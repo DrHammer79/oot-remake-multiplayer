@@ -88,14 +88,13 @@ inline constexpr std::uint64_t kPerformerState = 40;       // u32; 3: busy (0x27
 // `EventRequestTrigger` (the room graph gives it from the plate / eye / torch plate). Until that input has started the
 // module, the AI writes EventBool = EventBoolEX1 = EventFinish = 0 every frame, so an event asked for it by anyone else
 // has its EventTriggerSetEventBool wiped at once (the 0.11 runs: A's lifts never rose, A's asker was never deleted).
-// So the room's input is given the game's own way: its bool-plug setter, the execute of the AI node ExecuteLogicSetBool
-// (0x2726f40), called with a node laid out in our block as the game's node holds it:
-//   node+8 -> ctx, ctx+8 -> inner, inner+496 = the target actor; node+32 = key ^ 7 of the plug to set; node+56 = key ^ 7
-//   of a plug set to the opposite (a key the actor does not have: nothing); node+80 -> the value byte.
-// The setter: logic = [actor + 0x270]; plugs = [logic + 0x118] (used when +0x20 is set and bit 0 of +0x30 clear); the
-// root of a binary tree = [[[plugs + 0x28] + 8] + 0x20]; a plug: +0 lower, +8 higher, +0x18 its u32 key, +0x28 a tagged
-// pointer (low 2 bits) to its value byte, +0x38 its kind (7: a bool; the setter sets no other kind). Read from main.
-inline constexpr std::uint64_t kLogicSetBool = 0x2726f40;
+// Not fixed: the game's bool-plug setter (0x2726f40, ExecuteLogicSetBool's execute; and 0x181440) sets outputs only
+// (kind 7), and no game function was found that writes an input (kind 0). Read here, for the logs:
+// logic = [actor + 0x270]; plugs = [logic + 0x118] (used when +0x20 is set and bit 0 of +0x30 clear); the root of a
+// binary tree = [[[plugs + 0x28] + 8] + 0x20]; a plug: +0 lower, +8 higher, +0x18 its u32 key, +0x28 a tagged pointer
+// (low 2 bits) to its value byte, +0x38 its kind. Seen in a game (lane 1, 2026-11-14): an input's key is the Murmur3 of
+// its name (seed 0) and its kind 0 (EventRequestTrigger f446f53d); an output's key is that ^ 7 and its kind 7
+// (EventBool f6d54409). At B's press the input went 0 > 1, EventBool about 1 s later.
 inline constexpr std::uint64_t kActorLogic = 0x270;  // the component table, CoopPuppet::addr::kActorParts
 inline constexpr std::uint64_t kLogicPlugs = 0x118;
 inline constexpr std::uint64_t kPlugsReady = 0x20;   // u64, not 0
@@ -108,21 +107,9 @@ inline constexpr std::uint64_t kPlugHigher = 0x8;
 inline constexpr std::uint64_t kPlugKey = 0x18;      // u32
 inline constexpr std::uint64_t kPlugValue = 0x28;    // tagged pointer
 inline constexpr std::uint64_t kPlugKind = 0x38;     // u8
-inline constexpr std::uint8_t kKindBool = 7;
-inline constexpr std::uint32_t kNodeKeyXor = 7;      // the setter compares node key ^ 7 with the plug's
-inline constexpr std::uint64_t kNodeCtx = 8;
-inline constexpr std::uint64_t kCtxInner = 8;
-inline constexpr std::uint64_t kInnerActor = 496;
-inline constexpr std::uint64_t kNodeKey = 32;        // u32
-inline constexpr std::uint64_t kNodeKeyOther = 56;   // u32
-inline constexpr std::uint64_t kNodeValue = 80;      // -> u8
-// Our node, its two contexts and the value byte, in the block after our strings (each part apart, all inside).
-inline constexpr std::uint64_t kTriggerArea = kArgSize + kStringsSize;
-inline constexpr std::uint64_t kTriggerNode = 0x0;             // 0x60 bytes used
-inline constexpr std::uint64_t kTriggerCtx = 0x60;             // +8 used
-inline constexpr std::uint64_t kTriggerValue = 0x70;           // 1 byte
-inline constexpr std::uint64_t kTriggerInner = 0x80;           // +496 used
-inline constexpr std::uint64_t kTriggerSize = 0x80 + 0x200;
+inline constexpr std::uint8_t kKindInput = 0;
+inline constexpr std::uint8_t kKindOutput = 7;
+inline constexpr std::uint32_t kOutputKeyXor = 7;
 inline constexpr std::uint64_t kEventStatePtr = 0x4e94840;  // as coop_boss_game.cpp
 inline constexpr std::uint64_t kEventSession = 0x68;        // set while an event runs
 inline constexpr std::uint64_t kSessionCount = 0xeb0;       // u32, as coop_boss_game.cpp
@@ -160,7 +147,7 @@ inline constexpr float kAskerNearM = 1.0f;
 std::uint64_t NearestActor(CoopPuppet::Guest& guest, std::uint64_t main, std::span<const std::string_view> names,
                            const std::array<float, 3>& at, float max_m);
 
-// deku-platforms: one of an actor's logic plugs (see addr::kLogicSetBool), as read.
+// deku-platforms: one of an actor's logic plugs (see addr::kActorLogic), as read.
 struct Plug {
     std::uint32_t key = 0;
     std::uint8_t kind = 0;
@@ -170,13 +157,8 @@ struct Plug {
 // table the setter would use. At most kMaxPlugs, so a broken tree cannot loop.
 inline constexpr std::size_t kMaxPlugs = 64;
 std::vector<Plug> Plugs(CoopPuppet::Guest& guest, std::uint64_t actor);
-// The asker's input that starts its own request module.
-inline constexpr std::string_view kTriggerPlugName = "EventRequestTrigger";
-// The bool plug for `name` among `plugs`: the key is matched to the Murmur3 hash of the name (seed 0, as the flags)
-// on all but its low 3 bits, which the setter's ^ 7 shows hold the plug's type. None: not found, or not a bool.
-std::optional<std::uint32_t> BoolPlugKey(std::span<const Plug> plugs, std::string_view name);
-// A key no plug of `plugs` has (for the setter's opposite plug, so it sets nothing).
-std::uint32_t UnusedKey(std::span<const Plug> plugs);
+// The key an input (`output` false) or output plug named `name` has (addr::kOutputKeyXor).
+std::uint32_t PlugKey(std::string_view name, bool output);
 // "key:kind=value ..." for the logs.
 std::string DescribePlugs(std::span<const Plug> plugs);
 
@@ -369,19 +351,9 @@ public:
     std::uint64_t Block() const { return block_; }
 
 private:
-    enum class Next { none, malloc, build, link, request, free1, free2, own_request, trigger };
-    // deku-platforms: our room's asker is given its room input (addr::kLogicSetBool) for at most kTriggerFrames, until
-    // an event runs; then it is let go (set to 0) once. Its own module asks its own event.
-    static constexpr int kTriggerFrames = 60;
-    // The setter's call on our node for the asker with `value`; false when the node could not be written.
-    bool TriggerCall(CoopPuppet::Guest& guest, std::uint64_t main, bool value, CoopPuppet::Call& c);
-    // The 0x4aa890 / link path of deku-sync-fix, for an asker whose input plug was not found.
+    enum class Next { none, malloc, build, link, request, free1, free2, own_request };
+    // The 0x4aa890 / link path of deku-sync-fix: none when the asker has no performer of its own, or is busy.
     std::optional<CoopPuppet::Call> OwnRequest(CoopPuppet::Guest& guest, std::uint64_t main);
-    std::uint64_t trigger_actor_ = 0;   // the asker being given its input; 0 none
-    std::uint32_t trigger_key_ = 0;
-    std::uint32_t trigger_other_ = 0;
-    int trigger_frames_ = 0;
-    bool trigger_release_ = false;      // the call made was the let-go (0)
     // deku-sync-fix: the asker's performer (its actor at +kPerformerActor), 0 when it has none we can trust.
     static std::uint64_t PerformerOf(CoopPuppet::Guest& guest, std::uint64_t actor);
     // The current event's arguments into the built request; false when one does not fit.

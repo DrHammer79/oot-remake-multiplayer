@@ -441,22 +441,9 @@ std::vector<Plug> Plugs(CoopPuppet::Guest& guest, std::uint64_t actor) {
     return out;
 }
 
-std::optional<std::uint32_t> BoolPlugKey(std::span<const Plug> plugs, std::string_view name) {
+std::uint32_t PlugKey(std::string_view name, bool output) {
     const std::uint32_t hash = coop::protocol::flag_hash(name);
-    for (const Plug& p : plugs) {
-        if (p.kind == addr::kKindBool && (p.key & ~7u) == (hash & ~7u)) {
-            return p.key;
-        }
-    }
-    return std::nullopt;
-}
-
-std::uint32_t UnusedKey(std::span<const Plug> plugs) {
-    std::uint32_t key = 0;
-    while (std::any_of(plugs.begin(), plugs.end(), [&](const Plug& p) { return p.key == key; })) {
-        ++key;  // at most kMaxPlugs steps
-    }
-    return key;
+    return output ? hash ^ addr::kOutputKeyXor : hash;
 }
 
 std::string DescribePlugs(std::span<const Plug> plugs) {
@@ -514,27 +501,6 @@ std::vector<std::string> PlugWatch::Look(CoopPuppet::Guest& guest, std::uint64_t
     });
     last_ = std::move(seen);  // actors gone (deleted, room unloaded) are forgotten
     return out;
-}
-
-bool Requester::TriggerCall(CoopPuppet::Guest& guest, std::uint64_t main, bool value, CoopPuppet::Call& c) {
-    const std::uint64_t area = block_ + addr::kTriggerArea;
-    const std::vector<std::uint8_t> zero(addr::kTriggerSize, 0);
-    const std::uint64_t node = area + addr::kTriggerNode, ctx = area + addr::kTriggerCtx;
-    const std::uint64_t inner = area + addr::kTriggerInner, byte_at = area + addr::kTriggerValue;
-    const std::uint32_t key = trigger_key_ ^ addr::kNodeKeyXor, other = trigger_other_ ^ addr::kNodeKeyXor;
-    const std::uint8_t byte = value ? 1 : 0;
-    if (!guest.Write(area, zero.data(), zero.size()) || !guest.Write(node + addr::kNodeCtx, &ctx, 8) ||
-        !guest.Write(ctx + addr::kCtxInner, &inner, 8) || !guest.Write(inner + addr::kInnerActor, &trigger_actor_, 8) ||
-        !guest.Write(node + addr::kNodeKey, &key, 4) || !guest.Write(node + addr::kNodeKeyOther, &other, 4) ||
-        !guest.Write(node + addr::kNodeValue, &byte_at, 8) || !guest.Write(byte_at, &byte, 1)) {
-        return false;
-    }
-    c = CoopPuppet::Call{};
-    c.function = main + addr::kLogicSetBool;
-    c.x[0] = node;
-    next_ = Next::trigger;
-    trigger_release_ = !value;
-    return true;
 }
 
 std::optional<CoopPuppet::Call> Requester::OwnRequest(CoopPuppet::Guest& guest, std::uint64_t main) {
@@ -767,32 +733,6 @@ std::optional<CoopPuppet::Call> Requester::Step(CoopPuppet::Guest& guest, bool a
             current_starter_ = 0;
             current_room_asker_ = false;
             return std::nullopt;  // its own call built and freed its arg; one event a frame
-        case Next::trigger:
-            if (!trigger_release_) {
-                ++trigger_frames_;
-                return std::nullopt;  // held: once a frame until an event runs (below)
-            }
-            notes_.push_back("live event " + current_ + ": our room's asker's input let go; its plugs: " +
-                             DescribePlugs(Plugs(guest, trigger_actor_)));
-            trigger_actor_ = 0;
-            trigger_release_ = false;
-            if (trigger_frames_ >= kTriggerFrames) {
-                // Its module did not ask in time: ask as before, so the event at least plays.
-                notes_.push_back("live event " + current_ + ": no event ran " + std::to_string(kTriggerFrames) +
-                                 " frames after our room's asker was given its input; asked for it instead");
-                if (auto own = OwnRequest(guest, main)) {
-                    return own;
-                }
-                c.function = main + addr::kArgBuild;
-                c.x[0] = block_;
-                next_ = Next::build;
-                return c;
-            }
-            current_.clear();
-            current_args_.clear();
-            current_starter_ = 0;
-            current_room_asker_ = false;
-            return std::nullopt;
         case Next::request: {
             notes_.push_back("live event " + current_ + " asked of the game (result " + std::to_string(result & 0xff) +
                              ")");
@@ -819,37 +759,12 @@ std::optional<CoopPuppet::Call> Requester::Step(CoopPuppet::Guest& guest, bool a
     if (next_ != Next::none || malloc_failed_ || main == 0) {
         return std::nullopt;
     }
-    if (trigger_actor_ != 0) {
-        // Our room's asker holds its input until an event runs (its own module asked it), then lets go.
-        if (!CoopFairy::ActorPresent(guest, trigger_actor_)) {
-            notes_.push_back("live event " + current_ + ": our room's asker went away while given its input");
-            trigger_actor_ = 0;
-            current_.clear();
-            current_starter_ = 0;
-            current_room_asker_ = false;
-            return std::nullopt;
-        }
-        const bool running = EventRunning(guest, main);
-        if (running) {
-            notes_.push_back("live event " + current_ + ": an event runs " + std::to_string(trigger_frames_) +
-                             " frames after our room's asker was given its input (its own request)");
-        }
-        if (!TriggerCall(guest, main, !(running || trigger_frames_ >= kTriggerFrames), c)) {
-            notes_.push_back("live event " + current_ + ": our room's asker's input could not be written; dropped");
-            trigger_actor_ = 0;
-            current_.clear();
-            current_starter_ = 0;
-            current_room_asker_ = false;
-            return std::nullopt;
-        }
-        return c;
-    }
     if (block_ == 0) {
         if (wanted_.empty()) {
             return std::nullopt;
         }
         c.function = main + addr::kMalloc;
-        c.x[0] = addr::kArgSize + addr::kStringsSize + addr::kTriggerSize;  // the arg, our strings, our setter node
+        c.x[0] = addr::kArgSize + addr::kStringsSize;  // the arg, then room for our string arguments
         next_ = Next::malloc;
         return c;
     }
@@ -876,28 +791,10 @@ std::optional<CoopPuppet::Call> Requester::Step(CoopPuppet::Guest& guest, bool a
         }
         wanted_.pop_front();
         if (current_room_asker_ && current_args_.empty()) {
-            // deku-platforms: the room's own input to the asker, so its own module asks its event and keeps its
-            // EventBool (addr::kLogicSetBool). Without that plug: the asker's performer asks it (deku-sync-fix).
-            const std::vector<Plug> plugs = Plugs(guest, current_starter_);
-            notes_.push_back("live event " + current_ + ": our room's asker's plugs: " + DescribePlugs(plugs));
-            if (const auto key = BoolPlugKey(plugs, kTriggerPlugName)) {
-                trigger_actor_ = current_starter_;
-                trigger_key_ = *key;
-                trigger_other_ = UnusedKey(plugs);
-                trigger_frames_ = 0;
-                char text[16];
-                std::snprintf(text, sizeof text, "%08x", *key);
-                notes_.push_back("live event " + current_ + ": our room's asker is given its input " +
-                                 std::string(kTriggerPlugName) + " (plug " + text + "), as its room does");
-                if (TriggerCall(guest, main, true, c)) {
-                    return c;
-                }
-                trigger_actor_ = 0;
-                notes_.push_back("live event " + current_ + ": our room's asker's input could not be written");
-            } else {
-                notes_.push_back("live event " + current_ + ": our room's asker has no bool plug " +
-                                 std::string(kTriggerPlugName) + "; asked by its performer");
-            }
+            // deku-platforms: the asker's plugs, for the logs (its EventBool is wiped by its own AI while its
+            // input has not asked; addr::kActorLogic). Then its performer asks it (deku-sync-fix).
+            notes_.push_back("live event " + current_ + ": our room's asker's plugs: " +
+                             DescribePlugs(Plugs(guest, current_starter_)));
             if (auto own = OwnRequest(guest, main)) {
                 return own;
             }
