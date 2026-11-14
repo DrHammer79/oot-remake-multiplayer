@@ -2265,6 +2265,11 @@ bool IsGimmick(std::string_view name) {
     if (name == "Enemy_Scrub_Deku_Brothers" || name == "Scrub_Deku_Brothers_Manager") {
         return true;
     }
+    // deku-sync-fix: a room's event asker, so a run shows its performer words (state +0x28, links) in the game that
+    // pressed and in the one that started the event for it (is ours bound into the event as the presser's is?).
+    if (name == "EventRequestActor") {
+        return true;
+    }
     if (!name.starts_with("Obj_")) {
         return false;
     }

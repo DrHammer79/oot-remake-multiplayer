@@ -1776,6 +1776,8 @@ TEST_CASE("gimmick probe: names of switches, water planes, shutters, torches and
     }
     CHECK(CoopWorld::IsGimmick("Enemy_Scrub_Deku_Brothers"));    // dungeon-switches: the 2-3-1 probe
     CHECK(CoopWorld::IsGimmick("Scrub_Deku_Brothers_Manager"));
+    CHECK(CoopWorld::IsGimmick("EventRequestActor"));             // deku-sync-fix: the room's asker
+    CHECK_FALSE(CoopWorld::IsGimmick("EventRequestActorX"));
     CHECK_FALSE(CoopWorld::IsGimmick("Enemy_Scrub_Deku"));
     for (const char* n : {"Obj_Pot_A_01", "Enemy_Stalchild", "Land_Kokiri_WaterPlane_A_01", "Obj_TBox_A_01"}) {
         CAPTURE(n);
