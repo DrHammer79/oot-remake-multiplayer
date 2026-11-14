@@ -159,6 +159,77 @@ bool MayPoint(std::uint64_t w) {
 
 } // namespace
 
+void EventWords::Diff(const std::vector<std::uint32_t>& before, const std::vector<std::uint32_t>& now, char tag,
+                      std::vector<int>& steps, std::vector<std::string>& out) {
+    if (before.size() != now.size()) {
+        return;
+    }
+    steps.resize(now.size(), 0);
+    for (std::size_t i = 0; i < now.size(); ++i) {
+        if (before[i] == now[i] || ++steps[i] > kNoisy) {
+            continue;
+        }
+        char text[64];
+        std::snprintf(text, sizeof text, "%c+0x%zx:%x>%x", tag, i * 4, before[i], now[i]);
+        out.emplace_back(text);
+    }
+}
+
+std::string EventWords::Look(Reader read, void* context, std::uint64_t main, bool running) {
+    const auto forget = [&] {
+        session_.clear();
+        event_.clear();
+        session_steps_.clear();
+        event_steps_.clear();
+        event_at_ = 0;
+        return std::string();
+    };
+    if (!running) {
+        return forget();
+    }
+    std::uint64_t manager = 0, session = 0, events = 0;
+    std::uint32_t count = 0, current = 0;
+    if (!read(context, main + addr::kEventStatePtr, &manager, 8) || manager == 0 ||
+        !read(context, manager + addr::kEventSession, &session, 8) || session == 0) {
+        return forget();
+    }
+    std::vector<std::uint32_t> s(addr::kScanSession / 4), e(addr::kScanEvent / 4);
+    if (!read(context, session, s.data(), addr::kScanSession)) {
+        return forget();
+    }
+    std::uint64_t event = 0;
+    if (read(context, session + addr::kSessionEvents, &events, 8) && events != 0 &&
+        read(context, session + addr::kSessionCount, &count, 4) &&
+        read(context, session + addr::kSessionCurrent, &current, 4) && current < count && count < 0x100) {
+        read(context, events + 8ull * current, &event, 8);
+    }
+    if (event == 0 || !read(context, event, e.data(), addr::kScanEvent)) {
+        e.clear();
+    }
+    std::vector<std::string> words;
+    if (!session_.empty()) {
+        Diff(session_, s, 's', session_steps_, words);
+    }
+    if (event != 0 && event == event_at_ && !event_.empty() && !e.empty()) {
+        Diff(event_, e, 'e', event_steps_, words);
+    } else if (event != event_at_) {
+        event_steps_.clear();
+        if (event_at_ != 0 || !session_.empty()) {
+            char text[48];
+            std::snprintf(text, sizeof text, "event %x of %u", current, count);
+            words.insert(words.begin(), text);
+        }
+    }
+    session_ = std::move(s);
+    event_ = std::move(e);
+    event_at_ = event;
+    std::string line;
+    for (std::size_t i = 0; i < words.size() && i < kMaxPerLine; ++i) {
+        line += (i ? " " : "") + words[i];
+    }
+    return line;
+}
+
 std::optional<std::string> FindRunningEvent(Reader read, void* context, std::uint64_t main,
                                             const std::vector<std::string_view>& names) {
     if (names.empty()) {

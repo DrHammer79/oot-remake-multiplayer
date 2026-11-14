@@ -1,0 +1,90 @@
+# hs-deku-platforms-probe (deku-sync-fix-b research): hs-deku-platforms (deku-test a17a9715) with B standing 3 m off
+# the compass room's plate for 2 s before it lands on it, so the gimmick probe in B copies the room's asker
+# (EventRequestActor f71ae8b2aa5f7fa2) before B's own event and logs its words across EventTriggerSetEventBool,
+# to compare with A's asker (bound into A's started event, state 3, yet A's room never moves). Same save prep.
+# Run: groups.py with a line 'hs-deku-platforms-probe' on the 0.11 pair (server auto-B, protocol 12).
+# hs-deku-platforms (Hookshot and emulator, issue #176): deku-platforms with the compass room's timed platforms (event InsideTheDekuTree_Gimmick_RoomD_PlatformUp) not yet played.
+# bigrun (2026-11-12): INCONCLUSIVE, both games in the Deku Tree but no "our game started the event" line:
+# the kit saves are past the Deku Tree. The Hookshot pairs' baselines have these set too (save_flags.py get
+# on hookshot-A, 2026-11-12: all 1): HavePlayedEvent.InsideTheDekuTree_Gimmick_RoomD_PlatformUp (0x50cbaf1b).
+# BEFORE the run (games closed; a Hookshot pair needs save_flags.py from save-flags-hookshot), for both
+# games of the pair (emulator kits: <kit>\autotest-save\*\*\slot_0*\progress.sav), and put them back
+# from <pair>\autotest-save-backup afterwards (all three hs-deku-* in one run: clear once with
+# bool:0x50cbaf1b=0 bool:0x429126ef=0 bool:0xfcbd74e3=0 bool:0x8d2b85ef=0 bool:0x392a228a=0, restore once):
+#   ..\oot-remake-recomp\.venv\Scripts\python.exe tools\autotest\save_flags.py set <pair>\autotest-save\slot_0*\progress.sav bool:0x50cbaf1b=0
+# Run: tools\autotest\run.ps1 -Runtime hookshot -Scenario hs-deku-platforms (emulator: -Scenario deku-platforms)
+# Pass: B "our game started the event InsideTheDekuTree_Gimmick_RoomD_PlatformUp: sent to the others"; A "player 2
+#   started the event InsideTheDekuTree_Gimmick_RoomD_PlatformUp in this scene" and "starting the event ... here"
+#   within about 1 s; shots up1/up2: the lifts up in both games at once.
+# deku-platforms's own notes follow.
+# deku-platforms (deku-dungeon-2, #176 and Alex's 2026-11-12 test: the timed platforms came in
+# the other game only after the presser's cutscene, then went out of step). The compass room
+# (InsideTheDekuTree room D): plate Obj_StepSwitch_A_02 d22a395cb75bc832 at -17.5 119.6 -4.9
+# (timed), lifts Obj_InsideTheDekuTree_ElevatorLift_A_01/_02/_03 at -25.4 114.4 -1.6, -29.9 114.4
+# 3.2, -32.7 114.0 -2.0, the event's asker at -22.6 122.6 -3.8. B steps on the plate; A stands by
+# the lifts (8 m from the asker) and only watches.
+# Expect:
+#  - B "coop: dungeon: our game started the event InsideTheDekuTree_Gimmick_RoomD_PlatformUp: sent to
+#    the others" while B's cutscene runs.
+#  - A "coop: dungeon: player 2 started the event InsideTheDekuTree_Gimmick_RoomD_PlatformUp in this
+#    scene", then "starting the event ... here" and "live event ... asked of the game (result N)"
+#    within about 1 s of B's line (not after B's cutscene ended), then A's own "our game started the
+#    event" line is NOT sent back as a new start in B (B: no "starting the event" line).
+#  - Shots "up1"/"up2": the lifts up in both games at the same time; "down": down in both at about
+#    the same time (the lifts' own timer, StopTime/SlowDownTime, started together).
+#  - Probe lines "gimmick probe: ... ElevatorLift" / "StepSwitch_A_02" in both logs: keep them if the
+#    lifts are out of step (the words for a later lift-state share).
+#  - If A shows "FindRunningEvent" found nothing (B has no "our game started" line): the name is not
+#    in the event or session blocks; send B's log tail.
+# deku-test run (2026-11-14, 0.11 edf277c4, groups-20261114-041849): the setup WORKS: B's landing starts the event,
+# A 'started by our room's asker at -22.6 122.6 -3.8' (result 1) within 1 s. SYNC FAILS: shots up1/up2: B's lifts up,
+# A's stay down (the event camera plays in A, its room does not move): a real 0.11 bug (deku-switches).
+# deku-test (2026-11-14, Longshot rc.3): clearing HavePlayedEvent alone does not start anything. The rooms'
+# logic (romfs Logic/InsideTheDekuTree_Level_Room_*.logic.module.ainb) reads room flags when the room loads:
+#   compass room D: the event's asker (EventRequestActor_641b) is deleted while RoomD_StepSwitch_On_01 (0x6fb4f455)
+#     is 1 (then the plate lifts the platforms with no event); slingshot room C: RoomC_Cleared (0x77279a83) boots the
+#     eye switch up and deletes its asker; torch room E: RoomE_KillSpiderWave (0x46e8fcf9) burns the web at load and
+#     the burned web is a Bool64bitKey (its placement Hash 0x0181f8a8ef2fd1d3, its parts 0x45c7d8b5c0c68917);
+#     water room G: WaterLevel (0x8d2b85ef) 1 deletes the dive switch's asker; Gohma's prefab (room L) deletes Gohma
+#     while the quest Get_StoneOfForest (enum 0x7d776b61) is DefeatBoss or later (the saves: Complete).
+# BEFORE the run (games closed), both games of the pair, every slot (one prep for all hs-deku-*, hs-ladder and
+# hs-boss-cutscenes-gohma; keep a copy of <pair>\autotest-save first and put it back afterwards):
+#   save_flags.py set <pair>\autotest-save\slot_0*\progress.sav bool:0x50cbaf1b=0 bool:0x429126ef=0 bool:0xb3a4fe84=0
+#     bool:0xfcbd74e3=0 bool:0x8d2b85ef=0 bool:0x392a228a=0 bool:0x6fb4f455=0 bool:0x77279a83=0 bool:0x46e8fcf9=0
+#     enum:0x7d776b61=0xb5df43cb      (GoToBossRoom)
+#   save_flags.py drop-keys <pair>\autotest-save\slot_0*\progress.sav 0x0181f8a8ef2fd1d3 0x45c7d8b5c0c68917
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_GIMMICK_PROBE=1
+#! timeout 420
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark after
+wait 240
+place -17.5 120.2 -2.0     # deku-test: the plate's floor (3F), 3 m off it, not by the lifts on 2F
+wait 240
+mark placed
+toward -29.9 3.2 6      # face the lifts (below)
+press ZL 10
+wait 600
+mark ready
+wait 300
+mark up1
+wait 300
+mark up2
+wait 900
+mark mid
+wait 1500
+mark down
+wait 600
+mark late

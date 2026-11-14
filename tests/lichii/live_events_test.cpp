@@ -895,6 +895,29 @@ TEST_CASE("deku-sync-fix: a late request is given only for a while, and the titl
     CHECK(n.ScanOnly() == 1);
 }
 
+TEST_CASE("deku-sync-fix: the event words tell each stepped word once per change, and mute a timer") {
+    using CoopLiveEvents::EventWords;
+    std::vector<int> steps;
+    std::vector<std::string> out;
+    std::vector<std::uint32_t> before{1, 2, 3}, now{1, 5, 3};
+    EventWords::Diff(before, now, 'e', steps, out);
+    REQUIRE(out.size() == 1);
+    CHECK(out[0] == "e+0x4:2>5");
+    // A word that keeps stepping (a frame counter) is told kNoisy times, then muted.
+    out.clear();
+    std::uint32_t t = 0;
+    for (int i = 0; i < EventWords::kNoisy + 4; ++i) {
+        std::vector<std::uint32_t> a{t, 9}, b{t + 1, 9};
+        ++t;
+        EventWords::Diff(a, b, 's', steps, out);
+    }
+    CHECK(out.size() == static_cast<std::size_t>(EventWords::kNoisy));
+    // Sizes that differ (another event's block): nothing.
+    out.clear();
+    EventWords::Diff({1}, {2, 3}, 's', steps, out);
+    CHECK(out.empty());
+}
+
 TEST_CASE("deku-sync-fix: our room's asker asks the event itself (its performer's own request), so the flow binds it") {
     Mem m;
     m.Put64(kMain + addr::kManagerPtr, kHolder);

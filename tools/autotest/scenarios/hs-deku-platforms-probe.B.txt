@@ -1,0 +1,36 @@
+# hs-deku-platforms-probe (deku-sync-fix-b research): hs-deku-platforms (deku-test a17a9715) with B standing 3 m off
+# the compass room's plate for 2 s before it lands on it, so the gimmick probe in B copies the room's asker
+# (EventRequestActor f71ae8b2aa5f7fa2) before B's own event and logs its words across EventTriggerSetEventBool,
+# to compare with A's asker (bound into A's started event, state 3, yet A's room never moves). Same save prep.
+# Run: groups.py with a line 'hs-deku-platforms-probe' on the 0.11 pair (server auto-B, protocol 12).
+# hs-deku-platforms, B: deku-platforms's B (see hs-deku-platforms.A.txt).
+# deku-platforms, B: put on the compass room's plate (see deku-platforms.A.txt) after A is in place.
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark after
+wait 1100
+place -17.5 120.2 -2.0   # deku-sync-fix-b: 3 m off the plate first, the asker 6 m away
+wait 120
+place -17.5 121.2 -4.9   # deku-test: 1.5 m over the plate: B lands on it (a landing presses it)
+wait 60
+mark pressed
+wait 240
+mark up1
+wait 300
+mark up2
+wait 900
+mark mid
+wait 1500
+mark down
+wait 600
+mark late

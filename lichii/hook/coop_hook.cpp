@@ -651,6 +651,13 @@ public:
                 }
             }
             const bool running_now = reading && reading->event_running.value_or(false);
+            if (debug_event_words_ && memory && (!running_now || ++event_words_frame_ % 10 == 0)) {
+                // deku-sync-fix research: the running event's words that stepped (reads only).
+                const std::string words = event_words_.Look(&ReadGuest, &*memory, base_, running_now);
+                if (!words.empty()) {
+                    LOG_INFO(Core, "coop: event words: {}", words);
+                }
+            }
             if (memory && !hold_scene_.empty()) {
                 // Only the held gimmick events (their result comes no other way);
                 // the ones whose room flags already carry the result (the
@@ -1810,6 +1817,9 @@ private:
     CoopLiveEvents::Requester live_requester_;
     CoopLiveEvents::StartSource start_source_;  // our own gimmick event starts
     std::uint64_t start_cursor_ = 0, start_scan_only_ = 0;
+    const bool debug_event_words_ = EnvFlag("LICHII_COOP_DEBUG_EVENT_WORDS");  // deku-sync-fix research, reads only
+    CoopLiveEvents::EventWords event_words_;
+    unsigned event_words_frame_ = 0;
     // An event start the search found that the game's request had not named, with the wrap there: logged, as the
     // sign that some event does not start through the wrapped request.
     static void LogScanOnly(const CoopLiveEvents::StartSource& source, std::uint64_t& said, const char* what,
