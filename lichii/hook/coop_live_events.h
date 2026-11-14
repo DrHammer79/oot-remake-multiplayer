@@ -176,6 +176,29 @@ std::optional<std::string> FindRunningEvent(Reader read, void* context, std::uin
 // The gimmick events with a place in `scene` (Places()), each once.
 std::vector<std::string_view> EventsIn(std::string_view scene);
 
+// deku-sync-fix research (LICHII_COOP_DEBUG_EVENT_WORDS=1, reads only): while an event runs, the session's
+// kScanSession bytes and the current event's kScanEvent bytes are compared with the last look, and each u32 word
+// that stepped is told ("s+0x..:a>b", "e+0x..:a>b"), as the gimmick probe does for actors. A word that stepped more
+// than kNoisy times in this event (a timer) is muted. Two games' lines side by side show whether a flow reached the
+// same steps (the compass room's PlatformUp reaches EventTriggerSetEventBool only after a camera branch).
+class EventWords {
+public:
+    static constexpr int kNoisy = 6;
+    static constexpr std::size_t kMaxPerLine = 40;
+    // One look; `running` false forgets the last look (the next event starts a new baseline). Returns the line's
+    // words, empty when nothing stepped (or on the first look of an event).
+    std::string Look(Reader read, void* context, std::uint64_t main, bool running);
+    // Pure: the words of `now` that differ from `before` (same size), named "<tag>+0x<offset>:<old>><new>",
+    // counting each in `steps` and leaving out the noisy ones.
+    static void Diff(const std::vector<std::uint32_t>& before, const std::vector<std::uint32_t>& now, char tag,
+                     std::vector<int>& steps, std::vector<std::string>& out);
+
+private:
+    std::vector<std::uint32_t> session_, event_;
+    std::vector<int> session_steps_, event_steps_;
+    std::uint64_t event_at_ = 0;
+};
+
 // Once a frame: when an event starts, look for its name (FindRunningEvent) on
 // its 1st, 2nd, 4th, 8th and 16th frame (kTries searches: every event in a
 // dungeon starts one, doors too, so not every frame); at most one name per event.
