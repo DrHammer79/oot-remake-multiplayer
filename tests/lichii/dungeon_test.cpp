@@ -376,9 +376,13 @@ TEST_CASE("dungeon: the ladder event waits while B is in the Deku Tree, B's own 
     CHECK(b.values[cleared].value == 1);
 }
 
-TEST_CASE("dungeon: only the slingshot room's clear waits with its event, other Deku Tree rooms stay live") {
-    for (const char* live : {"InsideTheDekuTree_RoomD_Cleared", "InsideTheDekuTree_RoomD_StepSwitch_On_01",
-                             "InsideTheDekuTree_RoomE_Cleared", "InsideTheDekuTree_RoomG_WaterLevel"}) {
+TEST_CASE("dungeon: the slingshot room's clear and the compass room's plate flag wait with their events, others stay live") {
+    for (const char* held : {"InsideTheDekuTree_RoomC_Cleared", "InsideTheDekuTree_RoomD_StepSwitch_On_01"}) {
+        CAPTURE(held);
+        CHECK(CoopDungeon::HeldIn(host::flag_hash(held)) == std::optional<std::string_view>("InsideTheDekuTree"));
+    }
+    for (const char* live : {"InsideTheDekuTree_RoomD_Cleared", "InsideTheDekuTree_RoomE_Cleared",
+                             "InsideTheDekuTree_RoomG_WaterLevel"}) {
         CAPTURE(live);
         CHECK_FALSE(CoopDungeon::HeldIn(host::flag_hash(live)).has_value());
     }

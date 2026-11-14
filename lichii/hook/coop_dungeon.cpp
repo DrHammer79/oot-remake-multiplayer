@@ -1645,8 +1645,13 @@ constexpr std::string_view kLiveOnTest6[] = {
 // game sets it at its event's end. Taken live, it deleted our asker before our own event ran, so the ladder (IsOn <-
 // that asker's EventBool) never fell and our eye switch asked nothing. Held, our asker is there for the event (or
 // for our own eye shot), and the event's end sets the flag here too.
+// deku-sync-fix (probe run groups-20261114-074019): the compass room the same way. Its graph
+// (..._Room_D_Prefab_b6c3) deletes EventRequestActor_641b while RoomD_StepSwitch_On_01 is set, and the presser's game
+// sets it right after its EventBool. Taken live, it came about 1 s into our own PlatformUp (our asker bound, performer
+// state 3) and before our flow's EventTriggerSetEventBool: our lifts never rose and our asker was never deleted.
 constexpr std::pair<std::string_view, std::string_view> kHeldWithEvent[] = {
-    {"InsideTheDekuTree_RoomC_Cleared", "InsideTheDekuTree"}};
+    {"InsideTheDekuTree_RoomC_Cleared", "InsideTheDekuTree"},
+    {"InsideTheDekuTree_RoomD_StepSwitch_On_01", "InsideTheDekuTree"}};
 
 std::string_view SceneOfEvent(std::string_view event) {
     // The game's own spellings, and the scene names that are not prefixes.
