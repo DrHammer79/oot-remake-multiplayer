@@ -9,11 +9,13 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "coop_dungeon.h"
 #include "coop_fairy.h"
 #include "coop_live_events.h"
+#include "coop/protocol/codec.hpp"
 
 namespace {
 
@@ -672,7 +674,7 @@ TEST_CASE("live events: an event with arguments and a starter, as the game's map
     while (call) {
         order.push_back(call->function - kMain);
         if (call->function == kMain + addr::kMalloc) {
-            CHECK(call->x[0] == addr::kArgSize + addr::kStringsSize);  // room for the strings after the arg
+            CHECK(call->x[0] == addr::kArgSize + addr::kStringsSize + addr::kTriggerSize);  // strings and our setter node after the arg
         }
         if (call->function == kMain + addr::kSetLink) {
             CHECK(call->x[0] == kBlock + addr::kArgMember2);
@@ -980,6 +982,201 @@ TEST_CASE("deku-sync-fix: our room's asker asks the event itself (its performer'
     CHECK(order == std::vector<std::uint64_t>{addr::kPerformerRequest});
 }
 
+namespace {
+// deku-platforms: an asker's logic plugs as the game's setter (0x2726f40) finds them: [actor + 0x270] -> logic,
+// [logic + 0x118] -> plugs, [[[plugs + 0x28] + 8] + 0x20] -> the tree's root.
+struct PlugTree {
+    Mem& m;
+    std::uint64_t actor;
+    std::uint64_t next = 0xa100000000;
+    std::uint64_t root = 0;
+    std::map<std::uint32_t, std::uint64_t> value_at;  // key -> its value byte
+    // `logic`: the actor's component table at +0x270 (the performer's table too, kActorParts).
+    PlugTree(Mem& mem, std::uint64_t a, std::uint64_t logic = 0xa000000000) : m(mem), actor(a) {
+        const std::uint64_t plugs = 0xa010000000, table = 0xa020000000, inner = 0xa030000000;
+        m.Put64(actor + addr::kActorLogic, logic);
+        m.Put64(logic + addr::kLogicPlugs, plugs);
+        m.Put64(plugs + addr::kPlugsReady, 1);
+        m.bytes[plugs + addr::kPlugsBusy] = 0;
+        m.Put64(plugs + addr::kPlugsTable, table);
+        m.Put64(table + addr::kTableInner, inner);
+        m.Put64(inner + addr::kInnerRoot, 0);
+        root_at = inner + addr::kInnerRoot;
+    }
+    std::uint64_t root_at = 0;
+    // Inserted as a binary search tree on the key; the value pointer tagged with bit 1 (the setter masks 2 bits).
+    void Add(std::uint32_t key, std::uint8_t kind, std::uint8_t value) {
+        const std::uint64_t node = next;
+        next += 0x100;
+        m.Put64(node + addr::kPlugLower, 0);
+        m.Put64(node + addr::kPlugHigher, 0);
+        m.Put32(node + addr::kPlugKey, key);
+        m.bytes[node + addr::kPlugKind] = kind;
+        const std::uint64_t byte_at = node + 0x80;
+        m.bytes[byte_at] = value;
+        m.Put64(node + addr::kPlugValue, byte_at | 2);
+        value_at[key] = byte_at;
+        std::uint64_t link = root_at;
+        while (m.Get64(link) != 0) {
+            const std::uint64_t at = m.Get64(link);
+            std::uint32_t k = 0;
+            m.Read(at + addr::kPlugKey, &k, 4);
+            link = at + (key < k ? addr::kPlugLower : addr::kPlugHigher);
+        }
+        m.Put64(link, node);
+    }
+    std::uint8_t Value(std::uint32_t key) { return m.bytes[value_at[key]]; }
+};
+
+// The game's setter, as lifted from main: the target actor through node+8 -> +8 -> +496, node+32 ^ 7 set to the value
+// byte at node+80, node+56 ^ 7 set to its opposite; only a bool plug (kind 7) is set. Returns how many plugs it set.
+int GameSetBool(Mem& m, std::uint64_t node) {
+    const std::uint64_t actor = m.Get64(m.Get64(m.Get64(node + addr::kNodeCtx) + addr::kCtxInner) + addr::kInnerActor);
+    const std::uint64_t plugs = m.Get64(m.Get64(actor + addr::kActorLogic) + addr::kLogicPlugs);
+    const std::uint64_t root = m.Get64(m.Get64(m.Get64(plugs + addr::kPlugsTable) + addr::kTableInner) + addr::kInnerRoot);
+    const std::uint8_t value = m.bytes[m.Get64(node + addr::kNodeValue)];
+    int set = 0;
+    const auto put = [&](std::uint64_t key_at, std::uint8_t v) {
+        std::uint32_t want = 0;
+        m.Read(key_at, &want, 4);
+        want ^= addr::kNodeKeyXor;
+        for (std::uint64_t at = root; at != 0;) {
+            std::uint32_t k = 0;
+            m.Read(at + addr::kPlugKey, &k, 4);
+            if (want == k) {
+                if (m.bytes[at + addr::kPlugKind] == addr::kKindBool) {
+                    m.bytes[m.Get64(at + addr::kPlugValue) & ~std::uint64_t{3}] = v;
+                    ++set;
+                }
+                return;
+            }
+            at = m.Get64(at + (want < k ? addr::kPlugLower : addr::kPlugHigher));
+        }
+    };
+    put(node + addr::kNodeKey, value);
+    put(node + addr::kNodeKeyOther, value ^ 1);
+    return set;
+}
+
+std::uint32_t Hash(std::string_view name) { return coop::protocol::flag_hash(name); }
+} // namespace
+
+TEST_CASE("deku-platforms: the plugs are read in key order, and the input is found by its name's hash") {
+    Mem m;
+    constexpr std::uint64_t kAsker = 0x9800000000;
+    PlugTree t(m, kAsker);
+    const std::uint32_t trigger = (Hash("EventRequestTrigger") & ~7u) | 3u;  // the low 3 bits: its type, not the name
+    t.Add(0x80000000, 7, 0);
+    t.Add(0x10000000, 7, 1);
+    t.Add(trigger, 7, 0);
+    t.Add(0xf0000000, 2, 5);
+    const auto plugs = CoopLiveEvents::Plugs(m, kAsker);
+    REQUIRE(plugs.size() == 4);
+    CHECK(std::is_sorted(plugs.begin(), plugs.end(), [](const auto& a, const auto& b) { return a.key < b.key; }));
+    CHECK(CoopLiveEvents::BoolPlugKey(plugs, "EventRequestTrigger") == trigger);
+    CHECK_FALSE(CoopLiveEvents::BoolPlugKey(plugs, "EventBool").has_value());
+    const std::uint32_t unused = CoopLiveEvents::UnusedKey(plugs);
+    CHECK(std::none_of(plugs.begin(), plugs.end(), [&](const auto& p) { return p.key == unused; }));
+    CHECK(CoopLiveEvents::DescribePlugs(plugs).find("10000000:7=1") != std::string::npos);
+    // Not a bool (another kind with the same name's hash): never handed to the bool setter.
+    Mem m2;
+    PlugTree t2(m2, kAsker);
+    t2.Add(trigger, 2, 0);
+    CHECK_FALSE(CoopLiveEvents::BoolPlugKey(CoopLiveEvents::Plugs(m2, kAsker), "EventRequestTrigger").has_value());
+    // No plug table (an actor that is not an asker): nothing.
+    Mem m3;
+    CHECK(CoopLiveEvents::Plugs(m3, kAsker).empty());
+    CHECK(CoopLiveEvents::DescribePlugs({}) == "none");
+}
+
+TEST_CASE("deku-platforms: our room's asker is given its room input until its own event runs, then let go") {
+    Mem m;
+    m.Put64(kMain + addr::kManagerPtr, kHolder);
+    m.Put64(kHolder, kManager);
+    constexpr std::uint64_t kState = 0x9300000000;
+    m.Put64(kMain + addr::kEventStatePtr, kState);
+    m.Put64(kState + addr::kEventSession, 0);
+    ActorList list(m);
+    constexpr std::uint64_t kAsker = 0x9800000000, kParts = 0x9840000000, kPerformer = 0x9850000000;
+    list.Add(kAsker, "EventRequestActor", {-22.62f, 122.58f, -3.81f});
+    m.Put64(kAsker + CoopPuppet::addr::kActorParts, kParts);
+    m.Put64(kParts + addr::kPerformerSlot, kPerformer);
+    m.Put64(kPerformer + addr::kPerformerActor, kAsker);
+    m.Put32(kPerformer + addr::kPerformerState, 0);
+    PlugTree t(m, kAsker, kParts);
+    const std::uint32_t trigger = (Hash("EventRequestTrigger") & ~7u) | 5u;
+    const std::uint32_t event_bool = 0x40000000;
+    t.Add(event_bool, 7, 0);
+    t.Add(trigger, 7, 0);
+    t.Add(0xc0000000, 7, 1);
+
+    CoopLiveEvents::Requester r;
+    std::vector<std::uint64_t> order;
+    int set = 0;
+    const auto frame = [&] {
+        auto call = r.Step(m, false, 0, kMain);
+        while (call) {
+            order.push_back(call->function - kMain);
+            std::uint64_t x0 = 1;
+            if (call->function == kMain + addr::kLogicSetBool) {
+                set += GameSetBool(m, call->x[0]);
+            } else {
+                x0 = Run(m, *call);
+            }
+            call = r.Step(m, true, x0, kMain);
+        }
+    };
+    r.WantFromRoom("InsideTheDekuTree_Gimmick_RoomD_PlatformUp", "InsideTheDekuTree");
+    frame();
+    CHECK(order == std::vector<std::uint64_t>{addr::kMalloc, addr::kLogicSetBool});
+    CHECK(t.Value(trigger) == 1);
+    CHECK(t.Value(event_bool) == 0);  // only the input; the opposite plug is none of the asker's
+    CHECK(t.Value(0xc0000000) == 1);
+    CHECK(set == 1);
+    // Held each frame while no event runs (the room graph may give it its own value between).
+    order.clear();
+    for (int i = 0; i < 5; ++i) frame();
+    CHECK(order == std::vector<std::uint64_t>(5, addr::kLogicSetBool));
+    CHECK(t.Value(trigger) == 1);
+    // Its module asked: an event runs. Let go once (0), and nothing more: no request of ours.
+    m.Put64(kState + addr::kEventSession, 0x1234);
+    order.clear();
+    frame();
+    frame();
+    CHECK(order == std::vector<std::uint64_t>{addr::kLogicSetBool});
+    CHECK(t.Value(trigger) == 0);
+    bool ran = false, given = false;
+    for (const auto& n : r.TakeNotes()) {
+        ran |= n.find("an event runs 6 frames after our room's asker was given its input") != std::string::npos;
+        given |= n.find("given its input EventRequestTrigger") != std::string::npos;
+    }
+    CHECK(ran);
+    CHECK(given);
+    CHECK(r.Waiting() == 0);
+
+    // No event in kTriggerFrames: let go, then asked by the asker's performer as before.
+    m.Put64(kState + addr::kEventSession, 0);
+    r.WantFromRoom("InsideTheDekuTree_Gimmick_RoomD_PlatformUp", "InsideTheDekuTree");
+    order.clear();
+    for (int i = 0; i < 70; ++i) frame();
+    CHECK(order.size() == 62);  // 60 held, then the let-go and the performer's request in the same frame
+    CHECK(order[60] == addr::kLogicSetBool);
+    CHECK(order[61] == addr::kPerformerRequest);
+    CHECK(t.Value(trigger) == 0);
+
+    // The asker deleted while held: dropped, never handed to the setter again.
+    r.WantFromRoom("InsideTheDekuTree_Gimmick_RoomD_PlatformUp", "InsideTheDekuTree");
+    order.clear();
+    frame();
+    m.Put32(kAsker + CoopFairy::addr::kActorState, 2);
+    frame();
+    frame();
+    CHECK(order == std::vector<std::uint64_t>{addr::kLogicSetBool});
+    bool away = false;
+    for (const auto& n : r.TakeNotes()) away |= n.find("went away while given its input") != std::string::npos;
+    CHECK(away);
+}
+
 TEST_CASE("live events: an asker deleted between the pick and the link is not handed to the game") {
     Mem m;
     m.Put64(kMain + addr::kManagerPtr, kHolder);
@@ -1041,4 +1238,14 @@ TEST_CASE("intro-ocarina: while the game runs another event it asked for, a stor
     // Without the wrap (the emulator) `other` cannot be known and is ignored.
     StartSource plain;
     CHECK(plain.Frame(std::nullopt, true, false, true, find) == "Dm_Kokiri_0150");
+}
+
+TEST_CASE("deku-platforms: the plug watch tells an asker whole once, then only the plugs that changed") {
+    using CoopLiveEvents::Plug;
+    using CoopLiveEvents::PlugWatch;
+    const std::vector<Plug> a{{0x10, 7, std::uint8_t{0}}, {0x20, 7, std::uint8_t{1}}};
+    const std::vector<Plug> b{{0x10, 7, std::uint8_t{1}}, {0x20, 7, std::uint8_t{1}}, {0x30, 7, std::nullopt}};
+    CHECK(PlugWatch::Diff(0x98, nullptr, a) == std::optional<std::string>("plugs 0x98: 00000010:7=0 00000020:7=1"));
+    CHECK_FALSE(PlugWatch::Diff(0x98, &a, a).has_value());
+    CHECK(PlugWatch::Diff(0x98, &a, b) == std::optional<std::string>("plugs 0x98: 00000010:0>1 00000030:new>?"));
 }

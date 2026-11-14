@@ -378,6 +378,12 @@ public:
             CoopSvc::AddCaller(60, [this](CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
                                           std::uint64_t) {
                 std::lock_guard lock(live_mutex_);
+                if (debug_plugs_ && !after_call && ++plug_watch_frame_ % 6 == 0) {
+                    // deku-platforms research: the askers' plugs that changed (reads only).
+                    for (const auto& line : plug_watch_.Look(guest, base_)) {
+                        LOG_INFO(Core, "coop: dungeon: {}", line);
+                    }
+                }
                 auto call = live_requester_.Step(guest, after_call, result, base_);
                 for (const auto& line : live_requester_.TakeNotes()) {
                     LOG_INFO(Core, "coop: dungeon: {}", line);
@@ -1819,6 +1825,9 @@ private:
     std::uint64_t start_cursor_ = 0, start_scan_only_ = 0;
     const bool debug_event_words_ = EnvFlag("LICHII_COOP_DEBUG_EVENT_WORDS");  // deku-sync-fix research, reads only
     CoopLiveEvents::EventWords event_words_;
+    const bool debug_plugs_ = EnvFlag("LICHII_COOP_DEBUG_PLUGS");  // deku-platforms research, reads only
+    CoopLiveEvents::PlugWatch plug_watch_;
+    unsigned plug_watch_frame_ = 0;
     unsigned event_words_frame_ = 0;
     // An event start the search found that the game's request had not named, with the wrap there: logged, as the
     // sign that some event does not start through the wrapped request.
