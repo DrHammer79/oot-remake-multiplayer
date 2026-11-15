@@ -1,0 +1,70 @@
+# hs-map-dc (Hookshot, dungeon-sync-b, player reports #63/#76): does a dungeon map show for the opener (A) and
+# for the other player (B), once with the randomizer on and once off? Run it twice in lane 1, with the lane's
+# kit saves (past the Deku Tree: DungeonInfo.DodongoCavern.IsGetMap 0 and EnteredFloorBit 0 in every slot; the
+# Deku Tree's EnteredFloorBit is 31 there and its Map page shows, hs-minimap). The Dodongo's Cavern map chest
+# (Obj_TBox_A_02, -26.50 100.25 -38.00, front +x) holds the map in seed 6PKCPFWP too, so with the randomizer
+# on, OOTRR's grant gives it (no EventGetDungeonMap: IsGetMap only); with it off, the game's own get.
+# Look at A's and B's "panel*" and "mini-room*" shots, and the logs' UInt 0x46913e20: DungeonInfo.DodongoCavern.EnteredFloorBit.
+# DungeonInfo.DodongoCavern.IsGetMap is bool 0xa52c3a19.
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=a52c3a19
+#! timeout 420
+mark start
+warp DodongoCavern DodongoCavern_MountainTrailSide
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark mini-before
+place -24.0 100.75 -38.0   # 2.5 m in front of the map chest
+wait 240
+goto -25.5 -38.0 0.35 300   # 1 m in front of it: the walk teaches the runner the camera's angle
+toward -26.5 -38.0 20      # face the chest
+mark placed
+press A
+wait 60
+press A
+wait 60
+press A
+wait 600                  # the get scene
+mark got
+press A
+wait 120
+press A
+wait 120
+press B
+wait 600
+mark mini-room
+press MINUS
+wait 120
+mark panel
+press R
+wait 90
+mark panel-r1
+press R
+wait 90
+mark panel-r2
+press B
+wait 240
+place -24.0 100.75 -38.0   # the same spot again (no room load here: the panel shots are the check)
+wait 900
+mark mini-room2
+press MINUS
+wait 120
+mark panel2
+press R
+wait 90
+mark panel2-r1
+press R
+wait 90
+mark panel2-r2
+press B
+wait 240
+mark end
