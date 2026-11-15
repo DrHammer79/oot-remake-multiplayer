@@ -27,7 +27,7 @@ foreach(line IN LISTS _coop_lines)
 endforeach()
 list(REMOVE_DUPLICATES _coop_sources)
 
-add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_chatbox.cpp src/coop_cheats_panel.cpp
+add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coop_draw_hos.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_chatbox.cpp src/coop_cheats_panel.cpp
   src/coop_host_menu.cpp src/coop_title.cpp src/coop_title_menu.cpp src/coop_input.cpp src/coop_pause.cpp
   src/coop_pause_menu.cpp src/coop_pause_files.cpp src/coop_i18n.cpp
   src/coop_mod_json.cpp src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
@@ -39,7 +39,7 @@ add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coo
 target_include_directories(hookshot_coop PRIVATE compat src "${_coop_hook}" ../server)
 target_compile_definitions(hookshot_coop PRIVATE LICHII_COOP COOP_HOOKSHOT)
 # coop_server_lib: the co-op server, run inside the game when the player hosts from the menu.
-target_link_libraries(hookshot_coop PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_server_lib
+target_link_libraries(hookshot_coop PRIVATE coop coop_ui coop_net coop_host coop_presence coop_overlay coop_server_lib
                       monocypher fmt::fmt coop_warnings)
 set_target_properties(hookshot_coop PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
 # Proximity voice (docs/voice.md): the two exports Hookshot's mixer looks for

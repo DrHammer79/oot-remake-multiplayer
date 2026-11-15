@@ -9,7 +9,7 @@
 #include <string>
 
 #include "coop_dbno_game.h"
-#include "hos_coop_draw.h"
+#include "coop_draw.h"
 
 namespace CoopDbnoDraw {
 
@@ -22,7 +22,7 @@ std::size_t Lit(float progress, std::size_t dots = kDots);
 // "Hold A to revive Saria", "Reviving Saria".
 std::string Caption(const CoopDbno::View& view);
 
-// Draws it at the lower middle of the picture.
-void Draw(const HosCoopDraw& d, const CoopDbno::View& view);
+// Draws it at the lower middle of the picture (into the draw list, coop_draw.h Canvas).
+void Draw(CoopDraw::Canvas& d, const CoopDbno::View& view);
 
 }  // namespace CoopDbnoDraw

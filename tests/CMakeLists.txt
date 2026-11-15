@@ -154,7 +154,8 @@ target_include_directories(coop_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lic
 # The Hookshot module and our patch to Hookshot (hookshot/): what can be checked without the game.
 target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cpp hookshot/draw_golden_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_draw.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_dbno_draw.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_dbno_draw.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_draw_hos.cpp
+  hookshot/drawlist_test.cpp
   hookshot/hud_dim_test.cpp
   hookshot/chatbox_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_chatbox.cpp
   hookshot/cheats_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_cheats_panel.cpp
@@ -183,7 +184,7 @@ if(NOT WIN32)   # the module's Linux clipboard (wl-copy, xclip, xsel), tried wit
   target_sources(coop_tests PRIVATE hookshot/clipboard_posix_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_clipboard_posix.cpp)
 endif()
-target_link_libraries(coop_tests PRIVATE coop coop_platform coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
+target_link_libraries(coop_tests PRIVATE coop coop_ui coop_platform coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
 # The session tests run the real server in process.
 target_link_libraries(coop_tests PRIVATE coop_server_lib)
 doctest_discover_tests(coop_tests)

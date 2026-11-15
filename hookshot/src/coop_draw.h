@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "coop/overlay/map_icons.hpp"
+#include "coop/ui/drawlist.h"
 #include "coop_dbno_game.h"
 #include "coop_hook.h"
 #include "coop_i18n.h"
@@ -76,6 +77,57 @@ struct Look {
             }
         }
         return regular != 0 && medium != 0;
+    }
+};
+
+// Text widths for Build (docs/ui.md). With `host` (Longshot): Hookshot's own
+// text_width in the font the list has chosen, so the layout is the one it
+// always was; it switches Hookshot's font through use_font as the old code
+// did, and Restore gives Hookshot back its own font (0) afterwards. Without
+// a host: the advance tables (an ExeFS build's font atlas, coop_text_width).
+struct Measure {
+    const HosCoopDraw* host = nullptr;
+    const Look* look = nullptr;  // the game look's ids for the logical fonts (none: every font is Hookshot's own)
+    std::array<const CoopFontAdvances*, COOP_FONT_COUNT> tables{};
+    // `font`: a logical font (COOP_FONT_*), or -1 while the list has chosen
+    // none yet (Hookshot's current font then, as before the list).
+    float Width(int font, float px, const char* utf8) const;
+    void Restore() const;
+
+private:
+    mutable int host_font_ = 0;  // Hookshot's font as this measure left it (0: its own, as between draws)
+};
+
+// What the overlay draws on (coop_draw.cpp, coop_dbno_draw.cpp): the draw
+// list (coop/ui/drawlist.h), the picture's size and the text widths.
+struct Canvas {
+    CoopDrawList& list;
+    const Measure& measure;
+    float width = 0, height = 0;
+    bool font_chosen = false;
+
+    void rect(float x0, float y0, float x1, float y1, std::uint32_t rgba, float rounding) {
+        coop_draw_rect(&list, x0, y0, x1, y1, rgba, rounding);
+    }
+    void circle(float x, float y, float r, std::uint32_t rgba, float thickness) {
+        coop_draw_circle(&list, x, y, r, rgba, thickness);
+    }
+    void triangle(float x0, float y0, float x1, float y1, float x2, float y2, std::uint32_t rgba) {
+        coop_draw_triangle(&list, x0, y0, x1, y1, x2, y2, rgba);
+    }
+    void text(float x, float y, float px, std::uint32_t rgba, const char* utf8) {
+        coop_draw_text(&list, x, y, px, rgba, utf8);
+    }
+    void image(int id, float x0, float y0, float x1, float y1, std::uint32_t tint) {
+        coop_draw_image(&list, id, x0, y0, x1, y1, tint);
+    }
+    // The font text and text_width use from here on (COOP_FONT_UI: the backend's own).
+    void font(int id) {
+        coop_draw_font(&list, id);
+        font_chosen = true;
+    }
+    float text_width(float px, const char* utf8) const {
+        return measure.Width(font_chosen ? list.font : -1, px, utf8);
     }
 };
 
@@ -210,7 +262,15 @@ bool Wanted(const Scene& scene);
 // left, then the player list over the top middle. The game look when `look`
 // is On and the table has hos_coop_draw2's calls; else the plain look (and no
 // HUD blocks, as the co-op window).
+// It builds the draw list (Build) with Hookshot's text widths, then replays
+// it onto the table (coop_draw_hos.h Replay): the calls the overlay always
+// made, in the same order (tests/hookshot/draw_golden_test.cpp).
 void Draw(const HosCoopDraw& d, const Scene& scene, const Look& look = {});
+
+// What Draw draws, as commands appended to `list` (begun for the picture's
+// size): any backend's. `game`: the game look (only its regular_metrics is
+// read; fonts and images are logical ids), or nullptr for the plain look.
+void Build(CoopDrawList& list, const Measure& m, const Scene& scene, const Look* game);
 
 // Whether Draw would use the game look with this table.
 bool GameLook(const HosCoopDraw& d, const Look& look);
