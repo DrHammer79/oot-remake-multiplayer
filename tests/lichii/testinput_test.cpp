@@ -466,6 +466,22 @@ TEST_CASE("testinput: setenum hands the hook an Enum flag (name or 0x hash) and 
     CHECK(requests[1].start == "Bow");
 }
 
+TEST_CASE("testinput: menu hands the hook the Customize page or the close (issue 74)") {
+    std::string error;
+    CHECK_FALSE(Parse("menu\n", error));
+    CHECK_FALSE(Parse("menu map\n", error));
+    CHECK_FALSE(Parse("menu customize now\n", error));
+    Runner r(Must("menu Customize\nmenu close\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].kind == Kind::menu);
+    CHECK(requests[0].name == "customize");
+    CHECK(requests[1].kind == Kind::menu);
+    CHECK(requests[1].name == "close");
+}
+
 TEST_CASE("test input: sync waits with every button let go until the games meet, then goes on together") {
     std::string error;
     auto script = Parse("press A 6\nsync title 2\npress A 6\n", error);

@@ -388,6 +388,7 @@ The emulator reads scripted input from the file in `LICHII_COOP_TEST_SCRIPT` ([c
 | `difficulty 300 100 100` / `difficulty auto` | test only: the host's difficulty choice through the host menu's own call (`CoopDifficulty::Set`): custom enemy life, damage and count in percent, bosses as the enemies (300: a boss takes 3x the hits). Only the host can: logs `coop: test difficulty custom 300 100 100: set` or `NOT set` |
 | `wear head Armor_Child_Mask_Keaton` | test only: sets this game's `PlayerStatus.Equip*` flag for `weapon`, `shield`, `head`, `armor`, `boots` or `hand` (gauntlets) ([items.md](items.md)). Only the flag changes, not this game's Link; the other games' puppets wear it (scenario `wear`). `wear head none` empties the flag: the piece is taken off |
 | `assign Bow` | test only: puts an item on ZR, for both ages, through the game's Enum queue (`PlayerStatus.AssignableItem.Child` and `.Adult`); the name is the button enum's (`Bow`, `Hookshot`, `Hammer`, `SlingShot`, `Bomb`, `DekuStick`, ...; GameDataList spelling). The item must be owned (`give`). R is the quick-select carousel and assigns nothing |
+| `menu customize` / `menu close` | test only (Longshot): opens the game's menu on Multiplayer > Customize Link (`CoopPause::TestMenu`, as the title's rows open the tab), or closes the menu; logs `coop: test menu customize: asked`. The page's `coop: look: the Customize picture ...` lines then say live or flat. Scenario `hs-customize` (#74) |
 | `mark name` | logs `coop: test mark name`; the runner takes a screenshot then |
 
 `goto` and `toward` steer from Link's position and the game camera's ground directions (from its world-to-clip matrix), read each frame; a push that gets nowhere for a second steps aside. Positions are the ones the objects debug log prints (`at x y z`, y is height), or the `Translate` of a placement in the romfs Banc files.
@@ -546,6 +547,16 @@ tools\autotest\run.ps1 -Scenario walk -Lag 150 -Jitter 20 -Loss 2 -Spike 500/10
 ```
 
 `-NetSimFor A` puts only A behind the relay (B connects straight: A slow, B fine). `-NetSimArgs` passes more relay options, `A:` or `B:` for one game only: `-NetSimArgs "--seed 3","B:--down loss=10"`. The relay's Python is the recomp's `.venv` beside the repo, else `py -3` or `python` (`-Python` sets it). The run folder gets `netsim.txt` (the conditions and each relay's command line) and `netsim-A.txt` / `netsim-B.txt` (each relay's counts).
+
+### On Longshot: the server's test delay
+
+Longshot games cannot be put behind the relay, so with `-Runtime hookshot` (and `-Kit`, `groups.py --lag N --jitter J`) `-Lag` and `-Jitter` go to the server instead: `coop_server --test-delay-ms N --test-jitter-ms J` holds every packet (`server/test_delay.hpp`). The same rules as the relay: `N` is the added round trip, half each way; each packet gets ± up to `J` ms on top, each way; one player's packets in one direction keep their order, so reliable stays reliable. Both games get it (no `-NetSimFor`); `-Loss`, `-Spike` and `-NetSimArgs` stay emulator-only. ENet's own round trip does not see it (its acknowledgements are not held), the game's PING/PONG does.
+
+```
+tools\autotest\run.ps1 -Runtime hookshot -Lane 1 -Scenario hs-puppets -Lag 250 -Jitter 60
+```
+
+**Tests only.** The server refuses both options unless its environment has `OOT_COOP_TEST=1` (`hookshot.py` and `hs_steps.py` set it for their server only) and prints `TEST DELAY on: ...` in `server-out.txt` when it runs with them. Never put them in a kit's start-server.
 
 ### What it does to the puppet
 

@@ -454,10 +454,19 @@ TEST_CASE("native boss: during our event a copy runs its own changes, then takes
     for (int i = 0; i < Table::kDriftSteps + 5; ++i) {
         CHECK_FALSE(t.Step(g, false, 0, kMain));
     }
-    // Over: from the owner's state now (its brain verb).
+    // Over: its own still runs for a moment (boss-copy-b: a hand-over to us
+    // may be on its way), then from the owner's state (its brain verb).
     t.SetEvent(false);
-    auto c = t.Step(g, false, 0, kMain);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 9, false, false));
+    CHECK(t.Totals().copy_own_run == 3);
+    std::optional<CoopPuppet::Call> c;
+    std::uint64_t steps = 0;
+    while (!c && steps <= Table::kAfterEventSteps) {
+        c = t.Step(g, false, 0, kMain);
+        ++steps;
+    }
     REQUIRE(c);
+    CHECK(steps >= Table::kAfterEventSteps);
     CHECK(c->function == kMain + addr::kSetBrainVerb);
     CHECK(c->x[1] == 5);
     // And its own changes are skipped again.

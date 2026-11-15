@@ -56,6 +56,14 @@ std::optional<CommandLine> parse_command_line(const std::vector<std::string>& ar
         return std::nullopt;
       }
       line.run_for_ms = ms;
+    } else if (arg == "--test-delay-ms" || arg == "--test-jitter-ms") {
+      // TEST ONLY (test_delay.hpp); main refuses them without OOT_COOP_TEST=1.
+      std::uint32_t ms = 0;
+      if (!has_value || !parse_number(args[++i], ms) || ms > 10'000) {
+        error = arg + " needs a number of milliseconds up to 10000";
+        return std::nullopt;
+      }
+      (arg == "--test-delay-ms" ? line.test_delay.round_trip_ms : line.test_delay.jitter_ms) = ms;
     } else if (arg == "--owner-hold-ms") {
       std::uint32_t ms = 0;
       if (!has_value || !parse_number(args[++i], ms)) {
@@ -192,6 +200,10 @@ std::optional<CommandLine> parse_command_line(const std::vector<std::string>& ar
     error = "--relay runs a relay; it cannot also use --invite";
     return std::nullopt;
   }
+  if (line.test_delay.on() && (line.relay || !line.join.empty())) {
+    error = "--test-delay-ms / --test-jitter-ms are for a game server, not --relay or --join";
+    return std::nullopt;
+  }
   if (line.relay && !line.port_given) line.port = 27530;
   return line;
 }
@@ -243,7 +255,10 @@ const char* usage() {
          "                   host can change it in the game with /pvp\n"
          "  --dbno on|off    down but not out: a player at no hearts crawls and\n"
          "                   can be revived (default: on); the host can change\n"
-         "                   it in the game with /dbno\n";
+         "                   it in the game with /dbno\n"
+         "  --test-delay-ms N --test-jitter-ms J  TESTS ONLY (needs OOT_COOP_TEST=1):\n"
+         "                   hold every packet N/2 ms each way, +- up to J ms,\n"
+         "                   in order (a bad connection for Longshot autotests)\n";
 }
 
 }  // namespace coop::server

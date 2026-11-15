@@ -146,6 +146,7 @@ enum class Kind {
     watch,   // test only: watch NAME [DX DY DZ] / watch off: where that actor is on screen (the .watch file)
     difficulty,  // test only: the host's difficulty choice (difficulty HP DAMAGE COUNT, or difficulty auto)
     driver,  // aim / near: the Hookshot driver's steps (tools/autotest/hookshot.py); checked here, skipped
+    menu,    // test only: menu customize|close, the Multiplayer tab's Customize page opened or the menu closed (issue 74)
 };
 
 struct Step {
@@ -289,5 +290,11 @@ private:
 // and writes only the test-only steps there; they are played without a pad
 // and the file is emptied once read.
 void OnFrame(Core::System& system);
+
+// The menu step's doer: the Hookshot module sets it (coop_pause.cpp); "customize" opens
+// the Multiplayer tab's Customize page, "close" closes the menu. True when asked.
+// Unset (the emulator): the step logs that it is not here.
+using MenuOpener = std::function<bool(const std::string& page)>;
+void SetMenuOpener(MenuOpener opener);
 
 } // namespace CoopTestInput

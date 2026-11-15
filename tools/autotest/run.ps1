@@ -178,7 +178,8 @@ if ($Runtime -eq 'hookshot') {
     # A steps file ($Scenario.steps.txt) is played by tools\autotest\hs_steps.py: the same verbs as
     # Run-Steps below (start, load, play, close, kill, server stop/start, password, try, expect, lines, shot).
     if ($TakeBaseline) { throw "-Runtime hookshot: copy <game>\user\save to <game>\autotest-save for a baseline" }
-    foreach ($o in 'Exe', 'Game', 'ScreenCopy', 'Fps30', 'AddOnsOff', 'Lag', 'Jitter', 'Loss', 'Spike', 'NetSimArgs') {
+    # -Lag and -Jitter work here too: the server holds the packets itself (below); loss and spikes are netsim.py's only.
+    foreach ($o in 'Exe', 'Game', 'ScreenCopy', 'Fps30', 'AddOnsOff', 'Loss', 'Spike', 'NetSimArgs', 'NetSimFor') {
         if ($PSBoundParameters.ContainsKey($o)) { throw "-$o is for the emulator; not with -Runtime hookshot" }
     }
     # The server's join password: always through the environment for the server (OOT_COOP_TEST_PASSWORD);
@@ -229,6 +230,13 @@ if ($Runtime -eq 'hookshot') {
         }
     }
     if ($NoCoop) { $a += @('--env', 'HOS_COOP=0') } else { $a += @('--server', $Server, '--port', "$Port") }
+    if ($Lag -or $Jitter) {
+        # Longshot games cannot go through tools\netsim\netsim.py, so the server holds every packet itself
+        # (TEST ONLY: server/test_delay.hpp, refused without OOT_COOP_TEST=1, which hookshot.py / hs_steps.py set):
+        # -Lag round trip (half each way), -Jitter +- each way, order kept, for both games.
+        if ($NoCoop) { throw "-Lag / -Jitter need the server (not with -NoCoop)" }
+        $a += @('--test-delay-ms', "$([int]$Lag)", '--test-jitter-ms', "$([int]$Jitter)")
+    }
     if ($Pipe -ne 'coop-auto') { $a += @('--pipe', $Pipe) }
     if ($Kit.Count) { $a += @('--kit-a', (Resolve $Kit[0]), '--kit-b', (Resolve $Kit[1])) }
     foreach ($e in @($Switches | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().Trim('"', "'") } | Where-Object { $_ })) {

@@ -205,6 +205,13 @@ public:
     // Steps a copy runs its own changes after our own hit on it (about 2 s:
     // the stun's start; its DAMAGE of 0 hands the boss to us meanwhile).
     static constexpr std::uint64_t kReactSteps = 120;
+    // Steps a copy still runs its own changes after our event ended (about
+    // 2 s). An intro that began the fight here, while the owner's game has
+    // not played its own (its boss still pre-battle), hands the boss to us
+    // meanwhile (the server's unready rule); taking the owner's pre-battle
+    // state at once would put ours back on the ceiling, and its own AI would
+    // ask the intro again (boss-copy-b).
+    static constexpr std::uint64_t kAfterEventSteps = 120;
     static constexpr std::size_t kMaxSkippedKept = 8;
     static constexpr std::size_t kMaxHeld = 8;  // copy bosses held at once (more: not held)
 

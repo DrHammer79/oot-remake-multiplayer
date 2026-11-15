@@ -137,6 +137,18 @@ Goal: every boss fight the same in every game, run by the game's own code. Gohma
 - Tested: `tests/lichii/boss_native_test.cpp` (boss-fix cases).
 - **Not proven in game:** that the intro then hands control back in every game, that a seed in a copy's eye stuns her there and the hand-over follows, and that the death plays for everyone. The players' 0.11 logs were not to hand (the Gohma logs in player-logs/magloyr-20261115 are from 0.10.1, without the wraps). Check: two players, save `1. Deku Tree` (owner-saves-OoTRsaves1.0), both enter Gohma's room, both get control after the intro, each stuns her with the slingshot and hits her eye, she dies in both games.
 
+## A copy Gohma stuck at the intro spot (branch boss-copy, 0.11.2/0.11.3)
+
+LANE1 autotest hs-boss-full (runs 20261115-122137 and -130255): in A's game the copy Gohma played her intro anims (`C01`..`C03-Enemy_DungeonBoss_Gohma-A-0`) at the intro spot for minutes while B owned her; B's own Gohma hung on the ceiling (`Pre_Battle_Ceiling_Turn` "(ours)", 0 brain changes). Likely the player report "Gohma sort of desynced" (#31 row).
+
+**Why.** A owned her and her drop started A's intro. B's copy, on the ceiling, looked at B's Link (`targeting`), and the server's chase rule (issue 101) handed her to B mid-intro, although B had flagged her `unready` (its intro not played: `HavePlayedEvent.Dm_Deku_BossIn` false). Only the fight-near and hit rules looked at that bit. B's boss, still pre-battle, became the owner's state. When A's intro ended, A's copy took that state (brain verb 8, pre-battle), went back up to the ceiling, its own AI found A's Link and asked `InsideTheDekuTree_BossAppear` again, and so on.
+
+**Now.**
+- Server (`server/session.cpp`): an unready game never takes a boss by the chase rule or the out-of-fight near rule (as before for the fight-near and hit rules); `best_other` (owner gone or unfit) takes a ready game before an unready one, and an unready one only when no other is left. New rule: a boss whose owner is unready goes to a ready game at once (`boss_to_ready`): a game whose own intro began the fight there is the one whose boss is in the fight.
+- Module (`Table::SetEvent`): after our event a copy still runs its own changes for `kAfterEventSteps` (120 frames, about 2 s) before it takes the owner's state, so that hand-over can come first. Note: `our event is over (its own still runs for a moment)`.
+- Tested: `tests/server/session_test.cpp` (three `boss-copy-b` cases), `tests/lichii/boss_native_test.cpp` (the event case waits for the grace).
+- **Not proven in game.** Check (LANE1, hs-boss-full or hs-boss-fix-gohma): A walks in first and under her; during A's intro no "now ours" in B's log while B logs "not ready to own the boss"; A's copy (if it is one) never asks `BossAppear` twice; after B's own intro (if it plays) "now ours" comes within ~1 s.
+
 ## One boss death for everyone (branch boss-fix, seed N2BTEYKM report, 0.11.2)
 Before: each game's boss could die of its own game's hits. A copy took its own hits through its own Life step
 and sent them to the owner as DAMAGE. The owner's game refused most of them, because Gohma holds her life at 1

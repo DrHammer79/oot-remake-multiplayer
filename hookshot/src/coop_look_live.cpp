@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +21,7 @@
 
 #include "common/fs/path_util.h"
 #include "common/logging.h"
+#include "coop_camera.h"
 #include "coop_hook.h"
 #include "coop_look.h"
 #include "coop_look_view.h"
@@ -642,6 +644,8 @@ namespace {
 std::mutex g_mutex;
 Orbit g_orbit;   // guarded
 Watch g_watch;   // guarded
+std::mutex g_keep_mutex;   // (its own: OwnLink runs outside g_mutex)
+Keep g_keep;               // guarded by g_keep_mutex
 
 std::uint64_t NowMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -653,23 +657,40 @@ std::uint64_t NowMs() {
 constexpr float kHeightChild = 1.35f;
 constexpr float kHeightAdult = 1.9f;
 
-// Your own Link, or none; `showing` (when given) says which picture that makes.
+// Your own Link, or none; `showing` (when given) says which picture that makes. Live during our own event too
+// (#74: the owner's adult Link got the flat picture, and the only flat causes are no Link or our event); a Link
+// missing for a moment (a scene entry) is the last one seen (Keep).
 std::optional<Subject> OwnLink(Showing* showing = nullptr) {
     thread_local CoopHook::MapView view;   // (keeps its room: no allocation once filled)
-    Showing s = Showing::flat_no_link;
-    std::optional<Subject> link;
+    std::optional<Seen> now;
     if (CoopHook::CurrentMapView(view)) {
-        if (view.event) {
-            s = Showing::flat_event;
-        } else {
-            s = view.adult ? Showing::live_adult : Showing::live_child;
-            link = Subject{view.self, view.adult ? kHeightAdult : kHeightChild};
-        }
+        const Showing s = view.event ? Showing::live_event : view.adult ? Showing::live_adult : Showing::live_child;
+        now = Seen{Subject{view.self, view.adult ? kHeightAdult : kHeightChild}, s};
+    }
+    std::optional<Seen> kept;
+    {
+        std::lock_guard lock(g_keep_mutex);
+        kept = g_keep.Take(now, NowMs());
     }
     if (showing) {
-        *showing = s;
+        *showing = kept ? kept->showing : Showing::flat_no_link;
     }
-    return link;
+    return kept ? std::optional<Subject>(kept->link) : std::nullopt;
+}
+
+// The game's vertical field of view now: from the camera block Hookshot hands the name tags (CoopCamera), else
+// kFovY. Said in the log when first known and when it changes by more than two degrees. The game's thread.
+double GameFov() {
+    const auto frame = CoopCamera::Latest();
+    const auto fov = frame ? FovFromClip(frame->clip_from_world) : std::nullopt;
+    static double said = 0;   // (the game's thread only)
+    const double now = fov.value_or(kFovY);
+    if (std::abs(now - said) > 0.035) {
+        said = now;
+        LOG_INFO(Core, "coop: look: the Customize camera's field of view is {:.1f} degrees ({})", now * 57.29578,
+                 fov ? "the game's camera" : "no camera from the game: the measured one");
+    }
+    return now;
 }
 
 }  // namespace
@@ -706,8 +727,9 @@ bool Camera(double eye[3], double target[3]) {
         }
     }
     const auto link = OwnLink();   // (outside the lock: the hook's own lock)
+    const double fov = GameFov();
     std::lock_guard lock(g_mutex);
-    const auto shot = g_orbit.Camera({eye[0], eye[1], eye[2]}, {target[0], target[1], target[2]}, link, now);
+    const auto shot = g_orbit.Camera({eye[0], eye[1], eye[2]}, {target[0], target[1], target[2]}, link, now, fov);
     if (!shot) {
         return false;
     }

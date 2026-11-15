@@ -251,6 +251,18 @@ int main(int argc, char** argv) {
                  "coop-options.ini is empty or missing. The server was not started.\n");
     return 2;
   }
+  // A bad connection made on purpose: tests only, never a player's server.
+  if (line->test_delay.on()) {
+    if (environment("OOT_COOP_TEST") != "1") {
+      std::fprintf(stderr, "coop_server: --test-delay-ms / --test-jitter-ms are for tests only (set "
+                           "OOT_COOP_TEST=1). The server was not started.\n");
+      return 2;
+    }
+    std::printf("coop_server: TEST DELAY on: %u ms round trip (half each way), jitter +-%u ms each way\n",
+                static_cast<unsigned>(line->test_delay.round_trip_ms),
+                static_cast<unsigned>(line->test_delay.jitter_ms));
+    std::fflush(stdout);
+  }
 #ifdef _WIN32
   SetConsoleCtrlHandler(on_console_event, TRUE);
 #endif
@@ -299,6 +311,7 @@ int main(int argc, char** argv) {
     config.upnp = line->upnp;
     config.invite = line->invite;
     if (line->invite) config.stun_servers = stun_servers(*line);
+    config.test_delay = line->test_delay;
     config.relay_via = line->relay_via;
     config.relay_key = line->relay_key;
     config.log = say;

@@ -1,5 +1,6 @@
 #include "enet_server.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -55,7 +56,8 @@ ConnectionId id_of(const ENetPeer* peer) {
 EnetServer::EnetServer(ServerOptions options)
     : options_(std::move(options)),
       session_(options_.session),
-      start_(std::chrono::steady_clock::now()) {}
+      start_(std::chrono::steady_clock::now()),
+      delay_(options_.test_delay) {}
 
 EnetServer::~EnetServer() {
   if (host_ != nullptr) enet_host_destroy(host_);
@@ -114,8 +116,10 @@ void EnetServer::service(std::uint32_t timeout_ms) {
     apply_actions();
     result = enet_host_check_events(host_, &event);
   }
+  release_held();
   session_.tick(now_us());
   apply_actions();
+  release_held();
   // ENet forgets to take a player's lost fragments off its count; past
   // kMaxWaitingBytes it would refuse (and never acknowledge) all they send.
   std::vector<ENetPeer*> lost_full;
@@ -152,6 +156,9 @@ void EnetServer::send_small(ENetPeer* peer, const std::string& why) {
   peers_.erase(id);
   path_marks_.erase(id);
   ciphers_.erase(id);
+  held_.drop_if([id](const Held& h) { return h.id == id; });
+  delay_.forget(in_lane(id));
+  delay_.forget(out_lane(id));
   peer->data = nullptr;
   enet_peer_disconnect_now(peer, net::kDisconnectSmallDatagrams);
   session_.disconnected(id, now_us(), link);
@@ -192,19 +199,13 @@ void EnetServer::handle(const ENetEvent& event) {
     case ENET_EVENT_TYPE_RECEIVE: {
       const ConnectionId id = id_of(event.peer);
       std::span<const std::uint8_t> bytes(event.packet->data, event.packet->dataLength);
-      if (auto cipher = ciphers_.find(id); cipher != ciphers_.end()) {
-        // Encrypted: only what opens with its key gets to the session.
-        std::vector<std::uint8_t> plain;
-        if (cipher->second->open(event.channelID, bytes, plain) != protocol::OpenError::none) {
-          ++unsealed_drops_;
-          enet_packet_destroy(event.packet);
-          break;
-        }
-        session_.received(id, event.channelID, plain, now_us());
-        enet_packet_destroy(event.packet);
-        break;
+      if (options_.test_delay.on()) {
+        // Opened when it is let through: the key may come with a packet held before it.
+        held_.push(delay_.due(in_lane(id), now_us()),
+                   Held{Held::Kind::receive, id, event.channelID, {bytes.begin(), bytes.end()}, {}});
+      } else {
+        receive_now(id, event.channelID, bytes);
       }
-      session_.received(id, event.channelID, bytes, now_us());
       enet_packet_destroy(event.packet);
       break;
     }
@@ -212,7 +213,8 @@ void EnetServer::handle(const ENetEvent& event) {
       ConnectionId id = id_of(event.peer);
       peers_.erase(id);
       path_marks_.erase(id);
-      ciphers_.erase(id);
+      // (delayed: its key opens what it sent before it left, until its leave)
+      if (!options_.test_delay.on()) ciphers_.erase(id);
       // As seen at the end of the last round: ENet has reset the peer by now.
       std::string link;
       if (auto seen = links_.find(id); seen != links_.end()) {
@@ -221,13 +223,34 @@ void EnetServer::handle(const ENetEvent& event) {
                std::to_string(seen->second.waiting_bytes) + " bytes";
         links_.erase(seen);
       }
-      session_.disconnected(id, now_us(), link);
       event.peer->data = nullptr;
+      if (options_.test_delay.on()) {
+        // After what it sent before it left; nothing more goes to it.
+        held_.drop_if([id](const Held& h) { return h.id == id && h.kind >= Held::Kind::send; });
+        delay_.forget(out_lane(id));
+        held_.push((std::max)(now_us(), delay_.last(in_lane(id))), Held{Held::Kind::leave, id, 0, {}, std::move(link)});
+        break;
+      }
+      session_.disconnected(id, now_us(), link);
       break;
     }
     case ENET_EVENT_TYPE_NONE:
       break;
   }
+}
+
+void EnetServer::receive_now(ConnectionId id, std::uint8_t channel, std::span<const std::uint8_t> bytes) {
+  if (auto cipher = ciphers_.find(id); cipher != ciphers_.end()) {
+    // Encrypted: only what opens with its key gets to the session.
+    std::vector<std::uint8_t> plain;
+    if (cipher->second->open(channel, bytes, plain) != protocol::OpenError::none) {
+      ++unsealed_drops_;
+      return;
+    }
+    session_.received(id, channel, plain, now_us());
+    return;
+  }
+  session_.received(id, channel, bytes, now_us());
 }
 
 std::uint32_t packet_flags(std::uint8_t channel) {
@@ -248,10 +271,11 @@ void EnetServer::apply_actions() {
         if (!sealed) continue;
         bytes = &*sealed;
       }
-      ENetPacket* packet =
-          enet_packet_create(bytes->data(), bytes->size(), packet_flags(send->channel));
-      if (packet != nullptr && enet_peer_send(it->second, send->channel, packet) != 0) {
-        enet_packet_destroy(packet);
+      if (options_.test_delay.on()) {
+        held_.push(delay_.due(out_lane(send->to), now_us()),
+                   Held{Held::Kind::send, send->to, send->channel, *bytes, {}});
+      } else {
+        send_now(it->second, send->channel, *bytes);
       }
     } else if (auto* encrypt = std::get_if<EncryptAction>(&action)) {
       if (peers_.count(encrypt->who) != 0) {
@@ -262,7 +286,42 @@ void EnetServer::apply_actions() {
       auto it = peers_.find(drop->who);
       if (it == peers_.end()) continue;
       // After what is queued for it (a REFUSED) has gone out.
-      enet_peer_disconnect_later(it->second, 0);
+      if (options_.test_delay.on()) {
+        held_.push(delay_.due(out_lane(drop->who), now_us()), Held{Held::Kind::drop, drop->who, 0, {}, {}});
+      } else {
+        enet_peer_disconnect_later(it->second, 0);
+      }
+    }
+  }
+}
+
+void EnetServer::send_now(ENetPeer* peer, std::uint8_t channel, const std::vector<std::uint8_t>& bytes) {
+  ENetPacket* packet = enet_packet_create(bytes.data(), bytes.size(), packet_flags(channel));
+  if (packet != nullptr && enet_peer_send(peer, channel, packet) != 0) {
+    enet_packet_destroy(packet);
+  }
+}
+
+void EnetServer::release_held() {
+  if (held_.size() == 0) return;
+  for (Held& h : held_.take_due(now_us())) {
+    switch (h.kind) {
+      case Held::Kind::receive:
+        receive_now(h.id, h.channel, h.bytes);
+        apply_actions();
+        break;
+      case Held::Kind::leave:
+        delay_.forget(in_lane(h.id));
+        ciphers_.erase(h.id);
+        session_.disconnected(h.id, now_us(), h.link);
+        apply_actions();
+        break;
+      case Held::Kind::send:
+        if (auto it = peers_.find(h.id); it != peers_.end()) send_now(it->second, h.channel, h.bytes);
+        break;
+      case Held::Kind::drop:
+        if (auto it = peers_.find(h.id); it != peers_.end()) enet_peer_disconnect_later(it->second, 0);
+        break;
     }
   }
 }

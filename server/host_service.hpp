@@ -56,6 +56,7 @@ struct HostServiceConfig {
   bool remember_friends = false;      // nat::HostConfig::remember_friends (the game's own host)
   std::vector<nat::Addr> stun_servers;
   bool stun_allow_private = false;    // tests: a STUN server on 127.0.0.1
+  TestDelay test_delay;               // TEST ONLY: as ServerOptions::test_delay
   std::string relay_via;              // "" for none
   std::string relay_key;
   // coop_server's window shows the invite code (the host copies it from

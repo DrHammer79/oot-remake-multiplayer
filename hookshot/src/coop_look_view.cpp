@@ -73,8 +73,24 @@ bool Orbit::Asked(std::uint64_t now_ms) const {
     return asked_ms_ && now_ms >= *asked_ms_ && now_ms - *asked_ms_ <= kHoldMs;
 }
 
+std::optional<double> FovFromClip(const std::array<float, 16>& m) {
+    const auto length = [&m](int row) {
+        return std::sqrt(static_cast<double>(m[4 * row]) * m[4 * row] + static_cast<double>(m[4 * row + 1]) * m[4 * row + 1] +
+                         static_cast<double>(m[4 * row + 2]) * m[4 * row + 2]);
+    };
+    const double up = length(1), depth = length(3);
+    if (!std::isfinite(up) || !std::isfinite(depth) || up <= 1e-9 || depth <= 1e-9) {
+        return std::nullopt;
+    }
+    const double fov = 2.0 * std::atan(depth / up);
+    if (!(fov >= kFovMin && fov <= kFovMax)) {
+        return std::nullopt;
+    }
+    return fov;
+}
+
 std::optional<Shot> Orbit::Camera(const Vec3& game_eye, const Vec3& game_target, const std::optional<Subject>& link,
-                                  std::uint64_t now_ms) {
+                                  std::uint64_t now_ms, double fov_y) {
     if (!Asked(now_ms) || !link) {
         start_ms_.reset();   // (the next turn starts in front of him again)
         return std::nullopt;
@@ -84,12 +100,12 @@ std::optional<Shot> Orbit::Camera(const Vec3& game_eye, const Vec3& game_target,
         start_yaw_ = FrontYaw(game_eye, game_target);
     }
     const double turn = static_cast<double>(now_ms - *start_ms_) / 1000.0 / kTurnSeconds;
-    return Aim(link->feet, link->height, start_yaw_ + kTau * (turn - std::floor(turn)), window_);
+    return Aim(link->feet, link->height, start_yaw_ + kTau * (turn - std::floor(turn)), window_, fov_y);
 }
 
 namespace {
 bool Live(std::optional<Showing> s) {
-    return s == Showing::live_child || s == Showing::live_adult;
+    return s == Showing::live_child || s == Showing::live_adult || s == Showing::live_event;
 }
 }  // namespace
 
@@ -98,9 +114,22 @@ const char* Describe(Showing showing) {
     case Showing::live_child: return "live, the camera around your child Link";
     case Showing::live_adult: return "live, the camera around your adult Link";
     case Showing::flat_no_link: return "flat: the co-op hook has no Link this frame (no game, scene or place)";
-    case Showing::flat_event: return "flat: our own event (a cutscene) runs";
+    case Showing::live_event: return "live, our own event (a cutscene) runs: the camera around your Link";
     }
     return "?";
+}
+
+std::optional<Seen> Keep::Take(const std::optional<Seen>& now, std::uint64_t now_ms) {
+    if (now) {
+        last_ = now;
+        seen_ms_ = now_ms;
+        return now;
+    }
+    if (last_ && now_ms >= seen_ms_ && now_ms - seen_ms_ <= kGapMs) {
+        return last_;
+    }
+    last_.reset();
+    return std::nullopt;
 }
 
 std::optional<std::string> Watch::Drawn(Showing showing, std::uint64_t now_ms) {

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "session.hpp"
+#include "test_delay.hpp"
 
 namespace coop::server {
 
@@ -59,6 +60,9 @@ struct CommandLine {
   bool pvp = false;
   // --dbno on|off: down but not out (docs/play-online.md); on by default.
   bool dbno = true;
+  // --test-delay-ms / --test-jitter-ms: TEST ONLY (test_delay.hpp); main
+  // refuses them unless the environment has OOT_COOP_TEST=1.
+  TestDelay test_delay;
   bool help = false;
 };
 

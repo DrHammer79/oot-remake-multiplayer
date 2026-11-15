@@ -84,6 +84,7 @@ bool HostService::start(std::string& error) {
     options.max_connections = config_.max_connections;
     options.bind = config_.bind;
     options.session = config_.session;
+    options.test_delay = config_.test_delay;
     auto server = std::make_unique<EnetServer>(std::move(options));
     if (server->start()) server_ = std::move(server);
     if (config_.port == 0) break;

@@ -967,3 +967,105 @@ TEST_CASE("host service: 16 real clients join over ENet, a 17th is told the serv
   CHECK(late.find<Welcome>() == nullptr);
   CHECK(service.status().players == 16);
 }
+
+// TEST ONLY delay (server/test_delay.hpp): the encrypted join still works,
+// a relayed packet takes the round trip (half in, half out), jitter keeps
+// every line in order, and a leave comes after what was sent before it.
+TEST_CASE("loopback: the test delay holds packets each way and keeps their order") {
+  EnetLife enet;
+  SimClock clock;
+  clock.enet();
+  ServerOptions options = server_options();
+  options.now_us = clock.us();
+  options.test_delay = TestDelay{200, 0, 1};
+  EnetServer server(options);
+  REQUIRE(server.start());
+
+  Client a;
+  Client b;
+  a.connect(server.port());
+  b.connect(server.port());
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return a.connected && b.connected; }, &clock));
+  a.send(hello_from("Link"), kChannelSession);
+  const std::uint64_t hello_at = clock.ms;
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return a.find<Welcome>() != nullptr; }, &clock));
+  // HELLO in (100 ms), the challenge out (100), the proof in (100), WELCOME out (100).
+  CHECK(clock.ms - hello_at >= 400);
+  b.send(hello_from("Zelda"), kChannelSession);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<Welcome>() != nullptr; }, &clock));
+
+  PlayerSample sample;
+  sample.time = {1000, 1};
+  sample.position = Vec3{1.0f, 2.0f, 3.0f};
+  a.send(sample, kChannelPlayerSamples);
+  const std::uint64_t sent_at = clock.ms;
+  clock.step();
+  clock.enet();
+  a.pump();
+  server.service(0);
+  CHECK(server.held_packets() >= 1);  // the sample, held on its way in
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<PlayerSample>() != nullptr; }, &clock));
+  const std::uint64_t took = clock.ms - sent_at;
+  CHECK(took >= 200);
+  CHECK(took < 230);
+
+  // Leaving waits for the lines sent before it.
+  a.send(Chat{0, "last words"}, kChannelSession);
+  clock.step();
+  clock.enet();
+  a.pump();
+  enet_peer_disconnect(a.peer, 0);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<PlayerLeft>() != nullptr; }, &clock));
+  std::size_t chat_at = 0;
+  std::size_t left_at = 0;
+  for (std::size_t i = 0; i < b.inbox.size(); ++i) {
+    if (std::holds_alternative<Chat>(b.inbox[i].message)) chat_at = i + 1;
+    if (std::holds_alternative<PlayerLeft>(b.inbox[i].message)) left_at = i + 1;
+  }
+  CHECK(chat_at != 0);
+  CHECK(chat_at < left_at);
+}
+
+TEST_CASE("loopback: with test jitter every reliable line still arrives in order") {
+  EnetLife enet;
+  SimClock clock;
+  clock.enet();
+  ServerOptions options = server_options();
+  options.now_us = clock.us();
+  options.test_delay = TestDelay{100, 60, 5};
+  EnetServer server(options);
+  REQUIRE(server.start());
+
+  Client a;
+  Client b;
+  a.connect(server.port());
+  b.connect(server.port());
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return a.connected && b.connected; }, &clock));
+  a.send(hello_from("Link"), kChannelSession);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return a.find<Welcome>() != nullptr; }, &clock));
+  b.send(hello_from("Zelda"), kChannelSession);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<Welcome>() != nullptr; }, &clock));
+
+  constexpr int kLines = 8;
+  for (int i = 0; i < kLines; ++i) {
+    a.send(Chat{0, "line " + std::to_string(i)}, kChannelSession);
+    for (int s = 0; s < 3; ++s) {  // a few ms apart, inside the jitter
+      clock.step();
+      clock.enet();
+      server.service(0);
+      clock.enet();
+      a.pump();
+      b.pump();
+    }
+  }
+  auto lines = [&] {
+    std::vector<std::string> out;
+    for (const Received& r : b.inbox) {
+      if (const auto* c = std::get_if<Chat>(&r.message)) out.push_back(c->text);
+    }
+    return out;
+  };
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return lines().size() == kLines; }, &clock));
+  const std::vector<std::string> got = lines();
+  for (int i = 0; i < kLines; ++i) CHECK(got[static_cast<std::size_t>(i)] == "line " + std::to_string(i));
+}

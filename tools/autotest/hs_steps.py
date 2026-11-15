@@ -355,6 +355,7 @@ class HookshotGames:
         self.pipe, self.env, self.timeout, self.head, self.restore, self.say = pipe, env, timeout, head, restore, say
         self.procs, self.bridges, self.runs, self.expected_exit = {}, {}, {"A": 0, "B": 0}, set()
         self.server, self.server_runs = None, 0
+        self.server_delay = []   # hookshot.py test_delay_args: the TEST-ONLY delay (needs OOT_COOP_TEST=1)
         self.commands = {x: os.path.join(out, "commands-%s.txt" % x) for x in games}
 
     def _log_path(self, x):
@@ -554,8 +555,12 @@ class HookshotGames:
         if os.environ.get("OOT_COOP_TEST_PASSWORD"):
             args += ["--password-env", "OOT_COOP_TEST_PASSWORD"]
         args += self.head.get("server", [])   # the steps file's `#! server` arguments
+        env = None
+        if self.server_delay:
+            args += self.server_delay
+            env = dict(os.environ, OOT_COOP_TEST="1")
         with open(os.path.join(self.out, "server-out%s.txt" % sfx), "w") as so:
-            self.server = subprocess.Popen(args, stdout=so, stderr=subprocess.STDOUT)
+            self.server = subprocess.Popen(args, stdout=so, stderr=subprocess.STDOUT, env=env)
         time.sleep(1)
 
     def server_stop(self):
@@ -607,6 +612,9 @@ def main(argv=None):
     r.add_argument("--expect-wait", type=float, default=60.0)
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--test-delay-ms", type=int, default=0,
+                   help="TEST ONLY: the server holds every packet, this round trip in ms (half each way)")
+    r.add_argument("--test-jitter-ms", type=int, default=0, help="TEST ONLY: +- up to this many ms each way")
     a = ap.parse_args(argv)
     if a.cmd == "check":
         bad = 0
@@ -649,6 +657,7 @@ def main(argv=None):
     say = hk.Log(os.path.join(a.out, "steps.txt"), echo=print)
     games = HookshotGames(hk, {"A": os.path.abspath(a.game_a), "B": os.path.abspath(a.game_b)}, a.out, a.server,
                           a.port, a.pipe, a.env, head["timeout"] or a.timeout, head, restore=not a.no_restore, say=say)
+    games.server_delay = hk.test_delay_args(a.test_delay_ms, a.test_jitter_ms)
     fails = 1
     try:
         games.server_start()

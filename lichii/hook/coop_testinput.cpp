@@ -319,6 +319,16 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             const auto from = static_cast<std::size_t>(w[1].data() - line.data());
             const auto to = static_cast<std::size_t>(w.back().data() + w.back().size() - line.data());
             step.mark = std::string(line.substr(from, to - from));
+        } else if (cmd == "MENU") {
+            // menu customize|close: the Customize page opened, or the menu closed. Test only.
+            std::string page = w.size() == 2 ? std::string(w[1]) : std::string{};
+            std::transform(page.begin(), page.end(), page.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (page != "customize" && page != "close") {
+                return fail("want: menu customize|close");
+            }
+            step.kind = Kind::menu;
+            step.mark = page;
         } else if (cmd == "KILL") {
             if (w.size() != 2) {
                 return fail("want: kill ACTOR");
@@ -553,7 +563,7 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
         }
         if (s.kind == Kind::warp || s.kind == Kind::give || s.kind == Kind::wear ||
             s.kind == Kind::assign || s.kind == Kind::chat || s.kind == Kind::kill ||
-            s.kind == Kind::setflag || s.kind == Kind::setenum) {
+            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu) {
             requests_.push_back(Request{s.kind, s.mark, s.start});
             ++index_;
             continue;
@@ -716,6 +726,8 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 constexpr double kWarpGiveUpS = 90.0;
+
+MenuOpener g_menu_opener;  // (set once at the module's start, before any script runs)
 
 // What the injector gives the pad: written on the present thread, read on
 // the input thread.
@@ -1133,6 +1145,10 @@ void WriteWatch() {
 
 } // namespace
 
+void SetMenuOpener(MenuOpener opener) {
+    g_menu_opener = std::move(opener);
+}
+
 void OnFrame(Core::System& system) {
     if (!g_state.checked_env) {
         g_state.checked_env = true;
@@ -1218,6 +1234,10 @@ void OnFrame(Core::System& system) {
             g_state.watch_said_us = 0;
             LOG_INFO(Core, "coop: test watch {} ({:.2f} {:.2f} {:.2f} in its own frame)", request.name,
                      request.at[0], request.at[1], request.at[2]);
+        } else if (request.kind == Kind::menu) {
+            const bool asked = g_menu_opener && g_menu_opener(request.name);
+            LOG_INFO(Core, "coop: test menu {}: {}", request.name,
+                     asked ? "asked" : "NOT asked (no menu in this build)");
         } else if (request.kind == Kind::chat) {
             const bool sent = CoopHook::SendChat(request.name);
             LOG_INFO(Core, "coop: test chat '{}': {}", request.name, sent ? "sent" : "NOT sent");

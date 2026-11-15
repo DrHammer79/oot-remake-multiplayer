@@ -838,4 +838,16 @@ void Open(CoopPauseMenu::Page page) {
     LOG_INFO(Core, "coop: multiplayer tab: opened from the title");
 }
 
+bool TestMenu(const std::string& page) {
+    if (page == "customize") {
+        Open(CoopPauseMenu::Page::kCustomize);
+        return true;
+    }
+    if (page == "close") {
+        g_wanted = HOS_COOP_MENU_WANT_CLOSE;
+        return true;
+    }
+    return false;
+}
+
 }  // namespace CoopPause

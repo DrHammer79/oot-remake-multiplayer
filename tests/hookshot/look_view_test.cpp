@@ -140,12 +140,12 @@ TEST_CASE("look view: the log says the page's picture once per change and per op
     CHECK_FALSE(watch.Drawn(Showing::live_child, 1016));   // the same picture: nothing
     CHECK_FALSE(watch.Drawn(Showing::live_child, 1032));
     // Our event starts: said once, with why.
-    const auto event = watch.Drawn(Showing::flat_event, 1048);
+    const auto event = watch.Drawn(Showing::live_event, 1048);
     REQUIRE(event);
     CHECK(event->find("event") != std::string::npos);
-    CHECK_FALSE(watch.Drawn(Showing::flat_event, 1064));
+    CHECK_FALSE(watch.Drawn(Showing::live_event, 1064));
     // The page left (not drawn for more than kHoldMs) and opened again: said again.
-    const auto again = watch.Drawn(Showing::flat_event, 1064 + CoopLookView::kHoldMs + 1);
+    const auto again = watch.Drawn(Showing::live_event, 1064 + CoopLookView::kHoldMs + 1);
     REQUIRE(again);
     const auto adult = watch.Drawn(Showing::live_adult, 1400);
     REQUIRE(adult);
@@ -183,4 +183,97 @@ TEST_CASE("look view: a live picture whose camera is never framed is said once")
         CHECK_FALSE(old.Drawn(Showing::live_child, now));
     }
     CHECK(old.Drawn(Showing::live_child, 1000 + unframed));
+}
+
+namespace {
+
+// A world-to-clip matrix as a game's camera block has it (row-major, clip = m * p): a perspective of `fov_y` (its y
+// row flipped when `y_down`) times the view from `eye` along yaw and pitch (the views' right, up, back rows).
+std::array<float, 16> Clip(double fov_y, double aspect, const Vec3& eye, double yaw, double pitch, bool y_down) {
+    const double sy = std::sin(yaw), cy = std::cos(yaw), sp = std::sin(pitch), cp = std::cos(pitch);
+    const double rows[3][3] = {{cy, 0, -sy}, {-sp * sy, cp, -sp * cy}, {cp * sy, sp, cp * cy}};
+    const double f = 1.0 / std::tan(fov_y * 0.5), near_z = 0.1;
+    const double scale[4] = {f / aspect, y_down ? -f : f, near_z, -1.0};   // (z: an infinite reversed one)
+    const int from[4] = {0, 1, 2, 2};
+    std::array<float, 16> m{};
+    for (int r = 0; r < 4; ++r) {
+        const double* axis = rows[from[r]];
+        const double s = r == 2 ? 0.0 : scale[r];
+        for (int c = 0; c < 3; ++c) {
+            m[4 * r + c] = static_cast<float>(s * axis[c]);
+        }
+        m[4 * r + 3] = static_cast<float>(-s * (axis[0] * eye[0] + axis[1] * eye[1] + axis[2] * eye[2]) +
+                                          (r == 2 ? near_z : 0.0));
+    }
+    return m;
+}
+
+}  // namespace
+
+TEST_CASE("look view: the game's field of view read from its camera matrix, any view, y up or down") {
+    for (const double degrees : {30.0, 45.0, 60.0, 75.0}) {
+        for (const bool y_down : {false, true}) {
+            const double fov = degrees * kPi / 180.0;
+            const auto m = Clip(fov, 16.0 / 9.0, {12.0, 5.0, -40.0}, 2.2, -0.3, y_down);
+            const auto got = CoopLookView::FovFromClip(m);
+            REQUIRE(got.has_value());
+            CHECK(*got == doctest::Approx(fov).epsilon(1e-4));
+        }
+    }
+    CHECK_FALSE(CoopLookView::FovFromClip({}).has_value());   // (no camera: zeros)
+    std::array<float, 16> flat{};
+    flat[0] = flat[5] = flat[10] = flat[15] = 1.0f;   // an identity: not a perspective (90 degrees, w row empty)
+    CHECK_FALSE(CoopLookView::FovFromClip(flat).has_value());
+    // Outside 10 to 120 degrees: not believed.
+    CHECK_FALSE(CoopLookView::FovFromClip(Clip(150 * kPi / 180, 1.0, {0, 0, 0}, 0, 0, false)).has_value());
+}
+
+TEST_CASE("look view: framed with the game's field of view, Link stays at the window's middle (owner: centred)") {
+    const Window w = Square();
+    const std::array<float, 3> feet{3.0f, 1.0f, 7.0f};
+    const double game_fov = 60.0 * kPi / 180.0;
+    for (const float height : {1.35f, 1.9f}) {
+        const Shot right = CoopLookView::Aim(feet, height, 0.7, w, game_fov);
+        const auto middle = Project(right, {feet[0], feet[1] + height * 0.5, feet[2]}, w.aspect, game_fov);
+        CHECK(middle[0] == doctest::Approx((w.x0 + w.x1) * 0.5).epsilon(1e-6));
+        CHECK(middle[1] == doctest::Approx((w.y0 + w.y1) * 0.5).epsilon(1e-6));
+        // The measured 45 degrees in a 60-degree game: he slides towards the picture's middle, out of the square's.
+        const Shot guessed = CoopLookView::Aim(feet, height, 0.7, w);
+        const auto off = Project(guessed, {feet[0], feet[1] + height * 0.5, feet[2]}, w.aspect, game_fov);
+        CHECK(std::abs(off[0] - (w.x0 + w.x1) * 0.5) > 0.03);
+    }
+}
+
+TEST_CASE("look view: the orbit frames with the fov it is given") {
+    Orbit orbit;
+    orbit.Ask(Square(), 1000);
+    const Subject link{{0, 0, 0}, 1.9f};
+    const double game_fov = 60.0 * kPi / 180.0;
+    const auto shot = orbit.Camera({0, 2, 5}, {0, 1, 0}, link, 1000, game_fov);
+    REQUIRE(shot.has_value());
+    const auto middle = Project(*shot, {0, 0.95, 0}, Square().aspect, game_fov);
+    CHECK(middle[0] == doctest::Approx((Square().x0 + Square().x1) * 0.5).epsilon(1e-6));
+    CHECK(middle[1] == doctest::Approx((Square().y0 + Square().y1) * 0.5).epsilon(1e-6));
+}
+
+TEST_CASE("look view: Link missing for a moment (a scene entry) keeps the last one, longer is none (#74)") {
+    using CoopLookView::Keep;
+    using CoopLookView::Seen;
+    using CoopLookView::Showing;
+    Keep keep;
+    CHECK_FALSE(keep.Take(std::nullopt, 1000).has_value());   // never seen: none (the title)
+    const Seen adult{Subject{{1.0f, 2.0f, 3.0f}, 1.9f}, Showing::live_adult};
+    const auto now = keep.Take(adult, 2000);
+    REQUIRE(now);
+    CHECK(now->showing == Showing::live_adult);
+    const auto gap = keep.Take(std::nullopt, 2000 + Keep::kGapMs);
+    REQUIRE(gap);   // a frame or two without him: still him
+    CHECK(gap->link.feet[0] == doctest::Approx(1.0f));
+    CHECK(gap->showing == Showing::live_adult);
+    CHECK_FALSE(keep.Take(std::nullopt, 2001 + Keep::kGapMs).has_value());   // gone longer: none
+    CHECK_FALSE(keep.Take(std::nullopt, 2002 + Keep::kGapMs).has_value());
+    // Our own event: the picture stays live (the camera still turns around him).
+    const Seen event{Subject{{0, 0, 0}, 1.9f}, Showing::live_event};
+    REQUIRE(keep.Take(event, 9000));
+    CHECK(keep.Take(std::nullopt, 9100)->showing == Showing::live_event);
 }

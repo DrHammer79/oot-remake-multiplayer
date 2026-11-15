@@ -63,6 +63,7 @@
 #include "coop_hud_hearts.h"
 #include "coop_link_sound.h"
 #include "coop_map_page.h"
+#include "coop_testinput.h"
 #include "coop_maps.h"
 #include "coop_live_events.h"
 #include "coop_objects_sync.h"
@@ -1067,6 +1068,7 @@ bool Start(const HosCoopApi* api) {
     CoopModsRuntime::Start();  // the mods folder and the code mods (docs/mods.md)
     CoopTitle::Init(api);
     CoopPause::Init(server);
+    CoopTestInput::SetMenuOpener(CoopPause::TestMenu);   // (the autotest's menu step; only a commands file asks it)
     CoopLook::StartModule();  // the look chosen in the pause menu (coop_look.h)
     return true;
 }

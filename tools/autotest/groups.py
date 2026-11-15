@@ -170,7 +170,8 @@ def lane_setup(lane, name, kit_root, run_root):
             "shots": os.path.join(run_root, name)}
 
 
-def plan(groups, kit_root, run_root, server, lane=0, kits=None):
+def plan(groups, kit_root, run_root, server, lane=0, kits=None, lag=0, jitter=0):
+    """lag / jitter: run.ps1 -Lag / -Jitter for every run (on Longshot the server holds the packets, TEST ONLY)."""
     if kits and not lane:
         raise Fail("--kit runs in a test lane only (--lane N): the kits start that lane's pair (kit_pair.py setup)")
     if kits and len(kits) != 2:
@@ -185,6 +186,8 @@ def plan(groups, kit_root, run_root, server, lane=0, kits=None):
         cmds = [run_command(s, r, server, kits=kits) for r in runs]
         if lane:
             cmds = [c + ["-Lane", str(lane)] for c in cmds]
+        if lag or jitter:
+            cmds = [c + ["-Lag", str(int(lag)), "-Jitter", str(int(jitter))] for c in cmds]
         planned.append((s, runs, cmds))
     return planned
 
@@ -416,6 +419,9 @@ def main(argv=None):
         p.add_argument("--run-root", help="default: <kit root>\\shots-hookshot\\groups-<time>")
         p.add_argument("--dry-run", action="store_true")
         p.add_argument("--lane", type=int, choices=[1, 2], help="run every group in this test lane (lanes.py)")
+        p.add_argument("--lag", type=int, default=0,
+                       help="run.ps1 -Lag for every run: added round trip in ms (Longshot: the server's TEST-ONLY delay)")
+        p.add_argument("--jitter", type=int, default=0, help="run.ps1 -Jitter for every run: +- ms each way")
         p.add_argument("--kit", help="A,B: kit folders whose own start starts the lane's games (run.ps1 -Kit; "
                                      "kit_pair.py setup)")
     m = sub.add_parser("merge")
@@ -440,7 +446,7 @@ def main(argv=None):
         with open(a.groups, encoding="utf-8") as f:
             groups = parse_groups(f.read())
         kits = [os.path.abspath(k.strip()) for k in a.kit.split(",") if k.strip()] if a.kit else None
-        planned = plan(groups, kit, run_root, server, a.lane or 0, kits)
+        planned = plan(groups, kit, run_root, server, a.lane or 0, kits, a.lag, a.jitter)
         if a.cmd == "prepare" and a.lane:
             raise Fail("a lane's pair is filled by lanes.py setup --lane %d (hard links for read-only files only)"
                        % a.lane)

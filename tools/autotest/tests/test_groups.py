@@ -89,6 +89,14 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(sum(1 for line in out if "run.ps1" in line), 3)
         self.assertTrue(out[0].startswith("[g1] pair"))
 
+    def test_lag_and_jitter_go_to_every_run(self):
+        planned = g.plan(g.parse_groups(GROUPS), "K", "R", "S.exe", lane=1, lag=250, jitter=60)
+        for _, _, cmds in planned:
+            for c in cmds:
+                self.assertEqual(c[-4:], ["-Lag", "250", "-Jitter", "60"])
+        plain = g.plan(g.parse_groups(GROUPS), "K", "R", "S.exe")
+        self.assertNotIn("-Lag", plain[0][2][0])
+
 
 class RunTest(unittest.TestCase):
     def setUp(self):

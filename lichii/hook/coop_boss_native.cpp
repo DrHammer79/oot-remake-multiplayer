@@ -357,8 +357,11 @@ void Table::SetEvent(bool running) {
             if (running && steps_ >= e.react_until) {
                 MakeLate(e);
             }
+            if (!running) {
+                e.react_until = std::max(e.react_until, steps_ + kAfterEventSteps);
+            }
             Note(e.name + (running ? ": our event: the copy runs its own (the owner's wait)"
-                                   : ": our event is over"));
+                                   : ": our event is over (its own still runs for a moment)"));
         } else if (e.role == Role::owner && !running) {
             e.record_after_event = true;  // its brain verb now goes out as a change (Step)
         }

@@ -408,6 +408,27 @@ class HookshotGamesTest(unittest.TestCase):
         self.assertEqual(started[0], ["coop_server.exe", "--port", "27560", "--password-env", "OOT_COOP_TEST_PASSWORD"])
         self.assertNotIn("zelda", " ".join(started[0]))   # the password never on the command line
 
+    def test_server_test_delay_needs_the_test_environment(self):
+        started = []
+        self.g.server_exe = "coop_server.exe"
+        self.g.server_delay = ["--test-delay-ms", "250", "--test-jitter-ms", "60"]
+        real = hs.subprocess.Popen
+
+        class P:
+            def __init__(self, args, **k):
+                started.append((args, k.get("env") or {}))
+
+            def poll(self):
+                return 0
+        hs.subprocess.Popen = P
+        try:
+            self.g.server_start()
+        finally:
+            hs.subprocess.Popen = real
+        args, env = started[0]
+        self.assertEqual(args[-4:], ["--test-delay-ms", "250", "--test-jitter-ms", "60"])
+        self.assertEqual(env.get("OOT_COOP_TEST"), "1")
+
 
 if __name__ == "__main__":
     unittest.main()
