@@ -2,8 +2,9 @@
 """Make the ExeFS module's null guard entries from tools/null_guards/sites.py, and check the copies.
 
     gen.py                 write switch/proto/null_guards.inc
-    gen.py --check         fail when null_guards.inc is not what this writes, or when Hookshot patch 0023's table
-                           (nx2/coop_null_guards.py inside hookshot/patches/0023-*.patch) differs from sites.py
+    gen.py --check         fail when null_guards.inc is not what this writes, or when the table of the Hookshot patch
+                           that adds nx2/coop_null_guards.py (0023, found by its content, not its number) differs
+                           from sites.py; it says `skipped` when no patch in hookshot/patches adds that file
 
 sites.py is the one table (its docstring says why): change it, run gen.py, and make patch 0023's table the same
 (--check names what differs).
@@ -20,8 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sites  # noqa: E402
 
 INC = os.path.join(ROOT, "switch", "proto", "null_guards.inc")
-PATCH_GLOB = os.path.join(ROOT, "hookshot", "patches", "0023-*.patch")
+PATCHES = os.path.join(ROOT, "hookshot", "patches")
 LIFT_FILE = "nx2/coop_null_guards.py"
+LIFT_DIFF = f"diff --git a/{LIFT_FILE} b/{LIFT_FILE}"
 TABLES = ("BUILD_ID", "PLAYER_OF", "PLAYER_LOADS", "PLAYER_LOADS_LATER", "SLOT10_LOADS")
 
 
@@ -59,30 +61,49 @@ def lift_table(patch_text: str) -> dict:
         if inside and line.startswith("+") and not line.startswith("+++"):
             out.append(line[1:])
     if not out:
-        raise SystemExit(f"{LIFT_FILE} is not in the patch")
+        raise ValueError(f"{LIFT_FILE} is not in the patch")
     ns: dict = {}
     exec(compile("\n".join(out), LIFT_FILE, "exec"), ns)  # (our own file, from our own repo)
     return {k: ns.get(k) for k in TABLES}
 
 
-def check() -> list[str]:
+def lift_patches(patches_dir: str = PATCHES) -> list[tuple[str, str]]:
+    """[(path, text)] of every patch in `patches_dir` that adds or changes nx2/coop_null_guards.py, by its content"""
+    out = []
+    for path in sorted(glob.glob(os.path.join(patches_dir, "*.patch"))):
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        if any(line.rstrip("\r") == LIFT_DIFF for line in text.splitlines()):
+            out.append((path, text))
+    return out
+
+
+def check(patches_dir: str = PATCHES, inc: str = INC) -> tuple[list[str], str]:
+    """(problems, what was done with the lift's table: `compared with <patch>` or `skipped: <why>`)"""
     problems = []
     try:
-        with open(INC, encoding="utf-8", newline="") as f:
+        with open(inc, encoding="utf-8", newline="") as f:
             if f.read() != inc_text():
-                problems.append(f"{os.path.relpath(INC, ROOT)} is not what gen.py writes: run tools/null_guards/gen.py")
+                problems.append(f"{os.path.basename(inc)} is not what gen.py writes: run tools/null_guards/gen.py")
     except FileNotFoundError:
-        problems.append(f"no {os.path.relpath(INC, ROOT)}: run tools/null_guards/gen.py")
-    patches = glob.glob(PATCH_GLOB)
-    if patches:
-        with open(patches[0], encoding="utf-8") as f:
-            lift = lift_table(f.read())
-        for k in TABLES:
-            if lift[k] != getattr(sites, k):
-                problems.append(f"{os.path.basename(patches[0])}: {k} differs from tools/null_guards/sites.py")
-    else:
-        print("note: no hookshot/patches/0023-*.patch on this branch: the lift's table is not compared")
-    return problems
+        problems.append(f"no {os.path.basename(inc)}: run tools/null_guards/gen.py")
+    found = lift_patches(patches_dir)
+    if not found:
+        return problems, f"skipped: no patch in {os.path.relpath(patches_dir, ROOT)} adds {LIFT_FILE}"
+    if len(found) > 1:
+        problems.append(f"{len(found)} patches change {LIFT_FILE} ({', '.join(os.path.basename(p) for p, _ in found)}): "
+                        "the table must have one home")
+    path, text = found[0]
+    name = os.path.basename(path)
+    try:
+        lift = lift_table(text)
+    except Exception as e:  # (the patch's own file does not run: that is a difference too)
+        problems.append(f"{name}: its {LIFT_FILE} could not be read: {e}")
+        return problems, f"compared with {name}"
+    for k in TABLES:
+        if lift[k] != getattr(sites, k):
+            problems.append(f"{name}: {k} differs from tools/null_guards/sites.py")
+    return problems, f"compared with {name}"
 
 
 def main(argv: list[str]) -> int:
@@ -90,7 +111,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args(argv)
     if a.check:
-        problems = check()
+        problems, lift = check()
+        print(f"null guards: Hookshot's table {lift}")
         for p in problems:
             print("error: " + p, file=sys.stderr)
         if not problems:

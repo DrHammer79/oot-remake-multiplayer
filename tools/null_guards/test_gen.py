@@ -8,7 +8,10 @@ import os
 import re
 import struct
 import sys
+import tempfile
 import unittest
+
+NL = chr(10)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -47,7 +50,7 @@ class SitesTest(unittest.TestCase):
 
 class GenTest(unittest.TestCase):
     def test_inc_is_current(self):
-        self.assertEqual(gen.check()[:1], [], "run tools/null_guards/gen.py")
+        self.assertEqual(gen.check()[0], [], "run tools/null_guards/gen.py")
 
     def test_inc_entries(self):
         text = gen.inc_text()
@@ -77,8 +80,70 @@ class GenTest(unittest.TestCase):
         self.assertEqual({k: t[k] == getattr(sites, k) for k in gen.TABLES}, {k: True for k in gen.TABLES})
         t = gen.lift_table(patch.replace(f"{sites.PLAYER_OF:#x}", "0x82acc4"))
         self.assertNotEqual(t["PLAYER_OF"], sites.PLAYER_OF)
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(ValueError):
             gen.lift_table("diff --git a/x b/x\n+y = 1\n")
+
+
+def lift_patch(**changes):
+    """A patch text that adds nx2/coop_null_guards.py with sites.py's tables (or `changes`), as 0023 does."""
+    values = {k: getattr(sites, k) for k in gen.TABLES}
+    values.update(changes)
+    lines = ["From 0 Mon Sep 17 00:00:00 2001", "Subject: [PATCH] x", "---",
+             "diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py", "+import coop_null_guards",
+             gen.LIFT_DIFF, "new file mode 100644", "--- /dev/null", f"+++ b/{gen.LIFT_FILE}"]
+    lines += [f"+{k} = {v!r}" for k, v in values.items()]
+    return NL.join(lines) + NL
+
+
+class CheckTest(unittest.TestCase):
+    """--check finds the lift's patch by its content (any number), fails when its table differs, says when it skipped."""
+
+    def run_check(self, patches):
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in patches.items():
+                with open(os.path.join(d, name), "w", encoding="utf-8", newline=NL) as f:
+                    f.write(text)
+            return gen.check(d, gen.INC)
+
+    def test_same_table_under_any_number(self):
+        for name in ("0023-coop-null-guards.patch", "0031-renumbered.patch"):
+            problems, lift = self.run_check({"0001-other.patch": "diff --git a/x b/x" + NL + "+y" + NL, name: lift_patch()})
+            self.assertEqual(problems, [])
+            self.assertEqual(lift, f"compared with {name}")
+
+    def test_a_different_table_fails(self):
+        moved = sites.PLAYER_LOADS[:-1] + ((sites.PLAYER_LOADS[-1][0] + 4, sites.PLAYER_LOADS[-1][1]),)
+        for change in ({"PLAYER_LOADS": moved}, {"PLAYER_OF": sites.PLAYER_OF + 4}, {"BUILD_ID": "0" * 40},
+                       {"SLOT10_LOADS": sites.SLOT10_LOADS[:2]}, {"PLAYER_LOADS_LATER": ()}):
+            problems, _ = self.run_check({"0023-coop-null-guards.patch": lift_patch(**change)})
+            self.assertEqual(len(problems), 1, change)
+            self.assertIn(next(iter(change)), problems[0])
+
+    def test_a_patch_that_does_not_run_fails(self):
+        bad = lift_patch().replace("+PLAYER_OF = ", "+PLAYER_OF = (")
+        problems, lift = self.run_check({"0023-coop-null-guards.patch": bad})
+        self.assertTrue(problems)
+        self.assertEqual(lift, "compared with 0023-coop-null-guards.patch")
+
+    def test_absent_says_skipped(self):
+        problems, lift = self.run_check({"0022-other.patch": "diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py" + NL
+                                                             + "+import coop_null_guards" + NL})
+        self.assertEqual(problems, [])
+        self.assertTrue(lift.startswith("skipped: no patch in "), lift)
+        self.assertIn(gen.LIFT_FILE, lift)
+
+    def test_two_homes_fail(self):
+        problems, _ = self.run_check({"0023-a.patch": lift_patch(), "0030-b.patch": lift_patch()})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("2 patches", problems[0])
+
+    def test_main_prints_what_it_did(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            gen.main(["--check"])
+        self.assertRegex(out.getvalue(), r"null guards: Hookshot's table (compared with |skipped: )")
 
 
 class FakeElf:
