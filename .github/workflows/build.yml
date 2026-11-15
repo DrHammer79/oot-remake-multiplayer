@@ -83,6 +83,11 @@ jobs:
         run: python tools/switch_mod/elf2nso_test.py -v
       - name: ExeFS module lift check tests
         run: python tools/switch_mod/lift_check_test.py -v
+      # One table for both null guards (tools/null_guards/sites.py): the ExeFS copy is current, Hookshot patch 0023's matches
+      - name: Null guard table tests
+        run: |
+          python tools/null_guards/test_gen.py -v
+          python tools/null_guards/gen.py --check
       # Builds the ExeFS module with stock LLVM; build.py refuses it if a recomp could not lift it.
       - name: ExeFS module build + lift check
         if: runner.os == 'Linux'

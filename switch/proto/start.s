@@ -92,3 +92,13 @@ __mod0:
     .balign 8
 __module_object:
     .space  0x200
+
+// Null guard islands (null_guard.h, hooks.h kNullGuard): one page of zeros in the file that
+// _init fills (made writable for that, then read+execute again) when it applies the guards.
+// Nothing branches here before then; a lifting recomp never uses it (applied_by_host).
+    .section .text.coop_islands, "ax"
+    .balign 0x1000
+    .global coop_null_islands
+    .hidden coop_null_islands
+coop_null_islands:
+    .space  0x1000
