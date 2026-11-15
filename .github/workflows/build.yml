@@ -334,6 +334,9 @@ jobs:
           echo "KIT=$(ls -d "$RUNNER_TEMP"/kit/oot-coop-*-linux)" >> "$GITHUB_ENV"
       - name: Longshot's Linux builder with our patches, and the patched renderer (no game)
         run: bash "$KIT/scripts/build.sh" --renderer-only "$RUNNER_TEMP/vk" --jobs 4
+      # (patch 0023: its tests in the source our patches went into, with Longshot's own Python; the emitted C with gcc)
+      - name: Co-op's null guards (patch 0023) in the patched Longshot source
+        run: CC=gcc-12 "$KIT/data/builder/image/usr/python/bin/python3" -I -B "$KIT/data/builder/source/tests/test_coop_null_guards.py" -v
       - name: A first start without a game stops in plain words
         run: |
           set +e
