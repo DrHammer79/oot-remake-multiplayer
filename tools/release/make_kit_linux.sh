@@ -97,7 +97,7 @@ done
 # The puppet pack tool: make_kit_hookshot.ps1's list, plus every module build.py imports.
 pack=$repo/tools/puppet_pack
 files=(ainb.py build.py __init__.py byml.py dumpcheck.py dungeon_rooms.py hud.py nup.py rstb.py sarc.py texture.py
-    title_menu.py tunic.py tunic_extra.py zs.py)
+    title_menu.py tunic.py tunic_extra.py zs.py self_tunic.py)   # (self_tunic.py: start.sh, colour-agree)
 while IFS= read -r m; do files+=("$m.py"); done < <(sed -n 's/#.*//; s/^[[:space:]]*from \. import //p' "$pack/build.py" | tr ',' '\n' | tr -d ' ' | grep .)
 for f in $(printf '%s\n' "${files[@]}" | sort -u); do
     [[ -f $pack/$f ]] || die "tools/puppet_pack/$f (needed by build.py) is not in the repo"

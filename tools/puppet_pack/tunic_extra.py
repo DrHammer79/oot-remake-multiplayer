@@ -33,11 +33,12 @@ EXTRA = {
 BC1, BC3 = 0x1A, 0x1C
 
 
-def extra_name(name, color):
-    """The puppet copy's name: as long as the game's (`_Player_` -> `_Coop_R_`)."""
+def extra_name(name, color, letter=None):
+    """The puppet copy's name: as long as the game's (`_Player_` -> `_Coop_R_`); `letter`: your
+    own copy's (tunic.SELF_LETTER)."""
     if "_Player_" not in name:
         raise TunicError(f"{name}: no _Player_ in the name")
-    return name.replace("_Player_", f"_Coop_{COLORS[color][0]}_", 1)
+    return name.replace("_Player_", f"_Coop_{letter or COLORS[color][0]}_", 1)
 
 
 def hue(rgb):
@@ -394,8 +395,8 @@ def for_puppet(data, own, name, color):
     return rename(data if color == "green" else own, name, extra_name(name, color), at_least=1)
 
 
-def model_names(model, color, names):
+def model_names(model, color, names, letter=None):
     """A player model with each of `names` it names changed to the colour's copy."""
     for n in names:
-        model = rename(model, n, extra_name(n, color), at_least=0, at_most=1)
+        model = rename(model, n, extra_name(n, color, letter), at_least=0, at_most=1)
     return model

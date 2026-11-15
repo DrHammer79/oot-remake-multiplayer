@@ -423,10 +423,13 @@ function Get-KitTunic([string]$Color) {
     return $best
 }
 
-# Puts your colour's tunic textures over the game's in the pack's romfs, so your own Link wears
-# your colour: the pack tool's coop_self/ files, listed in coop_puppet.json as self_files
-# ({colour: {romfs path: file}}: the tile, the child's dark tile, the adult's other tunic
-# textures and the adult's model copy that names the colour's textures, #202); a pack from before that: self_tiles / self_dark_tiles. Green, no colour or a
+# Puts your colour's tunic files in the pack's romfs, so your own Link wears your colour: the pack
+# tool's coop_self/ files, listed in coop_puppet.json as self_files ({colour: {romfs path: file}}).
+# Since colour-agree they are your own textures under their own names (Tex/Angin_Tile_S_Alb, ...)
+# and a copy of each player model naming them over Model/Player_<Age>: your own Link never draws
+# the puppets' copies. Older packs: the game-name tiles and the adult's puppet model copy (#202);
+# a pack from before that: self_tiles / self_dark_tiles. The Linux kit and the autotest run
+# tools/puppet_pack/self_tunic.py, the same steps. Green, no colour or a
 # pack without them: takes every copy away, the game's own green. Only the Kokiri tunic: the
 # Goron and Zora tunics have their own textures. Returns the colour put in, or ''.
 function Set-KitSelfTunic([string]$PackDir, [string]$Color) {
@@ -444,7 +447,7 @@ function Set-KitSelfTunic([string]$PackDir, [string]$Color) {
     # The fixed list also covers a pack without self_files (made again older): no stale copy.
     $targets = @($tile, $dark, 'Tex/Mt_Vest_Player_Adult_Alb.bntx.zs', 'Tex/Mt_Angin_Acs_Player_Adult_Alb.bntx.zs',
         'Tex/Mt_Cloth_Parts_Player_Child_Alb.bntx.zs', 'Tex/Mt_Vest_Player_Child_Alb.bntx.zs',
-        'Model/Player_Adult.Player_Adult.bfres.zs')
+        'Model/Player_Adult.Player_Adult.bfres.zs', 'Model/Player_Child.Player_Child.bfres.zs')
     $put = [ordered]@{}
     try {
         if ($json -and $json.self_files) {
@@ -465,8 +468,10 @@ function Set-KitSelfTunic([string]$PackDir, [string]$Color) {
             }
         }
     } catch { $put = [ordered]@{} }
-    # The tile is the one that must be there; a missing other file is left to the game's.
-    if (-not $put.Contains($tile) -or -not (Test-Path -LiteralPath $put[$tile] -PathType Leaf)) { $put = [ordered]@{} }
+    # A main tile must be there (your own S tile since colour-agree, or an older pack's game-name tile); a
+    # missing other file is left to the game's.
+    $main = @($put.Keys | Where-Object { $_ -match '^Tex/Angin_Tile_[A-Z]_Alb\.bntx\.zs$' -and (Test-Path -LiteralPath $put[$_] -PathType Leaf) })
+    if (-not $main.Count) { $put = [ordered]@{} }
     try {
         foreach ($t in ($targets | Select-Object -Unique)) {
             $dst = Join-Path $romfs $t

@@ -232,6 +232,23 @@ if ($Runtime -eq 'hookshot') {
         if ($LASTEXITCODE) { throw "lane $Lane is not free (lanes.py lock status)" }
     }
     try {
+        # Your own Link's tunic files follow the colour each game will wear and send, on every start, as the
+        # kit's launcher does (colour-agree; tools\puppet_pack\self_tunic.py = kit-paths.ps1 Set-KitSelfTunic):
+        # files left by an earlier start in another colour would show you in that colour on your own screen.
+        $switchList = @($Switches | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().Trim('"', "'") } | Where-Object { $_ })
+        foreach ($x in 'A', 'B') {
+            $pair = Resolve $(if ($x -eq 'A') { $HookshotA } else { $HookshotB })
+            $sw = @{}   # a plain switch, then the pair's own 'A:' / 'B:' one wins (hookshot.py --env)
+            foreach ($e in $switchList) { if ($e -notmatch '^[AB]:' -and $e -match '^(.+?)=(.*)$') { $sw[$Matches[1]] = $Matches[2] } }
+            foreach ($e in $switchList) { if ($e -match "^${x}:(.+?)=(.*)$") { $sw[$Matches[1]] = $Matches[2] } }
+            $pack = Join-Path $pair 'mods\contents\0400486024DEC000\coop-puppet'
+            if (-not (Test-Path -LiteralPath (Join-Path $pack 'coop_puppet.json'))) { continue }
+            $selfArgs = @('-I', (Join-Path (Split-Path $here) 'puppet_pack\self_tunic.py'), '--pack', $pack,
+                '--color', "$($sw['LICHII_COOP_COLOR'])", '--tunics', "$($sw['LICHII_COOP_TUNICS'])",
+                '--options', (Join-Path $pair 'coop-options.ini'), '--coop-ini', (Join-Path $pair 'coop.ini'))
+            $got = (& $py[0] @pyArgs @selfArgs | Out-String).Trim()
+            Write-Host "hookshot: game $x's own tunic files: $(if ($got) { $got } else { "none (the game's green)" })"
+        }
         & $py[0] @a
         $code = $LASTEXITCODE
     } finally {

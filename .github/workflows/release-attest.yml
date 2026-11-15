@@ -65,10 +65,25 @@ jobs:
           # The Longshot Linux kit (a zip: tools/release/make_kit_linux.sh), when the release has one.
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern "oot-coop-$TAG-linux.zip" --pattern "oot-coop-$TAG-linux.zip.sha256" || true
-          for sum in oot-coop-*-linux-*.tar.gz.sha256 oot-coop-*-linux.zip.sha256; do [ -f "$sum" ] && sha256sum -c "$sum"; done
+          # Every kit asset is named here, so a kit is never signed by accident or left out: the
+          # updaters (update.ps1 + verify_kit.ps1, both Linux update.sh) check a download by its
+          # SHA-256 and then by `gh attestation verify` on that same file, so each kit file a
+          # release has must be a subject. The .sha256 files are only checked, not signed.
+          subjects=("$PWD/oot-coop-$TAG.zip")
+          if [ -f "oot-coop-$TAG-windows.zip" ]; then subjects+=("$PWD/oot-coop-$TAG-windows.zip"); fi
+          for f in oot-coop-"$TAG"-linux-*.tar.gz "oot-coop-$TAG-linux.zip"; do
+            if [ ! -f "$f" ]; then continue; fi
+            # update.sh never takes a Linux kit without its .sha256: sign none without one either.
+            if [ ! -f "$f.sha256" ]; then echo "::error::release $TAG has $f but no $f.sha256"; exit 1; fi
+            sha256sum -c "$f.sha256"
+            subjects+=("$PWD/$f")
+          done
+          if [ -f Update.bat ]; then subjects+=("$PWD/Update.bat"); fi
+          printf '%s\n' "${subjects[@]}" > subjects.txt
+          echo "Attesting:"; cat subjects.txt
           {
             echo "subjects<<EOF"
-            ls -1 "$PWD"/oot-coop-*.zip "$PWD"/oot-coop-*-linux-*.tar.gz "$PWD"/Update.bat 2>/dev/null || true
+            cat subjects.txt
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
         id: assets
@@ -77,11 +92,11 @@ jobs:
           subject-path: ${{ steps.assets.outputs.subjects }}
       - name: Verify the attestation
         run: |
-          for f in kit/oot-coop-*.zip kit/oot-coop-*-linux-*.tar.gz kit/Update.bat; do
-            [ -f "$f" ] || continue
+          # The same list the attest step signed: each one must verify as the updaters check it.
+          while IFS= read -r f; do
             gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-attest.yml"
-          done
+          done < kit/subjects.txt
 
   self-test:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')
@@ -102,9 +117,20 @@ jobs:
           & "$env:SystemRoot\System32\tar.exe" -a -c -f selftest/oot-coop-v0.0.0-beta.zip -C selftest oot-coop-v0.0.0-beta
           $hash = (Get-FileHash selftest/oot-coop-v0.0.0-beta.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$PWD/selftest/oot-coop-v0.0.0-beta.zip.sha256", "$hash  oot-coop-v0.0.0-beta.zip`n")
+          # A made-up Linux kit under the v0.11.0 name (oot-coop-<tag>-linux.zip) the Linux update.sh looks for.
+          New-Item -ItemType Directory -Force selftest/oot-coop-v0.0.0-beta-linux | Out-Null
+          Set-Content selftest/oot-coop-v0.0.0-beta-linux/README.txt "release-attest self-test linux $env:GITHUB_SHA $env:GITHUB_RUN_ID"
+          & "$env:SystemRoot\System32\tar.exe" -a -c -f selftest/oot-coop-v0.0.0-beta-linux.zip -C selftest oot-coop-v0.0.0-beta-linux
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          subject-path: selftest/oot-coop-v0.0.0-beta.zip
+          subject-path: |
+            selftest/oot-coop-v0.0.0-beta.zip
+            selftest/oot-coop-v0.0.0-beta-linux.zip
+      - name: The Linux kit zip verifies as update.sh checks it
+        shell: bash
+        run: |
+          gh attestation verify selftest/oot-coop-v0.0.0-beta-linux.zip --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-attest.yml"
       - name: verify_kit.ps1 accepts the attested zip
         shell: pwsh
         run: |

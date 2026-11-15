@@ -45,6 +45,16 @@ COLORS = {
 # Set-KitSelfTunic); green or none: no copy, the game's own tile.
 SELF_DIR = "coop_self"
 
+# Your own Link's textures have their own names (colour-agree): the letter S, which no colour
+# uses. Your own Link wears a model copy naming them (coop_self/<colour>.Player_<Age>.bfres.zs,
+# put over the game's model by the kit), so it never draws the puppets' letter copies: a live
+# colour change of your own Link (hookshot/src/coop_look_tunic.cpp, by texels) cannot reach a
+# puppet of the same colour. The puppets' letter copies are marked as well (TUNIC_MARK).
+SELF_LETTER = "S"
+# The puppets' tunic copies: the image's last byte XOR this (puppet_pack.look_live.mark), so their
+# texels are never your own Link's (the same colour's own copy, or the game's green).
+TUNIC_MARK = 0xA5
+
 BC1, BC3 = 0x1A, 0x1C
 
 
@@ -52,8 +62,8 @@ class TunicError(ValueError):
     pass
 
 
-def tile_name(color):
-    return f"Angin_Tile_{COLORS[color][0]}_Alb"
+def tile_name(color, letter=None):
+    return f"Angin_Tile_{letter or COLORS[color][0]}_Alb"
 
 
 def project_name(variant, color):
@@ -218,13 +228,13 @@ def self_tile(data, color):
     return recolor_bntx(data, COLORS[color][1], TILE, TILE)
 
 
-def model_for(model, color, dark=True):
+def model_for(model, color, dark=True, letter=None):
     """A copy of a player model (bfres) that names the colour's tile instead of the green one,
     and the colour's dark tile instead of the green dark one if it names it (the child model;
     `dark`: the dark tiles are made, else the dark name stays the game's)."""
-    out = rename(model, TILE, tile_name(color), at_least=1, at_most=1)
+    out = rename(model, TILE, tile_name(color, letter), at_least=1, at_most=1)
     if dark:
-        out = rename(out, DARK, dark_name(color), at_least=0, at_most=1)
+        out = rename(out, DARK, dark_name(color, letter), at_least=0, at_most=1)
     return out
 
 
@@ -243,8 +253,8 @@ DARK = "Angin_Tile_A_Dark_Alb"
 DARK_SCALE = 0.64
 
 
-def dark_name(color):
-    return f"Angin_Tile_{COLORS[color][0]}_Dark_Alb"
+def dark_name(color, letter=None):
+    return f"Angin_Tile_{letter or COLORS[color][0]}_Dark_Alb"
 
 
 def _str_section(data):

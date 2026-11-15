@@ -98,6 +98,10 @@ FOOTSTEP_SUFFIX = ".game__component__SoundFootStepParam.bgyml"
 # worked by the player's own aiming code). Every perception emitter in the game has a Physics component; the
 # puppet gets the one of InterestSpotActor, a logic-only emitter whose controller set is empty (no body: the
 # puppet still collides with nothing).
+# OFF by default for 0.11 (own-look-2, lane1 2026-11-15): with the emitter on, a game crashes ~8 s after the save
+# loads when a child puppet wears a gear copy (Weapon_Sword_Kokiri_Look1) and holds the slingshot (guest null
+# read 0x7d8, lr 0x82deeef8; the slingshot actor in x19). The same pack built without it plays on. `--perception`
+# builds it (a test switch until that crash is understood).
 # Guards (review-boss-sync must-fix): the stealth guards (AffiliationParam NpcSecurityGuard: the castle's child
 # soldiers, the Gerudo) target Player too, and their AI (NpcSecurityGuard.SetIsObserve) takes any perceived
 # emitter of affiliation Player as Link: a puppet in view would catch this game's Link. Nothing in the data keeps
@@ -709,9 +713,11 @@ def recompress(dicts, original_raw, data, level=16):
     return dicts.compress(data, name, level=level)
 
 
-# The variants whose own Link wears the colour's model copy (above); the child's own Link took
-# the colour from its replaced tiles (bigrun5 PASS), so it keeps the game's model.
-SELF_MODEL_VARIANTS = ("Adult",)
+# The variants whose own Link wears the colour's model copy (above). The child too since
+# colour-agree: the owner's lane1 run (2026-11-14) showed the child's own Link with the hat in the
+# colour but the body and sleeves still the game's green, its replaced Tex/ files in place, while
+# the puppet of the same colour (renamed copies) was coloured all over: as the adult in bigrun5.
+SELF_MODEL_VARIANTS = ("Adult", "Child")
 
 
 def write_tunics(romfs, out_romfs, dicts, table, colors, log=print, self_dir=None, self_tiles=None,
@@ -765,28 +771,37 @@ def write_tunics(romfs, out_romfs, dicts, table, colors, log=print, self_dir=Non
         m_rel = f"Model/Player_{v}.Player_{v}.bfres.zs"
         m_src = os.path.join(romfs, m_rel)
         models[v] = (m_rel, read(m_src))
+    own_sizes = {}  # your own copies' Tex/ paths -> size-table entry, added once
     for c in colors:
         paths = []
         name = tunic.tile_name(c)
+        own_set = bool(self_dir) and c != "green"  # your own Link's S copies for this colour
         try:
-            data = tunic.tile_for(tile, c)
+            # The puppets' copy is marked: its texels are never your own Link's (tunic.TUNIC_MARK).
+            data = look_live.mark_bntx(tunic.tile_for(tile, c), tunic.TUNIC_MARK)
             own = tunic.self_tile(tile, c) if (self_dir or look_dir) and c != "green" else None
         except tunic.TunicError as e:
             raise BuildError(f"{tile_rel}: {e}")
         look = [(tunic.TILE, tile if own is None else own)]
         if own is not None and self_dir:
-            # Same size as the game's tile once unpacked: its size-table entry stands.
+            # Same size as the game's tile once unpacked: its size-table entry stands. (Packs
+            # before colour-agree put this one over the game's tile; the kit now uses self_files.)
             fname = f"{c}.bntx.zs"
             write(os.path.join(self_dir, fname), recompress(dicts, tile_raw, own))
             self_tiles[c] = f"{tunic.SELF_DIR}/{fname}"
-            self_files.setdefault(c, {})[tile_rel] = self_tiles[c]
+        if own_set:
+            own_name = tunic.tile_name(c, tunic.SELF_LETTER)
+            fname = f"{c}.{own_name}.bntx.zs"
+            write(os.path.join(self_dir, fname), recompress(dicts, tile_raw, tunic.rename(own, tunic.TILE, own_name)))
+            self_files.setdefault(c, {})[f"Tex/{own_name}.bntx.zs"] = f"{tunic.SELF_DIR}/{fname}"
+            own_sizes[strip_zs(f"Tex/{own_name}.bntx.zs")] = tile_size or len(own) + PACK_SIZE_MARGIN
         dst = f"Tex/{name}.bntx.zs"
         write(os.path.join(out_romfs, dst), recompress(dicts, tile_raw, data))
         table.add_new(strip_zs(dst), tile_size or len(data) + PACK_SIZE_MARGIN)
         paths.append(dst)
         if dark is not None:
             try:
-                ddata = tunic.dark_tile_for(tile, dark, c)
+                ddata = look_live.mark_bntx(tunic.dark_tile_for(tile, dark, c), tunic.TUNIC_MARK)
                 own_dark = tunic.self_dark_tile(tile, dark, c) if self_dir and c != "green" else None
             except tunic.TunicError as e:
                 raise BuildError(f"{dark_rel}: {e}")
@@ -796,10 +811,15 @@ def write_tunics(romfs, out_romfs, dicts, table, colors, log=print, self_dir=Non
                 fname = f"{c}.dark.bntx.zs"
                 write(os.path.join(self_dir, fname), recompress(dicts, tile_raw, own_dark))
                 self_dark_tiles[c] = f"{tunic.SELF_DIR}/{fname}"
-                self_files.setdefault(c, {})[dark_rel] = self_dark_tiles[c]
+                own_name = tunic.dark_name(c, tunic.SELF_LETTER)
+                fname = f"{c}.{own_name}.bntx.zs"
+                write(os.path.join(self_dir, fname),
+                      recompress(dicts, tile_raw, tunic.rename(own_dark, tunic.DARK, own_name)))
+                self_files.setdefault(c, {})[f"Tex/{own_name}.bntx.zs"] = f"{tunic.SELF_DIR}/{fname}"
+                own_sizes[strip_zs(f"Tex/{own_name}.bntx.zs")] = tile_size or len(own_dark) + PACK_SIZE_MARGIN
             if look_dir:
-                # In memory: the game's ASTC dark tile (green), else the BC3 copy the kit puts over it
-                # for your colour (self_dark_tiles); without those, the ASTC one recoloured in place.
+                # In memory: the game's ASTC dark tile (green), else the BC3 copy your own Link
+                # wears for that colour; without those, the ASTC one recoloured in place.
                 try:
                     look.append((tunic.DARK, dark if c == "green" else own_dark if own_dark is not None
                                  else tunic_extra.recolor(dark, c, base)))
@@ -813,35 +833,46 @@ def write_tunics(romfs, out_romfs, dicts, table, colors, log=print, self_dir=Non
         for name, (e_rel, e_raw, e_data) in extras.items():
             try:
                 e_own = None if c == "green" else tunic_extra.recolor(e_data, c, base)
-                e_pup = tunic_extra.for_puppet(e_data, e_own, name, c)
+                e_pup = look_live.mark_bntx(tunic_extra.for_puppet(e_data, e_own, name, c), tunic.TUNIC_MARK)
             except tunic.TunicError as e:
                 raise BuildError(f"{e_rel}: {e}")
             look.append((name, e_data if e_own is None else e_own))
-            if e_own is not None and self_dir:
-                # Same size and layout as the game's file: its size-table entry stands.
-                fname = f"{c}.{name}.bntx.zs"
-                write(os.path.join(self_dir, fname), recompress(dicts, e_raw, e_own))
-                self_files.setdefault(c, {})[e_rel] = f"{tunic.SELF_DIR}/{fname}"
+            if e_own is not None and own_set:
+                # Same size and layout as the game's file.
+                own_name = tunic_extra.extra_name(name, c, tunic.SELF_LETTER)
+                fname = f"{c}.{own_name}.bntx.zs"
+                write(os.path.join(self_dir, fname), recompress(dicts, e_raw, tunic.rename(e_own, name, own_name)))
+                self_files.setdefault(c, {})[f"Tex/{own_name}.bntx.zs"] = f"{tunic.SELF_DIR}/{fname}"
+                own_sizes[strip_zs(f"Tex/{own_name}.bntx.zs")] = (table.get(strip_zs(e_rel))
+                                                                  or len(e_own) + PACK_SIZE_MARGIN)
             edst = f"Tex/{tunic_extra.extra_name(name, c)}.bntx.zs"
             write(os.path.join(out_romfs, edst), recompress(dicts, e_raw, e_pup))
             table.add_new(strip_zs(edst), table.get(strip_zs(e_rel)) or len(e_pup) + PACK_SIZE_MARGIN)
             paths.append(edst)
         for v, (m_rel, m_raw) in models.items():
+            names = [n for n in extras if v in tunic_extra.EXTRA[n]]
             try:
-                data = tunic.model_for(dicts.decompress(m_raw), c, dark=dark is not None)
-                data = tunic_extra.model_names(data, c, [n for n in extras if v in tunic_extra.EXTRA[n]])
+                m_data = dicts.decompress(m_raw)
+                data = tunic.model_for(m_data, c, dark=dark is not None)
+                data = tunic_extra.model_names(data, c, names)
+                own_model = None
+                if own_set and v in SELF_MODEL_VARIANTS:
+                    own_model = tunic.model_for(m_data, c, dark=dark is not None, letter=tunic.SELF_LETTER)
+                    own_model = tunic_extra.model_names(own_model, c, names, letter=tunic.SELF_LETTER)
             except tunic.TunicError as e:
                 raise BuildError(f"{m_rel}: {e}")
             dst = f"Model/{tunic.project_name(v, c)}.Player_{v}.bfres.zs"
             write(os.path.join(out_romfs, dst), recompress(dicts, m_raw, data, level=3))
             table.add_new(strip_zs(dst), table.get(strip_zs(m_rel)) or len(data) + PACK_SIZE_MARGIN)
             paths.append(dst)
-            if v in SELF_MODEL_VARIANTS and self_dir and c != "green":
-                # Your own adult Link wears the puppet's model copy (same size: the game's entry
-                # stands), which names the colour's textures: bigrun5 showed the game's own names
-                # replaced in Tex/ did not reach the adult's lower tunic and hood, while the
-                # puppet's renamed ones did. The kit copies it from the pack's romfs, no 2nd copy.
-                self_files.setdefault(c, {})[m_rel] = f"romfs/{dst}"
+            if own_model is not None:
+                # Your own Link wears its own model copy (same size: the game's entry stands),
+                # naming your own S textures: bigrun5 (adult) and the lane1 run of 2026-11-14
+                # (child) showed the game's own names replaced in Tex/ did not reach the whole
+                # tunic, while renamed ones did; and not the puppets' copies (colour-agree).
+                fname = f"{c}.Player_{v}.bfres.zs"
+                write(os.path.join(self_dir, fname), recompress(dicts, m_raw, own_model, level=3))
+                self_files.setdefault(c, {})[m_rel] = f"{tunic.SELF_DIR}/{fname}"
         if look_dir:
             write(os.path.join(look_dir, f"{c}.bin"), look_live.pack(look))
             look_files[c] = f"{look_live.DIR}/{c}.bin"
@@ -853,6 +884,8 @@ def write_tunics(romfs, out_romfs, dicts, table, colors, log=print, self_dir=Non
         look += [(n, e_data) for n, (_, _, e_data) in extras.items()]
         write(os.path.join(look_dir, "green.bin"), look_live.pack(look))
         look_files["green"] = f"{look_live.DIR}/green.bin"
+    for path, size in own_sizes.items():
+        table.add_new(path, size)
     if self_dark_tiles and dark is not None:
         # The kit puts a BC3 copy (the main tile's size) over the game's ASTC dark tile: its
         # entry must hold the bigger of the two. A bigger entry is fine for the game's own file.
@@ -932,7 +965,7 @@ def write_look_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, slots, l
 
 def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=False, sound_user=None,
           tunics=(), test_tunic=None, stand_in_effects=False, basic_xlink=False, title_rows=False,
-          look_slots=look_items.SLOTS, perception=True):
+          look_slots=look_items.SLOTS, perception=False):
     """`tunics`: the tunic colours to make puppets of (puppet_pack.tunic.COLORS; each is a model,
     a tile and an actor per age, CoopPuppet_<age>_<Colour>). `test_tunic`: give the plain puppets
     that colour too (a test of the colours with a hook that knows none).
@@ -943,7 +976,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     instead of the player's (test switch, the pack before puppet-looks). `look_slots`: how many
     players' puppets can wear gear colours of their own (puppet_pack.look_items; 0: none).
     `perception`: True makes the puppets a target of the game's perception (PERCEPTION_SOURCE), each with a
-    quiet copy (quiet_name) for the scenes with stealth guards (guard_scenes)."""
+    quiet copy (quiet_name) for the scenes with stealth guards (guard_scenes); off for 0.11 (PERCEPTION_SOURCE)."""
     heaps = heaps or {}
     if not os.path.isfile(os.path.join(romfs, "Pack", "ZsDic.pack.zs")):
         raise BuildError(f"{romfs} does not look like the game's romfs (no Pack/ZsDic.pack.zs)")
@@ -1237,8 +1270,11 @@ def main(argv=None):
                          f"(default: all, {','.join(tunic.COLORS)})")
     ap.add_argument("--test-tunic", metavar="COLOUR",
                     help="give the plain puppets this tunic colour too (a test with a hook that knows no colours)")
+    ap.add_argument("--perception", action="store_true",
+                    help="puppets the game's perception sees, with quiet copies for the stealth guards' scenes "
+                         "(issue 150; off for 0.11: a puppet with a gear copy and the slingshot crashes the game)")
     ap.add_argument("--no-perception", action="store_true",
-                    help="puppets no perception sees (the pack before issue 150: enemies go for this game's Link only)")
+                    help="puppets no perception sees (the default for 0.11; kept for older scripts)")
     ap.add_argument("--no-sound", action="store_true",
                     help="build the puppets without Link's sounds (the pack before issue 131)")
     ap.add_argument("--seed-trail", action="store_true",
@@ -1312,7 +1348,7 @@ def _main_build(a, romfs, hud_reader=None):
               sound_user=a.sound_user, tunics=tunics, test_tunic=a.test_tunic,
               stand_in_effects=a.seed_trail and not a.no_seed_trail, basic_xlink=a.basic_xlink,
               title_rows=a.title_rows, look_slots=max(0, min(a.look_slots, look_items.MAX_SLOTS)),
-              perception=not a.no_perception)
+              perception=a.perception and not a.no_perception)
     except BuildError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

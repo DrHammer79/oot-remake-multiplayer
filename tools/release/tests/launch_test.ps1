@@ -258,6 +258,25 @@ try {
     Check ((Set-KitSelfTunic $sp 'red') -eq 'red' -and [System.IO.File]::ReadAllText($model) -eq 'REDMODEL') 'self tunic: self_files: the adult model copy put in'
     Check (-not (Test-Path -LiteralPath (Join-Path $sp 'romfs\Model\Other.bfres.zs'))) 'self tunic: self_files: no other model path written'
     Check ((Set-KitSelfTunic $sp '') -eq '' -and -not (Test-Path -LiteralPath $model) -and (Test-Path -LiteralPath (Join-Path $sp 'romfs\Model\CoopTunic_Adult_Red.Player_Adult.bfres.zs'))) 'self tunic: self_files: no colour takes the model copy away, the puppet''s stays'
+    # the child's model copy too (colour-agree), and a copy of it left from a start in a colour
+    Write-File (Join-Path $sp 'romfs\Model\CoopTunic_Child_Red.Player_Child.bfres.zs') 'REDCHILD'
+    Write-File (Join-Path $sp 'coop_puppet.json') '{"tunics": {"red": ["x"], "green": ["y"]}, "self_files": {"red": {"Tex/Angin_Tile_A_Alb.bntx.zs": "coop_self/red.bntx.zs", "Model/Player_Child.Player_Child.bfres.zs": "romfs/Model/CoopTunic_Child_Red.Player_Child.bfres.zs"}}}'
+    $childModel = Join-Path $sp 'romfs\Model\Player_Child.Player_Child.bfres.zs'
+    Check ((Set-KitSelfTunic $sp 'red') -eq 'red' -and [System.IO.File]::ReadAllText($childModel) -eq 'REDCHILD') 'self tunic: self_files: the child model copy put in'
+    Check ((Set-KitSelfTunic $sp 'green') -eq '' -and -not (Test-Path -LiteralPath $childModel)) 'self tunic: green takes the child model copy away'
+    [void](Set-KitSelfTunic $sp 'red')
+    Write-File (Join-Path $sp 'coop_puppet.json') '{"tunics": {"red": ["x"], "green": ["y"]}, "self_tiles": {"red": "coop_self/red.bntx.zs"}}'
+    Check ((Set-KitSelfTunic $sp 'red') -eq 'red' -and -not (Test-Path -LiteralPath $childModel)) 'self tunic: an older pack: no stale child model copy'
+    # colour-agree packs: your own S textures and model copies, no game-name tile in self_files
+    Write-File (Join-Path $sp 'coop_self\red.Angin_Tile_S_Alb.bntx.zs') 'REDS'
+    Write-File (Join-Path $sp 'coop_self\red.Player_Child.bfres.zs') 'REDCHILDS'
+    Write-File (Join-Path $sp 'coop_self\black.Angin_Tile_S_Alb.bntx.zs') 'BLACKS'
+    Write-File (Join-Path $sp 'coop_puppet.json') '{"tunics": {"red": ["x"], "green": ["y"]}, "self_files": {"red": {"Tex/Angin_Tile_S_Alb.bntx.zs": "coop_self/red.Angin_Tile_S_Alb.bntx.zs", "Model/Player_Child.Player_Child.bfres.zs": "coop_self/red.Player_Child.bfres.zs"}, "black": {"Tex/Angin_Tile_S_Alb.bntx.zs": "coop_self/black.Angin_Tile_S_Alb.bntx.zs"}}}'
+    $sTile = Join-Path $sp 'romfs\Tex\Angin_Tile_S_Alb.bntx.zs'
+    Check ((Set-KitSelfTunic $sp 'black') -eq 'black' -and [System.IO.File]::ReadAllText($sTile) -eq 'BLACKS' -and -not (Test-Path -LiteralPath $childModel) -and -not (Test-Path -LiteralPath $tile)) 'self tunic: S set: black put in, no game-name tile'
+    Check ((Set-KitSelfTunic $sp 'pink') -eq '' -and -not (Test-Path -LiteralPath $sTile)) 'self tunic: S set: a colour the pack lacks takes the stale black away'
+    Check ((Set-KitSelfTunic $sp 'red') -eq 'red' -and [System.IO.File]::ReadAllText($sTile) -eq 'REDS' -and [System.IO.File]::ReadAllText($childModel) -eq 'REDCHILDS') 'self tunic: S set: red tile and own child model'
+    Check ((Set-KitSelfTunic $sp '') -eq '' -and -not (Test-Path -LiteralPath $sTile) -and -not (Test-Path -LiteralPath $childModel)) 'self tunic: S set: no colour takes them away'
     # a pack made again by an older tool (self_tiles only): the newer copies do not stay
     [void](Set-KitSelfTunic $sp 'red')
     Write-File $vest 'STALEVEST'

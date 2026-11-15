@@ -816,3 +816,22 @@ TEST_CASE("look: coop.ini as Customize and Join write it keeps co-op on") {
     CHECK(back[Part::hylian_frame] == 0xE0C030u);
     CHECK_FALSE(back[Part::hylian_emblem]);
 }
+
+TEST_CASE("look: your own Link starts in the colour of the pack's tunic files, not the switch's") {
+    const std::map<std::string, std::vector<std::uint8_t>> self{{"black", {1, 2}}, {"pink", {3, 4}}, {"white", {5}}};
+    const CoopLook::FileFn file = [&](const std::string& c) -> std::optional<std::vector<std::uint8_t>> {
+        const auto it = self.find(c);
+        return it == self.end() ? std::nullopt : std::optional(it->second);
+    };
+    // No tile in the pack: the game's own green, whatever the switch says.
+    CHECK(CoopLook::PackStartTunic(std::nullopt, file, "") == "green");
+    CHECK(CoopLook::PackStartTunic(std::nullopt, file, "pink") == "green");
+    // The owner's lane1 run: black files left in the pack, pink chosen (sent), no switch.
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{1, 2}, file, "") == "black");
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{1, 2}, file, "pink") == "black");
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{3, 4}, file, "pink") == "pink");
+    // A tile that is no colour's file (an older pack): the switch, else green.
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{9}, file, "white") == "white");
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{9}, file, "") == "green");
+    CHECK(CoopLook::PackStartTunic(std::vector<std::uint8_t>{9}, nullptr, "") == "green");
+}

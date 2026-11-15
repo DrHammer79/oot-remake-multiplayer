@@ -125,6 +125,16 @@ if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "
 fi
 
 # --- 4: the game --------------------------------------------------------------------------------
+# Your own Link's tunic files follow your colour on every start, as on Windows (kit-paths.ps1
+# Set-KitSelfTunic; colour-agree): tools/puppet_pack/self_tunic.py reads the colour as the module does.
+pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
+py=$DATA/builder/image/usr/python/bin/python3
+[[ -x $py ]] || py=$(command -v python3 || true)
+if [[ -f $pack/coop_puppet.json && -n $py && -f $DATA/tools/puppet_pack/self_tunic.py ]]; then
+    own=$("$py" -I -B "$DATA/tools/puppet_pack/self_tunic.py" --pack "$pack" --options "$DATA/coop-options.ini" \
+        --coop-ini "$GAME/coop.ini" 2>/dev/null) || own=''
+    [[ -n $own ]] && say "Your Link: the $own tunic (coop-options.ini color)."
+fi
 step 'Starting the game: Host or Join in its menu (Multiplayer)'
 # (as Longshot's own builder/linux/longshot-launch: nothing of a launcher's environment goes in; its
 # own update check is off, the kit's updater brings Longshot up to date with co-op)
