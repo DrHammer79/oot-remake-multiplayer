@@ -4,7 +4,8 @@
 # offset in her own frame through the game's camera matrix); then real ZL/ZR/Y presses lock on, fire the slingshot
 # and swing the sword, so the stun, chance time, the eye hits and her death are her own AI's and the game's own Life
 # step's in each game. `difficulty 300 100 100` is the host menu's own call (bosses 300%). The test Links get 20
-# hearts (setflag PlayerStatus.MaxLife/Life 80), refilled every 3 rounds.
+# 4 bottled
+# fairies (the game's own revive), refilled every 3 rounds.
 # A (host, walks in first and under her: her drop) owns her; B (guest) walks in ~25 s later (its own intro, a
 # copy). Rounds 1-3: only B fires (the stun and the hand-over are the guest's); A swings when she is down.
 # SAVE: both lanes' baselines at quest Get_StoneOfForest = GoToBossRoom (save_flags.py set ...
@@ -27,8 +28,8 @@
 #     her death cutscene in both (shots a-dead / b-dead); never "lost kill" / "killed here, owner still shows life".
 #  6. ONE CONTAINER EACH: each game "heart container: player N took it, everyone's maximum life M" once, M the same.
 #  7. #88 GUEST WARP: B's log "(asked as InsideTheDekuTree_BossDie)" and B's scene changes (shot b-warped).
-#  8. If a Link dies (Game Over): with boss-gameover-b 05db896a its log "our Link died: a Game Over, not the boss's
-#     death" and no "boss beaten" / "sent 5" while she lives (run 122137 had a false "boss beaten" here).
+#  8. If a Link dies (Game Over): its log "our Link died: a Game Over, not the boss's death" and no "boss beaten" /
+#     "sent 5" while she lives (boss-gameover 05db896a; PASS in run 20261115-130255).
 #! noload
 #! start coop: test warp done
 #! switches LICHII_COOP_DEBUG_BOSS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_CHEATS=1
@@ -58,8 +59,18 @@ give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 assign SlingShot
 wait 120
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 difficulty 300 100 100   # bosses 300%: the host menu's own call
 wait 120
 place -12.0 48.5 66.5   # the corridor, 11 m before the door
@@ -76,8 +87,18 @@ wait 600               # her drop
 mark a-trigger
 goto 12.0 67.8 1.5 600  # inside the room, 10 m from its centre
 mark a-moved
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r1
 until Enemy_DungeonBoss_Gohma Down_ 1500   # B fires the first seeds: the stun and hand-over are B's
 mark a-r1-seed
@@ -120,8 +141,18 @@ wait 12
 hold ZL+Y 8
 mark a-r3-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r4
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -176,8 +207,18 @@ wait 12
 hold ZL+Y 8
 mark a-r6-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r7
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -232,8 +273,18 @@ wait 12
 hold ZL+Y 8
 mark a-r9-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r10
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -288,8 +339,18 @@ wait 12
 hold ZL+Y 8
 mark a-r12-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r13
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -344,8 +405,18 @@ wait 12
 hold ZL+Y 8
 mark a-r15-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r16
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick

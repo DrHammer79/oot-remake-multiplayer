@@ -13,8 +13,18 @@ give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 assign SlingShot
 wait 120
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 place -12.0 48.5 66.5   # the corridor before Gohma's door
 wait 240
 goto -4.0 67.5 1.0 600
@@ -27,8 +37,18 @@ aim Enemy_DungeonBoss_Gohma 0 0 0 240   # look up at her
 wait 600               # her drop
 mark b-trigger
 goto 12.0 67.8 1.5 600  # inside the room, 10 m from its centre
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r1
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -83,8 +103,18 @@ wait 12
 hold ZL+Y 8
 mark b-r3-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r4
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -139,8 +169,18 @@ wait 12
 hold ZL+Y 8
 mark b-r6-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r7
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -195,8 +235,18 @@ wait 12
 hold ZL+Y 8
 mark b-r9-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r10
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -251,8 +301,18 @@ wait 12
 hold ZL+Y 8
 mark b-r12-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r13
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
@@ -307,8 +367,18 @@ wait 12
 hold ZL+Y 8
 mark b-r15-hit
 wait 60
-setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
-setflag PlayerStatus.Life 80
+setflag PouchData.BottleA.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
+setflag PouchData.BottleB.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleB.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleB.BottleItem Fairy
+setflag PouchData.BottleC.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleC.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleC.BottleItem Fairy
+setflag PouchData.BottleD.StockNum 1
+setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark b-r16
 until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
 aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
