@@ -22,6 +22,8 @@ add_executable(coop_tests
   net/small_path_test.cpp
   net/lag_path_test.cpp
   net/encrypt_loopback_test.cpp
+  platform/platform_test.cpp
+  platform/platform_c_check.c
   presence/presence_test.cpp
   presence/show_delay_test.cpp
   voice/jitter_test.cpp
@@ -181,7 +183,7 @@ if(NOT WIN32)   # the module's Linux clipboard (wl-copy, xclip, xsel), tried wit
   target_sources(coop_tests PRIVATE hookshot/clipboard_posix_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_clipboard_posix.cpp)
 endif()
-target_link_libraries(coop_tests PRIVATE coop coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
+target_link_libraries(coop_tests PRIVATE coop coop_platform coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
 # The session tests run the real server in process.
 target_link_libraries(coop_tests PRIVATE coop_server_lib)
 doctest_discover_tests(coop_tests)
