@@ -1,7 +1,6 @@
 // CoopHostMenu (coop_host_menu.h): the "coop host" thread behind the menu's
 // Host and Join.
 #include "coop_host_menu.h"
-#include "coop_ngplus.h"
 
 #include <algorithm>
 #include <chrono>
@@ -257,7 +256,7 @@ void Menu::RunHost(HostJob job) {
             }
         }
         while (!stop_) {
-            host.set_ngplus(CoopNgPlus::Level());   // (Navi) New Game+: this game's level for everyone (coop_ngplus.h)
+            host.set_ngplus(hooks_.ngplus_level ? hooks_.ngplus_level() : 0);   // (Navi) New Game+ (Hooks)
             host.service(kRoundMs);
             std::deque<std::string> pasted;
             {

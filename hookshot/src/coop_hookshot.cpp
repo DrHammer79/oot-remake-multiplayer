@@ -65,6 +65,7 @@
 #include "coop_map_page.h"
 #include "coop_testinput.h"
 #include "coop_maps.h"
+#include "coop_ngplus.h"
 #include "coop_live_events.h"
 #include "coop_objects_sync.h"
 #include "coop_input.h"
@@ -477,6 +478,7 @@ CoopHostMenu::Menu& HostMenu() {
             CoopLobby::Forget();  // the Lobby tab shows nobody once co-op is left (lobby-state-b)
         };
         h.client_id = [] { return CoopTitle::ClientId(); };
+        h.ngplus_level = [] { return CoopNgPlus::Level(); };  // (Navi) New Game+ for our server
         h.log = [](const std::string& line) { LOG_INFO(Core, "{}", line); };
         h.default_name = [] {
             const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";

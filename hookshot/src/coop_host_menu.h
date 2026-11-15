@@ -50,6 +50,8 @@ struct Hooks {
     // the same helper nonce and port each time (RejoinIds). Empty: random.
     std::function<std::string()> client_id;
     std::uint64_t direct_ms = 3000;
+    // (Navi) This game's New Game+ level (coop_ngplus.h), told to our server each round for everyone. Empty: 0.
+    std::function<std::uint8_t()> ngplus_level;
 };
 
 // Most players at once for a server the title menu's Host starts: the options' number (1 to 16, more taken as 16),
