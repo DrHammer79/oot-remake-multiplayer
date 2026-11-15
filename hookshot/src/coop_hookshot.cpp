@@ -91,6 +91,7 @@
 #include "coop_title.h"
 #include "core/core.h"
 #include "coop_host_menu.h"
+#include "coop_null_page.h"
 #include "hos_coop_api.h"
 #include "hos_coop_actors.h"
 #include "hos_coop_bosses.h"
@@ -219,6 +220,18 @@ bool PuppetGuardInExe() {
 #endif
 }
 
+// Before the game makes our first puppet: its null reads give 0 (issue 150, coop_null_page.h). Once.
+void ArmNullPage(const std::string& actor) {
+    if (actor.rfind("CoopPuppet_", 0) == 0) {
+        CoopNullPage::Arm(Env("HOS_COOP_NULL_READS"));
+    }
+}
+
+// Whether a perceived puppet is safe here (coop_null_page.h Armable); if not, quiet puppets everywhere.
+bool PerceivedSafe() {
+    return CoopNullPage::Armable(Env("HOS_COOP_NULL_READS"), CoopNullPage::Query());
+}
+
 // coop_hookshot.h AllowLinkPuppets / RefuseCreate: without patch 0002 a Link-model puppet crashes Hookshot's game.
 bool Refused(const CoopPuppet::Call& c) {
     static const bool allow = [] {
@@ -248,6 +261,7 @@ bool Refused(const CoopPuppet::Call& c) {
         }
     }
     if (!CoopHookshot::RefuseCreate(actor, allow)) {
+        ArmNullPage(actor);
         return false;
     }
     static bool said = false;
@@ -1027,7 +1041,7 @@ bool Start(const HosCoopApi* api) {
     // The same switches that make the emulator put its cave in.
     CoopLook::AgreeStartTunic();  // your start tunic from the pack's files, before the puppets read it (coop_look.h)
     if (EnvOn("LICHII_COOP_PUPPET") || EnvOn("LICHII_COOP_DEBUG_PUPPET")) {
-        CoopPuppetConfig::Configure();  // as the emulator's cave (coop_puppet_config.h)
+        CoopPuppetConfig::Configure(PerceivedSafe());  // as the emulator's cave (coop_puppet_config.h)
     }
     CoopPackNotice::Enable(CoopPuppetConfig::HasPack());  // no pack: the chat says so once (coop_pack_notice.h)
     g_hold = EnvOn("LICHII_COOP_OBJECTS_AI_HOLD");

@@ -717,6 +717,11 @@ struct PlannerSettings {
     // quiet copy (QuietActor), which no perception sees, so a guard of this
     // game never takes another player's puppet for our Link (issue 150).
     std::vector<std::string> quiet_scenes;
+    // Every scene, not only quiet_scenes: the runtime cannot make the reads of
+    // a perceived puppet's missing Player component give 0 (Hookshot's null
+    // page cannot be armed, hookshot/src/coop_null_page.h), so no puppet
+    // carries the perception's Physics.
+    bool quiet_everywhere = false;
 };
 
 // The puppet pack's item copies (coop_puppet.json "look_items",
@@ -731,6 +736,9 @@ LookItems PackLookItems(std::string_view manifest);
 // The pack's "quiet_scenes" (a list of scene names; none for a pack made
 // before them, or without perception).
 std::vector<std::string> PackQuietScenes(std::string_view manifest);
+// The pack was built with perception (coop_puppet.json "perception": true):
+// its puppets are seen by enemies and each has a quiet copy.
+bool PackPerception(std::string_view manifest);
 // A puppet's quiet copy: CoopPuppet_Child -> CoopPuppet_ChildQuiet,
 // CoopPuppet_Adult_Red -> CoopPuppet_AdultQuiet_Red; any other name as it is.
 std::string QuietActor(std::string_view actor);

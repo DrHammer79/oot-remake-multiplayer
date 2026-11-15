@@ -163,6 +163,16 @@ std::vector<std::string> PackQuiet() {
     return {};
 }
 
+// A manifest of a pack built with perception.
+bool PackPerceived() {
+    for (const auto& text : PackManifests()) {
+        if (CoopPuppet::PackPerception(text)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The first manifest with item copies.
 CoopPuppet::LookItems PackLook() {
     for (const auto& text : PackManifests()) {
@@ -177,7 +187,7 @@ CoopPuppet::LookItems PackLook() {
 
 bool HasPack() { return !PackManifests().empty(); }
 
-void Configure() {
+void Configure(bool perceived_safe) {
     std::vector<std::string> lines;
     auto settings = Settings(Env, PackGreenPuppets, &lines, PackTunicPuppets, PackLook);
     if (settings.actor.empty() && !settings.native_player) {
@@ -188,6 +198,11 @@ void Configure() {
                 names += (names.empty() ? "" : ", ") + s;
             }
             lines.push_back("coop: puppets are seen by enemies; quiet puppets (no guard sees them) in " + names);
+        }
+        if (!perceived_safe && PackPerceived()) {
+            settings.quiet_everywhere = true;
+            lines.push_back("coop: null-pointer reads cannot give 0 here (HOS_COOP_NULL_READS=0, or the guest's first "
+                            "MB is not free): quiet puppets everywhere, enemies see only their own Link");
         }
     }
     for (const auto& line : lines) {

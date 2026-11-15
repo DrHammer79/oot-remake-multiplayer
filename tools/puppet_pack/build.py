@@ -100,8 +100,12 @@ FOOTSTEP_SUFFIX = ".game__component__SoundFootStepParam.bgyml"
 # puppet still collides with nothing).
 # OFF by default for 0.11 (own-look-2, lane1 2026-11-15): with the emitter on, a game crashes ~8 s after the save
 # loads when a child puppet wears a gear copy (Weapon_Sword_Kokiri_Look1) and holds the slingshot (guest null
-# read 0x7d8, lr 0x82deeef8; the slingshot actor in x19). The same pack built without it plays on. `--perception`
-# builds it (a test switch until that crash is understood).
+# read 0x7d8, lr 0x82deeef8; the slingshot actor in x19). The same pack built without it plays on. Cause (perception-a,
+# from the lane logs: every crashed game had no 'puppet guard' line, every game that played on had one): the
+# perception's Physics fills the puppet's component slot 10, so Hookshot patch 0002's guard, which arms the null page
+# when slot 10 is missing, never runs; the game's later read of the puppet's missing Player component faults. The
+# module now arms the page itself before its first puppet (hookshot/src/coop_null_page.h, no game rebuild) and makes
+# the quiet copies everywhere when it cannot. `--perception` builds it; default OFF until a lane run proves it.
 # Guards (review-boss-sync must-fix): the stealth guards (AffiliationParam NpcSecurityGuard: the castle's child
 # soldiers, the Gerudo) target Player too, and their AI (NpcSecurityGuard.SetIsObserve) takes any perceived
 # emitter of affiliation Player as Link: a puppet in view would catch this game's Link. Nothing in the data keeps

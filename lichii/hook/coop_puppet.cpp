@@ -2128,6 +2128,16 @@ std::vector<std::string> PackQuietScenes(std::string_view manifest) {
     return out;
 }
 
+bool PackPerception(std::string_view manifest) {
+    // "perception": true, as build.py writes it (json.dumps).
+    const auto at = manifest.find("\"perception\"");
+    if (at == std::string_view::npos) {
+        return false;
+    }
+    const auto v = manifest.find_first_not_of(" \t\r\n:", at + 12);
+    return v != std::string_view::npos && manifest.substr(v, 4) == "true";
+}
+
 std::string QuietActor(std::string_view actor) {
     for (const std::string_view plain : {std::string_view("CoopPuppet_Child"), std::string_view("CoopPuppet_Adult")}) {
         if (actor.substr(0, plain.size()) == plain &&
@@ -2220,8 +2230,10 @@ std::string Planner::ActorFor(bool adult, std::optional<std::uint32_t> color) co
         return CoopNativePlayer::ActorFor(adult);
     }
     // Issue 150: in a scene with stealth guards, the quiet copy (PlannerSettings::quiet_scenes).
-    const bool quiet = std::find(settings_.quiet_scenes.begin(), settings_.quiet_scenes.end(), scene_) !=
-                       settings_.quiet_scenes.end();
+    // Everywhere when the runtime cannot make a perceived puppet safe (PlannerSettings::quiet_everywhere).
+    const bool quiet = settings_.quiet_everywhere ||
+                       std::find(settings_.quiet_scenes.begin(), settings_.quiet_scenes.end(), scene_) !=
+                           settings_.quiet_scenes.end();
     const auto named = [quiet](std::string name) { return quiet ? QuietActor(name) : name; };
     const std::string plain = adult ? "CoopPuppet_Adult" : "CoopPuppet_Child";
     const auto works = [this](const std::string& name) {
