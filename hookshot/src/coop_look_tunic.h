@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -100,11 +101,32 @@ struct Search {
 // own size, as the game's storage; a copy's mark is its last byte); the first
 // colour that holds them is the one held.
 Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours);
+// The storage sizes a texture of `colours` may have: [first, second] (0, 0 when
+// they have no texels).
+std::pair<std::uint64_t, std::uint64_t> Sizes(const std::vector<std::shared_ptr<const Texels>>& colours);
+// Find among `listed` only (textures the game has, of those sizes).
+Search Find(const Textures& textures, const std::vector<Live>& listed,
+            const std::vector<std::shared_ptr<const Texels>>& colours);
 // Draws the place in `colour`: an override, or none when the game's memory
 // holds that colour already. False when Longshot refused it (nothing changed).
 bool Draw(Textures& textures, Place& place, const std::shared_ptr<const Texels>& colour);
 
+// How long a texture the game made is looked at again for a colour's texels
+// (the game may copy them in after it makes the texture); after that only a
+// Kick or another colour looks at it again.
+inline constexpr std::uint64_t kSettleMs = 5000;
+
 // Keeps your Link's tunic (or gear) in the colour asked for.
+//
+// The game makes your Link's textures again now and then (a scene, a
+// cutscene, a model streamed in again): the new texture has another serial
+// and Longshot took the old one's override away, so it shows the game's
+// colour until the wardrobe draws it again. Step is cheap while nothing
+// changes (one generation query), so the worker calls it often (every
+// kPollMs) and the game's colour shows for a frame or two at most. A texture
+// found once keeps its place, and its override, for as long as the game has
+// it: a texture is never drawn twice in one colour (v0.11.0 player logs:
+// "your Link's tunic is orange now" 47 times).
 class Wardrobe {
 public:
     struct Host {
@@ -127,7 +149,7 @@ public:
     // The colour to wear from now on: "green" (the game's own) or a colour of
     // the pack. Any thread.
     void Wear(std::string colour);
-    // One round of the work, about once a second: `now_ms` on any steady
+    // One round of the work, every kPollMs or so: `now_ms` on any steady
     // clock. One thread.
     void Step(std::uint64_t now_ms);
     // Look at the game's textures again at the next Step (the pause screen
@@ -159,6 +181,10 @@ private:
     bool look_now_ = true;
     bool looked_ = false;
     std::uint64_t generation_ = 0;
+    std::map<std::uint64_t, std::uint64_t> seen_;   // serial -> when first looked at (no colour's texels then)
+    bool pending_ = false;                    // a texture of seen_ younger than kSettleMs
+    std::string said_drawn_;                  // the colour last said drawn
+    std::size_t said_again_ = 0;              // "made again" lines said
     bool said_nothing_found_ = false;
     std::string said_;                        // the last "no texture" line (said again when it changes)
     int said_count_ = 0;

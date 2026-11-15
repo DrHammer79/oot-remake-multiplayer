@@ -118,8 +118,7 @@ bool SameLayout(const Texels& a, const Texels& b) {
     });
 }
 
-Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours) {
-    Search out;
+std::pair<std::uint64_t, std::uint64_t> Sizes(const std::vector<std::shared_ptr<const Texels>>& colours) {
     std::uint64_t smallest = ~std::uint64_t{0}, largest = 0;
     for (const auto& colour : colours) {
         for (std::size_t i = 0; colour && i < colour->size(); ++i) {
@@ -128,11 +127,24 @@ Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Te
         }
     }
     if (largest == 0) {
-        return out;
+        return {0, 0};
     }
     // A storage is the image's own size (the pack's texels), or its layout
     // rounded up a little.
-    const std::vector<Live> listed = textures.List(smallest, largest + kStorageSlack, nullptr);
+    return {smallest, largest + kStorageSlack};
+}
+
+Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours) {
+    const auto [lo, hi] = Sizes(colours);
+    if (hi == 0) {
+        return {};
+    }
+    return Find(textures, textures.List(lo, hi, nullptr), colours);
+}
+
+Search Find(const Textures& textures, const std::vector<Live>& listed,
+            const std::vector<std::shared_ptr<const Texels>>& colours) {
+    Search out;
     out.listed = listed.size();
     for (const Live& live : listed) {
         std::uint8_t head[kHead];
@@ -223,6 +235,8 @@ void Wardrobe::Clear() {
         }
     }
     places_.clear();
+    seen_.clear();
+    pending_ = false;
     looked_ = false;
     target_name_.clear();
     asked_.clear();
@@ -247,7 +261,6 @@ std::shared_ptr<const Texels> Wardrobe::Load(const std::string& colour) {
 }
 
 void Wardrobe::Step(std::uint64_t now_ms) {
-    (void)now_ms;
     std::string want;
     {
         std::lock_guard lock(mutex_);
@@ -295,7 +308,8 @@ void Wardrobe::Step(std::uint64_t now_ms) {
     // change, an age change, a new shield) or the pause screen closed.
     std::uint64_t generation = 0;
     host_.textures->List(1, 0, &generation);   // (no storage is that size: the generation only)
-    if (look_now_ || !looked_ || generation != generation_) {
+    const bool again = !look_now_ && looked_;  // places found before: only the game's new textures are looked at
+    if (!again || generation != generation_ || pending_) {
         // What the game's memory may hold: the start's colour first (the kit put
         // its files in), then the game's own, then the one asked for.
         std::vector<std::shared_ptr<const Texels>> colours;
@@ -304,16 +318,40 @@ void Wardrobe::Step(std::uint64_t now_ms) {
                 colours.push_back(c);
             }
         }
-        Search found = Find(*host_.textures, colours);
-        for (Place& p : found.places) {   // a texture kept since: drawn as it was
-            const auto old = std::find_if(places_.begin(), places_.end(), [&](const Place& o) {
-                return o.address == p.address && o.serial == p.serial && o.texture == p.texture;
+        const auto [lo, hi] = Sizes(colours);
+        const std::vector<Live> listed = hi == 0 ? std::vector<Live>{} : host_.textures->List(lo, hi, nullptr);
+        // A texture the game still has keeps its place, its colour and its
+        // override (a texture finalized or made again took its override with it).
+        std::erase_if(places_, [&](const Place& p) {
+            return std::none_of(listed.begin(), listed.end(), [&](const Live& l) {
+                return l.serial == p.serial && l.address == p.address;
             });
-            if (old != places_.end() && old->held == p.held) {
-                p.drawn = old->drawn, p.overridden = old->overridden;
+        });
+        if (!again) {
+            seen_.clear();   // (the colours may be others now: everything is looked at again)
+        }
+        std::erase_if(seen_, [&](const auto& s) {
+            return std::none_of(listed.begin(), listed.end(), [&](const Live& l) { return l.serial == s.first; });
+        });
+        std::vector<Live> look_at;
+        for (const Live& l : listed) {
+            if (std::any_of(places_.begin(), places_.end(), [&](const Place& p) { return p.serial == l.serial; })) {
+                continue;
+            }
+            const auto [it, first] = seen_.try_emplace(l.serial, now_ms);
+            if (first || now_ms - it->second < kSettleMs) {
+                look_at.push_back(l);
             }
         }
-        places_ = std::move(found.places);   // (a texture finalized took its override with it)
+        Search found = Find(*host_.textures, look_at, colours);
+        found.listed = listed.size();
+        for (Place& p : found.places) {
+            places_.push_back(std::move(p));
+        }
+        pending_ = std::any_of(seen_.begin(), seen_.end(), [&](const auto& s) {
+            return now_ms - s.second < kSettleMs &&
+                   std::none_of(places_.begin(), places_.end(), [&](const Place& p) { return p.serial == s.first; });
+        });
         look_now_ = false, looked_ = true;
         generation_ = generation;
         if (places_.empty()) {
@@ -338,8 +376,16 @@ void Wardrobe::Step(std::uint64_t now_ms) {
     }
     if (drawn != 0) {
         said_nothing_found_ = false;
-        host_.log("coop: look: your Link's " + host_.what + " is " + target_name_ + " now (" + std::to_string(drawn) +
-                  " texture(s) drawn so by Longshot's texture overrides; the game's memory is left as it is)");
+        if (said_drawn_ != target_name_) {
+            said_drawn_ = target_name_;
+            host_.log("coop: look: your Link's " + host_.what + " is " + target_name_ + " now (" +
+                      std::to_string(drawn) +
+                      " texture(s) drawn so by Longshot's texture overrides; the game's memory is left as it is)");
+        } else if (said_again_ < 20) {   // (the game makes them again at every scene: said at most 20 times)
+            ++said_again_;
+            host_.log("coop: look: " + std::to_string(drawn) + " " + host_.what +
+                      " texture(s) the game made again drawn in " + target_name_ + " too");
+        }
     }
     if (want == (start_ ? host_.start : host_.base) && target_ == (start_ ? start_ : green_) &&
         std::none_of(places_.begin(), places_.end(), [](const Place& p) { return p.overridden; })) {
@@ -348,7 +394,10 @@ void Wardrobe::Step(std::uint64_t now_ms) {
         if (wanted_ == (start_ ? host_.start : host_.base)) {
             busy_ = false;
             places_.clear();
+            seen_.clear();
+            pending_ = false;
             looked_ = false;
+            said_drawn_.clear();
         }
     }
 }
