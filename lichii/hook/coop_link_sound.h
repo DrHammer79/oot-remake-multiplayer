@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopPuppet {
 class Guest;
@@ -45,8 +46,8 @@ class Session;
 namespace CoopLinkSound {
 
 namespace addr {
-inline constexpr std::uint64_t kEmit = 0x440630;         // (user, &asset, &handle, 0)
-inline constexpr std::uint64_t kSearchAsset = 0x43db00;  // (accessor, &asset, name) -> bool
+inline constexpr std::uint64_t kEmit = CoopGameBuild::kReader.xlink_emit;         // (user, &asset, &handle, 0)
+inline constexpr std::uint64_t kSearchAsset = CoopGameBuild::kReader.xlink_search_asset;  // (accessor, &asset, name) -> bool
 inline constexpr std::uint64_t kUserResource = 0x58;
 inline constexpr std::uint64_t kResourceAccessor = 0x18;
 }  // namespace addr

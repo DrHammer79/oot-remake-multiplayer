@@ -1154,8 +1154,8 @@ constexpr std::uint64_t kComponentXLink = 0x68;
 constexpr std::uint64_t kXLinkELinkUser = 0x70;
 constexpr std::uint64_t kUserResource = 0x58;
 constexpr std::uint64_t kResourceAccessor = 0x18;
-constexpr std::uint64_t kXLinkSearch = 0x43db00;
-constexpr std::uint64_t kXLinkEmit = 0x440630;
+constexpr std::uint64_t kXLinkSearch = CoopGameBuild::kReader.xlink_search_asset;
+constexpr std::uint64_t kXLinkEmit = CoopGameBuild::kReader.xlink_emit;
 constexpr std::uint64_t kSlotLocator = 0x160;
 constexpr std::uint64_t kSlotEmitHandle = 0x168;
 static_assert(kSlotEmitHandle + 0x10 <= Director::kSlotSize);
@@ -1627,6 +1627,7 @@ Director& TheDirector() {
 #include "coop_flags.h"  // EmulatorMemory
 #include "coop_pvp_game.h"
 #include "coop_svc.h"
+#include "coop_game_build.h"
 
 namespace CoopSpawn {
 namespace {

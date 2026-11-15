@@ -107,7 +107,106 @@ TEST_CASE("game build: the table agrees with the readers' constants") {
     CHECK(m.svc_cave < m.hold_cave);
     CHECK(m.hold_cave < m.hold_table);
     CHECK(m.hold_table < m.cave_end);
-    // game_flags_ptr, world_mgr_ptr and set_time are file-local constants
-    // (coop_flags.cpp, coop/host/src/game_flags.cpp, coop_time.cpp): checked
-    // by hand against docs/flags.md and docs/time.md, not here.
+    // The file-local constants (coop_flags.cpp, coop_time.cpp, ...) are set
+    // from the table too; the next test pins every value.
+}
+
+TEST_CASE("game build: every offset the readers use keeps its 1.1.1 value") {
+    // The readers' constants were these literals before they took them from
+    // the table (v1 step 2): a pure move, the same numbers.
+    using CoopGameBuild::kMain;
+    using CoopGameBuild::kReader;
+    using CoopGameBuild::kRecompMain;
+    CHECK(kMain.actor_manager_ptr == 0x4e91888);
+    CHECK(kMain.actor_vtable == 0x4b25e18);
+    CHECK(kMain.banc_module_ptr == 0x4e919d0);
+    CHECK(kMain.cave_end == 0x3c47000);
+    CHECK(kMain.create_actor == 0x372a70);
+    CHECK(kMain.cut_foliage == 0xb80800);
+    CHECK(kMain.drop_create == 0x36fde0);
+    CHECK(kMain.equip == 0x2df7b20);
+    CHECK(kMain.equip_change_state == 0xe34c40);
+    CHECK(kMain.event_manager_ptr == 0x4e94840);
+    CHECK(kMain.foliage_module_ptr == 0x4e22540);
+    CHECK(kMain.game_flags_ptr == 0x4e842a8);
+    CHECK(kMain.game_ui_module_ptr == 0x4e7cfa8);
+    CHECK(kMain.got_create_default == 0x4c7dad0);
+    CHECK(kMain.hold_cave == 0x3c46300);
+    CHECK(kMain.hold_hook == 0x369df8);
+    CHECK(kMain.hold_table == 0x3c46400);
+    CHECK(kMain.malloc == 0x14c6c90);
+    CHECK(kMain.play_as == 0x2022a0);
+    CHECK(kMain.request_delete == 0xa6490);
+    CHECK(kMain.scene_module_ptr == 0x4e97648);
+    CHECK(kMain.set_as_frame == 0x37b5d70);
+    CHECK(kMain.set_matrix == 0x4c6580);
+    CHECK(kMain.set_time == 0x34522d0);
+    CHECK(kMain.svc_cave == 0x3c46280);
+    CHECK(kMain.svc_hook_frame == 0x6e70f8);
+    CHECK(kMain.svc_hook_rare == 0x6e6dd8);
+    CHECK(kMain.sync_as_slot == 0x3abec10);
+    CHECK(kMain.take_created == 0x36fbd0);
+    CHECK(kMain.unequip_armor == 0x10aceb0);
+    CHECK(kMain.world_mgr_ptr == 0x4e7eab0);
+    CHECK(kReader.block_node_start == 0x2751790);
+    CHECK(kReader.block_node_vtable == 0x49ae6f8);
+    CHECK(kReader.block_node_vtable2 == 0x49ae8b8);
+    CHECK(kReader.buttons_off_return == 0x279cdf8);
+    CHECK(kReader.challenge_manager_ptr == 0x4e29950);
+    CHECK(kReader.challenge_set_step == 0x2cf54a0);
+    CHECK(kReader.controller_manager_ptr == 0x4e92f10);
+    CHECK(kReader.counter_cave == 0x3c46700);
+    CHECK(kReader.counter_node_vtable == 0x499f200);
+    CHECK(kReader.counter_ring == 0x3c46780);
+    CHECK(kReader.counter_start == 0x5e6760);
+    CHECK(kReader.equip_state == 0xce7ab0);
+    CHECK(kReader.event_arg_build == 0xd79f10);
+    CHECK(kReader.event_request == 0xd7a820);
+    CHECK(kReader.event_request_got == 0x4c7e090);
+    CHECK(kReader.event_set_link == 0x2bc440);
+    CHECK(kReader.event_string_vtable == 0x4974b20);
+    CHECK(kReader.force_skip == 0x3b3af30);
+    CHECK(kReader.layer_bind == 0x336f5a0);
+    CHECK(kReader.layer_heap_got == 0x4c7e740);
+    CHECK(kReader.layer_maker == 0x1174620);
+    CHECK(kReader.layer_owner_got == 0x4c7e880);
+    CHECK(kReader.layer_set_shown == 0x11745c0);
+    CHECK(kReader.look_at_camera_vtable == 0x4bf8a88);
+    CHECK(kReader.ocarina_module_vtable_got == 0x4c8bfd0);
+    CHECK(kReader.performer_request == 0x4aa890);
+    CHECK(kReader.renderer_ptr == 0x4e81cf0);
+    CHECK(kReader.request_action_verb == 0xc08f0);
+    CHECK(kReader.set_bool_node_execute == 0x2727540);
+    CHECK(kReader.set_bool_node_vtable == 0x49a9550);
+    CHECK(kReader.set_brain_verb == 0x6733b0);
+    CHECK(kReader.shoot_create_return == 0xc17300);
+    CHECK(kReader.sound_root_got == 0x4c7e678);
+    CHECK(kReader.string_free == 0x20b6f0);
+    CHECK(kReader.text_3d_0 == 0x3f085b5);
+    CHECK(kReader.text_game_scene == 0x3d00948);
+    CHECK(kReader.text_main == 0x3dc7946);
+    CHECK(kReader.text_master_field == 0x3caa19d);
+    CHECK(kReader.transceiver_send == 0x2838c50);
+    CHECK(kReader.xlink_emit == 0x440630);
+    CHECK(kReader.xlink_kill == 0x7cc120);
+    CHECK(kReader.xlink_search_asset == 0x43db00);
+    CHECK(kRecompMain + kReader.find_pane == 0x8078e2b0);
+    CHECK(kRecompMain + kReader.msg_ref_init == 0x80a86f70);
+    CHECK(kRecompMain + kReader.msg_ref_set == 0x80a8afe0);
+    CHECK(kRecompMain + kReader.pane_text == 0x80a87d30);
+    CHECK(kRecompMain + kReader.title_screen_vtable == 0x84c106e8);
+    CHECK(kMain.frame_step == 0x3b4e300);
+}
+
+TEST_CASE("game build: a new field in the tables is pinned above") {
+    // A field added without a pin fails here: add its CHECK above and here.
+    CHECK(sizeof(CoopGameBuild::MainOffsets) / sizeof(std::uint64_t) == 32);
+    CHECK(sizeof(CoopGameBuild::ReaderOffsets) / sizeof(std::uint64_t) == 47);
+}
+
+TEST_CASE("game build: the recomps' guest addresses are main's") {
+    // Hookshot and Longshot name a game function by kRecompMain + its offset
+    // (hookshot/src/coop_title.cpp, coop_map_page.h): sead::LookAtCamera's
+    // vtable is main+0x4bf8a88 and 0x84c18a88 there (coop_local_probe.h).
+    CHECK(CoopGameBuild::kRecompMain + CoopGameBuild::kReader.look_at_camera_vtable == 0x84c18a88);
 }

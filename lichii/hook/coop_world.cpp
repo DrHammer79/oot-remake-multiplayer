@@ -11,6 +11,7 @@
 #include "coop/host/game_items.hpp"
 #include "coop/protocol/codec.hpp"
 #include "coop/protocol/messages.hpp"
+#include "coop_game_build.h"
 
 namespace CoopWorld {
 
@@ -1551,7 +1552,7 @@ std::vector<std::string> FoliageProbe::Look(const ReadWord& read, std::uint64_t 
 
 namespace {
 
-constexpr std::uint64_t kMalloc = 0x14c6c90;  // main + this (coop_puppet.h)
+constexpr std::uint64_t kMalloc = CoopGameBuild::kMain.malloc;  // main + this (coop_puppet.h)
 constexpr float kRequestDefault = 0.3f;       // what the game puts at +0x10
 
 float FloatAt(const GrassSync::Slot& s, std::size_t offset) {

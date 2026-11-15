@@ -11,15 +11,16 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopHold {
 
 // main+0x369df8 is `blr x8`: the call whose answer gives a BSA component
 // (x21) its calc bits for this frame. It becomes `bl kCaveOffset`.
-inline constexpr std::uint64_t kHookOffset = 0x369df8;
+inline constexpr std::uint64_t kHookOffset = CoopGameBuild::kMain.hold_hook;
 inline constexpr std::uint32_t kHookOriginal = 0xd63f0100;  // blr x8
-inline constexpr std::uint64_t kCaveOffset = 0x3c46300;     // after the co-op cave
-inline constexpr std::uint64_t kTableOffset = 0x3c46400;
+inline constexpr std::uint64_t kCaveOffset = CoopGameBuild::kMain.hold_cave;     // after the co-op cave
+inline constexpr std::uint64_t kTableOffset = CoopGameBuild::kMain.hold_table;
 inline constexpr std::size_t kMaxHeld = 64;
 inline constexpr std::size_t kTableSize = 0x10 + 8 * kMaxHeld;
 

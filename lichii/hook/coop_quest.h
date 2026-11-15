@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopQuest {
 
@@ -96,8 +97,8 @@ std::optional<std::uint32_t> CatchUp(const Quest& quest, const ReadBool& flag,
 //     when the step is the one it is at, else asks for the step (+0xa4, flag
 //     0x400) for the manager's own update to apply. The game's own calls pass
 //     w3 = w4 = w5 = 0, and so does co-op.
-inline constexpr std::uint64_t kChallengeMgr = 0x4e29950;
-inline constexpr std::uint64_t kSetStep = 0x2cf54a0;
+inline constexpr std::uint64_t kChallengeMgr = CoopGameBuild::kReader.challenge_manager_ptr;
+inline constexpr std::uint64_t kSetStep = CoopGameBuild::kReader.challenge_set_step;
 
 // One quest whose GameData step co-op holds: where the manager should be.
 struct StepWant {

@@ -47,6 +47,7 @@
 
 #include "coop/protocol/messages.hpp"
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopBossNative {
 
@@ -59,9 +60,9 @@ namespace addr {
 inline constexpr std::uint64_t kActorComponents = 0x270;  // actor -> component table
 inline constexpr std::uint64_t kComponentBsa = 0x188;     // table -> BSA component
 inline constexpr std::uint64_t kBsaBrainVerb = 0x28;      // s32, the current brain verb
-inline constexpr std::uint64_t kSetBrainVerb = 0x6733b0;       // main+
-inline constexpr std::uint64_t kRequestActionVerb = 0xc08f0;   // main+
-inline constexpr std::uint64_t kMalloc = 0x14c6c90;            // main+, as coop_puppet.h
+inline constexpr std::uint64_t kSetBrainVerb = CoopGameBuild::kReader.set_brain_verb;       // main+
+inline constexpr std::uint64_t kRequestActionVerb = CoopGameBuild::kReader.request_action_verb;   // main+
+inline constexpr std::uint64_t kMalloc = CoopGameBuild::kMain.malloc;            // main+, as coop_puppet.h
 // What kRequestActionVerb returns for a request it took (its main path,
 // main+0xc10f4; 2 and 3 are refusals). A skipped request answers the same.
 inline constexpr std::uint64_t kActionTaken = 0;

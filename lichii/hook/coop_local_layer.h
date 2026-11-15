@@ -36,19 +36,20 @@
 #include <vector>
 
 #include "coop_local_view.h"
+#include "coop_game_build.h"
 
 namespace CoopLocalLayer {
 
 // main+ offsets (static reading of main, build e0f3ccfa).
-inline constexpr std::uint64_t kMaker = 0x1174620;
-inline constexpr std::uint64_t kSetShown = 0x11745c0;
-inline constexpr std::uint64_t kBind = 0x336f5a0;
-inline constexpr std::uint64_t kOwnerSlot = 0x4c7e880;   // [[[main+slot]] + 0x38]: the layers' owner
-inline constexpr std::uint64_t kHeapSlot = 0x4c7e740;    // [[[main+slot]] + 0x200]: the heap
-inline constexpr std::uint64_t kSceneMain = 0x3dc7946;   // "Main"
-inline constexpr std::uint64_t kGameScene = 0x3d00948;   // "GameScene"
-inline constexpr std::uint64_t kMasterField = 0x3caa19d; // "Master_Field"
-inline constexpr std::uint64_t kName = 0x3f085b5;        // "3D_0" (inside "Main_3D_0" at main+0x3f085b0)
+inline constexpr std::uint64_t kMaker = CoopGameBuild::kReader.layer_maker;
+inline constexpr std::uint64_t kSetShown = CoopGameBuild::kReader.layer_set_shown;
+inline constexpr std::uint64_t kBind = CoopGameBuild::kReader.layer_bind;
+inline constexpr std::uint64_t kOwnerSlot = CoopGameBuild::kReader.layer_owner_got;   // [[[main+slot]] + 0x38]: the layers' owner
+inline constexpr std::uint64_t kHeapSlot = CoopGameBuild::kReader.layer_heap_got;    // [[[main+slot]] + 0x200]: the heap
+inline constexpr std::uint64_t kSceneMain = CoopGameBuild::kReader.text_main;   // "Main"
+inline constexpr std::uint64_t kGameScene = CoopGameBuild::kReader.text_game_scene;   // "GameScene"
+inline constexpr std::uint64_t kMasterField = CoopGameBuild::kReader.text_master_field; // "Master_Field"
+inline constexpr std::uint64_t kName = CoopGameBuild::kReader.text_3d_0;        // "3D_0" (inside "Main_3D_0" at main+0x3f085b0)
 inline constexpr std::uint8_t kId = 1;
 inline constexpr std::uint64_t kCamera = 0x78;
 inline constexpr std::uint64_t kCameraMatrix = 0x8;

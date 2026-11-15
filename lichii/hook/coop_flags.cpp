@@ -11,12 +11,13 @@
 #include "common/logging.h"
 #include "core/memory.h"
 #include "coop/host/game_items.hpp"
+#include "coop_game_build.h"
 
 namespace CoopHook {
 namespace {
 
 // docs/flags.md: the manager pointer and the tables the debug scan reads.
-constexpr u64 kManagerPtr = 0x4e842a8;
+constexpr u64 kManagerPtr = CoopGameBuild::kMain.game_flags_ptr;
 constexpr u64 kBoolTable = 0x10;
 constexpr u64 kIntTable = 0xd0;
 constexpr u64 kTableCount = 0x00, kTableEntries = 0x08, kTableSlots = 0x10,

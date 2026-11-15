@@ -24,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopPlayerInput {
 
@@ -45,7 +46,7 @@ inline constexpr std::uint64_t kNodeOwner = 0x8;
 inline constexpr std::uint64_t kOwnerHolder = 0x8;
 inline constexpr std::uint64_t kHolderActor = 0x1f0;
 // Where the input-off check returns to in the buttons' node (main+0x279cdf4 is its call).
-inline constexpr std::uint64_t kButtonsOffReturn = 0x279cdf8;
+inline constexpr std::uint64_t kButtonsOffReturn = CoopGameBuild::kReader.buttons_off_return;
 }  // namespace addr
 
 // One game frame of a Player's input, as the two reads give it.

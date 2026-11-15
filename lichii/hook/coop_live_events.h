@@ -38,16 +38,17 @@
 
 #include "coop/host/bounded_queue.hpp"
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopLiveEvents {
 
 namespace addr {
-inline constexpr std::uint64_t kMalloc = 0x14c6c90;        // as coop_puppet.h
-inline constexpr std::uint64_t kArgBuild = 0xd79f10;       // EventRequestArg(this)
-inline constexpr std::uint64_t kRequest = 0xd7a820;        // (manager, arg)
-inline constexpr std::uint64_t kManagerPtr = 0x4c7e090;    // [[main + this]] = the manager
-inline constexpr std::uint64_t kStringFree = 0x20b6f0;     // (member)
-inline constexpr std::uint64_t kStringVtable = 0x4974b20;  // the base vtable put back first
+inline constexpr std::uint64_t kMalloc = CoopGameBuild::kMain.malloc;        // as coop_puppet.h
+inline constexpr std::uint64_t kArgBuild = CoopGameBuild::kReader.event_arg_build;       // EventRequestArg(this)
+inline constexpr std::uint64_t kRequest = CoopGameBuild::kReader.event_request;        // (manager, arg)
+inline constexpr std::uint64_t kManagerPtr = CoopGameBuild::kReader.event_request_got;    // [[main + this]] = the manager
+inline constexpr std::uint64_t kStringFree = CoopGameBuild::kReader.string_free;     // (member)
+inline constexpr std::uint64_t kStringVtable = CoopGameBuild::kReader.event_string_vtable;  // the base vtable put back first
 inline constexpr std::uint64_t kArgSize = 0x1b20;
 inline constexpr std::uint64_t kArgName = 0x1a90;          // char* (inline buffer)
 inline constexpr std::uint64_t kArgNameCap = 0x1a98;       // u32
@@ -71,7 +72,7 @@ inline constexpr std::uint64_t kArgStrings = kArgSize;     // our strings, in th
 inline constexpr std::uint64_t kStringsSize = 0x200;
 // The event's starter actor: 0x2bc440(arg + kArgMember2, actor, 0) links it, as the game's
 // OneShotEventMemberRequestEventByEventName does; the frees after the request let it go again.
-inline constexpr std::uint64_t kSetLink = 0x2bc440;
+inline constexpr std::uint64_t kSetLink = CoopGameBuild::kReader.event_set_link;
 // deku-sync-fix: an actor's own event request, as the room graph's ActorLogicEventRequestActor node (0xbd1670) and the
 // performer AI nodes (0x2beedc, 0x2bf064) make it: 0x4aa890(performer, &name) builds the arg on its own stack, links
 // the performer's actor (+kPerformerActor) as the starter, asks the manager (via 0xf61460) and, when it took it, sets
@@ -79,12 +80,12 @@ inline constexpr std::uint64_t kSetLink = 0x2bc440;
 // is bound to it and its EventTriggerSetEventBool reaches the room graph (the 0.11 run: with the link alone A's asker
 // was never bound, its lifts stayed down, and it was not deleted at the event's end as B's was). `name` is the address
 // of a char* (the game passes a SafeString's buffer pointer). The performer is [[actor + 0x270] + kPerformerSlot].
-inline constexpr std::uint64_t kPerformerRequest = 0x4aa890;
+inline constexpr std::uint64_t kPerformerRequest = CoopGameBuild::kReader.performer_request;
 inline constexpr std::uint64_t kPerformerSlot = 0x88;      // as 0xbd1670 and 0x2beedc read it
 inline constexpr std::uint64_t kPerformerSlotAlt = 0x90;   // as 0xc70560 reads it (the player's)
 inline constexpr std::uint64_t kPerformerActor = 16;       // the performer's actor
 inline constexpr std::uint64_t kPerformerState = 40;       // u32; 3: busy (0x27fe410 does not ask then)
-inline constexpr std::uint64_t kEventStatePtr = 0x4e94840;  // as coop_boss_game.cpp
+inline constexpr std::uint64_t kEventStatePtr = CoopGameBuild::kMain.event_manager_ptr;  // as coop_boss_game.cpp
 inline constexpr std::uint64_t kEventSession = 0x68;        // set while an event runs
 inline constexpr std::uint64_t kSessionCount = 0xeb0;       // u32, as coop_boss_game.cpp
 inline constexpr std::uint64_t kSessionEvents = 0xeb8;      // -> event pointers

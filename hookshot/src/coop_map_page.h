@@ -23,6 +23,7 @@
 
 #include "coop/overlay/map_icons.hpp"
 #include "hos_coop_api.h"
+#include "coop_game_build.h"
 
 namespace CoopMapPage {
 
@@ -49,7 +50,7 @@ inline constexpr float kMiniWindowSize = 552.0f;
 inline constexpr const char* kMiniFieldWindowPane = "S_FieldMini_00";
 inline constexpr float kMiniFieldWindowSize = 960.0f;
 inline constexpr const char* kMiniRootPane = "N_MiniMap_00";
-inline constexpr std::uint64_t kFindPane = 0x8078e2b0;  // (layout, "name") -> pane, or 0
+inline constexpr std::uint64_t kFindPane = CoopGameBuild::kRecompMain + CoopGameBuild::kReader.find_pane;  // (layout, "name") -> pane, or 0
 inline constexpr std::uint64_t kScreenLayout = 0x28;     // a screen's layout
 inline constexpr std::uint64_t kPaneMatrix = 0x28;       // a pane's global matrix
 inline constexpr std::uint64_t kPaneAlpha = 0x78;        // a pane's alpha with its parents' (float; run 20261114-105315:

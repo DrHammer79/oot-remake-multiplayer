@@ -27,6 +27,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include "coop_game_build.h"
 
 namespace CoopPuppet {
 class Guest;
@@ -50,11 +51,11 @@ inline constexpr std::uint64_t kUserFirstLink = 0x30;
 inline constexpr std::uint64_t kUserLinkOffset = 0x3c;   // s32
 inline constexpr std::uint64_t kLinkNext = 0x08;
 inline constexpr std::uint64_t kEventAsset = 0x30;       // -> {char* name, ...}
-inline constexpr std::uint64_t kSearchAsset = 0x43db00;  // (accessor, &asset, name) -> bool
-inline constexpr std::uint64_t kEmit = 0x440630;         // (user, &asset, &handle, 0)
-inline constexpr std::uint64_t kKill = 0x7cc120;         // (&handle)
-inline constexpr std::uint64_t kSoundRootGot = 0x4c7e678;
-inline constexpr std::uint64_t kOcarinaModuleVtableGot = 0x4c8bfd0;  // + 0x10 = vtable
+inline constexpr std::uint64_t kSearchAsset = CoopGameBuild::kReader.xlink_search_asset;  // (accessor, &asset, name) -> bool
+inline constexpr std::uint64_t kEmit = CoopGameBuild::kReader.xlink_emit;         // (user, &asset, &handle, 0)
+inline constexpr std::uint64_t kKill = CoopGameBuild::kReader.xlink_kill;         // (&handle)
+inline constexpr std::uint64_t kSoundRootGot = CoopGameBuild::kReader.sound_root_got;
+inline constexpr std::uint64_t kOcarinaModuleVtableGot = CoopGameBuild::kReader.ocarina_module_vtable_got;  // + 0x10 = vtable
 inline constexpr std::uint64_t kModuleUser = 0x40;  // 0xd1f360 stores the made user here
 inline constexpr std::uint64_t kUserModuleBack = 0x138;  // ... and module + 0x38 here
 // The object at module + kModuleUser is the Ocarina.bars bank's handle; the SLink user the

@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "coop_game_build.h"
 
 namespace CoopNativePlayer {
 
@@ -49,7 +50,7 @@ inline constexpr std::uint64_t kPartPhysics = 0x50;     // slot 10
 inline constexpr std::uint64_t kPartLife = 0x2b8;       // slot 87
 inline constexpr std::uint64_t kPartPlayer = 0x358;     // slot 107
 // The player preload lists (the docs' "player manager"): how many records.
-inline constexpr std::uint64_t kSceneModulePtr = 0x4e97648;
+inline constexpr std::uint64_t kSceneModulePtr = CoopGameBuild::kMain.scene_module_ptr;
 inline constexpr std::uint64_t kSceneTable = 0x1f0;
 inline constexpr std::uint64_t kTableArray = 0x58;
 inline constexpr std::uint64_t kPlayerManagerSlot = 0x78;

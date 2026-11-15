@@ -25,6 +25,7 @@
 
 #include "coop_puppet.h"
 #include "coop_rooms.h"
+#include "coop_game_build.h"
 
 namespace coop::host {
 class Session;
@@ -107,7 +108,7 @@ private:
 // lists; the list head is lists + kListHead, a ring of nodes, each node's
 // owner at node + kNodeOwner, and an actor's own node at actor + kActorNode.
 namespace addr {
-inline constexpr std::uint64_t kManagerPtr = 0x4e91888;
+inline constexpr std::uint64_t kManagerPtr = CoopGameBuild::kMain.actor_manager_ptr;
 inline constexpr std::uint64_t kLists = 0x118;
 inline constexpr std::uint64_t kListHead = 0x670;
 inline constexpr std::uint64_t kNodeOwner = 0x10;

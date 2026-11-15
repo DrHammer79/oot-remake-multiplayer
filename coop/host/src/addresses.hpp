@@ -13,12 +13,13 @@
 
 #include <cstdint>
 #include <string_view>
+#include "../../../lichii/hook/coop_game_build.h"
 
 namespace coop::host::addr {
 
 // --- GameUI module: the player block it fills each frame ------------------
 // [plan][map] Pointer to the GameUI module, at main + 0x4e7cfa8. Checked.
-inline constexpr std::uint64_t kGameUiModulePtr = 0x4e7cfa8;
+inline constexpr std::uint64_t kGameUiModulePtr = CoopGameBuild::kMain.game_ui_module_ptr;
 // [plan][map] Player position, 3 x f32, copied from actor +0x31c by 0x32a4c40.
 // Checked; that it updates every frame is likely, not proven (Run 1 saw it
 // change once, not follow a moving player).
@@ -35,7 +36,7 @@ inline constexpr std::uint64_t kGameUiIsChild = 0x5c0;
 // [map] "From the Scene module to the player", shown whole at 0x37c97c and
 // the link choice at 0x37cca0. Checked. The map's peek is
 // 7104e97648 0 0x1f0 0x58 0x78 0x40 8 0x40 +0x31c.
-inline constexpr std::uint64_t kSceneModulePtr = 0x4e97648;
+inline constexpr std::uint64_t kSceneModulePtr = CoopGameBuild::kMain.scene_module_ptr;
 inline constexpr std::uint64_t kSceneTable = 0x1f0;          // S -> C
 inline constexpr std::uint64_t kTableCount = 0x50;           // C: u32 count
 inline constexpr std::uint64_t kTableArray = 0x58;           // C -> array
@@ -184,7 +185,7 @@ inline constexpr std::uint32_t kActorStateGoneLast = 11;
 
 // --- Banc module: the current scene ---------------------------------------
 // [plan][map] Banc module pointer. Checked (actor-map.md).
-inline constexpr std::uint64_t kBancModulePtr = 0x4e919d0;
+inline constexpr std::uint64_t kBancModulePtr = CoopGameBuild::kMain.banc_module_ptr;
 // [map] 0x58aac0 gives no name when B +0x38 is null. Checked.
 inline constexpr std::uint64_t kBancMustBeSet = 0x38;
 // [plan][map] Pointer to the path string and its capacity (u64 assumed).
@@ -198,7 +199,7 @@ inline constexpr std::uint64_t kBancPathCapacity = 0x48;
 // [plan][map] Event manager pointer; IsEventRunning (0xbcc100) is +0x68 != 0.
 // Checked, and seen in Run 1 (set in the opening movie and timeline). 8 bytes,
 // as the map's peek reads.
-inline constexpr std::uint64_t kEventManagerPtr = 0x4e94840;
+inline constexpr std::uint64_t kEventManagerPtr = CoopGameBuild::kMain.event_manager_ptr;
 inline constexpr std::uint64_t kEventRunning = 0x68;
 
 }  // namespace coop::host::addr

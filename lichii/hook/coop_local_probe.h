@@ -24,19 +24,20 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopLocalProbe {
 
 namespace addr {
-inline constexpr std::uint64_t kLayers = 0x4e81cf0;        // main+: pointer to the layers' owner
+inline constexpr std::uint64_t kLayers = CoopGameBuild::kReader.renderer_ptr;        // main+: pointer to the layers' owner
 inline constexpr std::uint64_t kLayerCount = 0x20;
 inline constexpr std::uint64_t kLayerArray = 0x28;
 inline constexpr std::uint64_t kLayerCamera = 0x78;
 inline constexpr std::uint64_t kLayerFlags = 0x88;
 inline constexpr std::uint64_t kLayerName = 0x8b0;
 inline constexpr std::uint64_t kLayerSize = 0x8f0;         // what the creator allocates
-inline constexpr std::uint64_t kLookAtCamera = 0x4bf8a88;  // main+: sead::LookAtCamera's vtable (0x84c18a88)
-inline constexpr std::uint64_t kControllers = 0x4e92f10;   // main+: pointer to the controller manager
+inline constexpr std::uint64_t kLookAtCamera = CoopGameBuild::kReader.look_at_camera_vtable;  // main+: sead::LookAtCamera's vtable (0x84c18a88)
+inline constexpr std::uint64_t kControllers = CoopGameBuild::kReader.controller_manager_ptr;   // main+: pointer to the controller manager
 }  // namespace addr
 
 inline constexpr std::uint32_t kMostLayers = 24;   // (15 ids; room for a bigger count than seen)

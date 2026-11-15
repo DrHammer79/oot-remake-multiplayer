@@ -108,6 +108,7 @@
 #include "coop_counters.h"
 #include "coop_scrubs.h"
 #include <set>
+#include "coop_game_build.h"
 
 namespace CoopObjects {
 void NoteBosses(const std::vector<Seen>& seen, const std::vector<std::pair<u64, std::string>>& owned);  // issue 109, below
@@ -120,7 +121,7 @@ namespace {
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 constexpr std::array<u8, 8> kGameBuildId{0xe0, 0xf3, 0xcc, 0xfa, 0xf5, 0x00, 0x65, 0xae};
 
-constexpr u64 kActorManagerPtr = 0x4e91888;  // main offset
+constexpr u64 kActorManagerPtr = CoopGameBuild::kMain.actor_manager_ptr;  // main offset
 constexpr u64 kManagerLists = 0x118;
 constexpr u64 kListHead = 0x670;
 constexpr u64 kListCount = 0x10;
@@ -148,15 +149,15 @@ float Apart(const coop::protocol::Vec3& a, const coop::protocol::Vec3& b) {
 // 0x4b25e18, whose slot 0x218 is 0x4c6580: it sets bit 23 of +0x4a8 and hands
 // the new transform to the physics component (0x4c6630). Checked live: a
 // plain write of +0x31c is undone by the game within a frame.
-constexpr u64 kActorVtable = 0x4b25e18;
-constexpr u64 kSetMatrix = 0x4c6580;
+constexpr u64 kActorVtable = CoopGameBuild::kMain.actor_vtable;
+constexpr u64 kSetMatrix = CoopGameBuild::kMain.set_matrix;
 // Issues 150, 157, 101 (on unless LICHII_COOP_OBJECTS_RELEASE=0): the actor flags word the
 // setter above marks (bit 23, docs/world.md). An enemy that becomes ours gets
 // the bit cleared once, in case the game leaves it set after the Mover's
 // last move and the body stays frozen or floats. Not proven.
 constexpr u64 kActorFlags = 0x4a8;
 constexpr u32 kWarpBit = u32{1} << 23;
-constexpr u64 kRequestDelete = 0xa6490;  // (actor, 0), as docs/puppet.md
+constexpr u64 kRequestDelete = CoopGameBuild::kMain.request_delete;  // (actor, 0), as docs/puppet.md
 // Rolled enemies' copies in the spawn director: their keys have the top bit.
 constexpr u64 kEnemyKey = u64{1} << 63;
 // Difficulty's extra enemies (coop_difficulty.h Extras) on the director's enemy list: their own keys there.
@@ -214,10 +215,10 @@ constexpr u64 kAsSlotEntry = 0x48;  // array entries; the first 8 bytes point to
 constexpr u64 kAsSlotName = 0x10;
 constexpr u64 kAsSlotRate = 0xd4;
 constexpr u64 kAsSlotFrame = 0xe8;
-constexpr u64 kPlayAs = 0x2022a0;
-constexpr u64 kSetAsFrame = 0x37b5d70;  // (controller, slot, s0 = frame), as the puppet
+constexpr u64 kPlayAs = CoopGameBuild::kMain.play_as;
+constexpr u64 kSetAsFrame = CoopGameBuild::kMain.set_as_frame;  // (controller, slot, s0 = frame), as the puppet
 constexpr float kFrameSlack = 3.0f;     // frames off before a copy's frame is set
-constexpr u64 kMalloc = 0x14c6c90;
+constexpr u64 kMalloc = CoopGameBuild::kMain.malloc;
 // The mover's block from the game's malloc: the play request, then one
 // fixed cell per animation name (a slot may keep the name's pointer).
 constexpr u64 kBlockRequest = 0x0;

@@ -14,6 +14,7 @@
 
 #include "coop_callers.h"
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace Core {
 class System;
@@ -30,11 +31,11 @@ struct Hook {
     std::uint32_t original; // bl 0x3b4e300
 };
 inline constexpr std::array<Hook, 2> kHooks{{
-    {0x6e6dd8, 0x94d19d4a},
-    {0x6e70f8, 0x94d19c82},
+    {CoopGameBuild::kMain.svc_hook_rare, 0x94d19d4a},
+    {CoopGameBuild::kMain.svc_hook_frame, 0x94d19c82},
 }};
-inline constexpr std::uint64_t kCaveOffset = 0x3c46280;
-inline constexpr std::uint64_t kCaveEnd = 0x3c47000;       // rodata starts here
+inline constexpr std::uint64_t kCaveOffset = CoopGameBuild::kMain.svc_cave;
+inline constexpr std::uint64_t kCaveEnd = CoopGameBuild::kMain.cave_end;       // rodata starts here
 
 // `bl kCaveOffset` at `offset`.
 constexpr std::uint32_t HookWord(std::uint64_t offset) {

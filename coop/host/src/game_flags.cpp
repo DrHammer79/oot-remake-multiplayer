@@ -10,13 +10,14 @@
 #include <bit>
 #include <cstring>
 #include <span>
+#include "../../../lichii/hook/coop_game_build.h"
 
 // Offsets: docs/flags.md, read from main of build e0f3ccfaf50065ae.
 namespace coop::host {
 namespace {
 
 // Pointer to gmd::GameDataMgr, at main + 0x4e842a8 (GOT slot 0x4c7e180).
-constexpr std::uint64_t kManagerPtr = 0x4e842a8;
+constexpr std::uint64_t kManagerPtr = CoopGameBuild::kMain.game_flags_ptr;
 
 // A hashed type table: entries, an open-addressing hash table of {u32 hash,
 // u32 entry index} slots, and a write queue. Offsets from the manager.

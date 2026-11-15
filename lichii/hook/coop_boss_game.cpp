@@ -44,20 +44,21 @@
 #include "coop_flags.h"
 #include "coop_puppet.h"
 #include "coop_svc.h"
+#include "coop_game_build.h"
 
 namespace CoopBoss {
 namespace {
 
-constexpr std::uint64_t kEventManagerPtr = 0x4e94840;
+constexpr std::uint64_t kEventManagerPtr = CoopGameBuild::kMain.event_manager_ptr;
 constexpr std::uint64_t kEventSession = 0x68;
 constexpr std::uint64_t kSessionEvents = 0xeb8;
 constexpr std::uint64_t kSessionCount = 0xeb0;
 constexpr std::uint64_t kSessionCurrent = 0xf18;
-constexpr std::uint64_t kForceSkip = 0x3b3af30;
+constexpr std::uint64_t kForceSkip = CoopGameBuild::kReader.force_skip;
 constexpr std::uint64_t kActorState = 0x2c;
 constexpr std::uint32_t kActorStatePresent = 4;
 constexpr std::uint64_t kActorPosition = 0x31c;
-constexpr std::uint64_t kSetMatrix = 0x4c6580;  // vtable slot 0x218 of every actor seen
+constexpr std::uint64_t kSetMatrix = CoopGameBuild::kMain.set_matrix;  // vtable slot 0x218 of every actor seen
 constexpr int kCallerOrder = 50;  // after the puppets, spawn, fairy, objects, time
 // Ten times a second on the steady clock, not by presented frames (issue
 // 106: with the emulator's speed-up, frames come faster).
