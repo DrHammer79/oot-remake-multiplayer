@@ -340,11 +340,6 @@ std::vector<Menu::Line> Menu::Lines() const {
         break;
     }
     case Page::kSettings:
-        out.push_back({Choice("Saves", mp_saves_ ? "Multiplayer" : "Solo"), Act::kSaveSet,   // (Navi)
-                       "Solo: your own saves. Multiplayer: a separate set of saves for playing together (made from "
-                       "your solo saves the first time), so co-op progress never mixes with your own. When you join "
-                       "a friend from the title screen you play the host's save, copied beside your multiplayer saves; "
-                       "your saves are not touched. Switched on the title screen with no file loaded."});
         out.push_back({Action("Your name", typing_ && typing_act_ == Act::kName ? options_.name + "_" : options_.name),
                        Act::kName,
                        "The name the other players see: 1 to 16 characters, typed with the keyboard."});
@@ -415,6 +410,11 @@ std::vector<Menu::Line> Menu::Lines() const {
                                      "level (up to NG+ " + std::to_string(ngplus_unlocked_) +
                                      " now). In a game you host your level counts for everyone. Off: the game as it is."});
         }
+        out.push_back({Choice("Saves", mp_saves_ ? "Multiplayer" : "Solo"), Act::kSaveSet,   // (Navi)
+                       "Solo: your own saves. Multiplayer: a separate set of saves for playing together (made from "
+                       "your solo saves the first time), so co-op progress never mixes with your own. When you join "
+                       "a friend from the title screen you play the host's save, copied beside your multiplayer saves; "
+                       "your saves are not touched. Switched on the title screen with no file loaded."});
         break;
     case Page::kCustomize:   // (its own rows: coop_look_menu.h)
         break;
