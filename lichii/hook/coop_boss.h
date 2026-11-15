@@ -51,6 +51,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "coop/protocol/messages.hpp"
@@ -285,6 +286,30 @@ public:
 private:
     std::optional<std::string> scene_;
     bool armed_ = false;
+};
+
+// Whether our game may own the boss of the room we are in (boss-copy-b; the
+// server never gives a boss to a game that is not, object_presence::unready).
+// Ready when our game has played the room's intro (its HavePlayedEvent flag),
+// or when our boss was seen in its pre-battle phase and then out of it this
+// visit: a late joiner's copy that follows an owner already in the fight is
+// in the fight too, though its game never plays the intro. Kept until the
+// room changes (Reset). A boss never seen pre-battle (no such animation
+// known) is ready by the flag only. Pure: the glue reads both.
+class Readiness {
+public:
+    // `intro_played`: nothing when the flag is not read. `pre_battle`:
+    // CoopObjects::LastBossPreBattle. `room`: the room we are in.
+    bool Step(std::uint8_t room, std::optional<bool> intro_played, std::optional<bool> pre_battle);
+    void Reset();
+    // True once, at the Step that found our boss out of its pre-battle phase.
+    bool TakeFoughtNews() { return std::exchange(fought_news_, false); }
+
+private:
+    std::optional<std::uint8_t> room_;
+    bool seen_pre_battle_ = false;
+    bool fought_ = false;
+    bool fought_news_ = false;
 };
 
 // The emulator side (coop_boss_game.cpp). LICHII_COOP_BOSS=0 turns it off;

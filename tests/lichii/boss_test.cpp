@@ -887,3 +887,29 @@ TEST_CASE("boss: the boss read gone while our Link is dead is still its death (b
     a = t.Tick(Dead(Forest().arrive, true, false, true), 30 * kS);
     CHECK(Has(a, proto::BossState::defeated));
 }
+
+TEST_CASE("boss: a late joiner is ready once its boss leaves the pre-battle phase, without its intro (boss-copy-b)") {
+    CoopBoss::Readiness r;
+    // Intro not played, boss unseen or on the ceiling: not ready.
+    CHECK_FALSE(r.Step(0, false, std::nullopt));
+    CHECK_FALSE(r.Step(0, false, true));
+    CHECK_FALSE(r.TakeFoughtNews());
+    // The copy follows an owner in the fight (Walk): ready, told once, kept.
+    CHECK(r.Step(0, false, false));
+    CHECK(r.TakeFoughtNews());
+    CHECK_FALSE(r.TakeFoughtNews());
+    CHECK(r.Step(0, false, true));          // back on the ceiling for a moment: still ready
+    CHECK(r.Step(0, false, std::nullopt));
+    // Another room, or out of the room (Reset): starts over.
+    CHECK_FALSE(r.Step(1, false, true));
+    r.Reset();
+    CHECK_FALSE(r.Step(1, false, std::nullopt));
+}
+
+TEST_CASE("boss: never seen pre-battle, a boss is ready by its intro flag only (boss-copy-b)") {
+    CoopBoss::Readiness r;
+    CHECK_FALSE(r.Step(3, false, false));  // no pre-battle animation known for it: the flag decides
+    CHECK_FALSE(r.Step(3, false, false));
+    CHECK(r.Step(3, true, false));
+    CHECK(r.Step(3, std::nullopt, std::nullopt));  // flag not read: as before, not held back
+}

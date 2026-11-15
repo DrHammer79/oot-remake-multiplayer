@@ -147,6 +147,21 @@ std::optional<bool> BossOurs(const std::vector<Seen>& walk, std::span<const std:
     return out;
 }
 
+bool IsPreBattleAnimation(std::string_view name) {
+    return name == "Sleep" || name.starts_with("Pre_Battle_");
+}
+
+std::optional<bool> BossPreBattle(const std::vector<Seen>& seen, std::span<const std::string_view> bodies) {
+    bool any = false;
+    for (const Seen& s : seen) {
+        if (std::find(bodies.begin(), bodies.end(), s.name) == bodies.end() || !s.animation) continue;
+        if (IsPreBattleAnimation(s.animation->name)) return true;
+        any = true;
+    }
+    if (!any) return std::nullopt;
+    return false;
+}
+
 std::optional<bool> BossHurt(const std::vector<Seen>& seen, std::span<const std::string_view> bodies) {
     bool any = false;
     for (const Seen& s : seen) {

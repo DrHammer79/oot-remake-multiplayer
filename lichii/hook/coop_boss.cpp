@@ -140,6 +140,27 @@ Vec ArrivalFor(const Room& room, std::uint8_t number) {
     return v;
 }
 
+bool Readiness::Step(std::uint8_t room, std::optional<bool> intro_played, std::optional<bool> pre_battle) {
+    if (room_ != room) {
+        Reset();
+        room_ = room;
+    }
+    if (pre_battle == true) {
+        seen_pre_battle_ = true;
+    } else if (pre_battle == false && seen_pre_battle_ && !fought_) {
+        fought_ = true;
+        fought_news_ = true;
+    }
+    return !(intro_played.has_value() && !*intro_played) || fought_;
+}
+
+void Readiness::Reset() {
+    room_.reset();
+    seen_pre_battle_ = false;
+    fought_ = false;
+    fought_news_ = false;
+}
+
 std::vector<std::string_view> StaleBossFlags::Check(const std::optional<std::string>& scene,
                                                     const std::optional<Vec>& position,
                                                     const std::function<bool(std::string_view)>& is_set) {

@@ -4462,3 +4462,23 @@ TEST_CASE("objects: an enemy that is not a boss still never heals across a hand-
     const auto step = Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 1, 50.0f)});
     CHECK(std::none_of(step.writes.begin(), step.writes.end(), [](const CoopObjects::LifeWrite& w) { return w.heal; }));
 }
+
+TEST_CASE("objects: a boss is pre-battle while a body plays Sleep or Pre_Battle_* (boss-copy-b)") {
+    constexpr std::array<std::string_view, 1> kGohma{"Enemy_DungeonBoss_Gohma"};
+    CHECK(CoopObjects::IsPreBattleAnimation("Sleep"));
+    CHECK(CoopObjects::IsPreBattleAnimation("Pre_Battle_Ceiling_Wait"));
+    CHECK_FALSE(CoopObjects::IsPreBattleAnimation("Walk_Start"));
+    CHECK_FALSE(CoopObjects::IsPreBattleAnimation("C01-Enemy_DungeonBoss_Gohma-A-0"));
+    Seen boss = Chest(0x960, 0);
+    boss.name = "Enemy_DungeonBoss_Gohma";
+    CHECK_FALSE(CoopObjects::BossPreBattle({}, kGohma).has_value());      // not seen: unknown
+    CHECK_FALSE(CoopObjects::BossPreBattle({boss}, kGohma).has_value());  // no animation read: unknown
+    boss.animation = proto::Animation{"Pre_Battle_Ceiling_Find", 0.0f, 1.0f};
+    CHECK(CoopObjects::BossPreBattle({boss}, kGohma) == std::optional<bool>(true));
+    boss.animation = proto::Animation{"Walk", 0.0f, 1.0f};
+    CHECK(CoopObjects::BossPreBattle({boss}, kGohma) == std::optional<bool>(false));
+    Seen egg = Chest(0x970, 0);
+    egg.name = "Enemy_Gohma_Egg";
+    egg.animation = proto::Animation{"Sleep", 0.0f, 1.0f};
+    CHECK(CoopObjects::BossPreBattle({boss, egg}, kGohma) == std::optional<bool>(false));  // not a body
+}

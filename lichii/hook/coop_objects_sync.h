@@ -235,6 +235,14 @@ bool RemovedWhenTaken(std::string_view name);
 // life was not read (unknown: the boss logic then keeps its old rule).
 std::optional<bool> BossAlive(const std::vector<Seen>& seen, std::span<const std::string_view> bodies);
 
+// boss-copy-b: whether a boss is still in its pre-battle phase in one walk,
+// from its body actors' own animation (AS slot 0): Gohma's `Sleep` and
+// `Pre_Battle_*` (on the ceiling, before her drop). True when a body there
+// plays one; false when the bodies there play others (the fight, or her
+// intro under way); nothing when no body there has its animation read.
+bool IsPreBattleAnimation(std::string_view name);
+std::optional<bool> BossPreBattle(const std::vector<Seen>& seen, std::span<const std::string_view> bodies);
+
 // Whether our game owns the dungeon's boss (boss-intro): from this walk when the boss is in it (`ours`: the
 // addresses of the bosses we own), else the last walk that had it, for kBossOursKeepUs: the owner's Gohma is
 // deleted by her own death event, and her death must still be known as the owner's then. `last` keeps one

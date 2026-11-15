@@ -160,6 +160,7 @@ struct Glue {
     std::uint64_t tick_at = 0;  // steady clock, us
     bool connected = false;
     bool unready_logged_ = true;  // the last state logged: ready
+    Readiness readiness;          // boss-copy-b: may our game own the room's boss
     std::uint64_t debug_at = 0;
     Sync sync;
     Mover mover;
@@ -244,6 +245,7 @@ struct Glue {
             if (connected) {
                 sync.Reset();
                 scenes.Reset();
+                readiness.Reset();
                 max_life_cap.reset();
                 connected = false;
             }
@@ -273,8 +275,15 @@ struct Glue {
                 coop::host::GameFlags flags(memory);
                 const auto intro = flags.get_bool(
                     coop::host::flag_hash("HavePlayedEvent." + std::string(room->intro)));
+                // boss-copy-b: also ready once our boss left its pre-battle
+                // phase here (a late joiner's copy following the fight).
+                const bool ready =
+                    readiness.Step(room->index, intro, CoopObjects::LastBossPreBattle(Bodies(*room)));
+                if (readiness.TakeFoughtNews() && intro.has_value() && !*intro) {
+                    LOG_INFO(Core, "coop: boss: our boss left its pre-battle phase here: ready to own it without our intro");
+                }
                 std::vector<std::string> unready;
-                if (intro.has_value() && !*intro) {
+                if (!ready) {
                     for (const auto body : Bodies(*room)) unready.emplace_back(body);
                 }
                 if (unready.empty() != unready_logged_) {
@@ -285,6 +294,7 @@ struct Glue {
                 }
                 CoopObjects::SetUnreadyBosses(std::move(unready));
             } else {
+                readiness.Reset();  // out of the boss room: her next visit starts over
                 CoopObjects::SetUnreadyBosses({});
             }
         }
@@ -486,6 +496,7 @@ void ForgetFights() {
     Glue& g = TheGlue();
     g.sync.Reset();
     g.scenes.Reset();
+    g.readiness.Reset();
     g.max_life_cap.reset();
     LOG_INFO(Core, "coop: boss: the host loaded a save: the fights this session knew are forgotten");
 }

@@ -88,6 +88,8 @@ unsigned TakeChestsOpenedTwice();
 std::optional<bool> LastBossAlive(std::span<const std::string_view> bodies);
 // The same walk: whether the boss has lost life (BossHurt).
 std::optional<bool> LastBossHurt(std::span<const std::string_view> bodies);
+// The same walk: whether the boss is still in its pre-battle phase (BossPreBattle).
+std::optional<bool> LastBossPreBattle(std::span<const std::string_view> bodies);
 // Whether our game owned the dungeon's boss in the last walk (nothing when it is not seen, or the walk is stale).
 std::optional<bool> LastBossOurs(std::span<const std::string_view> bodies);
 // The boss bodies our game is not ready to own (its intro not played here);

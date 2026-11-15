@@ -5345,6 +5345,26 @@ TEST_CASE("boss-copy-b: when a boss's owner leaves, a game that has played its i
   CHECK(h.session.object_owner(placed(7)) == owned(2, 1));
 }
 
+TEST_CASE("boss-copy-b: a late joiner's stun hands it the boss once its game says ready (its copy left pre-battle)") {
+  OwnerHarness h;
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(2, boss_presence(object_presence::awake | object_presence::unready), kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);  // a fight
+  h.stand(1, 12);
+  h.stand(2, 3);
+  h.run(20 * kSecond);  // past the owner's own hit (the fight's life drop): only readiness holds it now
+  h.clear();
+  h.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);  // a stun while unready
+  CHECK(messages_to<HandoverAsk>(h, 1).empty());
+  // Its copy now follows the owner's fight: its game sends no unready bit.
+  h.receive(2, boss_presence(object_presence::awake), kChannelOwnership);
+  h.run(3 * kSecond);
+  h.clear();
+  h.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+  CHECK(h.session.stats().boss_to_hitter == 1);
+}
+
 TEST_CASE("boss heart: the host loading a save forgets the claims (the boss fights again, player report #52)") {
   Harness h;
   h.join(1, "Link");
