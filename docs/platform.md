@@ -19,9 +19,16 @@ one plain C table, `CoopPlatform`, that the platform's adapter fills.
   another version, too short, or missing a required slot. No exceptions cross it.
 - Library `coop_platform` (`coop/CMakeLists.txt`); tests in `tests/platform/` (the C and C++ layouts agree, the
   install checks, threads, files, UDP over loopback).
-- Not yet used: step 4 (os-wrap) moves the core's `std::thread`/`std::mutex`/`chrono`/`fstream` onto `coop::os`, and
-  step 5 makes the Longshot module fill `CoopPlatform` from `HosCoopApi`. The `coop_core_*` entry points are declared
-  for review of their shape and defined by those later steps.
+- The Longshot/Hookshot module is the first adapter (step 5, `hookshot/src/coop_hs_platform.{h,cpp}`): at
+  `hos_coop_start` it fills `CoopPlatform` from Hookshot's `HosCoopApi` and installs it for `coop::os`. Game slots
+  forward to Hookshot's table (`read`, `write`, `cas32`, `call`, `scratch`, `pad_buttons` for player 0 only, `key_down`,
+  `log`); a slot an older Hookshot lacks stays NULL. The OS slots are the std backend's, files under the game's folder
+  (`HosCoopApi::game_dir`, which the table itself does not carry). Not filled: `hook_wrap`/`hook_site` (the hooks are
+  Hookshot's patches), `pad_sticks` (sticks come through `hos_coop_pad`), `draw_2d` (step 6) and voice (the module's own
+  exports). The compat runtime (`hookshot/compat/coop_runtime.h`, the emulator API slice the hook files use) and the
+  module's game calls now go through this table; tests in `tests/hookshot/hs_platform_test.cpp`.
+- Still to come: step 4 (os-wrap) moves the core's `std::thread`/`std::mutex`/`chrono`/`fstream` onto `coop::os`. The
+  `coop_core_*` entry points are declared for review of their shape and defined by core-lib-split.
 - Changes from the design sketch: `thread_start` returns a handle and `thread_join` takes it; `thread_id`,
   `mutex_free`, `sleep_us` and `sock_local` were added; the memory slots are `mem_alloc`/`mem_free` (a CRT may define
   `free` as a macro); sockets are opened by kind (`COOP_SOCK_UDP4`/`6`) and `sock_recvfrom` answers

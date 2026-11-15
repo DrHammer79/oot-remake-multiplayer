@@ -195,7 +195,7 @@ TEST_CASE("hookshot: Link puppets follow the puppet guard in longshot.exe") {
 TEST_CASE("hookshot: the module refuses puppet creates before they reach the game") {
     const std::string src = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     const auto refused = src.find("if (Refused(c))");
-    const auto call = src.find("g_api->call(ctx, &k, &x0)");
+    const auto call = src.find("Platform().call(ctx, &k, &x0)");
     REQUIRE(refused != std::string::npos);
     REQUIRE(call != std::string::npos);
     CHECK(refused < call);
