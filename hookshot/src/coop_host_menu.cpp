@@ -1,6 +1,7 @@
 // CoopHostMenu (coop_host_menu.h): the "coop host" thread behind the menu's
 // Host and Join.
 #include "coop_host_menu.h"
+#include "coop_ngplus.h"
 
 #include <algorithm>
 #include <chrono>
@@ -256,6 +257,7 @@ void Menu::RunHost(HostJob job) {
             }
         }
         while (!stop_) {
+            host.set_ngplus(CoopNgPlus::Level());   // (Navi) New Game+: this game's level for everyone (coop_ngplus.h)
             host.service(kRoundMs);
             std::deque<std::string> pasted;
             {
@@ -365,6 +367,17 @@ int Menu::Join(const HosCoopJoinOptions* o) {
     status_.state = HOS_COOP_CONNECTED;
     status_.port = where->port;
     return 1;
+}
+
+void Menu::NaviConnected(std::uint16_t port, const std::string& note) {
+    std::lock_guard calls(calls_);
+    direct_connected_ = true;
+    std::lock_guard lock(mutex_);
+    status_ = HosCoopStatus{};
+    status_.size = sizeof status_;
+    status_.state = HOS_COOP_CONNECTED;
+    status_.port = port;
+    CopyText(status_.message, sizeof status_.message, note);
 }
 
 void Menu::RunJoin(JoinJob job) {

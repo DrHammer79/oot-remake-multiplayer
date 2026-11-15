@@ -23,6 +23,9 @@
 #include "coop_look_view.h"
 #include "coop_mods_tab.h"
 #include "coop_pause_files.h"
+#include "coop_ngplus.h"
+#include "coop_save.h"
+#include <cstdlib>
 #include "coop_title.h"
 #include "coop_title_menu.h"
 #include "coop_voice.h"
@@ -450,6 +453,18 @@ void Act(const Request& r) {
     case Request::Kind::kCopyVpn: CopyLan(true); break;
     case Request::Kind::kController: CycleInput(true); break;
     case Request::Kind::kKeyboard: CycleInput(false); break;
+    case Request::Kind::kSaveSet:   // (Navi) solo or multiplayer saves (coop_save.h)
+        g_menu.SetNote({CoopSave::ChooseSaveSet(r.text == "multiplayer")});
+        g_menu.SetSaveSet(CoopSave::MultiplayerSaves());
+        break;
+    case Request::Kind::kNgPlus: {   // (Navi) New Game+ (coop_ngplus.h)
+        CoopNgPlus::SetLevel(std::atoi(r.text.c_str()));
+        g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());
+        g_menu.SetNote({CoopNgPlus::Level() == 0 ? std::string("New Game+ off.")
+                                                 : "New Game+ " + std::to_string(CoopNgPlus::Level()) +
+                                                       ": start a new file to play it (your hearts carry over)."});
+        break;
+    }
     }
 }
 
@@ -468,6 +483,8 @@ void ShowTab() {
     g_shown = true;
     g_menu.Show(ReadOptions());
     g_menu.SetLook(CoopLook::Shown());   // the Customize page opens on the look waiting, else the one worn
+    g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());   // (Navi) New Game+
+    g_menu.SetSaveSet(CoopSave::MultiplayerSaves());   // (Navi) the Saves row
     const std::string coop = ReadText(CoopIni());
     const auto last = CoopTitleMenu::IniGet(coop, "last_invite");
     g_menu.SetRejoin(CoopTitleMenu::IniGet(coop, "last_host").value_or(""), last.value_or(""));

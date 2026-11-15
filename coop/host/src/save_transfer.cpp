@@ -438,7 +438,12 @@ bool decide_again(bool decided, bool over, bool in_game) {
 FolderChoice folder_choice(std::optional<bool> env, bool can_switch, bool connected, bool is_host, bool in_game) {
   if (!can_switch) return env && *env ? FolderChoice::coop : FolderChoice::own;
   if (!connected) return FolderChoice::wait;
-  if (is_host || in_game) return FolderChoice::own;
+  // (Navi, 2026-11-15) A guest who joins with a save loaded plays the host's save too: it comes in now and is switched
+  // to on the title's menu with no file loaded (pending_step), never under the game being played, so no two saves mix.
+  // Before, such a guest kept its own save for the whole session (a friend who joined from the pause menu restarted at
+  // the beginning of his own early save while the host was far ahead).
+  (void)in_game;
+  if (is_host) return FolderChoice::own;
   return FolderChoice::coop;
 }
 

@@ -3,6 +3,7 @@
 #include "coop_save.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
@@ -67,6 +68,11 @@ bool g_title_up = false;   // the title's menu is up (NoteTitle, Hookshot's titl
 bool g_suspended = false;
 const void* g_decided_client = nullptr;   // the session's client it was made for
 bool g_live = false;   // decided and the session not over (SessionLive)
+// (Navi) Solo or multiplayer saves (ChooseSaveSet): the choice kept in coop-saves.ini, read once; put in force on the
+// first title's menu.
+bool g_mp_saves = false;
+bool g_set_read = false;
+bool g_set_applied = false;
 
 // An environment variable's text ("" when unset).
 std::string EnvText(const char* name) {
@@ -167,6 +173,10 @@ void SwitchFrame(coop::net::Client& client) {
             LOG_INFO(Core, "coop: save: a guest: this game plays from the co-op save folder (the host's save) in {} "
                            "once the host's save is written there; until then it stays on {}",
                      g_pending.string(), g_dir.string());
+            if (g_in_game) {   // (Navi) joined with a save loaded: the host's comes in and waits for the title
+                Say("You joined with your own save loaded: the host's save is coming. Go back to the title screen and "
+                    "load a save after Success to play the host's game.");
+            }
         } else {
             LOG_INFO(Core, "coop: save: {}", connected && client.is_host()
                                                  ? "the host: this game uses its own saves"
@@ -288,9 +298,117 @@ bool SessionLive() {
     return g_live;
 }
 
+namespace {
+
+fs::path SaveSetFile() {
+    return Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop-saves.ini";
+}
+
+// Under g_mutex: the kept choice, read once ("saves = multiplayer"; anything else: solo).
+void ReadSaveSetLocked() {
+    if (g_set_read) return;
+    g_set_read = true;
+    std::FILE* f = nullptr;
+#ifdef _MSC_VER
+    if (_wfopen_s(&f, SaveSetFile().c_str(), L"rb") != 0) f = nullptr;
+#else
+    f = std::fopen(SaveSetFile().c_str(), "rb");
+#endif
+    if (f == nullptr) return;
+    char buf[256] = {};
+    const std::size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+    std::fclose(f);
+    g_mp_saves = std::string_view(buf, n).find("saves = multiplayer") != std::string_view::npos;
+}
+
+void KeepSaveSetLocked() {
+    std::FILE* f = nullptr;
+#ifdef _MSC_VER
+    if (_wfopen_s(&f, SaveSetFile().c_str(), L"wb") != 0) f = nullptr;
+#else
+    f = std::fopen(SaveSetFile().c_str(), "wb");
+#endif
+    if (f == nullptr) {
+        LOG_WARNING(Core, "coop: save: could not write {}", SaveSetFile().string());
+        return;
+    }
+    const std::string text = std::string("# Navi: the saves played, solo or multiplayer (Multiplayer tab, Settings, Saves)\n") +
+                             "saves = " + (g_mp_saves ? "multiplayer" : "solo") + "\n";
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+}
+
+// Under g_mutex: the solo folder of the folder mounted now (no -coop, no -mp).
+fs::path SoloDirLocked(const fs::path& now) {
+    fs::path p = save::own_dir_of(now);
+    const std::string name = p.filename().string();
+    if (name.size() > 3 && name.compare(name.size() - 3, 3, "-mp") == 0) {
+        p = p.parent_path() / name.substr(0, name.size() - 3);
+    }
+    return p;
+}
+
+// Under g_mutex: the chosen set mounted, when that may be done now (the title's menu, no file, no session). The note.
+std::string ApplySaveSetLocked() {
+    if (!g_root || !g_remount) return "Saves can only be switched in this game's own menu.";
+    if (g_in_game || !g_title_up) return "Go back to the title screen first: the saves switch there.";
+    if (g_decided || !g_pending.empty()) return "Leave the multiplayer game first: the saves switch with no session.";
+    const auto root = g_root();
+    if (root.empty()) return "The game has not opened its saves yet.";
+    const fs::path now = fs::path(root).lexically_normal();
+    const fs::path solo = SoloDirLocked(now);
+    fs::path want = solo;
+    if (g_mp_saves) want += "-mp";
+    if (want == now) return g_mp_saves ? "Multiplayer saves." : "Solo saves.";
+    std::error_code ec;
+    if (g_mp_saves && !fs::exists(want, ec)) {   // (the first time: the solo saves as they are, to start from)
+        fs::copy(solo, want, fs::copy_options::recursive, ec);
+        LOG_INFO(Core, "coop: save: the multiplayer saves made as a copy of the solo saves: {}{}", want.string(),
+                 ec ? " (copy failed: " + ec.message() + ")" : std::string());
+        if (ec) return "The multiplayer saves could not be made (see the log).";
+    }
+    if (!g_remount(want.string())) {
+        LOG_WARNING(Core, "coop: save: could not switch the saves to {}", want.string());
+        return "The saves could not be switched (see the log).";
+    }
+    NoteSaveDirLocked(want);
+    LOG_INFO(Core, "coop: save: playing the {} saves: {}", g_mp_saves ? "multiplayer" : "solo", want.string());
+    return g_mp_saves ? "Multiplayer saves: load a save to play them." : "Solo saves: load a save to play them.";
+}
+
+}  // namespace
+
 void NoteTitle(bool title_up) {
     std::lock_guard lock(g_mutex);
     g_title_up = title_up;
+    if (title_up && !g_set_applied && !g_in_game && g_root) {   // (Navi) the kept choice, on the first title
+        ReadSaveSetLocked();
+        g_set_applied = true;
+        if (g_mp_saves) ApplySaveSetLocked();
+    }
+}
+
+std::string ChooseSaveSet(bool multiplayer) {
+    std::lock_guard lock(g_mutex);
+    ReadSaveSetLocked();
+    const bool before = g_mp_saves;
+    g_mp_saves = multiplayer;
+    const std::string note = ApplySaveSetLocked();
+    const std::string root = g_root ? g_root() : std::string();
+    const bool done = !root.empty() && (fs::path(root).lexically_normal().filename().string().ends_with("-mp") ||
+                                        save::own_dir_of(fs::path(root)).filename().string().ends_with("-mp")) == multiplayer;
+    if (!done) {
+        g_mp_saves = before;   // (not switched: the choice stays as it was)
+        return note;
+    }
+    KeepSaveSetLocked();
+    return note;
+}
+
+bool MultiplayerSaves() {
+    std::lock_guard lock(g_mutex);
+    ReadSaveSetLocked();
+    return g_mp_saves;
 }
 
 void CancelPendingSwitch(std::string_view why) {

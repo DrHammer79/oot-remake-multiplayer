@@ -465,6 +465,11 @@ class Session {
   const protocol::DbnoMode& dbno() const { return dbno_; }
   // The difficulty in force now, as every player has been told (DIFFICULTY).
   protocol::Difficulty difficulty() const;
+  // (Navi) New Game+: the hosting game's level (protocol/difficulty.hpp
+  // ngplus_difficulty), on top of the difficulty in force; a change is told
+  // to everyone at once. 0: none. Only the in-game host's server sets it.
+  void set_ngplus(std::uint8_t level);
+  std::uint8_t ngplus() const { return ngplus_; }
   // Flags in the server's table.
   std::size_t flag_count() const { return flags_.size(); }
   // Connections from `address` still waiting for HELLO.
@@ -809,6 +814,7 @@ class Session {
   protocol::DifficultyChoice difficulty_;
   std::uint8_t difficulty_set_by_ = 0;
   protocol::DifficultyValues difficulty_told_;
+  std::uint8_t ngplus_ = 0;  // (Navi) New Game+ level (set_ngplus)
   // The host's last MOD_SETTINGS (docs/protocol.md, "Mods"): kept when the
   // host leaves until the new host sends its own; forgotten when the session
   // empties.

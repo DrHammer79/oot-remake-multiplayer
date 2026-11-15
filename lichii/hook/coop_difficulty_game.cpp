@@ -19,6 +19,7 @@
 #include "common/fs/path_util.h"
 #include "common/logging.h"
 #include "coop_every.h"
+#include "coop_ngplus.h"
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 
@@ -28,21 +29,25 @@ namespace {
 namespace proto = coop::protocol;
 namespace fs = std::filesystem;
 
-// The three values in one word, for any thread.
+// The five values in one word, for any thread, 12 bits each (every end is
+// below 4096: boss life 1600). (Navi: it held three, so the bosses' own life
+// and damage never reached the game: they stayed 100%.)
 std::uint64_t Packed(const Values& v) {
-    return static_cast<std::uint64_t>(v.hp_pct) | static_cast<std::uint64_t>(v.damage_pct) << 16 |
-           static_cast<std::uint64_t>(v.count_pct) << 32;
+    auto f = [](std::uint16_t pct) { return static_cast<std::uint64_t>(pct & 0xfff); };
+    return f(v.hp_pct) | f(v.damage_pct) << 12 | f(v.count_pct) << 24 | f(v.boss_hp_pct) << 36 |
+           f(v.boss_damage_pct) << 48;
 }
 
 Values Unpacked(std::uint64_t word) {
-    return {static_cast<std::uint16_t>(word), static_cast<std::uint16_t>(word >> 16),
-            static_cast<std::uint16_t>(word >> 32)};
+    auto f = [word](int at) { return static_cast<std::uint16_t>((word >> at) & 0xfff); };
+    return {f(0), f(12), f(24), f(36), f(48)};
 }
 
 struct Glue {
     std::mutex mutex;
     State state;                    // network thread writes, under mutex
     std::atomic<std::uint64_t> now{Packed(Values{})};  // state.values, for any thread
+    std::atomic<bool> told{false};  // (Navi) the server said the values (they hold New Game+ then)
     std::optional<Choice> wish;     // Set -> Frame
     std::optional<Choice> kept;     // the file's, read once
     bool kept_read = false;
@@ -119,7 +124,10 @@ State Get() {
 }
 
 Values Now() {
-    return Unpacked(TheGlue().now.load());
+    Glue& g = TheGlue();
+    const Values v = Unpacked(g.now.load());
+    // (Navi) New Game+ alone: our own level on the game as it is. In a session the server's values hold the host's.
+    return g.told.load() ? v : proto::ngplus_difficulty(v, CoopNgPlus::Level());
 }
 
 bool Set(const Choice& choice) {
@@ -146,6 +154,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         std::lock_guard lock(g.mutex);
         g.state = State{};
         g.now.store(Packed(Values{}));
+        g.told.store(false);
         g.wish.reset();
         g.offered = false;
         return;
@@ -180,6 +189,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
     g.state.values = m->values;
     g.state.set_by = m->set_by;
     g.now.store(Packed(m->values));
+    g.told.store(true);
     const std::size_t players = client.players().size();  // (this client included)
     if (changed) {
         g.Line("Difficulty: " + Describe(g.state.choice, m->values, players));

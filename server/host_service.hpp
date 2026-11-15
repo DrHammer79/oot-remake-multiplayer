@@ -118,6 +118,9 @@ class HostService {
   bool port_failed() const { return port_failed_; }
   std::uint16_t port() const;
   const Session* session() const;
+  // (Navi) New Game+: the hosting game's level (Session::set_ngplus). Between
+  // service() calls, on the same thread.
+  void set_ngplus(std::uint8_t level);
 
  private:
   std::uint64_t now_ms() const;
