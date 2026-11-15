@@ -25,6 +25,7 @@ target_sources(core PRIVATE
     "${_coop_hook}/coop_difficulty.cpp"
     "${_coop_hook}/coop_difficulty_game.cpp"
     "${_coop_hook}/coop_ngplus.cpp"
+    "${_coop_hook}/coop_ngplus_rules.cpp"
     "${_coop_hook}/coop_drops.cpp"
     "${_coop_hook}/coop_chests.cpp"
     "${_coop_hook}/coop_colors.cpp"

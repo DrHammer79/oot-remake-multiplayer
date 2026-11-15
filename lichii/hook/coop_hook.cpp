@@ -1098,7 +1098,7 @@ public:
         }
         // (Navi) New Game+ (coop_ngplus.h): Ganon's death unlocks it; with a level on, the kept hearts.
         if (memory) {
-            CoopNgPlus::Frame(system, *memory, reading.has_value());
+            CoopNgPlus::Frame(*memory, reading.has_value(), !report.connected || report.hosting);  // host or alone
         }
         for (auto& line : CoopNgPlus::TakeLines()) {
             chat_.Add(std::move(line), true);
@@ -2420,7 +2420,7 @@ void LocalFrameOff(Core::System& system) {
     }
     CoopLocalGame::Frame(facts);
     // (Navi) New Game+ alone (coop_ngplus.h): no chat box here, the log and the Settings page say it.
-    CoopNgPlus::Frame(system, memory, facts.position.has_value());
+    CoopNgPlus::Frame(memory, facts.position.has_value(), true);
     for (const auto& line : CoopNgPlus::TakeLines()) {
         LOG_INFO(Core, "coop: {}", line);
     }

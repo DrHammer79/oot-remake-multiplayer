@@ -11,8 +11,10 @@
 // - The level is chosen on the Multiplayer tab's Settings page (New Game+:
 //   Off, NG+ 1 ... the highest unlocked) and kept in coop-ngplus.ini beside
 //   coop.ini, with what was unlocked and the hearts.
-// - With a level on: any save played gets the kept hearts (MaxLife and our
-//   Link's own Life component; never lowered), and the difficulty is
+// - With a level on: a NEW file (its opening, IsNewFileOpening) of the host
+//   or of a game alone gets the kept hearts, through the game's own MaxLife
+//   setter (never lowered; a loaded save and a guest's game get nothing of
+//   their own: a guest has the host's save), and the difficulty is
 //   ngplus_difficulty (coop/protocol/difficulty.hpp) of what is in force:
 //   alone in CoopDifficulty::Now(), in a session by the host's server (the
 //   host's level counts for everyone; a guest's own level is not used there,
@@ -20,18 +22,18 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace Core {
-class System;
-}
 namespace CoopHook {
 class EmulatorMemory;
 }
 
 namespace CoopNgPlus {
+
+inline constexpr std::int32_t kMostQuarters = 80;  // 20 hearts, the most kept
 
 // What coop-ngplus.ini keeps.
 struct Saved {
@@ -48,6 +50,19 @@ Saved Beaten(Saved s, std::int32_t max_life);
 Saved Choose(Saved s, int level);
 // An event the game asked for that is Ganon's death.
 bool IsGanonDeath(std::string_view event);
+// An event the game asked for that is the opening of a new file.
+bool IsNewFileOpening(std::string_view event);
+
+// What decides the kept hearts for the loaded file.
+struct Give {
+    std::uint8_t level = 0;                // the level chosen (0 off)
+    std::int32_t hearts = 0;               // kept (quarter hearts)
+    std::optional<std::int32_t> max_life;  // the file's MaxLife now (nothing: unread)
+    bool new_file = false;                 // the file began with the opening since the title
+    bool may_give = false;                 // alone, or this game hosts (a guest plays the host's save)
+};
+// The MaxLife to set, or nothing (off, a loaded save, a guest, already that high: never lowered).
+std::optional<std::int32_t> HeartsToGive(const Give& g);
 
 // Any thread.
 std::uint8_t Level();
@@ -57,8 +72,8 @@ std::int32_t Hearts();
 bool SetLevel(int level);
 
 // The hook's thread, each frame (alone and in a session): Ganon's death, and the hearts while a level is on.
-// `in_game`: our Link is in a loaded save.
-void Frame(Core::System& system, CoopHook::EmulatorMemory& memory, bool in_game);
+// `in_game`: our Link is in a loaded save. `may_give`: alone, or this game hosts the session.
+void Frame(CoopHook::EmulatorMemory& memory, bool in_game, bool may_give);
 
 // Chat lines ("New Game+ 1 unlocked ...").
 std::vector<std::string> TakeLines();

@@ -97,6 +97,7 @@ add_executable(coop_tests
   lichii/pvp_test.cpp
   lichii/dbno_test.cpp
   lichii/difficulty_test.cpp
+  lichii/ngplus_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ngplus_rules.cpp
   lichii/live_events_test.cpp
   lichii/logic_probe_test.cpp
   lichii/shared_scenes_test.cpp
