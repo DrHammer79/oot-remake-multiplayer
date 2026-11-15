@@ -654,7 +654,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(r->kind == Request::Kind::kKeyboard);
     // gone again (the module found no patch 0015): the selection stays on a row there is
     m.SetInputRows({}, {});
-    CHECK(Names(m).size() == 8);   // (with the port and two map rows)
+    CHECK(Names(m).size() == 10);   // (with the port, two map rows, New Game+ and Saves)
     CHECK_FALSE(Selected(m).empty());
 }
 
