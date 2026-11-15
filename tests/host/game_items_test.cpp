@@ -1404,3 +1404,43 @@ TEST_CASE("items: Ruto's Letter goes into the first empty bottle while King Zora
   item[letters::kBottles[1].item] = letters::kEmpty;
   CHECK_FALSE(ruto_letter_bottle(true, false, v, in));
 }
+
+TEST_CASE("items: Ruto's Letter says why it waits (issue 58, the 0.11.2 big run)") {
+  namespace letters = coop::host::letters;
+  using coop::host::RutoWait;
+  using coop::host::ruto_letter_plan;
+  // The run: B owned BottleA (StockNum 1, IsValid 1, BottleItem the default Empty), the others unowned.
+  std::map<std::uint32_t, bool> valid;
+  std::map<std::uint32_t, std::uint32_t> item;
+  for (std::size_t i = 0; i < 5; ++i) {
+    valid[letters::kBottles[i].valid] = i == 0;
+    item[letters::kBottles[i].item] = letters::kEmpty;
+  }
+  const auto v = [&](std::uint32_t h) -> std::optional<bool> {
+    const auto it = valid.find(h);
+    return it == valid.end() ? std::nullopt : std::optional(it->second);
+  };
+  const auto in = [&](std::uint32_t h) -> std::optional<std::uint32_t> {
+    const auto it = item.find(h);
+    return it == item.end() ? std::nullopt : std::optional(it->second);
+  };
+  const auto moved = [](const char* step) { return coop::host::king_zora_moved(coop::host::flag_hash(step)); };
+  CHECK(ruto_letter_plan(false, moved("Ready"), v, in).why == RutoWait::not_got);
+  CHECK(ruto_letter_plan(std::nullopt, moved("Ready"), v, in).why == RutoWait::not_got);
+  CHECK(ruto_letter_plan(true, std::nullopt, v, in).why == RutoWait::king_unread);
+  CHECK(ruto_letter_plan(true, moved("SomethingElse"), v, in).why == RutoWait::king_unread);
+  CHECK(ruto_letter_plan(true, moved("Step07"), v, in).why == RutoWait::king_moved);
+  for (const char* step : {"NotReady", "Ready", "Step06"}) {
+    const auto plan = ruto_letter_plan(true, moved(step), v, in);
+    CHECK(plan.why == RutoWait::give);
+    CHECK(plan.bottle == letters::kBottles[0].item);
+  }
+  item[letters::kBottles[0].item] = coop::host::flag_hash("Fish");
+  CHECK(ruto_letter_plan(true, moved("Ready"), v, in).why == RutoWait::no_empty);
+  item[letters::kBottles[3].item] = letters::kLetter;
+  CHECK(ruto_letter_plan(true, moved("Ready"), v, in).why == RutoWait::has_letter);
+  item.erase(letters::kBottles[2].item);
+  CHECK(ruto_letter_plan(true, moved("Ready"), v, in).why == RutoWait::bottle_unread);
+  CHECK_FALSE(ruto_letter_plan(true, moved("Ready"), v, in).bottle);
+  CHECK(coop::host::ruto_wait_text(RutoWait::king_unread).find("ChallengeMgr") != std::string_view::npos);
+}

@@ -211,24 +211,46 @@ std::uint64_t FindEntry(CoopPuppet::Guest& guest, std::uint64_t mgr, std::uint32
     return 0;
 }
 
+// Guest memory through a ReadMemory, never written (LiveStep, LiveDescribe).
+class ReadOnly final : public CoopPuppet::Guest {
+public:
+    explicit ReadOnly(const ReadMemory& read) : read_(read) {}
+    bool Read(std::uint64_t address, void* out, std::size_t size) override { return read_(address, out, size); }
+    bool Write(std::uint64_t, const void*, std::size_t) override { return false; }
+
+private:
+    const ReadMemory& read_;
+};
+
 } // namespace
 
 std::optional<std::uint32_t> LiveStep(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge) {
-    class ReadOnly final : public CoopPuppet::Guest {
-    public:
-        explicit ReadOnly(const ReadMemory& read) : read_(read) {}
-        bool Read(std::uint64_t address, void* out, std::size_t size) override { return read_(address, out, size); }
-        bool Write(std::uint64_t, const void*, std::size_t) override { return false; }
-
-    private:
-        const ReadMemory& read_;
-    } guest(read);
+    ReadOnly guest(read);
     if (main == 0) return std::nullopt;
     const auto mgr = Get<std::uint64_t>(guest, main + kChallengeMgr);
     if (!mgr || *mgr == 0) return std::nullopt;
     const std::uint64_t entry = FindEntry(guest, *mgr, challenge);
     if (entry == 0) return std::nullopt;
     return Get<std::uint32_t>(guest, entry + kEntryStep);
+}
+
+std::string LiveDescribe(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge) {
+    ReadOnly guest(read);
+    if (main == 0) return "no main";
+    const auto mgr = Get<std::uint64_t>(guest, main + kChallengeMgr);
+    if (!mgr) return "manager pointer unread";
+    if (*mgr == 0) return "no manager";
+    char at[24];
+    std::snprintf(at, sizeof at, "%#llx", static_cast<unsigned long long>(*mgr));
+    std::string out = std::string("manager ") + at + ", arrays";
+    for (std::uint64_t a = 0; a < 3; ++a) {
+        const auto count = Get<std::int32_t>(guest, *mgr + kArrays + 0x10 * a);
+        out += count ? " " + std::to_string(*count) : " unread";
+    }
+    const std::uint64_t entry = FindEntry(guest, *mgr, challenge);
+    if (entry == 0) return out + ", " + Hex(challenge) + " not found";
+    const auto step = Get<std::uint32_t>(guest, entry + kEntryStep);
+    return out + ", " + Hex(challenge) + " at " + (step ? Hex(*step) : std::string("unread"));
 }
 
 bool HeldStep(std::uint32_t challenge, std::uint32_t step) {

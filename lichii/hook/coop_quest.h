@@ -118,6 +118,9 @@ bool HeldStep(std::uint32_t challenge, std::uint32_t step);
 // guest address; `read` reads guest memory.
 using ReadMemory = std::function<bool(std::uint64_t address, void* out, std::size_t size)>;
 std::optional<std::uint32_t> LiveStep(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge);
+// For the log when LiveStep has nothing: what the manager read gave (no
+// manager, each array's count, the entry or its absence). Read only.
+std::string LiveDescribe(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge);
 
 // The step of `quest` the live manager should get, from the GameData step
 // `value` reads, or nothing. Sent: Get_StoneOfFire (the Kakariko gate's quest,

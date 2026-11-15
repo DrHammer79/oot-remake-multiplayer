@@ -528,3 +528,18 @@ TEST_CASE("quest: the live step is read from the game's ChallengeMgr, not GameDa
     };
     CHECK_FALSE(CoopQuest::LiveStep(nothing, kMain, Hash("Get_StoneOfFire")));
 }
+
+TEST_CASE("quest: LiveDescribe says what the manager read gave (issue 58 log)") {
+    Mgr g("KakarikoVillageNpc");
+    const CoopQuest::ReadMemory read = [&g](std::uint64_t a, void* out, std::size_t n) { return g.m.Read(a, out, n); };
+    const std::string water = CoopQuest::LiveDescribe(read, kMain, Hash("Get_StoneOfWater"));
+    CHECK(water.find("manager 0x") == 0);
+    CHECK(water.find("not found") != std::string::npos);
+    CHECK(CoopQuest::LiveDescribe(read, kMain, Hash("Get_StoneOfFire")).find(" at 0x") != std::string::npos);
+    CHECK(CoopQuest::LiveDescribe(read, 0, Hash("Get_StoneOfFire")) == "no main");
+    Memory none;
+    const CoopQuest::ReadMemory nothing = [&none](std::uint64_t a, void* out, std::size_t n) {
+        return none.Read(a, out, n);
+    };
+    CHECK(CoopQuest::LiveDescribe(nothing, kMain, Hash("Get_StoneOfFire")) == "manager pointer unread");
+}

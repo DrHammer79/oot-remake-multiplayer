@@ -6,6 +6,7 @@ setflag PouchData.Item_ZeldaLetter.StockNum 1                      # B holds Zel
 mark bottle
 setflag PouchData.BottleA.StockNum 1                               # and an empty bottle
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
+setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Empty   # the lane saves keep a Fairy in BottleA: empty it
 wait 120
 press DLEFT 12
 wait 240

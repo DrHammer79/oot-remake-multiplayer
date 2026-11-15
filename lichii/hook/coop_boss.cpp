@@ -387,6 +387,7 @@ Actions Sync::Step(const Local& local, std::uint64_t now_us) {
         }
         here_ = room;
         provisional_ = false;
+        died_ = false;
         entered_at_ = now_us;
         intro_at_ = 0;
         skip_asked_ = false;
@@ -416,9 +417,26 @@ Actions Sync::Step(const Local& local, std::uint64_t now_us) {
             }
         }
     } else if (here_ != nullptr) {
+        // Our Link died (a Game Over): its events are not the boss's; a fight
+        // that is on goes on for the others.
+        if (local.link_dead.value_or(false) && !died_) {
+            died_ = true;
+            out.log.push_back("our Link died: a Game Over, not the boss's death");
+            const bool boss_gone = local.boss_alive.has_value() && !*local.boss_alive;
+            if (phase_ == Phase::outro && provisional_ && !boss_gone) {
+                provisional_ = false;
+                phase_ = Phase::fight;
+                fight_at_ = now_us;
+            }
+        } else if (died_ && local.link_dead.has_value() && !*local.link_dead && !local.event) {
+            died_ = false;
+            out.log.push_back("our Link is up again");
+        }
         switch (phase_) {
         case Phase::waiting:
-            if (rose) {
+            if (rose && died_) {
+                out.log.push_back("an event while our Link is dead: not the intro");
+            } else if (rose) {
                 // Not yet past the door: a door opening or a text on the way
                 // is an event too (issue 148). Commit() below says when.
                 phase_ = Phase::intro;
@@ -457,7 +475,10 @@ Actions Sync::Step(const Local& local, std::uint64_t now_us) {
             }
             break;
         case Phase::fight:
-            if (rose && !committed_ && local.boss_alive.value_or(true)) {
+            if (rose && died_ && local.boss_alive.value_or(true)) {
+                // (The boss read gone at the same time is its death all the same: below.)
+                out.log.push_back("an event while our Link is dead: the Game Over, not the boss's death");
+            } else if (rose && !committed_ && local.boss_alive.value_or(true)) {
                 // The fight began here with no intro and nobody past the door
                 // (no event yet, or one that was not the intro): this event
                 // may be the real intro, not the boss's death (review of

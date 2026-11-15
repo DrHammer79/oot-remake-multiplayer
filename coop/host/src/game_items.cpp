@@ -643,19 +643,41 @@ std::optional<bool> king_zora_moved(std::uint32_t live_step) {
   return std::nullopt;
 }
 
-std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::optional<bool> king_moved,
-                                                const std::function<std::optional<bool>(std::uint32_t)>& valid,
-                                                const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item) {
-  if (got != true || king_moved != false) return std::nullopt;
+std::string_view ruto_wait_text(RutoWait why) {
+  switch (why) {
+    case RutoWait::not_got: return "nobody got it";
+    case RutoWait::king_unread: return "King Zora's step (ChallengeMgr Get_StoneOfWater) unread";
+    case RutoWait::king_moved: return "King Zora has moved here";
+    case RutoWait::bottle_unread: return "a bottle unread";
+    case RutoWait::has_letter: return "a bottle holds it";
+    case RutoWait::no_empty: return "no owned empty bottle";
+    case RutoWait::give: return "into a bottle";
+  }
+  return "?";
+}
+
+RutoLetter ruto_letter_plan(std::optional<bool> got, std::optional<bool> king_moved,
+                            const std::function<std::optional<bool>(std::uint32_t)>& valid,
+                            const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item) {
+  if (got != true) return {RutoWait::not_got, std::nullopt};
+  if (!king_moved) return {RutoWait::king_unread, std::nullopt};
+  if (*king_moved) return {RutoWait::king_moved, std::nullopt};
   std::optional<std::uint32_t> empty;
   for (const letters::Bottle& b : letters::kBottles) {
     const auto v = valid(b.valid);
     const auto in = item(b.item);
-    if (!v || !in) return std::nullopt;  // unread: leave every bottle alone
-    if (*in == letters::kLetter) return std::nullopt;
+    if (!v || !in) return {RutoWait::bottle_unread, std::nullopt};  // leave every bottle alone
+    if (*in == letters::kLetter) return {RutoWait::has_letter, std::nullopt};
     if (*v && *in == letters::kEmpty && !empty) empty = b.item;
   }
-  return empty;
+  if (!empty) return {RutoWait::no_empty, std::nullopt};
+  return {RutoWait::give, empty};
+}
+
+std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::optional<bool> king_moved,
+                                                const std::function<std::optional<bool>(std::uint32_t)>& valid,
+                                                const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item) {
+  return ruto_letter_plan(got, king_moved, valid, item).bottle;
 }
 
 std::optional<std::string_view> ocarina_equip_mend(std::int32_t fairy, std::int32_t time,

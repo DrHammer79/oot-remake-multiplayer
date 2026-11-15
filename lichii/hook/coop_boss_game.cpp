@@ -261,6 +261,10 @@ struct Glue {
             if (const Room* room = RoomOfScene(*scene)) {
                 local.boss_alive = CoopObjects::LastBossAlive(Bodies(*room));
                 local.boss_hurt = CoopObjects::LastBossHurt(Bodies(*room));
+                // A Game Over here is no boss's death (boss-gameover-b): Link's own Life at 0.
+                if (const auto life = CoopObjects::OurLinkLife()) {
+                    local.link_dead = *life <= 0;
+                }
                 // Not ready to own the boss until our game has played its
                 // intro: before it our boss is still in its pre-battle phase
                 // (Gohma on the ceiling), and as owner it would hold every

@@ -2175,14 +2175,28 @@ private:
         const auto live = CoopQuest::LiveStep(
             [&memory](std::uint64_t a, void* out, std::size_t n) { return ReadGuest(&memory, a, out, n); }, base_,
             letters::kStoneOfWater);
-        const auto bottle = coop::host::ruto_letter_bottle(
+        const auto plan = coop::host::ruto_letter_plan(
             flags.get_bool(letters::kRutoGot), live ? coop::host::king_zora_moved(*live) : std::nullopt,
             [&](std::uint32_t h) { return flags.get_bool(h); }, [&](std::uint32_t h) { return flags.get_enum(h); });
-        if (bottle && coop::host::GameFlags::set_enum(memory, *bottle, letters::kLetter)) {
+        // Each change of why it waits is logged once (the 0.11.2 big run's
+        // letter never came and said nothing about which test held it).
+        if (plan.why != ruto_why_ && plan.why != coop::host::RutoWait::give) {
+            ruto_why_ = plan.why;
+            const std::string step =
+                live ? fmt::format("{:#010x}", *live)
+                     : CoopQuest::LiveDescribe([&memory](std::uint64_t a, void* out,
+                                                         std::size_t n) { return ReadGuest(&memory, a, out, n); },
+                                               base_, letters::kStoneOfWater);
+            LOG_INFO(Core, "coop: items: Ruto's Letter waits: {} (Get_StoneOfWater: {}) (issue 58)",
+                     coop::host::ruto_wait_text(plan.why), step);
+        }
+        if (plan.bottle && coop::host::GameFlags::set_enum(memory, *plan.bottle, letters::kLetter)) {
+            ruto_why_ = plan.why;
             LOG_INFO(Core, "coop: items: Ruto's Letter into bottle {:#010x}: King Zora has not moved here (issue 58)",
-                     *bottle);
+                     *plan.bottle);
         }
     }
+    std::optional<coop::host::RutoWait> ruto_why_;  // issue 58, the last reason logged
 
     // Issue 130 (docs/flags.md, "Story and cutscenes"): raises our own
     // Meet_DekuTree quest to what the shared story says (Mido let someone by:

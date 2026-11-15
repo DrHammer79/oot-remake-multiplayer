@@ -165,6 +165,10 @@ struct Local {
     // An untouched boss is not dying, so a long event then is not its death
     // (Gohma's ceiling intro starts well after the room's entry event).
     std::optional<bool> boss_hurt;
+    // Whether our own Link is dead: his Life component read at 0 by the object
+    // walk (CoopObjects::OurLinkLife), nothing when unread. A Game Over is a long
+    // event in the boss room with the boss alive; it is never the boss's death.
+    std::optional<bool> link_dead;
 };
 
 class Sync {
@@ -235,6 +239,9 @@ private:
     // Our side.
     const Room* here_ = nullptr;
     bool provisional_ = false;   // outro from an event while the boss may be alive
+    // Our Link died in this room (the Game Over, then a continue or a reload): until he is up
+    // again with no event, no event of ours is taken for the intro or the boss's death.
+    bool died_ = false;
     std::uint64_t outro_at_ = 0;
     std::uint64_t fight_at_ = 0;  // when our fight phase began (kMinFightUs)
     Phase phase_ = Phase::none;

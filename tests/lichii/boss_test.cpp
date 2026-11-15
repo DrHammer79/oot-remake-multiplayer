@@ -805,3 +805,85 @@ TEST_CASE("boss: no leave notice for our own player, a group that leaves togethe
         CHECK(s.Tick(here(), 4 * kS).chat.empty());
     }
 }
+
+namespace {
+Local Dead(Vec p, bool event, std::optional<bool> alive, bool dead) {
+    Local l = Alive(p, event, alive);
+    l.boss_alive = alive;
+    l.boss_hurt = true;  // the boss has lost life: the long-event guess would apply
+    l.link_dead = dead;
+    return l;
+}
+} // namespace
+
+TEST_CASE("boss: a Game Over in the fight is never the boss's death (boss-gameover-b)") {
+    // hs-boss-full 20261115-122137: A's Link died with Gohma at 17 of 21; the Game Over ran
+    // over 15 s and was sent to the group as the boss beaten.
+    Sync s;
+    ToFight(s);
+    auto a = s.Tick(Dead(Forest().arrive, true, true, true), 30 * kS);
+    CHECK_FALSE(Has(a, proto::BossState::defeated));
+    CHECK(s.phase() == Sync::Phase::fight);
+    for (std::uint64_t t = 31; t <= 70; t += 3) {
+        a = s.Tick(Dead(Forest().arrive, true, true, true), t * kS);
+        CHECK_FALSE(Has(a, proto::BossState::defeated));
+        CHECK_FALSE(a.beaten_here);
+    }
+    // The fight goes on for the others: the heartbeat says so.
+    CHECK(Has(a, proto::BossState::intro_end));
+    // The boss's life unread during the Game Over is no death either.
+    a = s.Tick(Dead(Forest().arrive, false, std::nullopt, true), 71 * kS);
+    a = s.Tick(Dead(Forest().arrive, true, std::nullopt, true), 72 * kS);
+    CHECK_FALSE(Has(a, proto::BossState::defeated));
+}
+
+TEST_CASE("boss: Link's death read after the event began takes back the waiting (boss-gameover-b)") {
+    Sync s;
+    ToFight(s);
+    s.Tick(Dead(Forest().arrive, true, true, false), 30 * kS);
+    REQUIRE(s.phase() == Sync::Phase::outro);
+    auto a = s.Tick(Dead(Forest().arrive, true, true, true), 31 * kS);
+    CHECK(s.phase() == Sync::Phase::fight);
+    a = s.Tick(Dead(Forest().arrive, true, true, true), 50 * kS);
+    CHECK_FALSE(Has(a, proto::BossState::defeated));
+    a = s.Tick(Dead(Forest().arrive, false, true, true), 51 * kS);
+    CHECK_FALSE(Has(a, proto::BossState::defeated));
+    CHECK(s.phase() == Sync::Phase::fight);
+}
+
+TEST_CASE("boss: after a continue the fight and its win count again (boss-gameover-b)") {
+    Sync s;
+    ToFight(s);
+    s.Tick(Dead(Forest().arrive, true, true, true), 30 * kS);
+    // The continue: out of the room (a reload), then back in, Link up.
+    auto a = s.Tick(Dead(kForestEntrance, false, true, false), 50 * kS);
+    CHECK(Has(a, proto::BossState::left));
+    CHECK_FALSE(Has(a, proto::BossState::defeated));
+    // Another game kept fighting: nothing was beaten, so we are pulled back.
+    s.Receive(From(1, Forest(), proto::BossState::intro_end));
+    a = s.Tick(Dead(kForestEntrance, false, true, false), 51 * kS);
+    CHECK(a.pull);
+    // Back in, the fight is on; Link up in the same room after a death counts again too.
+    Sync t;
+    ToFight(t);
+    t.Tick(Dead(Forest().arrive, true, true, true), 30 * kS);
+    a = t.Tick(Dead(Forest().arrive, false, true, false), 40 * kS);
+    CHECK(t.phase() == Sync::Phase::fight);
+    // The real win: the boss read gone in an event.
+    t.Tick(Dead(Forest().arrive, true, true, false), 60 * kS);
+    a = t.Tick(Dead(Forest().arrive, true, false, false), 62 * kS);
+    CHECK(Has(a, proto::BossState::defeated));
+    CHECK(a.beaten_here);
+}
+
+TEST_CASE("boss: the boss read gone while our Link is dead is still its death (boss-gameover-b)") {
+    Sync s;
+    ToFight(s);
+    s.Tick(Dead(Forest().arrive, true, true, false), 30 * kS);
+    auto a = s.Tick(Dead(Forest().arrive, true, false, true), 31 * kS);
+    CHECK(Has(a, proto::BossState::defeated));
+    Sync t;
+    ToFight(t);
+    a = t.Tick(Dead(Forest().arrive, true, false, true), 30 * kS);
+    CHECK(Has(a, proto::BossState::defeated));
+}

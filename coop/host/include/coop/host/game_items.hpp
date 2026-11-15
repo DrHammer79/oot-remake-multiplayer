@@ -223,6 +223,26 @@ bool zelda_letter_spent(std::int32_t held, std::optional<bool> gate_open);
 // holds for Get_StoneOfWater. Nothing for a step not in the quest.
 std::optional<bool> king_zora_moved(std::uint32_t live_step);
 
+// Why Ruto's Letter goes into a bottle or waits (issue 58), for the log: a
+// run where it never came said nothing about which test held it back.
+enum class RutoWait {
+  not_got,        // IsGet.Item_Bottle_Letter unset (or unread)
+  king_unread,    // our ChallengeMgr's Get_StoneOfWater unread or at a step not in the quest
+  king_moved,     // King Zora has moved here: no letter needed
+  bottle_unread,  // a bottle's IsValid or BottleItem unread
+  has_letter,     // a bottle holds it already
+  no_empty,       // no owned empty bottle yet
+  give,           // `bottle` gets it
+};
+struct RutoLetter {
+  RutoWait why = RutoWait::not_got;
+  std::optional<std::uint32_t> bottle;  // the BottleItem flag, with `give`
+};
+std::string_view ruto_wait_text(RutoWait why);
+RutoLetter ruto_letter_plan(std::optional<bool> got, std::optional<bool> king_moved,
+                            const std::function<std::optional<bool>(std::uint32_t)>& valid,
+                            const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item);
+
 // The BottleItem flag to put Ruto's Letter in, or nothing: when the letter was
 // got (by anyone), King Zora has not moved here, no bottle holds it, and a
 // bottle is owned and empty (the first). Anything unread leaves it alone.
