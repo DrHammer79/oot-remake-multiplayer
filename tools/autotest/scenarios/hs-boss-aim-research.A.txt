@@ -40,7 +40,11 @@ goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
 mark a-in
 wait 2400
 mark a-after-intro
-goto 0.0 67.5 1.5 600
+goto 17.0 67.8 1.5 600  # under her: her drop is the room's trigger for the owner's own Link (GohmaStage floor Area x 22.5 z 68.2)
+aim Enemy_DungeonBoss_Gohma 0 0 0 240   # look up at her
+wait 600               # her drop
+mark a-trigger
+goto 12.0 67.8 1.5 600  # back inside the room, 10 m from its centre
 mark a-moved
 watch Enemy_DungeonBoss_Gohma 0 0 0
 wait 120

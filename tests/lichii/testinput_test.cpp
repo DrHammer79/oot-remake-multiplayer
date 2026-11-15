@@ -543,6 +543,24 @@ TEST_CASE("testinput: difficulty hands the hook the host's custom percents, or a
     CHECK(r.Done());
 }
 
+TEST_CASE("testinput: aim and near are checked, then skipped (the Hookshot driver's steps)") {
+    std::string error;
+    CHECK_FALSE(Parse("aim Gohma 0 1 300\n", error));
+    CHECK_FALSE(Parse("aim Gohma 0 1 0 60 NOPE\n", error));
+    CHECK_FALSE(Parse("near Gohma 0.1 60\n", error));
+    CHECK_FALSE(Parse("near Gohma 2\n", error));
+    Runner r(Must("aim Gohma 0 1.5 0.5 300 ZR\naim Gohma 0 0 0 60 left\nnear Gohma 2 600 B\nmark after\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    CHECK(r.TakeRequests().empty());
+    REQUIRE(log.size() == 4);
+    CHECK(log[0] == "aim skipped: the Hookshot driver's step");
+    CHECK(log[2] == "near skipped: the Hookshot driver's step");
+    CHECK(log[3] == "mark after");
+    CHECK(r.Current().buttons == 0);
+    CHECK(r.Done());
+}
+
 TEST_CASE("testinput: Project puts a world point on the picture through a row-major world-to-clip matrix") {
     // A camera at the origin looking down +z: clip x = world x, clip y = world y, clip w = world z.
     const std::array<float, 16> m{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0};

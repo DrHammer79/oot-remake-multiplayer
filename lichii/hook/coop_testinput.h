@@ -64,6 +64,10 @@
 //                          takes 3x the hits). `difficulty auto` is the
 //                          automatic scaler. Only the host can; logs
 //                          "coop: test difficulty ...: set" or "NOT set"
+//   aim NAME DX DY DZ TICKS [KEYS] [left] / near NAME RADIUS TICKS [KEYS]
+//                          the Hookshot driver's (it reads the watch file);
+//                          read and checked here, then skipped with a log
+//                          line ("aim skipped: the Hookshot driver's step")
 //   mark walk-start        writes "coop: test mark walk-start" to the log
 //
 // goto and toward steer from Link's position, read each frame. The stick is
@@ -140,6 +144,7 @@ enum class Kind {
     sync,    // sync NAME N: wait here, buttons let go, until N games reached NAME
     watch,   // test only: watch NAME [DX DY DZ] / watch off: where that actor is on screen (the .watch file)
     difficulty,  // test only: the host's difficulty choice (difficulty HP DAMAGE COUNT, or difficulty auto)
+    driver,  // aim / near: the Hookshot driver's steps (tools/autotest/hookshot.py); checked here, skipped
 };
 
 struct Step {

@@ -19,7 +19,11 @@ goto -4.0 67.5 1.0 600
 goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
 wait 2400               # the door's event and the intro
 mark a-re-in
-goto 0.0 67.5 1.5 600
+goto 17.0 67.8 1.5 600  # under her: her drop is the room's trigger for the owner's own Link (GohmaStage floor Area x 22.5 z 68.2)
+aim Enemy_DungeonBoss_Gohma 0 0 0 240   # look up at her
+wait 600               # her drop
+mark a-trigger
+goto 12.0 67.8 1.5 600  # back inside the room, 10 m from its centre
 watch Enemy_DungeonBoss_Gohma 0 2.0 1.5
 wait 300
 mark a-r1
@@ -137,8 +141,8 @@ hold ZL+Y 8
 mark a-r6-hit
 wait 120
 wait 1800               # her death and its event
-goto 7.5 67.2 1.5 900   # the room's centre, where the heart container falls
+goto 22.5 68.2 1.5 900  # the room's centre, where the heart container falls
 wait 600
-goto 9.0 67.2 1.5 300
+goto 21.0 68.2 1.5 300
 wait 900
 mark pickup

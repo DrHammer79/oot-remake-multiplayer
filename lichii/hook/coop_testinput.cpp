@@ -335,6 +335,34 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             } else {
                 return fail("want: watch ACTOR [DX DY DZ] or watch off");
             }
+        } else if (cmd == "AIM" || cmd == "NEAR") {
+            // The Hookshot driver's steps (tools/autotest/hookshot.py): checked as it checks them, skipped here.
+            std::size_t n = w.size();
+            const bool aim = cmd == "AIM";
+            if (aim && n > 0 && Upper(w[n - 1]) == "LEFT") {
+                --n;
+            }
+            float f = 0.0f;
+            bool ok = aim ? (n == 6 || n == 7) && Number(w[2], f) && Number(w[3], f) && Number(w[4], f)
+                          : (n == 4 || n == 5) && Number(w[2], f) && f >= 0.2f;
+            const std::size_t ticks_at = aim ? 5 : 3;
+            const std::size_t keys_at = aim ? 6 : 4;
+            std::uint32_t ticks = 0;
+            if (ok) {
+                const auto* end = w[ticks_at].data() + w[ticks_at].size();
+                ok = std::from_chars(w[ticks_at].data(), end, ticks).ptr == end;
+            }
+            std::string bad;
+            if (ok && n == keys_at + 1 && !Keys(w[keys_at], step, bad)) {
+                return fail("unknown key " + bad);
+            }
+            if (!ok) {
+                return fail(aim ? "want: aim ACTOR DX DY DZ TICKS [KEYS] [left]"
+                                : "want: near ACTOR RADIUS TICKS [KEYS], radius at least 0.2");
+            }
+            step.kind = Kind::driver;
+            step.mark = std::string(w[0]);
+            step.buttons = 0;
         } else if (cmd == "DIFFICULTY") {
             // difficulty HP DAMAGE COUNT (custom, percent) or difficulty auto. Test only.
             step.kind = Kind::difficulty;
@@ -496,6 +524,11 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
         if (s.kind == Kind::mark) {
             log.push_back("mark " + s.mark);
             ++index_;  // the next step starts when this one did
+            continue;
+        }
+        if (s.kind == Kind::driver) {
+            log.push_back(s.mark + " skipped: the Hookshot driver's step");
+            ++index_;
             continue;
         }
         if (s.kind == Kind::sync) {

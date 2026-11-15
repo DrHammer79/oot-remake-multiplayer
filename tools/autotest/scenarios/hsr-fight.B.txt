@@ -18,7 +18,7 @@ goto -4.0 67.5 1.0 600
 goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
 wait 2400               # the door's event and the intro
 mark b-re-in
-goto 15.0 67.5 1.5 600
+goto 15.0 69.5 1.5 600  # inside the room, 7.5 m west of its centre
 watch Enemy_DungeonBoss_Gohma 0 2.0 1.5
 wait 300
 mark b-r1
@@ -136,8 +136,8 @@ hold ZL+Y 8
 mark b-r6-hit
 wait 120
 wait 1800               # her death and its event
-goto 7.5 67.2 1.5 900   # the room's centre, where the heart container falls
+goto 22.5 68.2 1.5 900  # the room's centre, where the heart container falls
 wait 600
-goto 9.0 67.2 1.5 300
+goto 21.0 68.2 1.5 300
 wait 900
 mark pickup

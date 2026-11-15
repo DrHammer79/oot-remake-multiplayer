@@ -11,6 +11,8 @@
 #      -Server <coop-kit\auto-B\server\coop_server.exe>   (the 0.11 server)
 # PASS (proof lines; shots at every mark):
 #  1. A "coop: test difficulty custom 300 100 100: set"; the 5 s line "difficulty: bosses: ... (boss life 300%)".
+#  0. VOID unless she drops after a-trigger: her anim leaves Pre_Battle_Ceiling_* "(ours)" and A logs "ready to own
+#     the boss" (boss-owner-b: her drop is the room trigger for the owner's own Link under her).
 #  2. Both "coop: test aim on Enemy_DungeonBoss_Gohma" (aim reached); never only "aim timed out".
 #  3. STUN by B (r1, only B fires): B "our own hit: the copy runs its own reaction", B "Enemy_DungeonBoss_Gohma:
 #     now ours" (hand-over), shots b-r1-seed / a-r1-seed show her down in BOTH games.
@@ -61,7 +63,11 @@ mark a-in
 wait 2400               # the door's event, the intro
 mark a-after-intro
 watch Enemy_DungeonBoss_Gohma 0 2.0 1.5
-goto 0.0 67.5 1.5 600   # 7.5 m west of the room's centre
+goto 17.0 67.8 1.5 600  # under her: her drop is the room's trigger for the owner's own Link (GohmaStage floor Area x 22.5 z 68.2)
+aim Enemy_DungeonBoss_Gohma 0 0 0 240   # look up at her
+wait 600               # her drop
+mark a-trigger
+goto 12.0 67.8 1.5 600  # back inside the room, 10 m from its centre
 mark a-moved
 wait 1500               # B's intro
 mark a-r1
@@ -328,9 +334,9 @@ wait 120
 mark a-fight-over
 wait 1800               # her death and its event
 mark a-dead
-goto 7.5 67.2 1.5 900   # the room's centre, where the heart container falls
+goto 22.5 68.2 1.5 900  # the room's centre, where the heart container falls
 wait 600
-goto 9.0 67.2 1.5 300
+goto 21.0 68.2 1.5 300
 wait 900
 mark a-pickup
 wait 1200
