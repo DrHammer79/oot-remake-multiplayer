@@ -4,7 +4,9 @@
 # near Link), then pushes the grave Obj_Tombstone_A_01 (Banc 21.53 103.03 11.17, hash
 # 14296617607783081483) by walking into it from its front (-x), then tries a pull (hold A, stick back).
 # Then the test kill of the Poe. B watches from about 10 m (-x of the graves).
-#! switches LICHII_COOP_TIME_TEST_SET=72000@75,LICHII_COOP_DEBUG_TIME=1
+# The host sets 20:00 10 s after joining and again 10 s after its save load (the save's own time replaced the
+# title's set in the 2026-11-14 run: daylight); the guests take the host's jump (docs/time.md).
+#! switches LICHII_COOP_TIME_TEST_SET=72000@10,LICHII_COOP_DEBUG_TIME=1
 #! timeout 330
 # Pass: A "share" OBJECT_SPAWN path: A log `+ Enemy_Poe`, B log `+ Enemy_Poe` too (a copy) with the same
 # made id, `share owner` for it; after `kill Enemy_Poe` A "test kill Enemy_Poe ... hit", both logs

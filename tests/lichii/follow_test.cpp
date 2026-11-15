@@ -285,3 +285,215 @@ TEST_CASE("steps: the metric reads even steps, a wobble and a second writer") {
     CHECK(e->uneven < 0.01f);
     CHECK(e->game_moved == doctest::Approx(0.2f).epsilon(0.02));  // read = this frame's draw
 }
+
+namespace {
+
+// jitter-3: the place and velocity handed in wobble around the true path as presence's curve
+// does (the 'P1 steps' 0.37-0.40 left on a slow walk in jitter-2's run): a fixed pseudo-random
+// +-1 cm on the place and +-0.3 m/s on the velocity, each present.
+struct Wobble {
+    std::uint32_t state = 12345;
+    float Next() {  // -1 to 1
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / static_cast<float>(1u << 23) - 1.0f;
+    }
+};
+
+constexpr float kWalk = 1.4f;  // a slow walk, metres a second
+
+// Steps of a walker followed on the Cadence time at frames `gap_ms` apart in turn (a pattern),
+// the place worked out at a present up to 16 ms before each frame, with the wobble.
+CoopFollow::StepsReport Walk(const std::vector<std::uint64_t>& gap_ms, float wobble_m, float wobble_v,
+                             float* worst_off = nullptr) {
+    Follower f;
+    CoopFollow::Cadence cadence;
+    CoopFollow::Steps steps;
+    Wobble w;
+    std::optional<CoopFollow::StepsReport> last;
+    std::uint64_t now = 10'000;
+    float off = 0.0f;
+    for (int i = 0; i < 2000 && now < 10'000 + 12'000; ++i) {
+        now += gap_ms[static_cast<std::size_t>(i) % gap_ms.size()];
+        const std::uint64_t made = now - static_cast<std::uint64_t>((i * 7) % 17);
+        const float t = static_cast<float>(made) / 1000.0f;
+        const Vec3 at{kWalk * t + wobble_m * w.Next(), 0.0f, wobble_m * w.Next()};
+        const Vec3 v{kWalk + wobble_v * w.Next(), 0.0f, wobble_v * w.Next()};
+        const double even = cadence.At(now);
+        const Vec3 drawn = f.Step(at, v, made, even);
+        if (i > 20) {
+            off = std::max(off, std::fabs(drawn[0] - kWalk * static_cast<float>(even) / 1000.0f));
+        }
+        if (auto r = steps.Step(std::nullopt, drawn, now)) {
+            last = r;
+        }
+    }
+    if (worst_off != nullptr) {
+        *worst_off = off;
+    }
+    REQUIRE(last.has_value());
+    return *last;
+}
+
+}  // namespace
+
+TEST_CASE("follow: a slow walk with a wobbling place is drawn in even steps at 7-18, ~28 and 60 fps") {
+    const std::vector<std::vector<std::uint64_t>> patterns = {
+        {55, 140, 70, 120, 90, 60, 130, 80},             // the owner's 7-18 fps
+        {24, 38, 27, 33, 23, 41, 30, 36, 22, 35, 29, 45},  // the owner's ~28 fps
+        {16, 17, 16, 17, 17, 16},                        // 60 fps
+    };
+    for (const auto& gaps : patterns) {
+        CAPTURE(gaps[0]);
+        float off = 0.0f;
+        const auto clean = Walk(gaps, 0.0f, 0.0f);
+        const auto r = Walk(gaps, 0.01f, 0.3f, &off);
+        MESSAGE("frames from " << gaps[0] << " ms: uneven " << r.uneven << " (clean " << clean.uneven
+                               << ", worst " << r.uneven_max << "), mean step " << r.mean_step
+                               << ", worst off the path " << off);
+        CHECK(r.uneven < 0.1f);  // jitter-3's target
+        CHECK(r.mean_step == doctest::Approx(clean.mean_step).epsilon(0.05));  // no slower
+        CHECK(off < 0.03f);  // and still on the path, within 3 cm
+    }
+}
+
+TEST_CASE("follow: the velocity is smoothed, a stop still stops at once") {
+    Follower f;
+    std::uint64_t now = 1000;
+    f.Step({0.0f, 0.0f, 0.0f}, {kWalk, 0.0f, 0.0f}, now, now);
+    // One frame's velocity far off (a wobble): the step moves only part of the way toward it.
+    now += 33;
+    const Vec3 a = f.Step({kWalk * 0.033f, 0.0f, 0.0f}, {kWalk + 1.0f, 0.0f, 0.0f}, now, now);
+    CHECK(a[0] < kWalk * 0.033f + 1.0f * 0.033f * 0.5f);
+    // Stopped: still at once, settled exactly where they stopped, never past it.
+    const Vec3 stop{0.1f, 0.0f, 0.0f};
+    Vec3 drawn{};
+    for (int i = 0; i < 6; ++i) {
+        now += 33;
+        drawn = f.Step(stop, {0.0f, 0.0f, 0.0f}, now, now);
+        CHECK(drawn[0] <= stop[0] + 1e-6f);
+    }
+    CHECK(drawn == stop);
+}
+
+namespace {
+
+CoopFollow::Quat Yaw(float radians) {
+    return {0.0f, std::sin(radians / 2.0f), 0.0f, std::cos(radians / 2.0f)};
+}
+
+float YawOf(const CoopFollow::Quat& q) {
+    return 2.0f * std::atan2(q[1], q[3]);
+}
+
+}  // namespace
+
+TEST_CASE("turn: a steady turn worked out at uneven times is drawn in even turns") {
+    CoopFollow::Turner turner;
+    constexpr float kRate = 3.0f;  // rad a second (a quick turn)
+    const std::uint64_t made_before[] = {0, 16, 3, 12, 16, 0, 8, 15, 1, 10};
+    std::vector<float> turns;
+    float last = 0.0f;
+    for (int i = 0; i < 40; ++i) {
+        const std::uint64_t now = 1000 + 33 * static_cast<std::uint64_t>(i);
+        const std::uint64_t made = now - made_before[i % 10];
+        const float yaw = YawOf(turner.Step(Yaw(kRate * static_cast<float>(made - 1000) / 1000.0f), made, now));
+        if (i > 15) {  // the turn rate learnt
+            turns.push_back(yaw - last);
+            // Drawn kTurnLagMs behind (never past a turn that stops).
+            const float at = static_cast<float>(static_cast<double>(now - 1000) - CoopFollow::kTurnLagMs) / 1000.0f;
+            CHECK(yaw == doctest::Approx(kRate * at).epsilon(0.01));
+        }
+        last = yaw;
+    }
+    const auto [lo, hi] = std::minmax_element(turns.begin(), turns.end());
+    MESSAGE("turn per frame " << *lo << " to " << *hi);
+    CHECK(*hi - *lo < 0.01f);  // raw: 0.05 to 0.14 rad
+}
+
+TEST_CASE("turn: it settles exactly when the turn stops, a big turn is taken at once, bad input passes") {
+    CoopFollow::Turner turner;
+    std::uint64_t now = 1000;
+    for (int i = 0; i < 20; ++i, now += 33) {
+        turner.Step(Yaw(2.0f * static_cast<float>(now - 1000) / 1000.0f), now, now);
+    }
+    const CoopFollow::Quat stop = Yaw(2.0f * static_cast<float>(now - 33 - 1000) / 1000.0f);
+    CoopFollow::Quat drawn{};
+    for (int i = 0; i < 40; ++i, now += 33) {
+        drawn = turner.Step(stop, now, now);
+    }
+    CHECK(CoopFollow::Turner::Angle(drawn, stop) < 1e-3f);
+    // A respawn facing the other way: at once.
+    const CoopFollow::Quat back = Yaw(YawOf(stop) + 3.0f);
+    CHECK(CoopFollow::Turner::Angle(turner.Step(back, now, now), back) < 1e-4f);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const CoopFollow::Quat bad{nan, 0.0f, 0.0f, 1.0f};
+    CHECK(std::isnan(turner.Step(bad, now + 33, now + 33)[0]));
+    CHECK(turner.Rate()[1] == 0.0f);
+}
+
+TEST_CASE("delayed: the animation at the shown time, not the newest") {
+    CoopFollow::Delayed<int> line;
+    CHECK(line.At(1000) == nullptr);
+    line.Push(1000, 1);
+    line.Push(1033, 2);
+    line.Push(1066, 3);
+    line.Push(1050, 9);  // out of order: dropped
+    REQUIRE(line.At(900) != nullptr);
+    CHECK(*line.At(900) == 1);  // before them all: the oldest
+    CHECK(*line.At(1040) == 2);
+    CHECK(*line.At(1040) == 2);  // the same time twice
+    CHECK(*line.At(5000) == 3);  // past them all: the newest
+    line.Clear();
+    CHECK(line.At(5000) == nullptr);
+    for (int i = 0; i < 100; ++i) {
+        line.Push(static_cast<std::uint64_t>(i), i);
+    }
+    CHECK(*line.At(0) == 100 - static_cast<int>(CoopFollow::Delayed<int>::kKeep));  // only the newest kept
+}
+
+TEST_CASE("follow: an easing stop passes the stop by at most kPassM") {
+    Follower f;
+    CoopFollow::Cadence cadence;
+    // Walking, then slowing to a stop over 0.3 s (presence's curve eases it), then still.
+    float x = 0.0f;
+    std::uint64_t now = 1000;
+    float most = 0.0f;
+    for (int i = 0; i < 60; ++i, now += 30) {
+        const float slow = i < 20 ? 1.0f : std::max(0.0f, 1.0f - static_cast<float>(i - 20) / 10.0f);
+        const float v = kWalk * slow;
+        x += v * 0.030f;
+        const Vec3 drawn = f.Step({x, 0.0f, 0.0f}, {v, 0.0f, 0.0f}, now, cadence.At(now));
+        if (i >= 20) {
+            most = std::max(most, drawn[0] - x);
+        }
+        if (i == 59) {
+            CHECK(drawn[0] == doctest::Approx(x));  // settled where they stopped
+        }
+    }
+    CHECK(most <= CoopFollow::kPassM + 1e-3f);  // 2 cm (and float rounding)
+}
+
+TEST_CASE("turn: a quick turn that stops never passes the heading and settles on it") {
+    for (const float rate : {3.0f, 6.0f, 10.0f}) {  // rad a second
+        for (const std::uint64_t frame_ms : {16ull, 33ull, 100ull}) {
+            CAPTURE(rate);
+            CAPTURE(frame_ms);
+            CoopFollow::Turner turner;
+            CoopFollow::Cadence cadence;
+            const std::uint64_t made_before[] = {0, 16, 3, 12, 16, 0, 8, 15, 1, 10};
+            std::uint64_t now = 1000;
+            const std::uint64_t stop_ms = 1600;
+            const float stop = rate * static_cast<float>(stop_ms - 1000) / 1000.0f;
+            float most = -10.0f;
+            CoopFollow::Quat drawn{};
+            for (int i = 0; now < 3000; ++i, now += frame_ms) {
+                const std::uint64_t made = now - made_before[i % 10];
+                const float yaw = rate * static_cast<float>(std::min(made, stop_ms) - 1000) / 1000.0f;
+                drawn = turner.Step(Yaw(yaw), made, cadence.At(now));
+                most = std::max(most, YawOf(drawn) - stop);
+            }
+            CHECK(most <= 0.001f);                                 // never past the heading
+            CHECK(CoopFollow::Turner::Angle(drawn, Yaw(stop)) < 1e-3f);  // and settled on it
+        }
+    }
+}

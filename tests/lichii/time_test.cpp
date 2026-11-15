@@ -544,3 +544,31 @@ TEST_CASE("time: with the game's sets as events, a jump no set named is still se
     CHECK(jumps[0].seconds == 64'800);
     CHECK(a.UnnamedJumps() == 1);
 }
+
+TEST_CASE("time: the test set fires after joining and again after the host's save load") {
+    CoopTime::TestSet t(72'000, 10'000 * kMs);
+    REQUIRE(t.On());
+    CHECK_FALSE(t.Due(0, true, true));  // not armed before joining
+    t.Joined(1'000 * kMs);
+    CHECK_FALSE(t.Due(5'000 * kMs, true, true));  // too soon
+    CHECK_FALSE(t.Due(11'000 * kMs, true, false));  // no clock (a load): waits
+    CHECK(t.Due(11'500 * kMs, true, true) == 72'000u);
+    CHECK_FALSE(t.Due(30'000 * kMs, true, true));  // once per arm
+    t.SaveLoaded(40'000 * kMs);  // the save's time replaced it: set again
+    CHECK_FALSE(t.Due(45'000 * kMs, true, true));
+    CHECK(t.Due(50'000 * kMs, true, true) == 72'000u);
+    CHECK_FALSE(t.Due(60'000 * kMs, true, true));
+}
+
+TEST_CASE("time: the test set is the host's only and off without the switch") {
+    CoopTime::TestSet guest(72'000, 10'000 * kMs);
+    guest.Joined(0);
+    CHECK_FALSE(guest.Due(20'000 * kMs, false, true));
+    guest.SaveLoaded(30'000 * kMs);
+    CHECK_FALSE(guest.Due(50'000 * kMs, false, true));
+    CoopTime::TestSet off;
+    CHECK_FALSE(off.On());
+    off.Joined(0);
+    off.SaveLoaded(0);
+    CHECK_FALSE(off.Due(100'000 * kMs, true, true));
+}

@@ -92,6 +92,20 @@ class SelfTunicTest(unittest.TestCase):
         self.assertEqual(self_tunic.put(self.pack, "red"), "")
         self.assertEqual(self_tunic.put(os.path.join(self.dir, "no-pack"), "red"), "")
 
+    def test_colours_are_the_modules(self):
+        # NAMED and the presets are lichii/hook/coop_colors.cpp's kNamed and kTunics: no drift
+        import re
+        src = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))), "lichii", "hook", "coop_colors.cpp")
+        with open(src, encoding="utf-8") as f:
+            text = f.read()
+        named = text[text.index("kNamed[]"):text.index("};", text.index("kNamed[]"))]
+        self.assertEqual({n: int(v, 16) for n, v in re.findall(r'\{"(\w+)", 0x([0-9A-Fa-f]{6})\}', named)},
+                         self_tunic.NAMED)
+        tunics = text[text.index("kTunics[]"):text.index("};", text.index("kTunics[]"))]
+        suffixes = re.findall(r'\{0x[0-9A-Fa-f]{6}, "(\w*)"\}', tunics)
+        self.assertEqual(sorted(s.lower() or "green" for s in suffixes), sorted(self_tunic.TUNICS))
+
     def test_main(self):
         coop = os.path.join(self.dir, "coop.ini")
         with open(coop, "w") as f:

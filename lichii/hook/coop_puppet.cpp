@@ -1455,14 +1455,22 @@ void Director::DrawAt(Slot& slot, Guest& guest, const Target& target, std::uint6
     // steps. Held (their cutscene) it is drawn where the samples say, as before.
     Vec3 place = target.position;
     Vec3 raw = target.position;
+    // jitter-2: at the even frame time (coop_follow.h Cadence), so each frame's step is even.
+    const double even_ms = cadence_.At(now_ms);
     if (target.velocity && !held) {
-        // jitter-2: at the even frame time (coop_follow.h Cadence), so each frame's step is even.
-        place = slot.follow.Step(target.position, *target.velocity, input_.made_ms, cadence_.At(now_ms));
+        place = slot.follow.Step(target.position, *target.velocity, input_.made_ms, even_ms);
         raw = slot.raw_follow.Step(target.position, *target.velocity, input_.made_ms,
                                    static_cast<double>(now_ms));
     } else {
         slot.follow.Reset();
         slot.raw_follow.Reset();
+    }
+    // jitter-3: the rotation followed the same way (coop_follow.h Turner).
+    Mat3 rotation = target.rotation;
+    if (target.turn && !held) {
+        rotation = QuatToMatrix(slot.turner.Step(*target.turn, input_.made_ms, even_ms));
+    } else {
+        slot.turner.Reset();
     }
     float jump = 0.0f;
     const Vec3 drawn = slot.smooth.Step(place, now_ms, !held, &jump);
@@ -1494,7 +1502,7 @@ void Director::DrawAt(Slot& slot, Guest& guest, const Target& target, std::uint6
                       cadence_.PeriodMs(), r->game_moved, r->game_moved_max);
         Say(who + buf);
     }
-    Pose(slot, guest, drawn, &target.rotation, now_ms);
+    Pose(slot, guest, drawn, &rotation, now_ms);
 }
 
 // The puppet's pose: +0x31c/+0x328 and the engine's pending transform
@@ -1792,6 +1800,7 @@ Input Planner::Plan(std::uint64_t main_base, const std::optional<std::string>& s
         t.velocity = r.velocity;
         if (r.rotation) {
             t.rotation = QuatToMatrix(*r.rotation);
+            t.turn = r.rotation;
         }
         t.show = show;
         t.why = why;
@@ -1989,7 +1998,9 @@ struct Received {
 std::mutex g_anim_mutex;
 // One entry per player number, 0 (unused) to kMaxPlayers (up to 16 players).
 constexpr std::size_t kNumbers = std::size_t{coop::protocol::kMaxPlayers} + 1;
-std::array<std::optional<Received>, kNumbers> g_anims;  // by player number; guarded
+// jitter-3: by their sample time, taken at presence's shown time (coop_follow.h Delayed).
+std::array<CoopFollow::Delayed<Received>, kNumbers> g_anims;  // by player number; guarded
+std::array<std::uint32_t, kNumbers> g_anim_serials{};         // the same; guarded
 std::array<Gear, kNumbers> g_gear;                         // the same; guarded
 std::array<std::optional<std::uint8_t>, kNumbers> g_drawn;  // the same; guarded
 std::array<std::optional<std::uint32_t>, kNumbers> g_color; // the same; guarded
@@ -2034,7 +2045,7 @@ void OnEvent(const coop::net::Event& event) {
         g_sounds = {};
     } else if (event.kind == EventKind::player_left && event.player < g_anims.size()) {
         std::lock_guard lock(g_anim_mutex);
-        g_anims[event.player].reset();
+        g_anims[event.player].Clear();
         g_gear[event.player] = {};
         g_drawn[event.player].reset();
         g_color[event.player].reset();
@@ -2087,11 +2098,10 @@ void OnEvent(const coop::net::Event& event) {
             return;
         }
         std::lock_guard lock(g_anim_mutex);
-        auto& slot = g_anims[sample->player_number];
-        const std::uint32_t serial = slot ? slot->serial + 1 : 1;
-        slot = Received{{sample->animation->name, sample->animation->frame,
-                         sample->animation->rate},
-                        serial};
+        const std::uint32_t serial = ++g_anim_serials[sample->player_number];
+        g_anims[sample->player_number].Push(
+            sample->time.server_time_us,
+            Received{{sample->animation->name, sample->animation->frame, sample->animation->rate}, serial});
     }
 }
 
@@ -2121,7 +2131,10 @@ std::uint32_t LivePuppets() {
 std::vector<Remote> Collect(coop::host::Session* session, std::uint64_t server_now_us) {
     std::vector<Remote> remotes;
     if (session != nullptr && server_now_us != 0) {
+        std::uint64_t show_us = 0;  // jitter-3: the animation at the place's own time
         session->with_presence([&](coop::presence::Presence& p) {
+            const std::uint64_t delay = p.settings().show_delay_us;
+            show_us = server_now_us > delay ? server_now_us - delay : 0;
             for (const std::uint8_t n : p.players()) {
                 // The same time as the markers' collect() this frame.
                 const auto pose = p.shown(n, server_now_us);
@@ -2144,9 +2157,11 @@ std::vector<Remote> Collect(coop::host::Session* session, std::uint64_t server_n
         });
         std::lock_guard lock(g_anim_mutex);
         for (auto& r : remotes) {
-            if (r.number < g_anims.size() && g_anims[r.number]) {
-                r.anim = g_anims[r.number]->anim;
-                r.anim_serial = g_anims[r.number]->serial;
+            if (r.number < g_anims.size()) {
+                if (const Received* a = g_anims[r.number].At(show_us)) {
+                    r.anim = a->anim;
+                    r.anim_serial = a->serial;
+                }
             }
             if (r.number < g_gear.size()) {
                 r.gear = g_gear[r.number];

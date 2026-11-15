@@ -126,11 +126,10 @@ struct Glue {
         return g_game_set.exchange(0, std::memory_order_acq_rel);
     }
     // LICHII_COOP_TIME_TEST_SET=<seconds>[@<delay s>] (tests only): <delay>
-    // seconds (default 5) after joining, the host sets its own clock there,
-    // as the Sun's Song would. Another game ignores it, so one switch list
-    // serves both games of a test.
-    std::optional<std::uint32_t> test_set;
-    std::uint64_t test_delay_us = 5'000'000;
+    // seconds (default 5) after joining and after each of its save loads, the
+    // host sets its own clock there, as the Sun's Song would (TestSet).
+    // Another game ignores it, so one switch list serves both games of a test.
+    TestSet test_set;
     std::uint64_t joined_at = 0;
     // LICHII_COOP_TIME_TEST_DRIFT=<seconds>[@<delay s>] (tests only, issue
     // 192): <delay> seconds (default 60) after joining, a guest moves its own
@@ -150,11 +149,12 @@ struct Glue {
         if (const auto t = Env("LICHII_COOP_TIME_TEST_SET"); !t.empty()) {
             char* rest = nullptr;
             const unsigned long v = std::strtoul(t.c_str(), &rest, 10);
+            std::uint64_t delay_us = 5'000'000;
             if (rest != nullptr && *rest == '@') {
-                test_delay_us = std::strtoull(rest + 1, nullptr, 10) * 1'000'000;
+                delay_us = std::strtoull(rest + 1, nullptr, 10) * 1'000'000;
             }
             if (v < coop::protocol::kSecondsPerDay) {
-                test_set = static_cast<std::uint32_t>(v);
+                test_set = TestSet(static_cast<std::uint32_t>(v), delay_us);
             }
         }
         if (const auto t = Env("LICHII_COOP_TIME_TEST_DRIFT"); !t.empty()) {
@@ -264,15 +264,13 @@ struct Glue {
         const auto now = Read(system, main, now_us);
         if (!connected) {
             joined_at = now_us;
+            test_set.Joined(now_us);
         }
         connected = true;
         const bool host = session->with_client([](coop::net::Client& c) { return c.is_host(); });
-        if (test_set && now && now_us - joined_at >= test_delay_us) {
-            if (host) {
-                LOG_INFO(Core, "coop: time: test set to {}", *test_set);
-                setter.Want(main, *test_set);
-            }
-            test_set.reset();
+        if (const auto t = test_set.Due(now_us, host, now.has_value())) {
+            LOG_INFO(Core, "coop: time: test set to {}", *t);
+            setter.Want(main, *t);
         }
         if (test_drift && now && now_us - joined_at >= test_drift_delay_us) {
             auto& memory = system.ApplicationMemory();
@@ -348,6 +346,7 @@ void OnGameSet(std::uint32_t seconds, std::uint32_t mode, std::int32_t days) {
 void SaveLoaded(std::uint64_t server_now_us) {
     if (server_now_us != 0) {
         TheGlue().sync.SaveLoaded(server_now_us);
+        TheGlue().test_set.SaveLoaded(server_now_us);  // tests only: the save's time replaced the test's
     }
 }
 

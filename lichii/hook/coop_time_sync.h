@@ -138,4 +138,38 @@ private:
     std::vector<coop::protocol::TimeOfDay> inbox_;
 };
 
+// LICHII_COOP_TIME_TEST_SET (tests only): when the host sets its own clock.
+// Once <delay> after joining, and again <delay> after each save load the host
+// sees: a save load moves the clock to the save's time (the game's own set,
+// mode 0), so a set made at the title was lost when the save loaded
+// (time-sync-b: hs-graveyard 2026-11-14, the host set 20:00 at the title, its
+// save then loaded at 11:59 and both games played the run in daylight).
+class TestSet {
+public:
+    TestSet() = default;
+    TestSet(std::uint32_t seconds, std::uint64_t delay_us) : seconds_(seconds), delay_us_(delay_us) {}
+    bool On() const { return seconds_.has_value(); }
+    void Joined(std::uint64_t now_us) { Arm(now_us); }
+    void SaveLoaded(std::uint64_t now_us) { Arm(now_us); }
+    // The time to set now, once per arm; nullopt otherwise. Only the host
+    // sets; another game drops the arm. Waits for a readable clock.
+    std::optional<std::uint32_t> Due(std::uint64_t now_us, bool host, bool clock) {
+        if (!seconds_ || !armed_at_ || !clock || now_us - *armed_at_ < delay_us_) {
+            return std::nullopt;
+        }
+        armed_at_.reset();
+        return host ? seconds_ : std::nullopt;
+    }
+
+private:
+    void Arm(std::uint64_t now_us) {
+        if (seconds_) {
+            armed_at_ = now_us;
+        }
+    }
+    std::optional<std::uint32_t> seconds_;
+    std::uint64_t delay_us_ = 5'000'000;
+    std::optional<std::uint64_t> armed_at_;
+};
+
 } // namespace CoopTime
