@@ -1,0 +1,75 @@
+# hs-map-walkin (dungeon-sync-b, #63/#76, for 0.11.3): the map run with a WALK into Dodongo's Cavern instead of a
+# warp into it, the host first, then the guest. A (host) and B (guest on the REAL guest path: the host's save copy)
+# start on Death Mountain Trail at MountainTrail_DodongoCavernSide and walk into the cavern's entrance (the
+# FieldAndDungeonEntranceEventRequestActor at -55.27 124.90 -31.26; the crack rock DodongoCavern_CrackRock must be
+# open in the save, else the walk stops at it: B's and A's logs then never say "map: DodongoCavern").
+# A opens the map chest; both look at their minimap and Map page.
+# LICHII_COOP_MAP_REFRESH=1: after another player's map or floors, the game's own HUD refresh (coop_map_refresh.h);
+# the log line "map refresh: ... the HUD screen's copy floors 0x.. map . -> floors 0x.. map ." shows what it read.
+# Compare: hs-map-dc (warp start: Map page "???" for everyone). Pass: A's Map page shows the cavern (walk-in),
+# and B's too after the refresh.
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=a52c3a19,LICHII_COOP_MAP_REFRESH=1,B:LICHII_COOP_TEST_OWN_SAVE=0
+#! timeout 540
+mark start
+warp DeathMountainTrail_Child MountainTrail_DodongoCavernSide
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+goto -50.0 -24.5 0.5 600   # toward the cavern entrance
+goto -55.3 -31.3 0.5 600   # into the entrance: the scene change
+wait 2400
+mark mini-before
+place -24.0 100.75 -38.0   # 2.5 m in front of the map chest
+wait 240
+goto -25.5 -38.0 0.35 300   # 1 m in front of it: the walk teaches the runner the camera's angle
+toward -26.5 -38.0 20      # face the chest
+mark placed
+press A
+wait 60
+press A
+wait 60
+press A
+wait 600                  # the get scene
+mark got
+press A
+wait 120
+press A
+wait 120
+press B
+wait 600
+mark mini-room
+press MINUS
+wait 120
+mark panel
+press R
+wait 90
+mark panel-r1
+press R
+wait 90
+mark panel-r2
+press B
+wait 240
+place -24.0 100.75 -38.0   # the same spot again (no room load here: the panel shots are the check)
+wait 900
+mark mini-room2
+press MINUS
+wait 120
+mark panel2
+press R
+wait 90
+mark panel2-r1
+press R
+wait 90
+mark panel2-r2
+press B
+wait 240
+mark end

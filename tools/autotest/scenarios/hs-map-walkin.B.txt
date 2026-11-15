@@ -1,0 +1,47 @@
+# hs-map-walkin, B: the guest (real guest path) walks into the cavern too and waits while A opens the map chest,
+# then looks at its own minimap and Map page (the map refresh's log line in B's log).
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=a52c3a19
+#! timeout 540
+mark start
+warp DeathMountainTrail_Child MountainTrail_DodongoCavernSide
+wait 2400                 # B: the host's save comes and B switches to it on the title
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+goto -50.0 -24.5 0.5 600
+goto -55.3 -31.3 0.5 600
+wait 1200
+mark b-before
+wait 4200                 # A walks to the chest and plays the get scene
+mark b-after
+press MINUS
+wait 120
+mark b-panel
+press R
+wait 90
+mark b-panel-r1
+press R
+wait 90
+mark b-panel-r2
+press B
+wait 240
+place -29 117.6 0         # room 3: a room load (the map is read again)
+wait 900
+mark b-mini-room2
+press MINUS
+wait 120
+mark b-panel2
+press R
+wait 90
+mark b-panel2-r1
+press B
+wait 240
+mark end

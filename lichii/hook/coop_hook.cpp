@@ -104,6 +104,7 @@
 #include "coop_scrub_talk.h"
 #include "coop_sites.h"
 #include "coop_svc.h"
+#include "coop_map_refresh.h"
 #include "coop_time.h"
 #include "coop_testinput.h"
 #include "coop_world.h"
@@ -373,6 +374,17 @@ public:
                     LOG_INFO(Core, "coop: dungeon: LICHII_COOP_LIVE_EVENT_NAMES names no event: live events off");
                 }
             }  // issue 129: start another player's gimmick event here (coop_live_events.h)
+        }
+        if (EnvString("LICHII_COOP_MAP_REFRESH") == "1") {  // #63/#76: the HUD's own copy of the map (coop_map_refresh.h)
+            map_refresh_ = true;
+            CoopSvc::AddCaller(66, [](CoopPuppet::Guest& guest, bool after_call, std::uint64_t, std::uint64_t) {
+                auto& r = CoopMapRefresh::TheRefresher();
+                auto call = r.Step(guest, after_call, SteadyMs());
+                for (const auto& line : r.TakeNotes()) LOG_INFO(Core, "coop: {}", line);
+                return call;
+            });
+            LOG_INFO(Core, "coop: map refresh on (LICHII_COOP_MAP_REFRESH=1): the game's HUD refresh after "
+                           "another player's map or floors");
         }
         if (CoopStory::On()) {  // issue 171: shared quest steps into the game's ChallengeMgr
             CoopSvc::AddCaller(64, [this](CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
@@ -771,6 +783,14 @@ public:
             LOG_INFO(Core, "coop: dungeon: {}", holding_logged_
                          ? "room gimmick flags from another player held until we leave this dungeon or load"
                          : "no room gimmick flags held");
+        }
+        if (map_refresh_) {
+            for (const auto& r : report.received) {
+                if (coop::host::is_one_way_item(r.key) || coop::host::map_of_floors(r.key)) {
+                    CoopMapRefresh::TheRefresher().Want(SteadyMs());
+                    break;
+                }
+            }
         }
         // Chat notices (docs/setup.md): what another player's change gave us.
         if (notify_ && !report.received.empty()) {
@@ -1821,6 +1841,7 @@ private:
     bool live_events_ = false;     // LICHII_COOP_LIVE_EVENTS=1 (issue 129)
     // Chat notices, on unless LICHII_COOP_NOTIFY=0 (docs/setup.md).
     bool notify_ = EnvString("LICHII_COOP_NOTIFY") != "0";
+    bool map_refresh_ = false;  // LICHII_COOP_MAP_REFRESH=1 (coop_map_refresh.h)
     struct Names {
         std::vector<std::pair<std::uint8_t, std::string>> list;
         std::string operator()(std::uint8_t n) const {
