@@ -268,6 +268,39 @@ TEST_CASE("coop::os: UDP over loopback") {
     CHECK(server.RecvFrom(buf, sizeof buf, from) == -1);
 }
 
+TEST_CASE("coop::os: a closed peer port does not make the socket look dead") {
+    // Windows reports an ICMP port-unreachable to the sender's next recvfrom (WSAECONNRESET) unless told not to.
+    os::UdpSocket gone;
+    REQUIRE(gone.Open(COOP_SOCK_UDP4));
+    REQUIRE(gone.Bind(os::Ipv4(127, 0, 0, 1, 0)));
+    CoopAddr gone_addr{};
+    REQUIRE(gone.Local(gone_addr));
+    gone.Close();
+
+    os::UdpSocket me, peer;
+    REQUIRE(me.Open(COOP_SOCK_UDP4));
+    REQUIRE(me.Bind(os::Ipv4(127, 0, 0, 1, 0)));
+    CoopAddr me_addr{};
+    REQUIRE(me.Local(me_addr));
+    char buf[64];
+    CoopAddr from{};
+    for (int i = 0; i < 3; ++i) {
+        CHECK(me.SendTo("lost", 4, gone_addr) == 4);
+        os::SleepUs(20000);   // time for the ICMP answer to come back
+        CHECK(me.RecvFrom(buf, sizeof buf, from) == COOP_SOCK_WOULD_BLOCK);
+    }
+
+    REQUIRE(peer.Open(COOP_SOCK_UDP4));
+    REQUIRE(peer.Bind(os::Ipv4(127, 0, 0, 1, 0)));
+    CHECK(peer.SendTo("still", 5, me_addr) == 5);
+    int got = COOP_SOCK_WOULD_BLOCK;
+    for (int i = 0; i < 200 && got == COOP_SOCK_WOULD_BLOCK; ++i) {
+        got = me.RecvFrom(buf, sizeof buf, from);
+        if (got == COOP_SOCK_WOULD_BLOCK) os::SleepUs(5000);
+    }
+    CHECK(got == 5);
+}
+
 TEST_CASE("coop::os: resolve a literal address") {
     CoopAddr a{};
     REQUIRE(os::Resolve("127.0.0.1", COOP_SOCK_UDP4, a));

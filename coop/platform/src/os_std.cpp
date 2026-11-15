@@ -23,6 +23,9 @@
 #include <malloc.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)   // mstcpip.h
+#endif
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -176,7 +179,12 @@ int StdFileWrite(const char *rel, const void *data, size_t n) {
 using Native = SOCKET;
 const Native kBad = INVALID_SOCKET;
 void CloseNative(Native s) { closesocket(s); }
-bool WouldBlock() { return WSAGetLastError() == WSAEWOULDBLOCK; }
+// A UDP socket has no connection: Windows still answers recvfrom with WSAECONNRESET after an ICMP port-unreachable
+// from a peer whose port closed (SIO_UDP_CONNRESET is off, this is the backstop). Nothing waits, the socket is fine.
+bool WouldBlock() {
+    const int e = WSAGetLastError();
+    return e == WSAEWOULDBLOCK || e == WSAECONNRESET;
+}
 bool NetStart() {
     static const bool ok = [] {
         WSADATA data;
@@ -188,7 +196,8 @@ bool NetStart() {
 using Native = int;
 const Native kBad = -1;
 void CloseNative(Native s) { close(s); }
-bool WouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK; }
+// ECONNREFUSED: a queued ICMP port-unreachable (only seen on connected sockets; kept for the same reason as Windows).
+bool WouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNREFUSED; }
 bool NetStart() { return true; }
 #endif
 
@@ -251,7 +260,11 @@ int StdSockOpen(uint32_t kind) {
     if (s == kBad) return -1;
 #ifdef _WIN32
     u_long nonblocking = 1;
-    const bool ok = ioctlsocket(s, FIONBIO, &nonblocking) == 0;
+    BOOL report_reset = FALSE;   // no WSAECONNRESET from recvfrom after a closed peer port's ICMP
+    DWORD returned = 0;
+    const bool ok = ioctlsocket(s, FIONBIO, &nonblocking) == 0 &&
+                    WSAIoctl(s, SIO_UDP_CONNRESET, &report_reset, sizeof report_reset, nullptr, 0, &returned,
+                             nullptr, nullptr) == 0;
 #else
     const int flags = fcntl(s, F_GETFL, 0);
     const bool ok = flags >= 0 && fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
