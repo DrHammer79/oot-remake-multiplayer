@@ -1,0 +1,45 @@
+# hs-map-rando, B (dungeon-sync-b, #63/#76): the randomizer ON; B gets only what co-op shares of A's map get
+# (IsGetMap; OOTRR writes no EnteredFloorBit). Does B's map show?
+# B stands in the Deku Tree's first room while A opens the map chest, then looks at its own minimap and Map page.
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=89787395
+#! timeout 420
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark b-before
+wait 3000                 # A walks to the chest and plays the get scene
+mark b-after
+press MINUS
+wait 120
+mark b-panel
+press R
+wait 90
+mark b-panel-r1
+press R
+wait 90
+mark b-panel-r2
+press B
+wait 240
+place -29 117.6 0         # room 3: a room load (the map is read again)
+wait 900
+mark b-mini-room2
+press MINUS
+wait 120
+mark b-panel2
+press R
+wait 90
+mark b-panel2-r1
+press B
+wait 240
+mark end

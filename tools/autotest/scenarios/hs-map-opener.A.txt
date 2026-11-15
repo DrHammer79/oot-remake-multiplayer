@@ -1,7 +1,7 @@
 # hs-map-opener (Hookshot, map-get-b, issue 146): does the OPENER's own map show after the Deku Tree map chest?
 # Owner's playtest 2026-11-14: the opener got the map, but saw it on neither the minimap nor the Map page,
 # although its saves kept DungeonInfo.InsideTheDekuTree.IsGetMap (bool 0x89787395) = 1 and EnteredFloorBit
-# (UInt 0x5c6c21c1) = 31, and co-op wrote no flag in it. Here A opens the chest; B only idles.
+# (UInt 0x5c6c21c1) = 31, and co-op wrote no flag in it. Here A opens the chest; B (hs-map-opener.B.txt) waits in the Deku Tree and looks at its own map.
 # Saves: a pre-Deku save (IsGetMap 0), e.g. the owner's '1. Deku Tree' copied into both pairs' autotest-save.
 # Run: tools\autotest\run.ps1 -Runtime hookshot -Scenario hs-map-opener -Lane 1 -Server <protocol-12 server>
 #      and, if the map is missing, again with -NoCoop (the game's own behaviour, no session).

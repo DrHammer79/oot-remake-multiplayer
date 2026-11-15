@@ -1,0 +1,70 @@
+# hs-map-rando (Hookshot, dungeon-sync-b, player reports #63/#76): does a map from a RANDOMIZER chest show?
+# OOTRR (seed 6PKCPFWP, in lane 1's mods) strips the game's own EventGetDungeonMap from the chest flow
+# (Dm_SY_Treasurebox) and sets only DungeonInfo.InsideTheDekuTree.IsGetMap. Here A opens the Deku Tree
+# Slingshot Room Side Chest, which holds "Map (Deku Tree)" in that seed (stand point from ootrr tp-chests:
+# -45.90 116.70 19.61, facing 1.658). Run with co-op on (the module carries the warp and place) and the randomizer on: co-op writes no map flag into the opener (map-get-b; the log's "setter calls made for co-op" shows it), so A is the solo OOTRR check.
+# Saves: the owner's '1. Deku Tree' slots (IsGetMap 0) with the kit's option.sav.
+# Look at: "got" (the get scene), "mini-room" (the minimap), "panel*" (the Map page), "mini-room2"/"panel2*"
+# after a room load. The log: "bool 0x89787395" 0 -> 1 and whether UInt 0x5c6c21c1 (EnteredFloorBit) changes.
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=89787395
+#! timeout 420
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark mini-before
+place -47.40 116.7 19.74  # 1.5 m behind the side chest's stand point
+wait 240
+goto -45.90 19.61 0.35 300  # to its stand point: the walk teaches the runner the camera's angle
+toward -44.91 19.52 20    # face the chest
+mark placed
+press A
+wait 60
+press A
+wait 60
+press A
+wait 600                  # the get scene
+mark got
+press A
+wait 120
+press A
+wait 120
+press B
+wait 600
+mark mini-room
+press MINUS
+wait 120
+mark panel
+press R
+wait 90
+mark panel-r1
+press R
+wait 90
+mark panel-r2
+press B
+wait 240
+place -29 117.6 0         # room 3: a room load
+wait 900
+mark mini-room2
+press MINUS
+wait 120
+mark panel2
+press R
+wait 90
+mark panel2-r1
+press R
+wait 90
+mark panel2-r2
+press B
+wait 240
+mark end
