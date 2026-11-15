@@ -762,6 +762,50 @@ TEST_CASE("puppet animation: the other slots synced from slot 0, pose request wr
     CHECK(calls[3].function == kBase + addr::kSyncAsSlot);
 }
 
+TEST_CASE("puppet animation: the Ocarina's face and fingers play in their own slots") {
+    Game g;
+    Director d;
+    MakeLive(d, g);
+    GiveAnimation(g, 0.0f);
+    g.guest.Set(kController + addr::kSlotCount, std::int32_t{6});
+    d.SetInput(Wants({Playing("DemoOcarina", 4.0f, 1)}));
+    auto calls = Frame(d, g, 20);
+    // Play, frame, slots 1 to 5 synced from slot 0, then slots 4 and 5 their own.
+    REQUIRE(calls.size() == 9);
+    for (std::size_t i = 2; i < 7; ++i) {
+        CHECK(calls[i].function == kBase + addr::kSyncAsSlot);
+    }
+    const std::uint64_t request = kHeap + block::kPlayRequest;
+    CHECK(calls[7].function == kBase + addr::kPlayAs);
+    CHECK(calls[8].function == kBase + addr::kPlayAs);
+    CHECK(calls[8].x[0] == request);
+    // The last request (slot 5) as the game reads it; each name in its own fixed cell.
+    const std::uint64_t finger = kHeap + block::kPartText + block::kPartCapacity;
+    CHECK(g.guest.Get<std::uint64_t>(request + 0x00) == kActor);
+    CHECK(g.guest.Get<std::uint64_t>(request + 0x08) == finger);
+    CHECK(g.guest.Get<std::int32_t>(request + 0x10) == 5);
+    CHECK(g.guest.Get<float>(request + 0x14) == 1.0f);
+    CHECK(g.guest.Get<float>(request + 0x18) == -1.0f);
+    CHECK(g.guest.Get<std::uint64_t>(request + 0x20) == 0u);
+    CHECK(g.guest.Get<std::uint64_t>(finger) == 0x7261634f6f6d6544ull);  // "DemoOcar"
+    CHECK(g.guest.Get<std::uint64_t>(kHeap + block::kPartText) == 0x7261634f6f6d6544ull);
+    CHECK(Frame(d, g, 30).empty());
+
+    // Another command: only the sync, nothing of the Ocarina's own.
+    d.SetInput(Wants({Playing("Wait", 1.0f, 2)}));
+    calls = Frame(d, g, 40);
+    REQUIRE(calls.size() == 7);
+    CHECK(calls[6].function == kBase + addr::kSyncAsSlot);
+
+    // A puppet with fewer slots: no play on a slot it has not got.
+    g.guest.Set(kController + addr::kSlotCount, std::int32_t{5});
+    d.SetInput(Wants({Playing("DemoOcarina", 1.0f, 3)}));
+    calls = Frame(d, g, 50);
+    REQUIRE(calls.size() == 8);  // play, frame, 4 syncs, slot 4 only
+    CHECK(calls[7].function == kBase + addr::kPlayAs);
+    CHECK(g.guest.Get<std::int32_t>(request + 0x10) == 4);
+}
+
 TEST_CASE("puppet gear: each known piece worn once, on its own name cell") {
     Game g;
     Director d;

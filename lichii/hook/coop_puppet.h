@@ -101,6 +101,21 @@ inline constexpr std::uint64_t kSlotFrame = 0xe8;
 // partial slots are filled this way from slot 0.
 inline constexpr std::uint64_t kSyncAsSlot = 0x3abec10;
 inline constexpr std::int32_t kMaxAsSlots = 8;  // slots synced from slot 0
+// Partial slots the player's own code gives commands of their own instead of
+// slot 0's: while Link plays the Ocarina (slot 0 "DemoOcarina") slot 4 runs
+// "DemoOcarinaFace" and slot 5 "DemoOcarinaFinger" (A's AS slots in held-sword
+// run 20261114-140843). Synced from slot 0, the puppet's hand had another pose
+// and the Ocarina in it was turned upside down. After the sync the puppet
+// plays these through kPlayAs with the slot's index (request +0x10).
+struct PartPlay {
+    std::string_view command;  // slot 0's command
+    std::int32_t slot;
+    std::string_view name;     // what that slot plays
+};
+inline constexpr std::array<PartPlay, 2> kPartPlays{{
+    {"DemoOcarina", 4, "DemoOcarinaFace"},
+    {"DemoOcarina", 5, "DemoOcarinaFinger"},
+}};
 
 // Gear (docs/puppet.md, Equipment): the EquipmentUser is [[actor + 0x270] +
 // 0x200]; 0x2df7b20(eu, kind, &char*, state 2, -1, 1, 0) wears the named
@@ -244,6 +259,9 @@ inline constexpr std::uint64_t kHandles = 0x110;    // kHandleCount slots of 8 b
 inline constexpr std::uint64_t kHandleCount = 6;
 inline constexpr std::uint64_t kNameText = 0x140;   // kNameCapacity bytes
 inline constexpr std::uint32_t kNameCapacity = 0x40;
+// addr::kPartPlays' names, one fixed cell each (the slot keeps the pointer).
+inline constexpr std::uint64_t kPartText = 0x180;
+inline constexpr std::uint64_t kPartCapacity = 0x20;  // to 0x1c0 for two
 // The play request for 0x2022a0: +0 actor, +8 name, +0x10 slot, +0x14 rate,
 // +0x18 and +0x1c -1.0, +0x20 skip-if-same, +0x28 node (0, as 0x2a95c4).
 inline constexpr std::uint64_t kPlayRequest = 0x200;  // 0x30 bytes
@@ -490,6 +508,7 @@ private:
         float play_frame = 0.0f;
         std::uint32_t play_serial = 0;
         std::int32_t sync_next = 0;         // next slot to sync from slot 0; 0 none
+        std::size_t part_next = addr::kPartPlays.size();  // next kPartPlays entry; size: none
         std::uint64_t pose_log_ms = 0;      // last read-back line (debug anim)
         std::array<std::string, kGearCount> worn;    // equipped on it, by gear index
         std::size_t equip_index = 0;        // the equip being made
@@ -531,7 +550,7 @@ private:
         std::vector<Stray> strays;
     };
     enum class Pending {
-        none, malloc, create, take, drop, remove, play, frame, sync, equip, unequip, hold,
+        none, malloc, create, take, drop, remove, play, frame, sync, part, equip, unequip, hold,
         hold_check, move, sound, link_sound, stray
     };
     // The slot's taken actor becomes a stray (above); the slot then has none.

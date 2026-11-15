@@ -543,6 +543,7 @@ void Director::Finish(Guest& guest, std::uint64_t result, std::uint64_t now_ms) 
         slot.anim_serial = slot.play_serial;
         slot.frame_to_set = slot.play_frame;
         slot.sync_next = 1;  // then the partial slots, after the frame
+        slot.part_next = 0;  // then the ones with their own commands (kPartPlays)
         if (anim_) {
             char buf[48];
             std::snprintf(buf, sizeof(buf), " from frame %.1f", slot.play_frame);
@@ -559,6 +560,17 @@ void Director::Finish(Guest& guest, std::uint64_t result, std::uint64_t now_ms) 
                 slot.anim_name + "')");
         }
         ++slot.sync_next;
+        break;
+    case Pending::part:
+        if (slot.part_next < addr::kPartPlays.size()) {
+            const auto& part = addr::kPartPlays[slot.part_next];
+            if (anim_) {
+                Say(who + " slot " + std::to_string(part.slot) + " plays '" +
+                    std::string(part.name) + "' with '" + slot.anim_name + "' (returned " +
+                    Hex(result & 0xff) + ")");
+            }
+            ++slot.part_next;
+        }
         break;
     case Pending::equip:
         slot.worn[slot.equip_index] = slot.equip_name;
@@ -876,6 +888,7 @@ std::optional<Call> Director::Create(Slot& slot, const Target& target, Guest& gu
     slot.follow.Reset();
     slot.meter_skip = false;
     slot.sync_next = 0;
+    slot.part_next = addr::kPartPlays.size();
     slot.worn = {};
     slot.in_hand = 0;
     slot.hold_known = 0;
@@ -1411,6 +1424,39 @@ std::optional<Call> Director::Animate(Slot& slot, const Target& target, Guest& g
             return c;
         }
         slot.sync_next = 0;
+    }
+    // The partial slots the player's code gives their own commands (addr::kPartPlays:
+    // the Ocarina's face and fingers), played on the puppet's slot by the game's own
+    // AS play (0x2022a0) once slot 0's sync is done.
+    for (; slot.part_next < addr::kPartPlays.size(); ++slot.part_next) {
+        const auto& part = addr::kPartPlays[slot.part_next];
+        std::int32_t count = 0;
+        if (part.command != slot.anim_name || !ReadValue(guest, controller + addr::kSlotCount, count) ||
+            part.slot >= count) {
+            continue;
+        }
+        const std::uint64_t text = slot.block + block::kPartText + block::kPartCapacity * slot.part_next;
+        std::array<char, block::kPartCapacity> name{};
+        std::memcpy(name.data(), part.name.data(), part.name.size());
+        std::array<std::uint8_t, 0x30> request{};
+        const float rate = 1.0f;
+        const float unset = -1.0f;
+        std::memcpy(request.data() + 0x00, &slot.actor, 8);
+        std::memcpy(request.data() + 0x08, &text, 8);
+        std::memcpy(request.data() + 0x10, &part.slot, 4);
+        std::memcpy(request.data() + 0x14, &rate, 4);
+        std::memcpy(request.data() + 0x18, &unset, 4);
+        std::memcpy(request.data() + 0x1c, &unset, 4);
+        const std::uint64_t at = slot.block + block::kPlayRequest;
+        if (!guest.Write(text, name.data(), name.size()) ||
+            !guest.Write(at, request.data(), request.size())) {
+            return std::nullopt;
+        }
+        Call c;
+        c.function = input_.main_base + addr::kPlayAs;
+        c.x[0] = at;
+        pending_ = Pending::part;
+        return c;
     }
     if (target.anim_serial != slot.anim_serial) {
         slot.anim_serial = target.anim_serial;
