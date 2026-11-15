@@ -1062,3 +1062,53 @@ TEST_CASE("difficulty: bosses and mini-bosses scale by the boss values") {
   kinds->Forget(kBoss);
   CHECK(kinds->Of(kBoss) == Kind::none);
 }
+
+TEST_CASE("difficulty: the word the Life step reads keeps the boss values (issue 55)") {
+  using CoopDifficulty::Kind;
+  using CoopDifficulty::PackValues;
+  using CoopDifficulty::UnpackValues;
+  // Every value the host can be in: the automatic scaler for 1..16 players, each preset, the slider ends.
+  for (std::size_t players = 1; players <= 16; ++players) {
+    const Values v = proto::auto_difficulty(players);
+    CHECK(UnpackValues(PackValues(v)) == v);
+  }
+  for (const Preset p : {Preset::easy, Preset::normal, Preset::hard}) {
+    const Values v = proto::preset_difficulty(p);
+    CHECK(UnpackValues(PackValues(v)) == v);
+  }
+  Values ends;
+  ends.hp_pct = proto::kMaxHpPct;
+  ends.damage_pct = proto::kMinDamagePct;
+  ends.count_pct = proto::kMaxCountPct;
+  ends.boss_hp_pct = proto::kMaxBossHpPct;
+  ends.boss_damage_pct = proto::kMaxBossDamagePct;
+  CHECK(UnpackValues(PackValues(ends)) == ends);
+  CHECK(UnpackValues(PackValues(Values{})) == Values{});
+  // A value past 12 bits (never valid) is kept at 4095, not wrapped into its neighbour.
+  Values big;
+  big.boss_hp_pct = 0xffff;
+  const Values kept = UnpackValues(PackValues(big));
+  CHECK(kept.boss_hp_pct == 0xfff);
+  CHECK(kept.boss_damage_pct == 100);
+  CHECK(kept.count_pct == 100);
+
+  // Seed N2BTEYKM: 3 players, boss life 300%; Gohma's eye hits of 1 each. Through the word (as Now() gives
+  // them to the Life step), every third hit is taken, not every one.
+  const Values three = UnpackValues(PackValues(proto::auto_difficulty(3)));
+  CHECK(three.boss_hp_pct == 300);
+  auto kinds = std::make_unique<CoopDifficulty::Kinds>();
+  constexpr std::uint64_t kGohmaLife = 0x30'0000'4000, kGohma = 0x30'0000'5000, kLinkLife = 0x30'0000'6000;
+  CHECK(kinds->Mark(kGohmaLife, Kind::boss_life));
+  CHECK(kinds->Mark(kGohma, Kind::boss));
+  CHECK(kinds->Mark(kLinkLife, Kind::our_link_life));
+  auto attacker_of = [&] { return kGohma; };
+  std::int32_t taken = 0;
+  for (int hit = 0; hit < 21; ++hit) {
+    taken += kinds->Step(kGohmaLife, 1, three, 0, attacker_of);
+  }
+  CHECK(taken == 7);
+  CHECK(kinds->BossSteps() == 21);
+  CHECK(kinds->BossDamageTaken() == 7);
+  // Her hits on our Link at the boss damage, 140%: 5 quarter hearts become 7.
+  CHECK(kinds->Step(kLinkLife, 5, three, 0, attacker_of) == 7);
+}

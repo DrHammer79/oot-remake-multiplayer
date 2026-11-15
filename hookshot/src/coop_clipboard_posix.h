@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The desktop's clipboard on Linux (the invite and answer codes in the Multiplayer tab and the title menu),
-// through the desktop's own tools: wl-copy / wl-paste on Wayland, xclip or xsel on X11. Steam Deck Game Mode
-// has none of them: there the codes are shown in the tab and typed with Steam's keyboard. This is the module's
+// through the desktop's own tools: wl-copy / wl-paste on Wayland, xclip or xsel on X11; and, for a paste on the
+// game window's own thread (a Ctrl+V), through the game's SDL, which needs none of them (Steam Deck Game Mode
+// has no tool: there SDL's clipboard is the one, else the codes are typed with Steam's keyboard). This is the module's
 // one Linux clipboard: CoopFiles::ReadClipboard / SetClipboardText (coop_pause_files.cpp) call it; Windows has
 // its own there, and this file is not built on Windows.
 //
@@ -9,6 +10,7 @@
 // the tool's standard input from a file, and what the tool prints is only read back from a pipe.
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -23,5 +25,31 @@ bool Copy(const std::string& text);
 // fails or is stopped: an empty clipboard makes wl-paste and xclip exit 1, and that is "" (empty). Nothing
 // (std::nullopt) only when this desktop has none of the tools (or the tool could not be started).
 std::optional<std::string> Paste();
+
+// (on SDL's thread, OnSdlThread: SDL's clipboard first, PickPaste)
+
+// A function of the game's SDL by name (SDL3's library, else SDL2's, as the game loaded it: Longshot loads it
+// RTLD_LOCAL, so dlsym(RTLD_DEFAULT) never finds it); nullptr without SDL or without that function.
+void* GameSdl(const char* name);
+
+// While one lives, the calling thread is SDL's own: the game window's event loop, where Longshot hands the module
+// its keys (hos_coop_key / hos_coop_char) on Linux. SDL's clipboard is read only there (SDL wants the window's
+// thread): there Paste tries SDL first. Nested ones are fine.
+class OnSdlThread {
+public:
+    OnSdlThread();
+    ~OnSdlThread();
+    OnSdlThread(const OnSdlThread&) = delete;
+    OnSdlThread& operator=(const OnSdlThread&) = delete;
+
+private:
+    bool was_;
+};
+
+// What a paste gives: SDL's text when it has some (std::nullopt: SDL not read or not there); else the tools'
+// (`tools`, asked only then); else SDL's "" (SDL answers "" for an empty clipboard and for one it cannot read,
+// so a tool's answer wins over it). Nothing only when neither could read a clipboard.
+std::optional<std::string> PickPaste(const std::optional<std::string>& sdl,
+                                     const std::function<std::optional<std::string>()>& tools);
 
 }  // namespace CoopClipboard

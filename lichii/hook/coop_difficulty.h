@@ -65,6 +65,11 @@ bool Set(const Choice& choice);
 // Any thread: the values in force now (the game as it is while not in a
 // session or before the server said them).
 Values Now();
+// The values in one word, for Now() on any thread: all five percents (boss
+// life and boss damage too), 12 bits each (kMaxBossHpPct 1600 is the most;
+// a bigger one is kept at 4095).
+std::uint64_t PackValues(const Values& v) noexcept;
+Values UnpackValues(std::uint64_t word) noexcept;
 
 // The menu's rows. A preset or a moved slider turns the automatic scaler
 // off: what the host sets stays, whoever joins or leaves.

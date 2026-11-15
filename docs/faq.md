@@ -1,6 +1,6 @@
 # Questions testers ask
 
-Short answers. Setting up is in [setup.md](setup.md), playing over the internet in [play-online.md](play-online.md), what works in [known-issues.md](known-issues.md).
+Short answers about Squadala!, the co-op mod. Setting up is in [setup.md](setup.md), playing over the internet in [play-online.md](play-online.md), what works in [known-issues.md](known-issues.md).
 
 ## Who is the host?
 

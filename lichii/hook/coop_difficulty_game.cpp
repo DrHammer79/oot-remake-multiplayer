@@ -28,21 +28,12 @@ namespace {
 namespace proto = coop::protocol;
 namespace fs = std::filesystem;
 
-// The three values in one word, for any thread.
-std::uint64_t Packed(const Values& v) {
-    return static_cast<std::uint64_t>(v.hp_pct) | static_cast<std::uint64_t>(v.damage_pct) << 16 |
-           static_cast<std::uint64_t>(v.count_pct) << 32;
-}
-
-Values Unpacked(std::uint64_t word) {
-    return {static_cast<std::uint16_t>(word), static_cast<std::uint16_t>(word >> 16),
-            static_cast<std::uint16_t>(word >> 32)};
-}
-
 struct Glue {
     std::mutex mutex;
     State state;                    // network thread writes, under mutex
-    std::atomic<std::uint64_t> now{Packed(Values{})};  // state.values, for any thread
+    // state.values for any thread, all five (PackValues). Issue 55: the boss percents were left out of
+    // this word, so the Life step read boss life and damage as 100% whatever the host's difficulty said.
+    std::atomic<std::uint64_t> now{PackValues(Values{})};
     std::optional<Choice> wish;     // Set -> Frame
     std::optional<Choice> kept;     // the file's, read once
     bool kept_read = false;
@@ -119,7 +110,7 @@ State Get() {
 }
 
 Values Now() {
-    return Unpacked(TheGlue().now.load());
+    return UnpackValues(TheGlue().now.load());
 }
 
 bool Set(const Choice& choice) {
@@ -145,7 +136,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         // Each connection starts with the game as it is; the server says the rest.
         std::lock_guard lock(g.mutex);
         g.state = State{};
-        g.now.store(Packed(Values{}));
+        g.now.store(PackValues(Values{}));
         g.wish.reset();
         g.offered = false;
         return;
@@ -179,7 +170,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
     }
     g.state.values = m->values;
     g.state.set_by = m->set_by;
-    g.now.store(Packed(m->values));
+    g.now.store(PackValues(m->values));
     const std::size_t players = client.players().size();  // (this client included)
     if (changed) {
         g.Line("Difficulty: " + Describe(g.state.choice, m->values, players));

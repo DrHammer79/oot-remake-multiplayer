@@ -58,6 +58,10 @@ $hsRetry = if ($hsOnly) { 'Start "Start OoT Co-op.bat" again' } else { 'Run Buil
 if ($hsOnly) { $script:KitPackRemake = 'Start "Start OoT Co-op.bat" again: it makes the pack again.' }
 
 # Yes or no, yes when no key comes in $Seconds (an unattended start still updates).
+function Clear-KeysTypedAhead {
+    Start-Sleep -Milliseconds 300
+    try { while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) } } catch { }
+}
 function Read-YesNo([string]$Question, [int]$Seconds) {
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
@@ -71,8 +75,10 @@ function Read-YesNo([string]$Question, [int]$Seconds) {
     while ((Get-Date) -lt $end) {
         if ([Console]::KeyAvailable) {
             $key = [Console]::ReadKey($true)
-            if ($key.Key -eq 'N') { Write-Host 'n'; return $false }
-            if ($key.Key -eq 'Y' -or $key.Key -eq 'Enter') { Write-Host 'y'; return $true }
+            # (one key answers: the Enter many type after it is taken out here, else the next question reads it as
+            # an empty answer: player report 87, 'No game files given' at every start)
+            if ($key.Key -eq 'N') { Write-Host 'n'; Clear-KeysTypedAhead; return $false }
+            if ($key.Key -eq 'Y' -or $key.Key -eq 'Enter') { Write-Host 'y'; Clear-KeysTypedAhead; return $true }
         }
         Start-Sleep -Milliseconds 100
     }
@@ -239,6 +245,7 @@ if ($Mode -eq 'title') {
     [void](Use-KitPuppetPack (Join-Path $emu 'mods\contents\0400486024DEC000\coop-puppet\coop_puppet.json') (Join-Path $kit 'tools\puppet_pack') @(
         'Puppet pack: not in the co-op game, so the other players show as names only (the game''s chat says so too).',
         $(if ($hsOnly) { '  It is made from your game file (the one hookshot\game-files.txt names): put that file back, then start again.' } else { '  Run Build-Hookshot-Coop.bat -Game <your .nup> again (SETUP.md, "Play on Hookshot").' })))
+    foreach ($l in @(Invoke-KitSizeTableMerge $kit $emu)) { Write-Host $l }   # (#48: a seed from OOTRR's website)
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
     if ($testKit -and $game) { [System.IO.File]::WriteAllText($testKit, "$($game.Id)`n") }
     Write-Host 'Game started. Host or Join in the game''s menu, first tab Multiplayer (controller: Minus and Plus together, or Home;'
@@ -485,6 +492,7 @@ if ($Hookshot) {
     [void](Use-KitPuppetPack (Join-Path $emu 'mods\contents\0400486024DEC000\coop-puppet\coop_puppet.json') (Join-Path $kit 'tools\puppet_pack') @(
         'Puppet pack: not in the co-op game, so the other players show as names only (the game''s chat says so too).',
         $(if ($hsOnly) { '  It is made from your game file (the one hookshot\game-files.txt names): put that file back, then start again.' } else { '  Run Build-Hookshot-Coop.bat -Game <your .nup> again (SETUP.md, "Play on Hookshot").' })))
+    foreach ($l in @(Invoke-KitSizeTableMerge $kit $emu)) { Write-Host $l }   # (#48: a seed from OOTRR's website)
     $started = Get-Date
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
     Write-Host "Game started. Its log (longshot_log.txt in the game's logs folder) says 'coop: module loaded', then 'coop: connected'."

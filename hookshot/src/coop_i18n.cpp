@@ -623,6 +623,9 @@ constexpr Entry kzh_Hans[] = {
      "用 IP 地址加入时房主的加入密码：房主「同一网络」或「VPN」那一行里地址后面的词。邀请码里已经包含密码。"},
     {"Password: no spaces, at most 128 characters. It was not changed.",
      "密码：不能有空格，最多 128 个字符，未修改。"},
+    // The boss room's chat notices (lichii/hook/coop_boss.cpp, #50): "<name> took the blue warp".
+    {"{} took the blue warp", "{} 进入了蓝色传送光"},
+    {"{} left the boss room", "{} 离开了 Boss 房间"},
 };
 
 // ---------------------------------------------------------------------------
@@ -1193,6 +1196,9 @@ constexpr Entry kzh_Hant[] = {
      "用 IP 位址加入時房主的加入密碼：房主「同一網路」或「VPN」那一行裡位址後面的詞。邀請碼裡已經包含密碼。"},
     {"Password: no spaces, at most 128 characters. It was not changed.",
      "密碼：不能有空格，最多 128 個字元，未修改。"},
+    // The boss room's chat notices (lichii/hook/coop_boss.cpp, #50): "<name> took the blue warp".
+    {"{} took the blue warp", "{} 進入了藍色傳送光"},
+    {"{} left the boss room", "{} 離開了 Boss 房間"},
 };
 
 std::string Trim(std::string s) {
@@ -1522,6 +1528,10 @@ constexpr Shape kShapes[] = {
     {"No ", " yet.", "No {} yet.", true},
     {"Copied: ", "", "Copied: {}", false},
     {"", " friend(s) joined.", "{} friend(s) joined.", false},
+    // The boss room's chat notices (lichii/hook/coop_boss.cpp, #50): "<name> took the blue warp". Before
+    // the shapes with an empty end below ("Player {}"), which a name could also fit.
+    {"", " took the blue warp", "{} took the blue warp", false},
+    {"", " left the boss room", "{} left the boss room", false},
     {"Getting ", "'s save...", "Getting {}'s save...", false},
     {"Loading ", "'s save...", "Loading {}'s save...", false},
     {"Multiplayer: ", "", "Multiplayer: {}", true},

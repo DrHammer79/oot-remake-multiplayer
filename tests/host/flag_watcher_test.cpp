@@ -1730,3 +1730,126 @@ TEST_CASE("doubled chest: after the put-back, the next frames send nothing") {
   CHECK(w.stats().doubled_gains == 1);
   CHECK(store.tokens() == 5);
 }
+
+namespace {
+
+// Every FLAG_SET and FLAG_STATE entry the next `frames` frames send.
+std::vector<proto::FlagEntry> sent(FlagWatcher& w, FakeStore& store, int frames) {
+  std::vector<proto::FlagEntry> out;
+  for (int i = 0; i < frames; ++i) {
+    for (const auto& m : decode(w.frame(store))) {
+      if (const auto* s = std::get_if<proto::FlagSet>(&m)) out.insert(out.end(), s->flags.begin(), s->flags.end());
+      if (const auto* s = std::get_if<proto::FlagState>(&m)) out.insert(out.end(), s->flags.begin(), s->flags.end());
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("flag watcher: a down-only Bool at 0 here takes no 1 from the group, and our 0 goes out (issue 84)") {
+  // Mido's blocker: the game only ever lowers it. A group's 1 (host's state,
+  // its save load, a join snapshot) must not shut the path again here.
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  CHECK(w.share_down_only(kDoor));
+  CHECK_FALSE(w.share_down_only(kDoor));
+  w.frame(store);
+
+  CHECK(w.receive(state({entry(kDoor, 1), entry(kChest, 1)})));
+  auto out = sent(w, store, 3);
+  CHECK(store.get(kDoor) == 0);
+  CHECK(store.get(kChest) == 1);  // other flags as before
+  CHECK(has(out, entry(kDoor, 0)));
+  CHECK(w.stats().down_only_kept >= 1);
+
+  CHECK(w.receive(proto::Message{proto::FlagReset{1, {entry(kDoor, 1)}}}));
+  sent(w, store, 3);
+  CHECK(store.get(kDoor) == 0);
+
+  w.receive(proto::FlagSnapshot{0, 1, {entry(kDoor, 1)}});
+  sent(w, store, 3);
+  CHECK(store.get(kDoor) == 0);
+}
+
+TEST_CASE("flag watcher: a down-only Bool still goes down from the group (issue 84)") {
+  FakeStore store = game();
+  store.set(kDoor, 1);
+  FlagWatcher w(shared(), FlagRole::player);
+  w.share_down_only(kDoor);
+  w.frame(store);
+  CHECK(w.receive(state({entry(kDoor, 0)})));
+  sent(w, store, 2);
+  CHECK(store.get(kDoor) == 0);
+  CHECK(w.stats().down_only_kept == 0);
+}
+
+TEST_CASE("flag watcher: a host at 0 answers a player's 1 of a down-only Bool with 0 (issue 84)") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::host);
+  w.share_down_only(kDoor);
+  w.frame(store);
+  CHECK(w.receive(proto::FlagSet{2, {entry(kDoor, 1)}}));
+  const auto out = sent(w, store, 2);
+  CHECK(store.get(kDoor) == 0);
+  CHECK(has(out, entry(kDoor, 0)));
+  CHECK_FALSE(has(out, entry(kDoor, 1)));
+}
+
+TEST_CASE("flag watcher: an up-only Bool at 1 here takes no 0 from the group, and our 1 goes out (issue 84)") {
+  // The Deku Tree's mouth: the game only ever opens it. A group's 0 (host's
+  // state, its save load, a join snapshot) must not shut it again here.
+  FakeStore store = game();
+  store.set(kDoor, 1);
+  FlagWatcher w(shared(), FlagRole::player);
+  CHECK(w.share_up_only(kDoor));
+  CHECK_FALSE(w.share_up_only(kDoor));
+  CHECK_FALSE(w.share_down_only(kDoor));  // one way only
+  w.frame(store);
+
+  CHECK(w.receive(state({entry(kDoor, 0), entry(kChest, 1)})));
+  auto out = sent(w, store, 3);
+  CHECK(store.get(kDoor) == 1);
+  CHECK(store.get(kChest) == 1);  // other flags as before
+  CHECK(has(out, entry(kDoor, 1)));
+  CHECK(w.stats().up_only_kept >= 1);
+  CHECK(w.stats().down_only_kept == 0);
+
+  CHECK(w.receive(proto::Message{proto::FlagReset{1, {entry(kDoor, 0)}}}));
+  sent(w, store, 3);
+  CHECK(store.get(kDoor) == 1);
+
+  w.receive(proto::FlagSnapshot{0, 1, {entry(kDoor, 0)}});
+  sent(w, store, 3);
+  CHECK(store.get(kDoor) == 1);
+}
+
+TEST_CASE("flag watcher: an up-only Bool still goes up from the group (issue 84)") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  w.share_up_only(kDoor);
+  w.frame(store);
+  CHECK(w.receive(state({entry(kDoor, 1)})));
+  sent(w, store, 2);
+  CHECK(store.get(kDoor) == 1);
+  CHECK(w.stats().up_only_kept == 0);
+}
+
+TEST_CASE("flag watcher: a host at 1 answers a player's 0 of an up-only Bool with 1 (issue 84)") {
+  FakeStore store = game();
+  store.set(kDoor, 1);
+  FlagWatcher w(shared(), FlagRole::host);
+  w.share_up_only(kDoor);
+  w.frame(store);
+  CHECK(w.receive(proto::FlagSet{2, {entry(kDoor, 0)}}));
+  const auto out = sent(w, store, 2);
+  CHECK(store.get(kDoor) == 1);
+  CHECK(has(out, entry(kDoor, 1)));
+  CHECK_FALSE(has(out, entry(kDoor, 0)));
+}
+
+TEST_CASE("flag watcher: a down-only Bool cannot also be up-only (issue 84)") {
+  FlagWatcher w(shared(), FlagRole::player);
+  CHECK(w.share_down_only(kDoor));
+  CHECK_FALSE(w.share_up_only(kDoor));
+}

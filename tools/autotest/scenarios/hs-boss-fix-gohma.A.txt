@@ -12,6 +12,10 @@
 #     event or after our hit" > 0 in B.
 #  3. Neither log: "force skip of the event" right after "InsideTheDekuTree_BossAppear"; if the rules want to
 #     skip it they log "... not skipped" instead.
+#  0. FIRST (else VOID, not a sync FAIL): after "mark a-trigger" A's log has Gohma's anim leave
+#     Pre_Battle_Ceiling_Wait/Turn "(ours)" and "ready to own the boss (Dm_Deku_BossIn)" (her drop sets the
+#     flag); B's copy follows. Big run 2 (20261115-102144) parked the owner at x 0 (the doorway): she never
+#     dropped, both stayed 'unready', every later check was unreachable (boss-owner-b).
 #  4. CONTROL: shots a-moved / b-moved show each Link at its goto target (away from where the intro left it);
 #     the log's "test goto ... reached" (or the position lines) for both. A Link stuck in the intro = FAIL #30.
 #  5. STUN on the copy: after B's seeds (b-seed1..2), B's log "our own hit: the copy runs its own reaction";
@@ -60,7 +64,12 @@ goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
 mark a-in
 wait 2400               # the door's event, the intro, Gohma's own appear event
 mark a-after-intro
-goto 0.0 67.5 1.5 600   # CONTROL: 7.5 m west of the room's centre, facing in
+goto 17.0 67.8 1.5 600  # CONTROL + her drop: under her ceiling spot (18.49 59.97 67.79); the owner's Link must
+rstick 0 1 60           # walk into the room for her own trigger (GohmaStage Banc: floor Area x 22.5 z 68.2)
+press ZL 10             # look up at her
+wait 900
+mark a-trigger          # her anim leaves Pre_Battle_Ceiling_* here ('(ours)'), else the run is VOID
+goto 12.0 67.5 1.5 600  # inside the room, 6.5 m west of her (x 0.0 was the doorway, 17 m from her)
 mark a-moved
 wait 1500               # B's intro (B walks in now)
 mark a-watch0

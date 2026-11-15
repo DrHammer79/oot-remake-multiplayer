@@ -319,26 +319,32 @@ std::size_t Merge(std::optional<coop::host::SharedFlags>& shared, bool on) {
     return shared->size() - before;
 }
 
+namespace {
+
+// Meet_DekuTree's steps in order; 0 for NotReady or a value we do not know.
+int Rank(std::uint32_t v) {
+    switch (v) {
+    case quest::kReady:
+        return 1;
+    case quest::kStep01:
+        return 2;
+    case quest::kStep02:
+        return 3;
+    case quest::kStep03:
+        return 4;
+    case quest::kComplete:
+        return 5;
+    default:
+        return 0;
+    }
+}
+
+} // namespace
+
 std::optional<std::uint32_t> QuestCatchUp(std::optional<std::uint32_t> step,
                                           std::optional<bool> mido_blocker,
                                           std::optional<bool> met_deku_tree) {
-    const auto rank = [](std::uint32_t v) -> int {
-        switch (v) {
-        case quest::kReady:
-            return 1;
-        case quest::kStep01:
-            return 2;
-        case quest::kStep02:
-            return 3;
-        case quest::kStep03:
-            return 4;
-        case quest::kComplete:
-            return 5;
-        default:
-            return 0;  // NotReady or a value we do not know
-        }
-    };
-    if (!step || rank(*step) == 0) {
+    if (!step || Rank(*step) == 0) {
         return std::nullopt;
     }
     std::uint32_t target = 0;
@@ -349,10 +355,85 @@ std::optional<std::uint32_t> QuestCatchUp(std::optional<std::uint32_t> step,
     } else {
         return std::nullopt;
     }
-    if (rank(target) <= rank(*step)) {
+    if (Rank(target) <= Rank(*step)) {
         return std::nullopt;
     }
     return target;
+}
+
+bool MidoBlockerMend(std::optional<std::uint32_t> step, std::optional<bool> mido_blocker,
+                     std::optional<bool> met_deku_tree) {
+    if (mido_blocker != true) {
+        return false;  // already out of the way, or unread
+    }
+    return met_deku_tree == true || (step && Rank(*step) >= Rank(quest::kStep03));
+}
+
+bool DekuTreeMouthMend(std::optional<std::uint32_t> step, std::optional<bool> mouth) {
+    return mouth == false && step == quest::kComplete;
+}
+
+namespace {
+
+// Read from the romfs (GameDataList defaults; every EventTriggerSetGameDataBool
+// in Event/EventFlow/*.bfevfl and TriggerGameDataSetBool* in Logic/*.ainb).
+// Only flags that gate a path are here. Left out on purpose: the two
+// IsMalonAppear flags and the Kokiri/Lost Woods blockers the area logic sets
+// both ways; one-way flags that gate no path (the owl, Talon, talks, the light
+// prelude, the Gerudo carpenters); and the scene flags: a "seen" kept over a
+// fresh host save would spread to it and could skip a scene that gives an
+// item there, while a scene seen 0 again only plays again.
+constexpr std::array kOneWays = std::to_array<OneWay>({
+    // Mido at the Deku Tree path (Npc_Kokiri_Mido_Child: his sword and shield talk).
+    {quest::kMidoBlocker, Way::down, "KokiriForest_Npc_Kokiri_Mido_Child_Blocker"},
+    // Adult Mido in the Lost Woods (SageOfForest: Saria's Song for him).
+    {0x3b320c55u, Way::down, "KokiriForest_Npc_Kokiri_Mido_Adult_Blocker"},
+    // The Kokiri at the forest exit (Npc_Kokiri_007_Child, once the Emerald is won).
+    {0xe5dc5674u, Way::down, "KokiriForest_Npc_Kokiri_007_Child_Blocker_00"},
+    // The Deku Tree's mouth (Dm_Kokiri_0075).
+    {quest::kDekuTreeMouth, Way::up, "KokiriForest_Meet_DekuTree_OpenDekuTreeMouth"},
+    // Link's house door (Dm_Kokiri_0045).
+    {0x9b1b27d2u, Way::up, "KokiriForest_LinkHouseDoor_Open"},
+    // The royal tomb (Dm_Graveyard_0010, Zelda's Lullaby on the Triforce).
+    {0xcf7dad5cu, Way::up, "GraveYard_RoyalFamilyTomb_Open"},
+    {0x3eac8adau, Way::up, "GraveYard_RoyalFamilyTomb_Breaked"},
+    // Zora's River waterfall (Dm_ZoraRiver_0010, Get_StoneOfWater); the adult
+    // one has no writer in flows or logic and is only ever read.
+    {0xf16a3d82u, Way::up, "Zorariver_TheWaterfallsplits"},
+    {0xa426db4bu, Way::up, "Zorariver_TheWaterfallsplits_Adult"},
+    // Jabu-Jabu's mouth (no writer in flows or logic; only ever read).
+    {0xa49cb68cu, Way::up, "JabJabOpenedMouth"},
+    // Kakariko's well drained (Dm_Kakariko_0050, the windmill man's talk).
+    {0x61960b30u, Way::up, "KakarikoVillage_Npc_Hylia_009_Child_DeleteWaterPlane"},
+    {0xeecaa92au, Way::up, "KakarikoVillage_DeleteDummyLadder"},
+    {0xf5be8a94u, Way::up, "Npc_Hylia_009_Child_IsStormSongPlayed"},
+    // The Death Mountain gate (Dm_Kakariko_0010, the guard's talk).
+    {0x19898d14u, Way::up, "Npc_Hylia_Soldier_003_GateOpen"},
+    // Lake Hylia after the Water Temple (Dm_SY_BancChange_EscapeDungeon).
+    {0x503a54cfu, Way::up, "SageOfWater_Icedelete"},
+});
+
+bool MidoDue(std::optional<std::uint32_t> step, std::optional<bool> now, std::optional<bool> met_deku_tree) {
+    return MidoBlockerMend(step, now, met_deku_tree);
+}
+
+bool MouthDue(std::optional<std::uint32_t> step, std::optional<bool> now, std::optional<bool>) {
+    return DekuTreeMouthMend(step, now);
+}
+
+constexpr std::array<Mend, kMends> kMendList{{
+    {quest::kMidoBlocker, false, "Mido's blocker was 1 in a game past him", MidoDue},
+    {quest::kDekuTreeMouth, true, "the Deku Tree's mouth was shut in a game whose quest is Complete", MouthDue},
+}};
+
+} // namespace
+
+std::span<const OneWay> OneWays() {
+    return kOneWays;
+}
+
+std::span<const Mend, kMends> Mends() {
+    return kMendList;
 }
 
 bool On() {

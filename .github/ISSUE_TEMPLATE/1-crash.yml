@@ -1,5 +1,5 @@
 name: Crash
-description: The game or the co-op build closes, freezes or shows an error.
+description: The game or Squadala! (the co-op mod) closes, freezes or shows an error.
 labels: [bug, crash]
 body:
   - type: markdown
@@ -8,7 +8,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Co-op build and game version
+      label: Squadala! version and game version
       description: The first line of the kit's VERSION.txt, and the game version.
     validations:
       required: true

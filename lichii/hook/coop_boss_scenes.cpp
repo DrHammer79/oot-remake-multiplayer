@@ -38,6 +38,24 @@ const CoopBoss::Room* RoomOf(const Boss& b) {
     return b.room < 0 ? nullptr : CoopBoss::RoomByIndex(static_cast<std::uint8_t>(b.room));
 }
 
+// The death another player started, as our game is asked for it (player report #88: guests could not use the
+// blue warp). A boss in a dungeon room: its own death setting (outro_asks), the entry of the boss's quest flow
+// the boss's own logic asks (Gohma's InsideTheDekuTree_BossDie is Get_StoneOfForest's Boss_Win). That entry
+// plays the death flow as a sub-event and moves the quest on in our game (EventExecuteProgressChallengeStep:
+// DefeatBoss, GoToWarpPoint), and the room's logic makes the blue warp from that step (Logic
+// InsideTheDekuTree_Level_Room_L_Common: Create_WarpPrefab, the Gimmick_Warp_FromDungeon module whose area asks
+// the warp's event). The death flow alone (Dm_Deku_BossOut, a timeline) shows the warp in the cutscene but
+// moves no quest, and the shared quest step waits until our Link is out of the dungeon (coop_hook.cpp): no
+// warp to enter. Only in the boss room's own dungeon scene, and only when our game has the boss (Join); elsewhere (the boss rush, Ganondorf and Ganon, who
+// have no room) the death flow, as before.
+std::string_view DeathToAsk(const Boss& b, const std::optional<std::string>& scene) {
+    const CoopBoss::Room* room = RoomOf(b);
+    if (room == nullptr || !scene || *scene != room->scene || b.outro_asks[0].empty()) {
+        return b.outro;
+    }
+    return b.outro_asks[0];
+}
+
 bool Finite(const Vec& p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
 }
@@ -180,7 +198,12 @@ void Director::Join(std::uint8_t b, Kind kind, const Local& local, std::uint64_t
         return;  // our own game has it running already
     }
     f.asked_at = now_us;
-    out.play = std::string(kind == Kind::intro ? boss.intro : boss.outro);
+    // The death setting only when our game has the boss (our walk saw its body): a save that beat it already
+    // (no boss here, its warp there) would get its Complete quest set back by the setting's step (King Dodongo's
+    // and Barinade's do not ignore a completed quest), and its death signal would go to no boss (review-guest-warp).
+    out.play = std::string(kind == Kind::intro         ? boss.intro
+                           : local.boss_ours.has_value() ? DeathToAsk(boss, local.scene)
+                                                         : boss.outro);
     out.log.push_back(*out.play + ": playing it here too (player " +
                       std::to_string(kind == Kind::intro ? f.starter : f.outro_by) + " started it)");
 }
@@ -315,11 +338,18 @@ void Director::Ours(const Request& r, const Local& local, std::uint64_t now_us, 
             }
         }
     } suffix{out.log, out.log.size(), r.name == flow ? std::string() : " (asked as " + r.name + ")"};
+    Fight& f = fights_[b];
     if (!r.taken) {
         out.log.push_back(label + ": our game did not take it");
+        if (kind == Kind::outro && r.name != flow && f.asked_at != 0 && now_us - f.asked_at <= kJoinUs) {
+            // Our ask of the boss's own death setting was refused: the death flow alone, once (the cutscene
+            // still plays; the quest step and the warp then wait until our Link is out of the dungeon).
+            f.asked_at = now_us;
+            out.play = std::string(flow);
+            out.log.push_back(label + ": asking the death flow alone instead (no quest step, no warp here)");
+        }
         return;
     }
-    Fight& f = fights_[b];
     const bool asked = f.asked_at != 0 && now_us - f.asked_at <= kJoinUs;
     f.asked_at = 0;
     playing_ = Playing{b, kind};

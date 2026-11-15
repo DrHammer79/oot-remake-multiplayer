@@ -1,4 +1,4 @@
-# Testing co-op on two PCs
+# Testing Squadala! on two PCs
 
 How to test the co-op build with the test kit: the server on one PC, the patched emulator on both, each with its own copy of the game. The kit is made by `tools/release/make_kit.ps1` ([Making the kit](#making-the-kit)); in the kit this file is `TESTING.md`.
 

@@ -166,6 +166,11 @@ std::string ManifestText(const std::vector<std::string>& offered) {
      "help": "OOTRR's presets: only the ones the installed OOTRR can build are offered.",
      "help_zh-Hans": "OOTRR 的预设：只列出已安装的 OOTRR 能构建的那些。",
      "help_zh-Hant": "OOTRR 的預設：只列出已安裝的 OOTRR 能建置的那些。"},
+    {"key": "settings", "name": "Settings string", "type": "text", "max_length": 400, "shared": true, "restart": true,
+     "name_zh-Hans": "设定字符串", "name_zh-Hant": "設定字串",
+     "help": "Optional: a settings string from OOTRR's own page (OOTRR1-...), used in place of Settings. In co-op the host's is everyone's.",
+     "help_zh-Hans": "可选：OOTRR 官网的设定字符串（OOTRR1-...），代替上面的设定。联机时所有人用房主的。",
+     "help_zh-Hant": "選填：OOTRR 官網的設定字串（OOTRR1-...），取代上面的設定。連線時所有人用房主的。"},
     {"key": "game_folder", "name": "Game folder", "type": "text", "max_length": 260,
      "name_zh-Hans": "游戏文件夹", "name_zh-Hant": "遊戲資料夾",
      "help": "Only for other game files (1.1.1, with Pack, Banc, Event and System). Empty: the kit's own (romfs beside the game).",
@@ -191,9 +196,34 @@ std::string SeedWord(std::string_view seed) {
     return out.empty() ? "seed" : out;
 }
 
+bool IsSettingsString(std::string_view text) {
+    if (text.size() <= 5 || text.size() > kSettingsMax || text.substr(0, 5) != "OOTRR") return false;
+    return std::all_of(text.begin(), text.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    });
+}
+
+std::string SettingsString(std::string_view text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return {};
+    text = text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+    return IsSettingsString(text) ? std::string(text) : std::string();
+}
+
+std::string SettingsName(std::string_view preset) {
+    if (!IsSettingsString(preset)) return std::string(preset.empty() ? "default" : preset);
+    return "settings " + std::string(preset.substr(0, 16)) + (preset.size() > 16 ? "..." : "");
+}
+
 std::string FolderFor(std::string_view seed, std::string_view preset) {
     std::string out = std::string(kSeedPrefix) + SeedWord(seed);
-    if (!preset.empty() && preset != "default") {
+    if (IsSettingsString(preset)) {
+        std::uint32_t hash = 0x811c9dc5u;  // FNV-1a
+        for (const char c : preset) hash = (hash ^ static_cast<unsigned char>(c)) * 0x01000193u;
+        char hex[9];
+        std::snprintf(hex, sizeof hex, "%08x", static_cast<unsigned>(hash));
+        out += "-s" + std::string(hex);
+    } else if (!preset.empty() && preset != "default") {
         out += "-" + std::string(preset);
     }
     return out;
@@ -255,12 +285,12 @@ Plan Decide(const Want& want, const std::vector<Built>& built, const std::vector
     });
     if (have == built.end()) {
         plan.what = Plan::Do::build;
-        plan.why = "seed " + SeedWord(want.seed) + " (" + preset + ") is built now";
+        plan.why = "seed " + SeedWord(want.seed) + " (" + SettingsName(preset) + ") is built now";
         return plan;
     }
     if (tables && have->tables != *tables) {
         plan.what = Plan::Do::refresh;
-        plan.why = "seed " + SeedWord(want.seed) + " (" + preset +
+        plan.why = "seed " + SeedWord(want.seed) + " (" + SettingsName(preset) +
                    ") is made again for the other mods' size tables (the co-op puppets')";
         return plan;
     }
@@ -271,7 +301,7 @@ Plan Decide(const Want& want, const std::vector<Built>& built, const std::vector
         plan.on.push_back(plan.folder);
     }
     plan.what = plan.on.empty() && plan.off.empty() ? Plan::Do::nothing : Plan::Do::use;
-    plan.why = plan.what == Plan::Do::use ? "seed " + SeedWord(want.seed) + " (" + preset + ") is switched on" : "";
+    plan.why = plan.what == Plan::Do::use ? "seed " + SeedWord(want.seed) + " (" + SettingsName(preset) + ") is switched on" : "";
     return plan;
 }
 
@@ -359,8 +389,37 @@ std::string ShortName(std::string_view mod) {
 }
 }  // namespace
 
+std::string Fnv64Hex(std::string_view bytes) {
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    for (const char c : bytes) h = (h ^ static_cast<unsigned char>(c)) * 0x100000001b3ull;
+    char out[17];
+    std::snprintf(out, sizeof out, "%016llx", static_cast<unsigned long long>(h));
+    return out;
+}
+
+bool MergedByKit(const fs::path& mods_root, std::string_view mod) {
+    const fs::path folder = mods_root / CoopMods::FromUtf8(std::string(mod));
+    std::string version, table, table_hash, pack_hash;
+    for (const std::string& line : LastLines(ReadAll(folder / kMergedFile), static_cast<std::size_t>(-1))) {
+        std::istringstream words(line);
+        std::string key;
+        words >> key;
+        if (key == "coop-merged") words >> version;
+        else if (key == "table") words >> table >> table_hash;
+        else if (key == "pack") words >> pack_hash;
+    }
+    if (version != "1" || table.empty() || table_hash.size() != 16 || pack_hash.size() != 16) return false;
+    if (table.find_first_of("/\\") != std::string::npos || table == "." || table == "..") return false;
+    const fs::path in_mod = folder / "romfs" / "System" / "Resource" / CoopMods::FromUtf8(table);
+    const fs::path in_pack =
+        mods_root / CoopMods::FromUtf8(kPackFolder) / "romfs" / "System" / "Resource" / CoopMods::FromUtf8(table);
+    std::error_code ec;
+    if (!fs::is_regular_file(in_mod, ec) || !fs::is_regular_file(in_pack, ec)) return false;
+    return Fnv64Hex(ReadAll(in_mod)) == table_hash && Fnv64Hex(ReadAll(in_pack)) == pack_hash;
+}
+
 std::optional<std::string> OutsideSizeTable(const fs::path& mods_root, const std::vector<CoopMods::Row>& rows,
-                                            bool list_order) {
+                                            bool list_order, std::string* merged) {
     std::vector<const CoopMods::Row*> order;
     for (const CoopMods::Row& r : rows) {
         if (r.on_now && HasSizeTable(mods_root / CoopMods::FromUtf8(r.name))) order.push_back(&r);
@@ -384,6 +443,10 @@ std::optional<std::string> OutsideSizeTable(const fs::path& mods_root, const std
         }
     }
     if (winner == nullptr || IsSeedFolder(winner->name) || CoopMods::NameSame(winner->name, kFolder)) {
+        return std::nullopt;
+    }
+    if (MergedByKit(mods_root, winner->name)) {
+        if (merged != nullptr) *merged = winner->name;
         return std::nullopt;
     }
     return winner->name;
@@ -774,6 +837,24 @@ void Rando::Start() {
             return;
         }
         loader_.Refresh();
+    } else if (std::ifstream in(folder / CoopMods::kManifestFile, std::ios::binary); in) {
+        // A control mod written before the Settings string (#48): written again with it, offering the presets the
+        // probe found (kPresetsFile), all when none was tried.
+        std::ostringstream text;
+        text << in.rdbuf();
+        in.close();
+        if (text.str().find("\"key\": \"settings\"") == std::string::npos) {
+            std::ifstream cache_in(folder / kPresetsFile, std::ios::binary);
+            std::ostringstream cache_text;
+            cache_text << cache_in.rdbuf();
+            const PresetCache cache = ReadPresetCache(cache_text.str());
+            std::vector<std::string> offered;
+            for (const char* p : kPresets) {
+                const auto it = cache.ok.find(p);
+                if (it == cache.ok.end() || it->second) offered.emplace_back(p);
+            }
+            if (WriteText(folder / CoopMods::kManifestFile, ManifestText(offered))) loader_.Refresh();
+        }
     }
     {
         // Whether this run of the game plays a seed: one of ours was indexed at its start.
@@ -799,7 +880,13 @@ void Rando::Start() {
             }
         }
         // Another mod's size table wins (#48: a seed made on OOTRR's page, dropped in by hand): no pack actor this run.
-        if (const auto outside = OutsideSizeTable(loader_.Root(), loader_.Rows(), loader_.ExeReadsList())) {
+        std::string merged;
+        const auto outside = OutsideSizeTable(loader_.Root(), loader_.Rows(), loader_.ExeReadsList(), &merged);
+        if (!merged.empty() && hooks_.log) {
+            hooks_.log("randomizer: the game reads the size table of the mod " + merged +
+                       ", which the kit merged with the co-op puppets' entries (" + kMergedFile + "): puppets on");
+        }
+        if (outside) {
             outside_ = true;
             if (hooks_.log) {
                 hooks_.log("randomizer: the game reads the size table of the mod " + *outside +
@@ -972,6 +1059,13 @@ Want Rando::Wanted(bool* seed_locked) const {
         }
         if (s.setting.key == "preset") want.preset = s.value;
     }
+    // A settings string from OOTRR's page, when set, in place of the preset (#48); one not valid is left out (Check
+    // says so).
+    for (const CoopMods::SettingRow& s : loader_.Settings(kFolder)) {
+        if (s.setting.key == "settings") {
+            if (std::string settings = SettingsString(s.value); !settings.empty()) want.preset = std::move(settings);
+        }
+    }
     // A guest plays the host's world: a host whose randomizer is off or missing sends no switch, so ours is off too
     // (our own value is kept for a game alone).
     if (want.on && loader_.HostValuesSet()) {
@@ -1026,6 +1120,25 @@ void Rando::Check() {
         }
     }
     loader_.NoteChanged(std::string(kFolder) + "/switch", want.on == on_now_ ? std::string() : SwitchLine(want.on));
+    {
+        // A settings string that is not one (#48): said once per value; the preset is used meanwhile.
+        std::string bad;
+        for (const CoopMods::SettingRow& s : loader_.Settings(kFolder)) {
+            if (s.setting.key == "settings" && SettingsString(s.value).empty() &&
+                s.value.find_first_not_of(" \t\r\n") != std::string::npos) {
+                bad = s.value;
+            }
+        }
+        const std::lock_guard lock(mutex_);
+        if (bad != bad_settings_) {
+            bad_settings_ = bad;
+            if (!bad.empty()) {
+                lines_.push_back("Randomizer: the Settings string is not one of OOTRR's (it starts with OOTRR, "
+                                 "letters, digits and '-' only): Settings is used instead");
+                if (hooks_.log) hooks_.log("randomizer: " + lines_.back());
+            }
+        }
+    }
     if (want.on && want.seed.empty() && !seed_locked) {
         // Our own seed (we host or play alone): made once, kept as our setting, sent to the guests.
         const std::string seed = NewSeed(hooks_.entropy ? hooks_.entropy() : 0x9E3779B97F4A7C15ull);

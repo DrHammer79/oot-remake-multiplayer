@@ -25,7 +25,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <set>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,6 +48,16 @@ inline constexpr std::uint64_t kStorageSlack = 0x10000;
 // While the game makes textures, a Step looks only at the new ones; all of
 // them again at most this often (one made before its texels were in).
 inline constexpr std::uint64_t kFullSearchMs = 1000;
+// A texture the game made that holds no colour yet (its texels come after it
+// is made: a scene, a cutscene, its streaming) is read again at every Step for
+// this long, made or not made anything since: your Link's colour is drawn a
+// step or two after its texels are in, not at the next full search
+// (player report #78: the sword blinked in the game's colours).
+inline constexpr std::uint64_t kLateTexelsMs = 1000;
+// At most this many of those are read again in one Step (in turn, the rest at
+// the next ones): a scene's hundreds of new textures cost a few steps, not one
+// long one.
+inline constexpr std::size_t kLateChecks = 64;
 // A texture file's header is at most this long (the game's are 4096 bytes).
 inline constexpr std::uint64_t kMaxOffset = 0x10000;
 
@@ -98,7 +108,7 @@ struct Search {
     std::size_t listed = 0;   // the game's textures of a fitting size
     std::size_t unread = 0;   // ... whose storage could not be read
     std::size_t heads = 0;    // ... whose first kHead bytes are a colour's, the rest not (a copy's mark, a painting)
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> misses;   // (address, serial) read and held by no colour
+    std::vector<Live> misses;   // read and held by no colour (its first bytes may be one's)
 };
 // Every texture of `colours` the game has made: its storage holds the
 // colour's texels exactly, the whole image (the pack's texels are the image's
@@ -107,6 +117,12 @@ struct Search {
 // (counted in `listed` all the same), e.g. the misses of an earlier search.
 Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours,
             const std::function<bool(const Live&)>& skip = {});
+// The storage sizes a texture of `colours` may have, [first, second]; (0, 0)
+// when they have no texels.
+std::pair<std::uint64_t, std::uint64_t> Sizes(const std::vector<std::shared_ptr<const Texels>>& colours);
+// Find among `listed` only (`listed` of the result is their count).
+Search Find(const Textures& textures, const std::vector<Live>& listed,
+            const std::vector<std::shared_ptr<const Texels>>& colours);
 // Draws the place in `colour`: an override, or none when the game's memory
 // holds that colour already. False when Longshot refused it (nothing changed).
 bool Draw(Textures& textures, Place& place, const std::shared_ptr<const Texels>& colour);
@@ -168,11 +184,18 @@ private:
     bool look_now_ = true;
     bool looked_ = false;
     std::uint64_t generation_ = 0;
-    // The game's textures of the last searches that hold no colour, looked at
-    // again only by a full search (at most every kFullSearchMs while the game
-    // makes textures): a texture made again is found within a Step, not a round.
-    std::set<std::pair<std::uint64_t, std::uint64_t>> misses_;
+    // The game's textures of the last searches that hold no colour, by
+    // (address, serial), and when first read so. Read again at every Step
+    // while younger than kLateTexelsMs (LateLook), after that only by a full
+    // search (at most every kFullSearchMs while the game makes textures).
+    struct Miss {
+        Live live;
+        std::uint64_t since = 0;
+    };
+    std::map<std::pair<std::uint64_t, std::uint64_t>, Miss> misses_;
+    std::pair<std::uint64_t, std::uint64_t> late_next_{};   // where the next LateLook starts
     std::uint64_t full_ms_ = 0;
+    void LateLook(std::uint64_t now_ms, const std::vector<std::shared_ptr<const Texels>>& colours);
     bool said_nothing_found_ = false;
     std::string said_;                        // the last "no texture" line (said again when it changes)
     int said_count_ = 0;

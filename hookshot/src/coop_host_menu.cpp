@@ -539,7 +539,8 @@ PastedAnswer ReadPastedAnswer(const std::optional<std::string>& clipboard, std::
 #ifdef _WIN32
         out.line = "The clipboard could not be read (another program had it open): press this again.";
 #else
-        out.line = "The clipboard could not be read: install wl-clipboard (Wayland) or xclip (X11), then press this again.";
+        out.line = "The clipboard could not be read: no clipboard tool. Press Ctrl+V here, or install wl-clipboard "
+                   "(Wayland) or xclip (X11), then press this again.";
 #endif
         return out;
     }

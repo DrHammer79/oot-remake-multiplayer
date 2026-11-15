@@ -968,3 +968,43 @@ TEST_CASE("pause tab: Host Port and Settings Port when you host validate, save, 
     CHECK_FALSE(m.TakeRequest().has_value());
     CHECK(m.view().help.find("1 to 65535") != std::string::npos);
 }
+
+TEST_CASE("pause tab: q and e type into the code and the password, the page stays (Linux report)") {
+    Menu m;
+    m.Show(CoopTitleMenu::Options{});
+    m.Open(Page::kJoin);
+    SelectRow(m, "Friend's code");
+    m.Press(Input::kDecide);
+    CHECK(m.typing());
+    CHECK(m.TakeRequest()->kind == Request::Kind::kPaste);
+    CHECK(m.Paste(""));   // nothing on the clipboard: typed instead
+    for (const char c : std::string("queue")) {
+        CHECK(m.Char(static_cast<unsigned char>(c)));
+    }
+    CHECK(m.typing());
+    CHECK(m.page() == Page::kJoin);
+    CHECK(m.join_text() == "queue");
+    m.Press(Input::kDecide);
+    CHECK_FALSE(m.typing());
+    CHECK(m.join_text() == "queue");
+    // the Password row: the same
+    Menu p;
+    p.Show(CoopTitleMenu::Options{});
+    p.Open(Page::kJoin);
+    SelectRow(p, "IP address");
+    p.Press(Input::kDecide);
+    for (const char c : std::string("10.0.0.2:28000")) {
+        p.Char(static_cast<unsigned char>(c));
+    }
+    p.Press(Input::kDecide);
+    SelectRow(p, "Password");
+    p.Press(Input::kDecide);
+    for (const char c : std::string("qEeQue")) {
+        CHECK(p.Char(static_cast<unsigned char>(c)));
+    }
+    CHECK(p.typing());
+    CHECK(p.page() == Page::kJoin);
+    CHECK(SelectedValue(p) == "******_");
+    p.Press(Input::kDecide);
+    CHECK(p.join_text() == "10.0.0.2:28000 qEeQue");
+}

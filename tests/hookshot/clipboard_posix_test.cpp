@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <optional>
 #include <string>
 
 #include <fcntl.h>
@@ -179,4 +180,38 @@ TEST_CASE("Linux clipboard: the clipboard's text never reaches a shell") {
     CHECK(d.Clip() == evil);
     CHECK(CoopClipboard::Paste() == evil.substr(0, evil.size() - 1));
     CHECK_FALSE(fs::exists(marker));
+}
+
+TEST_CASE("Linux clipboard: a paste on SDL's thread takes SDL's text first, then a tool's, then SDL's empty one") {
+    int asked = 0;
+    const auto tool = [&asked](std::optional<std::string> answer) {
+        return [&asked, answer]() {
+            ++asked;
+            return answer;
+        };
+    };
+    // SDL has text (Steam Deck Game Mode: no tool at all): that, and no tool is run
+    CHECK(CoopClipboard::PickPaste(std::string("ABCD-EFGH"), tool(std::nullopt)) == "ABCD-EFGH");
+    CHECK(asked == 0);
+    // SDL's "" is empty or unreadable: a tool's answer wins, else the empty clipboard stands
+    CHECK(CoopClipboard::PickPaste(std::string(), tool(std::string("from wl-paste"))) == "from wl-paste");
+    CHECK(CoopClipboard::PickPaste(std::string(), tool(std::nullopt)) == "");
+    // not on SDL's thread, or no SDL: the tools alone; nothing only when neither can read
+    CHECK(CoopClipboard::PickPaste(std::nullopt, tool(std::string("from xclip"))) == "from xclip");
+    CHECK_FALSE(CoopClipboard::PickPaste(std::nullopt, tool(std::nullopt)).has_value());
+    CHECK(asked == 4);
+}
+
+TEST_CASE("Linux clipboard: without the game's SDL, SDL's thread pastes through the tools as before") {
+    CHECK(CoopClipboard::GameSdl("SDL_GetClipboardText") == nullptr);   // (the tests load no SDL)
+    Desktop d("wayland-7", "");
+    CHECK(CoopClipboard::Copy("ABCD-EFGH-5678"));
+    const CoopClipboard::OnSdlThread sdl_thread;
+    CHECK(CoopClipboard::Paste() == "ABCD-EFGH-5678");
+    {
+        const CoopClipboard::OnSdlThread nested;
+    }
+    d.Remove("wl-paste");
+    d.Remove("xclip");
+    CHECK_FALSE(CoopClipboard::Paste().has_value());   // (said in the tab: "no clipboard tool ... press Ctrl+V")
 }

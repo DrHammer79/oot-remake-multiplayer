@@ -303,6 +303,23 @@ bool IsAnnounced(std::string_view name);
 // could not be read (the big Skulltula has none we can read; issue 133).
 bool IsDeathAnimation(std::string_view name);
 
+// Issue 35 (4): an animation that hides the model (the withered Deku Baba's
+// "Upside_Visible_Off_Spine4", the stem's "DownSide_Visible_Off_Withered_Spine6"):
+// "Visible_Off" at the start or after '_'. A plain enemy's copy never
+// plays its owner's one: its own game hides it in its own step (its death),
+// the same step that takes it off Navi's and the Z-target's list. Replayed
+// alone, it hid a copy that stayed alive and targetable.
+bool IsHideAnimation(std::string_view name);
+
+// Issue 35 (3): an enemy waiting on the ceiling to drop on a Link (the
+// Skulltula's "CeilingWait", any LOD variant).
+bool IsCeilingWait(std::string_view name);
+// Our Link at `link` stands under a ceiling enemy at `enemy`: within
+// kCeilingUnderM across (x, z) and below it by at most kCeilingDropM (y up).
+inline constexpr float kCeilingUnderM = 4.0f;
+inline constexpr float kCeilingDropM = 30.0f;
+bool UnderCeilingEnemy(const coop::protocol::Vec3& enemy, const coop::protocol::Vec3& link);
+
 // Issue 150: a boss animation that plays while it is stunned or knocked down
 // ("Stun_Lp", "Down_Start", "Fall_St" when Gohma drops from the ceiling): the
 // first word, LOD suffix off, is Stun, Down, Fall or Faint. A seed in Gohma's
@@ -506,6 +523,19 @@ public:
     // dying actor stays listed a while; the address may be used again later).
     void GameDeleted(std::uint64_t address, std::uint64_t now_us);
     static constexpr std::uint64_t kDeletedKeepUs = 10'000'000;
+    // churn-b: the game's delete requests reach us (Hookshot, patch 0007).
+    // Then a placed object that leaves the walk alive with no delete request
+    // is not gone: the game takes live actors off its list for a moment and
+    // puts them back (townspeople, cuccos, pots, fairies, every ~0.5 s in a
+    // big run and in players' 0.11.0 logs, 11 m from Link). Its id stays
+    // listed in OBJECT_PRESENT and its owner kept for kAwayKeepUs, so the
+    // server does not hand it to another game each time (the owner
+    // ping-pong of hundreds of OBJECT_OWNER a minute). Back at the same
+    // place it goes on as before; a delete request or the time running out
+    // ends it. Without delete events (the emulator) two missed walks still end it.
+    void SetDeleteEvents(bool on) { delete_events_ = on; }
+    static constexpr std::uint64_t kAwayKeepUs = 2'000'000;
+    std::size_t AwayCount() const { return away_.size(); }
 
     // Projectiles (coop_projectiles.h): true for a life drop at a place and
     // server time that a projectile copy's blast here may have made. A copy
@@ -949,6 +979,15 @@ private:
         std::uint64_t at = 0;
     };
     std::vector<Egg> eggs_;
+    // churn-b: placed objects off the walk without a delete request (SetDeleteEvents).
+    struct Away {
+        coop::protocol::ObjectId id;
+        std::uint64_t address = 0;
+        std::uint64_t until = 0;
+        std::string name;
+    };
+    std::vector<Away> away_;
+    bool delete_events_ = false;
     // boss-sync-2: copies of other games' eggs that left our walk alive (our
     // game hatched them), for CopyHatch.
     std::vector<Egg> copy_eggs_;
@@ -967,6 +1006,8 @@ private:
                                             std::uint64_t now_us) const;
     // The nearest of our lures to `at` (metres), or nothing with none.
     std::optional<float> LureDistance(const coop::protocol::Vec3& at) const;
+    // chest-late-b: why a chest read the open idle when another's flag came (log only).
+    std::string ChestAlreadyOpenWhy(const Seen& s, std::uint64_t now_us) const;
     std::vector<std::string> notes_;
     std::map<std::uint64_t, Object> objects_;  // by actor address
     std::vector<std::uint64_t> ours_now_;     // copies that became ours (TakeOursNow)
@@ -1035,6 +1076,9 @@ private:
     struct ChestAnimation {
         std::string name;
         std::uint64_t changed_us = 0;
+        // chest-late-b (row #35 (2)): seen with its closed idle since it was
+        // first seen (an "already open" chest that was closed here before).
+        bool seen_closed = false;
     };
     std::map<std::uint64_t, ChestAnimation> chest_animations_;
     // Issue 195: a loaded closed chest that another player opened is shown

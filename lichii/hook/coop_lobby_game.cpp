@@ -165,7 +165,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         g.dbno.clear();
         g.Copy(client);
         g.seen.refused = event.kind == EventKind::refused
-                             ? std::string(coop::net::refuse_reason_text(event.refuse_reason))
+                             ? std::string(coop::net::refuse_text(event))
                              : std::string();
         g.seen.banned = event.kind == EventKind::refused && event.refuse_reason == proto::RefuseReason::banned;
         if (!g.seen.refused.empty()) {

@@ -474,34 +474,200 @@ TEST_CASE("look tunic: a texture the game makes again is drawn at the next step,
     w.Wear("red");
     w.Step(0);
     CHECK(Drawn(m, at, 9));
+    CHECK(m.reads[other] > 0);
+    // (the other texture, no colour in it, is read again while it is young: kLateTexelsMs)
+    m.Make(at, kTexels);
+    w.Step(1100);
+    CHECK(Drawn(m, at, 9));
     const int other_reads = m.reads[other];
-    CHECK(other_reads > 0);
     // Made again 20 ms later: red at the next step; the other texture (no colour) is not read again.
     m.Make(at, kTexels);
     CHECK(Drawn(m, at, 1));
-    w.Step(20);
+    w.Step(1120);
     CHECK(Drawn(m, at, 9));
     CHECK(m.reads[other] == other_reads);
     // A new texture of Link's made since: found by the quick step too.
     const std::uint64_t second = kBase + 0x5000 + kOffset;
     std::memcpy(m.at(second), TexelsOf(1).data(), kTexels);
     m.Make(second, kTexels);
-    w.Step(40);
+    w.Step(1140);
     CHECK(Drawn(m, second, 9));
     CHECK(m.reads[other] == other_reads);
-    // Its texels came after it was made (a quick step missed it): the full search a second on finds it.
+    // Its texels came after it was made (a quick step missed it): read again at the next step, nothing
+    // made since (player report #78: before, only the full search a second on found it).
     const std::uint64_t late = kBase + 0x7000 + kOffset;
     m.Make(late, kTexels);
-    w.Step(60);
+    w.Step(1160);
     CHECK_FALSE(Drawn(m, late, 9));
     std::memcpy(m.at(late), TexelsOf(1).data(), kTexels);
-    m.Make(other, kTexels);   // (something made: the generation moves)
-    w.Step(500);
-    CHECK_FALSE(Drawn(m, late, 9));
-    m.Make(other, kTexels);
-    w.Step(1100);
+    w.Step(1180);
     CHECK(Drawn(m, late, 9));
+    CHECK(m.reads[other] == other_reads);
+    // The same with something made in between (the generation moves).
+    const std::uint64_t later = kBase + 0x9000 + kOffset;
+    m.Make(later, kTexels);
+    w.Step(1200);
+    std::memcpy(m.at(later), TexelsOf(1).data(), kTexels);
+    m.Make(other, kTexels);
+    w.Step(1220);
+    CHECK(Drawn(m, later, 9));
     CHECK(m.reads[other] > other_reads);
+}
+
+TEST_CASE("look tunic: texels that come in late are drawn within a step or two, each texture drawn once") {
+    // Player report #78 (0.11.1): your own customised sword showed the game's colours for up to a second
+    // after each cutscene or scene, then snapped back. The game makes the texture first, its texels after.
+    FakeTextures m(kBase, 0x10000);
+    PutFile(m, kBase + 0x1000, "Tile_A", TexelsOf(1));
+    const std::map<std::string, std::vector<std::uint8_t>> pack = {
+        {"green", LookFile({{"Tile_A", TexelsOf(1)}})},
+        {"red", LookFile({{"Tile_A", TexelsOf(9)}})},
+    };
+    std::vector<std::string> said;
+    CoopLookTunic::Wardrobe::Host host;
+    host.textures = &m;
+    host.file = [&](const std::string& c) -> std::optional<std::vector<std::uint8_t>> {
+        const auto it = pack.find(c);
+        return it == pack.end() ? std::nullopt : std::optional(it->second);
+    };
+    host.log = [&](const std::string& s) { said.push_back(s); };
+    CoopLookTunic::Wardrobe w(host);
+    const auto repaints = [&] {
+        return std::count_if(said.begin(), said.end(), [](const std::string& s) { return s.find(" now (") != std::string::npos; });
+    };
+    w.Wear("red");
+    w.Step(0);
+    REQUIRE(Drawn(m, kBase + 0x1000 + kOffset, 9));
+    REQUIRE(repaints() == 1);
+    // Made again with nothing in it; its first bytes come in, then the rest, steps apart.
+    const std::uint64_t at = kBase + 0x4000 + kOffset;
+    m.Make(at, kTexels);
+    w.Step(20);
+    std::memcpy(m.at(at), TexelsOf(1).data(), kTexels / 2);
+    w.Step(40);
+    CHECK_FALSE(Drawn(m, at, 9));
+    std::memcpy(m.at(at), TexelsOf(1).data(), kTexels);
+    w.Step(60);
+    CHECK(Drawn(m, at, 9));
+    CHECK(repaints() == 2);
+    // Drawn once: later steps (made or not made anything) draw nothing again.
+    const int overridden = m.overridden;
+    for (std::uint64_t t = 80; t <= 2000; t += 20) {
+        if (t % 400 == 0) {
+            m.Make(kBase + 0xa000 + kOffset, kTexels);   // (something else made now and then)
+        }
+        w.Step(t);
+    }
+    CHECK(m.overridden == overridden);
+    CHECK(repaints() == 2);
+    CHECK(Drawn(m, at, 9));
+}
+
+TEST_CASE("look tunic: a scene's many new textures are read again at most kLateChecks a step, for kLateTexelsMs") {
+    FakeTextures m(kBase, 0x40000);
+    PutFile(m, kBase + 0x1000, "Tile_A", TexelsOf(1));
+    const std::map<std::string, std::vector<std::uint8_t>> pack = {
+        {"green", LookFile({{"Tile_A", TexelsOf(1)}})},
+        {"red", LookFile({{"Tile_A", TexelsOf(9)}})},
+    };
+    CoopLookTunic::Wardrobe::Host host;
+    host.textures = &m;
+    host.file = [&](const std::string& c) -> std::optional<std::vector<std::uint8_t>> {
+        const auto it = pack.find(c);
+        return it == pack.end() ? std::nullopt : std::optional(it->second);
+    };
+    host.log = [](const std::string&) {};
+    CoopLookTunic::Wardrobe w(host);
+    w.Wear("red");
+    w.Step(0);
+    // 200 textures of the size with no colour in them (the scene's), and one of Link's late.
+    std::vector<std::uint64_t> made;
+    for (std::uint64_t i = 0; i < 200; ++i) {
+        made.push_back(kBase + 0x2000 + i * 0x120);
+        m.Make(made.back(), kTexels);
+    }
+    const std::uint64_t late = made[150];
+    w.Step(20);   // (the generation moved: every new one read once)
+    const auto reads = [&] {
+        int n = 0;
+        for (const std::uint64_t a : made) {
+            n += m.reads[a];
+        }
+        return n;
+    };
+    CHECK(reads() == 200);
+    // The textures one step reads (a texture whose first bytes are a colour's is read twice: head, then whole).
+    const auto step = [&](std::uint64_t at_ms) {
+        const std::map<std::uint64_t, int> was = m.reads;
+        w.Step(at_ms);
+        std::size_t n = 0;
+        for (const std::uint64_t a : made) {
+            n += m.reads[a] != (was.count(a) ? was.at(a) : 0) ? 1 : 0;
+        }
+        return n;
+    };
+    std::memcpy(m.at(late), TexelsOf(1).data(), kTexels);
+    std::size_t n = step(40);
+    CHECK(n <= CoopLookTunic::kLateChecks);
+    CHECK(n > 0);
+    // Every one is read again in turn: Link's is drawn within a few steps.
+    std::uint64_t t = 40;
+    while (!Drawn(m, late, 9) && t < 200) {
+        t += 20;
+        CHECK(step(t) <= CoopLookTunic::kLateChecks);
+    }
+    CHECK(Drawn(m, late, 9));
+    CHECK(t <= 20 + 20 * (200 / CoopLookTunic::kLateChecks + 1));
+    // Once they are older than kLateTexelsMs, a step with nothing made reads none of them.
+    w.Step(20 + CoopLookTunic::kLateTexelsMs + 20);
+    CHECK(step(20 + CoopLookTunic::kLateTexelsMs + 40) == 0);
+}
+
+TEST_CASE("look tunic: while the game makes textures every step, the young ones are still read at most kLateChecks a step") {
+    // review-sword-blink: a scene load makes textures over many steps; each such step reads the new
+    // ones and at most kLateChecks of the young misses, not all of them again.
+    FakeTextures m(kBase, 0x40000);
+    PutFile(m, kBase + 0x1000, "Tile_A", TexelsOf(1));
+    const std::map<std::string, std::vector<std::uint8_t>> pack = {
+        {"green", LookFile({{"Tile_A", TexelsOf(1)}})},
+        {"red", LookFile({{"Tile_A", TexelsOf(9)}})},
+    };
+    CoopLookTunic::Wardrobe::Host host;
+    host.textures = &m;
+    host.file = [&](const std::string& c) -> std::optional<std::vector<std::uint8_t>> {
+        const auto it = pack.find(c);
+        return it == pack.end() ? std::nullopt : std::optional(it->second);
+    };
+    host.log = [](const std::string&) {};
+    CoopLookTunic::Wardrobe w(host);
+    w.Wear("red");
+    w.Step(0);
+    std::vector<std::uint64_t> made;
+    for (std::uint64_t i = 0; i < 200; ++i) {
+        made.push_back(kBase + 0x2000 + i * 0x120);
+        m.Make(made.back(), kTexels);
+    }
+    const std::uint64_t late = made[150];
+    w.Step(20);
+    std::memcpy(m.at(late), TexelsOf(1).data(), kTexels);
+    // One new texture made before each step (none of Link's): the 200 are read <= kLateChecks a step.
+    std::uint64_t t = 20;
+    std::uint64_t fresh = kBase + 0x20000;
+    while (!Drawn(m, late, 9) && t < 200) {
+        t += 20;
+        m.Make(fresh, kTexels);
+        fresh += 0x120;
+        const std::map<std::uint64_t, int> was = m.reads;
+        w.Step(t);
+        std::size_t n = 0;
+        for (const std::uint64_t a : made) {
+            n += m.reads[a] != (was.count(a) ? was.at(a) : 0) ? 1 : 0;
+        }
+        CHECK(n <= CoopLookTunic::kLateChecks);
+        CHECK(m.reads[fresh - 0x120] > 0);   // (the new one is read at once)
+    }
+    CHECK(Drawn(m, late, 9));
+    CHECK(t <= 20 + 20 * (200 / CoopLookTunic::kLateChecks + 1));
 }
 
 TEST_CASE("look tunic: an override goes when the game's memory there holds something else, its texture not finalized") {

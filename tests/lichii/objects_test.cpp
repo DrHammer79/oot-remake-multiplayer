@@ -663,6 +663,95 @@ TEST_CASE("objects: an actor the game itself deleted is gone at the first walk w
     CHECK(sync.IdOf(0x300));
 }
 
+namespace {
+bool Listed(const Step& step, const proto::ObjectId& id) {
+    for (const auto& p : All<proto::ObjectPresent>(step)) {
+        for (const auto& o : p.objects) {
+            if (o.id == id) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+} // namespace
+
+// churn-b: the game takes live actors off its list for a moment (adult
+// Kakariko's townspeople and cuccos, hundreds of times in 4 minutes); with
+// the game's delete requests known (Hookshot) such an actor is away, not
+// gone, so the server never hands it to another game for it.
+TEST_CASE("objects: delete events: an actor off the walk with no delete request keeps its id listed and its owner") {
+    const std::string npc = "Npc_Hylia_019_Shop_Child";
+    Sync sync;
+    sync.SetDeleteEvents(true);
+    Tick(sync, 0, {Enemy(0x100, 0x11, 100, 0.0f, npc), Enemy(0x200, 0x22, 2, 5.0f)});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 1);
+    Tick(sync, 10 * kMs, {Enemy(0x100, 0x11, 100, 0.0f, npc), Enemy(0x200, 0x22, 2, 5.0f)});
+    REQUIRE(sync.OwnerAt(0x100) == 1);
+
+    // Off the list for several walks: away, still listed (a new enemy is the
+    // change, so a presence goes out), its owner kept.
+    Tick(sync, 40 * kMs, {Enemy(0x200, 0x22, 2, 5.0f)});
+    const Step off = Tick(sync, 80 * kMs, {Enemy(0x200, 0x22, 2, 5.0f), Enemy(0x300, 0x33, 2, 9.0f)});
+    CHECK(sync.AwayCount() == 1);
+    CHECK(Listed(off, id));
+    for (const auto& n : sync.TakeNotes()) {
+        CHECK(n.find("Npc_Hylia_019_Shop_Child") == std::string::npos);  // no "gone ... left" line
+    }
+    // Back on the list: the same id, the same owner, nothing asked again.
+    Tick(sync, 500 * kMs, {Enemy(0x100, 0x11, 100, 0.0f, npc)});
+    CHECK(sync.AwayCount() == 0);
+    CHECK(*sync.IdOf(0x100) == id);
+    CHECK(sync.OwnerAt(0x100) == 1);
+
+    // Off for longer than kAwayKeepUs: gone (left), no longer listed.
+    Tick(sync, 600 * kMs, {});
+    Tick(sync, 700 * kMs, {});
+    CHECK(sync.AwayCount() == 1);
+    const Step later = Tick(sync, 700 * kMs + Sync::kAwayKeepUs, {});
+    CHECK(sync.AwayCount() == 0);
+    CHECK_FALSE(Listed(later, id));
+}
+
+TEST_CASE("objects: delete events: a deleted, dead or unowned actor is gone, not away") {
+    Sync sync;
+    sync.SetDeleteEvents(true);
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 2, 5.0f), Enemy(0x300, 0x33, 2, 9.0f)});
+    Own(sync, *sync.IdOf(0x100), 1);
+    Own(sync, *sync.IdOf(0x200), 2);
+    Tick(sync, 10 * kMs, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 0, 5.0f), Enemy(0x300, 0x33, 2, 9.0f)});
+    sync.GameDeleted(0x100, 20 * kMs);  // the game asked: gone at the first miss
+    Tick(sync, 40 * kMs, {});
+    Tick(sync, 80 * kMs, {});
+    // 0x100 deleted, 0x200 dead (life 0), 0x300 with no owner yet: none is away.
+    CHECK(sync.AwayCount() == 0);
+    CHECK_FALSE(sync.IdOf(0x100));
+    CHECK_FALSE(sync.IdOf(0x200));
+    CHECK_FALSE(sync.IdOf(0x300));
+
+    // A delete request that comes while it is away ends it at once.
+    Tick(sync, 100 * kMs, {Enemy(0x400, 0x44, 2)});
+    Own(sync, *sync.IdOf(0x400), 1);
+    Tick(sync, 110 * kMs, {Enemy(0x400, 0x44, 2)});
+    Tick(sync, 140 * kMs, {});
+    Tick(sync, 180 * kMs, {});
+    REQUIRE(sync.AwayCount() == 1);
+    sync.GameDeleted(0x400, 190 * kMs);
+    CHECK(sync.AwayCount() == 0);
+}
+
+TEST_CASE("objects: without delete events (the emulator) two missed walks still end an owned actor") {
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2)});
+    Own(sync, *sync.IdOf(0x100), 1);
+    Tick(sync, 10 * kMs, {Enemy(0x100, 0x11, 2)});
+    Tick(sync, 40 * kMs, {});
+    Tick(sync, 80 * kMs, {});
+    CHECK(sync.AwayCount() == 0);
+    CHECK_FALSE(sync.IdOf(0x100));
+}
+
 TEST_CASE("objects: life events: a hit that took no life is forgotten, a fall with no step still counts") {
     Sync sync;
     sync.SetLifeEvents(true);
@@ -1217,6 +1306,41 @@ TEST_CASE("objects: a chest made open is never removed when its flag comes (issu
     }
 }
 
+TEST_CASE("objects: an already open chest's log says how long it read OpenWait and if it was closed (row 35)") {
+    // chest-late-b: Bean Seller's 0.11.0 log had 'already shows open here'
+    // for chests the player saw closed; the note now tells the two cases apart.
+    Sync sync;
+    sync.SetPlayer(proto::Vec3{20.0f, 0.0f, 1.0f});
+    Seen made = Chest(0x500, 0x1111);
+    made.animation = proto::Animation{"OpenWait", 0.0f, 1.0f};
+    Seen changed = Chest(0x600, 0x2222);
+    changed.animation = proto::Animation{"CloseWait", 0.0f, 1.0f};
+    Tick(sync, 0, {made, changed, Enemy(0x100, 0x11, 2)});
+    changed.animation = proto::Animation{"OpenWait", 0.0f, 1.0f};
+    Tick(sync, 1000 * kMs, {made, changed, Enemy(0x100, 0x11, 2)});
+    for (std::uint64_t t = 2000; t <= 5000; t += 1000) Tick(sync, t * kMs, {made, changed, Enemy(0x100, 0x11, 2)});
+    sync.TakeNotes();
+    sync.Take(0x1111);
+    sync.Take(0x2222);
+    Tick(sync, 6000 * kMs, {made, changed, Enemy(0x100, 0x11, 2)});
+    Tick(sync, 6010 * kMs, {made, changed, Enemy(0x100, 0x11, 2)});
+    CHECK(sync.Removes().empty());
+    std::vector<PlayWish> plays;
+    sync.Plays(6020 * kMs, plays);
+    CHECK(plays.empty());
+    bool first = false;
+    bool later = false;
+    for (const auto& n : sync.TakeNotes()) {
+        if (n.find("already shows open here") == std::string::npos) continue;
+        first |= n.find("open idle since first seen") != std::string::npos &&
+                 n.find("closed here before") == std::string::npos;
+        later |= n.find("open idle for 5.0 s, closed here before") != std::string::npos;
+        CHECK(n.find("m away") != std::string::npos);
+    }
+    CHECK(first);
+    CHECK(later);
+}
+
 TEST_CASE("objects: a chest away from our Link that starts opening as the flag comes shows open (issue 87)") {
     Sync sync;
     sync.SetPlayer(proto::Vec3{20.0f, 0.0f, 1.0f});
@@ -1576,6 +1700,47 @@ TEST_CASE("objects: a boss copy keeps the slot frame it had (issue 150)") {
     REQUIRE(plays.size() == 1);
     CHECK_FALSE(plays[0].play_frame);
     CHECK_FALSE(plays[0].alias);
+}
+
+TEST_CASE("objects: an enemy copy never plays its owner's hide animation (issue 35, Navi on a hidden Deku Baba)") {
+    CHECK(CoopObjects::IsHideAnimation("Upside_Visible_Off_Spine4"));
+    CHECK(CoopObjects::IsHideAnimation("DownSide_Visible_Off_Withered_Spine6"));
+    CHECK(CoopObjects::IsHideAnimation("Visible_Off"));
+    CHECK_FALSE(CoopObjects::IsHideAnimation("Upside_Visible_On_Spine6"));
+    CHECK_FALSE(CoopObjects::IsHideAnimation("Wait_Battle_Wither"));
+    CHECK_FALSE(CoopObjects::IsHideAnimation("InVisible_Off"));
+
+    const std::string name = "Enemy_Dekubaba_Withered";
+    Sync owner;
+    Tick(owner, 0, {Enemy(0x100, 0x11, 2, 0.0f, name)});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Sync copy;
+    Tick(copy, 0, {Enemy(0x200, 0x11, 2, 0.0f, name)}, 2);
+    Own(copy, id, 1);
+
+    // Before the kill the owner's animations play on the copy as usual.
+    copy.Receive(EnemySample(id, 1000 * kMs, "Upside_Visible_On_Spine6", 1.0f));
+    auto plays = EnemyPlays(copy, 1100 * kMs, name);
+    REQUIRE(plays.size() == 1);
+    CHECK(plays[0].name == "Upside_Visible_On_Spine6");
+
+    // The owner's dying Baba hides its spine: the copy is asked nothing (its
+    // own death hides it and takes it off the target list).
+    copy.Receive(EnemySample(id, 1050 * kMs, "Upside_Visible_Off_Spine6", 1.0f));
+    CHECK(EnemyPlays(copy, 1150 * kMs, name).empty());
+
+    // A boss keeps every animation of its owner's (its phases may hide parts).
+    const std::string boss = "Enemy_DungeonBoss_Gohma";
+    Sync boss_owner;
+    Tick(boss_owner, 0, {Enemy(0x100, 0x11, 2, 0.0f, boss)});
+    const proto::ObjectId boss_id = *boss_owner.IdOf(0x100);
+    Sync boss_copy;
+    Tick(boss_copy, 0, {Enemy(0x200, 0x11, 2, 0.0f, boss)}, 2);
+    Own(boss_copy, boss_id, 1);
+    boss_copy.Receive(EnemySample(boss_id, 1000 * kMs, "Visible_Off", 1.0f));
+    plays = EnemyPlays(boss_copy, 1100 * kMs, boss);
+    REQUIRE(plays.size() == 1);
+    CHECK(plays[0].name == "Visible_Off");
 }
 
 namespace {
@@ -2684,6 +2849,46 @@ TEST_CASE("objects: a copy whose own AI acts near our Link is flagged targeting 
     Own(sync, id, 2);
     const auto flags = Wake(sync, id, 10, 800, 5.0f, "Appear", "Wait_Ground");
     CHECK_FALSE(flags.has_value());
+}
+
+TEST_CASE("objects: a ceiling Skulltula copy with our Link under it is flagged targeting (issue 35)") {
+    CHECK(CoopObjects::IsCeilingWait("CeilingWait"));
+    CHECK(CoopObjects::IsCeilingWait("CeilingWait_ModelOnlyLOD"));
+    CHECK_FALSE(CoopObjects::IsCeilingWait("Wait"));
+    CHECK_FALSE(CoopObjects::IsCeilingWait("Fall"));
+
+    // The owner's (player 2's) Skulltula hangs 12 m up, over the 10 m wake
+    // reach; its copy's own AI shows no wake (it plays CeilingWait too).
+    auto run = [](float link_x, const std::string& owners, std::uint8_t owner = 2, bool wake = true,
+                  std::uint64_t until = 1500) {
+        Sync sync;
+        sync.SetWake(wake);
+        sync.SetPlayer(proto::Vec3{link_x, 0.0f, 0.0f});
+        auto seen = [] {
+            Seen s = Acting(0x100, 0x11, 2, 0.0f, "CeilingWait", "Enemy_Skulltula");
+            s.position[1] = 12.0f;
+            return s;
+        };
+        Tick(sync, 0, {seen()});
+        const proto::ObjectId id = *sync.IdOf(0x100);
+        Own(sync, id, owner);
+        std::optional<std::uint8_t> flags;
+        for (std::uint64_t t = 10; t < until; t += 66) {
+            proto::ObjectSample s = OwnerSample(id, owner, t * kMs, 0.0f, 2, owners);
+            s.state.position = proto::Vec3{0.0f, 12.0f, 0.0f};
+            sync.Receive(s);
+            for (const auto& p : All<proto::ObjectPresent>(Tick(sync, t * kMs, {seen()}))) {
+                flags = p.objects[0].flags;
+            }
+        }
+        return flags && (*flags & kTargeting) != 0;
+    };
+    CHECK(run(1.0f, "CeilingWait"));              // under it: the server gives it to us
+    CHECK_FALSE(run(6.0f, "CeilingWait"));        // 6 m across: not under it
+    CHECK_FALSE(run(1.0f, "Walk"));               // already down: the usual rules
+    CHECK_FALSE(run(1.0f, "CeilingWait", 1));     // ours already
+    CHECK_FALSE(run(1.0f, "CeilingWait", 2, false));  // LICHII_COOP_OBJECTS_WAKE=0
+    CHECK_FALSE(run(1.0f, "CeilingWait", 2, true, 800));  // under 1 s: not yet
 }
 
 TEST_CASE("objects: a copy whose wake the Mover put back once is flagged targeting (issue 157)") {

@@ -106,6 +106,8 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+
+#include "coop_clipboard_posix.h"
 #endif
 
 namespace {
@@ -1580,8 +1582,12 @@ COOP_HOOKSHOT_EXPORT void hos_coop_leave(void) {
 COOP_HOOKSHOT_EXPORT void hos_coop_status(HosCoopStatus* out) {
     CoopHookshot::HostMenu().Status(out);
 }
-// Typing (hos_coop_api.h): the chat box.
+// Typing (hos_coop_api.h): the chat box. (Linux: Longshot calls these on the window's thread, SDL's: a Ctrl+V there
+// reads SDL's clipboard, which needs no wl-paste or xclip: CoopClipboard::OnSdlThread)
 COOP_HOOKSHOT_EXPORT int hos_coop_key(uint32_t vk, int repeat) {
+#ifndef _WIN32
+    const CoopClipboard::OnSdlThread sdl_thread;
+#endif
     return CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0) ? 1 : 0;
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_char(uint32_t ch) {

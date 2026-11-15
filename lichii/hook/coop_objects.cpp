@@ -2237,6 +2237,7 @@ private:
         std::size_t lost = 0;
         const auto events = CoopActorEvents::TheRing().Drain(&lost);
         actor_events_lost_ += lost;
+        sync_.SetDeleteEvents(true);  // churn-b: off the walk with no delete request is away, not gone
         for (const auto& e : events) {
             switch (e.kind) {
             case CoopActorEvents::Kind::Create:

@@ -54,6 +54,16 @@ pick "$GAME/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" game/co
     command -v vulkaninfo >/dev/null && vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' | sed 's/^[[:space:]]*/vulkan: /'
     command -v ip >/dev/null && ip -4 -o addr show 2>/dev/null | awk '$4 !~ /^169\.254\./ { print "ip: " $4 " (" $2 ")" }'
     df -h "$DATA" 2>/dev/null | tail -n1 | sed 's/^/disk: /'
+    # Memory now (issue 85: a host's game crashed with the commit limit nearly used up): RAM, swap,
+    # the commit charge and its limit, and the 10 programs using the most memory (resident, summed
+    # by name; names only, masked below like the rest).
+    awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree|CommitLimit|Committed_AS):/ { v[substr($1, 1, length($1) - 1)] = $2 / 1048576 }
+         END { printf "memory now: RAM %.1f GB available of %.1f GB; swap %.1f GB free of %.1f GB; commit %.1f GB used of %.1f GB limit\n",
+               v["MemAvailable"], v["MemTotal"], v["SwapFree"], v["SwapTotal"], v["Committed_AS"], v["CommitLimit"] }' /proc/meminfo 2>/dev/null
+    command -v ps >/dev/null && ps -eo comm=,rss= 2>/dev/null |
+        awk '{ n = NF - 1; name = $1; for (i = 2; i <= n; i++) name = name " " $i; kb[name] += $NF; c[name]++ }
+             END { for (k in kb) printf "%d\t%s\t%d\n", kb[k], k, c[k] }' |
+        sort -rn | head -n 10 | awk -F '\t' '{ printf "top memory: %s (%d running), %.2f GB resident\n", $2, $3, $1 / 1048576 }'
     kit_game_running && echo 'running: the game'
 } >"$stage/about-this-pc.txt"
 # What identifies a player is masked, as the Windows kit's log-mask.ps1 does: a set password

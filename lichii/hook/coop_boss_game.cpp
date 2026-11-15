@@ -337,6 +337,16 @@ struct Glue {
                 }
             });
         }
+        if (!act.chat.empty()) {  // "<name> took the blue warp" (#50); the chat draws it in the menu's language
+            session->with_client([&](coop::net::Client& c) {
+                for (auto& line : act.chat) {
+                    const auto* p = c.find_player(line.player);
+                    lines.push_back((p != nullptr ? p->nickname : "player " + std::to_string(line.player)) + " " +
+                                    line.text);
+                }
+                return 0;
+            });
+        }
     }
 };
 

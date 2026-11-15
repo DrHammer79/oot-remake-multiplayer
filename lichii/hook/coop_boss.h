@@ -137,6 +137,14 @@ struct Actions {
     // the boss was beaten here (only when the walk read the boss gone, not a guess from a long event). The area rules (coop_boss_scenes) take them when no request named the event.
     const Room* intro_here = nullptr;
     const Room* beaten_here = nullptr;
+    // Chat lines for the players left in a boss room (player report #50): another player who was past
+    // the door went out of it, "took the blue warp" once the boss is beaten, else "left the boss room".
+    // The hook puts the player's name first.
+    struct Notice {
+        std::uint8_t player = 0;
+        std::string text;
+    };
+    std::vector<Notice> chat;
 };
 
 // This game's Link, read this frame.
@@ -182,6 +190,9 @@ public:
     // An event shorter than this near a boss room with no shut-in flag is not
     // its intro (a door opening, a text, Navi): it moves no one in (issue 148).
     static constexpr std::uint64_t kMinIntroUs = 3'000'000;
+    // A leave notice (Actions::chat) waits this long, and is dropped when we have gone out of the room
+    // meanwhile: a group that leaves together leaves no one behind to tell (#50).
+    static constexpr std::uint64_t kLeaveNoticeUs = 1'000'000;
 
     // Network thread: BOSS_ROOM from the others. Taken on the next Tick.
     void Receive(const coop::protocol::Message& message);
@@ -202,9 +213,19 @@ private:
         bool in_room = false;   // last heard in the room
         bool fighting = false;  // their intro is over (or never ran)
         bool committed = false; // their intro started or their fight is on: they are past the door (issue 148)
+        bool beaten = false;    // they said defeated for this room
         std::uint64_t heard_at = 0;
     };
-    void Take(const coop::protocol::BossRoom& m, std::uint64_t now_us);
+    // A leave notice waiting for kLeaveNoticeUs (#50).
+    struct Leaving {
+        std::uint8_t player = 0;
+        const Room* room = nullptr;
+        bool warp = false;  // the boss was beaten: the blue warp
+        std::uint64_t at = 0;
+    };
+    void Take(const coop::protocol::BossRoom& m, std::uint64_t now_us, std::uint8_t self);
+    void Notices(Actions& out, std::uint64_t now_us);
+    Actions Step(const Local& local, std::uint64_t now_us);  // Tick without the notices
     void Defeat(Actions& out, bool read_gone);  // our game saw the boss's death (read_gone: the walk read it gone)
     void Say(Actions& out, const Room& room, coop::protocol::BossState state);
     bool FightActive(const Room& room, std::uint64_t now_us) const;
@@ -228,6 +249,8 @@ private:
     std::uint64_t last_now_ = 0;  // the clock never goes back (server time can)
     std::optional<std::string> scene_;  // the scene of the last Tick with one
     std::vector<std::uint8_t> defeated_;  // rooms beaten while we were in this scene
+    std::vector<Leaving> leaving_;        // leave notices waiting (#50)
+    std::vector<std::uint32_t> told_;     // notices given in this scene: player | room << 8 | warp << 16
     // Pulling.
     unsigned pulls_ = 0;
     std::uint64_t pulled_at_ = 0;

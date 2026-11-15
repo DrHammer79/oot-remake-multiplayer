@@ -2,11 +2,14 @@
 #include "coop_clipboard_posix.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -24,6 +27,8 @@ constexpr const char* kPickTool =
     "elif [ -n \"$DISPLAY\" ] && command -v xclip >/dev/null 2>&1; then exec $t %s; "
     "elif [ -n \"$DISPLAY\" ] && command -v xsel >/dev/null 2>&1; then exec $t %s; "
     "else exit 127; fi";
+
+thread_local bool t_sdl_thread = false;   // (OnSdlThread)
 
 constexpr std::size_t kMax = 4096;         // what Paste gives back, at most
 constexpr std::size_t kRead = 64 * 1024;   // what is read from the tool, at most
@@ -137,19 +142,84 @@ Ran Run(bool copy, const std::string& input, std::string* out) {
     return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? Ran::kOk : Ran::kFailed;
 }
 
+std::optional<std::string> ToolPaste() {
+    std::string out;
+    const Ran ran = Run(false, {}, &out);
+    if (ran == Ran::kNotStarted || ran == Ran::kNoTool) {
+        return std::nullopt;
+    }
+    return out;   // (kFailed is believed: what the tool printed stands, "" for an empty clipboard)
+}
+
+// SDL's clipboard (SDL_GetClipboardText, SDL2 and SDL3 alike: a string to SDL_free), at most kRead bytes;
+// nothing without SDL. Only on SDL's thread.
+std::optional<std::string> SdlPaste() {
+    using GetText = char* (*)();
+    using Free = void (*)(void*);
+    const auto get = reinterpret_cast<GetText>(GameSdl("SDL_GetClipboardText"));
+    const auto free_fn = reinterpret_cast<Free>(GameSdl("SDL_free"));
+    if (get == nullptr || free_fn == nullptr) {
+        return std::nullopt;
+    }
+    char* text = get();
+    if (text == nullptr) {
+        return std::nullopt;
+    }
+    std::string out(text, strnlen(text, kRead));
+    free_fn(text);
+    return out;
+}
+
 }  // namespace
 
 bool Copy(const std::string& text) {
     return Run(true, text, nullptr) == Ran::kOk;
 }
 
+void* GameSdl(const char* name) {
+    // (NOLOAD: only the library the game has loaded, found by its soname; kept once found)
+    static std::atomic<void*> lib{nullptr};
+    void* h = lib.load(std::memory_order_acquire);
+    if (h == nullptr) {
+        h = dlopen("libSDL3.so.0", RTLD_NOW | RTLD_NOLOAD);
+        if (h == nullptr) {
+            h = dlopen("libSDL2-2.0.so.0", RTLD_NOW | RTLD_NOLOAD);
+        }
+        if (h == nullptr) {
+            return nullptr;
+        }
+        void* expected = nullptr;
+        if (!lib.compare_exchange_strong(expected, h, std::memory_order_acq_rel)) {
+            dlclose(h);   // (another thread kept one first)
+            h = expected;
+        }
+    }
+    return dlsym(h, name);
+}
+
+OnSdlThread::OnSdlThread() : was_(t_sdl_thread) {
+    t_sdl_thread = true;
+}
+
+OnSdlThread::~OnSdlThread() {
+    t_sdl_thread = was_;
+}
+
+std::optional<std::string> PickPaste(const std::optional<std::string>& sdl,
+                                     const std::function<std::optional<std::string>()>& tools) {
+    if (sdl && !sdl->empty()) {
+        return sdl;
+    }
+    std::optional<std::string> got = tools();
+    return got ? got : sdl;
+}
+
 std::optional<std::string> Paste() {
-    std::string out;
-    const Ran ran = Run(false, {}, &out);
-    if (ran == Ran::kNotStarted || ran == Ran::kNoTool) {
+    std::optional<std::string> got = PickPaste(t_sdl_thread ? SdlPaste() : std::nullopt, ToolPaste);
+    if (!got) {
         return std::nullopt;
     }
-    // (kFailed is believed: what the tool printed stands, "" for an empty clipboard)
+    std::string out = std::move(*got);
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
         out.pop_back();
     }

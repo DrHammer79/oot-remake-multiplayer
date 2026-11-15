@@ -489,6 +489,25 @@ std::uint16_t Folded(std::uint16_t pct, std::uint16_t count_pct) {
     return static_cast<std::uint16_t>(std::min<std::uint32_t>(folded, 0xffff));
 }
 
+std::uint64_t PackValues(const Values& v) noexcept {
+    const auto field = [](std::uint16_t pct, unsigned at) {
+        return static_cast<std::uint64_t>(std::min<std::uint16_t>(pct, 0xfff)) << at;
+    };
+    return field(v.hp_pct, 0) | field(v.damage_pct, 12) | field(v.count_pct, 24) | field(v.boss_hp_pct, 36) |
+           field(v.boss_damage_pct, 48);
+}
+
+Values UnpackValues(std::uint64_t word) noexcept {
+    const auto field = [word](unsigned at) { return static_cast<std::uint16_t>(word >> at & 0xfff); };
+    Values v;
+    v.hp_pct = field(0);
+    v.damage_pct = field(12);
+    v.count_pct = field(24);
+    v.boss_hp_pct = field(36);
+    v.boss_damage_pct = field(48);
+    return v;
+}
+
 bool ScalesAsBoss(std::string_view name) {
     const KindRule* rule = name.starts_with("Enemy_") ? KindRuleOf(name) : nullptr;
     return rule != nullptr && (rule->why == "boss" || rule->why == "mini-boss");

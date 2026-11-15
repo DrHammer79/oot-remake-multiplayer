@@ -57,6 +57,7 @@ $kit = Split-Path -Parent $PSScriptRoot
 $hs = Join-Path $kit 'hookshot'
 . (Join-Path $PSScriptRoot 'kit-paths.ps1')   # (Test-KitOtherKitGame, Find-KitHookshotGameToCopy)
 . (Join-Path $PSScriptRoot 'coop-ini.ps1')
+. (Join-Path $PSScriptRoot 'console-mode.ps1')   # (Read-KitPath: the questions for a path, pasted, dragged or typed)
 Set-KitTls   # (kit-mirror: Tls12 added to what Windows enables, and Tls13 where .NET has it; was Tls12 alone)
 
 function Fail([string]$Text) { Write-Host ''; Write-Host "Longshot build: $Text" -ForegroundColor Red; exit 1 }
@@ -160,23 +161,6 @@ $python = Join-Path $tools 'python\python.exe'
 # --- A Longshot of the player's own (kit-friction) -----------------------------------------------
 # Never played or written to: co-op is a separate build (the release in hookshot\PIN with co-op's patches in its source).
 # Asked once, before the first build (hookshot\longshot-folder.txt keeps the answer; 'none' is a no).
-function Read-TimedLine([int]$Seconds) {
-    $redirected = $true
-    try { $redirected = [Console]::IsInputRedirected } catch { }
-    if ($redirected) { return "$([Console]::In.ReadLine())" }
-    $end = (Get-Date).AddSeconds($Seconds)
-    $text = ''
-    while ($text -or (Get-Date) -lt $end) {
-        if ([Console]::KeyAvailable) {
-            $key = [Console]::ReadKey($true)
-            if ($key.Key -eq 'Enter') { Write-Host ''; return $text }
-            if ($key.Key -eq 'Backspace') { if ($text) { $text = $text.Substring(0, $text.Length - 1); Write-Host -NoNewline "`b `b" } }
-            elseif ($key.KeyChar) { $text += $key.KeyChar; Write-Host -NoNewline $key.KeyChar }
-        } else { Start-Sleep -Milliseconds 50 }
-    }
-    Write-Host ''
-    return ''
-}
 # The puppet pack, from the same game files, where the co-op hook looks for it: its load folder
 # (<exe dir>\mods\contents on Hookshot)\0400486024DEC000\coop-puppet, the emulator's layout, which Hookshot's
 # host/mods.c also loads as a mod. A pack an earlier version of this script put in mods\coop-puppet goes.
@@ -226,8 +210,9 @@ function Invoke-PuppetPackStep([string]$exeDir) {
         if ($askedBefore) {
             Write-Host '  (Not asked again at every start. make-puppet-pack.cmd asks for your game file and makes the pack.)' -ForegroundColor Yellow
         } elseif ($canAsk -and -not $env:CI -and (Test-Path -LiteralPath $packTool)) {
-            Write-Host '  Drag your game''s .nup file into this window and press Enter (Enter alone: start without the pack):'
-            $given = "$(Read-TimedLine 120)".Trim().Trim('"')
+            Write-Host '  Your game''s .nup file: paste its path with Ctrl+V or right-click, or drag the file here, then press Enter'
+            Write-Host '  (Enter alone: start without the pack):'
+            $given = Read-KitPath 120 { param($p) $p -like '*.nup' }
             if ($given -and (Test-Path -LiteralPath $given)) {
                 $packFrom = (Resolve-Path -LiteralPath $given).Path
                 [System.IO.File]::WriteAllText((Join-Path $hs 'game-files.txt'), "$packFrom`n")
@@ -278,10 +263,10 @@ if (-not $Longshot -and $lsFresh -and -not $env:OOT_COOP_NO_LONGSHOT_ASK) {
     else {
         Write-Host ''
         Write-Host 'Built Longshot yourself? The co-op game is a separate build (co-op is built into its source), but your own'
-        Write-Host 'Longshot can lend it your saves and its downloads. Drag your Longshot game folder (the one with longshot.exe)'
-        Write-Host 'into this window and press Enter; just Enter (or 60 s) for no. (Asked once: hookshot\longshot-folder.txt keeps the answer;'
-        Write-Host 'delete that file to be asked again before a build.)'
-        $Longshot = (Read-TimedLine 60).Trim().Trim('"')
+        Write-Host 'Longshot can lend it your saves and its downloads. Your Longshot game folder (the one with longshot.exe): paste'
+        Write-Host 'its path with Ctrl+V or right-click, or drag the folder here, then press Enter; just Enter (or 60 s) for no.'
+        Write-Host '(Asked once: hookshot\longshot-folder.txt keeps the answer; delete that file to be asked again before a build.)'
+        $Longshot = Read-KitPath 60 { param($p) Test-Path -LiteralPath (Join-Path $p 'longshot.exe') }
         try { [System.IO.File]::WriteAllText($lsNote, "$(if ($Longshot) { $Longshot } else { 'none' })`n") } catch { }
     }
 }
@@ -478,6 +463,11 @@ $gameStamp = Join-Path $Out 'coop-built-from.txt'
 $exe = Find-HookshotExe $Out
 $gameReady = $exe -and (Test-Path -LiteralPath $gameStamp) -and ([System.IO.File]::ReadAllText($gameStamp) -eq $stamp)
 
+# Game files that could not be taken, with why: said at the next game question (hookshot\game-rejected.txt).
+$gameRejected = Join-Path $hs 'game-rejected.txt'
+function Save-KitGameRejected([string]$What, [string]$Why) {
+    try { [System.IO.File]::WriteAllText($gameRejected, "$What`r`nWhy: $Why`r`n") } catch { }
+}
 if (-not $Game -and (-not $gameReady -or $Rebuild -or $CheckOnly)) {
     # As make-puppet-pack.cmd: the .nup in a folder of the emulator's game list.
     $check = Join-Path $kit 'tools\puppet_pack\dumpcheck.py'
@@ -487,33 +477,78 @@ if (-not $Game -and (-not $gameReady -or $Rebuild -or $CheckOnly)) {
         $ErrorActionPreference = 'Stop'
         if ($found) { $Game = $found.Substring(6); Write-Host "Found your game: $Game" }
     }
-    # The game files given the last time (hookshot\game-files.txt): asked only once.
+    # The game files given the last time (hookshot\game-files.txt, written once Longshot's check took them): asked only once.
+    # Remembered files that cannot be taken any more are not used (the question comes, with the reason).
     $last = Join-Path $hs 'game-files.txt'
     if (-not $Game -and (Test-Path -LiteralPath $last)) {
         $remembered = "$(Get-Content -LiteralPath $last -TotalCount 1)".Trim()
-        if ($remembered -and (Test-Path -LiteralPath $remembered)) { $Game = $remembered; Write-Host "Your game (from the last time): $Game" }
+        if ($remembered -and (Test-Path -LiteralPath $remembered)) {
+            $a = Resolve-KitGameAnswer $remembered
+            # (refused by Longshot's check before: asked again, with that reason)
+            $refused = if (Test-Path -LiteralPath $gameRejected) { "$(Get-Content -LiteralPath $gameRejected -TotalCount 1)".Trim() } else { '' }
+            if ($refused -and $refused -ieq $remembered) { $a = @{ Why = 'Longshot''s check refused it the last time.' } }
+            if ($a.Why) { Write-Host "The game files from the last time cannot be taken: $($a.Why)" -ForegroundColor Yellow }
+            else { $Game = $remembered; Write-Host "Your game (from the last time): $Game" }
+        }
     }
     if (-not $Game) {
+        # (the usual places first, as the puppet pack does: beside the kit, Downloads, the Desktop; the right game only)
+        $dumpCheck = Join-Path $kit 'tools\puppet_pack\dumpcheck.py'
+        if ((Test-Path -LiteralPath $dumpCheck) -and (Test-Path -LiteralPath $python)) {
+            $isGame = {
+                param($p)
+                $ErrorActionPreference = 'Continue'
+                & $python -I -B $dumpCheck --user-dir (Join-Path $kit 'emulator\user') --romfs $p *> $null
+                return $LASTEXITCODE -eq 0
+            }
+            $found = Find-KitGameNup '' $kit $isGame
+            if ($found -and -not (Resolve-KitGameAnswer $found).Why) { $Game = $found; Write-Host "Found your game: $Game" }
+        }
+    }
+    if (-not $Game) {
+        # Asked until the files can be taken, each refusal with its reason. What the last start refused
+        # (hookshot\game-rejected.txt: a check that failed) is said first.
         Write-Host ''
-        Write-Host 'Drag your game''s .nup file (or its romfs folder) into this window and press Enter:'
-        $Game = "$(Read-Host)".Trim().Trim('"')
-        if (-not $Game) { Fail 'No game files given. Run this again with -Game <your .nup>.' }
+        if (Test-Path -LiteralPath $gameRejected) {
+            Write-Host 'Last time your game files were not taken:' -ForegroundColor Yellow
+            Get-Content -LiteralPath $gameRejected | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        }
+        $why = ''
+        # In a window someone sits at: asked until given (an empty answer asks again). Input from a file: 3 tries.
+        $redirected = $true
+        try { $redirected = [Console]::IsInputRedirected } catch { }
+        $tries = if ($redirected) { 3 } else { [int]::MaxValue }
+        for ($try = 1; $try -le $tries -and -not $Game; $try++) {
+            Write-Host 'Your game''s .nup file (or its romfs folder): paste its path with Ctrl+V or right-click, or drag it here, then press Enter:'
+            $a = Resolve-KitGameAnswer (Read-KitPath 0 { param($p) $p -like '*.nup' -or (Test-Path -LiteralPath $p -PathType Container) })
+            if ($a.Why) { $why = $a.Why; Write-Host "  Not taken: $why" -ForegroundColor Yellow; Write-Host '  (Asked again; close this window to stop.)'; Write-Host '' }
+            else { $Game = $a.Path; if ($a.Note) { Write-Host "  $($a.Note)" } }
+        }
+        if (-not $Game) {
+            Save-KitGameRejected '(what was given at the question)' $why
+            Fail "No game files taken: $why Start again to give them (or run Build-Hookshot-Coop.bat -Game <your .nup>)."
+        }
     }
 }
 if ($Game) {
-    if (-not (Test-Path -LiteralPath $Game)) { Fail "Not found: $Game" }
-    $Game = (Resolve-Path -LiteralPath $Game).Path
+    $a = Resolve-KitGameAnswer $Game
+    if ($a.Why) { Save-KitGameRejected $Game $a.Why; Fail "Your game files cannot be taken: $($a.Why)" }
+    if ($a.Note) { Write-Host $a.Note }
+    $Game = $a.Path
     if ((Get-Item -LiteralPath $Game).PSIsContainer) {
         if (-not $Exefs) {
             $guess = Join-Path (Split-Path -Parent $Game) 'exefs'
             if (Test-Path -LiteralPath (Join-Path $guess 'main')) { $Exefs = $guess }
             else {
-                Write-Host 'A romfs folder needs its exefs folder too. Drag the exefs folder in and press Enter:'
-                $Exefs = "$(Read-Host)".Trim().Trim('"')
-                if (-not $Exefs) { Fail 'No exefs folder given.' }
+                Write-Host 'A romfs folder needs its exefs folder too. Paste its path with Ctrl+V or right-click, or drag it here, then press Enter:'
+                $Exefs = Read-KitPath 0 { param($p) Test-Path -LiteralPath (Join-Path $p 'main') }
+                if (-not $Exefs) { Fail 'No exefs folder given (nothing arrived: paste its path with Ctrl+V or right-click, or drag the folder in). A romfs folder is built with its exefs folder; or give the .nup file instead.' }
             }
         }
-        if (-not (Test-Path -LiteralPath (Join-Path $Exefs 'main'))) { Fail "$Exefs is not an exefs folder (no main in it)." }
+        if (-not (Test-Path -LiteralPath (Join-Path $Exefs 'main'))) {
+            Save-KitGameRejected $Exefs 'it is not an exefs folder (no file named main in it).'
+            Fail "$Exefs is not an exefs folder (no file named main in it). Give the exefs folder beside your romfs folder, or the game's .nup file instead."
+        }
         $Exefs = (Resolve-Path -LiteralPath $Exefs).Path
         $gameArgs = @('--romfs', $Game, '--exefs', $Exefs)
     } else {
@@ -524,6 +559,7 @@ if ($Game) {
 # make_game.py runs in Longshot's tools folder with the builder's own compiler, headers and
 # libraries, as Longshot Builder runs it (builder/LongshotBuilder/Runner.cs).
 function Invoke-MakeGame([string[]]$MoreArgs, [string]$Log = '') {
+    $script:MakeGameErrors = @()
     $env:PYTHONIOENCODING = 'utf-8'
     $env:RX_CPM = Join-Path $tools 'cpm'
     $env:WGPU_NATIVE = Join-Path $tools 'wgpu-native'
@@ -548,7 +584,7 @@ function Invoke-MakeGame([string[]]$MoreArgs, [string]$Log = '') {
         & $python -I (Join-Path $tools 'nx2\make_game.py') @MoreArgs @logArgs 2>&1 | ForEach-Object {
             $line = "$_"
             if ($line -match '^@@stage \S+ (.*)$') { Write-Host "  -- $($Matches[1])" -ForegroundColor Cyan }
-            elseif ($line -match '^@@error (.*)$') { Write-Host "  $($Matches[1])" -ForegroundColor Red }
+            elseif ($line -match '^@@error (.*)$') { Write-Host "  $($Matches[1])" -ForegroundColor Red; $script:MakeGameErrors += $Matches[1] }
             elseif ($line -notmatch '^@@') { Write-Host "  $line" }
         }
         $code = $LASTEXITCODE
@@ -560,10 +596,25 @@ function Invoke-MakeGame([string[]]$MoreArgs, [string]$Log = '') {
 if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
     Step "The game: built already ($Out)"
 } else {
-    if (-not $gameArgs) { Fail 'No game files given.' }
+    if (-not $gameArgs) { Fail 'No game files: none were found or remembered, and none could be asked for here. Start "Start OoT Co-op.bat" again, or run Build-Hookshot-Coop.bat -Game <your .nup>.' }
     Step 'Checking your game files'
     $code = Invoke-MakeGame ($gameArgs + @('--check'))
-    if ($code -ne 0) { Fail 'Longshot cannot build from these files (it said why above). This is not the game version co-op needs: program 0400486024DEC000, update v131072, build e0f3ccfa. Dump that version of your game and give its .nup.' }
+    if ($code -ne 0) {
+        # (remembered with its reason: the next start asks again and says why these were not taken)
+        $said = @($script:MakeGameErrors | Select-Object -Last 2) -join ' '
+        $why = "Longshot's check refused $Game$(if ($said) { ": $said" } else { ' (its lines above say why)' })."
+        Save-KitGameRejected $Game $why
+        # (and forgotten: a remembered file the check refuses would be taken again at every start, with no question.
+        # The pack question and the pack step save game-files.txt unchecked.)
+        $remembered = Join-Path $hs 'game-files.txt'
+        if ((Test-Path -LiteralPath $remembered) -and "$(Get-Content -LiteralPath $remembered -TotalCount 1)".Trim() -ieq $Game) {
+            Remove-Item -LiteralPath $remembered -Force -ErrorAction SilentlyContinue
+        }
+        Fail "$why Most often the file is another version of the game: co-op needs program 0400486024DEC000, update v131072, build e0f3ccfa (dump that version and give its .nup). Start again to give other files."
+    }
+    # Taken: remembered now, so a build that stops later does not ask again.
+    if ($Game) { [System.IO.File]::WriteAllText((Join-Path $hs 'game-files.txt'), "$Game`n") }
+    Remove-Item -LiteralPath $gameRejected -Force -ErrorAction SilentlyContinue
     if ($CheckOnly) { Write-Host ''; Write-Host 'Your game files are right for Longshot. Run this again without -CheckOnly to build.' -ForegroundColor Green; exit 0 }
     $drive = [System.IO.Path]::GetPathRoot($work)
     $free = (Get-PSDrive -Name $drive.Substring(0, 1) -ErrorAction SilentlyContinue).Free

@@ -106,6 +106,16 @@ TEST_CASE("coop i18n: Tr fills a built line") {
     CHECK(CoopI18n::Tr(hans, "") == "");
 }
 
+TEST_CASE("coop i18n: the boss room's leave notices around a name (#50)") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    CHECK(CoopI18n::Tr(hans, "Saria took the blue warp") == "Saria 进入了蓝色传送光");
+    CHECK(CoopI18n::Tr(hant, "Saria left the boss room") == "Saria 離開了 Boss 房間");
+    // A name that starts like another shape's fixed start is still this line.
+    CHECK(CoopI18n::Tr(hans, "Player1 took the blue warp") == "Player1 进入了蓝色传送光");
+    CHECK(CoopI18n::Tr(nullptr, "Saria took the blue warp") == "Saria took the blue warp");
+}
+
 TEST_CASE("coop i18n: a language code picks its table") {
     // Longshot's menu codes (MenuLanguageCode) and language.txt's,
     // any case, and the first part of a longer one ("zh-Hans-CN").

@@ -596,6 +596,9 @@ TEST_CASE("client: a JOIN_CHALLENGE is answered once with the proof of the join 
   const Event& refused = events.all[*events.find(EventKind::refused)];
   CHECK(refused.refuse_reason == proto::RefuseReason::bad_password);
   CHECK(refuse_reason_text(refused.refuse_reason).starts_with("wrong join password"));
+  // A join the player started keeps the plain wrong-password text.
+  CHECK_FALSE(refused.reconnecting);
+  CHECK(refuse_text(refused).starts_with("wrong join password"));
   CHECK(client.state() == State::refused);
 }
 
@@ -763,6 +766,36 @@ TEST_CASE("client: comes back after the server drops it") {
   CHECK(client.state() == State::connected);
   CHECK(events.count(EventKind::welcomed) == 1);
   CHECK(client.send(proto::Chat{0, "back"}));
+}
+
+TEST_CASE("client: a wrong join password on an automatic reconnect says the host restarted") {
+  // Issue 85: the host's server crashed and was started again, so it has a new
+  // password; the old one is refused when the client comes back by itself.
+  FakeServer server;
+  Client client(config_for(server));
+  Events events;
+  REQUIRE(client.start());
+  welcome_client(client, server);
+  REQUIRE(wait_event(client, server, events, EventKind::welcomed));
+  server.drop();
+  REQUIRE(wait_event(client, server, events, EventKind::disconnected));
+
+  const std::size_t from = server.received.size();
+  REQUIRE(pump(client, server, [&] { return server.find<proto::Hello>(from).has_value(); }));
+  key_client(client, server);
+  server.cipher.reset();  // the real server refuses a wrong password in plain
+  server.send(proto::Refused{proto::RefuseReason::bad_password}, proto::kChannelSession);
+  REQUIRE(wait_event(client, server, events, EventKind::refused));
+  const Event& refused = events.all[*events.find(EventKind::refused)];
+  CHECK(refused.reconnecting);
+  CHECK(refuse_text(refused).starts_with("the host restarted its server"));
+  CHECK(refuse_text(refused).find("new invite") != std::string_view::npos);
+  CHECK(client.state() == State::refused);
+
+  // Other reasons on a reconnect keep their own text.
+  Event full = refused;
+  full.refuse_reason = proto::RefuseReason::server_full;
+  CHECK(refuse_text(full) == refuse_reason_text(proto::RefuseReason::server_full));
 }
 
 TEST_CASE("client: a server that vanishes is noticed by the timeout") {

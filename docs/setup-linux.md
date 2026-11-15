@@ -1,6 +1,6 @@
-# Co-op on Linux and Steam Deck (Longshot)
+# Squadala! on Linux and Steam Deck (Longshot)
 
-The Linux kit is the same co-op as the Windows kit, on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot)'s
+The Linux kit is the same Squadala! co-op as the Windows kit, on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot)'s
 Linux build: the game is compiled on your PC from your own copy of it, with co-op built in. There is no emulator.
 
 **Experimental, untested:** this kit has not yet been run on a real Linux PC or a Steam Deck. CI builds it and

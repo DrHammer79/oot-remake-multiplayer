@@ -249,6 +249,9 @@ struct Event {
   EventKind kind = EventKind::message;
   protocol::Welcome welcome;          // welcomed, reconnected
   protocol::RefuseReason refuse_reason{};  // refused; raw value kept
+  // refused: during an automatic reconnect (this client was welcomed before),
+  // not on the join the player started.
+  bool reconnecting = false;
   DropReason drop_reason = DropReason::none;  // connect_failed, disconnected
   protocol::Message message;          // message
   std::uint8_t channel = 0;           // message, and the four after it
@@ -296,6 +299,11 @@ inline constexpr std::size_t kMaxChatChars = protocol::kMaxChatChars;
 
 // Text to show for a refusal, "unknown reason" for one this build does not know.
 std::string_view refuse_reason_text(protocol::RefuseReason reason);
+
+// Text to show for a `refused` event. A wrong join password on an automatic
+// reconnect means the host started its server again (each start makes a new
+// password and invite; issue 85), so it says that; else refuse_reason_text.
+std::string_view refuse_text(const Event& event);
 
 class Client {
  public:

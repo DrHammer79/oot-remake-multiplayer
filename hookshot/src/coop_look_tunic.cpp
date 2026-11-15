@@ -118,9 +118,7 @@ bool SameLayout(const Texels& a, const Texels& b) {
     });
 }
 
-Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours,
-            const std::function<bool(const Live&)>& skip) {
-    Search out;
+std::pair<std::uint64_t, std::uint64_t> Sizes(const std::vector<std::shared_ptr<const Texels>>& colours) {
     std::uint64_t smallest = ~std::uint64_t{0}, largest = 0;
     for (const auto& colour : colours) {
         for (std::size_t i = 0; colour && i < colour->size(); ++i) {
@@ -129,16 +127,34 @@ Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Te
         }
     }
     if (largest == 0) {
-        return out;
+        return {0, 0};
     }
     // A storage is the image's own size (the pack's texels), or its layout
     // rounded up a little.
-    const std::vector<Live> listed = textures.List(smallest, largest + kStorageSlack, nullptr);
+    return {smallest, largest + kStorageSlack};
+}
+
+Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Texels>>& colours,
+            const std::function<bool(const Live&)>& skip) {
+    const auto [lo, hi] = Sizes(colours);
+    if (hi == 0) {
+        return {};
+    }
+    std::vector<Live> listed = textures.List(lo, hi, nullptr);
+    const std::size_t count = listed.size();
+    if (skip) {
+        std::erase_if(listed, skip);
+    }
+    Search out = Find(textures, listed, colours);
+    out.listed = count;
+    return out;
+}
+
+Search Find(const Textures& textures, const std::vector<Live>& listed,
+            const std::vector<std::shared_ptr<const Texels>>& colours) {
+    Search out;
     out.listed = listed.size();
     for (const Live& live : listed) {
-        if (skip && skip(live)) {
-            continue;
-        }
         std::uint8_t head[kHead];
         if (!textures.Read(live.address, head, kHead)) {
             ++out.unread;
@@ -171,9 +187,10 @@ Search Find(const Textures& textures, const std::vector<std::shared_ptr<const Te
             }
         }
         if (head_only && !taken) {
-            ++out.heads;
-        } else if (!taken) {
-            out.misses.emplace_back(live.address, live.serial);
+            ++out.heads;   // (a miss too: its texels may still be coming in)
+        }
+        if (!taken) {
+            out.misses.push_back(live);
         }
     }
     return out;
@@ -229,6 +246,7 @@ void Wardrobe::Clear() {
         }
     }
     places_.clear();
+    misses_.clear();
     looked_ = false;
     target_name_.clear();
     asked_.clear();
@@ -305,7 +323,6 @@ void Wardrobe::Step(std::uint64_t now_ms) {
         // again or a full search is due (a texture whose texels came later).
         const bool full = look_now_ || !looked_ || now_ms - full_ms_ >= kFullSearchMs;
         if (full) {
-            misses_.clear();
             full_ms_ = now_ms;
         }
         // What the game's memory may hold: the start's colour first (the kit put
@@ -316,10 +333,24 @@ void Wardrobe::Step(std::uint64_t now_ms) {
                 colours.push_back(c);
             }
         }
+        // The misses: those the game still has and this search skips (a quick
+        // one skips every known miss, young ones too: LateLook below reads
+        // those, kLateChecks a step), and those read now (each keeps when it
+        // was first read). A texture finalized is not listed: its miss goes.
+        std::map<std::pair<std::uint64_t, std::uint64_t>, Miss> misses;
         Search found = Find(*host_.textures, colours, [&](const Live& l) {
-            return misses_.count({l.address, l.serial}) != 0;
+            const auto m = full ? misses_.end() : misses_.find({l.address, l.serial});
+            if (m == misses_.end()) {
+                return false;
+            }
+            misses.insert(*m);
+            return true;
         });
-        misses_.insert(found.misses.begin(), found.misses.end());
+        for (const Live& l : found.misses) {
+            const auto old = misses_.find({l.address, l.serial});
+            misses[{l.address, l.serial}] = {l, old != misses_.end() ? old->second.since : now_ms};
+        }
+        misses_ = std::move(misses);
         std::vector<bool> carried(places_.size(), false);
         for (Place& p : found.places) {   // a texture kept since: drawn as it was
             const auto old = std::find_if(places_.begin(), places_.end(), [&](const Place& o) {
@@ -353,6 +384,9 @@ void Wardrobe::Step(std::uint64_t now_ms) {
         places_ = std::move(found.places);
         look_now_ = false, looked_ = true;
         generation_ = generation;
+        if (!full) {
+            LateLook(now_ms, colours);   // (a full search read them all just now)
+        }
         if (places_.empty() && full) {
             std::string line = "coop: look: no " + host_.what + " texture of your Link among the game's yet (" +
                                std::to_string(found.listed) + " of the game's of those sizes, " +
@@ -366,6 +400,15 @@ void Wardrobe::Step(std::uint64_t now_ms) {
             said_nothing_found_ = true;
             said_ = std::move(line);
         }
+    } else {
+        // Nothing made or finalized: the young misses only (texels that came in late).
+        std::vector<std::shared_ptr<const Texels>> colours;
+        for (const auto& c : {start_, green_, target_}) {
+            if (c && std::find(colours.begin(), colours.end(), c) == colours.end()) {
+                colours.push_back(c);
+            }
+        }
+        LateLook(now_ms, colours);
     }
     std::size_t drawn = 0;
     for (Place& p : places_) {
@@ -387,6 +430,31 @@ void Wardrobe::Step(std::uint64_t now_ms) {
             places_.clear();
             looked_ = false;
         }
+    }
+}
+
+void Wardrobe::LateLook(std::uint64_t now_ms, const std::vector<std::shared_ptr<const Texels>>& colours) {
+    // The young misses, from late_next_ on (in turn: at most kLateChecks a Step).
+    std::vector<Live> look_at;
+    // (one first read in this very Step is not read again in it)
+    const auto young = [&](const auto& e) { return e.second.since != now_ms && now_ms - e.second.since < kLateTexelsMs; };
+    auto it = misses_.lower_bound(late_next_);
+    for (std::size_t n = 0; n < misses_.size() && look_at.size() < kLateChecks; ++n, ++it) {
+        if (it == misses_.end()) {
+            it = misses_.begin();
+        }
+        if (young(*it)) {
+            look_at.push_back(it->second.live);
+        }
+    }
+    if (look_at.empty()) {
+        return;
+    }
+    late_next_ = it == misses_.end() ? std::pair<std::uint64_t, std::uint64_t>{} : it->first;
+    Search found = Find(*host_.textures, look_at, colours);
+    for (Place& p : found.places) {
+        misses_.erase({p.address, p.serial});
+        places_.push_back(std::move(p));
     }
 }
 

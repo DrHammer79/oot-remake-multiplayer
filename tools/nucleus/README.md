@@ -1,6 +1,6 @@
-# Nucleus Co-op handler for OoT Co-op
+# Nucleus Co-op handler for Squadala!
 
-`OoTCoop.js` is a handler for [Nucleus Co-op](https://github.com/SplitScreen-Me/splitscreenme-nucleus), a free Windows tool that runs several copies of a PC game split-screen on one PC, each with its own controller. With it, 2 to 4 players on one PC start OoT Co-op on Longshot in one click: player 1's game hosts on this PC, and the others join it.
+`OoTCoop.js` is a handler for [Nucleus Co-op](https://github.com/SplitScreen-Me/splitscreenme-nucleus), a free Windows tool that runs several copies of a PC game split-screen on one PC, each with its own controller. With it, 2 to 4 players on one PC start Squadala! on Longshot in one click: player 1's game hosts on this PC, and the others join it.
 
 How to play with it: [docs/play-lan.md, "Split screen (experimental)"](../../docs/play-lan.md#split-screen-experimental).
 

@@ -144,7 +144,7 @@ foreach ($p in $hsPatches) { Copy-Item -LiteralPath $p.FullName -Destination (Jo
 $packTool = Join-Path $repo 'tools\puppet_pack'
 # (make_kit.ps1's list: its tests and the scene-placing test helper stay out), plus every module build.py imports.
 $packFiles = @('ainb.py', 'build.py', '__init__.py', 'byml.py', 'dumpcheck.py', 'dungeon_rooms.py', 'hud.py', 'nup.py', 'rstb.py',
-    'sarc.py', 'texture.py', 'title_menu.py', 'tunic.py', 'tunic_extra.py', 'zs.py')
+    'sarc.py', 'texture.py', 'title_menu.py', 'tunic.py', 'tunic_extra.py', 'zs.py', 'merge_tables.py')   # (merge_tables.py: play.ps1, #48)
 foreach ($line in (Get-Content (Join-Path $packTool 'build.py') | Where-Object { $_ -match '^\s*from \. import ' })) {
     $packFiles += (($line -replace '#.*$', '') -replace '^\s*from \. import ', '').Split(',') | ForEach-Object { "$($_.Trim()).py" } | Where-Object { $_ -ne '.py' }
 }

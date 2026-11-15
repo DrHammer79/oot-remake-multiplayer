@@ -142,7 +142,7 @@ TEST_CASE("rando: the control mod's mod.json is valid, with the seed and preset 
     for (const auto& s : m->settings) {
         if (s.shared) shared.insert(s.key);
     }
-    CHECK(shared == std::set<std::string>{"on", "seed", "preset"});
+    CHECK(shared == std::set<std::string>{"on", "seed", "preset", "settings"});
     CHECK(m->settings[2].initial == "default");
     CHECK(m->settings[2].choices.size() == std::size(kPresets));
     // Each choice is {"value", "name"}: OOTRR and the folder get the value, the
@@ -1263,6 +1263,72 @@ TEST_CASE("rando: a run that reads an outside mod's size table holds the pack an
     CHECK(rando.HoldPack());  // the whole run
 }
 
+TEST_CASE("rando: FNV-1a 64 as the kit's merge writes it") {
+    CHECK(Fnv64Hex("") == "cbf29ce484222325");
+    CHECK(Fnv64Hex("a") == "af63dc4c8601ec8c");
+    CHECK(Fnv64Hex("foobar") == "85944171f73967e8");
+}
+
+namespace {
+// The kit's merge (#48 step 2) as it leaves a mod: its table rewritten, and the mark beside its romfs.
+void MarkMerged(const fs::path& mods, const std::string& mod, const std::string& table_text) {
+    Put(mods / mod / kTable, table_text);
+    const std::string pack = Get(mods / kPackFolder / kTable);
+    Put(mods / mod / kMergedFile, "coop-merged 1\r\ntable " + kTable.filename().string() + " " +
+                                      Fnv64Hex(table_text) + "\r\npack " + Fnv64Hex(pack) + "\r\n");
+}
+}  // namespace
+
+TEST_CASE("rando: a winning mod whose table the kit merged is not held, a stale mark is") {
+    World w;
+    Put(w.mods / kPackFolder / kTable, "puppet");
+    MarkMerged(w.mods, "ootrr-site", "site + puppet");
+    CHECK(MergedByKit(w.mods, "ootrr-site"));
+    std::string merged;
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, true, &merged));
+    CHECK(merged == "ootrr-site");
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, false));
+    // a new seed table dropped over it: stale
+    Put(w.mods / "ootrr-site" / kTable, "another site seed");
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    CHECK(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, true) == std::optional<std::string>("ootrr-site"));
+    // the pack rebuilt since the merge: stale
+    MarkMerged(w.mods, "ootrr-site", "site + puppet");
+    Put(w.mods / kPackFolder / kTable, "puppet, rebuilt");
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    // a mark of another version, a path for a table name, or no pack: not trusted
+    Put(w.mods / kPackFolder / kTable, "puppet");
+    MarkMerged(w.mods, "ootrr-site", "site + puppet");
+    CHECK(MergedByKit(w.mods, "ootrr-site"));
+    const std::string good = Get(w.mods / "ootrr-site" / kMergedFile);
+    std::string other = good;
+    other.replace(0, std::string("coop-merged 1").size(), "coop-merged 2");
+    Put(w.mods / "ootrr-site" / kMergedFile, other);
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    Put(w.mods / "ootrr-site" / kMergedFile,
+        "coop-merged 1\ntable ../../coop-puppet/romfs/System/Resource/T.rsizetable.zs " + Fnv64Hex("puppet") +
+            "\npack " + Fnv64Hex("puppet") + "\n");
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    Put(w.mods / "ootrr-site" / kMergedFile, good);
+    fs::remove(w.mods / kPackFolder / kTable);
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    CHECK_FALSE(MergedByKit(w.mods, "no-such-mod"));
+}
+
+TEST_CASE("rando: a run that reads a kit-merged outside table makes the puppets and says nothing") {
+    World w;
+    Put(w.mods / kPackFolder / kTable, "puppet");
+    MarkMerged(w.mods, "ootrr-site", "site + puppet");
+    PlaysSeed(w, "ootrr-site", 7);
+    CoopMods::Loader loader(w.mods, {nullptr, 7, nullptr});
+    loader.Start();
+    Rando rando(loader, w.Hooks());
+    rando.Start();
+    rando.Wait();
+    CHECK_FALSE(rando.HoldPack());
+    CHECK(Count(rando.TakeLines(), ChatSafe(OutsideLine("ootrr-site"), 300)) == 0);
+}
+
 TEST_CASE("rando: a run that reads our own seed's size table is not held for an outside mod") {
     World w;
     Put(w.mods / "ootrr-site" / kTable, "site");
@@ -1275,4 +1341,84 @@ TEST_CASE("rando: a run that reads our own seed's size table is not held for an 
     rando.Wait();
     CHECK_FALSE(rando.HoldPack());
     for (const std::string& line : rando.TakeLines()) CHECK(line.find("own size table") == std::string::npos);
+}
+
+TEST_CASE("rando: a settings string from OOTRR's page is known, named short, and gets a short folder") {
+    CHECK(IsSettingsString("OOTRR1-EYAQCTABAHIHE"));
+    CHECK_FALSE(IsSettingsString("OOTRR"));
+    CHECK_FALSE(IsSettingsString("default"));
+    CHECK_FALSE(IsSettingsString("OOTRR1-AB CD"));
+    CHECK_FALSE(IsSettingsString("OOTRR1-..\\x"));
+    CHECK_FALSE(IsSettingsString("OOTRR1-" + std::string(kSettingsMax, 'A')));
+    CHECK(SettingsString("  OOTRR1-EYAQCTABAHIHE\r\n") == "OOTRR1-EYAQCTABAHIHE");
+    CHECK(SettingsString("keysanity").empty());
+    CHECK(SettingsString("   ").empty());
+    CHECK(SettingsName("keysanity") == "keysanity");
+    CHECK(SettingsName("") == "default");
+    CHECK(SettingsName("OOTRR1-EYAQCTABAHIHE") == "settings OOTRR1-EYAQCTABA...");
+    const std::string folder = FolderFor("AB12", "OOTRR1-EYAQCTABAHIHE");
+    CHECK(folder.rfind("randomizer-AB12-s", 0) == 0);
+    CHECK(folder.size() == std::string("randomizer-AB12-s").size() + 8);
+    CHECK(folder != FolderFor("AB12", "OOTRR1-EYAQCTABAHIHF"));
+    CHECK(folder == FolderFor("AB12", "OOTRR1-EYAQCTABAHIHE"));
+}
+
+TEST_CASE("rando: the host's settings string is built in place of the preset, in the guest's game too") {
+    World w;
+    CoopMods::Loader loader(w.mods, {nullptr, 1, nullptr});
+    loader.Start();
+    Rando rando(loader, w.Hooks());
+    rando.Start();
+    w.Settings(loader);
+    loader.SetHostValues(std::vector<CoopMods::SharedValue>{{kId, "on", "1"},
+                                                            {kId, "seed", "SITE1"},
+                                                            {kId, "preset", "default"},
+                                                            {kId, "settings", "OOTRR1-EYAQCTABAHIHE"}});
+    rando.Wait();
+    REQUIRE(w.runs.size() == 2);
+    CHECK(w.runs[0].find(L"generate") != std::wstring::npos);
+    CHECK(w.runs[0].find(L"OOTRR1-EYAQCTABAHIHE") != std::wstring::npos);  // in place of the preset
+    CHECK(w.runs[0].find(L"default") == std::wstring::npos);
+    const std::string folder = FolderFor("SITE1", "OOTRR1-EYAQCTABAHIHE");
+    CHECK(On(loader, folder));
+    CHECK(Get(w.mods / folder / kPresetFile) == "OOTRR1-EYAQCTABAHIHE\n");
+    // Built once: the same settings again build nothing.
+    rando.Recheck();
+    rando.Wait();
+    CHECK(w.runs.size() == 2);
+}
+
+TEST_CASE("rando: a Settings string that is not one is said once and the preset is used") {
+    World w;
+    CoopMods::Loader loader(w.mods, {nullptr, 1, nullptr});
+    loader.Start();
+    Rando rando(loader, w.Hooks());
+    rando.Start();
+    w.Settings(loader);
+    (void)rando.TakeLines();
+    REQUIRE(loader.Set(kFolder, "settings", "not a string"));
+    REQUIRE(loader.Set(kFolder, "seed", "BAD1"));
+    REQUIRE(loader.Set(kFolder, "on", "1"));
+    rando.Wait();
+    std::size_t said = 0;
+    for (const std::string& line : rando.TakeLines()) said += line.find("Settings string is not") != std::string::npos;
+    CHECK(said == 1);
+    CHECK(On(loader, FolderFor("BAD1", "default")));
+}
+
+TEST_CASE("rando: a control mod written before the Settings string gets it at the start") {
+    World w;
+    std::string old = ManifestText();
+    const auto from = old.find("    {\"key\": \"settings\"");
+    REQUIRE(from != std::string::npos);
+    old.erase(from, old.find('\n', old.find("\"help\"", from)) + 1 - from);
+    REQUIRE(old.find("\"key\": \"settings\"") == std::string::npos);
+    Put(w.mods / kFolder / "mod.json", old);
+    CoopMods::Loader loader(w.mods, {nullptr, 1, nullptr});
+    loader.Start();
+    Rando rando(loader, w.Hooks());
+    rando.Start();
+    bool has = false;
+    for (const CoopMods::SettingRow& s : loader.Settings(kFolder)) has = has || s.setting.key == "settings";
+    CHECK(has);
 }

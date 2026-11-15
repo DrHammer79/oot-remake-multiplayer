@@ -154,6 +154,14 @@ std::string_view refuse_reason_text(proto::RefuseReason reason) {
   return "unknown reason";
 }
 
+std::string_view refuse_text(const Event& event) {
+  if (event.reconnecting && event.refuse_reason == proto::RefuseReason::bad_password) {
+    return "the host restarted its server (it has a new join password now): ask the host "
+           "for the new invite, then start Join.bat again with it";
+  }
+  return refuse_reason_text(event.refuse_reason);
+}
+
 Client::Client(ClientConfig config) : config_(sanitised(std::move(config))) {}
 
 Client::~Client() {
@@ -491,6 +499,7 @@ void Client::on_receive(const std::uint8_t* data, std::size_t size,
       Event event;
       event.kind = EventKind::refused;
       event.refuse_reason = refused->reason;
+      event.reconnecting = ever_welcomed_;
       push(std::move(event));
     } else if (channel == proto::kChannelProgress &&
                early_.size() < config_.max_early_messages) {

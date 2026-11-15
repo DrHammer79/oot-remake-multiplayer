@@ -643,3 +643,23 @@ TEST_CASE("hookshot: on Linux the exe exports every function the module finds in
         CHECK(build.find("\"" + name + "\"") != std::string::npos);
     }
 }
+
+TEST_CASE("hookshot: typing in a co-op field keeps the keyboard from the menu (patch 0022), Insert and F1 stay the menu's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0022-coop-menu-typing-keys.patch");
+    REQUIRE_FALSE(patch.empty());
+    // the menu asks the module (by name, with its other exports) and drops its own key presses while it types:
+    // Linux reads the keys' state, so Q and E changed the tab there (player report, Linux and Steam Deck)
+    CHECK(patch.find("+    keys_taken_fn.store((int (*)(void))look(\"hos_coop_keys_taken\"), std::memory_order_release);") !=
+          std::string::npos);
+    CHECK(patch.find("+    const bool coop_typing = coop::keys_taken();") != std::string::npos);
+    CHECK(patch.find("+            if (keys[i] != VK_INSERT && keys[i] != VK_F1) press[i] = false;") != std::string::npos);
+    CHECK(patch.find("+            const bool down = (held[i] && !coop_typing) ||") != std::string::npos);   // no arrow repeat
+    CHECK(patch.find("+    if (coop_typing) tune_cancelled = true;") != std::string::npos);   // Shift: no compact menu
+    // the module says so while a field of its tab is typed into
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_keys_taken(void) {") != std::string::npos);
+    // menu files only: no lift, no host change
+    for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
+        CHECK(patch.compare(at, 20, "diff --git a/gpu/vk/") == 0);
+    }
+}

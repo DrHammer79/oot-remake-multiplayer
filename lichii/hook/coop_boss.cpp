@@ -198,6 +198,8 @@ void Sync::Reset() {
     last_now_ = 0;
     scene_.reset();
     defeated_.clear();
+    leaving_.clear();
+    told_.clear();
     pulls_ = 0;
     pulled_at_ = 0;
     gave_up_ = false;
@@ -206,7 +208,7 @@ void Sync::Reset() {
     inbox_.clear();
 }
 
-void Sync::Take(const proto::BossRoom& m, std::uint64_t now_us) {
+void Sync::Take(const proto::BossRoom& m, std::uint64_t now_us, std::uint8_t self) {
     const Room* room = RoomByIndex(m.room);
     if (room == nullptr || room->scene != m.scene || m.player_number == 0) {
         return;  // a room this build does not know
@@ -233,11 +235,20 @@ void Sync::Take(const proto::BossRoom& m, std::uint64_t now_us) {
         r.committed = true;
         break;
     case proto::BossState::left:
+        // Past the door, then out (#50): tell us, if we are in that room, once the notice's wait is over.
+        // A warp only once the boss is beaten (they or we saw it die); a walk-up that never got past the
+        // door says nothing.
+        if (m.player_number != self && here_ == room && (r.beaten || r.committed)) {
+            const bool warp =
+                r.beaten || std::find(defeated_.begin(), defeated_.end(), m.room) != defeated_.end();
+            leaving_.push_back(Leaving{m.player_number, room, warp, now_us});
+        }
         r.in_room = false;
         r.fighting = false;
         r.committed = false;
         break;
     case proto::BossState::defeated:
+        r.beaten = true;
         r.in_room = false;
         r.fighting = false;
         r.committed = false;
@@ -304,6 +315,33 @@ bool Sync::OtherFinishedIntro(const Room& room, std::uint64_t now_us) const {
 }
 
 Actions Sync::Tick(const Local& local, std::uint64_t now_us) {
+    Actions out = Step(local, now_us);
+    // Only once our room is known again this frame (a load keeps here_ as it was). On Step's clock,
+    // which never goes back: a server time stepping back must not cut the notice's wait.
+    if (local.scene && local.position) {
+        Notices(out, last_now_);
+    }
+    return out;
+}
+
+void Sync::Notices(Actions& out, std::uint64_t now_us) {
+    std::erase_if(leaving_, [&](const Leaving& l) {
+        if (now_us - l.at < kLeaveNoticeUs) {
+            return false;
+        }
+        // We went out too meanwhile (the group left together): nobody here to tell.
+        const std::uint32_t key = l.player | std::uint32_t{l.room->index} << 8 | std::uint32_t{l.warp} << 16;
+        if (here_ == l.room && std::find(told_.begin(), told_.end(), key) == told_.end()) {
+            told_.push_back(key);  // once per player per fight
+            std::string text = l.warp ? "took the blue warp" : "left the boss room";
+            out.log.push_back("player " + std::to_string(l.player) + " " + text + ": told in the chat");
+            out.chat.push_back({l.player, std::move(text)});
+        }
+        return true;
+    });
+}
+
+Actions Sync::Step(const Local& local, std::uint64_t now_us) {
     Actions out;
     // Server time can step back when its offset is estimated again; every
     // "since" below would then wrap.
@@ -316,7 +354,7 @@ Actions Sync::Tick(const Local& local, std::uint64_t now_us) {
             in.swap(inbox_);
         }
         for (const auto& m : in) {
-            Take(m, now_us);
+            Take(m, now_us, local.self);
         }
     }
     // Nothing is decided while the game cannot be read (a load, a menu).
@@ -326,6 +364,7 @@ Actions Sync::Tick(const Local& local, std::uint64_t now_us) {
     if (!scene_ || *scene_ != *local.scene) {
         scene_ = local.scene;
         defeated_.clear();
+        told_.clear();
         pulls_ = 0;
         gave_up_ = false;
     }

@@ -710,3 +710,98 @@ TEST_CASE("boss: in a no-intro fight nobody is past the door for, the boss dead 
     auto out = a.Tick(Alive(Forest().arrive, true, false, 1), 40 * kS);
     CHECK(Has(out, proto::BossState::defeated));
 }
+
+namespace {
+
+// The chat notices of a Tick, as "<player> <text>".
+std::vector<std::string> Said(const Actions& a) {
+    std::vector<std::string> out;
+    for (const auto& n : a.chat) {
+        out.push_back(std::to_string(n.player) + " " + n.text);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("boss: a player who leaves the beaten boss room is told to those still in it (#50)") {
+    Sync s;  // we are player 1, in the room
+    const auto here = [] { return At("ForestTemple", Forest().arrive); };
+    s.Tick(here(), 1 * kS);
+    s.Receive(From(2, Forest(), proto::BossState::intro_end));
+    s.Receive(From(2, Forest(), proto::BossState::defeated));
+    s.Receive(From(2, Forest(), proto::BossState::left));
+    CHECK(s.Tick(here(), 20 * kS).chat.empty());  // waits a second: the group may be leaving together
+    CHECK(s.Tick(here(), 20 * kS + kS / 2).chat.empty());
+    CHECK(Said(s.Tick(here(), 21 * kS)) == std::vector<std::string>{"2 took the blue warp"});
+    CHECK(s.Tick(here(), 22 * kS).chat.empty());
+    // Once per player per fight: back in and out again says nothing more.
+    s.Receive(From(2, Forest(), proto::BossState::defeated));
+    s.Receive(From(2, Forest(), proto::BossState::left));
+    CHECK(s.Tick(here(), 23 * kS).chat.empty());
+    CHECK(s.Tick(here(), 25 * kS).chat.empty());
+}
+
+TEST_CASE("boss: a player past the door who leaves before the win is told as left, and one only near it is not (#50)") {
+    Sync s;
+    const auto here = [] { return At("ForestTemple", Forest().arrive); };
+    s.Tick(here(), 1 * kS);
+    s.Receive(From(2, Forest(), proto::BossState::intro_start));
+    s.Receive(From(2, Forest(), proto::BossState::left));
+    s.Receive(From(3, Forest(), proto::BossState::in_room));  // never past the door
+    s.Receive(From(3, Forest(), proto::BossState::left));
+    s.Tick(here(), 2 * kS);
+    CHECK(Said(s.Tick(here(), 4 * kS)) == std::vector<std::string>{"2 left the boss room"});
+    // The boss beaten in our own game: their warp out is a warp.
+    s.Receive(From(4, Forest(), proto::BossState::intro_end));
+    s.Tick(At("ForestTemple", Forest().arrive, true), 5 * kS);  // our intro
+    s.Tick(here(), 20 * kS);                                    // its end: the fight
+    REQUIRE(s.phase() == Sync::Phase::fight);
+    s.Tick(At("ForestTemple", Forest().arrive, true), 60 * kS);  // our boss's death (outro)
+    s.Tick(At("ForestTemple", Forest().arrive, true), 80 * kS);
+    s.Tick(here(), 90 * kS);
+    REQUIRE(s.phase() == Sync::Phase::done);
+    s.Receive(From(4, Forest(), proto::BossState::left));
+    s.Tick(here(), 91 * kS);
+    CHECK(Said(s.Tick(here(), 93 * kS)) == std::vector<std::string>{"4 took the blue warp"});
+}
+
+TEST_CASE("boss: no leave notice for our own player, a group that leaves together, or after our own warp (#50)") {
+    const auto here = [] { return At("ForestTemple", Forest().arrive); };
+    {
+        Sync s;  // our own BOSS_ROOM back from the server
+        s.Tick(here(), 1 * kS);
+        s.Receive(From(1, Forest(), proto::BossState::defeated));
+        s.Receive(From(1, Forest(), proto::BossState::left));
+        s.Tick(here(), 2 * kS);
+        CHECK(s.Tick(here(), 4 * kS).chat.empty());
+    }
+    {
+        Sync s;  // they warp, we warp half a second later: nobody left behind
+        s.Tick(here(), 1 * kS);
+        s.Receive(From(2, Forest(), proto::BossState::defeated));
+        s.Receive(From(2, Forest(), proto::BossState::left));
+        s.Tick(here(), 10 * kS);
+        Local loading;  // the warp's load: nothing is read
+        CHECK(s.Tick(loading, 10 * kS + kS / 2).chat.empty());
+        CHECK(s.Tick(loading, 12 * kS).chat.empty());
+        CHECK(s.Tick(At("DekuTree", Vec{}), 13 * kS).chat.empty());
+    }
+    {
+        Sync s;  // we walk out within the second
+        s.Tick(here(), 1 * kS);
+        s.Receive(From(2, Forest(), proto::BossState::defeated));
+        s.Receive(From(2, Forest(), proto::BossState::left));
+        s.Tick(here(), 10 * kS);
+        CHECK(s.Tick(At("ForestTemple", kForestEntrance), 10 * kS + kS / 2).chat.empty());
+        CHECK(s.Tick(At("ForestTemple", kForestEntrance), 12 * kS).chat.empty());
+    }
+    {
+        Sync s;  // we are not in the room when they leave it
+        s.Tick(At("ForestTemple", kForestEntrance), 1 * kS);
+        s.Receive(From(2, Forest(), proto::BossState::defeated));
+        s.Receive(From(2, Forest(), proto::BossState::left));
+        s.Tick(At("ForestTemple", kForestEntrance), 2 * kS);
+        CHECK(s.Tick(here(), 4 * kS).chat.empty());
+    }
+}

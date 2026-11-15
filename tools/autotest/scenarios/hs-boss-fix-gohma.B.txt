@@ -33,7 +33,7 @@ goto 6.7 67.6 1.5 600   # through the door: B's own intro, with a copy Gohma
 mark b-in
 wait 2400               # B's intro (the copy runs its own event changes)
 mark b-after-intro
-goto 15.0 67.5 1.5 600  # CONTROL: 7.5 m east of the room's centre
+goto 15.0 67.5 1.5 600  # CONTROL: 3.5 m west of her (the room's centre is x 22.5)
 mark b-moved
 wait 300
 hold ZL 30              # B's seed into the eye: the copy's own stun

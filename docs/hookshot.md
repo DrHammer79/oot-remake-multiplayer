@@ -1,4 +1,4 @@
-# Co-op on Longshot (formerly Hookshot; Stage 2: recomp)
+# Squadala! on Longshot (formerly Hookshot; Stage 2: recomp)
 
 [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean and contributors, GPL-3.0; https://longshot.magicbean.dev/) is a static recompilation by Team MagicBean whose changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) (NotRexed and contributors, self-hosted): a static recompilation of the same game build co-op already supports, main build id `e0f3ccfaf50065ae` (version 1.1.1). It is the version co-op builds on until something better is out. The game's AArch64 code is translated to C ahead of time from the player's own dump, compiled for x86-64 Windows and Linux, with Horizon OS and NVN2 written natively and the GPU work replayed on Vulkan. No CPU or GPU emulation.
 

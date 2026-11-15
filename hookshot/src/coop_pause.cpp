@@ -38,7 +38,7 @@
 #endif
 #include <windows.h>
 #else
-#include <dlfcn.h>
+#include "coop_clipboard_posix.h"
 #endif
 
 namespace CoopPause {
@@ -52,6 +52,15 @@ using CoopFiles::ReadOptions;
 using CoopFiles::ReadText;
 using CoopFiles::SetClipboardText;
 using CoopFiles::WriteText;
+
+// A paste that found no clipboard to read (Request::Kind::kPaste): what is missing and what still works.
+#ifdef _WIN32
+constexpr const char* kClipboardUnread = "The clipboard could not be read (another program had it open): press this again.";
+#else
+constexpr const char* kClipboardUnread =
+    "The clipboard could not be read: no clipboard tool. Press Ctrl+V while typing, install wl-clipboard (Wayland) "
+    "or xclip (X11), or type the code.";
+#endif
 using CoopPauseMenu::Input;
 using CoopPauseMenu::Request;
 using State = CoopPauseMenu::Session::State;
@@ -455,7 +464,15 @@ void Act(const Request& r) {
         break;
     }
     case Request::Kind::kLookParts: g_menu.SetNote(ChooseLookParts(g_menu.look())); break;
-    case Request::Kind::kPaste: g_menu.Paste(ClipboardText()); break;
+    case Request::Kind::kPaste: {
+        const std::optional<std::string> clip = CoopFiles::ReadClipboard();
+        g_menu.Paste(clip.value_or(std::string()));
+        if (!clip) {   // (said, not a silent nothing: what is missing, and the ways that still work)
+            g_menu.SetNote({kClipboardUnread});
+            LOG_INFO(Core, "coop: multiplayer tab: a paste found no clipboard to read");
+        }
+        break;
+    }
     case Request::Kind::kCopyInvite:
         g_lan_lines.clear();
         Copy(Status().invite, "invite code");
@@ -722,14 +739,15 @@ int Wanted() {
     return g_wanted.exchange(HOS_COOP_MENU_WANT_NOTHING);
 }
 
-// Ctrl and Shift held now. Windows: GetKeyState. Linux: the game's own SDL (SDL2 or SDL3, found in the process when
-// it is there: no link to it), whose KMOD_CTRL / KMOD_SHIFT bits are the same in both; without SDL, neither.
+// Ctrl and Shift held now. Windows: GetKeyState. Linux: the game's own SDL (SDL2 or SDL3, the library the game
+// loaded: CoopClipboard::GameSdl; Longshot loads it RTLD_LOCAL, so RTLD_DEFAULT never saw it and Ctrl+V did not
+// paste on Linux), whose KMOD_CTRL / KMOD_SHIFT bits are the same in both; without SDL, neither.
 static std::pair<bool, bool> Modifiers() {
 #ifdef _WIN32
     return {(GetKeyState(VK_CONTROL) & 0x8000) != 0, (GetKeyState(VK_SHIFT) & 0x8000) != 0};
 #else
     using GetModState = unsigned int (*)();
-    static const GetModState get = reinterpret_cast<GetModState>(dlsym(RTLD_DEFAULT, "SDL_GetModState"));
+    const auto get = reinterpret_cast<GetModState>(CoopClipboard::GameSdl("SDL_GetModState"));
     if (get == nullptr) {
         return {false, false};
     }

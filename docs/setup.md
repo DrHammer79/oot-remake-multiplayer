@@ -1,6 +1,6 @@
-# Setting up co-op
+# Setting up Squadala!
 
-Online co-op for the Ocarina of Time remake, on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean and contributors, GPL-3.0; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) by NotRexed and contributors): a native PC version of the game that the kit builds on your PC from your own copy. There is no emulator: the game runs as a normal Windows program. This is an early test build (the newest is on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)); [known-issues.md](known-issues.md) lists what works and what does not yet.
+Squadala!, online co-op for the Ocarina of Time remake, on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean and contributors, GPL-3.0; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) by NotRexed and contributors): a native PC version of the game that the kit builds on your PC from your own copy. There is no emulator: the game runs as a normal Windows program. This is an early test build (the newest is on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)); [known-issues.md](known-issues.md) lists what works and what does not yet.
 
 The kit has one file to start: **`Start OoT Co-op.bat`**. Everything else is done by it or in the game. (The older emulator kits, with `Host.bat` and `Join.bat`, have their own guide: [setup-emulator.md](setup-emulator.md). A player on an emulator kit cannot join a game hosted with this kit, nor the other way round: every player needs this kit, the same version.)
 
