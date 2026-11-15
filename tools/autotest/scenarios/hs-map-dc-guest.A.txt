@@ -21,7 +21,7 @@ wait 300
 press A
 wait 2400
 mark b-before
-wait 4200                 # B (later on the title: the host's save) walks to the chest and plays the get scene
+wait 5400                 # B (later on the title: the host's save) walks to the chest and plays the get scene
 mark b-after
 press MINUS
 wait 120

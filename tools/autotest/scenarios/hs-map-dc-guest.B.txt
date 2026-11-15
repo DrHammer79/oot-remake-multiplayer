@@ -16,6 +16,7 @@ press A
 wait 300
 press A
 wait 2400
+wait 1200                 # the host's save loads later: Link in the cavern first
 mark mini-before
 place -24.0 100.75 -38.0   # 2.5 m in front of the map chest
 wait 240
