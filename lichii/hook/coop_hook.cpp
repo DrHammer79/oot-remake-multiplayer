@@ -80,6 +80,7 @@
 #include "coop_pickups.h"
 #include "coop_fairy.h"
 #include "coop_difficulty.h"
+#include "coop_ngplus.h"
 #include "coop_drops.h"
 #include "coop_every.h"
 #include "coop_dungeon.h"
@@ -1093,6 +1094,13 @@ public:
         // Difficulty (docs/play-online.md "Difficulty"): the host's choice goes out.
         CoopDifficulty::Frame(report.connected ? session_.get() : nullptr);
         for (auto& line : CoopDifficulty::TakeLines()) {
+            chat_.Add(std::move(line), true);
+        }
+        // (Navi) New Game+ (coop_ngplus.h): Ganon's death unlocks it; with a level on, the kept hearts.
+        if (memory) {
+            CoopNgPlus::Frame(system, *memory, reading.has_value());
+        }
+        for (auto& line : CoopNgPlus::TakeLines()) {
             chat_.Add(std::move(line), true);
         }
         // Mods (docs/mods.md "Mods in co-op"): our list, the host's shared settings, a warning when they differ.
@@ -2411,6 +2419,11 @@ void LocalFrameOff(Core::System& system) {
         facts = {position.has_value(), position, position && reader.read_age() == coop::protocol::Age::adult};
     }
     CoopLocalGame::Frame(facts);
+    // (Navi) New Game+ alone (coop_ngplus.h): no chat box here, the log and the Settings page say it.
+    CoopNgPlus::Frame(system, memory, facts.position.has_value());
+    for (const auto& line : CoopNgPlus::TakeLines()) {
+        LOG_INFO(Core, "coop: {}", line);
+    }
     {
         const auto scene = full ? full->scene : reader.read_scene();
         WatchMapDrops(memory, facts.position.has_value(), scene, facts.position);

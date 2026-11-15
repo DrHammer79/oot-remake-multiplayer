@@ -664,8 +664,25 @@ Difficulty Session::difficulty() const {
   d.set_by = difficulty_set_by_;
   d.auto_scale = difficulty_.auto_scale;
   d.preset = difficulty_.auto_scale ? DifficultyPreset::normal : difficulty_.preset;
-  d.values = difficulty_in_force(difficulty_, player_count());
+  d.values = ngplus_difficulty(difficulty_in_force(difficulty_, player_count()), ngplus_);
   return d;
+}
+
+// (Navi) New Game+: the host's level, told to everyone in the session at once.
+void Session::set_ngplus(std::uint8_t level) {
+  if (level > kMaxNgPlus) level = kMaxNgPlus;
+  if (level == ngplus_) return;
+  ngplus_ = level;
+  const Difficulty now = difficulty();
+  log("New Game+ " + std::to_string(level) + ": life " + std::to_string(now.values.hp_pct) + "%, damage " +
+      std::to_string(now.values.damage_pct) + "%, bosses life " + std::to_string(now.values.boss_hp_pct) + "%");
+  if (now.values == difficulty_told_) return;
+  difficulty_told_ = now.values;
+  std::vector<std::uint8_t> bytes;
+  if (encode(Message{now}, bytes) != Error::none) return;
+  for (const auto& [id, c] : connections_) {
+    if (c.state == State::joined) actions_.push_back(SendAction{id, kChannelSession, bytes});
+  }
 }
 
 // The host chooses the difficulty for everyone. Anyone else's is ignored

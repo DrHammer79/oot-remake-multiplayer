@@ -60,6 +60,10 @@ std::uint16_t HostService::port() const { return server_ ? server_->port() : 0; 
 
 const Session* HostService::session() const { return server_ ? &server_->session() : nullptr; }
 
+void HostService::set_ngplus(std::uint8_t level) {
+  if (server_) server_->session().set_ngplus(level);
+}
+
 bool HostService::start(std::string& error) {
   auto fail = [&](const std::string& why, HostProblem problem) {
     error = why;

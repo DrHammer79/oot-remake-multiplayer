@@ -54,6 +54,15 @@ bool SessionLive();
 // then (never while a file loads).
 void NoteTitle(bool title_up);
 
+// (Navi) Solo or multiplayer saves: the Multiplayer tab's Settings page, "Saves". The multiplayer saves are their own
+// folder beside the solo ones (<account>-mp; a guest's copy of the host's save is then <account>-mp-coop), first made
+// as a copy of the solo saves. Switched on the title's menu with no file loaded and no session, and kept in
+// coop-saves.ini beside coop.ini for the next start (put in force on the first title). Hookshot only.
+// What it did, in plain words, for the menu's note.
+std::string ChooseSaveSet(bool multiplayer);
+// The saves chosen (as kept: in force from the title's menu on).
+bool MultiplayerSaves();
+
 // A guest's switch to the host's save that has not happened yet waits (the player picked a file on the title):
 // never while that file loads. Once Link is in the game the hold ends; the switch still waits (never under a game
 // being played) and goes when the player is back on the title's menu with no file loaded.
