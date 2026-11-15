@@ -7,6 +7,7 @@
 #include "coop_look_share.h"
 #include "coop_pose.h"
 #include "coop_puppet_own.h"
+#include "coop_show_delay.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2319,15 +2320,19 @@ std::uint32_t LivePuppets() {
 std::vector<Remote> Collect(coop::host::Session* session, std::uint64_t server_now_us) {
     std::vector<Remote> remotes;
     if (session != nullptr && server_now_us != 0) {
-        std::uint64_t show_us = 0;  // jitter-3: the animation at the place's own time
+        // jitter-3: the animation at the place's own time; report 37: that time is each
+        // player's own (its delay follows its samples' ages: coop/presence show_delay.hpp).
+        std::array<std::uint64_t, coop::protocol::kMaxPlayers + 1> show_us{};
         session->with_presence([&](coop::presence::Presence& p) {
-            const std::uint64_t delay = p.settings().show_delay_us;
-            show_us = server_now_us > delay ? server_now_us - delay : 0;
             for (const std::uint8_t n : p.players()) {
                 // The same time as the markers' collect() this frame.
                 const auto pose = p.shown(n, server_now_us);
                 if (!pose) {
                     continue;
+                }
+                if (n < show_us.size()) {
+                    show_us[n] = pose->at_us;
+                    CoopShowDelay::Set(n, server_now_us > pose->at_us ? server_now_us - pose->at_us : 0);
                 }
                 Remote r;
                 r.number = n;
@@ -2346,7 +2351,7 @@ std::vector<Remote> Collect(coop::host::Session* session, std::uint64_t server_n
         std::lock_guard lock(g_anim_mutex);
         for (auto& r : remotes) {
             if (r.number < g_anims.size()) {
-                if (const Received* a = g_anims[r.number].At(show_us)) {
+                if (const Received* a = g_anims[r.number].At(show_us[r.number])) {
                     r.anim = a->anim;
                     r.anim_serial = a->serial;
                 }

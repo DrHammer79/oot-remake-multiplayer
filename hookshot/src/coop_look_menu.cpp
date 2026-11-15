@@ -53,9 +53,10 @@ const char* Note(Part part) {
     case Part::mirror_rim: return "The red rim.";
     case Part::mirror_face: return "The mirror.";
     case Part::deku_shield: return "The whole shield: it is one piece of wood.";
+    // (issue #77: a coloured blade left the hilt blue; the hilt is the row below, the gold guard stays.)
     case Part::kokiri_blade:
-    case Part::master_blade:
-    case Part::biggoron_blade: return "The blade.";
+    case Part::biggoron_blade: return "The blade only: the grip is the Hilt below.";
+    case Part::master_blade: return "The blade only: the grip and wings are the Hilt below; the gold stays.";
     case Part::kokiri_hilt: return "The leather grip.";
     case Part::master_hilt: return "The blue grip and wings; the gold and the gem stay.";
     case Part::biggoron_hilt: return "The blue grip.";

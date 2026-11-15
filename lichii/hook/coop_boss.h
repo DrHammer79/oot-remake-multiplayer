@@ -270,6 +270,9 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<st
 
 // Network thread, from the session's on_event.
 void OnEvent(const coop::net::Event& event);
+// The host loaded a save (FLAG_RESET): the fights this session knew (beaten bosses, the heart
+// container's answer and cap, an intro in progress) are forgotten, as on a disconnect.
+void ForgetFights();
 
 // For /teleport (coop_teleport.h), present thread:
 // - our boss fight runs (its intro, fight or outro phase);

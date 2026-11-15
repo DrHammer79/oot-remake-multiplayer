@@ -325,7 +325,8 @@ TEST_CASE("hookshot: co-op draws over the picture through Hookshot's ImGui (chat
 TEST_CASE("hookshot: the chat box gets Hookshot's keys first, and the game none while it types") {
     const std::string patch = Patch();
     CHECK(patch.find("+        if (hos_coop_key((unsigned)wp, (lp & (1 << 30)) != 0)) {") != std::string::npos);
-    CHECK(patch.find("+        if (hos_coop_char((unsigned)wp)) return 0;") != std::string::npos);
+    // (Longshot rc.4 has its own WM_CHAR for the Insert menu's text fields: the module is asked first inside it)
+    CHECK(patch.find("+        if (!trail && hos_coop_char((unsigned)wp)) return 0;") != std::string::npos);
     CHECK(patch.find("+static int key(int vk) { return !rx_option(1, 0) && !hos_coop_keys_taken() &&") != std::string::npos);
     CHECK(patch.find("GetProcAddress(m, \"hos_coop_keys_taken\")") != std::string::npos);
     const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
@@ -346,13 +347,14 @@ TEST_CASE("hookshot: the mouse reaches the cheats panel first, a click it takes 
 
 TEST_CASE("hookshot: on Linux the window's keys, typed text and mouse reach co-op too (display_sdl.c)") {
     const std::string patch = Patch();
-    // SDL's text events (both SDLs' layouts) and text input started on the window.
-    CHECK(patch.find("+        case 0x303: {   /* (SDL_TextInputEvent: the text's pointer at 24") != std::string::npos);
-    CHECK(patch.find("+        memcpy(e->text, raw + 12, sizeof e->text - 1);") != std::string::npos);
-    CHECK(patch.find("+    hos_sdl_text_input(window);") != std::string::npos);
+    // SDL's text events are Longshot's own since rc.4 (hos_sdl.c); text input stays on while co-op has the keys.
+    CHECK(patch.find("+            const int text_wanted = hos_text_focus() || hos_coop_keys_taken();") != std::string::npos);
+    CHECK(patch.find("+            if (text_wanted != text_on) hos_sdl_text_input(window, text_on = text_wanted);") !=
+          std::string::npos);
+    CHECK(patch.find("diff --git a/host/hos_sdl.c") == std::string::npos);
     // Keys by virtual-key code first, text as code points, the mouse as on Windows.
     CHECK(patch.find("+                    if (cvk && hos_coop_key(cvk, e.repeat)) {") != std::string::npos);
-    CHECK(patch.find("+                    coop_text(e.text);") != std::string::npos);
+    CHECK(patch.find("+                    if (!hos_text_focus()) coop_text(e.text);") != std::string::npos);
     CHECK(patch.find("+                    else if (e.button == 1 && !mouse_captured && coop_mouse(e.x, e.y, 1)) {}") !=
           std::string::npos);
     // The key state for F6, F7 and the closing keys.

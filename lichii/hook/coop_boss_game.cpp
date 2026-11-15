@@ -19,6 +19,7 @@
 // We do the same from the cave.
 
 #include "coop_boss.h"
+#include "coop_boss_native.h"
 #include "coop_boss_scenes.h"
 #include "coop_live_events.h"
 #include "coop_objects.h"
@@ -436,6 +437,8 @@ Glue& TheGlue() {
 void Frame(Core::System& system, std::uint64_t main_base, const std::optional<std::string>& scene,
            const std::optional<coop::protocol::Vec3>& position, bool event_running, std::optional<bool> shut_in,
            coop::host::Session* session, std::uint64_t server_now_us) {
+    // Native boss sync: during our event a copy boss runs its own changes (the intro's, the death's; boss-fix).
+    CoopBossNative::TheTable().SetEvent(main_base != 0 && event_running);
     TheGlue().Frame(system, main_base, scene, position, event_running, shut_in, session, server_now_us);
 }
 
@@ -463,6 +466,14 @@ void OnEvent(const coop::net::Event& event) {
                      m->scene);
         }
     }
+}
+
+void ForgetFights() {
+    Glue& g = TheGlue();
+    g.sync.Reset();
+    g.scenes.Reset();
+    g.max_life_cap.reset();
+    LOG_INFO(Core, "coop: boss: the host loaded a save: the fights this session knew are forgotten");
 }
 
 void SetMaxLife(std::optional<std::int32_t> max_life) {

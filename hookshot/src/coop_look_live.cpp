@@ -641,6 +641,7 @@ namespace {
 
 std::mutex g_mutex;
 Orbit g_orbit;   // guarded
+Watch g_watch;   // guarded
 
 std::uint64_t NowMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -652,18 +653,39 @@ std::uint64_t NowMs() {
 constexpr float kHeightChild = 1.35f;
 constexpr float kHeightAdult = 1.9f;
 
-std::optional<Subject> OwnLink() {
+// Your own Link, or none; `showing` (when given) says which picture that makes.
+std::optional<Subject> OwnLink(Showing* showing = nullptr) {
     thread_local CoopHook::MapView view;   // (keeps its room: no allocation once filled)
-    if (!CoopHook::CurrentMapView(view) || view.event) {
-        return std::nullopt;
+    Showing s = Showing::flat_no_link;
+    std::optional<Subject> link;
+    if (CoopHook::CurrentMapView(view)) {
+        if (view.event) {
+            s = Showing::flat_event;
+        } else {
+            s = view.adult ? Showing::live_adult : Showing::live_child;
+            link = Subject{view.self, view.adult ? kHeightAdult : kHeightChild};
+        }
     }
-    return Subject{view.self, view.adult ? kHeightAdult : kHeightChild};
+    if (showing) {
+        *showing = s;
+    }
+    return link;
 }
 
 }  // namespace
 
 bool LinkShown() {
-    return OwnLink().has_value();
+    Showing showing = Showing::flat_no_link;
+    const bool shown = OwnLink(&showing).has_value();
+    std::optional<std::string> line;
+    {
+        std::lock_guard lock(g_mutex);
+        line = g_watch.Drawn(showing, NowMs());
+    }
+    if (line) {
+        LOG_INFO(Core, "{}", *line);
+    }
+    return shown;
 }
 
 void Ask(const Window& window) {
@@ -689,6 +711,7 @@ bool Camera(double eye[3], double target[3]) {
     if (!shot) {
         return false;
     }
+    g_watch.Framed(now);
     for (int i = 0; i < 3; ++i) {
         eye[i] = shot->eye[i];
         target[i] = shot->target[i];

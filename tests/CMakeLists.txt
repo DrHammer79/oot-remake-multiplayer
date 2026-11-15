@@ -20,8 +20,10 @@ add_executable(coop_tests
   net/clock_test.cpp
   net/client_test.cpp
   net/small_path_test.cpp
+  net/lag_path_test.cpp
   net/encrypt_loopback_test.cpp
   presence/presence_test.cpp
+  presence/show_delay_test.cpp
   voice/jitter_test.cpp
   voice/gate_test.cpp
   voice/spatial_test.cpp
@@ -52,6 +54,7 @@ add_executable(coop_tests
   lichii/fairy_test.cpp
   lichii/rooms_test.cpp
   lichii/objects_test.cpp
+  lichii/show_delay_test.cpp
   lichii/npc_anim_test.cpp
   lichii/spawn_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_spawn.cpp
   lichii/ride_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ride.cpp

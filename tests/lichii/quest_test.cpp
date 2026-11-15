@@ -96,8 +96,13 @@ TEST_CASE("quest: the step hashes are the step names, and each quest's steps are
         }
         for (const auto& r : q.rules) {
             CHECK(CoopQuest::Rank(q, r.step).has_value());
-            // Every rule flag is a shared story flag.
-            CHECK(CoopStory::Find(r.flag) != nullptr);
+            // Every rule flag is a shared story flag; a rule without one
+            // (the stones, issue 60) names the quests that must be Complete.
+            if (r.flag != 0) {
+                CHECK(CoopStory::Find(r.flag) != nullptr);
+            } else {
+                CHECK(r.done_a != 0);
+            }
         }
     }
     const auto& g = Q("Goto_HyruleCastle");
@@ -415,19 +420,20 @@ TEST_CASE("quest: a player in a boss fight or minigame step is never moved out o
     CHECK(c.Step(g.m, false, 0, kMain).has_value());
 }
 
-TEST_CASE("quest: only Get_StoneOfFire goes to the live manager, and only from KakarikoVillageNpc") {
+TEST_CASE("quest: Get_StoneOfFire and DoorOfTime go to the live manager, each from its floor") {
     Game g;
     const auto& f = Q("Get_StoneOfFire");
+    const auto& d = Q("DoorOfTime");
     for (const auto& q : CoopQuest::Quests()) {
         g.enums[q.hash] = q.steps[q.steps.size() - 2];  // every quest far along
     }
     for (const auto& q : CoopQuest::Quests()) {
         const auto w = CoopQuest::LiveWant(q, g.value);
-        CHECK_MESSAGE(w.has_value() == (q.hash == f.hash), q.name);
+        CHECK_MESSAGE(w.has_value() == (q.hash == f.hash || q.hash == d.hash), q.name);
         if (w) {
-            CHECK(w->challenge == Hash("Get_StoneOfFire"));
-            CHECK(w->step == g.enums[f.hash]);
-            CHECK(w->steps.size() == f.steps.size());
+            CHECK(w->challenge == Hash(q.name));
+            CHECK(w->step == g.enums[q.hash]);
+            CHECK(w->steps.size() == q.steps.size());
         }
     }
     g.enums[f.hash] = Hash("Ready");  // below the floor: not B's quest yet
@@ -438,4 +444,87 @@ TEST_CASE("quest: only Get_StoneOfFire goes to the live manager, and only from K
     CHECK_FALSE(CoopQuest::LiveWant(f, g.value).has_value());
     g.enums.erase(f.hash);  // unread
     CHECK_FALSE(CoopQuest::LiveWant(f, g.value).has_value());
+    // DoorOfTime from the stone steps on: Step01 and Step02 stay GameData only
+    // (each player meets Impa, who moves the manager herself).
+    for (const char* s : {"NotReady", "Step01", "Step02"}) {
+        g.enums[d.hash] = Hash(s);
+        CHECK_MESSAGE(!CoopQuest::LiveWant(d, g.value).has_value(), s);
+    }
+    for (const char* s : {"Step2_1", "Step2_2", "Step03"}) {
+        g.enums[d.hash] = Hash(s);
+        const auto w = CoopQuest::LiveWant(d, g.value);
+        REQUIRE_MESSAGE(w.has_value(), s);
+        CHECK(w->challenge == Hash("DoorOfTime"));
+        CHECK(w->step == Hash(s));
+    }
+    // Step04 (Zelda's escape) is a held step: never asked of the manager.
+    CHECK(CoopQuest::HeldStep(Hash("DoorOfTime"), Hash("Step04")));
+}
+
+TEST_CASE("quest: the Spiritual Stones move DoorOfTime on, as DoorOfTime_CheckStoneNum (issue 60)") {
+    const auto& g = Q("Goto_HyruleCastle");
+    const auto& d = Q("DoorOfTime");
+    const auto& f = Q("Get_StoneOfFire");
+    const std::uint32_t water = 0x5bca02a6u;
+    CHECK(Hash("Step_Get_StoneOfWater") == water);
+    // B met Zelda and was sent off by Impa, then stayed in Hyrule Field while
+    // A got both stones. The stones are shared quests: B's are Complete, but
+    // CheckStoneNum runs only in each dungeon's escape, which B never played.
+    Game b;
+    b.enums[g.hash] = Hash("Complete");
+    b.enums[d.hash] = Hash("Step02");
+    b.enums[f.hash] = Hash("DeathMtTrailIn");
+    b.enums[water] = Hash("Step07");
+    b.Frame();
+    CHECK(b.enums[d.hash] == Hash("Step02"));  // no stone yet
+    b.enums[f.hash] = Hash("Complete");
+    b.Frame();
+    CHECK(b.enums[d.hash] == Hash("Step2_1"));  // the Goron Ruby
+    b.enums[water] = Hash("Complete");
+    b.Frame();
+    CHECK(b.enums[d.hash] == Hash("Step03"));  // all three: Zelda's escape can start
+    // The water stone alone gives Step2_2.
+    Game c;
+    c.enums[g.hash] = Hash("Complete");
+    c.enums[d.hash] = Hash("Step02");
+    c.enums[f.hash] = Hash("Ready");
+    c.enums[water] = Hash("Complete");
+    c.Frame();
+    CHECK(c.enums[d.hash] == Hash("Step2_2"));
+    // Never lowered: a player past the escape keeps their step.
+    Game e;
+    e.enums[g.hash] = Hash("Complete");
+    e.enums[d.hash] = Hash("Step05");
+    e.enums[f.hash] = Hash("Complete");
+    e.enums[water] = Hash("Complete");
+    e.Frame();
+    CHECK(e.enums[d.hash] == Hash("Step05"));
+    // Not before our own meeting with Zelda (Goto_HyruleCastle Complete).
+    Game n;
+    n.enums[g.hash] = Hash("Step03");
+    n.enums[d.hash] = Hash("NotReady");
+    n.enums[f.hash] = Hash("Complete");
+    n.enums[water] = Hash("Complete");
+    n.Frame();
+    CHECK(n.enums[d.hash] == Hash("NotReady"));
+    // An unread stone quest moves nothing.
+    Game u;
+    u.enums[g.hash] = Hash("Complete");
+    u.enums[d.hash] = Hash("Step02");
+    u.enums[f.hash] = Hash("Complete");
+    u.Frame();
+    CHECK(u.enums[d.hash] == Hash("Step2_1"));
+}
+
+TEST_CASE("quest: the live step is read from the game's ChallengeMgr, not GameData (issue 58)") {
+    Mgr g("KakarikoVillageNpc");
+    const CoopQuest::ReadMemory read = [&g](std::uint64_t a, void* out, std::size_t n) { return g.m.Read(a, out, n); };
+    CHECK(CoopQuest::LiveStep(read, kMain, Hash("Get_StoneOfFire")) == Hash("KakarikoVillageNpc"));
+    CHECK_FALSE(CoopQuest::LiveStep(read, kMain, Hash("Get_StoneOfWater")));  // not in this manager
+    CHECK_FALSE(CoopQuest::LiveStep(read, 0, Hash("Get_StoneOfFire")));
+    Memory none;  // no game loaded: no manager
+    const CoopQuest::ReadMemory nothing = [&none](std::uint64_t a, void* out, std::size_t n) {
+        return none.Read(a, out, n);
+    };
+    CHECK_FALSE(CoopQuest::LiveStep(nothing, kMain, Hash("Get_StoneOfFire")));
 }

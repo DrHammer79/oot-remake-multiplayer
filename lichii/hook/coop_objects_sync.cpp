@@ -334,6 +334,13 @@ bool NativeOnlyName(std::string_view name) {
 }
 
 LifeRouted RouteLife(const LifeAsk& a) {
+    if (a.heal) {
+        // Only through the game's own Life step (a negative sum), never a write; nothing to do when not lower.
+        if (a.step_seen && a.has_component && a.old >= 0 && a.life > a.old) {
+            return {LifeRoute::step, a.old - a.life};  // (a stale give was taken back: the whole raise again)
+        }
+        return {LifeRoute::lost, 0};
+    }
     if (a.hurt > 0 && a.replay_on && !a.direct && a.has_player) {
         return {LifeRoute::replay, a.hurt};
     }
@@ -842,6 +849,11 @@ std::optional<std::uint8_t> Sync::OwnerOf(std::uint64_t address) const {
         return std::nullopt;
     }
     return owner->second.player;
+}
+
+bool Sync::OwnerSaysDead(std::uint64_t address) const {
+    const auto it = objects_.find(address);
+    return it != objects_.end() && (it->second.dead_at != 0 || it->second.owner_life_zero);
 }
 
 std::vector<std::pair<std::uint64_t, std::string>> Sync::Owned() const {
@@ -1990,7 +2002,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                        now_seen.contains(address) && Distance(o.position, *player_) <= wake_m &&
                        !o.received.empty() && now_us >= o.received.back().time &&
                        now_us - o.received.back().time <= kPoseStaleUs &&
-                       !(o.react_at != 0 && now_us < o.react_at + kReactHoldUs)) {
+                       !(o.react_at != 0 && now_us < o.react_at + AnswerHoldUs(kReactHoldUs, owner->second.player))) {
                 // A copy near our Link whose own AI plays something else than
                 // the owner's enemy (issue 132): it wants to act on our Link.
                 const auto& wanted = o.received.back().animation;
@@ -2444,15 +2456,20 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                 continue;
             }
             const std::int32_t life = sample->state.life->life;
+            o->owner_life_zero = life <= 0;
             const std::int32_t have = o->hurt_until != 0 ? o->hurt_target : *o->life;
-            const bool holding = o->hit_sum > 0 || now_us - o->hit_at < kHitHoldUs;
+            const bool holding =
+                o->hit_sum > 0 || now_us - o->hit_at < AnswerHoldUs(kHitHoldUs, sample->player_number);
             if (life < have) {
                 // Who hit it is not sent: its owner is the best guess.
                 Lower(*o, life, now_us, writes, sample->player_number);
                 o->fight_until = now_us + kFightUs;
             } else if (life > have && !holding && have <= 0 && o->killed_at != 0 &&
                        now_us - o->killed_at < kKilledKeepUs && o->dead_at == 0 &&
-                       o->resent < kResendMax) {
+                       o->resent < kResendMax && !IsBoss(o->name)) {
+                // (never a boss: its DAMAGE resent would be the copy's whole life in one hit, the owner's
+                // weak point bypassed (seed N2BTEYKM: Barinade's instant death). A boss copy is held at
+                // life 1 by its own Life step and dies with its owner's: CoopBossNative HeldLifeStep.)
                 // We killed it here and the owner's enemy still lives (the
                 // DAMAGE was lost, or crossed a change of owner): not healed
                 // back, the hit is sent again (issue 133). After kResendMax
@@ -2524,8 +2541,24 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
         } else if (const auto* handed = std::get_if<proto::HandoverState>(&m)) {
             Object* o = find(handed->id);
             // The lower life of the two, so an enemy never heals across a
-            // hand-over. Its place stays our own enemy's.
-            if (o != nullptr && handed->state.life && o->life &&
+            // hand-over. Its place stays our own enemy's. A boss is the
+            // exception: one boss death for everyone holds a copy at 1 (and
+            // its own hits lowered it where the owner refused them), so it
+            // takes the old owner's life, raised through its own Life step.
+            if (o != nullptr && handed->state.life && o->life && IsBoss(o->name) &&
+                handed->state.life->life > *o->life && handed->state.life->life > 0) {
+                LifeWrite raise;
+                raise.address = o->address;
+                raise.life = handed->state.life->life;
+                raise.heal = true;
+                writes.push_back(raise);
+                notes_.emplace_back("ours now with less life than its old owner's (" + std::to_string(*o->life) +
+                                    " < " + std::to_string(handed->state.life->life) +
+                                    "): raised through its own Life step: " + o->name);
+                o->life = handed->state.life->life;
+                o->hurt_left = 0;
+                o->hurt_until = 0;
+            } else if (o != nullptr && handed->state.life && o->life &&
                 handed->state.life->life < *o->life) {
                 write(*o, handed->state.life->life);
                 if (handed->state.life->life <= 0) {
@@ -2592,7 +2625,6 @@ void Sync::Lower(Object& o, std::int32_t life, std::uint64_t now_us,
 }
 
 void Sync::Poses(std::uint64_t now_us, std::vector<PoseWrite>& out) const {
-    const std::uint64_t t = now_us > kBehindUs ? now_us - kBehindUs : 0;
     for (const auto& [address, o] : objects_) {
         if (o.received.empty() || now_us < o.received.back().time ||
             now_us - o.received.back().time > kPoseStaleUs) {
@@ -2602,6 +2634,9 @@ void Sync::Poses(std::uint64_t now_us, std::vector<PoseWrite>& out) const {
         if (owner == owners_.end() || owner->second.player == 0 || owner->second.player == self_) {
             continue;
         }
+        // Shown as late as its owner's puppet (report 37: that owner's delay, coop_show_delay.h).
+        const std::uint64_t behind = BehindUs(owner->second.player);
+        const std::uint64_t t = now_us > behind ? now_us - behind : 0;
         PoseWrite w;
         w.address = address;
         const Received& last = o.received.back();
@@ -2744,15 +2779,15 @@ void Sync::Plays(std::uint64_t now_us, std::vector<PlayWish>& out) const {
         // Just hit here: the copy's own game shows the hit. The owner's
         // animation from before the hit waits; its next one (its own
         // reaction to our DAMAGE) is played as usual.
-        if (o.react_at != 0 && now_us < o.react_at + kReactHoldUs &&
+        if (o.react_at != 0 && now_us < o.react_at + AnswerHoldUs(kReactHoldUs, owner->second.player) &&
             wanted->name == o.react_over) {
             continue;
         }
         const float rate = std::isfinite(wanted->rate) && wanted->rate > 0.0f ? wanted->rate : 1.0f;
-        // Shown kBehindUs late, as the pose; no further ahead than a pose is.
-        const std::int64_t age = std::clamp<std::int64_t>(
-            static_cast<std::int64_t>(now_us - last.time) - static_cast<std::int64_t>(kBehindUs),
-            -static_cast<std::int64_t>(kBehindUs), static_cast<std::int64_t>(kExtrapolateUs));
+        // Shown as late as the pose (its owner's delay); no further ahead than a pose is.
+        const auto behind = static_cast<std::int64_t>(BehindUs(owner->second.player));
+        const std::int64_t age = std::clamp<std::int64_t>(static_cast<std::int64_t>(now_us - last.time) - behind,
+                                                          -behind, static_cast<std::int64_t>(kExtrapolateUs));
         out.push_back({address, wanted->name, rate, FrameAfter(wanted->frame, rate, age),
                        last.time, 0, {}});
         if (o.play_frame) {

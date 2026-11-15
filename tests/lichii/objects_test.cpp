@@ -5,6 +5,7 @@
 #include <ostream>  // doctest prints string_view through it
 
 #include <cstring>
+#include <algorithm>
 #include <array>
 #include <map>
 #include <optional>
@@ -4189,4 +4190,70 @@ TEST_CASE("objects: a copy dead here whose owner still lives after the resends i
         CHECK(Tick(sync, t * kMs, {Enemy(0x100, 0x11, 0)}).writes.empty());
     }
     CHECK(sync.SplitKills() == 1);
+}
+
+TEST_CASE("objects: a boss heal goes only through the game's Life step, as a negative sum") {
+    using CoopObjects::LifeAsk;
+    using CoopObjects::LifeRoute;
+    using CoopObjects::RouteLife;
+    LifeAsk a;
+    a.native = true;
+    a.heal = true;
+    a.life = 21;
+    a.old = 1;
+    a.step_seen = true;
+    a.has_component = true;
+    auto r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == -20);
+    a.stale = -20;  // the earlier raise was never taken: taken back, the whole raise again
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == -20);
+    a.old = 21;  // already there: nothing
+    CHECK(RouteLife(a).route == LifeRoute::lost);
+    a.old = 1;
+    a.step_seen = false;  // no Life step hook: never a write
+    CHECK(RouteLife(a).route == LifeRoute::lost);
+}
+
+TEST_CASE("objects: a boss copy held at 1 that becomes ours takes its old owner's life") {
+    const std::string kBoss = "Enemy_DungeonBoss_Gohma";
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 21, 50.0f, kBoss)});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 2);
+    // Held at 1 here (HeldLifeStep) while the owner's boss is at 21.
+    Tick(sync, 100 * kMs, {Enemy(0x100, 0x11, 1, 50.0f, kBoss)});
+    proto::HandoverState h;
+    h.player_number = 2;
+    h.id = id;
+    h.epoch = 1;
+    h.state.life = proto::ObjectLife{21, 21};
+    sync.Receive(h);
+    Own(sync, id, 1, 1);
+    const auto step = Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 1, 50.0f, kBoss)});
+    const auto raise = std::find_if(step.writes.begin(), step.writes.end(),
+                                    [](const CoopObjects::LifeWrite& w) { return w.heal; });
+    REQUIRE(raise != step.writes.end());
+    CHECK(raise->address == 0x100);
+    CHECK(raise->life == 21);
+    CHECK(raise->hurt == 0);
+    CHECK_FALSE(raise->direct);
+}
+
+TEST_CASE("objects: an enemy that is not a boss still never heals across a hand-over") {
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 1, 50.0f)});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 2);
+    proto::HandoverState h;
+    h.player_number = 2;
+    h.id = id;
+    h.epoch = 1;
+    h.state.life = proto::ObjectLife{2, 2};
+    sync.Receive(h);
+    Own(sync, id, 1, 1);
+    const auto step = Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 1, 50.0f)});
+    CHECK(std::none_of(step.writes.begin(), step.writes.end(), [](const CoopObjects::LifeWrite& w) { return w.heal; }));
 }

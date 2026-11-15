@@ -11,9 +11,11 @@
 // that come are only compared with an empty list of our own.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "coop/protocol/messages.hpp"
@@ -33,6 +35,19 @@ namespace CoopModShare {
 // file plays the same; the Mods tab shows it).
 std::vector<std::string> Compare(const coop::protocol::ModList& host, const coop::protocol::ModList& mine,
                                  std::size_t max = 6);
+
+// A randomizer seed's mod id (the folder OOTRR builds, randomizer-<seed word>; its id is the folder's name in lower
+// case).
+bool IsSeedId(std::string_view id);
+// The host's randomizer seed that a player's list lacks (#59: guests whose game could not build it played the base
+// game, another world, and nobody knew): its seed word in capitals; empty when the host plays no seed or the player
+// has it.
+std::string SeedMissing(const coop::protocol::ModList& host, const coop::protocol::ModList& theirs);
+// The chat lines for it: to the host and the other players (about player `number`, `name` may be empty), to the
+// player itself, and when the player has the seed after all.
+std::string SeedlessLine(std::uint8_t number, std::string_view name, std::string_view seed);
+std::string SeedlessMineLine(std::string_view seed);
+std::string SeedBackLine(std::uint8_t number, std::string_view name);
 
 struct Provider {
     // This game's list once its mods are hashed (any thread, often: cheap); nullopt until then.

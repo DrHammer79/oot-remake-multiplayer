@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <string>
 
 #include "coop_look_view.h"
 
@@ -127,4 +128,59 @@ TEST_CASE("look view: a square that is not one is not asked for") {
     Orbit orbit;
     orbit.Ask(Window{}, 1000);
     CHECK_FALSE(orbit.Asked(1000));
+}
+
+TEST_CASE("look view: the log says the page's picture once per change and per opening") {
+    using CoopLookView::Showing;
+    CoopLookView::Watch watch;
+    const auto first = watch.Drawn(Showing::live_child, 1000);
+    REQUIRE(first);
+    CHECK(first->find("child") != std::string::npos);
+    watch.Framed(1010);
+    CHECK_FALSE(watch.Drawn(Showing::live_child, 1016));   // the same picture: nothing
+    CHECK_FALSE(watch.Drawn(Showing::live_child, 1032));
+    // Our event starts: said once, with why.
+    const auto event = watch.Drawn(Showing::flat_event, 1048);
+    REQUIRE(event);
+    CHECK(event->find("event") != std::string::npos);
+    CHECK_FALSE(watch.Drawn(Showing::flat_event, 1064));
+    // The page left (not drawn for more than kHoldMs) and opened again: said again.
+    const auto again = watch.Drawn(Showing::flat_event, 1064 + CoopLookView::kHoldMs + 1);
+    REQUIRE(again);
+    const auto adult = watch.Drawn(Showing::live_adult, 1400);
+    REQUIRE(adult);
+    CHECK(adult->find("adult") != std::string::npos);
+    const auto no_link = watch.Drawn(Showing::flat_no_link, 1416);
+    REQUIRE(no_link);
+    CHECK(no_link->find("no Link") != std::string::npos);
+}
+
+TEST_CASE("look view: a live picture whose camera is never framed is said once") {
+    using CoopLookView::Showing;
+    CoopLookView::Watch watch;
+    const std::uint64_t step = 16, unframed = CoopLookView::Watch::kUnframedMs;
+    REQUIRE(watch.Drawn(Showing::live_adult, 1000));
+    std::uint64_t now = 1000 + step;
+    for (; now < 1000 + unframed; now += step) {
+        CHECK_FALSE(watch.Drawn(Showing::live_adult, now));
+    }
+    const auto said = watch.Drawn(Showing::live_adult, 1000 + unframed);
+    REQUIRE(said);
+    CHECK(said->find("not framed") != std::string::npos);
+    CHECK_FALSE(watch.Drawn(Showing::live_adult, 1000 + unframed + step));   // once
+    // Framed by the game: never said.
+    CoopLookView::Watch framed;
+    REQUIRE(framed.Drawn(Showing::live_child, 1000));
+    for (now = 1000 + step; now < 1000 + 2 * unframed; now += step) {
+        framed.Framed(now - 8);
+        CHECK_FALSE(framed.Drawn(Showing::live_child, now));
+    }
+    // A camera framed before this opening does not count for it.
+    CoopLookView::Watch old;
+    old.Framed(500);
+    REQUIRE(old.Drawn(Showing::live_child, 1000));
+    for (now = 1000 + step; now < 1000 + unframed; now += step) {
+        CHECK_FALSE(old.Drawn(Showing::live_child, now));
+    }
+    CHECK(old.Drawn(Showing::live_child, 1000 + unframed));
 }

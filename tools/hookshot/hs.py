@@ -55,15 +55,21 @@ CACHE_GAME = "game"
 CACHE_NAME = re.compile(r"^[0-9a-f]{20}(\.part|\.build)?$")
 # Caches the game writes while it runs (shaders, pipelines): copied into a pair that has none, never overwritten,
 # except when the pair's game was built from another stamp (cache_restore): then they are another build's.
+# Longshot rc.4 keeps them in a cache\ folder beside longshot.exe (CACHE_DIR), with its own names for some
+# (longshot_vk_pipelines*, longshot_compute_variants, longshot_module_ids); the game build already fills part of it.
 RUNTIME_CACHE = re.compile(r"^(longshot_(pipelines|pipeline_states|programs|shaders|computes|prepared)\.(bin|idx)"
                            r"|longshot_pipelines\.bin\.(built|predicted)|longshot_damaged_files\.txt"
-                           r"|mkw_vk_pipelines(_play_\d+)?\.bin)$", re.I)
+                           r"|longshot_(compute_variants|module_ids)\.bin|longshot_vk_pipelines(_play_\d+)?\.bin"
+                           r"|longshot_vk_pipelines\.stamp|mkw_vk_pipelines(_play_\d+)?\.bin)$", re.I)
+CACHE_DIR = "cache"
 # What one start's shader preparation leaves (warmup): the noted pipelines built into the pipeline cache. The game build
 # prepares in a separate process that does not write longshot_pipelines.bin.built (on NVIDIA that process's pipeline
 # cache does not answer the game's), so each new game folder's first start builds every noted pipeline (35269, about
 # 18 min; six at once took 9+ min per load in wave 1). One pair warmed, these files go to the others and the cache.
 WARM_FILES = re.compile(r"^(longshot_pipelines\.bin(\.built|\.predicted)?|longshot_(pipeline_states|computes|prepared)\.bin"
-                        r"|longshot_programs\.(bin|idx)|mkw_vk_pipelines(_play_\d+)?\.bin)$", re.I)
+                        r"|longshot_programs\.(bin|idx)|mkw_vk_pipelines(_play_\d+)?\.bin"
+                        r"|longshot_(compute_variants|module_ids)\.bin|longshot_vk_pipelines(_play_\d+)?\.bin"
+                        r"|longshot_vk_pipelines\.stamp)$", re.I)
 WARM_DONE = "vk: start-up: the shaders took"
 
 
@@ -180,10 +186,10 @@ def find_exe(folder):
     return None
 
 
-def copy_tree(src, dst, skip_top=PER_PLAYER, dry=False, say=print, runtime_too=False):
+def copy_tree(src, dst, skip_top=PER_PLAYER, dry=False, say=print, runtime_too=False, in_cache=False):
     """Copies src into dst: new or changed files (size or mtime) only, links recreated as links (never followed),
-    the top-level names in skip_top left alone on both sides; dst's runtime caches kept unless runtime_too.
-    Returns (files copied, links made)."""
+    the top-level names in skip_top left alone on both sides; dst's runtime caches (at the top, or in the top's
+    cache folder: in_cache) kept unless runtime_too. Returns (files copied, links made)."""
     copied = links = 0
     for name in sorted(os.listdir(src)):
         if name.lower() in skip_top:
@@ -200,11 +206,12 @@ def copy_tree(src, dst, skip_top=PER_PLAYER, dry=False, say=print, runtime_too=F
         elif os.path.isdir(s):
             if not dry:
                 os.makedirs(d, exist_ok=True)
-            c, n = copy_tree(s, d, set(), dry, say, runtime_too)
+            c, n = copy_tree(s, d, set(), dry, say, runtime_too,
+                             in_cache=skip_top is PER_PLAYER and name.lower() == CACHE_DIR)
             copied, links = copied + c, links + n
         else:
             if os.path.isfile(d) and not is_link(d):
-                if skip_top is PER_PLAYER and RUNTIME_CACHE.match(name) and not runtime_too:
+                if (skip_top is PER_PLAYER or in_cache) and RUNTIME_CACHE.match(name) and not runtime_too:
                     continue
                 a, b = os.stat(s), os.stat(d)
                 if a.st_size == b.st_size and int(a.st_mtime) == int(b.st_mtime):
@@ -293,9 +300,10 @@ def cache_restore(dst, repo=REPO, dry=False, say=print):
 
 
 def warm_dir(folder):
-    """Where a game folder's caches are: beside its longshot.exe."""
+    """Where a game folder's caches are: beside its longshot.exe, or in the cache folder there (Longshot rc.4)."""
     exe = find_exe(folder)
-    return os.path.dirname(exe) if exe else folder
+    d = os.path.dirname(exe) if exe else folder
+    return os.path.join(d, CACHE_DIR) if os.path.isdir(os.path.join(d, CACHE_DIR)) else d
 
 
 def warm_files(folder):

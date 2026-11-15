@@ -486,3 +486,34 @@ TEST_CASE("boss scenes: the cap's base is our maximum when the death was heard, 
     CHECK(out.max_life_cap == std::optional<std::int32_t>(16));
     CHECK(out.claims.empty());
 }
+
+TEST_CASE("boss scenes: the boss's own start of the fight is never skipped (player report #30)") {
+    // The 0.11.0 run: our intro (seen without a name) ended, then Gohma's own logic asked
+    // InsideTheDekuTree_BossAppear in our game; it was force-skipped as a late arrival's.
+    Director b;
+    std::vector<Request> seen{Request{"Dm_Deku_BossIn", true, true}};
+    b.Tick(At(kInRoom, 1, true), seen, 1'000'000);
+    b.Tick(At(kInRoom, 1, true), {}, 2'000'000);
+    b.Tick(At(kInRoom, 1, false), {}, 10'000'000);  // ours is over: the fight is on
+    REQUIRE(b.phase(kGohma) == Phase::fight);
+    Actions out = b.Tick(At(kInRoom, 1, true), Took("InsideTheDekuTree_BossAppear"), 11'000'000);
+    CHECK_FALSE(out.skip);
+    CHECK_FALSE(b.Tick(At(kInRoom, 1, true), {}, 11'200'000).skip);
+    // The flow itself, late: still skipped as before.
+    Director late;
+    late.Receive(Scene(2, kGohma, proto::BossSceneKind::intro_start, kInRoom));
+    late.Tick(At(kFar, 1), {}, 1'000'000);
+    late.Receive(Scene(2, kGohma, proto::BossSceneKind::intro_end, kInRoom));
+    late.Tick(At(kFar, 1), {}, 20'000'000);
+    CHECK(late.Tick(At(kInRoom, 1, true), Took("Dm_Deku_BossIn"), 30'000'000).skip);
+}
+
+TEST_CASE("boss scenes: a follower's own BossAppear plays out when the starter's intro ends") {
+    Director b;
+    b.Receive(Scene(2, kGohma, proto::BossSceneKind::intro_start, kInRoom));
+    b.Tick(At(kInRoom, 1), {}, 1'000'000);
+    b.Tick(At(kInRoom, 1, true), Took("InsideTheDekuTree_BossAppear"), 1'500'000);
+    b.Receive(Scene(2, kGohma, proto::BossSceneKind::intro_end, kInRoom));
+    CHECK_FALSE(b.Tick(At(kInRoom, 1, true), {}, 5'000'000).skip);
+    CHECK(b.phase(kGohma) == Phase::fight);
+}

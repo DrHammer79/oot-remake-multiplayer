@@ -30,11 +30,19 @@ namespace {
 //   - DoorOfTime (time travel stays each game's own, docs/flags.md), AllSage
 //     (the Chamber of Sages; its Step01_00_01 to _03 are not in an order),
 //     Defeat_Ganon and EscapeFromCrumblingGanonCastle (the final battle).
-//   - for now, Get_StoneOfFire, SageOfShadow, SageOfSpirit and SageOfWater:
-//     their RawValues look out of order or branched (KokiriForestFire before
-//     KokiriForestIn, GotGlassTruth before GetGlassTruth, Step07 before
-//     Step07_pre00, Step07_1_Safety), and with the max rule a wrong order skips
-//     a step. Back in once checked against their event flows.
+//   - for now, SageOfShadow, SageOfSpirit and SageOfWater: their RawValues
+//     look out of order or branched (GotGlassTruth before GetGlassTruth,
+//     Step07 before Step07_pre00, Step07_1_Safety), and with the max rule a
+//     wrong order skips a step. Back in once checked against their event flows.
+//
+// Get_StoneOfFire (the Goron Ruby) is shared since issue 60: its RawValues are
+// the RSDB row's steps in the story's order (KokiriForestFire before
+// KokiriForestIn is the story: Darunia sends Link to Saria), set one after the
+// other by its event flows. Left out, a player who was not there for Darunia
+// never got Complete, and Get_StoneOfFire_IsCompleted_Exp is what the Door of
+// Time's DoorOfTime_CheckStoneNum reads (CoopQuest then moves DoorOfTime on).
+// Floor Ready: Ready comes from the game's quest manager, never from a scene,
+// so only a game still at NotReady (a new save's opening) is left alone.
 //
 // Get_Epona (0x92431c55, not listed in the tab) is shared by its end only
 // (Quest::complete_only): its steps are one player's own (the song as a
@@ -48,6 +56,13 @@ namespace {
 // raises DoorOfTime from our Goto_HyruleCastle; both only raise.
 const std::vector<Quest>& Table() {
     static const std::vector<Quest> kQuests = {
+        {0x1002b466u, "Get_StoneOfFire",
+         {"NotReady", "Ready", "KakarikoVillageNpc", "KakarikoVillageLetter", "DeathMtTrailIn",
+          "DeathMtTrailNpc", "GoronCityIn", "GoronCityDarniaroomNpcTalk01", "GoronCityDarniaroomOpen",
+          "GoronCityDarniaTalk", "DarniaRoomKokiriTalk", "KokiriForestNPCTalk", "KokiriForestFire",
+          "KokiriForestIn", "SariaMelodyGet", "SariaMelodyPlay", "DodongoCavernOpne", "DungeonStart",
+          "BossBattle", "EscapeDungeon", "Complete"},
+         1},  // floor: Ready (the manager's own, never a scene's)
         {0x3372689bu, "Meet_DekuTree", {"NotReady", "Ready", "Step01", "Step02", "Step03", "Complete"}},
         {0x44063c4eu, "SubEvent_GetMelodySun", {"NotReady", "Ready", "GetMelodySun", "Complete"}},
         {0x5bca02a6u, "Get_StoneOfWater",

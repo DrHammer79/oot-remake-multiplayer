@@ -41,7 +41,8 @@ namespace {
 // world: named flags that an overworld placement's `Presence` tests (Banc),
 //   one by one: the Kokiri who blocks the forest exit and the invisible wall
 //   with it (KokiriForest_Npc_Kokiri_007_Child_Blocker_00), Mido's blockers,
-//   Jabu-Jabu's mouth, Kakariko's ladder and well water, Lake Hylia's ice,
+//   Jabu-Jabu's mouth, Zora's River waterfall, Kakariko's ladder and well
+//   water, Lake Hylia's ice,
 //   the royal tomb, the Death Mountain gate guard, Talon and Malon, the
 //   Gerudo carpenters, the light prelude, the owl at Lake Hylia.
 //   Left out: minigames, the scarecrow, Gossip Stone fairies, where one
@@ -182,6 +183,11 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0xa0c96073u, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Sun_08"},
     {0xa1d82e4fu, Kind::scene, "HavePlayedEvent.Dm_HrlField_0005"},
     {0xa1eb22e6u, Kind::world, "LostWood_Npc_Kokiri_Blocker"},
+    // Zora's River waterfall, opened by Zelda's Lullaby (issue 61): the flow
+    // StoneOfWater_WaterfallSplit sets it, then plays Dm_ZoraRiver_0010 (a
+    // shared scene); Logic/ZoraRiver_Common_39bb opens the falls from it (and
+    // from its _Adult twin, for the adult river).
+    {0xa426db4bu, Kind::world, "Zorariver_TheWaterfallsplits_Adult"},
     {0xa49cb68cu, Kind::world, "JabJabOpenedMouth"},
     {0xa5d8b51du, Kind::scene, "HavePlayedEvent.Dm_LonLon_0030"},
     {0xa66e1d49u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0120"},
@@ -259,6 +265,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0xef98d829u, Kind::scene, "HavePlayedEvent.KokiriForest_Meet_DekuTree_MeetDekuTree_01"},
     {0xf07a3be3u, Kind::scene, "HavePlayedEvent.Dm_HrlCastle_0030"},
     {0xf0fde374u, Kind::world, "KokiriForest_Npc_Kokiri_007_Child_Blocker"},
+    {0xf16a3d82u, Kind::world, "Zorariver_TheWaterfallsplits"},  // issue 61, above
     {0xf1826d42u, Kind::scene, "HavePlayedEvent.Dm_LonLon_0020"},
     {0xf38be607u, Kind::scene, "HavePlayedEvent.Dm_Kakariko_0000"},
     {0xf5be8a94u, Kind::world, "Npc_Hylia_009_Child_IsStormSongPlayed"},

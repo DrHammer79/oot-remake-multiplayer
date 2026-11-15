@@ -155,10 +155,11 @@ public:
     // idle-twitch: a received pose (the bones sent) filled (Fill), its slow bones eased
     // (kRampAfterMs), and pushed. Returns how many bones are being eased.
     std::size_t Add(Pose sent, std::uint64_t now_ms, std::uint64_t made_ms);
-    // The pose to show at now_ms. Timed: the one at now_ms - kShowDelayMs,
+    // The pose to show at now_ms. Timed: the one at now_ms - delay_ms (the
+    // player's delay, coop_show_delay.h; report 37),
     // the two around it blended. Untimed: one interval behind, the last two
     // blended, so a 30 Hz stream plays smooth at 60 frames a second.
-    std::optional<Pose> At(std::uint64_t now_ms) const;
+    std::optional<Pose> At(std::uint64_t now_ms, std::uint64_t delay_ms = kShowDelayMs) const;
     std::uint64_t last_ms() const { return newest_ms_; }
     bool Timed() const { return !timed_.empty(); }
     std::size_t Eased() const { return ramps_.size(); }  // idle-twitch: slow bones being eased

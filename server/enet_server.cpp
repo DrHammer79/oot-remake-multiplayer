@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "coop/net/enet_path.hpp"
+#include "coop/net/enet_throttle.hpp"
 #include "coop/net/enet_waiting.hpp"
 
 namespace coop::server {
@@ -184,6 +185,7 @@ void EnetServer::handle(const ENetEvent& event) {
       }
       event.peer->data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(id));
       enet_peer_timeout(event.peer, 0, kPeerTimeoutMs, kPeerTimeoutMs);
+      net::steady_throttle(event.peer);  // report 37: also for a game that does not ask
       peers_[id] = event.peer;
       break;
     }

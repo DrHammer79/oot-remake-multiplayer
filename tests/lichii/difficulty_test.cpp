@@ -1043,6 +1043,10 @@ TEST_CASE("difficulty: bosses and mini-bosses scale by the boss values") {
   // Automatic, 4 players: enemies life 220%, bosses 400% and damage 160%.
   const Values four = proto::auto_difficulty(4);
   CHECK(kinds->Step(kBossLife, 8, four, 0, attacker_of) == 2);
+  // Traced apart for the log (boss life scaling): one step, 8 in, 2 taken.
+  CHECK(kinds->BossSteps() == 1);
+  CHECK(kinds->BossDamageIn() == 8);
+  CHECK(kinds->BossDamageTaken() == 2);
   CHECK(kinds->Step(kLinkLife, 5, four, 0, attacker_of) == 8);  // 5 x 1.6
   // 16 players, the most: 1600% life (a sixteenth of each hit), 400% damage; no overflow.
   const Values sixteen = proto::auto_difficulty(16);

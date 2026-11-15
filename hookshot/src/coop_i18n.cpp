@@ -888,7 +888,7 @@ int MenuLanguageAfterRead(int last, std::string_view ini, bool* good) {
 }
 
 const char* MenuLanguageCode(int setting) {
-    // Longshot's menu_i18n.h kLangs in order (rc.3, 0c74253d; check again at
+    // Longshot's menu_i18n.h kLangs in order (rc.3 0c74253d, same on rc.4 53f96d78; check again at
     // each re-pin): the Menu language row is 0 Auto, then kLangs[setting - 1].
     static constexpr const char* kMenuLangs[] = {"en", "pt-BR", "es-419", "es", "fr", "de", "it",
                                                  "nl", "pl",    "ru",     "ja", "ko", "zh-Hans", "zh-Hant"};

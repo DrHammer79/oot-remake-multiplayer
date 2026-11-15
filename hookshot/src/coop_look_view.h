@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace CoopLookView {
 
@@ -78,6 +79,37 @@ private:
     std::optional<std::uint64_t> asked_ms_;
     std::optional<std::uint64_t> start_ms_;   // the turn's start; none: no turn
     double start_yaw_ = 0;
+};
+
+// What the page shows, for the log (0.11.1: adult Link got the flat picture
+// where a child got the live one; the log now says which and why).
+enum class Showing : std::uint8_t {
+    live_child,     // the live picture, a child Link
+    live_adult,     // the live picture, an adult Link
+    flat_no_link,   // the flat one: the hook has no Link this frame (no game, scene or place)
+    flat_event,     // the flat one: our own event (cutscene) runs
+};
+const char* Describe(Showing showing);
+
+// One line to the log each time the page's picture changes (and again at
+// each opening of the page), and once when a live picture's camera is never
+// framed (the game's view routine did not ask for it). Not thread-safe: the
+// caller's lock.
+class Watch {
+public:
+    // How long a live picture may go without a framed camera before it is said.
+    static constexpr std::uint64_t kUnframedMs = 2000;
+    // The menu's thread, each drawing of the page: a line to log, or none.
+    std::optional<std::string> Drawn(Showing showing, std::uint64_t now_ms);
+    // The game's thread: the camera was framed around Link.
+    void Framed(std::uint64_t now_ms);
+
+private:
+    std::optional<Showing> last_;
+    std::uint64_t drawn_ms_ = 0;
+    std::uint64_t live_since_ms_ = 0;
+    std::optional<std::uint64_t> framed_ms_;
+    bool told_unframed_ = false;
 };
 
 // The module's one orbit, with your own Link from the co-op hook

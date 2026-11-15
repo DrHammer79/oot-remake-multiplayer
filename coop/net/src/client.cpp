@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "coop/net/enet_path.hpp"
+#include "coop/net/enet_throttle.hpp"
 #include "coop/net/enet_waiting.hpp"
 #include "coop/protocol/codec.hpp"
 
@@ -286,6 +287,7 @@ void Client::service(std::uint32_t wait_ms) {
     switch (event.type) {
       case ENET_EVENT_TYPE_CONNECT:
         if (event.peer == peer_ && state_ == State::connecting) {
+          steady_throttle(peer_);  // report 37: ENet's throttle never falls (enet_throttle.hpp)
           proto::Hello hello = config_.hello;
           last_receive_us_ = now_us();  // the server answered the connect
           // The token of our last place, shown before HELLO: with it the

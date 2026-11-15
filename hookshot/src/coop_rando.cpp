@@ -453,6 +453,13 @@ std::string TellLine(std::string_view why) {
     return line;
 }
 
+std::string NoSeedLine(std::string_view seed, std::string_view why) {
+    return "Randomizer: NO SEED - you play the BASE GAME, not the host's seed " + SeedWord(seed) +
+           " (other items in chests, bombs need the Goron Bracelet): " + std::string(why) +
+           ". To fix: start the game again to try once more; if it still fails, ask the host for other Settings or "
+           "send " + kLogFile + " with a report.";
+}
+
 std::vector<std::string> LastLines(std::string_view text, std::size_t n) {
     std::vector<std::string> all;
     std::size_t at = 0;
@@ -1047,6 +1054,8 @@ void Rando::Build(const Plan& plan, const Want& want) {
                 tell_ = TellLine(reason);
                 tell_seed_ = want.seed;
                 if (!hooks_.tell_others) lines_.push_back(tell_);
+                // and loudly here, with what to do (#59: the guests did not know they played the base game)
+                lines_.push_back(ChatSafe(NoSeedLine(want.seed, line), 400));
             } else {
                 // A host or a player alone: in the chat too, not only in the Mods tab.
                 lines_.push_back(ChatSafe("Randomizer: no seed, this game plays without it: " + line));

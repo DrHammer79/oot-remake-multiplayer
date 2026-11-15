@@ -1,4 +1,4 @@
-From b7aef01fc643c7c393d7f8c140b1b4055bf10d4b Mon Sep 17 00:00:00 2001
+From 7120ebfcaca4c75bf66381fee1e60ba3918b3fd7 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 12 Nov 2026 13:32:10 -0900
 Subject: [PATCH] Co-op voice: the module's voices in the game's final mix
@@ -220,7 +220,7 @@ index 00000000..6873d47c
 +
 +#endif
 diff --git a/host/nn_audio.c b/host/nn_audio.c
-index af1ee013..62827c54 100644
+index 74269e23..ee9c4048 100644
 --- a/host/nn_audio.c
 +++ b/host/nn_audio.c
 @@ -620,6 +620,18 @@ static void render_frame(int16_t *pcm, int channels) {   /* 240 frames of the de
@@ -448,6 +448,3 @@ index afd07b14..bcd1cbfd 100644
 +    ReleaseSRWLockExclusive(&lock);
 +    hos_log("audio in: co-op voice microphone: %s", named ? name : "the game's (the Insert menu's)");
 +}
--- 
-2.56.0.windows.4
-

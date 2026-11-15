@@ -168,7 +168,7 @@ std::uint32_t bits(std::int32_t v) { return static_cast<std::uint32_t>(v); }
 
 TEST_CASE("game items: every name hashes to its hash, sorted, each once") {
   const auto items = item_flags();
-  CHECK(items.size() == 317);  // IsGet.Item_Bottle for the randomizer, 14 dungeons' EnteredFloorBit (issue 146)
+  CHECK(items.size() == 318);  // IsGet.Item_Bottle and IsGet.Item_Bottle_Letter (issue 58), 14 dungeons' EnteredFloorBit (issue 146)
   std::uint32_t last = 0;
   for (const auto& item : items) {
     CAPTURE(item.name);
@@ -232,12 +232,12 @@ TEST_CASE("game items: the shared list") {
   CHECK_FALSE(shared.contains(FlagKey{kBottleAItem, 0}));
   CHECK(shared.contains(FlagKey{kForestKeys, 0}));  // counts travel as deltas
   CHECK(shared.contains(FlagKey{kMaxLife, 0}));
-  CHECK(shared.size() == 317 - 15);  // 15 per player (the Deku Shield and the FairyBless items are shared)
+  CHECK(shared.size() == 318 - 15);  // 15 per player (the Deku Shield and the FairyBless items are shared)
   const auto all = item_shared_flags(true);
   CHECK(all.contains(FlagKey{kForestKeys, 0}));
   CHECK(all.contains(FlagKey{kMaxLife, 0}));
   CHECK_FALSE(all.contains(FlagKey{kRupees, 0}));
-  CHECK(all.size() == 317 - 15);  // the Deku Shield is shared again (issue 130)
+  CHECK(all.size() == 318 - 15);  // the Deku Shield is shared again (issue 130)
 }
 
 TEST_CASE("game items: merge rules") {
@@ -1344,4 +1344,63 @@ TEST_CASE("game items: a floor the game drops is put back, a new one still goes 
   CHECK(decoded(player.frame(store)).empty());
   CHECK(GameFlags(w).get_uint(kDekuFloors) == 31u);
   CHECK(player.stats().one_way_restores == 1);
+}
+
+TEST_CASE("items: Zelda's Letter is spent for everyone once the Kakariko gate's Bool is set (issue 58)") {
+  using coop::host::zelda_letter_spent;
+  CHECK(zelda_letter_spent(1, true));
+  CHECK_FALSE(zelda_letter_spent(1, false));
+  CHECK_FALSE(zelda_letter_spent(1, std::nullopt));  // unread: kept
+  CHECK_FALSE(zelda_letter_spent(0, true));           // nothing to take
+  CHECK(coop::host::flag_hash("PouchData.Item_ZeldaLetter.StockNum") == coop::host::letters::kZelda);
+  CHECK(coop::host::flag_hash("Npc_Hylia_Soldier_003_GateOpen") == coop::host::letters::kGateOpen);
+}
+
+TEST_CASE("items: Ruto's Letter goes into the first empty bottle while King Zora has not moved here (issue 58)") {
+  namespace letters = coop::host::letters;
+  using coop::host::ruto_letter_bottle;
+  CHECK(coop::host::flag_hash("IsGet.Item_Bottle_Letter") == letters::kRutoGot);
+  CHECK(coop::host::flag_hash("Letter") == letters::kLetter);
+  CHECK(coop::host::flag_hash("Empty") == letters::kEmpty);
+  CHECK(coop::host::flag_hash("Get_StoneOfWater") == letters::kStoneOfWater);
+  const char* bottles[] = {"BottleA", "BottleB", "BottleC", "BottleD", "BottleE"};
+  for (std::size_t i = 0; i < 5; ++i) {
+    const std::string at = std::string("PlayerStatus.AssignableItem.BottleInfo.") + bottles[i];
+    CHECK(coop::host::flag_hash(at + ".IsValid") == letters::kBottles[i].valid);
+    CHECK(coop::host::flag_hash(at + ".BottleItem") == letters::kBottles[i].item);
+  }
+  // King Zora: the quest's steps before Step07 wait, Step07 and after have moved.
+  CHECK(coop::host::king_zora_moved(coop::host::flag_hash("Step06")) == false);
+  CHECK(coop::host::king_zora_moved(coop::host::flag_hash("NotReady")) == false);
+  CHECK(coop::host::king_zora_moved(coop::host::flag_hash("Step07")) == true);
+  CHECK(coop::host::king_zora_moved(coop::host::flag_hash("Complete")) == true);
+  CHECK_FALSE(coop::host::king_zora_moved(coop::host::flag_hash("KakarikoVillageNpc")).has_value());
+
+  // Bottles A (owned, a fish), B (owned, empty), C (owned, empty), D and E not owned.
+  std::map<std::uint32_t, bool> valid{{letters::kBottles[0].valid, true}, {letters::kBottles[1].valid, true},
+                                      {letters::kBottles[2].valid, true}, {letters::kBottles[3].valid, false},
+                                      {letters::kBottles[4].valid, false}};
+  std::map<std::uint32_t, std::uint32_t> item{{letters::kBottles[0].item, coop::host::flag_hash("Fish")}};
+  for (std::size_t i = 1; i < 5; ++i) item[letters::kBottles[i].item] = letters::kEmpty;
+  const auto v = [&](std::uint32_t h) -> std::optional<bool> {
+    const auto it = valid.find(h);
+    return it == valid.end() ? std::nullopt : std::optional(it->second);
+  };
+  const auto in = [&](std::uint32_t h) -> std::optional<std::uint32_t> {
+    const auto it = item.find(h);
+    return it == item.end() ? std::nullopt : std::optional(it->second);
+  };
+  CHECK(ruto_letter_bottle(true, false, v, in) == letters::kBottles[1].item);
+  CHECK_FALSE(ruto_letter_bottle(false, false, v, in));         // nobody got it
+  CHECK_FALSE(ruto_letter_bottle(true, true, v, in));           // King Zora moved here: not needed
+  CHECK_FALSE(ruto_letter_bottle(true, std::nullopt, v, in));   // no manager read: left alone
+  CHECK_FALSE(ruto_letter_bottle(std::nullopt, false, v, in));
+  item[letters::kBottles[2].item] = letters::kLetter;            // a bottle holds it already
+  CHECK_FALSE(ruto_letter_bottle(true, false, v, in));
+  item[letters::kBottles[2].item] = coop::host::flag_hash("Bug");
+  item[letters::kBottles[1].item] = coop::host::flag_hash("Fairy");
+  CHECK_FALSE(ruto_letter_bottle(true, false, v, in));          // no empty bottle: it waits
+  valid.erase(letters::kBottles[4].valid);                       // a bottle unread: left alone
+  item[letters::kBottles[1].item] = letters::kEmpty;
+  CHECK_FALSE(ruto_letter_bottle(true, false, v, in));
 }

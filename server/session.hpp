@@ -164,6 +164,11 @@ struct SessionConfig {
   // it has said so for handover_chased_us, wherever the owner's enemy
   // stands. The owner saying the same is a fight, which keeps it.
   std::uint64_t handover_chased_us = 500'000;
+  // Player report 37 (Revirie's 0.11.0 log: an Octorok went P2, P3, P2, P3 ... 42 times, some
+  // within 10 s): an object is not handed back to the player who just gave it up (a chase, the
+  // near-player rule or a hit) until this long after the change. A frozen owner, a group's root,
+  // a fish and a boss follow their own rules. 0: off.
+  std::uint64_t handover_back_us = 15'000'000;
   // Issue 151 (fishing-3): a fish (an object some game listed in FISH_LURE)
   // goes to the game whose lure is nearest it, not by the distance rule and
   // never held by a fight lock. Its owner keeps it while the fish is hooked,
@@ -399,6 +404,7 @@ struct Stats {
   std::uint64_t handover_asked = 0;       // HANDOVER_ASK sent to an owner
   std::uint64_t handover_unanswered = 0;  // moved with the last relayed sample
   std::uint64_t handover_chased = 0;      // asked because a copy chased its player
+  std::uint64_t handover_back_held = 0;    // not handed back so soon (handover_back_us)
   std::uint64_t fish_to_lure = 0;         // a fish asked over to the nearest lure (issue 151)
   std::uint64_t spawns_replayed = 0;      // OBJECT_SPAWN sent again to a player entering
   std::uint64_t owners_refreshed = 0;     // OBJECT_OWNER repeated (owner_refresh_us)
@@ -742,6 +748,8 @@ class Session {
   bool in_fight(const Object& o, std::uint64_t now_us) const;
   // The owner hit it itself within boss_owner_hit_hold_us (issue 150).
   bool owner_hit_lately(const Object& o, std::uint64_t now_us) const;
+  // `to` gave `o` up less than handover_back_us ago: not handed back yet (counted).
+  bool hands_back_soon(const Object& o, ConnectionId to, std::uint64_t now_us);
   // The game that has said longest (at least handover_chased_us) that its
   // copy of `o`, or of one of its members, chases its Link; not the owner.
   std::optional<ConnectionId> chased_by(const Object& o, ConnectionId owner,

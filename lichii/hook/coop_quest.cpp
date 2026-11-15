@@ -59,6 +59,8 @@ constexpr std::uint32_t kGotoHyruleCastle = 0xdb89c1a9u;
 constexpr std::uint32_t kDoorOfTime = 0x378913cau;
 constexpr std::uint32_t kStoneOfFire = 0x1002b466u;
 constexpr std::uint32_t kStoneOfFireName = 0xe4c584e6u;  // the challenge: Get_StoneOfFire
+constexpr std::uint32_t kStoneOfWater = 0x5bca02a6u;      // Enum Step_Get_StoneOfWater
+constexpr std::uint32_t kDoorOfTimeName = 0xe8dafe6cu;    // the challenge: DoorOfTime
 
 constexpr std::array kGotoSteps{kNotReady, kReady,     kStep01,    kStep02, kStep02_01,
                                 kStep03,   kStep03_01, kStep03_02, kStep04, kComplete};
@@ -97,13 +99,27 @@ constexpr std::array kGotoRules{
     Rule{kImpaCame, kComplete, "Zelda met in the courtyard"},
 };
 // DoorOfTime: the same meeting gives Step01 (Impa waits in the courtyard and
-// stops Link when he leaves, then takes him out: Zelda's Lullaby). Nothing
-// later is raised: each player then meets Impa, who moves the quest on.
-// Checked again for issue 171 and kept: DoorOfTime's own flow (Impa's send-off
-// after Zelda's Lullaby) is what sets Get_StoneOfFire to KakarikoVillageNpc,
-// the step the Kakariko guard needs; raising DoorOfTime past Step01 would skip it.
+// stops Link when he leaves, then takes him out: Zelda's Lullaby). Step02 is
+// not raised: each player then meets Impa, whose send-off (DoorOfTime_SendOff)
+// sets Step02 and Get_StoneOfFire KakarikoVillageNpc, the step the Kakariko
+// guard needs (issue 171).
+//
+// The stone steps (issue 60): the game's DoorOfTime_CheckStoneNum sets Step2_1
+// (the Goron Ruby), Step2_2 (the Zora Sapphire) or Step03 (all three) from
+// Get_StoneOfFire_IsCompleted_Exp and Get_StoneOfWater_IsCompleted_Exp, but it
+// runs only in Dm_SY_BancChange_EscapeDungeon, right after the player's own
+// Darunia or Jabu-Jabu escape. A player who was elsewhere gets the stone (a
+// shared quest) and never runs it, so their DoorOfTime stayed at Step02: no
+// Zelda escape in the field (it starts at Step03) and a Door of Time that
+// stays shut. These rules do what CheckStoneNum does, from our own GameData.
+// Step04 and later (the escape, the Ocarina of Time, the door) stay each
+// game's own: they follow from Step03 in that game.
 constexpr std::array kDoorRules{
     Rule{kImpaCame, kStep01, "Zelda met in the courtyard (Impa comes)"},
+    Rule{0, kStep2_1, "the Goron Ruby (as DoorOfTime_CheckStoneNum)", kStoneOfFire},
+    Rule{0, kStep2_2, "the Zora Sapphire (as DoorOfTime_CheckStoneNum)", kStoneOfWater},
+    Rule{0, kStep03, "all three Spiritual Stones (as DoorOfTime_CheckStoneNum)", kStoneOfFire,
+         kStoneOfWater},
 };
 // Get_StoneOfFire (issue 171): showing Zelda's Letter to the Kakariko guard
 // sets his Bool (shared) and moves the shower's quest from KakarikoVillageNpc
@@ -121,9 +137,11 @@ constexpr std::array kQuests{
     Quest{kGotoHyruleCastle, "Goto_HyruleCastle", kGotoSteps, kGotoRules, 2},
     // DoorOfTime is NotReady until Goto_HyruleCastle is complete; the
     // meeting with Zelda moves it from there.
-    Quest{kDoorOfTime, "DoorOfTime", kDoorSteps, kDoorRules, 0, kGotoHyruleCastle, kComplete},
+    // Its manager entry from Step2_1 (index 4) on: the escape's trigger reads it.
+    Quest{kDoorOfTime, "DoorOfTime", kDoorSteps, kDoorRules, 0, kGotoHyruleCastle, kComplete,
+          kDoorOfTimeName, 4},
     // From KakarikoVillageNpc (index 2) on: set by our own Impa.
-    Quest{kStoneOfFire, "Get_StoneOfFire", kFireSteps, kFireRules, 2},
+    Quest{kStoneOfFire, "Get_StoneOfFire", kFireSteps, kFireRules, 2, 0, 0, kStoneOfFireName, 2},
 };
 
 // The steps the manager is never moved into (RSDB Challenge: IsBossBattle or
@@ -195,16 +213,34 @@ std::uint64_t FindEntry(CoopPuppet::Guest& guest, std::uint64_t mgr, std::uint32
 
 } // namespace
 
+std::optional<std::uint32_t> LiveStep(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge) {
+    class ReadOnly final : public CoopPuppet::Guest {
+    public:
+        explicit ReadOnly(const ReadMemory& read) : read_(read) {}
+        bool Read(std::uint64_t address, void* out, std::size_t size) override { return read_(address, out, size); }
+        bool Write(std::uint64_t, const void*, std::size_t) override { return false; }
+
+    private:
+        const ReadMemory& read_;
+    } guest(read);
+    if (main == 0) return std::nullopt;
+    const auto mgr = Get<std::uint64_t>(guest, main + kChallengeMgr);
+    if (!mgr || *mgr == 0) return std::nullopt;
+    const std::uint64_t entry = FindEntry(guest, *mgr, challenge);
+    if (entry == 0) return std::nullopt;
+    return Get<std::uint32_t>(guest, entry + kEntryStep);
+}
+
 bool HeldStep(std::uint32_t challenge, std::uint32_t step) {
     return std::find(kHeld.begin(), kHeld.end(), std::pair{challenge, step}) != kHeld.end();
 }
 
 std::optional<StepWant> LiveWant(const Quest& quest, const ReadEnum& value) {
-    if (quest.hash != kStoneOfFire) return std::nullopt;  // 0.11: the gate's quest only
+    if (quest.live == 0) return std::nullopt;
     const auto at = value(quest.hash);
     const auto rank = at ? Rank(quest, *at) : std::nullopt;
-    if (!rank || *rank < quest.floor) return std::nullopt;
-    return StepWant{kStoneOfFireName, *at, {quest.steps.begin(), quest.steps.end()}, quest.name};
+    if (!rank || *rank < quest.live_floor) return std::nullopt;
+    return StepWant{quest.live, *at, {quest.steps.begin(), quest.steps.end()}, quest.name};
 }
 
 void Challenges::Want(std::vector<StepWant> wants) {
@@ -287,7 +323,10 @@ std::optional<std::uint32_t> CatchUp(const Quest& quest, const ReadBool& flag,
     }
     std::optional<std::size_t> best;
     for (const auto& r : quest.rules) {
-        if (flag(r.flag) != true) continue;
+        if (r.flag == 0 && r.done_a == 0 && r.done_b == 0) continue;
+        if (r.flag != 0 && flag(r.flag) != true) continue;
+        if (r.done_a != 0 && value(r.done_a) != kComplete) continue;
+        if (r.done_b != 0 && value(r.done_b) != kComplete) continue;
         const auto to = Rank(quest, r.step);
         if (to && (!best || *to > *best)) best = to;
     }

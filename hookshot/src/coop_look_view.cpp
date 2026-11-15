@@ -87,4 +87,48 @@ std::optional<Shot> Orbit::Camera(const Vec3& game_eye, const Vec3& game_target,
     return Aim(link->feet, link->height, start_yaw_ + kTau * (turn - std::floor(turn)), window_);
 }
 
+namespace {
+bool Live(std::optional<Showing> s) {
+    return s == Showing::live_child || s == Showing::live_adult;
+}
+}  // namespace
+
+const char* Describe(Showing showing) {
+    switch (showing) {
+    case Showing::live_child: return "live, the camera around your child Link";
+    case Showing::live_adult: return "live, the camera around your adult Link";
+    case Showing::flat_no_link: return "flat: the co-op hook has no Link this frame (no game, scene or place)";
+    case Showing::flat_event: return "flat: our own event (a cutscene) runs";
+    }
+    return "?";
+}
+
+std::optional<std::string> Watch::Drawn(Showing showing, std::uint64_t now_ms) {
+    // Not drawn for a while: the page was left; the next opening says its picture again.
+    if (last_ && (now_ms < drawn_ms_ || now_ms - drawn_ms_ > kHoldMs)) {
+        last_.reset();
+    }
+    drawn_ms_ = now_ms;
+    if (showing != last_) {
+        if (Live(showing) && !Live(last_)) {
+            live_since_ms_ = now_ms;
+            told_unframed_ = false;
+        }
+        last_ = showing;
+        return std::string("coop: look: the Customize picture is ") + Describe(showing);
+    }
+    if (Live(showing) && !told_unframed_ && now_ms - live_since_ms_ >= kUnframedMs &&
+        (!framed_ms_ || *framed_ms_ < live_since_ms_)) {
+        told_unframed_ = true;
+        return std::string("coop: look: the Customize picture is live but its camera was not framed for ") +
+               std::to_string(kUnframedMs / 1000) +
+               " s: the game's view routine did not ask (hos_coop_view, patch 0019), so the game's own camera shows";
+    }
+    return std::nullopt;
+}
+
+void Watch::Framed(std::uint64_t now_ms) {
+    framed_ms_ = now_ms;
+}
+
 }  // namespace CoopLookView

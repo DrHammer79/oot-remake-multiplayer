@@ -572,6 +572,14 @@ TEST_CASE("rando: a guest that cannot build the host's seed tells the others, on
     rando.Wait();
     CHECK(w.runs.empty());
     {
+        // loud in this game's own chat, with what to do (#59)
+        const auto chat = rando.TakeLines();
+        CHECK(std::count_if(chat.begin(), chat.end(), [](const std::string& l) {
+                  return l.rfind("Randomizer: NO SEED - you play the BASE GAME, not the host's seed HOST9", 0) == 0 &&
+                         l.find("OOTRR") != std::string::npos && l.find("To fix: start the game again") != std::string::npos;
+              }) == 1);
+    }
+    {
         const std::lock_guard lock(told_mutex);
         CHECK(told.empty());  // not connected: kept
         connected = true;

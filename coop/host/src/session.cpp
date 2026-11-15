@@ -176,6 +176,10 @@ void Session::handle(const net::Event& event) {
       {
         std::lock_guard lock(presence_mutex_);
         presence_.apply(event.message);
+        // Report 37: how old another game's sample is here sets how late it is drawn.
+        if (const auto* sample = std::get_if<protocol::PlayerSample>(&event.message)) {
+          presence_.seen(sample->player_number, sample->time.server_time_us, client_.server_now_us());
+        }
       }
       // FLAG_STATE comes to the watcher as its flag_state event, which the
       // client also gives for its own answers as host.

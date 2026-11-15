@@ -1,4 +1,4 @@
-From cf27a61e48a0772c170654f928b4ede04321367b Mon Sep 17 00:00:00 2001
+From ea839d7a22e6069a89b6472747b3c5c29d75fd04 Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 12:26:46 -0900
 Subject: [PATCH] Co-op local pads: split-screen players get Npads 2 to 4
@@ -10,10 +10,10 @@ oot-remake-multiplayer's patch 0016 (host only, no lift), on top of patch 0015. 
  2 files changed, 182 insertions(+), 13 deletions(-)
 
 diff --git a/host/nn_hid.c b/host/nn_hid.c
-index 51861870..94e40cd1 100644
+index cb3e07eb..d755eb83 100644
 --- a/host/nn_hid.c
 +++ b/host/nn_hid.c
-@@ -687,6 +687,23 @@ static uint64_t bound_pad_buttons(uint64_t raw) {
+@@ -707,6 +707,23 @@ static uint64_t bound_pad_buttons(uint64_t raw) {
      return buttons;
  }
  
@@ -37,7 +37,7 @@ index 51861870..94e40cd1 100644
  static volatile LONG pad_raw_now;   /* the gamepads' inputs at the last read, 1 << HOS_PAD_* */
  static int pad_after_menu;          /* (the menu just closed: the pads wait until they are let go; oc_pad_word too) */
  uint32_t hos_pad_raw(void) { return (uint32_t)pad_raw_now; }
-@@ -1089,6 +1106,26 @@ static void npad_states(Ctx *c) {
+@@ -1150,6 +1167,26 @@ static void npad_states(Ctx *c) {
      uint64_t buttons = 0;
      int32_t stick[4] = {0};
      int connected = id == NPAD_NO1;
@@ -64,7 +64,7 @@ index 51861870..94e40cd1 100644
      {
          static int64_t last_read;
          static uint32_t seen_ids[16];
-@@ -1104,7 +1141,8 @@ static void npad_states(Ctx *c) {
+@@ -1165,7 +1202,8 @@ static void npad_states(Ctx *c) {
          for (int i = 0; i < nseen; i++) known |= seen_ids[i] == id;
          if (!known && nseen < 16) {
              seen_ids[nseen++] = id;
@@ -74,7 +74,7 @@ index 51861870..94e40cd1 100644
                      (unsigned long long)c->x[30]);
          }
      }
-@@ -1141,7 +1179,8 @@ static void npad_states(Ctx *c) {
+@@ -1209,7 +1247,8 @@ static void npad_states(Ctx *c) {
      uint64_t hos_coop_pad_filter(uint64_t buttons, int32_t stick[4]);   /* (oot-remake-multiplayer, coop_bridge.c: the title menu) */
      if (connected) buttons = hos_coop_pad_filter(buttons, stick);
      int64_t s = ++sampling;
@@ -84,7 +84,7 @@ index 51861870..94e40cd1 100644
      if (connected) __atomic_store_n(&hos_coop_pad, word, __ATOMIC_RELAXED);
      for (int i = 0; i < count; i++) {
          uint64_t e = out + (uint64_t)i * STATE_SIZE;
-@@ -1149,7 +1188,7 @@ static void npad_states(Ctx *c) {
+@@ -1217,7 +1256,7 @@ static void npad_states(Ctx *c) {
          G64(e) = (uint64_t)(s - i);
          G64(e + 8) = word;
          memcpy(GP(e + 16), stick, 16);
@@ -93,7 +93,7 @@ index 51861870..94e40cd1 100644
      }
      RET(count);
  }
-@@ -1159,14 +1198,27 @@ HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
+@@ -1227,14 +1266,27 @@ HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
  HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj) { npad_states(c); }
  HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj) { npad_states(c); }
  /* GetNpadStyleSet(unsigned int const&) -> BitFlagSet<32, NpadStyleTag> */
@@ -123,7 +123,7 @@ index 51861870..94e40cd1 100644
  HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {}
  HLE(_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE) {}
  
-@@ -1359,3 +1411,30 @@ HLE(_ZN2nn3hid20GetTouchScreenStatesILm16EEEiPNS0_16TouchScreenStateIXT_EEEi) {
+@@ -1427,3 +1479,30 @@ HLE(_ZN2nn3hid20GetTouchScreenStatesILm16EEEiPNS0_16TouchScreenStateIXT_EEEi) {
      G64(ARG(0)) = (uint64_t)InterlockedIncrement64(&sampling);
      RET(1);
  }

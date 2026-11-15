@@ -179,6 +179,9 @@ std::vector<std::string> ErrorLines(std::string_view text, std::size_t n);
 // (a chat line's limit), cut at a whole UTF-8 character.
 inline constexpr std::size_t kTellChars = 200;
 std::string TellLine(std::string_view why);
+// The guest's own loud chat line when the host's seed could not be made (#59: guests played the base game without
+// knowing it): no seed, the base game, why, and what to do. For this game's chat only (`why` may name a local file).
+std::string NoSeedLine(std::string_view seed, std::string_view why);
 
 // What the tab and the chat say when the randomizer is switched (by the player, or the host's switch reaching a guest).
 // A seed plays only after a restart, and only from a new save (a save from before has the items of the plain game).

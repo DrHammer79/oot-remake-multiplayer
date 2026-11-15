@@ -27,11 +27,16 @@
 namespace CoopQuest {
 
 // A shared story flag (a saved Bool) that, once 1, means the quest is at least
-// at `step`.
+// at `step`. `flag` 0: no flag; then the quests in `done` decide alone.
 struct Rule {
     std::uint32_t flag;
     std::uint32_t step;  // Murmur3 of the step name
     const char* why;
+    // Other quests of ours (GameData Enum hashes) that must be Complete too
+    // (0 = none). Issue 60: DoorOfTime's stone steps, as the game's own
+    // DoorOfTime_CheckStoneNum reads Get_StoneOfFire / Get_StoneOfWater.
+    std::uint32_t done_a = 0;
+    std::uint32_t done_b = 0;
 };
 
 // One quest: its Enum (hash from GameDataList, matched by its value list), its
@@ -49,6 +54,11 @@ struct Quest {
     // (0 = no such need).
     std::uint32_t needs_quest = 0;
     std::uint32_t needs_step = 0;
+    // The game's ChallengeMgr entry (Murmur3 of the challenge's name) that
+    // gets this quest's GameData step through setStep (LiveWant), from step
+    // `live_floor` (index into steps) on; 0 = GameData only.
+    std::uint32_t live = 0;
+    std::size_t live_floor = 0;
 };
 
 std::span<const Quest> Quests();
@@ -102,11 +112,21 @@ struct StepWant {
 // out of one a player is in (their fight or race goes on).
 bool HeldStep(std::uint32_t challenge, std::uint32_t step);
 
+// The step the game's ChallengeMgr holds for `challenge` (Murmur3 of the quest's
+// name): what the game's logic reads, not GameData. Read only; nothing before a
+// game is loaded or for a quest the manager does not have. `main` is main's
+// guest address; `read` reads guest memory.
+using ReadMemory = std::function<bool(std::uint64_t address, void* out, std::size_t size)>;
+std::optional<std::uint32_t> LiveStep(const ReadMemory& read, std::uint64_t main, std::uint32_t challenge);
+
 // The step of `quest` the live manager should get, from the GameData step
-// `value` reads, or nothing. 0.11 sends only Get_StoneOfFire (the Kakariko
-// gate's quest), and only from its floor (KakarikoVillageNpc) on. The other
-// quests stay as before (GameData and the Threads of Time tab); each joins
-// later on its own, with its own floor and an in-game check.
+// `value` reads, or nothing. Sent: Get_StoneOfFire (the Kakariko gate's quest,
+// issue 171) from KakarikoVillageNpc on, and DoorOfTime (issue 60) from
+// Step2_1 on: the field's trigger for Zelda's escape
+// (Logic/HyruleField_Child_Prefab_0ce5, HoldChallengeCurrentStepCheckOrder
+// DoorOfTime Step03) reads the manager, never GameData. The other quests stay
+// as before (GameData and the Threads of Time tab); each joins later on its
+// own, with its own floor and an in-game check.
 std::optional<StepWant> LiveWant(const Quest& quest, const ReadEnum& value);
 
 // Moves the manager's entries up to the steps GameData holds. Never lowers,

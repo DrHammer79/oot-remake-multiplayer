@@ -13,6 +13,7 @@
 #include "coop/net/client.hpp"
 #include "coop/protocol/messages.hpp"
 #include "coop_puppet.h"
+#include "coop_show_delay.h"
 
 namespace CoopPose {
 
@@ -375,9 +376,9 @@ std::vector<proto::PoseBone> BonePicker::Pick(std::uint32_t skeleton,
     return out;
 }
 
-std::optional<Pose> Track::At(std::uint64_t now_ms) const {
+std::optional<Pose> Track::At(std::uint64_t now_ms, std::uint64_t delay_ms) const {
     if (!timed_.empty()) {
-        const std::uint64_t show = now_ms - std::min(now_ms, kShowDelayMs);
+        const std::uint64_t show = now_ms - std::min(now_ms, delay_ms);
         if (show <= timed_.front().first) return timed_.front().second;
         for (std::size_t i = 0; i + 1 < timed_.size(); ++i) {
             const auto& [a_ms, a] = timed_[i];
@@ -836,7 +837,7 @@ Wrote WriteFor(State& s, CoopPuppet::Guest& guest, std::uint8_t number, std::uin
         // puppet-anim (#36/#41): a track whose poses stopped is not written on: its last
         // pose held for ever was the puppet stuck in one animation. Its AS commands drive it.
         if (it != tracks.end() && now_ms - std::min(now_ms, it->second.last_ms()) < kFreshMs) {
-            pose = it->second.At(now_ms);
+            pose = it->second.At(now_ms, CoopShowDelay::Us(number) / 1000);
         }
         int moving = 0;
         const std::optional<float> u = pose && body ? s.evenness[number].Step(*pose, now_ms, &moving) : std::nullopt;

@@ -107,6 +107,13 @@ var Context = {
 
 eval(readFile(fso.BuildPath(here, "OoTCoop.js")));
 
+// Nucleus lists controllers in its setup screen only for a handler with XInput (or DirectInput) on
+// (DevicesFunctions.GamepadTimer_Tick); its input DLLs come only with the other switches, which stay off.
+check(Game.Hook.XInputEnabled === true && Game.Hook.XInputReroute === false && Game.Hook.DInputEnabled === false,
+      "Nucleus lists the XInput pads, no DirectInput or reroute");
+check(Game.Hook.CustomDllEnabled === false && !Game.UseX360ce && !Game.XInputPlusDll && !Game.ProtoInput,
+      "no Nucleus input DLLs");
+
 var players = [
     { nick: "Saria", pad: 2, keyboard: false },
     { nick: "A name that is far too long", pad: 0, keyboard: false },   // Nucleus gave no pad number

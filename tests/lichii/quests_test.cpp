@@ -19,6 +19,7 @@ constexpr std::uint32_t kGotoCastle = 0xdb89c1a9u;  // Goto_HyruleCastle (the ow
 constexpr std::uint32_t kFairy = 0x682d1169u;       // Meet_GreatFairy
 constexpr std::uint32_t kEpona = 0x92431c55u;       // Get_Epona (its end only)
 constexpr std::uint32_t kForest = 0x7d776b61u;      // Get_StoneOfForest (the Deku Tree)
+constexpr std::uint32_t kFire = 0x1002b466u;        // Get_StoneOfFire (the Goron Ruby, issue 60)
 
 host::FlagKey Key(std::uint32_t hash) {
     return host::FlagKey(hash, std::uint16_t{0});
@@ -95,7 +96,7 @@ TEST_CASE("quests: the table is sorted by hash, once, each from NotReady to Comp
         std::set<std::uint32_t> seen;
         for (const char* s : q.steps) CHECK_MESSAGE(seen.insert(host::flag_hash(s)).second, q.name);
     }
-    CHECK(CoopQuests::Quests().size() == 12);
+    CHECK(CoopQuests::Quests().size() == 13);
     CHECK(CoopQuests::Find(0x12345678u) == nullptr);
 }
 
@@ -415,4 +416,32 @@ TEST_CASE("quests: Get_Epona shares its end only") {
     odd.enums[kEpona] = 0xdeadbeefu;
     CHECK(odd.store.write_exact(entry("Complete")));
     CHECK(odd.enums[kEpona] == 0xdeadbeefu);
+}
+
+TEST_CASE("quests: Get_StoneOfFire is shared, in the game's order, from Ready (issue 60)") {
+    CHECK(host::flag_hash("Step_Get_StoneOfFire") == kFire);
+    const auto& q = Q(kFire);
+    CHECK(q.floor == RankOf(kFire, "Ready"));
+    // The RSDB row's steps in order (Darunia sends Link to Saria, then the cavern).
+    CHECK(RankOf(kFire, "KakarikoVillageNpc") == 2);
+    CHECK(RankOf(kFire, "GoronCityDarniaTalk") < RankOf(kFire, "KokiriForestFire"));
+    CHECK(RankOf(kFire, "KokiriForestFire") < RankOf(kFire, "KokiriForestIn"));
+    CHECK(RankOf(kFire, "SariaMelodyPlay") < RankOf(kFire, "DodongoCavernOpne"));
+    CHECK(RankOf(kFire, "EscapeDungeon") == RankOf(kFire, "Complete") - 1);
+    const proto::FlagEntry done{Key(kFire), proto::FlagKind::int32,
+                                static_cast<std::uint32_t>(RankOf(kFire, "Complete"))};
+    // B was in Kakariko while A got the Goron Ruby: B's quest is Complete too,
+    // so B's Get_StoneOfFire_IsCompleted_Exp (the Door of Time's check) holds.
+    Game b;
+    b.step(kFire, "KakarikoVillageLetter");
+    CHECK(b.store.write(done));
+    CHECK(b.at(kFire, "Complete"));
+    // From Ready on (the manager's own step), not from a new save's NotReady.
+    Game c;
+    c.step(kFire, "NotReady");
+    CHECK(c.store.write(done));
+    CHECK(c.at(kFire, "NotReady"));
+    c.step(kFire, "Ready");
+    CHECK(c.store.write(done));
+    CHECK(c.at(kFire, "Complete"));
 }

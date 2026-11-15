@@ -734,5 +734,14 @@ try {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# QuickEdit off (issue #68): update.ps1 carries its own copy of console-mode.ps1's function (it runs alone from a temp
+# file); the two must stay the same. Without a console window (CI, output redirected) it says $false and never throws.
+$cmText = [System.IO.File]::ReadAllText((Join-Path $release 'kit\scripts\console-mode.ps1')) -replace '\r\n', "`n"
+$upText = [System.IO.File]::ReadAllText($updater) -replace '\r\n', "`n"
+$fn = $cmText.Substring($cmText.IndexOf('function Disable-KitQuickEdit'))
+Check ($fn.Length -gt 100 -and $upText.Contains($fn)) 'QuickEdit: update.ps1 has the same Disable-KitQuickEdit as console-mode.ps1'
+$qe = & $ps -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $release 'kit\scripts\console-mode.ps1')'; Disable-KitQuickEdit; Disable-KitQuickEdit" 2>&1
+Check ($LASTEXITCODE -eq 0 -and ($qe -join ',') -in 'False,False', 'True,True') "QuickEdit: no throw, twice in one session [$($qe -join ',')]"
+
 if ($failed) { Write-Host "$failed failed"; exit 1 }
 Write-Host 'all passed'

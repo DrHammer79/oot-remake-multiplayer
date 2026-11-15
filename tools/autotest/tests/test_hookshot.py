@@ -500,6 +500,12 @@ class RendererWaitTest(unittest.TestCase):
         self.assertEqual(len(reads), 5)
         self.assertAlmostEqual(waited, 2.0, places=2)
 
+    def test_rc4_start_up_line_is_ready_too(self):
+        log = ("[hos host] vk: precompile: load at create (RX_VK_LOAD=create): 32623 noted pipelines found, none built\n"
+               "[hos host] vk: start-up: the shaders took 6.5 s\n")
+        self.assertEqual(hs.wait_renderer(lambda: log, lambda: True, 60, clock=Clock(), sleep=Clock().sleep), 0.0)
+        self.assertFalse(hs.RENDERER_READY.search(log.splitlines()[0]))
+
     def test_times_out_and_notices_a_closed_game(self):
         c = Clock()
         with self.assertRaises(TimeoutError):

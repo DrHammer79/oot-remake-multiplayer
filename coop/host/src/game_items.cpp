@@ -47,6 +47,7 @@ constexpr ItemFlag kItems[] = {
   {"DungeonInfo.InsideJabuJabuBelly.SmallKeyNum", 0x1470a816, K::int32, R::count, true},
   {"IsGet.Item_AlarmCucco", 0x14909166, K::boolean, R::any, true},
   {"IsGet.Item_Melody_SunSong", 0x165dd1ad, K::boolean, R::any, true},
+  {"IsGet.Item_Bottle_Letter", 0x170b5df2, K::boolean, R::any, true},  // Ruto's Letter was got (issue 58)
   {"DungeonInfo.SpiritTemple.IsGetBossKey", 0x1984c03f, K::boolean, R::any, true},
   {"PouchData.Item_NutBag_Small.StockNum", 0x19b80dbc, K::int32, R::max, true},
   {"PouchData.Item_Hammer.StockNum", 0x1aafdb66, K::int32, R::max, true},
@@ -629,6 +630,32 @@ std::optional<float> dive_depth_raise(std::int32_t silver, std::int32_t gold, fl
   const float want = gold >= 1 ? dive::kGoldDepth : silver >= 1 ? dive::kSilverDepth : 0.0f;
   if (!(want > current)) return std::nullopt;  // a NaN current is left alone too
   return want;
+}
+
+bool zelda_letter_spent(std::int32_t held, std::optional<bool> gate_open) {
+  return held > 0 && gate_open == true;
+}
+
+std::optional<bool> king_zora_moved(std::uint32_t live_step) {
+  const auto in = [&](const auto& steps) { return std::find(steps.begin(), steps.end(), live_step) != steps.end(); };
+  if (in(letters::kKingMoved)) return true;
+  if (in(letters::kKingWaits)) return false;
+  return std::nullopt;
+}
+
+std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::optional<bool> king_moved,
+                                                const std::function<std::optional<bool>(std::uint32_t)>& valid,
+                                                const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item) {
+  if (got != true || king_moved != false) return std::nullopt;
+  std::optional<std::uint32_t> empty;
+  for (const letters::Bottle& b : letters::kBottles) {
+    const auto v = valid(b.valid);
+    const auto in = item(b.item);
+    if (!v || !in) return std::nullopt;  // unread: leave every bottle alone
+    if (*in == letters::kLetter) return std::nullopt;
+    if (*v && *in == letters::kEmpty && !empty) empty = b.item;
+  }
+  return empty;
 }
 
 std::optional<std::string_view> ocarina_equip_mend(std::int32_t fairy, std::int32_t time,

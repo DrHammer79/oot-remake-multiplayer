@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace CoopBossScenes {
 
@@ -142,6 +143,15 @@ void Director::Say(Actions& out, std::uint8_t b, proto::BossSceneKind kind, cons
 
 void Director::Skip(const char* why, std::uint64_t now_us, Actions& out) {
     if (!playing_ || playing_->skip) {
+        return;
+    }
+    if (playing_->own_setting) {
+        // The boss's own logic asked it: skipping it (the game's force skip) left its fight's start half done and
+        // the player held in it (player report #30). It plays out; the boss is synced by its owner meanwhile.
+        if (!std::exchange(playing_->kept_said, true)) {
+            out.log.push_back(std::string(kBosses[playing_->boss].intro) + ": " + why +
+                              ", but our game asked it as the boss's own start of the fight: not skipped");
+        }
         return;
     }
     playing_->skip = true;
@@ -313,6 +323,7 @@ void Director::Ours(const Request& r, const Local& local, std::uint64_t now_us, 
     const bool asked = f.asked_at != 0 && now_us - f.asked_at <= kJoinUs;
     f.asked_at = 0;
     playing_ = Playing{b, kind};
+    playing_->own_setting = r.name != flow;
     if (kind == Kind::intro) {
         if (f.phase == Phase::none || f.phase == Phase::done) {
             f = Fight{};

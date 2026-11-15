@@ -221,6 +221,45 @@ class WarmTest(Fixture):
         with self.assertRaises(hs.Fail):
             hs.warm_spread(src, [self.game("pair")], say=self.say)
 
+    # Longshot rc.4: the caches are in cache\ beside longshot.exe, some under new names, and the game build fills part.
+    WARM_RC4 = ("longshot_pipelines.bin", "longshot_pipelines.bin.built", "longshot_prepared.bin", "longshot_programs.bin",
+                "longshot_programs.idx", "longshot_vk_pipelines.bin", "longshot_vk_pipelines.stamp",
+                "longshot_vk_pipelines_play_1.bin", "longshot_compute_variants.bin", "longshot_module_ids.bin")
+
+    def warmed_rc4(self, name="warm4"):
+        g = self.game(name)
+        for n in self.WARM_RC4:
+            write(os.path.join(g, "cache", n), "warm " + n)
+        write(os.path.join(g, "cache", "prompts", "Common.key"), "k")   # (not a warm file)
+        return g
+
+    def test_rc4_warm_files_are_in_the_cache_folder(self):
+        g = self.warmed_rc4()
+        self.assertEqual(hs.warm_dir(g), os.path.join(g, "cache"))
+        self.assertEqual(hs.warm_files(g), sorted(self.WARM_RC4))
+        for n in self.WARM_RC4:
+            self.assertTrue(hs.RUNTIME_CACHE.match(n), n)
+        dst = self.game("pair4")
+        write(os.path.join(dst, "cache", "longshot_vk_pipelines_play_3.bin"), "a play file of another start")
+        self.assertEqual(hs.warm_spread(g, [dst], say=self.say), len(self.WARM_RC4))
+        self.assertEqual(hs.warm_files(dst), sorted(self.WARM_RC4))
+        os.unlink(os.path.join(g, "cache", "longshot_pipelines.bin.built"))
+        with self.assertRaises(hs.Fail):
+            hs.warm_spread(g, [dst], say=self.say)
+
+    def test_rc4_copy_keeps_the_pairs_cache_folder_files(self):
+        src = self.warmed_rc4("built4")
+        write(os.path.join(src, "cache", "longshot_vk_pipelines.bin"), "the build's, bigger than the pair's file")
+        dst = self.game("pair4")
+        write(os.path.join(dst, "cache", "longshot_vk_pipelines.bin"), "the pair's warmed")
+        hs.copy_tree(src, dst, say=self.say)
+        with open(os.path.join(dst, "cache", "longshot_vk_pipelines.bin")) as f:
+            self.assertEqual(f.read(), "the pair's warmed")   # a runtime cache in cache\: kept
+        self.assertTrue(os.path.isfile(os.path.join(dst, "cache", "prompts", "Common.key")))   # the rest copied
+        hs.copy_tree(src, dst, say=self.say, runtime_too=True)
+        with open(os.path.join(dst, "cache", "longshot_vk_pipelines.bin")) as f:
+            self.assertEqual(f.read(), "the build's, bigger than the pair's file")
+
     def test_restore_replaces_the_runtime_caches_of_another_build(self):
         k = hs.cache_store(self.warmed("new"), self.repo, say=self.say)
         same = self.game("same")

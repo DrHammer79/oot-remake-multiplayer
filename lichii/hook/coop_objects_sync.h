@@ -21,6 +21,7 @@
 //   reaction; a life that is not taken within 400 ms is written directly.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <deque>
@@ -41,6 +42,7 @@
 #include "coop/protocol/messages.hpp"
 #include "coop_npc_anim.h"
 #include "coop_guard.h"
+#include "coop_show_delay.h"
 
 namespace CoopObjects {
 
@@ -82,6 +84,9 @@ struct Seen {
     // Where a boss copy's own new hit landed (its game's hit record, +0x27c; IsBoss only, never one we replayed,
     // checked near the boss): sent with our DAMAGE so the owner's replay lands there (boss-intro).
     std::optional<coop::protocol::Vec3> hit_at{};
+    // Its Life component (0: none read); a copy boss's is held at life 1 by its own Life step
+    // (CoopBossNative::Table::HeldLifeStep) until its owner's dies.
+    std::uint64_t life_component = 0;
 };
 
 // An animation a copy should play (the owner's AS slot 0 command). The
@@ -173,6 +178,10 @@ struct LifeWrite {
     // Life step (Hookshot, patch 0007), so the game still runs its own death. For the test kill: a boss takes no
     // plain hit outside its weak point (Gohma on the ceiling). Never written directly: not taken, nothing happens.
     bool direct = false;
+    // Raise its life to `life` through the game's own Life step (a negative sum: the game's heal), never a write:
+    // a boss copy that becomes ours with less life than its old owner's had (held at 1 by HeldLifeStep, or
+    // lowered by its own hits) takes the old owner's life, so one hit never kills a near-full boss (Barinade).
+    bool heal = false;
 };
 
 // Shared: enemies, animals (a cucco is Animal_Cucco), townspeople (Npc_, but
@@ -352,6 +361,7 @@ struct LifeAsk {
     bool has_component = false;
     bool replay_seen = true;   // its damage step saw our last replayed hit (or we never replayed one)
     std::int32_t stale = 0;    // given to the step earlier and never taken (taken back now)
+    bool heal = false;         // LifeWrite::heal: a raise to `life` through the Life step
 };
 struct LifeRouted {
     LifeRoute route = LifeRoute::lost;
@@ -439,7 +449,15 @@ public:
     static constexpr std::uint64_t kStunEveryUs = 2'000'000;
     static constexpr std::uint64_t kPlaceStaleUs = 2'000'000;   // another player's place
     static constexpr std::uint64_t kFightUs = 12'000'000;
-    static constexpr std::uint64_t kBehindUs = 100'000;       // copies show the owner this late
+    static constexpr std::uint64_t kBehindUs = 100'000;       // copies show the owner at least this late
+    // Report 37: as late as that owner's puppet (coop_show_delay.h: from its samples' ages), never under kBehindUs.
+    static std::uint64_t BehindUs(std::uint8_t owner) { return std::max(kBehindUs, CoopShowDelay::Us(owner)); }
+    // A hold that waits for the owner's answer to our hit (kHitHoldUs, kReactHoldUs) is set for a LAN; over a
+    // slower line the answer is later by the extra delay both ways (report 37: at 300 ms ping it came after the
+    // hold, the copy played its old animation again and the hit was sent once more).
+    static std::uint64_t AnswerHoldUs(std::uint64_t lan_us, std::uint8_t owner) {
+        return lan_us + 2 * (BehindUs(owner) - kBehindUs);
+    }
     static constexpr std::uint64_t kExtrapolateUs = 150'000;
     static constexpr std::uint64_t kPoseStaleUs = 2'500'000;  // no sample this long: let it be
     static constexpr std::uint64_t kHurtWaitUs = 400'000;     // then write life directly
@@ -724,6 +742,9 @@ public:
     // The player who owns the object at `address` (0: the server, none: not
     // known). For coop_enemy_shots.
     std::optional<std::uint8_t> OwnerOf(std::uint64_t address) const;
+    // The owner of the copy at `address` said it died: its life 0 in the owner's samples, or its
+    // ObjectRemove dead (one boss death for everyone: the copy's Life step lets it die then).
+    bool OwnerSaysDead(std::uint64_t address) const;
     std::uint8_t OwnerOf(const coop::protocol::ObjectId& id) const;
     std::size_t HurtsTaken() const { return hurt_taken_; }
     std::size_t HurtsMissed() const { return hurt_missed_; }
@@ -840,6 +861,7 @@ private:
         // its owner said it died (OBJECT_REMOVE dead; 0 = not said).
         int resent = 0;
         std::uint64_t dead_at = 0;
+        bool owner_life_zero = false;  // its owner's samples said life 0 (OwnerSaysDead)
         bool dead_now = false;  // a kill from before we came: deleted at once
         // enemy-sync-3 (issue 133): our enemy, killed by another game's hit
         // that our game did not take, already said dead (OBJECT_REMOVE).

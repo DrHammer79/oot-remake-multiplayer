@@ -7,6 +7,12 @@
 # Files still open (a running emulator or server) are copied as they are.
 param([switch]$WithCrashDumps)
 $ErrorActionPreference = 'Stop'
+# Says at once that it runs, then one line per step and file: masking a 30 MB game log takes a while, and a blank
+# window looked dead to players (issue #67). collect-logs.cmd says the first line itself (before windows-checks).
+if (-not $env:OOT_COOP_COLLECT_SAID) { Write-Host 'Collecting your logs (this can take a few minutes)...' }
+# QuickEdit off first: a click in this window would pause the collecting (issue #68; console-mode.ps1, never fails).
+$consoleMode = Join-Path $PSScriptRoot 'console-mode.ps1'
+if (Test-Path -LiteralPath $consoleMode) { . $consoleMode; [void](Disable-KitQuickEdit) }
 . (Join-Path $PSScriptRoot 'log-mask.ps1')
 $mask = New-MaskState
 $kit = Split-Path -Parent $PSScriptRoot
@@ -17,6 +23,11 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) "coop-logs-$stamp-$PID"
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+function Format-KitSize([long]$Bytes) {
+    if ($Bytes -ge 1MB) { return '{0:N1} MB' -f ($Bytes / 1MB) }
+    if ($Bytes -ge 1KB) { return '{0:N0} KB' -f ($Bytes / 1KB) }
+    return "$Bytes bytes"
+}
 function Copy-Shared([string]$From, [string]$To, [bool]$Binary) {
     # Opens with read/write sharing so a log the emulator still writes can be read.
     # Text is masked on the way; only the copy is written.
@@ -96,8 +107,11 @@ if ($WithCrashDumps) {
 }
 
 $found = 0
+Write-Host 'Copying the files (addresses and names are masked in each):'
 for ($i = 0; $i -lt $picked.Count; $i += 2) {
     if (Test-Path -LiteralPath $picked[$i]) {
+        $size = try { (Get-Item -LiteralPath $picked[$i] -Force).Length } catch { 0 }
+        Write-Host "  $($picked[$i + 1]) ($(Format-KitSize $size))"
         Copy-Shared $picked[$i] (Join-Path $stage $picked[$i + 1]) ($picked[$i + 1] -like 'emulator\crash_dumps\*')
         $found++
     } else {
@@ -105,6 +119,7 @@ for ($i = 0; $i -lt $picked.Count; $i += 2) {
     }
 }
 
+Write-Host 'Noting this PC (Windows version, graphics, CPU, memory, network adapters)...'
 # No PC name and no addresses: only each adapter's name and the kind of its address.
 $about = @(
     "collected: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC",
@@ -138,6 +153,7 @@ $about += Get-Process lichii, coop_server -ErrorAction SilentlyContinue | ForEac
 
 # A standard zip on every PC ('/' names, one entry per file; log-mask.ps1). Not tar.exe or
 # Compress-Archive: a player's PC without tar.exe got Compress-Archive's '\' names.
+Write-Host 'Making the zip...'
 Write-LogZip $stage $zip
 Remove-Item -LiteralPath $stage -Recurse -Force
 Write-Host ''

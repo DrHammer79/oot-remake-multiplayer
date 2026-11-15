@@ -296,3 +296,16 @@ TEST_CASE("story: the Kakariko guard's gate and the letter scene are shared (iss
     }
     CHECK(host::flag_hash("Npc_Hylia_Soldier_003_GateOpen") == 0x19898d14u);
 }
+
+TEST_CASE("story: Zora's River waterfall opens for every player, with its scene (issue 61)") {
+    // StoneOfWater_WaterfallSplit sets the Bool, then plays the (shared) scene:
+    // sharing the scene alone left the other players' falls shut.
+    CHECK(host::flag_hash("Zorariver_TheWaterfallsplits") == 0xf16a3d82u);
+    CHECK(host::flag_hash("Zorariver_TheWaterfallsplits_Adult") == 0xa426db4bu);
+    for (const char* name : {"Zorariver_TheWaterfallsplits", "Zorariver_TheWaterfallsplits_Adult"}) {
+        const auto* f = CoopStory::Find(host::flag_hash(name));
+        REQUIRE_MESSAGE(f != nullptr, name);
+        CHECK(f->kind == CoopStory::Kind::world);
+    }
+    CHECK(CoopStory::Find(host::flag_hash("HavePlayedEvent.Dm_ZoraRiver_0010")) != nullptr);
+}

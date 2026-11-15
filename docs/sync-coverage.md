@@ -165,7 +165,7 @@ Status: **Fixed** (on main, or in this branch), **OK** (the rules already cover 
 
 | # | Case | Status | Why / what to do |
 |---|---|---|---|
-| I1 | Ruto's letter | **OK** | `IsGet.Item_Bottle_Letter` is not shared, so the letter is still in the other game's lake (`Obj_Bottle_Letter`, no key). Bottle contents are per player, so each player takes their own letter for King Zora (whose state is per game). Side effect: the second letter's bottle is shared as a new bottle (one extra empty bottle for everyone); harmless. |
+| I1 | Ruto's letter | **Fixed (items-share, issue 58)** | Bottle contents are per player, so the letter's bottle reached the others empty, and in a randomizer seed the only letter is in a shared chest: King Zora (per game) never moved for them. `IsGet.Item_Bottle_Letter` is shared now, and a player whose own King Zora has not moved gets the letter in their first empty bottle ([items.md](items.md), "The letters"). |
 | I2 | Fish, Blue Fire, bugs and other bottle contents needed to go on (Jabu-Jabu, Zora's Domain ice, the Ice Cavern) | **OK** | Per player, and every source can be used again. |
 | I3 | Trade sequence items (mirror rule): one player hands an item over and it is gone for everyone | **P2** | Optional quests (Biggoron's Sword, masks). A player halfway through loses their step. Later: share the trade step too, or make the trade items per player. |
 | I4 | Zelda's Letter, Ocarina of Time, songs, stones and medallions | **OK** | Shared items let the other player do the per-game event themselves (Kakariko gate, Temple of Time door) or skip it. |

@@ -9,10 +9,13 @@ stamp=$(date +%Y%m%d-%H%M%S)
 host=$(hostname 2>/dev/null || uname -n)
 out=$KIT/coop-logs-$stamp.tar.gz  # no PC name: it is masked inside too
 stage=$(mktemp -d "${TMPDIR:-/tmp}/coop-logs-XXXXXX")
+# Says at once that it runs, then one line per file (issue #67: a big game log takes a while to mask).
+echo 'Collecting your logs (this can take a few minutes)...'
 found=0
 pick() {  # pick FROM TO
     if [[ -f $1 ]]; then
         mkdir -p "$stage/$(dirname "$2")"
+        echo "  $2 ($(du -h -- "$1" 2>/dev/null | cut -f1))"
         cp -- "$1" "$stage/$2" && found=$((found + 1))
     else
         echo "Missing: ${1#"$KIT"/}"
@@ -109,6 +112,7 @@ FNR == 1 { if (outfile != "") close(outfile); outfile = FILENAME ".masked" }
     t = words(t, pc, "<pc>")
     print t > outfile
 }'
+echo 'Masking addresses and names in the copies, then packing them...'
 find "$stage" -type f ! -path '*/crash_dumps/*' | while IFS= read -r f; do
     { awk -v user="$(id -un 2>/dev/null)" -v pc="$host" "$mask_awk" "$f" && mv -f "$f.masked" "$f"; } || rm -f "$f" "$f.masked"   # never an unmasked file in the tarball
 done

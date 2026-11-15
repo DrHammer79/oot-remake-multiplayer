@@ -181,6 +181,10 @@ private:
         Kind kind = Kind::intro;
         bool skip = false;
         bool seen = false;  // our game has run it (its end counts only then)
+        // Our game asked it as the boss's own setting (Gohma's InsideTheDekuTree_BossAppear), not the flow:
+        // the fight's own start in our game, never skipped (boss-fix, player report #30).
+        bool own_setting = false;
+        bool kept_said = false;  // logged once that it is not skipped
         std::uint64_t skip_since = 0, skip_at = 0;
     };
     void Take(const coop::protocol::Message& m, const Local& local, std::uint64_t now_us, Actions& out);

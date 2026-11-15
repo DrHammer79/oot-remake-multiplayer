@@ -209,14 +209,29 @@ static void LogHits() {
     }
     const std::uint64_t enemy = TheKinds().EnemyHits();
     const std::uint64_t link = TheKinds().LinkHits();
-    if (enemy == enemy_said && link == link_said) {
+    static std::uint64_t boss_said = 0;
+    static std::uint64_t boss_in_said = 0;
+    static std::uint64_t boss_took_said = 0;
+    const std::uint64_t boss = TheKinds().BossSteps();
+    const std::uint64_t boss_in = TheKinds().BossDamageIn();
+    const std::uint64_t boss_took = TheKinds().BossDamageTaken();
+    if (enemy == enemy_said && link == link_said && boss == boss_said) {
         return;
     }
     const Values v = Now();
     LOG_INFO(Core, "coop: difficulty: the Life step scaled {} hits on enemies (life {}%) and {} on our Link (damage {}%)",
              enemy - enemy_said, v.hp_pct, link - link_said, v.damage_pct);
+    if (boss != boss_said) {
+        // Boss life scaling, traced apart (seed N2BTEYKM: "boss life not scaled"): a boss hit that never shows
+        // here does not go through the game's Life step sum.
+        LOG_INFO(Core, "coop: difficulty: bosses: {} Life steps with damage, {} damage in, {} taken (boss life {}%)",
+                 boss - boss_said, boss_in - boss_in_said, boss_took - boss_took_said, v.boss_hp_pct);
+    }
     enemy_said = enemy;
     link_said = link;
+    boss_said = boss;
+    boss_in_said = boss_in;
+    boss_took_said = boss_took;
 }
 
 void Frame(coop::host::Session* session) {

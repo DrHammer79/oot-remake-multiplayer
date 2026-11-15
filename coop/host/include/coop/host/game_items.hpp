@@ -16,6 +16,7 @@
 // No game data beyond the flag names and their hashes.
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <functional>
@@ -181,6 +182,53 @@ std::optional<std::string_view> ocarina_equip_mend(std::int32_t fairy, std::int3
 // raised; nothing for an ocarina not held.
 std::vector<std::uint32_t> ocarina_bools_mend(std::int32_t fairy, std::int32_t time,
                                               const std::function<std::optional<bool>(std::uint32_t)>& get);
+
+// The two letters (issue 58, docs/items.md, "The letters").
+namespace letters {
+// Zelda's Letter: the Kakariko guard takes it from the player who shows it and
+// sets his Bool (shared story). Each player kept theirs (max, issue 171), so it
+// stayed in the pouch of every player who never showed it.
+constexpr std::uint32_t kZelda = 0x6be5c3b0;     // PouchData.Item_ZeldaLetter.StockNum
+constexpr std::uint32_t kGateOpen = 0x19898d14;  // Npc_Hylia_Soldier_003_GateOpen
+// Ruto's Letter is a bottle's contents (BottleItem Enum "Letter"), per player as
+// every bottle's contents: another player got only the bottle, empty, and King
+// Zora (the game's ChallengeMgr, per game) never moved for them.
+constexpr std::uint32_t kRutoGot = 0x170b5df2;   // IsGet.Item_Bottle_Letter
+constexpr std::uint32_t kLetter = 0x0f24e808;    // the Enum value "Letter"
+constexpr std::uint32_t kEmpty = 0xbe69de49;     // the Enum value "Empty"
+struct Bottle {
+  std::uint32_t valid;  // PlayerStatus.AssignableItem.BottleInfo.Bottle<X>.IsValid
+  std::uint32_t item;   // ... .BottleItem
+};
+constexpr std::array<Bottle, 5> kBottles{{{0xf39ce410, 0x7d48df76},
+                                          {0x000ff6ea, 0x1edd164a},
+                                          {0xf63b1194, 0xb80c70a8},
+                                          {0xb7f052ce, 0xe4c1b1fc},
+                                          {0xe27b136d, 0x365e1953}}};
+// King Zora steps aside at Get_StoneOfWater Step07 (OOTRR start_state.rs
+// FOUNTAIN_STEPS): the quest's steps in the game's order, as name hashes.
+constexpr std::uint32_t kStoneOfWater = 0x0aa38424;  // the challenge Get_StoneOfWater
+constexpr std::array<std::uint32_t, 10> kKingWaits{0x57b849f0, 0x17bfaa46, 0xeb62add9, 0x0e5afad8, 0x6f917dfe,
+                                                   0x8b4b69e2, 0x27f660fe, 0x5cde171f, 0xec4c4a24, 0x21d6fa38};
+constexpr std::array<std::uint32_t, 10> kKingMoved{0xee867c27, 0xa594ed54, 0x5daeca58, 0x0be69809, 0x02428c32,
+                                                   0xc25a29d8, 0x2f0ed242, 0xa6447454, 0x84be6ff1, 0x4c0a63f4};
+}  // namespace letters
+
+// True when the held Zelda's Letter is spent: the gate's Bool is set (by any
+// player), so the guard never asks for it again. The guard takes it from the
+// shower; this takes it from the others.
+bool zelda_letter_spent(std::int32_t held, std::optional<bool> gate_open);
+
+// Whether King Zora has moved in this game, from the step its ChallengeMgr
+// holds for Get_StoneOfWater. Nothing for a step not in the quest.
+std::optional<bool> king_zora_moved(std::uint32_t live_step);
+
+// The BottleItem flag to put Ruto's Letter in, or nothing: when the letter was
+// got (by anyone), King Zora has not moved here, no bottle holds it, and a
+// bottle is owned and empty (the first). Anything unread leaves it alone.
+std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::optional<bool> king_moved,
+                                                const std::function<std::optional<bool>(std::uint32_t)>& valid,
+                                                const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item);
 
 // When to mend (ItemFlagStore::mend), kept by the hook across frames: for
 // the first frames after Link comes into the game (a save or a scene

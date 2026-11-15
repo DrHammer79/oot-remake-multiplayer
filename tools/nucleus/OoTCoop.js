@@ -5,7 +5,7 @@
 // Each player's game runs from its own Nucleus instance folder (links to the game's big files, its own small ones).
 // Player 1 starts the kit's co-op server (this PC only, a new join password each session) and plays on it; players
 // 2 to 4 join it. Every game reads its own controller itself (LICHII_COOP_PAD, patch 0015), also behind the other
-// windows, so no Nucleus input hooks are used.
+// windows, so no Nucleus input hooks are used (Nucleus only lists the pads).
 // Written for Nucleus's script engine (Jint) in plain ES3 style, so tools/nucleus/test_handler.js runs it under
 // Windows' own cscript too.
 
@@ -36,10 +36,14 @@ Game.FileSymlinkCopyInstead = ["longshot_options.ini", "language.txt", "longshot
     "longshot_prepared.bin", "longshot_pipelines.bin.built"];
 
 // Input: each game picks its own controller (LICHII_COOP_PAD) and reads it in the background; no hook DLLs.
+// XInputEnabled only makes Nucleus list the Xbox-style pads in its setup screen (DevicesFunctions.GamepadTimer_Tick
+// lists none without it) and give each player its pad (Context.GamepadId, XInput slot + 1). Nucleus injects or copies
+// input DLLs only for CustomDllEnabled, XInputPlusDll, UseX360ce and ProtoInput, all off here.
 Game.SupportsKeyboard = true;
 Game.Hook.CustomDllEnabled = false;
-Game.Hook.XInputEnabled = false;
-Game.Hook.DInputEnabled = false;
+Game.Hook.XInputEnabled = true;
+Game.Hook.XInputReroute = false;
+Game.Hook.DInputEnabled = false;   // DirectInput pads would get Nucleus's DirectInput order, not the game's
 Game.Hook.ForceFocus = false;
 
 // Windows: Nucleus places, sizes and unborders them.

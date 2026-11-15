@@ -5,6 +5,9 @@
 #   -NoUpdate   skip the update check (as play.ps1)
 param([switch]$NoUpdate)
 $ErrorActionPreference = 'Stop'
+# QuickEdit off first: a click in this window would pause the start (issue #68; console-mode.ps1, never fails).
+$consoleMode = Join-Path $PSScriptRoot 'console-mode.ps1'
+if (Test-Path -LiteralPath $consoleMode) { . $consoleMode; [void](Disable-KitQuickEdit) }
 . (Join-Path $PSScriptRoot 'start-checks.ps1')
 . (Join-Path $PSScriptRoot 'kit-paths.ps1')
 $kit = Split-Path -Parent $PSScriptRoot

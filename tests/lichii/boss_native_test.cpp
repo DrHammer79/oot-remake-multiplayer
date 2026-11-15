@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -429,4 +430,168 @@ TEST_CASE("native boss: a new owner sends the phase its own game's boss is in, n
     REQUIRE(s);
     CHECK(s->brain_verb == 4);
     CHECK(s->seq == 3);
+}
+
+// boss-fix (player reports #30, #31): the copy's own game runs its events and its own hit reactions.
+
+TEST_CASE("native boss: during our event a copy runs its own changes, then takes the owner's state again") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Gohma(Role::copy)});
+    t.Receive(kActor, BossBsa{3, 4, std::nullopt, {}});
+    FakeGuest g;
+    const std::int32_t at = 4;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));  // (already the owner's verb)
+    // The intro starts: the event's own brain verb and move run in our game.
+    t.SetEvent(true);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 9, true, false));
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(21, kNode), true, false));
+    CHECK(t.Totals().copy_own_run == 2);
+    CHECK(t.Totals().copy_skipped == 0);
+    // The owner's changes wait: none put in, no put-back, while the event runs.
+    t.Receive(kActor, BossBsa{4, 5, std::nullopt, {BossChange{4, BossBrain{5, false}}}});
+    for (int i = 0; i < Table::kDriftSteps + 5; ++i) {
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+    }
+    // Over: from the owner's state now (its brain verb).
+    t.SetEvent(false);
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kSetBrainVerb);
+    CHECK(c->x[1] == 5);
+    // And its own changes are skipped again.
+    CHECK(t.OnBrainVerb(kBsa, 9, false, false));
+}
+
+TEST_CASE("native boss: a copy's own change skipped just before our event is made late") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Gohma(Role::copy)});
+    t.Receive(kActor, BossBsa{3, 4, std::nullopt, {}});
+    FakeGuest g;
+    const std::int32_t at = 4;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    // An old skip (long before) and one in the frame the event began.
+    CHECK(t.OnBrainVerb(kBsa, 7, false, false));
+    for (std::uint64_t i = 0; i < Table::kLookBackSteps + 2; ++i) {
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+    }
+    CHECK(t.OnBrainVerb(kBsa, 9, true, false));
+    t.SetEvent(true);
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kSetBrainVerb);
+    CHECK(c->x[1] == 9);  // only the recent one
+    CHECK(c->x[2] == 1);  // with its own force
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    CHECK(t.Totals().copy_own_late == 1);
+}
+
+TEST_CASE("native boss: our own hit on a copy lets its own reaction run for a while") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Gohma(Role::copy)});
+    t.Receive(kActor, BossBsa{3, 4, std::nullopt, {}});
+    FakeGuest g;
+    const std::int32_t at = 4;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    // The stun's action was asked in the frame of the hit, before the walk saw the hit: skipped, then made late.
+    CHECK(t.OnActionVerb(kBsa, GameRequest(30, kNode), true, false));
+    t.NoteOwnHit(kActor);
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kMalloc);
+    c = t.Step(g, true, kBlock, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kRequestActionVerb);
+    CHECK(g.Get<std::int32_t>(kBlock + addr::kReqVerb) == 30);
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqNode) == kNode);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // What follows in the reaction runs.
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 12, false, false));
+    CHECK(t.Totals().copy_own_run == 1);
+    // A hit on a boss we own, or an unknown actor: nothing changes.
+    t.NoteOwnHit(kActor + 8);
+    // After the reaction time: the owner's state again, own changes skipped.
+    for (std::uint64_t i = 0; i < Table::kReactSteps; ++i) {
+        (void)t.Step(g, false, 0, kMain);
+    }
+    CHECK(t.OnBrainVerb(kBsa, 12, false, false));
+}
+
+TEST_CASE("native boss: the owner keeps none of its event's changes and sends its verb when it is over") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Gohma(Role::owner)});
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 3, false, false));
+    REQUIRE(t.OwnerState(kActor));
+    CHECK(t.OwnerState(kActor)->seq == 1);
+    t.SetEvent(true);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 9, true, false));  // the game runs it, nothing kept
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(21, kNode), true, false));
+    FakeGuest g;
+    std::int32_t at = 9;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    CHECK(t.OwnerState(kActor)->seq == 1);
+    CHECK(t.OwnerState(kActor)->brain_verb == 3);  // not the cutscene's verb
+    // The intro leaves her in her battle verb: sent as a change.
+    at = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    t.SetEvent(false);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    const auto s = t.OwnerState(kActor);
+    REQUIRE(s);
+    CHECK(s->seq == 2);
+    CHECK(s->brain_verb == 6);
+    REQUIRE_FALSE(s->recent.empty());
+    CHECK(std::get<BossBrain>(s->recent.back().what) == BossBrain{6, true});
+}
+
+TEST_CASE("native boss: a copy's own Life step holds it at 1 until the owner's dies") {
+    constexpr std::uint64_t kLife = 0x7700'0000;
+    Table t;
+    t.SetOn(true, true);
+    Boss copy = Gohma(Role::copy);
+    copy.life_component = kLife;
+    t.Publish({copy});
+    CHECK(t.Watches(kLife));
+    CHECK_FALSE(t.Watches(kLife + 0x10));
+    CHECK(t.HeldLifeStep(kLife, 30, 10) == 10);  // a hit that leaves life: as the game has it
+    CHECK(t.HeldLifeStep(kLife, 5, 21) == 4);    // a killing hit of its own: life 1 stays
+    CHECK(t.HeldLifeStep(kLife, 1, 3) == 0);
+    CHECK(t.HeldLifeStep(kLife + 0x10, 5, 21) == 21);  // another actor's: untouched
+    CHECK(t.Totals().copy_life_held == 2);
+    // The owner's died: the same step lets ours die.
+    copy.owner_dead = true;
+    t.Publish({copy});
+    CHECK(t.HeldLifeStep(kLife, 1, 1) == 1);
+    CHECK(t.Totals().copy_killed == 1);
+    const auto notes = t.TakeNotes();
+    CHECK(std::any_of(notes.begin(), notes.end(),
+                      [](const std::string& n) { return n.find("lets it die now") != std::string::npos; }));
+}
+
+TEST_CASE("native boss: the owner's own boss and a forgotten copy are never held") {
+    constexpr std::uint64_t kLife = 0x7700'0000;
+    Table t;
+    t.SetOn(true, true);
+    Boss owner = Gohma(Role::owner);
+    owner.life_component = kLife;
+    t.Publish({owner});
+    CHECK_FALSE(t.Watches(kLife));
+    CHECK(t.HeldLifeStep(kLife, 5, 21) == 21);
+    Boss copy = Gohma(Role::copy);
+    copy.life_component = kLife;
+    t.Publish({copy});
+    CHECK(t.HeldLifeStep(kLife, 5, 21) == 4);
+    t.Publish({});  // gone from the walk (its owner's ObjectRemove dead: nobody's now)
+    CHECK_FALSE(t.Watches(kLife));
+    CHECK(t.HeldLifeStep(kLife, 5, 21) == 21);
+    t.Publish({copy});
+    t.Reset();
+    CHECK_FALSE(t.Watches(kLife));
 }

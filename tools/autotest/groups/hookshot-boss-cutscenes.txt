@@ -9,3 +9,7 @@ hs-boss-far-gohma          expect="A:Dm_Deku_BossIn: our game started it"  expec
 
 [g2]
 hs-boss-cutscenes-dodongo  expect="A:Dm_DodongoCave_BossIn: our game started it"  expect="A:Dm_DodongoCave_BossOut: our game started the death"  label="boss cutscenes: King Dodongo intro + death"
+
+# boss-fix (player reports #30, #31): the non-owner's own intro hands control back, a copy stuns on its own hit.
+[boss-fix]
+hs-boss-fix-gohma       expect="B:our event: the copy runs its own"  expect="B:the copy takes the owner's state again"  expect="B:our own hit: the copy runs its own reaction"  label="#30 #31 Gohma two players"

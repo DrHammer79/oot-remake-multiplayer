@@ -1,4 +1,4 @@
-From 47071154b380820ebbd22a6083c4f45bbca5d376 Mon Sep 17 00:00:00 2001
+From a86fdae6d391cc47145f750a5306307eeab85d66 Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 20:38:47 -0900
 Subject: [PATCH] Co-op texture overrides in the WebGPU renderer
@@ -40,6 +40,3 @@ index c7d424a9..0322af4f 100644
  
      auto im = std::make_unique<Image>();
      im->gpu_va = va;
--- 
-2.56.0.windows.4
-

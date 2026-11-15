@@ -720,7 +720,9 @@ def to_play(bridge, log, timeout, clock=time.monotonic, sleep=time.sleep):
 
 # The renderer's start is done: its pipelines are made (from the caches or compiled now). Until then the game shows
 # nothing and reads no controller; with a cold driver cache that is minutes (~170 s seen), so a run waits for it.
-RENDERER_READY = re.compile(r"vk: precompile: \d+ programs, .* in \d+ ms")
+# Longshot rc.4 builds pipelines at their create (RX_VK_LOAD=create) and logs "vk: start-up: the shaders took N s"
+# instead of rc.3's precompile total.
+RENDERER_READY = re.compile(r"vk: precompile: \d+ programs, .* in \d+ ms|vk: start-up: the shaders took \d")
 
 
 def read_text(path):

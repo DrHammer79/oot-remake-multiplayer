@@ -64,9 +64,10 @@ class GameFlags {
   // Element `index` of a BoolArray flag. Read only.
   std::optional<bool> get_bool_array(std::uint32_t hash, std::uint32_t index);
   // A String64 flag (for example PlayerStatus.EquipWeapon, an actor name).
-  // Read only, from the table as 0x3758110 reads it; a write still in the
-  // game's queue is not seen until the game applies it. Nothing when the
-  // text is not 0-terminated within its buffer or not printable ASCII.
+  // From the table as 0x3758110 reads it, but a write of ours still waiting
+  // for the game's setter or in its queue first (as the other getters).
+  // Nothing when the text is not 0-terminated within its buffer or not
+  // printable ASCII.
   std::optional<std::string> get_string64(std::uint32_t hash);
 
   // Queues a write as the game's setter does. False when the flag is
@@ -78,6 +79,11 @@ class GameFlags {
   static bool set_float(WritableGameMemory& memory, std::uint32_t hash, float value);
   static bool set_enum(WritableGameMemory& memory, std::uint32_t hash, std::uint32_t value);
   static bool set_key64(WritableGameMemory& memory, std::uint64_t key, bool value);
+  // A String64 (at most 63 bytes of printable ASCII), as the game's push
+  // f_710376b9b0 queues it: the applier then writes the live text and the
+  // saved copy, so it lasts through loads and saves (issue 57: the equipped
+  // ocarina written by set_string64_now went back to "" at each scene load).
+  static bool set_string64(WritableGameMemory& memory, std::uint32_t hash, std::string_view text);
 
   // Test only (tools/autotest warp): writes a String64 flag's text straight
   // into its buffer, 0-terminated, without the game's queue, so the live
