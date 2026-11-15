@@ -152,7 +152,7 @@ add_executable(coop_tests
 )
 target_include_directories(coop_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook)
 # The Hookshot module and our patch to Hookshot (hookshot/): what can be checked without the game.
-target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cpp
+target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cpp hookshot/draw_golden_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_draw.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_dbno_draw.cpp
   hookshot/hud_dim_test.cpp
