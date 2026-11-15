@@ -348,6 +348,28 @@ fs::path own_dir_of(const fs::path& coop_dir) {
   return p.parent_path() / name.substr(0, name.size() - kCoopSuffix.size());
 }
 
+bool copy_dir_whole(const fs::path& from, const fs::path& to, std::string* error) {
+  auto fail = [error](const std::string& why) {
+    if (error != nullptr) *error = why;
+    return false;
+  };
+  std::error_code ec;
+  if (fs::exists(to, ec)) return fail("already there");
+  if (!fs::is_directory(from, ec)) return fail("no folder to copy from");
+  fs::path part = to;
+  part += ".part";
+  fs::remove_all(part, ec);  // an earlier try's
+  if (ec) return fail("could not remove an earlier copy: " + ec.message());
+  fs::copy(from, part, fs::copy_options::recursive, ec);
+  if (!ec) fs::rename(part, to, ec);
+  if (ec) {
+    const std::string why = ec.message();
+    fs::remove_all(part, ec);
+    return fail(why);
+  }
+  return true;
+}
+
 WriteResult write_coop_save(const fs::path& coop_dir, const SaveSlot& slot, const fs::path& own_dir) {
   if (!is_coop_dir(coop_dir) || is_coop_dir(own_dir) || slot.files.empty()) return WriteResult::not_coop;
   std::error_code ec;
@@ -438,12 +460,7 @@ bool decide_again(bool decided, bool over, bool in_game) {
 FolderChoice folder_choice(std::optional<bool> env, bool can_switch, bool connected, bool is_host, bool in_game) {
   if (!can_switch) return env && *env ? FolderChoice::coop : FolderChoice::own;
   if (!connected) return FolderChoice::wait;
-  // (Navi, 2026-11-15) A guest who joins with a save loaded plays the host's save too: it comes in now and is switched
-  // to on the title's menu with no file loaded (pending_step), never under the game being played, so no two saves mix.
-  // Before, such a guest kept its own save for the whole session (a friend who joined from the pause menu restarted at
-  // the beginning of his own early save while the host was far ahead).
-  (void)in_game;
-  if (is_host) return FolderChoice::own;
+  if (is_host || in_game) return FolderChoice::own;
   return FolderChoice::coop;
 }
 

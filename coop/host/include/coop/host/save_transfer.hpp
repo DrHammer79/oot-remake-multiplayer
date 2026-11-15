@@ -185,6 +185,13 @@ bool is_coop_dir(const std::filesystem::path& dir);
 std::filesystem::path coop_dir_of(const std::filesystem::path& own_dir);
 std::filesystem::path own_dir_of(const std::filesystem::path& coop_dir);
 
+// The first multiplayer saves (the hook's solo/multiplayer save sets, coop_save ChooseSaveSet): `from` copied whole
+// to `to`. The copy goes to `to` + ".part" and is renamed to `to` only once it is complete, so a failed copy never
+// leaves a half `to` that would be played from ever after (a ".part" left by an earlier try is removed first). `from`
+// is only read. False when `to` already exists (nothing done), when `from` is not a folder, or on a failure (`to` then
+// absent, `error` says why).
+bool copy_dir_whole(const std::filesystem::path& from, const std::filesystem::path& to, std::string* error);
+
 enum class WriteResult {
   written,
   not_coop,  // refused: the folder is not a co-op save folder (never a player's own saves)
@@ -205,9 +212,8 @@ WriteResult write_coop_save(const std::filesystem::path& coop_dir, const SaveSlo
 // (the join helper) and an old address may be a friend's while this player now hosts.
 // - Where the save folder can be switched while the game runs (Hookshot's patch 0008): the session decides at the
 //   first connection that has a host, whatever the start was (the title menu can Host or Join after any start): a guest
-//   plays from the co-op folder, the host from its own. (Navi) A guest with a save loaded (Link in the game) plays the
-//   host's too: it is switched to on the title's menu with no file loaded (pending_step), never under a game being
-//   played. `env` is not used there.
+//   plays from the co-op folder, the host from its own. A game that already has a save loaded (Link in the game) keeps
+//   its own: a switch then would mix two saves. `env` is not used there.
 // - Where it is fixed when the game starts (the emulator): `env`, LICHII_COOP_HOST_SAVE when set (play.ps1: 1 for a
 //   join, by address or invite; 0 for a host; or coop-options.ini), else its own.
 enum class FolderChoice { wait, own, coop };
