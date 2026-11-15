@@ -100,7 +100,7 @@ TEST_CASE("draw list: an outline's copies of the same words are stored once") {
     CHECK(std::string(coop_draw_text_of(l.get(), &l->cmd[10])).empty());
 }
 
-TEST_CASE("draw list: full, the rest is dropped and counted; nothing written past the end") {
+TEST_CASE("draw list: full, the rest is dropped and counted, nothing written past the end") {
     auto l = NewList();
     for (int i = 0; i < COOP_DRAW_MAX_CMDS + 5; ++i) {
         coop_draw_rect(l.get(), 0, 0, 1, 1, 0, 0);
