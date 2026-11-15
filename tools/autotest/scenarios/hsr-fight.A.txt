@@ -13,29 +13,31 @@ give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 assign SlingShot
 wait 120
-place -12.0 48.5 66.5   # the corridor before Gohma's door
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+place -12.0 48.5 66.5   # the corridor, 11 m before the door
 wait 240
 goto -4.0 67.5 1.0 600
 goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
 wait 2400               # the door's event and the intro
 mark a-re-in
-goto 17.0 67.8 1.5 600  # under her: her drop is the room's trigger for the owner's own Link (GohmaStage floor Area x 22.5 z 68.2)
+watch Enemy_DungeonBoss_Gohma 0 1.7 1.5
+goto 17.0 67.8 1.5 600  # under her: her drop is the room's trigger for the owner's own Link (floor Area x 22.5 z 68.2)
 aim Enemy_DungeonBoss_Gohma 0 0 0 240   # look up at her
 wait 600               # her drop
 mark a-trigger
-goto 12.0 67.8 1.5 600  # back inside the room, 10 m from its centre
-watch Enemy_DungeonBoss_Gohma 0 2.0 1.5
-wait 300
+goto 12.0 67.8 1.5 600  # inside the room, 10 m from its centre
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
 mark a-r1
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
 mark a-r1-seed
-wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -44,17 +46,16 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r1-hit
-wait 120
-mark a-r2
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
-mark a-r2-seed
 wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+mark a-r2
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r2-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -63,17 +64,16 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r2-hit
-wait 120
-mark a-r3
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
-mark a-r3-seed
 wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+mark a-r3
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r3-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -82,17 +82,18 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r3-hit
-wait 120
-mark a-r4
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
-mark a-r4-seed
 wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+mark a-r4
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r4-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -101,17 +102,16 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r4-hit
-wait 120
-mark a-r5
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
-mark a-r5-seed
 wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+mark a-r5
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r5-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -120,17 +120,16 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r5-hit
-wait 120
-mark a-r6
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
-hold ZL 20              # lock on (the game's own target)
-hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
-hold ZL 20
-aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
-press ZR                # fires, if letting go did not
-mark a-r6-seed
 wait 60
-near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+mark a-r6
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r6-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
 hold ZL+Y 8
@@ -139,8 +138,198 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r6-hit
-wait 120
+wait 60
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+mark a-r7
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r7-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r7-hit
+wait 60
+mark a-r8
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r8-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r8-hit
+wait 60
+mark a-r9
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r9-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r9-hit
+wait 60
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+mark a-r10
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r10-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r10-hit
+wait 60
+mark a-r11
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r11-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r11-hit
+wait 60
+mark a-r12
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r12-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r12-hit
+wait 60
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+mark a-r13
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r13-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r13-hit
+wait 60
+mark a-r14
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r14-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r14-hit
+wait 60
+mark a-r15
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r15-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r15-hit
+wait 60
+setflag PlayerStatus.MaxLife 80   # 20 hearts: a test Link must outlive the fight (run 122137: Game Over at 3)
+setflag PlayerStatus.Life 80
+mark a-r16
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+hold ZL 10              # lock on (the game's own target: her eye)
+hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
+hold ZL 10
+mark a-r16-seed
+until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r16-hit
+wait 60
+mark a-fight-over
 wait 1800               # her death and its event
+mark a-dead
 goto 22.5 68.2 1.5 900  # the room's centre, where the heart container falls
 wait 600
 goto 21.0 68.2 1.5 300

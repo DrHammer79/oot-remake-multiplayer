@@ -124,6 +124,7 @@ struct TestActorSeen {
     std::array<float, 3> at{};    // the actor's place plus the offset turned with it
     std::array<float, 3> root{};  // the actor's place
     std::int32_t life = -1;       // -1: no life read
+    std::string anim;             // its animation (slot 0) now, empty when not read
     std::uint64_t seen_us = 0;    // CoopEvery::NowUs() of the walk that saw it
 };
 // The last walk's sight of the watched actor (nothing: none seen yet, or not watching).

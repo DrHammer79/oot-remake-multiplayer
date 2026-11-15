@@ -335,6 +335,15 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             } else {
                 return fail("want: watch ACTOR [DX DY DZ] or watch off");
             }
+        } else if (cmd == "UNTIL") {
+            // until ACTOR PATTERN TICKS: the Hookshot driver's (waits for the actor's animation); skipped here.
+            std::uint32_t ticks = 0;
+            const auto* end = w.size() == 4 ? w[3].data() + w[3].size() : nullptr;
+            if (w.size() != 4 || std::from_chars(w[3].data(), end, ticks).ptr != end) {
+                return fail("want: until ACTOR ANIM[|ANIM...] TICKS");
+            }
+            step.kind = Kind::driver;
+            step.mark = std::string(w[0]);
         } else if (cmd == "AIM" || cmd == "NEAR") {
             // The Hookshot driver's steps (tools/autotest/hookshot.py): checked as it checks them, skipped here.
             std::size_t n = w.size();
@@ -1104,9 +1113,11 @@ void WriteWatch() {
         }
         g_state.watch_said_us = seen->seen_us;
         const OnScreen o = Project(frame->clip_from_world, seen->at, frame->y_down);
-        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d\n", t, o.x, o.y,
-                      o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1], seen->root[2],
-                      seen->life);
+        std::string anim = seen->anim.empty() ? std::string("-") : seen->anim.substr(0, 64);
+        std::replace_if(anim.begin(), anim.end(), [](char c) { return c == ' ' || c == '\n' || c == '\r'; }, '_');
+        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d %s\n", t, o.x,
+                      o.y, o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1], seen->root[2],
+                      seen->life, anim.c_str());
     }
     auto out_path = g_state.path;
     out_path += ".watch";

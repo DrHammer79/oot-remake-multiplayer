@@ -668,8 +668,9 @@ class AimGame(FakeGame):
             self.sights += 1
             x, y = self.target[0] - self.view[0], self.target[1] - self.view[1]
             with open(self.path + ".watch", "w", encoding="utf-8") as f:
-                f.write("watch %d.5 %.4f %.4f 7.5 %.3f %.3f %.3f %.3f %.3f %.3f 21\n"
-                        % ((self.sights,) + (x, y) + tuple(self.actor) + tuple(self.actor)))
+                f.write("watch %d.5 %.4f %.4f 7.5 %.3f %.3f %.3f %.3f %.3f %.3f 21 %s\n"
+                        % ((self.sights,) + (x, y) + tuple(self.actor) + tuple(self.actor)
+                           + ("AttackWait" if self.sights > 20 else "CeilingMove",)))
 
 
 def play_aim(text, game):
@@ -757,6 +758,21 @@ class AimTest(unittest.TestCase):
             self.assertTrue(any(line.startswith("coop: test near reached") for line in log.lines), log.lines)
             self.assertLess(math.hypot(game.pos[0] - 6.0, game.pos[2] + 8.0), 1.6)
             self.assertEqual(game.held, [])
+
+    def test_until_waits_for_the_animation(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            open(path, "w").close()
+            game = AimGame(path)
+            game, log, _, _, _ = play_aim("until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 900\n"
+                                          "until Enemy_DungeonBoss_Gohma Down_ 30", game)
+            self.assertTrue(any(line.startswith("coop: test until Enemy_DungeonBoss_Gohma seen AttackWait")
+                                for line in log.lines), log.lines)
+            self.assertIn("coop: test until Enemy_DungeonBoss_Gohma timed out (last AttackWait)", log.lines)
+            self.assertEqual(game.cmds("press", "stick"), [])
+        with self.assertRaises(hs.ScriptError):
+            hs.parse("until Gohma Down 3x")
 
     def test_old_sight_is_not_used(self):
         import tempfile

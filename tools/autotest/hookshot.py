@@ -277,6 +277,12 @@ def parse(text):
                 bad = _keys(words[6], s)
                 if bad:
                     fail("unknown key " + bad)
+        elif cmd == "UNTIL":
+            # until ACTOR ANIM[|ANIM...] TICKS: no input until the actor plays one of those animations (its name starts
+            # with one), from the watch file; logs "until ... seen ANIM" or "until ... timed out".
+            if len(w) != 4 or _ticks(w[3]) is None or not all(w[2].split("|")):
+                fail("want: until ACTOR ANIM[|ANIM...] TICKS")
+            s.kind, s.name, s.start, s.ticks = "until", w[1], w[2], _ticks(w[3])
         elif cmd == "NEAR":
             # near ACTOR RADIUS TICKS [KEYS]: a goto to where the actor stands now (followed as it moves).
             if len(w) not in (4, 5) or _number(w[2]) is None or _number(w[2]) < 0.2 or _ticks(w[3]) is None:
@@ -629,7 +635,7 @@ class Player:
         except OSError:
             return None
         w = line.split()
-        if len(w) != 12 or w[0] != "watch":
+        if len(w) not in (12, 13) or w[0] != "watch":
             return None
         try:
             v = [float(x) for x in w[1:11]]
@@ -641,7 +647,9 @@ class Player:
             self._watch_t, self._watch_at = v[0], now
         elif now - self._watch_at > WATCH_STALE:
             return None
-        return {"x": v[1], "y": v[2], "w": v[3], "at": tuple(v[4:7]), "root": tuple(v[7:10]), "life": life}
+        anim = w[12] if len(w) == 13 and w[12] != "-" else ""
+        return {"x": v[1], "y": v[2], "w": v[3], "at": tuple(v[4:7]), "root": tuple(v[7:10]), "life": life,
+                "anim": anim}
 
     def _watch(self, s, offset):
         if not self.commands:
@@ -654,6 +662,25 @@ class Player:
                      % (s.kind, s.line))
             return False
         return True
+
+    def until(self, s, t0):
+        """until: waits, no input, until the watched actor plays one of the animations (by name start)."""
+        if not self._watch(s, (0.0, 0.0, 0.0)):
+            return t0
+        t0 = max(t0, self.clock())
+        end = t0 + s.ticks / TICKS
+        wanted = s.start.split("|")
+        last = ""
+        while self.clock() < end:
+            w = self.read_watch()
+            if w is not None:
+                last = w["anim"]
+                if any(last.startswith(a) for a in wanted):
+                    self.log("coop: test until %s seen %s after %.1f s" % (s.name, last, self.clock() - t0))
+                    return self.clock()
+            self._until(self.clock() + self.steer_every)
+        self.log("coop: test until %s timed out (last %s)" % (s.name, last or "none"))
+        return self.clock()
 
     def near(self, s, t0):
         """near: a goto to the watched actor's place, followed as it moves."""
@@ -846,6 +873,9 @@ class Player:
                 t = max(t, self.clock())
             elif s.kind in ("goto", "toward"):
                 t = max(t, self.steer(s, max(t, self.clock())))
+            elif s.kind == "until":
+                self._until(t)
+                t = max(t, self.until(s, t))
             elif s.kind == "near":
                 self._until(t)
                 t = max(t, self.near(s, t))

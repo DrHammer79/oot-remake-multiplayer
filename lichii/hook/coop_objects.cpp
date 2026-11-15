@@ -3191,6 +3191,7 @@ private:
             }
         }
         t.life = best->life ? best->life->life : -1;
+        t.anim = best->animation ? best->animation->name : std::string{};
         t.seen_us = CoopEvery::NowUs();
         std::lock_guard lock(KeyRefundMutex());
         if (TestWatched().name == name) {

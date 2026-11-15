@@ -549,6 +549,8 @@ TEST_CASE("testinput: aim and near are checked, then skipped (the Hookshot drive
     CHECK_FALSE(Parse("aim Gohma 0 1 0 60 NOPE\n", error));
     CHECK_FALSE(Parse("near Gohma 0.1 60\n", error));
     CHECK_FALSE(Parse("near Gohma 2\n", error));
+    CHECK_FALSE(Parse("until Gohma Down_Start\n", error));
+    CHECK(Parse("until Gohma PreAttack|AttackWait 900\n", error).has_value());
     Runner r(Must("aim Gohma 0 1.5 0.5 300 ZR\naim Gohma 0 0 0 60 left\nnear Gohma 2 600 B\nmark after\n"));
     std::vector<std::string> log;
     r.Advance(0.0, std::nullopt, log);
