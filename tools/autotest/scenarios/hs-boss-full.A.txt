@@ -27,6 +27,8 @@
 #     her death cutscene in both (shots a-dead / b-dead); never "lost kill" / "killed here, owner still shows life".
 #  6. ONE CONTAINER EACH: each game "heart container: player N took it, everyone's maximum life M" once, M the same.
 #  7. #88 GUEST WARP: B's log "(asked as InsideTheDekuTree_BossDie)" and B's scene changes (shot b-warped).
+#  8. If a Link dies (Game Over): with boss-gameover-b 05db896a its log "our Link died: a Game Over, not the boss's
+#     death" and no "boss beaten" / "sent 5" while she lives (run 122137 had a false "boss beaten" here).
 #! noload
 #! start coop: test warp done
 #! switches LICHII_COOP_DEBUG_BOSS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_CHEATS=1
