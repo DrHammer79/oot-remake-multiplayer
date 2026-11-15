@@ -81,3 +81,16 @@ add_library(coop_voice STATIC
 )
 target_include_directories(coop_voice PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/voice/include")
 target_link_libraries(coop_voice PUBLIC coop_protocol PRIVATE coop_warnings)
+
+# The platform interface (docs/platform.md): coop_platform.h, the C table an adapter fills (the Longshot module, an
+# ExeFS code mod), and coop::os, the core's threads/locks/time/files/sockets over it with a std backend on PC.
+# v1 step 1: nothing links it yet but the tests.
+add_library(coop_platform STATIC
+  platform/src/os.cpp
+  platform/src/os_std.cpp
+)
+target_include_directories(coop_platform PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/platform/include")
+target_link_libraries(coop_platform PRIVATE coop_warnings)
+if(WIN32)
+  target_link_libraries(coop_platform PRIVATE ws2_32)
+endif()
