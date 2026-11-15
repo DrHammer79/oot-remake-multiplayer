@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Checks that coop_core (cmake/coop_core.cmake) stays platform-free.
+"""Checks that coop_core (cmake/coop_core.cmake, lists in cmake/coop_core_sources.cmake) stays platform-free.
 
-coop_core is built once and linked by every adapter (the Longshot module, the emulator, later an ExeFS
-code mod), so none of its files, nor anything they include, may use:
+coop_core is built once and linked by the adapters (the Longshot module, later an ExeFS code mod; the emulator
+compiles the same files in its core, tools/check_core_flags.py), so none of its files, nor anything they include, may use:
   - an OS header (windows.h and friends, POSIX system headers),
   - an emulator header (core/, common/, video_core/, Qt) or a Hookshot/Longshot one (hos_coop_*, Vulkan, SDL),
   - an #if on LICHII_COOP or COOP_HOOKSHOT (the library is built without them, so such a block would
@@ -39,13 +39,13 @@ FORBIDDEN = [
 def cmake_list(text: str, name: str) -> list[str]:
     m = re.search(r'set\(\s*' + re.escape(name) + r'\b(.*?)\)', text, re.S)
     if not m:
-        raise ValueError(f'no set({name} ...) in cmake/coop_core.cmake')
+        raise ValueError(f'no set({name} ...) in cmake/coop_core_sources.cmake')
     body = re.sub(r'#[^\n]*', '', m.group(1))
     return body.split()
 
 
 def core_sources(root: Path) -> list[Path]:
-    text = (root / 'cmake' / 'coop_core.cmake').read_text(encoding='utf-8')
+    text = (root / 'cmake' / 'coop_core_sources.cmake').read_text(encoding='utf-8')
     hook = [root / 'lichii' / 'hook' / n for n in cmake_list(text, 'COOP_CORE_HOOK_SOURCES')]
     ui = [root / 'hookshot' / 'src' / n for n in cmake_list(text, 'COOP_CORE_UI_SOURCES')]
     return hook + ui

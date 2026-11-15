@@ -31,7 +31,7 @@ Online co-op for the Ocarina of Time remake on PC. Up to 16 players see each oth
 |---|---|
 | `coop/` | Shared library: `protocol/` (messages and codec), `net/` (ENet transport, clock), `host/` (game memory readers, flags, saves), `presence/`, `overlay/`, `voice/` |
 | `server/` | `coop_server`: relays and decides, never runs the game (sessions, relay, UPnP, hole punching) |
-| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into both the emulator and the Longshot module. Platform-free files: `cmake/coop_core.cmake` (library `coop_core`, checked by `tools/check_core.py`); the rest: `lichii/hook/core.cmake` |
+| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into both the emulator and the Longshot module. Platform-free files: `cmake/coop_core_sources.cmake` (library `coop_core`, checked by `tools/check_core.py`); the rest: `lichii/hook/core.cmake` |
 | `lichii/` (rest) | Emulator pin (`PIN`), fetch scripts and patches for Fritchii |
 | `hookshot/src/` | The Longshot module: frame driver, menus, chat box, drawing, input |
 | `hookshot/patches/`, `hookshot/PIN` | Our small patches to Longshot and the commit they apply to |

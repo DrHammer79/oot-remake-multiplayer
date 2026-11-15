@@ -71,7 +71,7 @@ With `LICHII_COOP` off (the default) the patch changes nothing in the build.
 | File | Change |
 |---|---|
 | `CMakeLists.txt` | The `LICHII_COOP` option and `LICHII_COOP_DIR`. Stops the configure when `ENABLE_UPDATE_CHECKER` is on as well (see "The emulator's own updater"). When on, adds this repo with `add_subdirectory` (no tests, no server, no test tool) before `src/`. |
-| `src/core/CMakeLists.txt` | When on, includes `hook/core.cmake`: the hook files with emulator glue built into `core`, linked with our `coop_core` (the platform-free hook files, `cmake/coop_core.cmake`), `coop`, `coop_net`, `coop_host`, `coop_presence` and `coop_overlay`. |
+| `src/core/CMakeLists.txt` | When on, includes `hook/core.cmake`: the hook built into `core` (with the platform-free files `cmake/coop_core_sources.cmake` lists, so they keep Fritchii's flags), linked with our `coop`, `coop_net`, `coop_host`, `coop_presence` and `coop_overlay`. |
 | `src/yuzu/CMakeLists.txt` | When on, includes `hook/qt.cmake`: the co-op panel (`hook/coop_window.cpp`) built into the Qt frontend. |
 | `src/yuzu/main_window.cpp` | Starts co-op and its panel once the render window exists (`CoopWindow::Attach`), and stops it when the window closes (`CoopHook::Shutdown`). |
 | `src/core/hle/service/nx2_gsv.h` | In `Composite` (the Switch 2 present path, the one Ocarina uses), calls `CoopHook::OnFrame` after the speed limiter and the frame-time stats. |

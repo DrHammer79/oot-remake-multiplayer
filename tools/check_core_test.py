@@ -24,7 +24,7 @@ class CheckCoreTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        files = {'cmake/coop_core.cmake': cmake,
+        files = {'cmake/coop_core_sources.cmake': cmake,
                  'lichii/hook/coop_a.cpp': '#include "coop_a.h"\n#include <vector>\n',
                  'lichii/hook/coop_a.h': '#pragma once\n#include "coop/host/x.hpp"\n',
                  'coop/host/include/coop/host/x.hpp': '#pragma once\n',

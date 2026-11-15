@@ -34,16 +34,18 @@ target_sources(core PRIVATE
     "${_coop_hook}/coop_testinput.cpp"
     "${_coop_hook}/coop_time.cpp"
 )
+# coop_core's hook files (cmake/coop_core_sources.cmake), compiled here as before rather than linked as the
+# coop_core library: so they keep Fritchii's own flags for core (-fwrapv, -fno-rtti; MSVC /GT, /GR-, ...),
+# which a library outside src/ would not get. tools/check_core_flags.py checks that in CI.
+include("${LICHII_COOP_DIR}/cmake/coop_core_sources.cmake")
+foreach(_coop_name IN LISTS COOP_CORE_HOOK_SOURCES)
+    target_sources(core PRIVATE "${_coop_hook}/${_coop_name}")
+endforeach()
 # Public, so video_core (which links core) sees them: the patched
 # vk_rasterizer.cpp includes coop_camera_track.h under LICHII_COOP.
 target_include_directories(core PUBLIC "${_coop_hook}")
 target_compile_definitions(core PUBLIC LICHII_COOP)
-# coop_core (cmake/coop_core.cmake): the platform-free hook files and the coop/* libraries.
-target_link_libraries(core PRIVATE coop_core coop coop_net coop_host coop_presence coop_overlay coop_voice)
-# The core's files call the hook files above that stay in core (the ones with LICHII_COOP glue), and core
-# is a static library too: name that edge, so CMake repeats the pair on the link line (GNU ld reads a
-# static library once).
-target_link_libraries(coop_core INTERFACE core)
+target_link_libraries(core PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_voice)
 # Which co-op commit is built in, for the log ("coop: build ..."). Read when
 # CMake configures, so reconfigure after a pull to keep it current.
 execute_process(COMMAND git -C "${LICHII_COOP_DIR}" describe --tags --always --dirty
