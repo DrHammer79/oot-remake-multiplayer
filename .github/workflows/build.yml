@@ -79,6 +79,11 @@ jobs:
         run: python tools/autotest/tests/test_kit_pair.py -v
       - name: Bad-connection relay tests
         run: python tools/netsim/tests/test_netsim.py -v
+      # coop_core (cmake/coop_core.cmake) stays platform-free: no OS, emulator or Hookshot header, no LICHII_COOP #if.
+      - name: Platform-free core check
+        run: |
+          python tools/check_core_test.py -v
+          python tools/check_core.py
       - name: ExeFS prototype NSO converter tests
         run: python tools/switch_mod/elf2nso_test.py -v
       - name: ExeFS module lift check tests
