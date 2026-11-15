@@ -215,7 +215,14 @@ def fake_player_pack(variant):
         "Component/ModelInfo/P.engine__component__ModelInfo.bgyml": byml.dumps({"FmdbName": "P"}),
         f"Component/ModelInfo/{variant}.engine__component__ModelInfo.bgyml": byml.dumps({"FmdbName": variant}),
         "Component/AnimationParam/P.engine__component__AnimationParam.bgyml": byml.dumps({"A": []}),
-        "Component/Physics/P.engine__component__PhysicsParam.bgyml": byml.dumps({"Rigid": 1}),
+        "Component/Physics/P.engine__component__PhysicsParam.bgyml": byml.dumps(
+            {"Rigid": 1, "ControllerSetPath": "Work/Phive/ControllerSetParam/P.phive__ControllerSetParam.gyml"}),
+        # Link's controller set: his body and character controller (never the puppet's) and his cloth (v1 B1).
+        "Phive/ControllerSetParam/P.phive__ControllerSetParam.bgyml": byml.dumps(
+            {"CharacterController": {"Radius": 0.4}, "RigidBodies": [{"Name": "Body"}],
+             "Cloth": {"SetupFile": "Work/Phive/ClothSetup/P.phive__ClothSetupParam.gyml"},
+             "ClothList": ["Hair", "Hood"]}),
+        "Phive/ClothSetup/P.phive__ClothSetupParam.bgyml": byml.dumps({"Hair": 1}),
         "Component/ELink/Player.engine__component__ELinkParam.bgyml": byml.dumps({"UserName": "Player"}),
         "Component/SLink/Player.engine__component__SLinkParam.bgyml": byml.dumps({"UserName": "Player"}),
         f"Component/SLink/Player_{variant}.engine__component__SLinkParam.bgyml": byml.dumps(
@@ -328,8 +335,17 @@ class BuildPackTest(unittest.TestCase):
         self.assertNotIn("$parent", doc)
         self.assertEqual(comps["ModelInfoRef"], "?Component/ModelInfo/Child.engine__component__ModelInfo.bgyml")
         self.assertEqual(comps["ASRef"], "?AS/Player_Adult.root.asb")
-        for k in ("ActorNameRef", "PhysicsRef"):
-            self.assertNotIn(k, comps)
+        self.assertNotIn("ActorNameRef", comps)
+        # v1 B1: a Physics of its own (slot 10) with Link's cloth only, never his body or controller.
+        own_phys, own_cs = build.physics_paths("CoopPuppet_Child")
+        self.assertEqual(comps["PhysicsRef"], "?" + own_phys)
+        self.assertEqual(byml.loads(out[own_phys]),
+                         {"ControllerSetPath": "Work/Phive/ControllerSetParam/CoopPuppet_Child.phive__ControllerSetParam.gyml"})
+        self.assertEqual(byml.loads(out[own_cs]),
+                         {"Cloth": {"SetupFile": "Work/Phive/ClothSetup/P.phive__ClothSetupParam.gyml"},
+                          "ClothList": ["Hair", "Hood"]})
+        self.assertIn("Phive/ClothSetup/P.phive__ClothSetupParam.bgyml", out)
+        self.assertNotIn("Phive/ControllerSetParam/P.phive__ControllerSetParam.bgyml", out)
         self.assertEqual(comps["ActorLogicNodeRef"], build.FIXED_COMPONENTS["ActorLogicNodeRef"])
         # Referenced members come along, through $parent too; the rest stay out.
         self.assertIn("Component/ASInfo/Base.engine__component__ASInfo.bgyml", out)
@@ -414,7 +430,15 @@ class BuildPackTest(unittest.TestCase):
         self.assertEqual(byml.loads(out[own]), {"IsResidentEmitter": True, "SubLayerSensor": "PerceptionPlayer"})
         self.assertEqual(comps["AffiliationRef"],
                          "?Component/AffiliationParam/Player.game__component__AffiliationParam.bgyml")
-        self.assertEqual(comps["PhysicsRef"], "?" + build.PERCEPTION_PHYSICS)
+        # The perception's body-less Physics, with Link's cloth in its (empty) controller set (v1 B1).
+        own_phys, own_cs = build.physics_paths("CoopPuppet_Child")
+        self.assertEqual(comps["PhysicsRef"], "?" + own_phys)
+        self.assertEqual(byml.loads(out[own_phys]), {
+            "$parent": "Work/Component/Physics/ProjectBase.engine__component__PhysicsParam.gyml",
+            "ControllerSetPath": "Work/Phive/ControllerSetParam/CoopPuppet_Child.phive__ControllerSetParam.gyml"})
+        self.assertEqual(sorted(byml.loads(out[own_cs])), ["Cloth", "ClothList"])
+        _, ap0, _, _ = build.build_pack(members, "Child", perception=seen_by, cloth=False)
+        self.assertEqual(byml.loads(ap0)["Components"]["PhysicsRef"], "?" + build.PERCEPTION_PHYSICS)
         for p in (build.PERCEPTION_PHYSICS, build.PERCEPTION_CONTROLLERS,
                   "Component/AffiliationParam/Player.game__component__AffiliationParam.bgyml"):
             self.assertIn(p, names)
@@ -425,8 +449,35 @@ class BuildPackTest(unittest.TestCase):
     def test_pack_no_perception(self):
         _, ap, _, _ = build.build_pack(fake_player_pack("Child"), "Child")
         comps = byml.loads(ap)["Components"]
-        for k in ("AffiliationRef", "PerceptionEmitterRef", "PhysicsRef"):
+        for k in ("AffiliationRef", "PerceptionEmitterRef"):
             self.assertNotIn(k, comps)
+        self.assertEqual(comps["PhysicsRef"], "?" + build.physics_paths("CoopPuppet_Child")[0])
+        _, ap, names, _ = build.build_pack(fake_player_pack("Child"), "Child", cloth=False)   # (--no-cloth)
+        self.assertNotIn("PhysicsRef", byml.loads(ap)["Components"])
+        self.assertFalse([n for n in names if "ControllerSet" in n or "Physics" in n])
+
+    def test_cloth_checks(self):
+        members = fake_player_pack("Child")
+        comps = build.flatten_actor_param(members, "Player_Child")
+        no_cloth = dict(members)
+        no_cloth["Phive/ControllerSetParam/P.phive__ControllerSetParam.bgyml"] = byml.dumps({"RigidBodies": []})
+        with self.assertRaises(build.BuildError):
+            build.puppet_cloth(no_cloth, comps, "CoopPuppet_Child")
+        no_cs = dict(members)
+        del no_cs["Phive/ControllerSetParam/P.phive__ControllerSetParam.bgyml"]
+        with self.assertRaises(build.BuildError):
+            build.puppet_cloth(no_cs, comps, "CoopPuppet_Child")
+        with self.assertRaises(build.BuildError):
+            build.puppet_cloth(members, {k: v for k, v in comps.items() if k != "PhysicsRef"}, "CoopPuppet_Child")
+        clash = fake_perception_pack()
+        clash[build.PERCEPTION_CONTROLLERS] = byml.dumps({"Cloth": {}})
+        with self.assertRaises(build.BuildError):
+            build.puppet_cloth(members, comps, "CoopPuppet_Child", clash)
+        # Each file stands in for the player's own (its size-table entry is sized from it).
+        own = build.puppet_cloth(members, comps, "CoopPuppet_Child")
+        self.assertEqual([src for _, src in own.values()],
+                         ["Component/Physics/P.engine__component__PhysicsParam.bgyml",
+                          "Phive/ControllerSetParam/P.phive__ControllerSetParam.bgyml"])
 
     def test_perception_members_checks(self):
         self.assertIsNone(build.perception_members({}))
@@ -1476,8 +1527,9 @@ class FullBuildTest(unittest.TestCase):
             self.assertEqual(made[quiet]["tunic"], made[loud]["tunic"])
             files = sarc.read(d.decompress(build.read(os.path.join(mod, "romfs", made[quiet]["pack"]))))
             comps = byml.loads(files[build.actor_param_path(quiet)])["Components"]
-            for k in ("AffiliationRef", "PerceptionEmitterRef", "PhysicsRef"):
+            for k in ("AffiliationRef", "PerceptionEmitterRef"):
                 self.assertNotIn(k, comps)
+            self.assertEqual(comps["PhysicsRef"], "?" + build.physics_paths(quiet)[0])   # (cloth only, v1 B1)
             loud_comps = byml.loads(sarc.read(d.decompress(build.read(os.path.join(
                 mod, "romfs", made[loud]["pack"]))))[build.actor_param_path(loud)])["Components"]
             self.assertIn("PerceptionEmitterRef", loud_comps)
@@ -1495,6 +1547,14 @@ class FullBuildTest(unittest.TestCase):
         self.assertEqual(d["quiet_scenes"], [])
         self.assertEqual(m["quiet_scenes"], [])
         self.assertFalse([a for a in m["actors"] if a["quiet"] or a["perception"]])
+        # v1 B1: every puppet has its cloth Physics, each file with a size-table entry; --no-cloth builds none.
+        self.assertTrue(m["cloth"])
+        for made in m["actors"]:
+            self.assertEqual(sorted(made["physics"]), sorted(build.physics_paths(made["actor"])), made["actor"])
+            self.assertTrue(all(v >= build.PACK_SIZE_MARGIN for v in made["physics"].values()))
+        n = build.build(self.romfs, os.path.join(self.dir, "mod_nocloth"), log=lambda *_: None, look_slots=0, cloth=False)
+        self.assertFalse(n["cloth"])
+        self.assertFalse([a for a in n["actors"] if a["physics"]])
 
     def test_quiet_name(self):
         self.assertEqual(build.quiet_name("CoopPuppet_Child"), "CoopPuppet_ChildQuiet")
