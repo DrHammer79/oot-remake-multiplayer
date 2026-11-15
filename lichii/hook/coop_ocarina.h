@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopOcarina {
 
@@ -41,14 +42,14 @@ public:
 
     static constexpr std::uint64_t kParts = 0x270;          // actor -> component table
     static constexpr std::uint64_t kPartsEquipment = 0x200; // table -> EquipmentUser
-    static constexpr std::uint64_t kArmorLinks = 0xe0;      // EquipmentUser: 13 links
+    static constexpr std::uint64_t kArmorLinks = CoopGameBuild::kFields.equip_armor_links;      // EquipmentUser: 13 links
     static constexpr std::uint32_t kArmorLinkCount = 13;
     static constexpr std::uint64_t kLinkStride = 0x18;
-    static constexpr std::uint64_t kLinkHolder = 0x08;
-    static constexpr std::uint64_t kLinkId = 0x10;
-    static constexpr std::uint64_t kHolderActor = 0x40;
-    static constexpr std::uint64_t kActorName = 0x260;      // char*
-    static constexpr std::uint64_t kActorPosition = 0x31c;  // three floats
+    static constexpr std::uint64_t kLinkHolder = CoopGameBuild::kFields.link_holder;
+    static constexpr std::uint64_t kLinkId = CoopGameBuild::kFields.link_id;
+    static constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.holder_actor;
+    static constexpr std::uint64_t kActorName = CoopGameBuild::kFields.actor_name;      // char*
+    static constexpr std::uint64_t kActorPosition = CoopGameBuild::kFields.actor_position;  // three floats
     static constexpr std::size_t kEquipmentBytes = 0x1600;
     static constexpr std::size_t kActorBytes = 0x900;
     static constexpr std::size_t kTableBytes = 0x400;

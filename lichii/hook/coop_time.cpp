@@ -32,18 +32,19 @@
 #include "coop_puppet.h"
 #include "coop_svc.h"
 #include "coop_time_sync.h"
+#include "coop_game_build.h"
 
 namespace CoopTime {
 namespace {
 
-constexpr std::uint64_t kWorldMgrPtr = 0x4e7eab0;
+constexpr std::uint64_t kWorldMgrPtr = CoopGameBuild::kMain.world_mgr_ptr;
 constexpr std::uint64_t kTimeObject = 0x510;
 constexpr std::uint64_t kTimeFlags = 0x8;
 constexpr std::uint32_t kTimeOverride = 0x200;
 constexpr std::uint64_t kTimeNow = 0x20;
 constexpr std::uint64_t kTimeNowOverride = 0x50;
 constexpr std::uint64_t kTimeAsked = 0x48;
-constexpr std::uint64_t kSetTime = 0x34522d0;
+constexpr std::uint64_t kSetTime = CoopGameBuild::kMain.set_time;
 constexpr int kCallerOrder = 40;  // after the puppets, spawn (10), fairy (20), objects (30)
 constexpr std::uint64_t kDebugEveryUs = 2'000'000;
 

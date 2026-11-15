@@ -10,13 +10,14 @@
 #include <bit>
 #include <cstring>
 #include <span>
+#include "../../../lichii/hook/coop_game_build.h"
 
 // Offsets: docs/flags.md, read from main of build e0f3ccfaf50065ae.
 namespace coop::host {
 namespace {
 
 // Pointer to gmd::GameDataMgr, at main + 0x4e842a8 (GOT slot 0x4c7e180).
-constexpr std::uint64_t kManagerPtr = 0x4e842a8;
+constexpr std::uint64_t kManagerPtr = CoopGameBuild::kMain.game_flags_ptr;
 
 // A hashed type table: entries, an open-addressing hash table of {u32 hash,
 // u32 entry index} slots, and a write queue. Offsets from the manager.
@@ -62,9 +63,9 @@ constexpr std::uint64_t kArraySize = 0x20, kArrayBits = 0x28;
 // 64-bit keys: a sorted array of 16-byte records {u64 key, u32 file mask,
 // u8 value, s8 file index, u8 flags}, and a queue of {u8 value, u32 record
 // index} slots, empty = index 0xffffffff.
-constexpr std::uint64_t kKeyCount = 0xc58, kKeyRecords = 0xc60, kKeyQueueCap = 0xc68,
+constexpr std::uint64_t kKeyCount = CoopGameBuild::kFields.flags_key_count, kKeyRecords = CoopGameBuild::kFields.flags_key_records, kKeyQueueCap = 0xc68,
                         kKeyQueueBuf = 0xc70, kKeyQueueWord = 0xc78;
-constexpr std::uint64_t kKeyRecordSize = 0x10, kKeyValue = 0xc;
+constexpr std::uint64_t kKeyRecordSize = CoopGameBuild::kFields.flags_key_record_size, kKeyValue = CoopGameBuild::kFields.flags_key_value;
 
 // Queue word: bits 0-19 slots taken, 20-27 slots finished, 28-31 a round
 // the applier (0xb99980, 0xba24b0) moves on each time it empties the queue.

@@ -23,6 +23,7 @@
 #include "coop_runtime.h"
 #include "coop_save.h"
 #include "coop_title_menu.h"
+#include "coop_game_build.h"
 
 namespace CoopTitle {
 
@@ -39,16 +40,16 @@ using CoopFiles::Utf8Path;
 using CoopFiles::WriteText;
 
 // --- The game (build e0f3ccfa..., the only one the module runs on) ---
-constexpr std::uint64_t kTitleVtable = 0x84c106e8;    // UITitleScreen
+constexpr std::uint64_t kTitleVtable = CoopGameBuild::kRecompMain + CoopGameBuild::kReader.title_screen_vtable;    // UITitleScreen
 constexpr std::uint64_t kTitleActive = 0x1a8;         // u8: 1 while its step runs its work (f_83426d70)
 constexpr std::uint64_t kTitleCount = 0x2c8;          // s32: its buttons
 constexpr std::uint64_t kTitleButtons = 0x2d0;        // its buttons' array
 constexpr std::uint64_t kTitleFocused = 0x2e0;        // the focused button (f_83426f40)
 constexpr std::uint64_t kTitleLayout = 0x28;          // the screen's layout
 // A pane's text from a message, as UISystemWindowScreen sets its buttons' (f_83425bc0):
-constexpr std::uint64_t kMsgRefInit = 0x80a86f70;     // (ref): {0, 0, -1}, 24 bytes
-constexpr std::uint64_t kMsgRefSet = 0x80a8afe0;      // (ref, &"LayoutMsg/...", &"label", 1)
-constexpr std::uint64_t kPaneText = 0x80a87d30;       // (layout, "pane/T_Btn_00", ref, 1, 0)
+constexpr std::uint64_t kMsgRefInit = CoopGameBuild::kRecompMain + CoopGameBuild::kReader.msg_ref_init;     // (ref): {0, 0, -1}, 24 bytes
+constexpr std::uint64_t kMsgRefSet = CoopGameBuild::kRecompMain + CoopGameBuild::kReader.msg_ref_set;      // (ref, &"LayoutMsg/...", &"label", 1)
+constexpr std::uint64_t kPaneText = CoopGameBuild::kRecompMain + CoopGameBuild::kReader.pane_text;       // (layout, "pane/T_Btn_00", ref, 1, 0)
 // The title's own co-op rows (tools/puppet_pack/title_menu.py adds them to Title_00 and their
 // texts to LayoutMsg/Title_00): Pa_Button_04 Host, _05 Join, _06 Co-op Settings. Each opens
 // Hookshot's menu on the Multiplayer tab at that page (coop_pause.h).

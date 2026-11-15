@@ -42,7 +42,9 @@ GLOBALS = ('actor_manager_ptr', 'game_flags_ptr', 'game_ui_module_ptr', 'scene_m
 
 def load_table():
     text = open(TABLE, encoding='utf-8').read()
-    fields = re.findall(r'std::uint64_t (\w+);', text.split('struct Build')[0])
+    # MainOffsets only: the scan does not search the other tables' fields.
+    main = text.split('struct MainOffsets {')[1].split('};')[0]
+    fields = re.findall(r'std::uint64_t (\w+);', main)
     values = dict(re.findall(r'\.(\w+) = (0x[0-9a-f]+)', text))
     return fields, {k: int(v, 16) for k, v in values.items()}
 

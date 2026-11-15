@@ -11,17 +11,18 @@
 #include "common/logging.h"
 #include "core/memory.h"
 #include "coop/host/game_items.hpp"
+#include "coop_game_build.h"
 
 namespace CoopHook {
 namespace {
 
 // docs/flags.md: the manager pointer and the tables the debug scan reads.
-constexpr u64 kManagerPtr = 0x4e842a8;
+constexpr u64 kManagerPtr = CoopGameBuild::kMain.game_flags_ptr;
 constexpr u64 kBoolTable = 0x10;
 constexpr u64 kIntTable = 0xd0;
 constexpr u64 kTableCount = 0x00, kTableEntries = 0x08, kTableSlots = 0x10,
               kTableSlotCount = 0x1c;
-constexpr u64 kKeyCount = 0xc58, kKeyRecords = 0xc60, kKeyRecordSize = 0x10, kKeyValue = 0xc;
+constexpr u64 kKeyCount = CoopGameBuild::kFields.flags_key_count, kKeyRecords = CoopGameBuild::kFields.flags_key_records, kKeyRecordSize = CoopGameBuild::kFields.flags_key_record_size, kKeyValue = CoopGameBuild::kFields.flags_key_value;
 
 // Tables larger than this are taken as a misread, not scanned.
 constexpr u32 kMaxEntries = 1u << 20;

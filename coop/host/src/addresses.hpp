@@ -13,12 +13,13 @@
 
 #include <cstdint>
 #include <string_view>
+#include "../../../lichii/hook/coop_game_build.h"
 
 namespace coop::host::addr {
 
 // --- GameUI module: the player block it fills each frame ------------------
 // [plan][map] Pointer to the GameUI module, at main + 0x4e7cfa8. Checked.
-inline constexpr std::uint64_t kGameUiModulePtr = 0x4e7cfa8;
+inline constexpr std::uint64_t kGameUiModulePtr = CoopGameBuild::kMain.game_ui_module_ptr;
 // [plan][map] Player position, 3 x f32, copied from actor +0x31c by 0x32a4c40.
 // Checked; that it updates every frame is likely, not proven (Run 1 saw it
 // change once, not follow a moving player).
@@ -35,19 +36,19 @@ inline constexpr std::uint64_t kGameUiIsChild = 0x5c0;
 // [map] "From the Scene module to the player", shown whole at 0x37c97c and
 // the link choice at 0x37cca0. Checked. The map's peek is
 // 7104e97648 0 0x1f0 0x58 0x78 0x40 8 0x40 +0x31c.
-inline constexpr std::uint64_t kSceneModulePtr = 0x4e97648;
-inline constexpr std::uint64_t kSceneTable = 0x1f0;          // S -> C
+inline constexpr std::uint64_t kSceneModulePtr = CoopGameBuild::kMain.scene_module_ptr;
+inline constexpr std::uint64_t kSceneTable = CoopGameBuild::kFields.scene_table;          // S -> C
 inline constexpr std::uint64_t kTableCount = 0x50;           // C: u32 count
-inline constexpr std::uint64_t kTableArray = 0x58;           // C -> array
-inline constexpr std::uint64_t kPlayerManagerSlot = 0x78;    // array[15] -> O
+inline constexpr std::uint64_t kTableArray = CoopGameBuild::kFields.scene_table_array;           // C -> array
+inline constexpr std::uint64_t kPlayerManagerSlot = CoopGameBuild::kFields.scene_player_manager;    // array[15] -> O
 inline constexpr std::uint32_t kMinTableCount = 0x10;        // needs index 15
 inline constexpr std::uint64_t kManagerMustBeSet = 0x30;     // O: pointer, non-zero
 inline constexpr std::uint64_t kManagerLinkFirst = 0x40;     // O -> L, tried first
 inline constexpr std::uint64_t kManagerLinkSecond = 0x50;    // O -> L, if not alive
-inline constexpr std::uint64_t kLinkHolder = 0x08;           // L -> H
-inline constexpr std::uint64_t kLinkId = 0x10;               // L: u32 id, ~0 empty
-inline constexpr std::uint64_t kHolderActor = 0x40;          // H -> actor
-inline constexpr std::uint64_t kHolderId = 0x48;             // H: u32, must equal L id
+inline constexpr std::uint64_t kLinkHolder = CoopGameBuild::kFields.link_holder;           // L -> H
+inline constexpr std::uint64_t kLinkId = CoopGameBuild::kFields.link_id;               // L: u32 id, ~0 empty
+inline constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.holder_actor;          // H -> actor
+inline constexpr std::uint64_t kHolderId = CoopGameBuild::kFields.holder_id;             // H: u32, must equal L id
 inline constexpr std::uint32_t kEmptyId = 0xffffffffu;
 // The width of the two ids and of the count is not stated in the map; 4 bytes
 // is assumed. Unconfirmed.
@@ -55,30 +56,30 @@ inline constexpr std::uint32_t kEmptyId = 0xffffffffu;
 // --- Actor ----------------------------------------------------------------
 // [map] u32 state; 4 is what GameUI requires before it copies the position,
 // and is taken here as "the player is present". Checked; names unknown.
-inline constexpr std::uint64_t kActorState = 0x2c;
+inline constexpr std::uint64_t kActorState = CoopGameBuild::kFields.actor_state;
 inline constexpr std::uint32_t kActorStatePresent = 4;
 // [plan][map] Position, 3 x f32. Checked.
-inline constexpr std::uint64_t kActorPosition = 0x31c;
+inline constexpr std::uint64_t kActorPosition = CoopGameBuild::kFields.actor_position;
 // [plan][map] Rotation, 9 x f32, three rows of three. The layout is checked;
 // that it is rows (not columns) of the matrix that turns local into world is
 // inferred. If a run shows the puppet turning the wrong way, flip this.
-inline constexpr std::uint64_t kActorRotation = 0x328;
+inline constexpr std::uint64_t kActorRotation = CoopGameBuild::kFields.actor_rotation;
 inline constexpr bool kActorRotationRowMajor = true;
 
 // --- AS (animation) controller of an actor ----------------------------------
 // [dump] actor +0x270 (component table) -> +0x40 -> +0x18 -> +0x18 is the AS
 // controller, the same walk in 0x974b80, 0x1081f60, 0x3abebc0 and 0x2022a0.
 // Checked.
-inline constexpr std::uint64_t kActorComponents = 0x270;
-inline constexpr std::uint64_t kComponentsAs = 0x40;
+inline constexpr std::uint64_t kActorComponents = CoopGameBuild::kFields.actor_components;
+inline constexpr std::uint64_t kComponentsAs = CoopGameBuild::kFields.components_as;
 inline constexpr std::uint64_t kAsComponentInner = 0x18;
 inline constexpr std::uint64_t kAsInnerController = 0x18;
 // [dump] Controller: s32 slot count at +0x18, slot array at +0x20, 0x48 bytes
 // an entry, whose first 8 bytes point to the slot. Every reader bounds the
 // index by the count (0x3abebc0, 0x37b5d70, 0x2022a0). Checked.
-inline constexpr std::uint64_t kAsSlotCount = 0x18;
-inline constexpr std::uint64_t kAsSlotArray = 0x20;
-inline constexpr std::uint64_t kAsSlotStride = 0x48;
+inline constexpr std::uint64_t kAsSlotCount = CoopGameBuild::kFields.as_slot_count;
+inline constexpr std::uint64_t kAsSlotArray = CoopGameBuild::kFields.as_slot_array;
+inline constexpr std::uint64_t kAsSlotStride = CoopGameBuild::kFields.as_slot_stride;
 // [dump] Slot 0 is the default slot: the slot-name lookup 0xacd6d0 gives 0
 // for an empty or unknown name. That it is Link's whole-body slot is inferred.
 inline constexpr std::uint32_t kAsMainSlot = 0;
@@ -90,10 +91,10 @@ inline constexpr std::uint64_t kAsSlotCommandName = 0x10;
 // [dump] Slot: f32 play rate at +0xd4 (0xdf49e0; 0x3abec10 passes it as the
 // rate of the replay request). Checked as a read; that it is the rate is
 // inferred from the request field it fills.
-inline constexpr std::uint64_t kAsSlotRate = 0xd4;
+inline constexpr std::uint64_t kAsSlotRate = CoopGameBuild::kFields.as_slot_rate;
 // [dump] Slot: f32 current frame at +0xe8 (0x3abebc0). Checked as a read;
 // that it is the frame is inferred (the ASFrame plug, see docs/puppet.md).
-inline constexpr std::uint64_t kAsSlotFrame = 0xe8;
+inline constexpr std::uint64_t kAsSlotFrame = CoopGameBuild::kFields.as_slot_frame;
 
 // --- Equipment ---------------------------------------------------------------
 // [items] What the player has equipped: String64 flags holding actor names,
@@ -130,12 +131,12 @@ inline constexpr std::uint64_t kComponentsEquipmentUser = 0x200;
 // +0xa4 read 1 with the sword out and put away alike (autotest, 2026-11-09).
 inline constexpr std::uint8_t kEquipRequestNone = 0x1;
 inline constexpr std::uint8_t kEquipRequestAway = 0x4;
-inline constexpr std::uint64_t kEquipSlots = 0x20;
-inline constexpr std::uint64_t kEquipSlotStride = 0x18;
+inline constexpr std::uint64_t kEquipSlots = CoopGameBuild::kFields.equip_slots;
+inline constexpr std::uint64_t kEquipSlotStride = CoopGameBuild::kFields.equip_slot_stride;
 inline constexpr std::uint32_t kEquipSlotCount = 8;
-inline constexpr std::uint64_t kEquipSlotHolder = 0x08;
-inline constexpr std::uint64_t kEquipSlotId = 0x10;
-inline constexpr std::uint64_t kEquipSlotState = 0x13bc;
+inline constexpr std::uint64_t kEquipSlotHolder = CoopGameBuild::kFields.equip_slot_holder;
+inline constexpr std::uint64_t kEquipSlotId = CoopGameBuild::kFields.equip_slot_id;
+inline constexpr std::uint64_t kEquipSlotState = CoopGameBuild::kFields.equip_slot_bits;
 inline constexpr std::uint8_t kEquipSlotDrawnBit = 0x2;
 // Run (2026-11-09), child Link: slot 0 holds the sword, slot 4 the shield
 // (its actor and id change on every shield change), slot 3 a held item.
@@ -170,7 +171,7 @@ constexpr bool equip_slot_carried(std::uint32_t slot) {
 // Accessory2 to the bone Ph_Bangle), not through PlayerStatus.EquipHandArmor,
 // which stays "" for the child. Hookshot runs (held-ocarina-b, 2026-11-14)
 // saw the bracelet in armor link 9 of the player's own EquipmentUser.
-inline constexpr std::uint64_t kArmorLinks = 0xe0;
+inline constexpr std::uint64_t kArmorLinks = CoopGameBuild::kFields.equip_armor_links;
 inline constexpr std::uint32_t kArmorLinkCount = 13;
 inline constexpr std::uint32_t kArmorLinkBracelet = 9;
 // [dump] 0x2df7b20 (the equip call) tests slot 3's link (+0x70, +0x78) for
@@ -178,13 +179,13 @@ inline constexpr std::uint32_t kArmorLinkBracelet = 9;
 // (2026-11-09): a child with the slingshot has `Weapon_Range_SlingShot`
 // there, in state 6 while it is put away.
 // [objects] An actor's name: a char* at +0x260 (docs/objects.md).
-inline constexpr std::uint64_t kActorName = 0x260;
+inline constexpr std::uint64_t kActorName = CoopGameBuild::kFields.actor_name;
 inline constexpr std::uint32_t kActorStateGoneFirst = 7;
 inline constexpr std::uint32_t kActorStateGoneLast = 11;
 
 // --- Banc module: the current scene ---------------------------------------
 // [plan][map] Banc module pointer. Checked (actor-map.md).
-inline constexpr std::uint64_t kBancModulePtr = 0x4e919d0;
+inline constexpr std::uint64_t kBancModulePtr = CoopGameBuild::kMain.banc_module_ptr;
 // [map] 0x58aac0 gives no name when B +0x38 is null. Checked.
 inline constexpr std::uint64_t kBancMustBeSet = 0x38;
 // [plan][map] Pointer to the path string and its capacity (u64 assumed).
@@ -198,7 +199,7 @@ inline constexpr std::uint64_t kBancPathCapacity = 0x48;
 // [plan][map] Event manager pointer; IsEventRunning (0xbcc100) is +0x68 != 0.
 // Checked, and seen in Run 1 (set in the opening movie and timeline). 8 bytes,
 // as the map's peek reads.
-inline constexpr std::uint64_t kEventManagerPtr = 0x4e94840;
+inline constexpr std::uint64_t kEventManagerPtr = CoopGameBuild::kMain.event_manager_ptr;
 inline constexpr std::uint64_t kEventRunning = 0x68;
 
 }  // namespace coop::host::addr

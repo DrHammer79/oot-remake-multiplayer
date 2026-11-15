@@ -33,6 +33,7 @@
 #include "coop_snap.h"
 #include "coop_link_sound.h"
 #include "coop_puppet_sound.h"
+#include "coop_game_build.h"
 
 namespace coop::protocol {
 struct Equipment;
@@ -52,26 +53,26 @@ using Mat3 = std::array<float, 9>;  // rows of 3, as the actor holds it
 
 // Offsets into main of build e0f3ccfaf50065ae (docs/puppet.md).
 namespace addr {
-inline constexpr std::uint64_t kCreate = 0x372a70;          // requestCreateActorAsync
-inline constexpr std::uint64_t kActorManagerPtr = 0x4e91888;
-inline constexpr std::uint64_t kMalloc = 0x14c6c90;
-inline constexpr std::uint64_t kRequestDelete = 0xa6490;    // (actor, 0)
+inline constexpr std::uint64_t kCreate = CoopGameBuild::kMain.create_actor;          // requestCreateActorAsync
+inline constexpr std::uint64_t kActorManagerPtr = CoopGameBuild::kMain.actor_manager_ptr;
+inline constexpr std::uint64_t kMalloc = CoopGameBuild::kMain.malloc;
+inline constexpr std::uint64_t kRequestDelete = CoopGameBuild::kMain.request_delete;    // (actor, 0)
 // What the create puts in the handle slot is a request: its low 16 bits at
 // +0 are its state, +8 the actor. SeqExecuteCreateActor's check (0x32bcb30)
 // waits for state 3, then takes the actor with 0x36fbd0(request, 1, 0),
 // which wakes it (0x94f30) and returns it, and clears the slot. State 4 it
 // hands to 0x36fde0(request); 5 and 6 are failures.
-inline constexpr std::uint64_t kTakeCreated = 0x36fbd0;     // (request, 1, 0) -> actor
-inline constexpr std::uint64_t kDropCreate = 0x36fde0;      // (request)
+inline constexpr std::uint64_t kTakeCreated = CoopGameBuild::kMain.take_created;     // (request, 1, 0) -> actor
+inline constexpr std::uint64_t kDropCreate = CoopGameBuild::kMain.drop_create;      // (request)
 inline constexpr std::uint64_t kRequestActor = 0x08;
 inline constexpr std::uint32_t kRequestReady = 3;
 inline constexpr std::uint32_t kRequestDrop = 4;
 // The GOT entry the preload walker reads for create argument +0x40.
-inline constexpr std::uint64_t kGotCreateDefault = 0x4c7dad0;
+inline constexpr std::uint64_t kGotCreateDefault = CoopGameBuild::kMain.got_create_default;
 
-inline constexpr std::uint64_t kActorState = 0x2c;
-inline constexpr std::uint64_t kActorPosition = 0x31c;
-inline constexpr std::uint64_t kActorRotation = 0x328;
+inline constexpr std::uint64_t kActorState = CoopGameBuild::kFields.actor_state;
+inline constexpr std::uint64_t kActorPosition = CoopGameBuild::kFields.actor_position;
+inline constexpr std::uint64_t kActorRotation = CoopGameBuild::kFields.actor_rotation;
 // The pending transform the engine's own setter 0xc6fd60(actor, mtx34, 0)
 // (the run of OneShotActorRequestSetMtx, 0x28b2050) leaves on an actor with
 // no physics body: position at +0x358, rotation rows at +0x364. The actor's
@@ -79,17 +80,17 @@ inline constexpr std::uint64_t kActorRotation = 0x328;
 inline constexpr std::uint64_t kActorPositionRequest = 0x358;
 inline constexpr std::uint64_t kActorRotationRequest = 0x364;
 inline constexpr std::uint32_t kStatePresent = 4;
-inline constexpr std::uint64_t kLinkHolder = 0x08;
-inline constexpr std::uint64_t kLinkId = 0x10;
-inline constexpr std::uint64_t kHolderActor = 0x40;
-inline constexpr std::uint64_t kHolderId = 0x48;
+inline constexpr std::uint64_t kLinkHolder = CoopGameBuild::kFields.link_holder;
+inline constexpr std::uint64_t kLinkId = CoopGameBuild::kFields.link_id;
+inline constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.holder_actor;
+inline constexpr std::uint64_t kHolderId = CoopGameBuild::kFields.holder_id;
 
 // Animation (docs/puppet.md, Animation). The AS controller is actor +0x270,
 // then +0x40, +0x18, +0x18; its slot count at +0x18, slots at +0x20 (0x48
 // bytes each, the first 8 point to the slot); slot +0x10 the command name,
 // +0xe8 the frame.
-inline constexpr std::uint64_t kPlayAs = 0x2022a0;      // (request)
-inline constexpr std::uint64_t kSetAsFrame = 0x37b5d70; // (controller, slot, s0 = frame)
+inline constexpr std::uint64_t kPlayAs = CoopGameBuild::kMain.play_as;      // (request)
+inline constexpr std::uint64_t kSetAsFrame = CoopGameBuild::kMain.set_as_frame; // (controller, slot, s0 = frame)
 inline constexpr std::array<std::uint64_t, 4> kControllerPath{0x270, 0x40, 0x18, 0x18};
 inline constexpr std::uint64_t kSlotCount = 0x18;
 inline constexpr std::uint64_t kSlots = 0x20;
@@ -99,14 +100,14 @@ inline constexpr std::uint64_t kSlotFrame = 0xe8;
 // node 0, 0) plays the command of one slot on another (request skip-if-same
 // 1, the source's rate) through 0x37b59c0. Link's upper body and other
 // partial slots are filled this way from slot 0.
-inline constexpr std::uint64_t kSyncAsSlot = 0x3abec10;
+inline constexpr std::uint64_t kSyncAsSlot = CoopGameBuild::kMain.sync_as_slot;
 inline constexpr std::int32_t kMaxAsSlots = 8;  // slots synced from slot 0
 
 // Gear (docs/puppet.md, Equipment): the EquipmentUser is [[actor + 0x270] +
 // 0x200]; 0x2df7b20(eu, kind, &char*, state 2, -1, 1, 0) wears the named
 // piece in a slot kind, as the game's own GameData path does.
-inline constexpr std::uint64_t kEquip = 0x2df7b20;
-inline constexpr std::uint64_t kActorParts = 0x270;
+inline constexpr std::uint64_t kEquip = CoopGameBuild::kMain.equip;
+inline constexpr std::uint64_t kActorParts = CoopGameBuild::kFields.actor_components;
 inline constexpr std::uint64_t kPartsEquipmentUser = 0x200;
 // In hand or put away: 0xe34c40(eu, slot, state) is the game's own change of
 // an equipment slot's state (the shield node 0x2797850 calls it with slot 4,
@@ -115,7 +116,7 @@ inline constexpr std::uint64_t kPartsEquipmentUser = 0x200;
 // byte at EquipmentUser + 0x13bc + slot (2 in hand, 4 put away), which is how
 // a call that was taken is told from one that was not. The slot's link is at
 // EquipmentUser + 0x20 + 0x18 * slot (u32 id at +0x10, ~0 empty).
-inline constexpr std::uint64_t kEquipChangeState = 0xe34c40;
+inline constexpr std::uint64_t kEquipChangeState = CoopGameBuild::kMain.equip_change_state;
 // The game's own read of a slot's state: 0xce7ab0(eu, slot) returns 1 in
 // hand, 2 put away, 0 none (read from the dump: a request in the slot's
 // byte gives the rodata table at 0x3ef9474: bit 0 -> 0, bit 1 -> 1,
@@ -123,25 +124,25 @@ inline constexpr std::uint64_t kEquipChangeState = 0xe34c40;
 // puppet's own played animations can draw or put away its pieces too, so
 // the director asks this now and then and changes a piece again when the
 // game has it otherwise than its player (held-fix).
-inline constexpr std::uint64_t kEquipState = 0xce7ab0;
+inline constexpr std::uint64_t kEquipState = CoopGameBuild::kReader.equip_state;
 // Taking armor off: 0x10aceb0(eu, index, 0) empties the EquipmentUser's
 // armor link `index` (eu + 0xe0 + 0x18 * index, the same {holder, id} shape
 // as a hand slot) and deletes its piece. The game's own GameData path
 // (0x2df6c80) calls it this way when a PlayerStatus.Equip* armor flag is "":
 // kind 7 (head) index 0, 8 (upper) 1, 9 (lower) 2, 10 (hand) 3. It returns
 // 0 when there was a piece it could not take off.
-inline constexpr std::uint64_t kUnequipArmor = 0x10aceb0;
+inline constexpr std::uint64_t kUnequipArmor = CoopGameBuild::kMain.unequip_armor;
 inline constexpr std::uint32_t kArmorKindFirst = 7;   // ArmorHead
 inline constexpr std::uint32_t kArmorKindLast = 10;   // ArmorHand
-inline constexpr std::uint64_t kArmorLinks = 0xe0;    // kArmorLinkCount links of kEquipSlotStride
+inline constexpr std::uint64_t kArmorLinks = CoopGameBuild::kFields.equip_armor_links;    // kArmorLinkCount links of kEquipSlotStride
 inline constexpr std::uint32_t kArmorLinkCount = 13;
 inline constexpr std::uint32_t kEquipStateInHand = 1;
 inline constexpr std::uint32_t kEquipStateAway = 2;
-inline constexpr std::uint64_t kEquipSlots = 0x20;
-inline constexpr std::uint64_t kEquipSlotStride = 0x18;
-inline constexpr std::uint64_t kEquipSlotHolder = 0x08;
-inline constexpr std::uint64_t kEquipSlotId = 0x10;
-inline constexpr std::uint64_t kEquipSlotBits = 0x13bc;
+inline constexpr std::uint64_t kEquipSlots = CoopGameBuild::kFields.equip_slots;
+inline constexpr std::uint64_t kEquipSlotStride = CoopGameBuild::kFields.equip_slot_stride;
+inline constexpr std::uint64_t kEquipSlotHolder = CoopGameBuild::kFields.equip_slot_holder;
+inline constexpr std::uint64_t kEquipSlotId = CoopGameBuild::kFields.equip_slot_id;
+inline constexpr std::uint64_t kEquipSlotBits = CoopGameBuild::kFields.equip_slot_bits;
 inline constexpr std::uint8_t kEquipBitInHand = 0x2;
 inline constexpr std::uint8_t kEquipBitAway = 0x4;
 // The byte is a request the game clears when the change is done (seen in a
@@ -158,8 +159,8 @@ inline constexpr std::uint64_t kEquipRecordFlags = 0xa0;  // u32, logged only
 // node ExecuteActorForceSetMtx (run 0x2622e50): write +0x31c..+0x34b, then
 // call vtable slot 0x218, which is 0x4c6580(actor, 0) for the vtable every
 // actor seen has (docs/objects.md). A plain write is undone within a frame.
-inline constexpr std::uint64_t kActorVtable = 0x4b25e18;
-inline constexpr std::uint64_t kSetMatrix = 0x4c6580;
+inline constexpr std::uint64_t kActorVtable = CoopGameBuild::kMain.actor_vtable;
+inline constexpr std::uint64_t kSetMatrix = CoopGameBuild::kMain.set_matrix;
 }  // namespace addr
 
 // The slot kinds the puppet wears, in Target::gear order: weapon, shield,

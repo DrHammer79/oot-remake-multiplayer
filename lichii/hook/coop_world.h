@@ -26,6 +26,7 @@
 #include "coop/protocol/messages.hpp"
 #include "coop_objects_sync.h"
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopWorld {
 
@@ -369,10 +370,10 @@ RestScan RestWords(const std::function<std::optional<std::uint64_t>(std::uint64_
 // it runs only when the node is entered, not at each push (checked on
 // Longshot v3.0.0-rc.3, docs/world.md).
 namespace BlockNode {
-inline constexpr std::uint64_t kVtable = 0x49ae6f8;
-inline constexpr std::uint64_t kVtable2 = 0x49ae8b8;
+inline constexpr std::uint64_t kVtable = CoopGameBuild::kReader.block_node_vtable;
+inline constexpr std::uint64_t kVtable2 = CoopGameBuild::kReader.block_node_vtable2;
 inline constexpr std::uint64_t kOwner = 0x8;          // [node + 8] -> [+8] -> [+0x1f0] = actor
-inline constexpr std::uint64_t kOwnerActor = 0x1f0;
+inline constexpr std::uint64_t kOwnerActor = CoopGameBuild::kFields.logic_holder_actor;
 inline constexpr std::uint64_t kBase = 0x40;
 inline constexpr std::uint64_t kGoal = 0x4c;
 inline constexpr std::uint64_t kTarget = 0xfc;
@@ -383,7 +384,7 @@ inline constexpr std::uint64_t kStart = 0x108;
 // main+0x2872580, through their vtables), so the game runs it when the
 // node is entered, not at each push (read from Longshot v3.0.0-rc.3's
 // lifted f_82771790, main at 0x80020000 there).
-inline constexpr std::uint64_t kStartFn = 0x2751790;
+inline constexpr std::uint64_t kStartFn = CoopGameBuild::kReader.block_node_start;
 inline constexpr int kNodeDepth = 3;
 inline constexpr std::size_t kNodeLooks = 2048;
 inline constexpr std::size_t kNodeBytes = 0x200;
@@ -767,8 +768,8 @@ private:
 // cuts through the game's own queueing call, 0xb80800(module, request),
 // which copies the request into a free slot: Step() does that from the svc
 // cave. A cut we made comes back in our own queue; it is not sent again.
-inline constexpr std::uint64_t kFoliageModule = 0x4e22540;  // main + this: Module*
-inline constexpr std::uint64_t kCutFoliage = 0xb80800;      // main + this
+inline constexpr std::uint64_t kFoliageModule = CoopGameBuild::kMain.foliage_module_ptr;  // main + this: Module*
+inline constexpr std::uint64_t kCutFoliage = CoopGameBuild::kMain.cut_foliage;      // main + this
 inline constexpr std::size_t kCutSlotSize = 0x3c;
 
 class GrassSync {

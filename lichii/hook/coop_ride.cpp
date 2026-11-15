@@ -275,6 +275,7 @@ std::vector<std::string> Rides::Changes() {
 #include "core/memory.h"
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
+#include "coop_game_build.h"
 
 namespace CoopRide {
 namespace {
@@ -284,13 +285,13 @@ using u32 = std::uint32_t;
 using s32 = std::int32_t;
 
 // The live actor list, as coop_spawn.cpp walks it (docs/objects.md).
-constexpr u64 kManagerLists = 0x118;
-constexpr u64 kListHead = 0x670;
-constexpr u64 kListCount = 0x10;
-constexpr u64 kNodeOwner = 0x10;
-constexpr u64 kActorNode = 0x538;
-constexpr u64 kActorName = 0x260;
-constexpr u64 kAsSlotRate = 0xd4;
+constexpr u64 kManagerLists = CoopGameBuild::kFields.manager_lists;
+constexpr u64 kListHead = CoopGameBuild::kFields.manager_list_head;
+constexpr u64 kListCount = CoopGameBuild::kFields.manager_list_count;
+constexpr u64 kNodeOwner = CoopGameBuild::kFields.manager_node_owner;
+constexpr u64 kActorNode = CoopGameBuild::kFields.actor_node;
+constexpr u64 kActorName = CoopGameBuild::kFields.actor_name;
+constexpr u64 kAsSlotRate = CoopGameBuild::kFields.as_slot_rate;
 constexpr std::size_t kMaxWalk = 8192;
 constexpr float kLookM = 6.0f;  // the log's "what is around us" when no horse is found
 

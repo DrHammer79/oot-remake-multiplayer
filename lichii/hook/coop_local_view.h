@@ -27,12 +27,13 @@
 #include <utility>
 
 #include "coop_local_layout.h"
+#include "coop_game_build.h"
 
 namespace CoopLocalView {
 
-inline constexpr std::uint64_t kRenderer = 0x4e81cf0;   // main+: the renderer's pointer
-inline constexpr std::uint64_t kLayerCount = 0x20;      // u32
-inline constexpr std::uint64_t kLayerArray = 0x28;      // layer pointers, by id
+inline constexpr std::uint64_t kRenderer = CoopGameBuild::kReader.renderer_ptr;   // main+: the renderer's pointer
+inline constexpr std::uint64_t kLayerCount = CoopGameBuild::kFields.renderer_layer_count;      // u32
+inline constexpr std::uint64_t kLayerArray = CoopGameBuild::kFields.renderer_layer_array;      // layer pointers, by id
 inline constexpr std::uint64_t kLayerRect = 0x30;       // f32 min x, min y, max x, max y
 inline constexpr std::uint64_t kLayerProjection = 0x80;
 inline constexpr std::uint64_t kProjectionDirty = 0x8;  // u8: 1 = made again

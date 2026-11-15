@@ -14,6 +14,7 @@
 
 #include "coop/host/player_reader.hpp"
 #include "coop_dbno.h"
+#include "coop_game_build.h"
 
 namespace coop::host {
 class Session;
@@ -42,7 +43,7 @@ std::vector<std::string> TakeLines();
 
 // A Life component's life value entry; the value is the int32 at its + 8
 // (as the objects walk reads it).
-inline constexpr std::uint64_t kLifeValueEntry = 0x1c10;
+inline constexpr std::uint64_t kLifeValueEntry = CoopGameBuild::kFields.life_value;
 
 // The guard the Life step asks (LifeGuard::Step), for our Link only.
 LifeGuard& TheGuard();

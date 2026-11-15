@@ -47,24 +47,25 @@
 #include <vector>
 
 #include "coop/protocol/messages.hpp"
+#include "coop_game_build.h"
 
 namespace CoopCounters {
 
 // The game's (build e0f3ccfaf50065ae; Hot Onion's notes, checked against
 // the dump: the function starts `pacibsp; str d8, [sp, #-0x30]!; ...`).
-inline constexpr std::uint64_t kStartOffset = 0x5e6760;       // ExecuteGenericCounter start
+inline constexpr std::uint64_t kStartOffset = CoopGameBuild::kReader.counter_start;       // ExecuteGenericCounter start
 inline constexpr std::uint32_t kStartOriginal = 0xd503237f;   // pacibsp
-inline constexpr std::uint64_t kNodeVtable = 0x499f200;
+inline constexpr std::uint64_t kNodeVtable = CoopGameBuild::kReader.counter_node_vtable;
 inline constexpr std::uint64_t kNodeRemaining = 0x20;         // f32 frames left
 inline constexpr std::uint64_t kNodeDuration = 0x2c;          // f32 frames
 inline constexpr std::uint64_t kNodeGraph = 0x8;              // [node + 8]: the graph instance
 inline constexpr std::uint64_t kGraphOwner = 0x8;             // [[node + 8] + 8]
-inline constexpr std::uint64_t kOwnerActor = 0x1f0;           // [[[node + 8] + 8] + 0x1f0]: the actor
+inline constexpr std::uint64_t kOwnerActor = CoopGameBuild::kFields.logic_holder_actor;           // [[[node + 8] + 8] + 0x1f0]: the actor
 inline constexpr float kFramesPerSecond = 60.0f;
 
 // The cave (coop_counter.s) and the u64 that holds the ring's address.
-inline constexpr std::uint64_t kCaveOffset = 0x3c46700;
-inline constexpr std::uint64_t kRingPointer = 0x3c46780;
+inline constexpr std::uint64_t kCaveOffset = CoopGameBuild::kReader.counter_cave;
+inline constexpr std::uint64_t kRingPointer = CoopGameBuild::kReader.counter_ring;
 inline constexpr std::size_t kRingNodes = 256;  // every AI counter of the scene goes through it
 inline constexpr std::size_t kRingBytes = 8 + 8 * kRingNodes;
 inline constexpr std::array<std::uint8_t, 40> kCave{

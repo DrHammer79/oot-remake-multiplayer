@@ -19,16 +19,17 @@
 #include <vector>
 
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopHitReplay {
 
 // The Life component (offsets as in coop_objects.cpp's notes, live dump 2026-11-09).
-inline constexpr std::uint64_t kActorComponents = 0x270;
-inline constexpr std::uint64_t kComponentLife = 0x2b8;
-inline constexpr std::uint64_t kHitHeader = 0x1f8;
-inline constexpr std::uint64_t kHitAmount = 0x224;
-inline constexpr std::uint64_t kHitRecord = 0x240;
-inline constexpr std::uint64_t kLastHitId = 0x1b18;
+inline constexpr std::uint64_t kActorComponents = CoopGameBuild::kFields.actor_components;
+inline constexpr std::uint64_t kComponentLife = CoopGameBuild::kFields.components_life;
+inline constexpr std::uint64_t kHitHeader = CoopGameBuild::kFields.life_hit_header;
+inline constexpr std::uint64_t kHitAmount = CoopGameBuild::kFields.life_hit_amount;
+inline constexpr std::uint64_t kHitRecord = CoopGameBuild::kFields.life_hit_record;
+inline constexpr std::uint64_t kLastHitId = CoopGameBuild::kFields.life_last_hit_id;
 inline constexpr std::uint64_t kHitLateMs = 200;  // under Sync::kHurtWaitUs: a hit that waited longer is dropped
 
 // The Kokiri Sword hit a ReDead took (live dump, 2026-11-09): the incoming hit at +0x240..+0x2d8 (attacker

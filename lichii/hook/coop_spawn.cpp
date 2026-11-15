@@ -60,9 +60,9 @@ bool Finite(const Vec3& v) {
 }
 
 // Main offsets (build e0f3ccfaf50065ae): docs/objects.md and docs/puppet.md.
-constexpr std::uint64_t kActorComponents = 0x270;
-constexpr std::uint64_t kComponentLife = 0x2b8;
-constexpr std::uint64_t kLifeValue = 0x1c10;
+constexpr std::uint64_t kActorComponents = CoopGameBuild::kFields.actor_components;
+constexpr std::uint64_t kComponentLife = CoopGameBuild::kFields.components_life;
+constexpr std::uint64_t kLifeValue = CoopGameBuild::kFields.life_value;
 
 template <typename T>
 bool ReadValue(CoopPuppet::Guest& guest, std::uint64_t address, T& out) {
@@ -1152,10 +1152,10 @@ std::uint64_t Director::NameCellOf(CoopPuppet::Guest& guest, const std::string& 
 namespace {
 constexpr std::uint64_t kComponentXLink = 0x68;
 constexpr std::uint64_t kXLinkELinkUser = 0x70;
-constexpr std::uint64_t kUserResource = 0x58;
-constexpr std::uint64_t kResourceAccessor = 0x18;
-constexpr std::uint64_t kXLinkSearch = 0x43db00;
-constexpr std::uint64_t kXLinkEmit = 0x440630;
+constexpr std::uint64_t kUserResource = CoopGameBuild::kFields.xlink_user_resource;
+constexpr std::uint64_t kResourceAccessor = CoopGameBuild::kFields.xlink_resource_accessor;
+constexpr std::uint64_t kXLinkSearch = CoopGameBuild::kReader.xlink_search_asset;
+constexpr std::uint64_t kXLinkEmit = CoopGameBuild::kReader.xlink_emit;
 constexpr std::uint64_t kSlotLocator = 0x160;
 constexpr std::uint64_t kSlotEmitHandle = 0x168;
 static_assert(kSlotEmitHandle + 0x10 <= Director::kSlotSize);
@@ -1627,6 +1627,7 @@ Director& TheDirector() {
 #include "coop_flags.h"  // EmulatorMemory
 #include "coop_pvp_game.h"
 #include "coop_svc.h"
+#include "coop_game_build.h"
 
 namespace CoopSpawn {
 namespace {
@@ -1634,13 +1635,13 @@ namespace {
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 constexpr std::array<u8, 8> kGameBuildId{0xe0, 0xf3, 0xcc, 0xfa, 0xf5, 0x00, 0x65, 0xae};
 // The live actor list, as coop_objects.cpp walks it (docs/objects.md).
-constexpr u64 kManagerLists = 0x118;
-constexpr u64 kListHead = 0x670;
-constexpr u64 kListCount = 0x10;
-constexpr u64 kNodeOwner = 0x10;
-constexpr u64 kActorNode = 0x538;
-constexpr u64 kActorName = 0x260;
-constexpr u64 kAsSlotRate = 0xd4;  // AS slot rate f32 (docs/puppet.md "Animation")
+constexpr u64 kManagerLists = CoopGameBuild::kFields.manager_lists;
+constexpr u64 kListHead = CoopGameBuild::kFields.manager_list_head;
+constexpr u64 kListCount = CoopGameBuild::kFields.manager_list_count;
+constexpr u64 kNodeOwner = CoopGameBuild::kFields.manager_node_owner;
+constexpr u64 kActorNode = CoopGameBuild::kFields.actor_node;
+constexpr u64 kActorName = CoopGameBuild::kFields.actor_name;
+constexpr u64 kAsSlotRate = CoopGameBuild::kFields.as_slot_rate;  // AS slot rate f32 (docs/puppet.md "Animation")
 constexpr std::size_t kMaxWalk = 8192;
 
 bool On() {

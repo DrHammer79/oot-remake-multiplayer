@@ -41,12 +41,13 @@
 
 #include "coop/protocol/messages.hpp"
 #include "coop_puppet.h"
+#include "coop_game_build.h"
 
 namespace CoopScrubs {
 
 namespace addr {
-inline constexpr std::uint64_t kMalloc = 0x14c6c90;            // as coop_live_events.h
-inline constexpr std::uint64_t kSend = 0x2838c50;              // (sender, -, header, payload)
+inline constexpr std::uint64_t kMalloc = CoopGameBuild::kMain.malloc;            // as coop_live_events.h
+inline constexpr std::uint64_t kSend = CoopGameBuild::kReader.transceiver_send;              // (sender, -, header, payload)
 inline constexpr std::uint64_t kTransceiver = 0x3e0;           // actor + : the actor's transceiver
 inline constexpr std::uint64_t kTransceiverId = 0x3e8;         // actor + : its id (u32)
 inline constexpr std::uint32_t kDefeatedOrderMessage = 0x77440000;

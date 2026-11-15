@@ -1124,7 +1124,7 @@ thread_local bool t_create_stop = false;
 // (SHOOT_FROM's shooter until that thread's next CREATE_REQUEST; used only for
 // the create the shoot code itself makes, by its return address)
 thread_local std::uint64_t t_shooter = 0;
-constexpr std::uint64_t kShootCreateReturn = 0xc17300;  // (after the bl at main+0xc172fc)
+constexpr std::uint64_t kShootCreateReturn = CoopGameBuild::kReader.shoot_create_return;  // (after the bl at main+0xc172fc)
 
 // The world hooks (patch 0005): the game's C hands its world events here instead of into caves and guest rings.
 int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {

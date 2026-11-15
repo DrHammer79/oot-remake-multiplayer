@@ -14,6 +14,7 @@
 #include "coop/protocol/messages.hpp"
 #include "coop_puppet.h"
 #include "coop_show_delay.h"
+#include "coop_game_build.h"
 
 namespace CoopPose {
 
@@ -515,7 +516,7 @@ std::optional<std::string> ModelNameOf(CoopPuppet::Guest& guest, std::uint64_t a
 std::uint64_t FindPlayer(CoopPuppet::Guest& guest, std::uint64_t main_base) {
     std::uint64_t scene = 0, table = 0, array = 0, manager = 0, must = 0;
     std::uint32_t count = 0;
-    if (!ReadValue(guest, main_base + 0x4e97648, scene) || !ReadValue(guest, scene + 0x1f0, table) ||
+    if (!ReadValue(guest, main_base + CoopGameBuild::kMain.scene_module_ptr, scene) || !ReadValue(guest, scene + 0x1f0, table) ||
         !ReadValue(guest, table + 0x50, count) || count < 0x10 ||
         !ReadValue(guest, table + 0x58, array) || !ReadValue(guest, array + 0x78, manager) ||
         !ReadValue(guest, manager + 0x30, must) || must == 0) {

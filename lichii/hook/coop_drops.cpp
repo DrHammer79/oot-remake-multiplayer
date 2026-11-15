@@ -71,9 +71,9 @@ std::string Tag(const proto::ObjectId& id) {
 }
 
 // Main offsets (build e0f3ccfaf50065ae): docs/objects.md.
-constexpr std::uint64_t kActorName = 0x260;
-constexpr std::uint64_t kActorNode = 0x538;
-constexpr std::uint64_t kNodeOwner = 0x10;
+constexpr std::uint64_t kActorName = CoopGameBuild::kFields.actor_name;
+constexpr std::uint64_t kActorNode = CoopGameBuild::kFields.actor_node;
+constexpr std::uint64_t kNodeOwner = CoopGameBuild::kFields.manager_node_owner;
 constexpr std::uint32_t kStateAlive = 4;
 
 } // namespace
@@ -780,6 +780,7 @@ std::optional<CoopPuppet::Call> Remover::Step(CoopPuppet::Guest& guest, bool aft
 #include "coop_objects.h"
 #include "coop_spawn.h"
 #include "coop_svc.h"
+#include "coop_game_build.h"
 
 namespace CoopDrops {
 namespace {
@@ -787,11 +788,11 @@ namespace {
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 constexpr std::array<u8, 8> kGameBuildId{0xe0, 0xf3, 0xcc, 0xfa, 0xf5, 0x00, 0x65, 0xae};
 // The live actor list, as coop_objects.cpp walks it (docs/objects.md).
-constexpr u64 kManagerLists = 0x118;
-constexpr u64 kListHead = 0x670;
-constexpr u64 kListCount = 0x10;
-constexpr u64 kActorPlacement = 0x3d8;
-constexpr u64 kPlacementHash = 0x88;
+constexpr u64 kManagerLists = CoopGameBuild::kFields.manager_lists;
+constexpr u64 kListHead = CoopGameBuild::kFields.manager_list_head;
+constexpr u64 kListCount = CoopGameBuild::kFields.manager_list_count;
+constexpr u64 kActorPlacement = CoopGameBuild::kFields.actor_placement;
+constexpr u64 kPlacementHash = CoopGameBuild::kFields.placement_hash;
 constexpr std::size_t kMaxWalk = 8192;
 constexpr u64 kDropKey = u64{1} << 62;  // the director's keys for drops
 constexpr int kCallerOrder = 40;        // after the mover (30)
