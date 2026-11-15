@@ -45,8 +45,18 @@ CI builds the module on Linux with the runner's LLVM and runs the lift check.
 
 Remove the `coop-proto` folder to go back to the plain game.
 
+## Null guards (v1 blocker B1)
+
+A co-op puppet has no Player component, and code of the game that runs for an item it wears loads through that null pointer (`main+0x82acc0` returns 0 for it). An emulator reads 0 there. A recomp's host and a real Switch fault. The 29 loads involved are listed once, in `tools/null_guards/sites.py`, and two guards are made from that list with the same meaning: if the load's base register is a null pointer, its register gets 0. Otherwise the load runs as shipped.
+
+- **Longshot/Hookshot (lifted C):** Hookshot patch 0023 (`nx2/coop_null_guards.py`, through `Lifter.unless` in `a64_lift.py`).
+- **ExeFS (in the game's process):** hook entries of kind 4 (null guard) and kind 5 (check) in `coop_hooks`, generated into `switch/proto/null_guards.inc` by `tools/null_guards/gen.py`. A guard is applied only when its load and every check before it hold the expected words (another mod or another build leaves that guard out). `_init` writes one five-word island per guard into a page of the module (`start.s`, `.text.coop_islands`; made writable for that, then read+execute again) and turns the load into a `b` to it. The island runs `cbz x<base>, 1f; <the load>; b back; 1: movz x<dest>, #0; b back` (`switch/proto/null_guard.h`). It uses no scratch register and leaves the flags alone, so the code around the load sees what it would after the load. The site and the island must be within a `b`'s reach: the module lands next to `main`.
+- **A recomp that lifts the module** applies kinds 4 and 5 itself (as `Lifter.unless`) and sets `applied_by_host`.
+
+The ExeFS guard tests for a base of exactly 0; the lifted guard tests for a base below 1 MB. Every logged read had a base of 0. `python tools/null_guards/gen.py --check` (CI) fails when `null_guards.inc` is not current or patch 0023's table differs from `sites.py`. `tests/switch/null_guard_test.cpp` runs the islands with null and real bases. The puppet's missing Physics (slot 10) is answered by the puppet pack, not by guards (`v1-puppet-components`). The three slot-10 loads stay listed for packs built without it.
+
 ## What it does not cover yet
 
-- Consoles: the Switch 2 has no custom firmware. A console would also need a `main.npdm` that grants `svcSetProcessMemoryPermission` (0x73), and would fault on the null reads the emulator returns as 0.
+- Consoles: the Switch 2 has no custom firmware. A console would also need a `main.npdm` that grants `svcSetProcessMemoryPermission` (0x73). The null reads the emulator returns as 0 are guarded (above); not yet proven on hardware.
 - Recomps (Longshot, Hookshot) load only `.ips`/`.pchtxt` byte patches, not code modules (Longshot PR #134, Hookshot PR 2900). Lifting the module needs a recomp that accepts it (above).
 - PAC: the hook does not touch a signed prologue (it rewrites a `bl` and restores `x30` and `sp` before jumping on), so pointer signing is unaffected.

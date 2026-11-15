@@ -18,6 +18,8 @@
 #include <stdint.h>
 
 #include "hooks.h"
+#include "null_guard.h"
+#include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
 #include "svc.h"
 
 // ---- Imports, resolved by rtld from main and sdk ----
@@ -59,19 +61,23 @@ COOP_EXPORT uint64_t coop_slot_frame_step = 0;  // the game's frame step; start.
 COOP_EXPORT uint64_t coop_slot_set_time = 0;    // void set_time(world, seconds)
 COOP_EXPORT void coop_frame_entry();            // start.s
 COOP_EXPORT void coop_call_set_time(uint64_t world, uint64_t seconds);  // start.s, via coop_slot_set_time
+extern uint32_t coop_null_islands[];  // start.s: one page, filled by ApplyNullGuards
 }
+static_assert(kNullGuardCount * null_guard::kIslandBytes <= 0x1000, "the island page is full");
 
-extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) hooks::Table coop_hooks = {
+constexpr uint32_t kHookCount = 2 + kNullGuardEntries;
+extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) hooks::Table<kHookCount> coop_hooks = {
     {'C', 'O', 'O', 'P', 'H', 'O', 'O', 'K'},
     1,
     sizeof(hooks::Entry),
-    2,
+    kHookCount,
     0,  // applied_by_host: a lifting recomp sets it to 1 in its copy
     0,
     {
         {hooks::kCallRedirect, 0, game::kFrameSiteInsn, game::kFrameSite, &coop_frame_entry,
          &coop_slot_frame_step},
         {hooks::kGameFn, 0, 0, game::kSetTime, nullptr, &coop_slot_set_time},
+        COOP_NULL_GUARD_ENTRIES
     },
 };
 
@@ -138,14 +144,15 @@ bool ReadU64(uint64_t addr, uint64_t& out) {
     return true;
 }
 
-// Point the game's `bl` at `target` (one instruction, same page permissions after).
-bool PatchBl(uint64_t site, uint64_t target) {
-    const int64_t delta = static_cast<int64_t>(target - site);
-    if ((delta & 3) || delta >= (int64_t{1} << 27) || delta < -(int64_t{1} << 27)) {
-        Log().s("hook: ").hex(target).s(" out of bl range from ").hex(site);
-        return false;
-    }
-    const uint32_t insn = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+void FlushCode(uint64_t from, uint64_t size) {
+    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("dc cvau, %0" : : "r"(a) : "memory");
+    __asm__ volatile("dsb ish" : : : "memory");
+    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("ic ivau, %0" : : "r"(a) : "memory");
+    __asm__ volatile("dsb ish\n isb" : : : "memory");
+}
+
+// Write one instruction of the game's code (same page permissions after).
+bool PatchWord(uint64_t site, uint32_t insn) {
     const uint64_t page = site & ~uint64_t{0xfff};
     uint32_t r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW);
     if (r != 0) {
@@ -153,10 +160,69 @@ bool PatchBl(uint64_t site, uint64_t target) {
         return false;
     }
     *reinterpret_cast<volatile uint32_t*>(site) = insn;
-    __asm__ volatile("dc cvau, %0\n dsb ish\n ic ivau, %0\n dsb ish\n isb" : : "r"(site) : "memory");
+    FlushCode(site, 4);
     r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX);
     if (r != 0) Log().s("hook: restore RX failed, result ").hex(r);
     return true;
+}
+
+// Point the game's `bl` at `target`.
+bool PatchBl(uint64_t site, uint64_t target) {
+    const int64_t delta = static_cast<int64_t>(target - site);
+    if ((delta & 3) || delta >= (int64_t{1} << 27) || delta < -(int64_t{1} << 27)) {
+        Log().s("hook: ").hex(target).s(" out of bl range from ").hex(site);
+        return false;
+    }
+    return PatchWord(site, 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu));
+}
+
+// The null guards (hooks.h kNullGuard, null_guard.h): every island is written in one writable
+// window of the island page, then each guarded load becomes `b` to its island. A guard whose
+// load or any kCheck before it differs (another mod, another build) is left out.
+void ApplyNullGuards() {
+    uint64_t sites[kNullGuardCount];  // (no `= {}`: freestanding, no memset; each is written before it is read)
+    uint32_t islands[kNullGuardCount][null_guard::kIslandWords];
+    uint32_t n = 0, wanted = 0;
+    bool checks_ok = true;
+    const uint64_t page = reinterpret_cast<uint64_t>(coop_null_islands);
+    for (uint32_t i = 0; i < coop_hooks.count && i < kHookCount; ++i) {
+        const hooks::Entry& e = coop_hooks.entries[i];
+        if (e.kind != hooks::kCheck && e.kind != hooks::kNullGuard) continue;
+        const uint64_t at = g_main + e.main_offset;
+        const uint32_t insn = *reinterpret_cast<volatile uint32_t*>(at);
+        if (e.kind == hooks::kCheck) {
+            checks_ok = checks_ok && insn == e.expected_insn;
+            continue;
+        }
+        ++wanted;
+        const uint64_t island = page + n * null_guard::kIslandBytes;
+        if (checks_ok && insn == e.expected_insn && n < kNullGuardCount &&
+            null_guard::Island(at, island, insn, islands[n])) {
+            sites[n++] = at;
+        } else {
+            Log().s("null guard at main+").hex(e.main_offset).s(": not the code it was made for, or out of reach: left out");
+        }
+        checks_ok = true;
+    }
+    if (n == 0) return;
+    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW) != 0) {
+        Log().s("null guards: the island page could not be made writable: none applied");
+        return;
+    }
+    for (uint32_t k = 0; k < n; ++k)
+        for (uint32_t w = 0; w < null_guard::kIslandWords; ++w)
+            reinterpret_cast<volatile uint32_t*>(page)[k * null_guard::kIslandWords + w] = islands[k][w];
+    FlushCode(page, n * null_guard::kIslandBytes);
+    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX) != 0) {
+        Log().s("null guards: the island page could not be made executable again: none applied");
+        return;
+    }
+    uint32_t done = 0;
+    for (uint32_t k = 0; k < n; ++k) {
+        uint32_t b = 0;
+        if (null_guard::Branch(sites[k], page + k * null_guard::kIslandBytes, b) && PatchWord(sites[k], b)) ++done;
+    }
+    Log().s("null guards: ").dec(done).s(" of ").dec(wanted).s(" applied (a load through a null base reads 0)");
 }
 
 bool IsBl(uint32_t insn) { return (insn & 0xfc000000u) == 0x94000000u; }
@@ -169,8 +235,9 @@ uint64_t BlTarget(uint64_t site, uint32_t insn) {
 // What a lifting recomp does at build time, done here at run time (emulators, console).
 void ApplyHooks() {
     const uint32_t count = coop_hooks.count;
-    for (uint32_t i = 0; i < count && i < sizeof(coop_hooks.entries) / sizeof(coop_hooks.entries[0]); ++i) {
+    for (uint32_t i = 0; i < count && i < kHookCount; ++i) {
         const hooks::Entry& e = coop_hooks.entries[i];
+        if (e.kind == hooks::kCheck || e.kind == hooks::kNullGuard) continue;  // (ApplyNullGuards)
         const uint64_t at = g_main + e.main_offset;
         const uint32_t insn = *reinterpret_cast<volatile uint32_t*>(at);
         if (e.expected_insn != 0 && insn != e.expected_insn) {
@@ -199,6 +266,7 @@ void ApplyHooks() {
                 break;
         }
     }
+    ApplyNullGuards();
 }
 
 void TrySetTime() {

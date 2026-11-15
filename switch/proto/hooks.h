@@ -16,7 +16,9 @@
 //   header, 32 bytes: char magic[8] "COOPHOOK"; u32 version; u32 entry_size (32);
 //                     u32 count; u32 applied_by_host; u64 reserved
 //   entry,  32 bytes: u16 kind; u16 reserved; u32 expected_insn; u64 main_offset;
-//                     u64 replacement (module address or 0); u64 slot (module address)
+//                     u64 replacement (module address or 0); u64 slot (module address or 0)
+// The entries are in one array of `count`; null guards (kinds 4 and 5) come from
+// tools/null_guards/sites.py through the generated null_guards.inc.
 #pragma once
 
 #include <stdint.h>
@@ -36,6 +38,14 @@ enum Kind : uint16_t {
     // No hook: the slot gets the game function at main_offset. expected_insn is
     // that function's first instruction, or 0 for no check.
     kGameFn = 3,
+    // A null guard (v1 blocker B1): the load at main_offset (expected_insn: LDR/LDRB/LDRH
+    // with an unsigned immediate offset, base not sp) gives its register 0 when its base
+    // register is 0, what the emulator reads, and runs as shipped otherwise. No replacement,
+    // no slot. Applied only when every kCheck entry since the previous guard matched.
+    // A lifting recomp emits it in its lifted code (Longshot: Lifter.unless, patch 0023).
+    kNullGuard = 4,
+    // No hook: main_offset must hold expected_insn for the next kNullGuard to be applied.
+    kCheck = 5,
 };
 
 struct Entry {
@@ -48,6 +58,7 @@ struct Entry {
 };
 static_assert(sizeof(Entry) == 32);
 
+template <uint32_t N>
 struct Table {
     char magic[8];
     uint32_t version;
@@ -55,8 +66,8 @@ struct Table {
     uint32_t count;
     uint32_t applied_by_host;
     uint64_t reserved;
-    Entry entries[2];
+    Entry entries[N];
 };
-static_assert(sizeof(Table) == 32 + 2 * 32);
+static_assert(sizeof(Table<2>) == 32 + 2 * 32);
 
 }  // namespace hooks

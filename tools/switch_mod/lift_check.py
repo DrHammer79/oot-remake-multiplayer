@@ -27,7 +27,8 @@ STT_OBJECT = 1
 HOOK_MAGIC = b"COOPHOOK"
 HOOK_HEADER = 32
 HOOK_ENTRY = 32
-KINDS = {1: "call_redirect", 2: "entry", 3: "game_fn"}
+KINDS = {1: "call_redirect", 2: "entry", 3: "game_fn", 4: "null_guard", 5: "check"}
+NO_SLOT_KINDS = (4, 5)   # null guard and its checks (hooks.h): no slot, no replacement
 
 
 class LiftError(Exception):
@@ -196,6 +197,12 @@ def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
             for i, (kind, _insn, main_off, repl, slot) in enumerate(hook_table(elf, dyn["coop_hooks"].value)):
                 if kind not in KINDS:
                     problems.append(f"hook {i}: unknown kind {kind}")
+                if kind in NO_SLOT_KINDS:
+                    if slot != 0 or repl != 0:
+                        problems.append(f"hook {i} (main+{main_off:#x}): a {KINDS[kind]} entry has no slot or replacement")
+                    if _insn == 0:
+                        problems.append(f"hook {i} (main+{main_off:#x}): a {KINDS[kind]} entry needs its instruction")
+                    continue
                 if slot not in slots:
                     problems.append(f"hook {i} (main+{main_off:#x}): slot {slot:#x} is not an exported coop_slot_*")
                 if kind == 3 and repl != 0:
