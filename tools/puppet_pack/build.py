@@ -122,6 +122,19 @@ EMITTER_DIR = "Component/PerceptionEmitterParam/"
 EMITTER_SUFFIX = ".game__component__PerceptionEmitterParam.bgyml"
 EMITTER_DROP = ("AdvancedEmitters",)
 QUIET = "Quiet"
+# Cloth physics (v1-puppet-components, v1 blocker B1). The game reads an actor's Physics component (slot 10 of its
+# component table, +0x50: the engine's component registry main+0x11e9b00, creator main+0x94c870) without a check at
+# 574 places; Link's hair code (main+0x4b8240, main+0x4b84b0) goes on to [[physics+0x20]+0x1c8], his cloth. A puppet
+# without one faults there on Hookshot (patch 0002's guard, patch 0023's guards) and on a real Switch, which has
+# neither. So each puppet gets a Physics of its own whose ControllerSet has only Link's cloth (hair, hood, belt): no
+# character controller, body, sensor or ragdoll, so it still collides with nothing and nothing pushes it (hs-puppets-alt-b,
+# 2026-11-12: the slot-10 crash went away with it in game). With perception the puppet's Physics is
+# PERCEPTION_SOURCE's, whose ControllerSet is empty: the cloth goes into that one instead. `--no-cloth` leaves it out.
+CLOTH_KEYS = ("Cloth", "ClothAdvandecOption", "ClothList", "ClothReaction")   # (sic: the game's own key)
+PHYSICS_DIR = "Component/Physics/"
+PHYSICS_SUFFIX = ".engine__component__PhysicsParam.bgyml"
+CONTROLLER_SET_DIR = "Phive/ControllerSetParam/"
+CONTROLLER_SET_SUFFIX = ".phive__ControllerSetParam.bgyml"
 GUARD_AFFILIATION = "Component/AffiliationParam/NpcSecurityGuard.game__component__AffiliationParam.bgyml"
 
 # The puppet is no use without these: no AS, no model, nowhere to put a sword.
@@ -500,6 +513,84 @@ def add_perception(doc, player_components, members, actor, files, perception):
     return path, data, src
 
 
+def _merged_chain(members, path):
+    """A member with its in-pack `$parent` chain merged (child wins), and the paths read."""
+    chain, seen = [], []
+    while path and path in members and path not in seen:
+        seen.append(path)
+        doc = byml.loads(members[path])
+        chain.append(doc)
+        path = ref_to_member(doc.get("$parent")) if isinstance(doc, dict) else None
+    out = {}
+    for doc in reversed(chain):
+        out.update({k: v for k, v in doc.items() if k != "$parent"})
+    return out, seen
+
+
+def physics_paths(actor):
+    """The puppet's own (PhysicsParam, ControllerSetParam) member paths"""
+    return f"{PHYSICS_DIR}{actor}{PHYSICS_SUFFIX}", f"{CONTROLLER_SET_DIR}{actor}{CONTROLLER_SET_SUFFIX}"
+
+
+def _work_path(member):
+    """A member path as a param names it: Phive/X.bgyml -> Work/Phive/X.gyml"""
+    return "Work/" + member[:-len(".bgyml")] + ".gyml"
+
+
+def puppet_cloth(members, player_components, actor, base=None):
+    """The puppet's own Physics with Link's cloth (CLOTH_KEYS of the player's ControllerSet, its $parent chain merged).
+    `base`: {member path: bytes} of a Physics the puppet has already (perception's PhysicsParam and its ControllerSet):
+    its fields are kept and the cloth goes into its ControllerSet. Returns {member path: (bytes, the player's member it
+    stands in for)}: the PhysicsParam first, then the ControllerSet."""
+    src = ref_to_member(player_components.get("PhysicsRef"))
+    if not src or src not in members:
+        raise BuildError("the player's ActorParam has no PhysicsRef in the pack")
+    phys, _ = _merged_chain(members, src)
+    cs_src = ref_to_member(phys.get("ControllerSetPath"))
+    if not cs_src or cs_src not in members:
+        raise BuildError(f"the player's physics param {src} has no ControllerSet in the pack")
+    cs, _ = _merged_chain(members, cs_src)
+    cloth = {k: cs[k] for k in CLOTH_KEYS if k in cs}
+    if "Cloth" not in cloth:
+        raise BuildError(f"the player's ControllerSet {cs_src} has no Cloth")
+    own_phys, own_cs = {}, {}
+    if base:
+        base_phys = next(p for p in base if p.startswith(PHYSICS_DIR))
+        own_phys = byml.loads(base[base_phys])   # (as it is, its $parent too: only its ControllerSet changes)
+        base_cs = ref_to_member(own_phys.get("ControllerSetPath"))
+        if base_cs in base:
+            own_cs = byml.loads(base[base_cs])
+            if "$parent" in own_cs:
+                raise BuildError(f"{base_cs} has a $parent")
+        clash = sorted(set(own_cs) & set(cloth))
+        if clash:
+            raise BuildError(f"{base_phys}'s ControllerSet has {', '.join(clash)} already")
+    own_cs.update(cloth)
+    phys_path, cs_path = physics_paths(actor)
+    own_phys["ControllerSetPath"] = _work_path(cs_path)
+    return {phys_path: (byml.dumps(own_phys), src), cs_path: (byml.dumps(own_cs), cs_src)}
+
+
+def add_cloth(doc, player_components, members, actor, files):
+    """Gives the puppet's ActorParam `doc` its own cloth Physics (puppet_cloth), on top of the Physics it has (perception's)
+    when it has one. Adds the files and the members the cloth names to `files`."""
+    have = ref_to_member(doc["Components"].get("PhysicsRef"))
+    base = None
+    if have:
+        if have not in files:
+            raise BuildError(f"the puppet's PhysicsRef {have} is not in its pack")
+        base = {have: files[have]}
+        cs = ref_to_member(byml.loads(files[have]).get("ControllerSetPath"))
+        if cs in files:
+            base[cs] = files[cs]
+    own = puppet_cloth(members, player_components, actor, base)
+    for path, (data, _) in own.items():
+        files[path] = data
+    files.update(collect_members(members, byml.loads(own[physics_paths(actor)[1]][0])))
+    doc["Components"]["PhysicsRef"] = "?" + physics_paths(actor)[0]
+    return own
+
+
 def tunic_model_info(actor, variant, project):
     """(member path, bytes) of a colour puppet's ModelInfo: the player's model under its own
     project name, `Model/<project>.Player_<variant>.bfres` (puppet_pack.tunic)."""
@@ -508,11 +599,11 @@ def tunic_model_info(actor, variant, project):
 
 
 def build_pack(members, variant, sound=True, player_footsteps=False, sound_user=None, actor=None,
-               project=None, basic_xlink=False, perception=None):
+               project=None, basic_xlink=False, perception=None, cloth=True):
     """Returns (pack bytes, actor param bytes, member list, equipment keys) for one variant.
     `actor`: the pack's actor (default CoopPuppet_<variant>); `project`: a model project of its own
     (a tunic colour), else the player's. `perception`: perception_members() to make the puppet a
-    target of the game's perception (PERCEPTION_SOURCE), or None."""
+    target of the game's perception (PERCEPTION_SOURCE), or None. `cloth`: the puppet's own cloth Physics (add_cloth)."""
     player = f"Player_{variant}"
     actor = actor or puppet_name(variant)
     player_components = flatten_actor_param(members, player)
@@ -520,6 +611,8 @@ def build_pack(members, variant, sound=True, player_footsteps=False, sound_user=
     files = collect_members(members, doc)
     if perception:
         add_perception(doc, player_components, members, actor, files, perception)
+    if cloth:
+        add_cloth(doc, player_components, members, actor, files)
     if project:
         path, data = tunic_model_info(actor, variant, project)
         files[path] = data
@@ -1025,7 +1118,7 @@ def write_look_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, slots, l
 
 def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=False, sound_user=None,
           tunics=(), test_tunic=None, stand_in_effects=False, basic_xlink=False, title_rows=False,
-          look_slots=look_items.SLOTS, perception=False):
+          look_slots=look_items.SLOTS, perception=False, cloth=True):
     """`tunics`: the tunic colours to make puppets of (puppet_pack.tunic.COLORS; each is a model,
     a tile and an actor per age, CoopPuppet_<age>_<Colour>). `test_tunic`: give the plain puppets
     that colour too (a test of the colours with a hook that knows none).
@@ -1036,7 +1129,8 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     instead of the player's (test switch, the pack before puppet-looks). `look_slots`: how many
     players' puppets can wear gear colours of their own (puppet_pack.look_items; 0: none).
     `perception`: True makes the puppets a target of the game's perception (PERCEPTION_SOURCE), each with a
-    quiet copy (quiet_name) for the scenes with stealth guards (guard_scenes); off for 0.11 (PERCEPTION_SOURCE)."""
+    quiet copy (quiet_name) for the scenes with stealth guards (guard_scenes); off for 0.11 (PERCEPTION_SOURCE).
+    `cloth`: each puppet has a Physics of its own with Link's cloth only (CLOTH_KEYS; v1 blocker B1)."""
     heaps = heaps or {}
     if not os.path.isfile(os.path.join(romfs, "Pack", "ZsDic.pack.zs")):
         raise BuildError(f"{romfs} does not look like the game's romfs (no Pack/ZsDic.pack.zs)")
@@ -1115,7 +1209,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             raise BuildError(f"missing {rel(romfs, src)}")
         members = sarc.read(dicts.decompress(read(src)))
         pack, ap, names, keys = build_pack(members, v, sound, player_footsteps, sound_user, actor, project,
-                                           basic_xlink=basic_xlink, perception=None if quiet else seen_by)
+                                           basic_xlink=basic_xlink, perception=None if quiet else seen_by, cloth=cloth)
         dst_rel = f"Pack/Actor/{actor}.pack.zs"
         write(os.path.join(out_romfs, dst_rel), dicts.compress(pack, PACK_DICT))
         if player not in ai_rows:
@@ -1160,9 +1254,20 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             em_size = max((table.get(src) or 0) + max(0, len(data) - len(members[src])), len(data) + PACK_SIZE_MARGIN)
             table.add_new(path, em_size)
             emitter = {"param": path, "size": em_size}
+        physics = None
+        if physics_paths(actor)[0] in names:
+            # Each sized as the player's file it stands in for (the cloth is a part of his ControllerSet), plus any
+            # bytes it is longer, as the footstep param.
+            own = puppet_cloth(members, flatten_actor_param(members, player), actor,
+                               None if quiet or not seen_by else seen_by)
+            physics = {}
+            for path, (data, src) in own.items():
+                size = max((table.get(src) or 0) + max(0, len(data) - len(members[src])), len(data) + PACK_SIZE_MARGIN)
+                table.add_new(path, size)
+                physics[path] = size
         made.append({"actor": actor, "from": player, "perception": emitter, "quiet": quiet, "tunic": shade, "model": project, "pack": dst_rel, "pack_bytes": len(pack),
                      "instance_heap": _num(new_ai[-1].get("InstanceHeapSize", 0)), "param_size": ap_size,
-                     "members": names, "equipment_keys": keys, "footstep": footstep})
+                     "members": names, "equipment_keys": keys, "footstep": footstep, "physics": physics})
         log(f"{actor}: {len(names)} files, {len(pack)} bytes, {len(keys)} equipment keys -> {dst_rel}")
 
     src = os.path.join(romfs, "Pack", "Actor", f"{IMPACT_SOURCE}.pack.zs")
@@ -1270,6 +1375,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
         "sound": sound,
         "footsteps": "player" if player_footsteps or not sound else "puppet",
         "perception": bool(seen_by),
+        "cloth": cloth,
         "quiet_scenes": quiet_scenes,
         "guards": guards,
         "sound_user": sound_user if sound and sound_user else None,
@@ -1335,6 +1441,9 @@ def main(argv=None):
                          "(issue 150; off for 0.11: a puppet with a gear copy and the slingshot crashes the game)")
     ap.add_argument("--no-perception", action="store_true",
                     help="puppets no perception sees (the default for 0.11; kept for older scripts)")
+    ap.add_argument("--no-cloth", action="store_true",
+                    help="puppets without a Physics of their own (the pack before v1-puppet-components: Hookshot's "
+                         "patches 0002/0023 then guard the game's reads of it, and a real Switch faults)")
     ap.add_argument("--no-sound", action="store_true",
                     help="build the puppets without Link's sounds (the pack before issue 131)")
     ap.add_argument("--seed-trail", action="store_true",
@@ -1411,7 +1520,7 @@ def _main_build(a, romfs, hud_reader=None):
               sound_user=a.sound_user, tunics=tunics, test_tunic=a.test_tunic,
               stand_in_effects=a.seed_trail and not a.no_seed_trail, basic_xlink=a.basic_xlink,
               title_rows=a.title_rows, look_slots=max(0, min(a.look_slots, look_items.MAX_SLOTS)),
-              perception=a.perception and not a.no_perception)
+              perception=a.perception and not a.no_perception, cloth=not a.no_cloth)
     except BuildError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
