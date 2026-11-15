@@ -44,7 +44,7 @@ inline constexpr std::uint64_t kOutSticks = 0x0;
 // An AI node's actor: [[[node+8]+8]+0x1f0] (main+0x973030).
 inline constexpr std::uint64_t kNodeOwner = 0x8;
 inline constexpr std::uint64_t kOwnerHolder = 0x8;
-inline constexpr std::uint64_t kHolderActor = 0x1f0;
+inline constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.logic_holder_actor;
 // Where the input-off check returns to in the buttons' node (main+0x279cdf4 is its call).
 inline constexpr std::uint64_t kButtonsOffReturn = CoopGameBuild::kReader.buttons_off_return;
 }  // namespace addr

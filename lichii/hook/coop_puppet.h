@@ -70,9 +70,9 @@ inline constexpr std::uint32_t kRequestDrop = 4;
 // The GOT entry the preload walker reads for create argument +0x40.
 inline constexpr std::uint64_t kGotCreateDefault = CoopGameBuild::kMain.got_create_default;
 
-inline constexpr std::uint64_t kActorState = 0x2c;
-inline constexpr std::uint64_t kActorPosition = 0x31c;
-inline constexpr std::uint64_t kActorRotation = 0x328;
+inline constexpr std::uint64_t kActorState = CoopGameBuild::kFields.actor_state;
+inline constexpr std::uint64_t kActorPosition = CoopGameBuild::kFields.actor_position;
+inline constexpr std::uint64_t kActorRotation = CoopGameBuild::kFields.actor_rotation;
 // The pending transform the engine's own setter 0xc6fd60(actor, mtx34, 0)
 // (the run of OneShotActorRequestSetMtx, 0x28b2050) leaves on an actor with
 // no physics body: position at +0x358, rotation rows at +0x364. The actor's
@@ -80,10 +80,10 @@ inline constexpr std::uint64_t kActorRotation = 0x328;
 inline constexpr std::uint64_t kActorPositionRequest = 0x358;
 inline constexpr std::uint64_t kActorRotationRequest = 0x364;
 inline constexpr std::uint32_t kStatePresent = 4;
-inline constexpr std::uint64_t kLinkHolder = 0x08;
-inline constexpr std::uint64_t kLinkId = 0x10;
-inline constexpr std::uint64_t kHolderActor = 0x40;
-inline constexpr std::uint64_t kHolderId = 0x48;
+inline constexpr std::uint64_t kLinkHolder = CoopGameBuild::kFields.link_holder;
+inline constexpr std::uint64_t kLinkId = CoopGameBuild::kFields.link_id;
+inline constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.holder_actor;
+inline constexpr std::uint64_t kHolderId = CoopGameBuild::kFields.holder_id;
 
 // Animation (docs/puppet.md, Animation). The AS controller is actor +0x270,
 // then +0x40, +0x18, +0x18; its slot count at +0x18, slots at +0x20 (0x48
@@ -107,7 +107,7 @@ inline constexpr std::int32_t kMaxAsSlots = 8;  // slots synced from slot 0
 // 0x200]; 0x2df7b20(eu, kind, &char*, state 2, -1, 1, 0) wears the named
 // piece in a slot kind, as the game's own GameData path does.
 inline constexpr std::uint64_t kEquip = CoopGameBuild::kMain.equip;
-inline constexpr std::uint64_t kActorParts = 0x270;
+inline constexpr std::uint64_t kActorParts = CoopGameBuild::kFields.actor_components;
 inline constexpr std::uint64_t kPartsEquipmentUser = 0x200;
 // In hand or put away: 0xe34c40(eu, slot, state) is the game's own change of
 // an equipment slot's state (the shield node 0x2797850 calls it with slot 4,
@@ -134,15 +134,15 @@ inline constexpr std::uint64_t kEquipState = CoopGameBuild::kReader.equip_state;
 inline constexpr std::uint64_t kUnequipArmor = CoopGameBuild::kMain.unequip_armor;
 inline constexpr std::uint32_t kArmorKindFirst = 7;   // ArmorHead
 inline constexpr std::uint32_t kArmorKindLast = 10;   // ArmorHand
-inline constexpr std::uint64_t kArmorLinks = 0xe0;    // kArmorLinkCount links of kEquipSlotStride
+inline constexpr std::uint64_t kArmorLinks = CoopGameBuild::kFields.equip_armor_links;    // kArmorLinkCount links of kEquipSlotStride
 inline constexpr std::uint32_t kArmorLinkCount = 13;
 inline constexpr std::uint32_t kEquipStateInHand = 1;
 inline constexpr std::uint32_t kEquipStateAway = 2;
-inline constexpr std::uint64_t kEquipSlots = 0x20;
-inline constexpr std::uint64_t kEquipSlotStride = 0x18;
-inline constexpr std::uint64_t kEquipSlotHolder = 0x08;
-inline constexpr std::uint64_t kEquipSlotId = 0x10;
-inline constexpr std::uint64_t kEquipSlotBits = 0x13bc;
+inline constexpr std::uint64_t kEquipSlots = CoopGameBuild::kFields.equip_slots;
+inline constexpr std::uint64_t kEquipSlotStride = CoopGameBuild::kFields.equip_slot_stride;
+inline constexpr std::uint64_t kEquipSlotHolder = CoopGameBuild::kFields.equip_slot_holder;
+inline constexpr std::uint64_t kEquipSlotId = CoopGameBuild::kFields.equip_slot_id;
+inline constexpr std::uint64_t kEquipSlotBits = CoopGameBuild::kFields.equip_slot_bits;
 inline constexpr std::uint8_t kEquipBitInHand = 0x2;
 inline constexpr std::uint8_t kEquipBitAway = 0x4;
 // The byte is a request the game clears when the change is done (seen in a

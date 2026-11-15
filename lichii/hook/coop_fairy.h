@@ -109,12 +109,12 @@ private:
 // owner at node + kNodeOwner, and an actor's own node at actor + kActorNode.
 namespace addr {
 inline constexpr std::uint64_t kManagerPtr = CoopGameBuild::kMain.actor_manager_ptr;
-inline constexpr std::uint64_t kLists = 0x118;
-inline constexpr std::uint64_t kListHead = 0x670;
-inline constexpr std::uint64_t kNodeOwner = 0x10;
-inline constexpr std::uint64_t kActorNode = 0x538;
-inline constexpr std::uint64_t kActorName = 0x260;  // -> the actor's name, a C string
-inline constexpr std::uint64_t kActorState = 0x2c;  // 4: present
+inline constexpr std::uint64_t kLists = CoopGameBuild::kFields.manager_lists;
+inline constexpr std::uint64_t kListHead = CoopGameBuild::kFields.manager_list_head;
+inline constexpr std::uint64_t kNodeOwner = CoopGameBuild::kFields.manager_node_owner;
+inline constexpr std::uint64_t kActorNode = CoopGameBuild::kFields.actor_node;
+inline constexpr std::uint64_t kActorName = CoopGameBuild::kFields.actor_name;  // -> the actor's name, a C string
+inline constexpr std::uint64_t kActorState = CoopGameBuild::kFields.actor_state;  // 4: present
 inline constexpr std::uint32_t kStatePresent = 4;
 inline constexpr std::size_t kMaxWalk = 8192;
 }  // namespace addr

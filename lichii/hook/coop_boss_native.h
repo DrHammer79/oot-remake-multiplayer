@@ -57,7 +57,7 @@ using coop::protocol::BossBrain;
 using coop::protocol::BossChange;
 
 namespace addr {
-inline constexpr std::uint64_t kActorComponents = 0x270;  // actor -> component table
+inline constexpr std::uint64_t kActorComponents = CoopGameBuild::kFields.actor_components;  // actor -> component table
 inline constexpr std::uint64_t kComponentBsa = 0x188;     // table -> BSA component
 inline constexpr std::uint64_t kBsaBrainVerb = 0x28;      // s32, the current brain verb
 inline constexpr std::uint64_t kSetBrainVerb = CoopGameBuild::kReader.set_brain_verb;       // main+

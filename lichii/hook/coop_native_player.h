@@ -42,18 +42,18 @@ inline std::string ActorFor(bool adult) {
 }
 
 namespace addr {
-inline constexpr std::uint64_t kActorState = 0x2c;      // 4: present
-inline constexpr std::uint64_t kActorPosition = 0x31c;
-inline constexpr std::uint64_t kActorParts = 0x270;     // the component table
+inline constexpr std::uint64_t kActorState = CoopGameBuild::kFields.actor_state;      // 4: present
+inline constexpr std::uint64_t kActorPosition = CoopGameBuild::kFields.actor_position;
+inline constexpr std::uint64_t kActorParts = CoopGameBuild::kFields.actor_components;     // the component table
 // Slots of the component table (8 bytes each; reports/hs-puppets-alt-b.md).
 inline constexpr std::uint64_t kPartPhysics = 0x50;     // slot 10
 inline constexpr std::uint64_t kPartLife = 0x2b8;       // slot 87
 inline constexpr std::uint64_t kPartPlayer = 0x358;     // slot 107
 // The player preload lists (the docs' "player manager"): how many records.
 inline constexpr std::uint64_t kSceneModulePtr = CoopGameBuild::kMain.scene_module_ptr;
-inline constexpr std::uint64_t kSceneTable = 0x1f0;
-inline constexpr std::uint64_t kTableArray = 0x58;
-inline constexpr std::uint64_t kPlayerManagerSlot = 0x78;
+inline constexpr std::uint64_t kSceneTable = CoopGameBuild::kFields.scene_table;
+inline constexpr std::uint64_t kTableArray = CoopGameBuild::kFields.scene_table_array;
+inline constexpr std::uint64_t kPlayerManagerSlot = CoopGameBuild::kFields.scene_player_manager;
 inline constexpr std::uint64_t kListOneCount = 0x28;
 inline constexpr std::uint64_t kListTwoCount = 0x38;
 }  // namespace addr

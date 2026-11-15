@@ -37,15 +37,15 @@ struct Call;
 namespace CoopPuppetSound {
 
 namespace addr {
-inline constexpr std::uint64_t kActorParts = 0x270;
+inline constexpr std::uint64_t kActorParts = CoopGameBuild::kFields.actor_components;
 inline constexpr std::uint64_t kPartsXLink = 0x68;
 inline constexpr std::uint64_t kXLinkEffectUser = 0x70;
 inline constexpr std::uint64_t kXLinkSoundUser = 0x78;
 inline constexpr std::uint64_t kUserFlags = 0x18;
 inline constexpr std::uint32_t kUserFlagEffect = 0x1000;
-inline constexpr std::uint64_t kUserResource = 0x58;
+inline constexpr std::uint64_t kUserResource = CoopGameBuild::kFields.xlink_user_resource;
 inline constexpr std::uint64_t kResourceName = 0x10;
-inline constexpr std::uint64_t kResourceAccessor = 0x18;
+inline constexpr std::uint64_t kResourceAccessor = CoopGameBuild::kFields.xlink_resource_accessor;
 inline constexpr std::uint64_t kUserEvents = 0x28;       // list head
 inline constexpr std::uint64_t kUserFirstLink = 0x30;
 inline constexpr std::uint64_t kUserLinkOffset = 0x3c;   // s32

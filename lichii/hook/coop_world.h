@@ -373,7 +373,7 @@ namespace BlockNode {
 inline constexpr std::uint64_t kVtable = CoopGameBuild::kReader.block_node_vtable;
 inline constexpr std::uint64_t kVtable2 = CoopGameBuild::kReader.block_node_vtable2;
 inline constexpr std::uint64_t kOwner = 0x8;          // [node + 8] -> [+8] -> [+0x1f0] = actor
-inline constexpr std::uint64_t kOwnerActor = 0x1f0;
+inline constexpr std::uint64_t kOwnerActor = CoopGameBuild::kFields.logic_holder_actor;
 inline constexpr std::uint64_t kBase = 0x40;
 inline constexpr std::uint64_t kGoal = 0x4c;
 inline constexpr std::uint64_t kTarget = 0xfc;

@@ -23,6 +23,7 @@
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 #include "coop/presence/presence.hpp"
+#include "coop_game_build.h"
 
 namespace CoopPuppet {
 namespace {
@@ -86,7 +87,7 @@ bool Gone(std::uint32_t state) {
 // The actor's name (actor + 0x260 -> a C string, as coop_fairy.h's
 // addr::kActorName) is `name`, or not readable yet (then the vtable decides).
 bool NameFits(Guest& guest, std::uint64_t actor, const std::string& name) {
-    constexpr std::uint64_t kActorName = 0x260;
+    constexpr std::uint64_t kActorName = CoopGameBuild::kFields.actor_name;
     std::uint64_t text = 0;
     if (!ReadValue(guest, actor + kActorName, text) || text == 0) {
         return true;

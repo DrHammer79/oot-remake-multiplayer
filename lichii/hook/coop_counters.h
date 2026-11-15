@@ -60,7 +60,7 @@ inline constexpr std::uint64_t kNodeRemaining = 0x20;         // f32 frames left
 inline constexpr std::uint64_t kNodeDuration = 0x2c;          // f32 frames
 inline constexpr std::uint64_t kNodeGraph = 0x8;              // [node + 8]: the graph instance
 inline constexpr std::uint64_t kGraphOwner = 0x8;             // [[node + 8] + 8]
-inline constexpr std::uint64_t kOwnerActor = 0x1f0;           // [[[node + 8] + 8] + 0x1f0]: the actor
+inline constexpr std::uint64_t kOwnerActor = CoopGameBuild::kFields.logic_holder_actor;           // [[[node + 8] + 8] + 0x1f0]: the actor
 inline constexpr float kFramesPerSecond = 60.0f;
 
 // The cave (coop_counter.s) and the u64 that holds the ring's address.

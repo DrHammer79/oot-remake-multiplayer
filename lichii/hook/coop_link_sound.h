@@ -48,8 +48,8 @@ namespace CoopLinkSound {
 namespace addr {
 inline constexpr std::uint64_t kEmit = CoopGameBuild::kReader.xlink_emit;         // (user, &asset, &handle, 0)
 inline constexpr std::uint64_t kSearchAsset = CoopGameBuild::kReader.xlink_search_asset;  // (accessor, &asset, name) -> bool
-inline constexpr std::uint64_t kUserResource = 0x58;
-inline constexpr std::uint64_t kResourceAccessor = 0x18;
+inline constexpr std::uint64_t kUserResource = CoopGameBuild::kFields.xlink_user_resource;
+inline constexpr std::uint64_t kResourceAccessor = CoopGameBuild::kFields.xlink_resource_accessor;
 }  // namespace addr
 
 // Room in the puppet's block (CoopPuppet::block). The Ocarina notes' asset and

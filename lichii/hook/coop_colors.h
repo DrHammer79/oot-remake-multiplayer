@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "coop_game_build.h"
 
 namespace CoopPuppet {
 class Guest;
@@ -27,7 +28,7 @@ class Guest;
 namespace CoopColors {
 
 namespace addr {
-inline constexpr std::uint64_t kActorParts = 0x270;    // actor -> parts
+inline constexpr std::uint64_t kActorParts = CoopGameBuild::kFields.actor_components;    // actor -> parts
 inline constexpr std::uint64_t kPartsModel = 0x260;    // parts -> model (0xc71c20)
 inline constexpr std::uint64_t kModelColor = 0x20;     // 4 x f32: r, g, b, strength
 inline constexpr std::uint64_t kModelDirty = 0x120;    // u32 bits

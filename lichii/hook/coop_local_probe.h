@@ -30,8 +30,8 @@ namespace CoopLocalProbe {
 
 namespace addr {
 inline constexpr std::uint64_t kLayers = CoopGameBuild::kReader.renderer_ptr;        // main+: pointer to the layers' owner
-inline constexpr std::uint64_t kLayerCount = 0x20;
-inline constexpr std::uint64_t kLayerArray = 0x28;
+inline constexpr std::uint64_t kLayerCount = CoopGameBuild::kFields.renderer_layer_count;
+inline constexpr std::uint64_t kLayerArray = CoopGameBuild::kFields.renderer_layer_array;
 inline constexpr std::uint64_t kLayerCamera = 0x78;
 inline constexpr std::uint64_t kLayerFlags = 0x88;
 inline constexpr std::uint64_t kLayerName = 0x8b0;

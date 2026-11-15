@@ -199,9 +199,66 @@ TEST_CASE("game build: every offset the readers use keeps its 1.1.1 value") {
 }
 
 TEST_CASE("game build: a new field in the tables is pinned above") {
-    // A field added without a pin fails here: add its CHECK above and here.
+    // A field added without a pin fails here: add its CHECK to the pins and here.
     CHECK(sizeof(CoopGameBuild::MainOffsets) / sizeof(std::uint64_t) == 32);
     CHECK(sizeof(CoopGameBuild::ReaderOffsets) / sizeof(std::uint64_t) == 47);
+    CHECK(sizeof(CoopGameBuild::StructOffsets) / sizeof(std::uint64_t) == 50);
+}
+
+TEST_CASE("game build: every shared struct offset keeps its 1.1.1 value") {
+    // The readers' constants (kActorName, kListHead, ...) had these literals,
+    // the same in every file, before they took them from the table.
+    using CoopGameBuild::kFields;
+    CHECK(kFields.actor_components == 0x270);
+    CHECK(kFields.actor_name == 0x260);
+    CHECK(kFields.actor_node == 0x538);
+    CHECK(kFields.actor_placement == 0x3d8);
+    CHECK(kFields.actor_position == 0x31c);
+    CHECK(kFields.actor_rotation == 0x328);
+    CHECK(kFields.actor_state == 0x2c);
+    CHECK(kFields.as_slot_array == 0x20);
+    CHECK(kFields.as_slot_count == 0x18);
+    CHECK(kFields.as_slot_frame == 0xe8);
+    CHECK(kFields.as_slot_rate == 0xd4);
+    CHECK(kFields.as_slot_stride == 0x48);
+    CHECK(kFields.components_as == 0x40);
+    CHECK(kFields.components_life == 0x2b8);
+    CHECK(kFields.equip_armor_links == 0xe0);
+    CHECK(kFields.equip_slot_bits == 0x13bc);
+    CHECK(kFields.equip_slot_holder == 0x8);
+    CHECK(kFields.equip_slot_id == 0x10);
+    CHECK(kFields.equip_slot_stride == 0x18);
+    CHECK(kFields.equip_slots == 0x20);
+    CHECK(kFields.event_session == 0x68);
+    CHECK(kFields.flags_key_count == 0xc58);
+    CHECK(kFields.flags_key_record_size == 0x10);
+    CHECK(kFields.flags_key_records == 0xc60);
+    CHECK(kFields.flags_key_value == 0xc);
+    CHECK(kFields.holder_actor == 0x40);
+    CHECK(kFields.holder_id == 0x48);
+    CHECK(kFields.life_hit_amount == 0x224);
+    CHECK(kFields.life_hit_header == 0x1f8);
+    CHECK(kFields.life_hit_record == 0x240);
+    CHECK(kFields.life_last_hit_id == 0x1b18);
+    CHECK(kFields.life_value == 0x1c10);
+    CHECK(kFields.link_holder == 0x8);
+    CHECK(kFields.link_id == 0x10);
+    CHECK(kFields.logic_holder_actor == 0x1f0);
+    CHECK(kFields.manager_list_count == 0x10);
+    CHECK(kFields.manager_list_head == 0x670);
+    CHECK(kFields.manager_lists == 0x118);
+    CHECK(kFields.manager_node_owner == 0x10);
+    CHECK(kFields.placement_hash == 0x88);
+    CHECK(kFields.renderer_layer_array == 0x28);
+    CHECK(kFields.renderer_layer_count == 0x20);
+    CHECK(kFields.scene_player_manager == 0x78);
+    CHECK(kFields.scene_table == 0x1f0);
+    CHECK(kFields.scene_table_array == 0x58);
+    CHECK(kFields.session_count == 0xeb0);
+    CHECK(kFields.session_current == 0xf18);
+    CHECK(kFields.session_events == 0xeb8);
+    CHECK(kFields.xlink_resource_accessor == 0x18);
+    CHECK(kFields.xlink_user_resource == 0x58);
 }
 
 TEST_CASE("game build: the recomps' guest addresses are main's") {

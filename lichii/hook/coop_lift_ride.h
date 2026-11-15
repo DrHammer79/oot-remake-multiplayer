@@ -48,7 +48,7 @@ inline constexpr std::uint64_t kNodeValue = 0x38;     // -> value byte
 inline constexpr std::uint64_t kNodeOwner = 0x08;     // -> owner; [owner+8] -> holder; [holder+0x1f0] = actor
 inline constexpr std::uint64_t kOwner = 0x40;         // in the block
 inline constexpr std::uint64_t kHolder = 0x80;        // in the block
-inline constexpr std::uint64_t kHolderActor = 0x1f0;
+inline constexpr std::uint64_t kHolderActor = CoopGameBuild::kFields.logic_holder_actor;
 inline constexpr std::uint64_t kValueByte = 0x60;     // in the block
 inline constexpr std::uint64_t kBlockSize = kHolder + kHolderActor + 0x10;
 }  // namespace addr

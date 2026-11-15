@@ -122,15 +122,15 @@ constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 constexpr std::array<u8, 8> kGameBuildId{0xe0, 0xf3, 0xcc, 0xfa, 0xf5, 0x00, 0x65, 0xae};
 
 constexpr u64 kActorManagerPtr = CoopGameBuild::kMain.actor_manager_ptr;  // main offset
-constexpr u64 kManagerLists = 0x118;
-constexpr u64 kListHead = 0x670;
-constexpr u64 kListCount = 0x10;
-constexpr u64 kNodeOwner = 0x10;
-constexpr u64 kActorNode = 0x538;
-constexpr u64 kActorName = 0x260;
-constexpr u64 kActorState = 0x2c;
-constexpr u64 kActorPosition = 0x31c;
-constexpr u64 kActorRotation = 0x328;  // 9 x f32, rows of 3
+constexpr u64 kManagerLists = CoopGameBuild::kFields.manager_lists;
+constexpr u64 kListHead = CoopGameBuild::kFields.manager_list_head;
+constexpr u64 kListCount = CoopGameBuild::kFields.manager_list_count;
+constexpr u64 kNodeOwner = CoopGameBuild::kFields.manager_node_owner;
+constexpr u64 kActorNode = CoopGameBuild::kFields.actor_node;
+constexpr u64 kActorName = CoopGameBuild::kFields.actor_name;
+constexpr u64 kActorState = CoopGameBuild::kFields.actor_state;
+constexpr u64 kActorPosition = CoopGameBuild::kFields.actor_position;
+constexpr u64 kActorRotation = CoopGameBuild::kFields.actor_rotation;  // 9 x f32, rows of 3
 constexpr u64 kLifeHurt = 0x228;       // s32 damage this frame (0x49dc90)
 constexpr u32 kStateAlive = 4;
 // What the game sets on an actor about 25 m or more from its Link (docs/
@@ -206,15 +206,15 @@ u64 SteadyNowMs() {
 // its command name char* +0x10, rate f32 +0xd4, frame f32 +0xe8. The play
 // request for 0x2022a0: +0 actor, +8 name, +0x10 slot, +0x14 rate, +0x18 and
 // +0x1c -1.0, +0x20 skip-if-same, +0x28 node.
-constexpr u64 kComponentsAs = 0x40;
+constexpr u64 kComponentsAs = CoopGameBuild::kFields.components_as;
 constexpr u64 kAsInner = 0x18;
 constexpr u64 kAsController = 0x18;
-constexpr u64 kAsSlotCount = 0x18;
-constexpr u64 kAsSlotArray = 0x20;
-constexpr u64 kAsSlotEntry = 0x48;  // array entries; the first 8 bytes point to the slot (docs/puppet.md)
+constexpr u64 kAsSlotCount = CoopGameBuild::kFields.as_slot_count;
+constexpr u64 kAsSlotArray = CoopGameBuild::kFields.as_slot_array;
+constexpr u64 kAsSlotEntry = CoopGameBuild::kFields.as_slot_stride;  // array entries; the first 8 bytes point to the slot (docs/puppet.md)
 constexpr u64 kAsSlotName = 0x10;
-constexpr u64 kAsSlotRate = 0xd4;
-constexpr u64 kAsSlotFrame = 0xe8;
+constexpr u64 kAsSlotRate = CoopGameBuild::kFields.as_slot_rate;
+constexpr u64 kAsSlotFrame = CoopGameBuild::kFields.as_slot_frame;
 constexpr u64 kPlayAs = CoopGameBuild::kMain.play_as;
 constexpr u64 kSetAsFrame = CoopGameBuild::kMain.set_as_frame;  // (controller, slot, s0 = frame), as the puppet
 constexpr float kFrameSlack = 3.0f;     // frames off before a copy's frame is set
@@ -296,13 +296,13 @@ constexpr u64 kPlayLogMs = 1000;  // a copy's replays of one name: one log line 
 // place +0x27c, the attacker's place +0x2a0). The list links from +0x2d8 on
 // are left alone. Our own player stands in as the attacker.
 // (kHitTemplate: coop_hit_replay.h)
-constexpr u64 kHitRecord = 0x240;
-constexpr u64 kHitHeader = 0x1f8;
-constexpr u64 kHitAmount = 0x224;
-constexpr u64 kLastHitId = 0x1b18;
+constexpr u64 kHitRecord = CoopGameBuild::kFields.life_hit_record;
+constexpr u64 kHitHeader = CoopGameBuild::kFields.life_hit_header;
+constexpr u64 kHitAmount = CoopGameBuild::kFields.life_hit_amount;
+constexpr u64 kLastHitId = CoopGameBuild::kFields.life_last_hit_id;
   // the copy's own AI took over: play again at most this often
 constexpr u64 kDriftLogUs = 5'000'000;
-constexpr u64 kActorComponents = 0x270;
+constexpr u64 kActorComponents = CoopGameBuild::kFields.actor_components;
 // LICHII_COOP_OBJECTS_AI_HOLD=1 or 2 (off by default; docs/objects.md
 // "Holding a copy's AI", coop_hold.h): the BSA component is table +0xb0
 // (0xcad060), and bit 0 of its u16 at +0xc4 is what QueryBsaIsBrainSkip (run
@@ -311,15 +311,15 @@ constexpr u64 kActorComponents = 0x270;
 // frames each one's bit read as asked.
 constexpr u64 kComponentBsa = 0xb0;
 constexpr u64 kBsaFlags = 0xc4;
-constexpr u64 kComponentLife = 0x2b8;
+constexpr u64 kComponentLife = CoopGameBuild::kFields.components_life;
 static_assert(kComponentLife == CoopHitReplay::kComponentLife && kActorComponents == CoopHitReplay::kActorComponents &&
               kHitRecord == CoopHitReplay::kHitRecord && kHitHeader == CoopHitReplay::kHitHeader &&
               kHitAmount == CoopHitReplay::kHitAmount && kLastHitId == CoopHitReplay::kLastHitId);
-constexpr u64 kLifeValue = 0x1c10;
+constexpr u64 kLifeValue = CoopGameBuild::kFields.life_value;
 constexpr u64 kLifeMax = 0x1c18;
 constexpr u64 kLifeCopy = 0x1ca8;  // life and max as last mirrored
-constexpr u64 kActorPlacement = 0x3d8;
-constexpr u64 kPlacementHash = 0x88;
+constexpr u64 kActorPlacement = CoopGameBuild::kFields.actor_placement;
+constexpr u64 kPlacementHash = CoopGameBuild::kFields.placement_hash;
 constexpr std::size_t kMaxWalk = 8192;
 
 // LICHII_COOP_OBJECTS_CHEAT: what it sets is in coop_cheat_items.h.

@@ -125,12 +125,78 @@ struct ReaderOffsets {
     std::uint64_t counter_ring;               // kRingPointer
 };
 
+// Field offsets inside the game's objects that more than one reader uses.
+// They may well be the same in another build, which is not proven: a new
+// build checks them by hand (docs/game-builds.md, step 3). Each field's
+// readers keep a constant of their own name set from here.
+struct StructOffsets {
+    // The actor (docs/puppet.md, docs/objects.md).
+    std::uint64_t actor_state;            // u32, 4 = alive
+    std::uint64_t actor_name;             // the actor name (char*)
+    std::uint64_t actor_components;       // the component table (kActorComponents, kActorParts)
+    std::uint64_t actor_position;         // 3 x f32
+    std::uint64_t actor_rotation;         // 9 x f32, rows of 3
+    std::uint64_t actor_placement;        // the placement it came from
+    std::uint64_t actor_node;             // the actor's own node in the manager's ring
+    std::uint64_t placement_hash;         // placement -> its u64 hash
+    // The actor manager's ring of actors.
+    std::uint64_t manager_lists;          // manager -> lists
+    std::uint64_t manager_list_head;      // lists + this: the ring head
+    std::uint64_t manager_list_count;     // the ring count
+    std::uint64_t manager_node_owner;     // node -> its actor
+    // The component table and the AS (animation) component.
+    std::uint64_t components_as;          // components -> AS
+    std::uint64_t components_life;        // components -> Life
+    std::uint64_t as_slot_count;          // AS: slot count
+    std::uint64_t as_slot_array;          // AS: slot array
+    std::uint64_t as_slot_stride;         // one array entry (kAsSlotStride, kAsSlotEntry)
+    std::uint64_t as_slot_rate;           // slot: f32 rate
+    std::uint64_t as_slot_frame;          // slot: f32 frame
+    // The Life component and its last hit.
+    std::uint64_t life_value;             // kLifeValue, kLifeValueEntry
+    std::uint64_t life_last_hit_id;
+    std::uint64_t life_hit_header;
+    std::uint64_t life_hit_amount;
+    std::uint64_t life_hit_record;
+    // The EquipmentUser and its links (a link -> holder -> actor).
+    std::uint64_t equip_slots;
+    std::uint64_t equip_slot_stride;
+    std::uint64_t equip_slot_holder;
+    std::uint64_t equip_slot_id;
+    std::uint64_t equip_slot_bits;        // kEquipSlotBits, kEquipSlotState
+    std::uint64_t equip_armor_links;
+    std::uint64_t link_holder;            // link -> holder
+    std::uint64_t link_id;                // link: u32 id
+    std::uint64_t holder_actor;           // holder -> actor
+    std::uint64_t holder_id;              // holder: u32, equals the link id
+    // The event manager's running session.
+    std::uint64_t event_session;          // set while an event runs
+    std::uint64_t session_count;          // u32
+    std::uint64_t session_events;         // -> event pointers
+    std::uint64_t session_current;        // u32
+    // The game flags manager's key records (docs/flags.md).
+    std::uint64_t flags_key_count;
+    std::uint64_t flags_key_records;
+    std::uint64_t flags_key_record_size;
+    std::uint64_t flags_key_value;
+    // Others.
+    std::uint64_t xlink_user_resource;    // xlink user -> resource
+    std::uint64_t xlink_resource_accessor;// resource -> accessor
+    std::uint64_t scene_table;            // Scene module -> table
+    std::uint64_t scene_table_array;      // table -> array
+    std::uint64_t scene_player_manager;   // array slot of the player manager
+    std::uint64_t logic_holder_actor;     // an AI/logic node's holder -> actor (kHolderActor, kOwnerActor)
+    std::uint64_t renderer_layer_count;   // u32
+    std::uint64_t renderer_layer_array;   // layer pointers, by id
+};
+
 struct Build {
     std::string_view id;       // first 8 bytes of the build id, lower-case hex
     std::string_view main_id;  // main's full build id, upper-case hex (loader)
     std::string_view version;  // the game's display version
     MainOffsets main;
     ReaderOffsets reader;
+    StructOffsets fields;
 };
 
 inline constexpr std::array<Build, 1> kBuilds{{
@@ -217,6 +283,58 @@ inline constexpr std::array<Build, 1> kBuilds{{
          .counter_start = 0x5e6760,
          .counter_cave = 0x3c46700,
          .counter_ring = 0x3c46780,
+     },
+     StructOffsets{
+         .actor_state = 0x2c,
+         .actor_name = 0x260,
+         .actor_components = 0x270,
+         .actor_position = 0x31c,
+         .actor_rotation = 0x328,
+         .actor_placement = 0x3d8,
+         .actor_node = 0x538,
+         .placement_hash = 0x88,
+         .manager_lists = 0x118,
+         .manager_list_head = 0x670,
+         .manager_list_count = 0x10,
+         .manager_node_owner = 0x10,
+         .components_as = 0x40,
+         .components_life = 0x2b8,
+         .as_slot_count = 0x18,
+         .as_slot_array = 0x20,
+         .as_slot_stride = 0x48,
+         .as_slot_rate = 0xd4,
+         .as_slot_frame = 0xe8,
+         .life_value = 0x1c10,
+         .life_last_hit_id = 0x1b18,
+         .life_hit_header = 0x1f8,
+         .life_hit_amount = 0x224,
+         .life_hit_record = 0x240,
+         .equip_slots = 0x20,
+         .equip_slot_stride = 0x18,
+         .equip_slot_holder = 0x8,
+         .equip_slot_id = 0x10,
+         .equip_slot_bits = 0x13bc,
+         .equip_armor_links = 0xe0,
+         .link_holder = 0x8,
+         .link_id = 0x10,
+         .holder_actor = 0x40,
+         .holder_id = 0x48,
+         .event_session = 0x68,
+         .session_count = 0xeb0,
+         .session_events = 0xeb8,
+         .session_current = 0xf18,
+         .flags_key_count = 0xc58,
+         .flags_key_records = 0xc60,
+         .flags_key_record_size = 0x10,
+         .flags_key_value = 0xc,
+         .xlink_user_resource = 0x58,
+         .xlink_resource_accessor = 0x18,
+         .scene_table = 0x1f0,
+         .scene_table_array = 0x58,
+         .scene_player_manager = 0x78,
+         .logic_holder_actor = 0x1f0,
+         .renderer_layer_count = 0x20,
+         .renderer_layer_array = 0x28,
      }},
 }};
 
@@ -231,6 +349,7 @@ inline constexpr const Build& kPrimary = kBuilds[0];
 // What the readers' constants are set from: the primary build's entry.
 inline constexpr const MainOffsets& kMain = kPrimary.main;
 inline constexpr const ReaderOffsets& kReader = kPrimary.reader;
+inline constexpr const StructOffsets& kFields = kPrimary.fields;
 
 // Where the recomps (Hookshot, Longshot) load main in guest memory
 // (hos_coop_api.h main_base): module code names a game function by its guest
