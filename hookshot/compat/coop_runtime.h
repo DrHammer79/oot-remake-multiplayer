@@ -2,6 +2,7 @@
 // The Hookshot module's runtime, behind the compat headers (hookshot/compat).
 // The emulator's API slice that lichii/hook uses is answered from here, so the
 // hook files compile unchanged for Hookshot (one copy of the co-op code).
+// Answered from the module's CoopPlatform table (hookshot/src/coop_hs_platform.cpp).
 #pragma once
 
 #include <cstddef>
@@ -11,7 +12,7 @@
 
 namespace CoopRuntime {
 
-// Set by the module's start (hookshot/src/coop_hookshot.cpp); false or zero
+// Set by the module's start (CoopHsPlatform::Make); false or zero
 // before.
 bool Running();                     // the game is up (the bridge's table is set)
 std::uint64_t MainBase();

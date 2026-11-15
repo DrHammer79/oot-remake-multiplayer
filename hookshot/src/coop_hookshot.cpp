@@ -13,6 +13,7 @@
 // - settings: coop.ini beside longshot.exe, then the LICHII_COOP_* variables,
 //   as in the emulator (the kit's launcher sets them from coop-options.ini).
 #include "coop_hookshot.h"
+#include "coop_hs_platform.h"
 
 #include <algorithm>
 #include <cctype>
@@ -31,6 +32,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <coop/os.hpp>
 
 #include "common/fs/path_util.h"
 #include "common/logging.h"
@@ -122,6 +125,32 @@ std::atomic<bool> g_present_seen{false};  // our patch's present site has run
 std::atomic<bool> g_flag_setters{false};  // our flag writes go through the game's setters (coop_flag_native.h)
 bool g_hold = false;
 Core::System g_system;
+
+// The module as a platform adapter (coop_hs_platform.h): Hookshot's table as a CoopPlatform, installed for coop::os.
+// Only while co-op is on (Start until a refusal): the game slots it forwards are Hookshot's.
+void UsePlatform(const HosCoopApi* api) {
+    const coop::os::InstallError e = coop::os::Install(CoopHsPlatform::Make(api));
+    if (e != coop::os::InstallError::kNone) {
+        LOG_WARNING(Core, "coop: the platform table was refused ({}): coop::os keeps the std one", static_cast<int>(e));
+    }
+}
+// Co-op off at start: the compat runtime answers nothing again, coop::os the std table.
+void Off() {
+    coop::os::Install(coop::os::StdPlatform());
+    CoopHsPlatform::Clear();
+    g_api = nullptr;
+}
+// The game slots, only used while co-op is on (Start set the table).
+const CoopPlatform& Platform() {
+    return *CoopHsPlatform::Get();
+}
+#ifndef _WIN32
+// A key held, from Hookshot's key_down (Linux: the SDL window's keys; Windows asks GetAsyncKeyState itself).
+bool TableKeyDown(int vk) {
+    const CoopPlatform* p = CoopHsPlatform::Get();
+    return p != nullptr && p->key_down != nullptr && p->key_down(static_cast<std::uint32_t>(vk)) != 0;
+}
+#endif
 
 std::string Env(const char* name) {
     const char* v = std::getenv(name);
@@ -254,20 +283,19 @@ void RunFlagSetters(void* ctx) {
     const bool ok = CoopFlagNative::RunSetters(
         memory, [ctx](std::uint64_t function, std::uint64_t x0, std::uint64_t x1, std::uint64_t x2,
                       std::optional<std::uint32_t> s0) {
-            HosCoopCall k{};
+            CoopCall k{};
             k.function = function;
             k.x[0] = x0;
             k.x[1] = x1;
             k.x[2] = x2;
             if (s0) std::memcpy(&k.s0, &*s0, sizeof k.s0);  // a Float setter's value
             std::uint64_t result = 0;
-            return g_api->call(ctx, &k, &result) != 0;
+            return Platform().call(ctx, &k, &result) != 0;
         },
         [ctx](const void* data, std::size_t n) -> std::uint64_t {
             // (patch 0004's scratch: an older Hookshot has none, and String64 writes then go into the queues)
-            const bool has = g_api->size >= offsetof(HosCoopApi, scratch) + sizeof(g_api->scratch) &&
-                             g_api->scratch != nullptr;
-            return has ? g_api->scratch(ctx, data, n) : 0;
+            const CoopPlatform& p = Platform();
+            return p.scratch != nullptr ? p.scratch(ctx, data, n) : 0;
         });
     if (ok) {
         return;
@@ -383,14 +411,14 @@ void RunCalls(void* ctx) {
         if (Refused(c)) {
             return std::optional<std::uint64_t>(0);  // as the game refusing it: asked again later
         }
-        HosCoopCall k{};
+        CoopCall k{};
         k.function = c.function;
         std::memcpy(k.x, c.x.data(), sizeof k.x);
         std::memcpy(k.stack, c.stack.data(), sizeof k.stack);
         k.s0 = c.s0;
         std::uint64_t x0 = 0;
         const OwnCall own;  // (what the game asks inside it is our own asking: World())
-        if (!g_api->call(ctx, &k, &x0)) {
+        if (!Platform().call(ctx, &k, &x0)) {
             LOG_WARNING(Core, "coop: no game function at {:#x}", c.function);
             return std::optional<std::uint64_t>();
         }
@@ -399,55 +427,6 @@ void RunCalls(void* ctx) {
 }
 
 }  // namespace
-
-namespace CoopRuntime {
-bool Running() {
-    return g_api != nullptr;
-}
-std::uint64_t MainBase() {
-    return g_api != nullptr ? g_api->main_base : 0;
-}
-const std::string& MainBuildHex() {
-    return g_build;
-}
-std::filesystem::path GameDir() {
-    if (g_api == nullptr || g_api->game_dir == nullptr) {
-        return std::filesystem::path(".");
-    }
-    // UTF-8 from the bridge: a folder name outside the ANSI code page stays whole.
-    const std::string dir = g_api->game_dir;
-    return std::filesystem::path(std::u8string(dir.begin(), dir.end()));
-}
-bool Valid(std::uint64_t address, std::size_t size) {
-    // The bridge checks a whole range before it copies: one byte at each end
-    // says whether the range is mapped (Hookshot's guest memory has no holes
-    // inside a mapped range the hook reads).
-    std::uint8_t b = 0;
-    return g_api != nullptr && size != 0 && address + size > address && g_api->read(address, &b, 1) != 0 &&
-           g_api->read(address + size - 1, &b, 1) != 0;
-}
-bool Read(std::uint64_t address, void* out, std::size_t size) {
-    return g_api != nullptr && g_api->read(address, out, size) != 0;
-}
-bool Write(std::uint64_t address, const void* in, std::size_t size) {
-    return g_api != nullptr && g_api->write(address, in, size) != 0;
-}
-bool Cas32(std::uint64_t address, std::uint32_t expected, std::uint32_t desired, std::uint32_t& seen) {
-    return g_api != nullptr && g_api->cas32(address, expected, desired, &seen) != 0;
-}
-void Log(const std::string& line) {
-    if (g_api != nullptr && g_api->log != nullptr) {
-        g_api->log(line.c_str());
-    }
-}
-bool PadButtons(std::uint64_t& out) {
-    if (!CoopHookshot::HasPadButtons(g_api)) {
-        return false;
-    }
-    out = g_api->pad_buttons();
-    return true;
-}
-}  // namespace CoopRuntime
 
 // The emulator-only parts of the hook, as Hookshot has them.
 namespace CoopSvc {
@@ -502,7 +481,7 @@ bool KeyDown(int vk) {
     }
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
 #else
-    return HasKeyDown(g_api) && g_api->key_down(static_cast<std::uint32_t>(vk)) != 0;
+    return TableKeyDown(vk);
 #endif
 }
 
@@ -608,7 +587,7 @@ bool AsyncDown(int vk) {
 #ifdef _WIN32
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
 #else
-    return HasKeyDown(g_api) && g_api->key_down(static_cast<std::uint32_t>(vk)) != 0;
+    return TableKeyDown(vk);
 #endif
 }
 
@@ -1015,10 +994,11 @@ bool Start(const HosCoopApi* api) {
         return false;
     }
     g_api = api;
+    UsePlatform(api);
     g_build = api->main_build_id != nullptr ? api->main_build_id : "";
     if (!BuildSupported(g_build)) {
         LOG_WARNING(Core, "coop: {}", CoopGameBuild::LogRefusal(g_build));
-        g_api = nullptr;
+        Off();
         return false;
     }
     LOG_INFO(Core, "coop: Hookshot module, game build {}, main at {:#x}{}", g_build.substr(0, 16), api->main_base,
@@ -1038,7 +1018,7 @@ bool Start(const HosCoopApi* api) {
     }
     if (!menu && !server) {
         CoopHook::Start();  // logs why co-op is off
-        g_api = nullptr;
+        Off();
         return false;
     }
     if (!server) {
@@ -1432,9 +1412,8 @@ void LocalLayer(void* ctx) {
         const char* v = std::getenv("LICHII_COOP_LOCAL_LAYER");
         return v != nullptr && std::string_view(v) == "1";
     }();
-    if (!wanted || g_api == nullptr || g_api->size < offsetof(HosCoopApi, scratch) + sizeof(g_api->scratch) ||
-        g_api->scratch == nullptr || g_api->call == nullptr)
-        return;
+    const CoopPlatform* platform = CoopHsPlatform::Get();
+    if (!wanted || platform == nullptr || platform->scratch == nullptr || platform->call == nullptr) return;
     static CoopLocalLayer::Second second{[] {
         CoopLocalLayer::Game g;
         g.main_base = [] { return CoopRuntime::MainBase(); };
@@ -1446,13 +1425,13 @@ void LocalLayer(void* ctx) {
     static void* frame_ctx = nullptr;   // (this call's: scratch() and call() take it)
     frame_ctx = ctx;
     static const bool set = [] {
-        second.Set([](const std::vector<std::uint8_t>& b) { return g_api->scratch(frame_ctx, b.data(), b.size()); },
+        second.Set([](const std::vector<std::uint8_t>& b) { return Platform().scratch(frame_ctx, b.data(), b.size()); },
                    [](std::uint64_t f, const std::array<std::uint64_t, 8>& x) -> std::optional<std::uint64_t> {
-                       HosCoopCall k{};
+                       CoopCall k{};
                        k.function = f;
                        for (std::size_t i = 0; i < 8; i++) k.x[i] = x[i];
                        std::uint64_t x0 = 0;
-                       if (!g_api->call(frame_ctx, &k, &x0)) return std::nullopt;
+                       if (!Platform().call(frame_ctx, &k, &x0)) return std::nullopt;
                        return x0;
                    });
         return true;
