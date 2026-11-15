@@ -1392,6 +1392,16 @@ void NoteDrawn(const HosCoopDraw& d) {
     g_drawn_h = d.height;
 }
 
+// The overlay's draw list was full (coop/ui/drawlist.h, docs/ui.md): the rest of that frame was not drawn. Said once.
+void NoteDropped(std::uint32_t dropped) {
+    static std::atomic<bool> said{false};
+    if (dropped > 0 && !said.exchange(true)) {
+        LOG_WARNING(Core, "coop: the overlay's draw list was full: {} drawing commands of a frame were not drawn "
+                    "(docs/ui.md); said once",
+                    dropped);
+    }
+}
+
 void DrawWithLook(const HosCoopDraw& d) {
     NoteDrawn(d);
     if (g_look_state.load() == kLookNotYet) {
@@ -1401,7 +1411,7 @@ void DrawWithLook(const HosCoopDraw& d) {
             g_look_state = kLookOff;
         }
     }
-    CoopDraw::Draw(d, DrawScene(), g_look_state.load() == kLookOn ? g_look : CoopDraw::Look{});
+    NoteDropped(CoopDraw::Draw(d, DrawScene(), g_look_state.load() == kLookOn ? g_look : CoopDraw::Look{}));
 }
 
 // Local co-op's research probe (coop_local_probe.h, LICHII_COOP_LOCAL_PROBE=1): the renderer's layers and the
@@ -1669,7 +1679,7 @@ COOP_HOOKSHOT_EXPORT void hos_coop_draw(const HosCoopDraw* d) {
         t.triangle = d->triangle;
         t.text = d->text;
         t.text_width = d->text_width;
-        CoopDraw::Draw(t, CoopHookshot::DrawScene());
+        CoopHookshot::NoteDropped(CoopDraw::Draw(t, CoopHookshot::DrawScene()));
         CoopModsRuntime::Overlay(t);
     }
 }

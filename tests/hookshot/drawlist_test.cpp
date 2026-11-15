@@ -229,3 +229,121 @@ TEST_CASE("draw list build: the overlay's commands fit the list, an outline's wo
     CHECK(l->n > 60 * 12);           // name and words, each the game's rim, shadow and fill
     CHECK(l->text_used < 60 * 120);  // each line's words once, not six times
 }
+
+TEST_CASE("draw list draw: a full list still gives Hookshot its own font back, and says how much was lost") {
+    CoopDraw::Scene s;
+    CoopHook::Markers m{1280, 720, {}};
+    CoopHook::Marker tag;
+    tag.x = tag.tag_x = 100;
+    tag.y = tag.tag_y = 100;
+    tag.tag = "Saria";
+    tag.tag_head = true;
+    m.items = {tag};
+    s.markers = m;   // the game look's markers choose the medium font first
+    std::vector<CoopHook::OverlayLine> panel;
+    for (int i = 0; i < COOP_DRAW_MAX_CMDS + 100; ++i) {
+        panel.push_back({"line " + std::to_string(i), false});
+    }
+    s.panel = panel;   // far more lines than the list holds: the last FONT command is lost
+    Host h(true);
+    CoopDraw::Look look = Ids();
+    h.d.font = [](void*, const char*) { return 1; };
+    h.d.image = [](void*, int, int, const std::uint8_t*) { return 1; };
+    const std::uint32_t lost = CoopDraw::Draw(h.d, s, look);
+    CHECK(lost > 100);
+    REQUIRE_FALSE(h.calls.empty());
+    CHECK(h.calls.back() == "font 0");
+    bool medium = false;
+    for (const auto& c : h.calls) medium = medium || c == "font 8";
+    CHECK(medium);   // (the game look was on: the reset is not trivially the only font call)
+
+    Host none(true);   // nothing lost: 0
+    CoopDraw::Scene quiet;
+    quiet.panel = std::vector<CoopHook::OverlayLine>{{"coop: connected", false}};
+    CHECK(CoopDraw::Draw(none.d, quiet, look) == 0);
+    CHECK(none.calls.back() == "font 0");
+}
+
+TEST_CASE("draw list build: sixteen players with everything on fit the list") {
+    // The worst case the overlay has: 16 players (the server's most), each tagged, on the minimap, under your
+    // hearts with 20 hearts, a voice icon and a place, in the player list and the panel; the down ring, the chat's
+    // kept lines (coop_chat.h kKeep: 6) with the box open, the cheats panel and a title line, all in the game look.
+    CoopDraw::Scene s;
+    CoopHook::Markers mk{1920, 1080, {}};
+    std::vector<CoopHook::PlayerRow> rows;
+    std::vector<CoopHook::OverlayLine> panel{{"coop: connected to a long server address:27500", false}};
+    for (int i = 0; i < 16; ++i) {
+        const std::string name = "Player Number " + std::to_string(i + 1);
+        CoopHook::Marker t;
+        t.x = t.tag_x = 100.0f + 100.0f * static_cast<float>(i);
+        t.y = t.tag_y = 500;
+        t.size = 20;
+        t.tag = name;
+        t.edge = i % 2 == 0;   // an arrow and a tag: the most commands
+        mk.items.push_back(t);
+        CoopDraw::HudBlock b;
+        b.name = name;
+        b.place = "Inside the Great Deku Tree";
+        b.hearts.assign(20, 3);
+        b.voice = i % 3 == 0 ? CoopVoice::Icon::muted : CoopVoice::Icon::talking;
+        s.hud.push_back(b);
+        CoopHook::PlayerRow r;
+        r.number = static_cast<std::uint8_t>(i + 1);
+        r.name = name;
+        r.self = i == 0;
+        r.state = "connected";
+        r.ms = 120;
+        r.scene = "Inside the Great Deku Tree";
+        rows.push_back(r);
+        panel.push_back({"P" + std::to_string(i + 1) + " " + name + ": other scene", i % 2 == 1});
+    }
+    s.markers = mk;
+    s.own_voice = CoopVoice::Icon::talking;
+    s.players = rows;
+    s.panel = panel;
+    s.dbno = CoopDbno::View{CoopDbno::View::Kind::reviving, "Player Number 2", 20'000'000, 0.5f, true};
+    for (int i = 0; i < 6; ++i) {
+        s.chat.push_back({"Player Number " + std::to_string(i) + ": " + std::string(60, 'w'), false, 1.0f});
+    }
+    s.box = CoopDraw::ChatBoxView{"typing a message", false};
+    CoopDraw::CheatsView c;
+    for (int i = 0; i < 12; ++i) {
+        c.rows.push_back("Item flag " + std::to_string(i));
+    }
+    c.result = "Gave it";
+    s.cheats = c;
+    s.title = CoopDraw::TitleView{"Multiplayer", true};
+
+    coop::overlay::map::Capture field;
+    field.location = "HyruleField";
+    field.height = 240;
+    field.floors.push_back({});
+    CoopDraw::MapShown map;
+    map.scene = "HyruleField";
+    map.capture = &field;
+    map.page = coop::overlay::map::Box{100, 100, 2000, 1500};
+    for (int i = 0; i < 16; ++i) {
+        coop::overlay::map::Player p;
+        p.number = static_cast<std::uint8_t>(i + 1);
+        p.position = {static_cast<float>(i * 10), 0, 0};
+        p.scene = "HyruleField";
+        p.rgb = 0x3366FF;
+        p.rotation = coop::overlay::map::Quat{0, 0, 0, 1};
+        map.players.push_back(p);
+        map.names.push_back("Player Number " + std::to_string(i + 1));
+    }
+    s.map = &map;
+
+    Host h(true);
+    CoopDraw::Measure m;
+    m.host = &h.d;
+    CoopDraw::Look look = Ids();
+    m.look = &look;
+    auto l = NewList(1920, 1080);
+    CoopDraw::Build(*l, m, s, &look);
+    MESSAGE("16 players, everything on: " << l->n << " of " << COOP_DRAW_MAX_CMDS << " commands, " << l->text_used
+                                          << " of " << COOP_DRAW_MAX_TEXT << " text bytes");
+    CHECK(l->dropped == 0);
+    CHECK(l->n > 1000);   // (the case really is big)
+    CHECK(l->n + 128 <= COOP_DRAW_MAX_CMDS);   // and leaves some room
+}

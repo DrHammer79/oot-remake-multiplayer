@@ -795,9 +795,9 @@ void Build(CoopDrawList& list, const Measure& m, const Scene& s, const Look* gam
     d.font(COOP_FONT_UI);
 }
 
-void Draw(const HosCoopDraw& d, const Scene& s, const Look& look) {
+std::uint32_t Draw(const HosCoopDraw& d, const Scene& s, const Look& look) {
     if (d.width <= 0 || d.height <= 0 || !d.rect || !d.circle || !d.triangle || !d.text || !d.text_width) {
-        return;
+        return 0;
     }
     const Look* game = GameLook(d, look) ? &look : nullptr;
     // The list is big (docs/ui.md): one per drawing thread, kept between presents.
@@ -812,6 +812,11 @@ void Draw(const HosCoopDraw& d, const Scene& s, const Look& look) {
     Build(*list, m, s, game);
     m.Restore();
     Replay(*list, d, game);
+    // Hookshot's own font back, always: the list's last FONT command is lost when the list was full.
+    if (d.use_font) {
+        d.use_font(d.user, 0);
+    }
+    return list->dropped;
 }
 
 }  // namespace CoopDraw

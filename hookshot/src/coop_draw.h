@@ -265,7 +265,9 @@ bool Wanted(const Scene& scene);
 // It builds the draw list (Build) with Hookshot's text widths, then replays
 // it onto the table (coop_draw_hos.h Replay): the calls the overlay always
 // made, in the same order (tests/hookshot/draw_golden_test.cpp).
-void Draw(const HosCoopDraw& d, const Scene& scene, const Look& look = {});
+// Returns the commands that did not fit the list (0: all drawn); Hookshot's own
+// font is set back at the end even then.
+std::uint32_t Draw(const HosCoopDraw& d, const Scene& scene, const Look& look = {});
 
 // What Draw draws, as commands appended to `list` (begun for the picture's
 // size): any backend's. `game`: the game look (only its regular_metrics is

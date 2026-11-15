@@ -26,6 +26,9 @@ function pointers, so it can live inside a payload a recomp lifts and on a conso
   each backend maps them to its own.
 - Repeated words (a text's outline and shadow copies) are stored once.
 - When the list is full the rest of the frame is dropped and counted in `dropped`; nothing is written past the end.
+  On Longshot `CoopDraw::Draw` returns that count, the module logs it once ("the overlay's draw list was full"), and
+  Hookshot's own font is set back after every replay even when the list's last font command was lost. Sixteen
+  players with everything on fit with at least 128 commands to spare (`drawlist_test.cpp`).
 - Text widths: `coop_text_width` sums a font's advances from a table (`CoopFontAdvances`): data, no font engine.
 
 ## Who emits it
