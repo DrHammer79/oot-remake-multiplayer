@@ -1,0 +1,18 @@
+# hs-boss-aim-research, B: stays outside the boss room (see hs-boss-aim-research.A.txt).
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200               
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A                 
+wait 2400
+mark b-landed
+wait 3000
+mark b-wait
+wait 3000
+mark end

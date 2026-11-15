@@ -632,5 +632,147 @@ class FindLogTest(unittest.TestCase):
             self.assertIn(os.path.join(game, "logs", "longshot_log.txt"), hs.log_candidates(game))
 
 
+class AimGame(FakeGame):
+    """A fake game whose module answers watch steps: the camera turns by right stick pushes (signs the player does not
+    know), and the watched actor's place on the picture is written to the commands file's .watch, as the module does."""
+
+    def __init__(self, path, sx=1.0, sy=1.0, target=(0.6, -0.4), actor=(4.0, 1.0, -3.0), **kw):
+        super().__init__(**kw)
+        self.path = path
+        self.sx, self.sy = sx, sy
+        self.view = [0.0, 0.0]          # where the camera points (ndc units, as the picture moves)
+        self.target = list(target)      # where the actor's point is in the same units
+        self.actor = list(actor)
+        self.watching = None
+        self.sights = 0
+        self.taken = []
+
+    def answer(self, req):
+        if req.get("cmd") == "stick" and req.get("stick") == "R":
+            # A push turns the camera toward where the stick points, by this game's signs.
+            self.view[0] += 0.1 * req["x"] * self.sx
+            self.view[1] += 0.1 * req["y"] * self.sy
+        return super().answer(req)
+
+    def module(self):   # the module's check: takes the commands file, writes a sight
+        if os.path.getsize(self.path):
+            with open(self.path, encoding="utf-8") as f:
+                lines = f.read().splitlines()[1:]
+            open(self.path, "w").close()
+            self.taken += lines
+            for line in lines:
+                w = line.split()
+                if w[0] == "watch":
+                    self.watching = None if w[1] == "off" else w[1]
+        if self.watching:
+            self.sights += 1
+            x, y = self.target[0] - self.view[0], self.target[1] - self.view[1]
+            with open(self.path + ".watch", "w", encoding="utf-8") as f:
+                f.write("watch %d.5 %.4f %.4f 7.5 %.3f %.3f %.3f %.3f %.3f %.3f 21\n"
+                        % ((self.sights,) + (x, y) + tuple(self.actor) + tuple(self.actor)))
+
+
+def play_aim(text, game):
+    sleep = game.clock.sleep
+
+    def module_sleep(sec):
+        sleep(sec)
+        game.module()
+    game.clock.sleep = module_sleep
+    return play(text, game, commands=game.path)
+
+
+class AimTest(unittest.TestCase):
+    def test_parse(self):
+        s = hs.parse("aim Enemy_DungeonBoss_Gohma 0 1.5 0.5 300 ZR\naim X 0 0 0 60 left\nnear Gohma 2 600 B\n"
+                     "watch Gohma 0 1 0\nwatch off")
+        self.assertEqual([x.kind for x in s], ["aim", "aim", "near", "watch", "watch"])
+        self.assertEqual((s[0].name, s[0].y, s[0].z, s[0].ticks, s[0].buttons, s[0].stick),
+                         ("Enemy_DungeonBoss_Gohma", 1.5, 0.5, 300, ["ZR"], "R"))
+        self.assertEqual((s[1].stick, s[1].buttons), ("L", []))
+        self.assertEqual((s[2].radius, s[2].ticks, s[2].buttons), (2.0, 600, ["B"]))
+        d = hs.parse("difficulty 300 100 100\ndifficulty auto")
+        self.assertEqual([(x.kind, x.text) for x in d], [("difficulty", "difficulty 300 100 100"),
+                                                          ("difficulty", "difficulty auto")])
+        for bad in ("difficulty", "difficulty 300", "difficulty 0 100 100", "difficulty hard",
+                    "aim Gohma 0 1 300", "aim Gohma 0 1 0", "aim Gohma 0 1 0 60 NOPE", "near Gohma 0.1 60",
+                    "near Gohma 2", "watch Gohma 1 2", "watch"):
+            with self.assertRaises(hs.ScriptError, msg=bad):
+                hs.parse(bad)
+
+    def test_aim_turns_the_camera_onto_the_point_whatever_the_signs(self):
+        import tempfile
+        for sx, sy in ((1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "commands-A.txt")
+                open(path, "w").close()
+                game = AimGame(path, sx=sx, sy=sy)
+                game, log, _, _, _ = play_aim("aim Enemy_DungeonBoss_Gohma 0 1.5 0.5 600 ZR\nmark fired", game)
+                self.assertIn("watch Enemy_DungeonBoss_Gohma 0 1.5 0.5", game.taken)
+                on = [line for line in log.lines if line.startswith("coop: test aim on Enemy_DungeonBoss_Gohma")]
+                self.assertTrue(on, (sx, sy, log.lines))
+                self.assertLess(abs(game.target[0] - game.view[0]), hs.AIM_TOLERANCE + 1e-6)
+                self.assertLess(abs(game.target[1] - game.view[1]), hs.AIM_TOLERANCE + 1e-6)
+                presses = game.cmds("press")
+                self.assertEqual(presses[0]["buttons"], ["ZR"])   # held through the aim, one press
+                sticks = game.cmds("stick")
+                self.assertTrue(sticks and all(r["stick"] == "R" and r["frames"] == hs.AIM_PULSE_FRAMES
+                                               for r in sticks))
+                # No release while aiming (a let-go ZR fires the slingshot): one, at the end.
+                rel = [i for i, (_, r) in enumerate(game.got) if r["cmd"] == "release"]
+                last_stick = max(i for i, (_, r) in enumerate(game.got) if r["cmd"] == "stick")
+                self.assertTrue(rel and min(rel) > last_stick)
+
+    def test_aim_gives_up_without_a_sight(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            open(path, "w").close()
+            game = AimGame(path)
+            game.module = lambda: open(path, "w").close()   # takes the commands, never sees the actor
+            sleep = game.clock.sleep
+
+            def module_sleep(sec):
+                sleep(sec)
+                game.module()
+            game.clock.sleep = module_sleep
+            game, log, _, _, _ = play("aim Gohma 0 0 0 60", game, commands=path)
+            self.assertIn("coop: test aim timed out (never seen)", log.lines)
+            self.assertEqual(game.cmds("stick"), [])
+
+    def test_aim_and_near_skipped_without_the_file(self):
+        game, log, _, _, _ = play("aim Gohma 0 0 0 60 ZR\nnear Gohma 2 60")
+        self.assertEqual(sum("skipped on hookshot" in line for line in log.lines), 2)
+        self.assertEqual(game.cmds("press", "stick"), [])
+
+    def test_near_walks_to_the_actor(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            open(path, "w").close()
+            game = AimGame(path, actor=(6.0, 0.0, -8.0), camera=1.1)
+            game.pos = [0.0, 0.0, 0.0]
+            game, log, _, _, _ = play_aim("near Enemy_DungeonBoss_Gohma 1.5 900", game)
+            self.assertIn("watch Enemy_DungeonBoss_Gohma 0 0 0", game.taken)
+            self.assertTrue(any(line.startswith("coop: test near reached") for line in log.lines), log.lines)
+            self.assertLess(math.hypot(game.pos[0] - 6.0, game.pos[2] + 8.0), 1.6)
+            self.assertEqual(game.held, [])
+
+    def test_old_sight_is_not_used(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            with open(path + ".watch", "w") as f:
+                f.write("watch 5.0 0.1 0.1 7 1 2 3 1 2 3 21\n")
+            game = FakeGame()
+            p = hs.Player(None, hs.Log(), clock=game.clock, sleep=game.clock.sleep, commands=path)
+            self.assertEqual(p.read_watch()["life"], 21)
+            game.clock.sleep(hs.WATCH_STALE + 0.5)
+            self.assertIsNone(p.read_watch())   # the module stopped writing: the actor is gone
+            with open(path + ".watch", "w") as f:
+                f.write("none 6.0 actor\n")
+            self.assertIsNone(p.read_watch())
+
+
 if __name__ == "__main__":
     unittest.main()

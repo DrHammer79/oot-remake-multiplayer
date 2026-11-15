@@ -501,3 +501,60 @@ TEST_CASE("test input: sync waits with every button let go until the games meet,
     CHECK_FALSE(Parse("sync title 9\n", bad).has_value());
     CHECK_FALSE(Parse("sync title\n", bad).has_value());
 }
+
+TEST_CASE("testinput: watch hands the hook an actor and an offset in its own frame, or off (boss-autotest)") {
+    std::string error;
+    CHECK_FALSE(Parse("watch\n", error));
+    CHECK_FALSE(Parse("watch Enemy_DungeonBoss_Gohma 1 2\n", error));
+    CHECK_FALSE(Parse("watch Enemy_DungeonBoss_Gohma 1 2 x\n", error));
+    Runner r(Must("watch Enemy_DungeonBoss_Gohma 0 1.5 -0.25\nwatch off\nmark watched\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].kind == Kind::watch);
+    CHECK(requests[0].name == "Enemy_DungeonBoss_Gohma");
+    CHECK(requests[0].at[1] == doctest::Approx(1.5f));
+    CHECK(requests[0].at[2] == doctest::Approx(-0.25f));
+    CHECK(requests[1].kind == Kind::watch);
+    CHECK(requests[1].name == "off");
+    REQUIRE(log.size() == 1);
+    CHECK(log[0] == "mark watched");
+    CHECK(r.Done());
+}
+
+TEST_CASE("testinput: difficulty hands the hook the host's custom percents, or auto (boss-autotest)") {
+    std::string error;
+    CHECK_FALSE(Parse("difficulty\n", error));
+    CHECK_FALSE(Parse("difficulty 300 100\n", error));
+    CHECK_FALSE(Parse("difficulty 300 100 x\n", error));
+    CHECK_FALSE(Parse("difficulty 0 100 100\n", error));
+    CHECK_FALSE(Parse("difficulty hard\n", error));
+    Runner r(Must("difficulty 300 100 125\ndifficulty auto\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[0].kind == Kind::difficulty);
+    CHECK(requests[0].name == "custom");
+    CHECK(requests[0].at[0] == doctest::Approx(300.0f));
+    CHECK(requests[0].at[2] == doctest::Approx(125.0f));
+    CHECK(requests[1].name == "auto");
+    CHECK(r.Done());
+}
+
+TEST_CASE("testinput: Project puts a world point on the picture through a row-major world-to-clip matrix") {
+    // A camera at the origin looking down +z: clip x = world x, clip y = world y, clip w = world z.
+    const std::array<float, 16> m{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const OnScreen centre = Project(m, {0.0f, 0.0f, 10.0f}, false);
+    CHECK(centre.x == doctest::Approx(0.0f));
+    CHECK(centre.y == doctest::Approx(0.0f));
+    CHECK(centre.w == doctest::Approx(10.0f));
+    const OnScreen up_right = Project(m, {2.0f, 5.0f, 10.0f}, false);
+    CHECK(up_right.x == doctest::Approx(0.2f));
+    CHECK(up_right.y == doctest::Approx(0.5f));
+    CHECK(Project(m, {2.0f, 5.0f, 10.0f}, true).y == doctest::Approx(-0.5f));  // clip y down: picture up is -
+    const OnScreen behind = Project(m, {2.0f, 5.0f, -3.0f}, false);
+    CHECK(behind.w < 0.0f);
+    CHECK(behind.x == 0.0f);
+}

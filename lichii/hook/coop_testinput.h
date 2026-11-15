@@ -46,6 +46,24 @@
 //   give bombs             test only: gives an item through coop_cheats
 //                          (needs LICHII_COOP_CHEATS=1): bombs, bow, hookshot,
 //                          or any item flag name coop_cheats knows
+//   watch Enemy_DungeonBoss_Gohma 0 1.5 0.8
+//                          test only: about every 3 frames, until `watch off`,
+//                          writes one line to <this file>.watch: the nearest
+//                          actor of that name, plus the offset in its own frame
+//                          (its rotation rows; metres), projected through the
+//                          game's own camera matrix ("watch T NDCX NDCY W X Y Z
+//                          RX RY RZ LIFE", or "none T"). The Hookshot driver's
+//                          aim and near steps read it to turn the camera with
+//                          the right stick (the player's own aim) and to walk
+//                          up to the actor (tools/autotest/hookshot.py).
+//                          Needs LICHII_COOP_OBJECTS on.
+//   difficulty 300 100 100 test only: the host's difficulty choice, as the
+//                          host menu sets it (CoopDifficulty::Set): custom
+//                          enemy life, damage and count in percent; bosses
+//                          follow the enemies' life and damage (300: Gohma
+//                          takes 3x the hits). `difficulty auto` is the
+//                          automatic scaler. Only the host can; logs
+//                          "coop: test difficulty ...: set" or "NOT set"
 //   mark walk-start        writes "coop: test mark walk-start" to the log
 //
 // goto and toward steer from Link's position, read each frame. The stick is
@@ -120,6 +138,8 @@ enum class Kind {
     setflag, // test only: an Int or Bool flag of this game set to a value (issue 130: shop-buy)
     setenum, // test only: an Enum flag (name or 0x hash) set to a value's name (issue 193: quests)
     sync,    // sync NAME N: wait here, buttons let go, until N games reached NAME
+    watch,   // test only: watch NAME [DX DY DZ] / watch off: where that actor is on screen (the .watch file)
+    difficulty,  // test only: the host's difficulty choice (difficulty HP DAMAGE COUNT, or difficulty auto)
 };
 
 struct Step {
@@ -155,6 +175,16 @@ std::optional<std::string> WearFlag(std::string_view slot);
 // DekuStick, Bomb, SlingShot, Hookshot, Longshot, Hammer, Bow, ...), as the
 // game spells it.
 bool AssignableItem(std::string_view name);
+
+// watch: a world point through a world-to-clip matrix (row-major, clip = m * p, as CoopCamera's): where it is on
+// the picture, x right and y up, each -1..1 while on it, and its clip w (<= 0: behind the camera; x and y are 0
+// then). y_down: the matrix's clip y grows down the picture.
+struct OnScreen {
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+};
+OnScreen Project(const std::array<float, 16>& m, const std::array<float, 3>& p, bool y_down);
 
 // What the pad gets now.
 struct Output {

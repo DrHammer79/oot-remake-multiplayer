@@ -13,3 +13,9 @@ hs-boss-cutscenes-dodongo  expect="A:Dm_DodongoCave_BossIn: our game started it"
 # boss-fix (player reports #30, #31): the non-owner's own intro hands control back, a copy stuns on its own hit.
 [boss-fix]
 hs-boss-fix-gohma       expect="B:our event: the copy runs its own"  expect="B:the copy takes the owner's state again"  expect="B:our own hit: the copy runs its own reaction"  label="#30 #31 Gohma two players"
+
+# boss-autotest: the whole fight through the game's own paths (aim/near/difficulty test steps; real ZL/ZR/Y).
+# Run hs-boss-aim-research first (calibrates the eye's offset), then hs-boss-full, then hs-boss-fix-reload (#52).
+[boss-autotest]
+hs-boss-aim-research    expect="A:coop: test aim on Enemy_DungeonBoss_Gohma"  label="aim at Gohma's eye (calibration)"
+hs-boss-full            expect="A:test difficulty custom 300 100 100: set"  expect="B:our own hit: the copy runs its own reaction"  expect="B:Enemy_DungeonBoss_Gohma: now ours"  expect="A:boss beaten"  label="#31 #55 #88 Gohma whole fight, two players"

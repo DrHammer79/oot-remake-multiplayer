@@ -61,7 +61,13 @@ STICK_KEYS = {  # full stick directions: (stick, x, y)
     "RSTICK_UP": ("R", 0, 1), "RSTICK_DOWN": ("R", 0, -1), "RSTICK_LEFT": ("R", -1, 0), "RSTICK_RIGHT": ("R", 1, 0),
 }
 WEAR_SLOTS = ("weapon", "shield", "head", "armor", "boots", "hand")
-MODULE_ONLY = ("chat", "give", "wear", "assign", "place", "kill", "setflag", "setenum")
+MODULE_ONLY = ("chat", "give", "wear", "assign", "place", "kill", "setflag", "setenum", "watch", "difficulty")
+AIM_TOLERANCE = 0.03      # aim: on target once the actor is this near the picture's centre (ndc, -1..1) ...
+AIM_STEADY = 3            # ... in this many sights in a row
+AIM_GAIN = 2.0            # aim: stick = gain x the actor's distance from the centre (ndc), at least AIM_MIN_PUSH
+AIM_MIN_PUSH = 0.18       # (a smaller push sits in the stick's dead zone)
+AIM_PULSE_FRAMES = 4      # aim: each push lasts this many game frames (shorter than steer_every: never two at once)
+WATCH_STALE = 1.0         # a sight unchanged this long (s) is old: the actor is gone or the walk stopped
 
 
 class ScriptError(Exception):
@@ -89,6 +95,7 @@ class Step:
         self.start = ""
         self.x = self.y = self.z = 0.0
         self.radius = 1.0
+        self.stick = "R"          # aim: the stick that turns the camera
         self.text = ""            # the line as written (no comment), for the module's commands file
 
     def __repr__(self):
@@ -243,6 +250,42 @@ def parse(text):
             if len(w) != 2:
                 fail("want: assign ITEM")
             s.kind, s.name = "assign", w[1]
+        elif cmd == "WATCH":
+            if not (len(w) == 2 or (len(w) == 5 and all(_number(v) is not None for v in w[2:]))):
+                fail("want: watch ACTOR [DX DY DZ] or watch off")
+            s.kind, s.name = "watch", w[1]
+        elif cmd == "DIFFICULTY":
+            ok = len(w) == 2 and w[1].lower() == "auto"
+            if len(w) == 4:
+                ok = all(v.isdigit() and 0 < int(v) <= 1600 for v in w[1:])
+            if not ok:
+                fail("want: difficulty HP DAMAGE COUNT (percent) or difficulty auto")
+            s.kind, s.name = "difficulty", " ".join(w[1:])
+        elif cmd == "AIM":
+            # aim ACTOR DX DY DZ TICKS [KEYS] [left]: the camera turned (right stick, or the left with `left`) until
+            # the actor's point (the offset in its own frame, metres) sits in the picture's centre, KEYS held
+            # throughout (ZR: the slingshot's aim). Then the script's next step fires.
+            words = w[:]
+            if words and words[-1].lower() == "left":
+                s.stick = "L"
+                words = words[:-1]
+            if len(words) not in (6, 7) or any(_number(v) is None for v in words[2:5]) or _ticks(words[5]) is None:
+                fail("want: aim ACTOR DX DY DZ TICKS [KEYS] [left]")
+            s.kind, s.name, s.ticks = "aim", words[1], _ticks(words[5])
+            s.x, s.y, s.z = (_number(v) for v in words[2:5])
+            if len(words) == 7:
+                bad = _keys(words[6], s)
+                if bad:
+                    fail("unknown key " + bad)
+        elif cmd == "NEAR":
+            # near ACTOR RADIUS TICKS [KEYS]: a goto to where the actor stands now (followed as it moves).
+            if len(w) not in (4, 5) or _number(w[2]) is None or _number(w[2]) < 0.2 or _ticks(w[3]) is None:
+                fail("want: near ACTOR RADIUS TICKS [KEYS], radius at least 0.2")
+            s.kind, s.name, s.radius, s.ticks = "near", w[1], _number(w[2]), _ticks(w[3])
+            if len(w) == 5:
+                bad = _keys(w[4], s)
+                if bad:
+                    fail("unknown key " + bad)
         elif cmd == "MARK":
             if len(w) != 2:
                 fail("want: mark NAME (one word)")
@@ -434,6 +477,8 @@ class Player:
         self.warps = []
         self.angle = 0.0              # camera model: world direction = stick direction turned by this
         self.learned = False
+        self._watch_t = None          # the watch file's newest sight time (the module's clock) ...
+        self._watch_at = 0.0          # ... and when it changed (ours)
 
     # time
     def _until(self, t):
@@ -514,29 +559,36 @@ class Player:
             return None
         return struct.unpack("<3f", data[POS - POS_VALID:])
 
-    def steer(self, s, t0):
+    def steer(self, s, t0, target=None):
         """goto (until within s.radius or s.ticks) or toward (for s.ticks). The stick is camera-relative: the camera
-        model (an angle) is learnt from how Link moves for a push; a push that gets nowhere for a second steps aside."""
+        model (an angle) is learnt from how Link moves for a push; a push that gets nowhere for a second steps aside.
+        target(): the point (x, z) now, for near (None: keep the last; nothing is walked before the first)."""
         end = t0 + s.ticks / TICKS
         if self.link_pos() is None and self.mem_ok is False:
             self.log("coop: test %s skipped (no position on hookshot without guest memory)" % s.kind)
             return t0
         last_pos, last_push, stuck_since, detour_until, detour = None, None, None, 0.0, 1
         held = False
+        seen = target is None
         while True:
             now = self.clock()
             if now >= end:
-                if s.kind == "goto":
-                    self.log("coop: test goto timed out")
+                if s.kind in ("goto", "near"):
+                    self.log("coop: test %s timed out" % s.kind)
                 break
             pos = self.link_pos()
-            if pos is None:
+            if target is not None:
+                to = target()
+                if to is not None:
+                    s.x, s.z = to
+                    seen = True
+            if pos is None or not seen:
                 self._until(now + self.steer_every)
                 continue
             dx, dz = s.x - pos[0], s.z - pos[2]
             dist = math.hypot(dx, dz)
-            if s.kind == "goto" and dist <= s.radius:
-                self.log("coop: test goto reached %.1f %.1f" % (pos[0], pos[2]))
+            if s.kind in ("goto", "near") and dist <= s.radius:
+                self.log("coop: test %s reached %.1f %.1f" % (s.kind, pos[0], pos[2]))
                 break
             if last_pos is not None and last_push is not None:
                 mx, mz = pos[0] - last_pos[0], pos[2] - last_pos[2]
@@ -564,6 +616,108 @@ class Player:
             self._until(min(end, now + self.steer_every))
         if held:
             self._release()
+        return self.clock()
+
+    # the module's watch file: where the watched actor is (coop_testinput.h, watch)
+    def read_watch(self):
+        """The newest fresh sight: dict(x, y, w, at, root, life), or None (none yet, old, or 'none')."""
+        if not self.commands:
+            return None
+        try:
+            with open(self.commands + ".watch", encoding="utf-8") as f:
+                line = f.read().strip()
+        except OSError:
+            return None
+        w = line.split()
+        if len(w) != 12 or w[0] != "watch":
+            return None
+        try:
+            v = [float(x) for x in w[1:11]]
+            life = int(w[11])
+        except ValueError:
+            return None
+        now = self.clock()
+        if v[0] != self._watch_t:
+            self._watch_t, self._watch_at = v[0], now
+        elif now - self._watch_at > WATCH_STALE:
+            return None
+        return {"x": v[1], "y": v[2], "w": v[3], "at": tuple(v[4:7]), "root": tuple(v[7:10]), "life": life}
+
+    def _watch(self, s, offset):
+        if not self.commands:
+            self.log("coop: test %s skipped on hookshot (line %d: needs the co-op module's test commands)"
+                     % (s.kind, s.line))
+            return False
+        self._watch_t = None
+        if not self._send(["watch %s %g %g %g" % ((s.name,) + tuple(offset))]):
+            self.log("coop: test %s NOT taken (line %d: no module reading LICHII_COOP_TEST_COMMANDS?)"
+                     % (s.kind, s.line))
+            return False
+        return True
+
+    def near(self, s, t0):
+        """near: a goto to the watched actor's place, followed as it moves."""
+        if not self._watch(s, (0.0, 0.0, 0.0)):
+            return t0
+
+        def target():
+            w = self.read_watch()
+            return None if w is None else (w["root"][0], w["root"][2])
+        return self.steer(s, max(t0, self.clock()), target)
+
+    def aim(self, s, t0):
+        """aim: short stick pushes turn the camera until the watched point sits in the picture's centre (the
+        player's own aim, so a seed or an arrow flies there), s.buttons held all along. The push's sign for each axis
+        is learnt: a push that moves the point away twice in a row turns that axis round; an overshoot halves it."""
+        if not self._watch(s, (s.x, s.y, s.z)):
+            return t0
+        t0 = max(t0, self.clock())
+        end = t0 + s.ticks / TICKS
+        if s.buttons:
+            self.b.request("press", buttons=s.buttons, frames=max(1, int(s.ticks * 4) + 60), wait=False)
+        sign, gain, away = [1.0, 1.0], [AIM_GAIN, AIM_GAIN], [0, 0]
+        last, steady, said = None, 0, None
+        while True:
+            now = self.clock()
+            if now >= end:
+                self.log("coop: test aim timed out (%s)" % (said or "never seen"))
+                break
+            w = self.read_watch()
+            if w is None:
+                self._until(now + self.steer_every)
+                continue
+            err = [w["x"], w["y"]] if w["w"] > 0 else [1.0, 0.0]   # behind the camera: turn round one way
+            said = "x %.3f y %.3f w %.1f, at %.2f %.2f %.2f, life %d" % (err[0], err[1], w["w"], w["at"][0],
+                                                                          w["at"][1], w["at"][2], w["life"])
+            if abs(err[0]) <= AIM_TOLERANCE and abs(err[1]) <= AIM_TOLERANCE and w["w"] > 0:
+                steady += 1
+                if steady >= AIM_STEADY:
+                    self.log("coop: test aim on %s after %.1f s (%s)" % (s.name, now - t0, said))
+                    break
+                last = err
+                self._until(now + self.steer_every)
+                continue
+            steady = 0
+            if last is not None:
+                for i in (0, 1):
+                    if abs(last[i]) > AIM_TOLERANCE and err[i] * last[i] < 0:
+                        gain[i] = max(0.5, gain[i] / 2)   # overshot
+                    if abs(last[i]) > AIM_TOLERANCE and abs(err[i]) > abs(last[i]) + 0.01:
+                        away[i] += 1
+                        if away[i] >= 2:
+                            sign[i], away[i] = -sign[i], 0
+                    else:
+                        away[i] = 0
+            push = []
+            for i in (0, 1):
+                p = 0.0
+                if abs(err[i]) > AIM_TOLERANCE:
+                    p = max(AIM_MIN_PUSH, min(1.0, gain[i] * abs(err[i]))) * (1 if err[i] > 0 else -1) * sign[i]
+                push.append(round(p, 3))
+            last = err
+            self.b.request("stick", stick=s.stick, x=push[0], y=push[1], frames=AIM_PULSE_FRAMES, wait=False)
+            self._until(now + self.steer_every)
+        self._release()
         return self.clock()
 
     # warps: the bridge's teleport, asked again until the game takes it (it refuses during a load or an event)
@@ -692,6 +846,12 @@ class Player:
                 t = max(t, self.clock())
             elif s.kind in ("goto", "toward"):
                 t = max(t, self.steer(s, max(t, self.clock())))
+            elif s.kind == "near":
+                self._until(t)
+                t = max(t, self.near(s, t))
+            elif s.kind == "aim":
+                self._until(t)
+                t = max(t, self.aim(s, t))
             elif s.kind == "warp":
                 self.warp(s)
         self.log("coop: test script done")

@@ -1,0 +1,120 @@
+# hs-boss-aim-research (boss-autotest): calibrates the aim at Gohma's eye before hs-boss-full. A walks in alone
+# (B stays in the corridor). A watches her and turns the camera onto a few points of her own frame, a shot at each
+# (a-p0..a-p4: which one puts the reticle on her eye?), then tries both ways of firing (r1: lock-on + ZR,
+# r2: the slingshot's own aim with ZR held) and a sword round. Read A's log for "coop: test aim on" / "timed out"
+# (the ndc error, w and her place) and the shots; put the eye's offset into hs-boss-full (EYE in its rounds).
+# Run: tools\autotest\run.ps1 -Runtime hookshot -Lane 1 -Scenario hs-boss-aim-research -Timeout 900 -Server <auto-B>
+#! noload
+#! start coop: test warp done
+#! switches LICHII_COOP_DEBUG_BOSS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_CHEATS=1
+#! timeout 900
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200               # the title screen
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A                 # loads the save, then the warp
+wait 2400
+mark a-landed
+setflag HavePlayedEvent.InsideTheDekuTree_BossArea_ShutIn 0
+setflag HavePlayedEvent.Dm_Deku_BossIn 0
+setflag HavePlayedEvent.Dm_Deku_BossOut 0
+setflag HavePlayedEvent.InsideTheDekuTree_BossArea_Warp 0
+setflag InsideTheDekuTree_BossArea_ShutIn 0
+setflag InsideTheDekuTree_BossArea_ChangeENVForBoss 0
+setflag Gohma_IsLightingForBattle 0
+setflag Gohma_DefeatBoss 0
+give PouchData.Weapon_Range_SlingShot.StockNum
+wait 120
+assign SlingShot
+wait 120
+place -12.0 48.5 66.5   # the corridor, 11 m before the door
+wait 240
+goto -4.0 67.5 1.0 600
+goto 6.7 67.6 1.5 600   # through the door: the game's own boss trigger
+mark a-in
+wait 2400
+mark a-after-intro
+goto 0.0 67.5 1.5 600
+mark a-moved
+watch Enemy_DungeonBoss_Gohma 0 0 0
+wait 120
+aim Enemy_DungeonBoss_Gohma 0 0 0 300
+mark a-p0
+wait 60
+aim Enemy_DungeonBoss_Gohma 0 1.0 1.0 300
+mark a-p1
+wait 60
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300
+mark a-p2
+wait 60
+aim Enemy_DungeonBoss_Gohma 0 3.0 2.0 300
+mark a-p3
+wait 60
+aim Enemy_DungeonBoss_Gohma 0 1.5 2.5 300
+mark a-p4
+wait 60
+mark a-r1
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
+hold ZL 20              # lock on (the game's own target)
+hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
+hold ZL 20
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
+press ZR                # fires, if letting go did not
+mark a-r1-seed
+wait 60
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r1-hit
+wait 120
+mark a-r2
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
+hold ZL 20              # lock on (the game's own target)
+hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
+hold ZL 20
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
+press ZR                # fires, if letting go did not
+mark a-r2-seed
+wait 60
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r2-hit
+wait 120
+mark a-r3
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 300   # the camera on her eye: the player's own right stick
+hold ZL 20              # lock on (the game's own target)
+hold ZL+ZR 40           # the slingshot while locked on: the seed flies at the target
+hold ZL 20
+aim Enemy_DungeonBoss_Gohma 0 2.0 1.5 240 ZR   # no lock: the slingshot's own aim, ZR held; letting go fires
+press ZR                # fires, if letting go did not
+mark a-r3-seed
+wait 60
+near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her while she is down (chance time)
+hold ZL+Y 8             # the sword at her eye, locked on
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+wait 12
+hold ZL+Y 8
+mark a-r3-hit
+wait 120
+wait 600
+mark end

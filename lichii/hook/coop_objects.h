@@ -114,6 +114,21 @@ void ForgetKeptBreaks();
 // walk of LICHII_COOP_OBJECTS (logs "coop: test kill ..."). Any thread.
 void QueueTestKill(std::string name);
 
+// Test only (coop_testinput's "watch NAME DX DY DZ" step): each walk of
+// LICHII_COOP_OBJECTS finds the nearest actor of that name to our Link and
+// keeps where it is (an empty name stops). `local` is an offset in the
+// actor's own frame (its rotation rows, +0x328), so a script can name a part
+// of a boss (Gohma's eye). Any thread.
+void WatchTestActor(std::string name, std::array<float, 3> local);
+struct TestActorSeen {
+    std::array<float, 3> at{};    // the actor's place plus the offset turned with it
+    std::array<float, 3> root{};  // the actor's place
+    std::int32_t life = -1;       // -1: no life read
+    std::uint64_t seen_us = 0;    // CoopEvery::NowUs() of the walk that saw it
+};
+// The last walk's sight of the watched actor (nothing: none seen yet, or not watching).
+std::optional<TestActorSeen> TestActorAt();
+
 // Present thread: the actors of the shared things this game owns now (for
 // coop_drops: a drop beside one of them is its owner's to decide).
 std::vector<std::uint64_t> OwnedActors();

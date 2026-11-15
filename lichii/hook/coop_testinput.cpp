@@ -7,6 +7,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -197,6 +198,20 @@ constexpr double kMinMagnitude = 0.45;     // slower near the point, never a cra
 
 } // namespace
 
+OnScreen Project(const std::array<float, 16>& m, const std::array<float, 3>& p, bool y_down) {
+    const auto row = [&](std::size_t r) {
+        return m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3];
+    };
+    OnScreen out;
+    out.w = row(3);
+    if (out.w <= 1e-4f) {
+        return out;
+    }
+    out.x = row(0) / out.w;
+    out.y = (y_down ? -row(1) : row(1)) / out.w;
+    return out;
+}
+
 std::optional<Script> Parse(std::string_view text, std::string& error) {
     Script script;
     int number = 0;
@@ -310,6 +325,35 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             }
             step.kind = Kind::kill;
             step.mark = std::string(w[1]);
+        } else if (cmd == "WATCH") {
+            // watch NAME [DX DY DZ] / watch off. Test only (the Hookshot driver's aim and near).
+            step.kind = Kind::watch;
+            if (w.size() == 2) {
+                step.mark = std::string(w[1]);
+            } else if (w.size() == 5 && Number(w[2], step.x) && Number(w[3], step.y) && Number(w[4], step.z)) {
+                step.mark = std::string(w[1]);
+            } else {
+                return fail("want: watch ACTOR [DX DY DZ] or watch off");
+            }
+        } else if (cmd == "DIFFICULTY") {
+            // difficulty HP DAMAGE COUNT (custom, percent) or difficulty auto. Test only.
+            step.kind = Kind::difficulty;
+            int v[3] = {0, 0, 0};
+            bool ok = w.size() == 2 && Upper(w[1]) == "AUTO";
+            if (w.size() == 4) {
+                ok = true;
+                for (std::size_t i = 0; i < 3; ++i) {
+                    const auto* end = w[i + 1].data() + w[i + 1].size();
+                    ok = ok && std::from_chars(w[i + 1].data(), end, v[i]).ptr == end && v[i] > 0 && v[i] <= 1600;
+                }
+            }
+            if (!ok) {
+                return fail("want: difficulty HP DAMAGE COUNT (percent) or difficulty auto");
+            }
+            step.mark = w.size() == 2 ? "auto" : "custom";
+            step.x = static_cast<float>(v[0]);
+            step.y = static_cast<float>(v[1]);
+            step.z = static_cast<float>(v[2]);
         } else if (cmd == "GIVE") {
             if (w.size() != 2) {
                 return fail("want: give ITEM");
@@ -472,8 +516,8 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
             ++index_;
             continue;
         }
-        if (s.kind == Kind::place) {
-            requests_.push_back(Request{s.kind, {}, {}, {s.x, s.y, s.z}});
+        if (s.kind == Kind::place || s.kind == Kind::watch || s.kind == Kind::difficulty) {
+            requests_.push_back(Request{s.kind, s.kind == Kind::place ? std::string{} : s.mark, {}, {s.x, s.y, s.z}});
             ++index_;
             continue;
         }
@@ -606,6 +650,7 @@ void Runner::Steer(const Step& step, double now_s, std::optional<std::array<floa
 #include "coop/host/game_flags.hpp"
 #include "coop/host/player_reader.hpp"
 #include "coop_cheats.h"
+#include "coop_difficulty.h"
 #include "coop_every.h"
 #include "coop_boss.h"
 #include "coop_camera.h"
@@ -665,6 +710,9 @@ struct State {
         std::optional<std::array<float, 2>> from;  // Link before the warp
     };
     std::optional<PendingWarp> warp;
+    bool watching = false;  // a watch step is on: its sights go to `path`.watch
+    CoopEvery::Every watch_every{CoopEvery::kTwoFramesUs};
+    std::uint64_t watch_said_us = 0;  // the sight last written (none written twice)
 } g_state;  // only touched on the present thread
 
 // The emulator plays LICHII_COOP_TEST_SCRIPT whole, input and all. Hookshot's
@@ -1005,6 +1053,42 @@ void CheckFile(Core::System& system) {
     Begin(system, std::move(*script));
 }
 
+// watch: the watched actor's last sight, through the last frame's camera, as one line in `path`.watch (the
+// Hookshot driver's aim and near steps read it; the file holds only the newest line).
+void WriteWatch() {
+    if (!g_state.watching || !g_state.watch_every.Due(CoopEvery::NowUs())) {
+        return;
+    }
+    const auto seen = CoopObjects::TestActorAt();
+    const auto frame = CoopCamera::Latest();
+    const double t = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+    char line[256];
+    if (!seen || !frame || Clock::now() - frame->at > std::chrono::milliseconds(500)) {
+        std::snprintf(line, sizeof(line), "none %.3f %s
+", t, !seen ? "actor" : "camera");
+    } else {
+        if (seen->seen_us == g_state.watch_said_us) {
+            return;  // no new walk yet
+        }
+        g_state.watch_said_us = seen->seen_us;
+        const OnScreen o = Project(frame->clip_from_world, seen->at, frame->y_down);
+        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d
+", t, o.x, o.y,
+                      o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1], seen->root[2],
+                      seen->life);
+    }
+    auto out_path = g_state.path;
+    out_path += ".watch";
+    auto tmp = out_path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << line;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, out_path, ec);  // whole lines only for the reader
+}
+
 } // namespace
 
 void OnFrame(Core::System& system) {
@@ -1027,6 +1111,7 @@ void OnFrame(Core::System& system) {
     if (quarter) {
         CheckFile(system);
     }
+    WriteWatch();
     if (!g_state.running) {
         return;
     }
@@ -1074,6 +1159,23 @@ void OnFrame(Core::System& system) {
                      request.at[2], ok ? "done" : "failed");
         } else if (request.kind == Kind::kill) {
             CoopObjects::QueueTestKill(request.name);  // logged where it is done
+        } else if (request.kind == Kind::difficulty) {
+            CoopDifficulty::Choice choice;
+            choice.auto_scale = request.name == "auto";
+            choice.preset = CoopDifficulty::Preset::custom;
+            choice.custom.hp_pct = static_cast<std::uint16_t>(request.at[0]);
+            choice.custom.damage_pct = static_cast<std::uint16_t>(request.at[1]);
+            choice.custom.count_pct = static_cast<std::uint16_t>(request.at[2]);
+            const bool set = CoopDifficulty::Set(choice);  // the host menu's own call: only the host can
+            LOG_INFO(Core, "coop: test difficulty {} {:.0f} {:.0f} {:.0f}: {}", request.name, request.at[0],
+                     request.at[1], request.at[2], set ? "set" : "NOT set (not the host, or not connected)");
+        } else if (request.kind == Kind::watch) {
+            const bool off = request.name == "off";
+            CoopObjects::WatchTestActor(off ? std::string{} : request.name, request.at);
+            g_state.watching = !off;
+            g_state.watch_said_us = 0;
+            LOG_INFO(Core, "coop: test watch {} ({:.2f} {:.2f} {:.2f} in its own frame)", request.name,
+                     request.at[0], request.at[1], request.at[2]);
         } else if (request.kind == Kind::chat) {
             const bool sent = CoopHook::SendChat(request.name);
             LOG_INFO(Core, "coop: test chat '{}': {}", request.name, sent ? "sent" : "NOT sent");

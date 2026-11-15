@@ -349,6 +349,16 @@ std::vector<std::string>& TestKillQueue() {  // the test script's kill steps (Qu
     return q;
 }
 
+struct TestWatch {  // the test script's watch step (WatchTestActor), under KeyRefundMutex()
+    std::string name;
+    std::array<float, 3> local{};
+    std::optional<CoopObjects::TestActorSeen> seen;
+};
+TestWatch& TestWatched() {
+    static TestWatch w;
+    return w;
+}
+
 bool EnvFlag(const char* name) {
 #ifdef _WIN32
     char* value = nullptr;
@@ -1561,6 +1571,7 @@ public:
             }
             writes.insert(writes.end(), world.lives.begin(), world.lives.end());
             TestKills(seen, writes);
+            TestWatchStep(seen);
             if (!world.key_lends.empty() || !world.lend_returns.empty()) {
                 std::lock_guard lock(KeyRefundMutex());
                 auto& lends = KeyLendQueue();
@@ -3133,6 +3144,60 @@ private:
         }
     }
 
+    // Test only: where the watched actor is now (coop_testinput's watch step).
+    void TestWatchStep(const std::vector<Seen>& seen) {
+        std::string name;
+        std::array<float, 3> local{};
+        {
+            std::lock_guard lock(KeyRefundMutex());
+            name = TestWatched().name;
+            local = TestWatched().local;
+        }
+        if (name.empty()) {
+            return;
+        }
+        const Seen* best = nullptr;
+        float best_m = 0.0f;
+        for (const Seen& s : seen) {
+            if (s.name != name) {
+                continue;
+            }
+            float m = 0.0f;
+            if (player_) {
+                const float dx = s.position[0] - (*player_)[0];
+                const float dy = s.position[1] - (*player_)[1];
+                const float dz = s.position[2] - (*player_)[2];
+                m = std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            if (!best || m < best_m) {
+                best = &s;
+                best_m = m;
+            }
+        }
+        if (!best) {
+            return;  // the last sight stays, with its time
+        }
+        TestActorSeen t;
+        t.root = {best->position[0], best->position[1], best->position[2]};
+        t.at = t.root;
+        if (best->rotation) {
+            const auto& m = *best->rotation;  // rows of 3
+            for (std::size_t i = 0; i < 3; ++i) {
+                t.at[i] += m[i * 3] * local[0] + m[i * 3 + 1] * local[1] + m[i * 3 + 2] * local[2];
+            }
+        } else {
+            for (std::size_t i = 0; i < 3; ++i) {
+                t.at[i] += local[i];
+            }
+        }
+        t.life = best->life ? best->life->life : -1;
+        t.seen_us = CoopEvery::NowUs();
+        std::lock_guard lock(KeyRefundMutex());
+        if (TestWatched().name == name) {
+            TestWatched().seen = t;
+        }
+    }
+
     void WriteLife(Core::Memory::Memory& memory, Reader& r, const LifeWrite& w) {
         const auto value = LifeValue(r, w.address);
         if (!value || !memory.IsValidVirtualAddressRange(value->first + 8, 4)) {
@@ -3912,6 +3977,18 @@ void OwnCountDrops(const std::vector<std::uint32_t>& key_flags) {
     std::lock_guard lock(KeyRefundMutex());
     auto& drops = OwnDropQueue();
     drops.insert(drops.end(), key_flags.begin(), key_flags.end());
+}
+
+void WatchTestActor(std::string name, std::array<float, 3> local) {
+    std::lock_guard lock(KeyRefundMutex());
+    TestWatched().name = std::move(name);
+    TestWatched().local = local;
+    TestWatched().seen.reset();
+}
+
+std::optional<TestActorSeen> TestActorAt() {
+    std::lock_guard lock(KeyRefundMutex());
+    return TestWatched().seen;
 }
 
 void QueueTestKill(std::string name) {
