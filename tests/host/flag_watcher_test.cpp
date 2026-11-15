@@ -866,6 +866,48 @@ FakeStore dungeon_game() {
 }
 }  // namespace
 
+TEST_CASE("flag watcher: floors the game writes with its own map get are kept, not ORed back (#63/#76)") {
+  constexpr FlagKey kDekuFloors{0x5c6c21c1u, 0};  // DungeonInfo.InsideTheDekuTree.EnteredFloorBit
+  CHECK(coop::host::map_of_floors(kDekuFloors) == std::optional<FlagKey>(kDekuMap));
+  CHECK_FALSE(coop::host::map_of_floors(kDekuMap));
+  const auto floors = [&](FakeStore& g, std::uint32_t v) { g.values[kDekuFloors] = entry(kDekuFloors, v, proto::FlagKind::uint32); };
+  const SharedFlags flags({kDekuMap, kDekuFloors});
+  SUBCASE("the map in the same frame") {
+    FakeStore game_store = dungeon_game();
+    floors(game_store, 0b10000);
+    ItemFlagStore store(game_store);
+    FlagWatcher w(flags, FlagRole::player);
+    w.frame(store);
+    floors(game_store, 0b01111);
+    game_store.set(kDekuMap, 1);
+    w.frame(store);
+    CHECK(game_store.get(kDekuFloors) == 0b01111u);
+    CHECK(w.stats().one_way_restores == 0);
+    const auto told = w.take_one_way_restores();
+    REQUIRE(told.size() == 1);
+    CHECK(told[0].kept);
+    CHECK(told[0].before == 0b10000u);
+    CHECK(told[0].now == 0b01111u);
+  }
+  SUBCASE("the map a frame before, and long after a drop is put back as before") {
+    FakeStore game_store = dungeon_game();
+    floors(game_store, 0b10000);
+    ItemFlagStore store(game_store);
+    FlagWatcher w(flags, FlagRole::player);
+    w.frame(store);
+    game_store.set(kDekuMap, 1);
+    w.frame(store);
+    floors(game_store, 0b01111);
+    w.frame(store);
+    CHECK(game_store.get(kDekuFloors) == 0b01111u);
+    for (int i = 0; i < 5; ++i) w.frame(store);
+    floors(game_store, 0b00001);
+    w.frame(store);
+    CHECK(game_store.get(kDekuFloors) == 0b01111u);
+    CHECK(w.stats().one_way_restores == 1);
+  }
+}
+
 TEST_CASE("flag watcher: a dungeon map or compass the game drops to 0 is put back (issue 146)") {
   FakeStore game_store = dungeon_game();
   ItemFlagStore store(game_store);
@@ -885,7 +927,15 @@ TEST_CASE("flag watcher: a dungeon map or compass the game drops to 0 is put bac
   CHECK(only<proto::FlagSet>(w.frame(store)) == std::vector{entry(kGotBomb, 0)});
   CHECK(game_store.get(kDekuMap) == 1);
   CHECK(w.stats().one_way_restores == 1);
-  CHECK(w.take_one_way_restores() == std::vector<FlagKey>{kDekuMap});
+  {
+    const auto told = w.take_one_way_restores();
+    REQUIRE(told.size() == 1);
+    CHECK(told[0].key == kDekuMap);
+    CHECK(told[0].before == 1);
+    CHECK(told[0].now == 0);
+    CHECK(told[0].put == 1);
+    CHECK_FALSE(told[0].kept);
+  }
   CHECK(w.take_one_way_restores().empty());
   CHECK(w.frame(store).empty());  // and it stays
   CHECK(game_store.get(kDekuMap) == 1);
@@ -1092,6 +1142,23 @@ TEST_CASE("item store: a reset that lowers the hearts holds life to the new maxi
   game_store.values[kLife] = entry(kLife, 8, proto::FlagKind::int32);
   CHECK(store.write_exact(entry(kMaxLife, 10, proto::FlagKind::int32)));
   CHECK(game_store.get(kLife) == 8);
+}
+
+TEST_CASE("item store: an exact write never takes a floor off a dungeon's floors (#63/#76)") {
+  constexpr FlagKey kFloors{0x46913e20u, 0};  // DungeonInfo.DodongoCavern.EnteredFloorBit
+  constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
+  FakeStore game_store;
+  game_store.values[kFloors] = entry(kFloors, 0b0110, proto::FlagKind::uint32);
+  game_store.values[kMaxLife] = entry(kMaxLife, 20, proto::FlagKind::int32);
+  ItemFlagStore store(game_store);
+  // The host's save has fewer floors (a guest entered more): the guest keeps its own and takes the host's.
+  CHECK(store.write_exact(entry(kFloors, 0b0001, proto::FlagKind::uint32)));
+  CHECK(game_store.get(kFloors) == 0b0111);
+  CHECK(store.write_exact(entry(kFloors, 0, proto::FlagKind::uint32)));
+  CHECK(game_store.get(kFloors) == 0b0111);
+  // Any other item still takes the exact value.
+  CHECK(store.write_exact(entry(kMaxLife, 12, proto::FlagKind::int32)));
+  CHECK(game_store.get(kMaxLife) == 12);
 }
 
 TEST_CASE("flag watcher, host: two flags back with a scene loaded is no save load (doors, enter flags, death)") {

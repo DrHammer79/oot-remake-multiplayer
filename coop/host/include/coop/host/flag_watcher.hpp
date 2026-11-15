@@ -133,7 +133,17 @@ class FlagWatcher {
   // One-way Bools (FlagStore::is_one_way) the game dropped to 0 and diff()
   // wrote back to 1 since the last call, for the log (issue 146). Each key
   // only the first time it is put back; stats().one_way_restores counts all.
-  std::vector<FlagKey> take_one_way_restores() { return std::exchange(one_way_restored_, {}); }
+  // dungeon-sync-b (#63/#76): with the values (a UInt's floors: before, the game's now, what was written), and
+  // `kept` when the game's own value was kept instead: its dungeon's map (game_items map_of_floors) turned on
+  // this frame or the one before, so the drop is the game's own map get writing its floors.
+  struct OneWayRestore {
+    FlagKey key;
+    std::uint32_t before = 0;
+    std::uint32_t now = 0;
+    std::uint32_t put = 0;
+    bool kept = false;
+  };
+  std::vector<OneWayRestore> take_one_way_restores() { return std::exchange(one_way_restored_, {}); }
   static constexpr std::size_t kMaxWrittenForOthers = 1024;
 
   // The counts (small keys, ...) our game itself lowered since the last call,
@@ -350,7 +360,9 @@ class FlagWatcher {
   std::set<FlagKey> pickups_;  // one-way 64-bit keys
   std::set<FlagKey> one_way_;  // one-way named flags, no load write-back (share_one_way)
   std::vector<FlagKey> written_for_others_;  // take_written_for_others
-  std::vector<FlagKey> one_way_restored_;    // take_one_way_restores
+  std::vector<OneWayRestore> one_way_restored_;  // take_one_way_restores
+  std::map<FlagKey, std::uint64_t> map_on_pass_;  // a one-way map Bool's 0 -> 1, by diff pass
+  std::uint64_t diff_pass_ = 0;
   std::set<FlagKey> one_way_told_;           // keys take_one_way_restores gave once
   std::vector<FlagKey> own_count_drops_;     // take_own_count_drops
   struct Guard {

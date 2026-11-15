@@ -171,8 +171,8 @@ class Session {
   bool share_pickup_named(FlagKey key) { return watcher_ && watcher_->share_pickup_named(key); }
   // Emulator thread only: FlagWatcher::take_written_for_others (empty when
   // flags are not shared).
-  std::vector<FlagKey> take_one_way_restores() {
-    return watcher_ ? watcher_->take_one_way_restores() : std::vector<FlagKey>{};
+  std::vector<FlagWatcher::OneWayRestore> take_one_way_restores() {
+    return watcher_ ? watcher_->take_one_way_restores() : std::vector<FlagWatcher::OneWayRestore>{};
   }
   // How many times a one-way Bool was put back this session (for the log).
   std::uint64_t one_way_restores() const {

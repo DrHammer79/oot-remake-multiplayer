@@ -152,7 +152,7 @@ Alex (2026-11-11): "Let's make it follow the hosts save." Before, the group's st
 - **While playing**, changes merge as before (OR, max, counts). Only a host's save load resets.
 - **Per player** stays per player: rupees, ammo counts, life, position (not shared at all).
 - **A new host** (the old one left) sends its table as before (merged); no reset.
-- **One-way rules** (map and compass, chests, pickups) hold for `FLAG_STATE`. A `FLAG_RESET` sets them back to 0 when the host's save has 0.
+- **One-way rules** (map and compass, chests, pickups) hold for `FLAG_STATE`. A `FLAG_RESET` sets them back to 0 when the host's save has 0. A dungeon's floors (`EnteredFloorBit`, the bits rule) never lose a bit, also not to a `FLAG_RESET` or a guest's load write-back: the floors a guest entered stay on its map (#63/#76).
 - **One-way room flags** (dungeon-live's live room flags, which the game resets itself) are never in a `FLAG_RESET`, never put back by a guest's revert, and never count as a sign of a save load.
 - **Hearts**: a reset that lowers `PlayerStatus.MaxLife` holds the player's own `PlayerStatus.Life` to the new maximum.
 - **Hooks** for session-wide state the host's save undoes: the server's `Session::on_host_reset()` and the game's `FrameReport::host_reset` (logged `coop: flags: the host loaded a save: the group follows it`).

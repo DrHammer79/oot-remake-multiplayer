@@ -818,10 +818,17 @@ public:
         // Issue 146: a map or compass the game took back, put back.
         // Each key logged the first time; the count says how often in all.
         for (const auto& k : session_->take_one_way_restores()) {
+            if (k.kept) {  // dungeon-sync-b (#63/#76)
+                LOG_INFO(Core,
+                         "coop: flags: {:#010x} (dungeon floors) {:#x} -> {:#x} with its map just got here: the "
+                         "game's own map get, kept (not ORed back)",
+                         k.key.hash, k.before, k.now);
+                continue;
+            }
             LOG_INFO(Core,
-                     "coop: flags: {:#010x} (dungeon map, compass or floors) went back here: put back "
-                     "({} put back this session)",
-                     k.hash, session_->one_way_restores());
+                     "coop: flags: {:#010x} (dungeon map, compass or floors) went back here: {:#x} -> {:#x}, put "
+                     "back {:#x} ({} put back this session)",
+                     k.key.hash, k.before, k.now, k.put, session_->one_way_restores());
         }
         for (const auto& g : session_->take_counts_guarded()) {  // issue 89 (docs/items.md)
             LOG_INFO(Core,

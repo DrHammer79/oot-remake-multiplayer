@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "coop/host/game_items.hpp"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/protocol/codec.hpp"
 
@@ -759,6 +760,7 @@ const std::vector<FlagKey>& FlagWatcher::diff_keys() {
 
 void FlagWatcher::diff(FlagStore& store, Table& changes) {
   const std::vector<FlagKey>& keys = diff_keys();
+  ++diff_pass_;
   for (std::size_t n = 0; n < keys.size(); ++n) {
     const FlagKey key = keys[n];
     std::optional<FlagEntry> now = store.read(key);
@@ -835,7 +837,34 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
     const bool bool_drop = before.kind == protocol::FlagKind::boolean && before.value != 0 && now->value == 0;
     const bool bits_drop = before.kind == protocol::FlagKind::uint32 && now->kind == protocol::FlagKind::uint32 &&
                            (before.value & ~now->value) != 0;
-    if (!loading_ && (bool_drop || bits_drop) && store.is_one_way(key)) {
+    if (before.kind == protocol::FlagKind::boolean && before.value == 0 && now->value != 0 && is_one_way_item(key)) {
+      map_on_pass_[key] = diff_pass_;  // a map (or compass) got here: its floors may follow
+    }
+    bool game_floors = false;  // the game's own map get wrote these floors: kept
+    if (!loading_ && bits_drop && store.is_one_way(key)) {
+      // dungeon-sync-b (#63/#76): the game's own map get writes the dungeon's floors as it wants them. When the
+      // same dungeon's map turned on this frame or the one before (or is on now and was off at our last read),
+      // that write is the game's: kept, not ORed with our older bits.
+      bool map_get = false;
+      if (const auto map = map_of_floors(key)) {
+        const auto on = map_on_pass_.find(*map);
+        if (on != map_on_pass_.end() && diff_pass_ - on->second <= 1) {
+          map_get = true;
+        } else if (const auto seen = last_.find(*map); seen != last_.end() && seen->second.value == 0) {
+          const auto map_now = store.read(*map);
+          map_get = map_now && map_now->value != 0;
+        }
+      }
+      if (map_get) {
+        if (one_way_told_.insert(key).second) {
+          one_way_restored_.push_back({key, static_cast<std::uint32_t>(before.value),
+                                       static_cast<std::uint32_t>(now->value), static_cast<std::uint32_t>(now->value),
+                                       true});
+        }
+        game_floors = true;
+      }
+    }
+    if (!loading_ && !game_floors && (bool_drop || bits_drop) && store.is_one_way(key)) {
       // A map or compass the game took back (issue 146: both players opened
       // the Deku Tree's map chest and neither kept the map). Never right for
       // a one-way Bool: put it back, send nothing.
@@ -846,7 +875,11 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
         ++stats_.one_way_restores;
         ++stats_.applied;
         it->second = before;  // a new floor in `back` goes out next frame as a change
-        if (one_way_told_.insert(key).second) one_way_restored_.push_back(key);
+        if (one_way_told_.insert(key).second) {
+          one_way_restored_.push_back({key, static_cast<std::uint32_t>(before.value),
+                                       static_cast<std::uint32_t>(now->value), static_cast<std::uint32_t>(back.value),
+                                       false});
+        }
         continue;
       }
       ++stats_.write_failures;

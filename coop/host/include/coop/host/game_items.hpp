@@ -64,6 +64,9 @@ SharedFlags item_shared_flags(bool with_off = false);
 bool is_one_way_item(FlagKey key);
 // Every such flag, sorted by hash.
 std::vector<FlagKey> one_way_item_flags();
+// dungeon-sync-b (#63/#76): a dungeon's floors flag (DungeonInfo.<dungeon>.EnteredFloorBit) gives the same
+// dungeon's map flag (DungeonInfo.<dungeon>.IsGetMap); anything else gives nothing.
+std::optional<FlagKey> map_of_floors(FlagKey floors);
 
 // A shared UInt item (DungeonInfo.<dungeon>.EnteredFloorBit, issue 146): the
 // game's UInt table is read and written for it (GameFlagStore). Other UInts
