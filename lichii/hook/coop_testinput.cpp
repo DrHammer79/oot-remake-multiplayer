@@ -1064,16 +1064,14 @@ void WriteWatch() {
     const double t = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
     char line[256];
     if (!seen || !frame || Clock::now() - frame->at > std::chrono::milliseconds(500)) {
-        std::snprintf(line, sizeof(line), "none %.3f %s
-", t, !seen ? "actor" : "camera");
+        std::snprintf(line, sizeof(line), "none %.3f %s\n", t, !seen ? "actor" : "camera");
     } else {
         if (seen->seen_us == g_state.watch_said_us) {
             return;  // no new walk yet
         }
         g_state.watch_said_us = seen->seen_us;
         const OnScreen o = Project(frame->clip_from_world, seen->at, frame->y_down);
-        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d
-", t, o.x, o.y,
+        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d\n", t, o.x, o.y,
                       o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1], seen->root[2],
                       seen->life);
     }
