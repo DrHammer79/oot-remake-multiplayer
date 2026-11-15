@@ -89,7 +89,7 @@ class Unit:
             if norm_path(a, cwd) == self.file:
                 i += 1
                 continue
-            inc = next((f for f in INCLUDE_FLAGS if a == f or (a.startswith(f) and f in ('-I', '/I'))), None)
+            inc = next((f for f in INCLUDE_FLAGS if a == f or (a.startswith(f) and f != '-isystem' and f != '-iquote')), None)
             if inc:
                 value = nxt if a == inc else a[len(inc):]
                 self.includes.append(norm_path(value, cwd))

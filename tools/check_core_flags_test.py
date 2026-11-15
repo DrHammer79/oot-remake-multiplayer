@@ -26,7 +26,7 @@ def gcc(target: str, rel: str, flags: str) -> dict:
 
 def msvc(target: str, rel: str, flags: str) -> dict:
     obj = f'CMakeFiles\\{target}.dir\\{rel}.obj'
-    src = str(ROOT / rel).replace('/', '\\')
+    src = str(ROOT / rel)   # native: backslashes on Windows, as MSVC's database has them
     return {'directory': str(ROOT / 'build'), 'file': src,
             'command': f'C:\\PROGRA~1\\MICROS~1\\cl.exe  /nologo /TP {flags} /showIncludes /Fo{obj} /Fdx.pdb /FS -c "{src}"'}
 
@@ -74,8 +74,10 @@ class FlagsTest(unittest.TestCase):
                 self.assertIn(why, problems[0])
 
     def test_module_msvc_command_lines(self):
-        mod = '-DLICHII_COOP -DCOOP_HOOKSHOT -I..\\hookshot\\compat /W4 /utf-8 /wd4456 /bigobj /GR /EHsc'
-        core = '/W4 /utf-8 /wd4456 /bigobj /GR /EHsc'
+        # As CI's MSVC database writes them: -external:I glued to its folder (Monocypher's, module only).
+        mod = ('-DLICHII_COOP -DCOOP_HOOKSHOT -I../hookshot/compat -external:I../.deps/monocypher/src '
+               '-external:W0 /W4 /utf-8 /wd4456 /bigobj /GR /EHsc')
+        core = '-external:W0 /W4 /utf-8 /wd4456 /bigobj /GR /EHsc'
         db = [msvc('hookshot_coop', 'hookshot/src/coop_title.cpp', mod)] + [msvc('coop_core', f, core) for f in CORE]
         self.assertEqual(self.run_check(db, 'module'), [])
         db[-1] = msvc('coop_core', CORE[-1], core.replace(' /bigobj', ''))
