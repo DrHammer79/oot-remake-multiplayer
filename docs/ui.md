@@ -70,6 +70,17 @@ payload). `coop_raster_draw` clears what the last frame drew and draws every com
 
 Memory: a 1280 x 720 picture is 3.6 MB plus about 20 KB of work.
 
+## Upload to the game's textures (v1 step 8 e2, first part)
+
+`coop/ui/upload.h`, for the ExeFS picture pane (the pane itself comes after a research run):
+
+- `coop_draw_list_hash`: a frame whose list hashes the same as the last one is not rasterised or uploaded again.
+- `CoopUpload`: the picture is shown through two textures in turn (the GPU may still read the one shown last), so a
+  changed row is pending for every texture until each has had it; a new texture starts with every row pending (the
+  first frame sends the whole picture). `coop_upload_take` gives one texture's pending rows as bands, merging bands
+  closer than a gap and stopping at a row budget per frame; what is left waits for the next frame, and a texture is
+  shown only once nothing is pending for it.
+
 ## Own menu (v1 step 6b)
 
 Co-op's own menu screen, for platforms with no Hookshot menu. `coop/ui/menu_view.hpp` `DrawMenu` lays out a tab strip,
