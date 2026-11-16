@@ -29,9 +29,7 @@ enum {
     COOP_DRAW_POLY = 4,      /* convex, n (3..8) points x y ...; id 1: outline only */
     COOP_DRAW_TEXT = 5,      /* x y (its top left) px; the words at text_off */
     COOP_DRAW_IMAGE = 6,     /* the whole image `id` into x0 y0 x1 y1, rgba = tint */
-    COOP_DRAW_FONT = 7,      /* texts and measures from here on use font `id` */
-    COOP_DRAW_CLIP_PUSH = 8, /* x0 y0 x1 y1: nothing drawn outside until the matching pop */
-    COOP_DRAW_CLIP_POP = 9
+    COOP_DRAW_FONT = 7       /* texts and measures from here on use font `id` */
 };
 
 /* Logical fonts (COOP_DRAW_FONT id) */
@@ -65,7 +63,7 @@ typedef struct CoopDrawList {
     uint32_t text_used;    /* bytes of text used */
     uint32_t dropped;      /* commands that did not fit (the rest of the frame is lost; a backend may log it) */
     uint16_t font;         /* the font the last COOP_DRAW_FONT chose (COOP_FONT_UI at first) */
-    uint16_t clip_depth;
+    uint16_t pad_;
     uint32_t last_text;    /* the last text's offset + 1 (0: none), so a repeated text (outline copies) is stored once */
     CoopDrawCmd cmd[COOP_DRAW_MAX_CMDS];
     char text[COOP_DRAW_MAX_TEXT];
@@ -81,8 +79,6 @@ int coop_draw_poly(CoopDrawList *l, const float *xy, int points, uint32_t rgba, 
 int coop_draw_text(CoopDrawList *l, float x, float y, float px, uint32_t rgba, const char *utf8);
 int coop_draw_image(CoopDrawList *l, int image, float x0, float y0, float x1, float y1, uint32_t tint);
 int coop_draw_font(CoopDrawList *l, int font);
-int coop_draw_clip_push(CoopDrawList *l, float x0, float y0, float x1, float y1);
-int coop_draw_clip_pop(CoopDrawList *l);
 /* A TEXT command's words (NUL-terminated); "" for any other command. */
 const char *coop_draw_text_of(const CoopDrawList *l, const CoopDrawCmd *c);
 

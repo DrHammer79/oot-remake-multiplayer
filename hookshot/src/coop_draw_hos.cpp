@@ -109,7 +109,7 @@ void Replay(const CoopDrawList& list, const HosCoopDraw& d, const Look* look) {
             case COOP_DRAW_POLY:
                 Poly(d, c);
                 break;
-            default:   // CLIP: this table has no clip (the overlay and the own menu emit none)
+            default:   // (no other kinds)
                 break;
         }
     }

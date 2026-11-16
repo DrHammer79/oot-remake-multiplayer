@@ -120,7 +120,7 @@ TEST_CASE("draw list: full, the rest is dropped and counted, nothing written pas
     CHECK(coop_draw_text(t.get(), 0, 0, 1, 0, big.c_str()) == 1);   // the last words again: no room needed
 }
 
-TEST_CASE("draw list: polygons of 3 to 8 points, clips in pairs") {
+TEST_CASE("draw list: polygons of 3 to 8 points") {
     auto l = NewList();
     const float xy[18] = {0, 0, 1, 0, 1, 1, 0, 1, 0.5f, 0.5f, 0, 0, 0, 0, 0, 0, 9, 9};
     CHECK(coop_draw_poly(l.get(), xy, 2, 0, 0) == 0);
@@ -131,12 +131,7 @@ TEST_CASE("draw list: polygons of 3 to 8 points, clips in pairs") {
     CHECK(l->cmd[0].n == 4);
     CHECK(l->cmd[0].id == 1);
     CHECK(l->cmd[0].v[7] == 1);
-    CHECK(coop_draw_clip_pop(l.get()) == 0);   // nothing pushed
-    CHECK(coop_draw_clip_push(l.get(), 0, 0, 10, 10) == 1);
-    CHECK(l->clip_depth == 1);
-    CHECK(coop_draw_clip_pop(l.get()) == 1);
-    CHECK(l->clip_depth == 0);
-    CHECK(l->n == 3);
+    CHECK(l->n == 1);
 }
 
 TEST_CASE("draw list: text widths from a font's advance table") {
@@ -163,9 +158,7 @@ TEST_CASE("draw list replay: logical fonts and hearts become the game look's ids
     coop_draw_font(l.get(), COOP_FONT_UI);
     const float xy[6] = {0, 0, 1, 0, 1, 1};
     coop_draw_poly(l.get(), xy, 3, 0, 0);   // one triangle (a fan of 3 points)
-    coop_draw_clip_push(l.get(), 0, 0, 1, 1);
     coop_draw_rect(l.get(), 0, 0, 1, 1, 0, 0);
-    coop_draw_clip_pop(l.get());
     const auto look = Ids();
     Host h(true);
     CoopDraw::Replay(*l, h.d, &look);

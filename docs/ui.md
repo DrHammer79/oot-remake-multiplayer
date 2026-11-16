@@ -19,7 +19,6 @@ function pointers, so it can live inside a payload a recomp lifts and on a conso
 | `COOP_DRAW_TEXT` | top left, size in px, UTF-8 words in the arena |
 | `COOP_DRAW_IMAGE` | a logical image (the HUD pack's hearts) into a rectangle, tinted |
 | `COOP_DRAW_FONT` | the logical font for the texts after it |
-| `COOP_DRAW_CLIP_PUSH` / `POP` | a clip rectangle |
 
 - Colours are `0xAABBGGRR` (Dear ImGui's IM_COL32), coordinates pixels from the picture's top left.
 - Fonts and images are logical ids (`COOP_FONT_UI`, `COOP_FONT_REGULAR`, `COOP_FONT_MEDIUM`, `COOP_IMAGE_HEART_0..4`);
@@ -61,7 +60,10 @@ On Longshot it is **opt-in**: `LICHII_COOP_OWN_MENU=1` (`hookshot/src/coop_own_m
 none of it runs and Hookshot's menu is as before (the golden test pins the overlay). On, F9 or the pad's L + R held
 then Minus opens it over the picture (drawn through `hos_coop_draw2`; an older Hookshot's table draws none), and it
 shows the same Multiplayer and Mods tabs as Hookshot's menu. Minus or F9 closes it, or Back with nothing left to go
-back to. While it is open the game gets no pad buttons, keys or mouse. The Longshot replay draws a polygon as
+back to. While it is open the game gets no pad buttons, keys or mouse, and after it closes no button that was held then
+(B for Back, Minus, A) reaches the game until it is let go (`coop/ui/pad.hpp` `PadGate`). It opens only where
+Hookshot draws through `hos_coop_draw2`: an older Hookshot (`hos_coop_draw` only), or one that never draws it within a
+second, turns it off with one log line; drawn before and then not for a second (a long frame), it just closes. The Longshot replay draws a polygon as
 triangles (an outline as thin bands).
 
 ## Input (v1 step 6b)

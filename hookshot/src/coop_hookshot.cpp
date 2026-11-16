@@ -1675,6 +1675,7 @@ COOP_HOOKSHOT_EXPORT void hos_coop_draw(const HosCoopDraw* d) {
                      static_cast<int>(d->width), static_cast<int>(d->height));
         }
         CoopHookshot::NoGameLook();
+        CoopOwnMenu::NoDraw2();   // (opt-in own menu: shown only through hos_coop_draw2)
         CoopHookshot::NoteDrawn(*d);
         // An older Hookshot's table ends at text_width: the rest stays empty.
         HosCoopDraw t{};

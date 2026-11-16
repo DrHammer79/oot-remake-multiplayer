@@ -100,4 +100,23 @@ private:
     std::uint64_t next_ms_ = 0;
 };
 
+// What the game gets of the pad around co-op's menu: nothing while the menu has it, and afterwards no button that
+// was held while it had it (B for Back, Minus from the open combination, A for a confirm that closed it) until that
+// button is let go, so none reaches the game as a new press. Buttons pressed after the menu let go pass at once.
+class PadGate {
+public:
+    std::uint64_t Pass(std::uint64_t buttons, bool menu_has_pad) {
+        if (menu_has_pad) {
+            latched_ = buttons;
+            return 0;
+        }
+        latched_ &= buttons;   // a latched button let go is free again
+        return buttons & ~latched_;
+    }
+    std::uint64_t latched() const { return latched_; }
+
+private:
+    std::uint64_t latched_ = 0;
+};
+
 }  // namespace coop::ui

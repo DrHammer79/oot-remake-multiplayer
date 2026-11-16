@@ -87,3 +87,25 @@ TEST_CASE("ui focus: the top owner has input, the pad is masked while anyone doe
     f.Pop(Owner::menu);
     CHECK_FALSE(f.MasksPad());
 }
+
+TEST_CASE("ui pad gate: nothing while the menu has the pad, and no button held at close reaches the game") {
+    PadGate g;
+    CHECK(g.Pass(npad::kA, false) == npad::kA);   // no menu: everything passes
+    const std::uint64_t combo = npad::kL | npad::kR | npad::kMinus;
+    CHECK(g.Pass(combo, true) == 0);              // the frame it opens on: none of the combination
+    CHECK(g.Pass(npad::kDown, true) == 0);        // open: nothing
+    CHECK(g.Pass(npad::kB, true) == 0);           // B (Back) closes it on this frame
+    CHECK(g.Pass(npad::kB, false) == 0);          // closed, B still held: not a new press for the game
+    CHECK(g.Pass(npad::kB | npad::kA, false) == npad::kA);   // A pressed after: passes; B still held back
+    CHECK(g.Pass(npad::kA, false) == npad::kA);   // B let go...
+    CHECK(g.Pass(npad::kA | npad::kB, false) == (npad::kA | npad::kB));   // ...so a new B press is the game's
+    CHECK(g.latched() == 0);
+
+    PadGate m;   // closed with Minus while L and R are still held from opening
+    CHECK(m.Pass(combo, true) == 0);
+    CHECK(m.Pass(npad::kL | npad::kR | npad::kMinus, true) == 0);
+    CHECK(m.Pass(npad::kL | npad::kMinus, false) == 0);    // R let go; L and Minus still held: nothing
+    CHECK(m.Pass(npad::kL, false) == 0);
+    CHECK(m.Pass(0, false) == 0);
+    CHECK(m.Pass(npad::kMinus, false) == npad::kMinus);    // Minus pressed again: the game's map
+}

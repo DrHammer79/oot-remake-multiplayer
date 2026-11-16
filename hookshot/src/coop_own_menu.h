@@ -147,7 +147,10 @@ bool Mouse(float fx, float fy, int event);
 // The pad from hos_coop_pad: the buttons the game should get (none while the menu is open or as it opens; the sticks
 // zeroed then too).
 std::uint64_t Pad(std::uint64_t buttons, std::int32_t stick[4]);
-// Draws the menu when open (hos_coop_draw2, after the overlay).
+// Draws the menu when open (hos_coop_draw2, after the overlay). Not drawn within a second of opening (or of its last
+// draw) it closes; never drawn at all, it opens no more.
+// NoDraw2: Hookshot called hos_coop_draw, the older table: the menu closes and opens no more (it could not be seen).
+void NoDraw2();
 void Draw(const HosCoopDraw& d);
 
 }  // namespace CoopOwnMenu
