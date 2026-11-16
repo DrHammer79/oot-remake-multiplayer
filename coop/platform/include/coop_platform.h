@@ -11,7 +11,8 @@
      adapter (thread_start's fn).
    - Versioned like HosCoopApi (hookshot/src/hos_coop_api.h): `version` and `size` first; the table only grows at its
      end, and the core reads a later slot only when `size` covers it (COOP_PLATFORM_HAS).
-   No callers yet: coop::os (coop/platform/include/coop/os.hpp) wraps the OS slots with a std backend on PC. */
+   coop::os (coop/platform/include/coop/os.hpp) wraps the OS slots, with a std backend on PC; since v1 step 4
+   (os-wrap) the core (coop_core) reaches the OS only through it (tools/check_core.py). */
 #ifndef COOP_PLATFORM_H
 #define COOP_PLATFORM_H
 #include <stddef.h>
@@ -132,20 +133,31 @@ typedef struct CoopPlatform {
 
     /* One line of the mod's log (no newline needed). */
     void (*log)(const char *line);
+
+    /* ---- Appended after the first table (v1 step 4, os-wrap). An adapter built before them has a shorter `size`;
+       the core reads them only when COOP_PLATFORM_HAS says the table reaches them, and does without otherwise. */
+    /* 1 locked, 0 another thread holds it (never waits). */
+    int (*mutex_try_lock)(void *mutex);
+    /* A variable of the process environment, OPTIONAL (consoles have none): its length, -1 when it is not set.
+       `out` gets as much as fits in `cap` bytes, always NUL-ended when cap > 0. */
+    int (*env_get)(const char *name, char *out, size_t cap);
+    /* n bytes from the platform's random source (for keys and names, not a game RNG). 0 ok. */
+    int (*random_fill)(void *out, size_t n);
 } CoopPlatform;
 
 /* 1 when the table is long enough to have `field` (a later version's slot in an older adapter's table). */
 #define COOP_PLATFORM_HAS(p, field) \
     ((p)->size >= offsetof(CoopPlatform, field) + sizeof(((const CoopPlatform *)0)->field))
 
-/* Every function slot, in order: X(name, required). For a lifter's entries list and for the checks in coop::os. */
+/* Every function slot, in order: X(name, required). For a lifter's entries list and for the checks in coop::os.
+   `required` binds a table only when it is long enough to have the slot (an older adapter's may end before it). */
 #define COOP_PLATFORM_SLOTS(X) \
     X(read, 0) X(write, 0) X(cas32, 0) X(call, 0) X(scratch, 0) X(hook_wrap, 0) X(hook_site, 0) \
     X(pad_buttons, 0) X(pad_sticks, 0) X(key_down, 0) X(draw_2d, 0) X(voice_out, 0) X(voice_in, 0) \
     X(sock_open, 1) X(sock_bind, 1) X(sock_local, 1) X(sock_sendto, 1) X(sock_recvfrom, 1) X(sock_close, 1) \
     X(resolve, 1) X(thread_start, 1) X(thread_join, 1) X(thread_id, 1) X(mutex_new, 1) X(mutex_lock, 1) \
     X(mutex_unlock, 1) X(mutex_free, 1) X(now_us, 1) X(sleep_us, 1) X(mem_alloc, 1) X(mem_free, 1) X(file_read, 1) \
-    X(file_write, 1) X(log, 1)
+    X(file_write, 1) X(log, 1) X(mutex_try_lock, 1) X(env_get, 0) X(random_fill, 1)
 
 /* The core's entry points that an adapter calls. Declared for review of the shape; defined by later steps (core-lib-
    split / hookshot-on-platform), so nothing calls them yet. */

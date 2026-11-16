@@ -7,3 +7,4 @@ size_t coop_platform_c_size(void) { return sizeof(CoopPlatform); }
 size_t coop_platform_c_offset_log(void) { return offsetof(CoopPlatform, log); }
 size_t coop_platform_c_addr_size(void) { return sizeof(CoopAddr); }
 size_t coop_platform_c_call_size(void) { return sizeof(CoopCall); }
+size_t coop_platform_c_offset_random_fill(void) { return offsetof(CoopPlatform, random_fill); }

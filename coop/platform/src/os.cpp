@@ -2,6 +2,7 @@
 // coop::os over the installed CoopPlatform table (coop/os.hpp).
 #include "coop/os.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 
@@ -30,7 +31,7 @@ InstallError Install(const CoopPlatform *platform) {
     if (platform->version != COOP_PLATFORM_VERSION) return InstallError::kVersion;
     if (platform->size < kMinSize) return InstallError::kSize;
 #define COOP_OS_CHECK_SLOT(name, required) \
-    if (Missing(required, platform->name)) return InstallError::kMissingSlot;
+    if (COOP_PLATFORM_HAS(platform, name) && Missing(required, platform->name)) return InstallError::kMissingSlot;
     COOP_PLATFORM_SLOTS(COOP_OS_CHECK_SLOT)
 #undef COOP_OS_CHECK_SLOT
     g_platform.store(platform, std::memory_order_release);
@@ -78,7 +79,10 @@ bool WriteFile(const char *rel, const void *data, std::size_t n) {
     return P().file_write(rel, data, n) == 0;
 }
 
-Mutex::Mutex() : owner_(&P()) { handle_ = owner_->mutex_new(); }
+Mutex::Mutex() : owner_(&P()) {
+    handle_ = owner_->mutex_new();
+    if (!handle_) owner_->log("coop::os: mutex_new failed: this lock gives no exclusion");
+}
 Mutex::~Mutex() {
     if (handle_) owner_->mutex_free(handle_);
 }
@@ -87,6 +91,53 @@ void Mutex::lock() {
 }
 void Mutex::unlock() {
     if (handle_) owner_->mutex_unlock(handle_);
+}
+
+bool Mutex::try_lock() {
+    if (!handle_) return true;   // as lock(): no handle, no exclusion
+    if (COOP_PLATFORM_HAS(owner_, mutex_try_lock) && owner_->mutex_try_lock) {
+        return owner_->mutex_try_lock(handle_) != 0;
+    }
+    owner_->mutex_lock(handle_);
+    return true;
+}
+
+std::optional<std::string> GetEnv(const char *name) {
+    const CoopPlatform &p = P();
+    if (!name || !*name || !COOP_PLATFORM_HAS(&p, env_get) || !p.env_get) return std::nullopt;
+    char small[256];
+    const int len = p.env_get(name, small, sizeof small);
+    if (len < 0) return std::nullopt;
+    if (static_cast<std::size_t>(len) < sizeof small) return std::string(small, static_cast<std::size_t>(len));
+    std::string value(static_cast<std::size_t>(len) + 1, '\0');   // longer than the first buffer: ask again
+    const int again = p.env_get(name, value.data(), value.size());
+    if (again < 0) return std::nullopt;
+    value.resize(std::min(static_cast<std::size_t>(again), value.size() - 1));
+    return value;
+}
+
+bool RandomFill(void *out, std::size_t n) {
+    if (n == 0) return true;
+    if (!out) return false;
+    const CoopPlatform &p = P();
+    if (COOP_PLATFORM_HAS(&p, random_fill) && p.random_fill && p.random_fill(out, n) == 0) return true;
+    // No random source: splitmix64 over the clock, the thread, a call count and this call's stack address.
+    static std::atomic<std::uint64_t> calls{0};
+    std::uint64_t x = p.now_us() ^ (p.thread_id() << 1) ^ (calls.fetch_add(1) * 0xd1b54a32d192ed03ull);
+    x ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&x));
+    auto *bytes = static_cast<std::uint8_t *>(out);
+    std::uint64_t word = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i % 8 == 0) {
+            x += 0x9e3779b97f4a7c15ull;
+            word = x;
+            word = (word ^ (word >> 30)) * 0xbf58476d1ce4e5b9ull;
+            word = (word ^ (word >> 27)) * 0x94d049bb133111ebull;
+            word ^= word >> 31;
+        }
+        bytes[i] = static_cast<std::uint8_t>(word >> (8 * (i % 8)));
+    }
+    return false;
 }
 
 Thread::~Thread() { Join(); }

@@ -2,6 +2,7 @@
 // The std backend of CoopPlatform (coop/os.hpp StdPlatform): PC only, no game.
 #include "coop/os.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <random>
 #include <system_error>
 #include <thread>
 
@@ -108,6 +110,45 @@ void *StdMutexNew() {
 void StdMutexLock(void *m) { static_cast<std::mutex *>(m)->lock(); }
 void StdMutexUnlock(void *m) { static_cast<std::mutex *>(m)->unlock(); }
 void StdMutexFree(void *m) { delete static_cast<std::mutex *>(m); }
+int StdMutexTryLock(void *m) { return static_cast<std::mutex *>(m)->try_lock() ? 1 : 0; }
+
+// ---- environment
+int StdEnvGet(const char *name, char *out, size_t cap) {
+    if (!name) return -1;
+#ifdef _MSC_VER
+    char *value = nullptr;
+    size_t size = 0;
+    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) return -1;
+    const std::string text(value);
+    std::free(value);
+#else
+    const char *value = std::getenv(name);
+    if (value == nullptr) return -1;
+    const std::string text(value);
+#endif
+    if (out && cap) {
+        const size_t n = std::min(text.size(), cap - 1);
+        std::memcpy(out, text.data(), n);
+        out[n] = '\0';
+    }
+    return static_cast<int>(text.size());
+}
+
+// ---- random
+int StdRandomFill(void *out, size_t n) {
+    if (!out && n) return -1;
+    try {
+        std::random_device random;
+        auto *bytes = static_cast<unsigned char *>(out);
+        for (size_t i = 0; i < n; i += 4) {
+            const uint32_t r = random();
+            for (size_t j = 0; j < 4 && i + j < n; ++j) bytes[i + j] = static_cast<unsigned char>(r >> (8 * j));
+        }
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
 
 // ---- files
 std::mutex g_root_mutex;
@@ -379,6 +420,9 @@ CoopPlatform MakeStd() {
     p.file_read = StdFileRead;
     p.file_write = StdFileWrite;
     p.log = StdLog;
+    p.mutex_try_lock = StdMutexTryLock;
+    p.env_get = StdEnvGet;
+    p.random_fill = StdRandomFill;
     return p;
 }
 

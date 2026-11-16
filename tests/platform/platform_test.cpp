@@ -7,16 +7,20 @@
 
 #include "hos_coop_api.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <string>
 
 extern "C" {
 size_t coop_platform_c_size(void);
 size_t coop_platform_c_offset_log(void);
+size_t coop_platform_c_offset_random_fill(void);
 size_t coop_platform_c_addr_size(void);
 size_t coop_platform_c_call_size(void);
 }
@@ -43,6 +47,7 @@ std::filesystem::path TempRoot(const char *name) {
 TEST_CASE("coop_platform.h: the same layout in C and C++, CoopCall as HosCoopCall") {
     CHECK(coop_platform_c_size() == sizeof(CoopPlatform));
     CHECK(coop_platform_c_offset_log() == offsetof(CoopPlatform, log));
+    CHECK(coop_platform_c_offset_random_fill() == offsetof(CoopPlatform, random_fill));
     CHECK(coop_platform_c_addr_size() == sizeof(CoopAddr));
     CHECK(coop_platform_c_call_size() == sizeof(CoopCall));
     CHECK(sizeof(CoopCall) == sizeof(HosCoopCall));
@@ -72,7 +77,7 @@ TEST_CASE("coop_platform.h: COOP_PLATFORM_SLOTS names every function slot once")
     COOP_PLATFORM_SLOTS(COOP_TEST_COUNT)
 #undef COOP_TEST_COUNT
     // The slots run from read to the end; nothing but slots after main_build_id.
-    CHECK(slots == 34);
+    CHECK(slots == 37);
     CHECK(offsetof(CoopPlatform, read) + slot_bytes == sizeof(CoopPlatform));
 }
 
@@ -310,4 +315,133 @@ TEST_CASE("coop::os: resolve a literal address") {
     CHECK(a.addr[3] == 1);
     CHECK_FALSE(os::Resolve(nullptr, COOP_SOCK_UDP4, a));
     CHECK_FALSE(os::Resolve("127.0.0.1", 99, a));
+}
+
+// ---- v1 step 4 (os-wrap): the slots appended after the first table.
+
+TEST_CASE("coop::os: an adapter's table from before the appended slots still installs") {
+    RestoreStd restore;
+    CoopPlatform old = *os::StdPlatform();
+    old.size = static_cast<uint32_t>(offsetof(CoopPlatform, log) + sizeof(CoopPlatform::log));
+    old.mutex_try_lock = nullptr;   // past its end: never read, never required
+    old.env_get = nullptr;
+    old.random_fill = nullptr;
+    CHECK_FALSE(COOP_PLATFORM_HAS(&old, mutex_try_lock));
+    REQUIRE(os::Install(&old) == os::InstallError::kNone);
+
+    os::Mutex m;
+    CHECK(m.try_lock());   // no slot: waits for the lock instead
+    m.unlock();
+    CHECK_FALSE(os::GetEnv("PATH").has_value());   // no environment
+    std::uint8_t a[16] = {}, b[16] = {};
+    CHECK_FALSE(os::RandomFill(a, sizeof a));       // the fallback still fills
+    CHECK_FALSE(os::RandomFill(b, sizeof b));
+    CHECK(std::memcmp(a, b, sizeof a) != 0);
+    CHECK(std::count(std::begin(a), std::end(a), std::uint8_t{0}) < 8);
+
+    // A table that reaches an appended required slot must fill it.
+    CoopPlatform full = *os::StdPlatform();
+    full.random_fill = nullptr;
+    CHECK(os::Install(&full) == os::InstallError::kMissingSlot);
+    full = *os::StdPlatform();
+    full.env_get = nullptr;   // optional
+    CHECK(os::Install(&full) == os::InstallError::kNone);
+    CHECK_FALSE(os::GetEnv("PATH").has_value());
+}
+
+namespace {
+struct TryLockState {
+    os::Mutex mutex;
+    std::atomic<int> got{-1};
+};
+void TryFromOtherThread(void *arg) {
+    auto *s = static_cast<TryLockState *>(arg);
+    std::unique_lock<os::Mutex> lock(s->mutex, std::try_to_lock);
+    s->got = lock.owns_lock() ? 1 : 0;
+}
+}  // namespace
+
+TEST_CASE("coop::os: try_lock does not wait for a held lock") {
+    TryLockState s;
+    REQUIRE(s.mutex.ok());
+    {
+        std::lock_guard<os::Mutex> held(s.mutex);
+        os::Thread t;
+        REQUIRE(t.Start(TryFromOtherThread, &s));
+        t.Join();
+        CHECK(s.got == 0);
+    }
+    os::Thread t;
+    REQUIRE(t.Start(TryFromOtherThread, &s));
+    t.Join();
+    CHECK(s.got == 1);
+}
+
+namespace {
+char g_env_value[600];
+int FakeEnv(const char *name, char *out, size_t cap) {
+    if (std::strcmp(name, "COOP_OS_TEST_SET") != 0) return -1;
+    const size_t len = std::strlen(g_env_value);
+    if (cap) {
+        const size_t n = len < cap - 1 ? len : cap - 1;
+        std::memcpy(out, g_env_value, n);
+        out[n] = '\0';
+    }
+    return static_cast<int>(len);
+}
+}  // namespace
+
+TEST_CASE("coop::os: GetEnv through the table, short and long values") {
+    RestoreStd restore;
+    CoopPlatform mine = *os::StdPlatform();
+    mine.env_get = FakeEnv;
+    REQUIRE(os::Install(&mine) == os::InstallError::kNone);
+    std::strcpy(g_env_value, "0");
+    CHECK(os::GetEnv("COOP_OS_TEST_SET") == std::optional<std::string>("0"));
+    std::strcpy(g_env_value, "");
+    CHECK(os::GetEnv("COOP_OS_TEST_SET") == std::optional<std::string>(""));   // set but empty
+    std::memset(g_env_value, 'x', 500);
+    g_env_value[500] = '\0';
+    const auto longer = os::GetEnv("COOP_OS_TEST_SET");
+    REQUIRE(longer.has_value());
+    CHECK(longer->size() == 500);
+    CHECK(longer->find_first_not_of('x') == std::string::npos);
+    CHECK_FALSE(os::GetEnv("COOP_OS_TEST_UNSET").has_value());
+    CHECK_FALSE(os::GetEnv("").has_value());
+    CHECK_FALSE(os::GetEnv(nullptr).has_value());
+}
+
+TEST_CASE("coop::os: the std backend's environment and random source") {
+    // PATH is set on every CI runner and PC.
+    const auto path = os::GetEnv("PATH");
+    REQUIRE(path.has_value());
+    CHECK_FALSE(path->empty());
+    CHECK_FALSE(os::GetEnv("COOP_OS_TEST_SURELY_UNSET_7f3a").has_value());
+
+    std::uint8_t a[13] = {}, b[13] = {};   // not a multiple of 4: the tail is filled too
+    CHECK(os::RandomFill(a, sizeof a));
+    CHECK(os::RandomFill(b, sizeof b));
+    CHECK(std::memcmp(a, b, sizeof a) != 0);
+    CHECK(os::RandomFill(nullptr, 0));
+    CHECK_FALSE(os::RandomFill(nullptr, 4));
+}
+
+TEST_CASE("coop::os: SteadyClock is NowUs as a std::chrono clock") {
+    static_assert(os::SteadyClock::is_steady);
+    const auto before = os::NowUs();
+    const auto t = os::SteadyClock::now();
+    const auto after = os::NowUs();
+    const auto us = static_cast<std::uint64_t>(t.time_since_epoch().count());
+    CHECK(us >= before);
+    CHECK(us <= after);
+    os::SleepUs(2000);
+    CHECK(os::SteadyClock::now() - t >= std::chrono::milliseconds(1));
+    // The same epoch as std::chrono::steady_clock on the std backend (the core's old clock), so a value kept as
+    // milliseconds since the clock's start reads the same before and after the switch.
+    const auto std_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const auto os_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        os::SteadyClock::now().time_since_epoch()).count();
+    CHECK(os_ms - std_ms <= 1);
+    CHECK(std_ms - os_ms <= 1);
 }

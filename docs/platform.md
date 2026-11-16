@@ -27,8 +27,17 @@ one plain C table, `CoopPlatform`, that the platform's adapter fills.
   Hookshot's patches), `pad_sticks` (sticks come through `hos_coop_pad`), `draw_2d` (step 6) and voice (the module's own
   exports). The compat runtime (`hookshot/compat/coop_runtime.h`, the emulator API slice the hook files use) and the
   module's game calls now go through this table; tests in `tests/hookshot/hs_platform_test.cpp`.
-- Still to come: step 4 (os-wrap) moves the core's `std::thread`/`std::mutex`/`chrono`/`fstream` onto `coop::os`. The
-  `coop_core_*` entry points are declared for review of their shape and defined by core-lib-split.
+- Step 4 (os-wrap) moves the core's `std::mutex`/`steady_clock`/`fstream`/`getenv`/`random_device` onto `coop::os`
+  (see "os-wrap (step 4)" below). The `coop_core_*` entry points are declared for review of their shape and defined by
+  later steps.
+- Slots appended after the first table (step 4): `mutex_try_lock` (for `std::unique_lock` with `std::try_to_lock`),
+  `env_get` (optional: consoles have no environment) and `random_fill` (keys, names). The version stays 1: the table
+  grows at its end, `Install` checks a required slot only when the table's `size` reaches it, and `coop::os` does
+  without one an older table lacks (`try_lock` waits; `GetEnv` answers nothing; `RandomFill` fills from the clock,
+  thread and a call count and answers false). `coop::os::SteadyClock` is a `std::chrono` clock over `now_us`, so the
+  core keeps its `time_point`/duration code; on the std backend it has `std::chrono::steady_clock`'s epoch.
+- No condition-variable slot: nothing in the hook files and UI models waits on one (the one user is
+  `coop::host::Session`, see below).
 - Changes from the design sketch: `thread_start` returns a handle and `thread_join` takes it; `thread_id`,
   `mutex_free`, `sleep_us` and `sock_local` were added; the memory slots are `mem_alloc`/`mem_free` (a CRT may define
   `free` as a macro); sockets are opened by kind (`COOP_SOCK_UDP4`/`6`) and `sock_recvfrom` answers
