@@ -42,11 +42,31 @@ function pointers, so it can live inside a payload a recomp lifts and on a conso
   overlay made before the list existed, in the same order. `CoopDraw::Draw(table, scene, look)` is Build then Replay,
   so the module's exports did not change. `tests/hookshot/draw_golden_test.cpp` records every call of 25 scenes
   (plain and game look, old and new table) from the code before the list and must keep passing.
-- **ExeFS** (later, v1 step 8): not written yet. Recommended route: rasterise the list in software (portable,
-  unit-tested, the same pixels everywhere) into one RGBA texture the game draws with one picture pane of our own
-  layout; text from a font atlas built on the player's PC from the HUD pack (no game data in this repository).
-  The alternatives (the game's own 2D layout system pane by pane; an NVN2 renderer of our own) and their sizes and
-  risks are in the coordinator's v1 reports.
+- **ExeFS** (v1 step 8): the list is rasterised in software into one RGBA picture the game draws with one picture
+  pane of our own layout (the pane is step 8 e2, not written yet). Text comes from a font atlas built on the player's
+  PC from the HUD pack (no game data in this repository). The alternatives (the game's own 2D layout system pane by
+  pane; an NVN2 renderer of our own) and their sizes and risks are in the coordinator's v1 reports.
+
+## Software raster (v1 step 8 e1)
+
+`coop/ui/raster.h` `CoopRaster` draws a `CoopDrawList` into a picture the caller owns (`coop_raster_init` with the
+pixels and a work buffer of `coop_raster_work_bytes`; no allocation, no function pointers, so it can go into the
+payload). `coop_raster_draw` clears what the last frame drew and draws every command in order:
+
+- Rects (rounded), circles and rings, triangles, convex polygons, polygon outlines (1.5 px bands along the edges, as
+  the Longshot replay draws them), text from a `CoopRasterFont` atlas (bilinear, any size), and the HUD pack's images
+  (`CoopRasterImage`, bilinear, tinted). A text whose font has no atlas, an image not set, NaN numbers or an unknown
+  command are skipped and counted (`skipped`).
+- The same pixels everywhere: numbers become 1/16 px integers once, then it is integer arithmetic only. Edges are
+  anti-aliased from 4 sub-rows times 1/16 px per pixel. `tests/ui/raster_test.cpp` checks exact pixels and two golden
+  pictures that every CI compiler must give byte for byte.
+- The picture is 0xAABBGGRR with premultiplied alpha (draw it with "one, one minus source alpha");
+  `coop_raster_to_straight` converts rows for a pane that wants straight alpha.
+- Dirty rows: each frame hashes every row it drew (64-bit) and compares with the frame before; `coop_raster_dirty`
+  gives the changed rows as bands, so the pane uploads only those.
+- Text widths for the layout come from the same atlas: `coop_raster_font_advances` fills a `CoopFontAdvances`.
+
+Memory: a 1280 x 720 picture is 3.6 MB plus about 20 KB of work.
 
 ## Own menu (v1 step 6b)
 
