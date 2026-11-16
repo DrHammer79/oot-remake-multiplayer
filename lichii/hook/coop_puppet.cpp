@@ -24,6 +24,8 @@
 #include "coop/net/client.hpp"
 #include "coop/presence/presence.hpp"
 #include "coop_game_build.h"
+#include <coop/os.hpp>
+#include <mutex>
 
 namespace CoopPuppet {
 namespace {
@@ -34,8 +36,8 @@ namespace {
 // LICHII_COOP_OCARINA_SOUND=0 turns it off.
 bool OcarinaSoundOn() {
     static const bool on = [] {
-        const char* v = std::getenv("LICHII_COOP_OCARINA_SOUND");
-        return v == nullptr || std::string_view(v) != "0";
+        const auto v = coop::os::GetEnv("LICHII_COOP_OCARINA_SOUND");
+        return !v || *v != "0";
     }();
     return on;
 }
@@ -45,8 +47,8 @@ bool OcarinaSoundOn() {
 // puts them back, for a test that checks whether a later build can take them.
 bool WearsUnsafe() {
     static const bool on = [] {
-        const char* v = std::getenv("LICHII_COOP_PUPPET_HOOKSHOT");
-        return v != nullptr && v[0] != '\0' && std::string_view(v) != "0";
+        const auto v = coop::os::GetEnv("LICHII_COOP_PUPPET_HOOKSHOT");
+        return v && !v->empty() && *v != "0";
     }();
     return on;
 }
@@ -966,8 +968,8 @@ namespace {
 // when the piece is made. LICHII_COOP_HEAD_STATE=2 goes back to 2.
 std::uint64_t EquipState(std::uint32_t kind) {
     static const std::uint64_t head = [] {
-        const char* v = std::getenv("LICHII_COOP_HEAD_STATE");
-        return v != nullptr && std::string_view(v) == "2" ? std::uint64_t{2} : std::uint64_t{1};
+        const auto v = coop::os::GetEnv("LICHII_COOP_HEAD_STATE");
+        return v && *v == "2" ? std::uint64_t{2} : std::uint64_t{1};
     }();
     return kind == addr::kArmorKindFirst ? head : std::uint64_t{2};
 }
@@ -2278,7 +2280,7 @@ struct Received {
     Anim anim;
     std::uint32_t serial = 0;
 };
-std::mutex g_anim_mutex;
+coop::os::Mutex g_anim_mutex;
 // One entry per player number, 0 (unused) to kMaxPlayers (up to 16 players).
 constexpr std::size_t kNumbers = std::size_t{coop::protocol::kMaxPlayers} + 1;
 // jitter-3: by their sample time, taken at presence's shown time (coop_follow.h Delayed).
@@ -2354,7 +2356,7 @@ void OnEvent(const coop::net::Event& event) {
         }
         const auto now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
+                coop::os::SteadyClock::now().time_since_epoch())
                 .count());
         std::lock_guard lock(g_anim_mutex);
         auto& w = g_ocarina[note->player_number];
@@ -2366,7 +2368,7 @@ void OnEvent(const coop::net::Event& event) {
         }
         const auto now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
+                coop::os::SteadyClock::now().time_since_epoch())
                 .count());
         std::lock_guard lock(g_anim_mutex);
         auto& queue = g_sounds[sound->player_number];
@@ -2395,8 +2397,8 @@ void Configure(PlannerSettings settings, bool verbose, Director::Log log) {
         // docs/puppet.md, "Colour". LICHII_COOP_PUPPET_TINT: 0 to 1, or off.
         // The model tint darkens the whole Link (reports puppet-colors-2): off
         // unless asked for; the colour is the tunic (PlannerSettings::tunics).
-        const char* tint = std::getenv("LICHII_COOP_PUPPET_TINT");
-        g_director->SetTint(tint != nullptr ? CoopColors::StrengthFrom(tint) : 0.0f);
+        const auto tint = coop::os::GetEnv("LICHII_COOP_PUPPET_TINT");
+        g_director->SetTint(tint ? CoopColors::StrengthFrom(tint->c_str()) : 0.0f);
         g_planner = std::make_unique<Planner>(std::move(settings));
         g_configured = true;
     });
@@ -2482,7 +2484,7 @@ void Publish(std::uint64_t main_base, const std::optional<std::string>& scene,
     }
     const auto now_ms = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
+            coop::os::SteadyClock::now().time_since_epoch())
             .count());
     g_planner->SetFailedTunics(g_director->FailedTunics());
     auto input = g_planner->Plan(main_base, scene, position, local_event, remotes, now_ms, own_gear, own_drawn, own_color);
@@ -2499,7 +2501,7 @@ void StampDrawing(Input& input, std::uint64_t now_ms) {
     static bool camera_seen = false;           // the present thread only
     static std::uint64_t drawn_since_ms = 0;
     const auto camera = CoopCamera::Latest();
-    const bool drawn = camera && std::chrono::steady_clock::now() - camera->at <
+    const bool drawn = camera && coop::os::SteadyClock::now() - camera->at <
                                      std::chrono::milliseconds(250);
     if (!drawn) {
         drawn_since_ms = 0;

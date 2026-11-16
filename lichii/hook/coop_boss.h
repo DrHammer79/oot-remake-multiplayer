@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -265,7 +266,7 @@ private:
 
     std::map<std::uint8_t, Remote> remotes_;  // by player number
 
-    std::mutex inbox_mutex_;
+    coop::os::Mutex inbox_mutex_;
     std::vector<coop::protocol::BossRoom> inbox_;
 };
 

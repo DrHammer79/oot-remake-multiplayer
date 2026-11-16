@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <coop/os.hpp>
 #include <cstdint>
 
 namespace CoopPuppetOwn {
@@ -34,7 +35,7 @@ inline constexpr std::uint64_t kFreshMs = 500;
 
 inline std::uint64_t NowMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          coop::os::SteadyClock::now().time_since_epoch())
                                           .count());
 }
 

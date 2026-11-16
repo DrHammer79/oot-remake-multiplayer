@@ -2,6 +2,7 @@
 #include "coop_look.h"
 
 #include <cctype>
+#include <coop/os.hpp>
 #include <mutex>
 #include <utility>
 
@@ -211,7 +212,7 @@ Look FromWire(const std::vector<std::pair<std::uint8_t, std::uint32_t>>& parts) 
 // ---------------------------------------------------------------------------
 
 namespace {
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 Choice g_choice;           // guarded
 Apply g_apply;             // guarded
 std::function<void()> g_unpaused;   // guarded

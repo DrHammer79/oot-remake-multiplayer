@@ -2,13 +2,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <coop/os.hpp>
 #include <mutex>
 
 namespace CoopCamera {
 namespace {
 
 std::atomic<bool> g_wanted{false};
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 std::optional<Frame> g_pending;  // the frame the renderer is drawing
 std::optional<Frame> g_latest;   // the last finished one
 
@@ -40,7 +41,7 @@ void Publish(std::uint64_t frame, const float* clip_from_world, float width, flo
     f.height = height;
     f.y_down = y_down;
     f.frame = frame;
-    f.at = std::chrono::steady_clock::now();
+    f.at = coop::os::SteadyClock::now();
     std::lock_guard lock(g_mutex);
     if (g_pending && g_pending->frame != frame) {
         g_latest = g_pending;  // a new frame began: the last one is finished

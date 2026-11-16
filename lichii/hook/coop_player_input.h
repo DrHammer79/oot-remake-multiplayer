@@ -21,6 +21,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -183,7 +184,7 @@ public:
     std::uint64_t repeated() const { return repeated_.load(std::memory_order_relaxed); }
 
 private:
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::deque<Frame> frames_;
     Frame current_;
     std::atomic<std::uint64_t> merged_{0};
@@ -327,7 +328,7 @@ private:
     static constexpr std::size_t kLocalMax = 512;  // nobody takes them (not connected): no growth
     std::array<std::atomic<std::uint64_t>, kMaxPlayers + 1> actors_{};
     std::array<Queue, kMaxPlayers + 1> queues_;
-    std::mutex local_mutex_;
+    coop::os::Mutex local_mutex_;
     std::vector<Frame> local_;
     std::array<float, 4> local_sticks_{};
     std::uint64_t main_base_ = 0;

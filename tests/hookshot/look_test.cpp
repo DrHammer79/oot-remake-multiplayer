@@ -2,6 +2,7 @@
 // Your Link's look changed in the pause menu (hookshot/src/coop_look.h) and
 // its tunic rewritten in memory (coop_look_tunic.h).
 #include <doctest/doctest.h>
+#include <coop/os.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -1152,7 +1153,12 @@ TEST_CASE("look: coop.ini as Customize and Join write it keeps co-op on") {
         out << coop;
     }
     std::vector<std::string> errors;
-    const CoopHook::Settings s = CoopHook::LoadSettings(ini, errors);
+    {
+        // LoadSettings reads through coop::os, relative to the std backend's root.
+        const auto dir = std::filesystem::temp_directory_path().u8string();
+        coop::os::StdPlatform(std::string(reinterpret_cast<const char*>(dir.data()), dir.size()));
+    }
+    const CoopHook::Settings s = CoopHook::LoadSettings("coop_tests_module.ini", errors);
     std::filesystem::remove(ini);
     for (const auto& e : errors) {
         MESSAGE(e);

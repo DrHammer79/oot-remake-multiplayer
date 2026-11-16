@@ -25,6 +25,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -91,7 +92,7 @@ public:
 private:
     std::optional<CoopPuppet::Call> Next(CoopPuppet::Guest& guest, std::uint64_t main);
 
-    std::mutex mutex_;
+    coop::os::Mutex mutex_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> wanted_;  // (lift, until ms)
     std::uint64_t main_ = 0;
     std::vector<std::string> notes_;

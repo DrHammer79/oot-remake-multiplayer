@@ -2,6 +2,7 @@
 #include "coop_callers.h"
 
 #include <algorithm>
+#include <coop/os.hpp>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -10,7 +11,7 @@ namespace CoopCallers {
 namespace {
 
 struct Callers {
-    std::mutex mutex;
+    coop::os::Mutex mutex;
     std::vector<std::pair<int, Caller>> list;
     Caller first;               // empty: the puppet director
     std::size_t current = 0;    // who made the last call (the calc thread only)

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 
 #include "coop/net/client.hpp"
@@ -575,7 +576,7 @@ struct Written {
 };
 
 struct State {
-    std::mutex mutex;
+    coop::os::Mutex mutex;
     std::function<void(const std::string&)> log;
     bool debug = false;
     bool no_as = false;

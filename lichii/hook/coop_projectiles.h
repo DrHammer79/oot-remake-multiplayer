@@ -23,6 +23,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -238,7 +239,7 @@ private:
         Vec3 at{};
         std::uint64_t time_us = 0;
     };
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::deque<Blast> blasts_;
 };
 
@@ -256,7 +257,7 @@ public:
     std::vector<Vec3> Get() const;
 
 private:
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::vector<Vec3> at_;
 };
 Lures& TheLures();

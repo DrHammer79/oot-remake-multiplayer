@@ -763,7 +763,7 @@ std::optional<std::array<float, 2>> PlayerXZ(Core::System& system) {
 // (row 0). Nothing when there is no recent camera or it looks straight down.
 std::optional<Runner::Camera> CameraXZ() {
     const auto frame = CoopCamera::Latest();
-    if (!frame || Clock::now() - frame->at > std::chrono::milliseconds(500)) {
+    if (!frame || coop::os::SteadyClock::now() - frame->at > std::chrono::milliseconds(500)) {
         return std::nullopt;
     }
     const auto& m = frame->clip_from_world;

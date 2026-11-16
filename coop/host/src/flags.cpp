@@ -1,4 +1,5 @@
 #include "coop/host/flags.hpp"
+#include "coop/host/flags_file.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -131,7 +132,7 @@ std::optional<SharedFlags> SharedFlags::parse(std::string_view text, std::string
   return SharedFlags(std::move(keys));
 }
 
-std::optional<SharedFlags> SharedFlags::load(const std::filesystem::path& path,
+std::optional<SharedFlags> load_shared_flags(const std::filesystem::path& path,
                                              std::string* error) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -140,7 +141,7 @@ std::optional<SharedFlags> SharedFlags::load(const std::filesystem::path& path,
   }
   std::ostringstream text;
   text << file.rdbuf();
-  return parse(text.str(), error);
+  return SharedFlags::parse(text.str(), error);
 }
 
 bool SharedFlags::add(FlagKey key) {

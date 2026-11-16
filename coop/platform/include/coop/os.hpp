@@ -2,13 +2,16 @@
 // coop::os: the core's OS calls (threads, locks, time, memory, files, sockets, log) over the CoopPlatform table
 // (coop_platform.h, docs/platform.md). On PC the std backend fills the table; an ExeFS adapter fills its own.
 // No exceptions, no std::function, no virtuals: everything is a call through the installed table.
-// v1 step 1: nothing in the core uses it yet (step 4, os-wrap, swaps std::thread/mutex/chrono/fstream for it).
+// Since v1 step 4 (os-wrap) the core (coop_core) makes every OS call through it; tools/check_core.py keeps it so.
 #pragma once
 
 #include <coop_platform.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +34,23 @@ const CoopPlatform &Platform();
 // ---- time
 std::uint64_t NowUs();
 void SleepUs(std::uint64_t us);
+// A std::chrono clock over NowUs, so the core keeps its time_point and duration arithmetic. On PC it is
+// std::chrono::steady_clock (the std backend's now_us), in microseconds.
+struct SteadyClock {
+    using duration = std::chrono::microseconds;
+    using rep = duration::rep;
+    using period = duration::period;
+    using time_point = std::chrono::time_point<SteadyClock>;
+    static constexpr bool is_steady = true;
+    static time_point now() { return time_point(duration(static_cast<rep>(NowUs()))); }
+};
+
+// ---- environment: the variable's value; nothing when it is not set or the platform has no environment.
+std::optional<std::string> GetEnv(const char *name);
+
+// ---- random: fills `out` from the platform's random source. False when it has none or it failed: `out` is then
+// still filled, from the clock and the thread (fine for a name, not for a secret).
+bool RandomFill(void *out, std::size_t n);
 
 // ---- log
 void Log(const char *line);
@@ -46,7 +66,8 @@ bool WriteFile(const char *rel, const void *data, std::size_t n);
 // A path the platform takes: relative, '/' separators, no "..", no ':' or '\\', not empty.
 bool IsModPath(const char *rel);
 
-// ---- locks. Works with std::lock_guard / std::scoped_lock (lock/unlock).
+// ---- locks. Works with std::lock_guard / std::scoped_lock / std::unique_lock (lock/unlock/try_lock). Not
+// recursive. A failed mutex_new is logged once per mutex; such a mutex then gives no exclusion.
 class Mutex {
 public:
     Mutex();
@@ -56,10 +77,43 @@ public:
     bool ok() const { return handle_ != nullptr; }
     void lock();
     void unlock();
+    // True when it took the lock without waiting (std::try_to_lock). A table without mutex_try_lock waits instead.
+    bool try_lock();
 
 private:
+    friend class CondVar;
     void *handle_;
     const CoopPlatform *owner_;   // the table that made it frees it, even after a later Install
+};
+
+// ---- condition variables, waited on through a std::unique_lock of a Mutex made by the same table. A table without
+// the cond slots (or a mismatched mutex) waits by sleeping a millisecond at a time with the lock released.
+class CondVar {
+public:
+    CondVar();
+    ~CondVar();
+    CondVar(const CondVar &) = delete;
+    CondVar &operator=(const CondVar &) = delete;
+    void notify_one();
+    void notify_all();
+    // Waits at most `us` with the lock released; holds it again on return. False when the time ran out.
+    bool WaitUs(std::unique_lock<Mutex> &lock, std::uint64_t us);
+    // As std::condition_variable::wait_for with a predicate: true when `pred` held, false when the time ran out.
+    template <class Rep, class Period, class Pred>
+    bool wait_for(std::unique_lock<Mutex> &lock, const std::chrono::duration<Rep, Period> &d, Pred pred) {
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(d).count();
+        const std::uint64_t deadline = NowUs() + (us > 0 ? static_cast<std::uint64_t>(us) : 0);
+        while (!pred()) {
+            const std::uint64_t now = NowUs();
+            if (now >= deadline) return pred();
+            WaitUs(lock, deadline - now);
+        }
+        return true;
+    }
+
+private:
+    void *handle_ = nullptr;
+    const CoopPlatform *owner_;
 };
 
 // ---- threads. A plain function and argument (no captures cross the platform boundary). Join before destruction;
