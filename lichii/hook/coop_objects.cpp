@@ -319,13 +319,13 @@ constexpr u64 kLifeMax = 0x1c18;
 constexpr u64 kLifeCopy = 0x1ca8;  // life and max as last mirrored
 constexpr u64 kActorPlacement = 0x3d8;
 constexpr u64 kPlacementHash = 0x88;
-// Player report 111: an actor's room component (a pointer in the actor itself:
-// f_7102c1d740 reads it at actor +0x440 beside the component table at +0x270;
-// its +0x18 points back at the actor), and its fields (Objects::ExtraRooms).
-constexpr u64 kActorRoom = 0x440;
+// Player report 111: an actor's room part ([[actor+0x270]+0x460], its +0x18
+// points back at the actor; init f_7102ecb690): +0x117c the default room from
+// the placement (DefaultDungeonRoomIndex), +0x1174 the room in use (Objects::ExtraRooms).
+constexpr u64 kComponentsRoom = 0x460;
 constexpr u64 kRoomActor = 0x18;
-constexpr u64 kRoomDefault = 0x34;
-constexpr u64 kRoomNow = 0x38;
+constexpr u64 kRoomDefault = 0x117c;
+constexpr u64 kRoomNow = 0x1174;
 constexpr std::size_t kMaxWalk = 8192;
 
 // LICHII_COOP_OBJECTS_CHEAT: what it sets is in coop_cheat_items.h.
@@ -2424,7 +2424,7 @@ private:
     }
     // Player report 111 (LICHII_COOP_EXTRA_ROOM=1): extras whose dungeon room
     // was set from their placed enemy (once each), and the log lines said.
-    std::set<u64> extra_rooms_done_;
+    std::map<u64, u64> extra_rooms_done_;  // extra key -> when its room was copied (0: looked again)
     std::size_t extra_room_lines_ = 0;
     std::set<u64> extra_room_said_;  // (each extra's "not found" lines once)
     u64 actor_events_said_us_ = 0;
@@ -3076,20 +3076,47 @@ private:
         static const bool on = EnvText("LICHII_COOP_EXTRA_ROOM") == "1";
         return on;
     }
-    // Player report 111: an actor's dungeon room is kept by its room component
-    // ([[actor+0x270]+0x440], init f_7102ec5f80): +0x34 the room its
-    // placement's DefaultDungeonRoomIndex (instance parameter, mm3 0xe8a27e12)
-    // gave, else the one read at +0x460 -> +0x1174, else -1; +0x38 the room in
-    // use. An extra is made with no instance parameters, so a Deku Baba extra
-    // in room 7 never woke. Once made, it takes its placed enemy's two words
-    // (the game's own values, read from that actor), logged before and after.
+    // Player report 111: an actor's dungeon room is kept by its room part
+    // [[actor+0x270]+0x460] (its +0x18 points back at the actor). Its init
+    // f_7102ecb690 reads the placement's DefaultDungeonRoomIndex (instance
+    // parameter, mm3 0xe8a27e12, store [[actor+0x270]+0]+0x10) into +0x117c
+    // and, when below 60, into +0x1174 (the room in use); the other room part
+    // (f_7102ec5f80, [[actor+0x270]+0x440]: Babas have none) falls back to
+    // that +0x1174. An extra is made with no instance parameters, so its
+    // +0x117c/+0x1174 are not its placed enemy's: a Deku Baba extra in room 7
+    // never woke. Once made, it takes its placed enemy's two words (the game's
+    // own values, read from that actor), logged before, after and 5 s later.
     template <class Reader>
     void ExtraRooms(Reader& r) {
         if (!ExtraRoomOn()) {
             return;
         }
+        const u64 now = static_cast<u64>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+        auto room_part = [&r](u64 actor) -> u64 {
+            const u64 table = r.template Get<u64>(actor + kActorComponents).value_or(0);
+            const u64 part = table != 0 ? r.template Get<u64>(table + kComponentsRoom).value_or(0) : 0;
+            return part != 0 && r.template Get<u64>(part + kRoomActor).value_or(0) == actor ? part : 0;
+        };
+        auto word = [&r](u64 part, u64 off) {
+            return static_cast<std::int32_t>(r.template Get<u32>(part + off).value_or(~u32{0}));
+        };
         for (const auto& e : extras_.All()) {
-            if (e.address == 0 || e.source == 0 || extra_rooms_done_.contains(e.key)) {
+            if (e.address == 0 || e.source == 0) {
+                continue;
+            }
+            if (const auto done = extra_rooms_done_.find(e.key); done != extra_rooms_done_.end()) {
+                // One later look: does the game keep the copied room, or set its own?
+                if (done->second != 0 && now - done->second >= 5000) {
+                    done->second = 0;
+                    const u64 part = room_part(e.address);
+                    if (part != 0 && extra_room_lines_ < 60) {
+                        ++extra_room_lines_;
+                        LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} 5 s later: room {} (default {}) (report 111)",
+                                 e.address, e.name, word(part, kRoomNow), word(part, kRoomDefault));
+                    }
+                }
                 continue;
             }
             u64 source = 0;
@@ -3100,66 +3127,41 @@ private:
                 }
             }
             if (source == 0) {
-                if (extra_room_said_.insert(e.key * 4 + 0).second && extra_room_lines_ < 40) {
+                if (extra_room_said_.insert(e.key * 4 + 0).second && extra_room_lines_ < 60) {
                     ++extra_room_lines_;
                     LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: its placed enemy not seen here yet (report 111)",
                              e.address, e.name, e.source);
                 }
                 continue;  // (its placed enemy not loaded here: next walk)
             }
-            const u64 src_table = r.template Get<u64>(source + kActorComponents).value_or(0);
-            const u64 dst_table = r.template Get<u64>(e.address + kActorComponents).value_or(0);
-            u64 src_room = r.template Get<u64>(source + kActorRoom).value_or(0);
-            u64 dst_room = r.template Get<u64>(e.address + kActorRoom).value_or(0);
-            if (src_room != 0 && r.template Get<u64>(src_room + kRoomActor).value_or(0) != source) {
-                src_room = 0;  // (not the room component: never written)
-            }
-            if (dst_room != 0 && r.template Get<u64>(dst_room + kRoomActor).value_or(0) != e.address) {
-                dst_room = 0;
-            }
-            if (src_room == 0 || dst_room == 0) {
-                if (extra_room_said_.insert(e.key * 4 + 1).second && extra_room_lines_ < 40) {
+            const u64 src_part = room_part(source);
+            const u64 dst_part = room_part(e.address);
+            if (src_part == 0 || dst_part == 0) {
+                if (extra_room_said_.insert(e.key * 4 + 1).second && extra_room_lines_ < 60) {
                     ++extra_room_lines_;
-                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room component at actor+{:#x} (extra -> {:#x}, "
-                                   "placed {:#x} -> {:#x}, tables {:#x} {:#x}) (report 111)",
-                             e.address, e.name, kActorRoom, dst_room, source, src_room, dst_table, src_table);
-                    // Which components of the placed enemy point back at it (+0x18), and their +0x34/+0x38.
-                    for (u64 off = 0; src_table != 0 && off < 0x800 && extra_room_lines_ < 40; off += 8) {
-                        const u64 comp = r.template Get<u64>(src_table + off).value_or(0);
-                        if (comp == 0 || r.template Get<u64>(comp + 0x18).value_or(0) != source) {
-                            continue;
-                        }
-                        const u64 dcomp = dst_table ? r.template Get<u64>(dst_table + off).value_or(0) : 0;
-                        ++extra_room_lines_;
-                        LOG_INFO(Core, "coop: difficulty:   table+{:#x}: placed +0x34 {} +0x38 {}; extra +0x34 {} +0x38 {} "
-                                       "(report 111)",
-                                 off, static_cast<std::int32_t>(r.template Get<u32>(comp + kRoomDefault).value_or(0)),
-                                 static_cast<std::int32_t>(r.template Get<u32>(comp + kRoomNow).value_or(0)),
-                                 dcomp ? static_cast<std::int32_t>(r.template Get<u32>(dcomp + kRoomDefault).value_or(0)) : 0,
-                                 dcomp ? static_cast<std::int32_t>(r.template Get<u32>(dcomp + kRoomNow).value_or(0)) : 0);
-                    }
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room part at table+{:#x} (extra -> {:#x}, "
+                                   "placed {:#x} -> {:#x}) (report 111)",
+                             e.address, e.name, kComponentsRoom, dst_part, source, src_part);
                 }
                 continue;
             }
-            const u32 src_default = r.template Get<u32>(src_room + kRoomDefault).value_or(~u32{0});
-            const u32 src_now = r.template Get<u32>(src_room + kRoomNow).value_or(~u32{0});
-            const u32 dst_default = r.template Get<u32>(dst_room + kRoomDefault).value_or(~u32{0});
-            const u32 dst_now = r.template Get<u32>(dst_room + kRoomNow).value_or(~u32{0});
-            extra_rooms_done_.insert(e.key);
-            const bool write = (src_default >> 31) == 0 && (dst_default != src_default || dst_now != src_now);
+            const std::int32_t src_default = word(src_part, kRoomDefault);
+            const std::int32_t src_now = word(src_part, kRoomNow);
+            const std::int32_t dst_default = word(dst_part, kRoomDefault);
+            const std::int32_t dst_now = word(dst_part, kRoomNow);
+            extra_rooms_done_[e.key] = now == 0 ? 1 : now;
+            // The game's own rule (f_7102ecb690): a room is 0..59; the default only counts when it is one.
+            const bool write = src_now >= 0 && src_now < 60 && (dst_default != src_default || dst_now != src_now);
             if (write) {
-                memory_->Write32(dst_room + kRoomDefault, src_default);
-                if ((src_now >> 31) == 0) {
-                    memory_->Write32(dst_room + kRoomNow, src_now);
-                }
+                memory_->Write32(dst_part + kRoomDefault, static_cast<u32>(src_default));
+                memory_->Write32(dst_part + kRoomNow, static_cast<u32>(src_now));
             }
-            if (extra_room_lines_ < 40) {
+            if (extra_room_lines_ < 60) {
                 ++extra_room_lines_;
-                LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: room {} / {} (its placed enemy {:#x}: {} / {}){} "
-                               "(report 111)",
-                         e.address, e.name, e.source, static_cast<std::int32_t>(dst_default),
-                         static_cast<std::int32_t>(dst_now), source, static_cast<std::int32_t>(src_default),
-                         static_cast<std::int32_t>(src_now), write ? ": set to its placed enemy's" : "");
+                LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: room {} (default {}), its placed enemy {:#x}: "
+                               "room {} (default {}){} (report 111)",
+                         e.address, e.name, e.source, dst_now, dst_default, source, src_now, src_default,
+                         write ? ": set to its placed enemy's" : "");
             }
         }
     }
