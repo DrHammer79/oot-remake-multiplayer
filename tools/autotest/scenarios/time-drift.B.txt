@@ -17,6 +17,8 @@ press A
 wait 300
 press A                 # loads the save, then the warp
 wait 2400               # the save loads, then the warp lands (about 30 s)
+place -5.78 85.19 44.20   # a warp on hookshot ignores the start name and lands at the map default (as 91cc9dce): place at the start point (lichii/hook/coop_start_points.inc) Kakariko_WellSide
+wait 60
 mark day
 wait 4800               # the guest drifts 120 s after joining (joined at boot), then is nudged back
 mark nudged

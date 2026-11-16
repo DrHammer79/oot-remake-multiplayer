@@ -39,7 +39,7 @@ mark after
 give PouchData.Item_ZeldaLetter.StockNum
 wait 60
 give IsGet.Item_ZeldaLetter
-wait 600                   # B's "before" walk to the shut gate and back
+wait 840                   # B's "before" walk to the shut gate and back (+240: B's place at the start point)
 mark a-letter
 place -46.30 109.90 -10.20  # 1.7 m from the guard, village side
 wait 120

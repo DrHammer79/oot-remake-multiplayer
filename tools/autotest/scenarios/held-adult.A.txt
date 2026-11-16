@@ -24,6 +24,8 @@ wait 300
 press A
 wait 2400
 mark after
+place -5.78 85.19 44.20   # a warp on hookshot ignores the start name and lands at the map default (as 91cc9dce): place at the start point (lichii/hook/coop_start_points.inc) Kakariko_WellSide
+wait 240
 give bow
 give hookshot
 give PouchData.Item_Hammer.StockNum

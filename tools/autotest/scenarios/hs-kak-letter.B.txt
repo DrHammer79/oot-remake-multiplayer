@@ -13,6 +13,8 @@ wait 300
 press A
 wait 2400
 mark after
+place -41.20 109.99 -16.00   # a warp on hookshot ignores the start name and lands at the map default (as 91cc9dce): place at the start point (lichii/hook/coop_start_points.inc) Kakariko_MountainTrailSide
+wait 240
 give PouchData.Item_ZeldaLetter.StockNum
 wait 60
 give IsGet.Item_ZeldaLetter

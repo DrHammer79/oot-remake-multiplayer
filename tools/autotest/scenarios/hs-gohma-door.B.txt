@@ -14,6 +14,8 @@ wait 300
 press A
 wait 2400
 mark b-landed
+place 0.22 101.00 14.71   # a warp on hookshot ignores the start name and lands at the map default (as 91cc9dce): place at the start point (lichii/hook/coop_start_points.inc) InsideTheDekuTree Entrance
+wait 240
 # The kit saves have the Deku Tree beaten (issue 178, gohma-door-b): Gohma_DefeatBoss and
 # Dm_Deku_BossOut were cleared, but the trap event, the intro and the room's battle state were
 # still marked as played, so the boss room's one-shot trigger (Area_6c3c -> EventRequestActor
