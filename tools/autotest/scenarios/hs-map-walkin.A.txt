@@ -24,7 +24,8 @@ press A
 wait 300
 press A
 wait 2400
-goto -50.0 -24.5 0.5 600   # toward the cavern entrance
+place -44.3 109.72 -17.63  # the cave-side start (StartPos MountainTrail_DodongoCavernSide): a warp on hookshot ignores the start name and lands at the map default (-38 93 57, run 20261115-150314: the walk hit a wall)
+wait 240
 goto -55.3 -31.3 0.5 600   # into the entrance: the scene change
 wait 2400
 mark mini-before
