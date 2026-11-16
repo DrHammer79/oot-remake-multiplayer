@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_pickups.h"
 
+#include <coop/os.hpp>
 #include <mutex>
 #include <set>
 
@@ -11,7 +12,7 @@ namespace {
 constexpr std::size_t kMaxKeys = 4096;
 
 struct Noted {
-    std::mutex mutex;
+    coop::os::Mutex mutex;
     std::set<std::uint64_t> known;
     std::vector<std::uint64_t> order;
 };

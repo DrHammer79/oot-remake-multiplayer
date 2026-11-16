@@ -34,7 +34,7 @@
 // While not connected frame() reads nothing and sends nothing; changes the
 // game made meanwhile are found at the first connected frame.
 
-#include <condition_variable>
+#include <coop/os.hpp>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -253,8 +253,8 @@ class Session {
   PlayerReader::DrawnState drawn_state_{};  // frame(GameMemory&)'s readers share it
 
   // Guarded by net_mutex_.
-  std::mutex net_mutex_;
-  std::condition_variable wake_;
+  coop::os::Mutex net_mutex_;
+  coop::os::CondVar wake_;
   bool woken_ = false;
   net::Client& client_;
   std::vector<Outbound> outbox_;
@@ -264,7 +264,7 @@ class Session {
   bool sharing_ = false;  // set once, before any thread starts
 
   // Guarded by presence_mutex_.
-  std::mutex presence_mutex_;
+  coop::os::Mutex presence_mutex_;
   presence::Presence presence_;
 };
 

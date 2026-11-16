@@ -2,6 +2,8 @@
 // OneWayKeeper (minimap-b): a guard for a dungeon's map and compass with no session.
 #include <doctest/doctest.h>
 
+#include <ostream>  // doctest prints std::string_view values through it
+
 #include <algorithm>
 #include <map>
 #include <optional>

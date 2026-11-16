@@ -86,6 +86,33 @@ int coop_plat_file_write(const char *, const void *buf, size_t n) {
     return 0;
 }
 void coop_plat_log(const char *line) { Note("log"), g.log = line; }
+int coop_plat_mutex_try_lock(void *) { return Note("mutex_try_lock"), 0; }   // "another thread holds it"
+int coop_plat_random_fill(void *out, size_t n) {
+    Note("random_fill");
+    std::memset(out, 0x5a, n);
+    return 0;
+}
+int g_cond_dummy = 0;
+void *coop_plat_cond_new(void) { return Note("cond_new"), &g_cond_dummy; }
+int coop_plat_cond_wait_us(void *, void *, uint64_t) { return Note("cond_wait_us"), 1; }
+void coop_plat_cond_notify_one(void *) { Note("cond_notify_one"); }
+void coop_plat_cond_notify_all(void *) { Note("cond_notify_all"); }
+void coop_plat_cond_free(void *) { Note("cond_free"); }
+}
+
+namespace {
+// Made before any Install (static init), as the core's global locks are: they must use the adapter's functions
+// after an Install too, so a wait and its notify never land on two backends (review-v1-oswrap's trap).
+coop::os::Mutex g_early_mutex;
+coop::os::CondVar g_early_cond;
+
+int g_table_cond_calls = 0;
+void TableNotify(void *) { ++g_table_cond_calls; }
+int TableWait(void *, void *, uint64_t) { return ++g_table_cond_calls, 0; }
+int TableTryLock(void *) { return ++g_table_cond_calls, 1; }
+}  // namespace
+
+extern "C" {
 }
 
 TEST_CASE("payload build: before Install, Platform() is the adapter's functions with no game slots") {
@@ -186,4 +213,40 @@ TEST_CASE("payload build: an installed table gives game slots, but the OS calls 
     bad.log = nullptr;
     CHECK(coop::os::Install(&bad) == coop::os::InstallError::kMissingSlot);
     CHECK(coop::os::Platform().kind == COOP_PLATFORM_KIND_EXEFS_SWITCH);
+}
+
+TEST_CASE("payload build: locks and condition variables made before Install stay on the adapter's functions") {
+    static CoopPlatform t;
+    t = coop::os::Platform();
+    t.cond_notify_one = &TableNotify;   // a table whose cond and try_lock slots point elsewhere
+    t.cond_wait_us = &TableWait;
+    t.mutex_try_lock = &TableTryLock;
+    REQUIRE(coop::os::Install(&t) == coop::os::InstallError::kNone);
+    g.Clear();
+    g_table_cond_calls = 0;
+    {
+        std::unique_lock<coop::os::Mutex> lock(g_early_mutex);
+        CHECK(g_early_cond.WaitUs(lock, 5000));   // the fake says "woken"
+    }
+    g_early_cond.notify_one();
+    coop::os::CondVar late;
+    late.notify_all();
+    CHECK(g.Has("cond_wait_us"));
+    CHECK(g.Has("cond_notify_one"));
+    CHECK(g.Has("cond_notify_all"));
+    CHECK_FALSE(g.Has("sleep_us"));   // a real wait, not the sleep fallback
+    CHECK(g_table_cond_calls == 0);
+}
+
+TEST_CASE("payload build: try_lock does not block, random comes from the adapter, no environment") {
+    g.Clear();
+    coop::os::Mutex m;
+    CHECK_FALSE(m.try_lock());   // the fake says another thread holds it
+    CHECK(g.Has("mutex_try_lock"));
+    CHECK_FALSE(g.Has("mutex_lock"));
+    unsigned char bytes[8] = {};
+    CHECK(coop::os::RandomFill(bytes, sizeof bytes));
+    CHECK(bytes[0] == 0x5a);
+    CHECK(bytes[7] == 0x5a);
+    CHECK_FALSE(coop::os::GetEnv("PATH").has_value());
 }

@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -1135,7 +1136,7 @@ private:
     BlastNear blast_near_;
     std::size_t blast_drops_ = 0;
 
-    mutable std::mutex inbox_mutex_;
+    mutable coop::os::Mutex inbox_mutex_;
     std::vector<coop::protocol::Message> inbox_;
     bool forget_owners_ = false;  // guarded by inbox_mutex_
 };

@@ -1,6 +1,8 @@
 // Tests for the shared Threads of Time quests (lichii/hook/coop_quests.cpp, issue 193).
 #include <doctest/doctest.h>
 
+#include <ostream>  // doctest prints std::string_view values through it
+
 #include <map>
 #include <set>
 #include <string>

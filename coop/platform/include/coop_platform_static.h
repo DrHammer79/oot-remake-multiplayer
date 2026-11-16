@@ -51,6 +51,15 @@ int coop_plat_file_write(const char *rel, const void *buf, size_t n);
 /* Log. */
 void coop_plat_log(const char *line);
 
+/* Appended by v1 step 4 (os-wrap); env_get is optional, so a payload has none (coop::os::GetEnv gives nothing). */
+int coop_plat_mutex_try_lock(void *mutex);
+int coop_plat_random_fill(void *out, size_t n);
+void *coop_plat_cond_new(void);
+int coop_plat_cond_wait_us(void *cond, void *mutex, uint64_t us);
+void coop_plat_cond_notify_one(void *cond);
+void coop_plat_cond_notify_all(void *cond);
+void coop_plat_cond_free(void *cond);
+
 #ifdef __cplusplus
 }
 #endif

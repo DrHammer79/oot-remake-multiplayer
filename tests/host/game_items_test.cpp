@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <map>
+#include <ostream>   // doctest prints a string_view (CAPTURE) through it
 #include <set>
 #include <string>
 #include <string_view>

@@ -6,7 +6,9 @@ compiles the same files in its core, tools/check_core_flags.py), so none of its 
   - an OS header (windows.h and friends, POSIX system headers),
   - an emulator header (core/, common/, video_core/, Qt) or a Hookshot/Longshot one (hos_coop_*, Vulkan, SDL),
   - an #if on LICHII_COOP or COOP_HOOKSHOT (the library is built without them, so such a block would
-    silently leave the module).
+    silently leave the module),
+  - an OS call the core makes through coop::os (coop/os.hpp) since v1 step 4, os-wrap (OS_CALLS: std mutexes,
+    condition variables and threads; their headers <thread>, <condition_variable>, ...).
 A hook file listed in coop_core must also not be listed in lichii/hook/core.cmake (it would be built twice).
 
 Usage: python tools/check_core.py [--root REPO]   (exit 1 and one line per problem when it fails)
@@ -33,6 +35,19 @@ FORBIDDEN = [
     (re.compile(r'(^|/)hos_coop'), 'a Hookshot/Longshot ABI header'),
     (re.compile(r'^(vulkan|SDL2?|SDL3)/|^vulkan', re.I), 'a renderer/window header (Hookshot)'),
     (re.compile(r'^fmt/'), 'fmt (the emulator\'s logging)'),
+    (re.compile(r'^(thread|condition_variable|shared_mutex|future|stop_token)$'), 'an OS header (std threads)'),
+    (re.compile(r'^(filesystem|fstream)$'), 'an OS header (std files: coop::os::ReadFile / WriteFile)'),
+]
+
+# OS calls the core makes through coop::os (coop/os.hpp) since v1 step 4 (os-wrap): (pattern, what to use instead).
+OS_CALLS = [
+    (re.compile(r'\bstd::(recursive_|timed_|recursive_timed_|shared_|shared_timed_)?mutex\b'), 'coop::os::Mutex'),
+    (re.compile(r'\bstd::(condition_variable(_any)?|thread|jthread|this_thread)\b'), 'coop::os::Thread / SleepUs'),
+    (re.compile(r'\b(steady_clock|system_clock|high_resolution_clock|utc_clock|file_clock)\b'),
+     'coop::os::SteadyClock / NowUs'),
+    (re.compile(r'\b(getenv|_dupenv_s|_wgetenv|secure_getenv|setenv|putenv|_putenv)\b'), 'coop::os::GetEnv'),
+    (re.compile(r'\brandom_device\b'), 'coop::os::RandomFill'),
+    (re.compile(r'\bstd::filesystem\b|\b[io]?fstream\b|\b_?w?fopen(_s)?\b'), 'coop::os::ReadFile / WriteFile'),
 ]
 
 
@@ -92,6 +107,11 @@ def check(root: Path) -> list[str]:
             if BUILD_MACRO.search(m.group(2)):
                 problems.append(f'{where}: #{m.group(1)} on {BUILD_MACRO.search(m.group(2)).group(1)}'
                                 ' (coop_core is built without it)')
+        code = INCLUDE.sub('', text)   # the includes are checked below (FORBIDDEN); line numbers stay
+        for rx, instead in OS_CALLS:
+            for m in rx.finditer(code):
+                line = code.count('\n', 0, m.start()) + 1
+                problems.append(f'{where}:{line}: {m.group(0)}: an OS call; the core uses {instead} (coop/os.hpp)')
         for kind, name in INCLUDE.findall(text):
             bad = next((why for rx, why in FORBIDDEN if rx.search(name)), None)
             if bad:

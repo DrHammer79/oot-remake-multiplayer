@@ -27,8 +27,19 @@ one plain C table, `CoopPlatform`, that the platform's adapter fills.
   Hookshot's patches), `pad_sticks` (sticks come through `hos_coop_pad`), `draw_2d` (step 6) and voice (the module's own
   exports). The compat runtime (`hookshot/compat/coop_runtime.h`, the emulator API slice the hook files use) and the
   module's game calls now go through this table; tests in `tests/hookshot/hs_platform_test.cpp`.
-- Still to come: step 4 (os-wrap) moves the core's `std::thread`/`std::mutex`/`chrono`/`fstream` onto `coop::os`. The
-  `coop_core_*` entry points are declared for review of their shape and defined by core-lib-split.
+- Step 4 (os-wrap) moves the core's `std::mutex`/`steady_clock`/`fstream`/`getenv`/`random_device` onto `coop::os`
+  (see "os-wrap (step 4)" below). The `coop_core_*` entry points are declared for review of their shape and defined by
+  later steps.
+- Slots appended after the first table (step 4): `mutex_try_lock` (for `std::unique_lock` with `std::try_to_lock`),
+  `env_get` (optional: consoles have no environment) and `random_fill` (keys, names). The version stays 1: the table
+  grows at its end, `Install` checks a required slot only when the table's `size` reaches it, and `coop::os` does
+  without one an older table lacks (`try_lock` waits; `GetEnv` answers nothing; `RandomFill` fills from the clock,
+  thread and a call count and answers false). `coop::os::SteadyClock` is a `std::chrono` clock over `now_us`, so the
+  core keeps its `time_point`/duration code; on the std backend it has `std::chrono::steady_clock`'s epoch.
+- Condition variables (`cond_new`, `cond_wait_us`, `cond_notify_one`/`_all`, `cond_free`, appended with them) for
+  `coop::host::Session`'s network wait: `coop::os::CondVar` waits through a `std::unique_lock<coop::os::Mutex>` with
+  `wait_for(lock, duration, pred)` as `std::condition_variable` has it; without the slots it sleeps a millisecond at a
+  time with the lock released.
 - Changes from the design sketch: `thread_start` returns a handle and `thread_join` takes it; `thread_id`,
   `mutex_free`, `sleep_us` and `sock_local` were added; the memory slots are `mem_alloc`/`mem_free` (a CRT may define
   `free` as a macro); sockets are opened by kind (`COOP_SOCK_UDP4`/`6`) and `sock_recvfrom` answers
@@ -66,12 +77,43 @@ a library outside Fritchii's `src/` would lose Fritchii's flags for core (`-fwra
   pads/take/read/write/log hooks, `CoopLocalNet`'s Send/Log, `CoopWorld`'s ReadWord (`std::function`). Inside the
   core they are fine; at the payload boundary they become `CoopPlatform` slots (step 5).
 
+## os-wrap (step 4)
+
+The core (`coop_core`'s files and every header they reach) makes no OS call of its own: it goes through `coop::os`, so
+an adapter that fills `CoopPlatform` (Longshot today, an ExeFS code mod later) is all it needs. On PC the std backend
+does what the core did itself, so Longshot and the emulator behave as before.
+
+| Area | Was | Now |
+|---|---|---|
+| locks | `std::mutex` (incl. `coop::host::Session`, `coop_local.h`) | `coop::os::Mutex`; same `std::lock_guard`/`std::unique_lock` code |
+| waits | `std::condition_variable` (`Session::wait`) | `coop::os::CondVar` |
+| time | `std::chrono::steady_clock` | `coop::os::SteadyClock` (same epoch on PC) |
+| environment | `getenv` / `_dupenv_s` | `coop::os::GetEnv` |
+| random | `std::random_device` | `coop::os::RandomFill` |
+| files | `std::filesystem` + `fstream` (coop.ini, player-key.txt) | `coop::os::ReadFile`/`WriteFile`, relative to the co-op's folder |
+
+- Files: `CoopHook::LoadSettings(kSettingsFile, ...)` and `LoadPlayerKey(kPlayerKeyFile, ...)` take names relative to
+  the co-op's folder. On Longshot that is the game folder (the std backend's root, set by the module's platform table;
+  the same folder as before); the emulator points the std backend's root at its config folder before it reads them.
+  `coop::host::SharedFlags::load` became `load_shared_flags` in `coop/host/flags_file.hpp`, which the core does not
+  include (the emulator's `LICHII_COOP_FLAGS` file and tests use it).
+- `tools/check_core.py` refuses each converted family in the core: `std::mutex` and the other std mutexes,
+  `std::condition_variable`, `std::thread`/`this_thread`, the std clocks, `getenv`/`_dupenv_s`/`setenv`,
+  `std::random_device`, `std::filesystem`/`fstream`/`fopen`, and the headers `<thread>`, `<condition_variable>`,
+  `<shared_mutex>`, `<future>`, `<filesystem>`, `<fstream>`. `<mutex>` stays allowed (`std::lock_guard`), and so do
+  `<chrono>` durations and seeded game RNGs (`std::mt19937`).
+- Not in this step: the coop/* libraries' own sources outside what the core reaches (`coop_net` is ENet over the OS
+  sockets until the ExeFS adapter's socket backend, step 8; `coop/host`'s save transfer and map-drop log files,
+  `coop_voice`), and the adapters' own files (`coop_hook.cpp`, `coop_hookshot.cpp`, ...), which are platform code.
+
 ## The payload build (step 8, COOP_PLATFORM_STATIC)
 A payload that a recompiler lifts (the ExeFS module, subsdk1) may make no call through a function pointer, and
 `CoopPlatform` is a table of them. So the payload builds `coop/platform/src/os.cpp` with `COOP_PLATFORM_STATIC`: every
 coop::os call of a required slot is then a direct call of the adapter's `coop_plat_<slot>` function
 (`coop_platform_static.h`, each checked at compile time to have its slot's type). The adapter fills its table's
-required slots with the same functions; the table still gives the optional game slots, `kind` and `main_base`. Before
-any `Install`, `Platform()` is a table of those functions with no game slots; the std backend (`os_std.cpp`) is not in
+required slots with the same functions; the table still gives the optional game slots, `kind` and `main_base`. One backend from the first call: an object made
+before `Install` (a static `Mutex` or `CondVar`) uses the same functions as one made after it, so a wait and its
+notify cannot land on different backends. `GetEnv` returns nothing in a payload (`env_get` is an optional, table-only slot).
+Before any `Install`, `Platform()` is a table of those functions with no game slots; the std backend (`os_std.cpp`) is not in
 a payload. PC and the Longshot/Hookshot module do not define the flag and keep the table. Test:
 `coop_platform_static_tests` (tests/platform/static_os_test.cpp) builds os.cpp with the flag over fake adapter functions.

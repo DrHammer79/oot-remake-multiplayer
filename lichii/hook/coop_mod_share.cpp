@@ -5,6 +5,7 @@
 #include "coop_mod_share.h"
 
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <utility>
 #include <variant>
@@ -23,7 +24,7 @@ std::string Short(const proto::ModEntry& e) {
 }
 
 struct Glue {
-    std::mutex mutex;
+    coop::os::Mutex mutex;
     Provider provider;
     bool connected = false;
     bool hosting = false;

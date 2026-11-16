@@ -5,6 +5,7 @@
 
 #include <array>
 #include <chrono>
+#include <coop/os.hpp>
 #include <cstdint>
 #include <optional>
 
@@ -19,7 +20,7 @@ struct Frame {
     // viewport and window origin of the draw.
     bool y_down = false;
     std::uint64_t frame = 0;  // the renderer's frame counter
-    std::chrono::steady_clock::time_point at{};
+    coop::os::SteadyClock::time_point at{};
 };
 
 // Turned on by the hook while Ocarina is running with co-op on, so the

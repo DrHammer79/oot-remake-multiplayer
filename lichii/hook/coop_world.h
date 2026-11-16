@@ -15,6 +15,7 @@
 #include <functional>
 #include <deque>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -749,7 +750,7 @@ private:
     std::optional<coop::protocol::Vec3> player_;  // our Link at the last Tick
     SignProbe probe_;
 
-    mutable std::mutex inbox_mutex_;
+    mutable coop::os::Mutex inbox_mutex_;
     std::vector<coop::protocol::Message> inbox_;
 };
 // Research, not sync (docs/world.md, "Field grass"): the grass that is not an
@@ -813,7 +814,7 @@ private:
         Slot slot;
     };
 
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     // Look's side
     std::uint64_t scene_address_ = 0;
     std::optional<std::uint64_t> last_index_;
