@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <array>
 #include <optional>
 #include <set>
 #include <string>
@@ -110,11 +109,6 @@ struct Copy {
     // Always the game's own actor of that name, never the pack's stand-in:
     // the shootable the game makes has the effect user the key belongs to.
     bool real = false;
-    // Player report 111: create argument +0x60..+0x80 as the game's placement
-    // creator (main+0x109f110) filled it for the placed enemy this one is an
-    // extra of (its instance parameters, DefaultDungeonRoomIndex among them).
-    // Unset: 0, as before.
-    std::optional<std::array<std::uint64_t, 4>> placed_words;
 };
 
 class Sync {

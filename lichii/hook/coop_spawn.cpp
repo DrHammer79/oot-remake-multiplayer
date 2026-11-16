@@ -1538,9 +1538,6 @@ std::optional<CoopPuppet::Call> Director::Next(CoopPuppet::Guest& guest, std::ui
         std::memcpy(arg.data() + 0x0c, rotation.data(), 36);
         std::memcpy(arg.data() + 0x30, scale.data(), 12);
         std::memcpy(arg.data() + 0x40, &create_default, 8);
-        if (copy.placed_words) {  // report 111: the placed enemy's own create words
-            std::memcpy(arg.data() + 0x60, copy.placed_words->data(), 32);
-        }
         arg[0x98] = 1;
         // (issue 166: Copy::real is the game's own actor whatever the pack has)
         std::string_view stand_in = copy.real || no_stand_in_.count(copy.actor) != 0 ? std::string_view{}
