@@ -4,7 +4,7 @@
 //
 // - Threads: nn::os threads with stacks from our arena, priority nn::os's default, the process's default core unless
 //   one is asked for.
-// - Locks: nn::os mutexes (not recursive) in our arena.
+// - Locks: nn::os mutexes (not recursive) and condition variables in our arena; random bytes from the system.
 // - Time: the system tick over the system's own tick frequency (read, never assumed).
 // - Memory: our own arena (arena.h) in this module's bss, COOP_ARENA_BYTES big, never the game's heap.
 // - Files: the SD card, mounted as "coopsd" on first use, under config/oot-coop/ (on an emulator its sdmc folder).
@@ -211,6 +211,42 @@ COOP_EXPORT void coop_plat_mutex_free(void* mutex) {
     if (!mutex) return;
     nn::os::FinalizeMutex(static_cast<nn::os::MutexType*>(mutex));
     coop_plat_mem_free(mutex);
+}
+COOP_EXPORT int coop_plat_mutex_try_lock(void* mutex) {
+    return nn::os::TryLockMutex(static_cast<nn::os::MutexType*>(mutex)) ? 1 : 0;
+}
+
+// ---- condition variables (with a mutex from coop_plat_mutex_new)
+COOP_EXPORT void* coop_plat_cond_new(void) {
+    void* c = coop_plat_mem_alloc(nn::os::kCondTypeBytes, 16);
+    if (c) nn::os::InitializeConditionVariable(static_cast<nn::os::ConditionVariableType*>(c));
+    return c;
+}
+COOP_EXPORT int coop_plat_cond_wait_us(void* cond, void* mutex, uint64_t us) {
+    constexpr uint64_t kMaxUs = uint64_t{1} << 40;
+    const nn::TimeSpan timeout{static_cast<long>((us < kMaxUs ? us : kMaxUs) * 1000u)};
+    return nn::os::TimedWaitConditionVariable(static_cast<nn::os::ConditionVariableType*>(cond),
+                                              static_cast<nn::os::MutexType*>(mutex), timeout) == nn::os::kCondTimedOut
+               ? 0
+               : 1;
+}
+COOP_EXPORT void coop_plat_cond_notify_one(void* cond) {
+    nn::os::SignalConditionVariable(static_cast<nn::os::ConditionVariableType*>(cond));
+}
+COOP_EXPORT void coop_plat_cond_notify_all(void* cond) {
+    nn::os::BroadcastConditionVariable(static_cast<nn::os::ConditionVariableType*>(cond));
+}
+COOP_EXPORT void coop_plat_cond_free(void* cond) {
+    if (!cond) return;
+    nn::os::FinalizeConditionVariable(static_cast<nn::os::ConditionVariableType*>(cond));
+    coop_plat_mem_free(cond);
+}
+
+// ---- random (the system's own source)
+COOP_EXPORT int coop_plat_random_fill(void* out, size_t n) {
+    if (!out) return -1;
+    if (n) nn::os::GenerateRandomBytes(out, n);
+    return 0;
 }
 
 // ---- time

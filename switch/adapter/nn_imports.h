@@ -47,6 +47,26 @@ void FinalizeMutex(MutexType* mutex);              // _ZN2nn2os13FinalizeMutexEP
 void LockMutex(MutexType* mutex);                  // _ZN2nn2os9LockMutexEPNS0_9MutexTypeE
 void UnlockMutex(MutexType* mutex);                // _ZN2nn2os11UnlockMutexEPNS0_9MutexTypeE
 
+bool TryLockMutex(MutexType* mutex);               // _ZN2nn2os12TryLockMutexEPNS0_9MutexTypeE
+
+// Condition variables (with an nn::os mutex the caller holds). TimedWait returns ConditionVariableStatus:
+// 0 timed out, 1 woken (as Atmosphere's os::ConditionVariableStatus).
+struct ConditionVariableType;  // opaque: we only hold kCondTypeBytes for it
+inline constexpr size_t kCondTypeBytes = 0x40;
+inline constexpr int kCondTimedOut = 0;
+// _ZN2nn2os27InitializeConditionVariableEPNS0_21ConditionVariableTypeE
+void InitializeConditionVariable(ConditionVariableType* cond);
+// _ZN2nn2os25FinalizeConditionVariableEPNS0_21ConditionVariableTypeE
+void FinalizeConditionVariable(ConditionVariableType* cond);
+// _ZN2nn2os23SignalConditionVariableEPNS0_21ConditionVariableTypeE
+void SignalConditionVariable(ConditionVariableType* cond);
+// _ZN2nn2os26BroadcastConditionVariableEPNS0_21ConditionVariableTypeE
+void BroadcastConditionVariable(ConditionVariableType* cond);
+// _ZN2nn2os26TimedWaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9MutexTypeENS_8TimeSpanE
+int TimedWaitConditionVariable(ConditionVariableType* cond, MutexType* mutex, TimeSpan timeout);
+
+void GenerateRandomBytes(void* out, unsigned long size);  // _ZN2nn2os19GenerateRandomBytesEPvm
+
 Tick GetSystemTick();                              // _ZN2nn2os13GetSystemTickEv
 long GetSystemTickFrequency();                     // _ZN2nn2os22GetSystemTickFrequencyEv
 

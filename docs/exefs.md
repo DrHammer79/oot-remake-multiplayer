@@ -68,7 +68,8 @@ The ExeFS guard tests for a base of exactly 0; the lifted guard tests for a base
 ## OS slots (v1 step 8, piece b)
 `switch/adapter/platform_os.cpp` defines the platform's OS slots as `coop_plat_*` (see docs/platform.md, "The payload
 build") on the game's own sdk functions (`nn_imports.h`): nn::os threads (stacks from our arena, default priority and
-core), nn::os mutexes, the system tick over the system's tick frequency, our own heap (`arena.h`, 8 MB of the module's
+core), nn::os mutexes (and TryLock), nn::os condition variables (TimedWait), random bytes from
+nn::os::GenerateRandomBytes, the system tick over the system's tick frequency, our own heap (`arena.h`, 8 MB of the module's
 bss, never the game's heap), files on the SD card mounted as `coopsd` under `config/oot-coop/` (on an emulator: its
 `sdmc` folder; a write goes to `<file>.tmp` and is renamed over the file), and the log as `coop-proto: ` lines (svc 0x27, the module's one tag).
 `tools/switch_mod/imports.txt` lists every name the module may import, each checked against the game's dynsym; build.py
