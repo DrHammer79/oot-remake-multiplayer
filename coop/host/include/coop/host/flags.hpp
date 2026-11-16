@@ -8,7 +8,6 @@
 #include <compare>
 #include <cstdint>
 #include <functional>
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -157,8 +156,7 @@ class SharedFlags {
   // Nothing on a bad line; `error`, when given, then says which and why.
   static std::optional<SharedFlags> parse(std::string_view text,
                                           std::string* error = nullptr);
-  static std::optional<SharedFlags> load(const std::filesystem::path& path,
-                                         std::string* error = nullptr);
+  // A whole file of them: load_shared_flags (coop/host/flags_file.hpp, PC only).
 
   bool contains(FlagKey key) const;
   // Adds one key at run time (a one-time pickup seen in the game). False when

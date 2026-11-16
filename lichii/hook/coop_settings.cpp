@@ -4,8 +4,6 @@
 
 #include <coop/os.hpp>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 
 namespace CoopHook {
 namespace {
@@ -226,37 +224,40 @@ std::string PlayerKeyText(const std::array<std::uint8_t, 16>& key) {
     return out;
 }
 
-std::array<std::uint8_t, 16> LoadPlayerKey(const std::filesystem::path& file, std::string& note) {
-    std::error_code ec;
-    if (std::filesystem::is_regular_file(file, ec)) {
-        std::ifstream in(file, std::ios::binary);
-        std::ostringstream text;
-        text << in.rdbuf();
-        if (const auto key = ParsePlayerKey(text.str())) {
+namespace {
+// A whole file of the co-op's folder as text; nothing when it is missing or unreadable.
+std::optional<std::string> ReadText(const char* rel) {
+    std::vector<std::uint8_t> bytes;
+    if (!coop::os::ReadFile(rel, bytes)) {
+        return std::nullopt;
+    }
+    return std::string(bytes.begin(), bytes.end());
+}
+}  // namespace
+
+std::array<std::uint8_t, 16> LoadPlayerKey(const char* rel, std::string& note) {
+    if (const auto text = ReadText(rel)) {
+        if (const auto key = ParsePlayerKey(*text)) {
             return *key;
         }
     }
     std::array<std::uint8_t, 16> key{};
     const bool random = coop::os::RandomFill(key.data(), key.size());
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::ofstream out(file, std::ios::binary | std::ios::trunc);
-    out << PlayerKeyText(key) << "\n";
-    note = out.good() ? "a new player key was made in " + file.string()
-                      : "the player key could not be written to " + file.string() + ": it holds for this run only";
+    const std::string line = PlayerKeyText(key) + "\n";
+    const std::string name = rel != nullptr ? rel : "";
+    note = coop::os::WriteFile(rel, line.data(), line.size())
+               ? "a new player key was made in " + name
+               : "the player key could not be written to " + name + ": it holds for this run only";
     if (!random) {
         note += " (this platform gave no random source: the key was made from the clock, so it is easier to guess)";
     }
     return key;
 }
 
-Settings LoadSettings(const std::filesystem::path& ini, std::vector<std::string>& errors) {
+Settings LoadSettings(const char* rel, std::vector<std::string>& errors) {
     Settings settings;
-    std::error_code ec;
-    if (std::filesystem::is_regular_file(ini, ec)) {
-        std::ifstream file(ini, std::ios::binary);
-        std::ostringstream text;
-        text << file.rdbuf();
-        ApplyIni(text.str(), settings, errors);
+    if (const auto text = ReadText(rel)) {
+        ApplyIni(*text, settings, errors);
     }
     ApplyEnvironment([](const char* name) { return coop::os::GetEnv(name); }, settings, errors);
     return settings;

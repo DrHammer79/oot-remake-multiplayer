@@ -456,9 +456,8 @@ CoopHostMenu::Menu& HostMenu() {
     static CoopHostMenu::Menu menu([] {
         CoopHostMenu::Hooks h;
         h.connect = [](const CoopHostMenu::Target& t) {
-            const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";
             std::vector<std::string> errors;
-            CoopHook::Settings s = CoopHook::LoadSettings(ini, errors);  // the colour, as the player set it
+            CoopHook::Settings s = CoopHook::LoadSettings(CoopHook::kSettingsFile, errors);  // the colour, as the player set it
             s.server = t.server;
             s.port = t.port;
             s.name = t.name;
@@ -472,9 +471,8 @@ CoopHostMenu::Menu& HostMenu() {
         h.client_id = [] { return CoopTitle::ClientId(); };
         h.log = [](const std::string& line) { LOG_INFO(Core, "{}", line); };
         h.default_name = [] {
-            const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";
             std::vector<std::string> errors;
-            return CoopHook::LoadSettings(ini, errors).name;
+            return CoopHook::LoadSettings(CoopHook::kSettingsFile, errors).name;
         };
         return h;
     }());
@@ -1021,12 +1019,11 @@ bool Start(const HosCoopApi* api) {
     CoopTitle::ApplyKitOptions();
     UseInputSelect();
     CoopFiles::CheckName();  // never the PC's user or PC name as the co-op name (coop_name_privacy.h), before coop.ini is read
-    const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";
     std::vector<std::string> errors;
     // The Multiplayer tab (patch 0004's Hookshot and later, or HOS_COOP_MENU=1): the module stays loaded with co-op idle
     // until the player hosts or joins from the tab (coop_pause.h, hos_coop_host.h).
     const bool menu = EnvOn("HOS_COOP_MENU") || TitleMenuPossible(api, Env("LICHII_COOP_TITLE_MENU"));
-    const bool server = CoopHook::LoadSettings(ini, errors).enabled();
+    const bool server = CoopHook::LoadSettings(CoopHook::kSettingsFile, errors).enabled();
     for (const auto& e : errors) {
         LOG_WARNING(Core, "coop: {}", e);
     }

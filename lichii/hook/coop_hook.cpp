@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <coop/os.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -2283,13 +2284,20 @@ Coop* Get() {
 // The Lobby (docs/protocol.md "Lobby"): the player's own key, from
 // player-key.txt beside coop.ini (made there once), so the host's mutes and
 // bans follow the player and not the name.
+// The core's files (coop.ini, player-key.txt through coop::os) are under the
+// emulator's config folder: the std backend's root.
+static void UseConfigFolder() {
+    const auto dir = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir).u8string();
+    coop::os::StdPlatform(std::string(reinterpret_cast<const char*>(dir.data()), dir.size()));
+}
+
 static void WithPlayerKey(Settings& settings) {
     if (settings.player_key) {
         return;
     }
+    UseConfigFolder();
     std::string note;
-    settings.player_key =
-        LoadPlayerKey(Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "player-key.txt", note);
+    settings.player_key = LoadPlayerKey(kPlayerKeyFile, note);
     if (!note.empty()) {
         LOG_INFO(Core, "coop: {}", note);
     }
@@ -2315,9 +2323,10 @@ void Start() {
                     changed);
         return;
     }
-    const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";
+    const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / kSettingsFile;  // (for the log)
+    UseConfigFolder();
     std::vector<std::string> errors;
-    auto settings = LoadSettings(ini, errors);
+    auto settings = LoadSettings(kSettingsFile, errors);
     // Each problem drops only its own line (CoopHook::ApplyIni): co-op goes on with the rest.
     for (const auto& e : errors) {
         LOG_WARNING(Core, "coop: {}", e);

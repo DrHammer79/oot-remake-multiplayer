@@ -76,3 +76,32 @@ a library outside Fritchii's `src/` would lose Fritchii's flags for core (`-fwra
   `coop::host::GameMemory` and `CoopPuppet::Guest` (virtual), `CoopCallers::Caller` and `CoopLocalGame`'s
   pads/take/read/write/log hooks, `CoopLocalNet`'s Send/Log, `CoopWorld`'s ReadWord (`std::function`). Inside the
   core they are fine; at the payload boundary they become `CoopPlatform` slots (step 5).
+
+## os-wrap (step 4)
+
+The core (`coop_core`'s files and every header they reach) makes no OS call of its own: it goes through `coop::os`, so
+an adapter that fills `CoopPlatform` (Longshot today, an ExeFS code mod later) is all it needs. On PC the std backend
+does what the core did itself, so Longshot and the emulator behave as before.
+
+| Area | Was | Now |
+|---|---|---|
+| locks | `std::mutex` (incl. `coop::host::Session`, `coop_local.h`) | `coop::os::Mutex`; same `std::lock_guard`/`std::unique_lock` code |
+| waits | `std::condition_variable` (`Session::wait`) | `coop::os::CondVar` |
+| time | `std::chrono::steady_clock` | `coop::os::SteadyClock` (same epoch on PC) |
+| environment | `getenv` / `_dupenv_s` | `coop::os::GetEnv` |
+| random | `std::random_device` | `coop::os::RandomFill` |
+| files | `std::filesystem` + `fstream` (coop.ini, player-key.txt) | `coop::os::ReadFile`/`WriteFile`, relative to the co-op's folder |
+
+- Files: `CoopHook::LoadSettings(kSettingsFile, ...)` and `LoadPlayerKey(kPlayerKeyFile, ...)` take names relative to
+  the co-op's folder. On Longshot that is the game folder (the std backend's root, set by the module's platform table;
+  the same folder as before); the emulator points the std backend's root at its config folder before it reads them.
+  `coop::host::SharedFlags::load` became `load_shared_flags` in `coop/host/flags_file.hpp`, which the core does not
+  include (the emulator's `LICHII_COOP_FLAGS` file and tests use it).
+- `tools/check_core.py` refuses each converted family in the core: `std::mutex` and the other std mutexes,
+  `std::condition_variable`, `std::thread`/`this_thread`, the std clocks, `getenv`/`_dupenv_s`/`setenv`,
+  `std::random_device`, `std::filesystem`/`fstream`/`fopen`, and the headers `<thread>`, `<condition_variable>`,
+  `<shared_mutex>`, `<future>`, `<filesystem>`, `<fstream>`. `<mutex>` stays allowed (`std::lock_guard`), and so do
+  `<chrono>` durations and seeded game RNGs (`std::mt19937`).
+- Not in this step: the coop/* libraries' own sources outside what the core reaches (`coop_net` is ENet over the OS
+  sockets until the ExeFS adapter's socket backend, step 8; `coop/host`'s save transfer and map-drop log files,
+  `coop_voice`), and the adapters' own files (`coop_hook.cpp`, `coop_hookshot.cpp`, ...), which are platform code.

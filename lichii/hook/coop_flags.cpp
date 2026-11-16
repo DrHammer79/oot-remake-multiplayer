@@ -11,6 +11,7 @@
 #include "common/logging.h"
 #include "core/memory.h"
 #include "coop/host/game_items.hpp"
+#include "coop/host/flags_file.hpp"
 #include "coop_game_build.h"
 
 namespace CoopHook {
@@ -150,7 +151,7 @@ std::optional<coop::host::SharedFlags> LoadShared(std::string& error) {
     }
     if (const auto path = Env("LICHII_COOP_FLAGS")) {
         std::string why;
-        const auto file = coop::host::SharedFlags::load(*path, &why);
+        const auto file = coop::host::load_shared_flags(*path, &why);
         if (!file) {
             error = "LICHII_COOP_FLAGS " + *path + ": " + why;
             return std::nullopt;
