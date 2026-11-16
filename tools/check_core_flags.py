@@ -8,10 +8,13 @@ exactly the flags of its build's other files. This compares, in a compile databa
                     to a hook file that always was there (lichii/hook/coop_dungeon.cpp): Fritchii's
                     -fwrapv, -fno-rtti, /GT, /GR- ... included. (lichii/hook/core.cmake compiles the list there.)
   --build module    each coop_core file (target coop_core) against a module file (hookshot/src/coop_title.cpp,
-                    target hookshot_coop): every flag the same and in the same order, except that the module
-                    file may have more -D/-I: LICHII_COOP, COOP_HOOKSHOT, hookshot_coop_EXPORTS (tools/check_core.py proves no core
-                    file or header tests them) and the include folders of compat/, server/, fmt and Monocypher
+                    target hookshot_coop): every flag the same, except that the module file may
+                    have more -D/-I: LICHII_COOP, COOP_HOOKSHOT, hookshot_coop_EXPORTS (tools/check_core.py
+                    proves no core file or header tests them) and the include folders of compat/, server/, fmt and Monocypher
                     (check_core proves no core file includes from them).
+
+Flags are the same when both lists hold the same flags and, within each option family (-fwrapv/-fno-wrapv,
+/O1//O2, ...), in the same order: there a later flag overrides an earlier one (same_flags).
 
 Usage: python tools/check_core_flags.py --compdb build/compile_commands.json --build module|emulator
 Exit 1 with one line per difference.
@@ -118,12 +121,29 @@ def find(units: list[Unit], target: str, root: Path, rel: str) -> list[Unit]:
     return [u for u in units if u.target == target and u.file == want]
 
 
+def family(flag: str) -> str:
+    """The option a flag sets, so -fwrapv/-fno-wrapv, /O1//O2, -std=c++17/-std=c++20 or /W3//W4 share one."""
+    s = flag.lstrip('-/')
+    s = re.sub(r'^([fWm])no-', r'\1', s)
+    s = re.split(r'[=:]', s, maxsplit=1)[0]
+    return s.rstrip('0123456789+-').lower()
+
+
+def same_flags(ref: list[str], got: list[str]) -> bool:
+    """The same flags, and in the same order wherever order can matter: within one option family a later flag
+    overrides an earlier one, across families it does not (CMake may place a de-duplicated /utf-8 elsewhere)."""
+    if sorted(ref) != sorted(got):
+        return False
+    return all([f for f in ref if family(f) == fam] == [f for f in got if family(f) == fam]
+               for fam in {family(f) for f in ref})
+
+
 def diff_list(name: str, ref: list[str], got: list[str]) -> str:
     missing = [x for x in ref if x not in got]
     extra = [x for x in got if x not in ref]
     if missing or extra:
         return f'{name}: missing {missing}, extra {extra}'
-    return f'{name}: same flags in another order ({ref} vs {got})'
+    return f'{name}: same flags, but an option family in another order ({ref} vs {got})'
 
 
 def check(units: list[Unit], build: str, root: Path) -> list[str]:
@@ -144,7 +164,7 @@ def check(units: list[Unit], build: str, root: Path) -> list[str]:
             problems.append(f'{rel}: {len(got)} compiles in target {target} (want 1)')
             continue
         u = got[0]
-        if u.flags != ref.flags:
+        if not same_flags(ref.flags, u.flags):
             problems.append(f'{rel}: {diff_list("flags", ref.flags, u.flags)}')
         extra_defines = [d for d in u.defines if d not in ref.defines]
         extra_includes = [d for d in u.includes if d not in ref.includes]

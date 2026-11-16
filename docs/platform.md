@@ -37,10 +37,11 @@ a library outside Fritchii's `src/` would lose Fritchii's flags for core (`-fwra
 `/volatile:iso`, ...), and `-fwrapv` changes what signed overflow does.
 
 - `tools/check_core_flags.py` proves the flags did not change (CI, from each build's compile database): in the emulator
-  every core file compiles with exactly the flags of `coop_dungeon.cpp` (always in `core`); in the module (MSVC and
+  every core file compiles with the same flags as `coop_dungeon.cpp` (always in `core`); in the module (MSVC and
   Linux) every `coop_core` file compiles with the flags of `hookshot/src/coop_title.cpp` except the module-only
   `LICHII_COOP`/`COOP_HOOKSHOT` defines and the compat/, server/, fmt and Monocypher include folders, which
-  `tools/check_core.py` proves no core file uses.
+  `tools/check_core.py` proves no core file uses. Order is compared within each option family (`-fwrapv`/`-fno-wrapv`,
+  `/O1`/`/O2`), where a later flag wins; across families CMake may order a de-duplicated flag (MSVC `/utf-8`) differently.
 
 - A file is in it only when neither it nor anything it includes uses an OS header (`windows.h`, POSIX system headers),
   an emulator one (`core/`, `common/`, Qt) or a Hookshot/Longshot one (`hos_coop_*`, Vulkan, SDL, fmt), and it has no

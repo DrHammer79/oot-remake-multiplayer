@@ -83,6 +83,14 @@ class FlagsTest(unittest.TestCase):
         db[-1] = msvc('coop_core', CORE[-1], core.replace(' /bigobj', ''))
         self.assertEqual(len(self.run_check(db, 'module')), 1)
 
+    def test_flag_order(self):
+        self.assertTrue(ccf.same_flags(['/W4', '/utf-8', '/permissive-'], ['/utf-8', '/W4', '/permissive-']))
+        self.assertFalse(ccf.same_flags(['-fno-wrapv', '-fwrapv'], ['-fwrapv', '-fno-wrapv']))
+        self.assertFalse(ccf.same_flags(['/O1', '/O2'], ['/O2', '/O1']))
+        self.assertFalse(ccf.same_flags(['-std=c++17', '-std=c++20'], ['-std=c++20', '-std=c++17']))
+        self.assertFalse(ccf.same_flags(['/W4'], ['/W4', '/W4']))
+        self.assertEqual(ccf.family('/wd4456'), ccf.family('/wd4459'))
+
     def test_missing_reference_is_reported(self):
         problems = self.run_check([gcc('coop_core', f, CORE_FLAGS) for f in CORE], 'module')
         self.assertEqual(len(problems), 1)
