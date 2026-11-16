@@ -1,6 +1,7 @@
 # One Fritchii run of the ExeFS module (subsdk1), whole PC, time boxed. docs/exefs.md, "Run harness".
 #
-#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|codemem|input [-Sha <commit>]
+#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|codemem|input|draw-re [-Sha <commit>]
+# (draw-re: the log-only research build, build.py --draw-re: switch/proto/draw_re.h)
 #
 # Refuses to start unless TEST-TURN's LANE1 names -Id (LANE2 names it too or is CLOSED), no game or server runs,
 # no build/lane lock exists, and no saves backup or old install is left from an earlier run. Takes the lane1 and
@@ -9,7 +10,7 @@
 # Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
-    [ValidateSet('proto', 'nullguards', 'codemem', 'input')][string]$Preset = 'nullguards',
+    [ValidateSet('proto', 'nullguards', 'codemem', 'input', 'draw-re')][string]$Preset = 'nullguards',
     [string]$Sha = '',
     [int]$Seconds = 0,                     # game time; 0 = the preset's default
     [string]$Scenario = '',                # LICHII_COOP_TEST_SCRIPT; default scenarios\play.txt
@@ -33,12 +34,12 @@ if (-not $Game) {
     if ($nups.Count -ne 1) { Write-Output "FAIL start: pass -Game (found $($nups.Count) .nup files in $root)"; exit 2 }
     $Game = $nups[0].FullName
 }
-if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; codemem = 200; input = 200 }[$Preset] }
-if (-not $Scenario) { $Scenario = @{ proto = "$here\scenarios\play.txt"; nullguards = "$here\scenarios\play.txt"; codemem = "$here\scenarios\play.txt"; input = "$here\scenarios\input.txt" }[$Preset] }
+if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; codemem = 200; input = 200; 'draw-re' = 200 }[$Preset] }
+if (-not $Scenario) { $Scenario = @{ proto = "$here\scenarios\play.txt"; nullguards = "$here\scenarios\play.txt"; codemem = "$here\scenarios\play.txt"; input = "$here\scenarios\input.txt"; 'draw-re' = "$here\scenarios\draw_re.txt" }[$Preset] }
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
-$datagrams = @{ proto = 3; nullguards = 0; codemem = 0; input = 0 }[$Preset]
+$datagrams = @{ proto = 3; nullguards = 0; codemem = 0; input = 0; 'draw-re' = 0 }[$Preset]
 # Shots at the scenario's `mark` lines too (run_check.py MARK_SHOTS): PrintWindow like the others.
-$markShots = @{ proto = @(); nullguards = @(); codemem = @(); input = @('before', 'swallow-start', 'swallow-mid', 'swallow-end', 'after-start', 'after-end') }[$Preset]
+$markShots = @{ proto = @(); nullguards = @(); codemem = @(); input = @('before', 'swallow-start', 'swallow-mid', 'swallow-end', 'after-start', 'after-end'); 'draw-re' = @('loaded', 'map', 'pause') }[$Preset]
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"
@@ -153,7 +154,7 @@ try {
     New-Item -ItemType Directory "$main\build.lock" | Out-Null
     try {
         Set-Content "$main\build.lock\owner.txt" $owner -Encoding utf8
-        & $Python "$here\build.py"
+        if ($Preset -eq 'draw-re') { & $Python "$here\build.py" --draw-re } else { & $Python "$here\build.py" }
         if ($LASTEXITCODE -ne 0) { throw 'module build failed' }
     } finally { Remove-Item -Recurse -Force "$main\build.lock" }
 

@@ -63,15 +63,22 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--llvm")
     ap.add_argument("--out", default=str(REPO / "build" / "switch-proto"))
+    # The log-only research build of v1 step 8 e2 (switch/proto/draw_re.h): three call taps + screen reads.
+    ap.add_argument("--draw-re", action="store_true")
     a = ap.parse_args()
     clang = find_tool("clang", a.llvm)
     lld = find_tool("ld.lld", a.llvm)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    for src in (SRC / "start.s", SRC / "main.cpp", SRC / "codemem.cpp", ADAPTER / "input.cpp"):
+    sources = [SRC / "start.s", SRC / "main.cpp", SRC / "codemem.cpp", ADAPTER / "input.cpp"]
+    defines = []
+    if a.draw_re:
+        sources += [SRC / "draw_re.s", SRC / "draw_re.cpp"]
+        defines = ["-DCOOP_DRAW_RE=1"]
+    for src in sources:
         obj = out / (src.name + ".o")
-        flags = [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
+        flags = [*CFLAGS, *INCLUDES, *defines] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
         run([clang, *flags, "-c", str(src), "-o", str(obj)])
         objs.append(str(obj))
     elf = out / "module.elf"

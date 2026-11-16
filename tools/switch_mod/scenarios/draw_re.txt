@@ -1,0 +1,35 @@
+# ExeFS runs, preset draw-re (run_fritchii.ps1 -Preset draw-re; v1 step 8 e2 research, switch/proto/draw_re.h).
+# Ticks of 1/60 s. Load the save (as play.txt), then open the map (Minus) so the map screen sets its pictures, close it,
+# then the pause menu (Plus) and two of its pages (R), so the screen list is read with each of them open. Log only.
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 900
+mark loaded
+wait 300
+press MINUS
+wait 300
+mark map
+wait 120
+press MINUS
+wait 240
+press PLUS
+wait 300
+press R
+wait 240
+mark pause
+press R
+wait 240
+press B
+wait 120
+press PLUS
+wait 300
+stick 0 0.5 90
+wait 300
+mark walked

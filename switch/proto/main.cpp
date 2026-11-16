@@ -23,6 +23,12 @@
 #include "null_guard.h"
 #include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
 #include "svc.h"
+#if COOP_DRAW_RE
+#include "draw_re.h"  // the log-only research build (build.py --draw-re)
+#else
+#define COOP_DRAW_RE_HOOK_COUNT 0
+#define COOP_DRAW_RE_HOOK_ENTRIES
+#endif
 
 // ---- Imports, resolved by rtld from main and sdk ----
 extern "C" {
@@ -68,7 +74,7 @@ extern uint32_t coop_null_islands[];  // start.s: one page, filled by ApplyNullG
 }
 static_assert(kNullGuardCount * null_guard::kIslandBytes <= 0x1000, "the island page is full");
 
-constexpr uint32_t kHookCount = 2 + input::kHookCount + kNullGuardEntries;
+constexpr uint32_t kHookCount = 2 + input::kHookCount + COOP_DRAW_RE_HOOK_COUNT + kNullGuardEntries;
 extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) hooks::Table<kHookCount> coop_hooks = {
     {'C', 'O', 'O', 'P', 'H', 'O', 'O', 'K'},
     1,
@@ -81,6 +87,7 @@ extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) h
          &coop_slot_frame_step},
         {hooks::kGameFn, 0, 0, game::kSetTime, nullptr, &coop_slot_set_time},
         COOP_INPUT_HOOK_ENTRIES
+        COOP_DRAW_RE_HOOK_ENTRIES
         COOP_NULL_GUARD_ENTRIES
     },
 };
@@ -442,6 +449,9 @@ extern "C" COOP_EXPORT void coop_proto_frame() {
     LogInput();
     if (!g_time_done && g_frames >= 300 && g_frames % 60 == 0) TrySetTime();
     if (!g_net_done && g_frames >= 900) SayHello();
+#if COOP_DRAW_RE
+    if (!g_host) draw_re::Frame(g_main, g_frames);
+#endif
 }
 
 // rtld calls this once, after nninitStartup and before nnMain (actor-map.md, Module _init).

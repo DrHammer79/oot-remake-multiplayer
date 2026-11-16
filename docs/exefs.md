@@ -89,6 +89,10 @@ The module sees the pad the way the game reads it. `main` calls `nn::hid::GetNpa
 
 The frame tick logs the news: `pad: player 1 read through the module`, `pad: player N down|up <button> (bit B, left stick X,Y)`, `ui: OPEN|CLOSE|CONFIRM|...`, `pad: menu open ...` / `pad: menu closed ...`, and every 600 frames the reads per style. `tests/switch/pad_hook_test.cpp` checks the hook on the PC. A lifting recomp routes `main`'s calls of the import to the replacement and fills the slot with its own `GetNpadStates`.
 
+## Draw research build (v1 step 8 e2)
+
+`build.py --draw-re` (`-DCOOP_DRAW_RE=1`, `switch/proto/draw_re.{h,cpp,s}`) is a log-only build for the picture pane's research: it changes nothing in the game and calls none of its functions. Three call taps (hook table `kCallRedirect`, the frame hook's shape) log their arguments and then continue to the game function: the map screen's two set-texture calls (`bl` at `main+0xb2abc8` and `main+0xb2aac0`) and one texture registration (`bl` at `main+0xe43c0`). The frame tick reads the UI manager's screen list (when it changes) and the gfx manager's descriptor table. Every line starts `draw-re:`. Run: `run_fritchii.ps1 -Preset draw-re` (scenario `scenarios/draw_re.txt`: load, the map, the pause menu). The normal build has none of it; CI builds both and lift-checks both.
+
 ## What it does not cover yet
 
 - Consoles: the Switch 2 has no custom firmware. A console would also need a `main.npdm` whose SVC mask allows the calls listed in "Writing the game's code". The null reads the emulator returns as 0 are guarded (above); not yet proven on hardware.

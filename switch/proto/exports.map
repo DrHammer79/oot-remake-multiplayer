@@ -9,5 +9,6 @@
     coop_slot_*;
     coop_call_*;
     coop_hook_*;
+    coop_draw_re_*;   /* the log-only draw-re build (build.py --draw-re) */
   local: *;
 };

@@ -219,7 +219,7 @@ class InputPresetTest(unittest.TestCase):
 
     def test_mark_shots_are_the_harness_and_the_scenario(self):
         ps1 = (HERE / "run_fritchii.ps1").read_text(encoding="utf-8")
-        m = re.search(r"input = @\(([^)]*)\) \}\[\$Preset\]", ps1)
+        m = re.search(r"input = @\(([^)]*)\)", ps1)
         self.assertIsNotNone(m)
         self.assertEqual(re.findall(r"'([^']+)'", m.group(1)), run_check.MARK_SHOTS["input"])
         scenario = (HERE / "scenarios" / "input.txt").read_text(encoding="utf-8").splitlines()
@@ -227,6 +227,86 @@ class InputPresetTest(unittest.TestCase):
         for name in run_check.MARK_SHOTS["input"]:
             self.assertIn(name, marks)
         self.assertIn("hold L+R+MINUS 10", scenario)
+
+
+DRAW_RE_RUN = [
+    "hello from subsdk1 (ExeFS prototype)",
+    "hook 0: frame hook in at main+0x6e70f8, continues at main+0x3b4e300",
+    "hook 7: frame hook in at main+0xb2abc8, continues at main+0xe4b660",
+    "hook 8: frame hook in at main+0xb2aac0, continues at main+0xe4b660",
+    "hook 9: frame hook in at main+0xe43c0, continues at main+0x434b0",
+    "draw-re: taps: apply main+0xb2abc8, default main+0xb2aac0, register main+0xe43c0 (log only)",
+    "draw-re: gfx manager 0x2c0001000: texture pool +384, id records 4096 at 0x2c0005000, id base 0, pool memory 0x2c0009000 count 8192",
+    "draw-re: ui screens 41 at frame 1320 (manager 0x2c4000000, array 0x2c4000100)",
+    "draw-re: screen 0 0x2c4100000 vt main+0x4c106e8 layout 0x2c4200000 w30..4c 0x0 0x1 0x0 0x0 0x0 0x0 0x0 0x0 w1a8 0x1",
+    "draw-re: register: texture object 0x2c5000000 view 0x2c5000200 flags 0x0 from main+0xe43c0, id before 0xffffffffffffffff",
+    "draw-re: texobj +0x0: 0x1 0x2 0x3 0x4",
+    "draw-re: register: texture object 0x2c5000000 id after 0x91, +16 0x2c5100000, w 64 h 64 fmt+184 0x25",
+    "draw-re: apply default 0: material 0x2c6000000 id 0x12 (w 4 h 4) texmap 0",
+    "draw-re: apply 0: entry 0x2c6000148 holds 0x12, holder 0x2c7000000 pane 0x2c7100000, material +24 0x200 +88 0x0",
+    "frame 3000",
+]
+
+
+class DrawRePresetTest(unittest.TestCase):
+    def test_pass(self):
+        ok, rep = run("draw-re", DRAW_RE_RUN)
+        self.assertTrue(ok, rep)
+
+    def test_each_tap_must_be_in(self):
+        for site in run_check.DRAW_RE_TAPS.values():
+            lines = [x for x in DRAW_RE_RUN if f"in at main+{site:#x}," not in x]
+            self.assertFalse(run("draw-re", lines)[0], f"{site:#x}")
+
+    def test_a_skipped_tap_fails_and_names_the_line(self):
+        bad = "hook 8: main+0xb2aac0 holds 0x14000000, not 0x940c82e8 (another mod?): skipped"
+        ok, rep = run("draw-re", DRAW_RE_RUN + [bad])
+        self.assertFalse(ok)
+        self.assertIn(f"FAIL 2 no tap skipped: {bad}", rep)
+
+    def test_the_facts_are_needed(self):  # the run is for them: without a texture object or a set-texture call it fails
+        for gone, check in (("register: texture object 0x2c5000000 id after", "FAIL 6 fact: a texture object and its id"),
+                            ("apply default 0: material", "FAIL 7 fact: a set-texture call")):
+            lines = [x for x in DRAW_RE_RUN if gone not in x]
+            self.assertIn(check, run("draw-re", lines)[1])
+
+    def test_a_screen_without_a_layout_does_not_count(self):
+        lines = [x.replace("layout 0x2c4200000", "layout 0x0") for x in DRAW_RE_RUN]
+        self.assertIn("FAIL 4 a screen with a layout", run("draw-re", lines)[1])
+
+    def test_zero_screens_or_ids_fail(self):
+        lines = [x.replace("ui screens 41", "ui screens 0").replace("id records 4096", "id records 0") for x in DRAW_RE_RUN]
+        rep = run("draw-re", lines)[1]
+        self.assertIn("FAIL 4 ui screen list read", rep)
+        self.assertIn("FAIL 5 gfx manager read", rep)
+
+    def test_crash_fails(self):
+        self.assertFalse(run("draw-re", DRAW_RE_RUN, alive=False)[0])
+
+    def test_taps_match_the_module(self):  # the preset's sites and texts are draw_re.h's and draw_re.cpp's
+        h = (REPO / "switch" / "proto" / "draw_re.h").read_text(encoding="utf-8")
+        sites = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"k(Apply|ApplyDefault|Register)Site = (0x[0-9a-f]+);", h)}
+        self.assertEqual(sites, {"Apply": run_check.DRAW_RE_TAPS["apply"], "ApplyDefault": run_check.DRAW_RE_TAPS["apply default"],
+                                 "Register": run_check.DRAW_RE_TAPS["register"]})
+        cpp = (REPO / "switch" / "proto" / "draw_re.cpp").read_text(encoding="utf-8")
+        for text in ('"coop-proto: draw-re: "', '"taps: apply main+"', '", default main+"', '", register main+"', '" (log only)"',
+                     '"ui screens "', '" at frame "', '"screen "', '" vt "', '" layout "', '"gfx manager "',
+                     '": texture pool +384, id records "', '"register: texture object "', '" id after "',
+                     '"apply loaded" : "apply default"', '": material "', '" id "'):
+            self.assertIn(text, cpp)
+
+    def test_harness_and_scenario(self):
+        ps1 = (HERE / "run_fritchii.ps1").read_text(encoding="utf-8")
+        self.assertIn("'draw-re'", ps1)
+        self.assertIn("build.py\" --draw-re", ps1)
+        m = re.search(r"'draw-re' = @\(([^)]*)\)", ps1)
+        self.assertIsNotNone(m)
+        self.assertEqual(re.findall(r"'([^']+)'", m.group(1)), run_check.MARK_SHOTS["draw-re"])
+        scenario = (HERE / "scenarios" / "draw_re.txt").read_text(encoding="utf-8").splitlines()
+        marks = [line.split()[1] for line in scenario if line.startswith("mark ")]
+        for name in run_check.MARK_SHOTS["draw-re"]:
+            self.assertIn(name, marks)
+        self.assertIn("press MINUS", scenario)
 
 
 class HarnessPrivacyTest(unittest.TestCase):

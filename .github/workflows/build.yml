@@ -106,6 +106,7 @@ jobs:
           clang --version | head -1
           python tools/switch_mod/build.py
           cat build/switch-proto/subsdk1.entries
+          python tools/switch_mod/build.py --draw-re --out build/switch-draw-re   # the log-only research build (v1 step 8 e2)
       # The kit's patch applier for Hookshot (hookshot-kit); skipped until that branch is merged.
       - name: Kit patch applier tests
         if: hashFiles('tools/release/tests/test_apply_patch.py') != ''

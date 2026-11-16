@@ -21,6 +21,9 @@ NULL_GUARDS = 29  # switch/proto/null_guards.inc kNullGuardCount
 # switch/adapter/input.h: main's GOT entries for the five GetNpadStates imports.
 NPAD_GOT = {"FullKey": 0x4cbf5c8, "Handheld": 0x4cbf5e0, "JoyDual": 0x4cbf5c0, "JoyLeft": 0x4cbf5d0, "JoyRight": 0x4cbf5d8}
 
+# switch/proto/draw_re.h: the draw-re build's call taps (bl sites in main).
+DRAW_RE_TAPS = {"apply": 0xb2abc8, "apply default": 0xb2aac0, "register": 0xe43c0}
+
 # name -> (expects, forbids, datagrams)
 PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
     # The prototype (reports v1-proto-a): hello, frame hook, one game call, one UDP hello.
@@ -81,9 +84,27 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("2 no import skipped", r"hook \d+: GOT main\+0x[0-9a-f]+ (holds|not writable)"),
         ("4 no edge or event lost", r"lost edges [1-9]|lost events [1-9]"),
     ], 0),
+    # The draw-re research build (v1 step 8 e2, switch/proto/draw_re.h; build.py --draw-re): log only. Its three call
+    # taps are in, the screen list and the gfx manager were read, a texture object and a set-texture call were seen
+    # (the facts the run is for), and the game played on.
+    "draw-re": ([
+        HELLO, HOOK_IN,
+        *[(f"2 tap {name} in", rf"hook \d+: frame hook in at main\+{site:#x}") for name, site in DRAW_RE_TAPS.items()],
+        ("3 taps log only", r"^draw-re: taps: apply main\+0xb2abc8, default main\+0xb2aac0, register main\+0xe43c0 \(log only\)"),
+        ("4 ui screen list read", r"^draw-re: ui screens [1-9]\d* at frame \d+"),
+        ("4 a screen with a layout", r"^draw-re: screen \d+ \S+ vt main\+0x[0-9a-f]+ layout (?!0x0 )\S+"),
+        ("5 gfx manager read", r"^draw-re: gfx manager \S+: texture pool \+384, id records [1-9]"),
+        ("6 fact: a texture object and its id", r"^draw-re: register: texture object \S+ id after 0x[0-9a-f]+"),
+        ("7 fact: a set-texture call", r"^draw-re: apply (loaded|default) \d+: material \S+ id 0x[0-9a-f]+"),
+        ("8 game plays (frame 3000)", r"^frame 3000$"),
+    ], [
+        ("2 no tap skipped", r"^hook \d+: main\+0x(b2abc8|b2aac0|e43c0) (holds|is not a bl)"),
+        ("2 every hook written", r"^hook: main\+0x[0-9a-f]+ could not be written"),
+    ], 0),
 }
 # Presets that take a shot at scenario marks (run_fritchii.ps1 -Preset input: "coop: test mark <name>" in the log).
-MARK_SHOTS = {"input": ["before", "swallow-start", "swallow-mid", "swallow-end", "after-start", "after-end"]}
+MARK_SHOTS = {"input": ["before", "swallow-start", "swallow-mid", "swallow-end", "after-start", "after-end"],
+              "draw-re": ["loaded", "map", "pause"]}
 
 
 def module_lines(log_text: str) -> list[str]:
