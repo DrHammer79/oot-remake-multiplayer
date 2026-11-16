@@ -20,6 +20,7 @@ setflag InsideTheDekuTree_BossArea_ShutIn 0
 setflag InsideTheDekuTree_BossArea_ChangeENVForBoss 0
 setflag Gohma_IsLightingForBattle 0
 setflag Gohma_DefeatBoss 0
+setflag HavePlayedEvent.InsideTheDekuTree_BossDie 0   # else the host's game drops the death setting as played (run 20261115-191432)
 give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 assign SlingShot

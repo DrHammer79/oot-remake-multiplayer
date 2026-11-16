@@ -106,6 +106,9 @@ struct Local {
     // Whether our game owns the boss (the object walk): a death seen with no name is taken only from the owner,
     // so a copy that dies in its own game (its hit judged lethal there, refused by the owner) starts nothing.
     std::optional<bool> boss_ours;
+    // Whether the room's boss lives in our game (the object walk: life above 0; nothing when not seen). Another's
+    // death is asked as the boss's own death setting only once our copy does not (player report #105).
+    std::optional<bool> boss_alive;
 };
 
 // One of our game's own event requests since the last tick.

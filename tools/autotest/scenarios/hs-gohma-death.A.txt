@@ -3,10 +3,16 @@
 # stays the owner). B's test kill ends the owner's Gohma; A's game is then asked her death setting
 # (InsideTheDekuTree_BossDie, guest-warp) and must play her whole death itself: the cutscene, the fade back,
 # the heart container and the blue warp. A then walks to the room's centre (the warp) and around it.
-# Same save and flags as hs-boss-fix-gohma-rev (header there; the scenario clears the Deku boss flags itself).
+# SAVE (else VOID: no Gohma body, B's kill finds "none here with a life"; run 20261115-190406): both lane
+# baselines at quest Get_StoneOfForest = GoToBossRoom, as hs-boss-full: games closed, for lane N A and B, slots
+# 00-02: save_flags.py set <laneN-X>\autotest-save\slot_0*\progress.sav enum:0x7d776b61=0xb5df43cb (old file
+# kept in autotest-save-backup; put it back after). The scenario clears the Deku boss room flags itself.
 # PASS (all of):
 #  1. B: "Dm_Deku_BossOut: our game started the death" (VOID without it: the kill did not land).
-#  2. A: "Dm_Deku_BossOut: playing it here too" (asked as InsideTheDekuTree_BossDie) or "ours started with".
+#  2. A: "Dm_Deku_BossOut: playing it here too (player 2 started it), the death flow alone: our copy of the boss
+#     still lives" (from the copy-alive fallback, 0.11.4), or the setting (asked as InsideTheDekuTree_BossDie)
+#     only when A's copy already reads dead. With the flow alone A's warp may do nothing until A leaves the
+#     dungeon (#88 again for that player): note it, it is not a FAIL of this scenario.
 #  3. A: "its death has begun: the copy runs all its own" (the fix), and no "the copy takes the owner's state
 #     again" after it; her death ends here: A's "a hit the dying boss's game did not take: N given to its own
 #     Life step (its death has begun)" and/or "N ended in their death" > 0 in A's "coop: bosses:" totals line, and
@@ -42,6 +48,7 @@ setflag InsideTheDekuTree_BossArea_ShutIn 0
 setflag InsideTheDekuTree_BossArea_ChangeENVForBoss 0
 setflag Gohma_IsLightingForBattle 0
 setflag Gohma_DefeatBoss 0
+setflag HavePlayedEvent.InsideTheDekuTree_BossDie 0   # else the host's game drops the death setting as played (run 20261115-191432)
 give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 wait 1500               # B walks in first and owns her

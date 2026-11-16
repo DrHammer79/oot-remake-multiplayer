@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <ostream>
 #include <optional>
 #include <set>
@@ -342,6 +343,37 @@ TEST_CASE("boss scenes: another's death is asked as the boss's own death setting
         CHECK_FALSE(out.play);
         CHECK(out.send.empty());  // player 1 started it
         CHECK(b.phase(kGohma) == Phase::outro);
+    }
+    SUBCASE("our copy still lives: the death flow alone, never the setting (report 105)") {
+        // Revirie's 0.11.2 host: the setting taken with her copy Gohma alive at life 1 waited for her death for good.
+        const auto alive = [&with_boss](Local l, bool lives) {
+            l = with_boss(l);
+            l.boss_alive = lives;
+            return l;
+        };
+        Director b;
+        b.Receive(death);
+        Actions out = b.Tick(alive(At(kInRoom, 2), true), {}, 1'000'000);
+        CHECK(out.play == std::optional<std::string>("Dm_Deku_BossOut"));
+        CHECK(std::any_of(out.log.begin(), out.log.end(), [](const std::string& l) {
+            return l.find("our copy of the boss still lives") != std::string::npos;
+        }));
+        out = b.Tick(alive(At(kInRoom, 2, true), true), Took("Dm_Deku_BossOut"), 1'100'000);
+        CHECK_FALSE(out.play);
+        CHECK(b.phase(kGohma) == Phase::outro);
+        // Our copy already dead (or gone from the walk) when the death comes: the setting, as before.
+        Director d;
+        d.Receive(death);
+        CHECK(d.Tick(alive(At(kInRoom, 2), false), {}, 1'000'000).play ==
+              std::optional<std::string>("InsideTheDekuTree_BossDie"));
+        // The owner's own game (boss ours) never comes here with its own death; another's death while we own
+        // the boss (a hand-over in flight) still asks the setting.
+        Director e;
+        e.Receive(death);
+        Local owner = At(kInRoom, 2);
+        owner.boss_ours = true;
+        owner.boss_alive = true;
+        CHECK(e.Tick(owner, {}, 1'000'000).play == std::optional<std::string>("InsideTheDekuTree_BossDie"));
     }
     SUBCASE("the setting refused: the death flow alone, once") {
         Director b;

@@ -407,6 +407,7 @@ bool Glue::Scenes(Core::System& system, std::uint64_t main, const Local& local, 
         for (const auto& room : CoopBoss::Rooms()) {  // the scene's boss (a dungeon has one boss room)
             if (room.scene == *local.scene) {
                 here.boss_ours = CoopObjects::LastBossOurs(CoopBoss::Bodies(room));
+                here.boss_alive = CoopObjects::LastBossAlive(CoopBoss::Bodies(room));
                 break;
             }
         }

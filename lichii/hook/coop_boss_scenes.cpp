@@ -201,11 +201,20 @@ void Director::Join(std::uint8_t b, Kind kind, const Local& local, std::uint64_t
     // The death setting only when our game has the boss (our walk saw its body): a save that beat it already
     // (no boss here, its warp there) would get its Complete quest set back by the setting's step (King Dodongo's
     // and Barinade's do not ignore a completed quest), and its death signal would go to no boss (review-guest-warp).
-    out.play = std::string(kind == Kind::intro         ? boss.intro
-                           : local.boss_ours.has_value() ? DeathToAsk(boss, local.scene)
-                                                         : boss.outro);
+    // Not while our copy still lives (player report #105, a black screen after Gohma's death in the host's game):
+    // the setting's flow waits for the boss's own death, and her own rules keep a copy at life 1 (the owner's
+    // killing hit given to her Life step leaves her at 1: hs-gohma-death 20261115-191432). The death flow alone
+    // then, as 0.11.1 did: the cutscene, no quest step and no warp here until our Link is out of the dungeon.
+    const bool copy_alive = local.boss_ours == false && local.boss_alive == true;
+    out.play = std::string(kind == Kind::intro                         ? boss.intro
+                           : local.boss_ours.has_value() && !copy_alive ? DeathToAsk(boss, local.scene)
+                                                                        : boss.outro);
     out.log.push_back(*out.play + ": playing it here too (player " +
-                      std::to_string(kind == Kind::intro ? f.starter : f.outro_by) + " started it)");
+                      std::to_string(kind == Kind::intro ? f.starter : f.outro_by) + " started it)" +
+                      (kind == Kind::outro && copy_alive
+                           ? ", the death flow alone: our copy of the boss still lives (its own death setting would "
+                             "wait for it)"
+                           : ""));
 }
 
 void Director::Take(const proto::Message& m, const Local& local, std::uint64_t now_us, Actions& out) {
