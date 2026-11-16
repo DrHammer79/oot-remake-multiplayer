@@ -125,8 +125,8 @@ void DrawWithLook(const HosCoopDraw& d);
 void NoGameLook();
 // The picture's size at this draw (the mouse's fractions are of it).
 void NoteDrawn(const HosCoopDraw& d);
-// Logs once that the overlay's draw list was full (CoopDraw::Draw's result > 0).
-void NoteDropped(std::uint32_t dropped);
+// Logs once that the overlay's draw list was full (CoopDraw::Draw's result > 0), with what `scene` held.
+void NoteDropped(std::uint32_t dropped, const CoopDraw::Scene& scene);
 
 // The mouse (hos_coop_mouse): the cheats panel's rows. fx, fy: the cursor as
 // a fraction of the window; event: HOS_COOP_MOUSE_*. True when taken.

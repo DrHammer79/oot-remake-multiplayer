@@ -1392,13 +1392,18 @@ void NoteDrawn(const HosCoopDraw& d) {
     g_drawn_h = d.height;
 }
 
-// The overlay's draw list was full (coop/ui/drawlist.h, docs/ui.md): the rest of that frame was not drawn. Said once.
-void NoteDropped(std::uint32_t dropped) {
+// The overlay's draw list was full (coop/ui/drawlist.h, docs/ui.md): the rest of that frame was not drawn. Said once,
+// with what the scene held and the list's room.
+void NoteDropped(std::uint32_t dropped, const CoopDraw::Scene& s) {
     static std::atomic<bool> said{false};
     if (dropped > 0 && !said.exchange(true)) {
-        LOG_WARNING(Core, "coop: the overlay's draw list was full: {} drawing commands of a frame were not drawn "
-                    "(docs/ui.md); said once",
-                    dropped);
+        LOG_WARNING(Core, "coop: the overlay's draw list was full ({} commands, {} text bytes): {} drawing commands of "
+                    "a frame were not drawn (docs/ui.md); the scene: {} tags, {} map players, {} HUD blocks, {} chat "
+                    "lines{}, {} list rows, {} panel lines, cheats {}, down ring {}, title {}; said once",
+                    COOP_DRAW_MAX_CMDS, COOP_DRAW_MAX_TEXT, dropped, s.markers ? s.markers->items.size() : 0,
+                    s.map != nullptr ? s.map->players.size() : 0, s.hud.size(), s.chat.size(),
+                    s.box ? " + the box" : "", s.players ? s.players->size() : 0, s.panel ? s.panel->size() : 0,
+                    s.cheats ? "on" : "off", s.dbno ? "on" : "off", s.title ? "on" : "off");
     }
 }
 
@@ -1411,7 +1416,8 @@ void DrawWithLook(const HosCoopDraw& d) {
             g_look_state = kLookOff;
         }
     }
-    NoteDropped(CoopDraw::Draw(d, DrawScene(), g_look_state.load() == kLookOn ? g_look : CoopDraw::Look{}));
+    const CoopDraw::Scene scene = DrawScene();
+    NoteDropped(CoopDraw::Draw(d, scene, g_look_state.load() == kLookOn ? g_look : CoopDraw::Look{}), scene);
 }
 
 // Local co-op's research probe (coop_local_probe.h, LICHII_COOP_LOCAL_PROBE=1): the renderer's layers and the
@@ -1679,7 +1685,8 @@ COOP_HOOKSHOT_EXPORT void hos_coop_draw(const HosCoopDraw* d) {
         t.triangle = d->triangle;
         t.text = d->text;
         t.text_width = d->text_width;
-        CoopHookshot::NoteDropped(CoopDraw::Draw(t, CoopHookshot::DrawScene()));
+        const CoopDraw::Scene scene = CoopHookshot::DrawScene();
+        CoopHookshot::NoteDropped(CoopDraw::Draw(t, scene), scene);
         CoopModsRuntime::Overlay(t);
     }
 }
