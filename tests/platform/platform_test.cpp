@@ -378,13 +378,13 @@ TEST_CASE("coop::os: try_lock does not wait for a held lock") {
 }
 
 namespace {
-char g_env_value[600];
+std::string g_env_value;
 int FakeEnv(const char *name, char *out, size_t cap) {
     if (std::strcmp(name, "COOP_OS_TEST_SET") != 0) return -1;
-    const size_t len = std::strlen(g_env_value);
+    const size_t len = g_env_value.size();
     if (cap) {
         const size_t n = len < cap - 1 ? len : cap - 1;
-        std::memcpy(out, g_env_value, n);
+        std::memcpy(out, g_env_value.data(), n);
         out[n] = '\0';
     }
     return static_cast<int>(len);
@@ -396,12 +396,11 @@ TEST_CASE("coop::os: GetEnv through the table, short and long values") {
     CoopPlatform mine = *os::StdPlatform();
     mine.env_get = FakeEnv;
     REQUIRE(os::Install(&mine) == os::InstallError::kNone);
-    std::strcpy(g_env_value, "0");
+    g_env_value = "0";
     CHECK(os::GetEnv("COOP_OS_TEST_SET") == std::optional<std::string>("0"));
-    std::strcpy(g_env_value, "");
+    g_env_value.clear();
     CHECK(os::GetEnv("COOP_OS_TEST_SET") == std::optional<std::string>(""));   // set but empty
-    std::memset(g_env_value, 'x', 500);
-    g_env_value[500] = '\0';
+    g_env_value.assign(500, 'x');
     const auto longer = os::GetEnv("COOP_OS_TEST_SET");
     REQUIRE(longer.has_value());
     CHECK(longer->size() == 500);
