@@ -9,7 +9,7 @@
 # Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
-    [ValidateSet('proto', 'nullguards')][string]$Preset = 'nullguards',
+    [ValidateSet('proto', 'nullguards', 'input')][string]$Preset = 'nullguards',
     [string]$Sha = '',
     [int]$Seconds = 0,                     # game time; 0 = the preset's default
     [string]$Scenario = '',                # LICHII_COOP_TEST_SCRIPT; default scenarios\play.txt
@@ -33,10 +33,12 @@ if (-not $Game) {
     if ($nups.Count -ne 1) { Write-Output "FAIL start: pass -Game (found $($nups.Count) .nup files in $root)"; exit 2 }
     $Game = $nups[0].FullName
 }
-if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240 }[$Preset] }
-if (-not $Scenario) { $Scenario = "$here\scenarios\play.txt" }
+if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; input = 200 }[$Preset] }
+if (-not $Scenario) { $Scenario = @{ proto = "$here\scenarios\play.txt"; nullguards = "$here\scenarios\play.txt"; input = "$here\scenarios\input.txt" }[$Preset] }
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
-$datagrams = @{ proto = 3; nullguards = 0 }[$Preset]
+$datagrams = @{ proto = 3; nullguards = 0; input = 0 }[$Preset]
+# Shots at the scenario's `mark` lines too (run_check.py MARK_SHOTS): PrintWindow like the others.
+$markShots = @{ proto = @(); nullguards = @(); input = @('before', 'swallow-start', 'swallow-mid', 'swallow-end', 'after-start', 'after-end') }[$Preset]
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"
@@ -102,6 +104,23 @@ function Shot($proc, $name) {
     } catch { Write-Output "shot ${name}: skipped ($_)" }
 }
 
+# The preset's mark shots: one PrintWindow shot when the log first shows `coop: test mark <name>` (the kit's scripted
+# input writes it). The log is read shared, as the emulator keeps it open.
+$markShot = @{}
+function Shot-Marks($proc) {
+    if (-not (Test-Path $log)) { return }
+    try {
+        $f = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite,Delete')
+        try { $text = (New-Object IO.StreamReader($f)).ReadToEnd() } finally { $f.Close() }
+    } catch { return }
+    foreach ($n in $markShots) {
+        if (-not $markShot.ContainsKey($n) -and $text -match "coop: test mark $([regex]::Escape($n))(\s|$)") {
+            $markShot[$n] = $true
+            Shot $proc $n
+        }
+    }
+}
+
 # Relative path + size + SHA-256 of every file under a folder, for comparing a copy with its source.
 function Get-Tree($dir) {
     $base = (Resolve-Path -LiteralPath $dir).Path
@@ -140,7 +159,7 @@ try {
     # Only this run's log may be judged: move the kit's old log and this folder's old results away first.
     if (Test-Path $log) { Move-Item $log "$Out\eden_log.before.txt" -Force }
     if (Test-Path $log) { throw "could not move the old $log away: not started" }
-    foreach ($f in 'eden_log.txt', 'listen.txt', 'listen-err.txt', 'title.png', 'playing.png', 'end.png') {
+    foreach ($f in @('eden_log.txt', 'listen.txt', 'listen-err.txt', 'title.png', 'playing.png', 'end.png') + @($markShots | ForEach-Object { "$_.png" })) {
         Remove-Item "$Out\$f" -Force -ErrorAction SilentlyContinue
         if (Test-Path "$Out\$f") { throw "could not remove the old $Out\${f}: not started" }
     }
@@ -156,7 +175,9 @@ try {
     $start = Get-Date
     $marks = @(@{ at = 50; n = 'title' }, @{ at = [int]($Seconds * 0.6); n = 'playing' }, @{ at = $Seconds; n = 'end' })
     foreach ($m in $marks) {
-        while (((Get-Date) - $start).TotalSeconds -lt $m.at -and -not $p.HasExited) { Start-Sleep 2 }
+        while (((Get-Date) - $start).TotalSeconds -lt $m.at -and -not $p.HasExited) {
+            if ($markShots.Count) { Start-Sleep -Milliseconds 250; Shot-Marks $p } else { Start-Sleep 2 }
+        }
         if ($p.HasExited) { Write-Output "game exited early (code $($p.ExitCode))"; break }
         Shot $p $m.n
     }
