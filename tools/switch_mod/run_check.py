@@ -90,8 +90,16 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("5 os: thread started", r"^os selftest: thread tick 1, "),
         ("5 os: thread ticked 10x", r"^os selftest: thread tick 10, "),
         ("6 os: mutex contended", r"^os selftest: mutex: game took it \d+ times, waited \(>1 ms\) [1-9]\d* times"),
+        ("6 os: try_lock got it and saw it held",
+         r"^os selftest: try_lock: got it [1-9]\d* times, saw it held [1-9]\d* times"),
+        # 0 after at least 45 ms (the self-test's own bound) with no notify; 1 when the game thread notifies.
+        ("6 os: cond timeout 0 and notify 1",
+         r"^os selftest: cond: wait 50 ms with no notify returned 0 after (4[5-9]|[5-9]\d|\d{3,})\d{3} us; "
+         r"notified wait returned 1 after \d+ us$"),
+        ("6 os: random not zero and differs", r"^os selftest: random: 32 bytes, first 8 0x[0-9a-f]+, not all zero, "
+         r"two calls differ$"),
         ("7 os: file round trip", r"^os selftest: file: wrote ok, read ok 4096 bytes"),
-        ("8 os: self-test verdict", r"^os selftest: PASS"),
+        ("8 os: self-test verdict", r"^os selftest: PASS \(thread, mutex, try_lock, cond, random,"),
     ], [
         ("8 no self-test FAIL", r"^os selftest: FAIL"),
         ("5 no thread error", r"^threads: "),

@@ -3,12 +3,14 @@
 // calls directly (coop_platform_static.h). Sockets are platform_net.cpp's (piece c).
 //
 // - Threads: nn::os threads with stacks from our arena, priority nn::os's default, the process's default core unless
-//   one is asked for.
-// - Locks: nn::os mutexes (not recursive) and condition variables in our arena; random bytes from the system.
+//   one is asked for. Priority 24, below the game's threads (nn_imports.h kCoopPriority says why).
+// - Locks: nn::os mutexes (not recursive) and condition variables in our arena.
+// - Random: nn::crypto's cryptographic source (csrng), never nn::os::GenerateRandomBytes (TinyMT).
 // - Time: the system tick over the system's own tick frequency (read, never assumed).
 // - Memory: our own arena (arena.h) in this module's bss, COOP_ARENA_BYTES big, never the game's heap.
 // - Files: the SD card, mounted as "coopsd" on first use, under config/oot-coop/ (on an emulator its sdmc folder).
-//   Writes go to "<file>.tmp" first and replace the file by a rename, so a file is never half written.
+//   Writes go to "<file>.tmp" first (flushed), then replace the file by a rename, so a file is never half
+//   written; a read that finds no file takes a left "<file>.tmp" (a write cut off between delete and rename).
 // - Log: the kernel's debug string (svc 0x27), which the emulator's log shows; one "coop-proto: " line per call
 //   (the module's one log tag, which tools/switch_mod/run_check.py reads).
 #include <coop_platform_static.h>
@@ -33,7 +35,7 @@ constexpr size_t kDefaultStack = 128 * 1024;
 constexpr size_t kMinStack = 16 * 1024;
 
 alignas(0x1000) uint8_t g_arena_mem[COOP_ARENA_BYTES];
-coop_arena::Arena g_arena;
+constinit coop_arena::Arena g_arena;
 alignas(16) uint8_t g_arena_lock[nn::os::kMutexTypeBytes];
 alignas(16) uint8_t g_fs_lock[nn::os::kMutexTypeBytes];
 bool g_ready = false;
@@ -174,8 +176,8 @@ COOP_EXPORT void* coop_plat_thread_start(void (*fn)(void* arg), void* arg, int c
     }
     rec->stack = mem;
     const uint32_t r = core < 0
-        ? nn::os::CreateThread(TypeOf(rec), fn, arg, mem, size, nn::os::kDefaultPriority)
-        : nn::os::CreateThread(TypeOf(rec), fn, arg, mem, size, nn::os::kDefaultPriority, core);
+        ? nn::os::CreateThread(TypeOf(rec), fn, arg, mem, size, nn::os::kCoopPriority)
+        : nn::os::CreateThread(TypeOf(rec), fn, arg, mem, size, nn::os::kCoopPriority, core);
     if (r != 0) {
         LogResult("threads: CreateThread failed, result", r);
         coop_plat_mem_free(mem);
@@ -242,10 +244,10 @@ COOP_EXPORT void coop_plat_cond_free(void* cond) {
     coop_plat_mem_free(cond);
 }
 
-// ---- random (the system's own source)
+// ---- random: the system's cryptographic source (keys and join codes come from it; never TinyMT)
 COOP_EXPORT int coop_plat_random_fill(void* out, size_t n) {
     if (!out) return -1;
-    if (n) nn::os::GenerateRandomBytes(out, n);
+    if (n) nn::crypto::GenerateCryptographicallyRandomBytes(out, n);
     return 0;
 }
 
@@ -280,10 +282,15 @@ COOP_EXPORT int coop_plat_file_read(const char* rel, void** buf, size_t* n) {
     *buf = nullptr;
     *n = 0;
     char path[kPathMax];
-    if (!coop_os_util::JoinPath(path, sizeof(path), kRoot, rel, nullptr)) return -1;
+    char tmp[kPathMax];
+    if (!coop_os_util::JoinPath(path, sizeof(path), kRoot, rel, nullptr) ||
+        !coop_os_util::JoinPath(tmp, sizeof(tmp), kRoot, rel, ".tmp"))
+        return -1;
     if (!g_ready) coop_plat_os_init();
     nn::os::LockMutex(FsLock());
-    const int r = SdReady() ? ReadLocked(path, buf, n) : -1;
+    // A .tmp is only ever renamed over the file after it was written whole and flushed: when the file is missing
+    // (a write cut off after the delete), the .tmp is the newest complete copy.
+    const int r = SdReady() ? (ReadLocked(path, buf, n) == 0 ? 0 : ReadLocked(tmp, buf, n)) : -1;
     nn::os::UnlockMutex(FsLock());
     return r;
 }

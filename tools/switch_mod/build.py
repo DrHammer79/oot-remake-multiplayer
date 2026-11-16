@@ -109,6 +109,13 @@ def main() -> int:
         sys.exit("build: the module would not lift or would not link in the game:\n  " + "\n  ".join(problems))
     imports = lift_check.imports(lift_check.Elf(elf.read_bytes()))
     print("build: imports (rtld links them by name): " + " ".join(imports))
+    # The module's own _init (switch/proto/main.cpp) runs no .init_array: a C++ static constructor would never run
+    # (a global coop::os::Mutex would stay without a handle, so no locking). Until _init runs them (v1 step 8 f1),
+    # refuse a module that has any.
+    for name in (".init_array", ".preinit_array", ".ctors"):
+        sec = lift_check.Elf(elf.read_bytes()).section(name)
+        if sec is not None and sec.size:
+            sys.exit(f"build: the module has {name} ({sec.size} bytes): static constructors that _init never runs")
     libc = [n for n in imports if n in ("memset", "memcpy", "memmove") or n.startswith("__cxa_")]
     if libc:  # freestanding: the compiler asked for a C/C++ runtime the module does not have
         sys.exit("build: the module needs a runtime it has none of: " + " ".join(libc))

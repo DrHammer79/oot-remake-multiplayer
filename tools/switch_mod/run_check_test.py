@@ -32,9 +32,12 @@ OS_RUN = PROTO_RUN + [
 ] + [f"os selftest: thread tick {k}, now_us {81234567 + k * 120000} (+120000)" for k in range(1, 11)] + [
     "os selftest: thread ticks 10, now_us delta min 120000 max 121000",
     "os selftest: mutex: game took it 70 times, waited (>1 ms) 6 times, longest 19876 us; counter 80 (expected 80)",
+    "os selftest: try_lock: got it 31 times, saw it held 4 times (never waited)",
+    "os selftest: cond: wait 50 ms with no notify returned 0 after 50213 us; notified wait returned 1 after 16890 us",
+    "os selftest: random: 32 bytes, first 8 0x9f3c11d2a07e5b44, not all zero, two calls differ",
     "os selftest: file: wrote ok, read ok 4096 bytes, hash out 0x1 in 0x1",
     "os selftest: arena after: 8388608 bytes, used 0, peak 132176, largest free 8388608, refused/bad 0",
-    "os selftest: PASS (thread, mutex, now_us, file, arena)",
+    "os selftest: PASS (thread, mutex, try_lock, cond, random, now_us, file, arena)",
 ]
 
 CODEMEM_RUN = [
@@ -109,6 +112,38 @@ class OsPresetTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any(r.startswith("FAIL 8 no self-test FAIL") for r in rep), rep)
         self.assertTrue(any(r.startswith("FAIL 7 SD card mounted") for r in rep), rep)
+
+    def test_try_lock_never_held_fails(self):
+        lines = [x.replace("saw it held 4 times", "saw it held 0 times") for x in OS_RUN]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 6 os: try_lock got it and saw it held", rep)
+
+    def test_cond_timeout_must_be_0_after_45_ms(self):
+        for bad in ("returned 1 after 50213 us;", "returned 0 after 12000 us;", "returned 0 after 900 us;"):
+            lines = [x.replace("returned 0 after 50213 us;", bad) for x in OS_RUN]
+            ok, rep = run("os", lines, self.LISTEN)
+            self.assertIn("FAIL 6 os: cond timeout 0 and notify 1", rep, bad)
+        for good in ("returned 0 after 45000 us;", "returned 0 after 120000 us;", "returned 0 after 1500000 us;"):
+            lines = [x.replace("returned 0 after 50213 us;", good) for x in OS_RUN]
+            ok, rep = run("os", lines, self.LISTEN)
+            self.assertNotIn("FAIL 6 os: cond timeout 0 and notify 1", rep, good)
+
+    def test_cond_notify_must_wake_with_1(self):
+        lines = [x.replace("notified wait returned 1 after", "notified wait returned 0 after") for x in OS_RUN]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 6 os: cond timeout 0 and notify 1", rep)
+
+    def test_random_all_zero_or_same_fails(self):
+        for bad in (", ALL ZERO, two calls differ", ", not all zero, two calls SAME"):
+            lines = [x.replace(", not all zero, two calls differ", bad) for x in OS_RUN]
+            ok, rep = run("os", lines, self.LISTEN)
+            self.assertIn("FAIL 6 os: random not zero and differs", rep, bad)
+
+    def test_old_verdict_without_the_new_parts_fails(self):
+        lines = [x if not x.startswith("os selftest: PASS") else "os selftest: PASS (thread, mutex, now_us, file, arena)"
+                 for x in OS_RUN]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 8 os: self-test verdict", rep)
 
     def test_failed_file_read_fails(self):
         lines = [x.replace("read ok 4096", "read FAILED 0") for x in OS_RUN]

@@ -27,6 +27,10 @@ struct Tick {       // nn::os::Tick: 8 bytes, returned in x0
 inline constexpr size_t kThreadTypeBytes = 0x400;
 inline constexpr size_t kMutexTypeBytes = 0x40;
 inline constexpr int kDefaultPriority = 16;  // nn::os's default; 0 = highest, 31 = lowest for a game
+// The co-op's threads: below the game's (16 and up for its main and render threads), so a co-op thread that
+// spins can never take the CPU from the game; the cost is that a game busy on every core delays co-op, never
+// the other way round. Same default core as the game's own threads (core -1); a caller may ask for one.
+inline constexpr int kCoopPriority = 24;
 
 // _ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mi
 uint32_t CreateThread(ThreadType* thread, void (*fn)(void*), void* arg, void* stack, unsigned long stack_size,
@@ -65,7 +69,6 @@ void BroadcastConditionVariable(ConditionVariableType* cond);
 // _ZN2nn2os26TimedWaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9MutexTypeENS_8TimeSpanE
 int TimedWaitConditionVariable(ConditionVariableType* cond, MutexType* mutex, TimeSpan timeout);
 
-void GenerateRandomBytes(void* out, unsigned long size);  // _ZN2nn2os19GenerateRandomBytesEPvm
 
 Tick GetSystemTick();                              // _ZN2nn2os13GetSystemTickEv
 long GetSystemTickFrequency();                     // _ZN2nn2os22GetSystemTickFrequencyEv
@@ -99,4 +102,10 @@ uint32_t RenameFile(const char* from, const char* to);  // _ZN2nn2fs10RenameFile
 uint32_t CreateDirectory(const char* path);        // _ZN2nn2fs15CreateDirectoryEPKc
 
 }  // namespace fs
+
+namespace crypto {
+// The system's cryptographic random source (csrng through the SDK), not nn::os::GenerateRandomBytes (TinyMT):
+// co-op makes player keys and join codes from it. sdk exports it, so the module links it or does not load.
+void GenerateCryptographicallyRandomBytes(void* out, unsigned long size);  // _ZN2nn6crypto36GenerateCryptographicallyRandomBytesEPvm
+}  // namespace crypto
 }  // namespace nn
