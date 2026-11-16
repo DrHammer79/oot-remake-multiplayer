@@ -105,7 +105,7 @@ TEST_CASE("pad hook: players 2-4 are kept and never held back") {
     CHECK(h.pad(0).buttons == (kL | kR | kMinus));
 }
 
-TEST_CASE("pad hook: L+R then Minus opens the menu; the game gets no buttons and centred sticks") {
+TEST_CASE("pad hook: L+R then Minus opens the menu, the game gets no buttons and centred sticks") {
     Hook h;
     CHECK(Read(h, kL | kR, 0).buttons == (kL | kR));
     const NpadState opening = Read(h, kL | kR | kMinus, 16, 0, 32000);
@@ -121,7 +121,7 @@ TEST_CASE("pad hook: L+R then Minus opens the menu; the game gets no buttons and
     CHECK(Kinds(h) == std::vector<int>{COOP_UI_CONFIRM, COOP_UI_UP});
 }
 
-TEST_CASE("pad hook: Minus closes; buttons held then stay from the game until let go") {
+TEST_CASE("pad hook: Minus closes, buttons held then stay from the game until let go") {
     Hook h;
     Open(h, 0);
     Read(h, kB, 100);
