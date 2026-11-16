@@ -392,8 +392,23 @@ void Scene(CoopDrawList* l, float s) {
     coop_draw_image(l, COOP_IMAGE_HEART_0, 24.5f * s, 5.5f * s, 27.5f * s, 8.5f * s, 0xC0FFFFFFu);
 }
 
-const char* kGoldenSmall = "TODO";
-const char* kGoldenLargeHash = "TODO";
+// Taken from CI (run 43789490047, linux gcc), checked by eye: the rounded box, the disc in a ring, the triangle,
+// the pentagon outline with text and the heart image inside. Alpha only; the large hash covers every byte.
+const char* kGoldenSmall =
+    "\n"
+    "                                \n"
+    " .=#%@@@@%###########@%%%###=.  \n"
+    " =#%@%%%%@%##%######@@@@@@@@%=  \n"
+    " #%@%@@@@%@%#@@%####@%##%%%%@#  \n"
+    " #@%@@@@@@%@#@@@@%#%@%@@###%@%  \n"
+    " #@%@@@@@@%@#@@@@@@%@#@@%%@@@%  \n"
+    " #@%@@@@@@%@#@@@@@@%@%##%@@%@%  \n"
+    " #@%@@@@@@%@#@@@@%##@@##%@%%@@  \n"
+    " #%@%@@@@%@%#@@%####@@##%%%%@@  \n"
+    " =#%@%%%%@%##%######%@@@@@@@@=  \n"
+    " .=#%@@@@%###########%@@@%%#=.  \n"
+    "                                \n";
+const char* kGoldenLargeHash = "118765999af04047";
 
 }  // namespace
 
