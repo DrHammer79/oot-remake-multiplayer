@@ -1,0 +1,23 @@
+# ExeFS runs (run_fritchii.ps1): title -> Continue on the last save, then walk around for a while,
+# so the module's hooks run under normal play. Steps as in tools/autotest/scenarios/load.txt + walk.A.txt.
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 600
+mark loaded
+stick 0 0.5 90
+hold LSTICK_UP+A 90
+stick 1 0 60
+stick 0 -1 90
+stick -1 0 60
+wait 300
+stick 0 0.5 120
+stick 0 -1 120
+wait 300
+mark walked
