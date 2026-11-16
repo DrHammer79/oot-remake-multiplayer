@@ -3,6 +3,7 @@
 // Difficulty, the rules (coop_difficulty.h). No emulator code.
 
 #include "coop_difficulty.h"
+#include "coop_dungeon.h"
 
 #include <algorithm>
 #include <array>
@@ -555,6 +556,10 @@ std::string_view TreatmentWhy(std::string_view name, std::uint64_t hash) {
     return rule != nullptr ? rule->why : std::string_view{};
 }
 
+bool ExtrasIn(std::string_view scene) {
+    return !CoopDungeon::IsDungeonScene(scene);
+}
+
 bool GetsExtras(std::string_view name, std::uint64_t hash, bool has_life, bool special) {
     if (special || !has_life || hash == 0 || hash == ~std::uint64_t{0}) {
         return false;
@@ -694,6 +699,17 @@ std::size_t Extras::Plan(std::string_view scene, const std::vector<Original>& wa
         scene_ = std::string(scene);
     }
     if (boss_here || count_pct <= 100) {
+        return 0;
+    }
+    if (!ExtrasIn(scene)) {
+        // Player report 111: in a dungeon an extra is made with no placement
+        // data, so no DefaultDungeonRoomIndex, and a Deku Baba extra never
+        // woke in its owner's game either (the room check). Weight instead.
+        for (const Original& o : walk) {
+            if (ExtraCount(o.hash, count_pct) > 0) {
+                no_spot_.insert(o.hash);
+            }
+        }
         return 0;
     }
     std::vector<const Original*> sorted;

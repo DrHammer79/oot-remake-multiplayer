@@ -635,6 +635,27 @@ TEST_CASE("difficulty: water enemies get their weight, never a land spot") {
   }
 }
 
+TEST_CASE("difficulty: no extras in a dungeon, each gets its weight instead (player report 111)") {
+  CHECK(CoopDifficulty::ExtrasIn("Lake"));
+  CHECK(CoopDifficulty::ExtrasIn("KokiriForest_Child"));
+  CHECK_FALSE(CoopDifficulty::ExtrasIn("InsideTheDekuTree"));
+  CHECK_FALSE(CoopDifficulty::ExtrasIn("DodongoCavern"));
+  World w;
+  const World::Data& d = w.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  const auto walk = Walk(d);
+  CoopDifficulty::Extras e(w.Lookup());
+  CHECK(e.Plan("InsideTheDekuTree", walk, 200, false, 0) == 0);
+  CHECK(e.All().empty());
+  for (const auto& o : walk) {
+    CHECK(e.NoSpot(o.hash));  // its life and hits are folded instead
+  }
+  // The same enemies outside a dungeon get their extras.
+  World w2;
+  const World::Data& d2 = w2.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  CoopDifficulty::Extras f(w2.Lookup());
+  CHECK(f.Plan("Lake", Walk(d2), 200, false, 0) > 0);
+}
+
 TEST_CASE("difficulty: every game plans the same extras whatever it has loaded and wherever its enemies walked") {
   World w;
   const World::Data& d =
