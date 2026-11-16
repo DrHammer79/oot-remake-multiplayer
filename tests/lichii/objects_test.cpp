@@ -4589,3 +4589,39 @@ TEST_CASE("objects: a boss is pre-battle while a body plays Sleep or Pre_Battle_
     egg.animation = proto::Animation{"Sleep", 0.0f, 1.0f};
     CHECK(CoopObjects::BossPreBattle({boss, egg}, kGohma) == std::optional<bool>(false));  // not a body
 }
+
+TEST_CASE("objects: a copy boss whose death has begun gets its owner's refused killing hit in its Life step (#105)") {
+    // The owner's Gohma died (its dead remove reaches our copy as a hurt to life 0); her game refuses it outside
+    // her eye. In a fight a boss copy is never written; once her death has begun (the glue's SetDying) the rest
+    // goes into her own Life step (direct), which CoopBossNative lets end her, so the death setting finds her dead.
+    const std::string boss = "Enemy_DungeonBoss_Gohma";
+    for (const bool dying : {false, true}) {
+        CAPTURE(dying);
+        Sync copy;
+        copy.SetHurt(true);
+        if (dying) {
+            copy.SetDying({boss});
+        }
+        const auto gohma = [&boss](std::int32_t life) { return Enemy(0x100, 0x11, life, 0.0f, boss); };
+        Tick(copy, 0, {gohma(3)});
+        const proto::ObjectId id = *copy.IdOf(0x100);
+        Own(copy, id, 2);  // player 2's; we are player 1
+        Tick(copy, 10 * kMs, {gohma(3)});
+        copy.Receive(Dead(id, 2));
+        auto step = Tick(copy, 20 * kMs, {gohma(3)});
+        REQUIRE(step.writes.size() == 1);
+        CHECK(step.writes[0].hurt == 3);
+        CHECK_FALSE(step.writes[0].direct);
+        step = Tick(copy, 500 * kMs, {gohma(3)});
+        if (dying) {
+            REQUIRE(step.writes.size() == 1);
+            CHECK(step.writes[0].direct);
+            CHECK(step.writes[0].hurt == 3);
+            CHECK(step.writes[0].life == 0);
+        } else {
+            CHECK(step.writes.empty());
+        }
+        CHECK(copy.HurtsMissed() == 1);
+        CHECK(copy.BossHitsStepped() == 0);  // (not boss-hits' own-boss rule)
+    }
+}

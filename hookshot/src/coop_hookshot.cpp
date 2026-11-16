@@ -364,17 +364,18 @@ void LogBossNative() {
     if (c.owner_brain == said.owner_brain && c.owner_action == said.owner_action && c.copy_skipped == said.copy_skipped &&
         c.brain_applied == said.brain_applied && c.action_applied == said.action_applied &&
         c.copy_own_run == said.copy_own_run && c.copy_own_late == said.copy_own_late &&
-        c.copy_life_held == said.copy_life_held && c.copy_killed == said.copy_killed) {
+        c.copy_life_held == said.copy_life_held && c.copy_killed == said.copy_killed &&
+        c.copy_finished == said.copy_finished) {
         return;
     }
     said_ms = now;
     said = c;
     LOG_INFO(Core, "coop: bosses: ours sent {} brain + {} action verbs ({} by plug); copies: {} own skipped, {} brain + "
                    "{} action verbs put in ({} waited for a node), {} own run in our event or after our hit ({} late), "
-                   "{} own minions not made, {} busy; {} own Life steps held at 1, {} let die after the owner's",
+                   "{} own minions not made, {} busy; {} own Life steps held at 1, {} let die after the owner's, {} ended in their death",
              c.owner_brain, c.owner_action, c.plug_actions, c.copy_skipped, c.brain_applied, c.action_applied,
              c.action_waiting, c.copy_own_run, c.copy_own_late, c.minions_stopped, c.busy, c.copy_life_held,
-             c.copy_killed);
+             c.copy_killed, c.copy_finished);
 }
 
 void RunCalls(void* ctx) {

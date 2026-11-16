@@ -115,6 +115,7 @@ void ForgetBosses();  // below: a new session, the title or a new game run
 // Boss bodies whose intro this game has not played (SetUnreadyBosses, below).
 std::mutex g_unready_mutex;
 std::vector<std::string> g_unready;
+std::vector<std::string> g_dying;  // SetDyingBosses (same mutex)
 namespace {
 
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
@@ -1460,6 +1461,7 @@ public:
         {
             std::lock_guard lock(g_unready_mutex);
             sync_.SetUnready(g_unready);
+            sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
         if (const unsigned twice = sync_.ChestsOpenedTwice(); twice != chests_twice_seen_) {
@@ -4120,6 +4122,11 @@ std::optional<bool> LastBossOurs(std::span<const std::string_view> bodies) {
 void SetUnreadyBosses(std::vector<std::string> bodies) {
     std::lock_guard lock(g_unready_mutex);
     g_unready = std::move(bodies);
+}
+
+void SetDyingBosses(std::vector<std::string> bodies) {
+    std::lock_guard lock(g_unready_mutex);
+    g_dying = std::move(bodies);
 }
 
 std::optional<bool> LastBossHurt(std::span<const std::string_view> bodies) {

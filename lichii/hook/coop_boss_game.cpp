@@ -370,6 +370,8 @@ bool Glue::Scenes(Core::System& system, std::uint64_t main, const Local& local, 
     auto& requests = CoopLiveEvents::TheGameRequests();
     if (!scenes_on || !requests.Live()) {
         max_life_cap.reset();
+        CoopBossNative::TheTable().SetDying({});
+        CoopObjects::SetDyingBosses({});
         std::lock_guard lock(searched_mutex);
         searched.clear();  // nothing takes them: none applied late when the rules come on
         return false;
@@ -410,6 +412,18 @@ bool Glue::Scenes(Core::System& system, std::uint64_t main, const Local& local, 
         }
     }
     CoopBossScenes::Actions a = scenes.Tick(here, ours, now_us);
+    // Player report #105 (a black screen after Gohma's death): once her death has begun in any game, our copy is
+    // no copy any more; its own game runs its death (the setting we ask it, its warp and its container).
+    std::vector<std::string> dying;
+    if (local.scene) {
+        for (const auto& room : CoopBoss::Rooms()) {
+            if (room.scene == *local.scene && scenes.phase(room.index) >= CoopBossScenes::Director::Phase::outro) {
+                for (const auto body : CoopBoss::Bodies(room)) dying.emplace_back(body);
+            }
+        }
+    }
+    CoopObjects::SetDyingBosses(dying);
+    CoopBossNative::TheTable().SetDying(std::move(dying));
     for (const auto& line : a.log) {
         LOG_INFO(Core, "coop: boss: {}", line);
     }

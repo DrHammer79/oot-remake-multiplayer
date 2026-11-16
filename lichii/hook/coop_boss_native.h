@@ -126,6 +126,7 @@ struct Counts {
     std::uint64_t copy_own_late = 0;  // a copy's own skipped change made late (event or hit seen after it)
     std::uint64_t copy_life_held = 0; // a copy's own Life step that would have killed it, held at 1
     std::uint64_t copy_killed = 0;    // a copy let die by its Life step after its owner's died
+    std::uint64_t copy_finished = 0;  // a dying copy's Life step that its own rules left alive, ended (#105)
 };
 
 class Table {
@@ -156,6 +157,15 @@ public:
     // last hit id moved, not to one we replayed). A copy then runs its own
     // reaction for kReactSteps.
     void NoteOwnHit(std::uint64_t actor);
+    // The boss's death has begun (the boss glue, every frame: the area rules'
+    // fight is at its death or past it, ours or the owner's; player report
+    // #105, a black screen after Gohma's death). Bodies named here are copies
+    // no more: their own game runs every change of theirs (the death setting
+    // our game was asked, InsideTheDekuTree_BossDie, drives our copy through
+    // its own death, the blue warp and the heart container its prefab makes)
+    // and their Life step is not held (it dies here of its own). The ones
+    // skipped just before are made late. An empty list: none (a new fight).
+    void SetDying(std::vector<std::string> bodies);
 
     // The game's Life step (patch 0007, any game thread), after every other
     // change to the frame's damage `sum`: for a copy boss's Life component
@@ -248,6 +258,8 @@ private:
         bool held = false;
         // Owner: our event ended: send our brain verb as a change.
         bool record_after_event = false;
+        std::uint64_t life_component = 0;  // (Publish's, for SetDying's release)
+        bool dying = false;                // its death has begun (SetDying): its own game runs it
     };
     bool OwnTime(const Entry& e) const;   // the copy's own changes run now
     void Keep(Entry& e, std::variant<BossBrain, BossAction> what);
@@ -267,6 +279,9 @@ private:
     bool brain_on_ = false;
     bool actions_on_ = false;
     bool event_ = false;           // our game runs an event (SetEvent)
+    std::vector<std::string> dying_;  // the bodies whose death has begun (SetDying)
+    bool Dying(std::string_view name) const;
+    void Release(std::uint64_t component);  // its held_life_ slot: let die
     std::uint64_t steps_ = 0;      // Step calls (game frames)
     Counts counts_{};
     std::vector<std::string> notes_;
@@ -277,6 +292,12 @@ private:
     std::array<std::atomic<std::uint64_t>, kMaxHeld> held_life_{};
     std::atomic<std::uint64_t> life_held_{0};
     std::atomic<std::uint64_t> life_killed_{0};
+    std::atomic<std::uint64_t> life_finished_{0};
+    // The Life components of copies whose death has begun (SetDying; kept when the owner's dead remove takes
+    // the boss off the walk's owned list, until the dying list empties). Their Life step ends them: the owner's
+    // death is the boss's, whatever their own game's damage rules let through (player report #105).
+    std::array<std::atomic<std::uint64_t>, kMaxHeld> dying_life_{};
+    void AddDyingLife(std::uint64_t component);
     // The caller's state (frame thread only).
     std::uint64_t block_ = 0;      // our request in guest memory (kRequestSize)
     std::uint64_t main_base_ = 0;  // the game the block belongs to

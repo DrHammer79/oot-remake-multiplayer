@@ -20,3 +20,8 @@ hs-boss-fix-gohma-rev   expect="A:our event: the copy runs its own"  expect="A:t
 [boss-autotest]
 hs-boss-aim-research    expect="A:coop: test aim on Enemy_DungeonBoss_Gohma"  label="aim at Gohma's eye (calibration)"
 hs-boss-full            expect="A:test difficulty custom 300 100 100: set"  expect="B:our own hit: the copy runs its own reaction"  expect="B:Enemy_DungeonBoss_Gohma: now ours"  expect="A:boss beaten"  label="#31 #55 #88 Gohma whole fight, two players"
+
+# gohma-death (player report #105): the host (A) holds a copy Gohma, the guest (B) owns her and kills her; A's
+# game must play her whole death and come back from it (fade, container, blue warp). Header: hs-gohma-death.A.txt.
+[gohma-death]
+hs-gohma-death          expect="B:Dm_Deku_BossOut: our game started the death"  expect="A:its death has begun: the copy runs all its own"  expect="A:Dm_Deku_BossOut: playing it here too"  label="#105 host's copy Gohma dies: no black screen"

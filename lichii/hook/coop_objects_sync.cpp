@@ -1928,6 +1928,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         if (o.hurt_until != 0 && now_us >= o.hurt_until) {
             const auto boss_owner = owners_.find(o.id);
             const bool boss_ours = boss_owner != owners_.end() && boss_owner->second.player == self;
+            const bool dying = std::find(dying_.begin(), dying_.end(), o.name) != dying_.end();
             if (o.life && *o.life > o.hurt_target && IsBoss(o.name) && boss_ours) {
                 // Our boss refused another player's replayed hit (boss-hits, tracker 104, issue 150): the
                 // replay is a template sword hit, and Gohma's damage rules judge it as no eye hit, so only her
@@ -1943,6 +1944,18 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 notes_.emplace_back("a hit our boss's game did not take as a replay: " +
                                     std::to_string(*o.life - o.hurt_target) +
                                     " given to its own Life step (the hitter's game judged it): " + o.name);
+            } else if (o.life && *o.life > o.hurt_target && IsBoss(o.name) && dying) {
+                // A boss copy whose death has begun (player report #105): its game refused the owner's killing
+                // hit (Gohma's damage rules outside her eye) and stood on in her death setting, the host's screen
+                // black for good. The rest goes into its own Life step (never a write), which CoopBossNative
+                // lets end it now (SetDying): her death plays out here as in the owner's game.
+                ++hurt_missed_;
+                LifeWrite w{o.address, o.hurt_target, *o.life - o.hurt_target, std::nullopt};
+                w.direct = true;
+                writes.push_back(w);
+                notes_.emplace_back("a hit the dying boss's game did not take: " +
+                                    std::to_string(*o.life - o.hurt_target) +
+                                    " given to its own Life step (its death has begun): " + o.name);
             } else if (o.life && *o.life != o.hurt_target && IsBoss(o.name)) {
                 // A boss copy is never written (boss-intro, the native rule): its game refused the owner's hit
                 // (Gohma holds her life at 1 outside her weak point), so its life stays what its own game says.

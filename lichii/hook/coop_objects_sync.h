@@ -665,6 +665,10 @@ public:
     // here): listed with object_presence::unready, so the server keeps them
     // with a game whose boss is fighting.
     void SetUnready(std::vector<std::string> names) { unready_ = std::move(names); }
+    // The boss actors whose death has begun (the boss glue; player report #105). A hit such a boss's game did
+    // not take (its owner's killing hit, refused outside Gohma's weak point) is given to its Life step as its
+    // life after the wait, as for any other enemy: its death plays out here (CoopBossNative lets it die).
+    void SetDying(std::vector<std::string> names) { dying_ = std::move(names); }
     static constexpr float kWakeM = 10.0f;
     // Issue 157: the Mover puts the owner's animation back on the very next
     // game frame, so a copy whose AI asks for its wake animation once (a
@@ -1138,6 +1142,7 @@ private:
     std::set<std::uint64_t> dead_;    // copies whose owner said dead kDeadGraceUs ago
     bool wake_ = true;
     std::vector<std::string> unready_;
+    std::vector<std::string> dying_;  // SetDying
     std::size_t hurt_taken_ = 0;   // hurts the game took as asked
     std::size_t hurt_late_ = 0;    // late falls put back
     std::size_t hurt_missed_ = 0;  // hurts not taken after the wait (given to the Life step, or lost: never written)
