@@ -11,6 +11,8 @@
 // menu's state over a page source, and the keys as events. coop_own_menu.cpp ties them to CoopPause and the exports.
 #pragma once
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -134,6 +136,57 @@ private:
     coop::ui::MenuModel model_;
     coop::ui::MenuLayout layout_;
 };
+
+// The keyboard's side of coop/ui's PadGate: keys still held when the menu closes (Enter for a confirm, Esc or
+// Backspace for Back, F9) stay co-op's (hos_coop_keys_taken) until they are let go, so the game reads none of them
+// as a new press. `Down`: bool(std::uint32_t vk), the key's state now.
+class KeyLatch {
+public:
+    static constexpr std::array<std::uint32_t, 4> kKeys{0x0D, 0x1B, 0x08, kOpenKey};
+
+    // At close: every one of kKeys held now is latched.
+    template <class Down>
+    void Latch(const Down& down) {
+        for (const std::uint32_t k : kKeys) {
+            if (down(k)) {
+                held_ |= Bit(k);
+            }
+        }
+    }
+    // Whether a latched key is still held (one let go is free again).
+    template <class Down>
+    bool Held(const Down& down) {
+        for (const std::uint32_t k : kKeys) {
+            if ((held_ & Bit(k)) != 0 && !down(k)) {
+                held_ &= ~Bit(k);
+            }
+        }
+        return held_ != 0;
+    }
+
+private:
+    static std::uint32_t Bit(std::uint32_t vk) {
+        for (std::size_t i = 0; i < kKeys.size(); ++i) {
+            if (kKeys[i] == vk) {
+                return 1u << i;
+            }
+        }
+        return 0;
+    }
+    std::uint32_t held_ = 0;
+};
+
+// The typed keys' order (coop_hookshot.cpp TypeKey) by who has focus: the cheats panel first when it is open, or
+// when neither box is open and the cheats are on (F8 opens them), as before the focus stack; but never over the chat
+// box when the box is on top.
+bool CheatsFirst(coop::ui::Owner top, bool cheats_open, bool box_open, bool cheats_on);
+
+// --- Focus over all of co-op's UI (coop_own_menu.cpp; works with or without LICHII_COOP_OWN_MENU). Thread-safe. ---
+// The chat box and the cheats panel say when they open and close (SetFocus); the own menu does it itself.
+void SetFocus(coop::ui::Owner owner, bool on);
+coop::ui::Owner FocusTop();
+// hos_coop_keys_taken's part: the own menu open, or a key held at its close still down. `down`: the key's state now.
+bool KeysTaken(bool (*down)(int vk));
 
 // --- The module's (coop_own_menu.cpp): all do nothing unless LICHII_COOP_OWN_MENU=1. Thread-safe. ---
 bool Enabled();

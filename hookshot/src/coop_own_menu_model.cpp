@@ -85,3 +85,14 @@ std::uint8_t KeyEvent(std::uint32_t vk, bool open, bool typing) {
 }
 
 }  // namespace CoopOwnMenu
+
+namespace CoopOwnMenu {
+
+bool CheatsFirst(coop::ui::Owner top, bool cheats_open, bool box_open, bool cheats_on) {
+    if (top == coop::ui::Owner::chat && box_open) {
+        return false;   // the chat box on top keeps its keys
+    }
+    return cheats_open || (!box_open && cheats_on);
+}
+
+}  // namespace CoopOwnMenu

@@ -315,3 +315,54 @@ TEST_CASE("own menu state: the pointer selects and clicks rows where they were d
     CHECK(menu.Handle(Ev(COOP_UI_CLOSE), p));
     CHECK_FALSE(menu.open());
 }
+
+TEST_CASE("own menu keys: Enter, Esc, Backspace or F9 held at close stay co-op's until let go") {
+    std::vector<std::uint32_t> down{0x0D, 0x1B, 'W'};   // Enter (it confirmed and closed), Esc, and a game key
+    const auto is_down = [&](std::uint32_t vk) {
+        for (const auto d : down) {
+            if (d == vk) return true;
+        }
+        return false;
+    };
+    CoopOwnMenu::KeyLatch latch;
+    CHECK_FALSE(latch.Held(is_down));   // nothing latched: nothing held back
+    latch.Latch(is_down);
+    CHECK(latch.Held(is_down));         // Enter and Esc still down
+    down = {0x1B, 'W'};                 // Enter let go
+    CHECK(latch.Held(is_down));
+    down = {'W', 0x0D};                 // Esc let go; Enter pressed again after the close: the game's
+    CHECK_FALSE(latch.Held(is_down));
+    down = {0x08, CoopOwnMenu::kOpenKey};
+    latch.Latch(is_down);               // Backspace (Back) and F9 (close) held
+    CHECK(latch.Held(is_down));
+    down = {};
+    CHECK_FALSE(latch.Held(is_down));
+    down = {'W'};                       // only the four keys are ever latched
+    latch.Latch(is_down);
+    CHECK_FALSE(latch.Held(is_down));
+}
+
+TEST_CASE("own menu focus: the typed keys' order, as before, and the chat box on top keeps its keys") {
+    using coop::ui::Owner;
+    using CoopOwnMenu::CheatsFirst;
+    // As before the focus stack: cheats first when open, or when the box is closed and the cheats are on.
+    for (const Owner top : {Owner::none, Owner::cheats, Owner::menu}) {
+        CHECK(CheatsFirst(top, true, false, false));
+        CHECK(CheatsFirst(top, true, true, true));
+        CHECK(CheatsFirst(top, false, false, true));
+        CHECK_FALSE(CheatsFirst(top, false, true, true));
+        CHECK_FALSE(CheatsFirst(top, false, false, false));
+    }
+    CHECK_FALSE(CheatsFirst(Owner::chat, true, true, true));   // the box on top: its keys
+    CHECK(CheatsFirst(Owner::chat, true, false, false));       // (a stale top with no box open does not count)
+
+    coop::ui::FocusStack f;   // the chat box takes the keyboard only; the menu the pad too
+    f.Push(Owner::chat);
+    CHECK(f.TakesKeys());
+    CHECK_FALSE(f.MasksPad());
+    f.Push(Owner::menu);
+    CHECK(f.MasksPad());
+    f.Pop(Owner::menu);
+    CHECK_FALSE(f.MasksPad());
+    CHECK(f.Top() == Owner::chat);
+}
