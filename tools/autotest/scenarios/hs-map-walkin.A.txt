@@ -24,7 +24,7 @@ press A
 wait 300
 press A
 wait 2400
-place -44.3 109.72 -17.63  # the cave-side start (StartPos MountainTrail_DodongoCavernSide): a warp on hookshot ignores the start name and lands at the map default (-38 93 57, run 20261115-150314: the walk hit a wall)
+place -53.5 123.5 -29.5   # past DodongoCavern_CrackRock (closed in the lane saves: run 20261115-163138 stopped at it), next to the entrance trigger (FieldAndDungeonEntranceEventRequestActor -55.27 124.90 -31.26); a warp on hookshot ignores the start name
 wait 240
 goto -55.3 -31.3 0.5 600   # into the entrance: the scene change
 wait 2400
