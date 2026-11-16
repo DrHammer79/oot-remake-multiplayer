@@ -92,11 +92,11 @@ TEST_CASE("payload build: before Install, Platform() is the adapter's functions 
     const CoopPlatform &p = coop::os::Platform();
     CHECK(p.version == COOP_PLATFORM_VERSION);
     CHECK(p.size == sizeof(CoopPlatform));
-    CHECK(p.now_us == &coop_plat_now_us);
-    CHECK(p.file_write == &coop_plat_file_write);
-    CHECK(p.sock_open == &coop_plat_sock_open);
-    CHECK(p.read == nullptr);
-    CHECK(p.call == nullptr);
+    CHECK((p.now_us == &coop_plat_now_us));
+    CHECK((p.file_write == &coop_plat_file_write));
+    CHECK((p.sock_open == &coop_plat_sock_open));
+    CHECK((p.read == nullptr));
+    CHECK((p.call == nullptr));
 }
 
 TEST_CASE("payload build: time, log and memory call coop_plat_* directly") {

@@ -98,7 +98,7 @@ bool IsModPath(const char *rel) {
     if (!rel || !*rel || rel[0] == '/') return false;
     const char *part = rel;
     for (const char *c = rel;; ++c) {
-        if (*c == '\' || *c == ':') return false;
+        if (*c == '\\' || *c == ':') return false;
         if (*c == '/' || *c == '\0') {
             const std::size_t len = static_cast<std::size_t>(c - part);
             if (len == 0) return false;                                     // "a//b" or a trailing '/'
