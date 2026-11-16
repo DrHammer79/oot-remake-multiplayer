@@ -671,6 +671,49 @@ TEST_CASE("difficulty: no extras in a dungeon, each gets its weight instead (pla
   CHECK(g.NoSpots() == walk3.size());
 }
 
+TEST_CASE("difficulty: in a dungeon an enemy whose own create words were caught gets its extras (player report 111)") {
+  // The same Babas: as on the overworld once each one's placed create words
+  // are known (its extras are made with them), its weight when they are not.
+  World w;
+  const World::Data& d = w.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  const auto walk = Walk(d);
+  World lake;
+  const World::Data& l = lake.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  CoopDifficulty::Extras overworld(lake.Lookup());
+  const std::size_t made = overworld.Plan("Lake", Walk(l), 200, false, 0);
+  REQUIRE(made > 0);
+
+  CoopDifficulty::Extras all(w.Lookup());
+  all.SetDungeonSource([](std::uint64_t) { return true; });
+  CHECK(all.Plan("InsideTheDekuTree", walk, 200, false, 0) == made);
+  CHECK(all.NoSpots() == overworld.NoSpots());
+  for (const auto& e : all.All()) {
+    const bool from_walk =
+        std::any_of(walk.begin(), walk.end(), [&](const auto& o) { return o.hash == e.source && o.name == e.name; });
+    CHECK(from_walk);  // each knows the placed enemy whose words it is made with
+  }
+
+  // Only the first enemy's words caught: only it may get extras, every other one its weight.
+  const std::uint64_t first = walk.front().hash;
+  CoopDifficulty::Extras one(w.Lookup());
+  one.SetDungeonSource([&](std::uint64_t h) { return h == first; });
+  one.Plan("InsideTheDekuTree", walk, 200, false, 0);
+  for (const auto& e : one.All()) {
+    CHECK(e.source == first);
+  }
+  for (const auto& o : walk) {
+    if (o.hash != first) {
+      CHECK(one.NoSpot(o.hash));
+    }
+  }
+
+  // None caught (or the switch off: no test set): no extras, weight for all.
+  CoopDifficulty::Extras none(w.Lookup());
+  none.SetDungeonSource([](std::uint64_t) { return false; });
+  CHECK(none.Plan("InsideTheDekuTree", walk, 200, false, 0) == 0);
+  CHECK(none.NoSpots() == walk.size());
+}
+
 TEST_CASE("difficulty: every game plans the same extras whatever it has loaded and wherever its enemies walked") {
   World w;
   const World::Data& d =

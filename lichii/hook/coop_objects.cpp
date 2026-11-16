@@ -319,6 +319,9 @@ constexpr u64 kLifeMax = 0x1c18;
 constexpr u64 kLifeCopy = 0x1ca8;  // life and max as last mirrored
 constexpr u64 kActorPlacement = 0x3d8;
 constexpr u64 kPlacementHash = 0x88;
+// The game's placement creator (main+0x109f110): its requestCreateActorAsync
+// call returns here (the `from` of a placed actor's create event, report 111).
+constexpr u64 kPlacementCreateReturn = 0x109f368;
 constexpr std::size_t kMaxWalk = 8192;
 
 // LICHII_COOP_OBJECTS_CHEAT: what it sets is in coop_cheat_items.h.
@@ -2158,6 +2161,8 @@ private:
             ForgetBosses();
             boss_hit_ids_.clear();
             extras_.Reset();  // difficulty: that run's extra enemies are gone with it
+            placed_creates_.clear();  // report 111: that run's placement data is gone
+            placed_words_.clear();
             horde_.Reset();
             {
                 ScrubsBox& box = TheScrubs();  // a new game run: its block is gone
@@ -2271,6 +2276,23 @@ private:
                     }
                     LOG_INFO(Core, "coop: actors: create '{}' from main+{:#x} at ({:.1f}, {:.1f}, {:.1f})", e.Name(),
                              e.from >= main_ && main_ != 0 ? e.from - main_ : e.from, place[0], place[1], place[2]);
+                }
+                // Player report 111: a placed enemy's create words, from the
+                // game's placement creator, kept until its actor is first seen.
+                if ((e.flags & CoopActorEvents::kOwn) == 0 && main_ != 0 && e.from == main_ + kPlacementCreateReturn &&
+                    (e.params[0] | e.params[1] | e.params[2] | e.params[3]) != 0 && e.Name().starts_with("Enemy_")) {
+                    PlacedCreate p;
+                    p.name = e.Name();
+                    for (int i = 0; i < 3; ++i) {
+                        const auto bits = static_cast<u32>(e.place[i]);
+                        std::memcpy(&p.place[i], &bits, 4);
+                    }
+                    std::copy_n(e.params, 4, p.words.begin());
+                    p.ms = SteadyNowMs();
+                    placed_creates_.push_back(std::move(p));
+                    if (placed_creates_.size() > kPlacedCreatesKept) {
+                        placed_creates_.erase(placed_creates_.begin());
+                    }
                 }
                 // Player report 111 research: an enemy's create argument +0x60..+0x80 (the
                 // placement's data for placed ones; ours, extras included, leave it 0).
@@ -2406,6 +2428,26 @@ private:
     std::int64_t actor_hit_sum_ = 0;
     std::size_t actor_event_lines_ = 0;
     std::size_t actor_param_lines_ = 0;  // report 111 research: create argument lines for enemies
+    // Player report 111: placed enemies' create words (create argument
+    // +0x60..+0x80 from the placement creator), by name and place until the
+    // walk first sees the actor, then by its placement hash.
+    struct PlacedCreate {
+        std::string name;
+        std::array<float, 3> place{};
+        std::array<u64, 4> words{};
+        u64 ms = 0;
+    };
+    struct PlacedWords {
+        std::array<u64, 4> words{};
+        u64 ms = 0;
+    };
+    static constexpr std::size_t kPlacedCreatesKept = 512;
+    static constexpr u64 kPlacedCreateMaxAgeMs = 60'000;
+    std::vector<PlacedCreate> placed_creates_;
+    std::unordered_map<u64, PlacedWords> placed_words_;
+    std::string placed_scene_;
+    u64 placed_scene_ms_ = 0;
+    std::size_t placed_lines_ = 0;
     u64 actor_events_said_us_ = 0;
 #endif
 
@@ -2632,6 +2674,7 @@ private:
                 const auto placement = r.Ptr(a + kActorPlacement);
                 known.second = placement ? r.Get<u64>(*placement + kPlacementHash).value_or(0) : 0;
                 CoopPickups::Note(known.first, known.second);  // one-time pickups (docs/items.md)
+                BindPlacedWords(r, a, known.first, known.second);  // report 111
                 if (IsShared(known.first) && vtables_logged_.insert(known.first).second) {
                     // The set-matrix node (0x2622e50) writes +0x31c..+0x34b and
                     // then calls vtable slot 0x218 (actor, 0): what does it do?
@@ -3050,6 +3093,46 @@ private:
         return IsRolled(name) || IsHatchingEgg(name) || IsHatchling(name) || IsAnnounced(name) || IsOwnPuzzle(name) ||
                IsFish(name);
     }
+    static bool ExtraParamsOn() {
+        static const bool on = EnvText("LICHII_COOP_EXTRA_PARAMS") == "1";
+        return on;
+    }
+    // Player report 111: an actor first seen with a placement hash takes the
+    // words of the placed create of its name nearest to it (within 1 m: it
+    // was made there moments ago).
+    template <class Reader>
+    void BindPlacedWords(Reader& r, u64 actor, const std::string& name, u64 hash) {
+        if (hash == 0 || hash == ~u64{0} || placed_creates_.empty() || !name.starts_with("Enemy_")) {
+            return;
+        }
+        float at[3] = {};
+        for (int i = 0; i < 3; ++i) {
+            at[i] = r.template Get<float>(actor + kActorPosition + 4 * u64(i)).value_or(0.0f);
+        }
+        const u64 now = SteadyNowMs();
+        auto best = placed_creates_.end();
+        float best_d = 1.0f;
+        for (auto it = placed_creates_.begin(); it != placed_creates_.end(); ++it) {
+            if (it->name != name || now - it->ms > kPlacedCreateMaxAgeMs) {
+                continue;
+            }
+            const float d = std::hypot(it->place[0] - at[0], it->place[1] - at[1], it->place[2] - at[2]);
+            if (d <= best_d) {
+                best_d = d;
+                best = it;
+            }
+        }
+        if (best == placed_creates_.end()) {
+            return;
+        }
+        placed_words_[hash] = {best->words, now};
+        placed_creates_.erase(best);
+    }
+    const PlacedWords* PlacedWordsFor(u64 hash) const {
+        const auto it = placed_words_.find(hash);
+        // (bound in this scene: a scene's placement data lives while it does)
+        return it != placed_words_.end() && it->second.ms + 10'000 >= placed_scene_ms_ ? &it->second : nullptr;
+    }
     void PlanExtras(const std::string& scene, const std::vector<Seen>& seen, std::vector<CoopSpawn::Copy>& enemies) {
         std::vector<CoopDifficulty::Extras::Original> originals;
         bool boss = false;
@@ -3060,6 +3143,21 @@ private:
             if (CoopDifficulty::GetsExtras(s.name, s.hash, s.life && s.life->max > 0, special)) {
                 originals.push_back({s.name, s.hash});
             }
+        }
+        // Player report 111 (LICHII_COOP_EXTRA_PARAMS=1, research until proven
+        // in game): an extra is made with its placed enemy's own create words,
+        // so it has that enemy's instance parameters (its dungeon room among
+        // them); in a dungeon only such enemies get extras, the others their
+        // weight. Words caught before this scene began are not used.
+        if (scene != placed_scene_) {
+            placed_scene_ = scene;
+            placed_scene_ms_ = SteadyNowMs();
+        }
+        const bool copy_words = ExtraParamsOn();
+        if (copy_words) {
+            extras_.SetDungeonSource([this](std::uint64_t h) { return PlacedWordsFor(h) != nullptr; });
+        } else {
+            extras_.SetDungeonSource(nullptr);
         }
         const std::uint16_t count = CoopDifficulty::Now().count_pct;
         const std::size_t no_spot = extras_.NoSpots();
@@ -3082,6 +3180,17 @@ private:
             c.place = false;  // its own AI moves it; the sync places it where it is a copy
             c.remakes = 0;    // one that went is not made again
             c.real = true;    // the game's own enemy, never a stand-in
+            if (copy_words) {
+                if (const PlacedWords* w = PlacedWordsFor(e.source)) {
+                    c.placed_words = w->words;
+                    if (placed_lines_ < 20 && e.address == 0) {
+                        ++placed_lines_;
+                        LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x} is made with its placed enemy's create "
+                                       "words {:#x} {:#x} {:#x} {:#x} (report 111)",
+                                 e.hash, e.name, e.source, w->words[0], w->words[1], w->words[2], w->words[3]);
+                    }
+                }
+            }
             enemies.push_back(std::move(c));
         }
     }
