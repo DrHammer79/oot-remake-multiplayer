@@ -16,6 +16,9 @@ press A
 wait 300
 press A
 wait 2400
+setflag HavePlayedEvent.Get_StoneOfFire_DodongoCavernOpne 1   # the cavern open (the event linked to DodongoCavern_CrackRock; the lane saves keep it closed: run 20261115-163138)
+warp DeathMountainTrail_Child   # a reload, so the rock is read again
+wait 1800
 place -53.5 123.5 -29.5   # past DodongoCavern_CrackRock (closed in the lane saves: run 20261115-163138 stopped at it), next to the entrance trigger (FieldAndDungeonEntranceEventRequestActor -55.27 124.90 -31.26); a warp on hookshot ignores the start name
 wait 240
 goto -55.3 -31.3 0.5 600
