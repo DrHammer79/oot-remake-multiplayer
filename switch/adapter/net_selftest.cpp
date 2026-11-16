@@ -73,10 +73,10 @@ ENetPeer *g_peer = nullptr;
 
 void StartEcho(uint64_t frame) {
     g_sock = coop_plat_sock_open(COOP_SOCK_UDP4);
-    CoopAddr any{};
-    any.family = 4;
+    // Loopback only: on an emulator this is a real host socket, and one on 0.0.0.0 can raise a firewall prompt.
+    const CoopAddr here = Loopback(0);
     CoopAddr local{};
-    if (g_sock < 0 || coop_plat_sock_bind(g_sock, &any) != 0 || coop_plat_sock_local(g_sock, &local) != 0) {
+    if (g_sock < 0 || coop_plat_sock_bind(g_sock, &here) != 0 || coop_plat_sock_local(g_sock, &local) != 0) {
         Line().s(g_sock < 0 ? "net: FAIL udp open" : "net: FAIL udp bind");
         if (g_sock >= 0) coop_plat_sock_close(g_sock);
         g_sock = -1;
@@ -103,9 +103,12 @@ void StartConnect(uint64_t frame) {
         g_step = Step::kDone;
         return;
     }
-    g_host = enet_host_create(nullptr, 1, 6, 0, 0);  // 6 = the protocol's channel count
+    // Bound to 127.0.0.1 too: unbound, the first send would bind the host socket to 0.0.0.0 (see StartEcho).
+    ENetAddress here{};
     ENetAddress server{};
     server.port = kServerPort;
+    if (enet_address_set_host_ip(&here, "127.0.0.1") == 0)
+        g_host = enet_host_create(&here, 1, 6, 0, 0);  // port 0 = any; 6 = the protocol's channel count
     if (!g_host || enet_address_set_host_ip(&server, "127.0.0.1") != 0 ||
         !(g_peer = enet_host_connect(g_host, &server, 6, 0))) {
         Line().s("net: FAIL enet host/connect");

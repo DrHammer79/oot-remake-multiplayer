@@ -174,7 +174,7 @@ doctest_discover_tests(coop_tests)
 
 # enet_coop (v1 step 8c) defines the same enet_* symbols as the PC's ENet that coop_tests links: its own program.
 if(TARGET enet_coop)
-  add_executable(enet_coop_tests main.cpp net/enet_coop_test.cpp)
+  add_executable(enet_coop_tests main.cpp net/enet_coop_test.cpp net/net_selftest_test.cpp)
   target_link_libraries(enet_coop_tests PRIVATE enet_coop coop_platform doctest::doctest coop_warnings)
   doctest_discover_tests(enet_coop_tests)
 endif()
