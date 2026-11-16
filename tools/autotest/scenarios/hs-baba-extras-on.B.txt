@@ -1,7 +1,7 @@
 # hs-baba-extras-on B (guest): see the A file.
 #! noload
 #! start coop: test warp done
-#! switches LICHII_COOP_EXTRA_PARAMS=1
+#! switches LICHII_COOP_EXTRA_ROOM=1
 #! timeout 600
 mark start
 warp KokiriForest_Child FrontDekuTree
