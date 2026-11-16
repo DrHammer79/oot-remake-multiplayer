@@ -675,6 +675,24 @@ public:
     // IsGuardReaction one).
     void NoteTakeover(std::uint64_t address, std::uint64_t now_us, std::string_view name = {});
     static constexpr std::uint64_t kWakeLatchUs = 1'200'000;
+    // Player report 109 (Deku Babas slow to come out, then stuck upright): a
+    // copy's own AI that wakes for our Link (it rises out of the ground) had
+    // the owner's resting animation put back over its rise on the next frame.
+    // Its AI then waited for the end of a play it no longer had (frozen in
+    // the rise's pose) and only the hand-over (kChaseHoldUs and the server)
+    // let it act. Now, as after our own hit (kReactHoldUs), the copy's own
+    // wake runs: the owner's animation of that moment is not put back for
+    // kOwnWakeUs, and a rise the Mover already took away is given back once
+    // (TakeOwnWakes). Only while the owner's enemy rests or idles (its rest
+    // animation, or no new animation for kOwnWakeIdleUs), never over the
+    // owner's own fight; at most once each kOwnWakeAgainUs. Its next
+    // animation is played as usual, and the wake hands it to us meanwhile.
+    static constexpr std::uint64_t kOwnWakeUs = 3'000'000;
+    static constexpr std::uint64_t kOwnWakeIdleUs = 3'000'000;
+    static constexpr std::uint64_t kOwnWakeAgainUs = 10'000'000;
+    // Present thread: copies whose own wake play the Mover put back, with
+    // that play, to give back once at the next game frame.
+    std::vector<std::pair<std::uint64_t, std::string>> TakeOwnWakes() { return std::exchange(own_wakes_, {}); }
     // The owner side flags a woken enemy only this long after it left its
     // rest animation, so an enemy that patrols or flies near its owner's
     // Link is not held in a fight for good (that would stop the chase rule).
@@ -895,6 +913,10 @@ private:
         std::uint64_t woke_at = 0;  // left its rest animation (0 = resting)
         std::uint64_t took_over_at = 0;  // issue 157: its own AI's play put back (NoteTakeover)
         std::string took_over_name;      // ... and what it was (a guard's, issue 191)
+        // Report 109: its own wake (kOwnWakeUs) began then, over the owner's animation `own_wake_over`.
+        std::uint64_t own_wake_at = 0;
+        std::string own_wake_over;
+        std::uint64_t owner_anim_since = 0;  // the owner's animation (base name) is this one since
         // Our own hit took its life to 0 here (the DAMAGE resend's mark).
         std::uint64_t killed_at = 0;
         // Issue 133: resends of a DAMAGE for a copy we killed here, and when
@@ -923,6 +945,8 @@ private:
 
     // One step of `o` towards our Link at `now_us` (NoteDrift).
     static void ChaseStep(Object& o, std::uint64_t now_us);
+    // Report 109: a copy's own AI woke for our Link (`taken_away`: the Mover put its play back already).
+    void OwnWake(Object& o, bool taken_away, std::uint64_t now_us);
 
     // Takes `o` down to `life`: a hurt when hurt is on, else a write.
     // The hits the game's Life step dealt o that count now (SetLifeEvents);
@@ -1019,6 +1043,7 @@ private:
     std::vector<std::string> notes_;
     std::map<std::uint64_t, Object> objects_;  // by actor address
     std::vector<std::uint64_t> ours_now_;     // copies that became ours (TakeOursNow)
+    std::vector<std::pair<std::uint64_t, std::string>> own_wakes_;  // report 109 (TakeOwnWakes)
     std::map<std::uint64_t, Decided> decided_;  // by director key
     std::map<std::uint64_t, std::uint64_t> bound_;  // actor to director key
     std::uint64_t next_key_ = 1;

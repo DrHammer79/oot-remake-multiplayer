@@ -2937,6 +2937,95 @@ TEST_CASE("objects: a copy whose wake the Mover put back once is flagged targeti
     CHECK_FALSE((flags && (*flags & kTargeting) != 0));
 }
 
+TEST_CASE("objects: a copy's own wake for our Link runs, the owner's rest is not put back (report 109)") {
+    // Player report 109: a Deku Baba copy rose for our Link ("GetUp"); the
+    // owner's buried "Wait" was put back over it, so it came out late and
+    // then stood frozen in the rise's pose.
+    struct Run {
+        std::vector<std::string> plays;  // the owner's animations wished for the copy at the end
+        std::vector<std::pair<std::uint64_t, std::string>> given_back;
+        bool targeting = false;
+    };
+    // `own`: what the copy's own AI plays from 100 ms on (the walk sees it);
+    // `taken`: the Mover put that play back at 100 ms (the walk sees "Wait").
+    auto run = [](float x, const std::string& own, bool taken, const std::string& owners,
+                  std::uint64_t until = 1500, bool owners_new = false) {
+        Sync sync;
+        sync.SetPlayer(proto::Vec3{0.0f, 0.0f, 0.0f});
+        Tick(sync, 0, {Acting(0x100, 0x11, 2, x, "Wait")});
+        const proto::ObjectId id = *sync.IdOf(0x100);
+        Own(sync, id, 2);
+        Run r;
+        for (std::uint64_t t = 10; t <= until; t += 66) {
+            if (taken && t >= 100 && t < 166) {
+                sync.NoteTakeover(0x100, t * kMs, own);
+            }
+            // owners_new: the owner's enemy changed animation just now (it fights).
+            const std::string theirs = owners_new && t >= 1000 ? owners : (t < 1000 ? "Wait" : owners);
+            sync.Receive(OwnerSample(id, 2, t * kMs, x, 2, theirs));
+            const std::string shown = t >= 100 && !taken ? own : "Wait";
+            for (const auto& p : All<proto::ObjectPresent>(Tick(sync, t * kMs, {Acting(0x100, 0x11, 2, x, shown)}))) {
+                r.targeting = (p.objects[0].flags & kTargeting) != 0;
+            }
+            for (auto& g : sync.TakeOwnWakes()) {
+                r.given_back.push_back(std::move(g));
+            }
+        }
+        std::vector<PlayWish> plays;
+        sync.Plays(until * kMs + 5 * kMs, plays);
+        for (const PlayWish& p : plays) {
+            r.plays.push_back(p.name);
+        }
+        return r;
+    };
+    // Its rise seen by the walk: the owner's "Wait" is not wished over it, and
+    // the wake still hands it to us.
+    Run seen = run(5.0f, "GetUp", false, "Wait");
+    CHECK(seen.plays.empty());
+    CHECK(seen.given_back.empty());
+    CHECK(seen.targeting);
+    // Its rise already put back by the Mover: given back once, "Wait" not wished.
+    Run taken = run(5.0f, "GetUp", true, "Wait");
+    CHECK(taken.plays.empty());
+    REQUIRE(taken.given_back.size() == 1);
+    CHECK(taken.given_back[0] == std::pair<std::uint64_t, std::string>{0x100, "GetUp"});
+    // The owner's next animation (its own Baba rose too) is played as usual.
+    CHECK(run(5.0f, "GetUp", false, "GetUp", 1500).plays == std::vector<std::string>{"GetUp"});
+    // Over 10 m from our Link: no wake, the owner's rest is played.
+    CHECK(run(15.0f, "GetUp", false, "Wait").plays == std::vector<std::string>{"Wait"});
+    // After kOwnWakeUs the owner's animation is played again (the old rule).
+    CHECK(run(5.0f, "GetUp", false, "Wait", 3500).plays == std::vector<std::string>{"Wait"});
+}
+
+TEST_CASE("objects: a copy's own wake never plays over the owner's fight (report 109)") {
+    Sync sync;
+    sync.SetPlayer(proto::Vec3{0.0f, 0.0f, 0.0f});
+    Tick(sync, 0, {Acting(0x100, 0x11, 2, 5.0f, "Wait")});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 2);
+    // The owner's Baba attacks its own Link ("Attack" since 1 s ago); our
+    // copy's AI turns to ours. The owner's "Attack" stays on the copy.
+    for (std::uint64_t t = 10; t <= 2000; t += 66) {
+        sync.Receive(OwnerSample(id, 2, t * kMs, 5.0f, 2, t < 1000 ? "GetUp" : "Attack"));
+        Tick(sync, t * kMs, {Acting(0x100, 0x11, 2, 5.0f, t < 1000 ? "GetUp" : "Turn")});
+    }
+    std::vector<PlayWish> plays;
+    sync.Plays(2005 * kMs, plays);
+    REQUIRE(plays.size() == 1);
+    CHECK(plays[0].name == "Attack");
+    CHECK(sync.TakeOwnWakes().empty());
+
+    // The owner's Baba then stays in one animation (no new one for 3 s:
+    // it idles): our copy's own AI acts on our Link.
+    for (std::uint64_t t = 2010; t <= 5500; t += 66) {
+        sync.Receive(OwnerSample(id, 2, t * kMs, 5.0f, 2, "Attack"));
+        Tick(sync, t * kMs, {Acting(0x100, 0x11, 2, 5.0f, "Turn")});
+    }
+    plays.clear();
+    sync.Plays(5505 * kMs, plays);
+    CHECK(plays.empty());
+}
+
 TEST_CASE("objects: an enemy of ours woken near our Link is flagged too, so it stays ours") {
     auto run = [](float x, const std::string& now, std::uint64_t until = 1500) {
         Sync sync;

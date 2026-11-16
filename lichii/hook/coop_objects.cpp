@@ -554,6 +554,20 @@ public:
         }
     }
 
+    // Present thread (report 109): a copy's own wake play that a put-back
+    // took away is played again once at the next game frame. The owner's
+    // play wished for it before is dropped, and the wake is no hand-over's
+    // to replay later (wanted_).
+    void GiveBack(u64 actor, std::string name) {
+        std::lock_guard lock(mutex_);
+        LOG_INFO(Core, "coop: objects: copy {:#x}: its own wake '{}' is played again (report 109)", actor, name);
+        if (wakes_.size() < 64) {
+            wakes_.emplace_back(actor, std::move(name));
+        }
+        std::erase_if(plays_, [actor](const PlayWish& p) { return p.address == actor && p.slot == 0; });
+        wanted_.erase(actor);
+    }
+
     // Releases made since the last ask: bit found set and cleared, and not.
     // Also the ones dropped because the frame's list was full.
     std::tuple<std::size_t, std::size_t, std::size_t> TakeReleases() {
@@ -3541,6 +3555,9 @@ private:
         }
         if (const auto ours = sync_.TakeOursNow(); release_ && !ours.empty()) {
             TheMover().Release(ours);
+        }
+        for (auto& [a, name] : sync_.TakeOwnWakes()) {
+            TheMover().GiveBack(a, std::move(name));  // report 109
         }
         std::vector<u64> removes = sync_.Removes();
         for (const u64 a : horde_.Removes()) {
