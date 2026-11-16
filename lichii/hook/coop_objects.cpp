@@ -3193,6 +3193,7 @@ private:
         }
         t.life = best->life ? best->life->life : -1;
         t.anim = best->animation ? best->animation->name : std::string{};
+        t.address = best->address;
         t.seen_us = CoopEvery::NowUs();
         std::lock_guard lock(KeyRefundMutex());
         if (TestWatched().name == name) {
@@ -3988,11 +3989,6 @@ void WatchTestActor(std::string name, std::array<float, 3> local) {
     TestWatched().seen.reset();
 }
 
-std::optional<TestActorSeen> TestActorAt() {
-    std::lock_guard lock(KeyRefundMutex());
-    return TestWatched().seen;
-}
-
 void QueueTestKill(std::string name) {
     std::lock_guard lock(KeyRefundMutex());
     if (TestKillQueue().size() < 16) {
@@ -4057,6 +4053,24 @@ std::uint64_t g_bosses_at = 0;
 constexpr std::uint64_t kBossesFreshUs = 1'500'000;
 
 } // namespace
+
+std::optional<TestActorSeen> TestActorAt() {
+    std::optional<TestActorSeen> seen;
+    {
+        std::lock_guard lock(KeyRefundMutex());
+        seen = TestWatched().seen;
+    }
+    if (seen && seen->address != 0) {
+        std::lock_guard lock(g_bosses_mutex);
+        const bool boss = std::any_of(g_bosses.begin(), g_bosses.end(),
+                                      [&](const Seen& b) { return b.address == seen->address; });
+        if (boss) {
+            seen->ours = std::find(g_bosses_ours.begin(), g_bosses_ours.end(), seen->address) != g_bosses_ours.end();
+        }
+    }
+    return seen;
+}
+
 
 void NoteBosses(const std::vector<Seen>& seen, const std::vector<std::pair<u64, std::string>>& owned) {
     std::vector<Seen> bosses;

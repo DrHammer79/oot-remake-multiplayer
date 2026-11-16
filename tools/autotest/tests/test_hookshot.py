@@ -650,6 +650,7 @@ class AimGame(FakeGame):
         self.target = list(target)      # where the actor's point is in the same units
         self.actor = list(actor)
         self.watching = None
+        self.owner = "copy"
         self.sights = 0
         self.taken = []
 
@@ -674,9 +675,9 @@ class AimGame(FakeGame):
             self.sights += 1
             x, y = self.target[0] - self.view[0], self.target[1] - self.view[1]
             with open(self.path + ".watch", "w", encoding="utf-8") as f:
-                f.write("watch %d.5 %.4f %.4f 7.5 %.3f %.3f %.3f %.3f %.3f %.3f 21 %s\n"
+                f.write("watch %d.5 %.4f %.4f 7.5 %.3f %.3f %.3f %.3f %.3f %.3f 21 %s %s\n"
                         % ((self.sights,) + (x, y) + tuple(self.actor) + tuple(self.actor)
-                           + ("AttackWait" if self.sights > 20 else "CeilingMove",)))
+                           + ("AttackWait" if self.sights > 20 else "CeilingMove", self.owner)))
 
 
 def play_aim(text, game):
@@ -797,6 +798,21 @@ class AimTest(unittest.TestCase):
             for bad in ("until G Down_ 240 x", "away G 0.1 60", "away G 8"):
                 with self.assertRaises(hs.ScriptError, msg=bad):
                     hs.parse(bad)
+
+    def test_when_runs_its_block_by_ownership(self):
+        import tempfile
+        for owner, pressed in (("copy", [["A"], ["B"]]), ("ours", [["X"], ["B"]])):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "commands-A.txt")
+                open(path, "w").close()
+                game = AimGame(path)
+                game.owner = owner
+                game, log, _, _, _ = play_aim("when Enemy_DungeonBoss_Gohma ours 1\npress X\n"
+                                              "when Enemy_DungeonBoss_Gohma copy 1\npress A\npress B", game)
+                self.assertEqual([r["buttons"] for r in game.cmds("press")], pressed, (owner, log.lines))
+                self.assertIn("coop: test when Enemy_DungeonBoss_Gohma %s: yes" % owner, log.lines)
+        with self.assertRaises(hs.ScriptError):
+            hs.parse("when G mine 3")
 
     def test_away_walks_off(self):
         import tempfile

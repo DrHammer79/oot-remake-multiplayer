@@ -52,7 +52,8 @@
 //                          actor of that name, plus the offset in its own frame
 //                          (its rotation rows; metres), projected through the
 //                          game's own camera matrix ("watch T NDCX NDCY W X Y Z
-//                          RX RY RZ LIFE ANIM", or "none T"). The Hookshot driver's
+//                          RX RY RZ LIFE ANIM OWNER", OWNER ours / copy for a boss,
+//                          else -; or "none T"). The Hookshot driver's
 //                          aim and near steps read it to turn the camera with
 //                          the right stick (the player's own aim) and to walk
 //                          up to the actor (tools/autotest/hookshot.py).
@@ -65,7 +66,7 @@
 //                          automatic scaler. Only the host can; logs
 //                          "coop: test difficulty ...: set" or "NOT set"
 //   aim NAME DX DY DZ TICKS [KEYS] [left] / near NAME RADIUS TICKS [KEYS] /
-//   until NAME ANIM[|ANIM...] TICKS [SKIP] / away NAME METRES TICKS
+//   until NAME ANIM[|ANIM...] TICKS [SKIP] / away NAME METRES TICKS / when NAME ours|copy SKIP
 //                          the Hookshot driver's (it reads the watch file);
 //                          read and checked here, then skipped with a log
 //                          line ("aim skipped: the Hookshot driver's step")

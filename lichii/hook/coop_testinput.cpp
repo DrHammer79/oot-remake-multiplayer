@@ -345,6 +345,16 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             } else {
                 return fail("want: watch ACTOR [DX DY DZ] or watch off");
             }
+        } else if (cmd == "WHEN") {
+            // when ACTOR ours|copy SKIP: the Hookshot driver's (skips SKIP lines unless the boss is that); skipped here.
+            std::uint32_t skip = 0;
+            const auto* end = w.size() == 4 ? w[3].data() + w[3].size() : nullptr;
+            if (w.size() != 4 || (Upper(w[2]) != "OURS" && Upper(w[2]) != "COPY") ||
+                std::from_chars(w[3].data(), end, skip).ptr != end) {
+                return fail("want: when ACTOR ours|copy SKIP");
+            }
+            step.kind = Kind::driver;
+            step.mark = std::string(w[0]);
         } else if (cmd == "UNTIL" || cmd == "AWAY") {
             // until ACTOR PATTERN TICKS [SKIP] / away ACTOR METRES TICKS: the Hookshot driver's; skipped here.
             const bool until = cmd == "UNTIL";
@@ -1135,9 +1145,10 @@ void WriteWatch() {
         const OnScreen o = Project(frame->clip_from_world, seen->at, frame->y_down);
         std::string anim = seen->anim.empty() ? std::string("-") : seen->anim.substr(0, 64);
         std::replace_if(anim.begin(), anim.end(), [](char c) { return c == ' ' || c == '\n' || c == '\r'; }, '_');
-        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d %s\n", t, o.x,
-                      o.y, o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1], seen->root[2],
-                      seen->life, anim.c_str());
+        const char* owner = !seen->ours ? "-" : *seen->ours ? "ours" : "copy";
+        std::snprintf(line, sizeof(line), "watch %.3f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d %s %s\n", t,
+                      o.x, o.y, o.w, seen->at[0], seen->at[1], seen->at[2], seen->root[0], seen->root[1],
+                      seen->root[2], seen->life, anim.c_str(), owner);
     }
     auto out_path = g_state.path;
     out_path += ".watch";

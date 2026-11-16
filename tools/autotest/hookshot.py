@@ -286,6 +286,12 @@ def parse(text):
                 fail("want: until ACTOR ANIM[|ANIM...] TICKS [SKIP]")
             s.kind, s.name, s.start, s.ticks = "until", w[1], w[2], _ticks(w[3])
             s.radius = float(_ticks(w[4])) if len(w) == 5 else 0.0
+        elif cmd == "WHEN":
+            # when ACTOR ours|copy SKIP: the next SKIP script lines run only while our game owns the boss (ours) or
+            # does not (copy), from the watch file; nothing seen within 5 s counts as neither (the lines are skipped).
+            if len(w) != 4 or w[2].lower() not in ("ours", "copy") or _ticks(w[3]) is None:
+                fail("want: when ACTOR ours|copy SKIP")
+            s.kind, s.name, s.start, s.radius = "when", w[1], w[2].lower(), float(_ticks(w[3]))
         elif cmd == "AWAY":
             # away ACTOR METRES TICKS: walk until the actor is at least METRES away (straight away from it).
             if len(w) != 4 or _number(w[2]) is None or _number(w[2]) < 0.5 or _ticks(w[3]) is None:
@@ -649,7 +655,7 @@ class Player:
         except OSError:
             return None
         w = line.split()
-        if len(w) not in (12, 13) or w[0] != "watch":
+        if len(w) not in (12, 13, 14) or w[0] != "watch":
             return None
         try:
             v = [float(x) for x in w[1:11]]
@@ -661,9 +667,10 @@ class Player:
             self._watch_t, self._watch_at = v[0], now
         elif now - self._watch_at > WATCH_STALE:
             return None
-        anim = w[12] if len(w) == 13 and w[12] != "-" else ""
+        anim = w[12] if len(w) >= 13 and w[12] != "-" else ""
+        owner = w[13] if len(w) == 14 and w[13] != "-" else ""
         return {"x": v[1], "y": v[2], "w": v[3], "at": tuple(v[4:7]), "root": tuple(v[7:10]), "life": life,
-                "anim": anim}
+                "anim": anim, "owner": owner}
 
     def _watch(self, s, offset):
         if not self.commands:
@@ -696,6 +703,26 @@ class Player:
         self.log("coop: test until %s timed out (last %s)%s" % (s.name, last or "none",
                                                                  ", %d lines skipped" % s.radius if s.radius else ""))
         self.skip, self._skip_line = int(s.radius), -1
+        return self.clock()
+
+    def when(self, s, t0):
+        """when: skips the next lines unless our game owns the boss (ours) or does not (copy)."""
+        if not self._watch(s, (0.0, 0.0, 0.0)):
+            self.skip, self._skip_line = int(s.radius), -1
+            return t0
+        t0 = max(t0, self.clock())
+        owner = ""
+        while self.clock() < t0 + 5.0 and not owner:
+            w = self.read_watch()
+            owner = w["owner"] if w is not None else ""
+            if not owner:
+                self._until(self.clock() + self.steer_every)
+        if owner == s.start:
+            self.log("coop: test when %s %s: yes" % (s.name, s.start))
+        else:
+            self.log("coop: test when %s %s: no (%s), %d lines skipped" % (s.name, s.start, owner or "not seen",
+                                                                            s.radius))
+            self.skip, self._skip_line = int(s.radius), -1
         return self.clock()
 
     def away(self, s, t0):
@@ -922,6 +949,9 @@ class Player:
                 t = max(t, self.clock())
             elif s.kind in ("goto", "toward"):
                 t = max(t, self.steer(s, max(t, self.clock())))
+            elif s.kind == "when":
+                self._until(t)
+                t = max(t, self.when(s, t))
             elif s.kind == "away":
                 self._until(t)
                 t = max(t, self.away(s, t))

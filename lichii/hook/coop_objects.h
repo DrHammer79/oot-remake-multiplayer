@@ -127,6 +127,8 @@ struct TestActorSeen {
     std::array<float, 3> root{};  // the actor's place
     std::int32_t life = -1;       // -1: no life read
     std::string anim;             // its animation (slot 0) now, empty when not read
+    std::uint64_t address = 0;    // the actor
+    std::optional<bool> ours;     // a boss: our game owns it now (the boss list's owned ones); else nothing
     std::uint64_t seen_us = 0;    // CoopEvery::NowUs() of the walk that saw it
 };
 // The last walk's sight of the watched actor (nothing: none seen yet, or not watching).

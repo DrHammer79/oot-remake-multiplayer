@@ -570,6 +570,10 @@ TEST_CASE("testinput: aim and near are checked, then skipped (the Hookshot drive
     CHECK(Parse("until Gohma Down_ 240 7\n", error).has_value());
     CHECK_FALSE(Parse("until Gohma Down_ 240 x\n", error));
     CHECK(Parse("away Gohma 8 180\n", error).has_value());
+    CHECK(Parse("when Gohma ours 10\n", error).has_value());
+    CHECK(Parse("when Gohma copy 15\n", error).has_value());
+    CHECK_FALSE(Parse("when Gohma mine 10\n", error));
+    CHECK_FALSE(Parse("when Gohma ours\n", error));
     CHECK_FALSE(Parse("away Gohma 0.1 180\n", error));
     CHECK_FALSE(Parse("away Gohma 8\n", error));
     Runner r(Must("aim Gohma 0 1.5 0.5 300 ZR\naim Gohma 0 0 0 60 left\nnear Gohma 2 600 B\nmark after\n"));
