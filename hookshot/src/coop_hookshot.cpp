@@ -43,6 +43,7 @@
 #include "coop_cheats_panel.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
+#include "coop_own_menu.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop_flag_native.h"
 #include "coop_flags.h"
@@ -1412,6 +1413,7 @@ void DrawWithLook(const HosCoopDraw& d) {
     }
     const CoopDraw::Scene scene = DrawScene();
     NoteDropped(CoopDraw::Draw(d, scene, g_look_state.load() == kLookOn ? g_look : CoopDraw::Look{}), scene);
+    CoopOwnMenu::Draw(d);   // co-op's own menu over it, when opted in and open
 }
 
 // Local co-op's research probe (coop_local_probe.h, LICHII_COOP_LOCAL_PROBE=1): the renderer's layers and the
@@ -1599,17 +1601,20 @@ COOP_HOOKSHOT_EXPORT int hos_coop_key(uint32_t vk, int repeat) {
 #ifndef _WIN32
     const CoopClipboard::OnSdlThread sdl_thread;
 #endif
+    if (g_on && CoopOwnMenu::Key(vk)) {   // co-op's own menu (opt-in, coop_own_menu.h) first
+        return 1;
+    }
     return CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0) ? 1 : 0;
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_char(uint32_t ch) {
-    return CoopHookshot::TypeChar(ch) ? 1 : 0;
+    return (g_on && CoopOwnMenu::Char(ch)) || CoopHookshot::TypeChar(ch) ? 1 : 0;
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_keys_taken(void) {
-    return CoopHookshot::KeysTaken() ? 1 : 0;
+    return CoopHookshot::KeysTaken() || (g_on && CoopOwnMenu::Open()) ? 1 : 0;
 }
 // The mouse (hos_coop_api.h): the cheats panel's clicks.
 COOP_HOOKSHOT_EXPORT int hos_coop_mouse(float fx, float fy, int event) {
-    return CoopHookshot::Mouse(fx, fy, event) ? 1 : 0;
+    return (g_on && CoopOwnMenu::Mouse(fx, fy, event)) || CoopHookshot::Mouse(fx, fy, event) ? 1 : 0;
 }
 // Drawing over the picture (hos_coop_draw.h), on Hookshot's render thread.
 // The title menu (hos_coop_api.h, patch 0004): the game's title screen and the pad first.
@@ -1646,6 +1651,7 @@ COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) {
     if (!g_on || stick == nullptr) {
         return buttons;
     }
+    buttons = CoopOwnMenu::Pad(buttons, stick);   // co-op's own menu (opt-in): none to the game while it is open
     buttons = CoopTitle::OnPad(buttons, stick);
     // Down but not out (coop_dbno_game.h): a downed Link crawls and uses nothing; beside one, A revives.
     CoopDbno::Pad pad{buttons, {stick[0], stick[1], stick[2], stick[3]}};
@@ -1656,7 +1662,9 @@ COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) {
     return pad.buttons;
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_draw_wanted(void) {
-    return g_on && (CoopDraw::Wanted(CoopHookshot::DrawScene()) || CoopModsRuntime::OverlayWanted()) ? 1 : 0;
+    return g_on && (CoopDraw::Wanted(CoopHookshot::DrawScene()) || CoopModsRuntime::OverlayWanted() || CoopOwnMenu::Open())
+               ? 1
+               : 0;
 }
 COOP_HOOKSHOT_EXPORT void hos_coop_draw(const HosCoopDraw* d) {
     if (g_on && d != nullptr) {
@@ -1667,6 +1675,7 @@ COOP_HOOKSHOT_EXPORT void hos_coop_draw(const HosCoopDraw* d) {
                      static_cast<int>(d->width), static_cast<int>(d->height));
         }
         CoopHookshot::NoGameLook();
+        CoopOwnMenu::NoDraw2();   // (opt-in own menu: shown only through hos_coop_draw2)
         CoopHookshot::NoteDrawn(*d);
         // An older Hookshot's table ends at text_width: the rest stays empty.
         HosCoopDraw t{};

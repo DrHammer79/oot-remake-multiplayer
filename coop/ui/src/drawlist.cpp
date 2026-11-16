@@ -72,7 +72,6 @@ void coop_draw_begin(CoopDrawList* l, float width, float height) {
     l->text_used = 0;
     l->dropped = 0;
     l->font = COOP_FONT_UI;
-    l->clip_depth = 0;
     l->last_text = 0;
 }
 
@@ -173,28 +172,6 @@ int coop_draw_font(CoopDrawList* l, int font) {
     }
     c->id = static_cast<std::uint16_t>(font);
     l->font = static_cast<std::uint16_t>(font);
-    return 1;
-}
-
-int coop_draw_clip_push(CoopDrawList* l, float x0, float y0, float x1, float y1) {
-    CoopDrawCmd* c = Next(l, COOP_DRAW_CLIP_PUSH);
-    if (c == nullptr) {
-        return 0;
-    }
-    c->v[0] = x0, c->v[1] = y0, c->v[2] = x1, c->v[3] = y1;
-    ++l->clip_depth;
-    return 1;
-}
-
-int coop_draw_clip_pop(CoopDrawList* l) {
-    if (l->clip_depth == 0) {
-        return 0;   // nothing pushed: nothing to pop
-    }
-    CoopDrawCmd* c = Next(l, COOP_DRAW_CLIP_POP);
-    if (c == nullptr) {
-        return 0;
-    }
-    --l->clip_depth;
     return 1;
 }
 

@@ -2,6 +2,7 @@
 #include "coop_draw_hos.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 namespace CoopDraw {
@@ -46,6 +47,38 @@ void Measure::Restore() const {
     }
 }
 
+namespace {
+
+// A convex polygon with the table's triangles: filled, a fan from its first point; an outline, each edge a band
+// (two triangles) about 1.5 px wide, as Hookshot's menu draws the Customize picture's outlines.
+void Poly(const HosCoopDraw& d, const CoopDrawCmd& c) {
+    const int n = c.n;
+    const float* v = c.v;
+    if (n < 3 || n > COOP_DRAW_POLY_POINTS) {
+        return;
+    }
+    if (c.id == 0) {
+        for (int i = 1; i + 1 < n; ++i) {
+            d.triangle(d.user, v[0], v[1], v[2 * i], v[2 * i + 1], v[2 * i + 2], v[2 * i + 3], c.rgba);
+        }
+        return;
+    }
+    constexpr float kHalf = 0.75f;
+    for (int i = 0; i < n; ++i) {
+        const int j = (i + 1) % n;
+        const float ax = v[2 * i], ay = v[2 * i + 1], bx = v[2 * j], by = v[2 * j + 1];
+        const float len = std::sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+        if (len <= 0.0f) {
+            continue;
+        }
+        const float nx = -(by - ay) / len * kHalf, ny = (bx - ax) / len * kHalf;
+        d.triangle(d.user, ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny, c.rgba);
+        d.triangle(d.user, ax + nx, ay + ny, bx - nx, by - ny, ax - nx, ay - ny, c.rgba);
+    }
+}
+
+}  // namespace
+
 void Replay(const CoopDrawList& list, const HosCoopDraw& d, const Look* look) {
     for (std::uint32_t i = 0; i < list.n; ++i) {
         const CoopDrawCmd& c = list.cmd[i];
@@ -73,7 +106,10 @@ void Replay(const CoopDrawList& list, const HosCoopDraw& d, const Look* look) {
                     d.use_font(d.user, HostFont(look, c.id));
                 }
                 break;
-            default:   // POLY, CLIP: nothing in this table draws them
+            case COOP_DRAW_POLY:
+                Poly(d, c);
+                break;
+            default:   // (no other kinds)
                 break;
         }
     }
