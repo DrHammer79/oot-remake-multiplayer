@@ -110,7 +110,7 @@ void Register(const uint64_t* r) {
     if (k >= kMaxRegister) return;
     const uint64_t tex = r[0];
     Line().s("register: texture object ").at(tex).s(" view ").at(r[1]).s(" flags ").hex(r[2]).s(" from main+")
-        .hex(r[9] - g_main - 4).s(", id before ").hex(static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(U32(tex + 104))))));
+        .hex(r[9] - g_main - 4).s(", id before ").hex(static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(U32(tex + 104)))));
     Dump("texobj", tex, 256);
     __atomic_store_n(&g_registered[k], tex, __ATOMIC_RELEASE);
 }
