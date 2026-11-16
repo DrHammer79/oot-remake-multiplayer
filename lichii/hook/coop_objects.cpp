@@ -2296,13 +2296,14 @@ private:
                 }
                 // Player report 111 research: an enemy's create argument +0x60..+0x80 (the
                 // placement's data for placed ones; ours, extras included, leave it 0).
-                if (actor_param_lines_ < 40 && e.Name().starts_with("Enemy_")) {
-                    ++actor_param_lines_;
+                if (e.Name().starts_with("Enemy_") &&
+                    (e.Name().starts_with("Enemy_Dekubaba") ? actor_param_lines_baba_++ < 60 : actor_param_lines_++ < 20)) {
                     LOG_INFO(Core, "coop: actors: create '{}' from main+{:#x}{}: arg+0x60 {:#x} +0x68 {:#x} +0x70 {:#x} "
-                                   "+0x78 {:#x}; [+0x60] {:#x} {:#x} (report 111 research)",
+                                   "+0x78 {:#x}; +0x48 {:#018x} +0x50 {:#018x} at ({:.1f}, {:.1f}, {:.1f}) (report 111 research)",
                              e.Name(), e.from >= main_ && main_ != 0 ? e.from - main_ : e.from,
                              (e.flags & CoopActorEvents::kOwn) != 0 ? " (ours)" : "", e.params[0], e.params[1],
-                             e.params[2], e.params[3], e.params[4], e.params[5]);
+                             e.params[2], e.params[3], e.params[4], e.params[5], ParamPlace(e, 0), ParamPlace(e, 1),
+                             ParamPlace(e, 2));
                 }
                 break;
             case CoopActorEvents::Kind::Delete: {
@@ -2428,6 +2429,13 @@ private:
     std::int64_t actor_hit_sum_ = 0;
     std::size_t actor_event_lines_ = 0;
     std::size_t actor_param_lines_ = 0;  // report 111 research: create argument lines for enemies
+    std::size_t actor_param_lines_baba_ = 0;  // ... and for Deku Babas apart
+    static float ParamPlace(const CoopActorEvents::Event& e, int i) {
+        float f = 0.0f;
+        const auto bits = static_cast<u32>(e.place[i]);
+        std::memcpy(&f, &bits, 4);
+        return f;
+    }
     // Player report 111: placed enemies' create words (create argument
     // +0x60..+0x80 from the placement creator), by name and place until the
     // walk first sees the actor, then by its placement hash.

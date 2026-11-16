@@ -40,8 +40,9 @@ struct Event {
     std::uint64_t name[4]{};   // Create: the name's first 31 bytes, 0-terminated (read at the request)
     // Create (player report 111 research): the create argument's +0x60..+0x80,
     // which the placement creator (main+0x109f110) fills from its placement
-    // info +0x20..+0x38 and our own creates leave 0, then the two words +0x60
-    // points at. Read at the request (the argument is on the caller's stack).
+    // info +0x20..+0x38 and our own creates leave 0, then +0x48..+0x58 (its
+    // small fields from info +10, +12, +56). Read at the request (the argument
+    // is on the caller's stack).
     std::uint64_t params[6]{};
 
     std::string Name() const {
