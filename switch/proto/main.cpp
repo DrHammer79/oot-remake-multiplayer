@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "hooks.h"
+#include "../adapter/input.h"
 #include "null_guard.h"
 #include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
 #include "svc.h"
@@ -53,6 +54,7 @@ constexpr uint32_t kFrameSiteInsn = 0x94d19c82;  // bl 0x3b4e300 (frame_step)
 constexpr uint64_t kWorldMgrPtr = 0x4e7eab0;  // coop_game_build.h .world_mgr_ptr
 constexpr uint64_t kTimeObject = 0x510;     // coop_time.cpp
 constexpr uint64_t kSetTime = 0x34522d0;    // coop_time.cpp kSetTime
+constexpr uint64_t kMainCodeEnd = 0x3c461d0;  // main's text segment size (its PLT is in it)
 }  // namespace game
 
 // ---- Slots: the only way this module calls into the game (see hooks.h) ----
@@ -65,7 +67,7 @@ extern uint32_t coop_null_islands[];  // start.s: one page, filled by ApplyNullG
 }
 static_assert(kNullGuardCount * null_guard::kIslandBytes <= 0x1000, "the island page is full");
 
-constexpr uint32_t kHookCount = 2 + kNullGuardEntries;
+constexpr uint32_t kHookCount = 2 + input::kHookCount + kNullGuardEntries;
 extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) hooks::Table<kHookCount> coop_hooks = {
     {'C', 'O', 'O', 'P', 'H', 'O', 'O', 'K'},
     1,
@@ -77,6 +79,7 @@ extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) h
         {hooks::kCallRedirect, 0, game::kFrameSiteInsn, game::kFrameSite, &coop_frame_entry,
          &coop_slot_frame_step},
         {hooks::kGameFn, 0, 0, game::kSetTime, nullptr, &coop_slot_set_time},
+        COOP_INPUT_HOOK_ENTRIES
         COOP_NULL_GUARD_ENTRIES
     },
 };
@@ -121,6 +124,10 @@ struct Line {
         } while (v && k < 20);
         while (k && n < sizeof(buf) - 1) buf[n++] = tmp[--k];
         return *this;
+    }
+    Line& sdec(int64_t v) {
+        if (v < 0) s("-");
+        return dec(v < 0 ? 0 - static_cast<uint64_t>(v) : static_cast<uint64_t>(v));
     }
     ~Line() { svc::OutputDebugString(buf, n); }
 };
@@ -225,6 +232,29 @@ void ApplyNullGuards() {
     Log().s("null guards: ").dec(done).s(" of ").dec(wanted).s(" applied (a load through a null base reads 0)");
 }
 
+// hooks.h kImportRedirect: main's GOT entry `at` gets e.replacement; e.slot already holds the import's own target.
+void RedirectImport(uint32_t i, const hooks::Entry& e, uint64_t at) {
+    const uint64_t cur = *reinterpret_cast<volatile uint64_t*>(at);
+    const bool unbound = cur >= g_main && cur - g_main < game::kMainCodeEnd;  // lazy binding: still main's PLT
+    if (*e.slot == 0 || (cur != *e.slot && !unbound)) {
+        Log().s("hook ").dec(i).s(": GOT main+").hex(e.main_offset).s(" holds ").hex(cur)
+            .s(", not the import or main's PLT (another mod?): skipped");
+        return;
+    }
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, at) != 0 || (mi.perm & 2) == 0) {
+        const uint32_t r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, at & ~uint64_t{0xfff}, 0x1000, svc::kPermRW);
+        if (r != 0) {
+            Log().s("hook ").dec(i).s(": GOT main+").hex(e.main_offset).s(" not writable, result ").hex(r).s(": skipped");
+            return;
+        }
+        Log().s("hook ").dec(i).s(": GOT page made writable (perm was ").dec(mi.perm).s(")");
+    }
+    *reinterpret_cast<volatile uint64_t*>(at) = reinterpret_cast<uint64_t>(e.replacement);
+    Log().s("hook ").dec(i).s(": import at GOT main+").hex(e.main_offset).s(" now goes through the module (")
+        .s(unbound ? "not bound yet" : "was bound").s(")");
+}
+
 bool IsBl(uint32_t insn) { return (insn & 0xfc000000u) == 0x94000000u; }
 
 uint64_t BlTarget(uint64_t site, uint32_t insn) {
@@ -257,6 +287,9 @@ void ApplyHooks() {
                         .s(", continues at main+").hex(*e.slot - g_main);
                 }
                 break;
+            case hooks::kImportRedirect:
+                RedirectImport(i, e, at);
+                break;
             case hooks::kGameFn:
                 *e.slot = at;
                 Log().s("hook ").dec(i).s(": game function slot = main+").hex(e.main_offset);
@@ -267,6 +300,62 @@ void ApplyHooks() {
         }
     }
     ApplyNullGuards();
+}
+
+const char* ButtonName(uint8_t bit) {
+    static const char* const kNames[] = {"A", "B", "X", "Y", "LS", "RS", "L", "R", "ZL", "ZR", "Plus", "Minus",
+                                         "Left", "Up", "Right", "Down", "StickL-Left", "StickL-Up", "StickL-Right",
+                                         "StickL-Down", "StickR-Left", "StickR-Up", "StickR-Right", "StickR-Down"};
+    return bit < sizeof(kNames) / sizeof(kNames[0]) ? kNames[bit] : "other";
+}
+
+const char* UiName(uint8_t kind) {
+    switch (kind) {
+        case COOP_UI_UP: return "UP";
+        case COOP_UI_DOWN: return "DOWN";
+        case COOP_UI_LEFT: return "LEFT";
+        case COOP_UI_RIGHT: return "RIGHT";
+        case COOP_UI_CONFIRM: return "CONFIRM";
+        case COOP_UI_BACK: return "BACK";
+        case COOP_UI_TAB_PREV: return "TAB_PREV";
+        case COOP_UI_TAB_NEXT: return "TAB_NEXT";
+        case COOP_UI_OPEN: return "OPEN";
+        case COOP_UI_CLOSE: return "CLOSE";
+        default: return "?";
+    }
+}
+
+// The pad hook's news since the last frame (switch/adapter/input.h), into the log.
+bool g_pad_seen = false;
+bool g_menu_was_open = false;
+void LogInput() {
+    pad_hook::Hook& h = input::hook();
+    if (!g_pad_seen && h.pad(0).reads != 0) {
+        g_pad_seen = true;
+        Log().s("pad: player 1 read through the module (frame ").dec(g_frames).s(")");
+    }
+    pad_hook::Edge edges[16];
+    for (size_t n = h.TakeEdges(edges, 16), k = 0; k < n; ++k) {
+        const pad_hook::Edge& e = edges[k];
+        const pad_hook::Pad& p = h.pad(e.player);
+        Log().s("pad: player ").dec(e.player + 1u).s(e.down ? " down " : " up ").s(ButtonName(e.bit)).s(" (bit ")
+            .dec(e.bit).s(", left stick ").sdec(p.stick[0]).s(",").sdec(p.stick[1]).s(")");
+    }
+    CoopUiEvent events[8];
+    for (size_t n = h.TakeEvents(events, 8), k = 0; k < n; ++k) {
+        Log().s("ui: ").s(UiName(events[k].kind)).s(events[k].repeat ? " (repeat)" : "");
+    }
+    if (h.open() != g_menu_was_open) {
+        g_menu_was_open = h.open();
+        Log().s(g_menu_was_open ? "pad: menu open, the game gets no pad from player 1 (closes by itself in 5 s)"
+                                : "pad: menu closed, the game has the pad again");
+    }
+    if (g_frames % 600 == 0) {
+        Line l = Log();
+        l.s("pad: reads");
+        for (uint32_t s = 0; s < input::kStyles; ++s) l.s(" ").s(input::StyleName(s)).s(" ").dec(input::Calls(s));
+        l.s(", lost edges ").dec(h.dropped_edges()).s(", lost events ").dec(h.dropped_events());
+    }
 }
 
 void TrySetTime() {
@@ -316,6 +405,7 @@ void SayHello() {
 extern "C" COOP_EXPORT void coop_proto_frame() {
     ++g_frames;
     if (g_frames == 1 || g_frames % 600 == 0) Log().s("frame ").dec(g_frames);
+    LogInput();
     if (!g_time_done && g_frames >= 300 && g_frames % 60 == 0) TrySetTime();
     if (!g_net_done && g_frames >= 900) SayHello();
 }
@@ -337,5 +427,6 @@ extern "C" COOP_EXPORT void _init() {
         Log().s("hooks applied by the host (lifted module): nothing to patch");
         return;
     }
+    input::FillSlots();
     ApplyHooks();
 }

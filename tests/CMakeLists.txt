@@ -25,6 +25,7 @@ add_executable(coop_tests
   platform/platform_test.cpp
   platform/platform_c_check.c
   switch/null_guard_test.cpp
+  switch/pad_hook_test.cpp
   presence/presence_test.cpp
   presence/show_delay_test.cpp
   voice/jitter_test.cpp

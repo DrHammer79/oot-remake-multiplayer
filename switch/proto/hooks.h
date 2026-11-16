@@ -46,6 +46,13 @@ enum Kind : uint16_t {
     kNullGuard = 4,
     // No hook: main_offset must hold expected_insn for the next kNullGuard to be applied.
     kCheck = 5,
+    // main's calls of an import go to `replacement`: main_offset is main's GOT entry for it (the
+    // relocation there names the import), expected_insn is 0. The slot gets the import's own target,
+    // where `replacement` continues. On an emulator the module fills the slot with its own import of
+    // the same name, then writes `replacement` into the GOT entry (a data write; the entry must hold
+    // that import or, before main's first call, main's PLT). A lifting recomp routes main's calls of
+    // that import to `replacement` and fills the slot with its own implementation.
+    kImportRedirect = 6,
 };
 
 struct Entry {

@@ -21,6 +21,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 SRC = REPO / "switch" / "proto"
+ADAPTER = REPO / "switch" / "adapter"
+INCLUDES = ["-I", str(REPO / "coop" / "ui" / "include")]  # coop/ui/pad.hpp, events.h (freestanding)
 sys.path.insert(0, str(HERE))
 import elf2nso  # noqa: E402
 import lift_check  # noqa: E402
@@ -67,10 +69,10 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    for src in ("start.s", "main.cpp"):
-        obj = out / (src + ".o")
-        flags = CFLAGS if src.endswith(".cpp") else ["--target=aarch64-none-elf", "-march=armv8-a"]
-        run([clang, *flags, "-c", str(SRC / src), "-o", str(obj)])
+    for src in (SRC / "start.s", SRC / "main.cpp", ADAPTER / "input.cpp"):
+        obj = out / (src.name + ".o")
+        flags = [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
+        run([clang, *flags, "-c", str(src), "-o", str(obj)])
         objs.append(str(obj))
     elf = out / "module.elf"
     run([lld, *LDFLAGS, "-T", str(SRC / "module.ld"), "--version-script", str(SRC / "exports.map"),
@@ -81,6 +83,11 @@ def main() -> int:
         problems, entries = [str(e)], []
     if problems:
         sys.exit("build: the module would not lift:\n  " + "\n  ".join(problems))
+    imports = lift_check.imports(lift_check.Elf(elf.read_bytes()))
+    print("build: imports (rtld links them by name): " + " ".join(imports))
+    libc = [n for n in imports if n in ("memset", "memcpy", "memmove") or n.startswith("__cxa_")]
+    if libc:  # freestanding: the compiler asked for a C/C++ runtime the module does not have
+        sys.exit("build: the module needs a runtime it has none of: " + " ".join(libc))
     lift_check.write_entries(str(out / "subsdk1.entries"), entries)
     nso = elf2nso.build_nso(elf.read_bytes())
     (out / "subsdk1").write_bytes(nso)
