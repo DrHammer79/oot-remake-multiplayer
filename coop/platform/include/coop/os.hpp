@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,8 +81,39 @@ public:
     bool try_lock();
 
 private:
+    friend class CondVar;
     void *handle_;
     const CoopPlatform *owner_;   // the table that made it frees it, even after a later Install
+};
+
+// ---- condition variables, waited on through a std::unique_lock of a Mutex made by the same table. A table without
+// the cond slots (or a mismatched mutex) waits by sleeping a millisecond at a time with the lock released.
+class CondVar {
+public:
+    CondVar();
+    ~CondVar();
+    CondVar(const CondVar &) = delete;
+    CondVar &operator=(const CondVar &) = delete;
+    void notify_one();
+    void notify_all();
+    // Waits at most `us` with the lock released; holds it again on return. False when the time ran out.
+    bool WaitUs(std::unique_lock<Mutex> &lock, std::uint64_t us);
+    // As std::condition_variable::wait_for with a predicate: true when `pred` held, false when the time ran out.
+    template <class Rep, class Period, class Pred>
+    bool wait_for(std::unique_lock<Mutex> &lock, const std::chrono::duration<Rep, Period> &d, Pred pred) {
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(d).count();
+        const std::uint64_t deadline = NowUs() + (us > 0 ? static_cast<std::uint64_t>(us) : 0);
+        while (!pred()) {
+            const std::uint64_t now = NowUs();
+            if (now >= deadline) return pred();
+            WaitUs(lock, deadline - now);
+        }
+        return true;
+    }
+
+private:
+    void *handle_ = nullptr;
+    const CoopPlatform *owner_;
 };
 
 // ---- threads. A plain function and argument (no captures cross the platform boundary). Join before destruction;

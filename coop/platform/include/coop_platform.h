@@ -143,6 +143,14 @@ typedef struct CoopPlatform {
     int (*env_get)(const char *name, char *out, size_t cap);
     /* n bytes from the platform's random source (for keys and names, not a game RNG). 0 ok. */
     int (*random_fill)(void *out, size_t n);
+    /* Condition variables, used with a mutex from mutex_new of the same table. cond_wait_us is called with `mutex`
+       held, releases it while it waits (at most `us` microseconds) and holds it again on return: 1 notified (or a
+       spurious wake), 0 the time ran out. NULL from cond_new on failure. */
+    void *(*cond_new)(void);
+    int (*cond_wait_us)(void *cond, void *mutex, uint64_t us);
+    void (*cond_notify_one)(void *cond);
+    void (*cond_notify_all)(void *cond);
+    void (*cond_free)(void *cond);
 } CoopPlatform;
 
 /* 1 when the table is long enough to have `field` (a later version's slot in an older adapter's table). */
@@ -157,7 +165,8 @@ typedef struct CoopPlatform {
     X(sock_open, 1) X(sock_bind, 1) X(sock_local, 1) X(sock_sendto, 1) X(sock_recvfrom, 1) X(sock_close, 1) \
     X(resolve, 1) X(thread_start, 1) X(thread_join, 1) X(thread_id, 1) X(mutex_new, 1) X(mutex_lock, 1) \
     X(mutex_unlock, 1) X(mutex_free, 1) X(now_us, 1) X(sleep_us, 1) X(mem_alloc, 1) X(mem_free, 1) X(file_read, 1) \
-    X(file_write, 1) X(log, 1) X(mutex_try_lock, 1) X(env_get, 0) X(random_fill, 1)
+    X(file_write, 1) X(log, 1) X(mutex_try_lock, 1) X(env_get, 0) X(random_fill, 1) X(cond_new, 1) X(cond_wait_us, 1) \
+    X(cond_notify_one, 1) X(cond_notify_all, 1) X(cond_free, 1)
 
 /* The core's entry points that an adapter calls. Declared for review of the shape; defined by later steps (core-lib-
    split / hookshot-on-platform), so nothing calls them yet. */

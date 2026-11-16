@@ -36,8 +36,10 @@ one plain C table, `CoopPlatform`, that the platform's adapter fills.
   without one an older table lacks (`try_lock` waits; `GetEnv` answers nothing; `RandomFill` fills from the clock,
   thread and a call count and answers false). `coop::os::SteadyClock` is a `std::chrono` clock over `now_us`, so the
   core keeps its `time_point`/duration code; on the std backend it has `std::chrono::steady_clock`'s epoch.
-- No condition-variable slot: nothing in the hook files and UI models waits on one (the one user is
-  `coop::host::Session`, see below).
+- Condition variables (`cond_new`, `cond_wait_us`, `cond_notify_one`/`_all`, `cond_free`, appended with them) for
+  `coop::host::Session`'s network wait: `coop::os::CondVar` waits through a `std::unique_lock<coop::os::Mutex>` with
+  `wait_for(lock, duration, pred)` as `std::condition_variable` has it; without the slots it sleeps a millisecond at a
+  time with the lock released.
 - Changes from the design sketch: `thread_start` returns a handle and `thread_join` takes it; `thread_id`,
   `mutex_free`, `sleep_us` and `sock_local` were added; the memory slots are `mem_alloc`/`mem_free` (a CRT may define
   `free` as a macro); sockets are opened by kind (`COOP_SOCK_UDP4`/`6`) and `sock_recvfrom` answers

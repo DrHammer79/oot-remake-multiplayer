@@ -102,6 +102,43 @@ bool Mutex::try_lock() {
     return true;
 }
 
+namespace {
+bool HasCond(const CoopPlatform *p) {
+    return COOP_PLATFORM_HAS(p, cond_free) && p->cond_new && p->cond_wait_us && p->cond_notify_one &&
+           p->cond_notify_all && p->cond_free;
+}
+}  // namespace
+
+CondVar::CondVar() : owner_(&P()) {
+    if (!HasCond(owner_)) return;   // an older table: WaitUs sleeps instead
+    handle_ = owner_->cond_new();
+    if (!handle_) owner_->log("coop::os: cond_new failed: waits on it sleep instead");
+}
+
+CondVar::~CondVar() {
+    if (handle_) owner_->cond_free(handle_);
+}
+
+void CondVar::notify_one() {
+    if (handle_) owner_->cond_notify_one(handle_);
+}
+
+void CondVar::notify_all() {
+    if (handle_) owner_->cond_notify_all(handle_);
+}
+
+bool CondVar::WaitUs(std::unique_lock<Mutex> &lock, std::uint64_t us) {
+    Mutex *m = lock.mutex();
+    if (!m || !lock.owns_lock()) return false;
+    if (handle_ && m->handle_ && m->owner_ == owner_) return owner_->cond_wait_us(handle_, m->handle_, us) != 0;
+    // No condition variable for this lock: release it, sleep a little, take it again (a spurious wake).
+    const std::uint64_t start = owner_->now_us();
+    lock.unlock();
+    owner_->sleep_us(us < 1000 ? us : 1000);
+    lock.lock();
+    return owner_->now_us() - start < us;
+}
+
 std::optional<std::string> GetEnv(const char *name) {
     const CoopPlatform &p = P();
     if (!name || !*name || !COOP_PLATFORM_HAS(&p, env_get) || !p.env_get) return std::nullopt;

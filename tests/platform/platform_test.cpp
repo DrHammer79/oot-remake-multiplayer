@@ -20,7 +20,7 @@
 extern "C" {
 size_t coop_platform_c_size(void);
 size_t coop_platform_c_offset_log(void);
-size_t coop_platform_c_offset_random_fill(void);
+size_t coop_platform_c_offset_cond_free(void);
 size_t coop_platform_c_addr_size(void);
 size_t coop_platform_c_call_size(void);
 }
@@ -47,7 +47,7 @@ std::filesystem::path TempRoot(const char *name) {
 TEST_CASE("coop_platform.h: the same layout in C and C++, CoopCall as HosCoopCall") {
     CHECK(coop_platform_c_size() == sizeof(CoopPlatform));
     CHECK(coop_platform_c_offset_log() == offsetof(CoopPlatform, log));
-    CHECK(coop_platform_c_offset_random_fill() == offsetof(CoopPlatform, random_fill));
+    CHECK(coop_platform_c_offset_cond_free() == offsetof(CoopPlatform, cond_free));
     CHECK(coop_platform_c_addr_size() == sizeof(CoopAddr));
     CHECK(coop_platform_c_call_size() == sizeof(CoopCall));
     CHECK(sizeof(CoopCall) == sizeof(HosCoopCall));
@@ -77,7 +77,7 @@ TEST_CASE("coop_platform.h: COOP_PLATFORM_SLOTS names every function slot once")
     COOP_PLATFORM_SLOTS(COOP_TEST_COUNT)
 #undef COOP_TEST_COUNT
     // The slots run from read to the end; nothing but slots after main_build_id.
-    CHECK(slots == 37);
+    CHECK(slots == 42);
     CHECK(offsetof(CoopPlatform, read) + slot_bytes == sizeof(CoopPlatform));
 }
 
@@ -444,4 +444,66 @@ TEST_CASE("coop::os: SteadyClock is NowUs as a std::chrono clock") {
         os::SteadyClock::now().time_since_epoch()).count();
     CHECK(os_ms - std_ms <= 1);
     CHECK(std_ms - os_ms <= 1);
+}
+
+namespace {
+struct Waiting {
+    os::Mutex mutex;
+    os::CondVar cond;
+    bool ready = false;
+    std::atomic<int> woke{-1};
+};
+void WaitForReady(void *arg) {
+    auto *w = static_cast<Waiting *>(arg);
+    std::unique_lock<os::Mutex> lock(w->mutex);
+    w->woke = w->cond.wait_for(lock, std::chrono::seconds(10), [&] { return w->ready; }) ? 1 : 0;
+}
+// Sets the flag under the lock, then notifies: a waiter not yet waiting sees the flag in its predicate.
+void SetReady(Waiting &w) {
+    {
+        std::lock_guard<os::Mutex> lock(w.mutex);
+        w.ready = true;
+    }
+    w.cond.notify_all();
+}
+}  // namespace
+
+TEST_CASE("coop::os: a condition variable wakes its waiter and times out") {
+    Waiting w;
+    os::Thread t;
+    REQUIRE(t.Start(WaitForReady, &w));
+    os::SleepUs(20000);
+    const auto start = os::NowUs();
+    SetReady(w);
+    t.Join();
+    CHECK(w.woke == 1);
+    CHECK(os::NowUs() - start < 5000000);   // woken, not the 10 s time-out
+
+    os::Mutex m;
+    os::CondVar c;
+    std::unique_lock<os::Mutex> lock(m);
+    const auto before = os::NowUs();
+    CHECK_FALSE(c.wait_for(lock, std::chrono::milliseconds(30), [] { return false; }));
+    CHECK(os::NowUs() - before >= 25000);
+    CHECK(lock.owns_lock());
+    CHECK(c.wait_for(lock, std::chrono::milliseconds(30), [] { return true; }));
+}
+
+TEST_CASE("coop::os: without the cond slots a wait sleeps and still wakes") {
+    RestoreStd restore;
+    CoopPlatform old = *os::StdPlatform();
+    old.size = static_cast<uint32_t>(offsetof(CoopPlatform, random_fill) + sizeof(CoopPlatform::random_fill));
+    REQUIRE(os::Install(&old) == os::InstallError::kNone);
+    Waiting w;   // its mutex and cond are the old table's
+    os::Thread t;
+    REQUIRE(t.Start(WaitForReady, &w));
+    os::SleepUs(20000);
+    SetReady(w);
+    t.Join();
+    CHECK(w.woke == 1);
+    std::unique_lock<os::Mutex> lock(w.mutex);
+    const auto before = os::NowUs();
+    CHECK_FALSE(w.cond.wait_for(lock, std::chrono::milliseconds(20), [] { return false; }));
+    CHECK(os::NowUs() - before >= 15000);
+    CHECK(lock.owns_lock());
 }

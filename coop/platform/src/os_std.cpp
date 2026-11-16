@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -111,6 +112,24 @@ void StdMutexLock(void *m) { static_cast<std::mutex *>(m)->lock(); }
 void StdMutexUnlock(void *m) { static_cast<std::mutex *>(m)->unlock(); }
 void StdMutexFree(void *m) { delete static_cast<std::mutex *>(m); }
 int StdMutexTryLock(void *m) { return static_cast<std::mutex *>(m)->try_lock() ? 1 : 0; }
+void *StdCondNew() {
+    try {
+        return new std::condition_variable;
+    } catch (...) {
+        return nullptr;
+    }
+}
+int StdCondWaitUs(void *c, void *m, uint64_t us) {
+    constexpr uint64_t kMaxUs = 24ull * 3600 * 1000 * 1000;   // a day: keeps steady_clock::now() + us from overflowing
+    std::unique_lock<std::mutex> lock(*static_cast<std::mutex *>(m), std::adopt_lock);   // the caller holds it
+    const std::cv_status st = static_cast<std::condition_variable *>(c)->wait_for(
+        lock, std::chrono::microseconds(us < kMaxUs ? us : kMaxUs));
+    lock.release();   // still held, by the caller
+    return st == std::cv_status::timeout ? 0 : 1;
+}
+void StdCondNotifyOne(void *c) { static_cast<std::condition_variable *>(c)->notify_one(); }
+void StdCondNotifyAll(void *c) { static_cast<std::condition_variable *>(c)->notify_all(); }
+void StdCondFree(void *c) { delete static_cast<std::condition_variable *>(c); }
 
 // ---- environment
 int StdEnvGet(const char *name, char *out, size_t cap) {
@@ -423,6 +442,11 @@ CoopPlatform MakeStd() {
     p.mutex_try_lock = StdMutexTryLock;
     p.env_get = StdEnvGet;
     p.random_fill = StdRandomFill;
+    p.cond_new = StdCondNew;
+    p.cond_wait_us = StdCondWaitUs;
+    p.cond_notify_one = StdCondNotifyOne;
+    p.cond_notify_all = StdCondNotifyAll;
+    p.cond_free = StdCondFree;
     return p;
 }
 
