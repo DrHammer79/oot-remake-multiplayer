@@ -68,6 +68,20 @@ writes and reads back a 4 KB file, then logs `coop: os selftest: PASS ...` or `F
 On a console the game's npdm has no SD card access: MountSdCard is refused there (the log says so) until the npdm is
 patched or files move to the game's save mount; Fritchii's fsp-srv does not check it.
 
+## Network slots and ENet (v1 step 8, piece c)
+`switch/adapter/platform_net.cpp` defines the socket slots (`coop_plat_sock_*`, `coop_plat_resolve`) on the game's
+nn::socket (`nn_socket.h`; the BSD-style overloads, names in imports.txt). The game has the library up already, so it
+is never initialized or finalized here. Every send and receive passes MSG_DONTWAIT (0x80), so no Fcntl and no errno
+import: a receive that fails is "nothing waiting". Only sockets opened through the slots (at most 8) can be used or
+closed, never the game's own. IPv4 only; literals are parsed here, names go to the game's resolver (GetAddrInfo).
+ENet runs on these slots through `coop/net/enet_coop` (what ENet's unix.c / win32.c define, over CoopPlatform; on PC
+it has its own test program, a real connect over 127.0.0.1). `build.py --net` adds ENet's protocol files at the
+pinned commit (built against `switch/adapter/libc`, ENet's whole view of libc), enet_coop in place of callbacks.c
+(memory from the arena) and the network self-test (`net_selftest.cpp`, from frame 1800): a UDP echo through the slots
+(`listen.py --echo` on 127.0.0.1:27520), then an ENet connect and disconnect to coop_server on 127.0.0.1:27521, one
+`net: ` line per result. ENet's own callback calls (allocator, packet free, checksum, compressor, intercept) are
+indirect: lift_check lists them as reports in a `--net` build (step 8 decision 2) and stays strict for the rest.
+
 ## What it does not cover yet
 
 - Consoles: the Switch 2 has no custom firmware. A console would also need a `main.npdm` that grants `svcSetProcessMemoryPermission` (0x73). The null reads the emulator returns as 0 are guarded (above); not yet proven on hardware.
