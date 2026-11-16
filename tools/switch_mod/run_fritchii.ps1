@@ -1,6 +1,6 @@
 # One Fritchii run of the ExeFS module (subsdk1), whole PC, time boxed. docs/exefs.md, "Run harness".
 #
-#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset nullguards [-Sha <commit>]
+#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|codemem [-Sha <commit>]
 #
 # Refuses to start unless TEST-TURN's LANE1 names -Id (LANE2 names it too or is CLOSED), no game or server runs,
 # no build/lane lock exists, and no saves backup or old install is left from an earlier run. Takes the lane1 and
@@ -9,7 +9,7 @@
 # Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
-    [ValidateSet('proto', 'nullguards')][string]$Preset = 'nullguards',
+    [ValidateSet('proto', 'nullguards', 'codemem')][string]$Preset = 'nullguards',
     [string]$Sha = '',
     [int]$Seconds = 0,                     # game time; 0 = the preset's default
     [string]$Scenario = '',                # LICHII_COOP_TEST_SCRIPT; default scenarios\play.txt
@@ -33,10 +33,10 @@ if (-not $Game) {
     if ($nups.Count -ne 1) { Write-Output "FAIL start: pass -Game (found $($nups.Count) .nup files in $root)"; exit 2 }
     $Game = $nups[0].FullName
 }
-if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240 }[$Preset] }
+if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; codemem = 200 }[$Preset] }
 if (-not $Scenario) { $Scenario = "$here\scenarios\play.txt" }
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
-$datagrams = @{ proto = 3; nullguards = 0 }[$Preset]
+$datagrams = @{ proto = 3; nullguards = 0; codemem = 0 }[$Preset]
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"

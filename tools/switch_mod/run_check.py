@@ -37,7 +37,26 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
     ], [
         ("2 no guard left out", r"null guard at main\+0x[0-9a-f]+: .*left out"),
         ("2 island page usable", r"null guards: the island page could not"),
-        ("2 code pages back to RX", r"restore RX failed"),
+        ("2 code pages back to RX", r"restore RX failed|RX back refused"),
+    ], 0),
+    # The code-memory path (v1 step 8 (a), switch/proto/codemem.h): every patch written through a RW alias,
+    # main's own pages stay RX, no 0x73 fallback.
+    "codemem": ([
+        HELLO, HOOK_IN,
+        # Two aliases: main's text (not one page) and the island page (one page).
+        ("2 alias of main's text", r"^codemem: alias at 0x[0-9a-f]+ for 0x[0-9a-f]+ \+0x(?!1000 )[0-9a-f]+ \(RW"),
+        ("2 alias of the island page", r"^codemem: alias at 0x[0-9a-f]+ for 0x[0-9a-f]+ \+0x1000 \(RW"),
+        ("3 frame site page RX after patching", r"^codemem: frame site page perm 0x5 \(RX\)"),
+        ("4 null guards all applied", rf"^null guards: {NULL_GUARDS} of {NULL_GUARDS} applied"),
+        ("5 game plays (frame 3000)", r"^frame 3000$"),
+    ], [
+        ("2 no refused step", r"^codemem: .* refused, result"),
+        ("2 main's text found", r"^codemem: main's text not found"),
+        ("3 no write through svc 0x73", r"writes through svc 0x73"),
+        ("3 no 0xd401", r"0xd401"),
+        ("4 no guard left out", r"null guard at main\+0x[0-9a-f]+: .*left out"),
+        ("4 island page written", r"null guards: the island page could not"),
+        ("4 every hook written", r"^hook: main\+0x[0-9a-f]+ could not be written"),
     ], 0),
 }
 

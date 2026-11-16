@@ -26,6 +26,17 @@ NULL_RUN = [
     "frame 6000",
 ]
 
+CODEMEM_RUN = [
+    "hello from subsdk1 (ExeFS prototype)",
+    "main at 0x802c6000, malloc +0x14c6c90",
+    "codemem: alias at 0x5000000000 for 0x802c6000 +0x3c5b000 (RW; the code stays RX)",
+    "codemem: alias at 0x5003c5b000 for 0x87a1f000 +0x1000 (RW; the code stays RX)",
+    "hook 0: frame hook in at main+0x6e70f8, continues at main+0x3b4e300",
+    "null guards: 29 of 29 applied (a load through a null base reads 0)",
+    "codemem: frame site page perm 0x5 (RX), state 0x3",
+    "frame 3000",
+]
+
 
 def log(lines):
     return "\n".join(["[   1.0] Loader <Info> something else"] + [PREFIX + x for x in lines])
@@ -96,6 +107,45 @@ class NullGuardPresetTest(unittest.TestCase):
 
     def test_crash_fails(self):
         self.assertIn("FAIL game still running at the end (no crash)", run("nullguards", NULL_RUN, alive=False)[1])
+
+
+class CodememPresetTest(unittest.TestCase):
+    def test_pass(self):
+        ok, rep = run("codemem", CODEMEM_RUN)
+        self.assertTrue(ok, rep)
+
+    def test_one_alias_is_not_enough(self):
+        for drop, name in ((2, "2 alias of main's text"), (3, "2 alias of the island page")):
+            lines = [x for i, x in enumerate(CODEMEM_RUN) if i != drop]
+            self.assertIn(f"FAIL {name}", run("codemem", lines)[1])
+
+    def test_page_left_rw_fails(self):
+        lines = [x.replace("perm 0x5 (RX)", "perm 0x3 (not RX)") for x in CODEMEM_RUN]
+        self.assertIn("FAIL 3 frame site page RX after patching", run("codemem", lines)[1])
+
+    def test_fallback_and_refusals_fail_and_name_the_line(self):
+        rep = run("codemem", CODEMEM_RUN + [
+            "codemem: MapProcessMemory (svc 0x74) refused, result 0xe401: the rest goes through svc 0x73",
+            "codemem: 3 writes through svc 0x73 (refused 0x0, RX back refused 0xd401: those pages stay RW, emulator only)",
+        ])[1]
+        self.assertTrue(any(r.startswith("FAIL 2 no refused step: codemem: MapProcessMemory") for r in rep))
+        self.assertTrue(any(r.startswith("FAIL 3 no write through svc 0x73") for r in rep))
+        self.assertTrue(any(r.startswith("FAIL 3 no 0xd401") for r in rep))
+
+    def test_guard_count_is_pinned(self):
+        lines = [x.replace("29 of 29", "0 of 0") for x in CODEMEM_RUN]
+        self.assertIn("FAIL 4 null guards all applied", run("codemem", lines)[1])
+
+    def test_short_run_fails(self):
+        lines = [x.replace("frame 3000", "frame 2400") for x in CODEMEM_RUN]
+        self.assertIn("FAIL 5 game plays (frame 3000)", run("codemem", lines)[1])
+
+    def test_unwritten_hook_fails(self):
+        rep = run("codemem", CODEMEM_RUN + ["hook: main+0x6e70f8 could not be written (svc 0x73 result 0xd801)"])[1]
+        self.assertTrue(any(r.startswith("FAIL 4 every hook written") for r in rep))
+
+    def test_crash_fails(self):
+        self.assertIn("FAIL game still running at the end (no crash)", run("codemem", CODEMEM_RUN, alive=False)[1])
 
 
 class HarnessPrivacyTest(unittest.TestCase):
