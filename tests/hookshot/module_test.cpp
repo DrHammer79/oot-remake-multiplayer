@@ -216,7 +216,7 @@ TEST_CASE("hookshot: perceived puppets only where null reads can give 0 (issue 1
 TEST_CASE("hookshot: the null page is armed before the first puppet create reaches the game (issue 150)") {
     const std::string src = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     const auto arm = src.find("ArmNullPage(actor);");
-    const auto call = src.find("g_api->call(ctx, &k, &x0)");
+    const auto call = src.find("Platform().call(ctx, &k, &x0)");
     REQUIRE(arm != std::string::npos);
     REQUIRE(call != std::string::npos);
     CHECK(arm < call);  // inside Refused(), which runs before the call
