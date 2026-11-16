@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,11 +24,22 @@ REPO = HERE.parent.parent
 SRC = REPO / "switch" / "proto"
 ADAPTER = REPO / "switch" / "adapter"
 # v1 step 8: the adapter's sources (switch/adapter) and the headers they share with the core.
-ADAPTER_SOURCES = ("platform_os.cpp", "arena.cpp", "os_selftest.cpp")
+ADAPTER_SOURCES = ("platform_os.cpp", "arena.cpp", "os_selftest.cpp", "platform_net.cpp")
 INCLUDES = ["-I", str(REPO / "coop" / "platform" / "include")]
 # Every name the module may import (one per line, '#' comments): checked against the game's dynsym, so a declaration
 # that mangles differently (a wrong parameter type) fails the build instead of failing to link in the game.
 IMPORTS = HERE / "imports.txt"
+# v1 step 8c, --net: ENet (its protocol files at the pinned commit, built against switch/adapter/libc) on the platform's
+# sockets (coop/net/enet_coop) and the network self-test. Off by default, so other runs' modules stay as they were.
+ENET_FILES = ("compress.c", "host.c", "list.c", "packet.c", "peer.c", "protocol.c")  # callbacks.c: enet_coop's
+LIBC = ADAPTER / "libc"
+NET_DEFINES = ["-DCOOP_PLATFORM_STATIC"]
+C_FLAGS = [
+    "--target=aarch64-none-elf", "-march=armv8-a", "-O2", "-std=c11",
+    "-fPIC", "-ffreestanding", "-fno-stack-protector",
+    "-funwind-tables", "-fno-jump-tables", "-fvisibility=hidden", "-ffixed-x18", "-mno-outline-atomics",
+    "-nostdlib",
+]
 sys.path.insert(0, str(HERE))
 import elf2nso  # noqa: E402
 import lift_check  # noqa: E402
@@ -79,10 +91,38 @@ def import_problems(elf: "lift_check.Elf", allowed: set[str]) -> list[str]:
             for s in elf.symbols(lift_check.SHT_DYNSYM) if not s.defined and s.name and s.name not in allowed]
 
 
+def enet_source(out: Path, given: str | None) -> Path:
+    """ENet's source at the commit cmake/enet.cmake pins: --enet DIR, else a clone in the build folder."""
+    cmake = (REPO / "cmake" / "enet.cmake").read_text(encoding="utf-8")
+    url = re.search(r"GIT_REPOSITORY\s+(\S+)", cmake).group(1)
+    tag = re.search(r"GIT_TAG\s+([0-9a-f]{40})", cmake).group(1)
+    src = Path(given) if given else out / "enet-src"
+    if not given and not (src / ".git").exists():
+        run(["git", "clone", "--quiet", url, str(src)])
+    head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != tag:
+        if given:
+            sys.exit(f"build: {src} is at {head or '?'}, cmake/enet.cmake pins {tag}")
+        run(["git", "-C", str(src), "-c", "advice.detachedHead=false", "checkout", "--quiet", tag])
+    return src
+
+
+def net_sources(enet: Path) -> list[tuple[Path, list[str]]]:
+    """(source, flags) for a --net build: ENet without warnings (not ours), our files strict."""
+    inc = ["-isystem", str(LIBC), "-isystem", str(enet / "include")]
+    ours_cpp = [*CFLAGS, *INCLUDES, *NET_DEFINES, *inc]
+    return ([(enet / name, [*C_FLAGS, *inc, "-w"]) for name in ENET_FILES] +
+            [(LIBC / "mem.c", [*C_FLAGS, *inc, "-Wall", "-Wextra", "-Werror"]),
+             (REPO / "coop" / "net" / "enet_coop" / "enet_coop.cpp", ours_cpp),
+             (ADAPTER / "net_selftest.cpp", ours_cpp)])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--llvm")
     ap.add_argument("--out", default=str(REPO / "build" / "switch-proto"))
+    ap.add_argument("--net", action="store_true", help="add ENet and the network self-test (v1 step 8c run)")
+    ap.add_argument("--enet", help="ENet's source at the pinned commit (default: cloned into --out)")
     a = ap.parse_args()
     clang = find_tool("clang", a.llvm)
     lld = find_tool("ld.lld", a.llvm)
@@ -90,9 +130,13 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     objs = []
     sources = [SRC / "start.s", SRC / "main.cpp"] + [ADAPTER / name for name in ADAPTER_SOURCES]
-    for src in sources:
+    builds = [(src, [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"])
+              for src in sources]
+    if a.net:
+        builds = [(src, [*flags, "-DCOOP_NET_SELFTEST"] if src.name == "main.cpp" else flags) for src, flags in builds]
+        builds += net_sources(enet_source(out, a.enet))
+    for src, flags in builds:
         obj = out / (src.parent.name + "_" + src.name + ".o")
-        flags = [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
         run([clang, *flags, "-c", str(src), "-o", str(obj)])
         objs.append(str(obj))
     elf = out / "module.elf"
@@ -100,7 +144,10 @@ def main() -> int:
          *objs, "-o", str(elf)])
     try:
         parsed = lift_check.Elf(elf.read_bytes())
-        problems, entries = lift_check.check(parsed)
+        reports: list[str] = []
+        problems, entries = lift_check.check(parsed, ("enet_",) if a.net else (), reports)
+        for line in reports:  # step 8 decision 2: ENet's own callbacks, listed for the lift-clean step (f2)
+            print(f"build: lift report: {line}")
         problems += import_problems(parsed, allowed_imports())
     except lift_check.LiftError as e:
         problems, entries = [str(e)], []

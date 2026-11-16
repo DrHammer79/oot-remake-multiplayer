@@ -25,6 +25,9 @@
 // v1 step 8 (b): the OS slots on nn::os / nn::fs and their self-test (switch/adapter)
 #include "../adapter/os_selftest.h"
 #include "../adapter/platform_os.h"
+#ifdef COOP_NET_SELFTEST  // v1 step 8 (c), build.py --net: UDP echo + ENet connect (switch/adapter/net_selftest.cpp)
+extern "C" void coop_net_selftest_frame(uint64_t frame);
+#endif
 
 // ---- Imports, resolved by rtld from main and sdk ----
 extern "C" {
@@ -323,6 +326,9 @@ extern "C" COOP_EXPORT void coop_proto_frame() {
     if (!g_time_done && g_frames >= 300 && g_frames % 60 == 0) TrySetTime();
     if (!g_net_done && g_frames >= 900) SayHello();
     coop_os_selftest_frame(g_frames);  // v1 step 8 (b): from frame 1200, once
+#ifdef COOP_NET_SELFTEST
+    coop_net_selftest_frame(g_frames);  // v1 step 8 (c): from frame 1800
+#endif
 }
 
 // rtld calls this once, after nninitStartup and before nnMain (actor-map.md, Module _init).

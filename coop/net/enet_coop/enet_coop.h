@@ -14,7 +14,10 @@
      slot does not say why, and one failed UDP send must not end the whole service call.
    - Stream sockets, listen/accept/connect/shutdown and enet_socketset_select are refused (-1): ENet's UDP host
      never uses them. Socket options are accepted and ignored: platform sockets are already non-blocking.
-   - Reverse lookup (enet_address_get_host) gives the dotted address. */
+   - Reverse lookup (enet_address_get_host) gives the dotted address.
+   - In the payload (COOP_PLATFORM_STATIC) it also stands in for callbacks.c: enet_malloc/enet_free go straight to
+     the platform's arena (no allocator table, no libc malloc/abort); out of memory is NULL and one log line, and
+     enet_initialize_with_callbacks refuses own allocators. tools/switch_mod/build.py --net builds it so. */
 #ifndef COOP_ENET_COOP_H
 #define COOP_ENET_COOP_H
 

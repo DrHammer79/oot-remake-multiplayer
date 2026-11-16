@@ -177,8 +177,13 @@ def hook_table(elf: Elf, table_addr: int) -> list[tuple[int, int, int, int, int]
     return [struct.unpack_from("<HxxIQQQ", body, i * HOOK_ENTRY) for i in range(count)]
 
 
-def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
-    """Return (problems, entries)."""
+def check(elf: Elf, report_prefixes: tuple[str, ...] = (),
+          reports: list[str] | None = None) -> tuple[list[str], list[tuple[int, str]]]:
+    """Return (problems, entries).
+
+    report_prefixes (v1 step 8 decision 2, "emulator first"): an unknown indirect call inside a function whose name
+    starts with one of them goes to `reports` instead of `problems`: listed, not fatal. Only for code a lifting recomp
+    does not need yet (ENet's own callbacks in a --net build); everything else stays strict."""
     problems: list[str] = []
     for name in (".eh_frame", ".eh_frame_hdr"):
         sec = elf.section(name)
@@ -222,7 +227,11 @@ def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
             if src in slots or any(g.addr <= (src or -1) < g.addr + g.size for g in got):
                 continue
             where = max((n for n in names if n[0] <= pc), default=(0, "?"))[1]
-            problems.append(f"{kind} at {pc:#x} (in {where}) does not go through a coop_slot_* or an import")
+            message = f"{kind} at {pc:#x} (in {where}) does not go through a coop_slot_* or an import"
+            if reports is not None and report_prefixes and where.startswith(report_prefixes):
+                reports.append(message)
+            else:
+                problems.append(message)
 
     entries = sorted((s.value, s.name) for s in dyn.values() if s.type == STT_FUNC)
     return problems, entries

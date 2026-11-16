@@ -43,3 +43,12 @@ _ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm
 _ZN2nn2fs9CloseFileENS0_10FileHandleE
 _ZN2nn2fs9FlushFileENS0_10FileHandleE
 _ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE
+
+# sdk: nn::socket, the platform's socket slots (switch/adapter/nn_socket.h, v1 step 8c; checked against the local
+# sdk dump: all present). Socket, Close and IsInitialized are above.
+_ZN2nn6socket4BindEiPK8sockaddrj
+_ZN2nn6socket11GetSockNameEiP8sockaddrPj
+_ZN2nn6socket6SendToEiPKvmiPK8sockaddrj
+_ZN2nn6socket8RecvFromEiPvmiP8sockaddrPj
+_ZN2nn6socket11GetAddrInfoEPKcS2_PK8addrinfoPPS3_
+_ZN2nn6socket12FreeAddrInfoEP8addrinfo

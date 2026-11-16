@@ -104,6 +104,9 @@ jobs:
           clang --version | head -1
           python tools/switch_mod/build.py
           cat build/switch-proto/subsdk1.entries
+          # v1 step 8c: the --net module (ENet on the platform's sockets + the network self-test); ENet's own
+          # callbacks are listed as lift reports, anything else indirect still fails.
+          python tools/switch_mod/build.py --net --out build/switch-proto-net
       # The kit's patch applier for Hookshot (hookshot-kit); skipped until that branch is merged.
       - name: Kit patch applier tests
         if: hashFiles('tools/release/tests/test_apply_patch.py') != ''

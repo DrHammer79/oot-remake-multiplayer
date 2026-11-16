@@ -9,6 +9,7 @@
 // - IPv4 only: the game's socket config has no IPv6 (COOP_SOCK_UDP6 is refused).
 // - Handles are the sdk's descriptors (>= 0); we keep a small set of the ones we opened, so a stray handle
 //   from the core can never close or read one of the game's own sockets.
+#include "coop_platform_static.h"
 #include "nn_socket.h"
 #include "sock_addr.h"
 

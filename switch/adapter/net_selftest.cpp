@@ -1,28 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The network self-test of the ExeFS payload (v1 step 8c run; built only with build.py --net). From the game's
-// frame hook, a few steps a frame and never waiting:
+// frame hook (from frame 1800), a few steps a frame and never waiting:
 //   1. UDP through the CoopPlatform slots (platform_net.cpp): open, bind any port, send one datagram to the run's
 //      echo on 127.0.0.1:27520, read the echo back.
 //   2. ENet on the same slots (coop/net/enet_coop): connect to coop_server on 127.0.0.1:27521, then disconnect.
 // Every result is one `net:` log line (coop_plat_log); the run's check reads them (reports/v1-exefs-net-a.md).
 #include <enet/enet.h>
 
-#include "coop_platform.h"
+#include "coop_platform_static.h"
 
 extern "C" {
-int coop_plat_sock_open(uint32_t sock_kind);
-int coop_plat_sock_bind(int s, const CoopAddr *local);
-int coop_plat_sock_local(int s, CoopAddr *out);
-int coop_plat_sock_sendto(int s, const void *data, size_t n, const CoopAddr *to);
-int coop_plat_sock_recvfrom(int s, void *buf, size_t cap, CoopAddr *from);
-int coop_plat_sock_close(int s);
-void coop_plat_log(const char *line);
 void coop_net_selftest_frame(uint64_t frame);  // switch/proto/main.cpp, every frame (--net builds)
 }
 
 namespace {
 
-constexpr uint64_t kStartFrame = 1200;  // ~20 s in: after the title, and after the prototype's own net step
+constexpr uint64_t kStartFrame = 1800;  // ~30 s in: after the prototype's net step and the OS self-test (1200)
 constexpr uint64_t kEchoFrames = 300;
 constexpr uint64_t kConnectFrames = 900;
 constexpr uint64_t kDisconnectFrames = 300;

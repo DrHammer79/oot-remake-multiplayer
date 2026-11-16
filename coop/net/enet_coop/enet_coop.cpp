@@ -6,20 +6,7 @@
 #include <enet/enet.h>
 
 #ifdef COOP_PLATFORM_STATIC
-extern "C" {
-int coop_plat_sock_open(uint32_t sock_kind);
-int coop_plat_sock_bind(int s, const CoopAddr *local);
-int coop_plat_sock_local(int s, CoopAddr *out);
-int coop_plat_sock_sendto(int s, const void *data, size_t n, const CoopAddr *to);
-int coop_plat_sock_recvfrom(int s, void *buf, size_t cap, CoopAddr *from);
-int coop_plat_sock_close(int s);
-int coop_plat_resolve(const char *host, uint32_t sock_kind, CoopAddr *out);
-uint64_t coop_plat_now_us(void);
-void coop_plat_sleep_us(uint64_t us);
-void *coop_plat_mem_alloc(size_t n, size_t align);
-void coop_plat_mem_free(void *p);
-void coop_plat_log(const char *line);
-}
+#include "coop_platform_static.h"
 #define COOP_ENET_CALL(slot, fail, ...) coop_plat_##slot(__VA_ARGS__)
 #endif
 
