@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Print the UDP datagrams the ExeFS prototype sends (default 127.0.0.1:27520, LANE1's port).
 
-    listen.py [--port 27520] [--seconds 600]
+    listen.py [--port 27520] [--seconds 600] [--echo]
+
+--echo sends every datagram back to where it came from (the v1 step 8c network self-test reads it back).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=27520)
     ap.add_argument("--seconds", type=float, default=600)
+    ap.add_argument("--echo", action="store_true")
     a = ap.parse_args()
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", a.port))
@@ -29,6 +32,9 @@ def main() -> int:
             continue
         got += 1
         print(f"listen: {peer[0]}:{peer[1]} {data!r}", flush=True)
+        if a.echo:
+            s.sendto(data, peer)
+            print(f"listen: echoed {len(data)} bytes to {peer[0]}:{peer[1]}", flush=True)
     print(f"listen: {got} datagram(s)")
     return 0 if got else 1
 
