@@ -22,6 +22,8 @@ constexpr uint32_t kRegisterInsn = 0x97fd7c3c;
 constexpr uint64_t kUiManagerPtr = 0x4c7e098;  // **: the UI manager (screens: count +8, array +0x10)
 constexpr uint64_t kGfxManagerPtr = 0x4c8cc98;  // **: the gfx manager (texture pool +384, ids: +2544 count, +2658 base)
 
+// From _init once main's base is known, before any hook is applied (so a tap firing at boot has it).
+void Init(uint64_t main);
 // Every frame from coop_proto_frame, after main's base is known.
 void Frame(uint64_t main, uint64_t frames);
 

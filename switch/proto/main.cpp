@@ -473,6 +473,9 @@ extern "C" COOP_EXPORT void _init() {
     }
     OpenCodeAliases();
     input::FillSlots();
+#if COOP_DRAW_RE
+    draw_re::Init(g_main);
+#endif
     ApplyHooks();
     ReportCodeWrites();
 }

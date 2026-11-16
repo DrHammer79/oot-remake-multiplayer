@@ -18,7 +18,7 @@ namespace {
 uint64_t g_main = 0;
 
 struct Line {
-    char buf[200];
+    char buf[256];  // a screen line with raw heap pointers runs to ~200
     size_t n = 0;
     Line() { s("coop-proto: draw-re: "); }
     Line& s(const char* t) {
@@ -93,9 +93,10 @@ constexpr uint32_t kMaxRegister = 6;
 uint64_t g_registered[kMaxRegister];  // objects to look at again a frame later (their id); index = the tap's count
 
 void Apply(uint32_t which, const uint64_t* r) {
+    if (g_main == 0) return;  // before _init knew main (draw_re::Init)
     const uint32_t k = Bump(&g_apply_logged);
     if (k >= kMaxApply) return;
-    const uint64_t mat = r[0], slot_ptr = r[1], idx = r[2], holder = r[11];
+    const uint64_t mat = r[0], slot_ptr = r[1], idx = r[2] & 0xffffffffu, holder = r[11];  // idx is an int argument
     const uint64_t entries = U64(mat + 48);
     const uint64_t entry = entries + idx * 0x50 + 72;
     Line().s(which == 0 ? "apply loaded" : "apply default").s(" ").dec(k).s(": material ").at(mat).s(" id ")
@@ -106,6 +107,7 @@ void Apply(uint32_t which, const uint64_t* r) {
 }
 
 void Register(const uint64_t* r) {
+    if (g_main == 0) return;  // before _init knew main (draw_re::Init)
     const uint32_t k = Bump(&g_register_logged);
     if (k >= kMaxRegister) return;
     const uint64_t tex = r[0];
@@ -166,6 +168,8 @@ extern "C" COOP_EXPORT void coop_draw_re_tap(uint32_t which, const uint64_t* reg
 }
 
 namespace draw_re {
+
+void Init(uint64_t main) { __atomic_store_n(&g_main, main, __ATOMIC_RELEASE); }
 
 void Frame(uint64_t main, uint64_t frames) {
     g_main = main;
