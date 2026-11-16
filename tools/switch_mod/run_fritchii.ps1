@@ -56,7 +56,7 @@ if (Get-Process lichii, longshot, hookshot, eden, yuzu, coop_server -ErrorAction
 foreach ($l in 'build.lock', 'build-game.lock', 'build-hs.lock', 'lane1.lock', 'lane2.lock') {
     if (Test-Path "$main\$l") { Fail-Start "$l exists (someone holds it; never take or delete it)" }
 }
-foreach ($f in $Kit, $Game, $Python, $lanes, $Scenario) { if (-not (Test-Path $f)) { Fail-Start "missing: $f" } }
+foreach ($f in $Kit, $Game, $Python, $lanes, $Scenario) { if (-not (Test-Path -LiteralPath $f)) { Fail-Start "missing: $f" } }
 if (Test-Path $bak) { Fail-Start "$bak exists: an earlier run may not have restored the kit's saves; restore by hand, then delete it" }
 if (Test-Path $modDir) { Fail-Start "$modDir exists: remove the old install first" }
 if ($Sha) {
