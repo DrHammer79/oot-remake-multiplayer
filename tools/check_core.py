@@ -45,6 +45,7 @@ OS_CALLS = [
     (re.compile(r'\b(steady_clock|system_clock|high_resolution_clock|utc_clock|file_clock)\b'),
      'coop::os::SteadyClock / NowUs'),
     (re.compile(r'\b(getenv|_dupenv_s|_wgetenv|secure_getenv|setenv|putenv|_putenv)\b'), 'coop::os::GetEnv'),
+    (re.compile(r'\brandom_device\b'), 'coop::os::RandomFill'),
 ]
 
 

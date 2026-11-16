@@ -105,6 +105,12 @@ class CheckCoreTest(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertTrue(all('coop::os::GetEnv' in p for p in problems))
 
+    def test_random_device_fails(self):
+        problems = check_core.check(self.tree({'lichii/hook/coop_a.cpp': '#include <random>\nstd::random_device rd;\n'
+                                                                         'std::mt19937 game_rng(5);\n'}))
+        self.assertEqual(len(problems), 1)
+        self.assertIn('coop::os::RandomFill', problems[0])
+
     def test_coop_os_and_comments_pass(self):
         text = ('#include <mutex>\n#include <coop/os.hpp>\n// was std::mutex\n/* std::thread */\n'
                 'coop::os::Mutex m;\nstd::lock_guard<coop::os::Mutex> g(m);\nstd::unique_lock<coop::os::Mutex> u;\n'

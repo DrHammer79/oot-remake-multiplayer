@@ -4,7 +4,6 @@
 
 #include <coop/os.hpp>
 #include <cstdlib>
-#include <random>
 #include <fstream>
 #include <sstream>
 
@@ -237,19 +236,16 @@ std::array<std::uint8_t, 16> LoadPlayerKey(const std::filesystem::path& file, st
             return *key;
         }
     }
-    std::random_device random;
     std::array<std::uint8_t, 16> key{};
-    for (std::size_t i = 0; i < key.size(); i += 4) {
-        const std::uint32_t r = random();
-        for (std::size_t j = 0; j < 4; ++j) {
-            key[i + j] = static_cast<std::uint8_t>(r >> (8 * j));
-        }
-    }
+    const bool random = coop::os::RandomFill(key.data(), key.size());
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     out << PlayerKeyText(key) << "\n";
     note = out.good() ? "a new player key was made in " + file.string()
                       : "the player key could not be written to " + file.string() + ": it holds for this run only";
+    if (!random) {
+        note += " (this platform gave no random source: the key was made from the clock, so it is easier to guess)";
+    }
     return key;
 }
 
