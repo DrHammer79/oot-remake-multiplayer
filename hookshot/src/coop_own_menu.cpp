@@ -38,6 +38,10 @@ float g_width = 0, g_height = 0;   // the picture at the last draw (the mouse's 
 bool g_cannot_draw = false;        // no hos_coop_draw2 here: the menu does not open
 std::uint64_t g_shown_ms = 0;      // when it opened, then its last draw
 bool g_ever_drawn = false;         // hos_coop_draw2 has drawn it at least once
+std::mutex g_focus_mutex;          // g_focus alone (taken last, never holding it while taking another lock)
+coop::ui::FocusStack g_focus;      // all of co-op's UI: the own menu, the chat box, the cheats panel
+KeyLatch g_keys;                   // keys held when the menu closed
+bool g_latch_keys = false;         // it just closed: latch at the next KeysTaken
 
 std::uint64_t NowMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -61,6 +65,14 @@ bool Do(const CoopUiEvent& e) {
     const bool taken = g_menu.Handle(e, pages);
     if (!was_open && g_menu.open()) {
         g_shown_ms = NowMs();
+        std::lock_guard focus(g_focus_mutex);
+        g_focus.Push(coop::ui::Owner::menu);
+    } else if (was_open && !g_menu.open()) {
+        {
+            std::lock_guard focus(g_focus_mutex);
+            g_focus.Pop(coop::ui::Owner::menu);
+        }
+        g_latch_keys = true;   // the keys held now stay co-op's until let go (KeysTaken)
     }
     return taken;
 }
@@ -70,16 +82,42 @@ void CannotDraw(const char* why) {
     if (!g_cannot_draw) {
         LOG_WARNING(Core, "coop: co-op's own menu (LICHII_COOP_OWN_MENU=1) is off: {} (docs/ui.md)", why);
     }
-    g_cannot_draw = true;
     if (g_menu.open()) {
         CoopUiEvent close{};
         close.kind = COOP_UI_CLOSE;
-        PausePages pages;
-        g_menu.Handle(close, pages);
+        Do(close);
     }
+    g_cannot_draw = true;
 }
 
 }  // namespace
+
+void SetFocus(coop::ui::Owner owner, bool on) {
+    std::lock_guard lock(g_focus_mutex);
+    if (!on) {
+        g_focus.Pop(owner);
+    } else if (!g_focus.Has(owner)) {   // (already on: stays where it is, the menu over it keeps the top)
+        g_focus.Push(owner);
+    }
+}
+
+coop::ui::Owner FocusTop() {
+    std::lock_guard lock(g_focus_mutex);
+    return g_focus.Top();
+}
+
+bool KeysTaken(bool (*down)(int vk)) {
+    if (!Enabled() || down == nullptr) {
+        return false;
+    }
+    std::lock_guard lock(g_mutex);
+    const auto held = [down](std::uint32_t vk) { return down(static_cast<int>(vk)); };
+    if (g_latch_keys) {
+        g_latch_keys = false;
+        g_keys.Latch(held);
+    }
+    return g_keys.Held(held) || g_menu.open();
+}
 
 void NoDraw2() {
     if (!Enabled()) {

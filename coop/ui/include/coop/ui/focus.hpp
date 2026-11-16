@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Who has co-op UI input (docs/ui.md "Input"): a small stack of owners; the top one gets the events, and while any
-// owner is on it the game's pad is masked (the adapter clears the buttons it hands the game). No allocation.
+// Who has co-op UI input (docs/ui.md "Input"): a small stack of owners; the top one gets the events. While any owner
+// is on it the keyboard is co-op's; while the menu is, the pad too (the adapter clears what it hands the game).
+// No allocation.
 #pragma once
 #include <array>
 #include <cstddef>
@@ -30,7 +31,10 @@ public:
         }
         return false;
     }
-    bool MasksPad() const { return n_ > 0; }
+    // Any owner takes the keyboard; only the menu takes the pad too (the chat box and the cheats panel are typed
+    // into while the game is still played, as always).
+    bool TakesKeys() const { return n_ > 0; }
+    bool MasksPad() const { return Has(Owner::menu); }
     std::size_t Size() const { return n_; }
 
 private:
