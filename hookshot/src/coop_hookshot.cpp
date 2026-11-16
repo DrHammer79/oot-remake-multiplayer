@@ -1187,6 +1187,12 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
                 std::memcpy(&e.place[i], &place[i], 4);
             }
         }
+        // Player report 111 research: what a placed actor's create carries
+        // that ours does not (create argument +0x60..+0x80, and what +0x60
+        // points at). Only read; logged by the Objects step for enemies.
+        if (arg != 0 && CoopRuntime::Read(arg + 0x60, e.params, 4 * sizeof e.params[0]) && e.params[0] != 0) {
+            (void)CoopRuntime::Read(e.params[0], &e.params[4], 2 * sizeof e.params[0]);
+        }
         // A copy enemy's own shot is not made at all (coop_enemy_shots.h):
         // the owner's game fires, and its shot comes as a copy, which is
         // one of our own creates and never stopped.

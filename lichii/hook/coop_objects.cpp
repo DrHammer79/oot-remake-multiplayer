@@ -2272,6 +2272,16 @@ private:
                     LOG_INFO(Core, "coop: actors: create '{}' from main+{:#x} at ({:.1f}, {:.1f}, {:.1f})", e.Name(),
                              e.from >= main_ && main_ != 0 ? e.from - main_ : e.from, place[0], place[1], place[2]);
                 }
+                // Player report 111 research: an enemy's create argument +0x60..+0x80 (the
+                // placement's data for placed ones; ours, extras included, leave it 0).
+                if (actor_param_lines_ < 40 && e.Name().starts_with("Enemy_")) {
+                    ++actor_param_lines_;
+                    LOG_INFO(Core, "coop: actors: create '{}' from main+{:#x}{}: arg+0x60 {:#x} +0x68 {:#x} +0x70 {:#x} "
+                                   "+0x78 {:#x}; [+0x60] {:#x} {:#x} (report 111 research)",
+                             e.Name(), e.from >= main_ && main_ != 0 ? e.from - main_ : e.from,
+                             (e.flags & CoopActorEvents::kOwn) != 0 ? " (ours)" : "", e.params[0], e.params[1],
+                             e.params[2], e.params[3], e.params[4], e.params[5]);
+                }
                 break;
             case CoopActorEvents::Kind::Delete: {
                 ++actor_deletes_;
@@ -2395,6 +2405,7 @@ private:
     std::size_t actor_events_lost_ = 0;
     std::int64_t actor_hit_sum_ = 0;
     std::size_t actor_event_lines_ = 0;
+    std::size_t actor_param_lines_ = 0;  // report 111 research: create argument lines for enemies
     u64 actor_events_said_us_ = 0;
 #endif
 

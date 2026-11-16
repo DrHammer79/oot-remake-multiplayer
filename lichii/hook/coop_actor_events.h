@@ -38,6 +38,11 @@ struct Event {
     std::uint64_t from = 0;    // Create: the caller (guest return address)
     std::uint64_t place[3]{};  // Create: the asked position (bits of 3 floats, 0 when not read)
     std::uint64_t name[4]{};   // Create: the name's first 31 bytes, 0-terminated (read at the request)
+    // Create (player report 111 research): the create argument's +0x60..+0x80,
+    // which the placement creator (main+0x109f110) fills from its placement
+    // info +0x20..+0x38 and our own creates leave 0, then the two words +0x60
+    // points at. Read at the request (the argument is on the caller's stack).
+    std::uint64_t params[6]{};
 
     std::string Name() const {
         char text[sizeof name + 1] = {};
@@ -74,6 +79,9 @@ public:
         for (int i = 0; i < 4; ++i) {
             s.name[i].store(e.name[i], std::memory_order_relaxed);
         }
+        for (int i = 0; i < 6; ++i) {
+            s.params[i].store(e.params[i], std::memory_order_relaxed);
+        }
         s.seq.store(n + 1, std::memory_order_release);
     }
 
@@ -105,6 +113,9 @@ public:
             for (int i = 0; i < 4; ++i) {
                 e.name[i] = s.name[i].load(std::memory_order_relaxed);
             }
+            for (int i = 0; i < 6; ++i) {
+                e.params[i] = s.params[i].load(std::memory_order_relaxed);
+            }
             std::atomic_thread_fence(std::memory_order_acquire);
             if (seq != tail_ + 1 || s.seq.load(std::memory_order_relaxed) != seq) {
                 ++gone;  // (written over by a later push)
@@ -131,6 +142,7 @@ private:
         std::atomic<std::uint64_t> a{0}, b{0}, from{0};
         std::atomic<std::uint64_t> place[3]{};
         std::atomic<std::uint64_t> name[4]{};
+        std::atomic<std::uint64_t> params[6]{};
     };
     std::atomic<std::uint64_t> head_{0};
     std::uint64_t tail_ = 0;  // (the reader's)
