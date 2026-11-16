@@ -321,6 +321,12 @@ TEST_CASE("utf8: malformed sequences give one bad codepoint per byte that starts
     CHECK(DecodeAll("\xF0\x9F\x98" "A") == V{kBad, kBad, kBad, 'A'});
     CHECK(DecodeAll("A\xE2\x82") == V{'A', kBad, kBad});      // cut by the end of the text
     CHECK(DecodeAll("\xF0\x9F") == V{kBad, kBad});
+    // Overlong forms are not rejected (drawlist's rule): they decode as their value, which no font has a glyph for
+    // (C0 80 = 0, never the text's end), so the measure and the pen both count one missing codepoint.
+    CHECK(DecodeAll("\xC0\x80" "A") == V{0, 'A'});
+    CHECK(DecodeAll("\xC1\xBF") == V{0x7F});
+    CHECK(DecodeAll("\xE0\x80\xAF") == V{0x2F});
+    CHECK(DecodeAll("\xF0\x80\x80\x80") == V{0});
 }
 
 TEST_CASE("raster: the pen moves as the measure counts, bad bytes included") {
@@ -330,7 +336,7 @@ TEST_CASE("raster: the pen moves as the measure counts, bad bytes included") {
     CoopFontAdvances fa{};
     coop_raster_font_advances(&tf.font, cps, adv, &fa);
     const char* cases[] = {"", "\x80", "\xFF\xFE", "\xC3", "\xC3\xA9", "\xE2\x82", "\xE2\x82\xAC", "\xF0\x9F\x98",
-                           "A\xE2\x82", "\xC3\xC3\xC3"};
+                           "A\xE2\x82", "\xC3\xC3\xC3", "\xC0\x80", "\xE0\x80\xAF"};
     for (const char* bad : cases) {
         CAPTURE(DecodeAll(bad).size());
         Pic p(64, 2);
