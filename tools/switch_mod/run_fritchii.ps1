@@ -9,7 +9,7 @@
 # Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
-    [ValidateSet('proto', 'nullguards')][string]$Preset = 'nullguards',
+    [ValidateSet('proto', 'nullguards', 'os')][string]$Preset = 'nullguards',
     [string]$Sha = '',
     [int]$Seconds = 0,                     # game time; 0 = the preset's default
     [string]$Scenario = '',                # LICHII_COOP_TEST_SCRIPT; default scenarios\play.txt
@@ -33,10 +33,10 @@ if (-not $Game) {
     if ($nups.Count -ne 1) { Write-Output "FAIL start: pass -Game (found $($nups.Count) .nup files in $root)"; exit 2 }
     $Game = $nups[0].FullName
 }
-if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240 }[$Preset] }
+if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; os = 200 }[$Preset] }
 if (-not $Scenario) { $Scenario = "$here\scenarios\play.txt" }
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
-$datagrams = @{ proto = 3; nullguards = 0 }[$Preset]
+$datagrams = @{ proto = 3; nullguards = 0; os = 3 }[$Preset]
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"

@@ -47,13 +47,13 @@ Remove the `coop-proto` folder to go back to the plain game.
 
 ## Run harness (Fritchii, whole PC)
 
-`tools/switch_mod/run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards [-Sha <commit>]` does one time-boxed run on the Fritchii kit `coop-kit\auto-A` (a kit path that ran before, so Windows shows no firewall prompt). It builds the module from the checkout it lives in, so run it from the branch under test.
+`tools/switch_mod/run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|os [-Sha <commit>]` does one time-boxed run on the Fritchii kit `coop-kit\auto-A` (a kit path that ran before, so Windows shows no firewall prompt). It builds the module from the checkout it lives in, so run it from the branch under test.
 
 - **Refuses to start** unless TEST-TURN's LANE1 line names the id (LANE2 names it too or is CLOSED), no game or server runs, no build or lane lock exists, no saves backup or old install is left from an earlier run, and (with `-Sha`) the checkout is at that commit.
 - **Locks:** lane1 and lane2 through `tools/autotest/lanes.py`, `build.lock` (with `owner.txt`) only for the seconds of `build.py`. All are freed in `finally`.
 - **Kit:** turns the kit's own co-op hook off through the environment only (it rewrites the same frame site), backs up the saves and checks the copy (names, sizes, hashes) before anything runs, moves the kit's old log and the output folder's old results away (only this run's log is judged), installs `subsdk1`, runs the game with `LICHII_COOP_TEST_SCRIPT` = `tools/switch_mod/scenarios/play.txt` (title, Continue, walk). `finally` stops the game and listener, copies the log, restores the saves (the backup is deleted only after a hash-checked restore), then removes the mod folder; each step on its own.
 - **Screenshots** (title, playing, end) come from `PrintWindow` only (full content): the game window is asked for its own pixels, so a covered window still shows the game and nothing else on the screen (another window, a topmost one, the desktop) can get into a shot. There is no screen copy: when `PrintWindow` fails or gives a black image, the shot is skipped and the line says why. `run_check_test.py` fails if a screen-copy call appears in the script.
-- **Verdict:** `tools/switch_mod/run_check.py` matches only the module's own `coop-proto:` lines and prints `PASS`/`FAIL` per check and `RESULT PASS|FAIL` (exit 0/1). Presets: `proto` (hello, frame hook in and running, set_time returned, UDP sent + 3 datagrams) and `nullguards` (hello, frame hook in, `null guards: 29 of 29 applied` (pinned; a test keeps it equal to `null_guards.inc`), frame 6000 reached; none left out, island page usable, no failed RX restore; the game still running at the end). Unit tests: `run_check_test.py` (CI).
+- **Verdict:** `tools/switch_mod/run_check.py` matches only the module's own `coop-proto:` lines and prints `PASS`/`FAIL` per check and `RESULT PASS|FAIL` (exit 0/1). Presets: `proto` (hello, frame hook in and running, set_time returned, UDP sent + 3 datagrams) and `nullguards` (hello, frame hook in, `null guards: 29 of 29 applied` (pinned; a test keeps it equal to `null_guards.inc`), frame 6000 reached; none left out, island page usable, no failed RX restore; the game still running at the end) and `os` (the proto checks plus the OS self-test: thread ticks 1 and 10, mutex contended, 4 KB file round trip, `os selftest: PASS`; no FAIL, `threads:` or `files:` error line). Unit tests: `run_check_test.py` (CI).
 
 ## Null guards (v1 blocker B1)
 
@@ -70,11 +70,11 @@ The ExeFS guard tests for a base of exactly 0; the lifted guard tests for a base
 build") on the game's own sdk functions (`nn_imports.h`): nn::os threads (stacks from our arena, default priority and
 core), nn::os mutexes, the system tick over the system's tick frequency, our own heap (`arena.h`, 8 MB of the module's
 bss, never the game's heap), files on the SD card mounted as `coopsd` under `config/oot-coop/` (on an emulator: its
-`sdmc` folder; a write goes to `<file>.tmp` and is renamed over the file), and the log as `coop: ` lines (svc 0x27).
+`sdmc` folder; a write goes to `<file>.tmp` and is renamed over the file), and the log as `coop-proto: ` lines (svc 0x27, the module's one tag).
 `tools/switch_mod/imports.txt` lists every name the module may import, each checked against the game's dynsym; build.py
 refuses any other (a declaration that mangles differently fails the build, not the game). The self-test
 (`os_selftest.cpp`, from frame 1200) starts a thread that ticks 10 times while contending a mutex with the game thread,
-writes and reads back a 4 KB file, then logs `coop: os selftest: PASS ...` or `FAIL <what>`.
+writes and reads back a 4 KB file, then logs `coop-proto: os selftest: PASS ...` or `FAIL <what>`.
 On a console the game's npdm has no SD card access: MountSdCard is refused there (the log says so) until the npdm is
 patched or files move to the game's save mount; Fritchii's fsp-srv does not check it.
 

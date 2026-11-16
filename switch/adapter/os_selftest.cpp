@@ -2,7 +2,7 @@
 // from the frame hook: at frame kStartFrame it starts one thread through coop_plat_thread_start; that thread ticks 10
 // times (holding a mutex the game thread also takes every frame, so the two contend), then writes a 4 KB file, reads it
 // back and hashes both. The game thread joins it and logs one verdict line:
-//   "coop: os selftest: PASS ..." or "coop: os selftest: FAIL <what>".
+//   "coop-proto: os selftest: PASS ..." or "... FAIL <what>" (the module's one log tag, run_check.py).
 // Everything goes through the coop_plat_* functions, exactly as a payload build of coop::os calls them.
 #include <coop_platform_static.h>
 

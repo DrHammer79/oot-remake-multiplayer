@@ -26,6 +26,17 @@ NULL_RUN = [
     "frame 6000",
 ]
 
+OS_RUN = PROTO_RUN + [
+    "os selftest: arena before: 8388608 bytes, used 0, peak 0, largest free 8388608, refused/bad 0",
+    "os selftest: start at frame 1200, now_us 81234567, thread id 72",
+] + [f"os selftest: thread tick {k}, now_us {81234567 + k * 120000} (+120000)" for k in range(1, 11)] + [
+    "os selftest: thread ticks 10, now_us delta min 120000 max 121000",
+    "os selftest: mutex: game took it 70 times, waited (>1 ms) 6 times, longest 19876 us; counter 80 (expected 80)",
+    "os selftest: file: wrote ok, read ok 4096 bytes, hash out 0x1 in 0x1",
+    "os selftest: arena after: 8388608 bytes, used 0, peak 132176, largest free 8388608, refused/bad 0",
+    "os selftest: PASS (thread, mutex, now_us, file, arena)",
+]
+
 
 def log(lines):
     return "\n".join(["[   1.0] Loader <Info> something else"] + [PREFIX + x for x in lines])
@@ -61,6 +72,43 @@ class ProtoPresetTest(unittest.TestCase):
         lines = [x for x in PROTO_RUN if x != "frame 600"] + ["frame 6000"]
         ok, rep = run("proto", lines, "coop-proto hello from subsdk1\n" * 3)
         self.assertIn("FAIL 2 frame hook runs", rep)
+
+
+class OsPresetTest(unittest.TestCase):
+    LISTEN = "coop-proto hello from subsdk1\n" * 3
+
+    def test_the_expected_pass(self):
+        ok, rep = run("os", OS_RUN, self.LISTEN)
+        self.assertTrue(ok, rep)
+
+    def test_no_contention_fails(self):
+        lines = [x.replace("waited (>1 ms) 6 times", "waited (>1 ms) 0 times") for x in OS_RUN]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 6 os: mutex contended", rep)
+
+    def test_tick_1_is_not_tick_10(self):
+        lines = [x for x in OS_RUN if not x.startswith("os selftest: thread tick 10,")]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 5 os: thread ticked 10x", rep)
+
+    def test_self_test_fail_and_sd_refusal_fail(self):
+        lines = OS_RUN + ["os selftest: FAIL file round trip",
+                          "files: the SD card could not be mounted (no file slots), result 0x00000202"]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertFalse(ok)
+        self.assertTrue(any(r.startswith("FAIL 8 no self-test FAIL") for r in rep), rep)
+        self.assertTrue(any(r.startswith("FAIL 7 SD card mounted") for r in rep), rep)
+
+    def test_failed_file_read_fails(self):
+        lines = [x.replace("read ok 4096", "read FAILED 0") for x in OS_RUN]
+        ok, rep = run("os", lines, self.LISTEN)
+        self.assertIn("FAIL 7 os: file round trip", rep)
+
+    def test_harness_offers_the_preset(self):
+        ps1 = (Path(__file__).resolve().parent / "run_fritchii.ps1").read_text(encoding="utf-8")
+        self.assertIn("'os')]", ps1)
+        self.assertIn("os = 200", ps1)
+        self.assertIn("os = 3", ps1)
 
 
 class NullGuardPresetTest(unittest.TestCase):

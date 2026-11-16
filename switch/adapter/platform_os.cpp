@@ -9,7 +9,8 @@
 // - Memory: our own arena (arena.h) in this module's bss, COOP_ARENA_BYTES big, never the game's heap.
 // - Files: the SD card, mounted as "coopsd" on first use, under config/oot-coop/ (on an emulator its sdmc folder).
 //   Writes go to "<file>.tmp" first and replace the file by a rename, so a file is never half written.
-// - Log: the kernel's debug string (svc 0x27), which the emulator's log shows; one "coop: " line per call.
+// - Log: the kernel's debug string (svc 0x27), which the emulator's log shows; one "coop-proto: " line per call
+//   (the module's one log tag, which tools/switch_mod/run_check.py reads).
 #include <coop_platform_static.h>
 
 #include "../proto/hooks.h"  // COOP_EXPORT
@@ -269,7 +270,7 @@ COOP_EXPORT int coop_plat_file_write(const char* rel, const void* buf, size_t n)
 COOP_EXPORT void coop_plat_log(const char* line) {
     char out[256];  // (filled by hand: an initialised array becomes a memset call, which the module has not got)
     size_t n = 0;
-    for (const char* c = "coop: "; *c; ++c) out[n++] = *c;
+    for (const char* c = "coop-proto: "; *c; ++c) out[n++] = *c;
     for (const char* c = line ? line : ""; *c && n < sizeof(out) - 1; ++c) out[n++] = *c;
     svc::OutputDebugString(out, n);
 }

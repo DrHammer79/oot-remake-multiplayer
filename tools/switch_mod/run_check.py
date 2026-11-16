@@ -39,6 +39,22 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("2 island page usable", r"null guards: the island page could not"),
         ("2 code pages back to RX", r"restore RX failed"),
     ], 0),
+    # The OS slots on nn::os / nn::fs (v1 step 8 (b), switch/adapter/os_selftest.cpp): a thread ticks 10x contending a
+    # mutex with the game thread, a 4 KB file round trip on the SD card, the self-test's own verdict; plus the proto's.
+    "os": ([
+        HELLO, HOOK_IN,
+        ("2 frame hook runs", r"^frame 600$"),
+        ("4 net sent", r"net: connect 0, sent 29 bytes"),
+        ("5 os: thread started", r"^os selftest: thread tick 1, "),
+        ("5 os: thread ticked 10x", r"^os selftest: thread tick 10, "),
+        ("6 os: mutex contended", r"^os selftest: mutex: game took it \d+ times, waited \(>1 ms\) [1-9]\d* times"),
+        ("7 os: file round trip", r"^os selftest: file: wrote ok, read ok 4096 bytes"),
+        ("8 os: self-test verdict", r"^os selftest: PASS"),
+    ], [
+        ("8 no self-test FAIL", r"^os selftest: FAIL"),
+        ("5 no thread error", r"^threads: "),
+        ("7 SD card mounted", r"^files: "),
+    ], 3),
 }
 
 
