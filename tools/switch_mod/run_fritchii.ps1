@@ -38,7 +38,7 @@ if (-not $Scenario) { $Scenario = @{ proto = "$here\scenarios\play.txt"; nullgua
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
 $datagrams = @{ proto = 3; nullguards = 0; codemem = 0; input = 0; os = 3 }[$Preset]
 # Shots at the scenario's `mark` lines too (run_check.py MARK_SHOTS): PrintWindow like the others.
-$markShots = @{ proto = @(); nullguards = @(); codemem = @(); input = @('before', 'swallow-start', 'swallow-mid', 'swallow-end', 'after-start', 'after-end'); os = @() }[$Preset]
+$markShots = @{ proto = @(); nullguards = @(); codemem = @(); os = @(); input = @('before', 'swallow-start', 'swallow-mid', 'swallow-end', 'after-start', 'after-end') }[$Preset]
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"
