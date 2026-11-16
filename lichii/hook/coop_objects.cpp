@@ -2638,8 +2638,10 @@ private:
                                        extras_.Holds(known.first, now_ms);
             if (CoopDifficulty::IsEnemy(known.first, CoopEnemyShots::IsEnemyShot(known.first))) {
                 // Difficulty: an attacker (a boss, one with its copies' weight folded in, or plain).
-                CoopDifficulty::TheKinds().Mark(a, CoopDifficulty::AttackerKind(known.first, known.second,
-                                                                                extras_.NoSpot(known.second)));
+                // A no-spot enemy folds by its own missing extras (FoldCount), keyed by its placement.
+                const bool no_spot = extras_.NoSpot(known.second);
+                CoopDifficulty::TheKinds().Mark(a, CoopDifficulty::AttackerKind(known.first, known.second, no_spot),
+                                                no_spot ? known.second : 0);
             } else {
                 CoopDifficulty::TheKinds().Forget(a);  // difficulty: a reused address (our bomb where a Keese was)
             }
@@ -2788,9 +2790,10 @@ private:
                             life_components.emplace(*component, a);  // (whose Life step is whose: StepHits)
                             s.life_component = *component;
                             if (CoopDifficulty::IsEnemy(s.name, false)) {  // difficulty: its hits are scaled
+                                const bool no_spot = extras_.NoSpot(s.hash);
                                 CoopDifficulty::TheKinds().Mark(*component,
-                                                                CoopDifficulty::LifeKind(s.name, s.hash,
-                                                                                         extras_.NoSpot(s.hash)));
+                                                                CoopDifficulty::LifeKind(s.name, s.hash, no_spot),
+                                                                no_spot ? s.hash : 0);
                             } else {
                                 CoopDifficulty::TheKinds().Forget(*component);  // (a reused address)
                             }
