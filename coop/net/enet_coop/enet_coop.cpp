@@ -16,6 +16,9 @@ int coop_plat_sock_close(int s);
 int coop_plat_resolve(const char *host, uint32_t sock_kind, CoopAddr *out);
 uint64_t coop_plat_now_us(void);
 void coop_plat_sleep_us(uint64_t us);
+void *coop_plat_mem_alloc(size_t n, size_t align);
+void coop_plat_mem_free(void *p);
+void coop_plat_log(const char *line);
 }
 #define COOP_ENET_CALL(slot, fail, ...) coop_plat_##slot(__VA_ARGS__)
 #endif
@@ -94,6 +97,32 @@ int enet_initialize(void) {
 }
 
 void enet_deinitialize(void) {}
+
+#ifdef COOP_PLATFORM_STATIC
+// The payload builds ENet without callbacks.c: its allocator table is called through pointers (a lifter refuses
+// those) and defaults to libc malloc/abort, which the payload does not have. Memory comes from the platform's
+// arena; out of memory is NULL (ENet checks it) and one log line, never abort inside the game.
+void *enet_malloc(size_t size) {
+    void *memory = coop_plat_mem_alloc(size, 16);
+    static bool told = false;
+    if (!memory && !told) {
+        told = true;
+        coop_plat_log("enet: out of memory (the arena is full)");
+    }
+    return memory;
+}
+
+void enet_free(void *memory) { coop_plat_mem_free(memory); }
+
+ENetVersion enet_linked_version(void) { return ENET_VERSION; }
+
+// Own allocators cannot be honoured here: refused, so a caller never believes its callbacks are in use.
+int enet_initialize_with_callbacks(ENetVersion version, const ENetCallbacks *inits) {
+    if (version < ENET_VERSION_CREATE(1, 3, 0)) return -1;
+    if (inits && (inits->malloc || inits->free || inits->no_memory)) return -1;
+    return enet_initialize();
+}
+#endif
 
 enet_uint32 enet_host_random_seed(void) {
     return static_cast<enet_uint32>(COOP_ENET_CALL(now_us, uint64_t{0}) * 2654435761u);
