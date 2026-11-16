@@ -22,6 +22,10 @@
 #include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
 #include "svc.h"
 
+// v1 step 8 (b): the OS slots on nn::os / nn::fs and their self-test (switch/adapter)
+#include "../adapter/os_selftest.h"
+#include "../adapter/platform_os.h"
+
 // ---- Imports, resolved by rtld from main and sdk ----
 extern "C" {
 void nnMain();             // defined only in main: finds main's base
@@ -318,11 +322,13 @@ extern "C" COOP_EXPORT void coop_proto_frame() {
     if (g_frames == 1 || g_frames % 600 == 0) Log().s("frame ").dec(g_frames);
     if (!g_time_done && g_frames >= 300 && g_frames % 60 == 0) TrySetTime();
     if (!g_net_done && g_frames >= 900) SayHello();
+    coop_os_selftest_frame(g_frames);  // v1 step 8 (b): from frame 1200, once
 }
 
 // rtld calls this once, after nninitStartup and before nnMain (actor-map.md, Module _init).
 extern "C" COOP_EXPORT void _init() {
     Log().s("hello from subsdk1 (ExeFS prototype)");
+    coop_plat_os_init();  // v1 step 8 (b): locks, arena, tick frequency
     // main's base without a kernel call: rtld linked nnMain and malloc from main.
     const uint64_t nn_main = reinterpret_cast<uint64_t>(&nnMain);
     g_main = nn_main - game::kNnMain;

@@ -21,6 +21,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 SRC = REPO / "switch" / "proto"
+ADAPTER = REPO / "switch" / "adapter"
+# v1 step 8: the adapter's sources (switch/adapter) and the headers they share with the core.
+ADAPTER_SOURCES = ("platform_os.cpp", "arena.cpp", "os_selftest.cpp")
+INCLUDES = ["-I", str(REPO / "coop" / "platform" / "include")]
+# Every name the module may import (one per line, '#' comments): checked against the game's dynsym, so a declaration
+# that mangles differently (a wrong parameter type) fails the build instead of failing to link in the game.
+IMPORTS = HERE / "imports.txt"
 sys.path.insert(0, str(HERE))
 import elf2nso  # noqa: E402
 import lift_check  # noqa: E402
@@ -28,7 +35,7 @@ import lift_check  # noqa: E402
 CFLAGS = [
     "--target=aarch64-none-elf", "-march=armv8-a", "-O2", "-std=c++20",
     "-fPIC", "-ffreestanding", "-fno-exceptions", "-fno-rtti", "-fno-stack-protector",
-    "-funwind-tables", "-fno-jump-tables", "-fvisibility=hidden", "-ffixed-x18",
+    "-funwind-tables", "-fno-jump-tables", "-fvisibility=hidden", "-ffixed-x18", "-mno-outline-atomics",
     "-nostdlib", "-Wall", "-Wextra", "-Werror",
 ]
 LDFLAGS = [
@@ -57,6 +64,21 @@ def run(cmd: list[str]) -> None:
         sys.exit(f"build: failed: {' '.join(cmd)}")
 
 
+def allowed_imports(path: Path = IMPORTS) -> set[str]:
+    names = set()
+    for line in path.read_text(encoding="ascii").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            names.add(line.split()[0])
+    return names
+
+
+def import_problems(elf: "lift_check.Elf", allowed: set[str]) -> list[str]:
+    """Every undefined dynamic symbol must be in the allow-list."""
+    return [f"imports {s.name}, which is not in {IMPORTS.name} (checked against the game's dynsym?)"
+            for s in elf.symbols(lift_check.SHT_DYNSYM) if not s.defined and s.name and s.name not in allowed]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--llvm")
@@ -67,20 +89,23 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    for src in ("start.s", "main.cpp"):
-        obj = out / (src + ".o")
-        flags = CFLAGS if src.endswith(".cpp") else ["--target=aarch64-none-elf", "-march=armv8-a"]
-        run([clang, *flags, "-c", str(SRC / src), "-o", str(obj)])
+    sources = [SRC / "start.s", SRC / "main.cpp"] + [ADAPTER / name for name in ADAPTER_SOURCES]
+    for src in sources:
+        obj = out / (src.parent.name + "_" + src.name + ".o")
+        flags = [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
+        run([clang, *flags, "-c", str(src), "-o", str(obj)])
         objs.append(str(obj))
     elf = out / "module.elf"
     run([lld, *LDFLAGS, "-T", str(SRC / "module.ld"), "--version-script", str(SRC / "exports.map"),
          *objs, "-o", str(elf)])
     try:
-        problems, entries = lift_check.check(lift_check.Elf(elf.read_bytes()))
+        parsed = lift_check.Elf(elf.read_bytes())
+        problems, entries = lift_check.check(parsed)
+        problems += import_problems(parsed, allowed_imports())
     except lift_check.LiftError as e:
         problems, entries = [str(e)], []
     if problems:
-        sys.exit("build: the module would not lift:\n  " + "\n  ".join(problems))
+        sys.exit("build: the module would not lift or would not link in the game:\n  " + "\n  ".join(problems))
     lift_check.write_entries(str(out / "subsdk1.entries"), entries)
     nso = elf2nso.build_nso(elf.read_bytes())
     (out / "subsdk1").write_bytes(nso)

@@ -25,6 +25,9 @@ enum class InstallError { kNone, kNull, kVersion, kSize, kMissingSlot };
 // Uses `platform` for every call below from now on (it must outlive them). Refuses a table of another version, one
 // too short for version 1's slots, or one missing a required slot (COOP_PLATFORM_SLOTS), and keeps the old one.
 // Before any Install the std backend is used. Call before starting threads that use coop::os.
+// A payload build (COOP_PLATFORM_STATIC, coop_platform_static.h) has no std backend (os_std.cpp is left out): the OS
+// calls below go straight to the adapter's coop_plat_<slot> functions, before and after Install, and Platform()
+// before any Install is a table of those functions with no game slots.
 InstallError Install(const CoopPlatform *platform);
 const CoopPlatform &Platform();
 

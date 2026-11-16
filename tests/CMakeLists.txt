@@ -26,6 +26,8 @@ add_executable(coop_tests
   platform/platform_c_check.c
   switch/null_guard_test.cpp
   switch/platform_net_test.cpp
+  switch/arena_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../switch/adapter/arena.cpp
+  switch/os_util_test.cpp
   presence/presence_test.cpp
   presence/show_delay_test.cpp
   voice/jitter_test.cpp
@@ -175,6 +177,15 @@ if(TARGET enet_coop)
   target_link_libraries(enet_coop_tests PRIVATE enet_coop coop_platform doctest::doctest coop_warnings)
   doctest_discover_tests(enet_coop_tests)
 endif()
+
+# coop::os as a payload builds it (COOP_PLATFORM_STATIC: direct coop_plat_* calls, coop_platform_static.h), with fake
+# adapter functions. Its own program: os.cpp is compiled here a second time, with the flag.
+add_executable(coop_platform_static_tests platform/static_os_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../coop/platform/src/os.cpp)
+target_compile_definitions(coop_platform_static_tests PRIVATE COOP_PLATFORM_STATIC)
+target_include_directories(coop_platform_static_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../coop/platform/include)
+target_link_libraries(coop_platform_static_tests PRIVATE doctest::doctest coop_warnings)
+doctest_discover_tests(coop_platform_static_tests)
 
 add_subdirectory(server)
 

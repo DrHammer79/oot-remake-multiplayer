@@ -1,0 +1,45 @@
+# Every name the ExeFS module may import (tools/switch_mod/build.py refuses any other). One per line; '#' starts a
+# comment. Each name was checked against the game's own dynsym (build e0f3ccfaf50065ae, 1.1.1: main and sdk) from a
+# local dump; nothing of the game is copied here but the names a module links by. Add yours with the module it is in.
+
+# main
+nnMain
+malloc
+
+# sdk: nn::socket (switch/proto/main.cpp; the socket backend adds its own below)
+_ZN2nn6socket10InitializeEPvmmi
+_ZN2nn6socket13IsInitializedEv
+_ZN2nn6socket4SendEiPKvmi
+_ZN2nn6socket5CloseEi
+_ZN2nn6socket6SocketEiii
+_ZN2nn6socket7ConnectEiPK8sockaddrj
+
+# sdk: nn::os (switch/adapter/nn_imports.h)
+_ZN2nn2os10WaitThreadEPNS0_10ThreadTypeE
+_ZN2nn2os11GetThreadIdEPKNS0_10ThreadTypeE
+_ZN2nn2os11SleepThreadENS_8TimeSpanE
+_ZN2nn2os11StartThreadEPNS0_10ThreadTypeE
+_ZN2nn2os11UnlockMutexEPNS0_9MutexTypeE
+_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mi
+_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mii
+_ZN2nn2os13DestroyThreadEPNS0_10ThreadTypeE
+_ZN2nn2os13FinalizeMutexEPNS0_9MutexTypeE
+_ZN2nn2os13GetSystemTickEv
+_ZN2nn2os13SetThreadNameEPNS0_10ThreadTypeEPKc
+_ZN2nn2os15InitializeMutexEPNS0_9MutexTypeEbi
+_ZN2nn2os16GetCurrentThreadEv
+_ZN2nn2os22GetSystemTickFrequencyEv
+_ZN2nn2os9LockMutexEPNS0_9MutexTypeE
+
+# sdk: nn::fs (switch/adapter/nn_imports.h)
+_ZN2nn2fs10CreateFileEPKcl
+_ZN2nn2fs10DeleteFileEPKc
+_ZN2nn2fs10RenameFileEPKcS2_
+_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE
+_ZN2nn2fs11MountSdCardEPKc
+_ZN2nn2fs15CreateDirectoryEPKc
+_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci
+_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm
+_ZN2nn2fs9CloseFileENS0_10FileHandleE
+_ZN2nn2fs9FlushFileENS0_10FileHandleE
+_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE

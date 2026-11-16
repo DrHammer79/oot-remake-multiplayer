@@ -65,3 +65,13 @@ a library outside Fritchii's `src/` would lose Fritchii's flags for core (`-fwra
   `coop::host::GameMemory` and `CoopPuppet::Guest` (virtual), `CoopCallers::Caller` and `CoopLocalGame`'s
   pads/take/read/write/log hooks, `CoopLocalNet`'s Send/Log, `CoopWorld`'s ReadWord (`std::function`). Inside the
   core they are fine; at the payload boundary they become `CoopPlatform` slots (step 5).
+
+## The payload build (step 8, COOP_PLATFORM_STATIC)
+A payload that a recompiler lifts (the ExeFS module, subsdk1) may make no call through a function pointer, and
+`CoopPlatform` is a table of them. So the payload builds `coop/platform/src/os.cpp` with `COOP_PLATFORM_STATIC`: every
+coop::os call of a required slot is then a direct call of the adapter's `coop_plat_<slot>` function
+(`coop_platform_static.h`, each checked at compile time to have its slot's type). The adapter fills its table's
+required slots with the same functions; the table still gives the optional game slots, `kind` and `main_base`. Before
+any `Install`, `Platform()` is a table of those functions with no game slots; the std backend (`os_std.cpp`) is not in
+a payload. PC and the Longshot/Hookshot module do not define the flag and keep the table. Test:
+`coop_platform_static_tests` (tests/platform/static_os_test.cpp) builds os.cpp with the flag over fake adapter functions.

@@ -55,6 +55,19 @@ A co-op puppet has no Player component, and code of the game that runs for an it
 
 The ExeFS guard tests for a base of exactly 0; the lifted guard tests for a base below 1 MB. Every logged read had a base of 0. `python tools/null_guards/gen.py --check` (CI) fails when `null_guards.inc` is not current, or when the table of the patch that adds `nx2/coop_null_guards.py` (0023, found by its content) differs from `sites.py`. It prints `skipped` when no patch adds that file, and it fails when two do. `tests/switch/null_guard_test.cpp` runs the islands with null and real bases. The puppet's missing Physics (slot 10) is answered by the puppet pack, not by guards (`v1-puppet-components`). The three slot-10 loads stay listed for packs built without it.
 
+## OS slots (v1 step 8, piece b)
+`switch/adapter/platform_os.cpp` defines the platform's OS slots as `coop_plat_*` (see docs/platform.md, "The payload
+build") on the game's own sdk functions (`nn_imports.h`): nn::os threads (stacks from our arena, default priority and
+core), nn::os mutexes, the system tick over the system's tick frequency, our own heap (`arena.h`, 8 MB of the module's
+bss, never the game's heap), files on the SD card mounted as `coopsd` under `config/oot-coop/` (on an emulator: its
+`sdmc` folder; a write goes to `<file>.tmp` and is renamed over the file), and the log as `coop: ` lines (svc 0x27).
+`tools/switch_mod/imports.txt` lists every name the module may import, each checked against the game's dynsym; build.py
+refuses any other (a declaration that mangles differently fails the build, not the game). The self-test
+(`os_selftest.cpp`, from frame 1200) starts a thread that ticks 10 times while contending a mutex with the game thread,
+writes and reads back a 4 KB file, then logs `coop: os selftest: PASS ...` or `FAIL <what>`.
+On a console the game's npdm has no SD card access: MountSdCard is refused there (the log says so) until the npdm is
+patched or files move to the game's save mount; Fritchii's fsp-srv does not check it.
+
 ## What it does not cover yet
 
 - Consoles: the Switch 2 has no custom firmware. A console would also need a `main.npdm` that grants `svcSetProcessMemoryPermission` (0x73). The null reads the emulator returns as 0 are guarded (above); not yet proven on hardware.
