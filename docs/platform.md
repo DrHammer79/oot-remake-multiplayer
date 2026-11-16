@@ -33,3 +33,35 @@ one plain C table, `CoopPlatform`, that the platform's adapter fills.
   `mutex_free`, `sleep_us` and `sock_local` were added; the memory slots are `mem_alloc`/`mem_free` (a CRT may define
   `free` as a macro); sockets are opened by kind (`COOP_SOCK_UDP4`/`6`) and `sock_recvfrom` answers
   `COOP_SOCK_WOULD_BLOCK` when nothing waits.
+
+## coop_core (step 3)
+
+`coop_core` (`cmake/coop_core.cmake`, its file lists in `cmake/coop_core_sources.cmake`) is the static library the
+adapters link: the coop/* libraries (protocol, net, host, presence, overlay, voice, platform) plus the hook files and UI
+models that are the same code in every build. The Longshot module and `coop_tests` link it; before, each compiled those
+files itself. The emulator compiles the same hook-file list inside its own `core` (`lichii/hook/core.cmake`), as before:
+a library outside Fritchii's `src/` would lose Fritchii's flags for core (`-fwrapv`, `-fno-rtti`; MSVC `/GT`, `/GR-`,
+`/volatile:iso`, ...), and `-fwrapv` changes what signed overflow does.
+
+- `tools/check_core_flags.py` proves the flags did not change (CI, from each build's compile database): in the emulator
+  every core file compiles with the same flags as `coop_dungeon.cpp` (always in `core`); in the module (MSVC and
+  Linux) every `coop_core` file compiles with the flags of `hookshot/src/coop_title.cpp` except the module-only
+  `LICHII_COOP`/`COOP_HOOKSHOT` defines and the compat/, server/, fmt and Monocypher include folders, which
+  `tools/check_core.py` proves no core file uses. Order is compared within each option family (`-fwrapv`/`-fno-wrapv`,
+  `/O1`/`/O2`), where a later flag wins; across families CMake may order a de-duplicated flag (MSVC `/utf-8`) differently.
+
+- A file is in it only when neither it nor anything it includes uses an OS header (`windows.h`, POSIX system headers),
+  an emulator one (`core/`, `common/`, Qt) or a Hookshot/Longshot one (`hos_coop_*`, Vulkan, SDL, fmt), and it has no
+  `#if` on `LICHII_COOP`/`COOP_HOOKSHOT` (the library is built without them). `tools/check_core.py` checks that, and
+  that no file is in both `coop_core` and `lichii/hook/core.cmake` (CI: python-tools). A new platform-free hook file
+  goes in `COOP_CORE_HOOK_SOURCES`; one with emulator glue goes in `lichii/hook/core.cmake` as before.
+- Still outside it: the hook files whose emulator glue sits behind `#ifdef LICHII_COOP` in the same file (chests,
+  drops, dungeon, fairy, quests, story, look_share, ocarina_sound, link_sound, voice, puppet_config, ride, spawn and
+  the `*_game.cpp`/memory files), and the menu models that call `coop_i18n`'s `Tr()` (i18n finds the game folder with
+  `windows.h`). The core's files call into the first group, so the core is not yet link-complete on its own (the module
+  and the tests compile that group themselves). Moving that glue into `*_game.cpp` files and i18n's folder lookup onto
+  `coop::os` (step 4) lets them join.
+- Lifting (ExeFS payload): the core still takes callbacks as C++ types where the adapter will sit:
+  `coop::host::GameMemory` and `CoopPuppet::Guest` (virtual), `CoopCallers::Caller` and `CoopLocalGame`'s
+  pads/take/read/write/log hooks, `CoopLocalNet`'s Send/Log, `CoopWorld`'s ReadWord (`std::function`). Inside the
+  core they are fine; at the payload boundary they become `CoopPlatform` slots (step 5).

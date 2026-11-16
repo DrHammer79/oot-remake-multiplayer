@@ -61,8 +61,8 @@ add_executable(coop_tests
   lichii/npc_anim_test.cpp
   lichii/spawn_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_spawn.cpp
   lichii/ride_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ride.cpp
-  lichii/projectiles_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_projectiles.cpp
-  lichii/enemy_shots_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_enemy_shots.cpp
+  lichii/projectiles_test.cpp
+  lichii/enemy_shots_test.cpp
   lichii/drops_test.cpp
   lichii/guard_test.cpp
   lichii/snap_test.cpp
@@ -71,8 +71,8 @@ add_executable(coop_tests
   lichii/chests_test.cpp
   lichii/colors_test.cpp
   lichii/dungeon_test.cpp
-  lichii/platforms_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_platforms.cpp
-  lichii/counters_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_counters.cpp
+  lichii/platforms_test.cpp
+  lichii/counters_test.cpp
   lichii/actor_events_test.cpp
   lichii/quest_test.cpp
   lichii/story_test.cpp
@@ -94,8 +94,8 @@ add_executable(coop_tests
   lichii/game_build_test.cpp
   lichii/game_scan_test.cpp
   lichii/boss_test.cpp
-  lichii/boss_native_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_native.cpp
-  lichii/boss_scenes_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_scenes.cpp
+  lichii/boss_native_test.cpp
+  lichii/boss_scenes_test.cpp
   lichii/teleport_test.cpp
   lichii/pvp_test.cpp
   lichii/dbno_test.cpp
@@ -103,53 +103,28 @@ add_executable(coop_tests
   lichii/live_events_test.cpp
   lichii/logic_probe_test.cpp
   lichii/shared_scenes_test.cpp
-  lichii/scrubs_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_scrubs.cpp
-  lichii/cheat_items_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_cheat_items.cpp
-  # These hook files have no emulator code, so they are tested on their own.
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_callers.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_camera.cpp
+  lichii/scrubs_test.cpp
+  lichii/cheat_items_test.cpp
+  # These hook files keep their emulator glue behind LICHII_COOP (off here), so their logic is tested
+  # on its own; the platform-free ones come from coop_core.
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_drops.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_chests.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_colors.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_dungeon.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_quest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_story.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_quests.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_live_events.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_live_places.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_local_game.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_local_net.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_shared_scenes.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_fairy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_rooms.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_objects_sync.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_npc_anim.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_pose.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_puppet.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_puppet_config.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_settings.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_world.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_logic_probe.cpp
-  lichii/lift_ride_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_lift_ride.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ocarina.cpp
+  lichii/lift_ride_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ocarina_sound.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_look_share.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_voice.cpp
   lichii/voice_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_puppet_sound.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_link_sound.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_pickups.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_testinput.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_teleport.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_pvp.cpp
-  lichii/lobby_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_lobby.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_dbno.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_difficulty.cpp
-  lichii/mod_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_mod_share.cpp
+  lichii/lobby_test.cpp
+  lichii/mod_share_test.cpp
   lichii/pack_notice_test.cpp
-  lichii/name_privacy_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_name_privacy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_time_sync.cpp
+  lichii/name_privacy_test.cpp
 )
 target_include_directories(coop_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook)
 # The Hookshot module and our patch to Hookshot (hookshot/): what can be checked without the game.
@@ -160,25 +135,24 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/own_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_own_menu_model.cpp
   hookshot/ui_input_test.cpp
   hookshot/hud_dim_test.cpp
-  hookshot/chatbox_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_chatbox.cpp
+  hookshot/chatbox_test.cpp
   hookshot/cheats_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_cheats_panel.cpp
   hookshot/png_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_png.cpp
   hookshot/title_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_title_menu.cpp
   hookshot/pause_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_pause_menu.cpp
   hookshot/host_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_host_menu.cpp
   hookshot/input_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_input.cpp
-  hookshot/mods_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mod_json.cpp
+  hookshot/mods_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mod_library.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mods.cpp
   hookshot/mod_plugins_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mod_plugins.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mod_guard.cpp
   hookshot/rando_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_rando.cpp
   hookshot/mods_tab_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mods_tab.cpp
-  hookshot/look_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look.cpp
+  hookshot/look_test.cpp
   hookshot/look_paint_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_paint.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_parts.cpp
   hookshot/look_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_menu.cpp
   hookshot/look_view_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_view.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_tunic.cpp
   hookshot/texture_override_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_texture.c
   hookshot/lobby_tab_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_lobby_tab.cpp
   hookshot/i18n_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_i18n.cpp
@@ -188,7 +162,8 @@ if(NOT WIN32)   # the module's Linux clipboard (wl-copy, xclip, xsel), tried wit
   target_sources(coop_tests PRIVATE hookshot/clipboard_posix_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_clipboard_posix.cpp)
 endif()
-target_link_libraries(coop_tests PRIVATE coop coop_ui coop_platform coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
+# coop_core (cmake/coop_core.cmake): the platform-free hook files and UI models, as the module links them.
+target_link_libraries(coop_tests PRIVATE coop_core coop coop_ui coop_platform coop_presence coop_host coop_overlay coop_voice monocypher doctest::doctest coop_warnings)
 # The session tests run the real server in process.
 target_link_libraries(coop_tests PRIVATE coop_server_lib)
 doctest_discover_tests(coop_tests)

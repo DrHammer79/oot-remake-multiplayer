@@ -74,6 +74,8 @@ if(NOT TARGET monocypher)
 endif()
 
 add_subdirectory(coop)
+# coop_core: coop/* + the platform-free hook files and UI models (cmake/coop_core.cmake, docs/platform.md).
+include(cmake/coop_core.cmake)
 if(COOP_BUILD_HOOKSHOT)
   add_subdirectory(hookshot)
 endif()

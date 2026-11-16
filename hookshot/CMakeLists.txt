@@ -2,7 +2,8 @@
 # to Hookshot (patches/) loads it from beside the game and calls the four
 # exports in src/hos_coop_api.h. It is lichii/hook's co-op, the same files the
 # emulator builds (read from lichii/hook/core.cmake, so a new hook file joins
-# both), with compat/ answering the emulator API slice they use. Only the
+# both; the platform-free ones come from coop_core, cmake/coop_core.cmake), with compat/ answering the
+# emulator API slice they use. Only the
 # emulator's cave (coop_svc.cpp) stays out: src/coop_hookshot.cpp does its job
 # here. coop_testinput.cpp plays the autotest driver's test commands
 # (LICHII_COOP_TEST_COMMANDS); its pad input is the emulator's only.
@@ -27,19 +28,20 @@ foreach(line IN LISTS _coop_lines)
 endforeach()
 list(REMOVE_DUPLICATES _coop_sources)
 
-add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_hs_platform.cpp src/coop_draw.cpp src/coop_draw_hos.cpp src/coop_own_menu.cpp src/coop_own_menu_model.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_chatbox.cpp src/coop_cheats_panel.cpp
+add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_hs_platform.cpp src/coop_draw.cpp src/coop_draw_hos.cpp src/coop_own_menu.cpp src/coop_own_menu_model.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_cheats_panel.cpp
   src/coop_host_menu.cpp src/coop_title.cpp src/coop_title_menu.cpp src/coop_input.cpp src/coop_pause.cpp
   src/coop_pause_menu.cpp src/coop_pause_files.cpp src/coop_i18n.cpp src/coop_null_page.cpp
-  src/coop_mod_json.cpp src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
+  src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
   src/coop_mods_runtime.cpp src/coop_rando.cpp src/coop_mods_tab.cpp src/coop_mods_tab_module.cpp
   src/coop_lobby_tab.cpp src/coop_lobby_tab_module.cpp
-  src/coop_look.cpp src/coop_look_live.cpp src/coop_look_tunic.cpp src/coop_look_paint.cpp src/coop_look_parts.cpp src/coop_look_menu.cpp src/coop_look_view.cpp
+  src/coop_look_live.cpp src/coop_look_paint.cpp src/coop_look_parts.cpp src/coop_look_menu.cpp src/coop_look_view.cpp
   ${_coop_sources})
 # compat/ first: its core/ and common/ headers stand in for the emulator's.
 target_include_directories(hookshot_coop PRIVATE compat src "${_coop_hook}" ../server)
 target_compile_definitions(hookshot_coop PRIVATE LICHII_COOP COOP_HOOKSHOT)
 # coop_server_lib: the co-op server, run inside the game when the player hosts from the menu.
-target_link_libraries(hookshot_coop PRIVATE coop coop_platform coop_ui coop_net coop_host coop_presence coop_overlay coop_server_lib
+# coop_core (cmake/coop_core.cmake): the platform-free hook files and UI models, built once for every user.
+target_link_libraries(hookshot_coop PRIVATE coop_core coop coop_platform coop_ui coop_net coop_host coop_presence coop_overlay coop_server_lib
                       monocypher fmt::fmt coop_warnings)
 set_target_properties(hookshot_coop PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
 # Proximity voice (docs/voice.md): the two exports Hookshot's mixer looks for
