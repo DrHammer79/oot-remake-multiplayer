@@ -483,8 +483,7 @@ void AgreeStartTunic() {
     // the autotest started the game; else your own Link starts in the files' colour and the wardrobe repaints
     // it in the chosen one (your own textures only: the puppets' copies are marked).
     std::vector<std::string> errors;
-    const auto chosen = CoopHook::LoadSettings(
-        Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini", errors).color;
+    const auto chosen = CoopHook::LoadSettings(CoopHook::kSettingsFile, errors).color;
     if (chosen && TunicName(chosen) != start) {
         LOG_WARNING(Core, "coop: look: the puppet pack's tunic files are {}, your colour is {}: started without the "
                           "kit's launcher? Your Link is repainted in {} once the game's textures are found",
@@ -511,13 +510,12 @@ void StartModule() {
     if (g_wardrobe) {
         return;
     }
-    const auto ini = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop.ini";
     std::vector<std::string> errors;   // (said by the module's own start)
     // The parts but the tunic: from coop-options.ini of a kit, else coop.ini.
     const auto kit = CoopFiles::FindKit();
     std::vector<std::string> part_errors;
     Look worn = ReadParts(CoopFiles::ReadText(kit ? *kit / "coop-options.ini" : CoopFiles::CoopIni()), &part_errors);
-    worn[Part::tunic] = CoopHook::LoadSettings(ini, errors).color;
+    worn[Part::tunic] = CoopHook::LoadSettings(CoopHook::kSettingsFile, errors).color;
 
     g_textures = std::make_unique<GameTextures>();
     if (!g_textures->Known()) {

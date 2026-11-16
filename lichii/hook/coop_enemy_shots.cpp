@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <coop/os.hpp>
 #include <mutex>
 
 namespace CoopEnemyShots {
@@ -63,19 +64,8 @@ const Shot* Find(std::string_view name) {
 }
 
 bool EnvOff(const char* name) {
-#ifdef _WIN32
-    char* value = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
-        return false;
-    }
-    const bool off = std::string_view(value) == "0";
-    std::free(value);
-    return off;
-#else
-    const char* v = std::getenv(name);
-    return v != nullptr && std::string_view(v) == "0";
-#endif
+    const auto v = coop::os::GetEnv(name);
+    return v && *v == "0";
 }
 
 float Distance(const Vec3& a, const Vec3& b) {
@@ -83,10 +73,10 @@ float Distance(const Vec3& a, const Vec3& b) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 std::vector<Shooter> g_shooters;
 std::uint64_t g_at = 0;
-std::chrono::steady_clock::time_point g_noted{};  // (this PC's clock, for StopAtCreate)
+coop::os::SteadyClock::time_point g_noted{};  // (this PC's clock, for StopAtCreate)
 std::atomic<std::uint64_t> g_stopped{0};
 
 } // namespace
@@ -166,7 +156,7 @@ void NoteShooters(std::vector<Shooter> shooters, std::uint64_t now_us) {
     std::lock_guard lock(g_mutex);
     g_shooters = std::move(shooters);
     g_at = now_us;
-    g_noted = std::chrono::steady_clock::now();
+    g_noted = coop::os::SteadyClock::now();
 }
 
 bool StopAtCreate(std::string_view shot, const Vec3& at, std::uint64_t shooter) {
@@ -175,7 +165,7 @@ bool StopAtCreate(std::string_view shot, const Vec3& at, std::uint64_t shooter) 
     }
     std::unique_lock lock(g_mutex, std::try_to_lock);
     if (!lock.owns_lock() || g_at == 0 ||
-        std::chrono::steady_clock::now() - g_noted > std::chrono::microseconds(kFreshUs)) {
+        coop::os::SteadyClock::now() - g_noted > std::chrono::microseconds(kFreshUs)) {
         return false;
     }
     const Shooter* by = nullptr;

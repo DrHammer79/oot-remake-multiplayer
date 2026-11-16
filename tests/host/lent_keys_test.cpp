@@ -3,6 +3,8 @@
 // player opened stays in our game; the group never sees it or its spend.
 #include <doctest/doctest.h>
 
+#include <ostream>  // doctest prints std::string_view values through it
+
 #include <map>
 #include <vector>
 

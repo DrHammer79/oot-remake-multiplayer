@@ -6,7 +6,6 @@
 
 #include <array>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -34,11 +33,16 @@ struct Settings {
 // skipped). Nothing for anything else.
 std::optional<std::array<std::uint8_t, 16>> ParsePlayerKey(std::string_view text);
 std::string PlayerKeyText(const std::array<std::uint8_t, 16>& key);
-// The key in `file` (player-key.txt beside coop.ini). A missing or broken
+// The co-op's own files, relative to its folder (coop::os files: the game's
+// folder on Longshot, the emulator's config folder there).
+inline constexpr const char* kSettingsFile = "coop.ini";
+inline constexpr const char* kPlayerKeyFile = "player-key.txt";
+
+// The key in `rel` (kPlayerKeyFile, beside coop.ini). A missing or broken
 // file gets a new random key written to it, once, so the kit keeps it; if
 // that cannot be written the key holds for this run only (`note` says so).
 // Not in coop.ini: the launcher writes that file anew from its template.
-std::array<std::uint8_t, 16> LoadPlayerKey(const std::filesystem::path& file, std::string& note);
+std::array<std::uint8_t, 16> LoadPlayerKey(const char* rel, std::string& note);
 
 // Reads `key = value` lines. Blank lines, `#` or `;` comments and `[section]`
 // headers are skipped. Keys: server (`host` or `host:port`), port, name, password,
@@ -56,9 +60,10 @@ void ApplyIni(std::string_view text, Settings& settings, std::vector<std::string
 void ApplyEnvironment(const std::function<std::optional<std::string>(const char*)>& get,
                       Settings& settings, std::vector<std::string>& errors);
 
-// The ini at `ini` (a missing file is fine), then the process environment.
+// The ini at `rel` (kSettingsFile; a missing file is fine), then the process
+// environment.
 // `errors` are warnings: each drops only its own line (ApplyIni), never the
 // rest of the settings, so a key a newer build wrote never turns co-op off.
-Settings LoadSettings(const std::filesystem::path& ini, std::vector<std::string>& errors);
+Settings LoadSettings(const char* rel, std::vector<std::string>& errors);
 
 } // namespace CoopHook

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -629,13 +630,13 @@ private:
     bool pose_copy_ = false;
     bool matrix_call_ = false;
     float tint_ = 0.0f;
-    mutable std::mutex tunic_mutex_;
+    mutable coop::os::Mutex tunic_mutex_;
     std::set<std::string> tunic_failed_;           // guarded by tunic_mutex_
     std::map<std::string, int> tunic_timeouts_;    // by actor name
     bool tunic_proven_ = false;  // a tunic puppet spawned with its model: the pack has them
     void TunicFails(const std::string& actor, const std::string& why);
 
-    mutable std::mutex input_mutex_;
+    mutable coop::os::Mutex input_mutex_;
     Input next_input_;  // guarded
 
     // The calc thread only.

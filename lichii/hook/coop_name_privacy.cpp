@@ -2,8 +2,8 @@
 #include "coop_name_privacy.h"
 
 #include <array>
+#include <coop/os.hpp>
 #include <mutex>
-#include <random>
 #include <utility>
 
 namespace CoopNamePrivacy {
@@ -40,7 +40,7 @@ std::string_view First16(std::string_view s) {
     return s;
 }
 
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 std::vector<std::string> g_lines;
 
 }  // namespace
@@ -52,8 +52,9 @@ std::string RandomName(std::uint32_t r) {
 }
 
 std::string NewName() {
-    std::random_device rd;
-    return RandomName(rd());
+    std::uint32_t r = 0;
+    coop::os::RandomFill(&r, sizeof r);   // without a random source still filled (clock, thread): fine for a name
+    return RandomName(r);
 }
 
 Source Matches(std::string_view name, std::string_view user, std::string_view pc) {

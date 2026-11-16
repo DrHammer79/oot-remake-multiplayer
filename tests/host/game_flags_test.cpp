@@ -1,6 +1,8 @@
 #include <bit>
 #include <doctest/doctest.h>
 
+#include <ostream>  // doctest prints std::string_view values through it
+
 #include <cstring>
 #include <functional>
 #include <string>

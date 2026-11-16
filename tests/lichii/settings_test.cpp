@@ -12,6 +12,8 @@
 
 #include "coop_settings.h"
 
+#include <coop/os.hpp>
+
 using CoopHook::ApplyEnvironment;
 using CoopHook::ApplyIni;
 using CoopHook::LoadSettings;
@@ -46,6 +48,12 @@ bool process_env_set(const char* name) {
 bool any_coop_env() {
   return process_env_set("LICHII_COOP_SERVER") || process_env_set("LICHII_COOP_PORT") ||
          process_env_set("LICHII_COOP_NAME");
+}
+
+// coop::os's files (LoadSettings, LoadPlayerKey) are relative to the std backend's root: point it at `dir`.
+void use_root(const std::filesystem::path& dir) {
+  const auto u8 = dir.u8string();
+  coop::os::StdPlatform(std::string(reinterpret_cast<const char*>(u8.data()), u8.size()));
 }
 
 std::filesystem::path write_temp(const std::string& name, const std::string& text) {
@@ -204,13 +212,14 @@ TEST_CASE("settings: LoadSettings reads the file, a missing one is fine") {
     return;
   }
   std::vector<std::string> errors;
-  const auto missing = std::filesystem::temp_directory_path() / "coop_tests_missing_dir" / "coop.ini";
-  Settings off = LoadSettings(missing, errors);
+  use_root(std::filesystem::temp_directory_path() / "coop_tests_missing_dir");
+  Settings off = LoadSettings("coop.ini", errors);
   CHECK(errors.empty());
   CHECK_FALSE(off.enabled());
 
   const auto good = write_temp("coop_tests_good.ini", "server = 127.0.0.1\nname = Saria\n");
-  Settings on = LoadSettings(good, errors);
+  use_root(std::filesystem::temp_directory_path());
+  Settings on = LoadSettings("coop_tests_good.ini", errors);
   std::filesystem::remove(good);
   CHECK(errors.empty());
   CHECK(on.enabled());
@@ -228,7 +237,8 @@ TEST_CASE("settings: a problem drops only its own line") {
   // with the rest (the name stays the default).
   const auto bad = write_temp("coop_tests_bad.ini",
                               "server = 127.0.0.1\nprot = 27510\nname = 12345678901234567\nport = 27520\n");
-  Settings s = LoadSettings(bad, errors);
+  use_root(std::filesystem::temp_directory_path());
+  Settings s = LoadSettings("coop_tests_bad.ini", errors);
   std::filesystem::remove(bad);
   REQUIRE(errors.size() == 2);
   CHECK(errors[0].find("unknown key 'prot'") != std::string::npos);
@@ -320,18 +330,19 @@ TEST_CASE("settings: the player key is 32 hex digits, kept in its own file and m
     const auto dir = std::filesystem::temp_directory_path() / "coop-player-key-test";
     std::filesystem::remove_all(dir);
     const auto file = dir / "player-key.txt";
+    use_root(dir);   // made by the first write
     std::string note;
-    const auto made = LoadPlayerKey(file, note);
+    const auto made = LoadPlayerKey("player-key.txt", note);
     CHECK(note.find("a new player key was made") == 0);
     REQUIRE(std::filesystem::is_regular_file(file));
     note.clear();
-    CHECK(LoadPlayerKey(file, note) == made);  // kept: the same key next time
+    CHECK(LoadPlayerKey("player-key.txt", note) == made);  // kept: the same key next time
     CHECK(note.empty());
     {
         std::ofstream broken(file, std::ios::binary | std::ios::trunc);
         broken << "not a key";
     }
-    const auto again = LoadPlayerKey(file, note);
+    const auto again = LoadPlayerKey("player-key.txt", note);
     CHECK(again != made);  // a broken file gets a new one (16 random bytes: never the same)
     CHECK(note.find("a new player key was made") == 0);
     std::filesystem::remove_all(dir);

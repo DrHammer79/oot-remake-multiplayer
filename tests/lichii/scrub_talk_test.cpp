@@ -1,6 +1,8 @@
 // Tests for the Deku Scrub destroy flags held during our Link's event (lichii/hook/coop_scrub_talk.h, issue 144).
 #include <doctest/doctest.h>
 
+#include <ostream>  // doctest prints std::string_view values through it
+
 #include <map>
 
 #include "coop/host/flags.hpp"

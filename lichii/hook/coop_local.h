@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <coop/os.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -304,7 +305,7 @@ private:
     }
 
     Game& game_;
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     Status status_;
     Config wanted_;
     Want want_ = Want::None;

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "coop/host/flags.hpp"
+#include "coop/host/flags_file.hpp"
 
 using namespace coop::host;
 
@@ -99,7 +100,7 @@ TEST_CASE("shared flags: bad lines are refused with their line number") {
 TEST_CASE("shared flags: the example file loads") {
   const auto path = std::filesystem::path(COOP_TEST_SOURCE_DIR) / "host" / "shared_flags.example.txt";
   std::string error;
-  const auto flags = SharedFlags::load(path, &error);
+  const auto flags = coop::host::load_shared_flags(path, &error);
   REQUIRE_MESSAGE(flags, error);
   CHECK(flags->size() == 8);
   CHECK(flags->contains(FlagKey::key64_flag(0x2fa4c1d09b7e6a35ull)));
@@ -108,5 +109,5 @@ TEST_CASE("shared flags: the example file loads") {
   CHECK(flags->contains({flag_hash("Example.DoorUnlocked"), 2}));
   CHECK(flags->contains({flag_hash("Example.KeysUsed"), 3}));
 
-  CHECK_FALSE(SharedFlags::load(path.parent_path() / "no_such_file.txt", &error));
+  CHECK_FALSE(coop::host::load_shared_flags(path.parent_path() / "no_such_file.txt", &error));
 }

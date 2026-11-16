@@ -529,7 +529,7 @@ void Frame(const std::optional<std::array<float, 3>>& our_feet,
     // The listener: at our Link's head, facing as the camera does.
     const auto camera = CoopCamera::Latest();
     std::optional<coop::voice::Listener> view;
-    if (camera && std::chrono::steady_clock::now() - camera->at < std::chrono::milliseconds(500)) {
+    if (camera && coop::os::SteadyClock::now() - camera->at < std::chrono::milliseconds(500)) {
         view = coop::voice::listener_from_clip(camera->clip_from_world);
     }
     if (our_feet) {

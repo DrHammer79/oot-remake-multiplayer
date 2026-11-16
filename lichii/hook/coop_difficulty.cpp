@@ -8,6 +8,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <coop/os.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -327,7 +328,7 @@ std::int32_t Kinds::Scaled(Slot& s, std::int32_t sum, std::uint16_t pct, Rule ru
 
 std::uint64_t SteadyMs() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          coop::os::SteadyClock::now().time_since_epoch())
                                           .count());
 }
 

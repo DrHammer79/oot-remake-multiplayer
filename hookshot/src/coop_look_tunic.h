@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <map>
@@ -171,7 +172,7 @@ private:
     std::shared_ptr<const Texels> Load(const std::string& colour);
 
     Host host_;
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::string wanted_;                      // guarded
     bool busy_ = false;                       // guarded
     bool kicked_ = false;                     // guarded
