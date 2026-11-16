@@ -65,7 +65,7 @@
 //                          automatic scaler. Only the host can; logs
 //                          "coop: test difficulty ...: set" or "NOT set"
 //   aim NAME DX DY DZ TICKS [KEYS] [left] / near NAME RADIUS TICKS [KEYS] /
-//   until NAME ANIM[|ANIM...] TICKS
+//   until NAME ANIM[|ANIM...] TICKS [SKIP] / away NAME METRES TICKS
 //                          the Hookshot driver's (it reads the watch file);
 //                          read and checked here, then skipped with a log
 //                          line ("aim skipped: the Hookshot driver's step")

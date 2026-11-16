@@ -13,6 +13,7 @@ give PouchData.Weapon_Range_SlingShot.StockNum
 wait 120
 assign SlingShot
 wait 120
+give PouchData.Item_FairyBless_DefenseDouble.StockNum   # the Great Fairy's double defence: half damage
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleA.BottleItem Fairy   # 4 bottled fairies: the game's own revive (runs 122137/130255: both Links died; Life 80 did not hold)
@@ -50,13 +51,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r1
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r1-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -66,15 +68,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r1-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r2
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r2-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -84,15 +88,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r2-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r3
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r3-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -102,6 +108,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r3-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
@@ -116,13 +123,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r4
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r4-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -132,15 +140,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r4-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r5
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r5-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -150,15 +160,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r5-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r6
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r6-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -168,6 +180,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r6-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
@@ -182,13 +195,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r7
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r7-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -198,15 +212,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r7-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r8
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r8-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -216,15 +232,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r8-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r9
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r9-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -234,6 +252,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r9-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
@@ -248,13 +267,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r10
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r10-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -264,15 +284,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r10-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r11
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r11-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -282,15 +304,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r11-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r12
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r12-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -300,6 +324,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r12-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
@@ -314,13 +339,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r13
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r13-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -330,15 +356,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r13-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r14
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r14-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -348,15 +376,17 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r14-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-r15
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r15-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -366,6 +396,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r15-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 setflag PouchData.BottleA.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid 1
@@ -380,13 +411,14 @@ setflag PouchData.BottleD.StockNum 1
 setflag PlayerStatus.AssignableItem.BottleInfo.BottleD.IsValid 1
 setenum PlayerStatus.AssignableItem.BottleInfo.BottleD.BottleItem Fairy
 mark a-r16
-until Enemy_DungeonBoss_Gohma PreAttack|AttackWait|CeilingServiceWait 1200   # her opening
-aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 120   # the camera on her eye: the player's own right stick
+until Enemy_DungeonBoss_Gohma PreAttack|AttackWait 1800 4   # her floor opening; none: the 4 fire lines are skipped
+aim Enemy_DungeonBoss_Gohma 0 1.7 1.5 300   # the camera on her eye: the player's own right stick
 hold ZL 10              # lock on (the game's own target: her eye)
 hold ZL+ZR 30           # the slingshot while locked on: the seed flies at the target
 hold ZL 10
 mark a-r16-seed
-until Enemy_DungeonBoss_Gohma Down_ 240   # stunned (chance time)?
+away Enemy_DungeonBoss_Gohma 7 180   # back off: both Links died standing in her attacks (runs 130255, 144757)
+until Enemy_DungeonBoss_Gohma Down_ 240 8   # stunned (chance time)? not down: the 8 sword lines are skipped
 near Enemy_DungeonBoss_Gohma 2.5 300 ZL   # up to her eye while she is down
 hold ZL+Y 8             # the sword at her eye, locked on
 wait 12
@@ -396,6 +428,7 @@ hold ZL+Y 8
 wait 12
 hold ZL+Y 8
 mark a-r16-hit
+away Enemy_DungeonBoss_Gohma 7 180
 wait 60
 mark a-fight-over
 wait 1800               # her death and its event

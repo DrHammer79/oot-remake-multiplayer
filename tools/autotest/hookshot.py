@@ -278,11 +278,19 @@ def parse(text):
                 if bad:
                     fail("unknown key " + bad)
         elif cmd == "UNTIL":
-            # until ACTOR ANIM[|ANIM...] TICKS: no input until the actor plays one of those animations (its name starts
-            # with one), from the watch file; logs "until ... seen ANIM" or "until ... timed out".
-            if len(w) != 4 or _ticks(w[3]) is None or not all(w[2].split("|")):
-                fail("want: until ACTOR ANIM[|ANIM...] TICKS")
+            # until ACTOR ANIM[|ANIM...] TICKS [SKIP]: no input until the actor plays one of those animations (its name
+            # starts with one), from the watch file; logs "until ... seen ANIM" or "until ... timed out", and on a
+            # time-out the next SKIP script lines are skipped (a fire or a sword round that would only walk into her).
+            if len(w) not in (4, 5) or _ticks(w[3]) is None or not all(w[2].split("|")) or (
+                    len(w) == 5 and _ticks(w[4]) is None):
+                fail("want: until ACTOR ANIM[|ANIM...] TICKS [SKIP]")
             s.kind, s.name, s.start, s.ticks = "until", w[1], w[2], _ticks(w[3])
+            s.radius = float(_ticks(w[4])) if len(w) == 5 else 0.0
+        elif cmd == "AWAY":
+            # away ACTOR METRES TICKS: walk until the actor is at least METRES away (straight away from it).
+            if len(w) != 4 or _number(w[2]) is None or _number(w[2]) < 0.5 or _ticks(w[3]) is None:
+                fail("want: away ACTOR METRES TICKS, metres at least 0.5")
+            s.kind, s.name, s.radius, s.ticks = "away", w[1], _number(w[2]), _ticks(w[3])
         elif cmd == "NEAR":
             # near ACTOR RADIUS TICKS [KEYS]: a goto to where the actor stands now (followed as it moves).
             if len(w) not in (4, 5) or _number(w[2]) is None or _number(w[2]) < 0.2 or _ticks(w[3]) is None:
@@ -487,6 +495,8 @@ class Player:
         self.warps = []
         self.angle = 0.0              # camera model: world direction = stick direction turned by this
         self.learned = False
+        self.skip = 0                 # until's time-out: script lines still to skip ...
+        self._skip_line = -1          # ... and the line being skipped
         self._watch_t = None          # the watch file's newest sight time (the module's clock) ...
         self._watch_at = 0.0          # ... and when it changed (ours)
 
@@ -683,8 +693,34 @@ class Player:
                     self.log("coop: test until %s seen %s after %.1f s" % (s.name, last, self.clock() - t0))
                     return self.clock()
             self._until(self.clock() + self.steer_every)
-        self.log("coop: test until %s timed out (last %s)" % (s.name, last or "none"))
+        self.log("coop: test until %s timed out (last %s)%s" % (s.name, last or "none",
+                                                                 ", %d lines skipped" % s.radius if s.radius else ""))
+        self.skip, self._skip_line = int(s.radius), -1
         return self.clock()
+
+    def away(self, s, t0):
+        """away: a goto to the point s.radius metres from the actor, straight away from it (followed as it moves)."""
+        if not self._watch(s, (0.0, 0.0, 0.0)):
+            return t0
+
+        def target():
+            w = self.read_watch()
+            pos = self.link_pos()
+            if w is None or pos is None:
+                return None
+            ax, az = w["root"][0], w["root"][2]
+            dx, dz = pos[0] - ax, pos[2] - az
+            d = math.hypot(dx, dz)
+            if d >= s.radius:
+                return pos[0], pos[2]   # far enough: the goto ends here
+            if d < 1e-3:
+                dx, dz, d = 1.0, 0.0, 1.0
+            return ax + dx / d * (s.radius + 0.5), az + dz / d * (s.radius + 0.5)
+        g = Step("near", s.line, s.ticks)   # reported as near reached / timed out
+        g.name, g.radius = s.name, 0.6
+        t = self.steer(g, max(t0, self.clock()), target)
+        self.log("coop: test away %s done" % s.name)
+        return t
 
     def near(self, s, t0):
         """near: a goto to the watched actor's place, followed as it moves."""
@@ -857,6 +893,15 @@ class Player:
         while i < len(steps):
             s = steps[i]
             i += 1
+            if self.skip > 0 or s.line == self._skip_line:   # SKIP counts script lines (press is two steps)
+                if s.line != self._skip_line:
+                    self.skip -= 1
+                    self._skip_line = s.line
+                if s.kind == "mark":   # marks still go (shots, grading)
+                    self._until(t)
+                    self.mark(s.name)
+                    t = max(t, self.clock())
+                continue
             if s.kind in MODULE_ONLY:
                 # Steps in a row go together: the emulator plays them in one frame.
                 batch = [s]
@@ -877,6 +922,9 @@ class Player:
                 t = max(t, self.clock())
             elif s.kind in ("goto", "toward"):
                 t = max(t, self.steer(s, max(t, self.clock())))
+            elif s.kind == "away":
+                self._until(t)
+                t = max(t, self.away(s, t))
             elif s.kind == "until":
                 self._until(t)
                 t = max(t, self.until(s, t))

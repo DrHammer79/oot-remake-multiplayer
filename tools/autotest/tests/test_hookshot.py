@@ -780,6 +780,36 @@ class AimTest(unittest.TestCase):
         with self.assertRaises(hs.ScriptError):
             hs.parse("until Gohma Down 3x")
 
+    def test_until_skips_steps_on_time_out(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            open(path, "w").close()
+            game = AimGame(path)
+            game, log, shots, _, _ = play_aim("until Enemy_DungeonBoss_Gohma Down_ 30 3\npress Y\nmark skipped\n"
+                                              "press Y\npress B\nmark after", game)
+            self.assertIn("coop: test until Enemy_DungeonBoss_Gohma timed out (last CeilingMove), 3 lines skipped",
+                          log.lines)
+            self.assertEqual([r["buttons"] for r in game.cmds("press")], [["B"]])   # the Ys were skipped
+            self.assertEqual(shots, ["skipped", "after"])   # a mark still goes
+            p = hs.parse("until G Down_ 240 7")[0]
+            self.assertEqual((p.kind, p.radius), ("until", 7.0))
+            for bad in ("until G Down_ 240 x", "away G 0.1 60", "away G 8"):
+                with self.assertRaises(hs.ScriptError, msg=bad):
+                    hs.parse(bad)
+
+    def test_away_walks_off(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "commands-A.txt")
+            open(path, "w").close()
+            game = AimGame(path, actor=(1.0, 0.0, 0.0), camera=0.7)
+            game.pos = [2.0, 0.0, 0.5]
+            game, log, _, _, _ = play_aim("away Enemy_DungeonBoss_Gohma 6 900", game)
+            self.assertIn("coop: test away Enemy_DungeonBoss_Gohma done", log.lines)
+            self.assertGreaterEqual(math.hypot(game.pos[0] - 1.0, game.pos[2]), 5.9, log.lines)
+            self.assertEqual(game.held, [])
+
     def test_old_sight_is_not_used(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:

@@ -345,12 +345,20 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             } else {
                 return fail("want: watch ACTOR [DX DY DZ] or watch off");
             }
-        } else if (cmd == "UNTIL") {
-            // until ACTOR PATTERN TICKS: the Hookshot driver's (waits for the actor's animation); skipped here.
+        } else if (cmd == "UNTIL" || cmd == "AWAY") {
+            // until ACTOR PATTERN TICKS [SKIP] / away ACTOR METRES TICKS: the Hookshot driver's; skipped here.
+            const bool until = cmd == "UNTIL";
             std::uint32_t ticks = 0;
-            const auto* end = w.size() == 4 ? w[3].data() + w[3].size() : nullptr;
-            if (w.size() != 4 || std::from_chars(w[3].data(), end, ticks).ptr != end) {
-                return fail("want: until ACTOR ANIM[|ANIM...] TICKS");
+            std::uint32_t skip = 0;
+            float metres = 0.0f;
+            const bool shape = until ? (w.size() == 4 || w.size() == 5) : w.size() == 4;
+            const auto whole = [](std::string_view v, std::uint32_t& out) {
+                return std::from_chars(v.data(), v.data() + v.size(), out).ptr == v.data() + v.size();
+            };
+            if (!shape || !whole(w[3], ticks) || (w.size() == 5 && !whole(w[4], skip)) ||
+                (!until && (!Number(w[2], metres) || metres < 0.5f))) {
+                return fail(until ? "want: until ACTOR ANIM[|ANIM...] TICKS [SKIP]"
+                                  : "want: away ACTOR METRES TICKS, metres at least 0.5");
             }
             step.kind = Kind::driver;
             step.mark = std::string(w[0]);
