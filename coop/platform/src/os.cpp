@@ -84,7 +84,10 @@ Mutex::Mutex() : owner_(&P()) {
     if (!handle_) owner_->log("coop::os: mutex_new failed: this lock gives no exclusion");
 }
 Mutex::~Mutex() {
-    if (handle_) owner_->mutex_free(handle_);
+    // Cleared first: a lock on a static mutex from a thread still running at exit is then a no-op, not a freed one.
+    void *h = handle_;
+    handle_ = nullptr;
+    if (h) owner_->mutex_free(h);
 }
 void Mutex::lock() {
     if (handle_) owner_->mutex_lock(handle_);
