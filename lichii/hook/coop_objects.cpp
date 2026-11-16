@@ -2424,6 +2424,7 @@ private:
     // was set from their placed enemy (once each), and the log lines said.
     std::set<u64> extra_rooms_done_;
     std::size_t extra_room_lines_ = 0;
+    std::set<u64> extra_room_said_;  // (each extra's "not found" lines once)
     u64 actor_events_said_us_ = 0;
 #endif
 
@@ -3097,6 +3098,11 @@ private:
                 }
             }
             if (source == 0) {
+                if (extra_room_said_.insert(e.key * 4 + 0).second && extra_room_lines_ < 40) {
+                    ++extra_room_lines_;
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: its placed enemy not seen here yet (report 111)",
+                             e.address, e.name, e.source);
+                }
                 continue;  // (its placed enemy not loaded here: next walk)
             }
             const u64 src_table = r.template Get<u64>(source + kActorComponents).value_or(0);
@@ -3104,6 +3110,27 @@ private:
             const u64 src_room = src_table ? r.template Get<u64>(src_table + kComponentsRoom).value_or(0) : 0;
             const u64 dst_room = dst_table ? r.template Get<u64>(dst_table + kComponentsRoom).value_or(0) : 0;
             if (src_room == 0 || dst_room == 0) {
+                if (extra_room_said_.insert(e.key * 4 + 1).second && extra_room_lines_ < 40) {
+                    ++extra_room_lines_;
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room component at table+{:#x} (extra table {:#x} "
+                                   "-> {:#x}, placed {:#x} table {:#x} -> {:#x}) (report 111)",
+                             e.address, e.name, kComponentsRoom, dst_table, dst_room, source, src_table, src_room);
+                    // Which components of the placed enemy point back at it (+0x18), and their +0x34/+0x38.
+                    for (u64 off = 0; src_table != 0 && off < 0x800 && extra_room_lines_ < 40; off += 8) {
+                        const u64 comp = r.template Get<u64>(src_table + off).value_or(0);
+                        if (comp == 0 || r.template Get<u64>(comp + 0x18).value_or(0) != source) {
+                            continue;
+                        }
+                        const u64 dcomp = dst_table ? r.template Get<u64>(dst_table + off).value_or(0) : 0;
+                        ++extra_room_lines_;
+                        LOG_INFO(Core, "coop: difficulty:   table+{:#x}: placed +0x34 {} +0x38 {}; extra +0x34 {} +0x38 {} "
+                                       "(report 111)",
+                                 off, static_cast<std::int32_t>(r.template Get<u32>(comp + kRoomDefault).value_or(0)),
+                                 static_cast<std::int32_t>(r.template Get<u32>(comp + kRoomNow).value_or(0)),
+                                 dcomp ? static_cast<std::int32_t>(r.template Get<u32>(dcomp + kRoomDefault).value_or(0)) : 0,
+                                 dcomp ? static_cast<std::int32_t>(r.template Get<u32>(dcomp + kRoomNow).value_or(0)) : 0);
+                    }
+                }
                 continue;
             }
             const u32 src_default = r.template Get<u32>(src_room + kRoomDefault).value_or(~u32{0});
