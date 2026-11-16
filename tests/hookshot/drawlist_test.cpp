@@ -162,20 +162,20 @@ TEST_CASE("draw list replay: logical fonts and hearts become the game look's ids
     coop_draw_image(l.get(), COOP_IMAGE_HEART_0 + 2, 0, 0, 1, 1, 0);
     coop_draw_font(l.get(), COOP_FONT_UI);
     const float xy[6] = {0, 0, 1, 0, 1, 1};
-    coop_draw_poly(l.get(), xy, 3, 0, 0);   // no call for it in Hookshot's table
+    coop_draw_poly(l.get(), xy, 3, 0, 0);   // one triangle (a fan of 3 points)
     coop_draw_clip_push(l.get(), 0, 0, 1, 1);
     coop_draw_rect(l.get(), 0, 0, 1, 1, 0, 0);
     coop_draw_clip_pop(l.get());
     const auto look = Ids();
     Host h(true);
     CoopDraw::Replay(*l, h.d, &look);
-    CHECK(h.calls == std::vector<std::string>{"font 7", "text a", "font 8", "image 22", "font 0", "rect"});
+    CHECK(h.calls == std::vector<std::string>{"font 7", "text a", "font 8", "image 22", "font 0", "tri", "rect"});
     Host plain(true);
     CoopDraw::Replay(*l, plain.d, nullptr);   // no game look: Hookshot's own font everywhere
-    CHECK(plain.calls == std::vector<std::string>{"font 0", "text a", "font 0", "image 0", "font 0", "rect"});
+    CHECK(plain.calls == std::vector<std::string>{"font 0", "text a", "font 0", "image 0", "font 0", "tri", "rect"});
     Host old(false);   // an older Hookshot's table: no fonts or pictures to call
     CoopDraw::Replay(*l, old.d, &look);
-    CHECK(old.calls == std::vector<std::string>{"text a", "rect"});
+    CHECK(old.calls == std::vector<std::string>{"text a", "tri", "rect"});
     CHECK(CoopDraw::HostImage(&look, 9) == 0);
     CHECK(CoopDraw::HostFont(&look, 99) == 0);
 }
