@@ -17,6 +17,7 @@ import sys
 MODULE_TAG = "coop-proto: "
 HELLO = ("1 loaded (hello)", r"hello from subsdk1")
 HOOK_IN = ("2 frame hook in", r"hook \d+: frame hook in at main\+0x6e70f8")
+NULL_GUARDS = 29  # switch/proto/null_guards.inc kNullGuardCount
 
 # name -> (expects, forbids, datagrams)
 PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
@@ -30,7 +31,8 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
     # Null guards Run 2 (v1 step 8 (g)): every guard in, none left out, the game plays on.
     "nullguards": ([
         HELLO, HOOK_IN,
-        ("2 null guards all applied", r"null guards: (\d+) of \1 applied"),
+        # Pinned, so "0 of 0" cannot pass; run_check_test.py keeps it equal to null_guards.inc's kNullGuardCount.
+        ("2 null guards all applied", rf"null guards: {NULL_GUARDS} of {NULL_GUARDS} applied"),
         ("3 game plays (frame 6000)", r"^frame 6000$"),
     ], [
         ("2 no guard left out", r"null guard at main\+0x[0-9a-f]+: .*left out"),

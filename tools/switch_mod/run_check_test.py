@@ -2,6 +2,7 @@
 """Unit tests for run_check.py (made-up log lines in the emulator's format)."""
 from __future__ import annotations
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -82,6 +83,16 @@ class NullGuardPresetTest(unittest.TestCase):
                                            "hook: restore RX failed, result 0xd401"])[1]
         self.assertTrue(any(r.startswith("FAIL 2 island page usable") for r in rep))
         self.assertTrue(any(r.startswith("FAIL 2 code pages back to RX") for r in rep))
+
+    def test_zero_of_zero_fails(self):
+        lines = [x.replace("29 of 29", "0 of 0") for x in NULL_RUN]
+        self.assertIn("FAIL 2 null guards all applied", run("nullguards", lines)[1])
+
+    def test_pinned_count_matches_the_generated_table(self):
+        inc = (Path(__file__).resolve().parents[2] / "switch" / "proto" / "null_guards.inc").read_text(encoding="utf-8")
+        m = re.search(r"kNullGuardCount = (\d+);", inc)
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(1)), run_check.NULL_GUARDS)
 
     def test_crash_fails(self):
         self.assertIn("FAIL game still running at the end (no crash)", run("nullguards", NULL_RUN, alive=False)[1])

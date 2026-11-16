@@ -69,10 +69,14 @@ New-Item -ItemType Directory -Force $Out | Out-Null
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace RunFritchii -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool GetClientRect(System.IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool ClientToScreen(System.IntPtr h, ref POINT p);
 [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint flags);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int cmd);
 public struct RECT { public int L, T, R, B; }
+public struct POINT { public int X, Y; }
 '@ -ErrorAction SilentlyContinue
 
 # Mostly-black image? (PrintWindow on a GPU window can give black.) Samples a grid.
@@ -84,6 +88,9 @@ function Test-Blank($bmp) {
     } }
     return $lit -lt 3
 }
+# Privacy: a shot only ever holds the game window's own pixels. PrintWindow asks the window itself for its content.
+# The fallback copies the screen, so it runs only when the game is the foreground window, copies only the game's
+# client area, and keeps the image only if the game was still in front after the copy; otherwise no shot.
 function Shot($proc, $name) {
     try {
         $proc.Refresh(); $h = $proc.MainWindowHandle
@@ -93,19 +100,36 @@ function Shot($proc, $name) {
         $bmp = New-Object System.Drawing.Bitmap $w, $hh
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         $dc = $g.GetHdc(); $ok = [RunFritchii.Win]::PrintWindow($h, $dc, 2); $g.ReleaseHdc($dc)   # 2 = PW_RENDERFULLCONTENT
-        $how = 'printwindow'
-        if (-not $ok -or (Test-Blank $bmp)) {
-            [RunFritchii.Win]::ShowWindow($h, 9) | Out-Null          # SW_RESTORE
-            [RunFritchii.Win]::SetForegroundWindow($h) | Out-Null
-            Start-Sleep -Milliseconds 700
-            [RunFritchii.Win]::GetWindowRect($h, [ref]$r) | Out-Null
-            $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
-            $how = 'front+copy'
+        $g.Dispose()
+        if ($ok -and -not (Test-Blank $bmp)) {
+            $bmp.Save("$Out\$name.png"); $bmp.Dispose(); Write-Output "shot ${name}: printwindow"; return
         }
-        $bmp.Save("$Out\$name.png"); $g.Dispose(); $bmp.Dispose()
-        Write-Output "shot ${name}: $how"
+        $bmp.Dispose()
+        [RunFritchii.Win]::ShowWindow($h, 9) | Out-Null          # SW_RESTORE
+        [RunFritchii.Win]::SetForegroundWindow($h) | Out-Null
+        Start-Sleep -Milliseconds 700
+        if ([RunFritchii.Win]::GetForegroundWindow() -ne $h) { Write-Output "shot ${name}: skipped (printwindow blank, game not in front)"; return }
+        $c = New-Object RunFritchii.Win+RECT; [RunFritchii.Win]::GetClientRect($h, [ref]$c) | Out-Null
+        $pt = New-Object RunFritchii.Win+POINT; [RunFritchii.Win]::ClientToScreen($h, [ref]$pt) | Out-Null
+        $cw = $c.R - $c.L; $ch = $c.B - $c.T
+        if ($cw -le 0 -or $ch -le 0) { Write-Output "shot ${name}: skipped (no client area)"; return }
+        $bmp = New-Object System.Drawing.Bitmap $cw, $ch
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.CopyFromScreen($pt.X, $pt.Y, 0, 0, $bmp.Size); $g.Dispose()
+        if ([RunFritchii.Win]::GetForegroundWindow() -ne $h) { $bmp.Dispose(); Write-Output "shot ${name}: skipped (game left the front during the copy)"; return }
+        $bmp.Save("$Out\$name.png"); $bmp.Dispose()
+        Write-Output "shot ${name}: client area, game in front"
     } catch { Write-Output "shot ${name}: $_" }
 }
+
+# Relative path + size + SHA-256 of every file under a folder, for comparing a copy with its source.
+function Get-Tree($dir) {
+    $base = (Resolve-Path -LiteralPath $dir).Path
+    @(Get-ChildItem -LiteralPath $base -Recurse -File | Sort-Object FullName | ForEach-Object {
+        "$($_.FullName.Substring($base.Length))|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName).Hash)" })
+}
+
+function Same-Tree($a, $b) { ((Get-Tree $a) -join "`n") -ceq ((Get-Tree $b) -join "`n") }
 
 $held = @(); $p = $null; $listen = $null; $backedUp = $false; $alive = 0
 try {
@@ -125,9 +149,21 @@ try {
     foreach ($v in 'LICHII_COOP_PUPPET', 'LICHII_COOP_DEBUG_PUPPET', 'LICHII_COOP_SPAWN', 'LICHII_COOP_LIVE_EVENTS',
                    'LICHII_COOP_OBJECTS_AI_HOLD') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
 
+    # Back up the saves and check the copy (file names + hashes) before anything runs; a bad copy stops the run
+    # with the kit's saves untouched (and the restore in finally never uses it).
     Copy-Item -Recurse $saves $bak
+    if (-not (Same-Tree $saves $bak)) {
+        Remove-Item -Recurse -Force $bak   # the kit's saves were not touched; a bad copy is no backup
+        throw "the saves backup did not match the saves (removed it): not started"
+    }
     $backedUp = $true
-    if (Test-Path $log) { Copy-Item $log "$Out\eden_log.before.txt" -Force }
+    # Only this run's log may be judged: move the kit's old log and this folder's old results away first.
+    if (Test-Path $log) { Move-Item $log "$Out\eden_log.before.txt" -Force }
+    if (Test-Path $log) { throw "could not move the old $log away: not started" }
+    foreach ($f in 'eden_log.txt', 'listen.txt', 'listen-err.txt', 'title.png', 'playing.png', 'end.png') {
+        Remove-Item "$Out\$f" -Force -ErrorAction SilentlyContinue
+        if (Test-Path "$Out\$f") { throw "could not remove the old $Out\${f}: not started" }
+    }
     New-Item -ItemType Directory -Force "$modDir\exefs" | Out-Null
     Copy-Item "$wt\build\switch-proto\subsdk1" "$modDir\exefs\subsdk1" -Force
 
@@ -157,9 +193,7 @@ try {
         try {
             if (Test-Path $saves) { Remove-Item -Recurse -Force $saves }
             Copy-Item -Recurse $bak $saves
-            $a = Get-ChildItem -Recurse -File $bak | ForEach-Object { "$($_.FullName.Substring($bak.Length))|$((Get-FileHash $_.FullName).Hash)" }
-            $b = Get-ChildItem -Recurse -File $saves | ForEach-Object { "$($_.FullName.Substring($saves.Length))|$((Get-FileHash $_.FullName).Hash)" }
-            if (Compare-Object @($a) @($b)) { Write-Output "SAVES NOT VERIFIED: backup kept at $bak" }
+            if (-not (Same-Tree $bak $saves)) { Write-Output "SAVES NOT VERIFIED: backup kept at $bak" }
             else { Remove-Item -Recurse -Force $bak; Write-Output 'saves restored and verified' }
         } catch { Write-Output "SAVES RESTORE FAILED ($_): backup kept at $bak" }
     }
