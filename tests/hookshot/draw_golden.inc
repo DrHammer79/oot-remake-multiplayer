@@ -1,0 +1,1201 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Golden records for draw_golden_test.cpp: {"scene", R"G(calls)G"}, taken from the test's output in CI
+// (run 43769585100, linux gcc) on the drawing code before the draw list (71f8439e). Split in pieces of 80 lines
+// (MSVC's 16 KB limit on one string literal).
+    {"chat-plain", R"G(
+rect 12.00 624.00 182.00 646.00 4.00 #96000000
+text 16.00 626.00 18.00 0.00 #ffffffff |Saria: hello there
+rect 12.00 650.00 119.00 672.00 4.00 #96000000
+text 16.00 652.00 18.00 0.00 #ff78dcff |Mido joined
+rect 12.00 676.00 668.00 698.00 4.00 #3c000000
+text 16.00 678.00 18.00 0.00 #66ffffff |Darunia: a very long line that will not fit in the chat's width at al...
+end font 0
+)G"},
+    {"chat-game", R"G(
+text 54.28 921.45 34.50 1.00 #46000000 |Saria:
+text 57.72 921.45 34.50 1.00 #46000000 |Saria:
+text 56.00 919.73 34.50 1.00 #46000000 |Saria:
+text 56.00 923.17 34.50 1.00 #46000000 |Saria:
+text 58.16 924.25 34.50 1.00 #96000000 |Saria:
+text 56.00 921.45 34.50 1.00 #ffffffff |Saria:
+text 157.77 921.45 34.50 1.00 #46000000 | hello there
+text 161.23 921.45 34.50 1.00 #46000000 | hello there
+text 159.50 919.73 34.50 1.00 #46000000 | hello there
+text 159.50 923.17 34.50 1.00 #46000000 | hello there
+text 161.66 924.25 34.50 1.00 #96000000 | hello there
+text 159.50 921.45 34.50 1.00 #ffffffff | hello there
+text 54.28 966.30 34.50 1.00 #46000000 |Mido joined
+text 57.72 966.30 34.50 1.00 #46000000 |Mido joined
+text 56.00 964.58 34.50 1.00 #46000000 |Mido joined
+text 56.00 968.02 34.50 1.00 #46000000 |Mido joined
+text 58.16 969.10 34.50 1.00 #96000000 |Mido joined
+text 56.00 966.30 34.50 1.00 #ff52ceff |Mido joined
+text 54.28 1011.15 34.50 1.00 #1c000000 |Darunia:
+text 57.72 1011.15 34.50 1.00 #1c000000 |Darunia:
+text 56.00 1009.42 34.50 1.00 #1c000000 |Darunia:
+text 56.00 1012.87 34.50 1.00 #1c000000 |Darunia:
+text 58.16 1013.95 34.50 1.00 #3c000000 |Darunia:
+text 56.00 1011.15 34.50 1.00 #66ffffff |Darunia:
+text 192.27 1011.15 34.50 1.00 #1c000000 | a very long line that will not fit in the ...
+text 195.73 1011.15 34.50 1.00 #1c000000 | a very long line that will not fit in the ...
+text 194.00 1009.42 34.50 1.00 #1c000000 | a very long line that will not fit in the ...
+text 194.00 1012.87 34.50 1.00 #1c000000 | a very long line that will not fit in the ...
+text 196.16 1013.95 34.50 1.00 #3c000000 | a very long line that will not fit in the ...
+text 194.00 1011.15 34.50 1.00 #66ffffff | a very long line that will not fit in the ...
+end font 0
+)G"},
+    {"chat-box-empty-plain", R"G(
+rect 16.00 674.00 684.57 704.00 6.00 #be000000
+text 24.00 680.00 18.00 0.00 #a0ffffff |Say something (Enter sends, Esc closes)
+rect 12.00 588.00 182.00 610.00 4.00 #96000000
+text 16.00 590.00 18.00 0.00 #ffffffff |Saria: hello there
+rect 12.00 614.00 119.00 636.00 4.00 #96000000
+text 16.00 616.00 18.00 0.00 #ff78dcff |Mido joined
+rect 12.00 640.00 668.00 662.00 4.00 #3c000000
+text 16.00 642.00 18.00 0.00 #66ffffff |Darunia: a very long line that will not fit in the chat's width at al...
+end font 0
+)G"},
+    {"chat-box-empty-game", R"G(
+text 46.56 846.50 28.75 1.00 #2b000000 |Say something (Enter sends, Esc closes)
+text 49.44 846.50 28.75 1.00 #2b000000 |Say something (Enter sends, Esc closes)
+text 48.00 845.06 28.75 1.00 #2b000000 |Say something (Enter sends, Esc closes)
+text 48.00 847.94 28.75 1.00 #2b000000 |Say something (Enter sends, Esc closes)
+text 49.80 848.84 28.75 1.00 #5e000000 |Say something (Enter sends, Esc closes)
+text 48.00 846.50 28.75 1.00 #a0ffffff |Say something (Enter sends, Esc closes)
+text 46.56 713.62 28.75 1.00 #46000000 |Saria:
+text 49.44 713.62 28.75 1.00 #46000000 |Saria:
+text 48.00 712.19 28.75 1.00 #46000000 |Saria:
+text 48.00 715.06 28.75 1.00 #46000000 |Saria:
+text 49.80 715.96 28.75 1.00 #96000000 |Saria:
+text 48.00 713.62 28.75 1.00 #ffffffff |Saria:
+text 132.81 713.62 28.75 1.00 #46000000 | hello there
+text 135.69 713.62 28.75 1.00 #46000000 | hello there
+text 134.25 712.19 28.75 1.00 #46000000 | hello there
+text 134.25 715.06 28.75 1.00 #46000000 | hello there
+text 136.05 715.96 28.75 1.00 #96000000 | hello there
+text 134.25 713.62 28.75 1.00 #ffffffff | hello there
+text 46.56 751.00 28.75 1.00 #46000000 |Mido joined
+text 49.44 751.00 28.75 1.00 #46000000 |Mido joined
+text 48.00 749.56 28.75 1.00 #46000000 |Mido joined
+text 48.00 752.44 28.75 1.00 #46000000 |Mido joined
+text 49.80 753.34 28.75 1.00 #96000000 |Mido joined
+text 48.00 751.00 28.75 1.00 #ff52ceff |Mido joined
+text 46.56 788.38 28.75 1.00 #1c000000 |Darunia:
+text 49.44 788.38 28.75 1.00 #1c000000 |Darunia:
+text 48.00 786.94 28.75 1.00 #1c000000 |Darunia:
+text 48.00 789.81 28.75 1.00 #1c000000 |Darunia:
+text 49.80 790.71 28.75 1.00 #3c000000 |Darunia:
+text 48.00 788.38 28.75 1.00 #66ffffff |Darunia:
+text 161.56 788.38 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 164.44 788.38 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 163.00 786.94 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 163.00 789.81 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 164.80 790.71 28.75 1.00 #3c000000 | a very long line that will not fit in the ...
+text 163.00 788.38 28.75 1.00 #66ffffff | a very long line that will not fit in the ...
+end font 0
+)G"},
+    {"chat-box-failed-plain", R"G(
+rect 14.00 672.00 686.57 706.00 7.00 #e63c3cdc
+rect 16.00 674.00 684.57 704.00 6.00 #be000000
+text 24.00 680.00 18.00 0.00 #ffffffff |a long message that goes on and on past the end of the box for sure yes_
+rect 12.00 588.00 182.00 610.00 4.00 #96000000
+text 16.00 590.00 18.00 0.00 #ffffffff |Saria: hello there
+rect 12.00 614.00 119.00 636.00 4.00 #96000000
+text 16.00 616.00 18.00 0.00 #ff78dcff |Mido joined
+rect 12.00 640.00 668.00 662.00 4.00 #3c000000
+text 16.00 642.00 18.00 0.00 #66ffffff |Darunia: a very long line that will not fit in the chat's width at al...
+end font 0
+)G"},
+    {"chat-box-failed-game", R"G(
+text 38.85 673.40 23.00 1.00 #46000000 |...oes on and on past the end of the box for sure yes_
+text 41.15 673.40 23.00 1.00 #46000000 |...oes on and on past the end of the box for sure yes_
+text 40.00 672.25 23.00 1.00 #46000000 |...oes on and on past the end of the box for sure yes_
+text 40.00 674.55 23.00 1.00 #46000000 |...oes on and on past the end of the box for sure yes_
+text 41.44 675.27 23.00 1.00 #96000000 |...oes on and on past the end of the box for sure yes_
+text 40.00 673.40 23.00 1.00 #ff6a7aff |...oes on and on past the end of the box for sure yes_
+text 38.85 564.10 23.00 1.00 #46000000 |Saria:
+text 41.15 564.10 23.00 1.00 #46000000 |Saria:
+text 40.00 562.95 23.00 1.00 #46000000 |Saria:
+text 40.00 565.25 23.00 1.00 #46000000 |Saria:
+text 41.44 565.97 23.00 1.00 #96000000 |Saria:
+text 40.00 564.10 23.00 1.00 #ffffffff |Saria:
+text 107.85 564.10 23.00 1.00 #46000000 | hello there
+text 110.15 564.10 23.00 1.00 #46000000 | hello there
+text 109.00 562.95 23.00 1.00 #46000000 | hello there
+text 109.00 565.25 23.00 1.00 #46000000 | hello there
+text 110.44 565.97 23.00 1.00 #96000000 | hello there
+text 109.00 564.10 23.00 1.00 #ffffffff | hello there
+text 38.85 594.00 23.00 1.00 #46000000 |Mido joined
+text 41.15 594.00 23.00 1.00 #46000000 |Mido joined
+text 40.00 592.85 23.00 1.00 #46000000 |Mido joined
+text 40.00 595.15 23.00 1.00 #46000000 |Mido joined
+text 41.44 595.87 23.00 1.00 #96000000 |Mido joined
+text 40.00 594.00 23.00 1.00 #ff52ceff |Mido joined
+text 38.85 623.90 23.00 1.00 #1c000000 |Darunia:
+text 41.15 623.90 23.00 1.00 #1c000000 |Darunia:
+text 40.00 622.75 23.00 1.00 #1c000000 |Darunia:
+text 40.00 625.05 23.00 1.00 #1c000000 |Darunia:
+text 41.44 625.77 23.00 1.00 #3c000000 |Darunia:
+text 40.00 623.90 23.00 1.00 #66ffffff |Darunia:
+text 130.85 623.90 23.00 1.00 #1c000000 | a very long line that will not fit in the ...
+text 133.15 623.90 23.00 1.00 #1c000000 | a very long line that will not fit in the ...
+text 132.00 622.75 23.00 1.00 #1c000000 | a very long line that will not fit in the ...
+text 132.00 625.05 23.00 1.00 #1c000000 | a very long line that will not fit in the ...
+text 133.44 625.77 23.00 1.00 #3c000000 | a very long line that will not fit in the ...
+text 132.00 623.90 23.00 1.00 #66ffffff | a very long line that will not fit in the ...
+end font 0
+)G"},
+    {"markers-plain", R"G(
+text 606.40 274.80 25.20 0.00 #cc000000 |Saria
+text 610.60 274.80 25.20 0.00 #cc000000 |Saria
+text 608.50 272.70 25.20 0.00 #cc000000 |Saria
+text 608.50 276.90 25.20 0.00 #cc000000 |Saria
+text 606.40 272.70 25.20 0.00 #cc000000 |Saria
+text 610.60 272.70 25.20 0.00 #cc000000 |Saria
+text 606.40 276.90 25.20 0.00 #cc000000 |Saria
+text 610.60 276.90 25.20 0.00 #cc000000 |Saria
+text 608.50 274.80 25.20 0.00 #ffffffff |Saria
+circle 200.00 400.00 13.50 0.00 #bf000000
+circle 200.00 400.00 12.00 0.00 #ffffc85a
+circle 1000.00 200.00 13.50 0.00 #5f000000
+circle 1000.00 200.00 12.00 0.00 #7fffc85a
+text 972.70 140.00 25.20 0.00 #65000000 |Mido
+text 976.90 140.00 25.20 0.00 #65000000 |Mido
+text 974.80 137.90 25.20 0.00 #65000000 |Mido
+text 974.80 142.10 25.20 0.00 #65000000 |Mido
+text 972.70 137.90 25.20 0.00 #65000000 |Mido
+text 976.90 137.90 25.20 0.00 #65000000 |Mido
+text 972.70 142.10 25.20 0.00 #65000000 |Mido
+text 976.90 142.10 25.20 0.00 #65000000 |Mido
+text 974.80 140.00 25.20 0.00 #7fffffff |Mido
+tri 1269.18 687.73 1248.31 682.70 1260.68 668.02 #ffffc85a
+text 1187.70 594.80 25.20 0.00 #cc000000 |Darunia
+text 1191.90 594.80 25.20 0.00 #cc000000 |Darunia
+text 1189.80 592.70 25.20 0.00 #cc000000 |Darunia
+text 1189.80 596.90 25.20 0.00 #cc000000 |Darunia
+text 1187.70 592.70 25.20 0.00 #cc000000 |Darunia
+text 1191.90 592.70 25.20 0.00 #cc000000 |Darunia
+text 1187.70 596.90 25.20 0.00 #cc000000 |Darunia
+text 1191.90 596.90 25.20 0.00 #cc000000 |Darunia
+text 1189.80 594.80 25.20 0.00 #ffffffff |Darunia
+text 579.00 514.80 25.20 0.00 #cc000000 |you
+text 583.20 514.80 25.20 0.00 #cc000000 |you
+text 581.10 512.70 25.20 0.00 #cc000000 |you
+text 581.10 516.90 25.20 0.00 #cc000000 |you
+text 579.00 512.70 25.20 0.00 #cc000000 |you
+text 583.20 512.70 25.20 0.00 #cc000000 |you
+text 579.00 516.90 25.20 0.00 #cc000000 |you
+text 583.20 516.90 25.20 0.00 #cc000000 |you
+text 581.10 514.80 25.20 0.00 #ff78e1ff |you
+end font 0
+)G"},
+    {"markers-game", R"G(
+text 603.96 312.28 27.72 2.00 #46000000 |Saria
+text 606.74 312.28 27.72 2.00 #46000000 |Saria
+text 605.35 310.89 27.72 2.00 #46000000 |Saria
+text 605.35 313.67 27.72 2.00 #46000000 |Saria
+text 607.08 314.53 27.72 2.00 #96000000 |Saria
+text 605.35 312.28 27.72 2.00 #ff82d66e |Saria
+circle 200.00 440.00 13.50 0.00 #bf000000
+circle 200.00 440.00 12.00 0.00 #ffffffff
+circle 1000.00 240.00 13.50 0.00 #5f000000
+circle 1000.00 240.00 12.00 0.00 #7fffffff
+text 970.89 180.00 27.72 2.00 #22000000 |Mido
+text 973.67 180.00 27.72 2.00 #22000000 |Mido
+text 972.28 178.61 27.72 2.00 #22000000 |Mido
+text 972.28 181.39 27.72 2.00 #22000000 |Mido
+text 974.01 182.25 27.72 2.00 #4a000000 |Mido
+text 972.28 180.00 27.72 2.00 #7fffffff |Mido
+tri 1269.18 727.73 1248.31 722.70 1260.68 708.02 #ff6e82d6
+text 1179.59 632.28 27.72 2.00 #46000000 |Darunia
+text 1182.37 632.28 27.72 2.00 #46000000 |Darunia
+text 1180.98 630.89 27.72 2.00 #46000000 |Darunia
+text 1180.98 633.67 27.72 2.00 #46000000 |Darunia
+text 1182.71 634.53 27.72 2.00 #96000000 |Darunia
+text 1180.98 632.28 27.72 2.00 #ff6e82d6 |Darunia
+text 577.82 552.28 27.72 2.00 #46000000 |you
+text 580.60 552.28 27.72 2.00 #46000000 |you
+text 579.21 550.89 27.72 2.00 #46000000 |you
+text 579.21 553.67 27.72 2.00 #46000000 |you
+text 580.94 554.53 27.72 2.00 #96000000 |you
+text 579.21 552.28 27.72 2.00 #ff3cd2ff |you
+end font 0
+)G"},
+    {"hud-game", R"G(
+text 38.75 273.60 25.00 2.00 #46000000 |You
+text 41.25 273.60 25.00 2.00 #46000000 |You
+text 40.00 272.35 25.00 2.00 #46000000 |You
+text 40.00 274.85 25.00 2.00 #46000000 |You
+text 41.56 275.63 25.00 2.00 #96000000 |You
+text 40.00 273.60 25.00 2.00 #ffffffff |You
+rect 95.00 276.35 103.00 290.60 4.00 #96000000
+rect 98.25 290.60 99.75 295.60 0.00 #96000000
+rect 94.00 295.10 104.00 297.10 1.00 #96000000
+rect 93.50 274.85 101.50 289.10 4.00 #ff78eb78
+rect 96.75 289.10 98.25 294.10 0.00 #ff78eb78
+rect 92.50 293.60 102.50 295.60 1.00 #ff78eb78
+circle 97.50 284.10 12.50 1.75 #7f78eb78
+text 38.75 314.60 25.00 2.00 #46000000 |Mido
+text 41.25 314.60 25.00 2.00 #46000000 |Mido
+text 40.00 313.35 25.00 2.00 #46000000 |Mido
+text 40.00 315.85 25.00 2.00 #46000000 |Mido
+text 41.56 316.63 25.00 2.00 #96000000 |Mido
+text 40.00 314.60 25.00 2.00 #ffffffff |Mido
+rect 107.50 317.35 115.50 331.60 4.00 #96000000
+rect 110.75 331.60 112.25 336.60 0.00 #96000000
+rect 106.50 336.10 116.50 338.10 1.00 #96000000
+rect 106.00 315.85 114.00 330.10 4.00 #ff78eb78
+rect 109.25 330.10 110.75 335.10 0.00 #ff78eb78
+rect 105.00 334.60 115.00 336.60 1.00 #ff78eb78
+circle 110.00 325.10 12.50 1.75 #7f78eb78
+image 15.00 31.64 334.00 69.64 372.00 #ffffffff
+image 15.00 52.54 334.00 90.54 372.00 #ffffffff
+image 13.00 73.44 334.00 111.44 372.00 #ffffffff
+image 11.00 94.34 334.00 132.34 372.00 #ffffffff
+image 12.00 115.24 334.00 153.24 372.00 #ffffffff
+image 14.00 136.14 334.00 174.14 372.00 #ffffffff
+image 15.00 157.04 334.00 195.04 372.00 #ffffffff
+image 15.00 177.94 334.00 215.94 372.00 #ffffffff
+image 15.00 198.84 334.00 236.84 372.00 #ffffffff
+image 15.00 219.74 334.00 257.74 372.00 #ffffffff
+image 15.00 31.64 354.90 69.64 392.90 #ffffffff
+image 15.00 52.54 354.90 90.54 392.90 #ffffffff
+image 11.00 73.44 354.90 111.44 392.90 #ffffffff
+image 13.00 94.34 354.90 132.34 392.90 #ffffffff
+text 39.05 386.40 19.00 1.00 #46000000 |Kokiri Forest
+text 40.95 386.40 19.00 1.00 #46000000 |Kokiri Forest
+text 40.00 385.45 19.00 1.00 #46000000 |Kokiri Forest
+text 40.00 387.35 19.00 1.00 #46000000 |Kokiri Forest
+text 41.19 387.94 19.00 1.00 #96000000 |Kokiri Forest
+text 40.00 386.40 19.00 1.00 #ffe1e1e1 |Kokiri Forest
+text 38.75 421.40 25.00 2.00 #29000000 |Saria
+text 41.25 421.40 25.00 2.00 #29000000 |Saria
+text 40.00 420.15 25.00 2.00 #29000000 |Saria
+text 40.00 422.65 25.00 2.00 #29000000 |Saria
+text 41.56 423.43 25.00 2.00 #58000000 |Saria
+text 40.00 421.40 25.00 2.00 #96ffffff |Saria
+rect 120.00 424.15 128.00 438.40 4.00 #58000000
+rect 123.25 438.40 124.75 443.40 0.00 #58000000
+rect 119.00 442.90 129.00 444.90 1.00 #58000000
+rect 118.50 422.65 126.50 436.90 4.00 #96d7d7d7
+rect 121.75 436.90 123.25 441.90 0.00 #96d7d7d7
+rect 117.50 441.40 127.50 443.40 1.00 #96d7d7d7
+tri 111.50 423.40 114.50 420.40 133.50 442.90 #963c46e6
+tri 111.50 423.40 133.50 442.90 130.50 445.90 #963c46e6
+text 38.75 464.40 25.00 2.00 #46000000 |Ruto
+text 41.25 464.40 25.00 2.00 #46000000 |Ruto
+text 40.00 463.15 25.00 2.00 #46000000 |Ruto
+text 40.00 465.65 25.00 2.00 #46000000 |Ruto
+text 41.56 466.43 25.00 2.00 #96000000 |Ruto
+text 40.00 464.40 25.00 2.00 #ffffffff |Ruto
+rect 107.50 467.15 115.50 481.40 4.00 #40000000
+rect 110.75 481.40 112.25 486.40 0.00 #40000000
+rect 106.50 485.90 116.50 487.90 1.00 #40000000
+rect 106.00 465.65 114.00 479.90 4.00 #6ed7d7d7
+rect 109.25 479.90 110.75 484.90 0.00 #6ed7d7d7
+rect 105.00 484.40 115.00 486.40 1.00 #6ed7d7d7
+image 14.00 31.64 483.80 69.64 521.80 #ffffffff
+text 39.05 515.30 19.00 1.00 #46000000 |Lake Hylia
+text 40.95 515.30 19.00 1.00 #46000000 |Lake Hylia
+text 40.00 514.35 19.00 1.00 #46000000 |Lake Hylia
+text 40.00 516.25 19.00 1.00 #46000000 |Lake Hylia
+text 41.19 516.84 19.00 1.00 #96000000 |Lake Hylia
+text 40.00 515.30 19.00 1.00 #ffe1e1e1 |Lake Hylia
+end font 0
+)G"},
+    {"hud-plain", R"G(
+end font 0
+)G"},
+    {"players-plain", R"G(
+rect 405.07 120.00 874.93 239.36 8.00 #aa000000
+text 421.07 136.00 15.84 0.00 #ff78dcff |#
+text 457.27 136.00 15.84 0.00 #ff78dcff |Player
+text 564.76 136.00 15.84 0.00 #ff78dcff |State
+text 680.17 136.00 15.84 0.00 #ff78dcff |Ping
+text 755.97 136.00 15.84 0.00 #ff78dcff |Scene
+text 421.07 157.84 15.84 0.00 #ffffffff |P1
+text 457.27 157.84 15.84 0.00 #ffffffff |Saria (you)
+text 564.76 157.84 15.84 0.00 #ffffffff |connected
+text 680.17 157.84 15.84 0.00 #ffffffff |42 ms
+text 755.97 157.84 15.84 0.00 #ffffffff |Kokiri Forest
+text 421.07 179.68 15.84 0.00 #ffaaaaaa |P2
+text 457.27 179.68 15.84 0.00 #ffaaaaaa |Mido
+text 564.76 179.68 15.84 0.00 #ffaaaaaa |reconnecting
+text 680.17 179.68 15.84 0.00 #ffaaaaaa |~120 ms
+text 755.97 179.68 15.84 0.00 #ffaaaaaa |?
+text 421.07 201.52 15.84 0.00 #ffffffff |-
+text 457.27 201.52 15.84 0.00 #ffffffff |Ruto
+text 564.76 201.52 15.84 0.00 #ffffffff |connected
+text 680.17 201.52 15.84 0.00 #ffffffff |-
+text 755.97 201.52 15.84 0.00 #ffffffff |Zora's Domain
+end font 0
+)G"},
+    {"players-game", R"G(
+text 780.63 196.00 36.00 1.00 #46000000 |#
+text 784.23 196.00 36.00 1.00 #46000000 |#
+text 782.43 194.20 36.00 1.00 #46000000 |#
+text 782.43 197.80 36.00 1.00 #46000000 |#
+text 784.68 198.93 36.00 1.00 #96000000 |#
+text 782.43 196.00 36.00 1.00 #ff52ceff |#
+text 862.91 196.00 36.00 1.00 #46000000 |Player
+text 866.51 196.00 36.00 1.00 #46000000 |Player
+text 864.71 194.20 36.00 1.00 #46000000 |Player
+text 864.71 197.80 36.00 1.00 #46000000 |Player
+text 866.96 198.93 36.00 1.00 #96000000 |Player
+text 864.71 196.00 36.00 1.00 #ff52ceff |Player
+text 1107.20 196.00 36.00 1.00 #46000000 |State
+text 1110.80 196.00 36.00 1.00 #46000000 |State
+text 1109.00 194.20 36.00 1.00 #46000000 |State
+text 1109.00 197.80 36.00 1.00 #46000000 |State
+text 1111.25 198.93 36.00 1.00 #96000000 |State
+text 1109.00 196.00 36.00 1.00 #ff52ceff |State
+text 1369.49 196.00 36.00 1.00 #46000000 |Ping
+text 1373.09 196.00 36.00 1.00 #46000000 |Ping
+text 1371.29 194.20 36.00 1.00 #46000000 |Ping
+text 1371.29 197.80 36.00 1.00 #46000000 |Ping
+text 1373.54 198.93 36.00 1.00 #96000000 |Ping
+text 1371.29 196.00 36.00 1.00 #ff52ceff |Ping
+text 1541.77 196.00 36.00 1.00 #46000000 |Place
+text 1545.37 196.00 36.00 1.00 #46000000 |Place
+text 1543.57 194.20 36.00 1.00 #46000000 |Place
+text 1543.57 197.80 36.00 1.00 #46000000 |Place
+text 1545.82 198.93 36.00 1.00 #96000000 |Place
+text 1543.57 196.00 36.00 1.00 #ff52ceff |Place
+text 780.63 241.00 36.00 1.00 #46000000 |P1
+text 784.23 241.00 36.00 1.00 #46000000 |P1
+text 782.43 239.20 36.00 1.00 #46000000 |P1
+text 782.43 242.80 36.00 1.00 #46000000 |P1
+text 784.68 243.93 36.00 1.00 #96000000 |P1
+text 782.43 241.00 36.00 1.00 #ffffffff |P1
+text 862.91 241.00 36.00 1.00 #46000000 |Saria (you)
+text 866.51 241.00 36.00 1.00 #46000000 |Saria (you)
+text 864.71 239.20 36.00 1.00 #46000000 |Saria (you)
+text 864.71 242.80 36.00 1.00 #46000000 |Saria (you)
+text 866.96 243.93 36.00 1.00 #96000000 |Saria (you)
+text 864.71 241.00 36.00 1.00 #ffffffff |Saria (you)
+text 1107.20 241.00 36.00 1.00 #46000000 |connected
+text 1110.80 241.00 36.00 1.00 #46000000 |connected
+text 1109.00 239.20 36.00 1.00 #46000000 |connected
+text 1109.00 242.80 36.00 1.00 #46000000 |connected
+text 1111.25 243.93 36.00 1.00 #96000000 |connected
+text 1109.00 241.00 36.00 1.00 #ffffffff |connected
+text 1369.49 241.00 36.00 1.00 #46000000 |42 ms
+text 1373.09 241.00 36.00 1.00 #46000000 |42 ms
+text 1371.29 239.20 36.00 1.00 #46000000 |42 ms
+text 1371.29 242.80 36.00 1.00 #46000000 |42 ms
+text 1373.54 243.93 36.00 1.00 #96000000 |42 ms
+text 1371.29 241.00 36.00 1.00 #ffffffff |42 ms
+text 1541.77 241.00 36.00 1.00 #46000000 |Kokiri Forest
+text 1545.37 241.00 36.00 1.00 #46000000 |Kokiri Forest
+text 1543.57 239.20 36.00 1.00 #46000000 |Kokiri Forest
+text 1543.57 242.80 36.00 1.00 #46000000 |Kokiri Forest
+text 1545.82 243.93 36.00 1.00 #96000000 |Kokiri Forest
+text 1543.57 241.00 36.00 1.00 #ffffffff |Kokiri Forest
+text 780.63 286.00 36.00 1.00 #46000000 |P2
+text 784.23 286.00 36.00 1.00 #46000000 |P2
+text 782.43 284.20 36.00 1.00 #46000000 |P2
+text 782.43 287.80 36.00 1.00 #46000000 |P2
+text 784.68 288.92 36.00 1.00 #96000000 |P2
+text 782.43 286.00 36.00 1.00 #ffaaaaaa |P2
+text 862.91 286.00 36.00 1.00 #46000000 |Mido
+text 866.51 286.00 36.00 1.00 #46000000 |Mido
+text 864.71 284.20 36.00 1.00 #46000000 |Mido
+text 864.71 287.80 36.00 1.00 #46000000 |Mido
+text 866.96 288.92 36.00 1.00 #96000000 |Mido
+text 864.71 286.00 36.00 1.00 #ffaaaaaa |Mido
+text 1107.20 286.00 36.00 1.00 #46000000 |reconnecting
+text 1110.80 286.00 36.00 1.00 #46000000 |reconnecting
+text 1109.00 284.20 36.00 1.00 #46000000 |reconnecting
+text 1109.00 287.80 36.00 1.00 #46000000 |reconnecting
+text 1111.25 288.92 36.00 1.00 #96000000 |reconnecting
+text 1109.00 286.00 36.00 1.00 #ffaaaaaa |reconnecting
+text 1369.49 286.00 36.00 1.00 #46000000 |~120 ms
+text 1373.09 286.00 36.00 1.00 #46000000 |~120 ms
+)G" R"G(
+text 1371.29 284.20 36.00 1.00 #46000000 |~120 ms
+text 1371.29 287.80 36.00 1.00 #46000000 |~120 ms
+text 1373.54 288.92 36.00 1.00 #96000000 |~120 ms
+text 1371.29 286.00 36.00 1.00 #ffaaaaaa |~120 ms
+text 1541.77 286.00 36.00 1.00 #46000000 |?
+text 1545.37 286.00 36.00 1.00 #46000000 |?
+text 1543.57 284.20 36.00 1.00 #46000000 |?
+text 1543.57 287.80 36.00 1.00 #46000000 |?
+text 1545.82 288.92 36.00 1.00 #96000000 |?
+text 1543.57 286.00 36.00 1.00 #ffaaaaaa |?
+text 780.63 331.00 36.00 1.00 #46000000 |-
+text 784.23 331.00 36.00 1.00 #46000000 |-
+text 782.43 329.20 36.00 1.00 #46000000 |-
+text 782.43 332.80 36.00 1.00 #46000000 |-
+text 784.68 333.92 36.00 1.00 #96000000 |-
+text 782.43 331.00 36.00 1.00 #ffffffff |-
+text 862.91 331.00 36.00 1.00 #46000000 |Ruto
+text 866.51 331.00 36.00 1.00 #46000000 |Ruto
+text 864.71 329.20 36.00 1.00 #46000000 |Ruto
+text 864.71 332.80 36.00 1.00 #46000000 |Ruto
+text 866.96 333.92 36.00 1.00 #96000000 |Ruto
+text 864.71 331.00 36.00 1.00 #ffffffff |Ruto
+text 1107.20 331.00 36.00 1.00 #46000000 |connected
+text 1110.80 331.00 36.00 1.00 #46000000 |connected
+text 1109.00 329.20 36.00 1.00 #46000000 |connected
+text 1109.00 332.80 36.00 1.00 #46000000 |connected
+text 1111.25 333.92 36.00 1.00 #96000000 |connected
+text 1109.00 331.00 36.00 1.00 #ffffffff |connected
+text 1369.49 331.00 36.00 1.00 #46000000 |-
+text 1373.09 331.00 36.00 1.00 #46000000 |-
+text 1371.29 329.20 36.00 1.00 #46000000 |-
+text 1371.29 332.80 36.00 1.00 #46000000 |-
+text 1373.54 333.92 36.00 1.00 #96000000 |-
+text 1371.29 331.00 36.00 1.00 #ffffffff |-
+text 1541.77 331.00 36.00 1.00 #46000000 |Zora's Domain
+text 1545.37 331.00 36.00 1.00 #46000000 |Zora's Domain
+text 1543.57 329.20 36.00 1.00 #46000000 |Zora's Domain
+text 1543.57 332.80 36.00 1.00 #46000000 |Zora's Domain
+text 1545.82 333.92 36.00 1.00 #96000000 |Zora's Domain
+text 1543.57 331.00 36.00 1.00 #ffffffff |Zora's Domain
+end font 0
+)G"},
+    {"panel", R"G(
+rect 16.00 16.00 506.50 79.00 6.00 #96000000
+text 24.00 24.00 13.00 0.00 #ffffffff |coop: connected
+text 24.00 41.00 13.00 0.00 #ffaaaaaa |P2 Mido: other scene
+text 24.00 58.00 13.00 0.00 #ffffffff |P3 Ruto: a line far too long for the panel's width on a small window, cut
+end font 0
+)G"},
+    {"cheats", R"G(
+rect 630.40 16.00 1264.00 184.88 8.00 #c8000000
+text 638.40 24.00 15.84 0.00 #ff78dcff |Co-op item cheats (debug): a click or Enter gives, F8 or Esc closes
+text 638.40 45.84 15.84 0.00 #ffffffff |Find: bomb_
+text 638.40 67.68 15.84 0.00 #ffaaaaaa |Item flags with that in the name:
+text 638.40 89.52 15.84 0.00 #ffffffff |Bombs (20)
+rect 634.40 109.36 1260.00 130.20 4.00 #5affc85a
+text 638.40 111.36 15.84 0.00 #ffffffff |Bomb Bag
+text 638.40 133.20 15.84 0.00 #ffffffff |Bombchus (10)
+text 638.40 155.04 15.84 0.00 #ff78dcff |Gave Bomb Bag
+end font 0
+)G"},
+    {"cheats-empty", R"G(
+rect 630.40 16.00 1264.00 119.36 8.00 #c8000000
+text 638.40 24.00 15.84 0.00 #ff78dcff |Co-op item cheats (debug): a click or Enter gives, F8 or Esc closes
+text 638.40 45.84 15.84 0.00 #ffffffff |Find: _
+text 638.40 67.68 15.84 0.00 #ffaaaaaa |Quick gifts (type to find any item flag):
+text 638.40 89.52 15.84 0.00 #ffaaaaaa |(none)
+end font 0
+)G"},
+    {"title-button-plain", R"G(
+circle 62.88 676.00 14.88 0.00 #82000000
+circle 62.88 676.00 14.88 2.00 #e6ffffff
+rect 55.44 674.50 70.32 677.50 0.00 #ffffffff
+text 87.76 665.20 24.00 0.00 #ffffffff |Multiplayer
+end font 0
+)G"},
+    {"title-button-game", R"G(
+circle 94.32 1074.00 22.32 0.00 #82000000
+circle 94.32 1074.00 22.32 3.00 #e6ffffff
+rect 83.16 1071.75 105.48 1076.25 0.00 #ffffffff
+text 129.84 1055.10 36.00 1.00 #46000000 |Multiplayer
+text 133.44 1055.10 36.00 1.00 #46000000 |Multiplayer
+text 131.64 1053.30 36.00 1.00 #46000000 |Multiplayer
+text 131.64 1056.90 36.00 1.00 #46000000 |Multiplayer
+text 133.89 1058.03 36.00 1.00 #96000000 |Multiplayer
+text 131.64 1055.10 36.00 1.00 #ffffffff |Multiplayer
+end font 0
+)G"},
+    {"title-words-game", R"G(
+text 46.80 663.40 24.00 1.00 #46000000 |Loading the host's save...
+text 49.20 663.40 24.00 1.00 #46000000 |Loading the host's save...
+text 48.00 662.20 24.00 1.00 #46000000 |Loading the host's save...
+text 48.00 664.60 24.00 1.00 #46000000 |Loading the host's save...
+text 49.50 665.35 24.00 1.00 #96000000 |Loading the host's save...
+text 48.00 663.40 24.00 1.00 #ffffffff |Loading the host's save...
+end font 0
+)G"},
+    {"dbno-plain", R"G(
+circle 640.00 489.60 39.69 0.00 #8c000000
+circle 640.00 457.20 2.92 0.00 #ff78e678
+circle 648.39 458.30 2.92 0.00 #ff78e678
+circle 656.20 461.54 2.92 0.00 #ff78e678
+circle 662.91 466.69 2.92 0.00 #ff78e678
+circle 668.06 473.40 2.92 0.00 #ff78e678
+circle 671.30 481.21 2.92 0.00 #ff78e678
+circle 672.40 489.60 2.92 0.00 #dc5a5a5a
+circle 671.30 497.99 2.92 0.00 #dc5a5a5a
+circle 668.06 505.80 2.92 0.00 #dc5a5a5a
+circle 662.91 512.51 2.92 0.00 #dc5a5a5a
+circle 656.20 517.66 2.92 0.00 #dc5a5a5a
+circle 648.39 520.90 2.92 0.00 #dc5a5a5a
+circle 640.00 522.00 2.92 0.00 #dc5a5a5a
+circle 631.61 520.90 2.92 0.00 #dc5a5a5a
+circle 623.80 517.66 2.92 0.00 #dc5a5a5a
+circle 617.09 512.51 2.92 0.00 #dc5a5a5a
+circle 611.94 505.80 2.92 0.00 #dc5a5a5a
+circle 608.70 497.99 2.92 0.00 #dc5a5a5a
+circle 607.60 489.60 2.92 0.00 #dc5a5a5a
+circle 608.70 481.21 2.92 0.00 #dc5a5a5a
+circle 611.94 473.40 2.92 0.00 #dc5a5a5a
+circle 617.09 466.69 2.92 0.00 #dc5a5a5a
+circle 623.80 461.54 2.92 0.00 #dc5a5a5a
+circle 631.61 458.30 2.92 0.00 #dc5a5a5a
+text 620.56 478.91 19.44 0.00 #ffffffff |0:32
+rect 582.48 532.75 697.52 558.59 6.00 #96000000
+text 592.48 536.75 15.84 0.00 #ffffffff |You are down
+end font 0
+)G"},
+    {"dbno-game", R"G(
+circle 640.00 489.60 39.69 0.00 #8c000000
+circle 640.00 457.20 2.92 0.00 #ff78e678
+circle 648.39 458.30 2.92 0.00 #ff78e678
+circle 656.20 461.54 2.92 0.00 #ff78e678
+circle 662.91 466.69 2.92 0.00 #ff78e678
+circle 668.06 473.40 2.92 0.00 #ff78e678
+circle 671.30 481.21 2.92 0.00 #ff78e678
+circle 672.40 489.60 2.92 0.00 #dc5a5a5a
+circle 671.30 497.99 2.92 0.00 #dc5a5a5a
+circle 668.06 505.80 2.92 0.00 #dc5a5a5a
+circle 662.91 512.51 2.92 0.00 #dc5a5a5a
+circle 656.20 517.66 2.92 0.00 #dc5a5a5a
+circle 648.39 520.90 2.92 0.00 #dc5a5a5a
+circle 640.00 522.00 2.92 0.00 #dc5a5a5a
+circle 631.61 520.90 2.92 0.00 #dc5a5a5a
+circle 623.80 517.66 2.92 0.00 #dc5a5a5a
+circle 617.09 512.51 2.92 0.00 #dc5a5a5a
+circle 611.94 505.80 2.92 0.00 #dc5a5a5a
+circle 608.70 497.99 2.92 0.00 #dc5a5a5a
+circle 607.60 489.60 2.92 0.00 #dc5a5a5a
+circle 608.70 481.21 2.92 0.00 #dc5a5a5a
+circle 611.94 473.40 2.92 0.00 #dc5a5a5a
+circle 617.09 466.69 2.92 0.00 #dc5a5a5a
+circle 623.80 461.54 2.92 0.00 #dc5a5a5a
+circle 631.61 458.30 2.92 0.00 #dc5a5a5a
+text 620.56 478.91 19.44 1.00 #ffffffff |0:32
+rect 582.48 532.75 697.52 558.59 6.00 #96000000
+text 592.48 536.75 15.84 1.00 #ffffffff |You are down
+end font 0
+)G"},
+    {"minimap-plain", R"G(
+tri 1738.00 878.03 1728.23 855.88 1747.77 855.88 #bf000000
+tri 1738.00 874.65 1730.76 858.24 1745.24 858.24 #ff0000ff
+text 1713.55 876.58 18.33 0.00 #cc000000 |Saria
+text 1716.61 876.58 18.33 0.00 #cc000000 |Saria
+text 1715.08 875.05 18.33 0.00 #cc000000 |Saria
+text 1715.08 878.11 18.33 0.00 #cc000000 |Saria
+text 1713.55 875.05 18.33 0.00 #cc000000 |Saria
+text 1716.61 875.05 18.33 0.00 #cc000000 |Saria
+text 1713.55 878.11 18.33 0.00 #cc000000 |Saria
+text 1716.61 878.11 18.33 0.00 #cc000000 |Saria
+text 1715.08 876.58 18.33 0.00 #ff0000ff |Saria
+circle 1728.00 885.00 7.29 0.00 #bf000000
+circle 1728.00 885.00 5.79 0.00 #ff00ff00
+text 1694.39 896.58 18.33 0.00 #cc000000 |Darunia
+text 1697.44 896.58 18.33 0.00 #cc000000 |Darunia
+text 1695.91 895.05 18.33 0.00 #cc000000 |Darunia
+text 1695.91 898.11 18.33 0.00 #cc000000 |Darunia
+text 1694.39 895.05 18.33 0.00 #cc000000 |Darunia
+text 1697.44 895.05 18.33 0.00 #cc000000 |Darunia
+text 1694.39 898.11 18.33 0.00 #cc000000 |Darunia
+text 1697.44 898.11 18.33 0.00 #cc000000 |Darunia
+text 1695.91 896.58 18.33 0.00 #ff00ff00 |Darunia
+circle 1856.35 1013.35 7.29 0.00 #8f000000
+circle 1856.35 1013.35 5.79 0.00 #bfff6633
+text 1836.49 1024.93 18.33 0.00 #98000000 |Ruto
+text 1839.54 1024.93 18.33 0.00 #98000000 |Ruto
+text 1838.02 1023.40 18.33 0.00 #98000000 |Ruto
+text 1838.02 1026.46 18.33 0.00 #98000000 |Ruto
+text 1836.49 1023.40 18.33 0.00 #98000000 |Ruto
+text 1839.54 1023.40 18.33 0.00 #98000000 |Ruto
+text 1836.49 1026.46 18.33 0.00 #98000000 |Ruto
+text 1839.54 1026.46 18.33 0.00 #98000000 |Ruto
+text 1838.02 1024.93 18.33 0.00 #bfff6633 |Ruto
+end font 0
+)G"},
+    {"minimap-game", R"G(
+tri 1738.00 878.03 1728.23 855.88 1747.77 855.88 #bf000000
+tri 1738.00 874.65 1730.76 858.24 1745.24 858.24 #ff0000ff
+text 1714.16 876.58 18.33 2.00 #46000000 |Saria
+text 1716.00 876.58 18.33 2.00 #46000000 |Saria
+text 1715.08 875.66 18.33 2.00 #46000000 |Saria
+text 1715.08 877.50 18.33 2.00 #46000000 |Saria
+text 1716.23 878.07 18.33 2.00 #96000000 |Saria
+text 1715.08 876.58 18.33 2.00 #ff0000ff |Saria
+circle 1728.00 885.00 7.29 0.00 #bf000000
+circle 1728.00 885.00 5.79 0.00 #ff00ff00
+text 1695.00 896.58 18.33 2.00 #46000000 |Darunia
+text 1696.83 896.58 18.33 2.00 #46000000 |Darunia
+text 1695.91 895.66 18.33 2.00 #46000000 |Darunia
+text 1695.91 897.50 18.33 2.00 #46000000 |Darunia
+text 1697.06 898.07 18.33 2.00 #96000000 |Darunia
+text 1695.91 896.58 18.33 2.00 #ff00ff00 |Darunia
+circle 1856.35 1013.35 7.29 0.00 #8f000000
+circle 1856.35 1013.35 5.79 0.00 #bfff6633
+text 1837.10 1024.93 18.33 2.00 #34000000 |Ruto
+text 1838.93 1024.93 18.33 2.00 #34000000 |Ruto
+text 1838.02 1024.01 18.33 2.00 #34000000 |Ruto
+text 1838.02 1025.85 18.33 2.00 #34000000 |Ruto
+text 1839.16 1026.42 18.33 2.00 #70000000 |Ruto
+text 1838.02 1024.93 18.33 2.00 #bfff6633 |Ruto
+end font 0
+)G"},
+    {"all-game", R"G(
+text 754.96 340.35 34.65 2.00 #46000000 |Saria
+text 758.42 340.35 34.65 2.00 #46000000 |Saria
+text 756.69 338.62 34.65 2.00 #46000000 |Saria
+text 756.69 342.08 34.65 2.00 #46000000 |Saria
+text 758.85 343.17 34.65 2.00 #96000000 |Saria
+text 756.69 340.35 34.65 2.00 #ffffffff |Saria
+circle 250.00 500.00 16.50 0.00 #bf000000
+circle 250.00 500.00 15.00 0.00 #ffffffff
+circle 1250.00 250.00 16.50 0.00 #5f000000
+circle 1250.00 250.00 15.00 0.00 #7fffffff
+text 1213.62 175.00 34.65 2.00 #22000000 |Mido
+text 1217.08 175.00 34.65 2.00 #22000000 |Mido
+text 1215.35 173.27 34.65 2.00 #22000000 |Mido
+text 1215.35 176.73 34.65 2.00 #22000000 |Mido
+text 1217.52 177.82 34.65 2.00 #4a000000 |Mido
+text 1215.35 175.00 34.65 2.00 #7fffffff |Mido
+tri 1586.47 859.66 1560.39 853.38 1575.85 835.02 #ffffffff
+text 1474.99 740.35 34.65 2.00 #46000000 |Darunia
+text 1478.46 740.35 34.65 2.00 #46000000 |Darunia
+text 1476.72 738.62 34.65 2.00 #46000000 |Darunia
+text 1476.72 742.08 34.65 2.00 #46000000 |Darunia
+text 1478.89 743.17 34.65 2.00 #96000000 |Darunia
+text 1476.72 740.35 34.65 2.00 #ffffffff |Darunia
+text 722.28 640.35 34.65 2.00 #46000000 |you
+text 725.74 640.35 34.65 2.00 #46000000 |you
+text 724.01 638.62 34.65 2.00 #46000000 |you
+text 724.01 642.08 34.65 2.00 #46000000 |you
+text 726.18 643.17 34.65 2.00 #96000000 |you
+text 724.01 640.35 34.65 2.00 #ff3cd2ff |you
+tri 1448.33 731.69 1440.19 713.23 1456.48 713.23 #bf000000
+tri 1448.33 728.88 1442.30 715.20 1454.36 715.20 #ff0000ff
+text 1428.43 730.48 15.28 2.00 #46000000 |Saria
+text 1430.03 730.48 15.28 2.00 #46000000 |Saria
+text 1429.23 729.68 15.28 2.00 #46000000 |Saria
+text 1429.23 731.28 15.28 2.00 #46000000 |Saria
+text 1430.23 731.78 15.28 2.00 #96000000 |Saria
+text 1429.23 730.48 15.28 2.00 #ff0000ff |Saria
+circle 1440.00 737.50 6.32 0.00 #bf000000
+circle 1440.00 737.50 4.82 0.00 #ff00ff00
+text 1412.46 747.15 15.28 2.00 #46000000 |Darunia
+text 1414.06 747.15 15.28 2.00 #46000000 |Darunia
+text 1413.26 746.35 15.28 2.00 #46000000 |Darunia
+text 1413.26 747.95 15.28 2.00 #46000000 |Darunia
+text 1414.26 748.45 15.28 2.00 #96000000 |Darunia
+text 1413.26 747.15 15.28 2.00 #ff00ff00 |Darunia
+circle 1546.96 844.46 6.32 0.00 #8f000000
+circle 1546.96 844.46 4.82 0.00 #bfff6633
+text 1530.88 854.11 15.28 2.00 #34000000 |Ruto
+text 1532.48 854.11 15.28 2.00 #34000000 |Ruto
+text 1531.68 853.31 15.28 2.00 #34000000 |Ruto
+text 1531.68 854.91 15.28 2.00 #34000000 |Ruto
+text 1532.68 855.41 15.28 2.00 #70000000 |Ruto
+text 1531.68 854.11 15.28 2.00 #bfff6633 |Ruto
+text 48.44 342.00 31.25 2.00 #46000000 |Mido
+text 51.56 342.00 31.25 2.00 #46000000 |Mido
+text 50.00 340.44 31.25 2.00 #46000000 |Mido
+text 50.00 343.56 31.25 2.00 #46000000 |Mido
+text 51.95 344.54 31.25 2.00 #96000000 |Mido
+text 50.00 342.00 31.25 2.00 #ffffffff |Mido
+image 15.00 39.55 366.25 87.05 413.75 #ffffffff
+image 13.00 65.68 366.25 113.18 413.75 #ffffffff
+text 48.81 405.62 23.75 1.00 #46000000 |Kokiri Forest
+text 51.19 405.62 23.75 1.00 #46000000 |Kokiri Forest
+text 50.00 404.44 23.75 1.00 #46000000 |Kokiri Forest
+text 50.00 406.81 23.75 1.00 #46000000 |Kokiri Forest
+text 51.48 407.55 23.75 1.00 #96000000 |Kokiri Forest
+text 50.00 405.62 23.75 1.00 #ffe1e1e1 |Kokiri Forest
+rect 16.00 16.00 153.50 48.20 6.00 #96000000
+text 24.00 24.00 16.20 0.00 #ffffffff |coop: connected
+circle 800.00 612.00 49.61 0.00 #8c000000
+circle 800.00 571.50 3.65 0.00 #ff78e678
+circle 810.48 572.88 3.65 0.00 #ff78e678
+circle 820.25 576.93 3.65 0.00 #ff78e678
+circle 828.64 583.36 3.65 0.00 #ff78e678
+circle 835.07 591.75 3.65 0.00 #ff78e678
+circle 839.12 601.52 3.65 0.00 #ff78e678
+circle 840.50 612.00 3.65 0.00 #ff78e678
+circle 839.12 622.48 3.65 0.00 #ff78e678
+circle 835.07 632.25 3.65 0.00 #ff78e678
+circle 828.64 640.64 3.65 0.00 #ff78e678
+)G" R"G(
+circle 820.25 647.07 3.65 0.00 #ff78e678
+circle 810.48 651.12 3.65 0.00 #ff78e678
+circle 800.00 652.50 3.65 0.00 #dc5a5a5a
+circle 789.52 651.12 3.65 0.00 #dc5a5a5a
+circle 779.75 647.07 3.65 0.00 #dc5a5a5a
+circle 771.36 640.64 3.65 0.00 #dc5a5a5a
+circle 764.93 632.25 3.65 0.00 #dc5a5a5a
+circle 760.88 622.48 3.65 0.00 #dc5a5a5a
+circle 759.50 612.00 3.65 0.00 #dc5a5a5a
+circle 760.88 601.52 3.65 0.00 #dc5a5a5a
+circle 764.93 591.75 3.65 0.00 #dc5a5a5a
+circle 771.36 583.36 3.65 0.00 #dc5a5a5a
+circle 779.75 576.93 3.65 0.00 #dc5a5a5a
+circle 789.52 572.88 3.65 0.00 #dc5a5a5a
+text 775.70 598.64 24.30 1.00 #ff5a6eff |0:05
+rect 730.60 665.43 869.40 695.23 6.00 #96000000
+text 740.60 669.43 19.80 1.00 #ffffffff |You are down
+text 46.56 846.50 28.75 1.00 #46000000 |hi_
+text 49.44 846.50 28.75 1.00 #46000000 |hi_
+text 48.00 845.06 28.75 1.00 #46000000 |hi_
+text 48.00 847.94 28.75 1.00 #46000000 |hi_
+text 49.80 848.84 28.75 1.00 #96000000 |hi_
+text 48.00 846.50 28.75 1.00 #ffffffff |hi_
+text 46.56 713.62 28.75 1.00 #46000000 |Saria:
+text 49.44 713.62 28.75 1.00 #46000000 |Saria:
+text 48.00 712.19 28.75 1.00 #46000000 |Saria:
+text 48.00 715.06 28.75 1.00 #46000000 |Saria:
+text 49.80 715.96 28.75 1.00 #96000000 |Saria:
+text 48.00 713.62 28.75 1.00 #ffffffff |Saria:
+text 132.81 713.62 28.75 1.00 #46000000 | hello there
+text 135.69 713.62 28.75 1.00 #46000000 | hello there
+text 134.25 712.19 28.75 1.00 #46000000 | hello there
+text 134.25 715.06 28.75 1.00 #46000000 | hello there
+text 136.05 715.96 28.75 1.00 #96000000 | hello there
+text 134.25 713.62 28.75 1.00 #ffffffff | hello there
+text 46.56 751.00 28.75 1.00 #46000000 |Mido joined
+text 49.44 751.00 28.75 1.00 #46000000 |Mido joined
+text 48.00 749.56 28.75 1.00 #46000000 |Mido joined
+text 48.00 752.44 28.75 1.00 #46000000 |Mido joined
+text 49.80 753.34 28.75 1.00 #96000000 |Mido joined
+text 48.00 751.00 28.75 1.00 #ff52ceff |Mido joined
+text 46.56 788.38 28.75 1.00 #1c000000 |Darunia:
+text 49.44 788.38 28.75 1.00 #1c000000 |Darunia:
+text 48.00 786.94 28.75 1.00 #1c000000 |Darunia:
+text 48.00 789.81 28.75 1.00 #1c000000 |Darunia:
+text 49.80 790.71 28.75 1.00 #3c000000 |Darunia:
+text 48.00 788.38 28.75 1.00 #66ffffff |Darunia:
+text 161.56 788.38 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 164.44 788.38 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 163.00 786.94 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 163.00 789.81 28.75 1.00 #1c000000 | a very long line that will not fit in the ...
+text 164.80 790.71 28.75 1.00 #3c000000 | a very long line that will not fit in the ...
+text 163.00 788.38 28.75 1.00 #66ffffff | a very long line that will not fit in the ...
+text 383.86 166.00 30.00 1.00 #46000000 |#
+text 386.86 166.00 30.00 1.00 #46000000 |#
+text 385.36 164.50 30.00 1.00 #46000000 |#
+text 385.36 167.50 30.00 1.00 #46000000 |#
+text 387.23 168.44 30.00 1.00 #96000000 |#
+text 385.36 166.00 30.00 1.00 #ff52ceff |#
+text 452.43 166.00 30.00 1.00 #46000000 |Player
+text 455.43 166.00 30.00 1.00 #46000000 |Player
+text 453.93 164.50 30.00 1.00 #46000000 |Player
+text 453.93 167.50 30.00 1.00 #46000000 |Player
+text 455.80 168.44 30.00 1.00 #96000000 |Player
+text 453.93 166.00 30.00 1.00 #ff52ceff |Player
+text 656.00 166.00 30.00 1.00 #46000000 |State
+text 659.00 166.00 30.00 1.00 #46000000 |State
+text 657.50 164.50 30.00 1.00 #46000000 |State
+text 657.50 167.50 30.00 1.00 #46000000 |State
+text 659.38 168.44 30.00 1.00 #96000000 |State
+text 657.50 166.00 30.00 1.00 #ff52ceff |State
+text 874.57 166.00 30.00 1.00 #46000000 |Ping
+text 877.57 166.00 30.00 1.00 #46000000 |Ping
+text 876.07 164.50 30.00 1.00 #46000000 |Ping
+text 876.07 167.50 30.00 1.00 #46000000 |Ping
+text 877.95 168.44 30.00 1.00 #96000000 |Ping
+text 876.07 166.00 30.00 1.00 #ff52ceff |Ping
+text 1018.14 166.00 30.00 1.00 #46000000 |Place
+text 1021.14 166.00 30.00 1.00 #46000000 |Place
+text 1019.64 164.50 30.00 1.00 #46000000 |Place
+)G" R"G(
+text 1019.64 167.50 30.00 1.00 #46000000 |Place
+text 1021.52 168.44 30.00 1.00 #96000000 |Place
+text 1019.64 166.00 30.00 1.00 #ff52ceff |Place
+text 383.86 203.50 30.00 1.00 #46000000 |P1
+text 386.86 203.50 30.00 1.00 #46000000 |P1
+text 385.36 202.00 30.00 1.00 #46000000 |P1
+text 385.36 205.00 30.00 1.00 #46000000 |P1
+text 387.23 205.94 30.00 1.00 #96000000 |P1
+text 385.36 203.50 30.00 1.00 #ffffffff |P1
+text 452.43 203.50 30.00 1.00 #46000000 |Saria (you)
+text 455.43 203.50 30.00 1.00 #46000000 |Saria (you)
+text 453.93 202.00 30.00 1.00 #46000000 |Saria (you)
+text 453.93 205.00 30.00 1.00 #46000000 |Saria (you)
+text 455.80 205.94 30.00 1.00 #96000000 |Saria (you)
+text 453.93 203.50 30.00 1.00 #ffffffff |Saria (you)
+text 656.00 203.50 30.00 1.00 #46000000 |connected
+text 659.00 203.50 30.00 1.00 #46000000 |connected
+text 657.50 202.00 30.00 1.00 #46000000 |connected
+text 657.50 205.00 30.00 1.00 #46000000 |connected
+text 659.38 205.94 30.00 1.00 #96000000 |connected
+text 657.50 203.50 30.00 1.00 #ffffffff |connected
+text 874.57 203.50 30.00 1.00 #46000000 |42 ms
+text 877.57 203.50 30.00 1.00 #46000000 |42 ms
+text 876.07 202.00 30.00 1.00 #46000000 |42 ms
+text 876.07 205.00 30.00 1.00 #46000000 |42 ms
+text 877.95 205.94 30.00 1.00 #96000000 |42 ms
+text 876.07 203.50 30.00 1.00 #ffffffff |42 ms
+text 1018.14 203.50 30.00 1.00 #46000000 |Kokiri Forest
+text 1021.14 203.50 30.00 1.00 #46000000 |Kokiri Forest
+text 1019.64 202.00 30.00 1.00 #46000000 |Kokiri Forest
+text 1019.64 205.00 30.00 1.00 #46000000 |Kokiri Forest
+text 1021.52 205.94 30.00 1.00 #96000000 |Kokiri Forest
+text 1019.64 203.50 30.00 1.00 #ffffffff |Kokiri Forest
+text 383.86 241.00 30.00 1.00 #46000000 |P2
+text 386.86 241.00 30.00 1.00 #46000000 |P2
+text 385.36 239.50 30.00 1.00 #46000000 |P2
+text 385.36 242.50 30.00 1.00 #46000000 |P2
+text 387.23 243.44 30.00 1.00 #96000000 |P2
+text 385.36 241.00 30.00 1.00 #ffaaaaaa |P2
+text 452.43 241.00 30.00 1.00 #46000000 |Mido
+text 455.43 241.00 30.00 1.00 #46000000 |Mido
+text 453.93 239.50 30.00 1.00 #46000000 |Mido
+text 453.93 242.50 30.00 1.00 #46000000 |Mido
+text 455.80 243.44 30.00 1.00 #96000000 |Mido
+text 453.93 241.00 30.00 1.00 #ffaaaaaa |Mido
+text 656.00 241.00 30.00 1.00 #46000000 |reconnecting
+text 659.00 241.00 30.00 1.00 #46000000 |reconnecting
+text 657.50 239.50 30.00 1.00 #46000000 |reconnecting
+text 657.50 242.50 30.00 1.00 #46000000 |reconnecting
+text 659.38 243.44 30.00 1.00 #96000000 |reconnecting
+text 657.50 241.00 30.00 1.00 #ffaaaaaa |reconnecting
+text 874.57 241.00 30.00 1.00 #46000000 |~120 ms
+text 877.57 241.00 30.00 1.00 #46000000 |~120 ms
+text 876.07 239.50 30.00 1.00 #46000000 |~120 ms
+text 876.07 242.50 30.00 1.00 #46000000 |~120 ms
+text 877.95 243.44 30.00 1.00 #96000000 |~120 ms
+text 876.07 241.00 30.00 1.00 #ffaaaaaa |~120 ms
+text 1018.14 241.00 30.00 1.00 #46000000 |?
+text 1021.14 241.00 30.00 1.00 #46000000 |?
+text 1019.64 239.50 30.00 1.00 #46000000 |?
+text 1019.64 242.50 30.00 1.00 #46000000 |?
+text 1021.52 243.44 30.00 1.00 #96000000 |?
+text 1019.64 241.00 30.00 1.00 #ffaaaaaa |?
+text 383.86 278.50 30.00 1.00 #46000000 |-
+text 386.86 278.50 30.00 1.00 #46000000 |-
+text 385.36 277.00 30.00 1.00 #46000000 |-
+text 385.36 280.00 30.00 1.00 #46000000 |-
+text 387.23 280.94 30.00 1.00 #96000000 |-
+text 385.36 278.50 30.00 1.00 #ffffffff |-
+text 452.43 278.50 30.00 1.00 #46000000 |Ruto
+text 455.43 278.50 30.00 1.00 #46000000 |Ruto
+text 453.93 277.00 30.00 1.00 #46000000 |Ruto
+text 453.93 280.00 30.00 1.00 #46000000 |Ruto
+text 455.80 280.94 30.00 1.00 #96000000 |Ruto
+text 453.93 278.50 30.00 1.00 #ffffffff |Ruto
+text 656.00 278.50 30.00 1.00 #46000000 |connected
+text 659.00 278.50 30.00 1.00 #46000000 |connected
+text 657.50 277.00 30.00 1.00 #46000000 |connected
+text 657.50 280.00 30.00 1.00 #46000000 |connected
+text 659.38 280.94 30.00 1.00 #96000000 |connected
+)G" R"G(
+text 657.50 278.50 30.00 1.00 #ffffffff |connected
+text 874.57 278.50 30.00 1.00 #46000000 |-
+text 877.57 278.50 30.00 1.00 #46000000 |-
+text 876.07 277.00 30.00 1.00 #46000000 |-
+text 876.07 280.00 30.00 1.00 #46000000 |-
+text 877.95 280.94 30.00 1.00 #96000000 |-
+text 876.07 278.50 30.00 1.00 #ffffffff |-
+text 1018.14 278.50 30.00 1.00 #46000000 |Zora's Domain
+text 1021.14 278.50 30.00 1.00 #46000000 |Zora's Domain
+text 1019.64 277.00 30.00 1.00 #46000000 |Zora's Domain
+text 1019.64 280.00 30.00 1.00 #46000000 |Zora's Domain
+text 1021.52 280.94 30.00 1.00 #96000000 |Zora's Domain
+text 1019.64 278.50 30.00 1.00 #ffffffff |Zora's Domain
+rect 792.00 16.00 1584.00 135.20 8.00 #c8000000
+text 800.00 24.00 19.80 0.00 #ff78dcff |Co-op item cheats (debug): a click or Enter gives, F8 or Esc closes
+text 800.00 49.80 19.80 0.00 #ffffffff |Find: _
+text 800.00 75.60 19.80 0.00 #ffaaaaaa |Quick gifts (type to find any item flag):
+text 800.00 101.40 19.80 0.00 #ffaaaaaa |(none)
+circle 78.60 845.00 18.60 0.00 #82000000
+circle 78.60 845.00 18.60 2.50 #e6ffffff
+rect 69.30 843.12 87.90 846.88 0.00 #ffffffff
+text 108.20 829.25 30.00 1.00 #46000000 |Multiplayer
+text 111.20 829.25 30.00 1.00 #46000000 |Multiplayer
+text 109.70 827.75 30.00 1.00 #46000000 |Multiplayer
+text 109.70 830.75 30.00 1.00 #46000000 |Multiplayer
+text 111.57 831.69 30.00 1.00 #96000000 |Multiplayer
+text 109.70 829.25 30.00 1.00 #ffffffff |Multiplayer
+end font 0
+)G"},
+    {"all-plain", R"G(
+text 758.00 343.50 31.50 0.00 #cc000000 |Saria
+text 763.25 343.50 31.50 0.00 #cc000000 |Saria
+text 760.62 340.88 31.50 0.00 #cc000000 |Saria
+text 760.62 346.12 31.50 0.00 #cc000000 |Saria
+text 758.00 340.88 31.50 0.00 #cc000000 |Saria
+text 763.25 340.88 31.50 0.00 #cc000000 |Saria
+text 758.00 346.12 31.50 0.00 #cc000000 |Saria
+text 763.25 346.12 31.50 0.00 #cc000000 |Saria
+text 760.62 343.50 31.50 0.00 #ffffffff |Saria
+circle 250.00 500.00 16.50 0.00 #bf000000
+circle 250.00 500.00 15.00 0.00 #ffffc85a
+circle 1250.00 250.00 16.50 0.00 #5f000000
+circle 1250.00 250.00 15.00 0.00 #7fffc85a
+text 1215.88 175.00 31.50 0.00 #65000000 |Mido
+text 1221.12 175.00 31.50 0.00 #65000000 |Mido
+text 1218.50 172.38 31.50 0.00 #65000000 |Mido
+text 1218.50 177.62 31.50 0.00 #65000000 |Mido
+text 1215.88 172.38 31.50 0.00 #65000000 |Mido
+text 1221.12 172.38 31.50 0.00 #65000000 |Mido
+text 1215.88 177.62 31.50 0.00 #65000000 |Mido
+text 1221.12 177.62 31.50 0.00 #65000000 |Mido
+text 1218.50 175.00 31.50 0.00 #7fffffff |Mido
+tri 1586.47 859.66 1560.39 853.38 1575.85 835.02 #ffffc85a
+text 1485.12 743.50 31.50 0.00 #cc000000 |Darunia
+text 1490.38 743.50 31.50 0.00 #cc000000 |Darunia
+text 1487.75 740.88 31.50 0.00 #cc000000 |Darunia
+text 1487.75 746.12 31.50 0.00 #cc000000 |Darunia
+text 1485.12 740.88 31.50 0.00 #cc000000 |Darunia
+text 1490.38 740.88 31.50 0.00 #cc000000 |Darunia
+text 1485.12 746.12 31.50 0.00 #cc000000 |Darunia
+text 1490.38 746.12 31.50 0.00 #cc000000 |Darunia
+text 1487.75 743.50 31.50 0.00 #ffffffff |Darunia
+text 723.75 643.50 31.50 0.00 #cc000000 |you
+text 729.00 643.50 31.50 0.00 #cc000000 |you
+text 726.38 640.88 31.50 0.00 #cc000000 |you
+text 726.38 646.12 31.50 0.00 #cc000000 |you
+text 723.75 640.88 31.50 0.00 #cc000000 |you
+text 729.00 640.88 31.50 0.00 #cc000000 |you
+text 723.75 646.12 31.50 0.00 #cc000000 |you
+text 729.00 646.12 31.50 0.00 #cc000000 |you
+text 726.38 643.50 31.50 0.00 #ff78e1ff |you
+tri 1448.33 731.69 1440.19 713.23 1456.48 713.23 #bf000000
+tri 1448.33 728.88 1442.30 715.20 1454.36 715.20 #ff0000ff
+text 1427.96 730.48 15.28 0.00 #cc000000 |Saria
+text 1430.51 730.48 15.28 0.00 #cc000000 |Saria
+text 1429.23 729.21 15.28 0.00 #cc000000 |Saria
+text 1429.23 731.76 15.28 0.00 #cc000000 |Saria
+text 1427.96 729.21 15.28 0.00 #cc000000 |Saria
+text 1430.51 729.21 15.28 0.00 #cc000000 |Saria
+text 1427.96 731.76 15.28 0.00 #cc000000 |Saria
+text 1430.51 731.76 15.28 0.00 #cc000000 |Saria
+text 1429.23 730.48 15.28 0.00 #ff0000ff |Saria
+circle 1440.00 737.50 6.32 0.00 #bf000000
+circle 1440.00 737.50 4.82 0.00 #ff00ff00
+text 1411.99 747.15 15.28 0.00 #cc000000 |Darunia
+text 1414.53 747.15 15.28 0.00 #cc000000 |Darunia
+text 1413.26 745.88 15.28 0.00 #cc000000 |Darunia
+text 1413.26 748.42 15.28 0.00 #cc000000 |Darunia
+text 1411.99 745.88 15.28 0.00 #cc000000 |Darunia
+text 1414.53 745.88 15.28 0.00 #cc000000 |Darunia
+text 1411.99 748.42 15.28 0.00 #cc000000 |Darunia
+text 1414.53 748.42 15.28 0.00 #cc000000 |Darunia
+text 1413.26 747.15 15.28 0.00 #ff00ff00 |Darunia
+circle 1546.96 844.46 6.32 0.00 #8f000000
+circle 1546.96 844.46 4.82 0.00 #bfff6633
+text 1530.41 854.11 15.28 0.00 #98000000 |Ruto
+text 1532.95 854.11 15.28 0.00 #98000000 |Ruto
+text 1531.68 852.84 15.28 0.00 #98000000 |Ruto
+text 1531.68 855.38 15.28 0.00 #98000000 |Ruto
+text 1530.41 852.84 15.28 0.00 #98000000 |Ruto
+text 1532.95 852.84 15.28 0.00 #98000000 |Ruto
+text 1530.41 855.38 15.28 0.00 #98000000 |Ruto
+text 1532.95 855.38 15.28 0.00 #98000000 |Ruto
+text 1531.68 854.11 15.28 0.00 #bfff6633 |Ruto
+rect 16.00 16.00 153.50 48.20 6.00 #96000000
+text 24.00 24.00 16.20 0.00 #ffffffff |coop: connected
+circle 800.00 612.00 49.61 0.00 #8c000000
+circle 800.00 571.50 3.65 0.00 #ff78e678
+circle 810.48 572.88 3.65 0.00 #ff78e678
+circle 820.25 576.93 3.65 0.00 #ff78e678
+)G" R"G(
+circle 828.64 583.36 3.65 0.00 #ff78e678
+circle 835.07 591.75 3.65 0.00 #ff78e678
+circle 839.12 601.52 3.65 0.00 #ff78e678
+circle 840.50 612.00 3.65 0.00 #ff78e678
+circle 839.12 622.48 3.65 0.00 #ff78e678
+circle 835.07 632.25 3.65 0.00 #ff78e678
+circle 828.64 640.64 3.65 0.00 #ff78e678
+circle 820.25 647.07 3.65 0.00 #ff78e678
+circle 810.48 651.12 3.65 0.00 #ff78e678
+circle 800.00 652.50 3.65 0.00 #dc5a5a5a
+circle 789.52 651.12 3.65 0.00 #dc5a5a5a
+circle 779.75 647.07 3.65 0.00 #dc5a5a5a
+circle 771.36 640.64 3.65 0.00 #dc5a5a5a
+circle 764.93 632.25 3.65 0.00 #dc5a5a5a
+circle 760.88 622.48 3.65 0.00 #dc5a5a5a
+circle 759.50 612.00 3.65 0.00 #dc5a5a5a
+circle 760.88 601.52 3.65 0.00 #dc5a5a5a
+circle 764.93 591.75 3.65 0.00 #dc5a5a5a
+circle 771.36 583.36 3.65 0.00 #dc5a5a5a
+circle 779.75 576.93 3.65 0.00 #dc5a5a5a
+circle 789.52 572.88 3.65 0.00 #dc5a5a5a
+text 775.70 598.64 24.30 0.00 #ff5a6eff |0:05
+rect 730.60 665.43 869.40 695.23 6.00 #96000000
+text 740.60 669.43 19.80 0.00 #ffffffff |You are down
+rect 16.00 849.50 851.71 884.00 6.00 #be000000
+text 24.00 855.50 22.50 0.00 #ffffffff |hi_
+rect 12.00 750.00 222.50 776.50 4.00 #96000000
+text 16.00 752.00 22.50 0.00 #ffffffff |Saria: hello there
+rect 12.00 780.50 143.75 807.00 4.00 #96000000
+text 16.00 782.50 22.50 0.00 #ff78dcff |Mido joined
+rect 12.00 811.00 830.00 837.50 4.00 #3c000000
+text 16.00 813.00 22.50 0.00 #66ffffff |Darunia: a very long line that will not fit in the chat's width at al...
+rect 510.34 150.00 1089.66 285.20 8.00 #aa000000
+text 526.34 166.00 19.80 0.00 #ff78dcff |#
+text 571.59 166.00 19.80 0.00 #ff78dcff |Player
+text 705.95 166.00 19.80 0.00 #ff78dcff |State
+text 850.21 166.00 19.80 0.00 #ff78dcff |Ping
+text 944.96 166.00 19.80 0.00 #ff78dcff |Scene
+text 526.34 191.80 19.80 0.00 #ffffffff |P1
+text 571.59 191.80 19.80 0.00 #ffffffff |Saria (you)
+text 705.95 191.80 19.80 0.00 #ffffffff |connected
+text 850.21 191.80 19.80 0.00 #ffffffff |42 ms
+text 944.96 191.80 19.80 0.00 #ffffffff |Kokiri Forest
+text 526.34 217.60 19.80 0.00 #ffaaaaaa |P2
+text 571.59 217.60 19.80 0.00 #ffaaaaaa |Mido
+text 705.95 217.60 19.80 0.00 #ffaaaaaa |reconnecting
+text 850.21 217.60 19.80 0.00 #ffaaaaaa |~120 ms
+text 944.96 217.60 19.80 0.00 #ffaaaaaa |?
+text 526.34 243.40 19.80 0.00 #ffffffff |-
+text 571.59 243.40 19.80 0.00 #ffffffff |Ruto
+text 705.95 243.40 19.80 0.00 #ffffffff |connected
+text 850.21 243.40 19.80 0.00 #ffffffff |-
+text 944.96 243.40 19.80 0.00 #ffffffff |Zora's Domain
+rect 792.00 16.00 1584.00 135.20 8.00 #c8000000
+text 800.00 24.00 19.80 0.00 #ff78dcff |Co-op item cheats (debug): a click or Enter gives, F8 or Esc closes
+text 800.00 49.80 19.80 0.00 #ffffffff |Find: _
+text 800.00 75.60 19.80 0.00 #ffaaaaaa |Quick gifts (type to find any item flag):
+text 800.00 101.40 19.80 0.00 #ffaaaaaa |(none)
+circle 78.60 845.00 18.60 0.00 #82000000
+circle 78.60 845.00 18.60 2.50 #e6ffffff
+rect 69.30 843.12 87.90 846.88 0.00 #ffffffff
+text 109.70 831.50 30.00 0.00 #ffffffff |Multiplayer
+end font 0
+)G"},
+    {"all-old-table", R"G(
+text 758.00 343.50 31.50 0.00 #cc000000 |Saria
+text 763.25 343.50 31.50 0.00 #cc000000 |Saria
+text 760.62 340.88 31.50 0.00 #cc000000 |Saria
+text 760.62 346.12 31.50 0.00 #cc000000 |Saria
+text 758.00 340.88 31.50 0.00 #cc000000 |Saria
+text 763.25 340.88 31.50 0.00 #cc000000 |Saria
+text 758.00 346.12 31.50 0.00 #cc000000 |Saria
+text 763.25 346.12 31.50 0.00 #cc000000 |Saria
+text 760.62 343.50 31.50 0.00 #ffffffff |Saria
+circle 250.00 500.00 16.50 0.00 #bf000000
+circle 250.00 500.00 15.00 0.00 #ffffc85a
+circle 1250.00 250.00 16.50 0.00 #5f000000
+circle 1250.00 250.00 15.00 0.00 #7fffc85a
+text 1215.88 175.00 31.50 0.00 #65000000 |Mido
+text 1221.12 175.00 31.50 0.00 #65000000 |Mido
+text 1218.50 172.38 31.50 0.00 #65000000 |Mido
+text 1218.50 177.62 31.50 0.00 #65000000 |Mido
+text 1215.88 172.38 31.50 0.00 #65000000 |Mido
+text 1221.12 172.38 31.50 0.00 #65000000 |Mido
+text 1215.88 177.62 31.50 0.00 #65000000 |Mido
+text 1221.12 177.62 31.50 0.00 #65000000 |Mido
+text 1218.50 175.00 31.50 0.00 #7fffffff |Mido
+tri 1586.47 859.66 1560.39 853.38 1575.85 835.02 #ffffc85a
+text 1485.12 743.50 31.50 0.00 #cc000000 |Darunia
+text 1490.38 743.50 31.50 0.00 #cc000000 |Darunia
+text 1487.75 740.88 31.50 0.00 #cc000000 |Darunia
+text 1487.75 746.12 31.50 0.00 #cc000000 |Darunia
+text 1485.12 740.88 31.50 0.00 #cc000000 |Darunia
+text 1490.38 740.88 31.50 0.00 #cc000000 |Darunia
+text 1485.12 746.12 31.50 0.00 #cc000000 |Darunia
+text 1490.38 746.12 31.50 0.00 #cc000000 |Darunia
+text 1487.75 743.50 31.50 0.00 #ffffffff |Darunia
+text 723.75 643.50 31.50 0.00 #cc000000 |you
+text 729.00 643.50 31.50 0.00 #cc000000 |you
+text 726.38 640.88 31.50 0.00 #cc000000 |you
+text 726.38 646.12 31.50 0.00 #cc000000 |you
+text 723.75 640.88 31.50 0.00 #cc000000 |you
+text 729.00 640.88 31.50 0.00 #cc000000 |you
+text 723.75 646.12 31.50 0.00 #cc000000 |you
+text 729.00 646.12 31.50 0.00 #cc000000 |you
+text 726.38 643.50 31.50 0.00 #ff78e1ff |you
+tri 1448.33 731.69 1440.19 713.23 1456.48 713.23 #bf000000
+tri 1448.33 728.88 1442.30 715.20 1454.36 715.20 #ff0000ff
+text 1427.96 730.48 15.28 0.00 #cc000000 |Saria
+text 1430.51 730.48 15.28 0.00 #cc000000 |Saria
+text 1429.23 729.21 15.28 0.00 #cc000000 |Saria
+text 1429.23 731.76 15.28 0.00 #cc000000 |Saria
+text 1427.96 729.21 15.28 0.00 #cc000000 |Saria
+text 1430.51 729.21 15.28 0.00 #cc000000 |Saria
+text 1427.96 731.76 15.28 0.00 #cc000000 |Saria
+text 1430.51 731.76 15.28 0.00 #cc000000 |Saria
+text 1429.23 730.48 15.28 0.00 #ff0000ff |Saria
+circle 1440.00 737.50 6.32 0.00 #bf000000
+circle 1440.00 737.50 4.82 0.00 #ff00ff00
+text 1411.99 747.15 15.28 0.00 #cc000000 |Darunia
+text 1414.53 747.15 15.28 0.00 #cc000000 |Darunia
+text 1413.26 745.88 15.28 0.00 #cc000000 |Darunia
+text 1413.26 748.42 15.28 0.00 #cc000000 |Darunia
+text 1411.99 745.88 15.28 0.00 #cc000000 |Darunia
+text 1414.53 745.88 15.28 0.00 #cc000000 |Darunia
+text 1411.99 748.42 15.28 0.00 #cc000000 |Darunia
+text 1414.53 748.42 15.28 0.00 #cc000000 |Darunia
+text 1413.26 747.15 15.28 0.00 #ff00ff00 |Darunia
+circle 1546.96 844.46 6.32 0.00 #8f000000
+circle 1546.96 844.46 4.82 0.00 #bfff6633
+text 1530.41 854.11 15.28 0.00 #98000000 |Ruto
+text 1532.95 854.11 15.28 0.00 #98000000 |Ruto
+text 1531.68 852.84 15.28 0.00 #98000000 |Ruto
+text 1531.68 855.38 15.28 0.00 #98000000 |Ruto
+text 1530.41 852.84 15.28 0.00 #98000000 |Ruto
+text 1532.95 852.84 15.28 0.00 #98000000 |Ruto
+text 1530.41 855.38 15.28 0.00 #98000000 |Ruto
+text 1532.95 855.38 15.28 0.00 #98000000 |Ruto
+text 1531.68 854.11 15.28 0.00 #bfff6633 |Ruto
+rect 16.00 16.00 153.50 48.20 6.00 #96000000
+text 24.00 24.00 16.20 0.00 #ffffffff |coop: connected
+circle 800.00 612.00 49.61 0.00 #8c000000
+circle 800.00 571.50 3.65 0.00 #ff78e678
+circle 810.48 572.88 3.65 0.00 #ff78e678
+circle 820.25 576.93 3.65 0.00 #ff78e678
+)G" R"G(
+circle 828.64 583.36 3.65 0.00 #ff78e678
+circle 835.07 591.75 3.65 0.00 #ff78e678
+circle 839.12 601.52 3.65 0.00 #ff78e678
+circle 840.50 612.00 3.65 0.00 #ff78e678
+circle 839.12 622.48 3.65 0.00 #ff78e678
+circle 835.07 632.25 3.65 0.00 #ff78e678
+circle 828.64 640.64 3.65 0.00 #ff78e678
+circle 820.25 647.07 3.65 0.00 #ff78e678
+circle 810.48 651.12 3.65 0.00 #ff78e678
+circle 800.00 652.50 3.65 0.00 #dc5a5a5a
+circle 789.52 651.12 3.65 0.00 #dc5a5a5a
+circle 779.75 647.07 3.65 0.00 #dc5a5a5a
+circle 771.36 640.64 3.65 0.00 #dc5a5a5a
+circle 764.93 632.25 3.65 0.00 #dc5a5a5a
+circle 760.88 622.48 3.65 0.00 #dc5a5a5a
+circle 759.50 612.00 3.65 0.00 #dc5a5a5a
+circle 760.88 601.52 3.65 0.00 #dc5a5a5a
+circle 764.93 591.75 3.65 0.00 #dc5a5a5a
+circle 771.36 583.36 3.65 0.00 #dc5a5a5a
+circle 779.75 576.93 3.65 0.00 #dc5a5a5a
+circle 789.52 572.88 3.65 0.00 #dc5a5a5a
+text 775.70 598.64 24.30 0.00 #ff5a6eff |0:05
+rect 730.60 665.43 869.40 695.23 6.00 #96000000
+text 740.60 669.43 19.80 0.00 #ffffffff |You are down
+rect 16.00 849.50 851.71 884.00 6.00 #be000000
+text 24.00 855.50 22.50 0.00 #ffffffff |hi_
+rect 12.00 750.00 222.50 776.50 4.00 #96000000
+text 16.00 752.00 22.50 0.00 #ffffffff |Saria: hello there
+rect 12.00 780.50 143.75 807.00 4.00 #96000000
+text 16.00 782.50 22.50 0.00 #ff78dcff |Mido joined
+rect 12.00 811.00 830.00 837.50 4.00 #3c000000
+text 16.00 813.00 22.50 0.00 #66ffffff |Darunia: a very long line that will not fit in the chat's width at al...
+rect 510.34 150.00 1089.66 285.20 8.00 #aa000000
+text 526.34 166.00 19.80 0.00 #ff78dcff |#
+text 571.59 166.00 19.80 0.00 #ff78dcff |Player
+text 705.95 166.00 19.80 0.00 #ff78dcff |State
+text 850.21 166.00 19.80 0.00 #ff78dcff |Ping
+text 944.96 166.00 19.80 0.00 #ff78dcff |Scene
+text 526.34 191.80 19.80 0.00 #ffffffff |P1
+text 571.59 191.80 19.80 0.00 #ffffffff |Saria (you)
+text 705.95 191.80 19.80 0.00 #ffffffff |connected
+text 850.21 191.80 19.80 0.00 #ffffffff |42 ms
+text 944.96 191.80 19.80 0.00 #ffffffff |Kokiri Forest
+text 526.34 217.60 19.80 0.00 #ffaaaaaa |P2
+text 571.59 217.60 19.80 0.00 #ffaaaaaa |Mido
+text 705.95 217.60 19.80 0.00 #ffaaaaaa |reconnecting
+text 850.21 217.60 19.80 0.00 #ffaaaaaa |~120 ms
+text 944.96 217.60 19.80 0.00 #ffaaaaaa |?
+text 526.34 243.40 19.80 0.00 #ffffffff |-
+text 571.59 243.40 19.80 0.00 #ffffffff |Ruto
+text 705.95 243.40 19.80 0.00 #ffffffff |connected
+text 850.21 243.40 19.80 0.00 #ffffffff |-
+text 944.96 243.40 19.80 0.00 #ffffffff |Zora's Domain
+rect 792.00 16.00 1584.00 135.20 8.00 #c8000000
+text 800.00 24.00 19.80 0.00 #ff78dcff |Co-op item cheats (debug): a click or Enter gives, F8 or Esc closes
+text 800.00 49.80 19.80 0.00 #ffffffff |Find: _
+text 800.00 75.60 19.80 0.00 #ffaaaaaa |Quick gifts (type to find any item flag):
+text 800.00 101.40 19.80 0.00 #ffaaaaaa |(none)
+circle 78.60 845.00 18.60 0.00 #82000000
+circle 78.60 845.00 18.60 2.50 #e6ffffff
+rect 69.30 843.12 87.90 846.88 0.00 #ffffffff
+text 109.70 831.50 30.00 0.00 #ffffffff |Multiplayer
+end font 0
+)G"},

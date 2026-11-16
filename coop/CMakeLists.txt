@@ -94,3 +94,11 @@ target_link_libraries(coop_platform PRIVATE coop_warnings)
 if(WIN32)
   target_link_libraries(coop_platform PRIVATE ws2_32)
 endif()
+
+# Co-op's own UI layer (docs/ui.md): CoopDrawList, the plain-C draw list the overlay emits and a backend draws
+# (Hookshot's table on Longshot, coop_draw_hos.cpp; an ExeFS backend later). No rendering, no allocation.
+add_library(coop_ui STATIC
+  ui/src/drawlist.cpp
+)
+target_include_directories(coop_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ui/include")
+target_link_libraries(coop_ui PRIVATE coop_warnings)
