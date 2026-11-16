@@ -2997,6 +2997,45 @@ TEST_CASE("objects: a copy's own wake for our Link runs, the owner's rest is not
     CHECK(run(5.0f, "GetUp", false, "Wait", 3500).plays == std::vector<std::string>{"Wait"});
 }
 
+TEST_CASE("objects: a copy's own wake gives its rise back once, never over the owner's new animation (report 109)") {
+    // The review's case: own wake starts over the owner's "Wait"; the owner's
+    // Link then reaches its Baba, which rises ("GetUp"). Plays wishes that, the
+    // Mover puts it over the copy's own play: no give-back (no ping-pong).
+    auto start = [](Sync& sync) {
+        sync.SetPlayer(proto::Vec3{0.0f, 0.0f, 0.0f});
+        Tick(sync, 0, {Acting(0x100, 0x11, 2, 5.0f, "Wait")});
+        const proto::ObjectId id = *sync.IdOf(0x100);
+        Own(sync, id, 2);
+        for (std::uint64_t t = 10; t <= 300; t += 66) {
+            sync.Receive(OwnerSample(id, 2, t * kMs, 5.0f, 2, "Wait"));
+            Tick(sync, t * kMs, {Acting(0x100, 0x11, 2, 5.0f, t >= 100 ? "GetUp" : "Wait")});
+        }
+        CHECK(sync.TakeOwnWakes().empty());  // seen by the walk: nothing to give back
+        return id;
+    };
+    {
+        Sync sync;
+        const proto::ObjectId id = start(sync);
+        sync.Receive(OwnerSample(id, 2, 400 * kMs, 5.0f, 2, "Attack"));
+        Tick(sync, 400 * kMs, {Acting(0x100, 0x11, 2, 5.0f, "Wait")});  // the put-back shows
+        sync.NoteTakeover(0x100, 420 * kMs, "GetUp");
+        CHECK(sync.TakeOwnWakes().empty());
+        sync.NoteTakeover(0x100, 490 * kMs, "GetUp");
+        CHECK(sync.TakeOwnWakes().empty());
+    }
+    // While the owner's "Wait" is still the latest: given back once, not twice.
+    {
+        Sync sync;
+        const proto::ObjectId id = start(sync);
+        sync.Receive(OwnerSample(id, 2, 400 * kMs, 5.0f, 2, "Wait"));
+        Tick(sync, 400 * kMs, {Acting(0x100, 0x11, 2, 5.0f, "Wait")});  // the put-back shows
+        sync.NoteTakeover(0x100, 420 * kMs, "GetUp");
+        CHECK(sync.TakeOwnWakes().size() == 1);
+        sync.NoteTakeover(0x100, 490 * kMs, "GetUp");
+        CHECK(sync.TakeOwnWakes().empty());
+    }
+}
+
 TEST_CASE("objects: a copy's own wake never plays over the owner's fight (report 109)") {
     Sync sync;
     sync.SetPlayer(proto::Vec3{0.0f, 0.0f, 0.0f});

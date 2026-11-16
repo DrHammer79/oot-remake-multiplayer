@@ -916,6 +916,7 @@ private:
         // Report 109: its own wake (kOwnWakeUs) began then, over the owner's animation `own_wake_over`.
         std::uint64_t own_wake_at = 0;
         std::string own_wake_over;
+        bool own_wake_given = false;  // its rise was given back once in this own wake (TakeOwnWakes)
         std::uint64_t owner_anim_since = 0;  // the owner's animation (base name) is this one since
         // Our own hit took its life to 0 here (the DAMAGE resend's mark).
         std::uint64_t killed_at = 0;

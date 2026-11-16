@@ -654,6 +654,21 @@ TEST_CASE("difficulty: no extras in a dungeon, each gets its weight instead (pla
   const World::Data& d2 = w2.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
   CoopDifficulty::Extras f(w2.Lookup());
   CHECK(f.Plan("Lake", Walk(d2), 200, false, 0) > 0);
+  // 125% (Automatic, 2 players, the report's case): only about 1 in 4 has an
+  // ExtraCount there, but every one folds, so the total is 125%, not ~106%.
+  World w3;
+  const World::Data& d3 = w3.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 12);
+  const auto walk3 = Walk(d3);
+  CoopDifficulty::Extras g(w3.Lookup());
+  CHECK(g.Plan("InsideTheDekuTree", walk3, 125, false, 0) == 0);
+  CHECK(g.All().empty());
+  std::size_t without_extra = 0;
+  for (const auto& o : walk3) {
+    CHECK(g.NoSpot(o.hash));
+    without_extra += CoopDifficulty::ExtraCount(o.hash, 125) == 0 ? 1 : 0;
+  }
+  CHECK(without_extra > 0);  // the case the old rule missed is in the set
+  CHECK(g.NoSpots() == walk3.size());
 }
 
 TEST_CASE("difficulty: every game plans the same extras whatever it has loaded and wherever its enemies walked") {

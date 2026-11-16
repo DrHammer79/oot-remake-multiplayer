@@ -704,11 +704,12 @@ std::size_t Extras::Plan(std::string_view scene, const std::vector<Original>& wa
     if (!ExtrasIn(scene)) {
         // Player report 111: in a dungeon an extra is made with no placement
         // data, so no DefaultDungeonRoomIndex, and a Deku Baba extra never
-        // woke in its owner's game either (the room check). Weight instead.
+        // woke in its owner's game either (the room check). Weight instead:
+        // EVERY enemy of the walk, as each folds by count_pct (Folded), so
+        // the dungeon's total is exactly count_pct (not only those with an
+        // ExtraCount, which gave 1.0625 instead of 1.25 at 125%).
         for (const Original& o : walk) {
-            if (ExtraCount(o.hash, count_pct) > 0) {
-                no_spot_.insert(o.hash);
-            }
+            no_spot_.insert(o.hash);
         }
         return 0;
     }

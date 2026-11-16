@@ -1109,12 +1109,14 @@ void Sync::OwnWake(Object& o, bool taken_away, std::uint64_t now_us) {
     }
     o.own_wake_at = now_us;
     o.own_wake_over = wanted->name;
+    o.own_wake_given = false;
     notes_.emplace_back(o.name + ": its own wake for our Link runs; the owner's '" + wanted->name +
                         "' is not put back over it (report 109)");
     // The walk sees the owner's animation again: the Mover put the copy's
     // own play back already, and its AI waits for that play's end.
     if (taken_away && !o.took_over_name.empty() && own_wakes_.size() < 64) {
         own_wakes_.emplace_back(o.address, o.took_over_name);
+        o.own_wake_given = true;
     }
 }
 
@@ -1129,10 +1131,22 @@ void Sync::NoteTakeover(std::uint64_t address, std::uint64_t now_us, std::string
         o.took_over_name = std::string(name);
     }
     // Report 109: put back during its own wake (a wish from before it began):
-    // given back once more.
-    if (o.own_wake_at != 0 && now_us >= o.own_wake_at && now_us - o.own_wake_at < kOwnWakeUs &&
-        !name.empty() && own_wakes_.size() < 64) {
+    // given back, at most once per own wake, and only while the owner's
+    // latest animation is still the one the wake holds back (own_wake_over).
+    // Once the owner's enemy plays a new one (its Link came, it rose or
+    // fights), Plays wishes that one and the Mover's put-back is right: no
+    // give-back, or the two would swap each tick (review of baba-pose).
+    if (o.own_wake_at == 0 || o.own_wake_given || name.empty() || now_us < o.own_wake_at ||
+        own_wakes_.size() >= 64 || o.received.empty() || !o.received.back().animation) {
+        return;
+    }
+    const auto owner = owners_.find(o.id);
+    const std::uint64_t hold =
+        owner != owners_.end() ? AnswerHoldUs(kOwnWakeUs, owner->second.player) : kOwnWakeUs;
+    if (now_us - o.own_wake_at < hold &&
+        AnimationBase(o.received.back().animation->name) == AnimationBase(o.own_wake_over)) {
         own_wakes_.emplace_back(address, std::string(name));
+        o.own_wake_given = true;
     }
 }
 
