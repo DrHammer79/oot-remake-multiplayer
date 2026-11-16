@@ -16,7 +16,7 @@ int HostFont(const Look* look, int font);
 int HostImage(const Look* look, int image);
 
 // Draws `list` through `d`. A call the table lacks (an older Hookshot's: use_font, draw_image) is skipped, as the
-// old code skipped it. POLY and CLIP commands have no call in this table: skipped (the overlay emits none).
+// old code skipped it. A POLY is drawn with triangles (a fan; an outline as thin bands).
 void Replay(const CoopDrawList& list, const HosCoopDraw& d, const Look* look);
 
 }  // namespace CoopDraw

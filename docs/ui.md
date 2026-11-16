@@ -19,7 +19,6 @@ function pointers, so it can live inside a payload a recomp lifts and on a conso
 | `COOP_DRAW_TEXT` | top left, size in px, UTF-8 words in the arena |
 | `COOP_DRAW_IMAGE` | a logical image (the HUD pack's hearts) into a rectangle, tinted |
 | `COOP_DRAW_FONT` | the logical font for the texts after it |
-| `COOP_DRAW_CLIP_PUSH` / `POP` | a clip rectangle |
 
 - Colours are `0xAABBGGRR` (Dear ImGui's IM_COL32), coordinates pixels from the picture's top left.
 - Fonts and images are logical ids (`COOP_FONT_UI`, `COOP_FONT_REGULAR`, `COOP_FONT_MEDIUM`, `COOP_IMAGE_HEART_0..4`);
@@ -49,10 +48,44 @@ function pointers, so it can live inside a payload a recomp lifts and on a conso
   The alternatives (the game's own 2D layout system pane by pane; an NVN2 renderer of our own) and their sizes and
   risks are in the coordinator's v1 reports.
 
-## Next (not in this step)
+## Own menu (v1 step 6b)
 
-- Our own menu screens drawn into the list (the Multiplayer and Mods tabs that Hookshot's menu draws today), for
-  platforms with no Hookshot menu; on Longshot behind an opt-in switch only.
-- One input model for that layer (pad navigation, text from a software keyboard, the pointer on PC) with a focus
-  stack, so the game's pad is masked only while co-op's UI has it.
+Co-op's own menu screen, for platforms with no Hookshot menu. `coop/ui/menu_view.hpp` `DrawMenu` lays out a tab strip,
+the page's rows (action, choice with arrows, Off / On toggle, heading, note; fixed rows dim; scrolled so the selected
+row shows), a help column with the page's picture (its shapes as `COOP_DRAW_POLY`) and a prompt strip into the draw
+list; `RowAt` / `TabAt` say what the pointer is on. The rows are the ones Hookshot's menu shows on Longshot
+(`hos_coop_menu.h`), so the page code (CoopPause) is shared. It is our own screen; it never touches the game's menus.
+
+On Longshot it is **opt-in**: `LICHII_COOP_OWN_MENU=1` (`hookshot/src/coop_own_menu.*`). Off, which is the default,
+none of it runs and Hookshot's menu is as before (the golden test pins the overlay). On, F9 or the pad's L + R held
+then Minus opens it over the picture (drawn through `hos_coop_draw2`; an older Hookshot's table draws none), and it
+shows the same Multiplayer and Mods tabs as Hookshot's menu. Minus or F9 closes it, or Back with nothing left to go
+back to. While it is open the game gets no pad buttons, keys or mouse, and after it closes no button that was held then
+(B for Back, Minus, A) reaches the game until it is let go (`coop/ui/pad.hpp` `PadGate`). It opens only where
+Hookshot draws through `hos_coop_draw2`: an older Hookshot (`hos_coop_draw` only), or one that never draws it within a
+second, turns it off with one log line; drawn before and then not for a second (a long frame), it just closes. The Longshot replay draws a polygon as
+triangles (an outline as thin bands).
+
+## Input (v1 step 6b)
+
+- `coop/ui/events.h` `CoopUiEvent`: up, down, left, right, confirm, back, tab previous / next, open, close, a typed
+  character, backspace, text done, pointer move / click. The same on every platform.
+- `coop/ui/pad.hpp` `PadReader`: the game's own NpadButton bits and left stick (what Longshot's `hos_coop_pad` and an
+  ExeFS build's nn::hid hook both see) as events. A held direction repeats (after 400 ms, then every 110 ms). Closed,
+  only L + R + Minus counts. Open: the D-pad or stick moves, A confirms, B goes back, L / R change the tab, Minus closes.
+- `coop/ui/focus.hpp` `FocusStack`: menu, chat and cheats as owners. The top one gets input. Any owner takes the
+  keyboard; only the menu takes the pad too, because the chat box and the cheats panel are typed into while the game is
+  still played. On Longshot there is one stack for all three, in `coop_own_menu.cpp`, and it works with or without the
+  opt-in. The chat box and the cheats panel tell it when they open and close (`SetFocus`, after each key in
+  `TypeKey`). The typed keys go to the cheats panel first as before (when it is open, or when the box is closed and the
+  cheats are on), except when the chat box is on top: then it keeps its keys (`CheatsFirst`).
+- Keyboard (Longshot): the arrows, Enter, Esc / Backspace, Q / E or Page Up / Down. While the page types into a field,
+  every key but F9 goes to that field. As with the pad, Enter, Esc, Backspace or F9 still held when the menu closes
+  stay co-op's (`hos_coop_keys_taken`) until they are let go, so the game reads none of them as a new press
+  (`KeyLatch`). On a console, text comes from the software keyboard as typed characters followed
+  by "text done" (step 8).
+
+## Next
+
+- The ExeFS backend for the draw list, and the console input (software keyboard) (step 8).
 - The mods' drawing API (`coop_mods_runtime.cpp` Overlay) still draws on Hookshot's table directly.

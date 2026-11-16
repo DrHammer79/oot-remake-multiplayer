@@ -31,7 +31,7 @@ add_library(coop_core STATIC ${_coop_core_files})
 # include the hook's headers); the UI models' folder only the module and the tests add, as before.
 target_include_directories(coop_core PUBLIC "${_coop_root}/lichii/hook" PRIVATE "${_coop_root}/hookshot/src")
 target_link_libraries(coop_core PUBLIC coop coop_net coop_host coop_presence coop_overlay coop_voice
-                      coop_protocol coop_platform PRIVATE coop_warnings)
+                      coop_protocol coop_platform coop_ui PRIVATE coop_warnings)
 # As the module built these files before: hidden symbols (nothing in the core is exported from the
 # module) and, with MSVC, the emulator's warning exceptions and big object files.
 set_target_properties(coop_core PROPERTIES CXX_VISIBILITY_PRESET hidden)

@@ -28,7 +28,7 @@ foreach(line IN LISTS _coop_lines)
 endforeach()
 list(REMOVE_DUPLICATES _coop_sources)
 
-add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_hs_platform.cpp src/coop_draw.cpp src/coop_draw_hos.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_cheats_panel.cpp
+add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_hs_platform.cpp src/coop_draw.cpp src/coop_draw_hos.cpp src/coop_own_menu.cpp src/coop_own_menu_model.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_cheats_panel.cpp
   src/coop_host_menu.cpp src/coop_title.cpp src/coop_title_menu.cpp src/coop_input.cpp src/coop_pause.cpp
   src/coop_pause_menu.cpp src/coop_pause_files.cpp src/coop_i18n.cpp src/coop_null_page.cpp
   src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
