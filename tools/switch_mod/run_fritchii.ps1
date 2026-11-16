@@ -105,16 +105,29 @@ function Shot($proc, $name) {
 }
 
 # The preset's mark shots: one PrintWindow shot when the log first shows `coop: test mark <name>` (the kit's scripted
-# input writes it). The log is read shared, as the emulator keeps it open.
-$markShot = @{}
+# input writes it). The log is read once: each call reads only what was added since the last one (shared, as the
+# emulator keeps it open), and only whole lines are matched; a part line waits for the rest.
+$markShot = @{}; $logPos = 0L; $logPart = ''
 function Shot-Marks($proc) {
     if (-not (Test-Path $log)) { return }
     try {
         $f = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite,Delete')
-        try { $text = (New-Object IO.StreamReader($f)).ReadToEnd() } finally { $f.Close() }
+        try {
+            if ($f.Length -lt $script:logPos) { $script:logPos = 0L; $script:logPart = '' }   # a new log
+            $null = $f.Seek($script:logPos, 'Begin')
+            $buf = New-Object byte[] ([int][Math]::Min($f.Length - $script:logPos, 16MB))
+            $got = $f.Read($buf, 0, $buf.Length)
+            $script:logPos += $got
+        } finally { $f.Close() }
     } catch { return }
-    foreach ($n in $markShots) {
-        if (-not $markShot.ContainsKey($n) -and $text -match "coop: test mark $([regex]::Escape($n))(\s|$)") {
+    $text = $script:logPart + [Text.Encoding]::UTF8.GetString($buf, 0, $got)
+    $cut = $text.LastIndexOf("`n")
+    if ($cut -lt 0) { $script:logPart = $text; return }
+    $script:logPart = $text.Substring($cut + 1)
+    foreach ($line in $text.Substring(0, $cut).Split("`n")) {
+        if ($line -notmatch 'coop: test mark (\S+)') { continue }
+        $n = $Matches[1]
+        if ($markShots -contains $n -and -not $markShot.ContainsKey($n)) {
             $markShot[$n] = $true
             Shot $proc $n
         }

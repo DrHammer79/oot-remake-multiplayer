@@ -327,19 +327,24 @@ const char* UiName(uint8_t kind) {
 
 // The pad hook's news since the last frame (switch/adapter/input.h), into the log.
 bool g_pad_seen = false;
+uint32_t g_source = pad_hook::kNpadNo1;
 bool g_menu_was_open = false;
 void LogInput() {
     pad_hook::Hook& h = input::hook();
-    if (!g_pad_seen && h.pad(0).reads != 0) {
+    h.Frame(g_frames);  // player 1's source may change from the next read on
+    if (!g_pad_seen && h.reads(0) != 0) {
         g_pad_seen = true;
         Log().s("pad: player 1 read through the module (frame ").dec(g_frames).s(")");
     }
     pad_hook::Edge edges[16];
     for (size_t n = h.TakeEdges(edges, 16), k = 0; k < n; ++k) {
         const pad_hook::Edge& e = edges[k];
-        const pad_hook::Pad& p = h.pad(e.player);
         Log().s("pad: player ").dec(e.player + 1u).s(e.down ? " down " : " up ").s(ButtonName(e.bit)).s(" (bit ")
-            .dec(e.bit).s(", left stick ").sdec(p.stick[0]).s(",").sdec(p.stick[1]).s(")");
+            .dec(e.bit).s(", left stick ").sdec(e.stick_x).s(",").sdec(e.stick_y).s(")");
+    }
+    if (h.source() != g_source) {
+        g_source = h.source();
+        Log().s("pad: player 1 is now npad ").s(g_source == pad_hook::kNpadHandheld ? "Handheld" : "No.1");
     }
     CoopUiEvent events[8];
     for (size_t n = h.TakeEvents(events, 8), k = 0; k < n; ++k) {

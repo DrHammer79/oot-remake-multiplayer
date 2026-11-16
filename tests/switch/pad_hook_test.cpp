@@ -5,6 +5,8 @@
 
 #include "../../switch/adapter/pad_hook.h"
 
+#include <atomic>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -69,7 +71,7 @@ TEST_CASE("pad hook: closed, the game gets its pad unchanged and co-op keeps it 
     CHECK(got.stick[2] == 7);
     CHECK(h.pad(0).buttons == kA);
     CHECK(h.pad(0).stick[1] == -2000);
-    CHECK(h.pad(0).reads == 1);
+    CHECK(h.reads(0) == 1);
     Read(h, kB, 16);
     pad_hook::Edge e[8];
     REQUIRE(h.TakeEdges(e, 8) == 3);
@@ -86,11 +88,11 @@ TEST_CASE("pad hook: a result that is not connected is not the pad") {
     NpadState other = State(0, 0, 0, false);  // the game also asks the styles that are not connected
     h.OnStates(&other, 1, 0x20, 16);
     CHECK(h.pad(0).buttons == kA);
-    CHECK(h.pad(0).reads == 1);
+    CHECK(h.reads(0) == 1);
     NpadState none{};
     h.OnStates(&none, 0, 0, 32);  // no states
     h.OnStates(nullptr, 1, 0, 32);
-    CHECK(h.pad(0).reads == 1);
+    CHECK(h.reads(0) == 1);
 }
 
 TEST_CASE("pad hook: players 2-4 are kept and never held back") {
@@ -162,7 +164,7 @@ TEST_CASE("pad hook: older states in one result get the same mask") {
         CHECK(x.buttons == 0);
         CHECK(x.stick[1] == 0);
     }
-    h.SetOpen(false, 60);
+    h.RequestOpen(false);  // the core closes it: done at the next read
     NpadState t[2] = {State(kA), State(kA | kB)};
     h.OnStates(t, 2, 0, 70);  // A was held while open: latched; B in the older state passes
     CHECK(t[0].buttons == 0);
@@ -179,4 +181,125 @@ TEST_CASE("pad hook: the queues keep the oldest and count what they lost") {
     CHECK(h.TakeEdges(e, 64) == 64);  // 79 edges (the first read repeats the held A)
     CHECK(h.dropped_edges() == 15);
     CHECK(e[0].down == 0);  // the oldest kept: A up after the first batch ended with A down
+}
+
+namespace {
+
+// Player 1 on both ids at once: No.1 (a controller) and Handheld (the console's own Joy-Con), one frame.
+void Both(Hook& h, uint64_t frame, uint64_t no1, uint64_t handheld, NpadState* got_no1 = nullptr,
+          NpadState* got_handheld = nullptr) {
+    h.Frame(frame);
+    NpadState a = State(no1);
+    NpadState b = State(handheld);
+    h.OnStates(&a, 1, pad_hook::kNpadNo1, frame * 16);
+    h.OnStates(&b, 1, pad_hook::kNpadHandheld, frame * 16 + 1);
+    h.OnStates(&a, 1, pad_hook::kNpadNo1, frame * 16 + 2);  // the game reads No.1 again in the same frame
+    if (got_no1) *got_no1 = a;
+    if (got_handheld) *got_handheld = b;
+}
+
+size_t Edges(Hook& h) {
+    pad_hook::Edge e[64];
+    return h.TakeEdges(e, 64);
+}
+
+}  // namespace
+
+TEST_CASE("pad hook: No.1 and Handheld both connected, one source per frame, no flapping") {
+    Hook h;
+    for (uint64_t f = 1; f <= 10; ++f) Both(h, f, kA, kB);  // both pressed, each its own button
+    CHECK(h.source() == pad_hook::kNpadNo1);  // both have input: the source stays
+    CHECK(h.pad(0).buttons == kA);
+    CHECK(Edges(h) == 1);  // A down once; Handheld's B never flips player 1's pad
+    CHECK(h.reads(0) == 20);
+}
+
+TEST_CASE("pad hook: the source moves to the id with input at a frame boundary, never within a frame") {
+    Hook h;
+    Both(h, 1, 0, 0);
+    Edges(h);
+    Both(h, 2, 0, kB);  // only Handheld has input: still No.1 in this frame
+    CHECK(h.source() == pad_hook::kNpadNo1);
+    CHECK(h.pad(0).buttons == 0);
+    Both(h, 3, 0, kB);  // the next frame starts on Handheld
+    CHECK(h.source() == pad_hook::kNpadHandheld);
+    CHECK(h.pad(0).buttons == kB);
+    pad_hook::Edge e[8];
+    REQUIRE(h.TakeEdges(e, 8) == 1);
+    CHECK((e[0].bit == 1 && e[0].down == 1));
+    for (uint64_t f = 4; f <= 8; ++f) Both(h, f, 0, kB);  // No.1 idle: stays on Handheld
+    CHECK(h.source() == pad_hook::kNpadHandheld);
+    CHECK(Edges(h) == 0);
+}
+
+TEST_CASE("pad hook: a source that is not connected hands over to the other id") {
+    Hook h;
+    for (uint64_t f = 1; f <= 3; ++f) {
+        h.Frame(f);
+        NpadState no1 = State(0, 0, 0, false);  // no controller on No.1: handheld play
+        NpadState hh = State(kA);
+        h.OnStates(&no1, 1, pad_hook::kNpadNo1, f * 16);
+        h.OnStates(&hh, 1, pad_hook::kNpadHandheld, f * 16 + 1);
+    }
+    CHECK(h.source() == pad_hook::kNpadHandheld);
+    CHECK(h.pad(0).buttons == kA);
+}
+
+TEST_CASE("pad hook: the id that is not the source is held back like it while the menu is open") {
+    Hook h;
+    Both(h, 1, kL | kR, 0);
+    Both(h, 2, kL | kR | kMinus, 0);
+    REQUIRE(h.open());
+    NpadState a{}, b{};
+    h.Frame(3);
+    a = State(kA, 0, 32000);
+    b = State(kB, 0, 32000);
+    h.OnStates(&a, 1, pad_hook::kNpadNo1, 48);
+    h.OnStates(&b, 1, pad_hook::kNpadHandheld, 49);
+    CHECK(a.buttons == 0);
+    CHECK(b.buttons == 0);
+    CHECK(b.stick[1] == 0);
+    CHECK(h.source() == pad_hook::kNpadNo1);
+}
+
+TEST_CASE("pad hook: the core opens and closes the menu by request, at player 1's next read") {
+    Hook h;
+    h.RequestOpen(true);
+    CHECK_FALSE(h.open());
+    CHECK(Read(h, kA, 0).buttons == 0);
+    CHECK(h.open());
+    h.RequestOpen(false);
+    Read(h, 0, 16);
+    CHECK_FALSE(h.open());
+    CHECK(Read(h, kA, 32).buttons == kA);
+    CHECK(Kinds(h) == std::vector<int>{COOP_UI_CONFIRM});  // a request makes no OPEN/CLOSE event
+}
+
+TEST_CASE("pad hook: the queue hands items from one thread to another in order") {  // (tsan in CI)
+    pad_hook::Queue<uint32_t, 64> q;
+    constexpr uint32_t kItems = 200000;
+    std::atomic<bool> done{false};
+    std::thread producer([&q, &done] {
+        for (uint32_t i = 1; i <= kItems; ++i) q.Push(i);
+        done.store(true, std::memory_order_release);
+    });
+    uint64_t taken = 0;
+    uint32_t last = 0;
+    bool in_order = true;
+    uint32_t buf[16];
+    while (true) {
+        const bool finished = done.load(std::memory_order_acquire);  // read before Take: then it sees every push
+        const size_t n = q.Take(buf, 16);
+        for (size_t i = 0; i < n; ++i) {
+            in_order = in_order && buf[i] > last;
+            last = buf[i];
+        }
+        taken += n;
+        if (finished && n == 0) break;
+        if (n == 0) std::this_thread::yield();
+    }
+    producer.join();
+    CHECK(in_order);
+    CHECK(taken + q.dropped() == kItems);
+    CHECK(taken > 0);
 }

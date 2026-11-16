@@ -49,7 +49,7 @@ uint64_t NowMs() {
 }
 
 int After(uint32_t style, pad_hook::NpadState* out, int count, const uint32_t* npad_id, int n) {
-    ++g_calls[style];
+    pad_hook::atom::Store<pad_hook::atom::kRelaxed>(g_calls[style], pad_hook::atom::Load<pad_hook::atom::kRelaxed>(g_calls[style]) + 1);
     if (n > count) n = count;
     if (n > 0 && npad_id != nullptr) g_hook.OnStates(out, n, *npad_id, NowMs());
     return n;
@@ -103,6 +103,8 @@ void FillSlots() {
 
 pad_hook::Hook& hook() { return g_hook; }
 
-uint64_t Calls(uint32_t style) { return style < kStyles ? g_calls[style] : 0; }
+uint64_t Calls(uint32_t style) {  // (the tick reads what the pad's thread counts)
+    return style < kStyles ? pad_hook::atom::Load<pad_hook::atom::kRelaxed>(g_calls[style]) : 0;
+}
 
 }  // namespace input
