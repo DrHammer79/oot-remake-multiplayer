@@ -2,6 +2,7 @@
 #include "coop/host/map_drop_log.hpp"
 
 #include <chrono>
+#include <coop/os.hpp>
 #include <cstdio>
 #include <utility>
 
@@ -13,7 +14,7 @@ namespace {
 
 std::uint64_t steady_us() {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                        std::chrono::steady_clock::now().time_since_epoch())
+                                        coop::os::SteadyClock::now().time_since_epoch())
                                         .count());
 }
 

@@ -87,7 +87,7 @@ float Distance(const Vec3& a, const Vec3& b) {
 coop::os::Mutex g_mutex;
 std::vector<Shooter> g_shooters;
 std::uint64_t g_at = 0;
-std::chrono::steady_clock::time_point g_noted{};  // (this PC's clock, for StopAtCreate)
+coop::os::SteadyClock::time_point g_noted{};  // (this PC's clock, for StopAtCreate)
 std::atomic<std::uint64_t> g_stopped{0};
 
 } // namespace
@@ -167,7 +167,7 @@ void NoteShooters(std::vector<Shooter> shooters, std::uint64_t now_us) {
     std::lock_guard lock(g_mutex);
     g_shooters = std::move(shooters);
     g_at = now_us;
-    g_noted = std::chrono::steady_clock::now();
+    g_noted = coop::os::SteadyClock::now();
 }
 
 bool StopAtCreate(std::string_view shot, const Vec3& at, std::uint64_t shooter) {
@@ -176,7 +176,7 @@ bool StopAtCreate(std::string_view shot, const Vec3& at, std::uint64_t shooter) 
     }
     std::unique_lock lock(g_mutex, std::try_to_lock);
     if (!lock.owns_lock() || g_at == 0 ||
-        std::chrono::steady_clock::now() - g_noted > std::chrono::microseconds(kFreshUs)) {
+        coop::os::SteadyClock::now() - g_noted > std::chrono::microseconds(kFreshUs)) {
         return false;
     }
     const Shooter* by = nullptr;

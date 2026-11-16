@@ -42,6 +42,8 @@ FORBIDDEN = [
 OS_CALLS = [
     (re.compile(r'\bstd::(recursive_|timed_|recursive_timed_|shared_|shared_timed_)?mutex\b'), 'coop::os::Mutex'),
     (re.compile(r'\bstd::(condition_variable(_any)?|thread|jthread|this_thread)\b'), 'coop::os::Thread / SleepUs'),
+    (re.compile(r'\b(steady_clock|system_clock|high_resolution_clock|utc_clock|file_clock)\b'),
+     'coop::os::SteadyClock / NowUs'),
 ]
 
 

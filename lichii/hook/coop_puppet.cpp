@@ -2356,7 +2356,7 @@ void OnEvent(const coop::net::Event& event) {
         }
         const auto now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
+                coop::os::SteadyClock::now().time_since_epoch())
                 .count());
         std::lock_guard lock(g_anim_mutex);
         auto& w = g_ocarina[note->player_number];
@@ -2368,7 +2368,7 @@ void OnEvent(const coop::net::Event& event) {
         }
         const auto now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
+                coop::os::SteadyClock::now().time_since_epoch())
                 .count());
         std::lock_guard lock(g_anim_mutex);
         auto& queue = g_sounds[sound->player_number];
@@ -2484,7 +2484,7 @@ void Publish(std::uint64_t main_base, const std::optional<std::string>& scene,
     }
     const auto now_ms = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
+            coop::os::SteadyClock::now().time_since_epoch())
             .count());
     g_planner->SetFailedTunics(g_director->FailedTunics());
     auto input = g_planner->Plan(main_base, scene, position, local_event, remotes, now_ms, own_gear, own_drawn, own_color);
@@ -2501,7 +2501,7 @@ void StampDrawing(Input& input, std::uint64_t now_ms) {
     static bool camera_seen = false;           // the present thread only
     static std::uint64_t drawn_since_ms = 0;
     const auto camera = CoopCamera::Latest();
-    const bool drawn = camera && std::chrono::steady_clock::now() - camera->at <
+    const bool drawn = camera && coop::os::SteadyClock::now() - camera->at <
                                      std::chrono::milliseconds(250);
     if (!drawn) {
         drawn_since_ms = 0;

@@ -92,6 +92,13 @@ class CheckCoreTest(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn('std threads', problems[0])
 
+    def test_std_clocks_fail(self):
+        text = ('#include <chrono>\nauto a = std::chrono::steady_clock::now();\nusing namespace std::chrono;\n'
+                'auto b = system_clock::now();\nstd::chrono::milliseconds ok(5);\n')
+        problems = check_core.check(self.tree({'lichii/hook/coop_a.cpp': text}))
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all('coop::os::SteadyClock' in p for p in problems))
+
     def test_coop_os_and_comments_pass(self):
         text = ('#include <mutex>\n#include <coop/os.hpp>\n// was std::mutex\n/* std::thread */\n'
                 'coop::os::Mutex m;\nstd::lock_guard<coop::os::Mutex> g(m);\nstd::unique_lock<coop::os::Mutex> u;\n'
