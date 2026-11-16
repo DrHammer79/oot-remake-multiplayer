@@ -937,8 +937,8 @@ TEST_CASE("difficulty: an enemy with no ground for its copies folds by the extra
       CHECK(FoldCount(k, pct) == 100 * (1 + e));
       total += FoldCount(k, pct);
       extras += 100 * (1 + e);
-      if (e == pct / 100 - 1 && none == 0 && pct % 100 != 0) none = k;
-      if (e == pct / 100 && one == 0) one = k;
+      if (e == pct / 100u - 1u && none == 0 && pct % 100 != 0) none = k;
+      if (e == pct / 100u && one == 0) one = k;
     }
     CHECK(total == extras);  // the folded strength is exactly what the extras would add
     if (pct % 100 == 0) {
