@@ -90,7 +90,7 @@ class MergeTablesTest(unittest.TestCase):
         mark = read(self.path("ootrr-site", mt.MARK)).decode("utf-8")
         table_hash = mt.fnv64(site)[0]
         pack_hash = mt.fnv64(self.path(PACK, "romfs", "System", "Resource", NAME))[0]
-        self.assertEqual(mark, f"coop-merged 1\ntable {NAME} {table_hash}\npack {pack_hash}\n")
+        self.assertEqual(mark, f"coop-merged 1\ntable {NAME} {table_hash}\npack {pack_hash}\nrule merged\n")
         # Undo puts the site's own table back.
         mt.undo(self.mods, self.say)
         self.assertFalse(os.path.exists(self.path("ootrr-site", mt.MARK)))
@@ -180,6 +180,73 @@ class MergeTablesTest(unittest.TestCase):
         self.assertEqual(self.lines, [])
         self.assertEqual(self.table("aaa-textures").by_crc, {3: 3})
 
+    def mark_rule(self, mod):
+        try:
+            text = read(self.path(mod, mt.MARK)).decode("utf-8")
+        except OSError:
+            return None
+        return next((l[5:] for l in text.split("\n") if l.startswith("rule ")), None)
+
+    def test_a_table_holding_the_pack_entries_already_is_left_as_it_is_and_marked_contains(self):
+        # (a skins mod whose maker merged the pack's entries in by hand: larger sizes and extra entries of its own)
+        self.put_table(PACK, {1: 100, 2: 50}, {"Puppet/new.bfres": 77})
+        own = read(self.put_table("skins", {1: 100, 2: 60, 5: 5}, {"Puppet/new.bfres": 80}))
+        self.assertEqual(self.run_merge(), 0)
+        self.assertEqual(read(self.path("skins", "romfs", "System", "Resource", NAME)), own)  # untouched
+        self.assertFalse(os.path.exists(self.path("skins", mt.KEEP_DIR)))
+        self.assertEqual(self.mark_rule("skins"), "contains")
+        mark = read(self.path("skins", mt.MARK)).decode("utf-8").split("\n")
+        self.assertEqual(mark[1], f"table {NAME} {mt.fnv64_bytes(own)}")
+        self.assertIn("holds every puppet pack entry", self.lines[0])
+        # A pack made again with a new entry: no longer contained, so merged as any other seed.
+        self.put_table(PACK, {1: 100, 2: 50, 3: 9}, {"Puppet/new.bfres": 77})
+        self.run_merge()
+        self.assertEqual(self.table("skins").by_crc, {1: 100, 2: 60, 3: 9, 5: 5})
+        self.assertEqual(self.mark_rule("skins"), "merged")
+
+    def test_a_smaller_size_is_not_contained(self):
+        self.put_table(PACK, {1: 100})
+        self.put_table("skins", {1: 99})
+        self.run_merge()
+        self.assertEqual(self.mark_rule("skins"), "merged")
+        self.assertEqual(self.table("skins").by_crc, {1: 100})
+
+    def test_a_pack_name_row_held_as_a_crc_row_counts(self):
+        name = "Puppet/new.bfres"
+        self.put_table(PACK, {}, {name: 77})
+        self.put_table("skins", {rstb.Rstb.crc(name): 77})
+        self.assertEqual(mt.missing_pack_entries(self.table("skins"), self.table(PACK)), 0)
+        self.put_table("skins", {rstb.Rstb.crc(name): 76})
+        self.assertEqual(mt.missing_pack_entries(self.table("skins"), self.table(PACK)), 1)
+
+    def test_with_another_mods_table_too_the_winner_is_still_merged(self):
+        # (holding the pack's entries is not enough: the third mod's entries belong in the one table too)
+        self.put_table(PACK, {1: 100})
+        self.put_table("aaa-textures", {7: 7})
+        self.put_table("skins", {1: 100})
+        self.run_merge()
+        self.assertEqual(self.table("skins").by_crc, {1: 100, 7: 7})
+        self.assertEqual(self.mark_rule("skins"), "merged")
+
+    def test_a_title_mod_that_wins_is_marked_only_when_it_holds_the_pack_entries(self):
+        title_mod = "contents/0400486024DEC000/skins"   # (by name above coop-puppet: its table wins)
+        self.put_table(PACK, {1: 100, 2: 50})
+        own = read(self.put_table(title_mod, {1: 100}))
+        self.assertEqual(self.run_merge(), 1)  # lacks entry 2: never rewritten, said, no mark
+        self.assertEqual(read(self.path(title_mod, "romfs", "System", "Resource", NAME)), own)
+        self.assertIsNone(self.mark_rule(title_mod))
+        self.assertIn("lacks 1 of the puppet pack's entries", self.lines[0])
+        self.put_table(title_mod, {1: 100, 2: 50, 3: 3})
+        self.assertEqual(self.run_merge(), 0)
+        self.assertEqual(self.mark_rule(title_mod), "contains")
+        self.put_table(title_mod, {1: 100})  # (a stale mark goes)
+        self.run_merge()
+        self.assertIsNone(self.mark_rule(title_mod))
+        # A title mod with nothing of the pack's under it: left alone as before, nothing said.
+        os.remove(self.path(PACK, "romfs", "System", "Resource", NAME))
+        self.assertEqual(self.run_merge(), 0)
+        self.assertEqual(self.lines, [])
+
     def test_the_mods_list_decides_the_winner_and_mods_switched_off_are_left_out(self):
         self.put_table(PACK, {1: 100})
         self.put_table("zz-site", {2: 5})
@@ -191,6 +258,28 @@ class MergeTablesTest(unittest.TestCase):
         self.assertEqual(self.table("aa-site").by_crc, {1: 100, 2: 5, 3: 6})  # the first row wins, 9 left out
         self.assertEqual(self.table("zz-site").by_crc, {2: 5})
         self.assertEqual([n for n, _ in mt.load_order(self.mods)], [PACK, "zz-site", "aa-site"])
+
+    def test_with_a_list_an_unlisted_mod_wins_only_over_the_pack_by_name(self):
+        # Patch 0011: listed rows above everything; the unlisted mods and the pack by _stricmp name, the last wins.
+        self.put_table(PACK, {1: 100})
+        self.put_table("Aaa-Site", {2: 5})  # unlisted, sorts under contents/...: the pack's table is read
+        self.put_table("listed-off", {9: 9})
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\noff listed-off\n")
+        self.assertEqual(self.run_merge(), 0)
+        self.assertEqual(self.lines, [])
+        self.assertEqual(self.table("Aaa-Site").by_crc, {2: 5})
+        self.assertEqual([n for n, _ in mt.load_order(self.mods)], ["Aaa-Site", PACK])
+        self.put_table("Zzz-Site", {3: 6})  # unlisted, sorts over contents/...: it wins and gets the others
+        self.run_merge()
+        self.assertEqual(self.table("Zzz-Site").by_crc, {1: 100, 2: 5, 3: 6})
+        self.assertEqual(self.table("Aaa-Site").by_crc, {2: 5})
+        self.put_table("bbb-listed", {4: 4})  # a listed row is above every unlisted one
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\non bbb-listed\noff listed-off\n")
+        self.run_merge()
+        self.assertEqual(self.table("bbb-listed").by_crc, {1: 100, 2: 5, 3: 6, 4: 4})
+        self.assertEqual([n for n, _ in mt.load_order(self.mods)][-1], "bbb-listed")
 
     def test_folders_with_a_leading_dash_or_underscore_are_no_mods(self):
         self.put_table(PACK, {1: 100})

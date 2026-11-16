@@ -1,4 +1,4 @@
-# What Windows itself may block, checked before any other script of the kit runs. "Start OoT Co-op.bat" runs this
+# What Windows itself may block, checked before any other script of the kit runs. "Start Squadala.bat" runs this
 # file's text through Invoke-Expression (powershell -Command), not as a script file: a policy that refuses script
 # files then still lets it say why. So it is written for PowerShell's Constrained Language mode too (Smart App
 # Control and other application control put PowerShell in it): cmdlets and plain strings only, no .NET calls.
@@ -45,7 +45,7 @@ function Get-WcMarked([string]$Kit, [switch]$All) {
             }
         }
     } else {
-        foreach ($n in 'Start OoT Co-op.bat', 'scripts\start.ps1', 'scripts\play.ps1', 'hookshot\hookshot_coop.dll', 'server\coop_server.exe') {
+        foreach ($n in 'Start Squadala.bat', 'scripts\start.ps1', 'scripts\play.ps1', 'hookshot\hookshot_coop.dll', 'server\coop_server.exe') {
             $p = Join-Path $Kit $n
             if (Test-Path -LiteralPath $p) { $files += Get-Item -LiteralPath $p -Force }
         }
@@ -220,7 +220,7 @@ function Invoke-WcChecks([string]$Kit) {
             $say += '  Add an allowed app > All recent blocked apps: allow powershell.exe (and, later, the build''s python.exe and clang.exe).'
             $say += '  Or turn Controlled folder access off there, or move the kit to a folder it does not protect.'
         } else {
-            $say += '  Another antivirus, or the folder''s permissions, may do this. Move the kit to a short folder of your own such as C:\OoT-Coop,'
+            $say += '  Another antivirus, or the folder''s permissions, may do this. Move the kit to a short folder of your own such as C:\Squadala,'
             $say += '  or allow powershell.exe in your antivirus. Windows Security > Protection history says what was blocked.'
         }
     }
@@ -230,7 +230,7 @@ function Invoke-WcChecks([string]$Kit) {
     $log += "controlled folder access over the kit: $(if ($cfa) { Split-Path -Leaf $cfa } else { 'no' })"
     if ($cfa) {
         $say += "Controlled folder access (Windows Security) protects $cfa, where this kit is: it stops the game build writing there,"
-        $say += '  even with real-time protection off. Move the kit to a short folder such as C:\OoT-Coop and start it there.'
+        $say += '  even with real-time protection off. Move the kit to a short folder such as C:\Squadala and start it there.'
     }
     @{ Lines = $say; Log = $log; Stop = $stop }
 }

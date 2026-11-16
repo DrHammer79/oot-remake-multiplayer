@@ -1,12 +1,14 @@
 # Builds the Hookshot-only co-op kit (no emulator): one folder (and a zip of it) a player unzips and starts with
-# "Start OoT Co-op.bat". No emulator, Fritchii or Lichii file goes in: each player builds the Hookshot game on
+# "Start Squadala.bat". No emulator, Fritchii or Lichii file goes in: each player builds the Hookshot game on
 # their own PC from their own game (scripts\hookshot-build.ps1), and Host and Join are in the game itself.
 # make_kit.ps1 still makes the emulator kits (the older releases); this script shares its kit scripts.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\release\make_kit_hookshot.ps1 -Release <tag>
 #
 # The kit (docs/setup.md says what the player does with it):
-#   Start OoT Co-op.bat     the one entry point: checks, update, first game build, start (scripts\start.ps1)
+#   Start Squadala.bat      the one entry point: checks, update, first game build, start (scripts\start.ps1)
+#   Start OoT Co-op.bat     its old name (up to v0.11.2): one line that starts Start Squadala.bat, for desktop
+#                           shortcuts and Steam entries, and for the updaters up to v0.11.2, which want it in a new kit
 #   README.txt              ten lines: what to do
 #   Update.bat              the updater in one file (also attached to the release for older kits)
 #   Revert.bat              back to the version before the last update (Update.bat -Revert)
@@ -27,7 +29,7 @@
 # -HookshotDll  hookshot_coop.dll (default: found under -BuildDir)
 # -OutRoot      where the kit folder goes (default ..\coop-kit beside the main checkout)
 # -Port         the default server port written into the kit (27510)
-# -Release      the release tag: the kit is named oot-coop-<Release>
+# -Release      the release tag: the kit is named Squadala-<Release>
 # -NoZip        skip the zip
 param(
     [string]$BuildDir = '',
@@ -53,7 +55,7 @@ function Test-BinaryHas([string]$Path, [string]$Text) {
 function Get-Sha([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 
 # What goes in. Files listed here and nowhere else, so a review sees the whole kit in one place.
-$KitTop = @('Start OoT Co-op.bat', 'README.txt', 'Revert.bat', 'start-server.cmd', 'make-puppet-pack.cmd', 'coop-options.ini')
+$KitTop = @('Start Squadala.bat', 'Start OoT Co-op.bat', 'README.txt', 'Revert.bat', 'start-server.cmd', 'make-puppet-pack.cmd', 'coop-options.ini')
 $KitScripts = @('start.ps1', 'start-checks.ps1', 'play.ps1', 'coop-ini.ps1', 'kit-paths.ps1', 'hosting.ps1', 'relay-join.ps1',
     'invite.ps1', 'hookshot-build.ps1', 'apply_patch.py', 'update.ps1', 'start-server.ps1', 'collect-logs.ps1', 'collect-logs.cmd',
     'log-mask.ps1', 'windows-checks.ps1', 'console-mode.ps1')
@@ -115,7 +117,7 @@ $enetLicense = Join-Path $BuildDir '_deps\enet-src\LICENSE'
 if (-not (Test-Path $enetLicense)) { throw "ENet's LICENSE not found in $BuildDir\_deps\enet-src." }
 
 # Lay out the kit.
-$name = if ($Release) { "oot-coop-$Release" } else { 'oot-coop-{0:yyyyMMdd-HHmm}' -f (Get-Date) }
+$name = if ($Release) { "Squadala-$Release" } else { 'Squadala-{0:yyyyMMdd-HHmm}' -f (Get-Date) }
 $kit = Join-Path $OutRoot $name
 if (Test-Path $kit) { throw "$kit already exists; wait a minute or remove it." }
 New-Item -ItemType Directory -Force -Path $kit | Out-Null
@@ -169,7 +171,7 @@ $commit = Invoke-Git $repo rev-parse HEAD
     "  https://github.com/daurosk/oot-remake-multiplayer/tree/$commit",
     "  $(if ($Release) { "(tag $Release) " })commit $commit; hookshot\hookshot_coop.dll is its CMake target hookshot_coop.",
     '',
-    'Longshot: Team MagicBean''s static recompilation, GPL-3.0. Not in this kit: "Start OoT Co-op.bat" downloads it and builds',
+    'Longshot: Team MagicBean''s static recompilation, GPL-3.0. Not in this kit: "Start Squadala.bat" downloads it and builds',
     'it on your PC from your own game:',
     "  $($pin.repo)/src/commit/$($pin.commit)",
     '  with the patches in hookshot\patches (also hookshot/patches in the co-op repo), and the build tools of the',
@@ -206,19 +208,21 @@ $own = @(Get-ChildItem $kit -Recurse -File | ForEach-Object { $_.FullName.Substr
 $size = (Get-ChildItem $kit -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ('Folder: {0:N1} MB, {1} files' -f ($size / 1MB), ($own.Count + 1))
 if (-not $NoZip) {
-    # Two names, the same bytes: oot-coop-<tag>-windows.zip is the one players download (beside the Linux kit's
-    # oot-coop-<tag>-linux.zip); oot-coop-<tag>.zip is the name every updater up to v0.10.1 looks for (its
-    # Select-KitRelease takes nothing else), so those kits still find and install this release. Both go up.
+    # Two names, the same bytes: Squadala-<tag>-windows.zip is the one players download (beside the Linux kit's
+    # Squadala-<tag>-linux.zip; both were oot-coop-... up to v0.11.2). oot-coop-<tag>.zip is the name every older
+    # updater takes (up to v0.10.1 the only one; v0.11.0 to v0.11.2 take it after oot-coop-<tag>-windows.zip), so
+    # those kits still find and install this release. Both go up.
     $zip = Join-Path $OutRoot "$name-windows.zip"
-    $old = "$kit.zip"
+    $oldName = ($name -replace '^Squadala-', 'oot-coop-') + '.zip'
+    $old = Join-Path $OutRoot $oldName
     & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $OutRoot $name
     if ($LASTEXITCODE -ne 0) { throw "Zipping failed (tar $LASTEXITCODE)." }
     Copy-Item -LiteralPath $zip -Destination $old -Force
     $hash = Get-Sha $zip
     if ((Get-Sha $old) -ne $hash) { throw "The copy $old does not match $zip." }
     [System.IO.File]::WriteAllText("$zip.sha256", "$hash  $name-windows.zip`n", [System.Text.Encoding]::ASCII)
-    [System.IO.File]::WriteAllText("$old.sha256", "$hash  $name.zip`n", [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllText("$old.sha256", "$hash  $oldName`n", [System.Text.Encoding]::ASCII)
     Copy-Item -LiteralPath (Join-Path $kit 'Update.bat') -Destination (Join-Path $OutRoot 'Update.bat') -Force
     Write-Host ('Zip: {0} ({1:N1} MB), SHA-256 {2}' -f $zip, ((Get-Item $zip).Length / 1MB), $hash)
-    Write-Host "Release assets: $name-windows.zip and $name.zip (the same file, the name kits up to v0.10.1 update from), each with its .sha256, and Update.bat, all in $OutRoot"
+    Write-Host "Release assets: $name-windows.zip and $oldName (the same file, the name kits up to v0.11.2 update from), each with its .sha256, and Update.bat, all in $OutRoot"
 }

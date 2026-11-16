@@ -222,9 +222,78 @@ TEST_CASE("objects: a boss copy's hit place goes with its DAMAGE, and the owner'
     REQUIRE(step.writes.size() == 1);
     CHECK(step.writes[0].hurt == 2);
     CHECK(step.writes[0].hit_at == std::optional<proto::Vec3>(eye));
-    // The boss's game does not take it (Gohma holds at 1): no life is written for a boss, ever.
+    // The boss's game took 1 of the replay (it holds at 1): no life is written for a boss, ever; the rest goes
+    // to its own Life step (boss-hits), which clamps it as the game does.
     step = Tick(owner, 700 * kMs, {Enemy(0x200, 0x11, 1, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].direct);
+    CHECK(step.writes[0].hurt == 1);
+    CHECK(owner.BossHitsStepped() == 1);
+}
+
+TEST_CASE("objects: another player's hit our boss refused as a replay goes to its own Life step (boss-hits)") {
+    // A player's log as Gohma's owner: 23 DAMAGE from the other players, no replay taken ("did not take"). The
+    // hitter's game judged the hit on its copy; the owner's game takes the amount through its Life step.
+    const std::string kBoss = "Enemy_DungeonBoss_Gohma";
+    Sync owner;
+    owner.SetHurt(true);
+    Tick(owner, 0, {Enemy(0x200, 0x11, 21, 0.0f, kBoss)});
+    const proto::ObjectId oid = *owner.IdOf(0x200);
+    Own(owner, oid, 1);
+    proto::Damage d;
+    d.player_number = 2;
+    d.id = oid;
+    d.amount = 2;
+    owner.Receive(d);
+    auto step = Tick(owner, 100 * kMs, {Enemy(0x200, 0x11, 21, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].hurt == 2);  // the replay first (her reaction where her game takes it)
+    CHECK_FALSE(step.writes[0].direct);
+    CHECK(Tick(owner, 300 * kMs, {Enemy(0x200, 0x11, 21, 0.0f, kBoss)}).writes.empty());
+    // Refused: after the wait the whole 2 goes to her Life step, once.
+    step = Tick(owner, 600 * kMs, {Enemy(0x200, 0x11, 21, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].direct);
+    CHECK(step.writes[0].hurt == 2);
+    CHECK(step.writes[0].life == 19);
+    CHECK(step.writes[0].address == 0x200);
+    // Taken: 21 -> 19 is no hit of ours (nothing sent), and nothing more is given.
+    step = Tick(owner, 700 * kMs, {Enemy(0x200, 0x11, 19, 0.0f, kBoss)});
     CHECK(step.writes.empty());
+    CHECK(All<proto::Damage>(step).empty());
+    CHECK(Tick(owner, 1500 * kMs, {Enemy(0x200, 0x11, 19, 0.0f, kBoss)}).writes.empty());
+    CHECK(owner.BossHitsStepped() == 1);
+
+    // A replay her game takes (the eye in her own chance time): nothing more given.
+    d.amount = 1;
+    owner.Receive(d);
+    step = Tick(owner, 1600 * kMs, {Enemy(0x200, 0x11, 19, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);
+    Tick(owner, 1700 * kMs, {Enemy(0x200, 0x11, 18, 0.0f, kBoss)});
+    CHECK(Tick(owner, 2200 * kMs, {Enemy(0x200, 0x11, 18, 0.0f, kBoss)}).writes.empty());
+    CHECK(owner.BossHitsStepped() == 1);
+}
+
+TEST_CASE("objects: a boss copy's refused owner hit is still never given here (the owner judges)") {
+    const std::string kBoss = "Enemy_DungeonBoss_Gohma";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)});
+    const proto::ObjectId id = *copy.IdOf(0x100);
+    Own(copy, id, 2, 1);
+    proto::ObjectSample s;
+    s.player_number = 2;
+    s.id = id;
+    s.epoch = 1;
+    s.state.life = proto::ObjectLife{19, 21};
+    copy.Receive(s);
+    auto step = Tick(copy, 100 * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);
+    step = Tick(copy, 600 * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)});
+    CHECK(step.writes.empty());
+    CHECK(copy.BossHitsStepped() == 0);
 }
 
 TEST_CASE("objects: a hit place never rides on a later DAMAGE (seen while ours, or an older sum)") {
@@ -4445,6 +4514,44 @@ TEST_CASE("objects: a boss copy held at 1 that becomes ours takes its old owner'
     CHECK(raise->life == 21);
     CHECK(raise->hurt == 0);
     CHECK_FALSE(raise->direct);
+}
+
+TEST_CASE("objects: a boss copy with more life than its old owner's is lowered through its Life step (boss-hits)") {
+    // hs-boss-full 20261115-122137: B took Gohma at 21 while A's was 17; the plain lower waited for a replay
+    // that never came ("nothing given"), so the hand-over healed her.
+    const std::string kBoss = "Enemy_DungeonBoss_Gohma";
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 21, 50.0f, kBoss)});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 2);
+    proto::HandoverState h;
+    h.player_number = 2;
+    h.id = id;
+    h.epoch = 1;
+    h.state.life = proto::ObjectLife{17, 21};
+    sync.Receive(h);
+    Own(sync, id, 1, 1);
+    auto step = Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 21, 50.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].direct);
+    CHECK(step.writes[0].hurt == 4);
+    CHECK(step.writes[0].life == 17);
+    CHECK_FALSE(step.writes[0].heal);
+    // Taken: no hit of ours goes out for it.
+    step = Tick(sync, 300 * kMs, {Enemy(0x100, 0x11, 17, 50.0f, kBoss)});
+    CHECK(All<proto::Damage>(step).empty());
+    CHECK(step.writes.empty());
+    // A kill in the hand-over is not a direct lower (the old path: dead in the hand-over).
+    Sync dead;
+    Tick(dead, 0, {Enemy(0x100, 0x11, 21, 50.0f, kBoss)});
+    const proto::ObjectId did = *dead.IdOf(0x100);
+    Own(dead, did, 2);
+    h.id = did;
+    h.state.life = proto::ObjectLife{0, 21};
+    dead.Receive(h);
+    Own(dead, did, 1, 1);
+    step = Tick(dead, 200 * kMs, {Enemy(0x100, 0x11, 21, 50.0f, kBoss)});
+    CHECK(std::none_of(step.writes.begin(), step.writes.end(), [](const CoopObjects::LifeWrite& w) { return w.direct; }));
 }
 
 TEST_CASE("objects: an enemy that is not a boss still never heals across a hand-over") {

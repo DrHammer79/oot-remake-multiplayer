@@ -747,7 +747,7 @@ function Get-KitHeldFolderText([string]$Folder, [string]$Why, [string[]]$Holders
     $text = "Windows would not let the build move or delete $Folder ($Why). Something still has a file in it open"
     $text += $(if ($Holders) { ': ' + ($Holders -join ', ') + '.' } else { '.' })
     if ($Sync) {
-        $text += " This folder is in a cloud-sync folder ($Sync), and the sync client opens every new file to upload it: move the kit out of it, to a short folder such as C:\OoT-Coop, and start it there."
+        $text += " This folder is in a cloud-sync folder ($Sync), and the sync client opens every new file to upload it: move the kit out of it, to a short folder such as C:\Squadala, and start it there."
         return $text
     }
     $text += (' Most often it is the antivirus scanning the files just unpacked, or an Explorer window or the search indexer. ' +
@@ -1018,6 +1018,25 @@ function Get-KitOtherSizeTables([string]$ModsDir) {
     return $out.ToArray()
 }
 
+# Another OOTRR release replaced the game's (an update of hookshot\OOTRR.txt): its seeds are other worlds than the
+# old one's for the same seed word, and the old release's seed files do not build with the new one (OOTRR 0.6.0:
+# "Seeds made with older versions will not build"). So every built seed (mods\randomizer-*\coop-seed.txt) and its
+# seed file go: the game makes each one again with the new OOTRR at its next start (about a minute), so every player
+# of the same kit plays the same world. Run while the game is closed (the module step). The lines to show.
+function Remove-KitRandoSeeds([string]$ExeDir, [string]$Release) {
+    $lines = @()
+    $mods = Join-Path $ExeDir 'mods'
+    $control = Join-Path $mods 'oot-remake-randomizer'
+    foreach ($d in @(Get-ChildItem -LiteralPath $mods -Directory -Filter 'randomizer-*' -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $d.FullName 'coop-seed.txt'))) { continue }
+        Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $control "$($d.Name).ootrr") -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $d.FullName) { $lines += "randomizer: seed $($d.Name) could not be removed for OOTRR $Release" }
+        else { $lines += "randomizer: seed $($d.Name) removed for OOTRR $Release`: the game makes it again at its next start (another world: start a new save)" }
+    }
+    return $lines
+}
+
 # Built randomizer seeds (mods\randomizer-*\coop-seed.txt) whose size table is older than another mod's (a puppet
 # pack made again): the game aborts while it loads with such a seed on, so they are built again (Update-KitRandoSeeds).
 function Get-KitStaleRandoSeeds([string]$ExeDir) {
@@ -1100,7 +1119,7 @@ function Test-KitPuppetPackStale([string]$Manifest, [string]$ToolDir) {
 # The line said before Build-Hookshot-Coop runs for that need ('game', 'moved' and 'pin' ask first:
 # Get-KitHookshotNeedQuestion). A tester read the old "No co-op Hookshot game" as "couldn't find Hookshot"
 # and stopped: these say what is missing and that the kit sets it up.
-# $HsOnly: a Hookshot-only kit ("Start OoT Co-op.bat"), which has no emulator and no Build-Hookshot-Coop.bat.
+# $HsOnly: a Hookshot-only kit ("Start Squadala.bat"), which has no emulator and no Build-Hookshot-Coop.bat.
 function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnly = $false) {
     # (kit-friction: players who had built Longshot asked whether it could be used, or moved it into the kit; one asked
     # where 60 GB goes. Sizes measured on a built kit, 2026-11-14)

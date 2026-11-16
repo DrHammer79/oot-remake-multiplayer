@@ -91,6 +91,7 @@ struct FrameReport {
   std::vector<FlagWatcher::Received> received;
   // A save load was seen this frame (FlagWatcher::take_save_load): distinct
   // flags gone back, frames with no scene. 0 when not.
+  bool save_load = false;  // (save_load_flags may be 0: a load through the title, #96)
   int save_load_flags = 0;
   int save_load_frames = 0;
 };
@@ -105,6 +106,10 @@ class Session {
   // (PlayerReader::read_scene). Its absence for a while in a load is the
   // title screen, the sign of a save load (FlagWatcher::set_scene).
   void set_scene_readable(bool readable) { scene_readable_ = readable; }
+  // Emulator thread, before frame(): Hookshot's title menu is up now
+  // (FlagWatcher::set_title; passed on also while not connected). Never set
+  // on the emulator.
+  void set_title_up(bool up) { title_up_ = up; }
 
   // Emulator thread, once per emulated frame. `reading` is this frame's
   // PlayerReader::read() (nothing when the game is not the right one);
@@ -250,6 +255,7 @@ class Session {
   std::optional<FlagWatcher> watcher_;
   bool reset_sampler_ = false;
   bool scene_readable_ = true;  // set_scene_readable
+  bool title_up_ = false;       // set_title_up
   PlayerReader::DrawnState drawn_state_{};  // frame(GameMemory&)'s readers share it
 
   // Guarded by net_mutex_.

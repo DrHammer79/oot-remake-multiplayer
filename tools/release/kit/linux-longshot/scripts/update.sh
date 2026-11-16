@@ -14,7 +14,8 @@
 # than the one left is offered, and asked about. An update forward forgets it.
 # As tools/release/kit/linux/update.sh, for the zip: it reads the kit's version from VERSION.txt,
 # asks GitHub for the releases of daurosk/oot-remake-multiplayer and takes the newest with a Linux
-# zip (oot-coop-<version>-linux.zip and its .sha256). If that is newer, it downloads it,
+# zip (Squadala-<version>-linux.zip and its .sha256; oot-coop-<version>-linux.zip up to v0.11.2, and the same file
+# again from v0.11.3 on for the older kits' updaters, which know only that name). If that is newer, it downloads it,
 # checks the SHA-256 (and the release signature when the GitHub CLI is logged in; verify_signature = no in
 # data/coop-options.ini skips that, not the SHA-256), unpacks it to a temp folder and copies the kit's own files (MANIFEST.txt)
 # over this kit. Every file it replaces is first copied to backup-<old version>/; if anything fails,
@@ -65,17 +66,22 @@ newest_release() {
     KIT_QUIET_FETCH=1 fetch "$API" "$list" 2>/dev/null || { rm -f "$list"; return 2; }
     grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$list" | sed 's/.*:[[:space:]]*"//; s/"$//' >"$list.urls"
     rm -f "$list"
-    local url name tag sha best='' best_zip='' best_sha=''
+    local url name tag sha cmp new_name best='' best_zip='' best_sha='' best_new=0
     while IFS= read -r url; do
         name=${url##*/}
-        [[ $name =~ ^oot-coop-(.+)-linux\.zip$ ]] || continue
-        tag=${BASH_REMATCH[1]}
+        [[ $name =~ ^(Squadala|oot-coop)-(.+)-linux\.zip$ ]] || continue
+        tag=${BASH_REMATCH[2]}
+        [[ ${BASH_REMATCH[1]} == Squadala ]] && new_name=1 || new_name=0
         [[ -z ${WANT_TAG-} || ${tag,,} == "${WANT_TAG,,}" ]] || continue
         [[ $(kit_version_compare "$tag" 0.0.0-a) == 1 ]] || continue   # a version, not a draft name
         sha=$(grep -F -- "/$name.sha256" "$list.urls" | head -n1)
         [[ -n $sha ]] || continue
         url_ok "$url" && url_ok "$sha" || continue
-        if [[ -z $best || $(kit_version_compare "$tag" "$best") == 1 ]]; then best=$tag best_zip=$url best_sha=$sha; fi
+        # (the same release under both names: the Squadala- one)
+        [[ -z $best ]] && cmp=1 || cmp=$(kit_version_compare "$tag" "$best")
+        if [[ $cmp == 1 || ($cmp == 0 && $new_name == 1 && $best_new == 0) ]]; then
+            best=$tag best_zip=$url best_sha=$sha best_new=$new_name
+        fi
     done <"$list.urls"
     rm -f "$list.urls"
     [[ -n $best ]] && printf '%s %s %s\n' "$best" "$best_zip" "$best_sha"
@@ -115,7 +121,7 @@ prev_rm() {
 # that failed while copying holds only some).
 kit_complete() {
     local rel
-    [[ -f $1/MANIFEST.txt && -f $1/start-oot-coop.sh ]] || return 1
+    [[ -f $1/MANIFEST.txt && ( -f $1/start-squadala.sh || -f $1/start-oot-coop.sh ) ]] || return 1
     while IFS= read -r rel; do
         rel=${rel%$'\r'}
         [[ -z $rel || $rel == '#'* || $rel == data/coop-options.ini ]] && continue
@@ -216,7 +222,7 @@ else
     fi
     if [[ $action == check ]]; then
         if wanted "$tag" || [[ -n $want_tag ]]; then
-            echo "Co-op $tag is out (this kit: ${current:-not a release}). Start start-oot-coop.sh to update."
+            echo "Co-op $tag is out (this kit: ${current:-not a release}). Start start-squadala.sh to update."
         else
             echo "You stay on $current (you went back from $left); $tag is out. bash scripts/update.sh goes forward again."
         fi
@@ -269,7 +275,8 @@ else
     fi
     unzip_to "$work/kit.zip" "$work/new" >/dev/null || { echo 'The download is damaged (it does not unpack); nothing was changed.'; exit 1; }
     new=$(find "$work/new" -mindepth 1 -maxdepth 1 -type d | head -n1)
-    [[ -n $new && -f $new/MANIFEST.txt && -f $new/VERSION.txt && -f $new/start-oot-coop.sh ]] ||
+    # (start-oot-coop.sh: the start file's name up to v0.11.2, when going back)
+    [[ -n $new && -f $new/MANIFEST.txt && -f $new/VERSION.txt && ( -f $new/start-squadala.sh || -f $new/start-oot-coop.sh ) ]] ||
         { echo 'The download is not a Linux co-op kit; nothing was changed.'; exit 1; }
 fi
 change=$(game_change "$KIT" "$new")
@@ -344,7 +351,7 @@ for rel in "${files[@]}"; do
     mkdir -p "$KIT/$(dirname "$rel")" && cp -p -- "$new/$rel" "$KIT/$rel.update-new" &&
         mv -f -- "$KIT/$rel.update-new" "$KIT/$rel" || restore
 done
-chmod +x "$KIT/start-oot-coop.sh" "$KIT"/scripts/*.sh "$KIT/revert.sh" 2>/dev/null || true
+chmod +x "$KIT"/start-*.sh "$KIT"/scripts/*.sh "$KIT/revert.sh" 2>/dev/null || true
 rm -f "$KIT/$MARKER"
 # previous/<version>/, the last $KEEP_PREV of them.
 if [[ -n $part && -d $part ]]; then

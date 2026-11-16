@@ -5,6 +5,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "coop_dungeon.h"
 #include "coop_story.h"
@@ -402,5 +403,80 @@ TEST_CASE("story: each mend writes the value its quest proves, on the one-way si
         CHECK(m.due(q::kComplete, !m.value, true));
         // Before Mido (Step01, the Deku Tree scene not played): never due.
         CHECK_FALSE(m.due(q::kStep01, !m.value, false));
+    }
+}
+
+namespace {
+
+// Player report 99: cell N of Gerudo Fortress holds Npc_Hylia_01(2+N)_Adult
+// (Logic/GerudoFortress_Common_Level_CarpenterSet_0N_*).
+std::string Carpenter(int cell) {
+    return "Npc_Hylia_01" + std::to_string(2 + cell) + "_Adult";
+}
+
+std::vector<std::string> RescueDone(int cell) {
+    const std::string n = "0" + std::to_string(cell);
+    return {"GerudoFortress_DestroyGerudoThief_" + Carpenter(cell),
+            "IsGet_SmallKey_GerudoFortress.SmallKey" + n,
+            "GerudoFortress_Saved_" + Carpenter(cell),
+            "GerudoFortress_IsAfterHelpCarpenter_" + Carpenter(cell),
+            "GerudoFortress_WarpPoint" + n + "_ClearEvent"};
+}
+
+} // namespace
+
+TEST_CASE("story: a Gerudo Fortress rescue is shared whole, the guard's own spawn is not (player report 99)") {
+    CHECK(host::flag_hash("GerudoFortress_Saved_Npc_Hylia_013_Adult") == 0x0db0556fu);
+    CHECK(host::flag_hash("GerudoFortress_WarpPoint04_ClearEvent") == 0xa4b1efb9u);
+    for (int cell = 1; cell <= 4; ++cell) {
+        for (const std::string& name : RescueDone(cell)) {
+            const auto* f = CoopStory::Find(host::flag_hash(name));
+            REQUIRE_MESSAGE(f != nullptr, name);
+            CHECK_MESSAGE(f->kind == CoopStory::Kind::world, name);
+        }
+        // What makes the jail guard and closes the cell stays each game's own: a
+        // player there before the guard is beaten still gets the fight.
+        for (const std::string& name : {"Found_" + Carpenter(cell),
+                                        "GerudoFortress_AppearGerudoThief_" + Carpenter(cell),
+                                        "GerudoFortress_CloseShutter_" + Carpenter(cell),
+                                        "InsideTheRoom_" + Carpenter(cell),
+                                        "GerudoFortress_" + Carpenter(cell) + "_IsCallingHelp"}) {
+            CHECK_MESSAGE(CoopStory::Find(host::flag_hash(name)) == nullptr, name);
+        }
+    }
+    // The card and its scene were shared already (an item; Dm_Gerudo_0025).
+    CHECK(CoopStory::Find(host::flag_hash("HavePlayedEvent.Dm_Gerudo_0025")) != nullptr);
+}
+
+TEST_CASE("story: the host frees a carpenter, the guest's game has the whole rescue, not half (player report 99)") {
+    std::optional<host::SharedFlags> list;
+    CoopStory::Merge(list, true);
+    Game host_game;
+    Game guest;
+    for (Game* g : {&host_game, &guest}) {
+        for (int cell = 1; cell <= 4; ++cell) {
+            for (const std::string& name : RescueDone(cell)) g->set(Key(name.c_str()), 0);
+        }
+    }
+    host::FlagWatcher wh(*list, host::FlagRole::player);
+    host::FlagWatcher wg(*list, host::FlagRole::player);
+    wh.frame(host_game);
+    wg.frame(guest);
+
+    // The host beats cell 2's guard, takes the key, opens the cell and the carpenter leaves.
+    for (const std::string& name : RescueDone(2)) host_game.set(Key(name.c_str()), 1);
+    const auto out = wh.frame(host_game);
+    REQUIRE(out.size() == 1);
+    proto::Message m;
+    REQUIRE(proto::decode(out[0].bytes, m) == proto::Error::none);
+    const auto* set = std::get_if<proto::FlagSet>(&m);
+    REQUIRE(set);
+    CHECK(set->flags.size() == RescueDone(2).size());
+
+    wg.receive(proto::Message{proto::FlagState{1, set->flags}});
+    wg.frame(guest);
+    for (const std::string& name : RescueDone(2)) CHECK_MESSAGE(guest.get(Key(name.c_str())) == 1, name);
+    for (const int cell : {1, 3, 4}) {
+        for (const std::string& name : RescueDone(cell)) CHECK_MESSAGE(guest.get(Key(name.c_str())) == 0, name);
     }
 }

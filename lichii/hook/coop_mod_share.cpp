@@ -36,7 +36,7 @@ struct Glue {
     std::optional<std::vector<proto::ModSetting>> host_values;
     std::vector<std::string> differences;     // as last told
     std::map<std::uint8_t, std::size_t> guests_told;  // host: differences last told per guest
-    std::map<std::uint8_t, bool> seedless;  // a player without the host's seed, as last told (#59)
+    std::map<std::uint8_t, int> seedless;  // a player's seed against the host's, as last told: 0 same, 1 none, 2 other files (#59)
     std::vector<std::string> lines;
     void Line(std::string text) {
         if (lines.size() < 32) {
@@ -113,17 +113,33 @@ bool IsSeedId(std::string_view id) {
     return true;
 }
 
+namespace {
+std::string SeedWordOf(const std::string& id) {
+    std::string word = id.substr(std::string_view("randomizer-").size());
+    for (char& c : word) {
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    }
+    return word;
+}
+}  // namespace
+
 std::string SeedMissing(const proto::ModList& host, const proto::ModList& theirs) {
     for (const auto& h : host.mods) {
         if (!IsSeedId(h.id)) continue;
         bool has = false;
         for (const auto& t : theirs.mods) has = has || t.id == h.id;
         if (has) continue;
-        std::string word = h.id.substr(std::string_view("randomizer-").size());
-        for (char& c : word) {
-            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        return SeedWordOf(h.id);
+    }
+    return {};
+}
+
+std::string SeedFilesOther(const proto::ModList& host, const proto::ModList& theirs) {
+    for (const auto& h : host.mods) {
+        if (!IsSeedId(h.id) || h.hash == proto::ModHash{}) continue;
+        for (const auto& t : theirs.mods) {
+            if (t.id == h.id && t.hash != proto::ModHash{} && t.hash != h.hash) return SeedWordOf(h.id);
         }
-        return word;
     }
     return {};
 }
@@ -143,6 +159,18 @@ std::string SeedlessMineLine(std::string_view seed) {
     return "Mods: you run WITHOUT the host's randomizer seed " + std::string(seed) +
            ": your game is the base game, not the host's world, until the seed is built and the game started again "
            "(the Randomizer's lines say why)";
+}
+
+std::string SeedOtherLine(std::uint8_t number, std::string_view name, std::string_view seed) {
+    return "Mods: " + Who(number, name) + " has the randomizer seed " + std::string(seed) +
+           " built unlike the host's: on another kit (another OOTRR) it is another world (other items in chests); "
+           "all need the same kit";
+}
+
+std::string SeedOtherMineLine(std::string_view seed) {
+    return "Mods: your randomizer seed " + std::string(seed) +
+           " is built unlike the host's: on another kit (another OOTRR) it is another world (other items in chests); "
+           "update to the host's kit";
 }
 
 std::string SeedBackLine(std::uint8_t number, std::string_view name) {
@@ -243,6 +271,8 @@ void Frame(coop::host::Session* session) {
                     if (diff != g.differences) {
                         if (const std::string seed = SeedMissing(host->second, *mine); !seed.empty()) {
                             g.Line(SeedlessMineLine(seed));  // (the other differences are in the Mods tab)
+                        } else if (const std::string other = SeedFilesOther(host->second, *mine); !other.empty()) {
+                            g.Line(SeedOtherMineLine(other));
                         } else if (!diff.empty()) {
                             g.Line("Mods: yours differ from the host's (" + diff.front() +
                                    (diff.size() > 1 ? ", ..." : "") + "): see the Mods tab");
@@ -265,13 +295,21 @@ void Frame(coop::host::Session* session) {
             if (host_list != nullptr) {
                 for (const auto& [number, list] : g.lists) {
                     if (!g.hosting && number == g.host_number) continue;
-                    const std::string seed = SeedMissing(*host_list, list);
-                    const auto told = g.seedless.try_emplace(number, false).first;
-                    if (told->second == !seed.empty()) continue;
-                    told->second = !seed.empty();
+                    // 0: the host's seed, 1: none (SeedMissing), 2: other files (SeedFilesOther: another kit)
+                    std::string seed = SeedMissing(*host_list, list);
+                    int state = seed.empty() ? 0 : 1;
+                    if (state == 0) {
+                        seed = SeedFilesOther(*host_list, list);
+                        if (!seed.empty()) state = 2;
+                    }
+                    const auto told = g.seedless.try_emplace(number, 0).first;
+                    if (told->second == state) continue;
+                    told->second = state;
                     const auto name = g.names.find(number);
                     const std::string who = name != g.names.end() ? name->second : std::string();
-                    g.Line(seed.empty() ? SeedBackLine(number, who) : SeedlessLine(number, who, seed));
+                    g.Line(state == 1   ? SeedlessLine(number, who, seed)
+                           : state == 2 ? SeedOtherLine(number, who, seed)
+                                        : SeedBackLine(number, who));
                 }
             }
             if (mine && g.hosting) {

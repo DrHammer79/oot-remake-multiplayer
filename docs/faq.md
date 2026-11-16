@@ -33,7 +33,7 @@ We never ship save files, keys, firmware or the game in a release or in this rep
 
 ## The update did not happen
 
-`Start OoT Co-op.bat` and `Update.bat` say why and how to update by hand. Most often: the game is still open (close it), there is no network, or GitHub turned the check away for a while (it allows 60 checks an hour from one internet address). If it says the release signature does not check, the release was published moments ago and is not signed yet: try again later (only set `verify_signature = no` in `coop-options.ini` if it keeps failing and you downloaded nothing from elsewhere). By hand: download **Update.bat** from the newest [release](https://github.com/daurosk/oot-remake-multiplayer/releases) into your kit folder and double-click it.
+`Start Squadala.bat` and `Update.bat` say why and how to update by hand. Most often: the game is still open (close it), there is no network, or GitHub turned the check away for a while (it allows 60 checks an hour from one internet address). If it says the release signature does not check, the release was published moments ago and is not signed yet: try again later (only set `verify_signature = no` in `coop-options.ini` if it keeps failing and you downloaded nothing from elsewhere). By hand: download **Update.bat** from the newest [release](https://github.com/daurosk/oot-remake-multiplayer/releases) into your kit folder and double-click it.
 
 ## Can I go back to the version I had?
 

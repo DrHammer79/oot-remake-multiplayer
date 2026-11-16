@@ -51,6 +51,7 @@ struct FlagStats {
   std::uint64_t applied = 0;           // entries written into the game
   std::uint64_t deltas_added = 0;      // host: count deltas added to the game (in applied too)
   std::uint64_t kept_local = 0;        // snapshot entries skipped over a pending change
+  std::uint64_t snapshot_exact = 0;    // player: join snapshot values written as they are (#96)
   std::uint64_t not_shared = 0;        // incoming entries not in the shared list
   std::uint64_t pickups_learned = 0;   // 64-bit keys taken as pickups from a message
   std::uint64_t pickup_resets = 0;     // a pickup's 0, ours or incoming: not passed on
@@ -61,6 +62,8 @@ struct FlagStats {
   std::uint64_t bad_snapshots = 0;     // parts out of order: the snapshot is dropped
   std::uint64_t ignored_messages = 0;  // not a flag message, or not for this role
   std::uint64_t load_reverts = 0;      // the game's load undid a group value: written back
+  std::uint64_t title_loads = 0;       // player: a load through the title, fewer flags back than kSaveLoadMin (#96)
+  std::uint64_t offline_loads = 0;     // player: the title was up while not connected, our changes put back (#96)
   std::uint64_t one_way_restores = 0;  // a one-way Bool (map, compass) back to 0: written back
   std::uint64_t down_only_kept = 0;    // a group's 1 not written over our 0 (share_down_only)
   std::uint64_t up_only_kept = 0;      // a group's 0 not written over our 1 (share_up_only)
@@ -263,6 +266,17 @@ class FlagWatcher {
   // load window means the title screen or file select: the only way to a
   // save load (docs/flags.md, "Saves"). Default: loaded.
   void set_scene(bool readable) { scene_readable_ = readable; }
+  // Hookshot's title menu is up (coop_title.cpp TitleUp), every frame, also
+  // while not connected (frame() does not run then). A player's load window
+  // with the title in it is a save load even with no flag back: a guest's own
+  // richer save no longer sends its items into the host's file (player report
+  // #96). A title while not connected puts back, at the next connection's
+  // first frame with Link, what our game changed meanwhile. Never set on the
+  // emulator (the old rule holds there); the host's loads never use it.
+  void set_title(bool up) {
+    title_up_ = up;
+    if (up) title_seen_ = true;
+  }
   static constexpr int kTitleFrames = 30;
   static constexpr int kSaveLoadMin = 2;
   static constexpr int kSettleFrames = 120;
@@ -290,7 +304,8 @@ class FlagWatcher {
     int frames = 0;
   };
   std::optional<SaveLoadSeen> take_save_load() {
-    if (seen_flags_ == 0) return std::nullopt;
+    if (!seen_) return std::nullopt;
+    seen_ = false;
     SaveLoadSeen s{seen_flags_, seen_frames_};
     seen_flags_ = 0;
     seen_frames_ = 0;
@@ -339,6 +354,9 @@ class FlagWatcher {
   void apply_snapshot(FlagStore& store);
   // The host's save load (FLAG_RESET): every value written exactly.
   void apply_reset(FlagStore& store, const std::vector<protocol::FlagEntry>& flags);
+  // The group's value written as it is (no OR, max or mirror rule), except a
+  // one-way flag that keeps our own value (keeps_own). True when written.
+  bool write_exact(FlagStore& store, const protocol::FlagEntry& entry);
   // A load window (settling()) ends. Host: when its save load moved named
   // flags, the flags that moved go out as FLAG_RESET. Player: when its own
   // save load moved them, they go back to what the group had before.
@@ -429,10 +447,15 @@ class FlagWatcher {
   bool window_ = false;
   bool moved_ = false;  // a save was loaded in it (the title seen, kSaveLoadMin flags back)
   std::set<FlagKey> back_keys_;  // distinct named flags gone back with no Link in this window
+  bool seen_ = false;            // take_save_load: a save load was seen, not taken yet
   int seen_flags_ = 0;           // take_save_load: the sign was taken with these
   int seen_frames_ = 0;
   int no_scene_frames_ = 0;  // frames in this window with no scene loaded
   bool scene_readable_ = true;  // set_scene
+  bool title_up_ = false;       // set_title: up now
+  bool title_seen_ = false;     // set_title: up since the last frame() (also while not connected)
+  bool window_title_ = false;   // the title was up in this load window
+  bool check_offline_ = false;  // reset(): a connection's first frame with Link looks at title_seen_
   bool reset_seen_ = false;  // take_reset
   std::set<FlagKey> restate_;  // host: counts a delta was added to this frame
   bool resend_pending_ = false;

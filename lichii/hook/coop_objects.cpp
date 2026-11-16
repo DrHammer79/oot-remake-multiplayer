@@ -3326,10 +3326,10 @@ private:
             return;  // never a write of ours
         }
         if (w.direct) {
-            LOG_INFO(Core, "coop: objects: test kill {:#x}: the game's Life step did not take it (or there is none: "
-                           "patch 0007): nothing written",
-                     w.address);
-            return;  // the test kill goes only through the game's own step, never a write of ours
+            LOG_INFO(Core, "coop: objects: a direct hit (test kill or boss hit) {:#x} '{}': the game's Life step "
+                           "did not take it (or there is none: patch 0007): nothing written",
+                     w.address, NameOf(w.address));
+            return;  // a test kill or a boss hit goes only through the game's own step, never a write of ours
         }
         if (ask.native) {
             // (no Life step here, or it could not take it: the hit is lost; never a write of ours)
@@ -3646,10 +3646,10 @@ private:
                 LOG_INFO(Core,
                          "coop: objects: share placed {} copies; off from where we put them "
                          "avg {:.3f} max {:.3f} over {}; game calls: {} moves, {} deletes, {} "
-                         "plays, {} frame sets; hurts taken {} missed {}",
+                         "plays, {} frame sets; hurts taken {} missed {} (boss hits to its Life step {})",
                          placed_.size(), drift_count_ ? drift_sum_ / drift_count_ : 0.0f,
                          drift_max_, drift_count_, moved, deleted, played, framed, sync_.HurtsTaken(),
-                         sync_.HurtsMissed());
+                         sync_.HurtsMissed(), sync_.BossHitsStepped());
             }
             // Issue 101: which copy was furthest from where we put it, so
             // one run tells a copy the setter does not hold (a flying or

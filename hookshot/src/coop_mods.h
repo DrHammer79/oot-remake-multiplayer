@@ -85,6 +85,9 @@ public:
     // Whether this hookshot.exe reads the list (patch 0011). Without it the mods load in Hookshot's own order and the
     // tab cannot switch or move them; code mods and settings work all the same.
     bool ExeReadsList() const;
+    // What this run's game indexed, in its order (the last one wins a file), the pack included: coop-mods.applied's
+    // "on" rows. Only when ExeReadsList; else the mods it sees by name.
+    std::vector<std::string> Indexed() const;
 
     std::vector<Row> Rows() const;
     bool SetOn(std::string_view name, bool on, std::string* problem = nullptr);

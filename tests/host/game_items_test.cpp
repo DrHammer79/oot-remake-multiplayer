@@ -545,7 +545,7 @@ TEST_CASE("game items: the host adds deltas its client hands over") {
   CHECK(keys(pw) == 2);
 }
 
-TEST_CASE("game items: a late joiner gets the host's items and keeps its own") {
+TEST_CASE("game items: a late joiner gets the host's items, not its own (the host's save decides, #96)") {
   // The host has played on: the Hookshot, 3 Forest Temple keys, a heart
   // container. The joiner comes in with only a bottle the host lacks. The
   // server hands the joiner the host's table as FLAG_SNAPSHOT; here the
@@ -581,23 +581,19 @@ TEST_CASE("game items: a late joiner gets the host's items and keeps its own") {
     CHECK(jf.get_int(kHookshot) == 1);
     CHECK(jf.get_bool(kHookshotGet) == true);
     CHECK(jf.get_int(kForestKeys) == 3);   // the host's total
-    CHECK(jf.get_int(kMaxLife) == 16);     // max
-    CHECK(jf.get_int(kBottleA) == 1);      // its own bottle stays
-    CHECK(jf.get_bool(kBottleAValid) == true);
+    CHECK(jf.get_int(kMaxLife) == 16);
+    // The host's save decides (docs/flags.md, "Saves"; player report #96: a
+    // guest's older save filled the host's new file): the joiner's own
+    // bottle, which the host's save lacks, is not kept and not sent.
+    CHECK(jf.get_int(kBottleA) == 0);
+    CHECK(jf.get_bool(kBottleAValid) == false);
     CHECK(jf.get_int(kRupees) == 10);      // per player, not in the table
+    CHECK(from_joiner.empty());
 
-    // The joiner's bottle goes to the host.
-    const auto sent = decoded(from_joiner);
-    REQUIRE(sent.size() == 1);
-    const auto& set = std::get<protocol::FlagSet>(sent[0]);
-    CHECK(set.flags == std::vector{i(kBottleA, 1), b(kBottleAValid, true)});
-    deliver(host, from_joiner);
-    const auto answer = host.frame(hs);
     GameFlags hf(hw);
-    CHECK(hf.get_int(kBottleA) == 1);
-    CHECK(hf.get_bool(kBottleAValid) == true);
+    CHECK(hf.get_int(kBottleA) == 0);
+    CHECK(hf.get_bool(kBottleAValid) == false);
     CHECK(hf.get_int(kRupees) == 50);
-    deliver(joiner, answer);
     CHECK(joiner.frame(js).empty());
     CHECK(host.frame(hs).empty());
   }

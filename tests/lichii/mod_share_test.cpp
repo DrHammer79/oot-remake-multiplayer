@@ -70,3 +70,23 @@ TEST_CASE("mod share: a player without the host's randomizer seed is found, and 
           std::string::npos);
     CHECK(CoopModShare::SeedBackLine(2, "Rev") == "Mods: player 2 (Rev) runs the host's randomizer seed now");
 }
+
+TEST_CASE("mod share: the host's seed built into other files (another kit's OOTRR: another world) is found and said") {
+    const ModList host{1, {Mod("hud", "2", 7), Mod("randomizer-n2bteykm", "0", 5)}};
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Mod("randomizer-n2bteykm", "0", 6)}}) == "N2BTEYKM");
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Mod("randomizer-n2bteykm", "0", 5)}}).empty());
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Mod("randomizer-n2bteykm", "0", 0)}}).empty());  // not hashed yet
+    CHECK(CoopModShare::SeedFilesOther(ModList{1, {Mod("randomizer-n2bteykm", "0", 0)}},
+                                       ModList{2, {Mod("randomizer-n2bteykm", "0", 6)}})
+              .empty());
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {}}).empty());  // missing: SeedMissing says it
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Mod("hud", "2", 9)}}).empty());  // not a seed
+    const std::string line = CoopModShare::SeedOtherLine(2, "Rev-the-long-name", "N2BTEYKM");
+    CHECK(line.find("player 2 (Rev-the-long-name) has the randomizer seed N2BTEYKM built unlike the host's") !=
+          std::string::npos);
+    CHECK(line.find("another OOTRR") != std::string::npos);
+    CHECK(line.size() <= 200);
+    const std::string mine = CoopModShare::SeedOtherMineLine("N2BTEYKM");
+    CHECK(mine.find("update to the host's kit") != std::string::npos);
+    CHECK(mine.size() <= 200);
+}

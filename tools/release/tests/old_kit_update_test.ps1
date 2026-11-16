@@ -3,10 +3,10 @@
 # that names the new release's assets as GitHub will. No network, nothing published, no game run.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\release\tests\old_kit_update_test.ps1 `
-#       -OldZip <oot-coop-v0.10.1.zip> -NewDir <make_kit_hookshot -OutRoot folder> -Tag v0.11.0
+#       -OldZip <oot-coop-v0.11.2-windows.zip or another old kit> -NewDir <make_kit_hookshot -OutRoot folder> -Tag v0.11.3
 #
 # -OldZip  the old release's zip (best the one downloaded from its GitHub release; its .sha256 beside it is checked)
-# -NewDir  the folder make_kit_hookshot.ps1 wrote oot-coop-<Tag>-windows.zip, oot-coop-<Tag>.zip and their .sha256 to
+# -NewDir  the folder make_kit_hookshot.ps1 wrote Squadala-<Tag>-windows.zip, oot-coop-<Tag>.zip and their .sha256 to
 # -Tag     the new release's tag
 # -Work    a folder for the test (default: a new temp folder, removed after)
 #
@@ -73,7 +73,7 @@ try {
     }
 
     # --- The new release, as GitHub lists it
-    $newWin = Join-Path $NewDir "oot-coop-$Tag-windows.zip"
+    $newWin = Join-Path $NewDir "Squadala-$Tag-windows.zip"
     $newOld = Join-Path $NewDir "oot-coop-$Tag.zip"
     foreach ($f in $newWin, "$newWin.sha256", $newOld, "$newOld.sha256") { Check (Test-Path -LiteralPath $f) "the new release has $([System.IO.Path]::GetFileName($f))" }
     Check ((Sha $newWin) -eq (Sha $newOld)) 'the -windows zip and the old-name zip are the same file'
@@ -82,15 +82,17 @@ try {
         Check ($line -eq "$(Sha $z)  $([System.IO.Path]::GetFileName($z))") "$([System.IO.Path]::GetFileName($z)).sha256 names its own file and hash"
     }
     $assets = @()
-    foreach ($f in @(Get-ChildItem -LiteralPath $NewDir -File | Where-Object { $_.Name -like "oot-coop-$Tag*" -or $_.Name -eq 'Update.bat' })) {
+    foreach ($f in @(Get-ChildItem -LiteralPath $NewDir -File | Where-Object { $_.Name -like "oot-coop-$Tag*" -or $_.Name -like "Squadala-$Tag*" -or $_.Name -eq 'Update.bat' })) {
         $assets += [pscustomobject]@{ name = $f.Name; browser_download_url = $f.FullName; size = $f.Length }
     }
     # (the Linux kit goes up beside it: the Windows updater must never take it)
-    $lin = Join-Path $Work "oot-coop-$Tag-linux.zip"
-    [System.IO.File]::WriteAllText($lin, 'not a windows kit')
-    [System.IO.File]::WriteAllText("$lin.sha256", "$(Sha $lin)  oot-coop-$Tag-linux.zip`n")
-    $assets += [pscustomobject]@{ name = "oot-coop-$Tag-linux.zip"; browser_download_url = $lin; size = 17 }
-    $assets += [pscustomobject]@{ name = "oot-coop-$Tag-linux.zip.sha256"; browser_download_url = "$lin.sha256"; size = 90 }
+    foreach ($ln in "Squadala-$Tag-linux.zip", "oot-coop-$Tag-linux.zip") {
+        $lin = Join-Path $Work $ln
+        [System.IO.File]::WriteAllText($lin, 'not a windows kit')
+        [System.IO.File]::WriteAllText("$lin.sha256", "$(Sha $lin)  $ln`n")
+        $assets += [pscustomobject]@{ name = $ln; browser_download_url = $lin; size = 17 }
+        $assets += [pscustomobject]@{ name = "$ln.sha256"; browser_download_url = "$lin.sha256"; size = 90 }
+    }
     $list = Join-Path $Work 'releases.json'
     $rel = @([pscustomobject]@{ tag_name = $Tag; draft = $false; html_url = "page/$Tag"; assets = $assets })
     [System.IO.File]::WriteAllText($list, (ConvertTo-Json -InputObject $rel -Depth 5))
@@ -125,7 +127,8 @@ try {
     $top = @(Get-ChildItem -LiteralPath $kit -File | ForEach-Object Name | Sort-Object)
     $newTop = @(Get-ChildItem -LiteralPath $newKit -File | ForEach-Object Name | Sort-Object)
     Check ((Compare-Object $top $newTop).Count -eq 0) "the kit's top folder is the new kit's [$($top -join ', ')]"
-    Check (Test-Path -LiteralPath (Join-Path $kit 'Start OoT Co-op.bat')) 'the start file is there'
+    Check (Test-Path -LiteralPath (Join-Path $kit 'Start Squadala.bat')) 'the start file Start Squadala.bat is there'
+    Check ((Get-Content -LiteralPath (Join-Path $kit 'Start OoT Co-op.bat') -Raw) -match 'call "%~dp0Start Squadala\.bat"') 'Start OoT Co-op.bat (the old name) is the one-line call of it now'
     Check ((Select-String -LiteralPath (Join-Path $kit 'scripts\update.ps1') -SimpleMatch 'function Get-KitReleaseZip' -Quiet)) 'the new kit''s updater knows the -windows name'
     $o = [System.IO.File]::ReadAllText($optFile)
     Check ($o -match '(?m)^pvp = on' -and $o -match '(?m)^# mine' -and $o -match '(?m)^verify_signature = no') 'coop-options.ini keeps the player''s values'

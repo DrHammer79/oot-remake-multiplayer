@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# What start-oot-coop.sh does (the Linux twin of the Windows kit's scripts/start.ps1):
+# What start-squadala.sh does (the Linux twin of the Windows kit's scripts/start.ps1):
 #   1. checks this PC and the kit folder (each problem said in plain words, with what to do)
 #   2. offers a new co-op version when there is one (data/coop-options.ini auto_update: ask, yes, no)
 #   3. builds the game once from your game file (scripts/build.sh), or brings it up to date
 #   4. starts the game; Host and Join are in its menu (the Multiplayer tab)
 #
-#   bash start-oot-coop.sh                     all of the above
-#   bash start-oot-coop.sh --game FILE.nup     the game file, no question (also --exefs, --rebuild, --jobs N)
-#   bash start-oot-coop.sh --no-update         no update check this time
-#   bash start-oot-coop.sh --logs              collect the logs for a bug report, start nothing
-#   bash start-oot-coop.sh --pack              make the puppet pack again (how you see the others), start nothing
+#   bash start-squadala.sh                     all of the above
+#   bash start-squadala.sh --game FILE.nup     the game file, no question (also --exefs, --rebuild, --jobs N)
+#   bash start-squadala.sh --no-update         no update check this time
+#   bash start-squadala.sh --logs              collect the logs for a bug report, start nothing
+#   bash start-squadala.sh --pack              make the puppet pack again (how you see the others), start nothing
 # Started without a terminal (Steam's Game Mode, a desktop shortcut) it asks nothing: an update is
 # left for the next start from a terminal, and a game that is not built yet is said in a dialog.
 set -euo pipefail
@@ -24,7 +24,7 @@ while (($#)); do
         --game | --exefs | --jobs) build_args+=("$1" "${2-}"); shift ;;
         --rebuild | --check-only) build_args+=("$1") ;;
         -h | --help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) fail "Unknown option: $1 (bash start-oot-coop.sh --help lists them)" ;;
+        *) fail "Unknown option: $1 (bash start-squadala.sh --help lists them)" ;;
     esac
     shift
 done
@@ -45,13 +45,13 @@ if [[ -n $glibc && $(kit_version_compare "v$glibc.0" v2.35.0) == -1 ]]; then
     fail "This Linux is too old (glibc $glibc; the game needs 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, SteamOS 3 or newer)."
 fi
 [[ -f $DATA/longshot/PIN && -f $KIT/scripts/build.sh ]] ||
-    fail 'Files of the kit are missing. Unzip the whole zip again (not only start-oot-coop.sh).'
+    fail 'Files of the kit are missing. Unzip the whole zip again (not only start-squadala.sh).'
 case $KIT in
     /tmp/* | /var/tmp/* | */.cache/*) [[ ! -d $DATA/game ]] &&
-        fail "This kit is in a temporary folder ($KIT): it would be lost. Unzip it to a folder of your own (for example ~/OoT-Coop) and start it there." ;;
+        fail "This kit is in a temporary folder ($KIT): it would be lost. Unzip it to a folder of your own (for example ~/Squadala) and start it there." ;;
 esac
 touch "$DATA/.write-test" 2>/dev/null && rm -f "$DATA/.write-test" ||
-    fail "This folder is read-only for you ($KIT). Unzip the kit to a folder of your own (for example ~/OoT-Coop)."
+    fail "This folder is read-only for you ($KIT). Unzip the kit to a folder of your own (for example ~/Squadala)."
 missing=()
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || missing+=('curl')
 for c in sha256sum find sed awk df; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
@@ -70,11 +70,11 @@ kit_game_running && fail 'The game of this kit is running already. Switch to its
 # --pack (boredhermit: "it can't build the puppet independently anymore"): the pack made again, nothing else. Its stamp
 # goes, so build.sh makes it whatever it was; the game's own build steps are skipped as on any start (nothing changed).
 if ((pack_only)); then
-    [[ -n $(kit_game_exe) ]] || fail 'The game is not built yet: start start-oot-coop.sh (it builds the game and makes the puppet pack).'
+    [[ -n $(kit_game_exe) ]] || fail 'The game is not built yet: start start-squadala.sh (it builds the game and makes the puppet pack).'
     rm -f "$GAME/mods/contents/0400486024DEC000/coop-puppet/.coop-stamp" "$DATA/pack-asked.txt"   # (and asks again)
     bash "$KIT/scripts/build.sh" "${build_args[@]}"
     [[ -f $GAME/mods/contents/0400486024DEC000/coop-puppet/.coop-stamp ]] || fail 'The puppet pack was not made (said why above).'
-    say 'Done: the puppet pack is made. Start start-oot-coop.sh to play.'
+    say 'Done: the puppet pack is made. Start start-squadala.sh to play.'
     exit 0
 fi
 
@@ -92,14 +92,14 @@ if ((!no_update)) && [[ $mode != no ]] && [[ -z ${OOT_COOP_NO_UPDATE-} ]]; then
                 read -r -t 60 -p 'Update now? Your saves and settings are kept. [Y/n] ' a || a=y
                 [[ $a =~ ^[nN] ]] || go=1
             else
-                say "Co-op ${status#newer } is out: start start-oot-coop.sh from a terminal to update."
+                say "Co-op ${status#newer } is out: start start-squadala.sh from a terminal to update."
             fi
             if ((go)); then
                 set +e
                 bash "$KIT/scripts/update.sh" --launch
                 code=$?
                 set -e
-                ((code == 3)) && exec bash "$KIT/start-oot-coop.sh" --no-update "${build_args[@]}"
+                ((code == 3)) && exec bash "$KIT/start-squadala.sh" --no-update "${build_args[@]}"
                 ((code == 0)) || warn 'the update did not finish (said why above); starting this version.'
             fi ;;
         'failed '*) warn "no update check this time (${status#failed })." ;;
@@ -119,7 +119,7 @@ exe=$(kit_game_exe) || fail 'The game is not built (said why above).'
 # A menu entry once (Steam Deck: Steam's "Add a Non-Steam Game" lists it), for this kit.
 apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 entry=$apps/oot-coop.desktop
-if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "$KIT/start-oot-coop.sh" "$entry" 2>/dev/null; then
+if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "$KIT/start-squadala.sh" "$entry" 2>/dev/null; then
     mkdir -p "$apps"
     # (the desktop entry spec: inside "...", \ " ` $ are escaped with a backslash)
     q=${KIT//\\/\\\\}; q=${q//\"/\\\"}; q=${q//\`/\\\`}; q=${q//\$/\\\$}
@@ -128,7 +128,7 @@ if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "
         echo 'Type=Application'
         echo 'Name=OoT Co-op'
         echo 'Comment=Ocarina of Time co-op on Longshot: host or join in the game'
-        echo "Exec=bash \"$q/start-oot-coop.sh\""
+        echo "Exec=bash \"$q/start-squadala.sh\""
         echo "Path=$KIT"
         [[ -f $GAME/longshot.png ]] && echo "Icon=$GAME/longshot.png"
         echo 'Terminal=false'

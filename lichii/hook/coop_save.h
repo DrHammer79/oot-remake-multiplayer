@@ -53,6 +53,8 @@ bool SessionLive();
 // Hookshot's title module, each pad poll: whether the title's menu is up. A guest switches to the host's save only
 // then (never while a file loads).
 void NoteTitle(bool title_up);
+// What NoteTitle last said (false on the emulator, which has no title module).
+bool TitleUp();
 
 // A guest's switch to the host's save that has not happened yet waits (the player picked a file on the title):
 // never while that file loads. Once Link is in the game the hold ends; the switch still waits (never under a game

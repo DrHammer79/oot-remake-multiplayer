@@ -1,7 +1,7 @@
 """One merged resource size table at each start (#48: a randomizer seed from OOTRR's website).
 
 Longshot serves ONE ResourceSizeTable: the one of the mod indexed last (host/mods.c with our patch 0011: the Mods
-tab's list `coop-mods.list`, its first row last; mods the list does not name under the listed ones, by name). A seed
+tab's list `coop-mods.list`, its first row last; the mods it does not name and the puppet pack under the listed ones, by name without case, the last wins; the module: coop-mods.applied). A seed
 folder made on OOTRR's page has its own table, made without the puppet pack's entries, so the puppets cannot load.
 This writes ONE table where the game reads it: the winner's own entries, and from every other mod that is on, each
 entry it has (the larger size where both have one). The winner's original is kept in
@@ -9,8 +9,12 @@ entry it has (the larger size where both have one). The winner's original is kep
 merge was made from and the file it wrote (`<path under mods> <length> <FNV-1a 64>`), so the next start merges again
 only when one of them changed. Last, `<winner>/coop-merged.txt` (beside its romfs) tells the co-op module the table
 it serves holds the puppets' entries (coop_rando MergedByKit): `coop-merged 1` / `table <file name> <FNV-1a 64 of
-that table>` / `pack <FNV-1a 64 of the puppet pack's table of that name>`; it holds the puppets again when either
-file changed since. `--undo` puts every original back.
+that table>` / `pack <FNV-1a 64 of the puppet pack's table of that name>` / `rule merged|contains` (which rule let
+the table through); it holds the puppets again when either file changed since. `--undo` puts every original back.
+
+A winning table that already holds every puppet pack entry, each at least the pack's size (a mod maker merged the
+pack's entries in by hand, e.g. a skins mod), needs no merge: it is left as it is and marked `rule contains`. That is
+also the only way a winner under `contents/` (a title's own mod folder, never rewritten here) keeps the puppets on.
 
 Our own seeds (`randomizer-*`) and the puppet pack are left alone when they win: the module builds a seed beside
 every other table already (coop_rando StageSizeTables).
@@ -146,7 +150,21 @@ def file_line(root, path):
     return f"{rel} {n} {h}"
 
 
-def write_mark(root, win_path, fname):
+def missing_pack_entries(table, pack):
+    """How many of the pack's entries `table` lacks or holds smaller than the pack (0: it holds them all).
+
+    A name row of the pack may sit in the table as a crc row (no crc clash there), and the other way round."""
+    missing = 0
+    for c, size in pack.by_crc.items():
+        if table.by_crc.get(c, -1) < size:
+            missing += 1
+    for n, size in pack.by_name.items():
+        if max(table.by_name.get(n, -1), table.by_crc.get(rstb.Rstb.crc(n), -1)) < size:
+            missing += 1
+    return missing
+
+
+def write_mark(root, win_path, fname, rule="merged"):
     """The module's mark (coop_rando MergedByKit), written last. None without a puppet pack table of that name."""
     pack = os.path.join(root, *PACK_DIR.split("/"), *RESOURCE, fname)
     mark = os.path.join(win_path, MARK)
@@ -155,7 +173,7 @@ def write_mark(root, win_path, fname):
             os.remove(mark)
         return None
     table = fnv64(os.path.join(win_path, *RESOURCE, fname))[0]
-    text = f"coop-merged 1\ntable {fname} {table}\npack {fnv64(pack)[0]}\n"
+    text = f"coop-merged 1\ntable {fname} {table}\npack {fnv64(pack)[0]}\nrule {rule}\n"
     write_atomic(mark, text.encode("utf-8"))
     return mark
 
@@ -242,18 +260,47 @@ def merge_mods(root, romfs, say=print):
     for fname in sorted({f for _, _, fs_ in order for f in fs_}):
         having = [(n, p) for n, p, fs_ in order if fname in fs_]
         win_name, win_path = having[-1]
-        if len(having) < 2 or is_ours(win_name) or fold(win_name).startswith("contents/"):
-            continue  # (one table, one of our seeds, or a title's own mod such as the puppet pack)
+        if len(having) < 2 or is_ours(win_name) or fold(win_name) == PACK:
+            continue  # (one table, one of our seeds, or the puppet pack itself)
+        others = having[:-1]
+        pack_in = [p for n, p in others if fold(n) == PACK]
+        title_mod = fold(win_name).startswith("contents/")
+        if title_mod and not pack_in:
+            continue  # (a title's own mod, nothing of the puppets' under it: left alone as ever)
         try:
-            failed += merge_one(root, codec, fname, win_name, win_path, having[:-1], say)
+            merged_before = os.path.isfile(os.path.join(win_path, KEEP_DIR, STAMP))
+            if pack_in and (title_mod or (len(others) == 1 and not merged_before)):
+                missing = missing_pack_entries(load_table(codec, win_path, fname), load_table(codec, pack_in[0], fname))
+                if missing == 0:
+                    write_mark(root, win_path, fname, "contains")
+                    say(f"Size tables: the game reads {win_name}'s, which holds every puppet pack entry already "
+                        "(left as it is): the other players can be shown.")
+                    continue
+                if title_mod:  # (never rewritten: a title's own mod)
+                    remove_mark(win_path)
+                    say(f"Size tables: the game reads {win_name}'s, which lacks {missing} of the puppet pack's "
+                        "entries (or holds them smaller): the other players can't be shown with it on. Merge the "
+                        "pack's entries into it, or turn it off.")
+                    failed += 1
+                    continue
+            failed += merge_one(root, codec, fname, win_name, win_path, others, say)
         except (OSError, ValueError, MergeError) as e:
-            try:
-                os.remove(os.path.join(win_path, MARK))  # (an old mark must not keep the puppets on)
-            except OSError:
-                pass
+            remove_mark(win_path)  # (an old mark must not keep the puppets on)
             say(f"Size tables: {win_name} could not be merged ({e}): the other players can't be shown with it on.")
             failed += 1
     return failed
+
+
+def load_table(codec, mod_path, fname):
+    with open(os.path.join(mod_path, *RESOURCE, fname), "rb") as f:
+        return codec.load(f.read())
+
+
+def remove_mark(win_path):
+    try:
+        os.remove(os.path.join(win_path, MARK))
+    except OSError:
+        pass
 
 
 def merge_one(root, codec, fname, win_name, win_path, others, say):

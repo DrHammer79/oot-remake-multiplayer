@@ -1926,9 +1926,26 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         // never written: if its damage step never saw the replay, or there is
         // no Life step, the hit is lost and its life stays its game's).
         if (o.hurt_until != 0 && now_us >= o.hurt_until) {
-            if (o.life && *o.life != o.hurt_target && IsBoss(o.name)) {
-                // A boss is never written (boss-intro, the native rule): its game refused the hit (Gohma holds
-                // her life at 1 outside her weak point), so its life stays what its own game says.
+            const auto boss_owner = owners_.find(o.id);
+            const bool boss_ours = boss_owner != owners_.end() && boss_owner->second.player == self;
+            if (o.life && *o.life > o.hurt_target && IsBoss(o.name) && boss_ours) {
+                // Our boss refused another player's replayed hit (boss-hits, tracker 104, issue 150): the
+                // replay is a template sword hit, and Gohma's damage rules judge it as no eye hit, so only her
+                // owner could ever hurt her (a player's owner log: 23 DAMAGE in, no replay taken). The hitter's
+                // game already judged that hit with its own damage rules on its copy (its life fell there), so
+                // the rest goes into our game's own Life step (never a write): the game clamps it (Gohma keeps
+                // 1 outside her chance time) and runs its own death.
+                ++hurt_missed_;
+                ++boss_hits_stepped_;
+                LifeWrite w{o.address, o.hurt_target, *o.life - o.hurt_target, std::nullopt};
+                w.direct = true;
+                writes.push_back(w);
+                notes_.emplace_back("a hit our boss's game did not take as a replay: " +
+                                    std::to_string(*o.life - o.hurt_target) +
+                                    " given to its own Life step (the hitter's game judged it): " + o.name);
+            } else if (o.life && *o.life != o.hurt_target && IsBoss(o.name)) {
+                // A boss copy is never written (boss-intro, the native rule): its game refused the owner's hit
+                // (Gohma holds her life at 1 outside her weak point), so its life stays what its own game says.
                 ++hurt_missed_;
                 notes_.emplace_back("a hit the boss's game did not take: its life stays its game's: " + o.name);
             } else if (o.life && *o.life != o.hurt_target) {
@@ -2687,6 +2704,22 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                                     " < " + std::to_string(handed->state.life->life) +
                                     "): raised through its own Life step: " + o->name);
                 o->life = handed->state.life->life;
+                o->hurt_left = 0;
+                o->hurt_until = 0;
+            } else if (o != nullptr && handed->state.life && o->life && IsBoss(o->name) &&
+                       handed->state.life->life < *o->life && handed->state.life->life > 0) {
+                // A boss copy that becomes ours with MORE life than its old owner's (its game refused the
+                // owner's replayed hits): the old owner's damage goes into its own Life step, never a write.
+                // A plain lower life waited for a replay that never came (hs-boss-full 20261115-122137: B
+                // took Gohma at 21 while A's was 17, "nothing given"), so every hand-over healed her, and
+                // only the player who kept her could wear her down (boss-hits, tracker 104).
+                LifeWrite lower{o->address, handed->state.life->life, *o->life - handed->state.life->life,
+                                std::nullopt};
+                lower.direct = true;
+                writes.push_back(lower);
+                notes_.emplace_back("ours now with more life than its old owner's (" + std::to_string(*o->life) +
+                                    " > " + std::to_string(handed->state.life->life) +
+                                    "): lowered through its own Life step: " + o->name);
                 o->hurt_left = 0;
                 o->hurt_until = 0;
             } else if (o != nullptr && handed->state.life && o->life &&

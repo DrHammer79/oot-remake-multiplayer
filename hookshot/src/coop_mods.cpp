@@ -157,6 +157,11 @@ bool Loader::ExeReadsList() const {
     return exe_reads_list_;
 }
 
+std::vector<std::string> Loader::Indexed() const {
+    const std::lock_guard lock(mutex_);
+    return files_now_;
+}
+
 const Mod* Loader::Find(std::string_view name) const {
     for (const Mod& m : mods_) {
         if (NameSame(m.name, name)) {

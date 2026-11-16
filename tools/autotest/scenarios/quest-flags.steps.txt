@@ -19,13 +19,17 @@
 #   "coop: story: quest DoorOfTime ... -> 0x6f917dfe asked of the game's ChallengeMgr"
 #     ("refused by the game's ChallengeMgr" or no line: FAIL, report it; "no game function at
 #     0x2cf54a0" too)
-#   "bool 0xf16a3d82 ... 0 -> 1" (LICHII_COOP_DEBUG_FLAGS) for the waterfall.
+#   "coop: flags debug: get_bool(0xf16a3d82) = 1" in B after its load, and still 1 in the
+#     5 s repeats after it (LICHII_COOP_DEBUG_BOOL, issue 61): the waterfall. Not the
+#     "bool 0xf16a3d82 ... 0 -> 1" change line: one debug scan logs only 40 changes and a
+#     save load makes hundreds, so its absence proves nothing (the 0.11.2 smoke's FAIL).
+#     A: the same line = 1 after its load (else the prep did not reach the loaded slot).
 # A's log has no "coop: story: quest DoorOfTime" line (A is at Step03 already).
 # By hand / in the big run (not scripted): B opens the pause menu's Threads of Time tab: the
 # Spiritual Stones row shows the Step03 text ("... collected all three Spiritual Stones"), no
 # MISSING TEXT; B walks from the field entrance toward the castle town: Zelda's escape
 # (Dm_HrlField_0060) starts in B's game; B at Zora's River sees the falls open.
-#! switches LICHII_COOP_DEBUG_FLAGS=1
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_DEBUG_BOOL=0xf16a3d82
 start A
 start B
 sleep 40

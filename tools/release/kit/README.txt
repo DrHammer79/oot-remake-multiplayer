@@ -1,6 +1,6 @@
 Squadala! (Longshot) - online co-op: play Ocarina of Time together, each player on their own PC with their own copy of the game.
-1. Unzip this folder to a short place such as C:\OoT-Coop (not inside the zip, not in OneDrive).
-2. Double-click "Start OoT Co-op.bat". The first time it asks for your game file (drag your .nup into the window)
+1. Unzip this folder to a short place such as C:\Squadala (not inside the zip, not in OneDrive).
+2. Double-click "Start Squadala.bat" ("Start OoT Co-op.bat" is its old name). The first time it asks for your game file (drag your .nup into the window)
    and builds the game from it: 10 to 45 minutes, about 60 GB free, once. After that it starts in seconds.
 3. In the game, open the menu: - and + together on a controller (Xbox: View and Menu) or Home, F1 on the keyboard,
    or - alone on the title screen. Its first tab, Multiplayer: Host gives you a code for your friends; Join takes one.

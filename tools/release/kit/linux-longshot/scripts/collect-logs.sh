@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Packs what is needed to see what went wrong into coop-logs-<time>.tar.gz beside start-oot-coop.sh:
+# Packs what is needed to see what went wrong into coop-logs-<time>.tar.gz beside start-squadala.sh:
 # the game's longshot_log.txt files, coop.ini, the kit's logs (start, build, game output),
 # VERSION.txt, coop-options.ini, the puppet pack's manifest and a short note about this PC.
-# bash start-oot-coop.sh --logs runs it. Send that file back.
+# bash start-squadala.sh --logs runs it. Send that file back.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 stamp=$(date +%Y%m%d-%H%M%S)
@@ -139,9 +139,9 @@ if ((game_logs == 0)); then
     {
         echo "The game's log (longshot_log.txt) is not in this file: none in $GAME or $GAME/logs."
     if [[ -x $GAME/longshot ]]; then
-        echo '  Start the game once (it writes the log when it starts), close it, then run this again (bash start-oot-coop.sh --logs).'
+        echo '  Start the game once (it writes the log when it starts), close it, then run this again (bash start-squadala.sh --logs).'
     else
-        echo '  The game was not found there: it is built by the first start (bash start-oot-coop.sh). Its log is beside the game.'
+        echo '  The game was not found there: it is built by the first start (bash start-squadala.sh). Its log is beside the game.'
     fi
     echo "  Found it somewhere else? Copy longshot_log.txt into $LOGS and run this again, or send it with this file."
     } | sed -e "s#/home/$u/#/home/<user>/#g"

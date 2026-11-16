@@ -77,10 +77,35 @@ try {
         $old = & { param($f, $l) . $f; Select-KitRelease $l } $v0101 @((Rel 'v0.11.0' $false @('oot-coop-v0.11.0-windows.zip', 'oot-coop-v0.11.0-windows.zip.sha256')))
         Check ($null -eq $old) 'the v0.10.1 updater cannot see a release with only the -windows zip (why the old name must go up too)'
     } else { Check $false "the v0.10.1 Select-KitRelease fixture is missing ($v0101)" }
+    # From v0.11.3 the players' file is Squadala-<tag>-windows.zip, and the same file goes up as oot-coop-<tag>.zip
+    # (no oot-coop-<tag>-windows.zip any more): the v0.10.1 updaters take only that name, the v0.11.0 to v0.11.2 ones
+    # take it after oot-coop-<tag>-windows.zip.
+    $sq = @('Squadala-v0.11.3-windows.zip', 'Squadala-v0.11.3-windows.zip.sha256', 'oot-coop-v0.11.3.zip', 'oot-coop-v0.11.3.zip.sha256',
+            'Squadala-v0.11.3-linux.zip', 'Squadala-v0.11.3-linux.zip.sha256', 'oot-coop-v0.11.3-linux.zip', 'oot-coop-v0.11.3-linux.zip.sha256', 'Update.bat')
+    $pick = Select-KitRelease @((Rel 'v0.11.2' $false $both), (Rel 'v0.11.3' $false $sq))
+    Check ($pick.Tag -eq 'v0.11.3' -and $pick.Zip -eq 'dl/Squadala-v0.11.3-windows.zip' -and $pick.Sum -eq 'dl/Squadala-v0.11.3-windows.zip.sha256') 'v0.11.3: the Squadala- zip is taken when both names are up'
+    $pick = Select-KitRelease @((Rel 'v0.11.3' $false @('Squadala-v0.11.3-windows.zip', 'Squadala-v0.11.3-windows.zip.sha256')))
+    Check ($pick.Zip -eq 'dl/Squadala-v0.11.3-windows.zip') 'a release with only the Squadala- zip is found'
+    $pick = Select-KitRelease @((Rel 'v0.11.3' $false @('Squadala-v0.11.3-windows.zip', 'oot-coop-v0.11.3.zip', 'oot-coop-v0.11.3.zip.sha256')))
+    Check ($pick.Zip -eq 'dl/oot-coop-v0.11.3.zip') 'a Squadala- zip with no checksum: the old name with its checksum instead'
+    Check ($null -eq (Select-KitRelease @((Rel 'v0.11.3' $false @('Squadala-v0.11.3-linux.zip', 'Squadala-v0.11.3-linux.zip.sha256'))))) 'the Squadala- Linux zip is never taken by the Windows updater'
+    if (Test-Path -LiteralPath $v0101) {
+        $old = & { param($f, $l) . $f; Select-KitRelease $l } $v0101 @((Rel 'v0.10.1' $false @('oot-coop-v0.10.1.zip', 'oot-coop-v0.10.1.zip.sha256')), (Rel 'v0.11.3' $false $sq))
+        Check ($old.Tag -eq 'v0.11.3' -and $old.Zip -eq 'dl/oot-coop-v0.11.3.zip') 'the v0.10.1 updater finds v0.11.3 by oot-coop-v0.11.3.zip'
+    }
+    $v0112 = Join-Path $release 'tests\fixtures\update-v0.11.2-select.ps1'
+    if (Test-Path -LiteralPath $v0112) {
+        $old = & { param($f, $l) . $f; Select-KitRelease $l } $v0112 @((Rel 'v0.11.2' $false $both), (Rel 'v0.11.3' $false $sq))
+        Check ($old.Tag -eq 'v0.11.3' -and $old.Zip -eq 'dl/oot-coop-v0.11.3.zip' -and $old.Sum -eq 'dl/oot-coop-v0.11.3.zip.sha256') 'the v0.11.2 updater finds v0.11.3 by oot-coop-v0.11.3.zip'
+        $old = & { param($f, $l) . $f; Select-KitRelease $l } $v0112 @((Rel 'v0.11.3' $false @('Squadala-v0.11.3-windows.zip', 'Squadala-v0.11.3-windows.zip.sha256')))
+        Check ($null -eq $old) 'the v0.11.2 updater cannot see a release with only the Squadala- zip (why the old name must go up too)'
+    } else { Check $false "the v0.11.2 Select-KitRelease fixture is missing ($v0112)" }
     # make_kit_hookshot.ps1 writes both names (the whole path, with a real kit: old_kit_update_test.ps1).
     $mk = [System.IO.File]::ReadAllText((Join-Path $release 'make_kit_hookshot.ps1'))
-    Check ($mk.Contains('$zip = Join-Path $OutRoot "$name-windows.zip"') -and $mk.Contains('$old = "$kit.zip"') -and
-           $mk.Contains('"$hash  $name-windows.zip`n"') -and $mk.Contains('"$hash  $name.zip`n"')) 'make_kit_hookshot.ps1 writes oot-coop-<tag>-windows.zip and oot-coop-<tag>.zip, each with its .sha256'
+    Check ($mk.Contains('$name = if ($Release) { "Squadala-$Release" }') -and $mk.Contains('$zip = Join-Path $OutRoot "$name-windows.zip"') -and
+           $mk.Contains("`$oldName = (`$name -replace '^Squadala-', 'oot-coop-') + '.zip'") -and
+           $mk.Contains('"$hash  $name-windows.zip`n"') -and $mk.Contains('"$hash  $oldName`n"')) 'make_kit_hookshot.ps1 writes Squadala-<tag>-windows.zip and oot-coop-<tag>.zip, each with its .sha256'
+    Check ($mk.Contains("'Start Squadala.bat', 'Start OoT Co-op.bat'")) 'make_kit_hookshot.ps1: the kit has Start Squadala.bat and its old name'
 
     # --- The player's files
     foreach ($p in 'emulator\user\config\coop.ini', 'emulator\user\keys\prod.keys', 'emulator\user\load\0400486024DEC000\coop-puppet\x',
@@ -560,6 +585,19 @@ try {
     Check (Test-KitFolder $hsSrc) 'a Hookshot-only kit is a kit folder'
     Check (-not (Test-KitFolder (Join-Path $tmp 'hsrc'))) 'its parent is not'
     Check ((Test-KitNewKit $hsSrc) -eq '') 'a Hookshot-only kit may be installed'
+    # From v0.11.3 "Start Squadala.bat" (and "Start OoT Co-op.bat", its old name, a call of it); a kit up to v0.11.2 has only the old one.
+    $sqSrc = Join-Path $tmp 'sq-new'
+    Write-File "$sqSrc\Start Squadala.bat" 'new launcher'; Write-File "$sqSrc\scripts\start.ps1" 'x'
+    Write-File "$sqSrc\hookshot\PIN" 'tag=x'; Write-File "$sqSrc\hookshot\hookshot_coop.dll" 'dll'
+    Check ((Test-KitNewKit $sqSrc) -eq '' -and (Test-KitFolder $sqSrc)) 'a kit with only Start Squadala.bat may be installed and is a kit'
+    Check ((Get-KitStartFile $sqSrc) -eq "$sqSrc\Start Squadala.bat") 'the start file: Start Squadala.bat'
+    Remove-Item -LiteralPath "$sqSrc\Start Squadala.bat"
+    Check ((Test-KitNewKit $sqSrc) -match 'Start Squadala\.bat' -and -not (Test-KitFolder $sqSrc)) 'a kit with no start file is refused'
+    Write-File "$sqSrc\Start OoT Co-op.bat" 'old launcher'; Write-File "$sqSrc\Start Squadala.bat" 'new launcher'
+    if (Test-Path -LiteralPath $v0112) {
+        $r = & { param($f, $d) . $f; @((Test-KitNewKit $d), (Test-KitFolder $d)) } $v0112 $sqSrc
+        Check ($r[0] -eq '' -and $r[1]) 'the v0.11.2 updater takes a v0.11.3 kit (it has Start OoT Co-op.bat too)'
+    }
     Remove-Item -LiteralPath "$hsSrc\hookshot\hookshot_coop.dll"
     Check ((Test-KitNewKit $hsSrc) -match 'hookshot_coop\.dll') 'a Hookshot-only kit without the module is refused'
     Write-File "$hsSrc\hookshot\hookshot_coop.dll" 'module'

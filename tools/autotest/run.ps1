@@ -104,7 +104,7 @@ param(
     # pair (coop-kit\ls\laneN-A/-B), port, pipes and run folders unless given, and its lock (laneN.lock) for the run.
     # Two runs in different lanes go at the same time; a game build (build-game.lock) stops both.
     [ValidateRange(0, 2)][int]$Lane = 0,
-    # Hookshot: start each game through a release kit's own start, as "Start OoT Co-op.bat" does (play.ps1 choose
+    # Hookshot: start each game through a release kit's own start, as "Start Squadala.bat" does (play.ps1 choose
     # -Hookshot: the module step, the puppet pack, the colour, the randomizer seeds), then play as usual. Two kit
     # folders, A then B ("kitA,kitB"), each with hookshot\game-folder.txt naming its game (-HookshotA/-B or the
     # lane's pair): tools\autotest\kit_pair.py setup makes them. Plain scenarios only (no steps files yet).

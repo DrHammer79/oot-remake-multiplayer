@@ -29,7 +29,8 @@
 # What it does: reads the kit's version from VERSION.txt, asks GitHub for the releases of
 # daurosk/oot-remake-multiplayer (test builds count, drafts never) and takes the newest. If that
 # is newer, it downloads the release's zip, checks it against the SHA-256 published beside it
-# (oot-coop-<version>-windows.zip.sha256, or oot-coop-<version>.zip.sha256 before v0.11.0), unpacks it to a temp folder and copies the kit's own files
+# (Squadala-<version>-windows.zip.sha256; oot-coop-<version>-windows.zip.sha256 up to v0.11.2, oot-coop-<version>.zip.sha256
+# before v0.11.0), unpacks it to a temp folder and copies the kit's own files
 # over this kit. Every file it replaces is first copied to backup-<old version>\; if anything
 # fails, those are put back and the new files removed. VERSION.txt is written last, and
 # update-in-progress.txt marks an update that has started: an update that was stopped half way
@@ -133,13 +134,13 @@ function Compare-KitVersion([string]$A, [string]$B) {
 }
 
 # The release this kit was made from, from the first line of VERSION.txt
-# ("kit: oot-coop-v0.1.0-beta2 (release v0.1.0-beta2)"); '' for a kit that is no release.
+# ("kit: Squadala-v0.11.3 (release v0.11.3)", "kit: oot-coop-..." up to v0.11.2); '' for a kit that is no release.
 function Get-KitVersion([string]$KitDir) {
     $file = Join-Path $KitDir 'VERSION.txt'
     if (-not (Test-Path -LiteralPath $file)) { return '' }
     foreach ($line in [System.IO.File]::ReadAllLines($file)) {
         if ($line -match '\(release ([^)]+)\)') { return $Matches[1] }
-        if ($line -match '^kit: oot-coop-(v\d[^ ]*)') { return $Matches[1] }
+        if ($line -match '^kit: (?:Squadala|oot-coop)-(v\d[^ ]*)') { return $Matches[1] }
     }
     return ''
 }
@@ -185,12 +186,12 @@ function Get-KitManualSteps([string]$Page) {
     $where = if ($Page -and $Page -match '^https://') { $Page } else { "https://github.com/$Repo/releases" }
     return [string[]]@(
         'To update by hand:',
-        "  1. Close the games and the server window, and download the newest oot-coop-....zip from $where",
-        '  2. Unzip it to a new folder with a short path, such as C:\oot-coop-new.',
+        "  1. Close the games and the server window, and download the newest Squadala-...-windows.zip from $where",
+        '  2. Unzip it to a new folder with a short path, such as C:\Squadala-new.',
         '  3. Copy the folder emulator\user (keys, firmware, saves, settings, your name, the puppet pack)',
         '     and the file coop-options.ini from this kit into the new folder. Missing switches are added',
         '     to coop-options.ini when you start the new kit.',
-        '  4. Play from the new folder ("Start OoT Co-op.bat", or Host.bat / Join.bat in an emulator kit).')
+        '  4. Play from the new folder ("Start Squadala.bat", or Host.bat / Join.bat in an emulator kit).')
 }
 
 # --- Releases ---------------------------------------------------------------------------
@@ -205,11 +206,12 @@ function Read-KitReleaseList([string]$Source) {
     return Invoke-RestMethod -Uri $Source -UserAgent $UserAgent -TimeoutSec $timeout -Headers @{ Accept = 'application/vnd.github+json' }
 }
 
-# The Windows kit zip of a release and its .sha256: oot-coop-<tag>-windows.zip from v0.11.0 on, else
-# oot-coop-<tag>.zip (every release before, and the same file again in later ones, for the kits up to v0.10.1,
-# whose updater knows only that name). @(zip asset, sha256 asset) or $null.
+# The Windows kit zip of a release and its .sha256: Squadala-<tag>-windows.zip from v0.11.3 on,
+# oot-coop-<tag>-windows.zip from v0.11.0 to v0.11.2, else oot-coop-<tag>.zip (every release before, and the same
+# file again in later ones, for the older kits: up to v0.10.1 their updater knows only that name, and from v0.11.3
+# it is the one the v0.11.0 to v0.11.2 updaters find). @(zip asset, sha256 asset) or $null.
 function Get-KitReleaseZip($Release, [string]$Tag) {
-    foreach ($n in "oot-coop-$Tag-windows.zip", "oot-coop-$Tag.zip") {
+    foreach ($n in "Squadala-$Tag-windows.zip", "oot-coop-$Tag-windows.zip", "oot-coop-$Tag.zip") {
         $zip = @($Release.assets) | Where-Object { $_.name -eq $n } | Select-Object -First 1
         $sum = @($Release.assets) | Where-Object { $_.name -eq "$n.sha256" } | Select-Object -First 1
         if ($zip -and $sum) { return @($zip, $sum) }
@@ -460,38 +462,51 @@ function Test-KitEmulator([string]$Exe) {
     return ''
 }
 
+# The start file of a Hookshot-only kit: "Start Squadala.bat" from v0.11.3 on (which keeps "Start OoT Co-op.bat",
+# the name up to v0.11.2, as a one-line call of it), else that old name; '' when there is neither.
+function Get-KitStartFile([string]$Dir) {
+    foreach ($n in 'Start Squadala.bat', 'Start OoT Co-op.bat') {
+        $f = Join-Path $Dir $n
+        if (Test-Path -LiteralPath $f) { return $f }
+    }
+    return ''
+}
+
 # A co-op kit folder: an emulator kit (emulator\) or a Hookshot-only kit (make_kit_hookshot.ps1: hookshot\PIN and its launcher).
 function Test-KitFolder([string]$Dir) {
     if (Test-Path -LiteralPath (Join-Path $Dir 'emulator')) { return $true }
-    return (Test-Path -LiteralPath (Join-Path $Dir 'hookshot\PIN')) -and (Test-Path -LiteralPath (Join-Path $Dir 'Start OoT Co-op.bat'))
+    return (Test-Path -LiteralPath (Join-Path $Dir 'hookshot\PIN')) -and [bool](Get-KitStartFile $Dir)
 }
 
 # Why an unpacked release must not be installed, or ''. An emulator kit: its emulator (Test-KitEmulator).
 # A Hookshot-only kit: the co-op module, the Hookshot pin, the launcher and its script.
 function Test-KitNewKit([string]$Dir) {
     if (Test-Path -LiteralPath (Join-Path $Dir 'emulator')) { return (Test-KitEmulator (Join-Path $Dir 'emulator\lichii.exe')) }
-    foreach ($f in 'hookshot\hookshot_coop.dll', 'hookshot\PIN', 'Start OoT Co-op.bat', 'scripts\start.ps1') {
+    foreach ($f in 'hookshot\hookshot_coop.dll', 'hookshot\PIN', 'scripts\start.ps1') {
         if (-not (Test-Path -LiteralPath (Join-Path $Dir $f))) { return "it has no $f" }
     }
+    if (-not (Get-KitStartFile $Dir)) { return 'it has no Start Squadala.bat' }
     return ''
 }
 
 # After an emulator kit became a Hookshot-only kit: the desktop shortcut to a launcher that is gone points at
-# "Start OoT Co-op.bat", and the player hears that emulator\user (theirs: saves, keys, settings) is kept.
+# "Start Squadala.bat" (or the old "Start OoT Co-op.bat" of a kit up to v0.11.2), and the player hears that emulator\user (theirs: saves, keys, settings) is kept.
 # Returns the lines to say.
 function Complete-KitHookshotOnly([string]$KitDir, [bool]$HadEmulator, [string]$Desktop = $(if ($env:OOT_COOP_DESKTOP) { $env:OOT_COOP_DESKTOP } else { [Environment]::GetFolderPath('Desktop') })) {
-    $start = Join-Path $KitDir 'Start OoT Co-op.bat'
-    if (-not (Test-Path -LiteralPath $start)) { return @() }
+    $start = Get-KitStartFile $KitDir
+    if (-not $start) { return @() }
+    $startName = Split-Path -Leaf $start
     $lines = @()
     try {
-        $link = Join-Path $Desktop 'Play OoT Co-op.lnk'
+        $link = Join-Path $Desktop 'Play Squadala.lnk'
+        if ($Desktop -and -not (Test-Path -LiteralPath $link)) { $link = Join-Path $Desktop 'Play OoT Co-op.lnk' }
         if ($Desktop -and (Test-Path -LiteralPath $link)) {
             $shell = New-Object -ComObject WScript.Shell
             $s = $shell.CreateShortcut($link)
             $root = [System.IO.Path]::GetFullPath($KitDir).TrimEnd('\') + '\'
             if ($s.TargetPath -and $s.TargetPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and -not (Test-Path -LiteralPath $s.TargetPath)) {
                 $s.TargetPath = $start; $s.WorkingDirectory = $KitDir; $s.Save()
-                $lines += 'The desktop shortcut "Play OoT Co-op" now starts "Start OoT Co-op.bat".'
+                $lines += "The desktop shortcut ""$([System.IO.Path]::GetFileNameWithoutExtension($link))"" now starts ""$startName""."
             }
         }
     } catch { }
@@ -500,7 +515,7 @@ function Complete-KitHookshotOnly([string]$KitDir, [bool]$HadEmulator, [string]$
         if (Test-Path -LiteralPath (Join-Path $KitDir 'emulator\user')) {
             $lines += 'Your emulator files (emulator\user: its saves, keys and settings) were kept; delete that folder when you no longer need them.'
         }
-        $lines += 'From now on start the game with "Start OoT Co-op.bat".'
+        $lines += "From now on start the game with ""$startName""."
     }
     return $lines
 }
@@ -525,7 +540,7 @@ function Get-KitRunning([string]$KitDir) {
     })
 }
 
-# The one folder at the top of an unpacked release zip (oot-coop-<version>\).
+# The one folder at the top of an unpacked release zip (Squadala-<version>\, oot-coop-<version>\ up to v0.11.2).
 function Get-KitUnpackedRoot([string]$Dir) {
     $top = @(Get-ChildItem -LiteralPath $Dir -Force)
     if ($top.Count -eq 1 -and $top[0].PSIsContainer) { return $top[0].FullName }
@@ -950,7 +965,7 @@ function Invoke-KitUpdate {
     if (-not $dir) { $dir = Split-Path -Parent $PSScriptRoot }
     $dir = [System.IO.Path]::GetFullPath($dir)
     if (-not (Test-KitFolder $dir)) {
-        throw "$dir is not a co-op kit. Put Update.bat in the kit folder, beside ""Start OoT Co-op.bat"" (or Host.bat in an older kit)."
+        throw "$dir is not a co-op kit. Put Update.bat in the kit folder, beside ""Start Squadala.bat"" (or Host.bat in an older kit)."
     }
     $mine = Get-KitVersion $dir
     # (a damaged VERSION.txt: this kit counts as no release, the update goes on, nothing is named after it)
@@ -1047,7 +1062,7 @@ function Invoke-KitUpdate {
             continue
         }
         Write-Host "Close these first (they run from this kit): $(($running | ForEach-Object { $_.Name + '.exe' } | Sort-Object -Unique) -join ', ')"
-        if ($Yes) { throw "This kit's emulator or server is still running: close it, then start the kit (""Start OoT Co-op.bat"", Host.bat or Join.bat) or Update.bat again." }
+        if ($Yes) { throw "This kit's emulator or server is still running: close it, then start the kit (""Start Squadala.bat"", Host.bat or Join.bat) or Update.bat again." }
         Read-Host 'Press Enter when they are closed' | Out-Null
     }
     if (-not $Yes) {
@@ -1087,7 +1102,7 @@ function Invoke-KitUpdate {
         $r = Invoke-KitSwitch $dir $newKit $newest.Tag $mine $back $unfinished
         $n = $r.N; $backup = $r.Backup
         # After the install: an emulator kit updated to a Hookshot-only one has the new launcher now.
-        $hsOnly = Test-Path -LiteralPath (Join-Path $dir 'Start OoT Co-op.bat')
+        $hsOnly = [bool](Get-KitStartFile $dir)
         Write-Host "$(if ($back) { 'Went back' } else { 'Updated' }) to $($newest.Tag): $n files. The replaced files are in $backup (delete it once the new version works)."
         if ($script:ShadersMoved) {
             Write-Host "The emulator changed, so its old shader cache was moved to $backup\$ShaderCache. The first minutes of play may stutter while a new one is built."
@@ -1100,7 +1115,7 @@ function Invoke-KitUpdate {
         foreach ($l in Complete-KitHookshotOnly $dir $r.HadEmu) { Write-Host $l }
         if ($hsOnly -and $r.Game -ne 'same') { Write-Host (Get-KitGameChangeText $r.Game $newest.Tag) }
         if ($script:PackToolChanged) {
-            if ($hsOnly) { Write-Host 'The puppet pack tool changed: "Start OoT Co-op.bat" makes the pack again when it starts.' }
+            if ($hsOnly) { Write-Host 'The puppet pack tool changed: "Start Squadala.bat" makes the pack again when it starts.' }
             else { Write-Host 'The puppet pack tool changed: run make-puppet-pack.cmd once more before you play, for the other players'' sounds and the latest puppet fixes.' }
         }
         if ($back) {

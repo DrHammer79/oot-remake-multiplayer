@@ -1060,7 +1060,7 @@ def find_log(game):
 
 # ---------------------------------------------------------------------------------------------- the kit's own start
 # Kit mode (run --kit-a/--kit-b, run.ps1 -Kit): each game is started by its kit's own start, play.ps1 choose -Hookshot
-# as "Start OoT Co-op.bat" runs it, so what a player's start does runs for real before the game: the update check
+# as "Start Squadala.bat" runs it, so what a player's start does runs for real before the game: the update check
 # aside (-NoUpdate), the module step (Get-KitHookshotNeed: co-op module, puppet pack, randomizer, seeds built again),
 # coop-options.ini (the colour) and the pack's own-tunic step. The start answers 'n' to every question (a long game
 # build is never started by a test: the start fails and says so). OOT_COOP_TEST_KIT keeps the test server and join

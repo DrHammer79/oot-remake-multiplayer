@@ -1200,21 +1200,36 @@ TEST_CASE("rando: a size table of a mod not made by us that wins is found (playe
     Put(w.mods / "randomizer-S1" / kTable, "seed");
     Put(w.mods / "aaa-textures" / kTable, "early");
     Put(w.mods / "no-table" / "romfs" / "a.bin", "x");
-    // The Mods list's order: the first row wins.
-    CHECK(OutsideSizeTable(w.mods, {Indexed("ootrr-site"), Indexed("randomizer-S1")}, true) ==
-          std::optional<std::string>("ootrr-site"));
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("randomizer-S1"), Indexed("ootrr-site")}, true));
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("no-table"), Indexed("randomizer-S1")}, true));
-    CHECK(OutsideSizeTable(w.mods, {Indexed("no-table"), Indexed("ootrr-site")}, true) ==
-          std::optional<std::string>("ootrr-site"));
-    CoopMods::Row later = Indexed("ootrr-site");
-    later.on_now = false;  // switched on after this run started: the game did not read it
-    CHECK_FALSE(OutsideSizeTable(w.mods, {later, Indexed("randomizer-S1")}, true));
-    CHECK_FALSE(OutsideSizeTable(w.mods, {}, true));  // only the pack (never a row)
+    Put(w.mods / kPackFolder / kTable, "puppet");
+    // With the Mods list: what the game indexed, in its order (coop-mods.applied), the last one wins: the list's rows
+    // from the last to the first, under them the mods it does not name, by name (the pack, written with '\').
+    using Order = std::vector<std::string>;
+    const std::string pack = "contents\\0400486024DEC000\\coop-puppet";
+    const Order site_first{pack, "randomizer-S1", "ootrr-site"};
+    CHECK(OutsideSizeTable(w.mods, {}, &site_first) == std::optional<std::string>("ootrr-site"));
+    const Order seed_first{pack, "ootrr-site", "randomizer-S1"};
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &seed_first));
+    const Order no_table_first{pack, "ootrr-site", "no-table"};
+    CHECK(OutsideSizeTable(w.mods, {}, &no_table_first) == std::optional<std::string>("ootrr-site"));
+    const Order site_not_read{pack, "randomizer-S1"};  // switched on after this run started: the game did not read it
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &site_not_read));
+    const Order only_pack{pack};
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &only_pack));
+    const Order nothing;
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &nothing));
+    // A mod the list does not name (dropped in since it was written) sits at the pack's rank: by name, under
+    // contents/0400486024DEC000/coop-puppet the pack's table wins, above it the mod's.
+    const Order unlisted_under{"aaa-textures", pack};
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &unlisted_under));
+    const Order unlisted_over{pack, "ootrr-site"};
+    CHECK(OutsideSizeTable(w.mods, {}, &unlisted_over) == std::optional<std::string>("ootrr-site"));
     // Hookshot's own order (no list): by name, the last wins, the pack being contents/0400486024DEC000/coop-puppet.
-    CHECK(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, false) == std::optional<std::string>("ootrr-site"));
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("aaa-textures")}, false));  // under the pack: the pack's wins
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site"), Indexed("randomizer-S1")}, false));
+    CHECK(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, nullptr) == std::optional<std::string>("ootrr-site"));
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("aaa-textures")}, nullptr));  // under the pack: the pack's wins
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site"), Indexed("randomizer-S1")}, nullptr));
+    CoopMods::Row later = Indexed("ootrr-site");
+    later.on_now = false;  // not indexed at the start
+    CHECK_FALSE(OutsideSizeTable(w.mods, {later}, nullptr));
 }
 
 TEST_CASE("rando: the chat lines about an outside size table name the mod and fit a chat line") {
@@ -1285,13 +1300,14 @@ TEST_CASE("rando: a winning mod whose table the kit merged is not held, a stale 
     MarkMerged(w.mods, "ootrr-site", "site + puppet");
     CHECK(MergedByKit(w.mods, "ootrr-site"));
     std::string merged;
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, true, &merged));
+    const std::vector<std::string> indexed{"contents/0400486024DEC000/coop-puppet", "ootrr-site"};
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &indexed, &merged));
     CHECK(merged == "ootrr-site");
-    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, false));
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, nullptr));
     // a new seed table dropped over it: stale
     Put(w.mods / "ootrr-site" / kTable, "another site seed");
     CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
-    CHECK(OutsideSizeTable(w.mods, {Indexed("ootrr-site")}, true) == std::optional<std::string>("ootrr-site"));
+    CHECK(OutsideSizeTable(w.mods, {}, &indexed) == std::optional<std::string>("ootrr-site"));
     // the pack rebuilt since the merge: stale
     MarkMerged(w.mods, "ootrr-site", "site + puppet");
     Put(w.mods / kPackFolder / kTable, "puppet, rebuilt");
@@ -1313,6 +1329,42 @@ TEST_CASE("rando: a winning mod whose table the kit merged is not held, a stale 
     fs::remove(w.mods / kPackFolder / kTable);
     CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
     CHECK_FALSE(MergedByKit(w.mods, "no-such-mod"));
+}
+
+TEST_CASE("rando: the mark's rule says what let the table through, an unknown rule is not trusted") {
+    World w;
+    Put(w.mods / kPackFolder / kTable, "puppet");
+    MarkMerged(w.mods, "ootrr-site", "site + puppet");  // (no rule line: an older kit's mark)
+    std::string rule;
+    CHECK(MergedByKit(w.mods, "ootrr-site", &rule));
+    CHECK(rule == "merged");
+    const std::string mark = Get(w.mods / "ootrr-site" / kMergedFile);
+    // a skins mod in a title's folder whose maker merged the pack's entries in by hand (kit: rule contains)
+    const std::string skins = "contents/0400486024DEC000/skins";
+    MarkMerged(w.mods, skins, "skins + puppet");
+    Put(w.mods / skins / kMergedFile, Get(w.mods / skins / kMergedFile) + "rule contains\r\n");
+    rule.clear();
+    CHECK(MergedByKit(w.mods, skins, &rule));
+    CHECK(rule == "contains");
+    std::string merged;
+    rule.clear();
+    const std::vector<std::string> skins_indexed{"contents/0400486024DEC000/coop-puppet", skins};
+    CHECK_FALSE(OutsideSizeTable(w.mods, {}, &skins_indexed, &merged, &rule));  // indexed above the pack
+    merged.clear();
+    rule.clear();
+    CHECK_FALSE(OutsideSizeTable(w.mods, {Indexed(skins)}, nullptr, &merged, &rule));  // by name above the pack
+    CHECK(merged == skins);
+    CHECK(rule == "contains");
+    Put(w.mods / "ootrr-site" / kMergedFile, mark + "rule merged\n");
+    CHECK(MergedByKit(w.mods, "ootrr-site", &rule));
+    CHECK(rule == "merged");
+    Put(w.mods / "ootrr-site" / kMergedFile, mark + "rule trust-me\n");
+    CHECK_FALSE(MergedByKit(w.mods, "ootrr-site"));
+    const std::vector<std::string> site_indexed{"contents/0400486024DEC000/coop-puppet", "ootrr-site"};
+    CHECK(OutsideSizeTable(w.mods, {}, &site_indexed) == std::optional<std::string>("ootrr-site"));
+    // rule contains, but the table changed since the kit looked: stale as any mark
+    Put(w.mods / skins / kTable, "skins, without the puppet");
+    CHECK_FALSE(MergedByKit(w.mods, skins));
 }
 
 TEST_CASE("rando: a run that reads a kit-merged outside table makes the puppets and says nothing") {

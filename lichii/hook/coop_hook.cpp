@@ -631,6 +631,8 @@ public:
             session_->set_scene_readable(coop::host::PlayerReader(*memory).read_scene().has_value());
         }
 #ifdef COOP_HOOKSHOT
+        // The title's menu up: a guest's load through it is a save load (player report #96, docs/flags.md "Saves").
+        session_->set_title_up(CoopSave::TitleUp());
         // The game's own flag writes since the last frame (the applier's wrap, coop_flag_native.h): the watcher
         // reads those flags, not the whole list.
         CoopFlagNative::Feed(*session_);
@@ -689,7 +691,7 @@ public:
                 LOG_INFO(Core, "coop: live events: a new co-op session: the game's earlier event requests are forgotten");
             }
         }
-        if (report.save_load_flags != 0) {
+        if (report.save_load) {
             LOG_INFO(Core, "coop: flags: save load seen ({} flags back, {} frames without a scene)",
                      report.save_load_flags, report.save_load_frames);
             CoopTime::SaveLoaded(report.server_now_us);  // issue 159

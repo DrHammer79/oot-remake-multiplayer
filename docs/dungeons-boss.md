@@ -241,6 +241,18 @@ A copy that dies in its own game (its hit judged lethal there, refused by the ow
 
 Autotests: `tools/autotest/groups/hookshot-boss-cutscenes.txt` (`hs-boss-cutscenes-gohma`: intro with B before the door, then the death; `hs-boss-far-gohma`: B far, chat lines only; `hs-boss-cutscenes-dodongo`: both start together in the boss rush, then the death). **Not proven in game:** that a boss event asked by name plays right in a game whose own trigger did not fire (the boss copy's state, the door), that the antechamber margin fits the walls, that the game's container pickup raises `MaxLife` (the cap and the claim read it), and that the heart container vanishes live on the other screens.
 
+## A non-owner's hits count (branch boss-hits, tracker 104, issue 150)
+
+**Seen.** "Still only the player targeted by the boss can damage it" (a player report on 0.11.2). Two logs show why. In one player's own log as Gohma's owner (0.11.0, the same replay path as 0.11.2), 23 `DAMAGE` came in from the other players (`share got damage 1 for 0xd45e52e43b253151`). Every one was replayed (`replays a hit of 1`, 10 of them `where it landed in the hitter's game`) and none was taken (19 lines `a hit the boss's game did not take: its life stays its game's`, no hurt taken). So the hit place from boss-intro (above) is not enough: her game judges the template sword hit as no eye hit. In hs-boss-full 20261115-122137, B took her at 21 while A's was 17. The plain lower waited for a replay that never came (`its damage step has not seen our replayed hit yet: nothing given (life 21, owner's 17)`), and then A's copy was raised back to 21 as well. Each hand-over healed her, so only the player who kept her could wear her down.
+
+**Now** (module only, `lichii/hook/coop_objects_sync.cpp`).
+- The owner still replays another player's hit first, so her game reacts where it takes it. If her life is still above the target after the wait (`kHurtWaitUs`), the rest goes into our game's own Life step (`LifeWrite::direct`, patch 0007), never as a write. The hitter's game already judged that hit with its own damage rules on its copy: its copy's life fell there. Her game clamps the sum as it does any (Gohma keeps 1 outside her chance time) and runs its own death. Log: `a hit our boss's game did not take as a replay: N given to its own Life step (the hitter's game judged it)`, then `share hurt ...: N through the game's Life step`. The 5 s line counts them: `(boss hits to its Life step N)`.
+- A boss copy that becomes ours with more life than its old owner's is lowered to the old owner's life through its own Life step (direct) instead of the plain lower. Log: `ours now with more life than its old owner's (21 > 17): lowered through its own Life step`.
+- Unchanged: a copy is never given its owner's refused hit (the owner judges), and a copy is still held at 1 until the owner's death.
+- Tests: `tests/lichii/objects_test.cpp` (boss-hits cases; the boss-intro case now expects the direct rest).
+
+**Not proven in game.** That the Life step takes a direct sum on the owner's Gohma in a real fight. The test kill showed it does (21 -> 1). The check is boss-autotest round 5: the guest's eye hits show the owner's `given to its own Life step` line, and her life falls in both games.
+
 ## Not known yet (for the in-game check)
 
 1. Whether the force-set-matrix move into a room of the same scene loads that room's walls and floor, or Link falls through (the dungeon may stream rooms by `DungeonRoomIndex`). If he falls, the fallback is the scene change, which needs an event running.

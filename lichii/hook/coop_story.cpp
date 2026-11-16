@@ -45,6 +45,20 @@ namespace {
 //   water, Lake Hylia's ice,
 //   the royal tomb, the Death Mountain gate guard, Talon and Malon, the
 //   Gerudo carpenters, the light prelude, the owl at Lake Hylia.
+//   The carpenters' rescue (player report 99): each cell's logic
+//   (Logic/GerudoFortress_Common_Level_CarpenterSet_0N_*, cell N holds
+//   Npc_Hylia_01(2+N)_Adult) makes the jail guard only while
+//   AppearGerudoThief && !DestroyGerudoThief, gates the carpenter's thank-you
+//   talk on Destroy and drops the cell key on Destroy && !IsGet_SmallKey0N.
+//   Destroy alone was shared, so a guest whose host beat the guard first had
+//   no guard, the thank-you talk, a free cell key and a carpenter left in the
+//   cell. Now the whole rescue is shared progress: Destroy, the key taken,
+//   Saved_* (the cell opened: Common_Dungeon_OpenDoorChainLockMove; the chain
+//   lock itself is a shared world break), IsAfterHelpCarpenter_* and
+//   WarpPoint0N_ClearEvent (Dm_Gerudo_0020, the carpenter gone; Dm_Gerudo_0025,
+//   the card, reads all four). Each game's own: Found_*, AppearGerudoThief_*,
+//   CloseShutter_* and the carpenter's per-visit state, so a player who gets
+//   there before the guard is beaten still gets the fight in their game.
 //   Left out: minigames, the scarecrow, Gossip Stone fairies, where one
 //   player is (IsEntered, ArriveFrom), weather and age (Sequence_IsChildhood).
 // talk: a talk Alex's play-test asked to be shared (2026-11-12): the Kokiri
@@ -55,11 +69,14 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x00a58feeu, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Fire"},
     {0x01a718c3u, Kind::scene, "HavePlayedEvent.Dm_LonLon_0010"},
     {0x069c4cc7u, Kind::scene, "HavePlayedEvent.Dm_Kakariko_0030"},
+    {0x06d7f245u, Kind::world, "GerudoFortress_IsAfterHelpCarpenter_Npc_Hylia_014_Adult"},  // player report 99
     {0x079b10a1u, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Sun_01"},
     {0x0895a9ffu, Kind::world, "Market_Adult_GetLightPrelude"},
     {0x0b450ae4u, Kind::scene, "HavePlayedEvent.Dm_Goron_0010"},
     {0x0bc9161fu, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0080"},
     {0x0bf7ce9du, Kind::world, "KakarikoVillage_LeaveKakariko_Npc_Hylia_Talon_Adult"},
+    {0x0db0556fu, Kind::world, "GerudoFortress_Saved_Npc_Hylia_013_Adult"},  // player report 99
+    {0x0e18ee0du, Kind::world, "GerudoFortress_WarpPoint03_ClearEvent"},  // player report 99
     {0x0fba19e9u, Kind::scene, "HavePlayedEvent.Dm_HrlField_0072"},
     {0x132f347cu, Kind::scene, "HavePlayedEvent.Dm_ZoraFountain_0030"},
     {0x1330a253u, Kind::scene, "HavePlayedEvent.Dm_FairyFountain_Courage"},
@@ -77,11 +94,15 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x19898d14u, Kind::world, "Npc_Hylia_Soldier_003_GateOpen"},
     {0x1c3ca514u, Kind::scene, "HavePlayedEvent.Dm_LakeHrl_0010"},
     {0x1db3a87eu, Kind::scene, "HavePlayedEvent.Dm_DeathMtTrail_0040"},
+    {0x1ee8e249u, Kind::world, "IsGet_SmallKey_GerudoFortress.SmallKey02"},  // player report 99
     {0x22d6ff6fu, Kind::talk, "HaveTalked.Npc_Kokiri_001_Shop_Child"},  // Alex's play-test 2026-11-12 (issue 173)
+    {0x231f663au, Kind::world, "GerudoFortress_WarpPoint02_ClearEvent"},  // player report 99
     {0x249e026eu, Kind::scene, "HavePlayedEvent.Dm_GerudoValley_0000"},
     {0x26d2802cu, Kind::scene, "HavePlayedEvent.Dm_HrlCastle_0035"},
     {0x273a73e9u, Kind::scene, "HavePlayedEvent.Dm_DeathMtTrail_0010"},
     {0x27bcb659u, Kind::world, "GerudoFortress_DestroyGerudoThief_Npc_Hylia_015_Adult"},
+    {0x2815a352u, Kind::world, "IsGet_SmallKey_GerudoFortress.SmallKey03"},  // player report 99
+    {0x288291b3u, Kind::world, "GerudoFortress_Saved_Npc_Hylia_015_Adult"},  // player report 99
     {0x29076b06u, Kind::scene, "HavePlayedEvent.Dm_GerudoValley_0010"},
     {0x291f87b2u, Kind::world, "IsMalonAppear_Market"},
     {0x2adcc032u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0160"},
@@ -98,6 +119,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x3690868du, Kind::scene, "HavePlayedEvent.Dm_HrlField_0071"},
     {0x3725522fu, Kind::scene, "HavePlayedEvent.Dm_LakeHrl_0000"},
     {0x38f16559u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0110"},
+    {0x397957cau, Kind::world, "IsGet_SmallKey_GerudoFortress.SmallKey04"},  // player report 99
     {0x3b320c55u, Kind::world, "KokiriForest_Npc_Kokiri_Mido_Adult_Blocker"},
     {0x3cd8eff5u, Kind::scene, "HavePlayedEvent.Dm_Goron_0040"},
     {0x3eac8adau, Kind::world, "GraveYard_RoyalFamilyTomb_Breaked"},
@@ -126,6 +148,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x5ba9783eu, Kind::scene, "HavePlayedEvent.Dm_DeathMtTrail_0020"},
     {0x603cc0d0u, Kind::scene, "HavePlayedEvent.Dm_DeathMtCrater_0000"},
     {0x60992704u, Kind::scene, "HavePlayedEvent.Dm_HrlField_0060"},
+    {0x6127c9cfu, Kind::world, "GerudoFortress_Saved_Npc_Hylia_016_Adult"},  // player report 99
     {0x61960b30u, Kind::world, "KakarikoVillage_Npc_Hylia_009_Child_DeleteWaterPlane"},
     {0x61f46481u, Kind::scene, "HavePlayedEvent.Get_StoneOfWater_DiscoveryStone"},
     {0x6240e02cu, Kind::scene, "HavePlayedEvent.Dm_HrlCastle_0040"},
@@ -143,6 +166,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x71fb94e3u, Kind::scene, "HavePlayedEvent.Goto_ZoraDomain"},
     {0x7275f781u, Kind::scene, "HavePlayedEvent.Dm_DeathMtTrail_0027"},
     {0x72984c4fu, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0050"},  // Alex's play-test 2026-11-12 (issue 173)
+    {0x73dce2fau, Kind::world, "GerudoFortress_IsAfterHelpCarpenter_Npc_Hylia_016_Adult"},  // player report 99
     {0x754f6228u, Kind::scene, "HavePlayedEvent.Meet_FourCarpenter_ClearEvent"},
     {0x75b6f007u, Kind::scene, "HavePlayedEvent.Dm_FairyFountain_Nayru"},
     {0x7607c748u, Kind::scene, "HavePlayedEvent.Dm_DesertColossus_0000"},
@@ -161,6 +185,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x880a2efau, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Sun_09"},
     {0x88163dffu, Kind::scene, "HavePlayedEvent.Dm_LonLon_0040"},
     {0x88bb5813u, Kind::world, "GerudoFortress_DestroyGerudoThief_Npc_Hylia_014_Adult"},
+    {0x89c70062u, Kind::world, "GerudoFortress_WarpPoint01_ClearEvent"},  // player report 99
     {0x89fc39f9u, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Sun_07"},
     {0x8ab78984u, Kind::scene, "HavePlayedEvent.Dm_Goron_0000"},
     {0x8b591e04u, Kind::scene, "HavePlayedEvent.Goto_KakarikoWells"},
@@ -168,6 +193,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0x8c9a392fu, Kind::scene, "HavePlayedEvent.Dm_HrlField_0080"},
     {0x8e15ffd6u, Kind::scene, "HavePlayedEvent.Dm_HrlCastle_0060"},
     {0x8f02a43bu, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0162"},
+    {0x8f360c8cu, Kind::world, "GerudoFortress_Saved_Npc_Hylia_014_Adult"},  // player report 99
     {0x8fa2608eu, Kind::scene, "HavePlayedEvent.Dm_FairyFountain_Power"},
     {0x9312137cu, Kind::scene, "HavePlayedEvent.Dm_Gerudo_0030"},
     {0x97137664u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0070"},
@@ -189,6 +215,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     // from its _Adult twin, for the adult river).
     {0xa426db4bu, Kind::world, "Zorariver_TheWaterfallsplits_Adult"},
     {0xa49cb68cu, Kind::world, "JabJabOpenedMouth"},
+    {0xa4b1efb9u, Kind::world, "GerudoFortress_WarpPoint04_ClearEvent"},  // player report 99
     {0xa5d8b51du, Kind::scene, "HavePlayedEvent.Dm_LonLon_0030"},
     {0xa66e1d49u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0120"},
     {0xa6b0c301u, Kind::scene, "HavePlayedEvent.Dm_HrlField_0070"},
@@ -239,6 +266,7 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0xd78d5af7u, Kind::scene, "HavePlayedEvent.Dm_Kokiri_0155"},
     {0xdb8433f7u, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Epona"},
     {0xdbb40c10u, Kind::scene, "HavePlayedEvent.Dm_DeathMtTrail_0050"},
+    {0xdc0010f6u, Kind::world, "IsGet_SmallKey_GerudoFortress.SmallKey01"},  // player report 99
     {0xdcf49939u, Kind::scene, "HavePlayedEvent.Dm_MelodyGet_Sun_05"},
     {0xe0fc0275u, Kind::scene, "HavePlayedEvent.Dm_LostWood_0025"},
     {0xe2c6b142u, Kind::scene, "HavePlayedEvent.Dm_Kakariko_0040"},
@@ -267,9 +295,11 @@ constexpr std::array kFlags = std::to_array<Flag>({
     {0xf0fde374u, Kind::world, "KokiriForest_Npc_Kokiri_007_Child_Blocker"},
     {0xf16a3d82u, Kind::world, "Zorariver_TheWaterfallsplits"},  // issue 61, above
     {0xf1826d42u, Kind::scene, "HavePlayedEvent.Dm_LonLon_0020"},
+    {0xf1eb5977u, Kind::world, "GerudoFortress_IsAfterHelpCarpenter_Npc_Hylia_013_Adult"},  // player report 99
     {0xf38be607u, Kind::scene, "HavePlayedEvent.Dm_Kakariko_0000"},
     {0xf5be8a94u, Kind::world, "Npc_Hylia_009_Child_IsStormSongPlayed"},
     {0xf66ceb94u, Kind::scene, "HavePlayedEvent.Dm_Goron_0045"},
+    {0xf717e3dau, Kind::world, "GerudoFortress_IsAfterHelpCarpenter_Npc_Hylia_015_Adult"},  // player report 99
     {0xf84339cbu, Kind::scene, "HavePlayedEvent.Dm_DeathMtCrater_0010"},
     {0xfd1b310eu, Kind::world, "IsMalonAppear_HyruleCastleSecondTime"},
     {0xfd925132u, Kind::scene, "HavePlayedEvent.Dm_HrlCastle_0000"},

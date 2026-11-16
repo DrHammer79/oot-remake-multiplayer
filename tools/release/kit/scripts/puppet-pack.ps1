@@ -75,7 +75,7 @@ $loadDir = Get-KitLoadDir $user
 $longest = Join-Path $loadDir '0400486024DEC000\coop-puppet\romfs\System\Resource\ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs.tmp'
 if ($longest.Length -gt 259) {
     Write-Host "The kit folder is too deep for Windows ($($longest.Length) characters in the longest path, 259 at most)."
-    Write-Host 'Move the kit to a shorter folder, for example C:\oot-coop, and run this again.'
+    Write-Host 'Move the kit to a shorter folder, for example C:\Squadala, and run this again.'
     exit 1
 }
 

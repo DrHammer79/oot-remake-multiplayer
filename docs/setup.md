@@ -2,7 +2,7 @@
 
 Squadala!, online co-op for the Ocarina of Time remake, on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean and contributors, GPL-3.0; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) by NotRexed and contributors): a native PC version of the game that the kit builds on your PC from your own copy. There is no emulator: the game runs as a normal Windows program. This is an early test build (the newest is on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)); [known-issues.md](known-issues.md) lists what works and what does not yet.
 
-The kit has one file to start: **`Start OoT Co-op.bat`**. Everything else is done by it or in the game. (The older emulator kits, with `Host.bat` and `Join.bat`, have their own guide: [setup-emulator.md](setup-emulator.md). A player on an emulator kit cannot join a game hosted with this kit, nor the other way round: every player needs this kit, the same version.)
+The kit has one file to start: **`Start Squadala.bat`**. Everything else is done by it or in the game. (The older emulator kits, with `Host.bat` and `Join.bat`, have their own guide: [setup-emulator.md](setup-emulator.md). A player on an emulator kit cannot join a game hosted with this kit, nor the other way round: every player needs this kit, the same version.)
 
 ## What you need
 
@@ -17,15 +17,15 @@ The kit has one file to start: **`Start OoT Co-op.bat`**. Everything else is don
 
 ## Step by step
 
-1. **Download** `oot-coop-<version>-windows.zip` from the newest release on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases).
+1. **Download** `Squadala-<version>-windows.zip` (up to v0.11.2 `oot-coop-<version>-windows.zip`; the `oot-coop-<version>.zip` beside it is the same file, for older kits' updaters) from the newest release on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases).
 2. **Unzip it.** Right-click the zip, choose **Extract All...**, and extract it to a short folder on a drive with 60 GB free, for example `C:\OoT-Coop`. Not inside the zip, not in OneDrive (your Desktop and Documents are often in OneDrive), not under Program Files.
-3. **Double-click `Start OoT Co-op.bat`** in that folder. A window opens and checks the kit first (see [If something goes wrong](#if-something-goes-wrong)).
+3. **Double-click `Start Squadala.bat`** in that folder. A window opens and checks the kit first (see [If something goes wrong](#if-something-goes-wrong)).
 4. **The first time, give it your game.** It asks you to drag your game's `.nup` file into the window and press Enter (for a `romfs` folder it then asks for the `exefs` folder). It remembers the file; it never asks again. Then it builds the game: **10 to 45 minutes, once**. The window shows each stage; the PC stays usable. It also makes the puppet pack (the other players' Link and tunic colours) from your game, and puts a **Play OoT Co-op** shortcut on your desktop.
 5. **The game starts.** **Host** and **Join** are in the game's menu, on its first tab, **Multiplayer**. To open it: on a controller **−** and **+** together (on an Xbox-style pad **View** and **Menu**), or **Home**; on the keyboard **F1** (Insert and Esc also open it unless you changed that in the menu); on the title screen **−** alone. The D-pad or the arrow keys choose, A or Enter confirms, B or Esc goes back.
    - **Host:** one press. The Host screen's first line says it: *Invite code copied to your clipboard. Share it in DMs only: it contains your internet address.* Send the code in a DM (Discord, a text), never in a public channel; that is all most hosts need. Below it: **Paste friend's answer (or Ctrl+V)** when a friend's game shows an answer code, **Same network** for friends in the same house, **VPN** for friends on Radmin VPN, Hamachi, ZeroTier, Tailscale or WireGuard with you, and **Port** to choose a custom UDP port (1 to 65535; default 27510; changing it while hosting restarts hosting: friends join again with the new code).
    - **Join:** paste your friend's code (it is filled in already when it is on your clipboard), or enter their **IP address**, **Port** and **Password** (from their Same network or VPN line), then **Join**.
    - **Co-op Settings:** your name, your colour, the number of players and port when you host (`Players when you host`, `Port when you host`), voice chat.
-6. **Next time**, double-click `Start OoT Co-op.bat` or the desktop shortcut: the game starts in seconds.
+6. **Next time**, double-click `Start Squadala.bat` or the desktop shortcut: the game starts in seconds.
 
 To check it works: in the game the other players show as Link with their name tags, and **T** opens the chat box. The game's log `longshot_log.txt` (in the `logs` folder of the kit's `hookshot\game\`; before Longshot rc.4, beside `longshot.exe`) says `coop: module loaded`, then `coop: connected`.
 
@@ -51,7 +51,8 @@ On Linux the same is `bash revert.sh` and `bash scripts/update.sh --version <tag
 
 | What | Why |
 |---|---|
-| `Start OoT Co-op.bat` | The only file you start |
+| `Start Squadala.bat` | The only file you start |
+| `Start OoT Co-op.bat` | Its old name (up to v0.11.2), kept so old shortcuts and older updaters still work: it starts `Start Squadala.bat` |
 | `README.txt` | The steps above, short |
 | `Update.bat` | Updates by hand (the start does it by itself) |
 | `Revert.bat` | Goes back to the version before the last update ([above](#going-back-to-an-older-version)); `previous\` holds the versions kept for it |
@@ -70,12 +71,12 @@ Nothing of the game is in the kit. The built game and the puppet pack are made f
 
 The start window says what is wrong and what to do. What it checks:
 
-- **"This kit is still inside its zip file."** You opened the zip and double-clicked the file inside it. Close it, right-click the zip, **Extract All...**, and start `Start OoT Co-op.bat` in the folder it made.
+- **"This kit is still inside its zip file."** You opened the zip and double-clicked the file inside it. Close it, right-click the zip, **Extract All...**, and start `Start Squadala.bat` in the folder it made.
 - **"OoT Co-op is already starting in another window."** You double-clicked twice. Wait for the first window (the first build takes a while).
 - **"This folder is in OneDrive"**, **"...letters the game build cannot handle"**, **"...too long"**, **"...cannot be written to"**: the first build cannot work in this folder. It offers to copy the kit to `C:\OoT-Coop` and start it there; say yes (or move the folder yourself). Once the game is built, the kit no longer asks.
 - **"Your antivirus has most likely removed..."**: Windows Security (or another antivirus) took a file of the kit or of the built game. Open **Windows Security > Virus & threat protection > Protection history**, restore the file, and add the kit folder under **Exclusions**. Then start again: the game is not built again.
 - **"The game isn't set up yet... Set it up now?"**: the first start. Answer **Y** (or wait a minute) and it builds the game once; **n** builds nothing until the next start.
-- **"Windows protected your PC"** when you start `Start OoT Co-op.bat`: SmartScreen, because the kit's files came from a downloaded zip. Click **More info**, then **Run anyway**. The kit then takes Windows' "downloaded from the internet" mark off its own files, once, so Windows does not ask about them again. To avoid it from the start: right-click the zip, **Properties**, tick **Unblock**, **OK**, then extract it. Defender's exclusions and turning real-time protection off do not change SmartScreen.
+- **"Windows protected your PC"** when you start `Start Squadala.bat`: SmartScreen, because the kit's files came from a downloaded zip. Click **More info**, then **Run anyway**. The kit then takes Windows' "downloaded from the internet" mark off its own files, once, so Windows does not ask about them again. To avoid it from the start: right-click the zip, **Properties**, tick **Unblock**, **OK**, then extract it. Defender's exclusions and turning real-time protection off do not change SmartScreen.
 - **"Windows Smart App Control is blocking this kit's PowerShell scripts"** or **"...blocked <file>"**: Smart App Control (Windows 11) blocks programs and scripts without a known signature, whatever Defender's settings are; the kit's are not signed. To use the kit, turn it off: **Windows Security > App & browser control > Smart App Control settings > Off**. Windows cannot turn it back on without a reset of Windows, so that is your choice. (Longshot's own builder is a single program that downloads its tools itself, so nothing it runs carries the internet mark; the kit is PowerShell scripts from a zip.)
 - **"PowerShell on this PC runs in ConstrainedLanguage mode"** or **"A Group Policy on this PC sets PowerShell's execution policy"**: a policy (work or school PCs, or a privacy or tweak tool) stops unsigned scripts. On your own PC the message says which setting to change; otherwise ask the PC's owner.
 - **"Windows would not let the build move or delete ...\hookshot\tools.new"** (in 0.10.1: a red `Access to the path '...\tools.new' is denied`, even as administrator): a program still had a file of the freshly unpacked tools open. The kit now tries again for 30 seconds, then moves the folder with robocopy, which copies even files another program has open. When even that fails, the message names the program holding it (an antivirus, Explorer, the search indexer, a sync client such as Google Drive or Dropbox): close it or add the kit folder to its exclusions, and start again. A kit inside a cloud-sync folder: move it out, to `C:\OoT-Coop`.
@@ -112,7 +113,7 @@ Already set up? Copy by hand: close both games, keep a copy of the kit's `hooksh
 
 ## The randomizer
 
-The kit brings the randomizer, OOTRR: the first build (and an update that moves it) downloads it into `hookshot\game\tools\ootrr\`, and it builds seeds from the game files the build already unpacked. Nothing to download or set. It is off until you, or the host in co-op, turn it on in the Mods tab (**OoT Remake Randomizer**, **Settings**): [mods.md](mods.md#the-randomizer). Do not install OOTRR by hand next to co-op: with a second OOTRR 0.5.0 the game crashes at start.
+The kit brings the randomizer, OOTRR: the first build (and an update that moves it) downloads it into `hookshot\game\tools\ootrr\`, and it builds seeds from the game files the build already unpacked. Nothing to download or set. It is off until you, or the host in co-op, turn it on in the Mods tab (**OoT Remake Randomizer**, **Settings**): [mods.md](mods.md#the-randomizer). Step by step for co-op: [randomizer.md](randomizer.md). Do not install OOTRR by hand next to co-op: with a second OOTRR the game crashes at start.
 
 ## Customize Link
 
@@ -133,7 +134,7 @@ Longshot builds its shaders the first time it sees each place, so the first minu
 Optional. The updater checks every download against the SHA-256 published with the release, which proves the file arrived whole. Each release's zip and `Update.bat` are also signed by our release workflow on GitHub (an artifact attestation). To check a zip you downloaded, install the [GitHub CLI](https://cli.github.com), run `gh auth login` once, and in the folder with the zip:
 
 ```
-gh attestation verify oot-coop-<version>.zip --repo daurosk/oot-remake-multiplayer --signer-workflow daurosk/oot-remake-multiplayer/.github/workflows/release-attest.yml
+gh attestation verify Squadala-<version>-windows.zip --repo daurosk/oot-remake-multiplayer --signer-workflow daurosk/oot-remake-multiplayer/.github/workflows/release-attest.yml
 ```
 
 It must say the verification succeeded. If it fails, do not use the zip, and tell us ([Reporting a problem](#reporting-a-problem)).

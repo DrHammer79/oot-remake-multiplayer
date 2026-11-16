@@ -243,8 +243,8 @@ function Invoke-PuppetPackStep([string]$exeDir) {
 # only the puppet pack, made again in the game this kit built. Nothing is downloaded or built.
 if ($PackOnly) {
     $exe = Get-KitHookshotExe $Out
-    if (-not $exe) { Fail 'The co-op game is not built yet. Start "Start OoT Co-op.bat": it builds the game and makes the puppet pack.' }
-    if (-not (Test-Path -LiteralPath $python)) { Fail "The pack tool's Python is not in $tools. Start ""Start OoT Co-op.bat"" once (it gets it), then this again." }
+    if (-not $exe) { Fail 'The co-op game is not built yet. Start "Start Squadala.bat": it builds the game and makes the puppet pack.' }
+    if (-not (Test-Path -LiteralPath $python)) { Fail "The pack tool's Python is not in $tools. Start ""Start Squadala.bat"" once (it gets it), then this again." }
     $exeDir = Split-Path -Parent $exe
     if (Get-Process longshot, hookshot -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($exeDir, [StringComparison]::OrdinalIgnoreCase) }) {
         Fail 'The co-op game is running: close it first (it reads the pack when it starts).'
@@ -252,7 +252,7 @@ if ($PackOnly) {
     Step 'The puppet pack'
     $ok = Invoke-PuppetPackStep $exeDir
     foreach ($l in @(Update-KitRandoSeeds $exeDir)) { Write-Host "  $l" }
-    if ($ok) { Write-Host ''; Write-Host 'Done: the puppet pack is made. Start "Start OoT Co-op.bat" to play.' -ForegroundColor Green; exit 0 }
+    if ($ok) { Write-Host ''; Write-Host 'Done: the puppet pack is made. Start "Start Squadala.bat" to play.' -ForegroundColor Green; exit 0 }
     exit 1
 }
 
@@ -596,7 +596,7 @@ function Invoke-MakeGame([string[]]$MoreArgs, [string]$Log = '') {
 if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
     Step "The game: built already ($Out)"
 } else {
-    if (-not $gameArgs) { Fail 'No game files: none were found or remembered, and none could be asked for here. Start "Start OoT Co-op.bat" again, or run Build-Hookshot-Coop.bat -Game <your .nup>.' }
+    if (-not $gameArgs) { Fail 'No game files: none were found or remembered, and none could be asked for here. Start "Start Squadala.bat" again, or run Build-Hookshot-Coop.bat -Game <your .nup>.' }
     Step 'Checking your game files'
     $code = Invoke-MakeGame ($gameArgs + @('--check'))
     if ($code -ne 0) {
@@ -724,7 +724,13 @@ if (Test-Path -LiteralPath $ootrrPin) {
             else { [System.IO.File]::WriteAllText($ootrrStamp, "$ootrrWant`n") }
         }
         if ($why) { Write-Host "  The randomizer (OOTRR $($op.release)) was not set up: $why. Co-op works without it; run Build-Hookshot-Coop.bat again to retry." -ForegroundColor Yellow }
-        else { Write-Host "  randomizer: OOTRR $($op.release) -> $ootrrDir" }
+        else {
+            Write-Host "  randomizer: OOTRR $($op.release) -> $ootrrDir"
+            # (another release than the one before: its seeds are other worlds, Remove-KitRandoSeeds)
+            if ($ootrrHave -and ($ootrrHave -split ' ')[0] -ne $op.release) {
+                foreach ($l in @(Remove-KitRandoSeeds $exeDir $op.release)) { Write-Host "  $l" }
+            }
+        }
     }
 }
 
@@ -740,16 +746,18 @@ if ($lsImage) {
     foreach ($l in (Copy-KitLongshotSaves $lsImage $ourImage)) { Write-Host "  $l" }
 }
 
-# A desktop shortcut to the kit's launcher ("Start OoT Co-op.bat"; Play-OoT-Coop.bat in an older emulator kit), once,
-# for the kit's own game (not for a game hs.py builds elsewhere).
-$launcher = Join-Path $kit 'Start OoT Co-op.bat'
+# A desktop shortcut to the kit's launcher ("Start Squadala.bat"; "Start OoT Co-op.bat" up to v0.11.2,
+# Play-OoT-Coop.bat in an older emulator kit), once, for the kit's own game (not for a game hs.py builds elsewhere).
+# "Play Squadala" (its name up to v0.11.2, "Play OoT Co-op", counts as there: start.ps1 renames it).
+$launcher = Join-Path $kit 'Start Squadala.bat'
+if (-not (Test-Path -LiteralPath $launcher)) { $launcher = Join-Path $kit 'Start OoT Co-op.bat' }
 if (-not (Test-Path -LiteralPath $launcher)) { $launcher = Join-Path $kit 'Play-OoT-Coop.bat' }
 if (-not $PSBoundParameters.ContainsKey('Out') -and -not $Tools -and (Test-Path -LiteralPath $launcher) -and
     -not $env:OOT_COOP_NO_SHORTCUT) {
     try {
         $desktop = [Environment]::GetFolderPath('Desktop')
-        $link = Join-Path $desktop 'Play OoT Co-op.lnk'
-        if ($desktop -and -not (Test-Path -LiteralPath $link)) {
+        $link = Join-Path $desktop 'Play Squadala.lnk'
+        if ($desktop -and -not (Test-Path -LiteralPath $link) -and -not (Test-Path -LiteralPath (Join-Path $desktop 'Play OoT Co-op.lnk'))) {
             $shell = New-Object -ComObject WScript.Shell
             $s = $shell.CreateShortcut($link)
             $s.TargetPath = $launcher
@@ -757,14 +765,14 @@ if (-not $PSBoundParameters.ContainsKey('Out') -and -not $Tools -and (Test-Path 
             $s.IconLocation = "$exe,0"
             $s.Description = 'OoT co-op on Hookshot: host or join, updates itself'
             $s.Save()
-            Write-Host "  A shortcut 'Play OoT Co-op' is on your desktop."
+            Write-Host "  A shortcut 'Play Squadala' is on your desktop."
         }
     } catch { Write-Host "  (no desktop shortcut: $($_.Exception.Message))" }
 }
 
 Write-Host ''
-if (Test-Path -LiteralPath (Join-Path $kit 'Start OoT Co-op.bat')) {
-    Write-Host 'Done. The game is ready: "Start OoT Co-op.bat" (or the desktop shortcut) starts it; Host and Join are in the game.' -ForegroundColor Green
+if (Test-Path -LiteralPath (Join-Path $kit 'Start Squadala.bat')) {
+    Write-Host 'Done. The game is ready: "Start Squadala.bat" (or the desktop shortcut) starts it; Host and Join are in the game.' -ForegroundColor Green
     Write-Host "  The game: $exe. Its log (longshot_log.txt in the game's logs folder) says 'coop: module loaded'."
     exit 0
 }

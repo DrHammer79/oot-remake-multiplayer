@@ -31,7 +31,7 @@ Out of scope: what a player you let in does inside the shared game (see [What an
 Each release's kit zip and `Update.bat` are signed by this repository's `Release attest` workflow (GitHub artifact attestations, Sigstore) from the files as published. To check a download yourself, with the GitHub CLI:
 
 ```
-gh attestation verify oot-coop-<version>.zip --repo daurosk/oot-remake-multiplayer --signer-workflow daurosk/oot-remake-multiplayer/.github/workflows/release-attest.yml
+gh attestation verify Squadala-<version>-windows.zip --repo daurosk/oot-remake-multiplayer --signer-workflow daurosk/oot-remake-multiplayer/.github/workflows/release-attest.yml
 ```
 
 or run `tools\release\verify_kit.ps1 -Zip <file>` from this repository, which also checks the `.sha256` file. It prints `OK: signed by our release workflow`. The signature proves the file is what our workflow saw at publish time; it does not protect against someone with write access to this repository. Every GitHub Action our workflows use is pinned to a full commit hash (checked by `tools/check_actions.py`). More in [setup.md](docs/setup.md#check-the-download).

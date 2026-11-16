@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 #include "coop/host/map_drop_log.hpp"
 #include "coop/protocol/codec.hpp"
@@ -278,6 +279,7 @@ void FlagWatcher::reset() {
   }
   raced_.clear();
   resend_pending_ = role_ == FlagRole::player && !pending_.empty();
+  check_offline_ = true;  // the title seen meanwhile (set_title) is looked at by the next frame()
 }
 
 std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
@@ -315,9 +317,24 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
   for (auto& message : queue) handle(store, message, answers);
 
   std::vector<Outgoing> resets;
+  if (std::exchange(check_offline_, false) && !loading_ && title_seen_ && role_ == FlagRole::player &&
+      !window_ && !last_.empty()) {
+    // A connection's first frame, Link in the game, and the title was up
+    // while we were not connected (set_title): our game may have loaded
+    // another save meanwhile, which no load window saw (frame() does not run
+    // then). What it changed since our last frame goes back to that (the
+    // group's then), as a guest's save load does: it is never sent as our
+    // progress (player report #96). With no Link now the load window below
+    // takes the title instead.
+    ++stats_.offline_loads;
+    moved_ = true;
+    end_window(store, resets);
+    moved_ = false;
+  }
   if (settling() && !window_) {
     window_ = true;
     moved_ = false;
+    window_title_ = false;
     back_keys_.clear();
     no_scene_frames_ = 0;
   } else if (!settling() && window_) {
@@ -325,7 +342,9 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
     end_window(store, resets);
   }
   if (window_ && loading_ && !scene_readable_) no_scene_frames_ += static_cast<int>(step);
+  if (window_ && title_seen_) window_title_ = true;
   see_save_load();
+  title_seen_ = title_up_;  // taken: what comes before the next frame() counts again
 
   Table changes;
   if (!holding_) {
@@ -480,36 +499,48 @@ void FlagWatcher::apply_reset(FlagStore& store, const std::vector<FlagEntry>& fl
     const FlagKey key = key_of(entry);
     if (!shared_.contains(key) || is_delta(entry)) continue;  // no one-way rule here
     pending_.erase(key);  // the host's save wins over a change of ours
-    if (keeps_own(store, entry)) {
-      unwritten_.erase(key);
-      last_[key] = entry;  // the next diff sends our own value
-      continue;
-    }
-    note_for_others(store, entry);
-    const auto seen = last_.find(key);
-    const std::optional<FlagEntry> before =
-        seen != last_.end() ? std::optional<FlagEntry>(seen->second) : std::nullopt;
-    if (!store.write_exact(entry)) {
-      ++stats_.write_failures;
-      unwritten_[key] = entry;
-      if (!written_for_others_.empty() && written_for_others_.back() == key) {
-        written_for_others_.pop_back();
-      }
-      continue;
-    }
-    ++stats_.applied;
-    ++stats_.reset_applied;
-    unwritten_.erase(key);
-    if (!store.is_count(key)) note_group(entry, nullptr);
-    last_[key] = entry;
-    if (before) note_received(key, *before, entry);
+    if (write_exact(store, entry)) ++stats_.reset_applied;
   }
+}
+
+bool FlagWatcher::write_exact(FlagStore& store, const FlagEntry& entry) {
+  const FlagKey key = key_of(entry);
+  if (keeps_own(store, entry)) {
+    unwritten_.erase(key);
+    last_[key] = entry;  // the next diff sends our own value
+    return false;
+  }
+  note_for_others(store, entry);
+  const auto seen = last_.find(key);
+  const std::optional<FlagEntry> before =
+      seen != last_.end() ? std::optional<FlagEntry>(seen->second) : std::nullopt;
+  if (!store.write_exact(entry)) {
+    ++stats_.write_failures;
+    unwritten_[key] = entry;
+    if (!written_for_others_.empty() && written_for_others_.back() == key) {
+      written_for_others_.pop_back();
+    }
+    return false;
+  }
+  ++stats_.applied;
+  unwritten_.erase(key);
+  if (!store.is_count(key)) note_group(entry, nullptr);
+  last_[key] = entry;
+  if (before) note_received(key, *before, entry);
+  return true;
 }
 
 void FlagWatcher::see_save_load() {
   if (!window_ || !loading_ || moved_) return;
-  if (static_cast<int>(back_keys_.size()) < kSaveLoadMin || no_scene_frames_ < kTitleFrames) return;
+  const bool flags_back = static_cast<int>(back_keys_.size()) >= kSaveLoadMin && no_scene_frames_ >= kTitleFrames;
+  // A player's load through Hookshot's title menu (set_title) is a save load
+  // even when its save only goes forward of the group's (player report #96:
+  // a guest's own richer save). The host's loads keep the flags-back rule.
+  const bool title = role_ == FlagRole::player && window_title_;
+  if (!flags_back && !title) return;
+  if (!flags_back) ++stats_.title_loads;
   moved_ = true;
+  seen_ = true;  // also with 0 flags back (the title sign): take_save_load reports it
   seen_flags_ = static_cast<int>(back_keys_.size());
   seen_frames_ = no_scene_frames_;
 }
@@ -554,8 +585,14 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
       // not shared here, or a pickup's 0
     } else if (pending_.contains(key)) {
       ++stats_.kept_local;  // the host's answer to it is still to come
-    } else {
-      write(store, entry);
+    } else if (is_delta(entry) || store.is_count(key)) {
+      write(store, entry);  // a count's total, plus our change not sent yet
+    } else if (write_exact(store, entry)) {
+      // The host's save decides (docs/flags.md, "Saves"): a game that joins
+      // takes the group's value as it is, a lower one too. Merged (OR, max),
+      // a guest's older save filled the host's new file with that save's
+      // items and quests at once (player report #96).
+      ++stats_.snapshot_exact;
     }
   }
   snapshot_.clear();

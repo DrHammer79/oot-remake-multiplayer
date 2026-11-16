@@ -53,9 +53,9 @@ if ($Hookshot) {
 }
 if (-not $Hookshot -and -not (Test-Path $exe)) { Write-Host "Not found: $exe"; exit 1 }
 # A Hookshot-only kit (make_kit_hookshot.ps1) has one launcher and no Build-Hookshot-Coop.bat or Host/Join .bat files.
-$hsOnly = Test-Path -LiteralPath (Join-Path $kit 'Start OoT Co-op.bat')
-$hsRetry = if ($hsOnly) { 'Start "Start OoT Co-op.bat" again' } else { 'Run Build-Hookshot-Coop.bat' }
-if ($hsOnly) { $script:KitPackRemake = 'Start "Start OoT Co-op.bat" again: it makes the pack again.' }
+$hsOnly = Test-Path -LiteralPath (Join-Path $kit 'Start Squadala.bat')
+$hsRetry = if ($hsOnly) { 'Start "Start Squadala.bat" again' } else { 'Run Build-Hookshot-Coop.bat' }
+if ($hsOnly) { $script:KitPackRemake = 'Start "Start Squadala.bat" again: it makes the pack again.' }
 
 # Yes or no, yes when no key comes in $Seconds (an unattended start still updates).
 function Clear-KeysTypedAhead {
@@ -179,7 +179,7 @@ if ($Hookshot) {
         # The long builds ask first (yes by itself after a minute, so an unattended start still builds).
         $question = Get-KitHookshotNeedQuestion $need
         if ($question -and -not (Read-YesNo "$question (then the game starts; closing this window cancels)" 60)) {
-            Write-Host $(if ($hsOnly) { 'Not now. Start "Start OoT Co-op.bat" again when you want to set it up.' } else { 'Not now. Build-Hookshot-Coop.bat sets it up (SETUP.md, "Play on Hookshot"); then start this again.' })
+            Write-Host $(if ($hsOnly) { 'Not now. Start "Start Squadala.bat" again when you want to set it up.' } else { 'Not now. Build-Hookshot-Coop.bat sets it up (SETUP.md, "Play on Hookshot"); then start this again.' })
             exit 1
         }
         $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -193,7 +193,7 @@ if ($Hookshot) {
         $exe = Get-KitHookshotExe $hsGame
     }
     if (-not $exe) {
-        Write-Host "The co-op game isn't set up yet: none in $hsGame. $(if ($hsOnly) { 'Start ""Start OoT Co-op.bat"" again and let it finish (SETUP.md).' } else { 'Run Build-Hookshot-Coop.bat and let it finish (SETUP.md, ""Play on Hookshot"").' })"
+        Write-Host "The co-op game isn't set up yet: none in $hsGame. $(if ($hsOnly) { 'Start ""Start Squadala.bat"" again and let it finish (SETUP.md).' } else { 'Run Build-Hookshot-Coop.bat and let it finish (SETUP.md, ""Play on Hookshot"").' })"
         exit 1
     }
     if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $exe) 'hookshot_coop.dll'))) {

@@ -1,5 +1,5 @@
 # Shared by the Linux kit's scripts (sourced, not run). The kit:
-#   start-oot-coop.sh   the one file players start
+#   start-squadala.sh   the one file players start
 #   README.txt
 #   scripts/            these scripts (players never open it)
 #   data/               the server, Longshot's pin and our patches, the co-op module, docs, licences;

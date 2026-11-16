@@ -94,7 +94,7 @@ sha=$(sha256sum "$appimage" | cut -d' ' -f1)
 
 kit="$tmp/OoT Coop kit"   # (a space in the path, as players' folders have)
 mkdir -p "$kit/scripts" "$kit/data/longshot/patches" "$kit/data/server" "$kit/data/tools/puppet_pack"
-cp "$src/start-oot-coop.sh" "$src/README.txt" "$src/revert.sh" "$kit/"
+cp "$src/start-squadala.sh" "$src/start-oot-coop.sh" "$src/README.txt" "$src/revert.sh" "$kit/"
 cp "$src"/scripts/*.sh "$release/kit/scripts/apply_patch.py" "$kit/scripts/"
 cp "$release/kit/coop.ini.template" "$kit/scripts/"
 cp "$release/kit/coop-options.ini" "$kit/data/coop-options.ini"
@@ -217,6 +217,19 @@ printf 'release=v0.5.0\nurl=https://example.invalid/ootrr\nlinux=OOTRR-test-linu
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o4.txt" 2>&1; export CODE=$?
 check 'build offline: the OOTRR tarball already here (its SHA-256 matched) is put in, no download' \
     bash -c '[ $CODE -eq 0 ] && [ -x "$1/game/tools/ootrr/ootrr" ] && ! grep -q downloading "$2"' _ "$D" "$tmp/build-o4.txt"
+# Another OOTRR release (0.5.0 -> 0.6.0): the built seeds and their seed files go (the game makes them again with
+# it); another mod and a folder with no coop-seed.txt stay. The same release again removes nothing.
+mkdir -p "$D/game/mods/randomizer-EF" "$D/game/mods/randomizer-half" "$D/game/mods/oot-remake-randomizer" "$D/game/mods/hd/romfs"
+echo EF >"$D/game/mods/randomizer-EF/coop-seed.txt"
+echo '{}' >"$D/game/mods/oot-remake-randomizer/randomizer-EF.ootrr"
+printf 'release=v0.6.0\nurl=https://example.invalid/ootrr\nlinux=OOTRR-test-linux.tar.gz\nlinux_sha256=%s\n' "$o_sha" >"$kit/data/longshot/OOTRR.txt"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o6.txt" 2>&1; export CODE=$?
+check 'build: another OOTRR release removes the built seeds (the game makes them again), keeps the rest' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "seed randomizer-EF removed for OOTRR v0.6.0" "$1" && [ ! -e "$2/game/mods/randomizer-EF" ] && [ ! -e "$2/game/mods/oot-remake-randomizer/randomizer-EF.ootrr" ] && [ -d "$2/game/mods/randomizer-half" ] && [ -d "$2/game/mods/hd/romfs" ]' _ "$tmp/build-o6.txt" "$D"
+mkdir -p "$D/game/mods/randomizer-GH" && echo GH >"$D/game/mods/randomizer-GH/coop-seed.txt"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o7.txt" 2>&1
+check 'build: the same OOTRR release again keeps the seeds' bash -c '[ -f "$1/game/mods/randomizer-GH/coop-seed.txt" ] && ! grep -q "removed for OOTRR" "$2"' _ "$D" "$tmp/build-o7.txt"
+rm -rf "$D/game/mods/randomizer-GH" "$D/game/mods/randomizer-half" "$D/game/mods/hd"
 rm -rf "$D/game/tools/ootrr" "$D/builder/OOTRR-test-linux.tar.gz"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o5.txt" 2>&1; export CODE=$?
 check 'build offline: no OOTRR here -> no download try, one offline line, the game still ready' \
@@ -306,22 +319,32 @@ rm -rf "$kit2"
 # --- start.sh (Linux only: its checks read this PC) --------------------------------------------
 if [[ $(uname -s) == Linux ]]; then
     : >"$log"
-    OOT_COOP_SECRET=1 bash "$kit/start-oot-coop.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
+    OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
     check 'start: builds if needed, then starts the game in data/game' bash -c '[ $CODE -eq 0 ] && grep -q "^started $2 1 $3$" "$1"' _ "$log" "$D" "$D/game"
     check 'start: without a terminal, what it says goes to data/logs/start.log' has "$D/logs/start.log" 'start without a terminal'
-    check 'start: an applications menu entry for this kit (Steam: Add a Non-Steam Game)' bash -c 'grep -qF "Exec=bash \"$2/start-oot-coop.sh\"" "$1" && grep -q "^Categories=Game;" "$1"' _ "$XDG_DATA_HOME/applications/oot-coop.desktop" "$kit"
-    check 'start: "sh start-oot-coop.sh" works too (POSIX sh start file)' sh -n "$kit/start-oot-coop.sh"
-    bash "$kit/start-oot-coop.sh" --nope </dev/null >"$tmp/start2.txt" 2>&1; export CODE=$?
+    check 'start: an applications menu entry for this kit (Steam: Add a Non-Steam Game)' bash -c 'grep -qF "Exec=bash \"$2/start-squadala.sh\"" "$1" && grep -q "^Categories=Game;" "$1"' _ "$XDG_DATA_HOME/applications/oot-coop.desktop" "$kit"
+    check 'start: "sh start-squadala.sh" works too (POSIX sh start file)' sh -n "$kit/start-squadala.sh"
+    bash "$kit/start-squadala.sh" --nope </dev/null >"$tmp/start2.txt" 2>&1; export CODE=$?
     check 'start: an unknown option is refused' bash -c '[ $CODE -ne 0 ] && grep -q "Unknown option" "$1"' _ "$tmp/start2.txt"
-    bash "$kit/start-oot-coop.sh" --help </dev/null >"$tmp/start3.txt" 2>&1
+    bash "$kit/start-squadala.sh" --help </dev/null >"$tmp/start3.txt" 2>&1
     check 'start --help lists the options' has "$tmp/start3.txt" '--no-update'
     check 'start --help lists --pack' has "$tmp/start3.txt" '--pack'
+    # start-oot-coop.sh, the start file's name up to v0.11.2 (menu entries, Steam shortcuts): the same start, by sh or bash
+    sh "$kit/start-oot-coop.sh" --help </dev/null >"$tmp/start3old.txt" 2>&1
+    check 'start-oot-coop.sh (old name) starts the same: --help' cmp -s "$tmp/start3.txt" "$tmp/start3old.txt"
+    bash "$kit/start-oot-coop.sh" --nope </dev/null >/dev/null 2>&1; export CODE=$?
+    check 'start-oot-coop.sh (old name): its exit code goes through' [ $CODE -ne 0 ]
+    # A menu entry made by a kit up to v0.11.2 (Exec= start-oot-coop.sh) is made again for start-squadala.sh.
+    printf '[Desktop Entry]\nName=OoT Co-op\nExec=bash "%s/start-oot-coop.sh"\n' "$kit" >"$XDG_DATA_HOME/applications/oot-coop.desktop"
     : >"$log"
-    bash "$kit/start-oot-coop.sh" --pack </dev/null >"$tmp/start5.txt" 2>&1; export CODE=$?
+    bash "$kit/start-squadala.sh" --no-update </dev/null >/dev/null 2>&1
+    check 'start: an old menu entry (start-oot-coop.sh) now runs start-squadala.sh' grep -qF "Exec=bash \"$kit/start-squadala.sh\"" "$XDG_DATA_HOME/applications/oot-coop.desktop"
+    : >"$log"
+    bash "$kit/start-squadala.sh" --pack </dev/null >"$tmp/start5.txt" 2>&1; export CODE=$?
     check 'start --pack: the pack made again even when current, the game not started' bash -c '[ $CODE -eq 0 ] && grep -q "^puppet_pack" "$1" && ! grep -q "^started" "$1" && grep -q "the puppet pack is made" "$2"' _ "$log" "$tmp/start5.txt"
     chmod -w "$D"
     if [[ ! -w $D ]]; then
-        bash "$kit/start-oot-coop.sh" --no-update </dev/null >"$tmp/start4.txt" 2>&1
+        bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start4.txt" 2>&1
         check 'start: a read-only kit folder is said' has "$tmp/start4.txt" 'read-only'
     fi
     chmod u+w "$D"
@@ -330,26 +353,35 @@ else
 fi
 
 # --- update.sh -------------------------------------------------------------------------------
-new=$tmp/rel/oot-coop-v0.1.0-beta3-linux
+new=$tmp/rel/Squadala-v0.1.0-beta3-linux
 mkdir -p "$new"
-cp -a "$kit/start-oot-coop.sh" "$kit/README.txt" "$kit/revert.sh" "$kit/scripts" "$new/"
+cp -a "$kit/start-squadala.sh" "$kit/start-oot-coop.sh" "$kit/README.txt" "$kit/revert.sh" "$kit/scripts" "$new/"
 mkdir -p "$new/data/longshot/patches" "$new/data/server"
 cp -a "$kit/data/longshot/." "$new/data/longshot/"
 printf 'module v12\n' >"$new/data/longshot/hookshot_coop.so"
 printf 'server\n' >"$new/data/server/coop_server"
 { cat "$release/kit/coop-options.ini"; printf '# A new switch.\nLICHII_COOP_NEW_THING=1\n'; } >"$new/data/coop-options.ini"
-printf 'kit: oot-coop-v0.1.0-beta3-linux (release v0.1.0-beta3)\n' >"$new/VERSION.txt"
+printf 'kit: Squadala-v0.1.0-beta3-linux (release v0.1.0-beta3)\n' >"$new/VERSION.txt"
 (cd "$new" && { echo MANIFEST.txt; find . -type f ! -name MANIFEST.txt | sed 's|^\./||'; } | sort >MANIFEST.txt)
 (cd "$tmp/rel" && "$py" -c 'import os, sys, zipfile
 z = zipfile.ZipFile(sys.argv[1], "w")
 for d, _, fs in os.walk(sys.argv[2]):
     for f in fs: z.write(os.path.join(d, f))
-z.close()' oot-coop-v0.1.0-beta3-linux.zip oot-coop-v0.1.0-beta3-linux)
-(cd "$tmp/rel" && sha256sum oot-coop-v0.1.0-beta3-linux.zip >oot-coop-v0.1.0-beta3-linux.zip.sha256)
+z.close()' Squadala-v0.1.0-beta3-linux.zip Squadala-v0.1.0-beta3-linux)
+(cd "$tmp/rel" && sha256sum Squadala-v0.1.0-beta3-linux.zip >Squadala-v0.1.0-beta3-linux.zip.sha256)
+# From v0.11.3 a release has the kit under both names (the same bytes; oot-coop-... for the older kits' update.sh).
+# Here the oot-coop- one is listed first and does not match its .sha256: the update must take the Squadala- one.
+mkdir -p "$tmp/rel/old-name"
+cp "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip" "$tmp/rel/old-name/oot-coop-v0.1.0-beta3-linux.zip"
+(cd "$tmp/rel/old-name" && sha256sum oot-coop-v0.1.0-beta3-linux.zip >oot-coop-v0.1.0-beta3-linux.zip.sha256)
+printf 'not the kit\n' >"$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip"
+printf '%064d  oot-coop-v0.1.0-beta3-linux.zip\n' 0 >"$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip.sha256"
 cat >"$tmp/rel/releases.json" <<EOF
 [{"tag_name": "v0.1.0-beta3", "assets": [
   {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip"},
   {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip.sha256"},
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip"},
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip.sha256"},
   {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta3.zip"}]}]
 EOF
 (cd "$kit" && { echo MANIFEST.txt; find . -path ./data/game -prune -o -path ./data/builder -prune -o -path ./data/work -prune -o -path ./data/logs -prune -o -type f ! -name MANIFEST.txt -print | sed 's|^\./||'; } | sort >MANIFEST.txt)
@@ -363,11 +395,12 @@ check 'update: the new module and VERSION.txt are in' bash -c '[ "$(cat "$1/data
 check 'update: the built game and saves are kept' [ "$(cat "$D/game/save.bin")" = 'my save' ]
 check "update: the player's settings stay; the new switch is added as a comment" bash -c 'grep -q "^auto_update = yes$" "$1" && grep -q "^# LICHII_COOP_NEW_THING=1$" "$1"' _ "$D/coop-options.ini"
 check 'update: the old files are in backup-v0.1.0-beta2/' [ -f "$kit/backup-v0.1.0-beta2/data/longshot/hookshot_coop.so" ]
-check 'update: the start file keeps working after a zip without exec bits' bash -n "$kit/start-oot-coop.sh"
+check 'update: the start file keeps working after a zip without exec bits' bash -n "$kit/start-squadala.sh"
+check 'update: of the same release under both names, the Squadala- zip is taken' bash -c '! grep -qi "damaged\|does not match" "$1"' _ "$tmp/update.txt"
 check 'update --status after it: nothing newer' [ -z "$(bash "$kit/scripts/update.sh" --status)" ]
 # revert-b: the version replaced is kept in previous/, revert.sh puts it back, the start does not update straight back.
 P=$kit/previous/v0.1.0-beta2
-check 'update: the version it replaced is kept in previous/v0.1.0-beta2' bash -c '[ "$(cat "$1/data/longshot/hookshot_coop.so")" = module ] && grep -q beta2 "$1/VERSION.txt" && [ -f "$1/start-oot-coop.sh" ]' _ "$P"
+check 'update: the version it replaced is kept in previous/v0.1.0-beta2' bash -c '[ "$(cat "$1/data/longshot/hookshot_coop.so")" = module ] && grep -q beta2 "$1/VERSION.txt" && [ -f "$1/start-squadala.sh" ]' _ "$P"
 check "update: nothing of the player's in it (game, saves, coop-options.ini)" bash -c '[ ! -e "$1/data/game" ] && [ ! -e "$1/data/coop-options.ini" ] && [ ! -e "$1/data/logs" ]' _ "$P"
 check 'update: it says how to go back' grep -q 'bash revert.sh goes back to v0.1.0-beta2' "$tmp/update.txt"
 bash "$kit/revert.sh" --yes </dev/null >"$tmp/revert.txt" 2>&1
@@ -391,8 +424,8 @@ for d, _, fs in os.walk(sys.argv[2]):
 z.close()' oot-coop-v0.1.0-beta2-linux.zip oot-coop-v0.1.0-beta2-linux && sha256sum oot-coop-v0.1.0-beta2-linux.zip >oot-coop-v0.1.0-beta2-linux.zip.sha256)
 cat >"$tmp/rel/releases2.json" <<EOF
 [{"tag_name": "v0.1.0-beta3", "assets": [
-  {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip"},
-  {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta3-linux.zip.sha256"}]},
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip"},
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip.sha256"}]},
  {"tag_name": "v0.1.0-beta2", "assets": [
   {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta2-linux.zip"},
   {"browser_download_url": "$tmp/rel/oot-coop-v0.1.0-beta2-linux.zip.sha256"}]}]
@@ -404,9 +437,9 @@ check 'update --version: no such release -> said' bash -c 'bash "$1/scripts/upda
 rm -rf "$kit/previous" "$kit"/backup-*
 # (a backup missing a file its MANIFEST.txt names, as an update that failed while copying leaves one: never gone back to)
 mkdir -p "$kit/backup-v0.1.0-beta1"
-cp "$kit/start-oot-coop.sh" "$kit/backup-v0.1.0-beta1/"
+cp "$kit/start-squadala.sh" "$kit/backup-v0.1.0-beta1/"
 printf 'kit: oot-coop-v0.1.0-beta1-linux (release v0.1.0-beta1)\n' >"$kit/backup-v0.1.0-beta1/VERSION.txt"
-printf 'MANIFEST.txt\nVERSION.txt\nstart-oot-coop.sh\nscripts/start.sh\n' >"$kit/backup-v0.1.0-beta1/MANIFEST.txt"
+printf 'MANIFEST.txt\nVERSION.txt\nstart-squadala.sh\nscripts/start.sh\n' >"$kit/backup-v0.1.0-beta1/MANIFEST.txt"
 check 'revert.sh: nothing kept (a partial backup does not count) -> says --version' bash -c 'bash "$1/revert.sh" --yes </dev/null | grep -q -- "--version" && grep -q beta2 "$1/VERSION.txt"' _ "$kit"
 rm -rf "$kit"/backup-*
 # A damaged or hand-edited VERSION.txt never names a folder: the update goes on, nothing outside previous/ is removed.
@@ -415,9 +448,36 @@ for bad in .. ../..; do
     printf 'kit: oot-coop-x (release %s)\n' "$bad" >"$kit/VERSION.txt"
     bash "$kit/scripts/update.sh" --yes </dev/null >"$tmp/hostile.txt" 2>&1
     check "VERSION.txt '(release $bad)': the update goes on, the kit, its saves and the folder above are still there" bash -c \
-        'grep -q beta3 "$1/VERSION.txt" && [ -f "$1/start-oot-coop.sh" ] && [ "$(cat "$1/data/game/save.bin")" = "my save" ] && [ -f "$2" ]' _ "$kit" "$tmp/beside-the-kit.txt"
+        'grep -q beta3 "$1/VERSION.txt" && [ -f "$1/start-squadala.sh" ] && [ "$(cat "$1/data/game/save.bin")" = "my save" ] && [ -f "$2" ]' _ "$kit" "$tmp/beside-the-kit.txt"
     check "VERSION.txt '(release $bad)': nothing kept under that name" bash -c '[ ! -e "$1/previous" ] || [ -z "$(ls -A "$1/previous")" ]' _ "$kit"
 done
+
+# A v0.11.2 kit (its own update.sh, lib.sh and start-oot-coop.sh: tests/fixtures/linux-longshot-v0.11.2) updates to a
+# release of the new layout. That updater takes only oot-coop-<tag>-linux.zip and wants start-oot-coop.sh in the new kit.
+old="$tmp/old kit 0.11.2"
+rm -rf "$old" && cp -a "$kit" "$old" && rm -rf "$old/previous" "$old"/backup-* "$old/start-squadala.sh" "$old/stay-on-version.txt"
+fix=$release/tests/fixtures/linux-longshot-v0.11.2
+cp "$fix/scripts/update.sh" "$fix/scripts/lib.sh" "$old/scripts/" && cp "$fix/start-oot-coop.sh" "$old/"
+printf 'kit: oot-coop-v0.1.0-beta2-linux (release v0.1.0-beta2)\n' >"$old/VERSION.txt"
+(cd "$old" && { echo MANIFEST.txt; find . -path ./data/game -prune -o -path ./data/builder -prune -o -path ./data/work -prune -o -path ./data/logs -prune -o -type f ! -name MANIFEST.txt -print | sed 's|^\./||'; } | sort >MANIFEST.txt)
+cat >"$tmp/rel/releases-old.json" <<EOF
+[{"tag_name": "v0.1.0-beta3", "assets": [
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip"},
+  {"browser_download_url": "$tmp/rel/Squadala-v0.1.0-beta3-linux.zip.sha256"},
+  {"browser_download_url": "$tmp/rel/old-name/oot-coop-v0.1.0-beta3-linux.zip"},
+  {"browser_download_url": "$tmp/rel/old-name/oot-coop-v0.1.0-beta3-linux.zip.sha256"}]}]
+EOF
+export OOT_COOP_UPDATE_API=$tmp/rel/releases-old.json
+check 'v0.11.2 updater: sees the new release (its oot-coop- name)' [ "$(bash "$old/scripts/update.sh" --status)" = 'newer v0.1.0-beta3' ]
+bash "$old/scripts/update.sh" --yes </dev/null >"$tmp/update-old.txt" 2>&1; export CODE=$?
+check 'v0.11.2 updater: installs it' bash -c '[ $CODE -eq 0 ] && grep -q "Squadala-v0.1.0-beta3-linux (release v0.1.0-beta3)" "$1/VERSION.txt"' _ "$old"
+check 'v0.11.2 updater: start-squadala.sh is in, start-oot-coop.sh is the new one-line call of it' bash -c \
+    '[ -f "$1/start-squadala.sh" ] && grep -q "exec sh \"\$here/start-squadala.sh\"" "$1/start-oot-coop.sh"' _ "$old"
+check 'v0.11.2 updater: the game, saves and settings are kept' bash -c \
+    '[ "$(cat "$1/data/game/save.bin")" = "my save" ] && grep -q "^auto_update = yes$" "$1/data/coop-options.ini" && [ -n "$(ls "$1/data/game")" ]' _ "$old"
+check 'v0.11.2 updater: the new updater is in (it knows the Squadala- name)' grep -q 'Squadala|oot-coop' "$old/scripts/update.sh"
+check 'v0.11.2 updater: nothing left to update' [ -z "$(bash "$old/scripts/update.sh" --status)" ]
+rm -rf "$old"
 unset OOT_COOP_UPDATE_API
 
 # --- collect-logs.sh -------------------------------------------------------------------------
@@ -425,7 +485,7 @@ printf 'coop: joined 192.168.1.20\npassword = hunter2\n' >"$D/game/longshot_log.
 mkdir -p "$D/game/mods/oot-remake-randomizer" && printf 'error: seed failed at 192.168.1.20\n' >"$D/game/mods/oot-remake-randomizer/last-build.txt"
 bash "$kit/scripts/collect-logs.sh" >"$tmp/logs.txt" 2>&1
 out=$(ls "$kit"/coop-logs-*.tar.gz 2>/dev/null | head -n1)
-check 'collect-logs: a .tar.gz beside start-oot-coop.sh' [ -n "$out" ]
+check 'collect-logs: a .tar.gz beside start-squadala.sh' [ -n "$out" ]
 if [[ -n $out ]]; then
     mkdir -p "$tmp/logs" && tar -xzf "$out" -C "$tmp/logs"
     check 'collect-logs: the game log is in, its password and LAN address masked' bash -c 'grep -q "<lan-1>" "$1" && grep -q "(removed)" "$1" && ! grep -q hunter2 "$1"' _ "$tmp/logs/game/longshot_log.txt"
@@ -445,7 +505,7 @@ check 'collect-logs: a log copied into data/logs goes in' bash -c 'tar -tzf "$1"
 rm -f "$D/logs/longshot_log.txt"
 
 # --- The scripts parse ---------------------------------------------------------------------
-for f in "$src/start-oot-coop.sh" "$src"/scripts/*.sh "$release/make_kit_linux.sh"; do
+for f in "$src/start-squadala.sh" "$src/start-oot-coop.sh" "$src"/scripts/*.sh "$release/make_kit_linux.sh"; do
     check "bash -n ${f#"$repo"/}" bash -n "$f"
 done
 

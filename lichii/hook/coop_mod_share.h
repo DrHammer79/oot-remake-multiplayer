@@ -43,10 +43,15 @@ bool IsSeedId(std::string_view id);
 // game, another world, and nobody knew): its seed word in capitals; empty when the host plays no seed or the player
 // has it.
 std::string SeedMissing(const coop::protocol::ModList& host, const coop::protocol::ModList& theirs);
+// The host's seed that a player has with other files (both hashes known): built by another OOTRR (a player on another
+// co-op kit: the same seed word is another world) or beside other mods' size tables; its seed word, else empty.
+std::string SeedFilesOther(const coop::protocol::ModList& host, const coop::protocol::ModList& theirs);
 // The chat lines for it: to the host and the other players (about player `number`, `name` may be empty), to the
 // player itself, and when the player has the seed after all.
 std::string SeedlessLine(std::uint8_t number, std::string_view name, std::string_view seed);
 std::string SeedlessMineLine(std::string_view seed);
+std::string SeedOtherLine(std::uint8_t number, std::string_view name, std::string_view seed);
+std::string SeedOtherMineLine(std::string_view seed);
 std::string SeedBackLine(std::uint8_t number, std::string_view name);
 
 struct Provider {

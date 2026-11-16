@@ -17,23 +17,23 @@ playing together (same server, same version) is not yet proven. Please report wh
 
 ## Steps
 
-1. Download `oot-coop-<version>-linux.zip` and unzip it to a folder of your own, such as `~/OoT-Coop`.
-2. Open a terminal in that folder and type `bash start-oot-coop.sh`. (Typing `bash` first works even when the unzip
+1. Download `Squadala-<version>-linux.zip` and unzip it to a folder of your own, such as `~/Squadala`.
+2. Open a terminal in that folder and type `bash start-squadala.sh`. (Typing `bash` first works even when the unzip
    tool dropped the file's "executable" mark.)
 3. The first time it asks for your game: drag your `.nup` into the terminal and press Enter. (It finds it by itself
    when it is in Downloads, Desktop, Documents or your home folder.) Then it builds the game, once.
 4. The game starts. **Host** or **Join** in the game's menu (the Multiplayer tab). Host gives you an invite code for
    your friends (it is also put on your clipboard); Join takes a friend's code.
 
-After the first build, `bash start-oot-coop.sh` starts the game in seconds, and the kit adds an **OoT Co-op** entry to
+After the first build, `bash start-squadala.sh` starts the game in seconds, and the kit adds an **OoT Co-op** entry to
 your applications menu. Each start checks for a new co-op version and offers it; every player needs the same one.
 
 ## Steam Deck
 
 1. Switch to **Desktop Mode** (Steam button > Power > Switch to Desktop).
-2. Unzip the kit (Dolphin, right-click > Extract) to `~/OoT-Coop` (not on the SD card's root if it is formatted
+2. Unzip the kit (Dolphin, right-click > Extract) to `~/Squadala` (not on the SD card's root if it is formatted
    exFAT: the build needs a Linux file system; the Deck's own storage or an ext4 SD card).
-3. Right-click the folder's empty space > **Open Terminal Here** (Konsole), type `bash start-oot-coop.sh`, give it your
+3. Right-click the folder's empty space > **Open Terminal Here** (Konsole), type `bash start-squadala.sh`, give it your
    `.nup`, and let it build (plug the Deck in; it takes about an hour).
 4. When the game has started once, close it. In Steam (still in Desktop Mode): **Games > Add a Non-Steam Game to My
    Library**, tick **OoT Co-op**, **Add Selected Programs**.
@@ -59,7 +59,7 @@ The terminal says what happened and what to do. Common ones:
 | "Missing on this PC: curl" | Install it (`sudo apt install curl`, `sudo dnf install curl`, `sudo pacman -S curl`). |
 | The download or build stopped | Start again: it goes on from where it stopped. |
 
-For a bug report: `bash start-oot-coop.sh --logs` writes `coop-logs-<time>.tar.gz` beside it (passwords, codes,
+For a bug report: `bash start-squadala.sh --logs` writes `coop-logs-<time>.tar.gz` beside it (passwords, codes,
 addresses and your user name are masked). Send that file.
 
 ## Going back to an older version
@@ -76,7 +76,8 @@ addresses and your user name are masked). Send that file.
 
 | Path | What |
 |---|---|
-| `start-oot-coop.sh` | The one file you start. |
+| `start-squadala.sh` | The one file you start. |
+| `start-oot-coop.sh` | Its old name (up to v0.11.2), kept for old menu entries and Steam shortcuts: it starts `start-squadala.sh`. |
 | `README.txt` | The short version of this page. |
 | `revert.sh` | Back to the version before the last update (above); `previous/` holds the versions kept for it. |
 | `scripts/` | The kit's scripts (start, build, update, logs). |

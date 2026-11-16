@@ -5,7 +5,7 @@
 # release in a local folder (no network). Then starts play.ps1 the way play.cmd does, for:
 # a newer release (asked, yes), declined, auto_update = yes and = no, none newer, no network,
 # a damaged download (the update fails, the old kit starts) and an update that did not finish.
-# Then "Start OoT Co-op.bat" (start.ps1) and each check it makes before the game starts.
+# Then "Start Squadala.bat" (start.ps1) and each check it makes before the game starts.
 # Exits 1 when a check fails.
 $ErrorActionPreference = 'Stop'
 $release = Split-Path -Parent $PSScriptRoot
@@ -222,10 +222,10 @@ try {
     Check ((Get-PuppetPackHint (Join-Path $ph 'none.json') $tool) -match 'could not be read') 'a missing coop_puppet.json: a line, no throw'
     # A Hookshot-only kit has no make-puppet-pack.cmd: play.ps1 points the hints at the launcher.
     $packRemake = $script:KitPackRemake
-    $script:KitPackRemake = 'Start "Start OoT Co-op.bat" again: it makes the pack again.'
+    $script:KitPackRemake = 'Start "Start Squadala.bat" again: it makes the pack again.'
     Write-File $man '{"actors": [], "sound": true}'
     $h = Get-PuppetPackHint $man $tool
-    Check ($h -match 'Start OoT Co-op\.bat' -and $h -notmatch 'make-puppet-pack') "a Hookshot-only kit: the pack hint names the launcher [$h]"
+    Check ($h -match 'Start Squadala\.bat' -and $h -notmatch 'make-puppet-pack') "a Hookshot-only kit: the pack hint names the launcher [$h]"
     $script:KitPackRemake = $packRemake
     # Your own Link in your colour (#202): the nearest preset, as coop_colors.cpp TunicOf.
     Check ((Get-KitTunic 'red') -eq 'red') 'tunic: red'
@@ -570,7 +570,7 @@ try {
     $out = (cmd /c "powershell -NoProfile -ExecutionPolicy Bypass -File `"$kit\scripts\play.ps1`" choose -Hookshot -NoUpdate < nul" 2>&1) -join '|'
     $idle = Read-File (Join-Path $hsGame 'coop.ini')
     Check ($out -match 'Game started' -and $idle -notmatch '(?m)^\s*server\s*=') "Play-OoT-Coop: a first start (no coop.ini) writes one with no server [$out]"
-    # Start OoT Co-op.bat (play.ps1 choose -Hookshot, the release kit's start) reads coop-options.ini too, so
+    # Start Squadala.bat (play.ps1 choose -Hookshot, the release kit's start) reads coop-options.ini too, so
     # your colour's tunic files are put in before the game starts (v0.11.0: this start never read it and put
     # the game's green back: "the puppet pack's tunic files are green, your colour is orange").
     & $stopHs
@@ -770,6 +770,25 @@ try {
     Check ((Get-KitHookshotNeed $hk) -eq '') 'hookshot need: the kit''s OOTRR in the game -> nothing'
     Check (-not (Test-KitOotrrStale (Join-Path $hk 'no-kit') $g)) 'OOTRR stale: a kit without OOTRR.txt brings none'
     Check ((Test-KitOotrrStale $hk (Join-Path $hk 'no-game'))) 'OOTRR stale: a game without tools\ootrr -> yes'
+    # Another OOTRR release (0.5.0 -> 0.6.0): its seeds are other worlds and the old seed files do not build with it,
+    # so the built seeds go (the game makes them again); another mod, a seed folder not built (no coop-seed.txt) and
+    # the control folder stay.
+    $ng = Join-Path $hk 'new-ootrr-game'
+    Write-File (Join-Path $ng 'mods\randomizer-AB\coop-seed.txt') "AB`n"
+    Write-File (Join-Path $ng 'mods\randomizer-AB-keysanity\coop-seed.txt') "AB`n"
+    Write-File (Join-Path $ng 'mods\randomizer-half\romfs\x.bin') 'x'
+    Write-File (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.ootrr') '{}'
+    Write-File (Join-Path $ng 'mods\oot-remake-randomizer\settings.txt') 'on=1'
+    Write-File (Join-Path $ng 'mods\hd-textures\romfs\y.bin') 'y'
+    $gone = @(Remove-KitRandoSeeds $ng 'v0.6.0')
+    Check ($gone.Count -eq 2 -and ($gone -join ' ') -match 'randomizer-AB removed for OOTRR v0\.6\.0' -and
+           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-AB')) -and
+           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-AB-keysanity')) -and
+           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.ootrr'))) 'new OOTRR: built seeds and their seed files removed'
+    Check ((Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-half\romfs\x.bin')) -and
+           (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\settings.txt')) -and
+           (Test-Path -LiteralPath (Join-Path $ng 'mods\hd-textures\romfs\y.bin'))) 'new OOTRR: other mods, the control folder and an unbuilt folder stay'
+    Check (@(Remove-KitRandoSeeds (Join-Path $hk 'no-such-game') 'v0.6.0').Count -eq 0) 'new OOTRR: no mods folder -> nothing'
     # A randomizer seed built before the puppet pack was made again: its size table lacks the pack's entries and the
     # game aborts while it loads (lane1, 2026-11-14), so it is built again, or removed when it cannot be.
     $rg = Join-Path $hk 'rando-game'
@@ -934,7 +953,7 @@ try {
 } finally {
     Remove-Item -LiteralPath $hk -Recurse -Force -ErrorAction SilentlyContinue
 }
-# --- "Start OoT Co-op.bat" (start.ps1, start-checks.ps1): the one entry point of the Hookshot-only kit and each
+# --- "Start Squadala.bat" (start.ps1, start-checks.ps1): the one entry point of the Hookshot-only kit and each
 # thing that could go wrong before the game starts. play.ps1 is a stub here: it writes what it was given.
 . (Join-Path $kitSrc 'scripts\start-checks.ps1')
 # (a short name: the kits made under it are checked against start-checks.ps1's 80-letter limit, and the TEMP of GitHub's
@@ -1005,7 +1024,7 @@ try {
 
     # Whole starts of a Hookshot-only kit, with a stub play.ps1.
     function New-StartKit([string]$Dir) {
-        Copy-KitFile (Join-Path $kitSrc 'Start OoT Co-op.bat') (Join-Path $Dir 'Start OoT Co-op.bat')
+        foreach ($b in 'Start Squadala.bat', 'Start OoT Co-op.bat') { Copy-KitFile (Join-Path $kitSrc $b) (Join-Path $Dir $b) }
         foreach ($f in 'start.ps1', 'start-checks.ps1', 'kit-paths.ps1', 'windows-checks.ps1') { Copy-KitFile (Join-Path $kitSrc "scripts\$f") (Join-Path $Dir "scripts\$f") }
         Write-File "$Dir\scripts\play.ps1" ("param([string]`$Mode, [switch]`$Hookshot, [switch]`$NoUpdate)`r`n" +
             "[System.IO.File]::WriteAllText((Join-Path (Split-Path -Parent `$PSScriptRoot) 'played.txt'), `"`$Mode `$Hookshot `$NoUpdate `$env:OOT_COOP_KIT`")`r`n" +
@@ -1025,11 +1044,11 @@ try {
             Remove-Item env:OOT_COOP_DESKTOP -ErrorAction SilentlyContinue
         }
     }
-    function Start-Kit([string]$Kit, [string]$Answer = '') {
+    function Start-Kit([string]$Kit, [string]$Answer = '', [string]$Bat = 'Start Squadala.bat') {
         $in = Join-Path $sk 'answer.txt'
         [System.IO.File]::WriteAllText($in, "$Answer`r`n")
         Set-StartEnv $true
-        try { $o = (cmd /c "call `"$Kit\Start OoT Co-op.bat`" -NoUpdate < `"$in`"" 2>&1) -join '|'; $c = $LASTEXITCODE }
+        try { $o = (cmd /c "call `"$Kit\$Bat`" -NoUpdate < `"$in`"" 2>&1) -join '|'; $c = $LASTEXITCODE }
         finally { Set-StartEnv $false }
         return @($c, $o)
     }
@@ -1037,20 +1056,34 @@ try {
     New-StartKit $k
     $r = Start-Kit $k
     Check ($r[0] -eq 0 -and (Read-File "$k\played.txt") -eq "choose True True $k") "start: a good kit hands over to play.ps1 choose -Hookshot with the kit named [$($r[1])] [$(Read-File "$k\played.txt")]"
+    # "Start OoT Co-op.bat", the start file's name up to v0.11.2 (shortcuts, older updaters): the same start.
+    Remove-Item -LiteralPath "$k\played.txt" -Force
+    $r = Start-Kit $k '' 'Start OoT Co-op.bat'
+    Check ($r[0] -eq 0 -and (Read-File "$k\played.txt") -eq "choose True True $k") "start: the old name Start OoT Co-op.bat starts the same [$($r[1])]"
+    Write-File "$k\scripts\play.ps1" "exit 5`r`n"
+    $r = Start-Kit $k '' 'Start OoT Co-op.bat'
+    Check ($r[0] -ne 0) "start: the old name passes a failed start on (exit $($r[0]))"
+    New-StartKit $k
     # (kit-friction review) a ' in the kit's path: the Windows checks get the folder from a variable, never in their code
     $ka = Join-Path $sk "kits\O'Brien's kit"
     New-StartKit $ka
     $r = Start-Kit $ka
     Check ($r[0] -eq 0 -and (Read-File "$ka\played.txt") -eq "choose True True $ka" -and (Test-Path -LiteralPath "$ka\logs\windows-checks.txt") -and $r[1] -notmatch 'Unexpected token') "start: a kit path with an apostrophe starts, the Windows checks ran [$($r[1])]"
     Remove-Item -LiteralPath $ka -Recurse -Force -ErrorAction SilentlyContinue
-    # A desktop shortcut to another kit is moved to the kit started last.
+    # A desktop shortcut to another kit is moved to the kit started last; its name up to v0.11.2 ("Play OoT Co-op",
+    # to "Start OoT Co-op.bat") becomes "Play Squadala".
     $sh = New-Object -ComObject WScript.Shell
     $l = $sh.CreateShortcut("$sk\desk\Play OoT Co-op.lnk"); $l.TargetPath = "$old\Start OoT Co-op.bat"; $l.Save()
     [void](Start-Kit $k)
-    Check ($sh.CreateShortcut("$sk\desk\Play OoT Co-op.lnk").TargetPath -ieq "$k\Start OoT Co-op.bat") 'start: the desktop shortcut follows the kit started last'
+    Check (-not (Test-Path -LiteralPath "$sk\desk\Play OoT Co-op.lnk") -and (Test-Path -LiteralPath "$sk\desk\Play Squadala.lnk")) 'start: the old desktop shortcut "Play OoT Co-op" is now "Play Squadala"'
+    Check ($sh.CreateShortcut("$sk\desk\Play Squadala.lnk").TargetPath -ieq "$k\Start Squadala.bat") 'start: the desktop shortcut follows the kit started last'
+    $l = $sh.CreateShortcut("$sk\desk\Play Squadala.lnk"); $l.TargetPath = "$old\Start Squadala.bat"; $l.Save()
+    [void](Start-Kit $k)
+    Check ($sh.CreateShortcut("$sk\desk\Play Squadala.lnk").TargetPath -ieq "$k\Start Squadala.bat") 'start: "Play Squadala" follows the kit started last too'
+    Remove-Item -LiteralPath "$sk\desk\Play Squadala.lnk" -Force
     # Started from inside the zip (only the .bat unpacked to a temp folder): the .bat itself says so.
     $z = Join-Path $sk 'Temp1_oot-coop.zip'
-    Copy-KitFile (Join-Path $kitSrc 'Start OoT Co-op.bat') (Join-Path $z 'Start OoT Co-op.bat')
+    Copy-KitFile (Join-Path $kitSrc 'Start Squadala.bat') (Join-Path $z 'Start Squadala.bat')
     $r = Start-Kit $z
     Check ($r[0] -ne 0 -and $r[1] -match 'still inside its zip' -and $r[1] -match 'Extract All') "start: only the .bat (from an open zip): says unzip first [$($r[1])]"
     # The whole kit run from Windows' temp copy of the zip.
@@ -1095,8 +1128,10 @@ try {
     Remove-Item -LiteralPath $sk -Recurse -Force -ErrorAction SilentlyContinue
 }
 # The one entry point: one command line (an update may replace it while it runs); the kit README is ten lines at most.
-$startLine = @(Get-Content (Join-Path $kitSrc 'Start OoT Co-op.bat') | Where-Object { $_ -and $_ -notmatch '^(@echo off|rem )' })
-Check ($startLine.Count -eq 1 -and $startLine[0] -match 'scripts\\start\.ps1" %\*' -and $startLine[0] -match '& exit /b 0$') 'Start OoT Co-op.bat: start.ps1, one line'
+$startLine = @(Get-Content (Join-Path $kitSrc 'Start Squadala.bat') | Where-Object { $_ -and $_ -notmatch '^(@echo off|rem )' })
+Check ($startLine.Count -eq 1 -and $startLine[0] -match 'scripts\\start\.ps1" %\*' -and $startLine[0] -match '& exit /b 0$') 'Start Squadala.bat: start.ps1, one line'
+$oldLine = @(Get-Content (Join-Path $kitSrc 'Start OoT Co-op.bat') | Where-Object { $_ -and $_ -notmatch '^(@echo off|rem )' })
+Check ($oldLine.Count -eq 1 -and $oldLine[0] -match 'call "%~dp0Start Squadala\.bat" %\* & exit /b\)') 'Start OoT Co-op.bat (the old name): one line that calls Start Squadala.bat'
 Check (@(Get-Content (Join-Path $kitSrc 'README.txt')).Count -le 10) 'README.txt: ten lines at most'
 # --- hs-missing: Host-/Join-Hookshot.bat with no co-op Hookshot game say why in plain words and offer the build ---
 $hm = Join-Path ([System.IO.Path]::GetTempPath()) ('oot-coop-hs-missing-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -1192,7 +1227,7 @@ try {
         Write-File "$k\hookshot\TOOLS.txt" "release=v3.0.0-rc.3`nlock_sha256=b3`nsource_commit=$commit`nsource_sha256=aa`n"
         Write-File "$k\hookshot\patches\0001-a.patch" "one`n"
         Write-File "$k\hookshot\hookshot_coop.dll" 'MODULE'
-        Write-File "$k\Start OoT Co-op.bat" '@echo off'
+        Write-File "$k\Start Squadala.bat" '@echo off'
         Write-File "$k\VERSION.txt" "kit: oot-coop-test`n"
     }
     $k1 = "$kc\kit-1"; $k2 = "$kc\kit-1 - Copy"
@@ -1303,7 +1338,7 @@ if ($pyHome -and (Test-Path -LiteralPath (Join-Path $pyHome 'python.exe'))) {
         Write-File "$k\hookshot\PIN" "runtime=Longshot`nrepo=https://git.magicbean.dev/MagicBeanDev/Longshot`ncommit=$commit`n"
         Write-File "$k\hookshot\TOOLS.txt" "release=v3.0.0-rc.3`nlock_sha256=b3`nsource_commit=$commit`nsource_sha256=aa`n"
         Write-File "$k\hookshot\patches\0001-a.patch" "one`n"
-        Write-File "$k\Start OoT Co-op.bat" '@echo off'
+        Write-File "$k\Start Squadala.bat" '@echo off'
         New-Item -ItemType Directory -Force -Path "$k\hookshot\tools" | Out-Null
         New-Item -ItemType Junction -Path "$k\hookshot\tools\python" -Value $pyHome | Out-Null
         # stand-ins: the pack tool writes a manifest (or fails, PACK_FAIL), dumpcheck takes a file that says GAME
@@ -1315,7 +1350,7 @@ if ($pyHome -and (Test-Path -LiteralPath (Join-Path $pyHome 'python.exe'))) {
             return @($LASTEXITCODE, $o)
         }
         $r = & $run
-        Check ($r[0] -ne 0 -and $r[1] -match 'not built yet.*Start OoT Co-op\.bat') "pack only: no game yet: said, nothing made [$($r[1])]"
+        Check ($r[0] -ne 0 -and $r[1] -match 'not built yet.*Start Squadala\.bat') "pack only: no game yet: said, nothing made [$($r[1])]"
         Write-File "$k\hookshot\game\longshot.exe" 'exe'
         Write-File "$k\hookshot\game-files.txt" "$pk\gone\OoT.nup`n"
         Write-File "$pk\OoT.nup" 'GAME'   # moved beside the kit
@@ -1335,7 +1370,7 @@ if ($pyHome -and (Test-Path -LiteralPath (Join-Path $pyHome 'python.exe'))) {
     Write-Host 'skip pack only cases (no Python: set TEST_PYTHON)'
 }
 
-# kit-friction: what Windows itself may block (windows-checks.ps1, run as "Start OoT Co-op.bat" runs it: its text through
+# kit-friction: what Windows itself may block (windows-checks.ps1, run as "Start Squadala.bat" runs it: its text through
 # powershell -Command), with stand-ins for Smart App Control, the language mode, the policy, the Code Integrity log and
 # controlled folder access. And a Longshot of the player's own: its saves, its downloads, its version.
 $wk = Join-Path ([System.IO.Path]::GetTempPath()) ('oot-coop-wc-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -1353,16 +1388,16 @@ function Invoke-Wc([string]$Kit, [hashtable]$Vars = @{}, [switch]$Constrained) {
 try {
     $wkit = Join-Path $wk 'OoT Co-op'
     Copy-KitFile (Join-Path $kitSrc 'scripts\windows-checks.ps1') "$wkit\scripts\windows-checks.ps1"
-    Write-File "$wkit\Start OoT Co-op.bat" '@echo off'
+    Write-File "$wkit\Start Squadala.bat" '@echo off'
     Write-File "$wkit\scripts\start.ps1" '#'
     Write-File "$wkit\hookshot\game\bin\big.dll" 'built here'
-    foreach ($f in "$wkit\Start OoT Co-op.bat", "$wkit\scripts\start.ps1", "$wkit\hookshot\game\bin\big.dll") {
+    foreach ($f in "$wkit\Start Squadala.bat", "$wkit\scripts\start.ps1", "$wkit\hookshot\game\bin\big.dll") {
         Set-Content -LiteralPath $f -Stream 'Zone.Identifier' -Value "[ZoneTransfer]`r`nZoneId=3"
     }
     $marked = { param($f) [bool](Get-Item -LiteralPath $f -Stream 'Zone.Identifier' -ErrorAction SilentlyContinue) }
     $r = Invoke-Wc $wkit
     Check ($r[0] -eq 0 -and $r[1] -match "Took Windows' 'downloaded from the internet' mark off" -and -not (& $marked "$wkit\scripts\start.ps1") -and
-        -not (& $marked "$wkit\Start OoT Co-op.bat")) "windows checks: the kit's own files lose the internet mark, the start goes on [$($r[1])]"
+        -not (& $marked "$wkit\Start Squadala.bat")) "windows checks: the kit's own files lose the internet mark, the start goes on [$($r[1])]"
     Check (& $marked "$wkit\hookshot\game\bin\big.dll") 'windows checks: the built game''s files are not walked'
     $log = Read-File "$wkit\logs\windows-checks.txt"
     Check ($log -match 'internet mark: 2 file' -and $log -match 'language mode: FullLanguage' -and $log -match 'smart app control: off') "windows checks: logs\windows-checks.txt says what was found [$log]"

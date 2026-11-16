@@ -293,6 +293,11 @@ void NoteTitle(bool title_up) {
     g_title_up = title_up;
 }
 
+bool TitleUp() {
+    std::lock_guard lock(g_mutex);
+    return g_title_up;
+}
+
 void CancelPendingSwitch(std::string_view why) {
     std::lock_guard lock(g_mutex);
     if (g_pending.empty() || g_suspended) return;
