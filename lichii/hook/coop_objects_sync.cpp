@@ -1098,7 +1098,10 @@ Sync::PartnerWhy Sync::EventPartnerWhy(const Object& o) const {
         return PartnerWhy::none;
     }
     if (o.event_member.value_or(false)) {
-        return PartnerWhy::member;
+        return PartnerWhy::member;  // whether or not our event flag is set
+    }
+    if (!in_event_) {
+        return PartnerWhy::none;
     }
     const bool near = player_ && Distance(o.position, *player_) <= kEventNpcM;
     // Its own AI acting: only an actor with one (an enemy, a guard, a townsperson), not a
@@ -2196,7 +2199,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         // runs, so the other games see them move as they do here. Row 97: so
         // is every actor the event is with, of any kind and at any distance
         // (SetEvent): its own game runs it for the event.
-        if (in_event_) {
+        // Bound by a running event even while our event flag is off: a Deku Scrub's talk
+        // or AttackedEvent does not set the event manager's running word (scrub-sale-a).
+        {
             const PartnerWhy why = EventPartnerWhy(o);
             if (why != PartnerWhy::none) {
                 o.event_until = now_us + kEventKeepUs;

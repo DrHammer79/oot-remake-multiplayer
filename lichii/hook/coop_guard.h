@@ -72,12 +72,13 @@ inline bool Waits(const Local& local, const std::optional<Vec3>& at) {
     return !local.link || Near(local.link, at, kEventNearM);
 }
 
-// Waits, for the actor at `address`: also when our event is with it, however far (row 97).
+// Waits, for the actor at `address`: also when a running event is with it, however far, and
+// even while our event flag is off (row 97: a Deku Scrub's talk does not set it).
+inline bool Partner(const Local& local, std::uint64_t address) {
+    return local.partner && local.partner(address);
+}
 inline bool WaitsFor(const Local& local, std::uint64_t address, const std::optional<Vec3>& at) {
-    if (!local.in_event) {
-        return false;
-    }
-    return (local.partner && local.partner(address)) || Waits(local, at);
+    return Partner(local, address) || Waits(local, at);
 }
 
 // Who an actor at an address is, for Held: its placement hash, its name and the object id the
@@ -141,7 +142,14 @@ public:
     Result Pass(std::vector<Change> now, const Local& local, const Where& where, const HashOf& hash_of) {
         Result out;
         if (!local.in_event) {
+            // The event is over; a change for an actor a running event is still with
+            // (a scrub's talk, which sets no event flag) keeps waiting.
+            std::vector<std::uint64_t> still;
             for (const std::uint64_t address : order_) {
+                if (Partner(local, address)) {
+                    still.push_back(address);
+                    continue;
+                }
                 Entry& e = held_.at(address);
                 const auto hash = hash_of(address);
                 if (e.hash && hash && *hash == *e.hash) {
@@ -150,9 +158,9 @@ public:
                 } else {
                     ++out.dropped;
                 }
+                held_.erase(address);
             }
-            held_.clear();
-            order_.clear();
+            order_ = std::move(still);
         }
         for (auto& c : now) {
             if (WaitsFor(local, c.address, where(c.address))) {
@@ -203,7 +211,7 @@ template <typename Change, typename AddressOf>
 std::size_t Skip(std::vector<Change>& changes, const Local& local,
                  const std::function<std::optional<Vec3>(std::uint64_t)>& where, AddressOf address_of,
                  const std::function<bool(std::uint64_t)>& never_waits = {}) {
-    if (!local.in_event) {
+    if (!local.in_event && !local.partner) {
         return 0;
     }
     const auto before = changes.size();

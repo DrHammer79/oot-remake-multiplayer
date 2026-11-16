@@ -4219,7 +4219,11 @@ TEST_CASE("objects: every actor our event is with is claimed, any kind and any d
     };
     CHECK(run({20.0f, true, true, {}}));                 // bound by our event, beyond 8 m
     CHECK(run({80.0f, true, true, {}}));                 // bound, far across the room
-    CHECK_FALSE(run({20.0f, false, true, {}}));          // no event of ours
+    // A Deku Scrub's talk or AttackedEvent leaves the event flag 0 (scrub-sale-a): a scrub
+    // the running event binds is claimed all the same.
+    CHECK(run({20.0f, false, true, {}}));
+    CHECK_FALSE(run({20.0f, false, std::nullopt, 200}));  // the own-AI rule needs the flag
+    CHECK_FALSE(run({20.0f, false, false, {}}));          // flag off, not bound
     CHECK_FALSE(run({20.0f, true, false, {}}));          // the event does not bind it
     CHECK(run({20.0f, true, std::nullopt, 200}));        // performer unknown: its own AI acts in our event
     CHECK_FALSE(run({20.0f, true, std::nullopt, 5}));    // ... but only since the event began

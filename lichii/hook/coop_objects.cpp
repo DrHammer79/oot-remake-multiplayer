@@ -2790,12 +2790,10 @@ private:
                         }
                     }
                 }
-                // Row 97: whether our running event binds it (coop_event_member.h). Read only
-                // while our Link is in an event; the Sync claims such an actor at any distance.
-                if (TheLocalEvent().load()) {
-                    s.event_member = CoopEventMember::InEvent(
-                        [&r](std::uint64_t at) { return r.Get<u64>(at); }, a);
-                }
+                // Row 97: whether a running event binds it (coop_event_member.h). Read every
+                // walk, not only while our event flag is set: a Deku Scrub's talk or
+                // AttackedEvent leaves that flag 0. The Sync claims such an actor at any distance.
+                s.event_member = CoopEventMember::InEvent([&r](std::uint64_t at) { return r.Get<u64>(at); }, a);
                 out.push_back(std::move(s));
             }
             names.emplace(a, std::move(known));
@@ -3401,10 +3399,18 @@ private:
             LOG_INFO(Core, "coop: event: our Link's event ended after {:.1f} s",
                      static_cast<double>(now_us - event_began_us_) / 1e6);
             event_began_us_ = 0;
-            event_partners_.clear();
         }
-        if (!running) {
-            return;
+        // Whether our own Link is bound into an event (its performer, as any actor's): the
+        // event flag misses a Deku Scrub's talk (scrub-sale-a), so the run shows whether this
+        // sees the events the flag does not (each change, with the flag).
+        const auto read = [&r](std::uint64_t at) { return r.Get<u64>(at); };
+        const std::optional<bool> link_bound =
+            our_link_ != 0 ? CoopEventMember::InEvent(read, our_link_) : std::nullopt;
+        if (link_bound != link_bound_) {
+            link_bound_ = link_bound;
+            LOG_INFO(Core, "coop: event: our Link's own event performer: {} (the event flag is {})",
+                     !link_bound ? "not found" : *link_bound ? "bound into an event" : "free",
+                     running ? "on" : "off");
         }
         static constexpr const char* kWhy[] = {"none", "bound by the event", "its own AI acts", "townsperson"};
         std::set<u64> now_partners;
@@ -3418,10 +3424,11 @@ private:
                 text += fmt::format("{}{} {:#x} (owner P{}, {}, {:.1f} m)", text.empty() ? "" : "; ", p.name,
                                     p.address, p.owner, kWhy[static_cast<int>(p.why)], p.metres);
             }
-            LOG_INFO(Core, "coop: event: the actors our event is with: {}", text.empty() ? std::string("none") : text);
+            LOG_INFO(Core, "coop: event: the actors our event is with: {}{}", text.empty() ? std::string("none") : text,
+                     running ? "" : " (the event flag is off: bound by a running event)");
             event_partners_ = std::move(now_partners);
         }
-        if (now_us - event_still_us_ >= kEventStillUs) {
+        if (running && now_us - event_still_us_ >= kEventStillUs) {
             event_still_us_ = now_us;
             LOG_INFO(Core, "coop: event: our Link is still in its event after {:.0f} s ({} actors claimed)",
                      static_cast<double>(now_us - event_began_us_) / 1e6, list.size());
@@ -3847,6 +3854,7 @@ private:
     u64 event_began_us_ = 0;    // row 97: EventLog
     u64 event_still_us_ = 0;
     std::set<u64> event_partners_;
+    std::optional<bool> link_bound_;  // row 97: our Link's own performer, last logged
     std::size_t npc_ours_ = 0;     // how many of them the server gave us (log)
     u64 npc_log_at_ = 0;
     u64 npc_calls_at_ = 0;  // the 5 s line of the walking townspeople

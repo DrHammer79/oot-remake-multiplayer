@@ -601,6 +601,10 @@ public:
     // 8 m rule (coop_guard.h) covered the rest: a Deku Scrub copy further away
     // was made to sleep by its absent owner every frame and our Link's event
     // that waited on it never ended (Mr. Shorty's 15 min softlock).
+    // The member rule does not need SetEvent(true): the event manager's running
+    // word (PlayerReading::event_running) stays 0 in a Deku Scrub's talk and
+    // AttackedEvent, so an actor bound into a running event is claimed whatever
+    // our event flag says. The own-AI and townsperson rules need the flag.
     void SetEvent(bool in_event, std::uint64_t now_us = 0) {
         if (in_event && !in_event_) {
             event_since_ = now_us;

@@ -200,17 +200,28 @@ TEST_CASE("guard: an actor our event is with waits at any distance (row 97)") {
     CHECK(CoopGuard::WaitsFor(talking, 0x100, Where(0x100)));        // near: as before
     CHECK_FALSE(CoopGuard::WaitsFor(talking, 0x300, Vec3{50, 0, 0})); // far and not in it
     talking.in_event = false;
-    CHECK_FALSE(CoopGuard::WaitsFor(talking, 0x200, Where(0x200)));   // no event: nothing waits
+    CHECK_FALSE(CoopGuard::WaitsFor(talking, 0x100, Where(0x100)));   // flag off: the near rule is off
+    CHECK(CoopGuard::WaitsFor(talking, 0x200, Where(0x200)));         // a scrub's talk sets no flag
     // A kill of it from another game waits for our event's end too.
     CoopGuard::Held<Change> held;
     talking.in_event = true;
-    auto r = held.Pass({{0x200, 0}}, talking, Where, Who);
+    auto r = held.Pass({{0x200, 0}, {0x100, 3}}, talking, Where, Who);
     CHECK(r.apply.empty());
-    CHECK(held.Size() == 1);
+    CHECK(held.Size() == 2);
+    // The flag drops while the running event still binds 0x200 (a scrub's talk): the near
+    // one goes, the partner's keeps waiting.
     talking.in_event = false;
     r = held.Pass({}, talking, Where, Who);
     REQUIRE(r.apply.size() == 1);
+    CHECK(r.apply[0].address == 0x100);
+    CHECK(held.Size() == 1);
+    // The event lets it go: its change is made now.
+    talking.partner = [](std::uint64_t) { return false; };
+    r = held.Pass({}, talking, Where, Who);
+    REQUIRE(r.apply.size() == 1);
     CHECK(r.apply[0].address == 0x200);
+    CHECK(held.Size() == 0);
+    talking.partner = [](std::uint64_t a) { return a == 0x200; };
     // Skip (places, plays, removes made every frame) leaves it out while the event runs.
     talking.in_event = true;
     std::vector<std::uint64_t> removes{0x200, 0x300};
@@ -220,4 +231,10 @@ TEST_CASE("guard: an actor our event is with waits at any distance (row 97)") {
     CHECK(CoopGuard::Skip(removes, talking, where, [](std::uint64_t a) { return a; }) == 1);
     REQUIRE(removes.size() == 1);
     CHECK(removes[0] == 0x300);
+    // Flag off (a scrub's talk): the partner is still left out, the near one is not.
+    talking.in_event = false;
+    std::vector<std::uint64_t> more{0x200, 0x100};
+    CHECK(CoopGuard::Skip(more, talking, where, [](std::uint64_t a) { return a; }) == 1);
+    REQUIRE(more.size() == 1);
+    CHECK(more[0] == 0x100);
 }
