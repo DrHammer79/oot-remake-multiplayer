@@ -31,6 +31,10 @@
 #  7. #88 GUEST WARP: B's log "(asked as InsideTheDekuTree_BossDie)" and B's scene changes (shot b-warped).
 #  8. If a Link dies (Game Over): its log "our Link died: a Game Over, not the boss's death" and no "boss beaten" /
 #     "sent 5" while she lives (boss-gameover 05db896a; PASS in runs 130255, 144757, 161220).
+#  9. A NON-OWNER'S HITS COUNT (boss-hits 3a1fa954, tracker 104 / #150): the owner logs "a hit our boss's game did not
+#     take as a replay: N given to its own Life step" then "share hurt 0x..: N through the game's Life step", and her
+#     life falls in the owner's samples after a guest eye hit; a hand-over to a copy with more life logs "ours now
+#     with more life than its old owner's (X > Y): lowered through its own Life step".
 #! noload
 #! start coop: test warp done
 #! switches LICHII_COOP_DEBUG_BOSS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_CHEATS=1
