@@ -6,8 +6,7 @@
 # no build/lane lock exists, and no saves backup or old install is left from an earlier run. Takes the lane1 and
 # lane2 locks (tools/autotest/lanes.py) and build.lock for the seconds of the module build. Saves are backed up and
 # restored in `finally` (the backup is deleted only after a hash-checked restore); the mod folder is removed after.
-# Screenshots use PrintWindow (the window's own content, even when covered), falling back to bringing the window to
-# the front and copying the screen. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
+# Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
     [ValidateSet('proto', 'nullguards')][string]$Preset = 'nullguards',
@@ -69,14 +68,8 @@ New-Item -ItemType Directory -Force $Out | Out-Null
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace RunFritchii -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
-[DllImport("user32.dll")] public static extern bool GetClientRect(System.IntPtr h, out RECT r);
-[DllImport("user32.dll")] public static extern bool ClientToScreen(System.IntPtr h, ref POINT p);
 [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint flags);
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
-[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int cmd);
 public struct RECT { public int L, T, R, B; }
-public struct POINT { public int X, Y; }
 '@ -ErrorAction SilentlyContinue
 
 # Mostly-black image? (PrintWindow on a GPU window can give black.) Samples a grid.
@@ -88,38 +81,25 @@ function Test-Blank($bmp) {
     } }
     return $lit -lt 3
 }
-# Privacy: a shot only ever holds the game window's own pixels. PrintWindow asks the window itself for its content.
-# The fallback copies the screen, so it runs only when the game is the foreground window, copies only the game's
-# client area, and keeps the image only if the game was still in front after the copy; otherwise no shot.
+# Privacy: a shot only ever holds the game window's own pixels. PrintWindow asks the window itself for its content,
+# so nothing on the screen (another window, a topmost one, the desktop) can get in. There is NO screen copy: when
+# PrintWindow fails or gives a black image, the shot is skipped and the line says why. (run_check_test.py fails if
+# a screen-copy call appears in this file.)
 function Shot($proc, $name) {
     try {
         $proc.Refresh(); $h = $proc.MainWindowHandle
-        if ($h -eq [IntPtr]::Zero) { Write-Output "shot ${name}: no window"; return }
+        if ($h -eq [IntPtr]::Zero) { Write-Output "shot ${name}: skipped (no window)"; return }
         $r = New-Object RunFritchii.Win+RECT; [RunFritchii.Win]::GetWindowRect($h, [ref]$r) | Out-Null
-        $w = $r.R - $r.L; $hh = $r.B - $r.T; if ($w -le 0 -or $hh -le 0) { Write-Output "shot ${name}: window has no size"; return }
+        $w = $r.R - $r.L; $hh = $r.B - $r.T; if ($w -le 0 -or $hh -le 0) { Write-Output "shot ${name}: skipped (window has no size)"; return }
         $bmp = New-Object System.Drawing.Bitmap $w, $hh
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         $dc = $g.GetHdc(); $ok = [RunFritchii.Win]::PrintWindow($h, $dc, 2); $g.ReleaseHdc($dc)   # 2 = PW_RENDERFULLCONTENT
         $g.Dispose()
-        if ($ok -and -not (Test-Blank $bmp)) {
-            $bmp.Save("$Out\$name.png"); $bmp.Dispose(); Write-Output "shot ${name}: printwindow"; return
-        }
-        $bmp.Dispose()
-        [RunFritchii.Win]::ShowWindow($h, 9) | Out-Null          # SW_RESTORE
-        [RunFritchii.Win]::SetForegroundWindow($h) | Out-Null
-        Start-Sleep -Milliseconds 700
-        if ([RunFritchii.Win]::GetForegroundWindow() -ne $h) { Write-Output "shot ${name}: skipped (printwindow blank, game not in front)"; return }
-        $c = New-Object RunFritchii.Win+RECT; [RunFritchii.Win]::GetClientRect($h, [ref]$c) | Out-Null
-        $pt = New-Object RunFritchii.Win+POINT; [RunFritchii.Win]::ClientToScreen($h, [ref]$pt) | Out-Null
-        $cw = $c.R - $c.L; $ch = $c.B - $c.T
-        if ($cw -le 0 -or $ch -le 0) { Write-Output "shot ${name}: skipped (no client area)"; return }
-        $bmp = New-Object System.Drawing.Bitmap $cw, $ch
-        $g = [System.Drawing.Graphics]::FromImage($bmp)
-        $g.CopyFromScreen($pt.X, $pt.Y, 0, 0, $bmp.Size); $g.Dispose()
-        if ([RunFritchii.Win]::GetForegroundWindow() -ne $h) { $bmp.Dispose(); Write-Output "shot ${name}: skipped (game left the front during the copy)"; return }
+        if (-not $ok) { $bmp.Dispose(); Write-Output "shot ${name}: skipped (PrintWindow failed)"; return }
+        if (Test-Blank $bmp) { $bmp.Dispose(); Write-Output "shot ${name}: skipped (PrintWindow gave a black image)"; return }
         $bmp.Save("$Out\$name.png"); $bmp.Dispose()
-        Write-Output "shot ${name}: client area, game in front"
-    } catch { Write-Output "shot ${name}: $_" }
+        Write-Output "shot ${name}: saved (PrintWindow)"
+    } catch { Write-Output "shot ${name}: skipped ($_)" }
 }
 
 # Relative path + size + SHA-256 of every file under a folder, for comparing a copy with its source.

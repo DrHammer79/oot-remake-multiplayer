@@ -98,6 +98,20 @@ class NullGuardPresetTest(unittest.TestCase):
         self.assertIn("FAIL game still running at the end (no crash)", run("nullguards", NULL_RUN, alive=False)[1])
 
 
+class HarnessPrivacyTest(unittest.TestCase):
+    """Screenshots hold only the game window's own pixels: run_fritchii.ps1 may use PrintWindow, never a screen copy."""
+
+    SCREEN_COPY = ("CopyFromScreen", "BitBlt", "StretchBlt", "GetDC(", "GetWindowDC(", "CreateDC(",
+                   "PrintScreen", "SendKeys", "{PRTSC}")
+
+    def test_no_screen_copy_in_the_run_harness(self):
+        ps1 = (Path(__file__).resolve().parent / "run_fritchii.ps1").read_text(encoding="utf-8")
+        code = "\n".join(line.split("#", 1)[0] for line in ps1.splitlines())  # comments may name them
+        for api in self.SCREEN_COPY:
+            self.assertNotIn(api, code, f"run_fritchii.ps1 uses {api}: shots must come from PrintWindow only")
+        self.assertIn("PrintWindow(", code)
+
+
 class CommandLineTest(unittest.TestCase):
     def test_pair_parsing(self):
         self.assertEqual(run_check.pair("x=a=b"), ("x", "a=b"))
