@@ -5,7 +5,8 @@
                  [--listen listen.txt --datagrams N] [--alive 0|1]
 
 Prints one `PASS <check>` / `FAIL <check>` line per check, then `RESULT PASS` or `RESULT FAIL`; exit 0 / 1.
-Only the module's own lines (`coop-proto: ...`) are matched, so text elsewhere in the emulator log cannot pass a check.
+Only the module's own lines (`coop-proto: ...`, and the adapter's `coop: net: ...` from coop_plat_log) are matched, so
+text elsewhere in the emulator log cannot pass a check.
 --alive 1 says the game was still running at the end (no crash); 0 fails the run.
 """
 from __future__ import annotations
@@ -15,6 +16,10 @@ import re
 import sys
 
 MODULE_TAG = "coop-proto: "
+# The adapter's log (coop_plat_log, switch/adapter/platform_os.cpp) tags its lines `coop: `, as the emulator's own co-op
+# hook does (`coop: boss: ...`): only these topics of it are the module's.
+ADAPTER_TAG = "coop: "
+ADAPTER_TOPICS = ("net: ", "enet: ")
 HELLO = ("1 loaded (hello)", r"hello from subsdk1")
 HOOK_IN = ("2 frame hook in", r"hook \d+: frame hook in at main\+0x6e70f8")
 NULL_GUARDS = 29  # switch/proto/null_guards.inc kNullGuardCount
@@ -58,6 +63,21 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("4 island page written", r"null guards: the island page could not"),
         ("4 every hook written", r"^hook: main\+0x[0-9a-f]+ could not be written"),
     ], 0),
+    # The network slots + ENet in the payload (v1 step 8 (c), build.py --net, switch/adapter/net_selftest.cpp): a UDP
+    # echo through the slots (listen.py --echo on 27520), then an ENet connect + disconnect to coop_server on 27521.
+    # The prototype's own 3 hello datagrams still reach the listener (frame 900).
+    "net": ([
+        HELLO, HOOK_IN,
+        ("3 udp bound through the slots", r"^net: udp bound to port [1-9]\d* through the platform slots$"),
+        ("4 udp sent to the echo", r"^net: udp sent 26 bytes to 127\.0\.0\.1:27520$"),
+        ("5 udp echo read back, same text", r"^net: udp echo 26 bytes back from 127\.0\.0\.1:27520, same text$"),
+        ("6 enet connected to coop_server", r"^net: enet connected to the server \(mtu \d+\)$"),
+        ("7 enet disconnected", r"^net: enet disconnected$"),
+        ("8 self-test finished", r"^net: self-test done$"),
+    ], [
+        ("3-8 no net failure", r"^net: FAIL"),
+        ("9 ENet never out of memory", r"^enet: out of memory"),
+    ], 3),
 }
 
 
@@ -67,6 +87,10 @@ def module_lines(log_text: str) -> list[str]:
         i = line.find(MODULE_TAG)
         if i >= 0:
             out.append(line[i + len(MODULE_TAG):].rstrip())
+            continue
+        i = line.find(ADAPTER_TAG)
+        if i >= 0 and line.startswith(ADAPTER_TOPICS, i + len(ADAPTER_TAG)):
+            out.append(line[i + len(ADAPTER_TAG):].rstrip())
     return out
 
 

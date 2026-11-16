@@ -1,15 +1,17 @@
 # One Fritchii run of the ExeFS module (subsdk1), whole PC, time boxed. docs/exefs.md, "Run harness".
 #
-#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|codemem [-Sha <commit>]
+#   powershell -ExecutionPolicy Bypass -File tools\switch_mod\run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards|codemem|net [-Sha <commit>]
 #
 # Refuses to start unless TEST-TURN's LANE1 names -Id (LANE2 names it too or is CLOSED), no game or server runs,
 # no build/lane lock exists, and no saves backup or old install is left from an earlier run. Takes the lane1 and
 # lane2 locks (tools/autotest/lanes.py) and build.lock for the seconds of the module build. Saves are backed up and
 # restored in `finally` (the backup is deleted only after a hash-checked restore); the mod folder is removed after.
+# -Preset net (v1 step 8 (c)): builds with build.py --net, the listener echoes (listen.py --echo, 127.0.0.1:27520), and
+# coop_server (the auto-B kit's, bound to 127.0.0.1:27521) runs for the game's ENet connect; stopped in `finally`.
 # Screenshots use PrintWindow only (the window's own content, even when covered); no screen copy ever. Verdict: tools/switch_mod/run_check.py (PASS/FAIL per check, RESULT line).
 param(
     [Parameter(Mandatory = $true)][string]$Id,
-    [ValidateSet('proto', 'nullguards', 'codemem')][string]$Preset = 'nullguards',
+    [ValidateSet('proto', 'nullguards', 'codemem', 'net')][string]$Preset = 'nullguards',
     [string]$Sha = '',
     [int]$Seconds = 0,                     # game time; 0 = the preset's default
     [string]$Scenario = '',                # LICHII_COOP_TEST_SCRIPT; default scenarios\play.txt
@@ -33,10 +35,12 @@ if (-not $Game) {
     if ($nups.Count -ne 1) { Write-Output "FAIL start: pass -Game (found $($nups.Count) .nup files in $root)"; exit 2 }
     $Game = $nups[0].FullName
 }
-if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; codemem = 200 }[$Preset] }
+if (-not $Seconds) { $Seconds = @{ proto = 190; nullguards = 240; codemem = 200; net = 240 }[$Preset] }
 if (-not $Scenario) { $Scenario = "$here\scenarios\play.txt" }
 if (-not $Out) { $Out = (Resolve-Path "$Kit\..\..").Path + "\shots\exefs-$Preset" }
-$datagrams = @{ proto = 3; nullguards = 0; codemem = 0 }[$Preset]
+$datagrams = @{ proto = 3; nullguards = 0; codemem = 0; net = 3 }[$Preset]
+$net    = $Preset -eq 'net'
+$server = "$root\coop-kit\auto-B\server\coop_server.exe"   # the 0.11 server that ran here before (no firewall prompt)
 $saves  = "$Kit\user\nand\user\save\0000000000000000"
 $bak    = "$Out\saves-backup"
 $modDir = "$Kit\user\load\0400486024DEC000\coop-proto"
@@ -56,7 +60,8 @@ if (Get-Process lichii, longshot, hookshot, eden, yuzu, coop_server -ErrorAction
 foreach ($l in 'build.lock', 'build-game.lock', 'build-hs.lock', 'lane1.lock', 'lane2.lock') {
     if (Test-Path "$main\$l") { Fail-Start "$l exists (someone holds it; never take or delete it)" }
 }
-foreach ($f in $Kit, $Game, $Python, $lanes, $Scenario) { if (-not (Test-Path $f)) { Fail-Start "missing: $f" } }
+$need = @($Kit, $Game, $Python, $lanes, $Scenario); if ($net) { $need += $server }
+foreach ($f in $need) { if (-not (Test-Path $f)) { Fail-Start "missing: $f" } }
 if (Test-Path $bak) { Fail-Start "$bak exists: an earlier run may not have restored the kit's saves; restore by hand, then delete it" }
 if (Test-Path $modDir) { Fail-Start "$modDir exists: remove the old install first" }
 if ($Sha) {
@@ -111,7 +116,7 @@ function Get-Tree($dir) {
 
 function Same-Tree($a, $b) { ((Get-Tree $a) -join "`n") -ceq ((Get-Tree $b) -join "`n") }
 
-$held = @(); $p = $null; $listen = $null; $backedUp = $false; $alive = 0
+$held = @(); $p = $null; $listen = $null; $srv = $null; $backedUp = $false; $alive = 0
 try {
     foreach ($n in 1, 2) {
         & $Python -I $lanes lock acquire --lane $n --owner $owner --pid $PID --wait 60
@@ -121,7 +126,8 @@ try {
     New-Item -ItemType Directory "$main\build.lock" | Out-Null
     try {
         Set-Content "$main\build.lock\owner.txt" $owner -Encoding utf8
-        & $Python "$here\build.py"
+        $buildArgs = @(); if ($net) { $buildArgs = @('--net') }
+        & $Python "$here\build.py" @buildArgs
         if ($LASTEXITCODE -ne 0) { throw 'module build failed' }
     } finally { Remove-Item -Recurse -Force "$main\build.lock" }
 
@@ -140,7 +146,7 @@ try {
     # Only this run's log may be judged: move the kit's old log and this folder's old results away first.
     if (Test-Path $log) { Move-Item $log "$Out\eden_log.before.txt" -Force }
     if (Test-Path $log) { throw "could not move the old $log away: not started" }
-    foreach ($f in 'eden_log.txt', 'listen.txt', 'listen-err.txt', 'title.png', 'playing.png', 'end.png') {
+    foreach ($f in 'eden_log.txt', 'listen.txt', 'listen-err.txt', 'server.txt', 'server-err.txt', 'title.png', 'playing.png', 'end.png') {
         Remove-Item "$Out\$f" -Force -ErrorAction SilentlyContinue
         if (Test-Path "$Out\$f") { throw "could not remove the old $Out\${f}: not started" }
     }
@@ -148,8 +154,16 @@ try {
     Copy-Item "$wt\build\switch-proto\subsdk1" "$modDir\exefs\subsdk1" -Force
 
     if ($datagrams) {
-        $listen = Start-Process $Python -ArgumentList "-I `"$here\listen.py`" --seconds $($Seconds + 20)" -PassThru `
+        $echoArg = ''; if ($net) { $echoArg = ' --echo' }
+        $listen = Start-Process $Python -ArgumentList "-I `"$here\listen.py`" --seconds $($Seconds + 20)$echoArg" -PassThru `
             -WindowStyle Minimized -RedirectStandardOutput "$Out\listen.txt" -RedirectStandardError "$Out\listen-err.txt"
+    }
+    if ($net) {
+        $srv = Start-Process $server -ArgumentList '--port 27521 --bind 127.0.0.1 --password exefs-net-run' -PassThru `
+            -WorkingDirectory (Split-Path -Parent $server) -WindowStyle Minimized `
+            -RedirectStandardOutput "$Out\server.txt" -RedirectStandardError "$Out\server-err.txt"
+        Start-Sleep 2
+        if ($srv.HasExited) { throw "coop_server exited at once (code $($srv.ExitCode)): see $Out\server-err.txt" }
     }
     $env:LICHII_COOP_TEST_SCRIPT = $Scenario
     $p = Start-Process "$Kit\lichii.exe" -ArgumentList "-g `"$Game`"" -WorkingDirectory $Kit -PassThru
@@ -166,6 +180,7 @@ try {
 } finally {
     # Each step on its own: one failing never skips the others. Saves first.
     try { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force; $p.WaitForExit(20000) | Out-Null } } catch { Write-Output "stop game: $_" }
+    try { if ($srv -and -not $srv.HasExited) { Stop-Process -Id $srv.Id -Force } } catch { Write-Output "stop server: $_" }
     try { if ($listen -and -not $listen.HasExited) { $listen.WaitForExit(30000) | Out-Null; if (-not $listen.HasExited) { Stop-Process -Id $listen.Id -Force } } } catch { Write-Output "stop listener: $_" }
     Remove-Item Env:LICHII_COOP_TEST_SCRIPT -ErrorAction SilentlyContinue
     try { if (Test-Path $log) { Copy-Item $log "$Out\eden_log.txt" -Force } } catch { Write-Output "copy log: $_" }

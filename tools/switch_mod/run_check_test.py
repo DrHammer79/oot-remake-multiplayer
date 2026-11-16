@@ -148,6 +148,76 @@ class CodememPresetTest(unittest.TestCase):
         self.assertIn("FAIL game still running at the end (no crash)", run("codemem", CODEMEM_RUN, alive=False)[1])
 
 
+ADAPTER = "[  95.1] Debug.Emulated <Info> core\\hle\\kernel\\svc\\svc_debug_string.cpp:25:OutputDebugString: coop: "
+NET_PROTO = [
+    "hello from subsdk1 (ExeFS prototype)",
+    "hook 0: frame hook in at main+0x6e70f8, continues at main+0x3b4e300",
+    "net: connect 0, sent 29 bytes x3 to 127.0.0.1:27520",
+]
+NET_ADAPTER = [
+    "net: udp bound to port 61375 through the platform slots",
+    "net: udp sent 26 bytes to 127.0.0.1:27520",
+    "net: udp echo 26 bytes back from 127.0.0.1:27520, same text",
+    "net: enet connecting to 127.0.0.1:27521",
+    "net: enet connected to the server (mtu 1392)",
+    "net: enet disconnected",
+    "net: self-test done",
+]
+HELLOS = "listen: 127.0.0.1:61000 b'coop-proto hello from subsdk1'\n" * 3
+
+
+def net_run(adapter_lines, alive=True, other=()):
+    text = "\n".join([log(NET_PROTO)] + [ADAPTER + x for x in list(other) + list(adapter_lines)])
+    e, f, d = run_check.PRESETS["net"]
+    return run_check.verdict(run_check.module_lines(text), e, f, d, HELLOS, alive)
+
+
+class NetPresetTest(unittest.TestCase):
+    def test_pass(self):
+        ok, report = net_run(NET_ADAPTER)
+        self.assertTrue(ok, report)
+        self.assertEqual(report[-1], "RESULT PASS")
+
+    def test_adapter_lines_count_only_for_their_topics(self):
+        lines = run_check.module_lines("\n".join(ADAPTER + x for x in ("boss: moved Link", "net: self-test done")))
+        self.assertEqual(lines, ["net: self-test done"])
+
+    def test_no_echo_fails(self):
+        lines = [x for x in NET_ADAPTER if "udp echo" not in x] + ["net: FAIL no udp echo in 300 frames"]
+        ok, report = net_run(lines)
+        self.assertFalse(ok)
+        self.assertIn("FAIL 5 udp echo read back, same text", report)
+        self.assertTrue(any(r.startswith("FAIL 3-8 no net failure: net: FAIL no udp echo") for r in report))
+
+    def test_different_echo_text_fails(self):
+        lines = [x.replace("same text", "DIFFERENT text") for x in NET_ADAPTER]
+        self.assertFalse(net_run(lines)[0])
+
+    def test_enet_timeout_fails(self):
+        lines = [x for x in NET_ADAPTER if "enet connected" not in x and "disconnected" not in x]
+        ok, report = net_run(lines + ["net: FAIL enet connect timed out"])
+        self.assertFalse(ok)
+        self.assertIn("FAIL 6 enet connected to coop_server", report)
+
+    def test_out_of_memory_fails(self):
+        ok, report = net_run(NET_ADAPTER, other=["enet: out of memory (the arena is full)"])
+        self.assertFalse(ok)
+        self.assertTrue(any(r.startswith("FAIL 9 ENet never out of memory") for r in report))
+
+    def test_net_lines_outside_the_module_do_not_count(self):
+        text = "\n".join([log(NET_PROTO)] + ["[ 95.0] Network <Info> " + x for x in NET_ADAPTER])
+        e, f, d = run_check.PRESETS["net"]
+        self.assertFalse(run_check.verdict(run_check.module_lines(text), e, f, d, HELLOS, True)[0])
+
+    def test_echo_length_is_the_module_text(self):
+        src = (Path(__file__).resolve().parents[2] / "switch" / "adapter" / "net_selftest.cpp").read_text(encoding="utf-8")
+        hello = re.search(r'kHello\[\] = "([^"]*)"', src).group(1)
+        self.assertEqual(len(hello), 26)
+
+    def test_crash_fails(self):
+        self.assertFalse(net_run(NET_ADAPTER, alive=False)[0])
+
+
 class HarnessPrivacyTest(unittest.TestCase):
     """Screenshots hold only the game window's own pixels: run_fritchii.ps1 may use PrintWindow, never a screen copy."""
 
@@ -160,6 +230,20 @@ class HarnessPrivacyTest(unittest.TestCase):
         for api in self.SCREEN_COPY:
             self.assertNotIn(api, code, f"run_fritchii.ps1 uses {api}: shots must come from PrintWindow only")
         self.assertIn("PrintWindow(", code)
+
+
+class HarnessPresetsTest(unittest.TestCase):
+    def test_harness_offers_exactly_the_checked_presets(self):
+        ps1 = (Path(__file__).resolve().parent / "run_fritchii.ps1").read_text(encoding="utf-8")
+        offered = re.search(r"\[ValidateSet\(([^)]*)\)\]\[string\]\$Preset", ps1).group(1)
+        self.assertEqual(sorted(re.findall(r"'([a-z]+)'", offered)), sorted(run_check.PRESETS))
+        for table in re.findall(r"@\{ (proto = [^}]*)\}\[\$Preset\]", ps1):  # seconds and datagrams per preset
+            self.assertEqual(sorted(re.findall(r"([a-z]+) = ", table)), sorted(run_check.PRESETS), table)
+
+    def test_net_datagrams_match_the_preset(self):
+        ps1 = (Path(__file__).resolve().parent / "run_fritchii.ps1").read_text(encoding="utf-8")
+        table = re.search(r"\$datagrams = @\{([^}]*)\}", ps1).group(1)
+        self.assertIn(f"net = {run_check.PRESETS['net'][2]}", table)
 
 
 class CommandLineTest(unittest.TestCase):
