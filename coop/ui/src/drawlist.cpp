@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "coop/ui/utf8.hpp"
+
 namespace {
 
 CoopDrawCmd* Next(CoopDrawList* l, std::uint8_t kind) {
@@ -17,35 +19,6 @@ CoopDrawCmd* Next(CoopDrawList* l, std::uint8_t kind) {
     std::memset(c, 0, sizeof *c);
     c->kind = kind;
     return c;
-}
-
-// One UTF-8 codepoint from `s` (advanced past it); a bad byte is skipped alone and gives 0xFFFFFFFF.
-std::uint32_t Decode(const unsigned char*& s) {
-    const unsigned char b = *s++;
-    if (b < 0x80) {
-        return b;
-    }
-    int more = 0;
-    std::uint32_t cp = 0;
-    if ((b & 0xE0) == 0xC0) {
-        more = 1, cp = b & 0x1Fu;
-    } else if ((b & 0xF0) == 0xE0) {
-        more = 2, cp = b & 0x0Fu;
-    } else if ((b & 0xF8) == 0xF0) {
-        more = 3, cp = b & 0x07u;
-    } else {
-        return 0xFFFFFFFFu;
-    }
-    for (int i = 0; i < more; ++i) {
-        if ((s[i] & 0xC0) != 0x80) {
-            return 0xFFFFFFFFu;   // (s stays after the lead byte: the next byte is read on its own)
-        }
-    }
-    for (int i = 0; i < more; ++i) {
-        cp = cp << 6 | (s[i] & 0x3Fu);
-    }
-    s += more;
-    return cp;
 }
 
 float Advance(const CoopFontAdvances* f, std::uint32_t cp) {
@@ -187,8 +160,10 @@ float coop_text_width(const CoopFontAdvances* f, float px, const char* utf8) {
         return 0.0f;
     }
     float sum = 0.0f;
-    for (const auto* s = reinterpret_cast<const unsigned char*>(utf8); *s != 0;) {
-        sum += Advance(f, Decode(s));
+    const auto* s = reinterpret_cast<const unsigned char*>(utf8);
+    const unsigned char* end = s + std::strlen(utf8);
+    while (s < end) {
+        sum += Advance(f, coop::ui::DecodeUtf8(s, end));
     }
     return sum * px;
 }

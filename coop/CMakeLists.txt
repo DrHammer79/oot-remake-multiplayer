@@ -96,9 +96,10 @@ if(WIN32)
 endif()
 
 # Co-op's own UI layer (docs/ui.md): CoopDrawList, the plain-C draw list the overlay emits and a backend draws
-# (Hookshot's table on Longshot, coop_draw_hos.cpp; an ExeFS backend later). No rendering, no allocation.
+# (Hookshot's table on Longshot, coop_draw_hos.cpp) and CoopRaster, the software raster for an ExeFS build. No allocation.
 add_library(coop_ui STATIC
   ui/src/drawlist.cpp
+  ui/src/raster.cpp
 )
 target_include_directories(coop_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ui/include")
 target_link_libraries(coop_ui PRIVATE coop_warnings)
