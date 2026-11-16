@@ -36,8 +36,8 @@ namespace {
 // LICHII_COOP_OCARINA_SOUND=0 turns it off.
 bool OcarinaSoundOn() {
     static const bool on = [] {
-        const char* v = std::getenv("LICHII_COOP_OCARINA_SOUND");
-        return v == nullptr || std::string_view(v) != "0";
+        const auto v = coop::os::GetEnv("LICHII_COOP_OCARINA_SOUND");
+        return !v || *v != "0";
     }();
     return on;
 }
@@ -47,8 +47,8 @@ bool OcarinaSoundOn() {
 // puts them back, for a test that checks whether a later build can take them.
 bool WearsUnsafe() {
     static const bool on = [] {
-        const char* v = std::getenv("LICHII_COOP_PUPPET_HOOKSHOT");
-        return v != nullptr && v[0] != '\0' && std::string_view(v) != "0";
+        const auto v = coop::os::GetEnv("LICHII_COOP_PUPPET_HOOKSHOT");
+        return v && !v->empty() && *v != "0";
     }();
     return on;
 }
@@ -968,8 +968,8 @@ namespace {
 // when the piece is made. LICHII_COOP_HEAD_STATE=2 goes back to 2.
 std::uint64_t EquipState(std::uint32_t kind) {
     static const std::uint64_t head = [] {
-        const char* v = std::getenv("LICHII_COOP_HEAD_STATE");
-        return v != nullptr && std::string_view(v) == "2" ? std::uint64_t{2} : std::uint64_t{1};
+        const auto v = coop::os::GetEnv("LICHII_COOP_HEAD_STATE");
+        return v && *v == "2" ? std::uint64_t{2} : std::uint64_t{1};
     }();
     return kind == addr::kArmorKindFirst ? head : std::uint64_t{2};
 }
@@ -2397,8 +2397,8 @@ void Configure(PlannerSettings settings, bool verbose, Director::Log log) {
         // docs/puppet.md, "Colour". LICHII_COOP_PUPPET_TINT: 0 to 1, or off.
         // The model tint darkens the whole Link (reports puppet-colors-2): off
         // unless asked for; the colour is the tunic (PlannerSettings::tunics).
-        const char* tint = std::getenv("LICHII_COOP_PUPPET_TINT");
-        g_director->SetTint(tint != nullptr ? CoopColors::StrengthFrom(tint) : 0.0f);
+        const auto tint = coop::os::GetEnv("LICHII_COOP_PUPPET_TINT");
+        g_director->SetTint(tint ? CoopColors::StrengthFrom(tint->c_str()) : 0.0f);
         g_planner = std::make_unique<Planner>(std::move(settings));
         g_configured = true;
     });

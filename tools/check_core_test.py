@@ -99,6 +99,12 @@ class CheckCoreTest(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertTrue(all('coop::os::SteadyClock' in p for p in problems))
 
+    def test_environment_fails(self):
+        text = 'const char* a = std::getenv("X");\nchar* b; size_t n; _dupenv_s(&b, &n, "X");\nint my_getenv_count;\n'
+        problems = check_core.check(self.tree({'lichii/hook/coop_a.cpp': text}))
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all('coop::os::GetEnv' in p for p in problems))
+
     def test_coop_os_and_comments_pass(self):
         text = ('#include <mutex>\n#include <coop/os.hpp>\n// was std::mutex\n/* std::thread */\n'
                 'coop::os::Mutex m;\nstd::lock_guard<coop::os::Mutex> g(m);\nstd::unique_lock<coop::os::Mutex> u;\n'

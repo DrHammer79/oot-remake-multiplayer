@@ -64,19 +64,8 @@ const Shot* Find(std::string_view name) {
 }
 
 bool EnvOff(const char* name) {
-#ifdef _WIN32
-    char* value = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
-        return false;
-    }
-    const bool off = std::string_view(value) == "0";
-    std::free(value);
-    return off;
-#else
-    const char* v = std::getenv(name);
-    return v != nullptr && std::string_view(v) == "0";
-#endif
+    const auto v = coop::os::GetEnv(name);
+    return v && *v == "0";
 }
 
 float Distance(const Vec3& a, const Vec3& b) {

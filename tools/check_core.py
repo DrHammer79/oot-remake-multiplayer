@@ -44,6 +44,7 @@ OS_CALLS = [
     (re.compile(r'\bstd::(condition_variable(_any)?|thread|jthread|this_thread)\b'), 'coop::os::Thread / SleepUs'),
     (re.compile(r'\b(steady_clock|system_clock|high_resolution_clock|utc_clock|file_clock)\b'),
      'coop::os::SteadyClock / NowUs'),
+    (re.compile(r'\b(getenv|_dupenv_s|_wgetenv|secure_getenv|setenv|putenv|_putenv)\b'), 'coop::os::GetEnv'),
 ]
 
 

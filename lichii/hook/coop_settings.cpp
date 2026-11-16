@@ -2,6 +2,7 @@
 
 #include "coop_colors.h"
 
+#include <coop/os.hpp>
 #include <cstdlib>
 #include <random>
 #include <fstream>
@@ -261,26 +262,7 @@ Settings LoadSettings(const std::filesystem::path& ini, std::vector<std::string>
         text << file.rdbuf();
         ApplyIni(text.str(), settings, errors);
     }
-    ApplyEnvironment(
-        [](const char* name) -> std::optional<std::string> {
-#ifdef _MSC_VER
-            char* value = nullptr;
-            std::size_t size = 0;
-            if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
-                return std::nullopt;
-            }
-            std::string result(value);
-            std::free(value);
-            return result;
-#else
-            const char* value = std::getenv(name);
-            if (value == nullptr) {
-                return std::nullopt;
-            }
-            return std::string(value);
-#endif
-        },
-        settings, errors);
+    ApplyEnvironment([](const char* name) { return coop::os::GetEnv(name); }, settings, errors);
     return settings;
 }
 
