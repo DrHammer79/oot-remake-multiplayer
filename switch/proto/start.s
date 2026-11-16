@@ -76,6 +76,33 @@ coop_frame_entry:
 
     game_fn coop_call_set_time, coop_slot_set_time
 
+// The pad hook (switch/adapter/input.h): the real nn::hid::GetNpadStates, one per controller style.
+    game_fn coop_call_npad_fullkey, coop_slot_npad_fullkey
+    game_fn coop_call_npad_handheld, coop_slot_npad_handheld
+    game_fn coop_call_npad_joydual, coop_slot_npad_joydual
+    game_fn coop_call_npad_joyleft, coop_slot_npad_joyleft
+    game_fn coop_call_npad_joyright, coop_slot_npad_joyright
+
+// What main's GOT entries for GetNpadStates point at (hooks.h kImportRedirect): an exported entry
+// a lifter can name, which goes on to the C++ code with a direct branch (every register as main set it).
+    .macro import_hook name, impl
+    .section .text, "ax"
+    .global \name
+    .protected \name
+    .type \name, %function
+\name:
+    .cfi_startproc
+    b       \impl
+    .cfi_endproc
+    .size \name, . - \name
+    .endm
+
+    import_hook coop_hook_npad_fullkey, coop_npad_fullkey_impl
+    import_hook coop_hook_npad_handheld, coop_npad_handheld_impl
+    import_hook coop_hook_npad_joydual, coop_npad_joydual_impl
+    import_hook coop_hook_npad_joyleft, coop_npad_joyleft_impl
+    import_hook coop_hook_npad_joyright, coop_npad_joyright_impl
+
     .section .rodata.mod0, "a"
     .balign 4
     .global __mod0

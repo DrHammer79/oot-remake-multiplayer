@@ -27,7 +27,7 @@ STT_OBJECT = 1
 HOOK_MAGIC = b"COOPHOOK"
 HOOK_HEADER = 32
 HOOK_ENTRY = 32
-KINDS = {1: "call_redirect", 2: "entry", 3: "game_fn", 4: "null_guard", 5: "check"}
+KINDS = {1: "call_redirect", 2: "entry", 3: "game_fn", 4: "null_guard", 5: "check", 6: "import_redirect"}
 NO_SLOT_KINDS = (4, 5)   # null guard and its checks (hooks.h): no slot, no replacement
 
 
@@ -177,6 +177,31 @@ def hook_table(elf: Elf, table_addr: int) -> list[tuple[int, int, int, int, int]
     return [struct.unpack_from("<HxxIQQQ", body, i * HOOK_ENTRY) for i in range(count)]
 
 
+def entry_problems(i: int, entry: tuple[int, int, int, int, int], slots: set[int], funcs: set[int]) -> list[str]:
+    """What is wrong with hook table entry i (kind, insn, main_offset, replacement, slot): slots and funcs are the
+    module addresses of the exported coop_slot_* and the exported functions."""
+    kind, insn, main_off, repl, slot = entry
+    at = f"hook {i} (main+{main_off:#x})"
+    if kind not in KINDS:
+        return [f"hook {i}: unknown kind {kind}"]
+    out = []
+    if kind in NO_SLOT_KINDS:
+        if slot != 0 or repl != 0:
+            out.append(f"{at}: a {KINDS[kind]} entry has no slot or replacement")
+        if insn == 0:
+            out.append(f"{at}: a {KINDS[kind]} entry needs its instruction")
+        return out
+    if slot not in slots:
+        out.append(f"{at}: slot {slot:#x} is not an exported coop_slot_*")
+    if kind == 3 and repl != 0:
+        out.append(f"{at}: a game_fn entry has no replacement")
+    if kind == 6 and insn != 0:
+        out.append(f"{at}: an import_redirect entry has no instruction (main_offset is a GOT entry)")
+    if kind in (1, 2, 6) and repl not in funcs:
+        out.append(f"{at}: replacement {repl:#x} is not an exported function")
+    return out
+
+
 def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
     """Return (problems, entries)."""
     problems: list[str] = []
@@ -194,21 +219,9 @@ def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
 
     if "coop_hooks" in dyn:
         try:
-            for i, (kind, _insn, main_off, repl, slot) in enumerate(hook_table(elf, dyn["coop_hooks"].value)):
-                if kind not in KINDS:
-                    problems.append(f"hook {i}: unknown kind {kind}")
-                if kind in NO_SLOT_KINDS:
-                    if slot != 0 or repl != 0:
-                        problems.append(f"hook {i} (main+{main_off:#x}): a {KINDS[kind]} entry has no slot or replacement")
-                    if _insn == 0:
-                        problems.append(f"hook {i} (main+{main_off:#x}): a {KINDS[kind]} entry needs its instruction")
-                    continue
-                if slot not in slots:
-                    problems.append(f"hook {i} (main+{main_off:#x}): slot {slot:#x} is not an exported coop_slot_*")
-                if kind == 3 and repl != 0:
-                    problems.append(f"hook {i} (main+{main_off:#x}): a game_fn entry has no replacement")
-                if kind in (1, 2) and repl not in {s.value for s in dyn.values() if s.type == STT_FUNC}:
-                    problems.append(f"hook {i} (main+{main_off:#x}): replacement {repl:#x} is not an exported function")
+            funcs = {s.value for s in dyn.values() if s.type == STT_FUNC}
+            for i, entry in enumerate(hook_table(elf, dyn["coop_hooks"].value)):
+                problems += entry_problems(i, entry, set(slots), funcs)
         except LiftError as e:
             problems.append(str(e))
 
@@ -226,6 +239,11 @@ def check(elf: Elf) -> tuple[list[str], list[tuple[int, str]]]:
 
     entries = sorted((s.value, s.name) for s in dyn.values() if s.type == STT_FUNC)
     return problems, entries
+
+
+def imports(elf: Elf) -> list[str]:
+    """The undefined dynamic symbols: what rtld must link from the game's modules."""
+    return sorted({s.name for s in elf.symbols(SHT_DYNSYM) if not s.defined and s.name})
 
 
 def write_entries(path: str, entries: list[tuple[int, str]]) -> None:

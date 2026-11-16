@@ -8,5 +8,6 @@
     coop_hooks;
     coop_slot_*;
     coop_call_*;
+    coop_hook_*;
   local: *;
 };

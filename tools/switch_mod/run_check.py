@@ -18,6 +18,8 @@ MODULE_TAG = "coop-proto: "
 HELLO = ("1 loaded (hello)", r"hello from subsdk1")
 HOOK_IN = ("2 frame hook in", r"hook \d+: frame hook in at main\+0x6e70f8")
 NULL_GUARDS = 29  # switch/proto/null_guards.inc kNullGuardCount
+# switch/adapter/input.h: main's GOT entries for the five GetNpadStates imports.
+NPAD_GOT = {"FullKey": 0x4cbf5c8, "Handheld": 0x4cbf5e0, "JoyDual": 0x4cbf5c0, "JoyLeft": 0x4cbf5d0, "JoyRight": 0x4cbf5d8}
 
 # name -> (expects, forbids, datagrams)
 PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
@@ -58,7 +60,30 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("4 island page written", r"null guards: the island page could not"),
         ("4 every hook written", r"^hook: main\+0x[0-9a-f]+ could not be written"),
     ], 0),
+    # The pad hook (v1 step 8 (d), scenarios/input.txt): five imports hooked, player 1 read through the module, the
+    # scripted A, B, D-pad up and stick up each logged with its bit, then L+R+Minus opens the menu and it closes by
+    # itself 5 s later. Whether Link stood still meanwhile is in the shots (swallow-start/-end vs after-start/-end).
+    "input": ([
+        HELLO, HOOK_IN,
+        *[(f"2 {style} import hooked", rf"hook \d+: import at GOT main\+{got:#x} now goes through the module")
+          for style, got in NPAD_GOT.items()],
+        ("3 player 1 read through the module", r"pad: player 1 read through the module"),
+        ("4a edge A (bit 0)", r"pad: player 1 down A \(bit 0,"),
+        ("4b edge B (bit 1)", r"pad: player 1 down B \(bit 1,"),
+        ("4c edge D-pad up (bit 13)", r"pad: player 1 down Up \(bit 13,"),
+        ("4d edge left stick up (bit 17)", r"pad: player 1 down StickL-Up \(bit 17, left stick -?\d+,[1-9]\d{3,}\)"),
+        ("5a menu opened (L+R+Minus)", r"^ui: OPEN$"),
+        ("5a game has no pad from player 1", r"^pad: menu open, the game gets no pad from player 1"),
+        ("5b menu closed by itself", r"^ui: CLOSE$"),
+        ("5b game has the pad again", r"^pad: menu closed, the game has the pad again"),
+        ("6 game plays (frame 3000)", r"^frame 3000$"),
+    ], [
+        ("2 no import skipped", r"hook \d+: GOT main\+0x[0-9a-f]+ (holds|not writable)"),
+        ("4 no edge or event lost", r"lost edges [1-9]|lost events [1-9]"),
+    ], 0),
 }
+# Presets that take a shot at scenario marks (run_fritchii.ps1 -Preset input: "coop: test mark <name>" in the log).
+MARK_SHOTS = {"input": ["before", "swallow-start", "swallow-mid", "swallow-end", "after-start", "after-end"]}
 
 
 def module_lines(log_text: str) -> list[str]:

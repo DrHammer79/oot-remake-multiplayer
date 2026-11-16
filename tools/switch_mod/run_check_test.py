@@ -148,6 +148,87 @@ class CodememPresetTest(unittest.TestCase):
         self.assertIn("FAIL game still running at the end (no crash)", run("codemem", CODEMEM_RUN, alive=False)[1])
 
 
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent.parent
+INPUT_RUN = [
+    "hello from subsdk1 (ExeFS prototype)",
+    "hook 0: frame hook in at main+0x6e70f8, continues at main+0x3b4e300",
+    "hook 2: import at GOT main+0x4cbf5c8 now goes through the module (not bound yet)",
+    "hook 3: import at GOT main+0x4cbf5e0 now goes through the module (not bound yet)",
+    "hook 4: import at GOT main+0x4cbf5c0 now goes through the module (not bound yet)",
+    "hook 5: import at GOT main+0x4cbf5d0 now goes through the module (not bound yet)",
+    "hook 6: import at GOT main+0x4cbf5d8 now goes through the module (not bound yet)",
+    "pad: player 1 read through the module (frame 1)",
+    "pad: player 1 down A (bit 0, left stick 0,0)",
+    "pad: player 1 up A (bit 0, left stick 0,0)",
+    "pad: player 1 down B (bit 1, left stick 0,0)",
+    "pad: player 1 down Up (bit 13, left stick 0,0)",
+    "pad: player 1 down StickL-Up (bit 17, left stick 0,32767)",
+    "ui: OPEN",
+    "pad: menu open, the game gets no pad from player 1 (closes by itself in 5 s)",
+    "ui: CLOSE",
+    "pad: menu closed, the game has the pad again",
+    "pad: reads FullKey 900 Handheld 900 JoyDual 900 JoyLeft 900 JoyRight 900, lost edges 0, lost events 0",
+    "frame 3000",
+]
+
+
+class InputPresetTest(unittest.TestCase):
+    def test_pass(self):
+        ok, rep = run("input", INPUT_RUN)
+        self.assertTrue(ok, rep)
+
+    def test_each_import_must_be_hooked(self):
+        for got in run_check.NPAD_GOT.values():
+            lines = [x for x in INPUT_RUN if f"main+{got:#x}" not in x]
+            self.assertFalse(run("input", lines)[0], f"{got:#x}")
+
+    def test_a_skipped_import_fails_and_names_the_line(self):
+        bad = "hook 7: GOT main+0x4cbf5c8 holds 0x1234, not the import or main's PLT (another mod?): skipped"
+        ok, rep = run("input", INPUT_RUN + [bad])
+        self.assertFalse(ok)
+        self.assertIn(f"FAIL 2 no import skipped: {bad}", rep)
+
+    def test_stick_edge_needs_the_stick_pushed(self):
+        lines = [x.replace("0,32767", "0,0") for x in INPUT_RUN]
+        self.assertIn("FAIL 4d edge left stick up (bit 17)", run("input", lines)[1])
+
+    def test_no_close_fails(self):
+        lines = [x for x in INPUT_RUN if x != "ui: CLOSE"]
+        self.assertIn("FAIL 5b menu closed by itself", run("input", lines)[1])
+
+    def test_lost_events_fail(self):
+        lines = INPUT_RUN + ["pad: reads FullKey 1 Handheld 1 JoyDual 1 JoyLeft 1 JoyRight 1, lost edges 0, lost events 3"]
+        self.assertFalse(run("input", lines)[0])
+
+    def test_crash_fails(self):
+        self.assertFalse(run("input", INPUT_RUN, alive=False)[0])
+
+    def test_got_offsets_match_the_module(self):
+        h = (REPO / "switch" / "adapter" / "input.h").read_text(encoding="utf-8")
+        got = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"kGot(\w+) = (0x[0-9a-f]+);", h)}
+        self.assertEqual(got, run_check.NPAD_GOT)
+
+    def test_log_texts_are_the_modules(self):  # the preset matches what main.cpp writes
+        cpp = (REPO / "switch" / "proto" / "main.cpp").read_text(encoding="utf-8")
+        for text in ('": import at GOT main+"', '" now goes through the module ("', '"pad: player 1 read through the module (frame "',
+                     '"pad: player "', '" down " : " up "', '"StickL-Up"', '", left stick "', '"ui: "', '"OPEN"', '"CLOSE"',
+                     '"pad: menu open, the game gets no pad from player 1', '"pad: menu closed, the game has the pad again"',
+                     '", lost edges "', '", lost events "'):
+            self.assertIn(text, cpp)
+
+    def test_mark_shots_are_the_harness_and_the_scenario(self):
+        ps1 = (HERE / "run_fritchii.ps1").read_text(encoding="utf-8")
+        m = re.search(r"input = @\(([^)]*)\) \}\[\$Preset\]", ps1)
+        self.assertIsNotNone(m)
+        self.assertEqual(re.findall(r"'([^']+)'", m.group(1)), run_check.MARK_SHOTS["input"])
+        scenario = (HERE / "scenarios" / "input.txt").read_text(encoding="utf-8").splitlines()
+        marks = [line.split()[1] for line in scenario if line.startswith("mark ")]
+        for name in run_check.MARK_SHOTS["input"]:
+            self.assertIn(name, marks)
+        self.assertIn("hold L+R+MINUS 10", scenario)
+
+
 class HarnessPrivacyTest(unittest.TestCase):
     """Screenshots hold only the game window's own pixels: run_fritchii.ps1 may use PrintWindow, never a screen copy."""
 
