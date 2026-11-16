@@ -45,6 +45,16 @@ CI builds the module on Linux with the runner's LLVM and runs the lift check.
 
 Remove the `coop-proto` folder to go back to the plain game.
 
+## Run harness (Fritchii, whole PC)
+
+`tools/switch_mod/run_fritchii.ps1 -Id <TEST-TURN id> -Preset proto|nullguards [-Sha <commit>]` does one time-boxed run on the Fritchii kit `coop-kit\auto-A` (a kit path that ran before, so Windows shows no firewall prompt). It builds the module from the checkout it lives in, so run it from the branch under test.
+
+- **Refuses to start** unless TEST-TURN's LANE1 line names the id (LANE2 names it too or is CLOSED), no game or server runs, no build or lane lock exists, no saves backup or old install is left from an earlier run, and (with `-Sha`) the checkout is at that commit.
+- **Locks:** lane1 and lane2 through `tools/autotest/lanes.py`, `build.lock` (with `owner.txt`) only for the seconds of `build.py`. All are freed in `finally`.
+- **Kit:** turns the kit's own co-op hook off through the environment only (it rewrites the same frame site), backs up the saves, installs `subsdk1`, runs the game with `LICHII_COOP_TEST_SCRIPT` = `tools/switch_mod/scenarios/play.txt` (title, Continue, walk). `finally` stops the game and listener, copies the log, restores the saves (the backup is deleted only after a hash-checked restore), then removes the mod folder; each step on its own.
+- **Screenshots** (title, playing, end) use `PrintWindow` with full content, so a covered window still shows the game; if that comes back black, the window is brought to the front and the screen copied. Each shot line says which way it took.
+- **Verdict:** `tools/switch_mod/run_check.py` matches only the module's own `coop-proto:` lines and prints `PASS`/`FAIL` per check and `RESULT PASS|FAIL` (exit 0/1). Presets: `proto` (hello, frame hook in and running, set_time returned, UDP sent + 3 datagrams) and `nullguards` (hello, frame hook in, `null guards: N of N applied`, frame 6000 reached; none left out, island page usable, no failed RX restore; the game still running at the end). Unit tests: `run_check_test.py` (CI).
+
 ## Null guards (v1 blocker B1)
 
 A co-op puppet has no Player component, and code of the game that runs for an item it wears loads through that null pointer (`main+0x82acc0` returns 0 for it). An emulator reads 0 there. A recomp's host and a real Switch fault. The 29 loads involved are listed once, in `tools/null_guards/sites.py`, and two guards are made from that list with the same meaning: if the load's base register is a null pointer, its register gets 0. Otherwise the load runs as shipped.
