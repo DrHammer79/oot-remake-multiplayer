@@ -169,6 +169,13 @@ target_link_libraries(coop_tests PRIVATE coop_core coop coop_ui coop_platform co
 target_link_libraries(coop_tests PRIVATE coop_server_lib)
 doctest_discover_tests(coop_tests)
 
+# enet_coop (v1 step 8c) defines the same enet_* symbols as the PC's ENet that coop_tests links: its own program.
+if(TARGET enet_coop)
+  add_executable(enet_coop_tests main.cpp net/enet_coop_test.cpp)
+  target_link_libraries(enet_coop_tests PRIVATE enet_coop coop_platform doctest::doctest coop_warnings)
+  doctest_discover_tests(enet_coop_tests)
+endif()
+
 add_subdirectory(server)
 
 # The test tool runs a server and two clients for 3 s and loses nothing.

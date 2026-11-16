@@ -36,3 +36,25 @@ endif()
 if(COOP_SANITIZE)
   target_compile_options(enet PRIVATE -fno-sanitize=null,shift-base)
 endif()
+
+# enet_coop (v1 step 8c): ENet's protocol files with coop/net/enet_coop in place of unix.c / win32.c, so ENet
+# runs on CoopPlatform's sockets (the ExeFS payload). It defines the same enet_* symbols as enet, so nothing
+# links both: the PC client keeps enet; enet_coop has its own test program.
+add_library(enet_coop STATIC
+  "${enet_SOURCE_DIR}/callbacks.c" "${enet_SOURCE_DIR}/compress.c" "${enet_SOURCE_DIR}/host.c"
+  "${enet_SOURCE_DIR}/list.c" "${enet_SOURCE_DIR}/packet.c" "${enet_SOURCE_DIR}/peer.c"
+  "${enet_SOURCE_DIR}/protocol.c" "${PROJECT_SOURCE_DIR}/coop/net/enet_coop/enet_coop.cpp")
+target_include_directories(enet_coop SYSTEM PUBLIC "${enet_SOURCE_DIR}/include")
+target_include_directories(enet_coop PUBLIC "${PROJECT_SOURCE_DIR}/coop/net/enet_coop")
+target_link_libraries(enet_coop PUBLIC coop_platform PRIVATE coop_warnings)
+if(WIN32)
+  target_link_libraries(enet_coop PUBLIC ws2_32)  # ENET_HOST_TO_NET_* are htons/htonl there
+endif()
+if(MSVC)
+  target_compile_options(enet_coop PRIVATE $<$<COMPILE_LANGUAGE:C>:/w>)
+else()
+  target_compile_options(enet_coop PRIVATE $<$<COMPILE_LANGUAGE:C>:-w>)
+endif()
+if(COOP_SANITIZE)
+  target_compile_options(enet_coop PRIVATE $<$<COMPILE_LANGUAGE:C>:-fno-sanitize=null,shift-base>)
+endif()
