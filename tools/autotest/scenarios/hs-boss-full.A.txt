@@ -35,6 +35,7 @@
 #     take as a replay: N given to its own Life step" then "share hurt 0x..: N through the game's Life step", and her
 #     life falls in the owner's samples after a guest eye hit; a hand-over to a copy with more life logs "ours now
 #     with more life than its old owner's (X > Y): lowered through its own Life step".
+# 10. Row 105: no black screen after her death (shots a-dead / b-dead / a-pickup / b-pickup show the room).
 #! noload
 #! start coop: test warp done
 #! switches LICHII_COOP_DEBUG_BOSS=1,LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_CHEATS=1
