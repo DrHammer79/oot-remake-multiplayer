@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "coop/ui/utf8.hpp"
+
 namespace {
 
 constexpr int kMaxParts = COOP_DRAW_POLY_POINTS;
@@ -338,31 +340,6 @@ void Fill(CoopRaster* r, const Shape* parts, int np, std::uint32_t rgba, const I
 
 // ---- text ----
 
-std::uint32_t Decode(const unsigned char*& s, const unsigned char* end) {
-    const unsigned char b = *s++;
-    if (b < 0x80) {
-        return b;
-    }
-    int more = 0;
-    std::uint32_t cp = 0;
-    if ((b & 0xE0) == 0xC0) {
-        more = 1, cp = b & 0x1Fu;
-    } else if ((b & 0xF0) == 0xE0) {
-        more = 2, cp = b & 0x0Fu;
-    } else if ((b & 0xF8) == 0xF0) {
-        more = 3, cp = b & 0x07u;
-    } else {
-        return 0xFFFFFFFFu;
-    }
-    for (int i = 0; i < more; ++i) {
-        if (s >= end || (*s & 0xC0) != 0x80) {
-            return 0xFFFFFFFFu;
-        }
-        cp = (cp << 6) | (*s++ & 0x3Fu);
-    }
-    return cp;
-}
-
 const CoopRasterGlyph* Find(const CoopRasterFont& f, std::uint32_t cp) {
     std::uint32_t lo = 0, hi = f.n;
     while (lo < hi) {
@@ -438,7 +415,7 @@ void Text(CoopRaster* r, const CoopRasterFont& f, std::int32_t x16, std::int32_t
     const auto* s = reinterpret_cast<const unsigned char*>(text);
     const unsigned char* end = s + len;
     while (s < end) {
-        const std::uint32_t cp = Decode(s, end);
+        const std::uint32_t cp = coop::ui::DecodeUtf8(s, end);
         if (cp == '\n') {
             pen = start;
             top += FloorDiv(std::int64_t{f.line64} * px16, size);

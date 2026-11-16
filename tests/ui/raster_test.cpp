@@ -12,6 +12,7 @@
 
 #include "coop/ui/drawlist.h"
 #include "coop/ui/raster.h"
+#include "coop/ui/utf8.hpp"
 
 namespace {
 
@@ -291,6 +292,61 @@ TEST_CASE("raster: the font's advances measure what it draws") {
     CHECK(adv[0] == doctest::Approx(0.75f));
     CHECK(fa.missing == doctest::Approx(0.5f));
     CHECK(coop_text_width(&fa, 4, "A?A") == doctest::Approx(8.0f));  // the pen above: 3 + 2 + 3
+}
+
+namespace {
+
+std::vector<std::uint32_t> DecodeAll(const std::string& bytes) {
+    std::vector<std::uint32_t> out;
+    const auto* s = reinterpret_cast<const unsigned char*>(bytes.data());
+    const unsigned char* end = s + bytes.size();
+    while (s < end) {
+        out.push_back(coop::ui::DecodeUtf8(s, end));
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("utf8: malformed sequences give one bad codepoint per byte that starts nothing") {
+    using V = std::vector<std::uint32_t>;
+    constexpr std::uint32_t kBad = coop::ui::kBadCodepoint;
+    CHECK(DecodeAll("A\xC3\xA9") == V{'A', 0xE9});
+    CHECK(DecodeAll("\xE2\x82\xAC") == V{0x20AC});
+    CHECK(DecodeAll("\xF0\x9F\x98\x80") == V{0x1F600});
+    CHECK(DecodeAll("\x80") == V{kBad});                      // a lone continuation byte
+    CHECK(DecodeAll("\xFF" "A") == V{kBad, 'A'});             // never a lead byte
+    CHECK(DecodeAll("\xC3" "A") == V{kBad, 'A'});             // lead byte, then not a continuation
+    CHECK(DecodeAll("\xE2\x82" "A") == V{kBad, kBad, 'A'});   // cut short: the lead alone, then 0x82 alone
+    CHECK(DecodeAll("\xF0\x9F\x98" "A") == V{kBad, kBad, kBad, 'A'});
+    CHECK(DecodeAll("A\xE2\x82") == V{'A', kBad, kBad});      // cut by the end of the text
+    CHECK(DecodeAll("\xF0\x9F") == V{kBad, kBad});
+}
+
+TEST_CASE("raster: the pen moves as the measure counts, bad bytes included") {
+    TinyFont tf;
+    std::uint32_t cps[2];
+    float adv[2];
+    CoopFontAdvances fa{};
+    coop_raster_font_advances(&tf.font, cps, adv, &fa);
+    const char* cases[] = {"", "\x80", "\xFF\xFE", "\xC3", "\xC3\xA9", "\xE2\x82", "\xE2\x82\xAC", "\xF0\x9F\x98",
+                           "A\xE2\x82", "\xC3\xC3\xC3"};
+    for (const char* bad : cases) {
+        CAPTURE(DecodeAll(bad).size());
+        Pic p(64, 2);
+        coop_raster_set_font(&p.r, COOP_FONT_UI, &tf.font);
+        auto l = NewList(64, 2);
+        const std::string text = std::string(bad) + "A";
+        coop_draw_text(l.get(), 0, 0, 4, kWhite, text.c_str());
+        p.Draw(*l);
+        int last = -1;  // the right edge of the last 'A': the pen before it + its 2 px
+        for (int x = 0; x < 64; ++x) {
+            if (p.at(x, 0) != 0) {
+                last = x;
+            }
+        }
+        CHECK(static_cast<float>(last + 1 - 2) == doctest::Approx(coop_text_width(&fa, 4, bad)));
+    }
 }
 
 TEST_CASE("raster: images are sampled and tinted") {

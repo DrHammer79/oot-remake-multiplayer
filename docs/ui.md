@@ -65,6 +65,8 @@ payload). `coop_raster_draw` clears what the last frame drew and draws every com
 - Dirty rows: each frame hashes every row it drew (64-bit) and compares with the frame before; `coop_raster_dirty`
   gives the changed rows as bands, so the pane uploads only those.
 - Text widths for the layout come from the same atlas: `coop_raster_font_advances` fills a `CoopFontAdvances`.
+  The measure and the raster walk text with the same decoder (`coop/ui/utf8.hpp`), so bad bytes move the pen as
+  the measure counts them.
 
 Memory: a 1280 x 720 picture is 3.6 MB plus about 20 KB of work.
 
