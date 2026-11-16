@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "codemem.h"
 #include "hooks.h"
 #include "null_guard.h"
 #include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
@@ -151,26 +152,62 @@ bool ReadU64(uint64_t addr, uint64_t& out) {
     return true;
 }
 
-void FlushCode(uint64_t from, uint64_t size) {
-    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("dc cvau, %0" : : "r"(a) : "memory");
-    __asm__ volatile("dsb ish" : : : "memory");
-    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("ic ivau, %0" : : "r"(a) : "memory");
-    __asm__ volatile("dsb ish\n isb" : : : "memory");
+// Write one instruction of the game's code (codemem.h: through the writable alias; main's own
+// pages keep RX).
+bool PatchWord(uint64_t site, uint32_t insn) {
+    if (codemem::Write(site, &insn, 1)) return true;
+    Log().s("hook: main+").hex(site - g_main).s(" could not be written (svc 0x73 result ")
+        .hex(codemem::FallbackStats().refused).s(")");
+    return false;
 }
 
-// Write one instruction of the game's code (same page permissions after).
-bool PatchWord(uint64_t site, uint32_t insn) {
-    const uint64_t page = site & ~uint64_t{0xfff};
-    uint32_t r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW);
-    if (r != 0) {
-        Log().s("hook: make main writable failed, result ").hex(r);
-        return false;
+const char* StepName(codemem::Step step) {
+    switch (step) {
+        case codemem::kOk: return "ok";
+        case codemem::kCreateSession: return "CreateSession (svc 0x40)";
+        case codemem::kSendRequest: return "SendAsyncRequestWithUserBuffer (svc 0x23)";
+        case codemem::kReceive: return "ReplyAndReceive (svc 0x43)";
+        case codemem::kNoHandle: return "no handle in the message";
+        case codemem::kRegionInfo: return "GetInfo (svc 0x29)";
+        case codemem::kNoRoom: return "no free gap (svc 0x06 walk)";
+        case codemem::kMap: return "MapProcessMemory (svc 0x74)";
+        case codemem::kTooMany: return "too many ranges";
     }
-    *reinterpret_cast<volatile uint32_t*>(site) = insn;
-    FlushCode(site, 4);
-    r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX);
-    if (r != 0) Log().s("hook: restore RX failed, result ").hex(r);
-    return true;
+    return "?";
+}
+
+// One writable alias of main's text and one of the island page (start.s), before any patch.
+void OpenCodeAliases() {
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, g_main) != 0 || mi.addr != g_main || mi.perm != svc::kPermRX) {
+        Log().s("codemem: main's text not found at ").hex(g_main).s(": patches go through svc 0x73");
+        return;
+    }
+    const uint64_t islands = reinterpret_cast<uint64_t>(coop_null_islands);
+    const codemem::Range ranges[2] = {{mi.addr, mi.addr + mi.size}, {islands, islands + 0x1000}};
+    const codemem::Status st = codemem::Open(ranges, 2);
+    for (uint32_t i = 0; i < st.mapped; ++i) {
+        const codemem::Alias a = codemem::Get(i);
+        Log().s("codemem: alias at ").hex(a.rw).s(" for ").hex(a.rx).s(" +").hex(a.size).s(" (RW; the code stays RX)");
+    }
+    if (st.step != codemem::kOk) {
+        Log().s("codemem: ").s(StepName(st.step)).s(" refused, result ").hex(st.result)
+            .s(": the rest goes through svc 0x73");
+    }
+}
+
+// After the patches: did any go the old way, and is the frame site still RX?
+void ReportCodeWrites() {
+    const codemem::Fallback& f = codemem::FallbackStats();
+    if (f.writes != 0 || f.refused != 0) {
+        Log().s("codemem: ").dec(f.writes).s(" writes through svc 0x73 (refused ").hex(f.refused)
+            .s(", RX back refused ").hex(f.rx_refused).s(f.rx_refused ? ": those pages stay RW, emulator only)" : ")");
+    }
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, g_main + game::kFrameSite) == 0) {
+        Log().s("codemem: frame site page perm ").hex(mi.perm).s(mi.perm == svc::kPermRX ? " (RX)" : " (not RX)")
+            .s(", state ").hex(mi.state);
+    }
 }
 
 // Point the game's `bl` at `target`.
@@ -212,16 +249,8 @@ void ApplyNullGuards() {
         checks_ok = true;
     }
     if (n == 0) return;
-    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW) != 0) {
-        Log().s("null guards: the island page could not be made writable: none applied");
-        return;
-    }
-    for (uint32_t k = 0; k < n; ++k)
-        for (uint32_t w = 0; w < null_guard::kIslandWords; ++w)
-            reinterpret_cast<volatile uint32_t*>(page)[k * null_guard::kIslandWords + w] = islands[k][w];
-    FlushCode(page, n * null_guard::kIslandBytes);
-    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX) != 0) {
-        Log().s("null guards: the island page could not be made executable again: none applied");
+    if (!codemem::Write(page, &islands[0][0], n * null_guard::kIslandWords)) {
+        Log().s("null guards: the island page could not be written: none applied");
         return;
     }
     uint32_t done = 0;
@@ -349,5 +378,7 @@ extern "C" COOP_EXPORT void _init() {
         Log().s("hooks applied by the host (lifted module): nothing to patch");
         return;
     }
+    OpenCodeAliases();
     ApplyHooks();
+    ReportCodeWrites();
 }

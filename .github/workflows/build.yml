@@ -89,6 +89,8 @@ jobs:
         run: python tools/switch_mod/elf2nso_test.py -v
       - name: ExeFS module lift check tests
         run: python tools/switch_mod/lift_check_test.py -v
+      - name: ExeFS run verdict tests
+        run: python tools/switch_mod/run_check_test.py -v
       # One table for both null guards (tools/null_guards/sites.py): the ExeFS copy is current, Hookshot patch 0023's matches
       - name: Null guard table tests
         run: |

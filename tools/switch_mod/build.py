@@ -129,7 +129,7 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    sources = [SRC / "start.s", SRC / "main.cpp"] + [ADAPTER / name for name in ADAPTER_SOURCES]
+    sources = [SRC / "start.s", SRC / "main.cpp", SRC / "codemem.cpp"] + [ADAPTER / name for name in ADAPTER_SOURCES]
     builds = [(src, [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"])
               for src in sources]
     if a.net:

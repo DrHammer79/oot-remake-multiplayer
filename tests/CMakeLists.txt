@@ -28,6 +28,7 @@ add_executable(coop_tests
   switch/platform_net_test.cpp
   switch/arena_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../switch/adapter/arena.cpp
   switch/os_util_test.cpp
+  switch/codemem_test.cpp
   presence/presence_test.cpp
   presence/show_delay_test.cpp
   voice/jitter_test.cpp
