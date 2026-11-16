@@ -67,7 +67,7 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    for src in ("start.s", "main.cpp"):
+    for src in ("start.s", "main.cpp", "codemem.cpp"):
         obj = out / (src + ".o")
         flags = CFLAGS if src.endswith(".cpp") else ["--target=aarch64-none-elf", "-march=armv8-a"]
         run([clang, *flags, "-c", str(SRC / src), "-o", str(obj)])
