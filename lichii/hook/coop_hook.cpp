@@ -1282,7 +1282,8 @@ private:
             return;
         }
         const auto camera = CoopCamera::Latest();
-        const bool fresh = camera && view.at - camera->at < kCameraStale;
+        // camera->at is coop::os::SteadyClock (the core's clock): on PC steady_clock's epoch, so the two subtract.
+        const bool fresh = camera && view.at.time_since_epoch() - camera->at.time_since_epoch() < kCameraStale;
         if (fresh != camera_seen_) {
             camera_seen_ = fresh;
             if (fresh) {
