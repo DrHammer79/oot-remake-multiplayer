@@ -319,9 +319,11 @@ constexpr u64 kLifeMax = 0x1c18;
 constexpr u64 kLifeCopy = 0x1ca8;  // life and max as last mirrored
 constexpr u64 kActorPlacement = 0x3d8;
 constexpr u64 kPlacementHash = 0x88;
-// Player report 111: an actor's room component in its component table, and its
-// fields (Objects::ExtraRooms).
-constexpr u64 kComponentsRoom = 0x440;
+// Player report 111: an actor's room component (a pointer in the actor itself:
+// f_7102c1d740 reads it at actor +0x440 beside the component table at +0x270;
+// its +0x18 points back at the actor), and its fields (Objects::ExtraRooms).
+constexpr u64 kActorRoom = 0x440;
+constexpr u64 kRoomActor = 0x18;
 constexpr u64 kRoomDefault = 0x34;
 constexpr u64 kRoomNow = 0x38;
 constexpr std::size_t kMaxWalk = 8192;
@@ -3107,14 +3109,20 @@ private:
             }
             const u64 src_table = r.template Get<u64>(source + kActorComponents).value_or(0);
             const u64 dst_table = r.template Get<u64>(e.address + kActorComponents).value_or(0);
-            const u64 src_room = src_table ? r.template Get<u64>(src_table + kComponentsRoom).value_or(0) : 0;
-            const u64 dst_room = dst_table ? r.template Get<u64>(dst_table + kComponentsRoom).value_or(0) : 0;
+            u64 src_room = r.template Get<u64>(source + kActorRoom).value_or(0);
+            u64 dst_room = r.template Get<u64>(e.address + kActorRoom).value_or(0);
+            if (src_room != 0 && r.template Get<u64>(src_room + kRoomActor).value_or(0) != source) {
+                src_room = 0;  // (not the room component: never written)
+            }
+            if (dst_room != 0 && r.template Get<u64>(dst_room + kRoomActor).value_or(0) != e.address) {
+                dst_room = 0;
+            }
             if (src_room == 0 || dst_room == 0) {
                 if (extra_room_said_.insert(e.key * 4 + 1).second && extra_room_lines_ < 40) {
                     ++extra_room_lines_;
-                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room component at table+{:#x} (extra table {:#x} "
-                                   "-> {:#x}, placed {:#x} table {:#x} -> {:#x}) (report 111)",
-                             e.address, e.name, kComponentsRoom, dst_table, dst_room, source, src_table, src_room);
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room component at actor+{:#x} (extra -> {:#x}, "
+                                   "placed {:#x} -> {:#x}, tables {:#x} {:#x}) (report 111)",
+                             e.address, e.name, kActorRoom, dst_room, source, src_room, dst_table, src_table);
                     // Which components of the placed enemy point back at it (+0x18), and their +0x34/+0x38.
                     for (u64 off = 0; src_table != 0 && off < 0x800 && extra_room_lines_ < 40; off += 8) {
                         const u64 comp = r.template Get<u64>(src_table + off).value_or(0);
