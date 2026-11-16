@@ -73,11 +73,16 @@ triangles (an outline as thin bands).
 - `coop/ui/pad.hpp` `PadReader`: the game's own NpadButton bits and left stick (what Longshot's `hos_coop_pad` and an
   ExeFS build's nn::hid hook both see) as events. A held direction repeats (after 400 ms, then every 110 ms). Closed,
   only L + R + Minus counts. Open: the D-pad or stick moves, A confirms, B goes back, L / R change the tab, Minus closes.
-- `coop/ui/focus.hpp` `FocusStack`: menu, chat and cheats as owners. The top one gets input, and the game's pad is
-  masked while any owner is on the stack. Step 6b puts the own menu on it; the chat box and cheats keep their own
-  key handling for now and move onto it with the ExeFS adapter.
+- `coop/ui/focus.hpp` `FocusStack`: menu, chat and cheats as owners. The top one gets input. Any owner takes the
+  keyboard; only the menu takes the pad too, because the chat box and the cheats panel are typed into while the game is
+  still played. On Longshot there is one stack for all three, in `coop_own_menu.cpp`, and it works with or without the
+  opt-in. The chat box and the cheats panel tell it when they open and close (`SetFocus`, after each key in
+  `TypeKey`). The typed keys go to the cheats panel first as before (when it is open, or when the box is closed and the
+  cheats are on), except when the chat box is on top: then it keeps its keys (`CheatsFirst`).
 - Keyboard (Longshot): the arrows, Enter, Esc / Backspace, Q / E or Page Up / Down. While the page types into a field,
-  every key but F9 goes to that field. On a console, text comes from the software keyboard as typed characters followed
+  every key but F9 goes to that field. As with the pad, Enter, Esc, Backspace or F9 still held when the menu closes
+  stay co-op's (`hos_coop_keys_taken`) until they are let go, so the game reads none of them as a new press
+  (`KeyLatch`). On a console, text comes from the software keyboard as typed characters followed
   by "text done" (step 8).
 
 ## Next

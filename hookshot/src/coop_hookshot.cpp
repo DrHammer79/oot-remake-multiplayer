@@ -878,8 +878,16 @@ bool TypeKey(std::uint32_t vk, bool repeat) {
         return false;
     }
     std::lock_guard lock(g_box_mutex);
-    // The cheats panel (F8, LICHII_COOP_CHEATS=1) when it is open or the chat box is not.
-    if (g_cheats.open() || (!g_box.open() && CoopCheats::On())) {
+    // Co-op's focus stack (coop_own_menu.h) hears when the box and the panel open and close, after each key.
+    struct Synced {
+        ~Synced() {
+            CoopOwnMenu::SetFocus(coop::ui::Owner::cheats, g_cheats.open());
+            CoopOwnMenu::SetFocus(coop::ui::Owner::chat, g_box.open());
+        }
+    } synced;
+    // The cheats panel (F8, LICHII_COOP_CHEATS=1) when it is open or the chat box is not (and not over the chat box
+    // when that has the focus).
+    if (CoopOwnMenu::CheatsFirst(CoopOwnMenu::FocusTop(), g_cheats.open(), g_box.open(), CoopCheats::On())) {
         const auto rows = CheatRows();
         if (g_cheats.Key(vk, repeat, rows.size())) {
             GiveChosen(rows);
@@ -966,6 +974,9 @@ bool KeysTaken() {
     }
     if (!g_on) {
         return false;
+    }
+    if (CoopOwnMenu::KeysTaken(AsyncDown)) {   // the own menu (opt-in): open, or a key held at its close still down
+        return true;
     }
     std::lock_guard lock(g_box_mutex);
     const bool closing = AsyncDown(0x0D) || AsyncDown(0x1B);
@@ -1610,7 +1621,7 @@ COOP_HOOKSHOT_EXPORT int hos_coop_char(uint32_t ch) {
     return (g_on && CoopOwnMenu::Char(ch)) || CoopHookshot::TypeChar(ch) ? 1 : 0;
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_keys_taken(void) {
-    return CoopHookshot::KeysTaken() || (g_on && CoopOwnMenu::Open()) ? 1 : 0;
+    return CoopHookshot::KeysTaken() ? 1 : 0;
 }
 // The mouse (hos_coop_api.h): the cheats panel's clicks.
 COOP_HOOKSHOT_EXPORT int hos_coop_mouse(float fx, float fy, int event) {
