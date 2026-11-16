@@ -18,6 +18,8 @@ MODULE_TAG = "coop-proto: "
 HELLO = ("1 loaded (hello)", r"hello from subsdk1")
 HOOK_IN = ("2 frame hook in", r"hook \d+: frame hook in at main\+0x6e70f8")
 NULL_GUARDS = 29  # switch/proto/null_guards.inc kNullGuardCount
+# switch/adapter/input.h: main's GOT entries for the five GetNpadStates imports.
+NPAD_GOT = {"FullKey": 0x4cbf5c8, "Handheld": 0x4cbf5e0, "JoyDual": 0x4cbf5c0, "JoyLeft": 0x4cbf5d0, "JoyRight": 0x4cbf5d8}
 
 # name -> (expects, forbids, datagrams)
 PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
@@ -37,7 +39,47 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
     ], [
         ("2 no guard left out", r"null guard at main\+0x[0-9a-f]+: .*left out"),
         ("2 island page usable", r"null guards: the island page could not"),
-        ("2 code pages back to RX", r"restore RX failed"),
+        ("2 code pages back to RX", r"restore RX failed|RX back refused"),
+    ], 0),
+    # The code-memory path (v1 step 8 (a), switch/proto/codemem.h): every patch written through a RW alias,
+    # main's own pages stay RX, no 0x73 fallback.
+    "codemem": ([
+        HELLO, HOOK_IN,
+        # Two aliases: main's text (not one page) and the island page (one page).
+        ("2 alias of main's text", r"^codemem: alias at 0x[0-9a-f]+ for 0x[0-9a-f]+ \+0x(?!1000 )[0-9a-f]+ \(RW"),
+        ("2 alias of the island page", r"^codemem: alias at 0x[0-9a-f]+ for 0x[0-9a-f]+ \+0x1000 \(RW"),
+        ("3 frame site page RX after patching", r"^codemem: frame site page perm 0x5 \(RX\)"),
+        ("4 null guards all applied", rf"^null guards: {NULL_GUARDS} of {NULL_GUARDS} applied"),
+        ("5 game plays (frame 3000)", r"^frame 3000$"),
+    ], [
+        ("2 no refused step", r"^codemem: .* refused, result"),
+        ("2 main's text found", r"^codemem: main's text not found"),
+        ("3 no write through svc 0x73", r"writes through svc 0x73"),
+        ("3 no 0xd401", r"0xd401"),
+        ("4 no guard left out", r"null guard at main\+0x[0-9a-f]+: .*left out"),
+        ("4 island page written", r"null guards: the island page could not"),
+        ("4 every hook written", r"^hook: main\+0x[0-9a-f]+ could not be written"),
+    ], 0),
+    # The pad hook (v1 step 8 (d), scenarios/input.txt): five imports hooked, player 1 read through the module, the
+    # scripted A, B, D-pad up and stick up each logged with its bit, then L+R+Minus opens the menu and it closes by
+    # itself 5 s later. Whether Link stood still meanwhile is in the shots (swallow-start/-end vs after-start/-end).
+    "input": ([
+        HELLO, HOOK_IN,
+        *[(f"2 {style} import hooked", rf"hook \d+: import at GOT main\+{got:#x} now goes through the module")
+          for style, got in NPAD_GOT.items()],
+        ("3 player 1 read through the module", r"pad: player 1 read through the module"),
+        ("4a edge A (bit 0)", r"pad: player 1 down A \(bit 0,"),
+        ("4b edge B (bit 1)", r"pad: player 1 down B \(bit 1,"),
+        ("4c edge D-pad up (bit 13)", r"pad: player 1 down Up \(bit 13,"),
+        ("4d edge left stick up (bit 17)", r"pad: player 1 down StickL-Up \(bit 17, left stick -?\d+,[1-9]\d{3,}\)"),
+        ("5a menu opened (L+R+Minus)", r"^ui: OPEN$"),
+        ("5a game has no pad from player 1", r"^pad: menu open, the game gets no pad from player 1"),
+        ("5b menu closed by itself", r"^ui: CLOSE$"),
+        ("5b game has the pad again", r"^pad: menu closed, the game has the pad again"),
+        ("6 game plays (frame 3000)", r"^frame 3000$"),
+    ], [
+        ("2 no import skipped", r"hook \d+: GOT main\+0x[0-9a-f]+ (holds|not writable)"),
+        ("4 no edge or event lost", r"lost edges [1-9]|lost events [1-9]"),
     ], 0),
     # The OS slots on nn::os / nn::fs (v1 step 8 (b), switch/adapter/os_selftest.cpp): a thread ticks 10x contending a
     # mutex with the game thread, a 4 KB file round trip on the SD card, the self-test's own verdict; plus the proto's.
@@ -56,6 +98,8 @@ PRESETS: dict[str, tuple[list[tuple[str, str]], list[tuple[str, str]], int]] = {
         ("7 SD card mounted", r"^files: "),
     ], 3),
 }
+# Presets that take a shot at scenario marks (run_fritchii.ps1 -Preset input: "coop: test mark <name>" in the log).
+MARK_SHOTS = {"input": ["before", "swallow-start", "swallow-mid", "swallow-end", "after-start", "after-end"]}
 
 
 def module_lines(log_text: str) -> list[str]:

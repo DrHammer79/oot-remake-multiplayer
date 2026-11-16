@@ -1,0 +1,41 @@
+# ExeFS runs, preset input (run_fritchii.ps1 -Preset input; v1 step 8 (d), docs/exefs.md "Input").
+# Ticks of 1/60 s. The harness takes a PrintWindow shot at each mark that preset lists.
+# Load the save (as tools/autotest/scenarios/load.txt), then edges, then the swallow window, then the pad back.
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 900
+mark loaded
+wait 300
+# Edges: A, B, D-pad up, left stick up (each logged by the module with its bit)
+mark edges
+press A 10
+wait 60
+press B 10
+wait 60
+press DUP 10
+wait 60
+stick 0 1 20
+wait 120
+# Before: Link stands
+mark before
+wait 60
+# Open co-op's menu: L+R+Minus (the game gets none of it), then hold the stick up for 4 s: Link must not move
+hold L+R+MINUS 10
+mark swallow-start
+stick 0 1 120
+mark swallow-mid
+stick 0 1 110
+mark swallow-end
+# The menu closes by itself 5 s after it opened; then the same stick walks Link again
+wait 120
+mark after-start
+stick 0 1 90
+mark after-end
+wait 60

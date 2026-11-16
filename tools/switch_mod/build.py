@@ -23,8 +23,9 @@ REPO = HERE.parent.parent
 SRC = REPO / "switch" / "proto"
 ADAPTER = REPO / "switch" / "adapter"
 # v1 step 8: the adapter's sources (switch/adapter) and the headers they share with the core.
-ADAPTER_SOURCES = ("platform_os.cpp", "arena.cpp", "os_selftest.cpp")
-INCLUDES = ["-I", str(REPO / "coop" / "platform" / "include")]
+ADAPTER_SOURCES = ("platform_os.cpp", "arena.cpp", "os_selftest.cpp", "input.cpp")
+INCLUDES = ["-I", str(REPO / "coop" / "ui" / "include"),        # coop/ui/pad.hpp, events.h (freestanding)
+            "-I", str(REPO / "coop" / "platform" / "include")]  # coop_platform_static.h (freestanding C)
 # Every name the module may import (one per line, '#' comments): checked against the game's dynsym, so a declaration
 # that mangles differently (a wrong parameter type) fails the build instead of failing to link in the game.
 IMPORTS = HERE / "imports.txt"
@@ -89,7 +90,7 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     objs = []
-    sources = [SRC / "start.s", SRC / "main.cpp"] + [ADAPTER / name for name in ADAPTER_SOURCES]
+    sources = [SRC / "start.s", SRC / "main.cpp", SRC / "codemem.cpp"] + [ADAPTER / n for n in ADAPTER_SOURCES]
     for src in sources:
         obj = out / (src.parent.name + "_" + src.name + ".o")
         flags = [*CFLAGS, *INCLUDES] if src.suffix == ".cpp" else ["--target=aarch64-none-elf", "-march=armv8-a"]
@@ -106,6 +107,11 @@ def main() -> int:
         problems, entries = [str(e)], []
     if problems:
         sys.exit("build: the module would not lift or would not link in the game:\n  " + "\n  ".join(problems))
+    imports = lift_check.imports(lift_check.Elf(elf.read_bytes()))
+    print("build: imports (rtld links them by name): " + " ".join(imports))
+    libc = [n for n in imports if n in ("memset", "memcpy", "memmove") or n.startswith("__cxa_")]
+    if libc:  # freestanding: the compiler asked for a C/C++ runtime the module does not have
+        sys.exit("build: the module needs a runtime it has none of: " + " ".join(libc))
     lift_check.write_entries(str(out / "subsdk1.entries"), entries)
     nso = elf2nso.build_nso(elf.read_bytes())
     (out / "subsdk1").write_bytes(nso)

@@ -111,5 +111,34 @@ class IndirectCallTest(unittest.TestCase):
         self.assertEqual(c, [(0x1014, "br", None)])
 
 
+
+class HookEntryTest(unittest.TestCase):
+    SLOTS = {0x5000, 0x5008}
+    FUNCS = {0x100, 0x200}
+
+    def problems(self, kind, insn, main_off, repl, slot):
+        return lift_check.entry_problems(0, (kind, insn, main_off, repl, slot), self.SLOTS, self.FUNCS)
+
+    def test_import_redirect_ok(self):  # main's GOT entry for GetNpadStates -> the module's coop_hook_npad_*
+        self.assertEqual(self.problems(6, 0, 0x4cbf5c8, 0x100, 0x5000), [])
+
+    def test_import_redirect_needs_an_exported_replacement(self):
+        self.assertIn("is not an exported function", self.problems(6, 0, 0x4cbf5c8, 0x300, 0x5000)[0])
+        self.assertIn("is not an exported function", self.problems(6, 0, 0x4cbf5c8, 0, 0x5000)[0])
+
+    def test_import_redirect_needs_a_slot(self):
+        self.assertIn("is not an exported coop_slot_*", self.problems(6, 0, 0x4cbf5c8, 0x100, 0)[0])
+
+    def test_import_redirect_has_no_instruction(self):
+        self.assertIn("has no instruction", self.problems(6, 0x94000000, 0x4cbf5c8, 0x100, 0x5000)[0])
+
+    def test_other_kinds_unchanged(self):
+        self.assertEqual(self.problems(1, 0x94d19c82, 0x6e70f8, 0x200, 0x5008), [])
+        self.assertEqual(self.problems(3, 0, 0x34522d0, 0, 0x5008), [])
+        self.assertEqual(self.problems(4, 0xb947d808, 0x2dceef8, 0, 0), [])
+        self.assertIn("has no replacement", self.problems(3, 0, 0x34522d0, 0x100, 0x5008)[0])
+        self.assertIn("has no slot or replacement", self.problems(5, 1, 0x10, 0, 0x5000)[0])
+        self.assertEqual(self.problems(7, 0, 0, 0, 0), ["hook 0: unknown kind 7"])
+
 if __name__ == "__main__":
     unittest.main()

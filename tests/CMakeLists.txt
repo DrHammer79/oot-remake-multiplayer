@@ -25,6 +25,8 @@ add_executable(coop_tests
   platform/platform_test.cpp
   platform/platform_c_check.c
   switch/null_guard_test.cpp
+  switch/codemem_test.cpp
+  switch/pad_hook_test.cpp
   switch/arena_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../switch/adapter/arena.cpp
   switch/os_util_test.cpp
   presence/presence_test.cpp
@@ -133,7 +135,7 @@ target_include_directories(coop_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lic
 target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cpp hookshot/draw_golden_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_draw.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_dbno_draw.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_draw_hos.cpp
-  hookshot/drawlist_test.cpp
+  hookshot/drawlist_test.cpp ui/raster_test.cpp
   hookshot/own_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_own_menu_model.cpp
   hookshot/ui_input_test.cpp
   hookshot/hud_dim_test.cpp

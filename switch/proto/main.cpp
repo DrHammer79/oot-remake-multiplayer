@@ -17,7 +17,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "codemem.h"
 #include "hooks.h"
+#include "../adapter/input.h"
 #include "null_guard.h"
 #include "null_guards.inc"  // (generated: tools/null_guards/gen.py)
 #include "svc.h"
@@ -57,6 +59,7 @@ constexpr uint32_t kFrameSiteInsn = 0x94d19c82;  // bl 0x3b4e300 (frame_step)
 constexpr uint64_t kWorldMgrPtr = 0x4e7eab0;  // coop_game_build.h .world_mgr_ptr
 constexpr uint64_t kTimeObject = 0x510;     // coop_time.cpp
 constexpr uint64_t kSetTime = 0x34522d0;    // coop_time.cpp kSetTime
+constexpr uint64_t kMainCodeEnd = 0x3c461d0;  // main's text segment size (its PLT is in it)
 }  // namespace game
 
 // ---- Slots: the only way this module calls into the game (see hooks.h) ----
@@ -69,7 +72,7 @@ extern uint32_t coop_null_islands[];  // start.s: one page, filled by ApplyNullG
 }
 static_assert(kNullGuardCount * null_guard::kIslandBytes <= 0x1000, "the island page is full");
 
-constexpr uint32_t kHookCount = 2 + kNullGuardEntries;
+constexpr uint32_t kHookCount = 2 + input::kHookCount + kNullGuardEntries;
 extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) hooks::Table<kHookCount> coop_hooks = {
     {'C', 'O', 'O', 'P', 'H', 'O', 'O', 'K'},
     1,
@@ -81,6 +84,7 @@ extern "C" COOP_EXPORT constinit __attribute__((section(".coop_hooks"), used)) h
         {hooks::kCallRedirect, 0, game::kFrameSiteInsn, game::kFrameSite, &coop_frame_entry,
          &coop_slot_frame_step},
         {hooks::kGameFn, 0, 0, game::kSetTime, nullptr, &coop_slot_set_time},
+        COOP_INPUT_HOOK_ENTRIES
         COOP_NULL_GUARD_ENTRIES
     },
 };
@@ -126,6 +130,10 @@ struct Line {
         while (k && n < sizeof(buf) - 1) buf[n++] = tmp[--k];
         return *this;
     }
+    Line& sdec(int64_t v) {
+        if (v < 0) s("-");
+        return dec(v < 0 ? 0 - static_cast<uint64_t>(v) : static_cast<uint64_t>(v));
+    }
     ~Line() { svc::OutputDebugString(buf, n); }
 };
 
@@ -148,26 +156,62 @@ bool ReadU64(uint64_t addr, uint64_t& out) {
     return true;
 }
 
-void FlushCode(uint64_t from, uint64_t size) {
-    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("dc cvau, %0" : : "r"(a) : "memory");
-    __asm__ volatile("dsb ish" : : : "memory");
-    for (uint64_t a = from & ~uint64_t{63}; a < from + size; a += 64) __asm__ volatile("ic ivau, %0" : : "r"(a) : "memory");
-    __asm__ volatile("dsb ish\n isb" : : : "memory");
+// Write one instruction of the game's code (codemem.h: through the writable alias; main's own
+// pages keep RX).
+bool PatchWord(uint64_t site, uint32_t insn) {
+    if (codemem::Write(site, &insn, 1)) return true;
+    Log().s("hook: main+").hex(site - g_main).s(" could not be written (svc 0x73 result ")
+        .hex(codemem::FallbackStats().refused).s(")");
+    return false;
 }
 
-// Write one instruction of the game's code (same page permissions after).
-bool PatchWord(uint64_t site, uint32_t insn) {
-    const uint64_t page = site & ~uint64_t{0xfff};
-    uint32_t r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW);
-    if (r != 0) {
-        Log().s("hook: make main writable failed, result ").hex(r);
-        return false;
+const char* StepName(codemem::Step step) {
+    switch (step) {
+        case codemem::kOk: return "ok";
+        case codemem::kCreateSession: return "CreateSession (svc 0x40)";
+        case codemem::kSendRequest: return "SendAsyncRequestWithUserBuffer (svc 0x23)";
+        case codemem::kReceive: return "ReplyAndReceive (svc 0x43)";
+        case codemem::kNoHandle: return "no handle in the message";
+        case codemem::kRegionInfo: return "GetInfo (svc 0x29)";
+        case codemem::kNoRoom: return "no free gap (svc 0x06 walk)";
+        case codemem::kMap: return "MapProcessMemory (svc 0x74)";
+        case codemem::kTooMany: return "too many ranges";
     }
-    *reinterpret_cast<volatile uint32_t*>(site) = insn;
-    FlushCode(site, 4);
-    r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX);
-    if (r != 0) Log().s("hook: restore RX failed, result ").hex(r);
-    return true;
+    return "?";
+}
+
+// One writable alias of main's text and one of the island page (start.s), before any patch.
+void OpenCodeAliases() {
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, g_main) != 0 || mi.addr != g_main || mi.perm != svc::kPermRX) {
+        Log().s("codemem: main's text not found at ").hex(g_main).s(": patches go through svc 0x73");
+        return;
+    }
+    const uint64_t islands = reinterpret_cast<uint64_t>(coop_null_islands);
+    const codemem::Range ranges[2] = {{mi.addr, mi.addr + mi.size}, {islands, islands + 0x1000}};
+    const codemem::Status st = codemem::Open(ranges, 2);
+    for (uint32_t i = 0; i < st.mapped; ++i) {
+        const codemem::Alias a = codemem::Get(i);
+        Log().s("codemem: alias at ").hex(a.rw).s(" for ").hex(a.rx).s(" +").hex(a.size).s(" (RW; the code stays RX)");
+    }
+    if (st.step != codemem::kOk) {
+        Log().s("codemem: ").s(StepName(st.step)).s(" refused, result ").hex(st.result)
+            .s(": the rest goes through svc 0x73");
+    }
+}
+
+// After the patches: did any go the old way, and is the frame site still RX?
+void ReportCodeWrites() {
+    const codemem::Fallback& f = codemem::FallbackStats();
+    if (f.writes != 0 || f.refused != 0) {
+        Log().s("codemem: ").dec(f.writes).s(" writes through svc 0x73 (refused ").hex(f.refused)
+            .s(", RX back refused ").hex(f.rx_refused).s(f.rx_refused ? ": those pages stay RW, emulator only)" : ")");
+    }
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, g_main + game::kFrameSite) == 0) {
+        Log().s("codemem: frame site page perm ").hex(mi.perm).s(mi.perm == svc::kPermRX ? " (RX)" : " (not RX)")
+            .s(", state ").hex(mi.state);
+    }
 }
 
 // Point the game's `bl` at `target`.
@@ -209,16 +253,8 @@ void ApplyNullGuards() {
         checks_ok = true;
     }
     if (n == 0) return;
-    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRW) != 0) {
-        Log().s("null guards: the island page could not be made writable: none applied");
-        return;
-    }
-    for (uint32_t k = 0; k < n; ++k)
-        for (uint32_t w = 0; w < null_guard::kIslandWords; ++w)
-            reinterpret_cast<volatile uint32_t*>(page)[k * null_guard::kIslandWords + w] = islands[k][w];
-    FlushCode(page, n * null_guard::kIslandBytes);
-    if (svc::SetProcessMemoryPermission(svc::kCurrentProcess, page, 0x1000, svc::kPermRX) != 0) {
-        Log().s("null guards: the island page could not be made executable again: none applied");
+    if (!codemem::Write(page, &islands[0][0], n * null_guard::kIslandWords)) {
+        Log().s("null guards: the island page could not be written: none applied");
         return;
     }
     uint32_t done = 0;
@@ -227,6 +263,29 @@ void ApplyNullGuards() {
         if (null_guard::Branch(sites[k], page + k * null_guard::kIslandBytes, b) && PatchWord(sites[k], b)) ++done;
     }
     Log().s("null guards: ").dec(done).s(" of ").dec(wanted).s(" applied (a load through a null base reads 0)");
+}
+
+// hooks.h kImportRedirect: main's GOT entry `at` gets e.replacement; e.slot already holds the import's own target.
+void RedirectImport(uint32_t i, const hooks::Entry& e, uint64_t at) {
+    const uint64_t cur = *reinterpret_cast<volatile uint64_t*>(at);
+    const bool unbound = cur >= g_main && cur - g_main < game::kMainCodeEnd;  // lazy binding: still main's PLT
+    if (*e.slot == 0 || (cur != *e.slot && !unbound)) {
+        Log().s("hook ").dec(i).s(": GOT main+").hex(e.main_offset).s(" holds ").hex(cur)
+            .s(", not the import or main's PLT (another mod?): skipped");
+        return;
+    }
+    svc::MemoryInfo mi{};
+    if (svc::QueryMemory(&mi, at) != 0 || (mi.perm & 2) == 0) {
+        const uint32_t r = svc::SetProcessMemoryPermission(svc::kCurrentProcess, at & ~uint64_t{0xfff}, 0x1000, svc::kPermRW);
+        if (r != 0) {
+            Log().s("hook ").dec(i).s(": GOT main+").hex(e.main_offset).s(" not writable, result ").hex(r).s(": skipped");
+            return;
+        }
+        Log().s("hook ").dec(i).s(": GOT page made writable (perm was ").dec(mi.perm).s(")");
+    }
+    *reinterpret_cast<volatile uint64_t*>(at) = reinterpret_cast<uint64_t>(e.replacement);
+    Log().s("hook ").dec(i).s(": import at GOT main+").hex(e.main_offset).s(" now goes through the module (")
+        .s(unbound ? "not bound yet" : "was bound").s(")");
 }
 
 bool IsBl(uint32_t insn) { return (insn & 0xfc000000u) == 0x94000000u; }
@@ -261,6 +320,9 @@ void ApplyHooks() {
                         .s(", continues at main+").hex(*e.slot - g_main);
                 }
                 break;
+            case hooks::kImportRedirect:
+                RedirectImport(i, e, at);
+                break;
             case hooks::kGameFn:
                 *e.slot = at;
                 Log().s("hook ").dec(i).s(": game function slot = main+").hex(e.main_offset);
@@ -271,6 +333,67 @@ void ApplyHooks() {
         }
     }
     ApplyNullGuards();
+}
+
+const char* ButtonName(uint8_t bit) {
+    static const char* const kNames[] = {"A", "B", "X", "Y", "LS", "RS", "L", "R", "ZL", "ZR", "Plus", "Minus",
+                                         "Left", "Up", "Right", "Down", "StickL-Left", "StickL-Up", "StickL-Right",
+                                         "StickL-Down", "StickR-Left", "StickR-Up", "StickR-Right", "StickR-Down"};
+    return bit < sizeof(kNames) / sizeof(kNames[0]) ? kNames[bit] : "other";
+}
+
+const char* UiName(uint8_t kind) {
+    switch (kind) {
+        case COOP_UI_UP: return "UP";
+        case COOP_UI_DOWN: return "DOWN";
+        case COOP_UI_LEFT: return "LEFT";
+        case COOP_UI_RIGHT: return "RIGHT";
+        case COOP_UI_CONFIRM: return "CONFIRM";
+        case COOP_UI_BACK: return "BACK";
+        case COOP_UI_TAB_PREV: return "TAB_PREV";
+        case COOP_UI_TAB_NEXT: return "TAB_NEXT";
+        case COOP_UI_OPEN: return "OPEN";
+        case COOP_UI_CLOSE: return "CLOSE";
+        default: return "?";
+    }
+}
+
+// The pad hook's news since the last frame (switch/adapter/input.h), into the log.
+bool g_pad_seen = false;
+uint32_t g_source = pad_hook::kNpadNo1;
+bool g_menu_was_open = false;
+void LogInput() {
+    pad_hook::Hook& h = input::hook();
+    h.Frame(g_frames);  // player 1's source may change from the next read on
+    if (!g_pad_seen && h.reads(0) != 0) {
+        g_pad_seen = true;
+        Log().s("pad: player 1 read through the module (frame ").dec(g_frames).s(")");
+    }
+    pad_hook::Edge edges[16];
+    for (size_t n = h.TakeEdges(edges, 16), k = 0; k < n; ++k) {
+        const pad_hook::Edge& e = edges[k];
+        Log().s("pad: player ").dec(e.player + 1u).s(e.down ? " down " : " up ").s(ButtonName(e.bit)).s(" (bit ")
+            .dec(e.bit).s(", left stick ").sdec(e.stick_x).s(",").sdec(e.stick_y).s(")");
+    }
+    if (h.source() != g_source) {
+        g_source = h.source();
+        Log().s("pad: player 1 is now npad ").s(g_source == pad_hook::kNpadHandheld ? "Handheld" : "No.1");
+    }
+    CoopUiEvent events[8];
+    for (size_t n = h.TakeEvents(events, 8), k = 0; k < n; ++k) {
+        Log().s("ui: ").s(UiName(events[k].kind)).s(events[k].repeat ? " (repeat)" : "");
+    }
+    if (h.open() != g_menu_was_open) {
+        g_menu_was_open = h.open();
+        Log().s(g_menu_was_open ? "pad: menu open, the game gets no pad from player 1 (closes by itself in 5 s)"
+                                : "pad: menu closed, the game has the pad again");
+    }
+    if (g_frames % 600 == 0) {
+        Line l = Log();
+        l.s("pad: reads");
+        for (uint32_t s = 0; s < input::kStyles; ++s) l.s(" ").s(input::StyleName(s)).s(" ").dec(input::Calls(s));
+        l.s(", lost edges ").dec(h.dropped_edges()).s(", lost events ").dec(h.dropped_events());
+    }
 }
 
 void TrySetTime() {
@@ -320,6 +443,7 @@ void SayHello() {
 extern "C" COOP_EXPORT void coop_proto_frame() {
     ++g_frames;
     if (g_frames == 1 || g_frames % 600 == 0) Log().s("frame ").dec(g_frames);
+    LogInput();
     if (!g_time_done && g_frames >= 300 && g_frames % 60 == 0) TrySetTime();
     if (!g_net_done && g_frames >= 900) SayHello();
     coop_os_selftest_frame(g_frames);  // v1 step 8 (b): from frame 1200, once
@@ -343,5 +467,8 @@ extern "C" COOP_EXPORT void _init() {
         Log().s("hooks applied by the host (lifted module): nothing to patch");
         return;
     }
+    OpenCodeAliases();
+    input::FillSlots();
     ApplyHooks();
+    ReportCodeWrites();
 }
