@@ -79,6 +79,12 @@ jobs:
         run: python tools/autotest/tests/test_kit_pair.py -v
       - name: Bad-connection relay tests
         run: python tools/netsim/tests/test_netsim.py -v
+      # coop_core (cmake/coop_core.cmake) stays platform-free: no OS, emulator or Hookshot header, no LICHII_COOP #if.
+      - name: Platform-free core check
+        run: |
+          python tools/check_core_test.py -v
+          python tools/check_core.py
+          python tools/check_core_flags_test.py -v
       - name: ExeFS prototype NSO converter tests
         run: python tools/switch_mod/elf2nso_test.py -v
       - name: ExeFS module lift check tests
@@ -170,13 +176,16 @@ jobs:
       - name: Configure
         shell: bash
         run: >
-          cmake -S . -B build -G Ninja -DCOOP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCOOP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DFETCHCONTENT_SOURCE_DIR_ENET="$(pwd -W)/.deps/enet"
           -DFETCHCONTENT_SOURCE_DIR_DOCTEST="$(pwd -W)/.deps/doctest"
           -DFETCHCONTENT_SOURCE_DIR_MONOCYPHER="$(pwd -W)/.deps/monocypher"
       - name: Build
         run: cmake --build build --parallel
+      # coop_core's files compile with the module's flags, as before the library (tools/check_core_flags.py).
+      - name: Core flags (MSVC module)
+        run: python tools/check_core_flags.py --compdb build/compile_commands.json --build module
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: sccache stats
@@ -316,9 +325,12 @@ jobs:
       - name: Build the module and the server
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 \
-            -DCOOP_BUILD_HOOKSHOT=ON -DCOOP_BUILD_TESTS=OFF \
+            -DCOOP_BUILD_HOOKSHOT=ON -DCOOP_BUILD_TESTS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
           cmake --build build --target hookshot_coop coop_server --parallel 4
+      # coop_core's files compile with the module's flags, as before the library (tools/check_core_flags.py).
+      - name: Core flags (Linux module)
+        run: python3 tools/check_core_flags.py --compdb build/compile_commands.json --build module
       - name: The module loads as the game loads it
         run: |
           set -o pipefail
@@ -431,6 +443,12 @@ jobs:
       - name: Compile the co-op hook
         if: steps.gate.outputs.run == 'true' && matrix.part == 'hook'
         run: lichii/build-linux.sh --src "$RUNNER_TEMP/fritchii" --cpm-cache "$RUNNER_TEMP/cpm-cache" --hook-only
+      # coop_core's hook files compile inside the emulator's core with Fritchii's flags (-fwrapv, -fno-rtti, ...).
+      - name: Core flags (emulator)
+        if: steps.gate.outputs.run == 'true' && matrix.part == 'hook'
+        run: |
+          ninja -C "$RUNNER_TEMP/fritchii/build/coop-linux" -t compdb > "$RUNNER_TEMP/emulator-compdb.json"
+          python3 tools/check_core_flags.py --compdb "$RUNNER_TEMP/emulator-compdb.json" --build emulator
       - name: Build the emulator and its AppImage
         if: steps.gate.outputs.run == 'true' && matrix.part == 'full'
         run: lichii/build-linux.sh --src "$RUNNER_TEMP/fritchii" --cpm-cache "$RUNNER_TEMP/cpm-cache" --appimage "$RUNNER_TEMP/lichii.AppImage"

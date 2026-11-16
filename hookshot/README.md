@@ -15,7 +15,7 @@ Co-op inside [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team M
 | `fetch.ps1` | For developers: clones Longshot (`longshot-src`) beside the main checkout at the pin and applies the patches as a local commit (as `lichii/fetch.ps1`). |
 | `src/` | The module, `hookshot_coop.dll`: `hos_coop_api.h` (the bridge's table, the same file the patch adds), `coop_hookshot.cpp` (start, frame, AI hold, stop; it drives `CoopHook` and makes the callers' game calls). |
 | `compat/` | Stand-ins for the slice of the emulator's API that `lichii/hook` uses, answered from the bridge's table, so every hook file compiles unchanged for Hookshot: one copy of co-op for both. |
-| `CMakeLists.txt` | Target `hookshot_coop` (Windows, MSVC): `lichii/hook`'s files as `core.cmake` lists them, but the emulator's cave and input injection, plus `src/`. |
+| `CMakeLists.txt` | Target `hookshot_coop` (Windows, MSVC): links `coop_core` (`cmake/coop_core.cmake`: the platform-free hook files and UI models) and builds `lichii/hook`'s files as `core.cmake` lists them, but the emulator's cave and input injection, plus `src/`. |
 | `proof.py` | The two-game check on one PC (both games, the server, shots of both pictures, the co-op log lines). |
 
 ## A co-op Hookshot game, for development (Windows)
