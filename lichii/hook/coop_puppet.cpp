@@ -24,6 +24,8 @@
 #include "coop/net/client.hpp"
 #include "coop/presence/presence.hpp"
 #include "coop_game_build.h"
+#include <coop/os.hpp>
+#include <mutex>
 
 namespace CoopPuppet {
 namespace {
@@ -2278,7 +2280,7 @@ struct Received {
     Anim anim;
     std::uint32_t serial = 0;
 };
-std::mutex g_anim_mutex;
+coop::os::Mutex g_anim_mutex;
 // One entry per player number, 0 (unused) to kMaxPlayers (up to 16 players).
 constexpr std::size_t kNumbers = std::size_t{coop::protocol::kMaxPlayers} + 1;
 // jitter-3: by their sample time, taken at presence's shown time (coop_follow.h Delayed).

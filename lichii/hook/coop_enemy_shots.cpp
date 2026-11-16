@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <coop/os.hpp>
 #include <mutex>
 
 namespace CoopEnemyShots {
@@ -83,7 +84,7 @@ float Distance(const Vec3& a, const Vec3& b) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 std::vector<Shooter> g_shooters;
 std::uint64_t g_at = 0;
 std::chrono::steady_clock::time_point g_noted{};  // (this PC's clock, for StopAtCreate)

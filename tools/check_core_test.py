@@ -81,6 +81,23 @@ class CheckCoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_core.check(self.tree({}, cmake='set(COOP_CORE_HOOK_SOURCES coop_a.cpp)\n'))
 
+    def test_std_locks_and_threads_fail(self):
+        text = ('#include <mutex>\nstd::mutex a;\nstd::recursive_mutex b;\nstd::condition_variable c;\n'
+                'void f() { std::this_thread::yield(); }\n')
+        problems = check_core.check(self.tree({'lichii/hook/coop_a.h': text}))
+        self.assertEqual(len(problems), 4)
+        self.assertTrue(all('an OS call' in p for p in problems))
+        self.assertIn('coop_a.h (included by lichii/hook/coop_a.cpp):2: std::mutex', problems[0])
+        problems = check_core.check(self.tree({'hookshot/src/coop_menu.cpp': '#include <thread>\n'}))
+        self.assertEqual(len(problems), 1)
+        self.assertIn('std threads', problems[0])
+
+    def test_coop_os_and_comments_pass(self):
+        text = ('#include <mutex>\n#include <coop/os.hpp>\n// was std::mutex\n/* std::thread */\n'
+                'coop::os::Mutex m;\nstd::lock_guard<coop::os::Mutex> g(m);\nstd::unique_lock<coop::os::Mutex> u;\n'
+                'int my_std_mutex_count;\n')
+        self.assertEqual(check_core.check(self.tree({'lichii/hook/coop_a.cpp': text})), [])
+
     def test_the_repo_passes(self):
         root = Path(__file__).resolve().parent.parent
         self.assertEqual(check_core.check(root), [])

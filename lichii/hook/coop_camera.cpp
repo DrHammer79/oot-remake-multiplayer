@@ -2,13 +2,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <coop/os.hpp>
 #include <mutex>
 
 namespace CoopCamera {
 namespace {
 
 std::atomic<bool> g_wanted{false};
-std::mutex g_mutex;
+coop::os::Mutex g_mutex;
 std::optional<Frame> g_pending;  // the frame the renderer is drawing
 std::optional<Frame> g_latest;   // the last finished one
 

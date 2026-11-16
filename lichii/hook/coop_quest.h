@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -149,7 +150,7 @@ public:
     std::vector<std::string> TakeNotes();
 
 private:
-    std::mutex mutex_;
+    coop::os::Mutex mutex_;
     std::vector<StepWant> waiting_;
     std::vector<StepWant> work_;  // calc thread only
     std::size_t next_ = 0;

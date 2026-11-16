@@ -12,6 +12,8 @@
 #include "coop/protocol/codec.hpp"
 #include "coop/protocol/messages.hpp"
 #include "coop_game_build.h"
+#include <coop/os.hpp>
+#include <mutex>
 
 namespace CoopWorld {
 
@@ -210,7 +212,7 @@ std::optional<std::string> KeyCountOf(std::string_view scene) {
 }
 
 namespace {
-std::mutex give_back_mutex;
+coop::os::Mutex give_back_mutex;
 std::vector<std::string> give_backs;
 std::vector<std::uint64_t> taken_keys;
 } // namespace

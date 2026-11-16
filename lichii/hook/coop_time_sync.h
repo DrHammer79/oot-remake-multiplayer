@@ -37,6 +37,7 @@
 #pragma once
 
 #include <cstdint>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -134,7 +135,7 @@ private:
     bool set_events_ = false;  // GameSet was called once: the game's sets come as events
     std::optional<std::uint64_t> game_set_at_;  // the Tick that took the last one
     std::uint64_t unnamed_jumps_ = 0;
-    std::mutex inbox_mutex_;
+    coop::os::Mutex inbox_mutex_;
     std::vector<coop::protocol::TimeOfDay> inbox_;
 };
 

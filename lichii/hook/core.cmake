@@ -45,7 +45,7 @@ endforeach()
 # vk_rasterizer.cpp includes coop_camera_track.h under LICHII_COOP.
 target_include_directories(core PUBLIC "${_coop_hook}")
 target_compile_definitions(core PUBLIC LICHII_COOP)
-target_link_libraries(core PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_voice)
+target_link_libraries(core PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_voice coop_platform)
 # Which co-op commit is built in, for the log ("coop: build ..."). Read when
 # CMake configures, so reconfigure after a pull to keep it current.
 execute_process(COMMAND git -C "${LICHII_COOP_DIR}" describe --tags --always --dirty

@@ -18,6 +18,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -74,7 +75,7 @@ private:
     }
 
     Log log_;
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::array<State, coop::protocol::kMaxLocalSeats> seats_{};
 };
 

@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -256,7 +257,7 @@ private:
     const Entry* FindActor(std::uint64_t actor) const;
     void Note(std::string line);
 
-    mutable std::mutex mutex_;
+    mutable coop::os::Mutex mutex_;
     std::map<std::uint64_t, Entry> by_bsa_;
     bool brain_on_ = false;
     bool actions_on_ = false;

@@ -45,6 +45,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <coop/os.hpp>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -201,7 +202,7 @@ private:
     std::optional<std::int32_t> max_life_;  // last tick's
     std::uint64_t last_now_ = 0;
 
-    std::mutex inbox_mutex_;
+    coop::os::Mutex inbox_mutex_;
     std::vector<coop::protocol::Message> inbox_;
 };
 
