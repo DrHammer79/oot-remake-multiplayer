@@ -33,7 +33,7 @@ export function checkRequest(request) {
     const kind = (request.headers.get('X-Squadala-Kind') || '').trim().toLowerCase();
     if (!Object.hasOwn(KINDS, kind)) return { error: reply(400, 'X-Squadala-Kind: crash, unclean or problem') };
     const version = (request.headers.get('X-Squadala-Kit') || '').trim();
-    if (!VERSION_RX.test(version)) return { error: reply(400, 'X-Squadala-Kit: the kit version (v0.11.5)') };
+    if (!VERSION_RX.test(version)) return { error: reply(400, 'X-Squadala-Kit: the kit version (v0.11.4)') };
     const length = request.headers.get('Content-Length');
     if (length !== null && !(/^\d+$/.test(length) && Number(length) <= MAX_BYTES)) {
         return { error: reply(413, `at most ${MAX_BYTES} bytes`) };

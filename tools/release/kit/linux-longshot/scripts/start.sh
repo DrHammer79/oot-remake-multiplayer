@@ -10,6 +10,7 @@
 #   bash start-squadala.sh --no-update         no update check this time
 #   bash start-squadala.sh --logs              collect the logs for a bug report, start nothing
 #   bash start-squadala.sh --pack              make the puppet pack again (how you see the others), start nothing
+#   bash start-squadala.sh --send-reports yes|no|ask   send crash reports by themselves (docs/problem-reports.md)
 # Started without a terminal (Steam's Game Mode, a desktop shortcut) it asks nothing: an update is
 # left for the next start from a terminal, and a game that is not built yet is said in a dialog.
 set -euo pipefail
@@ -20,10 +21,11 @@ while (($#)); do
     case $1 in
         --no-update) no_update=1 ;;
         --logs) exec bash "$KIT/scripts/collect-logs.sh" ;;
+        --send-reports) exec bash "$KIT/scripts/send-report.sh" "${2-}" ;;
         --pack) pack_only=1 ;;
         --game | --exefs | --jobs) build_args+=("$1" "${2-}"); shift ;;
         --rebuild | --check-only) build_args+=("$1") ;;
-        -h | --help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "Unknown option: $1 (bash start-squadala.sh --help lists them)" ;;
     esac
     shift
@@ -163,6 +165,9 @@ if [[ -n $py && -f $KIT/scripts/discord_status.py ]]; then
     "$py" -I -B "$KIT/scripts/discord_status.py" --options "$GAME/longshot_options.ini" --version-file "$KIT/VERSION.txt" 2>&1 |
         sed 's/^/  /' || true
 fi
+# A crash or a game that ended without closing last time: a masked crash report in data/logs; with send_reports = yes
+# (asked once, default no) it is sent to the developers in the background (scripts/send-report.sh). Never stops the start.
+bash "$KIT/scripts/send-report.sh" --at-start || true
 step 'Starting the game: Host or Join in its menu (Multiplayer)'
 # (as Longshot's own builder/linux/longshot-launch: nothing of a launcher's environment goes in; its
 # own update check is off, the kit's updater brings Longshot up to date with co-op)

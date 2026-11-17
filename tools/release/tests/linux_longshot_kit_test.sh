@@ -95,7 +95,7 @@ sha=$(sha256sum "$appimage" | cut -d' ' -f1)
 kit="$tmp/OoT Coop kit"   # (a space in the path, as players' folders have)
 mkdir -p "$kit/scripts" "$kit/data/longshot/patches" "$kit/data/server" "$kit/data/tools/puppet_pack"
 cp "$src/start-squadala.sh" "$src/start-oot-coop.sh" "$src/README.txt" "$src/revert.sh" "$kit/"
-cp "$src"/scripts/*.sh "$release/kit/scripts/apply_patch.py" "$kit/scripts/"
+cp "$src"/scripts/*.sh "$src/scripts/log-mask.awk" "$release/kit/scripts/apply_patch.py" "$release/kit/scripts/report-relay.txt" "$kit/scripts/"
 cp "$release/kit/coop.ini.template" "$kit/scripts/"
 cp "$release/kit/coop-options.ini" "$kit/data/coop-options.ini"
 printf 'server\n' >"$kit/data/server/coop_server"
@@ -484,7 +484,8 @@ rm -rf "$old"
 unset OOT_COOP_UPDATE_API
 
 # --- collect-logs.sh -------------------------------------------------------------------------
-printf 'coop: joined 192.168.1.20\npassword = hunter2\n' >"$D/game/longshot_log.txt"
+printf 'coop: joined 192.168.1.20\npassword = hunter2\nserver: player 2 joined: Mido (192.168.1.21)\n' >"$D/game/longshot_log.txt"
+printf 'Mido opened a chest at friend.duckdns.org:27510\n' >>"$D/logs/start.log"
 mkdir -p "$D/game/mods/oot-remake-randomizer" && printf 'error: seed failed at 192.168.1.20\n' >"$D/game/mods/oot-remake-randomizer/last-build.txt"
 bash "$kit/scripts/collect-logs.sh" >"$tmp/logs.txt" 2>&1
 out=$(ls "$kit"/coop-logs-*.tar.gz 2>/dev/null | head -n1)
@@ -493,6 +494,7 @@ if [[ -n $out ]]; then
     mkdir -p "$tmp/logs" && tar -xzf "$out" -C "$tmp/logs"
     check 'collect-logs: the game log is in, its password and LAN address masked' bash -c 'grep -q "<lan-1>" "$1" && grep -q "(removed)" "$1" && ! grep -q hunter2 "$1"' _ "$tmp/logs/game/longshot_log.txt"
     check 'collect-logs: OOTRR'"'"'s last-build.txt is in, masked' bash -c 'grep -q "<lan-1>" "$1" && grep -q "seed failed" "$1"' _ "$tmp/logs/game/last-build.txt"
+    check 'collect-logs: a name learnt in the game log is masked in the kit'"'"'s logs too; host names too' bash -c 'grep -Eq "<name> opened a chest at <host-[0-9]+>:27510" "$1" && ! grep -rq Mido "$2"' _ "$tmp/logs/logs/start.log" "$tmp/logs"
 fi
 check 'collect-logs: the last line names the file to send' bash -c '[ "$(tail -n1 "$1")" = "Send this file: $2" ]' _ "$tmp/logs.txt" "$out"
 check 'collect-logs: with the game log in, no help about finding it' bash -c '! grep -q "not in this file" "$1"' _ "$tmp/logs.txt"
@@ -506,6 +508,91 @@ bash "$kit/scripts/collect-logs.sh" >"$tmp/logs3.txt" 2>&1
 out=$(ls "$kit"/coop-logs-*.tar.gz 2>/dev/null | head -n1)
 check 'collect-logs: a log copied into data/logs goes in' bash -c 'tar -tzf "$1" | grep -q "game/copied/longshot_log.txt" && ! grep -q "not in this file" "$2"' _ "$out" "$tmp/logs3.txt"
 rm -f "$D/logs/longshot_log.txt"
+
+# --- send-report.sh: crash reports and sending them (opt-in) ----------------------------------
+sr=$kit/scripts/send-report.sh
+# The shared mask (lib.sh kit_mask, scripts/log-mask.awk; collect-logs.sh uses it too).
+mkdir -p "$tmp/mask"
+printf 'name = Saria\n' >"$tmp/mask/coop.ini"
+{
+    echo 'server = myhost.example.org'
+    echo 'connecting to friend.duckdns.org:27510'
+    echo 'POST https://relay.example.com/report'
+    echo 'loaded hookshot_coop.so, read coop.ini and v3.0.0-rc.4'
+    echo "player 3 'Kafei' joined"
+    echo 'Saria and Kafei are here; Link too'
+} >"$tmp/mask/a.txt"
+check 'kit_mask: host names <host> / <host-N>; file names and versions kept' bash -c 'KIT=$1; . "$KIT/scripts/lib.sh"; kit_mask --learn "$2/coop.ini" "$2/a.txt" &&
+    grep -qx "server = <host>" "$2/a.txt" && grep -qx "connecting to <host-1>:27510" "$2/a.txt" && grep -qx "POST https://<host-2>/report" "$2/a.txt" &&
+    grep -qx "loaded hookshot_coop.so, read coop.ini and v3.0.0-rc.4" "$2/a.txt"' _ "$kit" "$tmp/mask"
+check 'kit_mask: players'"'"' names <name> (one learnt only from another file), a common word (Link) kept' bash -c 'grep -qx "<name> and <name> are here; Link too" "$1" &&
+    grep -qx "player 3 '"'"'<name>'"'"' joined" "$1" && [ ! -e "$1.masked" ]' _ "$tmp/mask/a.txt"
+# How a session ended: from its last 512 KB.
+lg=$tmp/sr-logs
+mkdir -p "$lg"
+printf '[00:00:01] start\n[00:01:00] vk: FATAL: device lost\n' >"$lg/fatal.txt"
+printf '[00:00:01] start\n[00:01:00] control: exiting\n' >"$lg/clean.txt"
+printf '[00:00:01] start\n[00:01:00] coop: frame\n' >"$lg/cut.txt"
+{ echo '[00:00:00] CRASH: exception (an old one)'; head -c 600000 /dev/zero | tr '\0' x | fold -w 100; echo; echo '[00:09:00] display: window closed'; } >"$lg/big.txt"
+check 'send-report: a session ends crash (FATAL:), clean (control: exiting), unclean (neither); only its end counts' bash -c '. "$1"
+    [ "$(report_end "$2/fatal.txt" "$2/t")" = crash ] && [ "$(report_end "$2/clean.txt" "$2/t")" = clean ] &&
+    [ "$(report_end "$2/cut.txt" "$2/t")" = unclean ] && [ "$(report_end "$2/big.txt" "$2/t")" = clean ]' _ "$sr" "$lg"
+# A crash: a masked report in data/logs; no relay set (report-relay.txt empty): /bugreport.
+rm -f "$D"/logs/crash-report-*.zip "$D/logs/report-sending.state" "$D"/game/longshot_log*.txt
+mkdir -p "$D/game/logs"
+newlog() {  # newlog RUN_ID LAST_LINE
+    {
+        echo "[00:00:00] run_id: $1"
+        for i in $(seq 1 100); do echo "[00:00:01] coop: start $i"; done
+        echo '[00:00:02] server: player 2 joined: Mido (192.168.1.20)'
+        for i in $(seq 1 400); do echo "[00:00:03] coop: frame $i"; done
+        echo "$2"
+    } >"$D/game/logs/longshot_log.txt"
+}
+newlog 0123456789abcdef0001 '[00:01:00] CRASH: exception 0xc0000005 near 192.168.1.20'
+printf '[00:01:00] CRASH: Mido was here\n' >>"$D/game/logs/longshot_log.txt"
+bash "$sr" --at-start </dev/null >"$tmp/sr1.txt" 2>&1
+z=$(ls "$D"/logs/crash-report-*-crash.zip 2>/dev/null | head -n1)
+check 'send-report: a crash gives a crash report zip in data/logs; no relay set: send it with /bugreport' bash -c '[ -n "$1" ] && grep -q "Your last game crashed" "$2" && grep -q /bugreport "$2"' _ "$z" "$tmp/sr1.txt"
+check 'send-report: the zip has the crash lines, the start and the end, masked (the name learnt far from the end)' "$py" -c 'import sys, zipfile
+t = zipfile.ZipFile(sys.argv[1]).read("crash-report.txt").decode()
+sys.exit(not ("CRASH: exception 0xc0000005 near <lan-1>" in t and "CRASH: <name> was here" in t and "coop: start 1\n" in t and "coop: frame 400" in t and "Mido" not in t))' "$z"
+bash "$sr" --at-start </dev/null >"$tmp/sr2.txt" 2>&1
+check 'send-report: a session is looked at once' bash -c '[ "$(ls "$2"/logs/crash-report-*.zip | wc -l)" = 1 ] && ! grep -q crashed "$1"' _ "$tmp/sr2.txt" "$D"
+# Sending (send_reports = yes): curl to the relay in the background. A stand-in curl notes what it was given.
+cat >"$tmp/bin/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$tmp/curl.args"
+printf 202
+EOF
+chmod +x "$tmp/bin/curl"
+: >"$tmp/curl.args"
+printf '# the relay\nhttp://127.0.0.1:9/report\n' >"$kit/scripts/report-relay.txt"
+bash "$kit/start-squadala.sh" --send-reports yes </dev/null >/dev/null 2>&1
+newlog 0123456789abcdef0002 '[00:00:04] coop: frame 401'
+bash "$sr" --at-start </dev/null >"$tmp/sr3.txt" 2>&1
+for i in $(seq 1 50); do [ -s "$D/logs/reports-sent.txt" ] && break; sleep 0.1; done
+check 'send-report yes: an unclean end is POSTed to the relay in the background (zip, kind, kit version) and listed as sent' bash -c 'grep -q "Sending 1 report" "$1" &&
+    grep -qx "X-Squadala-Kind: unclean" "$2" && grep -Eqx "X-Squadala-Kit: v[0-9].*" "$2" && grep -qx "Content-Type: application/zip" "$2" &&
+    grep -Eqx "@.*/crash-report-[0-9-]+-unclean.zip" "$2" && grep -qx "http://127.0.0.1:9/report" "$2" && grep -Eq "^crash-report-[0-9-]+-unclean.zip " "$3"' _ "$tmp/sr3.txt" "$tmp/curl.args" "$D/logs/reports-sent.txt"
+# ask without a terminal: nothing asked, nothing sent, still ask.
+bash "$sr" ask >/dev/null 2>&1
+: >"$tmp/curl.args"
+newlog 0123456789abcdef0003 '[00:00:04] CRASH: exception'
+bash "$sr" --at-start </dev/null >"$tmp/sr4.txt" 2>&1
+sleep 0.5
+check 'send-report ask without a terminal: nothing asked or sent, send_reports stays ask' bash -c '[ ! -s "$1" ] && grep -q "Your last game crashed" "$2" &&
+    ! grep -q "Send reports" "$2" && [ "$(grep -c "^send_reports" "$3")" = 1 ] && grep -qx "send_reports = ask" "$3"' _ "$tmp/curl.args" "$tmp/sr4.txt" "$D/coop-options.ini"
+# The kill switch: an empty report-relay.txt sends nothing, whatever the answer.
+cp "$release/kit/scripts/report-relay.txt" "$kit/scripts/report-relay.txt"
+bash "$kit/start-squadala.sh" --send-reports yes </dev/null >"$tmp/sr5a.txt" 2>&1
+newlog 0123456789abcdef0004 '[00:00:04] CRASH: exception'
+bash "$sr" --at-start </dev/null >"$tmp/sr5.txt" 2>&1
+sleep 0.5
+check 'send-report: no relay set: nothing sent with yes either, and --send-reports says so' bash -c '[ ! -s "$1" ] && grep -q /bugreport "$2" && grep -q "nothing is sent" "$3"' _ "$tmp/curl.args" "$tmp/sr5.txt" "$tmp/sr5a.txt"
+bash "$kit/start-squadala.sh" --send-reports no </dev/null >/dev/null 2>&1
+check 'start --send-reports no: one send_reports line, = no' bash -c '[ "$(grep -c "^send_reports" "$1")" = 1 ] && grep -qx "send_reports = no" "$1"' _ "$D/coop-options.ini"
+rm -f "$tmp/bin/curl" "$D"/game/logs/longshot_log*.txt "$D"/logs/crash-report-*.zip
 
 # --- The scripts parse ---------------------------------------------------------------------
 for f in "$src/start-squadala.sh" "$src/start-oot-coop.sh" "$src"/scripts/*.sh "$release/make_kit_linux.sh"; do

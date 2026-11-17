@@ -29,7 +29,7 @@ function zipBytes(comment = '') {
 }
 
 function post(body, headers = {}, path = '/report', method = 'POST') {
-    const h = { 'Content-Type': 'application/zip', 'X-Squadala-Kind': 'crash', 'X-Squadala-Kit': 'v0.11.5',
+    const h = { 'Content-Type': 'application/zip', 'X-Squadala-Kind': 'crash', 'X-Squadala-Kit': 'v0.11.4',
         'CF-Connecting-IP': '203.0.113.7', ...headers };
     for (const k of Object.keys(h)) if (h[k] === null) delete h[k];
     return new Request('https://relay.example' + path, { method, headers: h, body: method === 'GET' ? undefined : body });
@@ -66,7 +66,7 @@ test('a zip from a kit is passed on to the webhook with its kind and version, no
     assert.equal(discord.calls[0].url, WEBHOOK);
     const form = discord.calls[0].init.body;
     const payload = JSON.parse(form.get('payload_json'));
-    assert.equal(payload.content, 'Squadala! crash, kit v0.11.5');
+    assert.equal(payload.content, 'Squadala! crash, kit v0.11.4');
     assert.deepEqual(payload.allowed_mentions, { parse: [] });
     const file = form.get('files[0]');
     assert.match(file.name, /^squadala-crash-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.zip$/);
@@ -77,7 +77,7 @@ test('each kind has its own text', async () => {
     for (const [kind, text] of [['unclean', 'game ended without closing'], ['problem', 'problem report']]) {
         const { deps, discord } = setup();
         assert.equal((await handle(post(zipBytes(), { 'X-Squadala-Kind': kind }), ENV, deps)).status, 202);
-        assert.equal(JSON.parse(discord.calls[0].init.body.get('payload_json')).content, `Squadala! ${text}, kit v0.11.5`);
+        assert.equal(JSON.parse(discord.calls[0].init.body.get('payload_json')).content, `Squadala! ${text}, kit v0.11.4`);
     }
 });
 
@@ -104,12 +104,12 @@ test('anything else is refused before Discord is called', async () => {
     }
 });
 
-test('a version is a version: v0.11.5, 0.12.0-rc.1 pass; text, mentions and links do not', () => {
+test('a version is a version: v0.11.4, 0.12.0-rc.1 pass; text, mentions and links do not', () => {
     const ok = (v) => !checkRequest(post(zipBytes(), { 'X-Squadala-Kit': v })).error;
-    assert.ok(ok('v0.11.5'));
+    assert.ok(ok('v0.11.4'));
     assert.ok(ok('0.12.0-rc.1'));
-    assert.ok(ok('v0.11.5+dev.3'));
-    for (const v of ['', 'v0.11.5 @here', 'https://x.y', 'v1', '<@123>', 'v0.11.5\nhi']) assert.ok(!ok(v), v);
+    assert.ok(ok('v0.11.4+dev.3'));
+    for (const v of ['', 'v0.11.4 @here', 'https://x.y', 'v1', '<@123>', 'v0.11.4\nhi']) assert.ok(!ok(v), v);
 });
 
 test('a body larger than the cap is refused even without (or with a wrong) Content-Length', async () => {
@@ -197,7 +197,7 @@ test('no address is stored: only salted hashes, and a new window has a new salt 
 
 test('forward builds one multipart message', async () => {
     const { calls, fetchFn } = fakeDiscord();
-    assert.ok(await forward(WEBHOOK, zipBytes(), 'problem', 'v0.11.5', { fetchFn, now: () => new Date('2026-11-17T01:02:03Z') }));
+    assert.ok(await forward(WEBHOOK, zipBytes(), 'problem', 'v0.11.4', { fetchFn, now: () => new Date('2026-11-17T01:02:03Z') }));
     assert.equal(calls[0].init.method, 'POST');
     assert.equal(calls[0].init.body.get('files[0]').name, 'squadala-problem-2026-11-17T01-02-03.zip');
 });

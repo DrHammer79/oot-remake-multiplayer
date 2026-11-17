@@ -17,7 +17,8 @@
 #
 # The kit:
 #   start-squadala.sh (and start-oot-coop.sh, its old name, a call of it), revert.sh (back to the version before the last update), README.txt, VERSION.txt, MANIFEST.txt
-#   scripts/      start.sh, build.sh, update.sh, collect-logs.sh, lib.sh, apply_patch.py, coop.ini.template
+#   scripts/      start.sh, build.sh, update.sh, collect-logs.sh, lib.sh, send-report.sh, log-mask.awk,
+#                 apply_patch.py, discord_status.py, report-relay.txt, coop.ini.template
 #   data/         coop-options.ini, server/coop_server, longshot/ (PIN, LINUX.txt, patches/, hookshot_coop.so),
 #                 tools/puppet_pack/, docs/ (SETUP-LINUX.md, KNOWN-ISSUES.md), licenses/
 set -euo pipefail
@@ -66,9 +67,10 @@ text "$src/start-squadala.sh" "$kit/start-squadala.sh"
 text "$src/start-oot-coop.sh" "$kit/start-oot-coop.sh"
 text "$src/README.txt" "$kit/README.txt"
 text "$src/revert.sh" "$kit/revert.sh"
-for f in start.sh build.sh update.sh collect-logs.sh lib.sh; do text "$src/scripts/$f" "$kit/scripts/$f"; done
+for f in start.sh build.sh update.sh collect-logs.sh lib.sh send-report.sh log-mask.awk; do text "$src/scripts/$f" "$kit/scripts/$f"; done
 text "$repo/tools/release/kit/scripts/apply_patch.py" "$kit/scripts/apply_patch.py"
 text "$repo/tools/release/kit/scripts/discord_status.py" "$kit/scripts/discord_status.py"
+text "$repo/tools/release/kit/scripts/report-relay.txt" "$kit/scripts/report-relay.txt"
 text "$repo/tools/release/kit/coop.ini.template" "$kit/scripts/coop.ini.template"
 text "$repo/tools/release/kit/coop-options.ini" "$kit/data/coop-options.ini"
 chmod 755 "$kit/start-squadala.sh" "$kit/start-oot-coop.sh" "$kit/revert.sh" "$kit"/scripts/*.sh

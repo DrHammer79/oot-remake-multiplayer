@@ -6,7 +6,8 @@ The kit also writes a crash report after a game that crashed or ended without cl
 yes to that (asked once, default no), sends its crash and problem reports by itself through our relay to the
 developers' Discord channel (see "Sent by itself" below). Nothing ever goes to Longshot or anywhere else.
 
-Windows only for now: the Linux kit's `start.sh` does not ask, and has no `problem-report` script.
+On Linux (the Linux kit, from 0.11.4) crash reports and sending them work the same way (see "On Linux" below); problem
+reports are Windows only: the Linux kit has no `problem-report` script yet.
 
 collect-logs (`collect-logs.cmd`) stays the way to send whole logs for one report. Problem reports are the small, regular
 side: a few lines a session, and only problems not reported before.
@@ -98,6 +99,20 @@ it with `/bugreport`.
   `https://` URL): nothing is sent, whatever the answer, and nothing is asked. A release can empty it to stop sending for
   every kit; the owner can also stop the relay itself (below).
 - Nothing is ever sent to Longshot (co-op builds have its send paths removed); the relay is ours.
+
+## On Linux
+
+The Linux kit does the same for crash reports: `start-squadala.sh` runs `scripts/send-report.sh --at-start` before it
+starts the game (it never stops the start). The same lines tell how a session ended, from the last 512 KB of the game's
+`longshot_log*.txt` (in `data/game` or `data/game/logs`, and any a player copied into `data/logs`); the report is
+`data/logs/crash-report-<date>-<kind>.zip`, masked by the same rules as collect-logs (`scripts/log-mask.awk`, shared
+with `collect-logs.sh`: addresses, host names, MAC addresses, passwords, codes, the user, PC and players' names, those
+learnt from the whole log). It is packed with Python's `zipfile` (the builder's Python or the system's), else `zip`.
+The question is asked on a terminal only (no after 20 seconds; started from Steam or a menu entry it is asked at a later
+start from a terminal); change it with `bash start-squadala.sh --send-reports yes` (`no`, `ask`) or `send_reports` in
+`data/coop-options.ini`. With yes, `curl` sends each new crash report in the background, to the relay in
+`scripts/report-relay.txt` (the same kill switch); sent zips are listed in `data/logs/reports-sent.txt`, failures in
+`data/logs/report-sending.log`. Tests: `tools/release/tests/linux_longshot_kit_test.sh` (CI).
 
 ## The relay
 

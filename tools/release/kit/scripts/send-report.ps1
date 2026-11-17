@@ -75,7 +75,7 @@ function Set-KitSendReports([string]$Options, [string]$Value) {
     [System.IO.File]::WriteAllLines($Options, [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
 }
 
-# The kit's version for the relay: VERSION.txt's '(release v0.11.5)', else v0.0.0-dev (a kit built for testing).
+# The kit's version for the relay: VERSION.txt's '(release v0.11.4)', else v0.0.0-dev (a kit built for testing).
 function Get-KitReportVersion([string]$Kit) {
     $first = ''
     try { $first = Get-Content -LiteralPath (Join-Path $Kit 'VERSION.txt') -TotalCount 1 -ErrorAction Stop } catch { }

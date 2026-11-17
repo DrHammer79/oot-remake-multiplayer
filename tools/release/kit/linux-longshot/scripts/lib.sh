@@ -206,3 +206,20 @@ kit_game_running() {
     done
     return 1
 }
+
+# kit_mask FILE...: masks the files in place as the Windows kit's log-mask.ps1 does (scripts/log-mask.awk: addresses,
+# host names, MAC addresses, passwords, invite codes, the user, PC and players' names; a name learnt in one file is
+# masked in all of them; --learn LOG also learns the names a whole log writes). A file that could not be masked is
+# deleted: never an unmasked file sent or packed.
+kit_mask() {
+    local f ok=0 learn=()
+    while [[ ${1-} == --learn ]]; do learn+=("$2"); shift 2; done
+    (($#)) || return 0
+    for f; do : >"$f.masked" || ok=-1; done
+    ((ok == 0)) && awk -v user="$(id -un 2>/dev/null)" -v pc="$(hostname 2>/dev/null || uname -n)" \
+        -f "$KIT/scripts/log-mask.awk" pass=1 "${learn[@]}" "$@" pass=2 "$@" && ok=1
+    for f; do
+        if ((ok == 1)); then mv -f -- "$f.masked" "$f" || rm -f -- "$f" "$f.masked"; else rm -f -- "$f" "$f.masked"; fi
+    done
+    ((ok == 1))
+}

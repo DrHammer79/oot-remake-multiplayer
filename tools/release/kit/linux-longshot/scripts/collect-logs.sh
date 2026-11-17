@@ -66,72 +66,17 @@ pick "$GAME/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" game/co
         sort -rn | head -n 10 | awk -F '\t' '{ printf "top memory: %s (%d running), %.2f GB resident\n", $2, $3, $1 / 1048576 }'
     kit_game_running && echo 'running: the game'
 } >"$stage/about-this-pc.txt"
-# What identifies a player is masked, as the Windows kit's log-mask.ps1 does: a set password
-# (password = ..., server_password = ..., relay_key = ..., --password x) and an invite code become (removed),
-# MAC addresses <mac>, each IPv4 address its kind with a number (<lan-1>, <public-1>, ...; the
-# same address gets the same tag in every file), a host name as the server <host>, the user
-# name (in /home/<name> and on its own) <user> and the PC name <pc>. Crash dumps stay as they are.
-mask_awk='
-function kind(a,   o, n, i) {
-    n = split(a, o, ".")
-    for (i = 1; i <= 4; i++) if (length(o[i]) > 3 || o[i] + 0 > 255) return ""
-    if (a == "0.0.0.0" || a == "255.255.255.255") return ""
-    o[1] += 0; o[2] += 0
-    if (o[1] == 127) return "loopback"
-    if (o[1] == 10 || (o[1] == 172 && o[2] >= 16 && o[2] <= 31) || (o[1] == 192 && o[2] == 168) || (o[1] == 169 && o[2] == 254)) return "lan"
-    if (o[1] == 100 && o[2] >= 64 && o[2] <= 127) return "tailscale"
-    if (o[1] == 25) return "hamachi"
-    if (o[1] == 26) return "radmin"
-    return "public"
-}
-function tag(k, a) {
-    if (!(a in tags)) { count[k]++; tags[a] = "<" k "-" count[k] ">" }
-    return tags[a]
-}
-function words(t, w, r,   out, before, after, lw, i) {
-    if (length(w) < 3) return t
-    out = ""; lw = tolower(w)
-    while ((i = index(tolower(t), lw)) > 0) {
-        before = substr(t, i - 1, 1); after = substr(t, i + length(w), 1)
-        if ((i == 1 || before !~ /[A-Za-z0-9_]/) && after !~ /[A-Za-z0-9_]/) out = out substr(t, 1, i - 1) r
-        else out = out substr(t, 1, i - 1 + length(w))
-        t = substr(t, i + length(w))
-    }
-    return out t
-}
-FNR == 1 { if (outfile != "") close(outfile); outfile = FILENAME ".masked" }
-{
-    t = $0
-    if (match(t, /^[ \t]*[A-Za-z0-9_.]*([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Kk][Ee][Yy])[A-Za-z0-9_]*[ \t]*[=:][ \t]*[^ \t]/))
-        t = substr(t, 1, RLENGTH - 1) "(removed)"
-    gsub(/--?[A-Za-z0-9-]*password[A-Za-z0-9-]*[ \t=]+[^ \t-][^ \t]*/, "--password (removed)", t)
-    gsub(/[Ii]nvite code:?[ \t]*[A-Z2-9][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-][A-Z2-9-]+/, "invite code: (removed)", t)
-    gsub(/[0-9A-Fa-f][0-9A-Fa-f][:-][0-9A-Fa-f][0-9A-Fa-f][:-][0-9A-Fa-f][0-9A-Fa-f][:-][0-9A-Fa-f][0-9A-Fa-f][:-][0-9A-Fa-f][0-9A-Fa-f][:-][0-9A-Fa-f][0-9A-Fa-f]/, "<mac>", t)
-    out = ""
-    while (match(t, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
-        a = substr(t, RSTART, RLENGTH)
-        before = substr(t, RSTART - 1, 1); after = substr(t, RSTART + RLENGTH, 2)
-        k = (RSTART > 1 && before ~ /[0-9.vV]/) || after ~ /^\.[0-9]/ ? "" : kind(a)
-        out = out substr(t, 1, RSTART - 1) (k == "" ? a : tag(k, a))
-        t = substr(t, RSTART + RLENGTH)
-    }
-    t = out t
-    if (match(t, /^[ \t]*server[ \t]*=[ \t]*[A-Za-z][A-Za-z0-9_.-]*/) && t !~ /=[ \t]*localhost/) {
-        p = t; sub(/=[ \t]*[A-Za-z][A-Za-z0-9_.-]*/, "= <host>", p); t = p
-    }
-    gsub("/home/" user "(/|$)", "/home/<user>/", t)
-    if (length(user) >= 5 && user !~ /^(admin|administrator|users?|owner|player|guest|link|zelda|navi|default|public|deck)$/) t = words(t, user, "<user>")
-    t = words(t, pc, "<pc>")
-    print t > outfile
-}'
+# What identifies a player is masked (lib.sh kit_mask, scripts/log-mask.awk, as the Windows kit's log-mask.ps1): a set
+# password and an invite code become (removed), MAC addresses <mac>, each IPv4 address its kind with a number (<lan-1>,
+# <public-1>, ...; the same address the same tag in every file), host names <host>/<host-1>, the user name <user>, the
+# PC name <pc> and players' names <name> (learnt in any of the files). Crash dumps stay as they are.
 echo 'Masking addresses and names in the copies, then packing them...'
-find "$stage" -type f ! -path '*/crash_dumps/*' | while IFS= read -r f; do
-    { awk -v user="$(id -un 2>/dev/null)" -v pc="$host" "$mask_awk" "$f" && mv -f "$f.masked" "$f"; } || rm -f "$f" "$f.masked"   # never an unmasked file in the tarball
-done
+mapfile -d '' masked < <(find "$stage" -type f ! -path '*/crash_dumps/*' -print0)
+kit_mask "${masked[@]}" || true   # (a file it could not mask is left out)
 tar -czf "$out" -C "$stage" .
 rm -rf "$stage"
 echo "Wrote $out ($((found + 1)) files, $game_logs of them game logs)."
-echo 'IP addresses, MAC addresses, passwords, the invite code, your user name and PC name are masked in it.'
+echo 'IP addresses, host names, MAC addresses, passwords, the invite code, your user, PC and players'"'"' names are masked in it.'
 if ((game_logs == 0)); then
     echo
     # (as in the tarball: the user name masked)
