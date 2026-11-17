@@ -70,12 +70,10 @@ public:
     bool Add(std::uint8_t room);
     void Clear();
     std::vector<std::uint8_t> Rooms() const;
-    std::uint64_t Version() const;  // goes up on every change
 
 private:
     mutable std::mutex mutex_;
     std::vector<std::uint8_t> rooms_;
-    std::uint64_t version_ = 0;
 };
 Record& TheRecord();
 
@@ -90,17 +88,22 @@ struct Write {
 
 class Apply {
 public:
-    // At each hook frame: `scene` nothing while loading; `place_known` once Link's position reads. Each beaten room is
-    // checked once per scene load (and once more when the record changes), at the first frame of a scene that is not
-    // the boss's: `read(hash)` is the flag's value now (nothing: unread, left alone). Returns what to write.
+    // At each hook frame: `scene` nothing while loading; `place_known` once Link's position reads. Only at a scene
+    // load (boss-away-crash, review of c78d17c4): the rooms `beaten` holds when a scene is first seen are the ones
+    // given in it, each once, once Link's place reads, in a scene that is not the boss's. A boss beaten while we stand
+    // in a scene waits for the next load: some of the set is read live outside the dungeon (Gohma_DefeatBoss by
+    // Kokiri Forest's Npc_Kokiri_011, HavePlayedEvent.Dm_DodongoCave_BossOut by Death Mountain Trail's
+    // DeathMountainTrail_Child_Prefab_6f34, SageOfForest_IsBefore_Step08 by Kokiri Forest's Level_All_01 and
+    // Level_Area_01), and in the game alone those never change while such a scene is loaded: a kill is always in
+    // another scene. `read(hash)` is the flag's value now (nothing: unread, left alone). Returns what to write.
     std::vector<Write> Check(const std::optional<std::string>& scene, bool place_known,
-                             std::span<const std::uint8_t> beaten, std::uint64_t version,
+                             std::span<const std::uint8_t> beaten,
                              const std::function<std::optional<std::uint32_t>(std::uint32_t)>& read);
     void Reset();
 
 private:
     std::optional<std::string> scene_;
-    std::uint64_t version_ = 0;
+    std::vector<std::uint8_t> loaded_;   // the record's rooms when this scene was first seen: the only ones given here
     std::vector<std::uint8_t> checked_;  // rooms done since this scene load
 };
 

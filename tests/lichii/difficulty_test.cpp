@@ -635,40 +635,26 @@ TEST_CASE("difficulty: water enemies get their weight, never a land spot") {
   }
 }
 
-TEST_CASE("difficulty: no extras in a dungeon, each gets its weight instead (player report 111)") {
-  CHECK(CoopDifficulty::ExtrasIn("Lake"));
-  CHECK(CoopDifficulty::ExtrasIn("KokiriForest_Child"));
-  CHECK_FALSE(CoopDifficulty::ExtrasIn("InsideTheDekuTree"));
-  CHECK_FALSE(CoopDifficulty::ExtrasIn("DodongoCavern"));
+TEST_CASE("difficulty: a dungeon's enemies get extras like the overworld's (player report 111)") {
+  // Report 111's buried Deku Baba extra was the give-back ping-pong of report
+  // 109 (a copy's own wake put back to the owner's rest), not the extra's
+  // dungeon room: the same Babas plan the same extras in the Deku Tree as in
+  // the same layout outside, and only an enemy with no spot gets its weight.
   World w;
-  const World::Data& d = w.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
-  const auto walk = Walk(d);
-  CoopDifficulty::Extras e(w.Lookup());
-  CHECK(e.Plan("InsideTheDekuTree", walk, 200, false, 0) == 0);
-  CHECK(e.All().empty());
-  for (const auto& o : walk) {
-    CHECK(e.NoSpot(o.hash));  // its life and hits are folded instead
-  }
-  // The same enemies outside a dungeon get their extras.
+  const World::Data& d = w.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 12);
   World w2;
-  const World::Data& d2 = w2.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
-  CoopDifficulty::Extras f(w2.Lookup());
-  CHECK(f.Plan("Lake", Walk(d2), 200, false, 0) > 0);
-  // 125% (Automatic, 2 players, the report's case): only about 1 in 4 has an
-  // ExtraCount there, but every one folds, so the total is 125%, not ~106%.
-  World w3;
-  const World::Data& d3 = w3.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 12);
-  const auto walk3 = Walk(d3);
-  CoopDifficulty::Extras g(w3.Lookup());
-  CHECK(g.Plan("InsideTheDekuTree", walk3, 125, false, 0) == 0);
-  CHECK(g.All().empty());
-  std::size_t without_extra = 0;
-  for (const auto& o : walk3) {
-    CHECK(g.NoSpot(o.hash));
-    without_extra += CoopDifficulty::ExtraCount(o.hash, 125) == 0 ? 1 : 0;
+  const World::Data& d2 = w2.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 12);
+  for (const std::uint16_t pct : {std::uint16_t{125}, std::uint16_t{200}}) {
+    CoopDifficulty::Extras in(w.Lookup());
+    CoopDifficulty::Extras out(w2.Lookup());
+    const std::size_t made = in.Plan("InsideTheDekuTree", Walk(d), pct, false, 0);
+    CHECK(made > 0);
+    CHECK(made == out.Plan("Lake", Walk(d2), pct, false, 0));
+    CHECK(in.NoSpots() == out.NoSpots());
+    for (const auto& o : Walk(d)) {
+      CHECK(in.NoSpot(o.hash) == out.NoSpot(o.hash));
+    }
   }
-  CHECK(without_extra > 0);  // the case the old rule missed is in the set
-  CHECK(g.NoSpots() == walk3.size());
 }
 
 TEST_CASE("difficulty: every game plans the same extras whatever it has loaded and wherever its enemies walked") {

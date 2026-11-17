@@ -287,6 +287,49 @@ class SaveReport(TempDir):
         self.assertEqual(list((self.dir / "logs").iterdir()), [])
 
 
+REPORT_CH, OTHER_CH, BOT, PLAYER = 10, 11, 99, 5
+
+
+def removes(channel=REPORT_CH, author=PLAYER, plain=True, webhook=False, manage=False, report=REPORT_CH):
+    return core.should_remove(channel, report, author, BOT, plain, webhook, manage)
+
+
+class PlainMessageFilter(unittest.TestCase):
+    def test_plain_player_message_in_report_channel_removed(self):
+        self.assertTrue(removes())
+
+    def test_bot_own_message_kept(self):
+        self.assertFalse(removes(author=BOT))
+
+    def test_slash_command_response_and_system_messages_kept(self):
+        # chat_input_command / pins / joins arrive as not-plain message types
+        self.assertFalse(removes(plain=False))
+
+    def test_moderator_kept(self):
+        self.assertFalse(removes(manage=True))
+
+    def test_other_channel_or_no_report_channel_kept(self):
+        self.assertFalse(removes(channel=OTHER_CH))
+        self.assertFalse(removes(report=None))
+
+    def test_webhook_kept(self):
+        self.assertFalse(removes(webhook=True))
+
+    def test_one_notice_per_player_per_window(self):
+        t = [0.0]
+        notices = core.RateLimiter(1, core.NOTICE_WINDOW, clock=lambda: t[0])
+        self.assertEqual(notices.acquire(PLAYER), 0)
+        self.assertGreater(notices.acquire(PLAYER), 0)
+        self.assertEqual(notices.acquire(PLAYER + 1), 0)
+        t[0] = core.NOTICE_WINDOW + 1
+        self.assertEqual(notices.acquire(PLAYER), 0)
+
+    def test_notice_and_help_texts(self):
+        self.assertIn("/bugreport", core.REMOVED_NOTICE)
+        self.assertIn("collect-logs", core.REMOVED_NOTICE)
+        self.assertIn("Manage Messages", core.MANAGE_MESSAGES_HELP.format(channel=REPORT_CH))
+
+
 class Scrub(unittest.TestCase):
     def test_token_never_in_log_or_traceback(self):
         import io

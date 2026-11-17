@@ -108,11 +108,13 @@ tools_env=$(env -u LONGSHOT_TOOLS "$PY" -I "$SRC/builder/linux/linux_tools.py" e
 eval "$tools_env"
 # Longshot's own variables for its build, and nothing of a launcher or test run: LONGSHOT_TOOLS
 # unset keeps the game in one folder (no bin/), LONGSHOT_VK_PREBUILT unset compiles the patched
-# renderer. Its lift key hashes every A64_/OOT_/RX_ variable: co-op's OOT_COOP_* ones go.
+# renderer, LONGSHOT_ROMFS_FROM unset (a launcher's, Longshot rc.6 #360: game files hard-linked from
+# another folder) unpacks the game files the kit names. Co-op's OOT_COOP_* ones go too (Longshot's lift
+# key hashed every A64_/OOT_/RX_ variable before rc.6, and they are no business of the build's).
 language=${OOT_COOP_LANGUAGE:-en-US}   # (read before the OOT_COOP_* variables go below)
 fetch_local=${OOT_COOP_FETCH_LOCAL-}   # (tests: a local OOTRR in step 5, after they go)
 offline=${OOT_COOP_OFFLINE-}           # (tests: 1 = no internet, for step 5)
-unset LONGSHOT_TOOLS LONGSHOT_VK_PREBUILT LONGSHOT_BUILDER_EXE LONGSHOT_NGX_SDK LONGSHOT_FFX_SDK
+unset LONGSHOT_TOOLS LONGSHOT_VK_PREBUILT LONGSHOT_BUILDER_EXE LONGSHOT_NGX_SDK LONGSHOT_FFX_SDK LONGSHOT_ROMFS_FROM
 while IFS='=' read -r v _; do [[ $v == OOT_COOP_* ]] && unset "$v"; done < <(env)
 export PYTHONIOENCODING=utf-8
 

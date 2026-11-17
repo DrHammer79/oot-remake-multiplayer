@@ -90,6 +90,7 @@
 #include "coop_time.h"
 #include "coop_pause.h"
 #include "coop_title.h"
+#include "coop_title_menu.h"
 #include "core/core.h"
 #include "coop_host_menu.h"
 #include "coop_null_page.h"
@@ -1751,6 +1752,34 @@ COOP_HOOKSHOT_EXPORT int hos_coop_discord_state(char* out, size_t cap) noexcept 
         return 1;
     } catch (...) {
         return 0;
+    }
+}
+// Longshot patch 0028 (player report 133), host/oot_autoload.c: its Skip title screen asks before it chooses one of the
+// title's buttons itself (the game's own Button::Decide, no pressed buttons), from its game thread at a menu screen's
+// update. 1 = not now: co-op is hosting, joining or in a session, or the host's save is on its way (the choice is the
+// player's then; CoopTitleMenu::SkipTitleHold). 0 with co-op off: solo play skips the title as Longshot does. Nothing
+// thrown crosses into Longshot's C; a failure holds.
+COOP_HOOKSHOT_EXPORT int hos_coop_title_hold(void) noexcept {
+    if (!g_on) {
+        return 0;
+    }
+    try {
+        CoopTitleMenu::SkipTitleInput in;
+        HosCoopStatus st{};
+        st.size = sizeof st;
+        CoopHookshot::HostMenu().Status(&st);
+        in.host_state = st.state;
+        in.session_live = CoopSave::SessionLive();
+        in.save_coming = CoopSave::HostSaveComing();
+        in.save_wait = CoopTitle::SaveWaitWaiting();
+        const char* why = CoopTitleMenu::SkipTitleHold(in);
+        static std::atomic<const char*> said{nullptr};
+        if (why != nullptr && said.exchange(why) != why) {
+            LOG_INFO(Core, "coop: title: Skip title screen waits: {}", why);
+        }
+        return why != nullptr ? 1 : 0;
+    } catch (...) {
+        return 1;
     }
 }
 // The mouse (hos_coop_api.h): the cheats panel's clicks.

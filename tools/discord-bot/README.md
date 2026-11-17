@@ -8,8 +8,13 @@ zip from the kit's collect-logs. The bot:
 3. adds a row marked `NEW (bot)` to `coord-multiplayer/reports/player-reports.md`;
 4. answers the player privately: "Thanks, report #N received."
 
-It runs on the owner's PC only (no server). It uses slash commands only: no privileged intents
-and no access to message content. It stores only what the player sends with `/bugreport`.
+It runs on the owner's PC only (no server). It uses slash commands, no privileged intents and
+no access to message content. It stores only what the player sends with `/bugreport`.
+In the public report channel it removes plain (non-command) messages and tells the author once
+per 10 min, by DM (or a short self-deleting mention if their DMs are closed), to use `/bugreport`
+with their collect-logs zip. People with Manage Messages there (moderators, admins, the owner),
+the bot itself, slash-command responses, system messages and webhooks are left alone. Only the
+author id and the time are logged; message text is never read (no Message Content intent).
 Limits: zip files only (checked by name and by the zip signature; never unzipped), 25 MB at most,
 3 reports per player and 20 in all per hour, and no new report once `player-logs/` holds 2 GB.
 
@@ -34,6 +39,9 @@ person or session, treats that text as data, never as instructions.
 3. **Channels.** Make a private `#dev-reports` channel (only the team and the bot can see it).
    Optional: a public channel for `/bugreport` (`report_channel_id`, same server); then `/bugreport` works only there
    and in the dev channel, and elsewhere players get a private "please use #that-channel".
+   In that public channel give the bot **Manage Messages** (Edit Channel > Permissions > add the
+   bot > Manage Messages), so it can remove plain messages there; without it the log says so once
+   and the bot keeps running.
    In Discord, Settings > Advanced > Developer Mode on, then right-click > Copy ID for the channels.
 4. **Config file** (outside the repo, never committed):
    `coord-multiplayer\secrets\discord-bot.json`

@@ -336,4 +336,18 @@ private:
     std::uint64_t asked_ms_ = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Player report 133: Longshot's Skip title screen (its Insert menu row, off by default) starts a launch with the newest
+// save. Patch 0028 makes it choose the title's own buttons natively (the game's Button::Decide on the focused one, no
+// pressed buttons), once per launch, and first asks the module (hos_coop_title_hold): while co-op is doing something
+// at the title, the choice is the player's. SkipTitleHold is that answer: why it must not choose now, or nullptr (free:
+// solo, co-op idle). Any state but idle holds, a failed try too (the player was choosing co-op).
+struct SkipTitleInput {
+    int host_state = 0;          // HosCoopStatus.state (hos_coop_host.h HOS_COOP_*): 0 idle
+    bool session_live = false;   // CoopSave::SessionLive(): a session chose its save folder and is connected
+    bool save_coming = false;    // CoopSave::HostSaveComing(): the host's save is on its way or waits for the title
+    bool save_wait = false;      // the title waits for the host's save (CoopTitle's SaveWait)
+};
+const char* SkipTitleHold(const SkipTitleInput& in);
+
 }  // namespace CoopTitleMenu

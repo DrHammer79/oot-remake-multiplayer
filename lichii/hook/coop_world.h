@@ -103,6 +103,11 @@ bool IsLyingKey(std::string_view name);
 // known yet (a Skulltula knocked away as it died, a token that fell:
 // items-sync).
 bool IsGoldToken(std::string_view name);
+// True for the placement hash of a Gold Skulltula (gold_skulltula_keys).
+bool IsGoldSkulltulaKey(std::uint64_t hash);
+// The placement a token's id came from (TokenId the other way): 0 when `id`
+// is no Gold Skulltula's.
+std::uint64_t PlacementOfTokenId(std::uint64_t id);
 std::uint64_t TokenId(std::uint64_t skulltula_hash);
 inline constexpr const char* kTokenCount = "PouchData.Item_Token_Gold.StockNum";
 
@@ -135,21 +140,21 @@ bool IsWorldObject(std::string_view name);
 // in ("ShadowTemple", "GerudoFortress_Adult"), or nothing.
 std::optional<std::string> KeyCountOf(std::string_view scene);
 
-// Give-backs (WorldSync::Out::give_back, count names) and taken keys
-// (Out::taken_keys) from the objects' thread to the frame that writes the
-// game's flags (coop_hook.cpp). Thread safe.
+// Give-backs (WorldSync::Out::give_back, count names) from the objects'
+// thread to the frame that writes the game's flags (coop_hook.cpp). Thread
+// safe.
 void QueueGiveBack(std::string count);
 std::vector<std::string> TakeGiveBacks();
-void QueueTakenKey(std::uint64_t key);
-std::vector<std::uint64_t> TakeTakenKeys();
+// A Gold Skulltula's placement whose key this game wrote 1 for another player
+// (coop_hook.cpp, from FlagWatcher::take_written_for_others): the world sync
+// takes that Skulltula and its token away. Thread safe.
+void QueueTakenPlacement(std::uint64_t placement);
+std::vector<std::uint64_t> TakeTakenPlacements();
 
 // One back in the count item `count` (KeyCountOf's, kTokenCount), never
 // below 0 (the frame that writes flags). The flag watcher sends the -1 like
 // any change, so the group's count rose once. Returns the log line.
 std::string GiveBack(coop::host::FlagStore& game, std::string_view count);
-// The 64-bit key `key` set to 1 in the game (a token's Skulltula). Returns
-// the log line.
-std::string SetTakenKey(coop::host::FlagStore& game, std::uint64_t key);
 
 // Research for signs (issue 90; docs/world.md, "Signs: the probe"). A sign's
 // cut is not in its life and its pack keeps no flag for it, and whether the
@@ -504,9 +509,6 @@ public:
         // token at once and theirs reached the server first: one goes back
         // each (KeyCountOf's, kTokenCount), so the shared count rose once.
         std::vector<std::string> give_back;
-        // 64-bit keys to set to 1 here: the Gold Skulltula of a token
-        // another player took, so a room loaded again has no token.
-        std::vector<std::uint64_t> taken_keys;
         // Issue 147: a block another game moved has come to rest here. Its
         // memory still holds `from` (RestWords puts `to` there); `anchor`,
         // when not 0, is its base anchor actor found at `from`, which Poses
@@ -546,6 +548,28 @@ public:
     // Present thread: the host loaded a save (host-save's FLAG_RESET): kept
     // breaks (locks) are forgotten, so our locks come back with their rooms.
     void ForgetKept();
+
+    // Present thread, every frame: a Gold Skulltula's placement key our game
+    // now holds at 1 (the game wrote it, or the flag list brought another
+    // game's). The Skulltula and the token it made go here, so a token taken
+    // once cannot be taken again — issue 89, 2026-11-17: 4090 killed and took
+    // a token in one run, ROGX never saw the token through its walk (it lived
+    // less than a walk), so no break was ever sent and ROGX's token stayed to
+    // be taken a second time (41 -> 42). The key is the fact that crosses
+    // every game; the token's actor is what it removes.
+    void TakenKey(std::uint64_t placement);
+    // Whether this token id / Gold Skulltula placement is one the group has
+    // taken (the sets TakenKey fills): its actor is never "back from the dead".
+    bool IsTokenTaken(std::uint64_t token_id) const {
+        return taken_token_ids_.contains(token_id);
+    }
+    bool IsSkulltulaTaken(std::uint64_t placement) const {
+        return taken_skulltulas_.contains(placement);
+    }
+    // The place a taken Skulltula stood at, and whether `at` is that place:
+    // a token's id is a guess, its place is not.
+    void RememberTakenPlace(const coop::protocol::Vec3& at);
+    bool NearTakenPlace(const coop::protocol::Vec3& at) const;
 
     // Present thread, once per walk, with every breakable and movable the
     // walk saw. `player` is our own Link, when the walk saw him.
@@ -679,8 +703,10 @@ private:
     std::optional<std::string> TookKey(std::uint64_t hash) const;  // its count
     // A token's id (TokenId) from where it is, or 0: not known.
     std::uint64_t IdentifyToken(const coop::protocol::Vec3& at, std::uint64_t now_us);
-    // Another player's break of a token we know: its spot is kept, and its
-    // Skulltula's key is set here (Out::taken_keys).
+    // Another player's break of a token we know: its spot is kept, and our own
+    // token at that place (or with that id) is taken away. No 64-bit key is set
+    // here: the placement key is the game's to write at the pickup, and it comes
+    // in through the flag list.
     void Token(const coop::protocol::WorldBreak& b);
     void LocalBreak(Object& o, std::uint64_t now_us, const char* how, Out& out);
     void MakeBreak(Object& o, Break& b, std::uint64_t now_us, Out& out);
@@ -720,7 +746,15 @@ private:
     std::map<std::uint64_t, Remote> remote_;   // by placement hash, this scene
     std::vector<Gone> gone_;
     std::vector<std::string> give_back_;  // from Drain, for the next Tick's Out
-    std::vector<std::uint64_t> taken_keys_;  // the same
+    // Token ids whose Skulltula's key this save holds at 1 (TakenKey): a token the
+    // game makes for one of them is taken away as the walk sees it.
+    std::set<std::uint64_t> taken_token_ids_;
+    // The Gold Skulltula placements whose key is 1 (the same): the Skulltula a
+    // walk makes for one of them goes as well.
+    std::set<std::uint64_t> taken_skulltulas_;
+    // Where those Skulltula stood, by scene: the token our game makes for one
+    // carries a guess of its own, and this is the place that finds it.
+    std::map<std::string, std::vector<coop::protocol::Vec3>> taken_places_;
     // Gold Skulltulas of this scene by placement hash: where we saw them last.
     std::map<std::uint64_t, coop::protocol::Vec3> skulltulas_;
     std::map<std::uint64_t, std::uint64_t> skulltulas_seen_us_;  // and when, in the last walk it was in

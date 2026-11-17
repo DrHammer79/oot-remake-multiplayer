@@ -10,13 +10,14 @@
 #
 # --licenses: the CMake build folder that fetched ENet and fmt (_deps/enet-src, _deps/fmt-src): their
 # licence texts go in data/licenses/.
-# Out: <out>/Squadala-<release>-linux/ and, unless --no-zip, <out>/Squadala-<release>-linux.zip and the same file as
-# <out>/oot-coop-<release>-linux.zip (the name up to v0.11.2, the only one older kits' update.sh takes), each with its .sha256
-# and its .sha256 (the names scripts/update.sh looks for). The zip keeps the scripts' executable bit;
+# Out: <out>/Squadala-<release>-linux/ and, unless --no-zip, <out>/Squadala-<release>-linux.zip and its .sha256 (the
+# names scripts/update.sh looks for). No oot-coop-<release>-linux.zip copy from v0.11.4 on: the update.sh of the kits
+# up to v0.11.2 knows only that name, so it takes v0.11.3 (the last release with it), whose update.sh takes this one. The zip keeps the scripts' executable bit;
 # a player whose unzip drops it still starts the kit with `bash start-squadala.sh` (README.txt).
 #
 # The kit:
-#   start-squadala.sh (and start-oot-coop.sh, its old name, a call of it), revert.sh (back to the version before the last update), README.txt, VERSION.txt, MANIFEST.txt
+#   start-squadala.sh (the one start file; its old name start-oot-coop.sh is gone from v0.11.4 on: update.sh --tidy
+#   points the menu and Steam entries at start-squadala.sh), revert.sh (back to the version before the last update), README.txt, VERSION.txt, MANIFEST.txt
 #   scripts/      start.sh, build.sh, update.sh, collect-logs.sh, lib.sh, send-report.sh, log-mask.awk,
 #                 apply_patch.py, discord_status.py, report-relay.txt, coop.ini.template
 #   data/         coop-options.ini, server/coop_server, longshot/ (PIN, LINUX.txt, patches/, hookshot_coop.so),
@@ -66,7 +67,6 @@ text() {   # text FROM TO: LF line ends
     tr -d '\r' <"$1" >"$2"
 }
 text "$src/start-squadala.sh" "$kit/start-squadala.sh"
-text "$src/start-oot-coop.sh" "$kit/start-oot-coop.sh"
 text "$src/README.txt" "$kit/README.txt"
 text "$src/revert.sh" "$kit/revert.sh"
 for f in start.sh build.sh update.sh collect-logs.sh lib.sh send-report.sh log-mask.awk; do text "$src/scripts/$f" "$kit/scripts/$f"; done
@@ -75,7 +75,7 @@ text "$repo/tools/release/kit/scripts/discord_status.py" "$kit/scripts/discord_s
 text "$repo/tools/release/kit/scripts/report-relay.txt" "$kit/scripts/report-relay.txt"
 text "$repo/tools/release/kit/coop.ini.template" "$kit/scripts/coop.ini.template"
 text "$repo/tools/release/kit/coop-options.ini" "$kit/data/coop-options.ini"
-chmod 755 "$kit/start-squadala.sh" "$kit/start-oot-coop.sh" "$kit/revert.sh" "$kit"/scripts/*.sh
+chmod 755 "$kit/start-squadala.sh" "$kit/revert.sh" "$kit"/scripts/*.sh
 install -m 755 "$server" "$kit/data/server/coop_server"
 install -m 644 "$module" "$kit/data/longshot/hookshot_coop.so"
 text "$pin" "$kit/data/longshot/PIN"
@@ -156,11 +156,6 @@ if ((zip)); then
     rm -f "$z" "$z.sha256"
     (cd "$out" && zip -q -r -X "$z" "$name")
     printf '%s  %s\n' "$(sha256sum "$z" | cut -d' ' -f1)" "${z##*/}" >"$z.sha256"
-    # The same bytes under the name up to v0.11.2: the update.sh of those kits looks for oot-coop-<tag>-linux.zip only.
-    oz=$out/oot-coop-${name#Squadala-}.zip
-    cp -f "$z" "$oz"
-    printf '%s  %s\n' "$(cut -d' ' -f1 "$z.sha256")" "${oz##*/}" >"$oz.sha256"
-    cmp -s "$z" "$oz" || die "the copy $oz does not match $z"
     echo "Zip: $z ($(du -h "$z" | cut -f1)), SHA-256 $(cut -d' ' -f1 "$z.sha256")"
 fi
 echo "Kit: $kit"

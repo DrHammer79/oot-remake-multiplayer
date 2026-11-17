@@ -1,4 +1,4 @@
-From 996089b51dd3ea1dc1f3a76474f2ab7a834b9664 Mon Sep 17 00:00:00 2001
+From ad73e758ee22e839497355b72988eada7ad2bf06 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 01:34:58 -0900
 Subject: [PATCH] Co-op menu tabs: the module's tabs lead the menu's strip
@@ -21,8 +21,8 @@ exports: no tabs, the menu as before.
  gpu/vk/hos_coop_menu.h |  86 ++++++++++++++++
  gpu/vk/vk_coop.cpp     |  71 ++++++++++++++
  gpu/vk/vk_coop.h       |  14 +++
- gpu/vk/vk_menu.cpp     | 216 +++++++++++++++++++++++++++++++++++++----
- 4 files changed, 369 insertions(+), 18 deletions(-)
+ gpu/vk/vk_menu.cpp     | 217 +++++++++++++++++++++++++++++++++++++----
+ 4 files changed, 370 insertions(+), 18 deletions(-)
  create mode 100644 gpu/vk/hos_coop_menu.h
 
 diff --git a/gpu/vk/hos_coop_menu.h b/gpu/vk/hos_coop_menu.h
@@ -242,7 +242,7 @@ index 59acc4be..17c4cf0d 100644
 +
  }  // namespace mkwvk::coop
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index b883d2dd..e6292d40 100644
+index 2fe30100..ac2be2ac 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
 @@ -15,6 +15,9 @@
@@ -255,7 +255,7 @@ index b883d2dd..e6292d40 100644
  #include <atomic>
  #include <chrono>
  #include <cmath>
-@@ -1890,6 +1893,24 @@ void outputs_sync() {
+@@ -2014,6 +2017,24 @@ void outputs_sync() {
  
  int cur_tab = TAB_GRAPHICS;
  int tab_selected[TAB_FPS_DEV + 1] = {};   // (and the pages' a row opens: Motion, the FPS counter's details)
@@ -280,7 +280,7 @@ index b883d2dd..e6292d40 100644
  bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !strcmp(r.name, "Motion"); }
  bool is_fps_dev_row(const Row& r) { return r.tab == TAB_GAMEPLAY && !r.value && !strcmp(r.name, "FPS counter details"); }
  
-@@ -2001,8 +2022,9 @@ bool menu_refresh = false;
+@@ -2127,8 +2148,9 @@ bool menu_refresh = false;
  int marquee_pos = 0, marquee_max = 0;
  int64_t marquee_next = 0;
  constexpr int64_t kMarqueeStep = 150000000LL, kMarqueeRest = 1200000000LL;   // (ns)
@@ -292,7 +292,7 @@ index b883d2dd..e6292d40 100644
  int hover_tab = -1;
  int drag_row = -1;
  bool mouse_read = false;   // (the menu has read the mouse since it opened)
-@@ -3098,12 +3120,13 @@ double fps_target_ms() {
+@@ -3270,12 +3292,13 @@ double fps_target_ms() {
      return fps_stats::target_ms_for(cap, fifo, fifo ? (display_refresh_mhz() + 500) / 1000 : 0);
  }
  menu_hit::Map hits;      // (the menu's controls as last drawn: the mouse's, menu_tick)
@@ -310,7 +310,7 @@ index b883d2dd..e6292d40 100644
  float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
  
  ui::Ctx ui_ctx(uint32_t w, uint32_t h) {
-@@ -3673,26 +3696,104 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
+@@ -3902,26 +3925,104 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
      }
  }
  
@@ -421,7 +421,7 @@ index b883d2dd..e6292d40 100644
          if (shown || i == hover_tab) {
              c.d->AddRectFilled(ImVec2(x, 0), ImVec2(x + tw[i], hh - 3 * s), shown ? ui::kTabInset : ui::alpha(ui::kTabInset, 0.35f));
              if (shown) {
-@@ -3700,7 +3801,7 @@ void draw_options(ui::Ctx& c) {
+@@ -3929,7 +4030,7 @@ void draw_options(ui::Ctx& c) {
                  c.d->AddLine(ImVec2(x + tw[i] - 1, 0), ImVec2(x + tw[i] - 1, hh - 3 * s), ui::rgba(52, 34, 16), std::max(1.0f, s));
              }
          }
@@ -430,7 +430,7 @@ index b883d2dd..e6292d40 100644
          hits.add(x, 0, x + tw[i], hh, menu_hit::kTab, i);
          x += tw[i];
      }
-@@ -3715,6 +3816,10 @@ void draw_options(ui::Ctx& c) {
+@@ -3944,6 +4045,10 @@ void draw_options(ui::Ctx& c) {
          const float fit = ui::fit_px(px, opts.menu_size == 3 ? px : kVersionMinPt * s, 0.5f * s, room, width);
          if (fit > 0) ui::text_mid(c, c.f.body, fit, c.safe, ty, ui::kBannerInk, ver.c_str());
      }
@@ -441,7 +441,7 @@ index b883d2dd..e6292d40 100644
      // the rows, in the column; the help beside it
      float cx0, cx1, hx0, hx1;
      bool narrow;
-@@ -5648,7 +5753,7 @@ void game_lang_tick() {
+@@ -5885,7 +5990,7 @@ void game_lang_tick() {
          return -1;
      }();
      if (row < 0 || opts.game_lang == i18n::game_lang_index()) return;
@@ -450,10 +450,11 @@ index b883d2dd..e6292d40 100644
                          tab_row_to_global(cur_tab, tab_selected[cur_tab]) == row;
      if (on_row) return;
      if (!i18n::set_game_language(opts.game_lang)) {
-@@ -5704,6 +5809,58 @@ void outputs_follow_screen() {
-          dm::ratio_name({sw, sh}).c_str(), added);
+@@ -5956,6 +6061,59 @@ void mic_test_tick(bool focused) {
+     mic_test_state = host && host->mic_test ? host->mic_test(mic_testing, opts.microphone_gain, mic_levels) : 0;
+     if (!(mic_test_state & 1)) mic_testing = false;
  }
- 
++
 +/// (oot-remake-multiplayer) The co-op module told which of its tabs shows, when that changes (HOS_COOP_MENU_SHOW and _HIDE):
 +/// one on the menu's options page, not under the compact bar, or none
 +void coop_tell() {
@@ -509,7 +510,7 @@ index b883d2dd..e6292d40 100644
  void menu_tick() {
      std::lock_guard lk(menu_mu);   // (the control bridge's settings: menu_setting_set)
      share_finish();   // (Save my pipeline list's worker, done)
-@@ -5875,6 +6032,23 @@ void menu_tick() {
+@@ -6128,6 +6286,23 @@ void menu_tick() {
      // ESC alone (the gamepad's back is Esc only while it is open, above). The press that opened it does not go back a page
      // below; with the compact menu key held it opens the compact bar, as Insert and F1 do (tune_mode). No
      // control can be bound to Esc, so nothing in play changes; the window gives the captured mouse back on the close)
@@ -533,7 +534,7 @@ index b883d2dd..e6292d40 100644
      const bool esc_opens = opts.menu_shortcut == 2 && press[5] && !open_now.load();
      if (esc_opens) press[5] = false;
      const bool home_debug = press[15] && (!open_now.load() || (quick_debug && page == 0));
-@@ -6121,11 +6295,13 @@ void menu_tick() {
+@@ -6376,11 +6551,13 @@ void menu_tick() {
              else teleport_choice = std::clamp(teleport_step_rows(teleport_choice, rows) + (press[4] - press[3]), 0, kTeleports - 1);
              if (teleport_choice != was) teleport_follow = true, changed = true;
          }
@@ -549,7 +550,7 @@ index b883d2dd..e6292d40 100644
              if (ht != hover_tab) hover_tab = ht, changed = true;
              int& sel = tab_selected[cur_tab];
              const bool on_row = hit.part == menu_hit::kRow || hit.part == menu_hit::kSlider;
-@@ -6148,7 +6324,7 @@ void menu_tick() {
+@@ -6403,7 +6580,7 @@ void menu_tick() {
              if ((ptr.pressed & HOS_MOUSE_LEFT) && drag_row < 0) {
                  if (hit.part == menu_hit::kTabPrev) tab_left = true;
                  else if (hit.part == menu_hit::kTabNext) tab_right = true;
@@ -558,7 +559,7 @@ index b883d2dd..e6292d40 100644
                  else if (hit.part == menu_hit::kSlider) {
                      Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
                      drag_row = hit.index;
-@@ -6188,7 +6364,10 @@ void menu_tick() {
+@@ -6443,7 +6620,10 @@ void menu_tick() {
          // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
          if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
          if ((tab_left || tab_right) && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY;
@@ -570,7 +571,7 @@ index b883d2dd..e6292d40 100644
          else if (tab_right) cur_tab = (cur_tab + 1) % TAB_COUNT, changed = true;
          const int tab_count = tab_row_count(cur_tab);
          int& selected = tab_selected[cur_tab];
-@@ -6253,6 +6432,7 @@ void menu_tick() {
+@@ -6512,6 +6692,7 @@ void menu_tick() {
              changed = true;
          }
      }

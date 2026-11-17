@@ -318,6 +318,18 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
   auto queue = std::move(queue_);
   queue_.clear();
   for (auto& message : queue) handle(store, message, answers);
+  if (holding_) {
+    stats_.holding_frames += step;
+    if (frames_ - holding_since_ > kHoldMaxFrames) {
+      // Rows 106/107: the snapshot's last part never came. Held, this game
+      // would send none of its changes and write none of the group's for as
+      // long as the connection lasts; dropped, play goes on (the hook says so
+      // and points at Resync from host for the host's values).
+      ++stats_.hold_timeouts;
+      hold_timed_out_ = true;
+      drop_snapshot(store);
+    }
+  }
 
   std::vector<Outgoing> resets;
   if (std::exchange(check_offline_, false) && !loading_ && title_seen_ && role_ == FlagRole::player &&
@@ -350,6 +362,7 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
   }
   if (settling() && !window_) {
     window_ = true;
+    window_since_ = frames_;
     old_counted_ = false;
     window_retry_ = false;
     moved_ = false;
@@ -361,6 +374,7 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
     end_window(store, resets);
   }
   if (window_ && loading_ && !scene_readable_) no_scene_frames_ += static_cast<int>(step);
+  if (window_) stats_.window_frames += step;
   if (window_ && title_seen_) window_title_ = true;
   see_save_load();
   if (std::exchange(native_loaded_, false)) {
@@ -391,6 +405,7 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
   if (!loading_ && settle_left_ > 0) settle_left_ -= (std::min)(settle_left_, static_cast<int>(step));
   restate_.clear();
   added_.clear();
+  stats_.pending_now = pending_.size();
 
   if (role_ == FlagRole::player) {
     push_list<protocol::FlagSet>(out, changes, stats_.entries_unsent);
@@ -447,6 +462,12 @@ void FlagWatcher::handle(FlagStore& store, Incoming& message, Table& answers) {
   }
   if (auto* state = std::get_if<protocol::FlagState>(&message)) {
     stats_.entries_in += state->flags.size();
+    if (holding_ && held_states_.size() >= kHeldStatesMax) {
+      // Rows 106/107: no snapshot takes this long; play goes on without it.
+      ++stats_.hold_timeouts;
+      hold_timed_out_ = true;
+      drop_snapshot(store);
+    }
     if (holding_) {
       held_states_.push_back(std::move(*state));
     } else {
@@ -472,6 +493,7 @@ void FlagWatcher::handle(FlagStore& store, Incoming& message, Table& answers) {
   if (part.part == 0) {
     if (holding_) ++stats_.bad_snapshots;  // the earlier one never finished
     holding_ = true;
+    holding_since_ = frames_;
     snapshot_.clear();
     snapshot_next_part_ = 0;
     snapshot_part_count_ = part.part_count;
@@ -479,12 +501,7 @@ void FlagWatcher::handle(FlagStore& store, Incoming& message, Table& answers) {
              part.part_count != snapshot_part_count_) {
     // A part missing or out of order: drop the snapshot, stop holding the
     // game, and apply what came after it.
-    ++stats_.bad_snapshots;
-    holding_ = false;
-    snapshot_.clear();
-    auto held = std::move(held_states_);
-    held_states_.clear();
-    for (const auto& state : held) apply_state(store, state.flags);
+    drop_snapshot(store);
     return;
   }
   for (const auto& entry : part.flags) snapshot_[key_of(entry)] = entry;
@@ -649,6 +666,17 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
     }
   }
   snapshot_.clear();
+  auto held = std::move(held_states_);
+  held_states_.clear();
+  for (const auto& state : held) apply_state(store, state.flags);
+}
+
+void FlagWatcher::drop_snapshot(FlagStore& store) {
+  ++stats_.bad_snapshots;
+  holding_ = false;
+  snapshot_.clear();
+  snapshot_next_part_ = 0;
+  snapshot_part_count_ = 0;
   auto held = std::move(held_states_);
   held_states_.clear();
   for (const auto& state : held) apply_state(store, state.flags);

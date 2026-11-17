@@ -40,26 +40,17 @@ bool Record::Add(std::uint8_t room) {
         return false;
     }
     rooms_.push_back(room);
-    ++version_;
     return true;
 }
 
 void Record::Clear() {
     std::lock_guard lock(mutex_);
-    if (!rooms_.empty()) {
-        rooms_.clear();
-        ++version_;
-    }
+    rooms_.clear();
 }
 
 std::vector<std::uint8_t> Record::Rooms() const {
     std::lock_guard lock(mutex_);
     return rooms_;
-}
-
-std::uint64_t Record::Version() const {
-    std::lock_guard lock(mutex_);
-    return version_;
 }
 
 std::optional<std::uint8_t> ProvenDeath(const coop::protocol::Message& m) {
@@ -85,26 +76,27 @@ Record& TheRecord() {
 }
 
 std::vector<Write> Apply::Check(const std::optional<std::string>& scene, bool place_known,
-                                std::span<const std::uint8_t> beaten, std::uint64_t version,
+                                std::span<const std::uint8_t> beaten,
                                 const std::function<std::optional<std::uint32_t>(std::uint32_t)>& read) {
     if (!scene) {
         scene_.reset();  // loading: the scene after it (the same one too) checks again
+        loaded_.clear();
         checked_.clear();
         return {};
     }
     if (!scene_ || *scene_ != *scene) {
         scene_ = scene;
+        loaded_.assign(beaten.begin(), beaten.end());  // a later record change waits for the next load
         checked_.clear();
-    }
-    if (version != version_) {
-        version_ = version;
-        checked_.clear();  // a new boss beaten (or the record cleared): look again
     }
     if (!place_known) {
         return {};
     }
     std::vector<Write> out;
-    for (const std::uint8_t room : beaten) {
+    for (const std::uint8_t room : loaded_) {
+        if (!Has(beaten, room)) {
+            continue;  // the record was cleared since (the host loaded a save): that boss fights again
+        }
         const BeatenSet* set = ForRoom(room);
         const CoopBoss::Room* where = CoopBoss::RoomByIndex(room);
         if (set == nullptr || where == nullptr || Has(checked_, room) || where->scene == *scene) {
@@ -127,7 +119,7 @@ std::vector<Write> Apply::Check(const std::optional<std::string>& scene, bool pl
 
 void Apply::Reset() {
     scene_.reset();
-    version_ = 0;
+    loaded_.clear();
     checked_.clear();
 }
 

@@ -73,6 +73,15 @@ inline constexpr std::uint64_t kActorComponents = 0x270;
 inline constexpr std::uint64_t kComponentsAs = 0x40;
 inline constexpr std::uint64_t kAsComponentInner = 0x18;
 inline constexpr std::uint64_t kAsInnerController = 0x18;
+
+// --- Life of an actor (PLAYER_STATUS dead, away-status) ----------------------
+// actor +0x270 (component table) -> +0x2b8 its Life component -> +0x1c10 the
+// value object, the life (s32, quarter hearts) at +8: the same walk as the
+// objects walk's (lichii/hook/coop_objects.cpp LifeValue, run in the game
+// since issue 88; coop_hit_replay.h kComponentLife).
+inline constexpr std::uint64_t kComponentLife = 0x2b8;
+inline constexpr std::uint64_t kLifeValue = 0x1c10;
+inline constexpr std::uint64_t kLifeValueWord = 0x8;
 // [dump] Controller: s32 slot count at +0x18, slot array at +0x20, 0x48 bytes
 // an entry, whose first 8 bytes point to the slot. Every reader bounds the
 // index by the count (0x3abebc0, 0x37b5d70, 0x2022a0). Checked.

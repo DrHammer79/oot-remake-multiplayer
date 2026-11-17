@@ -4,6 +4,7 @@
 
 #include <map>
 #include <set>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -2482,4 +2483,306 @@ TEST_CASE("flag watcher: a down-only Bool cannot also be up-only (issue 84)") {
   FlagWatcher w(shared(), FlagRole::player);
   CHECK(w.share_down_only(kDoor));
   CHECK_FALSE(w.share_up_only(kDoor));
+}
+
+namespace {
+
+// One dungeon's rows of the item list (docs/items.md, "Dungeon items").
+struct DungeonRow {
+  std::string name;  // "DungeonInfo.ForestTemple"
+  FlagKey keys, boss_key, map, compass;
+};
+
+std::vector<DungeonRow> dungeon_rows() {
+  constexpr std::string_view kStart = "DungeonInfo.", kKeys = ".SmallKeyNum";
+  const auto row = [](const std::string& name) {
+    for (const ItemFlag& item : item_flags()) {
+      if (item.name == name) return FlagKey{item.hash, 0};
+    }
+    FAIL("no item " << name);
+    return FlagKey{0u, 0};
+  };
+  std::vector<DungeonRow> rows;
+  for (const ItemFlag& item : item_flags()) {
+    if (!item.name.starts_with(kStart) || !item.name.ends_with(kKeys)) continue;
+    const std::string d(item.name.substr(0, item.name.size() - kKeys.size()));
+    rows.push_back({d, FlagKey{item.hash, 0}, row(d + ".IsGetBossKey"), row(d + ".IsGetMap"), row(d + ".IsGetCompass")});
+  }
+  return rows;
+}
+
+// A host's game and a guest's, each with the item rules, in one session.
+struct TwoGames {
+  FakeStore host_game, guest_game;
+  ItemFlagStore host_store{host_game}, guest_store{guest_game};
+  FlagWatcher host, guest;
+  DungeonRow r;
+
+  explicit TwoGames(const DungeonRow& row)
+      : host(SharedFlags({row.keys, row.boss_key, row.map, row.compass}), FlagRole::host),
+        guest(SharedFlags({row.keys, row.boss_key, row.map, row.compass}), FlagRole::player),
+        r(row) {
+    for (FakeStore* s : {&host_game, &guest_game}) {
+      s->values[r.keys] = entry(r.keys, 0, proto::FlagKind::int32);
+      for (FlagKey k : {r.boss_key, r.map, r.compass}) s->set(k, 0);
+    }
+    host.set_native_loads(true);
+    guest.set_native_loads(true);
+    host.frame(host_store);
+    guest.frame(guest_store);
+  }
+  void keys(FakeStore& game, int n) {
+    game.values[r.keys] = entry(r.keys, static_cast<std::uint32_t>(n), proto::FlagKind::int32);
+  }
+  int keys(const FakeStore& game) const { return static_cast<int>(game.get(r.keys)); }
+  // Frames of both games, every message handed to the other one.
+  void run(int frames = 4) {
+    for (int i = 0; i < frames; ++i) {
+      for (const auto& o : guest.frame(guest_store)) CHECK(host.receive(o.bytes));
+      for (const auto& o : host.frame(host_store)) CHECK(guest.receive(o.bytes));
+    }
+  }
+};
+
+}  // namespace
+
+TEST_CASE("dungeon items: every dungeon's rows are shared: keys as a count, boss key, map and compass owned once") {
+  const auto rows = dungeon_rows();
+  CHECK(rows.size() == 14);
+  for (const DungeonRow& r : rows) {
+    CAPTURE(r.name);
+    const ItemFlag* keys = find_item(r.keys.hash);
+    REQUIRE(keys != nullptr);
+    CHECK(keys->on);
+    CHECK(keys->rule == ItemRule::count);
+    CHECK(keys->kind == proto::FlagKind::int32);
+    for (FlagKey k : {r.boss_key, r.map, r.compass}) {
+      const ItemFlag* item = find_item(k.hash);
+      REQUIRE(item != nullptr);
+      CHECK(item->on);
+      CHECK(item->rule == ItemRule::any);
+      CHECK(item->kind == proto::FlagKind::boolean);
+    }
+  }
+}
+
+TEST_CASE("dungeon items: a key found or used in one game is found or used in every game, in every dungeon (row 106)") {
+  for (const DungeonRow& r : dungeon_rows()) {
+    CAPTURE(r.name);
+    TwoGames t(r);
+    t.keys(t.guest_game, 1);  // the guest opens a key chest
+    t.run();
+    CHECK(t.keys(t.host_game) == 1);
+    CHECK(t.keys(t.guest_game) == 1);
+    t.keys(t.host_game, 3);  // the host finds two
+    t.run();
+    CHECK(t.keys(t.guest_game) == 3);
+    t.keys(t.guest_game, 2);  // the guest uses one on a door
+    t.run();
+    CHECK(t.keys(t.host_game) == 2);
+    t.keys(t.host_game, 1);  // the host uses one
+    t.run();
+    CHECK(t.keys(t.guest_game) == 1);
+    // In the same frame: the guest finds one, the host uses one. One group count, no key lost or made.
+    t.keys(t.guest_game, 2);
+    t.keys(t.host_game, 0);
+    t.run();
+    CHECK(t.keys(t.host_game) == 1);
+    CHECK(t.keys(t.guest_game) == 1);
+    // The boss key, map and compass: owned by all once one game has them, either way.
+    t.guest_game.set(r.boss_key, 1);
+    t.host_game.set(r.map, 1);
+    t.guest_game.set(r.compass, 1);
+    t.run();
+    for (FlagKey k : {r.boss_key, r.map, r.compass}) {
+      CHECK(t.host_game.get(k) == 1);
+      CHECK(t.guest_game.get(k) == 1);
+    }
+    CHECK(t.keys(t.host_game) == 1);  // nothing of it touched the count
+    CHECK(t.keys(t.guest_game) == 1);
+  }
+}
+
+TEST_CASE("dungeon items: a guest's own save load takes the group's keys and dungeon items, then its play counts again (rows 106/107)") {
+  for (const DungeonRow& r : dungeon_rows()) {
+    CAPTURE(r.name);
+    TwoGames t(r);
+    t.keys(t.host_game, 2);
+    t.host_game.set(r.boss_key, 1);
+    t.host_game.set(r.map, 1);
+    t.host_game.set(r.compass, 1);
+    t.run();
+    REQUIRE(t.keys(t.guest_game) == 2);
+    REQUIRE(t.guest_game.get(r.boss_key) == 1);
+    // The guest loads a file of its own: other key count, no dungeon items (the game's load nodes say so).
+    t.guest.note_save_load_start();
+    t.keys(t.guest_game, 5);
+    for (FlagKey k : {r.boss_key, r.map, r.compass}) t.guest_game.set(k, 0);
+    t.run(1);
+    t.guest.note_save_loaded();
+    t.run(FlagWatcher::kSettleFrames + 4);
+    CHECK_FALSE(t.guest.settling());
+    CHECK(t.keys(t.guest_game) == 2);  // the group's count, not the file's
+    CHECK(t.keys(t.host_game) == 2);   // and the file's never reached the group
+    for (FlagKey k : {r.boss_key, r.map, r.compass}) {
+      CHECK(t.guest_game.get(k) == 1);
+      CHECK(t.host_game.get(k) == 1);
+    }
+    // After the load the guest's play counts as before: a key found, then used.
+    t.keys(t.guest_game, 3);
+    t.run();
+    CHECK(t.keys(t.host_game) == 3);
+    t.keys(t.guest_game, 2);
+    t.run();
+    CHECK(t.keys(t.host_game) == 2);
+    CHECK(t.keys(t.guest_game) == 2);
+  }
+}
+
+TEST_CASE("dungeon items: the host's save load gives every game that save's keys and dungeon items, lower too (row 107)") {
+  for (const DungeonRow& r : dungeon_rows()) {
+    CAPTURE(r.name);
+    TwoGames t(r);
+    t.keys(t.host_game, 3);
+    for (FlagKey k : {r.boss_key, r.map, r.compass}) t.host_game.set(k, 1);
+    t.run();
+    REQUIRE(t.keys(t.guest_game) == 3);
+    REQUIRE(t.guest_game.get(r.compass) == 1);
+    // The host loads another file: one key, the map only.
+    t.host.note_save_load_start();
+    t.keys(t.host_game, 1);
+    t.host_game.set(r.boss_key, 0);
+    t.host_game.set(r.compass, 0);
+    t.run(1);
+    t.host.note_save_loaded();
+    t.run(FlagWatcher::kSettleFrames + 4);
+    CHECK_FALSE(t.host.settling());
+    CHECK(t.host.stats().host_resets == 1);
+    CHECK(t.keys(t.host_game) == 1);  // the host's file is the truth: nothing of the old one put back
+    CHECK(t.host_game.get(r.boss_key) == 0);
+    CHECK(t.host_game.get(r.compass) == 0);
+    CHECK(t.keys(t.guest_game) == 1);
+    CHECK(t.guest_game.get(r.boss_key) == 0);
+    CHECK(t.guest_game.get(r.compass) == 0);
+    CHECK(t.guest_game.get(r.map) == 1);
+    // Play goes on from that file in both games.
+    t.keys(t.guest_game, 0);  // the guest uses the key
+    t.guest_game.set(r.boss_key, 1);
+    t.run();
+    CHECK(t.keys(t.host_game) == 0);
+    CHECK(t.host_game.get(r.boss_key) == 1);
+  }
+}
+
+// Rows 106/107 (dungeon-items-next): a join snapshot whose last part never comes held a guest's game for as long
+// as the connection lasted: none of its own changes sent, no FLAG_STATE written, nothing logged.
+TEST_CASE("flag watcher: a join snapshot whose last part never comes is dropped after kHoldMaxFrames") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  w.receive(proto::FlagSnapshot{0, 2, {entry(kChest, 1)}});
+  CHECK(w.frame(store).empty());
+  CHECK(w.holding());
+  store.set(kKey0, 1);              // our own change while held
+  w.receive(state({entry(kDoor, 1)}));  // another game's change while held
+  for (std::uint64_t i = 1; i < FlagWatcher::kHoldMaxFrames; ++i) {
+    CHECK(w.frame(store).empty());
+  }
+  CHECK(w.holding());
+  CHECK(w.stats().holding_frames >= FlagWatcher::kHoldMaxFrames - 1);
+  CHECK(w.holding_for() >= FlagWatcher::kHoldMaxFrames - 1);
+  CHECK(store.get(kDoor) == 0);     // held, not written
+  CHECK(w.stats().hold_timeouts == 0);
+
+  // Past the limit: dropped, the state written, our change sent; the unfinished snapshot is not written.
+  std::vector<Outgoing> out;
+  for (int i = 0; i < 3 && out.empty(); ++i) out = w.frame(store);
+  CHECK_FALSE(w.holding());
+  CHECK(w.holding_for() == 0);
+  CHECK(w.stats().hold_timeouts == 1);
+  CHECK(w.stats().bad_snapshots == 1);
+  CHECK(w.take_hold_timeout());
+  CHECK_FALSE(w.take_hold_timeout());
+  CHECK(store.get(kDoor) == 1);
+  CHECK(store.get(kChest) == 0);
+  CHECK(only<proto::FlagSet>(out) == std::vector{entry(kKey0, 1)});
+
+  // A whole snapshot after it is taken as usual.
+  w.receive(proto::FlagSnapshot{0, 1, {entry(kChest, 1)}});
+  w.frame(store);
+  CHECK_FALSE(w.holding());
+  CHECK(store.get(kChest) == 1);
+  CHECK(w.stats().hold_timeouts == 1);
+}
+
+TEST_CASE("flag watcher: a snapshot that finishes in time is not dropped") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  w.receive(proto::FlagSnapshot{0, 2, {entry(kChest, 1)}});
+  for (std::uint64_t i = 0; i + 2 < FlagWatcher::kHoldMaxFrames; ++i) w.frame(store);
+  CHECK(w.holding());
+  w.receive(proto::FlagSnapshot{1, 2, {entry(kDoor, 1)}});
+  w.frame(store);
+  CHECK_FALSE(w.holding());
+  CHECK(store.get(kChest) == 1);
+  CHECK(store.get(kDoor) == 1);
+  CHECK(w.stats().hold_timeouts == 0);
+  CHECK(w.stats().bad_snapshots == 0);
+  CHECK_FALSE(w.take_hold_timeout());
+}
+
+TEST_CASE("flag watcher: more FLAG_STATEs than kHeldStatesMax while holding drop the snapshot at once") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  w.receive(proto::FlagSnapshot{0, 2, {}});
+  w.frame(store);
+  for (std::size_t i = 0; i < FlagWatcher::kHeldStatesMax; ++i) {
+    w.receive(state({entry(kDoor, static_cast<std::uint32_t>(i % 2))}));
+  }
+  w.frame(store);
+  CHECK(w.holding());  // full, not past it
+  CHECK(store.get(kDoor) == 0);
+  w.receive(state({entry(kDoor, 1)}));
+  w.frame(store);
+  CHECK_FALSE(w.holding());
+  CHECK(w.stats().hold_timeouts == 1);
+  CHECK(store.get(kDoor) == 1);  // every held state, in order, then the newest
+}
+
+TEST_CASE("flag watcher: time in a load window is counted, and how long the open one has lasted") {
+  FakeStore store = game();
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  CHECK(w.window_for() == 0);
+  w.set_loading(true);
+  for (int i = 0; i < 10; ++i) w.frame(store);
+  CHECK(w.window_for() >= 9);
+  CHECK(w.stats().window_frames >= 10);
+  w.set_loading(false);
+  for (int i = 0; i < FlagWatcher::kSettleFrames + 4; ++i) w.frame(store);
+  CHECK(w.window_for() == 0);
+}
+
+TEST_CASE("dungeon items: a guest held by an unfinished join snapshot sends its key after the limit, every dungeon (rows 106/107)") {
+  for (const DungeonRow& r : dungeon_rows()) {
+    CAPTURE(r.name);
+    TwoGames t(r);
+    t.keys(t.host_game, 2);
+    t.run();
+    REQUIRE(t.keys(t.guest_game) == 2);
+    t.guest.receive(proto::FlagSnapshot{0, 2, {}});
+    t.keys(t.guest_game, 3);   // the guest opens a key chest while held
+    t.keys(t.host_game, 1);    // the host uses a key meanwhile
+    t.run(2);
+    CHECK(t.keys(t.host_game) == 1);   // nothing of the guest's arrived
+    CHECK(t.guest.holding());
+    t.run(static_cast<int>(FlagWatcher::kHoldMaxFrames) + 4);
+    CHECK_FALSE(t.guest.holding());
+    // One group count: 2, the guest's +1 and the host's -1, in both games.
+    CHECK(t.keys(t.host_game) == 2);
+    CHECK(t.keys(t.guest_game) == 2);
+    CHECK(t.guest.stats().hold_timeouts == 1);
+  }
 }

@@ -444,9 +444,9 @@ What each case does now. "Handled" is by code and unit tests; none of these is p
 | Cutscene (event running) | ours | Every puppet and Navi parked, no markers | Handled | `cutscene` (A talks to a sign, B watches) |
 | Cutscene | theirs | Their puppet's animation held frozen; it follows their place (issue 194, below) | Handled | `cutscene` (reverse), `cutscene-snap` |
 | Title screen, file select | ours | No player actor, so no reading and no scene: nothing planned, puppets deleted | Handled if the title has no player actor (unknown: the title demo may have one) | `screens` (B on the title, then A back on it) |
-| Title screen, file select | theirs | They send no samples (no reading): their pose fades in 0.4 s and the puppet is deleted after the 2 s grace | Handled | `screens` |
+| Title screen, file select | theirs | They send no samples (no reading), and the status `loading` ([Away](#away-the-status-bits-each-game-sends)): their pose fades in 0.4 s and the puppet is deleted after the 2 s grace | Handled | `screens` |
 | Pause menu, item menu | ours | Nothing changes: puppets stay; whether the game draws them behind the menu, and whether our pose writes run while paused, is not known | Unknown | `screens` (B pauses) |
-| Pause menu | theirs | Keep-alive samples go on; the puppet stands where they stopped. The `paused` and `in_menu` status bits are never set by the sender, and do not hide | Handled (stands) | `screens` |
+| Pause menu | theirs | Keep-alive samples go on; the puppet stands where they stopped. Their game sends `in_menu` and `paused` ([Away](#away-the-status-bits-each-game-sends)); with perception on, the puppet is unseen by our enemies meanwhile | Handled (stands); the bits built, not run in game | `screens` |
 | Loading | ours | Scene change deletes every puppet; creates wait until the game draws again (`kDrawnMs`) | Handled (proven before, puppet-join) | `stray` |
 | Loading, other scene | theirs | Their scene changes: other place, deleted | Handled (proven, `stray`) | `stray` |
 | Riding Epona | theirs | Puppet shown in its riding animation while their command names a horse (`Horse...`, `Evt_Horse_...`, not `DismountHorse` or `HorseAccess`), with a copy of their Epona under it (`CoopRide_Epona`, [Riding](#riding-issue-199)); dismount: the copy goes, the puppet walks on | Built (issue 199); not run in game yet | `epona` |
@@ -456,6 +456,20 @@ What each case does now. "Handled" is by code and unit tests; none of these is p
 | Song taught, warp song, Song of Time block | either | `DemoOcarinaMelodyGet...` and what follows are cutscenes: as a cutscene | Handled as a cutscene | `ocarina` (log only) |
 | Time travel (Master Sword) | either | A cutscene, then the age changes: the puppet is made again as the other age (settle 1 s) | Handled (the age swap is proven, `stray-adult`) | none new |
 | Crawlspace | either | Unknown: the AS tables have no crawl command name (`Crouch...` is crouching); if the game runs it as an event, ours hides puppets and theirs holds them at the entrance | Unknown | `crawl` (both warp into Kokiri Forest; A crawls the Kokiri Sword tunnel, B watches from inside; no save to set up) |
+
+### Away: the status bits each game sends
+
+`PLAYER_STATUS` ([protocol.md](protocol.md), type 8) has five bits. Until branch `away-status` (issue 150) a game set only `in_cutscene`; the others were read by the server (object hand-overs: `loading`, `paused` 6 s, `dead` 10 s), PvP, down but not out, the shared cutscenes, the Ocarina mend, the Lobby and perception, but never sent. `coop::host::status_bits` (sampler.hpp) now builds every bit each frame from the game's own state; `Sampler::frame` sends the byte on every change, as before.
+
+| Bit | Set while | Read from (the game's own state) |
+|---|---|---|
+| `loading` | No Link to read (a scene or save load, the title), or the title's menu is up | `PlayerReader` finds no player actor; Hookshot/Longshot's title menu (`CoopSave::TitleUp`) |
+| `in_cutscene` | Our Link is in an event (G1) | The event manager's running word or our Link's bound performer (`PlayerReading::event_running`, `our_link_in_event`) |
+| `in_menu` | A game menu is in front | Longshot's patch 0018 `hos_coop_menu_state().menu_open`: one of the game's menu screens (their update f_802f1380) has a focused button: the pause menu, the Key Items / Threads of Time / Map panel, a dialog |
+| `paused` | A game menu is in front and our Link is in no event | The same; the pause menu and the panel stop the game's world, a talk's choices (a menu inside an event) do not |
+| `dead` | The player's life is 0 (a Game Over; down but not out keeps a downed Link at a quarter heart) | The player actor's own Life component (`PlayerReader::read_life`: component table +0x2b8, value +0x1c10, s32 at +8, the objects walk's read since issue 88); a split-screen seat reads its own actor |
+
+While `loading`, `in_menu` and `paused` are clear and `in_cutscene` and `dead` keep what they were; an unknown value (no life read, no event word) keeps the bit. Not known, so never set: `in_menu`/`paused` on the emulator and on Linux Longshot (patch 0018's menu tracking is Windows only); seats take `in_menu` from the screen they share.
 
 ### Cutscenes without snaps (issue 194, branch `cutscene-snap`)
 

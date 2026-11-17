@@ -25,7 +25,7 @@ playing together (same server, same version) is not yet proven. Please report wh
 4. The game starts. **Host** or **Join** in the game's menu (the Multiplayer tab). Host gives you an invite code for
    your friends (it is also put on your clipboard); Join takes a friend's code.
 
-After the first build, `bash start-squadala.sh` starts the game in seconds, and the kit adds an **OoT Co-op** entry to
+After the first build, `bash start-squadala.sh` starts the game in seconds, and the kit adds a **Squadala** entry to
 your applications menu. Each start checks for a new co-op version and offers it; every player needs the same one.
 
 ## Steam Deck
@@ -36,14 +36,17 @@ your applications menu. Each start checks for a new co-op version and offers it;
 3. Right-click the folder's empty space > **Open Terminal Here** (Konsole), type `bash start-squadala.sh`, give it your
    `.nup`, and let it build (plug the Deck in; it takes about an hour).
 4. When the game has started once, close it. In Steam (still in Desktop Mode): **Games > Add a Non-Steam Game to My
-   Library**, tick **OoT Co-op**, **Add Selected Programs**.
-5. Back in **Game Mode**, start OoT Co-op from your library. The controls are the Deck's own (Steam Input gives the
+   Library**, tick **Squadala**, **Add Selected Programs**.
+5. Back in **Game Mode**, start Squadala from your library. The controls are the Deck's own (Steam Input gives the
    game a standard controller). **Steam + X** opens the on-screen keyboard for the chat box (T on a keyboard) and for
    typing an invite code in the Join page. Game Mode has no clipboard tool: the invite code is shown in the
    Multiplayer tab to read out or type.
 
 Updates: the first start after a new version asks in the terminal; in Game Mode there is no terminal, so start it
-once from Desktop Mode (step 3) when a friend has a newer version.
+once from Desktop Mode (step 3) when a friend has a newer version. A kit older than 0.11.3 (started with
+`start-oot-coop.sh`) updates in two steps: to 0.11.3 first, then to the newest on the next start. From 0.11.4 the kit has
+one start file, `start-squadala.sh`: the update moves your menu entry and Steam entry over to it (if Steam was open,
+restart it once).
 
 ## If something goes wrong
 
@@ -83,7 +86,6 @@ As on Windows ([setup.md, "Discord status"](setup.md#discord-status)): with Disc
 | Path | What |
 |---|---|
 | `start-squadala.sh` | The one file you start. |
-| `start-oot-coop.sh` | Its old name (up to v0.11.2), kept for old menu entries and Steam shortcuts: it starts `start-squadala.sh`. |
 | `README.txt` | The short version of this page. |
 | `revert.sh` | Back to the version before the last update (above); `previous/` holds the versions kept for it. |
 | `scripts/` | The kit's scripts (start, build, update, logs). |

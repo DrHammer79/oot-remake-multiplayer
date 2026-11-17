@@ -777,3 +777,54 @@ TEST_CASE("host reader: our Link bound into an event counts as in an event, word
     CHECK(r->event_running == false);
   }
 }
+
+TEST_CASE("host reader: the player's life from its own Life component, dead at 0 (away-status)") {
+  // [[[actor + 0x270] + 0x2b8] + 0x1c10] + 8: the objects walk's read (coop_objects.cpp LifeValue).
+  FakeMemory m;
+  const Layout l = make_game(m);
+  {
+    PlayerReader reader(m);  // no Life component: not known, never "alive" or "dead"
+    CHECK(reader.read_life() == std::nullopt);
+    const auto r = reader.read();
+    REQUIRE(r);
+    CHECK(r->dead == std::nullopt);
+  }
+  constexpr std::uint64_t kParts = 0x93000000, kLife = 0x93100000, kValue = 0x93200000;
+  m.put_u64(l.actor1 + addr::kActorComponents, kParts);
+  m.put_u64(kParts + addr::kComponentLife, kLife);
+  m.put_u64(kLife + addr::kLifeValue, kValue);
+  m.put_u32(kValue + addr::kLifeValueWord, 12);  // three hearts
+  {
+    PlayerReader reader(m);
+    CHECK(reader.read_life() == 12);
+    CHECK(reader.read()->dead == false);
+  }
+  m.put_u32(kValue + addr::kLifeValueWord, 1);  // a downed Link's quarter heart (down but not out): not dead
+  CHECK(PlayerReader(m).read()->dead == false);
+  m.put_u32(kValue + addr::kLifeValueWord, 0);  // Game Over
+  {
+    PlayerReader reader(m);
+    CHECK(reader.read_life() == 0);
+    CHECK(reader.read()->dead == true);
+  }
+  m.put_u32(kValue + addr::kLifeValueWord, 0xFFFFFFFFu);  // garbage (-1): not known
+  CHECK(PlayerReader(m).read()->dead == std::nullopt);
+  m.put_u32(kValue + addr::kLifeValueWord, 4 * 41);  // above protocol::kMaxLifeQuarters: not known
+  CHECK(PlayerReader(m).read_life() == std::nullopt);
+
+  // A split-screen seat (set_actor) reads its own actor's Life, not the first Link's.
+  constexpr std::uint64_t kSeat = 0x94000000, kSeatParts = 0x94100000, kSeatLife = 0x94200000,
+                          kSeatValue = 0x94300000;
+  m.put_u32(kValue + addr::kLifeValueWord, 12);
+  m.put_u32(kSeat + addr::kActorState, addr::kActorStatePresent);
+  m.put_vec3(kSeat + addr::kActorPosition, {4.0f, 5.0f, 6.0f});
+  put_matrix(m, kSeat, Mat3{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}});
+  m.put_u64(kSeat + addr::kActorComponents, kSeatParts);
+  m.put_u64(kSeatParts + addr::kComponentLife, kSeatLife);
+  m.put_u64(kSeatLife + addr::kLifeValue, kSeatValue);
+  m.put_u32(kSeatValue + addr::kLifeValueWord, 0);
+  PlayerReader seat(m);
+  seat.set_actor(kSeat);
+  CHECK(seat.read_life() == 0);
+  CHECK(PlayerReader(m).read_life() == 12);
+}

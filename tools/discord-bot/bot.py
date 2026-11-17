@@ -6,8 +6,10 @@ coord-multiplayer/reports/player-reports.md as 'NEW (bot)' and posted to the
 private dev channel. Everything the player types is stored and shown as quoted,
 untrusted text.
 
-No privileged intents and no message content: the bot only sees the slash
-commands sent to it. Runs on the owner's PC (run-bot.ps1).
+No privileged intents and no message content. Besides /bugreport, the bot gets
+message events (without their text) only to remove plain messages typed in the
+public report channel; it logs the author id and the time, nothing else.
+Runs on the owner's PC (run-bot.ps1).
 
 Usage: python bot.py --config <path to discord-bot.json>
 """
@@ -52,7 +54,8 @@ def setup_logging(log_path, token):
 class ReportBot(discord.Client):
     def __init__(self, cfg):
         intents = discord.Intents.none()
-        intents.guilds = True  # channel cache only; not privileged
+        intents.guilds = True  # channel and role cache; not privileged
+        intents.guild_messages = True  # message events without text (no Message Content intent)
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(),
                          application_id=cfg.get("application_id"))
         self.cfg = cfg
@@ -62,6 +65,8 @@ class ReportBot(discord.Client):
         self.user_limit = core.RateLimiter(core.USER_LIMIT, core.USER_WINDOW)
         self.global_limit = core.RateLimiter(core.GLOBAL_LIMIT, core.GLOBAL_WINDOW)
         self.lock = asyncio.Lock()
+        self.notice_limit = core.RateLimiter(1, core.NOTICE_WINDOW)
+        self.delete_forbidden_logged = False
         self.logs_dir = cfg["coord_dir"] / "player-logs"
         self.tracker = cfg["coord_dir"] / "reports" / core.TRACKER_NAME
 
@@ -90,6 +95,70 @@ class ReportBot(discord.Client):
 
     async def on_ready(self):
         log.info("online as %s", self.user)
+        self._check_report_channel_rights()
+
+    def _check_report_channel_rights(self):
+        """Log once at start when the bot cannot remove messages in the report channel."""
+        channel_id = self.cfg["report_channel_id"]
+        channel = self.get_channel(channel_id) if channel_id is not None else None
+        me = getattr(getattr(channel, "guild", None), "me", None)
+        if channel is None or me is None:
+            return
+        if not channel.permissions_for(me).manage_messages:
+            log.error(core.MANAGE_MESSAGES_HELP.format(channel=channel_id))
+            self.delete_forbidden_logged = True
+
+    async def on_message(self, message):
+        # Owner 2026-11-17: the report channel takes /bugreport only; plain messages are removed.
+        if message.guild is None or self.user is None:
+            return
+        plain = message.type in (discord.MessageType.default, discord.MessageType.reply)
+
+        def remove(can_manage):
+            return core.should_remove(message.channel.id, self.cfg["report_channel_id"], message.author.id,
+                                      self.user.id, plain, message.webhook_id is not None, can_manage)
+
+        if not remove(False):  # channel, author, type and webhook first; no API call for these
+            return
+        author = message.author
+        if not isinstance(author, discord.Member):
+            try:
+                author = await message.guild.fetch_member(author.id)
+            except discord.HTTPException:
+                return  # cannot tell whether they moderate: keep the message
+        if not remove(message.channel.permissions_for(author).manage_messages):
+            return
+        try:
+            await message.delete()
+        except discord.NotFound:
+            return  # already gone
+        except discord.Forbidden:
+            if not self.delete_forbidden_logged:
+                log.error(core.MANAGE_MESSAGES_HELP.format(channel=message.channel.id))
+                self.delete_forbidden_logged = True
+            return
+        except discord.HTTPException as e:
+            log.warning("removing a plain message from user %s failed (%s)", author.id, type(e).__name__)
+            return
+        self.delete_forbidden_logged = False
+        log.info("removed a plain message from user %s in the report channel", author.id)
+        if author.bot or self.notice_limit.acquire(author.id) > 0:
+            return
+        await self._tell_removed(message.channel, author)
+
+    async def _tell_removed(self, channel, author):
+        """DM the one-line notice; if their DMs are closed, a short mention in the channel that
+        deletes itself."""
+        try:
+            await author.send(core.REMOVED_NOTICE)
+            return
+        except discord.HTTPException:
+            pass
+        try:
+            await channel.send(f"<@{author.id}> {core.REMOVED_NOTICE}", delete_after=20,
+                               allowed_mentions=discord.AllowedMentions(users=[author]))
+        except discord.HTTPException as e:
+            log.warning("could not tell user %s why their message was removed (%s)", author.id, type(e).__name__)
 
     async def on_command_error(self, interaction, error):
         # Never show a traceback or error text to the player; it goes to the log only.

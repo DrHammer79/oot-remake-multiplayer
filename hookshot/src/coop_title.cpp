@@ -509,6 +509,11 @@ void StopSaveWait() {
     g_wait.Stop();
 }
 
+bool SaveWaitWaiting() {
+    std::lock_guard lock(g_mutex);
+    return g_wait.waiting();
+}
+
 std::string ClientId() {
     static std::mutex m;
     std::lock_guard lock(m);

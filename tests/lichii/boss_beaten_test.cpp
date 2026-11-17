@@ -116,9 +116,7 @@ TEST_CASE("boss beaten: record") {
     CHECK(r.Add(0));
     CHECK(!r.Add(0));
     CHECK(!r.Add(9));  // no dungeon room
-    const auto v = r.Version();
     CHECK(r.Add(3));
-    CHECK(r.Version() > v);
     CHECK((r.Rooms() == std::vector<std::uint8_t>{0, 3}));
     r.Clear();
     CHECK(r.Rooms().empty());
@@ -132,11 +130,11 @@ TEST_CASE("boss beaten: given one way, once per scene load, never in the boss's 
     const std::string deku(CoopBoss::RoomByIndex(0)->scene);
 
     // In the Deku Tree (the boss room or anywhere in it): its room's logic is loaded, nothing given.
-    CHECK(a.Check(deku, true, beaten, 1, std::ref(f)).empty());
+    CHECK(a.Check(deku, true, beaten, std::ref(f)).empty());
     // Loading, then a field: nothing before Link's place reads.
-    CHECK(a.Check(std::nullopt, false, beaten, 1, std::ref(f)).empty());
-    CHECK(a.Check(std::string("KokiriForest"), false, beaten, 1, std::ref(f)).empty());
-    std::vector<Write> w = a.Check(std::string("KokiriForest"), true, beaten, 1, std::ref(f));
+    CHECK(a.Check(std::nullopt, false, beaten, std::ref(f)).empty());
+    CHECK(a.Check(std::string("KokiriForest"), false, beaten, std::ref(f)).empty());
+    std::vector<Write> w = a.Check(std::string("KokiriForest"), true, beaten, std::ref(f));
     REQUIRE(w.size() == s.bools.size() + 1);
     for (const auto& b : s.bools) {
         CHECK(std::any_of(w.begin(), w.end(), [&](const Write& x) {
@@ -147,17 +145,17 @@ TEST_CASE("boss beaten: given one way, once per scene load, never in the boss's 
     CHECK(w.back().hash == s.quest);
     CHECK(w.back().value == s.step);
     // Once per scene load.
-    CHECK(a.Check(std::string("KokiriForest"), true, beaten, 1, std::ref(f)).empty());
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
     // The writes took: the next scene load finds nothing to give.
     for (const Write& x : w) {
         f.v[x.hash] = x.value;
     }
-    CHECK(a.Check(std::nullopt, false, beaten, 1, std::ref(f)).empty());
-    CHECK(a.Check(std::string("KokiriForest"), true, beaten, 1, std::ref(f)).empty());
+    CHECK(a.Check(std::nullopt, false, beaten, std::ref(f)).empty());
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
     // A reload of an older save of ours (the boss alive in it again): the next scene load gives it again (#241).
     f = Alive(s);
-    CHECK(a.Check(std::nullopt, false, beaten, 1, std::ref(f)).empty());
-    CHECK(a.Check(std::string("HyruleField"), true, beaten, 1, std::ref(f)).size() == s.bools.size() + 1);
+    CHECK(a.Check(std::nullopt, false, beaten, std::ref(f)).empty());
+    CHECK(a.Check(std::string("HyruleField"), true, beaten, std::ref(f)).size() == s.bools.size() + 1);
 }
 
 TEST_CASE("boss beaten: a finished dungeon is never stepped back, unread flags are left alone") {
@@ -167,19 +165,56 @@ TEST_CASE("boss beaten: a finished dungeon is never stepped back, unread flags a
     f.v[s.quest] = coop::protocol::flag_hash("Complete");
     f.v.erase(s.bools.front().hash);
     Apply a;
-    const std::vector<Write> w = a.Check(std::string("KokiriForest"), true, beaten, 1, std::ref(f));
+    const std::vector<Write> w = a.Check(std::string("KokiriForest"), true, beaten, std::ref(f));
     CHECK(w.size() == s.bools.size() - 1);
     CHECK(std::none_of(w.begin(), w.end(), [](const Write& x) { return x.is_enum; }));
     CHECK(std::none_of(w.begin(), w.end(), [&](const Write& x) { return x.hash == s.bools.front().hash; }));
 }
 
-TEST_CASE("boss beaten: a boss beaten while we stand in a field is given at once, in that scene") {
+TEST_CASE("boss beaten: a boss beaten while we stand in a scene is given at its next load, never mid-scene") {
+    // boss-away-crash (review of c78d17c4): Kokiri Forest's Npc_Kokiri_011 reads Gohma_DefeatBoss live, and in the game
+    // alone it never changes while Kokiri Forest is loaded (the kill is in the Deku Tree).
     const BeatenSet& s = Gohma();
     Flags f = Alive(s);
     Apply a;
-    CHECK(a.Check(std::string("KokiriForest"), true, {}, 0, std::ref(f)).empty());  // co-op idle or nothing beaten
+    CHECK(a.Check(std::string("KokiriForest"), true, {}, std::ref(f)).empty());  // co-op idle or nothing beaten
     const std::vector<std::uint8_t> beaten{0};
-    CHECK(a.Check(std::string("KokiriForest"), true, beaten, 1, std::ref(f)).size() == s.bools.size() + 1);
+    // The guests beat Gohma while we stand in Kokiri Forest: nothing written in this scene, however long we stay.
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
+    // The next load (the same scene again too): given then, once.
+    CHECK(a.Check(std::nullopt, false, beaten, std::ref(f)).empty());
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).size() == s.bools.size() + 1);
+    CHECK(a.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
+    // A scene reached without a loading frame between (a new scene name): that is a load too.
+    Apply b;
+    CHECK(b.Check(std::string("KokiriForest"), true, {}, std::ref(f)).empty());
+    CHECK(b.Check(std::string("KokiriForest"), true, beaten, std::ref(f)).empty());
+    CHECK(b.Check(std::string("LostWoods"), true, beaten, std::ref(f)).size() == s.bools.size() + 1);
+}
+
+TEST_CASE("boss beaten: every boss's set waits for the next load when beaten mid-scene") {
+    // Every set, not only Gohma's: Dodongo's BossOut is read by Death Mountain Trail, Phantom Ganon's
+    // SageOfForest_IsBefore_Step08 by Kokiri Forest. A field none of the bosses is in.
+    for (const BeatenSet& set : CoopBossBeaten::Sets()) {
+        CAPTURE(set.boss);
+        Flags f = Alive(set);
+        Apply a;
+        const std::vector<std::uint8_t> beaten{set.room};
+        CHECK(a.Check(std::string("HyruleField"), true, {}, std::ref(f)).empty());
+        CHECK(a.Check(std::string("HyruleField"), true, beaten, std::ref(f)).empty());
+        CHECK(a.Check(std::nullopt, false, beaten, std::ref(f)).empty());
+        CHECK_FALSE(a.Check(std::string("HyruleField"), true, beaten, std::ref(f)).empty());
+    }
+}
+
+TEST_CASE("boss beaten: a record cleared mid-scene (the host loaded a save) gives nothing in that scene") {
+    const BeatenSet& s = Gohma();
+    Flags f = Alive(s);
+    Apply a;
+    const std::vector<std::uint8_t> beaten{0};
+    CHECK(a.Check(std::string("KokiriForest"), false, beaten, std::ref(f)).empty());  // loaded with it, place unread
+    CHECK(a.Check(std::string("KokiriForest"), true, {}, std::ref(f)).empty());       // cleared before it was given
 }
 
 TEST_CASE("boss beaten: only a proven death is one (a game took the boss's death event itself)") {

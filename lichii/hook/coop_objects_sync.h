@@ -867,6 +867,13 @@ public:
 
     // Present thread: not connected or the game went away. Forgets everything.
     void Reset();
+    // Present thread, just before the Reset of a session's end (we left, the server dropped, the host's game
+    // crashed): no owner judges our boss copies any more, and their own Life step lets them die again
+    // (CoopBossNative Publish({})). A copy held at life 1 by HeldLifeStep (or lower by its own hits the owner
+    // refused) would die of the next hit: each live boss copy takes its owner's last life from the owner's samples,
+    // through its own Life step (the hand-over's rule, TakeOwnerLife), so the fight goes on in our game where it
+    // was. No new network data. A copy whose owner said it died, or with no owner's life heard, is left alone.
+    void KeepBossLives(std::uint8_t self, std::vector<LifeWrite>& writes);
 
     // Network thread, on a reconnect: the server's epochs may start again
     // at 0, so the owners we know of placed objects are forgotten at the
@@ -1031,6 +1038,7 @@ private:
         int resent = 0;
         std::uint64_t dead_at = 0;
         bool owner_life_zero = false;  // its owner's samples said life 0 (OwnerSaysDead)
+        std::optional<std::int32_t> owner_life;  // its owner's last life, from the owner's samples (KeepBossLives)
         bool death_given = false;      // a dying copy boss's remaining life went to its own Life step (once)
         bool dead_now = false;  // a kill from before we came: deleted at once
         // enemy-sync-3 (issue 133): our enemy, killed by another game's hit
@@ -1063,6 +1071,10 @@ private:
     void Lower(Object& o, std::int32_t life, std::uint64_t now_us, std::vector<LifeWrite>& writes,
                std::uint8_t hitter,
                const std::optional<coop::protocol::Vec3>& hit_at = std::nullopt);
+
+    // A boss copy takes `owner_life` (its old owner's last life): raised (heal) or lowered (direct) through its
+    // own Life step, never a write. False when it is no boss, has no life read, or the lives agree.
+    bool TakeOwnerLife(Object& o, std::int32_t owner_life, std::vector<LifeWrite>& writes, std::string_view why);
 
     // enemy-sync-3 (issue 133): an enemy we own whose life was written to 0
     // (another game's hit our game did not take, or hurt off) may stand on

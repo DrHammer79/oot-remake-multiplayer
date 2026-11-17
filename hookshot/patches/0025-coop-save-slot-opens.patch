@@ -1,4 +1,4 @@
-From c18a1e989b84ef43bf75c81a69ea3115d1f6f4b4 Mon Sep 17 00:00:00 2001
+From dc0761a3c512b1c24b1310288580dadc6db9f947 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 16 Nov 2026 11:37:15 -0900
 Subject: [PATCH] Co-op save slot opens: the slot folder the game opened last,
@@ -17,7 +17,7 @@ on disk. Nothing else changes: the open itself is as before.
  1 file changed, 33 insertions(+)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
-index 13396d4c..435ee070 100644
+index 13396d4c..79eea692 100644
 --- a/host/nn_fs.c
 +++ b/host/nn_fs.c
 @@ -300,6 +300,38 @@ HOS_COOP_FS_EXPORT int hos_coop_fs_save_remount(const char *root) {
@@ -67,6 +67,3 @@ index 13396d4c..435ee070 100644
      if (hos_trace || fs_trace()) hos_log("fs: OpenFile(%s)", g);
      RET(0);
  }
--- 
-2.56.0.windows.4
-

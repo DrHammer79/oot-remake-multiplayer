@@ -538,6 +538,20 @@ bool Table::CopyMakes(std::string_view maker) {
     return false;
 }
 
+std::vector<std::uint64_t> Table::CopiesRunningOwn() const {
+    std::lock_guard lock(mutex_);
+    std::vector<std::uint64_t> out;
+    if (!brain_on_) {
+        return out;
+    }
+    for (const auto& [bsa, e] : by_bsa_) {
+        if (e.role == Role::copy && OwnTime(e)) {
+            out.push_back(e.actor);
+        }
+    }
+    return out;
+}
+
 std::optional<BossBsa> Table::OwnerState(std::uint64_t actor) const {
     std::lock_guard lock(mutex_);
     const Entry* e = FindActor(actor);

@@ -74,6 +74,29 @@ def guild_allowed(interaction_guild_id, allowed_guild_id):
     return allowed_guild_id is not None and interaction_guild_id == allowed_guild_id
 
 
+# Plain (non-command) messages in the public report channel are removed (owner, 2026-11-17):
+# /bugreport needs Send Messages there, so players could chat in it otherwise.
+REMOVED_NOTICE = ("Your message in the bug-report channel was removed: please use /bugreport there "
+                  "and attach the zip from your kit's collect-logs.")
+NOTICE_WINDOW = 10 * 60  # at most one notice per player per 10 min; every message is still removed
+MANAGE_MESSAGES_HELP = ("cannot delete messages in the report channel {channel} (Forbidden): give the bot "
+                        "Manage Messages there (Edit Channel > Permissions > the bot)")
+
+
+def should_remove(channel_id, report_channel_id, author_id, bot_id, is_plain, from_webhook, can_manage):
+    """True for a plain message a player typed in the report channel.
+
+    Kept: other channels (and threads, which have their own id); no report channel configured;
+    the bot's own messages; anything that is not a normal message or reply (slash-command
+    responses, pins, joins and other system messages); webhook posts; and anyone with Manage
+    Messages there (moderators, admins, the owner)."""
+    if report_channel_id is None or channel_id != report_channel_id:
+        return False
+    if author_id == bot_id or not is_plain or from_webhook:
+        return False
+    return not can_manage
+
+
 def dir_size(path):
     """Total bytes of the files under path (0 if it does not exist)."""
     total = 0

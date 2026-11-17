@@ -1,4 +1,4 @@
-From 2fd1cf74b6ee21b3389e8e7ac9578eca113332cf Mon Sep 17 00:00:00 2001
+From a39d179f80727c0fd2e97cd5ebcb4544914db807 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 12 Nov 2026 07:28:40 -0900
 Subject: [PATCH] Co-op puppets: null-pointer reads give 0, as on the emulator

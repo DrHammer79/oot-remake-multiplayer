@@ -1,4 +1,4 @@
-From ad8801fe89c196581720f7e6aad20197ef9bc4d5 Mon Sep 17 00:00:00 2001
+From efa9410514651db10000df40f3048010dc7247db Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 02:56:35 -0900
 Subject: [PATCH] Co-op pad select: this game's controller and keyboard, for
@@ -23,10 +23,10 @@ the exe: hos_coop_input_select and hos_coop_input_pad_name.
  3 files changed, 114 insertions(+), 3 deletions(-)
 
 diff --git a/host/display.c b/host/display.c
-index 8c3865dd..4809c55f 100644
+index a95ebd65..b38147d4 100644
 --- a/host/display.c
 +++ b/host/display.c
-@@ -41,6 +41,7 @@ static int renderer;   /* the renderer presents into the window */
+@@ -42,6 +42,7 @@ static int renderer;   /* the renderer presents into the window */
  /* mouse capture: raw motion accumulated here, taken by nn_hid.c */
  static volatile LONG mouse_dx, mouse_dy;
  static volatile LONG mouse_captured;
@@ -34,16 +34,16 @@ index 8c3865dd..4809c55f 100644
  static int cursor_hidden;
  
  int hos_mouse_take(int32_t *dx, int32_t *dy) {
-@@ -368,6 +369,8 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
-         return 0;
-     case WM_TIMER: {
+@@ -467,6 +468,8 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
+             if (fullscreen) set_fullscreen(w,1); /* selection/hotplug changes, on the window thread */
+         }
          pointer_update(w, 0, 0);
 +        if (mouse_captured && hos_input_keyboard_mode() == 2) mouse_capture(w, 0);   /* (patch 0015: keyboard and mouse
 +                                                                                      off: a capture from before let go) */
          /* (longshot, #1532) a controller is not input to Windows: playing with one, the display went off at the power
             plan's timeout. While the game's window is in front and not minimized, the display's idle timer is reset every
             30 s (ES_DISPLAY_REQUIRED without ES_CONTINUOUS: nothing is held when the game is left or closed).
-@@ -410,7 +413,7 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
+@@ -509,7 +512,7 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
          if (coop_mouse(w, (POINT){(short)LOWORD(lp), (short)HIWORD(lp)}, 1)) return 0;   /* (oot-remake-multiplayer) */
          if (menu_open) menu_press(w, lp, HOS_MOUSE_LEFT);
          else if (game_menu_open) game_menu_press(lp, HOS_MOUSE_LEFT);
@@ -53,10 +53,10 @@ index 8c3865dd..4809c55f 100644
      case WM_KEYDOWN: {
          extern int hos_coop_key(unsigned key, int repeat);   /* (oot-remake-multiplayer: the chat box's keys first) */
 diff --git a/host/nn_hid.c b/host/nn_hid.c
-index a66371e7..aae351d4 100644
+index a02f267d..45b3e69d 100644
 --- a/host/nn_hid.c
 +++ b/host/nn_hid.c
-@@ -784,6 +784,8 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
+@@ -786,6 +786,8 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
              {XINPUT_GAMEPAD_DPAD_UP, HOS_PAD_UP}, {XINPUT_GAMEPAD_DPAD_RIGHT, HOS_PAD_RIGHT},
              {XINPUT_GAMEPAD_DPAD_DOWN, HOS_PAD_DOWN}};
          for (int p = 0; p < XUSER_MAX_COUNT && xinput_get; p++) {
@@ -65,7 +65,7 @@ index a66371e7..aae351d4 100644
              if (now < retry[p]) continue;
              XINPUT_STATE xs;
              if (xinput_get((DWORD)p, &xs) != ERROR_SUCCESS) {
-@@ -1018,6 +1020,22 @@ static void move_keys_stick(int x, int y, int percent, int32_t out[2]) {
+@@ -1020,6 +1022,22 @@ static void move_keys_stick(int x, int y, int percent, int32_t out[2]) {
          logged = percent, hos_log("hid: walking: the movement keys tilt the left stick to %d%% (%d, %d)", percent, out[0], out[1]);
  }
  
@@ -88,7 +88,7 @@ index a66371e7..aae351d4 100644
  /* *taps: the host's own presses (hos_hid_tap), apart from the rest */
  static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
      *buttons = *taps = 0;
-@@ -1057,7 +1075,9 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
+@@ -1059,7 +1077,9 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
          static const char *env;
          static int looked;
          if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
@@ -99,7 +99,7 @@ index a66371e7..aae351d4 100644
          walk_held(0, 0, rx_option(HOS_OPT_WALK_MODE, 0) == 1);   /* (behind: a toggled walk is kept) */
          return;
      }
-@@ -1081,6 +1101,11 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
+@@ -1083,6 +1103,11 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
              ps[3] > 12000 || ps[3] < -12000)
              player_used();
      }
@@ -112,7 +112,7 @@ index a66371e7..aae351d4 100644
      for (int i = 0; i < HOS_SW_N; i++)
          if (bound_down(i, 0)) *buttons |= 1ULL << i, player_used();
 diff --git a/host/pad_sdl.c b/host/pad_sdl.c
-index f587e3b1..1c76f4ff 100644
+index f587e3b1..44f5d5e0 100644
 --- a/host/pad_sdl.c
 +++ b/host/pad_sdl.c
 @@ -188,6 +188,31 @@ static int hd_poll(int i, const uint8_t side[3][4], long long now) {
@@ -173,7 +173,7 @@ index f587e3b1..1c76f4ff 100644
 +                    for (int i = 0; i < MAX_PADS; i++)
 +                        if (i != slot && pads[i].gc && pad_rank[i] == n) n++, i = -1;
 +                    pad_rank[slot] = n;
-+                    hos_log("hid: controller \"%s\" is pad %d", hos_sdl_pad_name(gc), n);
++                    hos_log("hid: that controller is pad %d", n);   /* (its name: the line before, Longshot's own) */
 +                }
 +            }
 +            {   /* (patch 0015) the open pads' names by number */

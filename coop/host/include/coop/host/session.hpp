@@ -82,6 +82,11 @@ struct FrameReport {
   std::uint64_t server_now_us = 0;      // the client's estimate; 0 when not connected
   bool hosting = false;                 // the watcher's role is host
   bool holding = false;                 // a snapshot is coming in parts: hold the game
+  // Rows 106/107: a held snapshot was dropped this frame (FlagWatcher::kHoldMaxFrames): the hook says so once.
+  bool hold_timeout = false;
+  // How long (1/60 s) the watcher's load window has been open; 0 when closed. Our own changes are not sent
+  // while it is: the hook logs one that stays open for a minute (rows 106/107).
+  std::uint64_t window_for = 0;
   std::size_t queued = 0;               // messages and flag lists queued to send
   // The host's save load reached this game this frame (FlagWatcher::
   // take_reset): drop session-wide state the save undoes (docs/flags.md, "Saves").

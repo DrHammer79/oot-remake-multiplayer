@@ -72,7 +72,7 @@ FrameReport Session::frame(const std::optional<PlayerReading>& reading, FlagStor
     sampler_.set_player_number(number);
     const std::uint64_t sample_us =
         frame_aligned_us(report.server_now_us, game_frame_age_us_ ? game_frame_age_us_() : 0);
-    for (const Outgoing& m : sampler_.frame(reading, sample_us)) {
+    for (const Outgoing& m : sampler_.frame(reading, sample_us, title_up_)) {
       protocol::Message message;
       if (protocol::decode(m.bytes, message) == protocol::Error::none) {
         out.emplace_back(std::move(message));
@@ -90,6 +90,8 @@ FrameReport Session::frame(const std::optional<PlayerReading>& reading, FlagStor
   if (watcher_) {
     report.hosting = watcher_->role() == FlagRole::host;
     report.holding = watcher_->holding();
+    report.hold_timeout = watcher_->take_hold_timeout();
+    report.window_for = watcher_->window_for();
     report.host_reset = watcher_->take_reset();
     report.received = watcher_->take_received();
     if (const auto seen = watcher_->take_save_load()) {

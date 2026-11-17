@@ -42,6 +42,8 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]);
 bool StartSaveWait(const std::string& host);
 // Co-op stopped: the title's line goes.
 void StopSaveWait();
+// The title waits for the host's save (Longshot patch 0028's hold, hos_coop_title_hold).
+bool SaveWaitWaiting();
 
 // This PC's own id for rejoining (coop.ini client_id, made once): the module's
 // join helper uses the same nonce and port for the same invite with it.

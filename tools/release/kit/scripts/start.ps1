@@ -32,7 +32,7 @@ if (Test-KitInZip $kit) {
 
 # 2. One start at a time for this folder.
 $lock = Enter-KitStartLock $kit
-if (-not $lock) { Stop-Start @('OoT Co-op is already starting in another window (it may be building the game). Wait for that window.') }
+if (-not $lock) { Stop-Start @('Squadala is already starting in another window (it may be building the game). Wait for that window.') }
 
 # 3. Files an antivirus or a broken unzip took.
 $missing = @(Get-KitMissingFiles $kit)

@@ -6,9 +6,10 @@
 #   powershell -ExecutionPolicy Bypass -File tools\release\make_kit_hookshot.ps1 -Release <tag>
 #
 # The kit (docs/setup.md says what the player does with it):
-#   Start Squadala.bat      the one entry point: checks, update, first game build, start (scripts\start.ps1)
-#   Start OoT Co-op.bat     its old name (up to v0.11.2): one line that starts Start Squadala.bat, for desktop
-#                           shortcuts and Steam entries, and for the updaters up to v0.11.2, which want it in a new kit
+#   Start Squadala.bat      the one entry point: checks, update, first game build, start (scripts\start.ps1). The only
+#                           start file from v0.11.4 on: its old name "Start OoT Co-op.bat" (up to v0.11.3) is gone, and
+#                           the kit's updater points the player's shortcuts and Steam entries at this one
+#                           (update.ps1 Update-KitStartLinks)
 #   README.txt              ten lines: what to do
 #   Update.bat              the updater in one file (also attached to the release for older kits)
 #   Revert.bat              back to the version before the last update (Update.bat -Revert)
@@ -58,7 +59,7 @@ function Test-BinaryHas([string]$Path, [string]$Text) {
 function Get-Sha([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 
 # What goes in. Files listed here and nowhere else, so a review sees the whole kit in one place.
-$KitTop = @('Start Squadala.bat', 'Start OoT Co-op.bat', 'README.txt', 'Revert.bat', 'start-server.cmd', 'make-puppet-pack.cmd', 'coop-options.ini')
+$KitTop = @('Start Squadala.bat', 'README.txt', 'Revert.bat', 'start-server.cmd', 'make-puppet-pack.cmd', 'coop-options.ini')
 $KitScripts = @('start.ps1', 'start-checks.ps1', 'play.ps1', 'coop-ini.ps1', 'kit-paths.ps1', 'hosting.ps1', 'relay-join.ps1',
     'invite.ps1', 'hookshot-build.ps1', 'apply_patch.py', 'discord_status.py', 'update.ps1', 'start-server.ps1', 'collect-logs.ps1', 'collect-logs.cmd', 'problem-report.ps1', 'problem-report.cmd', 'send-report.ps1', 'send-report.cmd', 'report-relay.txt',
     'log-mask.ps1', 'windows-checks.ps1', 'console-mode.ps1')
@@ -214,21 +215,15 @@ $own = @(Get-ChildItem $kit -Recurse -File | ForEach-Object { $_.FullName.Substr
 $size = (Get-ChildItem $kit -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ('Folder: {0:N1} MB, {1} files' -f ($size / 1MB), ($own.Count + 1))
 if (-not $NoZip) {
-    # Two names, the same bytes: Squadala-<tag>-windows.zip is the one players download (beside the Linux kit's
-    # Squadala-<tag>-linux.zip; both were oot-coop-... up to v0.11.2). oot-coop-<tag>.zip is the name every older
-    # updater takes (up to v0.10.1 the only one; v0.11.0 to v0.11.2 take it after oot-coop-<tag>-windows.zip), so
-    # those kits still find and install this release. Both go up.
+    # Squadala-<tag>-windows.zip (beside the Linux kit's Squadala-<tag>-linux.zip), its .sha256 and Update.bat: the release
+    # assets from v0.11.4 on. No oot-coop-<tag>.zip copy any more: the updaters up to v0.11.2 know only that name, so
+    # they take v0.11.3 (the last release with it) and that kit's updater takes this one; or Update.bat does it at once.
     $zip = Join-Path $OutRoot "$name-windows.zip"
-    $oldName = ($name -replace '^Squadala-', 'oot-coop-') + '.zip'
-    $old = Join-Path $OutRoot $oldName
     & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $OutRoot $name
     if ($LASTEXITCODE -ne 0) { throw "Zipping failed (tar $LASTEXITCODE)." }
-    Copy-Item -LiteralPath $zip -Destination $old -Force
     $hash = Get-Sha $zip
-    if ((Get-Sha $old) -ne $hash) { throw "The copy $old does not match $zip." }
     [System.IO.File]::WriteAllText("$zip.sha256", "$hash  $name-windows.zip`n", [System.Text.Encoding]::ASCII)
-    [System.IO.File]::WriteAllText("$old.sha256", "$hash  $oldName`n", [System.Text.Encoding]::ASCII)
     Copy-Item -LiteralPath (Join-Path $kit 'Update.bat') -Destination (Join-Path $OutRoot 'Update.bat') -Force
     Write-Host ('Zip: {0} ({1:N1} MB), SHA-256 {2}' -f $zip, ((Get-Item $zip).Length / 1MB), $hash)
-    Write-Host "Release assets: $name-windows.zip and $oldName (the same file, the name kits up to v0.11.2 update from), each with its .sha256, and Update.bat, all in $OutRoot"
+    Write-Host "Release assets: $name-windows.zip, its .sha256 and Update.bat, all in $OutRoot"
 }

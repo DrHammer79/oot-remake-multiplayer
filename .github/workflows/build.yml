@@ -1,18 +1,21 @@
 name: Build
 
-# Two tiers, so a push to a work branch does not fill the free runners' queue:
-# - fast tier, on a push to any branch: linux gcc unit tests (plus a compile of the
-#   Hookshot module, the hook code), python-tools on ubuntu with Python 3.12, and the
-#   hook compiles: windows-hook (the module with MSVC), linux-emulator (hook) and
-#   windows-emulator (hook), the emulator's hook files against its own headers with gcc
-#   and MSVC. So every pushed branch compiles all of lichii/hook on every platform.
-# - full tier: every job below. On a push to main or integrate-*, on a tag, on a
-#   pull request into main, and on a manual run (Actions > Build > Run workflow,
-#   pick the branch) when a branch wants the full proof before integration. There
-#   windows builds the module itself, so windows-hook is skipped. linux-emulator's
-#   full part (the AppImage) runs on linux-build, linux-2, tags and by hand.
+# Two tiers (docs/testing.md, "CI tiers"). One full run per batch, not per branch:
+# - branch tier, on a push to any other branch: linux gcc unit tests (plus a compile of
+#   the Hookshot module, the hook code) and python-tools on ubuntu with Python 3.12, and
+#   Content guard (its own workflow). The emulator's hook compiles (linux-emulator (hook),
+#   windows-emulator) run here only when the push changes an emulator-only file (the
+#   `changes` job: lichii/** but the core hook files the module already compiles). A
+#   branch's real gate is the local check (coord-multiplayer offline local-ci.ps1: MSVC
+#   build, ctest and the windows job's script steps), so windows-hook runs only for a
+#   pull request from a fork into another branch than main, which has no local check.
+# - full tier (batch tier): every job below. On a push to main or integrate-* (the
+#   integrator's merge of a batch of branches), on a tag, on a pull request into main,
+#   and on a manual run (Actions > Build > Run workflow). There windows builds the
+#   module itself. linux-emulator's full part (the AppImage) runs on linux-build,
+#   linux-2, tags and by hand.
 # A pull request from a branch of this repo into anything but main runs nothing:
-# the push already ran it. A pull request from a fork runs the fast tier.
+# the push already ran it. A pull request from a fork runs the branch tier.
 # Docs-only changes skip Build; Content guard still checks them.
 #
 # The full-tier test is repeated in each job's `if` or matrix (GitHub has no
@@ -49,6 +52,56 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/integrate-') && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  # Branch tier: does this push change an emulator-only file? Then the emulator's hook
+  # compiles run on the branch too. Emulator-only: everything under lichii/ (Fritchii pin,
+  # patches, fetch and build scripts, the hook) except the hook's core files, which the
+  # Hookshot module compiles in linux (gcc) and local-ci.ps1 (MSVC) already: so the Qt
+  # panel, coop_svc and the hook's build files. Base: the push's previous commit, or for a
+  # new branch the nearest of main and integrate-* (fewest commits ahead); no base found
+  # runs the compiles.
+  changes:
+    if: github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      emulator: ${{ steps.diff.outputs.emulator }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Files changed against the base
+        id: diff
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          base=""
+          if [ -n "${PR_BASE:-}" ]; then
+            base="$PR_BASE"
+          elif [ -n "${BEFORE:-}" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            best=""
+            for ref in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main 'refs/remotes/origin/integrate-*'); do
+              n=$(git rev-list --count "$ref..HEAD" 2>/dev/null) || continue
+              if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; base=$(git merge-base "$ref" HEAD); fi
+            done
+          fi
+          if [ -z "$base" ] || ! files=$(git diff --name-only "$base" HEAD); then
+            echo "no base found: the emulator compiles run"; echo "emulator=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          emu=$(printf '%s\n' "$files" | grep -E '^lichii/' |
+            grep -vE '^lichii/hook/' ; printf '%s\n' "$files" |
+            grep -E '^lichii/hook/(coop_svc|coop_window|coop_cheats_window|.*CMakeLists\.txt$|.*\.cmake$)')
+          echo "base $base; emulator-only files changed:"; printf '%s\n' "$emu" | sed '/^$/d'
+          if [ -n "$(printf '%s' "$emu" | tr -d '[:space:]')" ]; then
+            echo "emulator=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "emulator=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # The puppet pack tool runs on the player's PC (Windows, any recent Python 3), so its
   # tests run there too, on the oldest and newest Python we support. The tests use
   # made-up data only; nothing from the game is needed. Fast tier: ubuntu, 3.12 only.
@@ -83,10 +136,14 @@ jobs:
         run: python tools/puppet_pack/tests/test_autogen_flags.py -v
       - name: Boss beaten sets tests
         run: python tools/puppet_pack/tests/test_boss_beaten.py -v
+      - name: Story event effects tests
+        run: python tools/puppet_pack/tests/test_story_effects.py -v
       - name: Save flags tests
         run: python tools/autotest/tests/test_save_flags.py -v
       - name: Hookshot autotest driver tests
         run: python tools/autotest/tests/test_hookshot.py -v
+      - name: hs.py shared game files tests
+        run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Test lanes tests
         run: python tools/autotest/tests/test_lanes.py -v
       - name: Kit-mode autotest tests
@@ -219,11 +276,12 @@ jobs:
       - name: CI runner script checks
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci-runner/scripts_test.ps1
 
-  # The Windows module's compile (MSVC, the hook's own compiler) on the pushes the windows
-  # job skips (any branch but main, integrate-* and tags): hookshot_coop only, no tests or
-  # kit, so a worker branch sees its hook compile errors. Always GitHub's runner.
+  # The Windows module's compile (MSVC, the hook's own compiler) for a pull request from a
+  # fork into another branch than main (the windows job does not run there, and a fork has
+  # no local check): hookshot_coop only, no tests or kit. Our own branches get the same
+  # compile from local-ci.ps1 (their gate), so pushes skip it. Always GitHub's runner.
   windows-hook:
-    if: (github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository) && !(github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integrate-') || startsWith(github.ref, 'refs/tags/'))))
+    if: github.event_name == 'pull_request' && github.base_ref != 'main' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -431,9 +489,9 @@ jobs:
           release=$(if [ "$GITHUB_REF_TYPE" = tag ]; then echo "$GITHUB_REF_NAME"; else echo "ci-${GITHUB_SHA::8}"; fi)
           bash tools/release/make_kit_linux.sh --module "$MODULE" --server "$SERVER" --licenses build \
             --release "$release" --out "$RUNNER_TEMP/kit"
-          # Squadala-<tag>-linux.zip, and the same bytes as oot-coop-<tag>-linux.zip (the name the kits up to v0.11.2 update from)
-          (cd "$RUNNER_TEMP/kit" && sha256sum -c Squadala-*-linux.zip.sha256 oot-coop-*-linux.zip.sha256)
-          cmp "$RUNNER_TEMP"/kit/Squadala-*-linux.zip "$RUNNER_TEMP"/kit/oot-coop-*-linux.zip
+          # Squadala-<tag>-linux.zip and its .sha256 only (no oot-coop-* copy from v0.11.4 on)
+          (cd "$RUNNER_TEMP/kit" && sha256sum -c Squadala-*-linux.zip.sha256)
+          if ls "$RUNNER_TEMP"/kit/oot-coop-* >/dev/null 2>&1; then echo "::error::the kit has an oot-coop-* asset"; exit 1; fi
           unzip -l "$RUNNER_TEMP"/kit/Squadala-*-linux.zip | tail -n +4 | head -n 60
           echo "KIT=$(ls -d "$RUNNER_TEMP"/kit/Squadala-*-linux)" >> "$GITHUB_ENV"
       - name: Longshot's Linux builder with our patches, and the patched renderer (no game)
@@ -449,18 +507,14 @@ jobs:
           code=$?
           printf '%s\n' "$out" | tail -n 15
           [ $code -ne 0 ] && printf '%s' "$out" | grep -q 'needs your game file' || { echo "::error::expected the no-game message"; exit 1; }
-          # the old name (up to v0.11.2; menu entries and Steam shortcuts still start it) does the same
-          out=$(bash "$KIT/start-oot-coop.sh" --no-update </dev/null 2>&1)
-          code=$?
-          [ $code -ne 0 ] && printf '%s' "$out" | grep -q 'needs your game file' || { echo "::error::start-oot-coop.sh: expected the no-game message"; exit 1; }
+          # one start file: the old name (start-oot-coop.sh, up to v0.11.3) is not in the kit
+          [ ! -e "$KIT/start-oot-coop.sh" ] || { echo "::error::the kit still has start-oot-coop.sh"; exit 1; }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: oot-coop-linux
           path: |
             ${{ runner.temp }}/kit/Squadala-*-linux.zip
             ${{ runner.temp }}/kit/Squadala-*-linux.zip.sha256
-            ${{ runner.temp }}/kit/oot-coop-*-linux.zip
-            ${{ runner.temp }}/kit/oot-coop-*-linux.zip.sha256
           retention-days: 14
 
   # The co-op emulator on Linux (issue 127): Fritchii at lichii/PIN with our patches and the
@@ -468,16 +522,25 @@ jobs:
   # only the hook's files are compiled; the whole emulator, its AppImage and a start without a
   # game run on the linux-build and linux-2 branches, on tags and by hand (workflow_dispatch).
   linux-emulator:
-    # Every push: its hook part is the only compile of the emulator-only hook file (coop_svc.cpp)
-    # against the emulator's own headers. The full part (AppImage) stays gated in the gate step.
-    if: github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository
+    # Full tier, and a branch push that changes an emulator-only file (`changes`): its hook part
+    # is the only compile of the emulator-only hook file (coop_svc.cpp) against the emulator's
+    # own headers. The full part (AppImage) is in the matrix only where it runs (the gate step
+    # below still checks), so other pushes do not hold a runner just to skip it.
+    needs: changes
+    if: (github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository) && ((github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integrate-') || startsWith(github.ref, 'refs/tags/')))) || needs.changes.outputs.emulator == 'true' || github.ref == 'refs/heads/linux-build' || github.ref == 'refs/heads/linux-2')
     runs-on: ubuntu-24.04
     name: linux-emulator (${{ matrix.part }})
     timeout-minutes: 300
+    env:
+      # ccache through CMake's launcher variables (build-linux.sh passes no launcher itself).
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1500M
     strategy:
       fail-fast: false
       matrix:
-        part: [hook, full]
+        part: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/linux-build' || github.ref == 'refs/heads/linux-2' || startsWith(github.ref, 'refs/tags/')) && '["hook", "full"]' || '["hook"]') }}
     steps:
       - name: Skip the full build here
         id: gate
@@ -524,6 +587,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/cpm-cache
           key: fritchii-cpm-${{ hashFiles('lichii/PIN') }}
+      - name: Install ccache
+        if: steps.gate.outputs.run == 'true'
+        run: sudo apt-get install -y -q ccache
+      # One cache per part and pin; each run saves its own (run id) and starts from the newest.
+      - name: ccache
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .ccache
+          key: emu-ccache-${{ matrix.part }}-${{ hashFiles('lichii/PIN') }}-${{ github.run_id }}
+          restore-keys: |
+            emu-ccache-${{ matrix.part }}-${{ hashFiles('lichii/PIN') }}-
       - name: Compile the co-op hook
         if: steps.gate.outputs.run == 'true' && matrix.part == 'hook'
         run: lichii/build-linux.sh --src "$RUNNER_TEMP/fritchii" --cpm-cache "$RUNNER_TEMP/cpm-cache" --hook-only
@@ -571,12 +646,14 @@ jobs:
           retention-days: 14
 
   # The co-op emulator's hook files with MSVC (the compiler of the Windows kit's lichii.exe),
-  # on every push: Fritchii at lichii/PIN with our patches (lichii/fetch.ps1), configured as
+  # on the full tier and emulator-only changes (`changes`): Fritchii at lichii/PIN with our patches (lichii/fetch.ps1), configured as
   # lichii/README.md "Build (Windows)" says, then only the lichii/hook objects (core, the
   # emulator-only coop_svc.cpp and the Qt panel coop_window.cpp / coop_cheats_window.cpp) are
   # compiled. Nothing is linked or packaged. Always GitHub's runner, never the owner's PC.
   windows-emulator:
-    if: github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository
+    # Full tier, and a branch push that changes an emulator-only file (`changes`).
+    needs: changes
+    if: (github.event_name != 'pull_request' || github.base_ref == 'main' || github.event.pull_request.head.repo.full_name != github.repository) && ((github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integrate-') || startsWith(github.ref, 'refs/tags/')))) || needs.changes.outputs.emulator == 'true')
     runs-on: windows-2022
     name: windows-emulator (hook)
     timeout-minutes: 120

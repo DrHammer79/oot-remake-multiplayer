@@ -10,6 +10,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 #include <fmt/format.h>
@@ -33,11 +35,19 @@ struct HosCoopMenuState {
 };
 using MenuStateFn = int (*)(HosCoopMenuState*);
 
-MenuStateFn FindMenuState() {
+// One of patch 0018's exports, by name in the exe: dllexport on Windows; on Linux the exe's link exports it by name
+// (patch 0001, as 0008's and 0015's) and dlsym finds it. Nothing in a Longshot without it.
+void* FindExport(const char* name) {
 #ifdef _WIN32
+    return reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(nullptr), name));
+#else
+    return dlsym(RTLD_DEFAULT, name);
+#endif
+}
+
+MenuStateFn FindMenuState() {
     static const MenuStateFn fn = [] {
-        const auto f = reinterpret_cast<MenuStateFn>(
-            reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(nullptr), "hos_coop_menu_state")));
+        const auto f = reinterpret_cast<MenuStateFn>(FindExport("hos_coop_menu_state"));
         LOG_INFO(Core, "coop: map: {}", f ? "the game's menus are known (patch 0018): players on the Map page, the "
                                             "minimap's icons hidden behind menus"
                                           : "this Longshot has no menu state (patch 0018): nothing on the Map page, "
@@ -45,9 +55,6 @@ MenuStateFn FindMenuState() {
         return f;
     }();
     return fn;
-#else
-    return nullptr;
-#endif
 }
 
 // The panes found (0: not found), each with the screen whose layout it is in; and the screens looked in.
@@ -202,10 +209,8 @@ std::atomic<bool> g_refresh_pending{false};
 }  // namespace
 
 bool AskHudRefresh() {
-#ifdef _WIN32
     using Fn = int (*)();
-    static const Fn fn = reinterpret_cast<Fn>(
-        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(nullptr), "hos_coop_hud_refresh")));
+    static const Fn fn = reinterpret_cast<Fn>(FindExport("hos_coop_hud_refresh"));
     static bool told = false;
     if (fn == nullptr) {
         if (!told) LOG_INFO(Core, "coop: map refresh: this Longshot's patch 0018 has no HUD refresh: not asked");
@@ -219,9 +224,6 @@ bool AskHudRefresh() {
     LOG_INFO(Core, "coop: map refresh: asked (a dungeon item written by co-op); the HUD screen's copy {}",
              menu ? HudCopy(menu->hud_screen) : std::string("unknown"));
     return true;
-#else
-    return false;
-#endif
 }
 
 void Frame(void* ctx, const HosCoopApi* api) {

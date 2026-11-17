@@ -106,6 +106,11 @@ function Wait-AnyKey([int]$Seconds) {
 # with what to do, and this kit starts as it is; a failed update waits for a key first, so
 # its message is read before the game window covers it.
 $updater = Join-Path $PSScriptRoot 'update.ps1'
+if ($NoUpdate -and (Test-Path $updater)) {
+    # No -Status this time (as right after an update by an older updater, which removed "Start OoT Co-op.bat"): the
+    # player's shortcuts are still pointed at the kit's start file (-Status does it on the other starts).
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $updater -Kit $kit -Tidy
+}
 if (-not $NoUpdate -and (Test-Path $updater)) {
     $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $status = ''

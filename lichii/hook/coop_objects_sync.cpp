@@ -741,8 +741,22 @@ void Sync::Take(std::uint64_t hash) {
         return;
     }
     std::lock_guard lock(inbox_mutex_);
-    if (takes_in_.size() < 1024) {
-        takes_in_.push_back(hash);
+    if (takes_in_.size() >= 1024) {
+        return;
+    }
+    takes_in_.push_back(hash);
+    // A Gold Skulltula's placement key arrives here as the placement hash, but
+    // the token the game made for it has no placement: its id is
+    // TokenId(placement). Both are taken, so the Skulltula and the token it
+    // already made go (issue 89: the token stayed and counted a second
+    // time). Only for the 100 placements: any other key would name a token
+    // that cannot exist.
+    if (!CoopWorld::IsGoldSkulltulaKey(hash)) {
+        return;
+    }
+    const std::uint64_t token = CoopWorld::TokenId(hash);
+    if (token != 0 && token != kNoHash && takes_in_.size() < 1024) {
+        takes_in_.push_back(token);
     }
 }
 
@@ -1178,8 +1192,9 @@ std::size_t Sync::EventPartnersOurs(std::uint64_t now_us) const {
 }
 
 Sync::PartnerWhy Sync::EventPartnerWhy(const Object& o) const {
-    // A boss runs its own changes in our event already (CoopBossNative::SetEvent) and keeps
-    // its fight's owner; a fish keeps the lure rules (issue 151).
+    // A boss runs its own changes in our event already (CoopBossNative::SetEvent; row 130: its owner's
+    // motion waits meanwhile, CopiesRunningOwn) and keeps its fight's owner; a fish keeps the lure rules
+    // (issue 151).
     if (IsBoss(o.name) || o.fish) {
         return PartnerWhy::none;
     }
@@ -2932,6 +2947,7 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             }
             const std::int32_t life = sample->state.life->life;
             o->owner_life_zero = life <= 0;
+            o->owner_life = life;
             const std::int32_t have = o->hurt_until != 0 ? o->hurt_target : *o->life;
             const bool holding =
                 o->hit_sum > 0 || now_us - o->hit_at < AnswerHoldUs(kHitHoldUs, sample->player_number);
@@ -3020,35 +3036,9 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             // exception: one boss death for everyone holds a copy at 1 (and
             // its own hits lowered it where the owner refused them), so it
             // takes the old owner's life, raised through its own Life step.
-            if (o != nullptr && handed->state.life && o->life && IsBoss(o->name) &&
-                handed->state.life->life > *o->life && handed->state.life->life > 0) {
-                LifeWrite raise;
-                raise.address = o->address;
-                raise.life = handed->state.life->life;
-                raise.heal = true;
-                writes.push_back(raise);
-                notes_.emplace_back("ours now with less life than its old owner's (" + std::to_string(*o->life) +
-                                    " < " + std::to_string(handed->state.life->life) +
-                                    "): raised through its own Life step: " + o->name);
-                o->life = handed->state.life->life;
-                o->hurt_left = 0;
-                o->hurt_until = 0;
-            } else if (o != nullptr && handed->state.life && o->life && IsBoss(o->name) &&
-                       handed->state.life->life < *o->life && handed->state.life->life > 0) {
-                // A boss copy that becomes ours with MORE life than its old owner's (its game refused the
-                // owner's replayed hits): the old owner's damage goes into its own Life step, never a write.
-                // A plain lower life waited for a replay that never came (hs-boss-full 20261115-122137: B
-                // took Gohma at 21 while A's was 17, "nothing given"), so every hand-over healed her, and
-                // only the player who kept her could wear her down (boss-hits, tracker 104).
-                LifeWrite lower{o->address, handed->state.life->life, *o->life - handed->state.life->life,
-                                std::nullopt};
-                lower.direct = true;
-                writes.push_back(lower);
-                notes_.emplace_back("ours now with more life than its old owner's (" + std::to_string(*o->life) +
-                                    " > " + std::to_string(handed->state.life->life) +
-                                    "): lowered through its own Life step: " + o->name);
-                o->hurt_left = 0;
-                o->hurt_until = 0;
+            if (o != nullptr && handed->state.life && handed->state.life->life > 0 &&
+                TakeOwnerLife(*o, handed->state.life->life, writes, "ours now")) {
+                // (a boss: one boss death for everyone held its copy at 1, or its own hits lowered it)
             } else if (o != nullptr && handed->state.life && o->life &&
                 handed->state.life->life < *o->life) {
                 write(*o, handed->state.life->life);
@@ -3058,6 +3048,50 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                 }
             }
         }
+    }
+}
+
+bool Sync::TakeOwnerLife(Object& o, std::int32_t owner_life, std::vector<LifeWrite>& writes, std::string_view why) {
+    if (!IsBoss(o.name) || !o.life || owner_life <= 0 || owner_life == *o.life) {
+        return false;
+    }
+    if (owner_life > *o.life) {
+        // Less life than its owner's (held at 1 by HeldLifeStep, or lowered by its own hits): raised through its own
+        // Life step (a heal), so one hit never kills a near-full boss (Barinade).
+        LifeWrite raise;
+        raise.address = o.address;
+        raise.life = owner_life;
+        raise.heal = true;
+        writes.push_back(raise);
+        notes_.emplace_back(std::string(why) + " with less life than its old owner's (" + std::to_string(*o.life) +
+                            " < " + std::to_string(owner_life) + "): raised through its own Life step: " + o.name);
+        o.life = owner_life;
+    } else {
+        // More life than its owner's (its game refused the owner's replayed hits): the owner's damage goes into its
+        // own Life step, never a write. A plain lower life waited for a replay that never came (hs-boss-full
+        // 20261115-122137: B took Gohma at 21 while A's was 17, "nothing given"), so every hand-over healed her,
+        // and only the player who kept her could wear her down (boss-hits, tracker 104).
+        LifeWrite lower{o.address, owner_life, *o.life - owner_life, std::nullopt};
+        lower.direct = true;
+        writes.push_back(lower);
+        notes_.emplace_back(std::string(why) + " with more life than its old owner's (" + std::to_string(*o.life) +
+                            " > " + std::to_string(owner_life) + "): lowered through its own Life step: " + o.name);
+    }
+    o.hurt_left = 0;
+    o.hurt_until = 0;
+    return true;
+}
+
+void Sync::KeepBossLives(std::uint8_t self, std::vector<LifeWrite>& writes) {
+    for (auto& [address, o] : objects_) {
+        const auto own = owners_.find(o.id);
+        if (own == owners_.end() || own->second.player == self || own->second.player == 0) {
+            continue;  // ours (our game judged it all along) or no owner known
+        }
+        if (o.dead_at != 0 || o.owner_life_zero || !o.owner_life) {
+            continue;  // its owner said it died (it dies here too), or no life of the owner's heard
+        }
+        TakeOwnerLife(o, *o.owner_life, writes, "the session ended: our copy");
     }
 }
 

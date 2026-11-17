@@ -780,3 +780,30 @@ TEST_CASE("title menu: the save list waits for the title and the manager, retrie
     in.state = R::kRead;
     CHECK(r.Step(in) == R::Action::ask);     // the later switch: asked again
 }
+
+TEST_CASE("title menu: Skip title screen is free solo and held while co-op does anything (patch 0028, report 133)") {
+    SkipTitleInput in;   // solo, co-op idle: Longshot's Skip title screen may choose
+    CHECK(SkipTitleHold(in) == nullptr);
+    for (const int state : {HOS_COOP_STARTING, HOS_COOP_HOSTING, HOS_COOP_JOINING, HOS_COOP_WAIT_HOST, HOS_COOP_CONNECTED,
+                            HOS_COOP_FAILED}) {
+        SkipTitleInput s;
+        s.host_state = state;
+        INFO("state " << state);
+        CHECK(SkipTitleHold(s) != nullptr);
+    }
+    SkipTitleInput live;
+    live.session_live = true;
+    CHECK(std::string(SkipTitleHold(live)) == "a co-op session is live");
+    SkipTitleInput coming;
+    coming.save_coming = true;
+    CHECK(std::string(SkipTitleHold(coming)) == "the host's save is on its way");
+    SkipTitleInput wait;
+    wait.save_wait = true;
+    CHECK(std::string(SkipTitleHold(wait)) == "the host's save is on its way");
+    SkipTitleInput host;
+    host.host_state = HOS_COOP_HOSTING;
+    CHECK(std::string(SkipTitleHold(host)) == "co-op is hosting");
+    SkipTitleInput join;
+    join.host_state = HOS_COOP_CONNECTED;
+    CHECK(std::string(SkipTitleHold(join)) == "co-op is joining");
+}

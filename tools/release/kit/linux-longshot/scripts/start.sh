@@ -81,6 +81,9 @@ if ((pack_only)); then
 fi
 
 # --- 2: a new co-op version ---------------------------------------------------------------------
+# The menu and Steam entries follow the kit's start file (start-oot-coop.sh, the name up to v0.11.3, is gone from
+# v0.11.4 on; an updater up to v0.11.3 removes it without moving the entries): every start, the update check or not.
+bash "$KIT/scripts/update.sh" --tidy || true
 mode=$(kit_auto_update)
 if ((!no_update)) && [[ $mode != no ]] && [[ -z ${OOT_COOP_NO_UPDATE-} ]]; then
     status=$(KIT_QUIET_FETCH=1 bash "$KIT/scripts/update.sh" --status 2>/dev/null || true)
@@ -121,14 +124,16 @@ exe=$(kit_game_exe) || fail 'The game is not built (said why above).'
 # A menu entry once (Steam Deck: Steam's "Add a Non-Steam Game" lists it), for this kit.
 apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 entry=$apps/oot-coop.desktop
-if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "$KIT/start-squadala.sh" "$entry" 2>/dev/null; then
+# (written again when it starts another kit or still has its name up to v0.11.3, "OoT Co-op")
+if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] &&
+    { ! grep -qF -- "$KIT/start-squadala.sh" "$entry" 2>/dev/null || grep -qx 'Name=OoT Co-op' "$entry" 2>/dev/null; }; then
     mkdir -p "$apps"
     # (the desktop entry spec: inside "...", \ " ` $ are escaped with a backslash)
     q=${KIT//\\/\\\\}; q=${q//\"/\\\"}; q=${q//\`/\\\`}; q=${q//\$/\\\$}
     {
         echo '[Desktop Entry]'
         echo 'Type=Application'
-        echo 'Name=OoT Co-op'
+        echo 'Name=Squadala'
         echo 'Comment=Ocarina of Time co-op on Longshot: host or join in the game'
         echo "Exec=bash \"$q/start-squadala.sh\""
         echo "Path=$KIT"
@@ -136,7 +141,7 @@ if [[ -d $(dirname "$apps") && -z ${OOT_COOP_NO_SHORTCUT-} ]] && ! grep -qF -- "
         echo 'Terminal=false'
         echo 'Categories=Game;'
     } >"$entry"
-    say "A menu entry 'OoT Co-op' was added (Steam Deck: add it to Steam with 'Add a Non-Steam Game')."
+    say "A menu entry 'Squadala' was added (Steam Deck: add it to Steam with 'Add a Non-Steam Game')."
 fi
 
 # --- 4: the game --------------------------------------------------------------------------------

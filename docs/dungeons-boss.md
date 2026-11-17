@@ -151,6 +151,35 @@ LANE1 autotest hs-boss-full (runs 20261115-122137 and -130255): in A's game the 
 - Tested: `tests/server/session_test.cpp` (four `boss-copy-b` cases: chase/near refused while unready, an unready owner hands to a ready game, ready before nearer unready when the owner leaves, a late joiner's stun once ready), `tests/lichii/boss_native_test.cpp` (the event case waits for the grace), `boss_test.cpp` (Readiness, 2 cases), `objects_test.cpp` (BossPreBattle).
 - **Not proven in game.** Check (LANE1, hs-boss-full or hs-boss-fix-gohma): A walks in first and under her; during A's intro no "now ours" in B's log while B logs "not ready to own the boss"; A's copy (if it is one) never asks `BossAppear` twice; after B's own intro (if it plays) "now ours" comes within ~1 s. A late B logs "our boss left its pre-battle phase here" once its copy follows A's fight, and B's seed stun then hands B the boss ("now ours").
 
+## Entering together: a copy's own event held by its owner's motion (tracker row 130, GitHub #173, 0.11.3)
+
+**Seen.** Two players walked into Gohma's room together; one softlocked, the other beat her. The softlocked game's log
+(0.11.3): player 1 started the intro; her own game took `InsideTheDekuTree_BossAppear` a moment later, after player 1's
+intro was over ("the fight is on already ..., not skipped"), with a copy Gohma. Through that whole event the objects
+layer put player 1's animation on the copy (`copy ... plays 'C01-Enemy_DungeonBoss_Gohma-A-0' at frame 1.0 (its own
+AI: 'Pre_Battle_Ceiling_Find')`). The event never ended (`teleport: not during a cutscene`) until player 1 killed her.
+
+**Root cause.** Two layers drive a boss copy. The native table (`coop_boss_native`) lets the copy run its own changes in
+four windows (`OwnTime`): our event and `kAfterEventSteps` after it, `kReactSteps` after our own hit, a new mid-boss's
+`kStartSteps`, and its death. The objects layer did not know about these windows and still put the owner's place,
+animation and frame on the copy every frame. Its event-partner rule (row 97) leaves bosses out on purpose, because the
+native table "runs their own". So the copy's own game asked its own steps while the owner's motion undid them.
+
+**Fix.** `CoopBossNative::Table::CopiesRunningOwn()` names those copies (empty while native sync is off). The objects
+tick drops the owner's poses and plays for them before the Mover (`coop_objects.cpp`). The owner's remove still comes.
+Log: `coop: objects: N boss copy(ies) run their own ...: their owner's place and animation wait`, then `... again`.
+
+**Every case with the same cause** (all four windows, every boss and mid-boss with native sync):
+- A copy's own intro / appear event (this report; also a late arrival's own `BossAppear` with a copy Gohma).
+- The reaction to our own hit (a seed stun on a copy: the owner's animation undid the stun, a likely part of "Gohma
+  can't be stunned" in the 0.11 reports).
+- A new mid-boss copy's own start (issue 62: its appear undone, "stayed unseen").
+- A copy's death (player report #105: its own death setting played under the owner's last motion).
+
+Tests: `tests/lichii/boss_native_test.cpp` ("the copies that run their own now are named for the objects layer").
+Autotest: `hs-boss-together-gohma` (both walk through the door at once; offline job `boss-together-a-repro`).
+**Not proven in game** until that run passes on a module with this fix.
+
 ## One boss death for everyone (branch boss-fix, seed N2BTEYKM report, 0.11.2)
 Before: each game's boss could die of its own game's hits. A copy took its own hits through its own Life step
 and sent them to the owner as DAMAGE. The owner's game refused most of them, because Gohma holds her life at 1
@@ -399,8 +428,13 @@ reload brought the fight back with no container to win (#241, row 52).
   | Twinrova | SageOfSpirit -> Step10 | |
 
   Every row also has the three `HavePlayedEvent` flags (the setting, BossIn, BossOut).
-- **Given one way, outside the boss's scene.** Once per scene load (and again when the record changes), while our
-  Link stands in any scene but the boss's dungeon, each Bool not at its beaten value is written to it, and the quest
+- **Given one way, outside the boss's scene, only at a scene load.** The bosses the record holds when a scene is
+  first seen are given there, once, while our Link stands in any scene but the boss's dungeon. A boss beaten while we
+  stand in a scene waits for the next load (a door, a warp, a reload), never mid-scene: some of the set is read live
+  outside the dungeon (`Gohma_DefeatBoss` by Kokiri Forest's `Npc_Kokiri_011`, `HavePlayedEvent.Dm_DodongoCave_BossOut`
+  by Death Mountain Trail's `DeathMountainTrail_Child_Prefab_6f34`, `SageOfForest_IsBefore_Step08` by Kokiri Forest's
+  `Level_All_01` and `Level_Area_01`; romfs `Logic`), and in the game alone a kill is always in another scene, so those
+  scenes never see them change while loaded (review of c78d17c4, boss-away-crash). Then each Bool not at its beaten value is written to it, and the quest
   is raised to the step only from a step before it: a save that finished the dungeon (Complete) is never stepped
   back. Never in the boss's own dungeon scene: its room's logic is loaded there (maybe a fight); the next scene gives
   it. The dungeon then loads as a beaten save's: no boss, the blue warp there; a reload of an older save of ours gets

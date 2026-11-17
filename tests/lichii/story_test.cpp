@@ -1,12 +1,16 @@
 // Tests for the shared story flags (lichii/hook/coop_story.cpp, issue 173).
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <array>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "coop_chests.h"
 #include "coop_dungeon.h"
 #include "coop_quests.h"
 #include "coop_story.h"
@@ -542,4 +546,139 @@ TEST_CASE("story: the Great Fairy fountains open by each game's own flags, their
     CHECK(host::flag_hash("Meet_GreatFairy_04") == 0x732acbf1u);
     CHECK(host::flag_hash("Meet_GreatFairy_05") == 0xbe878637u);
     CHECK(host::flag_hash("Meet_GreatFairy_CompleteMessage") == 0x2fe03182u);
+}
+
+// Row 129 (GitHub #173): what a shared story event sets in the game that plays it, given to a game whose
+// played flag came from another game (CoopStory::Effects, tools/puppet_pack/story_effects.py).
+namespace {
+
+const CoopStory::Effect* FindEffect(std::string_view setting, std::string_view flag) {
+    for (const auto& e : CoopStory::Effects()) {
+        if (setting == e.setting && flag == e.name) return &e;
+    }
+    return nullptr;
+}
+
+std::vector<const CoopStory::Effect*> Due(const std::map<std::uint32_t, bool>& bools) {
+    std::array<const CoopStory::Effect*, CoopStory::kEffectsMax> out{};
+    const auto n = CoopStory::EffectsDue(
+        [&](std::uint32_t h) -> std::optional<bool> {
+            const auto it = bools.find(h);
+            return it == bools.end() ? std::nullopt : std::optional<bool>(it->second);
+        },
+        out);
+    return {out.begin(), out.begin() + n};
+}
+
+} // namespace
+
+TEST_CASE("story effects: the owl's HyruleField_ArriveEntrance, which starts the clock, is one (row 129)") {
+    const auto* owl = FindEffect("HyruleField_Goto_HyruleCastle_Kaepora", "HyruleField_ArriveEntrance");
+    REQUIRE(owl != nullptr);
+    CHECK(owl->played == 0x98bf10c1u);  // shared: CoopStory::Find
+    CHECK(owl->flag == 0x804aec99u);    // the clock gate's flag (docs/time.md)
+    CHECK(owl->value);
+    REQUIRE(CoopStory::Find(owl->played) != nullptr);
+}
+
+TEST_CASE("story effects: due only once the event played, while the flag is read and not its value") {
+    const auto* owl = FindEffect("HyruleField_Goto_HyruleCastle_Kaepora", "HyruleField_ArriveEntrance");
+    REQUIRE(owl != nullptr);
+    // A late joiner: the owl's played flag came from the host, its own flow never ran.
+    auto due = Due({{owl->played, true}, {owl->flag, false}});
+    CHECK(std::find(due.begin(), due.end(), owl) != due.end());
+    // Its own owl (or a mend before): nothing to do.
+    CHECK(Due({{owl->played, true}, {owl->flag, true}}).empty());
+    // The owl not seen anywhere yet: the clock stays as the game has it.
+    CHECK(Due({{owl->played, false}, {owl->flag, false}}).empty());
+    // Anything unread counts as not due.
+    CHECK(Due({{owl->flag, false}}).empty());
+    CHECK(Due({{owl->played, true}}).empty());
+}
+
+TEST_CASE("story effects: every one comes from a shared played flag and is not shared itself") {
+    std::optional<host::SharedFlags> shared = host::item_shared_flags();
+    CoopDungeon::AddShared(shared);
+    CoopStory::AddShared(shared);
+    CoopQuests::AddShared(shared);
+    CoopChests::AddShared(shared);
+    REQUIRE(shared.has_value());
+    REQUIRE_FALSE(CoopStory::Effects().empty());
+    CHECK(CoopStory::Effects().size() <= CoopStory::kEffectsMax);
+    std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
+    for (const auto& e : CoopStory::Effects()) {
+        INFO(e.setting << ": " << e.name);
+        CHECK(e.played == host::flag_hash(std::string("HavePlayedEvent.") + e.setting));
+        CHECK(e.flag == host::flag_hash(e.name));
+        CHECK(shared->contains(host::FlagKey(e.played, std::uint16_t{0})));
+        CHECK_FALSE(shared->contains(host::FlagKey(e.flag, std::uint16_t{0})));
+        CHECK(seen.insert({e.played, e.flag}).second);  // no row twice
+    }
+}
+
+TEST_CASE("story effects: given once per flag per load, a flag set back then is left alone and said once") {
+    // Review of owl-time: a flag the game's own code sets back is not fought every 3 s.
+    const auto& effects = CoopStory::Effects();
+    const auto* owl_row = FindEffect("HyruleField_Goto_HyruleCastle_Kaepora", "HyruleField_ArriveEntrance");
+    REQUIRE(owl_row != nullptr);
+    REQUIRE(owl_row->played == 0x98bf10c1u);
+    const CoopStory::Effect& owl = *owl_row;
+    using V = CoopStory::EffectsGiven::Verdict;
+    CoopStory::EffectsGiven given;
+    // A write that failed is not given: the next pass gives it again, no false "set back".
+    CHECK(given.Take(owl) == V::give);
+    CHECK(given.Take(owl) == V::give);
+    given.Given(owl);
+    // Set back in the same load: said once, then quiet however often it is due again.
+    CHECK(given.Take(owl) == V::set_back);
+    CHECK(given.Take(owl) == V::quiet);
+    CHECK(given.Take(owl) == V::quiet);
+    // Another flag is its own.
+    for (const CoopStory::Effect& e : effects) {
+        if (e.flag != owl.flag) {
+            CHECK(given.Take(e) == V::give);
+            given.Given(e);
+            break;
+        }
+    }
+    // A new load (an older save reloaded, the flag back at 0 there): given once more.
+    given.NewLoad();
+    CHECK(given.Take(owl) == V::give);
+    given.Given(owl);
+    CHECK(given.Take(owl) == V::set_back);
+}
+
+TEST_CASE("story effects: a flag set by several events is due once per pass, with one value (review of owl-time)") {
+    // Every flag that more than one row sets: one value, and with all its events played it is due once.
+    std::map<std::uint32_t, std::vector<const CoopStory::Effect*>> by_flag;
+    for (const auto& e : CoopStory::Effects()) by_flag[e.flag].push_back(&e);
+    std::size_t multi = 0;
+    for (const auto& [flag, rows] : by_flag) {
+        if (rows.size() < 2) continue;
+        ++multi;
+        INFO(rows.front()->name);
+        std::map<std::uint32_t, bool> bools{{flag, !rows.front()->value}};
+        for (const auto* r : rows) {
+            CHECK(r->value == rows.front()->value);
+            bools[r->played] = true;
+        }
+        const auto due = Due(bools);
+        REQUIRE(due.size() == 1);
+        CHECK(due.front()->flag == flag);
+        // Given once in that pass: the flag is not "set back" by its own second row.
+        CoopStory::EffectsGiven given;
+        CHECK(given.Take(*due.front()) == CoopStory::EffectsGiven::Verdict::give);
+        given.Given(*due.front());
+    }
+    CHECK(multi >= 2);  // DeathMtCrater_IsFirstEntry, MelodyGet_Time_EndConversationWithZelda
+    // The two crater entrances played together: one due row.
+    const auto* a = FindEffect("GoTo_DeathMountainCrater", "DeathMtCrater_IsFirstEntry");
+    const auto* b = FindEffect("GoTo_DeathMountainCrater_FromGoronCity", "DeathMtCrater_IsFirstEntry");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    CHECK(Due({{a->played, true}, {b->played, true}, {a->flag, true}}).size() == 1);
+    // Only the second entrance played: still due, through its own row.
+    const auto only_b = Due({{a->played, false}, {b->played, true}, {a->flag, true}});
+    REQUIRE(only_b.size() == 1);
+    CHECK(only_b.front() == b);
 }

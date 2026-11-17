@@ -43,6 +43,10 @@ struct Plug {
     std::uint32_t key = 0;
     std::uint8_t type = 0;
     std::optional<std::uint8_t> value;  // the first byte of the value, when it can be read
+    // [plug + 0x28]: the value's address, its low 2 bits flags (bit 1: the game's set-bool marks a change of it,
+    // f_7103c41cf0/41d00). deku-ladder: CoopLogicSet::SetInput stores through it.
+    std::uint64_t value_word = 0;
+    std::uint64_t node = 0;  // the plug node's own address (deku-ladder: SetInput's ownership check)
 };
 
 // The actor's plugs in key order, or nothing when its logic is not there or not live.

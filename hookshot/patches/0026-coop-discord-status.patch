@@ -1,4 +1,4 @@
-From 05f232655a34bf8e922d617528851235bec2a6d4 Mon Sep 17 00:00:00 2001
+From 027414bbb2979be797f377954dbf98450de3a67c Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 12:42:25 -0900
 Subject: [PATCH] Co-op Discord status: the words and art from the options
@@ -32,7 +32,7 @@ line of its own).
  create mode 100644 host/hos_discord_activity.h
 
 diff --git a/host/discord_rpc.c b/host/discord_rpc.c
-index dda093b..dc127f7 100644
+index dda093bb..dc127f75 100644
 --- a/host/discord_rpc.c
 +++ b/host/discord_rpc.c
 @@ -14,9 +14,19 @@
@@ -265,7 +265,7 @@ index dda093b..dc127f7 100644
      }
 diff --git a/host/hos_discord_activity.h b/host/hos_discord_activity.h
 new file mode 100644
-index 0000000..5b363d6
+index 00000000..5b363d6b
 --- /dev/null
 +++ b/host/hos_discord_activity.h
 @@ -0,0 +1,137 @@
@@ -406,6 +406,3 @@ index 0000000..5b363d6
 +}
 +
 +#endif
--- 
-2.56.0.windows.4
-

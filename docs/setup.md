@@ -33,6 +33,8 @@ To check it works: in the game the other players show as Link with their name ta
 
 Nothing to do: on every start the kit asks GitHub whether a new co-op version is out, and if so asks you once (`auto_update = yes` in `coop-options.ini` updates without asking, `no` never does). It downloads the new kit, checks it, keeps your settings, your game file and the built game, and puts the new co-op into the game in seconds. It builds the game again only when the update moves to a new Longshot (it says so: about 15 minutes). Every player needs the same version.
 
+**A kit older than 0.11.3** (its start file is `Start OoT Co-op.bat`) updates in two steps by itself: first to 0.11.3, then, on the next start, to the newest version (its updater only knows the old download names, which releases from 0.11.4 on no longer have). To go straight to the newest version, download `Update.bat` from the newest release into your kit folder and double-click it. From 0.11.4 the kit has one start file, `Start Squadala.bat`: the update moves your desktop and Start menu shortcuts and your Steam entry over to it and removes `Start OoT Co-op.bat` (if Steam was open, restart it once).
+
 `Update.bat` in the kit folder updates by hand (for example when the start said it could not reach GitHub). It is also attached to each release: dropped into an older emulator kit, it turns that kit into a Longshot kit. The emulator, `Host.bat`, `Join.bat` and the other old files go into the kit's `backup-<version>\` folder; your emulator files (`emulator\user`: its saves, keys and settings) stay where they are, and the window says you can delete that folder when you no longer need it. **To keep playing on the emulator**, keep your emulator kit (the last emulator release is the early test release of 2026-11-12 on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)) as it is (do not put a newer `Update.bat` in it) and unzip the Longshot kit into a new folder.
 
 ## Going back to an older version
@@ -52,7 +54,6 @@ On Linux the same is `bash revert.sh` and `bash scripts/update.sh --version <tag
 | What | Why |
 |---|---|
 | `Start Squadala.bat` | The only file you start |
-| `Start OoT Co-op.bat` | Its old name (up to v0.11.2), kept so old shortcuts and older updaters still work: it starts `Start Squadala.bat` |
 | `README.txt` | The steps above, short |
 | `Update.bat` | Updates by hand (the start does it by itself) |
 | `Revert.bat` | Goes back to the version before the last update ([above](#going-back-to-an-older-version)); `previous\` holds the versions kept for it |
@@ -72,7 +73,7 @@ Nothing of the game is in the kit. The built game and the puppet pack are made f
 The start window says what is wrong and what to do. What it checks:
 
 - **"This kit is still inside its zip file."** You opened the zip and double-clicked the file inside it. Close it, right-click the zip, **Extract All...**, and start `Start Squadala.bat` in the folder it made.
-- **"OoT Co-op is already starting in another window."** You double-clicked twice. Wait for the first window (the first build takes a while).
+- **"Squadala is already starting in another window."** You double-clicked twice. Wait for the first window (the first build takes a while).
 - **"This folder is in OneDrive"**, **"...letters the game build cannot handle"**, **"...too long"**, **"...cannot be written to"**: the first build cannot work in this folder. It offers to copy the kit to `C:\OoT-Coop` and start it there; say yes (or move the folder yourself). Once the game is built, the kit no longer asks.
 - **"Your antivirus has most likely removed..."**: Windows Security (or another antivirus) took a file of the kit or of the built game. Open **Windows Security > Virus & threat protection > Protection history**, restore the file, and add the kit folder under **Exclusions**. Then start again: the game is not built again.
 - **"The game isn't set up yet... Set it up now?"**: the first start. Answer **Y** (or wait a minute) and it builds the game once; **n** builds nothing until the next start.
@@ -96,11 +97,11 @@ The start window says what is wrong and what to do. What it checks:
 
 ## Built Longshot yourself?
 
-The kit never plays a Longshot you built with Longshot's own builder, and moving that game into the kit folder does nothing: co-op needs its own build of the Longshot release the kit is made for (`hookshot\PIN`, now v3.0.0-rc.5), with co-op's changes in its source. A nightly or dev build is another version, so it cannot be used either.
+The kit never plays a Longshot you built with Longshot's own builder, and moving that game into the kit folder does nothing: co-op needs its own build of the Longshot release the kit is made for (`hookshot\PIN`, now v3.0.0-rc.6), with co-op's changes in its source. A nightly or dev build is another version, so it cannot be used either.
 
 Before the first build the kit asks once: **"Built Longshot yourself? ... Drag your Longshot game folder ... into this window"** (the folder with `longshot.exe`; just Enter, or 60 seconds, for no). The answer is kept in `hookshot\longshot-folder.txt`: to be asked again, delete that file before the game is built (once it is built, copy saves by hand, below). It then:
 - copies the tool downloads your Longshot's setup already has, when they are the very same files (by SHA-256): less to download;
-- copies its compiled files too when it is the same release (v3.0.0-rc.5), so that what co-op does not change is not compiled again (the game is still translated again, with co-op in it);
+- copies its compiled files too when it is the same release (v3.0.0-rc.7), so that what co-op does not change is not compiled again (the game is still translated again, with co-op in it);
 - copies your saves into the co-op game after the build (below).
 
 Nothing is ever changed in your Longshot's folders. Without a folder, the kit still reuses the downloads in Longshot Builder's home (`%LOCALAPPDATA%\LongshotBuilder`) when it finds one.

@@ -308,15 +308,6 @@ std::string_view TreatmentWhy(std::string_view name, std::uint64_t hash);
 // copies, and not an enemy the sync treats in its own way (`special`:
 // rolled, hatching, announced, a puzzle, a shot).
 bool GetsExtras(std::string_view name, std::uint64_t hash, bool has_life, bool special);
-// Player report 111 (Deku Tree): extras are made only outside dungeons. The
-// director makes an extra with no placement data, so it has no
-// DefaultDungeonRoomIndex, and the game's room check (EnemyCommon
-// IsDungeonRoomCheckDisable, BSAParam IsMOLDisableDungeonRoomID false) kept
-// one buried for both players, its owner's Link on top of it. In a dungeon
-// scene (CoopDungeon::IsDungeonScene) each enemy that would get extras gets
-// its weight instead (Extras::NoSpot). Lifted once the create can pass the
-// placed enemy's Dynamic (docs/play-online.md, Difficulty).
-bool ExtrasIn(std::string_view scene);
 // The placement id of extra `index` (0 on) of the enemy placed with `hash`:
 // never 0 or ~0 (a made actor's), never `hash` itself.
 std::uint64_t ExtraHash(std::uint64_t hash, unsigned index);

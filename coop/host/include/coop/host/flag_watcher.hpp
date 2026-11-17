@@ -80,6 +80,11 @@ struct FlagStats {
   std::uint64_t entries_unsent = 0;    // entries a message kind cannot carry: left out, the rest sent
   std::uint64_t event_reads = 0;       // use_events: flags read because the game wrote them
   std::uint64_t event_misses = 0;      // use_events: a change the audit found that no event had named
+  // Rows 106/107: the two states in which a player sends none of its own changes (dungeon-items-next).
+  std::uint64_t holding_frames = 0;    // 1/60 s held for a join snapshot's last part: diff() off, FLAG_STATE held
+  std::uint64_t window_frames = 0;     // 1/60 s in a load window: our own changes not sent (docs/flags.md "Saves")
+  std::uint64_t hold_timeouts = 0;     // a snapshot whose last part never came (kHoldMaxFrames): dropped
+  std::uint64_t pending_now = 0;       // player: own changes sent and not answered yet (now, not a count)
   std::uint64_t full_reads = 0;        // use_events: frames that read the whole list (a load window, the first)
 };
 
@@ -316,6 +321,12 @@ class FlagWatcher {
   }
   // A start with no save in after this long (a load the game gave up): loading no more.
   static constexpr std::uint64_t kNativeLoadMaxFrames = 30 * 60;
+  // A join snapshot whose last part has not come after this long is dropped as an out-of-order part is
+  // (rows 106/107): held, a player sends none of its own changes and writes no FLAG_STATE. The server sends
+  // every part at once on the reliable progress channel, so a whole snapshot takes well under a second.
+  static constexpr std::uint64_t kHoldMaxFrames = 10 * 60;
+  // FLAG_STATE messages kept while holding; one more drops the snapshot at once.
+  static constexpr std::size_t kHeldStatesMax = 512;
   static constexpr int kTitleFrames = 30;
   static constexpr int kSaveLoadMin = 2;
   static constexpr int kSettleFrames = 120;
@@ -379,6 +390,11 @@ class FlagWatcher {
 
   // A FLAG_SNAPSHOT has started and its last part has not come yet.
   bool holding() const { return holding_; }
+  // How long (1/60 s) the snapshot has been held, and the load window open; 0 when not.
+  std::uint64_t holding_for() const { return holding_ ? frames_ - holding_since_ : 0; }
+  std::uint64_t window_for() const { return window_ ? frames_ - window_since_ : 0; }
+  // A held snapshot was dropped by kHoldMaxFrames or kHeldStatesMax since the last call (the hook's notice).
+  bool take_hold_timeout() { return std::exchange(hold_timed_out_, false); }
   // Local changes sent and not answered yet.
   std::size_t pending() const { return pending_.size(); }
   const FlagStats& stats() const { return stats_; }
@@ -392,6 +408,8 @@ class FlagWatcher {
   void handle(FlagStore& store, Incoming& message, Table& answers);
   void apply_state(FlagStore& store, const std::vector<protocol::FlagEntry>& flags);
   void apply_snapshot(FlagStore& store);
+  // A snapshot that cannot finish: dropped, the game no longer held, what came meanwhile applied.
+  void drop_snapshot(FlagStore& store);
   // The host's save load (FLAG_RESET): every value written exactly.
   void apply_reset(FlagStore& store, const std::vector<protocol::FlagEntry>& flags);
   // The group's value written as it is (no OR, max or mirror rule), except a
@@ -512,6 +530,9 @@ class FlagWatcher {
   bool resend_pending_ = false;
   bool snapshot_requested_ = false;
   bool holding_ = false;
+  std::uint64_t holding_since_ = 0;  // frames_ at part 0
+  bool hold_timed_out_ = false;      // take_hold_timeout
+  std::uint64_t window_since_ = 0;   // frames_ when window_ opened
   std::uint16_t snapshot_next_part_ = 0;
   std::uint16_t snapshot_part_count_ = 0;
   Table snapshot_;                        // parts so far

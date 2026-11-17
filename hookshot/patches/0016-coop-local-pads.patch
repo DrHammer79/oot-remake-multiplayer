@@ -1,4 +1,4 @@
-From 992db052500dcf3a79d01b84dfdaf55dc02d06f0 Mon Sep 17 00:00:00 2001
+From f99c86f44962ce877042e96e372046d9fe4d8c8d Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 12:26:46 -0900
 Subject: [PATCH] Co-op local pads: split-screen players get Npads 2 to 4
@@ -10,10 +10,10 @@ oot-remake-multiplayer's patch 0016 (host only, no lift), on top of patch 0015. 
  2 files changed, 182 insertions(+), 13 deletions(-)
 
 diff --git a/host/nn_hid.c b/host/nn_hid.c
-index aae351d4..4335e4d7 100644
+index 45b3e69d..f83eef85 100644
 --- a/host/nn_hid.c
 +++ b/host/nn_hid.c
-@@ -710,6 +710,23 @@ static uint64_t bound_pad_buttons(uint64_t raw) {
+@@ -712,6 +712,23 @@ static uint64_t bound_pad_buttons(uint64_t raw) {
      return buttons;
  }
  
@@ -37,7 +37,7 @@ index aae351d4..4335e4d7 100644
  static volatile LONG pad_raw_now;   /* the gamepads' inputs at the last read, 1 << HOS_PAD_* */
  static uint64_t pad_after_menu;     /* (the pads' inputs the Insert menu had, 1 << HOS_PAD_*: each waits until let go) */
  static uint64_t pad_raw_game;       /* (pads_read: the last read's inputs without the menu's Back+Start chord) */
-@@ -1167,6 +1184,26 @@ static void npad_states(Ctx *c) {
+@@ -1169,6 +1186,26 @@ static void npad_states(Ctx *c) {
      uint64_t buttons = 0, taps = 0;
      int32_t stick[4] = {0};
      int connected = id == NPAD_NO1;
@@ -64,7 +64,7 @@ index aae351d4..4335e4d7 100644
      {
          static int64_t last_read;
          static uint32_t seen_ids[16];
-@@ -1182,7 +1219,8 @@ static void npad_states(Ctx *c) {
+@@ -1184,7 +1221,8 @@ static void npad_states(Ctx *c) {
          for (int i = 0; i < nseen; i++) known |= seen_ids[i] == id;
          if (!known && nseen < 16) {
              seen_ids[nseen++] = id;
@@ -74,7 +74,7 @@ index aae351d4..4335e4d7 100644
                      (unsigned long long)c->x[30]);
          }
      }
-@@ -1226,7 +1264,8 @@ static void npad_states(Ctx *c) {
+@@ -1228,7 +1266,8 @@ static void npad_states(Ctx *c) {
      uint64_t hos_coop_pad_filter(uint64_t buttons, int32_t stick[4]);   /* (oot-remake-multiplayer, coop_bridge.c: the title menu) */
      if (connected) buttons = hos_coop_pad_filter(buttons, stick);
      int64_t s = ++sampling;
@@ -84,7 +84,7 @@ index aae351d4..4335e4d7 100644
      if (connected) __atomic_store_n(&hos_coop_pad, word, __ATOMIC_RELAXED);
      for (int i = 0; i < count; i++) {
          uint64_t e = out + (uint64_t)i * STATE_SIZE;
-@@ -1234,7 +1273,7 @@ static void npad_states(Ctx *c) {
+@@ -1236,7 +1275,7 @@ static void npad_states(Ctx *c) {
          G64(e) = (uint64_t)(s - i);
          G64(e + 8) = word;
          memcpy(GP(e + 16), stick, 16);
@@ -93,7 +93,7 @@ index aae351d4..4335e4d7 100644
      }
      RET(count);
  }
-@@ -1244,14 +1283,27 @@ HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
+@@ -1246,14 +1285,27 @@ HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
  HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj) { npad_states(c); }
  HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj) { npad_states(c); }
  /* GetNpadStyleSet(unsigned int const&) -> BitFlagSet<32, NpadStyleTag> */
@@ -123,7 +123,7 @@ index aae351d4..4335e4d7 100644
  HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {}
  HLE(_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE) {}
  
-@@ -1444,3 +1496,30 @@ HLE(_ZN2nn3hid20GetTouchScreenStatesILm16EEEiPNS0_16TouchScreenStateIXT_EEEi) {
+@@ -1446,3 +1498,30 @@ HLE(_ZN2nn3hid20GetTouchScreenStatesILm16EEEiPNS0_16TouchScreenStateIXT_EEEi) {
      G64(ARG(0)) = (uint64_t)InterlockedIncrement64(&sampling);
      RET(1);
  }
@@ -155,7 +155,7 @@ index aae351d4..4335e4d7 100644
 +}
 +HOS_COOP_HID_EXPORT int hos_coop_pad_take(int n, uint32_t serial, int npad) { return hos_sdl_pad_take(n, serial, npad); }
 diff --git a/host/pad_sdl.c b/host/pad_sdl.c
-index 1c76f4ff..5116a403 100644
+index 44f5d5e0..0686cea6 100644
 --- a/host/pad_sdl.c
 +++ b/host/pad_sdl.c
 @@ -66,6 +66,22 @@ static uint64_t state_buttons;

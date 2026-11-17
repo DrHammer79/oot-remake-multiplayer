@@ -865,4 +865,20 @@ SaveListRefresh::Action SaveListRefresh::Step(const Input& in) {
     return Action::ask;
 }
 
+const char* SkipTitleHold(const SkipTitleInput& in) {
+    if (in.session_live) {
+        return "a co-op session is live";
+    }
+    if (in.save_wait || in.save_coming) {
+        return "the host's save is on its way";
+    }
+    switch (in.host_state) {
+    case HOS_COOP_IDLE: return nullptr;
+    case HOS_COOP_STARTING:
+    case HOS_COOP_HOSTING: return "co-op is hosting";
+    case HOS_COOP_FAILED: return "a co-op host or join was tried";
+    default: return "co-op is joining";
+    }
+}
+
 }  // namespace CoopTitleMenu

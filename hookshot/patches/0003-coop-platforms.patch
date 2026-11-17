@@ -1,4 +1,4 @@
-From 123f4ed37b613629e6f8119ed6bcfc51db2beb84 Mon Sep 17 00:00:00 2001
+From 4f2f8dc4d31775bbcb1bd52a78e9831e7cf44adc Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 12 Nov 2026 08:35:18 -0900
 Subject: [PATCH] Co-op platforms: started AI pause counters go into co-op's

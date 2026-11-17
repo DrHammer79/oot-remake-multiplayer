@@ -725,3 +725,56 @@ TEST_CASE("native boss: a death list for another boss, or none, leaves a copy a 
     t.Receive(kActor, BossBsa{3, 4, std::nullopt, {}});
     CHECK(t.OnBrainVerb(kBsa, 9, false, false));
 }
+
+// Row 130 (two players entering Gohma's room together; only one could beat her). The second game's own appear event
+// ran with a copy Gohma the objects layer kept putting into its owner's animation (C01 at frame 1 over her own
+// Pre_Battle_Ceiling_Find) every frame: the event waited for her for good. The table now names the copies that run
+// their own, and the objects layer puts none of their owner's motion on them meanwhile.
+TEST_CASE("native boss: the copies that run their own now are named for the objects layer (row 130)") {
+    constexpr std::uint64_t kOwned = kActor + 0x100;
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Gohma(Role::copy), Boss{kOwned, kBsa + 0x100, Role::owner, "Enemy_MiddleBoss_Stalfos", 1}});
+    t.Receive(kActor, BossBsa{3, 4, std::nullopt, {}});
+    FakeGuest g;
+    const std::int32_t at = 4;
+    g.Write(kBsa + addr::kBsaBrainVerb, &at, 4);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    using V = std::vector<std::uint64_t>;
+    CHECK(t.CopiesRunningOwn().empty());  // a copy taking its owner's verbs; our own boss is never named
+
+    SUBCASE("our event, and kAfterEventSteps after it") {
+        t.SetEvent(true);
+        CHECK(t.CopiesRunningOwn() == V{kActor});
+        t.SetEvent(false);
+        CHECK(t.CopiesRunningOwn() == V{kActor});
+        for (std::uint64_t i = 0; i < Table::kAfterEventSteps + 1; ++i) {
+            (void)t.Step(g, false, 0, kMain);
+        }
+        CHECK(t.CopiesRunningOwn().empty());
+    }
+    SUBCASE("our own hit's reaction") {
+        t.NoteOwnHit(kActor);
+        CHECK(t.CopiesRunningOwn() == V{kActor});
+        t.NoteOwnHit(kOwned);  // our own boss: never named
+        for (std::uint64_t i = 0; i < Table::kReactSteps + 1; ++i) {
+            (void)t.Step(g, false, 0, kMain);
+        }
+        CHECK(t.CopiesRunningOwn().empty());
+    }
+    SUBCASE("its death") {
+        t.SetDying({"Enemy_DungeonBoss_Gohma"});
+        CHECK(t.CopiesRunningOwn() == V{kActor});
+    }
+    SUBCASE("a new mid-boss copy's own start") {
+        Table m;
+        m.SetOn(true, true);
+        m.Publish({Boss{kActor, kBsa, Role::copy, "Enemy_MiddleBoss_Lizalfos", 2}});
+        CHECK(m.CopiesRunningOwn() == V{kActor});
+    }
+    SUBCASE("native sync off: none (the owner's motion is the only sync)") {
+        t.SetEvent(true);
+        t.SetOn(false, false);
+        CHECK(t.CopiesRunningOwn().empty());
+    }
+}
