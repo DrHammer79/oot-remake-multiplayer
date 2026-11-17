@@ -68,17 +68,34 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
         return false;
     }
     if (!crawling_) {
-        // Not in our crawl (refused: a ladder, water, mid-air; or the world
-        // took our Link out of it): the game's own runs. Back on the ground,
-        // the crawl is asked again at once.
-        if (ground) {
-            asks_ = 0;
-            next_ask_ms_ = 0;
+        if (Passes(a->verb)) {
+            airborne_ = true;  // the world moves our Link: its own runs, the crawl waits for the ground
+            moved_ = true;
+            return false;
         }
+        if (ground) {
+            airborne_ = false;
+            ground_seen_ = true;  // (Next starts a new round when one is due)
+        }
+        if (Trying()) {
+            // A crawl round is on: the game takes one request per slot a
+            // frame, so its own (asked before our caller runs) would take
+            // the slot and ours would get kSlotBusy.
+            ++counts_.cleared;
+            if (!std::exchange(cleared_noted_, true)) {
+                Note("our downed Link: the game's own action verb " + std::to_string(a->verb) +
+                     " skipped so our Crawl gets the slot");
+            }
+            return true;
+        }
+        // Not in our crawl and no round on (really refused: a ladder, water,
+        // mid-air; or out of asks): the game's own runs.
         return false;
     }
     if (Passes(a->verb)) {
         crawling_ = false;  // the world moves our Link (a fall, water, the void): asked again after it
+        airborne_ = true;
+        moved_ = true;
         ++counts_.passed;
         Note("our downed Link: the game's action verb " + std::to_string(a->verb) + " let through; crawl again after");
         return false;
@@ -189,9 +206,18 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
                 crawling_ = taken;
                 if (taken) {
                     asks_ = 0;  // (a later fall or water may need a fresh round)
+                    moved_ = false;
+                    Note("our downed Link: Crawl (234) asked and taken");
+                } else if (result == kSlotBusy) {
+                    // Not a refusal of the crawl: the slot took another
+                    // request this frame. Skipping is on now: next frame.
+                    ++counts_.busy;
+                    next_ask_ms_ = 0;
+                    Note("our downed Link: Crawl (234) waits: the slot took a request this frame (3); asked next frame");
+                } else {
+                    blocked_ = true;  // a real refusal: the game's own runs
+                    Note("our downed Link: Crawl (234) refused (" + std::to_string(result) + ")");
                 }
-                Note(taken ? "our downed Link: Crawl (234) asked and taken"
-                           : "our downed Link: Crawl (234) refused (" + std::to_string(result) + ")");
             } else {
                 Note(taken ? "our Link up: Wait (40) asked and taken" : "our Link up: Wait (40) refused");
             }
@@ -228,18 +254,34 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
     }
 
     // The crawl.
-    if (want_.lying != was_lying_) {
-        was_lying_ = want_.lying;
+    const auto new_round = [this] {
         asks_ = 0;
         next_ask_ms_ = 0;
+        blocked_ = false;
+        moved_ = false;
+        cleared_noted_ = false;
+    };
+    if (want_.lying != was_lying_) {
+        was_lying_ = want_.lying;
+        new_round();
+        airborne_ = false;
+        ground_seen_ = false;
         stand_due_ = !want_.lying && crawling_;
         crawling_ = false;
     }
     if (want_.event) {
         crawling_ = false;  // the event moves our Link; asked again after it
-        asks_ = 0;
-        next_ask_ms_ = 0;
+        new_round();
+        airborne_ = false;
         return std::nullopt;
+    }
+    if (std::exchange(ground_seen_, false) && !crawling_ && !airborne_) {
+        // Back on the ground: after the world moved our Link, a new round at
+        // once; a round that ended on the spot only kRetryMs after its last ask.
+        const bool over = blocked_ || asks_ >= kMaxAsks;
+        if (moved_ || (over && now_ms >= last_ask_ms_ + kRetryMs)) {
+            new_round();
+        }
     }
     if (want_.bsa == 0 || !learnt_) {
         return std::nullopt;
@@ -248,9 +290,10 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
         stand_due_ = false;
         return Ask(guest, verb::kWait, main_base);
     }
-    if (want_.lying && !crawling_ && asks_ < kMaxAsks && now_ms >= next_ask_ms_) {
+    if (want_.lying && !crawling_ && !airborne_ && asks_ < kMaxAsks && now_ms >= next_ask_ms_) {
         ++asks_;
         next_ask_ms_ = now_ms + kAskEveryMs;
+        last_ask_ms_ = now_ms;
         return Ask(guest, verb::kCrawl, main_base);
     }
     return std::nullopt;

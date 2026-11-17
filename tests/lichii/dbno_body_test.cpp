@@ -219,6 +219,58 @@ TEST_CASE("dbno body: a refused crawl skips nothing (a ladder, water, mid-air)")
     CHECK(c.Totals().skipped == 0);
 }
 
+TEST_CASE("dbno body: the game's own requests are skipped while the crawl is asked, so it gets the slot") {
+    // The game takes one request per slot a frame (main+0xc08f0 answers 3 to
+    // a second one): the 15:38 run's 6482 'refused (3)' lines.
+    Guest g;
+    Crawl d;
+    d.Want(Want(false));
+    d.Skip(kBsa, Req(verb::kWait), false);
+    d.Want(Want(true));
+    // The scheduler's own Wait, before our caller in the frame: skipped.
+    CHECK(d.Skip(kBsa, Req(verb::kWait), false));
+    CHECK(d.Skip(kBsa, Req(134), false));
+    CHECK_FALSE(d.Skip(kBsa, Req(verb::kFall), false));  // the world's: runs
+    CHECK(d.Skip(kBsa, Req(verb::kWait), false));         // landed: skipped again
+    // Our ask answered 3 (the slot was taken anyway): asked again next frame,
+    // not kAskEveryMs later, and no 'refused' line.
+    CHECK(Verbs(RunFrame(d, g, 1000, Crawl::kSlotBusy)) == std::vector<std::int32_t>{verb::kCrawl});
+    CHECK(Verbs(RunFrame(d, g, 1016, 0)) == std::vector<std::int32_t>{verb::kCrawl});
+    CHECK(Verbs(RunFrame(d, g, 1032, 0)).empty());  // taken
+    const auto t = d.Totals();
+    CHECK(t.busy == 1);
+    CHECK(t.cleared == 3);
+    bool refused_line = false;
+    bool taken_line = false;
+    for (const auto& n : d.TakeNotes()) {
+        refused_line = refused_line || n.find("refused") != std::string::npos;
+        taken_line = taken_line || n.find("Crawl (234) asked and taken") != std::string::npos;
+    }
+    CHECK_FALSE(refused_line);
+    CHECK(taken_line);
+    CHECK(d.Skip(kBsa, Req(134), false));  // crawling: skipped as before
+}
+
+TEST_CASE("dbno body: a crawl refused on the spot is asked again only every kRetryMs, never each frame") {
+    Guest g;
+    Crawl c;
+    c.Want(Want(false));
+    c.Skip(kBsa, Req(verb::kWait), false);
+    c.Want(Want(true));
+    // 20 s of the scheduler asking Wait every frame, every crawl refused (2):
+    // rounds of at most kMaxAsks, each kRetryMs after the last ask of the one
+    // before (was: one ask each frame).
+    int asks = 0;
+    int skipped = 0;
+    for (std::uint64_t ms = 1000; ms < 21000; ms += 16) {
+        skipped += c.Skip(kBsa, Req(verb::kWait), false) ? 1 : 0;
+        asks += static_cast<int>(Verbs(RunFrame(c, g, ms, 2)).size());
+    }
+    CHECK(asks > Crawl::kMaxAsks);       // tried again later
+    CHECK(asks <= 3 * Crawl::kMaxAsks);  // rounds at ~1, ~8.5, ~16 s
+    CHECK(skipped <= 3);                 // a real refusal skips the game's own (only each round's first frame)
+}
+
 TEST_CASE("dbno body: a fall or water while crawling passes, and the crawl is asked again on the ground") {
     Guest g;
     Crawl c;
@@ -227,14 +279,15 @@ TEST_CASE("dbno body: a fall or water while crawling passes, and the crawl is as
     CHECK(c.Totals().passed == 1);
     CHECK_FALSE(c.Skip(kBsa, Req(verb::kLand), false));  // no longer crawling: the game's
     CHECK_FALSE(c.Skip(kBsa, Req(134), false));
-    // Asked again (refused while in the air: spaced, at most kMaxAsks).
+    // Not asked while the world moves our Link.
     int asks = 0;
     for (std::uint64_t ms = 1100; ms < 9000; ms += 100) {
         asks += static_cast<int>(Verbs(RunFrame(c, g, ms, 2)).size());
     }
-    CHECK(asks == Crawl::kMaxAsks);
-    // Back on the ground (the game's own Wait): asked at once, taken, skipping again.
-    CHECK_FALSE(c.Skip(kBsa, Req(verb::kWait), false));
+    CHECK(asks == 0);
+    // Back on the ground (the game's own Wait, skipped: it would take the
+    // slot): asked at once, taken, skipping again.
+    CHECK(c.Skip(kBsa, Req(verb::kWait), false));
     CHECK(Verbs(RunFrame(c, g, 9000)) == std::vector<std::int32_t>{verb::kCrawl});
     CHECK(c.Skip(kBsa, Req(134), false));
 

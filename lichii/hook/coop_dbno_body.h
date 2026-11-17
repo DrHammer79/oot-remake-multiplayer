@@ -13,8 +13,17 @@
 //   wrap (a hit's reaction no longer stands it up, row 34), except the ones the
 //   world forces (kPassVerbs: falling, landing, sliding, swimming, diving, the
 //   void, an event, the game's death): those run, and the crawl is asked again
-//   once our Link is back on the ground (its next Walk or Wait). A refused
-//   crawl skips nothing. Up again: the game's "Wait" (40) is asked once.
+//   once our Link is back on the ground (its next Walk or Wait).
+//   The game takes ONE request per slot a frame: its accept path sets bit 1
+//   of the slot record's byte +0x7c, the BSA update (main+0xcb9c0) clears it,
+//   and a request meanwhile gets 3. The scheduler asks our Link's slot nearly
+//   every frame before our caller runs, so while a crawl round is on (lying,
+//   no event, not in the air, not really refused, asks left) the game's own
+//   requests (except kPassVerbs) are skipped too, leaving the slot free for
+//   our Crawl; a 3 is asked again next frame. A real refusal (any other
+//   result) skips nothing; the next round starts on the ground after the
+//   world moved our Link, or kRetryMs after the last ask.
+//   Up again: the game's "Wait" (40) is asked once.
 //   The verb values are read from the scheduler modules' selector cases.
 // - Shield. The game's own named invincibility, as the AI node
 //   OneShotLifeSetInvincible gives it (run main+0x8d7520; inputs Bool,
@@ -155,6 +164,8 @@ public:
         std::uint64_t passed = 0;      // kPassVerbs let through while crawling
         std::uint64_t asked = 0;       // our Crawl / Wait requests made
         std::uint64_t refused = 0;     // ... that the game refused (result not 0)
+        std::uint64_t busy = 0;        // ... of those: the slot had taken a request this frame (3)
+        std::uint64_t cleared = 0;     // the game's own requests skipped to free the slot for our Crawl
         std::uint64_t shield_on = 0;   // our invincibility put on
         std::uint64_t unseen_on = 0;   // our emitter key put in
         std::vector<std::int32_t> skipped_verbs;  // the first distinct ones (the log)
@@ -165,7 +176,12 @@ public:
 
     // Ask again at most this often while lying and not known to crawl.
     static constexpr std::uint64_t kAskEveryMs = 500;
-    static constexpr int kMaxAsks = 6;  // then left until our Link's next Walk/Wait
+    static constexpr int kMaxAsks = 6;  // then left until our Link's next Walk/Wait (see kRetryMs)
+    // A round that ended refused (or out of asks) on the spot starts again on
+    // the ground only this long after its last ask (moved by the world: at once).
+    static constexpr std::uint64_t kRetryMs = 5000;
+    // The request's result when the slot already took one this frame.
+    static constexpr std::uint64_t kSlotBusy = 3;
 
 private:
     enum class Pending : std::uint8_t { none, malloc, crawl, stand, shield, unseen };
@@ -193,6 +209,17 @@ private:
     bool stand_due_ = false;     // up again after a crawl: ask Wait once
     int asks_ = 0;
     std::uint64_t next_ask_ms_ = 0;
+    std::uint64_t last_ask_ms_ = 0;
+    bool blocked_ = false;      // this round's crawl was really refused (not kSlotBusy)
+    bool airborne_ = false;     // a kPassVerbs verb let through, no Walk/Wait since
+    bool moved_ = false;        // the world moved our Link since this round started
+    bool ground_seen_ = false;  // a Walk/Wait of the game's while not crawling (Next may start a round)
+    bool cleared_noted_ = false;
+    // A crawl round is on: the game's own requests are skipped to free the slot.
+    bool Trying() const noexcept {
+        return want_.lying && !want_.event && learnt_ && !crawling_ && !airborne_ && !blocked_ &&
+               asks_ < kMaxAsks;
+    }
     Hold shield_;
     Hold unseen_;
     bool pending_on_ = false;    // the hold call in flight turns on (else off)
