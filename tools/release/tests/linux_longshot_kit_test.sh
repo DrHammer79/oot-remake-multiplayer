@@ -492,8 +492,10 @@ out=$(ls "$kit"/coop-logs-*.zip 2>/dev/null | head -n1)
 check 'collect-logs: a .zip beside start-squadala.sh (the /bugreport bot takes a .zip only)' [ -n "$out" ]
 if [[ -n $out ]]; then
     mkdir -p "$tmp/logs" && python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$out" "$tmp/logs"
-    check 'collect-logs: the game log is in, its password and LAN address masked' bash -c 'grep -q "<lan-1>" "$1" && grep -q "(removed)" "$1" && ! grep -q hunter2 "$1"' _ "$tmp/logs/game/longshot_log.txt"
-    check 'collect-logs: OOTRR'"'"'s last-build.txt is in, masked' bash -c 'grep -q "<lan-1>" "$1" && grep -q "seed failed" "$1"' _ "$tmp/logs/game/last-build.txt"
+    # (the tags are numbered across all the files, about-this-pc.txt's own addresses too: <lan-N>, not a fixed number)
+    lan=$(grep -o 'joined <lan-[0-9]*>' "$tmp/logs/game/longshot_log.txt" 2>/dev/null | head -n1 | cut -d' ' -f2)
+    check 'collect-logs: the game log is in, its password and LAN address masked' bash -c '[ -n "$2" ] && grep -q "(removed)" "$1" && ! grep -q hunter2 "$1" && ! grep -q "192\.168\." "$1"' _ "$tmp/logs/game/longshot_log.txt" "$lan"
+    check 'collect-logs: OOTRR'"'"'s last-build.txt is in, masked (the same address the same tag as in the game log)' bash -c '[ -n "$2" ] && grep -qF "seed failed at $2" "$1"' _ "$tmp/logs/game/last-build.txt" "$lan"
     check 'collect-logs: a name learnt in the game log is masked in the kit'"'"'s logs too; host names too' bash -c 'grep -Eq "<name> opened a chest at <host-[0-9]+>:27510" "$1" && ! grep -rq Mido "$2"' _ "$tmp/logs/logs/start.log" "$tmp/logs"
 fi
 check 'collect-logs: the last line names the file to send' bash -c '[ "$(tail -n1 "$1")" = "Send this file: $2" ]' _ "$tmp/logs.txt" "$out"

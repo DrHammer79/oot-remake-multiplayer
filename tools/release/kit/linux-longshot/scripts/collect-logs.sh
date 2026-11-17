@@ -72,7 +72,8 @@ pick "$GAME/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" game/co
 # <public-1>, ...; the same address the same tag in every file), host names <host>/<host-1>, the user name <user>, the
 # PC name <pc> and players' names <name> (learnt in any of the files). Crash dumps stay as they are.
 echo 'Masking addresses and names in the copies, then packing them...'
-mapfile -d '' masked < <(find "$stage" -type f ! -path '*/crash_dumps/*' -print0)
+# (in a fixed order, so the same logs give the same tags)
+mapfile -d '' masked < <(find "$stage" -type f ! -path '*/crash_dumps/*' -print0 | LC_ALL=C sort -z)
 kit_mask "${masked[@]}" || true   # (a file it could not mask is left out: never an unmasked file in the zip)
 # A zip: python3 (the system's, else the one the first start set up), else zip, else bsdtar. None of them: a .tar.gz.
 py=$(command -v python3 || true)

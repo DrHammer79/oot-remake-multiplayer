@@ -93,7 +93,7 @@ if ($reused) { Write-Host "Your game file (from the other kit): $reused" }
 try { & (Join-Path $PSScriptRoot 'problem-report.ps1') -AtStart } catch { }
 # 5c. Crash reports and sending reports (send-report.ps1, docs/problem-reports.md): a crash or a game that ended without
 # closing last time gives a masked crash report in logs; with send_reports = yes (asked once, default no) the new reports
-# go to the relay in scriptseport-relay.txt from a hidden process. Nothing here stops or holds up the start.
+# go to the relay in scripts\report-relay.txt from a hidden process. Nothing here stops or holds up the start.
 try { & (Join-Path $PSScriptRoot 'send-report.ps1') -AtStart } catch { }
 
 # 6. The rest: update, game build, start (play.ps1). The desktop shortcut follows the kit started last. Its name up to
