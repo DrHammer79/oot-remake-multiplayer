@@ -50,10 +50,11 @@ bn::Request Req(std::int32_t v, std::int32_t slot = 0, std::uint64_t node = kNod
     return bn::RequestFromAction(a, node);
 }
 
-Crawl::Wanted Want(bool lying, bool event = false) {
+Crawl::Wanted Want(bool lying, bool event = false, bool adult = false) {
     Crawl::Wanted w;
     w.lying = lying;
     w.event = event;
+    w.adult = adult;
     w.bsa = kBsa;
     w.life = kLife;
     w.emitter = kEmitter;
@@ -269,6 +270,41 @@ TEST_CASE("dbno body: a crawl refused on the spot is asked again only every kRet
     CHECK(asks > Crawl::kMaxAsks);       // tried again later
     CHECK(asks <= 3 * Crawl::kMaxAsks);  // rounds at ~1, ~8.5, ~16 s
     CHECK(skipped <= 3);                 // a real refusal skips the game's own (only each round's first frame)
+}
+
+TEST_CASE("dbno body: a downed adult takes the game's HugeHit (no adult crawl animations), up through LDamageStandUp") {
+    CHECK(DownVerb(false) == verb::kCrawl);
+    CHECK(DownVerb(true) == verb::kHugeHit);
+    CHECK(UpVerb(false) == verb::kWait);
+    CHECK(UpVerb(true) == verb::kLDamageStandUp);
+    Guest g;
+    Crawl c;
+    c.Want(Want(false, false, true));
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    c.Want(Want(true, false, true));
+    CHECK(Verbs(RunFrame(c, g, 1000)) == std::vector<std::int32_t>{verb::kHugeHit});
+    CHECK(Verbs(RunFrame(c, g, 1100)).empty());                     // taken: held
+    CHECK(c.Skip(kBsa, Req(verb::kLDamageStandUp), false));         // the game's stand-up: skipped while down
+    CHECK(c.Skip(kBsa, Req(verb::kWait), false));
+    CHECK_FALSE(c.Skip(kBsa, Req(verb::kHugeHit), false));          // the down verb itself is never skipped
+    bool named = false;
+    for (const auto& n : c.TakeNotes()) {
+        named = named || n.find("HugeHit (136) asked and taken") != std::string::npos;
+    }
+    CHECK(named);
+    c.Want(Want(false, false, true));
+    CHECK(Verbs(RunFrame(c, g, 2000)) == std::vector<std::int32_t>{verb::kLDamageStandUp});
+    CHECK(Verbs(RunFrame(c, g, 2100)).empty());
+}
+
+TEST_CASE("dbno body: our Link changing age while down asks the other age's verb") {
+    Guest g;
+    Crawl c;
+    Crawling(c, g);  // a child, crawling
+    c.Want(Want(true, false, true));
+    CHECK(Verbs(RunFrame(c, g, 2000)) == std::vector<std::int32_t>{verb::kHugeHit});
+    c.Want(Want(false, false, true));
+    CHECK(Verbs(RunFrame(c, g, 3000)) == std::vector<std::int32_t>{verb::kLDamageStandUp});
 }
 
 TEST_CASE("dbno body: a fall or water while crawling passes, and the crawl is asked again on the ground") {

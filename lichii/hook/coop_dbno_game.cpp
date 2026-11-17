@@ -91,6 +91,7 @@ struct Glue {
     std::atomic<std::uint64_t> life_component{0};
     std::atomic<std::uint64_t> bsa{0};      // our Link's BSA (the objects walk)
     std::atomic<std::uint64_t> emitter{0};  // our Link's PerceptionEmitter (the objects walk)
+    std::atomic<bool> adult{false};         // our Link is Player_Adult (the objects walk)
     std::atomic<std::int32_t> life_write{-1};  // raise to this (-1: none); the objects walk writes it
     Lowering take_to;                          // lower to this; the Life step takes it
     std::atomic<PadMode> pad_mode{PadMode::game};
@@ -405,6 +406,7 @@ void Frame(const std::optional<std::string>& scene, const std::optional<coop::ho
                                                            reading->event_whose);
     body.emitter = g.emitter.load(std::memory_order_acquire);
     body.bsa = g.bsa.load(std::memory_order_acquire);
+    body.adult = g.adult.load(std::memory_order_acquire);
     body.life = g.life_component.load(std::memory_order_acquire);
     Body::TheCrawl().Want(body);
     for (auto& note : Body::TheCrawl().TakeNotes()) {
@@ -575,7 +577,8 @@ std::int32_t LifeStep(std::uint64_t component, std::int32_t life, std::int32_t s
     return Body::Raised(life, sum, Body::TheRaising().Peek());
 }
 
-void SetOurComponents(std::uint64_t bsa, std::uint64_t emitter) {
+void SetOurComponents(std::uint64_t bsa, std::uint64_t emitter, bool adult) {
+    TheGlue().adult.store(adult, std::memory_order_release);
     TheGlue().bsa.store(bsa, std::memory_order_release);
     TheGlue().emitter.store(emitter, std::memory_order_release);
 }

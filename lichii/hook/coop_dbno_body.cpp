@@ -7,6 +7,13 @@
 
 namespace CoopDbno::Body {
 
+namespace {
+// "Crawl (234)" for the log (the offline graders match these).
+std::string Named(std::int32_t v) {
+    return std::string(VerbName(v)) + " (" + std::to_string(v) + ")";
+}
+}  // namespace
+
 // --- Raising ---
 
 void Raising::Start(std::int32_t to, std::uint64_t now_us) noexcept {
@@ -64,7 +71,7 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
         flags_ = a->flags;
         learnt_ = true;
     }
-    if (!want_.lying || want_.event || a->verb == verb::kCrawl) {
+    if (!want_.lying || want_.event || a->verb == DownVerb(want_.adult)) {
         return false;
     }
     if (!crawling_) {
@@ -84,7 +91,7 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
             ++counts_.cleared;
             if (!std::exchange(cleared_noted_, true)) {
                 Note("our downed Link: the game's own action verb " + std::to_string(a->verb) +
-                     " skipped so our Crawl gets the slot");
+                     " skipped so our " + VerbName(DownVerb(want_.adult)) + " gets the slot");
             }
             return true;
         }
@@ -127,7 +134,8 @@ std::optional<CoopPuppet::Call> Crawl::Ask(CoopPuppet::Guest& guest, std::int32_
     c.x[0] = want_.bsa;
     c.x[1] = block_;
     c.x[2] = 1;
-    pending_ = v == verb::kCrawl ? Pending::crawl : Pending::stand;
+    pending_ = v == verb::kCrawl || v == verb::kHugeHit ? Pending::crawl : Pending::stand;
+    asked_verb_ = v;
     ++counts_.asked;
     return c;
 }
@@ -207,19 +215,20 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
                 if (taken) {
                     asks_ = 0;  // (a later fall or water may need a fresh round)
                     moved_ = false;
-                    Note("our downed Link: Crawl (234) asked and taken");
+                    Note("our downed Link: " + Named(asked_verb_) + " asked and taken");
                 } else if (result == kSlotBusy) {
                     // Not a refusal of the crawl: the slot took another
                     // request this frame. Skipping is on now: next frame.
                     ++counts_.busy;
                     next_ask_ms_ = 0;
-                    Note("our downed Link: Crawl (234) waits: the slot took a request this frame (3); asked next frame");
+                    Note("our downed Link: " + Named(asked_verb_) +
+                         " waits: the slot took a request this frame (3); asked next frame");
                 } else {
                     blocked_ = true;  // a real refusal: the game's own runs
-                    Note("our downed Link: Crawl (234) refused (" + std::to_string(result) + ")");
+                    Note("our downed Link: " + Named(asked_verb_) + " refused (" + std::to_string(result) + ")");
                 }
             } else {
-                Note(taken ? "our Link up: Wait (40) asked and taken" : "our Link up: Wait (40) refused");
+                Note("our Link up: " + Named(asked_verb_) + (taken ? " asked and taken" : " refused"));
             }
             return std::nullopt;  // (one action ask a frame)
         }
@@ -261,8 +270,10 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
         moved_ = false;
         cleared_noted_ = false;
     };
-    if (want_.lying != was_lying_) {
+    if (want_.lying != was_lying_ || (want_.lying && want_.adult != was_adult_)) {
+        // (down or up; or our Link changed age while down: the other age's verb)
         was_lying_ = want_.lying;
+        was_adult_ = want_.adult;
         new_round();
         airborne_ = false;
         ground_seen_ = false;
@@ -288,13 +299,14 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
     }
     if (stand_due_) {
         stand_due_ = false;
-        return Ask(guest, verb::kWait, main_base);
+        return Ask(guest, UpVerb(down_adult_), main_base);
     }
     if (want_.lying && !crawling_ && !airborne_ && asks_ < kMaxAsks && now_ms >= next_ask_ms_) {
         ++asks_;
         next_ask_ms_ = now_ms + kAskEveryMs;
         last_ask_ms_ = now_ms;
-        return Ask(guest, verb::kCrawl, main_base);
+        down_adult_ = want_.adult;
+        return Ask(guest, DownVerb(want_.adult), main_base);
     }
     return std::nullopt;
 }

@@ -89,6 +89,8 @@ inline constexpr std::int32_t kSlide = 35;
 inline constexpr std::int32_t kSlideLand = 36;
 inline constexpr std::int32_t kWait = 40;
 inline constexpr std::int32_t kSwim = 84;
+inline constexpr std::int32_t kLDamageStandUp = 85;  // Player.scheduler.ldamagestandup: up from lying (Damage_Down_*_StandUp)
+inline constexpr std::int32_t kHugeHit = 136;        // Player.scheduler.reactionhugehit: knocked flat (Damage_L_*)
 inline constexpr std::int32_t kPreDie = 141;
 inline constexpr std::int32_t kPreAbyss = 156;
 inline constexpr std::int32_t kPreEvent = 159;
@@ -99,6 +101,19 @@ inline constexpr std::array<std::int32_t, 10> kPassVerbs{verb::kFall,     verb::
                                                           verb::kSlide,    verb::kSlideLand, verb::kSwim,
                                                           verb::kWaterDive, verb::kPreAbyss, verb::kPreEvent,
                                                           verb::kPreDie};
+// The lying verb and the getting-up verb for each age. Crawl's animations
+// (Tunnel_St / Tunnel_Wait / Tunnel_Move_F / Tunnel_Ed / Tunnel_Ed_B) are in
+// the child's banks only (Player_Child_0x_Animation); Player_Adult's banks
+// have none, though both ages run the same crawl AI (identical
+// Player.action/scheduler.crawl modules) and AS root, so an adult in Crawl
+// would have no animation. A downed adult takes the game's own HugeHit
+// instead: knocked flat, held there (its LDamageStandUp is skipped like any
+// other verb), and up again through LDamageStandUp, the game's own stand-up.
+constexpr std::int32_t DownVerb(bool adult) { return adult ? verb::kHugeHit : verb::kCrawl; }
+constexpr std::int32_t UpVerb(bool adult) { return adult ? verb::kLDamageStandUp : verb::kWait; }
+constexpr const char* VerbName(std::int32_t v) {
+    return v == verb::kCrawl ? "Crawl" : v == verb::kHugeHit ? "HugeHit" : v == verb::kLDamageStandUp ? "LDamageStandUp" : "Wait";
+}
 constexpr bool Passes(std::int32_t v) {
     for (const std::int32_t p : kPassVerbs) {
         if (p == v) {
@@ -140,6 +155,7 @@ public:
     struct Wanted {
         bool lying = false;          // downed (or spectating): crawl, shielded, unseen
         bool event = false;          // our Link in an event: the event drives it
+        bool adult = false;          // our Link is Player_Adult (no crawl animations: HugeHit, see DownVerb)
         std::uint64_t bsa = 0;       // our Link's BSA component (0: none)
         std::uint64_t life = 0;      // our Link's Life component (0: none)
         std::uint64_t emitter = 0;   // our Link's PerceptionEmitter component (0: none)
@@ -206,6 +222,9 @@ private:
     bool crawling_ = false;      // our Crawl was taken (until up, an event or a pass verb)
     // The caller's (calc thread).
     bool was_lying_ = false;
+    bool was_adult_ = false;
+    bool down_adult_ = false;    // the age our down verb was asked for (the matching up verb)
+    std::int32_t asked_verb_ = 0;  // the verb of the action ask in flight (the log)
     bool stand_due_ = false;     // up again after a crawl: ask Wait once
     int asks_ = 0;
     std::uint64_t next_ask_ms_ = 0;

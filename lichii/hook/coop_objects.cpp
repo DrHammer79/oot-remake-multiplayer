@@ -2780,7 +2780,8 @@ private:
                         GivePvp(a, value->first + 8, life);  // PvP (coop_pvp_game.cpp)
                     }
                     if (known.first == "Player_Child" || known.first == "Player_Adult") {
-                        GiveDbno(r, a, value->first + 8, life);  // down but not out (coop_dbno_game.h)
+                        GiveDbno(r, a, value->first + 8, life,
+                                 known.first == "Player_Adult");  // down but not out (coop_dbno_game.h)
                     }
                     // On by default (=0 turns it off): a MaxLife raised by
                     // another player is put into the component the hearts are
@@ -3063,7 +3064,7 @@ private:
     // Down but not out (coop_dbno_game.h): our Link's Life component for the
     // Life step's guard, and the life the rules ask for (a revive, a downed
     // Link's quarter heart, out), written as PvP's fallback does.
-    void GiveDbno(Reader& r, u64 link, u64 life_at, s32 life) {
+    void GiveDbno(Reader& r, u64 link, u64 life_at, s32 life, bool adult) {
         const auto table = r.Ptr(link + kActorComponents);
         const auto component = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
         CoopDbno::SetOurLifeComponent(component.value_or(0));
@@ -3071,7 +3072,7 @@ private:
         // caller that asks the game.
         const auto bsa = table ? r.Ptr(*table + CoopDbno::Body::addr::kComponentBsa) : std::nullopt;
         const auto emitter = table ? r.Ptr(*table + CoopDbno::Body::addr::kComponentEmitter) : std::nullopt;
-        CoopDbno::SetOurComponents(bsa.value_or(0), emitter.value_or(0));
+        CoopDbno::SetOurComponents(bsa.value_or(0), emitter.value_or(0), adult);
         static const bool body_caller = [] {
             CoopSvc::AddCaller(kDbnoBodyCallerOrder, [](CoopPuppet::Guest& guest, bool after_call,
                                                         std::uint64_t result, std::uint64_t now_ms) {
