@@ -1,0 +1,27 @@
+# hs-dbno-adult (row 113 parts 1-4, the ADULT case): adults have no crawl animations (Tunnel_* are in the child's banks
+# only), so a downed adult takes the game's own HugeHit (knocked flat, held) and gets up through LDamageStandUp.
+# A hosts (joins first), sets the bleed-out to 10 s and stays up in Hyrule Field (adult, by Kakariko's steps); B is
+# downed by the game's own hits (hurt 4 x3), lies, tries to move (the stick must not move it), bleeds out, spectates A,
+# then respawns beside A once no enemy is near and stands up. See hs-dbno-adult.B.txt for B's checks.
+# Checks (offline job): B "coop: dbno: our Link: event 0", "our downed Link: HugeHit (136) asked and taken", no
+# "refused", "event 2" (spectating), "event 7" (respawned), "our Link up: LDamageStandUp (85) asked and taken".
+# Shots by eye: B-lying / B-stick (B flat on the ground, not a T or bind pose; A-* shots: B's puppet flat too),
+# B-after-respawn (B standing beside A).
+#! timeout 420
+mark start
+setflag Sequence_IsChildhood 0  # adult (run.ps1 loads the save first)
+warp HyruleField_Adult HyruleField_FrontOfKakarikoVillage
+wait 1200
+mark field
+chat /dbno time 10
+wait 300
+mark b-hurt                     # B is hurt from here (~6 s after B's field mark)
+wait 420
+mark see-b-lying                # B's puppet, lying flat, in A's window
+wait 300
+mark see-b-stick
+wait 1200                       # B bleeds out, spectates, respawns beside A
+mark a-after
+chat /dbno time 45
+wait 120
+mark end
