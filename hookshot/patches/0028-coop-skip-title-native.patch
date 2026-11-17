@@ -1,4 +1,4 @@
-From a07cd03b699eb1b42b37f9a95cc96087be9bf6f6 Mon Sep 17 00:00:00 2001
+From 89e7d2571276b2bbd642a18990ab120d578fb384 Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 23:28:22 -0900
 Subject: [PATCH] Co-op title: Skip title screen chooses natively, presses
@@ -25,13 +25,17 @@ good. It also stops on any button, key or click of the player's
 hos_coop_title_hold_now, the module's optional hos_coop_title_hold:
 hosting, joining, a session, the host's save coming), once Link runs or
 after 120 s. Each choice and each stop is logged with its reason.
+
+The focused button's pane name is read as the game's own screen request
+reads it (main+0x3379160): the NUL-ended text at *(button+0x18); +0x20 is
+the parent pane (hos_skip_title.h, hos_skip_title_button_name).
 ---
  host/coop_bridge.c    |   7 ++
- host/hos_skip_title.h |  64 ++++++++++++++++
- host/oot_autoload.c   | 170 +++++++++++++++++++++++++++++++++++++-----
+ host/hos_skip_title.h |  95 ++++++++++++++++++++++++
+ host/oot_autoload.c   | 165 +++++++++++++++++++++++++++++++++++++-----
  host/oot_autoload.h   |   8 +-
  host/oot_menu.c       |   4 +-
- 5 files changed, 233 insertions(+), 20 deletions(-)
+ 5 files changed, 259 insertions(+), 20 deletions(-)
  create mode 100644 host/hos_skip_title.h
 
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
@@ -68,10 +72,10 @@ index 6bf35e1..957c34e 100644
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_title) coop_title(c, screen, event);
 diff --git a/host/hos_skip_title.h b/host/hos_skip_title.h
 new file mode 100644
-index 0000000..23e5c98
+index 0000000..97300c4
 --- /dev/null
 +++ b/host/hos_skip_title.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,95 @@
 +/* (oot-remake-multiplayer's patch 0028, player report 133) Which button Longshot's Skip title screen may choose, and when.
 +   The same file is the patch's host/hos_skip_title.h and the module repo's hookshot/src/hos_skip_title.h (unit tests:
 +   tests/hookshot/skip_title_test.cpp; tests/hookshot/module_test.cpp checks the two are one).
@@ -84,7 +88,8 @@ index 0000000..23e5c98
 +     2. its question, UISystemSaveLoadScreen (main+0x4bef840): Pa_CheckButton_00, its first answer.
 +   A screen of an earlier step still updating (the title behind the list) is waited out. Any other screen with a focused
 +   button, a known one out of order, or a known one focused on another button stops the skip for good: the rest is the
-+   player's. At most three choices. */
++   player's. At most three choices.
++   The focused button's pane name is read as the game reads it (hos_skip_title_button_name, below). */
 +#ifndef HOS_SKIP_TITLE_H
 +#define HOS_SKIP_TITLE_H
 +#include <stdint.h>
@@ -94,6 +99,36 @@ index 0000000..23e5c98
 +#define HOS_SKIP_LOAD_LIST_SCREEN 0x84c0eba0ULL   /* UISystemLoadListScreen */
 +#define HOS_SKIP_LOAD_CHECK_SCREEN 0x84c0f840ULL  /* UISystemSaveLoadScreen */
 +#define HOS_SKIP_STEPS 3
++#define HOS_SKIP_BUTTON_NAME 0x18                 /* a button's pane name: a pointer to its NUL-ended text */
++
++/* Reads n bytes of the game's memory at addr into out: 1, or 0 when they cannot be read */
++typedef int (*hos_skip_read_fn)(uint64_t addr, void *out, size_t n);
++
++/* A button's pane name into out ("" when it cannot be read, is not printable, or does not fit), the way the game's own
++   screen request reads it (main+0x3379160): x1 = *(button+0x18), x2 = *(button+0x20) (or *(*(button+0x20)+0x30) with
++   bit 5 of +0x41), then f_837a28f0(dst, x1, x2) -> f_8045dc00(dst, x1, x2, "/"), which writes x2's path (the parent
++   pane: its names at +0x40, up the +0x30 links) and then x1 through strlen (f_83c61ee0) and memcpy. So +0x18 is the
++   name's NUL-ended text and +0x20 the parent pane, not a length and the text (host/oot_menu.c reads pane+0x18 the same
++   way). Read as text, the parent pane's first bytes are its vtable pointer (0x84c4....), never a name. */
++static inline const char *hos_skip_title_button_name(uint64_t button, hos_skip_read_fn read, char *out, size_t cap) {
++    uint64_t at = 0;
++    size_t i = 0;
++    if (!out || cap == 0) return "";
++    out[0] = 0;
++    if (!read || cap < 2 || !button || !read(button + HOS_SKIP_BUTTON_NAME, &at, sizeof at) || at < 0x100000) return out;
++    for (; i + 1 < cap; i++) {
++        char ch = 0;
++        if (!read(at + i, &ch, 1)) break;
++        if (ch == 0) {
++            out[i] = 0;
++            return out;
++        }
++        if ((unsigned char)ch < 33 || (unsigned char)ch > 126) break;
++        out[i] = ch;
++    }
++    out[0] = 0;   /* (unreadable, not printable, or too long for a pane name: none) */
++    return out;
++}
 +
 +enum { HOS_SKIP_WAIT = 0, HOS_SKIP_CHOOSE = 1, HOS_SKIP_STOP = 2 };
 +
@@ -137,7 +172,7 @@ index 0000000..23e5c98
 +}
 +#endif
 diff --git a/host/oot_autoload.c b/host/oot_autoload.c
-index 4110c56..381042c 100644
+index 4110c56..87f222d 100644
 --- a/host/oot_autoload.c
 +++ b/host/oot_autoload.c
 @@ -9,6 +9,8 @@
@@ -213,7 +248,7 @@ index 4110c56..381042c 100644
  }
  
  void hos_oot_autoload_input(void) {
-@@ -187,27 +222,126 @@ void hos_oot_autoload_input(void) {
+@@ -187,27 +222,121 @@ void hos_oot_autoload_input(void) {
              hos_log("skip title: no saved game yet: the title screen stays");
              return;
          }
@@ -283,17 +318,12 @@ index 4110c56..381042c 100644
 +    return found;
 +}
 +
-+/* (patch 0028) a button's pane name, as the game's own screen request reads it (main+0x3379160): its length at +0x18, its
-+   text at *(button+0x20), or at *(*(button+0x20)+0x30) when bit 5 of +0x41 is set; "" when it cannot be read */
-+static void button_name(uint64_t button, char *out, size_t cap) {
-+    out[0] = 0;
-+    uint64_t n = peek64(button + 0x18);
-+    const uint64_t at = (peek8(button + 0x41) & 0x20) ? peek64(peek64(button + 0x20) + 0x30) : peek64(button + 0x20);
-+    if (n >= cap) n = cap - 1;
-+    const char *s = at >= 0x100000 && n ? (const char *)hos_guest_range(at, n) : NULL;
-+    if (!s) return;
-+    memcpy(out, s, n);
-+    out[n] = 0;
++/* (patch 0028) the game's memory for hos_skip_title_button_name: 1 when all n bytes are in the guest window */
++static int guest_read(uint64_t a, void *out, size_t n) {
++    const void *p = a >= 0x100000 ? hos_guest_range(a, n) : NULL;
++    if (!p) return 0;
++    memcpy(out, p, n);
++    return 1;
 +}
 +
 +/* (patch 0028) one screen's step, while armed and not held: hos_skip_title.h says which screen and button, in order */
@@ -309,7 +339,7 @@ index 4110c56..381042c 100644
 +    if (!button) return;
 +    const uint64_t vtable = peek64(screen);
 +    char name[64];
-+    button_name(button, name, sizeof name);
++    hos_skip_title_button_name(button, guest_read, name, sizeof name);
 +    const char *why = "";
 +    const int next = hos_skip_title_next(choices, vtable, name, &why);
 +    if (next == HOS_SKIP_WAIT) return;

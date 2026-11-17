@@ -716,7 +716,13 @@ TEST_CASE("hookshot: Skip title screen chooses the game's own way, presses nothi
     CHECK(has("if (choices >= HOS_SKIP_STEPS) return;"));
     CHECK(has("const int next = hos_skip_title_next(choices, vtable, name, &why); if (next == HOS_SKIP_WAIT) return; "
               "if (next == HOS_SKIP_STOP) {"));
-    CHECK(has("const uint64_t vtable = peek64(screen); char name[64]; button_name(button, name, sizeof name);"));
+    // The focused button's name, read as the game reads it (hos_skip_title_button_name: the text at *(button+0x18));
+    // the 0.11.4 candidate read a length at +0x18 and the text at *(button+0x20), the parent pane (title-press-a FAIL).
+    CHECK(has("const uint64_t vtable = peek64(screen); char name[64]; "
+              "hos_skip_title_button_name(button, guest_read, name, sizeof name);"));
+    CHECK(has("static int guest_read(uint64_t a, void *out, size_t n) {"));
+    CHECK(autoload.find(Squashed("peek64(button + 0x20)")) == std::string::npos);
+    CHECK(autoload.find(Squashed("static void button_name(")) == std::string::npos);
     // (Armed only by the row, off by default: Longshot's own start test, unchanged, outside the patch's hunks.)
     // Both platforms' screen hook hand each menu screen to it, before the screen's own update.
     const std::string menu = PatchedCode(patch, "host/oot_menu.c");

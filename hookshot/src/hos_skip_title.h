@@ -10,7 +10,8 @@
      2. its question, UISystemSaveLoadScreen (main+0x4bef840): Pa_CheckButton_00, its first answer.
    A screen of an earlier step still updating (the title behind the list) is waited out. Any other screen with a focused
    button, a known one out of order, or a known one focused on another button stops the skip for good: the rest is the
-   player's. At most three choices. */
+   player's. At most three choices.
+   The focused button's pane name is read as the game reads it (hos_skip_title_button_name, below). */
 #ifndef HOS_SKIP_TITLE_H
 #define HOS_SKIP_TITLE_H
 #include <stdint.h>
@@ -20,6 +21,36 @@
 #define HOS_SKIP_LOAD_LIST_SCREEN 0x84c0eba0ULL   /* UISystemLoadListScreen */
 #define HOS_SKIP_LOAD_CHECK_SCREEN 0x84c0f840ULL  /* UISystemSaveLoadScreen */
 #define HOS_SKIP_STEPS 3
+#define HOS_SKIP_BUTTON_NAME 0x18                 /* a button's pane name: a pointer to its NUL-ended text */
+
+/* Reads n bytes of the game's memory at addr into out: 1, or 0 when they cannot be read */
+typedef int (*hos_skip_read_fn)(uint64_t addr, void *out, size_t n);
+
+/* A button's pane name into out ("" when it cannot be read, is not printable, or does not fit), the way the game's own
+   screen request reads it (main+0x3379160): x1 = *(button+0x18), x2 = *(button+0x20) (or *(*(button+0x20)+0x30) with
+   bit 5 of +0x41), then f_837a28f0(dst, x1, x2) -> f_8045dc00(dst, x1, x2, "/"), which writes x2's path (the parent
+   pane: its names at +0x40, up the +0x30 links) and then x1 through strlen (f_83c61ee0) and memcpy. So +0x18 is the
+   name's NUL-ended text and +0x20 the parent pane, not a length and the text (host/oot_menu.c reads pane+0x18 the same
+   way). Read as text, the parent pane's first bytes are its vtable pointer (0x84c4....), never a name. */
+static inline const char *hos_skip_title_button_name(uint64_t button, hos_skip_read_fn read, char *out, size_t cap) {
+    uint64_t at = 0;
+    size_t i = 0;
+    if (!out || cap == 0) return "";
+    out[0] = 0;
+    if (!read || cap < 2 || !button || !read(button + HOS_SKIP_BUTTON_NAME, &at, sizeof at) || at < 0x100000) return out;
+    for (; i + 1 < cap; i++) {
+        char ch = 0;
+        if (!read(at + i, &ch, 1)) break;
+        if (ch == 0) {
+            out[i] = 0;
+            return out;
+        }
+        if ((unsigned char)ch < 33 || (unsigned char)ch > 126) break;
+        out[i] = ch;
+    }
+    out[0] = 0;   /* (unreadable, not printable, or too long for a pane name: none) */
+    return out;
+}
 
 enum { HOS_SKIP_WAIT = 0, HOS_SKIP_CHOOSE = 1, HOS_SKIP_STOP = 2 };
 

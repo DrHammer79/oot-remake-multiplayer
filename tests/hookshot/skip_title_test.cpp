@@ -4,6 +4,8 @@
 // known one out of order or focused on another button stops it; at most three choices (player report 133).
 #include <doctest/doctest.h>
 
+#include <cstring>
+#include <map>
 #include <string>
 
 #include "hos_skip_title.h"
@@ -69,4 +71,85 @@ TEST_CASE("skip title: no fourth choice") {
         CHECK(Next(3, vt, "Pa_Button_02", &why) == HOS_SKIP_STOP);
         CHECK(why == "made its three choices");
     }
+}
+
+// The button's pane name, read as the game's own screen request reads it (main+0x3379160 -> f_837a28f0(dst, *(button+0x18),
+// *(button+0x20)) -> strlen and memcpy of the first): +0x18 holds the name's text, +0x20 the parent pane. The 0.11.4
+// candidate (title-press-a, 11-17) read a length at +0x18 and the text at *(button+0x20): the parent pane's vtable bytes,
+// logged as "button p..": the title's check stopped the skip (fail-safe) and nothing was ever chosen.
+namespace {
+// A small guest memory: words and strings at addresses, bytes outside them unreadable.
+std::map<uint64_t, uint8_t> g_mem;
+void Put(uint64_t a, const void* p, size_t n) {
+    for (size_t i = 0; i < n; ++i) g_mem[a + i] = static_cast<const uint8_t*>(p)[i];
+}
+void Put64(uint64_t a, uint64_t v) { Put(a, &v, 8); }
+void PutText(uint64_t a, const char* s) { Put(a, s, std::strlen(s) + 1); }
+int Read(uint64_t a, void* out, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        const auto it = g_mem.find(a + i);
+        if (it == g_mem.end()) return 0;
+        static_cast<uint8_t*>(out)[i] = it->second;
+    }
+    return 1;
+}
+constexpr uint64_t kButton = 0x90001000ULL, kText = 0x90002000ULL, kParent = 0x90003000ULL;
+constexpr uint64_t kParentVtable = 0x84c4c470ULL;   // (a pane's vtable in main's data: 70 c4 c4 84 00 00 00 00)
+void Title(const char* name) {
+    g_mem.clear();
+    Put64(kButton + 0x18, kText);
+    Put64(kButton + 0x20, kParent);
+    PutText(kText, name);
+    Put64(kParent, kParentVtable);
+    Put64(kParent + 0x30, 0);
+}
+std::string Name(uint64_t button = kButton, size_t cap = 64) {
+    char out[64] = "x";
+    return hos_skip_title_button_name(button, Read, out, cap);
+}
+// The candidate's read, kept to show what it gave: n = *(button+0x18), the text at *(button+0x20)
+std::string OldName() {
+    uint64_t n = 0, at = 0;
+    Read(kButton + 0x18, &n, 8);
+    Read(kButton + 0x20, &at, 8);
+    if (n >= 64) n = 63;
+    char out[64] = {};
+    for (uint64_t i = 0; i < n && Read(at + i, &out[i], 1); ++i) {}
+    return out;
+}
+}  // namespace
+
+TEST_CASE("skip title: the focused button's name is the text at *(button+0x18), not the parent pane at +0x20") {
+    Title("Pa_Button_02");
+    CHECK(Name() == "Pa_Button_02");
+    CHECK(Next(0, kTitle, Name().c_str()) == HOS_SKIP_CHOOSE);
+    // The wrong read: the parent pane's vtable bytes, so the title's check stopped the skip with nothing chosen.
+    const std::string old = OldName();
+    CHECK(old == std::string{'\x70', '\xc4', '\xc4', '\x84'});
+    std::string why;
+    CHECK(Next(0, kTitle, old.c_str(), &why) == HOS_SKIP_STOP);
+    CHECK(why == "the title's focus is not on Continue (Pa_Button_02)");
+    // The other two screens read the same way.
+    Title("Pa_CheckButton_00");
+    CHECK(Next(2, kCheck, Name().c_str()) == HOS_SKIP_CHOOSE);
+    Title("Pa_SaveData_00");
+    CHECK(Next(1, kList, Name().c_str()) == HOS_SKIP_CHOOSE);
+}
+
+TEST_CASE("skip title: a name that cannot be read is none (the skip stops, nothing is chosen)") {
+    Title("Pa_Button_02");
+    CHECK(Name(0) == "");                              // no button
+    CHECK(Name(kButton + 0x100) == "");                // its words unreadable
+    CHECK(Name(kButton, 1) == "");                     // no room
+    Put64(kButton + 0x18, 0x40);                       // a null pointer's page
+    CHECK(Name() == "");
+    Put64(kButton + 0x18, kParent);                    // pointing at a pane, not text: not printable
+    CHECK(Name() == "");
+    g_mem.clear();
+    Put64(kButton + 0x18, kText);
+    Put(kText, "Pa_Button_02", 12);                    // no end within what can be read
+    CHECK(Name() == "");
+    Title("Pa_Button_02_and_a_name_far_too_long_for_a_pane");
+    CHECK(Name(kButton, 16) == "");                    // longer than the room: none, not cut
+    CHECK(Next(0, kTitle, "") == HOS_SKIP_STOP);
 }
