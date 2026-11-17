@@ -4141,6 +4141,10 @@ private:
     std::unordered_map<u64, u64> life_components_;  // the actor by its Life component (shared actors with a life)
     // Difficulty: this scene visit's extra enemies (where from the game's placement data).
     CoopDifficulty::Extras extras_{CoopDifficulty::AreaOf, SpecialForExtras};
+    // Player report 111 (ExtraRooms): extra key -> when its room was looked at (0: looked again 5 s later).
+    std::map<u64, u64> extra_rooms_done_;
+    std::size_t extra_room_lines_ = 0;
+    std::set<u64> extra_room_said_;  // (each extra's "not found" lines once)
     CoopDifficulty::Horde horde_;    // difficulty: the night horde we made beside our own rolls
     u64 share_now_us_ = 0;  // this Share's server time (WriteLife)
     Sync sync_;
