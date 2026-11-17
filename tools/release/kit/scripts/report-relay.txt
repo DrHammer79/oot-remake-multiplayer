@@ -1,0 +1,3 @@
+# The crash relay that reports go to when a player says yes to sending them (send-report.ps1, docs/problem-reports.md).
+# One https:// URL ending in /report. Empty: nothing is ever sent (a release can empty it to turn sending off for every kit).
+

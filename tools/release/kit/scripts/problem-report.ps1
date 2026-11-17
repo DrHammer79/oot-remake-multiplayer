@@ -1,7 +1,7 @@
 # Problem reports (docs/problem-reports.md): the co-op module's problems from the player's finished game sessions, masked
 # as collect-logs masks them (log-mask.ps1 Protect-LogText: addresses, MAC addresses, the user and PC names, invite codes,
 # passwords), players' names masked too, each problem in one report only, written as logs\coop-report-<date>.zip for the
-# player to send with the /report bot command. Nothing is sent from here: no webhook, no network. Windows only for now.
+# player to send with the /bugreport bot command. Nothing is sent from here: no webhook, no network. Windows only for now.
 #
 # Opt-in, asked once: start.ps1 calls it with -AtStart, which asks the first time (default no) and remembers the answer in
 # logs\problem-reports.json; with yes, each start makes a zip when the sessions since the last one had a new problem.
@@ -19,10 +19,6 @@ $script:ProblemLine = '(?i:warning|error): coop|coop: .*\b(?:fail\w*|could not|c
 # Routine status lines that only contain such words (counters a second or every 10 s, notes of normal states)
 $script:ProblemRoutine = 'coop: pose: |coop: actors: in \d+ s|invite code is made|camera lost, markers off|' +
     'coop: flags: (by the game''s events|native)|so far; |coop: objects: list head|/s.*/s'
-# Where the module writes a player's name: player 2 joined: Mido, player 2 left: Mido (...) (the server), player 2 'Mido'
-# joined (a game), Mods: player 2 (Mido), name 'Mido' (our own)
-$script:ProblemNameAt = 'player \d+ (?:joined|left): (?<n>[^(]+?)(?= \(|$)|player \d+ ''(?<n>[^'']+)''|' +
-    'Mods: player \d+ \((?<n>[^)]+)\)|name ''(?<n>[^'']+)'''
 # Dotted words that are file names, not host names (the gate)
 $script:ProblemFileExt = '^(?i:exe|dll|txt|log|ini|json|zip|cpp|hpp|h|ps1|cmd|bat|pak|sav|bin|png|dds|cfg|toml|md|nup|pdb)$'
 # How many report zips are kept in logs\ (the oldest go)
@@ -64,17 +60,11 @@ function Test-ProblemLine([string]$Line) {
     $script:ProblemLineRx.IsMatch($Line) -and -not $script:ProblemRoutineRx.IsMatch($Line)
 }
 
-# Players' names: the ones a line names where the module writes a name are added to $Names; every name known becomes
-# <name> (in this line, and in later lines that name a player bare).
+# Players' names: log-mask.ps1's Protect-LogNames (where the module writes a name, learnt into $Names; every name known
+# becomes <name>, in this line and in later ones). Protect-LogText does the same with its state's Names, so collect-logs
+# masks them too.
 function Protect-ProblemNames([string]$Text, [System.Collections.Generic.HashSet[string]]$Names) {
-    foreach ($m in [regex]::Matches($Text, $script:ProblemNameAt)) {
-        $n = $m.Groups['n'].Value.Trim()
-        if ($n.Length -ge 2 -and $n -notmatch '^<[a-z]+(-\d+)?>$') { [void]$Names.Add($n) }
-    }
-    foreach ($n in @($Names | Sort-Object Length -Descending)) {
-        $Text = [regex]::Replace($Text, '(?<!\w)' + [regex]::Escape($n) + '(?!\w)', '<name>')
-    }
-    $Text
+    Protect-LogNames $Text $Names
 }
 
 # The problem a masked line is, the same for every occurrence: its thread tag, the masks' numbers (<lan-1>, <lan-2>),
@@ -137,7 +127,7 @@ function Read-ProblemRun([string]$Path, [hashtable]$Mask, [string]$UserName = $e
     try {
         $key = Get-ProblemRunKey $stream
         if ($Known -contains $key) { return @{ Key = $key; Events = $null } }
-        $names = New-Object 'System.Collections.Generic.HashSet[string]'
+        $names = $Mask.Names   # (log-mask.ps1: the names learnt from every log of this report)
         $events = [ordered]@{}
         $reader = New-Object System.IO.StreamReader($stream, (New-Object System.Text.UTF8Encoding $false), $true)
         $isProblem = $script:ProblemLineRx
@@ -188,7 +178,7 @@ function New-ProblemReport([string[]]$Logs, [hashtable]$State, [string]$OutDir, 
     try {
         $lines = @("Squadala! problem report: $($new.Count) new problem(s) from $($read.Count) session(s)",
             "Kit: $(Protect-LogText $Version $mask $UserName $PcName)",
-            'Addresses, names, codes and passwords are masked (as collect-logs masks them). Send with /report.', '')
+            'Addresses, names, codes and passwords are masked (as collect-logs masks them). Send with /bugreport.', '')
         foreach ($e in @($new.Values | Sort-Object { -$_.Count })) { $lines += ('{0}x {1}' -f $e.Count, $e.Line) }
         [System.IO.File]::WriteAllText((Join-Path $stage 'problem-report.txt'), ($lines -join "`r`n") + "`r`n",
             (New-Object System.Text.UTF8Encoding $false))
@@ -239,7 +229,7 @@ if (-not $state.choice) {
     if (-not $interactive) { return }
     Write-Host ''
     Write-Host 'Problem reports: after your games, the kit can put the co-op problems it finds in your logs into a small zip'
-    Write-Host 'for you to send with /report in the Squadala! Discord. Addresses, names and codes are masked; nothing is'
+    Write-Host 'for you to send with /bugreport in the Squadala! Discord. Addresses, names and codes are masked; nothing is'
     Write-Host 'sent by itself. Change it later with scripts\problem-report.cmd on (or off).'
     $answer = Read-Host 'Make problem reports? [y/N]'
     $state.choice = if ($answer -and $answer.Trim() -match '^(?i)(y|yes)$') { 'on' } else { 'off' }
@@ -252,7 +242,7 @@ $report = New-ProblemReport @(Get-ProblemLogs $kit) $state (Join-Path $kit 'logs
 Write-ProblemState $stateFile $state
 if ($report) {
     Write-Host "Problem report: $($report.Count) new problem(s) in $($report.Zip)"
-    Write-Host 'Send it with /report in the Squadala! Discord (addresses, names and codes are masked in it).'
+    Write-Host 'Send it with /bugreport in the Squadala! Discord (addresses, names and codes are masked in it).'
 } elseif ($Now) {
     Write-Host 'Problem report: no new problem in your game logs since the last report.'
 }

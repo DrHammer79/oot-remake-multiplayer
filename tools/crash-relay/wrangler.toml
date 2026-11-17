@@ -1,0 +1,19 @@
+# The crash relay (docs/problem-reports.md, "Owner setup"). No secret is in this file: the Discord webhook goes in with
+#   npx wrangler secret put DISCORD_WEBHOOK
+# and stays in Cloudflare only.
+name = "squadala-crash-relay"
+main = "src/worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+# No request logs are kept (an address would be in them).
+[observability]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]

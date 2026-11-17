@@ -5,6 +5,6 @@ Squadala! (Longshot) - online co-op: play Ocarina of Time together, each player 
 3. In the game, open the menu: - and + together on a controller (Xbox: View and Menu) or Home, F1 on the keyboard,
    or - alone on the title screen. Its first tab, Multiplayer: Host gives you a code for your friends; Join takes one.
 It updates itself (Revert.bat goes back); every player needs the same version. Needs 64-bit Windows and a graphics card with mesh shaders.
-Something wrong? The window says what to do. Others only names, no Link? make-puppet-pack.cmd makes the puppet pack again.
-More help: docs\SETUP.md. Logs for a bug report: scripts\collect-logs.cmd. Problem reports at each start: scripts\problem-report.cmd on (or off).
-Nothing of the game is in this kit, and nothing of yours leaves your PC except the co-op traffic while you play. Licence: GPL-3.0 (licenses\). The source: licenses\SOURCE.txt.
+Something wrong? The window says what to do. Others only names, no Link? make-puppet-pack.cmd makes the puppet pack again. More help: docs\SETUP.md.
+Logs for a bug report: scripts\collect-logs.cmd. Problem reports at each start: scripts\problem-report.cmd on (or off). Sent to the developers by themselves (asked once, default no): scripts\send-report.cmd yes (or no).
+Nothing of the game is in this kit, and nothing of yours leaves your PC except the co-op traffic while you play (and the masked reports, if you said yes). Licence: GPL-3.0 (licenses\). The source: licenses\SOURCE.txt.

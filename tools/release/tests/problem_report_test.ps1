@@ -108,7 +108,7 @@ try {
     $reader = New-Object System.IO.StreamReader($entry.Open())
     try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
 } finally { $zip.Dispose() }
-Check ($text -match 'Send with /report') 'the report says how to send it'
+Check ($text -match 'Send with /bugreport') 'the report says how to send it'
 Check ($text -notmatch '192\.168|203\.0\.113|fe80|Testuser|ABCDE-FGHJK|Mido|Saria|Ruto') 'the zip holds no address, user name, code or player name'
 Check ($null -eq (New-ProblemReport @($log1) $state $tmp '' 'Testuser' 'TESTPC-01')) 'the same session is never reported again'
 $log2 = New-Log 'longshot_log.2.txt' 'fedcba9876543210fedcba9876543210' $problems

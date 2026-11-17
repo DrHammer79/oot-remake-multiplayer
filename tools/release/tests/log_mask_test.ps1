@@ -84,6 +84,32 @@ Check ($got -eq 'Link spawned near Link_actor') "a common user name is not repla
 $got = Protect-LogText 'C:\Users\Link\kit' (New-MaskState) 'Link' 'PC1'
 Check ($got -eq 'C:\Users\<user>\kit') "but it is replaced in a path (got '$got')"
 
+# Host names anywhere (review-pr259 should-fix 3): with a port, in a URL, the same name the same tag; files stay.
+$got = Mask 'coop: could not reach myhost.duckdns.org:27510; then my.Host.example.com, again myhost.duckdns.org'
+Check ($got -eq 'coop: could not reach <host-1>:27510; then <host-2>, again <host-1>') "host names get tags (got '$got')"
+$got = Mask 'fetch https://relay.squadala.workers.dev/report failed'
+Check ($got -eq 'fetch https://<host-1>/report failed') "a URL's host (got '$got')"
+foreach ($keep in @('loaded hookshot_coop.dll from C:\games\kit\coop.ini', 'coop-mods.list read', 'vk_draw.cpp:98 msyh.ttc',
+                    'Join.bat and Update.bat', 'shot hs-npc-A.png.part', '[hos nn.npln.Callback] tick', 'server <lan-1>:27510',
+                    'e.g. this', 'logs/longshot_log.1.txt', 'localhost:27510')) {
+    $got = Mask $keep
+    Check ($got -eq $keep) "'$keep' stays (got '$got')"
+}
+
+# Players' names (should-fix 4): learnt where the module or coop.ini writes one, then masked everywhere, also in later
+# texts of the same state; common words (Link) are never a name.
+$s = New-MaskState
+$got = Mask "coop: host: player 2 joined: Mido`ncoop: host: player 2 left: Mido (timed out)`nMido's game sent 3 flags" $s
+Check ($got -eq "coop: host: player 2 joined: <name>`ncoop: host: player 2 left: <name> (timed out)`n<name>'s game sent 3 flags") "server's join/left names (got '$got')"
+$got = Mask 'puppet of Mido at the gate; Midori stays' $s
+Check ($got -eq 'puppet of <name> at the gate; Midori stays') "a name learnt before, whole words only (got '$got')"
+$got = Mask "coop: player 3 'Saria Forest' joined; Mods: player 4 (Dark Link)" (New-MaskState)
+Check ($got -eq "coop: player 3 '<name>' joined; Mods: player 4 (<name>)") "game and Mods name forms (got '$got')"
+$got = Mask "[coop]`r`nname = Darunia`r`nserver = 1.2.3.4`r`n" (New-MaskState)
+Check ($got -eq "[coop]`r`nname = <name>`r`nserver = <public-1>`r`n") "coop.ini's name line (got '$got')"
+$got = Mask "coop: on, name 'Link'; player 2 joined: Link" (New-MaskState)
+Check ($got -eq "coop: on, name 'Link'; player 2 joined: Link") "a common word is not a name (got '$got')"
+
 # What must stay.
 foreach ($keep in @('game 1.1.1 (v131072)', 'Microsoft Windows NT 10.0.26200.0', 'driver 32.0.15.6094',
                     'bind 0.0.0.0:27510', '[12:34:56.789] tick', 'Core::Frontend started', 'protocol 9, build v0.1.0', 'v1.2.3.4', 'join-password 191', 'server-password set','fritchii-v5.8.4')) {

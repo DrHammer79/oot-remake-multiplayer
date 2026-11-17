@@ -88,9 +88,13 @@ $reused = Copy-KitGameFilesFrom $kit $others
 if ($reused) { Write-Host "Your game file (from the other kit): $reused" }
 
 # 5b. Problem reports (problem-report.ps1, docs/problem-reports.md): asked once (default no); with yes, the problems of the
-# sessions since the last report, masked as collect-logs masks them, in coop-report-<date>.zip to send with /report.
+# sessions since the last report, masked as collect-logs masks them, in coop-report-<date>.zip to send with /bugreport.
 # Nothing is sent from here, and nothing here stops the start.
 try { & (Join-Path $PSScriptRoot 'problem-report.ps1') -AtStart } catch { }
+# 5c. Crash reports and sending reports (send-report.ps1, docs/problem-reports.md): a crash or a game that ended without
+# closing last time gives a masked crash report in logs; with send_reports = yes (asked once, default no) the new reports
+# go to the relay in scriptseport-relay.txt from a hidden process. Nothing here stops or holds up the start.
+try { & (Join-Path $PSScriptRoot 'send-report.ps1') -AtStart } catch { }
 
 # 6. The rest: update, game build, start (play.ps1). The desktop shortcut follows the kit started last. Its name up to
 # v0.11.2, "Play OoT Co-op", becomes "Play Squadala" (when there is no such one yet; else the old one is left as it is).

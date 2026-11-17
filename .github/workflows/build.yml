@@ -203,6 +203,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/log_mask_test.ps1
       - name: Kit problem report tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/problem_report_test.ps1
+      - name: Kit crash report and sending tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/send_report_test.ps1
       - name: CI runner hook tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci-runner/job_started_test.ps1
       - name: CI runner script checks
@@ -356,6 +358,9 @@ jobs:
       - name: Linux Longshot kit tests
         if: matrix.job == 'gcc'
         run: bash tools/release/tests/linux_longshot_kit_test.sh
+      - name: Crash relay tests (node)
+        if: matrix.job == 'gcc'
+        run: node --test tools/crash-relay/tests/relay.test.js
       - name: coop_test, 2 clients for 20 seconds
         if: env.COOP_SOAK == '1'
         run: |
