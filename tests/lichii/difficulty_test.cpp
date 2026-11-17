@@ -671,6 +671,49 @@ TEST_CASE("difficulty: no extras in a dungeon, each gets its weight instead (pla
   CHECK(g.NoSpots() == walk3.size());
 }
 
+TEST_CASE("difficulty: in a dungeon an enemy whose extras can take its room gets its extras (player report 111)") {
+  // The same Babas: as on the overworld once each one's room
+  // can be given (its extras take it once made), its weight when they are not.
+  World w;
+  const World::Data& d = w.Grid("InsideTheDekuTree", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  const auto walk = Walk(d);
+  World lake;
+  const World::Data& l = lake.Grid("Lake", "Enemy_Dekubaba", 0x0dec'0000'0000ULL, 6);
+  CoopDifficulty::Extras overworld(lake.Lookup());
+  const std::size_t made = overworld.Plan("Lake", Walk(l), 200, false, 0);
+  REQUIRE(made > 0);
+
+  CoopDifficulty::Extras all(w.Lookup());
+  all.SetDungeonSource([](std::uint64_t) { return true; });
+  CHECK(all.Plan("InsideTheDekuTree", walk, 200, false, 0) == made);
+  CHECK(all.NoSpots() == overworld.NoSpots());
+  for (const auto& e : all.All()) {
+    const bool from_walk =
+        std::any_of(walk.begin(), walk.end(), [&](const auto& o) { return o.hash == e.source && o.name == e.name; });
+    CHECK(from_walk);  // each knows the placed enemy whose words it is made with
+  }
+
+  // Only the first enemy's words caught: only it may get extras, every other one its weight.
+  const std::uint64_t first = walk.front().hash;
+  CoopDifficulty::Extras one(w.Lookup());
+  one.SetDungeonSource([&](std::uint64_t h) { return h == first; });
+  one.Plan("InsideTheDekuTree", walk, 200, false, 0);
+  for (const auto& e : one.All()) {
+    CHECK(e.source == first);
+  }
+  for (const auto& o : walk) {
+    if (o.hash != first) {
+      CHECK(one.NoSpot(o.hash));
+    }
+  }
+
+  // None caught (or the switch off: no test set): no extras, weight for all.
+  CoopDifficulty::Extras none(w.Lookup());
+  none.SetDungeonSource([](std::uint64_t) { return false; });
+  CHECK(none.Plan("InsideTheDekuTree", walk, 200, false, 0) == 0);
+  CHECK(none.NoSpots() == walk.size());
+}
+
 TEST_CASE("difficulty: every game plans the same extras whatever it has loaded and wherever its enemies walked") {
   World w;
   const World::Data& d =
@@ -1192,4 +1235,16 @@ TEST_CASE("difficulty: the word the Life step reads keeps the boss values (issue
   CHECK(kinds->BossDamageTaken() == 7);
   // Her hits on our Link at the boss damage, 140%: 5 quarter hearts become 7.
   CHECK(kinds->Step(kLinkLife, 5, three, 0, attacker_of) == 7);
+}
+
+TEST_CASE("difficulty: an extra takes its placed enemy's room only when that is a room and differs (player report 111)") {
+  using CoopDifficulty::CopyRoom;
+  CHECK(CopyRoom(7, 7, 7, -1));     // the run's case: room in use already 7, default -1
+  CHECK(CopyRoom(7, 7, 0, -1));
+  CHECK(CopyRoom(0, 0, 0, -1));
+  CHECK(CopyRoom(59, 59, 1, 1));
+  CHECK_FALSE(CopyRoom(7, 7, 7, 7));  // already the same
+  CHECK_FALSE(CopyRoom(-1, -1, 3, 3));  // the placed enemy has no room
+  CHECK_FALSE(CopyRoom(60, 60, 3, 3));  // not a room (the game's 0..59)
+  static_assert(!CopyRoom(-1, 7, 0, -1));
 }

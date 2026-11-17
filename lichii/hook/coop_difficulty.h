@@ -123,6 +123,15 @@ std::uint16_t Folded(std::uint16_t pct, std::uint16_t count_pct);
 // instead of x2, and those with none at x1.5 instead of x1).
 std::uint16_t FoldCount(std::uint64_t fold_key, std::uint16_t count_pct);
 
+// Player report 111: does an extra's dungeon room (its room part: the room in
+// use and the default from its placement) need its placed enemy's? Only when
+// the placed enemy's room in use is a room (0..59, the game's own rule in
+// f_7102ecb690) and the extra's two words are not already the same.
+constexpr bool CopyRoom(std::int32_t src_now, std::int32_t src_default, std::int32_t dst_now,
+                        std::int32_t dst_default) {
+    return src_now >= 0 && src_now < 60 && (dst_now != src_now || dst_default != src_default);
+}
+
 // What the object walk found, for the Life step on the game's threads.
 enum class Kind : std::uint8_t {
     none = 0,
@@ -395,6 +404,7 @@ public:
     struct Extra {
         std::uint64_t key = 0;   // the director's key (1 on, unique in this run)
         std::uint64_t hash = 0;  // its placement id (ExtraHash)
+        std::uint64_t source = 0;  // the placed enemy it is an extra of (its placement hash)
         std::string name;
         std::array<float, 3> position{};
         std::uint64_t asked_ms = 0;
@@ -413,6 +423,11 @@ public:
     // has them). An original the data does not have gets none (NoSpot).
     std::size_t Plan(std::string_view scene, const std::vector<Original>& walk, std::uint16_t count_pct,
                      bool boss_here, std::uint64_t now_ms);
+    // Player report 111: in a dungeon, an enemy for which this answers true
+    // (its extras can be given its dungeon room once made) is planned as
+    // anywhere else; the others get their weight. No test set (the default):
+    // no extras in dungeons at all.
+    void SetDungeonSource(std::function<bool(std::uint64_t)> ok) { dungeon_source_ = std::move(ok); }
     // The placed enemy with `hash` gets no copies for want of ground: its life and hits are folded instead.
     bool NoSpot(std::uint64_t hash) const { return no_spot_.contains(hash); }
     std::size_t NoSpots() const { return no_spot_.size(); }
@@ -437,6 +452,7 @@ public:
 private:
     Lookup areas_;
     NameTest special_;
+    std::function<bool(std::uint64_t)> dungeon_source_;
     std::string scene_;
     std::vector<Extra> extras_;
     std::map<std::string_view, AreaPlan> plans_;  // this visit's areas (names from the table: static)

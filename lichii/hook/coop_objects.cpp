@@ -330,6 +330,13 @@ constexpr u64 kLifeMax = 0x1c18;
 constexpr u64 kLifeCopy = 0x1ca8;  // life and max as last mirrored
 constexpr u64 kActorPlacement = 0x3d8;
 constexpr u64 kPlacementHash = 0x88;
+// Player report 111: an actor's room part ([[actor+0x270]+0x460], its +0x18
+// points back at the actor; init f_7102ecb690): +0x117c the default room from
+// the placement (DefaultDungeonRoomIndex), +0x1174 the room in use (Objects::ExtraRooms).
+constexpr u64 kComponentsRoom = 0x460;
+constexpr u64 kRoomActor = 0x18;
+constexpr u64 kRoomDefault = 0x117c;
+constexpr u64 kRoomNow = 0x1174;
 constexpr std::size_t kMaxWalk = 8192;
 
 // LICHII_COOP_OBJECTS_CHEAT: what it sets is in coop_cheat_items.h.
@@ -2193,6 +2200,7 @@ private:
             ForgetBosses();
             boss_hit_ids_.clear();
             extras_.Reset();  // difficulty: that run's extra enemies are gone with it
+            extra_rooms_done_.clear();  // report 111
             horde_.Reset();
             {
                 ScrubsBox& box = TheScrubs();  // a new game run: its block is gone
@@ -2676,6 +2684,7 @@ private:
             }
             extras_.Keep(actors);  // (a whole walk: List) one whose actor is gone frees its address
             extras_.Bind(live);
+            ExtraRooms(r);  // report 111 (LICHII_COOP_EXTRA_ROOM=1)
             std::map<u64, u64> horde;
             for (const auto& [key, actor] : CoopSpawn::TheDirector().Live()) {
                 if ((key & (kExtraKey | kHordeKey)) == kHordeKey) {
@@ -3171,6 +3180,106 @@ private:
         return IsRolled(name) || IsHatchingEgg(name) || IsHatchling(name) || IsAnnounced(name) || IsOwnPuzzle(name) ||
                IsFish(name);
     }
+    // LICHII_COOP_EXTRA_ROOM: "1" dungeon enemies get extras and each takes
+    // its placed enemy's room; "log" the same extras with the room only logged
+    // (the control run: is the room what keeps them asleep?); else off.
+    static bool ExtraRoomOn() {
+        static const bool on = EnvText("LICHII_COOP_EXTRA_ROOM") == "1" || EnvText("LICHII_COOP_EXTRA_ROOM") == "log";
+        return on;
+    }
+    static bool ExtraRoomWrite() {
+        static const bool on = EnvText("LICHII_COOP_EXTRA_ROOM") == "1";
+        return on;
+    }
+    // Player report 111: an actor's dungeon room is kept by its room part
+    // [[actor+0x270]+0x460] (its +0x18 points back at the actor). Its init
+    // f_7102ecb690 reads the placement's DefaultDungeonRoomIndex (instance
+    // parameter, mm3 0xe8a27e12, store [[actor+0x270]+0]+0x10) into +0x117c
+    // and, when below 60, into +0x1174 (the room in use); the other room part
+    // (f_7102ec5f80, [[actor+0x270]+0x440]: Babas have none) falls back to
+    // that +0x1174. An extra is made with no instance parameters, so its
+    // +0x117c/+0x1174 are not its placed enemy's: a Deku Baba extra in room 7
+    // never woke. Once made, it takes its placed enemy's two words (the game's
+    // own values, read from that actor), logged before, after and 5 s later.
+    template <class Reader>
+    void ExtraRooms(Reader& r) {
+        if (!ExtraRoomOn()) {
+            return;
+        }
+        const u64 now = static_cast<u64>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+        auto room_part = [&r](u64 actor) -> u64 {
+            const u64 table = r.template Get<u64>(actor + kActorComponents).value_or(0);
+            const u64 part = table != 0 ? r.template Get<u64>(table + kComponentsRoom).value_or(0) : 0;
+            return part != 0 && r.template Get<u64>(part + kRoomActor).value_or(0) == actor ? part : 0;
+        };
+        auto word = [&r](u64 part, u64 off) {
+            return static_cast<std::int32_t>(r.template Get<u32>(part + off).value_or(~u32{0}));
+        };
+        for (const auto& e : extras_.All()) {
+            if (e.address == 0 || e.source == 0) {
+                continue;
+            }
+            if (const auto done = extra_rooms_done_.find(e.key); done != extra_rooms_done_.end()) {
+                // One later look: does the game keep the copied room, or set its own?
+                if (done->second != 0 && now - done->second >= 5000) {
+                    done->second = 0;
+                    const u64 part = room_part(e.address);
+                    if (part != 0 && extra_room_lines_ < 60) {
+                        ++extra_room_lines_;
+                        LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} 5 s later: room {} (default {}) (report 111)",
+                                 e.address, e.name, word(part, kRoomNow), word(part, kRoomDefault));
+                    }
+                }
+                continue;
+            }
+            u64 source = 0;
+            for (const auto& [address, known] : names_) {
+                if (known.second == e.source && known.first == e.name) {
+                    source = address;
+                    break;
+                }
+            }
+            if (source == 0) {
+                if (extra_room_said_.insert(e.key * 4 + 0).second && extra_room_lines_ < 60) {
+                    ++extra_room_lines_;
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: its placed enemy not seen here yet (report 111)",
+                             e.address, e.name, e.source);
+                }
+                continue;  // (its placed enemy not loaded here: next walk)
+            }
+            const u64 src_part = room_part(source);
+            const u64 dst_part = room_part(e.address);
+            if (src_part == 0 || dst_part == 0) {
+                if (extra_room_said_.insert(e.key * 4 + 1).second && extra_room_lines_ < 60) {
+                    ++extra_room_lines_;
+                    LOG_INFO(Core, "coop: difficulty: extra {:#x} of {}: no room part at table+{:#x} (extra -> {:#x}, "
+                                   "placed {:#x} -> {:#x}) (report 111)",
+                             e.address, e.name, kComponentsRoom, dst_part, source, src_part);
+                }
+                continue;
+            }
+            const std::int32_t src_default = word(src_part, kRoomDefault);
+            const std::int32_t src_now = word(src_part, kRoomNow);
+            const std::int32_t dst_default = word(dst_part, kRoomDefault);
+            const std::int32_t dst_now = word(dst_part, kRoomNow);
+            extra_rooms_done_[e.key] = now == 0 ? 1 : now;
+            const bool differs = CoopDifficulty::CopyRoom(src_now, src_default, dst_now, dst_default);
+            const bool write = differs && ExtraRoomWrite();
+            if (write) {
+                memory_->Write32(dst_part + kRoomDefault, static_cast<u32>(src_default));
+                memory_->Write32(dst_part + kRoomNow, static_cast<u32>(src_now));
+            }
+            if (extra_room_lines_ < 60) {
+                ++extra_room_lines_;
+                LOG_INFO(Core, "coop: difficulty: extra {:#x} of {} {:#x}: room {} (default {}), its placed enemy {:#x}: "
+                               "room {} (default {}){} (report 111)",
+                         e.address, e.name, e.source, dst_now, dst_default, source, src_now, src_default,
+                         write ? ": set to its placed enemy's" : differs ? ": differs, left as it is (control)" : "");
+            }
+        }
+    }
     void PlanExtras(const std::string& scene, const std::vector<Seen>& seen, std::vector<CoopSpawn::Copy>& enemies) {
         std::vector<CoopDifficulty::Extras::Original> originals;
         bool boss = false;
@@ -3181,6 +3290,14 @@ private:
             if (CoopDifficulty::GetsExtras(s.name, s.hash, s.life && s.life->max > 0, special)) {
                 originals.push_back({s.name, s.hash});
             }
+        }
+        // Player report 111 (LICHII_COOP_EXTRA_ROOM=1, research until proven in
+        // game): dungeon enemies get extras too, each given its placed enemy's
+        // dungeon room once made (ExtraRooms); off: their weight instead.
+        if (ExtraRoomOn()) {
+            extras_.SetDungeonSource([](std::uint64_t) { return true; });
+        } else {
+            extras_.SetDungeonSource(nullptr);
         }
         const std::uint16_t count = CoopDifficulty::Now().count_pct;
         const std::size_t no_spot = extras_.NoSpots();

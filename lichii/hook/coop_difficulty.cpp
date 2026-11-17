@@ -711,20 +711,30 @@ std::size_t Extras::Plan(std::string_view scene, const std::vector<Original>& wa
     if (boss_here || count_pct <= 100) {
         return 0;
     }
+    std::vector<Original> in_dungeon;
+    const std::vector<Original>* plan_walk = &walk;
     if (!ExtrasIn(scene)) {
-        // Player report 111: in a dungeon an extra is made with no placement
-        // data, so no DefaultDungeonRoomIndex, and a Deku Baba extra never
-        // woke in its owner's game either (the room check). Weight instead:
-        // each enemy folds by its own would-be extras (FoldCount), so the
-        // dungeon is as strong as with them; one with none stays x1.
+        // Player report 111: in a dungeon an extra made with no placement
+        // data has no DefaultDungeonRoomIndex, and a Deku Baba extra never
+        // woke in its owner's game (the room check). Only an enemy whose
+        // extras can be given its room (dungeon_source_) is planned; the
+        // others get their weight: each folds by its own would-be extras
+        // (FoldCount), so the dungeon is as strong as with them.
         for (const Original& o : walk) {
-            no_spot_.insert(o.hash);
+            if (dungeon_source_ && dungeon_source_(o.hash)) {
+                in_dungeon.push_back(o);
+            } else {
+                no_spot_.insert(o.hash);
+            }
         }
-        return 0;
+        if (in_dungeon.empty()) {
+            return 0;
+        }
+        plan_walk = &in_dungeon;
     }
     std::vector<const Original*> sorted;
-    sorted.reserve(walk.size());
-    for (const Original& o : walk) {
+    sorted.reserve(plan_walk->size());
+    for (const Original& o : *plan_walk) {
         sorted.push_back(&o);
     }
     std::stable_sort(sorted.begin(), sorted.end(),
@@ -759,6 +769,7 @@ std::size_t Extras::Plan(std::string_view scene, const std::vector<Original>& wa
             Extra e;
             e.key = next_key_++;
             e.hash = ExtraHash(o.hash, have);
+            e.source = o.hash;
             e.name = o.name;
             e.position = at;
             e.asked_ms = now_ms;
