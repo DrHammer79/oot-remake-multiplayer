@@ -493,4 +493,11 @@ View Tab::view() const {
     return v;
 }
 
+std::string DiscordState(bool connected, std::size_t players) {
+    if (!connected) {
+        return "Solo";
+    }
+    return players == 1 ? "Co-op: 1 player" : "Co-op: " + std::to_string(players) + " players";
+}
+
 }  // namespace CoopLobbyTab

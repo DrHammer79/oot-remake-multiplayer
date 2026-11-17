@@ -1,0 +1,411 @@
+From 05f232655a34bf8e922d617528851235bec2a6d4 Mon Sep 17 00:00:00 2001
+From: daurosk <354202035+daurosk@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:42:25 -0900
+Subject: [PATCH] Co-op Discord status: the words and art from the options
+ file, the module's line
+
+host/discord_rpc.c: longshot_options.ini may set the status's words and
+art next to discord_app_id=: discord_image= (an art asset key or an
+https image of that application; none = no art, so Discord shows the
+application's icon), discord_details= (first line), discord_state=
+(second line), discord_large_text= (the art's hover text). A key that
+is absent or not usable keeps Longshot's own: with none of them the
+SET_ACTIVITY frame is byte for byte Longshot's.
+
+host/hos_discord_activity.h (new, plain C, static inline, no I/O)
+writes the activity: the checks (2 to 127 bytes of valid UTF-8, no
+control character; image keys), the JSON escapes (bytes that are no
+UTF-8 dropped) and the frame. The same file is in
+oot-remake-multiplayer's hookshot/src, where unit tests drive it.
+
+A loaded co-op module may give the second line itself through the
+optional export hos_coop_discord_state(out, cap) (1 = a line written),
+found by name as host/coop_world.c finds its exports, with a reference
+held across the call. The words are checked every 5 s and a change is
+sent at once; the 60 s keep-alive stays. The options file is read with
+a 512-byte line (the rest of a longer line is skipped, not read as a
+line of its own).
+---
+ host/discord_rpc.c          | 143 ++++++++++++++++++++++++++++--------
+ host/hos_discord_activity.h | 137 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 248 insertions(+), 32 deletions(-)
+ create mode 100644 host/hos_discord_activity.h
+
+diff --git a/host/discord_rpc.c b/host/discord_rpc.c
+index dda093b..dc127f7 100644
+--- a/host/discord_rpc.c
++++ b/host/discord_rpc.c
+@@ -14,9 +14,19 @@
+ 
+    The protocol is Discord's documented IPC (discord-rpc's rpc_connection.h): a frame is <opcode u32 LE><length u32 LE><JSON>,
+    Handshake 0, Frame 1, Close 2, Ping 3, Pong 4. The handshake {"v":1,"client_id":...} is answered by a Ready frame; a
+-   SET_ACTIVITY frame by a frame; a Ping is echoed as a Pong. */
++   SET_ACTIVITY frame by a frame; a Ping is echoed as a Pong.
++
++   (oot-remake-multiplayer's patch 0026) The status's words and art may come from longshot_options.ini too, for a mod's or a
++   kit's own Discord application: discord_image= (an art asset key of that application, an https image, or none: no art, so
++   Discord shows the application's icon), discord_details= (the first line), discord_state= (the second line) and
++   discord_large_text= (the art's hover text). A key that is absent, or not usable, keeps Longshot's own: with none of them the
++   frame is byte for byte Longshot's (host/hos_discord_activity.h, which writes it). A loaded co-op module may say the second
++   line itself through the optional export hos_coop_discord_state (found by name, as host/coop_world.c finds its exports): 1 = a
++   line was written, 0 = none (the file's or Longshot's line). The words are checked every 5 s and a change is sent at once; the
++   file is read again every 15 s, as the id was. */
+ #include "hos_paths.h"   /* (first: windows.h on Windows) */
+ #include "options_path.h"
++#include <stddef.h>   /* (patch 0026: offsetof) */
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -26,6 +36,7 @@
+ #ifdef _WIN32
+ #include <windows.h>
+ #else
++#include <dlfcn.h>   /* (patch 0026: the module's hos_coop_discord_state) */
+ #include <errno.h>
+ #include <poll.h>
+ #include <pthread.h>
+@@ -35,6 +46,7 @@
+ #endif
+ 
+ #include "../gpu/vk/vk_api.h"
++#include "hos_discord_activity.h"   /* (patch 0026) */
+ 
+ #define LONGSHOT_DISCORD_APP_ID_DEFAULT "1570559772111933578"   /* (the Longshot application's id, digits) */
+ #define LONGSHOT_DISCORD_IMAGE_DEFAULT "longshot"     /* (its large-image art asset key) */
+@@ -136,22 +148,68 @@ static int valid_app_id(const char *s) {
+         if (*s < '0' || *s > '9') return 0;
+     return 1;
+ }
+-/* the application id: HOS_DISCORD_APP_ID, then longshot_options.ini's discord_app_id=, then the default */
+-static void read_app_id(char *out, size_t cap) {
+-    snprintf(out, cap, "%s", LONGSHOT_DISCORD_APP_ID_DEFAULT);
++typedef struct Settings {
++    char app_id[24];
++    HosDiscordWords words;   /* (patch 0026) "" each: Longshot's */
++} Settings;
++/* the application id: HOS_DISCORD_APP_ID, then longshot_options.ini's discord_app_id=, then the default; and (patch 0026) the
++   file's discord_image=, discord_details=, discord_state=, discord_large_text= (each the last usable line of its key) */
++static void read_settings(Settings *s) {
++    static const struct { const char *key; size_t at; size_t cap; int (*ok)(const char *); } keys[] = {
++        {"discord_app_id=", offsetof(Settings, app_id), sizeof ((Settings *)0)->app_id, valid_app_id},
++        {"discord_image=", offsetof(Settings, words.image), sizeof ((Settings *)0)->words.image, hos_discord_valid_image},
++        {"discord_details=", offsetof(Settings, words.details), sizeof ((Settings *)0)->words.details, hos_discord_valid_text},
++        {"discord_state=", offsetof(Settings, words.state), sizeof ((Settings *)0)->words.state, hos_discord_valid_text},
++        {"discord_large_text=", offsetof(Settings, words.large_text), sizeof ((Settings *)0)->words.large_text,
++         hos_discord_valid_text},
++    };
++    memset(s, 0, sizeof *s);
++    snprintf(s->app_id, sizeof s->app_id, "%s", LONGSHOT_DISCORD_APP_ID_DEFAULT);
+     FILE *f = fopen(hos_options_file(), "r");   /* (host/options_path.c) */
+     if (f) {
+-        char line[128];
+-        while (fgets(line, sizeof line, f))
+-            if (!strncmp(line, "discord_app_id=", 15)) {
+-                line[strcspn(line, "\r\n")] = 0;
+-                if (valid_app_id(line + 15)) snprintf(out, cap, "%s", line + 15);
++        char line[512];
++        int line_start = 1;   /* (the rest of a line longer than the buffer is no line of its own) */
++        while (fgets(line, sizeof line, f)) {
++            const int starts = line_start;
++            line_start = strchr(line, '\n') != NULL;
++            if (!starts) continue;
++            line[strcspn(line, "\r\n")] = 0;
++            for (size_t k = 0; k < sizeof keys / sizeof *keys; k++) {
++                const size_t kn = strlen(keys[k].key);
++                if (strncmp(line, keys[k].key, kn) || !keys[k].ok(line + kn)) continue;
++                snprintf((char *)s + keys[k].at, keys[k].cap, "%s", line + kn);
+             }
++        }
+         fclose(f);
+     }
+     const char *e = getenv("HOS_DISCORD_APP_ID");
+-    if (e && valid_app_id(e)) snprintf(out, cap, "%s", e);
+-    if (*out && !valid_app_id(out)) *out = 0;
++    if (e && valid_app_id(e)) snprintf(s->app_id, sizeof s->app_id, "%s", e);
++    if (*s->app_id && !valid_app_id(s->app_id)) *s->app_id = 0;
++}
++
++/* (patch 0026) The co-op module's second line: its optional export hos_coop_discord_state(out, cap), 1 = a line written. Looked
++   up again on each call (every 5 s): the module may load after the game starts, or not at all. */
++typedef int (*hos_coop_discord_state_fn)(char *out, size_t cap);
++static int module_state(char *out, size_t cap) {
++    if (cap < 2) return 0;
++    out[0] = 0;
++    int got = 0;
++    /* (a reference held across the call: the bridge frees a module that says co-op is off) */
++#ifdef _WIN32
++    HMODULE m = NULL;
++    if (!GetModuleHandleExA(0, "hookshot_coop.dll", &m)) return 0;
++    hos_coop_discord_state_fn fn = (hos_coop_discord_state_fn)(void *)GetProcAddress(m, "hos_coop_discord_state");
++    if (fn) got = fn(out, cap) == 1;
++    FreeLibrary(m);
++#else
++    void *m = dlopen("hookshot_coop.so", RTLD_NOW | RTLD_NOLOAD);
++    hos_coop_discord_state_fn fn =
++        (hos_coop_discord_state_fn)(m ? dlsym(m, "hos_coop_discord_state") : dlsym(RTLD_DEFAULT, "hos_coop_discord_state"));
++    if (fn) got = fn(out, cap) == 1;
++    if (m) dlclose(m);
++#endif
++    out[cap - 1] = 0;
++    return got && hos_discord_valid_text(out);
+ }
+ 
+ /* ---- frames ---- */
+@@ -212,17 +270,21 @@ static Ipc connect_client(const char *app_id) {
+     }
+     return IPC_NONE;
+ }
+-/* the activity: the release in the details, the start of play for the elapsed time, the application's art */
+-static int send_activity(Ipc p, long long started) {
+-    static unsigned nonce;
+-    char version[48], json[640], answer[ANSWER_CAP];
++/* the activity: the release in the details, the start of play for the elapsed time, the application's art. (patch 0026) The
++   words: host/hos_discord_activity.h (the settings' where they have them, the module's second line first) */
++static int make_activity(char *activity, size_t cap, const Settings *s, const char *module_line, long long started) {
++    char version[48];
+     snprintf(version, sizeof version, "%s", hos_version());
+     version[strcspn(version, " +")] = 0;   /* ("v2.0.12 (source ...)": the release alone) */
+-    snprintf(json, sizeof json,
+-             "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":{\"details\":\"Longshot\","
+-             "\"state\":\"Longshot %s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"%s\",\"large_text\":"
+-             "\"Longshot %s\"}}}}",
+-             ++nonce, process_id(), version, started, LONGSHOT_DISCORD_IMAGE_DEFAULT, version);
++    return hos_discord_activity(activity, cap, "Longshot", version, LONGSHOT_DISCORD_IMAGE_DEFAULT, &s->words, module_line,
++                                started);   /* (0: it does not fit, out "") */
++}
++/* 1 sent, 0 the connection broke, -1 no frame (it does not fit: nothing written, the connection is fine) */
++static int send_activity(Ipc p, const char *activity) {
++    static unsigned nonce;
++    char json[2048], answer[ANSWER_CAP];
++    if (!hos_discord_set_activity(json, sizeof json, nonce + 1, process_id(), activity)) return -1;
++    ++nonce;
+     if (!write_frame(p, OP_FRAME, json)) return 0;
+     uint32_t op = 0;
+     const int r = read_frame(p, &op, answer, sizeof answer, 2000);
+@@ -237,19 +299,19 @@ static int send_activity(Ipc p, long long started) {
+ 
+ /* ---- the presence thread ---- */
+ static void presence_main(void) {
+-    char app_id[24];
+-    read_app_id(app_id, sizeof app_id);
++    Settings set;
++    read_settings(&set);
+     const long long started = (long long)time(NULL);
+     Ipc ipc = IPC_NONE;
+-    uint64_t retry_at = 0, send_at = 0, reread_at = now_ms() + 15000;
++    uint64_t retry_at = 0, send_at = 0, reread_at = now_ms() + 15000, words_at = 0;
+     int said_no_client = 0, said_no_app = 0;
++    char module_line[128] = "", sent[1536] = "";
+     for (;;) {
+         sleep_ms(500);
+         if (now_ms() >= reread_at) {   /* (an id typed into the options file while the game runs) */
+-            char was[24];
+-            memcpy(was, app_id, sizeof was);
+-            read_app_id(app_id, sizeof app_id);
+-            if (strcmp(was, app_id)) {
++            Settings was = set;
++            read_settings(&set);
++            if (strcmp(was.app_id, set.app_id)) {
+                 if (ipc != IPC_NONE) ipc_close(ipc), ipc = IPC_NONE;
+                 retry_at = 0, said_no_app = 0;
+             }
+@@ -259,7 +321,7 @@ static void presence_main(void) {
+             if (ipc != IPC_NONE) ipc_close(ipc), ipc = IPC_NONE;
+             continue;
+         }
+-        if (!app_id[0]) {
++        if (!set.app_id[0]) {
+             if (!said_no_app)
+                 hos_log("discord: no application id: discord_app_id= in longshot_options.ini or HOS_DISCORD_APP_ID (the "
+                         "Discord application named Longshot); the status stays off");
+@@ -267,23 +329,40 @@ static void presence_main(void) {
+             continue;
+         }
+         if (ipc == IPC_NONE && now_ms() >= retry_at) {
+-            ipc = connect_client(app_id);
++            ipc = connect_client(set.app_id);
+             if (ipc == IPC_NONE) {
+                 retry_at = now_ms() + 15000;
+                 if (!said_no_client) hos_log("discord: no Discord client is running; trying again every 15 s");
+                 said_no_client = 1;
+             } else {
+-                hos_log("discord: connected (application %s)", app_id);
++                hos_log("discord: connected (application %s)", set.app_id);
+                 send_at = 0, said_no_client = 0;
+             }
+         }
+-        if (ipc != IPC_NONE && now_ms() >= send_at) {
+-            if (send_activity(ipc, started)) {
++        if (now_ms() >= words_at) {   /* (patch 0026: the module's line, and a change of the words sent at once) */
++            if (!module_state(module_line, sizeof module_line)) *module_line = 0;
++            words_at = now_ms() + 5000;
++        }
++        char activity[1536];
++        static int said_too_long;
++        const int made = make_activity(activity, sizeof activity, &set, module_line, started);
++        if (!made && !said_too_long) hos_log("discord: the status's words do not fit; nothing sent");
++        said_too_long |= !made;
++        if (made && ipc != IPC_NONE && (now_ms() >= send_at || strcmp(activity, sent))) {
++            const int r = send_activity(ipc, activity);
++            if (r < 0) {   /* (no frame: tried again at the keep-alive, the connection kept) */
++                if (!said_too_long) hos_log("discord: the status's frame does not fit; nothing sent");
++                said_too_long = 1;
++                snprintf(sent, sizeof sent, "%s", activity);
++                send_at = now_ms() + 60000;
++            } else if (r) {
++                snprintf(sent, sizeof sent, "%s", activity);
+                 send_at = now_ms() + 60000;
+             } else {
+                 hos_log("discord: the connection broke; connecting again");
+                 ipc_close(ipc), ipc = IPC_NONE;
+                 retry_at = now_ms() + 15000;
++                *sent = 0;
+             }
+         }
+     }
+diff --git a/host/hos_discord_activity.h b/host/hos_discord_activity.h
+new file mode 100644
+index 0000000..5b363d6
+--- /dev/null
++++ b/host/hos_discord_activity.h
+@@ -0,0 +1,137 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   The Discord status's activity text (oot-remake-multiplayer's patch 0026, Longshot's host/discord_rpc.c).
++
++   The same file is in Longshot's host/ through the patch and in our repository (hookshot/src): keep them equal
++   (tests/hookshot/module_test.cpp checks it; tests/hookshot/discord_activity_test.cpp checks what it writes).
++   Plain C with static inline functions only: no state, no I/O, so the tests drive it as discord_rpc.c does.
++
++   With no setting and no module line the SET_ACTIVITY frame is byte for byte the one Longshot wrote before the patch:
++   details "<name>", state and the art's hover text "<name> <version>", the art <default image>. A setting replaces one
++   of them; discord_image=none sends no art at all (Discord then shows the application's own icon). */
++#ifndef HOS_DISCORD_ACTIVITY_H
++#define HOS_DISCORD_ACTIVITY_H
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++
++/* The settings' words: each "" when longshot_options.ini has no usable line for it. */
++typedef struct HosDiscordWords {
++    char image[256];        /* discord_image=: an art asset key or an https image; "none": no art */
++    char details[128];      /* discord_details= */
++    char state[128];        /* discord_state= */
++    char large_text[128];   /* discord_large_text= */
++} HosDiscordWords;
++
++/* 1 for an art asset key or an image's https address: letters, digits and _ - . : / ? = & %, 1 to 255 of them */
++static inline int hos_discord_valid_image(const char *s) {
++    const size_t n = strlen(s);
++    if (!n || n > 255) return 0;
++    for (; *s; s++)
++        if (!((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9') || strchr("_-.:/?=&%", *s)))
++            return 0;
++    return 1;
++}
++
++/* The length of the whole UTF-8 sequence at s (1 to 4), 0 when it is not one (a stray or cut byte, an overlong form,
++   a surrogate, past U+10FFFF) */
++static inline size_t hos_discord_utf8_len(const unsigned char *s) {
++    const unsigned char c = s[0];
++    if (c < 0x80) return 1;
++    size_t n;
++    unsigned min;
++    unsigned v;
++    if (c >= 0xc2 && c <= 0xdf) n = 2, min = 0x80, v = c & 0x1fu;
++    else if (c >= 0xe0 && c <= 0xef) n = 3, min = 0x800, v = c & 0x0fu;
++    else if (c >= 0xf0 && c <= 0xf4) n = 4, min = 0x10000, v = c & 0x07u;
++    else return 0;
++    for (size_t i = 1; i < n; i++) {
++        if ((s[i] & 0xc0) != 0x80) return 0;
++        v = v << 6 | (s[i] & 0x3fu);
++    }
++    if (v < min || v > 0x10ffff || (v >= 0xd800 && v <= 0xdfff)) return 0;
++    return n;
++}
++
++/* 1 for words Discord takes: 2 to 127 bytes of UTF-8 with no control character (Discord refuses a line shorter than 2
++   or longer than 128 characters) */
++static inline int hos_discord_valid_text(const char *s) {
++    const size_t n = strlen(s);
++    if (n < 2 || n > 127) return 0;
++    for (const unsigned char *p = (const unsigned char *)s; *p;) {
++        if (*p < 0x20 || *p == 0x7f) return 0;
++        const size_t k = hos_discord_utf8_len(p);
++        if (!k) return 0;
++        p += k;
++    }
++    return 1;
++}
++
++/* s as the inside of a JSON string: " and \ escaped, control characters and bytes that are no UTF-8 left out, cut
++   before a character that would not fit (out always ended) */
++static inline void hos_discord_json_text(char *out, size_t cap, const char *s) {
++    size_t o = 0;
++    if (!cap) return;
++    for (const unsigned char *p = (const unsigned char *)s; *p;) {
++        const size_t k = hos_discord_utf8_len(p);
++        if (!k || *p < 0x20 || *p == 0x7f) {   /* (dropped: one byte) */
++            p++;
++            continue;
++        }
++        const size_t escape = (*p == '"' || *p == '\\') ? 1 : 0;   /* (only " and \: k is 1 for them) */
++        if (o + escape + k + 1 > cap) break;
++        if (escape) out[o++] = '\\';
++        memcpy(out + o, p, k);
++        o += k, p += k;
++    }
++    out[o] = 0;
++}
++
++/* Joins the strings of parts (NULL-ended) into out. All or nothing: 1 when the whole fits (out ended), else 0 and out "" (a cut
++   would leave half an escape or a JSON object without its end). No snprintf of a string of unknown length. */
++static inline int hos_discord_join(char *out, size_t cap, const char *const *parts) {
++    size_t o = 0;
++    if (!cap) return 0;
++    for (; *parts; parts++) {
++        const size_t n = strlen(*parts);
++        if (n >= cap - o) {
++            out[0] = 0;
++            return 0;
++        }
++        memcpy(out + o, *parts, n);
++        o += n;
++    }
++    out[o] = 0;
++    return 1;
++}
++
++/* The activity object: name ("Longshot") and version ("v3.0.0-rc.4") make the default words, default_image the default
++   art; w (may be NULL) the settings; module_line ("" or NULL: none) the second line, before the settings' state.
++   1 when it fits in cap (1536 always does: each word is at most 254 bytes escaped, the image 255), else 0 and out "". */
++static inline int hos_discord_activity(char *out, size_t cap, const char *name, const char *version, const char *default_image,
++                                       const HosDiscordWords *w, const char *module_line, long long started) {
++    static const HosDiscordWords none_set = {"", "", "", ""};
++    if (!w) w = &none_set;
++    char own[256], details[256], state[256], large[256], image[300], start[24];
++    const char *const own_parts[] = {name, " ", version, NULL}, *const name_only[] = {name, NULL};
++    if (!hos_discord_join(own, sizeof own, own_parts)) hos_discord_join(own, sizeof own, name_only);
++    hos_discord_json_text(details, sizeof details, *w->details ? w->details : name);
++    hos_discord_json_text(state, sizeof state, module_line && *module_line ? module_line : *w->state ? w->state : own);
++    hos_discord_json_text(large, sizeof large, *w->large_text ? w->large_text : own);
++    hos_discord_json_text(image, sizeof image, *w->image ? w->image : default_image);
++    snprintf(start, sizeof start, "%lld", started);   /* (at most 20 characters) */
++    const int art = strcmp(image, "none") != 0;
++    const char *const parts[] = {"{\"details\":\"", details, "\",\"state\":\"", state, "\",\"timestamps\":{\"start\":", start,
++                                 art ? "},\"assets\":{\"large_image\":\"" : "}}", art ? image : NULL, "\",\"large_text\":\"",
++                                 large, "\"}}", NULL};
++    return hos_discord_join(out, cap, parts);
++}
++
++/* The SET_ACTIVITY frame's JSON around an activity object; 1 when it fits, else 0 and out "" */
++static inline int hos_discord_set_activity(char *out, size_t cap, unsigned nonce, unsigned long pid, const char *activity) {
++    char head[96];
++    snprintf(head, sizeof head, "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":", nonce, pid);
++    const char *const parts[] = {head, activity, "}}", NULL};
++    return hos_discord_join(out, cap, parts);
++}
++
++#endif
+-- 
+2.56.0.windows.4
+

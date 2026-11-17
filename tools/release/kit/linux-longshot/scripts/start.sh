@@ -157,6 +157,12 @@ if [[ -f $DATA/tools/puppet_pack/merge_tables.py && -d $GAME/mods ]]; then
         say "  Size tables: not merged (no Python): with a mod that has its own size table, the other players can't be shown."
     fi
 fi
+# "Playing Squadala!" on Discord: the Squadala! application and this kit's release in longshot_options.ini
+# (scripts/discord_status.py, as the Windows kit's Invoke-KitDiscordStatus). Never stops the start.
+if [[ -n $py && -f $KIT/scripts/discord_status.py ]]; then
+    "$py" -I -B "$KIT/scripts/discord_status.py" --options "$GAME/longshot_options.ini" --version-file "$KIT/VERSION.txt" 2>&1 |
+        sed 's/^/  /' || true
+fi
 step 'Starting the game: Host or Join in its menu (Multiplayer)'
 # (as Longshot's own builder/linux/longshot-launch: nothing of a launcher's environment goes in; its
 # own update check is off, the kit's updater brings Longshot up to date with co-op)

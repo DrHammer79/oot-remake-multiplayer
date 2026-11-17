@@ -68,6 +68,7 @@ text "$src/README.txt" "$kit/README.txt"
 text "$src/revert.sh" "$kit/revert.sh"
 for f in start.sh build.sh update.sh collect-logs.sh lib.sh; do text "$src/scripts/$f" "$kit/scripts/$f"; done
 text "$repo/tools/release/kit/scripts/apply_patch.py" "$kit/scripts/apply_patch.py"
+text "$repo/tools/release/kit/scripts/discord_status.py" "$kit/scripts/discord_status.py"
 text "$repo/tools/release/kit/coop.ini.template" "$kit/scripts/coop.ini.template"
 text "$repo/tools/release/kit/coop-options.ini" "$kit/data/coop-options.ini"
 chmod 755 "$kit/start-squadala.sh" "$kit/start-oot-coop.sh" "$kit/revert.sh" "$kit"/scripts/*.sh

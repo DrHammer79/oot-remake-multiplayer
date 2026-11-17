@@ -604,6 +604,69 @@ TEST_CASE("hookshot: a module tab may draw a picture beside its page (patch 0019
     CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_view(double eye[3], double target[3])") != std::string::npos);
 }
 
+namespace {
+
+// s without spaces, tabs and line ends.
+std::string Squashed(const std::string& s) {
+    std::string out;
+    for (const char c : s) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// A patched file's code as the patch leaves it (its hunks' '+' and ' ' lines, without the diff's first column),
+// with every space, tab and line end taken out: a search matches the code, not the diff's layout, so a refreshed
+// patch (other context, a statement that moved from '+' to context) still matches while the code is the same.
+std::string PatchedCode(const std::string& patch, const std::string& path) {
+    std::string code;
+    auto at = patch.find("+++ b/" + path + "\n");
+    if (at == std::string::npos) {
+        return code;
+    }
+    at = patch.find('\n', at) + 1;
+    while (at < patch.size()) {
+        const auto end = patch.find('\n', at);
+        const std::string line = patch.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        if (line.rfind("diff --git ", 0) == 0 || line == "-- ") {
+            break;   // (the next file, or the patch's end)
+        }
+        if (!line.empty() && (line[0] == '+' || line[0] == ' ')) {
+            code += line.substr(1);
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        at = end + 1;
+    }
+    return Squashed(code);
+}
+
+}  // namespace
+
+TEST_CASE("hookshot: the Discord status header in patch 0026 is hookshot/src's, and the module gives its line") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0026-coop-discord-status.patch");
+    REQUIRE_FALSE(patch.empty());
+    CHECK(NewFile(patch, "host/hos_discord_activity.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_discord_activity.h"));
+    const std::string rpc = PatchedCode(patch, "host/discord_rpc.c");
+    REQUIRE_FALSE(rpc.empty());
+    const auto has = [&rpc](const char* code) { return rpc.find(Squashed(code)) != std::string::npos; };
+    CHECK(has("hos_discord_activity(activity, cap, \"Longshot\", version, LONGSHOT_DISCORD_IMAGE_DEFAULT, &s->words,"));
+    CHECK(has("GetProcAddress(m, \"hos_coop_discord_state\")"));
+    CHECK(has("dlsym(m, \"hos_coop_discord_state\")"));
+    // Words or a frame that do not fit (hos_discord_activity / hos_discord_set_activity give 0 and "": the
+    // header's test) send no frame, and that is no broken connection.
+    CHECK(has("if (!hos_discord_set_activity(json, sizeof json, nonce + 1, process_id(), activity)) return -1; ++nonce;"
+              " if (!write_frame(p, OP_FRAME, json)) return 0;"));
+    CHECK(has("const int made = make_activity(activity, sizeof activity, &set, module_line, started);"));
+    CHECK(has("if (made && ipc != IPC_NONE && (now_ms() >= send_at || strcmp(activity, sent))) {"));
+    CHECK(has("const int r = send_activity(ipc, activity); if (r < 0) {"));
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_discord_state(char* out, size_t cap) noexcept") != std::string::npos);
+}
+
 TEST_CASE("hookshot: a module may have a texture drawn with other texels (patch 0020, hos_coop_texture.h)") {
     const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0020-coop-texture-override.patch");
     REQUIRE_FALSE(patch.empty());

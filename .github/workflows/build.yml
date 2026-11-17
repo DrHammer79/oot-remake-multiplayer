@@ -93,6 +93,8 @@ jobs:
       - name: Kit patch applier tests
         if: hashFiles('tools/release/tests/test_apply_patch.py') != ''
         run: python tools/release/tests/test_apply_patch.py -v
+      - name: Kit Discord status tests
+        run: python tools/release/tests/test_discord_status.py -v
       - name: Puppet pack command lines
         run: |
           python tools/puppet_pack/build.py --help
@@ -170,6 +172,17 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      # Our Longshot patches' Windows host code (host/*.c), compiled syntax only with Longshot's own llvm-mingw clang:
+      # nothing else in CI compiles it for Windows (the Linux jobs build the renderer alone), and 0.11.4's patch 0025
+      # reached a game build with a character literal that did not compile. Downloads: the pinned tools.lock,
+      # llvm-mingw, Python and source, mirror first, SHA-256 checked, cached by the pin.
+      - name: Longshot downloads cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .longshot-dl
+          key: longshot-dl-${{ hashFiles('hookshot/PIN', 'tools/release/kit/hookshot/TOOLS.txt') }}
+      - name: Our patches' Windows host code compiles (Longshot's clang, syntax only)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/hookshot/host_compile_check.ps1 -Cache "$env:GITHUB_WORKSPACE\.longshot-dl"
       - name: sccache stats
         run: sccache --show-stats
       - name: Kit updater tests

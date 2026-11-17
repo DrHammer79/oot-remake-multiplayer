@@ -246,6 +246,7 @@ if ($Mode -eq 'title') {
         'Puppet pack: not in the co-op game, so the other players show as names only (the game''s chat says so too).',
         $(if ($hsOnly) { '  It is made from your game file (the one hookshot\game-files.txt names): put that file back, then start again.' } else { '  Run Build-Hookshot-Coop.bat -Game <your .nup> again (SETUP.md, "Play on Hookshot").' })))
     foreach ($l in @(Invoke-KitSizeTableMerge $kit $emu)) { Write-Host $l }   # (#48: a seed from OOTRR's website)
+    foreach ($l in @(Invoke-KitDiscordStatus $kit $emu)) { Write-Host $l }   # ('Playing Squadala!' on Discord)
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
     if ($testKit -and $game) { [System.IO.File]::WriteAllText($testKit, "$($game.Id)`n") }
     Write-Host 'Game started. Host or Join in the game''s menu, first tab Multiplayer (controller: Minus and Plus together, or Home;'
@@ -493,6 +494,7 @@ if ($Hookshot) {
         'Puppet pack: not in the co-op game, so the other players show as names only (the game''s chat says so too).',
         $(if ($hsOnly) { '  It is made from your game file (the one hookshot\game-files.txt names): put that file back, then start again.' } else { '  Run Build-Hookshot-Coop.bat -Game <your .nup> again (SETUP.md, "Play on Hookshot").' })))
     foreach ($l in @(Invoke-KitSizeTableMerge $kit $emu)) { Write-Host $l }   # (#48: a seed from OOTRR's website)
+    foreach ($l in @(Invoke-KitDiscordStatus $kit $emu)) { Write-Host $l }   # ('Playing Squadala!' on Discord)
     $started = Get-Date
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
     Write-Host "Game started. Its log (longshot_log.txt in the game's logs folder) says 'coop: module loaded', then 'coop: connected'."

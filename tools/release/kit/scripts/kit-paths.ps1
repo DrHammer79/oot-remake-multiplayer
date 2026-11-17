@@ -1477,3 +1477,19 @@ function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir) {
     $ErrorActionPreference = $before
     return $out
 }
+
+# The Discord status (docs/setup.md, "Discord"): Squadala!'s Discord application and this kit's release in the game's
+# longshot_options.ini (discord_app_id=, discord_details=, discord_state=), scripts\discord_status.py. A line the player
+# changed stays theirs; the Insert menu's "Discord status" row turns it off. Never stops the start. The lines it says.
+function Invoke-KitDiscordStatus([string]$Kit, [string]$ExeDir) {
+    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+    $tool = Join-Path $Kit 'scripts\discord_status.py'
+    if (-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $python)) { return @() }
+    $before = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = @(& $python -I -B $tool --options (Join-Path $ExeDir 'longshot_options.ini') --version-file (Join-Path $Kit 'VERSION.txt') 2>&1 | ForEach-Object { "$_" })
+    } catch { $out = @("Discord status: not set ($($_.Exception.Message)).") }
+    $ErrorActionPreference = $before
+    return $out
+}

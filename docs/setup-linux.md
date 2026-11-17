@@ -62,6 +62,10 @@ The terminal says what happened and what to do. Common ones:
 For a bug report: `bash start-squadala.sh --logs` writes `coop-logs-<time>.tar.gz` beside it (passwords, codes,
 addresses and your user name are masked). Send that file.
 
+## Discord status
+
+As on Windows ([setup.md, "Discord status"](setup.md#discord-status)): with Discord running (also the Flatpak or Snap one), it shows **Playing Squadala!**; the game's Insert menu row **Discord status** turns it off. The kit writes its lines into `data/game/longshot_options.ini`.
+
 ## Going back to an older version
 
 `bash revert.sh` in the kit folder puts back the version the kit had before its last update. Every update keeps the version it replaces in `previous/` (the last two; only the kit's own files).

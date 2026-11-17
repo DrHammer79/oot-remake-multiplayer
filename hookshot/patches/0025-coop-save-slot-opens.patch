@@ -35,7 +35,7 @@ index 13396d4c..435ee070 100644
 +    static const char kProgress[] = "progress.sav";
 +    const size_t k = sizeof kProgress - 1, n = strlen(host);
 +    const char *colon = strstr(guest, ":/");
-+    if (!colon || n <= k + 1 || _stricmp(host + n - k, kProgress) || (host[n - k - 1] != '\' && host[n - k - 1] != '/'))
++    if (!colon || n <= k + 1 || _stricmp(host + n - k, kProgress) || (host[n - k - 1] != '\\' && host[n - k - 1] != '/'))
 +        return;
 +    AcquireSRWLockExclusive(&mount_lock);
 +    const size_t m = strlen(save_mount);
