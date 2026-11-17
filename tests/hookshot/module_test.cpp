@@ -924,6 +924,7 @@ TEST_CASE("hookshot: the Insert menu files nothing with Longshot in a co-op buil
             CHECK(line.find("data-services.magicbean.dev") == std::string::npos);
         }
     }
+}
 
 TEST_CASE("hookshot: every switch of the save folder marks the game's save list for a re-read (player report 124)") {
     // One path: the only call of the exe's remount is in CoopSave's RemountLocked, which marks the list stale; the
