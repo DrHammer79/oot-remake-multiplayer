@@ -438,6 +438,25 @@ Type 39 is kept for drops and not used. A `DROP_SPAWN` told again may come from 
 
 Protocol 10, type 355 (355 to 359 kept; branch `deku-dungeon-2`, issues 176 and 196). When a game starts one of the room gimmick events whose played flag the others hold ([dungeon.md](dungeon.md), "Live events"), it sends the event's name at once. The others in that scene start the same event as soon as their Link is near its place, instead of waiting for the played flag, which comes only at the end of the sender's event. On channel 0, reliable; the server writes the sender's number, relays it to the others in the sender's scene and keeps nothing (a game that comes later gets the played flag). A version 9 server refuses it as unknown. Story cutscenes use the same message (branch `shared-cutscenes`): the name is one of the story cutscenes in `coop_shared_scenes.cpp`, and the others in the room play it at once ([scenes.md](scenes.md), "Shared story cutscenes"); a game without that branch ignores such a name.
 
+### Switch states (`SWITCH_STATE`)
+
+Protocol 12, type 356 (in the gimmick range 355 to 359; branch `room-objects`). It carries one room switch's output plug (`OnState`, `OffState`, ...) going on or off by its own player's press. These are the timed step, eye and hit switches that a room object reads through its own timer, delay or gates, with no event and no saved flag. The 12 lines are generated from the room graphs ([objects.md](objects.md), "Timed switches").
+
+Fields:
+- `u8` player (0 from a game; the server writes the sender).
+- The scene.
+- The switch's actor name (1 to 64 characters).
+- Its placement (3 x `f32`, the romfs's, finite).
+- `u32` plug: Murmur3 of the plug's name, not 0.
+- `u8` on (0 or 1).
+
+How it is sent and used:
+- The presser's game sends on when the plug goes 1, then again every 2 s while it stays 1, and off when it goes back to 0.
+- A game in the same scene holds the same plug on its own switch through the game's set-bool while the sender's is on, so its own logic runs. It lets go on off, or when 5 s pass without a resend.
+- A plug that is 1 while (or within 1 s after) a game holds it for another player is not sent back.
+- Nothing is sent with no other player in the scene.
+- Session channel, reliable, from either side. The server relays it to the sender's scene only and never keeps it, as `DUNGEON_EVENT`.
+
 ### Moving platforms (`PLATFORM_CLOCK`)
 
 Protocol 10, type 400 (400 to 404 kept; branch `platforms-b`, issues 196 and 194). The game moves its lifts, moving floors and turning floors by delta time, so one word of each platform's driver (an elapsed time, a phase, an angle) decides where it is. The game that owns a platform sends that word about once a second, and at once when it jumped (it looped, or a switch started it), with the server time it read it at (the clock of [Keep-alive and clock](#keep-alive-and-clock)). Every other game in the scene puts value + rate x (its server time now - the sent server time) into its own word, looped by the cycle when one was seen, only when its own is more than 0.1 s of the clock off, and at most every 0.5 s. Latency and the games' own clocks drop out: both sides use the server's time. Which word it is, and its rate, the sender finds in its running game ([objects.md](objects.md), "Moving platforms"); the key says where it is, the same in every game of one build.
@@ -630,6 +649,8 @@ usual `PLAYER_JOINED`, samples and `PLAYER_LEFT`. Types 460 to 469 are kept; 465
 - Version 11 also (branch `customizer-full`): `PLAYER_LOOK` (430), each part's colour from the Link customizer ([Looks](#looks-player_look)). No earlier layout changed and no bump of its own. A build without it ignores the type (that player's parts stay the game's own on its screen).
 - Version 11 also (branch `ocarina-sound-b`): `LINK_SOUND` (500); 500 to 509 kept for Link's sounds. A build without it ignores the type (no sounds from that player).
 - **Protocol 12** (0.11, branch `boss-intro`): `DAMAGE` may end in the hit's place (3 x `f32`). A protocol 11 reader refuses that as trailing bytes, so the version goes up once for 0.11: a 0.10.x game or server is refused at `HELLO` with reason 1 and the server's note says which side runs Update.bat. Every other protocol 11 message is unchanged.
+
+- Protocol 12 also (branch `room-objects`): `SWITCH_STATE` (356). No bump of its own. A build without it ignores the type, and its timed switches stay its own player's. A server without it does not relay it.
 
 ## Who gets which stream
 

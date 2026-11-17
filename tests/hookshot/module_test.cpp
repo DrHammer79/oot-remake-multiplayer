@@ -195,6 +195,18 @@ TEST_CASE("hookshot: Link puppets follow the puppet guard in longshot.exe") {
     CHECK_FALSE(CoopHookshot::AllowLinkPuppets("0", true));
 }
 
+TEST_CASE("hookshot: no Link puppet where the null page could not be armed (player report 131)") {
+    // Armed (or Linux): made. Not armed: refused, every held piece and the puppet's own update read through null.
+    CHECK_FALSE(CoopHookshot::RefuseUnarmed("CoopPuppet_Child_Green", true, ""));
+    CHECK(CoopHookshot::RefuseUnarmed("CoopPuppet_Child_Green", false, ""));
+    CHECK(CoopHookshot::RefuseUnarmed("CoopPuppet_ChildQuiet_Red", false, "1"));
+    // HOS_COOP_NULL_READS=0 asks for the faults (a test): still made.
+    CHECK_FALSE(CoopHookshot::RefuseUnarmed("CoopPuppet_Adult", false, "0"));
+    // Not a Link puppet (the fairy, gear): never refused here.
+    CHECK_FALSE(CoopHookshot::RefuseUnarmed("Dm_Npc_Navi", false, ""));
+    CHECK_FALSE(CoopHookshot::RefuseUnarmed("Weapon_Range_SlingShot", false, ""));
+}
+
 TEST_CASE("hookshot: the module's null page covers the guest's first MB only (issue 150)") {
     using CoopNullPage::GuestOffset;
     CHECK(GuestOffset(0x1000000007d8ULL) == std::optional<std::uint64_t>(0x7d8));  // the perception crash's read
@@ -216,7 +228,7 @@ TEST_CASE("hookshot: perceived puppets only where null reads can give 0 (issue 1
 
 TEST_CASE("hookshot: the null page is armed before the first puppet create reaches the game (issue 150)") {
     const std::string src = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
-    const auto arm = src.find("ArmNullPage(actor);");
+    const auto arm = src.find("return !ArmNullPage(actor);");
     const auto call = src.find("g_api->call(ctx, &k, &x0)");
     REQUIRE(arm != std::string::npos);
     REQUIRE(call != std::string::npos);
@@ -792,4 +804,35 @@ TEST_CASE("hookshot: typing in a co-op field keeps the keyboard from the menu (p
     for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
         CHECK(patch.compare(at, 20, "diff --git a/gpu/vk/") == 0);
     }
+}
+
+TEST_CASE("hookshot: every switch of the save folder marks the game's save list for a re-read (player report 124)") {
+    // One path: the only call of the exe's remount is in CoopSave's RemountLocked, which marks the list stale; the
+    // title's step has the game re-read it (its own SeqOneshotRequestLoadAndSerializeCaption body).
+    const std::string save = ReadFile(kRepo / "lichii" / "hook" / "coop_save.cpp");
+    const auto first = save.find("g_remount(");
+    REQUIRE(first != std::string::npos);
+    CHECK(save.find("g_remount(", first + 1) == std::string::npos);
+    const auto helper = save.find("bool RemountLocked(const fs::path& dir) {");
+    REQUIRE(helper != std::string::npos);
+    CHECK(first > helper);
+    CHECK(save.find("g_list_stale = true;", helper) != std::string::npos);
+    const std::string title = ReadFile(kRepo / "hookshot" / "src" / "coop_title.cpp");
+    CHECK(title.find("constexpr std::uint64_t kCaptionReload = 0x80f6da40;") != std::string::npos);
+    CHECK(title.find("constexpr std::uint64_t kCaptionBusy = 0x833ad380;") != std::string::npos);
+    CHECK(title.find("constexpr std::uint64_t kCaptionReset = 0x80bafd40;") != std::string::npos);
+    // The game's order: its idle test, its reset, then its read (a read starts only from state 0).
+    const auto busy = title.find("GameCall(ctx, kCaptionBusy, mgr)");
+    const auto reset = title.find("GameCall(ctx, kCaptionReset, 0)");
+    const auto read = title.find("GameCall(ctx, kCaptionReload, mgr)");
+    REQUIRE(busy != std::string::npos);
+    REQUIRE(reset != std::string::npos);
+    REQUIRE(read != std::string::npos);
+    CHECK(busy < reset);
+    CHECK(reset < read);
+    CHECK(title.find("constexpr std::uint64_t kCaptionMgrGot = 0x84c81660;") != std::string::npos);
+    CHECK(title.find("in.stale = CoopSave::TakeSaveListStale();") != std::string::npos);
+    const auto step = title.find("if (event == HOS_COOP_TITLE_STEP) {");
+    REQUIRE(step != std::string::npos);
+    CHECK(title.find("RefreshSaveList(ctx);", step) != std::string::npos);
 }

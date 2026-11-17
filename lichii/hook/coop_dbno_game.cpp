@@ -318,6 +318,7 @@ void Frame(const std::optional<std::string>& scene, const std::optional<coop::ho
             t.state = g.roster.StateOf(r.number);
             t.in_game = r.scene.has_value() && !r.scene->empty() && (r.status & proto::status::loading) == 0;
             t.loading = (r.status & proto::status::loading) != 0;
+            t.status = r.status;
             t.scene = r.scene;
             t.position = r.position;
             if (const auto& th = g.threats[r.number <= proto::kMaxPlayers ? r.number : 0];
@@ -406,6 +407,14 @@ void Frame(const std::optional<std::string>& scene, const std::optional<coop::ho
     body.emitter = g.emitter.load(std::memory_order_acquire);
     body.bsa = g.bsa.load(std::memory_order_acquire);
     body.life = g.life_component.load(std::memory_order_acquire);
+    // A teammate who cannot be fought now (downed, spectating, or PLAYER_STATUS away: paused, in a
+    // menu, loading, in their own event, dead): their puppet is unseen in our game too (issue 150 with
+    // row 113; review of perception-on).
+    for (const Teammate& t : team) {
+        if (auto why = Body::UnseenWhy(t.state == State::downed || t.state == State::spectating, t.status)) {
+            body.unseen_puppets.push_back({t.number, std::move(*why)});
+        }
+    }
     Body::TheCrawl().Want(body);
     for (auto& note : Body::TheCrawl().TakeNotes()) {
         LOG_INFO(Core, "coop: dbno: {}", note);

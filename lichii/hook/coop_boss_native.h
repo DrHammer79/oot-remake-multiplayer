@@ -47,6 +47,7 @@
 #include <vector>
 
 #include "coop/protocol/messages.hpp"
+#include "coop_caller_orders.h"
 #include "coop_puppet.h"
 
 namespace CoopBossNative {
@@ -213,7 +214,7 @@ public:
     // Everything forgotten, the block too (tests; co-op off).
     void Reset();
 
-    static constexpr int kCallerOrder = 45;  // after the drops (40), before the boss rooms (50)
+    static constexpr int kCallerOrder = CoopCallerOrders::kBossTable;  // after the drops (40), before the boss rooms (50)
     // Steps a copy's brain verb may differ from the owner's (nothing queued)
     // before it is put back (about a second at the game's 60 frames).
     static constexpr int kDriftSteps = 60;

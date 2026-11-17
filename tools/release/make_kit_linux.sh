@@ -43,10 +43,12 @@ die() { echo "make_kit_linux: $*" >&2; exit 1; }
 kind=$(file -b "$module" 2>/dev/null)   # ("ELF 64-bit LSB shared object, x86-64, ...")
 [[ $kind == *'ELF 64-bit'* && $kind == *'shared object'* && $kind == *x86-64* ]] || die "$module is not an x86-64 Linux shared object"
 file -b "$server" 2>/dev/null | grep -q 'ELF 64-bit.*x86-64' || die "$server is not an x86-64 Linux program"
-enet_licence=$licenses/_deps/enet-src/LICENSE
-fmt_licence=$(find "$licenses/_deps" "$repo/build"*/_deps -maxdepth 2 -path '*fmt-src/LICENSE*' -type f 2>/dev/null | head -n1 || true)
-[[ -f $enet_licence ]] || die "ENet's LICENSE not found in $licenses/_deps/enet-src"
-[[ -n $fmt_licence ]] || die "fmt's LICENSE not found under $licenses/_deps/fmt-src"
+# (the licences where the build's CMakeCache says the sources are: _deps/<name>-src, or a source given from outside)
+. "$repo/tools/release/kit_deps.sh"
+enet_licence=$(kit_dep_license enet "$licenses")
+fmt_licence=$(kit_dep_license fmt "$licenses" "$(kit_build_of "$module")" "$repo/build"*)
+[[ -n $enet_licence ]] || die "ENet's LICENSE not found in the ENet source of $licenses ($(kit_dep_source "$licenses" enet))"
+[[ -n $fmt_licence ]] || die "fmt's LICENSE not found in the fmt source of $licenses ($(kit_dep_source "$licenses" fmt))"
 src=$repo/tools/release/kit/linux-longshot
 pin=$repo/hookshot/PIN
 linux_pin=$repo/hookshot/LINUX.txt

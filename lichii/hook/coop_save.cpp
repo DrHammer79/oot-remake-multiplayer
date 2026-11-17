@@ -80,6 +80,10 @@ bool g_title_up = false;   // the title's menu is up (NoteTitle, Hookshot's titl
 bool g_suspended = false;
 const void* g_decided_client = nullptr;   // the session's client it was made for
 bool g_live = false;   // decided and the session not over (SessionLive)
+// Player report 124: the save folder was switched (RemountLocked) and the game's own save list (its caption manager,
+// which the title's Continue and Load read) still shows the old folder's saves. Taken by the title's step
+// (TakeSaveListStale), which has the game re-read it.
+bool g_list_stale = false;
 
 // An environment variable's text ("" when unset).
 std::string EnvText(const char* name) {
@@ -125,6 +129,7 @@ void Decide() {
 }
 
 void NoteSaveDirLocked(const fs::path& dir);
+bool RemountLocked(const fs::path& dir);
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, bool played_from = true);
 void PendingFrame();
 
@@ -162,13 +167,12 @@ void SwitchFrame(coop::net::Client& client) {
         // whole in it (PendingFrame), never onto an empty one.
         const fs::path own = save::is_coop_dir(g_dir) ? save::own_dir_of(g_dir) : g_dir;
         if (own != g_dir) {
-            if (!g_remount(own.string())) {
+            if (!RemountLocked(own)) {
                 LOG_WARNING(Core, "coop: save: could not switch the save folder back to {}: this game keeps {}",
                             own.string(), g_dir.string());
                 g_use = false;
                 return;
             }
-            NoteSaveDirLocked(own);
         }
         g_use = choice == save::FolderChoice::coop;
         if (g_use) {
@@ -208,7 +212,7 @@ void PendingFrame() {
     g_guest.unwritten.reset();
     const fs::path to = std::exchange(g_pending, {});
     if (WriteSlotTo(to, slot, false) != save::WriteResult::written) return;
-    if (!g_remount(to.string())) {
+    if (!RemountLocked(to)) {
         LOG_WARNING(Core, "coop: save: could not switch the save folder to {}: this game keeps {}", to.string(),
                     g_dir.string());
         g_guest.ready = false;
@@ -216,9 +220,20 @@ void PendingFrame() {
         Say("The host's save came, but this game could not switch to it (see the log): play your own save.");
         return;
     }
-    NoteSaveDirLocked(to);
     LOG_INFO(Core, "coop: save: now playing from the co-op save folder {}", to.string());
     Say(g_lines.on_ready(g_in_game));
+}
+
+// Under g_mutex: THE one way this game's save folder is switched (Hookshot): every switch (back to its own folder for
+// a new session, to the co-op folder once the host's save is in it, which Resync from host also ends in) goes through
+// here. After a switch the game's save list is stale (player report 124): the title has the game re-read it
+// (TakeSaveListStale). False: not switched, the game keeps its folder and its list.
+bool RemountLocked(const fs::path& dir) {
+    if (!g_remount || !g_remount(dir.string())) return false;
+    NoteSaveDirLocked(dir);
+    g_list_stale = true;
+    LOG_INFO(Core, "coop: save: the save folder is now {}: the game re-reads its save list on the title", dir.string());
+    return true;
 }
 
 // Under g_mutex: the host's slot written whole into the co-op folder `dir`.
@@ -447,6 +462,11 @@ GameSaveLoads TakeGameSaveLoads() {
 
 bool TakeKeeperSaveLoad() {
     return g_keeper_load.exchange(false, std::memory_order_relaxed);
+}
+
+bool TakeSaveListStale() {
+    std::lock_guard lock(g_mutex);
+    return std::exchange(g_list_stale, false);
 }
 
 bool TitleUp() {

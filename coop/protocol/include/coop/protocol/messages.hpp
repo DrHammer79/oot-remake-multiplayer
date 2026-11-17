@@ -132,6 +132,7 @@ enum class MessageType : std::uint16_t {
   fish_lure = 320,  // 320 to 324: the fishing pond (docs/protocol.md, "Fishing")
   rejoin_token = 345,  // 345 to 349: rejoin after a crash or drop (docs/protocol.md, "Rejoin")
   rejoin_claim = 346,
+  switch_state = 356,  // room-objects: a room switch's own state (docs/protocol.md, "Switch states")
   dungeon_event = 355,  // 355 to 359: a room gimmick's event started (docs/protocol.md, "Gimmick events")
   player_ride = 385,  // 385 to 389: riding Epona (docs/protocol.md, "Riding")
   platform_clock = 400,  // 400 to 404: moving platforms' clocks (docs/protocol.md, "Moving platforms")
@@ -340,6 +341,9 @@ inline constexpr std::uint8_t loading = 1u << 1;
 inline constexpr std::uint8_t in_cutscene = 1u << 2;
 inline constexpr std::uint8_t in_menu = 1u << 3;
 inline constexpr std::uint8_t dead = 1u << 4;
+// Not really here: a player who cannot fight or be fought now (PvP never hits them, and with the
+// puppets perceived no enemy picks their puppet: coop_pvp.cpp Guarded, coop_dbno_body.h UnseenWhy).
+inline constexpr std::uint8_t away = paused | loading | in_cutscene | in_menu | dead;
 }  // namespace status
 
 struct PlayerStatus {
@@ -1470,6 +1474,23 @@ struct DungeonEvent {
   bool operator==(const DungeonEvent&) const = default;
 };
 
+// SWITCH_STATE (room-objects; docs/protocol.md, "Switch states"): one of the sender's room switches (a timed step, eye
+// or hit switch whose output a room object reads) turned an output plug on or off by its own player's press. A game in
+// the same scene holds the same plug on its own switch while the sender's is on, so its own timers, gates and movers
+// run (lichii/hook/coop_switch_share.h). Reliable, relayed to the sender's scene, never kept; sent again every 2 s
+// while on, so a player who comes in late gets it.
+inline constexpr std::size_t kMaxSwitchNameChars = 64;
+
+struct SwitchState {
+  std::uint8_t player_number = kPlayerSelf;
+  std::string scene;
+  std::string name;        // the switch's actor name, 1 to kMaxSwitchNameChars
+  Vec3 place{};            // its placement (the romfs's), finite
+  std::uint32_t plug = 0;  // Murmur3 of the output plug's name (OnState, OffState, FirstOn, ...), not 0
+  bool on = false;
+  bool operator==(const SwitchState&) const = default;
+};
+
 // Down but not out (protocol 11; docs/protocol.md, "Down but not out"): a
 // player whose hearts run out is downed, not dead, and a teammate can revive
 // them. On unless the host turns it off.
@@ -1756,7 +1777,7 @@ using Message = std::variant<Hello, Welcome, Refused, PlayerJoined, PlayerLeft,
                              DbnoMode, DbnoStatus, DbnoRevive, DbnoThreat, Difficulty, VoiceFrame,
                              ModList, ModSettings, LobbyAction, LobbyMutes, LobbyResult,
                              LocalJoin, LocalJoined, LocalLeave, LocalSample, LocalMessage, LinkSound,
-                             BossScene, BossHeart, PlayerLook>;
+                             BossScene, BossHeart, PlayerLook, SwitchState>;
 
 MessageType type_of(const Message& message);
 

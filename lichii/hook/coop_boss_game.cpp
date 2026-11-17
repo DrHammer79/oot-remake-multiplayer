@@ -20,6 +20,7 @@
 
 #include "coop_boss.h"
 #include "coop_boss_beaten.h"
+#include "coop_caller_orders.h"
 #include "coop_boss_native.h"
 #include "coop_boss_scenes.h"
 #include "coop_live_events.h"
@@ -60,7 +61,7 @@ constexpr std::uint64_t kActorState = 0x2c;
 constexpr std::uint32_t kActorStatePresent = 4;
 constexpr std::uint64_t kActorPosition = 0x31c;
 constexpr std::uint64_t kSetMatrix = 0x4c6580;  // vtable slot 0x218 of every actor seen
-constexpr int kCallerOrder = 50;  // after the puppets, spawn, fairy, objects, time
+constexpr int kCallerOrder = CoopCallerOrders::kBossRooms;  // after the puppets, spawn, fairy, objects, time
 // Ten times a second on the steady clock, not by presented frames (issue
 // 106: with the emulator's speed-up, frames come faster).
 constexpr std::uint64_t kTickEveryUs = 100'000;

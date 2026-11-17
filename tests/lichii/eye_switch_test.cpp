@@ -154,7 +154,13 @@ TEST_CASE("eye switch: the table, its places and FirstOn's key") {
     // Not here: no wired trigger (Water), not shared (room spins).
     CHECK(CoopEyeSwitch::FindAll("WaterTemple_EyeSwitch_Focus", "WaterTemple").empty());
     CHECK(CoopEyeSwitch::Find("ForestTemple_Room11_RoomSpin", "ForestTemple") == nullptr);
-    CHECK(CoopEyeSwitch::FindAll("SpiritTemple_Level_Room_19_SwitchOn_01", "SpiritTemple").size() == 2);
+    // Driven only where our set stays (offline hs-step-probe): eye switches and FirstOn latches, 25 of the 64 lines.
+    int driven = 0;
+    for (const auto& s : CoopEyeSwitch::Switches()) driven += CoopEyeSwitch::Latches(s) ? 1 : 0;
+    CHECK(driven == 25);
+    CHECK(CoopEyeSwitch::FindAll("SpiritTemple_Level_Room_19_SwitchOn_01", "SpiritTemple").empty());  // sun: rewritten
+    CHECK(CoopEyeSwitch::FindAll("InsideJabuJabuBellyRoom01StepSwitch", "InsideJabuJabuBelly").empty());  // step OnState
+    CHECK(CoopEyeSwitch::FindAll("ForestTemple_Room02_ShutterOpen", "ForestTemple").size() == 1);  // step FirstOn
     CHECK(CoopEyeSwitch::FindAll("DodongoCavern_Gimmick_EyeSwitch", "DodongoCavern").size() == 1);  // one eye, not three
     CHECK(CoopEyeSwitch::PlugKey("FirstOn") == CoopEyeSwitch::kFirstOn);
     CHECK(CoopEyeSwitch::OnFromEnv("1"));
@@ -325,39 +331,18 @@ TEST_CASE("eye switch: only the eye its asker links to, at its placement (Dodong
     CHECK(FirstOn(g2, kEye2) == 0);
 }
 
-TEST_CASE("eye switch: an event with two askers: the one that is here, nearest our Link") {
-    // SpiritTemple_Level_Room_19_SwitchOn_01: two sun switches, each with its own asker, in one room.
-    const std::array<float, 3> west_switch{28.0f, 121.5f, -40.1f}, west_asker{31.4f, 120.0f, -41.6f};
-    const std::array<float, 3> east_switch{45.8f, 121.5f, -47.5f}, east_asker{40.9f, 119.2f, -47.5f};
-    const std::string spirit = "SpiritTemple", event = "SpiritTemple_Level_Room_19_SwitchOn_01";
-    const std::uint32_t light = CoopEyeSwitch::PlugKey("isLightMax");
-    SUBCASE("both askers here: Link's side") {
-        FakeGuest g;
-        World w;
-        Eye(g, kEye, 0, light ^ 7u);
-        CoopEyeSwitch::Switcher s(w.Finder());
-        REQUIRE(s.Want(event, spirit, std::array<float, 3>{46.0f, 121.0f, -46.0f}));  // Link by the east switch
-        s.Step(g, false, 0, kMain, 100);
-        REQUIRE(s.Step(g, true, kBlock, kMain, 100));
-        CHECK(w.looks.front().at == east_asker);
-        CHECK(w.looks.back().at == east_switch);
-        CHECK(w.looks.back().name == "Obj_SolarSwitch_A_02");
-        CHECK(g.Get<std::uint32_t>(kBlock + a::kNodeKey) == light);
-    }
-    SUBCASE("Link nearer the west one, but only the east asker is here") {
-        FakeGuest g;
-        World w;
-        w.asker_only_at = east_asker;
-        Eye(g, kEye, 0, light ^ 7u);
-        CoopEyeSwitch::Switcher s(w.Finder());
-        REQUIRE(s.Want(event, spirit, std::array<float, 3>{29.0f, 121.0f, -40.0f}));
-        s.Step(g, false, 0, kMain, 100);
-        REQUIRE(s.Step(g, true, kBlock, kMain, 100));
-        CHECK(w.looks[0].at == west_asker);  // tried first, not here
-        CHECK(w.looks[1].at == east_asker);
-        CHECK(w.looks.back().at == east_switch);
-    }
-    (void)west_switch;
+TEST_CASE("eye switch: a switch whose own AI rewrites the plug is not driven (step OnState, sun isLightMax)") {
+    // Offline hs-step-probe (2026-11-16): B's Jabu room-1 step switch OnState, set through the set-bool, read back 0
+    // every frame for 2 s (its AI writes it from contact) and no event came; A's own press raised the asker's trigger.
+    World w;
+    CoopEyeSwitch::Switcher s(w.Finder());
+    s.Expire("InsideJabuJabuBelly");
+    CHECK_FALSE(s.Want("InsideJabuJabuBellyRoom01StepSwitch", "InsideJabuJabuBelly"));  // the old way at once
+    CHECK_FALSE(s.Want("SpritTemple_Room23_SunSwitch", "SpiritTemple"));
+    CHECK_FALSE(s.Want("InsideJabuJabuBellyRoom05Swich", "InsideJabuJabuBelly"));  // hit switch OnState
+    // ... and their guard flags come as before (nothing waits for a copy we do not drive).
+    CHECK_FALSE(s.HoldsGuard(coop::protocol::flag_hash("InsideJabuJabuBelly_Gimmick_Onswitch_first"), "InsideJabuJabuBelly"));
+    CHECK(s.Want(kLadder, kDeku));  // an eye: driven
 }
 
 TEST_CASE("eye switch: the plug the graph reads, never another (an eye with only FirstOn is not set for OnState)") {
@@ -408,7 +393,7 @@ TEST_CASE("eye switch: guard flags (a negated trigger flag, an asker's delete fl
     s.Expire(kDeku);
     CHECK(s.HoldsGuard(cleared, kDeku));
     CHECK_FALSE(s.HoldsGuard(cleared, "GerudoTrainingGround"));  // its own dungeon only
-    CHECK(s.HoldsGuard(fire, "GerudoTrainingGround"));
+    CHECK_FALSE(s.HoldsGuard(fire, "GerudoTrainingGround"));  // a step switch's OnState event: not driven, not held
     CHECK_FALSE(s.HoldsGuard(coop::protocol::flag_hash("ForestTemple_After_Appearance_TreasureChest"), "ForestTemple"));
     // The path gave up on the ladder this visit: its guard comes as before (the old way); others still wait.
     REQUIRE(s.Want(kLadder, kDeku));

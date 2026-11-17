@@ -188,5 +188,6 @@ if (-not $env:CI) { try { Start-Process explorer.exe "/select,`"$zip`"" } catch 
 Write-Host 'IP addresses, MAC addresses, passwords, your Windows user name and PC name are masked in it.'
 if ($logHelp) { Write-Host ''; foreach ($l in $logHelp) { Write-Host (Protect-LogText $l $mask) -ForegroundColor Yellow } }
 Write-Host ''
-Write-Host 'Send it privately (a Discord DM to the maintainer). Do not attach it to a public issue.'
+Write-Host 'To report it: on the Squadala! Discord (https://discord.gg/GwtRKAqng5) type /bugreport, say what happened'
+Write-Host 'and attach this zip. Do not attach it to a public issue.'
 Write-Host "Send this zip: $zip" -ForegroundColor Green

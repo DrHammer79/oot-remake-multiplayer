@@ -93,7 +93,7 @@ struct World {
             }
             if (at == fail_at) return 3;
             // generate <preset or string> <seed> <out.ootrr> [--spoiler <file>]: the seed file (JSON, its "settings"
-            // the OOTRR1- string) and, when asked, the spoiler log, as OOTRR 0.6.1 writes them.
+            // the OOTRR1- string) and, when asked, the spoiler log, as OOTRR 0.6.1 and 0.6.2 write them.
             if (args.size() >= 4 && args[0] == "generate") {
                 const std::string s = args[1].rfind("OOTRR", 0) == 0 ? args[1] : "OOTRR1-P" + args[1];
                 Put(CoopMods::FromUtf8(args[3]), "{\n  \"format\": \"ootrr-seed\",\n  \"seed\": \"" + args[2] +
@@ -1489,7 +1489,7 @@ TEST_CASE("rando: a control mod written before the Settings string gets it at th
 }
 
 TEST_CASE("rando: the settings string of a seed file") {
-    // As OOTRR 0.6.1 writes it (generate default abc).
+    // As OOTRR 0.6.1 writes it (generate default abc); 0.6.2 writes the same layout (its settings/seed.rs is unchanged).
     CHECK(SeedSettings("{\n  \"format\": \"ootrr-seed\",\n  \"version\": 1,\n  \"generator\": \"ootrr-core 0.6.1\",\n"
                        "  \"seed\": \"abc\",\n  \"settings\": \"OOTRR1-EYAQCTABAFQACAMOJY\",\n  \"placements\": {}\n}\n") ==
           "OOTRR1-EYAQCTABAFQACAMOJY");

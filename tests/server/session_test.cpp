@@ -4243,6 +4243,31 @@ TEST_CASE("a gimmick event start goes to the others in the sender's scene only, 
   CHECK(messages_to<DungeonEvent>(h, 3).empty());
 }
 
+TEST_CASE("a switch state goes to the others in the sender's scene only, never kept (room-objects)") {
+  ObjectHarness h;
+  h.receive(1, sample_in("DodongoCavern"), kChannelPlayerSamples);
+  h.receive(2, sample_in("DodongoCavern"), kChannelPlayerSamples);
+  h.receive(3, sample_in("KokiriForest"), kChannelPlayerSamples);
+  h.clear();
+  SwitchState s;
+  s.scene = "DodongoCavern";
+  s.name = "Obj_StepSwitch_A_01";
+  s.place = {17.2f, 112.3f, -23.0f};
+  s.plug = 0x1234abcdu;
+  s.on = true;
+  h.receive(1, s, kChannelSession);
+  const auto got = messages_to<SwitchState>(h, 2);
+  REQUIRE(got.size() == 1);
+  CHECK(got.front().player_number == 1);
+  CHECK(got.front().on);
+  CHECK(messages_to<SwitchState>(h, 1).empty());
+  CHECK(messages_to<SwitchState>(h, 3).empty());
+  h.clear();
+  s.scene = "KokiriForest";  // late, from a scene the sender left
+  h.receive(1, s, kChannelSession);
+  CHECK(messages_to<SwitchState>(h, 3).empty());
+}
+
 TEST_CASE("a platform clock goes to the others in the sender's scene only, never kept (platforms-b)") {
   ObjectHarness h;
   h.receive(1, sample_in("DodongoCavern"), kChannelPlayerSamples);

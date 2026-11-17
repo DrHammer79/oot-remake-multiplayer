@@ -12,6 +12,7 @@
 //              0xeee640(T, seconds, 1, -1)
 
 #include "coop_time.h"
+#include "coop_caller_orders.h"
 #include "coop_session_gate.h"
 
 #include <array>
@@ -45,7 +46,7 @@ constexpr std::uint64_t kTimeNow = 0x20;
 constexpr std::uint64_t kTimeNowOverride = 0x50;
 constexpr std::uint64_t kTimeAsked = 0x48;
 constexpr std::uint64_t kSetTime = 0x34522d0;
-constexpr int kCallerOrder = 40;  // after the puppets, spawn (10), fairy (20), objects (30)
+constexpr int kCallerOrder = CoopCallerOrders::kTime;  // after the puppets, spawn (10), fairy (20), objects (30)
 constexpr std::uint64_t kDebugEveryUs = 2'000'000;
 
 std::string Env(const char* name) {

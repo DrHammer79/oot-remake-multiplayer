@@ -111,10 +111,7 @@ float ReachOf(proto::DamageCause cause) {
 }
 
 bool Guarded(std::uint8_t status_flags) {
-    constexpr std::uint8_t kOut = proto::status::paused | proto::status::loading |
-                                  proto::status::in_cutscene | proto::status::in_menu |
-                                  proto::status::dead;
-    return (status_flags & kOut) != 0;
+    return (status_flags & proto::status::away) != 0;
 }
 
 bool Attacker::Ready(std::uint8_t number, std::uint64_t now_us) {

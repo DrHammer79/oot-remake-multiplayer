@@ -28,6 +28,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -105,6 +106,11 @@ public:
     // hitched; Found() is empty then), else nothing.
     std::optional<std::uint64_t> StalledKey() const;
     void Reset();
+    // room-objects: only a word known to be a clock may be chosen: a wave mover's phase (WavePhaseCycle) or the AS
+    // slot 0 frame. Any other stepping float was a guess, and runs showed what it picked: the Deku Tree lifts' frame
+    // counter (written back by the game: "do not hold"), the water-room controller's place, a Jabu-Jabu floor's
+    // word at -0.066 a second. A guessed word is still watched (logs), never sent or written.
+    static bool Trusted(std::uint64_t key, bool wave);
 
 private:
     struct Candidate {
@@ -177,6 +183,10 @@ public:
     // the last look that said so, so no write moves the platform from under his landing.
     static constexpr std::uint64_t kRideGraceUs = 1'000'000;
     static bool OnFootprint(const coop::protocol::Vec3& platform, const coop::protocol::Vec3& who);
+    // room-objects (coop_room_objects.h): why this driver is moved by its own logic (a switch, sensor or event input
+    // in the room graph, or a rider plug: a live RideOnPlayer, which CoopLiftRide sets for the other players), so
+    // its clock is neither sent nor written; nothing when it runs free.
+    static std::optional<std::string> OwnLogic(const std::string& scene, const Driver& d);
     static bool OurLinkRides(const Driver& d, const coop::protocol::Vec3& player);
     // The 8-byte words of a driver (SignProbe::Read), plus its AS slot 0
     // frame under Key(kRegionAsFrame, 0) when it has one. Empty: not there.
@@ -248,6 +258,7 @@ private:
     std::map<std::uint64_t, std::map<std::uint8_t, Heard>> heard_;  // by hash, then player
     std::map<std::uint64_t, State> states_;                          // by hash
     std::size_t writes_ = 0;
+    std::set<std::uint64_t> told_own_logic_;  // room-objects: logged once a scene
 };
 
 }  // namespace CoopPlatforms

@@ -49,6 +49,7 @@
 // dropped, and an actor counts as gone only when two walks in a row miss it.
 
 #include "coop_objects.h"
+#include "coop_caller_orders.h"
 #include "coop_hit_replay.h"
 #include "coop_every.h"
 #include "coop_cheat_items.h"
@@ -104,6 +105,8 @@
 #include <unordered_map>
 #include "coop_world.h"
 #include "coop_lift_ride.h"
+#include "coop_room_objects.h"
+#include "coop_switch_share.h"
 #include "coop_logic_probe.h"
 #include "coop_platforms.h"
 #include "coop_counters.h"
@@ -171,8 +174,8 @@ constexpr u64 kEnemyKey = u64{1} << 63;
 constexpr u64 kExtraKey = kEnemyKey | u64{1} << 62;
 // Difficulty's night horde (coop_difficulty.h Horde): its own keys on the same list.
 constexpr u64 kHordeKey = kEnemyKey | u64{1} << 61;
-constexpr unsigned kMoverCallerOrder = 30;  // after the puppets, spawn copies (10) and fairies (20)
-constexpr unsigned kGrassCallerOrder = 40;  // the others' field grass cuts (coop_world.h)
+constexpr int kMoverCallerOrder = CoopCallerOrders::kMover;  // after the puppets, spawn copies (10) and fairies (20)
+constexpr int kGrassCallerOrder = CoopCallerOrders::kGrass;  // the others' field grass cuts (coop_world.h)
 
 CoopWorld::GrassSync& TheGrass() {
     static CoopWorld::GrassSync grass;
@@ -181,9 +184,10 @@ CoopWorld::GrassSync& TheGrass() {
 
 // Issue 149 (coop_scrubs.h): the Scrub Brothers' hits. The present thread
 // looks and receives, the calc thread's cave gives the others' hits.
-constexpr int kScrubsCallerOrder = 62;
-constexpr int kLiftRideCallerOrder = 47;  // jabu-lifts (#65): after the boss table (45), before the boss rooms (50)
-constexpr int kDbnoBodyCallerOrder = 48;  // down but not out: our downed Link's crawl, shield, unseen (coop_dbno_body.h)
+constexpr int kScrubsCallerOrder = CoopCallerOrders::kScrubs;
+constexpr int kLiftRideCallerOrder = CoopCallerOrders::kLiftRide;  // jabu-lifts (#65): after the boss table (45), before the boss rooms (50)
+constexpr int kSwitchShareCallerOrder = CoopCallerOrders::kSwitchShare;  // room-objects: another player's timed switch held on ours
+constexpr int kDbnoBodyCallerOrder = CoopCallerOrders::kDbnoBody;  // down but not out: our downed Link's crawl, shield, unseen (coop_dbno_body.h)
 
 std::string EnvText(const char* name);  // below EnvOn  // after the live events (60) and the teleport's (61)
 
@@ -240,7 +244,7 @@ constexpr u64 kBlockSize = kBlockNames + kNameCell * kNameCells;
 
 // The pause counters' ring (coop_counters.h): made once with the game's
 // malloc on the calc thread, its address put where the cave reads it.
-constexpr int kCountersCallerOrder = 63;
+constexpr int kCountersCallerOrder = CoopCallerOrders::kCounters;
 // deku-switches (LICHII_COOP_LOGIC_PROBE): a room's event asker (coop_live_events.h kAskerNames).
 bool IsRoomAsker(std::string_view name) { return name == "EventRequestActor" || name == "EventProxyRequestActor"; }
 struct CounterRingBox {
@@ -1449,6 +1453,12 @@ public:
                                       std::uint64_t now_ms) {
                                        return CoopLiftRide::TheRider().Step(guest, after_call, result, now_ms);
                                    });
+                // room-objects: another player's timed switch is on: ours held on through the game's set-bool.
+                CoopSvc::AddCaller(kSwitchShareCallerOrder,
+                                   [](CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
+                                      std::uint64_t now_ms) {
+                                       return CoopSwitchShare::TheSetter().Step(guest, after_call, result, now_ms);
+                                   });
                 // Issue 149: another player's hit on a Scrub Brother, given to our manager.
                 CoopSvc::AddCaller(kScrubsCallerOrder,
                                    [](CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
@@ -1837,7 +1847,11 @@ public:
                 if (!player_ || (g.name.find("ElevatorLift") == std::string::npos && g.name.find("FallingLadder_") == std::string::npos &&
                                  g.name.find("Stopper_") == std::string::npos &&
                                  g.name.find("MoveFloor") == std::string::npos &&
-                                 g.name.find("EyeSwitch_") == std::string::npos && !IsRoomAsker(g.name))) {
+                                 g.name.find("EyeSwitch_") == std::string::npos &&
+                                 // deku-ladder: the other switch kinds whose plug starts a room event (step, hit, sun)
+                                 g.name.find("StepSwitch_") == std::string::npos &&
+                                 g.name.find("SwitchHit_") == std::string::npos &&
+                                 g.name.find("SolarSwitch_") == std::string::npos && !IsRoomAsker(g.name))) {
                     continue;
                 }
                 float d2 = 0.0f;
@@ -1937,6 +1951,9 @@ public:
         for (const LifeWrite& w : writes) {
             WriteLife(system.ApplicationMemory(), r, w);
         }
+        if (switch_share_mode_ != 0) {
+            SwitchShare(r, *scene, server_now_us, send);
+        }
         if (platforms_mode_ != 0) {
             Platforms(r, *scene, self, server_now_us, send);
         }
@@ -2012,6 +2029,9 @@ public:
     void Take(std::uint64_t key) { sync_.Take(key); }  // any thread (Sync::Take locks)
 
     void Receive(const coop::protocol::Message& m) {
+        if (const auto* left = std::get_if<coop::protocol::PlayerLeft>(&m)) {
+            CoopSwitchShare::TheSharer().Forget(left->player_number);  // room-objects: their switch holds end now
+        }
         if (const auto* o = std::get_if<coop::protocol::ObjectOwner>(&m)) {
             if (owner_log_.Changed(*o)) {  // owner, epoch or group changed
                 LOG_INFO(Core, "coop: objects: share owner {:#x} is player {} epoch {} group {}",
@@ -2056,6 +2076,11 @@ public:
                 platforms_in_.push_back(*pc);
             }
             return;
+        } else if (const auto* ss = std::get_if<coop::protocol::SwitchState>(&m)) {
+            if (switch_share_mode_ != 0) {
+                CoopSwitchShare::TheSharer().Receive(*ss, SteadyNowMs());  // room-objects
+            }
+            return;
         } else if (const auto* pk = std::get_if<coop::protocol::PlatformCounter>(&m)) {
             std::lock_guard lock(platforms_mutex_);
             if (counters_in_.size() < 64) {
@@ -2066,12 +2091,23 @@ public:
     }
 
     bool debug_ = false;
+    bool aggro_ = false;   // LICHII_COOP_DEBUG_AGGRO (Aggro)
+    u64 aggro_at_ = 0;
     u64 grass_made_logged_ = 0;
     CoopWorld::WorldSync world_;
     CoopWorld::GimmickProbe gimmick_probe_;  // LICHII_COOP_GIMMICK_PROBE=1 turns it on
     // Moving platforms (coop_platforms.h, issues 196 and 194).
     // LICHII_COOP_PLATFORMS: on unless 0; "probe" finds and sends, never writes.
     int platforms_mode_ = 1;  // 0 off, 1 on, 2 probe
+    // room-objects (coop_switch_share.h): the timed switches' presses. LICHII_COOP_SWITCH_SHARE: on unless 0;
+    // "probe" sends and logs, never sets.
+    int switch_share_mode_ = 1;  // 0 off, 1 on, 2 probe
+    struct ShareSwitch {
+        u64 address = 0;
+        std::string name;
+        std::array<float, 3> position{};
+    };
+    std::vector<ShareSwitch> share_switches_;  // this walk's switches that have a SwitchPlugs line by name
     CoopPlatforms::PlatformSync platforms_;
     std::vector<CoopPlatforms::PlatformSync::Driver> platform_drivers_;
     std::mutex platforms_mutex_;
@@ -2207,6 +2243,46 @@ private:
 
     // The shared actors of one whole walk, with life and place. False when
     // the list changed under us (try the next frame).
+    // room-objects (coop_switch_share.h): our timed switches' presses out, the others' held on ours.
+    void SwitchShare(Reader& r, const std::string& scene, u64 server_now_us,
+                     std::vector<coop::protocol::Message>& send) {
+        std::vector<CoopSwitchShare::Seen> seen;
+        for (const ShareSwitch& s : share_switches_) {
+            for (const CoopRoomObjects::SwitchPlug* line : CoopRoomObjects::SwitchPlugsOf(scene, s.name, s.position)) {
+                CoopSwitchShare::Seen v;
+                v.line = line;
+                v.address = s.address;
+                const std::uint32_t key = CoopSwitchShare::PlugKey(line->plug) ^ 7u;
+                if (const auto plugs = CoopLogicProbe::Read([&r](u64 a) { return r.Get<u64>(a); }, s.address)) {
+                    for (const CoopLogicProbe::Plug& p : *plugs) {
+                        if (p.key == key && p.type == CoopLogicProbe::kBool && p.value) {
+                            v.on = *p.value != 0;
+                            break;
+                        }
+                    }
+                }
+                seen.push_back(v);
+            }
+        }
+        std::vector<coop::protocol::SwitchState> out;
+        std::vector<std::string> notes;
+        const auto holds = CoopSwitchShare::TheSharer().Tick(scene, seen, !sync_.OthersHere(server_now_us).empty(),
+                                                             SteadyNowMs(), out, notes);
+        for (auto& m : out) {
+            send.emplace_back(std::move(m));
+        }
+        if (switch_share_mode_ == 1) {
+            auto& setter = CoopSwitchShare::TheSetter();
+            setter.Want(holds, main_, SteadyNowMs());
+            for (const auto& line : setter.TakeNotes()) {
+                LOG_INFO(Core, "coop: {}", line);
+            }
+        }
+        for (const auto& line : notes) {
+            LOG_INFO(Core, "coop: {}{}", line, switch_share_mode_ == 2 ? " (probe: not set)" : "");
+        }
+    }
+
     // Moving platforms (coop_platforms.h): our drivers' clocks out, the
     // owners' clocks into ours.
     void Platforms(Reader& r, const std::string& scene, u8 self, u64 server_now_us,
@@ -2648,6 +2724,7 @@ private:
     bool Collect(Reader& r, std::vector<Seen>& out) {
         gimmicks_.clear();  // dungeon gimmicks for the probe
         ride_lifts_.clear();  // jabu-lifts (#65)
+        share_switches_.clear();  // room-objects
         platform_drivers_.clear();
         scrubs_seen_.clear();  // issue 149
         std::vector<u64> actors;
@@ -2855,6 +2932,15 @@ private:
                     d.position[i] = r.Get<float>(a + kActorPosition + 4 * i).value_or(0.0f);
                 }
                 platform_drivers_.push_back(std::move(d));
+            }
+            if (switch_share_mode_ != 0 && CoopRoomObjects::SharedSwitchName(known.first)) {
+                ShareSwitch s;  // room-objects: a timed switch some room object reads
+                s.address = a;
+                s.name = known.first;
+                for (std::size_t i = 0; i < 3; ++i) {
+                    s.position[i] = r.Get<float>(a + kActorPosition + 4 * i).value_or(0.0f);
+                }
+                share_switches_.push_back(std::move(s));
             }
             if (lift_ride_on_ && CoopLiftRide::IsRideLift(known.first)) {
                 CoopLiftRide::Lift l;
@@ -3099,6 +3185,16 @@ private:
         const auto emitter = table ? r.Ptr(*table + CoopDbno::Body::addr::kComponentEmitter) : std::nullopt;
         CoopDbno::SetOurComponents(bsa.value_or(0), emitter.value_or(0));
         static const bool body_caller = [] {
+            // A downed teammate's puppet (issue 150): its actor, from the puppet director's slots (the same
+            // calc-thread caller chain, so its slots are not changing meanwhile).
+            CoopDbno::Body::TheCrawl().SetPuppetActor([](std::uint8_t number) -> std::uint64_t {
+                for (const auto& slot : CoopPuppet::TheDirector().Slots()) {
+                    if (slot.number == number && slot.phase == CoopPuppet::Phase::live) {
+                        return slot.actor;
+                    }
+                }
+                return 0;
+            });
             CoopSvc::AddCaller(kDbnoBodyCallerOrder, [](CoopPuppet::Guest& guest, bool after_call,
                                                         std::uint64_t result, std::uint64_t now_ms) {
                 return CoopDbno::Body::TheCrawl().Next(guest, after_call, result, now_ms, TheBossMain().load());
@@ -3603,6 +3699,57 @@ private:
     // LICHII_COOP_DEBUG_NPC=1 every NPC copy's place and animation once a second.
     // Walking townspeople
     // (coop_npc_anim.h): the 5 s line of plays and frame sets.
+    // LICHII_COOP_DEBUG_AGGRO=1 (issue 150 proof, research only): once a second, every live Enemy_ within
+    // kAggroM of our Link: the Link it faces (ours or a puppet: a perceived puppet is who the game's own
+    // perception may pick), by its forward axis (rotation column 2) on the ground, and each Link's distance
+    // and angle off that axis. Read only; nothing is written.
+    static constexpr float kAggroM = 30.0f;
+    void Aggro(Reader& r, u64 now_us) {
+        if (!aggro_ || !player_ || now_us - aggro_at_ < 1'000'000) {
+            return;
+        }
+        aggro_at_ = now_us;
+        struct Seen {
+            std::string who;
+            std::array<float, 3> at;
+        };
+        std::vector<Seen> links{{"Link", *player_}};
+        for (const auto& [a, known] : names_) {
+            if (known.first.starts_with("CoopPuppet_") && r.Get<u32>(a + kActorState).value_or(0) == kStateAlive) {
+                if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                    links.push_back({fmt::format("puppet {:#x}", a), *at});
+                }
+            }
+        }
+        for (const auto& [a, known] : names_) {
+            if (!known.first.starts_with("Enemy_") || r.Get<u32>(a + kActorState).value_or(0) != kStateAlive) {
+                continue;
+            }
+            const auto at = r.Get<std::array<float, 3>>(a + kActorPosition);
+            const auto m = r.Get<std::array<float, 9>>(a + kActorRotation);
+            if (!at || !m || Apart(*player_, *at) > kAggroM) {
+                continue;
+            }
+            const float yaw = std::atan2((*m)[2], (*m)[8]);
+            std::string each;
+            std::size_t best = 0;
+            float best_off = 1e9f;
+            for (std::size_t i = 0; i < links.size(); ++i) {
+                const float dx = links[i].at[0] - (*at)[0];
+                const float dz = links[i].at[2] - (*at)[2];
+                float off = std::fabs(std::remainder(std::atan2(dx, dz) - yaw, 6.2831853f)) * 57.29578f;
+                if (off < best_off) {
+                    best_off = off;
+                    best = i;
+                }
+                each += fmt::format("; {} {:.1f} m off {:.0f} deg", links[i].who, std::sqrt(dx * dx + dz * dz), off);
+            }
+            // owner P0: not shared (yet), or not on our list.
+            LOG_INFO(Core, "coop: aggro: {} {:#x} (owner P{}) faces {} (off {:.0f} deg){}", known.first, a,
+                     sync_.OwnerAt(a), links[best].who, best_off, each);
+        }
+    }
+
     void NpcAnim(Reader& r, u64 now_us, std::vector<u64>& removes,
                  std::vector<Mover::Pose>& wish, std::vector<PlayWish>& plays) {
         // Row 97: every actor the event is with (Sync::EventPartner), not only
@@ -3816,6 +3963,7 @@ private:
             }
         }
         NpcAnim(r, now_us, removes, wish, plays);
+        Aggro(r, now_us);
         TheMover().Want(main_, std::move(wish), std::move(removes), std::move(plays));
         if (now_us - drift_at_ >= kDriftLogUs) {
             const auto [moved, deleted, played, framed] = TheMover().TakeCounts();
@@ -4065,6 +4213,7 @@ Objects& Instance() {
     static Objects objects;  // first called on the present thread
     static const bool once = [] {
         objects.debug_ = EnvFlag("LICHII_COOP_DEBUG_OBJECTS");
+        objects.aggro_ = EnvFlag("LICHII_COOP_DEBUG_AGGRO");
         objects.cheat_ = EnvFlag("LICHII_COOP_OBJECTS_CHEAT");
         objects.share_ = EnvFlag("LICHII_COOP_OBJECTS");
         objects.pose_ = EnvOn("LICHII_COOP_OBJECTS_POSE");
@@ -4074,6 +4223,8 @@ Objects& Instance() {
         {
             const std::string platforms = EnvText("LICHII_COOP_PLATFORMS");
             objects.platforms_mode_ = platforms == "0" ? 0 : platforms == "probe" ? 2 : 1;
+            const std::string share = EnvText("LICHII_COOP_SWITCH_SHARE");  // room-objects
+            objects.switch_share_mode_ = share == "0" ? 0 : share == "probe" ? 2 : 1;
         }
         objects.scrubs_on_ = EnvOn("LICHII_COOP_SCRUBS");  // issue 149, on unless =0
         objects.ocarina_probe_on_ = EnvFlag("LICHII_COOP_OCARINA_PROBE");  // issue 152, reads only

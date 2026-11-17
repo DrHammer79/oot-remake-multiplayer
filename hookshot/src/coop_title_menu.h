@@ -298,4 +298,42 @@ std::string Utf8(std::uint32_t cp);
 // On one line: line ends and tabs become spaces.
 std::string OneLine(std::string_view text);
 
+// ---------------------------------------------------------------------------
+// Player report 124: after the save folder is switched (CoopSave, a join's host's save, Resync from host, a new
+// session back on the player's own folder) the game's save list still shows the old folder: no Continue until a
+// restart. The game keeps that list in its caption manager (the title's SeqQueryIsExistSave reads it). Its state
+// byte: 0 cleared, 1-3 reading, 4 read (done once every slot entry says so: the game's own idle test). A new read
+// starts only from 0, so the game's order is: its idle test, its list reset (back to 0), then its read
+// (SeqOneshotRequestLoadAndSerializeCaption's body). SaveListRefresh says when the title's step does that, and when
+// the game is done: idle again with state 4. Only on the title (its step), once per switch.
+class SaveListRefresh {
+public:
+    struct Input {
+        bool stale = false;          // CoopSave::TakeSaveListStale() this step
+        bool title = false;          // the title's step runs (on its menu)
+        bool manager = false;        // the caption manager was found
+        bool busy = true;            // the game's own idle test says it is reading (or it could not be asked)
+        std::uint8_t state = 0;      // its state byte
+        std::uint64_t now_ms = 0;
+    };
+    enum class Action { none, ask, done, gave_up };
+    // Why nothing is asked yet (for a log line once per wait): nothing pending, no title, no manager, the game busy.
+    enum class Wait { none, title, manager, busy };
+    static constexpr std::uint8_t kRead = 4;            // the state byte once the game's read is done
+    static constexpr std::uint64_t kGiveUpMs = 10000;   // not read after this: said once, not asked again
+
+    Action Step(const Input& in);
+    // The ask could not be made (the game's reset said no: a save screen is busy): asked again at a later step.
+    void Refused() { asked_ = false; pending_ = true; }
+    bool pending() const { return pending_; }
+    bool asked() const { return asked_; }
+    Wait waiting() const { return wait_; }
+
+private:
+    bool pending_ = false;   // a switch happened, the game has not re-read its list since
+    bool asked_ = false;
+    Wait wait_ = Wait::none;
+    std::uint64_t asked_ms_ = 0;
+};
+
 }  // namespace CoopTitleMenu

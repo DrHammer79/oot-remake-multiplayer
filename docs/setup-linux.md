@@ -5,7 +5,7 @@ Linux build: the game is compiled on your PC from your own copy of it, with co-o
 
 **Experimental, untested:** this kit has not yet been run on a real Linux PC or a Steam Deck. CI builds it and
 checks that the module loads, but no one has built the game with it or played on it yet, and Linux and Windows players
-playing together (same server, same version) is not yet proven. Please report what happens (`bash scripts/collect-logs.sh`).
+playing together (same server, same version) is not yet proven. Please report what happens: `/bugreport` on the [Squadala! Discord](https://discord.gg/GwtRKAqng5), with the zip from `bash start-squadala.sh --logs`.
 
 ## What you need
 
@@ -59,8 +59,10 @@ The terminal says what happened and what to do. Common ones:
 | "Missing on this PC: curl" | Install it (`sudo apt install curl`, `sudo dnf install curl`, `sudo pacman -S curl`). |
 | The download or build stopped | Start again: it goes on from where it stopped. |
 
-For a bug report: `bash start-squadala.sh --logs` writes `coop-logs-<time>.tar.gz` beside it (passwords, codes,
-addresses and your user name are masked). Send that file.
+For a bug report: `bash start-squadala.sh --logs` writes `coop-logs-<time>.zip` beside it (passwords, codes,
+addresses and your user name are masked). On the [Squadala! Discord](https://discord.gg/GwtRKAqng5) type `/bugreport`, say what happened and
+attach that zip (never to a public issue). A PC with no `python3`, `zip` or `bsdtar` gets a `.tar.gz` instead: zip it first,
+the bot takes a `.zip` only.
 
 ## Discord status
 

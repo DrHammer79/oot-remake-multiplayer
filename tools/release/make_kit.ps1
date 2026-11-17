@@ -49,6 +49,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 . (Join-Path $here 'kit\scripts\coop-ini.ps1')
+. (Join-Path $here 'kit_deps.ps1')   # (the licences of fmt and ENet: where the build's CMakeCache says their sources are)
 . (Join-Path $here 'check_paths.ps1')
 
 function Invoke-Git([string]$Dir) {
@@ -243,9 +244,8 @@ if (-not (Test-Path $hsPin)) {
         if (Test-Path -LiteralPath (Join-Path $d 'CMakeCache.txt')) { $fmtRoots += $d; break }
     }
     $fmtRoots += $BuildDir
-    $fmtLicense = $fmtRoots | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_ '_deps\fmt-src') -Filter 'LICENSE*' -File -ErrorAction SilentlyContinue } |
-        Select-Object -First 1 -ExpandProperty FullName
-    if (-not $fmtLicense) { throw "fmt's LICENSE not found under _deps\fmt-src of the build that made $HookshotDll; the kit must carry it (MIT)." }
+    $fmtLicense = Find-KitDepLicense $fmtRoots 'fmt'
+    if (-not $fmtLicense) { throw "fmt's LICENSE not found in the fmt source of the build that made $HookshotDll ($(Get-KitDepSource $fmtRoots[0] 'fmt')); the kit must carry it (MIT)." }
     Write-Host "Hookshot: module $(Split-Path -Leaf $HookshotDll), pin $($hsPinMap.commit), $($hsPatches.Count) patch(es)"
 }
 
@@ -317,8 +317,8 @@ if ($emuSource -and (Test-Path (Join-Path $emuSource 'LICENSE.txt'))) {
     Get-ChildItem (Join-Path $emuSource 'LICENSES') -Filter '*.txt' -ErrorAction SilentlyContinue |
         ForEach-Object { Copy-Item $_.FullName (Join-Path $lic "SPDX-$($_.Name)") }
 } else { Write-Warning "The emulator source's LICENSE.txt was not found; add the licence texts by hand." }
-$enetLicense = Join-Path $BuildDir '_deps\enet-src\LICENSE'
-if (Test-Path $enetLicense) { Copy-Item $enetLicense (Join-Path $lic 'ENet-MIT.txt') }
+$enetLicense = Find-KitDepLicense @($BuildDir) 'enet'
+if ($enetLicense) { Copy-Item $enetLicense (Join-Path $lic 'ENet-MIT.txt') }
 else { Write-Warning 'ENet LICENSE not found in the build folder; add it by hand.' }
 if ($fmtLicense) { Copy-Item -LiteralPath $fmtLicense (Join-Path $lic 'fmt-MIT.txt') }
 

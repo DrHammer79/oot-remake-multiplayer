@@ -1996,6 +1996,41 @@ Error decode_body(Reader& r, DungeonEvent& m) {
   return check_dungeon_event(m);
 }
 
+// SWITCH_STATE: u8 player, scene, name, 3 x f32 place, u32 plug, u8 on.
+Error check_switch_state(const SwitchState& m) {
+  if (!valid_player_or_self(m.player_number) || m.scene.empty() || m.name.empty() || m.plug == 0 ||
+      !all_finite(m.place)) {
+    return Error::bad_value;
+  }
+  COOP_TRY(check_string(m.scene, kMaxSceneChars));
+  return check_string(m.name, kMaxSwitchNameChars);
+}
+
+Error encode_body(const SwitchState& m, Writer& w) {
+  COOP_TRY(check_switch_state(m));
+  w.u8(m.player_number);
+  w.str(m.scene);
+  w.str(m.name);
+  for (const float f : m.place) w.f32(f);
+  w.u32(m.plug);
+  w.u8(m.on ? 1 : 0);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, SwitchState& m) {
+  m = SwitchState{};
+  COOP_READ(r.u8(m.player_number));
+  COOP_TRY(r.str(m.scene, kMaxSceneChars));
+  COOP_TRY(r.str(m.name, kMaxSwitchNameChars));
+  for (float& f : m.place) COOP_READ(r.f32(f));
+  COOP_READ(r.u32(m.plug));
+  std::uint8_t on = 0;
+  COOP_READ(r.u8(on));
+  if (on > 1) return Error::bad_value;
+  m.on = on == 1;
+  return check_switch_state(m);
+}
+
 // PLATFORM_CLOCK: u8 player, scene, u64 server time, u8 count, then count x
 // (u64 hash, u64 key, f32 value, f32 rate, f32 cycle).
 Error check_platform_tick(const PlatformTick& t) {
@@ -2955,6 +2990,7 @@ MessageType type_of(const Message& message) {
       MessageType::link_sound,
       MessageType::boss_scene,  MessageType::boss_heart,
       MessageType::player_look,
+      MessageType::switch_state,
   };
   static_assert(std::size(kTypes) == std::variant_size_v<Message>);
   return kTypes[message.index()];
@@ -3030,6 +3066,7 @@ bool allowed_on_channel(MessageType type, std::uint8_t channel) {
     case MessageType::world_hit:
     case MessageType::boss_room:
     case MessageType::sign_cut:
+    case MessageType::switch_state:
     case MessageType::dungeon_event:
     case MessageType::save_ask:
     case MessageType::save_part:
@@ -3156,6 +3193,7 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::drop_ask:
     case MessageType::boss_room:
     case MessageType::sign_cut:
+    case MessageType::switch_state:
     case MessageType::dungeon_event:
     case MessageType::save_ask:
     case MessageType::save_part:
@@ -3206,7 +3244,7 @@ auto* player_field(M& message) {
                       std::is_same_v<T, SignCut> || std::is_same_v<T, SaveAsk> ||
                       std::is_same_v<T, SavePart> || std::is_same_v<T, PlayerLife> ||
                       std::is_same_v<T, PvpHit> || std::is_same_v<T, PvpHurt> ||
-                      std::is_same_v<T, DungeonEvent> ||
+                      std::is_same_v<T, DungeonEvent> || std::is_same_v<T, SwitchState> ||
                       std::is_same_v<T, PlayerRide> ||
                       std::is_same_v<T, OcarinaNote> ||
                       std::is_same_v<T, PlatformClock> ||
@@ -3344,6 +3382,7 @@ Error decode(std::span<const std::uint8_t> bytes, Message& out) {
     case MessageType::world_hit: return decode_as<WorldHit>(body, out);
     case MessageType::sign_cut: return decode_as<SignCut>(body, out);
     case MessageType::dungeon_event: return decode_as<DungeonEvent>(body, out);
+    case MessageType::switch_state: return decode_as<SwitchState>(body, out);
     case MessageType::platform_clock: return decode_as<PlatformClock>(body, out);
     case MessageType::platform_counter: return decode_as<PlatformCounter>(body, out);
     case MessageType::voice_frame: return decode_as<VoiceFrame>(body, out);

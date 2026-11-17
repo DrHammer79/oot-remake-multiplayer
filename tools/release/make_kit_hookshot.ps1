@@ -45,6 +45,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 . (Join-Path $here 'check_paths.ps1')
 . (Join-Path $here 'kit_text.ps1')
+. (Join-Path $here 'kit_deps.ps1')   # (the licences of fmt and ENet: where the build's CMakeCache says their sources are)
 function Copy-Text([string]$From, [string]$To) { Copy-KitText $From $To $Port }
 function Invoke-Git([string]$Dir) {
     $out = & git.exe -C $Dir @args 2>$null
@@ -112,11 +113,10 @@ for ($d = Split-Path -Parent ([System.IO.Path]::GetFullPath($HookshotDll)); $d; 
     if (Test-Path -LiteralPath (Join-Path $d 'CMakeCache.txt')) { $fmtRoots += $d; break }
 }
 $fmtRoots += $BuildDir
-$fmtLicense = $fmtRoots | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_ '_deps\fmt-src') -Filter 'LICENSE*' -File -ErrorAction SilentlyContinue } |
-    Select-Object -First 1 -ExpandProperty FullName
-if (-not $fmtLicense) { throw "fmt's LICENSE not found under _deps\fmt-src of the build that made $HookshotDll." }
-$enetLicense = Join-Path $BuildDir '_deps\enet-src\LICENSE'
-if (-not (Test-Path $enetLicense)) { throw "ENet's LICENSE not found in $BuildDir\_deps\enet-src." }
+$fmtLicense = Find-KitDepLicense $fmtRoots 'fmt'
+if (-not $fmtLicense) { throw "fmt's LICENSE not found in the fmt source of the build that made $HookshotDll ($(Get-KitDepSource $fmtRoots[0] 'fmt'))." }
+$enetLicense = Find-KitDepLicense @($BuildDir) 'enet'
+if (-not $enetLicense) { throw "ENet's LICENSE not found in the ENet source of $BuildDir ($(Get-KitDepSource $BuildDir 'enet'))." }
 
 # Lay out the kit.
 $name = if ($Release) { "Squadala-$Release" } else { 'Squadala-{0:yyyyMMdd-HHmm}' -f (Get-Date) }

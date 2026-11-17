@@ -580,12 +580,13 @@ void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t cha
     on_grass_cut(id, c, *cut, now_us);
     return;
   }
-  if (std::holds_alternative<DungeonEvent>(message)) {
-    // deku-dungeon-2: relayed to the others in the sender's scene, never kept.
+  if (std::holds_alternative<DungeonEvent>(message) || std::holds_alternative<SwitchState>(message)) {
+    // deku-dungeon-2, room-objects: relayed to the others in the sender's scene, never kept.
     set_sender(message, c.number);
-    const auto& e = std::get<DungeonEvent>(message);
-    if (e.scene != c.scene) return;  // late, from the scene it left
-    send_to_scene(e.scene, id, channel, message);
+    const std::string& scene = std::holds_alternative<DungeonEvent>(message) ? std::get<DungeonEvent>(message).scene
+                                                                             : std::get<SwitchState>(message).scene;
+    if (scene != c.scene) return;  // late, from the scene it left
+    send_to_scene(scene, id, channel, message);
     ++stats_.relayed;
     return;
   }

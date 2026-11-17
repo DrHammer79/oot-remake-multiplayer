@@ -247,7 +247,7 @@ One path for every kind of hit, as TotK's `TOTK_SYNC_DAMAGE` found worked best (
 - The owner takes the amount off its enemy (life at least 0) and sends a sample at once. Its life change starts the fight lock, but does not move the enemy (above).
 - Hits that change no life (a Deku nut's stun, a boomerang's stun, a hookshot pull) are not seen by a life read. They need the cause sent instead: `DAMAGE` with amount 0 and the cause, applied by whatever the game does for that cause. Not found yet.
 - Projectiles hit only on their maker's screen, so a remote player's arrow reaches a copy on the maker's game, and that game forwards the drop. Copies of projectiles never hit.
-- Players are not hurt by each other, and puppets have no life. Enemy attacks on a puppet do nothing; an enemy attacks the player of its owner's game. Whether enemies should target puppets is a later question.
+- Puppets have no life (players hurt each other only with PvP on). Enemies do target puppets (issue 150, on by default since perception-on: the pack gives each puppet a perception emitter, [puppet.md](puppet.md)): the owner's enemy may pick another player's puppet by the game's own rules. Its attack on a puppet itself does nothing (no body); the chase rule below hands the enemy to that player, whose game then fights its own Link. A puppet whose player cannot be fought now (downed, spectating, paused, in a menu, loading, in their own event, dead) is not perceived at all ([dungeons-boss.md](dungeons-boss.md), "Every player is a target").
 
 ## The hook side (first cut)
 
@@ -533,6 +533,61 @@ A tip from a developer working on the same game (Hot Onion, shared by Alex, 2026
 **While our Link rides it** (issue 194): a follower does not write a platform's clock while our Link stands on it, nor does an owner put its own clock back after a pause then: a write moved the platform, and Link with it, in one frame (the rubber-band on the Deku Tree's timed platforms). Riding is the game's own word, the platform AI's bool plug `RideOnPlayer` (`CoopLogicProbe::Read`, as `coop_lift_ride.h`), read with who else is on it: the plug is also 1 while another player's puppet rides our copy, so a plug of 1 is ours unless another player stands on the platform actor's footprint (1.8 m round, 0.5 m under to 2.5 m over) and our Link does not (on a platform wider than the footprint, our Link on its far edge is still riding). With no plug the footprint alone. The plug is 0 while Link is in the air, so riding lasts 1 s after the last look that said so (`kRideGraceUs`): a jump on the platform keeps the hold; a `GroundControlActor_` controller is not where its floor is, so only its plug. Once he is off, the next write puts it in step (a held write is not counted as one the game took back). Logs: `<hash> <name>: our Link rides it (RideOnPlayer|footprint): its clock is left <s> s off until he is off` and `<hash> <name>: our Link is off it: its clock may be put in step again`.
 
 **The water room's floor is a wave, and its phase is the clock** (deku-switches-b, the 0.10.1 Longshot playtest: "the moving platform in the water room is not synced"). The Deku Tree room G floor `Obj_Deku_MoveFloor_A_01` shares a Banc group (8932) with `GroundControlActor_WaveLoop` (`WaveCycle_Linear` 18 s, `WaveRadius_Linear` 4 m on x). Read from main: the WaveLoop controller's setup (main+0x2fff730) reads the four wave keys from the blackboard (Murmur3 hashes `0x0a6d2c57` cycle linear, `0x97c33c58` radius linear) into a wave block at controller + 192 (main+0x11d07b0: cycles at +8 and +32, radii at +20 and +44, three floats each) and puts the phase angles after them (+56 linear x, y, z, then angular): each from the place the floor starts at, wrapped into [0, 2 pi). It then goes on by 2 pi / cycle a second. Both games start it from the placed position, so the phase differs only by when each game loaded the room: that phase is the one value to share. The finder takes a word that steps at 2 pi / the float 48 bytes before it (`WavePhaseCycle`) before any seconds or frames word, with its loop 2 pi known at once (no wrap needs to be seen first), so the follower's write is that phase, as the owner's plus the server-time gap. Not known until a run: whether the block is inside the 0x200 bytes of a component the probe reads (+0xf8 from the controller if the controller is the component; a controller held by pointer is not read, and the probe lines then show no `GroundControlActor_WaveLoop ... clock` line).
+
+### Moving platforms: own logic first, no guessed words (branch `room-objects`, issues 196, 249, 194)
+
+**The rule:** in a game that follows another, a room object moves only through its own logic. That means the input its own switch, sensor or rider would set. CoopEyeSwitch sets the plate's plug, which drives the Deku Tree compass-room lifts' `IsOn`. CoopLiftRide sets `RideOnPlayer` (Jabu-Jabu's lifts and moving floor, the Forest Temple's elevators). The push block's own node starts again ([world.md](world.md), issue 147). Nothing is written into such an object from outside.
+
+**Why:** the clock-word path above wrote what its finder guessed into the same objects, and the runs show what it guessed:
+- On the Deku lifts it took a frame counter at 58 to 65 a second (`c+0x88+0x140`), and the game put each write back (`do not hold`, hs-deku-platforms-probe 2026-11-14).
+- On the water room's WaveLoop it took `actor+0x388` at -0.432 a second. That is the controller's place (4 m, 18 s), not its phase (2 pi / 18 = 0.349 a second).
+- On Jabu-Jabu's moving floor it took a word at -0.066 a second (hs-logic-probe 2026-11-15).
+
+Two drivers then fought over one object, the follower's own logic and our write: the snaps of issue 194 and the out-of-step Jabu-Jabu platforms of issue 249.
+
+**What is built:**
+- `ClockFinder::Trusted`: only a word known to be a clock may be chosen, that is a wave mover's phase (`WavePhaseCycle`) or the AS slot 0 frame. Other stepping floats are still watched, but never sent or written.
+- `PlatformSync::OwnLogic`: a driver with a live `RideOnPlayer` plug (a rider lift) is skipped, and so is a driver whose placement the romfs marks as driven (`coop_room_objects.{h,cpp}`). Neither is sent nor written. The log says it once a scene: `coop: platforms: <hash> <name>: driven by its own logic (<why>): its clock is not shared`.
+- The table comes from `tools/puppet_pack/room_objects.py --romfs <dump>`. It lists all 132 placements of the platform names (`IsDriver`), 24 of them driven. Each line gives why it is driven: the room graph's wired inputs (switch, flag, sensor or event), `RideOnPlayer` (its logic type has the plug), or `with <name>` (a part with no logic, placed on a driven one: the Deku `ElevatorLiftLim_A_0n`). Inputs that only reset or warp a mover (`ForceWarp`, `IisForceWarp`, `Logic_*`, `RespawnTrigger`) do not drive it. A live actor is the placement of its name nearest to it in its scene.
+- `CoopLiftRide::IsRideLift` also takes every name whose logic has `RideOnPlayer` (`CoopRoomObjects::RiderName`). That adds `Obj_ForestTemple_Elevator_A_01`, which runs the base lift's logic.
+
+**Still on the clock path:** free-running movers only, those with no wired input and no rider plug. Examples are the Deku Tree's water-room wave (`GroundControlActor_WaveLoop`, whose phase is the only difference) and animation-looped platforms (AS frame). Looping pause counters stay on their own path below.
+
+### Timed switches (`SWITCH_STATE`, review of 60567704)
+
+The rule above needs every driven object's INPUT to reach the follower. `room_objects.py --delivery` traces each of the 24 driven placements' inputs, through gates, timers, delays and module inputs into the calling graph, down to the leaves:
+
+| Driven placement | Its input reaches the follower by |
+|---|---|
+| Deku `ElevatorLift_A_01..03` (IsOn) and their `ElevatorLiftLim` parts | the plate's `OnState` (CoopEyeSwitch line `RoomD_PlatformUp`), the asker's `EventBool` (the same event) and a flag |
+| Jabu `ElevatorLift_A_01` (IsTargetFloor) | the asker's `EventBool` (`FocusOnGimmick_JabujabuLift`, CoopEyeSwitch) and RideOnPlayer (CoopLiftRide) |
+| Jabu `ElevatorLift_A_02`, `MoveFloor_A_01`, Forest `Elevator_A_01` x4, DreamWorld lifts | a player's contact (sensor; CoopLiftRide's RideOnPlayer for another player) and flags |
+| Dodongo `SimpleMoveTo` (MoveToPosX), `MoveFloor_A_01` (IsShortCutMove) and its `Airwall` | `Obj_StepSwitch_A_01` `OnState` through `HoldGeneralTimerSwitch`: **`SWITCH_STATE`** (new; before it, nothing) |
+| Fire `DiffentSpeedMoveTo` x2 | the asker's `EventBool`/`EventBoolEX1` (`Dm_FireTemple_0029`, hammer switch, CoopEyeSwitch) or the chest's `OpenState` (the chest-opened flag) |
+| Ice Cavern `RotateBlade_A_01` | flags and the silver-rupee counter's `AllGet` (`IceCavern_Room06_SilverRupeeGet`, a shared flag); `IsResetAngle` from an asker's event |
+| GTG `Rotate` (RotateAxisX) | a flag |
+| Shadow `RotateFloor_A_01` (IsOn) | `Obj_ShadowTemple_SkullPot_A_01.Dead` (a breakable: `WORLD_BREAK`) |
+| Market `SimpleMoveTo` (MoveToPosX) | the actor's own blackboard bool (its own state in each game, not a co-op object) |
+
+The one input with no path was a timed switch. So the timed switches get one mechanism, the switch's own state (`coop_switch_share.{h,cpp}`, `SWITCH_STATE`, [protocol.md](protocol.md)):
+- The presser's game sends the plug going on and off.
+- The others hold the same plug on their own switch with the game's set-bool every frame while it is on. Their own timer (`HoldGeneralTimerSwitch`), delays and gates then run, and their movers move.
+- The 12 plugs (`CoopRoomObjects::SwitchPlugs`, the generator's third table) are every switch output a room object reads that no CoopEyeSwitch line covers:
+  - Dodongo: the moving ground and shortcut plate, two fire-wall eyes, the room 12 shutter plate.
+  - Forest: the lamp, air wall and light plate, and the torch plate.
+  - GTG: the eye-switch shutter.
+  - Water: the two eye-switch shutters, the hit-switch shutter, and the fountain's `OnState` and `OffState`.
+
+Logs:
+- `coop: switch share: <switch> <plug> at x y z: our player's press: sent`
+- `...: another player's is on: ours held on, its own logic runs`
+- `...: another player's is off: let go`
+
+`LICHII_COOP_SWITCH_SHARE=0` turns it off; `=probe` sends and logs but never sets. It runs in the object walk, so it needs `LICHII_COOP_OBJECTS=1` (on in the kit). Solo: nothing is sent with no other player in the scene, and nothing is held without a received press. A player who leaves (`PLAYER_LEFT`) is let go at once. Its svc caller has order 49 (`coop_caller_orders.h`, where every caller's order is listed; a test fails on a number used twice).
+
+Still open: the Deku Tree compass-room lifts' `OnPlayer` (not `RideOnPlayer`) is not set for another player standing on them in a follower's game. That is visual only (the lift may sink under their puppet).
+
+**Switch-wired objects found in the romfs (23, before SWITCH_STATE):** 12 are covered by CoopEyeSwitch's table: the Deku lifts, the Deku torch and web, the GTG chest, the Spirit fire wall and mirrors, and a Dodongo fire wall. The 11 others now go through `SWITCH_STATE` (above): Dodongo's two other fire-wall eyes, the Forest lamp, air wall and `Obj_SwitchCandleStick_A_01`, the Water fountain and shutters A_02/A_07.
 
 ### Moving platforms: the pause counters (branch `platforms-b2`)
 

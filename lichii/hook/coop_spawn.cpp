@@ -6,6 +6,7 @@
 // emulator only (LICHII_COOP).
 
 #include "coop_spawn.h"
+#include "coop_caller_orders.h"
 
 #include "coop_objects_sync.h"  // QuatOf
 
@@ -2083,7 +2084,7 @@ void UseDirector() {
         LOG_INFO(Core, "coop: spawn: stand-ins in the puppet pack: {}",
                  list.empty() ? "none (copies are the game's own actors; rebuild the puppet pack)" : list);
         TheDirector().SetStandIns(std::move(names));
-        CoopSvc::AddCaller(10, [](CoopPuppet::Guest& guest, bool after_call,
+        CoopSvc::AddCaller(CoopCallerOrders::kSpawn, [](CoopPuppet::Guest& guest, bool after_call,
                                   std::uint64_t result, std::uint64_t now_ms) {
             return TheDirector().Step(guest, after_call, result, now_ms);
         });

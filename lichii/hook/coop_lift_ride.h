@@ -49,7 +49,8 @@ inline constexpr float kRideAboveM = 2.5f;
 inline constexpr std::uint64_t kHoldMs = 400;
 
 // The lifts that start on RideOnPlayer (#65): Jabu-Jabu's lift and moving floor; the other dungeons' elevator lifts
-// run the same base AI (Obj_Base_ElevatorLift_A_00). Not the Deku Tree's basement floor (GroundControl-driven) or
+// run the same base AI (Obj_Base_ElevatorLift_A_00), and every name the romfs gives a RideOnPlayer logic
+// (CoopRoomObjects::RiderName: the Forest Temple's elevators). Not the Deku Tree's basement floor (GroundControl-driven) or
 // its compass-room lifts (on/off animation actors with no RideOnPlayer plug).
 bool IsRideLift(std::string_view name);
 

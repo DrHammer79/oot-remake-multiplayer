@@ -43,6 +43,36 @@ void Crawl::Want(const Wanted& w) {
     bsa_.store(w.bsa, std::memory_order_release);
 }
 
+std::optional<std::string> UnseenWhy(bool downed_or_spectating, std::uint8_t status) {
+    namespace st = coop::protocol::status;
+    if (downed_or_spectating) {
+        return std::string("downed");
+    }
+    if ((status & st::dead) != 0) {
+        return std::string("dead");
+    }
+    if ((status & st::loading) != 0) {
+        return std::string("loading");
+    }
+    if ((status & st::in_cutscene) != 0) {
+        return std::string("in their event");
+    }
+    if ((status & st::in_menu) != 0) {
+        return std::string("in a menu");
+    }
+    if ((status & st::paused) != 0) {
+        return std::string("paused");
+    }
+    static_assert(st::away == (st::paused | st::loading | st::in_cutscene | st::in_menu | st::dead),
+                  "UnseenWhy names every away bit");
+    return std::nullopt;
+}
+
+void Crawl::SetPuppetActor(PuppetActor find) {
+    std::lock_guard lock(mutex_);
+    puppet_actor_ = std::move(find);
+}
+
 bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool own) {
     if (bsa == 0 || own || bsa != bsa_.load(std::memory_order_acquire)) {
         return false;  // (every other actor's request: no lock)
@@ -116,13 +146,13 @@ std::optional<CoopPuppet::Call> Crawl::Ask(CoopPuppet::Guest& guest, std::int32_
 }
 
 std::optional<CoopPuppet::Call> Crawl::Step(CoopPuppet::Guest& guest, Hold& h, Pending kind, std::uint64_t now_at,
-                                            std::uint64_t main_base) {
+                                            std::uint64_t main_base, bool want) {
     // (the lock is held; the block exists) One hold's step this frame: on
     // while lying, on the component now; off when up, only on the component
     // it was put on and only while that is still our Link's (a new scene's
     // Link has a new one: the old key went with the old component).
     h.tried = true;
-    const bool want_on = want_.lying && now_at != 0;
+    const bool want_on = want && now_at != 0;
     if (want_on && h.on_at == now_at) {
         return std::nullopt;
     }
@@ -155,12 +185,55 @@ std::optional<CoopPuppet::Call> Crawl::Step(CoopPuppet::Guest& guest, Hold& h, P
     return c;
 }
 
+std::optional<CoopPuppet::Call> Crawl::StepPuppets(CoopPuppet::Guest& guest, std::uint64_t main_base) {
+    // (the lock is held; the block exists) Every teammate downed now, and
+    // every puppet still holding our key (they got up, or left: their puppet
+    // is gone and so is its component).
+    for (const auto& u : want_.unseen_puppets) {
+        puppets_.try_emplace(u.number);
+    }
+    for (auto it = puppets_.begin(); it != puppets_.end();) {
+        const std::uint8_t n = it->first;
+        Hold& h = it->second;
+        const auto wanted = std::find_if(want_.unseen_puppets.begin(), want_.unseen_puppets.end(),
+                                         [n](const Wanted::Unseen& u) { return u.number == n; });
+        const bool want = wanted != want_.unseen_puppets.end();
+        if (!want && h.on_at == 0 && !(pending_ == Pending::puppet && pending_number_ == n)) {
+            it = puppets_.erase(it);
+            continue;
+        }
+        ++it;
+        if (h.tried) {
+            continue;
+        }
+        // Their puppet's PerceptionEmitter now: [[actor + 0x270] + 0x328] (0:
+        // no puppet, or a pack without perception).
+        std::uint64_t component = 0;
+        if (const std::uint64_t actor = puppet_actor_ ? puppet_actor_(n) : 0; actor != 0) {
+            std::uint64_t table = 0;
+            if (guest.Read(actor + CoopBossNative::addr::kActorComponents, &table, sizeof table) && table != 0 &&
+                !guest.Read(table + addr::kComponentEmitter, &component, sizeof component)) {
+                component = 0;
+            }
+        }
+        if (auto c = Step(guest, h, Pending::puppet, component, main_base, want)) {
+            pending_number_ = n;
+            pending_why_ = want ? wanted->why : std::string();
+            return c;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
                                             std::uint64_t now_ms, std::uint64_t main_base) {
     std::lock_guard lock(mutex_);
     if (!after_call) {
         shield_.tried = false;
         unseen_.tried = false;
+        for (auto& [n, h] : puppets_) {
+            h.tried = false;
+        }
     } else {
         const Pending was = std::exchange(pending_, Pending::none);
         switch (was) {
@@ -177,6 +250,16 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
             Note(std::string(was == Pending::shield ? "the game's invincibility (no reaction)" : "the game's perception emitter") +
                  (pending_on_ ? (was == Pending::shield ? " on for our downed Link" : " off for our downed Link")
                               : (was == Pending::shield ? " off: our Link is up" : " on again: our Link is up")));
+            break;
+        }
+        case Pending::puppet: {
+            Hold& h = puppets_[pending_number_];
+            h.on_at = pending_on_ ? pending_at_ : 0;
+            if (pending_on_) {
+                ++counts_.puppets_unseen_on;
+            }
+            Note("the game's perception emitter " + std::string(pending_on_ ? "off" : "on again") + " for player " +
+                 std::to_string(pending_number_) + "'s puppet: " + (pending_on_ ? "they are " + pending_why_ : "they are back"));
             break;
         }
         case Pending::crawl:
@@ -202,8 +285,12 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
         }
     }
 
+    bool puppets_held = !want_.unseen_puppets.empty();
+    for (const auto& [n, h] : puppets_) {
+        puppets_held = puppets_held || h.on_at != 0;
+    }
     const bool need_block = want_.lying || shield_.on_at != 0 || unseen_.on_at != 0 || stand_due_ ||
-                            want_.lying != was_lying_;
+                            want_.lying != was_lying_ || puppets_held;
     if (block_ == 0) {
         if (!need_block || pending_ != Pending::none || (after_call && result == 0)) {
             return std::nullopt;  // (nothing to do, or the game had no memory: next frame)
@@ -217,14 +304,17 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
 
     // Shield and unseen (any time, events too).
     if (!shield_.tried) {
-        if (auto c = Step(guest, shield_, Pending::shield, want_.life, main_base)) {
+        if (auto c = Step(guest, shield_, Pending::shield, want_.life, main_base, want_.lying)) {
             return c;
         }
     }
     if (!unseen_.tried) {
-        if (auto c = Step(guest, unseen_, Pending::unseen, want_.emitter, main_base)) {
+        if (auto c = Step(guest, unseen_, Pending::unseen, want_.emitter, main_base, want_.lying)) {
             return c;
         }
+    }
+    if (auto c = StepPuppets(guest, main_base)) {
+        return c;
     }
 
     // The crawl.

@@ -23,7 +23,8 @@ std::uint64_t Bits(float lo, float hi = 0.0f) {
     return std::uint64_t{a} | (std::uint64_t{b} << 32);
 }
 
-constexpr std::uint64_t kClockKey = Key(4, 0x30);     // the clock, low half of c+0x10+0x30
+constexpr std::uint64_t kAsKey = Key(kRegionAsFrame, 0);
+constexpr std::uint64_t kClockKey = kAsKey;  // the clock: the AS slot 0 frame (room-objects: no guessed word)
 constexpr std::uint64_t kHash = 0x7f36b7404e6b5890ull;
 constexpr std::uint64_t kMs = 1000;
 
@@ -165,8 +166,9 @@ TEST_CASE("platforms: a look's floats leave out pointers, the table and the acto
     CHECK(Where(Key(kRegionAsFrame, 0)) == "as-frame");
 }
 
-TEST_CASE("platforms: the finder takes the word that steps with time, and its rate") {
+TEST_CASE("platforms: the finder takes the AS frame, never a guessed word that steps with time (room-objects)") {
     ClockFinder f;
+    ClockFinder guessed;  // the same words without the AS frame: a seconds word, a frame counter, a slow place
     float clock = 2.0f;
     float frames = 100.0f;
     float uneven = 0.0f;
@@ -176,6 +178,8 @@ TEST_CASE("platforms: the finder takes the word that steps with time, and its ra
         Floats look{{Key(2, 0x0), clock},     {Key(2, 0x4), 5.0f},
                     {Key(2, 0x8), uneven},    {Key(2, 0xc), frames},
                     {Key(2, 0x10), slow_linear}};
+        guessed.Add(t, look);
+        look[kAsKey] = frames;
         f.Add(t, look);
         if (i < 4) {
             CHECK_FALSE(f.Found());  // three agreeing checks first
@@ -187,14 +191,15 @@ TEST_CASE("platforms: the finder takes the word that steps with time, and its ra
     }
     const auto found = f.Found();
     REQUIRE(found);
-    // Both the seconds and the frames words are clock-like; the first by key wins.
-    CHECK((found->key == Key(2, 0x0) || found->key == Key(2, 0xc)));
-    if (found->key == Key(2, 0x0)) {
-        CHECK(found->rate == doctest::Approx(1.0f).epsilon(0.01));
-    } else {
-        CHECK(found->rate == doctest::Approx(30.0f).epsilon(0.01));
-    }
+    CHECK(found->key == kAsKey);
+    CHECK(found->rate == doctest::Approx(30.0f).epsilon(0.01));
     CHECK(found->cycle == 0.0f);
+    // What the clock path took in runs (the Deku lifts' frame counter, the water-room controller's place) is never
+    // the clock: nothing to send or write.
+    CHECK_FALSE(guessed.Found());
+    CHECK_FALSE(ClockFinder::Trusted(Key(2, 0xc), false));
+    CHECK(ClockFinder::Trusted(Key(2, 0xc), true));  // a wave phase
+    CHECK(ClockFinder::Trusted(kAsKey, false));
 }
 
 TEST_CASE("platforms: a looping clock gives its cycle and counts as a jump") {
@@ -202,7 +207,7 @@ TEST_CASE("platforms: a looping clock gives its cycle and counts as a jump") {
     float clock = 0.0f;
     bool jumped = false;
     for (int i = 0; i < 20; ++i) {
-        f.Add(1'000'000 + static_cast<std::uint64_t>(i) * 250'000, Floats{{Key(0, 0x40), clock}});
+        f.Add(1'000'000 + static_cast<std::uint64_t>(i) * 250'000, Floats{{kAsKey, clock}});
         jumped = jumped || f.Jumped();
         clock += 0.25f;
         if (clock >= 3.0f) {
@@ -211,7 +216,7 @@ TEST_CASE("platforms: a looping clock gives its cycle and counts as a jump") {
     }
     const auto found = f.Found();
     REQUIRE(found);
-    CHECK(found->key == Key(0, 0x40));
+    CHECK(found->key == kAsKey);
     CHECK(found->cycle == doctest::Approx(3.0f).epsilon(0.01));
     CHECK(jumped);
 }
@@ -247,7 +252,7 @@ TEST_CASE("platforms: the owner's clock reaches the other game in step, whatever
     CHECK(a.sync.Writes() == 0);
     bool followed = false;
     for (const auto& n : b.notes) {
-        followed = followed || n.find("following player 1's clock c+0x10+0x30") != std::string::npos;
+        followed = followed || n.find("following player 1's clock as-frame") != std::string::npos;
     }
     CHECK(followed);
     // In step: no more writes.
@@ -426,7 +431,7 @@ TEST_CASE("platforms: a stall right after a loop is no cycle and no jump (review
     float clock = 0.0f;
     std::uint64_t t = 1'000'000;
     const auto look = [&] {
-        f.Add(t, Floats{{Key(0, 0x40), clock}});
+        f.Add(t, Floats{{kAsKey, clock}});
         t += 250'000;
     };
     // Steps at 1 a second and loops at 3: the cycle is learned.
@@ -578,12 +583,11 @@ TEST_CASE("platforms: no clock write while our Link rides it, in step once he is
     b.self = 2;
     b.clock = 30.0f;  // far out of step: a write would make the lift jump
     for (Game* g : {&a, &b}) {
-        g->driver_name = "Obj_InsideTheDekuTree_ElevatorLift_A_02";
+        g->driver_name = "Obj_Deku_MoveFloor_A_01";  // a free floor (not in this scene's table): its footprint
         g->driver_at = {1.0f, 0.0f, 0.0f};
     }
-    a.link = {6.0f, 0.0f, 0.0f};  // A beside its lift
-    b.link = {1.2f, 0.3f, 0.0f};  // B stands on its lift
-    b.ride_plug = true;
+    a.link = {6.0f, 0.0f, 0.0f};  // A beside its floor
+    b.link = {1.2f, 0.3f, 0.0f};  // B stands on its floor
     std::uint64_t time = 0;
     a.Tick(time);
     Play(a, b, time, 4000);
@@ -597,10 +601,9 @@ TEST_CASE("platforms: no clock write while our Link rides it, in step once he is
         }
         return false;
     };
-    CHECK(has("our Link rides it (RideOnPlayer)"));
-    // Off the lift: put in step, and the held writes count as none the game took back.
+    CHECK(has("our Link rides it (footprint)"));
+    // Off the floor: put in step, and the held writes count as none the game took back.
     b.link = {6.0f, 0.0f, 0.0f};
-    b.ride_plug = false;
     Play(a, b, time, 3000);
     CHECK(b.sync.Writes() >= 1);
     CHECK(std::fabs(a.clock - b.clock) < PlatformSync::kDriftS + 0.06f);
@@ -615,27 +618,23 @@ TEST_CASE("platforms: a jump on the platform keeps the hold, a longer time off i
     b.self = 2;
     b.clock = 30.0f;
     for (Game* g : {&a, &b}) {
-        g->driver_name = "Obj_InsideTheDekuTree_ElevatorLift_A_02";
+        g->driver_name = "Obj_Deku_MoveFloor_A_01";
     }
     a.link = {6.0f, 0.0f, 0.0f};
     b.link = {1.2f, 0.3f, 0.0f};
-    b.ride_plug = true;
     std::uint64_t time = 0;
     a.Tick(time);
     Play(a, b, time, 3000);
     REQUIRE(b.sync.Writes() == 0);
-    // A jump: in the air the plug is 0 and Link is over the footprint's top for half a second.
-    b.ride_plug = false;
+    // A jump: Link is over the footprint's top for half a second.
     b.link = {1.2f, 3.0f, 0.0f};
     Play(a, b, time, 500);
     CHECK(b.sync.Writes() == 0);
     // Landed again: still held.
-    b.ride_plug = true;
     b.link = {1.2f, 0.3f, 0.0f};
     Play(a, b, time, 1000);
     CHECK(b.sync.Writes() == 0);
     // Off it for good: in step after the grace.
-    b.ride_plug = false;
     b.link = {6.0f, 0.0f, 0.0f};
     Play(a, b, time, 3000);
     CHECK(b.sync.Writes() >= 1);
@@ -649,14 +648,13 @@ TEST_CASE("platforms: an owner riding its platform does not put its clock back a
     b.self = 2;
     b.clock = 30.0f;
     for (Game* g : {&a, &b}) {
-        g->driver_name = "Obj_InsideTheDekuTree_ElevatorLift_A_02";
+        g->driver_name = "Obj_Deku_MoveFloor_A_01";
         g->link = {6.0f, 0.0f, 0.0f};
     }
     std::uint64_t time = 0;
     Play(a, b, time, 4000);
     REQUIRE(b.sync.OwnerOf(kHash, 2, time + 10'000'000) == 1);
-    a.link = {1.2f, 0.3f, 0.0f};  // A stands on its lift
-    a.ride_plug = true;
+    a.link = {1.2f, 0.3f, 0.0f};  // A stands on its floor
     a.paused = true;
     Play(a, b, time, 1500);
     a.paused = false;
@@ -665,4 +663,64 @@ TEST_CASE("platforms: an owner riding its platform does not put its clock back a
     for (const auto& n : a.notes) {
         CHECK(n.find("stood still") == std::string::npos);
     }
+}
+
+TEST_CASE("platforms: an object its own logic drives is neither sent nor written (room-objects)") {
+    struct Result {
+        std::size_t sent = 0;
+        std::size_t writes = 0;
+        bool told = false;
+    };
+    const auto run = [](const char* name, const char* scene, proto::Vec3 at, std::optional<bool> plug) {
+        Game a;
+        Game b;
+        a.self = 1;
+        b.self = 2;
+        b.clock = 30.0f;
+        for (Game* g : {&a, &b}) {
+            g->driver_name = name;
+            g->driver_at = at;
+            g->ride_plug = plug;
+            g->link = {at[0] + 6.0f, at[1], at[2]};
+        }
+        Result r;
+        std::uint64_t time = 0;
+        for (std::uint64_t t = 0; t < 4000; t += 50) {
+            time += 50 * kMs;
+            a.Step(0.05f);
+            b.Step(0.05f);
+            a.Tick(time, scene);
+            b.Tick(time, scene);
+            r.sent += a.sent.size() + b.sent.size();
+            for (auto& m : a.sent) {
+                auto pc = std::get<proto::PlatformClock>(m);
+                pc.player_number = a.self;
+                b.sync.Receive(pc);
+            }
+            a.sent.clear();
+            b.sent.clear();
+        }
+        r.writes = a.sync.Writes() + b.sync.Writes();
+        for (const auto& n : b.notes) {
+            r.told = r.told || n.find("driven by its own logic") != std::string::npos;
+        }
+        return r;
+    };
+    // The Deku Tree compass-room lift: IsOn from its plate (CoopEyeSwitch sets the plate's plug).
+    const Result lift = run("Obj_InsideTheDekuTree_ElevatorLift_A_02", "InsideTheDekuTree", {-29.9f, 116.0f, 3.2f}, {});
+    CHECK(lift.sent == 0);
+    CHECK(lift.writes == 0);
+    CHECK(lift.told);
+    // Its limit part placed on it moves with it.
+    const Result lim = run("Obj_InsideTheDekuTree_ElevatorLiftLim_A_02", "InsideTheDekuTree", {-29.9f, 118.0f, 3.2f}, {});
+    CHECK(lim.sent == 0);
+    // A rider lift by its live plug (CoopLiftRide sets it for the other players), in any scene.
+    const Result rider = run("Obj_InsideJabu_Jabu_MoveFloor_A_01", "DodongoCavern", {0.0f, 0.0f, 0.0f}, false);
+    CHECK(rider.sent == 0);
+    CHECK(rider.told);
+    // The water room's wave runs free: shared and followed.
+    const Result wave = run("GroundControlActor_WaveLoop", "InsideTheDekuTree", {-26.2f, 82.3f, 38.0f}, {});
+    CHECK(wave.sent > 0);
+    CHECK(wave.writes > 0);
+    CHECK_FALSE(wave.told);
 }

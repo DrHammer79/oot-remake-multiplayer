@@ -197,12 +197,28 @@ bool PuppetGuardInExe() {
 }
 
 // Before the game makes our first puppet: its null reads give 0 (issue 150, coop_null_page.h). Once.
-// Where that failed after all (the MB could not be committed), the puppets' director learns it before
-// the puppet exists, so no piece that needs those reads (GearIsUnsafe, issue 232) is ever worn.
-void ArmNullPage(const std::string& actor) {
-    if (actor.rfind("CoopPuppet_", 0) == 0 && !CoopNullPage::Arm(Env("HOS_COOP_NULL_READS"))) {
+// Where that failed after all, the puppets' director learns it before the puppet exists (GearIsUnsafe,
+// issue 232), and the create is refused unless HOS_COOP_NULL_READS=0 asked for the faults
+// (coop_hookshot.h RefuseUnarmed: every held piece and the puppet itself read through null). True: make it.
+bool ArmNullPage(const std::string& actor) {
+    if (actor.rfind("CoopPuppet_", 0) != 0) {
+        return true;
+    }
+    const std::string env = Env("HOS_COOP_NULL_READS");
+    const bool armed = CoopNullPage::Arm(env);
+    if (!armed) {
         CoopPuppet::TheDirector().SetNullReadsZero(false);
     }
+    if (!CoopHookshot::RefuseUnarmed(actor, armed, env)) {
+        return true;
+    }
+    static std::atomic<bool> said{false};
+    if (!said.exchange(true)) {
+        LOG_WARNING(Core, "coop: {} not made: null-pointer reads cannot give 0 in this longshot.exe (see the null "
+                          "page line above); other players show as their fairy",
+                    actor);
+    }
+    return false;
 }
 
 // Whether a perceived puppet is safe here (coop_null_page.h Armable); if not, quiet puppets everywhere.
@@ -239,8 +255,7 @@ bool Refused(const CoopPuppet::Call& c) {
         }
     }
     if (!CoopHookshot::RefuseCreate(actor, allow)) {
-        ArmNullPage(actor);
-        return false;
+        return !ArmNullPage(actor);
     }
     static bool said = false;
     if (!said) {

@@ -1459,7 +1459,7 @@ function Get-KitDownloadFailText([string]$File, [string]$Why, [string]$TestUrl, 
         'or a firewall. Test: open this in your browser:'
         "  $TestUrl"
         'If the browser downloads it but this script cannot, the antivirus or a proxy blocks PowerShell. Start again: what was'
-        'downloaded is kept. Still stuck: scripts\collect-logs.cmd, and send its zip.'
+        'downloaded is kept. Still stuck: scripts\collect-logs.cmd, and attach its zip to /bugreport on the Discord.'
     ) -join "`n"
 }
 

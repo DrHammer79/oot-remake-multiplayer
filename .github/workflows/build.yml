@@ -77,6 +77,8 @@ jobs:
         run: python tools/puppet_pack/tests/test_extra_spots.py -v
       - name: Story cutscene requests tests
         run: python tools/puppet_pack/tests/test_story_requests.py -v
+      - name: Room objects (own logic) tests
+        run: python tools/puppet_pack/tests/test_room_objects.py -v
       - name: Unnamed room bools tests
         run: python tools/puppet_pack/tests/test_autogen_flags.py -v
       - name: Boss beaten sets tests
@@ -93,6 +95,8 @@ jobs:
         run: python tools/netsim/tests/test_netsim.py -v
       - name: Discord bug-report bot tests
         run: python tools/discord-bot/tests/test_report_core.py -v
+      - name: Content guard tests (test names with ';')
+        run: python tools/tests/test_check_content.py -v
       # The kit's patch applier for Hookshot (hookshot-kit); skipped until that branch is merged.
       - name: Kit patch applier tests
         if: hashFiles('tools/release/tests/test_apply_patch.py') != ''
@@ -176,10 +180,11 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
-      # Our Longshot patches' Windows host code (host/*.c), compiled syntax only with Longshot's own llvm-mingw clang:
-      # nothing else in CI compiles it for Windows (the Linux jobs build the renderer alone), and 0.11.4's patch 0025
-      # reached a game build with a character literal that did not compile. Downloads: the pinned tools.lock,
-      # llvm-mingw, Python and source, mirror first, SHA-256 checked, cached by the pin.
+      # Our Longshot patches' Windows code (host/*.c, gpu/vk/*.cpp and their includers), compiled syntax only with
+      # Longshot's own llvm-mingw clang and build.py's flags: nothing else in CI compiles it for Windows (the Linux jobs
+      # build the renderer alone, for Linux), and 0.11.4's patch 0025 reached a game build with a character literal
+      # that did not compile. Downloads: the pinned tools.lock, llvm-mingw, Python, CPM headers and source, mirror
+      # first, SHA-256 checked, cached by the pin.
       - name: Longshot downloads cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
@@ -207,6 +212,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/problem_report_test.ps1
       - name: Kit crash report and sending tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/send_report_test.ps1
+      - name: Kit dependency licence tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/kit_deps_test.ps1
       - name: CI runner hook tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci-runner/job_started_test.ps1
       - name: CI runner script checks
@@ -363,6 +370,9 @@ jobs:
       - name: Crash relay tests (node)
         if: matrix.job == 'gcc'
         run: node --test tools/crash-relay/tests/relay.test.js
+      - name: Kit dependency licence tests (Linux)
+        if: matrix.job == 'gcc'
+        run: bash tools/release/tests/kit_deps_test.sh
       - name: coop_test, 2 clients for 20 seconds
         if: env.COOP_SOAK == '1'
         run: |
@@ -428,6 +438,10 @@ jobs:
           echo "KIT=$(ls -d "$RUNNER_TEMP"/kit/Squadala-*-linux)" >> "$GITHUB_ENV"
       - name: Longshot's Linux builder with our patches, and the patched renderer (no game)
         run: bash "$KIT/scripts/build.sh" --renderer-only "$RUNNER_TEMP/vk" --jobs 4
+      # (the renderer build compiles no host file: our patches' host/*.c and host/posix/*.c, syntax only, with
+      # Longshot's Linux clang and build.py's flags; the windows job does the same for Windows)
+      - name: Our patches' Linux host code compiles (Longshot's clang, syntax only)
+        run: bash tools/hookshot/host_compile_check.sh "$KIT"
       - name: A first start without a game stops in plain words
         run: |
           set +e

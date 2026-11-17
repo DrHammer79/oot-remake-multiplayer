@@ -67,6 +67,10 @@ bool SessionLive();
 void NoteTitle(bool title_up);
 // What NoteTitle last said (false on the emulator, which has no title module).
 bool TitleUp();
+// Player report 124: true once after each switch of the save folder (every switch: a join's host's save, Resync from
+// host, back to the player's own folder for a new session). Hookshot's title step then has the game re-read its save
+// list (its caption manager: Continue and Load), as the game itself does at boot.
+bool TakeSaveListStale();
 
 // Hookshot's save-load wraps (patch 0024, hos_coop_save_load.h), from the game's thread: the game's own sequence
 // nodes start loading a save (start) or say the save is in (!start). Every save the game loads: the title, the System

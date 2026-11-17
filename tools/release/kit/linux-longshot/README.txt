@@ -1,5 +1,5 @@
 Squadala! for Linux and Steam Deck - online co-op: play Ocarina of Time together, each player on their own PC with their own copy of the game.
-EXPERIMENTAL: not yet tested on a real Linux PC or Steam Deck. Please tell us what happens (bash scripts/collect-logs.sh).
+EXPERIMENTAL: not yet tested on a real Linux PC or Steam Deck. Please tell us what happens: /bugreport on the Squadala! Discord (https://discord.gg/GwtRKAqng5) with the zip from bash start-squadala.sh --logs.
 1. Unzip this folder to a place of your own, such as ~/Squadala (not a temporary folder).
 2. Open a terminal in that folder and type:  bash start-squadala.sh
    The first time it asks for your game file (drag your .nup into the terminal and press Enter) and builds the game

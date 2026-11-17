@@ -836,4 +836,33 @@ std::string SaveWait::Line() const {
     }
 }
 
+SaveListRefresh::Action SaveListRefresh::Step(const Input& in) {
+    if (in.stale) {
+        pending_ = true;   // (another switch while the game reads: it reads again after this one)
+    }
+    if (asked_) {
+        if (in.manager && !in.busy && in.state == kRead) {
+            asked_ = false;
+            return Action::done;
+        }
+        if (in.now_ms - asked_ms_ >= kGiveUpMs) {
+            asked_ = false;
+            return Action::gave_up;
+        }
+        return Action::none;
+    }
+    if (!pending_) {
+        wait_ = Wait::none;
+        return Action::none;
+    }
+    wait_ = !in.title ? Wait::title : !in.manager ? Wait::manager : in.busy ? Wait::busy : Wait::none;
+    if (wait_ != Wait::none) {
+        return Action::none;   // (the game's own reading first: asked once it is idle)
+    }
+    pending_ = false;
+    asked_ = true;
+    asked_ms_ = in.now_ms;
+    return Action::ask;
+}
+
 }  // namespace CoopTitleMenu

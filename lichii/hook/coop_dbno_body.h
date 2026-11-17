@@ -33,6 +33,20 @@
 //   every enemy's and boss's target) and they go for someone else.
 //   Shield and unseen go on while downed and off when up, each only on the
 //   component it was put on; the game's own keys are never touched.
+// - A downed teammate unseen here too (and any teammate not really here). With the puppets perceived (issue 150:
+//   the pack gives each puppet the player's PerceptionEmitter), our game's
+//   enemies and bosses would pick a downed (or spectating) teammate's lying
+//   puppet: in the enemy's owner's game that is who it goes for, so the downed
+//   player's own unseen key alone did not keep enemies off them. The same key
+//   goes into that puppet's emitter ([[puppet+0x270]+0x328] + 0x20) while its
+//   player is downed or spectating, out when they are up; only on the
+//   component it was put on (a remade puppet has a new one). A pack without
+//   perception: the puppet has no emitter (0), nothing is called.
+//   The same for a teammate who is not really here (PLAYER_STATUS away: paused,
+//   in a menu, loading, in their own event or dead; review of perception-on):
+//   the enemy's owner would stick to that puppet (the game keeps a target while
+//   it is perceived) or attack a talking player mid-event, which the game never
+//   does to its own Link in an event. Out again when the bit clears.
 // - Heal. The revive's life goes in through the game's own Life step (patch
 //   0007) as a negative sum, the game's heal (as LifeWrite::heal for bosses);
 //   written directly only when the step has not taken it in kHealWaitUs.
@@ -44,6 +58,8 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
+#include <map>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -134,8 +150,19 @@ public:
         std::uint64_t bsa = 0;       // our Link's BSA component (0: none)
         std::uint64_t life = 0;      // our Link's Life component (0: none)
         std::uint64_t emitter = 0;   // our Link's PerceptionEmitter component (0: none)
+        // Teammates downed, spectating or away (UnseenWhy): their puppets in
+        // our game are unseen too. `why` goes into the log line.
+        struct Unseen {
+            std::uint8_t number = 0;
+            std::string why;
+        };
+        std::vector<Unseen> unseen_puppets;
     };
     void Want(const Wanted& w);
+    // Player n's live puppet actor in our game (0: none). The calc thread, as
+    // Next (the module: the puppet director's slots).
+    using PuppetActor = std::function<std::uint64_t(std::uint8_t number)>;
+    void SetPuppetActor(PuppetActor find);
 
     // A request the game makes on any BSA; true: skip it (our downed Link in
     // the game's Crawl, any verb but Crawl and kPassVerbs, not our own call).
@@ -157,6 +184,7 @@ public:
         std::uint64_t refused = 0;     // ... that the game refused (result not 0)
         std::uint64_t shield_on = 0;   // our invincibility put on
         std::uint64_t unseen_on = 0;   // our emitter key put in
+        std::uint64_t puppets_unseen_on = 0;  // ... into a downed teammate's puppet's emitter
         std::vector<std::int32_t> skipped_verbs;  // the first distinct ones (the log)
     };
     Counts Totals() const;
@@ -168,7 +196,7 @@ public:
     static constexpr int kMaxAsks = 6;  // then left until our Link's next Walk/Wait
 
 private:
-    enum class Pending : std::uint8_t { none, malloc, crawl, stand, shield, unseen };
+    enum class Pending : std::uint8_t { none, malloc, crawl, stand, shield, unseen, puppet };
     // A keyed state of ours on one component: on while lying.
     struct Hold {
         std::uint64_t on_at = 0;  // the component it is on (0: off)
@@ -176,7 +204,9 @@ private:
     };
     std::optional<CoopPuppet::Call> Ask(CoopPuppet::Guest& guest, std::int32_t verb, std::uint64_t main_base);
     std::optional<CoopPuppet::Call> Step(CoopPuppet::Guest& guest, Hold& h, Pending kind, std::uint64_t now_at,
-                                         std::uint64_t main_base);
+                                         std::uint64_t main_base, bool want);
+    // A downed teammate's puppet's emitter, or none this frame.
+    std::optional<CoopPuppet::Call> StepPuppets(CoopPuppet::Guest& guest, std::uint64_t main_base);
     void Note(std::string line);
 
     mutable std::mutex mutex_;
@@ -195,6 +225,10 @@ private:
     std::uint64_t next_ask_ms_ = 0;
     Hold shield_;
     Hold unseen_;
+    std::map<std::uint8_t, Hold> puppets_;  // by player number: their puppet's emitter
+    PuppetActor puppet_actor_;
+    std::uint8_t pending_number_ = 0;  // the puppet hold call in flight
+    std::string pending_why_;
     bool pending_on_ = false;    // the hold call in flight turns on (else off)
     std::uint64_t pending_at_ = 0;
     std::uint64_t block_ = 0;    // our request block in guest memory
@@ -202,6 +236,10 @@ private:
     Counts counts_;
     std::vector<std::string> notes_;
 };
+
+// Why a teammate's puppet is unseen in our game, or nothing (they can be
+// fought): downed or spectating (dbno), else their PLAYER_STATUS away bits.
+std::optional<std::string> UnseenWhy(bool downed_or_spectating, std::uint8_t status);
 
 Crawl& TheCrawl();
 Raising& TheRaising();

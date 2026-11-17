@@ -13,6 +13,7 @@
 // the others are refused (declined).
 
 #include "coop_teleport_game.h"
+#include "coop_caller_orders.h"
 
 #include "coop/presence/presence.hpp"
 
@@ -196,7 +197,7 @@ struct Glue {
         LOG_INFO(Core, "coop: teleport {}", on ? "on (/teleport <player> in chat)" : "off (LICHII_COOP_TELEPORT=0)");
     }
 
-    static constexpr int kEventCallerOrder = 61;  // after the live events (60)
+    static constexpr int kEventCallerOrder = CoopCallerOrders::kTeleportEvent;  // after the live events (60)
     std::uint64_t main = 0;  // set by Frame under event_mutex
     bool events_open = false;  // set by Frame under event_mutex: travelling, no load
 

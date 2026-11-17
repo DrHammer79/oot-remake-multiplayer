@@ -64,11 +64,18 @@ struct Switch {
 std::span<const Switch> Switches();
 // The first line of `event` in `scene`, if it is one.
 const Switch* Find(std::string_view event, std::string_view scene);
-// Every line of `event` in `scene`, nearest switch to `link` first (table order without `link`).
+// Every line of `event` in `scene` that we drive (Latches), nearest switch to `link` first (table order without `link`).
 std::vector<const Switch*> FindAll(std::string_view event, std::string_view scene,
                                    const std::optional<std::array<float, 3>>& link = std::nullopt);
 // The plug's key as the node block names it (Murmur3 of the name; the plug keeps it ^ 7).
 std::uint32_t PlugKey(std::string_view plug);
+// Whether our set of this line's plug stays until the room graph reads it (deku-ladder, offline hs-step-probe
+// 2026-11-16): an eye's OnState latches after its hit (hs-eye-probe PASS: the plug read back 1 the next frame), and
+// FirstOn is a first-on latch. A step switch's OnState (and a hit, hammer, dive or sun switch's OnState/isLightMax)
+// is rewritten by the switch's own AI every frame from its contact/hit/light: our 1 read back 0 every frame for 2 s
+// (Jabu-Jabu room 1, no event), and no game function sets its inputs (ForceControl) yet. Those lines stay in the
+// table (generated) but are not driven: their events go the old way at once, and their guard flags are not held.
+bool Latches(const Switch& s);
 
 // AND-gated triggers (deku-ladder round 3): a trigger can AND the switch with a saved room flag read NEGATED (the
 // room's "done" flag: GTG room 6's fire, Jabu room 1's first press), and the asker itself is deleted by a room flag

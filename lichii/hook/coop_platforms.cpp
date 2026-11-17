@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_platforms.h"
 
+#include "coop_room_objects.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -234,8 +236,8 @@ void ClockFinder::Add(std::uint64_t now_us, const Floats& floats) {
     if (!chosen_) {
         std::optional<std::uint64_t> best;
         for (const auto& [key, cand] : candidates_) {
-            if (cand.good < kKeepAfter || cand.bad != 0) {
-                continue;
+            if (cand.good < kKeepAfter || cand.bad != 0 || !Trusted(key, cand.wave)) {
+                continue;  // room-objects: a guessed word is never the clock (it was a place or a frame counter)
             }
             if (!best) {
                 best = key;
@@ -260,6 +262,20 @@ void ClockFinder::Add(std::uint64_t now_us, const Floats& floats) {
         }
         chosen_ = best;
     }
+}
+
+bool ClockFinder::Trusted(std::uint64_t key, bool wave) {
+    return wave || (key >> 32) == kRegionAsFrame;
+}
+
+std::optional<std::string> PlatformSync::OwnLogic(const std::string& scene, const Driver& d) {
+    if (d.ride_plug.has_value()) {
+        return std::string("RideOnPlayer, live");  // a rider lift: CoopLiftRide drives it
+    }
+    if (const auto* p = CoopRoomObjects::Nearest(scene, d.name, d.position); p != nullptr && !p->why.empty()) {
+        return std::string(p->why);
+    }
+    return std::nullopt;
 }
 
 std::optional<std::uint64_t> ClockFinder::StalledKey() const {
@@ -386,6 +402,16 @@ void PlatformSync::Tick(const std::string& scene, std::uint8_t self, std::uint64
     std::vector<std::pair<float, const Driver*>> near;
     for (const Driver& d : drivers) {
         if (d.hash == 0 || d.hash == ~std::uint64_t{0} || !IsDriver(d.name)) {
+            continue;
+        }
+        // room-objects: an object its own logic drives (a switch, a sensor, a rider) is never written from outside.
+        if (const auto why = OwnLogic(scene, d)) {
+            if (told_own_logic_.insert(d.hash).second) {
+                char text[200];
+                std::snprintf(text, sizeof text, "%016llx %s: driven by its own logic (%s): its clock is not shared",
+                              static_cast<unsigned long long>(d.hash), d.name.c_str(), why->c_str());
+                out.notes.emplace_back(text);
+            }
             continue;
         }
         const float m = Distance(d.position, *player);
@@ -569,6 +595,7 @@ void PlatformSync::Reset() {
     scene_.clear();
     heard_.clear();
     states_.clear();
+    told_own_logic_.clear();
 }
 
 }  // namespace CoopPlatforms

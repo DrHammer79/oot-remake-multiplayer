@@ -20,7 +20,7 @@ Co-op inside [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team M
 | `compat/` | Stand-ins for the slice of the emulator's API that `lichii/hook` uses, answered from the bridge's table, so every hook file compiles unchanged for Hookshot: one copy of co-op for both. |
 | `CMakeLists.txt` | Target `hookshot_coop` (Windows, MSVC): `lichii/hook`'s files as `core.cmake` lists them, but the emulator's cave and input injection, plus `src/`. |
 | `proof.py` | The two-game check on one PC (both games, the server, shots of both pictures, the co-op log lines). |
-| `../tools/hookshot/host_compile_check.ps1` | CI's windows job: Longshot's source at the pin with these patches, and the `host/*.c` they change (or whose headers they change) compiled syntax only by Longshot's own llvm-mingw clang, plus the patched `.py` files. Nothing else compiles the Windows host code before a game build (the Linux jobs build the renderer alone). Run it by hand before pushing a patch that changes `host/`. |
+| `../tools/hookshot/host_compile_check.ps1`, `.sh`, `.py` | CI: Longshot's source at the pin with these patches. The C and C++ files they change, or whose headers they change (`host/*.c`, `host/posix/*.c`, `gpu/vk/*.cpp`), are compiled syntax only by Longshot's own compiler with `nx2/build.py`'s own flags (taken from its `--dry-run`). Windows (llvm-mingw) runs in the windows job and Linux in linux-longshot, plus the patched `.py` files. Nothing else compiles the host code or the renderer's `_WIN32` parts before a game build: the Linux job builds the renderer alone. Run the `.ps1` by hand before pushing a patch that changes `host/` or `gpu/vk/`. |
 
 ## A co-op Hookshot game, for development (Windows)
 

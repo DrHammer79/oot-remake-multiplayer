@@ -243,6 +243,7 @@ struct Teammate {
     State state = State::up;
     bool in_game = false;             // has a Link now (not on the title, not loading)
     bool loading = false;             // a scene load (a door, a loading zone, a teleport, a Try Again)
+    std::uint8_t status = 0;          // their PLAYER_STATUS flags (proto::status)
     std::optional<std::string> scene;
     std::optional<Vec3> position;     // at the feet, as our game shows them
     Threat threat = Threat::unknown;  // their DBNO_THREAT

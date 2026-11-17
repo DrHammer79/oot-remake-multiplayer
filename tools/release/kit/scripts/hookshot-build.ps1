@@ -81,7 +81,7 @@ trap {
     } elseif ($m -match '(?i)application control|blocked by|virus|potentially unwanted') {
         Write-Host '  Windows or the antivirus blocked a program of the build: Windows Security > Protection history says which; allow it, or add this kit''s folder under Exclusions. Smart App Control (Windows 11) blocks it whatever Defender''s settings (SETUP.md, "If something goes wrong").' -ForegroundColor Yellow
     }
-    Write-Host '  Start again once that is done; what was downloaded is kept. Still stuck: scripts\collect-logs.cmd, and send its zip.'
+    Write-Host '  Start again once that is done; what was downloaded is kept. Still stuck: scripts\collect-logs.cmd, and attach its zip to /bugreport on the Discord.'
     exit 1
 }
 function Step([string]$Text) { Write-Host ''; Write-Host "== $Text" -ForegroundColor Cyan }

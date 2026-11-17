@@ -168,7 +168,7 @@ std::vector<const Switch*> FindAll(std::string_view event, std::string_view scen
                                    const std::optional<std::array<float, 3>>& link) {
     std::vector<const Switch*> out;
     for (const auto& s : kSwitches) {
-        if (s.event == event && s.scene == scene) out.push_back(&s);
+        if (s.event == event && s.scene == scene && Latches(s)) out.push_back(&s);  // only lines we can drive
     }
     if (link) {
         std::stable_sort(out.begin(), out.end(), [&](const Switch* x, const Switch* y) {
@@ -179,6 +179,8 @@ std::vector<const Switch*> FindAll(std::string_view event, std::string_view scen
 }
 
 std::uint32_t PlugKey(std::string_view plug) { return coop::protocol::flag_hash(plug); }
+
+bool Latches(const Switch& s) { return s.actor.starts_with("Obj_EyeSwitch") || s.plug == "FirstOn"; }
 
 std::vector<std::uint64_t> FindActors(CoopPuppet::Guest& guest, std::uint64_t main,
                                       std::span<const std::string_view> names, const std::array<float, 3>& at,
@@ -203,7 +205,7 @@ std::vector<std::uint64_t> FindActors(CoopPuppet::Guest& guest, std::uint64_t ma
 }
 
 bool Switcher::Want(const std::string& event, const std::string& scene, std::optional<std::array<float, 3>> link) {
-    if (Find(event, scene) == nullptr) return false;
+    if (FindAll(event, scene).empty()) return false;  // not a switch event, or one whose plug its AI rewrites
     std::lock_guard lock(mutex_);
     if (failed_) return false;
     if (std::none_of(wanted_.begin(), wanted_.end(), [&](const Try& t) { return t.event == event; })) {
@@ -247,16 +249,19 @@ void Switcher::Expire(const std::string& scene, const std::function<bool(const s
 }
 
 bool Switcher::HoldsGuard(std::uint32_t hash, std::string_view scene) {
+    // 0: not held (its event has no line we drive: the flag comes as before)
     static const std::vector<std::uint32_t> hashes = [] {
         std::vector<std::uint32_t> out;
-        for (const Guard& g : kGuards) out.push_back(coop::protocol::flag_hash(g.flag));
+        for (const Guard& g : kGuards) {
+            out.push_back(FindAll(g.event, g.scene).empty() ? 0u : coop::protocol::flag_hash(g.flag));
+        }
         return out;
     }();
     std::lock_guard lock(mutex_);
     if (failed_) return false;  // every event goes the old way: nothing waits
     for (std::size_t i = 0; i < hashes.size(); ++i) {
         const Guard& g = kGuards[i];
-        if (hashes[i] == hash && g.scene == scene &&
+        if (hashes[i] != 0 && hashes[i] == hash && g.scene == scene &&
             std::find(ended_.begin(), ended_.end(), g.event) == ended_.end()) {
             return true;
         }

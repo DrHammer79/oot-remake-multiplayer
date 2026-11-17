@@ -6,10 +6,14 @@
 #include <cstdio>
 
 #include "coop_fairy.h"
+#include "coop_room_objects.h"
 
 namespace CoopLiftRide {
 
 bool IsRideLift(std::string_view name) {
+    // room-objects: every name whose logic has the RideOnPlayer plug (generated from the romfs), so the Forest
+    // Temple's elevators (Obj_ForestTemple_Elevator_A_01, the base lift's logic) too.
+    if (CoopRoomObjects::RiderName(name)) return true;
     if (!name.starts_with("Obj_")) return false;
     if (name.starts_with("Obj_Deku_") || name.starts_with("Obj_InsideTheDekuTree_")) return false;
     return name.find("ElevatorLift_") != std::string_view::npos || name.find("MoveFloor_") != std::string_view::npos;

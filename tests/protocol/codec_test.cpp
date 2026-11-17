@@ -2245,6 +2245,32 @@ TEST_CASE("dungeon event has its number, the session channel and checked strings
         Error::none);
 }
 
+TEST_CASE("switch state: type 356, the session channel, a round trip and checked fields (room-objects)") {
+  CHECK(static_cast<int>(MessageType::switch_state) == 356);
+  CHECK(channel_of(MessageType::switch_state) == kChannelSession);
+  CHECK(allowed_on_channel(MessageType::switch_state, kChannelSession));
+  CHECK_FALSE(allowed_on_channel(MessageType::switch_state, kChannelProgress));
+  CHECK(may_send(Sender::client, MessageType::switch_state));
+  CHECK(may_send(Sender::server, MessageType::switch_state));
+  const SwitchState s{3, "DodongoCavern", "Obj_StepSwitch_A_01", {17.2f, 112.3f, -23.0f}, 0x1234abcdu, true};
+  Message back;
+  REQUIRE(decode(must_encode(s), back) == Error::none);
+  CHECK(std::get<SwitchState>(back) == s);
+  Message n = s;
+  CHECK(set_sender(n, 5));
+  CHECK(sender_of(n) == 5);
+  Bytes out;
+  CHECK(encode(SwitchState{0, "", "A", {}, 1, true}, out) == Error::bad_value);               // no scene
+  CHECK(encode(SwitchState{0, "DodongoCavern", "", {}, 1, true}, out) == Error::bad_value);   // no name
+  CHECK(encode(SwitchState{0, "DodongoCavern", "A", {}, 0, true}, out) == Error::bad_value);  // no plug
+  CHECK(encode(SwitchState{0, "DodongoCavern", "A", {std::nanf(""), 0.0f, 0.0f}, 1, true}, out) == Error::bad_value);
+  CHECK(encode(SwitchState{0, "DodongoCavern", std::string(kMaxSwitchNameChars + 1, 'a'), {}, 1, true}, out) ==
+        Error::string_too_long);
+  Bytes b = must_encode(SwitchState{0, "D", "A", {}, 1, false});
+  b.back() = 2;  // on is 0 or 1
+  CHECK(decode(b, back) == Error::bad_value);
+}
+
 TEST_CASE("player ride: type 385, samples channel, horse and offset, both ways") {
   CHECK(static_cast<int>(MessageType::player_ride) == 385);
   CHECK(channel_of(MessageType::player_ride) == kChannelPlayerSamples);

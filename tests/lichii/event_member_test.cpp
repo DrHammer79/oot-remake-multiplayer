@@ -40,7 +40,6 @@ struct Memory {
 constexpr std::uint64_t kActor = 0x10'0000;
 constexpr std::uint64_t kParts = 0x20'0000;
 constexpr std::uint64_t kPerformer = 0x30'0000;
-constexpr std::uint64_t kEventLink = 0x106d7f9dd0;  // as in the probe run
 
 } // namespace
 

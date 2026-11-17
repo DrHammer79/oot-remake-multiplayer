@@ -1,10 +1,12 @@
 // Tests for our downed Link's body: crawl, shield, unseen, heal (lichii/hook/coop_dbno_body.cpp).
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -385,4 +387,147 @@ TEST_CASE("dbno body: never down, the game is never called") {
     for (std::uint64_t ms = 1000; ms < 3000; ms += 100) {
         CHECK(RunFrame(c, g, ms).empty());
     }
+}
+
+// Issue 150 with row 113: a downed teammate's puppet in our game is unseen too.
+namespace {
+constexpr std::uint64_t kPuppet = 0x60000;   // player 2's puppet actor
+constexpr std::uint64_t kTable = 0x61000;    // its component table
+constexpr std::uint64_t kPuppetEmitter = 0x62000;
+
+void GivePuppet(Guest& g, std::uint64_t actor, std::uint64_t table, std::uint64_t emitter) {
+    g.Write(actor + bn::addr::kActorComponents, &table, sizeof table);
+    g.Write(table + addr::kComponentEmitter, &emitter, sizeof emitter);
+}
+
+Crawl::Wanted Teammates(std::vector<std::uint8_t> downed, const char* why = "downed") {
+    Crawl::Wanted w = Want(false);
+    for (const std::uint8_t n : downed) {
+        w.unseen_puppets.push_back({n, why});
+    }
+    return w;
+}
+}  // namespace
+
+TEST_CASE("dbno body: a downed teammate's puppet: our key in its emitter while down, out when up") {
+    Guest g;
+    Crawl c;
+    g_lists = {};
+    GivePuppet(g, kPuppet, kTable, kPuppetEmitter);
+    c.SetPuppetActor([](std::uint8_t n) { return n == 2 ? kPuppet : 0; });
+    c.Want(Teammates({2}));
+    const auto down = RunFrame(c, g, 1000);
+    REQUIRE(Count(down, addr::kEmitterSwitch) == 1);
+    CHECK(Count(down, addr::kInvincibleNoReaction) == 0);  // our own Link is up: no shield, no own unseen
+    for (const Made& m : down) {
+        if (m.function == addr::kEmitterSwitch) {
+            CHECK(m.x0 == kPuppetEmitter + addr::kEmitterKeys);
+            CHECK(m.x2 == 0);  // IsEnable 0: off
+        }
+    }
+    CHECK(g_lists.emitter_off.count({kPuppetEmitter + addr::kEmitterKeys, addr::kOurKey}) == 1);
+    CHECK(RunFrame(c, g, 1100).empty());  // once
+    CHECK(c.Totals().puppets_unseen_on == 1);
+    CHECK(c.Totals().unseen_on == 0);
+
+    c.Want(Teammates({}));
+    const auto up = RunFrame(c, g, 2000);
+    REQUIRE(Count(up, addr::kEmitterSwitch) == 1);
+    for (const Made& m : up) {
+        CHECK(m.x2 == 1);  // on again
+    }
+    CHECK(g_lists.emitter_off.empty());
+    CHECK(RunFrame(c, g, 2100).empty());
+}
+
+TEST_CASE("dbno body: a remade puppet gets the key again, a gone one is never called") {
+    Guest g;
+    Crawl c;
+    g_lists = {};
+    std::uint64_t actor = kPuppet;
+    GivePuppet(g, kPuppet, kTable, kPuppetEmitter);
+    c.SetPuppetActor([&actor](std::uint8_t n) { return n == 3 ? actor : 0; });
+    c.Want(Teammates({3}));
+    RunFrame(c, g, 1000);
+    // Remade (a scene change): a new actor with a new emitter.
+    actor = 0x70000;
+    GivePuppet(g, 0x70000, 0x71000, 0x72000);
+    const auto again = RunFrame(c, g, 1100);
+    REQUIRE(Count(again, addr::kEmitterSwitch) == 1);
+    CHECK(again[0].x0 == 0x72000 + addr::kEmitterKeys);
+    // Up while the puppet is gone (they left the scene): nothing is called on a freed component.
+    actor = 0;
+    c.Want(Teammates({}));
+    CHECK(Count(RunFrame(c, g, 1200), addr::kEmitterSwitch) == 0);
+    CHECK(RunFrame(c, g, 1300).empty());
+}
+
+TEST_CASE("dbno body: a puppet without perception (no emitter) or no puppet: the game is never asked") {
+    Guest g;
+    Crawl c;
+    GivePuppet(g, kPuppet, kTable, 0);  // a pack without perception: no emitter component
+    c.SetPuppetActor([](std::uint8_t n) { return n == 2 ? kPuppet : 0; });
+    c.Want(Teammates({2, 4}));  // 4: no puppet in our scene
+    for (std::uint64_t ms = 1000; ms < 1500; ms += 100) {
+        CHECK(Count(RunFrame(c, g, ms), addr::kEmitterSwitch) == 0);
+    }
+    CHECK(c.Totals().puppets_unseen_on == 0);
+}
+
+TEST_CASE("dbno body: our own Link and a teammate both downed: both emitters off, both back on") {
+    Guest g;
+    Crawl c;
+    g_lists = {};
+    GivePuppet(g, kPuppet, kTable, kPuppetEmitter);
+    c.SetPuppetActor([](std::uint8_t n) { return n == 2 ? kPuppet : 0; });
+    Crawl::Wanted w = Want(true);
+    w.unseen_puppets = {{2, "downed"}};
+    c.Want(w);
+    RunFrame(c, g, 1000);
+    CHECK(g_lists.emitter_off.count({kEmitter + addr::kEmitterKeys, addr::kOurKey}) == 1);
+    CHECK(g_lists.emitter_off.count({kPuppetEmitter + addr::kEmitterKeys, addr::kOurKey}) == 1);
+    c.Want(Want(false));
+    RunFrame(c, g, 2000);
+    CHECK(g_lists.emitter_off.empty());
+}
+
+TEST_CASE("dbno body: why a teammate's puppet is unseen: downed, then every PLAYER_STATUS away bit") {
+    namespace st = coop::protocol::status;
+    CHECK(UnseenWhy(true, 0) == "downed");
+    CHECK(UnseenWhy(true, st::paused) == "downed");
+    CHECK(UnseenWhy(false, st::dead) == "dead");
+    CHECK(UnseenWhy(false, st::loading) == "loading");
+    CHECK(UnseenWhy(false, st::in_cutscene) == "in their event");
+    CHECK(UnseenWhy(false, st::in_menu) == "in a menu");
+    CHECK(UnseenWhy(false, st::paused) == "paused");
+    CHECK(UnseenWhy(false, st::paused | st::in_menu) == "in a menu");
+    CHECK_FALSE(UnseenWhy(false, 0).has_value());  // playing: seen
+    for (int bit = 0; bit < 8; ++bit) {
+        const auto b = static_cast<std::uint8_t>(1u << bit);
+        CHECK_MESSAGE(UnseenWhy(false, b).has_value() == ((b & st::away) != 0), "bit ", bit);
+    }
+}
+
+TEST_CASE("dbno body: a paused teammate's puppet is unseen until they play again, with the reason in the log") {
+    Guest g;
+    Crawl c;
+    g_lists = {};
+    GivePuppet(g, kPuppet, kTable, kPuppetEmitter);
+    c.SetPuppetActor([](std::uint8_t n) { return n == 2 ? kPuppet : 0; });
+    c.Want(Teammates({2}, "paused"));
+    REQUIRE(Count(RunFrame(c, g, 1000), addr::kEmitterSwitch) == 1);
+    CHECK(g_lists.emitter_off.count({kPuppetEmitter + addr::kEmitterKeys, addr::kOurKey}) == 1);
+    const auto on = c.TakeNotes();
+    CHECK(std::find(on.begin(), on.end(),
+                    "the game's perception emitter off for player 2's puppet: they are paused") != on.end());
+    // Paused -> in a menu: still unseen, no second call.
+    c.Want(Teammates({2}, "in a menu"));
+    CHECK(RunFrame(c, g, 1100).empty());
+    // Playing again: on again.
+    c.Want(Teammates({}));
+    REQUIRE(Count(RunFrame(c, g, 1200), addr::kEmitterSwitch) == 1);
+    CHECK(g_lists.emitter_off.empty());
+    const auto off = c.TakeNotes();
+    CHECK(std::find(off.begin(), off.end(),
+                    "the game's perception emitter on again for player 2's puppet: they are back") != off.end());
 }

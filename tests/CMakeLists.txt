@@ -4,7 +4,8 @@ file(GLOB_RECURSE coop_test_sources CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp"
      "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 foreach(source IN LISTS coop_test_sources)
-  file(STRINGS "${source}" bad_names REGEX "(TEST_CASE|SUBCASE|SCENARIO|TEST_CASE_FIXTURE)[(]\"[^\"]*;[^\"]*\"")
+  # (TEST_CASE_FIXTURE's name is its second argument; tools/check_content.py refuses the same names at commit time.)
+  file(STRINGS "${source}" bad_names REGEX "((TEST_CASE|SUBCASE|SCENARIO|TEST_CASE_TEMPLATE)[(]|TEST_CASE_FIXTURE[(][^,]*,[ ]*)\"[^\"]*;[^\"]*\"")
   if(bad_names)
     message(FATAL_ERROR "A test name in ${source} has a ';' (ctest would run nothing for it): ${bad_names}")
   endif()
@@ -140,6 +141,9 @@ add_executable(coop_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_world.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_logic_probe.cpp
   lichii/lift_ride_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_lift_ride.cpp
+  lichii/room_objects_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_room_objects.cpp
+  lichii/switch_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_switch_share.cpp
+  lichii/caller_orders_test.cpp
   lichii/eye_switch_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_eye_switch.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ocarina.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ocarina_sound.cpp
