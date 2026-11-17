@@ -261,7 +261,8 @@ if [[ -f $ootrr_pin ]]; then
                     for seed_dir in "$GAME"/mods/randomizer-*/; do
                         [[ -f ${seed_dir}coop-seed.txt ]] || continue
                         seed_name=$(basename "$seed_dir")
-                        rm -rf "$seed_dir" "$GAME/mods/oot-remake-randomizer/$seed_name.ootrr"
+                        rm -rf "$seed_dir" "$GAME/mods/oot-remake-randomizer/$seed_name.ootrr" \
+                            "$GAME/mods/oot-remake-randomizer/$seed_name.spoiler.txt"
                         say "  randomizer: seed $seed_name removed for OOTRR $o_rel: the game makes it again at its next start (another world: start a new save)"
                     done
                 fi
@@ -401,7 +402,11 @@ for seed_dir in "$GAME"/mods/randomizer-*/; do
         done < <(rando_tables)
         if "$GAME/tools/ootrr/ootrr" build "$control/$seed_name.ootrr" "$GAME/romfs" "$stage" "$seed_name" --host hookshot \
             >"$control/last-build.txt" 2>&1 && [[ -f $stage/$seed_name/coop-seed.txt ]]; then
-            [[ -f ${seed_dir}coop-rando.txt ]] && cp "${seed_dir}coop-rando.txt" "$stage/$seed_name/"
+            # the game's own files OOTRR's build does not write: the preset, and the spoiler log and settings
+            # string the players share (the same seed file: the same seed)
+            for keep in coop-rando.txt spoiler.txt settings.txt; do
+                [[ -f ${seed_dir}$keep ]] && cp "${seed_dir}$keep" "$stage/$seed_name/"
+            done
             rm -rf "$seed_dir" && mv "$stage/$seed_name" "$GAME/mods/$seed_name" && ok=1
         fi
     fi

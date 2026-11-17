@@ -6,6 +6,8 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "coop_event_member.h"
 
@@ -42,28 +44,54 @@ constexpr std::uint64_t kEventLink = 0x106d7f9dd0;  // as in the probe run
 
 } // namespace
 
-TEST_CASE("event member: an actor whose own performer holds an event link is in the event (row 97)") {
+TEST_CASE("event member: in our Link's event only when its fixed-slot performer holds our Link's link (row 97)") {
     using namespace CoopEventMember;
+    constexpr std::uint64_t kLink = 0x50'0000, kLinkParts = 0x51'0000, kLinkPerformer = 0x52'0000;
+    constexpr std::uint64_t kOurEvent = 0x106d7f9dd0;  // a link as the probe read it
     Memory m;
+    // Our Link: its performer at the player's slot 0x90.
+    m.Put(kLink + kActorParts, kLinkParts);
+    m.Put(kLinkParts + kPerformerSlotAlt, kLinkPerformer);
+    m.Put(kLinkPerformer + kPerformerActor, kLink);
+    m.Put(kLinkPerformer + kPerformerLink, 0);
+    CHECK(OurLinkOf(m.Reader(), kLink) == 0);  // in no event
+    m.Put(kLinkPerformer + kPerformerLink, kOurEvent);
+    const std::uint64_t ours = OurLinkOf(m.Reader(), kLink);
+    CHECK(ours == kOurEvent);
+    // The actor (a scrub, say), its performer at 0x88. Nothing here reads the event manager's
+    // word: a Deku Scrub's talk, which leaves it 0, is seen all the same.
     m.Put(kActor + kActorParts, kParts);
     m.Put(kParts + kPerformerSlot, kPerformer);
     m.Put(kPerformer + kPerformerActor, kActor);
     m.Put(kPerformer + kPerformerLink, 0);
-    CHECK(PerformerOf(m.Reader(), kActor) == kPerformer);
-    REQUIRE(InEvent(m.Reader(), kActor));
-    CHECK_FALSE(*InEvent(m.Reader(), kActor));  // not bound: no event link
-    m.Put(kPerformer + kPerformerLink, kEventLink);  // the event's start binds it
-    CHECK(*InEvent(m.Reader(), kActor));
-    // The second slot (the player's) is looked at when the first is not its own.
-    m.Put(kParts + kPerformerSlot, 0x40'0000);
-    m.Put(0x40'0000 + kPerformerActor, 0x99);  // another actor's performer
-    CHECK_FALSE(InEvent(m.Reader(), kActor));   // neither is its own: not known
-    m.Put(kParts + kPerformerSlotAlt, kPerformer);
-    CHECK(PerformerOf(m.Reader(), kActor) == kPerformer);
-    CHECK(*InEvent(m.Reader(), kActor));
-    // Unreadable or empty: not known, never "in the event".
-    CHECK_FALSE(InEvent(m.Reader(), 0));
-    CHECK_FALSE(InEvent(m.Reader(), 0x77'0000));
+    REQUIRE(InOurEvent(m.Reader(), kActor, ours));
+    CHECK_FALSE(*InOurEvent(m.Reader(), kActor, ours));  // not bound
+    m.Put(kPerformer + kPerformerLink, kOurEvent);
+    CHECK(*InOurEvent(m.Reader(), kActor, ours));        // bound into our Link's event
+    CHECK_FALSE(*InOurEvent(m.Reader(), kActor, 0));     // our Link in no event: nothing is ours
+    // Another event's link (a butterfly's own) and heap neighbours of ours never count.
+    for (const std::uint64_t other : {std::uint64_t{0x106d900000}, kOurEvent + 8, kOurEvent - 8, kOurEvent + 0x880}) {
+        CAPTURE(other);
+        m.Put(kPerformer + kPerformerLink, other);
+        CHECK_FALSE(*InOurEvent(m.Reader(), kActor, ours));
+    }
+    // A stray component of its own (owner back-pointer at +0x10, our link at +0x18) in another
+    // slot is never taken as the performer: no performer at 0x88/0x90, not known.
+    m.Put(kParts + kPerformerSlot, 0);
+    m.Put(kParts + 0xa8, 0x53'0000);
+    m.Put(0x53'0000 + kPerformerActor, kActor);
+    m.Put(0x53'0000 + kPerformerLink, kOurEvent);
+    CHECK_FALSE(InOurEvent(m.Reader(), kActor, ours));
+    // ... only the diagnostic scan names that slot.
+    const auto slots = ScanLinked(m.Reader(), kActor, ours);
+    REQUIRE(slots.size() == 1);
+    CHECK(slots[0] == 0xa8);
+    CHECK(ScanLinked(m.Reader(), kActor, 0).empty());
+    // The fixed slot holding another actor's performer: not ours either.
+    m.Put(kParts + kPerformerSlot, kPerformer);
+    m.Put(kPerformer + kPerformerActor, 0x99);
+    CHECK_FALSE(InOurEvent(m.Reader(), kActor, ours));
+    CHECK_FALSE(InOurEvent(m.Reader(), 0, ours));
 }
 
 TEST_CASE("event member: our running event's kind and the names it points at, for the log") {

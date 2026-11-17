@@ -326,6 +326,47 @@ TEST_CASE("a game build other than the session's is refused") {
   }
 }
 
+TEST_CASE("crossplay: players on different clients of the same game build share one session") {
+  // docs/crossplay.md: what a game runs the module in (this kit's Longshot, Hookshot, another launcher's build) is
+  // never a reason to refuse it; only the protocol version, the game build and the join password are.
+  std::vector<std::string> lines;
+  SessionConfig config;
+  config.log = [&lines](const std::string& line) { lines.push_back(line); };
+  Harness h(config);
+  // (the Longshot kit's module, Navi's build of it, a Hookshot build, and the Fritchii emulator: stage 1)
+  const char* clients[] = {"coop hookshot 0.11.3", "coop hookshot b614270-dirty (Navi)", "coop hookshot longshot-mirror-v3.0.0-rc.5",
+                           "coop fritchii-v5 0.11.3"};
+  for (ConnectionId id = 1; id <= 4; ++id) {
+    h.connect(id);
+    Hello hello = hello_from(id == 1 ? "Link" : id == 2 ? "Zelda" : id == 3 ? "Saria" : "Darunia");
+    hello.build_id = clients[id - 1];
+    h.receive(id, hello, kChannelSession);
+    bool welcomed = false, refused = false;
+    for (const Sent& s : h.to(id)) {
+      welcomed = welcomed || std::holds_alternative<Welcome>(s.message);
+      refused = refused || std::holds_alternative<Refused>(s.message);
+    }
+    CHECK(welcomed);
+    CHECK_FALSE(refused);
+  }
+  CHECK(h.session.player_count() == 4);
+  // The server's log names each player's client, so a desync between two clients can be told apart
+  const auto joined_by = [&lines](const std::string& text) {
+    return std::any_of(lines.begin(), lines.end(), [&text](const std::string& l) { return l.find(text) != std::string::npos; });
+  };
+  CHECK(joined_by("joined: Link (client: coop hookshot 0.11.3)"));
+  CHECK(joined_by("joined: Zelda (client: coop hookshot b614270-dirty (Navi))"));
+  CHECK(joined_by("joined: Saria (client: coop hookshot longshot-mirror-v3.0.0-rc.5)"));
+  CHECK(joined_by("joined: Darunia (client: coop fritchii-v5 0.11.3)"));
+}
+
+TEST_CASE("crossplay: a client's name in the log is printable and short, whatever another game sends") {
+  CHECK(Session::client_label("") == "unnamed");
+  CHECK(Session::client_label("a\nb\x01" "c\x7f") == "abc");
+  CHECK(Session::client_label(std::string(200, 'x')).size() == 48);
+  CHECK(Session::client_label("hookshot 0.11.3") == "hookshot 0.11.3");
+}
+
 TEST_CASE("a nickname in use is refused as name taken, a blank one as bad name") {
   Harness h;
   h.join(1, "Link");

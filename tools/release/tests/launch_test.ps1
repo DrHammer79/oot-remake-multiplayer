@@ -778,13 +778,15 @@ try {
     Write-File (Join-Path $ng 'mods\randomizer-AB-keysanity\coop-seed.txt') "AB`n"
     Write-File (Join-Path $ng 'mods\randomizer-half\romfs\x.bin') 'x'
     Write-File (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.ootrr') '{}'
+    Write-File (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.spoiler.txt') 'chests'
     Write-File (Join-Path $ng 'mods\oot-remake-randomizer\settings.txt') 'on=1'
     Write-File (Join-Path $ng 'mods\hd-textures\romfs\y.bin') 'y'
     $gone = @(Remove-KitRandoSeeds $ng 'v0.6.0')
     Check ($gone.Count -eq 2 -and ($gone -join ' ') -match 'randomizer-AB removed for OOTRR v0\.6\.0' -and
            -not (Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-AB')) -and
            -not (Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-AB-keysanity')) -and
-           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.ootrr'))) 'new OOTRR: built seeds and their seed files removed'
+           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.ootrr')) -and
+           -not (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\randomizer-AB.spoiler.txt'))) 'new OOTRR: built seeds, their seed files and kept spoiler logs removed'
     Check ((Test-Path -LiteralPath (Join-Path $ng 'mods\randomizer-half\romfs\x.bin')) -and
            (Test-Path -LiteralPath (Join-Path $ng 'mods\oot-remake-randomizer\settings.txt')) -and
            (Test-Path -LiteralPath (Join-Path $ng 'mods\hd-textures\romfs\y.bin'))) 'new OOTRR: other mods, the control folder and an unbuilt folder stay'
@@ -803,6 +805,32 @@ try {
     $lines = @(Update-KitRandoSeeds $rg)
     Check (-not (Test-Path -LiteralPath (Join-Path $rg 'mods\randomizer-AB')) -and $lines.Count -eq 1 -and $lines[0] -match 'removed') 'rando seeds: no OOTRR to build it again -> the seed is removed, said once'
     Check (@(Get-KitStaleRandoSeeds $rg).Count -eq 0) 'rando seeds: nothing stale after'
+    # Built again with OOTRR (a fake: writes the seed as `ootrr build` does): the game's own files OOTRR does not
+    # write stay in the seed, so the players still find spoiler.txt and settings.txt (player report 0.11.3).
+    Write-File (Join-Path $rg "mods\randomizer-AB\$rst") 'seed'
+    Write-File (Join-Path $rg 'mods\randomizer-AB\coop-seed.txt') "AB`n"
+    Write-File (Join-Path $rg 'mods\randomizer-AB\coop-rando.txt') "default`n"
+    Write-File (Join-Path $rg 'mods\randomizer-AB\spoiler.txt') 'chests'
+    Write-File (Join-Path $rg 'mods\randomizer-AB\settings.txt') "OOTRR1-XZLA`n"
+    Write-File (Join-Path $rg 'mods\oot-remake-randomizer\randomizer-AB.ootrr') '{}'
+    Write-File (Join-Path $rg 'romfs\System\x.bin') 'x'
+    (Get-Item (Join-Path $rg "mods\randomizer-AB\$rst")).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-1)
+    $fake = Join-Path $hk 'fake-ootrr.ps1'
+    Write-File $fake @'
+# build <seed file> <romfs> <load dir> <name> --host hookshot
+$out = Join-Path $args[3] $args[4]
+New-Item -ItemType Directory -Force -Path (Join-Path $out 'romfs\System\Resource') | Out-Null
+Set-Content -LiteralPath (Join-Path $out 'romfs\System\Resource\T.rsizetable.zs') -Value 'new'
+Set-Content -LiteralPath (Join-Path $out 'coop-seed.txt') -Value 'AB'
+exit 0
+'@
+    $lines = @(Update-KitRandoSeeds $rg $fake)
+    $ab = Join-Path $rg 'mods\randomizer-AB'
+    Check ($lines.Count -eq 1 -and $lines[0] -match 'built again' -and
+           (Get-Content -Raw -LiteralPath (Join-Path $ab $rst)).Trim() -eq 'new') "rando seeds: built again with OOTRR [$($lines -join ' | ')]"
+    Check ((Get-Content -Raw -LiteralPath (Join-Path $ab 'spoiler.txt')) -eq 'chests' -and
+           (Get-Content -Raw -LiteralPath (Join-Path $ab 'settings.txt')).Trim() -eq 'OOTRR1-XZLA' -and
+           (Get-Content -Raw -LiteralPath (Join-Path $ab 'coop-rando.txt')).Trim() -eq 'default') 'rando seeds: built again, spoiler.txt, settings.txt and the preset kept'
     $env:OOT_COOP_OFFLINE = $offlineWas
     Check ((Test-KitPuppetPackStale (Join-Path $hk 'none\coop_puppet.json') (Join-Path $hk 'no-tool')) -and
         -not (Test-KitPuppetPackStale $pack (Join-Path $hk 'no-tool'))) 'pack stale: a missing pack yes, a current one no'

@@ -30,6 +30,15 @@ The randomizer is **off** until the host turns it on. Each game builds the seed 
 
 Guests can join one after another. Each one waits for its own build and restarts once. A seed is built once and kept, so a guest who built it before skips the wait.
 
+## Sharing the seed: spoiler log and settings string
+
+From 0.11.4, every built seed folder has two text files for sharing, on the host's PC and on each guest's (every player builds the same seed, so the files are the same):
+
+- `mods\randomizer-<seed>\settings.txt`: the seed's settings string (`OOTRR1-...`), the one OOTRR's page and the randomizer Discord use. With the seed word, anyone on the same OOTRR can make the same world. It is the string even when you picked a preset (**default**, **keysanity**).
+- `mods\randomizer-<seed>\spoiler.txt`: OOTRR's own spoiler log, in OOTRR's format: what is in each chest and check, and the spheres. **spoiler.txt spoils the item locations**, so open it only when you want to know, and share it after the run.
+
+`mods` is the game's mods folder in your kit (the same folder the size-table and last-build lines name). A copy of the spoiler log also stays in `mods\oot-remake-randomizer\randomizer-<seed>.spoiler.txt`, next to the seed file. Both files stay when the kit builds the seed again for the co-op puppets. A seed built with 0.11.3 or older gets them at its next start: the game makes the same seed again in the background (about a minute, no restart needed, your save stays).
+
 ## What the chat lines mean
 
 | Line | Meaning | What to do |

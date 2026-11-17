@@ -451,7 +451,19 @@ void Session::admit(ConnectionId id, Connection& c, const Hello& hello,
   for (const auto& [room, beaten] : boss_beaten_) {
     send(id, kChannelSession, beaten);
   }
-  log("player " + std::to_string(c.number) + " joined: " + c.nickname);
+  log("player " + std::to_string(c.number) + " joined: " + c.nickname + " (client: " + client_label(hello.build_id) + ")");
+}
+
+// Crossplay (docs/crossplay.md): the client a player runs, as its HELLO names it (build_id: this kit's module, another
+// launcher's build of the same module, a test tool). Only for the log, so a desync between two clients can be told
+// apart; nothing is decided by it. Printable ASCII only, at most 48 characters (it comes from another player's game).
+std::string Session::client_label(const std::string& build_id) {
+  std::string out;
+  for (const char ch : build_id) {
+    if (out.size() >= 48) break;
+    if (ch >= 0x20 && ch <= 0x7e) out.push_back(ch);
+  }
+  return out.empty() ? std::string("unnamed") : out;
 }
 
 void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t channel,

@@ -499,7 +499,7 @@ class HookshotGames:
         hk, errs = self.hk, {}
         parsed = {}
         for x, f in files.items():
-            with open(os.path.join(HERE, "scenarios", f), encoding="utf-8") as fh:
+            with open(os.path.join(HERE, "scenarios", f), encoding="utf-8-sig") as fh:
                 parsed[x] = hk.parse(fh.read())
 
         def one(x):
@@ -619,7 +619,7 @@ def main(argv=None):
     if a.cmd == "check":
         bad = 0
         for path in a.files:
-            with open(path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8-sig") as f:
                 text = f.read()
             try:
                 steps = parse_steps(text)
@@ -636,7 +636,7 @@ def main(argv=None):
     for kv in a.env:
         if "=" not in kv:
             ap.error("--env NAME=VALUE")
-    with open(a.steps, encoding="utf-8") as f:
+    with open(a.steps, encoding="utf-8-sig") as f:
         text = f.read()
     try:
         steps = parse_steps(text)

@@ -36,6 +36,19 @@ inline constexpr std::size_t kComponentHeaderSize = 4;
 // A string may also never be longer than 4 bytes per character, must be valid
 // UTF-8 and holds no control characters (U+0000-U+001F, U+007F-U+009F).
 inline constexpr std::size_t kMaxBuildIdChars = 64;
+
+// A client's name for HELLO's build_id (docs/crossplay.md) cut to kMaxBuildIdChars characters, so a long version text
+// (a long `git describe`, a launcher's own version) never keeps the HELLO from being encoded and the player from
+// joining. Cut at a character's start, never inside a UTF-8 sequence.
+inline std::string clamp_build_id(std::string_view id) {
+  std::size_t chars = 0;
+  for (std::size_t i = 0; i < id.size(); ++i) {
+    if ((static_cast<unsigned char>(id[i]) & 0xC0) != 0x80 && chars++ == kMaxBuildIdChars) {
+      return std::string(id.substr(0, i));
+    }
+  }
+  return std::string(id);
+}
 inline constexpr std::size_t kMaxGameBuildIdChars = 32;
 inline constexpr std::size_t kMaxGameVersionChars = 16;
 inline constexpr std::size_t kMaxNicknameChars = 16;

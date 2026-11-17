@@ -222,10 +222,11 @@ check 'build offline: the OOTRR tarball already here (its SHA-256 matched) is pu
 mkdir -p "$D/game/mods/randomizer-EF" "$D/game/mods/randomizer-half" "$D/game/mods/oot-remake-randomizer" "$D/game/mods/hd/romfs"
 echo EF >"$D/game/mods/randomizer-EF/coop-seed.txt"
 echo '{}' >"$D/game/mods/oot-remake-randomizer/randomizer-EF.ootrr"
+echo chests >"$D/game/mods/oot-remake-randomizer/randomizer-EF.spoiler.txt"
 printf 'release=v0.6.0\nurl=https://example.invalid/ootrr\nlinux=OOTRR-test-linux.tar.gz\nlinux_sha256=%s\n' "$o_sha" >"$kit/data/longshot/OOTRR.txt"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o6.txt" 2>&1; export CODE=$?
 check 'build: another OOTRR release removes the built seeds (the game makes them again), keeps the rest' \
-    bash -c '[ $CODE -eq 0 ] && grep -q "seed randomizer-EF removed for OOTRR v0.6.0" "$1" && [ ! -e "$2/game/mods/randomizer-EF" ] && [ ! -e "$2/game/mods/oot-remake-randomizer/randomizer-EF.ootrr" ] && [ -d "$2/game/mods/randomizer-half" ] && [ -d "$2/game/mods/hd/romfs" ]' _ "$tmp/build-o6.txt" "$D"
+    bash -c '[ $CODE -eq 0 ] && grep -q "seed randomizer-EF removed for OOTRR v0.6.0" "$1" && [ ! -e "$2/game/mods/randomizer-EF" ] && [ ! -e "$2/game/mods/oot-remake-randomizer/randomizer-EF.ootrr" ] && [ ! -e "$2/game/mods/oot-remake-randomizer/randomizer-EF.spoiler.txt" ] && [ -d "$2/game/mods/randomizer-half" ] && [ -d "$2/game/mods/hd/romfs" ]' _ "$tmp/build-o6.txt" "$D"
 mkdir -p "$D/game/mods/randomizer-GH" && echo GH >"$D/game/mods/randomizer-GH/coop-seed.txt"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-o7.txt" 2>&1
 check 'build: the same OOTRR release again keeps the seeds' bash -c '[ -f "$1/game/mods/randomizer-GH/coop-seed.txt" ] && ! grep -q "removed for OOTRR" "$2"' _ "$D" "$tmp/build-o7.txt"
@@ -251,15 +252,17 @@ EOF
 chmod +x "$G/tools/ootrr/ootrr"
 for s in AB CD; do echo old >"$G/mods/randomizer-$s/$R/T.rsizetable.zs"; echo "$s" >"$G/mods/randomizer-$s/coop-seed.txt"; done
 echo default >"$G/mods/randomizer-AB/coop-rando.txt"
+echo chests >"$G/mods/randomizer-AB/spoiler.txt" && echo OOTRR1-XZLA >"$G/mods/randomizer-AB/settings.txt"
 echo seed >"$G/mods/oot-remake-randomizer/randomizer-AB.ootrr"   # (none kept for CD: it cannot be built again)
 echo off >"$G/mods/_off/$R/T.rsizetable.zs"
 touch -d '1 hour ago' "$G/mods/randomizer-AB/$R/T.rsizetable.zs" "$G/mods/randomizer-CD/$R/T.rsizetable.zs"
 echo pack >"$G/mods/contents/0400486024DEC000/coop-puppet/$R/T.rsizetable.zs"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-r1.txt" 2>&1; export CODE=$?
-check 'build: a seed older than the puppet pack is built again beside the pack'"'"'s size table (no off folder'"'"'s), its preset kept' \
+check 'build: a seed older than the puppet pack is built again beside the pack'"'"'s size table (no off folder'"'"'s), its preset, spoiler.txt and settings.txt kept' \
     bash -c '[ $CODE -eq 0 ] && grep -q "seed randomizer-AB built again" "$1" && [ "$(cat "$2/mods/randomizer-AB/romfs/System/Resource/T.rsizetable.zs")" = new ] &&
         grep -qx pack "$2/mods/oot-remake-randomizer/staged.txt" && ! grep -q off "$2/mods/oot-remake-randomizer/staged.txt" &&
-        [ -f "$2/mods/randomizer-AB/coop-rando.txt" ] && [ ! -e "$2/mods/oot-remake-randomizer/_seed-build" ]' _ "$tmp/build-r1.txt" "$G"
+        [ -f "$2/mods/randomizer-AB/coop-rando.txt" ] &&
+        [ "$(cat "$2/mods/randomizer-AB/spoiler.txt")" = chests ] && [ "$(cat "$2/mods/randomizer-AB/settings.txt")" = OOTRR1-XZLA ] && [ ! -e "$2/mods/oot-remake-randomizer/_seed-build" ]' _ "$tmp/build-r1.txt" "$G"
 check 'build: a seed older than the pack that cannot be built again (no seed file kept) is removed, said once' \
     bash -c 'grep -q "seed randomizer-CD removed" "$1" && [ ! -e "$2/mods/randomizer-CD" ]' _ "$tmp/build-r1.txt" "$G"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-r2.txt" 2>&1

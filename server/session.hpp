@@ -783,7 +783,12 @@ class Session {
   void send_streamed(ConnectionId from, const Connection& sender, std::uint8_t channel,
                      const protocol::Message& m, std::uint64_t now_us);
   void log(const std::string& line) const;
+ public:
+  // The client a joiner runs, for the server's log (docs/crossplay.md): its HELLO's build_id, printable ASCII only, at
+  // most 48 characters; "unnamed" when none.
+  static std::string client_label(const std::string& build_id);
 
+ private:
   SessionConfig config_;
   std::string session_game_build_;  // set while players are in
   std::map<ConnectionId, Connection> connections_;

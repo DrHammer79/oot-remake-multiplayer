@@ -59,6 +59,7 @@ struct World {
     std::set<std::string> bad_presets;  // presets this OOTRR cannot make (#16: OOTRR 0.5.0's full_shuffle)
     std::set<std::string> stopped_presets;  // presets whose run is stopped (a timeout, the game closing)
     bool probe = false;                 // Hooks::probe_presets (off: the tests count every run)
+    bool spoiler = true;                // generate writes the --spoiler file (false: an OOTRR that writes none)
     std::vector<std::string> staged;  // the size tables the last build saw beside it (their text, sorted)
     World() {
         std::error_code ec;
@@ -91,6 +92,16 @@ struct World {
                 return 1;
             }
             if (at == fail_at) return 3;
+            // generate <preset or string> <seed> <out.ootrr> [--spoiler <file>]: the seed file (JSON, its "settings"
+            // the OOTRR1- string) and, when asked, the spoiler log, as OOTRR 0.6.1 writes them.
+            if (args.size() >= 4 && args[0] == "generate") {
+                const std::string s = args[1].rfind("OOTRR", 0) == 0 ? args[1] : "OOTRR1-P" + args[1];
+                Put(CoopMods::FromUtf8(args[3]), "{\n  \"format\": \"ootrr-seed\",\n  \"seed\": \"" + args[2] +
+                                                     "\",\n  \"settings\": \"" + s + "\",\n  \"placements\": {}\n}\n");
+                if (args.size() >= 6 && args[4] == "--spoiler" && spoiler) {
+                    Put(CoopMods::FromUtf8(args[5]), "Randomized chests\n  KF Kokiri Sword Chest: " + args[2] + "\n");
+                }
+            }
             // build <seed> <game> <load dir> <folder>: write the folder into the load dir as OOTRR does, and note
             // the size tables OOTRR finds there (mods/<name>/romfs only).
             if (!args.empty() && args[0] == "build" && args.size() >= 5) {
@@ -249,6 +260,8 @@ TEST_CASE("rando: what to do for the settings, the seeds built and the switches"
 
 TEST_CASE("rando: OOTRR's command lines") {
     CHECK(GenerateArgs("", "a b", "s.ootrr") == std::vector<std::string>{"generate", "default", "ab", "s.ootrr"});
+    CHECK(GenerateArgs("easy", "AB", "s.ootrr", "C:/m/s.spoiler.txt") ==
+          std::vector<std::string>{"generate", "easy", "AB", "s.ootrr", "--spoiler", "C:/m/s.spoiler.txt"});
     CHECK(BuildArgs("s.ootrr", "C:/game", "C:/mods", "randomizer-ab") ==
           std::vector<std::string>{"build", "s.ootrr", "C:/game", "C:/mods", "randomizer-ab", "--host", "hookshot"});
     // "C:\My Tools\ootrr.exe" build "C:\a b\\" "x\"y"   (a trailing backslash doubled before the quote)
@@ -1473,4 +1486,109 @@ TEST_CASE("rando: a control mod written before the Settings string gets it at th
     bool has = false;
     for (const CoopMods::SettingRow& s : loader.Settings(kFolder)) has = has || s.setting.key == "settings";
     CHECK(has);
+}
+
+TEST_CASE("rando: the settings string of a seed file") {
+    // As OOTRR 0.6.1 writes it (generate default abc).
+    CHECK(SeedSettings("{\n  \"format\": \"ootrr-seed\",\n  \"version\": 1,\n  \"generator\": \"ootrr-core 0.6.1\",\n"
+                       "  \"seed\": \"abc\",\n  \"settings\": \"OOTRR1-EYAQCTABAFQACAMOJY\",\n  \"placements\": {}\n}\n") ==
+          "OOTRR1-EYAQCTABAFQACAMOJY");
+    CHECK(SeedSettings("{\"settings\" :\r\n\t\"OOTRR1-XZLA\"}") == "OOTRR1-XZLA");
+    CHECK(SeedSettings("{\"seed\": \"abc\"}").empty());
+    CHECK(SeedSettings("{\"settings\": \"not a string\"}").empty());
+    CHECK(SeedSettings("{\"settings\": \"OOTRR1-AB").empty());
+    CHECK(SeedSettings("").empty());
+}
+
+TEST_CASE("rando: a seed built before spoiler.txt and settings.txt is made again once for them") {
+    const Want want{true, "S1", "default"};
+    const std::vector<CoopMods::Row> rows{RowNamed("randomizer-S1", true)};
+    Built b{"randomizer-S1", "S1", "default", "coop-tables 1\n"};
+    CHECK(Decide(want, {b}, rows, std::string("coop-tables 1\n")).what == Plan::Do::nothing);
+    b.shared_files = false;
+    const Plan p = Decide(want, {b}, rows, std::string("coop-tables 1\n"));
+    CHECK(p.what == Plan::Do::refresh);
+    CHECK_FALSE(p.for_tables);
+    CHECK(p.folder == "randomizer-S1");
+    // other size tables too: for those (the files come with it)
+    CHECK(Decide(want, {b}, rows, std::string("coop-tables 1\nx 1 0\n")).for_tables);
+}
+
+TEST_CASE("rando: every built seed carries OOTRR's spoiler.txt and its settings.txt, kept when made again") {
+    // (player report 0.11.3: no spoiler log and no OOTRR1- string to share; host and guests build the same seed)
+    World w;
+    const std::string folder = "randomizer-SP1";
+    {
+        CoopMods::Loader loader(w.mods, {nullptr, 1, nullptr});
+        loader.Start();
+        Rando rando(loader, w.Hooks());
+        rando.Start();
+        w.Settings(loader);
+        REQUIRE(loader.Set(kFolder, "seed", "SP1"));
+        REQUIRE(loader.Set(kFolder, "on", "1"));
+        rando.Wait();
+        REQUIRE(w.runs.size() == 2);
+        CHECK(w.runs[0].find(L" --spoiler ") != std::wstring::npos);
+        CHECK(Get(w.mods / folder / kSpoilerFile) == "Randomized chests\n  KF Kokiri Sword Chest: SP1\n");
+        CHECK(Get(w.mods / folder / kSettingsFile) == "OOTRR1-Pdefault\n");
+        CHECK(Get(w.mods / kFolder / (folder + ".spoiler.txt")) == Get(w.mods / folder / kSpoilerFile));
+    }
+    // A seed from before (0.11.3): made again once, in use, with no restart asked and no puppet line.
+    fs::remove(w.mods / folder / kSpoilerFile);
+    fs::remove(w.mods / folder / kSettingsFile);
+    fs::remove(w.mods / kFolder / (folder + ".spoiler.txt"));
+    PlaysSeed(w, folder, 2);
+    {
+        CoopMods::Loader loader(w.mods, {nullptr, 2, nullptr});
+        loader.Start();
+        Rando rando(loader, w.Hooks());
+        rando.Start();
+        rando.Wait();
+        CHECK(w.runs.size() == 4);
+        CHECK(rando.TakeLines().empty());
+        CHECK_FALSE(rando.HoldPack());
+        CHECK(Get(w.mods / folder / kSpoilerFile) == "Randomized chests\n  KF Kokiri Sword Chest: SP1\n");
+        CHECK(Get(w.mods / folder / kSettingsFile) == "OOTRR1-Pdefault\n");
+        CHECK(fs::is_regular_file(w.mods / folder / kSeedFile));
+    }
+    // And not again.
+    PlaysSeed(w, folder, 3);
+    {
+        CoopMods::Loader loader(w.mods, {nullptr, 3, nullptr});
+        loader.Start();
+        Rando rando(loader, w.Hooks());
+        rando.Start();
+        rando.Wait();
+        CHECK(w.runs.size() == 4);
+    }
+}
+
+TEST_CASE("rando: a settings string seed's settings.txt is that string, and an OOTRR with no spoiler log does not loop") {
+    World w;
+    w.spoiler = false;
+    const std::string s = "OOTRR1-EYAQCTABAHIHE";
+    const std::string folder = FolderFor("SP2", s);
+    {
+        CoopMods::Loader loader(w.mods, {nullptr, 1, nullptr});
+        loader.Start();
+        Rando rando(loader, w.Hooks());
+        rando.Start();
+        w.Settings(loader);
+        REQUIRE(loader.Set(kFolder, "settings", s));
+        REQUIRE(loader.Set(kFolder, "seed", "SP2"));
+        REQUIRE(loader.Set(kFolder, "on", "1"));
+        rando.Wait();
+        REQUIRE(w.runs.size() == 2);
+        CHECK(Get(w.mods / folder / kSettingsFile) == s + "\n");
+        CHECK_FALSE(fs::exists(w.mods / folder / kSpoilerFile));
+    }
+    PlaysSeed(w, folder, 2);
+    {
+        CoopMods::Loader loader(w.mods, {nullptr, 2, nullptr});
+        loader.Start();
+        Rando rando(loader, w.Hooks());
+        rando.Start();
+        rando.Wait();
+        CHECK(w.runs.size() == 2);  // settings.txt is there: nothing made again
+    }
 }

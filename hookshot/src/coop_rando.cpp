@@ -248,8 +248,8 @@ std::vector<Built> Scan(const fs::path& mods_root) {
         if (!it->is_directory(ec) || !IsSeedFolder(name)) continue;
         const fs::path seed_file = it->path() / kSeedFile;
         if (!fs::is_regular_file(seed_file, ec)) continue;
-        out.push_back(
-            {name, ReadLine(seed_file), ReadLine(it->path() / kPresetFile), ReadAll(it->path() / kTablesFile)});
+        out.push_back({name, ReadLine(seed_file), ReadLine(it->path() / kPresetFile), ReadAll(it->path() / kTablesFile),
+                       fs::is_regular_file(it->path() / kSettingsFile, ec)});
     }
     std::sort(out.begin(), out.end(), [](const Built& a, const Built& b) { return CoopMods::NameLess(a.name, b.name); });
     return out;
@@ -294,6 +294,15 @@ Plan Decide(const Want& want, const std::vector<Built>& built, const std::vector
                    ") is made again for the other mods' size tables (the co-op puppets')";
         return plan;
     }
+    if (!have->shared_files) {
+        // Built before seeds carried spoiler.txt and settings.txt: made again once (the same seed: OOTRR is
+        // deterministic), which writes both. settings.txt is written by every build, so this does not repeat.
+        plan.what = Plan::Do::refresh;
+        plan.for_tables = false;
+        plan.why =
+            "seed " + SeedWord(want.seed) + " (" + SettingsName(preset) + ") gets its spoiler.txt and settings.txt";
+        return plan;
+    }
     switch_off_all_but(plan.folder);
     // On, and the first row: its size table (which keeps the larger entry of every other mod) must win.
     const CoopMods::Row* row = RowOf(rows, plan.folder);
@@ -305,8 +314,28 @@ Plan Decide(const Want& want, const std::vector<Built>& built, const std::vector
     return plan;
 }
 
-std::vector<std::string> GenerateArgs(const std::string& preset, const std::string& seed, const fs::path& seed_file) {
-    return {"generate", preset.empty() ? "default" : preset, SeedWord(seed), CoopMods::ToUtf8(seed_file)};
+std::vector<std::string> GenerateArgs(const std::string& preset, const std::string& seed, const fs::path& seed_file,
+                                      const fs::path& spoiler) {
+    std::vector<std::string> args = {"generate", preset.empty() ? "default" : preset, SeedWord(seed),
+                                     CoopMods::ToUtf8(seed_file)};
+    if (!spoiler.empty()) {
+        args.push_back("--spoiler");
+        args.push_back(CoopMods::ToUtf8(spoiler));
+    }
+    return args;
+}
+
+std::string SeedSettings(std::string_view text) {
+    // {"format": "ootrr-seed", ..., "settings": "OOTRR1-...", ...}: the key at the top level, before "placements".
+    const auto key = text.find("\"settings\"");
+    if (key == std::string_view::npos) return {};
+    auto at = text.find_first_not_of(" \t\r\n", key + 10);
+    if (at == std::string_view::npos || text[at] != ':') return {};
+    at = text.find_first_not_of(" \t\r\n", at + 1);
+    if (at == std::string_view::npos || text[at] != '"') return {};
+    const auto end = text.find('"', at + 1);
+    if (end == std::string_view::npos) return {};
+    return SettingsString(text.substr(at + 1, end - at - 1));
 }
 
 std::vector<std::string> BuildArgs(const fs::path& seed_file, const fs::path& game_folder, const fs::path& mods_root,
@@ -1244,7 +1273,11 @@ void Rando::Build(const Plan& plan, const Want& want) {
         {
             const std::lock_guard lock(mutex_);
             last_failed_ = plan.folder;
-            if (refresh) {
+            if (refresh && !plan.for_tables) {
+                // The seed plays as it is: only its spoiler.txt / settings.txt are missing.
+                lines_.push_back(ChatSafe("Randomizer: the seed's spoiler.txt and settings.txt could not be made "
+                                          "(the seed still plays): " + line));
+            } else if (refresh) {
                 // The seed still plays, with its old size table: only the co-op puppets may not show.
                 lines_.push_back(ChatSafe("Randomizer: the seed could not be made again for the co-op puppets (the "
                                           "other players may be invisible): " + line));
@@ -1348,7 +1381,9 @@ void Rando::Build(const Plan& plan, const Want& want) {
     fs::remove(log, ec);
     Say(plan.why + " (about a minute)");
     const fs::path seed_file = control / (plan.folder + ".ootrr");
-    const int made = hooks_.run(*ootrr, GenerateArgs(want.preset, want.seed, seed_file), log);
+    const fs::path spoiler = control / (plan.folder + ".spoiler.txt");  // kept beside the seed file (kSpoilerFile)
+    fs::remove(spoiler, ec);  // (one an older run left is not this generate's)
+    const int made = hooks_.run(*ootrr, GenerateArgs(want.preset, want.seed, seed_file, spoiler), log);
     if (made != 0) {
         const std::string head = "OOTRR could not make the seed (" + exit_text(made) + ")";
         return ootrr_failed(head, head, read_log());
@@ -1399,6 +1434,22 @@ void Rando::Build(const Plan& plan, const Want& want) {
     }
     WriteText(target / kPresetFile, (want.preset.empty() ? std::string("default") : want.preset) + "\n");
     WriteText(target / kTablesFile, stamp);
+    // For the players to share (player report: no spoiler log, no settings string to post): the seed's OOTRR1-
+    // string (the seed file's; the preset's name when it has none) and OOTRR's spoiler log. settings.txt is written
+    // last and always, so Decide does not make this seed again for it.
+    std::error_code sec;
+    if (fs::is_regular_file(spoiler, sec)) {
+        fs::copy_file(spoiler, target / kSpoilerFile, fs::copy_options::overwrite_existing, sec);
+        if (sec && hooks_.log) {
+            hooks_.log("randomizer: " + std::string(kSpoilerFile) + " not copied into " + plan.folder);
+        }
+    } else if (hooks_.log) {
+        hooks_.log("randomizer: OOTRR wrote no spoiler log for " + plan.folder);
+    }
+    const std::string settings = SeedSettings(ReadAll(seed_file));
+    WriteText(target / kSettingsFile, (settings.empty() ? (want.preset.empty() ? std::string("default") : want.preset)
+                                                        : settings) +
+                                          "\n");
     {
         const std::lock_guard lock(mutex_);
         last_failed_.clear();

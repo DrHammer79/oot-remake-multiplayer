@@ -52,6 +52,25 @@ class ParseTest(unittest.TestCase):
             with self.assertRaises(g.Fail, msg=text):
                 g.parse_groups(text)
 
+    def test_a_bom_before_the_first_group_is_dropped(self):
+        # integrate-0114-testkit-2: PS 5.1 wrote smoke.txt with a BOM; '[rc5]' was "a scenario before the first [group]".
+        self.assertEqual(g.parse_groups("﻿" + GROUPS), g.parse_groups(GROUPS))
+        self.assertEqual([n for n, _ in g.parse_groups("﻿[g1]\nwalk\n")], ["g1"])
+
+    def test_cli_reads_a_file_with_a_bom(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "smoke.txt")
+            with open(path, "wb") as f:   # as PowerShell 5.1 writes it: BOM + CRLF
+                f.write(b"\xef\xbb\xbf" + GROUPS.replace("\n", "\r\n").encode("utf-8"))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(g.main(["plan", path, "--kit-root", d]), 0)
+            self.assertIn("[g1] pair", out.getvalue())
+            self.assertIn("[g2] pair", out.getvalue())
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 class PlanTest(unittest.TestCase):
     def test_each_group_has_its_own_pair_ports_pipe_and_folder(self):

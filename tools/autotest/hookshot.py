@@ -919,11 +919,11 @@ def run(a):
     parsed = {}
     for x in tags:
         if scripts[x]:
-            with open(scripts[x], encoding="utf-8") as f:
+            with open(scripts[x], encoding="utf-8-sig") as f:
                 parsed[x] = parse(f.read())
     load = None
     if a.load:
-        with open(a.load, encoding="utf-8") as f:
+        with open(a.load, encoding="utf-8-sig") as f:
             load = parse(f.read())   # (checked; the load itself is "A until play", see to_play)
     procs, bridges, server, commands = {}, {}, None, {}
     failed = None
@@ -1147,7 +1147,7 @@ def main(argv=None):
     if a.what == "check":
         bad = 0
         for path in a.scripts:
-            with open(path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8-sig") as f:
                 try:
                     steps = parse(f.read())
                 except ScriptError as e:
@@ -1159,7 +1159,7 @@ def main(argv=None):
                                        else ""))
         return 1 if bad else 0
     if a.what == "play":
-        with open(a.script, encoding="utf-8") as f:
+        with open(a.script, encoding="utf-8-sig") as f:
             steps = parse(f.read())
         b = Bridge.connect(a.sock)
 

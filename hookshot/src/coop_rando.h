@@ -43,6 +43,11 @@ inline constexpr const char* kSeedFile = "coop-seed.txt";          // OOTRR writ
 inline constexpr const char* kPresetFile = "coop-rando.txt";       // we write the preset it was built with
 inline constexpr const char* kLogFile = "last-build.txt";          // in kFolder: OOTRR's output
 inline constexpr const char* kTablesFile = "coop-tables.txt";      // in a seed: the size tables it was built beside
+// In a seed, for the players to share (player report: no spoiler log to post): OOTRR's own spoiler log (`generate
+// --spoiler`, kept as <seed folder>.spoiler.txt beside the seed file in kFolder) and the seed's OOTRR1- settings string
+// (the seed file's "settings"). Every build writes both, host and guest alike (each builds the same seed).
+inline constexpr const char* kSpoilerFile = "spoiler.txt";
+inline constexpr const char* kSettingsFile = "settings.txt";
 inline constexpr const char* kPresets[] = {"default", "easy", "open_world", "keysanity", "full_shuffle"};
 inline constexpr const char* kPresetsFile = "presets-ok.txt";   // in kFolder: which presets the installed OOTRR builds
 
@@ -74,6 +79,7 @@ struct Built {
     std::string seed;    // coop-seed.txt
     std::string preset;  // coop-rando.txt; empty when not ours
     std::string tables;  // coop-tables.txt (TablesStamp); empty when built before it
+    bool shared_files = true;  // settings.txt is there (kSettingsFile; false: built before it)
 };
 std::vector<Built> Scan(const std::filesystem::path& mods_root);
 
@@ -91,6 +97,7 @@ struct Plan {
     std::vector<std::string> on;        // folders the list turns on (first wins: the seed's)
     std::vector<std::string> off;       // folders the list turns off (every other seed; all when the randomizer is off)
     std::string why;                    // one plain line for the log and the tab
+    bool for_tables = true;             // refresh: for the size tables (false: only for spoiler.txt / settings.txt)
 };
 // What the game must do for `want`, given the seeds built and which mods are on now (Loader rows). `tables`: the
 // TablesStamp of the other mods' size tables now; a built seed with another one is refreshed (none: not compared).
@@ -98,8 +105,12 @@ Plan Decide(const Want& want, const std::vector<Built>& built, const std::vector
             const std::optional<std::string>& tables = std::nullopt);
 
 // OOTRR's command lines (arguments after the program).
+// `spoiler`: where OOTRR writes its spoiler log (--spoiler, in every OOTRR release); empty: none.
 std::vector<std::string> GenerateArgs(const std::string& preset, const std::string& seed,
-                                      const std::filesystem::path& seed_file);
+                                      const std::filesystem::path& seed_file,
+                                      const std::filesystem::path& spoiler = {});
+// The settings string a seed file (.ootrr, JSON) was made with: its "settings" (IsSettingsString), empty when none.
+std::string SeedSettings(std::string_view seed_file_text);
 std::vector<std::string> BuildArgs(const std::filesystem::path& seed_file, const std::filesystem::path& game_folder,
                                    const std::filesystem::path& mods_root, const std::string& folder);
 // The game uses one resource size table, the one of the mod that wins (the seed), so the seed's must hold every

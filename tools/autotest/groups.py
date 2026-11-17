@@ -58,7 +58,9 @@ class Fail(Exception):
 
 def parse_groups(text):
     """[(group name, [run dict])] in file order. A run: scenario, switches, expects [(side or '', regex)], timeout,
-    label."""
+    label. A leading UTF-8 BOM is dropped (Windows PowerShell 5.1's Out-File -Encoding utf8 writes one: the first
+    [group] was then not seen)."""
+    text = text.lstrip("﻿")
     groups, cur, seen = [], None, set()
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -443,7 +445,7 @@ def main(argv=None):
         stamp = "groups-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         run_root = a.run_root or (os.path.join(kit, "ls", "shots-lane%d" % a.lane, stamp) if a.lane
                                   else os.path.join(kit, "shots-hookshot", stamp))
-        with open(a.groups, encoding="utf-8") as f:
+        with open(a.groups, encoding="utf-8-sig") as f:   # a file with or without a BOM
             groups = parse_groups(f.read())
         kits = [os.path.abspath(k.strip()) for k in a.kit.split(",") if k.strip()] if a.kit else None
         planned = plan(groups, kit, run_root, server, a.lane or 0, kits, a.lag, a.jitter)

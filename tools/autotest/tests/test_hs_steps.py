@@ -297,6 +297,23 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("14 steps (password start try)", out.getvalue())
 
+    def test_check_reads_a_file_with_a_bom(self):
+        # A steps file written by Windows PowerShell 5.1 (Out-File -Encoding utf8: BOM + CRLF) reads the same.
+        with open(os.path.join(SCENARIOS, "join-password.steps.txt"), encoding="utf-8") as f:
+            text = f.read()
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "bom.steps.txt")
+            with open(path, "wb") as f:
+                f.write(b"\xef\xbb\xbf" + text.replace("\n", "\r\n").encode("utf-8"))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = hs.main(["check", path])
+            self.assertEqual(code, 0)
+            self.assertIn("14 steps (password start try)", out.getvalue())
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 class HookshotGamesTest(unittest.TestCase):
     """The real backend's files: a stand-in game (a copy of cmd.exe (or this Python), which ends at once on an empty stdin), a fake

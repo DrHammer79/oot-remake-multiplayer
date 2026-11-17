@@ -59,21 +59,6 @@ inline std::uint64_t PerformerOf(const ReadWord& read, std::uint64_t actor) {
     return 0;
 }
 
-// Whether the actor is bound into a running event (its performer holds an
-// event link). nullopt: no performer of its own was found (an actor class
-// whose performer sits elsewhere): the other rules decide for it.
-inline std::optional<bool> InEvent(const ReadWord& read, std::uint64_t actor) {
-    const std::uint64_t performer = PerformerOf(read, actor);
-    if (performer == 0) {
-        return std::nullopt;
-    }
-    const auto link = read(performer + kPerformerLink);
-    if (!link) {
-        return std::nullopt;
-    }
-    return *link != 0;
-}
-
 // For the log (row 97: the stuck event had no name in the log). Our running
 // event as the event manager has it (docs player-state-map, "The event
 // object"): [main + 0x4e94840] +0x68 the session S; S +0xeb8 its events,
@@ -158,6 +143,68 @@ inline Running ReadRunning(const ReadWord& read, std::uint64_t main) {
         std::string name = NameAt(read, *p);
         if (!name.empty() && std::find(out.names.begin(), out.names.end(), name) == out.names.end()) {
             out.names.push_back(std::move(name));
+        }
+    }
+    return out;
+}
+
+// Row 97 reviews (A #36): "bound" means bound into OUR Link's event, read the game's way.
+// - The performer sits at fixed slots of the component table: the generic actor request
+//   (0xbd1670) reads [[actor + 0x270] + 0x88], the player's (0xc70560) [[actor + 0x270] + 0x90]
+//   (read in main, build e0f3ccfaf50065ae). PerformerOf reads exactly those two, with +0x10 = actor.
+// - Its +0x18 is set at an event's start and cleared at its end (the probe runs). Two actors are
+//   in the same event when those links are equal: an actor is in OUR event when its link is not 0
+//   and equals our own Link's (OurLinkOf). No event-shape guess, and no reliance on the event
+//   manager's running word, which stays 0 in a Deku Scrub's talk.
+// In the scrub runs an Animal_Butterfly read as bound (an event of its own: another link, so not
+// ours now) and our Deku Scrubs never did. ScanLinked is a diagnostic for the latter only (never
+// used for a claim or a hold): which of the first kMaxSlots component slots hold a component of
+// the actor's own whose +0x18 equals our Link's link.
+inline constexpr std::uint64_t kMaxSlots = 0x40;
+
+// The link at the actor's own performer; nullopt when it has no performer at the fixed slots.
+inline std::optional<std::uint64_t> LinkOf(const ReadWord& read, std::uint64_t actor) {
+    const std::uint64_t performer = PerformerOf(read, actor);
+    if (performer == 0) {
+        return std::nullopt;
+    }
+    return read(performer + kPerformerLink);
+}
+
+// Our own Link's event link: 0 when it is in no event (or none could be read).
+inline std::uint64_t OurLinkOf(const ReadWord& read, std::uint64_t our_link_actor) {
+    return our_link_actor != 0 ? LinkOf(read, our_link_actor).value_or(0) : 0;
+}
+
+// Whether the actor is in our Link's event. nullopt: it has no performer at the fixed slots.
+inline std::optional<bool> InOurEvent(const ReadWord& read, std::uint64_t actor, std::uint64_t our_event_link) {
+    const auto link = LinkOf(read, actor);
+    if (!link) {
+        return std::nullopt;
+    }
+    return our_event_link != 0 && *link == our_event_link;
+}
+
+// Diagnostic only: the component slots (byte offsets) whose component is the actor's own and
+// whose +0x18 equals our Link's event link.
+inline std::vector<std::uint64_t> ScanLinked(const ReadWord& read, std::uint64_t actor, std::uint64_t our_event_link) {
+    std::vector<std::uint64_t> out;
+    if (actor == 0 || our_event_link == 0) {
+        return out;
+    }
+    const auto parts = read(actor + kActorParts);
+    if (!parts || *parts == 0) {
+        return out;
+    }
+    for (std::uint64_t slot = 0; slot < kMaxSlots * 8; slot += 8) {
+        const auto c = read(*parts + slot);
+        if (!c || *c == 0) {
+            continue;
+        }
+        const auto owner = read(*c + kPerformerActor);
+        const auto link = read(*c + kPerformerLink);
+        if (owner && *owner == actor && link && *link == our_event_link) {
+            out.push_back(slot);
         }
     }
     return out;
