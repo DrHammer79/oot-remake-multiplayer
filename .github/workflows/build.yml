@@ -201,6 +201,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/paste_test.ps1
       - name: Kit log masking tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/log_mask_test.ps1
+      - name: Kit problem report tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/problem_report_test.ps1
       - name: CI runner hook tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci-runner/job_started_test.ps1
       - name: CI runner script checks
