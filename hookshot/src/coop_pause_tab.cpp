@@ -73,7 +73,7 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         return d;
     case Kind::kPages: {
         if (f.screen != page_screen_) {
-            page_screen_ = f.screen, page_set_ = -1, texts_set_ = false;
+            page_screen_ = f.screen, page_set_ = -1, cursor_set_ = -1, texts_set_ = false;
         }
         pages_ = f, pages_ms_ = now_ms;
         if (shown_ && !CanShow(now_ms)) {
@@ -82,6 +82,10 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         const int want = shown_ ? 1 : 0;
         if (page_set_ != want) {
             d.set_page = true, d.page_shown = shown_, page_set_ = want;
+            cursor_set_ = -1;   // (shown again: its rows' frames set again)
+        }
+        if (shown_ && cursor_set_ != cursor_) {
+            d.set_cursor = true, d.cursor = cursor_, cursor_set_ = cursor_;
         }
         if (!texts_set_ && f.state == 2) {
             d.set_texts = true, texts_set_ = true;

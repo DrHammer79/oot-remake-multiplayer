@@ -232,10 +232,30 @@ class BuildTest(unittest.TestCase):
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             written = {}
             pm.build(src, out, _Plain(), table, lambda o, r, data: written.__setitem__(r, data),
-                     lambda d, raw, data: data, log=lambda s: None)
+                     lambda d, raw, data: data, log=lambda s: None, earlier=[rel])
             over = msbt.read(sarc.read(written[rel])[pm.OVERLAY_MSG])
             self.assertEqual(over.text("TitleRow"), ["Host"])
             self.assertEqual(over.text("Pa_Category_04-T_Text_00"), ["Multiplayer"])
+
+    def test_the_last_runs_files_are_not_read(self):
+        """The mod's folder holds the last run's files: this step starts from the game's again (a second run made the
+        tab twice: "the layout has Pa_Category_04 already")."""
+        with tempfile.TemporaryDirectory() as root:
+            src, out = os.path.join(root, "romfs"), os.path.join(root, "out")
+            self.romfs(src)
+            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000})
+            for lang in LANGS:
+                table.set("Mals/%s.Product.110.sarc" % lang, 2000)
+
+            def write(o, r, data):
+                path = os.path.join(o, *r.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(data)
+
+            for _ in range(2):
+                made = pm.build(src, out, _Plain(), table, write, lambda d, raw, data: data, log=lambda s: None)
+                self.assertIn(pm.COMMON_ARCHIVE, made)
 
     def test_nothing_written_when_one_language_fails(self):
         made, written, sizes, before, err = self.run_build(broken="JPja")

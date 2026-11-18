@@ -95,6 +95,8 @@ TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L giv
     d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 16);
     CHECK(d.set_page);
     CHECK(d.page_shown);
+    CHECK(d.set_cursor);   // (shown: the first row framed)
+    CHECK(d.cursor == 0);
     d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 16);
     CHECK(d.set_tabs);
     CHECK(d.tab_lit);
@@ -143,6 +145,11 @@ TEST_CASE("pause tab: nothing reaches System under the page but B, + and -, the 
     CHECK(p.TakeChosen() == kRows - 2);
     p.OnPad(0, now + 33);
     CHECK(p.OnPad(kPadB, now + 34) == kPadB);
+    // The rows' frames follow the cursor at the pages' next update.
+    auto d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 33);
+    CHECK(d.set_cursor);
+    CHECK(d.cursor == kRows - 2);
+    CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 34).set_cursor);
     CHECK(p.OnPad(kPadPlus | kPadA, now + 35) == kPadPlus);
     CHECK(p.OnPad(kPadMinus, now + 36) == kPadMinus);
     CHECK(p.Shown());   // (the game acts on them; the screens' updates then give System back)

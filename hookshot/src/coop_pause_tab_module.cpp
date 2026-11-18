@@ -26,6 +26,7 @@ Page g_page;
 std::atomic<bool> g_shown{false};   // (the mouse asks often, from any thread)
 // Panes found, per screen object (0: not looked up yet or not there).
 std::uint64_t g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
+std::uint64_t g_row_cursor[kRows] = {}, g_row_frame[kRows] = {};   // per row of ours: the copied cursor, the frame
 std::uint64_t g_strip_screen = 0, g_tab_pane = 0;
 bool g_pages_bad = false, g_strip_bad = false;   // a pane that is not a part: the page step stays off (logged once)
 
@@ -57,13 +58,6 @@ bool Call(void* ctx, std::uint64_t offset, std::uint64_t a0, std::uint64_t a1 = 
     return ok;
 }
 
-// (layout, "name") -> the pane, as coop_map_page.cpp finds the HUD's (one scratch block: it is the same place each call)
-std::uint64_t FindPane(void* ctx, std::uint64_t layout, const char* name) {
-    const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
-    std::uint64_t pane = 0;
-    return at != 0 && Call(ctx, kFindPane, layout, at, 0, 0, 0, &pane) ? pane : 0;
-}
-
 // (layout, "name") -> the pane itself, a part's own pane too. kFindPane (main+0x76e2b0) hands a part's inner root
 // instead (its layout's pane 0, the one the game hides a tab through); the pause tab's copies are stored hidden on the
 // part's own pane, so that is the one shown. The same two calls kFindPane makes first (read from main, 2026-11-18):
@@ -72,6 +66,29 @@ std::uint64_t FindOwnPane(void* ctx, std::uint64_t layout, const char* name) {
     std::uint64_t table = 0, pane = 0;
     if (!Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table) || table == 0) return 0;
     const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
+    return at != 0 && Call(ctx, kPaneByName, table, at, 0, 0, 0, &pane) ? pane : 0;
+}
+
+// A part's own layout, from the parts list of the layout holding it (the list kFindPane walks when the name table has
+// no such pane, read from main 2026-11-18: sentinel table + 0x128, first [table + 0x130], next [node + 8], each node a
+// layout whose name is at [node + 0x148]). `table` is a layout as kPaneTable gives it: its panes by name are kPaneByName.
+std::uint64_t PartLayout(std::uint64_t table, const char* name) {
+    if (table == 0) return 0;
+    const std::uint64_t end = table + 0x128;
+    std::uint64_t node = Read<std::uint64_t>(table + 0x130);
+    for (int guard = 0; node != 0 && node != end && guard < 256; ++guard) {
+        char got[64] = {};
+        const std::uint64_t at = Read<std::uint64_t>(node + 0x148);
+        if (at != 0 && CoopRuntime::Read(at, got, sizeof got - 1) && std::strcmp(got, name) == 0) return node;
+        node = Read<std::uint64_t>(node + 8);
+    }
+    return 0;
+}
+
+std::uint64_t PaneIn(void* ctx, std::uint64_t table, const char* name) {
+    if (table == 0) return 0;
+    const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
+    std::uint64_t pane = 0;
     return at != 0 && Call(ctx, kPaneByName, table, at, 0, 0, 0, &pane) ? pane : 0;
 }
 
@@ -128,10 +145,31 @@ void ApplyPages(void* ctx, std::uint64_t screen, const Page::Do& d) {
             std::snprintf(label, sizeof label, "Pa_Coop_00-Pa_Button_%02d-T_Btn_00", i);
             set += SetText(ctx, layout, path, "LayoutMsg/PlusMenu_00", label) ? 1 : 0;
         }
-        const std::uint64_t controller = FindPane(ctx, layout, "Pa_Coop_00/Pa_SystemController_00");
-        if (IsPart(controller)) SetVisible(ctx, controller, false);   // (the System page's controller picture: not ours)
-        LOG_INFO(Core, "coop: pause tab: the page's rows: {} of {} texts set; its controller picture {}", set, kRows,
-                 IsPart(controller) ? "hidden" : "not found by path (left as the layout has it)");
+        // Inside our copy: its controller picture (System's, not ours) hidden; each row's copied cursor and its own
+        // selection frame (W_Select_00, hidden in the button's layout) found, for the module's cursor.
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
+        const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
+        const std::uint64_t controller = PaneIn(ctx, ours, "Pa_SystemController_00");
+        if (IsPart(controller)) SetVisible(ctx, controller, false);
+        int rows = 0;
+        for (int i = 0; i < kRows; ++i) {
+            char name[24];
+            std::snprintf(name, sizeof name, "Pa_Button_%02d", i);
+            const std::uint64_t button = PartLayout(ours, name);
+            g_row_cursor[i] = PaneIn(ctx, button, "N_Cursor_00");
+            g_row_frame[i] = PaneIn(ctx, button, "W_Select_00");
+            rows += g_row_cursor[i] != 0 && g_row_frame[i] != 0 ? 1 : 0;
+        }
+        LOG_INFO(Core, "coop: pause tab: the page's rows: {} of {} texts set; its layout {:#x}, controller picture {}, "
+                 "{} of {} rows with a cursor and a frame", set, kRows, ours, IsPart(controller) ? "hidden" : "not found",
+                 rows, kRows);
+    }
+    if (d.set_cursor) {
+        for (int i = 0; i < kRows; ++i) {
+            if (g_row_cursor[i] != 0) SetVisible(ctx, g_row_cursor[i], false);   // (System's cursor, copied: not ours)
+            if (g_row_frame[i] != 0) SetVisible(ctx, g_row_frame[i], i == d.cursor);
+        }
     }
 }
 
@@ -155,7 +193,10 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     if (tab3 == 0 || tab4 == 0) return;
     if (d.fill_tab) {
         Call(ctx, kTabFill, tab4, kSystemPage, 1);   // (a Plus tab's look, as the game fills its four)
-        SetText(ctx, layout, "Pa_Category_04/T_Text_00", "LayoutMsg/MenuOverlay_00", "Pa_Category_04-T_Text_00");
+        const bool text = SetText(ctx, layout, "Pa_Category_04/T_Text_00", "LayoutMsg/MenuOverlay_00",
+                                  "Pa_Category_04-T_Text_00");
+        Call(ctx, kTabOpen, tab4, 0);   // (opened and shown, as the game's fill ends for each of its tabs)
+        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {})", text ? "set" : "not set");
     }
     Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);

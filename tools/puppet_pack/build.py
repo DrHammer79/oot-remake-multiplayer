@@ -1332,7 +1332,8 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     if pause_tab:
         try:
             pause_files = pause_menu.build(romfs, out_romfs, dicts, table,
-                                           lambda root, r, data: write(os.path.join(root, r), data), recompress, log)
+                                           lambda root, r, data: write(os.path.join(root, r), data), recompress, log,
+                                           earlier=title_files)
         except (pause_menu.PauseMenuError, OSError, ValueError, KeyError, IndexError, struct.error) as e:
             log(f"pause menu: the Multiplayer tab left out ({e}); the pause menu keeps its four")
 

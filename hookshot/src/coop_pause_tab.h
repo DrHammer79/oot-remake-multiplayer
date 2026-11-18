@@ -63,6 +63,8 @@ inline constexpr std::uint64_t kPaneByName = 0x43e300; // (table, "name") -> the
 inline constexpr std::uint64_t kSetVisible = 0x20aea0; // (pane, visible): pane +0xa8 bit 0 (as f_802edef0 hides a tab)
 inline constexpr std::uint64_t kTabFill = 0xa6ab50;    // (tab, category, enabled): its text and Plus/Minus look
 inline constexpr std::uint64_t kTabLight = 0x2ccf60;   // (tab, lit, instant): its CurrentIn / CurrentOut
+inline constexpr std::uint64_t kTabOpen = 0x208350;    // (tab, 0): the tab's part opened and shown, as the game's fill
+                                                       //  ends for each of its tabs (else no text shows)
 inline constexpr std::uint64_t kMsgRefInit = 0xa66f70; // (ref): {0, 0, -1}, 24 bytes (coop_title.cpp's)
 inline constexpr std::uint64_t kMsgRefSet = 0xa6afe0;  // (ref, &"LayoutMsg/...", &"label", 1)
 inline constexpr std::uint64_t kPaneText = 0xa67d30;   // (layout, "part/T_Text_00", ref, 1, 0)
@@ -98,7 +100,9 @@ public:
         bool set_texts = false;  // the pages: our rows' texts (once per screen object)
         bool set_tabs = false;   // the strip: the fifth tab shown or not, lit or not; System's tab lit or not
         bool tab_shown = false, tab_lit = false, fill_tab = false;
-        bool any() const { return set_page || set_texts || set_tabs; }
+        bool set_cursor = false;   // the pages: our rows' selection frame on row `cursor` (the copied cursor off)
+        int cursor = 0;
+        bool any() const { return set_page || set_texts || set_tabs || set_cursor; }
     };
     Do OnScreen(const Facts& f, std::uint64_t now_ms);
     // Player 1's pad before the game gets it: the buttons the game gets.
@@ -124,7 +128,7 @@ private:
     std::string why_;
     // What is set in the game, per screen object (-1: not yet).
     std::uint64_t page_screen_ = 0, strip_screen_ = 0;
-    int page_set_ = -1;
+    int page_set_ = -1, cursor_set_ = -1;
     bool texts_set_ = false;
     int tab_key_ = -1;
 };

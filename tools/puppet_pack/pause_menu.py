@@ -61,8 +61,9 @@ def _new_id(name):
     return ui_pack.part_id(name)
 
 
-FIFTH_GAP = 30.0   # the fifth tab this much closer to System than the game's step (430 for 460): R fits before the
-R_MOVE = 340.0     # rupee counter's icon, R moved this far right (990 -> 1330 in the game's layout)
+FIFTH_GAP = 50.0   # the fifth tab this much closer to System than the game's step (410 for 460), and R moved this far
+R_MOVE = 390.0     # right (990 -> 1380): R between the fifth tab's lit box and the rupee counter (seen in a run,
+                   # 2026-11-18: at 430 and 340 the lit box covered R)
 
 
 def _x(d, name):
@@ -129,26 +130,28 @@ class _Dir:
 
 
 class _Layered(_Dir):
-    """The mod's romfs over the game's: a file an earlier pack step wrote (title_menu.py's language archives) is read
-    as it wrote it, so its labels stay; the game's files otherwise."""
-    def __init__(self, top, root):
+    """The game's files, but those an earlier step of this same pack run wrote (`earlier`: title_menu.py's language
+    archives) read as it wrote them, so its labels stay. Not anything else in the mod's folder: it holds the last
+    run's files too (this step's own edited archive among them)."""
+    def __init__(self, top, root, earlier=()):
         super().__init__(root)
         self.top = top
+        self.earlier = set(earlier)
 
     def read(self, rel):
         path = os.path.join(self.top, *rel.split("/"))
-        if os.path.isfile(path):
+        if rel in self.earlier and os.path.isfile(path):
             with open(path, "rb") as f:
                 return f.read()
         return super().read(rel)
 
 
-def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS):
+def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, earlier=()):
     """The Common archive and every language's messages from the romfs folder, into out_romfs
     (write(out_romfs, rel, bytes)); their size table entries grown (`table`: rstb.Rstb). Returns
     the files written. All or nothing, as title_menu.build: a failure raises before anything is
     written, so the pack never holds the tab without its page and texts."""
-    files, growth = make(_Layered(out_romfs, romfs), dicts, recompress, strings)
+    files, growth = make(_Layered(out_romfs, romfs, earlier), dicts, recompress, strings)
     for rel, _, required in growth:
         if required and table.get(_key(rel)) is None:
             raise PauseMenuError("the size table has no %s" % _key(rel))
