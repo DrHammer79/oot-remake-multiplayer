@@ -254,6 +254,16 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      # (throwaway branch test-kit-page, never merged: a Hookshot kit of this commit for one local game run)
+      - name: Test kit
+        continue-on-error: true
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/make_kit_hookshot.ps1 -BuildDir build -OutRoot "$env:RUNNER_TEMP\testkit" -Release test-page -NoZip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: test-kit-windows
+          path: ${{ runner.temp }}/testkit
+          if-no-files-found: warn
       # Our Longshot patches' Windows code (host/*.c, gpu/vk/*.cpp and their includers), compiled syntax only with
       # Longshot's own llvm-mingw clang and build.py's flags: nothing else in CI compiles it for Windows (the Linux jobs
       # build the renderer alone, for Linux), and 0.11.4's patch 0025 reached a game build with a character literal
