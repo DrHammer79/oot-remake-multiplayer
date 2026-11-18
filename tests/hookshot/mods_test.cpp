@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "mod_temp.h"
+#include "coop_mod_api.h"
 #include "coop_mod_json.h"
 #include "coop_mod_library.h"
 #include "coop_mods.h"
@@ -277,6 +278,26 @@ TEST_CASE("mods: a code file must exist inside the mod's folder and want no newe
         CHECK(m.code.empty());
         CHECK_FALSE(m.problem.empty());
     }
+}
+
+TEST_CASE("mods: a code mod written for interface 1 or 2 loads, one for 3 waits for a newer co-op") {
+    TempMods t("coop-mods-api-test");
+    for (const char* v : {"1", "2", "3"}) {
+        const std::string name = std::string("api") + v;
+        t.Json(name, std::string(R"({"code": "m.dll", "api": )") + v + "}");
+        Put(t.root / name / "m.dll", "MZ");
+    }
+    for (const auto& m : Scan(t.root)) {
+        INFO(m.name);
+        if (m.name == "api3") {
+            CHECK(m.code.empty());
+            CHECK(m.problem == "its code needs a newer co-op (plugin interface 3, this one has 2)");
+        } else {
+            CHECK_FALSE(m.code.empty());
+            CHECK(m.problem.empty());
+        }
+    }
+    CHECK(kApiVersion == static_cast<int>(COOP_MOD_API_VERSION));
 }
 
 TEST_CASE("mods: coop-mods.list gives host/mods.c the tab's order and switches") {

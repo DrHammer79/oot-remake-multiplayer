@@ -5,9 +5,11 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 #include "coop_mods.h"
 #include "coop_rando.h"
+#include "hos_coop_api.h"
 #include "hos_coop_draw.h"
 
 namespace CoopModsRuntime {
@@ -32,5 +34,15 @@ void Overlay(const HosCoopDraw& d);             // the render thread, after co-o
 void SetHooks(std::uint64_t bits);
 int Hook(std::uint32_t id, int phase, std::uint64_t* x);
 bool Hooked(std::uint32_t id);
+
+// (mod API v2, docs/mods.md "Menu screens") The game side, once at the module's start: its table (the game calls) and
+// co-op's own answer whether a mod may choose a button now (nullptr: free; else why not: hosting, joining, the host's
+// save on its way, as Skip title screen's hold).
+void SetGame(const HosCoopApi* api, std::function<const char*()> coop_busy);
+// Patch 0030's call for every menu screen's update (the game's thread; ctx may call()). Nothing is read when no mod
+// asked for screens.
+void Screen(void* ctx, std::uint64_t screen);
+// hos_coop_pad: whether a mod holds the game's input now (the game then gets no buttons and no sticks).
+bool InputHeld();
 
 }  // namespace CoopModsRuntime

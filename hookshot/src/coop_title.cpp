@@ -91,6 +91,8 @@ std::atomic<bool> g_rows{false};
 
 // Everything below. Never held while calling into CoopPause (it calls in here: StartSaveWait, StopSaveWait).
 CoopTitleMenu::SaveListRefresh g_list;   // the title's step only (one thread)
+std::atomic<bool> g_mod_asked{false};    // a code mod asked for a re-read (AskSaveListRead), not taken yet
+std::atomic<bool> g_list_open{false};    // a re-read is asked or running (a mod's or co-op's): not ready
 std::mutex g_mutex;
 CoopTitleMenu::SaveWait g_wait;   // Join at the title -> what the title says while the host's save comes
 std::uint64_t g_pad_last = 0;
@@ -277,6 +279,10 @@ void RefreshSaveList(void* ctx) {
     const bool found = mgr != 0 && CoopRuntime::Read(mgr + kCaptionState, &state, 1);
     R::Input in;
     in.stale = CoopSave::TakeSaveListStale();
+    in.stale = g_mod_asked.exchange(false) || in.stale;
+    if (in.stale) {
+        g_list_open = true;
+    }
     in.title = true;
     in.manager = found;
     in.state = state;
@@ -319,9 +325,11 @@ void RefreshSaveList(void* ctx) {
         return;
     }
     case R::Action::done:
+        g_list_open = false;
         LOG_INFO(Core, "coop: title: save list: read again by the game: {}", CaptionLine(mgr));
         return;
     case R::Action::gave_up:
+        g_list_open = false;
         LOG_WARNING(Core, "coop: title: save list: not read again after {} s (state {}; {})", R::kGiveUpMs / 1000,
                     state, CaptionLine(mgr));
         return;
@@ -519,6 +527,21 @@ void StopSaveWait() {
 bool SaveWaitWaiting() {
     std::lock_guard lock(g_mutex);
     return g_wait.waiting();
+}
+
+void AskSaveListRead() {
+    g_list_open = true;
+    g_mod_asked = true;
+}
+
+bool SaveListReady() {
+    if (g_list_open.load()) {
+        return false;
+    }
+    const std::uint64_t mgr = CaptionMgr();
+    std::uint8_t state = 0;
+    return mgr != 0 && CoopRuntime::Read(mgr + kCaptionState, &state, 1) &&
+           state == CoopTitleMenu::SaveListRefresh::kRead;
 }
 
 std::string ClientId() {

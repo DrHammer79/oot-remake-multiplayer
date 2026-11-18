@@ -52,6 +52,9 @@ struct Host::Slot {
     std::vector<Callback<coop_mod_key_fn>> key;
     std::vector<Callback<coop_mod_setting_fn>> setting;
     std::vector<std::pair<std::uint32_t, Callback<coop_mod_hook_fn>>> hook;
+    std::vector<Callback<coop_mod_screen_fn>> screen;  // (API v2)
+    std::atomic<bool> hold{false};                     // (API v2) it holds the game's input
+    std::atomic<bool> said_outside{false};             // (API v2) a v2 call outside on_screen was logged
 
     static Slot* Of(const CoopModApi* self) {
         return self == nullptr ? nullptr : reinterpret_cast<const Table*>(self)->slot;
@@ -75,6 +78,10 @@ namespace {
 
 using Slot = Host::Slot;
 static_assert(std::is_standard_layout_v<Slot::Table>);
+
+// (API v2) The screen update this thread is in, and the mod being called: the v2 calls work only for that mod.
+thread_local const ScreenUpdate* t_update = nullptr;
+thread_local Slot* t_slot = nullptr;
 
 // ---- the calls into a mod, each through Guarded ----
 
@@ -130,6 +137,16 @@ struct HookCall {
 void RunHook(void* p) {
     auto* c = static_cast<HookCall*>(p);
     c->result = c->fn(c->user, c->hook, c->phase, c->x);
+}
+
+struct ScreenCall {
+    coop_mod_screen_fn fn;
+    void* user;
+    const CoopModScreen* screen;
+};
+void RunScreen(void* p) {
+    auto* c = static_cast<ScreenCall*>(p);
+    c->fn(c->user, c->screen);
 }
 
 struct StartCall {
@@ -244,6 +261,67 @@ int ApiHook(const CoopModApi* self, std::uint32_t hook, coop_mod_hook_fn fn, voi
         return 0;
     }
     s->hook.push_back({hook, {fn, user}});
+    return 1;
+}
+
+int ApiOnScreen(const CoopModApi* self, coop_mod_screen_fn fn, void* user) {
+    Slot* s = Registering(self, reinterpret_cast<const void*>(fn), "screen");
+    return s != nullptr ? (s->screen.push_back({fn, user}), 1) : 0;
+}
+
+// (API v2) The mod inside its own on_screen call, or nullptr (logged once per mod).
+Slot* InScreen(const CoopModApi* self, const char* what) {
+    Slot* s = Slot::Of(self);
+    if (s == nullptr) {
+        return nullptr;
+    }
+    if (t_slot != s || t_update == nullptr) {
+        if (!s->said_outside.exchange(true)) {
+            s->Say(std::string("called ") + what + " outside its on_screen call: nothing done (said once)");
+        }
+        return nullptr;
+    }
+    return s;
+}
+
+const char* KindName(std::uint32_t kind) {
+    switch (kind) {
+    case COOP_MOD_SCREEN_TITLE: return "the title";
+    case COOP_MOD_SCREEN_LOAD_LIST: return "the load list";
+    case COOP_MOD_SCREEN_LOAD_QUESTION: return "the load question";
+    default: return "a menu screen";
+    }
+}
+
+int ApiChooseFocused(const CoopModApi* self) {
+    Slot* s = InScreen(self, "choose_focused");
+    if (s == nullptr || t_update->focused.empty() || !s->game->choose_focused) {
+        return 0;
+    }
+    if (!s->game->choose_focused(t_update->ctx, t_update->screen)) {
+        return 0;
+    }
+    s->Say("chose " + t_update->focused + " on " + KindName(t_update->kind));
+    return 1;
+}
+
+int ApiReloadSaveList(const CoopModApi* self) {
+    Slot* s = InScreen(self, "reload_save_list");
+    if (s == nullptr || !s->game->reload_save_list || !s->game->reload_save_list()) {
+        return 0;
+    }
+    s->Say("asked the game to read its save list again");
+    return 1;
+}
+
+int ApiHoldInput(const CoopModApi* self, int on) {
+    Slot* s = InScreen(self, "hold_input");
+    if (s == nullptr) {
+        return 0;
+    }
+    if (s->hold.exchange(on != 0) != (on != 0)) {
+        s->Say(on != 0 ? "holds the game's input" : "gave the game's input back");
+    }
     return 1;
 }
 
@@ -394,6 +472,10 @@ bool Host::Begin(Slot& s, const CoopMods::Mod& m) {
     api.hook = ApiHook;
     api.has_hook = ApiHasHook;
     api.restart_needed = ApiRestartNeeded;
+    api.on_screen = ApiOnScreen;
+    api.choose_focused = ApiChooseFocused;
+    api.reload_save_list = ApiReloadSaveList;
+    api.hold_input = ApiHoldInput;
 
     s.starting = true;
     s.on = true;
@@ -409,13 +491,15 @@ bool Host::Begin(Slot& s, const CoopMods::Mod& m) {
         s.key.clear();
         s.setting.clear();
         s.hook.clear();
+        s.screen.clear();
         s.stop = nullptr;
         s.Say(problem);
         loader_.NoteCode(m.name, problem);
         return true;
     }
     s.Say("started (" +
-          std::to_string(s.frame.size() + s.overlay.size() + s.key.size() + s.setting.size() + s.hook.size()) +
+          std::to_string(s.frame.size() + s.overlay.size() + s.key.size() + s.setting.size() + s.hook.size() +
+                         s.screen.size()) +
           " callbacks)");
     loader_.NoteCode(m.name, "");
     return true;
@@ -538,6 +622,73 @@ bool Host::Hooks(std::uint32_t hook) const {
         }
     }
     return false;
+}
+
+bool Host::WantsScreens() const {
+    if (!started_ || stopped_) {
+        return false;
+    }
+    for (const auto& s : slots_) {
+        if (s->on && !s->screen.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Host::Screen(const ScreenUpdate& update) {
+    if (!started_ || stopped_) {
+        return;
+    }
+    std::unique_lock lock(screen_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        return;  // (another thread's screen is with the mods)
+    }
+    if (game_.now_ms) {
+        last_screen_ms_ = game_.now_ms();
+    }
+    CoopModScreen view{};
+    view.size = sizeof view;
+    view.kind = update.kind;
+    view.focused = update.focused.c_str();
+    view.save_list_ready = update.save_list_ready ? 1 : 0;
+    t_update = &update;
+    for (auto& s : slots_) {
+        t_slot = s.get();
+        for (const auto& cb : s->screen) {
+            if (!s->on) {
+                break;
+            }
+            ScreenCall c{cb.fn, cb.user, &view};
+            if (!Guarded(RunScreen, &c)) {
+                s->Crashed("screen callback");
+            }
+        }
+    }
+    t_slot = nullptr;
+    t_update = nullptr;
+}
+
+bool Host::InputHeld() {
+    if (!started_) {
+        return false;
+    }
+    const bool lapsed = !game_.now_ms || game_.now_ms() - last_screen_ms_.load() >= kHoldLapseMs;
+    bool held = false;
+    for (auto& s : slots_) {
+        if (!s->hold) {
+            continue;
+        }
+        if (stopped_ || !s->on || lapsed) {
+            if (s->hold.exchange(false)) {
+                s->Say(!s->on || stopped_ ? "its hold on the game's input ended (the mod is off)"
+                                          : "its hold on the game's input ended (no menu screen for half a second)");
+            }
+            continue;
+        }
+        held = true;
+    }
+    return held;
 }
 
 std::vector<std::string> Host::Running() const {

@@ -1105,6 +1105,21 @@ void UseInputSelect() {
     LOG_INFO(Core, "coop: controller {}, keyboard {}", CoopInput::PadValue(s.pad), CoopInput::KeyboardValue(s.keyboard));
 }
 
+// Why nothing may choose the title's buttons for the player now (nullptr: free): co-op is hosting, joining, in a
+// session or the host's save is on its way. Skip title screen's hold (hos_coop_title_hold) and the code mods' choice
+// (mod API v2) ask it.
+const char* TitleHoldWhy() {
+    CoopTitleMenu::SkipTitleInput in;
+    HosCoopStatus st{};
+    st.size = sizeof st;
+    HostMenu().Status(&st);
+    in.host_state = st.state;
+    in.session_live = CoopSave::SessionLive();
+    in.save_coming = CoopSave::HostSaveComing();
+    in.save_wait = CoopTitle::SaveWaitWaiting();
+    return CoopTitleMenu::SkipTitleHold(in);
+}
+
 bool Start(const HosCoopApi* api) {
     if (api == nullptr || api->version != HOS_COOP_API_VERSION || api->size < kFirstApiSize) {
         return false;
@@ -1161,6 +1176,7 @@ bool Start(const HosCoopApi* api) {
     CoopHook::Start();
     g_on = true;
     CoopModsRuntime::Start();  // the mods folder and the code mods (docs/mods.md)
+    CoopModsRuntime::SetGame(api, TitleHoldWhy);   // (mod API v2: the menu screens' calls)
     CoopTitle::Init(api);
     CoopPauseTab::Init(api);   // the pause menu's Multiplayer tab (patch 0030)
     CoopPause::Init(server);
@@ -1833,15 +1849,7 @@ COOP_HOOKSHOT_EXPORT int hos_coop_title_hold(void) noexcept {
         return 0;
     }
     try {
-        CoopTitleMenu::SkipTitleInput in;
-        HosCoopStatus st{};
-        st.size = sizeof st;
-        CoopHookshot::HostMenu().Status(&st);
-        in.host_state = st.state;
-        in.session_live = CoopSave::SessionLive();
-        in.save_coming = CoopSave::HostSaveComing();
-        in.save_wait = CoopTitle::SaveWaitWaiting();
-        const char* why = CoopTitleMenu::SkipTitleHold(in);
+        const char* why = CoopHookshot::TitleHoldWhy();
         static std::atomic<const char*> said{nullptr};
         if (why != nullptr && said.exchange(why) != why) {
             LOG_INFO(Core, "coop: title: Skip title screen waits: {}", why);
@@ -1864,9 +1872,15 @@ COOP_HOOKSHOT_EXPORT void hos_coop_title(void* ctx, uint64_t screen, int event) 
 }
 // The pause menu's Multiplayer tab (coop_pause_tab.h, patch 0030): every menu screen's update, on the game's threads,
 // and the page the mouse's tab strip counts (4 while our page shows, else -1).
+// The code mods' menu screens (coop_mod_api.h version 2) from the same call: read only when a mod asked for them.
 COOP_HOOKSHOT_EXPORT void hos_coop_game_screen(void* ctx, uint64_t screen) noexcept {
     if (g_on) {
         CoopPauseTab::OnScreen(ctx, screen);
+        try {
+            CoopModsRuntime::Screen(ctx, screen);
+        } catch (...) {
+            // (the mods' screens skip this update: the game's own goes on)
+        }
     }
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_game_pause_page(void) noexcept {
@@ -1914,6 +1928,10 @@ COOP_HOOKSHOT_EXPORT int hos_coop_view(double eye[3], double target[3]) {
 COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) {
     if (!g_on || stick == nullptr) {
         return buttons;
+    }
+    if (CoopModsRuntime::InputHeld()) {   // (a code mod's own screen is in front: coop_mod_api.h hold_input)
+        stick[0] = stick[1] = stick[2] = stick[3] = 0;
+        return 0;
     }
     buttons = CoopTitle::OnPad(buttons, stick);
     buttons = CoopPauseTab::OnPad(buttons, stick);   // (its page takes the pad while it shows)
