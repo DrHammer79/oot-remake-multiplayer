@@ -29,7 +29,8 @@ The Layout2 resource (BFFH "Nintendo.Ui.ResModels.LayoutResData"), as far as rea
     overrides ({u64 offset, u32 count, u32 stride}; not copied here), +0x28 its parameters (a
     list of offsets of {name, f32 value, 4 zero bytes}), +0x38 the offset of its properties list
     (16 bytes; empty on the parts copied here), +0x40 u64 its pane's index;
-  - ids are 64-bit identities of the panes, also the parts' ids;
+  - ids are 64-bit identities of the panes, also the parts' ids: CityHash64 of the name (part_id);
+    the game finds a pane by name through it;
   - the animations appear to name panes by index: MenuOverlay_00's four tabs, panes 8 to 11,
     show up in its animation strings as 0x40, 0x48, 0x50 and 0x58.
 
@@ -49,7 +50,6 @@ How a copy is added, so that nothing the layout already has moves:
     the order holds: an ancestor of the source, for example. Its translate is then in that pane's
     frame: frame_offset gives the move that keeps it where the source's frame would put it.
 """
-import hashlib
 import math
 import os
 import re
@@ -169,8 +169,88 @@ def read_layout(layout):
 
 
 def part_id(name):
-    """The id of a new pane and its part: 64 bits of sha256 over the name, the same in every pack."""
-    return int.from_bytes(hashlib.sha256(b"oot-coop ui part " + name.encode("ascii")).digest()[:8], "little")
+    """The id of a new pane and its part: CityHash64 of its name, as the game's own. The game finds a pane by name
+    by hashing the name and looking for that id (main+0x43e300, the hash main+0xebf190, read from main 2026-11-18;
+    every pane id of the game's layouts checked is CityHash64 of its name): a copy with another id is never found."""
+    return city_hash64(name.encode("ascii"))
+
+
+# ---------------------------------------------------------------------------------------- CityHash64
+# CityHash64, version 1.1, for strings up to 64 bytes (pane names are short), from Google's CityHash
+# (Copyright (c) 2011 Google, Inc.; MIT licence; https://github.com/google/cityhash, city.cc), written in
+# Python here. THIRD_PARTY_NOTICES.md has its licence.
+
+_M64 = (1 << 64) - 1
+_K0, _K1, _K2 = 0xc3a5c85c97cb3127, 0xb492b66fbe98f273, 0x9ae16a3b2f90404f
+
+
+def _city64(s, i):
+    return struct.unpack_from("<Q", s, i)[0]
+
+
+def _city32(s, i):
+    return struct.unpack_from("<I", s, i)[0]
+
+
+def _rot(v, r):
+    return v if r == 0 else ((v >> r) | (v << (64 - r))) & _M64
+
+
+def _len16(u, v, mul=0x9ddfea08eb382d69):
+    a = ((u ^ v) * mul) & _M64
+    a ^= a >> 47
+    b = ((v ^ a) * mul) & _M64
+    b ^= b >> 47
+    return (b * mul) & _M64
+
+
+def _swap(v):
+    return int.from_bytes(v.to_bytes(8, "little"), "big")
+
+
+def city_hash64(s):
+    """CityHash64 (v1.1) of bytes, up to 64 of them."""
+    n = len(s)
+    if n <= 16:
+        if n >= 8:
+            mul = (_K2 + n * 2) & _M64
+            a = (_city64(s, 0) + _K2) & _M64
+            b = _city64(s, n - 8)
+            return _len16((_rot(b, 37) * mul + a) & _M64, ((_rot(a, 25) + b) * mul) & _M64, mul)
+        if n >= 4:
+            return _len16((n + (_city32(s, 0) << 3)) & _M64, _city32(s, n - 4), (_K2 + n * 2) & _M64)
+        if n > 0:
+            y = (s[0] + (s[n >> 1] << 8)) & 0xFFFFFFFF
+            z = (n + (s[n - 1] << 2)) & 0xFFFFFFFF
+            v = (y * _K2 ^ z * _K0) & _M64
+            return ((v ^ (v >> 47)) * _K2) & _M64
+        return _K2
+    mul = (_K2 + n * 2) & _M64
+    if n <= 32:
+        a = (_city64(s, 0) * _K1) & _M64
+        b = _city64(s, 8)
+        c = (_city64(s, n - 8) * mul) & _M64
+        d = (_city64(s, n - 16) * _K2) & _M64
+        return _len16((_rot((a + b) & _M64, 43) + _rot(c, 30) + d) & _M64,
+                      (a + _rot((b + _K2) & _M64, 18) + c) & _M64, mul)
+    if n > 64:
+        raise UiPackError("a name of %d bytes: names up to 64 only" % n)
+    a = (_city64(s, 0) * _K2) & _M64
+    b, c, d = _city64(s, 8), _city64(s, n - 24), _city64(s, n - 32)
+    e = (_city64(s, 16) * _K2) & _M64
+    f = (_city64(s, 24) * 9) & _M64
+    g = _city64(s, n - 8)
+    h = (_city64(s, n - 16) * mul) & _M64
+    u = (_rot((a + g) & _M64, 43) + (_rot(b, 30) + c) * 9) & _M64
+    v = (((a + g) ^ d) + f + 1) & _M64
+    w = (_swap(((u + v) * mul) & _M64) + h) & _M64
+    x = (_rot((e + f) & _M64, 42) + c) & _M64
+    y = ((_swap(((v + w) * mul) & _M64) + g) * mul) & _M64
+    z = (e + f + c) & _M64
+    a = (_swap(((x + z) * mul + y) & _M64) + b) & _M64
+    t = ((z + a) * mul + d + h) & _M64
+    b = ((t ^ (t >> 47)) * mul) & _M64
+    return (b + x) & _M64
 
 
 def clone_part(layout, source, name, move=(0.0, 0.0), params=None, new_id=part_id, out_of_order=False):

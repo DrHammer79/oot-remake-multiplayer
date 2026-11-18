@@ -434,6 +434,25 @@ def make_msbt(entries, encoding=0, order="<", buckets=4, extra=()):
 GAME = [("ItemMenu", "Items"), ("MapMenu", "Map"), ("SystemMenu", "System")]
 
 
+class CityHashTest(unittest.TestCase):
+    def test_the_games_pane_ids(self):
+        """part_id is CityHash64 of the name, as every pane id of the game's layouts (these four: PlusMenu_00's)."""
+        for name, want in (("RootPane", 0x55a7ab4a9d264968), ("N_All_00", 0x7b2f820ba988bfbc),
+                           ("C_3DFade_00", 0xfa7620594596c6d7), ("P_3DFade_02", 0x42002723333a12c8)):
+            self.assertEqual(up.part_id(name), want, name)
+
+    def test_every_length(self):
+        """Each of the hash's length cases runs and gives 64 bits (0, 1-3, 4-7, 8-16, 17-32, 33-64 bytes)."""
+        seen = set()
+        for n in (0, 1, 3, 4, 7, 8, 16, 17, 32, 33, 64):
+            h = up.city_hash64(bytes(range(65, 65 + n)))
+            self.assertTrue(0 <= h < 1 << 64)
+            seen.add(h)
+        self.assertEqual(len(seen), 11)
+        with self.assertRaises(UiPackError):
+            up.city_hash64(b"x" * 65)
+
+
 class LabelsTest(unittest.TestCase):
     def test_new_labels_after_the_files_own(self):
         m = make_msbt(GAME)

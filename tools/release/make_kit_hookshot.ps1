@@ -165,8 +165,8 @@ while ($packQueue.Count -gt 0) {
         if ($code -match '^\s*from \.(\w+) import ') { $packQueue.Enqueue("$($Matches[1]).py") }
         elseif ($code -match '^\s*from \. import (.+)$') {
             foreach ($m in $Matches[1].Split(',')) {
-                $name = ($m.Trim() -split '\s+')[0]   # (from . import texture as tx)
-                if ($name) { $packQueue.Enqueue("$name.py") }
+                $packModule = ($m.Trim() -split '\s+')[0]   # (from . import texture as tx; not $name: the kit's own)
+                if ($packModule) { $packQueue.Enqueue("$packModule.py") }
             }
         }
     }

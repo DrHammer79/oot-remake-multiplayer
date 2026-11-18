@@ -20,7 +20,6 @@ pane is that button, so each copy is the last pane of the alignment pane's subtr
 and no existing offset or index moves.
 """
 import glob
-import hashlib
 import os
 
 from . import ui_pack
@@ -41,7 +40,8 @@ _label_hash = ui_pack.label_hash
 
 
 def _new_id(name):
-    return int.from_bytes(hashlib.sha256(b"oot-coop title row " + name.encode()).digest()[:8], "little")
+    """The game's own id for a pane of that name (ui_pack.part_id: CityHash64), so it finds the row by name."""
+    return ui_pack.part_id(name)
 
 
 def add_buttons(d, count=len(ROWS)):

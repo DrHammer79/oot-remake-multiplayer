@@ -835,7 +835,7 @@ TEST_CASE("hookshot: the game's menu screens reach the module, the mouse knows a
     CHECK(in_menu("enum { TAB_L = 8, TAB_R = 9 };"));
     CHECK(in_menu("return strip && peek(strip + 0x328, &n, sizeof n) && n == 5 ? 5 : 4;"));
     // (the fifth zone is a tab to step to only while the module has its page: -1 or 4; -2 without one)
-    CHECK(in_menu("return x < -696 ? 0 : x < -228 ? 1 : x < 240 ? 2 : x < 708 ? 3 : hos_coop_game_pause_page_now() >= -1 "
+    CHECK(in_menu("return x < -462 ? 0 : x < 6 ? 1 : x < 474 ? 2 : x < 927 ? 3 : hos_coop_game_pause_page_now() >= -1 "
                   "? 4 : -1;"));
     CHECK(in_menu("const int coop = hos_coop_game_pause_page_now(); return coop >= 0 ? coop : page_now;"));
     CHECK(in_menu("const int cur = pause ? pause_page() : page;"));

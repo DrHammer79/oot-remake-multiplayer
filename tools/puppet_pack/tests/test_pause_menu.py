@@ -51,20 +51,19 @@ def pane(d, name):
 
 
 class TabTest(unittest.TestCase):
-    def test_a_fifth_tab_and_the_strip_centred(self):
+    def test_a_fifth_tab_after_system_the_game_tabs_left_alone(self):
         d = overlay()
         n = pm.add_tab(d)
         panes, parts = ui_pack.read_layout(n)
         self.assertEqual(len(panes), len(OVERLAY) + 1)
         self.assertEqual((panes[-1].name, parts[-1].name), ("Pa_Category_04", "Pa_Category_04"))
-        # the game's four, half a step (50) to the left
-        self.assertEqual([pane(n, "Pa_Category_%02d" % i)[:2] for i in range(4)],
-                         [(350.0, -40.0), (450.0, -50.0), (550.0, -60.0), (650.0, -70.0)])
-        # the fifth one step after the fourth, in the root's frame (the header's (600, -60) added)
+        # the game's four and L where they were (the strip's animation places them)
+        for name in ["Pa_Category_%02d" % i for i in range(4)] + ["T_BtnL_00"]:
+            self.assertEqual(pane(n, name), pane(d, name), name)
+        # the fifth a step less FIFTH_GAP after the fourth, in the root's frame (the header's (600, -60) added)
         x, y, parent, end = pane(n, "Pa_Category_04")
-        self.assertEqual((x, y, parent, end), (650.0 + 100.0 + 600.0, -70.0 - 60.0, "RootPane", len(OVERLAY) + 1))
-        self.assertEqual(pane(n, "T_BtnL_00")[:2], (850.0, -90.0))
-        self.assertEqual(pane(n, "T_BtnR_00")[:2], (1050.0, -100.0))
+        self.assertEqual((x, y, parent, end), (700.0 + 100.0 - pm.FIFTH_GAP + 600.0, -70.0 - 60.0, "RootPane", len(OVERLAY) + 1))
+        self.assertEqual(pane(n, "T_BtnR_00")[:2], (1000.0 + pm.R_MOVE, -100.0))
         # the order holds: only the root reaches the copy, every other pane ends where it did
         old = [struct.unpack_from("<I", d, p.record + 0x34)[0] for p in ui_pack.read_layout(d)[0]]
         new = [struct.unpack_from("<I", n, p.record + 0x34)[0] for p in panes[:len(OVERLAY)]]
@@ -72,7 +71,7 @@ class TabTest(unittest.TestCase):
         # the copy is the fourth tab's part, with its own parameters
         rec = parts[-1].record
         self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, rec)[0]), "PaMenuCategory_00")
-        self.assertEqual(panes[-1].id, pm._new_id("Pa_Category_04"))
+        self.assertEqual(panes[-1].id, ui_pack.part_id("Pa_Category_04"))   # (the game's id: CityHash64 of the name)
         # stored hidden: only the co-op module shows it (bit 0 of the kind word; the source's has it)
         kind = lambda n, i: struct.unpack_from("<I", n, ui_pack.read_layout(n)[0][i].record + 0x38)[0]
         self.assertEqual(kind(n, -1), kind(d, 7) & ~1)

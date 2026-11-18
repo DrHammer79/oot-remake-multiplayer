@@ -1,4 +1,4 @@
-From eee408b89efe45d40e89d3860a969c59983cb4f7 Mon Sep 17 00:00:00 2001
+From 7b18ad9ba87f70f9631dd15e0c1013965828acec Mon Sep 17 00:00:00 2001
 From: DrHammer79 <351314278+DrHammer79@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 19:36:30 -0600
 Subject: [PATCH] Co-op pause menu tab: each menu screen's update to the
@@ -16,8 +16,9 @@ game's f_802f1380 (every menu screen's update, before the screen's own),
 also calls the module's optional export hos_coop_game_screen(ctx,
 screen) through host/coop_bridge.c, on both platforms. The mouse's tab
 strip (Windows) counts the overlay's tabs (+0x328, its Pa_Category_%02d
-parts): with five, its zones follow co-op's layout (the four and L 230
-to the left, R 230 to the right, the fifth 460 after the fourth), and
+parts): with five, its zones follow co-op's layout (the game's four
+and L where they are, the fifth 430 after System, R 340 further right),
+and
 the page it steps from is the module's (hos_coop_game_pause_page: 4
 while its page shows, -1 when not, -2 without a module page), so a click
 on the fifth tab is R from System and a click elsewhere from it L first;
@@ -75,7 +76,7 @@ index 957c34e..889a071 100644
  void hos_coop_title(Ctx *c, uint64_t screen, int event) {
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_title) coop_title(c, screen, event);
 diff --git a/host/oot_menu.c b/host/oot_menu.c
-index 80e3338..9c5a879 100644
+index 80e3338..4fd5436 100644
 --- a/host/oot_menu.c
 +++ b/host/oot_menu.c
 @@ -14,6 +14,10 @@
@@ -97,10 +98,10 @@ index 80e3338..9c5a879 100644
 -enum { TAB_L = 4, TAB_R = 5 };
 +   L at -1002 and R at 1014; the boxes meet halfway between.
 +   (oot-remake-multiplayer's patch 0030) With co-op's fifth tab the strip has five (the overlay's count, +0x328: its
-+   Pa_Category_%02d parts): co-op's layout moves the four and L 230 to the left, R 230 to the right, and puts the fifth
-+   460 after the fourth, so the same measures, moved: names at about -930, -462, 6, 474, 942, L -1235, R 1247. The
-+   fifth is a tab to step to only while the module has its page (hos_coop_game_pause_page: -1 or 4; -2 none): without
-+   it the tab stays hidden, and a click there is nothing */
++   Pa_Category_%02d parts): co-op's layout leaves the four and L where they are, puts the fifth 430 after System and R
++   340 further right, so the same measures: the fifth's name at about 1146, R at about 1359. The fifth is a tab to step
++   to only while the module has its page (hos_coop_game_pause_page: -1 or 4; -2 none): without it the tab stays
++   hidden, and a click there is nothing */
 +enum { TAB_L = 8, TAB_R = 9 };   /* (patch 0030: past a fifth tab's 4) */
 +static int strip_tabs(void) {
 +    uint32_t n = 0;
@@ -110,10 +111,10 @@ index 80e3338..9c5a879 100644
  static int tab_at(float x, float y) {
      if (y < 900 || y > 1080) return -1;
 +    if (strip_tabs() == 5) {   /* (patch 0030) */
-+        if (x >= -1340 && x < -1164) return TAB_L;
-+        if (x >= -1164 && x < 1176)
-+            return x < -696 ? 0 : x < -228 ? 1 : x < 240 ? 2 : x < 708 ? 3 : hos_coop_game_pause_page_now() >= -1 ? 4 : -1;
-+        if (x >= 1176 && x <= 1350) return TAB_R;
++        if (x >= -1100 && x < -926) return TAB_L;
++        if (x >= -926 && x < 1252)
++            return x < -462 ? 0 : x < 6 ? 1 : x < 474 ? 2 : x < 927 ? 3 : hos_coop_game_pause_page_now() >= -1 ? 4 : -1;
++        if (x >= 1252 && x <= 1450) return TAB_R;
 +        return -1;
 +    }
      if (x >= -1100 && x < -926) return TAB_L;
