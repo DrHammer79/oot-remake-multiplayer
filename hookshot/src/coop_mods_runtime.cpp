@@ -74,19 +74,34 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
         }
         return false;
     }
-    if (g_api == nullptr || g_api->call == nullptr || ctx == nullptr) {
+    // Why a choice did not happen, once per reason (a mod tries again at the next update).
+    static std::atomic<int> said{-1};
+    const auto no = [](int why, const char* line) {
+        if (said.exchange(why) != why) {
+            CoopRuntime::Log(std::string("coop: mods: a mod's button choice did not happen: ") + line);
+        }
         return false;
+    };
+    if (g_api == nullptr || g_api->call == nullptr || ctx == nullptr) {
+        return no(0, "this run has no game calls on the screens' update");
     }
     const std::uint64_t button = CoopModScreens::FocusedButton(ReadGame, screen);
     if (button == 0) {
-        return false;
+        return no(1, "no focused button now");
     }
     HosCoopCall k{};
     k.function = CoopRuntime::MainBase() + CoopModScreens::kButtonDecide;
     k.x[0] = button;
     k.x[1] = 0;
     std::uint64_t x0 = 0;
-    return g_api->call(ctx, &k, &x0) != 0 && (x0 & 1) != 0;
+    if (g_api->call(ctx, &k, &x0) == 0) {
+        return no(2, "the game's Button::Decide could not be called");
+    }
+    if ((x0 & 1) == 0) {
+        return no(3, "the game said not now (its control is deciding another button, or the button is off)");
+    }
+    said = -1;
+    return true;
 }
 
 std::string Env(const char* name) {
