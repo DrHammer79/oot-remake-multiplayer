@@ -2,7 +2,6 @@
 // coop_pause_tab.h's logic: no game reads or calls, no log (the tests drive it).
 #include "coop_pause_tab.h"
 
-#include <algorithm>
 #include <cstdio>
 
 namespace CoopPauseTab {
@@ -73,7 +72,7 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         return d;
     case Kind::kPages: {
         if (f.screen != page_screen_) {
-            page_screen_ = f.screen, page_set_ = -1, cursor_set_ = -1, texts_set_ = false;
+            page_screen_ = f.screen, page_set_ = -1, texts_set_ = false;
         }
         pages_ = f, pages_ms_ = now_ms;
         if (shown_ && !CanShow(now_ms)) {
@@ -82,10 +81,6 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         const int want = shown_ ? 1 : 0;
         if (page_set_ != want) {
             d.set_page = true, d.page_shown = shown_, page_set_ = want;
-            cursor_set_ = -1;   // (shown again: its rows' frames set again)
-        }
-        if (shown_ && cursor_set_ != cursor_) {
-            d.set_cursor = true, d.cursor = cursor_, cursor_set_ = cursor_;
         }
         if (!texts_set_ && f.state == 2) {
             d.set_texts = true, texts_set_ = true;
@@ -124,7 +119,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if (!shown_) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
-            shown_ = true, cursor_ = 0, why_.clear();
+            shown_ = true, decide_ = false, why_.clear();
             swallow_ |= buttons & ~kPadPassed;   // (R and anything held with it: none of it reaches System)
             return buttons & kPadPassed & ~swallow_;
         }
@@ -134,22 +129,16 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
         Hide("L");
         return buttons & ~swallow_;
     }
-    if ((down & (kPadUp | kPadStickUp)) != 0) {
-        cursor_ = std::max(0, cursor_ - 1);
-    }
-    if ((down & (kPadDown | kPadStickDown)) != 0) {
-        cursor_ = std::min(kRows - 1, cursor_ + 1);
-    }
     if ((down & kPadA) != 0) {
-        chosen_ = cursor_;
+        decide_ = true;
     }
     return buttons & kPadPassed & ~swallow_;
 }
 
-int Page::TakeChosen() {
-    const int c = chosen_;
-    chosen_ = -1;
-    return c;
+bool Page::TakeDecide() {
+    const bool d = decide_;
+    decide_ = false;
+    return d;
 }
 
 std::string Page::TakeWhy() {

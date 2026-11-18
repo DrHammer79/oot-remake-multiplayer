@@ -54,7 +54,7 @@ inline constexpr std::uint64_t kManagerPage = 0x530;   // s32: the Plus menu's c
 inline constexpr std::uint64_t kManagerAsked = 0x538;  // s32: the page asked for (the step's)
 inline constexpr int kSystemPage = 5;                  // the System page's category
 inline constexpr int kPlusMode = 1;
-inline constexpr int kRows = 5;                        // the page's buttons (Pa_Button_00..04)
+inline constexpr int kRows = 5;                        // the page's buttons (Pa_Button_00..04), System's too
 // The game's functions (main+), as its own code calls them:
 inline constexpr std::uint64_t kFindPane = 0x76e2b0;   // (layout, "name") -> pane, or 0 (coop_map_page.h's)
 inline constexpr std::uint64_t kPaneTable = 0x43c040;  // (layout + 0x40) -> its pane table (kFindPane's first call)
@@ -74,8 +74,15 @@ inline constexpr std::uint64_t kPadA = 1ull << 0, kPadB = 1ull << 1, kPadL = 1ul
                                kPadZL = 1ull << 8, kPadZR = 1ull << 9, kPadPlus = 1ull << 10, kPadMinus = 1ull << 11,
                                kPadUp = 1ull << 13, kPadDown = 1ull << 15, kPadStickUp = 1ull << 17,
                                kPadStickDown = 1ull << 19;
-// What the game still gets while our page shows: closing the menu, and the Minus menu.
-inline constexpr std::uint64_t kPadPassed = kPadB | kPadPlus | kPadMinus;
+// What the game still gets while our page shows: closing the menu, the Minus menu, and up and down, which move the
+// System page's focus under ours: the game's own cursor frame (drawn where the focused button is, and our rows sit
+// where System's buttons do) moves over our rows, with its sound (seen in a run, 2026-11-18). A is ours: the row is the
+// System page's focused button. Left and right are not passed (past the page's edge they would step the menu).
+inline constexpr std::uint64_t kPadPassed = kPadB | kPadPlus | kPadMinus | kPadUp | kPadDown | kPadStickUp | kPadStickDown;
+// The System page's buttons (read from main: its set-up f_80f990e0): the page object at the pages screen + 0x320,
+// its buttons at +0x38, +0x40 ... (5); a button's +0x38 byte is its focus state (Longshot's oot_autoload.c: non-zero and
+// not 4 or 5 is focused).
+inline constexpr std::uint64_t kSystemPageObject = 0x320, kSystemButtons = 0x38, kButtonState = 0x38;
 
 enum class Kind { kOther, kPages, kStrip, kBlocker };
 Kind KindOf(std::uint64_t vtable_offset);
@@ -100,18 +107,15 @@ public:
         bool set_texts = false;  // the pages: our rows' texts (once per screen object)
         bool set_tabs = false;   // the strip: the fifth tab shown or not, lit or not; System's tab lit or not
         bool tab_shown = false, tab_lit = false, fill_tab = false;
-        bool set_cursor = false;   // the pages: our rows' selection frame on row `cursor` (the copied cursor off)
-        int cursor = 0;
-        bool any() const { return set_page || set_texts || set_tabs || set_cursor; }
+        bool any() const { return set_page || set_texts || set_tabs; }
     };
     Do OnScreen(const Facts& f, std::uint64_t now_ms);
     // Player 1's pad before the game gets it: the buttons the game gets.
     std::uint64_t OnPad(std::uint64_t buttons, std::uint64_t now_ms);
 
     bool Shown() const { return shown_; }
-    int Cursor() const { return cursor_; }
-    // The row decided with A since the last call (-1: none).
-    int TakeChosen();
+    // A pressed on our page since the last call (the row is the System page's focused button).
+    bool TakeDecide();
     // Why it last went back to System, for the log ("" when none since the last call).
     std::string TakeWhy();
 
@@ -124,11 +128,11 @@ private:
     bool shown_ = false;
     std::uint64_t pad_last_ = 0;
     std::uint64_t swallow_ = 0;   // buttons the module took, kept from the game until let go
-    int cursor_ = 0, chosen_ = -1;
+    bool decide_ = false;
     std::string why_;
     // What is set in the game, per screen object (-1: not yet).
     std::uint64_t page_screen_ = 0, strip_screen_ = 0;
-    int page_set_ = -1, cursor_set_ = -1;
+    int page_set_ = -1;
     bool texts_set_ = false;
     int tab_key_ = -1;
 };

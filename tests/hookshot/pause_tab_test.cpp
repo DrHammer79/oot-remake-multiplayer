@@ -95,8 +95,6 @@ TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L giv
     d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 16);
     CHECK(d.set_page);
     CHECK(d.page_shown);
-    CHECK(d.set_cursor);   // (shown: the first row framed)
-    CHECK(d.cursor == 0);
     d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 16);
     CHECK(d.set_tabs);
     CHECK(d.tab_lit);
@@ -121,38 +119,31 @@ TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L giv
     CHECK_FALSE(p.Shown());
 }
 
-TEST_CASE("pause tab: nothing reaches System under the page but B, + and -, the cursor moves over five rows") {
+TEST_CASE("pause tab: under the page the game gets only B, + and -, and up and down for its cursor, A is ours") {
     Page p;
     std::uint64_t now = 1000;
     OnSystem(p, now);
     REQUIRE(p.OnPad(kPadR, now) == 0);
     p.OnPad(0, now + 1);
-    const std::uint64_t x = 1ull << 2, y = 1ull << 3, right = 1ull << 14, stick_right = 1ull << 18;
-    CHECK(p.OnPad(kPadA, now + 2) == 0);
-    CHECK(p.TakeChosen() == 0);
-    CHECK(p.TakeChosen() == -1);
-    CHECK(p.OnPad(x | y | right | stick_right, now + 3) == 0);
+    const std::uint64_t x = 1ull << 2, y = 1ull << 3, left = 1ull << 12, right = 1ull << 14, stick_right = 1ull << 18;
+    CHECK(p.OnPad(kPadA, now + 2) == 0);   // A: ours, not the System page's
+    CHECK(p.TakeDecide());
+    CHECK_FALSE(p.TakeDecide());
+    CHECK(p.OnPad(x | y | left | right | stick_right | kPadZL, now + 3) == 0);   // (ZL: back to System, taken)
+    CHECK_FALSE(p.Shown());
     p.OnPad(0, now + 4);
-    for (int i = 0; i < 7; ++i) {   // down past the last row: it stops there
-        p.OnPad(kPadDown, now + 5 + 2 * i);
-        p.OnPad(0, now + 6 + 2 * i);
-    }
-    CHECK(p.Cursor() == kRows - 1);
-    p.OnPad(kPadStickUp, now + 30);
-    p.OnPad(0, now + 31);
-    CHECK(p.Cursor() == kRows - 2);
-    p.OnPad(kPadA, now + 32);
-    CHECK(p.TakeChosen() == kRows - 2);
-    p.OnPad(0, now + 33);
-    CHECK(p.OnPad(kPadB, now + 34) == kPadB);
-    // The rows' frames follow the cursor at the pages' next update.
-    auto d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 33);
-    CHECK(d.set_cursor);
-    CHECK(d.cursor == kRows - 2);
-    CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 34).set_cursor);
-    CHECK(p.OnPad(kPadPlus | kPadA, now + 35) == kPadPlus);
-    CHECK(p.OnPad(kPadMinus, now + 36) == kPadMinus);
-    CHECK(p.Shown());   // (the game acts on them; the screens' updates then give System back)
+    REQUIRE(p.OnPad(kPadR, now + 5) == 0);
+    p.OnPad(0, now + 6);
+    // Up and down reach the game: the System page's focus moves, and the game's cursor frame with it over our rows.
+    CHECK(p.OnPad(kPadDown, now + 7) == kPadDown);
+    CHECK(p.OnPad(kPadUp | kPadStickUp, now + 8) == (kPadUp | kPadStickUp));
+    CHECK(p.OnPad(kPadDown | kPadA, now + 9) == kPadDown);
+    CHECK(p.TakeDecide());
+    p.OnPad(0, now + 10);
+    CHECK(p.OnPad(kPadB, now + 11) == kPadB);
+    CHECK(p.OnPad(kPadPlus, now + 12) == kPadPlus);
+    CHECK(p.OnPad(kPadMinus, now + 13) == kPadMinus);
+    CHECK(p.Shown());   // (the game acts on B, + and -; the screens' updates then give System back)
 }
 
 TEST_CASE("pause tab: the page does not show off System, mid-step, in the Minus menu, without the pack or under a window") {

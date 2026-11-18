@@ -12,6 +12,8 @@
 #include <mutex>
 #include <string>
 
+#include <fmt/format.h>
+
 #include "common/logging.h"
 #include "coop_runtime.h"
 
@@ -26,7 +28,6 @@ Page g_page;
 std::atomic<bool> g_shown{false};   // (the mouse asks often, from any thread)
 // Panes found, per screen object (0: not looked up yet or not there).
 std::uint64_t g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
-std::uint64_t g_row_cursor[kRows] = {}, g_row_frame[kRows] = {};   // per row of ours: the copied cursor, the frame
 std::uint64_t g_strip_screen = 0, g_tab_pane = 0;
 bool g_pages_bad = false, g_strip_bad = false;   // a pane that is not a part: the page step stays off (logged once)
 
@@ -145,31 +146,14 @@ void ApplyPages(void* ctx, std::uint64_t screen, const Page::Do& d) {
             std::snprintf(label, sizeof label, "Pa_Coop_00-Pa_Button_%02d-T_Btn_00", i);
             set += SetText(ctx, layout, path, "LayoutMsg/PlusMenu_00", label) ? 1 : 0;
         }
-        // Inside our copy: its controller picture (System's, not ours) hidden; each row's copied cursor and its own
-        // selection frame (W_Select_00, hidden in the button's layout) found, for the module's cursor.
+        // Inside our copy: its controller picture (System's, not ours) hidden.
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
         const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
         const std::uint64_t controller = PaneIn(ctx, ours, "Pa_SystemController_00");
         if (IsPart(controller)) SetVisible(ctx, controller, false);
-        int rows = 0;
-        for (int i = 0; i < kRows; ++i) {
-            char name[24];
-            std::snprintf(name, sizeof name, "Pa_Button_%02d", i);
-            const std::uint64_t button = PartLayout(ours, name);
-            g_row_cursor[i] = PaneIn(ctx, button, "N_Cursor_00");
-            g_row_frame[i] = PaneIn(ctx, button, "W_Select_00");
-            rows += g_row_cursor[i] != 0 && g_row_frame[i] != 0 ? 1 : 0;
-        }
-        LOG_INFO(Core, "coop: pause tab: the page's rows: {} of {} texts set; its layout {:#x}, controller picture {}, "
-                 "{} of {} rows with a cursor and a frame", set, kRows, ours, IsPart(controller) ? "hidden" : "not found",
-                 rows, kRows);
-    }
-    if (d.set_cursor) {
-        for (int i = 0; i < kRows; ++i) {
-            if (g_row_cursor[i] != 0) SetVisible(ctx, g_row_cursor[i], false);   // (System's cursor, copied: not ours)
-            if (g_row_frame[i] != 0) SetVisible(ctx, g_row_frame[i], i == d.cursor);
-        }
+        LOG_INFO(Core, "coop: pause tab: the page's rows: {} of {} texts set; its controller picture {}", set, kRows,
+                 IsPart(controller) ? "hidden" : "not found");
     }
 }
 
@@ -196,10 +180,40 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         const bool text = SetText(ctx, layout, "Pa_Category_04/T_Text_00", "LayoutMsg/MenuOverlay_00",
                                   "Pa_Category_04-T_Text_00");
         Call(ctx, kTabOpen, tab4, 0);   // (opened and shown, as the game's fill ends for each of its tabs)
-        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {})", text ? "set" : "not set");
+        // Its word's panes shown (the strip's own animations name the game's four tabs only: ours may start faded).
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
+        const std::uint64_t ours = PartLayout(table, "Pa_Category_04"), theirs = PartLayout(table, "Pa_Category_03");
+        std::string dump;
+        for (const char* name : {"N_MenuChangeTextIn_00", "N_Text_00", "T_Text_00"}) {
+            const std::uint64_t pane = PaneIn(ctx, ours, name), game = PaneIn(ctx, theirs, name);
+            if (pane != 0) SetVisible(ctx, pane, true);
+            // (for the next run: the pane's bytes +0x60..+0xc0, ours and System's tab's, to see what fades ours)
+            for (const std::uint64_t at : {pane, game}) {
+                std::uint8_t b[0x60] = {};
+                if (at != 0) CoopRuntime::Read(at + 0x60, b, sizeof b);
+                dump += fmt::format(" {}{}:", name, at == pane ? "(ours)" : "(System's)");
+                for (std::uint8_t x : b) dump += fmt::format("{:02x}", x);
+            }
+        }
+        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}); panes at +0x60:{}", text ? "set" : "not set",
+                 dump);
     }
     Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
+}
+
+// The System page's focused button (0..4), the row of ours under the game's cursor frame; -1 when none is.
+int FocusedRow() {
+    const std::uint64_t pages = g_pages_screen;
+    const std::uint64_t page = pages != 0 ? Read<std::uint64_t>(pages + kSystemPageObject) : 0;
+    if (page == 0) return -1;
+    for (int i = 0; i < kRows; ++i) {
+        const std::uint64_t button = Read<std::uint64_t>(page + kSystemButtons + 8 * static_cast<std::uint64_t>(i));
+        const std::uint8_t state = button != 0 ? Read<std::uint8_t>(button + kButtonState) : 0;
+        if (state != 0 && (state & 0xfe) != 4) return i;
+    }
+    return -1;
 }
 
 }  // namespace
@@ -262,25 +276,25 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         }
         std::uint64_t out = 0;
         bool was = false, shown = false;
-        int chosen = -1, cursor = 0;
+        bool decide = false;
+        int row = -1;
         std::string why;
         {
             std::lock_guard lock(g_mutex);
             was = g_page.Shown();
             out = g_page.OnPad(in, NowMs());
             shown = g_page.Shown();
-            chosen = g_page.TakeChosen();
-            cursor = g_page.Cursor();
+            decide = g_page.TakeDecide();
+            row = decide ? FocusedRow() : -1;   // (under the lock: the pages screen is the screens' updates')
             why = g_page.TakeWhy();
             g_shown = shown;
         }
         if (shown && stick != nullptr) {
-            for (int i = 0; i < 4; ++i) stick[i] = 0;   // (the System page's cursor does not move under ours)
+            stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
         }
         if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
-        if (chosen >= 0) LOG_INFO(Core, "coop: pause tab: row {} chosen (the rows' actions come next)", chosen);
-        (void)cursor;
+        if (decide) LOG_INFO(Core, "coop: pause tab: row {} chosen (the rows' actions come next)", row);
         // (the stick's up and down bits we added are not the game's: only what it sent, filtered)
         return out & (buttons | ~(kPadStickUp | kPadStickDown));
     } catch (...) {
