@@ -12,8 +12,6 @@
 #include <mutex>
 #include <string>
 
-#include <fmt/format.h>
-
 #include "common/logging.h"
 #include "coop_runtime.h"
 
@@ -57,6 +55,15 @@ bool Call(void* ctx, std::uint64_t offset, std::uint64_t a0, std::uint64_t a1 = 
     const bool ok = g_api->call(ctx, &k, &r);
     if (x0 != nullptr) *x0 = r;
     return ok;
+}
+
+void CallAlpha(void* ctx, std::uint64_t pane, float alpha) {
+    HosCoopCall k{};
+    k.function = CoopRuntime::MainBase() + kPaneAlpha;
+    k.x[0] = pane;
+    k.s0 = alpha;
+    std::uint64_t r = 0;
+    g_api->call(ctx, &k, &r);
 }
 
 // (layout, "name") -> the pane itself, a part's own pane too. kFindPane (main+0x76e2b0) hands a part's inner root
@@ -180,24 +187,15 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         const bool text = SetText(ctx, layout, "Pa_Category_04/T_Text_00", "LayoutMsg/MenuOverlay_00",
                                   "Pa_Category_04-T_Text_00");
         Call(ctx, kTabOpen, tab4, 0);   // (opened and shown, as the game's fill ends for each of its tabs)
-        // Its word's panes shown (the strip's own animations name the game's four tabs only: ours may start faded).
+        // Its word faded in: the strip's own "text in" animation fades in the game's four tabs' words only (it names
+        // their panes, 8 to 11), so ours stays at alpha 0 (seen in a run, 2026-11-18: N_MenuChangeTextIn_00's own
+        // alpha, +0x74, 0 in ours, 1 in the game's). Set to 1 with the game's alpha setter.
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
-        const std::uint64_t ours = PartLayout(table, "Pa_Category_04"), theirs = PartLayout(table, "Pa_Category_03");
-        std::string dump;
-        for (const char* name : {"N_MenuChangeTextIn_00", "N_Text_00", "T_Text_00"}) {
-            const std::uint64_t pane = PaneIn(ctx, ours, name), game = PaneIn(ctx, theirs, name);
-            if (pane != 0) SetVisible(ctx, pane, true);
-            // (for the next run: the pane's bytes +0x60..+0xc0, ours and System's tab's, to see what fades ours)
-            for (const std::uint64_t at : {pane, game}) {
-                std::uint8_t b[0x60] = {};
-                if (at != 0) CoopRuntime::Read(at + 0x60, b, sizeof b);
-                dump += fmt::format(" {}{}:", name, at == pane ? "(ours)" : "(System's)");
-                for (std::uint8_t x : b) dump += fmt::format("{:02x}", x);
-            }
-        }
-        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}); panes at +0x60:{}", text ? "set" : "not set",
-                 dump);
+        const std::uint64_t text_in = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
+        if (text_in != 0) CallAlpha(ctx, text_in, 1.0f);
+        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}, {})", text ? "set" : "not set",
+                 text_in != 0 ? "faded in" : "its text pane not found");
     }
     Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
