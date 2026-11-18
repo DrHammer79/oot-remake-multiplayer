@@ -53,26 +53,25 @@ std::string ButtonName(const Reader& read, std::uint64_t button) {
     if (button == 0) {
         return {};
     }
-    std::uint64_t n = Peek<std::uint64_t>(read, button + kNameLength);
-    const std::uint64_t at = (Peek<std::uint8_t>(read, button + kNameFlags) & 0x20) != 0
-                                 ? Peek<std::uint64_t>(read, Peek<std::uint64_t>(read, button + kNameText) + kNameIndirect)
-                                 : Peek<std::uint64_t>(read, button + kNameText);
-    if (n == 0 || at < 0x100000) {
+    const std::uint64_t at = Peek<std::uint64_t>(read, button + kNameText);
+    if (at < 0x100000) {
         return {};
     }
-    if (n > kNameMax) {
-        n = kNameMax;
-    }
-    std::string name(static_cast<std::size_t>(n), '\0');
-    if (!read(at, name.data(), name.size())) {
-        return {};
-    }
-    for (const char c : name) {
+    std::string name;
+    for (std::size_t i = 0; i < kNameMax; ++i) {   // (byte by byte: the text may end just before unmapped memory)
+        char c = 0;
+        if (!read(at + i, &c, 1)) {
+            return {};
+        }
+        if (c == 0) {
+            return name;
+        }
         if (c < 0x20 || c > 0x7e) {
             return {};
         }
+        name += c;
     }
-    return name;
+    return name;   // (cut at kNameMax)
 }
 
 }  // namespace CoopModScreens

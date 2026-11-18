@@ -73,7 +73,7 @@ enum {
 typedef struct CoopModScreen {
     uint32_t size;          /* sizeof this struct as the runtime knows it */
     uint32_t kind;          /* COOP_MOD_SCREEN_* */
-    const char *focused;    /* the focused button's name in the screen's layout ("Pa_Button_02": the title's Continue),
+    const char *focused;    /* the focused button's name in the screen's layout ("Pa_Button_00": the title's Continue),
                                "" when no button is focused or the screen takes no input now */
     int save_list_ready;    /* 1 when the game's save list is read and no new read is asked or running */
 } CoopModScreen;

@@ -490,9 +490,9 @@ TEST_CASE("mod plugins v2: each menu screen reaches the mods that asked, with it
     CHECK(g.api[1]->size >= offsetof(CoopModApi, hold_input) + sizeof(void*));
     CHECK(r.host->WantsScreens());
     g.calls.clear();
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     r.Screen(COOP_MOD_SCREEN_LOAD_LIST, "", false);
-    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_02' 1", "screen b 2 '' 0"});
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1", "screen b 2 '' 0"});
     CHECK(g.game_calls.empty());   // (nothing asked: nothing done)
 }
 
@@ -500,10 +500,10 @@ TEST_CASE("mod plugins v2: choose, reload and hold work inside the mod's own on_
     Run r;
     g.calls.clear();
     g.screen_do = kChoose | kReload | kHoldOn;
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
-    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_02' 1 choose 1 reload 1 hold 1"});
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1 choose 1 reload 1 hold 1"});
     CHECK(g.game_calls == std::vector<std::string>{"choose 7 20480", "reload"});   // (the update's own ctx and screen)
-    CHECK(r.Logged("mod bee: chose Pa_Button_02 on the title"));
+    CHECK(r.Logged("mod bee: chose Pa_Button_00 on the title"));
     CHECK(r.Logged("mod bee: asked the game to read its save list again"));
     CHECK(r.Logged("mod bee: holds the game's input"));
     CHECK(r.host->InputHeld());
@@ -542,8 +542,8 @@ TEST_CASE("mod plugins v2: outside the mod's own on_screen call the v2 calls do 
     // Inside bee's call, alpha's table is not inside alpha's own call.
     g.calls.clear();
     g.screen_do = kOther;
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
-    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_02' 1 alpha's 0"});
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1 alpha's 0"});
     CHECK(g.game_calls.empty());
     CHECK(r.Logged("mod alpha: called choose_focused outside its on_screen call"));
 
@@ -554,7 +554,7 @@ TEST_CASE("mod plugins v2: outside the mod's own on_screen call the v2 calls do 
 TEST_CASE("mod plugins v2: a hold ends with no menu screen for half a second, and with the mod") {
     Run r;
     g.screen_do = kHoldOn;
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     g.now += kHoldLapseMs - 1;
     CHECK(r.host->InputHeld());
     g.now += 1;
@@ -562,23 +562,23 @@ TEST_CASE("mod plugins v2: a hold ends with no menu screen for half a second, an
     CHECK(r.Logged("mod bee: its hold on the game's input ended (no menu screen for half a second)"));
 
     g.screen_do = kHoldOn | kThrow;
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     CHECK_FALSE(r.host->InputHeld());   // (switched off by its crash)
     CHECK(r.Logged("mod bee: crashed in its screen callback"));
     CHECK(r.Logged("mod bee: its hold on the game's input ended (the mod is off)"));
     CHECK_FALSE(r.host->WantsScreens());   // (no mod left that asked: the runtime reads no screen)
     g.calls.clear();
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     CHECK(g.calls.empty());
 }
 
 TEST_CASE("mod plugins v2: after stop no screen reaches a mod and nothing is held") {
     Run r;
     g.screen_do = kHoldOn;
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     r.host->Stop();
     g.calls.clear();
-    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_02");
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     CHECK(g.calls.empty());
     CHECK_FALSE(r.host->WantsScreens());
     CHECK_FALSE(r.host->InputHeld());

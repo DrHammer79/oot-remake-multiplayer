@@ -27,9 +27,10 @@ inline constexpr std::uint64_t kButtonDecide = 0x3771db0;
 inline constexpr std::uint64_t kScreenFocus = 32, kFocusManager = 96;
 inline constexpr std::uint64_t kListHead = 136, kListFirst = 144, kListEntryOffset = 156, kEntryButton = 24;
 inline constexpr std::uint64_t kButtonState = 56;
-// A button's pane name, as the game's own screen request reads it (main+0x3379160): its length at +0x18, its text at
-// *(button+0x20), or at *(*(button+0x20)+0x30) when bit 5 of +0x41 is set.
-inline constexpr std::uint64_t kNameLength = 0x18, kNameText = 0x20, kNameFlags = 0x41, kNameIndirect = 0x30;
+// A button's pane name: a pointer to its text at +0x18, ended by a 0, as the game's own screen request passes it on
+// (main+0x3379160: x1 = *(button+0x18)). Seen in a game on the title: Pa_Button_00 (Continue) to Pa_Button_03, in the
+// order of the title's buttons array (CoopTitle's +0x2d0).
+inline constexpr std::uint64_t kNameText = 0x18;
 inline constexpr std::size_t kNameMax = 63;
 inline constexpr int kMaxButtons = 64;
 

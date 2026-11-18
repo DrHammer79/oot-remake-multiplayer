@@ -103,32 +103,25 @@ TEST_CASE("mod screens: a list that never comes back to its head stops after 64 
     CHECK(FocusedButton(m.reader(), kScreen) == 0);   // (the same button found twice: not one focus)
 }
 
-TEST_CASE("mod screens: a button's name, direct or through its string object") {
+TEST_CASE("mod screens: a button's name is the text its +0x18 points at") {
     Memory m;
     const std::uint64_t b = 0x700000;
-    m.U64(b + kNameLength, 12);
     m.U64(b + kNameText, 0x710000);
-    m.U8(b + kNameFlags, 0);
-    m.Text(0x710000, "Pa_Button_02");
-    CHECK(ButtonName(m.reader(), b) == "Pa_Button_02");
-
-    m.U8(b + kNameFlags, 0x20);   // (bit 5: the text is at *(*(button+0x20)+0x30))
-    m.U64(0x710000 + kNameIndirect, 0x720000);
-    m.Text(0x720000, "Pa_Save_003x");
-    CHECK(ButtonName(m.reader(), b) == "Pa_Save_003x");
+    m.Text(0x710000, std::string("Pa_Button_00\0Pa_Button_01\0", 26));   // (the names lie end to end)
+    CHECK(ButtonName(m.reader(), b) == "Pa_Button_00");
 }
 
-TEST_CASE("mod screens: no name for no button, an unmapped or unprintable text, and long names are cut") {
+TEST_CASE("mod screens: no name for no button, an unmapped, unended or unprintable text, and long names are cut") {
     Memory m;
     CHECK(ButtonName(m.reader(), 0).empty());
     const std::uint64_t b = 0x700000;
-    m.U64(b + kNameLength, 4);
+    CHECK(ButtonName(m.reader(), b).empty());   // (no pointer)
     m.U64(b + kNameText, 0x710000);
-    m.U8(b + kNameFlags, 0);
     CHECK(ButtonName(m.reader(), b).empty());   // (the text is not mapped)
-    m.Text(0x710000, std::string("Pa\x01x", 4));
+    m.Text(0x710000, "Pa_Bu");                  // (mapped, then unmapped before its end)
     CHECK(ButtonName(m.reader(), b).empty());
-    m.U64(b + kNameLength, 200);
+    m.Text(0x710000, std::string("Pa\x01x\0", 5));
+    CHECK(ButtonName(m.reader(), b).empty());
     m.Text(0x710000, std::string(200, 'a'));
     CHECK(ButtonName(m.reader(), b) == std::string(kNameMax, 'a'));
 }
