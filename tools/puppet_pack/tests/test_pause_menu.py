@@ -245,5 +245,25 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(sizes, before)
 
 
+class NupFilesTest(unittest.TestCase):
+    def test_the_menus_files_newest_language_archives(self):
+        """A .nup build extracts the menus' archives too, and each language's newest message archive only."""
+        import fnmatch
+        from puppet_pack import build
+
+        class FakeNup:
+            files = ["UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
+                     "Mals/USen.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs", "Mals/EUfr.Product.110.sarc.zs",
+                     "Mals/JPja.Product.100.sarc.zs", "Pack/ZsDic.pack.zs"]
+
+            def glob(self, pattern):
+                d, _, name = pattern.rpartition("/")
+                return sorted(f for f in self.files if f.rpartition("/")[0] == d and fnmatch.fnmatchcase(f.rpartition("/")[2], name))
+
+        self.assertEqual(build.nup_menu_files(FakeNup()), [
+            "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
+            "Mals/EUfr.Product.110.sarc.zs", "Mals/JPja.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -64,6 +64,17 @@ std::uint64_t FindPane(void* ctx, std::uint64_t layout, const char* name) {
     return at != 0 && Call(ctx, kFindPane, layout, at, 0, 0, 0, &pane) ? pane : 0;
 }
 
+// (layout, "name") -> the pane itself, a part's own pane too. kFindPane (main+0x76e2b0) hands a part's inner root
+// instead (its layout's pane 0, the one the game hides a tab through); the pause tab's copies are stored hidden on the
+// part's own pane, so that is the one shown. The same two calls kFindPane makes first (read from main, 2026-11-18):
+// main+0x43c040(layout + 0x40) -> the layout's pane table, main+0x43e300(table, "name") -> the pane by name.
+std::uint64_t FindOwnPane(void* ctx, std::uint64_t layout, const char* name) {
+    std::uint64_t table = 0, pane = 0;
+    if (!Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table) || table == 0) return 0;
+    const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
+    return at != 0 && Call(ctx, kPaneByName, table, at, 0, 0, 0, &pane) ? pane : 0;
+}
+
 // A part's pane (kind 6 at +0xa8 bits 22..25, docs/game-ui.md): what the visibility call is made on.
 bool IsPart(std::uint64_t pane) {
     return pane != 0 && ((Read<std::uint32_t>(pane + 0xa8) >> 22) & 0xf) == 6;
@@ -97,8 +108,8 @@ void ApplyPages(void* ctx, std::uint64_t screen, const Page::Do& d) {
     if (layout == 0) return;
     if (screen != g_pages_screen) {
         g_pages_screen = screen, g_pages_bad = false;
-        g_system_pane = FindPane(ctx, layout, "Pa_System_00");
-        g_coop_pane = FindPane(ctx, layout, "Pa_Coop_00");
+        g_system_pane = FindOwnPane(ctx, layout, "Pa_System_00");
+        g_coop_pane = FindOwnPane(ctx, layout, "Pa_Coop_00");
         const bool ok = IsPart(g_system_pane) && IsPart(g_coop_pane);
         g_pages_bad = !ok;
         LOG_INFO(Core, "coop: pause tab: the pages' panes: Pa_System_00 {:#x}, Pa_Coop_00 {:#x}{}", g_system_pane,
@@ -132,7 +143,7 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     if (layout == 0 || tabs == 0) return;
     if (f.screen != g_strip_screen) {
         g_strip_screen = f.screen;
-        g_tab_pane = FindPane(ctx, layout, "Pa_Category_04");
+        g_tab_pane = FindOwnPane(ctx, layout, "Pa_Category_04");
         g_strip_bad = !IsPart(g_tab_pane);
         LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}", g_tab_pane,
                  g_strip_bad ? " (not a part: left alone)" : "");

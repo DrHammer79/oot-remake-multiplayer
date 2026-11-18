@@ -696,6 +696,27 @@ def nup_scene_files(n):
     return out
 
 
+def nup_menu_files(n):
+    """RomFS paths of what the menus' steps edit (title_menu.py's title rows, pause_menu.py's Multiplayer tab), in an
+    open Nup: their UI archives and every language's message archive. A .nup build extracts only what is named, and
+    these are not the pack's own sources: without them both steps were left out ("No such file")."""
+    out = []
+    for pattern in (title_menu.TITLE_ARCHIVE, pause_menu.COMMON_ARCHIVE):
+        out += n.glob(pattern)[:1]
+    newest = {}   # (a .nup has the base game's and the update's: the game reads the newest, Product.110 over 100)
+    for rel in n.glob(pause_menu.MALS_GLOB):
+        lang = rel.split("/")[-1].split(".")[0]
+        if lang not in newest or _product(rel) > _product(newest[lang]):
+            newest[lang] = rel
+    return out + [newest[lang] for lang in sorted(newest)]
+
+
+def _product(rel):
+    """The number after .Product. in a RomFS name (100, 110 ...), 0 when there is none."""
+    part = rel.split(".Product.")[-1].split(".")[0] if ".Product." in rel else ""
+    return int(part) if part.isdigit() else 0
+
+
 def nup_look_files(n, dicts):
     """RomFS paths of the gear colours' sources in an open Nup: each gear texture (look_live.GEAR,
     for coop_look/gear.bin: your own sword, shields, gauntlets, boots) and each coloured item's
@@ -1460,7 +1481,8 @@ def main(argv=None):
         tmp = tempfile.mkdtemp(prefix="coop-puppet-")
         try:
             with nup.Nup(a.romfs) as n:
-                for rel in list(dumpcheck.nup_files(n).values()) + nup_scene_files(n):
+                menus = nup_menu_files(n) if (a.title_rows or a.pause_tab) else []
+                for rel in list(dumpcheck.nup_files(n).values()) + nup_scene_files(n) + menus:
                     nup.write_under(tmp, rel, n.read(rel))
                 # The gear colours' sources (with the dictionaries just taken out, to read the items' packs).
                 for rel in nup_look_files(n, zs.Dicts.from_romfs(tmp)):
