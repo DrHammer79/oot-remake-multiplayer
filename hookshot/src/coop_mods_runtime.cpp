@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include <fmt/format.h>
 #include <monocypher.h>
 
 #include "coop_hook.h"
@@ -98,6 +99,22 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
         return no(2, "the game's Button::Decide could not be called");
     }
     if ((x0 & 1) == 0) {
+        // (what Button::Decide tests: the button's flags +0x40 need 0x14; its control base *(*(*(b+0x20)+0x28)+0x38)
+        // with bit 0 of +0x40 set walks its buttons for one being decided)
+        std::uint32_t flags = 0;
+        std::uint64_t part = 0, owner = 0, base = 0;
+        std::uint8_t base_flags = 0;
+        ReadGame(button + 0x40, &flags, sizeof flags);
+        ReadGame(button + 0x20, &part, sizeof part);
+        ReadGame(part + 0x28, &owner, sizeof owner);
+        ReadGame(owner + 0x38, &base, sizeof base);
+        ReadGame(base + 0x40, &base_flags, 1);
+        static std::atomic<int> detail{0};
+        if (detail.fetch_add(1) < 3) {
+            CoopRuntime::Log(fmt::format("coop: mods: Button::Decide answered {:#x} for button {:#x} of screen {:#x} "
+                                         "(flags {:#x}, its owner {:#x}, control base {:#x} flags {:#x})",
+                                         x0, button, screen, flags, owner, base, base_flags));
+        }
         return no(3, "the game said not now (its control is deciding another button, or the button is off)");
     }
     said = -1;
