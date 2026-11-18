@@ -24,12 +24,13 @@ NAME_FN, CTOR, CREATE, CALLER = 0x100, 0x200, 0x300, 0x400
 SCREEN_FNS = (0x500, 0x510, 0x520)
 TYPED_FN, PURE_FN = 0x530, 0x540
 OVERWRITE, SIMD = 0x600, 0x640   # an ADRP whose register is overwritten; a SIMD store and load
+OVERWRITES, KEEP = 0x680, 0x700  # ADRPs whose register a pair, an atomic, a CAS or a STXR overwrites; one they keep
 # Read-only data
 MOD0, NAME_STR, TYPE_NAME, DYNSTR, DYNSYM, DYNAMIC, RELA, RELR = (
     0x1000, 0x1100, 0x1120, 0x1200, 0x1300, 0x1400, 0x1500, 0x1600)
 # Data: four vtables, a type info object, a global pointer and a global value
 FACTORY_VT, SCREEN_VT, TYPED_VT, PURE_VT = 0x2010, 0x2030, 0x2058, 0x2070
-TYPE_INFO, GLOBAL_PTR, GLOBAL_VAL, WIDE = 0x2100, 0x2200, 0x2208, 0x2210
+TYPE_INFO, GLOBAL_PTR, GLOBAL_VAL, WIDE, COUNTER = 0x2100, 0x2200, 0x2208, 0x2210, 0x2220
 
 
 def adrp(rd, pc, target):
@@ -57,6 +58,15 @@ RET = 0xD65F03C0
 MOV_X8_X0 = 0xAA0003E8          # orr x8, xzr, x0
 STR_Q0 = 0x3D800000             # str q0, [xN, #imm * 16]
 LDR_Q1 = 0x3DC00001             # ldr q1, [xN, #imm * 16]
+# Each writes x8 (checked with capstone, as are the words in test_writes).
+WRITE_X8 = (0xA94023E0,         # ldp x0, x8, [sp]: the second register
+            0xF8210008,         # ldadd x1, x8, [x0]: the old value
+            0xC8A87C01,         # cas x8, x1, [x0]: the old value goes to Rs
+            0xC8087C01)         # stxr w8, x1, [x0]: the status
+# Each reads x8 and writes another register or none.
+KEEP_X8 = (0xC8097C08,          # stxr w9, x8, [x0]
+           0xC8E97C08,          # casa x9, x8, [x0]
+           0xF828001F)          # stadd x8, [x0] (ldadd x8, xzr, [x0])
 
 
 def simd(op, rn, off):
@@ -84,6 +94,10 @@ def make_image():
     # x8 gets the page of GLOBAL_VAL, then something else: the load after it is not a read of GLOBAL_VAL.
     code(img, OVERWRITE, [adrp(8, B + OVERWRITE, B + GLOBAL_VAL), MOV_X8_X0, ldr64(9, 8, GLOBAL_VAL & 0xFFF), RET])
     code(img, SIMD, [adrp(9, B + SIMD, B + WIDE), simd(STR_Q0, 9, WIDE & 0xFFF), simd(LDR_Q1, 9, WIDE & 0xFFF), RET])
+    for k, w in enumerate(WRITE_X8):
+        at = OVERWRITES + 16 * k
+        code(img, at, [adrp(8, B + at, B + GLOBAL_VAL), w, ldr64(9, 8, GLOBAL_VAL & 0xFFF), RET])
+    code(img, KEEP, [adrp(8, B + KEEP, B + COUNTER), *KEEP_X8, ldr64(10, 8, COUNTER & 0xFFF), RET])
     img[NAME_STR:NAME_STR + 11] = b"TestScreen\0"
     img[TYPE_NAME:TYPE_NAME + 14] = b"N4test5ThingE\0"
     names = b"\0__cxa_pure_virtual\0_ZTVN10__cxxabiv117__class_type_infoE\0"
@@ -258,7 +272,11 @@ class CallersTest(unittest.TestCase):
         code, _, _ = self.hits(B + SCREEN_VT)
         self.assertEqual(code, {(CTOR + 4, "address")})
         code, _, _ = self.hits(B + GLOBAL_VAL)
-        self.assertEqual(code, {(CALLER + 12, "read")})   # not OVERWRITE + 8: x8 was overwritten before it
+        self.assertEqual(code, {(CALLER + 12, "read")})   # not OVERWRITE + 8 nor OVERWRITES: x8 was overwritten
+
+    def test_register_kept(self):
+        code, _, _ = self.hits(B + COUNTER)
+        self.assertEqual(code, {(KEEP + 16, "read")})   # a store, a CAS and an atomic that only read x8
 
     def test_simd_store_and_load(self):
         code, _, _ = self.hits(B + WIDE)
@@ -270,8 +288,73 @@ class CallersTest(unittest.TestCase):
                             (0xFD000000, True), (0xFD400000, False),     # STR d, LDR d
                             (0xA9000000, True), (0xA9400000, False),     # STP x, LDP x
                             (0xF8000000, True), (0xF8400000, False),     # STUR x, LDUR x
+                            (0xF8210008, False), (0xF8218008, False),    # LDADD, SWP: the old value goes to Rt
+                            (0xC8A87C01, True), (0xC8E87C01, True),      # CAS, CASA: Rt is stored
+                            (0x48287C02, True), (0x48687C02, True),      # CASP, CASPA
+                            (0xC8087C01, True), (0xC85F7C08, False),     # STXR, LDXR
+                            (0xC8280801, True), (0xC87F2001, False),     # STXP, LDXP
+                            (0xC89FFC08, True), (0xC8DFFC08, False),     # STLR, LDAR
                             (MOV_X8_X0, False), (RET, False)):
             self.assertEqual(callers.is_store(word), store, hex(word))
+
+    def test_writes(self):
+        # Each word (checked with capstone) and the X registers it may write.
+        for word, regs in ((0xA94023E0, {0, 8}),         # ldp x0, x8, [sp]
+                           (0x29402020, {0, 8}),         # ldp w0, w8, [x1]
+                           (0x69402020, {0, 8}),         # ldpsw x0, x8, [x1]
+                           (0xA8402020, {0, 8}),         # ldnp x0, x8, [x1]
+                           (0xA9002020, set()),          # stp x0, x8, [x1]
+                           (0x6D402020, set()),          # ldp d0, d8, [x1]: V registers
+                           (0xA8C10500, {0, 1, 8}),      # ldp x0, x1, [x8], #16: x8 written back
+                           (0xA9810500, {8}),            # stp x0, x1, [x8, #16]!
+                           (0xF8408500, {0, 8}),         # ldr x0, [x8], #8
+                           (0xF8008D00, {8}),            # str x0, [x8, #8]!
+                           (0xF9400008, {8}),            # ldr x8, [x0]
+                           (0xF9000008, set()),          # str x8, [x0]
+                           (0x3DC00008, set()),          # ldr q8, [x0]
+                           (0x4CDF7100, {8}),            # ld1 {v0.16b}, [x8], #16
+                           (0xF8210008, {8}),            # ldadd x1, x8, [x0]
+                           (0xF8A10008, {8}),            # ldadda x1, x8, [x0]
+                           (0xF8610008, {8}),            # ldaddl x1, x8, [x0]
+                           (0xF8E10008, {8}),            # ldaddal x1, x8, [x0]
+                           (0xF8211008, {8}),            # ldclr x1, x8, [x0]
+                           (0xF8212008, {8}),            # ldeor x1, x8, [x0]
+                           (0xF8213008, {8}),            # ldset x1, x8, [x0]
+                           (0xF8214008, {8}),            # ldsmax x1, x8, [x0]
+                           (0xF8215008, {8}),            # ldsmin x1, x8, [x0]
+                           (0xF8216008, {8}),            # ldumax x1, x8, [x0]
+                           (0xF8217008, {8}),            # ldumin x1, x8, [x0]
+                           (0xF8218008, {8}),            # swp x1, x8, [x0]
+                           (0x38210008, {8}),            # ldaddb w1, w8, [x0]
+                           (0x78210008, {8}),            # ldaddh w1, w8, [x0]
+                           (0xB8210008, {8}),            # ldadd w1, w8, [x0]
+                           (0xF828001F, set()),          # stadd x8, [x0]
+                           (0xC8A87C01, {8}),            # cas x8, x1, [x0]
+                           (0xC8E87C01, {8}),            # casa x8, x1, [x0]
+                           (0xC8A8FC01, {8}),            # casl x8, x1, [x0]
+                           (0xC8E8FC01, {8}),            # casal x8, x1, [x0]
+                           (0x08A87C01, {8}),            # casb w8, w1, [x0]
+                           (0x48A87C01, {8}),            # cash w8, w1, [x0]
+                           (0x88A87C01, {8}),            # cas w8, w1, [x0]
+                           (0x48287C02, {8, 9}),         # casp x8, x9, x2, x3, [x0]
+                           (0x48687C02, {8, 9}),         # caspa x8, x9, x2, x3, [x0]
+                           (0x4828FC02, {8, 9}),         # caspl x8, x9, x2, x3, [x0]
+                           (0x4868FC02, {8, 9}),         # caspal x8, x9, x2, x3, [x0]
+                           (0x08287C02, {8, 9}),         # casp w8, w9, w2, w3, [x0]
+                           (0xC8087C01, {8}),            # stxr w8, x1, [x0]
+                           (0xC808FC01, {8}),            # stlxr w8, x1, [x0]
+                           (0x08087C01, {8}),            # stxrb w8, w1, [x0]
+                           (0xC8280801, {8}),            # stxp w8, x1, x2, [x0]
+                           (0xC8288801, {8}),            # stlxp w8, x1, x2, [x0]
+                           (0xC85F7C08, {8}),            # ldxr x8, [x0]
+                           (0xC85FFC08, {8}),            # ldaxr x8, [x0]
+                           (0xC87F2001, {1, 8}),         # ldxp x1, x8, [x0]
+                           (0xC87FA001, {1, 8}),         # ldaxp x1, x8, [x0]
+                           (0xC89FFC08, set()),          # stlr x8, [x0]
+                           (0xC8DFFC08, {8}),            # ldar x8, [x0]
+                           (MOV_X8_X0, {8}), (RET, set())):
+            for rd in range(31):
+                self.assertEqual(callers.writes(word, rd), rd in regs, f"{word:#x} x{rd}")
 
     def test_functions_file_skips_other_lines(self):
         with tempfile.TemporaryDirectory() as d:

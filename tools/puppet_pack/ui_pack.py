@@ -22,9 +22,8 @@ The Layout2 resource (BFFH "Nintendo.Ui.ResModels.LayoutResData"), as far as rea
   - a pane record is 0x44 bytes: +0x10 and +0x14 its scale (f32; 1.0 in most panes), +0x18 its
     rotation (f32, radians), +0x1c translate x and +0x20 translate y (f32, y up), +0x28 its
     parent's index (-1 for the root), +0x2c and +0x30 its size (f32), +0x34 the index past its
-    subtree (panes are in pre-order), +0x38 its kind word (bits 7 to 10 the kind; bit 0 shown at
-    start, clear on the game's panes that start hidden: cursor glows, check marks, unused guides),
-    +0x42 u16 its index in its kind's table (a part's: in the part dictionary);
+    subtree (panes are in pre-order), +0x38 its kind, +0x42 u16 its index in its kind's table (a
+    part's: in the part dictionary);
   - a part record is 0x48 bytes: +0x00 the part layout's name, +0x08 and +0x18 two lists of
     overrides ({u64 offset, u32 count, u32 stride}; not copied here), +0x28 its parameters (a
     list of offsets of {name, f32 value, 4 zero bytes}), +0x38 the offset of its properties list
@@ -81,7 +80,7 @@ class Copy(NamedTuple):
     layout's units, y up, added to the source's translate), new values for some of the part's
     parameters ({name: float}), the pane it goes under (None: the source's parent), and whether it is
     stored hidden (bit 0 of its kind word cleared, as on the game's own panes that start hidden: a
-    co-op module shows it)."""
+    co-op module shows it, and a game without that module looks as it always did)."""
     source: str
     name: str
     move: tuple = (0.0, 0.0)
@@ -468,6 +467,53 @@ def frame_offset(layout, pane, ancestor):
         x, y = x + tx, y + ty
         at = _u32(d, rec + 0x28)
     return (x, y)
+
+
+class PackRun:
+    """One pack run's view of the game's files, shared by every UI builder (title_menu.py, pause_menu.py): a file a
+    builder made in this run is what the next one reads, so two builders that edit one archive (each language's
+    messages) keep each other's work; and a file's size-table entry grows once, against the game's original: its
+    size before the run, plus how much the file grew from the original, plus 0x1000.
+
+    read(rel) and glob(pattern) are a builder's reader. A builder checks its growth (check) before it writes
+    anything, then records its files and growth (commit). growth: [(rel, plain length read, plain length made,
+    required)]; required: the table must have the entry (an archive), else it is grown when there."""
+
+    def __init__(self, romfs, table):
+        self.romfs = romfs
+        self.table = table
+        self.made = {}    # rel -> the compressed file a builder made in this run
+        self._base = {}   # table key -> (its size before the run, the original's plain length)
+
+    def read(self, rel):
+        if rel in self.made:
+            return self.made[rel]
+        with open(os.path.join(self.romfs, *rel.split("/")), "rb") as f:
+            return f.read()
+
+    def glob(self, pattern):
+        import glob as _glob
+        n = len(self.romfs.rstrip("/\\")) + 1
+        return sorted(p[n:].replace("\\", "/") for p in _glob.glob(os.path.join(self.romfs, *pattern.split("/"))))
+
+    @staticmethod
+    def key(rel):
+        return rel[:-3] if rel.endswith(".zs") else rel
+
+    def check(self, growth):
+        for rel, _old, _new, required in growth:
+            if required and self.table.get(self.key(rel)) is None:
+                raise UiPackError("the size table has no %s" % self.key(rel))
+
+    def commit(self, files, growth):
+        for rel, _old, _new, required in growth:
+            key = self.key(rel)
+            size = self.table.get(key)
+            if size is None and key not in self._base:
+                continue
+            base, original = self._base.setdefault(key, (size, _old))
+            self.table.set(key, base + max(0, _new - original) + 0x1000)
+        self.made.update(files)
 
 
 def edit_entries(entries, name, edit):

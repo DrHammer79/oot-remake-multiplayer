@@ -279,3 +279,37 @@ TEST_CASE("pause tab: the probe logs a screen's first update, its first second's
     CHECK(p.Seen(other, 0).empty());
     CHECK(p.Seen(Blocker(2), 0).empty());
 }
+
+TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing") {
+    Session idle;
+    Session joined;
+    joined.in_one = true;
+    Session hosting_no_code;
+    hosting_no_code.hosting = hosting_no_code.in_one = true;
+    Session hosting = hosting_no_code;
+    hosting.code = true;
+
+    for (const Session& s : {idle, joined, hosting_no_code, hosting}) {
+        CHECK(ActionFor(kRowSession, s) == RowAction::kOpenMain);
+        CHECK(ActionFor(kRowPlayers, s) == RowAction::kOpenLobby);
+        CHECK(ActionFor(kRowLeave, s) == RowAction::kOpenMain);   // (Leave takes a press of its own there)
+        CHECK(ActionFor(-1, s) == RowAction::kNone);              // (no row under the cursor)
+        CHECK(ActionFor(kRows, s) == RowAction::kNone);
+    }
+    // Join code: the host copies its room name or code (shown on the main page); a host whose code is still coming
+    // sees the main page; in another's session the main page; alone the Join page.
+    CHECK(ActionFor(kRowJoinCode, hosting) == RowAction::kCopyCode);
+    CHECK(ActionFor(kRowJoinCode, hosting_no_code) == RowAction::kOpenMain);
+    CHECK(ActionFor(kRowJoinCode, joined) == RowAction::kOpenMain);
+    CHECK(ActionFor(kRowJoinCode, idle) == RowAction::kOpenJoin);
+    // Let in: the host's /allow; anyone else the Lobby tab (who is in, who asks).
+    CHECK(ActionFor(kRowLetIn, hosting) == RowAction::kAllow);
+    CHECK(ActionFor(kRowLetIn, hosting_no_code) == RowAction::kAllow);
+    CHECK(ActionFor(kRowLetIn, joined) == RowAction::kOpenLobby);
+    CHECK(ActionFor(kRowLetIn, idle) == RowAction::kOpenLobby);
+    // Each has words for the log.
+    for (RowAction a : {RowAction::kNone, RowAction::kOpenMain, RowAction::kOpenJoin, RowAction::kCopyCode,
+                        RowAction::kOpenLobby, RowAction::kAllow}) {
+        CHECK(std::string(ActionWords(a)).size() > 3);
+    }
+}

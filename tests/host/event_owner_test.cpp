@@ -183,6 +183,28 @@ TEST_CASE("event owner: a request taken in a run decides that run only, never th
   CHECK(t.Frame(true, true, std::string_view("EvtWait")) == EventWhose::ours);  // used once
 }
 
+TEST_CASE("event owner: a request with no run is dropped when the scene changes (review of e3542a8a)") {
+  EventOwnerTracker t;
+  t.Scene("InsideTheDekuTree");
+  t.Frame(false, false);
+  t.GameAsked("Dm_SY_Ocarina");  // taken, but its run never reads as running here
+  CHECK(t.Frame(false, false) == EventWhose::ours);
+  t.Scene("KokiriForest");  // a load: every event the manager held ends
+  CHECK(t.Frame(false, false) == EventWhose::ours);
+  CHECK(t.Frame(true, true, std::string_view("EvtWait")) == EventWhose::ours);  // the load's event, not the Ocarina
+  CHECK(t.Decided() == EventOwnerTracker::By::member);
+  t.Frame(false, false);
+  // The same scene keeps it over the gap, and a request taken in the load's own frame starts that scene's run.
+  t.GameAsked("Dm_SY_Ocarina");
+  t.Scene("KokiriForest");
+  t.Frame(false, false);
+  CHECK(t.Frame(true, true, std::string_view("EvtWait")) == EventWhose::ocarina);
+  t.Frame(false, false);
+  t.Scene("InsideTheDekuTree");
+  t.GameAsked("Dm_SY_Ocarina");  // fed after the scene, as the hook does
+  CHECK(t.Frame(true, true, std::string_view("EvtWait")) == EventWhose::ocarina);
+}
+
 TEST_CASE("event owner: issues 144 and 243, the scrub holds follow only our Link's own event") {
   // The hook's scrub talk hold, sale hold and Scrub Brothers' hit hold take our_link_in_event:
   // a scrub's talk of ours holds; another player's dungeon event replayed here does not delay

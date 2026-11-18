@@ -567,6 +567,7 @@ TEST_CASE("save transfer: a guest that joins with a file loaded asks and gets th
   // The line the guest reads when it joins says where the save is taken.
   CHECK(N::kJoinedPlaying.find("go back to the title") != std::string_view::npos);
   CHECK(N::kJoinedPlaying.find("Success") != std::string_view::npos);
+  CHECK(N::kTitleAsked.find("Success") != std::string_view::npos);  // the title's own ask (review of #278)
 }
 
 TEST_CASE("save transfer: a new session with a file still loaded chooses again without the title") {
@@ -889,6 +890,33 @@ TEST_CASE("save transfer: a host load of a known slot goes to every guest at onc
   CHECK(p.due(t0).empty());
 }
 
+TEST_CASE("save transfer: a guest back on the title after playing asks for the host's save again, only then") {
+  const save::TitleResync go{.title_came = true, .connected_guest = true, .played_in_session = true, .on = true,
+                             .can_switch = true, .plays_hosts_save = true, .ask_waiting = false};
+  CHECK(save::title_resync_due(go));
+  auto t = go;
+  t.title_came = false;  // not a return to the title
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.connected_guest = false;  // the host, a game alone, or a session that just ended
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.played_in_session = false;  // nothing played since joining (asked on joining)
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.on = false;  // LICHII_COOP_TITLE_RESYNC=0
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.can_switch = false;  // the emulator's fixed folder: no line at every title
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.plays_hosts_save = false;  // LICHII_COOP_TEST_OWN_SAVE=1, or a failed folder switch: keeps its own saves
+  CHECK_FALSE(save::title_resync_due(t));
+  t = go;
+  t.ask_waiting = true;  // joined with a file loaded (its ask waits for the title), or a save on its way
+  CHECK_FALSE(save::title_resync_due(t));
+}
+
 TEST_CASE("save transfer: Resync from host goes only for a guest that can switch, and not twice at once") {
   using save::ResyncCheck;
   CHECK(save::resync_check(true, true, false) == ResyncCheck::go);
@@ -900,6 +928,38 @@ TEST_CASE("save transfer: Resync from host goes only for a guest that can switch
   CHECK_FALSE(g.asked);
   CHECK(save::pending_step(true, false, true) == save::PendingStep::keep);  // playing: never switched under the game
   CHECK(save::pending_step(true, true, false) == save::PendingStep::go);     // the title's menu: switched
+}
+
+TEST_CASE("save transfer: the first multiplayer saves are a whole copy, never a half folder") {
+  TempDir t("coop_copy_dir_whole_test");
+  const fs::path solo = t.path / "account";
+  const fs::path mp = t.path / "account-mp";
+  fs::create_directories(solo / "slot_00");
+  { std::ofstream(solo / "slot_00" / "progress.sav", std::ios::binary) << "save"; }
+  { std::ofstream(solo / "option.sav", std::ios::binary) << "opt"; }
+  // A half copy an earlier try left behind is thrown away, not used.
+  fs::create_directories(t.path / "account-mp.part" / "junk");
+  std::string why;
+  REQUIRE(save::copy_dir_whole(solo, mp, &why));
+  CHECK(fs::exists(mp / "slot_00" / "progress.sav"));
+  CHECK(fs::exists(mp / "option.sav"));
+  CHECK_FALSE(fs::exists(mp / "junk"));
+  CHECK_FALSE(fs::exists(t.path / "account-mp.part"));
+  CHECK(fs::exists(solo / "slot_00" / "progress.sav"));  // the solo saves are only read
+  // Once there it is never made again (nothing touched).
+  { std::ofstream(mp / "option.sav", std::ios::binary) << "played"; }
+  CHECK_FALSE(save::copy_dir_whole(solo, mp, &why));
+  std::ifstream kept(mp / "option.sav", std::ios::binary);
+  CHECK(std::string(std::istreambuf_iterator<char>(kept), {}) == "played");
+}
+
+TEST_CASE("save transfer: a copy with nothing to copy from leaves no folder") {
+  TempDir t("coop_copy_dir_whole_missing_test");
+  std::string why;
+  CHECK_FALSE(save::copy_dir_whole(t.path / "none", t.path / "none-mp", &why));
+  CHECK_FALSE(why.empty());
+  CHECK_FALSE(fs::exists(t.path / "none-mp"));
+  CHECK_FALSE(fs::exists(t.path / "none-mp.part"));
 }
 
 TEST_CASE("save transfer: an ask while the host plays a file waits for the save its game is asked for (case 1)") {
@@ -992,4 +1052,39 @@ TEST_CASE("save transfer: a rejoin with the game on an earlier host's save goes 
   CHECK_FALSE(save::old_coop_first(true, false, true, false, false));  // on its own folder already (a first join)
   CHECK_FALSE(save::old_coop_first(false, false, true, false, true));  // nothing asked (solo, the host)
   CHECK_FALSE(save::old_coop_first(true, false, false, false, true));  // a pick loading (suspended): after it
+}
+
+TEST_CASE("save transfer: a failed write or switch ends the ask, so Resync is not 'already on its way' for good") {
+  constexpr std::uint64_t s = 1'000'000;
+  save::GuestSession g;
+  g.asked = true;
+  CHECK(save::save_coming(g, 5 * s, 10 * s));   // asked, nothing yet: coming
+  g.unwritten = Slot(5);
+  CHECK(save::save_coming(g, 5 * s, 10 * s));   // waiting for the title
+  save::note_write_failed(g);                   // the write or the switch failed
+  CHECK_FALSE(g.unwritten.has_value());
+  CHECK_FALSE(g.ready);
+  CHECK_FALSE(save::save_coming(g, 6 * s, 10 * s));
+  CHECK(save::resync_check(true, true, save::save_coming(g, 6 * s, 10 * s)) == save::ResyncCheck::go);
+  // a fresh session (Resync's go) asks again
+  g = save::GuestSession{};
+  CHECK_FALSE(g.asked);
+}
+
+TEST_CASE("save transfer: every state that ends the ask also ends 'coming'") {
+  constexpr std::uint64_t s = 1'000'000;
+  save::GuestSession g;
+  g.asked = true;
+  g.no_save = true;   // the host has no save: nothing coming
+  CHECK_FALSE(save::save_coming(g, 5 * s, 10 * s));
+  g = save::GuestSession{};
+  g.asked = true;
+  g.gave_up = true;   // gave up after the asks
+  CHECK_FALSE(save::save_coming(g, 5 * s, 10 * s));
+  g = save::GuestSession{};
+  g.asked = true;
+  save::note_write_failed(g);   // unreadable slot / failed write / failed switch
+  CHECK_FALSE(save::save_coming(g, 5 * s, 10 * s));
+  save::note_part(g, 7, 6 * s);   // a new transfer clears gave_up again
+  CHECK_FALSE(g.gave_up);
 }

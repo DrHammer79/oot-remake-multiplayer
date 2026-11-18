@@ -8,6 +8,11 @@
 // ENet's "compressed" header bit set; we never turn ENet's compression on, so
 // no ENet datagram starts like that and the relay can tell them apart on one
 // port. All numbers are big-endian.
+//
+// Room names (issue 261) came later as three more kinds. A relay from before
+// them decodes those as nothing and answers nothing, so a host or guest that
+// gets no answer to them can say the relay is too old; hosts and guests that
+// use join codes work with either relay.
 
 #include <array>
 #include <cstdint>
@@ -26,22 +31,30 @@ inline constexpr std::array<std::uint8_t, 4> kMagic = {'O', 'C', 'R', 1};
 inline constexpr std::size_t kMaxPayloadBytes = 1400;
 inline constexpr std::size_t kCodeLength = 8;
 inline constexpr std::size_t kMaxKeyBytes = 64;
+// Room names: kMinRoomLength to kMaxRoomLength of A-Z, a-z, 0-9, '-' and '_',
+// compared without case.
+inline constexpr std::size_t kMinRoomLength = 3;
+inline constexpr std::size_t kMaxRoomLength = 24;
 
 enum class Kind : std::uint8_t {
   // Host link -> relay. All carry the session token the link chose.
-  kRegister = 0x01,   // token, key length u8, key: "give me a join code"
-  kKeepalive = 0x02,  // token (the relay answers kRegistered)
-  kLinkData = 0x03,   // token, flow u16, one ENet datagram for that guest
-  kLinkClose = 0x04,  // token, flow u16: that guest is gone on the host
-  kBye = 0x05,        // token: the host stopped
-  // Guest's Join.bat -> relay.
-  kLookup = 0x10,  // the 8-letter code: lets this address join that host
+  kRegister = 0x01,      // token, key length u8, key: "give me a join code"
+  kKeepalive = 0x02,     // token (the relay answers kRegistered)
+  kLinkData = 0x03,      // token, flow u16, one ENet datagram for that guest
+  kLinkClose = 0x04,     // token, flow u16: that guest is gone on the host
+  kBye = 0x05,           // token: the host stopped
+  kRegisterName = 0x06,  // token, key length u8, key, name length u8, name:
+                         // "give me a join code and this room name"
+  // Guest -> relay.
+  kLookup = 0x10,      // the 8-letter code: lets this address join that host
+  kLookupName = 0x11,  // name length u8, name: the same with a room name
   // Relay -> host link.
-  kRegistered = 0x81,  // token, code
-  kRefused = 0x82,     // token, Refusal u8
-  kRelayData = 0x83,   // flow u16, one ENet datagram from that guest
-  kRelayClose = 0x84,  // flow u16: that guest went quiet
-  // Relay -> guest's Join.bat.
+  kRegistered = 0x81,      // token, code
+  kRefused = 0x82,         // token, Refusal u8
+  kRelayData = 0x83,       // flow u16, one ENet datagram from that guest
+  kRelayClose = 0x84,      // flow u16: that guest went quiet
+  kRegisteredName = 0x85,  // token, code, name length u8, name: the room is this host's
+  // Relay -> guest.
   kFound = 0x90,  // LookupResult u8
 };
 
@@ -51,6 +64,8 @@ enum class Refusal : std::uint8_t {
   kWrongKey = 3,        // the relay wants a host key and this was not it
   kTooMany = 4,         // too many hosts from this address
   kSlowDown = 5,        // too many registrations from this address lately
+  kNameTaken = 6,       // another host has this room name
+  kBadName = 7,         // not a room name
 };
 
 enum class LookupResult : std::uint8_t {
@@ -65,8 +80,9 @@ struct Message {
   std::uint64_t token = 0;
   std::uint16_t flow = 0;
   std::uint8_t status = 0;  // Refusal or LookupResult
-  std::string code;         // kRegistered, kLookup: kCodeLength letters
-  std::string key;          // kRegister
+  std::string code;         // kRegistered, kRegisteredName, kLookup: kCodeLength letters
+  std::string key;          // kRegister, kRegisterName
+  std::string name;         // kRegisterName, kRegisteredName, kLookupName: at most kMaxRoomLength bytes
   std::vector<std::uint8_t> payload;
 };
 
@@ -85,6 +101,13 @@ std::string make_code(std::uint64_t random_bits);
 std::optional<std::string> normalize_code(std::string_view typed);
 // "ABCDEFGH" -> "ABCD-EFGH", the way it is shown.
 std::string show_code(std::string_view code);
+
+// What a player typed as a room name, without spaces or tabs at either end and
+// with its letters' case kept; nothing when it is not one.
+std::optional<std::string> normalize_room(std::string_view typed);
+// The form room names are compared in: lower case ("Forest-Gang" and
+// "forest-gang" are one room).
+std::string room_key(std::string_view room);
 
 std::string_view refusal_text(Refusal why);
 

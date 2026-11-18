@@ -117,6 +117,15 @@ class EventOwnerTracker {
     asked_ = true;
   }
 
+  // Our scene this frame (before Frame). A request still waiting for its run when the scene changes is
+  // dropped: a load ends every event the manager held, so no run after it was started by that request
+  // (review of e3542a8a: a taken request whose run never read as running stayed pending until any later
+  // run, even minutes later, and could mark it our free Ocarina). A fact, not a clock.
+  void Scene(std::string_view scene) {
+    if (!scene_.empty() && scene != scene_) asked_ = false;
+    scene_ = std::string(scene);
+  }
+
   EventWhose Frame(bool running, bool link_member, const std::optional<std::string_view>& own_anim = std::nullopt) {
     if (!running) {
       running_ = false;
@@ -148,6 +157,7 @@ class EventOwnerTracker {
   By Decided() const { return by_; }
 
  private:
+  std::string scene_;
   bool asked_ = false;
   bool asked_ocarina_ = false;
   bool running_ = false;

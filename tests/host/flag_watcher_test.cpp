@@ -3,8 +3,10 @@
 #include <cstddef>
 
 #include <map>
+#include <string_view>
 #include <set>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -149,6 +151,22 @@ TEST_CASE("flag watcher: a FLAG_STATE is written and not sent back") {
   CHECK(w.receive(*bytes));
   CHECK(w.frame(store).empty());
   CHECK(store.get(kDoor) == 0);
+}
+
+TEST_CASE("flag watcher: a refused write names its key in the stats (events-next-a-11)") {
+  FakeStore store = game();
+  store.unwritable.insert(kDoor);
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  CHECK(w.stats().top_write_failure_count == 0);
+  CHECK(w.receive(state({entry(kDoor, 1), entry(kChest, 1)})));
+  w.frame(store);
+  w.frame(store);  // tried again
+  CHECK(store.get(kChest) == 1);
+  CHECK(w.stats().write_failures >= 1);
+  CHECK(w.stats().top_write_failure == kDoor);
+  CHECK(w.stats().top_write_failure_count == w.stats().write_failures);
+  CHECK(std::string_view(w.stats().top_write_failure_site) == "write");
 }
 
 TEST_CASE("flag watcher: 64-bit keys go out, come in and fill a snapshot") {
@@ -1177,6 +1195,172 @@ TEST_CASE("flag watcher: a dungeon map or compass the game drops to 0 is put bac
   CHECK(w.take_one_way_restores().empty());
 }
 
+TEST_CASE("flag watcher: a one-way value the game lowers again at once is left to the game, not fought (row 140)") {
+  constexpr FlagKey kDekuFloors{0x5c6c21c1u, 0};  // DungeonInfo.InsideTheDekuTree.EnteredFloorBit
+  FakeStore game_store = dungeon_game();
+  const auto floors = [&](std::uint32_t v) { game_store.values[kDekuFloors] = entry(kDekuFloors, v, proto::FlagKind::uint32); };
+  floors(0b01100);
+  ItemFlagStore store(game_store);
+  FlagWatcher w(SharedFlags({kDekuMap, kDekuFloors}), FlagRole::player);
+  w.frame(store);
+  // The game writes its own copy (a new floor, the group's floors gone) every frame, as in Revirie's host log.
+  floors(0b10000);
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b11100u);  // a first drop is put back (issue 146)
+  CHECK(w.take_hud_refresh());                       // the HUD screen's copy asked to take it
+  CHECK_FALSE(w.take_hud_refresh());
+  floors(0b10000);
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b11100u);  // undone once: put back once more
+  CHECK(w.take_hud_refresh());                       // every put-back, not only the key's first (review)
+  CHECK(w.stats().one_way_restores == 2);
+  CHECK(w.take_one_way_left().empty());
+  floors(0b10000);
+  const auto out = w.frame(store);  // undone twice in a row: the game's own now
+  CHECK(game_store.get(kDekuFloors) == 0b10000u);
+  CHECK(w.stats().one_way_left == 1);
+  CHECK(w.take_one_way_left() == std::vector{kDekuFloors});
+  // Its new floor still goes out, ORed with ours: the group never loses a floor.
+  CHECK(only<proto::FlagSet>(out) == std::vector{entry(kDekuFloors, 0b11100, proto::FlagKind::uint32)});
+  const int writes = game_store.writes;
+  for (int i = 0; i < 120; ++i) {
+    floors(i % 2 == 0 ? 0b11100 : 0b10000);  // a write of ours from elsewhere, and the game's at once
+    w.frame(store);
+  }
+  CHECK(game_store.writes == writes);  // no fight: two seconds, no put-back
+  CHECK(w.stats().one_way_restores == 2);
+  CHECK(w.take_one_way_left().empty());  // said once
+  CHECK_FALSE(w.take_hud_refresh());
+  // A room load window (it reads the game's copy in again): when it ends, the group's floors are put back once,
+  // ORed with the game's, and the HUD refresh is asked, so the other player's floors reach the HUD screen's copy.
+  w.set_loading(true);
+  w.frame(store);
+  floors(0b10010);  // the game's own write at the load: a new floor of ours
+  w.frame(store);
+  w.set_loading(false);
+  for (int i = 0; i < FlagWatcher::kSettleFrames + 10; ++i) w.frame(store);  // past the settle
+  CHECK(game_store.get(kDekuFloors) == 0b11110u);
+  CHECK(w.stats().one_way_owed == 1);
+  CHECK(w.stats().one_way_restores == 3);
+  CHECK(w.take_hud_refresh());
+  for (int i = 0; i < 10; ++i) w.frame(store);
+  CHECK(w.stats().one_way_owed == 1);  // once per load
+  // The refresh took it: the game writes the merged copy back, no fight. If it still lowers it at once, it is
+  // left again after kMaxQuickUndos, and owed again for the next load.
+  floors(0b10010);
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b11110u);  // a later one-off drop: put back
+  floors(0b10010);
+  w.frame(store);
+  floors(0b10010);
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b10010u);
+  CHECK(w.stats().one_way_left == 2);
+  CHECK(w.stats().one_way_restores == 5);
+}
+
+TEST_CASE("flag watcher: a floor another player enters after a key was left is owed too (row 140 review)") {
+  constexpr FlagKey kDekuFloors{0x5c6c21c1u, 0};
+  FakeStore game_store = dungeon_game();
+  const auto floors = [&](std::uint32_t v) { game_store.values[kDekuFloors] = entry(kDekuFloors, v, proto::FlagKind::uint32); };
+  floors(0b01100);
+  ItemFlagStore store(game_store);
+  FlagWatcher w(SharedFlags({kDekuMap, kDekuFloors}), FlagRole::player);
+  w.frame(store);
+  for (int n = 0; n < 3; ++n) {  // put back, undone, put back, undone: left
+    floors(0b10000);
+    w.frame(store);
+  }
+  CHECK(w.stats().one_way_left == 1);
+  // The other player enters floor 0b00010: the group's floors come and are written here...
+  CHECK(w.receive(state({entry(kDekuFloors, 0b11110, proto::FlagKind::uint32)})));
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b11110u);
+  // ...and the game lowers them again from its HUD copy: left, not fought.
+  floors(0b10000);
+  w.frame(store);
+  CHECK(game_store.get(kDekuFloors) == 0b10000u);
+  // A room load: the put-back after it has that floor too.
+  w.set_loading(true);
+  w.frame(store);
+  w.set_loading(false);
+  for (int i = 0; i < FlagWatcher::kSettleFrames + 10; ++i) w.frame(store);
+  CHECK(w.stats().one_way_owed == 1);
+  CHECK(game_store.get(kDekuFloors) == 0b11110u);
+  CHECK(w.take_hud_refresh());
+}
+
+TEST_CASE("flag watcher: floors left to the game are not owed into another save after a save load (row 140)") {
+  constexpr FlagKey kDekuFloors{0x5c6c21c1u, 0};
+  FakeStore game_store = dungeon_game();
+  const auto floors = [&](std::uint32_t v) { game_store.values[kDekuFloors] = entry(kDekuFloors, v, proto::FlagKind::uint32); };
+  floors(0b01100);
+  ItemFlagStore store(game_store);
+  FlagWatcher w(SharedFlags({kDekuMap, kDekuFloors}), FlagRole::player);
+  w.frame(store);
+  for (int n = 0; n < 3; ++n) {  // put back, undone, put back, undone: left
+    floors(0b10000);
+    w.frame(store);
+  }
+  CHECK(w.stats().one_way_left == 1);
+  // The title, another save (a save load window): nothing owed from the old one.
+  w.set_loading(true);
+  w.set_scene(false);
+  w.set_title(true);
+  w.frame(store);
+  floors(0b00001);
+  w.frame(store);
+  w.set_title(false);
+  w.set_scene(true);
+  w.set_loading(false);
+  for (int i = 0; i <= FlagWatcher::kSettleFrames + 10; ++i) w.frame(store);
+  CHECK(w.stats().one_way_owed == 0);
+}
+
+TEST_CASE("flag watcher: one-off drops far apart are each put back (row 140 keeps issue 146)") {
+  FakeStore game_store = dungeon_game();
+  ItemFlagStore store(game_store);
+  FlagWatcher w(SharedFlags({kDekuMap}), FlagRole::player);
+  w.frame(store);
+  game_store.set(kDekuMap, 1);
+  w.frame(store);
+  for (int n = 0; n < 5; ++n) {
+    game_store.set(kDekuMap, 0);
+    w.frame(store);
+    CHECK(game_store.get(kDekuMap) == 1);
+    for (int i = 0; i < 3; ++i) w.frame(store);
+  }
+  CHECK(w.stats().one_way_restores == 5);
+  CHECK(w.stats().one_way_left == 0);
+}
+
+TEST_CASE("flag watcher: the key of a write that keeps failing is counted and said once (row 140)") {
+  FakeStore game_store = dungeon_game();
+  ItemFlagStore store(game_store);
+  FlagWatcher w(SharedFlags({kDekuMap}), FlagRole::player);
+  game_store.unwritable.insert(kDekuMap);
+  w.frame(store);
+  for (std::uint64_t n = 0; n < FlagWatcher::kFailureSayAt; ++n) {
+    game_store.set(kDekuMap, 1);
+    w.frame(store);
+    game_store.set(kDekuMap, 0);  // a one-way drop whose put-back the game refuses
+    w.frame(store);
+  }
+  CHECK(w.stats().write_failures == FlagWatcher::kFailureSayAt);
+  CHECK(w.stats().top_write_failure == kDekuMap);
+  CHECK(w.stats().top_write_failure_count == FlagWatcher::kFailureSayAt);
+  CHECK(std::string_view(w.stats().top_write_failure_site) == "diff put back");  // g1-events' site name
+  const auto said = w.take_keeps_failing();
+  REQUIRE(said.size() == 1);
+  CHECK(said[0].key == kDekuMap);
+  CHECK(said[0].count == FlagWatcher::kFailureSayAt);
+  game_store.set(kDekuMap, 1);
+  w.frame(store);
+  game_store.set(kDekuMap, 0);
+  w.frame(store);
+  CHECK(w.take_keeps_failing().empty());  // once per key
+}
+
 TEST_CASE("flag watcher: the host's save load through the title with a scene read is a save load (forest-temple-a)") {
   // A player's 0.11.2 host log: the host went to Hookshot's title mid-session and loaded a save without the Forest
   // Temple map; no save load was seen, and the old save's floors were put back into the new one, once a frame.
@@ -1327,6 +1511,62 @@ TEST_CASE("flag watcher: the host's Try Again puts the group's values back at on
   for (const auto& m : decode(link_back(w, store))) CHECK_FALSE(std::holds_alternative<proto::FlagReset>(m));
   CHECK(store.get(kDoor) == 1);
   CHECK(w.stats().host_resets == 0);
+}
+
+TEST_CASE("flag watcher: a held flag's retries are counted as held, not as write failures (events-next-a-12)") {
+  // The events-next-a-11 probe logged "top write failure: named 0xb3a4fe84[0]" ~60 times a second: a played-event
+  // flag HoldFlagStore held (by design) while our Link stayed in the dungeon, retried every frame. A hold is waiting,
+  // not a failure: write_failures stays for writes the game itself refused.
+  FakeStore game_store = game();
+  game_store.unwritable.insert(kChest);
+  bool hold = true;
+  HoldFlagStore store(game_store, [&hold](FlagKey key) { return hold && key == kDoor; });
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  CHECK(w.receive(state({entry(kDoor, 1), entry(kChest, 1)})));
+  for (int i = 0; i < 5; ++i) w.frame(store);
+  CHECK(game_store.get(kDoor) == 0);           // still held
+  CHECK(w.stats().held_retries >= 5);          // tried every frame, counted as held
+  CHECK(w.stats().write_failures >= 5);        // the chest the game refuses: a real failure
+  CHECK(w.stats().top_write_failure == kChest);  // the held door never names itself
+  CHECK(w.stats().top_write_failure_count == w.stats().write_failures);
+  hold = false;
+  w.frame(store);
+  CHECK(game_store.get(kDoor) == 1);  // written once the hold ends
+}
+
+TEST_CASE("flag watcher: a busy key's retries are counted as waiting, not as write failures (review-0116-e)") {
+  // The same class as a hold: no room in the game's queue now (issue 175), kept and tried again each frame.
+  FakeStore store = game();
+  store.no_room.insert(kKey0);
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  CHECK(w.receive(state({entry(kKey0, 1)})));
+  for (int i = 0; i < 3; ++i) w.frame(store);
+  CHECK(store.get(kKey0) == 0);
+  CHECK(w.stats().held_retries >= 3);
+  CHECK(w.stats().write_failures == 0);
+  CHECK(w.stats().top_write_failure_count == 0);
+  store.no_room.clear();
+  w.frame(store);
+  CHECK(store.get(kKey0) == 1);  // written once there is room
+}
+
+TEST_CASE("flag watcher: a held key's 0 from a FLAG_RESET that the game refuses is a write failure (review-0116-e)") {
+  // write_exact lets a held key's 0 through the hold (the host's save has not played it); if the game itself
+  // refuses that 0, it is a real failure, not hidden as held.
+  FakeStore game_store = game();
+  game_store.set(kDoor, 1);
+  HoldFlagStore store(game_store, [](FlagKey key) { return key == kDoor; });
+  FlagWatcher w(shared(), FlagRole::player);
+  w.frame(store);
+  game_store.unwritable.insert(kDoor);
+  CHECK(w.receive(proto::Message{proto::FlagReset{1, {entry(kDoor, 0)}}}));
+  w.frame(store);
+  CHECK(game_store.get(kDoor) == 1);
+  CHECK(w.stats().write_failures >= 1);
+  CHECK(w.stats().top_write_failure == kDoor);
+  CHECK(std::string_view(w.stats().top_write_failure_site) == "write_exact");
 }
 
 TEST_CASE("flag watcher: the host's Try Again into a held flag writes the group's value once the hold ends") {

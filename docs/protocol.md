@@ -53,9 +53,9 @@ Each rule answers a way the TotK online sync was seen to break.
 ## Handshake
 
 1. The client connects and sends `HELLO`: protocol version (`u16`), build id (string, up to 64 characters: emulator or recomp, and its version), game build id (string, up to 32, for example `e0f3ccfaf50065ae`), game version (string, up to 16, for example `1.1.1`), nickname (string, 1 to 16 characters), since protocol 10 the game's 32-byte traffic key share (see "Encrypted traffic"), and, after it, one byte: the player number this game had in its last session (1 to 16; none on a first join). The server gives that number back when it is free (a server restart: the games come back in the order they notice it, and without this the numbers, colours and objects' owners swapped). The protocol version is the first 2 bytes of the body in every version of the protocol, so a server can read it, and refuse with the right reason, even from a `HELLO` whose rest it cannot read.
-2. The server first answers `JOIN_CHALLENGE` (see "Join password" below; every session has one since protocol 10, this release's), or `REFUSED` for a wrong version; `WELCOME` or `REFUSED` follows the client's `JOIN_PROOF`.
+2. The server first answers `JOIN_CHALLENGE` (see "Join password" below; every session has one since protocol 10, this release's), or `REFUSED` for a wrong version; `WELCOME` or `REFUSED` follows the client's `JOIN_PROOF` (with host approval on, after the host's answer: "Host approval" below).
    - `WELCOME`: `u8` the player's number (1 to 16), `u64` server time, `u16` tick rate (not 0), `u8` count (at most 15), then for each player already in: `u8` number, nickname. Every number in it is different, and the new player's own is not in the list.
-   - `REFUSED`: `u8` reason, which the client shows: 1 wrong protocol version, 2 wrong game build, 3 server full, 4 name taken, 5 bad name (a nickname of nothing but spaces), 6 bad password (the join password did not match, protocol 9). Reason 200, not encrypted, is the game's own and never sent ("Encrypted traffic", 7). A reason the client does not know is kept and shown as unknown.
+   - `REFUSED`: `u8` reason, which the client shows: 1 wrong protocol version, 2 wrong game build, 3 server full, 4 name taken, 5 bad name (a nickname of nothing but spaces), 6 bad password (the join password did not match, protocol 9), 7 kicked and 8 banned (protocol 11, "Lobby"), 9 not let in (protocol 13, "Host approval"). Reason 200, not encrypted, is the game's own and never sent ("Encrypted traffic", 7). A reason the client does not know is kept and shown as unknown.
 3. No `HELLO` within 10 seconds: the server drops the connection.
 4. One address may hold at most 4 connections that have not sent `HELLO` yet (a server option; 0 for no limit). The server drops one more at once, without `REFUSED`.
 
@@ -100,6 +100,32 @@ A dropped or killed emulator stays in the session until the server times it out,
 Issue 163: before protocol 10 the token was not needed, so two players behind one router (one public address) could push each other out by name during a stall of over a second. A `HELLO` that is quiet and from the same address but shows no token, or a wrong one, is now refused as name taken (stat `rejoin_no_token`). The token lives in the client only, not on disk: a reconnect of a running game (connection lost) takes its place at once; a restarted emulator has no token and waits, through the name taken retries below, for the server to time the old player out (10 s).
 
 Then the old player is dropped and reported as `PLAYER_LEFT` timed out, with the host handed on as on any leave, and the new connection is welcomed with the old player's number. Otherwise the `HELLO` is refused as name taken as before: someone on another PC, or anyone while the player is still talking, cannot push a player out by using their name. A build restarted within that second is refused, so the client asks again: a `REFUSED` name taken is tried again every 1.5 s for 12 s (`name_taken_retry_ms`, `name_taken_retry_for_ms` in `ClientConfig`; either one 0 turns it off, and the interval is at least 100 ms) before it is reported. The 12 s count from the first name taken in a row: an attempt that ends any other way (timeout, lost connection) closes the window, so a later name taken gets the full 12 s again. That covers the second of silence on the same PC, and also a restart that comes from another address (the same PC joining by its LAN address after `127.0.0.1`), which waits for the server to time the old player out (10 s). Any other refusal is reported at once and not retried. While it retries the client is in `waiting_retry` and reports nothing (`retrying_name_taken()` is true, and the player list shows "name in use, asking again"); a name that someone else is really using is reported after the 12 s.
+
+### Host approval (protocol 13, `JOIN_KNOCK` and `JOIN_ALLOW`)
+
+Issue 261: a room name is easy to guess, so the host can see who asks to join and say yes or no. A host setting, off by default (`coop_server --approve-joins`; the game's own host: `approve_joins = on` in `coop-options.ini`; `SessionConfig::approve_joins`). Off, nothing changes: everyone with the join password joins at once. On:
+
+1. A joiner whose `JOIN_PROOF` was right (the connection is encrypted from there, as always) and who passes every other check (game build, name, ban, full) is **held**: not a player yet, not counted, told nothing about the session, and everything it sends is dropped (stat `before_welcome`).
+2. The server sends the host `JOIN_KNOCK` (525): a knock number, how long the server waits for the answer (60 s), whether the host let this player key in before in this session, and the joiner's name. It sends the joiner the same `JOIN_KNOCK` with its own name, so its game waits that long (plus 5 s) for `WELCOME` instead of its usual 10 s, and shows that it waits for the host.
+3. The host answers `JOIN_ALLOW` (526) with the knock number: yes or no, and whether to remember.
+   - **Yes**: the checks run again (the server may have filled up meanwhile) and the joiner gets `WELCOME` as any player.
+   - **No**: the joiner gets `REFUSED` 9, not let in, and is closed. It may ask again.
+   - **Remember** with yes: that player key joins without asking for the rest of the session. With no: that key is turned away without asking (`REFUSED` 8, as a ban; a player without a key by its name).
+4. No answer in 60 s: `REFUSED` 9. The host gets `JOIN_KNOCK` with wait 0 for that knock (the question is over), as it does when the joiner leaves while it waits. When the host leaves, every held joiner gets `REFUSED` 9 (nobody would answer them).
+
+- Never held: the first player in (it hosts: nobody to ask), a rejoin that showed its token ("Rejoin after a crash"; that player was let in already), and a player key the host said to remember, unless a player in has that key too (a copied kit). A split-screen seat of a game that is in is not asked about either.
+- Only a player key is remembered or "let in before", never a name (a name is easy to take). A player without a key is asked about every time.
+- A `JOIN_ALLOW` from anyone but the host, or for a knock that is over, is dropped (stat `join_answers_stray`). Only the host is sent `JOIN_KNOCK`.
+- At most 8 joiners wait at once (`max_held_joins`); one more gets `REFUSED` 3, server full.
+- What the host let in or said to remember is kept when the host changes and forgotten when the session empties, as the bans.
+- Stats: `joins_held`, `joins_allowed`, `joins_denied`, `joins_unanswered` (no answer in time, or the host left), `joins_remembered` (in without asking).
+
+| Type | Name | From | Channel | Body |
+|---|---|---|---|---|
+| 525 | `JOIN_KNOCK` | server | session | `u32` knock (not 0), `u16` wait in seconds (0 to 600; 0, to the host only: this knock is over), `u8` flags (bit 0: the host let this player key in before in this session, and no player in has it now; unknown bits kept), nickname (1 to 16, as `HELLO`'s) |
+| 526 | `JOIN_ALLOW` | client | session | `u32` knock (not 0), `u8` allow (0 no, 1 yes; others refused), `u8` remember (0 or 1; others refused) |
+
+Types 525 to 529 are kept for it (525 and 526 used).
 
 ## Keep-alive and clock
 
@@ -412,7 +438,7 @@ The server's rules today (`server/session.cpp`):
 | 23 | `OBJECT_SAMPLE` | 4 | both | `u8` player field, object id, `u16` epoch, then object components |
 | 24 | `OBJECT_REMOVE` | 2 | both | `u8` player field, object id, `u16` epoch, `u8` reason (0 gone, 1 dead, 2 exploded, 3 hit, 4 picked up), position (3 x f32) |
 | 29 | `OBJECT_GROUP` | 2 | client | `u8` player field, `u16` count (1 to 256), then per entry: member object id, root object id, `u8` flags (bit 0 the member is a boss; other bits refused). No member twice |
-| 25 | `DAMAGE` | 2 | both | `u8` player field, object id, `u16` epoch, `s32` amount (0 or more), `u8` cause (0 unknown, 1 sword, 2 arrow, 3 fire arrow, 4 ice arrow, 5 light arrow, 6 seed, 7 bomb, 8 nut, 9 boomerang, 10 hookshot, 11 hammer, 12 magic; others kept), position (3 x f32), then (protocol 12, optional) where the hit landed (3 x f32, finite): a boss copy's hit place from its own game's hit record (Life +0x27c, kept only within 12 units of the boss), so the owner's replay lands there (Gohma's weak point is a headshot check against her `Eyelid_Down` bone; boss-intro, [dungeons-boss.md](dungeons-boss.md)); any other trailing length is refused |
+| 25 | `DAMAGE` | 2 | both | `u8` player field, object id, `u16` epoch, `s32` amount (0 or more), `u8` cause (0 unknown, 1 sword, 2 arrow, 3 fire arrow, 4 ice arrow, 5 light arrow, 6 seed, 7 bomb, 8 nut, 9 boomerang, 10 hookshot, 11 hammer, 12 magic, 13 killed: the hitter's copy of an enemy whose life cannot be read died in its game, amount 1, and the owner says it dead (issue 133; an older game drops it as before); others kept), position (3 x f32), then (protocol 12, optional) where the hit landed (3 x f32, finite): a boss copy's hit place from its own game's hit record (Life +0x27c, kept only within 12 units of the boss), so the owner's replay lands there (Gohma's weak point is a headshot check against her `Eyelid_Down` bone; boss-intro, [dungeons-boss.md](dungeons-boss.md)); any other trailing length is refused |
 
 An **object id** is 10 bytes: `u8` kind (0 placed, 1 made), `u8` maker (0 for placed, 1 to 16 for made), `u64` value (the placement hash, or the maker's own counter). Any other kind, or a maker that does not fit the kind, is refused.
 
@@ -651,6 +677,7 @@ usual `PLAYER_JOINED`, samples and `PLAYER_LEFT`. Types 460 to 469 are kept; 465
 - **Protocol 12** (0.11, branch `boss-intro`): `DAMAGE` may end in the hit's place (3 x `f32`). A protocol 11 reader refuses that as trailing bytes, so the version goes up once for 0.11: a 0.10.x game or server is refused at `HELLO` with reason 1 and the server's note says which side runs Update.bat. Every other protocol 11 message is unchanged.
 
 - Protocol 12 also (branch `room-objects`): `SWITCH_STATE` (356). No bump of its own. A build without it ignores the type, and its timed switches stay its own player's. A server without it does not relay it.
+- **Protocol 13** (branch `join-approval`, issue 261): host approval ("Host approval"): `JOIN_KNOCK` (525), `JOIN_ALLOW` (526), 525 to 529 kept, and `REFUSED` reason 9, not let in. A protocol 12 game held by a server cannot read why it waits and gives up after 10 s, and a protocol 12 server would let everyone in, so the version goes up: a game and a server of different versions are refused at `HELLO`, reason 1. No other layout changed.
 
 ## Who gets which stream
 

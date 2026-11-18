@@ -26,6 +26,9 @@
 #include "coop_look_view.h"
 #include "coop_mods_tab.h"
 #include "coop_pause_files.h"
+#include "coop_ngplus.h"
+#include "coop_save.h"
+#include <cstdlib>
 #include "coop_title.h"
 #include "coop_title_menu.h"
 #include "coop_voice.h"
@@ -141,6 +144,10 @@ std::vector<std::string> StatusLines(const HosCoopStatus& st, const CoopLobby::S
         return g_lan_lines;
     }
     std::vector<std::string> lines = CoopTitleMenu::PlainStatus(v);
+    if (v.host && v.state == HOS_COOP_HOSTING && st.relay_room[0] != '\0') {
+        lines.push_back(std::string("Room ") + st.relay_room +
+                        ": friends type it in Join a game (IP address), with your join password.");
+    }
     if (!g_answer_note.empty() && v.problem != HOS_COOP_PROBLEM_BAD_CODE) {
         lines.push_back(v.players > 1 ? "Connected!" : g_answer_note);
     }
@@ -330,7 +337,12 @@ void Host() {
     h.upnp = 1;             // the router forward (nothing to set up)
     h.invite = 1;
     h.pvp = o.pvp ? 1 : 0;
+    h.approve_joins = o.approve_joins ? 1 : 0;
     h.max_players = static_cast<std::uint8_t>(o.max_players);
+    // coop-options.ini's relay lines, as Host.bat uses them (issue 261: a room name friends type in Join a game).
+    h.relay_via = o.relay.empty() ? nullptr : o.relay.c_str();
+    h.relay_key = o.relay_key.empty() ? nullptr : o.relay_key.c_str();
+    h.relay_room = o.relay_room.empty() ? nullptr : o.relay_room.c_str();
     g_doing = "hosting";
     ++g_session;
     g_copied = false;
@@ -598,6 +610,18 @@ void Act(const Request& r) {
     case Request::Kind::kCopyVpn: CopyLan(true); break;
     case Request::Kind::kController: CycleInput(true); break;
     case Request::Kind::kKeyboard: CycleInput(false); break;
+    case Request::Kind::kSaveSet:   // (Navi) solo or multiplayer saves (coop_save.h)
+        g_menu.SetNote({CoopSave::ChooseSaveSet(r.text == "multiplayer")});
+        g_menu.SetSaveSet(CoopSave::MultiplayerSaves());
+        break;
+    case Request::Kind::kNgPlus: {   // (Navi) New Game+ (coop_ngplus.h)
+        CoopNgPlus::SetLevel(std::atoi(r.text.c_str()));
+        g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());
+        g_menu.SetNote({CoopNgPlus::Level() == 0 ? std::string("New Game+ off.")
+                                                 : "New Game+ " + std::to_string(CoopNgPlus::Level()) +
+                                                       ": start a new file to play it (your hearts carry over)."});
+        break;
+    }
     }
 }
 
@@ -616,6 +640,8 @@ void ShowTab() {
     g_shown = true;
     g_menu.Show(ReadOptions());
     g_menu.SetLook(CoopLook::Shown());   // the Customize page opens on the look waiting, else the one worn
+    g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());   // (Navi) New Game+
+    g_menu.SetSaveSet(CoopSave::MultiplayerSaves());   // (Navi) the Saves row
     const std::string coop = ReadText(CoopIni());
     const auto last = CoopTitleMenu::IniGet(coop, "last_invite");
     g_menu.SetRejoin(CoopTitleMenu::IniGet(coop, "last_host").value_or(""), last.value_or(""));
@@ -810,9 +836,21 @@ bool Picture(int tab, HosCoopMenuPicture* out) {
     return !shapes.empty();
 }
 
+// The Mods tab's paste: the clipboard (PasteThen: on Linux it may come a few frames later, then on Tick) goes to
+// the field that asked, if the player is still on it (Tab::Paste drops it otherwise). Under g_mutex, as the
+// Multiplayer tab's own paste is; the tab's own lock is taken inside, never the other way round.
+static void ModsPaste(bool into_typing) {
+    std::lock_guard lock(g_mutex);
+    PasteThen([into_typing](std::optional<std::string> clip) { CoopModsTab::Paste(clip, into_typing); });
+}
+
 bool Input(int tab, int event, int arg, int arg2) {
     if (tab == kModsTab) {
-        return CoopModsTab::MenuInput(event, arg, arg2);
+        const bool taken = CoopModsTab::MenuInput(event, arg, arg2);
+        if (CoopModsTab::TakePasteRequest()) {   // a text row's Paste (pad: Left / Right; mouse: its sides)
+            ModsPaste(false);
+        }
+        return taken;
     }
     if (tab == kLobbyTab) {
         return CoopLobbyTab::MenuInput(event, arg, arg2);
@@ -873,6 +911,15 @@ static std::pair<bool, bool> Modifiers() {
 }
 
 bool Key(std::uint32_t vk, bool repeat) {
+    if (CoopModsTab::KeysTaken()) {   // Ctrl+V / Shift+Insert into the Mods tab's text field, as on the Join page
+        const auto [ctrl_down, shift_down] = Modifiers();
+        if ((vk == 'V' && ctrl_down) || (vk == 0x2D && shift_down && !ctrl_down)) {
+            if (!repeat) {
+                ModsPaste(true);
+            }
+            return true;
+        }
+    }
     if (CoopModsTab::Key(vk, repeat)) {  // the Mods tab's text field, while it is typed into
         return true;
     }
@@ -955,7 +1002,23 @@ void Open(CoopPauseMenu::Page page) {
     }
     Settle();
     g_wanted = kMultiplayerTab;
-    LOG_INFO(Core, "coop: multiplayer tab: opened from the title");
+    LOG_INFO(Core, "coop: multiplayer tab: opened on a page (the title's rows, or the pause menu's Multiplayer page)");
+}
+
+void OpenLobby() {
+    g_wanted = kLobbyTab;
+    LOG_INFO(Core, "coop: multiplayer tab: the Lobby tab opened (the pause menu's Multiplayer page)");
+}
+
+void CopyJoinCode() {
+    HosCoopStatus st{};
+    st.size = sizeof st;
+    CoopHookshot::HostMenu().Status(&st);
+    // (a relay room's name first: friends type it; then the relay's join code, then the invite code)
+    const std::string text = st.relay_room[0] != 0 ? st.relay_room : st.relay_code[0] != 0 ? st.relay_code : st.invite;
+    Open(CoopPauseMenu::Page::kMain);   // (first: opening clears the page's note)
+    std::lock_guard lock(g_mutex);
+    Copy(text, "room name or join code");
 }
 
 bool TestMenu(const std::string& page) {

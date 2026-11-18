@@ -14,8 +14,9 @@ Writes into the puppet mod's romfs:
       game's own Pa_System_00-Pa_Button_00-T_Btn_00)
 and grows those files' entries in the resource size table.
 
-Both copies are stored hidden (ui_pack's Copy.hidden): without the co-op module the pause menu looks
-as it always did, and only the module shows them.
+Both copies are stored hidden (ui_pack's Copy.hidden): the page sits under N_InOut_00 at x 0, over
+every page, so only the co-op module shows it (and the tab), and a game with an older module or none
+looks as it always did.
 
 What the game does with them (read from the game's code, not seen in a game yet):
   - the tab strip's set-up counts its Pa_Category_%02d parts and makes a tab for each, so it
@@ -31,8 +32,6 @@ where the fifth tab sits on the screen; the page under N_InOut_00 (the pages' an
 In and Out), where the shown page sits: the pages are side by side on a strip (System at x 12840)
 that the menu slides, and the System page shows when the strip has slid by its x.
 """
-import glob
-import os
 import struct
 
 from . import ui_pack
@@ -116,47 +115,17 @@ def add_page(d):
 
 # ---------------------------------------------------------------------------------------- build
 
-class _Dir:
-    def __init__(self, root):
-        self.root = root
-
-    def read(self, rel):
-        with open(os.path.join(self.root, *rel.split("/")), "rb") as f:
-            return f.read()
-
-    def glob(self, pattern):
-        n = len(self.root.rstrip("/\\")) + 1
-        return [p[n:].replace("\\", "/") for p in glob.glob(os.path.join(self.root, *pattern.split("/")))]
-
-
-class _Layered(_Dir):
-    """The game's files, but those an earlier step of this same pack run wrote (`earlier`: title_menu.py's language
-    archives) read as it wrote them, so its labels stay. Not anything else in the mod's folder: it holds the last
-    run's files too (this step's own edited archive among them)."""
-    def __init__(self, top, root, earlier=()):
-        super().__init__(root)
-        self.top = top
-        self.earlier = set(earlier)
-
-    def read(self, rel):
-        path = os.path.join(self.top, *rel.split("/"))
-        if rel in self.earlier and os.path.isfile(path):
-            with open(path, "rb") as f:
-                return f.read()
-        return super().read(rel)
-
-
-def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, earlier=()):
+def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, run=None):
     """The Common archive and every language's messages from the romfs folder, into out_romfs
     (write(out_romfs, rel, bytes)); their size table entries grown (`table`: rstb.Rstb). Returns
-    the files written. All or nothing, as title_menu.build: a failure raises before anything is
-    written, so the pack never holds the tab without its page and texts."""
-    files, growth = make(_Layered(out_romfs, romfs, earlier), dicts, recompress, strings)
-    for rel, _, required in growth:
-        if required and table.get(_key(rel)) is None:
-            raise PauseMenuError("the size table has no %s" % _key(rel))
-    for rel, by, required in growth:
-        _grow(table, rel, by, required)
+    the files written. `run`: the pack run's shared view (ui_pack.PackRun), the one the title rows'
+    step (title_menu.build) used too, so each language archive keeps both steps' labels and grows
+    once; a view of its own when None. All or nothing, as title_menu.build: a failure raises before
+    anything is written, so the pack never holds the tab without its page and texts."""
+    run = run or ui_pack.PackRun(romfs, table)
+    files, growth = make(run, dicts, recompress, strings)
+    run.check(growth)
+    run.commit(files, growth)
     for rel, data in files.items():
         write(out_romfs, rel, data)
     log("pause menu: the Multiplayer tab and page (%s, %s; %d languages)" % (OVERLAY_LAYOUT, PAGES_LAYOUT, len(files) - 1))
@@ -164,8 +133,9 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=
 
 
 def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
-    """({rel: compressed bytes}, [(rel, bytes grown, required)]) for the Common archive and every
-    language's messages; raises PauseMenuError (or the reader's error) when any one cannot be made."""
+    """({rel: compressed bytes}, [(rel, plain length read, plain length made, required)]) for the
+    Common archive and every language's messages (ui_pack.PackRun's growth); raises PauseMenuError
+    (or the reader's error) when any one cannot be made."""
     from . import sarc
     files, growth = {}, []
     raw = reader.read(COMMON_ARCHIVE)
@@ -176,9 +146,9 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
         if not olds:
             raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, layout))
         entries, new = ui_pack.edit_entries(entries, layout, edit)   # (every copy of the layout)
-        growth.append((layout, len(new[olds[0]]) - len(olds[0]), False))
+        growth.append((layout, len(olds[0]), len(new[olds[0]]), False))
     archive = sarc.write(entries, data_align=16)   # (as the game's own: 16)
-    growth.append((COMMON_ARCHIVE, len(archive) - len(plain), True))
+    growth.append((COMMON_ARCHIVE, len(plain), len(archive), True))
     files[COMMON_ARCHIVE] = recompress(dicts, raw, archive)
     for rel in sorted(reader.glob(MALS_GLOB)):
         ours = ui_pack.load_strings(ui_pack.language_of(rel), strings)
@@ -193,22 +163,8 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
                 raise PauseMenuError("the strings have no [%s]" % f)
         packed = sarc.write([(name, ui_pack.add_labels(data, ours[name], replace=True)
                               if name in (OVERLAY_MSG, PAGES_MSG) else data) for name, data in msgs], data_align=16)
-        growth.append((rel, len(packed) - len(plain), True))
+        growth.append((rel, len(plain), len(packed), True))
         files[rel] = recompress(dicts, raw, packed)
     if len(files) < 2:
         raise PauseMenuError("no language has %s and %s" % (OVERLAY_MSG, PAGES_MSG))
     return files, growth
-
-
-def _key(rel):
-    return rel[:-3] if rel.endswith(".zs") else rel
-
-
-def _grow(table, rel, by, required=True):
-    key = _key(rel)
-    size = table.get(key)
-    if size is None:
-        if required:
-            raise PauseMenuError("the size table has no %s" % key)
-        return
-    table.set(key, size + max(0, by) + 0x1000)

@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "coop_event_result.h"  // row 98(2): which held gimmick events are class live
+
 #ifdef LICHII_COOP
 #include "common/logging.h"
 #endif
@@ -1727,21 +1729,11 @@ constexpr std::string_view kCorridor[] = {
     "ForestTemple_SageOfForest_TwistedCorridor_A_02", "ForestTemple_SageOfForest_TwistedCorridor_A_03",
     "ForestTemple_SageOfForest_TwistedCorridor_A_04"};
 
-// Gimmick events whose result already came live in the other game in a player test
-// (players, Deku Tree): the basement water dropping and its button pressed,
-// the torch room's torches. Their room flags carry the result; the played
-// event is left live too, so nothing changes for them.
-constexpr std::string_view kLiveOnTest6[] = {
-    "InsideTheDekuTree_Gimmick_RoomG_WaterLevelDrop", "InsideTheDekuTree_Gimmick_RoomH_CandleStick"};
-
-// deku-switches-b (0.10.1 playtest): room flags that delete the asker of a held gimmick event, so they wait with
-// that event. The slingshot room's graph (Logic/InsideTheDekuTree_Level_Room_C_Prefab_efa7) deletes
-// EventRequestActor_d457 when RoomC_Cleared is set (Logic_Delete <- HoldGameDataGetBoolSimple), and the presser's
-// game sets it at its event's end. Taken live, it deleted our asker before our own event ran, so the ladder (IsOn <-
-// that asker's EventBool) never fell and our eye switch asked nothing. Held, our asker is there for the event (or
-// for our own eye shot), and the event's end sets the flag here too.
-constexpr std::pair<std::string_view, std::string_view> kHeldWithEvent[] = {
-    {"InsideTheDekuTree_RoomC_Cleared", "InsideTheDekuTree"}};
+// Gimmick events whose room results all come live by shared flags (row 98(2): class live, generated from the room
+// graphs in coop_event_result.cpp; it replaces the hand-made list of player test 6, the Deku basement water and the
+// torch room, both class live there) are not held: their flags carry the result. A flag that deletes the asker of a
+// class-asker event (the Deku slingshot room's RoomC_Cleared, once held here by hand) is a generated result guard now
+// (CoopEventResult::HoldFor): it waits only until our result is set, instead of until we leave the dungeon.
 
 std::string_view SceneOfEvent(std::string_view event) {
     // The game's own spellings, and the scene names that are not prefixes.
@@ -1784,16 +1776,11 @@ std::optional<std::string_view> HeldIn(std::uint32_t hash) {
         constexpr std::string_view kPlayed = "HavePlayedEvent.";
         if (name.starts_with(kPlayed)) {
             const std::string_view event = name.substr(kPlayed.size());
-            for (const std::string_view live : kLiveOnTest6) {
-                if (event == live) return std::nullopt;
-            }
+            if (CoopEventResult::IsLive(event)) return std::nullopt;
             return SceneOfEvent(event);
         }
         for (const std::string_view c : kCorridor) {
             if (name == c) return std::string_view("ForestTemple");
-        }
-        for (const auto& [flag, scene] : kHeldWithEvent) {
-            if (name == flag) return scene;
         }
         return std::nullopt;
     }

@@ -273,6 +273,7 @@ Options Options::Read(std::string_view coop_ini, std::string_view options_ini) {
     }
     o.show_players = On(IniGet(options_ini, "LICHII_COOP_SHOW_PLAYERS"));
     o.pvp = On(IniGet(options_ini, "pvp"));
+    o.approve_joins = On(IniGet(options_ini, "approve_joins"));
     o.upnp = !Off(IniGet(options_ini, "upnp"));
     if (const auto v = IniGet(options_ini, "server_password"); v && PasswordOk(*v)) {
         o.password = *v;
@@ -302,6 +303,11 @@ Options Options::Read(std::string_view coop_ini, std::string_view options_ini) {
     }
     o.map_players = !Off(IniGet(options_ini, "LICHII_COOP_MAP"));
     o.map_names = !Off(IniGet(options_ini, "LICHII_COOP_MAP_NAMES"));
+    // The relay lines Host.bat reads too (coop-options.ini, "Advanced: relay"): the Multiplayer tab's Host uses them
+    // the same way. Read only: the menu writes none of them.
+    o.relay = std::string(Trim(IniGet(options_ini, "relay").value_or("")));
+    o.relay_key = std::string(Trim(IniGet(options_ini, "relay_key").value_or("")));
+    o.relay_room = std::string(Trim(IniGet(options_ini, "relay_room").value_or("")));
     if (const auto v = IniGet(options_ini, "max_players"); v && !v->empty() && v->size() <= 2 &&
         std::all_of(v->begin(), v->end(), [](char c) { return c >= '0' && c <= '9'; })) {
         o.max_players = std::clamp(std::stoi(*v), kMinPlayers, kMaxPlayers);
@@ -416,7 +422,18 @@ std::optional<std::uint16_t> ParsePort(std::string_view text) {
 }
 
 bool AddressOk(std::string_view typed) {
-    const std::string_view t = Trim(typed);
+    std::string_view t = Trim(typed);
+    // Through a relay (issue 261): "<join code or room name>@relay[:port]", the relay's address checked as any other.
+    if (const std::size_t at = t.find('@'); at != std::string_view::npos) {
+        const std::string_view what = t.substr(0, at);
+        if (what.size() < 3 || what.size() > 24 ||
+            !std::all_of(what.begin(), what.end(), [](char c) {
+                return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-';
+            })) {
+            return false;
+        }
+        t = t.substr(at + 1);
+    }
     const std::size_t colon = t.find(':');
     const std::string_view host = t.substr(0, colon);
     if (host.empty() || host.size() > 253 ||

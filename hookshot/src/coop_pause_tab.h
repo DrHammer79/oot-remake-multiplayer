@@ -138,6 +138,27 @@ private:
     int tab_key_ = -1;
 };
 
+// The rows (Pa_Button_00..04): Session, Join code, Players, Let in, Leave. Each A leads to co-op's own parts, until
+// the rows have native pages of their own: co-op's menu (Hookshot's menu, its Multiplayer tab, over the game's pause
+// menu) at a page, its Lobby tab, the clipboard, or the Lobby's /allow.
+enum Row { kRowSession = 0, kRowJoinCode = 1, kRowPlayers = 2, kRowLetIn = 3, kRowLeave = 4 };
+enum class RowAction {
+    kNone,
+    kOpenMain,    // co-op's menu, its main page: what co-op does now, Host and Join, Stop and Leave
+    kOpenJoin,    // co-op's menu, its Join page (a room name or a code)
+    kCopyCode,    // the room name (or join code) to the clipboard, then the main page, which shows it
+    kOpenLobby,   // co-op's menu, its Lobby tab: the players, the host's controls
+    kAllow,       // the Lobby's /allow: the oldest player who asks to join is let in (its line says who, or nobody)
+};
+// What co-op is doing, as the rows need it.
+struct Session {
+    bool hosting = false;   // this game hosts (its server listens)
+    bool in_one = false;    // in a session, hosted or joined (or starting one)
+    bool code = false;      // hosting, and a room name or a join code is there to give
+};
+RowAction ActionFor(int row, const Session& s);
+const char* ActionWords(RowAction a);   // for the log
+
 // The log lines a run needs (the first step's probe, kept): a screen object's first update, its updates over its
 // first second, and every change of what it shows. Pages and strip only.
 class Probe {

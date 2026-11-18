@@ -40,6 +40,12 @@ class Refresher {
 public:
     // A co-op write of a HUD dungeon item (any thread): a later one moves the time, one refresh after the last.
     void Want(std::uint64_t now_ms);
+    // Row 140 (flag-oneway-c): our own put-back of a one-way dungeon item (the flag watcher's or the solo keeper's).
+    // The Hookshot frame runs the flag setters right before it asks Due, and the refresh runs later in that same
+    // game frame, so the HUD screen's copy takes the merged value before the game writes the copy back to
+    // EnteredFloorBit (main+0x5851ac) and lowers it again: asked on the next Due (no kDelayMs), plus once more
+    // kDelayMs later (as Want) in case the setter was late.
+    void WantNow(std::uint64_t now_ms);
     // The hook's frame, in a session and alone: Link is in play (a scene loaded, the first Link there). Not at the
     // title, a load or a reload: the refresh waits.
     void SetInPlay(bool in_play);
@@ -49,6 +55,7 @@ public:
 private:
     std::mutex mutex_;
     std::uint64_t due_ms_ = 0;  // 0: nothing wanted
+    bool now_ = false;          // WantNow: on the next Due in play
     bool in_play_ = false;
 };
 

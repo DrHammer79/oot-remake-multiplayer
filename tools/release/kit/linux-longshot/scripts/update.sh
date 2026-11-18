@@ -126,7 +126,8 @@ kit_complete() {
     [[ -f $1/MANIFEST.txt && ( -f $1/start-squadala.sh || -f $1/start-oot-coop.sh ) ]] || return 1
     while IFS= read -r rel; do
         rel=${rel%$'\r'}
-        [[ -z $rel || $rel == '#'* || $rel == data/coop-options.ini ]] && continue
+        # MANIFEST.txt.tmp: v0.11.2 to v0.11.4 kits list their build's temp file, which never shipped.
+        [[ -z $rel || $rel == '#'* || $rel == data/coop-options.ini || $rel == MANIFEST.txt.tmp ]] && continue
         plain_path "$rel" && ! player_path "$rel" || continue
         [[ -f $1/$rel ]] || return 1
     done <"$1/MANIFEST.txt"

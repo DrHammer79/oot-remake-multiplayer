@@ -679,6 +679,9 @@ Copy-Item -LiteralPath $module -Destination $exeDir -Force
 Get-ChildItem -LiteralPath $hs -Filter '*.dll' -File | Where-Object { $_.Name -ne 'hookshot_coop.dll' } |
     Where-Object { -not (Test-Path -LiteralPath (Join-Path $exeDir $_.Name)) } | Copy-Item -Destination $exeDir
 Write-Host "  hookshot_coop.dll -> $exeDir"
+# the window's icon: the module (hookshot/src/coop_window_brand.cpp) sets it, with the title "Squadala!", from this png beside the exe
+$brandIcon = Join-Path $PSScriptRoot 'squadala-icon.png'
+if (Test-Path -LiteralPath $brandIcon) { Copy-Item -LiteralPath $brandIcon -Destination $exeDir -Force }
 
 # coop.ini beside longshot.exe (the module reads it there): the player's own server and name from
 # this kit's emulator when the game has none yet.

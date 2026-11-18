@@ -23,7 +23,9 @@ namespace coop::protocol {
 // 2: OBJECT_SPAWN of a placed id; 3: TIME_OF_DAY; 4: the messages
 // (types 28 to 39) and the server sending HANDOVER_ASK; 9: the join password
 // (JOIN_CHALLENGE, JOIN_PROOF, REFUSED bad_password).
-inline constexpr std::uint16_t kProtocolVersion = 12;  // 12: DAMAGE's hit place (boss-intro, 0.11)
+// 12: DAMAGE's hit place (boss-intro, 0.11); 13: the host's approval of
+// joiners (JOIN_KNOCK, JOIN_ALLOW, REFUSED not_let_in; issue 261).
+inline constexpr std::uint16_t kProtocolVersion = 13;
 inline constexpr std::uint16_t kDefaultPort = 27510;
 inline constexpr std::uint8_t kMaxPlayers = 16;  // protocol 11; 4 before
 
@@ -157,6 +159,8 @@ enum class MessageType : std::uint16_t {
   link_sound = 500,  // 500 to 509: the other Links' sounds (docs/protocol.md, "Link sounds")
   boss_scene = 520,  // 520 to 524: boss intro and death cutscenes (docs/protocol.md, "Boss cutscenes")
   boss_heart = 521,
+  join_knock = 525,  // 525 to 529: the host lets joiners in (docs/protocol.md, "Host approval")
+  join_allow = 526,
 };
 
 // PLAYER_SAMPLE component ids.
@@ -256,6 +260,9 @@ enum class RefuseReason : std::uint8_t {
   // The host banned this player for the rest of the session: as kicked, and
   // a HELLO with that name or from that address is refused with this.
   banned = 8,
+  // Protocol 13, host approval (docs/protocol.md "Host approval"): the host
+  // did not let this player in (it said no, did not answer in time, or left).
+  not_let_in = 9,
   // Never sent: the game's own refusal of a server that did not encrypt
   // although the game has a join password (docs/protocol.md "Encrypted
   // traffic"), so nobody on the path can stand in for a no-password server.
@@ -972,6 +979,9 @@ enum class DamageCause : std::uint8_t {
   hookshot = 10,
   hammer = 11,
   magic = 12,
+  // The hitter's copy of an enemy whose life cannot be read died in its game (its own death
+  // animation as it left): no life drop to send, so the kill itself goes (amount 1).
+  killed = 13,
 };
 
 // DAMAGE: life lost on a copy, for the owner to take off. Amount 0 or more.
@@ -1719,6 +1729,42 @@ struct LobbyResult {
   bool operator==(const LobbyResult&) const = default;
 };
 
+// Host approval (protocol 13, docs/protocol.md "Host approval"): with the
+// host's setting on, the server holds a joiner who gave the right join
+// password until the host lets it in or says no, or its time runs out (60 s
+// by default). A JOIN_KNOCK's wait is at most this.
+inline constexpr std::uint16_t kMaxKnockWaitSeconds = 600;
+
+// JOIN_KNOCK flag bits. Unknown bits are kept.
+namespace join_knock {
+// The host let this player key in before in this session.
+inline constexpr std::uint8_t known = 1u << 0;
+}  // namespace join_knock
+
+// JOIN_KNOCK, server only. To the host: `nickname` asks to join; answer with
+// JOIN_ALLOW and `knock` within `wait_s` seconds. To the held joiner itself
+// (before WELCOME, its own name): its join waits for the host for up to
+// `wait_s` seconds. `wait_s` 0, to the host only: that knock is over (the
+// joiner left, or the time ran out).
+struct JoinKnock {
+  std::uint32_t knock = 1;          // not 0
+  std::uint16_t wait_s = 60;        // 0 to kMaxKnockWaitSeconds
+  std::uint8_t flags = 0;           // join_knock bits
+  std::string nickname;             // 1 to kMaxNicknameChars, as HELLO's
+  bool operator==(const JoinKnock&) const = default;
+};
+
+// JOIN_ALLOW, the host to the server: its answer to the knock `knock`.
+// remember: allowed, that player key gets in without asking from now on;
+// not allowed, it is turned away without asking (as a ban). Both until the
+// session ends.
+struct JoinAllow {
+  std::uint32_t knock = 1;  // not 0
+  bool allow = false;
+  bool remember = false;
+  bool operator==(const JoinAllow&) const = default;
+};
+
 // Split screen (docs/protocol.md, "Local players"): the extra players of one
 // game, seats 1 to kMaxLocalSeats (seat 0 is the connection's own player).
 inline constexpr std::uint8_t kMaxLocalSeats = 3;
@@ -1777,7 +1823,7 @@ using Message = std::variant<Hello, Welcome, Refused, PlayerJoined, PlayerLeft,
                              DbnoMode, DbnoStatus, DbnoRevive, DbnoThreat, Difficulty, VoiceFrame,
                              ModList, ModSettings, LobbyAction, LobbyMutes, LobbyResult,
                              LocalJoin, LocalJoined, LocalLeave, LocalSample, LocalMessage, LinkSound,
-                             BossScene, BossHeart, PlayerLook, SwitchState>;
+                             BossScene, BossHeart, PlayerLook, SwitchState, JoinKnock, JoinAllow>;
 
 MessageType type_of(const Message& message);
 

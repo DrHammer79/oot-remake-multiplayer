@@ -121,7 +121,7 @@ lines keep-number-A A max=0 coop: welcomed as player [2-4] on
         self.assertEqual(steps[6].args, [2.5])
         self.assertEqual(steps[7].args, ["B", "zelda-1"])
         self.assertEqual(steps[8].args, ["B", ""])
-        self.assertEqual(steps[10].args, ["both", {"A": 1, "B": 0}])
+        self.assertEqual(steps[10].args, ["both", {"A": 1, "B": 0}, []])
         self.assertEqual(steps[12].args, ["keep-number-A", "A", "max", 0])
         self.assertEqual(steps[12].pattern, "coop: welcomed as player [2-4] on")
 
@@ -226,7 +226,8 @@ class RunnerTest(unittest.TestCase):
         self.r.sleep = sleep
         self.r.run(hs.parse_steps("expect both-loaded A=1 B=0\n"))
         c = self.counts()
-        self.assertTrue(c[0].startswith("PASS both-loaded (want A=1 B=0, after 5 s): A: 1 puppet (1 CoopPuppet_Child), "
+        # the counts match; no see= check proves them on the shot: UNPROVEN (owner rule: no PASS from log lines)
+        self.assertTrue(c[0].startswith("UNPROVEN both-loaded (want A=1 B=0, after 5 s): A: 1 puppet (1 CoopPuppet_Child), "
                                         "1 fairy; B: 0 puppet (), 0 fairy"), c[0])
         self.assertEqual(self.g.shots, ["s1-both-loaded"])
 
@@ -272,7 +273,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn(("kill", "B", None), self.g.calls)
         self.assertEqual(verbs.count("load"), 3)
         self.assertTrue(any(c[0] == "play" and ("A", "stray-out.A.txt") in c[1] for c in self.g.calls))
-        self.assertEqual(sum(1 for line in self.counts() if line.startswith(("PASS", "FAIL"))), 12)  # 10 expect, 2 lines
+        self.assertEqual(sum(1 for line in self.counts() if line.startswith(("PASS", "FAIL", "UNPROVEN"))), 12)  # 10 expect, 2 lines
 
 
 class DryRunTest(unittest.TestCase):

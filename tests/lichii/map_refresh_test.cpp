@@ -32,3 +32,16 @@ TEST_CASE("map refresh: not in play (the title, a load, a reload): not asked, ke
     r.SetInPlay(true);
     CHECK(r.Due(3000));
 }
+
+TEST_CASE("map refresh: our own put-back is asked on the next frame, then once more a moment later (row 140)") {
+    CoopMapRefresh::Refresher r;
+    r.SetInPlay(false);
+    r.WantNow(100);
+    CHECK_FALSE(r.Due(100));  // not in play: waits
+    r.SetInPlay(true);
+    CHECK(r.Due(101));                       // the same frame's setters have run: now
+    CHECK_FALSE(r.Due(102));                 // once
+    CHECK_FALSE(r.Due(100 + kDelayMs - 1));
+    CHECK(r.Due(100 + kDelayMs));            // and after the setter's usual delay
+    CHECK_FALSE(r.Due(5000));
+}

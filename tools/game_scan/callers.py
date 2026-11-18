@@ -59,25 +59,57 @@ class Targets:
         return None
 
 
+def is_cas(w):
+    """Whether a load/store instruction is a compare and swap: CAS (o2 bit 23 and o1 bit 21 set) or CASP (o1
+    set, o2 clear, size 0x; with size 1x it is STXP or LDXP)."""
+    return w & 0x3F200000 == 0x08200000 and (w >> 23 & 1 == 1 or w >> 31 == 0)
+
+
 def is_store(w):
-    """Whether a load/store instruction stores (its Rt is read, not written)."""
+    """Whether a load/store instruction stores (its Rt is read, not written). A compare and swap stores Rt (the
+    old value goes to Rs); an atomic (LDADD, SWP) loads the old value into Rt."""
     if w & 0x0A000000 != 0x08000000:
         return False                       # not a load or store
+    if is_cas(w):
+        return True
     if w & 0x3A000000 == 0x28000000 or w & 0x3F000000 == 0x08000000:
         return not w >> 22 & 1             # pair, or exclusive/ordered: L is bit 22
+    if w & 0x3B200C00 == 0x38200000:
+        return False                       # atomic: bits 23 and 22 are acquire and release, not opc
     if w & 0x38000000 == 0x38000000:       # register: unsigned immediate, unscaled, indexed, register offset
         v, opc = w >> 26 & 1, w >> 22 & 3
         return opc & 1 == 0 if v else opc == 0   # SIMD: opc 0 and 2 store (STR b/h/s/d, STR q)
     return False
 
 
+def loaded(w):
+    """The X registers a load/store instruction may write: what it loads (an atomic's or a compare and swap's
+    old value too), a store exclusive's status, and its base register when it writes it back."""
+    rt, rt2, rn, rs = w & 31, w >> 10 & 31, w >> 5 & 31, w >> 16 & 31
+    if is_cas(w):
+        return {rs} if w >> 23 & 1 else {rs, rs + 1}   # CASP: Rs and Rs+1
+    if w & 0x3F000000 == 0x08000000:       # exclusive or ordered: L is bit 22, o2 bit 23, o1 bit 21
+        if w >> 22 & 1:
+            return {rt, rt2} if w >> 21 & 1 else {rt}   # LDXR, LDAXR, LDAR; LDXP and LDAXP load Rt2 too
+        return set() if w >> 23 & 1 else {rs}           # STLR; STXR and STXP put their status in Ws
+    regs = set() if is_store(w) or w >> 26 & 1 else {rt}   # a SIMD load writes V registers, not X
+    if w & 0x3A000000 == 0x28000000:       # pair: LDP, LDPSW and LDNP load Rt2 too
+        if regs:
+            regs.add(rt2)
+        if w >> 23 & 1:
+            regs.add(rn)                   # pre or post index: Rn is written back
+    elif w & 0x3B200400 == 0x38000400 or w & 0xBE800000 == 0x0C800000:
+        regs.add(rn)                       # one register or SIMD structures, pre or post index: Rn is written back
+    return regs
+
+
 def writes(w, rd):
-    """Whether an instruction may put a new value in register rd (so it no longer holds an ADRP page)."""
-    if w & 31 != rd:
-        return False
+    """Whether an instruction may put a new value in X register rd (so it no longer holds an ADRP page)."""
+    if w & 0x0A000000 == 0x08000000:       # loads and stores
+        return rd in loaded(w)
     if w & 0x1C000000 == 0x14000000:       # branches, exceptions, system
         return False
-    return not is_store(w)
+    return w & 31 == rd                    # data processing: Rd
 
 
 def ls_unsigned(w):

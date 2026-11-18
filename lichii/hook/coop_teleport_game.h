@@ -50,6 +50,10 @@ bool ToEntrance();
 // point). Nothing while not known. Taken once.
 std::optional<bool> TakeRespawnMove();
 
+// cutscene-bleed (#197): a trip of ours is past its answer (travelling to its scene, settling there, or asking
+// again): no other player's event may be asked of our game now (coop_hook.cpp drops them). Any thread.
+bool Underway();
+
 // The chat notices since the last call (for the chat box).
 std::vector<std::string> TakeLines();
 

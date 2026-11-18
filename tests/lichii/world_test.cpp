@@ -2935,3 +2935,55 @@ TEST_CASE("world: a placement queued just before the session ended is dropped wi
     CHECK_FALSE(w.IsSkulltulaTaken(kGoldHash));
     CHECK_FALSE(Removed(w, 0x100));
 }
+
+// ------------------------------------------------- row 98(2): trigger guards (Trigger::follow)
+
+TEST_CASE("world: a trigger keeper waits for another game's moves, rest place and break, then lands") {
+    // A block whose push onto a press switch would make our own asker ask that player's event here: while it is a
+    // keeper (our game has not played the event) its moves and rest place are not followed.
+    WorldSync w;
+    w.SetTriggerKeepers({0x50});
+    Walk(w, 1000 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox)});
+    w.Receive(MoveOf(0x50, 2000 * kMs, 1.0f));
+    w.Receive(MoveOf(0x50, 2100 * kMs, 2.0f));
+    w.Receive(PlaceOf(0x50, 2.5f));
+    const auto kept = Walk(w, 2200 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox)});
+    CHECK(kept.send.empty());
+    CHECK(std::any_of(kept.notes.begin(), kept.notes.end(),
+                      [](const std::string& n) { return n.find("waits (move)") != std::string::npos; }));
+    std::vector<CoopObjects::PoseWrite> poses;
+    w.Poses(2300 * kMs, poses);
+    CHECK(poses.empty());
+    Walk(w, 3000 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox)});
+    w.Poses(3100 * kMs, poses);
+    CHECK(poses.empty());
+    // Our game played the event: no keeper any more; their rest place lands.
+    w.SetTriggerKeepers({});
+    Walk(w, 4000 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox)});
+    w.Poses(4100 * kMs, poses);
+    REQUIRE(poses.size() == 1);
+    CHECK(poses[0].address == 0x100);
+    CHECK(poses[0].position[0] == doctest::Approx(2.5f));
+
+    // Our own push of a keeper is our own play: sent as usual.
+    WorldSync v;
+    v.SetTriggerKeepers({0x50});
+    Walk(v, 1000 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox)});
+    const auto push = Walk(v, 1100 * kMs, {Thing(0x100, 0x50, std::nullopt, kBox, {1.5f, 2.0f, 3.0f})});
+    CHECK(Sent<proto::WorldMove>(push).size() == 1);
+
+    // A hammer switch's (a faller's) press by another game waits too, then is made.
+    WorldSync b;
+    b.SetTriggerKeepers({0x11});
+    Walk(b, 1000 * kMs, {Thing(0x100, 0x11, 1, kPillar)});
+    Walk(b, 5000 * kMs, {Thing(0x100, 0x11, 1, kPillar)});
+    b.Receive(BreakOf(0x11));
+    for (std::uint64_t t = 5100; t < 8000; t += 100) {
+        CHECK(Walk(b, t * kMs, {Thing(0x100, 0x11, 1, kPillar)}).lives.empty());
+    }
+    CHECK(b.Removes().empty());
+    b.SetTriggerKeepers({});
+    const auto felled = Walk(b, 8100 * kMs, {Thing(0x100, 0x11, 1, kPillar)});
+    REQUIRE(felled.lives.size() == 1);
+    CHECK(felled.lives[0].life == 0);
+}

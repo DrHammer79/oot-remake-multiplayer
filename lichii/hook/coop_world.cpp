@@ -378,6 +378,7 @@ void WorldSync::Receive(const proto::Message& message) {
 }
 
 void WorldSync::Reset() {
+    trigger_said_.clear();
     scene_.clear();
     scene_since_ = 0;
     objects_.clear();
@@ -981,6 +982,18 @@ void WorldSync::Poses(std::uint64_t now_us, std::vector<CoopObjects::PoseWrite>&
     }
 }
 
+bool WorldSync::KeepsForTrigger(const Object& o, const char* what, Out& out) {
+    if (!trigger_keepers_.contains(o.hash)) {
+        return false;
+    }
+    if (trigger_said_.insert(o.hash).second) {
+        out.notes.push_back(Line("world: trigger: %016llx %s: another game's state of it waits (%s): our asker of a "
+                                 "room event our game has not played would ask it here; it lands once we played it",
+                                 o.hash, o.name, what));
+    }
+    return true;
+}
+
 void WorldSync::Move(Object& o, std::uint8_t self, std::uint64_t now_us,
                      const std::optional<proto::Vec3>& player, Out& out) {
     if (o.faller || o.key || o.kept) {
@@ -1007,7 +1020,14 @@ void WorldSync::Move(Object& o, std::uint8_t self, std::uint64_t now_us,
             remote = false;
         }
     }
-    if (!o.ours && r != nullptr && r->place && o.place_seen != r->place_serial) {
+    // Row 98(2): a keeper does not start following another game (its moves and its new rest place wait); one it
+    // already follows (it became a keeper on the way) goes on to its rest place.
+    const bool kept = !o.ours && !o.following && r != nullptr &&
+                      (remote || (r->place && o.place_seen != r->place_serial)) && KeepsForTrigger(o, "move", out);
+    if (kept) {
+        remote = false;
+    }
+    if (!kept && !o.ours && r != nullptr && r->place && o.place_seen != r->place_serial) {
         o.place_seen = r->place_serial;
         o.settle_us = now_us;
         if (!o.following) {
@@ -1018,7 +1038,7 @@ void WorldSync::Move(Object& o, std::uint8_t self, std::uint64_t now_us,
     // A shifter with an AI is held where it was put for good: its AI would
     // put it back up (it was not hit here).
     const bool settling =
-        !o.ours && o.settle_us != 0 && (o.hold || now_us - o.settle_us < kSettleUs);
+        !kept && !o.ours && o.settle_us != 0 && (o.hold || now_us - o.settle_us < kSettleUs);
     if (!o.ours && (remote || settling)) {
         if (!o.following && !o.follow_from && !o.breakable && IsPushBlock(o.name)) {
             o.follow_from = o.rest;  // where our copy rested before (issue 147)
@@ -1543,6 +1563,9 @@ void WorldSync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t 
             cuts_.erase(cut);
         }
         if (const auto b = broken_.find(o.hash); b != broken_.end()) {
+            if (!b->second.local && KeepsForTrigger(o, "break", out)) {
+                continue;  // made once our game has played the event
+            }
             MakeBreak(o, b->second, now_us, out);
             o.ours = false;
             o.following = false;

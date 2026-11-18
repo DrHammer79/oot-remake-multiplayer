@@ -19,8 +19,6 @@ button, Pa_Button_03 (clone_parts), and their texts are new labels (add_labels).
 pane is that button, so each copy is the last pane of the alignment pane's subtree, in pre-order,
 and no existing offset or index moves.
 """
-import glob
-import os
 
 from . import ui_pack
 from .ui_pack import read_layout, read_msbt, write_msbt  # noqa: F401  (the title's tests use them here)
@@ -68,33 +66,19 @@ def add_rows(msbt, rows=ROWS):
 
 # ---------------------------------------------------------------------------------------- build
 
-class _Dir:
-    def __init__(self, root):
-        self.root = root
-
-    def read(self, rel):
-        with open(os.path.join(self.root, *rel.split("/")), "rb") as f:
-            return f.read()
-
-    def glob(self, pattern):
-        n = len(self.root.rstrip("/\\")) + 1
-        return [p[n:].replace("\\", "/") for p in glob.glob(os.path.join(self.root, *pattern.split("/")))]
-
-
-def build(romfs, out_romfs, dicts, table, write, recompress, log=print):
+def build(romfs, out_romfs, dicts, table, write, recompress, log=print, run=None):
     """The title archive and every language's messages from the romfs folder, into out_romfs
     (write(out_romfs, rel, bytes)); their size table entries grown (`table`: rstb.Rstb). Returns
-    the files written.
+    the files written. `run`: the pack run's shared view (ui_pack.PackRun) when other UI builders
+    edit the same files (the language archives); a view of its own when None.
 
     All or nothing: every file and size is made in memory first; only when all of them were made
     (the layout and every language that has Title_00.msbt) is anything written or the table
     changed. A failure raises before that, so the pack never holds rows without their texts."""
-    files, growth = make(_Dir(romfs), dicts, recompress)
-    for rel, _, required in growth:
-        if required and table.get(_key(rel)) is None:
-            raise TitleMenuError("the size table has no %s" % _key(rel))
-    for rel, by, required in growth:
-        _grow(table, rel, by, required)
+    run = run or ui_pack.PackRun(romfs, table)
+    files, growth = make(run, dicts, recompress)
+    run.check(growth)
+    run.commit(files, growth)
     for rel, data in files.items():
         write(out_romfs, rel, data)
     log("title menu: Host, Join and Co-op Settings on the title (%s, %d languages)" % (TITLE_LAYOUT, len(files) - 1))
@@ -102,8 +86,9 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print):
 
 
 def make(reader, dicts, recompress):
-    """({rel: compressed bytes}, [(rel, bytes grown, required)]) for the title archive and every
-    language's messages; raises TitleMenuError (or the reader's error) when any one cannot be made."""
+    """({rel: compressed bytes}, [(rel, plain length read, plain length made, required)]) for the
+    title archive and every language's messages (ui_pack.PackRun's growth); raises TitleMenuError (or
+    the reader's error) when any one cannot be made."""
     from . import sarc
     files, growth = {}, []
     raw = reader.read(TITLE_ARCHIVE)
@@ -113,8 +98,8 @@ def make(reader, dicts, recompress):
         raise TitleMenuError("%s has no %s" % (TITLE_ARCHIVE, TITLE_LAYOUT))
     entries, new = ui_pack.edit_entries(entries, TITLE_LAYOUT, add_buttons)   # (every copy of the layout)
     archive = sarc.write(entries, data_align=16)   # (as the game's own: 16)
-    growth.append((TITLE_ARCHIVE, len(archive) - len(dicts.decompress(raw)), True))
-    growth.append((TITLE_LAYOUT, len(new[olds[0]]) - len(olds[0]), False))
+    growth.append((TITLE_ARCHIVE, len(dicts.decompress(raw)), len(archive), True))
+    growth.append((TITLE_LAYOUT, len(olds[0]), len(new[olds[0]]), False))
     files[TITLE_ARCHIVE] = recompress(dicts, raw, archive)
     for rel in sorted(reader.glob(MALS_GLOB)):
         raw = reader.read(rel)
@@ -124,22 +109,10 @@ def make(reader, dicts, recompress):
             continue
         packed = sarc.write([(name, add_rows(data) if name == MSG_FILE else data) for name, data in msgs],
                             data_align=16)
-        growth.append((rel, len(packed) - len(plain), True))
+        growth.append((rel, len(plain), len(packed), True))
         files[rel] = recompress(dicts, raw, packed)
     if len(files) < 2:
         raise TitleMenuError("no language has %s" % MSG_FILE)
     return files, growth
 
 
-def _key(rel):
-    return rel[:-3] if rel.endswith(".zs") else rel
-
-
-def _grow(table, rel, by, required=True):
-    key = _key(rel)
-    size = table.get(key)
-    if size is None:
-        if required:
-            raise TitleMenuError("the size table has no %s" % key)
-        return
-    table.set(key, size + max(0, by) + 0x1000)

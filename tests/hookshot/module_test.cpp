@@ -1111,7 +1111,19 @@ TEST_CASE("hookshot: every patch touches only what Longshot's Linux AppImage shi
     // tools/release/kit/linux-longshot/scripts/build.sh applies every hookshot/patches/*.patch to a copy of the
     // AppImage's usr/share/longshot, which holds only what Longshot's scripts/linux/appimage.sh copies (v3.0.0-rc.7):
     // no tests/, docs/, .forgejo/, most of third_party/. A hunk on anything else applies on Windows' full source and
-    // stops every Linux build. Keep this list to appimage.sh's when the pin moves.
+    // stops every Linux build. Keep this list to appimage.sh's when the pin moves: the list is for kShippedFor, and
+    // the test fails on any other tag in hookshot/LINUX.txt until the list is re-checked and kShippedFor moved.
+    const std::string kShippedFor = "v3.0.0-rc.7";
+    const std::string linux_pin = ReadFile(kRepo / "hookshot" / "LINUX.txt");
+    const auto tag_at = linux_pin.find("\ntag=");
+    REQUIRE(tag_at != std::string::npos);
+    const auto tag_start = tag_at + 5;
+    const std::string tag = linux_pin.substr(tag_start, linux_pin.find('\n', tag_start) - tag_start);
+    {
+        INFO("hookshot/LINUX.txt moved to " << tag << ": re-check this list against that tag's scripts/linux/appimage.sh, "
+             "then set kShippedFor to it");
+        REQUIRE(tag == kShippedFor);
+    }
     const char* const shipped[] = {
         "nx2/", "host/", "scripts/", "assets/", "builder/linux/", "gpu/vk/", "gpu/compat/", "gpu/third_party/",
         "third_party/opus/", "third_party/kenney_input/", "third_party/kenney_input_keyboard/", "third_party/imgui/",
@@ -1150,6 +1162,42 @@ TEST_CASE("hookshot: every patch touches only what Longshot's Linux AppImage shi
     }
     CHECK(patches >= 24);
     CHECK(files >= patches);
+}
+
+TEST_CASE("hookshot: our patches call game functions as main + offset, never a bare 0x8 address (patch 0018's HUD refresh)") {
+    // Patch 0018 called the HUD refresh at 0x833e4200: main's offset 0x33e4200 put on 0x80000000 (rtld's base), not on
+    // main's 0x80020000. That is the middle of f_833e4190, so a64_lookup found nothing, guest_call gave 0 and the
+    // refresh (rows 63/76) never ran while hud_refreshes still counted. No line a patch adds calls guest_call or
+    // a64_lookup with a bare 0x8... literal: a function is named by a constant written as main + offset.
+    const std::string bridge = Patch();
+    REQUIRE(bridge.find("+    api.main_base = 0x80020000ULL;") != std::string::npos);   // (the main the offsets are on)
+    std::size_t patches = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(kRepo / "hookshot" / "patches")) {
+        if (entry.path().extension() != ".patch") continue;
+        ++patches;
+        std::istringstream lines(ReadFile(entry.path()));
+        for (std::string line; std::getline(lines, line);) {
+            if (line.rfind("+", 0) != 0 || line.rfind("+++", 0) == 0) continue;
+            for (const char* call : {"guest_call(", "a64_lookup("}) {
+                const auto at = line.find(call);
+                if (at == std::string::npos) continue;
+                INFO(entry.path().filename().string() << ": " << line);
+                CHECK(line.find("0x8", at) == std::string::npos);
+            }
+        }
+    }
+    CHECK(patches > 20);
+    // The HUD refresh: main + 0x33e4200 (f_83404200), looked up first; counted only when it ran, else one log line.
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0018-coop-map-state.patch");
+    CHECK(patch.find("+#define HUD_REFRESH_FN (0x80020000ULL + 0x33e4200ULL)\n") != std::string::npos);
+    CHECK(patch.find("833e4200ULL") == std::string::npos);
+    CHECK(patch.find("+        if (a64_lookup(HUD_REFRESH_FN)) {\n"
+                     "+            guest_call(c, HUD_REFRESH_FN, screen, 0, NULL, NULL);\n"
+                     "+            InterlockedIncrement(&hud_refreshes);\n"
+                     "+        } else if (!InterlockedExchange(&hud_refresh_gone, 1)) {\n") != std::string::npos);
+    // patch 0028's Button::Decide is written the same way
+    const std::string skip = ReadFile(kRepo / "hookshot" / "patches" / "0028-coop-skip-title-native.patch");
+    CHECK(skip.find("+static const uint64_t kButtonDecide = 0x80020000ULL + 0x3771db0ULL;") != std::string::npos);
 }
 
 TEST_CASE("hookshot: co-op's log lines stay out of Longshot's crash report (patch 0027), its header hookshot/src's") {
@@ -1280,6 +1328,10 @@ TEST_CASE("hookshot: every switch of the save folder marks the game's save list 
     REQUIRE(helper != std::string::npos);
     CHECK(first > helper);
     CHECK(save.find("g_list_stale = true;", helper) != std::string::npos);
+    // (Navi's Saves row, ChooseSaveSet) the solo/multiplayer switch goes through it too: its new list shows at once.
+    const auto apply = save.find("std::string ApplySaveSetLocked() {");
+    REQUIRE(apply != std::string::npos);
+    CHECK(save.find("if (!RemountLocked(want)) {", apply) != std::string::npos);
     const std::string title = ReadFile(kRepo / "hookshot" / "src" / "coop_title.cpp");
     CHECK(title.find("constexpr std::uint64_t kCaptionReload = 0xf6da40;") != std::string::npos);
     CHECK(title.find("constexpr std::uint64_t kCaptionBusy = 0x33ad380;") != std::string::npos);

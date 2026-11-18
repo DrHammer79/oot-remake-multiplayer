@@ -285,6 +285,9 @@ TEST_CASE("shots: why an owner's projectile left the list") {
     CHECK(shots::GoneReason(*shots::Find("Shootable_DekuSeed"), 300'000, 20) == R::hit);
     CHECK(shots::GoneReason(*shots::Find("Weapon_Boomerang"), 2'000'000, 15) == R::gone);  // caught
     CHECK(shots::GoneReason(*shots::Find("Shootable_Hook"), 900'000, 10) == R::gone);
+    // #248: a nut bursts where it stops, slowed by its bounce or not: hit, so the copies burst too.
+    CHECK(shots::GoneReason(*shots::Find("Item_DekuNut"), 300'000, 0.5f) == R::hit);
+    CHECK(shots::GoneReason(*shots::Find("Item_DekuNut"), 300'000, 12) == R::hit);
 }
 
 TEST_CASE("shots: a bomb's moment on the server clock") {
@@ -527,6 +530,58 @@ TEST_CASE("shots: an arrow copy flies the owner's arc on the server clock") {
     CHECK(sync.Landed() == 1);  // counted once
 }
 
+TEST_CASE("shots: a nut copy bursts where the owner's nut burst (#248)") {
+    CoopSpawn::Sync sync;
+    sync.SetImpacts(false);
+    std::vector<proto::Message> send;
+    std::vector<Copy> copies;
+    const std::map<std::uint64_t, std::uint64_t> live;
+    std::uint64_t now = 10'000'000;
+    sync.Tick(kScene, 2, now, {}, live, send, copies);
+    proto::ObjectSpawn spawn;
+    spawn.id = {proto::ObjectKind::made, 1, 11};
+    spawn.actor = "Item_DekuNut";
+    spawn.state.time = {now, 0};
+    spawn.state.position = proto::Vec3{0.0f, 1.0f, 0.0f};
+    spawn.state.velocity = proto::Vec3{10.0f, 0.0f, 0.0f};
+    sync.Receive(Wire(spawn, 1));
+    now += 50 * kMs;
+    sync.Tick(kScene, 2, now, {}, live, send, copies);
+    REQUIRE(copies.size() == 1);
+    // The owner's nut burst after its bounce, slow: the sender's reason is hit now.
+    proto::ObjectRemove remove;
+    remove.id = spawn.id;
+    remove.reason = shots::GoneReason(*shots::Find("Item_DekuNut"), 300'000, 0.5f);
+    remove.position = {2.0f, 0.0f, 0.0f};
+    sync.Receive(Wire(remove, 1));
+    const std::uint64_t got = now + 33 * kMs;
+    copies.clear();
+    sync.Tick(kScene, 2, got, {}, live, send, copies);
+    REQUIRE(copies.size() == 1);
+    CHECK(copies[0].act == Act::show);  // not deleted at the remove (the old bug)
+    CHECK(copies[0].effect.empty());    // not at the spot yet (shown kBehindUs late)
+    // Shown reaching the spot: it plays the nut's own burst there, once.
+    copies.clear();
+    sync.Tick(kScene, 2, got + shots::Track::kBehindUs, {}, live, send, copies);
+    REQUIRE(copies.size() == 1);
+    CHECK(copies[0].act == Act::show);
+    CHECK(copies[0].position[0] == doctest::Approx(2.0f));
+    CHECK(copies[0].effect == "Chemical_Light");
+    CHECK(sync.HitEffects() == 1);
+    // Then gone, as on the owner's screen.
+    copies.clear();
+    sync.Tick(kScene, 2, got + shots::Track::kBehindUs + shots::LandHoldUs(shots::Kind::nut), {}, live, send,
+              copies);
+    REQUIRE(copies.size() == 1);
+    CHECK(copies[0].act == Act::remove);
+    CHECK(sync.HitEffects() == 1);  // counted once
+    CHECK(shots::HitEffect(shots::Kind::nut) == "Chemical_Light");
+    // Caught or reeled in, never burst: no end effect for the boomerang and the hook tips.
+    CHECK(shots::HitEffect(shots::Kind::boomerang).empty());
+    CHECK(shots::HitEffect(shots::Kind::hook).empty());
+    CHECK(shots::HitEffect(shots::Kind::hook_long).empty());
+}
+
 TEST_CASE("shots: a bounce is a turn of over 45 degrees at speed") {
     CHECK(shots::Bounced({20, 0, 0}, {-15, 2, 0}));   // off a wall
     CHECK(shots::Bounced({10, -10, 0}, {10, 8, 0}));  // off the floor
@@ -536,7 +591,7 @@ TEST_CASE("shots: a bounce is a turn of over 45 degrees at speed") {
     CHECK_FALSE(shots::Bounced({0, 0, 0}, {30, 0, 0}));    // the shot itself
     CHECK(shots::LandHoldUs(shots::Kind::seed) > 0);
     CHECK(shots::LandHoldUs(shots::Kind::arrow) > shots::LandHoldUs(shots::Kind::seed));
-    CHECK(shots::LandHoldUs(shots::Kind::nut) == 0);
+    CHECK(shots::LandHoldUs(shots::Kind::nut) > 0);  // #248: it bursts there, then goes
     CHECK(shots::LandHoldUs(shots::Kind::bomb) == 0);
 
     // A copy's track keeps its fall across a bounce: the turn is no gravity.
@@ -898,8 +953,9 @@ TEST_CASE("shots: a seed copy is seen landing where the owner's hit, a gone one 
 }
 
 TEST_CASE("shots: a nut copy that hit something reaches the spot before it goes") {
-    // A nut has no land hold: before, its copy was removed as the remove
-    // came, while shown 100 ms late it was still in flight.
+    // Before, its copy was removed as the remove came, while shown 100 ms
+    // late it was still in flight. #248: it then bursts there for its land
+    // hold (the nut's own Chemical_Light) before it goes.
     CoopSpawn::Sync sync;
     std::vector<proto::Message> send;
     std::vector<Copy> copies;
@@ -936,6 +992,13 @@ TEST_CASE("shots: a nut copy that hit something reaches the spot before it goes"
     CHECK(copies[0].position[0] == doctest::Approx(2.0f));  // at the wall
     copies.clear();
     sync.Tick(kScene, 2, got + shots::Track::kBehindUs, {}, live, send, copies);
+    REQUIRE(copies.size() == 1);
+    CHECK(copies[0].act == Act::show);  // reached the spot: it bursts there
+    CHECK(copies[0].position[0] == doctest::Approx(2.0f));
+    CHECK(copies[0].effect == "Chemical_Light");
+    copies.clear();
+    sync.Tick(kScene, 2, got + shots::Track::kBehindUs + shots::LandHoldUs(shots::Kind::nut), {}, live, send,
+              copies);
     REQUIRE(copies.size() == 1);
     CHECK(copies[0].act == Act::remove);
 }
@@ -1245,4 +1308,142 @@ TEST_CASE("shots: a held bomb's path is read between two samples, never carried 
     CHECK(path.At(0)[0] > 2.0f);  // only the newest kKeep are kept
     path.Clear();
     CHECK(path.Empty());
+}
+
+TEST_CASE("shots: issue 133, our own hit on a copy beside a copy bomb's blast is still sent") {
+    shots::Blasts blasts;
+    CoopObjects::Sync sync;
+    sync.SetBlastNear([&](const proto::Vec3& at, std::uint64_t now) { return blasts.Near(at, now); });
+    Tick(sync, 0, 8, 2);
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    sync.Receive(proto::ObjectOwner{id, 1, 0, 0});
+    Tick(sync, 10 * kMs, 8, 2);
+
+    // Player 1's bomb copy went off beside it, but the enemy's own hit record names our Link: our hit.
+    blasts.Add({2.0f, 0.0f, 0.0f}, 20 * kMs);
+    std::vector<proto::Message> send;
+    std::vector<CoopObjects::LifeWrite> writes;
+    CoopObjects::Seen hit = Enemy(0x100, 8);
+    hit.hit_ours = true;
+    sync.Tick(kScene, 2, 30 * kMs, {hit}, send, writes);
+    Tick(sync, 40 * kMs, 6, 2);
+    auto step = Tick(sync, 200 * kMs, 6, 2);
+    const auto damage = Of<proto::Damage>(step.send);
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].amount == 2);
+    CHECK(sync.BlastDrops() == 0);
+
+    // A hit record naming someone else (not ours): the blast's, as before.
+    blasts.Add({2.0f, 0.0f, 0.0f}, 3'000 * kMs);
+    hit = Enemy(0x100, 6);
+    hit.hit_ours = false;
+    sync.Tick(kScene, 2, 3'010 * kMs, {hit}, send, writes);
+    Tick(sync, 3'020 * kMs, 4, 2);
+    step = Tick(sync, 3'200 * kMs, 4, 2);
+    CHECK(Of<proto::Damage>(step.send).empty());
+    CHECK(sync.BlastDrops() == 1);
+}
+
+TEST_CASE("shots: issue 133, a hit counts as ours from our Link or our own projectile, also just after it went") {
+    shots::OwnShots own;
+    const std::uint64_t link = 0x5000;
+    CHECK(shots::HitIsOurs(link, link, own, 0));
+    CHECK_FALSE(shots::HitIsOurs(0, link, own, 0));
+    CHECK_FALSE(shots::HitIsOurs(0x7000, link, own, 0));
+    own.Note(0x7000, 1'000'000);  // our seed
+    CHECK(shots::HitIsOurs(0x7000, link, own, 1'000'000 + shots::OwnShots::kKeepUs));
+    CHECK_FALSE(shots::HitIsOurs(0x7000, link, own, 1'000'001 + shots::OwnShots::kKeepUs));
+    CHECK_FALSE(shots::HitIsOurs(0x7100, link, own, 1'000'000));  // a copy's, or another actor's
+    own.Note(0x7000, 5'000'000);  // seen again: kept from then
+    CHECK(shots::HitIsOurs(0x7000, link, own, 6'000'000));
+    for (std::uint64_t a = 1; a <= shots::OwnShots::kKeep; ++a) {
+        own.Note(0x9000 + a, 6'000'000);
+    }
+    CHECK_FALSE(own.Was(0x7000, 6'000'000));  // the oldest went first
+    own.Reset();
+    CHECK_FALSE(own.Was(0x9001 + 1, 6'000'000));
+}
+
+TEST_CASE("objects: issue 133, a lifeless enemy's death here is a kill only when it is ours") {
+    using CoopObjects::LifelessKillHere;
+    CHECK(LifelessKillHere("Enemy_Scrub_Deku_Leaf", true, false, true, "Wait", false));
+    CHECK(LifelessKillHere("Enemy_Tailpasaran", true, false, true, "", false));
+    CHECK_FALSE(LifelessKillHere("Enemy_Tailpasaran", true, true, true, "", false));     // its life falls: hits go
+    CHECK_FALSE(LifelessKillHere("Enemy_Tailpasaran", true, false, false, "", false));   // no death of its own here
+    CHECK_FALSE(LifelessKillHere("Enemy_Tailpasaran", true, false, true, "Die", false)); // the owner's death
+    CHECK_FALSE(LifelessKillHere("Enemy_Tailpasaran", true, false, true, "", true));     // the owner said dead
+    CHECK_FALSE(LifelessKillHere("Obj_Pot", false, false, true, "", false));             // not an enemy
+    CHECK_FALSE(LifelessKillHere("Enemy_DungeonBoss_Gohma", true, false, true, "", false));
+}
+
+namespace {
+
+CoopObjects::Seen Lifeless(std::uint64_t address, const char* animation) {
+    CoopObjects::Seen s;
+    s.address = address;
+    s.name = "Enemy_Tailpasaran";
+    s.hash = 0x22;
+    s.position = {0.0f, 0.0f, 0.0f};
+    s.animation = proto::Animation{animation, 0.0f, 1.0f};
+    return s;
+}
+
+} // namespace
+
+TEST_CASE("objects: issue 133, a lifeless enemy's copy that died here sends the kill and its owner says it dead") {
+    // The hitter (player 2): its copy of player 1's enemy plays its own death, then leaves the walk.
+    CoopObjects::Sync hitter;
+    std::vector<proto::Message> send;
+    std::vector<CoopObjects::LifeWrite> writes;
+    hitter.Tick(kScene, 2, 0, {Lifeless(0x200, "Wait")}, send, writes);
+    const proto::ObjectId id = *hitter.IdOf(0x200);
+    hitter.Receive(proto::ObjectOwner{id, 1, 0, 0});
+    hitter.Tick(kScene, 2, 10 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    hitter.Tick(kScene, 2, 100 * kMs, {Lifeless(0x200, "Dead_Fall")}, send, writes);
+    send.clear();
+    for (std::uint64_t t = 200; t <= 400; t += 100) {
+        hitter.Tick(kScene, 2, t * kMs, {}, send, writes);
+    }
+    const auto damage = Of<proto::Damage>(send);
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].id == id);
+    CHECK(damage[0].amount == 1);
+    CHECK(damage[0].cause == static_cast<std::uint8_t>(proto::DamageCause::killed));
+
+    // A copy that only left (no death of its own here) sends nothing.
+    CoopObjects::Sync other;
+    other.Tick(kScene, 2, 0, {Lifeless(0x200, "Wait")}, send, writes);
+    other.Receive(proto::ObjectOwner{id, 1, 0, 0});
+    other.Tick(kScene, 2, 10 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    send.clear();
+    for (std::uint64_t t = 200; t <= 400; t += 100) {
+        other.Tick(kScene, 2, t * kMs, {}, send, writes);
+    }
+    CHECK(Of<proto::Damage>(send).empty());
+
+    // The owner (player 1): the kill comes for its enemy with no life to read: said dead to everyone.
+    CoopObjects::Sync owner;
+    owner.Tick(kScene, 1, 0, {Lifeless(0x200, "Wait")}, send, writes);
+    owner.Receive(proto::ObjectOwner{id, 1, 0, 0});
+    owner.Tick(kScene, 1, 10 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    proto::Damage kill = damage[0];
+    kill.player_number = 2;
+    owner.Receive(kill);
+    send.clear();
+    owner.Tick(kScene, 1, 50 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    const auto removes = Of<proto::ObjectRemove>(send);
+    REQUIRE(removes.size() == 1);
+    CHECK(removes[0].id == id);
+    CHECK(removes[0].reason == proto::RemoveReason::dead);
+
+    // Any other DAMAGE on it (no kill) changes nothing.
+    CoopObjects::Sync plain;
+    plain.Tick(kScene, 1, 0, {Lifeless(0x200, "Wait")}, send, writes);
+    plain.Receive(proto::ObjectOwner{id, 1, 0, 0});
+    plain.Tick(kScene, 1, 10 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    kill.cause = static_cast<std::uint8_t>(proto::DamageCause::sword);
+    plain.Receive(kill);
+    send.clear();
+    plain.Tick(kScene, 1, 50 * kMs, {Lifeless(0x200, "Wait")}, send, writes);
+    CHECK(Of<proto::ObjectRemove>(send).empty());
 }

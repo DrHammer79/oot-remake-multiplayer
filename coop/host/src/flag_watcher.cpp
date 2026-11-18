@@ -264,6 +264,11 @@ void FlagWatcher::note_group(const FlagEntry& value, const FlagEntry* before) {
 
 void FlagWatcher::reset() {
   queue_.clear();
+  // Row 140: what was left to the game was the old session's group's.
+  game_owned_.clear();
+  put_back_.clear();
+  owed_.clear();
+  owed_due_ = false;
   // Another session, or the same server started again: what the group had
   // comes again with the next snapshot.
   group_.clear();
@@ -362,6 +367,10 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
   }
   if (settling() && !window_) {
     window_ = true;
+    // Row 140: a room or scene load (also the game's own load nodes) reads the game's own copies in again (the HUD
+    // screen's floors): a value left to the game may take a put-back again (owed_, when the window ends).
+    game_owned_.clear();
+    put_back_.clear();
     window_since_ = frames_;
     old_counted_ = false;
     window_retry_ = false;
@@ -371,6 +380,12 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
     no_scene_frames_ = 0;
   } else if (!settling() && window_) {
     window_ = false;
+    // Row 140: a save load (moved_) is another save: its floors are not owed the old one's.
+    if (moved_) {
+      owed_.clear();
+    } else {
+      owed_due_ = !owed_.empty();
+    }
     end_window(store, resets);
   }
   if (window_ && loading_ && !scene_readable_) no_scene_frames_ += static_cast<int>(step);
@@ -401,6 +416,8 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
       resend_pending_ = false;
     }
     diff(store, changes);
+    // Row 140: after this pass, so its own read of the key does not see a write still on its way (Hookshot's setter).
+    if (!loading_ && std::exchange(owed_due_, false)) put_owed(store);
   }
   if (!loading_ && settle_left_ > 0) settle_left_ -= (std::min)(settle_left_, static_cast<int>(step));
   restate_.clear();
@@ -558,6 +575,30 @@ void FlagWatcher::apply_reset(FlagStore& store, const std::vector<FlagEntry>& fl
   }
 }
 
+void FlagWatcher::note_write_failure(FlagStore& store, const FlagKey& key, const char* site, bool hold_applies) {
+  // Waiting on purpose, not a failure (FlagStats::held_retries): the store holds the key (HoldFlagStore), or the
+  // game's queue has no room for it now (busy, issue 175); the same pair answer_set() keeps for later. A hold
+  // applies only where it refuses the write: write_exact() lets a held key's 0 through (hold_applies false), so a
+  // refused 0 there is the game's own refusal and stays a write failure.
+  if (store.busy(key) || (hold_applies && store.holds(key))) {
+    ++stats_.held_retries;
+    return;
+  }
+  ++stats_.write_failures;
+  auto it = write_failure_keys_.find(key);
+  if (it == write_failure_keys_.end()) {
+    if (write_failure_keys_.size() >= kWriteFailureKeys) return;
+    it = write_failure_keys_.emplace(key, 0).first;
+  }
+  // Row 140: a key failing kFailureSayAt times is said once (key, site), for the log.
+  if (++it->second == kFailureSayAt) keeps_failing_.push_back({key, site, it->second});
+  if (it->second > stats_.top_write_failure_count || stats_.top_write_failure == key) {
+    stats_.top_write_failure = key;
+    stats_.top_write_failure_count = it->second;
+    stats_.top_write_failure_site = site;
+  }
+}
+
 bool FlagWatcher::write_exact(FlagStore& store, const FlagEntry& entry) {
   const FlagKey key = key_of(entry);
   if (keeps_own(store, entry)) {
@@ -570,7 +611,7 @@ bool FlagWatcher::write_exact(FlagStore& store, const FlagEntry& entry) {
   const std::optional<FlagEntry> before =
       seen != last_.end() ? std::optional<FlagEntry>(seen->second) : std::nullopt;
   if (!store.write_exact(entry)) {
-    ++stats_.write_failures;
+    note_write_failure(store, key, "write_exact", entry.value != 0);
     unwritten_[key] = entry;
     if (!written_for_others_.empty() && written_for_others_.back() == key) {
       written_for_others_.pop_back();
@@ -737,7 +778,7 @@ void FlagWatcher::answer_set(FlagStore& store, const protocol::FlagSet& set, Tab
       // A count change (rupees, keys) refused for now: summed with any other
       // for the same count and added on a later frame (add()), which then
       // states the new total. No answer now: a FLAG_STATE carries no delta.
-      ++stats_.write_failures;
+      note_write_failure(store, key, "answer_set count");
       if (!written_for_others_.empty() && written_for_others_.back() == key) {
         written_for_others_.pop_back();
       }
@@ -752,7 +793,7 @@ void FlagWatcher::answer_set(FlagStore& store, const protocol::FlagSet& set, Tab
     if (written) {
       ++stats_.applied;
     } else {
-      ++stats_.write_failures;
+      note_write_failure(store, key, "answer_set");
       if (!written_for_others_.empty() && written_for_others_.back() == key) {
         written_for_others_.pop_back();
       }
@@ -829,7 +870,7 @@ bool FlagWatcher::write(FlagStore& store, const FlagEntry& entry) {
   to_write.value = as_bits(as_int(to_write.value) + held);
   note_for_others(store, to_write);
   if (!store.write(to_write)) {
-    ++stats_.write_failures;
+    note_write_failure(store, key, "write");
     unwritten_[key] = entry;
     if (!written_for_others_.empty() && written_for_others_.back() == key) {
       written_for_others_.pop_back();  // not written: tried again later
@@ -863,7 +904,7 @@ void FlagWatcher::add(FlagStore& store, const FlagEntry& delta) {
   // The count before, for the chat notices ("the group has N").
   std::optional<FlagEntry> was = store.read(key);
   if (!store.write(delta)) {
-    ++stats_.write_failures;
+    note_write_failure(store, key, "add");
     // Tried again next frame, with any other change to the same count.
     auto [it, fresh] = unadded_.try_emplace(key, delta);
     if (!fresh) it->second.value = as_bits(as_int(it->second.value) + as_int(delta.value));
@@ -920,6 +961,35 @@ const std::vector<FlagKey>& FlagWatcher::diff_keys() {
     }
   }
   return visit_;
+}
+
+void FlagWatcher::put_owed(FlagStore& store) {
+  const MapDropBecause because("the flag watcher: one-way value owed after a room load (row 140)");
+  for (const auto& [key, owed] : std::exchange(owed_, {})) {
+    std::optional<FlagEntry> now = store.read(key);
+    if (!now || now->kind != owed.kind) continue;
+    now->key = key;
+    FlagEntry back = owed;
+    back.key = key;
+    if (back.kind == protocol::FlagKind::uint32) {
+      back.value |= now->value;  // the game's floors too
+      // And the group's: every floor another player entered, also one that never reached our game's flag.
+      if (const auto group = group_.find(key); group != group_.end() && group->second.kind == back.kind) {
+        back.value |= group->second.value;
+      }
+    }
+    if (back == *now) continue;  // the load read it in already
+    if (!store.write(back)) {
+      note_write_failure(store, key, "one-way owed put-back");
+      continue;
+    }
+    put_back_[key].pass = diff_pass_;  // lowered again at once: left again (kMaxQuickUndos), owed again
+    last_[key] = back;
+    ++stats_.one_way_restores;
+    ++stats_.one_way_owed;
+    ++stats_.applied;
+    if (is_hud_dungeon_item(key)) hud_refresh_ = true;
+  }
 }
 
 void FlagWatcher::diff(FlagStore& store, Table& changes) {
@@ -1048,10 +1118,42 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
       // A map or compass the game took back (issue 146: both players opened
       // the Deku Tree's map chest and neither kept the map). Never right for
       // a one-way Bool: put it back, send nothing.
+      // Row 140: left to the game, nothing is put back and the drop is not sent (the group keeps its value). A
+      // floor new to us in the game's value still goes out, ORed with what we had (the bits rule never lowers).
+      const auto leave = [&] {
+        FlagEntry& owed = owed_.try_emplace(key, before).first->second;  // the group keeps it: owed after a load
+        // Every floor since: the other player's that came after it was left (the game lowers them too) and ours.
+        if (bits_drop) owed.value |= before.value | now->value;
+        if (!bits_drop || (now->value & ~before.value) == 0) return;
+        FlagEntry both = *now;
+        both.value = before.value | now->value;
+        changes[key] = both;
+        note_group(both, &before);
+        if (role_ == FlagRole::player) pending_[key] = both;
+      };
+      if (game_owned_.contains(key)) {
+        leave();
+        continue;
+      }
+      if (auto& pb = put_back_[key]; pb.pass != 0 && diff_pass_ - pb.pass <= kUndoPasses) {
+        if (++pb.undone >= kMaxQuickUndos) {
+          // Row 140: the game lowers it again at once from its own copy: putting it back every frame never sticks.
+          game_owned_.insert(key);
+          put_back_.erase(key);
+          ++stats_.one_way_left;
+          one_way_left_.push_back(key);
+          leave();
+          continue;
+        }
+      } else {
+        pb.undone = 0;
+      }
       const MapDropBecause because("the flag watcher: one-way restore (issue 146)");
       FlagEntry back = before;
       if (bits_drop) back.value = before.value | now->value;
       if (store.write(back)) {
+        put_back_[key].pass = diff_pass_;
+        if (is_hud_dungeon_item(key)) hud_refresh_ = true;  // row 140: every put-back, so the HUD copy takes it
         ++stats_.one_way_restores;
         ++stats_.applied;
         it->second = before;  // a new floor in `back` goes out next frame as a change
@@ -1062,7 +1164,7 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
         }
         continue;
       }
-      ++stats_.write_failures;
+      note_write_failure(store, key, "diff put back");
     }
     if (settling() && !store.is_count(key) && !restate_.contains(key) && !one_way_.contains(key)) {
       // A load putting back an older value than the group's: not sent, and
@@ -1088,7 +1190,7 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
         }
         // The game takes no write of it (a player's own item): it is not
         // the group's to put back.
-        ++stats_.write_failures;
+        note_write_failure(store, key, "diff own item");
         group_.erase(group);
         group_before_.erase(key);
       }
@@ -1107,6 +1209,7 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
       back.key = key;
       back.value = as_bits((std::max)(as_int(before.value), std::int64_t{cap->second}));
       if (store.write_exact(back)) {  // exact: the max rule would keep the higher
+        cap_tries_.erase(key);
         ++stats_.max_caps_kept;
         ++stats_.applied;
         it->second = back;
@@ -1115,7 +1218,12 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
       }
       // Not put back now: still never sent. The value before stays the one
       // seen, so the next frame sees the rise again and tries again.
-      ++stats_.write_failures;
+      note_write_failure(store, key, "diff rise");
+      if (++cap_tries_[key] >= kMaxCapTries) {
+        // Row 140: refused every frame for a second: left (still never sent) until the value changes again.
+        cap_tries_.erase(key);
+        continue;  // it->second is the game's value now
+      }
       it->second = before;
       continue;
     }
@@ -1148,7 +1256,7 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
         it->second = back;
         continue;
       }
-      ++stats_.write_failures;  // sent as any gain
+      note_write_failure(store, key, "diff gain");  // sent as any gain
     }
     if (const auto g = guards_.find(key); g != guards_.end() &&
                                           before.kind == protocol::FlagKind::int32 &&
@@ -1203,7 +1311,7 @@ void FlagWatcher::settle_guards(FlagStore& store, Table& changes) {
       now->key = key;
       now->value = as_bits(std::max<std::int64_t>(std::int64_t{as_int(now->value)} + by, 0));
       if (!store.write(*now)) {
-        ++stats_.write_failures;
+        note_write_failure(store, key, "settle_guards");
         return false;
       }
       last_[key] = *now;

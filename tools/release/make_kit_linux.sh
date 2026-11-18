@@ -73,6 +73,7 @@ text "$repo/tools/release/kit/scripts/apply_patch.py" "$kit/scripts/apply_patch.
 text "$repo/tools/release/kit/scripts/discord_status.py" "$kit/scripts/discord_status.py"
 text "$repo/tools/release/kit/coop.ini.template" "$kit/scripts/coop.ini.template"
 text "$repo/tools/release/kit/coop-options.ini" "$kit/data/coop-options.ini"
+cp -- "$repo/tools/release/kit/assets/squadala-icon.png" "$kit/data/squadala-icon.png"   # (the window and menu icon, start.sh)
 chmod 755 "$kit/start-squadala.sh" "$kit/revert.sh" "$kit"/scripts/*.sh
 install -m 755 "$server" "$kit/data/server/coop_server"
 install -m 644 "$module" "$kit/data/longshot/hookshot_coop.so"
@@ -160,9 +161,11 @@ if [[ -n $home && $home != / ]] && grep -rlF -- "$home/" "$kit" >/dev/null 2>&1;
 fi
 
 # MANIFEST.txt: the kit's own files (the player's coop-options.ini is in it: the updater merges it).
-(cd "$kit" && { echo MANIFEST.txt; find . -type f ! -name MANIFEST.txt | sed 's|^\./||'; } | LC_ALL=C sort) >"$kit/MANIFEST.txt.tmp"
-{ echo "# Files of $name, for scripts/update.sh. Do not edit."; cat "$kit/MANIFEST.txt.tmp"; } >"$kit/MANIFEST.txt"
-rm -f "$kit/MANIFEST.txt.tmp"
+# The temp file lives OUTSIDE the kit: inside it, it listed itself (v0.11.2 to v0.11.4 kits name MANIFEST.txt.tmp).
+mtmp=$(mktemp) || die 'mktemp failed'
+(cd "$kit" && { echo MANIFEST.txt; find . -type f ! -name MANIFEST.txt | sed 's|^\./||'; } | LC_ALL=C sort) >"$mtmp"
+{ echo "# Files of $name, for scripts/update.sh. Do not edit."; cat "$mtmp"; } >"$kit/MANIFEST.txt"
+rm -f "$mtmp"
 
 if ((zip)); then
     command -v zip >/dev/null || die 'zip is not installed (sudo apt install zip)'

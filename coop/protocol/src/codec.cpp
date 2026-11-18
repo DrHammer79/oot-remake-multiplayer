@@ -2617,6 +2617,50 @@ Error decode_body(Reader& r, LobbyResult& m) {
   return Error::none;
 }
 
+// JOIN_KNOCK: u32 knock (not 0), u16 wait (0 to kMaxKnockWaitSeconds), u8 flags
+// (unknown bits kept), nickname (1 to kMaxNicknameChars).
+Error encode_body(const JoinKnock& m, Writer& w) {
+  if (m.knock == 0 || m.wait_s > kMaxKnockWaitSeconds || m.nickname.empty()) return Error::bad_value;
+  COOP_TRY(check_string(m.nickname, kMaxNicknameChars));
+  w.u32(m.knock);
+  w.u16(m.wait_s);
+  w.u8(m.flags);
+  w.str(m.nickname);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, JoinKnock& m) {
+  m = JoinKnock{};
+  COOP_READ(r.u32(m.knock));
+  COOP_READ(r.u16(m.wait_s));
+  COOP_READ(r.u8(m.flags));
+  COOP_TRY(r.str(m.nickname, kMaxNicknameChars));
+  if (m.knock == 0 || m.wait_s > kMaxKnockWaitSeconds || m.nickname.empty()) return Error::bad_value;
+  return Error::none;
+}
+
+// JOIN_ALLOW: u32 knock (not 0), u8 allow (0 or 1), u8 remember (0 or 1).
+Error encode_body(const JoinAllow& m, Writer& w) {
+  if (m.knock == 0) return Error::bad_value;
+  w.u32(m.knock);
+  w.u8(m.allow ? 1 : 0);
+  w.u8(m.remember ? 1 : 0);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, JoinAllow& m) {
+  m = JoinAllow{};
+  std::uint8_t allow = 0;
+  std::uint8_t remember = 0;
+  COOP_READ(r.u32(m.knock));
+  COOP_READ(r.u8(allow));
+  COOP_READ(r.u8(remember));
+  if (m.knock == 0 || allow > 1 || remember > 1) return Error::bad_value;
+  m.allow = allow == 1;
+  m.remember = remember == 1;
+  return Error::none;
+}
+
 // DIFFICULTY: u8 set by (0 nobody, else a player), u8 automatic (0 or 1),
 // u8 preset, u16 life, u16 damage, u16 count (percent, within the sliders),
 // u16 boss life (25 to 1600), u16 boss damage (25 to 400).
@@ -2991,6 +3035,7 @@ MessageType type_of(const Message& message) {
       MessageType::boss_scene,  MessageType::boss_heart,
       MessageType::player_look,
       MessageType::switch_state,
+      MessageType::join_knock,  MessageType::join_allow,
   };
   static_assert(std::size(kTypes) == std::variant_size_v<Message>);
   return kTypes[message.index()];
@@ -3089,6 +3134,8 @@ bool allowed_on_channel(MessageType type, std::uint8_t channel) {
     case MessageType::link_sound:
     case MessageType::boss_scene:
     case MessageType::boss_heart:
+    case MessageType::join_knock:
+    case MessageType::join_allow:
       return channel == kChannelSession;
     case MessageType::flag_set:
     case MessageType::flag_state:
@@ -3143,6 +3190,7 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::local_leave:
     case MessageType::local_sample:
     case MessageType::local_message:
+    case MessageType::join_allow:
       return from == Sender::client;
     case MessageType::welcome:
     case MessageType::refused:
@@ -3157,6 +3205,7 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::lobby_mutes:
     case MessageType::lobby_result:
     case MessageType::local_joined:
+    case MessageType::join_knock:
       return from == Sender::server;
     case MessageType::ping:
     case MessageType::pong:
@@ -3391,6 +3440,8 @@ Error decode(std::span<const std::uint8_t> bytes, Message& out) {
     case MessageType::lobby_action: return decode_as<LobbyAction>(body, out);
     case MessageType::lobby_mutes: return decode_as<LobbyMutes>(body, out);
     case MessageType::lobby_result: return decode_as<LobbyResult>(body, out);
+    case MessageType::join_knock: return decode_as<JoinKnock>(body, out);
+    case MessageType::join_allow: return decode_as<JoinAllow>(body, out);
     case MessageType::local_join: return decode_as<LocalJoin>(body, out);
     case MessageType::local_joined: return decode_as<LocalJoined>(body, out);
     case MessageType::local_leave: return decode_as<LocalLeave>(body, out);

@@ -642,6 +642,69 @@ TEST_CASE("host reader: what the player wears") {
       CHECK(reader.read_equipment()->hand == "");
     }
   }
+  SUBCASE("a mask or boots worn without its flag are read from the armor links (issue 91)") {
+    put_user(m, l);
+    // Armor link a is link 8 + a of the same array (8 hand slots first).
+    const auto wear = [&](std::uint32_t a, const std::string& name) {
+      const std::uint32_t link = 8 + a;
+      m.put_u64(kUser + 0x20 + 0x18 * link + 8, kEquipHolders + 0x100 * link);
+      put_equipped(m, link, 80 + a, 4, 0x0);
+      const std::uint64_t piece = kEquipActors + 0x1000 * link;
+      const std::uint64_t text = piece + 0x800;
+      m.put_u64(piece + 0x260, text);
+      const std::string room(80, char{0});
+      m.put(text, room.data(), room.size());
+      m.put(text, name.c_str(), name.size() + 1);
+    };
+    SUBCASE("a mask from ZR while EquipHeadArmor is empty") {
+      put_strings(m, {{addr::kEquipHeadArmor, ""}});
+      wear(0, "Armor_Child_Mask_Skull");
+      CHECK(reader.read_equipment()->head == "Armor_Child_Mask_Skull");
+    }
+    SUBCASE("by name, in whichever link the game put it") {
+      put_strings(m, {{addr::kEquipHeadArmor, ""}, {addr::kEquipBoot, ""}});
+      wear(4, "Armor_Child_Mask_Bunny");
+      wear(2, "Armor_Adult_HoverBoot");
+      const auto e = reader.read_equipment();
+      CHECK(e->head == "Armor_Child_Mask_Bunny");
+      CHECK(e->boots == "Armor_Adult_HoverBoot");
+    }
+    SUBCASE("an unknown flag is filled too") {
+      put_strings(m, {{addr::kEquipWeapon, "Weapon_Sword_Kokiri"}});
+      wear(2, "Armor_Adult_HeavyBoot");
+      wear(1, "Armor_Adult_Zora");
+      const auto e = reader.read_equipment();
+      CHECK(e->boots == "Armor_Adult_HeavyBoot");
+      CHECK(e->armor == "Armor_Adult_Zora");
+      CHECK_FALSE(e->head);  // no mask worn and its flag unknown: still unknown
+    }
+    SUBCASE("a flag with a name stands") {
+      put_strings(m, {{addr::kEquipHeadArmor, "Armor_Child_Mask_Keaton"},
+                      {addr::kEquipArmor, "Armor_Adult_Goron"}});
+      wear(0, "Armor_Child_Mask_Skull");
+      wear(1, "Armor_Adult_Zora");
+      const auto e = reader.read_equipment();
+      CHECK(e->head == "Armor_Child_Mask_Keaton");
+      CHECK(e->armor == "Armor_Adult_Goron");
+    }
+    SUBCASE("other pieces in the links are not a mask, tunic or boots") {
+      put_strings(m, {{addr::kEquipHeadArmor, ""}, {addr::kEquipBoot, ""}, {addr::kEquipArmor, ""}});
+      wear(0, "Item_Ocarina_Fairy");
+      wear(9, "Armor_Child_Gauntlet_Goron");
+      const auto e = reader.read_equipment();
+      CHECK(e->head == "");
+      CHECK(e->boots == "");
+      CHECK(e->armor == "");
+      CHECK(e->hand == "Armor_Child_Gauntlet_Goron");
+    }
+    SUBCASE("the mask taken off again (ZR): its link empties, head is empty") {
+      put_strings(m, {{addr::kEquipHeadArmor, ""}});
+      wear(0, "Armor_Child_Mask_Skull");
+      CHECK(reader.read_equipment()->head == "Armor_Child_Mask_Skull");
+      m.put_u32(kEquipActors + 0x1000 * 8 + 0x2c, 8);  // the piece gone
+      CHECK(reader.read_equipment()->head == "");
+    }
+  }
   SUBCASE("a request lasts a moment: the last one stands") {
     put_user(m, l);
     const std::uint64_t request = kUser + 0x13bc;

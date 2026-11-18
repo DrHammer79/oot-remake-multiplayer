@@ -16,6 +16,13 @@ void put64(std::vector<std::uint8_t>& out, std::uint64_t v) {
   for (int shift = 56; shift >= 0; shift -= 8) out.push_back(static_cast<std::uint8_t>(v >> shift));
 }
 
+// A length byte and the text, at most `most` bytes of it.
+void put_text(std::vector<std::uint8_t>& out, const std::string& text, std::size_t most) {
+  const std::size_t n = std::min(text.size(), most);
+  out.push_back(static_cast<std::uint8_t>(n));
+  out.insert(out.end(), text.begin(), text.begin() + static_cast<std::ptrdiff_t>(n));
+}
+
 struct Reader {
   std::span<const std::uint8_t> bytes;
   std::size_t at = 0;
@@ -61,7 +68,20 @@ struct Reader {
     at = bytes.size();
     return v;
   }
+  // A length byte and that many bytes; not ok when the length is over `most`.
+  std::string sized_text(std::size_t most) {
+    const std::uint8_t n = u8();
+    if (n > most) {
+      ok = false;
+      return {};
+    }
+    return text(n);
+  }
 };
+
+bool is_room_char(char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+}
 
 bool is_code(std::string_view code) {
   return code.size() == kCodeLength &&
@@ -81,8 +101,20 @@ std::vector<std::uint8_t> encode(const Message& m) {
   switch (m.kind) {
     case Kind::kRegister:
       put64(out, m.token);
-      out.push_back(static_cast<std::uint8_t>(std::min(m.key.size(), kMaxKeyBytes)));
-      out.insert(out.end(), m.key.begin(), m.key.begin() + static_cast<std::ptrdiff_t>(std::min(m.key.size(), kMaxKeyBytes)));
+      put_text(out, m.key, kMaxKeyBytes);
+      break;
+    case Kind::kRegisterName:
+      put64(out, m.token);
+      put_text(out, m.key, kMaxKeyBytes);
+      put_text(out, m.name, 255);
+      break;
+    case Kind::kLookupName:
+      put_text(out, m.name, 255);
+      break;
+    case Kind::kRegisteredName:
+      put64(out, m.token);
+      out.insert(out.end(), m.code.begin(), m.code.end());
+      put_text(out, m.name, 255);
       break;
     case Kind::kKeepalive:
     case Kind::kBye:
@@ -128,13 +160,24 @@ std::optional<Message> decode(std::span<const std::uint8_t> bytes) {
   Message m;
   m.kind = static_cast<Kind>(r.u8());
   switch (m.kind) {
-    case Kind::kRegister: {
+    case Kind::kRegister:
       m.token = r.u64();
-      const std::uint8_t n = r.u8();
-      if (n > kMaxKeyBytes) return std::nullopt;
-      m.key = r.text(n);
+      m.key = r.sized_text(kMaxKeyBytes);
       break;
-    }
+    case Kind::kRegisterName:
+      m.token = r.u64();
+      m.key = r.sized_text(kMaxKeyBytes);
+      m.name = r.sized_text(kMaxRoomLength);
+      break;
+    case Kind::kLookupName:
+      m.name = r.sized_text(kMaxRoomLength);
+      break;
+    case Kind::kRegisteredName:
+      m.token = r.u64();
+      m.code = r.text(kCodeLength);
+      if (r.ok && !is_code(m.code)) return std::nullopt;
+      m.name = r.sized_text(kMaxRoomLength);
+      break;
     case Kind::kKeepalive:
     case Kind::kBye:
       m.token = r.u64();
@@ -202,6 +245,21 @@ std::string show_code(std::string_view code) {
   return std::string(code.substr(0, 4)) + "-" + std::string(code.substr(4));
 }
 
+std::optional<std::string> normalize_room(std::string_view typed) {
+  const auto blank = [](char c) { return c == ' ' || c == '\t'; };
+  while (!typed.empty() && blank(typed.front())) typed.remove_prefix(1);
+  while (!typed.empty() && blank(typed.back())) typed.remove_suffix(1);
+  if (typed.size() < kMinRoomLength || typed.size() > kMaxRoomLength) return std::nullopt;
+  if (!std::all_of(typed.begin(), typed.end(), is_room_char)) return std::nullopt;
+  return std::string(typed);
+}
+
+std::string room_key(std::string_view room) {
+  std::string key(room);
+  for (char& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return key;
+}
+
 std::string_view refusal_text(Refusal why) {
   switch (why) {
     case Refusal::kUnknownSession:
@@ -214,6 +272,10 @@ std::string_view refusal_text(Refusal why) {
       return "the relay already has the most hosts it takes from your address";
     case Refusal::kSlowDown:
       return "too many tries from your address lately: wait 10 minutes";
+    case Refusal::kNameTaken:
+      return "another host has this room name (a host that just stopped keeps it for 30 seconds)";
+    case Refusal::kBadName:
+      return "that is not a room name: 3 to 24 letters, digits, - or _";
   }
   return "refused";
 }

@@ -24,6 +24,7 @@ inline constexpr int kLiftRide = 47;      // jabu-lifts #65 (coop_lift_ride.h)
 inline constexpr int kDbnoBody = 48;      // down but not out: our downed Link (coop_dbno_body.h)
 inline constexpr int kSwitchShare = 49;   // room-objects: another player's timed switch held on ours
 inline constexpr int kBossRooms = 50;     // boss rooms (coop_boss_game.cpp)
+inline constexpr int kEventResult = 58;   // row 98(2): our asker's result of another player's gimmick event (coop_hook.cpp)
 inline constexpr int kEyeSwitch = 59;     // deku-switches: before the live events' requester (coop_hook.cpp)
 inline constexpr int kLiveEvents = 60;    // live events' requester (coop_hook.cpp)
 inline constexpr int kTeleportEvent = 61; // after the live events (coop_teleport_game.cpp)
@@ -33,7 +34,7 @@ inline constexpr int kStory = 64;         // issue 171: shared quest steps (coop
 inline constexpr int kOcarinaEquip = 66;  // rows 93/103: the shared ocarina's equip (coop_hook.cpp)
 
 inline constexpr std::array kAll{kSpawn,     kFairy,       kMover,     kDrops,   kGrass,        kTime,
-                                 kBossTable, kLiftRide,    kDbnoBody,  kSwitchShare, kBossRooms, kEyeSwitch,
+                                 kBossTable, kLiftRide,    kDbnoBody,  kSwitchShare, kBossRooms, kEventResult, kEyeSwitch,
                                  kLiveEvents, kTeleportEvent, kScrubs, kCounters, kStory,      kOcarinaEquip};
 
 constexpr bool Unique() {

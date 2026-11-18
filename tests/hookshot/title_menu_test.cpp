@@ -692,6 +692,29 @@ TEST_CASE("title menu: the voice's microphone in coop-options.ini") {
     CHECK(seen);
 }
 
+TEST_CASE("title menu: a room or join code through a relay is an address, and the relay lines are read (issue 261)") {
+    CHECK(AddressOk("forest-gang@relay.example.net"));
+    CHECK(AddressOk("Forest_Gang@relay.example.net:27530"));
+    CHECK(AddressOk("ABCD-EFGH@1.2.3.4"));
+    CHECK_FALSE(AddressOk("ab@relay.example.net"));            // too short for a room
+    CHECK_FALSE(AddressOk("forest gang@relay.example.net"));   // no spaces
+    CHECK_FALSE(AddressOk("forest-gang@"));
+    CHECK_FALSE(AddressOk("forest-gang@relay.example.net:0"));
+    const auto t = ReadJoin("forest-gang@relay.example.net pw-room", CodeResult{});
+    REQUIRE(std::holds_alternative<JoinAddress>(t));
+    CHECK(std::get<JoinAddress>(t).server == "forest-gang@relay.example.net");
+    CHECK(std::get<JoinAddress>(t).password == "pw-room");
+
+    const Options o = Options::Read("", "relay = relay.example.net:27530\r\n# relay_room = old\r\nrelay_room = forest-gang \r\n");
+    CHECK(o.relay == "relay.example.net:27530");
+    CHECK(o.relay_key.empty());
+    CHECK(o.relay_room == "forest-gang");
+    // Read only: writing the options leaves the relay lines as they are.
+    std::string coop, options = "relay = relay.example.net:27530\r\nrelay_room = forest-gang\r\n";
+    o.Write(coop, options);
+    CHECK(options.find("relay_room = forest-gang") != std::string::npos);
+}
+
 TEST_CASE("title menu: ParsePort and host port, 1 to 65535, read and written") {
     CHECK(ParsePort("27510") == std::uint16_t{27510});
     CHECK(ParsePort(" 1 ") == std::uint16_t{1});
@@ -806,4 +829,17 @@ TEST_CASE("title menu: Skip title screen is free solo and held while co-op does 
     SkipTitleInput join;
     join.host_state = HOS_COOP_CONNECTED;
     CHECK(std::string(SkipTitleHold(join)) == "co-op is joining");
+}
+
+TEST_CASE("title menu: approve_joins (the host's) is read from coop-options.ini, off without a line, never rewritten") {
+    CHECK_FALSE(Options::Read("", "").approve_joins);
+    CHECK_FALSE(Options::Read("", "# approve_joins = on\r\n").approve_joins);
+    CHECK_FALSE(Options::Read("", "approve_joins = off\r\n").approve_joins);
+    CHECK(Options::Read("", "approve_joins = on\r\n").approve_joins);
+    // No row edits it: the line stays as the player wrote it.
+    const Options o = Options::Read("", "approve_joins = yes\r\n");
+    CHECK(o.approve_joins);
+    std::string coop, options = "approve_joins = yes\r\n";
+    o.Write(coop, options);
+    CHECK(IniGet(options, "approve_joins") == "yes");
 }

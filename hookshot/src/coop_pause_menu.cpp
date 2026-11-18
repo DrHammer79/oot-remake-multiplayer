@@ -137,6 +137,13 @@ const std::vector<Command>& Commands() {
          "voice or chat for only that (/mute 2 voice). Anyone else: you stop hearing and seeing them yourself, and "
          "nobody is told."},
         {"/unmute <player>", "Undoes /mute (add voice or chat for only that)."},
+        // Host approval (docs/play-online.md "Lobby"): with approve_joins = on, each new player waits for these.
+        {"/allow, /allow <player>",
+         "The host only, when a player asks to join (approve_joins = on in coop-options.ini): lets them in (the one "
+         "who asked first, or by name). Add always to let them in without asking until you stop hosting."},
+        {"/deny, /deny <player>",
+         "The host only: turns away the player who asks to join. Add always to keep them out until you stop "
+         "hosting."},
     };
     return list;
 }
@@ -397,6 +404,24 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "dungeon maps (not the world map). Off: neither shows them."});
         out.push_back({Toggle("Names on map", options_.map_names), Act::kMapNames,
                        "Each player's name beside their arrow on the maps. Off: the arrows only."});
+        {   // (Navi) New Game+ (coop_ngplus.h)
+            const std::string hearts = std::to_string(ngplus_hearts_ / 4) + (ngplus_hearts_ % 4 ? "+" : "");
+            out.push_back({Choice("New Game+", ngplus_unlocked_ == 0 ? std::string("Locked: beat Ganon")
+                                               : ngplus_level_ == 0  ? std::string("Off")
+                                                                     : "NG+ " + std::to_string(ngplus_level_)),
+                           Act::kNgPlus,
+                           ngplus_unlocked_ == 0
+                               ? "Beat Ganon to unlock it: then play again with the hearts you had and tougher enemies."
+                               : "Start a new file with this on: you keep your " + hearts +
+                                     " hearts, and enemies and bosses get 50% more life and 25% more damage for each "
+                                     "level (up to NG+ " + std::to_string(ngplus_unlocked_) +
+                                     " now). In a game you host your level counts for everyone. Off: the game as it is."});
+        }
+        out.push_back({Choice("Saves", mp_saves_ ? "Multiplayer" : "Solo"), Act::kSaveSet,   // (Navi)
+                       "Solo: your own saves. Multiplayer: a separate set of saves for playing together (made from "
+                       "your solo saves the first time), so co-op progress never mixes with your own. When you join "
+                       "a friend from the title screen you play the host's save, copied beside your multiplayer saves; "
+                       "your saves are not touched. Switched on the title screen with no file loaded."});
         break;
     case Page::kCustomize:   // (its own rows: coop_look_menu.h)
         break;
@@ -1000,6 +1025,8 @@ void Menu::Decide(Act act) {
     case Act::kChatKey:
     case Act::kController:
     case Act::kKeyboard:
+    case Act::kNgPlus:
+    case Act::kSaveSet:
         Change(act, 1);
         break;
     case Act::kVoice:
@@ -1070,6 +1097,17 @@ void Menu::Change(Act act, int step) {
     case Act::kMapNames:
         options_.map_names = step > 0 ? true : step < 0 ? false : !options_.map_names;
         request_ = Request{Request::Kind::kSave, {}};
+        break;
+    case Act::kSaveSet:   // (Navi) two choices: either arrow flips it
+        mp_saves_ = !mp_saves_;
+        request_ = Request{Request::Kind::kSaveSet, mp_saves_ ? "multiplayer" : "solo"};
+        break;
+    case Act::kNgPlus:   // (Navi) Off, NG+ 1 ... the highest unlocked, round
+        if (ngplus_unlocked_ > 0) {
+            const int span = ngplus_unlocked_ + 1;
+            ngplus_level_ = (std::clamp(ngplus_level_, 0, ngplus_unlocked_) + (step < 0 ? span - 1 : 1)) % span;
+            request_ = Request{Request::Kind::kNgPlus, std::to_string(ngplus_level_)};
+        }
         break;
     default:
         break;
@@ -1350,6 +1388,16 @@ View Menu::view() const {
 
 void Menu::SetLook(const CoopLook::Look& look) {
     look_ = look;
+}
+
+void Menu::SetSaveSet(bool multiplayer) {
+    mp_saves_ = multiplayer;
+}
+
+void Menu::SetNgPlus(int level, int unlocked, int hearts) {
+    ngplus_level_ = level;
+    ngplus_unlocked_ = unlocked;
+    ngplus_hearts_ = hearts;
 }
 
 std::vector<CoopLookMenu::Shape> Menu::Picture() const {

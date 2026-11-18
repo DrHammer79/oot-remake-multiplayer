@@ -465,6 +465,20 @@ printf 'kit: oot-coop-v0.1.0-beta1-linux (release v0.1.0-beta1)\n' >"$kit/backup
 printf 'MANIFEST.txt\nVERSION.txt\nstart-squadala.sh\nscripts/start.sh\n' >"$kit/backup-v0.1.0-beta1/MANIFEST.txt"
 check 'revert.sh: nothing kept (a partial backup does not count) -> says --version' bash -c 'bash "$1/revert.sh" --yes </dev/null | grep -q -- "--version" && grep -q beta2 "$1/VERSION.txt"' _ "$kit"
 rm -rf "$kit"/backup-*
+# (a v0.11.2 to v0.11.4 kit's MANIFEST.txt names MANIFEST.txt.tmp, its build's temp file, which never shipped: that kit
+# still counts as whole, so revert.sh finds it)
+# (on a copy: the revert replaces the kit's files and must not touch the kit the later cases use)
+lk=$tmp/legacy-kit
+rm -rf "$lk"
+cp -a "$kit" "$lk"
+rm -rf "$lk"/backup-* "$lk/previous"
+mkdir -p "$lk/backup-v0.1.0-beta1"
+cp "$lk/start-squadala.sh" "$lk/backup-v0.1.0-beta1/"
+printf 'kit: oot-coop-v0.1.0-beta1-linux (release v0.1.0-beta1)\n' >"$lk/backup-v0.1.0-beta1/VERSION.txt"
+printf '# Files of x\nMANIFEST.txt\nMANIFEST.txt.tmp\nVERSION.txt\nstart-squadala.sh\n' >"$lk/backup-v0.1.0-beta1/MANIFEST.txt"
+bash "$lk/revert.sh" --yes </dev/null >"$tmp/revert-legacy.txt" 2>&1
+check 'revert.sh: a kept kit whose MANIFEST.txt lists MANIFEST.txt.tmp (v0.11.2 to v0.11.4) is gone back to' bash -c 'grep -q beta1 "$1/VERSION.txt" && ! grep -q "keeps no older" "$2"' _ "$lk" "$tmp/revert-legacy.txt"
+rm -rf "$lk"
 # A damaged or hand-edited VERSION.txt never names a folder: the update goes on, nothing outside previous/ is removed.
 printf 'beside the kit\n' >"$tmp/beside-the-kit.txt"
 for bad in .. ../..; do
@@ -544,6 +558,25 @@ bash "$kit/scripts/collect-logs.sh" >"$tmp/logs3.txt" 2>&1
 out=$(ls "$kit"/coop-logs-*.zip 2>/dev/null | head -n1)
 check 'collect-logs: a log copied into data/logs goes in' bash -c 'python3 -c "import sys, zipfile; print(*zipfile.ZipFile(sys.argv[1]).namelist(), sep=chr(10))" "$1" | grep -qx "game/copied/longshot_log.txt" && ! grep -q "not in this file" "$2"' _ "$out" "$tmp/logs3.txt"
 rm -f "$D/logs/longshot_log.txt"
+
+# --- The real make_kit_linux.sh: its MANIFEST.txt lists only files that are in the kit (Linux only: ELF stand-ins) ---
+if [[ $(uname -s) == Linux ]]; then
+    mk=$tmp/mk
+    mkdir -p "$mk/build/_deps/enet-src" "$mk/build/_deps/fmt-src"
+    echo MIT >"$mk/build/_deps/enet-src/LICENSE"
+    echo MIT >"$mk/build/_deps/fmt-src/LICENSE"
+    so=$(ls /lib/x86_64-linux-gnu/libc.so.6 /usr/lib/x86_64-linux-gnu/libm.so.6 2>/dev/null | head -n1)
+    cp "$so" "$mk/hookshot_coop.so"
+    cp "$(command -v ls)" "$mk/coop_server"
+    bash "$release/make_kit_linux.sh" --module "$mk/hookshot_coop.so" --server "$mk/coop_server" --licenses "$mk/build"         --release v0.0.0-test --out "$mk/out" --no-zip >"$tmp/mk.txt" 2>&1 || tail -n5 "$tmp/mk.txt"
+    mkit=$mk/out/Squadala-v0.0.0-test-linux
+    check 'make_kit_linux.sh: a kit was built' [ -f "$mkit/MANIFEST.txt" ]
+    check 'make_kit_linux.sh: MANIFEST.txt names no MANIFEST.txt.tmp' bash -c '! grep -q "MANIFEST.txt.tmp" "$1/MANIFEST.txt"' _ "$mkit"
+    check 'make_kit_linux.sh: MANIFEST.txt lists MANIFEST.txt once and every file it names is in the kit' bash -c         '[ "$(grep -cx MANIFEST.txt "$1/MANIFEST.txt")" = 1 ] && ! grep -v "^#" "$1/MANIFEST.txt" | while IFS= read -r f; do [ -f "$1/$f" ] || echo "$f"; done | grep -q .' _ "$mkit"
+    check 'make_kit_linux.sh: no temp file left in the kit' bash -c '[ -z "$(find "$1" -name "*.tmp")" ]' _ "$mkit"
+else
+    echo "skip make_kit_linux.sh cases (not Linux)"
+fi
 
 # --- The scripts parse ---------------------------------------------------------------------
 for f in "$src/start-squadala.sh" "$src"/scripts/*.sh "$release/make_kit_linux.sh"; do

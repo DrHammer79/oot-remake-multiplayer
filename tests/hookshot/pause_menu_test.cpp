@@ -411,7 +411,8 @@ TEST_CASE("pause tab: Settings: name, Link's look, players and voice chat (off u
     m.Open(Page::kSettings);
     CHECK(Names(m) == std::vector<std::string>{"Your name", "Link's look", "Players when you host",
                                                "Port when you host", "Proximity voice chat", "Chat key",
-                                               "Show players on map", "Names on map"});   // (no patch 0015: no input rows)
+                                               "Show players on map", "Names on map", "New Game+",
+                                               "Saves"});   // (no patch 0015: no input rows; Navi's two last)
     View v = m.view();
     CHECK(v.rows[0].value == "Saria");
     CHECK(v.rows[1].value == "By player number");
@@ -489,7 +490,7 @@ TEST_CASE("pause tab: Settings: players on the map and their names, on unless tu
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
     View v = m.view();
-    REQUIRE(v.rows.size() == 8);   // (the port and chat key rows before them; no patch 0015: no input rows)
+    REQUIRE(v.rows.size() == 10);   // (the port and chat key rows before them, New Game+ and Saves after; no patch 0015)
     CHECK(v.rows[6].kind == RowKind::kToggle);
     CHECK(v.rows[6].on);
     CHECK(v.rows[7].on);
@@ -628,7 +629,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(Names(m) == std::vector<std::string>{"Your name", "Link's look", "Players when you host",
                                                "Port when you host", "Proximity voice chat", "Chat key",
                                                "Controller", "Keyboard and mouse", "Show players on map",
-                                               "Names on map"});
+                                               "Names on map", "New Game+", "Saves"});
     SelectRow(m, "Controller");
     View v = m.view();
     CHECK(v.rows[static_cast<std::size_t>(v.selected)].value == "all");
@@ -653,7 +654,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(r->kind == Request::Kind::kKeyboard);
     // gone again (the module found no patch 0015): the selection stays on a row there is
     m.SetInputRows({}, {});
-    CHECK(Names(m).size() == 8);   // (with the port and two map rows)
+    CHECK(Names(m).size() == 10);   // (with the port, two map rows, New Game+ and Saves)
     CHECK_FALSE(Selected(m).empty());
 }
 

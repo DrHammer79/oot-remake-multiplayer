@@ -129,6 +129,8 @@ $src = Join-Path $here 'kit'
 foreach ($f in $KitTop) { Copy-Text (Join-Path $src $f) (Join-Path $kit $f) }
 foreach ($f in $KitScripts) { Copy-Text (Join-Path $src "scripts\$f") (Join-Path $kit "scripts\$f") }
 Copy-Text (Join-Path $src 'coop.ini.template') (Join-Path $kit 'scripts\coop.ini.template')
+# the game window's icon (hookshot-build.ps1 puts the png beside the exe; the module sets it with the title "Squadala!")
+foreach ($f in 'squadala-icon.png', 'squadala.ico') { Copy-Item -LiteralPath (Join-Path $src "assets\$f") -Destination (Join-Path $kit "scripts\$f") -Force }
 Copy-Text (Join-Path $src 'coop-options.ini') (Join-Path $kit 'scripts\coop-options.default.ini')
 Copy-Text (Join-Path $here 'verify_kit.ps1') (Join-Path $kit 'scripts\verify_kit.ps1')
 & (Join-Path $here 'make_update_bat.ps1') -Out (Join-Path $kit 'Update.bat')

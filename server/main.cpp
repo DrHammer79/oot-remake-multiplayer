@@ -307,6 +307,7 @@ int main(int argc, char** argv) {
     config.session.join_password = line->password;
     config.session.pvp = line->pvp;
     config.session.dbno.on = line->dbno;
+    config.session.approve_joins = line->approve_joins;
     if (line->owner_hold_ms) config.session.owner_hold_us = std::uint64_t{*line->owner_hold_ms} * 1000;
     config.upnp = line->upnp;
     config.invite = line->invite;
@@ -314,6 +315,7 @@ int main(int argc, char** argv) {
     config.test_delay = line->test_delay;
     config.relay_via = line->relay_via;
     config.relay_key = line->relay_key;
+    config.relay_room = line->relay_room;
     config.log = say;
     HostService host(config);
     std::string why;

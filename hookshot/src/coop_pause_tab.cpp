@@ -147,6 +147,38 @@ std::string Page::TakeWhy() {
     return w;
 }
 
+// --- the rows ---
+
+RowAction ActionFor(int row, const Session& s) {
+    switch (row) {
+    case kRowSession:
+        return RowAction::kOpenMain;
+    case kRowJoinCode:
+        if (s.hosting) return s.code ? RowAction::kCopyCode : RowAction::kOpenMain;   // (the code still coming: shown there)
+        return s.in_one ? RowAction::kOpenMain : RowAction::kOpenJoin;
+    case kRowPlayers:
+        return RowAction::kOpenLobby;
+    case kRowLetIn:
+        return s.hosting ? RowAction::kAllow : RowAction::kOpenLobby;
+    case kRowLeave:
+        return RowAction::kOpenMain;   // (Leave and Stop hosting are there: leaving takes a press of its own)
+    default:
+        return RowAction::kNone;
+    }
+}
+
+const char* ActionWords(RowAction a) {
+    switch (a) {
+    case RowAction::kOpenMain: return "co-op's menu, its main page";
+    case RowAction::kOpenJoin: return "co-op's menu, its Join page";
+    case RowAction::kCopyCode: return "the room name or join code to the clipboard, then co-op's main page";
+    case RowAction::kOpenLobby: return "co-op's menu, its Lobby tab";
+    case RowAction::kAllow: return "the oldest player who asks to join let in (/allow)";
+    case RowAction::kNone: break;
+    }
+    return "nothing";
+}
+
 // --- Probe ---
 
 std::vector<std::string> Probe::Seen(const Facts& f, std::uint64_t now_ms) {

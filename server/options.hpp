@@ -40,6 +40,9 @@ struct CommandLine {
   bool relay = false;
   // --relay-via ADDRESS[:PORT]: host through that relay and get a join code.
   std::string relay_via;
+  // --relay-room NAME: with --relay-via, also hold this room name on the relay
+  // (players join with the name instead of the code).
+  std::string relay_room;
   // --relay-key / --relay-key-env: the relay's host key (on the relay: the one
   // hosts must give; with --relay-via: the one to give).
   std::string relay_key;
@@ -60,6 +63,9 @@ struct CommandLine {
   bool pvp = false;
   // --dbno on|off: down but not out (docs/play-online.md); on by default.
   bool dbno = true;
+  // --approve-joins: the host lets each new player in (docs/protocol.md,
+  // "Host approval"); off by default.
+  bool approve_joins = false;
   // --test-delay-ms / --test-jitter-ms: TEST ONLY (test_delay.hpp); main
   // refuses them unless the environment has OOT_COOP_TEST=1.
   TestDelay test_delay;

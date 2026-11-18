@@ -71,6 +71,7 @@ struct Options {
     std::string chat_key = "T";    // LICHII_COOP_CHAT_KEY
     bool show_players = false;     // LICHII_COOP_SHOW_PLAYERS (the list always shown)
     bool pvp = false;              // pvp (the host's)
+    bool approve_joins = false;    // approve_joins (the host's: each new player waits for /allow or /deny); read only
     bool upnp = true;              // upnp (the host's router forward)
     std::string password;          // server_password ("": a new one each session)
     bool debug_panel = false;      // LICHII_COOP_DEBUG_PANEL
@@ -83,6 +84,9 @@ struct Options {
     std::string voice_mic;         // LICHII_COOP_VOICE_MIC: the voice's microphone by its name ("": the game's)
     bool map_players = true;       // LICHII_COOP_MAP (0: no other players on the minimap and the pause map)
     bool map_names = true;         // LICHII_COOP_MAP_NAMES (0: their icons without names)
+    std::string relay;             // relay (the host's: host through that relay, Host.bat's too; read only here)
+    std::string relay_key;         // relay_key (that relay's host key; read only)
+    std::string relay_room;        // relay_room (a room name on the relay, issue 261; read only)
 
     // From the two files' texts (a missing file: "").
     static Options Read(std::string_view coop_ini, std::string_view options_ini);

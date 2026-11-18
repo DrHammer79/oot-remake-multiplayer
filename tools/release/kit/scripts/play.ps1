@@ -290,7 +290,7 @@ if ($askServer -or -not $Server) {
             else { Write-Host "Not used: $($invite.Error)." }
             continue
         }
-        # A join code with its relay (ABCD-EFGH@relay.example.net:27530): the code goes to the
+        # A join code or room name with its relay (ABCD-EFGH@relay.example.net:27530, forest-gang@...): it goes to the
         # relay first, then the game connects to the relay.
         $relayJoin = ConvertTo-RelayJoin $typed
         if ($relayJoin) {
@@ -309,7 +309,7 @@ if ($askServer -or -not $Server) {
         }
         else {
             Write-Host "'$typed' is not an address. It looks like 26.12.34.56 or 192.168.1.20 (four numbers"
-            Write-Host 'with dots), sometimes with :port at the end, or a join code with its relay (ABCD-EFGH@relay.example.net).'
+            Write-Host 'with dots), sometimes with :port at the end, or a join code or room name with its relay (ABCD-EFGH@relay.example.net, forest-gang@relay.example.net).'
             Write-Host 'Ask the host to copy it from their server window.'
         }
     } until ($ok)

@@ -2945,6 +2945,93 @@ TEST_CASE("report 37: an enemy is not handed back to the player who just gave it
   CHECK(messages_to<HandoverAsk>(h, 2)[0] == HandoverAsk{placed(7), 1, 1});
 }
 
+// Report 138 (Revirie's 4-player log): players 1, 2 and 3 in the Field with
+// enemy 7, which player 1 owns at x = 0 with life 12.
+struct ThreeOwnerHarness : OwnerHarness {
+  ThreeOwnerHarness() {
+    join(3, "Saria");
+    receive(3, present_in("Field", {placed(7)}), kChannelOwnership);
+    clear();
+  }
+
+  // 1 gives 7 to 2 by a chase; returns the time of the change.
+  std::uint64_t give_to_2() {
+    receive(2, chasing_in("Field", {placed(7)}), kChannelOwnership);
+    run(750'000);
+    REQUIRE(messages_to<HandoverAsk>(*this, 1).size() == 1);
+    receive(1, HandoverState{0, placed(7), 0, state_at(0, 12)}, kChannelOwnership);
+    REQUIRE(session.object_owner(placed(7)) == owned(2, 1));
+    receive(2, present_in("Field", {placed(7)}), kChannelOwnership);  // present, not chasing
+    clear();
+    return now;
+  }
+};
+
+TEST_CASE("report 138: an enemy that changed owner lately stays with its owner while it stands by it") {
+  ThreeOwnerHarness h;
+  h.stand(1, 50);
+  h.stand(2, 5);  // the new owner fights it
+  h.stand(3, 8);
+  const auto changed = h.give_to_2();
+
+  // 3's copy chases 3: once the 5 s cooldown is over this used to turn it to
+  // 3 (and the next chase to another). Its owner stands by it: it stays.
+  h.receive(3, chasing_in("Field", {placed(7)}), kChannelOwnership);
+  h.run(10 * kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 2).empty());
+  CHECK(h.session.stats().handover_back_held > 0);
+
+  // Its owner walks off: it is no longer the target, the chase moves it.
+  h.stand(2, 45);
+  h.run(kSecond);
+  REQUIRE(messages_to<HandoverAsk>(h, 2).size() == 1);
+  CHECK(messages_to<HandoverAsk>(h, 2)[0] == HandoverAsk{placed(7), 1, 3});
+  CHECK(h.now - changed < quiet_config().handover_back_us);
+}
+
+TEST_CASE("report 138: an enemy is not handed back to any player who gave it up lately, not only the last") {
+  ThreeOwnerHarness h;
+  h.stand(1, 50);
+  h.stand(2, 45);  // far from it: no sticky owner
+  h.stand(3, 8);
+  const auto first = h.give_to_2();
+
+  h.receive(3, chasing_in("Field", {placed(7)}), kChannelOwnership);
+  h.run(6 * kSecond);
+  REQUIRE(messages_to<HandoverAsk>(h, 2).size() == 1);
+  h.receive(2, HandoverState{0, placed(7), 1, state_at(0, 12)}, kChannelOwnership);
+  REQUIRE(h.session.object_owner(placed(7)) == owned(3, 2));
+  h.receive(3, present_in("Field", {placed(7)}), kChannelOwnership);
+  h.stand(3, 45);  // 3 walks off too
+
+  // 1's copy chases 1: 1 gave it up less than handover_back_us ago (it went
+  // 1, 2, 3, 1 ... in the 4-player log). Not before handover_back_us.
+  h.receive(1, chasing_in("Field", {placed(7)}), kChannelOwnership);
+  h.clear();
+  const std::uint64_t back = quiet_config().handover_back_us;
+  h.run(back - (h.now - first) - kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 3).empty());
+  h.run(2 * kSecond);
+  REQUIRE(messages_to<HandoverAsk>(h, 3).size() == 1);
+  CHECK(messages_to<HandoverAsk>(h, 3)[0] == HandoverAsk{placed(7), 2, 1});
+}
+
+TEST_CASE("report 138: an owner that lets go gives the enemy to a player who can play, not a paused one") {
+  ThreeOwnerHarness h;
+  h.stand(1, 0);
+  h.stand(2, 3);  // the nearest, but paused
+  h.stand(3, 20);
+  h.receive(2, PlayerStatus{0, status::paused}, kChannelSession);
+  h.clear();
+  h.receive(1, present_in("Field", {}), kChannelOwnership);  // 1's game unloads it
+  CHECK(h.session.object_owner(placed(7)) == owned(3, 1));
+
+  // Nobody fit left: a paused player still takes it rather than nobody.
+  h.receive(3, PlayerStatus{0, status::paused}, kChannelSession);
+  h.receive(3, present_in("Field", {}), kChannelOwnership);
+  CHECK(h.session.object_owner(placed(7)) == owned(2, 2));
+}
+
 TEST_CASE("issue 101: a chase shorter than 500 ms, or one the owner's enemy shares, moves nothing") {
   {
     OwnerHarness h;
@@ -5596,4 +5683,295 @@ TEST_CASE("boss beaten: a new group (the session emptied) starts with no boss be
   h.clear();
   h.join(2, "Zelda");
   CHECK(messages_to<BossScene>(h, 2).empty());
+}
+
+// --- Host approval (docs/protocol.md "Host approval", issue 261) ---
+
+namespace {
+
+SessionConfig approving() {
+  SessionConfig c;
+  c.approve_joins = true;
+  c.silence_timeout_us = 1'000'000'000;  // the tests move the clock by a minute; the players stay
+  return c;
+}
+
+// Connects and sends HELLO (with player key `key`; 0: none) to a server that
+// asks its host first; returns the JOIN_KNOCK the host was sent for it.
+JoinKnock knock(Harness& h, ConnectionId id, const std::string& name, std::uint8_t key,
+                ConnectionId host = 1, std::optional<std::uint32_t> address = std::nullopt) {
+  h.clear();
+  h.connect(id, address);
+  if (key != 0) h.player_keys[id] = key_of(key);
+  h.receive(id, hello_from(name), kChannelSession);
+  REQUIRE(all_to<Welcome>(h, id).empty());
+  REQUIRE(all_to<Refused>(h, id).empty());
+  const auto to_host = all_to<JoinKnock>(h, host);
+  REQUIRE(to_host.size() == 1);
+  CHECK(to_host[0].nickname == name);
+  // The joiner is told it waits (its game then waits that long for WELCOME).
+  CHECK(all_to<JoinKnock>(h, id) == std::vector<JoinKnock>{JoinKnock{to_host[0].knock, to_host[0].wait_s, 0, name}});
+  return to_host[0];
+}
+
+}  // namespace
+
+TEST_CASE("approval: off (the default), every joiner with the password is in at once and nobody is asked") {
+  Harness h;
+  h.join(1, "Link");
+  REQUIRE_FALSE(join_keyed(h, 2, "Zelda", 2));
+  for (const Sent& s : h.sent) CHECK_FALSE(std::holds_alternative<JoinKnock>(s.message));
+  CHECK(h.session.stats().joins_held == 0);
+  // A JOIN_ALLOW then finds nothing to answer.
+  h.clear();
+  h.receive(1, JoinAllow{1, true, true}, kChannelSession);
+  CHECK(h.sent.empty());
+  CHECK(h.session.player_count() == 2);
+}
+
+TEST_CASE("approval: the first player hosts at once, the next one waits, not a player, and the host is asked") {
+  Harness h(approving());
+  CHECK(h.join(1, "Link").player_number == 1);  // nobody to ask: it hosts
+  const JoinKnock k = knock(h, 2, "Riley", 2);
+  CHECK(k.knock != 0);
+  CHECK(k.wait_s == 60);
+  CHECK(k.flags == 0);
+  CHECK(h.session.player_count() == 1);
+  CHECK(h.session.stats().joins_held == 1);
+  CHECK_FALSE(was_dropped(h, 2));
+  // Its link is encrypted already (the password was right).
+  CHECK(std::find(h.encrypted.begin(), h.encrypted.end(), ConnectionId{2}) != h.encrypted.end());
+  // Nothing of it reaches the others, nor anything of theirs it.
+  h.clear();
+  const auto before = h.session.stats().before_welcome;
+  h.receive(2, Chat{0, "let me in"}, kChannelSession);
+  h.receive(1, Chat{0, "who is there?"}, kChannelSession);
+  CHECK(h.to(1).empty());
+  CHECK(h.to(2).empty());
+  CHECK(h.session.stats().before_welcome == before + 1);
+}
+
+TEST_CASE("approval: the host lets a joiner in once, and next time it is asked again, marked as let in before") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Zelda", 2);
+  h.clear();
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  const auto w = all_to<Welcome>(h, 2);
+  REQUIRE(w.size() == 1);
+  CHECK(w[0].player_number == 2);
+  CHECK(w[0].players == std::vector<PlayerInfo>{{1, "Link"}});
+  CHECK(all_to<PlayerJoined>(h, 1) == std::vector<PlayerJoined>{{2, "Zelda"}});
+  CHECK(h.tokens.contains(2));  // the usual REJOIN_TOKEN
+  CHECK(h.session.player_count() == 2);
+  CHECK(h.session.stats().joins_allowed == 1);
+  h.session.disconnected(2, h.now);
+  h.collect();
+  const JoinKnock again = knock(h, 3, "Zelda", 2);
+  CHECK(again.knock != k.knock);
+  CHECK(again.flags == join_knock::known);
+  // The same name with another key is not the player the host let in.
+  CHECK(knock(h, 4, "Zelda", 7).flags == 0);
+}
+
+TEST_CASE("approval: the host says no: the joiner is told and closed, nobody else hears of it, and may ask again") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Riley", 2);
+  h.clear();
+  h.receive(1, JoinAllow{k.knock, false, false}, kChannelSession);
+  CHECK(all_to<Refused>(h, 2) == std::vector<Refused>{Refused{RefuseReason::not_let_in}});
+  CHECK(was_dropped(h, 2));
+  CHECK(h.to(1).empty());
+  CHECK(h.session.player_count() == 1);
+  CHECK(h.session.stats().joins_denied == 1);
+  // A second answer finds nothing.
+  h.clear();
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  CHECK(h.to(2).empty());
+  CHECK(h.session.stats().join_answers_stray == 1);
+  // Not kept out: it may ask again.
+  h.session.disconnected(2, h.now);
+  h.collect();
+  knock(h, 3, "Riley", 2);
+}
+
+TEST_CASE("approval: no answer within the time turns the joiner away, and the host's question ends") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Riley", 2);
+  h.clear();
+  h.now += 59'000'000;
+  h.session.tick(h.now);
+  h.collect();
+  CHECK(all_to<Refused>(h, 2).empty());
+  CHECK(all_to<JoinKnock>(h, 1).empty());
+  h.now += 1'000'000;
+  h.session.tick(h.now);
+  h.collect();
+  CHECK(all_to<Refused>(h, 2) == std::vector<Refused>{Refused{RefuseReason::not_let_in}});
+  CHECK(was_dropped(h, 2));
+  CHECK(all_to<JoinKnock>(h, 1) == std::vector<JoinKnock>{JoinKnock{k.knock, 0, 0, "Riley"}});
+  CHECK(h.session.stats().joins_unanswered == 1);
+  // A late answer finds nothing.
+  h.clear();
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  CHECK(h.to(2).empty());
+  CHECK(h.session.stats().join_answers_stray == 1);
+  CHECK(h.session.player_count() == 1);
+}
+
+TEST_CASE("approval: a joiner who stops waiting ends the host's question, and a late answer does nothing") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Riley", 2);
+  h.clear();
+  h.session.disconnected(2, h.now);
+  h.collect();
+  CHECK(all_to<JoinKnock>(h, 1) == std::vector<JoinKnock>{JoinKnock{k.knock, 0, 0, "Riley"}});
+  h.clear();
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  CHECK(h.sent.empty());
+  CHECK(h.session.player_count() == 1);
+}
+
+TEST_CASE("approval: a player the host let in with remember comes back without asking, under any name") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Zelda", 2);
+  h.receive(1, JoinAllow{k.knock, true, true}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  h.session.disconnected(2, h.now);
+  h.collect();
+  h.clear();
+  REQUIRE_FALSE(join_keyed(h, 3, "Sheik", 2));  // in at once
+  CHECK(all_to<JoinKnock>(h, 1).empty());
+  CHECK(all_to<PlayerJoined>(h, 1) == std::vector<PlayerJoined>{{2, "Sheik"}});
+  CHECK(h.session.stats().joins_remembered == 1);
+  // Someone else with that player's first name and their own key is asked.
+  CHECK(knock(h, 4, "Zelda", 9).flags == 0);
+}
+
+TEST_CASE("approval: a remembered key that a player in has too (a copied kit) is asked about") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Zelda", 2);
+  h.receive(1, JoinAllow{k.knock, true, true}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  CHECK(knock(h, 3, "Saria", 2).flags == 0);  // nor marked as the player let in before
+  CHECK(h.session.stats().joins_remembered == 0);
+}
+
+TEST_CASE("approval: a player without a key is never remembered (a name is easy to take)") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Zelda", 0);
+  h.receive(1, JoinAllow{k.knock, true, true}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  h.session.disconnected(2, h.now);
+  h.collect();
+  CHECK(knock(h, 3, "Zelda", 0).flags == 0);
+}
+
+TEST_CASE("approval: no with remember keeps that player out without asking, under any name") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock k = knock(h, 2, "Riley", 2);
+  h.receive(1, JoinAllow{k.knock, false, true}, kChannelSession);
+  h.session.disconnected(2, h.now);
+  h.collect();
+  h.clear();
+  CHECK(join_keyed(h, 3, "Sheik", 2) == Refused{RefuseReason::banned});
+  CHECK(all_to<JoinKnock>(h, 1).empty());
+  // Others are still asked about.
+  knock(h, 4, "Saria", 4);
+}
+
+TEST_CASE("approval: only the host is asked and only the host answers") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock zelda = knock(h, 2, "Zelda", 2);
+  h.receive(1, JoinAllow{zelda.knock, true, false}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  const JoinKnock k = knock(h, 3, "Riley", 3);
+  CHECK(all_to<JoinKnock>(h, 2).empty());
+  h.clear();
+  h.receive(2, JoinAllow{k.knock, true, true}, kChannelSession);
+  CHECK(h.sent.empty());
+  CHECK(h.session.stats().join_answers_stray == 1);
+  CHECK(h.session.player_count() == 2);
+  // The host's answer still counts.
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  CHECK(all_to<Welcome>(h, 3).size() == 1);
+  CHECK(h.session.player_count() == 3);
+}
+
+TEST_CASE("approval: when the host leaves, every joiner still waiting is turned away") {
+  Harness h(approving());
+  h.join(1, "Link");
+  const JoinKnock zelda = knock(h, 2, "Zelda", 2);
+  h.receive(1, JoinAllow{zelda.knock, true, false}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  knock(h, 3, "Saria", 3);
+  knock(h, 4, "Impa", 4);
+  h.clear();
+  h.session.disconnected(1, h.now);
+  h.collect();
+  for (const ConnectionId id : {ConnectionId{3}, ConnectionId{4}}) {
+    CHECK(all_to<Refused>(h, id) == std::vector<Refused>{Refused{RefuseReason::not_let_in}});
+    CHECK(was_dropped(h, id));
+  }
+  CHECK(h.session.stats().joins_unanswered == 2);
+  REQUIRE(h.session.host().has_value());
+  CHECK(*h.session.host() == 2);  // Zelda hosts now
+  CHECK(h.session.player_count() == 1);
+  // The next joiner asks the new host.
+  knock(h, 5, "Mido", 5, 2);
+}
+
+TEST_CASE("approval: the checks run again when the host says yes (the server filled up meanwhile)") {
+  SessionConfig config = approving();
+  config.max_players = 2;
+  Harness h(config);
+  h.join(1, "Link");
+  const JoinKnock a = knock(h, 2, "Zelda", 2);
+  const JoinKnock b = knock(h, 3, "Saria", 3);
+  h.receive(1, JoinAllow{a.knock, true, false}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  h.clear();
+  h.receive(1, JoinAllow{b.knock, true, false}, kChannelSession);
+  CHECK(all_to<Refused>(h, 3) == std::vector<Refused>{Refused{RefuseReason::server_full}});
+  CHECK(h.session.player_count() == 2);
+}
+
+TEST_CASE("approval: at most max_held_joins wait at once, and one more is told the server is full") {
+  SessionConfig config = approving();
+  config.max_held_joins = 2;
+  Harness h(config);
+  h.join(1, "Link");
+  knock(h, 2, "Zelda", 2);
+  knock(h, 3, "Saria", 3);
+  h.clear();
+  h.connect(4);
+  h.receive(4, hello_from("Impa"), kChannelSession);
+  CHECK(all_to<Refused>(h, 4) == std::vector<Refused>{Refused{RefuseReason::server_full}});
+  CHECK(all_to<JoinKnock>(h, 1).empty());
+  CHECK(h.session.stats().joins_held == 2);
+}
+
+TEST_CASE("approval: a rejoin that shows its token takes its place without asking") {
+  Harness h(approving());
+  h.join(1, "Link", kHomePc);
+  const JoinKnock k = knock(h, 2, "Zelda", 2, 1, kOtherPc);
+  h.receive(1, JoinAllow{k.knock, true, false}, kChannelSession);
+  REQUIRE(h.session.player_count() == 2);
+  // Zelda's game lost its connection; Link talks on.
+  h.now += 1'000'000;
+  h.receive(1, Ping{h.now}, kChannelSession);
+  h.player_keys[9] = key_of(2);
+  const auto msgs = rejoin_on(h, 9, "Zelda", kOtherPc, token_of(h, 2));
+  REQUIRE_FALSE(msgs.empty());
+  CHECK(std::holds_alternative<Welcome>(msgs[0].message));
+  CHECK(all_to<JoinKnock>(h, 1).empty());
+  CHECK(h.session.player_count() == 2);
 }

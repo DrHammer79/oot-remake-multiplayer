@@ -34,6 +34,13 @@ inline void GameAsked(std::string_view name) {
     b.tracker.GameAsked(name);
 }
 
+// Our scene this frame, before Classify (a request still waiting for its run is dropped on a change).
+inline void Scene(std::string_view scene) {
+    Box& b = The();
+    std::lock_guard lock(b.mutex);
+    b.tracker.Scene(scene);
+}
+
 // This frame's kind from the raw facts (the frame without a session reads no full reading).
 inline coop::host::EventWhose Classify(bool running, bool link_bound, const std::optional<std::string_view>& anim,
                                        coop::host::EventOwnerTracker::By* by = nullptr) {

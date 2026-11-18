@@ -156,6 +156,10 @@ jobs:
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Test lanes tests
         run: python tools/autotest/tests/test_lanes.py -v
+      - name: Autotest groups tests
+        run: python tools/autotest/tests/test_groups.py -v
+      - name: Screenshot proof tests
+        run: python tools/autotest/tests/test_proof.py -v
       - name: Kit-mode autotest tests
         run: python tools/autotest/tests/test_kit_pair.py -v
       - name: Bad-connection relay tests
@@ -166,6 +170,8 @@ jobs:
         run: python tools/tests/test_check_content.py -v
       - name: Study tools tests (main reader, vtables, callers)
         run: python tools/game_scan/tests/test_game_scan.py -v
+      - name: Game names file tests
+        run: python tools/game_scan/tests/test_game_names.py -v
       - name: MSBT reader tests
         run: python tools/puppet_pack/tests/test_msbt.py -v
       # The kit's patch applier for Hookshot (hookshot-kit); skipped until that branch is merged.

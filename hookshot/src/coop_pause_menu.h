@@ -61,7 +61,9 @@ struct Request {
     // (SetInputRows). kLookParts: look() is the look chosen on the Customize
     // page (coop_look_menu.h); worn when the menu closes.
     enum class Kind { kHost, kJoin, kLeave, kSave, kLook, kPaste, kCopyInvite, kPasteAnswer, kCopyAnswer, kCopyLan,
-                      kController, kKeyboard, kLookParts, kCopyVpn };
+                      kController, kKeyboard, kLookParts, kCopyVpn,
+                      kNgPlus,     // (Navi) kNgPlus: `text` is the New Game+ level chosen (coop_ngplus.h)
+                      kSaveSet };  // (Navi) kSaveSet: `text` "multiplayer" or "solo" (CoopSave::ChooseSaveSet)
     Kind kind = Kind::kHost;
     std::string text;
 };
@@ -158,6 +160,11 @@ public:
     // The look shown now (the one waiting for the menu to close, else the one
     // worn): the Customize page opens on it.
     void SetLook(const CoopLook::Look& look);
+    // (Navi) New Game+ (coop_ngplus.h): the level chosen, the highest unlocked (0: Ganon not beaten yet), the
+    // hearts carried (quarters). The Settings page's New Game+ row.
+    void SetNgPlus(int level, int unlocked, int hearts);
+    // (Navi) The Settings page's Saves row: solo or multiplayer saves (CoopSave::MultiplayerSaves).
+    void SetSaveSet(bool multiplayer);
     // The Customize page's picture of Link (hos_coop_menu_picture.h); empty
     // on the other pages.
     std::vector<CoopLookMenu::Shape> Picture() const;
@@ -180,7 +187,7 @@ private:
         kStartHost, kHostPort, kCopyInvite, kPasteAnswer, kCopyAnswer, kCopyLan, kCopyVpn, kLeave,
         kRejoin, kCode, kClearCode, kJoinIp, kJoinPort, kJoinPassword, kJoinNow,
         kName, kLook, kPlayers, kVoice, kMic, kVoiceMode, kChatKey, kController, kKeyboard, kMapPlayers, kMapNames,
-        kOpenCustomize
+        kOpenCustomize, kNgPlus, kSaveSet
     };
     struct Line;   // a row, what it does and its help
     std::vector<Line> Lines() const;
@@ -215,6 +222,8 @@ private:
     std::string rejoin_host_, rejoin_code_;
     std::string controller_row_, keyboard_row_;
     std::optional<std::vector<std::string>> microphones_;
+    int ngplus_level_ = 0, ngplus_unlocked_ = 0, ngplus_hearts_ = 0;   // (Navi) New Game+ (SetNgPlus)
+    bool mp_saves_ = false;   // (Navi) the Saves row (SetSaveSet)
     Session session_;
     std::vector<std::string> note_;
     std::optional<Request> request_;

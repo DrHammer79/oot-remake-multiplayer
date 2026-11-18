@@ -200,6 +200,7 @@ struct Glue {
     static constexpr int kEventCallerOrder = CoopCallerOrders::kTeleportEvent;  // after the live events (60)
     std::uint64_t main = 0;  // set by Frame under event_mutex
     bool events_open = false;  // set by Frame under event_mutex: travelling, no load
+    bool underway = false;     // set by Frame under event_mutex: a trip past its answer (Underway)
 
     void Line(std::string text) {  // with the mutex held
         LOG_INFO(Core, "coop: {}", text);
@@ -270,6 +271,12 @@ bool Beside(std::uint8_t number, std::string name) {
     g.want_beside = true;
     g.respawn_moved.reset();
     return true;
+}
+
+bool Underway() {
+    Glue& g = TheGlue();
+    std::lock_guard lock(g.event_mutex);
+    return g.underway;
 }
 
 bool ToEntrance() {
@@ -434,6 +441,8 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
         std::lock_guard lock(g.event_mutex);
         g.main = main_base;
         g.events_open = g.trip.phase() == Trip::Phase::travelling && local.scene && !local.loading_banc;
+        g.underway = g.trip.phase() == Trip::Phase::travelling || g.trip.phase() == Trip::Phase::settling ||
+                     g.trip.phase() == Trip::Phase::asking_again;
     }
     for (auto& act : all) {
         if ((act.cancel_scene || act.release) && main_base != 0 && g.by_event) {

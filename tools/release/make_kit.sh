@@ -147,7 +147,7 @@ EOF
     echo "server: coop_server sha256 $(sha256sum "$kit/server/coop_server" | cut -d' ' -f1)"
 } >"$kit/VERSION.txt"
 # The kit's own files, for update.sh (never the player's user/ folder or logs).
-(cd "$kit" && find . -type f ! -path './emulator/user/*' ! -path './logs/*' | sed 's|^\./||' | LC_ALL=C sort) >"$kit/MANIFEST.txt"
+(cd "$kit" && find . -type f ! -name MANIFEST.txt ! -path './emulator/user/*' ! -path './logs/*' | sed 's|^\./||' | LC_ALL=C sort) >"$kit/MANIFEST.txt"
 echo MANIFEST.txt >>"$kit/MANIFEST.txt"
 
 # The build machine's home folder must not be in the kit (paths compiled into programs).

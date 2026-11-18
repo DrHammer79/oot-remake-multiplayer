@@ -13,7 +13,11 @@
 #include <string>
 
 #include "common/logging.h"
+#include "coop_hook.h"
+#include "coop_hookshot.h"
+#include "coop_pause.h"
 #include "coop_runtime.h"
+#include "coop_save.h"
 
 namespace CoopPauseTab {
 
@@ -214,6 +218,32 @@ int FocusedRow() {
     return -1;
 }
 
+// What co-op is doing now, as the rows need it.
+Session SessionNow() {
+    HosCoopStatus st{};
+    st.size = sizeof st;
+    CoopHookshot::HostMenu().Status(&st);
+    Session s;
+    s.hosting = st.state == HOS_COOP_HOSTING;
+    s.in_one = (st.state != HOS_COOP_IDLE && st.state != HOS_COOP_FAILED) || CoopSave::SessionLive();
+    s.code = s.hosting && (st.relay_room[0] != 0 || st.relay_code[0] != 0 || st.invite[0] != 0);
+    return s;
+}
+
+// A row's action (after the lock: co-op's menu and the chat take their own).
+void Act(int row) {
+    const RowAction a = ActionFor(row, SessionNow());
+    LOG_INFO(Core, "coop: pause tab: row {} chosen: {}", row, ActionWords(a));
+    switch (a) {
+    case RowAction::kOpenMain: CoopPause::Open(CoopPauseMenu::Page::kMain); break;
+    case RowAction::kOpenJoin: CoopPause::Open(CoopPauseMenu::Page::kJoin); break;
+    case RowAction::kCopyCode: CoopPause::CopyJoinCode(); break;
+    case RowAction::kOpenLobby: CoopPause::OpenLobby(); break;
+    case RowAction::kAllow: CoopHook::SendChat("/allow"); break;   // (its answer, or "nobody asks", shows in the chat)
+    case RowAction::kNone: break;
+    }
+}
+
 }  // namespace
 
 void Init(const HosCoopApi* api) {
@@ -292,7 +322,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         }
         if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
-        if (decide) LOG_INFO(Core, "coop: pause tab: row {} chosen (the rows' actions come next)", row);
+        if (decide) Act(row);
         // (the stick's up and down bits we added are not the game's: only what it sent, filtered)
         return out & (buttons | ~(kPadStickUp | kPadStickDown));
     } catch (...) {

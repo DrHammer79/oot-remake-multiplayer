@@ -81,7 +81,7 @@ std::vector<Hold> Sharer::Tick(const std::string& scene, const std::vector<Seen>
         if (remote_on && !armed && !s.told_waiting) {
             s.told_waiting = true;
             notes.push_back("switch share: " + Describe(*v.line) + ": another player's is on: waiting for " +
-                            std::string(v.line->guard) + " here (our asker would replay the event)");
+                            std::string(v.line->guard) + " here (holding it would raise our asker's trigger: a replay; the result is our asker's)");
         }
         if (armed || !remote_on) s.told_waiting = false;  // review-a38-3: a press that ends unarmed logs the next wait
         if (s.held && !remote) {

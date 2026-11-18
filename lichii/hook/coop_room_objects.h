@@ -77,7 +77,9 @@ std::span<const GroupFlag> GroupFlags();
 // load, it stopped our asker for this visit; landing live (the other player's press) stops nothing, our asker still
 // exists. Such a guard counts only when it was on at our room's load (CoopSwitchShare::Sharer latches it at the
 // switch's first sight): the Deku Tree room D lifts, whose compass asker RoomD_StepSwitch_On_01 deletes only at a load
-// (Room_D_Prefab_b6c3). Mid-visit, that result reaches the follower through the asker's own EventBool (row 98(2)).
+// (Room_D_Prefab_b6c3). Mid-visit the follower's lifts depend on our asker's EventBool: row 98(2) sets it
+// (coop_event_result.h), but the asker's own AI writes it 0 every tick until its trigger rises, so whether the room
+// sees it is not proven (deku-platforms-b21: in big-run-0115 only the camera played in the follower's game).
 struct SwitchPlug {
     std::string_view scene;
     std::string_view name;

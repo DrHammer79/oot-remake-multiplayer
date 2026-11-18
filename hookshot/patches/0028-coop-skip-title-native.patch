@@ -375,7 +375,7 @@ index 557c6e9..0598e4a 100644
  /* (tests) forget the run's state, as after a restart. */
  void hos_oot_autoload_reset(void);
 diff --git a/host/oot_menu.c b/host/oot_menu.c
-index e704bc3..80e3338 100644
+index a3981a2..512c685 100644
 --- a/host/oot_menu.c
 +++ b/host/oot_menu.c
 @@ -13,6 +13,7 @@
@@ -386,7 +386,7 @@ index e704bc3..80e3338 100644
  #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
  #include "../gpu/vk/compat/longshot_env.h"
  #endif
-@@ -790,6 +791,7 @@ static Seen *screen_seen(uint64_t screen, int64_t now) {
+@@ -795,6 +796,7 @@ static Seen *screen_seen(uint64_t screen, int64_t now) {
  
  void hos_oot_menu_tick(Ctx *c, uint64_t screen) {
      if (!screen) return;

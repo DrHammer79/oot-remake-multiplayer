@@ -158,12 +158,15 @@ constexpr std::array<Input, 0> kInputs{};
 //   B (none) GerudoTrainingGround_06_DisappearFire (Obj_StepSwitch_A_02): Obj_GerudoTrainingGround_FireWall_A_01.StartBurnSign
 //     (the fire's burn sign is an AND pulse of our asker's EventBool and Room06_Fire; the step switch has only BootUp,
 //     unwired, and no ForceControl: no native input to set. Known gap: the fire stays until the room reloads.)
-//   A, 38 lines: Dm_FireTemple_0029, FireTemple_SwitchFireCamera_Room04/12, FocusOnGimmick_InsideJabuJabuBelly_02,
+//   B (none) InsideTheDekuTree_Gimmick_RoomD_PlatformUp (Obj_StepSwitch_A_02): the three lifts' IsOn (OR of our
+//     asker's EventBool and AND(RoomD_StepSwitch_On_01, the plate): the shared flag alone raises nothing, so the
+//     result hangs on our asker; row 98(2) sets that EventBool, no replay).
+//   A, 37 lines: Dm_FireTemple_0029, FireTemple_SwitchFireCamera_Room04/12, FocusOnGimmick_InsideJabuJabuBelly_02,
 //     FocusOnGimmick_JabujabuLift, ForestTemple_Room27_CandleLight, GerudoTrainingGround_05_DisappearFire,
 //     InsideGanonCastle_Dungeon_AppaerTreasureBox_08, _AppearExtendingPlatform_03, _EnemyAppear01/02/03,
 //     _ShutterOpen_06_01/08_01/17_01/17_02, InsideJabuJabuBellyRoom01StepSwitch, Room05Swich, Room07StepSwitch,
 //     Room14StepSwitch, Room14StepSwitch_Under,
-//     InsideJabuJabuBelly_FocusOnGimmick, InsideTheDekuTree_Gimmick_RoomD_PlatformUp, _RoomG_WaterLevelDrop,
+//     InsideJabuJabuBelly_FocusOnGimmick, InsideTheDekuTree_Gimmick_RoomG_WaterLevelDrop,
 //     SpiritTemple_Level_Room_03_BoardNetFall, _Room_10_SwitchOn_01, _Room_19_SwitchOn_01 (both suns),
 //     _Room_19_wallmaster, _Room_32_SwitchOn_01, SpiritTemple_Room19_SunSwitchShutterOpen,
 //     SpritTemple_Room07_AppearTreasure, _Room08_OpenShutter, _Room14_OpenShutter, _Room23_SunSwitch,

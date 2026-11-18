@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "coop_dungeon.h"
+#include "coop_event_result.h"
 #include "coop/host/flag_watcher.hpp"
 #include "coop/protocol/codec.hpp"
 
@@ -513,6 +514,20 @@ host::HoldFlagStore::Hold HoldIn(const bool& link, const std::string& scene) {
     };
 }
 
+// The same with the row 98(2) result hold in front, as coop_hook.cpp orders them: the flags of an event whose result
+// we set here (`applied`) land; a result guard of a class-asker event not set and not played (`played`) waits.
+host::HoldFlagStore::Hold HookHold(const bool& link, const std::string& scene, const std::set<std::string>& applied,
+                                   const std::set<std::string>& played) {
+    return [&link, &scene, &applied, &played](host::FlagKey key) {
+        if (!link) return false;
+        const auto rh = CoopEventResult::HoldFor(scene, applied, [&](const std::string& e) { return played.contains(e); });
+        if (rh.Releases(key.hash)) return false;
+        if (rh.Waits(key.hash)) return true;
+        const auto in = CoopDungeon::HeldIn(key.hash);
+        return in && (in->empty() ? CoopDungeon::IsDungeonScene(scene) : scene == *in);
+    };
+}
+
 } // namespace
 
 TEST_CASE("dungeon: the ladder event waits while B is in the Deku Tree, B's own eye still works (issue 129)") {
@@ -523,15 +538,18 @@ TEST_CASE("dungeon: the ladder event waits while B is in the Deku Tree, B's own 
         host::FlagKey(host::flag_hash("HavePlayedEvent.InsideTheDekuTree_Gimmick_FallingLadder"), 0);
     const auto cleared = host::FlagKey(host::flag_hash("InsideTheDekuTree_RoomC_Cleared"), 0);
     REQUIRE(CoopDungeon::HeldIn(ladder.hash) == std::optional<std::string_view>("InsideTheDekuTree"));
-    // deku-switches-b: the room clear deletes the ladder's asker in the room graph, so it waits with the event.
-    REQUIRE(CoopDungeon::HeldIn(cleared.hash) == std::optional<std::string_view>("InsideTheDekuTree"));
+    // Row 98(2): the room clear (it deletes the ladder's asker) is no longer held by hand: it is the event's
+    // generated result guard, waiting in the Deku Tree until our result is set or we played it.
+    REQUIRE_FALSE(CoopDungeon::HeldIn(cleared.hash).has_value());
 
     Game b;
     b.set(ladder, 0);
     b.set(cleared, 0);
     bool link = true;
     std::string scene = "InsideTheDekuTree";
-    host::HoldFlagStore store(b, HoldIn(link, scene));
+    const std::set<std::string> applied;
+    const std::set<std::string> played;
+    host::HoldFlagStore store(b, HookHold(link, scene, applied, played));
     host::FlagWatcher wb(*list, host::FlagRole::player);
     wb.frame(store);
 
@@ -550,6 +568,53 @@ TEST_CASE("dungeon: the ladder event waits while B is in the Deku Tree, B's own 
     scene = "KokiriForest";
     wb.frame(store);
     CHECK(b.values[ladder].value == 1);
+    CHECK(b.values[cleared].value == 1);
+}
+
+TEST_CASE("dungeon: row 98(2): once our asker's ladder result is set, its flags land in the Deku Tree (no leaving)") {
+    namespace proto = coop::protocol;
+    std::optional<host::SharedFlags> list;
+    CoopDungeon::Merge(list, true);
+    const auto ladder =
+        host::FlagKey(host::flag_hash("HavePlayedEvent.InsideTheDekuTree_Gimmick_FallingLadder"), 0);
+    const auto cleared = host::FlagKey(host::flag_hash("InsideTheDekuTree_RoomC_Cleared"), 0);
+    Game b;
+    b.set(ladder, 0);
+    b.set(cleared, 0);
+    bool link = true;
+    std::string scene = "InsideTheDekuTree";
+    std::set<std::string> applied;
+    const std::set<std::string> played;
+    host::HoldFlagStore store(b, HookHold(link, scene, applied, played));
+    host::FlagWatcher wb(*list, host::FlagRole::player);
+    wb.frame(store);
+    wb.receive(proto::Message{proto::FlagState{1, {{ladder, proto::FlagKind::boolean, 1},
+                                                   {cleared, proto::FlagKind::boolean, 1}}}});
+    wb.frame(store);
+    CHECK(b.values[ladder].value == 0);   // held: our result not set yet
+    CHECK(b.values[cleared].value == 0);  // waits: it would delete our asker first
+    applied.insert("InsideTheDekuTree_Gimmick_FallingLadder");  // our asker's EventBool + EventFinish read 1
+    wb.frame(store);
+    CHECK(b.values[ladder].value == 1);
+    CHECK(b.values[cleared].value == 1);
+}
+
+TEST_CASE("dungeon: row 98(2): the room clear lands at once in the Deku Tree once our game played the ladder itself") {
+    namespace proto = coop::protocol;
+    std::optional<host::SharedFlags> list;
+    CoopDungeon::Merge(list, true);
+    const auto cleared = host::FlagKey(host::flag_hash("InsideTheDekuTree_RoomC_Cleared"), 0);
+    Game b;
+    b.set(cleared, 0);
+    bool link = true;
+    std::string scene = "InsideTheDekuTree";
+    const std::set<std::string> applied;
+    const std::set<std::string> played{"InsideTheDekuTree_Gimmick_FallingLadder"};
+    host::HoldFlagStore store(b, HookHold(link, scene, applied, played));
+    host::FlagWatcher wb(*list, host::FlagRole::player);
+    wb.frame(store);
+    wb.receive(proto::Message{proto::FlagState{1, {{cleared, proto::FlagKind::boolean, 1}}}});
+    wb.frame(store);
     CHECK(b.values[cleared].value == 1);
 }
 
@@ -637,16 +702,19 @@ TEST_CASE("dungeon: the host answers a held write with the asked value") {
     CHECK(h.values[ladder].value == 1);
 }
 
-TEST_CASE("dungeon: which flags are held: gimmick events and the corridor, not switches or keys") {
+TEST_CASE("dungeon: which flags are held: class-asker gimmick events and the corridor, not switches or keys") {
     std::size_t held = 0;
+    std::size_t live = 0;
     for (const auto& f : CoopDungeon::Flags()) {
         const auto in = CoopDungeon::HeldIn(f.hash);
         const std::string name = f.name;
-        const bool live_on_test6 = name == "HavePlayedEvent.InsideTheDekuTree_Gimmick_RoomG_WaterLevelDrop" ||
-                                   name == "HavePlayedEvent.InsideTheDekuTree_Gimmick_RoomH_CandleStick";
-        if (name.starts_with("HavePlayedEvent.") && !live_on_test6) {
-            CHECK_MESSAGE(in.has_value(), name);
+        constexpr std::string_view kPlayed = "HavePlayedEvent.";
+        if (name.starts_with(kPlayed)) {
+            // Row 98(2): a class-live event (every result by shared flags, coop_event_result.cpp) is not held.
+            const bool is_live = CoopEventResult::IsLive(std::string_view(name).substr(kPlayed.size()));
+            CHECK_MESSAGE(in.has_value() == !is_live, name);
             if (in && !in->empty()) CHECK(CoopDungeon::IsDungeonScene(*in));
+            live += is_live ? 1 : 0;
         }
         if (!name.starts_with("HavePlayedEvent.") &&
             (name.find("SmallKey") != std::string::npos || name.find("WaterLevel") != std::string::npos)) {
@@ -654,7 +722,11 @@ TEST_CASE("dungeon: which flags are held: gimmick events and the corridor, not s
         }
         held += in ? 1 : 0;
     }
-    CHECK(held > 190);
+    // 202 played events in the list (11-17): about 155 class live, about 47 held, plus the 7 corridor flags.
+    CHECK(live > 100);
+    CHECK(held > 40);
+    CHECK(held < 100);
+    CHECK(CoopDungeon::HeldIn(host::flag_hash("HavePlayedEvent.InsideTheDekuTree_Gimmick_FallingLadder")).has_value());
     CHECK(CoopDungeon::HeldIn(host::flag_hash("HavePlayedEvent.SpritTemple_Room01_Gimmick")) == std::nullopt);
     CHECK(CoopDungeon::IsDungeonScene("InsideJabuJabuBelly"));
     CHECK_FALSE(CoopDungeon::IsDungeonScene("KokiriForest"));

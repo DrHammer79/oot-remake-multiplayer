@@ -17,11 +17,17 @@ run.ps1 -Runtime hookshot calls `run` when the scenario is a steps file. The ver
                         without a password line a game sends the server's (OOT_COOP_TEST_PASSWORD)
   try B welcomed|refused|none   start B without waiting and see within 40 s: welcomed (its log), refused (a new
                         "refused a connection" in the server log) or none; then end B
-  expect NAME A=1 B=0   wait up to --expect-wait s until each game named has that many puppets (CoopPuppet_*) and
-                        as many fairies (Dm_Npc_Navi) alive, from the objects debug lines; then shot NAME
+  expect NAME A=1 B=0 [see=CHECK...]   wait up to --expect-wait s until each game named has that many puppets
+                        (CoopPuppet_*) and as many fairies (Dm_Npc_Navi) alive, from the objects debug lines; then shot
+                        NAME (s<step>-NAME-A/-B.png) and grade its see= checks (tools/autotest/proofs.txt, proof.py)
+  see CHECK [CHECK...]  grade screenshot checks on the shots taken so far (after a `shot`)
   shot NAME             a screenshot of every running game
   lines NAME B max=N|min=N REGEX   game B's log has at most / at least N lines matching REGEX
-Results go to counts.txt (PASS/FAIL lines as run.ps1 writes them); a step that cannot run is a FAIL there too.
+Results go to counts.txt (PASS/FAIL/UNPROVEN lines as run.ps1 writes them); a step that cannot run is a FAIL there too.
+Owner rule (2026-11-18), no PASS from log lines alone: puppets and fairies are visible, so an expect step whose
+counts match is PASS only when its see= checks are all OK (FAIL when a shot shows the wrong result), else UNPROVEN.
+Log-only steps by nature: `try` (a join's outcome: a connection result) and `lines` (counts log lines); a run made of
+them alone still needs its group line's see= or logonly= (groups.py).
 The server's join password comes from the environment variable OOT_COOP_TEST_PASSWORD (run.ps1 -ServerPassword).
 """
 import argparse
@@ -102,14 +108,23 @@ def parse_steps(text):
             steps.append(Step(n, verb, [_game(n, rest[0]), rest[1]], line))
         elif verb == "expect":
             if len(rest) < 2:
-                raise StepsError("line %d: expect NAME A=1 [B=0]" % n)
-            want = {}
+                raise StepsError("line %d: expect NAME A=1 [B=0] [see=CHECK...]" % n)
+            want, see = {}, []
             for kv in rest[1:]:
                 m = re.match(r"^([AB])=(\d+)$", kv)
-                if not m:
-                    raise StepsError("line %d: expect wants A=N / B=N, not %r" % (n, kv))
-                want[m.group(1)] = int(m.group(2))
-            steps.append(Step(n, verb, [rest[0], want], line))
+                if m:
+                    want[m.group(1)] = int(m.group(2))
+                elif re.match(r"^see=[A-Za-z0-9_.-]+$", kv):
+                    see.append(kv[4:])
+                else:
+                    raise StepsError("line %d: expect wants A=N / B=N / see=CHECK, not %r" % (n, kv))
+            if not want:
+                raise StepsError("line %d: expect NAME A=1 [B=0] [see=CHECK...]" % n)
+            steps.append(Step(n, verb, [rest[0], want, see], line))
+        elif verb == "see":
+            if not rest or not all(re.match(r"^[A-Za-z0-9_.-]+$", c) for c in rest):
+                raise StepsError("line %d: see CHECK [CHECK...]" % n)
+            steps.append(Step(n, verb, list(rest), line))
         elif verb == "shot":
             if len(rest) != 1:
                 raise StepsError("line %d: shot NAME" % n)
@@ -187,7 +202,7 @@ class Runner:
     """Plays parsed steps through a backend (HookshotGames, or a fake in the tests)."""
 
     def __init__(self, games, out, say=print, expect_wait=60.0, try_wait=40.0, clock=time.monotonic,
-                 sleep=time.sleep, default_password=None):
+                 sleep=time.sleep, default_password=None, kit_root=None, checks=None):
         self.g, self.out, self.say = games, out, say
         # A game with no `password` line sends the server's own (run.ps1's Start-Game does the same): every
         # session may have one. `password X -` is none.
@@ -197,17 +212,30 @@ class Runner:
         self.clock, self.sleep = clock, sleep
         self.passwords = {}
         self.fails = 0
+        self.unproven = 0
+        self.kit_root, self.checks = kit_root, checks   # proof.py's (None: the coop-kit above the repo, proofs.txt)
 
     def password(self, x):
         return self.passwords[x] if x in self.passwords else self.default_password
 
     def result(self, ok, text):
-        line = "%s %s" % ("PASS" if ok else "FAIL", text)
+        """ok: True (PASS), False (FAIL) or a state: "PASS", "FAIL", "UNPROVEN"."""
+        state = ok if isinstance(ok, str) else ("PASS" if ok else "FAIL")
+        line = "%s %s" % (state, text)
         self.say(line)
         with open(os.path.join(self.out, "counts.txt"), "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        if not ok:
+        if state == "FAIL":
             self.fails += 1
+        elif state == "UNPROVEN":
+            self.unproven += 1
+
+    def prove(self, names):
+        """(state, text) of screenshot checks on this run's shots so far (proof.check_all)."""
+        sys.path.insert(0, HERE)
+        import proof
+        kit = self.kit_root if self.kit_root is not None else proof.find_kit_root()
+        return proof.check_all(self.out, names, kit, self.checks)
 
     def run(self, steps):
         for s in steps:
@@ -270,7 +298,7 @@ class Runner:
         self.g.kill(x, keep_log="try%d" % s.n)
 
     def do_expect(self, s):
-        name, want = s.args
+        name, want = s.args[:2]
         t0 = self.clock()
         while True:
             ok, texts = True, []
@@ -282,9 +310,24 @@ class Runner:
             if ok or self.clock() - t0 >= self.expect_wait:
                 break
             self.sleep(0.5)
-        self.result(ok, "%s (want %s, after %d s): %s" % (name, " ".join("%s=%d" % kv for kv in want.items()),
-                                                          int(self.clock() - t0), "; ".join(texts)))
+        text = "%s (want %s, after %d s): %s" % (name, " ".join("%s=%d" % kv for kv in want.items()),
+                                                 int(self.clock() - t0), "; ".join(texts))
         self.g.shot("s%d-%s" % (s.n, name))
+        if not ok:
+            self.result(False, text)
+            return
+        # The counts come from log lines; the puppets are visible: the shot proves them (owner rule).
+        see = s.args[2] if len(s.args) > 2 else []
+        if not see:
+            self.result("UNPROVEN", text + " [counts from the log only: no see= check on shot s%d-%s]" % (s.n, name))
+            return
+        state, proof_text = self.prove(see)
+        self.result(state, text + (" [seen: %s]" if state == "PASS" else " [screenshot check: %s]") % proof_text)
+
+    def do_see(self, s):
+        state, text = self.prove(s.args)
+        self.result(state, "see %s%s" % (" ".join(s.args), " [seen: %s]" % text if state == "PASS"
+                                          else " [screenshot check: %s]" % text))
 
     def do_shot(self, s):
         self.g.shot("s%d-%s" % (s.n, s.args[0]))
@@ -670,13 +713,15 @@ def main(argv=None):
     games.server_delay = hk.test_delay_args(a.test_delay_ms, a.test_jitter_ms)
     games.renderer = (a.renderer_wait or games.timeout, a.renderer_stall or hk.RENDERER_STALL,
                       a.renderer_limit or hk.RENDERER_LIMIT)
-    fails = 1
+    fails, runner = 1, None
     try:
         games.server_start()
-        fails = Runner(games, a.out, say=say, expect_wait=a.expect_wait).run(steps)
+        runner = Runner(games, a.out, say=say, expect_wait=a.expect_wait)
+        fails = runner.run(steps)
     finally:
         games.finish()
-    say("steps done: %d FAIL" % fails)
+    say("steps done: %d FAIL" % fails + (", %d UNPROVEN (no screenshot proof: not a pass)" % runner.unproven
+                                         if runner and runner.unproven else ""))
     return 1 if fails else 0
 
 
@@ -700,8 +745,11 @@ def _dry(steps):
         elif s.verb == "try":
             say("  would start %s and check for '%s' within 40 s, then end it" % (s.args[0], s.args[1]))
         elif s.verb == "expect":
-            say("  would wait until %s puppets and fairies, then shoot %s" % (
-                " ".join("%s=%d" % kv for kv in s.args[1].items()), s.args[0]))
+            say("  would wait until %s puppets and fairies, then shoot %s and grade %s" % (
+                " ".join("%s=%d" % kv for kv in s.args[1].items()), s.args[0],
+                " ".join(s.args[2]) if s.args[2] else "no see= check (UNPROVEN)"))
+        elif s.verb == "see":
+            say("  would grade %s on the shots so far" % " ".join(s.args))
         elif s.verb == "lines":
             say("  would count %s's log lines matching '%s' (%s=%d)" % (s.args[1], s.pattern, s.args[2], s.args[3]))
         elif s.verb == "password":

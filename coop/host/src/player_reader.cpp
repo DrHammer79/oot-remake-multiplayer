@@ -261,6 +261,7 @@ std::optional<protocol::Equipment> PlayerReader::read_equipment() {
       e.hand = bracelet;
     }
   }
+  fill_worn_armor(e);
   e.ocarina = flags.get_string64(addr::kEquipOcarina);
   e.arrow = flags.get_string64(addr::kEquipArrow);
   e.drawn = read_drawn();
@@ -345,6 +346,48 @@ std::optional<std::string> PlayerReader::read_slot_name(std::uint32_t slot_index
 std::optional<std::string> PlayerReader::read_armor_link_name(std::uint32_t link_index) {
   if (link_index >= addr::kArmorLinkCount) return std::nullopt;
   return read_link_name(addr::kArmorLinks + addr::kEquipSlotStride * link_index);
+}
+
+// Issue 91, one cause for every piece the game wears without its flag. The
+// PlayerStatus.Equip* flags are what the pause menu chose; the EquipmentUser's
+// armor links hold what the game really draws on Link. The child's Goron's
+// Bracelet (kind 14) is in a link with EquipHandArmor "" (held-ocarina-b,
+// 2026-11-14). Masks and the Hover/Iron Boots are ZR items
+// (PlayerStatus.AssignableItem: SkullMask, HoverBoot, ...), put on by the
+// game's own use call, not the menu's GameData path; through that path (state
+// 2) the game drew no mask even on its own Link (wear-masks 20261110-155536).
+// So a flag that is "" or unknown is filled from a link that holds a piece of
+// its kind, by name (the links' index per kind is not proven); a flag with a
+// name stands. With no such piece and every link read, an unknown flag stays
+// unknown and "" stays "" (taken off), as before.
+namespace {
+bool worn_head(std::string_view n) {
+  return n.starts_with("Armor_") && n.find("_Mask_") != std::string_view::npos;
+}
+bool worn_armor(std::string_view n) {
+  return n == "Armor_Adult_Goron" || n == "Armor_Adult_Zora";
+}
+bool worn_boots(std::string_view n) {
+  return n == "Armor_Adult_HoverBoot" || n == "Armor_Adult_HeavyBoot";
+}
+}  // namespace
+
+void PlayerReader::fill_worn_armor(protocol::Equipment& e) {
+  const bool want_head = !e.head || e.head->empty();
+  const bool want_armor = !e.armor || e.armor->empty();
+  const bool want_boots = !e.boots || e.boots->empty();
+  if (!want_head && !want_armor && !want_boots) return;
+  for (std::uint32_t i = 0; i < addr::kArmorLinkCount; ++i) {
+    const auto name = read_armor_link_name(i);
+    if (!name || name->empty()) continue;
+    if (want_head && worn_head(*name)) {
+      e.head = name;
+    } else if (want_armor && worn_armor(*name)) {
+      e.armor = name;
+    } else if (want_boots && worn_boots(*name)) {
+      e.boots = name;
+    }
+  }
 }
 
 std::optional<std::string> PlayerReader::read_link_name(std::uint64_t link_offset) {

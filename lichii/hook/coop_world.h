@@ -607,6 +607,12 @@ public:
     // the lock stays, and our player opens it with a lent key (Lend).
     // LICHII_COOP_LOCK_DELETE=1 deletes, and then no key is ever lent.
     void SetDeleteLocks(bool on) { delete_locks_ = on; }
+    // Row 98(2) trigger guards (coop_event_result.h, Trigger::follow): the placement hashes whose following waits
+    // (CoopEventResult::FollowKeepers: a world object that would raise our own asker's trigger, for an event our game
+    // has not played). Another game's moves, rest place and break (a hammer switch's press, a pillar's fall) of a
+    // keeper are not made here; they land once it is no keeper. Our own push or hit of it goes out as usual. Present
+    // thread, before Tick.
+    void SetTriggerKeepers(std::set<std::uint64_t> hashes) { trigger_keepers_ = std::move(hashes); }
     // Present thread: the host loaded a save (host-save's FLAG_RESET): kept
     // breaks (locks) are forgotten, so our locks come back with their rooms.
     void ForgetKept();
@@ -760,6 +766,10 @@ private:
     };
 
     void Drain(std::uint64_t now_us);
+    // Whether another game's state of `o` waits (SetTriggerKeepers); `what` names it for the log, once per keeper.
+    bool KeepsForTrigger(const Object& o, const char* what, Out& out);
+    std::set<std::uint64_t> trigger_keepers_;
+    std::set<std::uint64_t> trigger_said_;  // keepers logged
     // A lying small key we took that has not gone out as our break yet.
     std::optional<std::string> TookKey(std::uint64_t hash) const;  // its count
     // A token's id (TokenId) from where it is, or 0: not known.

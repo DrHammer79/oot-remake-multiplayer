@@ -357,7 +357,6 @@ class LayoutTest(unittest.TestCase):
         word = lambda n: u32(n, up.read_layout(n)[0][-1].record + 0x38)
         self.assertEqual(word(shown), PART_KIND)                    # (the source's: bit 0 set)
         self.assertEqual(word(hidden), PART_KIND & ~1)              # only bit 0 cleared
-        self.assertEqual(len(hidden), len(shown))
         self.assert_rest_unchanged(d, hidden, bumped=(0, 9))
 
     def test_move_panes(self):

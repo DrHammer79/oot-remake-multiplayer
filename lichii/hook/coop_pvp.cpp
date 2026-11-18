@@ -91,7 +91,8 @@ std::int32_t AmountOf(proto::DamageCause cause) {
     case proto::DamageCause::hookshot: return 2;
     case proto::DamageCause::hammer: return 4;
     case proto::DamageCause::magic: return 4;
-    case proto::DamageCause::nut:  // a nut stuns, it does not hurt
+    case proto::DamageCause::nut:     // a nut stuns, it does not hurt
+    case proto::DamageCause::killed:  // a lifeless copy's kill report (issue 133), never a PvP hit
     case proto::DamageCause::unknown: return 0;
     }
     return 0;

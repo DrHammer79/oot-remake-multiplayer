@@ -53,6 +53,12 @@ bool KeysTaken();
 // title): Host hosts at once, Join pastes a code already copied.
 void Open(CoopPauseMenu::Page page);
 
+// The pause menu's Multiplayer page (coop_pause_tab.h), its rows: the menu opened on the Lobby tab (Players, and Let in
+// for a guest); and the host's room name (else its join code) to the clipboard, the menu opened on the main page, whose
+// note says what was copied (Join code).
+void OpenLobby();
+void CopyJoinCode();
+
 // The autotest's `menu customize|close` step (LICHII_COOP_TEST_COMMANDS only, coop_testinput.h): the menu opened
 // on the Customize page, or closed. Never asked in a player's game (no commands file there).
 bool TestMenu(const std::string& page);

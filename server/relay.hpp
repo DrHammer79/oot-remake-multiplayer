@@ -6,8 +6,11 @@
 //
 // - The host's coop_server (--relay-via, relay_link.hpp) connects OUT to the
 //   relay and gets a join code. Nothing on the host's router changes.
-// - A guest's Join.bat sends the code once (kLookup). That lets the guest's
-//   address send to that host for 30 minutes after its last datagram.
+// - It may also hold a room name (--relay-room, kRegisterName): the name is
+//   the session token's until that host stops or goes quiet, like its code.
+// - A guest's Join.bat sends the code once (kLookup), or the room name
+//   (kLookupName). That lets the guest's address send to that host for 30
+//   minutes after its last datagram. Wrong codes and names count together.
 // - The guest's game then talks plain ENet to the relay's port; the relay
 //   wraps each datagram for the host's link and unwraps the answers. It never
 //   reads them: the join password and the server's own checks still apply.
@@ -67,6 +70,7 @@ struct RelayStats {
   std::uint64_t lookups_limited = 0;
   std::uint64_t hosts_registered = 0;
   std::uint64_t hosts_refused = 0;
+  std::uint64_t rooms_taken = 0;  // a room name another host already had
 };
 
 class Relay {
@@ -79,6 +83,7 @@ class Relay {
   std::vector<Outgoing> tick(std::uint64_t now_ms);
 
   std::size_t sessions() const { return sessions_.size(); }
+  std::size_t rooms() const { return by_room_.size(); }
   std::size_t flows() const { return flows_by_guest_.size(); }
   const RelayStats& stats() const { return stats_; }
 
@@ -90,6 +95,7 @@ class Relay {
   struct Session {
     std::uint64_t token = 0;
     std::string code;
+    std::string room;  // the room name as the host gave it; empty: a join code only
     Endpoint link;
     std::uint64_t last_ms = 0;
     std::map<std::uint16_t, Flow> flows;
@@ -102,6 +108,14 @@ class Relay {
   };
 
   void control(Endpoint from, const Message& m, std::uint64_t now_ms, std::vector<Outgoing>& out);
+  // This token's session (a new one when it has none yet), at this address and
+  // time; sessions_.end() when the host is refused (the refusal is in out).
+  std::map<std::uint64_t, Session>::iterator open_session(Endpoint from, const Message& m, std::uint64_t now_ms,
+                                                          std::vector<Outgoing>& out);
+  // kLookup and kLookupName: lets the guest's address in for the session
+  // (token), or says why not.
+  LookupResult let_in(Endpoint from, std::optional<std::uint64_t> token, const std::string& what,
+                      std::uint64_t now_ms);
   void from_guest(Endpoint from, std::span<const std::uint8_t> bytes, std::uint64_t now_ms,
                   std::vector<Outgoing>& out);
   void remove_session(std::map<std::uint64_t, Session>::iterator it, const char* why);
@@ -115,6 +129,7 @@ class Relay {
   RelayStats stats_;
   std::map<std::uint64_t, Session> sessions_;  // by token
   std::map<std::string, std::uint64_t> by_code_;
+  std::map<std::string, std::uint64_t> by_room_;  // room_key -> token
   std::map<Endpoint, std::pair<std::uint64_t, std::uint16_t>> flows_by_guest_;  // token, flow
   std::map<std::uint32_t, std::uint64_t> guest_session_;  // address -> token (last code wins)
   std::map<std::uint32_t, Tries> lookups_;
