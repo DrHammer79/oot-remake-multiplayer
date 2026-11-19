@@ -560,6 +560,7 @@ std::uint64_t g_set_seen_gen = 0;
 int g_set_seen_row = -1;
 constexpr std::uint64_t kMouseAMs = 400;   // an A this soon after the left button was down is the mouse's
 std::uint64_t g_set_left_ms = 0;          // the left button last seen down on Longshot Settings. g_mutex.
+std::uint64_t g_list_focus_fix_ms = 0;    // a Left last sent to bring the game's cursor back from the list. g_mutex.
 // Longshot's settings as last read (every 2 s while the page shows, and after a change). g_set_mutex.
 std::mutex g_set_mutex;
 std::vector<SettingRow> g_set_all;
@@ -1894,6 +1895,17 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     g_cells_held = held;
                 }
                 if (set_row >= 0) out &= ~(kPadUp | kPadDown | kPadStickUp | kPadStickDown);   // (the rows' cursor stays)
+                // The game's cursor on a row of the list: the Options rows are buttons of the game's, and Longshot's
+                // mouse puts its cursor on one it clicks. The categories' cursor then walked that column (a run: the
+                // mouse's steps toward a category went down and up the list, the category never changed, B was needed
+                // first). A Left sends it back to the categories, each 300 ms at most while it is there.
+                if (const std::string on = FocusedShownName(); on.rfind("Pa_List_", 0) == 0 && now - g_list_focus_fix_ms > 300) {
+                    g_list_focus_fix_ms = now;
+                    out |= kPadLeft;
+                    LOG_INFO(Core, "coop: pause tab: settings: the game's cursor on {} (the list): Left sends it back to "
+                                   "the categories",
+                             on);
+                }
                 g_page.SetSubView(set_row >= 0);   // (B: back to the rows)
             }
             if (set_row != g_set_row.load()) g_set_row = set_row, g_live_poke = true;

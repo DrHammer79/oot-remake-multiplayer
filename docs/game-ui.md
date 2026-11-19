@@ -490,6 +490,17 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
 - A sixth button on the System page is cheaper: `PaSystemMenu_00` has `Pa_Button_00..04`, each a `PaCommonBtnThin_00`,
   and the graph's selectors on a button's name send an unknown name to their default branch. A co-op page could open
   from that button, as a screen of our own. (inferred)
+- System's five buttons are Save, Load, Options, Special Actions (its "New!" mark is `T_New_00`) and Title Screen, at
+  x -1330, y 338, 150, -140, -328, -516 (a gap after Load). `Pa_Button_03` alone has no override lists and an empty
+  properties list. A copy of it, `Pa_Button_05` at y -704, is a button the game's cursor reaches with Down from Title
+  Screen (Longshot Settings, 2026-11-19). (checked)
+- The pages screen's button list holds the buttons of every page made of `PaSystemMenu_00` (System's and our copies).
+  As a page is swapped for another, the focus goes to the shown button of the same name; with none shown, to the
+  nearest shown one. `f_8088ffc0(screen, button, 0)` on the pages screen moves the focus, but after it put the focus on
+  System's `Pa_Button_05`, neither B nor + closed the menu. (checked)
+- A text pane's drawn width is at +0x13c (its left at +0x134, -width/2 for centred text; +0x140 its height): the tabs'
+  words were 294.7 (Collection), 312.9, 159.0, 201.2 and 325.3 (Multiplayer) at the strip's scale. The game's tabs
+  keep a place written to their own x (+0x6c) in `N_MenuChange_00`. (checked)
 
 ### The tab strip
 
