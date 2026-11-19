@@ -1060,3 +1060,13 @@ TEST_CASE("pause tab: typing ends when the page goes, and the Join view's rows s
     v.relay_set = true;
     CHECK(RowTexts(View::kJoin, v)[3] == "Join this room");
 }
+
+TEST_CASE("pause tab: the focused row is the System button's number under it, by its name") {
+    CHECK(RowOfButton("Pa_Button_00") == 0);
+    CHECK(RowOfButton("Pa_Button_04") == 4);
+    CHECK(RowOfButton("Pa_Button_05") == -1);   // (five rows)
+    CHECK(RowOfButton("Pa_Button_0") == -1);
+    CHECK(RowOfButton("Pa_Button_010") == -1);
+    CHECK(RowOfButton("N_SlideList_00") == -1);
+    CHECK(RowOfButton("") == -1);
+}

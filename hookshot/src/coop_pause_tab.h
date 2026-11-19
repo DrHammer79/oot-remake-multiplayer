@@ -109,10 +109,6 @@ inline constexpr std::uint64_t kPadX = 1ull << 2, kPadY = 1ull << 3, kPadLeft = 
 // where System's buttons do) moves over our rows, with its sound (seen in a run, 2026-11-18). A is ours: the row is the
 // System page's focused button. Left and right are not passed (past the page's edge they would step the menu).
 inline constexpr std::uint64_t kPadPassed = kPadB | kPadPlus | kPadMinus | kPadUp | kPadDown | kPadStickUp | kPadStickDown;
-// The System page's buttons (read from main: its set-up f_80f990e0): the page object at the pages screen + 0x320,
-// its buttons at +0x38, +0x40 ... (5); a button's +0x38 byte is its focus state (Longshot's oot_autoload.c: non-zero and
-// not 4 or 5 is focused).
-inline constexpr std::uint64_t kSystemPageObject = 0x320, kSystemButtons = 0x38, kButtonState = 0x38;
 
 enum class Kind { kOther, kPages, kStrip, kBlocker };
 Kind KindOf(std::uint64_t vtable_offset);
@@ -323,6 +319,9 @@ struct Session {
 int PlayerIndex(int listed, int page, int row);
 int PlayerPages(int listed);
 RowAction ActionFor(int row, const Session& s);
+// The row of ours a focused button of the pages screen lies under: System's Pa_Button_00..04 (by the name the focus
+// manager's walk gives, CoopModScreens::ButtonName), -1 for any other.
+int RowOfButton(const std::string& name);
 // A row of a view (kMain: ActionFor).
 RowAction ActionFor(View view, int row, const Session& s);
 // A second A (Leave, Kick, Ban) is still waited for: our page shows and the game's cursor is on that row still.

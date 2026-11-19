@@ -387,6 +387,12 @@ float Ahead(float prev, float now, float limit) {
     return next;
 }
 
+int RowOfButton(const std::string& name) {
+    if (name.size() != 12 || name.compare(0, 11, "Pa_Button_0") != 0) return -1;
+    const int row = name[11] - '0';
+    return row >= 0 && row < kRows ? row : -1;
+}
+
 RowAction ActionFor(int row, const Session& s) {
     switch (row) {
     case kRowSession:

@@ -19,6 +19,7 @@
 #include "common/logging.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
+#include "coop_mod_screens.h"
 #include "coop_pause.h"
 #include "coop_runtime.h"
 #include "coop_lobby_game.h"
@@ -492,17 +493,22 @@ void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
     if (at != 0) Call(ctx, kScreenSound, screen, at);
 }
 
-// The System page's focused button (0..4), the row of ours under the game's cursor frame; -1 when none is.
+// The row of ours under the game's cursor frame (0..4): the pages screen's focused button, by the focus manager's walk
+// (CoopModScreens::FocusedButton, as the mods' screens) and its name, System's Pa_Button_00..04 (RowOfButton); -1 none.
+// The game focuses no button for a frame or two while the cursor steps: the row it had last in this opening of the
+// pages is kept then. (Read in a run, 2026-11-19: the walk names Pa_Button_00, 01, 02 as the cursor steps down. The
+// System page object's button array this read before, +0x320 then +0x38, gave no focus state there, so every A was
+// row 0's.)
 int FocusedRow() {
+    static std::uint64_t last_gen = 0;
+    static int last_row = -1;
     const std::uint64_t pages = g_pages_screen;
-    const std::uint64_t page = pages != 0 ? Read<std::uint64_t>(pages + kSystemPageObject) : 0;
-    if (page == 0) return -1;
-    for (int i = 0; i < kRows; ++i) {
-        const std::uint64_t button = Read<std::uint64_t>(page + kSystemButtons + 8 * static_cast<std::uint64_t>(i));
-        const std::uint8_t state = button != 0 ? Read<std::uint8_t>(button + kButtonState) : 0;
-        if (state != 0 && (state & 0xfe) != 4) return i;
-    }
-    return -1;
+    if (pages == 0) return -1;
+    const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+    const int row = RowOfButton(CoopModScreens::ButtonName(read, CoopModScreens::FocusedButton(read, pages)));
+    if (last_gen != g_pages_gen) last_gen = g_pages_gen, last_row = -1;   // (a new opening: nothing kept)
+    if (row >= 0) last_row = row;
+    return last_row;
 }
 
 void SetView(View v) {
