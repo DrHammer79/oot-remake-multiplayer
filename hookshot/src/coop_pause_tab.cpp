@@ -44,15 +44,15 @@ Kind KindOf(std::uint64_t vtable_offset) {
 
 // --- Page ---
 
+// The menu open on System, the strip with its five tabs: R shows our page.
 bool Page::CanShow(std::uint64_t now_ms) const {
-    return pages_.screen != 0 && strip_.screen != 0 && now_ms - pages_ms_ < kStaleMs && now_ms - strip_ms_ < kStaleMs &&
-           pages_.state == 2 && pages_.page == kSystemPage && pages_.asked == kSystemPage && strip_.state == 2 &&
-           strip_.mode == kPlusMode && strip_.tabs == 5 && now_ms >= blocked_until_ms_;
+    return CanStay(now_ms) && pages_.state == 2 && strip_.state == 2;
 }
 
-// The menu opening again (or open) on System, the strip with its five tabs: our page back from the opening on, so
-// System's never shows first.
-bool Page::CanShowAgain(std::uint64_t now_ms) const {
+// The menu open, or opening, on System: our page stays, or comes back as the menu opens again. (Opening too: the menu
+// opening again shows our page from its first update, and a run showed the pages open, state 2, while the strip still
+// opens, state 1.)
+bool Page::CanStay(std::uint64_t now_ms) const {
     return pages_.screen != 0 && strip_.screen != 0 && now_ms - pages_ms_ < kStaleMs && now_ms - strip_ms_ < kStaleMs &&
            (pages_.state == 1 || pages_.state == 2) && pages_.page == kSystemPage && pages_.asked == kSystemPage &&
            (strip_.state == 1 || strip_.state == 2) && strip_.mode == kPlusMode && strip_.tabs == 5 &&
@@ -85,8 +85,9 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
             page_screen_ = f.screen, page_set_ = -1, texts_set_ = false;
         }
         pages_ = f, pages_ms_ = now_ms;
-        if (shown_ && !CanShow(now_ms)) {
-            Hide(f.state != 2 ? "the menu is closing" : "the menu left the System page", f.state != 2);
+        if (shown_ && !CanStay(now_ms)) {
+            const bool closing = f.state == 3 || f.state == 0;
+            Hide(closing ? "the menu is closing" : "the menu left the System page", closing);
         }
         ShowAgain(now_ms);
         const int want = shown_ ? 1 : 0;
@@ -103,7 +104,7 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
             strip_screen_ = f.screen, tab_key_ = -1, tab_filled_ = false;
         }
         strip_ = f, strip_ms_ = now_ms;
-        if (shown_ && !CanShow(now_ms)) {
+        if (shown_ && !CanStay(now_ms)) {
             Hide(f.mode != kPlusMode ? "the Minus menu" : "the tab strip is closing", f.mode == kPlusMode);
         }
         ShowAgain(now_ms);
@@ -131,8 +132,8 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     const std::uint64_t down = buttons & ~pad_last_;
     pad_last_ = buttons;
     swallow_ &= buttons;   // (let go: the game gets it again)
-    if (shown_ && !CanShow(now_ms)) {
-        Hide("the menu's state changed", pages_.state != 2 || strip_.state != 2);
+    if (shown_ && !CanStay(now_ms)) {
+        Hide("the menu's state changed", pages_.state == 3 || pages_.state == 0 || strip_.state == 3 || strip_.state == 0);
     }
     if (!shown_) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
@@ -160,7 +161,7 @@ void Page::ShowAgain(std::uint64_t now_ms) {
         again_ = false;   // (the menu open on another page: not ours)
         return;
     }
-    if (CanShowAgain(now_ms)) {
+    if (CanStay(now_ms)) {
         shown_ = true, again_ = false, decide_ = false, why_.clear();
     }
 }
@@ -178,6 +179,14 @@ std::string Page::TakeWhy() {
 }
 
 // --- the rows ---
+
+float Ahead(float prev, float now, float limit) {
+    const float step = now - prev, next = now + step;
+    if ((step > 0 && now <= limit && next > limit) || (step < 0 && now >= limit && next < limit)) {
+        return limit;
+    }
+    return next;
+}
 
 RowAction ActionFor(int row, const Session& s) {
     switch (row) {

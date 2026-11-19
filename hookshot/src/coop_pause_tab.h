@@ -134,7 +134,7 @@ public:
 
 private:
     bool CanShow(std::uint64_t now_ms) const;
-    bool CanShowAgain(std::uint64_t now_ms) const;
+    bool CanStay(std::uint64_t now_ms) const;
     void ShowAgain(std::uint64_t now_ms);
     // keep: the menu closed with our page shown, so the next opening on System shows it again (as the game opens on
     // the page it closed on).
@@ -178,6 +178,11 @@ struct Session {
     bool code = false;      // hosting, and a room name or a join code is there to give
 };
 RowAction ActionFor(int row, const Session& s);
+
+// One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
+// the fourth tab's place and fades before the strip's own update, so they are one update old: ours takes them one
+// update ahead to move with the fourth, not a frame after it.
+float Ahead(float prev, float now, float limit);
 
 // What the rows say, in the game's own text panes (the module writes them through the pack's placeholder messages,
 // Coop_Live_NN, in LayoutMsg/PlusMenu_00): the session's state on the rows themselves.

@@ -77,6 +77,18 @@ TEST_CASE("pause tab: the screens are known by their class's vtable") {
     CHECK(0x80020000 + kPaneByName == 0x8045e300);
 }
 
+TEST_CASE("pause tab: the fourth tab's place and fades taken one update ahead, not past where they head") {
+    CHECK(Ahead(1023.83f, 1020.12f, 1000.0f) == doctest::Approx(1016.41f));   // (the strip's drop, a run's numbers)
+    CHECK(Ahead(1000.48f, 1000.34f, 1000.0f) == doctest::Approx(1000.20f));
+    CHECK(Ahead(1000.19f, 1000.0f, 1000.0f) == 1000.0f);                      // (at rest: stays)
+    CHECK(Ahead(1001.0f, 1000.2f, 1000.0f) == 1000.0f);                       // (not past its rest)
+    CHECK(Ahead(0.5f, 0.844f, 1.0f) == 1.0f);                                 // (a fade in: not past 1)
+    CHECK(Ahead(0.156f, 0.5f, 1.0f) == doctest::Approx(0.844f));
+    CHECK(Ahead(0.8f, 0.5f, 0.0f) == doctest::Approx(0.2f));                  // (a fade out)
+    CHECK(Ahead(0.4f, 0.1f, 0.0f) == 0.0f);
+    CHECK(Ahead(1.0f, 1.0f, 1.0f) == 1.0f);
+}
+
 TEST_CASE("pause tab: the fifth tab comes in with the strip's opening, filled once per opening") {
     Page p;
     auto d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), 1000);   // (closed)
@@ -119,6 +131,11 @@ TEST_CASE("pause tab: the menu closed on our page opens on it again, not after L
     CHECK(p.Shown());
     CHECK(d.set_page);
     CHECK(d.page_shown);
+    // (as a run had it: the pages open while the strip still opens; the page stays, the pad's update too)
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 2), now + 5100);
+    p.OnPad(0, now + 5100);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), now + 5100);
+    CHECK(p.Shown());
     // L, then the menu closed and opened again: System's.
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 2), now + 5300);
     p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), now + 5300);

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <utility>
 #include <string>
 
 #include "common/logging.h"
@@ -40,6 +41,9 @@ std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), wh
 std::uint64_t g_fourth_word = 0, g_tab_word = 0;   // the two tabs' word panes (N_MenuChangeTextIn_00)
 float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
 bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
+// The fourth tab's place and fades at the last strip update (to take them one update ahead); none after a hide.
+bool g_follow_had = false;
+float g_follow_y = 0, g_follow_alpha = 0, g_follow_word = 0;
 bool g_pages_bad = false, g_strip_bad = false;   // a pane that is not a part: the page step stays off (logged once)
 
 template <class T>
@@ -312,12 +316,14 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         g_fourth_word = PaneIn(ctx, PartLayout(table, "Pa_Category_03"), "N_MenuChangeTextIn_00");
         g_tab_word = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
         g_tab_shown = false;
+        g_follow_had = false;
         g_strip_bad = !IsPart(g_tab_pane);
         LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}", g_tab_pane,
                  g_strip_bad ? " (not a part: left alone)" : "");
     }
     if (g_strip_bad) return;
     SetVisible(ctx, g_tab_pane, d.tab_shown);
+    if (!d.tab_shown) g_follow_had = false;
     g_tab_shown = d.tab_shown;
     if (!d.tab_shown) return;
     const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
@@ -350,16 +356,24 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
 void FollowFourth(void* ctx) {
     if (!g_tab_shown || g_fourth_pane == 0 || g_strip_bad) return;
     const float y = Read<float>(g_fourth_pane + kPaneScreenY), alpha = Read<float>(g_fourth_pane + kPaneScreenAlpha);
-    if (!std::isfinite(y) || !std::isfinite(alpha) || std::fabs(y - g_tab_rest_y) > kFollowMost) return;
-    if (Read<float>(g_tab_pane + kPaneOwnY) != y) {
-        CoopRuntime::Write(g_tab_pane + kPaneOwnY, &y, sizeof y);
+    const float word = g_fourth_word != 0 ? Read<float>(g_fourth_word + kTextAlpha) : 1.0f;
+    if (!std::isfinite(y) || !std::isfinite(alpha) || !std::isfinite(word) || std::fabs(y - g_tab_rest_y) > kFollowMost) {
+        return;
+    }
+    // (one update ahead: these are the fourth's from the last frame, before the strip's own update moves it on)
+    const bool had = std::exchange(g_follow_had, true);
+    const float want_y = had ? Ahead(g_follow_y, y, g_tab_rest_y) : y;
+    const float want_alpha = had ? Ahead(g_follow_alpha, alpha, alpha >= g_follow_alpha ? 1.0f : 0.0f) : alpha;
+    const float want_word = had ? Ahead(g_follow_word, word, word >= g_follow_word ? 1.0f : 0.0f) : word;
+    g_follow_y = y, g_follow_alpha = alpha, g_follow_word = word;
+    if (Read<float>(g_tab_pane + kPaneOwnY) != want_y) {
+        CoopRuntime::Write(g_tab_pane + kPaneOwnY, &want_y, sizeof want_y);
         Call(ctx, kPaneMoved, g_tab_pane);
     }
-    CallAlpha(ctx, g_tab_pane, std::clamp(alpha, 0.0f, 1.0f));
+    CallAlpha(ctx, g_tab_pane, std::clamp(want_alpha, 0.0f, 1.0f));
     // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
     if (g_fourth_word != 0 && g_tab_word != 0) {
-        const float word = Read<float>(g_fourth_word + kTextAlpha);
-        if (std::isfinite(word)) CallAlpha(ctx, g_tab_word + kTextAlphaBlock, std::clamp(word, 0.0f, 1.0f));
+        CallAlpha(ctx, g_tab_word + kTextAlphaBlock, std::clamp(want_word, 0.0f, 1.0f));
     }
 }
 
