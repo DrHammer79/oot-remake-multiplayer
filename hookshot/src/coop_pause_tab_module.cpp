@@ -17,6 +17,8 @@
 #include <mutex>
 #include <utility>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <tuple>
 
 #include "common/logging.h"
@@ -571,6 +573,62 @@ std::vector<SettingRow> SettingsNow(std::uint64_t now_ms, bool fresh = false) {
     return g_set_all;
 }
 
+// (test, COOP_TEST_LONGSHOT_SETTINGS=1 only) Once a run, as Longshot Settings first shows: every setting Longshot lists
+// is found in one category, and each one that can change is set a step (Right, or Left at its end) the way the page
+// sets it, checked, and set back, checked; the log says each one and a summary. On a thread of its own: each set saves
+// Longshot's options file. A tester's options are theirs to back up first (a Quality preset moved and put back sets
+// its rows again).
+std::atomic<bool> g_settings_test_ran{false};
+void TestSettingsOnce() {
+    const char* on = std::getenv("COOP_TEST_LONGSHOT_SETTINGS");
+    if (on == nullptr || std::string_view(on) != "1" || g_settings_test_ran.exchange(true)) return;
+    std::thread([] {
+        const std::vector<CoopLongshotSettings::Setting> all = CoopLongshotSettings::All();
+        std::vector<SettingRow> rows;
+        for (const auto& x : all) {
+            rows.push_back(SettingRow{x.key, x.name, x.text, x.tab, x.value, x.lo, x.hi, x.step, x.restart, x.fixed});
+        }
+        int changed = 0, fixed = 0, failed = 0, nowhere = 0;
+        std::string per;
+        for (int c = 0; c < kSettingRows; ++c) {
+            per += std::string(" ") + kSettingTabs[static_cast<std::size_t>(c)] + " " +
+                   std::to_string(SettingsOf(rows, c).size());
+        }
+        for (const SettingRow& r : rows) {
+            int in = 0;
+            for (int c = 0; c < kSettingRows; ++c) {
+                for (const SettingRow& o : SettingsOf(rows, c)) in += o.key == r.key ? 1 : 0;
+            }
+            if (in != 1) {
+                ++nowhere;
+                LOG_WARNING(Core, "coop: settings test: {} (tab {}) is in {} categories", r.key, r.tab, in);
+            }
+            if (r.fixed || r.hi <= r.lo) {
+                ++fixed;
+                LOG_INFO(Core, "coop: settings test: {} ({}, {}): {} - nothing to choose here", r.key, r.tab, r.name, r.text);
+                continue;
+            }
+            int want = SettingNext(r, 1);
+            if (want == r.value) want = SettingNext(r, -1);
+            const auto there = CoopLongshotSettings::Set(r.key, want);
+            const auto back = CoopLongshotSettings::Set(r.key, r.value);
+            const bool went = there && there->value != r.value, returned = back && back->value == r.value;
+            if (went && returned) {
+                ++changed;
+            } else {
+                ++failed;
+            }
+            LOG_INFO(Core, "coop: settings test: {} ({}, {}): {} -> {} -> {}: {}", r.key, r.tab, r.name, r.text,
+                     there ? there->text : std::string("(refused)"), back ? back->text : std::string("(refused)"),
+                     went && returned ? "ok" : !went ? "NOT CHANGED" : "NOT PUT BACK");
+        }
+        LOG_INFO(Core, "coop: settings test: {} settings: {} changed and put back, {} with nothing to choose, {} failed, {} "
+                       "not in exactly one category; by category:{}",
+                 rows.size(), changed, fixed, failed, nowhere, per);
+        g_live_poke = true;
+    }).detach();
+}
+
 // A setting of the category's list set as a press asks (dir: -1 Left, +1 Right, 0 A). After the lock, as Act.
 void ChangeSetting(int index, int dir) {
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
@@ -884,6 +942,7 @@ void SettingsButton(void* ctx) {
         g_focus_want = "Pa_Button_00", g_focus_since = now;
         g_set_category = 0, g_set_page = 0, g_set_row = -1, g_live_poke = true;
         LOG_INFO(Core, "coop: pause tab: Longshot Settings opened from System");
+        TestSettingsOnce();   // (COOP_TEST_LONGSHOT_SETTINGS=1 only)
     }
     if (g_page.TakeSettingsLeft()) {
         g_focus_want = "Pa_Button_05", g_focus_since = now;
