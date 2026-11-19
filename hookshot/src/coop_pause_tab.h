@@ -69,8 +69,6 @@ inline constexpr std::uint64_t kSetVisible = 0x20aea0; // (pane, visible): pane 
 inline constexpr std::uint64_t kTabFill = 0xa6ab50;    // (tab, category, enabled): its text and Plus/Minus look
 inline constexpr std::uint64_t kTabLight = 0x2ccf60;   // (tab, lit, instant): its CurrentIn / CurrentOut
 inline constexpr std::uint64_t kPaneAlpha = 0x2d8ac0;  // (pane, s0 alpha 0..1): a pane's own alpha (+0x74), marked dirty
-inline constexpr std::uint64_t kSetFocus = 0x86ffc0;   // (screen, button, 0): the focus on that button (f_8088ffc0, as
-                                                       //  the title's set-up gives its first button the focus)
 // A pane's own place's height (+0x70, its x at +0x6c), its place on the screen (+0x4c, +0x50) and its alpha with its
 // parents' (+0x78), as read in a run (2026-11-19: the strip's fourth tab and our fifth through the strip's opening).
 inline constexpr std::uint64_t kPaneOwnY = 0x70, kPaneScreenX = 0x4c, kPaneScreenY = 0x50, kPaneScreenAlpha = 0x78;

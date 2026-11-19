@@ -943,69 +943,57 @@ std::string FocusedShownName() {
     return found == 1 ? name : std::string();
 }
 
-// System's Longshot Settings button, at each update of the pages: shown while Longshot Settings can be used, and the
-// game's cursor moved for it: onto the page's first row as it opens (A on the button), back onto the button as it is
-// left (B on its rows). The move waits for the button to be shown (its page's matrices made), kFocusWaitMs at most.
-// g_mutex.
-constexpr std::uint64_t kFocusWaitMs = 1000;
-std::string g_focus_want;
-std::uint64_t g_focus_since = 0;
-int g_left_trace = 0;   // (trace) the game's cursor's button logged this many more times after Longshot Settings is left
-std::uint64_t g_left_since = 0;
-std::string g_left_said;
+// System's Longshot Settings button, at each update of the pages: shown while Longshot Settings can be used (with the
+// page's own copy of it, its sixth category row, Debug). The game's cursor is never moved by a call: moved onto System's
+// button with f_8088ffc0 as the page was left, neither B nor + closed the menu any more (a run, 2026-11-19). The game
+// carries its cursor by the button's name: onto the page's sixth row as it opens from System's sixth button, so that
+// row is hidden for kDebugRowWaitMs as the page opens (ApplyPages) and the cursor goes elsewhere; back onto System's
+// button as it is left. Where it went is logged. g_mutex.
+constexpr std::uint64_t kDebugRowWaitMs = 400;
+std::uint64_t g_debug_row_back_ms = 0;   // the page's sixth row shown again then (0: not hidden for the opening)
+int g_open_trace = 0, g_left_trace = 0;  // (trace) the game's cursor's button logged this many more times
+std::uint64_t g_open_since = 0, g_left_since = 0;
+std::string g_open_said, g_left_said;
+void TraceCursor(const char* when, int* left, std::uint64_t since, std::string* said, std::uint64_t now) {
+    if (*left <= 0 || now - since < 100) return;
+    const std::string name = FocusedShownName();
+    if (name != *said) {
+        *said = name;
+        LOG_INFO(Core, "coop: pause tab: {}, the game's cursor on {}", when, name.empty() ? std::string("no one shown button") : name);
+        --*left;
+    }
+    if (now - since > 5000) *left = 0, said->clear();
+}
 void SettingsButton(void* ctx) {
+    const std::uint64_t now = NowMs();
     if (g_settings_button != 0) {
         const int want = g_page.SettingsUsable() ? 1 : 0;
         if (want != g_settings_button_shown) {
             SetVisible(ctx, g_settings_button, want != 0);
-            if (g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, want != 0);   // (the Debug row)
             g_settings_button_shown = want;
+            if (g_debug_row_back_ms == 0 && g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, want != 0);
             LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button {}", want != 0 ? "shown" : "hidden");
         }
     }
-    const std::uint64_t now = NowMs();
+    if (g_debug_row_back_ms != 0 && now >= g_debug_row_back_ms) {
+        g_debug_row_back_ms = 0;
+        if (g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, g_page.SettingsUsable());
+    }
     if (g_page.TakeSettingsOpened()) {
-        g_focus_want = "Pa_Button_00", g_focus_since = now;
-        g_set_category = 0, g_set_page = 0, g_set_row = -1, g_live_poke = true;
+        g_set_page = 0, g_set_row = -1, g_set_seen_row = -1, g_live_poke = true;   // (the category: the cursor's row)
+        g_open_trace = 4, g_open_since = now, g_open_said.clear();
         LOG_INFO(Core, "coop: pause tab: Longshot Settings opened from System");
         TestSettingsOnce();   // (COOP_TEST_LONGSHOT_SETTINGS=1 only)
     }
     if (g_page.TakeSettingsLeft()) {
-        // (the game's cursor not moved: where the game puts it. Moved onto System's Longshot Settings button, the menu
-        // no longer closed in a run, 2026-11-19: neither B nor + reached it)
-        g_left_trace = 4, g_left_since = now;
+        g_left_trace = 4, g_left_since = now, g_left_said.clear();
         LOG_INFO(Core, "coop: pause tab: Longshot Settings left (B): System again");
     }
-    if (g_left_trace > 0 && now - g_left_since > 300) {   // (trace: where the game's cursor went)
-        const std::string name = FocusedShownName();
-        if (name != g_left_said) {
-            g_left_said = name;
-            LOG_INFO(Core, "coop: pause tab: after Longshot Settings, the game's cursor on {}",
-                     name.empty() ? std::string("no one shown button") : name);
-            --g_left_trace;
-        }
-        if (now - g_left_since > 5000) g_left_trace = 0, g_left_said.clear();
-    }
-    if (g_focus_want.empty() || g_pages_screen == 0) return;
-    const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
-    std::uint64_t target = 0;
-    for (const std::uint64_t b : CoopModScreens::Buttons(read, g_pages_screen)) {
-        if (CoopModScreens::ButtonName(read, b) == g_focus_want && CoopModScreens::HitBox(read, b)) target = b;
-    }
-    if (target != 0) {
-        std::uint64_t x0 = 0;
-        const bool called = Call(ctx, kSetFocus, g_pages_screen, target, 0, 0, 0, &x0);
-        LOG_INFO(Core, "coop: pause tab: the game's cursor onto {} ({:#x}): {} (x0 {:#x})", g_focus_want, target,
-                 called ? "called" : "not called", x0);
-        g_focus_want.clear();
-    } else if (now - g_focus_since > kFocusWaitMs) {
-        LOG_INFO(Core, "coop: pause tab: the game's cursor not moved onto {}: no such button shown in {} ms",
-                 g_focus_want, kFocusWaitMs);
-        g_focus_want.clear();
-    }
+    TraceCursor("as Longshot Settings opened", &g_open_trace, g_open_since, &g_open_said, now);
+    TraceCursor("after Longshot Settings", &g_left_trace, g_left_since, &g_left_said, now);
 }
 
-// Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
+/ Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
 int SlidePlace(int page) {
     return page == 1 ? 1 : 0;
 }
@@ -1031,6 +1019,12 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
         } else {
             for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
                 if (pane != 0) SetVisible(ctx, pane, pane == (to != 0 ? to : g_system_pane));
+            }
+            // (Longshot Settings opening from System's sixth button: its own sixth row hidden a moment, so the game's
+            // cursor, carried by the button's name, does not land on Debug; SettingsButton shows it again)
+            if (d.page_from == 0 && d.page_to == 2 && g_settings_button_set != 0) {
+                SetVisible(ctx, g_settings_button_set, false);
+                g_debug_row_back_ms = NowMs() + kDebugRowWaitMs;
             }
         }
     }
