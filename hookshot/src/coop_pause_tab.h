@@ -589,6 +589,9 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept;
 std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept;
 // hos_coop_game_pause_page: Page::MousePage (4 shown, -1 can show, -2 cannot be used).
 int MousePage() noexcept;
+// hos_coop_game_pause_tab_at (patch 0032): the tab under (x, y) in the layout's units while the strip has six tabs
+// (0..5; 8 L, 9 R; -1 none), -2 otherwise (Longshot's own table for five).
+int TabAt(float x, float y) noexcept;
 // The keyboard while one of the page's fields is typed into (hos_coop_key, hos_coop_char; KeysTaken: the game gets
 // none of its keys then): true when the field took it.
 bool Key(std::uint32_t vk, bool repeat) noexcept;

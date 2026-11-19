@@ -1586,6 +1586,32 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
     }
 }
 
+int TabAt(float x, float y) noexcept {
+    try {
+        // (the six-tab strip as PlaceSix and FollowFourthX put it: the game's tabs 460 apart ending with the fourth,
+        // ours kSixGap after it, L and R at their places; read where the game draws them now)
+        if (!g_tab6_shown || g_fourth_pane == 0 || g_tab6_pane == 0) return -2;
+        if (y < 900 || y > 1080) return -1;
+        const float fourth = Read<float>(g_fourth_pane + kPaneScreenX);
+        if (!std::isfinite(fourth)) return -2;
+        float centres[6];
+        for (int i = 0; i < 4; ++i) centres[i] = fourth - 460.0f * static_cast<float>(3 - i);
+        centres[4] = fourth + kSixGap, centres[5] = fourth + 2 * kSixGap;
+        const float l = g_label_l != 0 ? Read<float>(g_label_l + kPaneScreenX) : centres[0] - 300.0f;
+        const float r = g_label_r != 0 ? Read<float>(g_label_r + kPaneScreenX) : centres[5] + 300.0f;
+        if (std::abs(x - l) < 110.0f) return 8;
+        if (std::abs(x - r) < 110.0f) return 9;
+        int best = -1;
+        float near = 1e9f;
+        for (int i = 0; i < 6; ++i) {
+            if (const float dx = std::abs(x - centres[i]); dx < near) near = dx, best = i;
+        }
+        return near < 200.0f ? best : -1;
+    } catch (...) {
+        return -2;
+    }
+}
+
 int MousePage() noexcept {
     return g_mouse.load();
 }
