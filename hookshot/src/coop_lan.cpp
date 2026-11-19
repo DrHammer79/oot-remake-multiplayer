@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <random>
 
 namespace CoopLan {
 namespace {
@@ -31,6 +32,11 @@ std::optional<int> Number(std::string_view v, int lo, int hi) {
     return n;
 }
 
+bool IsId(std::string_view v) {
+    return v.size() == kIdLength &&
+           std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
 }  // namespace
 
 std::string Encode(const Game& g) {
@@ -41,6 +47,7 @@ std::string Encode(const Game& g) {
     out += "\nmax=" + std::to_string(std::clamp(g.max, 0, 99));
     if (!g.room.empty()) out += "\nroom=" + Clean(g.room, 24);
     out += "\nprotocol=" + std::to_string(g.protocol);
+    if (IsId(g.id)) out += "\nid=" + g.id;
     out += "\n";
     if (out.size() > kMaxDatagram) out.resize(kMaxDatagram);
     return out;
@@ -79,6 +86,8 @@ std::optional<Game> Decode(std::string_view d) {
             const auto n = Number(value, 0, 65535);
             if (!n) return std::nullopt;
             g.protocol = *n, protocol = true;
+        } else if (key == "id") {
+            if (IsId(value)) g.id = std::string(value);   // (anything else: no id, rows by address and port)
         }   // (a key a newer game adds: left alone)
     }
     if (!port || !protocol) return std::nullopt;
@@ -86,9 +95,21 @@ std::optional<Game> Decode(std::string_view d) {
     return g;
 }
 
+std::string NewId() {
+    std::random_device rd;
+    std::uint64_t v = (static_cast<std::uint64_t>(rd()) << 32) ^ rd();
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string id(kIdLength, '0');
+    for (char& c : id) c = kHex[v & 15], v >>= 4;
+    return id;
+}
+
 void List::Add(const std::string& address, const Game& g, std::uint64_t now_ms) {
     for (Heard& h : heard_) {
-        if (h.address == address && h.game.port == g.port) {
+        const bool same = !g.id.empty() ? h.game.id == g.id
+                                        : h.game.id.empty() && h.address == address && h.game.port == g.port;
+        if (same) {
+            if (h.address == "127.0.0.1" && address != "127.0.0.1") h.address = address;
             h.game = g, h.at_ms = now_ms;
             return;
         }

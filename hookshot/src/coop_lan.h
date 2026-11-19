@@ -29,9 +29,16 @@ struct Game {
     int max = 0;               // the most it takes
     std::string room;          // its relay room name, "" none
     int protocol = 0;          // its protocol version (coop::protocol::kProtocolVersion): another one cannot join
+    std::string id;            // a random token the game picks once (NewId): the same game heard from several of its
+                               // networks (Wi-Fi, a VPN, a virtual switch) is one row. "" none (then address and port)
 };
 
-// The datagram: "SQUADALA LAN 1" then "key=value" lines (name, port, players, max, room, protocol).
+inline constexpr std::size_t kIdLength = 16;   // hex digits
+
+// A new id: kIdLength hex digits from the system's random source.
+std::string NewId();
+
+// The datagram: "SQUADALA LAN 1" then "key=value" lines (name, port, players, max, room, protocol, id).
 std::string Encode(const Game& g);
 // A datagram heard: the game it names, or nothing for anything else (not ours, another format, out of range).
 std::optional<Game> Decode(std::string_view datagram);
@@ -43,9 +50,11 @@ struct Heard {
     std::uint64_t at_ms = 0;
 };
 
-// The games heard, newest word kept per address and port.
+// The games heard, newest word kept per game: per id, or per address and port for a game without one.
 class List {
 public:
+    // A game with an id heard from another address keeps the address it was first heard at (a steady row), except that
+    // a network address takes the place of 127.0.0.1.
     void Add(const std::string& address, const Game& g, std::uint64_t now_ms);
     // The ones heard in the last kGoneMs, by name then address (a steady order for the page's rows).
     std::vector<Heard> Now(std::uint64_t now_ms) const;

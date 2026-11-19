@@ -95,3 +95,49 @@ TEST_CASE("lan: a game on this PC heard at 127.0.0.1 and at its network address 
     REQUIRE(now.size() == 1);
     CHECK(now[0].address == "192.168.1.20");
 }
+
+TEST_CASE("lan: a game heard from each of its networks is one row, at the address first heard") {
+    List l;
+    Game g;
+    g.name = "Saria", g.port = 27510, g.protocol = 14, g.id = "0123456789abcdef";
+    l.Add("192.168.1.20", g, 1000);
+    l.Add("172.20.0.1", g, 1010);     // (a virtual switch on the host's PC)
+    l.Add("100.64.0.7", g, 1020);     // (a VPN)
+    l.Add("127.0.0.1", g, 1030);
+    g.players = 2;
+    l.Add("172.20.0.1", g, 1040);
+    const auto now = l.Now(1100);
+    REQUIRE(now.size() == 1);
+    CHECK(now[0].address == "192.168.1.20");
+    CHECK(now[0].game.players == 2);
+    CHECK(l.Now(1040 + kGoneMs - 1).size() == 1);   // (each word keeps the row)
+}
+
+TEST_CASE("lan: two games with their own ids are two rows, and an id a loopback row heard first moves to the network") {
+    List l;
+    Game a, b;
+    a.name = b.name = "Saria", a.port = b.port = 27510, a.protocol = b.protocol = 14;
+    a.id = "0123456789abcdef", b.id = "fedcba9876543210";
+    l.Add("127.0.0.1", a, 1000);
+    l.Add("192.168.1.20", a, 1010);
+    l.Add("192.168.1.30", b, 1020);
+    const auto now = l.Now(1100);
+    REQUIRE(now.size() == 2);
+    CHECK(now[0].address == "192.168.1.20");
+    CHECK(now[1].address == "192.168.1.30");
+}
+
+TEST_CASE("lan: the id goes through the datagram, and a new one is 16 hex digits and different each time") {
+    Game g;
+    g.name = "Saria", g.port = 27510, g.protocol = 14;
+    g.id = NewId();
+    CHECK(g.id.size() == kIdLength);
+    CHECK(g.id.find_first_not_of("0123456789abcdef") == std::string::npos);
+    CHECK(NewId() != NewId());
+    auto back = Decode(Encode(g));
+    REQUIRE(back);
+    CHECK(back->id == g.id);
+    back = Decode("SQUADALA LAN 1\nport=27510\nprotocol=14\nid=NOT-AN-ID\n");   // (not one: no id, still a game)
+    REQUIRE(back);
+    CHECK(back->id.empty());
+}

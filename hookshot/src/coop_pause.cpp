@@ -336,6 +336,8 @@ void Follow(const HosCoopStatus& st) {
         if (const auto at = room.find('@'); at != std::string::npos) room.resize(at);
         g.room = room;
         g.protocol = coop::protocol::kProtocolVersion;
+        static const std::string id = CoopLan::NewId();   // (one for this game's run: one row however many networks)
+        g.id = id;
         CoopLanNet::Announce(g, now);
     }
     // Auto-rejoin (coop_auto_rejoin.h): the last friend's game again, at the start and after a drop.
