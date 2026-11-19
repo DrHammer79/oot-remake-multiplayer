@@ -1339,7 +1339,8 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             // undrawn page never takes System's R or A, and the mouse keeps the fifth tab out: MousePage -2).
             gen = g_page.Track(f);
             if (!g_page.Shown()) SetView(View::kMain);
-            g_page.SetSubView(ViewShown() != View::kMain);
+            // (B is ours in a view of the Multiplayer page, and in the Settings page's list)
+            g_page.SetSubView(g_page.Which() == 1 ? g_set_row.load() >= 0 : ViewShown() != View::kMain);
             if (f.kind == Kind::kPages) LookPages(ctx, calls, f, gen);
             // (local trace: the pages' strip's own x and the System page's screen x each update, to measure the game's
             // own slide between its pages)
@@ -1568,7 +1569,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 }
             }
             if (!shown) SetView(View::kMain), g_set_row = -1;
-            if (!settings) g_page.SetSubView(ViewShown() != View::kMain);
+            g_page.SetSubView(g_page.Which() == 1 ? g_set_row.load() >= 0 : ViewShown() != View::kMain);
             why = g_page.TakeWhy();
             g_mouse = g_page.MousePage();
             settings_shown = shown && g_page.Which() == 1;
