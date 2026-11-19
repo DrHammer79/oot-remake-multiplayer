@@ -40,12 +40,13 @@ struct Seen {
     std::uint64_t memory[4] = {1, 2, 3, 4};
     std::string marker;  // coop-mods.starting as alpha's start saw it
     // (API v2) What bee's on_screen does, and what the game side was asked.
-    int screen_do = 0;   // kChoose | kReload | kHoldOn | kHoldOff | kOther | kThrow
+    int screen_do = 0;   // kChoose | kReload | kHoldOn | kHoldOff | kOther | kThrow | kHoldA
+    std::uint64_t seen_buttons = 0;   // the last screen's buttons
     int choose_ok = 1;   // the fake game takes a choice
     std::uint64_t now = 1000;
     std::vector<std::string> game_calls;
 };
-constexpr int kChoose = 1, kReload = 2, kHoldOn = 4, kHoldOff = 8, kOther = 16, kThrow = 32;
+constexpr int kChoose = 1, kReload = 2, kHoldOn = 4, kHoldOff = 8, kOther = 16, kThrow = 32, kHoldA = 64;
 Seen g;
 
 int StartA(const CoopModApi* api) {
@@ -89,7 +90,9 @@ int StartB(const CoopModApi* api) {
         const CoopModApi* self = g.api[1];
         if (g.screen_do & kChoose) line += " choose " + std::to_string(self->choose_focused(self));
         if (g.screen_do & kReload) line += " reload " + std::to_string(self->reload_save_list(self));
-        if (g.screen_do & kHoldOn) line += " hold " + std::to_string(self->hold_input(self, 1));
+        g.seen_buttons = sc->buttons;
+        if (g.screen_do & kHoldOn) line += " hold " + std::to_string(self->hold_input(self, COOP_MOD_HOLD_ALL));
+        if (g.screen_do & kHoldA) line += " hold A " + std::to_string(self->hold_input(self, 1));
         if (g.screen_do & kHoldOff) line += " release " + std::to_string(self->hold_input(self, 0));
         if (g.screen_do & kOther) line += " alpha's " + std::to_string(g.api[0]->choose_focused(g.api[0]));
         g.calls.push_back(line);
@@ -216,13 +219,14 @@ struct Run {
         host->Start();
     }
     // One menu screen's update as the runtime hands it over.
-    void Screen(std::uint32_t kind, const std::string& focused, bool ready = true) {
+    void Screen(std::uint32_t kind, const std::string& focused, bool ready = true, std::uint64_t buttons = 0) {
         ScreenUpdate u;
         u.ctx = reinterpret_cast<void*>(std::uintptr_t{7});
         u.screen = 0x5000;
         u.kind = kind;
         u.focused = focused;
         u.save_list_ready = ready;
+        u.buttons = buttons;
         host->Screen(u);
     }
     int Count(const std::string& part) const {
@@ -505,14 +509,14 @@ TEST_CASE("mod plugins v2: choose, reload and hold work inside the mod's own on_
     CHECK(g.game_calls == std::vector<std::string>{"choose 7 20480", "reload"});   // (the update's own ctx and screen)
     CHECK(r.Logged("mod bee: chose Pa_Button_00 on the title"));
     CHECK(r.Logged("mod bee: asked the game to read its save list again"));
-    CHECK(r.Logged("mod bee: holds the game's input"));
-    CHECK(r.host->InputHeld());
+    CHECK(r.Logged("mod bee: holds all of the game's input"));
+    CHECK(r.host->HeldButtons() == COOP_MOD_HOLD_ALL);
 
     g.calls.clear();
     g.screen_do = kHoldOff;
     r.Screen(COOP_MOD_SCREEN_OTHER, "");
     CHECK(g.calls == std::vector<std::string>{"screen b 0 '' 1 release 1"});
-    CHECK_FALSE(r.host->InputHeld());
+    CHECK(r.host->HeldButtons() == 0);
     CHECK(r.Logged("mod bee: gave the game's input back"));
 }
 
@@ -535,7 +539,7 @@ TEST_CASE("mod plugins v2: outside the mod's own on_screen call the v2 calls do 
     CHECK(b->reload_save_list(b) == 0);
     CHECK(b->hold_input(b, 1) == 0);
     CHECK(g.game_calls.empty());
-    CHECK_FALSE(r.host->InputHeld());
+    CHECK(r.host->HeldButtons() == 0);
     CHECK(r.Count("mod bee: called choose_focused outside its on_screen call: nothing done (said once)") == 1);
     CHECK(r.Count("outside its on_screen call") == 1);   // (said once per mod)
 
@@ -556,14 +560,14 @@ TEST_CASE("mod plugins v2: a hold ends with no menu screen for half a second, an
     g.screen_do = kHoldOn;
     r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     g.now += kHoldLapseMs - 1;
-    CHECK(r.host->InputHeld());
+    CHECK(r.host->HeldButtons() == COOP_MOD_HOLD_ALL);
     g.now += 1;
-    CHECK_FALSE(r.host->InputHeld());
+    CHECK(r.host->HeldButtons() == 0);
     CHECK(r.Logged("mod bee: its hold on the game's input ended (no menu screen for half a second)"));
 
     g.screen_do = kHoldOn | kThrow;
     r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
-    CHECK_FALSE(r.host->InputHeld());   // (switched off by its crash)
+    CHECK(r.host->HeldButtons() == 0);   // (switched off by its crash)
     CHECK(r.Logged("mod bee: crashed in its screen callback"));
     CHECK(r.Logged("mod bee: its hold on the game's input ended (the mod is off)"));
     CHECK_FALSE(r.host->WantsScreens());   // (no mod left that asked: the runtime reads no screen)
@@ -581,5 +585,19 @@ TEST_CASE("mod plugins v2: after stop no screen reaches a mod and nothing is hel
     r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     CHECK(g.calls.empty());
     CHECK_FALSE(r.host->WantsScreens());
-    CHECK_FALSE(r.host->InputHeld());
+    CHECK(r.host->HeldButtons() == 0);
+}
+
+TEST_CASE("mod plugins v2: a mod sees the player's buttons and may hold only some of them") {
+    Run r;
+    g.screen_do = kHoldA;
+    g.calls.clear();
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00", true, 0x401);   // (A and + held by the player)
+    CHECK(g.seen_buttons == 0x401);
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1 hold A 1"});
+    CHECK(r.host->HeldButtons() == 1);   // (A only: the game still gets the d-pad, B, +)
+    CHECK(r.Logged("mod bee: holds the game's buttons 0x1"));
+    g.screen_do = kHoldOff;
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_01");
+    CHECK(r.host->HeldButtons() == 0);
 }

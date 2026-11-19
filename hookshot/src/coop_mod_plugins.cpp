@@ -2,6 +2,7 @@
 // mod from `self`; every call into a mod goes through Guarded.
 #include "coop_mod_plugins.h"
 
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 #include <utility>
@@ -53,7 +54,7 @@ struct Host::Slot {
     std::vector<Callback<coop_mod_setting_fn>> setting;
     std::vector<std::pair<std::uint32_t, Callback<coop_mod_hook_fn>>> hook;
     std::vector<Callback<coop_mod_screen_fn>> screen;  // (API v2)
-    std::atomic<bool> hold{false};                     // (API v2) it holds the game's input
+    std::atomic<std::uint64_t> hold{0};                // (API v2) the buttons it holds from the game
     std::atomic<bool> said_outside{false};             // (API v2) a v2 call outside on_screen was logged
 
     static Slot* Of(const CoopModApi* self) {
@@ -314,13 +315,22 @@ int ApiReloadSaveList(const CoopModApi* self) {
     return 1;
 }
 
-int ApiHoldInput(const CoopModApi* self, int on) {
+std::string HoldWords(std::uint64_t buttons) {
+    if (buttons == COOP_MOD_HOLD_ALL) {
+        return "all of the game's input";
+    }
+    char b[48];
+    std::snprintf(b, sizeof b, "the game's buttons %#llx", static_cast<unsigned long long>(buttons));
+    return b;
+}
+
+int ApiHoldInput(const CoopModApi* self, std::uint64_t buttons) {
     Slot* s = InScreen(self, "hold_input");
     if (s == nullptr) {
         return 0;
     }
-    if (s->hold.exchange(on != 0) != (on != 0)) {
-        s->Say(on != 0 ? "holds the game's input" : "gave the game's input back");
+    if (const std::uint64_t was = s->hold.exchange(buttons); was != buttons) {
+        s->Say(buttons != 0 ? "holds " + HoldWords(buttons) : "gave the game's input back");
     }
     return 1;
 }
@@ -652,6 +662,7 @@ void Host::Screen(const ScreenUpdate& update) {
     view.kind = update.kind;
     view.focused = update.focused.c_str();
     view.save_list_ready = update.save_list_ready ? 1 : 0;
+    view.buttons = update.buttons;
     t_update = &update;
     for (auto& s : slots_) {
         t_slot = s.get();
@@ -669,24 +680,25 @@ void Host::Screen(const ScreenUpdate& update) {
     t_update = nullptr;
 }
 
-bool Host::InputHeld() {
+std::uint64_t Host::HeldButtons() {
     if (!started_) {
-        return false;
+        return 0;
     }
     const bool lapsed = !game_.now_ms || game_.now_ms() - last_screen_ms_.load() >= kHoldLapseMs;
-    bool held = false;
+    std::uint64_t held = 0;
     for (auto& s : slots_) {
-        if (!s->hold) {
+        const std::uint64_t mine = s->hold.load();
+        if (mine == 0) {
             continue;
         }
         if (stopped_ || !s->on || lapsed) {
-            if (s->hold.exchange(false)) {
+            if (s->hold.exchange(0) != 0) {
                 s->Say(!s->on || stopped_ ? "its hold on the game's input ended (the mod is off)"
                                           : "its hold on the game's input ended (no menu screen for half a second)");
             }
             continue;
         }
-        held = true;
+        held |= mine;
     }
     return held;
 }

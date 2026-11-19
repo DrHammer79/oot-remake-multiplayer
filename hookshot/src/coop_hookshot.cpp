@@ -57,6 +57,7 @@
 #include "coop_dbno_body.h"
 #include "coop_dbno_game.h"
 #include "coop_enemy_shots.h"
+#include "coop_mod_api.h"
 #include "coop_mods_runtime.h"
 #include "coop_rando.h"
 #include "coop_hook.h"
@@ -1959,9 +1960,13 @@ COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) {
     if (!g_on || stick == nullptr) {
         return buttons;
     }
-    if (CoopModsRuntime::InputHeld()) {   // (a code mod's own screen is in front: coop_mod_api.h hold_input)
-        stick[0] = stick[1] = stick[2] = stick[3] = 0;
-        return 0;
+    CoopModsRuntime::NotePad(buttons);   // (the code mods' screens see the player's buttons before any hold)
+    if (const std::uint64_t held = CoopModsRuntime::HeldButtons(); held != 0) {   // (coop_mod_api.h hold_input)
+        if (held == COOP_MOD_HOLD_ALL) {   // (a mod's own screen is in front: nothing reaches the game)
+            stick[0] = stick[1] = stick[2] = stick[3] = 0;
+            return 0;
+        }
+        buttons &= ~held;
     }
     buttons = CoopTitle::OnPad(buttons, stick);
     buttons = CoopPauseTab::OnPad(buttons, stick);   // (its page takes the pad while it shows)

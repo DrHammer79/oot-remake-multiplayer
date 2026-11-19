@@ -13,7 +13,6 @@
 #include <thread>
 #include <vector>
 
-#include <fmt/format.h>
 #include <monocypher.h>
 
 #include "coop_hook.h"
@@ -54,6 +53,7 @@ std::atomic<bool> g_stop_hashing{false};
 // (mod API v2) The module's table and co-op's own busy answer (SetGame).
 const HosCoopApi* g_api = nullptr;
 std::function<const char*()> g_coop_busy;
+std::atomic<std::uint64_t> g_pad{0};   // (mod API v2) player 1's buttons before the holds (NotePad)
 
 std::uint64_t SteadyMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -99,23 +99,14 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
         return no(2, "the game's Button::Decide could not be called");
     }
     if ((x0 & 1) == 0) {
-        // (what Button::Decide tests: the button's flags +0x40 need 0x14; its control base *(*(*(b+0x20)+0x28)+0x38)
-        // with bit 0 of +0x40 set walks its buttons for one being decided)
+        // (Button::Decide says no when the button's flags (+0x40) lack 0x14, as on the title while it fades in, or when
+        // another button of its control is being chosen. Seen in a game: the title's Continue has 0x3b while it opens
+        // and 0x3f once it takes input.)
         std::uint32_t flags = 0;
-        std::uint64_t part = 0, owner = 0, base = 0;
-        std::uint8_t base_flags = 0;
         ReadGame(button + 0x40, &flags, sizeof flags);
-        ReadGame(button + 0x20, &part, sizeof part);
-        ReadGame(part + 0x28, &owner, sizeof owner);
-        ReadGame(owner + 0x38, &base, sizeof base);
-        ReadGame(base + 0x40, &base_flags, 1);
-        static std::atomic<int> detail{0};
-        if (detail.fetch_add(1) < 3) {
-            CoopRuntime::Log(fmt::format("coop: mods: Button::Decide answered {:#x} for button {:#x} of screen {:#x} "
-                                         "(flags {:#x}, its owner {:#x}, control base {:#x} flags {:#x})",
-                                         x0, button, screen, flags, owner, base, base_flags));
-        }
-        return no(3, "the game said not now (its control is deciding another button, or the button is off)");
+        return (flags & 0x14) != 0x14
+                   ? no(3, "the button cannot be chosen yet (its screen is still opening): asked again at a later update")
+                   : no(4, "another button of its screen is being chosen: asked again at a later update");
     }
     said = -1;
     return true;
@@ -412,11 +403,16 @@ void Screen(void* ctx, std::uint64_t screen) {
     u.kind = CoopModScreens::KindOf(vtable - base);
     u.focused = CoopModScreens::ButtonName(ReadGame, CoopModScreens::FocusedButton(ReadGame, screen));
     u.save_list_ready = CoopTitle::SaveListReady();
+    u.buttons = g_pad.load();
     g_host->Screen(u);
 }
 
-bool InputHeld() {
-    return g_running && g_host->InputHeld();
+void NotePad(std::uint64_t buttons) {
+    g_pad = buttons;
+}
+
+std::uint64_t HeldButtons() {
+    return g_running ? g_host->HeldButtons() : 0;
 }
 
 }  // namespace CoopModsRuntime

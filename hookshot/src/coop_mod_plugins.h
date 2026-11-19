@@ -56,6 +56,7 @@ struct ScreenUpdate {
     std::uint32_t kind = COOP_MOD_SCREEN_OTHER;
     std::string focused;          // the focused button's name, "" none
     bool save_list_ready = false;
+    std::uint64_t buttons = 0;    // player 1's buttons before any hold
 };
 
 // A hold ends when no menu screen has updated for this long.
@@ -89,9 +90,9 @@ public:
     // (API v2) A menu screen updates: each mod's on_screen, with the calls only it may make. Skipped when another
     // thread is in one.
     void Screen(const ScreenUpdate& update);
-    // (API v2) Whether a mod holds the game's input now (the pads' word the game gets is then empty). A hold whose mod
+    // (API v2) The buttons the mods hold from the game now (COOP_MOD_HOLD_ALL: the sticks too), 0 none. A hold whose mod
     // is off, or with no menu screen for kHoldLapseMs, ends here (with a line).
-    bool InputHeld();
+    std::uint64_t HeldButtons();
 
     // The ids of the mods running now, in load order.
     std::vector<std::string> Running() const;

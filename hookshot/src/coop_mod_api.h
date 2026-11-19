@@ -76,7 +76,12 @@ typedef struct CoopModScreen {
     const char *focused;    /* the focused button's name in the screen's layout ("Pa_Button_00": the title's Continue),
                                "" when no button is focused or the screen takes no input now */
     int save_list_ready;    /* 1 when the game's save list is read and no new read is asked or running */
+    uint64_t buttons;       /* player 1's buttons now (Switch NpadButton bits: A 1<<0, B 1<<1, X 1<<2, Y 1<<3, + 1<<10,
+                               - 1<<11, the d-pad 1<<12 to 1<<15), as the game would get them before any mod's hold: a
+                               pad, the keyboard's bindings and a click on the game's menus alike */
 } CoopModScreen;
+/* (version 2) hold_input's buttons: all of them and the sticks too */
+#define COOP_MOD_HOLD_ALL (~(uint64_t)0)
 /* (version 2) A menu screen updates: on the game's thread that updates it, before its own update, for every menu screen
    (the HUD is one too, as OTHER), one at a time across all mods. choose_focused, reload_save_list and hold_input work
    only inside this call. */
@@ -138,10 +143,12 @@ typedef struct CoopModApi {
        until it is done. 1 when asked. */
     int (*reload_save_list)(const struct CoopModApi *self);
 
-    /* on = 1: the game gets no buttons and no sticks from the pads (the mod's own screen is in front); on = 0 gives them
-       back. The hold ends by itself when no menu screen has updated for half a second, and when the mod is switched off.
-       1 when done. */
-    int (*hold_input)(const struct CoopModApi *self, int on);
+    /* The buttons the game does not get from player 1 while held (NpadButton bits, as CoopModScreen's `buttons`):
+       COOP_MOD_HOLD_ALL for all of them and the sticks (the mod's own screen is in front), a few to take one choice
+       (A on a focused button: the mod sees the press in `buttons` and acts itself), 0 to give everything back. Each call
+       replaces this mod's last; the mods' holds add up. The hold ends by itself when no menu screen has updated for half
+       a second, and when the mod is switched off. 1 when done. */
+    int (*hold_input)(const struct CoopModApi *self, uint64_t buttons);
 } CoopModApi;
 
 /* The mod's exports. coop_mod_start: once, when the co-op module starts, before any callback; return 1 to stay on,
