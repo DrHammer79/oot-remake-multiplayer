@@ -450,6 +450,9 @@ std::uint64_t g_cells_gen = 0;
 std::array<std::uint64_t, kCells> g_cell_panes{};
 std::array<int, kCells> g_cell_vis{};
 std::array<float, kCells> g_cell_alpha{};
+// Our page's five rows: dimmed while the cells have the pad (the game's cursor frame stays on its row there).
+std::array<std::uint64_t, kRows> g_row_panes{};
+float g_rows_alpha = -1;
 
 void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     if (g_cells_gen != gen) {
@@ -468,6 +471,13 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             g_cell_vis[k] = -1, g_cell_alpha[k] = -1;
             found += IsPart(pane) ? 1 : 0;
         }
+        for (int r = 0; r < kRows; ++r) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
+            const std::uint64_t pane = PaneIn(ctx, ours, name);
+            g_row_panes[static_cast<std::size_t>(r)] = IsPart(pane) ? pane : 0;
+        }
+        g_rows_alpha = -1;
         LOG_INFO(Core, "coop: pause tab: the game browser's cells: {} of {}{}", found, kCells,
                  found == kCells ? "" : " (build the puppet pack again for the browser)");
     }
@@ -490,6 +500,13 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         if (g_cell_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_cell_vis[k] = on ? 1 : 0;
         const float alpha = picked < 0 || picked == i ? 1.0f : 0.45f;
         if (on && g_cell_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_cell_alpha[k] = alpha;
+    }
+    const float rows = picked >= 0 ? 0.45f : 1.0f;
+    if (rows != g_rows_alpha) {
+        for (const std::uint64_t pane : g_row_panes) {
+            if (pane != 0) CallAlpha(ctx, pane, rows);
+        }
+        g_rows_alpha = rows;
     }
 }
 
