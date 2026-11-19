@@ -168,6 +168,11 @@ void Look(bool on, std::uint64_t now_ms) {
     }
 }
 
+void Forget() {
+    std::lock_guard lock(g_mutex);
+    g_list.Clear();
+}
+
 std::vector<CoopLan::Heard> Games(std::uint64_t now_ms) {
     std::lock_guard lock(g_mutex);
     return g_list.Now(now_ms);

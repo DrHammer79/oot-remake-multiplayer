@@ -33,5 +33,7 @@ struct Snapshot {
 // ("host" or "host:port", coop-options.ini relay), "" none set.
 void Look(bool wanted, std::uint64_t now_ms, const std::string& relay);
 Snapshot Now();
+// The list asked again at the next Look (the browser's Refresh), what was heard dropped meanwhile.
+void AskNow();
 
 }  // namespace CoopRoomList

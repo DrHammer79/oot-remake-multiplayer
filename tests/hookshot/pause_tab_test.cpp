@@ -1133,25 +1133,26 @@ TEST_CASE("pause tab: the game browser: the rows choose the list and its page, t
     Session s;
     CHECK(ActionFor(View::kLan, 0, s) == RowAction::kBrowseLan);
     CHECK(ActionFor(View::kLan, 1, s) == RowAction::kBrowseOnline);
-    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kNone);   // (one page)
+    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kBrowseRefresh);   // (one page)
     CHECK(ActionFor(View::kLan, 3, s) == RowAction::kListRoom);
     CHECK(ActionFor(View::kLan, kRows - 1, s) == RowAction::kBack);
     s.lan_listed = 9;   // (more than a page of cells)
     CHECK(ActionFor(View::kLan, 2, s) == RowAction::kBrowsePage);
     s.online = true;    // (the other list: its own count)
-    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kNone);
+    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kBrowseRefresh);
     s.in_one = true;    // (nobody joins from inside a session)
     CHECK(ActionFor(View::kLan, 0, s) == RowAction::kNone);
-    for (RowAction a : {RowAction::kBrowseLan, RowAction::kBrowseOnline, RowAction::kBrowsePage, RowAction::kListRoom}) {
+    for (RowAction a : {RowAction::kBrowseLan, RowAction::kBrowseOnline, RowAction::kBrowsePage, RowAction::kBrowseRefresh,
+                        RowAction::kListRoom}) {
         CHECK(std::string(ActionWords(a)).size() > 3);
     }
 
     SessionView v;
     auto rows = RowTexts(View::kLan, v);
-    CHECK(rows[0] == "[Local network: 0]");   // (the list the cells show, in brackets)
-    CHECK(rows[1] == "Online: ...");
-    CHECK(rows[2] == " ");
-    CHECK(rows[3] == "List my room online: Off");
+    CHECK(rows[0] == "Local games (0)");   // (the list the cells show: the module dims the other's row)
+    CHECK(rows[1] == "Online games");      // (not asked yet)
+    CHECK(rows[2] == "Refresh list");      // (one page: no empty row)
+    CHECK(rows[3] == "List my room: Off");
     CHECK(rows[kRows - 1] == "Back");
     auto cells = CellTexts(v);
     REQUIRE(cells.size() == static_cast<std::size_t>(kCells));
@@ -1166,17 +1167,17 @@ TEST_CASE("pause tab: the game browser: the rows choose the list and its page, t
     v.s.online = true;   // (the relay's list: why there are none, in the first cell)
     v.online_state = "No relay set";
     rows = RowTexts(View::kLan, v);
-    CHECK(rows[0] == "Local network: 2");
-    CHECK(rows[1] == "[Online: 0]");
+    CHECK(rows[0] == "Local games (2)");
+    CHECK(rows[1] == "Online games (0)");
     CHECK(CellTexts(v)[0] == "No relay set");
     v.online_state.clear();
     v.online_rows.assign(10, "kokiri (1/4)");
     v.s.online_listed = 10;
     v.s.list_room = true;
     rows = RowTexts(View::kLan, v);
-    CHECK(rows[1] == "[Online: 10]");
-    CHECK(rows[2] == "Page 1 of 2");
-    CHECK(rows[3] == "List my room online: On");
+    CHECK(rows[1] == "Online games (10)");
+    CHECK(rows[2] == "Next page (1/2)");
+    CHECK(rows[3] == "List my room: On");
     v.s.cell_page = 1;   // (the second page: the 9th and 10th rooms)
     cells = CellTexts(v);
     CHECK(cells[0] == "kokiri (1/4)");

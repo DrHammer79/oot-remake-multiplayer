@@ -19,5 +19,7 @@ void Announce(const CoopLan::Game& game, std::uint64_t now_ms);
 void Look(bool on, std::uint64_t now_ms);
 // The games heard lately (CoopLan::List::Now).
 std::vector<CoopLan::Heard> Games(std::uint64_t now_ms);
+// What was heard forgotten (the browser's Refresh): the games still announcing come back within 2 s.
+void Forget();
 
 }  // namespace CoopLanNet

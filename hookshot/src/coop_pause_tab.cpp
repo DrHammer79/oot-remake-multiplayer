@@ -615,7 +615,7 @@ RowAction ActionFor(View view, int row, const Session& s) {
         if (s.in_one || s.by_launcher) return RowAction::kNone;
         if (row == 0) return RowAction::kBrowseLan;
         if (row == 1) return RowAction::kBrowseOnline;
-        if (row == 2) return CellPages(BrowseListed(s)) > 1 ? RowAction::kBrowsePage : RowAction::kNone;
+        if (row == 2) return CellPages(BrowseListed(s)) > 1 ? RowAction::kBrowsePage : RowAction::kBrowseRefresh;
         if (row == 3) return RowAction::kListRoom;
         return RowAction::kNone;
     case View::kLanGame:
@@ -774,18 +774,17 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             rows[0] = v.s.by_launcher ? "Co-op came with the game" : "In a session already";
             break;
         }
-        // (the list shown in brackets: the cells on the right are its games)
-        const std::string lan = "Local network: " + std::to_string(v.lan_rows.size());
-        const std::string online = "Online: " + (v.online_rows.empty() && v.online_state.empty()
-                                                     ? std::string("...")
-                                                     : std::to_string(v.online_rows.size()));
-        rows[0] = v.s.online ? lan : "[" + lan + "]";
-        rows[1] = v.s.online ? "[" + online + "]" : online;
+        // (the two lists as tabs: the one the cells show is bright, the other dimmed (the module's alpha); A on the one
+        // shown goes into its cells, as Right does)
+        rows[0] = "Local games (" + std::to_string(v.lan_rows.size()) + ")";
+        rows[1] = v.online_rows.empty() && v.online_state.empty()
+                      ? std::string("Online games")
+                      : "Online games (" + std::to_string(v.online_rows.size()) + ")";
         const int pages = CellPages(BrowseListed(v.s));
-        if (pages > 1) {
-            rows[2] = "Page " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " + std::to_string(pages);
-        }
-        rows[3] = v.s.list_room ? "List my room online: On" : "List my room online: Off";
+        rows[2] = pages > 1 ? "Next page (" + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + "/" +
+                                  std::to_string(pages) + ")"
+                            : std::string("Refresh list");
+        rows[3] = v.s.list_room ? "List my room: On" : "List my room: Off";
         break;
     }
     case View::kLanGame:
@@ -964,6 +963,7 @@ const char* ActionWords(RowAction a) {
     case RowAction::kBrowseLan: return "the browser lists the games on this network";
     case RowAction::kBrowseOnline: return "the browser lists the relay's public rooms";
     case RowAction::kBrowsePage: return "the browser's next page of games";
+    case RowAction::kBrowseRefresh: return "the browser's list asked again";
     case RowAction::kListRoom: return "this game's room listed online when it hosts, on or off (saved)";
     case RowAction::kTypePassword: return "the join password typed on its row";
     case RowAction::kJoinRoom: return "join that room through the kit's relay";

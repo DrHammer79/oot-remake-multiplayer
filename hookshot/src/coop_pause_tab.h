@@ -313,6 +313,7 @@ enum class RowAction {
     kBrowseLan,      // the cells list the games on this network
     kBrowseOnline,   // the cells list the relay's public rooms (coop_room_list.h)
     kBrowsePage,     // the cells' next page
+    kBrowseRefresh,  // the list asked again (this network's games forgotten; the relay asked at once)
     kListRoom,       // this game's room on the relay's public list when it hosts, on or off (coop-options.ini
                      // list_room; saved at once)
 };

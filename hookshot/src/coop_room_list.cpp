@@ -86,6 +86,11 @@ void Look(bool wanted, std::uint64_t now_ms, const std::string& relay) {
     std::thread(Ask, relay).detach();   // (a few seconds at most: list_rooms_on_relay's own tries)
 }
 
+void AskNow() {
+    std::lock_guard lock(g_mutex);
+    if (!g_busy) g_asked_ms = 0, g_now = Snapshot{};
+}
+
 Snapshot Now() {
     std::lock_guard lock(g_mutex);
     return g_now;

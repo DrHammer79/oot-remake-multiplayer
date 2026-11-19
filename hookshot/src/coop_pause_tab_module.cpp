@@ -451,9 +451,10 @@ std::uint64_t g_cells_gen = 0;
 std::array<std::uint64_t, kCells> g_cell_panes{};
 std::array<int, kCells> g_cell_vis{};
 std::array<float, kCells> g_cell_alpha{};
-// Our page's five rows: dimmed while the cells have the pad (the game's cursor frame stays on its row there).
+// Our page's five rows: dimmed while the cells have the pad (the game's cursor frame stays on its row there); on the
+// browser, the list not shown dimmed too, as a tab.
 std::array<std::uint64_t, kRows> g_row_panes{};
-float g_rows_alpha = -1;
+std::array<float, kRows> g_rows_alpha{};
 
 void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     if (g_cells_gen != gen) {
@@ -478,7 +479,7 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             const std::uint64_t pane = PaneIn(ctx, ours, name);
             g_row_panes[static_cast<std::size_t>(r)] = IsPart(pane) ? pane : 0;
         }
-        g_rows_alpha = -1;
+        g_rows_alpha.fill(-1);
         LOG_INFO(Core, "coop: pause tab: the game browser's cells: {} of {}{}", found, kCells,
                  found == kCells ? "" : " (build the puppet pack again for the browser)");
     }
@@ -502,12 +503,11 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         const float alpha = picked < 0 || picked == i ? 1.0f : 0.45f;
         if (on && g_cell_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_cell_alpha[k] = alpha;
     }
-    const float rows = picked >= 0 ? 0.45f : 1.0f;
-    if (rows != g_rows_alpha) {
-        for (const std::uint64_t pane : g_row_panes) {
-            if (pane != 0) CallAlpha(ctx, pane, rows);
-        }
-        g_rows_alpha = rows;
+    for (int r = 0; r < kRows; ++r) {
+        const std::size_t k = static_cast<std::size_t>(r);
+        const bool other_list = browse && !v.s.in_one && !v.s.by_launcher && r == (v.s.online ? 0 : 1);
+        const float alpha = picked >= 0 ? 0.45f : other_list ? 0.55f : 1.0f;
+        if (g_row_panes[k] != 0 && g_rows_alpha[k] != alpha) CallAlpha(ctx, g_row_panes[k], alpha), g_rows_alpha[k] = alpha;
     }
 }
 
@@ -964,10 +964,25 @@ void Act(int row) {
         break;
     case RowAction::kMoreLan: g_lan_page = g_lan_page.load() + 1; break;
     case RowAction::kBrowseLan:
-        g_online = false, g_cell_page = 0, g_cell = -1;
-        CoopLanNet::Look(true, NowMs());
+    case RowAction::kBrowseOnline: {
+        // (the list already shown: A goes into its cells, as Right does; the other: the cells show it)
+        const bool online = a == RowAction::kBrowseOnline;
+        if (online == v.s.online) {
+            if (g_cell_games.load() > 0) g_cell = 0, g_live_poke = true;
+            break;
+        }
+        g_online = online, g_cell_page = 0, g_cell = -1;
+        if (!online) CoopLanNet::Look(true, NowMs());
         break;
-    case RowAction::kBrowseOnline: g_online = true, g_cell_page = 0, g_cell = -1; break;
+    }
+    case RowAction::kBrowseRefresh:
+        g_cell = -1;
+        if (v.s.online) {
+            CoopRoomList::AskNow();
+        } else {
+            CoopLanNet::Forget();
+        }
+        break;
     case RowAction::kBrowsePage:
         g_cell_page = (v.s.cell_page + 1) % CellPages(BrowseListed(v.s)), g_cell = -1;
         break;
