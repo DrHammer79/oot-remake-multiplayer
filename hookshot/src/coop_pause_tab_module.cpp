@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <mutex>
@@ -1036,6 +1037,22 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             if (!g_page.Shown()) SetView(View::kMain);
             g_page.SetSubView(ViewShown() != View::kMain);
             if (f.kind == Kind::kPages) LookPages(ctx, calls, f, gen);
+            // (local trace: the pages' strip's own x and the System page's screen x each update, to measure the game's
+            // own slide between its pages)
+            if (f.kind == Kind::kPages && calls && std::getenv("LICHII_COOP_TRACE_SLIDE") != nullptr) {
+                static std::uint64_t strip_gen = 0, strip = 0;
+                static float last = 1e9f;
+                if (strip_gen != gen) strip_gen = gen, strip = FindOwnPane(ctx, f.layout, "N_MenuChange_01");
+                if (strip != 0) {
+                    const float x = Read<float>(strip + 0x6c);
+                    if (x != last) {
+                        last = x;
+                        LOG_INFO(Core, "coop: slide trace: t {} ms strip x {:.1f} system screen x {:.1f} alpha {:.3f}",
+                                 NowMs() % 100000, x, Read<float>(g_system_pane + 0x4c),
+                                 Read<float>(g_system_pane + kPaneScreenAlpha));
+                    }
+                }
+            }
             if (f.kind == Kind::kStrip) LookStrip(ctx, calls, f, gen);
             if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_strip_ok);
             d = g_page.OnScreen(f, NowMs());
