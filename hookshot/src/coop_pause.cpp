@@ -1082,12 +1082,30 @@ namespace {
 
 // The pause menu's Multiplayer page's actions go through the menu's own requests (Act), with the menu's rules: co-op
 // that came with the game's start (Host.bat, Join.bat, coop.ini) is not started or stopped here, and what was refused
-// or went wrong is said on the menu's main page (its note, or the session's lines), never into a hidden menu.
-// Under g_mutex.
-void ShowNote() {
-    g_wanted = kMultiplayerTab;
-    LOG_INFO(Core, "coop: multiplayer tab: opened on its main page for what the pause menu's Multiplayer page asked");
+// or went wrong is said on the page itself (PageSays: the menu's note, else co-op's status line), in the game's own
+// rows; co-op's menu stays shut. Under g_mutex.
+std::string g_page_says;
+std::uint64_t g_page_says_gen = 0;
+
+void SayOnPage(const char* otherwise) {
+    std::string t;
+    for (const std::string& line : g_menu.NoteLines()) {
+        if (line.empty()) continue;
+        if (!t.empty()) t += ' ';
+        t += line;
+    }
+    if (t.empty()) {
+        const HosCoopStatus st = Status();
+        t.assign(st.message, strnlen(st.message, sizeof st.message));
+    }
+    if (t.empty()) t = otherwise;
+    g_page_says = t;
+    ++g_page_says_gen;
+    LOG_INFO(Core, "coop: multiplayer tab: the pause menu's Multiplayer page says: {}", t);
 }
+
+constexpr const char* kSayLauncher = "Co-op came with the game's start: start the game again to change it.";
+constexpr const char* kSayRefused = "Co-op did not start.";
 
 // The menu on its main page, the settings as the files have them now (Host reads them from the menu), no note.
 void FreshMain() {
@@ -1109,11 +1127,11 @@ void HostNow() {
     LOG_INFO(Core, "coop: multiplayer tab: host from the pause menu's Multiplayer page");
     if (g_coop_on) {   // (the main page's Host row says why: kByLauncher)
         LOG_INFO(Core, "coop: multiplayer tab: not hosting: co-op came with the game's start");
-        ShowNote();
+        SayOnPage(kSayLauncher);
         return;
     }
     if (!Host()) {
-        ShowNote();
+        SayOnPage(kSayRefused);
     }
 }
 
@@ -1122,7 +1140,7 @@ void LeaveNow() {
     if (g_coop_on) {   // (as the menu: no Leave row for it; its main page says to start the game again)
         FreshMain();
         LOG_INFO(Core, "coop: multiplayer tab: not leaving: co-op came with the game's start");
-        ShowNote();
+        SayOnPage(kSayLauncher);
         return;
     }
     Act(Request{Request::Kind::kLeave, {}});
@@ -1133,7 +1151,7 @@ void JoinPasteNow() {
     FreshMain();
     LOG_INFO(Core, "coop: multiplayer tab: join with the clipboard's code from the pause menu's Multiplayer page");
     if (g_coop_on) {
-        ShowNote();
+        SayOnPage(kSayLauncher);
         return;
     }
     const std::uint64_t session = g_session;
@@ -1145,10 +1163,10 @@ void JoinPasteNow() {
         line = first == std::string::npos ? std::string() : line.substr(first, line.find_last_not_of(' ') - first + 1);
         if (line.empty()) {
             g_menu.SetNote({clip ? "Copy your friend's code first, then choose Paste code and join." : kClipboardUnread});
-            ShowNote();
+            SayOnPage(kSayRefused);
             return;
         }
-        if (!Join(line)) ShowNote();
+        if (!Join(line)) SayOnPage(kSayRefused);
     });
 }
 
@@ -1176,11 +1194,12 @@ void JoinLanNow(const std::string& address, std::uint16_t port, const std::strin
     FreshMain();
     LOG_INFO(Core, "coop: multiplayer tab: join a game on this network from the pause menu's Multiplayer page");
     if (g_coop_on) {
-        ShowNote();
+        SayOnPage(kSayLauncher);
         return;
     }
     // (the same-network line: "<address>:<port> <password>", as the host's Copy same-network line gives it)
-    if (!Join(address + ":" + std::to_string(port) + (password.empty() ? std::string() : " " + password))) ShowNote();
+    const std::string line = address + ":" + std::to_string(port) + (password.empty() ? std::string() : " " + password);
+    if (!Join(line)) SayOnPage(kSayRefused);
 }
 
 bool RelaySet() {
@@ -1193,18 +1212,18 @@ void JoinRoomNow(const std::string& room, const std::string& password) {
     FreshMain();
     LOG_INFO(Core, "coop: multiplayer tab: join a room by its name from the pause menu's Multiplayer page");
     if (g_coop_on) {
-        ShowNote();
+        SayOnPage(kSayLauncher);
         return;
     }
     const std::string relay = g_menu.options().relay;
     if (relay.empty()) {
         g_menu.SetNote({"No relay is set in coop-options.ini (relay = ...), so a room name has nowhere to be found. "
                         "Ask your host for their whole room@relay line and paste it."});
-        ShowNote();
+        SayOnPage(kSayRefused);
         return;
     }
     // (the line friends type into Join: "<room>@<relay> <password>", docs/play-online.md)
-    if (!Join(room + "@" + relay + (password.empty() ? std::string() : " " + password))) ShowNote();
+    if (!Join(room + "@" + relay + (password.empty() ? std::string() : " " + password))) SayOnPage(kSayRefused);
 }
 
 bool Rejoin(std::string* host) {
@@ -1221,10 +1240,10 @@ void RejoinNow() {
     const auto code = CoopTitleMenu::IniGet(ReadText(CoopIni()), "last_invite");
     if (g_coop_on || !code || code->empty()) {
         if (!g_coop_on) g_menu.SetNote({"No last game to join again: paste your friend's code."});
-        ShowNote();
+        SayOnPage(g_coop_on ? kSayLauncher : kSayRefused);
         return;
     }
-    if (!Join(*code)) ShowNote();
+    if (!Join(*code)) SayOnPage(kSayRefused);
 }
 
 void PasteAnswerNow() {
@@ -1232,7 +1251,7 @@ void PasteAnswerNow() {
     FreshMain();   // (first: opening clears the page's note)
     LOG_INFO(Core, "coop: multiplayer tab: paste answer from the pause menu's Multiplayer page");
     Act(Request{Request::Kind::kPasteAnswer, {}});
-    ShowNote();
+    SayOnPage("The answer code was taken.");
 }
 
 namespace {
@@ -1299,6 +1318,12 @@ void PageCopyNow(PageCopy what) {
 std::string PageNote() {
     std::lock_guard lock(g_mutex);
     return NowMs() - g_page_note_ms < kPageNoteMs ? g_page_note : std::string();
+}
+
+std::string PageSays(std::uint64_t* gen) {
+    std::lock_guard lock(g_mutex);
+    if (gen != nullptr) *gen = g_page_says_gen;
+    return g_page_says;
 }
 
 bool TestMenu(const std::string& page) {

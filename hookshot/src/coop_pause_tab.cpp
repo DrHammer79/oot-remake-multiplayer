@@ -420,6 +420,7 @@ View BackOf(View view) {
     switch (view) {
     case View::kPlayerHost: return View::kPlayer;
     case View::kPlayer: return View::kPlayers;
+    case View::kLanGame: return View::kLan;
     default: return View::kMain;
     }
 }
@@ -463,6 +464,12 @@ RowAction ActionFor(View view, int row, const Session& s) {
         const int i = PlayerIndex(s.lan_listed, s.lan_page, row);
         return i >= 0 && i < 32 && (s.lan_joinable >> i & 1u) != 0 ? RowAction::kJoinLan : RowAction::kNone;
     }
+    case View::kLanGame:
+        // (0 the game, 1 its password typed on the row, 2 Join this game once one is typed; the last row is Back)
+        if (s.in_one || s.by_launcher) return RowAction::kNone;
+        if (row == 1) return RowAction::kTypePassword;
+        if (row == 2) return s.lan_password ? RowAction::kJoinLanGame : RowAction::kTypePassword;
+        return RowAction::kNone;
     case View::kLetIn:
         if (row == 0 && s.hosting && s.asking) return RowAction::kAllow;
         if (row == 1 && s.hosting && s.asking) return RowAction::kDeny;
@@ -616,6 +623,15 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         break;
     }
+    case View::kLanGame:
+        rows[0] = v.lan_game;
+        if (v.s.in_one || v.s.by_launcher) {
+            rows[1] = v.s.by_launcher ? "Co-op came with the game" : "In a session already";
+            break;
+        }
+        rows[1] = "Password: " + (v.password_field.empty() && v.typing != 1 ? std::string("A to type it") : v.password_field);
+        rows[2] = v.s.lan_password ? "Join this game" : "Join: type its password";
+        break;
     case View::kPlayer:
         if (v.s.player == 0) {
             rows[0] = "They left the session";
@@ -662,6 +678,12 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         break;
     case View::kSession: {
+        if (!v.says.empty()) {   // (what co-op's menu would have said, on our rows: the reason over three)
+            rows[0] = "Co-op says:";
+            const std::vector<std::string> says = Wrap(v.says, 3);
+            for (std::size_t i = 0; i < says.size(); ++i) rows[1 + i] = says[i];
+            break;
+        }
         if (v.s.hosting) {
             rows[0] = v.note.empty() ? "Hosting: " + Players(std::max(v.players, 1)) : v.note;
             rows[1] = !v.room.empty() ? "Copy room: " + v.room : v.s.code ? "Copy invite code" : "Room: coming...";
@@ -733,7 +755,8 @@ const char* ActionWords(RowAction a) {
     case RowAction::kKick: return "kick that player after a second A";
     case RowAction::kTypeRoom: return "the room name typed on its row";
     case RowAction::kViewLan: return "the games on this network";
-    case RowAction::kJoinLan: return "join that game on this network";
+    case RowAction::kJoinLan: return "that game's view: its password, then Join this game";
+    case RowAction::kJoinLanGame: return "join that game on this network, with the password typed";
     case RowAction::kMoreLan: return "the next page of games on this network";
     case RowAction::kAutoRejoin: return "auto-rejoin on or off";
     case RowAction::kTypePassword: return "the join password typed on its row";

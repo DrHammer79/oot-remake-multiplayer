@@ -145,6 +145,7 @@ public:
     // The answer to the last request, shown until the next press ("Settings
     // saved.", "Copy your friend's answer code first").
     void SetNote(std::vector<std::string> lines);
+    const std::vector<std::string>& NoteLines() const { return note_; }
     // The last code this game joined with, offered first on the Join page as
     // "Join <host> again" (one press). An empty code: no such row.
     void SetRejoin(std::string host, std::string code);

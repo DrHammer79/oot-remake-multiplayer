@@ -1105,3 +1105,49 @@ TEST_CASE("pause tab: the games on this network: one a row, A joins one that can
     rows = RowTexts(View::kLan, v);
     CHECK(rows[kRows - 2] == "More games (1/2)");
 }
+
+TEST_CASE("pause tab: a game on this network: its password typed on a row, then Join this game, and Back to the list") {
+    Session s;
+    CHECK(BackOf(View::kLanGame) == View::kLan);
+    CHECK(ActionFor(View::kLanGame, 0, s) == RowAction::kNone);   // (the game itself)
+    CHECK(ActionFor(View::kLanGame, 1, s) == RowAction::kTypePassword);
+    CHECK(ActionFor(View::kLanGame, 2, s) == RowAction::kTypePassword);   // (no password yet: typing it first)
+    CHECK(ActionFor(View::kLanGame, kRows - 1, s) == RowAction::kBack);
+    s.lan_password = true;
+    CHECK(ActionFor(View::kLanGame, 2, s) == RowAction::kJoinLanGame);
+    s.in_one = true;   // (nobody joins from inside a session)
+    CHECK(ActionFor(View::kLanGame, 1, s) == RowAction::kNone);
+    CHECK(ActionFor(View::kLanGame, 2, s) == RowAction::kNone);
+    SessionView v;
+    v.lan_game = "Mido's game (1/4)";
+    auto rows = RowTexts(View::kLanGame, v);
+    CHECK(rows[0] == "Mido's game (1/4)");
+    CHECK(rows[1] == "Password: A to type it");
+    CHECK(rows[2] == "Join: type its password");
+    CHECK(rows[kRows - 1] == "Back");
+    v.password_field = "kokiri";
+    v.s.lan_password = true;
+    rows = RowTexts(View::kLanGame, v);
+    CHECK(rows[1] == "Password: kokiri");
+    CHECK(rows[2] == "Join this game");
+    v.s.in_one = true;
+    rows = RowTexts(View::kLanGame, v);
+    CHECK(rows[1] == "In a session already");
+    CHECK(rows[2] == " ");
+}
+
+TEST_CASE("pause tab: the Session view says why the page's Host or Join did not start, over three rows") {
+    SessionView v;
+    v.says = "Type the join password the host sent you (every session has one).";
+    auto rows = RowTexts(View::kSession, v);
+    CHECK(rows[0] == "Co-op says:");
+    CHECK(rows[1].rfind("Type the join", 0) == 0);
+    CHECK_FALSE(rows[2].empty());
+    CHECK(rows[kRows - 1] == "Back");
+    std::string all;
+    for (int r = 1; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
+    CHECK(all.find("password") != std::string::npos);
+    v.says.clear();   // (nothing said: the view's own lines)
+    rows = RowTexts(View::kSession, v);
+    CHECK(rows[0] == "Not in a session");
+}

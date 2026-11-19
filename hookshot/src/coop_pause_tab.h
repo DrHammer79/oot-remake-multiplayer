@@ -252,9 +252,9 @@ private:
 // a player, Let in, Join). Only a Paste answer, a refused Host or Join, and co-op that came with the game's start open
 // co-op's menu (Hookshot's menu, over the game's pause menu) on its main page, whose note or help says why.
 // The game has no text entry or keyboard of its own (docs/game-ui.md, "Frames for a text field"), so a code is pasted.
-enum class View { kMain, kPlayers, kLetIn, kJoin, kSession, kPlayer, kPlayerHost, kLan };
-// Where B (or Back) goes from a view: a player's host controls to that player, a player to the Players view, else the
-// five rows.
+enum class View { kMain, kPlayers, kLetIn, kJoin, kSession, kPlayer, kPlayerHost, kLan, kLanGame };
+// Where B (or Back) goes from a view: a player's host controls to that player, a player to the Players view, a game on
+// this network to the list of them, else the five rows.
 View BackOf(View view);
 enum Row { kRowSession = 0, kRowJoinCode = 1, kRowPlayers = 2, kRowLetIn = 3, kRowLeave = 4 };
 enum class RowAction {
@@ -293,7 +293,8 @@ enum class RowAction {
     kTypePassword,   // the Join view: type the join password on the row
     kJoinRoom,       // the Join view: join that room on the kit's relay, with that password
     kViewLan,        // the games on this network (coop_lan.h): one a row, A joins
-    kJoinLan,        // join that game at its address and port (with the Join view's password, if typed)
+    kJoinLan,        // that game's own view (View::kLanGame): its join password typed on a row, then Join this game
+    kJoinLanGame,    // the game's view: join it at its address and port, with the password typed
     kMoreLan,        // the next page of games on this network
     kAutoRejoin,     // auto-rejoin on or off (coop_auto_rejoin.h; saved at once)
 };
@@ -318,6 +319,7 @@ struct Session {
     int lan_listed = 0;         // the games on this network the view lists
     int lan_page = 0;           // its page (PlayerIndex)
     std::uint32_t lan_joinable = 0;   // bit i: the list's game i can be joined (same version, room for one)
+    bool lan_password = false;  // a game's view: its join password is typed (every session has one)
     bool can_resync = false;    // a guest whose game can take the host's save again (CoopSave::CanResync)
     int listed = 0;         // the Players view: how many players it lists
     int page = 0;           // the Players view: its page (PlayerIndex)
@@ -364,6 +366,9 @@ struct SessionView {
     std::string room_field, password_field;
     bool room_ready = false, relay_set = false;
     std::vector<std::string> lan_rows;    // the games on this network, as their rows say them (CoopLan::RowText)
+    std::string lan_game;                 // a game's view: the game picked, as its row said it
+    std::string says;                     // the Session view: why the page's last Host or Join did not start
+                                          // (CoopPause::PageSays), while that view shows after it; "" none
     int typing = -1;                  // the field typed into (0 the room, 1 the password), -1 none
 };
 inline constexpr std::size_t kRowChars = 40;   // the most a row's text holds (the System page's button width)

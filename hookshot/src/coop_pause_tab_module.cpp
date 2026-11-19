@@ -49,6 +49,18 @@ std::atomic<int> g_confirm_row{-1}, g_confirm_view{0};
 // The Players view's page, and the player whose view shows (their number; the views kPlayer, kPlayerHost).
 std::atomic<int> g_players_page{0}, g_player{0};
 std::atomic<int> g_lan_page{0};   // the games on this network: the view's page
+// The game picked on that list, for its own view (View::kLanGame): where it is, and its row's words. g_mutex.
+struct LanPick {
+    std::string address, row;
+    std::uint16_t port = 0;
+};
+LanPick g_lan_pick;
+// What the page's last action came to when co-op did not start (CoopPause::PageSays), shown on the Session view from
+// the update that saw it until another view shows; and the newest one seen. g_says_mutex (SetView runs under g_mutex
+// and outside it).
+std::mutex g_says_mutex;
+std::string g_says;
+std::uint64_t g_says_seen = 0;
 static_assert(kMuteVoice == CoopLobby::kVoice && kMuteChat == CoopLobby::kChat);
 // Panes found, per opening of a screen (Page::Track's number; a menu reopened at the same address is looked up again,
 // so no pane of a freed layout is used). *_ok: both looked up for that opening and parts; the page is usable only then.
@@ -340,11 +352,19 @@ SessionView ViewNow(View view) {
     if (view == View::kJoin) {
         v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
         v.relay_set = CoopPause::RelaySet();   // (co-op's own lock: before ours, never inside it)
+    }
+    if (view == View::kSession) {
+        std::lock_guard lock(g_says_mutex);
+        v.says = g_says;
+    }
+    if (view == View::kJoin || view == View::kLanGame) {
         std::lock_guard lock(g_mutex);   // (the fields are the page's; no other lock of ours is held here)
         v.typing = g_page.Typing();
         v.room_field = g_page.Field(0).Shown(v.typing == 0, kRowChars - 6);       // ("Room: ")
         v.password_field = g_page.Field(1).Shown(v.typing == 1, kRowChars - 10);  // ("Password: ")
         v.room_ready = v.s.room_ready = g_page.Field(0).Ready();
+        v.s.lan_password = !g_page.Field(1).text().empty();
+        v.lan_game = g_lan_pick.row;
     }
     if (v.s.hosting) v.asking = CoopLobby::Asking();
     v.s.asking = !v.asking.empty();
@@ -542,6 +562,26 @@ int FocusedRow() {
 
 void SetView(View v) {
     if (g_view.exchange(static_cast<int>(v)) != static_cast<int>(v)) g_confirm_until = 0;   // (a new view: no A waited)
+    if (v != View::kSession) {
+        std::lock_guard lock(g_says_mutex);
+        g_says.clear();
+    }
+}
+
+// A new word from the page's last action (CoopPause::PageSays): the Session view shows it. Outside g_mutex (co-op's
+// own lock is taken).
+void FollowSays() {
+    std::uint64_t gen = 0;
+    std::string says = CoopPause::PageSays(&gen);
+    {
+        std::lock_guard lock(g_says_mutex);
+        if (gen == g_says_seen) return;
+        g_says_seen = gen;
+    }
+    SetView(View::kSession);
+    std::lock_guard lock(g_says_mutex);
+    g_says = std::move(says);
+    g_live_poke = true;
 }
 
 // A row that wants a second A: true on that second A (within kConfirmMs, the cursor still on the row), else it waits.
@@ -616,14 +656,23 @@ void Act(int row) {
         const auto games = CoopLanNet::Games(NowMs());
         const int i = PlayerIndex(static_cast<int>(games.size()), v.s.lan_page, row);
         if (i >= 0 && i < static_cast<int>(games.size())) {
-            std::string password;
+            const CoopLan::Heard& h = games[static_cast<std::size_t>(i)];
             {
                 std::lock_guard lock(g_mutex);
-                password = g_page.Field(1).text();   // (the Join view's password, if typed)
+                g_lan_pick = LanPick{h.address, CoopLan::RowText(h, coop::protocol::kProtocolVersion), h.game.port};
             }
-            const CoopLan::Heard& h = games[static_cast<std::size_t>(i)];
-            CoopPause::JoinLanNow(h.address, h.game.port, password);
+            SetView(View::kLanGame);   // (the password first: every session has one, and co-op's menu would ask it)
         }
+        break;
+    }
+    case RowAction::kJoinLanGame: {
+        LanPick pick;
+        std::string password;
+        {
+            std::lock_guard lock(g_mutex);
+            pick = g_lan_pick, password = g_page.Field(1).text();
+        }
+        if (!pick.address.empty()) CoopPause::JoinLanNow(pick.address, pick.port, password);
         break;
     }
     case RowAction::kAutoRejoin: CoopPause::SetAutoRejoin(!CoopPause::AutoRejoin()); break;
@@ -744,6 +793,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
         if (was && !now_shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
         if (f.kind == Kind::kPages && now_shown && f.state <= 2 && calls) {
             if (!KeepConfirm(true, focused, g_confirm_row.load())) g_confirm_until = 0;   // (the cursor left that row)
+            FollowSays();   // (a Host or Join refused: why, on the Session view)
             // (after our lock: the status and the Lobby take their own; read only when the rows are due)
             if (LiveDue(gen)) LiveRows(ctx, f.layout, gen, ViewNow(ViewShown()));
         }

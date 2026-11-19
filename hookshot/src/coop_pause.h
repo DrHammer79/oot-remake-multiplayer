@@ -59,20 +59,24 @@ void Open(CoopPauseMenu::Page page);
 enum class PageCopy { kCode, kAnswer, kLan, kVpn };
 void PageCopyNow(PageCopy what);
 std::string PageNote();
+// What the page's last Host, Join, Leave or Paste answer came to when co-op's menu would have said it (refused: the
+// menu's note, else co-op's status line; a Paste answer: its result), for the page's Session view; `gen` (may be null)
+// goes up with each one, so the page shows the newest once. "" none yet.
+std::string PageSays(std::uint64_t* gen);
 // The page's own actions, through the menu's requests and its rules: hosting at once with the kit's settings (its
 // room name, relay, port, approval), as the menu's Host does; and leaving (or stopping hosting), as its Leave does.
-// Co-op that came with the game's start (ByLauncher) is neither started nor stopped: the menu opens on its main page,
-// which says why. A Host refused or failed opens it too (its note, or the session's lines say why).
+// Co-op that came with the game's start (ByLauncher) is neither started nor stopped (PageSays why). A Host refused or
+// failed: PageSays why.
 void HostNow();
 void LeaveNow();
 // Co-op came with the game's start (Host.bat, Join.bat, coop.ini): the page's rows open the menu instead.
 bool ByLauncher();
 // The Multiplayer page's Join view: joining with the code (or address line) on the clipboard, as the Join page's
 // paste then Join; and the last game again ("Join <host> again", its code kept in coop.ini). Refused (co-op on, the
-// code not readable) or failed: the menu opens on its main page or Join page, whose note says why.
+// code not readable) or failed: PageSays why.
 void JoinPasteNow();
 // The page's Join view: join `room` (a room name) on the kit's relay (coop-options.ini's relay), with `password` (the
-// host's join password, "" none). No relay set, refused or failed: the menu opens, its note says why.
+// host's join password, "" none). No relay set, refused or failed: PageSays why.
 void JoinRoomNow(const std::string& room, const std::string& password);
 // A relay is set in coop-options.ini (relay = ...): a room name can be joined through it.
 bool RelaySet();
@@ -82,13 +86,13 @@ bool AutoRejoin();
 void SetAutoRejoin(bool on);
 bool AutoRejoining();
 // The page's "Games on this network": join the game at that address and port, with `password` (the Join view's,
-// "" none). Refused or failed: the menu opens, its note says why.
+// "" none). Refused or failed: PageSays why.
 void JoinLanNow(const std::string& address, std::uint16_t port, const std::string& password);
 void RejoinNow();
 // A last game's code is kept (coop.ini last_invite); its host's name into `host` (may be null; "" when not known).
 bool Rejoin(std::string* host);
-// The host's Paste answer (a friend's answer code from the clipboard), as the menu's row does it; the menu opened on
-// its main page, whose note says what became of it.
+// The host's Paste answer (a friend's answer code from the clipboard), as the menu's row does it; PageSays what became
+// of it.
 void PasteAnswerNow();
 
 // The autotest's `menu customize|close` step (LICHII_COOP_TEST_COMMANDS only, coop_testinput.h): the menu opened
