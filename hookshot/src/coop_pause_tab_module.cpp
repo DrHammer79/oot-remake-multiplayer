@@ -1380,6 +1380,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                     pages.kind = Kind::kPages, pages.screen = g_pages_screen, pages.layout = g_pages_layout;
                     Page::Do page_only;
                     page_only.set_page = true, page_only.page_shown = d.page_shown, page_only.slide = d.slide;
+                    page_only.page_from = d.page_from, page_only.page_to = d.page_to;
                     ApplyPages(ctx, pages, page_only);   // (the pages' own update comes a frame later)
                 }
             }
