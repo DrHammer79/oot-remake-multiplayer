@@ -1199,6 +1199,8 @@ TEST_CASE("pause tab: a guest the host's game turned away: the rows say so and w
     for (const View w : {View::kMain, View::kSession, View::kJoin, View::kLanGame}) {
         for (const std::string& r : RowTexts(w, v)) CHECK(r.size() <= kRowChars);
     }
+}
+
 TEST_CASE("pause tab: a stall of the whole game keeps the page, screens that stop while the pad goes on do not") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
