@@ -1653,16 +1653,16 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     CHECK(SettingPages(13) == 3);
     auto lines = SettingLines(graphics, 0, "Graphics");
     REQUIRE(lines.size() == static_cast<std::size_t>(kListRows));
-    CHECK(lines[0].name == "Graphics");          // (the header: the category, and its page when it has more)
-    CHECK(lines[0].value == "Page 1 of 2");
+    CHECK(lines[0].name == "Graphics (page 1 of 2)");   // (the header: the category, and its page when it has more)
+    CHECK(lines[0].value.empty());                     // (no value: the module hides its box)
     CHECK(lines[1].name == "Graphics 0");
     CHECK(lines[1].value == "On");
     lines = SettingLines(graphics, 1, "Graphics");
-    CHECK(lines[0].value == "Page 2 of 2");
+    CHECK(lines[0].name == "Graphics (page 2 of 2)");
     CHECK(lines[1].name == "Graphics 6");
     CHECK(lines[4].name == "Aspect ratio *");   // (a restart one)
     CHECK(lines[5].name.empty());
-    CHECK(SettingLines(SettingsOf(all, 1), 0, "Audio")[0].value.empty());   // (one page: no page shown)
+    CHECK(SettingLines(SettingsOf(all, 1), 0, "Audio")[0].name == "Audio");   // (one page: no page shown)
 
     CHECK(SettingNext(vol, 1) == 85);
     CHECK(SettingNext(vol, -1) == 75);

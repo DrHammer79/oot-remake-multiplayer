@@ -132,6 +132,8 @@ TEST_CASE("hookshot: patch 0032 hands the module the Insert menu's settings, the
     CHECK(p.find("+    if (index == 0 && can_mic() && std::chrono::steady_clock::now() - mics_asked > std::chrono::seconds(2)) {") !=
           std::string::npos);
     CHECK(p.find("+        if (std::min(host->mic_count(), kMaxMics) != mic_listed) refresh_mics();") != std::string::npos);
+    // A key the bridge handed out cut to 31 bytes is the row's it starts.
+    CHECK(p.find("+    while (i < kRows && !(bridge_row(i) && bridge_key_is(ini_key(rows[i]), key))) i++;") != std::string::npos);
     // The module's table reads them only when the exe's table is that long (an older Hookshot goes without).
     static_assert(offsetof(HosCoopApi, setting) > offsetof(HosCoopApi, scratch));
     static_assert(offsetof(HosCoopApi, setting_set) > offsetof(HosCoopApi, setting));

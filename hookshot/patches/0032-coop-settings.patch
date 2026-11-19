@@ -1,4 +1,4 @@
-From 2458c4066d951ab3583cfe375aa513e8445f6931 Mon Sep 17 00:00:00 2001
+From 9f98014ede57a6977a69bafcfc7c5b7ead5a8dd9 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 19 Nov 2026 11:58:55 -0600
 Subject: [PATCH] Co-op settings: the Insert menu's settings for the module
@@ -16,14 +16,18 @@ when it opens, so through the bridge the Microphone row ended at the
 default until the menu was opened once. An enumeration's start now lists
 them as they are, at most each 2 s, and only when their count moved
 (refresh_mics tells the host its choice, which starts it again).
+
+The keys (menu_setting_set): MkwVkSetting's key holds 31 bytes, so a
+longer ini key (version_and_hardware_at_every_level) was handed out cut
+and then matched no row. A cut key now matches the row it starts.
 ---
- gpu/vk/vk_menu.cpp  |  8 ++++++++
+ gpu/vk/vk_menu.cpp  | 16 +++++++++++++++-
  host/coop_bridge.c  | 26 ++++++++++++++++++++++++++
  host/hos_coop_api.h | 16 ++++++++++++++++
- 3 files changed, 50 insertions(+)
+ 3 files changed, 57 insertions(+), 1 deletion(-)
 
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index 737f025d..2b881cee 100644
+index 737f025d..a93a3e2b 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
 @@ -6073,6 +6073,14 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
@@ -41,6 +45,25 @@ index 737f025d..2b881cee 100644
      for (int i = 0, n = 0; i < kRows; i++)
          if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
      return 0;
+@@ -6170,11 +6178,17 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
+ /// through a list of their own (the Upscaler, Render resolution, the output resolution) are walked to value: walk_to. out: the
+ /// row as it is now. 1 set, 0 no such row, -1 nothing to choose on this PC (row_fixed), -2 none of a list row's steps reach
+ /// value here (the row and the rest as they were)
++// (oot-remake-multiplayer, patch 0032) a key as the bridge handed it out: MkwVkSetting's key holds 31 bytes, so a
++// longer ini key ("version_and_hardware_at_every_level") came back cut, and was no row's; a cut key is the row's it starts
++static bool bridge_key_is(const char* row_key, const char* key) {
++    const size_t n = strlen(key);
++    return !strcmp(row_key, key) || (n == sizeof ((MkwVkSetting*)0)->key - 1 && !strncmp(row_key, key, n));
++}
+ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
+     bridge_probe_first();
+     std::lock_guard lk(menu_mu);
+     int i = 0;
+-    while (i < kRows && !(bridge_row(i) && !strcmp(ini_key(rows[i]), key))) i++;
++    while (i < kRows && !(bridge_row(i) && bridge_key_is(ini_key(rows[i]), key))) i++;
+     if (i == kRows) return 0;
+     Row& r = rows[i];
+     if (row_fixed(r.value)) return bridge_fill(i, out), -1;
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
 index 889a0716..82b70a1e 100644
 --- a/host/coop_bridge.c

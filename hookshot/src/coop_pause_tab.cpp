@@ -1103,8 +1103,11 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
     std::vector<ListLine> lines(kListRows);
     const int pages = SettingPages(static_cast<int>(rows.size()));
     const int at_page = (page % pages + pages) % pages;
-    lines[0] = ListLine{FitTo(title, kListNameChars),
-                        pages > 1 ? "Page " + std::to_string(at_page + 1) + " of " + std::to_string(pages) : ""};
+    // (the header has no value: the module hides its value box and arrows, so it never looks like a setting)
+    lines[0] = ListLine{FitTo(pages > 1 ? title + " (page " + std::to_string(at_page + 1) + " of " + std::to_string(pages) + ")"
+                                        : title,
+                              kListNameChars),
+                        ""};
     for (int i = 0; i < kSettingsPerPage; ++i) {
         const std::size_t at = static_cast<std::size_t>(at_page * kSettingsPerPage + i);
         if (at >= rows.size()) break;

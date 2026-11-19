@@ -556,6 +556,8 @@ std::atomic<int> g_set_count{0};   // the category's settings (the list's length
 // mouse's steps), the category follows and the rows have the pad. g_mutex.
 std::uint64_t g_set_seen_gen = 0;
 int g_set_seen_row = -1;
+constexpr std::uint64_t kMouseAMs = 400;   // an A this soon after the left button was down is the mouse's
+std::uint64_t g_set_left_ms = 0;          // the left button last seen down on Longshot Settings. g_mutex.
 // Longshot's settings as last read (every 2 s while the page shows, and after a change). g_set_mutex.
 std::mutex g_set_mutex;
 std::vector<SettingRow> g_set_all;
@@ -567,10 +569,27 @@ std::vector<SettingRow> SettingsNow(std::uint64_t now_ms, bool fresh = false) {
         g_set_all.clear();
         for (const CoopLongshotSettings::Setting& x : CoopLongshotSettings::All()) {
             g_set_all.push_back(SettingRow{x.key, x.name, x.text, x.tab, x.value, x.lo, x.hi, x.step, x.restart, x.fixed});
+            // (Debug tools turns on only in Longshot's own menu, which asks first: set through the bridge it only raises
+            // that question there. Shown, dimmed, as one with nothing to choose here)
+            if (x.key == "debug_tools") g_set_all.back().fixed = true, g_set_all.back().name = "Debug tools (F1 menu only)";
         }
         g_set_read_ms = now_ms;
     }
     return g_set_all;
+}
+
+// A setting moved as a press asks (SettingNext), on past a value Longshot does not take here (a list row walks only to
+// the choices this PC has: the Upscaler to its engines): each next step that way, until one changes the setting. Nothing
+// when no step does (its end, or nothing else here).
+std::optional<CoopLongshotSettings::Setting> StepSetting(const SettingRow& r, int dir) {
+    SettingRow at = r;
+    for (int tries = 0; tries < 64; ++tries) {
+        const int want = SettingNext(at, dir);
+        if (want == at.value || want == r.value) return std::nullopt;
+        if (auto after = CoopLongshotSettings::Set(r.key, want); after && after->value != r.value) return after;
+        at.value = want;
+    }
+    return std::nullopt;
 }
 
 // (test, COOP_TEST_LONGSHOT_SETTINGS=1 only) Once a run, as Longshot Settings first shows: every setting Longshot lists
@@ -587,6 +606,7 @@ void TestSettingsOnce() {
         std::vector<SettingRow> rows;
         for (const auto& x : all) {
             rows.push_back(SettingRow{x.key, x.name, x.text, x.tab, x.value, x.lo, x.hi, x.step, x.restart, x.fixed});
+            if (x.key == "debug_tools") rows.back().fixed = true;   // (as SettingsNow: Longshot's own menu only)
         }
         int changed = 0, fixed = 0, failed = 0, nowhere = 0;
         std::string per;
@@ -608,9 +628,8 @@ void TestSettingsOnce() {
                 LOG_INFO(Core, "coop: settings test: {} ({}, {}): {} - nothing to choose here", r.key, r.tab, r.name, r.text);
                 continue;
             }
-            int want = SettingNext(r, 1);
-            if (want == r.value) want = SettingNext(r, -1);
-            const auto there = CoopLongshotSettings::Set(r.key, want);
+            auto there = StepSetting(r, 1);   // (as the page's Right, or Left at its end)
+            if (!there) there = StepSetting(r, -1);
             const auto back = CoopLongshotSettings::Set(r.key, r.value);
             const bool went = there && there->value != r.value, returned = back && back->value == r.value;
             if (went && returned) {
@@ -634,11 +653,10 @@ void ChangeSetting(int index, int dir) {
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
     if (index < 0 || index >= static_cast<int>(rows.size())) return;
     const SettingRow& r = rows[static_cast<std::size_t>(index)];
-    const int want = SettingNext(r, dir);
-    if (want == r.value) return;
-    const auto after = CoopLongshotSettings::Set(r.key, want);
-    LOG_INFO(Core, "coop: pause tab: settings: {} from {} to {}{}{}", r.key, r.text, after ? after->text : std::string("?"),
-             after ? "" : " (Longshot did not take it)", after && after->restart ? " (after a restart)" : "");
+    if (r.fixed || SettingNext(r, dir) == r.value) return;
+    const auto after = StepSetting(r, dir);
+    LOG_INFO(Core, "coop: pause tab: settings: {} from {} to {}{}{}", r.key, r.text, after ? after->text : r.text,
+             after ? "" : " (Longshot took no step that way)", after && after->restart ? " (after a restart)" : "");
     SettingsNow(NowMs(), true);
     g_live_poke = true;
 }
@@ -668,6 +686,11 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
             g_set_vis[static_cast<std::size_t>(i)] = -1, g_set_alpha[static_cast<std::size_t>(i)] = -1;
             if (const std::uint64_t mark = PaneIn(ctx, PartLayout(page, name), "P_CheckMark_00"); mark != 0) {
                 SetVisible(ctx, mark, false);   // (an Options row's check mark: never ours)
+            }
+            if (i == 0) {   // (the header: no value box and no arrows, so it never looks like a setting with no value)
+                for (const char* inner : {"W_Base_01", "W_Base_03", "N_Content_00"}) {
+                    if (const std::uint64_t in = PaneIn(ctx, PartLayout(page, name), inner); in != 0) SetVisible(ctx, in, false);
+                }
             }
         }
         for (int r = 0; r < kSettingRows; ++r) {
@@ -927,6 +950,9 @@ std::string FocusedShownName() {
 constexpr std::uint64_t kFocusWaitMs = 1000;
 std::string g_focus_want;
 std::uint64_t g_focus_since = 0;
+int g_left_trace = 0;   // (trace) the game's cursor's button logged this many more times after Longshot Settings is left
+std::uint64_t g_left_since = 0;
+std::string g_left_said;
 void SettingsButton(void* ctx) {
     if (g_settings_button != 0) {
         const int want = g_page.SettingsUsable() ? 1 : 0;
@@ -945,8 +971,20 @@ void SettingsButton(void* ctx) {
         TestSettingsOnce();   // (COOP_TEST_LONGSHOT_SETTINGS=1 only)
     }
     if (g_page.TakeSettingsLeft()) {
-        g_focus_want = "Pa_Button_05", g_focus_since = now;
+        // (the game's cursor not moved: where the game puts it. Moved onto System's Longshot Settings button, the menu
+        // no longer closed in a run, 2026-11-19: neither B nor + reached it)
+        g_left_trace = 4, g_left_since = now;
         LOG_INFO(Core, "coop: pause tab: Longshot Settings left (B): System again");
+    }
+    if (g_left_trace > 0 && now - g_left_since > 300) {   // (trace: where the game's cursor went)
+        const std::string name = FocusedShownName();
+        if (name != g_left_said) {
+            g_left_said = name;
+            LOG_INFO(Core, "coop: pause tab: after Longshot Settings, the game's cursor on {}",
+                     name.empty() ? std::string("no one shown button") : name);
+            --g_left_trace;
+        }
+        if (now - g_left_since > 5000) g_left_trace = 0, g_left_said.clear();
     }
     if (g_focus_want.empty() || g_pages_screen == 0) return;
     const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
@@ -1074,7 +1112,9 @@ void FollowFourthX(void* ctx) {
 void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t layout = f.layout;
     const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
-    if (layout == 0 || tabs == 0 || !g_strip_ok) return;
+    // (only when the strip's look changes: a Do of the strip's update that only switches the pages, as Longshot Settings
+    // opening does, has no tab facts, and hid our tab and put the game's back at their places)
+    if (layout == 0 || tabs == 0 || !g_strip_ok || !d.set_tabs) return;
     SetVisible(ctx, g_tab_pane, d.tab_shown);
     if (!d.tab_shown) g_follow_had = false, g_alpha_set = g_word_set = -1;
     g_tab_shown = d.tab_shown;
@@ -1776,13 +1816,28 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                 }
                 // A click on a category (Longshot presses A for it) only picks it: it never enters the list, and never
-                // reaches a setting there (it changed the one picked before: Volume from 100% to 0%).
-                if (const int clicked = g_mouse_rows.Clicked(now); clicked >= 0 && decide) {
-                    g_mouse_rows.TakeClicked(now);
-                    decide = false;
-                    if (set_row >= 0) set_row = -1;
-                    LOG_INFO(Core, "coop: pause tab: settings: a click on the category {}: it is picked, the list not entered",
-                             kSettingTabs[static_cast<std::size_t>(clicked)]);
+                // reaches a setting there (it changed the one picked before: Volume from 100% to 0%). The click is
+                // MouseRows' (pressed and let go on a row), or the left button down in the last kMouseAMs with the
+                // mouse on a category (Longshot's A can come before the button is let go).
+                {
+                    float mx = 0, my = 0;
+                    bool mheld = false;
+                    const bool inside = ReadCursor(&mx, &my, &mheld);
+                    if (inside && mheld) g_set_left_ms = now;
+                    const int mouse_row = inside && now - g_set_left_ms < kMouseAMs ? RowAt(ReadRowBoxes(now), mx, my) : -1;
+                    const int clicked = g_mouse_rows.Clicked(now);
+                    if (decide && (clicked >= 0 || mouse_row >= 0)) {
+                        g_mouse_rows.TakeClicked(now);
+                        decide = false;
+                        if (set_row >= 0) set_row = -1;
+                        const int row = clicked >= 0 ? clicked : mouse_row;
+                        LOG_INFO(Core, "coop: pause tab: settings: a click on the category {} ({}): it is picked, the list "
+                                       "not entered",
+                                 kSettingTabs[static_cast<std::size_t>(row)], clicked >= 0 ? "let go on it" : "held on it");
+                    } else if (decide) {
+                        LOG_INFO(Core, "coop: pause tab: settings: A (the pad's: the mouse {})",
+                                 inside ? "not on a category just now" : "not over the game");
+                    }
                 }
                 if (set_row < 0) {
                     if ((right || decide) && count > 0) {
