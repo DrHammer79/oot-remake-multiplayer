@@ -49,7 +49,9 @@ bool SaveWaitWaiting();
 // select takes that A and the ones in it, and presses Continue once a file is picked there), so co-op being busy at
 // the title does not refuse it. NotePlayerPad sees player 1's buttons before the code mods' holds come off
 // (coop_pad_order.h).
-inline constexpr std::uint64_t kPlayerChoiceMs = 10000;
+// (2 minutes: a file picked with the mouse brings no A after the first, and naming a file takes a while; a mod's own
+// choice with no A from the player before it, as at the game's start, is still refused)
+inline constexpr std::uint64_t kPlayerChoiceMs = 120000;
 void NotePlayerPad(std::uint64_t buttons);
 bool PlayerChoseLately();
 
