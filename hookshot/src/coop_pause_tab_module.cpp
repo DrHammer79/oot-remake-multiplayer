@@ -993,7 +993,7 @@ void SettingsButton(void* ctx) {
     TraceCursor("after Longshot Settings", &g_left_trace, g_left_since, &g_left_said, now);
 }
 
-/ Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
+// Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
 int SlidePlace(int page) {
     return page == 1 ? 1 : 0;
 }
