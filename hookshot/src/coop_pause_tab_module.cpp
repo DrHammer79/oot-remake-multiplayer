@@ -573,12 +573,66 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
 }
 
 // The pages: our page over System's, or System's alone. The rows' texts once per opening.
+// The pages' slide (Page::Do::slide, SlideOffsets): our page and System's both shown and moved from their own places
+// each update of the pages, then the one that went hidden and both back at their places. g_mutex.
+struct Slide {
+    int dir = 0;                  // 0: none
+    std::uint64_t start_ms = 0, gen = 0;
+    float ours_x = 0, system_x = 0;   // their own places (+0x6c), as they were when it began
+};
+Slide g_slide;
+
+void PlacePane(void* ctx, std::uint64_t pane, float x) {
+    if (Read<float>(pane + 0x6c) == x) return;
+    CoopRuntime::Write(pane + 0x6c, &x, sizeof x);
+    Call(ctx, kPaneMoved, pane);   // (its matrices made again, as the game's own place setter ends)
+}
+
+void EndSlide(void* ctx) {
+    if (g_slide.dir == 0) return;
+    if (g_slide.gen == g_pages_gen) {   // (a new opening has its own panes, at their places)
+        PlacePane(ctx, g_coop_pane, g_slide.ours_x);
+        PlacePane(ctx, g_system_pane, g_slide.system_x);
+    }
+    g_slide.dir = 0;
+}
+
+// Each update of the pages while a slide goes on; at its end the page that went is hidden.
+void StepSlide(void* ctx, std::uint64_t now_ms) {
+    if (g_slide.dir == 0) return;
+    if (g_slide.gen != g_pages_gen || !g_pages_ok) {
+        g_slide.dir = 0;
+        return;
+    }
+    const float p = SlideProgress(now_ms - g_slide.start_ms);
+    const auto [ours, system] = SlideOffsets(g_slide.dir, p);
+    PlacePane(ctx, g_coop_pane, g_slide.ours_x + ours);
+    PlacePane(ctx, g_system_pane, g_slide.system_x + system);
+    if (p >= 1.0f) {
+        const bool shown = g_slide.dir > 0;
+        EndSlide(ctx);
+        SetVisible(ctx, g_coop_pane, shown);
+        SetVisible(ctx, g_system_pane, !shown);
+    }
+}
+
 void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t layout = f.layout;
     if (layout == 0 || !g_pages_ok) return;
     if (d.set_page) {
-        SetVisible(ctx, g_coop_pane, d.page_shown);
-        SetVisible(ctx, g_system_pane, !d.page_shown);
+        EndSlide(ctx);   // (one going on: both back at their places first)
+        if (d.slide != 0) {
+            g_slide.dir = d.slide, g_slide.start_ms = NowMs(), g_slide.gen = g_pages_gen;
+            g_slide.ours_x = Read<float>(g_coop_pane + 0x6c), g_slide.system_x = Read<float>(g_system_pane + 0x6c);
+            SetVisible(ctx, g_coop_pane, true);
+            SetVisible(ctx, g_system_pane, true);
+            StepSlide(ctx, g_slide.start_ms);
+            LOG_INFO(Core, "coop: pause tab: the pages slide {} (our page's place x {:.0f}, System's {:.0f})",
+                     d.slide > 0 ? "to ours" : "back to System", g_slide.ours_x, g_slide.system_x);
+        } else {
+            SetVisible(ctx, g_coop_pane, d.page_shown);
+            SetVisible(ctx, g_system_pane, !d.page_shown);
+        }
     }
     if (d.set_texts) {
         // (the rows' words are the live texts', LiveRows: the pane-text call never reaches their "=T_Btn_00" panes)
@@ -1069,10 +1123,11 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                     Facts pages;
                     pages.kind = Kind::kPages, pages.screen = g_pages_screen, pages.layout = g_pages_layout;
                     Page::Do page_only;
-                    page_only.set_page = true, page_only.page_shown = d.page_shown;
+                    page_only.set_page = true, page_only.page_shown = d.page_shown, page_only.slide = d.slide;
                     ApplyPages(ctx, pages, page_only);   // (the pages' own update comes a frame later)
                 }
             }
+            if (f.kind == Kind::kPages && calls) StepSlide(ctx, NowMs());   // (each update while the pages slide)
             if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
             // (the menu sounds of the presses the module took: the game starts none for them)
             if (ctx != nullptr && CanCall()) {

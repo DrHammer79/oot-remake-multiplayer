@@ -160,6 +160,7 @@ void Page::Hide(const char* why, bool keep) {
     shown_ = false;
     sub_ = false, back_ = false;
     typing_ = -1;
+    slide_ = 0;   // (gone at once; L sets its slide after)
     again_ = keep;
     why_ = why;
     // Every button held now stays the module's until let go, so none reaches System as a fresh press (an A held
@@ -223,7 +224,7 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         ShowAgain(now_ms);
         const int want = shown_ ? 1 : 0;
         if (page_set_ != want) {
-            d.set_page = true, d.page_shown = shown_, page_set_ = want;
+            d.set_page = true, d.page_shown = shown_, d.slide = std::exchange(slide_, 0), page_set_ = want;
         }
         if (!texts_set_ && f.state == 2) {
             d.set_texts = true, texts_set_ = true;
@@ -239,7 +240,7 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         // (back at the strip's first update of the opening: the pages' own comes a frame later, so the module shows
         // our page through the pages screen it knows, in this update)
         if (shown_ && page_set_ != 1 && pages_.screen != 0) {
-            d.set_page = true, d.page_shown = true, page_set_ = 1;
+            d.set_page = true, d.page_shown = true, d.slide = std::exchange(slide_, 0), page_set_ = 1;
         }
         // (shown from the strip's opening to the end of its closing, as the game's four tabs are: shown only once
         // it was open, the fifth came in a moment after them; the module moves and fades it with the fourth. Filled
@@ -273,6 +274,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
             shown_ = true, decide_ = false, why_.clear();
             strip_sound_ = "mc_TabToRight";
+            slide_ = 1;   // (in from the right, as the game's next page)
             swallow_ |= buttons & ~kPadPassed;   // (R and anything held with it: none of it reaches System)
             return buttons & kPadPassed & ~swallow_;
         }
@@ -286,6 +288,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     if ((down & (kPadL | kPadZL)) != 0) {
         Hide("L");
         strip_sound_ = "mc_TabToLeft";
+        slide_ = -1;   // (out to the right, System back from the left)
         return buttons & ~swallow_;
     }
     if ((down & kPadA) != 0) {
@@ -376,6 +379,7 @@ void Page::ShowAgain(std::uint64_t now_ms) {
     }
     if (CanStay(now_ms)) {
         shown_ = true, again_ = false, decide_ = false, why_.clear();
+        slide_ = 0;   // (the menu opening on our page: at once, as the game opens on its own last page)
     }
 }
 
@@ -405,6 +409,26 @@ int RowOfButton(const std::string& name) {
     if (name.size() != 12 || name.compare(0, 11, "Pa_Button_0") != 0) return -1;
     const int row = name[11] - '0';
     return row >= 0 && row < kRows ? row : -1;
+}
+
+float SlideProgress(std::uint64_t ms) {
+    // (the measured progress at each 1/60 s update after the press: Items to System, 2026-11-19)
+    static constexpr float kCurve[] = {0.0f,   0.179f, 0.319f, 0.426f, 0.508f, 0.570f, 0.619f, 0.662f, 0.706f,
+                                       0.749f, 0.788f, 0.823f, 0.854f, 0.881f, 0.904f, 0.924f, 0.941f, 0.956f,
+                                       0.967f, 0.977f, 0.984f, 0.990f, 0.994f, 0.997f, 0.9987f, 0.9996f, 1.0f};
+    constexpr std::size_t kLast = sizeof kCurve / sizeof kCurve[0] - 1;
+    const float at = static_cast<float>(ms) * 60.0f / 1000.0f;
+    if (at >= static_cast<float>(kLast)) return 1.0f;
+    const std::size_t i = static_cast<std::size_t>(at);
+    const float frac = at - static_cast<float>(i);
+    return kCurve[i] + (kCurve[i + 1] - kCurve[i]) * frac;
+}
+
+std::pair<float, float> SlideOffsets(int dir, float p) {
+    p = std::clamp(p, 0.0f, 1.0f);
+    if (dir > 0) return {kPageWidth * (1.0f - p), -kPageWidth * p};
+    if (dir < 0) return {kPageWidth * p, -kPageWidth * (1.0f - p)};
+    return {0.0f, 0.0f};
 }
 
 float Ahead(float prev, float now, float limit) {

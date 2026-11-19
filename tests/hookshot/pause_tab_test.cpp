@@ -1447,3 +1447,45 @@ TEST_CASE("pause tab: the mouse's steps stop for the player's own, the cursor ou
     for (int i = 0; i < 200; ++i) m.Step(At(t += 16, -1100, 650, 3));
     CHECK(m.Step(At(t += 16, -1100, 650, 3)) == 0);
 }
+
+TEST_CASE("pause tab: R on System slides our page in, L slides it out, the menu opening on it shows it at once") {
+    Page p = UsablePage();
+    std::uint64_t now = 1000;
+    OnSystem(p, now);
+    p.OnPad(0, now);
+    CHECK(p.OnPad(kPadR, now + 16) == 0);
+    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
+    CHECK(d.set_page);
+    CHECK(d.page_shown);
+    CHECK(d.slide == 1);
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 48);
+    CHECK_FALSE(d.set_page);   // (once)
+    p.OnPad(0, now + 64);
+    p.OnPad(kPadL, now + 80);
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 96);
+    CHECK(d.set_page);
+    CHECK_FALSE(d.page_shown);
+    CHECK(d.slide == -1);
+}
+
+TEST_CASE("pause tab: the slide follows the game's measured curve and moves the two pages a page's width") {
+    CHECK(SlideProgress(0) == doctest::Approx(0.0f));
+    CHECK(SlideProgress(17) == doctest::Approx(0.18f).epsilon(0.02));
+    CHECK(SlideProgress(67) == doctest::Approx(0.51f).epsilon(0.02));   // (half by about 65 ms)
+    CHECK(SlideProgress(250) > 0.94f);
+    CHECK(SlideProgress(kSlideMs) == doctest::Approx(1.0f));
+    CHECK(SlideProgress(5000) == 1.0f);
+    for (std::uint64_t t = 0; t < kSlideMs; t += 5) CHECK(SlideProgress(t + 5) >= SlideProgress(t));   // (never back)
+    auto [ours, system] = SlideOffsets(1, 0.0f);
+    CHECK(ours == doctest::Approx(kPageWidth));   // (ours a page to the right, System at its place)
+    CHECK(system == doctest::Approx(0.0f));
+    std::tie(ours, system) = SlideOffsets(1, 1.0f);
+    CHECK(ours == doctest::Approx(0.0f));
+    CHECK(system == doctest::Approx(-kPageWidth));
+    std::tie(ours, system) = SlideOffsets(-1, 0.0f);   // (L: ours at its place, System a page to the left)
+    CHECK(ours == doctest::Approx(0.0f));
+    CHECK(system == doctest::Approx(-kPageWidth));
+    std::tie(ours, system) = SlideOffsets(-1, 1.0f);
+    CHECK(ours == doctest::Approx(kPageWidth));
+    CHECK(system == doctest::Approx(0.0f));
+}

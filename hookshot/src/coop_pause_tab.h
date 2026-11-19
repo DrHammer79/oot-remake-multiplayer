@@ -167,6 +167,9 @@ public:
         bool set_page = false;   // the pages: our page shown (and System hidden) or not (at the strip's update too:
                                  // the module then sets it through the pages screen it knows)
         bool page_shown = false;
+        // How the page comes or goes: +1 R on System, ours slides in from the right as System slides out to the left;
+        // -1 L, the other way; 0 at once (the menu opening on our page, closing, a window over it).
+        int slide = 0;
         bool set_texts = false;  // the pages: our rows' texts (once per screen object)
         bool set_tabs = false;   // the strip: the fifth tab shown or not, lit or not; System's tab lit or not
         bool tab_shown = false, tab_lit = false, fill_tab = false;
@@ -236,6 +239,7 @@ private:
     std::uint64_t swallow_ = 0;   // buttons the module took, kept from the game until let go
     bool decide_ = false;
     const char* strip_sound_ = nullptr;
+    int slide_ = 0;   // the next set_page's Do::slide (R or L)
     const char* pages_sound_ = nullptr;
     std::string why_;
     bool usable_ = false;
@@ -413,6 +417,17 @@ private:
     int target_ = -1, press_ = -1, clicked_ = -1, step_from_ = -1;
     std::uint64_t since_ = 0, clicked_ms_ = 0, step_ms_ = 0;
 };
+// --- The pages' slide (Page::Do::slide) ---
+// The game slides its pages a page's width apart (N_MenuChange_01's 4280) when L or R changes the page: measured in a
+// run (2026-11-19, the strip's own x each update from Items to System), 4280 in about 430 ms, a fast ease-out with no
+// fade: 18% at the first update, half by 65 ms, 95% by 250 ms. The module moves our page and System's the same way.
+inline constexpr float kPageWidth = 4280.0f;
+inline constexpr std::uint64_t kSlideMs = 433;
+// How far a slide is (0 to 1) `ms` after it began: the game's measured curve, between its samples a straight line.
+float SlideProgress(std::uint64_t ms);
+// The pages' own x offsets at a slide's progress p (0..1): {ours, System's}, added to their own places. dir +1: ours
+// from the right to its place, System from its place to the left; dir -1: back.
+std::pair<float, float> SlideOffsets(int dir, float p);
 
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: ours takes them one
