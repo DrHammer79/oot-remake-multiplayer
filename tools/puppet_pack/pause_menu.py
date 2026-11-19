@@ -128,7 +128,8 @@ def add_cells(d):
     """PaSystemMenu_00.buil with the game browser's cells: CELLS copies of its first button, two
     columns (CELL_X) of four rows at the heights of the page's first four rows, stored hidden. Each
     is a copy of the same button part; the page's own code binds its five Pa_Button_NN by name, so
-    the copies are no buttons of the game's."""
+    the copies are no buttons of the game's. The game's button overrides some of its part's panes
+    (seen in a pack run, 2026-11-19): the copies go without those overrides (Copy.drop_overrides)."""
     panes, _ = ui_pack.read_layout(d)
     names = [p.name for p in panes]
     for name in (CELL_SOURCE,) + CELL_ROWS:
@@ -140,7 +141,8 @@ def add_cells(d):
     copies = []
     for i in range(CELLS):
         _, y = _xy(d, CELL_ROWS[i // len(CELL_X)])
-        copies.append(ui_pack.Copy(CELL_SOURCE, CELL % i, (CELL_X[i % len(CELL_X)] - sx, y - sy), hidden=True))
+        copies.append(ui_pack.Copy(CELL_SOURCE, CELL % i, (CELL_X[i % len(CELL_X)] - sx, y - sy), hidden=True,
+                                   drop_overrides=True))   # (the game's button has its own; the words are live)
     return ui_pack.clone_parts(d, copies, new_id=_new_id)
 
 

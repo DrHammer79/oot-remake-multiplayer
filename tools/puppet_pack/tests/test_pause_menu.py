@@ -132,7 +132,11 @@ class PageTest(unittest.TestCase):
 
 class CellsTest(unittest.TestCase):
     def test_eight_cells_in_two_columns_at_the_rows_heights_stored_hidden(self):
-        d = system()
+        d = bytearray(system())
+        # (the game's buttons override panes of their part: its two override lists, at +0x08 and +0x18, not empty)
+        src = next(p for p in ui_pack.read_layout(bytes(d))[1] if p.name == "Pa_Button_00").record
+        struct.pack_into("<QII", d, src + 0x08, 0x10, 1, 8)
+        d = bytes(d)
         n = pm.add_cells(d)
         panes, parts = ui_pack.read_layout(n)
         self.assertEqual([p.name for p in panes[-pm.CELLS:]], [pm.CELL % i for i in range(pm.CELLS)])
@@ -145,6 +149,10 @@ class CellsTest(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", n, panes[len(SYSTEM) + i].record + 0x38)[0] & 1, 0)   # hidden
             self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-pm.CELLS + i].record)[0]),
                              "PaCommonBtnThin_00")
+            self.assertEqual(n[parts[-pm.CELLS + i].record + 0x08:parts[-pm.CELLS + i].record + 0x28], bytes(0x20))
+        self.assertEqual(struct.unpack_from("<QII", n, src + 0x08), (0x10, 1, 8))   # (the game's button keeps its own)
+        with self.assertRaises(ui_pack.UiPackError):   # (a copy that would keep them is still refused)
+            ui_pack.clone_parts(d, [ui_pack.Copy("Pa_Button_00", "Pa_Other_00")])
         for name in [p[0] for p in SYSTEM]:
             self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
         with self.assertRaises(pm.PauseMenuError):
