@@ -313,3 +313,41 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
         CHECK(std::string(ActionWords(a)).size() > 3);
     }
 }
+
+TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width") {
+    SessionView idle;
+    CHECK(RowTexts(idle) == std::vector<std::string>{"Not in a session", "Join a game", "Players", "Let in", "Leave"});
+
+    SessionView host;
+    host.s.hosting = host.s.in_one = true;
+    host.players = 1;
+    CHECK(RowTexts(host) ==
+          std::vector<std::string>{"Hosting", "Room: coming...", "Players: just you", "Let in: nobody asks", "Stop hosting"});
+    host.room = "forest-gang";
+    host.players = 3;
+    host.asking = {"Saria"};
+    CHECK(RowTexts(host)[kRowJoinCode] == "Room: forest-gang");
+    CHECK(RowTexts(host)[kRowPlayers] == "Players: 3");
+    CHECK(RowTexts(host)[kRowLetIn] == "Let in Saria");
+    host.asking = {"Saria", "Mido", "Darunia"};
+    CHECK(RowTexts(host)[kRowLetIn] == "Let in Saria (+2)");
+
+    SessionView guest;
+    guest.s.in_one = true;
+    guest.players = 2;
+    CHECK(RowTexts(guest) == std::vector<std::string>{"In a session", "Room", "Players: 2", "Let in", "Leave"});
+    SessionView joining;
+    joining.connecting = true;
+    joining.s.in_one = true;
+    CHECK(RowTexts(joining)[kRowSession] == "Connecting...");
+
+    // A long room name is cut at a UTF-8 character's start, with "...".
+    host.room = std::string(30, 'a') + "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9";
+    const std::string cut = RowTexts(host)[kRowJoinCode];
+    CHECK(cut.size() <= kRowChars);
+    CHECK(cut.substr(cut.size() - 3) == "...");
+    CHECK((static_cast<unsigned char>(cut[cut.size() - 4]) & 0xc0) != 0xc0);   // (no lead byte left alone)
+    for (const SessionView& v : {idle, host, guest, joining}) {
+        for (const std::string& r : RowTexts(v)) CHECK(r.size() <= kRowChars);
+    }
+}

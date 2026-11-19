@@ -157,6 +157,18 @@ struct Session {
     bool code = false;      // hosting, and a room name or a join code is there to give
 };
 RowAction ActionFor(int row, const Session& s);
+
+// What the rows say, in the game's own text panes (the module writes them through the pack's placeholder messages,
+// Coop_Live_NN, in LayoutMsg/PlusMenu_00): the session's state on the rows themselves.
+struct SessionView {
+    Session s;
+    bool connecting = false;     // starting a server, or joining (not in yet)
+    std::string room;            // hosting: the room name (else a join code) friends type, "" none yet
+    int players = 0;             // in the session, us included (0: not in one)
+    std::vector<std::string> asking;   // hosting: who asks to join, oldest first
+};
+inline constexpr std::size_t kRowChars = 40;   // the most a row's text holds (the System page's button width)
+std::vector<std::string> RowTexts(const SessionView& v);
 const char* ActionWords(RowAction a);   // for the log
 
 // The log lines a run needs (the first step's probe, kept): a screen object's first update, its updates over its

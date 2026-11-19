@@ -17,6 +17,7 @@
 #include "coop_hookshot.h"
 #include "coop_pause.h"
 #include "coop_runtime.h"
+#include "coop_lobby_game.h"
 #include "coop_save.h"
 
 namespace CoopPauseTab {
@@ -129,6 +130,124 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
     if (g_api->scratch(ctx, b, sizeof b) != base) return false;
     return Call(ctx, kMsgRefInit, base) && Call(ctx, kMsgRefSet, base, base + 0x20, base + 0x28, 1) &&
            Call(ctx, kPaneText, layout, at_path, base, 1, 0);
+}
+
+// --- Live text: our own words in the game's text panes ---
+// A message reference is {text, its length in bytes, the message's attributes} (main+0xa6afe0 fills it; for a missing
+// label it points at "LabelNotFound", 13). This game's message files are UTF-8. The pack adds placeholder messages
+// (strings/en.txt: Coop_Live_00..07, 64 dots each) to LayoutMsg/PlusMenu_00: the module looks one up once, writes its
+// own words into that text (the language archive stays loaded, so the text pane may read it later) and hands the
+// game's pane-text call (kPaneText) a reference with the new length.
+constexpr int kLiveSlots = 8;
+constexpr std::uint32_t kLivePlaceholder = 64;   // the placeholder's bytes (strings/en.txt)
+struct LiveSlot {
+    std::uint64_t text = 0;     // the placeholder's text in the loaded message file (0: not looked up)
+    std::uint32_t extra = 0;    // what the game's length counts beyond the text (its 0 at the end: 1, else 0)
+    std::uint64_t attrs = 0;    // the reference's third word, kept
+    bool bad = false;           // looked up and not ours (an old pack): no live text
+    std::string shown;          // what the pane shows now (per pages screen)
+};
+std::mutex g_live_mutex;        // the slots (the pages' updates come on several threads)
+LiveSlot g_live[kLiveSlots];
+std::uint64_t g_live_screen = 0, g_live_ms = 0;
+
+// The slot's placeholder, looked up once (the reference the game makes for it).
+bool LiveLookup(void* ctx, int slot) {
+    LiveSlot& l = g_live[slot];
+    if (l.text != 0) return true;
+    if (l.bad) return false;
+    char label[16];
+    std::snprintf(label, sizeof label, "Coop_Live_%02d", slot);
+    const std::string file = "LayoutMsg/PlusMenu_00";
+    std::uint8_t b[0x80] = {};
+    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
+    if (base == 0) return false;
+    const std::uint64_t at_file = base + 0x30, at_label = base + 0x60;
+    std::memcpy(b + 0x20, &at_file, 8);
+    std::memcpy(b + 0x28, &at_label, 8);
+    std::memcpy(b + 0x30, file.c_str(), file.size() + 1);
+    std::memcpy(b + 0x60, label, std::strlen(label) + 1);
+    if (g_api->scratch(ctx, b, sizeof b) != base) return false;
+    if (!Call(ctx, kMsgRefInit, base) || !Call(ctx, kMsgRefSet, base, base + 0x20, base + 0x28, 1)) return false;
+    const std::uint64_t text = Read<std::uint64_t>(base);
+    const std::uint32_t length = Read<std::uint32_t>(base + 8);
+    char head[8] = {};
+    CoopRuntime::Read(text, head, sizeof head);
+    if (text == 0 || std::memcmp(head, "........", 8) != 0 || length < kLivePlaceholder ||
+        length > kLivePlaceholder + 1) {
+        l.bad = true;
+        LOG_INFO(Core, "coop: pause tab: live text: {} is not the pack's placeholder (text {:#x}, length {}): the rows "
+                       "keep their own words (build the puppet pack again)", label, text, length);
+        return false;
+    }
+    l.text = text;
+    l.extra = length - kLivePlaceholder;
+    l.attrs = Read<std::uint64_t>(base + 0x10);
+    LOG_INFO(Core, "coop: pause tab: live text: {} at {:#x}, the game counts {} byte(s) more than its text", label, text,
+             l.extra);
+    return true;
+}
+
+// `utf8` (at most kLivePlaceholder - 1 bytes) in the pane at `path`, through slot `slot`. True when shown.
+bool LiveText(void* ctx, std::uint64_t layout, const std::string& path, int slot, const std::string& utf8) {
+    LiveSlot& l = g_live[slot];
+    if (l.shown == utf8) return true;
+    if (path.size() >= 0x40 || utf8.size() >= kLivePlaceholder || !LiveLookup(ctx, slot)) return false;
+    std::string bytes = utf8;
+    bytes.push_back('\0');
+    if (!CoopRuntime::Write(l.text, bytes.data(), bytes.size())) return false;
+    std::uint8_t b[0x60] = {};
+    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
+    if (base == 0) return false;
+    const std::uint32_t length = static_cast<std::uint32_t>(utf8.size()) + l.extra;
+    std::memcpy(b + 0x00, &l.text, 8);
+    std::memcpy(b + 0x08, &length, 4);
+    std::memcpy(b + 0x10, &l.attrs, 8);
+    std::memcpy(b + 0x20, path.c_str(), path.size() + 1);
+    if (g_api->scratch(ctx, b, sizeof b) != base) return false;
+    if (!Call(ctx, kPaneText, layout, base + 0x20, base, 1, 0)) return false;
+    l.shown = utf8;
+    return true;
+}
+
+// What the rows say now (co-op's host status and the Lobby's room). No lock of ours held: they take their own.
+SessionView ViewNow() {
+    HosCoopStatus st{};
+    st.size = sizeof st;
+    CoopHookshot::HostMenu().Status(&st);
+    SessionView v;
+    v.s.hosting = st.state == HOS_COOP_HOSTING;
+    v.s.in_one = (st.state != HOS_COOP_IDLE && st.state != HOS_COOP_FAILED) || CoopSave::SessionLive();
+    v.connecting = st.state == HOS_COOP_STARTING || st.state == HOS_COOP_JOINING || st.state == HOS_COOP_WAIT_HOST;
+    std::string room = st.relay_room[0] != 0 ? st.relay_room : st.relay_code[0] != 0 ? st.relay_code : "";
+    if (const auto at = room.find('@'); at != std::string::npos) room.resize(at);   // (the name friends type first)
+    v.room = room;
+    v.s.code = v.s.hosting && (!room.empty() || st.invite[0] != 0);
+    const CoopLobby::Seen seen = CoopLobby::Now();
+    v.players = seen.connected ? static_cast<int>(seen.players.size()) : 0;
+    if (v.s.hosting) v.asking = CoopLobby::Asking();
+    return v;
+}
+
+// The rows' live texts while our page shows: at most every 250 ms, a pane only when its words changed.
+void LiveRows(void* ctx, std::uint64_t screen, const SessionView& v) {
+    std::lock_guard lock(g_live_mutex);
+    const std::uint64_t now = NowMs();
+    if (screen != g_live_screen) {
+        g_live_screen = screen;
+        for (LiveSlot& l : g_live) l.shown.clear();   // (a new pages screen: its panes show the pack's words again)
+    } else if (now - g_live_ms < 250) {
+        return;
+    }
+    g_live_ms = now;
+    const std::uint64_t layout = Read<std::uint64_t>(screen + kScreenLayout);
+    if (layout == 0) return;
+    const std::vector<std::string> rows = RowTexts(v);
+    for (int i = 0; i < kRows && i < kLiveSlots; ++i) {
+        char path[64];
+        std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Button_%02d/T_Btn_00", i);
+        LiveText(ctx, layout, path, i, rows[static_cast<std::size_t>(i)]);
+    }
 }
 
 // The pages: our page over System's, or System's alone. The rows' texts once per screen object.
@@ -290,6 +409,9 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
         }
         for (const std::string& line : lines) LOG_INFO(Core, "{}", line);
         if (was && !now_shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
+        if (f.kind == Kind::kPages && now_shown && f.state == 2 && ctx != nullptr && CanCall()) {
+            LiveRows(ctx, screen, ViewNow());   // (after our lock: the status and the Lobby take their own)
+        }
     } catch (...) {
         // (a log line or a look lost is all: the game's update goes on)
     }

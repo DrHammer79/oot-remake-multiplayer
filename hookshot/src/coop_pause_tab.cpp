@@ -167,6 +167,51 @@ RowAction ActionFor(int row, const Session& s) {
     }
 }
 
+namespace {
+
+// At most kRowChars bytes, cut before a UTF-8 sequence's start, with "..." when cut.
+std::string Fit(std::string t) {
+    if (t.size() <= kRowChars) return t;
+    std::size_t n = kRowChars - 3;
+    while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xc0) == 0x80) --n;
+    return t.substr(0, n) + "...";
+}
+
+}  // namespace
+
+std::vector<std::string> RowTexts(const SessionView& v) {
+    std::vector<std::string> rows(kRows);
+    if (v.connecting) {
+        rows[kRowSession] = "Connecting...";
+    } else if (v.s.hosting) {
+        rows[kRowSession] = "Hosting";
+    } else if (v.s.in_one) {
+        rows[kRowSession] = "In a session";
+    } else {
+        rows[kRowSession] = "Not in a session";
+    }
+    if (v.s.hosting) {
+        rows[kRowJoinCode] = v.room.empty() ? "Room: coming..." : "Room: " + v.room;
+    } else {
+        rows[kRowJoinCode] = v.s.in_one ? "Room" : "Join a game";
+    }
+    rows[kRowPlayers] = v.players <= 0   ? "Players"
+                        : v.players == 1 ? "Players: just you"
+                                         : "Players: " + std::to_string(v.players);
+    if (!v.s.hosting) {
+        rows[kRowLetIn] = "Let in";
+    } else if (v.asking.empty()) {
+        rows[kRowLetIn] = "Let in: nobody asks";
+    } else if (v.asking.size() == 1) {
+        rows[kRowLetIn] = "Let in " + v.asking.front();
+    } else {
+        rows[kRowLetIn] = "Let in " + v.asking.front() + " (+" + std::to_string(v.asking.size() - 1) + ")";
+    }
+    rows[kRowLeave] = v.s.hosting ? "Stop hosting" : "Leave";
+    for (std::string& r : rows) r = Fit(std::move(r));
+    return rows;
+}
+
 const char* ActionWords(RowAction a) {
     switch (a) {
     case RowAction::kOpenMain: return "co-op's menu, its main page";

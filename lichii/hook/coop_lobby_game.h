@@ -81,6 +81,8 @@ struct Seen {
     std::vector<PlayerSeen> players;     // by number
 };
 Seen Now();
+// Who asks to join this host now (the JOIN_KNOCKs not answered yet), oldest first, by nickname. Any thread.
+std::vector<std::string> Asking();
 // Co-op was left (CoopHook::End sends no last event): nothing is seen any more.
 void Forget();
 

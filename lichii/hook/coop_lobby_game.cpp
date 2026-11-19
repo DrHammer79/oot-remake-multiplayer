@@ -348,6 +348,16 @@ Seen Now() {
     return g.seen;
 }
 
+std::vector<std::string> Asking() {
+    Glue& g = TheGlue();
+    std::lock_guard lock(g.mutex);
+    std::vector<std::string> out;
+    for (const proto::JoinKnock& k : g.knocks.open()) {
+        out.push_back(k.nickname);
+    }
+    return out;
+}
+
 void Forget() {
     Glue& g = TheGlue();
     std::lock_guard lock(g.mutex);
