@@ -909,13 +909,17 @@ TEST_CASE("pause tab: the details list on the right: the session, why co-op fail
     d = DetailLines(View::kMain, fv);
     CHECK(d[0].name == "Co-op failed");
     CHECK(d[1].name.rfind("no answer from the relay", 0) == 0);
-    for (int i = 1; i < kListRows - 1; ++i) {
+    for (int i = 1; i < kListRows; ++i) {
         CHECK(!d[static_cast<std::size_t>(i)].name.empty());
         CHECK(d[static_cast<std::size_t>(i)].value.empty());
         CHECK(d[static_cast<std::size_t>(i)].name.size() <= kListNameChars);
     }
-    CHECK(d[kListRows - 2].name.substr(d[kListRows - 2].name.size() - 3) == "...");   // (cut: the rest did not fit)
-    CHECK(d[kListRows - 1].name == "Release");
+    // (it needs every line: the release gives its line up, and the rest is cut)
+    CHECK(d[kListRows - 1].name.substr(d[kListRows - 1].name.size() - 3) == "...");
+    fv.why = "The port 27015 is in use";   // (a short one: the release on the line after it)
+    d = DetailLines(View::kMain, fv);
+    CHECK(d[1].name == "The port 27015 is in use");
+    CHECK(d[2].name == "Release");
     // Hosting: the room, how many, the join password (hidden until asked, then in fives), who asks.
     SessionView hv;
     hv.s.hosting = hv.s.in_one = hv.s.code = hv.s.has_password = true;
@@ -928,15 +932,19 @@ TEST_CASE("pause tab: the details list on the right: the session, why co-op fail
     CHECK(d[2].value == "2");
     CHECK(d[3].name == "Join password");
     CHECK(d[3].value == "Hidden");
+    CHECK(d[4].name.empty());   // (nobody asks: the Let in row says so)
+    hv.asking = {"Mido"};
+    d = DetailLines(View::kSession, hv);
     CHECK(d[4].name == "Asking to join");
-    CHECK(d[4].value == "Nobody");
+    CHECK(d[4].value == "1");
+    hv.asking.clear();
     hv.s.password_shown = true;
     hv.host_password = "ABCDEFGHJKLMNPQRSTUV";
     d = DetailLines(View::kSession, hv);
     CHECK(d[3].value == "ABCDE FGHJK");
     CHECK(d[4].name == " ");
     CHECK(d[4].value == "LMNPQ RSTUV");
-    CHECK(d[5].name == "Asking to join");
+    CHECK(d[5].name.empty());
     for (const ListLine& l : d) {
         CHECK(l.name.size() <= kListNameChars);
         CHECK(l.value.size() <= kListValueChars);

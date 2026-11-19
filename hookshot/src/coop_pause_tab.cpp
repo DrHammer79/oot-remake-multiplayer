@@ -1138,17 +1138,19 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
                 add(r == 0 ? "Join password" : " ", line);
             }
         }
-        add("Asking to join", v.asking.empty() ? "Nobody" : std::to_string(v.asking.size()));
+        if (!v.asking.empty()) add("Asking to join", std::to_string(v.asking.size()));   // (nobody: the Let in row says so)
     } else if (v.s.in_one && !v.connecting && v.says.empty() && v.turned_away.empty()) {
         if (!v.host_name.empty()) add("Host", v.host_name);
         if (v.players > 0) add("Players", std::to_string(v.players));
     } else if (!v.s.in_one && !v.s.by_launcher && !v.s.failed && v.says.empty() && v.turned_away.empty()) {
         add("Auto-rejoin", !v.s.auto_rejoin ? "Off" : v.s.rejoining ? "Trying..." : "On");
     }
-    // (co-op's problem or hint as lines of text, on the lines left but the release's)
-    const std::size_t room = lines.size() - at - (release.empty() ? 0 : 1);
-    if (!why.empty() && room > 0) {
-        for (const std::string& l : Wrap(why, room, kListNameChars)) lines[at++] = ListLine{l, ""};
+    // (co-op's problem or hint as lines of text on the lines left, the release on the last when it is free: the hint
+    // takes it when it needs it)
+    const std::size_t left = lines.size() - at;
+    if (!why.empty() && left > 0) {
+        const bool all = release.empty() || Wrap(why, left, kListNameChars).size() >= left;
+        for (const std::string& l : Wrap(why, all ? left : left - 1, kListNameChars)) lines[at++] = ListLine{l, ""};
     }
     if (!release.empty()) add("Release", release);
     return lines;

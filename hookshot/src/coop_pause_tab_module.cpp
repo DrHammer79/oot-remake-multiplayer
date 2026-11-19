@@ -425,10 +425,12 @@ SessionView ViewNow(View view) {
         v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
         v.relay_set = CoopPause::RelaySet();   // (co-op's own lock: before ours, never inside it)
     }
-    if (view == View::kSession) {
+    if (view == View::kSession || view == View::kMain) {   // (both show the details list, DetailLines)
         v.s.has_password = v.s.hosting && st.password[0] != 0;
         v.s.password_shown = v.s.has_password && g_show_password.load();
         if (v.s.password_shown) v.host_password.assign(st.password, strnlen(st.password, sizeof st.password));
+    }
+    if (view == View::kSession) {
         std::lock_guard lock(g_says_mutex);
         v.says = g_says;
     }
@@ -479,6 +481,7 @@ std::array<float, kRows> g_rows_alpha{};
 // Each list row's value box (W_Base_01 and W_Base_03 in PaOptionBtnLevel_00): shown for a line with a value, not for a
 // line of text (the details' header and their problem or hint), as Longshot Settings' header.
 std::array<std::array<std::uint64_t, 2>, kListRows> g_list_box{};
+std::array<std::array<bool, 2>, kListRows> g_list_box_own{};   // (as the layout has them: shown again so)
 std::array<int, kListRows> g_list_box_vis{};
 
 // The rows with nothing on them not shown (the one the cursor is on kept: the game moves it to the nearest shown on the
@@ -518,6 +521,10 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
                 if (const std::uint64_t in = PaneIn(ctx, row, inner); in != 0) SetVisible(ctx, in, false);
             }
             g_list_box[k] = {PaneIn(ctx, row, "W_Base_01"), PaneIn(ctx, row, "W_Base_03")};
+            for (std::size_t j = 0; j < 2; ++j) {
+                const std::uint64_t b = g_list_box[k][j];
+                g_list_box_own[k][j] = b != 0 && (Read<std::uint32_t>(b + 0xa8) & 1u) != 0;
+            }
         }
         for (int r = 0; r < kRows; ++r) {
             char name[16];
@@ -549,15 +556,17 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Text_00", i);
             LiveText(ctx, layout, gen, path, 9 + 2 * i, lines[k].value.empty() ? std::string(" ") : lines[k].value);
             if (const int box = lines[k].value.empty() ? 0 : 1; g_list_box_vis[k] != box) {
-                for (const std::uint64_t b : g_list_box[k]) {
-                    if (b != 0) SetVisible(ctx, b, box != 0);
+                for (std::size_t j = 0; j < 2; ++j) {   // (with a value: as the layout has them; a line of text: none)
+                    if (const std::uint64_t b = g_list_box[k][j]; b != 0) SetVisible(ctx, b, box != 0 && g_list_box_own[k][j]);
                 }
                 g_list_box_vis[k] = box;
             }
         }
         if (g_list_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_list_vis[k] = on ? 1 : 0;
-        // (the header a little dim, as a table's; a game bright when picked, or all of them when the rows have the pad)
-        const float alpha = i == 0 ? 0.7f : picked < 0 || picked == i - 1 ? 1.0f : 0.45f;
+        // (the header a little dim, as a table's; a game bright when picked, or all of them when the rows have the pad;
+        // the details, which nothing picks, as Longshot Settings' lines not picked: an Options row's value box is the
+        // game's bright orange, dimmed to its brown)
+        const float alpha = i == 0 ? 0.7f : !browse ? 0.55f : picked < 0 || picked == i - 1 ? 1.0f : 0.45f;
         if (on && g_list_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_list_alpha[k] = alpha;
     }
     for (int r = 0; r < kRows; ++r) {
