@@ -41,7 +41,14 @@ std::string MutedWords(std::uint8_t bits) {
 }
 
 std::string Shorten(const std::string& s, std::size_t most) {
-    return s.size() <= most ? s : s.substr(0, most) + "...";
+    if (s.size() <= most) {
+        return s;
+    }
+    std::size_t at = most;   // (back to the start of the character the cut would split)
+    while (at > 0 && (static_cast<unsigned char>(s[at]) & 0xC0) == 0x80) {
+        --at;
+    }
+    return s.substr(0, at) + "...";
 }
 
 }  // namespace

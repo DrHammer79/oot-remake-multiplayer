@@ -16,14 +16,17 @@
 // 3. On accept (Trip::Accepted): the same scene moves our Link there at once;
 //    another scene asks the game's scene change, at that scene's entrance
 //    start point nearest the player (NearestStart), the way a loading zone
-//    does (docs/scenes.md "Free-play scene change"): the String64s
-//    Sequence_ReservedNextBanc and ...NextStartPosName, then a short game
-//    event (kSceneEvent), since the game loads a reserved scene when an event
-//    ends. Asks again every 0.5 s and starts the event again every 3 s until
-//    the game takes it (it starts loading, or empties the request), then
-//    waits for the scene to settle, asks the player again for where it
-//    stands now, and moves there. An event already running (a talk) takes
-//    the same request when it ends.
+//    does: by default the loading zone's own event Dm_SY_BancChangeGo with
+//    NextBanc, NextStartPos and the entrance's arrival event (ArrivalEvent),
+//    started by our Link (map_event; teleport-direct-0116). It is asked again
+//    every 3 s while no event runs, at most kMaxEventAsks times, until the
+//    game takes it (it starts loading, or empties the request), then waits
+//    for the scene to settle, asks the player again for where it stands now,
+//    and moves there. LICHII_COOP_TELEPORT_EVENT=0 (no map_event): the
+//    String64s Sequence_ReservedNextBanc and ...NextStartPosName are written,
+//    asked again every 0.5 s, and the game takes them when an event of the
+//    player's own (a talk, a sign) ends (docs/scenes.md "Free-play scene
+//    change", #197).
 // Another scene with no start point known is refused: without one the game
 // keeps the old scene's start name, which the new scene does not have, and
 // the picture stays black after the load (docs/scenes.md "The start point").
@@ -79,6 +82,11 @@ std::string NotMovedLine(MoveCheck check, std::string_view name, bool after_load
 // written from the game's scene files by tools/puppet_pack/start_points.py).
 // Nothing for a scene we have no start point of.
 std::optional<std::string> NearestStart(std::string_view scene, const Vec& to);
+
+// The arrival event (BootEventName of Dm_SY_BancChangeGo) of the entrance at `start` in `scene`: the one the game's
+// own entrance there names (a few have their own, e.g. Kakariko's Dm_SY_BancChangeArrive_KakarikoVillage_01, as
+// Longshot's teleport table took them from the game), else the plain Dm_SY_BancChangeArrive.
+std::string ArrivalEvent(std::string_view scene, std::string_view start);
 
 // A chat line that is a command, not chat. "/teleport" alone lists players.
 struct Command {
@@ -176,18 +184,20 @@ public:
     static constexpr std::uint64_t kSettleUs = 1'500'000;
     // A taken scene change that ended somewhere else is asked again after this.
     static constexpr std::uint64_t kRearmUs = 5'000'000;
-    // The game loads a requested scene when an event ends (a loading zone is
-    // an event: docs/scenes.md "Free-play scene change"), so with the request
-    // set this short event is started (one wait node, no actor, no picture),
-    // again after this if the game has not taken the request.
-    static constexpr const char* kSceneEvent = "DefaultParentEvent";
+    // map_event: the map change event is asked again after this while no
+    // event runs and the game has not taken it, at most kMaxEventAsks times
+    // in all; then the trip is given up (the game refused it: Link in the
+    // air, swimming, held). #197: the old short event DefaultParentEvent
+    // (one EventWait binding the nearest actor) held Link after the load and
+    // is never started any more; Dm_SY_BancChangeGo is a loading zone's own
+    // event, whose arrival event hands Link back.
     static constexpr std::uint64_t kEventAgainUs = 3'000'000;
-    // Off (#197): after a load that kSceneEvent carried, our Link never moved
-    // again and the game refused every later event (autotest teleport-lock,
-    // Kokiri Forest <-> Deku Tree, both ways; docs/scenes.md). So the request
-    // waits for an event of the player's own (a talk, a sign), as the boss
-    // pull's scene change does, which leaves Link playable.
-    static constexpr bool kStartSceneEvent = false;
+    static constexpr int kMaxEventAsks = 3;
+
+    // map_event false: no event of ours, the request waits for the player's
+    // own talk or sign (LICHII_COOP_TELEPORT_EVENT=0).
+    explicit Trip(bool map_event = false) : map_event_(map_event) {}
+    bool map_event() const { return map_event_; }
 
     struct Actions {
         std::vector<std::string> lines;      // chat notices
@@ -199,7 +209,7 @@ public:
         bool cancel_scene = false;           // clear our scene change request and its switch (settled, given up)
         bool release = false;                // the game took it: drop only the free-play switch
         bool game_cleared = false;           // the game emptied our request itself (after its arrival): log only
-        bool start_event = false;            // with the request set: start kSceneEvent (no event runs)
+        bool start_event = false;            // map_event: ask the map change event to scene/start (no event runs)
         // With cancel_scene, not arrived (given up, the player left, a new
         // /teleport) and no load ran in this trip: put back the start name the
         // game had before our first ask, so it does not keep a start of a
@@ -234,7 +244,9 @@ private:
     Vec at_{};                    // travelling: the first answer's place, the fallback
     std::uint64_t since_us_ = 0;  // travelling: since the first ask
     std::uint64_t asked_us_ = 0;  // travelling: the last ask
-    std::uint64_t event_us_ = 0;  // travelling: the last kSceneEvent started
+    bool map_event_ = false;      // the game's map change event carries the trip (else a talk or sign)
+    std::uint64_t event_us_ = 0;  // travelling: the last map change event asked
+    int event_asks_ = 0;          // travelling: map change events asked in this trip
     std::uint64_t settle_us_ = 0; // settling: since the scene was in
     bool taken_ = false;          // travelling: the game took the request
     bool seen_request_ = false;   // travelling: the game's flag showed our request

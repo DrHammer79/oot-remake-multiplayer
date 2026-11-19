@@ -239,6 +239,55 @@ std::string RefusedLine(std::string_view name, JoinRefuseReason reason) {
     return "teleport: " + n + " refused (reason " + std::to_string(static_cast<int>(reason)) + ")";
 }
 
+std::string ArrivalEvent(std::string_view scene, std::string_view start) {
+    // {scene, start, arrival}: the entrances whose own arrival event is not the plain one (the game's entrances, as
+    // Longshot's teleport destinations took them; host/hos_main.c oot_destinations).
+    struct Arrival {
+        std::string_view scene, start, event;
+    };
+    static constexpr Arrival kArrivals[] = {
+        {"KakarikoVillage_Child", "KakarikoVillage_Entrance", "Dm_SY_BancChangeArrive_KakarikoVillage_01"},
+        {"KakarikoVillage_Adult", "KakarikoVillage_Entrance", "Dm_SY_BancChangeArrive_KakarikoVillage_01"},
+        {"Market_Child", "Market_Entrance", "Dm_SY_BancChangeArrive_Market_02"},
+        {"Market_Adult", "Market_Entrance", "Dm_SY_BancChangeArrive_Market_02"},
+        {"HyruleCastle", "HyruleCastle_Entrance", "Dm_SY_BancChangeArrive_HyruleCastle_01"},
+        {"GanonCastle", "GanonCastleEntrance", "Dm_SY_BancChangeArrive_GanonCastle_01"},
+        {"LostWood_Child", "LostWood_FrontOfSacredForestMeadow", "Dm_SY_BancChangeArrive_LostWood"},
+        {"LostWood_Adult", "LostWood_FrontOfSacredForestMeadow", "Dm_SY_BancChangeArrive_LostWood"},
+        {"SacredForestMeadow_Child", "OutsideOfForestTemple", "Dm_SY_BancChangeArrive_SacredForestMeadow_01"},
+        {"SacredForestMeadow_Adult", "OutsideOfForestTemple", "Dm_SY_BancChangeArrive_SacredForestMeadow_01"},
+        {"HyruleField_Child", "LakeHylia_FromGerudoValley", "Dm_SY_BancChangeArrive_LakeHylia_02"},
+        {"HyruleField_Adult", "LakeHylia_FromGerudoValley", "Dm_SY_BancChangeArrive_LakeHylia_02"},
+        {"Graveyard_Child", "GraveYard_KakarikoSide", "Dm_SY_BancChangeArrive_Graveyard_01"},
+        {"Graveyard_Adult", "GraveYard_KakarikoSide", "Dm_SY_BancChangeArrive_Graveyard_01"},
+        {"DeathMountainTrail_Child", "MountainTrail_KakarikoSide", "Dm_SY_BancChangeArrive_DeathMountainTrail_01"},
+        {"DeathMountainTrail_Adult", "MountainTrail_KakarikoSide", "Dm_SY_BancChangeArrive_DeathMountainTrail_01"},
+        {"DeathMountainCrater_Child", "Crater_GoronCitySide", "DeathMountainCrater_Arrive"},
+        {"DeathMountainCrater_Adult", "Crater_GoronCitySide", "DeathMountainCrater_Arrive"},
+        {"GoronCity_Child", "GoronCity_MountainTrailSide", "Dm_SY_BancChangeArrive_GoronCity_01"},
+        {"GoronCity_Adult", "GoronCity_MountainTrailSide", "Dm_SY_BancChangeArrive_GoronCity_01"},
+        {"GerudoValley_Child", "GerudoValley_Entrance", "FromHyruleField_ArriveGerudoValley"},
+        {"GerudoValley_Adult", "GerudoValley_Entrance", "FromHyruleField_ArriveGerudoValley"},
+        {"GerudoFortress_Adult", "GerudoFortress_FromHountedWasteland", "Dm_SY_BancChangeArrive_GerudoFortress_02"},
+        {"HountedWasteland_Child", "HountedWasteland_FromGerudoFortress", "FromGerudoFortress_ArriveWateland"},
+        {"HountedWasteland_Adult", "HountedWasteland_FromGerudoFortress", "FromGerudoFortress_ArriveWateland"},
+        {"DesertColossus_Child", "DesertColossus_FromHountedWasteland", "Dm_SY_BancChangeArrive_DesertColossus_01"},
+        {"DesertColossus_Adult", "DesertColossus_FromHountedWasteland", "Dm_SY_BancChangeArrive_DesertColossus_01"},
+        {"InsideTheDekuTree", "Entrance", "Dm_SY_BancChangeArrive_InsideTheDekuTree_01"},
+        {"WaterTemple", "WaterTemple_FromLakeHylia", "SageOfWater_Arrival_WaterTemple"},
+        {"ShadowTemple", "Entrance", "ShadowTemple_Arrive"},
+        {"IceCavern", "IceCavern_FromZoraFountain", "SageOfWater_Arrival_IceCavern"},
+        {"GerudoTrainingGround", "GerudoTrainingGround_FromGerudoFortress", "FromGerudoFortress_ArriveTrainingGround"},
+        {"InsideGanonCastle", "Entrance", "Dm_SY_BancChangeArrive_InsideGanonCastle_01"},
+    };
+    for (const auto& a : kArrivals) {
+        if (a.scene == scene && a.start == start) {
+            return std::string(a.event);
+        }
+    }
+    return "Dm_SY_BancChangeArrive";
+}
+
 std::optional<std::string> NearestStart(std::string_view scene, const Vec& to) {
     const StartPoint* best = nullptr;
     float best_d = 0.0f;
@@ -347,6 +396,7 @@ Trip::Actions Trip::Accepted(std::uint8_t number, const coop::protocol::JoinTarg
     since_us_ = now_us;
     asked_us_ = now_us;
     event_us_ = now_us;
+    event_asks_ = map_event_ ? 1 : 0;
     settle_us_ = 0;
     taken_ = false;
     seen_request_ = false;
@@ -354,9 +404,9 @@ Trip::Actions Trip::Accepted(std::uint8_t number, const coop::protocol::JoinTarg
     requested_ = true;
     a.scene = scene_;
     a.start = start_;
-    a.start_event = kStartSceneEvent;  // no event runs here (Accepted refuses during one)
+    a.start_event = map_event_;  // no event runs here (Accepted refuses during one)
     a.lines.push_back("teleport: going to " + name_ + " in " + scene_);
-    if (!kStartSceneEvent) {
+    if (!map_event_) {
         a.lines.push_back("teleport: talk to someone or read a sign within a minute to go there");
     }
     if (CoopDungeon::IsDungeonScene(scene_)) {
@@ -469,11 +519,25 @@ Trip::Actions Trip::Tick(const Local& local, std::uint64_t now_us) {
                 a.scene = scene_;
                 a.start = start_;
             }
-            // The game takes the request when an event ends: start one if
-            // none runs and the last one did not take it.
-            if (kStartSceneEvent && !local.event && !local.loading_banc && now_us - event_us_ >= kEventAgainUs) {
+            // map_event: the map change event again if none runs and the last
+            // one was not taken (refused: Link in the air, swimming, held).
+            if (map_event_ && !local.event && !local.loading_banc && now_us - event_us_ >= kEventAgainUs) {
+                if (event_asks_ >= kMaxEventAsks) {
+                    phase_ = Phase::idle;
+                    a.cancel_scene = requested_;
+                    a.restore_start = a.cancel_scene && !loaded_;
+                    requested_ = false;
+                    a.lines.push_back("teleport: the game did not start the map change; stand on firm ground "
+                                      "(not in the air or the water) and type /teleport again");
+                    return a;
+                }
                 event_us_ = now_us;
+                ++event_asks_;
                 a.start_event = true;
+                if (!a.scene) {
+                    a.scene = scene_;  // the event's arguments
+                    a.start = start_;
+                }
             }
             return a;
         }

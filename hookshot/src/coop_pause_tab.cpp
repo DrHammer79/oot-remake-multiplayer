@@ -111,8 +111,10 @@ bool TextField::Type(std::uint32_t cp) {
 
 std::string TextField::Shown(bool typing, std::size_t room) const {
     std::string shown;
+    std::size_t mark = std::string::npos;   // where the cursor's bracket went (a password may hold '[' itself)
     for (std::size_t i = 0; i <= text_.size(); ++i) {
         const bool here = typing && i == cursor_;
+        if (here) mark = shown.size();
         if (i == text_.size()) {
             if (here) shown += "[ ]";
             break;
@@ -122,7 +124,7 @@ std::string TextField::Shown(bool typing, std::size_t room) const {
     }
     if (shown.size() <= room) return shown;
     // (too long: the part around the cursor, so its letter stays in view)
-    const std::size_t mark = typing ? shown.find('[') : shown.size();
+    if (mark == std::string::npos) mark = shown.size();
     std::size_t from = mark > room / 2 ? mark - room / 2 : 0;
     if (from + room > shown.size()) from = shown.size() - room;
     return shown.substr(from, room);
@@ -381,18 +383,18 @@ std::string Page::TakeWhy() {
 
 // --- the rows ---
 
+int RowOfButton(const std::string& name) {
+    if (name.size() != 12 || name.compare(0, 11, "Pa_Button_0") != 0) return -1;
+    const int row = name[11] - '0';
+    return row >= 0 && row < kRows ? row : -1;
+}
+
 float Ahead(float prev, float now, float limit) {
     const float step = now - prev, next = now + step;
     if ((step > 0 && now <= limit && next > limit) || (step < 0 && now >= limit && next < limit)) {
         return limit;
     }
     return next;
-}
-
-int RowOfButton(const std::string& name) {
-    if (name.size() != 12 || name.compare(0, 11, "Pa_Button_0") != 0) return -1;
-    const int row = name[11] - '0';
-    return row >= 0 && row < kRows ? row : -1;
 }
 
 RowAction ActionFor(int row, const Session& s) {

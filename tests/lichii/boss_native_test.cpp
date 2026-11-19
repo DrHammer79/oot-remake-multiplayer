@@ -424,12 +424,18 @@ TEST_CASE("native boss: a new owner sends the phase its own game's boss is in, n
     // The old owner's change to 6 comes, and the boss is ours before it is made here.
     t.Receive(kActor, BossBsa{2, 6, std::nullopt, {BossChange{2, BossBrain{6, false}}}});
     t.Publish({Gohma(Role::owner)});
-    CHECK_FALSE(t.Step(g, false, 0, kMain));  // ours: nothing made, the game's verb read
+    // ours: nothing of the old owner's made; its AI chooses again from the verb our game's boss is in (row 149)
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kSetBrainVerb);
+    CHECK(c->x[1] == 4);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, here, true, true));
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
     t.OnActionVerb(kBsa, GameRequest(11, kNode), true, false);  // a change of ours: the state goes out
     const auto s = t.OwnerState(kActor);
     REQUIRE(s);
     CHECK(s->brain_verb == 4);
-    CHECK(s->seq == 3);
+    CHECK(s->seq == 4);  // (3: its re-chosen brain verb, sent to every copy)
 }
 
 // boss-fix (player reports #30, #31): the copy's own game runs its events and its own hit reactions.
@@ -1174,5 +1180,327 @@ TEST_CASE("native boss: the copies that run their own now are named for the obje
         t.SetEvent(true);
         t.SetOn(false, false);
         CHECK(t.CopiesRunningOwn().empty());
+    }
+}
+
+namespace {
+
+Boss Dodongo(Role role, std::string animation, std::optional<std::int32_t> life, std::uint8_t owner = 2) {
+    Boss b{kActor, kBsa, role, "Enemy_DungeonBoss_Dodongo", owner};
+    b.animation = std::move(animation);
+    b.life = life;
+    return b;
+}
+
+// Steps of our own King Dodongo in one move (its AI asking the roll's action each frame, as in the row 138 log)
+// until the table asks a call or `steps` ran out; its life 20 from step `life_at` on (a hit).
+std::optional<CoopPuppet::Call> HoldMove(Table& t, FakeGuest& g, std::uint64_t steps,
+                                         std::string animation = "Rolling_Loop", bool asks = true,
+                                         std::uint64_t life_at = ~0ull) {
+    for (std::uint64_t i = 0; i < steps; ++i) {
+        if (asks) {
+            CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(5, kNode), false, false));
+        }
+        t.Publish({Dodongo(Role::owner, animation, i >= life_at ? 20 : 24)});
+        if (auto c = t.Step(g, false, 0, kMain)) {
+            return c;
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("native boss: row 149: our boss stuck in one move with no hit chooses again, sent to every copy") {
+    Table t;
+    t.SetOn(true, true);
+    FakeGuest g;
+    const std::int32_t brain = 12;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    t.Publish({Dodongo(Role::owner, "Rolling_Loop", 24)});
+    CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+    // Short of the stall: nothing (a real roll ends at a wall within seconds).
+    CHECK_FALSE(HoldMove(t, g, Table::kStallSteps - 2));
+    auto c = HoldMove(t, g, 4);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kSetBrainVerb);
+    CHECK(c->x[0] == kBsa);
+    CHECK(c->x[1] == 12);  // the brain verb it is in, again
+    CHECK(c->x[2] == 1);   // forced
+    CHECK(t.Totals().owner_stalls == 1);
+    // The call runs the wrap as our caller's: kept and sent as any change of ours.
+    const std::uint32_t seq = t.OwnerState(kActor)->seq;
+    CHECK_FALSE(t.OnBrainVerb(kBsa, brain, true, true));
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    CHECK(t.Totals().owner_rechosen == 1);
+    const auto s = t.OwnerState(kActor);
+    REQUIRE(s);
+    CHECK(s->seq == seq + 1);
+    REQUIRE(std::holds_alternative<BossBrain>(s->recent.back().what));
+    CHECK(std::get<BossBrain>(s->recent.back().what).verb == 12);
+    CHECK(std::get<BossBrain>(s->recent.back().what).force);
+    // Asked once: the next frame makes no call.
+    CHECK_FALSE(t.Step(g, false, 0, kMain));
+    bool noted = false;
+    for (const std::string& n : t.TakeNotes()) {
+        noted = noted || n.find("held 'Rolling_Loop'") != std::string::npos;
+    }
+    CHECK(noted);
+    // Still stuck: again, at most kMaxStallRechoices times in the one move (then the server's hand-over).
+    int more = 0;
+    for (int i = 0; i < Table::kMaxStallRechoices + 1; ++i) {
+        if (HoldMove(t, g, Table::kStallSteps + 2)) {
+            ++more;
+            CHECK_FALSE(t.Step(g, true, 0, kMain));
+        }
+    }
+    CHECK(more == Table::kMaxStallRechoices - 1);
+    // A new move: counted from it, re-chosen again if it sticks too.
+    CHECK(HoldMove(t, g, Table::kStallSteps + 2, "Rolling_Start"));
+}
+
+TEST_CASE("native boss: row 149: a hit, an idle boss, our event, no life read or a copy never stall") {
+    FakeGuest g;
+    const std::int32_t brain = 12;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    {
+        // A hit that took life halfway: counted again from it.
+        Table t;
+        t.SetOn(true, true);
+        CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+        CHECK_FALSE(HoldMove(t, g, Table::kStallSteps + 2, "Rolling_Loop", true, Table::kStallSteps / 2));
+    }
+    {
+        // Its AI asks no action (Gohma waiting on the ceiling): no stall.
+        Table t;
+        t.SetOn(true, true);
+        CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+        CHECK_FALSE(HoldMove(t, g, Table::kStallSteps * 2, "Wait", false));
+        CHECK(t.Totals().owner_stalls == 0);
+    }
+    {
+        // Our event (its cutscene holds one animation): no stall.
+        Table t;
+        t.SetOn(true, true);
+        t.SetEvent(true);
+        CHECK_FALSE(HoldMove(t, g, Table::kStallSteps * 2));
+    }
+    {
+        // No life read: nothing to judge by.
+        Table t;
+        t.SetOn(true, true);
+        for (std::uint64_t i = 0; i < Table::kStallSteps * 2; ++i) {
+            (void)t.OnActionVerb(kBsa, GameRequest(5, kNode), false, false);
+            t.Publish({Dodongo(Role::owner, "Rolling_Loop", std::nullopt)});
+            CHECK_FALSE(t.Step(g, false, 0, kMain));
+        }
+    }
+    {
+        // A copy: its owner's game judges.
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24)});
+        t.Receive(kActor, BossBsa{3, 12, std::nullopt, {}});
+        for (std::uint64_t i = 0; i < Table::kStallSteps * 2; ++i) {
+            t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24)});
+            CHECK_FALSE(t.Step(g, false, 0, kMain));
+        }
+        CHECK(t.Totals().owner_stalls == 0);
+    }
+    {
+        // Native sync off (the switches): nothing at all.
+        Table t;
+        for (std::uint64_t i = 0; i < Table::kStallSteps * 2; ++i) {
+            t.Publish({Dodongo(Role::owner, "Rolling_Loop", 24)});
+            CHECK_FALSE(t.Step(g, false, 0, kMain));
+        }
+    }
+}
+
+TEST_CASE("native boss: row 149: a copy made ours chooses again unless its own AI ran its body (our stun)") {
+    FakeGuest g;
+    const std::int32_t brain = 12;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    {
+        // Its body ran the owner's roll while its own AI's requests were skipped: once ours, its AI chooses again.
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24)});
+        t.Receive(kActor, BossBsa{3, 12, std::nullopt, {}});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        t.Publish({Dodongo(Role::owner, "Rolling_Loop", 24)});
+        auto c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kSetBrainVerb);
+        CHECK(c->x[1] == 12);
+        // Not made that frame (the runtime could not): asked again, not lost.
+        c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kSetBrainVerb);
+        CHECK_FALSE(t.OnBrainVerb(kBsa, brain, true, true));
+        CHECK_FALSE(t.Step(g, true, 0, kMain));
+        CHECK(t.Totals().owner_rechosen == 1);
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+    }
+    {
+        // Handed to us at our stun (our own hit: its own reaction runs its body): left as it is.
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({Dodongo(Role::copy, "Down", 24)});
+        t.Receive(kActor, BossBsa{3, 12, std::nullopt, {}});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        t.NoteOwnHit(kActor);
+        t.Publish({Dodongo(Role::owner, "Down", 24)});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        CHECK(t.Totals().owner_rechosen == 0);
+    }
+    {
+        // Ours from the start (solo, or the first owner): nothing.
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({Dodongo(Role::owner, "Wait", 24)});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+    }
+}
+
+TEST_CASE("native boss: row 149: after our hit a copy that ran no move of its own is not asked the owner's again") {
+    FakeGuest g;
+    const std::int32_t brain = 12;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    const auto roll = ActionFromRequest(GameRequest(5, kNode));
+    REQUIRE(roll);
+    // The owner's roll put into the copy (its node learnt from its own skipped ask).
+    const auto start = [&](Table& t) {
+        t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24)});
+        CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(8, kNode), false, false));  // (no owner's state: runs)
+        t.Receive(kActor, BossBsa{3, 12, roll, {}});
+        auto c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kMalloc);
+        c = t.Step(g, true, kBlock, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kRequestActionVerb);
+        CHECK_FALSE(t.Step(g, true, 0, kMain));
+        CHECK(t.Totals().action_applied == 1);
+    };
+    {
+        // A sword hit with no stun: its own time passes with no move of its own: the roll goes on, not over.
+        Table t;
+        t.SetOn(true, true);
+        start(t);
+        t.NoteOwnHit(kActor);
+        for (std::uint64_t i = 0; i <= Table::kReactSteps + 2; ++i) {
+            CHECK_FALSE(t.Step(g, false, 0, kMain));
+        }
+        CHECK(t.Totals().action_applied == 1);
+        CHECK(t.Totals().moves_kept == 1);
+    }
+    {
+        // Its own AI ran a move of its own meanwhile (Inhale): the owner's roll is asked again.
+        Table t;
+        t.SetOn(true, true);
+        start(t);
+        t.NoteOwnHit(kActor);
+        CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(9, kNode), true, false));  // its own runs
+        std::optional<CoopPuppet::Call> c;
+        for (std::uint64_t i = 0; !c && i <= Table::kReactSteps + 2; ++i) {
+            c = t.Step(g, false, 0, kMain);
+        }
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kRequestActionVerb);
+        CHECK(g.Get<std::int32_t>(kBlock + addr::kReqVerb) == 5);
+        CHECK(t.Totals().moves_kept == 0);
+    }
+    {
+        // A new owner whose state names another move: asked.
+        Table t;
+        t.SetOn(true, true);
+        start(t);
+        t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24, 3)});
+        const auto inhale = ActionFromRequest(GameRequest(9, kNode));
+        t.Receive(kActor, BossBsa{4, 12, inhale, {}});
+        auto c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kRequestActionVerb);
+        CHECK(g.Get<std::int32_t>(kBlock + addr::kReqVerb) == 9);
+    }
+    {
+        // A new owner whose state names the move our copy runs (its old owner's): not asked again.
+        Table t;
+        t.SetOn(true, true);
+        start(t);
+        t.Publish({Dodongo(Role::copy, "Rolling_Loop", 24, 3)});
+        t.Receive(kActor, BossBsa{4, 12, roll, {}});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        CHECK(t.Totals().moves_kept == 1);
+    }
+}
+
+// Row 149, every native boss: the stall check is not King Dodongo's alone. Barinade, Morpha, Bongo Bongo, Volvagia
+// and Gohma run the same Table path (their names only label the boss here; the animation names are test names): one
+// held move with no hit is re-chosen, a move that changes animation (Barinade's spin cycle, Bongo Bongo's hand
+// slams) or a hit taken is never judged stuck.
+TEST_CASE("native boss: row 149: Barinade, Morpha, Bongo Bongo, Volvagia and Gohma stuck in one move choose again") {
+    const std::int32_t brain = 7;
+    for (const char* name : {"Enemy_DungeonBoss_Barinade", "Enemy_DungeonBoss_Morpha", "Enemy_DungeonBoss_BongoBongo",
+                             "Enemy_DungeonBoss_Volvagia", "Enemy_DungeonBoss_Gohma"}) {
+        CAPTURE(name);
+        const auto boss = [name](std::string animation, std::int32_t life) {
+            Boss b{kActor, kBsa, Role::owner, name, 2};
+            b.animation = std::move(animation);
+            b.life = life;
+            return b;
+        };
+        // Steps of one move (its AI asking an action each frame); the call asked, if any.
+        const auto hold = [&](Table& t, FakeGuest& g, std::uint64_t steps, auto&& animation_at, auto&& life_at) {
+            for (std::uint64_t i = 0; i < steps; ++i) {
+                CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(5, kNode), false, false));
+                t.Publish({boss(animation_at(i), life_at(i))});
+                if (auto c = t.Step(g, false, 0, kMain)) {
+                    return std::optional<CoopPuppet::Call>(std::move(c));
+                }
+            }
+            return std::optional<CoopPuppet::Call>{};
+        };
+        const auto same = [](std::uint64_t) { return std::string("Held_Loop"); };
+        const auto full = [](std::uint64_t) { return 24; };
+        {
+            Table t;
+            t.SetOn(true, true);
+            FakeGuest g;
+            g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+            t.Publish({boss("Held_Loop", 24)});
+            CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+            const auto c = hold(t, g, Table::kStallSteps + 4, same, full);
+            REQUIRE(c);
+            CHECK(c->function == kMain + addr::kSetBrainVerb);
+            CHECK(c->x[1] == static_cast<std::uint32_t>(brain));
+            CHECK(c->x[2] == 1);
+            CHECK(t.Totals().owner_stalls == 1);
+        }
+        {
+            // A move whose animation changes every 2 s (a spin cycle, hand slams): never judged.
+            Table t;
+            t.SetOn(true, true);
+            FakeGuest g;
+            g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+            t.Publish({boss("Phase_A", 24)});
+            CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+            const auto cycle = [](std::uint64_t i) { return std::string((i / 120) % 2 ? "Phase_B" : "Phase_A"); };
+            CHECK_FALSE(hold(t, g, 3 * Table::kStallSteps, cycle, full));
+            CHECK(t.Totals().owner_stalls == 0);
+        }
+        {
+            // Hit every 10 s in one held animation (a long legitimate move under fire): never judged.
+            Table t;
+            t.SetOn(true, true);
+            FakeGuest g;
+            g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+            t.Publish({boss("Held_Loop", 24)});
+            CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+            const auto hits = [](std::uint64_t i) { return 24 - static_cast<std::int32_t>(i / 600); };
+            CHECK_FALSE(hold(t, g, 3 * Table::kStallSteps, same, hits));
+            CHECK(t.Totals().owner_stalls == 0);
+        }
     }
 }

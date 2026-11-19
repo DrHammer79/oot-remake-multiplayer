@@ -1371,3 +1371,15 @@ TEST_CASE("hookshot: every switch of the save folder marks the game's save list 
     REQUIRE(step != std::string::npos);
     CHECK(title.find("RefreshSaveList(ctx);", step) != std::string::npos);
 }
+
+// Owner photo 2026-11-19 (patch 0031): the module tab's column is opaque (the game's own pause page showed through
+// under a short page) and an action row with a value and `right` set draws the page arrow after the value.
+TEST_CASE("hookshot: the module tab's column is opaque and a valued page row has its arrow (patch 0031)") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0031-coop-menu-column.patch");
+    REQUIRE_FALSE(patch.empty());
+    const std::string menu = PatchedCode(patch, "gpu/vk/vk_menu.cpp");
+    REQUIRE_FALSE(menu.empty());
+    const auto in_menu = [&menu](const char* code) { return menu.find(Squashed(code)) != std::string::npos; };
+    CHECK(in_menu("c.d->AddRectFilled(ImVec2(cx0, hh), ImVec2(cx1, c.h), ui::rgba(34, 26, 17));"));
+    CHECK(in_menu("if (r.right) ui::triangle(c, ImVec2(vb.x - 15 * s, (va.y + vb.y) * 0.5f), 10 * s, 1,"));
+}

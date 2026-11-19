@@ -2671,6 +2671,57 @@ Error encode_body(const JoinAllow& m, Writer& w) {
   return Error::none;
 }
 
+Error encode_body(const BombTake& m, Writer& w) {
+  COOP_TRY(check_object_id(m.id));
+  if (m.id.kind != ObjectKind::made) return Error::bad_value;
+  write_object_id(m.id, w);
+  w.u16(m.epoch);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, BombTake& m) {
+  m = BombTake{};
+  COOP_TRY(read_object_id(r, m.id));
+  if (m.id.kind != ObjectKind::made) return Error::bad_value;
+  COOP_READ(r.u16(m.epoch));
+  return Error::none;
+}
+
+Error encode_body(const BombShare& m, Writer& w) {
+  w.u8(m.on ? 1 : 0);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, BombShare& m) {
+  m = BombShare{};
+  std::uint8_t on = 0;
+  COOP_READ(r.u8(on));
+  if (on > 1) return Error::bad_value;
+  m.on = on != 0;
+  return Error::none;
+}
+
+Error encode_body(const BombAnswer& m, Writer& w) {
+  COOP_TRY(check_object_id(m.id));
+  const auto refusal = static_cast<std::uint8_t>(m.refusal);
+  if (refusal == 0 || refusal > kBombRefusalMax) return Error::bad_value;
+  write_object_id(m.id, w);
+  w.u16(m.epoch);
+  w.u8(refusal);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, BombAnswer& m) {
+  m = BombAnswer{};
+  COOP_TRY(read_object_id(r, m.id));
+  COOP_READ(r.u16(m.epoch));
+  std::uint8_t refusal = 0;
+  COOP_READ(r.u8(refusal));
+  if (refusal == 0 || refusal > kBombRefusalMax) return Error::bad_value;
+  m.refusal = static_cast<BombRefusal>(refusal);
+  return Error::none;
+}
+
 Error decode_body(Reader& r, JoinAllow& m) {
   m = JoinAllow{};
   std::uint8_t allow = 0;
@@ -3059,6 +3110,7 @@ MessageType type_of(const Message& message) {
       MessageType::player_look,
       MessageType::switch_state,
       MessageType::join_knock,  MessageType::join_allow,
+      MessageType::bomb_take,   MessageType::bomb_answer, MessageType::bomb_share,
   };
   static_assert(std::size(kTypes) == std::variant_size_v<Message>);
   return kTypes[message.index()];
@@ -3103,6 +3155,9 @@ std::uint8_t channel_of(MessageType type) {
     case MessageType::pvp_hit:
     case MessageType::pvp_hurt:
     case MessageType::dbno_revive:
+    case MessageType::bomb_take:
+    case MessageType::bomb_answer:
+    case MessageType::bomb_share:
       return kChannelOwnership;
     default:
       return kChannelSession;
@@ -3194,6 +3249,9 @@ bool allowed_on_channel(MessageType type, std::uint8_t channel) {
     case MessageType::pvp_hit:
     case MessageType::pvp_hurt:
     case MessageType::dbno_revive:
+    case MessageType::bomb_take:
+    case MessageType::bomb_answer:
+    case MessageType::bomb_share:
       return channel == kChannelOwnership;
     case MessageType::test_payload:
       return channel == kChannelSession || channel == kChannelPlayerSamples;
@@ -3214,6 +3272,8 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::local_sample:
     case MessageType::local_message:
     case MessageType::join_allow:
+    case MessageType::bomb_take:
+    case MessageType::bomb_share:
       return from == Sender::client;
     case MessageType::welcome:
     case MessageType::refused:
@@ -3229,6 +3289,7 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::lobby_result:
     case MessageType::local_joined:
     case MessageType::join_knock:
+    case MessageType::bomb_answer:
       return from == Sender::server;
     case MessageType::ping:
     case MessageType::pong:
@@ -3465,6 +3526,9 @@ Error decode(std::span<const std::uint8_t> bytes, Message& out) {
     case MessageType::lobby_result: return decode_as<LobbyResult>(body, out);
     case MessageType::join_knock: return decode_as<JoinKnock>(body, out);
     case MessageType::join_allow: return decode_as<JoinAllow>(body, out);
+    case MessageType::bomb_take: return decode_as<BombTake>(body, out);
+    case MessageType::bomb_answer: return decode_as<BombAnswer>(body, out);
+    case MessageType::bomb_share: return decode_as<BombShare>(body, out);
     case MessageType::local_join: return decode_as<LocalJoin>(body, out);
     case MessageType::local_joined: return decode_as<LocalJoined>(body, out);
     case MessageType::local_leave: return decode_as<LocalLeave>(body, out);

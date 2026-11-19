@@ -678,11 +678,19 @@ void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t cha
     return;
   }
   if (const auto* group = std::get_if<ObjectGroup>(&message)) {
-    on_object_group(id, c, *group);
+    on_object_group(id, c, *group, now_us);
     return;
   }
   if (const auto* lure = std::get_if<FishLure>(&message)) {
     on_fish_lure(c, *lure, now_us);
+    return;
+  }
+  if (const auto* share = std::get_if<BombShare>(&message)) {
+    c.bomb_share = share->on;
+    return;
+  }
+  if (const auto* take = std::get_if<BombTake>(&message)) {
+    on_bomb_take(id, c, *take, now_us);
     return;
   }
   if (auto* cut = std::get_if<GrassCut>(&message)) {
@@ -1309,6 +1317,7 @@ void Session::on_object_present(ConnectionId id, Connection& c, const ObjectPres
       Object& o = objects_[oid];
       o.scene = p.scene;
       o.serial = next_serial_++;
+      o.first_at = stamp(now_us);
       o.present.insert(id);
       c.present.insert(oid);
       if (holding) {
@@ -1392,6 +1401,7 @@ void Session::on_object_message(ConnectionId id, Connection& c, std::uint8_t cha
     Object& o = objects_[oid];
     o.scene = c.scene;
     o.serial = next_serial_++;
+    o.first_at = stamp(now_us);
     o.owner = id;
     o.made = true;
     o.projectile = (spawn->flags & object_spawn::projectile) != 0;
@@ -1410,6 +1420,7 @@ void Session::on_object_message(ConnectionId id, Connection& c, std::uint8_t cha
                               sample->state.life->life != o.last_state->life->life;
     const bool says_fight =
         sample->state.state && (*sample->state.state & object_state::in_fight) != 0;
+    note_hold(o, sample->state, now_us);
     if (life_changed || says_fight) mark_fight(o, now_us);
     // The owner's own hit: its life fell with no DAMAGE from another player
     // just before (issue 150, boss_owner_hit_hold_us).
@@ -1702,7 +1713,8 @@ bool Session::dead_for(ConnectionId id, Connection& c, const std::string& scene,
 
 // Not relayed. A member follows its root's owner (run_ownership), shares its
 // fight and is never moved alone.
-void Session::on_object_group(ConnectionId id, Connection& c, const ObjectGroup& g) {
+void Session::on_object_group(ConnectionId id, Connection& c, const ObjectGroup& g,
+                              std::uint64_t now_us) {
   for (const ObjectGroupEntry& e : g.entries) {
     auto m = objects_.find(e.member);
     auto r = objects_.find(e.root);
@@ -1741,6 +1753,18 @@ void Session::on_object_group(ConnectionId id, Connection& c, const ObjectGroup&
       root.members.insert(e.member);
       root.fight_until = std::max(root.fight_until, member.fight_until);
       if (group_of(root) != root_before) announce_owner(top, root);
+      // Row 149: a member first listed a moment ago (a boss part each game
+      // makes as its boss moves) takes its root's owner now, with no ask:
+      // its root's owner runs it from its first frame (CoopObjects'
+      // BossPartRoot), and that game has its own of it.
+      if (config_.part_fresh_us != 0 && member.first_at != 0 && now_us - member.first_at <= config_.part_fresh_us &&
+          root.owner && member.owner && *member.owner != *root.owner && !member.ask && !member.removed &&
+          !member.projectile && has_loaded(*root.owner, member)) {
+        std::uint8_t old_owner = 0;
+        if (auto it = connections_.find(*member.owner); it != connections_.end()) old_owner = it->second.number;
+        ++stats_.parts_to_root;
+        change_owner(e.member, member, root.owner, old_owner, now_us);
+      }
     }
     if (group_of(member) != before) announce_owner(e.member, member);
   }
@@ -1771,6 +1795,11 @@ void Session::drop_presence(ConnectionId id, std::uint8_t number, const ObjectId
     // an enemy nobody else has, is gone on every screen.
     std::optional<ConnectionId> next;
     if (!o.projectile) next = next_owner(o, id, now_us);
+    // Native puppets phase 2: a bomb goes on with a sharing game in its
+    // scene, which keeps its fuse (HANDOVER_STATE), so a lit one still goes
+    // off once everywhere and an unlit one can still be lifted and stashed.
+    if (o.projectile) next = bomb_heir(o, id);
+    if (next && o.projectile) ++stats_.bomb_handed_on;
     if (next) {
       change_owner(oid, o, next, number, now_us);
       return;
@@ -1889,11 +1918,38 @@ bool Session::hands_back_soon(const Object& o, ConnectionId to, std::uint64_t no
   return soon;
 }
 
+void Session::note_hold(Object& o, const ObjectState& sample, std::uint64_t now_us) {
+  if (!o.boss || o.root || config_.boss_stall_us == 0) return;
+  // What the sample lacks is as last relayed.
+  const ObjectState* last = o.last_state ? &*o.last_state : nullptr;
+  const auto& animation = sample.animation ? sample.animation : last ? last->animation : std::nullopt;
+  const auto& life = sample.life ? sample.life : last ? last->life : std::nullopt;
+  const auto& bsa = sample.bsa ? sample.bsa : last ? last->bsa : std::nullopt;
+  std::string key = animation ? animation->name : std::string{};
+  key += '|';
+  if (bsa && bsa->action) key += std::to_string(bsa->action->verb);
+  key += '|';
+  if (life) key += std::to_string(life->life);
+  if (key != o.hold_key || !animation || !life) {
+    o.hold_key = std::move(key);
+    o.hold_since = now_us;
+    o.stalled = false;  // a new move (or a hit that took life): its fight counts again
+    return;
+  }
+  if (o.stalled || now_us - o.hold_since < config_.boss_stall_us) return;
+  o.stalled = true;
+  o.fight_until = 0;
+  o.owner_hit_at = 0;
+  o.candidate.reset();
+  ++stats_.boss_stalled;
+}
+
 void Session::mark_fight(Object& o, std::uint64_t now_us) {
   Object* target = &o;
   if (o.root) {
     if (auto r = objects_.find(*o.root); r != objects_.end()) target = &r->second;
   }
+  if (target->stalled) return;  // row 149: stuck in one move, its fight lock stays free until the move changes
   const bool boss = o.boss || target->boss;
   const std::uint64_t until =
       now_us + (boss ? config_.boss_fight_lock_us : config_.fight_lock_us);
@@ -1923,10 +1979,26 @@ void Session::finish_handover(const ObjectId& oid, Object& o, const ObjectState*
   if (!o.ask || !o.owner) return;
   const ConnectionId to = o.ask->to;
   const std::int64_t hits_after_ask = o.ask->hits;
+  const bool bomb = o.ask->bomb;
   o.ask.reset();
   // The player it was for left, changed scene or unloaded it meanwhile: the
-  // owner keeps it.
-  if (!has_loaded(to, o)) return;
+  // owner keeps it. A bomb is a projectile, listed by nobody: its asker only
+  // has to be in its scene still.
+  if (bomb) {
+    auto tc = connections_.find(to);
+    if (tc == connections_.end() || tc->second.state != State::joined ||
+        tc->second.scene != o.scene) {
+      return;
+    }
+    // No answer: the owner's game keeps it (its Link holds it, or it has no
+    // bomb hand-over). The asker drops its lift.
+    if (!answer) {
+      refuse_bomb(to, oid, &o, BombRefusal::kept);
+      return;
+    }
+  } else if (!has_loaded(to, o)) {
+    return;
+  }
   if (answer) {
     // What the answer lacks (an owner that no longer has the actor sends
     // only the time) stays as last relayed.
@@ -1938,6 +2010,7 @@ void Session::finish_handover(const ObjectId& oid, Object& o, const ObjectState*
       if (!s.rotation) s.rotation = old.rotation;
       if (!s.animation) s.animation = old.animation;
       if (!s.life) s.life = old.life;
+      if (!s.fuse) s.fuse = old.fuse;  // a bomb's (BOMB_TAKE); enemies have none
     }
     // The answer's life is the owner's with every DAMAGE it had when it read
     // the ask (its pending replays included). What was passed on after the
@@ -1985,6 +2058,67 @@ void Session::change_owner(const ObjectId& oid, Object& o, std::optional<Connect
     send(*next, kChannelOwnership, HandoverState{old_owner, oid, o.epoch, *o.last_state});
   }
   announce_owner(oid, o);
+}
+
+// Native puppets phase 2 (docs/native-puppets.md "Lift a bomb, and stash it",
+// docs/protocol.md "Bomb hand-over"). A game whose Link lifted the copy of
+// another player's bomb asks for it. The first asker gets the HANDOVER_ASK to
+// the owner; anyone else while it is in flight is refused (busy). A stash is
+// the new owner's OBJECT_REMOVE with reason picked up: nothing here.
+namespace {
+bool is_shared_bomb(const std::string& actor) { return actor == "Item_Bomb"; }
+}  // namespace
+
+void Session::refuse_bomb(ConnectionId to, const ObjectId& oid, const Object* o,
+                          BombRefusal why) {
+  ++stats_.bomb_refused;
+  send(to, kChannelOwnership, BombAnswer{oid, o ? o->epoch : std::uint16_t{0}, why});
+}
+
+void Session::on_bomb_take(ConnectionId id, Connection& c, const BombTake& m,
+                           std::uint64_t now_us) {
+  c.bomb_share = true;  // asking is taking part
+  auto it = objects_.find(m.id);
+  if (it == objects_.end()) {
+    refuse_bomb(id, m.id, nullptr, BombRefusal::not_a_bomb);
+    return;
+  }
+  Object& o = it->second;
+  if (!o.made || !o.projectile || o.removed || !o.owner || *o.owner == id ||
+      o.scene != c.scene || !is_shared_bomb(o.actor)) {
+    refuse_bomb(id, m.id, &o, BombRefusal::not_a_bomb);
+    return;
+  }
+  if (o.epoch != m.epoch) {
+    refuse_bomb(id, m.id, &o, BombRefusal::stale);
+    return;
+  }
+  if (o.ask) {
+    refuse_bomb(id, m.id, &o, BombRefusal::busy);
+    return;
+  }
+  auto oc = connections_.find(*o.owner);
+  if (oc == connections_.end() || !oc->second.bomb_share) {
+    refuse_bomb(id, m.id, &o, BombRefusal::kept);
+    return;
+  }
+  ++stats_.bomb_takes;
+  ask_handover(m.id, o, id, now_us);
+  if (o.ask) o.ask->bomb = true;
+}
+
+std::optional<ConnectionId> Session::bomb_heir(const Object& o, ConnectionId except) const {
+  if (!is_shared_bomb(o.actor)) return std::nullopt;
+  std::optional<ConnectionId> best;
+  std::uint8_t best_number = 0;
+  for (const auto& [cid, p] : connections_) {
+    if (cid == except || p.state != State::joined || p.scene != o.scene || !p.bomb_share) continue;
+    if (!best || p.number < best_number) {
+      best = cid;
+      best_number = p.number;
+    }
+  }
+  return best;
 }
 
 // Fishing (issue 151, docs/objects.md "Fish and lures"). Each game says how

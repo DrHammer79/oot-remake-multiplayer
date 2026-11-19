@@ -114,6 +114,15 @@ void Sync::Receive(const proto::Message& message) {
         if (inbox_.size() < 1024) {
             inbox_.push_back(message);
         }
+    } else if (bomb_share_ && (std::holds_alternative<proto::HandoverAsk>(message) ||
+                               std::holds_alternative<proto::HandoverState>(message) ||
+                               std::holds_alternative<proto::ObjectOwner>(message) ||
+                               std::holds_alternative<proto::BombAnswer>(message))) {
+        // Phase 2: only with the bomb share on (coop_bomb_share.h).
+        std::lock_guard lock(inbox_mutex_);
+        if (bomb_inbox_.size() < 256) {
+            bomb_inbox_.push_back(message);
+        }
     }
 }
 
@@ -137,8 +146,16 @@ void Sync::Reset() {
     local_.clear();
     impacts_.clear();  // issue 166: the old scene's sparks
     carriers_.clear();
+    takes_.Clear();
+    releasing_.clear();
+    blow_own_.clear();
+    announce_.Reset();
+    if (bomb_share_) {
+        CoopBombShare::TheOwnBombs().Clear();  // mine_ went with the scene
+    }
     std::lock_guard lock(inbox_mutex_);
     inbox_.clear();
+    bomb_inbox_.clear();
 }
 
 void Sync::Apply(std::uint64_t now_us) {
@@ -176,6 +193,7 @@ void Sync::Apply(std::uint64_t now_us) {
                 continue;
             }
             Remote& r = it->second;
+            r.epoch = p->epoch;  // phase 2: what a BOMB_TAKE names
             if (p->state.rotation) {
                 r.rotation = p->state.rotation;
             }
@@ -222,6 +240,11 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     made_up_.clear();
     doom_.clear();
     decided_.clear();
+    blow_own_.clear();
+    bomb_notes_.clear();
+    if (bomb_share_) {
+        Bombs(self, now_us, send);  // phase 2: may doom one of ours (handed on)
+    }
     // Issue 169: how fast our Link moves, so a bomb moving with him is held.
     link_velocity_ = {};
     if (link_ && Finite(*link_)) {
@@ -257,6 +280,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             r.blasted = true;
         }
     }
+    if (bomb_share_) {
+        Adopt(now_us);  // phase 2: a handed copy becomes ours before the walk
+    }
 
     std::set<std::uint64_t> on_list;
     for (const Seen& s : seen) {
@@ -268,6 +294,29 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     }
 
     for (const Seen& s : seen) {
+        if (bomb_share_ && s.animation && CoopBombShare::IsBomb(s.name) &&
+            copy_addresses_.count(s.address) != 0) {
+            // Phase 2: our Link lifted the copy of another player's bomb (the
+            // copy's own animation says Lifted while its owner's does not).
+            for (auto& [id, r] : copies_) {
+                if (r.address != s.address) {
+                    continue;
+                }
+                const bool lifted =
+                    CoopBombShare::LiftedHere(CoopProjectiles::HeldByAnimation(s.animation->name), r.held);
+                if (!lifted) {
+                    r.refused = false;
+                } else if (!r.removed && !r.taking && !r.refused && !r.adopt) {
+                    if (auto take = takes_.Lifted(id, r.epoch, now_us)) {
+                        send.emplace_back(*take);
+                        r.taking = true;
+                        bomb_notes_.push_back("lifted the copy #" + Hex(id.value) + ": BOMB_TAKE epoch " +
+                                              std::to_string(r.epoch));
+                    }
+                }
+                break;
+            }
+        }
         if (old_.count(s.address) != 0 || copy_addresses_.count(s.address) != 0 ||
             !Finite(s.position)) {
             continue;
@@ -308,6 +357,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             m.seen_at = now_us;
             m.missed = 0;
             m.animation = s.animation;
+            if (s.vtable != 0) {
+                m.vtable = s.vtable;  // phase 2: for a blow or a delete
+            }
             Hands(m, false);
             MakeUpFlight(m, now_us);
             // A made-up flight is sent in place of the place, which stays
@@ -327,12 +379,13 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                  (moved || busy || now_us - m.sent_at >= kStillEveryUs))) {
                 proto::ObjectSample out;
                 out.id = m.id;
+                out.epoch = m.epoch;  // 0 unless handed to us (phase 2)
                 out.state.time = {now_us, ++m.sequence};
                 out.state.position = at;
                 out.state.velocity = velocity;
                 out.state.rotation = m.rotation;
                 if (Explodes(m.name)) {
-                    out.state.fuse = fuse_.Left(now_us - m.made_at);
+                    out.state.fuse = FuseOf(m, now_us);
                     out.state.state = m.held ? proto::object_state::held : std::uint8_t{0};
                 }
                 if (Animated(m.name)) {
@@ -412,6 +465,10 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             m.rotation = CoopObjects::QuatOf(*s.rotation);
         }
         m.animation = s.animation;
+        m.vtable = s.vtable;
+        if (bomb_share_ && CoopBombShare::IsBomb(s.name)) {
+            CoopBombShare::TheOwnBombs().Note(m.id, true);  // its HANDOVER_ASK is ours to answer
+        }
         Hands(m, true);
         proto::ObjectSpawn out;
         out.id = m.id;
@@ -441,6 +498,18 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             CoopProjectiles::TheOwnShots().Note(address, steady_us);
         }
     }
+    for (auto& [address, m] : mine_) {
+        // Phase 2: a bomb handed to us goes off on its owner's fuse, through
+        // the game's own explosion (the director sets its life to 0).
+        if (m.taken && m.blow_at && !m.blown && now_us >= *m.blow_at && on_list.count(address) != 0) {
+            m.blown = true;
+            if (m.vtable != 0) {
+                blow_own_.push_back({address, m.vtable});
+            }
+            bomb_notes_.push_back("our taken bomb #" + Hex(m.id.value) + ": fuse out, blown" +
+                                  (m.vtable != 0 ? "" : " (no vtable: left to its own fuse)"));
+        }
+    }
     for (auto it = mine_.begin(); it != mine_.end();) {
         if (on_list.count(it->first) != 0 || ++it->second.missed < kGoneWalks) {
             ++it;
@@ -462,9 +531,21 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             // (issue 166 landing), they go at once.
             out.reason = proto::RemoveReason::gone;
         }
-        if (out.reason == proto::RemoveReason::exploded && CoopProjectiles::Find(m.name)->fused) {
+        if (m.taken) {
+            // Phase 2: lit, it went off (on the fuse handed to us, or a hit);
+            // unlit with the pouch's count up by one, it was stashed.
+            const bool lit = m.blow_at.has_value();
+            const auto otherwise = m.blown || lit ? proto::RemoveReason::exploded : out.reason;
+            out.reason = CoopBombShare::GoneReason(true, lit, pouch_.RoseNear(now_us), otherwise);
+            bomb_notes_.push_back("our taken bomb #" + Hex(m.id.value) + " gone, reason " +
+                                  std::to_string(static_cast<int>(out.reason)));
+        } else if (out.reason == proto::RemoveReason::exploded && CoopProjectiles::Find(m.name)->fused) {
             fuse_.Lived(lived);  // the game's fuse, for our next bombs' copies
         }
+        if (bomb_share_) {
+            CoopBombShare::TheOwnBombs().Note(m.id, false);
+        }
+        out.epoch = m.epoch;
         out.position = m.made_up ? ShotPlace(m, now_us) : m.position;
         send.emplace_back(out);
         flights_.push_back({m.id, m.name, lived, m.far, m.top_speed, out.reason,
@@ -525,6 +606,13 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                                      (r.held ? std::int64_t(CoopProjectiles::kHeldBehindUs) : 0);
             a.frame = CoopObjects::FrameAfter(a.frame, a.rate, age);
             c.animation = std::move(a);
+        }
+        if (r.taking) {
+            // Phase 2: our Link holds it now (the game's lift); not pulled back
+            // to the owner's place, nor its animation played over the lift.
+            c.place = false;
+            c.setter = false;
+            c.animation.reset();
         }
         const auto live_it = copies_live.find(r.key);
         const bool made = live_it != copies_live.end() && live_it->second != 0;
@@ -597,6 +685,22 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         copies.push_back(std::move(c));
         ++it;
     }
+    // Phase 2: copies made ours; the director lets go of the actor (it is
+    // ours now) until it has.
+    for (auto it = releasing_.begin(); it != releasing_.end();) {
+        const auto live = copies_live.find(it->first);
+        if (live == copies_live.end() || live->second == 0 || ++it->second > kReleaseWalks) {
+            it = releasing_.erase(it);
+            continue;
+        }
+        Copy c;
+        c.key = it->first;
+        c.actor = "Item_Bomb";
+        c.act = Act::release;
+        c.place = false;
+        copies.push_back(std::move(c));
+        ++it;
+    }
     // Issue 166: made where they are and left there (no place written); gone
     // from the list, the director deletes them.
     std::erase_if(carriers_, [now_us](const Carrier& c) { return now_us >= c.until_us; });
@@ -620,6 +724,170 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         c.position = i.position;
         c.place = false;
         copies.push_back(std::move(c));
+    }
+}
+
+std::optional<float> Sync::FuseOf(const Own& m, std::uint64_t now_us) const {
+    if (m.taken) {  // phase 2: the fuse handed to us, not our own bombs' clock
+        return m.blow_at ? std::optional<float>(CoopBombShare::FuseLeft(*m.blow_at, now_us)) : std::nullopt;
+    }
+    return fuse_.Left(now_us - m.made_at);
+}
+
+proto::ObjectState Sync::StateOf(const Own& m, std::uint64_t now_us) const {
+    proto::ObjectState out;
+    out.time = {now_us, m.sequence};
+    out.position = m.position;
+    out.velocity = m.velocity;
+    out.rotation = m.rotation;
+    if (Explodes(m.name)) {
+        out.fuse = FuseOf(m, now_us);
+        out.state = m.held ? proto::object_state::held : std::uint8_t{0};
+    }
+    if (Animated(m.name)) {
+        out.animation = m.animation;
+    }
+    return out;
+}
+
+// Phase 2 (coop_bomb_share.h): the bomb share's messages, with the bomb
+// share on only.
+void Sync::Bombs(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Message>& send) {
+    std::vector<proto::Message> inbox;
+    {
+        std::lock_guard lock(inbox_mutex_);
+        inbox.swap(bomb_inbox_);
+    }
+    const auto own_of = [this](const proto::ObjectId& id) {
+        return std::find_if(mine_.begin(), mine_.end(), [&](const auto& e) { return e.second.id == id; });
+    };
+    for (const auto& message : inbox) {
+        if (const auto* ask = std::get_if<proto::HandoverAsk>(&message)) {
+            const auto own = own_of(ask->id);
+            if (own == mine_.end()) {
+                continue;  // not one of our bombs (the objects sync answers the rest)
+            }
+            const std::string who = "asked for our bomb #" + Hex(ask->id.value) + " by P" +
+                                    std::to_string(ask->to_player);
+            if (auto answer = CoopBombShare::Answer(*ask, own->second.held, StateOf(own->second, now_us))) {
+                send.emplace_back(std::move(*answer));
+                bomb_notes_.push_back(who + ": handed over");
+            } else {
+                bomb_notes_.push_back(who + ": kept (our Link holds it)");
+            }
+        } else if (const auto* handed = std::get_if<proto::HandoverState>(&message)) {
+            const bool asked = takes_.Done(handed->id);
+            const auto it = copies_.find(handed->id);
+            if (it == copies_.end() || !CoopBombShare::IsBomb(it->second.actor) || it->second.removed) {
+                if (asked) {
+                    bomb_notes_.push_back("bomb #" + Hex(handed->id.value) + " handed to us, but its copy is gone");
+                }
+                continue;
+            }
+            it->second.adopt = *handed;
+            it->second.epoch = handed->epoch;
+            bomb_notes_.push_back("bomb #" + Hex(handed->id.value) + " handed to us (epoch " +
+                                  std::to_string(handed->epoch) + (asked ? ", lifted" : ", its owner left") +
+                                  "), fuse " + std::to_string(handed->state.fuse.value_or(-1.0f)));
+        } else if (const auto* owner = std::get_if<proto::ObjectOwner>(&message)) {
+            if (const auto c = copies_.find(owner->id); c != copies_.end()) {
+                c->second.epoch = owner->epoch;
+                continue;
+            }
+            if (owner->owner == self) {
+                continue;
+            }
+            const auto own = own_of(owner->id);
+            if (own == mine_.end() || !CoopBombShare::IsBomb(own->second.name)) {
+                continue;
+            }
+            // Another player has our bomb now: our actor goes without an
+            // explosion, and the new owner's samples make the copy here.
+            const Own& m = own->second;
+            if (m.vtable != 0) {
+                doom_.push_back({own->first, m.vtable});
+            }
+            old_.insert(own->first);
+            CoopBombShare::TheOwnBombs().Note(m.id, false);
+            proto::ObjectSpawn spawn;
+            spawn.player_number = owner->owner;
+            spawn.id = m.id;
+            spawn.actor = m.name;
+            spawn.flags = proto::object_spawn::projectile;
+            spawn.state = StateOf(m, now_us);
+            spawn.state.state = proto::object_state::held;  // it was lifted
+            bomb_notes_.push_back("our bomb #" + Hex(m.id.value) + " is P" + std::to_string(owner->owner) +
+                                  "'s now (epoch " + std::to_string(owner->epoch) + ")" +
+                                  (m.vtable != 0 ? ": ours deleted" : ": no vtable, ours not deleted"));
+            mine_.erase(own);
+            std::lock_guard lock(inbox_mutex_);
+            inbox_.push_back(std::move(spawn));  // applied on the next Tick
+        } else if (const auto* answer = std::get_if<proto::BombAnswer>(&message)) {
+            takes_.Done(answer->id);
+            if (const auto c = copies_.find(answer->id); c != copies_.end()) {
+                c->second.taking = false;
+                c->second.refused = true;
+                c->second.epoch = answer->epoch;
+            }
+            bomb_notes_.push_back("lift of bomb #" + Hex(answer->id.value) + " refused (" +
+                                  std::to_string(static_cast<int>(answer->refusal)) + ")");
+        }
+    }
+    for (const auto& id : takes_.Expired(now_us)) {
+        if (const auto c = copies_.find(id); c != copies_.end()) {
+            c->second.taking = false;
+            c->second.refused = true;
+        }
+        bomb_notes_.push_back("lift of bomb #" + Hex(id.value) + ": no answer, dropped");
+    }
+    if (auto share = announce_.Due(now_us)) {
+        send.emplace_back(*share);
+    }
+}
+
+// Phase 2: a copy the server made ours becomes one of our own once the
+// director has the game's own bomb for it (a held stand-in cannot go off:
+// the game's own bomb is made first).
+void Sync::Adopt(std::uint64_t now_us) {
+    for (auto it = copies_.begin(); it != copies_.end();) {
+        Remote& r = it->second;
+        if (!r.adopt || r.removed) {
+            ++it;
+            continue;
+        }
+        if (r.held) {
+            Rekey(r, false);
+            ++it;
+            continue;
+        }
+        if (r.address == 0) {
+            ++it;
+            continue;
+        }
+        Own m;
+        m.id = it->first;
+        m.name = r.actor;
+        m.position = m.sent_position = m.made_position = r.Position();
+        m.seen_at = m.made_at = now_us;
+        m.sent_at = 0;  // its first sample as ours goes this walk
+        m.sequence = r.adopt->state.time.sequence;
+        m.rotation = r.rotation;
+        m.epoch = r.adopt->epoch;
+        m.taken = true;
+        m.held = m.sent_held = r.taking;
+        m.blow_at = CoopBombShare::BlowAt(r.adopt->state);
+        if (!m.blow_at) {
+            m.blow_at = r.blow_at;  // the owner's last word on its fuse
+        }
+        CoopBombShare::TheOwnBombs().Note(m.id, true);
+        bomb_notes_.push_back("bomb #" + Hex(m.id.value) + " is ours now" +
+                              (m.blow_at ? ", goes off in " +
+                                               std::to_string(CoopBombShare::FuseLeft(*m.blow_at, now_us)) + " s"
+                                         : std::string(", unlit")));
+        copy_addresses_.erase(r.address);
+        releasing_[r.key] = 0;
+        mine_[r.address] = std::move(m);
+        it = copies_.erase(it);
     }
 }
 
@@ -758,6 +1026,18 @@ void Director::SetDoomed(std::vector<Doomed> doomed) {
         if (doomed_.size() < 64) {
             d.since_ms = 0;
             doomed_.push_back(d);
+        }
+    }
+}
+
+void Director::SetBlowOwn(const std::vector<Doomed>& blow) {
+    if (blow.empty()) {
+        return;
+    }
+    std::lock_guard lock(mutex_);
+    for (const Doomed& b : blow) {
+        if (blow_own_.size() < 16) {
+            blow_own_.push_back(b);
         }
     }
 }
@@ -1256,6 +1536,28 @@ void Director::NewFrame(CoopPuppet::Guest& guest, std::uint64_t now_ms) {
     plays_.clear();
     emits_.clear();
     emit_found_ = false;
+    {
+        // Phase 2 (bomb share): our taken bombs whose handed fuse ran out
+        // go off as a copy does (a bomb's life is 1; at 0 the game runs its
+        // own explosion), if the actor is still the same one.
+        std::vector<Doomed> blow;
+        {
+            std::lock_guard lock(mutex_);
+            blow.swap(blow_own_);
+        }
+        for (const Doomed& b : blow) {
+            std::uint64_t vtable = 0, table = 0, life = 0, value = 0;
+            if (ReadValue(guest, b.address, vtable) && vtable == b.vtable &&
+                ReadValue(guest, b.address + kActorComponents, table) && table != 0 &&
+                ReadValue(guest, table + kComponentLife, life) && life != 0 &&
+                ReadValue(guest, life + kLifeValue, value) && value != 0) {
+                WriteValue(guest, value + 8, std::int32_t{0});
+                Say("our taken bomb " + Hex(b.address) + " blown on the fuse handed to us");
+            } else {
+                Say("our taken bomb " + Hex(b.address) + " not blown: not the same actor any more");
+            }
+        }
+    }
     if (pending_ == Pending::malloc) {
         allocating_ = false;  // the cave did not make the call
     } else if (pending_ == Pending::create) {
@@ -1697,6 +1999,14 @@ public:
             return;
         }
         active_ = true;
+        if (sync_.BombShare()) {
+            // Phase 2: a bomb's vtable, so a blow or a delete is sure of it.
+            for (Seen& s : seen) {
+                if (CoopBombShare::IsBomb(s.name)) {
+                    s.vtable = Get<u64>(memory, s.address).value_or(0);
+                }
+            }
+        }
         Shots(memory, now_us);
         std::vector<coop::protocol::Message> send;
         std::vector<Copy> copies;
@@ -1714,6 +2024,10 @@ public:
                      d.position[0], d.position[1], d.position[2], CoopEnemyShots::NameOf(d.verdict));
         }
         TheDirector().SetDoomed(sync_.Doom());
+        TheDirector().SetBlowOwn(sync_.BlowOwn());
+        for (const auto& note : sync_.BombNotes()) {
+            LOG_INFO(Core, "coop: bombs: {}", note);
+        }
         if (const auto held = std::make_pair(sync_.HeldMine(), sync_.HeldCopies()); held != logged_held_) {
             LOG_INFO(Core, "coop: shots: bombs held: {} of ours, {} copies in other players' hands",
                      held.first, held.second);
@@ -1791,6 +2105,12 @@ public:
                 } else if (const auto* r = std::get_if<coop::protocol::ObjectRemove>(&m)) {
                     LOG_INFO(Core, "coop: spawn: sent remove #{:#x} reason {}{}", r->id.value,
                              static_cast<int>(r->reason), sent ? "" : " (not sent)");
+                } else if (const auto* t = std::get_if<coop::protocol::BombTake>(&m)) {
+                    LOG_INFO(Core, "coop: bombs: sent BOMB_TAKE #{:#x} epoch {}{}", t->id.value, t->epoch,
+                             sent ? "" : " (not sent)");
+                } else if (const auto* h = std::get_if<coop::protocol::HandoverState>(&m)) {
+                    LOG_INFO(Core, "coop: bombs: sent HANDOVER_STATE #{:#x} fuse {:.2f}{}", h->id.value,
+                             h->state.fuse.value_or(-1.0f), sent ? "" : " (not sent)");
                 }
             }
         });
@@ -1816,6 +2136,10 @@ private:
         for (const auto& [kind, actor] : {std::pair{Kind::seed, "Shootable_DekuSeed"},
                                           std::pair{Kind::arrow, "NormalArrow"}}) {
             const auto count = flags.get_int(CoopProjectiles::AmmoFlag(kind));
+            if (kind == Kind::seed && sync_.BombShare()) {
+                // Phase 2: a stash. PouchData.Item_Bomb.StockNum (coop/host game_items.cpp).
+                sync_.SetPouch(flags.get_int(0xdb1bcd4f), now_us);
+            }
             if (ammo_.Dropped(kind, count)) {
                 const bool found = sync_.Shot(actor, now_us);
                 LOG_INFO(Core, "coop: shots: our {} let go ({} left){}", actor, count.value_or(-1),
@@ -1874,6 +2198,11 @@ private:
             sync_.Reset();
             sync_.SetSetter(SetterOn());
             sync_.SetShots(ShotSettingsFromEnv());
+            // Native puppets phase 2: a bomb changes hands (off by default).
+            sync_.SetBombShare(Env("LICHII_COOP_BOMB_SHARE").value_or("0") == "1");
+            if (sync_.BombShare()) {
+                LOG_INFO(Core, "coop: bombs: LICHII_COOP_BOMB_SHARE=1: a lifted bomb changes hands");
+            }
             // Issue 166: the hit effect is the copy's own, through the game's
             // emit; the impact actors (never made by the game) only on request.
             sync_.SetImpacts(Env("LICHII_COOP_SHOT_IMPACTS").value_or("0") == "1");

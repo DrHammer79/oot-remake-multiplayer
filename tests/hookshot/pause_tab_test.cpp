@@ -1004,6 +1004,13 @@ TEST_CASE("pause tab: a password shows as stars but for the letter typed into, a
     const std::string shown = room.Shown(true, 12);
     CHECK(shown.size() == 12);
     CHECK(shown.find('[') != std::string::npos);   // (the cursor's letter in view)
+    // A long password with '[' in it: the view follows the cursor, wherever the brackets fall.
+    TextField brackets(TextField::Kind::kPassword);
+    for (int i = 0; i < 30; ++i) brackets.Type(i % 3 == 0 ? '[' : 'x');
+    for (int i = 0; i < 26; ++i) brackets.Move(-1);   // (the cursor on the fifth letter, an 'x')
+    CHECK(brackets.Shown(true, 12).find("[x]") != std::string::npos);
+    while (brackets.cursor() < brackets.text().size()) brackets.Move(+1);
+    CHECK(brackets.Shown(true, 12).find("[ ]") != std::string::npos);   // (at the end: the empty place in view)
 }
 
 TEST_CASE("pause tab: the Join view's fields: typing takes every button from System until A or B") {

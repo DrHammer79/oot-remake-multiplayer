@@ -1377,7 +1377,8 @@ if ($pyHome -and (Test-Path -LiteralPath (Join-Path $pyHome 'python.exe'))) {
         $r = & $run
         $man = "$k\hookshot\game\mods\contents\0400486024DEC000\coop-puppet\coop_puppet.json"
         Check ($r[0] -eq 0 -and $r[1] -match 'Found your game file: .*OoT\.nup' -and $r[1] -match 'Making the puppet pack' -and (Test-Path -LiteralPath $man) -and (Read-File (Join-Path (Split-Path -Parent $man) 'from.txt')) -eq "$pk\OoT.nup") "pack only: the .nup moved beside the kit: found, the pack made [$($r[0]) $($r[1])]"
-        Check ((Read-File (Join-Path (Split-Path -Parent $man) 'args.txt')) -match '(^| )--title-rows( |$)') 'pack: made with the title rows (--title-rows, as the Linux kit)'
+        $packArgs = Read-File (Join-Path (Split-Path -Parent $man) 'args.txt')
+        Check ($packArgs -match '--title-rows' -and $packArgs -match '--pause-tab') "pack: the kit's pack command (Get-KitPackArgs) has --title-rows and --pause-tab [$packArgs]"
         Check ((Read-File "$k\hookshot\game-files.txt").Trim() -eq "$pk\OoT.nup") 'pack only: the new place is remembered'
         $env:PACK_FAIL = '1'
         try { $r = & $run } finally { Remove-Item env:PACK_FAIL }

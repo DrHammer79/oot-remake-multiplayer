@@ -26,6 +26,10 @@ The puppet pack's rows in RSDB tables (player report 144/145, merge_rows): befor
 pack ships (ActorInfo, GameActorInfo) is merged the same way into the copy of the mod that wins it, our seeds too, and
 the size the merged file needs goes into the size table the game reads (fit).
 
+The pack's menu files (build.py --title-rows / --pause-tab: larger copies of files the game reads at boot), last
+(guard_menus): kept out of the pack's romfs, in `<pack>/_coop-menus`, while the table the game reads lacks their sizes;
+else the language archive fails to load and the game crashes at boot.
+
     python -I merge_tables.py --mods <game>/mods [--romfs <game>/romfs] [--undo]
 
 Prints what it did, one line each. Exit 0 also when there is nothing to do; 1 when a table could not be merged
@@ -58,6 +62,8 @@ RSDB_TAIL = ".rstbl.byml.zs"
 ROWS_KEEP = "_coop-rows"
 ROWS_HEAD = "coop-rows 1"
 ROWS_MARK = "coop-rows.txt"   # (the module's kRowsFile)
+MENU_KEEP = "_coop-menus"     # the pack's menu files while the table the game reads cannot hold them (guard_menus)
+MENU_KEYS = ("title_menu", "pause_menu")   # (coop_puppet.json: the files build.py's menu steps wrote)
 
 
 class MergeError(Exception):
@@ -503,6 +509,105 @@ def merge_mods(root, romfs, say=print, fit=None):
     return failed
 
 
+def menu_files(pack_path):
+    """The pack's files that replace files the game reads at boot (build.py --title-rows / --pause-tab: each language's
+    Mals archive, the Title and Common layout archives), from its coop_puppet.json: [romfs path], [] when none."""
+    import json
+    try:
+        with open(os.path.join(pack_path, "coop_puppet.json"), "rb") as f:
+            m = json.loads(f.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for key in MENU_KEYS:
+        for rel in m.get(key) or []:
+            if isinstance(rel, str) and rel and rel not in out:
+                out.append(rel)
+    return out
+
+
+def _menu_short(codec, order, pack_path, files):
+    """(the mod whose size table the game reads, how many of the menu files it holds smaller than the pack's own table
+    does), or (None, 0) when the game reads the pack's own table or one that holds every menu file's size."""
+    for fname in tables_of(pack_path):
+        having = [(n, p) for n, p in order if fname in tables_of(p)]
+        win_name, win_path = having[-1]
+        if fold(win_name) == PACK:
+            continue
+        theirs, ours = load_table(codec, win_path, fname), load_table(codec, pack_path, fname)
+        short = 0
+        for rel in files:
+            key = rel[:-3] if rel.endswith(".zs") else rel
+            need = ours.get(key)
+            if need is not None and (theirs.get(key) or -1) < need:
+                short += 1
+        if short:
+            return win_name, short
+    return None, 0
+
+
+def guard_menus(root, romfs, say=print):
+    """The menu files only where the game can load them. They are larger than the game's own (more labels, more panes),
+    so the size table the game reads must hold the pack's sizes for them: the game loads a file larger than its entry
+    as a failed resource, and the language archive failing at boot crashed the game (0xc0000005 reading guest 0x8 in
+    sead::MainThread after 'prompts: switch icons': a copy of an older pack left in mods/contents as
+    coop-puppet.old-b26 sorted after the pack, so its table won). When another mod's table wins and lacks them (a
+    title's own mod under contents/, never rewritten here; a merge that failed), the menu files go to
+    <pack>/_coop-menus (beside its romfs: the game never reads them there) and the game keeps its own menus (the module
+    keeps the title rows and the pause tab off without their panes). They go back at the first start the table holds
+    them again; a pack made since (its files in romfs again) drops the kept copies. Returns 1 when it could not move
+    a file, else 0."""
+    order = load_order(root)
+    pack_path = next((p for n, p in order if fold(n) == PACK), None)
+    if pack_path is None:
+        return 0
+    files = menu_files(pack_path)
+    if not files:
+        return 0
+    keep = os.path.join(pack_path, MENU_KEEP)
+    try:
+        win_name, short = _menu_short(Codec(romfs), order, pack_path, files)
+    except (OSError, ValueError, MergeError) as e:
+        win_name, short = f"a mod's (it could not be read: {e})", len(files)
+    try:
+        if short:
+            moved = 0
+            for rel in files:
+                src = os.path.join(pack_path, "romfs", *rel.split("/"))
+                if os.path.isfile(src):
+                    dst = os.path.join(keep, *rel.split("/"))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    os.replace(src, dst)
+                    moved += 1
+            if moved or os.path.isdir(keep):
+                say(f"Menus: the game reads {win_name}'s size table, which lacks the sizes of {short} of the puppet "
+                    "pack's menu files: the title's co-op rows and the pause menu's Multiplayer tab are off this start "
+                    "(the game's own menus; co-op still works from the Minus menu). Turn that mod off, or merge the "
+                    "pack's entries into its table, and they come back.")
+            return 0
+        back = 0
+        for rel in files:
+            src = os.path.join(keep, *rel.split("/"))
+            dst = os.path.join(pack_path, "romfs", *rel.split("/"))
+            if not os.path.isfile(src):
+                continue
+            if os.path.isfile(dst):  # (a pack made since: its own file is the one)
+                os.remove(src)
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.replace(src, dst)
+            back += 1
+        if os.path.isdir(keep):
+            shutil.rmtree(keep, ignore_errors=True)
+        if back:
+            say(f"Menus: the size table the game reads holds the puppet pack's menu files again: the title's co-op "
+                f"rows and the pause menu's Multiplayer tab are back ({back} files).")
+        return 0
+    except OSError as e:
+        say(f"Menus: the puppet pack's menu files could not be moved ({e}).")
+        return 1
+
+
 def load_table(codec, mod_path, fname):
     with open(os.path.join(mod_path, *RESOURCE, fname), "rb") as f:
         return codec.load(f.read())
@@ -611,7 +716,10 @@ def main(argv=None):
         return 0
     try:
         rows_failed, fit = merge_rows(a.mods, a.romfs)
-        return 1 if (merge_mods(a.mods, a.romfs, fit=fit) or rows_failed) else 0
+        failed = merge_mods(a.mods, a.romfs, fit=fit)
+        # Last, on the tables as the game will read them: the pack's menu files only where they can load.
+        menus_failed = guard_menus(a.mods, a.romfs)
+        return 1 if (failed or rows_failed or menus_failed) else 0
     except SystemExit:  # (zs._zstd: no zstandard package)
         print("Size tables: not merged (this Python has no zstandard package): with a mod that has its own size "
               "table, the other players can't be shown.")

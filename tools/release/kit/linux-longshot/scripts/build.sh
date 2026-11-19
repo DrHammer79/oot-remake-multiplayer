@@ -292,7 +292,7 @@ pack_from=$game
 mod=$GAME/mods/contents/0400486024DEC000/coop-puppet
 # (the pack tool's own files too: a pack made by another version of the tool is made again, as the
 # Windows kit's Test-KitPuppetPackStale does; the look files and the copies' marks change with it)
-pack_stamp="$src_stamp tool:$(cd "$DATA/tools/puppet_pack" && LC_ALL=C sha256sum -- *.py | sha256sum | cut -d' ' -f1)"
+pack_stamp="$src_stamp menus:1 tool:$(cd "$DATA/tools/puppet_pack" && LC_ALL=C sha256sum -- *.py | sha256sum | cut -d' ' -f1)"
 # A file the pack's manifest names that is gone (a pack tool stopped half way, a hand-copied pack): the look files
 # (coop_look/gear.bin, a colour's .bin) and each tunic's files, as the Windows kit's Get-KitPuppetPackGaps (pack-retry).
 pack_gap() {
@@ -356,6 +356,10 @@ if [[ ! -e ${pack_from:-} ]] && ! [[ -f $mod/coop_puppet.json && $(cat "$mod/.co
         fi
     fi
 fi
+# The pack with the title's Host/Join/Co-op Settings rows and the pause menu's Multiplayer tab (--title-rows
+# --pause-tab, as the Windows kit's Get-KitPackArgs). They make the pack replace files the game reads at boot (each
+# language's Mals archive, the Title and Common layout archives) with larger ones; start.sh's merge_tables.py takes
+# them out of play when the size table the game reads cannot hold them (another mod's table wins).
 gap=$(pack_gap)
 if [[ -f $mod/coop_puppet.json && $(cat "$mod/.coop-stamp" 2>/dev/null) == "$pack_stamp" && -z $gap ]]; then
     say '  puppet pack: built already'

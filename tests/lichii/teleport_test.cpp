@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "coop/protocol/codec.hpp"
 #include "coop_teleport.h"
 
 namespace proto = coop::protocol;
@@ -244,8 +245,8 @@ TEST_CASE("teleport: another scene changes scene, then asks again and moves") {
 }
 
 TEST_CASE("teleport: no event of our own, the request waits for the player's own talk or sign (#197)") {
-    REQUIRE_FALSE(Trip::kStartSceneEvent);
-    Trip trip;
+    Trip trip;  // LICHII_COOP_TELEPORT_EVENT=0
+    REQUIRE_FALSE(trip.map_event());
     const Local here = At("KakarikoVillage_Child", 0, 0, 0);
     trip.Start(2, "Saria", here, 0);
     auto a = trip.Accepted(2, Target("Graveyard_Child", -35, 98, 8), here, kS);
@@ -269,6 +270,87 @@ TEST_CASE("teleport: no event of our own, the request waits for the player's own
     Local loading = here;
     loading.loading_banc = true;
     CHECK(trip.Tick(loading, 22 * kS).release);
+}
+
+TEST_CASE("teleport: the game's map change event carries another scene at once (teleport-direct-0116)") {
+    Trip trip(true);
+    const Local here = At("KakarikoVillage_Child", 0, 0, 0);
+    trip.Start(2, "Saria", here, 0);
+    auto a = trip.Accepted(2, Target("Graveyard_Child", -35, 98, 8), here, kS);
+    REQUIRE(a.scene);
+    CHECK(a.start_event);  // the map change event, asked at once
+    CHECK_FALSE(a.start.empty());
+    CHECK_FALSE(Has(a.lines, "talk to someone or read a sign"));
+    CHECK(Has(a.lines, "going to Saria in Graveyard_Child"));
+    // The event runs: nothing asked again meanwhile.
+    Local busy = here;
+    busy.event = true;
+    for (std::uint64_t t = kS + kS / 2; t < 10 * kS; t += kS / 2) {
+        CHECK_FALSE(trip.Tick(busy, t).start_event);
+    }
+    // The event reserved our scene (ReserveBancChange), then the load.
+    Local reserved = here;
+    reserved.reserved_banc = "Graveyard_Child";
+    reserved.event = true;
+    CHECK_FALSE(trip.Tick(reserved, 10 * kS).release);
+    Local loading;
+    loading.loading_banc = true;
+    a = trip.Tick(loading, 11 * kS);
+    CHECK(a.release);
+    CHECK_FALSE(a.start_event);
+    // Arrival: the game's arrival event, then it empties the request itself; settled: asked again, moved.
+    Local arrived = At("Graveyard_Child", 0, 0, 0);
+    arrived.reserved_banc = "Graveyard_Child";
+    arrived.event = true;
+    CHECK_FALSE(trip.Tick(arrived, 12 * kS).start_event);
+    arrived.event = false;
+    arrived.reserved_banc = "";
+    CHECK(trip.Tick(arrived, 13 * kS).game_cleared);
+    a = trip.Tick(arrived, 13 * kS + Trip::kSettleUs);
+    REQUIRE(a.ask);
+    CHECK_FALSE(a.cancel_scene);  // the game emptied it: nothing to write
+    a = trip.Accepted(2, Target("Graveyard_Child", -30, 98, 8), arrived, 16 * kS);
+    REQUIRE(a.move);
+    CHECK(a.after_load);
+}
+
+TEST_CASE("teleport: a map change event the game does not take is asked again, then given up") {
+    Trip trip(true);
+    const Local here = At("KakarikoVillage_Child", 0, 0, 0);
+    trip.Start(2, "Saria", here, 0);
+    REQUIRE(trip.Accepted(2, Target("Graveyard_Child", -35, 98, 8), here, kS).start_event);
+    int asks = 1;
+    Trip::Actions a;
+    std::uint64_t t = kS;
+    for (; t < 30 * kS && trip.phase() == Trip::Phase::travelling; t += kS / 2) {
+        a = trip.Tick(here, t);
+        if (a.start_event) {
+            ++asks;
+            REQUIRE(a.scene);  // with its arguments
+            CHECK(*a.scene == "Graveyard_Child");
+            CHECK_FALSE(a.start.empty());
+        }
+    }
+    CHECK(asks == Trip::kMaxEventAsks);
+    CHECK(trip.phase() == Trip::Phase::idle);
+    CHECK(a.cancel_scene);
+    CHECK(Has(a.lines, "did not start the map change"));
+    CHECK(t < 15 * kS);  // well before the 60 s give-up
+}
+
+TEST_CASE("teleport: the arrival event is the entrance's own, else the plain one") {
+    CHECK(CoopTeleport::ArrivalEvent("KakarikoVillage_Child", "KakarikoVillage_Entrance") ==
+          "Dm_SY_BancChangeArrive_KakarikoVillage_01");
+    CHECK(CoopTeleport::ArrivalEvent("InsideTheDekuTree", "Entrance") == "Dm_SY_BancChangeArrive_InsideTheDekuTree_01");
+    CHECK(CoopTeleport::ArrivalEvent("KakarikoVillage_Child", "Kakariko_WellSide") == "Dm_SY_BancChangeArrive");
+    CHECK(CoopTeleport::ArrivalEvent("KokiriForest_Child", "LostWoodBridge_FrontOfHyruleField") ==
+          "Dm_SY_BancChangeArrive");
+    // Every start point of the table has an arrival (the plain one at least).
+    CHECK(CoopTeleport::ArrivalEvent("", "") == "Dm_SY_BancChangeArrive");
+}
+
+TEST_CASE("teleport: the minimap's hidden flag is the one Longshot's teleport clears") {
+    CHECK(coop::protocol::flag_hash("MapIconDeactivateByAreaActor") == 0x9a4dd779u);
 }
 
 TEST_CASE("teleport: after the scene change, a busy or silent player still gives the first place") {

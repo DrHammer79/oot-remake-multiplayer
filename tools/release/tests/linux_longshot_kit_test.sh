@@ -149,7 +149,7 @@ check 'build: stages shown, @@ lines for the launcher left out' bash -c 'grep -q
 check 'build: the module is put beside the game' [ "$(cat "$D/game/hookshot_coop.so" 2>/dev/null)" = module ]
 check 'build: coop.ini beside the game, empty server and name left as comments, port 27510' \
     bash -c 'grep -q "^# server =$" "$1" && grep -q "^# name =$" "$1" && grep -q "^port = 27510$" "$1"' _ "$D/game/coop.ini"
-check 'build: the puppet pack goes in data/game/mods/contents/<title>/coop-puppet' bash -c '[ -f "$1/game/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" ] && grep -q "puppet_pack --romfs .*nup --mod-dir .* --title-rows" "$2"' _ "$D" "$log"
+check 'build: the puppet pack goes in data/game/mods/contents/<title>/coop-puppet, with the title rows and the pause tab (--title-rows --pause-tab)' bash -c '[ -f "$1/game/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" ] && grep -q "puppet_pack --romfs .*nup --mod-dir " "$2" && grep -q -- "--mod-dir .* --title-rows --pause-tab" "$2"' _ "$D" "$log"
 check 'build: the game file is remembered' has "$D/game-files.txt" "Downloads/OoT [04004860224DEC000].nup"
 
 : >"$log"

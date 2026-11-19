@@ -2711,3 +2711,41 @@ TEST_CASE("bad boss cutscene messages are refused") {
   b[kHeaderSize + 3] = 81;  // max life (u32 little end first byte)
   CHECK(decode(b, back) == Error::bad_value);
 }
+
+TEST_CASE("bomb hand-over messages round-trip and refuse bad values") {
+  const ObjectId bomb{ObjectKind::made, 2, 99};
+  const Message take = BombTake{bomb, 3};
+  CHECK(check_received(take, Sender::client, kChannelOwnership) == Error::none);
+  CHECK(check_received(take, Sender::server, kChannelOwnership) == Error::wrong_sender);
+  Bytes b = must_encode(take);
+  CHECK(b.size() == kHeaderSize + 12);
+  Message back;
+  REQUIRE(decode(b, back) == Error::none);
+  CHECK(std::get<BombTake>(back) == std::get<BombTake>(take));
+
+  const Message answer = BombAnswer{bomb, 4, BombRefusal::busy};
+  CHECK(check_received(answer, Sender::server, kChannelOwnership) == Error::none);
+  CHECK(check_received(answer, Sender::client, kChannelOwnership) == Error::wrong_sender);
+  b = must_encode(answer);
+  CHECK(b.size() == kHeaderSize + 13);
+  REQUIRE(decode(b, back) == Error::none);
+  CHECK(std::get<BombAnswer>(back) == std::get<BombAnswer>(answer));
+  b[kHeaderSize + 12] = 0;  // no such refusal
+  CHECK(decode(b, back) == Error::bad_value);
+  b[kHeaderSize + 12] = kBombRefusalMax + 1;
+  CHECK(decode(b, back) == Error::bad_value);
+
+  const Message share = BombShare{true};
+  CHECK(check_received(share, Sender::client, kChannelOwnership) == Error::none);
+  CHECK(check_received(share, Sender::client, kChannelSession) != Error::none);
+  b = must_encode(share);
+  CHECK(b.size() == kHeaderSize + 1);
+  REQUIRE(decode(b, back) == Error::none);
+  CHECK(std::get<BombShare>(back).on);
+  b[kHeaderSize] = 2;
+  CHECK(decode(b, back) == Error::bad_value);
+
+  // Only a made object can be taken.
+  Bytes out;
+  CHECK(encode(BombTake{ObjectId{ObjectKind::placed, 0, 5}, 0}, out) == Error::bad_value);
+}

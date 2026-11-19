@@ -227,10 +227,10 @@ function Invoke-PuppetPackStep([string]$exeDir) {
     if ($packFrom -and (Test-Path -LiteralPath $packFrom) -and (Test-Path -LiteralPath $packTool)) {
         Write-Host '  Making the puppet pack (how you see the other players; about a minute) ...'
         $ErrorActionPreference = 'Continue'
-        # --title-rows: Host, Join and Co-op Settings as the title's own rows (title_menu.py; the owner, 2026-11-19).
-        # --pause-tab: the game's own pause menu gets a Multiplayer tab and page, which the co-op module shows (patch
-        # 0030, issue 264). Both as the Linux kit's build.sh.
-        & $python -I -B $packTool --romfs $packFrom --mod-dir $mod --title-rows --pause-tab 2>&1 | ForEach-Object { Write-Host "    $_" }
+        # The kit's pack command (kit-paths.ps1 Get-KitPackArgs: with the title's rows and the pause menu's tab), the
+        # same one the test kits run. As the Linux kit's build.sh.
+        $packArgs = Get-KitPackArgs $packTool $packFrom $mod
+        & $python @packArgs 2>&1 | ForEach-Object { Write-Host "    $_" }
         $code = $LASTEXITCODE
         $made = $true
         $ErrorActionPreference = 'Stop'

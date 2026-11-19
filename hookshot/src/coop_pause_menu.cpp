@@ -81,6 +81,13 @@ Row Action(std::string name, std::string value = {}, bool fixed = false) {
     return r;
 }
 
+// A row that opens a page: its value cell says where it stands and the arrow after it (right) says it goes deeper.
+Row PageRow(std::string name, std::string value, bool fixed = false) {
+    Row r = Action(std::move(name), std::move(value), fixed);
+    r.right = true;
+    return r;
+}
+
 Row Choice(std::string name, std::string value) {
     Row r;
     r.name = std::move(name);
@@ -221,32 +228,34 @@ std::vector<Menu::Line> Menu::Lines() const {
     case Page::kMain:
         // Co-op that came with the game's start: both rows still open their page, which says so (a press must never
         // do nothing; the owner, 2026-11-19).
-        out.push_back({Action("Host a game", session_.by_launcher ? "Co-op is on"
-                                             : host ? (session_.state == State::kHosting ? "Hosting" : "Starting...") : "",
-                              guest),
+        // (every row says where it stands in its value cell, and the arrow after it says it opens a page: the cell is
+        // never left empty, owner photo 2026-11-19)
+        out.push_back({PageRow("Host a game", session_.by_launcher ? "Co-op is on"
+                                              : host ? (session_.state == State::kHosting ? "Hosting" : "Starting...") : "Off",
+                               guest),
                        Act::kOpenHost,
                        session_.by_launcher ? kByLauncher
                        : guest ? "You are in a friend's game. To host your own, leave it first: Join a game, then Leave the game."
                        : host ? "Your game: the code for your friends, who joined, and Stop hosting."
                               : "Starts a game on this PC and makes a code. Send the code to your friends; they choose Join a "
                                 "game and paste it. They play on your save."});
-        out.push_back({Action("Join a game", session_.by_launcher ? "Co-op is on"
-                                             : guest ? (session_.state == State::kJoined ? "Joined" : "Joining...") : "",
-                              host),
+        out.push_back({PageRow("Join a game", session_.by_launcher ? "Co-op is on"
+                                              : guest ? (session_.state == State::kJoined ? "Joined" : "Joining...") : "Off",
+                               host),
                        Act::kOpenJoin,
                        session_.by_launcher ? kByLauncher
                        : host ? "You are hosting. To join a friend's game, stop yours first: Host a game, then Stop hosting."
                        : guest ? "The game you joined, and Leave the game."
                                : "Joins a friend's game with the code they sent you. You play on their save; your own saves "
                                  "are not touched."});
-        out.push_back({Action("Local co-op"), Act::kOpenLocal, "Two players on this PC."});
-        out.push_back({Action("Settings"), Act::kOpenSettings,
+        out.push_back({PageRow("Local co-op", "2 players"), Act::kOpenLocal, "Two players on this PC."});
+        out.push_back({PageRow("Settings", options_.name.size() > 12 ? options_.name.substr(0, Utf8Start(options_.name, 9)) + "..." : options_.name), Act::kOpenSettings,
                        "Your name, Link's look, how many players can join your game, voice chat, the chat key, "
                        "which controller this game reads, and players on the map."});
-        out.push_back({Action("Customize Link"), Act::kOpenCustomize,
+        out.push_back({PageRow("Customize Link", "Colours"), Act::kOpenCustomize,
                        "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture of "
                        "the result. Your Link wears it when you close the menu; the other players see your tunic's colour."});
-        out.push_back({Action("Commands"), Act::kOpenCommands, "The chat's commands, and the key that opens the chat."});
+        out.push_back({PageRow("Commands", ChatKeyWords(options_.chat_key)), Act::kOpenCommands, "The chat's commands, and the key that opens the chat."});
         break;
     case Page::kHost: {
         const bool typing_port = typing_ && typing_act_ == Act::kHostPort;
@@ -1232,7 +1241,7 @@ bool Menu::Paste(std::string_view text) {
                 UpdateJoinFromIpPort();
             }
         } else {
-            join_ip_ = line.substr(0, kMaxIpBytes);
+            join_ip_ = line.substr(0, Utf8Start(line, std::min(line.size(), kMaxIpBytes)));
             EndTyping(true);
         }
         if (note_.empty() && !Trim(join_).empty()) {
@@ -1257,7 +1266,7 @@ bool Menu::Paste(std::string_view text) {
         }
         const Act was = typing_act_;
         typing_fresh_ = false;
-        port_text_ = line.substr(0, kMaxPortBytes);
+        port_text_ = line.substr(0, Utf8Start(line, std::min(line.size(), kMaxPortBytes)));
         EndTyping(true);
         if (note_.empty() && was == Act::kJoinPort && !Trim(join_).empty()) {
             Go(Page::kJoin, Act::kJoinNow);
@@ -1396,7 +1405,7 @@ View Menu::view() const {
             const bool typed_row = line->act == Act::kName || line->act == Act::kHostPort ||
                                    line->act == Act::kJoinIp || line->act == Act::kJoinPort ||
                                    line->act == Act::kJoinPassword;
-            v.confirm = line->row.value.empty() ? "Open" : typed_row ? "Type" : "Choose";
+            v.confirm = line->row.value.empty() || line->row.right ? "Open" : typed_row ? "Type" : "Choose";
         } else {
             v.change = "Change";
         }

@@ -1466,6 +1466,17 @@ function Get-KitDownloadFailText([string]$File, [string]$Why, [string]$TestUrl, 
     ) -join "`n"
 }
 
+# The kit's puppet pack command, one place for every caller (hookshot-build.ps1's pack step, make-puppet-pack.cmd, the
+# test kits' jobs): python's arguments for tools\puppet_pack\build.py from the game file $From into the pack folder $Mod.
+# --title-rows / --pause-tab: the title's Host, Join and Co-op Settings rows and the pause menu's Multiplayer tab. They
+# make the pack replace three files the game reads at boot (each language's Mals archive, the Title and Common layout
+# archives), larger than the game's, with their sizes in the pack's size table; merge_tables.py (every start) takes
+# them out of play when the size table the game reads cannot hold them (another mod's table wins), as that crashed the
+# game at boot in 0.11.5's test (the old pack left in mods\contents as coop-puppet.old-b26; its table won).
+function Get-KitPackArgs([string]$Tool, [string]$From, [string]$Mod) {
+    return @('-I', '-B', $Tool, '--romfs', $From, '--mod-dir', $Mod, '--title-rows', '--pause-tab')
+}
+
 # #48: Longshot serves ONE resource size table, the winning mod's. A seed made on OOTRR's website (its folder put into
 # mods by hand) has its own, made without the puppet pack's entries, so the others could not be shown. Before the game
 # starts, tools\puppet_pack\merge_tables.py writes ONE table where the game reads it: that mod's entries and every

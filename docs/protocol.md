@@ -127,6 +127,24 @@ Issue 261: a room name is easy to guess, so the host can see who asks to join an
 
 Types 525 to 529 are kept for it (525 and 526 used).
 
+### Bomb hand-over (native puppets phase 2, `BOMB_TAKE`, `BOMB_ANSWER`, `BOMB_SHARE`)
+
+A player takes another player's bomb ([native-puppets.md](native-puppets.md), "Lift a bomb, and stash it"). Only games with `LICHII_COOP_BOMB_SHARE=1` send these (off by default); with it off nothing here is sent and the server never asks for a bomb. No protocol bump: a server that does not know these types drops them (counted as unknown), and the asker drops its lift when no answer comes.
+
+| Type | Name | Sender | Channel | Body |
+|---|---|---|---|---|
+| 530 | `BOMB_TAKE` | client | ownership | object id (kind made only), `u16` the owner's epoch as the sender last had it. Our Link lifted the copy of that bomb. Also marks the sender as sharing |
+| 531 | `BOMB_ANSWER` | server | ownership | object id, `u16` the owner's epoch now, `u8` refusal: 1 busy (another take or hand-over is in flight), 2 not a bomb (unknown, not a made `Item_Bomb` projectile, another scene, or the sender's own), 3 stale (the epoch is not the owner's now), 4 kept (the owner's game does not share bombs, or did not answer the ask in `handover_answer_us`). Others refused. Sent only to the asker |
+| 532 | `BOMB_SHARE` | client | ownership | `u8` on (0 or 1; others refused). Its game takes part in the bomb hand-over; sent after joining and every 5 s |
+
+The server's rules (server/session.cpp `on_bomb_take`, `bomb_heir`):
+
+- The first `BOMB_TAKE` for a bomb gets the usual `HANDOVER_ASK` to its owner (only an owner that said `BOMB_SHARE` on); any other while that ask is in flight is refused busy (two lifts at once: one wins).
+- The owner's `HANDOVER_STATE` moves it as any hand-over does: epoch + 1, `HANDOVER_STATE` (with the `fuse` left) to the taker, `OBJECT_OWNER` to the scene. A state with no `fuse` keeps the last relayed one. The old owner's later samples and its `OBJECT_REMOVE` with the old epoch are refused, so only the new owner's explosion reaches the games, once each.
+- No answer (the owner's Link holds it): unlike an enemy, a bomb is not moved; the asker gets `BOMB_ANSWER` kept.
+- A stash is the new owner's `OBJECT_REMOVE` with reason 4 picked up: relayed, forgotten, no explosion anywhere.
+- A made `Item_Bomb` whose owner leaves or changes scene goes on with the sharing player in its scene with the lowest number (`HANDOVER_STATE` with the last state, its fuse left), instead of being removed as gone. With no sharing player it is removed as before.
+
 ## Keep-alive and clock
 
 - `PING` every 250 ms from each side with the sender time; `PONG` echoes it with the receiver time. This gives the round trip and the clock offset.

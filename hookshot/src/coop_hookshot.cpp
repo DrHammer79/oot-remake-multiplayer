@@ -1005,7 +1005,9 @@ CoopDraw::Scene DrawScene() {
 }
 
 bool TypeKey(std::uint32_t vk, bool repeat) {
-    if (CoopPauseTab::Key(vk, repeat)) {   // the pause menu's Multiplayer page's field, while it is typed into
+    // The pause menu's Multiplayer page's field, while it is typed into: every key is its own, the ones it does not
+    // use too (a letter comes again as its character, TypeChar), so none opens the chat box or the cheats panel.
+    if (CoopPauseTab::Key(vk, repeat) || CoopPauseTab::KeysTaken()) {
         return true;
     }
     if (CoopPause::Key(vk, repeat)) {   // the Multiplayer tab's field, while it is typed into

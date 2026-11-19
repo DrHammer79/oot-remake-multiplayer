@@ -357,3 +357,9 @@ title-pressed-A   s*-pressed-A   0,0,1280,720     change  from=s*-on-host-A  min
 title-pressed-B   s*-pressed-B   0,0,1280,720     change  from=s*-on-host-B  min=8
 title-closed-A    s*-closed-A    0,0,1280,720     change  from=s*-pressed-A  min=8
 title-closed-B    s*-closed-B    0,0,1280,720     change  from=s*-pressed-B  min=8
+# hs-teleport-direct (teleport-direct-0116): A arrived at the Deku Tree entrance by the map change event, not black
+# (same view as hs-teleport-room's arrival: its references)
+hs-teleport-direct-A       A-arrived-A        160,80,960,520  refs  refs=hs-teleport-room-A
+hs-teleport-direct-B       A-arrived-B        160,80,960,520  refs  refs=hs-teleport-room-B
+# hs-teleport-direct-kak: A in Kakariko next to B, not black (stub, UNPROVEN until refs are captured from that run)
+hs-teleport-direct-kak-A   A-end-A            160,80,960,520  refs

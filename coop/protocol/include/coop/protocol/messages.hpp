@@ -163,6 +163,9 @@ enum class MessageType : std::uint16_t {
   boss_heart = 521,
   join_knock = 525,  // 525 to 529: the host lets joiners in (docs/protocol.md, "Host approval")
   join_allow = 526,
+  bomb_take = 530,  // 530 to 534: a bomb changes hands (docs/protocol.md, "Bomb hand-over")
+  bomb_answer = 531,
+  bomb_share = 532,
 };
 
 // PLAYER_SAMPLE component ids.
@@ -1789,6 +1792,42 @@ struct JoinAllow {
   bool operator==(const JoinAllow&) const = default;
 };
 
+// Native puppets phase 2 (docs/native-puppets.md, "Lift a bomb, and stash
+// it"; docs/protocol.md, "Bomb hand-over"). BOMB_TAKE (client only): our Link
+// lifted the copy of another player's made bomb; give it to us. The server
+// asks its owner (HANDOVER_ASK); a yes reaches us as HANDOVER_STATE (the fuse
+// left in it), a no as BOMB_ANSWER.
+struct BombTake {
+  ObjectId id;
+  std::uint16_t epoch = 0;  // the owner's epoch as we last had it
+  bool operator==(const BombTake&) const = default;
+};
+
+// BOMB_ANSWER (server only): why a BOMB_TAKE was refused. Sent only to the
+// asker.
+enum class BombRefusal : std::uint8_t {
+  busy = 1,        // another player's take (or a hand-over) is in flight
+  not_a_bomb = 2,  // unknown, not a made Item_Bomb, another scene, or ours already
+  stale = 3,       // the epoch is not the owner's now
+  kept = 4,        // the owner did not answer (its game keeps the bomb)
+};
+inline constexpr std::uint8_t kBombRefusalMax = 4;
+// BOMB_SHARE (client only): our game takes part in the bomb hand-over (its
+// switch is on). Sent after WELCOME and every few seconds; the server asks an
+// owner for its bomb, and hands on a bomb whose owner left, only with games
+// that said so.
+struct BombShare {
+  bool on = true;
+  bool operator==(const BombShare&) const = default;
+};
+
+struct BombAnswer {
+  ObjectId id;
+  std::uint16_t epoch = 0;  // the owner's epoch now
+  BombRefusal refusal = BombRefusal::busy;
+  bool operator==(const BombAnswer&) const = default;
+};
+
 // Split screen (docs/protocol.md, "Local players"): the extra players of one
 // game, seats 1 to kMaxLocalSeats (seat 0 is the connection's own player).
 inline constexpr std::uint8_t kMaxLocalSeats = 3;
@@ -1847,7 +1886,8 @@ using Message = std::variant<Hello, Welcome, Refused, PlayerJoined, PlayerLeft,
                              DbnoMode, DbnoStatus, DbnoRevive, DbnoThreat, Difficulty, VoiceFrame,
                              ModList, ModSettings, LobbyAction, LobbyMutes, LobbyResult,
                              LocalJoin, LocalJoined, LocalLeave, LocalSample, LocalMessage, LinkSound,
-                             BossScene, BossHeart, PlayerLook, SwitchState, JoinKnock, JoinAllow>;
+                             BossScene, BossHeart, PlayerLook, SwitchState, JoinKnock, JoinAllow,
+                             BombTake, BombAnswer, BombShare>;
 
 MessageType type_of(const Message& message);
 

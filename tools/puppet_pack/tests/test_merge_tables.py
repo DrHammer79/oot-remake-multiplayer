@@ -385,6 +385,126 @@ AI_KEY = "RSDB/ActorInfo.Product.111.rstbl.byml"
 SEED = "randomizer-adzfteae2h83-s89dbd7a9"
 
 
+MALS = "Mals/USen.Product.110.sarc.zs"
+TITLE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
+
+
+@unittest.skipIf(zstandard is None, "needs zstandard")
+class MenuGuardTest(unittest.TestCase):
+    """guard_menus: the pack's menu files (--title-rows / --pause-tab) only where the size table the game reads holds
+    their sizes (0.11.5's test: an old pack left as contents/.../coop-puppet.old-b26 won the table and the language
+    archive failed to load at boot: a crash)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="merge_tables_menus_")
+        self.mods = os.path.join(self.dir, "mods")
+        self.romfs = os.path.join(self.dir, "romfs")
+        self.lines = []
+        self.pack = os.path.join(self.mods, *PACK.split("/"))
+        self.mals = 2373416 + 336         # the game's entry (made up near the real one)
+        self.grown = self.mals + 1048 + 0x1000
+        self.put_table(PACK, {self.crc(MALS): self.grown, self.crc(TITLE): 230000, 7: 70})
+        for rel in (MALS, TITLE):
+            self.put(os.path.join(self.pack, "romfs", *rel.split("/")), b"pack " + rel.encode())
+        self.put(os.path.join(self.pack, "coop_puppet.json"),
+                 b'{"title_rows": true, "title_menu": ["%s", "%s"], "pause_menu": ["%s"]}'
+                 % (TITLE.encode(), MALS.encode(), MALS.encode()))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    @staticmethod
+    def crc(rel):
+        return rstb.Rstb.crc(rel[:-3])
+
+    @staticmethod
+    def put(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def put_table(self, mod, by_crc):
+        raw = zstandard.ZstdCompressor(write_content_size=True).compress(rstb.Rstb(by_crc=by_crc).dumps())
+        self.put(os.path.join(self.mods, *mod.split("/"), "romfs", "System", "Resource", NAME), raw)
+
+    def guard(self):
+        self.lines = []
+        return mt.guard_menus(self.mods, self.romfs, self.lines.append)
+
+    def in_play(self, rel):
+        return os.path.isfile(os.path.join(self.pack, "romfs", *rel.split("/")))
+
+    def kept(self, rel):
+        return os.path.isfile(os.path.join(self.pack, mt.MENU_KEEP, *rel.split("/")))
+
+    def test_the_menu_files_are_the_manifests_menu_lists(self):
+        self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS])
+        os.remove(os.path.join(self.pack, "coop_puppet.json"))
+        self.assertEqual(mt.menu_files(self.pack), [])
+
+    def test_the_pack_reading_its_own_table_keeps_its_menus(self):
+        self.assertEqual(self.guard(), 0)
+        self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
+        self.assertEqual(self.lines, [])
+        self.assertFalse(os.path.isdir(os.path.join(self.pack, mt.MENU_KEEP)))
+
+    def test_an_old_pack_left_in_contents_takes_the_menus_out_and_they_come_back_without_it(self):
+        old = PACK + ".old-b26"   # (sorts after the pack: its table wins; a title's own mod, never rewritten)
+        self.put_table(old, {self.crc(MALS): self.mals, 7: 70})
+        self.assertEqual(self.guard(), 0)
+        self.assertFalse(self.in_play(MALS) or self.in_play(TITLE))
+        self.assertTrue(self.kept(MALS) and self.kept(TITLE))
+        self.assertEqual(len(self.lines), 1)
+        self.assertIn("coop-puppet.old-b26", self.lines[0])
+        self.assertIn("Multiplayer tab are off", self.lines[0])
+        self.guard()   # (every start while it wins: said again, nothing lost)
+        self.assertTrue(self.kept(MALS) and self.kept(TITLE))
+        shutil.rmtree(os.path.join(self.mods, *old.split("/")))
+        self.assertEqual(self.guard(), 0)
+        self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
+        self.assertFalse(os.path.isdir(os.path.join(self.pack, mt.MENU_KEEP)))
+        self.assertIn("are back (2 files)", self.lines[0])
+        with open(os.path.join(self.pack, "romfs", *MALS.split("/")), "rb") as f:
+            self.assertEqual(f.read(), b"pack " + MALS.encode())
+
+    def test_a_winning_table_without_one_entry_counts_as_lacking_it(self):
+        self.put_table("zz-site-seed", {self.crc(TITLE): 230000})   # (no Mals entry: the game's own would be used)
+        self.guard()
+        self.assertFalse(self.in_play(MALS))
+        self.assertIn("1 of the puppet pack's menu files", self.lines[0])
+
+    def test_a_winning_table_that_holds_the_sizes_keeps_the_menus(self):
+        self.put_table("zz-site-seed", {self.crc(MALS): self.grown + 5, self.crc(TITLE): 230000})   # (merged)
+        self.assertEqual(self.guard(), 0)
+        self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
+        self.assertEqual(self.lines, [])
+
+    def test_a_pack_made_again_while_its_menus_were_out_keeps_its_new_files(self):
+        self.put_table(PACK + ".old-b26", {self.crc(MALS): self.mals})
+        self.guard()
+        self.put(os.path.join(self.pack, "romfs", *MALS.split("/")), b"new pack")   # (build.py ran again)
+        shutil.rmtree(os.path.join(self.mods, *(PACK + ".old-b26").split("/")))
+        self.guard()
+        with open(os.path.join(self.pack, "romfs", *MALS.split("/")), "rb") as f:
+            self.assertEqual(f.read(), b"new pack")
+        self.assertTrue(self.in_play(TITLE))
+        self.assertFalse(os.path.isdir(os.path.join(self.pack, mt.MENU_KEEP)))
+
+    def test_a_mod_switched_off_in_the_mods_list_does_not_take_the_menus_out(self):
+        self.put_table("zz-site-seed", {self.crc(MALS): self.mals})
+        self.put(os.path.join(self.mods, mt.LIST_FILE), b"coop-mods 1\noff zz-site-seed\n")
+        self.guard()
+        self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
+
+    def test_every_start_runs_the_guard_after_the_merge(self):
+        self.put_table(PACK + ".old-b26", {self.crc(MALS): self.mals})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mt.main(["--mods", self.mods, "--romfs", self.romfs])
+        self.assertFalse(self.in_play(MALS))
+        self.assertIn("Menus: the game reads contents/0400486024DEC000/coop-puppet.old-b26's size table", out.getvalue())
+
+
 @unittest.skipIf(zstandard is None, "needs zstandard")
 class MergeRowsTest(unittest.TestCase):
     """Player report 144/145: a seed with its own RSDB/ActorInfo hid the puppet pack's rows (create refused)."""
