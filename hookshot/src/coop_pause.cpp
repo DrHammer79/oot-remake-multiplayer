@@ -325,6 +325,9 @@ void Follow(const HosCoopStatus& st) {
         const CoopTitleMenu::Options& o = g_menu.options();
         CoopLan::Game g;
         g.name = o.name;
+        for (const auto& row : CoopHook::PlayerList()) {   // (the name co-op plays this game under, once it is in)
+            if (row.self && !row.name.empty()) g.name = row.name;
+        }
         g.port = o.host_port != 0 ? o.host_port : CoopTitleMenu::kDefaultPort;
         const CoopLobby::Seen seen = CoopLobby::Now();
         g.players = seen.connected ? static_cast<int>(seen.players.size()) : 1;
