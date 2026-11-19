@@ -386,12 +386,18 @@ SessionView ViewNow(View view) {
         v.s.lan_listed = static_cast<int>(games.size());
         v.s.lan_page = g_lan_page.load();
         for (std::size_t i = 0; i < games.size(); ++i) {
-            v.lan_rows.push_back(CoopLan::RowText(games[i], coop::protocol::kProtocolVersion));
-            if (i < 32 && CoopLan::Joinable(games[i], coop::protocol::kProtocolVersion)) v.s.lan_joinable |= 1u << i;
+            const CoopLan::Heard& h = games[i];
+            v.lan_rows.push_back(CoopLan::RowText(h, coop::protocol::kProtocolVersion));
+            v.lan_list.push_back(ListLine{h.game.name + "'s game" + (h.game.room.empty() ? "" : ": " + h.game.room),
+                                          ListValue(h.game.players, h.game.max,
+                                                    h.game.protocol == coop::protocol::kProtocolVersion)});
+            if (i < 32 && CoopLan::Joinable(h, coop::protocol::kProtocolVersion)) v.s.lan_joinable |= 1u << i;
         }
         const CoopRoomList::Snapshot rooms = CoopRoomList::Now();
         for (const CoopRoomList::Room& r : rooms.rooms) {
             v.online_rows.push_back(CoopRoomList::CellText(r, coop::protocol::kProtocolVersion));
+            v.online_list.push_back(ListLine{r.room + " (" + r.host + ")",
+                                             ListValue(r.players, r.max, r.protocol == coop::protocol::kProtocolVersion)});
         }
         v.online_state = rooms.state;
         v.s.online_listed = static_cast<int>(rooms.rooms.size());
@@ -444,14 +450,16 @@ bool LiveDue(std::uint64_t gen) {
     return true;
 }
 
-// The game browser's cells (View::kLan): shown with their games' words, the one picked bright and the others dimmed
-// while the pad or the mouse is in them; hidden on every other view. The panes are looked up once an opening (the pack's
-// Pa_Game_00..07 in our page's own layout); an older pack has none, and the browser lists nothing then. g_live_mutex.
+// The game browser's list (View::kLan): the header and a page of games in the pack's Options rows (Pa_List_00..06 in our
+// page's own layout), each its name on the left and its players on the right; the arrows between which an Options row
+// shows its value hidden. The row picked bright and the others dimmed while the pad or the mouse is in the list; all
+// hidden on every other view. Looked up once an opening; an older pack has none, and the browser lists nothing then.
+// g_live_mutex.
 std::uint64_t g_cells_gen = 0;
-std::array<std::uint64_t, kCells> g_cell_panes{};
-std::array<int, kCells> g_cell_vis{};
-std::array<float, kCells> g_cell_alpha{};
-// Our page's five rows: dimmed while the cells have the pad (the game's cursor frame stays on its row there); on the
+std::array<std::uint64_t, kListRows> g_list_panes{};
+std::array<int, kListRows> g_list_vis{};
+std::array<float, kListRows> g_list_alpha{};
+// Our page's five rows: dimmed while the list has the pad (the game's cursor frame stays on its row there); on the
 // browser, the list not shown dimmed too, as a tab.
 std::array<std::uint64_t, kRows> g_row_panes{};
 std::array<float, kRows> g_rows_alpha{};
@@ -463,15 +471,21 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
         const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
         int found = 0;
-        for (int i = 0; i < kCells; ++i) {
+        for (int i = 0; i < kListRows; ++i) {
             char name[16];
-            std::snprintf(name, sizeof name, "Pa_Game_%02d", i);
+            std::snprintf(name, sizeof name, "Pa_List_%02d", i);
             const std::uint64_t pane = PaneIn(ctx, ours, name);
             const std::size_t k = static_cast<std::size_t>(i);
-            g_cell_panes[k] = IsPart(pane) ? pane : 0;
-            g_cell_pane_at[k] = g_cell_panes[k];
-            g_cell_vis[k] = -1, g_cell_alpha[k] = -1;
-            found += IsPart(pane) ? 1 : 0;
+            g_list_panes[k] = IsPart(pane) ? pane : 0;
+            if (i > 0) g_cell_pane_at[k - 1] = g_list_panes[k];
+            g_list_vis[k] = -1, g_list_alpha[k] = -1;
+            if (!IsPart(pane)) continue;
+            ++found;
+            // (inside the row: the value's arrows and the check mark an Options row has, never ours)
+            const std::uint64_t row = PartLayout(ours, name);
+            for (const char* inner : {"N_Content_00", "P_CheckMark_00"}) {
+                if (const std::uint64_t in = PaneIn(ctx, row, inner); in != 0) SetVisible(ctx, in, false);
+            }
         }
         for (int r = 0; r < kRows; ++r) {
             char name[16];
@@ -480,28 +494,31 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             g_row_panes[static_cast<std::size_t>(r)] = IsPart(pane) ? pane : 0;
         }
         g_rows_alpha.fill(-1);
-        LOG_INFO(Core, "coop: pause tab: the game browser's cells: {} of {}{}", found, kCells,
-                 found == kCells ? "" : " (build the puppet pack again for the browser)");
+        LOG_INFO(Core, "coop: pause tab: the game browser's list rows: {} of {}{}", found, kListRows,
+                 found == kListRows ? "" : " (build the puppet pack again for the browser)");
     }
     const bool browse = ViewShown() == View::kLan;
-    const std::vector<std::string> cells = CellTexts(v);
+    const std::vector<ListLine> lines = ListLines(v);
     int games = 0;
     for (int c = 0; c < kCells; ++c) games += CellIndex(v.s, c) >= 0 ? 1 : 0;
     g_cell_games = browse ? games : 0;
     const int picked = browse ? g_cell.load() : -1;
-    for (int i = 0; i < kCells; ++i) {
+    for (int i = 0; i < kListRows; ++i) {
         const std::size_t k = static_cast<std::size_t>(i);
-        const std::uint64_t pane = g_cell_panes[k];
+        const std::uint64_t pane = g_list_panes[k];
         if (pane == 0) continue;
-        const bool on = browse && !cells[k].empty();
+        const bool on = browse && !lines[k].name.empty();
         if (on) {
             char path[64];
-            std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Game_%02d/T_Btn_00", i);
-            LiveText(ctx, layout, gen, path, 8 + i, cells[k]);
+            std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Option_00", i);
+            LiveText(ctx, layout, gen, path, 8 + 2 * i, lines[k].name);
+            std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Text_00", i);
+            LiveText(ctx, layout, gen, path, 9 + 2 * i, lines[k].value.empty() ? std::string(" ") : lines[k].value);
         }
-        if (g_cell_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_cell_vis[k] = on ? 1 : 0;
-        const float alpha = picked < 0 || picked == i ? 1.0f : 0.45f;
-        if (on && g_cell_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_cell_alpha[k] = alpha;
+        if (g_list_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_list_vis[k] = on ? 1 : 0;
+        // (the header a little dim, as a table's; a game bright when picked, or all of them when the rows have the pad)
+        const float alpha = i == 0 ? 0.7f : picked < 0 || picked == i - 1 ? 1.0f : 0.45f;
+        if (on && g_list_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_list_alpha[k] = alpha;
     }
     for (int r = 0; r < kRows; ++r) {
         const std::size_t k = static_cast<std::size_t>(r);
@@ -768,8 +785,8 @@ RowBoxes ReadRowBoxes(std::uint64_t now_ms) {
     return boxes;
 }
 
-// The browser's cells where the game puts them now: each pane's global matrix (+0x28: the scales at [0] and [4], the
-// place at [9] and [10], as the map page reads its panes) and the copied button's size (720 x 180, PaSystemMenu_00's).
+// The browser's game rows where the game puts them now: each pane's global matrix (+0x28: the scales at [0] and [4],
+// the place at [9] and [10], as the map page reads its panes) and an Options row's bar (1880 wide).
 std::array<RowBox, kCells> ReadCellBoxes() {
     std::array<RowBox, kCells> boxes{};
     for (int i = 0; i < kCells; ++i) {
@@ -777,7 +794,7 @@ std::array<RowBox, kCells> ReadCellBoxes() {
         float m[12] = {};
         if (pane == 0 || !CoopRuntime::Read(pane + 0x28, m, sizeof m) || !(m[0] > 1e-3f) || !(m[4] > 1e-3f)) continue;
         if ((Read<std::uint32_t>(pane + 0xa8) & 1u) == 0) continue;   // (hidden: bit 0 of its flags, kSetVisible's)
-        const float hw = 360.0f * m[0], hh = 90.0f * m[4];
+        const float hw = 940.0f * m[0], hh = 70.0f * m[4];   // (an Options row: 1880 wide, its bar about 140 tall)
         boxes[static_cast<std::size_t>(i)] = RowBox{true, m[9] - hw, m[10] - hh, m[9] + hw, m[10] + hh};
     }
     return boxes;
@@ -1230,8 +1247,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 const bool right = (bdown & (kPadRight | kPadStickRight)) != 0, left = (bdown & (kPadLeft | kPadStickLeft)) != 0;
                 const bool up = (bdown & (kPadUp | kPadStickUp)) != 0, down = (bdown & (kPadDown | kPadStickDown)) != 0;
                 if (cell < 0 && right && games > 0) {
-                    const int r = FocusedRow();
-                    cell = std::clamp((r >= 0 && r < 4 ? r : 3) * kCellColumns, 0, games - 1);
+                    cell = 0;   // (the list's first game)
                     g_page.Sound("button_on");
                 } else if (cell >= 0 && (right || left || up || down)) {
                     const int to = CellMove(cell, right ? 1 : left ? -1 : 0, down ? 1 : up ? -1 : 0, games);
