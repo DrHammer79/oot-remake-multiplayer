@@ -44,6 +44,14 @@ bool StartSaveWait(const std::string& host);
 void StopSaveWait();
 // The title waits for the host's save (Longshot patch 0028's hold, hos_coop_title_hold).
 bool SaveWaitWaiting();
+// The player's own A on the title's first button (Continue, or Start in the title's own menu) in the last
+// kPlayerChoiceMs, also when a code mod holds it. A code mod's button choice then is the player's (Save Profiles' file
+// select takes that A and the ones in it, and presses Continue once a file is picked there), so co-op being busy at
+// the title does not refuse it. NotePlayerPad sees player 1's buttons before the code mods' holds come off
+// (coop_pad_order.h).
+inline constexpr std::uint64_t kPlayerChoiceMs = 10000;
+void NotePlayerPad(std::uint64_t buttons);
+bool PlayerChoseLately();
 
 // This PC's own id for rejoining (coop.ini client_id, made once): the module's
 // join helper uses the same nonce and port for the same invite with it.

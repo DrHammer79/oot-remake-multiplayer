@@ -113,6 +113,7 @@ std::atomic<std::uint64_t> g_screen{0};
 std::atomic<std::uint64_t> g_last_step_ms{0};
 std::atomic<bool> g_step_seen{false};
 std::atomic<bool> g_rows{false};
+std::atomic<std::uint64_t> g_player_chose_ms{0};   // the player's own A on a game button of the title (0: none yet)
 
 // Everything below. Never held while calling into CoopPause (it calls in here: StartSaveWait, StopSaveWait).
 CoopTitleMenu::SaveListRefresh g_list;   // the title's step only (one thread)
@@ -665,6 +666,23 @@ void OnTitle(void* ctx, std::uint64_t screen, int event) {
     }
 }
 
+void NotePlayerPad(std::uint64_t buttons) {
+    static std::uint64_t last = 0;
+    const std::uint64_t down = buttons & ~last;
+    last = buttons;
+    if ((down & kA) == 0) {
+        return;
+    }
+    std::lock_guard lock(g_mutex);
+    if (TitleUp() && FocusedIndex(g_screen.load()) == 0) {
+        const std::uint64_t now = std::max<std::uint64_t>(NowMs(), 1);
+        if (const std::uint64_t before = g_player_chose_ms.exchange(now); before == 0 || now - before >= kPlayerChoiceMs) {
+            LOG_INFO(Core, "coop: title: the player's own A on the title's first button (a code mod's choice for them "
+                           "goes through for {} s after it, co-op busy or not)", kPlayerChoiceMs / 1000);
+        }
+    }
+}
+
 std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) {
     (void)stick;
     std::optional<CoopPauseMenu::Page> open;   // (opened after the lock: CoopPause calls in here)
@@ -783,6 +801,11 @@ void StopSaveWait() {
 bool SaveWaitWaiting() {
     std::lock_guard lock(g_mutex);
     return g_wait.waiting();
+}
+
+bool PlayerChoseLately() {
+    const std::uint64_t at = g_player_chose_ms.load();
+    return at != 0 && NowMs() - at < kPlayerChoiceMs;
 }
 
 bool AskSaveListRead() {
