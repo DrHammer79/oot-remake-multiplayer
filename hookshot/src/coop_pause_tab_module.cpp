@@ -340,13 +340,16 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
 // parent of the game's tabs (seen in a run, 2026-11-19: the fourth tab's place on the screen, +0x50, from 1024 down to
 // 1000 in 300 ms as the strip opens, and its alpha with its parents', +0x78, from 0.16 to 1), and ours sits under
 // RootPane, out of that parent. So at each strip update ours takes the fourth's height (its own place, +0x70: RootPane
-// is the screen's origin) and alpha (the alpha setter, which also marks the pane for its new place). Not when the two
+// is the screen's origin, then kPaneMoved) and alpha (the alpha setter). Not when the two
 // are far apart (not the strip seen: ours stays where the pack put it).
 void FollowFourth(void* ctx) {
     if (!g_tab_shown || g_fourth_pane == 0 || g_strip_bad) return;
     const float y = Read<float>(g_fourth_pane + kPaneScreenY), alpha = Read<float>(g_fourth_pane + kPaneScreenAlpha);
     if (!std::isfinite(y) || !std::isfinite(alpha) || std::fabs(y - g_tab_rest_y) > kFollowMost) return;
-    CoopRuntime::Write(g_tab_pane + kPaneOwnY, &y, sizeof y);
+    if (Read<float>(g_tab_pane + kPaneOwnY) != y) {
+        CoopRuntime::Write(g_tab_pane + kPaneOwnY, &y, sizeof y);
+        Call(ctx, kPaneMoved, g_tab_pane);
+    }
     CallAlpha(ctx, g_tab_pane, std::clamp(alpha, 0.0f, 1.0f));
 }
 

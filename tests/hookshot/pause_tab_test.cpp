@@ -73,6 +73,7 @@ TEST_CASE("pause tab: the screens are known by their class's vtable") {
     CHECK(0x80020000 + kPaneTable == 0x8045c040);
     CHECK(0x80020000 + kPaneAlpha == 0x802f8ac0);
     CHECK(0x80020000 + kTabOpen == 0x80228350);
+    CHECK(0x80020000 + kPaneMoved == 0x8154af50);
     CHECK(0x80020000 + kPaneByName == 0x8045e300);
 }
 
