@@ -249,7 +249,15 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     pad_last_ = buttons;
     swallow_ &= buttons;   // (let go: the game gets it again)
     if (shown_ && !CanStay(now_ms)) {
-        Hide("the menu's state changed", pages_.state == 3 || pages_.state == 0 || strip_.state == 3 || strip_.state == 0);
+        // (local trace: which of CanStay's conditions failed)
+        static char why[200];
+        std::snprintf(why, sizeof why,
+                      "the menu's state changed [usable %d, pages %d ms ago state %d page %d asked %d, strip %d ms ago "
+                      "state %d mode %d tabs %d, blocked %d]",
+                      usable_ ? 1 : 0, static_cast<int>(now_ms - pages_ms_), pages_.state, pages_.page, pages_.asked,
+                      static_cast<int>(now_ms - strip_ms_), strip_.state, strip_.mode, strip_.tabs,
+                      now_ms < blocked_until_ms_ ? 1 : 0);
+        Hide(why, pages_.state == 3 || pages_.state == 0 || strip_.state == 3 || strip_.state == 0);
     }
     if (!shown_) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
