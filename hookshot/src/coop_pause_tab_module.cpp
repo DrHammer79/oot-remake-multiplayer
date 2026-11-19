@@ -1602,11 +1602,11 @@ int TabAt(float x, float y) noexcept {
         if (std::abs(x - l) < 110.0f) return 8;
         if (std::abs(x - r) < 110.0f) return 9;
         int best = -1;
-        float near = 1e9f;
+        float closest = 1e9f;
         for (int i = 0; i < 6; ++i) {
-            if (const float dx = std::abs(x - centres[i]); dx < near) near = dx, best = i;
+            if (const float dx = std::abs(x - centres[i]); dx < closest) closest = dx, best = i;
         }
-        return near < 200.0f ? best : -1;
+        return closest < 200.0f ? best : -1;
     } catch (...) {
         return -2;
     }
