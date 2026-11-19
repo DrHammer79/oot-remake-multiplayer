@@ -7,6 +7,7 @@
 #include "coop_pause_tab.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -15,6 +16,7 @@
 #include <mutex>
 #include <utility>
 #include <string>
+#include <tuple>
 
 #include "common/logging.h"
 #include "coop_hook.h"
@@ -29,6 +31,17 @@
 #include "coop_lobby.h"
 #include "coop_save.h"
 #include "coop_title_menu.h"
+#include "coop_window_brand.h"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace CoopPauseTab {
 
@@ -573,6 +586,74 @@ int FocusedRow() {
     return last_row;
 }
 
+// --- The mouse over our rows (MouseRows): the cursor and the rows' boxes, read at each pad read. g_mutex. ---
+MouseRows g_mouse_rows;
+std::uint64_t g_row_buttons_gen = 0, g_row_buttons_ms = 0;
+std::array<std::uint64_t, kRows> g_row_buttons{};   // System's Pa_Button_00..04 of this opening of the pages
+
+// The rows' boxes where the game puts them now. System's five buttons are found once an opening (again each 500 ms
+// until all five are), among the pages screen's buttons: the shown ones of that name.
+RowBoxes ReadRowBoxes(std::uint64_t now_ms) {
+    RowBoxes boxes{};
+    const std::uint64_t pages = g_pages_screen;
+    if (pages == 0) return boxes;
+    const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+    const bool all = std::all_of(g_row_buttons.begin(), g_row_buttons.end(), [](std::uint64_t b) { return b != 0; });
+    if (g_row_buttons_gen != g_pages_gen || (!all && now_ms - g_row_buttons_ms > 500)) {
+        g_row_buttons_gen = g_pages_gen, g_row_buttons_ms = now_ms, g_row_buttons = {};
+        for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
+            const int row = RowOfButton(CoopModScreens::ButtonName(read, b));
+            if (row >= 0 && g_row_buttons[static_cast<std::size_t>(row)] == 0 && CoopModScreens::HitBox(read, b)) {
+                g_row_buttons[static_cast<std::size_t>(row)] = b;
+            }
+        }
+    }
+    for (int i = 0; i < kRows; ++i) {
+        if (const auto box = CoopModScreens::HitBox(read, g_row_buttons[static_cast<std::size_t>(i)])) {
+            boxes[static_cast<std::size_t>(i)] = RowBox{true, box->x0, box->y0, box->x1, box->y1};
+        }
+    }
+    return boxes;
+}
+
+#ifdef _WIN32
+BOOL CALLBACK FindGameWindow(HWND h, LPARAM out) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    char cls[64] = {};
+    if (pid == GetCurrentProcessId() && IsWindowVisible(h) && GetClassNameA(h, cls, sizeof cls) > 0 &&
+        CoopWindowBrand::IsGameWindowClass(cls)) {
+        *reinterpret_cast<HWND*>(out) = h;
+        return FALSE;
+    }
+    return TRUE;
+}
+#endif
+
+// The cursor over the game's picture, in the layout's units, with the game's window in front (false otherwise), and
+// the left button.
+bool ReadCursor(float* x, float* y, bool* left) {
+#ifdef _WIN32
+    static HWND window = nullptr;
+    if (window == nullptr || !IsWindow(window)) {
+        window = nullptr;
+        EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&window));
+        if (window == nullptr) return false;
+    }
+    if (GetForegroundWindow() != window) return false;
+    POINT p{};
+    RECT rc{};
+    if (!GetCursorPos(&p) || !ScreenToClient(window, &p) || !GetClientRect(window, &rc)) return false;
+    if (p.x < 0 || p.y < 0 || p.x >= rc.right || p.y >= rc.bottom) return false;
+    std::tie(*x, *y) = LayoutPoint(p.x, p.y, rc.right, rc.bottom);
+    *left = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+    return true;
+#else
+    (void)x, (void)y, (void)left;
+    return false;   // (Longshot's mouse in the game's menus is Windows' only)
+#endif
+}
+
 void SetView(View v) {
     if (g_view.exchange(static_cast<int>(v)) != static_cast<int>(v)) {
         g_confirm_until = 0;      // (a new view: no A waited)
@@ -869,7 +950,23 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             if (typing_was != g_page.Typing() || field_was != field_now) g_live_poke = true;
             shown = g_page.Shown();
             decide = g_page.TakeDecide();
-            row = decide ? FocusedRow() : -1;   // (under the lock: the pages screen is the screens' updates')
+            // The mouse over our rows (MouseRows): the game's cursor stepped to the row under it, and an A just after
+            // a click (Longshot presses A for it) is the clicked row's, not the row the game's cursor is on.
+            if (shown && !typing) {
+                MouseRows::In mi;
+                mi.now_ms = NowMs();
+                mi.inside = ReadCursor(&mi.x, &mi.y, &mi.left);
+                mi.pad = (in & (kPadUp | kPadDown | kPadStickUp | kPadStickDown)) != 0;
+                mi.focused = FocusedRow();
+                if (mi.inside) mi.boxes = ReadRowBoxes(mi.now_ms);
+                out |= g_mouse_rows.Step(mi);
+            } else {
+                g_mouse_rows.Reset();
+            }
+            if (decide) {
+                const int clicked = g_mouse_rows.TakeClicked(NowMs());
+                row = clicked >= 0 ? clicked : FocusedRow();   // (under the lock: the pages screen is the updates')
+            }
             if (g_page.TakeBack()) SetView(BackOf(ViewShown()));   // (B in a view: where its Back goes)
             if (!shown) SetView(View::kMain);
             g_page.SetSubView(ViewShown() != View::kMain);

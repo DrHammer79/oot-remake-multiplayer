@@ -93,4 +93,35 @@ bool Choosable(const Reader& read, std::uint64_t button) {
     return button != 0 && read(button + kButtonFlags, &flags, sizeof flags) && (flags & kChoosable) == kChoosable;
 }
 
+std::vector<std::uint64_t> Buttons(const Reader& read, std::uint64_t screen) {
+    std::vector<std::uint64_t> out;
+    if (screen == 0) {
+        return out;
+    }
+    const std::uint64_t head = screen + kListHead;
+    const auto off = static_cast<std::int64_t>(Peek<std::int32_t>(read, screen + kListEntryOffset));
+    std::uint64_t node = Peek<std::uint64_t>(read, screen + kListFirst);
+    for (int i = 0; i < kMaxButtons && node != 0 && node != head; ++i) {
+        if (const std::uint64_t button = Peek<std::uint64_t>(read, node - static_cast<std::uint64_t>(off) + kEntryButton);
+            button != 0) {
+            out.push_back(button);
+        }
+        node = Peek<std::uint64_t>(read, node + 8);
+    }
+    return out;
+}
+
+std::optional<Box> HitBox(const Reader& read, std::uint64_t button) {
+    const std::uint64_t box = Peek<std::uint64_t>(read, button + kHitBox);
+    float m[12] = {}, r[4] = {};
+    if (button == 0 || box < 0x100000 || !read(box + kBoxMatrix, m, sizeof m) || !read(box + kBoxRect, r, sizeof r)) {
+        return std::nullopt;
+    }
+    const float sx = m[0], sy = m[4], tx = m[9], ty = m[10];
+    if (!(sx > 1e-3f) || !(sy > 1e-3f) || !(r[2] > 0) || !(r[3] > 0)) {
+        return std::nullopt;   // (not shown: its page's matrix is all 0)
+    }
+    return Box{tx + sx * r[0], ty + sy * r[1], tx + sx * (r[0] + r[2]), ty + sy * (r[1] + r[3])};
+}
+
 }  // namespace CoopModScreens

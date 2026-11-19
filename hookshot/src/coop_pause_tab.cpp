@@ -3,6 +3,7 @@
 #include "coop_pause_tab.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <utility>
 
@@ -397,6 +398,79 @@ float Ahead(float prev, float now, float limit) {
     return next;
 }
 
+std::pair<float, float> LayoutPoint(int px, int py, int w, int h) {
+    if (w <= 0 || h <= 0) return {0.0f, 0.0f};
+    const float sw = 3840.0f / static_cast<float>(w), sh = 2160.0f / static_cast<float>(h);
+    const float scale = sw > sh ? sw : sh;
+    return {static_cast<float>(px - w / 2) * scale, static_cast<float>(h / 2 - py) * scale};
+}
+
+int RowAt(const RowBoxes& boxes, float x, float y) {
+    for (int i = 0; i < kRows; ++i) {
+        const RowBox& r = boxes[static_cast<std::size_t>(i)];
+        if (!r.shown) continue;
+        const float cx = (r.x0 + r.x1) / 2;
+        float above = -1, below = -1;   // (the gaps to the nearest box above and below in the column)
+        for (int j = 0; j < kRows; ++j) {
+            const RowBox& o = boxes[static_cast<std::size_t>(j)];
+            const float ox = (o.x0 + o.x1) / 2;
+            if (j == i || !o.shown || ox - cx > 60 || cx - ox > 60) continue;
+            const float up = o.y0 - r.y1, down = r.y0 - o.y1;
+            if (up >= 0 && up < 240 && (above < 0 || up < above)) above = up;
+            if (down >= 0 && down < 240 && (below < 0 || down < below)) below = down;
+        }
+        float y0 = r.y0, y1 = r.y1;
+        if (above >= 0) y1 += above / 2;
+        if (below >= 0) y0 -= below / 2;
+        if (above >= 0 && below < 0) y0 -= above / 2;   // (an end of the column)
+        if (below >= 0 && above < 0) y1 += below / 2;
+        if (x >= r.x0 && x <= r.x1 && y >= y0 && y <= y1) return i;
+    }
+    return -1;
+}
+
+std::uint64_t MouseRows::Step(const In& in) {
+    const int hover = in.inside ? RowAt(in.boxes, in.x, in.y) : -1;
+    const bool moved = in.inside && (!seen_ || std::abs(in.x - x_) > 2 || std::abs(in.y - y_) > 2);
+    if (in.inside) seen_ = true, x_ = in.x, y_ = in.y;
+    if (in.pad) target_ = -1;   // (the player's own steps: the mouse's stop)
+    if (moved && hover >= 0 && hover != target_ && hover != in.focused) target_ = hover, since_ = in.now_ms, step_from_ = -1;
+    if (in.left && !left_) press_ = hover;
+    if (!in.left && left_) {
+        if (hover >= 0 && hover == press_) {   // (a click: pressed and let go on one row)
+            clicked_ = hover, clicked_ms_ = in.now_ms;
+            if (hover != in.focused) target_ = hover, since_ = in.now_ms, step_from_ = -1;
+        }
+        press_ = -1;
+    }
+    left_ = in.left;
+    if (target_ >= 0 && (in.focused == target_ || in.focused < 0 || in.now_ms - since_ > kGiveUpMs)) {
+        target_ = -1, step_from_ = -1;
+    }
+    if (held_) {
+        held_ = false;   // (let go a read between steps: each is a press of its own)
+        return 0;
+    }
+    if (target_ < 0) return 0;
+    if (step_from_ >= 0 && in.focused == step_from_ && in.now_ms - step_ms_ < kStepWaitMs) return 0;   // (not moved yet)
+    step_from_ = in.focused, step_ms_ = in.now_ms, held_ = true;
+    return in.focused < target_ ? kPadDown : kPadUp;
+}
+
+int MouseRows::Clicked(std::uint64_t now_ms) const {
+    return clicked_ >= 0 && now_ms >= clicked_ms_ && now_ms - clicked_ms_ <= kClickMs ? clicked_ : -1;
+}
+
+int MouseRows::TakeClicked(std::uint64_t now_ms) {
+    const int row = Clicked(now_ms);
+    clicked_ = -1;
+    return row;
+}
+
+void MouseRows::Reset() {
+    *this = MouseRows{};
+}
+
 RowAction ActionFor(int row, const Session& s) {
     switch (row) {
     case kRowSession:
@@ -411,7 +485,7 @@ RowAction ActionFor(int row, const Session& s) {
     case kRowLetIn:
         if (!s.in_one && !s.by_launcher) return RowAction::kAutoRejoin;   // (not in a session: the switch)
         if (!s.hosting) return s.in_one && s.can_resync ? RowAction::kResync : RowAction::kNone;   // (only a host lets in)
-        return s.invite && !s.asking ? RowAction::kPasteAnswer : RowAction::kViewLetIn;   // (a knock first)
+        return RowAction::kViewLetIn;   // (a friend's answer code is pasted on that view)
     case kRowLeave:
         if (s.by_launcher) return RowAction::kOpenMain;   // (not stopped here: the main page says to start the game again)
         return s.in_one ? RowAction::kConfirmLeave : RowAction::kNone;   // (a second A leaves: never one stray press)
@@ -477,6 +551,7 @@ RowAction ActionFor(View view, int row, const Session& s) {
     case View::kLetIn:
         if (row == 0 && s.hosting && s.asking) return RowAction::kAllow;
         if (row == 1 && s.hosting && s.asking) return RowAction::kDeny;
+        if (row == 3 && s.hosting && s.invite) return RowAction::kPasteAnswer;
         return RowAction::kNone;
     case View::kJoin: {
         const bool free = !s.in_one && !s.by_launcher;   // (as co-op's menu: nobody joins from inside a session)
@@ -573,7 +648,7 @@ std::vector<std::string> RowTexts(const SessionView& v) {
                                          : "Players: " + std::to_string(v.players);
     if (v.s.hosting) {
         if (v.asking.empty()) {
-            rows[kRowLetIn] = v.s.invite ? "Paste answer code" : "Let in: nobody asks";
+            rows[kRowLetIn] = "Let in: nobody asks";   // (a friend's answer code: on the Let in view)
         } else if (v.asking.size() == 1) {
             rows[kRowLetIn] = "Let in " + v.asking.front();
         } else {
@@ -673,6 +748,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             rows[1] = "Refuse " + v.asking.front();
             if (v.asking.size() > 1) rows[2] = "+" + std::to_string(v.asking.size() - 1) + " more ask";
         }
+        // (a friend whose way in was blocked sends an answer code: rarely needed, so here, not on the five rows)
+        if (v.s.hosting && v.s.invite) rows[3] = "Paste answer code";
         break;
     case View::kJoin:
         rows[0] = v.s.by_launcher            ? "Co-op came with the game"
@@ -691,10 +768,9 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         break;
     case View::kSession: {
-        if (!v.says.empty()) {   // (what co-op's menu would have said, on our rows: the reason over three)
-            rows[0] = "Co-op says:";
-            const std::vector<std::string> says = Wrap(v.says, 3);
-            for (std::size_t i = 0; i < says.size(); ++i) rows[1 + i] = says[i];
+        if (!v.says.empty()) {   // (what co-op's menu would have said, on our rows: the reason over all four)
+            const std::vector<std::string> says = Wrap(v.says, 4);
+            for (std::size_t i = 0; i < says.size(); ++i) rows[i] = says[i];
             break;
         }
         if (v.s.hosting) {
@@ -702,14 +778,17 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
                 rows[0] = v.note;
             } else if (v.s.password_shown && !v.host_password.empty()) {
                 // (over the rows below, in fives: a made one is 20 letters, two rows; A on any of them hides it)
+                // (two fives a row: a row of 23 capitals ran past the button's edges in a run, 2026-11-19)
                 rows[0] = "Password (A hides it):";
-                std::string grouped;
-                for (std::size_t i = 0; i < v.host_password.size(); ++i) {
-                    if (i > 0 && i % 5 == 0) grouped += ' ';
-                    grouped += v.host_password[i];
+                for (std::size_t r = 0; r < 3; ++r) {
+                    std::string line;
+                    for (std::size_t i = r * 10; i < v.host_password.size() && i < r * 10 + 10; ++i) {
+                        if (i > r * 10 && (i - r * 10) % 5 == 0) line += ' ';
+                        line += v.host_password[i];
+                    }
+                    if (r == 2 && v.host_password.size() > 30) line = Fit(line + "...");
+                    rows[1 + r] = line;
                 }
-                const std::vector<std::string> lines = Wrap(grouped, 3);
-                for (std::size_t i = 0; i < 3; ++i) rows[1 + i] = i < lines.size() ? lines[i] : std::string();
                 break;
             } else if (v.s.has_password) {
                 rows[0] = "Show join password";

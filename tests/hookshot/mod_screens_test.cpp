@@ -175,3 +175,30 @@ TEST_CASE("mod screens: no name for no button, an unmapped, unended or unprintab
     m.Text(0x710000, std::string(200, 'a'));
     CHECK(ButtonName(m.reader(), b) == std::string(kNameMax, 'a'));
 }
+
+TEST_CASE("mod screens: every button of a screen's list, in its order, whether or not the screen takes input") {
+    Memory m = ScreenWith({0, 3, 0}, false);
+    CHECK(Buttons(m.reader(), kScreen) == std::vector<std::uint64_t>{0x300000, 0x301000, 0x302000});
+    CHECK(Buttons(m.reader(), 0).empty());
+}
+
+TEST_CASE("mod screens: a button's hit box is its rectangle through its box's global matrix, none while not shown") {
+    Memory m;
+    const std::uint64_t button = 0x300000, box = 0x500000;
+    m.U64(button + kHitBox, box);
+    float matrix[12] = {2, 0, 0, 0, 3, 0, 0, 0, 1, -1000, 500, 0};   // (by column: scales 2 and 3, moved to -1000, 500)
+    const float rect[4] = {-100, -20, 200, 40};
+    m.Put(box + kBoxMatrix, matrix, sizeof matrix);
+    m.Put(box + kBoxRect, rect, sizeof rect);
+    const auto b = HitBox(m.reader(), button);
+    REQUIRE(b.has_value());
+    CHECK(b->x0 == doctest::Approx(-1200));
+    CHECK(b->x1 == doctest::Approx(-800));
+    CHECK(b->y0 == doctest::Approx(440));
+    CHECK(b->y1 == doctest::Approx(560));
+    for (float& f : matrix) f = 0;   // (its page not shown: the game's matrix is all 0)
+    m.Put(box + kBoxMatrix, matrix, sizeof matrix);
+    CHECK_FALSE(HitBox(m.reader(), button).has_value());
+    CHECK_FALSE(HitBox(m.reader(), 0).has_value());
+    CHECK_FALSE(HitBox(m.reader(), 0x310000).has_value());   // (nothing there)
+}

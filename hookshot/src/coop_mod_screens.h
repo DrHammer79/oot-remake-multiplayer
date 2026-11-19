@@ -7,7 +7,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace CoopModScreens {
 
@@ -66,5 +68,20 @@ std::string ButtonName(const Reader& read, std::uint64_t button);
 
 // Whether a button takes a choice now (its flags have kChoosable). False for no button or one that cannot be read.
 bool Choosable(const Reader& read, std::uint64_t button);
+
+// Each button of a screen's list, in the list's order (at most kMaxButtons). Unlike FocusedButton it does not ask
+// whether the screen takes input now.
+std::vector<std::uint64_t> Buttons(const Reader& read, std::uint64_t screen);
+
+// A button's hit box in the layout's units (3840 x 2160 about the screen's centre, y up), where the game puts it now:
+// its first box (button+0x58), whose global matrix is at +0x28 (3 x 4 by column: the scales at [0] and [4], the
+// translation at [9] and [10]; all 0 while its page is not shown) and its rectangle at +0x84 (x, y, w, h about the
+// box's origin). Longshot's mouse reads the boxes the same way (host/oot_menu.c, button_rect). Nothing when the button
+// is not shown or cannot be read.
+inline constexpr std::uint64_t kHitBox = 0x58, kBoxMatrix = 0x28, kBoxRect = 0x84;
+struct Box {
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+std::optional<Box> HitBox(const Reader& read, std::uint64_t button);
 
 }  // namespace CoopModScreens

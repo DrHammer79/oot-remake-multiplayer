@@ -20,8 +20,10 @@
 // makes the game's calls and logs.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "hos_coop_api.h"
@@ -343,6 +345,60 @@ RowAction ActionFor(View view, int row, const Session& s);
 inline bool KeepConfirm(bool shown, int focused_row, int confirm_row) {
     return shown && focused_row >= 0 && focused_row == confirm_row;
 }
+
+// --- The mouse over our rows ---
+// Longshot's mouse focuses the button under the cursor with the game's focus setter, then presses A. While our page
+// shows, that setter leaves System's buttons as they are (seen in a run, 2026-11-19: "the focus to Pa_Button_04 (1)",
+// then "row 3 chosen"): a click on Back chose the row the cursor was on. The pad's up and down do move the cursor, so
+// the page follows the mouse itself: the module reads the cursor and the rows' boxes each pad read, MouseRows steps
+// the game's cursor to the row under the mouse with the pad's up and down, and an A just after a click on a row is
+// that row's.
+
+// A row's box in the layout's units (CoopModScreens::HitBox); shown false when it is not on the screen.
+struct RowBox {
+    bool shown = false;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+using RowBoxes = std::array<RowBox, kRows>;
+
+// A client pixel in the layout's units: the game's 3840 x 2160 picture fit in a w x h client area about its centre,
+// y up (as Longshot's mouse takes it).
+std::pair<float, float> LayoutPoint(int px, int py, int w, int h);
+
+// The row whose box holds (x, y), -1 for none. Boxes one above the other meet halfway across a gap under 240 units, and
+// the column's ends grow by as much (no dead line between two rows, as Longshot's mouse takes the game's lists).
+int RowAt(const RowBoxes& boxes, float x, float y);
+
+class MouseRows {
+public:
+    static constexpr std::uint64_t kClickMs = 400;     // an A this long after a click on a row is that row's
+    static constexpr std::uint64_t kStepWaitMs = 250;  // a step not seen as the cursor's move: the next after this
+    static constexpr std::uint64_t kGiveUpMs = 2000;   // the cursor not there by then: let be
+
+    struct In {
+        std::uint64_t now_ms = 0;
+        bool inside = false;   // the cursor over the game's client area, the game's window in front
+        float x = 0, y = 0;    // where (LayoutPoint)
+        bool left = false;     // the left button held
+        bool pad = false;      // the player's own up or down this read (the mouse's steps stop)
+        int focused = -1;      // the game's cursor's row (-1 not known)
+        RowBoxes boxes{};
+    };
+
+    // The pad bits to add for the game this read: a step (up or down, one read held, one let go) toward the row the
+    // mouse moved onto or clicked.
+    std::uint64_t Step(const In& in);
+    // The row clicked in the last kClickMs (-1 none); Take forgets it (one A each click).
+    int Clicked(std::uint64_t now_ms) const;
+    int TakeClicked(std::uint64_t now_ms);
+    void Reset();
+
+private:
+    bool seen_ = false, left_ = false, held_ = false;
+    float x_ = 0, y_ = 0;
+    int target_ = -1, press_ = -1, clicked_ = -1, step_from_ = -1;
+    std::uint64_t since_ = 0, clicked_ms_ = 0, step_ms_ = 0;
+};
 
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: ours takes them one

@@ -5,6 +5,7 @@
 
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "coop_pause_tab.h"
@@ -464,10 +465,12 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
 
 TEST_CASE("pause tab: the invite code's two rows: the host's Paste answer, a waiting guest's Copy answer") {
     // A host with an invite code (no relay room): a friend whose direct join failed sends back an answer code, which
-    // Let in pastes (co-op's menu's Paste answer) while nobody asks; somebody asking still comes first (/allow).
+    // the Let in view's fourth row pastes (co-op's menu's Paste answer). The five rows keep Let in: a run showed
+    // players pressing "Paste answer code" there without knowing what it was (2026-11-19).
     Session host;
     host.hosting = host.in_one = host.code = host.invite = true;
-    CHECK(ActionFor(kRowLetIn, host) == RowAction::kPasteAnswer);
+    CHECK(ActionFor(kRowLetIn, host) == RowAction::kViewLetIn);
+    CHECK(ActionFor(View::kLetIn, 3, host) == RowAction::kPasteAnswer);
     CHECK(ActionFor(kRowJoinCode, host) == RowAction::kCopyCode);
     host.asking = true;
     CHECK(ActionFor(kRowLetIn, host) == RowAction::kViewLetIn);
@@ -489,7 +492,8 @@ TEST_CASE("pause tab: the invite code's two rows: the host's Paste answer, a wai
     v.s.hosting = v.s.in_one = v.s.code = v.s.invite = true;
     v.players = 1;
     CHECK(RowTexts(v) ==
-          std::vector<std::string>{"Hosting", "Copy invite code", "Players: just you", "Paste answer code", "Stop hosting"});
+          std::vector<std::string>{"Hosting", "Copy invite code", "Players: just you", "Let in: nobody asks", "Stop hosting"});
+    CHECK(RowTexts(View::kLetIn, v)[3] == "Paste answer code");
     v.asking = {"Saria"};
     v.s.asking = true;
     CHECK(RowTexts(v)[kRowLetIn] == "Let in Saria");
@@ -791,9 +795,9 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     CHECK(ActionFor(View::kSession, 0, host) == RowAction::kShowPassword);
     CHECK(RowTexts(View::kSession, hv)[0] == "Show join password");
     hv.host_password = "ABCDEFGHJKLMNPQRSTUV";
-    hv.s.password_shown = host.password_shown = true;   // (in fives over two rows: a row fits 24 letters)
-    CHECK(RowTexts(View::kSession, hv) == std::vector<std::string>{"Password (A hides it):", "ABCDE FGHJK LMNPQ RSTUV",
-                                                                    " ", " ", "Back"});
+    hv.s.password_shown = host.password_shown = true;   // (two fives a row: 23 capitals ran past the button's edges)
+    CHECK(RowTexts(View::kSession, hv) == std::vector<std::string>{"Password (A hides it):", "ABCDE FGHJK", "LMNPQ RSTUV",
+                                                                    " ", "Back"});
     for (int r = 0; r < kRows - 1; ++r) CHECK(ActionFor(View::kSession, r, host) == RowAction::kShowPassword);
     CHECK(ActionFor(View::kSession, kRows - 1, host) == RowAction::kBack);
     hv.s.password_shown = host.password_shown = false;
@@ -1160,17 +1164,23 @@ TEST_CASE("pause tab: a game on this network: its password typed on a row, then 
     CHECK(rows[2] == " ");
 }
 
-TEST_CASE("pause tab: the Session view says why the page's Host or Join did not start, over three rows") {
+TEST_CASE("pause tab: the Session view says why the page's Host or Join did not start, over four rows") {
     SessionView v;
     v.says = "Type the join password the host sent you (every session has one).";
     auto rows = RowTexts(View::kSession, v);
-    CHECK(rows[0] == "Co-op says:");
-    CHECK(rows[1].rfind("Type the join", 0) == 0);
-    CHECK_FALSE(rows[2].empty());
+    CHECK(rows[0].rfind("Type the join", 0) == 0);
+    CHECK_FALSE(rows[1].empty());
     CHECK(rows[kRows - 1] == "Back");
     std::string all;
-    for (int r = 1; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
+    for (int r = 0; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
     CHECK(all.find("password") != std::string::npos);
+    // (co-op's longest notes fit whole: a run cut this one at "th...")
+    v.says = "Your clipboard is empty: copy your friend's answer code first, then press this again.";
+    rows = RowTexts(View::kSession, v);
+    all.clear();
+    for (int r = 0; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
+    CHECK(all.find("...") == std::string::npos);
+    CHECK(all.find("again.") != std::string::npos);
     v.says.clear();   // (nothing said: the view's own lines)
     rows = RowTexts(View::kSession, v);
     CHECK(rows[0] == "Not in a session");
@@ -1199,4 +1209,105 @@ TEST_CASE("pause tab: a guest the host's game turned away: the rows say so and w
     for (const View w : {View::kMain, View::kSession, View::kJoin, View::kLanGame}) {
         for (const std::string& r : RowTexts(w, v)) CHECK(r.size() <= kRowChars);
     }
+}
+
+namespace {
+
+// The System page's five buttons as a run's page puts them (left column, about 300 units tall, gaps between; the
+// divider's wider gap between rows 1 and 2).
+RowBoxes FiveRows() {
+    RowBoxes b{};
+    const float tops[kRows] = {700, 350, -100, -450, -800};
+    for (int i = 0; i < kRows; ++i) {
+        b[static_cast<std::size_t>(i)] = RowBox{true, -1500, tops[i] - 260, -800, tops[i]};
+    }
+    return b;
+}
+
+MouseRows::In At(std::uint64_t now, float x, float y, int focused, bool left = false) {
+    MouseRows::In in;
+    in.now_ms = now, in.inside = true, in.x = x, in.y = y, in.focused = focused, in.left = left;
+    in.boxes = FiveRows();
+    return in;
+}
+
+}  // namespace
+
+TEST_CASE("pause tab: the mouse: a client pixel in the layout's units, and the row under it, gaps shared") {
+    auto [x, y] = LayoutPoint(800, 450, 1600, 900);   // (the centre)
+    CHECK(x == doctest::Approx(0));
+    CHECK(y == doctest::Approx(0));
+    std::tie(x, y) = LayoutPoint(0, 0, 1600, 900);   // (the top left: 3840 x 2160 fit, y up)
+    CHECK(x == doctest::Approx(-1920));
+    std::tie(x, y) = LayoutPoint(0, 0, 1920, 1200);   // (a taller window: bars above and below, the width fits)
+    CHECK(x == doctest::Approx(-1920));
+    CHECK(y == doctest::Approx(1200));
+    const RowBoxes b = FiveRows();
+    CHECK(RowAt(b, -1100, 600) == 0);
+    CHECK(RowAt(b, -1100, -900) == kRows - 1);   // (Back)
+    CHECK(RowAt(b, -1100, 420) == 0);            // (in the gap between 0 and 1, nearer 0's)
+    CHECK(RowAt(b, -1100, 390) == 1);
+    CHECK(RowAt(b, 0, 600) == -1);               // (off the column)
+    RowBoxes hidden = b;
+    hidden[4].shown = false;
+    CHECK(RowAt(hidden, -1100, -900) == -1);
+}
+
+TEST_CASE("pause tab: the mouse moved onto a row steps the game's cursor there with the pad, a read held, a read let go") {
+    MouseRows m;
+    std::uint64_t t = 1000;
+    CHECK(m.Step(At(t, -1100, 600, 3)) == kPadUp);   // (onto row 0 from row 3: up)
+    CHECK(m.Step(At(t += 16, -1100, 600, 3)) == 0);  // (let go)
+    CHECK(m.Step(At(t += 16, -1100, 600, 3)) == 0);  // (the cursor has not moved yet: wait)
+    CHECK(m.Step(At(t += 16, -1100, 600, 2)) == kPadUp);
+    CHECK(m.Step(At(t += 16, -1100, 600, 2)) == 0);
+    CHECK(m.Step(At(t += 16, -1100, 600, 1)) == kPadUp);
+    CHECK(m.Step(At(t += 16, -1100, 600, 1)) == 0);
+    CHECK(m.Step(At(t += 16, -1100, 600, 0)) == 0);  // (there)
+    CHECK(m.Step(At(t += 16, -1100, 600, 0)) == 0);
+    // A still mouse leaves the pad's cursor be: the player stepped down with the pad.
+    CHECK(m.Step(At(t += 16, -1100, 600, 1)) == 0);
+    CHECK(m.Step(At(t += 16, -1100, 600, 2)) == 0);
+    // Moved onto Back: down.
+    CHECK(m.Step(At(t += 16, -1100, -900, 2)) == kPadDown);
+}
+
+TEST_CASE("pause tab: a click on a row is that row's A, though the game's cursor is still on another (Back on a view)") {
+    MouseRows m;
+    std::uint64_t t = 1000;
+    // The cursor on row 3, the mouse already over Back (moved there earlier, the steps not taken yet).
+    m.Step(At(t, -1100, -900, 3));
+    m.Step(At(t += 16, -1100, -900, 3, true));
+    m.Step(At(t += 100, -1100, -900, 3, true));
+    m.Step(At(t += 16, -1100, -900, 3, false));   // (let go: a click on Back)
+    CHECK(m.Clicked(t + 50) == kRows - 1);
+    CHECK(m.TakeClicked(t + 60) == kRows - 1);
+    CHECK(m.Clicked(t + 70) == -1);   // (one A a click)
+    // Pressed on one row and let go on another: no click of ours (the focused row's A, as before).
+    m.Step(At(t += 500, -1100, 600, 0, true));
+    m.Step(At(t += 100, -1100, -900, 0, false));
+    CHECK(m.Clicked(t) == -1);
+    // A click long ago is not the next A's.
+    m.Step(At(t += 500, -1100, 600, 0, true));
+    m.Step(At(t += 100, -1100, 600, 0, false));
+    CHECK(m.Clicked(t + MouseRows::kClickMs + 1) == -1);
+}
+
+TEST_CASE("pause tab: the mouse's steps stop for the player's own, the cursor out of the window, and after 2 s") {
+    MouseRows m;
+    std::uint64_t t = 1000;
+    CHECK(m.Step(At(t, -1100, 600, 3)) == kPadUp);
+    MouseRows::In pad = At(t += 16, -1100, 600, 3);
+    pad.pad = true;
+    m.Step(pad);
+    CHECK(m.Step(At(t += 16, -1100, 600, 3)) == 0);
+    CHECK(m.Step(At(t += 16, -1100, 600, 3)) == 0);
+    MouseRows::In out;
+    out.now_ms = t += 16, out.focused = 3;
+    out.boxes = FiveRows();
+    CHECK(m.Step(out) == 0);
+    // Moved onto row 0, and the cursor never gets there: given up.
+    CHECK(m.Step(At(t += 16, -1100, 650, 3)) == kPadUp);
+    for (int i = 0; i < 200; ++i) m.Step(At(t += 16, -1100, 650, 3));
+    CHECK(m.Step(At(t += 16, -1100, 650, 3)) == 0);
 }
