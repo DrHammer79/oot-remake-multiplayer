@@ -1099,11 +1099,13 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                 if (strip_gen != gen) strip_gen = gen, strip = FindOwnPane(ctx, f.layout, "N_MenuChange_01");
                 if (strip != 0) {
                     const float x = Read<float>(strip + 0x6c);
-                    if (x != last) {
-                        last = x;
-                        LOG_INFO(Core, "coop: slide trace: t {} ms strip x {:.1f} system screen x {:.1f} alpha {:.3f}",
-                                 NowMs() % 100000, x, Read<float>(g_system_pane + 0x4c),
-                                 Read<float>(g_system_pane + kPaneScreenAlpha));
+                    const float sum = x + 3.0f * Read<float>(g_system_pane + 0x6c) + 7.0f * Read<float>(g_coop_pane + 0x6c);
+                    if (sum != last) {
+                        last = sum;
+                        LOG_INFO(Core, "coop: slide trace: t {} ms strip x {:.1f} system own x {:.1f} screen x {:.1f} "
+                                 "ours own x {:.1f} screen x {:.1f}",
+                                 NowMs() % 100000, x, Read<float>(g_system_pane + 0x6c), Read<float>(g_system_pane + 0x4c),
+                                 Read<float>(g_coop_pane + 0x6c), Read<float>(g_coop_pane + 0x4c));
                     }
                 }
             }
