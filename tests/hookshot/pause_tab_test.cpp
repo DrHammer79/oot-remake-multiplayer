@@ -1607,7 +1607,8 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     CHECK(SettingNext(vol, -1) == 75);
     vol.value = 100;
     CHECK(SettingNext(vol, 1) == 100);   // (the end of its range)
-    CHECK(SettingNext(vol, 0) == 0);     // (A: the first after the last)
+    CHECK(SettingNext(vol, 0) == 100);   // (A on a slider: nothing, never back to 0)
+    CHECK(SettingNext(res, 0) == 0);     // (A on a few choices: the first after the last)
     SettingRow onoff = graphics[0];
     CHECK(SettingNext(onoff, 0) == 0);
     onoff.value = 0;

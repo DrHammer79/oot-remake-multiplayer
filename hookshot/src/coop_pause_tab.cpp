@@ -1101,7 +1101,10 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
 int SettingNext(const SettingRow& r, int dir) {
     if (r.fixed || r.hi < r.lo) return r.value;
     const int step = r.step > 0 ? r.step : 1;
-    if (dir == 0) return r.value + step > r.hi ? r.lo : r.value + step;
+    if (dir == 0) {
+        if ((r.hi - r.lo) / step + 1 > kCycleChoices) return r.value;   // (a slider: Left and Right only)
+        return r.value + step > r.hi ? r.lo : r.value + step;
+    }
     return std::clamp(r.value + (dir < 0 ? -step : step), r.lo, r.hi);
 }
 

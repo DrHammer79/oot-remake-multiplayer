@@ -536,7 +536,10 @@ int SettingPages(int count);
 // A page of a category's settings as the list's rows: the name ("*" after a restart one), the value's words.
 std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page);
 // The value a press asks for: dir -1 Left, +1 Right (a step, kept within lo..hi), 0 A (the next, the first after the
-// last). The same value back when nothing would change (a fixed setting, the end of its range).
+// last, for a setting of at most kCycleChoices choices: a slider such as Volume is never sent from its end back to its
+// start by A or a click on the row). The same value back when nothing would change (a fixed setting, the end of its
+// range, A on a slider).
+inline constexpr int kCycleChoices = 8;
 int SettingNext(const SettingRow& r, int dir);
 // The cursor moved up (-1) or down (+1) in a category's list of `count`: across its pages, staying at its ends.
 void SettingMove(int count, int dy, int* page, int* row);
