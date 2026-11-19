@@ -587,13 +587,13 @@ void ChangeSetting(int index, int dir) {
 
 // The Settings page's words: its rows (the categories) and the list (a page of the category's settings), its picked
 // row bright and the others dimmed while the list has the pad, a fixed one dimmed always, the rows dimmed then too.
-// Live texts 22..26 (the rows) and 27..40 (the list: a name and a value each). g_live_mutex.
+// Live texts 22..26 and 41 (the six rows) and 27..40 (the list: a name and a value each). g_live_mutex.
 std::uint64_t g_set_gen = 0;
 std::array<std::uint64_t, kListRows> g_set_list{};
-std::array<std::uint64_t, kRows> g_set_rows{};
+std::array<std::uint64_t, kSettingRows> g_set_rows{};
 std::array<int, kListRows> g_set_vis{};
 std::array<float, kListRows> g_set_alpha{};
-std::array<float, kRows> g_set_rows_alpha{};
+std::array<float, kSettingRows> g_set_rows_alpha{};
 
 void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     if (g_settings_pane == 0) return;
@@ -612,7 +612,7 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
                 SetVisible(ctx, mark, false);   // (an Options row's check mark: never ours)
             }
         }
-        for (int r = 0; r < kRows; ++r) {
+        for (int r = 0; r < kSettingRows; ++r) {
             char name[16];
             std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
             const std::uint64_t pane = PaneIn(ctx, page, name);
@@ -620,16 +620,16 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
             g_set_rows_alpha[static_cast<std::size_t>(r)] = -1;
         }
     }
-    for (int r = 0; r < kRows; ++r) {
+    for (int r = 0; r < kSettingRows; ++r) {
         char path[64];
         std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_Button_%02d/T_Btn_00", r);
-        LiveText(ctx, layout, gen, path, 22 + r, kSettingTabs[static_cast<std::size_t>(r)]);
+        LiveText(ctx, layout, gen, path, r < kRows ? 22 + r : 41, kSettingTabs[static_cast<std::size_t>(r)]);
     }
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
     g_set_count = static_cast<int>(rows.size());
     const int page = g_set_page.load(), picked = g_set_row.load(), category = g_set_category.load();
     const std::vector<ListLine> lines =
-        SettingLines(rows, page, category >= 0 && category < kRows ? kSettingTabs[static_cast<std::size_t>(category)] : "");
+        SettingLines(rows, page, category >= 0 && category < kSettingRows ? kSettingTabs[static_cast<std::size_t>(category)] : "");
     const int pages = SettingPages(static_cast<int>(rows.size())), at_page = (page % pages + pages) % pages;
     for (int i = 0; i < kListRows; ++i) {
         const std::size_t k = static_cast<std::size_t>(i);
@@ -650,7 +650,7 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         const float alpha = i == 0 ? 0.7f : fixed ? 0.4f : picked < 0 || picked == i - 1 ? 1.0f : 0.5f;
         if (on && g_set_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_set_alpha[k] = alpha;
     }
-    for (int r = 0; r < kRows; ++r) {
+    for (int r = 0; r < kSettingRows; ++r) {
         const std::size_t k = static_cast<std::size_t>(r);
         const float alpha = picked >= 0 ? 0.45f : 1.0f;
         if (g_set_rows[k] != 0 && g_set_rows_alpha[k] != alpha) CallAlpha(ctx, g_set_rows[k], alpha), g_set_rows_alpha[k] = alpha;
@@ -874,6 +874,7 @@ void SettingsButton(void* ctx) {
         const int want = g_page.SettingsUsable() ? 1 : 0;
         if (want != g_settings_button_shown) {
             SetVisible(ctx, g_settings_button, want != 0);
+            if (g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, want != 0);   // (the Debug row)
             g_settings_button_shown = want;
             LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button {}", want != 0 ? "shown" : "hidden");
         }
@@ -948,10 +949,9 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
             if (IsPart(controller)) SetVisible(ctx, controller, false);
             LOG_INFO(Core, "coop: pause tab: {}'s controller picture {}", page, IsPart(controller) ? "hidden" : "not found");
         }
-        // (and the Longshot Settings button our copies of System's page have too: System's alone)
-        for (const std::uint64_t b : {g_settings_button_coop, g_settings_button_set}) {
-            if (b != 0) SetVisible(ctx, b, false);
-        }
+        // (and the Longshot Settings button our copies of System's page have too: the Multiplayer page's stays hidden;
+        // Longshot Settings' is its sixth category row, SettingsButton's)
+        if (g_settings_button_coop != 0) SetVisible(ctx, g_settings_button_coop, false);
     }
 }
 
@@ -1162,17 +1162,20 @@ void TraceFocus(const char* why) {
 // --- The mouse over our rows (MouseRows): the cursor and the rows' boxes, read at each pad read. g_mutex. ---
 MouseRows g_mouse_rows;
 std::uint64_t g_row_buttons_gen = 0, g_row_buttons_ms = 0;
-std::array<std::uint64_t, kRows> g_row_buttons{};   // System's Pa_Button_00..04 of this opening of the pages
+std::array<std::uint64_t, kButtonRows> g_row_buttons{};   // the shown Pa_Button_00..05 of the pages, as last found
 
-// The rows' boxes where the game puts them now. System's five buttons are found once an opening (again each 500 ms
-// until all five are), among the pages screen's buttons: the shown ones of that name.
+// The rows' boxes where the game puts them now. The buttons are found among the pages screen's buttons, the shown ones
+// of each name, once an opening and again each 250 ms while one found is not shown (our other page slid in: the
+// Multiplayer page's and Longshot Settings' rows are other buttons of the same names) or one is missing (the sixth
+// shows on Longshot Settings only).
 RowBoxes ReadRowBoxes(std::uint64_t now_ms) {
     RowBoxes boxes{};
     const std::uint64_t pages = g_pages_screen;
     if (pages == 0) return boxes;
     const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
-    const bool all = std::all_of(g_row_buttons.begin(), g_row_buttons.end(), [](std::uint64_t b) { return b != 0; });
-    if (g_row_buttons_gen != g_pages_gen || (!all && now_ms - g_row_buttons_ms > 500)) {
+    const bool all = std::all_of(g_row_buttons.begin(), g_row_buttons.end(),
+                                 [&](std::uint64_t b) { return b != 0 && CoopModScreens::HitBox(read, b); });
+    if (g_row_buttons_gen != g_pages_gen || (!all && now_ms - g_row_buttons_ms > 250)) {
         g_row_buttons_gen = g_pages_gen, g_row_buttons_ms = now_ms, g_row_buttons = {};
         for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
             const int row = RowOfButton(CoopModScreens::ButtonName(read, b));
@@ -1181,7 +1184,7 @@ RowBoxes ReadRowBoxes(std::uint64_t now_ms) {
             }
         }
     }
-    for (int i = 0; i < kRows; ++i) {
+    for (int i = 0; i < kButtonRows; ++i) {
         if (const auto box = CoopModScreens::HitBox(read, g_row_buttons[static_cast<std::size_t>(i)])) {
             boxes[static_cast<std::size_t>(i)] = RowBox{true, box->x0, box->y0, box->x1, box->y1};
         }

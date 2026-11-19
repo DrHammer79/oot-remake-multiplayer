@@ -1102,7 +1102,8 @@ TEST_CASE("pause tab: typing ends when the page goes, and the Join view's rows s
 TEST_CASE("pause tab: the focused row is the System button's number under it, by its name") {
     CHECK(RowOfButton("Pa_Button_00") == 0);
     CHECK(RowOfButton("Pa_Button_04") == 4);
-    CHECK(RowOfButton("Pa_Button_05") == -1);   // (five rows)
+    CHECK(RowOfButton("Pa_Button_05") == 5);    // (System's Longshot Settings button, and Longshot Settings' sixth row)
+    CHECK(RowOfButton("Pa_Button_06") == -1);
     CHECK(RowOfButton("Pa_Button_0") == -1);
     CHECK(RowOfButton("Pa_Button_010") == -1);
     CHECK(RowOfButton("N_SlideList_00") == -1);
@@ -1630,6 +1631,23 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     CHECK(SettingsOf(all, 1).size() == 1);
     CHECK(SettingsOf(all, 4).empty());   // (Motion: none here)
     for (const SettingRow& r : graphics) CHECK(r.tab != "Debug");
+    REQUIRE(SettingsOf(all, 5).size() == 1);   // (Debug: Longshot's Debug tab's settings)
+    CHECK(SettingsOf(all, 5)[0].key == "debug");
+    CHECK(SettingsOf(all, kSettingRows).empty());
+
+    // No setting of Longshot's is left out: each of the tabs its control bridge names (gpu/vk/vk_menu.cpp bridge_fill,
+    // v3.0.0 and rc.8: its strip's tabs, the Motion page, the FPS counter's Dev lines as gameplay, the Controls page's
+    // rows as controls) lands in exactly one category.
+    for (const char* tab : {"graphics", "audio", "gameplay", "controls", "nfc", "debug", "motion"}) {
+        SettingRow r;
+        r.key = std::string("k_") + tab, r.tab = tab;
+        int in = 0;
+        for (int c = 0; c < kSettingRows; ++c) in += static_cast<int>(SettingsOf({r}, c).size());
+        CHECK_MESSAGE(in == 1, tab);
+    }
+    SettingRow nfc;
+    nfc.key = "nfc_tag", nfc.name = "NFC tag", nfc.tab = "nfc";
+    CHECK(SettingsOf({nfc}, 3).size() == 1);   // (NFC tag: with Controls)
     CHECK(SettingPages(6) == 1);
     CHECK(SettingPages(10) == 2);
     CHECK(SettingPages(13) == 3);

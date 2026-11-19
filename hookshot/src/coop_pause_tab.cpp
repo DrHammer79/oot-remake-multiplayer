@@ -444,7 +444,7 @@ std::string Page::TakeWhy() {
 int RowOfButton(const std::string& name) {
     if (name.size() != 12 || name.compare(0, 11, "Pa_Button_0") != 0) return -1;
     const int row = name[11] - '0';
-    return row >= 0 && row < kRows ? row : -1;
+    return row >= 0 && row < kButtonRows ? row : -1;
 }
 
 float SlideProgress(std::uint64_t ms) {
@@ -515,12 +515,12 @@ std::pair<float, float> LayoutPoint(int px, int py, int w, int h) {
 }
 
 int RowAt(const RowBoxes& boxes, float x, float y) {
-    for (int i = 0; i < kRows; ++i) {
+    for (int i = 0; i < kButtonRows; ++i) {
         const RowBox& r = boxes[static_cast<std::size_t>(i)];
         if (!r.shown) continue;
         const float cx = (r.x0 + r.x1) / 2;
         float above = -1, below = -1;   // (the gaps to the nearest box above and below in the column)
-        for (int j = 0; j < kRows; ++j) {
+        for (int j = 0; j < kButtonRows; ++j) {
             const RowBox& o = boxes[static_cast<std::size_t>(j)];
             const float ox = (o.x0 + o.x1) / 2;
             if (j == i || !o.shown || ox - cx > 60 || cx - ox > 60) continue;
@@ -1080,7 +1080,7 @@ std::string ListName(const std::string& shown, const std::string& room) {
 
 std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int category) {
     std::vector<SettingRow> out;
-    if (category < 0 || category >= kRows) return out;
+    if (category < 0 || category >= kSettingRows) return out;
     // (Longshot names its tabs in lower case, "graphics": the match ignores case)
     const std::string want = kSettingTabs[static_cast<std::size_t>(category)];
     const auto same = [](const std::string& a, const std::string& b) {
@@ -1088,8 +1088,9 @@ std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int categ
                    return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
                });
     };
+    // (Longshot's NFC tab has one setting, the tag to use: it goes with Controls, as the game's reader is a pad's)
     for (const SettingRow& r : all) {
-        if (same(r.tab, want)) out.push_back(r);
+        if (same(r.tab, want) || (category == 3 && same(r.tab, "nfc"))) out.push_back(r);
     }
     return out;
 }

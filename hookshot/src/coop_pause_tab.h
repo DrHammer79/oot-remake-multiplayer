@@ -57,6 +57,9 @@ inline constexpr std::uint64_t kManagerAsked = 0x538;  // s32: the page asked fo
 inline constexpr int kSystemPage = 5;                  // the System page's category
 inline constexpr int kPlusMode = 1;
 inline constexpr int kRows = 5;                        // the page's buttons (Pa_Button_00..04), System's too
+// The buttons of the pages made of System's layout with the pack's Longshot Settings button (Pa_Button_05: System's
+// last button, and Longshot Settings' sixth category row).
+inline constexpr int kButtonRows = 6;
 // The game's functions (main+), as its own code calls them:
 inline constexpr std::uint64_t kFindPane = 0x76e2b0;   // (layout, "name") -> pane, or 0 (coop_map_page.h's)
 inline constexpr std::uint64_t kPaneTable = 0x43c040;  // (layout + 0x40) -> its pane table (kFindPane's first call)
@@ -379,7 +382,8 @@ int PlayerIndex(int listed, int page, int row);
 int PlayerPages(int listed);
 RowAction ActionFor(int row, const Session& s);
 // The row of ours a focused button of the pages screen lies under: System's Pa_Button_00..04 (by the name the focus
-// manager's walk gives, CoopModScreens::ButtonName), -1 for any other.
+// manager's walk gives, CoopModScreens::ButtonName), and the Longshot Settings button (Pa_Button_05: 5); -1 for any
+// other.
 int RowOfButton(const std::string& name);
 // A row of a view (kMain: ActionFor).
 RowAction ActionFor(View view, int row, const Session& s);
@@ -401,7 +405,7 @@ struct RowBox {
     bool shown = false;
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 };
-using RowBoxes = std::array<RowBox, kRows>;
+using RowBoxes = std::array<RowBox, kButtonRows>;
 
 // A client pixel in the layout's units: the game's 3840 x 2160 picture fit in a w x h client area about its centre,
 // y up (as Longshot's mouse takes it).
@@ -535,7 +539,8 @@ std::string ListName(const std::string& shown, const std::string& room);
 // change the value, A takes the next one (of a few choices), B gives the pad back to the rows. A change goes through
 // Longshot as its own menu's Left and Right do (clamped, saved, a restart noted).
 inline constexpr int kSettingsPerPage = 6;   // (kListRows less the header)
-inline constexpr std::array<const char*, kRows> kSettingTabs{"Graphics", "Audio", "Gameplay", "Controls", "Motion"};
+inline constexpr int kSettingRows = 6;   // (the five rows and the Longshot Settings button's copy)
+inline constexpr std::array<const char*, kSettingRows> kSettingTabs{"Graphics", "Audio", "Gameplay", "Controls", "Motion", "Debug"};
 struct SettingRow {
     std::string key, name, text, tab;   // its line in longshot_options.ini, what the menu calls it, its value's words
     int value = 0, lo = 0, hi = 0, step = 1;
