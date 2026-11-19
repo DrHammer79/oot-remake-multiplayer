@@ -786,6 +786,15 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     hv.note.clear();
     hv.players = 1;
     CHECK(RowTexts(View::kSession, hv)[0] == "Hosting: just you");
+    // Its join password: on the first row once A asks (friends who found the game on this network type it).
+    hv.s.has_password = host.has_password = true;
+    CHECK(ActionFor(View::kSession, 0, host) == RowAction::kShowPassword);
+    CHECK(RowTexts(View::kSession, hv)[0] == "Hosting: just you (A: password)");
+    hv.host_password = "ABCDEFGHJKLMNPQRSTUV";
+    hv.password_shown = true;
+    CHECK(RowTexts(View::kSession, hv)[0] == "Password: ABCDEFGHJKLMNPQRSTUV");
+    hv.password_shown = false;
+    hv.host_password.clear();
     // The main view's Join code row says what its copy did too.
     hv.note = "No clipboard: write it down";
     CHECK(RowTexts(hv)[kRowJoinCode] == "No clipboard: write it down");
@@ -976,6 +985,11 @@ TEST_CASE("pause tab: a room name stops at 24, a password at 128, and the cursor
     for (int i = 0; i < 200; ++i) pw.Type('x');
     CHECK(pw.text().size() == 128);
     CHECK(pw.Ready());                 // (a password may be anything, none included)
+    TextField code(TextField::Kind::kPassword);
+    code.Cycle(+1);
+    CHECK(code.text() == "A");         // (a host's own password's letters first: the pad reaches them soonest)
+    code.Cycle(-1);
+    CHECK(code.text() == "_");
 }
 
 TEST_CASE("pause tab: a password shows as stars but for the letter typed into, and a long text keeps the cursor in view") {

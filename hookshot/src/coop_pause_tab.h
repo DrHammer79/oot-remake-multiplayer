@@ -297,6 +297,8 @@ enum class RowAction {
     kJoinLanGame,    // the game's view: join it at its address and port, with the password typed
     kMoreLan,        // the next page of games on this network
     kAutoRejoin,     // auto-rejoin on or off (coop_auto_rejoin.h; saved at once)
+    kShowPassword,   // the host's Session view: its join password shown on the row, or hidden again (only on A:
+                     // friends who found the game on this network type it)
 };
 inline constexpr std::uint64_t kConfirmMs = 3000;
 // proto::lobby_mute's bits (CoopLobby's kVoice, kChat; the module checks they match).
@@ -320,6 +322,7 @@ struct Session {
     int lan_page = 0;           // its page (PlayerIndex)
     std::uint32_t lan_joinable = 0;   // bit i: the list's game i can be joined (same version, room for one)
     bool lan_password = false;  // a game's view: its join password is typed (every session has one)
+    bool has_password = false;  // hosting, and the session's join password is known (the status)
     bool can_resync = false;    // a guest whose game can take the host's save again (CoopSave::CanResync)
     int listed = 0;         // the Players view: how many players it lists
     int page = 0;           // the Players view: its page (PlayerIndex)
@@ -367,6 +370,8 @@ struct SessionView {
     bool room_ready = false, relay_set = false;
     std::vector<std::string> lan_rows;    // the games on this network, as their rows say them (CoopLan::RowText)
     std::string lan_game;                 // a game's view: the game picked, as its row said it
+    std::string host_password;            // the host's Session view: the join password, once A asked for it
+    bool password_shown = false;          // (and it is shown: until A again or another view)
     std::string says;                     // the Session view: why the page's last Host or Join did not start
                                           // (CoopPause::PageSays), while that view shows after it; "" none
     int typing = -1;                  // the field typed into (0 the room, 1 the password), -1 none

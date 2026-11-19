@@ -58,6 +58,7 @@ LanPick g_lan_pick;
 // What the page's last action came to when co-op did not start (CoopPause::PageSays), shown on the Session view from
 // the update that saw it until another view shows; and the newest one seen. g_says_mutex (SetView runs under g_mutex
 // and outside it).
+std::atomic<bool> g_show_password{false};   // the host's Session view shows the join password (A on its row)
 std::mutex g_says_mutex;
 std::string g_says;
 std::uint64_t g_says_seen = 0;
@@ -354,6 +355,9 @@ SessionView ViewNow(View view) {
         v.relay_set = CoopPause::RelaySet();   // (co-op's own lock: before ours, never inside it)
     }
     if (view == View::kSession) {
+        v.s.has_password = v.s.hosting && st.password[0] != 0;
+        v.password_shown = v.s.has_password && g_show_password.load();
+        if (v.password_shown) v.host_password.assign(st.password, strnlen(st.password, sizeof st.password));
         std::lock_guard lock(g_says_mutex);
         v.says = g_says;
     }
@@ -561,7 +565,10 @@ int FocusedRow() {
 }
 
 void SetView(View v) {
-    if (g_view.exchange(static_cast<int>(v)) != static_cast<int>(v)) g_confirm_until = 0;   // (a new view: no A waited)
+    if (g_view.exchange(static_cast<int>(v)) != static_cast<int>(v)) {
+        g_confirm_until = 0;      // (a new view: no A waited)
+        g_show_password = false;  // (and the password hidden again)
+    }
     if (v != View::kSession) {
         std::lock_guard lock(g_says_mutex);
         g_says.clear();
@@ -676,6 +683,7 @@ void Act(int row) {
         break;
     }
     case RowAction::kAutoRejoin: CoopPause::SetAutoRejoin(!CoopPause::AutoRejoin()); break;
+    case RowAction::kShowPassword: g_show_password = !g_show_password.load(); break;
     case RowAction::kTypeRoom:
     case RowAction::kTypePassword: {
         std::lock_guard lock(g_mutex);

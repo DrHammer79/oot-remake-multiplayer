@@ -48,8 +48,10 @@ Kind KindOf(std::uint64_t vtable_offset) {
 
 const std::string& TextField::Letters() const {
     static const std::string room = "abcdefghijklmnopqrstuvwxyz0123456789-_";
+    // (a host's own password is 20 of the first 32, the letters of its codes, coop::server::nat::kLetters: those come
+    // first, so the pad's up and down reach them soonest)
     static const std::string password =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&*+-.=?@_";
+        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789IO01abcdefghijklmnopqrstuvwxyz!#$%&*+-.=?@_";
     return kind_ == Kind::kRoom ? room : password;
 }
 
@@ -487,6 +489,7 @@ RowAction ActionFor(View view, int row, const Session& s) {
     }
     case View::kSession:
         if (s.hosting) {
+            if (row == 0) return s.has_password ? RowAction::kShowPassword : RowAction::kNone;
             if (row == 1) return s.code ? RowAction::kCopyCode : RowAction::kNone;
             return row == 2 ? RowAction::kCopyLan : row == 3 ? RowAction::kCopyVpn : RowAction::kNone;
         }
@@ -685,7 +688,13 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             break;
         }
         if (v.s.hosting) {
-            rows[0] = v.note.empty() ? "Hosting: " + Players(std::max(v.players, 1)) : v.note;
+            if (!v.note.empty()) {
+                rows[0] = v.note;
+            } else if (v.password_shown && !v.host_password.empty()) {
+                rows[0] = "Password: " + v.host_password;
+            } else {
+                rows[0] = "Hosting: " + Players(std::max(v.players, 1)) + (v.s.has_password ? " (A: password)" : "");
+            }
             rows[1] = !v.room.empty() ? "Copy room: " + v.room : v.s.code ? "Copy invite code" : "Room: coming...";
             rows[2] = "Copy same-network line";
             rows[3] = "Copy VPN line";
@@ -759,6 +768,7 @@ const char* ActionWords(RowAction a) {
     case RowAction::kJoinLanGame: return "join that game on this network, with the password typed";
     case RowAction::kMoreLan: return "the next page of games on this network";
     case RowAction::kAutoRejoin: return "auto-rejoin on or off";
+    case RowAction::kShowPassword: return "the join password shown or hidden";
     case RowAction::kTypePassword: return "the join password typed on its row";
     case RowAction::kJoinRoom: return "join that room through the kit's relay";
     case RowAction::kBan: return "ban that player for this session after a second A";
