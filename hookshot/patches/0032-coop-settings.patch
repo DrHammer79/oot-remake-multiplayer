@@ -126,6 +126,3 @@ index bc47834c..380e9553 100644
  } HosCoopApi;
  
  /* The module's exports (extern "C"). */
--- 
-2.56.0.windows.4
-
