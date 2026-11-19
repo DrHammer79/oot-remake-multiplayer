@@ -37,6 +37,7 @@ std::atomic<std::uint64_t> g_confirm_until{0};
 std::uint64_t g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
 std::uint64_t g_strip_screen = 0, g_tab_pane = 0;
 std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), which ours follows in the strip's animation
+std::uint64_t g_fourth_word = 0, g_tab_word = 0;   // the two tabs' word panes (N_MenuChangeTextIn_00)
 float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
 bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
 bool g_pages_bad = false, g_strip_bad = false;   // a pane that is not a part: the page step stays off (logged once)
@@ -306,6 +307,10 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         g_tab_pane = FindOwnPane(ctx, layout, "Pa_Category_04");
         g_fourth_pane = FindOwnPane(ctx, layout, "Pa_Category_03");
         g_tab_rest_y = IsPart(g_tab_pane) ? Read<float>(g_tab_pane + kPaneOwnY) : 0;
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
+        g_fourth_word = PaneIn(ctx, PartLayout(table, "Pa_Category_03"), "N_MenuChangeTextIn_00");
+        g_tab_word = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
         g_tab_shown = false;
         g_strip_bad = !IsPart(g_tab_pane);
         LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}", g_tab_pane,
@@ -351,6 +356,11 @@ void FollowFourth(void* ctx) {
         Call(ctx, kPaneMoved, g_tab_pane);
     }
     CallAlpha(ctx, g_tab_pane, std::clamp(alpha, 0.0f, 1.0f));
+    // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
+    if (g_fourth_word != 0 && g_tab_word != 0) {
+        const float word = Read<float>(g_fourth_word + kTextAlpha);
+        if (std::isfinite(word)) CallAlpha(ctx, g_tab_word + kTextAlphaBlock, std::clamp(word, 0.0f, 1.0f));
+    }
 }
 
 // The System page's focused button (0..4), the row of ours under the game's cursor frame; -1 when none is.

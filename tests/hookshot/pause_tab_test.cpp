@@ -99,6 +99,53 @@ TEST_CASE("pause tab: the fifth tab comes in with the strip's opening, filled on
     CHECK(d.fill_tab);
 }
 
+TEST_CASE("pause tab: the menu closed on our page opens on it again, not after L") {
+    Page p;
+    std::uint64_t now = 1000;
+    OnSystem(p, now);
+    CHECK(p.OnPad(kPadR, now) == 0);
+    CHECK(p.Shown());
+    p.OnPad(0, now + 16);
+    // The menu closes (B or +): our page goes with it.
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 32);
+    CHECK_FALSE(p.Shown());
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), now + 32);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 0), now + 300);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), now + 300);
+    CHECK_FALSE(p.Shown());
+    // The next opening, on System as the game keeps it: our page from its first opening update.
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), now + 5000);
+    auto d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 1), now + 5000);
+    CHECK(p.Shown());
+    CHECK(d.set_page);
+    CHECK(d.page_shown);
+    // L, then the menu closed and opened again: System's.
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 2), now + 5300);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), now + 5300);
+    p.OnPad(kPadL, now + 5400);
+    CHECK_FALSE(p.Shown());
+    p.OnPad(0, now + 5416);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 5500);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 0), now + 5800);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), now + 9000);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 1), now + 9000);
+    CHECK_FALSE(p.Shown());
+}
+
+TEST_CASE("pause tab: a menu that opens on another page forgets ours") {
+    Page p;
+    OnSystem(p, 1000);
+    p.OnPad(kPadR, 1000);
+    p.OnPad(0, 1016);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), 1032);
+    CHECK_FALSE(p.Shown());
+    p.OnScreen(Pages(0xa000, 1, 1, 2), 3000);   // (open on another page)
+    p.OnScreen(Strip(0x9000, 5, 1, kPlusMode, 2), 3000);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 2), 3100);   // (then stepped to System)
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), 3100);
+    CHECK_FALSE(p.Shown());
+}
+
 TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L gives System back") {
     Page p;
     std::uint64_t now = 1000;
