@@ -632,8 +632,7 @@ RowAction ActionFor(View view, int row, const Session& s) {
     }
     case View::kSession:
         if (s.hosting) {
-            if (s.password_shown) return row < kRows - 1 ? RowAction::kShowPassword : RowAction::kBack;   // (hidden)
-            if (row == 0) return s.has_password ? RowAction::kShowPassword : RowAction::kNone;
+            if (row == 0) return s.has_password ? RowAction::kShowPassword : RowAction::kNone;   // (shown or hidden)
             if (row == 1) return s.code ? RowAction::kCopyCode : RowAction::kNone;
             return row == 2 ? RowAction::kCopyLan : row == 3 ? RowAction::kCopyVpn : RowAction::kNone;
         }
@@ -655,19 +654,27 @@ std::string Fit(std::string t) {
     return t.substr(0, n) + "...";
 }
 
-// A line over up to `rows` rows, broken at spaces (a word longer than a row is cut); the last row ends in "..." when
-// more is left.
-std::vector<std::string> Wrap(const std::string& text, std::size_t rows) {
+// At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut.
+std::string FitWidth(std::string t, std::size_t n) {
+    if (t.size() <= n) return t;
+    std::size_t k = n - 3;
+    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
+    return t.substr(0, k) + "...";
+}
+
+// A line over up to `rows` rows of `width` bytes, broken at spaces (a word longer than a row is cut); the last row ends
+// in "..." when more is left.
+std::vector<std::string> Wrap(const std::string& text, std::size_t rows, std::size_t width = kRowChars) {
     std::vector<std::string> out;
     std::size_t at = 0;
     while (out.size() < rows) {
         while (at < text.size() && text[at] == ' ') ++at;
         if (at >= text.size()) break;
-        if (out.size() + 1 == rows) {   // (the last row: the rest, Fit cuts it)
-            out.push_back(Fit(text.substr(at)));
+        if (out.size() + 1 == rows) {   // (the last row: the rest, cut to fit)
+            out.push_back(FitWidth(text.substr(at), width));
             break;
         }
-        std::size_t end = std::min(text.size(), at + kRowChars);
+        std::size_t end = std::min(text.size(), at + width);
         if (end < text.size() && text[end] != ' ') {
             const std::size_t space = text.rfind(' ', end);
             if (space != std::string::npos && space > at) end = space;
@@ -686,10 +693,11 @@ std::string Players(int n) {
 
 std::vector<std::string> RowTexts(const SessionView& v) {
     std::vector<std::string> rows(kRows);
+    // (why, and the session's details: the list on the right, DetailLines)
     if (v.s.failed && !v.s.in_one) {
-        rows[kRowSession] = "Co-op failed: A says why";
+        rows[kRowSession] = "Co-op failed";
     } else if (!v.turned_away.empty()) {
-        rows[kRowSession] = "Turned away: A says why";   // (co-op is still on: Leave, then join again)
+        rows[kRowSession] = "Turned away";   // (co-op is still on: Leave, then join again)
     } else if (v.connecting) {
         rows[kRowSession] = "Connecting...";
     } else if (v.s.hosting) {
@@ -732,8 +740,8 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.confirm_leave) {
         rows[kRowLeave] = v.s.hosting ? "A again: stop hosting" : "A again: leave";
     } else {
-        rows[kRowLeave] = !v.s.in_one ? (v.version.empty() ? "Leave (not in a session)" : v.version)   // (no action)
-                          : v.s.hosting ? "Stop hosting" : "Leave";
+        // (in no session: nothing to leave, the row not shown; the release is on the list, DetailLines)
+        rows[kRowLeave] = !v.s.in_one ? std::string() : v.s.hosting ? "Stop hosting" : "Leave";
     }
     for (std::string& r : rows) r = Fit(std::move(r));
     return rows;
@@ -839,30 +847,18 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         break;
     case View::kSession: {
-        if (!v.says.empty()) {   // (what co-op's menu would have said, on our rows: the reason over all four)
-            const std::vector<std::string> says = Wrap(v.says, 4);
-            for (std::size_t i = 0; i < says.size(); ++i) rows[i] = says[i];
+        // (what can be done; the session's details, co-op's problem or hint and the release are on the list on the
+        // right, DetailLines)
+        if (!v.says.empty()) {   // (a Host or Join of the page's that did not start: why, on the list)
+            rows[0] = "Could not start";
             break;
         }
         if (v.s.hosting) {
             if (!v.note.empty()) {
                 rows[0] = v.note;
-            } else if (v.s.password_shown && !v.host_password.empty()) {
-                // (over the rows below, in fives: a made one is 20 letters, two rows; A on any of them hides it)
-                // (two fives a row: a row of 23 capitals ran past the button's edges in a run, 2026-11-19)
-                rows[0] = "Password (A hides it):";
-                for (std::size_t r = 0; r < 3; ++r) {
-                    std::string line;
-                    for (std::size_t i = r * 10; i < v.host_password.size() && i < r * 10 + 10; ++i) {
-                        if (i > r * 10 && (i - r * 10) % 5 == 0) line += ' ';
-                        line += v.host_password[i];
-                    }
-                    if (r == 2 && v.host_password.size() > 30) line = Fit(line + "...");
-                    rows[1 + r] = line;
-                }
-                break;
             } else if (v.s.has_password) {
-                rows[0] = "Show join password";
+                // (the password itself on the list, while shown)
+                rows[0] = v.s.password_shown && !v.host_password.empty() ? "Hide join password" : "Show join password";
             } else {
                 rows[0] = "Hosting: " + Players(std::max(v.players, 1));
             }
@@ -871,14 +867,11 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             rows[3] = "Copy VPN line";
             break;
         }
-        std::size_t first = 1;   // (the rows co-op's own line, its problem or hint, may take: first .. the last free)
-        std::string why = v.why;
         if (v.s.failed && !v.s.in_one) {
-            rows[0] = "Co-op failed:";
+            rows[0] = "Co-op failed";
             if (!v.s.by_launcher) rows[3] = "Host again";
         } else if (!v.turned_away.empty()) {
-            rows[0] = "Turned away:";   // (the host's game: kicked, banned, full...; as co-op's menu says it)
-            why = v.turned_away + "." + (v.banned ? " Leave." : " Leave, then join again.");
+            rows[0] = "Turned away";   // (the host's game: kicked, banned, full...; as co-op's menu says it)
         } else if (!v.note.empty()) {
             rows[0] = v.note;
         } else if (v.s.wait_host) {
@@ -890,27 +883,12 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         } else {
             rows[0] = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
         }
-        if (v.s.wait_host) {
-            rows[1] = "Copy answer code";
-            first = 2;
-        } else if (v.s.in_one && !v.connecting && v.players > 0) {
-            rows[1] = "With " + Players(v.players);
-            first = 2;
-        }
+        if (v.s.wait_host) rows[1] = "Copy answer code";
         if (v.s.in_one && v.s.can_resync) rows[3] = "Resync from host";
-        const std::size_t last = rows[3].empty() ? 4 : 3;
-        const std::vector<std::string> lines = Wrap(why, last - first);
-        for (std::size_t i = 0; i < lines.size(); ++i) rows[first + i] = lines[i];
-        for (std::size_t i = 3; i >= first && !v.version.empty(); --i) {   // the release, on the lowest free row
-            if (rows[i].empty()) {
-                rows[i] = v.version;
-                break;
-            }
-        }
         break;
     }
     }
-    for (std::string& r : rows) r = r.empty() ? std::string(" ") : Fit(std::move(r));
+    for (std::string& r : rows) r = Fit(std::move(r));   // ("": the row not shown)
     return rows;
 }
 
@@ -1108,6 +1086,71 @@ std::vector<ListLine> ListLines(const SessionView& v) {
             lines[static_cast<std::size_t>(c) + 1] = ListLine{FitTo(l.name, kListNameChars), FitTo(l.value, kListValueChars)};
         }
     }
+    return lines;
+}
+
+std::vector<ListLine> DetailLines(View view, const SessionView& v) {
+    std::vector<ListLine> lines(kListRows);
+    if (view != View::kMain && view != View::kSession) return lines;
+    std::size_t at = 1;
+    const auto add = [&](const std::string& name, const std::string& value) {
+        if (at < lines.size()) lines[at++] = ListLine{FitTo(name, kListNameChars), FitTo(value, kListValueChars)};
+    };
+    // (the release a short value: "Squadala! v0.11.6" is "v0.11.6")
+    std::string release = v.version;
+    if (const std::string brand = "Squadala! "; release.rfind(brand, 0) == 0) release.erase(0, brand.size());
+    std::string header, why = v.why;
+    if (!v.says.empty()) {
+        header = "Could not start", why = v.says;
+    } else if (v.s.failed && !v.s.in_one) {
+        header = "Co-op failed";
+    } else if (!v.turned_away.empty()) {
+        header = "Turned away";
+        why = v.turned_away + "." + (v.banned ? " Leave." : " Leave, then join again.");
+    } else if (v.s.hosting) {
+        header = "Hosting";
+    } else if (v.s.wait_host) {
+        header = "Waiting for the host";
+    } else if (v.connecting) {
+        header = "Connecting...";
+    } else if (v.s.in_one) {
+        header = "In a session";
+    } else {
+        header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
+    }
+    lines[0] = ListLine{FitTo(header, kListNameChars), ""};
+    if (v.s.hosting && v.says.empty()) {
+        add("Room", !v.room.empty() ? v.room : v.s.invite ? "Invite code" : "Coming...");
+        add("Players", std::to_string(std::max(v.players, 1)));
+        if (!v.s.has_password) {
+            add("Join password", "None");
+        } else if (!v.s.password_shown || v.host_password.empty()) {
+            add("Join password", "Hidden");
+        } else {
+            // (in fives, ten letters a line: a made one is 20, two lines; a longer one cut on its third)
+            for (std::size_t r = 0; r < 3 && r * 10 < v.host_password.size(); ++r) {
+                std::string line;
+                for (std::size_t i = r * 10; i < v.host_password.size() && i < r * 10 + 10; ++i) {
+                    if (i > r * 10 && (i - r * 10) % 5 == 0) line += ' ';
+                    line += v.host_password[i];
+                }
+                if (r == 2 && v.host_password.size() > 30) line = FitTo(line + "...", kListValueChars);
+                add(r == 0 ? "Join password" : " ", line);
+            }
+        }
+        add("Asking to join", v.asking.empty() ? "Nobody" : std::to_string(v.asking.size()));
+    } else if (v.s.in_one && !v.connecting && v.says.empty() && v.turned_away.empty()) {
+        if (!v.host_name.empty()) add("Host", v.host_name);
+        if (v.players > 0) add("Players", std::to_string(v.players));
+    } else if (!v.s.in_one && !v.s.by_launcher && !v.s.failed && v.says.empty() && v.turned_away.empty()) {
+        add("Auto-rejoin", !v.s.auto_rejoin ? "Off" : v.s.rejoining ? "Trying..." : "On");
+    }
+    // (co-op's problem or hint as lines of text, on the lines left but the release's)
+    const std::size_t room = lines.size() - at - (release.empty() ? 0 : 1);
+    if (!why.empty() && room > 0) {
+        for (const std::string& l : Wrap(why, room, kListNameChars)) lines[at++] = ListLine{l, ""};
+    }
+    if (!release.empty()) add("Release", release);
     return lines;
 }
 

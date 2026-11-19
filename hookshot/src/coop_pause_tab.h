@@ -478,7 +478,7 @@ struct SessionView {
     std::string why;                  // co-op's last problem or hint (its status message), "" none
     std::string player_name;          // a player's view: who
     // 0.11.6 (owner OK, 2026-11-19): this kit's release, "Squadala! v0.11.6" (CoopWindowBrand::TitleOf), "" none
-    // (a developer's build). On the Leave row when in no session (solo too) and on a free row of the Session view.
+    // (a developer's build). The details list's last line (DetailLines), "Release".
     std::string version;
     std::uint8_t own_mutes = 0, host_mutes = 0;   // a player's view: kMuteVoice / kMuteChat bits
     bool confirm_kick = false, confirm_ban = false;   // the host's Kick or Ban waits for its second A
@@ -503,7 +503,8 @@ struct SessionView {
 // 2026-11-19: "Leave (not in a session)" fills it, 31 letters ran past both edges).
 inline constexpr std::size_t kRowChars = 24;
 std::vector<std::string> RowTexts(const SessionView& v);
-// A view's rows (kMain: RowTexts). A row with nothing on it says " " (a pane's text is never empty).
+// A view's rows (kMain: RowTexts). A row with nothing on it is "": the module does not show it (but while the game's
+// cursor is on it).
 std::vector<std::string> RowTexts(View view, const SessionView& v);
 
 // --- The game browser (View::kLan): a list of the games on the right of the page, as a server browser ---
@@ -519,6 +520,10 @@ inline constexpr std::size_t kListNameChars = 30, kListValueChars = 16;   // (th
 // The list's rows for this page: the header, then a page of games ("" rows not shown). With nothing listed, the
 // first game row says why.
 std::vector<ListLine> ListLines(const SessionView& v);
+// The same list on the main view and the Session view: the session's details (a header, what it is, then name and
+// value lines), co-op's problem or hint as lines of text (no value: their value box not shown), and the release last.
+// None on the other views. The rows keep what can be done.
+std::vector<ListLine> DetailLines(View view, const SessionView& v);
 // What a game's right column says: "2/4", "Full", "Other version" (it cannot be joined from here).
 std::string ListValue(int players, int max, bool same_version);
 // What a room's left column says: the name its host listed it under (the room name unless they picked one), with the

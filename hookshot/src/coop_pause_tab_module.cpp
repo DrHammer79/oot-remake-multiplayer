@@ -81,6 +81,12 @@ std::atomic<bool> g_online{false};
 std::atomic<int> g_cell_page{0};
 std::atomic<int> g_cell{-1};
 std::atomic<int> g_cell_games{0};   // the cells on this page that hold a game (LiveCells)
+// The Multiplayer page's rows with nothing on them (bit per row, LiveRows), not shown but the one the game's cursor is
+// on (g_focus_row, read under g_mutex at the pages' update); none hidden while a moment's hiding goes on (SystemButtons:
+// it shows its rows again itself).
+std::atomic<std::uint32_t> g_rows_blank{0};
+std::atomic<int> g_focus_row{-1};
+std::atomic<bool> g_rows_moment{false};
 std::array<std::atomic<std::uint64_t>, kCells> g_cell_pane_at{};   // the cells' panes in our page, this opening
 // The pad's and the mouse's last state for the cells (OnPad, g_mutex).
 std::uint64_t g_browse_last = 0;
@@ -108,6 +114,7 @@ std::uint64_t g_mp_button = 0, g_mp_button_coop = 0, g_mp_button_set = 0;
 std::array<std::uint64_t, kRows> g_set_buttons{}, g_coop_buttons{}, g_sys_buttons{};
 std::array<float, kRows> g_sys_rest_y{};
 int g_settings_button_shown = -1;   // (which of ours System shows: 1 Multiplayer, 2 Longshot Settings; -1 not set yet)
+bool g_sys_hidden = false;          // (System's own buttons hidden: one of our pages is in its place, SystemButtons)
 bool g_pages_looked = false, g_pages_ok = false;
 std::uint64_t g_pages_layout = 0;  // the layout the pages' panes were looked up in (the early page switch checks it)
 
@@ -469,6 +476,24 @@ std::array<float, kListRows> g_list_alpha{};
 // browser, the list not shown dimmed too, as a tab.
 std::array<std::uint64_t, kRows> g_row_panes{};
 std::array<float, kRows> g_rows_alpha{};
+// Each list row's value box (W_Base_01 and W_Base_03 in PaOptionBtnLevel_00): shown for a line with a value, not for a
+// line of text (the details' header and their problem or hint), as Longshot Settings' header.
+std::array<std::array<std::uint64_t, 2>, kListRows> g_list_box{};
+std::array<int, kListRows> g_list_box_vis{};
+
+// The rows with nothing on them not shown (the one the cursor is on kept: the game moves it to the nearest shown on the
+// next press). g_live_mutex.
+void ApplyBlankRows(void* ctx) {
+    if (g_rows_moment.load()) return;
+    const std::uint32_t blank = g_rows_blank.load();
+    const int focus = g_focus_row.load();
+    for (int r = 0; r < kRows; ++r) {
+        const std::uint64_t pane = g_row_panes[static_cast<std::size_t>(r)];
+        if (pane == 0) continue;
+        const bool want = (blank & (1u << r)) == 0 || r == focus;
+        if (((Read<std::uint32_t>(pane + 0xa8) & 1u) != 0) != want) SetVisible(ctx, pane, want);
+    }
+}
 
 void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     if (g_cells_gen != gen) {
@@ -484,14 +509,15 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             const std::size_t k = static_cast<std::size_t>(i);
             g_list_panes[k] = IsPart(pane) ? pane : 0;
             if (i > 0) g_cell_pane_at[k - 1] = g_list_panes[k];
-            g_list_vis[k] = -1, g_list_alpha[k] = -1;
+            g_list_vis[k] = -1, g_list_alpha[k] = -1, g_list_box_vis[k] = -1, g_list_box[k] = {};
             if (!IsPart(pane)) continue;
             ++found;
-            // (inside the row: the value's arrows and the check mark an Options row has, never ours)
+            // (inside the row: the value's arrows and the check mark an Options row has, never ours; its value box)
             const std::uint64_t row = PartLayout(ours, name);
             for (const char* inner : {"N_Content_00", "P_CheckMark_00"}) {
                 if (const std::uint64_t in = PaneIn(ctx, row, inner); in != 0) SetVisible(ctx, in, false);
             }
+            g_list_box[k] = {PaneIn(ctx, row, "W_Base_01"), PaneIn(ctx, row, "W_Base_03")};
         }
         for (int r = 0; r < kRows; ++r) {
             char name[16];
@@ -503,8 +529,10 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         LOG_INFO(Core, "coop: pause tab: the game browser's list rows: {} of {}{}", found, kListRows,
                  found == kListRows ? "" : " (build the puppet pack again for the browser)");
     }
-    const bool browse = ViewShown() == View::kLan;
-    const std::vector<ListLine> lines = ListLines(v);
+    // (the browser's games; on the main view and the Session view the session's details, DetailLines)
+    const View view = ViewShown();
+    const bool browse = view == View::kLan;
+    const std::vector<ListLine> lines = browse ? ListLines(v) : DetailLines(view, v);
     int games = 0;
     for (int c = 0; c < kCells; ++c) games += CellIndex(v.s, c) >= 0 ? 1 : 0;
     g_cell_games = browse ? games : 0;
@@ -513,13 +541,19 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         const std::size_t k = static_cast<std::size_t>(i);
         const std::uint64_t pane = g_list_panes[k];
         if (pane == 0) continue;
-        const bool on = browse && !lines[k].name.empty();
+        const bool on = !lines[k].name.empty();
         if (on) {
             char path[64];
             std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Option_00", i);
             LiveText(ctx, layout, gen, path, 8 + 2 * i, lines[k].name);
             std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Text_00", i);
             LiveText(ctx, layout, gen, path, 9 + 2 * i, lines[k].value.empty() ? std::string(" ") : lines[k].value);
+            if (const int box = lines[k].value.empty() ? 0 : 1; g_list_box_vis[k] != box) {
+                for (const std::uint64_t b : g_list_box[k]) {
+                    if (b != 0) SetVisible(ctx, b, box != 0);
+                }
+                g_list_box_vis[k] = box;
+            }
         }
         if (g_list_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_list_vis[k] = on ? 1 : 0;
         // (the header a little dim, as a table's; a game bright when picked, or all of them when the rows have the pad)
@@ -746,12 +780,17 @@ void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionV
     std::lock_guard lock(g_live_mutex);
     if (layout == 0 || gen != g_live_gen) return;   // (another opening came meanwhile: its own turn sets them)
     const std::vector<std::string> rows = RowTexts(ViewShown(), v);
+    std::uint32_t blank = 0;
     for (int i = 0; i < kRows && i < kLiveSlots; ++i) {
         char path[64];
         std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Button_%02d/T_Btn_00", i);
-        LiveText(ctx, layout, gen, path, i, rows[static_cast<std::size_t>(i)]);
+        const std::string& text = rows[static_cast<std::size_t>(i)];
+        if (text.empty()) blank |= 1u << i;
+        LiveText(ctx, layout, gen, path, i, text.empty() ? std::string(" ") : text);   // (a pane's text is never empty)
     }
+    g_rows_blank = blank;
     LiveCells(ctx, layout, gen, v);
+    ApplyBlankRows(ctx);   // (after LiveCells: it finds the rows' panes)
     if (g_page.SettingsUsable()) LiveSettings(ctx, layout, gen);
 }
 
@@ -762,6 +801,7 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_system_pane = 0, g_coop_pane = 0;
         g_settings_button = g_settings_button_coop = g_settings_button_set = 0, g_settings_button_shown = -1, g_set_buttons = {};
         g_mp_button = g_mp_button_coop = g_mp_button_set = 0, g_coop_buttons = {}, g_sys_buttons = {};
+        g_sys_hidden = false;   // (a new opening: System's buttons as the game shows them)
     }
     if (g_pages_looked || !calls || f.layout == 0) return;
     g_pages_looked = true;
@@ -935,6 +975,7 @@ void HideRowsAMoment(void* ctx, std::vector<std::pair<std::uint64_t, bool>> pane
         if (pane != 0) SetVisible(ctx, pane, false);
     }
     g_rows_hidden = std::move(panes), g_rows_back_when = until, g_rows_back_ms = NowMs() + kRowsBackMs;
+    g_rows_moment = true;
 }
 void PlacePaneY(void* ctx, std::uint64_t pane, float y) {
     if (pane == 0 || Read<float>(pane + kPaneOwnY) == y) return;
@@ -956,25 +997,51 @@ void PlaceSystemButtons(void* ctx, int shown) {
     const float top = g_sys_rest_y[2], step = order.size() > 4 ? kSystemTightStep : g_sys_rest_y[2] - g_sys_rest_y[3];
     for (std::size_t i = 0; i < order.size(); ++i) PlacePaneY(ctx, order[i], top - step * static_cast<float>(i));
 }
+// System's own buttons (and its two of ours) hidden while one of our pages is in System's place (g_sys_hidden): hidden
+// with their page only, the game's cursor and Longshot's mouse still went to them (a run, 2026-11-19: an A on the
+// Multiplayer page's Session view chose System's Longshot Settings button, under Back, once System's lower buttons
+// were placed lower).
+bool SystemOwn(std::uint64_t pane) {
+    return pane != 0 && (pane == g_mp_button || pane == g_settings_button ||
+                         std::find(g_sys_buttons.begin(), g_sys_buttons.end(), pane) != g_sys_buttons.end());
+}
 void SystemButtons(void* ctx) {
     const std::uint64_t now = NowMs();
     const int want = (g_page.Usable() && g_mp_button != 0 ? 1 : 0) | (g_page.SettingsUsable() && g_settings_button != 0 ? 2 : 0);
-    if (want != g_settings_button_shown) {
-        if (g_mp_button != 0) SetVisible(ctx, g_mp_button, (want & 1) != 0);
-        if (g_settings_button != 0) SetVisible(ctx, g_settings_button, (want & 2) != 0);
+    const bool over = g_page.Shown();
+    if (want != g_settings_button_shown || over != g_sys_hidden) {
+        if (over != g_sys_hidden) {
+            for (const std::uint64_t b : g_sys_buttons) {
+                if (b != 0) SetVisible(ctx, b, !over);
+            }
+            g_sys_hidden = over;
+        }
+        if (g_mp_button != 0) SetVisible(ctx, g_mp_button, !over && (want & 1) != 0);
+        if (g_settings_button != 0) SetVisible(ctx, g_settings_button, !over && (want & 2) != 0);
         if (g_rows_back_ms == 0 && g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, (want & 2) != 0);
-        PlaceSystemButtons(ctx, want);
-        g_settings_button_shown = want;
-        LOG_INFO(Core, "coop: pause tab: System's buttons of ours: Multiplayer {}, Longshot Settings {}",
-                 (want & 1) != 0 ? "shown" : "hidden", (want & 2) != 0 ? "shown" : "hidden");
+        if (want != g_settings_button_shown) {
+            PlaceSystemButtons(ctx, want);
+            g_settings_button_shown = want;
+            LOG_INFO(Core, "coop: pause tab: System's buttons of ours: Multiplayer {}, Longshot Settings {}",
+                     (want & 1) != 0 ? "shown" : "hidden", (want & 2) != 0 ? "shown" : "hidden");
+        }
     }
-    // (the rows hidden for an opening or a leaving back once the game's cursor is where it should be)
+    // (the rows hidden for an opening or a leaving back once the game's cursor is where it should be; not System's
+    // own while our page is back over it, nor our page's rows with nothing on them, ApplyBlankRows')
     if (g_rows_back_ms != 0 && (now >= g_rows_back_ms || FocusedShownName() == g_rows_back_when)) {
         g_rows_back_ms = 0;
+        const std::uint32_t blank = g_rows_blank.load();
+        const int focus = g_focus_row.load();
         for (const auto& [pane, back] : g_rows_hidden) {
-            if (pane != 0 && back) SetVisible(ctx, pane, true);
+            if (pane == 0 || !back || (g_sys_hidden && SystemOwn(pane))) continue;
+            bool empty = false;
+            for (int r = 0; r < kRows; ++r) {
+                if (g_coop_buttons[static_cast<std::size_t>(r)] == pane) empty = (blank & (1u << r)) != 0 && r != focus;
+            }
+            if (!empty) SetVisible(ctx, pane, true);
         }
         g_rows_hidden.clear();
+        g_rows_moment = false;
     }
     if (g_page.TakeOpened()) {
         if (g_page.Which() == 1) {
@@ -1504,7 +1571,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             now_shown = g_page.Shown();
             why = g_page.TakeWhy();
             g_mouse = g_page.MousePage();
-            if (f.kind == Kind::kPages && now_shown) focused = FocusedRow();
+            if (f.kind == Kind::kPages && now_shown) focused = FocusedRow(), g_focus_row = focused;
             if (d.any() && calls) {
                 if (f.kind == Kind::kPages) ApplyPages(ctx, f, d);
                 if (f.kind == Kind::kStrip && d.set_page && g_pages_screen != 0 && g_pages_ok &&
@@ -1744,11 +1811,30 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 g_page.SetSubView(set_row >= 0);   // (B: back to the rows)
             }
             if (set_row != g_set_row.load()) g_set_row = set_row, g_live_poke = true;
+            // The Multiplayer page's details list (DetailLines, on the main and Session views) is the game's Options
+            // rows, its buttons: a click on one puts the game's cursor there. A Left sends it back to the rows, as on
+            // Longshot Settings, and an A there is no row's (the rows' last focused one would have been taken).
+            bool on_list = false;
+            if (shown && !typing && !settings && !browse) {
+                const std::uint64_t now = NowMs();
+                if (const std::string on = FocusedShownName(); on.rfind("Pa_List_", 0) == 0) {
+                    on_list = true;
+                    if (now - g_list_focus_fix_ms > 300) {
+                        g_list_focus_fix_ms = now;
+                        out |= kPadLeft;
+                        LOG_INFO(Core, "coop: pause tab: the game's cursor on {} (the details): Left sends it back to the "
+                                       "rows",
+                                 on);
+                    }
+                }
+            }
             if (decide) {
                 const int clicked = g_mouse_rows.TakeClicked(NowMs());
                 if (clicked < 0 && cell >= 0) {
                     pick_cell = cell;   // (A on a cell)
                     decide = false;
+                } else if (clicked < 0 && on_list) {
+                    decide = false;   // (A on a line of the details: nothing to do)
                 } else {
                     row = clicked >= 0 ? clicked : FocusedRow();   // (under the lock: the pages screen is the updates')
                 }
