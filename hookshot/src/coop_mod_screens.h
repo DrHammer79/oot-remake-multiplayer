@@ -39,6 +39,16 @@ inline constexpr std::uint32_t kChoosable = 0x14;
 inline constexpr std::size_t kNameMax = 63;
 inline constexpr int kMaxButtons = 64;
 
+// (screen, const char* name) -> bit 0: the sound started. A screen's own menu sound by name: its xlink user at
+// [screen+0x198]+8, then xlink2's searchAndEmit(name) ("searchAndEmit(%s)", main+0x43e400). Read from main and seen in
+// a run, 2026-11-19: the title's Continue starts "Pa_Button_00_decide" and "button_decide", a cursor step "button_on",
+// the pause menu's tabs "mc_TabToRight" and "mc_TabToLeft", all on that user.
+inline constexpr std::uint64_t kScreenSound = 0x43e400;
+inline constexpr std::size_t kSoundNameMax = 63;
+
+// A sound name a mod may give: 1 to kSoundNameMax letters, digits or _.
+bool SoundName(const char* name);
+
 // Reads n bytes at a guest address; false when not mapped.
 using Reader = std::function<bool(std::uint64_t address, void* out, std::size_t n)>;
 

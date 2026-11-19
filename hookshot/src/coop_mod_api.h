@@ -153,6 +153,11 @@ typedef struct CoopModApi {
        replaces this mod's last; the mods' holds add up. The hold ends by itself when no menu screen has updated for half
        a second, and when the mod is switched off. 1 when done. */
     int (*hold_input)(const struct CoopModApi *self, uint64_t buttons);
+    /* (version 2) One of the game's own menu sounds, on the screen being updated, as the game's screens start theirs:
+       `name` is a sound of that screen's set ("button_on" a cursor step, "button_decide" a choice, "Pa_Button_00_decide"
+       the title's Continue, "mc_TabToRight" the pause menu's tabs), letters, digits and _ only, at most 63. Only inside
+       on_screen; 1 when the game found the sound and started it. Read it only when size covers it. */
+    int (*play_sound)(const struct CoopModApi *self, const char *name);
 } CoopModApi;
 
 /* The mod's exports. coop_mod_start: once, when the co-op module starts, before any callback; return 1 to stay on,

@@ -166,6 +166,7 @@ Version 2 adds the game's menu screens. A mod written for it says `"api": 2` in 
 - Inside that call, and only there, for the screen it hands over:
   - `choose_focused(api)` chooses the focused button the game's own way, as the player's A (its sound, what it opens). 0 when nothing is focused, the button cannot be chosen yet (try at a later update) or co-op is busy at the title (hosting, joining, the host's save on its way).
   - `reload_save_list(api)` has the game read its save list again from the save folder, after the mod changed the files in it. The game reads it at the title's next update; `save_list_ready` is 0 until then.
+  - `play_sound(api, name)` starts one of the game's own menu sounds on the screen being updated, as its own screens do: `button_on` (a cursor step), `button_decide` (a choice), `Pa_Button_00_decide` (the title's Continue), `mc_TabToRight` and `mc_TabToLeft` (the pause menu's tabs). Letters, digits and `_` only; 1 when the screen had that sound and the game started it.
   - `hold_input(api, buttons)`: the game does not get those buttons from player 1 (`COOP_MOD_HOLD_ALL`: all of them and the sticks, for the mod's own screen in front; a few, such as A on a focused button, to take that choice: the mod sees the press in `screen->buttons` and acts itself; 0 gives everything back). It ends by itself when no menu screen updates for half a second, and when the mod is switched off.
   - Called anywhere else they do nothing and answer 0, with one line in the log.
 

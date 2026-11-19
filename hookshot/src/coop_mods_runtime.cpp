@@ -110,6 +110,26 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
     return true;
 }
 
+// (mod API v2) play_sound: the screen's own menu sound by name, on its update (CoopModScreens::kScreenSound): the name
+// into the call's scratch memory, then the game's searchAndEmit on the screen's xlink user. False when the screen has no
+// such sound.
+bool PlaySound(void* ctx, std::uint64_t screen, const std::string& name) {
+    if (g_api == nullptr || g_api->call == nullptr || ctx == nullptr || screen == 0 ||
+        g_api->size < offsetof(HosCoopApi, scratch) + sizeof(g_api->scratch) || g_api->scratch == nullptr) {
+        return false;
+    }
+    const std::uint64_t at = g_api->scratch(ctx, name.c_str(), name.size() + 1);
+    if (at == 0) {
+        return false;
+    }
+    HosCoopCall k{};
+    k.function = CoopRuntime::MainBase() + CoopModScreens::kScreenSound;
+    k.x[0] = screen;
+    k.x[1] = at;
+    std::uint64_t x0 = 0;
+    return g_api->call(ctx, &k, &x0) != 0 && (x0 & 1) != 0;
+}
+
 std::string Env(const char* name) {
     const char* v = std::getenv(name);
     return v != nullptr ? v : "";
@@ -303,6 +323,7 @@ void Start() {
     game.has_hook = [](std::uint32_t id) { return id < 64 && (g_hooks.load() >> id & 1) != 0; };
     game.runtime = "hookshot";
     game.choose_focused = ChooseFocused;
+    game.play_sound = PlaySound;
     game.reload_save_list = [] {
         CoopTitle::AskSaveListRead();
         return true;

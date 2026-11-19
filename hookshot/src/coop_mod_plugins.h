@@ -46,6 +46,7 @@ struct Game {
     // screen as Screen was given them). Each true when the game took it.
     std::function<bool(void* ctx, std::uint64_t screen)> choose_focused;
     std::function<bool()> reload_save_list;
+    std::function<bool(void* ctx, std::uint64_t screen, const std::string& name)> play_sound;
     std::function<std::uint64_t()> now_ms;  // a steady clock (the input hold's end)
 };
 

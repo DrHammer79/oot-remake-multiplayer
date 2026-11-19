@@ -2,6 +2,8 @@
 // mod from `self`; every call into a mod goes through Guarded.
 #include "coop_mod_plugins.h"
 
+#include "coop_mod_screens.h"
+
 #include <cstdio>
 #include <cstring>
 #include <type_traits>
@@ -56,6 +58,7 @@ struct Host::Slot {
     std::vector<Callback<coop_mod_screen_fn>> screen;  // (API v2)
     std::atomic<std::uint64_t> hold{0};                // (API v2) the buttons it holds from the game
     std::atomic<bool> said_outside{false};             // (API v2) a v2 call outside on_screen was logged
+    std::atomic<bool> said_bad_sound{false};           // (API v2) a play_sound with a bad name was logged
 
     static Slot* Of(const CoopModApi* self) {
         return self == nullptr ? nullptr : reinterpret_cast<const Table*>(self)->slot;
@@ -335,6 +338,18 @@ int ApiHoldInput(const CoopModApi* self, std::uint64_t buttons) {
     return 1;
 }
 
+int ApiPlaySound(const CoopModApi* self, const char* name) {
+    Slot* s = InScreen(self, "play_sound");
+    if (s == nullptr || !s->game->play_sound) {
+        return 0;
+    }
+    if (!CoopModScreens::SoundName(name)) {
+        if (!s->said_bad_sound.exchange(true)) s->Say("play_sound takes a sound's name: letters, digits and _, at most 63 (said once)");
+        return 0;
+    }
+    return s->game->play_sound(t_update->ctx, t_update->screen, name) ? 1 : 0;
+}
+
 void ApiRestartNeeded(const CoopModApi* self, const char* reason) {
     if (Slot* s = Slot::Of(self); s != nullptr) {
         s->loader->NoteChanged(s->name, reason != nullptr && *reason ? reason : s->id + " changed its files");
@@ -486,6 +501,7 @@ bool Host::Begin(Slot& s, const CoopMods::Mod& m) {
     api.choose_focused = ApiChooseFocused;
     api.reload_save_list = ApiReloadSaveList;
     api.hold_input = ApiHoldInput;
+    api.play_sound = ApiPlaySound;
 
     s.starting = true;
     s.on = true;

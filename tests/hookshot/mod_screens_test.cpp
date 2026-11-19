@@ -103,6 +103,19 @@ TEST_CASE("mod screens: a list that never comes back to its head stops after 64 
     CHECK(FocusedButton(m.reader(), kScreen) == 0);   // (the same button found twice: not one focus)
 }
 
+TEST_CASE("mod screens: a sound's name is letters, digits and _, at most 63, and the call is searchAndEmit's") {
+    CHECK(SoundName("button_decide"));
+    CHECK(SoundName("Pa_Button_00_decide"));
+    CHECK(SoundName("mc_TabToRight"));
+    CHECK_FALSE(SoundName(""));
+    CHECK_FALSE(SoundName(nullptr));
+    CHECK_FALSE(SoundName("button decide"));
+    CHECK_FALSE(SoundName("../x"));
+    CHECK(SoundName(std::string(63, 'a').c_str()));
+    CHECK_FALSE(SoundName(std::string(64, 'a').c_str()));
+    CHECK(0x80020000 + kScreenSound == 0x8045e400);
+}
+
 TEST_CASE("mod screens: a button takes a choice only with both bits of its flags") {
     Memory m;
     const std::uint64_t b = 0x700000;
