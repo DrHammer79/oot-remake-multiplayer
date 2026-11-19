@@ -3,6 +3,7 @@
 // the module does to the game, what the pad lets through, and the probe's lines.
 #include <doctest/doctest.h>
 
+#include <array>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -509,7 +510,7 @@ TEST_CASE("pause tab: the invite code's two rows: the host's Paste answer, a wai
 
 TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width") {
     SessionView idle;
-    CHECK(RowTexts(idle) == std::vector<std::string>{"Host a game", "Join a game", "Games on this network",
+    CHECK(RowTexts(idle) == std::vector<std::string>{"Host a game", "Join a game", "Find a game",
                                                      "Auto-rejoin: Off", "Leave (not in a session)"});
     idle.s.auto_rejoin = true;
     CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: On");
@@ -1128,33 +1129,92 @@ TEST_CASE("pause tab: the kit's release shows on the page, solo and in a session
     CHECK(RowTexts(dev)[kRowLeave] == "Leave (not in a session)");
 }
 
-TEST_CASE("pause tab: the games on this network: one a row, A joins one that can be joined, more than four turn pages") {
+TEST_CASE("pause tab: the game browser: the rows choose the list and its page, the cells hold its games") {
     Session s;
-    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kNone);   // (none heard yet)
-    s.lan_listed = 2;
-    s.lan_joinable = 0b01;   // (the second: full, or another version)
-    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kJoinLan);
-    CHECK(ActionFor(View::kLan, 1, s) == RowAction::kNone);
+    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kBrowseLan);
+    CHECK(ActionFor(View::kLan, 1, s) == RowAction::kBrowseOnline);
+    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kNone);   // (one page)
+    CHECK(ActionFor(View::kLan, 3, s) == RowAction::kListRoom);
     CHECK(ActionFor(View::kLan, kRows - 1, s) == RowAction::kBack);
-    s.lan_listed = 7;
-    s.lan_joinable = 0x7f;
-    CHECK(ActionFor(View::kLan, kRows - 2, s) == RowAction::kMoreLan);
-    s.lan_page = 2;   // (the third page of three: the 7th game on its first row)
-    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kJoinLan);
-    CHECK(ActionFor(View::kLan, 1, s) == RowAction::kNone);
-    s.in_one = true;   // (nobody joins from inside a session)
+    s.lan_listed = 9;   // (more than a page of cells)
+    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kBrowsePage);
+    s.online = true;    // (the other list: its own count)
+    CHECK(ActionFor(View::kLan, 2, s) == RowAction::kNone);
+    s.in_one = true;    // (nobody joins from inside a session)
     CHECK(ActionFor(View::kLan, 0, s) == RowAction::kNone);
+    for (RowAction a : {RowAction::kBrowseLan, RowAction::kBrowseOnline, RowAction::kBrowsePage, RowAction::kListRoom}) {
+        CHECK(std::string(ActionWords(a)).size() > 3);
+    }
+
     SessionView v;
     auto rows = RowTexts(View::kLan, v);
-    CHECK(rows[0] == "Looking for games...");
+    CHECK(rows[0] == "[Local network: 0]");   // (the list the cells show, in brackets)
+    CHECK(rows[1] == "Online: ...");
+    CHECK(rows[2] == " ");
+    CHECK(rows[3] == "List my room online: Off");
     CHECK(rows[kRows - 1] == "Back");
+    auto cells = CellTexts(v);
+    REQUIRE(cells.size() == static_cast<std::size_t>(kCells));
+    CHECK(cells[0] == "Looking for games...");
+    CHECK(cells[1].empty());
     v.lan_rows = {"Mido's game (1/4)", "Saria's game (full)"};
+    v.s.lan_listed = 2;
+    cells = CellTexts(v);
+    CHECK(cells[0] == "Mido's game (1/4)");
+    CHECK(cells[1] == "Saria's game (full)");
+    CHECK(cells[2].empty());
+    v.s.online = true;   // (the relay's list: why there are none, in the first cell)
+    v.online_state = "No relay set";
     rows = RowTexts(View::kLan, v);
-    CHECK(rows[0] == "Mido's game (1/4)");
-    CHECK(rows[1] == "Saria's game (full)");
-    v.lan_rows = {"a", "b", "c", "d", "e"};
+    CHECK(rows[0] == "Local network: 2");
+    CHECK(rows[1] == "[Online: 0]");
+    CHECK(CellTexts(v)[0] == "No relay set");
+    v.online_state.clear();
+    v.online_rows.assign(10, "kokiri (1/4)");
+    v.s.online_listed = 10;
+    v.s.list_room = true;
     rows = RowTexts(View::kLan, v);
-    CHECK(rows[kRows - 2] == "More games (1/2)");
+    CHECK(rows[1] == "[Online: 10]");
+    CHECK(rows[2] == "Page 1 of 2");
+    CHECK(rows[3] == "List my room online: On");
+    v.s.cell_page = 1;   // (the second page: the 9th and 10th rooms)
+    cells = CellTexts(v);
+    CHECK(cells[0] == "kokiri (1/4)");
+    CHECK(cells[1] == "kokiri (1/4)");
+    CHECK(cells[2].empty());
+    CHECK(CellIndex(v.s, 1) == 9);
+    CHECK(CellIndex(v.s, 2) == -1);
+    for (const View w : {View::kLan}) {
+        for (const std::string& r : RowTexts(w, v)) CHECK(r.size() <= kRowChars);
+    }
+    for (const std::string& c : CellTexts(v)) CHECK(c.size() <= kRowChars);
+}
+
+TEST_CASE("pause tab: the browser's cells: two columns, the arrows among them, Left from the left column to the rows") {
+    // 0 1
+    // 2 3
+    // 4 5
+    // 6 7
+    CHECK(CellMove(0, 1, 0, 8) == 1);
+    CHECK(CellMove(1, 1, 0, 8) == 1);              // (the right edge)
+    CHECK(CellMove(1, -1, 0, 8) == 0);
+    CHECK(CellMove(0, -1, 0, 8) == kRowsCell);     // (Left from the left column: the rows)
+    CHECK(CellMove(2, -1, 0, 8) == kRowsCell);
+    CHECK(CellMove(0, 0, 1, 8) == 2);
+    CHECK(CellMove(6, 0, 1, 8) == 6);              // (the bottom)
+    CHECK(CellMove(2, 0, -1, 8) == 0);
+    CHECK(CellMove(0, 0, -1, 8) == 0);             // (the top)
+    CHECK(CellMove(2, 0, 1, 3) == 2);              // (only three games: no cell below)
+    CHECK(CellMove(1, 0, 1, 3) == 1);
+    CHECK(CellMove(-1, 1, 0, 8) == kRowsCell);
+    std::array<RowBox, kCells> boxes{};
+    boxes[0] = RowBox{true, -220, 160, 500, 340};
+    boxes[1] = RowBox{true, 580, 160, 1300, 340};
+    CHECK(CellAt(boxes, 0, 250) == 0);
+    CHECK(CellAt(boxes, 900, 250) == 1);
+    CHECK(CellAt(boxes, 540, 250) == -1);          // (between them)
+    boxes[1].shown = false;
+    CHECK(CellAt(boxes, 900, 250) == -1);
 }
 
 TEST_CASE("pause tab: a game on this network: its password typed on a row, then Join this game, and Back to the list") {

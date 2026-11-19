@@ -26,6 +26,7 @@
 #include "coop_lan_net.h"
 #include "coop_mod_screens.h"
 #include "coop_pause.h"
+#include "coop_room_list.h"
 #include "coop_runtime.h"
 #include "coop_lobby_game.h"
 #include "coop_lobby.h"
@@ -70,6 +71,18 @@ struct LanPick {
     std::uint16_t port = 0;
 };
 LanPick g_lan_pick;
+// The game browser (View::kLan): its list (the relay's rooms, else this network's games), its page of cells, and the
+// cell picked with the pad or the mouse (-1: the rows have the pad). Any thread.
+std::atomic<bool> g_online{false};
+std::atomic<int> g_cell_page{0};
+std::atomic<int> g_cell{-1};
+std::atomic<int> g_cell_games{0};   // the cells on this page that hold a game (LiveCells)
+std::array<std::atomic<std::uint64_t>, kCells> g_cell_pane_at{};   // the cells' panes in our page, this opening
+// The pad's and the mouse's last state for the cells (OnPad, g_mutex).
+std::uint64_t g_browse_last = 0;
+float g_cells_mouse_x = 0, g_cells_mouse_y = 0;
+bool g_cells_held = false;
+int g_cells_press = -1;
 // What the page's last action came to when co-op did not start (CoopPause::PageSays), shown on the Session view from
 // the update that saw it until another view shows; and the newest one seen. g_says_mutex (SetView runs under g_mutex
 // and outside it).
@@ -202,7 +215,7 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
 // same scratch memory showed every row the last one's words, cut to its own length), so each row's text lives in a
 // message of the pack's (strings/en.txt: Coop_Live_00..07, 64 dots each, in LayoutMsg/PlusMenu_00): the module looks
 // it up for each opening of the pages and writes its words there.
-constexpr int kLiveSlots = 8;
+constexpr int kLiveSlots = 16;   // 0..4 the rows, 8..15 the browser's cells
 constexpr std::uint32_t kLivePlaceholder = 64;   // the placeholder's bytes (strings/en.txt)
 struct LiveSlot {
     std::uint64_t gen = 0;      // the pages' opening it was looked up for (Page::Track): looked up again for each
@@ -375,6 +388,18 @@ SessionView ViewNow(View view) {
             v.lan_rows.push_back(CoopLan::RowText(games[i], coop::protocol::kProtocolVersion));
             if (i < 32 && CoopLan::Joinable(games[i], coop::protocol::kProtocolVersion)) v.s.lan_joinable |= 1u << i;
         }
+        const CoopRoomList::Snapshot rooms = CoopRoomList::Now();
+        for (const CoopRoomList::Room& r : rooms.rooms) {
+            v.online_rows.push_back(CoopRoomList::CellText(r, coop::protocol::kProtocolVersion));
+        }
+        v.online_state = rooms.state;
+        v.s.online_listed = static_cast<int>(rooms.rooms.size());
+        v.s.online = g_online.load();
+        v.s.cell_page = g_cell_page.load();
+        v.s.list_room = CoopPause::ListRoom();   // (the files' setting; read only while this view shows)
+        v.cell = g_cell.load();
+        // (the relay asked again while the Online list shows: at most every CoopRoomList::kEveryMs, from its own thread)
+        CoopRoomList::Look(v.s.online && !v.s.in_one && !v.s.by_launcher, NowMs(), CoopPause::Relay());
     }
     if (view == View::kJoin) {
         v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
@@ -418,6 +443,56 @@ bool LiveDue(std::uint64_t gen) {
     return true;
 }
 
+// The game browser's cells (View::kLan): shown with their games' words, the one picked bright and the others dimmed
+// while the pad or the mouse is in them; hidden on every other view. The panes are looked up once an opening (the pack's
+// Pa_Game_00..07 in our page's own layout); an older pack has none, and the browser lists nothing then. g_live_mutex.
+std::uint64_t g_cells_gen = 0;
+std::array<std::uint64_t, kCells> g_cell_panes{};
+std::array<int, kCells> g_cell_vis{};
+std::array<float, kCells> g_cell_alpha{};
+
+void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
+    if (g_cells_gen != gen) {
+        g_cells_gen = gen;
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
+        const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
+        int found = 0;
+        for (int i = 0; i < kCells; ++i) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_Game_%02d", i);
+            const std::uint64_t pane = PaneIn(ctx, ours, name);
+            const std::size_t k = static_cast<std::size_t>(i);
+            g_cell_panes[k] = IsPart(pane) ? pane : 0;
+            g_cell_pane_at[k] = g_cell_panes[k];
+            g_cell_vis[k] = -1, g_cell_alpha[k] = -1;
+            found += IsPart(pane) ? 1 : 0;
+        }
+        LOG_INFO(Core, "coop: pause tab: the game browser's cells: {} of {}{}", found, kCells,
+                 found == kCells ? "" : " (build the puppet pack again for the browser)");
+    }
+    const bool browse = ViewShown() == View::kLan;
+    const std::vector<std::string> cells = CellTexts(v);
+    int games = 0;
+    for (int c = 0; c < kCells; ++c) games += CellIndex(v.s, c) >= 0 ? 1 : 0;
+    g_cell_games = browse ? games : 0;
+    const int picked = browse ? g_cell.load() : -1;
+    for (int i = 0; i < kCells; ++i) {
+        const std::size_t k = static_cast<std::size_t>(i);
+        const std::uint64_t pane = g_cell_panes[k];
+        if (pane == 0) continue;
+        const bool on = browse && !cells[k].empty();
+        if (on) {
+            char path[64];
+            std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Game_%02d/T_Btn_00", i);
+            LiveText(ctx, layout, gen, path, 8 + i, cells[k]);
+        }
+        if (g_cell_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_cell_vis[k] = on ? 1 : 0;
+        const float alpha = picked < 0 || picked == i ? 1.0f : 0.45f;
+        if (on && g_cell_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_cell_alpha[k] = alpha;
+    }
+}
+
 void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     std::lock_guard lock(g_live_mutex);
     if (layout == 0 || gen != g_live_gen) return;   // (another opening came meanwhile: its own turn sets them)
@@ -427,6 +502,7 @@ void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionV
         std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Button_%02d/T_Btn_00", i);
         LiveText(ctx, layout, gen, path, i, rows[static_cast<std::size_t>(i)]);
     }
+    LiveCells(ctx, layout, gen, v);
 }
 
 // The pages' panes, looked up once per opening (`calls`: ctx may call(); else looked up at a later update).
@@ -620,6 +696,21 @@ RowBoxes ReadRowBoxes(std::uint64_t now_ms) {
     return boxes;
 }
 
+// The browser's cells where the game puts them now: each pane's global matrix (+0x28: the scales at [0] and [4], the
+// place at [9] and [10], as the map page reads its panes) and the copied button's size (720 x 180, PaSystemMenu_00's).
+std::array<RowBox, kCells> ReadCellBoxes() {
+    std::array<RowBox, kCells> boxes{};
+    for (int i = 0; i < kCells; ++i) {
+        const std::uint64_t pane = g_cell_pane_at[static_cast<std::size_t>(i)].load();
+        float m[12] = {};
+        if (pane == 0 || !CoopRuntime::Read(pane + 0x28, m, sizeof m) || !(m[0] > 1e-3f) || !(m[4] > 1e-3f)) continue;
+        if ((Read<std::uint32_t>(pane + 0xa8) & 1u) == 0) continue;   // (hidden: bit 0 of its flags, kSetVisible's)
+        const float hw = 360.0f * m[0], hh = 90.0f * m[4];
+        boxes[static_cast<std::size_t>(i)] = RowBox{true, m[9] - hw, m[10] - hh, m[9] + hw, m[10] + hh};
+    }
+    return boxes;
+}
+
 #ifdef _WIN32
 BOOL CALLBACK FindGameWindow(HWND h, LPARAM out) {
     DWORD pid = 0;
@@ -662,6 +753,7 @@ void SetView(View v) {
     if (g_view.exchange(static_cast<int>(v)) != static_cast<int>(v)) {
         g_confirm_until = 0;      // (a new view: no A waited)
         g_show_password = false;  // (and the password hidden again)
+        g_cell = -1;              // (the browser's cells give the pad back)
     }
     if (v != View::kSession) {
         std::lock_guard lock(g_says_mutex);
@@ -694,6 +786,49 @@ bool SecondA(View view, int row) {
     g_confirm_view = static_cast<int>(view), g_confirm_row = row;
     g_confirm_until = NowMs() + kConfirmMs;   // (the row says "A again" until then)
     return false;
+}
+
+// A cell of the game browser chosen (A on it, or a click): that game's own view. A game on this network: its view
+// (its password, then Join this game). A room on the relay: the Join view with its name typed in (its password next).
+// After the lock, as Act.
+void ActCell(int cell) {
+    const SessionView v = ViewNow(View::kLan);
+    const int i = CellIndex(v.s, cell);
+    if (i < 0) return;
+    if (v.s.online) {
+        const CoopRoomList::Snapshot rooms = CoopRoomList::Now();
+        if (i >= static_cast<int>(rooms.rooms.size())) return;
+        const CoopRoomList::Room& r = rooms.rooms[static_cast<std::size_t>(i)];
+        if (!CoopRoomList::Joinable(r, coop::protocol::kProtocolVersion)) {
+            LOG_INFO(Core, "coop: pause tab: cell {} chosen: that room cannot be joined from here (full, or another "
+                           "version)", cell);
+            return;
+        }
+        LOG_INFO(Core, "coop: pause tab: cell {} chosen: a room on the relay's list, to the Join view", cell);
+        {
+            std::lock_guard lock(g_mutex);
+            g_page.Field(0).Clear();
+            for (const char c : r.room) g_page.Field(0).Type(static_cast<unsigned char>(c));
+            g_page.Field(1).Clear();
+            g_live_poke = true;
+        }
+        SetView(View::kJoin);
+        return;
+    }
+    const auto games = CoopLanNet::Games(NowMs());
+    if (i >= static_cast<int>(games.size())) return;
+    const CoopLan::Heard& h = games[static_cast<std::size_t>(i)];
+    if (!CoopLan::Joinable(h, coop::protocol::kProtocolVersion)) {
+        LOG_INFO(Core, "coop: pause tab: cell {} chosen: that game cannot be joined from here (full, or another "
+                       "version)", cell);
+        return;
+    }
+    LOG_INFO(Core, "coop: pause tab: cell {} chosen: a game on this network, to its view", cell);
+    {
+        std::lock_guard lock(g_mutex);
+        g_lan_pick = LanPick{h.address, CoopLan::RowText(h, coop::protocol::kProtocolVersion), h.game.port};
+    }
+    SetView(View::kLanGame);   // (the password first: every session has one)
 }
 
 // A row's action (after the lock: co-op's menu, the Lobby and the chat take their own).
@@ -751,11 +886,20 @@ void Act(int row) {
         CoopPause::JoinPasteNow();
         break;
     case RowAction::kViewLan:
-        g_lan_page = 0;
+        g_lan_page = 0, g_cell_page = 0, g_cell = -1;
         SetView(View::kLan);
         CoopLanNet::Look(true, NowMs());   // (the listener opens at once: the first games come within two seconds)
         break;
     case RowAction::kMoreLan: g_lan_page = g_lan_page.load() + 1; break;
+    case RowAction::kBrowseLan:
+        g_online = false, g_cell_page = 0, g_cell = -1;
+        CoopLanNet::Look(true, NowMs());
+        break;
+    case RowAction::kBrowseOnline: g_online = true, g_cell_page = 0, g_cell = -1; break;
+    case RowAction::kBrowsePage:
+        g_cell_page = (v.s.cell_page + 1) % CellPages(BrowseListed(v.s)), g_cell = -1;
+        break;
+    case RowAction::kListRoom: CoopPause::SetListRoom(!v.s.list_room); break;
     case RowAction::kJoinLan: {
         const auto games = CoopLanNet::Games(NowMs());
         const int i = PlayerIndex(static_cast<int>(games.size()), v.s.lan_page, row);
@@ -937,7 +1081,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         std::uint64_t out = 0;
         bool was = false, shown = false;
         bool decide = false;
-        int row = -1;
+        int row = -1, pick_cell = -1;
         std::string why;
         {
             std::lock_guard lock(g_mutex);
@@ -967,11 +1111,60 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             } else {
                 g_mouse_rows.Reset();
             }
+            // The game browser's cells (View::kLan): Right goes into them, the arrows move among them (none reaches the
+            // game's cursor), Left from the left column or B gives the pad back to the rows; the mouse picks one by
+            // moving onto it, and a click on one is its A (Longshot presses nothing there: the cells are no buttons).
+            const bool browse = shown && !typing && ViewShown() == View::kLan;
+            const std::uint64_t bdown = in & ~g_browse_last;
+            g_browse_last = in;
+            int cell = browse ? g_cell.load() : -1;
+            const int games = g_cell_games.load();
+            if (cell >= games) cell = games - 1;
+            if (browse) {
+                const bool right = (bdown & (kPadRight | kPadStickRight)) != 0, left = (bdown & (kPadLeft | kPadStickLeft)) != 0;
+                const bool up = (bdown & (kPadUp | kPadStickUp)) != 0, down = (bdown & (kPadDown | kPadStickDown)) != 0;
+                if (cell < 0 && right && games > 0) {
+                    const int r = FocusedRow();
+                    cell = std::clamp((r >= 0 && r < 4 ? r : 3) * kCellColumns, 0, games - 1);
+                    g_page.Sound("button_on");
+                } else if (cell >= 0 && (right || left || up || down)) {
+                    const int to = CellMove(cell, right ? 1 : left ? -1 : 0, down ? 1 : up ? -1 : 0, games);
+                    if (to != cell) g_page.Sound("button_on");
+                    cell = to;
+                }
+                float x = 0, y = 0;
+                bool held = false;
+                if (ReadCursor(&x, &y, &held)) {
+                    const int hover = CellAt(ReadCellBoxes(), x, y);
+                    const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
+                    g_cells_mouse_x = x, g_cells_mouse_y = y;
+                    if (moved && hover >= 0 && hover < games && hover != cell) cell = hover, g_page.Sound("button_on");
+                    if (held && !g_cells_held) g_cells_press = hover;
+                    if (!held && g_cells_held && hover >= 0 && hover == g_cells_press && hover < games) {
+                        pick_cell = hover;   // (a click on a cell: its A)
+                        g_page.Sound("button_decide");
+                    }
+                    g_cells_held = held;
+                }
+                if (cell >= 0) out &= ~(kPadUp | kPadDown | kPadStickUp | kPadStickDown);   // (the rows' cursor stays)
+            }
+            if (cell != g_cell.load()) g_cell = cell, g_live_poke = true;
             if (decide) {
                 const int clicked = g_mouse_rows.TakeClicked(NowMs());
-                row = clicked >= 0 ? clicked : FocusedRow();   // (under the lock: the pages screen is the updates')
+                if (clicked < 0 && cell >= 0) {
+                    pick_cell = cell;   // (A on a cell)
+                    decide = false;
+                } else {
+                    row = clicked >= 0 ? clicked : FocusedRow();   // (under the lock: the pages screen is the updates')
+                }
             }
-            if (g_page.TakeBack()) SetView(BackOf(ViewShown()));   // (B in a view: where its Back goes)
+            if (g_page.TakeBack()) {
+                if (cell >= 0) {
+                    g_cell = -1, g_live_poke = true;   // (B in the cells: the rows have the pad again)
+                } else {
+                    SetView(BackOf(ViewShown()));   // (B in a view: where its Back goes)
+                }
+            }
             if (!shown) SetView(View::kMain);
             g_page.SetSubView(ViewShown() != View::kMain);
             why = g_page.TakeWhy();
@@ -979,11 +1172,12 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         }
         if (shown && stick != nullptr) {
             stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
-            if (typing) stick[1] = 0;                   // (a field typed into: the cursor stays on its row)
+            if (typing || g_cell.load() >= 0) stick[1] = 0;   // (a field typed into, or the cells: the rows' cursor stays)
         }
         if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
         if (decide) Act(row);
+        if (pick_cell >= 0) ActCell(pick_cell);
         // (the stick's up and down bits we added are not the game's: only what it sent, filtered)
         return out & (buttons | ~(kPadStickUp | kPadStickDown | kPadStickLeft | kPadStickRight));
     } catch (...) {

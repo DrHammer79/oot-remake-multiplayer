@@ -275,6 +275,7 @@ Options Options::Read(std::string_view coop_ini, std::string_view options_ini) {
     o.pvp = On(IniGet(options_ini, "pvp"));
     o.approve_joins = On(IniGet(options_ini, "approve_joins"));
     o.auto_rejoin = On(IniGet(options_ini, "auto_rejoin"));
+    o.list_room = On(IniGet(options_ini, "list_room"));
     o.upnp = !Off(IniGet(options_ini, "upnp"));
     if (const auto v = IniGet(options_ini, "server_password"); v && PasswordOk(*v)) {
         o.password = *v;
@@ -337,6 +338,7 @@ void Options::Write(std::string& coop_ini, std::string& options_ini) const {
     o = show_players ? IniSet(o, "LICHII_COOP_SHOW_PLAYERS", "1", false) : IniUnset(o, "LICHII_COOP_SHOW_PLAYERS");
     o = IniSet(o, "pvp", pvp ? "on" : "off", true);
     o = auto_rejoin ? IniSet(o, "auto_rejoin", "on", true) : IniUnset(o, "auto_rejoin");
+    o = list_room ? IniSet(o, "list_room", "on", true) : IniUnset(o, "list_room");
     o = upnp ? IniUnset(o, "upnp") : IniSet(o, "upnp", "no", true);
     o = password.empty() ? IniUnset(o, "server_password") : IniSet(o, "server_password", password, true);
     o = debug_panel ? IniSet(o, "LICHII_COOP_DEBUG_PANEL", "1", false) : IniUnset(o, "LICHII_COOP_DEBUG_PANEL");

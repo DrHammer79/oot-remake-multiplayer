@@ -415,6 +415,38 @@ float Ahead(float prev, float now, float limit) {
     return next;
 }
 
+int BrowseListed(const Session& s) {
+    return s.online ? s.online_listed : s.lan_listed;
+}
+
+int CellPages(int listed) {
+    return listed <= kCells ? 1 : (listed + kCells - 1) / kCells;
+}
+
+int CellIndex(const Session& s, int cell) {
+    const int listed = BrowseListed(s), pages = CellPages(listed);
+    if (cell < 0 || cell >= kCells) return -1;
+    const int i = ((s.cell_page % pages + pages) % pages) * kCells + cell;
+    return i < listed ? i : -1;
+}
+
+int CellAt(const std::array<RowBox, kCells>& boxes, float x, float y) {
+    for (int i = 0; i < kCells; ++i) {
+        const RowBox& b = boxes[static_cast<std::size_t>(i)];
+        if (b.shown && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return i;
+    }
+    return -1;
+}
+
+int CellMove(int cell, int dx, int dy, int shown) {
+    if (shown <= 0 || cell < 0) return kRowsCell;
+    const int col = cell % kCellColumns, row = cell / kCellColumns;
+    if (dx < 0 && col == 0) return kRowsCell;   // (Left from the left column: back to the rows)
+    const int to_col = std::clamp(col + dx, 0, kCellColumns - 1), to_row = std::max(row + dy, 0);
+    const int to = to_row * kCellColumns + to_col;
+    return to < shown && to < kCells ? to : cell;
+}
+
 std::pair<float, float> LayoutPoint(int px, int py, int w, int h) {
     if (w <= 0 || h <= 0) return {0.0f, 0.0f};
     const float sw = 3840.0f / static_cast<float>(w), sh = 2160.0f / static_cast<float>(h);
@@ -553,12 +585,15 @@ RowAction ActionFor(View view, int row, const Session& s) {
         if (row == 0) return RowAction::kHostVoice;
         if (row == 1) return RowAction::kHostChat;
         return row == 2 ? RowAction::kKick : RowAction::kBan;
-    case View::kLan: {
+    case View::kLan:
+        // (0 this network's games, 1 the relay's public rooms, 2 the cells' next page, 3 listing our own room when we
+        // host; the games themselves are in the cells: Right goes into them)
         if (s.in_one || s.by_launcher) return RowAction::kNone;
-        if (s.lan_listed > kRows - 1 && row == kRows - 2) return RowAction::kMoreLan;
-        const int i = PlayerIndex(s.lan_listed, s.lan_page, row);
-        return i >= 0 && i < 32 && (s.lan_joinable >> i & 1u) != 0 ? RowAction::kJoinLan : RowAction::kNone;
-    }
+        if (row == 0) return RowAction::kBrowseLan;
+        if (row == 1) return RowAction::kBrowseOnline;
+        if (row == 2) return CellPages(BrowseListed(s)) > 1 ? RowAction::kBrowsePage : RowAction::kNone;
+        if (row == 3) return RowAction::kListRoom;
+        return RowAction::kNone;
     case View::kLanGame:
         // (0 the game, 1 its password typed on the row, 2 Join this game once one is typed; the last row is Back)
         if (s.in_one || s.by_launcher) return RowAction::kNone;
@@ -659,7 +694,7 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else {
         rows[kRowJoinCode] = v.s.in_one || v.s.by_launcher ? "Session details" : "Join a game";
     }
-    rows[kRowPlayers] = !v.s.in_one && !v.s.by_launcher ? "Games on this network"
+    rows[kRowPlayers] = !v.s.in_one && !v.s.by_launcher ? "Find a game"
                         : v.players <= 0   ? "Players"
                         : v.players == 1 ? "Players: just you"
                                          : "Players: " + std::to_string(v.players);
@@ -711,17 +746,22 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         break;
     }
     case View::kLan: {
-        const int listed = static_cast<int>(v.lan_rows.size());
-        if (listed == 0) rows[0] = "Looking for games...";
-        for (int r = 0; r < kRows - 1; ++r) {
-            const int i = PlayerIndex(listed, v.s.lan_page, r);
-            if (i >= 0) rows[static_cast<std::size_t>(r)] = v.lan_rows[static_cast<std::size_t>(i)];
+        if (v.s.in_one || v.s.by_launcher) {
+            rows[0] = v.s.by_launcher ? "Co-op came with the game" : "In a session already";
+            break;
         }
-        if (listed > kRows - 1) {
-            const int pages = PlayerPages(listed);
-            rows[kRows - 2] = "More games (" + std::to_string((v.s.lan_page % pages + pages) % pages + 1) + "/" +
-                              std::to_string(pages) + ")";
+        // (the list shown in brackets: the cells on the right are its games)
+        const std::string lan = "Local network: " + std::to_string(v.lan_rows.size());
+        const std::string online = "Online: " + (v.online_rows.empty() && v.online_state.empty()
+                                                     ? std::string("...")
+                                                     : std::to_string(v.online_rows.size()));
+        rows[0] = v.s.online ? lan : "[" + lan + "]";
+        rows[1] = v.s.online ? "[" + online + "]" : online;
+        const int pages = CellPages(BrowseListed(v.s));
+        if (pages > 1) {
+            rows[2] = "Page " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " + std::to_string(pages);
         }
+        rows[3] = v.s.list_room ? "List my room online: On" : "List my room online: Off";
         break;
     }
     case View::kLanGame:
@@ -897,6 +937,10 @@ const char* ActionWords(RowAction a) {
     case RowAction::kMoreLan: return "the next page of games on this network";
     case RowAction::kAutoRejoin: return "auto-rejoin on or off";
     case RowAction::kShowPassword: return "the join password shown or hidden";
+    case RowAction::kBrowseLan: return "the browser lists the games on this network";
+    case RowAction::kBrowseOnline: return "the browser lists the relay's public rooms";
+    case RowAction::kBrowsePage: return "the browser's next page of games";
+    case RowAction::kListRoom: return "this game's room listed online when it hosts, on or off (saved)";
     case RowAction::kTypePassword: return "the join password typed on its row";
     case RowAction::kJoinRoom: return "join that room through the kit's relay";
     case RowAction::kBan: return "ban that player for this session after a second A";
@@ -946,6 +990,24 @@ std::vector<std::string> Probe::Seen(const Facts& f, std::uint64_t now_ms) {
                       " updates in its first " + std::to_string(now_ms - last.first_ms) + " ms");
     }
     return out;
+}
+
+std::vector<std::string> CellTexts(const SessionView& v) {
+    std::vector<std::string> cells(kCells);
+    if (v.s.in_one || v.s.by_launcher) return cells;
+    const std::vector<std::string>& list = v.s.online ? v.online_rows : v.lan_rows;
+    if (list.empty()) {
+        cells[0] = v.s.online ? (v.online_state.empty() ? std::string("Asking the relay...") : v.online_state)
+                              : std::string("Looking for games...");
+        cells[0] = Fit(cells[0]);
+        return cells;
+    }
+    for (int c = 0; c < kCells; ++c) {
+        if (const int i = CellIndex(v.s, c); i >= 0 && static_cast<std::size_t>(i) < list.size()) {
+            cells[static_cast<std::size_t>(c)] = Fit(list[static_cast<std::size_t>(i)]);
+        }
+    }
+    return cells;
 }
 
 }  // namespace CoopPauseTab

@@ -178,6 +178,7 @@ int Menu::HostStart(const HosCoopHostOptions* o) {
     job.relay_via = Trim(COOP_HAS(o, HosCoopHostOptions, relay_via) ? Text(o->relay_via) : std::string());
     job.relay_key = COOP_HAS(o, HosCoopHostOptions, relay_key) ? Text(o->relay_key) : std::string();
     job.relay_room = Trim(COOP_HAS(o, HosCoopHostOptions, relay_room) ? Text(o->relay_room) : std::string());
+    job.relay_list = Trim(COOP_HAS(o, HosCoopHostOptions, relay_list) ? Text(o->relay_list) : std::string());
     job.max_players = HostMaxPlayers(COOP_HAS(o, HosCoopHostOptions, max_players) ? o->max_players : 0);
     if (COOP_HAS(o, HosCoopHostOptions, pose_upload_kbps)) {
         job.pose_upload_kbps = o->pose_upload_kbps;
@@ -236,6 +237,7 @@ void Menu::RunHost(HostJob job) {
         config.relay_via = job.relay_via;
         config.relay_key = job.relay_key;
         config.relay_room = job.relay_via.empty() ? std::string() : job.relay_room;
+        config.relay_list = config.relay_room.empty() ? std::string() : job.relay_list;   // (the public list: opt-in)
         config.counts = false;  // the game's log need not have them every 5 s
         config.log_invite = false;  // it holds the join password; the menu shows it
         config.log = [this](const std::string& text) { Say("coop: host: " + text); };

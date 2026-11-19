@@ -930,3 +930,18 @@ TEST_CASE("title menu: Start, Multiplayer, Options on the game's three, Multipla
         }
     }
 }
+
+TEST_CASE("title menu: list_room is off unless coop-options.ini turns it on, and it is written back") {
+    using CoopTitleMenu::Options;
+    CHECK_FALSE(Options::Read("", "").list_room);
+    Options o = Options::Read("", "list_room = on\r\n");
+    CHECK(o.list_room);
+    std::string coop, options = "relay = relay.example:27600\r\n";
+    o.list_room = true;
+    o.Write(coop, options);
+    CHECK(Options::Read(coop, options).list_room);
+    o.list_room = false;
+    o.Write(coop, options);
+    CHECK_FALSE(Options::Read(coop, options).list_room);
+    CHECK(options.find("relay = relay.example:27600") != std::string::npos);   // (the other lines kept)
+}

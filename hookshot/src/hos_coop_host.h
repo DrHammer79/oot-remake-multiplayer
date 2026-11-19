@@ -34,6 +34,8 @@ typedef struct HosCoopHostOptions {
     uint8_t reserved[2];
     uint32_t pose_upload_kbps;  /* the host's upload for other players' poses, kilobits a second; 0: no cap */
     const char *relay_room; /* with relay_via: a room name to hold on the relay (issue 261); NULL or "": none */
+    const char *relay_list; /* with relay_room: the host's name on the relay's public room list (coop-options.ini
+                               list_room); NULL or "": not listed */
 } HosCoopHostOptions;
 
 typedef struct HosCoopJoinOptions {

@@ -2,6 +2,7 @@
 // The lines it says are the ones coop_server always printed.
 #include "host_service.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <utility>
@@ -163,6 +164,18 @@ bool HostService::start(std::string& error) {
       c.server_port = server_->port();
       c.key = config_.relay_key;
       c.room = config_.relay_room;
+      if (!config_.relay_list.empty() && !config_.relay_room.empty()) {
+        const std::string host = relay::listing_name(config_.relay_list);
+        c.listing = [this, host]() -> std::optional<relay::RoomEntry> {
+          relay::RoomEntry e;
+          e.host = host;
+          const Session& session = server_->session();
+          e.players = static_cast<std::uint8_t>(std::min<std::size_t>(session.player_count(), 255));
+          e.max_players = config_.session.max_players;
+          e.version = protocol::kProtocolVersion;
+          return e;
+        };
+      }
       c.log = [this](const std::string& text) { say("relay: " + text); };
       const std::string relay_text = config_.relay_via;
       c.on_room = [this, relay_text](const std::string& room) {
@@ -185,7 +198,8 @@ bool HostService::start(std::string& error) {
         link_.reset();
       } else {
         say("relay: asking " + config_.relay_via + " for a join code" +
-            (config_.relay_room.empty() ? std::string() : " and room \"" + config_.relay_room + "\""));
+            (config_.relay_room.empty() ? std::string() : " and room \"" + config_.relay_room + "\"") +
+            (c.listing ? std::string(", listed on its room list") : std::string()));
       }
     }
   }

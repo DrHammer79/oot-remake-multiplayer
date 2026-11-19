@@ -316,6 +316,7 @@ int main(int argc, char** argv) {
     config.relay_via = line->relay_via;
     config.relay_key = line->relay_key;
     config.relay_room = line->relay_room;
+    config.relay_list = line->relay_list;
     config.log = say;
     HostService host(config);
     std::string why;

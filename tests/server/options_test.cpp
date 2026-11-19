@@ -54,6 +54,24 @@ TEST_CASE("command line: --relay-room needs --relay-via and a room name (issue 2
   CHECK(!parse_command_line({"--relay-via", "relay.example.net", "--relay-room"}, error).has_value());
 }
 
+TEST_CASE("command line: --relay-list lists the room under a host name, and needs --relay-room") {
+  std::string error;
+  auto listed = parse_command_line(
+      {"--relay-via", "relay.example.net", "--relay-room", "forest-gang", "--relay-list", "Saria"}, error);
+  REQUIRE(listed.has_value());
+  CHECK(listed->relay_list == "Saria");
+  auto unlisted = parse_command_line({"--relay-via", "relay.example.net", "--relay-room", "forest-gang"}, error);
+  REQUIRE(unlisted.has_value());
+  CHECK(unlisted->relay_list.empty());  // (off unless asked)
+  CHECK(!parse_command_line({"--relay-via", "relay.example.net", "--relay-list", "Saria"}, error).has_value());
+  CHECK(error.find("--relay-room") != std::string::npos);
+  CHECK(!parse_command_line({"--relay-via", "relay.example.net", "--relay-room", "forest-gang", "--relay-list", ""},
+                            error)
+             .has_value());
+  CHECK(!parse_command_line({"--relay-via", "relay.example.net", "--relay-room", "forest-gang", "--relay-list"}, error)
+             .has_value());
+}
+
 TEST_CASE("command line: --bind and --allow") {
   std::string error;
   auto none = parse_command_line({}, error);

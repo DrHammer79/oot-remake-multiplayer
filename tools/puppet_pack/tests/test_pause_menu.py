@@ -35,8 +35,19 @@ PAGES_PARTS = {"Pa_Collect_00": ("PaCollectMenu_00", []), "Pa_Equip_00": ("PaEqu
                "Pa_Item_00": ("PaItemMenu_00", []), "Pa_System_00": ("PaSystemMenu_00", [])}
 
 
+# Shaped as the System page's own layout (PaSystemMenu_00): the controller picture and five buttons under the
+# page's In and Out pane, the last button the last pane.
+SYSTEM = [("RootPane", -1), ("N_All_00", 0), ("N_InOut_00", 1), ("Pa_SystemController_00", 2)] +          [("Pa_Button_%02d" % i, 2) for i in range(5)]
+SYSTEM_PARTS = {"Pa_SystemController_00": ("PaSystemController_00", [])}
+SYSTEM_PARTS.update({"Pa_Button_%02d" % i: ("PaCommonBtnThin_00", []) for i in range(5)})
+
+
 def overlay():
     return make_layout(OVERLAY, OVERLAY_PARTS)
+
+
+def system():
+    return make_layout(SYSTEM, SYSTEM_PARTS)
 
 
 def pages():
@@ -119,6 +130,27 @@ class PageTest(unittest.TestCase):
             pm.add_page(make_layout(PAGES[:7], {k: v for k, v in PAGES_PARTS.items() if k != "Pa_System_00"}))
 
 
+class CellsTest(unittest.TestCase):
+    def test_eight_cells_in_two_columns_at_the_rows_heights_stored_hidden(self):
+        d = system()
+        n = pm.add_cells(d)
+        panes, parts = ui_pack.read_layout(n)
+        self.assertEqual([p.name for p in panes[-pm.CELLS:]], [pm.CELL % i for i in range(pm.CELLS)])
+        self.assertEqual([p.name for p in parts[-pm.CELLS:]], [pm.CELL % i for i in range(pm.CELLS)])
+        for i in range(pm.CELLS):
+            x, y, parent, _ = pane(n, pm.CELL % i)
+            self.assertEqual(parent, "N_InOut_00")
+            self.assertEqual(x, pm.CELL_X[i % 2])
+            self.assertEqual(y, pane(d, "Pa_Button_%02d" % (i // 2))[1])   # (a row's height)
+            self.assertEqual(struct.unpack_from("<I", n, panes[len(SYSTEM) + i].record + 0x38)[0] & 1, 0)   # hidden
+            self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-pm.CELLS + i].record)[0]),
+                             "PaCommonBtnThin_00")
+        for name in [p[0] for p in SYSTEM]:
+            self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
+        with self.assertRaises(pm.PauseMenuError):
+            pm.add_cells(n)   # (twice)
+
+
 class _Plain:
     """Dictionaries that do nothing: the synthetic files are not compressed."""
     def decompress(self, raw):
@@ -142,7 +174,8 @@ LANGS = ("EUfr", "JPja", "USen")
 class BuildTest(unittest.TestCase):
     def romfs(self, root, broken=None):
         files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
-                                                ("Other_00.buil", b"other")], data_align=16)}
+                                                (pm.SYSTEM_LAYOUT, system()), ("Other_00.buil", b"other")],
+                                               data_align=16)}
         for lang in LANGS:
             over = make_msbt([("SystemMenu", "System")])
             if lang == broken:
@@ -163,7 +196,8 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
             self.romfs(src, broken)
-            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, pm.OVERLAY_LAYOUT: 500, pm.PAGES_LAYOUT: 500})
+            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, pm.OVERLAY_LAYOUT: 500, pm.PAGES_LAYOUT: 500,
+                            pm.SYSTEM_LAYOUT: 500})
             for lang in LANGS:
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -187,6 +221,7 @@ class BuildTest(unittest.TestCase):
         common = dict(sarc.read_entries(written[pm.COMMON_ARCHIVE]))
         self.assertIn("Pa_Category_04", [p.name for p in ui_pack.read_layout(common[pm.OVERLAY_LAYOUT])[0]])
         self.assertIn("Pa_Coop_00", [p.name for p in ui_pack.read_layout(common[pm.PAGES_LAYOUT])[0]])
+        self.assertIn(pm.CELL % 7, [p.name for p in ui_pack.read_layout(common[pm.SYSTEM_LAYOUT])[0]])
         self.assertEqual(common["Other_00.buil"], b"other")
         ours = ui_pack.load_strings("USen")
         msgs = sarc.read(written["Mals/USen.Product.110.sarc.zs"])
@@ -198,12 +233,14 @@ class BuildTest(unittest.TestCase):
             label = "Pa_Coop_00-Pa_Button_%02d-T_Btn_00" % i
             self.assertEqual(page.text(label), [ours[pm.PAGES_MSG][label]])
         self.assertEqual(page.text("Pa_System_00-Pa_Button_00-T_Btn_00"), ["Save"])
-        # The module's live row texts (coop_pause_tab_module.cpp, kLiveSlots / kLivePlaceholder): Coop_Live_00..07,
-        # each exactly 64 dots, in the built message file (the module refuses any other text or length).
-        for i in range(8):
+        # The module's live texts (coop_pause_tab_module.cpp, kLiveSlots / kLivePlaceholder): Coop_Live_00..15 (the
+        # rows' and the browser's cells'), each exactly 64 dots, in the built message file (the module refuses any
+        # other text or length).
+        for i in range(16):
             label = "Coop_Live_%02d" % i
             self.assertEqual(page.text(label), ["." * 64], label)
-        self.assertTrue(all(sizes[k] > before[k] for k in before if k not in (pm.OVERLAY_LAYOUT, pm.PAGES_LAYOUT)))
+        self.assertTrue(all(sizes[k] > before[k] for k in before
+                            if k not in (pm.OVERLAY_LAYOUT, pm.PAGES_LAYOUT, pm.SYSTEM_LAYOUT)))
         self.assertTrue(sizes[pm.OVERLAY_LAYOUT] > before[pm.OVERLAY_LAYOUT])
 
     def test_a_translation_over_english(self):
@@ -227,8 +264,8 @@ class BuildTest(unittest.TestCase):
         game's original (its size before, plus the file's growth over both steps, plus 0x1000)."""
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
-            files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages())],
-                                                   data_align=16),
+            files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
+                                                    (pm.SYSTEM_LAYOUT, system())], data_align=16),
                      title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16)}
             for lang in LANGS:
                 files["Mals/%s.Product.110.sarc.zs" % lang] = sarc.write(

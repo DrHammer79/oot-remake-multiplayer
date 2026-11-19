@@ -124,6 +124,66 @@ std::optional<LookupResult> lookup_on_relay(const ENetAddress& relay, const Rela
   return result;
 }
 
+namespace {
+
+// One page of the room list: three tries a second apart, from `s`.
+std::optional<Message> ask_page(ENetSocket s, const ENetAddress& relay, std::uint8_t start,
+                                const std::function<bool()>& stop) {
+  Message ask;
+  ask.kind = Kind::kListRooms;
+  ask.start = start;
+  const std::vector<std::uint8_t> bytes = encode(ask);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (stop && stop()) return std::nullopt;
+    ENetBuffer out;
+    out.data = const_cast<std::uint8_t*>(bytes.data());
+    out.dataLength = bytes.size();
+    enet_socket_send(s, &relay, &out, 1);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+    while (std::chrono::steady_clock::now() < until) {
+      if (stop && stop()) return std::nullopt;
+      enet_uint32 wait = ENET_SOCKET_WAIT_RECEIVE;
+      if (enet_socket_wait(s, &wait, 100) != 0 || !(wait & ENET_SOCKET_WAIT_RECEIVE)) continue;
+      std::uint8_t data[2048];
+      ENetAddress from{};
+      ENetBuffer in;
+      in.data = data;
+      in.dataLength = sizeof data;
+      const int got = enet_socket_receive(s, &from, &in, 1);
+      if (got <= 0 || from.host != relay.host || from.port != relay.port) continue;
+      auto m = decode(std::span<const std::uint8_t>(data, static_cast<std::size_t>(got)));
+      if (m && m->kind == Kind::kRoomList && (m->start == start || m->total <= start)) return m;
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+std::optional<RoomList> list_rooms_on_relay(const ENetAddress& relay, const std::function<bool()>& stop) {
+  ENetSocket s = enet_socket_create(ENET_SOCKET_TYPE_DATAGRAM);
+  if (s == ENET_SOCKET_NULL) return std::nullopt;
+  ENetAddress any{};
+  any.host = ENET_HOST_ANY;
+  any.port = 0;
+  std::optional<RoomList> result;
+  if (enet_socket_bind(s, &any) == 0) {
+    enet_socket_set_option(s, ENET_SOCKOPT_NONBLOCK, 1);
+    for (int page = 0; page < 8; ++page) {
+      const std::size_t start = result ? result->rooms.size() : 0;
+      if (result && start >= result->total) break;
+      const auto m = ask_page(s, relay, static_cast<std::uint8_t>(start), stop);
+      if (!m) break;  // (the rooms so far: a later page lost, or the list got shorter)
+      if (!result) result.emplace();
+      result->total = m->total;
+      if (m->rooms.empty()) break;
+      result->rooms.insert(result->rooms.end(), m->rooms.begin(), m->rooms.end());
+    }
+  }
+  enet_socket_destroy(s);
+  return result;
+}
+
 std::string lookup_text(std::optional<LookupResult> result, const RelayJoin& join) {
   const std::string relay = join.relay_host + ":" + std::to_string(join.relay_port);
   const bool room = join.code.empty();
@@ -255,6 +315,7 @@ void RelayLink::handle(const Message& m, std::uint64_t now) {
       refused_hard_ = false;
       if (m.kind == Kind::kRegisteredName && m.name != room_) {
         room_ = m.name;
+        last_list_ms_ = 0;  // (listed at once with the room)
         if (config_.on_room) config_.on_room(room_);
       }
       if (!registered_ || m.code != code_) {
@@ -279,6 +340,7 @@ void RelayLink::handle(const Message& m, std::uint64_t now) {
         registered_ = false;
         code_.clear();
         room_.clear();
+        last_list_ms_ = 0;
         std::vector<std::uint16_t> ids;
         for (const auto& [id, flow] : flows_) ids.push_back(id);
         for (const std::uint16_t id : ids) close_flow(id, false);
@@ -408,6 +470,21 @@ void RelayLink::service() {
     Message m;
     m.kind = Kind::kKeepalive;
     m.token = token_;
+    send_relay(m);
+  }
+  // The room list: listed (or not) again with each keepalive, so a restarted
+  // relay has it back and the players' number stays right.
+  if (config_.listing && !room_.empty() && (last_list_ms_ == 0 || now - last_list_ms_ >= kKeepaliveEveryMs)) {
+    last_list_ms_ = now;
+    const std::optional<RoomEntry> entry = config_.listing();
+    Message m;
+    m.kind = Kind::kListRoom;
+    m.token = token_;
+    m.listed = entry.has_value();
+    if (entry) {
+      m.entry = *entry;
+      m.entry.host = listing_name(m.entry.host);
+    }
     send_relay(m);
   }
 }

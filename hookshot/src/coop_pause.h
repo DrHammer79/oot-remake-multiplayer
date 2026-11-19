@@ -85,6 +85,11 @@ bool RelaySet();
 bool AutoRejoin();
 void SetAutoRejoin(bool on);
 bool AutoRejoining();
+// Hosting with a relay room puts it on the relay's public room list (coop-options.ini list_room), or not; saved at once.
+bool ListRoom();
+// The kit's relay ("host" or "host:port", coop-options.ini relay), "" none: the files' setting.
+std::string Relay();
+void SetListRoom(bool on);
 // The page's "Games on this network": join the game at that address and port, with `password` (the Join view's,
 // "" none). Refused or failed: PageSays why.
 void JoinLanNow(const std::string& address, std::uint16_t port, const std::string& password);

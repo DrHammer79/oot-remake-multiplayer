@@ -1,5 +1,6 @@
 #include "relay.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -40,9 +41,9 @@ void Relay::say(const std::string& text) const {
 }
 
 bool Relay::over_limit(std::map<std::uint32_t, Tries>& tries, std::uint32_t address,
-                       std::uint32_t limit, std::uint64_t now_ms, bool count) {
+                       std::uint32_t limit, std::uint64_t now_ms, bool count, std::uint64_t window_ms) {
   Tries& t = tries[address];
-  if (t.count == 0 || now_ms - t.window_start >= config_.window_ms) {
+  if (t.count == 0 || now_ms - t.window_start >= (window_ms != 0 ? window_ms : config_.window_ms)) {
     t.window_start = now_ms;
     t.count = 0;
   }
@@ -214,6 +215,37 @@ void Relay::control(Endpoint from, const Message& m, std::uint64_t now_ms,
       out.push_back({flow->second.guest, m.payload});
       return;
     }
+    case Kind::kListRoom: {
+      auto it = sessions_.find(m.token);
+      if (it == sessions_.end()) return refuse(Refusal::kUnknownSession);
+      Session& s = it->second;
+      s.link = from;
+      s.last_ms = now_ms;
+      // Only a room is listed: a join code alone is not for everyone to see.
+      const bool list_it = m.listed && !s.room.empty();
+      if (list_it && !s.listed) {
+        s.listed_since = ++list_order_;
+        say("host " + address_text(from.host) + " lists room \"" + s.room + "\" (" + std::to_string(listed() + 1) +
+            " listed now)");
+      } else if (!list_it && s.listed) {
+        say("host " + address_text(from.host) + " took room \"" + s.room + "\" off the list");
+      }
+      s.listed = list_it;
+      if (list_it) {
+        s.listing = m.entry;
+        s.listing.room = s.room;
+        s.listing.password = true;  // (every session has one: docs/protocol.md)
+      }
+      return;
+    }
+    case Kind::kListRooms: {
+      if (over_limit(lists_, from.host, config_.lists_per_window, now_ms, true, config_.list_window_ms)) {
+        ++stats_.lists_limited;
+        return;  // (no answer: an answer would be more bytes toward a sender that may be forged)
+      }
+      ++stats_.lists_answered;
+      return reply(list_page(m.start));
+    }
     case Kind::kLookup:
     case Kind::kLookupName: {
       std::optional<std::uint64_t> token;
@@ -270,6 +302,43 @@ void Relay::from_guest(Endpoint from, std::span<const std::uint8_t> bytes, std::
   out.push_back({s->link, encode(m)});
 }
 
+std::size_t Relay::listed() const {
+  return static_cast<std::size_t>(
+      std::count_if(sessions_.begin(), sessions_.end(), [](const auto& kv) { return kv.second.listed; }));
+}
+
+std::vector<RoomEntry> Relay::room_list() const {
+  std::vector<const Session*> listed;
+  for (const auto& [token, s] : sessions_) {
+    if (s.listed && !s.room.empty()) listed.push_back(&s);
+  }
+  std::sort(listed.begin(), listed.end(),
+            [](const Session* a, const Session* b) { return a->listed_since > b->listed_since; });
+  std::vector<RoomEntry> out;
+  for (const Session* s : listed) {
+    if (out.size() >= kMaxListedRooms) break;
+    out.push_back(s->listing);
+    out.back().room = s->room;  // (the name it holds now)
+  }
+  return out;
+}
+
+Message Relay::list_page(std::uint8_t start) const {
+  const std::vector<RoomEntry> all = room_list();
+  Message page;
+  page.kind = Kind::kRoomList;
+  page.total = static_cast<std::uint8_t>(all.size());
+  page.start = static_cast<std::uint8_t>(std::min<std::size_t>(start, all.size()));
+  std::size_t bytes = kMagic.size() + 4;  // (the kind, total, start and count)
+  for (std::size_t i = page.start; i < all.size(); ++i) {
+    const std::size_t more = entry_bytes(all[i]);
+    if (bytes + more > kMaxPayloadBytes) break;
+    bytes += more;
+    page.rooms.push_back(all[i]);
+  }
+  return page;
+}
+
 void Relay::remove_flow(Session& s, std::uint16_t flow) {
   auto it = s.flows.find(flow);
   if (it == s.flows.end()) return;
@@ -285,7 +354,7 @@ void Relay::remove_session(std::map<std::uint64_t, Session>::iterator it, const 
     if (g != guest_session_.end() && g->second == s.token) guest_session_.erase(g);
   }
   by_code_.erase(s.code);
-  if (!s.room.empty()) by_room_.erase(room_key(s.room));
+  if (!s.room.empty()) by_room_.erase(room_key(s.room));  // (and off the room list: it goes with the session)
   say("host " + address_text(s.link.host) + " (join code " + show_code(s.code) +
       (s.room.empty() ? std::string() : ", room \"" + s.room + "\"") + ") " + why + "; " +
       std::to_string(sessions_.size() - 1) + " host(s) now");

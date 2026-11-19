@@ -14,6 +14,11 @@
 // - The guest's game then talks plain ENet to the relay's port; the relay
 //   wraps each datagram for the host's link and unwraps the answers. It never
 //   reads them: the join password and the server's own checks still apply.
+// - A host with a room name may list it (kListRoom, with each keepalive): its
+//   host name, players, most players and protocol version, never the
+//   password. Anyone may ask for the list (kListRooms, a page at a time,
+//   newest first); a room leaves it when its host stops, goes quiet or
+//   unlists it.
 //
 // Relay is the rules without a network (tests drive it); RelayServer is the
 // socket loop around it.
@@ -56,6 +61,8 @@ struct RelayConfig {
   std::uint32_t lookups_per_window = 10;      // wrong codes from one address
   std::uint32_t registers_per_window = 6;     // new hosts from one address
   std::uint64_t window_ms = 10 * 60'000;
+  std::uint32_t lists_per_window = 30;        // room list pages asked from one address
+  std::uint64_t list_window_ms = 60'000;
   std::function<void(const std::string&)> log;
   // Random numbers for join codes; std::random_device when empty.
   std::function<std::uint64_t()> random;
@@ -71,6 +78,8 @@ struct RelayStats {
   std::uint64_t hosts_registered = 0;
   std::uint64_t hosts_refused = 0;
   std::uint64_t rooms_taken = 0;  // a room name another host already had
+  std::uint64_t lists_answered = 0;  // room list pages sent
+  std::uint64_t lists_limited = 0;   // room list asks over the limit (not answered)
 };
 
 class Relay {
@@ -84,6 +93,10 @@ class Relay {
 
   std::size_t sessions() const { return sessions_.size(); }
   std::size_t rooms() const { return by_room_.size(); }
+  // The rooms on the list now (listed by their host, with a room name).
+  std::size_t listed() const;
+  // The list as kListRooms pages it: newest listed first, at most kMaxListedRooms.
+  std::vector<RoomEntry> room_list() const;
   std::size_t flows() const { return flows_by_guest_.size(); }
   const RelayStats& stats() const { return stats_; }
 
@@ -96,6 +109,9 @@ class Relay {
     std::uint64_t token = 0;
     std::string code;
     std::string room;  // the room name as the host gave it; empty: a join code only
+    bool listed = false;             // its host lists the room (kListRoom)
+    RoomEntry listing;               // what it lists (room: filled from `room`)
+    std::uint64_t listed_since = 0;  // when it was first listed (newest first)
     Endpoint link;
     std::uint64_t last_ms = 0;
     std::map<std::uint16_t, Flow> flows;
@@ -121,7 +137,9 @@ class Relay {
   void remove_session(std::map<std::uint64_t, Session>::iterator it, const char* why);
   void remove_flow(Session& s, std::uint16_t flow);
   bool over_limit(std::map<std::uint32_t, Tries>& tries, std::uint32_t address, std::uint32_t limit,
-                  std::uint64_t now_ms, bool count);
+                  std::uint64_t now_ms, bool count, std::uint64_t window_ms = 0);
+  // kListRooms: the page from `start` that fits a datagram.
+  Message list_page(std::uint8_t start) const;
   std::string new_code();
   void say(const std::string& text) const;
 
@@ -134,6 +152,8 @@ class Relay {
   std::map<std::uint32_t, std::uint64_t> guest_session_;  // address -> token (last code wins)
   std::map<std::uint32_t, Tries> lookups_;
   std::map<std::uint32_t, Tries> registers_;
+  std::map<std::uint32_t, Tries> lists_;
+  std::uint64_t list_order_ = 0;  // a number that goes up with each new listing (newest first)
 };
 
 // The relay on a UDP port.

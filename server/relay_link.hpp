@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <enet/enet.h>
 
@@ -35,6 +36,11 @@ struct RelayLinkConfig {
   // Called when the relay says the room name is this host's (again after a
   // relay restart).
   std::function<void(const std::string& room)> on_room;
+  // Set: the room goes on the relay's public room list (kListRoom, with each
+  // keepalive) with what this gives (host name, players, most players,
+  // protocol version; its room field is not used). Nothing from it takes the
+  // room off the list. Needs a room name; never sends the join password.
+  std::function<std::optional<RoomEntry>()> listing;
   // The session token; std::random_device when empty.
   std::function<std::uint64_t()> random;
 };
@@ -68,6 +74,21 @@ std::optional<LookupResult> lookup_on_relay(const ENetAddress& relay, const Rela
 
 // What to tell the player for a lookup's result, in plain English.
 std::string lookup_text(std::optional<LookupResult> result, const RelayJoin& join);
+
+// The relay's public room list (kListRooms): the rooms its hosts listed,
+// newest first, never a password. `total` is how many the relay has; `rooms`
+// may hold fewer when a page did not come.
+struct RoomList {
+  std::vector<RoomEntry> rooms;
+  std::size_t total = 0;
+};
+// Asks the relay at `relay` (ENet's form) for its room list, a page at a time
+// (about 20 rooms a page; three tries a second apart for each, from a socket
+// of its own). Nothing when the relay never answered the first page (not
+// running, wrong address, a relay from before the list, or this address asked
+// more than 30 pages in the last minute). `stop` returning true ends the wait
+// early. Blocks for up to about 3 s a page: call it off the game's threads.
+std::optional<RoomList> list_rooms_on_relay(const ENetAddress& relay, const std::function<bool()>& stop = {});
 
 class RelayLink {
  public:
@@ -117,6 +138,7 @@ class RelayLink {
   std::uint64_t last_heard_ms_ = 0;
   std::uint64_t first_try_ms_ = 0;
   std::uint64_t last_waiting_note_ms_ = 0;
+  std::uint64_t last_list_ms_ = 0;  // the last kListRoom (0: send one at the next service)
   std::map<std::uint16_t, Flow> flows_;
 };
 

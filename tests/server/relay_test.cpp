@@ -772,3 +772,294 @@ TEST_CASE("relay loopback: a game without the code never reaches the host") {
   CHECK(link.flows() == 0);
   CHECK(relay_server.relay().stats().not_let_in > 0);
 }
+
+// --- The room list (kListRoom, kListRooms, kRoomList) ---
+// (in a namespace of their own: coop::protocol's Message and encode are in sight here too)
+namespace room_list_tests {
+
+using coop::server::relay::decode;
+using coop::server::relay::encode;
+using coop::server::relay::Message;
+
+namespace {
+
+Message list_room_message(std::uint64_t token, bool listed, std::string host = "Saria", std::uint8_t players = 1,
+                          std::uint8_t max = 4) {
+  Message m;
+  m.kind = Kind::kListRoom;
+  m.token = token;
+  m.listed = listed;
+  m.entry.host = std::move(host);
+  m.entry.players = players;
+  m.entry.max_players = max;
+  m.entry.version = 15;
+  return m;
+}
+
+Message list_ask(std::uint8_t start) {
+  Message m;
+  m.kind = Kind::kListRooms;
+  m.start = start;
+  return m;
+}
+
+// A host on an address of its own (the relay takes 2 hosts an address) holding a room.
+Endpoint host_at(int i) { return Endpoint{static_cast<std::uint32_t>(0x0A000000u + static_cast<std::uint32_t>(i)), 40000}; }
+
+// The relay's page of the list from `start`, asked from `from`; nothing when it did not answer.
+std::optional<Message> ask_list(Fixture& f, std::uint8_t start, Endpoint from = kGuest, std::uint64_t now = 0) {
+  auto out = f.relay.received(from, encode(list_ask(start)), now);
+  if (out.empty()) return std::nullopt;
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].to == from);
+  CHECK(out[0].bytes.size() <= kMaxPayloadBytes);
+  return decoded(out[0]);
+}
+
+}  // namespace
+
+TEST_CASE("relay wire: the room list's messages go through encode and decode, the ask padded") {
+  Message listed = list_room_message(77, true, "Saria", 2, 4);
+  auto back = decode(encode(listed));
+  REQUIRE(back.has_value());
+  CHECK(back->kind == Kind::kListRoom);
+  CHECK(back->token == 77);
+  CHECK(back->listed);
+  CHECK(back->entry.host == "Saria");
+  CHECK(back->entry.players == 2);
+  CHECK(back->entry.max_players == 4);
+  CHECK(back->entry.version == 15);
+  back = decode(encode(list_room_message(77, false, "")));   // (off the list: no name needed)
+  REQUIRE(back.has_value());
+  CHECK_FALSE(back->listed);
+  // A listed room with no name, or a control character in it, is not a message.
+  CHECK_FALSE(decode(encode(list_room_message(77, true, ""))).has_value());
+  CHECK_FALSE(decode(encode(list_room_message(77, true, std::string("Sa\nria")))).has_value());
+
+  // The ask is padded with zeros to kListRequestBytes; shorter or with other bytes it is not one.
+  std::vector<std::uint8_t> ask = encode(list_ask(22));
+  CHECK(ask.size() == kListRequestBytes);
+  back = decode(ask);
+  REQUIRE(back.has_value());
+  CHECK(back->kind == Kind::kListRooms);
+  CHECK(back->start == 22);
+  std::vector<std::uint8_t> shorter(ask.begin(), ask.end() - 1);
+  CHECK_FALSE(decode(shorter).has_value());
+  ask[300] = 1;
+  CHECK_FALSE(decode(ask).has_value());
+
+  Message page;
+  page.kind = Kind::kRoomList;
+  page.total = 3;
+  page.start = 1;
+  page.rooms = {RoomEntry{"Forest-Gang", "Saria", 2, 4, 15, true}, RoomEntry{"lake_gang", "Ruto", 1, 16, 15, true}};
+  back = decode(encode(page));
+  REQUIRE(back.has_value());
+  CHECK(back->kind == Kind::kRoomList);
+  CHECK(back->total == 3);
+  CHECK(back->start == 1);
+  CHECK(back->rooms == page.rooms);
+  page.total = 2;   // (start 1 + 2 rooms is past a total of 2)
+  CHECK_FALSE(decode(encode(page)).has_value());
+  page.total = 3;
+  page.rooms[0].room = "no spaces";
+  CHECK_FALSE(decode(encode(page)).has_value());
+}
+
+TEST_CASE("relay wire: a host name as the list takes it") {
+  CHECK(listable_host_name("Saria"));
+  CHECK(listable_host_name("S\xc3\xa1ria"));   // (UTF-8 letters)
+  CHECK_FALSE(listable_host_name(""));
+  CHECK_FALSE(listable_host_name(std::string(kMaxHostNameBytes + 1, 'a')));
+  CHECK_FALSE(listable_host_name("a\tb"));
+  CHECK(listing_name("Sa\nria") == "Saria");
+  CHECK(listing_name("") == "Host");
+  CHECK(listing_name("\x01\x02") == "Host");
+  // Cut to kMaxHostNameBytes before a UTF-8 letter's start, never in the middle of one.
+  const std::string long_name = std::string(31, 'a') + "\xc3\xa1";
+  CHECK(listing_name(long_name) == std::string(31, 'a'));
+  CHECK(listable_host_name(listing_name(long_name)));
+}
+
+TEST_CASE("relay: a listed room is on the list newest first, never with a password, and leaves it with its host") {
+  Fixture f;
+  // Nothing listed yet: an empty list.
+  auto page = ask_list(f, 0);
+  REQUIRE(page.has_value());
+  CHECK(page->total == 0);
+  CHECK(page->rooms.empty());
+
+  REQUIRE(f.register_room(1, "Forest-Gang", host_at(1)).kind == Kind::kRegisteredName);
+  REQUIRE(f.register_room(2, "lake_gang", host_at(2)).kind == Kind::kRegisteredName);
+  REQUIRE(f.register_room(3, "quiet-room", host_at(3)).kind == Kind::kRegisteredName);
+  CHECK_FALSE(f.register_host(4, host_at(4)).empty());
+  CHECK(f.relay.received(host_at(1), encode(list_room_message(1, true, "Saria", 2, 4)), 10).empty());
+  CHECK(f.relay.received(host_at(2), encode(list_room_message(2, true, "Ruto", 1, 16)), 20).empty());
+  // A host with a join code only is not listed: the list is for room names.
+  CHECK(f.relay.received(host_at(4), encode(list_room_message(4, true, "Mido")), 30).empty());
+  CHECK(f.relay.listed() == 2);
+
+  page = ask_list(f, 0, kGuest, 40);
+  REQUIRE(page.has_value());
+  CHECK(page->total == 2);
+  CHECK(page->start == 0);
+  REQUIRE(page->rooms.size() == 2);
+  CHECK(page->rooms[0] == RoomEntry{"lake_gang", "Ruto", 1, 16, 15, true});   // (the newest first)
+  CHECK(page->rooms[1] == RoomEntry{"Forest-Gang", "Saria", 2, 4, 15, true});
+
+  // A new listing with other numbers keeps the room's place; a host that unlists it takes it off.
+  CHECK(f.relay.received(host_at(1), encode(list_room_message(1, true, "Saria", 3, 4)), 50).empty());
+  page = ask_list(f, 0, kGuest, 60);
+  REQUIRE(page.has_value());
+  REQUIRE(page->rooms.size() == 2);
+  CHECK(page->rooms[1].players == 3);
+  CHECK(f.relay.received(host_at(1), encode(list_room_message(1, false, "")), 70).empty());
+  page = ask_list(f, 0, kGuest, 80);
+  REQUIRE(page.has_value());
+  CHECK(page->total == 1);
+  CHECK(page->rooms[0].room == "lake_gang");
+
+  // Its host's BYE takes a room off the list, and so does a host that went quiet.
+  Message bye;
+  bye.kind = Kind::kBye;
+  bye.token = 2;
+  f.relay.received(host_at(2), encode(bye), 90);
+  CHECK(f.relay.listed() == 0);
+  CHECK(f.relay.received(host_at(3), encode(list_room_message(3, true, "Malon")), 100).empty());
+  CHECK(f.relay.listed() == 1);
+  f.relay.tick(100 + RelayConfig{}.session_timeout_ms + 1);
+  CHECK(f.relay.listed() == 0);
+  page = ask_list(f, 0, kGuest, 100 + RelayConfig{}.session_timeout_ms + 2);
+  REQUIRE(page.has_value());
+  CHECK(page->total == 0);
+
+  // A listing for a host the relay does not know (it restarted) is refused, so the link registers again.
+  auto out = f.relay.received(host_at(9), encode(list_room_message(99, true)), 200'000);
+  REQUIRE(out.size() == 1);
+  CHECK(decoded(out[0]).kind == Kind::kRefused);
+  CHECK(decoded(out[0]).status == static_cast<std::uint8_t>(Refusal::kUnknownSession));
+}
+
+TEST_CASE("relay: the list comes in pages under a datagram, at most 50 rooms, and asks are limited per address") {
+  Fixture f;
+  for (int i = 0; i < 60; ++i) {
+    const std::string room = "room-" + std::to_string(i) + std::string(24 - 5 - std::to_string(i).size(), 'x');
+    REQUIRE(room.size() == kMaxRoomLength);
+    REQUIRE(f.register_room(static_cast<std::uint64_t>(100 + i), room, host_at(i)).kind == Kind::kRegisteredName);
+    const std::string host = std::string(kMaxHostNameBytes - 2, 'h') + (i < 10 ? "0" : "") + std::to_string(i);
+    CHECK(f.relay.received(host_at(i), encode(list_room_message(static_cast<std::uint64_t>(100 + i), true, host)),
+                           static_cast<std::uint64_t>(i))
+              .empty());
+  }
+  CHECK(f.relay.listed() == 60);
+  std::vector<RoomEntry> all;
+  int pages = 0;
+  while (true) {
+    auto page = ask_list(f, static_cast<std::uint8_t>(all.size()), kGuest, 100);
+    REQUIRE(page.has_value());
+    CHECK(page->total == kMaxListedRooms);
+    CHECK(page->start == all.size());
+    if (page->rooms.empty()) break;
+    all.insert(all.end(), page->rooms.begin(), page->rooms.end());
+    ++pages;
+    if (all.size() >= page->total) break;
+  }
+  CHECK(pages >= 3);   // (about 22 long entries a page)
+  REQUIRE(all.size() == kMaxListedRooms);
+  CHECK(all.front().room.rfind("room-59", 0) == 0);   // (the newest 50: 59 down to 10)
+  CHECK(all.back().room.rfind("room-10", 0) == 0);
+  // A start past the end: an empty page with the total.
+  auto past = ask_list(f, 200, Endpoint{0x0300000Au, 1}, 100);
+  REQUIRE(past.has_value());
+  CHECK(past->rooms.empty());
+  CHECK(past->total == kMaxListedRooms);
+
+  // 30 asks a minute from one address; the next is not answered until the minute is over.
+  const Endpoint asker{0x0400000Au, 2};
+  for (std::uint32_t i = 0; i < RelayConfig{}.lists_per_window; ++i) CHECK(ask_list(f, 0, asker, 1000).has_value());
+  CHECK_FALSE(ask_list(f, 0, asker, 1000).has_value());
+  CHECK(f.relay.stats().lists_limited == 1);
+  CHECK(ask_list(f, 0, Endpoint{0x0500000Au, 2}, 1000).has_value());   // (another address is not held)
+  CHECK(ask_list(f, 0, asker, 1000 + RelayConfig{}.list_window_ms).has_value());
+
+  // An ask without its padding gets nothing: an answer must never be much more than what was sent.
+  std::vector<std::uint8_t> bare = encode(list_ask(0));
+  bare.resize(kMagic.size() + 2);
+  CHECK(f.relay.received(Endpoint{0x0600000Au, 3}, bare, 2000).empty());
+}
+
+TEST_CASE("relay loopback: a host's link lists its room, the game's list_rooms_on_relay reads it, a link without listing is not on it") {
+  EnetLife enet;
+  RelayServer relay_server(0, std::nullopt, RelayConfig{});
+  REQUIRE(relay_server.start());
+  const std::uint16_t relay_port = relay_server.port();
+
+  auto link_config = [&](std::string room) {
+    RelayLinkConfig c;
+    c.relay_host = "127.0.0.1";
+    c.relay_port = relay_port;
+    c.server_port = 1;  // no game here: only the room and its listing are tested
+    c.room = std::move(room);
+    return c;
+  };
+  std::atomic<int> players{1};
+  RelayLinkConfig listed_config = link_config("Forest-Gang");
+  listed_config.listing = [&]() -> std::optional<RoomEntry> {
+    RoomEntry e;
+    e.host = "Saria\x07";   // (a control character: dropped before it goes out)
+    e.players = static_cast<std::uint8_t>(players.load());
+    e.max_players = 4;
+    e.version = 15;
+    return e;
+  };
+  RelayLink listed(listed_config);
+  RelayLink unlisted(link_config("lake_gang"));
+  std::string why;
+  REQUIRE(listed.start(why));
+  REQUIRE(unlisted.start(why));
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while ((listed.room().empty() || unlisted.room().empty() || relay_server.relay().listed() == 0) &&
+         std::chrono::steady_clock::now() < deadline) {
+    listed.service();
+    unlisted.service();
+    relay_server.service(1);
+  }
+  REQUIRE(relay_server.relay().rooms() == 2);
+  REQUIRE(relay_server.relay().listed() == 1);
+
+  ENetAddress relay_at{};
+  enet_address_set_host_ip(&relay_at, "127.0.0.1");
+  relay_at.port = relay_port;
+  std::atomic<bool> done{false};
+  std::thread serve([&] {
+    while (!done) {
+      relay_server.service(5);
+      listed.service();
+      unlisted.service();
+    }
+  });
+  const auto list = list_rooms_on_relay(relay_at);
+  done = true;
+  serve.join();
+  REQUIRE(list.has_value());
+  CHECK(list->total == 1);
+  REQUIRE(list->rooms.size() == 1);
+  CHECK(list->rooms[0] == RoomEntry{"Forest-Gang", "Saria", 1, 4, 15, true});
+
+  // Its host stops: off the list at once.
+  listed.stop();
+  for (int i = 0; i < 50 && relay_server.relay().listed() != 0; ++i) relay_server.service(2);
+  CHECK(relay_server.relay().listed() == 0);
+  unlisted.stop();
+
+  // No relay there: nothing.
+  ENetAddress nobody{};
+  enet_address_set_host_ip(&nobody, "127.0.0.1");
+  nobody.port = 1;
+  const auto started = std::chrono::steady_clock::now();
+  std::atomic<int> asked{0};
+  CHECK_FALSE(list_rooms_on_relay(nobody, [&] { return ++asked > 20; }).has_value());   // (stopped early)
+  CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(3));
+}
+
+}  // namespace room_list_tests

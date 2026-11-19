@@ -76,7 +76,7 @@ public:
 
 private:
     struct HostJob {
-        std::string name, password, relay_via, relay_key, relay_room;
+        std::string name, password, relay_via, relay_key, relay_room, relay_list;
         std::uint16_t port = 0;
         bool upnp = false, invite = false, pvp = false, approve_joins = false;
         std::uint8_t max_players = 0;  // HostMaxPlayers'

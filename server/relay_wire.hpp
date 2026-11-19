@@ -35,6 +35,16 @@ inline constexpr std::size_t kMaxKeyBytes = 64;
 // compared without case.
 inline constexpr std::size_t kMinRoomLength = 3;
 inline constexpr std::size_t kMaxRoomLength = 24;
+// The room list (kListRoom, kListRooms, kRoomList): a listed room's host name
+// is 1 to kMaxHostNameBytes bytes of UTF-8 without control characters. The
+// relay lists at most kMaxListedRooms rooms, newest first. A request is
+// padded with zeros to kListRequestBytes, so an answer (at most
+// kMaxPayloadBytes) is never more than about three times what was sent: the
+// relay cannot be used to flood a forged sender's address with much more than
+// that sender sent.
+inline constexpr std::size_t kMaxHostNameBytes = 32;
+inline constexpr std::size_t kMaxListedRooms = 50;
+inline constexpr std::size_t kListRequestBytes = 512;
 
 enum class Kind : std::uint8_t {
   // Host link -> relay. All carry the session token the link chose.
@@ -45,9 +55,14 @@ enum class Kind : std::uint8_t {
   kBye = 0x05,           // token: the host stopped
   kRegisterName = 0x06,  // token, key length u8, key, name length u8, name:
                          // "give me a join code and this room name"
+  kListRoom = 0x07,      // token, listed u8 (0 or 1), players u8, max u8,
+                         // version u16, host name length u8, host name: "list
+                         // my room (or not) with these numbers" (RoomEntry)
   // Guest -> relay.
   kLookup = 0x10,      // the 8-letter code: lets this address join that host
   kLookupName = 0x11,  // name length u8, name: the same with a room name
+  kListRooms = 0x12,   // start u8, zeros up to kListRequestBytes in all: "the
+                       // listed rooms from this one on" (anyone may ask)
   // Relay -> host link.
   kRegistered = 0x81,      // token, code
   kRefused = 0x82,         // token, Refusal u8
@@ -55,7 +70,10 @@ enum class Kind : std::uint8_t {
   kRelayClose = 0x84,      // flow u16: that guest went quiet
   kRegisteredName = 0x85,  // token, code, name length u8, name: the room is this host's
   // Relay -> guest.
-  kFound = 0x90,  // LookupResult u8
+  kFound = 0x90,     // LookupResult u8
+  kRoomList = 0x91,  // total u8, start u8, count u8, then count entries: room
+                     // length u8, room, host length u8, host, players u8,
+                     // max u8, version u16, flags u8 (bit 0: a join password)
 };
 
 enum class Refusal : std::uint8_t {
@@ -75,6 +93,25 @@ enum class LookupResult : std::uint8_t {
   kFull = 3,      // this host already has the most guest addresses it takes
 };
 
+// One listed room: what a host lists (kListRoom: room is not sent, the relay
+// knows it) and what the list says (kRoomList). Never the join password.
+struct RoomEntry {
+  std::string room;        // the room name as its host holds it
+  std::string host;        // the host's name, 1 to kMaxHostNameBytes bytes
+  std::uint8_t players = 0;
+  std::uint8_t max_players = 0;
+  std::uint16_t version = 0;  // the host's co-op protocol version
+  bool password = true;       // a join password is needed (every session has one)
+  bool operator==(const RoomEntry&) const = default;
+};
+
+// Whether a host name can be listed: 1 to kMaxHostNameBytes bytes, none of
+// them a control character (UTF-8 letters are fine).
+bool listable_host_name(std::string_view name);
+// A player's name as the list takes it: control characters dropped, cut to
+// kMaxHostNameBytes before a UTF-8 letter's start; "Host" when nothing is left.
+std::string listing_name(std::string_view name);
+
 struct Message {
   Kind kind = Kind::kKeepalive;
   std::uint64_t token = 0;
@@ -84,12 +121,19 @@ struct Message {
   std::string key;          // kRegister, kRegisterName
   std::string name;         // kRegisterName, kRegisteredName, kLookupName: at most kMaxRoomLength bytes
   std::vector<std::uint8_t> payload;
+  bool listed = false;           // kListRoom: list this room (false: take it off the list)
+  RoomEntry entry;               // kListRoom: its numbers and host name (room unused)
+  std::uint8_t start = 0;        // kListRooms, kRoomList: the first room's place in the list
+  std::uint8_t total = 0;        // kRoomList: how many rooms the list has
+  std::vector<RoomEntry> rooms;  // kRoomList: the rooms from `start` on that fit
 };
 
 bool has_magic(std::span<const std::uint8_t> bytes);
 std::vector<std::uint8_t> encode(const Message& message);
 // Nothing for a datagram that is not a well-formed relay message.
 std::optional<Message> decode(std::span<const std::uint8_t> bytes);
+// What a kRoomList entry adds to the datagram, in bytes.
+std::size_t entry_bytes(const RoomEntry& entry);
 
 // Join codes: kCodeLength letters from 32 that cannot be mixed up when read
 // aloud or typed (no I, O, 0, 1): 40 bits.

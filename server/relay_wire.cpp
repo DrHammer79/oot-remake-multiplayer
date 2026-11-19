@@ -83,6 +83,15 @@ bool is_room_char(char c) {
   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
 }
 
+void put_entry(std::vector<std::uint8_t>& out, const RoomEntry& e) {
+  put_text(out, e.room, kMaxRoomLength);
+  put_text(out, e.host, kMaxHostNameBytes);
+  out.push_back(e.players);
+  out.push_back(e.max_players);
+  put16(out, e.version);
+  out.push_back(e.password ? 1 : 0);
+}
+
 bool is_code(std::string_view code) {
   return code.size() == kCodeLength &&
          std::all_of(code.begin(), code.end(),
@@ -150,8 +159,54 @@ std::vector<std::uint8_t> encode(const Message& m) {
     case Kind::kFound:
       out.push_back(m.status);
       break;
+    case Kind::kListRoom:
+      put64(out, m.token);
+      out.push_back(m.listed ? 1 : 0);
+      out.push_back(m.entry.players);
+      out.push_back(m.entry.max_players);
+      put16(out, m.entry.version);
+      put_text(out, m.entry.host, kMaxHostNameBytes);
+      break;
+    case Kind::kListRooms:
+      out.push_back(m.start);
+      out.resize(std::max(out.size(), kListRequestBytes), std::uint8_t{0});
+      break;
+    case Kind::kRoomList: {
+      const std::size_t n = std::min<std::size_t>(m.rooms.size(), 255);
+      out.push_back(m.total);
+      out.push_back(m.start);
+      out.push_back(static_cast<std::uint8_t>(n));
+      for (std::size_t i = 0; i < n; ++i) put_entry(out, m.rooms[i]);
+      break;
+    }
   }
   return out;
+}
+
+std::size_t entry_bytes(const RoomEntry& e) {
+  return 1 + std::min(e.room.size(), kMaxRoomLength) + 1 + std::min(e.host.size(), kMaxHostNameBytes) + 5;
+}
+
+std::string listing_name(std::string_view name) {
+  std::string out;
+  for (const char c : name) {
+    const auto u = static_cast<unsigned char>(c);
+    if (u >= 0x20 && u != 0x7f) out.push_back(c);
+  }
+  if (out.size() > kMaxHostNameBytes) {
+    std::size_t n = kMaxHostNameBytes;
+    while (n > 0 && (static_cast<unsigned char>(out[n]) & 0xc0) == 0x80) --n;
+    out.resize(n);
+  }
+  return out.empty() ? std::string("Host") : out;
+}
+
+bool listable_host_name(std::string_view name) {
+  if (name.empty() || name.size() > kMaxHostNameBytes) return false;
+  return std::none_of(name.begin(), name.end(), [](char c) {
+    const auto u = static_cast<unsigned char>(c);
+    return u < 0x20 || u == 0x7f;
+  });
 }
 
 std::optional<Message> decode(std::span<const std::uint8_t> bytes) {
@@ -214,6 +269,43 @@ std::optional<Message> decode(std::span<const std::uint8_t> bytes) {
     case Kind::kFound:
       m.status = r.u8();
       break;
+    case Kind::kListRoom: {
+      m.token = r.u64();
+      const std::uint8_t listed = r.u8();
+      if (listed > 1) return std::nullopt;
+      m.listed = listed == 1;
+      m.entry.players = r.u8();
+      m.entry.max_players = r.u8();
+      m.entry.version = r.u16();
+      m.entry.host = r.sized_text(kMaxHostNameBytes);
+      if (r.ok && m.listed && !listable_host_name(m.entry.host)) return std::nullopt;
+      break;
+    }
+    case Kind::kListRooms: {
+      if (bytes.size() < kListRequestBytes) return std::nullopt;  // (not padded: no answer)
+      m.start = r.u8();
+      const std::vector<std::uint8_t> pad = r.rest();
+      if (std::any_of(pad.begin(), pad.end(), [](std::uint8_t b) { return b != 0; })) return std::nullopt;
+      break;
+    }
+    case Kind::kRoomList: {
+      m.total = r.u8();
+      m.start = r.u8();
+      const std::uint8_t n = r.u8();
+      for (std::uint8_t i = 0; i < n && r.ok; ++i) {
+        RoomEntry e;
+        e.room = r.sized_text(kMaxRoomLength);
+        e.host = r.sized_text(kMaxHostNameBytes);
+        e.players = r.u8();
+        e.max_players = r.u8();
+        e.version = r.u16();
+        e.password = (r.u8() & 1u) != 0;
+        if (r.ok && (!normalize_room(e.room) || !listable_host_name(e.host))) return std::nullopt;
+        m.rooms.push_back(std::move(e));
+      }
+      if (r.ok && static_cast<std::size_t>(m.start) + m.rooms.size() > m.total) return std::nullopt;
+      break;
+    }
     default:
       return std::nullopt;
   }

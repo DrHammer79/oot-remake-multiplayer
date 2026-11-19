@@ -421,6 +421,8 @@ bool Host() {
     h.relay_via = o.relay.empty() ? nullptr : o.relay.c_str();
     h.relay_key = o.relay_key.empty() ? nullptr : o.relay_key.c_str();
     h.relay_room = o.relay_room.empty() ? nullptr : o.relay_room.c_str();
+    // (the room on the relay's public list, under the player's name, only when they turned it on: list_room)
+    h.relay_list = o.list_room && !o.relay_room.empty() ? o.name.c_str() : nullptr;
     g_doing = "hosting";
     ++g_session;
     g_copied = false;
@@ -1184,6 +1186,24 @@ void JoinPasteNow() {
 bool AutoRejoin() {
     std::lock_guard lock(g_mutex);
     return g_auto_rejoin_on;
+}
+
+std::string Relay() {
+    return ReadOptions().relay;
+}
+
+bool ListRoom() {
+    return ReadOptions().list_room;   // (the files' setting: the menu's are defaults until it opens)
+}
+
+void SetListRoom(bool on) {
+    std::lock_guard lock(g_mutex);
+    CoopTitleMenu::Options o = ReadOptions();
+    o.list_room = on;
+    g_menu.Show(o);   // (the menu's settings, as its own rows change them)
+    LOG_INFO(Core, "coop: multiplayer tab: this game's room {} the relay's public list when it hosts (from the pause "
+                   "menu's Multiplayer page)", on ? "goes on" : "stays off");
+    Save();
 }
 
 bool AutoRejoining() {
