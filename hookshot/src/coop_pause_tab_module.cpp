@@ -225,7 +225,7 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
 // same scratch memory showed every row the last one's words, cut to its own length), so each row's text lives in a
 // message of the pack's (strings/en.txt: Coop_Live_00..07, 64 dots each, in LayoutMsg/PlusMenu_00): the module looks
 // it up for each opening of the pages and writes its words there.
-constexpr int kLiveSlots = 16;   // 0..4 the rows, 8..15 the browser's cells
+constexpr int kLiveSlots = 48;   // 0..4 the rows, 8..21 the browser's list, 22..40 the Settings page (the pack's 00..47)
 constexpr std::uint32_t kLivePlaceholder = 64;   // the placeholder's bytes (strings/en.txt)
 struct LiveSlot {
     std::uint64_t gen = 0;      // the pages' opening it was looked up for (Page::Track): looked up again for each
@@ -244,6 +244,7 @@ std::uint64_t g_live_gen = 0, g_live_ms = 0;
 // an old address. Ours when its length is the placeholder's and its text is the placeholder's dots, or our own words at
 // the address we wrote before (the same file still loaded).
 bool LiveLookup(void* ctx, int slot, std::uint64_t gen) {
+    if (slot < 0 || slot >= kLiveSlots) return false;   // (a slot past the table: never written through)
     LiveSlot& l = g_live[slot];
     if (l.bad) return false;
     if (l.gen == gen && l.text != 0) return true;
@@ -290,6 +291,7 @@ bool LiveLookup(void* ctx, int slot, std::uint64_t gen) {
 // True when shown.
 bool LiveText(void* ctx, std::uint64_t layout, std::uint64_t gen, const std::string& path, int slot,
               const std::string& utf8) {
+    if (slot < 0 || slot >= kLiveSlots) return false;
     LiveSlot& l = g_live[slot];
     if (l.shown == utf8) return true;
     if (path.size() >= 0x40 || utf8.size() >= kLivePlaceholder || !LiveLookup(ctx, slot, gen)) return false;
