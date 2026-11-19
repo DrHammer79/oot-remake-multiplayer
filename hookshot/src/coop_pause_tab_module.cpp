@@ -377,6 +377,12 @@ void FollowFourth(void* ctx) {
     }
 }
 
+// A screen's own menu sound by name (kScreenSound), on its update.
+void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
+    const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
+    if (at != 0) Call(ctx, kScreenSound, screen, at);
+}
+
 // The System page's focused button (0..4), the row of ours under the game's cursor frame; -1 when none is.
 int FocusedRow() {
     const std::uint64_t pages = g_pages_screen;
@@ -469,8 +475,21 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             if (d.any() && ctx != nullptr && CanCall()) {
                 if (f.kind == Kind::kPages) ApplyPages(ctx, screen, d);
                 if (f.kind == Kind::kStrip) ApplyStrip(ctx, f, d);
+                if (f.kind == Kind::kStrip && d.set_page && g_pages_screen != 0) {
+                    Page::Do page_only;
+                    page_only.set_page = true, page_only.page_shown = d.page_shown;
+                    ApplyPages(ctx, g_pages_screen, page_only);   // (the pages' own update comes a frame later)
+                }
             }
             if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
+            // (the menu sounds of the presses the module took: the game starts none for them)
+            if (ctx != nullptr && CanCall()) {
+                if (f.kind == Kind::kStrip) {
+                    if (const char* sound = g_page.TakeStripSound()) PlaySound(ctx, screen, sound);
+                } else if (f.kind == Kind::kPages) {
+                    if (const char* sound = g_page.TakePagesSound()) PlaySound(ctx, screen, sound);
+                }
+            }
         }
         for (const std::string& line : lines) LOG_INFO(Core, "{}", line);
         if (was && !now_shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);

@@ -76,7 +76,12 @@ inline constexpr float kFollowMost = 200.0f;
 // place setter (main+0x20a3e0: (pane, x, y, z)) ends for a part after storing x and y at +0x6c; nothing for a pane whose
 // +0xa8 lacks bit 20. Read from main, 2026-11-19: a place written without it stays where it was drawn.
 inline constexpr std::uint64_t kPaneMoved = 0x152af50;   // the most our tab is moved from its own place to follow the fourth
-inline constexpr std::uint64_t kTabOpen = 0x208350;    // (tab, 0): the tab's part opened and shown, as the game's fill
+inline constexpr std::uint64_t kTabOpen = 0x208350;
+// (screen, const char* name) -> bit 0: started. A screen's own menu sound by name, as the game's screens start theirs:
+// xlink2's searchAndEmit on the screen's xlink user ([screen+0x198]+8; "searchAndEmit(%s)"). Seen in a run,
+// 2026-11-19: the strip starts "mc_TabToRight" / "mc_TabToLeft" when L and R change its tab, the pages "button_on" at a
+// cursor step and "button_decide" at a choice.
+inline constexpr std::uint64_t kScreenSound = 0x43e400;    // (tab, 0): the tab's part opened and shown, as the game's fill
                                                        //  ends for each of its tabs (else no text shows)
 inline constexpr std::uint64_t kMsgRefInit = 0xa66f70; // (ref): {0, 0, -1}, 24 bytes (coop_title.cpp's)
 inline constexpr std::uint64_t kMsgRefSet = 0xa6afe0;  // (ref, &"LayoutMsg/...", &"label", 1)
@@ -115,7 +120,8 @@ class Page {
 public:
     // What to do to the game at this screen's update (on its thread, with its ctx).
     struct Do {
-        bool set_page = false;   // the pages: our page shown (and System hidden) or not
+        bool set_page = false;   // the pages: our page shown (and System hidden) or not (at the strip's update too:
+                                 // the module then sets it through the pages screen it knows)
         bool page_shown = false;
         bool set_texts = false;  // the pages: our rows' texts (once per screen object)
         bool set_tabs = false;   // the strip: the fifth tab shown or not, lit or not; System's tab lit or not
@@ -131,6 +137,10 @@ public:
     bool TakeDecide();
     // Why it last went back to System, for the log ("" when none since the last call).
     std::string TakeWhy();
+    // The menu sound the module starts at the strip's next update (R onto our page, L off it) and at the pages' (A on
+    // a row): the game does not start them, the module took the press. nullptr when none.
+    const char* TakeStripSound();
+    const char* TakePagesSound();
 
 private:
     bool CanShow(std::uint64_t now_ms) const;
@@ -147,6 +157,8 @@ private:
     std::uint64_t pad_last_ = 0;
     std::uint64_t swallow_ = 0;   // buttons the module took, kept from the game until let go
     bool decide_ = false;
+    const char* strip_sound_ = nullptr;
+    const char* pages_sound_ = nullptr;
     std::string why_;
     // What is set in the game, per screen object (-1: not yet).
     std::uint64_t page_screen_ = 0, strip_screen_ = 0;

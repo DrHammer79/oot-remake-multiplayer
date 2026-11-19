@@ -3,6 +3,7 @@
 #include "coop_pause_tab.h"
 
 #include <cstdio>
+#include <utility>
 
 namespace CoopPauseTab {
 
@@ -53,10 +54,15 @@ bool Page::CanShow(std::uint64_t now_ms) const {
 // opening again shows our page from its first update, and a run showed the pages open, state 2, while the strip still
 // opens, state 1.)
 bool Page::CanStay(std::uint64_t now_ms) const {
-    return pages_.screen != 0 && strip_.screen != 0 && now_ms - pages_ms_ < kStaleMs && now_ms - strip_ms_ < kStaleMs &&
-           (pages_.state == 1 || pages_.state == 2) && pages_.page == kSystemPage && pages_.asked == kSystemPage &&
-           (strip_.state == 1 || strip_.state == 2) && strip_.mode == kPlusMode && strip_.tabs == 5 &&
-           now_ms >= blocked_until_ms_;
+    // The menu's first frames (a run, 2026-11-19): the strip's first update of the opening comes a frame before the
+    // pages', whose last update is still the closed one (state 0, old); then the pages are at 0 while the strip
+    // opens, System's page already drawn. Both are the menu opening, on the page the pages last had.
+    const bool pages_fresh = now_ms - pages_ms_ < kStaleMs;
+    const bool pages_open = pages_fresh ? pages_.state == 1 || pages_.state == 2 || (pages_.state == 0 && strip_.state == 1)
+                                        : strip_.state == 1;
+    return pages_.screen != 0 && strip_.screen != 0 && now_ms - strip_ms_ < kStaleMs && pages_open &&
+           pages_.page == kSystemPage && pages_.asked == kSystemPage && (strip_.state == 1 || strip_.state == 2) &&
+           strip_.mode == kPlusMode && strip_.tabs == 5 && now_ms >= blocked_until_ms_;
 }
 
 void Page::Hide(const char* why, bool keep) {
@@ -108,6 +114,11 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
             Hide(f.mode != kPlusMode ? "the Minus menu" : "the tab strip is closing", f.mode == kPlusMode);
         }
         ShowAgain(now_ms);
+        // (back at the strip's first update of the opening: the pages' own comes a frame later, so the module shows
+        // our page through the pages screen it knows, in this update)
+        if (shown_ && page_set_ != 1 && pages_.screen != 0) {
+            d.set_page = true, d.page_shown = true, page_set_ = 1;
+        }
         // (shown from the strip's opening to the end of its closing, as the game's four tabs are: shown only once
         // it was open, the fifth came in a moment after them; the module moves and fades it with the fourth. Filled
         // once per opening: a fill again restarts the tab's own opening.)
@@ -138,6 +149,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     if (!shown_) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
             shown_ = true, decide_ = false, why_.clear();
+            strip_sound_ = "mc_TabToRight";
             swallow_ |= buttons & ~kPadPassed;   // (R and anything held with it: none of it reaches System)
             return buttons & kPadPassed & ~swallow_;
         }
@@ -145,10 +157,12 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if ((down & (kPadL | kPadZL)) != 0) {
         Hide("L");
+        strip_sound_ = "mc_TabToLeft";
         return buttons & ~swallow_;
     }
     if ((down & kPadA) != 0) {
         decide_ = true;
+        pages_sound_ = "button_decide";
     }
     return buttons & kPadPassed & ~swallow_;
 }
@@ -164,6 +178,14 @@ void Page::ShowAgain(std::uint64_t now_ms) {
     if (CanStay(now_ms)) {
         shown_ = true, again_ = false, decide_ = false, why_.clear();
     }
+}
+
+const char* Page::TakeStripSound() {
+    return std::exchange(strip_sound_, nullptr);
+}
+
+const char* Page::TakePagesSound() {
+    return std::exchange(pages_sound_, nullptr);
 }
 
 bool Page::TakeDecide() {
