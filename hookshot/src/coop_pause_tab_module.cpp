@@ -113,11 +113,9 @@ std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), wh
 std::array<std::uint64_t, 4> g_game_tabs{};
 std::array<float, 4> g_game_tabs_x{};
 int g_tab_put_back = 0;
-// (trace) The six tabs' word panes (T_Text_00), dumped once a strip with six shows and has settled: their first 0x200
-// bytes as floats where they look like sizes, to find where the game keeps a word's drawn width.
-std::array<std::uint64_t, 6> g_trace_words{};
-bool g_words_traced = false;
-int g_words_wait = 0;
+// The six tabs' word panes (T_Text_00 of Pa_Category_00..05), whose drawn widths space the six-tab strip.
+std::array<std::uint64_t, 6> g_words{};
+std::string g_spacing_said;   // the spacing as last logged
 std::uint64_t g_fourth_word = 0, g_tab_word = 0;   // the two tabs' word panes (N_MenuChangeTextIn_00)
 float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
 bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
@@ -757,12 +755,12 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
             }
             LOG_INFO(Core, "coop: pause tab: the game's tabs at x {:.0f}, {:.0f}, {:.0f}, {:.0f} in their parent",
                      g_game_tabs_x[0], g_game_tabs_x[1], g_game_tabs_x[2], g_game_tabs_x[3]);
-            for (int i = 0; i < 6; ++i) {   // (the six words, for TraceWords)
+            for (int i = 0; i < 6; ++i) {   // (the six words, whose widths space the strip: SixOffsets)
                 char name[16];
                 std::snprintf(name, sizeof name, "Pa_Category_%02d", i);
-                g_trace_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
+                g_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
             }
-            g_words_traced = false, g_words_wait = 0;
+            g_spacing_said.clear();
         }
     }
     LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}; the sixth: Pa_Category_05 {:#x} "
@@ -823,6 +821,27 @@ void StepSlide(void* ctx, std::uint64_t now_ms) {
     }
 }
 
+// Our page shown (no slide going on): it alone of the three, at each update of the pages. Seen in a run (2026-11-19):
+// with the menu opened again on the Settings page, two Pa_Button_00 handed the focus to each other at every update
+// and the pad's up and down did nothing, as if System's page were shown too; a slide from Multiplayer was right. A
+// page found shown that should not be is hidden, and logged the first times.
+int g_page_fixes = 0;
+void KeepPageShown(void* ctx, int which) {
+    const std::uint64_t want = which == 1 ? g_settings_pane : g_coop_pane;
+    if (want == 0) return;
+    for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
+        if (pane == 0) continue;
+        const bool shown = (Read<std::uint32_t>(pane + 0xa8) & 1u) != 0;
+        if (shown == (pane == want)) continue;
+        SetVisible(ctx, pane, pane == want);
+        if (++g_page_fixes <= 8) {
+            LOG_INFO(Core, "coop: pause tab: the {} page was {}: {} again ({} so far)",
+                     pane == g_system_pane ? "System" : pane == g_coop_pane ? "Multiplayer" : "Settings",
+                     shown ? "shown" : "hidden", shown ? "hidden" : "shown", g_page_fixes);
+        }
+    }
+}
+
 void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t layout = f.layout;
     if (layout == 0 || !g_pages_ok) return;
@@ -867,13 +886,40 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
 // Elsewhere (the Minus menu, the strip closed, an older pack) all of them at their own places. Measured from the
 // layout (2026-11-19, docs/game-ui.md): the game's tabs 460 apart from x -690, the hearts end near -1218 with ten,
 // the rupee counter starts near 1460.
-// All six one kSixGap apart, centre to centre (the game's four moved closer from their 460, so the strip keeps its
-// span: the first where the shift puts it, the sixth where it was with ours 400 after the fourth).
+// The six words one even gap apart (the game's four moved from their 460 apart), the strip keeping its span: the
+// first where the shift puts it, the sixth kSixGap * 5 after it, centre to centre. A word's width is its text pane's
+// drawn width (T_Text_00 +0x13c, read in a run 2026-11-19: Collection 294.7, Equipment 312.9, Items 159.0, System
+// 201.2, Multiplayer 325.3, Settings 227.8; +0x134 its left, -width/2, the words centred). A width not read, or a gap
+// under kSixMinGap (long words in another language): the six kSixGap apart, centre to centre.
 constexpr float kSixShift = -320.0f, kSixGap = 436.0f, kSixLabelL = -270.0f, kSixLabelR = 40.0f;
+constexpr float kSixMinGap = 60.0f;
+constexpr std::uint64_t kTextDrawnWidth = 0x13c;
 bool g_six_placed = false;
-// A game tab's place in the six-tab strip: the first's own, then one kSixGap after another.
+// Each tab's centre from the first's.
+std::array<float, 6> SixOffsets() {
+    std::array<float, 6> off{}, w{};
+    bool words = true;
+    float total = 0;
+    for (std::size_t i = 0; i < w.size(); ++i) {
+        w[i] = g_words[i] != 0 ? Read<float>(g_words[i] + kTextDrawnWidth) : 0.0f;
+        if (!std::isfinite(w[i]) || w[i] < 10.0f || w[i] > 2000.0f) words = false;
+        total += w[i];
+    }
+    const float span = kSixGap * 5 + w[0] / 2 + w[5] / 2, gap = (span - total) / 5;
+    if (!words || gap < kSixMinGap) {
+        for (std::size_t i = 0; i < off.size(); ++i) off[i] = kSixGap * static_cast<float>(i);
+        return off;
+    }
+    float left = -w[0] / 2;
+    for (std::size_t i = 0; i < off.size(); ++i) {
+        off[i] = left + w[i] / 2;
+        left += w[i] + gap;
+    }
+    return off;
+}
+// A game tab's place in the six-tab strip (its own x in the tabs' parent).
 float SixTabX(int i) {
-    return g_game_tabs_x[0] + kSixGap * static_cast<float>(i);
+    return g_game_tabs_x[0] + SixOffsets()[static_cast<std::size_t>(i)];
 }
 void PlaceSix(void* ctx, bool six) {
     if (g_tabs_parent == 0) return;
@@ -885,15 +931,16 @@ void PlaceSix(void* ctx, bool six) {
     }
     if (six != g_six_placed) {
         g_six_placed = six;
-        LOG_INFO(Core, "coop: pause tab: the strip {}", six ? "with six tabs, all 436 apart" : "back to its own places");
+        LOG_INFO(Core, "coop: pause tab: the strip {}", six ? "with six tabs, their words one gap apart" : "back to its own places");
     }
 }
 void FollowFourthX(void* ctx) {
     if (g_fourth_pane == 0 || g_tab6_pane == 0) return;
     const float x = Read<float>(g_fourth_pane + kPaneScreenX);   // (its place on the screen)
     if (!std::isfinite(x)) return;
-    PlacePane(ctx, g_tab_pane, x + kSixGap);
-    PlacePane(ctx, g_tab6_pane, x + 2 * kSixGap);
+    const std::array<float, 6> off = SixOffsets();
+    PlacePane(ctx, g_tab_pane, x + off[4] - off[3]);
+    PlacePane(ctx, g_tab6_pane, x + off[5] - off[3]);
 }
 
 // The strip: the fifth tab shown in the Plus menu (filled as a Plus tab, our word), lit while our page shows, and
@@ -944,23 +991,18 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     if (tab5 != 0 && g_tab6_pane != 0) Call(ctx, kTabLight, tab5, d.tab6_lit ? 1 : 0, 0);
 }
 
-void TraceWords() {
-    if (g_words_traced || ++g_words_wait < 90) return;   // (about 1.5 s of strip updates: the words filled)
-    g_words_traced = true;
-    for (std::size_t i = 0; i < g_trace_words.size(); ++i) {
-        const std::uint64_t word = g_trace_words[i];
-        if (word == 0) continue;
-        std::string floats;
-        for (std::uint64_t off = 0; off < 0x200; off += 4) {
-            const float v = Read<float>(word + off);
-            if (std::isfinite(v) && std::fabs(v) >= 0.5f && std::fabs(v) <= 5000.0f) {
-                char one[32];
-                std::snprintf(one, sizeof one, "+%llx=%.1f ", static_cast<unsigned long long>(off), v);
-                floats += one;
-            }
-        }
-        LOG_INFO(Core, "coop: pause tab: trace: Pa_Category_{:02} T_Text_00 {:#x}: {}", i, word, floats);
+// (trace) The six words' widths and their centres from the first's, when they change (the words are filled as the
+// strip opens).
+void SaySpacing() {
+    std::string now = "words";
+    for (const std::uint64_t word : g_words) {
+        now += " " + std::to_string(word != 0 ? static_cast<int>(Read<float>(word + kTextDrawnWidth)) : -1);
     }
+    now += ", centres";
+    for (const float o : SixOffsets()) now += " " + std::to_string(static_cast<int>(o));
+    if (now == g_spacing_said) return;
+    g_spacing_said = now;
+    LOG_INFO(Core, "coop: pause tab: the six tabs: {}", now);
 }
 
 // The six-tab strip's even spacing, kept: a game tab's place found put back (an animation of the strip's sets it) is
@@ -1009,7 +1051,7 @@ void FollowFourth(void* ctx) {
     if (g_tab6_shown) {   // (six tabs: the game's four kept at their even places, ours after the fourth)
         KeepSixPlaces(ctx);
         FollowFourthX(ctx);
-        TraceWords();
+        SaySpacing();
     }
     // (the alphas only when they change, as the height: the strip settled, nothing is called)
     if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); a != g_alpha_set) {
@@ -1068,7 +1110,9 @@ void TraceFocus(const char* why) {
     for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
         const std::uint8_t state = CoopModScreens::FocusState(read, b);
         if (state == 0) continue;
-        now += CoopModScreens::ButtonName(read, b) + "=" + std::to_string(state) +
+        char at[24];
+        std::snprintf(at, sizeof at, "@%llx", static_cast<unsigned long long>(b & 0xfffff));
+        now += CoopModScreens::ButtonName(read, b) + at + "=" + std::to_string(state) +
                (CoopModScreens::HitBox(read, b) ? "(shown) " : "(hidden) ");
     }
     if (now == last) return;
@@ -1490,6 +1534,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                 }
             }
             if (f.kind == Kind::kPages && calls) StepSlide(ctx, NowMs());   // (each update while the pages slide)
+            if (f.kind == Kind::kPages && calls && now_shown && g_slide.dir == 0) KeepPageShown(ctx, g_page.Which());
             if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
             // (the menu sounds of the presses the module took: the game starts none for them)
             if (ctx != nullptr && CanCall()) {
@@ -1725,15 +1770,15 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
 
 int TabAt(float x, float y) noexcept {
     try {
-        // (the six-tab strip as PlaceSix and FollowFourthX put it: all six kSixGap apart, the fourth read where the
-        // game draws it now, L and R at their places)
+        // (the six-tab strip as PlaceSix and FollowFourthX put it: the fourth read where the game draws it now, the
+        // others at their spacing from it, L and R at their places)
         if (!g_tab6_shown || g_fourth_pane == 0 || g_tab6_pane == 0) return -2;
         if (y < 900 || y > 1080) return -1;
         const float fourth = Read<float>(g_fourth_pane + kPaneScreenX);
         if (!std::isfinite(fourth)) return -2;
+        const std::array<float, 6> off = SixOffsets();
         float centres[6];
-        for (int i = 0; i < 4; ++i) centres[i] = fourth - kSixGap * static_cast<float>(3 - i);
-        centres[4] = fourth + kSixGap, centres[5] = fourth + 2 * kSixGap;
+        for (int i = 0; i < 6; ++i) centres[i] = fourth + off[static_cast<std::size_t>(i)] - off[3];
         const float l = g_label_l != 0 ? Read<float>(g_label_l + kPaneScreenX) : centres[0] - 300.0f;
         const float r = g_label_r != 0 ? Read<float>(g_label_r + kPaneScreenX) : centres[5] + 300.0f;
         if (std::abs(x - l) < 110.0f) return 8;
