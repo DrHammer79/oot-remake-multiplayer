@@ -48,7 +48,7 @@ struct Seen {
     std::uint64_t now = 1000;
     std::vector<std::string> game_calls;
 };
-constexpr int kChoose = 1, kReload = 2, kHoldOn = 4, kHoldOff = 8, kOther = 16, kThrow = 32, kHoldA = 64;
+constexpr int kChoose = 1, kReload = 2, kHoldOn = 4, kHoldOff = 8, kOther = 16, kThrow = 32, kHoldA = 64, kSound = 128;
 Seen g;
 
 int StartA(const CoopModApi* api) {
@@ -88,13 +88,18 @@ int StartB(const CoopModApi* api) {
     CHECK(api->hook(api, 9, [](void*, std::uint32_t, int, std::uint64_t*) { return 0; }, nullptr) == 0);  // not built in
     CHECK(api->on_screen(api, [](void*, const CoopModScreen* sc) {
         std::string line = "screen b " + std::to_string(sc->kind) + " '" + sc->focused + "' " +
-                           std::to_string(sc->save_list_ready);
+                           std::to_string(sc->save_list_ready) + (sc->focused_ready ? " ready" : "");
         const CoopModApi* self = g.api[1];
         if (g.screen_do & kChoose) line += " choose " + std::to_string(self->choose_focused(self));
         if (g.screen_do & kReload) line += " reload " + std::to_string(self->reload_save_list(self));
         g.seen_buttons = sc->buttons;
         if (g.screen_do & kHoldOn) line += " hold " + std::to_string(self->hold_input(self, COOP_MOD_HOLD_ALL));
         if (g.screen_do & kHoldA) line += " hold A " + std::to_string(self->hold_input(self, 1));
+        if (g.screen_do & kSound) {
+            line += " sound " + std::to_string(self->play_sound(self, "button_decide"));
+            line += " bad " + std::to_string(self->play_sound(self, "button decide!"));
+            line += " none " + std::to_string(self->play_sound(self, nullptr));
+        }
         if (g.screen_do & kHoldOff) line += " release " + std::to_string(self->hold_input(self, 0));
         if (g.screen_do & kOther) line += " alpha's " + std::to_string(g.api[0]->choose_focused(g.api[0]));
         g.calls.push_back(line);
@@ -218,6 +223,11 @@ struct Run {
             g.game_calls.push_back("reload");
             return g.reload_ok != 0;
         };
+        game.play_sound = [](void* ctx, std::uint64_t screen, const std::string& name) {
+            g.game_calls.push_back("sound " + std::to_string(reinterpret_cast<std::uintptr_t>(ctx)) + " " +
+                                   std::to_string(screen) + " " + name);
+            return true;
+        };
         game.now_ms = [] { return g.now; };
         loader.Start();
         host = std::make_unique<Host>(loader, FakeLibrary(), game);
@@ -225,7 +235,7 @@ struct Run {
     }
     // One menu screen's update as the runtime hands it over.
     void Screen(std::uint32_t kind, const std::string& focused, bool ready = true, std::uint64_t buttons = 0,
-                std::uint64_t screen = 0x5000) {
+                std::uint64_t screen = 0x5000, bool focused_ready = false) {
         ScreenUpdate u;
         u.ctx = reinterpret_cast<void*>(std::uintptr_t{7});
         u.screen = screen;
@@ -233,6 +243,7 @@ struct Run {
         u.focused = focused;
         u.save_list_ready = ready;
         u.buttons = buttons;
+        u.focused_ready = focused_ready;
         host->Screen(u);
     }
     int Count(const std::string& part) const {
@@ -502,7 +513,9 @@ TEST_CASE("mod plugins v2: each menu screen reaches the mods that asked, with it
     g.calls.clear();
     r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     r.Screen(COOP_MOD_SCREEN_LOAD_LIST, "", false);
-    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1", "screen b 2 '' 0"});
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00", true, 0, 0x5000, true);   // (the title's menu takes input now)
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1", "screen b 2 '' 0",
+                                              "screen b 1 'Pa_Button_00' 1 ready"});
     CHECK(g.game_calls.empty());   // (nothing asked: nothing done)
 }
 
@@ -538,12 +551,25 @@ TEST_CASE("mod plugins v2: nothing is chosen with no focused button or when the 
     CHECK_FALSE(r.Logged("mod bee: chose"));
 }
 
+TEST_CASE("mod plugins v2: play_sound starts a named sound on the screen being updated, plain names only") {
+    Run r;
+    CHECK(g.api[1]->size >= offsetof(CoopModApi, play_sound) + sizeof(void*));
+    g.calls.clear();
+    g.screen_do = kSound;
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1 sound 1 bad 0 none 0"});
+    CHECK(g.game_calls == std::vector<std::string>{"sound 7 20480 button_decide"});   // (the update's own ctx, screen)
+    CHECK(r.Count("mod bee: play_sound takes a sound's name") == 1);   // (said once)
+    g.screen_do = 0;
+}
+
 TEST_CASE("mod plugins v2: outside the mod's own on_screen call the v2 calls do nothing") {
     Run r;
     const CoopModApi* b = g.api[1];
     CHECK(b->choose_focused(b) == 0);   // (from the test's thread, no screen update)
     CHECK(b->reload_save_list(b) == 0);
     CHECK(b->hold_input(b, 1) == 0);
+    CHECK(b->play_sound(b, "button_decide") == 0);
     CHECK(g.game_calls.empty());
     CHECK(r.host->HeldButtons() == 0);
     CHECK(r.Count("mod bee: called choose_focused outside its on_screen call: nothing done (said once)") == 1);

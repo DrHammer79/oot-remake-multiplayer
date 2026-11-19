@@ -103,14 +103,32 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
         // (Button::Decide says no when the button's flags (+0x40) lack 0x14, as on the title while it fades in, or when
         // another button of its control is being chosen. Seen in a game: the title's Continue has 0x3b while it opens
         // and 0x3f once it takes input.)
-        std::uint32_t flags = 0;
-        ReadGame(button + 0x40, &flags, sizeof flags);
-        return (flags & 0x14) != 0x14
+        return !CoopModScreens::Choosable(ReadGame, button)
                    ? no(3, "the button cannot be chosen yet (its screen is still opening): asked again at a later update")
                    : no(4, "another button of its screen is being chosen: asked again at a later update");
     }
     said = -1;
     return true;
+}
+
+// (mod API v2) play_sound: the screen's own menu sound by name, on its update (CoopModScreens::kScreenSound): the name
+// into the call's scratch memory, then the game's searchAndEmit on the screen's xlink user. False when the screen has no
+// such sound.
+bool PlaySound(void* ctx, std::uint64_t screen, const std::string& name) {
+    if (g_api == nullptr || g_api->call == nullptr || ctx == nullptr || screen == 0 ||
+        g_api->size < offsetof(HosCoopApi, scratch) + sizeof(g_api->scratch) || g_api->scratch == nullptr) {
+        return false;
+    }
+    const std::uint64_t at = g_api->scratch(ctx, name.c_str(), name.size() + 1);
+    if (at == 0) {
+        return false;
+    }
+    HosCoopCall k{};
+    k.function = CoopRuntime::MainBase() + CoopModScreens::kScreenSound;
+    k.x[0] = screen;
+    k.x[1] = at;
+    std::uint64_t x0 = 0;
+    return g_api->call(ctx, &k, &x0) != 0 && (x0 & 1) != 0;
 }
 
 std::string Env(const char* name) {
@@ -307,6 +325,7 @@ void Start() {
     game.has_hook = [](std::uint32_t id) { return id < 64 && (g_hooks.load() >> id & 1) != 0; };
     game.runtime = "hookshot";
     game.choose_focused = ChooseFocused;
+    game.play_sound = PlaySound;
     game.reload_save_list = [] {
         // The game reads its save list again only at the title's step (CoopTitle::RefreshSaveList): asked anywhere
         // else (the pause menu's System > Load), save_list_ready would stay 0 until the title, so it is refused there.
@@ -411,7 +430,9 @@ void Screen(void* ctx, std::uint64_t screen) {
     u.ctx = ctx;
     u.screen = screen;
     u.kind = CoopModScreens::KindOf(vtable - base);
-    u.focused = CoopModScreens::ButtonName(ReadGame, CoopModScreens::FocusedButton(ReadGame, screen));
+    const std::uint64_t focused = CoopModScreens::FocusedButton(ReadGame, screen);
+    u.focused = CoopModScreens::ButtonName(ReadGame, focused);
+    u.focused_ready = CoopModScreens::Choosable(ReadGame, focused);
     u.save_list_ready = CoopTitle::SaveListReady();
     u.buttons = g_pad.load();
     g_host->Screen(u);

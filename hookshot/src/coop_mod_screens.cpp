@@ -74,4 +74,23 @@ std::string ButtonName(const Reader& read, std::uint64_t button) {
     return name;   // (cut at kNameMax)
 }
 
+bool SoundName(const char* name) {
+    if (name == nullptr || *name == 0) {
+        return false;
+    }
+    std::size_t n = 0;
+    for (; name[n] != 0; ++n) {
+        const char c = name[n];
+        if (n >= kSoundNameMax || !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Choosable(const Reader& read, std::uint64_t button) {
+    std::uint32_t flags = 0;
+    return button != 0 && read(button + kButtonFlags, &flags, sizeof flags) && (flags & kChoosable) == kChoosable;
+}
+
 }  // namespace CoopModScreens

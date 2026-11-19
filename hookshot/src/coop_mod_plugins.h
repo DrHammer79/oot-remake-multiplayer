@@ -46,6 +46,7 @@ struct Game {
     // screen as Screen was given them). Each true when the game took it.
     std::function<bool(void* ctx, std::uint64_t screen)> choose_focused;
     std::function<bool()> reload_save_list;
+    std::function<bool(void* ctx, std::uint64_t screen, const std::string& name)> play_sound;
     std::function<std::uint64_t()> now_ms;  // a steady clock (the input hold's end)
 };
 
@@ -57,6 +58,7 @@ struct ScreenUpdate {
     std::string focused;          // the focused button's name, "" none
     bool save_list_ready = false;
     std::uint64_t buttons = 0;    // player 1's buttons before any hold
+    bool focused_ready = false;   // the focused button takes a choice now
 };
 
 // A hold ends when the menu screen it was set on has not updated for this long.

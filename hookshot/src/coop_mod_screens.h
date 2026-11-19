@@ -31,8 +31,23 @@ inline constexpr std::uint64_t kButtonState = 56;
 // (main+0x3379160: x1 = *(button+0x18)). Seen in a game on the title: Pa_Button_00 (Continue) to Pa_Button_03, in the
 // order of the title's buttons array (CoopTitle's +0x2d0).
 inline constexpr std::uint64_t kNameText = 0x18;
+// A button's flags at +0x40: Button::Decide says no unless both bits of kChoosable are set. Seen in a game: the
+// title's Continue has 0x3b while the title comes in (its opening scene, the menu fading in) and 0x3f once it takes
+// input.
+inline constexpr std::uint64_t kButtonFlags = 0x40;
+inline constexpr std::uint32_t kChoosable = 0x14;
 inline constexpr std::size_t kNameMax = 63;
 inline constexpr int kMaxButtons = 64;
+
+// (screen, const char* name) -> bit 0: the sound started. A screen's own menu sound by name: its xlink user at
+// [screen+0x198]+8, then xlink2's searchAndEmit(name) ("searchAndEmit(%s)", main+0x43e400). Read from main and seen in
+// a run, 2026-11-19: the title's Continue starts "Pa_Button_00_decide" and "button_decide", a cursor step "button_on",
+// the pause menu's tabs "mc_TabToRight" and "mc_TabToLeft", all on that user.
+inline constexpr std::uint64_t kScreenSound = 0x43e400;
+inline constexpr std::size_t kSoundNameMax = 63;
+
+// A sound name a mod may give: 1 to kSoundNameMax letters, digits or _.
+bool SoundName(const char* name);
 
 // Reads n bytes at a guest address; false when not mapped.
 using Reader = std::function<bool(std::uint64_t address, void* out, std::size_t n)>;
@@ -45,5 +60,8 @@ std::uint64_t FocusedButton(const Reader& read, std::uint64_t screen);
 
 // A button's pane name ("" when it cannot be read or is not printable).
 std::string ButtonName(const Reader& read, std::uint64_t button);
+
+// Whether a button takes a choice now (its flags have kChoosable). False for no button or one that cannot be read.
+bool Choosable(const Reader& read, std::uint64_t button);
 
 }  // namespace CoopModScreens
