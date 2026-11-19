@@ -152,7 +152,7 @@ std::string Page::TakeWhy() {
 RowAction ActionFor(int row, const Session& s) {
     switch (row) {
     case kRowSession:
-        return RowAction::kOpenMain;
+        return s.in_one ? RowAction::kOpenMain : RowAction::kHost;
     case kRowJoinCode:
         if (s.hosting) return s.code ? RowAction::kCopyCode : RowAction::kOpenMain;   // (the code still coming: shown there)
         return s.in_one ? RowAction::kOpenMain : RowAction::kOpenJoin;
@@ -161,7 +161,7 @@ RowAction ActionFor(int row, const Session& s) {
     case kRowLetIn:
         return s.hosting ? RowAction::kAllow : RowAction::kOpenLobby;
     case kRowLeave:
-        return RowAction::kOpenMain;   // (Leave and Stop hosting are there: leaving takes a press of its own)
+        return s.in_one ? RowAction::kConfirmLeave : RowAction::kNone;   // (a second A leaves: never one stray press)
     default:
         return RowAction::kNone;
     }
@@ -188,7 +188,7 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.s.in_one) {
         rows[kRowSession] = "In a session";
     } else {
-        rows[kRowSession] = "Not in a session";
+        rows[kRowSession] = "Host a game";
     }
     if (v.s.hosting) {
         rows[kRowJoinCode] = v.room.empty() ? "Room: coming..." : "Room: " + v.room;
@@ -207,7 +207,11 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else {
         rows[kRowLetIn] = "Let in " + v.asking.front() + " (+" + std::to_string(v.asking.size() - 1) + ")";
     }
-    rows[kRowLeave] = v.s.hosting ? "Stop hosting" : "Leave";
+    if (v.confirm_leave) {
+        rows[kRowLeave] = v.s.hosting ? "A again: stop hosting" : "A again: leave";
+    } else {
+        rows[kRowLeave] = !v.s.in_one ? "Leave (not in a session)" : v.s.hosting ? "Stop hosting" : "Leave";
+    }
     for (std::string& r : rows) r = Fit(std::move(r));
     return rows;
 }
@@ -219,6 +223,8 @@ const char* ActionWords(RowAction a) {
     case RowAction::kCopyCode: return "the room name or join code to the clipboard, then co-op's main page";
     case RowAction::kOpenLobby: return "co-op's menu, its Lobby tab";
     case RowAction::kAllow: return "the oldest player who asks to join let in (/allow)";
+    case RowAction::kHost: return "host now, with the kit's settings";
+    case RowAction::kConfirmLeave: return "leave (or stop hosting) after a second A";
     case RowAction::kNone: break;
     }
     return "nothing";

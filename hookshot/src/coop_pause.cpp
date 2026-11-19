@@ -1005,6 +1005,18 @@ void Open(CoopPauseMenu::Page page) {
     LOG_INFO(Core, "coop: multiplayer tab: opened on a page (the title's rows, or the pause menu's Multiplayer page)");
 }
 
+void HostNow() {
+    std::lock_guard lock(g_mutex);
+    g_menu.Show(ReadOptions());   // (the settings as the files have them now: Host reads them from the menu)
+    LOG_INFO(Core, "coop: multiplayer tab: host from the pause menu's Multiplayer page");
+    Host();
+}
+
+void LeaveNow() {
+    std::lock_guard lock(g_mutex);
+    Leave();
+}
+
 void OpenLobby() {
     g_wanted = kLobbyTab;
     LOG_INFO(Core, "coop: multiplayer tab: the Lobby tab opened (the pause menu's Multiplayer page)");

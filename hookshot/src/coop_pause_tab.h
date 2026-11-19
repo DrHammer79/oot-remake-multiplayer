@@ -149,7 +149,10 @@ enum class RowAction {
     kCopyCode,    // the room name (or join code) to the clipboard, then the main page, which shows it
     kOpenLobby,   // co-op's menu, its Lobby tab: the players, the host's controls
     kAllow,       // the Lobby's /allow: the oldest player who asks to join is let in (its line says who, or nobody)
+    kHost,        // host at once, with the kit's settings (its room name, relay, port, approval)
+    kConfirmLeave,   // Leave or Stop hosting: the row asks for a second A first (kConfirmMs), then co-op stops
 };
+inline constexpr std::uint64_t kConfirmMs = 3000;
 // What co-op is doing, as the rows need it.
 struct Session {
     bool hosting = false;   // this game hosts (its server listens)
@@ -166,6 +169,7 @@ struct SessionView {
     std::string room;            // hosting: the room name (else a join code) friends type, "" none yet
     int players = 0;             // in the session, us included (0: not in one)
     std::vector<std::string> asking;   // hosting: who asks to join, oldest first
+    bool confirm_leave = false;  // the Leave row waits for its second A
 };
 inline constexpr std::size_t kRowChars = 40;   // the most a row's text holds (the System page's button width)
 std::vector<std::string> RowTexts(const SessionView& v);

@@ -290,9 +290,9 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
     hosting.code = true;
 
     for (const Session& s : {idle, joined, hosting_no_code, hosting}) {
-        CHECK(ActionFor(kRowSession, s) == RowAction::kOpenMain);
+        CHECK(ActionFor(kRowSession, s) == (s.in_one ? RowAction::kOpenMain : RowAction::kHost));
         CHECK(ActionFor(kRowPlayers, s) == RowAction::kOpenLobby);
-        CHECK(ActionFor(kRowLeave, s) == RowAction::kOpenMain);   // (Leave takes a press of its own there)
+        CHECK(ActionFor(kRowLeave, s) == (s.in_one ? RowAction::kConfirmLeave : RowAction::kNone));
         CHECK(ActionFor(-1, s) == RowAction::kNone);              // (no row under the cursor)
         CHECK(ActionFor(kRows, s) == RowAction::kNone);
     }
@@ -309,14 +309,15 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
     CHECK(ActionFor(kRowLetIn, idle) == RowAction::kOpenLobby);
     // Each has words for the log.
     for (RowAction a : {RowAction::kNone, RowAction::kOpenMain, RowAction::kOpenJoin, RowAction::kCopyCode,
-                        RowAction::kOpenLobby, RowAction::kAllow}) {
+                        RowAction::kOpenLobby, RowAction::kAllow, RowAction::kHost, RowAction::kConfirmLeave}) {
         CHECK(std::string(ActionWords(a)).size() > 3);
     }
 }
 
 TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width") {
     SessionView idle;
-    CHECK(RowTexts(idle) == std::vector<std::string>{"Not in a session", "Join a game", "Players", "Let in", "Leave"});
+    CHECK(RowTexts(idle) ==
+          std::vector<std::string>{"Host a game", "Join a game", "Players", "Let in", "Leave (not in a session)"});
 
     SessionView host;
     host.s.hosting = host.s.in_one = true;
@@ -336,6 +337,11 @@ TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width
     guest.s.in_one = true;
     guest.players = 2;
     CHECK(RowTexts(guest) == std::vector<std::string>{"In a session", "Room", "Players: 2", "Let in", "Leave"});
+    guest.confirm_leave = true;
+    CHECK(RowTexts(guest)[kRowLeave] == "A again: leave");
+    host.confirm_leave = true;
+    CHECK(RowTexts(host)[kRowLeave] == "A again: stop hosting");
+    host.confirm_leave = false;
     SessionView joining;
     joining.connecting = true;
     joining.s.in_one = true;

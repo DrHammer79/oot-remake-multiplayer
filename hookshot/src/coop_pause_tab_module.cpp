@@ -29,6 +29,8 @@ std::mutex g_mutex;   // everything below: screen updates on several of the game
 Probe g_probe;
 Page g_page;
 std::atomic<bool> g_shown{false};   // (the mouse asks often, from any thread)
+// The Leave row's second A: until when it is waited for (0: not). Any thread.
+std::atomic<std::uint64_t> g_confirm_until{0};
 // Panes found, per screen object (0: not looked up yet or not there).
 std::uint64_t g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
 std::uint64_t g_strip_screen = 0, g_tab_pane = 0;
@@ -223,6 +225,7 @@ SessionView ViewNow() {
     if (const auto at = room.find('@'); at != std::string::npos) room.resize(at);   // (the name friends type first)
     v.room = room;
     v.s.code = v.s.hosting && (!room.empty() || st.invite[0] != 0);
+    v.confirm_leave = NowMs() < g_confirm_until.load();
     const CoopLobby::Seen seen = CoopLobby::Now();
     v.players = seen.connected ? static_cast<int>(seen.players.size()) : 0;
     if (v.s.hosting) v.asking = CoopLobby::Asking();
@@ -354,6 +357,15 @@ void Act(int row) {
     const RowAction a = ActionFor(row, SessionNow());
     LOG_INFO(Core, "coop: pause tab: row {} chosen: {}", row, ActionWords(a));
     switch (a) {
+    case RowAction::kHost: CoopPause::HostNow(); break;
+    case RowAction::kConfirmLeave:
+        if (NowMs() < g_confirm_until.exchange(0)) {
+            LOG_INFO(Core, "coop: pause tab: the second A: co-op stops");
+            CoopPause::LeaveNow();
+        } else {
+            g_confirm_until = NowMs() + kConfirmMs;   // (the row says "A again" until then)
+        }
+        break;
     case RowAction::kOpenMain: CoopPause::Open(CoopPauseMenu::Page::kMain); break;
     case RowAction::kOpenJoin: CoopPause::Open(CoopPauseMenu::Page::kJoin); break;
     case RowAction::kCopyCode: CoopPause::CopyJoinCode(); break;
@@ -394,6 +406,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
         Page::Do d;
         std::string why;
         bool was = false, now_shown = false;
+        int focused = -1;
         {
             std::lock_guard lock(g_mutex);
             lines = g_probe.Seen(f, NowMs());
@@ -402,6 +415,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             now_shown = g_page.Shown();
             why = g_page.TakeWhy();
             g_shown = now_shown;
+            if (f.kind == Kind::kPages && now_shown) focused = FocusedRow();
             if (d.any() && ctx != nullptr && CanCall()) {
                 if (f.kind == Kind::kPages) ApplyPages(ctx, screen, d);
                 if (f.kind == Kind::kStrip) ApplyStrip(ctx, f, d);
@@ -410,8 +424,10 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
         for (const std::string& line : lines) LOG_INFO(Core, "{}", line);
         if (was && !now_shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
         if (f.kind == Kind::kPages && now_shown && f.state == 2 && ctx != nullptr && CanCall()) {
+            if (focused != kRowLeave) g_confirm_until = 0;   // (the cursor left the Leave row: no second A waited for)
             LiveRows(ctx, screen, ViewNow());   // (after our lock: the status and the Lobby take their own)
         }
+        if (!now_shown) g_confirm_until = 0;
     } catch (...) {
         // (a log line or a look lost is all: the game's update goes on)
     }
