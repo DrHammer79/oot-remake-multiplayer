@@ -102,6 +102,8 @@ std::uint64_t g_settings_pane = 0;   // the Settings page (Pa_Settings_00; 0 wit
 // System's Longshot Settings button (the pack's Pa_Button_05 of PaSystemMenu_00: System's own, and the copies' in our
 // two pages, which stay hidden); 0 with an older pack.
 std::uint64_t g_settings_button = 0, g_settings_button_coop = 0, g_settings_button_set = 0;
+// Longshot Settings' own rows (Pa_Settings_00's Pa_Button_00..04; its sixth is g_settings_button_set).
+std::array<std::uint64_t, kRows> g_set_buttons{};
 int g_settings_button_shown = -1;
 std::uint64_t g_strip_gen = 0, g_tab_pane = 0;
 bool g_pages_looked = false, g_pages_ok = false, g_strip_looked = false, g_strip_ok = false;
@@ -772,7 +774,7 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     if (gen != g_pages_gen) {
         g_pages_gen = gen, g_pages_screen = f.screen, g_pages_looked = false, g_pages_ok = false;
         g_system_pane = 0, g_coop_pane = 0;
-        g_settings_button = g_settings_button_coop = g_settings_button_set = 0, g_settings_button_shown = -1;
+        g_settings_button = g_settings_button_coop = g_settings_button_set = 0, g_settings_button_shown = -1, g_set_buttons = {};
     }
     if (g_pages_looked || !calls || f.layout == 0) return;
     g_pages_looked = true;
@@ -793,6 +795,12 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_settings_button = button("Pa_System_00");
         g_settings_button_coop = button("Pa_Coop_00");
         g_settings_button_set = button("Pa_Settings_00");
+        for (int r = 0; r < kRows; ++r) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
+            const std::uint64_t b = PaneIn(ctx, PartLayout(table, "Pa_Settings_00"), name);
+            g_set_buttons[static_cast<std::size_t>(r)] = IsPart(b) ? b : 0;
+        }
         g_settings_button_shown = -1;
         LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button (Pa_Button_05): {:#x}{}", g_settings_button,
                  g_settings_button != 0 ? "" : " (not in the pack: Longshot Settings stays off)");
@@ -946,9 +954,9 @@ std::string FocusedShownName() {
 // System's Longshot Settings button, at each update of the pages: shown while Longshot Settings can be used (with the
 // page's own copy of it, its sixth category row, Debug). The game's cursor is never moved by a call: moved onto System's
 // button with f_8088ffc0 as the page was left, neither B nor + closed the menu any more (a run, 2026-11-19). The game
-// carries its cursor by the button's name: onto the page's sixth row as it opens from System's sixth button, so that
-// row is hidden for kDebugRowWaitMs as the page opens (ApplyPages) and the cursor goes elsewhere; back onto System's
-// button as it is left. Where it went is logged. g_mutex.
+// carries its cursor by the button's name: onto the page's sixth row as it opens from System's sixth button, so all
+// rows but the first are hidden as the page opens (ApplyPages) until the cursor is on the first (kDebugRowWaitMs at
+// most); back onto System's button as it is left. Where it went is logged. g_mutex.
 constexpr std::uint64_t kDebugRowWaitMs = 400;
 std::uint64_t g_debug_row_back_ms = 0;   // the page's sixth row shown again then (0: not hidden for the opening)
 int g_open_trace = 0, g_left_trace = 0;  // (trace) the game's cursor's button logged this many more times
@@ -975,8 +983,12 @@ void SettingsButton(void* ctx) {
             LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button {}", want != 0 ? "shown" : "hidden");
         }
     }
-    if (g_debug_row_back_ms != 0 && now >= g_debug_row_back_ms) {
+    // (the rows back once the game's cursor is on the first, or kDebugRowWaitMs at most)
+    if (g_debug_row_back_ms != 0 && (now >= g_debug_row_back_ms || FocusedShownName() == "Pa_Button_00")) {
         g_debug_row_back_ms = 0;
+        for (int r = 1; r < kRows; ++r) {
+            if (g_set_buttons[static_cast<std::size_t>(r)] != 0) SetVisible(ctx, g_set_buttons[static_cast<std::size_t>(r)], true);
+        }
         if (g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, g_page.SettingsUsable());
     }
     if (g_page.TakeSettingsOpened()) {
@@ -1020,10 +1032,14 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
             for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
                 if (pane != 0) SetVisible(ctx, pane, pane == (to != 0 ? to : g_system_pane));
             }
-            // (Longshot Settings opening from System's sixth button: its own sixth row hidden a moment, so the game's
-            // cursor, carried by the button's name, does not land on Debug; SettingsButton shows it again)
+            // (Longshot Settings opening from System's sixth button: all its rows but the first hidden a moment, so the
+            // game's cursor lands on Graphics: carried by the button's name it went to the sixth, Debug, and with that
+            // one hidden to the nearest, Motion (runs, 2026-11-19); SettingsButton shows them again)
             if (d.page_from == 0 && d.page_to == 2 && g_settings_button_set != 0) {
                 SetVisible(ctx, g_settings_button_set, false);
+                for (int r = 1; r < kRows; ++r) {
+                    if (g_set_buttons[static_cast<std::size_t>(r)] != 0) SetVisible(ctx, g_set_buttons[static_cast<std::size_t>(r)], false);
+                }
                 g_debug_row_back_ms = NowMs() + kDebugRowWaitMs;
             }
         }
