@@ -901,6 +901,25 @@ TitleArrangement ArrangementFor(bool any_save) {
     return a;
 }
 
+TitleMenuLook MenuFor(bool any_save, bool multiplayer) {
+    TitleMenuLook l;
+    if (multiplayer) {
+        l.btn_num_frame = 4;
+        l.rows = {{{"0100", TitleDo::kHost}, {"0101", TitleDo::kJoin}, {"0102", TitleDo::kSettings},
+                   {"0106", TitleDo::kBack}}};
+        l.count = 4;
+        l.focus = 0;
+        return l;
+    }
+    l.btn_num_frame = 3;
+    l.rows = {{{"0103", TitleDo::kGame},
+               {"0104", TitleDo::kMultiplayer},
+               any_save ? TitleMenuRow{"0105", TitleDo::kGame} : TitleMenuRow{"0105", TitleDo::kDecide, 1},
+               {}}};
+    l.count = 3;
+    return l;
+}
+
 const char* SkipTitleHold(const SkipTitleInput& in) {
     if (in.session_live) {
         return "a co-op session is live";

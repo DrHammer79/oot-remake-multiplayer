@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -362,6 +363,45 @@ struct TitleArrangement {
     std::size_t count = 0;
 };
 TitleArrangement ArrangementFor(bool any_save);
+
+// The title's own menu (a pack whose Title_00 has the hidden marker pane kMenuMarker, tools/puppet_pack/title_menu.py):
+// three rows on the game's own buttons, Start, Multiplayer and Options; Multiplayer turns them into Host, Join, Co-op
+// Settings and Back, the game's hidden fourth slot shown (BtnNum's frame 4). With the save-screen mod's file select,
+// Continue and New Game led to the same place, so one Start row stands for both: the game's first button, Continue
+// with a save, New Game without. Options is the game's own (its third button with a save; without one the game's
+// second is Options, decided by the module when the third row is chosen). The other rows are the module's: it takes
+// their A (the game never sees it) and plays the decide sound itself.
+inline constexpr const char* kMenuMarker = "Pa_CoopMenu_00";
+enum class TitleDo {
+    kGame,         // the game's own press (the A goes through)
+    kDecide,       // the game's button `decide` chosen in its place (Button::Decide)
+    kMultiplayer,  // the submenu
+    kHost,
+    kJoin,
+    kSettings,
+    kBack,         // the three rows again (also B in the submenu)
+};
+struct TitleMenuRow {
+    const char* label = nullptr;   // LayoutMsg/Title_00 (the pack's 0100..0106)
+    TitleDo action = TitleDo::kGame;
+    int decide = -1;               // kDecide: which of the game's buttons
+};
+struct TitleMenuLook {
+    float btn_num_frame = 3;   // the game's buttons shown (BtnNum's frame)
+    std::array<TitleMenuRow, 4> rows{};
+    std::size_t count = 0;
+    int focus = -1;            // where the cursor goes when this look comes in (-1: where it is)
+};
+TitleMenuLook MenuFor(bool any_save, bool multiplayer);
+// The pack's labels: 0100 Host, 0101 Join, 0102 Co-op Settings (the older packs' rows too), 0103 Start,
+// 0104 Multiplayer, 0105 Options, 0106 Back.
+inline constexpr std::array<std::pair<const char*, const char*>, 7> kMenuLabels{{{"0100", "Host"},
+                                                                               {"0101", "Join"},
+                                                                               {"0102", "Co-op Settings"},
+                                                                               {"0103", "Start"},
+                                                                               {"0104", "Multiplayer"},
+                                                                               {"0105", "Options"},
+                                                                               {"0106", "Back"}}};
 
 // ---------------------------------------------------------------------------
 // Player report 133: Longshot's Skip title screen (its Insert menu row, off by default) starts a launch with the newest

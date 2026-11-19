@@ -887,3 +887,46 @@ TEST_CASE("title menu: auto_rejoin is off unless coop-options.ini turns it on, a
     o.Write(coop, options);
     CHECK_FALSE(Options::Read(coop, options).auto_rejoin);
 }
+
+TEST_CASE("title menu: Start, Multiplayer, Options on the game's three, Multiplayer shows Host, Join, Co-op Settings, Back") {
+    using CoopTitleMenu::MenuFor;
+    using CoopTitleMenu::TitleDo;
+    // With a save the game's three are Continue, New Game, Options: Start is Continue's own press, Options its own.
+    auto l = MenuFor(true, false);
+    CHECK(l.btn_num_frame == 3);
+    CHECK(l.count == 3);
+    CHECK(std::string(l.rows[0].label) == "0103");
+    CHECK(l.rows[0].action == TitleDo::kGame);
+    CHECK(l.rows[1].action == TitleDo::kMultiplayer);
+    CHECK(l.rows[2].action == TitleDo::kGame);
+    CHECK(l.focus == -1);
+    // Without one the game shows New Game and Options: Start is New Game's press, and the third row decides the
+    // game's second button (Options) in its place.
+    l = MenuFor(false, false);
+    CHECK(l.btn_num_frame == 3);
+    CHECK(l.rows[0].action == TitleDo::kGame);
+    CHECK(l.rows[2].action == TitleDo::kDecide);
+    CHECK(l.rows[2].decide == 1);
+    // The submenu: the game's fourth slot shown, all four the module's, the cursor on Host.
+    for (const bool any : {true, false}) {
+        l = MenuFor(any, true);
+        CHECK(l.btn_num_frame == 4);
+        CHECK(l.count == 4);
+        CHECK(l.focus == 0);
+        CHECK(l.rows[0].action == TitleDo::kHost);
+        CHECK(l.rows[1].action == TitleDo::kJoin);
+        CHECK(l.rows[2].action == TitleDo::kSettings);
+        CHECK(l.rows[3].action == TitleDo::kBack);
+    }
+    // Every label a row uses is one of the pack's.
+    for (const bool any : {true, false}) {
+        for (const bool sub : {true, false}) {
+            const auto look = MenuFor(any, sub);
+            for (std::size_t i = 0; i < look.count; ++i) {
+                bool known = false;
+                for (const auto& [label, text] : CoopTitleMenu::kMenuLabels) known = known || std::string(label) == look.rows[i].label;
+                CHECK(known);
+            }
+        }
+    }
+}
