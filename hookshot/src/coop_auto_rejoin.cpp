@@ -29,6 +29,9 @@ bool Planner::Tick(const Facts& f, std::uint64_t now_ms) {
     }
     if (!wanted) {
         next_ms_ = 0;
+        // (off at the start's moment: that join is spent. Turned on later in the game, it waits for a drop: a run
+        // showed the switch joining the last game at once otherwise)
+        if (!start_done_ && now_ms - first_ms_ >= kStartDelayMs) start_done_ = true;
         return false;
     }
     if (!start_done_) {

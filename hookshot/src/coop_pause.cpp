@@ -92,8 +92,11 @@ std::string g_doing;         // what the tab started: "hosting", "joined", "" no
 // a Leave), which stop what it planned; g_auto_join: the join being made is the planner's, not the player's.
 CoopAutoRejoin::Planner g_rejoin;
 bool g_player_acted = false, g_player_left = false, g_auto_join = false;
-std::uint64_t g_last_game_ms = 0;   // when coop.ini's last_invite was last read
+std::uint64_t g_last_game_ms = 0;   // when coop.ini's last_invite and the setting were last read
 bool g_last_game = false;           // a last game is kept (coop.ini last_invite)
+// The setting as the files have it (ReadOptions, with last_invite): g_menu's own settings are read only when co-op's
+// menu opens, so at the game's start they are the defaults (a run: the switch saved them over coop.ini's name).
+bool g_auto_rejoin_on = false;
 bool g_copied = false;       // this session's invite code was put on the clipboard
 bool g_answer_copied = false;   // this join's answer code (WAIT_HOST) was put on the clipboard
 // Linux: the automatic copy is tried once per code (CopyThen, off the game's thread). A desktop where the tool
@@ -345,9 +348,10 @@ void Follow(const HosCoopStatus& st) {
         g_last_game_ms = now;
         const auto code = CoopTitleMenu::IniGet(ReadText(CoopIni()), "last_invite");
         g_last_game = code && !code->empty();
+        g_auto_rejoin_on = ReadOptions().auto_rejoin;
     }
     CoopAutoRejoin::Facts f;
-    f.enabled = g_menu.options().auto_rejoin;
+    f.enabled = g_auto_rejoin_on;
     f.code = g_last_game;
     f.launcher = g_coop_on;
     f.idle = !Busy();
@@ -358,6 +362,7 @@ void Follow(const HosCoopStatus& st) {
         const auto code = CoopTitleMenu::IniGet(ReadText(CoopIni()), "last_invite");
         LOG_INFO(Core, "coop: multiplayer tab: auto-rejoin: the last game again ({})", g_rejoin.Why());
         if (code && !code->empty()) {
+            g_menu.Show(ReadOptions());   // (the files' settings: the name, the relay; not the menu's defaults)
             g_auto_join = true;
             Join(*code);   // (refused or failed: the next try, if any, comes on its own)
             g_auto_join = false;
@@ -1172,7 +1177,7 @@ void JoinPasteNow() {
 
 bool AutoRejoin() {
     std::lock_guard lock(g_mutex);
-    return g_menu.options().auto_rejoin;
+    return g_auto_rejoin_on;
 }
 
 bool AutoRejoining() {
@@ -1182,9 +1187,10 @@ bool AutoRejoining() {
 
 void SetAutoRejoin(bool on) {
     std::lock_guard lock(g_mutex);
-    CoopTitleMenu::Options o = g_menu.options();
+    CoopTitleMenu::Options o = ReadOptions();   // (the files' settings: the menu's are defaults until it opens)
     o.auto_rejoin = on;
     g_menu.Show(o);   // (the menu's settings, as its own rows change them)
+    g_auto_rejoin_on = on;
     LOG_INFO(Core, "coop: multiplayer tab: auto-rejoin {} from the pause menu's Multiplayer page", on ? "on" : "off");
     Save();
 }
@@ -1203,8 +1209,8 @@ void JoinLanNow(const std::string& address, std::uint16_t port, const std::strin
 }
 
 bool RelaySet() {
-    std::lock_guard lock(g_mutex);
-    return !g_menu.options().relay.empty();
+    // (the files' settings: the menu's own are its defaults until it opens; read only while the Join view shows)
+    return !ReadOptions().relay.empty();
 }
 
 void JoinRoomNow(const std::string& room, const std::string& password) {

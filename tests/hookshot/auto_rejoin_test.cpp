@@ -105,3 +105,27 @@ TEST_CASE("auto-rejoin: turned off while a drop is tried: no more tries") {
     f.enabled = true;
     CHECK_FALSE(p.Tick(f, 3000 + kFirstRetryMs + kRetryMs));   // (the plan was dropped with the setting)
 }
+
+TEST_CASE("auto-rejoin: turned on later in the game, it does not join at once: it waits for a drop") {
+    Planner p;
+    Facts f = IdleOn();
+    f.enabled = false;
+    for (std::uint64_t t = 1000; t < 60000; t += 500) CHECK_FALSE(p.Tick(f, t));
+    f.enabled = true;   // (the page's switch, a minute in)
+    for (std::uint64_t t = 60000; t < 120000; t += 500) CHECK_FALSE(p.Tick(f, t));
+    f.idle = false, f.guest_in = true;   // (joined by hand, then dropped: that is tried again)
+    CHECK_FALSE(p.Tick(f, 120000));
+    f.idle = true, f.guest_in = false;
+    CHECK_FALSE(p.Tick(f, 121000));
+    CHECK(p.Tick(f, 121000 + kFirstRetryMs));
+}
+
+TEST_CASE("auto-rejoin: turned on before the start's moment, the start's join is still made") {
+    Planner p;
+    Facts f = IdleOn();
+    f.enabled = false;
+    CHECK_FALSE(p.Tick(f, 1000));
+    f.enabled = true;
+    CHECK_FALSE(p.Tick(f, 2000));
+    CHECK(p.Tick(f, 1000 + kStartDelayMs));
+}
