@@ -97,25 +97,23 @@ static_assert(kMuteVoice == CoopLobby::kVoice && kMuteChat == CoopLobby::kChat);
 // so no pane of a freed layout is used). *_ok: both looked up for that opening and parts; the page is usable only then.
 std::uint64_t g_pages_gen = 0, g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
 std::uint64_t g_settings_pane = 0;   // the Settings page (Pa_Settings_00; 0 with an older pack)
+// System's Longshot Settings button (the pack's Pa_Button_05 of PaSystemMenu_00: System's own, and the copies' in our
+// two pages, which stay hidden); 0 with an older pack.
+std::uint64_t g_settings_button = 0, g_settings_button_coop = 0, g_settings_button_set = 0;
+int g_settings_button_shown = -1;
 std::uint64_t g_strip_gen = 0, g_tab_pane = 0;
-// The sixth tab (Pa_Category_05, Settings) and its word, and what the six-tab strip moves: the game's four tabs'
-// parent (N_MenuChange_00: no animation track names it, so it keeps a place written to it), L and R, with their own
-// places in the layout to go back to (the Minus menu has its own tabs on the same strip). 0: none (an older pack).
-std::uint64_t g_tab6_pane = 0, g_tab6_word = 0, g_tabs_parent = 0, g_label_l = 0, g_label_r = 0;
-float g_tabs_parent_x = 0, g_label_l_x = 0, g_label_r_x = 0;
-bool g_tab6_shown = false;
-float g_alpha6_set = -1, g_word6_set = -1;
 bool g_pages_looked = false, g_pages_ok = false, g_strip_looked = false, g_strip_ok = false;
 std::uint64_t g_pages_layout = 0;  // the layout the pages' panes were looked up in (the early page switch checks it)
 std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), which ours follows in the strip's animation
-// The game's four tabs (Pa_Category_00..03) and their own places (x in N_MenuChange_00), for the six-tab strip's
-// even spacing; how often a place was found put back (an animation of the strip's), for the trace.
+// The game's four tabs (Pa_Category_00..03) and their own places (x in their parent), and the five words (T_Text_00 of
+// Pa_Category_00..04), whose drawn widths space the five tabs evenly (TabOffsets); how often a place was found put back
+// (an animation of the strip's), for the trace.
 std::array<std::uint64_t, 4> g_game_tabs{};
 std::array<float, 4> g_game_tabs_x{};
 int g_tab_put_back = 0;
-// The six tabs' word panes (T_Text_00 of Pa_Category_00..05), whose drawn widths space the six-tab strip.
-std::array<std::uint64_t, 6> g_words{};
+std::array<std::uint64_t, 5> g_words{};
 std::string g_spacing_said;   // the spacing as last logged
+bool g_tabs_placed = false;   // the game's four at their even places (the Plus menu with ours), not their own
 std::uint64_t g_fourth_word = 0, g_tab_word = 0;   // the two tabs' word panes (N_MenuChangeTextIn_00)
 float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
 bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
@@ -629,8 +627,10 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     }
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
     g_set_count = static_cast<int>(rows.size());
-    const int page = g_set_page.load(), picked = g_set_row.load();
-    const std::vector<ListLine> lines = SettingLines(rows, page);
+    const int page = g_set_page.load(), picked = g_set_row.load(), category = g_set_category.load();
+    const std::vector<ListLine> lines =
+        SettingLines(rows, page, category >= 0 && category < kRows ? kSettingTabs[static_cast<std::size_t>(category)] : "");
+    const int pages = SettingPages(static_cast<int>(rows.size())), at_page = (page % pages + pages) % pages;
     for (int i = 0; i < kListRows; ++i) {
         const std::size_t k = static_cast<std::size_t>(i);
         const std::uint64_t pane = g_set_list[k];
@@ -644,11 +644,10 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
             LiveText(ctx, layout, gen, path, 28 + 2 * i, lines[k].value.empty() ? std::string(" ") : lines[k].value);
         }
         if (g_set_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_set_vis[k] = on ? 1 : 0;
-        const std::size_t at = static_cast<std::size_t>(((page % SettingPages(static_cast<int>(rows.size())) +
-                                                          SettingPages(static_cast<int>(rows.size()))) %
-                                                         SettingPages(static_cast<int>(rows.size()))) * kListRows + i);
-        const bool fixed = at < rows.size() && rows[at].fixed;
-        const float alpha = fixed ? 0.4f : picked < 0 || picked == i ? 1.0f : 0.5f;
+        // (the header a little dim, as the browser's; a setting bright when picked, or all while the rows have the pad)
+        const std::size_t at = static_cast<std::size_t>(at_page * kSettingsPerPage + i - 1);
+        const bool fixed = i > 0 && at < rows.size() && rows[at].fixed;
+        const float alpha = i == 0 ? 0.7f : fixed ? 0.4f : picked < 0 || picked == i - 1 ? 1.0f : 0.5f;
         if (on && g_set_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_set_alpha[k] = alpha;
     }
     for (int r = 0; r < kRows; ++r) {
@@ -692,6 +691,7 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     if (gen != g_pages_gen) {
         g_pages_gen = gen, g_pages_screen = f.screen, g_pages_looked = false, g_pages_ok = false;
         g_system_pane = 0, g_coop_pane = 0;
+        g_settings_button = g_settings_button_coop = g_settings_button_set = 0, g_settings_button_shown = -1;
     }
     if (g_pages_looked || !calls || f.layout == 0) return;
     g_pages_looked = true;
@@ -700,6 +700,22 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     g_pages_ok = IsPart(g_system_pane) && IsPart(g_coop_pane);
     g_settings_pane = FindOwnPane(ctx, f.layout, "Pa_Settings_00");
     if (!IsPart(g_settings_pane)) g_settings_pane = 0;
+    // System's Longshot Settings button, and the same button in our two pages (copies of System's page: theirs stays
+    // hidden, as the pack stores all three)
+    {
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, f.layout + 0x40, 0, 0, 0, 0, &table);
+        const auto button = [&](const char* page) {
+            const std::uint64_t b = PaneIn(ctx, PartLayout(table, page), "Pa_Button_05");
+            return IsPart(b) ? b : 0;
+        };
+        g_settings_button = button("Pa_System_00");
+        g_settings_button_coop = button("Pa_Coop_00");
+        g_settings_button_set = button("Pa_Settings_00");
+        g_settings_button_shown = -1;
+        LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button (Pa_Button_05): {:#x}{}", g_settings_button,
+                 g_settings_button != 0 ? "" : " (not in the pack: Longshot Settings stays off)");
+    }
     g_pages_layout = f.layout;
     LOG_INFO(Core, "coop: pause tab: the pages' panes: Pa_System_00 {:#x}, Pa_Coop_00 {:#x}{}", g_system_pane,
              g_coop_pane, g_pages_ok ? "" : " (not both parts: the Multiplayer page stays off; is the pack's layout in?)");
@@ -721,8 +737,7 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_strip_gen = gen, g_strip_looked = false, g_strip_ok = false, g_tab_pane = 0;
         g_fourth_pane = 0, g_fourth_word = 0, g_tab_word = 0, g_tab_shown = false, g_follow_had = false;
         g_alpha_set = g_word_set = -1;
-        g_tab6_pane = g_tab6_word = g_tabs_parent = g_label_l = g_label_r = 0, g_tab6_shown = false;
-        g_alpha6_set = g_word6_set = -1;
+        g_game_tabs = {}, g_words = {}, g_tabs_placed = false;
     }
     if (g_strip_looked || !calls || f.layout == 0) return;
     g_strip_looked = true;
@@ -735,38 +750,26 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         Call(ctx, kPaneTable, f.layout + 0x40, 0, 0, 0, 0, &table);
         g_fourth_word = PaneIn(ctx, PartLayout(table, "Pa_Category_03"), "N_MenuChangeTextIn_00");
         g_tab_word = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
-        // (the sixth tab, and the panes the six-tab strip moves, with their places to go back to)
-        if (const std::uint64_t six = FindOwnPane(ctx, f.layout, "Pa_Category_05"); IsPart(six)) {
-            g_tab6_pane = six;
-            g_tab6_word = PaneIn(ctx, PartLayout(table, "Pa_Category_05"), "N_MenuChangeTextIn_00");
-            g_tabs_parent = FindOwnPane(ctx, f.layout, "N_MenuChange_00");
-            g_label_l = FindOwnPane(ctx, f.layout, "T_BtnL_00");
-            g_label_r = FindOwnPane(ctx, f.layout, "T_BtnR_00");
-            g_tabs_parent_x = Read<float>(g_tabs_parent + 0x6c);
-            g_label_l_x = Read<float>(g_label_l + 0x6c), g_label_r_x = Read<float>(g_label_r + 0x6c);
-            g_game_tabs = {}, g_tab_put_back = 0;
-            for (int i = 0; i < 4; ++i) {
-                char name[16];
-                std::snprintf(name, sizeof name, "Pa_Category_%02d", i);
+        // (the game's four tabs with their own places to go back to, and the five words, for the even spacing)
+        g_tab_put_back = 0;
+        for (int i = 0; i < 5; ++i) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_Category_%02d", i);
+            if (i < 4) {
                 const std::uint64_t tab = FindOwnPane(ctx, f.layout, name);
-                if (!IsPart(tab)) continue;
-                g_game_tabs[static_cast<std::size_t>(i)] = tab;
-                g_game_tabs_x[static_cast<std::size_t>(i)] = Read<float>(tab + 0x6c);
+                if (IsPart(tab)) {
+                    g_game_tabs[static_cast<std::size_t>(i)] = tab;
+                    g_game_tabs_x[static_cast<std::size_t>(i)] = Read<float>(tab + 0x6c);
+                }
             }
-            LOG_INFO(Core, "coop: pause tab: the game's tabs at x {:.0f}, {:.0f}, {:.0f}, {:.0f} in their parent",
-                     g_game_tabs_x[0], g_game_tabs_x[1], g_game_tabs_x[2], g_game_tabs_x[3]);
-            for (int i = 0; i < 6; ++i) {   // (the six words, whose widths space the strip: SixOffsets)
-                char name[16];
-                std::snprintf(name, sizeof name, "Pa_Category_%02d", i);
-                g_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
-            }
-            g_spacing_said.clear();
+            g_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
         }
+        g_spacing_said.clear();
     }
-    LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}; the sixth: Pa_Category_05 {:#x} "
-                   "(the game's tabs' parent {:#x} at x {:.0f}, L {:#x} at {:.0f}, R {:#x} at {:.0f})",
-             g_tab_pane, g_strip_ok ? "" : " (not a part: left alone, the Multiplayer page stays off)", g_tab6_pane,
-             g_tabs_parent, g_tabs_parent_x, g_label_l, g_label_l_x, g_label_r, g_label_r_x);
+    LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{} (the game's tabs at x {:.0f}, {:.0f}, "
+                   "{:.0f}, {:.0f} in their parent)",
+             g_tab_pane, g_strip_ok ? "" : " (not a part: left alone, the Multiplayer page stays off)", g_game_tabs_x[0],
+             g_game_tabs_x[1], g_game_tabs_x[2], g_game_tabs_x[3]);
 }
 
 // The pages: our page over System's, or System's alone. The rows' texts once per opening.
@@ -842,6 +845,73 @@ void KeepPageShown(void* ctx, int which) {
     }
 }
 
+// The pages screen's one shown button in a focus state, by its name ("" none, or more than one): System's Longshot
+// Settings button (Pa_Button_05) is not a row RowOfButton knows.
+std::string FocusedShownName() {
+    const std::uint64_t pages = g_pages_screen;
+    if (pages == 0) return {};
+    const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+    std::string name;
+    int found = 0;
+    for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
+        const std::uint8_t state = CoopModScreens::FocusState(read, b);
+        if (state == 0 || (state & 0xfe) == 4 || !CoopModScreens::HitBox(read, b)) continue;
+        name = CoopModScreens::ButtonName(read, b);
+        ++found;
+    }
+    return found == 1 ? name : std::string();
+}
+
+// System's Longshot Settings button, at each update of the pages: shown while Longshot Settings can be used, and the
+// game's cursor moved for it: onto the page's first row as it opens (A on the button), back onto the button as it is
+// left (B on its rows). The move waits for the button to be shown (its page's matrices made), kFocusWaitMs at most.
+// g_mutex.
+constexpr std::uint64_t kFocusWaitMs = 1000;
+std::string g_focus_want;
+std::uint64_t g_focus_since = 0;
+void SettingsButton(void* ctx) {
+    if (g_settings_button != 0) {
+        const int want = g_page.SettingsUsable() ? 1 : 0;
+        if (want != g_settings_button_shown) {
+            SetVisible(ctx, g_settings_button, want != 0);
+            g_settings_button_shown = want;
+            LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button {}", want != 0 ? "shown" : "hidden");
+        }
+    }
+    const std::uint64_t now = NowMs();
+    if (g_page.TakeSettingsOpened()) {
+        g_focus_want = "Pa_Button_00", g_focus_since = now;
+        g_set_category = 0, g_set_page = 0, g_set_row = -1, g_live_poke = true;
+        LOG_INFO(Core, "coop: pause tab: Longshot Settings opened from System");
+    }
+    if (g_page.TakeSettingsLeft()) {
+        g_focus_want = "Pa_Button_05", g_focus_since = now;
+        LOG_INFO(Core, "coop: pause tab: Longshot Settings left (B): System again");
+    }
+    if (g_focus_want.empty() || g_pages_screen == 0) return;
+    const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+    std::uint64_t target = 0;
+    for (const std::uint64_t b : CoopModScreens::Buttons(read, g_pages_screen)) {
+        if (CoopModScreens::ButtonName(read, b) == g_focus_want && CoopModScreens::HitBox(read, b)) target = b;
+    }
+    if (target != 0) {
+        std::uint64_t x0 = 0;
+        const bool called = Call(ctx, kSetFocus, g_pages_screen, target, 0, 0, 0, &x0);
+        LOG_INFO(Core, "coop: pause tab: the game's cursor onto {} ({:#x}): {} (x0 {:#x})", g_focus_want, target,
+                 called ? "called" : "not called", x0);
+        g_focus_want.clear();
+    } else if (now - g_focus_since > kFocusWaitMs) {
+        LOG_INFO(Core, "coop: pause tab: the game's cursor not moved onto {}: no such button shown in {} ms",
+                 g_focus_want, kFocusWaitMs);
+        g_focus_want.clear();
+    }
+}
+
+// Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
+int SlidePlace(int page) {
+    return page == 1 ? 1 : 0;
+}
+
 void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t layout = f.layout;
     if (layout == 0 || !g_pages_ok) return;
@@ -850,7 +920,8 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
         const std::uint64_t from = PageOf(d.page_from), to = PageOf(d.page_to);
         if (d.slide != 0 && from != 0 && to != 0 && from != to) {
             g_slide.dir = d.slide, g_slide.start_ms = NowMs(), g_slide.gen = g_pages_gen;
-            g_slide.right = d.page_to > d.page_from ? to : from, g_slide.left = d.page_to > d.page_from ? from : to;
+            const bool to_right = SlidePlace(d.page_to) > SlidePlace(d.page_from);
+            g_slide.right = to_right ? to : from, g_slide.left = to_right ? from : to;
             g_slide.stays = to;
             g_slide.right_x = Read<float>(g_slide.right + 0x6c), g_slide.left_x = Read<float>(g_slide.left + 0x6c);
             for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
@@ -877,27 +948,30 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
             if (IsPart(controller)) SetVisible(ctx, controller, false);
             LOG_INFO(Core, "coop: pause tab: {}'s controller picture {}", page, IsPart(controller) ? "hidden" : "not found");
         }
+        // (and the Longshot Settings button our copies of System's page have too: System's alone)
+        for (const std::uint64_t b : {g_settings_button_coop, g_settings_button_set}) {
+            if (b != 0) SetVisible(ctx, b, false);
+        }
     }
 }
 
-// The six-tab strip (the pack's sixth tab, in the Plus menu): the game's four tabs' parent moved left by kSixShift (its
-// own place: no animation track names it, so the strip's animations still move the tabs in it), our two tabs placed
-// kSixGap after the fourth (its place on the screen: they sit under RootPane), L and R moved out to the row's ends.
-// Elsewhere (the Minus menu, the strip closed, an older pack) all of them at their own places. Measured from the
-// layout (2026-11-19, docs/game-ui.md): the game's tabs 460 apart from x -690, the hearts end near -1218 with ten,
-// the rupee counter starts near 1460.
-// The six words one even gap apart (the game's four moved from their 460 apart), the strip keeping its span: the
-// first where the shift puts it, the sixth kSixGap * 5 after it, centre to centre. A word's width is its text pane's
-// drawn width (T_Text_00 +0x13c, read in a run 2026-11-19: Collection 294.7, Equipment 312.9, Items 159.0, System
-// 201.2, Multiplayer 325.3, Settings 227.8; +0x134 its left, -width/2, the words centred). A width not read, or a gap
-// under kSixMinGap (long words in another language): the six kSixGap apart, centre to centre.
-constexpr float kSixShift = -320.0f, kSixGap = 436.0f, kSixLabelL = -270.0f, kSixLabelR = 40.0f;
-constexpr float kSixMinGap = 60.0f;
+// The five tabs one even gap apart between their words (the game's four moved from their 460 apart, ours after the
+// fourth), in the Plus menu with ours shown; elsewhere (the Minus menu, the strip closed) the game's at their own
+// places. The span stays the pack's: the first tab's centre where the game has it, ours kFifthGap after the fourth's own
+// place (pause_menu.py's FIFTH_GAP off the game's 460). A word's width is its text pane's drawn width (T_Text_00
+// +0x13c, read in a run 2026-11-19: Collection 294.7, Equipment 312.9, Items 159.0, System 201.2, Multiplayer 325.3;
+// +0x134 its left, -width/2: the words are centred). A width not read, or a gap under kMinWordGap (long words in
+// another language): the tabs where the pack and the game put them.
+constexpr float kFifthGap = 410.0f, kMinWordGap = 60.0f;
 constexpr std::uint64_t kTextDrawnWidth = 0x13c;
-bool g_six_placed = false;
+bool TabsKnown() {
+    return std::all_of(g_game_tabs.begin(), g_game_tabs.end(), [](std::uint64_t t) { return t != 0; });
+}
 // Each tab's centre from the first's.
-std::array<float, 6> SixOffsets() {
-    std::array<float, 6> off{}, w{};
+std::array<float, 5> TabOffsets() {
+    std::array<float, 5> off{}, w{};
+    for (std::size_t i = 0; i < 4; ++i) off[i] = g_game_tabs_x[i] - g_game_tabs_x[0];
+    off[4] = off[3] + kFifthGap;
     bool words = true;
     float total = 0;
     for (std::size_t i = 0; i < w.size(); ++i) {
@@ -905,11 +979,8 @@ std::array<float, 6> SixOffsets() {
         if (!std::isfinite(w[i]) || w[i] < 10.0f || w[i] > 2000.0f) words = false;
         total += w[i];
     }
-    const float span = kSixGap * 5 + w[0] / 2 + w[5] / 2, gap = (span - total) / 5;
-    if (!words || gap < kSixMinGap) {
-        for (std::size_t i = 0; i < off.size(); ++i) off[i] = kSixGap * static_cast<float>(i);
-        return off;
-    }
+    const float gap = (off[4] + w[0] / 2 + w[4] / 2 - total) / 4;
+    if (!words || gap < kMinWordGap) return off;
     float left = -w[0] / 2;
     for (std::size_t i = 0; i < off.size(); ++i) {
         off[i] = left + w[i] / 2;
@@ -917,34 +988,30 @@ std::array<float, 6> SixOffsets() {
     }
     return off;
 }
-// A game tab's place in the six-tab strip (its own x in the tabs' parent).
-float SixTabX(int i) {
-    return g_game_tabs_x[0] + SixOffsets()[static_cast<std::size_t>(i)];
+// A game tab's own x: evenly spaced (on), or its own.
+float TabX(int i, bool on) {
+    const std::size_t k = static_cast<std::size_t>(i);
+    return on ? g_game_tabs_x[0] + TabOffsets()[k] : g_game_tabs_x[k];
 }
-void PlaceSix(void* ctx, bool six) {
-    if (g_tabs_parent == 0) return;
-    PlacePane(ctx, g_tabs_parent, g_tabs_parent_x + (six ? kSixShift : 0.0f));
-    if (g_label_l != 0) PlacePane(ctx, g_label_l, g_label_l_x + (six ? kSixLabelL : 0.0f));
-    if (g_label_r != 0) PlacePane(ctx, g_label_r, g_label_r_x + (six ? kSixLabelR : 0.0f));
-    for (std::size_t i = 0; i < g_game_tabs.size(); ++i) {
-        if (g_game_tabs[i] != 0) PlacePane(ctx, g_game_tabs[i], six ? SixTabX(static_cast<int>(i)) : g_game_tabs_x[i]);
-    }
-    if (six != g_six_placed) {
-        g_six_placed = six;
-        LOG_INFO(Core, "coop: pause tab: the strip {}", six ? "with six tabs, their words one gap apart" : "back to its own places");
+void PlaceTabs(void* ctx, bool on) {
+    if (!TabsKnown()) return;
+    for (int i = 0; i < 4; ++i) PlacePane(ctx, g_game_tabs[static_cast<std::size_t>(i)], TabX(i, on));
+    if (on != g_tabs_placed) {
+        g_tabs_placed = on;
+        LOG_INFO(Core, "coop: pause tab: the game's tabs {}", on ? "evenly spaced with ours" : "back at their own places");
     }
 }
+// Ours after the fourth, wherever the strip's animation puts it (its place on the screen: ours sits under RootPane).
 void FollowFourthX(void* ctx) {
-    if (g_fourth_pane == 0 || g_tab6_pane == 0) return;
-    const float x = Read<float>(g_fourth_pane + kPaneScreenX);   // (its place on the screen)
+    if (g_fourth_pane == 0 || !TabsKnown()) return;
+    const float x = Read<float>(g_fourth_pane + kPaneScreenX);
     if (!std::isfinite(x)) return;
-    const std::array<float, 6> off = SixOffsets();
+    const std::array<float, 5> off = TabOffsets();
     PlacePane(ctx, g_tab_pane, x + off[4] - off[3]);
-    PlacePane(ctx, g_tab6_pane, x + off[5] - off[3]);
 }
 
-// The strip: the fifth tab shown in the Plus menu (filled as a Plus tab, our word), lit while our page shows, and
-// System's tab lit only when System is the page shown.
+// The strip: the fifth tab shown in the Plus menu (filled as a Plus tab, our word), lit while the Multiplayer page
+// shows, and System's tab lit when System is the page shown or Longshot Settings (in System's place) is.
 void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t layout = f.layout;
     const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
@@ -952,12 +1019,7 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     SetVisible(ctx, g_tab_pane, d.tab_shown);
     if (!d.tab_shown) g_follow_had = false, g_alpha_set = g_word_set = -1;
     g_tab_shown = d.tab_shown;
-    if (g_tab6_pane != 0) {   // (the sixth tab, and the six-tab places: also when the tabs go, as in the Minus menu)
-        SetVisible(ctx, g_tab6_pane, d.tab6_shown);
-        if (!d.tab6_shown) g_alpha6_set = g_word6_set = -1;
-        g_tab6_shown = d.tab6_shown;
-        PlaceSix(ctx, d.tab6_shown);
-    }
+    PlaceTabs(ctx, d.tab_shown);   // (also when the tabs go, as in the Minus menu: the game's places back)
     if (!d.tab_shown) return;
     const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
     if (tab3 == 0 || tab4 == 0) return;
@@ -976,22 +1038,11 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}, {})", text ? "set" : "not set",
                  text_in != 0 ? "faded in" : "its text pane not found");
     }
-    // The sixth tab (Settings), the same way as the fifth.
-    const std::uint64_t tab5 = f.tabs >= 6 ? Read<std::uint64_t>(tabs + 8 * 5) : 0;
-    if (d.fill_tab6 && tab5 != 0 && g_tab6_pane != 0) {
-        Call(ctx, kTabFill, tab5, kSystemPage, 1);
-        const bool text = SetText(ctx, layout, "Pa_Category_05/T_Text_00", "LayoutMsg/MenuOverlay_00",
-                                  "Pa_Category_05-T_Text_00");
-        Call(ctx, kTabOpen, tab5, 0);
-        if (g_tab6_word != 0) CallAlpha(ctx, g_tab6_word, 1.0f);
-        LOG_INFO(Core, "coop: pause tab: the sixth tab filled (its word {})", text ? "set" : "not set");
-    }
-    Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit && !d.tab6_lit ? 1 : 0, 0);
+    Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
-    if (tab5 != 0 && g_tab6_pane != 0) Call(ctx, kTabLight, tab5, d.tab6_lit ? 1 : 0, 0);
 }
 
-// (trace) The six words' widths and their centres from the first's, when they change (the words are filled as the
+// (trace) The five words' widths and their centres from the first's, when they change (the words are filled as the
 // strip opens).
 void SaySpacing() {
     std::string now = "words";
@@ -999,19 +1050,19 @@ void SaySpacing() {
         now += " " + std::to_string(word != 0 ? static_cast<int>(Read<float>(word + kTextDrawnWidth)) : -1);
     }
     now += ", centres";
-    for (const float o : SixOffsets()) now += " " + std::to_string(static_cast<int>(o));
+    for (const float o : TabOffsets()) now += " " + std::to_string(static_cast<int>(o));
     if (now == g_spacing_said) return;
     g_spacing_said = now;
-    LOG_INFO(Core, "coop: pause tab: the six tabs: {}", now);
+    LOG_INFO(Core, "coop: pause tab: the five tabs: {}", now);
 }
 
-// The six-tab strip's even spacing, kept: a game tab's place found put back (an animation of the strip's sets it) is
-// set again, and the first few times are logged with the place found.
-void KeepSixPlaces(void* ctx) {
+// The even spacing kept: a game tab's place found put back (an animation of the strip's sets it) is set again, and the
+// first few times are logged with the place found.
+void KeepTabPlaces(void* ctx) {
+    if (!TabsKnown()) return;
     for (std::size_t i = 0; i < g_game_tabs.size(); ++i) {
         const std::uint64_t tab = g_game_tabs[i];
-        if (tab == 0) continue;
-        const float want = SixTabX(static_cast<int>(i)), now = Read<float>(tab + 0x6c);
+        const float want = TabX(static_cast<int>(i), true), now = Read<float>(tab + 0x6c);
         if (now == want) continue;
         if (++g_tab_put_back <= 8) {
             LOG_INFO(Core, "coop: pause tab: the game's tab {} was at x {:.0f}, not {:.0f}: set again ({} so far)", i, now,
@@ -1044,27 +1095,14 @@ void FollowFourth(void* ctx) {
         CoopRuntime::Write(g_tab_pane + kPaneOwnY, &want_y, sizeof want_y);
         Call(ctx, kPaneMoved, g_tab_pane);
     }
-    if (g_tab6_shown && g_tab6_pane != 0 && Read<float>(g_tab6_pane + kPaneOwnY) != want_y) {
-        CoopRuntime::Write(g_tab6_pane + kPaneOwnY, &want_y, sizeof want_y);
-        Call(ctx, kPaneMoved, g_tab6_pane);
-    }
-    if (g_tab6_shown) {   // (six tabs: the game's four kept at their even places, ours after the fourth)
-        KeepSixPlaces(ctx);
-        FollowFourthX(ctx);
-        SaySpacing();
-    }
+    // (the game's four kept at their even places, ours after the fourth)
+    KeepTabPlaces(ctx);
+    FollowFourthX(ctx);
+    SaySpacing();
     // (the alphas only when they change, as the height: the strip settled, nothing is called)
     if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); a != g_alpha_set) {
         CallAlpha(ctx, g_tab_pane, a);
         g_alpha_set = a;
-    }
-    if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); g_tab6_shown && a != g_alpha6_set) {
-        CallAlpha(ctx, g_tab6_pane, a);
-        g_alpha6_set = a;
-    }
-    if (const float w = std::clamp(want_word, 0.0f, 1.0f); g_tab6_shown && g_tab6_word != 0 && w != g_word6_set) {
-        CallAlpha(ctx, g_tab6_word + kTextAlphaBlock, w);
-        g_word6_set = w;
     }
     // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
     if (g_fourth_word != 0 && g_tab_word != 0) {
@@ -1510,8 +1548,8 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             }
             if (f.kind == Kind::kStrip) LookStrip(ctx, calls, f, gen);
             if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_strip_ok);
-            if (f.kind != Kind::kBlocker) {   // (the Settings page: its page, the sixth tab and Longshot's settings)
-                g_page.SetSettingsUsable(g_page.Usable() && g_settings_pane != 0 && g_tab6_pane != 0 &&
+            if (f.kind != Kind::kBlocker) {   // (Longshot Settings: its page, System's button and Longshot's settings)
+                g_page.SetSettingsUsable(g_page.Usable() && g_settings_pane != 0 && g_settings_button != 0 &&
                                          CoopLongshotSettings::Available());
             }
             d = g_page.OnScreen(f, NowMs());
@@ -1535,6 +1573,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             }
             if (f.kind == Kind::kPages && calls) StepSlide(ctx, NowMs());   // (each update while the pages slide)
             if (f.kind == Kind::kPages && calls && now_shown && g_slide.dir == 0) KeepPageShown(ctx, g_page.Which());
+            if (f.kind == Kind::kPages && calls) SettingsButton(ctx);
             if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
             // (the menu sounds of the presses the module took: the game starts none for them)
             if (ctx != nullptr && CanCall()) {
@@ -1587,6 +1626,9 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             const std::uint64_t field_was = std::hash<std::string>{}(g_page.Field(0).text() + '\n' +
                                                                      g_page.Field(1).text()) ^ g_page.Field(0).cursor() ^
                                             (g_page.Field(1).cursor() << 8);
+            // (A on System's Longshot Settings button opens its page: the button's name read only while A is held)
+            g_page.SetOnSettingsButton((in & kPadA) != 0 && !g_page.Shown() && g_page.SettingsUsable() &&
+                                       FocusedShownName() == "Pa_Button_05");
             out = g_page.OnPad(in, NowMs());
             typing = g_page.Typing() >= 0;
             const std::uint64_t field_now = std::hash<std::string>{}(g_page.Field(0).text() + '\n' +
@@ -1692,17 +1734,17 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         if (page != g_set_page.load() || r != set_row) g_page.Sound("button_on");
                         g_set_page = page, set_row = r;
                     }
-                    if (left || right) set_change = g_set_page.load() * kListRows + set_row, set_dir = left ? -1 : 1;
-                    if (decide) set_change = g_set_page.load() * kListRows + set_row, set_dir = 0, decide = false;
+                    if (left || right) set_change = g_set_page.load() * kSettingsPerPage + set_row, set_dir = left ? -1 : 1;
+                    if (decide) set_change = g_set_page.load() * kSettingsPerPage + set_row, set_dir = 0, decide = false;
                 }
                 float x = 0, y = 0;
                 bool held = false;
                 if (ReadCursor(&x, &y, &held)) {
                     const auto boxes = ReadSettingBoxes();
-                    int hover = -1;
-                    for (int i = 0; i < kListRows; ++i) {
+                    int hover = -1;   // (the setting under the mouse, as set_row counts: the header's row is none)
+                    for (int i = 1; i < kListRows; ++i) {
                         const RowBox& b = boxes[static_cast<std::size_t>(i)];
-                        if (b.shown && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) hover = i;
+                        if (b.shown && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) hover = i - 1;
                     }
                     const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
                     g_cells_mouse_x = x, g_cells_mouse_y = y;
@@ -1715,11 +1757,11 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                     if (held && !g_cells_held) g_cells_press = hover;
                     if (!held && g_cells_held && hover >= 0 && hover == g_cells_press) {
-                        const RowBox& b = boxes[static_cast<std::size_t>(hover)];
+                        const RowBox& b = boxes[static_cast<std::size_t>(hover) + 1];
                         const float cx = (b.x0 + b.x1) / 2, scale = (b.x1 - b.x0) / 1880.0f;
                         const float to_left = std::abs(x - (cx + kArrowLeftX * scale)), to_right = std::abs(x - (cx + kArrowRightX * scale));
                         set_row = hover;
-                        set_change = g_set_page.load() * kListRows + hover;
+                        set_change = g_set_page.load() * kSettingsPerPage + hover;
                         set_dir = to_left < kArrowReach * scale ? -1 : to_right < kArrowReach * scale ? 1 : 0;
                     }
                     g_cells_held = held;
@@ -1765,32 +1807,6 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         return out & (buttons | ~(kPadStickUp | kPadStickDown | kPadStickLeft | kPadStickRight));
     } catch (...) {
         return buttons;
-    }
-}
-
-int TabAt(float x, float y) noexcept {
-    try {
-        // (the six-tab strip as PlaceSix and FollowFourthX put it: the fourth read where the game draws it now, the
-        // others at their spacing from it, L and R at their places)
-        if (!g_tab6_shown || g_fourth_pane == 0 || g_tab6_pane == 0) return -2;
-        if (y < 900 || y > 1080) return -1;
-        const float fourth = Read<float>(g_fourth_pane + kPaneScreenX);
-        if (!std::isfinite(fourth)) return -2;
-        const std::array<float, 6> off = SixOffsets();
-        float centres[6];
-        for (int i = 0; i < 6; ++i) centres[i] = fourth + off[static_cast<std::size_t>(i)] - off[3];
-        const float l = g_label_l != 0 ? Read<float>(g_label_l + kPaneScreenX) : centres[0] - 300.0f;
-        const float r = g_label_r != 0 ? Read<float>(g_label_r + kPaneScreenX) : centres[5] + 300.0f;
-        if (std::abs(x - l) < 110.0f) return 8;
-        if (std::abs(x - r) < 110.0f) return 9;
-        int best = -1;
-        float closest = 1e9f;
-        for (int i = 0; i < 6; ++i) {
-            if (const float dx = std::abs(x - centres[i]); dx < closest) closest = dx, best = i;
-        }
-        return closest < 200.0f ? best : -1;
-    } catch (...) {
-        return -2;
     }
 }
 

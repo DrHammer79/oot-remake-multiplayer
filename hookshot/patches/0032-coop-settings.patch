@@ -1,30 +1,48 @@
-From 20747b21ee8ea27e0fb46212fe0723874d3d9267 Mon Sep 17 00:00:00 2001
+From 2458c4066d951ab3583cfe375aa513e8445f6931 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 19 Nov 2026 11:58:55 -0600
-Subject: [PATCH] Co-op settings: the Insert menu's settings for the module,
- and a sixth tab for the mouse
+Subject: [PATCH] Co-op settings: the Insert menu's settings for the module
 
-The pause menu's Settings tab (oot-remake-multiplayer's docs/hookshot.md
-"The pause menu's Settings tab"). HosCoopApi gains setting and setting_set:
-the control bridge's own rx_control_setting and rx_control_setting_set
-(rx_backend.c), which list the Insert menu's rows and set one as its Left and
-Right do (clamped, the Quality preset to Custom, a restart noted, the options
-file saved), copied field by field into HosCoopSetting. An older module reads
+The pause menu's Longshot Settings (oot-remake-multiplayer's
+docs/hookshot.md). HosCoopApi gains setting and setting_set: the control
+bridge's own rx_control_setting and rx_control_setting_set (rx_backend.c),
+which list the Insert menu's rows and set one as its Left and Right do
+(clamped, the Quality preset to Custom, a restart noted, the options file
+saved), copied field by field into HosCoopSetting. An older module reads
 the API's size and goes without them.
 
-The mouse on the pause menu's tabs (host/oot_menu.c, patch 0030's): the strip
-may have a sixth tab (its count 5 or 6), and tab_at asks the module first
-through an optional export, hos_coop_game_pause_tab_at (the tab where the
-module places its tabs, or -2 to leave it to the old table). Without the
-export, or with -2, the mouse does as before.
+The microphones (gpu/vk/vk_menu.cpp, menu_setting): the menu lists them
+when it opens, so through the bridge the Microphone row ended at the
+default until the menu was opened once. An enumeration's start now lists
+them as they are, at most each 2 s, and only when their count moved
+(refresh_mics tells the host its choice, which starts it again).
 ---
- host/coop_bridge.c  | 34 ++++++++++++++++++++++++++++++++++
+ gpu/vk/vk_menu.cpp  |  8 ++++++++
+ host/coop_bridge.c  | 26 ++++++++++++++++++++++++++
  host/hos_coop_api.h | 16 ++++++++++++++++
- host/oot_menu.c     |  8 ++++++--
- 3 files changed, 56 insertions(+), 2 deletions(-)
+ 3 files changed, 50 insertions(+)
 
+diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
+index 737f025d..2b881cee 100644
+--- a/gpu/vk/vk_menu.cpp
++++ b/gpu/vk/vk_menu.cpp
+@@ -6073,6 +6073,14 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
+ int menu_setting(int index, MkwVkSetting* out) {
+     bridge_probe_first();
+     std::lock_guard lk(menu_mu);
++    // (oot-remake-multiplayer, patch 0032) the microphones as they are now, as the menu lists them when it opens: else the
++    // Microphone row ends at the default until the menu was opened once. At an enumeration's start, at most each 2 s, and
++    // the list taken again only when its count moved (refresh_mics tells the host its choice, which starts it again)
++    static auto mics_asked = std::chrono::steady_clock::time_point{};
++    if (index == 0 && can_mic() && std::chrono::steady_clock::now() - mics_asked > std::chrono::seconds(2)) {
++        mics_asked = std::chrono::steady_clock::now();
++        if (std::min(host->mic_count(), kMaxMics) != mic_listed) refresh_mics();
++    }
+     for (int i = 0, n = 0; i < kRows; i++)
+         if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
+     return 0;
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 889a0716..c657836d 100644
+index 889a0716..82b70a1e 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -8,6 +8,7 @@
@@ -35,15 +53,7 @@ index 889a0716..c657836d 100644
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -91,6 +92,7 @@ static int (*coop_title_hold)(void);   /* (optional, patch 0028: Skip title scre
-    the page, not shown) or -2 (no page of its own) (any thread, often) */
- static void (*coop_game_screen)(void *ctx, uint64_t screen);
- static int (*coop_pause_page)(void);
-+static int (*coop_pause_tab_at)(float x, float y);   /* (optional, patch 0032: the tab under the mouse, oot_menu.c) */
- /* Bytes for the next call's pointers: in the game's stack between the call's stack words (bridge_call's sp + 32) and the
-    hook's own sp, which the called function does not touch (it only writes below its sp): [sp - 0x1c0, sp - 0xc0). x8,
-    where a function puts a result it returns in memory, is [sp - 0xb0, sp - 0x30) (bridge_call). */
-@@ -107,6 +109,30 @@ static uint64_t bridge_pad_buttons(void) { return __atomic_load_n(&hos_coop_pad,
+@@ -107,6 +108,30 @@ static uint64_t bridge_pad_buttons(void) { return __atomic_load_n(&hos_coop_pad,
  /* (a key held now, by virtual-key code: Windows' own, or the SDL window's keys on Linux, host/posix/display_sdl.c) */
  static int bridge_key_down(uint32_t vk) { return vk < 256 && (GetAsyncKeyState((int)vk) & 0x8000) != 0; }
  
@@ -74,15 +84,7 @@ index 889a0716..c657836d 100644
  static void at_exit(void) {
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_stop) coop_stop();
  }
-@@ -171,6 +197,7 @@ static void load(void) {
-     coop_title_hold = (int (*)(void))(void *)GetProcAddress(m, "hos_coop_title_hold");
-     coop_game_screen = (void (*)(void *, uint64_t))(void *)GetProcAddress(m, "hos_coop_game_screen");
-     coop_pause_page = (int (*)(void))(void *)GetProcAddress(m, "hos_coop_game_pause_page");
-+    coop_pause_tab_at = (int (*)(float, float))(void *)GetProcAddress(m, "hos_coop_game_pause_tab_at");
-     if (!start || !coop_frame || !coop_hold || !coop_stop) {
-         hos_log("coop: %s lacks an export: co-op off", path);
-         __atomic_store_n(&state, 3, __ATOMIC_RELEASE);
-@@ -186,6 +213,7 @@ static void load(void) {
+@@ -186,6 +211,7 @@ static void load(void) {
      api.pad_buttons = bridge_pad_buttons;
      api.key_down = bridge_key_down;
      api.scratch = bridge_scratch;
@@ -90,19 +92,6 @@ index 889a0716..c657836d 100644
      if (!start(&api)) {
          hos_log("coop: the module stays off");
          __atomic_store_n(&state, 3, __ATOMIC_RELEASE);
-@@ -230,6 +258,12 @@ void hos_coop_game_screen_now(Ctx *c, uint64_t screen) {
- int hos_coop_game_pause_page_now(void) {
-     return __atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_pause_page ? coop_pause_page() : -2;
- }
-+/* (patch 0032) host/oot_menu.c's mouse: the pause menu's tab at (x, y) in the layout's units as the module places its
-+   tabs (0 to 5, 8 L, 9 R, -1 none), or -2: not said (no module, co-op off, a module without the export, or one that
-+   leaves it to the old table) */
-+int hos_coop_game_pause_tab_at_now(float x, float y) {
-+    return __atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_pause_tab_at ? coop_pause_tab_at(x, y) : -2;
-+}
- /* nx2/coop_title_hooks.py: the game's title screen (HOS_COOP_TITLE_*) */
- void hos_coop_title(Ctx *c, uint64_t screen, int event) {
-     if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_title) coop_title(c, screen, event);
 diff --git a/host/hos_coop_api.h b/host/hos_coop_api.h
 index bc47834c..380e9553 100644
 --- a/host/hos_coop_api.h
@@ -137,32 +126,6 @@ index bc47834c..380e9553 100644
  } HosCoopApi;
  
  /* The module's exports (extern "C"). */
-diff --git a/host/oot_menu.c b/host/oot_menu.c
-index 2173dcc8..7476fca6 100644
---- a/host/oot_menu.c
-+++ b/host/oot_menu.c
-@@ -18,6 +18,7 @@
-    and the page it shows (4, its tab) or -1 */
- void hos_coop_game_screen_now(Ctx *c, uint64_t screen);
- int hos_coop_game_pause_page_now(void);
-+int hos_coop_game_pause_tab_at_now(float x, float y);   /* (patch 0032) */
- #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
- #include "../gpu/vk/compat/longshot_env.h"
- #endif
-@@ -356,11 +357,14 @@ enum { TAB_L = 8, TAB_R = 9 };   /* (patch 0030: past a fifth tab's 4) */
- static int strip_tabs(void) {
-     uint32_t n = 0;
-     const uint64_t strip = panel_screen;
--    return strip && peek(strip + 0x328, &n, sizeof n) && n == 5 ? 5 : 4;
-+    return strip && peek(strip + 0x328, &n, sizeof n) && (n == 5 || n == 6) ? (int)n : 4;   /* (patch 0032: a sixth) */
- }
- static int tab_at(float x, float y) {
-+    /* (patch 0032) the module's tabs first, where it places them (a sixth too): -2 when it does not say */
-+    const int coop = hos_coop_game_pause_tab_at_now(x, y);
-+    if (coop != -2) return coop;
-     if (y < 900 || y > 1080) return -1;
--    if (strip_tabs() == 5) {   /* (patch 0030) */
-+    if (strip_tabs() >= 5) {   /* (patch 0030) */
-         if (x >= -1100 && x < -926) return TAB_L;
-         if (x >= -926 && x < 1267)
-             return x < -462 ? 0 : x < 6 ? 1 : x < 474 ? 2 : x < 916 ? 3 : hos_coop_game_pause_page_now() >= -1 ? 4 : -1;
+-- 
+2.56.0.windows.4
+

@@ -64,15 +64,12 @@ def pane(d, name):
 
 
 class TabTest(unittest.TestCase):
-    def test_a_fifth_and_sixth_tab_after_system_the_game_tabs_left_alone(self):
+    def test_a_fifth_tab_after_system_the_game_tabs_left_alone(self):
         d = overlay()
         n = pm.add_tab(d)
         panes, parts = ui_pack.read_layout(n)
-        self.assertEqual(len(panes), len(OVERLAY) + 2)
-        self.assertEqual([p.name for p in panes[-2:]], ["Pa_Category_04", "Pa_Category_05"])
-        self.assertEqual([p.name for p in parts[-2:]], ["Pa_Category_04", "Pa_Category_05"])
-        x6, y6, parent6, _ = pane(n, "Pa_Category_05")   # (the sixth a gap further: the module places both)
-        self.assertEqual((x6, y6, parent6), (700.0 + 2 * (100.0 - pm.FIFTH_GAP) + 600.0, -70.0 - 60.0, "RootPane"))
+        self.assertEqual(len(panes), len(OVERLAY) + 1)
+        self.assertEqual((panes[-1].name, parts[-1].name), ("Pa_Category_04", "Pa_Category_04"))
         # the game's four and L where they were (the strip's animation places them)
         for name in ["Pa_Category_%02d" % i for i in range(4)] + ["T_BtnL_00"]:
             self.assertEqual(pane(n, name), pane(d, name), name)
@@ -83,15 +80,16 @@ class TabTest(unittest.TestCase):
         # the order holds: only the root reaches the copy, every other pane ends where it did
         old = [struct.unpack_from("<I", d, p.record + 0x34)[0] for p in ui_pack.read_layout(d)[0]]
         new = [struct.unpack_from("<I", n, p.record + 0x34)[0] for p in panes[:len(OVERLAY)]]
-        self.assertEqual(new, [len(OVERLAY) + 2] + old[1:])
-        # the copies are the fourth tab's part, with their own parameters
-        rec = parts[-2].record
+        self.assertEqual(new, [len(OVERLAY) + 1] + old[1:])
+        # the copy is the fourth tab's part, with its own parameters
+        rec = parts[-1].record
         self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, rec)[0]), "PaMenuCategory_00")
-        self.assertEqual(panes[-2].id, ui_pack.part_id("Pa_Category_04"))   # (the game's id: CityHash64 of the name)
+        self.assertEqual(panes[-1].id, ui_pack.part_id("Pa_Category_04"))   # (the game's id: CityHash64 of the name)
         # stored hidden: only the co-op module shows it (bit 0 of the kind word; the source's has it)
         kind = lambda n, i: struct.unpack_from("<I", n, ui_pack.read_layout(n)[0][i].record + 0x38)[0]
         self.assertEqual(kind(n, -1), kind(d, 7) & ~1)
         self.assertTrue(kind(d, 7) & 1)
+
 
     def test_refusals(self):
         with self.assertRaises(pm.PauseMenuError):
@@ -163,6 +161,24 @@ class RowsTest(unittest.TestCase):
             self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
         with self.assertRaises(pm.PauseMenuError):
             pm.add_rows(n)   # (twice)
+
+    def test_the_longshot_settings_button_a_row_below_the_last_stored_hidden(self):
+        d = system()
+        n = pm.add_settings_button(pm.add_rows(d))
+        panes, parts = ui_pack.read_layout(n)
+        self.assertEqual((panes[-1].name, parts[-1].name), (pm.SETTINGS_BUTTON, pm.SETTINGS_BUTTON))
+        self.assertEqual(panes[-1].id, ui_pack.part_id(pm.SETTINGS_BUTTON))
+        # one row step (Pa_Button_03 to Pa_Button_04) below Pa_Button_04, beside the page's other buttons
+        x3, y3, parent3, _ = pane(n, "Pa_Button_03")
+        x4, y4, _, _ = pane(n, "Pa_Button_04")
+        x, y, parent, _ = pane(n, pm.SETTINGS_BUTTON)
+        self.assertEqual((x, y, parent), (x4, y4 + (y4 - y3), parent3))
+        self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-1].record)[0]), "PaCommonBtnThin_00")
+        self.assertEqual(struct.unpack_from("<I", n, panes[-1].record + 0x38)[0] & 1, 0)   # (stored hidden)
+        for name in [p[0] for p in SYSTEM]:
+            self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
+        with self.assertRaises(pm.PauseMenuError):
+            pm.add_settings_button(n)   # (twice)
 
     def test_another_part_layout_needs_its_size_and_takes_no_parameters(self):
         d = system()
@@ -246,6 +262,8 @@ class BuildTest(unittest.TestCase):
         self.assertIn("Pa_Category_04", [p.name for p in ui_pack.read_layout(common[pm.OVERLAY_LAYOUT])[0]])
         self.assertIn("Pa_Coop_00", [p.name for p in ui_pack.read_layout(common[pm.PAGES_LAYOUT])[0]])
         self.assertIn(pm.ROW % 6, [p.name for p in ui_pack.read_layout(common[pm.SYSTEM_LAYOUT])[0]])
+        self.assertIn(pm.SETTINGS_BUTTON, [p.name for p in ui_pack.read_layout(common[pm.SYSTEM_LAYOUT])[0]])
+        self.assertNotIn("Pa_Category_05", [p.name for p in ui_pack.read_layout(common[pm.OVERLAY_LAYOUT])[0]])
         self.assertEqual(common["Other_00.buil"], b"other")
         ours = ui_pack.load_strings("USen")
         msgs = sarc.read(written["Mals/USen.Product.110.sarc.zs"])
@@ -257,6 +275,7 @@ class BuildTest(unittest.TestCase):
             label = "Pa_Coop_00-Pa_Button_%02d-T_Btn_00" % i
             self.assertEqual(page.text(label), [ours[pm.PAGES_MSG][label]])
         self.assertEqual(page.text("Pa_System_00-Pa_Button_00-T_Btn_00"), ["Save"])
+        self.assertEqual(page.text("Pa_System_00-Pa_Button_05-T_Btn_00"), ["Longshot Settings"])
         # The module's live texts (coop_pause_tab_module.cpp, kLiveSlots / kLivePlaceholder): Coop_Live_00..47 (the
         # rows' and the browser's cells'), each exactly 64 dots, in the built message file (the module refuses any
         # other text or length).

@@ -1503,71 +1503,106 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(system == doctest::Approx(0.0f));
 }
 
-TEST_CASE("pause tab: with the Settings page, R on Multiplayer slides to it and L slides back, the tabs lit in turn") {
+TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in System's place, B back, R on, L the game's") {
     Page p = UsablePage();
     p.SetSettingsUsable(true);
     std::uint64_t now = 1000;
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
-    p.OnScreen(Strip(0x9000, 6, kSystemPage), now);   // (the pack's six tabs)
+    p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
     p.OnPad(0, now);
-    CHECK(p.OnPad(kPadR, now + 16) == 0);   // System -> Multiplayer
-    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
+    // A on another of System's buttons is the game's.
+    p.SetOnSettingsButton(false);
+    CHECK(p.OnPad(kPadA, now + 16) == kPadA);
+    CHECK_FALSE(p.Shown());
+    p.OnPad(0, now + 32);
+    // A on the Longshot Settings button: the page at once, the game's A kept from it.
+    p.SetOnSettingsButton(true);
+    CHECK(p.OnPad(kPadA, now + 48) == 0);
+    CHECK(p.TakeSettingsOpened());
+    CHECK_FALSE(p.TakeSettingsOpened());
+    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
     CHECK(d.set_page);
     CHECK(d.page_from == 0);
-    CHECK(d.page_to == 1);
-    CHECK(d.slide == 1);
-    CHECK(p.MousePage() == 4);
-    p.OnPad(0, now + 48);
-    CHECK(p.OnPad(kPadR, now + 64) == 0);   // Multiplayer -> Settings
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 80);
-    CHECK(d.set_page);
-    CHECK(d.page_from == 1);
     CHECK(d.page_to == 2);
-    CHECK(d.slide == 1);
+    CHECK(d.slide == 0);
     CHECK(p.Which() == 1);
     CHECK(p.MousePage() == 5);
-    d = p.OnScreen(Strip(0x9000, 6, kSystemPage), now + 96);
-    CHECK(d.set_tabs);
-    CHECK(d.tab6_shown);
-    CHECK(d.tab6_lit);
-    CHECK_FALSE(d.tab_lit);
-    p.OnPad(0, now + 112);
-    CHECK(p.OnPad(kPadR, now + 128) == 0);   // (R on the last page: nothing more)
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 144);
-    CHECK_FALSE(d.set_page);
-    p.OnPad(0, now + 160);
-    p.OnPad(kPadL, now + 176);               // Settings -> Multiplayer
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 192);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80);
+    CHECK_FALSE(d.tab_lit);   // (System's tab stays lit: the page is in its place)
+    p.SetOnSettingsButton(false);
+    // B in its list goes back to its rows; B on its rows goes back to System, its cursor on the button again.
+    p.OnPad(0, now + 96);
+    p.SetSubView(true);
+    p.OnPad(kPadB, now + 112);
+    CHECK(p.TakeBack());
+    CHECK(p.Shown());
+    p.SetSubView(false);
+    p.OnPad(0, now + 128);
+    CHECK(p.OnPad(kPadB, now + 144) == 0);   // (the game's B would close the menu)
+    CHECK_FALSE(p.Shown());
+    CHECK(p.TakeSettingsLeft());
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 160);
+    CHECK(d.set_page);
+    CHECK(d.page_from == 2);
+    CHECK(d.page_to == 0);
+    CHECK(d.slide == 0);
+    // R on Longshot Settings: on to the Multiplayer page, sliding as from System.
+    p.OnPad(0, now + 176);
+    p.SetOnSettingsButton(true);
+    p.OnPad(kPadA, now + 192);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 208);
+    p.SetOnSettingsButton(false);
+    p.OnPad(0, now + 224);
+    CHECK(p.OnPad(kPadR, now + 240) == 0);
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 256);
     CHECK(d.set_page);
     CHECK(d.page_from == 2);
     CHECK(d.page_to == 1);
-    CHECK(d.slide == -1);
-    CHECK(p.Shown());
-    p.OnPad(0, now + 208);
-    p.OnPad(kPadL, now + 224);               // Multiplayer -> System
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 240);
-    CHECK(d.set_page);
+    CHECK(d.slide == 1);
+    CHECK(p.Which() == 0);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 272);
+    CHECK(d.tab_lit);
+    // L on the Multiplayer page: System, sliding.
+    p.OnPad(0, now + 288);
+    p.OnPad(kPadL, now + 304);
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 320);
     CHECK(d.page_from == 1);
     CHECK(d.page_to == 0);
     CHECK(d.slide == -1);
+    // L on Longshot Settings: System back at once, and the L is the game's (on to Items).
+    p.OnPad(0, now + 336);
+    p.SetOnSettingsButton(true);
+    p.OnPad(kPadA, now + 352);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 368);
+    p.SetOnSettingsButton(false);
+    p.OnPad(0, now + 384);
+    CHECK(p.OnPad(kPadL, now + 400) == kPadL);
     CHECK_FALSE(p.Shown());
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 416);
+    CHECK(d.page_from == 2);
+    CHECK(d.page_to == 0);
+    CHECK(d.slide == 0);
 }
 
-TEST_CASE("pause tab: without the Settings page (an older pack, or no settings from Longshot), R on Multiplayer does nothing") {
+TEST_CASE("pause tab: without Longshot Settings (an older pack, or no settings from Longshot), A on its place is the game's") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
-    p.OnScreen(Strip(0x9000, 6, kSystemPage), now);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
     p.OnPad(0, now);
-    p.OnPad(kPadR, now + 16);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
-    p.OnPad(0, now + 48);
-    p.OnPad(kPadR, now + 64);
-    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 80);
+    p.SetOnSettingsButton(true);
+    CHECK(p.OnPad(kPadA, now + 16) == kPadA);
+    CHECK_FALSE(p.Shown());
+    CHECK_FALSE(p.TakeSettingsOpened());
+    // R on the Multiplayer page goes nowhere further.
+    p.OnPad(0, now + 32);
+    p.OnPad(kPadR, now + 48);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
+    p.OnPad(0, now + 80);
+    p.OnPad(kPadR, now + 96);
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 112);
     CHECK_FALSE(d.set_page);
     CHECK(p.Which() == 0);
-    const Page::Do s = p.OnScreen(Strip(0x9000, 6, kSystemPage), now + 96);
-    CHECK_FALSE(s.tab6_shown);
 }
 
 TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages, and the values a press asks for") {
@@ -1595,13 +1630,21 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     CHECK(SettingsOf(all, 1).size() == 1);
     CHECK(SettingsOf(all, 4).empty());   // (Motion: none here)
     for (const SettingRow& r : graphics) CHECK(r.tab != "Debug");
+    CHECK(SettingPages(6) == 1);
     CHECK(SettingPages(10) == 2);
-    auto lines = SettingLines(graphics, 0);
-    CHECK(lines[0].name == "Graphics 0");
-    CHECK(lines[0].value == "On");
-    lines = SettingLines(graphics, 1);
-    CHECK(lines[2].name == "Aspect ratio *");   // (a restart one)
-    CHECK(lines[3].name.empty());
+    CHECK(SettingPages(13) == 3);
+    auto lines = SettingLines(graphics, 0, "Graphics");
+    REQUIRE(lines.size() == static_cast<std::size_t>(kListRows));
+    CHECK(lines[0].name == "Graphics");          // (the header: the category, and its page when it has more)
+    CHECK(lines[0].value == "Page 1 of 2");
+    CHECK(lines[1].name == "Graphics 0");
+    CHECK(lines[1].value == "On");
+    lines = SettingLines(graphics, 1, "Graphics");
+    CHECK(lines[0].value == "Page 2 of 2");
+    CHECK(lines[1].name == "Graphics 6");
+    CHECK(lines[4].name == "Aspect ratio *");   // (a restart one)
+    CHECK(lines[5].name.empty());
+    CHECK(SettingLines(SettingsOf(all, 1), 0, "Audio")[0].value.empty());   // (one page: no page shown)
 
     CHECK(SettingNext(vol, 1) == 85);
     CHECK(SettingNext(vol, -1) == 75);
@@ -1619,14 +1662,14 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     int page = 0, row = 0;
     SettingMove(10, 1, &page, &row);
     CHECK((page == 0 && row == 1));
-    page = 0, row = kListRows - 1;
+    page = 0, row = kSettingsPerPage - 1;
     SettingMove(10, 1, &page, &row);     // (down past the page's last: the next page)
     CHECK((page == 1 && row == 0));
     SettingMove(10, -1, &page, &row);
-    CHECK((page == 0 && row == kListRows - 1));
-    page = 1, row = 2;
+    CHECK((page == 0 && row == kSettingsPerPage - 1));
+    page = 1, row = 3;
     SettingMove(10, 1, &page, &row);     // (the last setting: stays)
-    CHECK((page == 1 && row == 2));
+    CHECK((page == 1 && row == 3));
     page = 0, row = 0;
     SettingMove(10, -1, &page, &row);
     CHECK((page == 0 && row == 0));

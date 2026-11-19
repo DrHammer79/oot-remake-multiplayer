@@ -125,22 +125,17 @@ TEST_CASE("hookshot: patch 0032 hands the module the Insert menu's settings, the
     CHECK(p.find("+    api.setting = bridge_setting, api.setting_set = bridge_setting_set;") != std::string::npos);
     CHECK(p.find("+    if (!out || !rx_control_setting(index, &s)) return 0;") != std::string::npos);
     CHECK(p.find("+    if (!key || !rx_control_setting_set(key, value, &s)) return 0;") != std::string::npos);
-    // (only the bridge and the API header: no lift hook, nothing of Longshot's own changed)
+    // (the bridge, the API header and the microphones' list: no lift hook)
     CHECK(p.find("diff --git a/nx2/") == std::string::npos);
-    CHECK(p.find("diff --git a/gpu/") == std::string::npos);
+    CHECK(p.find("diff --git a/host/oot_menu.c") == std::string::npos);   // (five tabs: the mouse's own table)
+    // The microphones listed as the menu lists them when it opens, at an enumeration's start, when their count moved.
+    CHECK(p.find("+    if (index == 0 && can_mic() && std::chrono::steady_clock::now() - mics_asked > std::chrono::seconds(2)) {") !=
+          std::string::npos);
+    CHECK(p.find("+        if (std::min(host->mic_count(), kMaxMics) != mic_listed) refresh_mics();") != std::string::npos);
     // The module's table reads them only when the exe's table is that long (an older Hookshot goes without).
     static_assert(offsetof(HosCoopApi, setting) > offsetof(HosCoopApi, scratch));
     static_assert(offsetof(HosCoopApi, setting_set) > offsetof(HosCoopApi, setting));
     static_assert(sizeof(HosCoopSetting) == 32 + 48 + 64 + 16 + 6 * sizeof(int));
-    // The mouse on a sixth tab: the strip's count 5 or 6, and tab_at asks the module first (-2: the old table).
-    CHECK(p.find("+    return strip && peek(strip + 0x328, &n, sizeof n) && (n == 5 || n == 6) ? (int)n : 4;") !=
-          std::string::npos);
-    CHECK(p.find("+    const int coop = hos_coop_game_pause_tab_at_now(x, y);") != std::string::npos);
-    CHECK(p.find("+    if (coop != -2) return coop;") != std::string::npos);
-    CHECK(p.find("+    coop_pause_tab_at = (int (*)(float, float))(void *)GetProcAddress(m, \"hos_coop_game_pause_tab_at\");") !=
-          std::string::npos);
-    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
-    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_game_pause_tab_at(float x, float y) noexcept {") != std::string::npos);
 }
 
 TEST_CASE("hookshot: patch 0004 hooks the title screen, hands the pad over and sets x8 for calls") {

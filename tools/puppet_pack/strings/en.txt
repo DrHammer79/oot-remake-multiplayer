@@ -11,8 +11,6 @@
 [LayoutMsg/MenuOverlay_00.msbt]
 # The pause menu's fifth tab (pause_menu.py): its text pane, T_Text_00 of the part Pa_Category_04.
 Pa_Category_04-T_Text_00 = Multiplayer
-# The sixth tab: Longshot's own options (the settings page, a copy of the System page).
-Pa_Category_05-T_Text_00 = Settings
 
 [LayoutMsg/PlusMenu_00.msbt]
 # The Multiplayer page's five rows (pause_menu.py: Pa_Coop_00, a copy of the System page). The co-op
@@ -22,7 +20,9 @@ Pa_Coop_00-Pa_Button_01-T_Btn_00 = Join code
 Pa_Coop_00-Pa_Button_02-T_Btn_00 = Players
 Pa_Coop_00-Pa_Button_03-T_Btn_00 = Let in
 Pa_Coop_00-Pa_Button_04-T_Btn_00 = Leave
-# The Settings page's five rows (Pa_Settings_00): Longshot's options by their tab in its own menu.
+# System's new last button (pause_menu.py's Pa_Button_05), which opens Longshot Settings.
+Pa_System_00-Pa_Button_05-T_Btn_00 = Longshot Settings
+# Longshot Settings' five rows (Pa_Settings_00): Longshot's options by their tab in its own menu.
 Pa_Settings_00-Pa_Button_00-T_Btn_00 = Graphics
 Pa_Settings_00-Pa_Button_01-T_Btn_00 = Audio
 Pa_Settings_00-Pa_Button_02-T_Btn_00 = Gameplay

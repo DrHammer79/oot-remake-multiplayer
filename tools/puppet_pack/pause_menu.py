@@ -4,16 +4,18 @@ player's own game files, as the puppets are.
 
 Writes into the puppet mod's romfs:
   UI/Layout2Archive/Common.Product.100.Nin_Ounce_NVN2.blarc.zs
-      MenuOverlay_00.buil (the tab strip): Pa_Category_04 and Pa_Category_05, copies of the fourth
-          tab, after System (Multiplayer, then Settings); the R label moved right of them. The game's four tabs and L stay where they are: the
-          strip's own animation places the tabs (seen in a run, 2026-11-18: moved ones went back)
+      MenuOverlay_00.buil (the tab strip): Pa_Category_04, a copy of the fourth tab, after System;
+          the R label moved right of it. The module spaces the five tabs evenly while ours shows
       PlusMenu_00.buil (the pages): Pa_Coop_00 and Pa_Settings_00, copies of the System page, where
-          a page shows (the Multiplayer page and the Settings page: Longshot's options)
-      PaSystemMenu_00.buil (the System page's own layout, which both pages use): Pa_List_00..06,
+          a page shows (the Multiplayer page, and Longshot Settings: Longshot's options, opened
+          from System's new last button)
+      PaSystemMenu_00.buil (the System page's own layout, which all three pages use): Pa_List_00..06,
           seven of the game's Options rows (PaOptionBtnLevel_00: a name on the left, a value
           between arrows on the right) down the right half, where the controller picture is: the
-          game browser's list (a header, then six games). Stored hidden, so the System page never
-          shows them; the module shows them on ours (its copy of the controller picture is hidden)
+          game browser's list (a header, then six games), and the settings' list; and Pa_Button_05,
+          a copy of Pa_Button_03 one row below Pa_Button_04: System's Longshot Settings button.
+          Stored hidden, so the System page never shows them; the module shows the list on ours
+          (its copy of the controller picture is hidden) and the button on System's
   Mals/<language>.Product.110.sarc.zs
       LayoutMsg/MenuOverlay_00.msbt: the tab's name; LayoutMsg/PlusMenu_00.msbt: the page's five
       rows (strings/en.txt and its translations: labels named for the panes they fill, as the
@@ -52,7 +54,6 @@ MALS_GLOB = "Mals/*.Product.*.sarc.zs"
 TAB = "Pa_Category_%02d"
 GAME_TABS = 4                 # Pa_Category_00..03
 NEW_TAB = TAB % GAME_TABS     # Pa_Category_04 (Multiplayer)
-SETTINGS_TAB = TAB % (GAME_TABS + 1)   # Pa_Category_05 (Settings)
 TAB_ROOT = "RootPane"
 L_LABEL, R_LABEL = "T_BtnL_00", "T_BtnR_00"
 SYSTEM_PAGE = "Pa_System_00"
@@ -109,11 +110,9 @@ def add_tab(d):
     if step <= 0 or any(abs(_x(d, TAB % (i + 1)) - _x(d, TAB % i) - step) > 0.5 for i in range(GAME_TABS - 1)):
         raise PauseMenuError("the game's tabs are not evenly spaced from left to right")
     off = ui_pack.frame_offset(d, last, TAB_ROOT)
-    gap = step - FIFTH_GAP
-    d = ui_pack.clone_parts(d, [ui_pack.Copy(last, NEW_TAB, (gap + off[0], off[1]), parent=TAB_ROOT, hidden=True),
-                                ui_pack.Copy(last, SETTINGS_TAB, (2 * gap + off[0], off[1]), parent=TAB_ROOT,
+    d = ui_pack.clone_parts(d, [ui_pack.Copy(last, NEW_TAB, (step - FIFTH_GAP + off[0], off[1]), parent=TAB_ROOT,
                                              hidden=True)], new_id=_new_id)
-    return ui_pack.move_panes(d, {R_LABEL: (R_MOVE, 0.0)})   # (the module places the tabs and R with six)
+    return ui_pack.move_panes(d, {R_LABEL: (R_MOVE, 0.0)})
 
 
 def add_page(d):
@@ -149,6 +148,39 @@ def add_rows(d):
     copies = [ui_pack.Copy(ROW_SOURCE, ROW % i, (ROW_X - sx, ROW_TOP + ROW_STEP * i - sy), hidden=True,
                            part_layout=ROW_LAYOUT, size=ROW_SIZE) for i in range(ROWS)]
     return ui_pack.clone_parts(d, copies, new_id=_new_id)
+
+
+SETTINGS_BUTTON = "Pa_Button_05"
+BUTTON_SOURCE = "Pa_Button_03"   # (the one of System's buttons without overrides or properties: clone_parts copies it)
+BUTTON_AFTER = "Pa_Button_04"    # (Title Screen: ours one row step below it)
+
+
+def add_settings_button(d):
+    """PaSystemMenu_00.buil with System's Longshot Settings button: SETTINGS_BUTTON, a copy of
+    BUTTON_SOURCE one row step (Pa_Button_03 to Pa_Button_04, 188 in the game's layout) below
+    BUTTON_AFTER, stored hidden. Every page made of this layout has it (System's, and our two
+    copies): the module shows System's while Longshot Settings can be used, and keeps the copies'
+    hidden. The game's System code binds its five buttons by name, so A on this one reaches only
+    the module (its selectors send an unknown name to their default branch)."""
+    panes, _ = ui_pack.read_layout(d)
+    names = [p.name for p in panes]
+    for name in (BUTTON_SOURCE, BUTTON_AFTER):
+        if name not in names:
+            raise PauseMenuError("the layout has no %s" % name)
+    if SETTINGS_BUTTON in names:
+        raise PauseMenuError("the layout has %s already" % SETTINGS_BUTTON)
+    sx, sy = _xy(d, BUTTON_SOURCE)
+    ax, ay = _xy(d, BUTTON_AFTER)
+    step = ay - sy   # (down: y up)
+    if step >= 0:
+        raise PauseMenuError("%s is not below %s" % (BUTTON_AFTER, BUTTON_SOURCE))
+    return ui_pack.clone_parts(d, [ui_pack.Copy(BUTTON_SOURCE, SETTINGS_BUTTON, (ax - sx, ay + step - sy), hidden=True)],
+                               new_id=_new_id)
+
+
+def _system_layout(d):
+    """The System page's own layout with the browser's list and the Longshot Settings button."""
+    return add_settings_button(add_rows(d))
 
 
 def _xy(d, name):
@@ -187,7 +219,7 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
     raw = reader.read(COMMON_ARCHIVE)
     plain = dicts.decompress(raw)
     entries = sarc.read_entries(plain)
-    for layout, edit in ((OVERLAY_LAYOUT, add_tab), (PAGES_LAYOUT, add_page), (SYSTEM_LAYOUT, add_rows)):
+    for layout, edit in ((OVERLAY_LAYOUT, add_tab), (PAGES_LAYOUT, add_page), (SYSTEM_LAYOUT, _system_layout)):
         olds = [data for name, data in entries if name == layout]
         if not olds:
             raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, layout))

@@ -66,6 +66,8 @@ inline constexpr std::uint64_t kSetVisible = 0x20aea0; // (pane, visible): pane 
 inline constexpr std::uint64_t kTabFill = 0xa6ab50;    // (tab, category, enabled): its text and Plus/Minus look
 inline constexpr std::uint64_t kTabLight = 0x2ccf60;   // (tab, lit, instant): its CurrentIn / CurrentOut
 inline constexpr std::uint64_t kPaneAlpha = 0x2d8ac0;  // (pane, s0 alpha 0..1): a pane's own alpha (+0x74), marked dirty
+inline constexpr std::uint64_t kSetFocus = 0x86ffc0;   // (screen, button, 0): the focus on that button (f_8088ffc0, as
+                                                       //  the title's set-up gives its first button the focus)
 // A pane's own place's height (+0x70, its x at +0x6c), its place on the screen (+0x4c, +0x50) and its alpha with its
 // parents' (+0x78), as read in a run (2026-11-19: the strip's fourth tab and our fifth through the strip's opening).
 inline constexpr std::uint64_t kPaneOwnY = 0x70, kPaneScreenX = 0x4c, kPaneScreenY = 0x50, kPaneScreenAlpha = 0x78;
@@ -167,16 +169,16 @@ public:
         bool set_page = false;   // the pages: our page shown (and System hidden) or not (at the strip's update too:
                                  // the module then sets it through the pages screen it knows)
         bool page_shown = false;
-        // Which page goes and which comes: 0 System's, 1 the Multiplayer page, 2 the Settings page (Longshot's options,
-        // the sixth tab).
+        // Which page goes and which comes: 0 System's, 1 the Multiplayer page, 2 the Longshot Settings page (Longshot's
+        // options, opened from System's last button: in System's place, so its tab is System's).
         int page_from = 0, page_to = 0;
         // How the page comes or goes: +1 R, the page to the right slides in as the one before slides out to the left;
-        // -1 L, the other way; 0 at once (the menu opening on our page, closing, a window over it).
+        // -1 L, the other way; 0 at once (the menu opening on our page, closing, a window over it, Longshot Settings
+        // opened or left).
         int slide = 0;
         bool set_texts = false;  // the pages: our rows' texts (once per screen object)
         bool set_tabs = false;   // the strip: the fifth tab shown or not, lit or not; System's tab lit or not
         bool tab_shown = false, tab_lit = false, fill_tab = false;
-        bool tab6_shown = false, tab6_lit = false, fill_tab6 = false;   // the sixth tab (Settings), the same way
         bool any() const { return set_page || set_texts || set_tabs; }
     };
     Do OnScreen(const Facts& f, std::uint64_t now_ms);
@@ -191,10 +193,17 @@ public:
     // Not usable: the page never shows (R and A stay System's) and the mouse keeps the fifth tab out.
     void SetUsable(bool usable);
     bool Usable() const { return usable_; }
-    // The Settings page can be used too (the module: its page and the sixth tab found, and Longshot's settings there).
+    // The Longshot Settings page can be used too (the module: its page and System's Longshot Settings button found, and
+    // Longshot's settings there).
     void SetSettingsUsable(bool usable) { settings_ok_ = usable; }
     bool SettingsUsable() const { return settings_ok_; }
-    // Which of our pages shows (while Shown): 0 Multiplayer, 1 Settings.
+    // The game's cursor is on System's Longshot Settings button (Pa_Button_05) now: its A opens the page.
+    void SetOnSettingsButton(bool on) { on_settings_button_ = on; }
+    // Longshot Settings was opened (A on its button) or left (B on its rows) since the last call: the module moves the
+    // game's cursor to the page's first row, or back to System's Longshot Settings button.
+    bool TakeSettingsOpened() { return std::exchange(settings_opened_, false); }
+    bool TakeSettingsLeft() { return std::exchange(settings_left_, false); }
+    // Which of our pages shows (while Shown): 0 Multiplayer, 1 Longshot Settings.
     int Which() const { return which_; }
     // hos_coop_game_pause_page: 4 while the Multiplayer page shows, 5 the Settings page, -1 while they can show, -2
     // while they cannot be used.
@@ -250,9 +259,10 @@ private:
     bool decide_ = false;
     const char* strip_sound_ = nullptr;
     int slide_ = 0;   // the next set_page's Do::slide (R or L)
-    int which_ = 0;   // our page shown: 0 Multiplayer, 1 Settings (kept while hidden: the menu opens on it again)
+    int which_ = 0;   // our page shown: 0 Multiplayer, 1 Longshot Settings (kept while hidden: the menu opens on it again)
     bool settings_ok_ = false;
-    bool tab6_filled_ = false;   // the sixth tab filled in this opening of the strip
+    bool on_settings_button_ = false;
+    bool settings_opened_ = false, settings_left_ = false;
     const char* pages_sound_ = nullptr;
     std::string why_;
     bool usable_ = false;
@@ -516,13 +526,15 @@ std::string ListValue(int players, int max, bool same_version);
 // room name after it when that is another: "Saria's forest (forest-gang)".
 std::string ListName(const std::string& shown, const std::string& room);
 
-// --- The Settings page (the sixth tab): Longshot's own options, from its Insert menu ---
-// The page's five rows are the categories, Longshot's menu's tabs (its Debug tab and the FPS counter's developer rows
-// stay in that menu). The list on the right, the same Options rows as the game browser's, shows a category's
-// settings, kListRows a page: the name on the left, the value between the arrows on the right. The rows choose the
-// category (the game's cursor on them); Right or A goes into its list, up and down move in it (turning the page at its
-// ends), Left and Right change the value, A takes the next one (back to the first after the last), B gives the pad back
-// to the rows. A change goes through Longshot as its own menu's Left and Right do (clamped, saved, a restart noted).
+// --- Longshot Settings (System's last button): Longshot's own options, from its Insert menu ---
+// The page's five rows are the categories, Longshot's menu's tabs (its Debug and NFC tabs, its buttons such as Test
+// microphone, and the FPS counter's developer rows stay in that menu). The list on the right, the same Options rows as
+// the game browser's, shows a category's settings under a header (the category, "Page 1 of 4"), kSettingsPerPage a
+// page: the name on the left, the value between the arrows on the right. The rows choose the category (the game's
+// cursor on them); Right or A goes into its list, up and down move in it (turning the page at its ends), Left and Right
+// change the value, A takes the next one (of a few choices), B gives the pad back to the rows. A change goes through
+// Longshot as its own menu's Left and Right do (clamped, saved, a restart noted).
+inline constexpr int kSettingsPerPage = 6;   // (kListRows less the header)
 inline constexpr std::array<const char*, kRows> kSettingTabs{"Graphics", "Audio", "Gameplay", "Controls", "Motion"};
 struct SettingRow {
     std::string key, name, text, tab;   // its line in longshot_options.ini, what the menu calls it, its value's words
@@ -533,15 +545,17 @@ struct SettingRow {
 // A category's settings (kSettingTabs[category]: their tab in Longshot's menu), in Longshot's order.
 std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int category);
 int SettingPages(int count);
-// A page of a category's settings as the list's rows: the name ("*" after a restart one), the value's words.
-std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page);
+// A page of a category's settings as the list's rows: the header (`title`, and "Page 2 of 4" when there are more),
+// then the settings: the name ("*" after a restart one), the value's words.
+std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page, const std::string& title);
 // The value a press asks for: dir -1 Left, +1 Right (a step, kept within lo..hi), 0 A (the next, the first after the
 // last, for a setting of at most kCycleChoices choices: a slider such as Volume is never sent from its end back to its
 // start by A or a click on the row). The same value back when nothing would change (a fixed setting, the end of its
 // range, A on a slider).
 inline constexpr int kCycleChoices = 8;
 int SettingNext(const SettingRow& r, int dir);
-// The cursor moved up (-1) or down (+1) in a category's list of `count`: across its pages, staying at its ends.
+// The cursor moved up (-1) or down (+1) in a category's list of `count`: across its pages, staying at its ends. `row`
+// is the setting's place on its page (0 to kSettingsPerPage - 1; the list's row under the header is row + 1).
 void SettingMove(int count, int dy, int* page, int* row);
 // The games the browser lists now (the chosen list's), and its pages.
 int BrowseListed(const Session& s);
@@ -595,9 +609,6 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept;
 std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept;
 // hos_coop_game_pause_page: Page::MousePage (4 shown, -1 can show, -2 cannot be used).
 int MousePage() noexcept;
-// hos_coop_game_pause_tab_at (patch 0032): the tab under (x, y) in the layout's units while the strip has six tabs
-// (0..5; 8 L, 9 R; -1 none), -2 otherwise (Longshot's own table for five).
-int TabAt(float x, float y) noexcept;
 // The keyboard while one of the page's fields is typed into (hos_coop_key, hos_coop_char; KeysTaken: the game gets
 // none of its keys then): true when the field took it.
 bool Key(std::uint32_t vk, bool repeat) noexcept;

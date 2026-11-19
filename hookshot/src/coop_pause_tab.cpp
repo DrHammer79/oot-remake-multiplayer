@@ -248,18 +248,16 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         // (shown from the strip's opening to the end of its closing, as the game's four tabs are: shown only once
         // it was open, the fifth came in a moment after them; the module moves and fades it with the fourth. Filled
         // once per opening: a fill again restarts the tab's own opening.)
+        // (Longshot Settings is in System's place: System's tab stays lit for it)
         const bool visible = f.tabs >= 5 && f.mode == kPlusMode && f.state >= 1 && f.state <= 3;
-        const bool sixth = visible && f.tabs >= 6 && settings_ok_;
-        const int key = (visible ? 1 : 0) | (shown_ ? 2 : 0) | ((f.lit & 0xff) << 2) | ((f.state & 0xf) << 10) |
-                        ((f.mode & 0xf) << 14) | (sixth ? 1 << 18 : 0) | (which_ << 19);
+        const bool ours_lit = shown_ && which_ == 0;
+        const int key = (visible ? 1 : 0) | (ours_lit ? 2 : 0) | ((f.lit & 0xff) << 2) | ((f.state & 0xf) << 10) |
+                        ((f.mode & 0xf) << 14);
         if (f.tabs >= 5 && key != tab_key_) {
             tab_key_ = key;
-            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && shown_ && which_ == 0;
+            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && ours_lit;
             d.fill_tab = visible && !tab_filled_;
             tab_filled_ = visible;
-            d.tab6_shown = sixth, d.tab6_lit = sixth && shown_ && which_ == 1;
-            d.fill_tab6 = sixth && !tab6_filled_;
-            tab6_filled_ = sixth;
         }
         return d;
     }
@@ -285,6 +283,16 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
             swallow_ |= buttons & ~kPadPassed;   // (R and anything held with it: none of it reaches System)
             return buttons & kPadPassed & ~swallow_;
         }
+        if ((down & kPadA) != 0 && on_settings_button_ && settings_ok_ && CanShow(now_ms)) {
+            // (A on System's Longshot Settings button: the page in System's place, at once; the game's own A never
+            // reaches the button, whose name its selectors do not know)
+            shown_ = true, decide_ = false, why_.clear(), which_ = 1, sub_ = false, back_ = false;
+            slide_ = 0;
+            settings_opened_ = true;
+            pages_sound_ = "button_decide";
+            swallow_ |= buttons & ~kPadPassed;
+            return buttons & kPadPassed & ~swallow_;
+        }
         return buttons & ~swallow_;
     }
     if (typing_ >= 0) {   // (a field typed into: every button is its, none reaches System)
@@ -292,25 +300,31 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
         swallow_ |= buttons;
         return 0;
     }
-    if ((down & (kPadR | kPadZR)) != 0 && which_ == 0 && settings_ok_ && strip_.tabs >= 6) {
-        // (the Multiplayer page: on to the Settings page, the sixth tab, sliding)
-        which_ = 1, sub_ = false, back_ = false, decide_ = false;
+    if ((down & (kPadR | kPadZR)) != 0 && which_ == 1) {
+        // (Longshot Settings, in System's place: on to the Multiplayer page, sliding, as from System)
+        which_ = 0, sub_ = false, back_ = false, decide_ = false;
         strip_sound_ = "mc_TabToRight";
         slide_ = 1;
         swallow_ |= buttons & ~kPadPassed;
         return buttons & kPadPassed & ~swallow_;
     }
     if ((down & (kPadL | kPadZL)) != 0) {
-        if (which_ == 1) {   // (the Settings page: back to the Multiplayer page, sliding)
-            which_ = 0, sub_ = false, back_ = false, decide_ = false;
-            strip_sound_ = "mc_TabToLeft";
-            slide_ = -1;
-            swallow_ |= buttons & ~kPadPassed;
-            return buttons & kPadPassed & ~swallow_;
+        if (which_ == 1) {   // (Longshot Settings: System back at once, and the game's L takes it on to Items)
+            Hide("L");
+            swallow_ &= ~(kPadL | kPadZL);   // (Hide keeps every held button from the game: this L is the game's)
+            return buttons & ~swallow_;
         }
         Hide("L");
         strip_sound_ = "mc_TabToLeft";
         slide_ = -1;   // (out to the right, System back from the left)
+        return buttons & ~swallow_;
+    }
+    if (which_ == 1 && !sub_ && (down & kPadB) != 0) {
+        // (B on Longshot Settings' rows: back to System at once, its cursor on the Longshot Settings button; the
+        // game's B would close the menu)
+        Hide("B on Longshot Settings");
+        settings_left_ = true;
+        swallow_ |= kPadB;
         return buttons & ~swallow_;
     }
     if ((down & kPadA) != 0) {
@@ -1081,18 +1095,20 @@ std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int categ
 }
 
 int SettingPages(int count) {
-    return count <= kListRows ? 1 : (count + kListRows - 1) / kListRows;
+    return count <= kSettingsPerPage ? 1 : (count + kSettingsPerPage - 1) / kSettingsPerPage;
 }
 
-std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page) {
+std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page, const std::string& title) {
     std::vector<ListLine> lines(kListRows);
     const int pages = SettingPages(static_cast<int>(rows.size()));
-    const int first = ((page % pages + pages) % pages) * kListRows;
-    for (int i = 0; i < kListRows; ++i) {
-        const std::size_t at = static_cast<std::size_t>(first + i);
+    const int at_page = (page % pages + pages) % pages;
+    lines[0] = ListLine{FitTo(title, kListNameChars),
+                        pages > 1 ? "Page " + std::to_string(at_page + 1) + " of " + std::to_string(pages) : ""};
+    for (int i = 0; i < kSettingsPerPage; ++i) {
+        const std::size_t at = static_cast<std::size_t>(at_page * kSettingsPerPage + i);
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
-        lines[static_cast<std::size_t>(i)] =
+        lines[static_cast<std::size_t>(i) + 1] =
             ListLine{FitTo(r.restart ? r.name + " *" : r.name, kListNameChars), FitTo(r.text, kListValueChars)};
     }
     return lines;
@@ -1113,8 +1129,8 @@ void SettingMove(int count, int dy, int* page, int* row) {
         *page = 0, *row = 0;
         return;
     }
-    const int at = std::clamp(*page * kListRows + *row + dy, 0, count - 1);
-    *page = at / kListRows, *row = at % kListRows;
+    const int at = std::clamp(*page * kSettingsPerPage + *row + dy, 0, count - 1);
+    *page = at / kSettingsPerPage, *row = at % kSettingsPerPage;
 }
 
 std::vector<ListLine> ListLines(const SessionView& v) {
