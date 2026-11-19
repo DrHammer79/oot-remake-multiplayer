@@ -103,6 +103,19 @@ TEST_CASE("mod screens: a list that never comes back to its head stops after 64 
     CHECK(FocusedButton(m.reader(), kScreen) == 0);   // (the same button found twice: not one focus)
 }
 
+TEST_CASE("mod screens: a button takes a choice only with both bits of its flags") {
+    Memory m;
+    const std::uint64_t b = 0x700000;
+    m.U32(b + kButtonFlags, 0x3f);   // (the title's Continue once it takes input)
+    CHECK(Choosable(m.reader(), b));
+    m.U32(b + kButtonFlags, 0x3b);   // (while the title comes in)
+    CHECK_FALSE(Choosable(m.reader(), b));
+    m.U32(b + kButtonFlags, 0x10);
+    CHECK_FALSE(Choosable(m.reader(), b));
+    CHECK_FALSE(Choosable(m.reader(), 0));
+    CHECK_FALSE(Choosable(m.reader(), 0x710000));   // (not mapped)
+}
+
 TEST_CASE("mod screens: a button's name is the text its +0x18 points at") {
     Memory m;
     const std::uint64_t b = 0x700000;

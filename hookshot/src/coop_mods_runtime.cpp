@@ -102,9 +102,7 @@ bool ChooseFocused(void* ctx, std::uint64_t screen) {
         // (Button::Decide says no when the button's flags (+0x40) lack 0x14, as on the title while it fades in, or when
         // another button of its control is being chosen. Seen in a game: the title's Continue has 0x3b while it opens
         // and 0x3f once it takes input.)
-        std::uint32_t flags = 0;
-        ReadGame(button + 0x40, &flags, sizeof flags);
-        return (flags & 0x14) != 0x14
+        return !CoopModScreens::Choosable(ReadGame, button)
                    ? no(3, "the button cannot be chosen yet (its screen is still opening): asked again at a later update")
                    : no(4, "another button of its screen is being chosen: asked again at a later update");
     }
@@ -401,7 +399,9 @@ void Screen(void* ctx, std::uint64_t screen) {
     u.ctx = ctx;
     u.screen = screen;
     u.kind = CoopModScreens::KindOf(vtable - base);
-    u.focused = CoopModScreens::ButtonName(ReadGame, CoopModScreens::FocusedButton(ReadGame, screen));
+    const std::uint64_t focused = CoopModScreens::FocusedButton(ReadGame, screen);
+    u.focused = CoopModScreens::ButtonName(ReadGame, focused);
+    u.focused_ready = CoopModScreens::Choosable(ReadGame, focused);
     u.save_list_ready = CoopTitle::SaveListReady();
     u.buttons = g_pad.load();
     g_host->Screen(u);

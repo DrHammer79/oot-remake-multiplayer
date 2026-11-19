@@ -57,6 +57,7 @@ struct ScreenUpdate {
     std::string focused;          // the focused button's name, "" none
     bool save_list_ready = false;
     std::uint64_t buttons = 0;    // player 1's buttons before any hold
+    bool focused_ready = false;   // the focused button takes a choice now
 };
 
 // A hold ends when no menu screen has updated for this long.

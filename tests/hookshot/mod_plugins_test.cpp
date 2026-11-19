@@ -86,7 +86,7 @@ int StartB(const CoopModApi* api) {
     CHECK(api->hook(api, 9, [](void*, std::uint32_t, int, std::uint64_t*) { return 0; }, nullptr) == 0);  // not built in
     CHECK(api->on_screen(api, [](void*, const CoopModScreen* sc) {
         std::string line = "screen b " + std::to_string(sc->kind) + " '" + sc->focused + "' " +
-                           std::to_string(sc->save_list_ready);
+                           std::to_string(sc->save_list_ready) + (sc->focused_ready ? " ready" : "");
         const CoopModApi* self = g.api[1];
         if (g.screen_do & kChoose) line += " choose " + std::to_string(self->choose_focused(self));
         if (g.screen_do & kReload) line += " reload " + std::to_string(self->reload_save_list(self));
@@ -219,7 +219,8 @@ struct Run {
         host->Start();
     }
     // One menu screen's update as the runtime hands it over.
-    void Screen(std::uint32_t kind, const std::string& focused, bool ready = true, std::uint64_t buttons = 0) {
+    void Screen(std::uint32_t kind, const std::string& focused, bool ready = true, std::uint64_t buttons = 0,
+                bool focused_ready = false) {
         ScreenUpdate u;
         u.ctx = reinterpret_cast<void*>(std::uintptr_t{7});
         u.screen = 0x5000;
@@ -227,6 +228,7 @@ struct Run {
         u.focused = focused;
         u.save_list_ready = ready;
         u.buttons = buttons;
+        u.focused_ready = focused_ready;
         host->Screen(u);
     }
     int Count(const std::string& part) const {
@@ -496,7 +498,9 @@ TEST_CASE("mod plugins v2: each menu screen reaches the mods that asked, with it
     g.calls.clear();
     r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00");
     r.Screen(COOP_MOD_SCREEN_LOAD_LIST, "", false);
-    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1", "screen b 2 '' 0"});
+    r.Screen(COOP_MOD_SCREEN_TITLE, "Pa_Button_00", true, 0, true);   // (the title's menu takes input now)
+    CHECK(g.calls == std::vector<std::string>{"screen b 1 'Pa_Button_00' 1", "screen b 2 '' 0",
+                                              "screen b 1 'Pa_Button_00' 1 ready"});
     CHECK(g.game_calls.empty());   // (nothing asked: nothing done)
 }
 

@@ -74,4 +74,9 @@ std::string ButtonName(const Reader& read, std::uint64_t button) {
     return name;   // (cut at kNameMax)
 }
 
+bool Choosable(const Reader& read, std::uint64_t button) {
+    std::uint32_t flags = 0;
+    return button != 0 && read(button + kButtonFlags, &flags, sizeof flags) && (flags & kChoosable) == kChoosable;
+}
+
 }  // namespace CoopModScreens

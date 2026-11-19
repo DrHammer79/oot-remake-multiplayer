@@ -663,6 +663,7 @@ void Host::Screen(const ScreenUpdate& update) {
     view.focused = update.focused.c_str();
     view.save_list_ready = update.save_list_ready ? 1 : 0;
     view.buttons = update.buttons;
+    view.focused_ready = update.focused_ready ? 1 : 0;
     t_update = &update;
     for (auto& s : slots_) {
         t_slot = s.get();

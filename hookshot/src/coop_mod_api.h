@@ -79,6 +79,10 @@ typedef struct CoopModScreen {
     uint64_t buttons;       /* player 1's buttons now (Switch NpadButton bits: A 1<<0, B 1<<1, X 1<<2, Y 1<<3, + 1<<10,
                                - 1<<11, the d-pad 1<<12 to 1<<15), as the game would get them before any mod's hold: a
                                pad, the keyboard's bindings and a click on the game's menus alike */
+    int focused_ready;      /* 1 when the focused button takes a choice now: its screen is open and not still coming in
+                               (the title has Continue focused while its opening scene plays and its menu fades in:
+                               0 then, and the game's own A goes to the title, not to Continue). Read it only when
+                               size covers it. */
 } CoopModScreen;
 /* (version 2) hold_input's buttons: all of them and the sticks too */
 #define COOP_MOD_HOLD_ALL (~(uint64_t)0)
