@@ -491,6 +491,7 @@ RowAction ActionFor(View view, int row, const Session& s) {
     }
     case View::kSession:
         if (s.hosting) {
+            if (s.password_shown) return row < kRows - 1 ? RowAction::kShowPassword : RowAction::kBack;   // (hidden)
             if (row == 0) return s.has_password ? RowAction::kShowPassword : RowAction::kNone;
             if (row == 1) return s.code ? RowAction::kCopyCode : RowAction::kNone;
             return row == 2 ? RowAction::kCopyLan : row == 3 ? RowAction::kCopyVpn : RowAction::kNone;
@@ -579,12 +580,12 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.s.in_one) {
         rows[kRowLetIn] = v.s.can_resync ? "Resync from host" : "Let in: the host does";
     } else if (!v.s.by_launcher) {
-        rows[kRowLetIn] = !v.s.auto_rejoin ? "Auto-rejoin: Off" : v.s.rejoining ? "Auto-rejoin: On (trying...)" : "Auto-rejoin: On";
+        rows[kRowLetIn] = !v.s.auto_rejoin ? "Auto-rejoin: Off" : v.s.rejoining ? "Auto-rejoin: trying..." : "Auto-rejoin: On";
     } else {
         rows[kRowLetIn] = "Let in: when you host";
     }
     if (v.s.by_launcher) {
-        rows[kRowLeave] = "Leave: start the game again";
+        rows[kRowLeave] = "Leave: restart the game";
     } else if (v.confirm_leave) {
         rows[kRowLeave] = v.s.hosting ? "A again: stop hosting" : "A again: leave";
     } else {
@@ -654,8 +655,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         if (v.s.player != 2 || !v.s.hosting) {
             rows[0] = "They left the session";
         } else {
-            rows[0] = (v.host_mutes & kMuteVoice) != 0 ? "Unmute voice for everyone" : "Mute voice for everyone";
-            rows[1] = (v.host_mutes & kMuteChat) != 0 ? "Unmute chat for everyone" : "Mute chat for everyone";
+            rows[0] = (v.host_mutes & kMuteVoice) != 0 ? "Unmute voice for all" : "Mute voice for all";
+            rows[1] = (v.host_mutes & kMuteChat) != 0 ? "Unmute chat for all" : "Mute chat for all";
             rows[2] = v.confirm_kick ? "A again: kick " + v.player_name : "Kick " + v.player_name;
             rows[3] = v.confirm_ban ? "A again: ban " + v.player_name : "Ban for this session";
         }
@@ -692,10 +693,21 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         if (v.s.hosting) {
             if (!v.note.empty()) {
                 rows[0] = v.note;
-            } else if (v.password_shown && !v.host_password.empty()) {
-                rows[0] = "Password: " + v.host_password;
+            } else if (v.s.password_shown && !v.host_password.empty()) {
+                // (over the rows below, in fives: a made one is 20 letters, two rows; A on any of them hides it)
+                rows[0] = "Password (A hides it):";
+                std::string grouped;
+                for (std::size_t i = 0; i < v.host_password.size(); ++i) {
+                    if (i > 0 && i % 5 == 0) grouped += ' ';
+                    grouped += v.host_password[i];
+                }
+                const std::vector<std::string> lines = Wrap(grouped, 3);
+                for (std::size_t i = 0; i < 3; ++i) rows[1 + i] = i < lines.size() ? lines[i] : std::string();
+                break;
+            } else if (v.s.has_password) {
+                rows[0] = "Show join password";
             } else {
-                rows[0] = "Hosting: " + Players(std::max(v.players, 1)) + (v.s.has_password ? " (A: password)" : "");
+                rows[0] = "Hosting: " + Players(std::max(v.players, 1));
             }
             rows[1] = !v.room.empty() ? "Copy room: " + v.room : v.s.code ? "Copy invite code" : "Room: coming...";
             rows[2] = "Copy same-network line";

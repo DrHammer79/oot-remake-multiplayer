@@ -1287,18 +1287,18 @@ void PageCopyNow(PageCopy what) {
     case PageCopy::kVpn: {
         const bool vpn = what == PageCopy::kVpn;
         if (st.state != HOS_COOP_HOSTING || st.port == 0) {
-            SetPageNote("The server is not running yet");
+            SetPageNote("The server is not up yet");
             return;
         }
         // (as the menu's Same network / VPN rows: the first address of that kind, the port and the password)
         const CoopTitleMenu::LanSplit split = CoopTitleMenu::SplitLan(CoopFiles::LocalCards());
         const auto& addresses = vpn ? split.vpn : split.home;
         if (addresses.empty()) {
-            SetPageNote(vpn ? "No VPN address found" : "No same-network address found");
+            SetPageNote(vpn ? "No VPN address found" : "No network address found");
             return;
         }
         text = CoopTitleMenu::LanJoinText(addresses.front().address, st.port, st.password);
-        words = vpn ? "VPN line" : "same-network line";
+        words = vpn ? "VPN line" : "network line";
         break;
     }
     }
@@ -1311,7 +1311,7 @@ void PageCopyNow(PageCopy what) {
     // (on Linux the result comes a moment later, under g_mutex: a Host or Join started meanwhile drops it)
     CopyThen(text, [session, words](bool ok) {
         if (session != g_session) return;
-        SetPageNote(ok ? "Copied the " + words : "No clipboard: write it down");
+        SetPageNote(ok ? "Copied the " + words : "No clipboard here");   // (the rows fit 24 letters: kRowChars)
     });
 }
 

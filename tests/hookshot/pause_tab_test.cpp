@@ -507,7 +507,7 @@ TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width
     idle.s.auto_rejoin = true;
     CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: On");
     idle.s.rejoining = true;
-    CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: On (trying...)");
+    CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: trying...");
     idle.s.auto_rejoin = idle.s.rejoining = false;
 
     SessionView host;
@@ -627,7 +627,7 @@ TEST_CASE("pause tab: co-op that came with the game's start, and a failed Host, 
     CHECK(ActionFor(kRowLeave, launcher) == RowAction::kOpenMain);
     SessionView lv;
     lv.s = launcher;
-    CHECK(RowTexts(lv)[kRowLeave] == "Leave: start the game again");
+    CHECK(RowTexts(lv)[kRowLeave] == "Leave: restart the game");
     // A Host (or Join) that failed: the row says so, and A shows the Session view, which says why.
     Session failed;
     failed.failed = true;
@@ -789,15 +789,18 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     // Its join password: on the first row once A asks (friends who found the game on this network type it).
     hv.s.has_password = host.has_password = true;
     CHECK(ActionFor(View::kSession, 0, host) == RowAction::kShowPassword);
-    CHECK(RowTexts(View::kSession, hv)[0] == "Hosting: just you (A: password)");
+    CHECK(RowTexts(View::kSession, hv)[0] == "Show join password");
     hv.host_password = "ABCDEFGHJKLMNPQRSTUV";
-    hv.password_shown = true;
-    CHECK(RowTexts(View::kSession, hv)[0] == "Password: ABCDEFGHJKLMNPQRSTUV");
-    hv.password_shown = false;
+    hv.s.password_shown = host.password_shown = true;   // (in fives over two rows: a row fits 24 letters)
+    CHECK(RowTexts(View::kSession, hv) == std::vector<std::string>{"Password (A hides it):", "ABCDE FGHJK LMNPQ RSTUV",
+                                                                    " ", " ", "Back"});
+    for (int r = 0; r < kRows - 1; ++r) CHECK(ActionFor(View::kSession, r, host) == RowAction::kShowPassword);
+    CHECK(ActionFor(View::kSession, kRows - 1, host) == RowAction::kBack);
+    hv.s.password_shown = host.password_shown = false;
     hv.host_password.clear();
     // The main view's Join code row says what its copy did too.
-    hv.note = "No clipboard: write it down";
-    CHECK(RowTexts(hv)[kRowJoinCode] == "No clipboard: write it down");
+    hv.note = "No clipboard here";
+    CHECK(RowTexts(hv)[kRowJoinCode] == "No clipboard here");
 
     // A guest: whose game, how many, Resync from host when its game can take the host's save, co-op's hint.
     Session guest;
@@ -833,12 +836,12 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     fv.why = "The port 27015 is in use by another program: close it, or pick another port in coop.ini";
     const std::vector<std::string> rows = RowTexts(View::kSession, fv);
     CHECK(rows[0] == "Co-op failed:");
-    CHECK(rows[1] == "The port 27015 is in use by another");
+    CHECK(rows[1] == "The port 27015 is in use");
     CHECK(rows[2].substr(rows[2].size() - 3) == "...");   // (two rows for it: the rest is cut)
     CHECK(rows[3] == "Host again");
     fv.s.by_launcher = true;
     CHECK(ActionFor(View::kSession, 3, fv.s) == RowAction::kNone);
-    CHECK(RowTexts(View::kSession, fv)[3] == "in coop.ini");   // (its row goes to why)
+    CHECK(RowTexts(View::kSession, fv)[3].substr(0, 5) == "close");   // (its row goes to why: the third of it)
     SessionView idle;
     CHECK(RowTexts(View::kSession, idle)[0] == "Not in a session");
     for (const SessionView& v : {hv, gv, wv, fv, idle}) {
@@ -902,11 +905,11 @@ TEST_CASE("pause tab: the Players view's pages and a player's view, with the hos
     SessionView cv;
     cv.s = host;
     cv.player_name = "Mido";
-    CHECK(RowTexts(View::kPlayerHost, cv) == std::vector<std::string>{"Mute voice for everyone", "Mute chat for everyone",
+    CHECK(RowTexts(View::kPlayerHost, cv) == std::vector<std::string>{"Mute voice for all", "Mute chat for all",
                                                                        "Kick Mido", "Ban for this session", "Back"});
     cv.host_mutes = kMuteVoice;
     cv.confirm_kick = true;
-    CHECK(RowTexts(View::kPlayerHost, cv)[0] == "Unmute voice for everyone");
+    CHECK(RowTexts(View::kPlayerHost, cv)[0] == "Unmute voice for all");
     CHECK(RowTexts(View::kPlayerHost, cv)[2] == "A again: kick Mido");
     cv.confirm_kick = false, cv.confirm_ban = true;
     CHECK(RowTexts(View::kPlayerHost, cv)[3] == "A again: ban Mido");

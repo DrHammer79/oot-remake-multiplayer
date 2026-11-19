@@ -323,6 +323,7 @@ struct Session {
     std::uint32_t lan_joinable = 0;   // bit i: the list's game i can be joined (same version, room for one)
     bool lan_password = false;  // a game's view: its join password is typed (every session has one)
     bool has_password = false;  // hosting, and the session's join password is known (the status)
+    bool password_shown = false;   // the host's Session view shows it now (its rows' A hides it again)
     bool can_resync = false;    // a guest whose game can take the host's save again (CoopSave::CanResync)
     int listed = 0;         // the Players view: how many players it lists
     int page = 0;           // the Players view: its page (PlayerIndex)
@@ -371,12 +372,13 @@ struct SessionView {
     std::vector<std::string> lan_rows;    // the games on this network, as their rows say them (CoopLan::RowText)
     std::string lan_game;                 // a game's view: the game picked, as its row said it
     std::string host_password;            // the host's Session view: the join password, once A asked for it
-    bool password_shown = false;          // (and it is shown: until A again or another view)
     std::string says;                     // the Session view: why the page's last Host or Join did not start
                                           // (CoopPause::PageSays), while that view shows after it; "" none
     int typing = -1;                  // the field typed into (0 the room, 1 the password), -1 none
 };
-inline constexpr std::size_t kRowChars = 40;   // the most a row's text holds (the System page's button width)
+// The most a row's text holds: the System page's button fits about 24 of the game's letters (seen in a run,
+// 2026-11-19: "Leave (not in a session)" fills it, 31 letters ran past both edges).
+inline constexpr std::size_t kRowChars = 24;
 std::vector<std::string> RowTexts(const SessionView& v);
 // A view's rows (kMain: RowTexts). A row with nothing on it says " " (a pane's text is never empty).
 std::vector<std::string> RowTexts(View view, const SessionView& v);

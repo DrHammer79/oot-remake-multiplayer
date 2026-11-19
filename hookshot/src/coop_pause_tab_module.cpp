@@ -356,8 +356,8 @@ SessionView ViewNow(View view) {
     }
     if (view == View::kSession) {
         v.s.has_password = v.s.hosting && st.password[0] != 0;
-        v.password_shown = v.s.has_password && g_show_password.load();
-        if (v.password_shown) v.host_password.assign(st.password, strnlen(st.password, sizeof st.password));
+        v.s.password_shown = v.s.has_password && g_show_password.load();
+        if (v.s.password_shown) v.host_password.assign(st.password, strnlen(st.password, sizeof st.password));
         std::lock_guard lock(g_says_mutex);
         v.says = g_says;
     }
