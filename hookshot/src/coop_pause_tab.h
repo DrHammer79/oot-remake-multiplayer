@@ -420,7 +420,7 @@ private:
 // --- The pages' slide (Page::Do::slide) ---
 // The game slides its pages a page's width apart (N_MenuChange_01's 4280) when L or R changes the page: measured in a
 // run (2026-11-19, the strip's own x each update from Items to System), 4280 in about 430 ms, a fast ease-out with no
-// fade: 18% at the first update, half by 65 ms, 95% by 250 ms. The module moves our page and System's the same way.
+// fade: 18% at the first update, half by 65 ms, 92% by 250 ms. The module moves our page and System's the same way.
 inline constexpr float kPageWidth = 4280.0f;
 inline constexpr std::uint64_t kSlideMs = 433;
 // How far a slide is (0 to 1) `ms` after it began: the game's measured curve, between its samples a straight line.

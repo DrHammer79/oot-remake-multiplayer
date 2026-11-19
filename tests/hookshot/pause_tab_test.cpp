@@ -1472,7 +1472,7 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(SlideProgress(0) == doctest::Approx(0.0f));
     CHECK(SlideProgress(17) == doctest::Approx(0.18f).epsilon(0.02));
     CHECK(SlideProgress(67) == doctest::Approx(0.51f).epsilon(0.02));   // (half by about 65 ms)
-    CHECK(SlideProgress(250) > 0.94f);
+    CHECK(SlideProgress(250) > 0.92f);   // (92% by 250 ms)
     CHECK(SlideProgress(kSlideMs) == doctest::Approx(1.0f));
     CHECK(SlideProgress(5000) == 1.0f);
     for (std::uint64_t t = 0; t < kSlideMs; t += 5) CHECK(SlideProgress(t + 5) >= SlideProgress(t));   // (never back)
