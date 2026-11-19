@@ -37,7 +37,10 @@ inline constexpr std::uint64_t kNameText = 0x18;
 inline constexpr std::uint64_t kButtonFlags = 0x40;
 inline constexpr std::uint32_t kChoosable = 0x14;
 inline constexpr std::size_t kNameMax = 63;
-inline constexpr int kMaxButtons = 64;
+// The most buttons a screen's list is walked for (a list that never comes back to its head stops there). The pause
+// menu's pages screen holds every page's buttons, well over 64 (seen in a run, 2026-11-19: System's five come after the
+// Collection's and Equipment's), so the walk goes far enough for them.
+inline constexpr int kMaxButtons = 256;
 
 // (screen, const char* name) -> bit 0: the sound started. A screen's own menu sound by name: its xlink user at
 // [screen+0x198]+8, then xlink2's searchAndEmit(name) ("searchAndEmit(%s)", main+0x43e400). Read from main and seen in

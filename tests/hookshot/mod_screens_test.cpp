@@ -7,6 +7,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "coop_mod_api.h"
 #include "coop_mod_screens.h"
@@ -91,7 +92,30 @@ TEST_CASE("mod screens: no focused button with none, with two, or while the scre
     CHECK(FocusedButton(empty.reader(), kScreen) == 0);
 }
 
-TEST_CASE("mod screens: a list that never comes back to its head stops after 64 buttons") {
+TEST_CASE("mod screens: a long list's focused button is found far down it (the pause menu's pages hold 100 and more)") {
+    std::vector<std::uint8_t> states(120, 0);
+    states[100] = 3;
+    Memory m;
+    {
+        // (ScreenWith for 120 buttons)
+        m.U64(kScreen + kScreenFocus, kFocusObj);
+        m.U64(kFocusObj + kFocusManager, kManager);
+        m.U32(kScreen + kListEntryOffset, static_cast<std::uint32_t>(kEntryOff));
+        std::uint64_t prev_next = kScreen + kListFirst;
+        for (std::size_t i = 0; i < states.size(); ++i) {
+            const std::uint64_t entry = 0x400000 + 0x100ull * i, node = entry + static_cast<std::uint64_t>(kEntryOff);
+            const std::uint64_t button = 0x300000 + 0x400ull * i;
+            m.U64(prev_next, node);
+            m.U64(entry + kEntryButton, button);
+            m.U8(button + kButtonState, states[i]);
+            prev_next = node + 8;
+        }
+        m.U64(prev_next, kScreen + kListHead);
+    }
+    CHECK(FocusedButton(m.reader(), kScreen) == 0x300000 + 0x400ull * 100);
+}
+
+TEST_CASE("mod screens: a list that never comes back to its head stops after kMaxButtons") {
     Memory m;
     m.U64(kScreen + kScreenFocus, kFocusObj);
     m.U64(kFocusObj + kFocusManager, kManager);
