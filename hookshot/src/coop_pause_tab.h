@@ -71,26 +71,26 @@ inline constexpr std::uint64_t kPaneOwnY = 0x70, kPaneScreenY = 0x50, kPaneScree
 // strip's "text in" animation fades, from 0 to 1 in about 250 ms as the strip opens (seen in a run, 2026-11-19, on the
 // fourth tab's N_MenuChangeTextIn_00). kPaneAlpha takes it as its pane.
 inline constexpr std::uint64_t kTextAlphaBlock = 0xb0, kTextAlpha = 0xb0 + 0x74;
-inline constexpr float kFollowMost = 200.0f;
+inline constexpr float kFollowMost = 200.0f;   // the most our tab is moved from its own place to follow the fourth
 // (pane): the pane's place marked changed (bit 0x40 of its first word) and its matrices made again, as the game's own
 // place setter (main+0x20a3e0: (pane, x, y, z)) ends for a part after storing x and y at +0x6c; nothing for a pane whose
 // +0xa8 lacks bit 20. Read from main, 2026-11-19: a place written without it stays where it was drawn.
-inline constexpr std::uint64_t kPaneMoved = 0x152af50;   // the most our tab is moved from its own place to follow the fourth
-inline constexpr std::uint64_t kTabOpen = 0x208350;
-// (screen, const char* name) -> bit 0: started. A screen's own menu sound by name, as the game's screens start theirs:
-// xlink2's searchAndEmit on the screen's xlink user ([screen+0x198]+8; "searchAndEmit(%s)"). Seen in a run,
-// 2026-11-19: the strip starts "mc_TabToRight" / "mc_TabToLeft" when L and R change its tab, the pages "button_on" at a
-// cursor step and "button_decide" at a choice.
-inline constexpr std::uint64_t kScreenSound = 0x43e400;    // (tab, 0): the tab's part opened and shown, as the game's fill
+inline constexpr std::uint64_t kPaneMoved = 0x152af50;
+inline constexpr std::uint64_t kTabOpen = 0x208350;    // (tab, 0): the tab's part opened and shown, as the game's fill
                                                        //  ends for each of its tabs (else no text shows)
+// (screen, const char* name) -> bit 0: started. A screen's own menu sound by name, as the game's screens start theirs:
+// xlink2's searchAndEmit (main+0x43e400, "searchAndEmit(%s)") on the screen's xlink user ([screen+0x198]+8). Seen in
+// a run, 2026-11-19: the strip starts "mc_TabToRight" / "mc_TabToLeft" when L and R change its tab, the pages
+// "button_on" at a cursor step and "button_decide" at a choice.
+inline constexpr std::uint64_t kScreenSound = 0x43e400;
 inline constexpr std::uint64_t kMsgRefInit = 0xa66f70; // (ref): {0, 0, -1}, 24 bytes (coop_title.cpp's)
 inline constexpr std::uint64_t kMsgRefSet = 0xa6afe0;  // (ref, &"LayoutMsg/...", &"label", 1)
 inline constexpr std::uint64_t kPaneText = 0xa67d30;   // (layout, "part/T_Text_00", ref, 1, 0)
 // (path "Part/Part/Pane", layout, &layout out) -> the pane's name in the last part's layout (written to out): the game's
-// path lookup, the one kPaneText starts with (main+0x8045c4a0, read from main 2026-11-19).
+// path lookup, the one kPaneText starts with (main+0x43c4a0, read from main 2026-11-19).
 inline constexpr std::uint64_t kPathFind = 0x43c4a0;
 // (text pane, &{text, length, attributes}, 0): the pane's text, as kPaneText sets each pane it matches
-// (main+0x80459520): the text and length to its text box's set-string, which keeps them (a pointer and a length, not a
+// (main+0x439520): the text and length to its text box's set-string, which keeps them (a pointer and a length, not a
 // copy: seen in a run, 2026-11-19); the attributes kept at +0x10.
 inline constexpr std::uint64_t kPaneSetMsg = 0x439520;
 inline constexpr std::uint32_t kTextPaneKind = 2;   // a pane's kind (+0xa8 bits 22..25): a text box

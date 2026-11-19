@@ -59,6 +59,7 @@ bool g_tab_shown = false;          // our tab shown now (the strip opening, open
 // The fourth tab's place and fades at the last strip update (to take them one update ahead); none after a hide.
 bool g_follow_had = false;
 float g_follow_y = 0, g_follow_alpha = 0, g_follow_word = 0;
+float g_alpha_set = -1, g_word_set = -1;   // the alphas last set on our tab and its word (-1: none since a hide)
 
 template <class T>
 T Read(std::uint64_t a) {
@@ -160,7 +161,7 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
 
 // --- Live text: our own words in the game's text panes ---
 // The rows' text panes are tagged "=T_Btn_00" (seen in a run, 2026-11-19, on both System's buttons and ours), and the
-// game's pane-text call (kPaneText -> main+0x8045b970) sets only "@"-tagged ones: it reaches the tab's word, never a
+// game's pane-text call (kPaneText -> main+0x43b970) sets only "@"-tagged ones: it reaches the tab's word, never a
 // row (0 panes set, its own count). So the module does what that call does for each pane it sets: the pane by the
 // game's path lookup (kPathFind: the last part's layout and the name) and its name there (kPaneByName), then the
 // pane's set-message call (kPaneSetMsg) with a reference {text, length in bytes, the message's attributes}, the
@@ -375,6 +376,16 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     g_pages_layout = f.layout;
     LOG_INFO(Core, "coop: pause tab: the pages' panes: Pa_System_00 {:#x}, Pa_Coop_00 {:#x}{}", g_system_pane,
              g_coop_pane, g_pages_ok ? "" : " (not both parts: the Multiplayer page stays off; is the pack's layout in?)");
+    if (g_pages_ok) {
+        // The rows say what they do only through the live texts (the pack's Coop_Live_NN): a pack without them would
+        // show its fixed words over rows that do other things, so the page stays off then, as without its panes.
+        std::lock_guard lock(g_live_mutex);
+        if (!LiveLookup(ctx, 0, gen) && g_live[0].bad) {
+            g_pages_ok = false;
+            LOG_INFO(Core, "coop: pause tab: the pack has no live texts (Coop_Live_00): the Multiplayer page stays off "
+                           "(build the puppet pack again)");
+        }
+    }
 }
 
 // The strip's fifth tab, the same way.
@@ -382,6 +393,7 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     if (gen != g_strip_gen) {
         g_strip_gen = gen, g_strip_looked = false, g_strip_ok = false, g_tab_pane = 0;
         g_fourth_pane = 0, g_fourth_word = 0, g_tab_word = 0, g_tab_shown = false, g_follow_had = false;
+        g_alpha_set = g_word_set = -1;
     }
     if (g_strip_looked || !calls || f.layout == 0) return;
     g_strip_looked = true;
@@ -408,21 +420,14 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
         SetVisible(ctx, g_system_pane, !d.page_shown);
     }
     if (d.set_texts) {
-        int set = 0;
-        for (int i = 0; i < kRows; ++i) {
-            char path[64], label[64];
-            std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_Button_%02d/T_Btn_00", i);
-            std::snprintf(label, sizeof label, "Pa_Coop_00-Pa_Button_%02d-T_Btn_00", i);
-            set += SetText(ctx, layout, path, "LayoutMsg/PlusMenu_00", label) ? 1 : 0;
-        }
+        // (the rows' words are the live texts', LiveRows: the pane-text call never reaches their "=T_Btn_00" panes)
         // Inside our copy: its controller picture (System's, not ours) hidden.
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
         const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
         const std::uint64_t controller = PaneIn(ctx, ours, "Pa_SystemController_00");
         if (IsPart(controller)) SetVisible(ctx, controller, false);
-        LOG_INFO(Core, "coop: pause tab: the page's rows: {} of {} texts set; its controller picture {}", set, kRows,
-                 IsPart(controller) ? "hidden" : "not found");
+        LOG_INFO(Core, "coop: pause tab: the page's controller picture {}", IsPart(controller) ? "hidden" : "not found");
     }
 }
 
@@ -433,7 +438,7 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
     if (layout == 0 || tabs == 0 || !g_strip_ok) return;
     SetVisible(ctx, g_tab_pane, d.tab_shown);
-    if (!d.tab_shown) g_follow_had = false;
+    if (!d.tab_shown) g_follow_had = false, g_alpha_set = g_word_set = -1;
     g_tab_shown = d.tab_shown;
     if (!d.tab_shown) return;
     const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
@@ -480,10 +485,17 @@ void FollowFourth(void* ctx) {
         CoopRuntime::Write(g_tab_pane + kPaneOwnY, &want_y, sizeof want_y);
         Call(ctx, kPaneMoved, g_tab_pane);
     }
-    CallAlpha(ctx, g_tab_pane, std::clamp(want_alpha, 0.0f, 1.0f));
+    // (the alphas only when they change, as the height: the strip settled, nothing is called)
+    if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); a != g_alpha_set) {
+        CallAlpha(ctx, g_tab_pane, a);
+        g_alpha_set = a;
+    }
     // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
     if (g_fourth_word != 0 && g_tab_word != 0) {
-        CallAlpha(ctx, g_tab_word + kTextAlphaBlock, std::clamp(want_word, 0.0f, 1.0f));
+        if (const float w = std::clamp(want_word, 0.0f, 1.0f); w != g_word_set) {
+            CallAlpha(ctx, g_tab_word + kTextAlphaBlock, w);
+            g_word_set = w;
+        }
     }
 }
 
