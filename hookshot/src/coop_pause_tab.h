@@ -136,6 +136,7 @@ private:
     int page_set_ = -1;
     bool texts_set_ = false;
     int tab_key_ = -1;
+    bool tab_filled_ = false;   // the fifth tab filled in this opening of the strip
 };
 
 // The rows (Pa_Button_00..04): Session, Join code, Players, Let in, Leave. Each A leads to co-op's own parts, until

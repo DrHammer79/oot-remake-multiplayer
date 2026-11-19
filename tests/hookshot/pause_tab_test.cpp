@@ -76,6 +76,25 @@ TEST_CASE("pause tab: the screens are known by their class's vtable") {
     CHECK(0x80020000 + kPaneByName == 0x8045e300);
 }
 
+TEST_CASE("pause tab: the fifth tab comes in with the strip's opening, filled once per opening") {
+    Page p;
+    auto d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), 1000);   // (closed)
+    CHECK_FALSE(d.tab_shown);
+    CHECK_FALSE(d.fill_tab);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 1016);   // (opening: with the game's four)
+    CHECK(d.set_tabs);
+    CHECK(d.tab_shown);
+    CHECK(d.fill_tab);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), 1300);   // (open: not filled again)
+    CHECK(d.set_tabs);
+    CHECK(d.tab_shown);
+    CHECK_FALSE(d.fill_tab);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), 2000);   // (closing: hidden)
+    CHECK_FALSE(d.tab_shown);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 3000);   // (the next opening: filled again)
+    CHECK(d.fill_tab);
+}
+
 TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L gives System back") {
     Page p;
     std::uint64_t now = 1000;

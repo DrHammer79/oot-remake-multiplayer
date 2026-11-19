@@ -89,18 +89,22 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
     }
     case Kind::kStrip: {
         if (f.screen != strip_screen_) {
-            strip_screen_ = f.screen, tab_key_ = -1;
+            strip_screen_ = f.screen, tab_key_ = -1, tab_filled_ = false;
         }
         strip_ = f, strip_ms_ = now_ms;
         if (shown_ && !CanShow(now_ms)) {
             Hide(f.mode != kPlusMode ? "the Minus menu" : "the tab strip is closing");
         }
-        const bool visible = f.tabs == 5 && f.mode == kPlusMode && f.state == 2;
+        // (shown from the strip's opening on, as the game's four tabs are: shown only once it was open, the fifth
+        // came in a moment after them. Filled once per opening: a fill again restarts the tab's own opening.)
+        const bool visible = f.tabs == 5 && f.mode == kPlusMode && (f.state == 1 || f.state == 2);
         const int key = (visible ? 1 : 0) | (shown_ ? 2 : 0) | ((f.lit & 0xff) << 2) | ((f.state & 0xf) << 10) |
                         ((f.mode & 0xf) << 14);
         if (f.tabs == 5 && key != tab_key_) {
             tab_key_ = key;
-            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && shown_, d.fill_tab = visible;
+            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && shown_;
+            d.fill_tab = visible && !tab_filled_;
+            tab_filled_ = visible;
         }
         return d;
     }
