@@ -1175,3 +1175,28 @@ TEST_CASE("pause tab: the Session view says why the page's Host or Join did not 
     rows = RowTexts(View::kSession, v);
     CHECK(rows[0] == "Not in a session");
 }
+
+TEST_CASE("pause tab: a guest the host's game turned away: the rows say so and why, and to Leave, then join again") {
+    SessionView v;
+    v.s.in_one = true;   // (co-op is still on until Leave, as co-op's menu says)
+    v.turned_away = "the host took you out of the game";
+    CHECK(RowTexts(v)[kRowSession] == "Turned away: A says why");
+    CHECK(ActionFor(kRowSession, v.s) == RowAction::kViewSession);
+    CHECK(ActionFor(kRowLeave, v.s) == RowAction::kConfirmLeave);
+    auto rows = RowTexts(View::kSession, v);
+    CHECK(rows[0] == "Turned away:");
+    std::string all;
+    for (int r = 1; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
+    CHECK(all.find("took you out") != std::string::npos);
+    CHECK(all.find("then join again") != std::string::npos);
+    v.banned = true;
+    rows = RowTexts(View::kSession, v);
+    all.clear();
+    for (int r = 1; r < 4; ++r) all += rows[static_cast<std::size_t>(r)] + " ";
+    CHECK(all.find("join again") == std::string::npos);   // (a ban: joining again cannot work)
+    CHECK(RowTexts(View::kJoin, v)[0] == "Turned away: Leave first");
+    CHECK(RowTexts(View::kLanGame, v)[1] == "Turned away: Leave first");
+    for (const View w : {View::kMain, View::kSession, View::kJoin, View::kLanGame}) {
+        for (const std::string& r : RowTexts(w, v)) CHECK(r.size() <= kRowChars);
+    }
+}

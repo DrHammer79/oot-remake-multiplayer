@@ -555,6 +555,8 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     std::vector<std::string> rows(kRows);
     if (v.s.failed && !v.s.in_one) {
         rows[kRowSession] = "Co-op failed: A says why";
+    } else if (!v.turned_away.empty()) {
+        rows[kRowSession] = "Turned away: A says why";   // (co-op is still on: Leave, then join again)
     } else if (v.connecting) {
         rows[kRowSession] = "Connecting...";
     } else if (v.s.hosting) {
@@ -640,7 +642,9 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
     case View::kLanGame:
         rows[0] = v.lan_game;
         if (v.s.in_one || v.s.by_launcher) {
-            rows[1] = v.s.by_launcher ? "Co-op came with the game" : "In a session already";
+            rows[1] = v.s.by_launcher            ? "Co-op came with the game"
+                      : !v.turned_away.empty() ? "Turned away: Leave first"
+                                               : "In a session already";
             break;
         }
         rows[1] = "Password: " + (v.password_field.empty() && v.typing != 1 ? std::string("A to type it") : v.password_field);
@@ -679,7 +683,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         break;
     case View::kJoin:
-        rows[0] = v.s.by_launcher ? "Co-op came with the game" : v.s.in_one ? "In a session already" : "Paste code and join";
+        rows[0] = v.s.by_launcher            ? "Co-op came with the game"
+                  : !v.turned_away.empty() ? "Turned away: Leave first"
+                  : v.s.in_one             ? "In a session already"
+                                           : "Paste code and join";
         if (!v.s.in_one && !v.s.by_launcher) {
             // (the fields: the row's label, then what was typed, the letter at the cursor in brackets while typing)
             rows[1] = "Room: " + (v.room_field.empty() && v.typing != 0 ? std::string("A to type its name") : v.room_field);
@@ -723,9 +730,13 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             break;
         }
         std::size_t first = 1;   // (the rows co-op's own line, its problem or hint, may take: first .. the last free)
+        std::string why = v.why;
         if (v.s.failed && !v.s.in_one) {
             rows[0] = "Co-op failed:";
             if (!v.s.by_launcher) rows[3] = "Host again";
+        } else if (!v.turned_away.empty()) {
+            rows[0] = "Turned away:";   // (the host's game: kicked, banned, full...; as co-op's menu says it)
+            why = v.turned_away + "." + (v.banned ? " Leave." : " Leave, then join again.");
         } else if (!v.note.empty()) {
             rows[0] = v.note;
         } else if (v.s.wait_host) {
@@ -746,8 +757,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         if (v.s.in_one && v.s.can_resync) rows[3] = "Resync from host";
         const std::size_t last = rows[3].empty() ? 4 : 3;
-        const std::vector<std::string> why = Wrap(v.why, last - first);
-        for (std::size_t i = 0; i < why.size(); ++i) rows[first + i] = why[i];
+        const std::vector<std::string> lines = Wrap(why, last - first);
+        for (std::size_t i = 0; i < lines.size(); ++i) rows[first + i] = lines[i];
         break;
     }
     }

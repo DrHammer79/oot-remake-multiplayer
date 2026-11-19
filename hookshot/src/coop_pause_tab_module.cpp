@@ -28,6 +28,7 @@
 #include "coop_lobby_game.h"
 #include "coop_lobby.h"
 #include "coop_save.h"
+#include "coop_title_menu.h"
 
 namespace CoopPauseTab {
 
@@ -322,6 +323,10 @@ SessionView ViewNow(View view) {
     v.confirm_kick = Confirming(View::kPlayerHost, 2);
     v.confirm_ban = Confirming(View::kPlayerHost, 3);
     const CoopLobby::Seen seen = CoopLobby::Now();
+    if (!v.s.hosting && !seen.refused.empty()) {   // (turned away: co-op's menu says "Press Leave, then join again")
+        v.turned_away = CoopTitleMenu::ShortReason(seen.refused);
+        v.banned = seen.banned;
+    }
     v.players = seen.connected ? static_cast<int>(seen.players.size()) : 0;
     v.s.listed = v.players;
     v.s.page = g_players_page.load();
@@ -652,7 +657,10 @@ void Act(int row) {
         break;
     case RowAction::kResync: CoopSave::RequestResync(); break;   // (the chat says how it goes)
     case RowAction::kDeny: CoopHook::SendChat("/deny"); break;   // (its answer shows in the chat)
-    case RowAction::kJoinPaste: CoopPause::JoinPasteNow(); break;
+    case RowAction::kJoinPaste:
+        SetView(View::kMain);   // (a join asked: the five rows follow it; a refusal shows the Session view, FollowSays)
+        CoopPause::JoinPasteNow();
+        break;
     case RowAction::kViewLan:
         g_lan_page = 0;
         SetView(View::kLan);
@@ -681,7 +689,10 @@ void Act(int row) {
             g_page.Field(1).Clear();   // (not kept once used, as after a room's join)
             g_live_poke = true;
         }
-        if (!pick.address.empty()) CoopPause::JoinLanNow(pick.address, pick.port, password);
+        if (!pick.address.empty()) {
+            SetView(View::kMain);
+            CoopPause::JoinLanNow(pick.address, pick.port, password);
+        }
         break;
     }
     case RowAction::kAutoRejoin: CoopPause::SetAutoRejoin(!CoopPause::AutoRejoin()); break;
@@ -701,10 +712,14 @@ void Act(int row) {
             g_page.Field(1).Clear();   // (the password is not kept once used; the room name stays for a retry)
             g_live_poke = true;
         }
-        CoopPause::JoinRoomNow(room, password);   // (a refused or failed join: co-op's menu says why)
+        SetView(View::kMain);
+        CoopPause::JoinRoomNow(room, password);   // (refused: the Session view says why, FollowSays)
         break;
     }
-    case RowAction::kRejoin: CoopPause::RejoinNow(); break;
+    case RowAction::kRejoin:
+        SetView(View::kMain);
+        CoopPause::RejoinNow();
+        break;
     case RowAction::kHost: CoopPause::HostNow(); break;
     case RowAction::kConfirmLeave:
         if (SecondA(view, row)) {

@@ -371,6 +371,9 @@ struct SessionView {
     bool room_ready = false, relay_set = false;
     std::vector<std::string> lan_rows;    // the games on this network, as their rows say them (CoopLan::RowText)
     std::string lan_game;                 // a game's view: the game picked, as its row said it
+    std::string turned_away;              // a guest the host's game turned away (kicked, banned, full: the Lobby's
+                                          // refusal, its short reason), "" not; Leave, then join again
+    bool banned = false;                  // (by the host's ban: joining again cannot work)
     std::string host_password;            // the host's Session view: the join password, once A asked for it
     std::string says;                     // the Session view: why the page's last Host or Join did not start
                                           // (CoopPause::PageSays), while that view shows after it; "" none
