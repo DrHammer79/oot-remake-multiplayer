@@ -245,6 +245,16 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
 }
 
 std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
+    // The whole game stalled: no pad call and no screen update came for a while (a run: a game frozen for 40 s;
+    // a shader build or a save can take a few hundred ms). The screens are as fresh as they were before it, so their
+    // times move on by the gap; this first call after it would otherwise find them stale and give System back with
+    // the menu still open. Screens that stop while the pad's calls go on are still stale after kStaleMs.
+    if (pad_ms_ != 0 && now_ms > pad_ms_ + kStaleMs) {
+        const std::uint64_t gap = now_ms - pad_ms_;
+        if (pages_ms_ != 0) pages_ms_ = std::min(now_ms, pages_ms_ + gap);
+        if (strip_ms_ != 0) strip_ms_ = std::min(now_ms, strip_ms_ + gap);
+    }
+    pad_ms_ = now_ms;
     const std::uint64_t down = buttons & ~pad_last_;
     pad_last_ = buttons;
     swallow_ &= buttons;   // (let go: the game gets it again)

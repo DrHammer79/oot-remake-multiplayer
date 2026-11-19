@@ -227,6 +227,7 @@ private:
     bool shown_ = false;
     bool again_ = false;          // shown again at the menu's next opening (it closed with our page shown)
     std::uint64_t pad_last_ = 0;
+    std::uint64_t pad_ms_ = 0;   // the pad's last call: one later than kStaleMs is the whole game stalled (OnPad)
     std::uint64_t swallow_ = 0;   // buttons the module took, kept from the game until let go
     bool decide_ = false;
     const char* strip_sound_ = nullptr;

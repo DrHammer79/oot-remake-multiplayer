@@ -1199,4 +1199,24 @@ TEST_CASE("pause tab: a guest the host's game turned away: the rows say so and w
     for (const View w : {View::kMain, View::kSession, View::kJoin, View::kLanGame}) {
         for (const std::string& r : RowTexts(w, v)) CHECK(r.size() <= kRowChars);
     }
+TEST_CASE("pause tab: a stall of the whole game keeps the page, screens that stop while the pad goes on do not") {
+    Page p = UsablePage();
+    std::uint64_t now = 1000;
+    OnSystem(p, now);
+    p.OnPad(0, now);
+    CHECK(p.OnPad(kPadR, now + 16) == 0);
+    CHECK(p.Shown());
+    OnSystem(p, now + 32);
+    p.OnPad(0, now + 32);
+    // 40 s with no pad call and no screen update (a run froze the game that long): still ours.
+    now += 32 + 40000;
+    p.OnPad(0, now);
+    CHECK(p.Shown());
+    OnSystem(p, now + 16);
+    p.OnPad(0, now + 16);
+    CHECK(p.Shown());
+    // The screens stop while the pad's calls go on: System back once they are stale.
+    std::uint64_t t = now + 32;
+    for (; t < now + 32 + 400; t += 16) p.OnPad(0, t);
+    CHECK_FALSE(p.Shown());
 }
