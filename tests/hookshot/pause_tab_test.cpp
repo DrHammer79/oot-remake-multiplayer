@@ -89,7 +89,10 @@ TEST_CASE("pause tab: the fifth tab comes in with the strip's opening, filled on
     CHECK(d.set_tabs);
     CHECK(d.tab_shown);
     CHECK_FALSE(d.fill_tab);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), 2000);   // (closing: hidden)
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), 2000);   // (closing: fading out with the four)
+    CHECK(d.tab_shown);
+    CHECK_FALSE(d.fill_tab);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), 2300);   // (closed: hidden)
     CHECK_FALSE(d.tab_shown);
     d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 3000);   // (the next opening: filled again)
     CHECK(d.fill_tab);

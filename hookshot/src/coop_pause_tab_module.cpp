@@ -6,8 +6,10 @@
 // tests drive Page and Probe themselves).
 #include "coop_pause_tab.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -34,6 +36,9 @@ std::atomic<std::uint64_t> g_confirm_until{0};
 // Panes found, per screen object (0: not looked up yet or not there).
 std::uint64_t g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
 std::uint64_t g_strip_screen = 0, g_tab_pane = 0;
+std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), which ours follows in the strip's animation
+float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
+bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
 bool g_pages_bad = false, g_strip_bad = false;   // a pane that is not a part: the page step stays off (logged once)
 
 template <class T>
@@ -299,12 +304,16 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     if (f.screen != g_strip_screen) {
         g_strip_screen = f.screen;
         g_tab_pane = FindOwnPane(ctx, layout, "Pa_Category_04");
+        g_fourth_pane = FindOwnPane(ctx, layout, "Pa_Category_03");
+        g_tab_rest_y = IsPart(g_tab_pane) ? Read<float>(g_tab_pane + kPaneOwnY) : 0;
+        g_tab_shown = false;
         g_strip_bad = !IsPart(g_tab_pane);
         LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}", g_tab_pane,
                  g_strip_bad ? " (not a part: left alone)" : "");
     }
     if (g_strip_bad) return;
     SetVisible(ctx, g_tab_pane, d.tab_shown);
+    g_tab_shown = d.tab_shown;
     if (!d.tab_shown) return;
     const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
     if (tab3 == 0 || tab4 == 0) return;
@@ -325,6 +334,20 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     }
     Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
+}
+
+// Our tab through the strip's opening and closing, as the game's four: the strip's animation moves and fades the
+// parent of the game's tabs (seen in a run, 2026-11-19: the fourth tab's place on the screen, +0x50, from 1024 down to
+// 1000 in 300 ms as the strip opens, and its alpha with its parents', +0x78, from 0.16 to 1), and ours sits under
+// RootPane, out of that parent. So at each strip update ours takes the fourth's height (its own place, +0x70: RootPane
+// is the screen's origin) and alpha (the alpha setter, which also marks the pane for its new place). Not when the two
+// are far apart (not the strip seen: ours stays where the pack put it).
+void FollowFourth(void* ctx) {
+    if (!g_tab_shown || g_fourth_pane == 0 || g_strip_bad) return;
+    const float y = Read<float>(g_fourth_pane + kPaneScreenY), alpha = Read<float>(g_fourth_pane + kPaneScreenAlpha);
+    if (!std::isfinite(y) || !std::isfinite(alpha) || std::fabs(y - g_tab_rest_y) > kFollowMost) return;
+    CoopRuntime::Write(g_tab_pane + kPaneOwnY, &y, sizeof y);
+    CallAlpha(ctx, g_tab_pane, std::clamp(alpha, 0.0f, 1.0f));
 }
 
 // The System page's focused button (0..4), the row of ours under the game's cursor frame; -1 when none is.
@@ -420,6 +443,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                 if (f.kind == Kind::kPages) ApplyPages(ctx, screen, d);
                 if (f.kind == Kind::kStrip) ApplyStrip(ctx, f, d);
             }
+            if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
         }
         for (const std::string& line : lines) LOG_INFO(Core, "{}", line);
         if (was && !now_shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);

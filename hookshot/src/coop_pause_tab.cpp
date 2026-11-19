@@ -95,9 +95,10 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         if (shown_ && !CanShow(now_ms)) {
             Hide(f.mode != kPlusMode ? "the Minus menu" : "the tab strip is closing");
         }
-        // (shown from the strip's opening on, as the game's four tabs are: shown only once it was open, the fifth
-        // came in a moment after them. Filled once per opening: a fill again restarts the tab's own opening.)
-        const bool visible = f.tabs == 5 && f.mode == kPlusMode && (f.state == 1 || f.state == 2);
+        // (shown from the strip's opening to the end of its closing, as the game's four tabs are: shown only once
+        // it was open, the fifth came in a moment after them; the module moves and fades it with the fourth. Filled
+        // once per opening: a fill again restarts the tab's own opening.)
+        const bool visible = f.tabs == 5 && f.mode == kPlusMode && f.state >= 1 && f.state <= 3;
         const int key = (visible ? 1 : 0) | (shown_ ? 2 : 0) | ((f.lit & 0xff) << 2) | ((f.state & 0xf) << 10) |
                         ((f.mode & 0xf) << 14);
         if (f.tabs == 5 && key != tab_key_) {
