@@ -136,6 +136,9 @@ class CellsTest(unittest.TestCase):
         # (the game's buttons override panes of their part: its two override lists, at +0x08 and +0x18, not empty)
         src = next(p for p in ui_pack.read_layout(bytes(d))[1] if p.name == "Pa_Button_00").record
         struct.pack_into("<QII", d, src + 0x08, 0x10, 1, 8)
+        props = ui_pack._q(bytes(d), src + 0x38)   # (and a properties list that is not empty)
+        if props:
+            struct.pack_into("<QI", d, props, 0x20, 2)
         d = bytes(d)
         n = pm.add_cells(d)
         panes, parts = ui_pack.read_layout(n)
@@ -149,7 +152,10 @@ class CellsTest(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", n, panes[len(SYSTEM) + i].record + 0x38)[0] & 1, 0)   # hidden
             self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-pm.CELLS + i].record)[0]),
                              "PaCommonBtnThin_00")
-            self.assertEqual(n[parts[-pm.CELLS + i].record + 0x08:parts[-pm.CELLS + i].record + 0x28], bytes(0x20))
+            rec = parts[-pm.CELLS + i].record
+            self.assertEqual(n[rec + 0x08:rec + 0x28], bytes(0x20))
+            mine = ui_pack._q(n, rec + 0x38)
+            self.assertTrue(mine == 0 or not any(n[mine:mine + 16]))   # (no properties)
         self.assertEqual(struct.unpack_from("<QII", n, src + 0x08), (0x10, 1, 8))   # (the game's button keeps its own)
         with self.assertRaises(ui_pack.UiPackError):   # (a copy that would keep them is still refused)
             ui_pack.clone_parts(d, [ui_pack.Copy("Pa_Button_00", "Pa_Other_00")])

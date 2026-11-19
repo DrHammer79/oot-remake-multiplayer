@@ -81,9 +81,10 @@ class Copy(NamedTuple):
     parameters ({name: float}), the pane it goes under (None: the source's parent), and whether it is
     stored hidden (bit 0 of its kind word cleared, as on the game's own panes that start hidden: a
     co-op module shows it, and a game without that module looks as it always did), and whether the
-    source part's two override lists are left off the copy (they are not copied: a copy of a part that
-    has them is refused unless it goes without, showing its part layout's own defaults where the
-    source overrode them; the module then sets what it needs, as the browser's cells' words)."""
+    source part's two override lists and its properties list are left off the copy (they are not
+    copied: a copy of a part that has them is refused unless it goes without, showing its part
+    layout's own defaults where the source overrode them; the module then sets what it needs, as the
+    browser's cells' words)."""
     source: str
     name: str
     move: tuple = (0.0, 0.0)
@@ -320,7 +321,7 @@ def _clone(d, panes, parts, copies, new_id, out_of_order):
         if any(d[rec + 0x08:rec + 0x28]) and not c.drop_overrides:
             raise UiPackError("%s overrides panes of its part (+0x08, +0x18), which is not copied here" % c.source)
         props = _q(d, rec + 0x38)
-        if props and any(d[props:props + 16]):
+        if props and any(d[props:props + 16]) and not c.drop_overrides:
             raise UiPackError("%s has a properties list, which is not copied here" % c.source)
         plist, pcount, pstride = _q(d, rec + 0x28), _u32(d, rec + 0x30), _u32(d, rec + 0x34)
         if pcount and pstride != 8:
@@ -409,7 +410,7 @@ def _clone(d, panes, parts, copies, new_id, out_of_order):
             struct.pack_into("<Q", p, 0x28, put(_q8(own)))
         props = _q(d, src + 0x38)
         if props:
-            struct.pack_into("<Q", p, 0x38, put(d[props:props + 16]))
+            struct.pack_into("<Q", p, 0x38, put(bytes(16) if c.drop_overrides else d[props:props + 16]))
         struct.pack_into("<Q", p, 0x40, n0 + i)
         part_recs.append(put(bytes(p)))
     keys, values, idarr, n = _dict(d, root + _PARTS)
