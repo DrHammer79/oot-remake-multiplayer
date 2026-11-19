@@ -86,12 +86,24 @@ inline constexpr std::uint64_t kScreenSound = 0x43e400;    // (tab, 0): the tab'
 inline constexpr std::uint64_t kMsgRefInit = 0xa66f70; // (ref): {0, 0, -1}, 24 bytes (coop_title.cpp's)
 inline constexpr std::uint64_t kMsgRefSet = 0xa6afe0;  // (ref, &"LayoutMsg/...", &"label", 1)
 inline constexpr std::uint64_t kPaneText = 0xa67d30;   // (layout, "part/T_Text_00", ref, 1, 0)
+// (path "Part/Part/Pane", layout, &layout out) -> the pane's name in the last part's layout (written to out): the game's
+// path lookup, the one kPaneText starts with (main+0x8045c4a0, read from main 2026-11-19).
+inline constexpr std::uint64_t kPathFind = 0x43c4a0;
+// (text pane, &{text, length, attributes}, 0): the pane's text, as kPaneText sets each pane it matches
+// (main+0x80459520): the text and length to its text box's set-string, which keeps them (a pointer and a length, not a
+// copy: seen in a run, 2026-11-19); the attributes kept at +0x10.
+inline constexpr std::uint64_t kPaneSetMsg = 0x439520;
+inline constexpr std::uint32_t kTextPaneKind = 2;   // a pane's kind (+0xa8 bits 22..25): a text box
 
 // Switch pad bits (nn::hid::NpadButton), as hos_coop_pad gets them.
 inline constexpr std::uint64_t kPadA = 1ull << 0, kPadB = 1ull << 1, kPadL = 1ull << 6, kPadR = 1ull << 7,
                                kPadZL = 1ull << 8, kPadZR = 1ull << 9, kPadPlus = 1ull << 10, kPadMinus = 1ull << 11,
                                kPadUp = 1ull << 13, kPadDown = 1ull << 15, kPadStickUp = 1ull << 17,
                                kPadStickDown = 1ull << 19;
+// A text field's own buttons (nn::hid's NpadButton bits: X, Y, the d-pad's left and right, the left stick's left and
+// right), taken from the game while the field is typed into.
+inline constexpr std::uint64_t kPadX = 1ull << 2, kPadY = 1ull << 3, kPadLeft = 1ull << 12, kPadRight = 1ull << 14,
+                               kPadStickLeft = 1ull << 16, kPadStickRight = 1ull << 18;
 // What the game still gets while our page shows: closing the menu, the Minus menu, and up and down, which move the
 // System page's focus under ours: the game's own cursor frame (drawn where the focused button is, and our rows sit
 // where System's buttons do) moves over our rows, with its sound (seen in a run, 2026-11-18). A is ours: the row is the
@@ -113,6 +125,39 @@ struct Facts {
     int state = 0;
     int tabs = 0, mode = 0, lit = 0;   // the strip's
     int page = -1, asked = -1;         // the pages' (the menu manager's)
+};
+
+// A text field on the page's rows. The game has no text entry or keyboard of its own (docs/game-ui.md), so a pad types
+// by cycling the letter under the cursor (Up, Down), moving along the text (Left, Right) and deleting (Y); a keyboard
+// types into it (its characters, Backspace, Delete, the arrows). A room name: letters, digits, - and _ (the relay
+// takes them in any case), 3 to 24. A join password: any printable character but a space, at most 128.
+class TextField {
+public:
+    enum class Kind { kRoom, kPassword };
+    explicit TextField(Kind kind) : kind_(kind) {}
+    Kind kind() const { return kind_; }
+    const std::string& text() const { return text_; }
+    std::size_t cursor() const { return cursor_; }
+    std::size_t Max() const { return kind_ == Kind::kRoom ? 24 : 128; }
+    // A room name the relay takes (3 or more of its letters); a password: any, none included.
+    bool Ready() const { return kind_ == Kind::kRoom ? text_.size() >= 3 : true; }
+    bool Allowed(char c) const;
+    // The letters a pad cycles through, in order.
+    const std::string& Letters() const;
+    void Cycle(int dir);      // +1 Up, -1 Down: the letter at the cursor (after the last: a new one, the first letter)
+    void Move(int dir);       // -1 Left, +1 Right: within the text, and one past its end while it can still grow
+    void Delete();            // the letter at the cursor (past the end: the last one)
+    void Backspace();         // the letter before the cursor
+    bool Type(std::uint32_t cp);   // a typed character at the cursor (a room name lower-cased): true when taken
+    void Clear() { text_.clear(), cursor_ = 0; }
+    // What its row shows after its label: the text, the letter at the cursor in brackets while it is typed into; a
+    // password as * but for that letter. At most `room` bytes, scrolled to keep the cursor in view.
+    std::string Shown(bool typing, std::size_t room) const;
+
+private:
+    Kind kind_;
+    std::string text_;
+    std::size_t cursor_ = 0;
 };
 
 // The page: when it shows, and what the module does to the game on each screen's update.
@@ -159,7 +204,21 @@ public:
     const char* TakeStripSound();
     const char* TakePagesSound();
 
+    // The Join view's two fields (the room name, the join password) and which one is typed into (-1: none). While one
+    // is, the pad's buttons are all the page's (none reach System) and the keyboard's keys are the field's (Key, Char).
+    TextField& Field(int which) { return which == 1 ? password_ : room_; }
+    const TextField& Field(int which) const { return which == 1 ? password_ : room_; }
+    void StartTyping(int which);
+    int Typing() const { return typing_; }
+    bool Key(std::uint32_t vk, bool repeat);   // a Windows virtual-key code while typing: true when the field took it
+    bool Char(std::uint32_t cp);               // a typed character while typing
+
 private:
+    void TypingPad(std::uint64_t down, std::uint64_t held, std::uint64_t now_ms);
+    TextField room_{TextField::Kind::kRoom}, password_{TextField::Kind::kPassword};
+    int typing_ = -1;
+    std::uint64_t repeat_since_ = 0, repeat_last_ = 0;   // a held direction: when it went down, its last step
+
     bool CanShow(std::uint64_t now_ms) const;
     bool CanStay(std::uint64_t now_ms) const;
     void ShowAgain(std::uint64_t now_ms);
@@ -234,6 +293,9 @@ enum class RowAction {
     kHostChat,       // the host: their chat muted for everyone
     kKick,           // the host: out of the game, after a second A (kConfirmMs)
     kBan,            // the host: out for this session, after a second A
+    kTypeRoom,       // the Join view: type the room name on the row (A or B ends it)
+    kTypePassword,   // the Join view: type the join password on the row
+    kJoinRoom,       // the Join view: join that room on the kit's relay, with that password
 };
 inline constexpr std::uint64_t kConfirmMs = 3000;
 // proto::lobby_mute's bits (CoopLobby's kVoice, kChat; the module checks they match).
@@ -250,6 +312,7 @@ struct Session {
                                 // stopped here; Session and Leave open co-op's main page, whose help says why
     bool failed = false;    // the last Host or Join did not work (co-op's main page says why)
     bool rejoin = false;    // a last game's code is kept (coop.ini last_invite): the Join view's "Join <host> again"
+    bool room_ready = false;    // the Join view's room name is long enough to join (TextField::Ready)
     bool can_resync = false;    // a guest whose game can take the host's save again (CoopSave::CanResync)
     int listed = 0;         // the Players view: how many players it lists
     int page = 0;           // the Players view: its page (PlayerIndex)
@@ -289,6 +352,10 @@ struct SessionView {
     std::string player_name;          // a player's view: who
     std::uint8_t own_mutes = 0, host_mutes = 0;   // a player's view: kMuteVoice / kMuteChat bits
     bool confirm_kick = false, confirm_ban = false;   // the host's Kick or Ban waits for its second A
+    // The Join view's fields: their rows' words (TextField::Shown) and whether a relay is set to join a room through.
+    std::string room_field, password_field;
+    bool room_ready = false, relay_set = false;
+    int typing = -1;                  // the field typed into (0 the room, 1 the password), -1 none
 };
 inline constexpr std::size_t kRowChars = 40;   // the most a row's text holds (the System page's button width)
 std::vector<std::string> RowTexts(const SessionView& v);
@@ -335,5 +402,10 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept;
 std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept;
 // hos_coop_game_pause_page: Page::MousePage (4 shown, -1 can show, -2 cannot be used).
 int MousePage() noexcept;
+// The keyboard while one of the page's fields is typed into (hos_coop_key, hos_coop_char; KeysTaken: the game gets
+// none of its keys then): true when the field took it.
+bool Key(std::uint32_t vk, bool repeat) noexcept;
+bool Char(std::uint32_t cp) noexcept;
+bool KeysTaken() noexcept;
 
 }  // namespace CoopPauseTab

@@ -1085,6 +1085,30 @@ void JoinPasteNow() {
     });
 }
 
+bool RelaySet() {
+    std::lock_guard lock(g_mutex);
+    return !g_menu.options().relay.empty();
+}
+
+void JoinRoomNow(const std::string& room, const std::string& password) {
+    std::lock_guard lock(g_mutex);
+    FreshMain();
+    LOG_INFO(Core, "coop: multiplayer tab: join a room by its name from the pause menu's Multiplayer page");
+    if (g_coop_on) {
+        ShowNote();
+        return;
+    }
+    const std::string relay = g_menu.options().relay;
+    if (relay.empty()) {
+        g_menu.SetNote({"No relay is set in coop-options.ini (relay = ...), so a room name has nowhere to be found. "
+                        "Ask your host for their whole room@relay line and paste it."});
+        ShowNote();
+        return;
+    }
+    // (the line friends type into Join: "<room>@<relay> <password>", docs/play-online.md)
+    if (!Join(room + "@" + relay + (password.empty() ? std::string() : " " + password))) ShowNote();
+}
+
 bool Rejoin(std::string* host) {
     const std::string coop = ReadText(CoopIni());
     const auto code = CoopTitleMenu::IniGet(coop, "last_invite");

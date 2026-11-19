@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <utility>
 #include <string>
@@ -157,11 +158,16 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
 }
 
 // --- Live text: our own words in the game's text panes ---
-// A message reference is {text, its length in bytes, the message's attributes} (main+0xa6afe0 fills it; for a missing
-// label it points at "LabelNotFound", 13). This game's message files are UTF-8. The pack adds placeholder messages
-// (strings/en.txt: Coop_Live_00..07, 64 dots each) to LayoutMsg/PlusMenu_00: the module looks one up once, writes its
-// own words into that text (the language archive stays loaded, so the text pane may read it later) and hands the
-// game's pane-text call (kPaneText) a reference with the new length.
+// The rows' text panes are tagged "=T_Btn_00" (seen in a run, 2026-11-19, on both System's buttons and ours), and the
+// game's pane-text call (kPaneText -> main+0x8045b970) sets only "@"-tagged ones: it reaches the tab's word, never a
+// row (0 panes set, its own count). So the module does what that call does for each pane it sets: the pane by the
+// game's path lookup (kPathFind: the last part's layout and the name) and its name there (kPaneByName), then the
+// pane's set-message call (kPaneSetMsg) with a reference {text, length in bytes, the message's attributes}, the
+// attributes the pane's own (+0x10, where the call keeps them).
+// The text box keeps that text where it is (a pointer and a length, not a copy: a run with every row's text in the
+// same scratch memory showed every row the last one's words, cut to its own length), so each row's text lives in a
+// message of the pack's (strings/en.txt: Coop_Live_00..07, 64 dots each, in LayoutMsg/PlusMenu_00): the module looks
+// it up for each opening of the pages and writes its words there.
 constexpr int kLiveSlots = 8;
 constexpr std::uint32_t kLivePlaceholder = 64;   // the placeholder's bytes (strings/en.txt)
 struct LiveSlot {
@@ -223,34 +229,36 @@ bool LiveLookup(void* ctx, int slot, std::uint64_t gen) {
     return true;
 }
 
-// `utf8` (at most kLivePlaceholder - 1 bytes) in the pane at `path`, through slot `slot`. True when shown.
+// `utf8` (at most kLivePlaceholder - 1 bytes) in the text pane at `path` ("Part/Part/Pane"), through slot `slot`.
+// True when shown.
 bool LiveText(void* ctx, std::uint64_t layout, std::uint64_t gen, const std::string& path, int slot,
               const std::string& utf8) {
     LiveSlot& l = g_live[slot];
     if (l.shown == utf8) return true;
     if (path.size() >= 0x40 || utf8.size() >= kLivePlaceholder || !LiveLookup(ctx, slot, gen)) return false;
+    // [0x00] the path lookup's layout, [0x10] the path, [0x60] the reference.
+    std::uint8_t b[0x80] = {};
+    std::memcpy(b + 0x10, path.c_str(), path.size() + 1);
+    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
+    if (base == 0) return false;
+    std::uint64_t name = 0;
+    if (!Call(ctx, kPathFind, base + 0x10, layout, base, 0, 0, &name) || name == 0) return false;
+    const std::uint64_t part = Read<std::uint64_t>(base);
+    std::uint64_t table = 0, pane = 0;
+    if (part == 0 || !Call(ctx, kPaneTable, part + 0x40, 0, 0, 0, 0, &table) || table == 0) return false;
+    if (!Call(ctx, kPaneByName, table, name, 0, 0, 0, &pane) || pane == 0) return false;
+    if (((Read<std::uint32_t>(pane + 0xa8) >> 22) & 0xf) != kTextPaneKind) return false;   // (not a text pane)
     std::string bytes = utf8;
     bytes.push_back('\0');
     if (!CoopRuntime::Write(l.text, bytes.data(), bytes.size())) return false;
-    // The reference as the game makes it for the placeholder's label (every field it sets, as SetText's), then its
-    // length ours: [0x00] the reference, [0x20] &file, [0x28] &label, [0x30] file, [0x50] label, [0x90] the pane's path.
-    char label[16];
-    std::snprintf(label, sizeof label, "Coop_Live_%02d", slot);
-    const std::string file = "LayoutMsg/PlusMenu_00";
-    std::uint8_t b[0xd0] = {};
-    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
-    if (base == 0) return false;
-    const std::uint64_t at_file = base + 0x30, at_label = base + 0x50, at_path = base + 0x90;
-    std::memcpy(b + 0x20, &at_file, 8);
-    std::memcpy(b + 0x28, &at_label, 8);
-    std::memcpy(b + 0x30, file.c_str(), file.size() + 1);
-    std::memcpy(b + 0x50, label, std::strlen(label) + 1);
-    std::memcpy(b + 0x90, path.c_str(), path.size() + 1);
-    if (g_api->scratch(ctx, b, sizeof b) != base) return false;
-    if (!Call(ctx, kMsgRefInit, base) || !Call(ctx, kMsgRefSet, base, base + 0x20, base + 0x28, 1)) return false;
+    const std::uint64_t attrs = Read<std::uint64_t>(pane + 0x10);
     const std::uint32_t length = static_cast<std::uint32_t>(utf8.size()) + l.extra;
-    if (Read<std::uint64_t>(base) != l.text || !CoopRuntime::Write(base + 8, &length, sizeof length)) return false;
-    if (!Call(ctx, kPaneText, layout, at_path, base, 1, 0)) return false;
+    std::uint8_t ref[0x18] = {};
+    std::memcpy(ref + 0x00, &l.text, 8);
+    std::memcpy(ref + 0x08, &length, 4);
+    std::memcpy(ref + 0x10, &attrs, 8);
+    if (!CoopRuntime::Write(base + 0x60, ref, sizeof ref)) return false;
+    if (!Call(ctx, kPaneSetMsg, pane, base + 0x60, 0)) return false;
     l.shown = utf8;
     return true;
 }
@@ -310,7 +318,15 @@ SessionView ViewNow(View view) {
         v.own_mutes = p->own_mutes;
         v.host_mutes = p->host_mutes;
     }
-    if (view == View::kJoin) v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
+    if (view == View::kJoin) {
+        v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
+        v.relay_set = CoopPause::RelaySet();   // (co-op's own lock: before ours, never inside it)
+        std::lock_guard lock(g_mutex);   // (the fields are the page's; no other lock of ours is held here)
+        v.typing = g_page.Typing();
+        v.room_field = g_page.Field(0).Shown(v.typing == 0, kRowChars - 6);       // ("Room: ")
+        v.password_field = g_page.Field(1).Shown(v.typing == 1, kRowChars - 10);  // ("Password: ")
+        v.room_ready = v.s.room_ready = g_page.Field(0).Ready();
+    }
     if (v.s.hosting) v.asking = CoopLobby::Asking();
     v.s.asking = !v.asking.empty();
     return v;
@@ -318,13 +334,15 @@ SessionView ViewNow(View view) {
 
 // The rows' live texts while our page shows: at most every 250 ms (asked before co-op's status and the Lobby are read,
 // so they are not copied every frame), at once for a new opening of the pages; a pane only when its words changed.
+std::atomic<bool> g_live_poke{false};   // a field changed: the rows are due at their next update
+
 bool LiveDue(std::uint64_t gen) {
     std::lock_guard lock(g_live_mutex);
     const std::uint64_t now = NowMs();
     if (gen != g_live_gen) {
         g_live_gen = gen;
         for (LiveSlot& l : g_live) l.shown.clear();   // (a new opening: its panes show the pack's words again)
-    } else if (now - g_live_ms < 250) {
+    } else if (now - g_live_ms < 250 && !g_live_poke.exchange(false)) {
         return false;
     }
     g_live_ms = now;
@@ -553,6 +571,22 @@ void Act(int row) {
     case RowAction::kResync: CoopSave::RequestResync(); break;   // (the chat says how it goes)
     case RowAction::kDeny: CoopHook::SendChat("/deny"); break;   // (its answer shows in the chat)
     case RowAction::kJoinPaste: CoopPause::JoinPasteNow(); break;
+    case RowAction::kTypeRoom:
+    case RowAction::kTypePassword: {
+        std::lock_guard lock(g_mutex);
+        g_page.StartTyping(a == RowAction::kTypePassword ? 1 : 0);
+        g_live_poke = true;
+        break;
+    }
+    case RowAction::kJoinRoom: {
+        std::string room, password;
+        {
+            std::lock_guard lock(g_mutex);
+            room = g_page.Field(0).text(), password = g_page.Field(1).text();
+        }
+        CoopPause::JoinRoomNow(room, password);   // (a refused or failed join: co-op's menu says why)
+        break;
+    }
     case RowAction::kRejoin: CoopPause::RejoinNow(); break;
     case RowAction::kHost: CoopPause::HostNow(); break;
     case RowAction::kConfirmLeave:
@@ -670,7 +704,10 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         if (stick != nullptr) {   // (the left stick as up and down for our rows; nn::hid: y up)
             if (stick[1] > 20000) in |= kPadStickUp;
             if (stick[1] < -20000) in |= kPadStickDown;
+            if (stick[0] > 20000) in |= kPadStickRight;
+            if (stick[0] < -20000) in |= kPadStickLeft;
         }
+        bool typing = false;
         std::uint64_t out = 0;
         bool was = false, shown = false;
         bool decide = false;
@@ -679,7 +716,16 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         {
             std::lock_guard lock(g_mutex);
             was = g_page.Shown();
+            const int typing_was = g_page.Typing();
+            const std::uint64_t field_was = std::hash<std::string>{}(g_page.Field(0).text() + '\n' +
+                                                                     g_page.Field(1).text()) ^ g_page.Field(0).cursor() ^
+                                            (g_page.Field(1).cursor() << 8);
             out = g_page.OnPad(in, NowMs());
+            typing = g_page.Typing() >= 0;
+            const std::uint64_t field_now = std::hash<std::string>{}(g_page.Field(0).text() + '\n' +
+                                                                     g_page.Field(1).text()) ^ g_page.Field(0).cursor() ^
+                                            (g_page.Field(1).cursor() << 8);
+            if (typing_was != g_page.Typing() || field_was != field_now) g_live_poke = true;
             shown = g_page.Shown();
             decide = g_page.TakeDecide();
             row = decide ? FocusedRow() : -1;   // (under the lock: the pages screen is the screens' updates')
@@ -691,12 +737,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         }
         if (shown && stick != nullptr) {
             stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
+            if (typing) stick[1] = 0;                   // (a field typed into: the cursor stays on its row)
         }
         if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
         if (decide) Act(row);
         // (the stick's up and down bits we added are not the game's: only what it sent, filtered)
-        return out & (buttons | ~(kPadStickUp | kPadStickDown));
+        return out & (buttons | ~(kPadStickUp | kPadStickDown | kPadStickLeft | kPadStickRight));
     } catch (...) {
         return buttons;
     }
@@ -704,6 +751,37 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
 
 int MousePage() noexcept {
     return g_mouse.load();
+}
+
+bool Key(std::uint32_t vk, bool repeat) noexcept {
+    try {
+        std::lock_guard lock(g_mutex);
+        const bool taken = g_page.Key(vk, repeat);
+        if (taken) g_live_poke = true;
+        return taken;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool Char(std::uint32_t cp) noexcept {
+    try {
+        std::lock_guard lock(g_mutex);
+        const bool taken = g_page.Char(cp);
+        if (taken) g_live_poke = true;
+        return taken;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool KeysTaken() noexcept {
+    try {
+        std::lock_guard lock(g_mutex);
+        return g_page.Typing() >= 0;
+    } catch (...) {
+        return false;
+    }
 }
 
 }  // namespace CoopPauseTab

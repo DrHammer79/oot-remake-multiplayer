@@ -71,6 +71,11 @@ bool ByLauncher();
 // paste then Join; and the last game again ("Join <host> again", its code kept in coop.ini). Refused (co-op on, the
 // code not readable) or failed: the menu opens on its main page or Join page, whose note says why.
 void JoinPasteNow();
+// The page's Join view: join `room` (a room name) on the kit's relay (coop-options.ini's relay), with `password` (the
+// host's join password, "" none). No relay set, refused or failed: the menu opens, its note says why.
+void JoinRoomNow(const std::string& room, const std::string& password);
+// A relay is set in coop-options.ini (relay = ...): a room name can be joined through it.
+bool RelaySet();
 void RejoinNow();
 // A last game's code is kept (coop.ini last_invite); its host's name into `host` (may be null; "" when not known).
 bool Rejoin(std::string* host);

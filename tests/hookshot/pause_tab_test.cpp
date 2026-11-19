@@ -83,6 +83,8 @@ TEST_CASE("pause tab: the screens are known by their class's vtable") {
     CHECK(0x80020000 + kTabOpen == 0x80228350);
     CHECK(0x80020000 + kPaneMoved == 0x8154af50);
     CHECK(0x80020000 + kScreenSound == 0x8045e400);
+    CHECK(0x80020000 + kPathFind == 0x8045c4a0);
+    CHECK(0x80020000 + kPaneSetMsg == 0x80459520);
     CHECK(0x80020000 + kPaneByName == 0x8045e300);
 }
 
@@ -666,14 +668,15 @@ TEST_CASE("pause tab: the rows' own views: Players, Let in and Join on the same 
     CHECK(RowTexts(View::kLetIn, lv)[0] == "Nobody asks to join");
     lv.asking = {"Mido", "Darunia"};
     CHECK(RowTexts(View::kLetIn, lv) == std::vector<std::string>{"Let in Mido", "Refuse Mido", "+1 more ask", " ", "Back"});
-    // Join: the clipboard's code, the last game again (the game has no text entry: a code is pasted); never from
-    // inside a session.
+    // Join: the clipboard's code, a room name and its password typed on their rows, then that room (or the last game
+    // again while no room name is typed); never from inside a session.
     CHECK(ActionFor(View::kJoin, 0, idle) == RowAction::kJoinPaste);
-    CHECK(ActionFor(View::kJoin, 1, idle) == RowAction::kNone);   // (no last game kept)
+    CHECK(ActionFor(View::kJoin, 1, idle) == RowAction::kTypeRoom);
+    CHECK(ActionFor(View::kJoin, 3, idle) == RowAction::kNone);   // (no last game kept, no room name)
     Session again = idle;
     again.rejoin = true;
-    CHECK(ActionFor(View::kJoin, 1, again) == RowAction::kRejoin);
-    CHECK(ActionFor(View::kJoin, 2, idle) == RowAction::kNone);
+    CHECK(ActionFor(View::kJoin, 3, again) == RowAction::kRejoin);
+    CHECK(ActionFor(View::kJoin, 2, idle) == RowAction::kTypePassword);
     CHECK(ActionFor(View::kJoin, kRows - 1, idle) == RowAction::kBack);
     Session in_one;
     in_one.in_one = in_one.rejoin = true;
@@ -685,8 +688,8 @@ TEST_CASE("pause tab: the rows' own views: Players, Let in and Join on the same 
     SessionView jv;
     jv.s = again;
     jv.rejoin_host = "Saria";
-    CHECK(RowTexts(View::kJoin, jv) ==
-          std::vector<std::string>{"Paste code and join", "Join Saria again", "Copy a friend's code first", " ", "Back"});
+    CHECK(RowTexts(View::kJoin, jv) == std::vector<std::string>{"Paste code and join", "Room: A to type its name",
+                                                               "Password: A to type it", "Join Saria again", "Back"});
     // The main view is the five rows; out of range is nothing.
     CHECK(ActionFor(View::kMain, kRowPlayers, idle) == ActionFor(kRowPlayers, idle));
     CHECK(RowTexts(View::kMain, none) == RowTexts(none));
@@ -922,4 +925,138 @@ TEST_CASE("pause tab: the Players view's pages and a player's view, with the hos
                         RowAction::kHostChat, RowAction::kKick, RowAction::kBan}) {
         CHECK(std::string(ActionWords(a)).size() > 3);
     }
+}
+
+TEST_CASE("pause tab: a room name typed with a pad: Up and Down cycle a letter, Left and Right move, Y deletes") {
+    TextField f(TextField::Kind::kRoom);
+    CHECK(f.Shown(false, 40) == "");
+    CHECK(f.Shown(true, 40) == "[ ]");
+    f.Cycle(+1);                       // (after the last: a new letter, the first)
+    CHECK(f.text() == "a");
+    f.Cycle(+1);
+    f.Cycle(+1);
+    CHECK(f.text() == "c");
+    f.Cycle(-1);
+    CHECK(f.text() == "b");
+    f.Move(+1);                        // (one past the end: the next letter)
+    f.Cycle(-1);                       // (a new one from the end of the letters: _)
+    CHECK(f.text() == "b_");
+    CHECK(f.Shown(true, 40) == "b[_]");
+    f.Move(-1);
+    CHECK(f.Shown(true, 40) == "[b]_");
+    f.Delete();
+    CHECK(f.text() == "_");
+    CHECK_FALSE(f.Ready());            // (3 letters at least)
+    f.Clear();
+    for (const char c : std::string("Forest-Gang")) CHECK(f.Type(static_cast<unsigned char>(c)));
+    CHECK(f.text() == "forest-gang");  // (any case: the relay's)
+    CHECK(f.Ready());
+    CHECK_FALSE(f.Type(' '));
+    CHECK_FALSE(f.Type('!'));
+    CHECK_FALSE(f.Type(0xe9));         // (no accents: not a room's letter)
+    f.Backspace();
+    CHECK(f.text() == "forest-gan");
+}
+
+TEST_CASE("pause tab: a room name stops at 24, a password at 128, and the cursor stays on the last letter then") {
+    TextField room(TextField::Kind::kRoom);
+    for (int i = 0; i < 30; ++i) room.Type('a');
+    CHECK(room.text().size() == 24);
+    room.Move(+1);
+    CHECK(room.cursor() == 23);        // (full: no place after the last)
+    room.Cycle(+1);
+    CHECK(room.text().back() == 'b');
+    TextField pw(TextField::Kind::kPassword);
+    for (int i = 0; i < 200; ++i) pw.Type('x');
+    CHECK(pw.text().size() == 128);
+    CHECK(pw.Ready());                 // (a password may be anything, none included)
+}
+
+TEST_CASE("pause tab: a password shows as stars but for the letter typed into, and a long text keeps the cursor in view") {
+    TextField pw(TextField::Kind::kPassword);
+    for (const char c : std::string("Hunter2!")) pw.Type(static_cast<unsigned char>(c));
+    CHECK(pw.text() == "Hunter2!");    // (capitals and punctuation kept)
+    CHECK(pw.Shown(false, 40) == "********");
+    pw.Move(-1);
+    CHECK(pw.Shown(true, 40) == "*******[!]");
+    TextField room(TextField::Kind::kRoom);
+    for (int i = 0; i < 24; ++i) room.Type(static_cast<char>('a' + i % 26));
+    const std::string shown = room.Shown(true, 12);
+    CHECK(shown.size() == 12);
+    CHECK(shown.find('[') != std::string::npos);   // (the cursor's letter in view)
+}
+
+TEST_CASE("pause tab: the Join view's fields: typing takes every button from System until A or B") {
+    Page p = UsablePage();
+    OnSystem(p, 1000);
+    p.OnPad(kPadR, 1000);
+    p.OnPad(0, 1016);
+    REQUIRE(p.Shown());
+    p.StartTyping(0);
+    CHECK(p.Typing() == 0);
+    CHECK(p.OnPad(kPadUp, 1032) == 0);          // (Up is the field's: none reaches System)
+    CHECK(p.Field(0).text() == "a");
+    CHECK(p.OnPad(0, 1048) == 0);
+    CHECK(p.OnPad(kPadRight, 1064) == 0);
+    CHECK(p.OnPad(kPadRight | kPadDown, 1080) == 0);   // (down with right still held: a new letter, _)
+    CHECK(p.Field(0).text() == "a_");
+    // Held: again and again after a moment (the screens updating meanwhile, as in a game).
+    OnSystem(p, 1100);
+    p.OnPad(kPadUp, 1100);
+    OnSystem(p, 1250);
+    p.OnPad(kPadUp, 1250);
+    OnSystem(p, 1400);
+    p.OnPad(kPadUp, 1400);
+    OnSystem(p, 1550);
+    p.OnPad(kPadUp, 1550);   // (held over 400 ms: a step)
+    CHECK(p.Field(0).text().size() == 2);
+    CHECK(p.Field(0).text()[1] != '_');          // (stepped on from _ by the held Up)
+    CHECK(p.OnPad(0, 1660) == 0);
+    CHECK(p.OnPad(kPadB, 1670) == 0);            // (B ends typing; it does not leave the view or the page)
+    CHECK(p.Typing() == -1);
+    CHECK(p.Shown());
+    CHECK_FALSE(p.TakeBack());
+    p.OnPad(0, 1680);
+    // The keyboard: its characters and keys while typing, none otherwise.
+    CHECK_FALSE(p.Char('x'));
+    p.StartTyping(1);
+    CHECK(p.Char('P'));
+    CHECK(p.Char(' '));                          // (taken, but not a password's letter)
+    CHECK(p.Key(0x25, false));                   // (Left)
+    CHECK(p.Char('a'));
+    CHECK(p.Field(1).text() == "aP");
+    CHECK(p.Key(0x0d, false));                   // (Enter: done)
+    CHECK(p.Typing() == -1);
+    CHECK_FALSE(p.Key(0x0d, false));
+}
+
+TEST_CASE("pause tab: typing ends when the page goes, and the Join view's rows say the fields") {
+    Page p = UsablePage();
+    OnSystem(p, 1000);
+    p.OnPad(kPadR, 1000);
+    p.OnPad(0, 1016);
+    p.StartTyping(0);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), 1100);   // (the menu closes)
+    CHECK(p.Typing() == -1);
+    Session s;
+    CHECK(ActionFor(View::kJoin, 1, s) == RowAction::kTypeRoom);
+    CHECK(ActionFor(View::kJoin, 2, s) == RowAction::kTypePassword);
+    CHECK(ActionFor(View::kJoin, 3, s) == RowAction::kNone);         // (no room name yet, no last game)
+    s.room_ready = s.rejoin = true;
+    CHECK(ActionFor(View::kJoin, 3, s) == RowAction::kJoinRoom);     // (a room name typed: that room, not the last game)
+    s.in_one = true;
+    CHECK(ActionFor(View::kJoin, 1, s) == RowAction::kNone);         // (nobody joins from inside a session)
+    SessionView v;
+    auto rows = RowTexts(View::kJoin, v);
+    CHECK(rows[1] == "Room: A to type its name");
+    CHECK(rows[2] == "Password: A to type it");
+    CHECK(rows[3] == " ");
+    v.room_field = "fore[s]t";
+    v.typing = 0;
+    v.room_ready = true;
+    rows = RowTexts(View::kJoin, v);
+    CHECK(rows[1] == "Room: fore[s]t");
+    CHECK(rows[3] == "Join room: no relay set");
+    v.relay_set = true;
+    CHECK(RowTexts(View::kJoin, v)[3] == "Join this room");
 }
