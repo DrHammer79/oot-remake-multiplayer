@@ -311,7 +311,6 @@ TEST_CASE("teleport: the game's map change event carries another scene at once (
     CHECK_FALSE(a.cancel_scene);  // the game emptied it: nothing to write
     a = trip.Accepted(2, Target("Graveyard_Child", -30, 98, 8), arrived, 16 * kS);
     REQUIRE(a.move);
-    CHECK(a.after_load);
 }
 
 TEST_CASE("teleport: a map change event the game does not take is asked again, then given up") {
@@ -632,7 +631,7 @@ TEST_CASE("teleport: no give-up in the middle of a load, and no old start put ba
     CHECK_FALSE(a.restore_start);
 }
 
-TEST_CASE("teleport: the next-to move stays in our room of a dungeon (issue 197)") {
+TEST_CASE("teleport: the spectate camera's room rule (CheckMove) stays in our room of a dungeon") {
     using CoopTeleport::CheckMove;
     using CoopTeleport::MoveCheck;
     // Two rooms of the Deku Tree, placements far apart; one Kokiri Forest point.
@@ -640,42 +639,44 @@ TEST_CASE("teleport: the next-to move stays in our room of a dungeon (issue 197)
                                   {"InsideTheDekuTree", 0, 5.0f, 0.0f, 5.0f},
                                   {"InsideTheDekuTree", 2, -33.0f, 110.0f, 10.0f}});
     const Vec entrance{1.0f, 0.0f, 1.0f};
-    const Vec slingshot_room{-33.2f, 109.8f, 10.4f};  // bigrun4's B: Link held here after the move
+    const Vec slingshot_room{-33.2f, 109.8f, 10.4f};
     CHECK(CheckMove(rooms, "InsideTheDekuTree", entrance, slingshot_room) == MoveCheck::other_room);
     CHECK(CheckMove(rooms, "InsideTheDekuTree", entrance, Vec{4.0f, 0.0f, 4.0f}) == MoveCheck::ok);
-    // No room known for a spot (no table, or too far from every placement): only short moves.
+    // No room known for a spot (no table, or too far from every placement): only short distances.
     const CoopRooms::Table none;
     CHECK(CheckMove(none, "InsideTheDekuTree", entrance, slingshot_room) == MoveCheck::too_far);
     CHECK(CheckMove(none, "InsideTheDekuTree", entrance, Vec{6.0f, 0.0f, 6.0f}) == MoveCheck::ok);
-    // Outside dungeons any move (teleport-other: Kakariko -> Graveyard passes).
+    // Outside dungeons anything.
     CHECK(CheckMove(none, "KakarikoVillage_Child", entrance, slingshot_room) == MoveCheck::ok);
-    // door-unlock: refused only right after a load. A /teleport within the scene we are in
-    // goes to any room of the dungeon (a player shut out by a door another player went through).
-    CHECK(CheckMove(rooms, "InsideTheDekuTree", entrance, slingshot_room, true) == MoveCheck::other_room);
-    CHECK(CheckMove(rooms, "InsideTheDekuTree", entrance, slingshot_room, false) == MoveCheck::ok);
-    CHECK(CheckMove(none, "InsideTheDekuTree", entrance, slingshot_room, false) == MoveCheck::ok);
 }
 
-TEST_CASE("teleport: the not-moved line says entrance only after a scene change (issue 197)") {
-    using CoopTeleport::MoveCheck;
-    using CoopTeleport::NotMovedLine;
-    CHECK(NotMovedLine(MoveCheck::other_room, "Saria", true) ==
-          "teleport: Saria is in another room of this dungeon; you are at its entrance: type /teleport again, or walk there");
-    CHECK(NotMovedLine(MoveCheck::other_room, "Saria", false) ==
-          "teleport: Saria is in another room of this dungeon; walk there");
-    CHECK(NotMovedLine(MoveCheck::too_far, "Saria", false).find("no room table") != std::string::npos);
-    CHECK(NotMovedLine(MoveCheck::too_far, "", true).rfind("teleport: they are too far", 0) == 0);
-    // Trip marks the move after the load (asking again), not the same-scene one.
-    Trip trip;
-    Local here;
-    here.scene = "InsideTheDekuTree";
-    here.position = Vec{0, 0, 0};
-    coop::protocol::JoinTarget t;
-    t.scene = "InsideTheDekuTree";
+TEST_CASE("teleport: after a load into a dungeon we are moved next to them in any room (issue 197)") {
+    // teleport-197: Kokiri Forest -> B in the Deku Tree's slingshot room (2F). The map change lands
+    // us at the Entrance start; once settled the trip asks again and moves us to B's spot, in another
+    // room of the dungeon (moving Link loads his room; no "another room" refusal any more).
+    Trip trip(true);
+    const Local here = At("KokiriForest_Child", 0, 0, 0);
     trip.Start(2, "Saria", here, 0);
-    const auto a = trip.Accepted(2, t, here, 1000);
+    auto a = trip.Accepted(2, Target("InsideTheDekuTree", -33.2f, 109.8f, 10.4f), here, kS);
+    REQUIRE(a.scene);
+    CHECK(a.start == "Entrance");
+    Local loading;
+    loading.loading_banc = true;
+    trip.Tick(loading, 2 * kS);
+    Local arrived = At("InsideTheDekuTree", 0.2f, 101.0f, 14.7f);
+    arrived.reserved_banc = "";
+    a = trip.Tick(arrived, 3 * kS);
+    for (std::uint64_t t = 3 * kS; !a.ask && t < 10 * kS; t += kS / 4) {
+        a = trip.Tick(arrived, t);
+    }
+    REQUIRE(a.ask);
+    a = trip.Accepted(2, Target("InsideTheDekuTree", -33.2f, 109.8f, 10.4f), arrived, 5 * kS);
     REQUIRE(a.move);
-    CHECK_FALSE(a.after_load);
+    CHECK(a.move->x == doctest::Approx(-33.2f));
+    CHECK(a.move->z == doctest::Approx(10.4f));
+    REQUIRE(a.lines.size() == 1);
+    CHECK(a.lines[0] == "teleport: next to Saria");
+    CHECK(trip.phase() == Trip::Phase::idle);
 }
 
 TEST_CASE("teleport: the request stays for the game's arrival, which empties it itself (issue 197)") {

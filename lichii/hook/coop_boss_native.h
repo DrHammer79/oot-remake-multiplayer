@@ -106,6 +106,11 @@ bool RunsOwnStart(std::string_view name);
 // Whether a plain enemy's death runs here now: its life is 0 in our game, or its owner's died.
 bool PlainDeath(std::optional<std::int32_t> life, bool owner_dead);
 
+// Row 149's stall check (Table::kStallSteps) judges only a fight move: an animation read, a life above 0, and
+// neither a death animation (coop::protocol::anim::IsDeath) nor a cutscene's (anim::IsEvent). Every boss and every
+// part (Twinrova's sisters, Bongo Bongo's hands, Ganon) is judged by its own animation and life.
+bool StallJudged(std::string_view animation, std::optional<std::int32_t> life);
+
 // Row 138 (2)(7), #238: whether our game's own hit on a copy took life (its life read before the hit, in the walk
 // before, and after it). Such a hit is the owner's to judge: its DAMAGE goes to the owner, the server keeps the boss
 // with its owner (only a hit that takes no life, a stun, hands it over), and the owner's game's reaction comes back

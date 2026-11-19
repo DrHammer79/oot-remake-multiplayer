@@ -281,6 +281,80 @@ inline std::atomic<std::uint64_t>& RevivesSkipped() {
     static std::atomic<std::uint64_t> skipped{0};
     return skipped;
 }
+// Later steps of such a death whose revive check was skipped again (for the log; KeptDeaths).
+inline std::atomic<std::uint64_t>& RevivesKeptSkipped() {
+    static std::atomic<std::uint64_t> skipped{0};
+    return skipped;
+}
+
+// boss-die-0116 (the test kill left Gohma in 'Die' at life 1, LANE2 2026-11-19 06:47 UTC: 'past its revive 1'):
+// the game's Life step asks the revive check (main+0x49d6b0) on EVERY step that ends at life 0 (the `b.le` at
+// main+0x49dd14), not only on the one that took the life. So a death whose revive LIFE_REVIVE skipped was revived to
+// 1 by its next frame's step (Gohma's callback answers 1 outside her chance time): the skip held one frame. The
+// components whose death we kept past their revive are kept here; their later steps at 0 skip it too, until a step
+// reads that component alive again (a heal, or a new actor's Life component at the same address: every actor starts
+// with a life above 0). Any thread (the steps run on the game's workers). The newest kSlots deaths are kept (a ring: a
+// new one takes the oldest's slot; a dead copy is deleted and never read alive, so its slot is never freed that way),
+// and the table is cleared at a scene load and a new game process (no Life component of the scene before is left).
+class KeptDeaths {
+public:
+    static constexpr std::size_t kSlots = 16;
+    void Keep(std::uint64_t component) noexcept {
+        if (component == 0 || Kept(component)) {
+            return;
+        }
+        slots_[next_.fetch_add(1, std::memory_order_relaxed) % kSlots].store(component, std::memory_order_release);
+    }
+    bool Kept(std::uint64_t component) const noexcept {
+        if (component == 0) {
+            return false;
+        }
+        for (const auto& slot : slots_) {
+            if (slot.load(std::memory_order_acquire) == component) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // A step read this component with a life above 0.
+    void Alive(std::uint64_t component) noexcept {
+        if (component == 0) {
+            return;
+        }
+        for (auto& slot : slots_) {
+            std::uint64_t was = component;
+            slot.compare_exchange_strong(was, 0, std::memory_order_acq_rel);
+        }
+    }
+
+    // A scene load or a new game process: none of the components kept is there any more.
+    void Clear() noexcept {
+        for (auto& slot : slots_) {
+            slot.store(0, std::memory_order_release);
+        }
+    }
+
+private:
+    std::array<std::atomic<std::uint64_t>, kSlots> slots_{};
+    std::atomic<std::size_t> next_{0};  // the slot the next kept death takes (the oldest)
+};
+inline KeptDeaths& TheKeptDeaths() {
+    static KeptDeaths kept;
+    return kept;
+}
+
+// LIFE_REVIVE's answer: skip the revive for the step whose stops it passed (`passed`: an owner's death on its copy, a
+// test kill on our own; that death is kept from then on) and for every later step of a death kept so.
+inline bool SkipRevive(KeptDeaths& kept, std::uint64_t component, bool passed) noexcept {
+    if (component == 0) {
+        return false;
+    }
+    if (passed) {
+        kept.Keep(component);
+        return true;
+    }
+    return kept.Kept(component);
+}
 
 // One Life step through the module: the damage the game dealt this frame
 // (pushed as a Damage event when not 0) and the sum the step then takes.

@@ -179,7 +179,8 @@ hs-skulltula-token-B       A-taken-B          160,80,960,520  refs
 # hs-spawn: the puppet appears where the player is, no pop from elsewhere
 hs-spawn-A                 A-reading-A        160,80,960,520  refs
 hs-spawn-B                 A-reading-B        160,80,960,520  refs
-# hs-teleport-room: A arrived by the other player
+# hs-teleport-room: A arrived by the other player. teleport-197: good = A on 2F beside B (map 2F); bad = A at the
+# 1F entrance (big-run-0117 g3). Old refs show the entrance: capture new ones (proof.py ref add).
 hs-teleport-room-A         A-arrived-A        160,80,960,520  refs
 hs-teleport-room-B         A-arrived-B        160,80,960,520  refs
 # hs-tunic: own Link blue, the puppet in its colour
@@ -366,7 +367,7 @@ title-pressed-A   s*-pressed-A   0,0,1280,720     change  from=s*-on-host-A  min
 title-pressed-B   s*-pressed-B   0,0,1280,720     change  from=s*-on-host-B  min=8
 title-closed-A    s*-closed-A    0,0,1280,720     change  from=s*-pressed-A  min=8
 title-closed-B    s*-closed-B    0,0,1280,720     change  from=s*-pressed-B  min=8
-# hs-teleport-direct (teleport-direct-0116): A arrived at the Deku Tree entrance by the map change event, not black
+# hs-teleport-direct (teleport-direct-0116): A arrived by the map change event, not black; teleport-197: then moved beside B on 2F
 # (same view as hs-teleport-room's arrival: its references)
 hs-teleport-direct-A       A-arrived-A        160,80,960,520  refs  refs=hs-teleport-room-A
 hs-teleport-direct-B       A-arrived-B        160,80,960,520  refs  refs=hs-teleport-room-B

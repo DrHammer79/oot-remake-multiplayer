@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cctype>
+#include <cstddef>
 
 #include <cstdio>
 #include <filesystem>
@@ -111,10 +112,26 @@ std::string Applied(const std::string& text, const std::string& patch, const std
 }  // namespace
 
 TEST_CASE("hookshot: the API header in our patches is hookshot/src's") {
-    // 0001 makes it, 0004 (the title menu) adds to it.
+    // 0001 makes it, 0004 (the title menu) and 0032 (the Settings tab) add to it.
     const std::string first = NewFile(Patch(), "host/hos_coop_api.h");
     const std::string title = ReadFile(kRepo / "hookshot" / "patches" / "0004-coop-title-menu.patch");
-    CHECK(Applied(first, title, "host/hos_coop_api.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_api.h"));
+    const std::string settings = ReadFile(kRepo / "hookshot" / "patches" / "0032-coop-settings.patch");
+    CHECK(Applied(Applied(first, title, "host/hos_coop_api.h"), settings, "host/hos_coop_api.h") ==
+          ReadFile(kRepo / "hookshot" / "src" / "hos_coop_api.h"));
+}
+
+TEST_CASE("hookshot: patch 0032 hands the module the Insert menu's settings, the control bridge's own two") {
+    const std::string p = ReadFile(kRepo / "hookshot" / "patches" / "0032-coop-settings.patch");
+    CHECK(p.find("+    api.setting = bridge_setting, api.setting_set = bridge_setting_set;") != std::string::npos);
+    CHECK(p.find("+    if (!out || !rx_control_setting(index, &s)) return 0;") != std::string::npos);
+    CHECK(p.find("+    if (!key || !rx_control_setting_set(key, value, &s)) return 0;") != std::string::npos);
+    // (only the bridge and the API header: no lift hook, nothing of Longshot's own changed)
+    CHECK(p.find("diff --git a/nx2/") == std::string::npos);
+    CHECK(p.find("diff --git a/gpu/") == std::string::npos);
+    // The module's table reads them only when the exe's table is that long (an older Hookshot goes without).
+    static_assert(offsetof(HosCoopApi, setting) > offsetof(HosCoopApi, scratch));
+    static_assert(offsetof(HosCoopApi, setting_set) > offsetof(HosCoopApi, setting));
+    static_assert(sizeof(HosCoopSetting) == 32 + 48 + 64 + 16 + 6 * sizeof(int));
 }
 
 TEST_CASE("hookshot: patch 0004 hooks the title screen, hands the pad over and sets x8 for calls") {

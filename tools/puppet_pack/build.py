@@ -521,26 +521,62 @@ CLOTH_KEYS = ("Cloth", "ClothAdvandecOption", "ClothList", "ClothReaction")
 BODY_MOVE_STATE = "Free"
 PHYSICS_DIR = "Component/Physics/"
 PHYSICS_SUFFIX = ".engine__component__PhysicsParam.bgyml"
+# The body's character controller runs the game's default component preset, as the placed NPCs' do
+# (Npc_Kokiri_MC_ThroughGround names no PresetTypeName). The player's names the "Player" preset
+# (Bootup pack, Phive/Config/PhiveConfig.byml, CharacterComponentPresetCollection), whose external
+# components PlayerClimb, PlayerClimbLadder and PlayerRagdoll are built for the player's own body. The
+# body has no ragdoll, so PlayerRagdoll's setup (vtable 0x84bbb9f8, CharacterExternalPlayerRagdoll, slot 5 at
+# 0x80a19ac0) read the actor's ragdoll as null and wrote through it: crash 0xc0000005 at guest 0x70 on
+# ModuleSystemWorker right after `create CoopPuppet_Child_Black` (crash-0116-b). So PresetTypeName goes, and
+# of the player's UpdateComponentParam and MoveStateParam only the entries the default preset has stay
+# (its UpdateComponents and MoveStateComponents, from the same file): InteractWithRagdoll (also a ragdoll
+# user), PlayerOnGround and the other Player-only entries go.
+BODY_DROP_KEYS = ("PresetTypeName",)
+BODY_UPDATE_COMPONENTS = ("FrameSetup", "MoveStateUpdate", "Rotate", "JumpExtension", "FloatWater",
+                          "AccumulateImpulse", "FollowSurfaceExtension", "FollowRagdoll", "ApplyVelocity")
+BODY_MOVE_STATES = ("InAir", "OnGround", "Free")
 CONTROLLER_SET_DIR = "Phive/ControllerSetParam/"
 CONTROLLER_SET_SUFFIX = ".phive__ControllerSetParam.bgyml"
 CHARACTER_DIR = "Phive/CharacterControllerParam/"
 CHARACTER_SUFFIX = ".phive__CharacterControllerParam.bgyml"
 
 
-def _merged_chain(members, path):
-    """A member with its in-pack `$parent` chain merged (child wins)."""
+def _chain(members, path):
+    """A member and its in-pack `$parent` chain: [(member path, document)], the member first."""
     chain, seen = [], set()
     while path and path in members and path not in seen:
         seen.add(path)
         doc = byml.loads(members[path])
         if not isinstance(doc, dict):
             break
-        chain.append(doc)
+        chain.append((path, doc))
         path = ref_to_member(doc.get("$parent"))
+    return chain
+
+
+def _merged_chain(members, path):
+    """A member with its in-pack `$parent` chain merged (child wins)."""
     out = {}
-    for doc in reversed(chain):
+    for _, doc in reversed(_chain(members, path)):
         out.update({k: v for k, v in doc.items() if k != "$parent"})
     return out
+
+
+def chain_entry(table, paths, data):
+    """The size-table entry of a file we made from the game's files `paths` (a member and the `$parent`s merged
+    into it): the sum of their entries, or the file's bytes and the margin when that is more. The game parses
+    a param in a heap of its entry, and each game file's entry is sized for that file only, so a merged file
+    needs the room of every file it holds. With the top file's entry alone the child puppet's body (its
+    character controller is Player_Child's merged with Player's) ran out of heap at its InteractWithRagdoll
+    object (factory main+0x107dd10, game__physics__CharacterUpdateInteractWithRagdollParam): a null pointer
+    and a crash in GeneralFormatAsync_ when the puppet loaded (crash-0116-a; the ActorParam's case was
+    issue 111)."""
+    return max(sum(table.get(p) or 0 for p in paths), len(data) + PACK_SIZE_MARGIN)
+
+
+def chain_paths(members, path):
+    """The member paths chain_entry sizes a merge of `path` by: the member and its in-pack `$parent`s."""
+    return [p for p, _ in _chain(members, path)] or [path]
 
 
 def _work_ref(member):
@@ -552,6 +588,23 @@ def body_paths(actor):
     """The puppet's own (PhysicsParam, ControllerSetParam, CharacterControllerParam) member paths."""
     return (f"{PHYSICS_DIR}{actor}{PHYSICS_SUFFIX}", f"{CONTROLLER_SET_DIR}{actor}{CONTROLLER_SET_SUFFIX}",
             f"{CHARACTER_DIR}{actor}{CHARACTER_SUFFIX}")
+
+
+def body_character_controller(cct):
+    """The body's character controller from the player's merged one `cct`: in Free (BODY_MOVE_STATE), on the
+    game's default component preset (no PresetTypeName), with only the update and move-state params that
+    preset has (BODY_UPDATE_COMPONENTS, BODY_MOVE_STATES). An emptied map is left out."""
+    out = {k: v for k, v in cct.items() if k not in BODY_DROP_KEYS}
+    for key, keep in (("UpdateComponentParam", BODY_UPDATE_COMPONENTS), ("MoveStateParam", BODY_MOVE_STATES)):
+        if key not in out:
+            continue
+        kept = {k: v for k, v in (out[key] or {}).items() if k in keep} if isinstance(out[key], dict) else {}
+        if kept:
+            out[key] = kept
+        else:
+            del out[key]
+    out["DefaultMoveState"] = BODY_MOVE_STATE
+    return out
 
 
 def pvp_sensors(cs, cs_src):
@@ -584,8 +637,7 @@ def puppet_body(members, player_components, actor, sensors=False):
     cct_src = ref_to_member(cs.get("PathCharacterController"))
     if not cct_src or cct_src not in members:
         raise BuildError(f"the player's ControllerSet {cs_src} has no character controller in the pack")
-    cct = _merged_chain(members, cct_src)
-    cct["DefaultMoveState"] = BODY_MOVE_STATE
+    cct = body_character_controller(_merged_chain(members, cct_src))
     phys_path, cs_path, cct_path = body_paths(actor)
     own_cs = {k: cs[k] for k in BODY_KEYS + CLOTH_KEYS if k in cs}
     # Only the contact collection the character controller names (Contact_0_cct); not the ragdoll's.
@@ -1250,7 +1302,8 @@ def write_look_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, slots, l
             continue
         try:
             members = sarc.read(dicts.decompress(read(src)))
-            _, project, info_src = look_items.model_info(members, item)
+            _, project, _ = look_items.model_info(members, item)
+            info_chain = look_items.model_info_chain(members, item)
         except (look_items.TunicError, ValueError, KeyError) as e:
             log(f"look items: {item} left out ({e})")
             continue
@@ -1267,8 +1320,7 @@ def write_look_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, slots, l
             table.add_new(strip_zs(dst), ((len(pack) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN)
             ap_size = table.get(look_items.actor_param_path(item)) or 0
             table.add_new(look_items.actor_param_path(actor), max(ap_size, len(ap) + PACK_SIZE_MARGIN))
-            info_size = table.get(info_src) or 0
-            table.add_new(look_items.model_info_path(actor), max(info_size, len(info) + PACK_SIZE_MARGIN))
+            table.add_new(look_items.model_info_path(actor), chain_entry(table, info_chain, info))
             new_ai.append(look_items.info_row(ai_rows[item], item, slot))
             new_gai.append(dict(gai_rows.get(item, {}), __RowId=actor))
             paths = [dst]
@@ -1322,7 +1374,8 @@ def write_blade_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, copies,
             members = sarc.read(dicts.decompress(read(os.path.join(pdir, f))))
             if not look_items.is_wearer_item(members, item):
                 continue
-            _, project, info_src = look_items.model_info(members, item)
+            _, project, _ = look_items.model_info(members, item)
+            info_chain = look_items.model_info_chain(members, item)
         except (look_items.TunicError, ValueError, KeyError) as e:
             log(f"wearer copies: {item} left out ({e})")
             continue
@@ -1342,8 +1395,7 @@ def write_blade_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, copies,
             table.add_new(strip_zs(dst), ((len(pack) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN)
             ap_size = table.get(look_items.actor_param_path(item)) or 0
             table.add_new(look_items.actor_param_path(actor), max(ap_size, len(ap) + PACK_SIZE_MARGIN))
-            info_size = table.get(info_src) or 0
-            table.add_new(look_items.model_info_path(actor), max(info_size, len(info) + PACK_SIZE_MARGIN))
+            table.add_new(look_items.model_info_path(actor), chain_entry(table, info_chain, info))
             new_ai.append(look_items.info_row_as(ai_rows[item], actor, copy_project))
             new_gai.append(dict(gai_rows.get(item, {}), __RowId=actor))
             files.append(dst)
@@ -1664,14 +1716,17 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     new_ai, new_gai = [], []
     seen_by = None
     lift_param = None
+    lift_chain = None
     carry_data = None
     if liftable:
         src = os.path.join(romfs, "Pack", "Actor", f"{LIFTABLE_SOURCE}.pack.zs")
         if not os.path.isfile(src):
             raise BuildError(f"--puppet-liftable: missing {rel(romfs, src)}")
-        lift_param = liftable_param(sarc.read(dicts.decompress(read(src))))
+        ruto = sarc.read(dicts.decompress(read(src)))
+        lift_param = liftable_param(ruto)
         if lift_param is None:
             raise BuildError(f"--puppet-liftable: {LIFTABLE_SOURCE} has no LiftableRef in its pack")
+        lift_chain = chain_paths(ruto, lift_param[0])
         # Ruto's carried pose on the young copies (asb_carry): the player's AS root with the carry clips, or the
         # game's own Eaten when it cannot be made (the fallback, logged).
         carry_src = f"AS/Player_{asb_carry.CARRY_VARIANTS[0]}.root.asb"
@@ -1684,11 +1739,14 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             table.add_new(asb_carry.CARRY_AS, max(table.get(carry_src) or 0, len(carry_data)) + PACK_SIZE_MARGIN)
             log(f"{asb_carry.CARRY_AS}: {carry_src} with Eaten's clips on Ruto's {asb_carry.RUTO_CLIP}")
     clients = None
+    client_chains = {}
     if pvp:
         src = os.path.join(romfs, "Pack", "Actor", f"{ATTENTION_SOURCE}.pack.zs")
         if not os.path.isfile(src):
             raise BuildError(f"--puppet-pvp: missing {rel(romfs, src)}")
-        clients = attention_clients(sarc.read(dicts.decompress(read(src))))
+        amos = sarc.read(dicts.decompress(read(src)))
+        clients = attention_clients(amos)
+        client_chains = {_client_src(c): chain_paths(amos, _client_src(c)) for c in ATTENTION_CLIENTS}
         if clients is None:
             raise BuildError(f"--puppet-pvp: {ATTENTION_SOURCE} has no EnemyCommon LockOn/AutoAim clients")
     if perception:
@@ -1841,15 +1899,15 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             body_files = {}
             for path, (data, src) in puppet_body(members, flatten_actor_param(members, player), actor,
                                                  sensors=pvp_copy).items():
-                # Sized as the player's file it is cut from, or its own bytes and the margin when longer.
-                size = max(table.get(src) or 0, len(data) + PACK_SIZE_MARGIN)
+                # Sized as the player's file it is cut from and every `$parent` merged into it (chain_entry).
+                size = chain_entry(table, chain_paths(members, src), data)
                 table.add_new(path, size)
                 body_files[path] = size
         lift_file = None
         if lift_param and v in LIFTABLE_VARIANTS:
             path = liftable_path(actor, lift_param[0])
-            # Sized as Ruto's file it is cut from, or its own bytes and the margin when longer.
-            size = max(table.get(lift_param[0]) or 0, len(byml.dumps(lift_param[1])) + PACK_SIZE_MARGIN)
+            # Sized as Ruto's file it is cut from and every `$parent` merged into it (chain_entry).
+            size = chain_entry(table, lift_chain, byml.dumps(lift_param[1]))
             table.add_new(path, size)
             lift_file = {"param": path, "size": size}
             carry_anim = asb_carry.carry_animation_path(actor)
@@ -1868,8 +1926,9 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             pvp_files = {}
             for path, (data, src) in puppet_pvp(members, flatten_actor_param(members, player), actor,
                                                 clients).items():
-                # Sized as the file it is cut from, or its own bytes and the margin when longer.
-                size = max(table.get(src) or 0, len(data) + PACK_SIZE_MARGIN)
+                # Sized as the file it is cut from and every `$parent` merged into it (chain_entry; the
+                # sender is a file of our own beside EnemyCommon's).
+                size = chain_entry(table, client_chains.get(src, [src]), data)
                 table.add_new(path, size)
                 pvp_files[path] = size
             made[-1]["pvp"] = pvp_files  # (off: the manifest as before)

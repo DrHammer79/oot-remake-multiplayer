@@ -174,3 +174,54 @@ TEST_CASE("actor events: a create inside a call that runs a copy's own game code
     // The owner's shoot action put into a copy: the copy's own shot is judged (stopped), the owner's comes.
     CHECK_FALSE(CoopActorEvents::Ours(true, true));
 }
+
+TEST_CASE("boss-die-0116: a death kept past its revive stays kept on the steps after, until it lives again") {
+    using CoopActorEvents::KeptDeaths;
+    using CoopActorEvents::SkipRevive;
+    KeptDeaths kept;
+    constexpr std::uint64_t kGohma = 0x1052a20000;
+    constexpr std::uint64_t kOther = 0x1052b30000;
+    // A death our game judged (a real hit outside chance time): its revive stays, every frame.
+    CHECK_FALSE(SkipRevive(kept, kGohma, false));
+    CHECK_FALSE(SkipRevive(kept, kGohma, false));
+    // The test kill (or an owner's death on its copy): the step whose stops passed skips the revive ...
+    CHECK(SkipRevive(kept, kGohma, true));
+    // ... and so does every later step that ends at 0 (the check is asked on each; before, the next frame gave 1).
+    for (int frame = 0; frame < 600; ++frame) {
+        CHECK(SkipRevive(kept, kGohma, false));
+    }
+    // Only that component.
+    CHECK_FALSE(SkipRevive(kept, kOther, false));
+    CHECK_FALSE(SkipRevive(kept, 0, true));
+    // Alive again (a heal; a new actor's Life component at the same address starts above 0): its revive is its own.
+    kept.Alive(kGohma);
+    CHECK_FALSE(kept.Kept(kGohma));
+    CHECK_FALSE(SkipRevive(kept, kGohma, false));
+    // Review C1: more deaths than slots (dead copies are deleted, never read alive): the newest are kept, the 17th
+    // death still skips its revive, the oldest gave up its slot.
+    for (std::uint64_t i = 1; i <= KeptDeaths::kSlots + 1; ++i) {
+        CHECK(SkipRevive(kept, i * 0x1000, true));
+    }
+    CHECK(SkipRevive(kept, (KeptDeaths::kSlots + 1) * 0x1000, false));
+    CHECK(SkipRevive(kept, 2 * 0x1000, false));
+    CHECK_FALSE(kept.Kept(0x1000));
+    // Many more (a long session): always the newest kSlots.
+    for (std::uint64_t i = 100; i < 100 + 5 * KeptDeaths::kSlots; ++i) {
+        kept.Keep(i * 0x1000);
+    }
+    for (std::uint64_t i = 100 + 4 * KeptDeaths::kSlots; i < 100 + 5 * KeptDeaths::kSlots; ++i) {
+        CHECK(kept.Kept(i * 0x1000));
+    }
+    CHECK_FALSE(kept.Kept((100 + 4 * KeptDeaths::kSlots - 1) * 0x1000));
+    // A scene load: none kept.
+    kept.Clear();
+    CHECK_FALSE(kept.Kept((100 + 5 * KeptDeaths::kSlots - 1) * 0x1000));
+    CHECK(SkipRevive(kept, 0x7000, true));  // and it keeps again after
+    CHECK(kept.Kept(0x7000));
+    // Kept twice: one slot (freed once by Alive).
+    KeptDeaths twice;
+    twice.Keep(kGohma);
+    twice.Keep(kGohma);
+    twice.Alive(kGohma);
+    CHECK_FALSE(twice.Kept(kGohma));
+}

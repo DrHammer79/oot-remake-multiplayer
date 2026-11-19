@@ -5,10 +5,11 @@
 # Pass, A's log: "teleport on (... by the game's map change event)", "asking the game's map change event
 # Dm_SY_BancChangeGo for InsideTheDekuTree at Entrance (arrival Dm_SY_BancChangeArrive_InsideTheDekuTree_01)",
 # "live event Dm_SY_BancChangeGo asked of the game (result 1)", the probe: event=1 then loading=1 ONCE (no second
-# load), then "not moved ... another room of this dungeon (issue 197)", "test steer at" positions changing during
-# both gotos, no "goto timed out", no "talk to someone or read a sign", no "did not start the map change".
-# SCREENSHOTS (required): arrived = A in the Deku Tree entrance room, picture not black; walked = A moved from
-# the arrival spot; end = still in the Deku Tree (no second load after the press A).
+# load), then "teleport: move to -33.2 ...: asked" (teleport-197: A is moved from the Entrance start into B's
+# room on 2F once settled), 'mark arrived' with Link at x about -33, no "goto timed out", no "talk to someone or
+# read a sign", no "did not start the map change".
+# SCREENSHOTS (required): arrived = A on 2F beside B (map 2F), picture not black; walked = A moved from
+# there; end = still in the Deku Tree (no second load after the press A).
 #! noload
 #! start coop: test warp done
 #! switches LICHII_COOP_DEBUG_OBJECTS=1,LICHII_COOP_SCENE_PROBE=1
@@ -34,9 +35,9 @@ wait 120
 mark asked
 wait 1200                  # no input: the map change must start on its own
 mark arrived
-goto 2.0 14.0 1.0 600      # a few metres from the entrance start: Link must move (#197)
+goto -31.6 11.6 1.0 600    # a couple of metres from B's spot (-33.2 10.4): Link must move (#197)
 wait 60
-goto 0.5 15.5 1.0 600
+goto -32.6 10.0 1.0 600
 wait 60
 mark walked
 press A 12                 # a check/talk here must not load anything again

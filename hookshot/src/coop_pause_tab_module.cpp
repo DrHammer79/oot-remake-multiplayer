@@ -30,6 +30,7 @@
 #include "coop_room_list.h"
 #include "coop_runtime.h"
 #include "coop_lobby_game.h"
+#include "coop_longshot_settings.h"
 #include "coop_lobby.h"
 #include "coop_save.h"
 #include "coop_window_brand.h"
@@ -95,7 +96,15 @@ static_assert(kMuteVoice == CoopLobby::kVoice && kMuteChat == CoopLobby::kChat);
 // Panes found, per opening of a screen (Page::Track's number; a menu reopened at the same address is looked up again,
 // so no pane of a freed layout is used). *_ok: both looked up for that opening and parts; the page is usable only then.
 std::uint64_t g_pages_gen = 0, g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
+std::uint64_t g_settings_pane = 0;   // the Settings page (Pa_Settings_00; 0 with an older pack)
 std::uint64_t g_strip_gen = 0, g_tab_pane = 0;
+// The sixth tab (Pa_Category_05, Settings) and its word, and what the six-tab strip moves: the game's four tabs'
+// parent (N_MenuChange_00: no animation track names it, so it keeps a place written to it), L and R, with their own
+// places in the layout to go back to (the Minus menu has its own tabs on the same strip). 0: none (an older pack).
+std::uint64_t g_tab6_pane = 0, g_tab6_word = 0, g_tabs_parent = 0, g_label_l = 0, g_label_r = 0;
+float g_tabs_parent_x = 0, g_label_l_x = 0, g_label_r_x = 0;
+bool g_tab6_shown = false;
+float g_alpha6_set = -1, g_word6_set = -1;
 bool g_pages_looked = false, g_pages_ok = false, g_strip_looked = false, g_strip_ok = false;
 std::uint64_t g_pages_layout = 0;  // the layout the pages' panes were looked up in (the early page switch checks it)
 std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), which ours follows in the strip's animation
@@ -528,6 +537,129 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
     }
 }
 
+// --- The Settings page (the sixth tab: Longshot's options; coop_pause_tab.h "The Settings page") ---
+// The category is the row the game's cursor is on while the rows have the pad; the list's page and its row picked
+// (-1: the rows have the pad). Any thread.
+std::atomic<int> g_set_category{0}, g_set_page{0}, g_set_row{-1};
+std::atomic<int> g_set_count{0};   // the category's settings (the list's length)
+// Longshot's settings as last read (every 2 s while the page shows, and after a change). g_set_mutex.
+std::mutex g_set_mutex;
+std::vector<SettingRow> g_set_all;
+std::uint64_t g_set_read_ms = 0;
+
+std::vector<SettingRow> SettingsNow(std::uint64_t now_ms, bool fresh = false) {
+    std::lock_guard lock(g_set_mutex);
+    if (fresh || g_set_read_ms == 0 || now_ms - g_set_read_ms > 2000) {
+        g_set_all.clear();
+        for (const CoopLongshotSettings::Setting& x : CoopLongshotSettings::All()) {
+            g_set_all.push_back(SettingRow{x.key, x.name, x.text, x.tab, x.value, x.lo, x.hi, x.step, x.restart, x.fixed});
+        }
+        g_set_read_ms = now_ms;
+    }
+    return g_set_all;
+}
+
+// A setting of the category's list set as a press asks (dir: -1 Left, +1 Right, 0 A). After the lock, as Act.
+void ChangeSetting(int index, int dir) {
+    const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
+    if (index < 0 || index >= static_cast<int>(rows.size())) return;
+    const SettingRow& r = rows[static_cast<std::size_t>(index)];
+    const int want = SettingNext(r, dir);
+    if (want == r.value) return;
+    const auto after = CoopLongshotSettings::Set(r.key, want);
+    LOG_INFO(Core, "coop: pause tab: settings: {} from {} to {}{}{}", r.key, r.text, after ? after->text : std::string("?"),
+             after ? "" : " (Longshot did not take it)", after && after->restart ? " (after a restart)" : "");
+    SettingsNow(NowMs(), true);
+    g_live_poke = true;
+}
+
+// The Settings page's words: its rows (the categories) and the list (a page of the category's settings), its picked
+// row bright and the others dimmed while the list has the pad, a fixed one dimmed always, the rows dimmed then too.
+// Live texts 22..26 (the rows) and 27..40 (the list: a name and a value each). g_live_mutex.
+std::uint64_t g_set_gen = 0;
+std::array<std::uint64_t, kListRows> g_set_list{};
+std::array<std::uint64_t, kRows> g_set_rows{};
+std::array<int, kListRows> g_set_vis{};
+std::array<float, kListRows> g_set_alpha{};
+std::array<float, kRows> g_set_rows_alpha{};
+
+void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
+    if (g_settings_pane == 0) return;
+    if (g_set_gen != gen) {
+        g_set_gen = gen;
+        std::uint64_t table = 0;
+        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
+        const std::uint64_t page = PartLayout(table, "Pa_Settings_00");
+        for (int i = 0; i < kListRows; ++i) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_List_%02d", i);
+            const std::uint64_t pane = PaneIn(ctx, page, name);
+            g_set_list[static_cast<std::size_t>(i)] = IsPart(pane) ? pane : 0;
+            g_set_vis[static_cast<std::size_t>(i)] = -1, g_set_alpha[static_cast<std::size_t>(i)] = -1;
+            if (const std::uint64_t mark = PaneIn(ctx, PartLayout(page, name), "P_CheckMark_00"); mark != 0) {
+                SetVisible(ctx, mark, false);   // (an Options row's check mark: never ours)
+            }
+        }
+        for (int r = 0; r < kRows; ++r) {
+            char name[16];
+            std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
+            const std::uint64_t pane = PaneIn(ctx, page, name);
+            g_set_rows[static_cast<std::size_t>(r)] = IsPart(pane) ? pane : 0;
+            g_set_rows_alpha[static_cast<std::size_t>(r)] = -1;
+        }
+    }
+    for (int r = 0; r < kRows; ++r) {
+        char path[64];
+        std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_Button_%02d/T_Btn_00", r);
+        LiveText(ctx, layout, gen, path, 22 + r, kSettingTabs[static_cast<std::size_t>(r)]);
+    }
+    const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
+    g_set_count = static_cast<int>(rows.size());
+    const int page = g_set_page.load(), picked = g_set_row.load();
+    const std::vector<ListLine> lines = SettingLines(rows, page);
+    for (int i = 0; i < kListRows; ++i) {
+        const std::size_t k = static_cast<std::size_t>(i);
+        const std::uint64_t pane = g_set_list[k];
+        if (pane == 0) continue;
+        const bool on = !lines[k].name.empty();
+        if (on) {
+            char path[64];
+            std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Option_00", i);
+            LiveText(ctx, layout, gen, path, 27 + 2 * i, lines[k].name);
+            std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Text_00", i);
+            LiveText(ctx, layout, gen, path, 28 + 2 * i, lines[k].value.empty() ? std::string(" ") : lines[k].value);
+        }
+        if (g_set_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_set_vis[k] = on ? 1 : 0;
+        const std::size_t at = static_cast<std::size_t>(((page % SettingPages(static_cast<int>(rows.size())) +
+                                                          SettingPages(static_cast<int>(rows.size()))) %
+                                                         SettingPages(static_cast<int>(rows.size()))) * kListRows + i);
+        const bool fixed = at < rows.size() && rows[at].fixed;
+        const float alpha = fixed ? 0.4f : picked < 0 || picked == i ? 1.0f : 0.5f;
+        if (on && g_set_alpha[k] != alpha) CallAlpha(ctx, pane, alpha), g_set_alpha[k] = alpha;
+    }
+    for (int r = 0; r < kRows; ++r) {
+        const std::size_t k = static_cast<std::size_t>(r);
+        const float alpha = picked >= 0 ? 0.45f : 1.0f;
+        if (g_set_rows[k] != 0 && g_set_rows_alpha[k] != alpha) CallAlpha(ctx, g_set_rows[k], alpha), g_set_rows_alpha[k] = alpha;
+    }
+}
+
+// The settings list's rows where the game puts them now (as ReadCellBoxes: an Options row's bar, 1880 wide), and the
+// x of a row's two arrows from its centre (PaOptionBtnLevel_00: its value at +500, the arrows 360 either side of it).
+constexpr float kArrowLeftX = 140.0f, kArrowRightX = 860.0f, kArrowReach = 90.0f;
+std::array<RowBox, kListRows> ReadSettingBoxes() {
+    std::array<RowBox, kListRows> boxes{};
+    for (int i = 0; i < kListRows; ++i) {
+        const std::uint64_t pane = g_set_list[static_cast<std::size_t>(i)];
+        float m[12] = {};
+        if (pane == 0 || !CoopRuntime::Read(pane + 0x28, m, sizeof m) || !(m[0] > 1e-3f) || !(m[4] > 1e-3f)) continue;
+        if ((Read<std::uint32_t>(pane + 0xa8) & 1u) == 0) continue;
+        boxes[static_cast<std::size_t>(i)] = RowBox{true, m[9] - 940.0f * m[0], m[10] - 70.0f * m[4],
+                                                    m[9] + 940.0f * m[0], m[10] + 70.0f * m[4]};
+    }
+    return boxes;
+}
+
 void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     std::lock_guard lock(g_live_mutex);
     if (layout == 0 || gen != g_live_gen) return;   // (another opening came meanwhile: its own turn sets them)
@@ -538,6 +670,7 @@ void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionV
         LiveText(ctx, layout, gen, path, i, rows[static_cast<std::size_t>(i)]);
     }
     LiveCells(ctx, layout, gen, v);
+    if (g_page.SettingsUsable()) LiveSettings(ctx, layout, gen);
 }
 
 // The pages' panes, looked up once per opening (`calls`: ctx may call(); else looked up at a later update).
@@ -551,6 +684,8 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     g_system_pane = FindOwnPane(ctx, f.layout, "Pa_System_00");
     g_coop_pane = FindOwnPane(ctx, f.layout, "Pa_Coop_00");
     g_pages_ok = IsPart(g_system_pane) && IsPart(g_coop_pane);
+    g_settings_pane = FindOwnPane(ctx, f.layout, "Pa_Settings_00");
+    if (!IsPart(g_settings_pane)) g_settings_pane = 0;
     g_pages_layout = f.layout;
     LOG_INFO(Core, "coop: pause tab: the pages' panes: Pa_System_00 {:#x}, Pa_Coop_00 {:#x}{}", g_system_pane,
              g_coop_pane, g_pages_ok ? "" : " (not both parts: the Multiplayer page stays off; is the pack's layout in?)");
@@ -572,6 +707,8 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_strip_gen = gen, g_strip_looked = false, g_strip_ok = false, g_tab_pane = 0;
         g_fourth_pane = 0, g_fourth_word = 0, g_tab_word = 0, g_tab_shown = false, g_follow_had = false;
         g_alpha_set = g_word_set = -1;
+        g_tab6_pane = g_tab6_word = g_tabs_parent = g_label_l = g_label_r = 0, g_tab6_shown = false;
+        g_alpha6_set = g_word6_set = -1;
     }
     if (g_strip_looked || !calls || f.layout == 0) return;
     g_strip_looked = true;
@@ -584,9 +721,21 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         Call(ctx, kPaneTable, f.layout + 0x40, 0, 0, 0, 0, &table);
         g_fourth_word = PaneIn(ctx, PartLayout(table, "Pa_Category_03"), "N_MenuChangeTextIn_00");
         g_tab_word = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
+        // (the sixth tab, and the panes the six-tab strip moves, with their places to go back to)
+        if (const std::uint64_t six = FindOwnPane(ctx, f.layout, "Pa_Category_05"); IsPart(six)) {
+            g_tab6_pane = six;
+            g_tab6_word = PaneIn(ctx, PartLayout(table, "Pa_Category_05"), "N_MenuChangeTextIn_00");
+            g_tabs_parent = FindOwnPane(ctx, f.layout, "N_MenuChange_00");
+            g_label_l = FindOwnPane(ctx, f.layout, "T_BtnL_00");
+            g_label_r = FindOwnPane(ctx, f.layout, "T_BtnR_00");
+            g_tabs_parent_x = Read<float>(g_tabs_parent + 0x6c);
+            g_label_l_x = Read<float>(g_label_l + 0x6c), g_label_r_x = Read<float>(g_label_r + 0x6c);
+        }
     }
-    LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}", g_tab_pane,
-             g_strip_ok ? "" : " (not a part: left alone, the Multiplayer page stays off)");
+    LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{}; the sixth: Pa_Category_05 {:#x} "
+                   "(the game's tabs' parent {:#x} at x {:.0f}, L {:#x} at {:.0f}, R {:#x} at {:.0f})",
+             g_tab_pane, g_strip_ok ? "" : " (not a part: left alone, the Multiplayer page stays off)", g_tab6_pane,
+             g_tabs_parent, g_tabs_parent_x, g_label_l, g_label_l_x, g_label_r, g_label_r_x);
 }
 
 // The pages: our page over System's, or System's alone. The rows' texts once per opening.
@@ -595,9 +744,17 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
 struct Slide {
     int dir = 0;                  // 0: none
     std::uint64_t start_ms = 0, gen = 0;
-    float ours_x = 0, system_x = 0;   // their own places (+0x6c), as they were when it began
+    // The two pages (the one to the right: the later tab; the one to the left), their own places (+0x6c) as they were
+    // when it began, and which one stays shown at its end.
+    std::uint64_t right = 0, left = 0, stays = 0;
+    float right_x = 0, left_x = 0;
 };
 Slide g_slide;
+
+// A page of Page::Do's numbering: 0 System's, 1 the Multiplayer page, 2 the Settings page (0 when the pack has none).
+std::uint64_t PageOf(int page) {
+    return page == 0 ? g_system_pane : page == 1 ? g_coop_pane : g_settings_pane;
+}
 
 void PlacePane(void* ctx, std::uint64_t pane, float x) {
     if (Read<float>(pane + 0x6c) == x) return;
@@ -608,8 +765,8 @@ void PlacePane(void* ctx, std::uint64_t pane, float x) {
 void EndSlide(void* ctx) {
     if (g_slide.dir == 0) return;
     if (g_slide.gen == g_pages_gen) {   // (a new opening has its own panes, at their places)
-        PlacePane(ctx, g_coop_pane, g_slide.ours_x);
-        PlacePane(ctx, g_system_pane, g_slide.system_x);
+        PlacePane(ctx, g_slide.right, g_slide.right_x);
+        PlacePane(ctx, g_slide.left, g_slide.left_x);
     }
     g_slide.dir = 0;
 }
@@ -622,14 +779,14 @@ void StepSlide(void* ctx, std::uint64_t now_ms) {
         return;
     }
     const float p = SlideProgress(now_ms - g_slide.start_ms);
-    const auto [ours, system] = SlideOffsets(g_slide.dir, p);
-    PlacePane(ctx, g_coop_pane, g_slide.ours_x + ours);
-    PlacePane(ctx, g_system_pane, g_slide.system_x + system);
+    const auto [right, left] = SlideOffsets(g_slide.dir, p);
+    PlacePane(ctx, g_slide.right, g_slide.right_x + right);
+    PlacePane(ctx, g_slide.left, g_slide.left_x + left);
     if (p >= 1.0f) {
-        const bool shown = g_slide.dir > 0;
+        const Slide was = g_slide;
         EndSlide(ctx);
-        SetVisible(ctx, g_coop_pane, shown);
-        SetVisible(ctx, g_system_pane, !shown);
+        SetVisible(ctx, was.right, was.stays == was.right);
+        SetVisible(ctx, was.left, was.stays == was.left);
     }
 }
 
@@ -638,17 +795,22 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
     if (layout == 0 || !g_pages_ok) return;
     if (d.set_page) {
         EndSlide(ctx);   // (one going on: both back at their places first)
-        if (d.slide != 0) {
+        const std::uint64_t from = PageOf(d.page_from), to = PageOf(d.page_to);
+        if (d.slide != 0 && from != 0 && to != 0 && from != to) {
             g_slide.dir = d.slide, g_slide.start_ms = NowMs(), g_slide.gen = g_pages_gen;
-            g_slide.ours_x = Read<float>(g_coop_pane + 0x6c), g_slide.system_x = Read<float>(g_system_pane + 0x6c);
-            SetVisible(ctx, g_coop_pane, true);
-            SetVisible(ctx, g_system_pane, true);
+            g_slide.right = d.page_to > d.page_from ? to : from, g_slide.left = d.page_to > d.page_from ? from : to;
+            g_slide.stays = to;
+            g_slide.right_x = Read<float>(g_slide.right + 0x6c), g_slide.left_x = Read<float>(g_slide.left + 0x6c);
+            for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
+                if (pane != 0) SetVisible(ctx, pane, pane == from || pane == to);
+            }
             StepSlide(ctx, g_slide.start_ms);
-            LOG_INFO(Core, "coop: pause tab: the pages slide {} (our page's place x {:.0f}, System's {:.0f})",
-                     d.slide > 0 ? "to ours" : "back to System", g_slide.ours_x, g_slide.system_x);
+            LOG_INFO(Core, "coop: pause tab: the pages slide from page {} to page {} (places x {:.0f} and {:.0f})",
+                     d.page_from, d.page_to, g_slide.left_x, g_slide.right_x);
         } else {
-            SetVisible(ctx, g_coop_pane, d.page_shown);
-            SetVisible(ctx, g_system_pane, !d.page_shown);
+            for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
+                if (pane != 0) SetVisible(ctx, pane, pane == (to != 0 ? to : g_system_pane));
+            }
         }
     }
     if (d.set_texts) {
@@ -656,11 +818,35 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
         // Inside our copy: its controller picture (System's, not ours) hidden.
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
-        const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
-        const std::uint64_t controller = PaneIn(ctx, ours, "Pa_SystemController_00");
-        if (IsPart(controller)) SetVisible(ctx, controller, false);
-        LOG_INFO(Core, "coop: pause tab: the page's controller picture {}", IsPart(controller) ? "hidden" : "not found");
+        for (const char* page : {"Pa_Coop_00", "Pa_Settings_00"}) {
+            const std::uint64_t ours = PartLayout(table, page);
+            if (ours == 0) continue;
+            const std::uint64_t controller = PaneIn(ctx, ours, "Pa_SystemController_00");
+            if (IsPart(controller)) SetVisible(ctx, controller, false);
+            LOG_INFO(Core, "coop: pause tab: {}'s controller picture {}", page, IsPart(controller) ? "hidden" : "not found");
+        }
     }
+}
+
+// The six-tab strip (the pack's sixth tab, in the Plus menu): the game's four tabs' parent moved left by kSixShift (its
+// own place: no animation track names it, so the strip's animations still move the tabs in it), our two tabs placed
+// kSixGap after the fourth (its place on the screen: they sit under RootPane), L and R moved out to the row's ends.
+// Elsewhere (the Minus menu, the strip closed, an older pack) all of them at their own places. Measured from the
+// layout (2026-11-19, docs/game-ui.md): the game's tabs 460 apart from x -690, the hearts end near -1218 with ten,
+// the rupee counter starts near 1460.
+constexpr float kSixShift = -320.0f, kSixGap = 400.0f, kSixLabelL = -270.0f, kSixLabelR = 40.0f;
+void PlaceSix(void* ctx, bool six) {
+    if (g_tabs_parent == 0) return;
+    PlacePane(ctx, g_tabs_parent, g_tabs_parent_x + (six ? kSixShift : 0.0f));
+    if (g_label_l != 0) PlacePane(ctx, g_label_l, g_label_l_x + (six ? kSixLabelL : 0.0f));
+    if (g_label_r != 0) PlacePane(ctx, g_label_r, g_label_r_x + (six ? kSixLabelR : 0.0f));
+}
+void FollowFourthX(void* ctx) {
+    if (g_fourth_pane == 0 || g_tab6_pane == 0) return;
+    const float x = Read<float>(g_fourth_pane + kPaneScreenX);   // (its place on the screen)
+    if (!std::isfinite(x)) return;
+    PlacePane(ctx, g_tab_pane, x + kSixGap);
+    PlacePane(ctx, g_tab6_pane, x + 2 * kSixGap);
 }
 
 // The strip: the fifth tab shown in the Plus menu (filled as a Plus tab, our word), lit while our page shows, and
@@ -672,6 +858,12 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
     SetVisible(ctx, g_tab_pane, d.tab_shown);
     if (!d.tab_shown) g_follow_had = false, g_alpha_set = g_word_set = -1;
     g_tab_shown = d.tab_shown;
+    if (g_tab6_pane != 0) {   // (the sixth tab, and the six-tab places: also when the tabs go, as in the Minus menu)
+        SetVisible(ctx, g_tab6_pane, d.tab6_shown);
+        if (!d.tab6_shown) g_alpha6_set = g_word6_set = -1;
+        g_tab6_shown = d.tab6_shown;
+        PlaceSix(ctx, d.tab6_shown);
+    }
     if (!d.tab_shown) return;
     const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
     if (tab3 == 0 || tab4 == 0) return;
@@ -690,8 +882,19 @@ void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
         LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}, {})", text ? "set" : "not set",
                  text_in != 0 ? "faded in" : "its text pane not found");
     }
-    Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
+    // The sixth tab (Settings), the same way as the fifth.
+    const std::uint64_t tab5 = f.tabs >= 6 ? Read<std::uint64_t>(tabs + 8 * 5) : 0;
+    if (d.fill_tab6 && tab5 != 0 && g_tab6_pane != 0) {
+        Call(ctx, kTabFill, tab5, kSystemPage, 1);
+        const bool text = SetText(ctx, layout, "Pa_Category_05/T_Text_00", "LayoutMsg/MenuOverlay_00",
+                                  "Pa_Category_05-T_Text_00");
+        Call(ctx, kTabOpen, tab5, 0);
+        if (g_tab6_word != 0) CallAlpha(ctx, g_tab6_word, 1.0f);
+        LOG_INFO(Core, "coop: pause tab: the sixth tab filled (its word {})", text ? "set" : "not set");
+    }
+    Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit && !d.tab6_lit ? 1 : 0, 0);
     Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
+    if (tab5 != 0 && g_tab6_pane != 0) Call(ctx, kTabLight, tab5, d.tab6_lit ? 1 : 0, 0);
 }
 
 // Our tab through the strip's opening and closing, as the game's four: the strip's animation moves and fades the
@@ -717,10 +920,23 @@ void FollowFourth(void* ctx) {
         CoopRuntime::Write(g_tab_pane + kPaneOwnY, &want_y, sizeof want_y);
         Call(ctx, kPaneMoved, g_tab_pane);
     }
+    if (g_tab6_shown && g_tab6_pane != 0 && Read<float>(g_tab6_pane + kPaneOwnY) != want_y) {
+        CoopRuntime::Write(g_tab6_pane + kPaneOwnY, &want_y, sizeof want_y);
+        Call(ctx, kPaneMoved, g_tab6_pane);
+    }
+    if (g_tab6_shown) FollowFourthX(ctx);   // (six tabs: ours after the fourth wherever the shift put it)
     // (the alphas only when they change, as the height: the strip settled, nothing is called)
     if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); a != g_alpha_set) {
         CallAlpha(ctx, g_tab_pane, a);
         g_alpha_set = a;
+    }
+    if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); g_tab6_shown && a != g_alpha6_set) {
+        CallAlpha(ctx, g_tab6_pane, a);
+        g_alpha6_set = a;
+    }
+    if (const float w = std::clamp(want_word, 0.0f, 1.0f); g_tab6_shown && g_tab6_word != 0 && w != g_word6_set) {
+        CallAlpha(ctx, g_tab6_word + kTextAlphaBlock, w);
+        g_word6_set = w;
     }
     // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
     if (g_fourth_word != 0 && g_tab_word != 0) {
@@ -1143,6 +1359,10 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             }
             if (f.kind == Kind::kStrip) LookStrip(ctx, calls, f, gen);
             if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_strip_ok);
+            if (f.kind != Kind::kBlocker) {   // (the Settings page: its page, the sixth tab and Longshot's settings)
+                g_page.SetSettingsUsable(g_page.Usable() && g_settings_pane != 0 && g_tab6_pane != 0 &&
+                                         CoopLongshotSettings::Available());
+            }
             d = g_page.OnScreen(f, NowMs());
             now_shown = g_page.Shown();
             why = g_page.TakeWhy();
@@ -1204,7 +1424,8 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         std::uint64_t out = 0;
         bool was = false, shown = false;
         bool decide = false;
-        int row = -1, pick_cell = -1;
+        int row = -1, pick_cell = -1, set_change = -1, set_dir = 0;
+        bool settings_shown = false;
         std::string why;
         {
             std::lock_guard lock(g_mutex);
@@ -1237,7 +1458,8 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             // The game browser's cells (View::kLan): Right goes into them, the arrows move among them (none reaches the
             // game's cursor), Left from the left column or B gives the pad back to the rows; the mouse picks one by
             // moving onto it, and a click on one is its A (Longshot presses nothing there: the cells are no buttons).
-            const bool browse = shown && !typing && ViewShown() == View::kLan;
+            const bool settings = shown && !typing && g_page.Which() == 1;
+            const bool browse = shown && !typing && !settings && ViewShown() == View::kLan;
             const std::uint64_t bdown = in & ~g_browse_last;
             g_browse_last = in;
             int cell = browse ? g_cell.load() : -1;
@@ -1271,6 +1493,59 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 if (cell >= 0) out &= ~(kPadUp | kPadDown | kPadStickUp | kPadStickDown);   // (the rows' cursor stays)
             }
             if (cell != g_cell.load()) g_cell = cell, g_live_poke = true;
+            // The Settings page: the rows choose the category; Right or A goes into its list; up and down move in it,
+            // Left and Right change the value, A the next one, B back to the rows. The mouse picks a row and a click
+            // on an arrow changes it (elsewhere on the row: A).
+            int set_row = settings ? g_set_row.load() : -1;
+            if (settings) {
+                const bool right = (bdown & (kPadRight | kPadStickRight)) != 0, left = (bdown & (kPadLeft | kPadStickLeft)) != 0;
+                const bool up = (bdown & (kPadUp | kPadStickUp)) != 0, down = (bdown & (kPadDown | kPadStickDown)) != 0;
+                const int count = g_set_count.load();
+                if (set_row < 0) {
+                    if (const int r = FocusedRow(); r >= 0 && r != g_set_category.load()) {
+                        g_set_category = r, g_set_page = 0, g_live_poke = true;   // (the category under the cursor)
+                    }
+                    if ((right || decide) && count > 0) {
+                        set_row = 0, g_set_page = 0, decide = false;
+                        g_page.Sound("button_on");
+                    }
+                } else {
+                    if (up || down) {
+                        int page = g_set_page.load(), r = set_row;
+                        SettingMove(count, down ? 1 : -1, &page, &r);
+                        if (page != g_set_page.load() || r != set_row) g_page.Sound("button_on");
+                        g_set_page = page, set_row = r;
+                    }
+                    if (left || right) set_change = g_set_page.load() * kListRows + set_row, set_dir = left ? -1 : 1;
+                    if (decide) set_change = g_set_page.load() * kListRows + set_row, set_dir = 0, decide = false;
+                }
+                float x = 0, y = 0;
+                bool held = false;
+                if (ReadCursor(&x, &y, &held)) {
+                    const auto boxes = ReadSettingBoxes();
+                    int hover = -1;
+                    for (int i = 0; i < kListRows; ++i) {
+                        const RowBox& b = boxes[static_cast<std::size_t>(i)];
+                        if (b.shown && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) hover = i;
+                    }
+                    const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
+                    g_cells_mouse_x = x, g_cells_mouse_y = y;
+                    if (moved && hover >= 0 && hover != set_row) set_row = hover, g_page.Sound("button_on");
+                    if (held && !g_cells_held) g_cells_press = hover;
+                    if (!held && g_cells_held && hover >= 0 && hover == g_cells_press) {
+                        const RowBox& b = boxes[static_cast<std::size_t>(hover)];
+                        const float cx = (b.x0 + b.x1) / 2, scale = (b.x1 - b.x0) / 1880.0f;
+                        const float to_left = std::abs(x - (cx + kArrowLeftX * scale)), to_right = std::abs(x - (cx + kArrowRightX * scale));
+                        set_row = hover;
+                        set_change = g_set_page.load() * kListRows + hover;
+                        set_dir = to_left < kArrowReach * scale ? -1 : to_right < kArrowReach * scale ? 1 : 0;
+                    }
+                    g_cells_held = held;
+                }
+                if (set_row >= 0) out &= ~(kPadUp | kPadDown | kPadStickUp | kPadStickDown);   // (the rows' cursor stays)
+                g_page.SetSubView(set_row >= 0);   // (B: back to the rows)
+            }
+            if (set_row != g_set_row.load()) g_set_row = set_row, g_live_poke = true;
             if (decide) {
                 const int clicked = g_mouse_rows.TakeClicked(NowMs());
                 if (clicked < 0 && cell >= 0) {
@@ -1280,26 +1555,30 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     row = clicked >= 0 ? clicked : FocusedRow();   // (under the lock: the pages screen is the updates')
                 }
             }
-            if (g_page.TakeBack()) {
+            if (settings && g_page.TakeBack()) {
+                g_set_row = -1, g_live_poke = true;   // (B in the settings list: the rows have the pad again)
+            } else if (g_page.TakeBack()) {
                 if (cell >= 0) {
                     g_cell = -1, g_live_poke = true;   // (B in the cells: the rows have the pad again)
                 } else {
                     SetView(BackOf(ViewShown()));   // (B in a view: where its Back goes)
                 }
             }
-            if (!shown) SetView(View::kMain);
-            g_page.SetSubView(ViewShown() != View::kMain);
+            if (!shown) SetView(View::kMain), g_set_row = -1;
+            if (!settings) g_page.SetSubView(ViewShown() != View::kMain);
             why = g_page.TakeWhy();
             g_mouse = g_page.MousePage();
+            settings_shown = shown && g_page.Which() == 1;
         }
         if (shown && stick != nullptr) {
             stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
-            if (typing || g_cell.load() >= 0) stick[1] = 0;   // (a field typed into, or the cells: the rows' cursor stays)
+            if (typing || g_cell.load() >= 0 || (g_page.Which() == 1 && g_set_row.load() >= 0)) stick[1] = 0;
         }
         if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
-        if (decide) Act(row);
+        if (decide && !settings_shown) Act(row);
         if (pick_cell >= 0) ActCell(pick_cell);
+        if (set_change >= 0) ChangeSetting(set_change, set_dir);
         // (the stick's up and down bits we added are not the game's: only what it sent, filtered)
         return out & (buttons | ~(kPadStickUp | kPadStickDown | kPadStickLeft | kPadStickRight));
     } catch (...) {

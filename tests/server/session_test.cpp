@@ -6306,6 +6306,32 @@ TEST_CASE("row 149: a boss stuck in one move frees its fight lock, a new move or
   CHECK(h.session.object_in_fight(placed(7), h.now));
 }
 
+TEST_CASE("boss-die-0116: a boss dying or in a cutscene never stalls: its fight lock stays (no hand-over mid-death)") {
+  SessionConfig config = quiet_config();
+  config.boss_near_hold_us = 0;
+  struct Held {
+    const char* animation;
+    std::int32_t life;
+  };
+  // Every boss's death and cut as its samples carry them: an own death move before the outro (Gohma's 'Die' at 1,
+  // as the test kill left her), any move at life 0 (a Bongo Bongo hand down), a cut's and an AS file's animations.
+  for (const Held held : {Held{"Die", 1}, Held{"Dead_Loop", 3}, Held{"Damage_Death", 0}, Held{"Wait", 0},
+                          Held{"C01-Enemy_DungeonBoss_Gohma-A-0", 21},
+                          Held{"AS-C10-Dm_FireTemple_BossIn_Enemy_DungeonBoss_Volvagia-A-0", 24}}) {
+    CAPTURE(std::string(held.animation));
+    OwnerHarness h(config);
+    h.receive(1, present_in("Field", {placed(7)}), kChannelOwnership);
+    h.receive(2, present_in("Field", {placed(7)}), kChannelOwnership);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    for (std::uint64_t t = 0; t < 2 * config.boss_stall_us; t += kSecond) {
+      h.receive(1, ObjectSample{0, placed(7), 0, held_move(held.animation, held.life)}, kChannelObjectSamples);
+      h.run(kSecond);
+    }
+    CHECK(h.session.stats().boss_stalled == 0);
+    CHECK(h.session.object_in_fight(placed(7), h.now));
+  }
+}
+
 TEST_CASE("row 149: a stuck boss's freed fight lets a copy's chase hand it over") {
   SessionConfig config = quiet_config();
   config.boss_near_hold_us = 0;

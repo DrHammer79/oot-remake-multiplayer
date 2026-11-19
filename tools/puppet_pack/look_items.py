@@ -153,8 +153,8 @@ def _merged(base, over):
     return out
 
 
-def _resolved(members, item, path):
-    """The ModelInfo at `path` with its `$parent`s (from the same pack) merged in, `$parent` dropped."""
+def _info_chain(members, item, path):
+    """The ModelInfo at `path` and its `$parent`s (from the same pack): their member paths, `path` first."""
     chain = []
     while path is not None:
         if path in chain:
@@ -170,8 +170,13 @@ def _resolved(members, item, path):
         # `Work/<path>.gyml` names the pack's `<path>.bgyml`.
         path = parent[len("Work/"):] if parent.startswith("Work/") else parent
         path = path[:-len(".gyml")] + ".bgyml" if path.endswith(".gyml") else path
+    return chain
+
+
+def _resolved(members, item, path):
+    """The ModelInfo at `path` with its `$parent`s (from the same pack) merged in, `$parent` dropped."""
     doc = {}
-    for p in reversed(chain):
+    for p in reversed(_info_chain(members, item, path)):
         doc = _merged(doc, byml.loads(members[p]))
     doc.pop("$parent", None)
     return doc
@@ -191,6 +196,13 @@ def model_info(members, item):
     if not isinstance(fmdb, str) or not isinstance(project, str):
         raise TunicError(f"{item}: its ModelInfo has no FmdbName and ModelProjectName")
     return fmdb, project, path
+
+
+def model_info_chain(members, item):
+    """The member paths of the item's ModelInfo and its `$parent`s, its own first: the game files a copy's
+    ModelInfo (copy_model_info, every `$parent` merged in) is made from, for its size-table entry
+    (build.chain_entry: the Giant's Knife's merges two files)."""
+    return _info_chain(members, item, model_info(members, item)[2])
 
 
 def copy_model_info(members, item, actor, project_name=None):

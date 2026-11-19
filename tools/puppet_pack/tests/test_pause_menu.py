@@ -64,12 +64,15 @@ def pane(d, name):
 
 
 class TabTest(unittest.TestCase):
-    def test_a_fifth_tab_after_system_the_game_tabs_left_alone(self):
+    def test_a_fifth_and_sixth_tab_after_system_the_game_tabs_left_alone(self):
         d = overlay()
         n = pm.add_tab(d)
         panes, parts = ui_pack.read_layout(n)
-        self.assertEqual(len(panes), len(OVERLAY) + 1)
-        self.assertEqual((panes[-1].name, parts[-1].name), ("Pa_Category_04", "Pa_Category_04"))
+        self.assertEqual(len(panes), len(OVERLAY) + 2)
+        self.assertEqual([p.name for p in panes[-2:]], ["Pa_Category_04", "Pa_Category_05"])
+        self.assertEqual([p.name for p in parts[-2:]], ["Pa_Category_04", "Pa_Category_05"])
+        x6, y6, parent6, _ = pane(n, "Pa_Category_05")   # (the sixth a gap further: the module places both)
+        self.assertEqual((x6, y6, parent6), (700.0 + 2 * (100.0 - pm.FIFTH_GAP) + 600.0, -70.0 - 60.0, "RootPane"))
         # the game's four and L where they were (the strip's animation places them)
         for name in ["Pa_Category_%02d" % i for i in range(4)] + ["T_BtnL_00"]:
             self.assertEqual(pane(n, name), pane(d, name), name)
@@ -80,11 +83,11 @@ class TabTest(unittest.TestCase):
         # the order holds: only the root reaches the copy, every other pane ends where it did
         old = [struct.unpack_from("<I", d, p.record + 0x34)[0] for p in ui_pack.read_layout(d)[0]]
         new = [struct.unpack_from("<I", n, p.record + 0x34)[0] for p in panes[:len(OVERLAY)]]
-        self.assertEqual(new, [len(OVERLAY) + 1] + old[1:])
-        # the copy is the fourth tab's part, with its own parameters
-        rec = parts[-1].record
+        self.assertEqual(new, [len(OVERLAY) + 2] + old[1:])
+        # the copies are the fourth tab's part, with their own parameters
+        rec = parts[-2].record
         self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, rec)[0]), "PaMenuCategory_00")
-        self.assertEqual(panes[-1].id, ui_pack.part_id("Pa_Category_04"))   # (the game's id: CityHash64 of the name)
+        self.assertEqual(panes[-2].id, ui_pack.part_id("Pa_Category_04"))   # (the game's id: CityHash64 of the name)
         # stored hidden: only the co-op module shows it (bit 0 of the kind word; the source's has it)
         kind = lambda n, i: struct.unpack_from("<I", n, ui_pack.read_layout(n)[0][i].record + 0x38)[0]
         self.assertEqual(kind(n, -1), kind(d, 7) & ~1)
@@ -113,15 +116,17 @@ class PageTest(unittest.TestCase):
         d = pages()
         n = pm.add_page(d)
         panes, parts = ui_pack.read_layout(n)
-        self.assertEqual((panes[-1].name, parts[-1].name), ("Pa_Coop_00", "Pa_Coop_00"))
+        self.assertEqual([p.name for p in panes[-2:]], ["Pa_Coop_00", "Pa_Settings_00"])
+        self.assertEqual([p.name for p in parts[-2:]], ["Pa_Coop_00", "Pa_Settings_00"])
+        self.assertEqual(pane(n, "Pa_Settings_00")[:3], pane(n, "Pa_Coop_00")[:3])   # (the same place: the module slides)
         # under N_InOut_00, x 0 (the strip's slide taken off), the System page's y there
         self.assertEqual(pane(n, "Pa_Coop_00"), (0.0, -70.0 - 30.0, "N_InOut_00", len(PAGES) + 1))
         self.assertEqual(pane(n, "Pa_System_00"), pane(d, "Pa_System_00"))
         self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-1].record)[0]), "PaSystemMenu_00")
         self.assertEqual(struct.unpack_from("<I", n, panes[-1].record + 0x38)[0] & 1, 0)   # stored hidden
-        # N_InOut_00 and its ancestors reach the copy; P_Black_00, the last pane before, as it was
+        # N_InOut_00 and its ancestors reach the copies; P_Black_00, the last pane before, as it was
         self.assertEqual([pane(n, p)[3] for p in ("RootPane", "N_All_00", "N_InOut_00", "P_Black_00")],
-                         [len(PAGES) + 1] * 3 + [len(PAGES)])
+                         [len(PAGES) + 2] * 3 + [len(PAGES)])
 
     def test_refusals(self):
         with self.assertRaises(pm.PauseMenuError):

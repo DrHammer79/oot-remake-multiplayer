@@ -748,8 +748,11 @@ included) gets its own `PhysicsParam` and `ControllerSetParam` made from the pla
 Left out: sensors (`Tgt`, `Atk`, `Chemical`: nothing hits or is hit by the copy yet), the ragdoll, the
 rigid body entities (ride, elastic hands, reflect shield, liftable sweep), the controller entities, IK and
 looking. Its character controller is the player's (merged) with `DefaultMoveState: Free` (the NPC
-`ThroughGround` value) so it does not fall between the hook's places. The new files get size-table entries
-as the player files they are cut from. The manifest (`coop_puppet.json`) records `"body": true`. No hook
+`ThroughGround` value) so it does not fall between the hook's places. Each new file's size-table entry is
+the sum of the entries of every player file merged into it (`build.chain_entry`: the game parses a param in a
+heap of its entry; with Player_Child's entry alone the child's character controller, merged with Player's,
+ran out at its `InteractWithRagdoll` object and crashed `GeneralFormatAsync_` as the copy loaded,
+crash-0116-a). The manifest (`coop_puppet.json`) records `"body": true`. No hook
 change: the Director already places the puppet through the physics-aware setter.
 
 Build for a proof (lane pair, offline job): `python -I -B tools\puppet_pack\build.py --romfs <the .nup>

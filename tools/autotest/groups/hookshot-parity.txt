@@ -48,7 +48,7 @@ hs-ocarina  expect='A:coop: ocarina note 4 \(Ocarina_D\) sent'  expect='A:coop: 
 [g3]
 # Dungeons and the frame cadence: /teleport into a dungeon room (#197), the ladder (#129), work during a load.
 warp  expect='A:coop: Hookshot calls co-op at each present'  expect='B:coop: Hookshot calls co-op at each present'  label="cadence"  logonly="frame cadence: nothing on screen"
-hs-teleport-room  expect='A:scene change taken'  expect='A:coop: teleport: not moved to .*\(issue 197\)'  expect='A:test goto reached'  label="#197"  see=hs-teleport-room-A  see=hs-teleport-room-B
+hs-teleport-room  expect='A:scene change taken'  expect='A:coop: teleport: move to -3[0-5].[0-9] .*: asked'  expect='A:test mark arrived \(Link at -3[0-5]\.'  expect='A:test goto reached'  label="#197"  see=hs-teleport-room-A  see=hs-teleport-room-B
 hs-door  expect='A:P2 show -> hold \(their cutscene\)'  expect='A:P2 hold -> show'  label="#194 door cutscene (B by goto)"  see=hs-door-A  see=hs-door-B
 hs-ladder  expect='A:test setflag HavePlayedEvent\.InsideTheDekuTree_Gimmick_FallingLadder \(bool\) 0: set'  expect='A:get_bool\(0xb3a4fe84\) = 1 \(was 0\)'  expect='B:result: InsideTheDekuTree_Gimmick_FallingLadder: another player played it'  label="#129 eye shot"  see=hs-ladder-A  see=hs-ladder-B
 

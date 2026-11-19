@@ -349,7 +349,6 @@ Trip::Actions Trip::Accepted(std::uint8_t number, const coop::protocol::JoinTarg
     const bool same = local.scene && *local.scene == target.scene;
     if (phase_ == Phase::asking_again) {
         phase_ = Phase::idle;
-        a.after_load = true;
         if (same) {
             a.move = to;
             a.lines.push_back("teleport: next to " + name_);
@@ -422,7 +421,6 @@ Trip::Actions Trip::Refused(std::uint8_t number, JoinRefuseReason reason) {
     }
     if (phase_ == Phase::asking_again && reason == JoinRefuseReason::busy) {
         a.move = at_;
-        a.after_load = true;  // we are in their scene: where they stood when they first answered
         a.lines.push_back("teleport: " + name_ + " is busy now; you are where they were");
     } else {
         a.lines.push_back(RefusedLine(name_, reason));
@@ -438,7 +436,6 @@ Trip::Actions Trip::TimedOut(std::uint8_t number) {
     }
     if (phase_ == Phase::asking_again) {
         a.move = at_;
-        a.after_load = true;
         a.lines.push_back("teleport: no answer from " + name_ + "; you are where they were");
     } else {
         a.lines.push_back("teleport: no answer from " + name_ + " (an older build, or their game is busy)");
@@ -573,19 +570,8 @@ Trip::Actions Trip::Tick(const Local& local, std::uint64_t now_us) {
     return a;
 }
 
-std::string NotMovedLine(MoveCheck check, std::string_view name, bool after_load) {
-    std::string who = name.empty() ? std::string("they are") : std::string(name) + " is";
-    std::string out = "teleport: ";
-    out += check == MoveCheck::other_room
-               ? who + " in another room of this dungeon"
-               : who + " too far away in this dungeon to move you there (no room table for it: make the puppet pack again)";
-    out += after_load ? "; you are at its entrance: type /teleport again, or walk there" : "; walk there";
-    return out;
-}
-
-MoveCheck CheckMove(const CoopRooms::Table& rooms, std::string_view scene, const Vec& from, const Vec& to,
-                    bool after_load) {
-    if (!after_load || !CoopDungeon::IsDungeonScene(scene)) {
+MoveCheck CheckMove(const CoopRooms::Table& rooms, std::string_view scene, const Vec& from, const Vec& to) {
+    if (!CoopDungeon::IsDungeonScene(scene)) {
         return MoveCheck::ok;
     }
     const auto a = rooms.Nearest(scene, CoopRooms::Vec3{from.x, from.y, from.z});

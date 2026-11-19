@@ -1497,3 +1497,131 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(ours == doctest::Approx(kPageWidth));
     CHECK(system == doctest::Approx(0.0f));
 }
+
+TEST_CASE("pause tab: with the Settings page, R on Multiplayer slides to it and L slides back, the tabs lit in turn") {
+    Page p = UsablePage();
+    p.SetSettingsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
+    p.OnScreen(Strip(0x9000, 6, kSystemPage), now);   // (the pack's six tabs)
+    p.OnPad(0, now);
+    CHECK(p.OnPad(kPadR, now + 16) == 0);   // System -> Multiplayer
+    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
+    CHECK(d.set_page);
+    CHECK(d.page_from == 0);
+    CHECK(d.page_to == 1);
+    CHECK(d.slide == 1);
+    CHECK(p.MousePage() == 4);
+    p.OnPad(0, now + 48);
+    CHECK(p.OnPad(kPadR, now + 64) == 0);   // Multiplayer -> Settings
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 80);
+    CHECK(d.set_page);
+    CHECK(d.page_from == 1);
+    CHECK(d.page_to == 2);
+    CHECK(d.slide == 1);
+    CHECK(p.Which() == 1);
+    CHECK(p.MousePage() == 5);
+    d = p.OnScreen(Strip(0x9000, 6, kSystemPage), now + 96);
+    CHECK(d.set_tabs);
+    CHECK(d.tab6_shown);
+    CHECK(d.tab6_lit);
+    CHECK_FALSE(d.tab_lit);
+    p.OnPad(0, now + 112);
+    CHECK(p.OnPad(kPadR, now + 128) == 0);   // (R on the last page: nothing more)
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 144);
+    CHECK_FALSE(d.set_page);
+    p.OnPad(0, now + 160);
+    p.OnPad(kPadL, now + 176);               // Settings -> Multiplayer
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 192);
+    CHECK(d.set_page);
+    CHECK(d.page_from == 2);
+    CHECK(d.page_to == 1);
+    CHECK(d.slide == -1);
+    CHECK(p.Shown());
+    p.OnPad(0, now + 208);
+    p.OnPad(kPadL, now + 224);               // Multiplayer -> System
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 240);
+    CHECK(d.set_page);
+    CHECK(d.page_from == 1);
+    CHECK(d.page_to == 0);
+    CHECK(d.slide == -1);
+    CHECK_FALSE(p.Shown());
+}
+
+TEST_CASE("pause tab: without the Settings page (an older pack, or no settings from Longshot), R on Multiplayer does nothing") {
+    Page p = UsablePage();
+    std::uint64_t now = 1000;
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
+    p.OnScreen(Strip(0x9000, 6, kSystemPage), now);
+    p.OnPad(0, now);
+    p.OnPad(kPadR, now + 16);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
+    p.OnPad(0, now + 48);
+    p.OnPad(kPadR, now + 64);
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 80);
+    CHECK_FALSE(d.set_page);
+    CHECK(p.Which() == 0);
+    const Page::Do s = p.OnScreen(Strip(0x9000, 6, kSystemPage), now + 96);
+    CHECK_FALSE(s.tab6_shown);
+}
+
+TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages, and the values a press asks for") {
+    std::vector<SettingRow> all;
+    for (int i = 0; i < 9; ++i) {
+        SettingRow r;
+        r.key = "g" + std::to_string(i), r.name = "Graphics " + std::to_string(i), r.text = "On", r.tab = "Graphics";
+        r.lo = 0, r.hi = 1, r.value = 1;
+        all.push_back(r);
+    }
+    SettingRow vol;
+    vol.key = "volume", vol.name = "Volume", vol.text = "80", vol.tab = "Audio", vol.lo = 0, vol.hi = 100, vol.step = 5;
+    vol.value = 80;
+    all.push_back(vol);
+    SettingRow dbg;
+    dbg.key = "debug", dbg.name = "Debug thing", dbg.tab = "Debug";
+    all.push_back(dbg);
+    SettingRow res;
+    res.key = "aspect", res.name = "Aspect ratio", res.text = "16:9", res.tab = "Graphics", res.restart = true;
+    res.lo = 0, res.hi = 3, res.value = 3;
+    all.push_back(res);
+
+    const auto graphics = SettingsOf(all, 0);
+    CHECK(graphics.size() == 10);
+    CHECK(SettingsOf(all, 1).size() == 1);
+    CHECK(SettingsOf(all, 4).empty());   // (Motion: none here)
+    for (const SettingRow& r : graphics) CHECK(r.tab != "Debug");
+    CHECK(SettingPages(10) == 2);
+    auto lines = SettingLines(graphics, 0);
+    CHECK(lines[0].name == "Graphics 0");
+    CHECK(lines[0].value == "On");
+    lines = SettingLines(graphics, 1);
+    CHECK(lines[2].name == "Aspect ratio *");   // (a restart one)
+    CHECK(lines[3].name.empty());
+
+    CHECK(SettingNext(vol, 1) == 85);
+    CHECK(SettingNext(vol, -1) == 75);
+    vol.value = 100;
+    CHECK(SettingNext(vol, 1) == 100);   // (the end of its range)
+    CHECK(SettingNext(vol, 0) == 0);     // (A: the first after the last)
+    SettingRow onoff = graphics[0];
+    CHECK(SettingNext(onoff, 0) == 0);
+    onoff.value = 0;
+    CHECK(SettingNext(onoff, 0) == 1);
+    onoff.fixed = true;
+    CHECK(SettingNext(onoff, 1) == 0);   // (nothing to choose on this PC)
+
+    int page = 0, row = 0;
+    SettingMove(10, 1, &page, &row);
+    CHECK((page == 0 && row == 1));
+    page = 0, row = kListRows - 1;
+    SettingMove(10, 1, &page, &row);     // (down past the page's last: the next page)
+    CHECK((page == 1 && row == 0));
+    SettingMove(10, -1, &page, &row);
+    CHECK((page == 0 && row == kListRows - 1));
+    page = 1, row = 2;
+    SettingMove(10, 1, &page, &row);     // (the last setting: stays)
+    CHECK((page == 1 && row == 2));
+    page = 0, row = 0;
+    SettingMove(10, -1, &page, &row);
+    CHECK((page == 0 && row == 0));
+}

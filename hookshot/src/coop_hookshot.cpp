@@ -98,6 +98,7 @@
 #include "coop_time.h"
 #include "coop_pause.h"
 #include "coop_pause_tab.h"
+#include "coop_longshot_settings.h"
 #include "coop_title.h"
 #include "coop_title_menu.h"
 #include "core/core.h"
@@ -1223,6 +1224,7 @@ bool Start(const HosCoopApi* api) {
     CoopModsRuntime::SetGame(api, TitleHoldWhy);   // (mod API v2: the menu screens' calls)
     CoopTitle::Init(api);
     CoopPauseTab::Init(api);   // the pause menu's Multiplayer tab (patch 0030)
+    CoopLongshotSettings::Init(api);   // Longshot's own settings for the Settings tab (patch 0032; none from an older Hookshot)
     CoopPause::Init(server);
     CoopTestInput::SetMenuOpener(CoopPause::TestMenu);   // (the autotest's menu step; only a commands file asks it)
     CoopLook::StartModule();  // the look chosen in the pause menu (coop_look.h)
@@ -1440,6 +1442,12 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
             }
             return std::nullopt;
         };
+        // A death kept past its revive ends when the component lives again (a heal, a new actor at that address).
+        if (CoopActorEvents::KeptDeaths& kept = CoopActorEvents::TheKeptDeaths(); kept.Kept(a)) {
+            if (const auto life = life_now(); life && *life > 0) {
+                kept.Alive(a);
+            }
+        }
         // One boss death for everyone (coop_boss_native.h HeldLifeStep): a copy boss's own Life step
         // keeps it at life 1 until its owner's has died; then this same step lets it die.
         bool finishing = false;
@@ -1489,9 +1497,12 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
             LOG_INFO(Core, "coop: actors: the game's Life step asks the module before its revive (patch 0007): an "
                            "owner's death and a test kill stay deaths");
         }
-        if (dead != nullptr && a != 0 && std::exchange(t_life_dead, 0) == a) {
+        // The check runs on every step that ends at 0, so a death kept once stays kept (KeptDeaths, boss-die-0116).
+        const bool passed = a != 0 && std::exchange(t_life_dead, 0) == a;
+        if (dead != nullptr && CoopActorEvents::SkipRevive(CoopActorEvents::TheKeptDeaths(), a, passed)) {
             *dead = 1;
-            CoopActorEvents::RevivesSkipped().fetch_add(1, std::memory_order_relaxed);
+            (passed ? CoopActorEvents::RevivesSkipped() : CoopActorEvents::RevivesKeptSkipped())
+                .fetch_add(1, std::memory_order_relaxed);
         }
         return 1;
     }

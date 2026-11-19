@@ -4,10 +4,11 @@ player's own game files, as the puppets are.
 
 Writes into the puppet mod's romfs:
   UI/Layout2Archive/Common.Product.100.Nin_Ounce_NVN2.blarc.zs
-      MenuOverlay_00.buil (the tab strip): Pa_Category_04, a copy of the fourth tab, after System;
-          the R label moved right of it. The game's four tabs and L stay where they are: the
+      MenuOverlay_00.buil (the tab strip): Pa_Category_04 and Pa_Category_05, copies of the fourth
+          tab, after System (Multiplayer, then Settings); the R label moved right of them. The game's four tabs and L stay where they are: the
           strip's own animation places the tabs (seen in a run, 2026-11-18: moved ones went back)
-      PlusMenu_00.buil (the pages): Pa_Coop_00, a copy of the System page, where a page shows
+      PlusMenu_00.buil (the pages): Pa_Coop_00 and Pa_Settings_00, copies of the System page, where
+          a page shows (the Multiplayer page and the Settings page: Longshot's options)
       PaSystemMenu_00.buil (the System page's own layout, which both pages use): Pa_List_00..06,
           seven of the game's Options rows (PaOptionBtnLevel_00: a name on the left, a value
           between arrows on the right) down the right half, where the controller picture is: the
@@ -50,11 +51,13 @@ MALS_GLOB = "Mals/*.Product.*.sarc.zs"
 
 TAB = "Pa_Category_%02d"
 GAME_TABS = 4                 # Pa_Category_00..03
-NEW_TAB = TAB % GAME_TABS     # Pa_Category_04
+NEW_TAB = TAB % GAME_TABS     # Pa_Category_04 (Multiplayer)
+SETTINGS_TAB = TAB % (GAME_TABS + 1)   # Pa_Category_05 (Settings)
 TAB_ROOT = "RootPane"
 L_LABEL, R_LABEL = "T_BtnL_00", "T_BtnR_00"
 SYSTEM_PAGE = "Pa_System_00"
 NEW_PAGE = "Pa_Coop_00"
+SETTINGS_PAGE = "Pa_Settings_00"
 PAGE_PARENT = "N_InOut_00"
 SYSTEM_LAYOUT = "PaSystemMenu_00.buil"
 ROW = "Pa_List_%02d"           # the game browser's rows (CoopPauseTab::kListRows: a header and kCells games)
@@ -106,9 +109,11 @@ def add_tab(d):
     if step <= 0 or any(abs(_x(d, TAB % (i + 1)) - _x(d, TAB % i) - step) > 0.5 for i in range(GAME_TABS - 1)):
         raise PauseMenuError("the game's tabs are not evenly spaced from left to right")
     off = ui_pack.frame_offset(d, last, TAB_ROOT)
-    d = ui_pack.clone_parts(d, [ui_pack.Copy(last, NEW_TAB, (step - FIFTH_GAP + off[0], off[1]), parent=TAB_ROOT,
+    gap = step - FIFTH_GAP
+    d = ui_pack.clone_parts(d, [ui_pack.Copy(last, NEW_TAB, (gap + off[0], off[1]), parent=TAB_ROOT, hidden=True),
+                                ui_pack.Copy(last, SETTINGS_TAB, (2 * gap + off[0], off[1]), parent=TAB_ROOT,
                                              hidden=True)], new_id=_new_id)
-    return ui_pack.move_panes(d, {R_LABEL: (R_MOVE, 0.0)})
+    return ui_pack.move_panes(d, {R_LABEL: (R_MOVE, 0.0)})   # (the module places the tabs and R with six)
 
 
 def add_page(d):
@@ -123,7 +128,9 @@ def add_page(d):
         raise PauseMenuError("the layout has %s already" % NEW_PAGE)
     off = ui_pack.frame_offset(d, SYSTEM_PAGE, PAGE_PARENT)
     move = (-_x(d, SYSTEM_PAGE), off[1])   # x: the page's place on the strip taken off (the strip itself sits at 0)
-    return ui_pack.clone_parts(d, [ui_pack.Copy(SYSTEM_PAGE, NEW_PAGE, move, parent=PAGE_PARENT, hidden=True)], new_id=_new_id)
+    return ui_pack.clone_parts(d, [ui_pack.Copy(SYSTEM_PAGE, NEW_PAGE, move, parent=PAGE_PARENT, hidden=True),
+                                   ui_pack.Copy(SYSTEM_PAGE, SETTINGS_PAGE, move, parent=PAGE_PARENT, hidden=True)],
+                               new_id=_new_id)
 
 
 def add_rows(d):

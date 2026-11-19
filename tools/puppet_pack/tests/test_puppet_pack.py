@@ -598,6 +598,44 @@ class BuildPackTest(unittest.TestCase):
                   "Phive/ControllerSetParam/PC.phive__ControllerSetParam.bgyml"):
             self.assertNotIn(p, names)
 
+    def test_body_character_controller_default_preset(self):
+        # crash-0116-b: the player's "Player" preset builds PlayerRagdoll, which needs the ragdoll the body
+        # leaves out (null write at guest 0x70). The body's controller runs the default preset, as NPCs do.
+        player = {"PresetTypeName": "Player", "GravityScale": 1.0, "DefaultMoveState": "OnGround",
+                  "MoveStateParam": {"PlayerOnGround": {"$type": "phive__CharacterMoveStateOnGroundParam"}},
+                  "UpdateComponentParam": {"InteractWithRagdoll": {"Settings": {}}, "Rotate": {"A": 1},
+                                           "BounceSuppressor": {}, "FloatWaterExtension": {},
+                                           "ForceFieldExtension": {}, "GroundEdgeUnstucker": {}}}
+        self.assertEqual(build.body_character_controller(player),
+                         {"GravityScale": 1.0, "DefaultMoveState": "Free", "UpdateComponentParam": {"Rotate": {"A": 1}}})
+        self.assertEqual(player["PresetTypeName"], "Player")  # the source is not changed
+        # Player_Child's own: only InteractWithRagdoll and PlayerOnGround, so both maps go.
+        child = {"PresetTypeName": "Player", "UpdateComponentParam": {"InteractWithRagdoll": {}},
+                 "MoveStateParam": {"PlayerOnGround": {}}, "UserContactCollectionName": "Contact_0_cct"}
+        self.assertEqual(build.body_character_controller(child),
+                         {"UserContactCollectionName": "Contact_0_cct", "DefaultMoveState": "Free"})
+        # An NPC-like controller keeps what the default preset has.
+        npc = {"MoveStateParam": {"OnGround": {"X": 1}}, "UpdateComponentParam": {"FloatWater": {}, "Rotate": {}}}
+        self.assertEqual(build.body_character_controller(npc), dict(npc, DefaultMoveState="Free"))
+        for name in ("PlayerRagdoll", "InteractWithRagdoll", "PlayerOnGround"):
+            self.assertNotIn(name, build.BODY_UPDATE_COMPONENTS + build.BODY_MOVE_STATES)
+
+    def test_pack_body_player_preset_dropped(self):
+        # Every body (child and adult; the _Pvp copy's goes through the same puppet_body) drops the Player preset.
+        for variant in ("Child", "Adult"):
+            members = with_body(fake_player_pack(variant))
+            cct_paths = [p for p in members if p.startswith(build.CHARACTER_DIR)]
+            for p in cct_paths:
+                doc = byml.loads(members[p])
+                doc["PresetTypeName"] = "Player"
+                doc["UpdateComponentParam"] = dict(doc.get("UpdateComponentParam") or {}, InteractWithRagdoll={})
+                members[p] = byml.dumps(doc)
+            pack, _, _, _ = build.build_pack(members, variant, body=True)
+            cct = byml.loads(sarc.read(pack)[build.body_paths("CoopPuppet_" + variant)[2]])
+            self.assertNotIn("PresetTypeName", cct)
+            self.assertNotIn("InteractWithRagdoll", cct.get("UpdateComponentParam") or {})
+            self.assertEqual(cct["DefaultMoveState"], "Free")
+
     def test_pack_body_wins_over_perception(self):
         members = with_body(fake_player_pack("Child"))
         seen_by = build.perception_members(fake_perception_pack())
@@ -814,6 +852,38 @@ class BuildPackTest(unittest.TestCase):
         del members["Phive/CharacterControllerParam/PC.phive__CharacterControllerParam.bgyml"]
         with self.assertRaises(build.BuildError):
             build.puppet_body(members, pc, "CoopPuppet_Child")
+
+    def test_merged_files_get_the_whole_chains_entry(self):
+        # crash-0116-a: the game parses a param in a heap of its size-table entry, sized for that one file. A file
+        # we merge from a `$parent` chain gets the sum of the chain's entries (with the top file's alone the child
+        # body's character controller, Player_Child's merged with Player's, crashed GeneralFormatAsync_).
+        members = with_body(fake_player_pack("Child"))
+        cs, cc = "Phive/ControllerSetParam/", "Phive/CharacterControllerParam/"
+        pc_cs, base_cs = cs + "PC.phive__ControllerSetParam.bgyml", cs + "PBase.phive__ControllerSetParam.bgyml"
+        pc_cc, base_cc = cc + "PC.phive__CharacterControllerParam.bgyml", cc + "PBase.phive__CharacterControllerParam.bgyml"
+        self.assertEqual(build.chain_paths(members, pc_cs), [pc_cs, base_cs])
+        self.assertEqual(build.chain_paths(members, base_cs), [base_cs])
+        self.assertEqual(build.chain_paths(members, "Not/In.pack.bgyml"), ["Not/In.pack.bgyml"])
+        # The game's entries of the cut-down real files (romfs 1.0.x): Player_Child 6,536 + Player 9,504.
+        t = rstb.Rstb(by_name={pc_cc: 6536, base_cc: 9504, pc_cs: 27008, base_cs: 34160})
+        self.assertEqual(build.chain_entry(t, build.chain_paths(members, pc_cc), b"x" * 1184), 6536 + 9504)
+        self.assertEqual(build.chain_entry(t, build.chain_paths(members, pc_cs), b"x" * 5764), 27008 + 34160)
+        # A file without entries, or longer than its chain's room, gets its own bytes and the margin.
+        self.assertEqual(build.chain_entry(t, ["Not/In.pack.bgyml"], b"x" * 10), 10 + build.PACK_SIZE_MARGIN)
+        self.assertEqual(build.chain_entry(rstb.Rstb(by_name={base_cs: 5}), [base_cs], b"x" * 10),
+                         10 + build.PACK_SIZE_MARGIN)
+        # Every body file of the puppet merges the chain chain_paths names (its source in puppet_body).
+        pc = {"PhysicsRef": "?Component/Physics/P.engine__component__PhysicsParam.bgyml"}
+        srcs = {path: src for path, (_, src) in build.puppet_body(members, pc, "CoopPuppet_Child").items()}
+        self.assertEqual(srcs[build.body_paths("CoopPuppet_Child")[1]], pc_cs)
+        self.assertEqual(srcs[build.body_paths("CoopPuppet_Child")[2]], pc_cc)
+        # Ruto's liftable param and EnemyCommon's LockOn client merge an in-pack $parent too.
+        ruto = fake_ruto_pack()
+        lift = build.liftable_param(ruto)[0]
+        self.assertEqual(len(build.chain_paths(ruto, lift)), 2)
+        amos = fake_attention_pack()
+        self.assertEqual(len(build.chain_paths(amos, build._client_src("LockOn"))), 2)
+        self.assertEqual(len(build.chain_paths(amos, build._client_src("AutoAim"))), 1)
 
     def test_pack_no_perception(self):
         _, ap, _, _ = build.build_pack(fake_player_pack("Child"), "Child")
@@ -1687,6 +1757,9 @@ class FullBuildTest(unittest.TestCase):
         self.assertEqual(got["SubModels"][0]["FmdbName"], "Weapon_Sword_BrokenBiggoron")
         self.assertEqual(got["SubModels"][1]["ModelProjectName"], "Other")   # not the item's project: kept
         self.assertEqual(sarc.read(pack)[look_items.model_info_path(f"{item}_Look2")], info)
+        # Its size-table entry is made from both files (crash-0116-a: build.chain_entry).
+        self.assertEqual(look_items.model_info_chain(members, item),
+                         [mi.format(item + "_With_SubModel"), mi.format(item)])
         self.assertIn(item, look_items.ITEMS)
         self.assertIn("Weapon_Sword_BrokenGiant", look_items.ITEMS)
         # A $parent that is not in the pack, or that loops, is said, not guessed.

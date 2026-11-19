@@ -33,7 +33,6 @@
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 #include "coop_boss.h"
-#include "coop_fairy.h"
 #include "coop_flags.h"
 #include "coop_live_events.h"
 #include "coop_svc.h"
@@ -527,35 +526,6 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
                 }
                 std::lock_guard lock(g.event_mutex);
                 g.events.WantWith(kBancChangeEvent, BancChangeArgs(g.event_scene, g.event_start), link);
-            }
-        }
-        if (act.move && local.scene && local.position) {
-            // Issue 197: never into another room of a dungeon right after a load (Link
-            // stays held). Within our scene (no load) any room is fine (door-unlock).
-            // Read once, at the first move: a pack made (again) while the game runs is
-            // seen after a restart; until then no table means short moves only.
-            static const CoopRooms::Table rooms = CoopFairy::RoomTable();
-            const auto check = CheckMove(rooms, *local.scene, *local.position, *act.move, act.after_load);
-            if (check != MoveCheck::ok) {
-                LOG_INFO(Core, "coop: teleport: not moved to {:.1f} {:.1f} {:.1f}: {} (issue 197)", act.move->x,
-                         act.move->y, act.move->z,
-                         check == MoveCheck::other_room ? "another room of this dungeon"
-                                                        : "far, and no room table for this dungeon");
-                bool told = false;
-                for (auto& line : act.lines) {
-                    if (line.rfind("teleport: next to ", 0) == 0) {
-                        line = NotMovedLine(check, line.substr(18), act.after_load);
-                        told = true;
-                    }
-                }
-                if (!told) {
-                    act.lines.push_back(NotMovedLine(check, "", act.after_load));
-                }
-                act.move.reset();
-                if (g.beside_to != 0) {
-                    respawn_moved = false;  // not moved (another room of a dungeon)
-                    g.beside_to = 0;
-                }
             }
         }
         if (g.beside_to != 0 && act.scene) {

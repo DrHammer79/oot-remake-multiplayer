@@ -451,7 +451,7 @@ void Frame(const std::optional<std::string>& scene, const std::optional<coop::ho
 
     // Spectating: the camera follows the one watched while the game can draw
     // where they are: our scene, and in a dungeon our room (rooms load one at
-    // a time; the same rule as /teleport's move, coop_teleport.h CheckMove).
+    // a time: coop_teleport.h CheckMove; the camera moves, Link does not, so his room stays the one loaded).
     std::optional<Vec3> offset;
     if (out.state == State::spectating && reading && scene) {
         static const CoopRooms::Table rooms = CoopFairy::RoomTable();

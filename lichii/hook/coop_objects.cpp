@@ -1581,6 +1581,7 @@ public:
             // them fill up over a long session). Nothing given there is owed.
             life_scene_ = *scene;
             CoopActorEvents::TheLifeTable().Clear();
+            CoopActorEvents::TheKeptDeaths().Clear();  // (deaths kept past their revive: the scene before's)
             CoopDifficulty::TheKinds().Clear();  // difficulty: the kinds of the scene before
             life_given_.clear();
             step_hits_.clear();
@@ -2587,6 +2588,9 @@ private:
             names_.clear();
             no_area_.clear();
             TheMover().ForgetReplayed();
+#ifdef COOP_HOOKSHOT
+            CoopActorEvents::TheKeptDeaths().Clear();
+#endif
             sync_.Reset();
             world_.Reset();
             ForgetGold();  // issue 89: a new game process, its own keys
@@ -2848,11 +2852,12 @@ private:
             actor_events_said_us_ = server_now_us;
             const std::uint64_t passed = CoopActorEvents::StopsPassed().load(std::memory_order_relaxed);
             const std::uint64_t kept = CoopActorEvents::RevivesSkipped().load(std::memory_order_relaxed);
+            const std::uint64_t again = CoopActorEvents::RevivesKeptSkipped().load(std::memory_order_relaxed);
             LOG_INFO(Core, "coop: actors: in 10 s the game asked {} creates ({} copies' shots refused), {} deletes, "
                            "{} hits (life {}), {} lost; owners' deaths past a copy's own life stops {}, past its "
-                           "revive {}",
+                           "revive {} (later steps kept dead {})",
                      actor_creates_, actor_stops_, actor_deletes_, actor_hits_, actor_hit_sum_, actor_events_lost_,
-                     passed, kept);
+                     passed, kept, again);
             actor_creates_ = actor_deletes_ = actor_hits_ = actor_events_lost_ = actor_stops_ = 0;
             actor_hit_sum_ = 0;
         }

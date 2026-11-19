@@ -150,7 +150,7 @@ bool Page::CanStay(std::uint64_t now_ms) const {
                                         : strip_.state == 1;
     return usable_ && pages_.screen != 0 && strip_.screen != 0 && now_ms - strip_ms_ < kStaleMs && pages_open &&
            pages_.page == kSystemPage && pages_.asked == kSystemPage && (strip_.state == 1 || strip_.state == 2) &&
-           strip_.mode == kPlusMode && strip_.tabs == 5 && now_ms >= blocked_until_ms_;
+           strip_.mode == kPlusMode && strip_.tabs >= 5 && now_ms >= blocked_until_ms_;
 }
 
 void Page::Hide(const char* why, bool keep) {
@@ -222,9 +222,10 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
             Hide(closing ? "the menu is closing" : "the menu left the System page", closing);
         }
         ShowAgain(now_ms);
-        const int want = shown_ ? 1 : 0;
+        const int want = shown_ ? 1 + which_ : 0;
         if (page_set_ != want) {
-            d.set_page = true, d.page_shown = shown_, d.slide = std::exchange(slide_, 0), page_set_ = want;
+            d.set_page = true, d.page_shown = shown_, d.page_from = std::max(page_set_, 0), d.page_to = want;
+            d.slide = std::exchange(slide_, 0), page_set_ = want;
         }
         if (!texts_set_ && f.state == 2) {
             d.set_texts = true, texts_set_ = true;
@@ -239,20 +240,25 @@ Page::Do Page::OnScreen(const Facts& f, std::uint64_t now_ms) {
         ShowAgain(now_ms);
         // (back at the strip's first update of the opening: the pages' own comes a frame later, so the module shows
         // our page through the pages screen it knows, in this update)
-        if (shown_ && page_set_ != 1 && pages_.screen != 0) {
-            d.set_page = true, d.page_shown = true, d.slide = std::exchange(slide_, 0), page_set_ = 1;
+        if (shown_ && page_set_ != 1 + which_ && pages_.screen != 0) {
+            d.set_page = true, d.page_shown = true, d.page_from = std::max(page_set_, 0), d.page_to = 1 + which_;
+            d.slide = std::exchange(slide_, 0), page_set_ = 1 + which_;
         }
         // (shown from the strip's opening to the end of its closing, as the game's four tabs are: shown only once
         // it was open, the fifth came in a moment after them; the module moves and fades it with the fourth. Filled
         // once per opening: a fill again restarts the tab's own opening.)
-        const bool visible = f.tabs == 5 && f.mode == kPlusMode && f.state >= 1 && f.state <= 3;
+        const bool visible = f.tabs >= 5 && f.mode == kPlusMode && f.state >= 1 && f.state <= 3;
+        const bool sixth = visible && f.tabs >= 6 && settings_ok_;
         const int key = (visible ? 1 : 0) | (shown_ ? 2 : 0) | ((f.lit & 0xff) << 2) | ((f.state & 0xf) << 10) |
-                        ((f.mode & 0xf) << 14);
-        if (f.tabs == 5 && key != tab_key_) {
+                        ((f.mode & 0xf) << 14) | (sixth ? 1 << 18 : 0) | (which_ << 19);
+        if (f.tabs >= 5 && key != tab_key_) {
             tab_key_ = key;
-            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && shown_;
+            d.set_tabs = true, d.tab_shown = visible, d.tab_lit = visible && shown_ && which_ == 0;
             d.fill_tab = visible && !tab_filled_;
             tab_filled_ = visible;
+            d.tab6_shown = sixth, d.tab6_lit = sixth && shown_ && which_ == 1;
+            d.fill_tab6 = sixth && !tab6_filled_;
+            tab6_filled_ = sixth;
         }
         return d;
     }
@@ -272,7 +278,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if (!shown_) {
         if ((down & (kPadR | kPadZR)) != 0 && CanShow(now_ms)) {
-            shown_ = true, decide_ = false, why_.clear();
+            shown_ = true, decide_ = false, why_.clear(), which_ = 0;
             strip_sound_ = "mc_TabToRight";
             slide_ = 1;   // (in from the right, as the game's next page)
             swallow_ |= buttons & ~kPadPassed;   // (R and anything held with it: none of it reaches System)
@@ -285,7 +291,22 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
         swallow_ |= buttons;
         return 0;
     }
+    if ((down & (kPadR | kPadZR)) != 0 && which_ == 0 && settings_ok_ && strip_.tabs >= 6) {
+        // (the Multiplayer page: on to the Settings page, the sixth tab, sliding)
+        which_ = 1, sub_ = false, back_ = false, decide_ = false;
+        strip_sound_ = "mc_TabToRight";
+        slide_ = 1;
+        swallow_ |= buttons & ~kPadPassed;
+        return buttons & kPadPassed & ~swallow_;
+    }
     if ((down & (kPadL | kPadZL)) != 0) {
+        if (which_ == 1) {   // (the Settings page: back to the Multiplayer page, sliding)
+            which_ = 0, sub_ = false, back_ = false, decide_ = false;
+            strip_sound_ = "mc_TabToLeft";
+            slide_ = -1;
+            swallow_ |= buttons & ~kPadPassed;
+            return buttons & kPadPassed & ~swallow_;
+        }
         Hide("L");
         strip_sound_ = "mc_TabToLeft";
         slide_ = -1;   // (out to the right, System back from the left)
@@ -1030,6 +1051,49 @@ std::string ListValue(int players, int max, bool same_version) {
     if (!same_version) return "Other version";
     if (max > 0 && players >= max) return "Full";
     return max > 0 ? std::to_string(players) + "/" + std::to_string(max) : std::to_string(players);
+}
+
+std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int category) {
+    std::vector<SettingRow> out;
+    if (category < 0 || category >= kRows) return out;
+    for (const SettingRow& r : all) {
+        if (r.tab == kSettingTabs[static_cast<std::size_t>(category)]) out.push_back(r);
+    }
+    return out;
+}
+
+int SettingPages(int count) {
+    return count <= kListRows ? 1 : (count + kListRows - 1) / kListRows;
+}
+
+std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page) {
+    std::vector<ListLine> lines(kListRows);
+    const int pages = SettingPages(static_cast<int>(rows.size()));
+    const int first = ((page % pages + pages) % pages) * kListRows;
+    for (int i = 0; i < kListRows; ++i) {
+        const std::size_t at = static_cast<std::size_t>(first + i);
+        if (at >= rows.size()) break;
+        const SettingRow& r = rows[at];
+        lines[static_cast<std::size_t>(i)] =
+            ListLine{FitTo(r.restart ? r.name + " *" : r.name, kListNameChars), FitTo(r.text, kListValueChars)};
+    }
+    return lines;
+}
+
+int SettingNext(const SettingRow& r, int dir) {
+    if (r.fixed || r.hi < r.lo) return r.value;
+    const int step = r.step > 0 ? r.step : 1;
+    if (dir == 0) return r.value + step > r.hi ? r.lo : r.value + step;
+    return std::clamp(r.value + (dir < 0 ? -step : step), r.lo, r.hi);
+}
+
+void SettingMove(int count, int dy, int* page, int* row) {
+    if (count <= 0) {
+        *page = 0, *row = 0;
+        return;
+    }
+    const int at = std::clamp(*page * kListRows + *row + dy, 0, count - 1);
+    *page = at / kListRows, *row = at % kListRows;
 }
 
 std::vector<ListLine> ListLines(const SessionView& v) {

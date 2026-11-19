@@ -1,5 +1,7 @@
 #include "session.hpp"
 
+#include "coop/protocol/animation_words.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -2093,10 +2095,15 @@ void Session::note_hold(Object& o, const ObjectState& sample, std::uint64_t now_
   if (bsa && bsa->action) key += std::to_string(bsa->action->verb);
   key += '|';
   if (life) key += std::to_string(life->life);
-  if (key != o.hold_key || !animation || !life) {
+  // A death (its death animation, or life 0) and a cutscene's animation are never a held move: freeing the fight
+  // lock there could hand a dying boss over mid-death (boss-die-0116; the game's own stall check has the same rule,
+  // CoopBossNative::StallJudged).
+  const bool judged = animation && life && life->life > 0 && !coop::protocol::anim::IsDeath(animation->name) &&
+                      !coop::protocol::anim::IsEvent(animation->name);
+  if (key != o.hold_key || !judged) {
     o.hold_key = std::move(key);
     o.hold_since = now_us;
-    o.stalled = false;  // a new move (or a hit that took life): its fight counts again
+    o.stalled = false;  // a new move (or a hit that took life, or none to judge): its fight counts again
     return;
   }
   if (o.stalled || now_us - o.hold_since < config_.boss_stall_us) return;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_objects_sync.h"
+#include "coop/protocol/animation_words.hpp"
 #include "coop_sensor_claim.h"
 #include "coop_bomb_share.h"
 #include "coop_enemy_shots.h"
@@ -645,19 +646,7 @@ std::string_view AnimationBase(std::string_view name) {
 }
 
 bool IsDeathAnimation(std::string_view name) {
-    for (const std::string_view word : {"Die", "Dead", "Death"}) {
-        for (std::size_t at = name.find(word); at != std::string_view::npos;
-             at = name.find(word, at + 1)) {
-            const bool starts = at == 0 || name[at - 1] == '_';
-            const std::size_t end = at + word.size();
-            const bool ends = end == name.size() || name[end] == '_' ||
-                              (name[end] >= '0' && name[end] <= '9');
-            if (starts && ends) {
-                return true;
-            }
-        }
-    }
-    return false;
+    return coop::protocol::anim::IsDeath(name);
 }
 
 bool LifelessKillHere(std::string_view name, bool reacts, bool life_read, bool own_death_recent,

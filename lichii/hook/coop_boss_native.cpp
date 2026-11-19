@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_boss_native.h"
+#include "coop/protocol/animation_words.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -265,8 +266,8 @@ void Table::Hold(Entry& e, const Boss& b) {
         e.hold_life = b.life;
         e.hold_rechoices = 0;
     }
-    if (!same || event_ || e.dying || b.animation.empty() || !b.life) {
-        // A new move, or none to judge (our event's, its death's, nothing read): counted from now.
+    if (!same || event_ || e.dying || !StallJudged(b.animation, b.life)) {
+        // A new move, or none to judge (our event's, its death's, a cutscene's, nothing read): counted from now.
         e.hold_since = steps_;
         e.hold_asks = 0;
         return;
@@ -460,6 +461,15 @@ bool OwnHitTookLife(std::optional<std::int32_t> before, std::optional<std::int32
 
 bool PlainDeath(std::optional<std::int32_t> life, bool owner_dead) {
     return owner_dead || (life && *life <= 0);
+}
+
+bool StallJudged(std::string_view animation, std::optional<std::int32_t> life) {
+    // Its death (an own death move before the Director's outro: the death event refused, late, or waiting; life 0
+    // whatever plays, as a Bongo Bongo hand down until it grows back) and a cutscene's animation (an event of
+    // another game's, or one ours plays before SetEvent sees it) are never a held move: re-choosing there would
+    // break the death or the cut (boss-die-0116).
+    namespace anim = coop::protocol::anim;
+    return !animation.empty() && life && *life > 0 && !anim::IsDeath(animation) && !anim::IsEvent(animation);
 }
 
 bool Table::OwnTime(const Entry& e) const {
