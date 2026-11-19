@@ -99,32 +99,17 @@ static_assert(kMuteVoice == CoopLobby::kVoice && kMuteChat == CoopLobby::kChat);
 // so no pane of a freed layout is used). *_ok: both looked up for that opening and parts; the page is usable only then.
 std::uint64_t g_pages_gen = 0, g_pages_screen = 0, g_system_pane = 0, g_coop_pane = 0;
 std::uint64_t g_settings_pane = 0;   // the Settings page (Pa_Settings_00; 0 with an older pack)
-// System's Longshot Settings button (the pack's Pa_Button_05 of PaSystemMenu_00: System's own, and the copies' in our
-// two pages, which stay hidden); 0 with an older pack.
+// System's two buttons of ours (the pack's Pa_Button_05, Longshot Settings, and Pa_Button_06, Multiplayer, of
+// PaSystemMenu_00), and the same two in our pages (copies of System's page: all hidden but Longshot Settings' sixth
+// row, its Debug category); 0 with an older pack. Each page's own rows (Pa_Button_00..04), and System's lower buttons'
+// own heights (Options, Special Actions, Title Screen: moved to make room for ours, Title Screen last).
 std::uint64_t g_settings_button = 0, g_settings_button_coop = 0, g_settings_button_set = 0;
-// Longshot Settings' own rows (Pa_Settings_00's Pa_Button_00..04; its sixth is g_settings_button_set).
-std::array<std::uint64_t, kRows> g_set_buttons{};
-int g_settings_button_shown = -1;
-std::uint64_t g_strip_gen = 0, g_tab_pane = 0;
-bool g_pages_looked = false, g_pages_ok = false, g_strip_looked = false, g_strip_ok = false;
+std::uint64_t g_mp_button = 0, g_mp_button_coop = 0, g_mp_button_set = 0;
+std::array<std::uint64_t, kRows> g_set_buttons{}, g_coop_buttons{}, g_sys_buttons{};
+std::array<float, kRows> g_sys_rest_y{};
+int g_settings_button_shown = -1;   // (which of ours System shows: 1 Multiplayer, 2 Longshot Settings; -1 not set yet)
+bool g_pages_looked = false, g_pages_ok = false;
 std::uint64_t g_pages_layout = 0;  // the layout the pages' panes were looked up in (the early page switch checks it)
-std::uint64_t g_fourth_pane = 0;   // the game's fourth tab (Pa_Category_03), which ours follows in the strip's animation
-// The game's four tabs (Pa_Category_00..03) and their own places (x in their parent), and the five words (T_Text_00 of
-// Pa_Category_00..04), whose drawn widths space the five tabs evenly (TabOffsets); how often a place was found put back
-// (an animation of the strip's), for the trace.
-std::array<std::uint64_t, 4> g_game_tabs{};
-std::array<float, 4> g_game_tabs_x{};
-int g_tab_put_back = 0;
-std::array<std::uint64_t, 5> g_words{};
-std::string g_spacing_said;   // the spacing as last logged
-bool g_tabs_placed = false;   // the game's four at their even places (the Plus menu with ours), not their own
-std::uint64_t g_fourth_word = 0, g_tab_word = 0;   // the two tabs' word panes (N_MenuChangeTextIn_00)
-float g_tab_rest_y = 0;            // our tab's own height in the layout (its place once the strip is open)
-bool g_tab_shown = false;          // our tab shown now (the strip opening, open or closing)
-// The fourth tab's place and fades at the last strip update (to take them one update ahead); none after a hide.
-bool g_follow_had = false;
-float g_follow_y = 0, g_follow_alpha = 0, g_follow_word = 0;
-float g_alpha_set = -1, g_word_set = -1;   // the alphas last set on our tab and its word (-1: none since a hide)
 
 template <class T>
 T Read(std::uint64_t a) {
@@ -776,6 +761,7 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_pages_gen = gen, g_pages_screen = f.screen, g_pages_looked = false, g_pages_ok = false;
         g_system_pane = 0, g_coop_pane = 0;
         g_settings_button = g_settings_button_coop = g_settings_button_set = 0, g_settings_button_shown = -1, g_set_buttons = {};
+        g_mp_button = g_mp_button_coop = g_mp_button_set = 0, g_coop_buttons = {}, g_sys_buttons = {};
     }
     if (g_pages_looked || !calls || f.layout == 0) return;
     g_pages_looked = true;
@@ -784,27 +770,35 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
     g_pages_ok = IsPart(g_system_pane) && IsPart(g_coop_pane);
     g_settings_pane = FindOwnPane(ctx, f.layout, "Pa_Settings_00");
     if (!IsPart(g_settings_pane)) g_settings_pane = 0;
-    // System's Longshot Settings button, and the same button in our two pages (copies of System's page: theirs stays
-    // hidden, as the pack stores all three)
+    // System's two buttons of ours and the same two in our pages, the pages' own rows, and System's own lower buttons
+    // with their heights
     {
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, f.layout + 0x40, 0, 0, 0, 0, &table);
-        const auto button = [&](const char* page) {
-            const std::uint64_t b = PaneIn(ctx, PartLayout(table, page), "Pa_Button_05");
+        const auto button = [&](const char* page, const char* name) {
+            const std::uint64_t b = PaneIn(ctx, PartLayout(table, page), name);
             return IsPart(b) ? b : 0;
         };
-        g_settings_button = button("Pa_System_00");
-        g_settings_button_coop = button("Pa_Coop_00");
-        g_settings_button_set = button("Pa_Settings_00");
+        g_settings_button = button("Pa_System_00", "Pa_Button_05");
+        g_settings_button_coop = button("Pa_Coop_00", "Pa_Button_05");
+        g_settings_button_set = button("Pa_Settings_00", "Pa_Button_05");
+        g_mp_button = button("Pa_System_00", "Pa_Button_06");
+        g_mp_button_coop = button("Pa_Coop_00", "Pa_Button_06");
+        g_mp_button_set = button("Pa_Settings_00", "Pa_Button_06");
         for (int r = 0; r < kRows; ++r) {
             char name[16];
             std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
-            const std::uint64_t b = PaneIn(ctx, PartLayout(table, "Pa_Settings_00"), name);
-            g_set_buttons[static_cast<std::size_t>(r)] = IsPart(b) ? b : 0;
+            const std::size_t k = static_cast<std::size_t>(r);
+            g_set_buttons[k] = button("Pa_Settings_00", name);
+            g_coop_buttons[k] = button("Pa_Coop_00", name);
+            g_sys_buttons[k] = button("Pa_System_00", name);
+            g_sys_rest_y[k] = g_sys_buttons[k] != 0 ? Read<float>(g_sys_buttons[k] + kPaneOwnY) : 0.0f;
         }
         g_settings_button_shown = -1;
-        LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button (Pa_Button_05): {:#x}{}", g_settings_button,
-                 g_settings_button != 0 ? "" : " (not in the pack: Longshot Settings stays off)");
+        LOG_INFO(Core, "coop: pause tab: System's buttons of ours: Multiplayer (Pa_Button_06) {:#x}, Longshot Settings "
+                       "(Pa_Button_05) {:#x}{}",
+                 g_mp_button, g_settings_button,
+                 g_mp_button != 0 ? "" : " (not in the pack: build it again; the Multiplayer page stays off)");
     }
     g_pages_layout = f.layout;
     LOG_INFO(Core, "coop: pause tab: the pages' panes: Pa_System_00 {:#x}, Pa_Coop_00 {:#x}{}", g_system_pane,
@@ -819,47 +813,6 @@ void LookPages(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
                            "(build the puppet pack again)");
         }
     }
-}
-
-// The strip's fifth tab, the same way.
-void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
-    if (gen != g_strip_gen) {
-        g_strip_gen = gen, g_strip_looked = false, g_strip_ok = false, g_tab_pane = 0;
-        g_fourth_pane = 0, g_fourth_word = 0, g_tab_word = 0, g_tab_shown = false, g_follow_had = false;
-        g_alpha_set = g_word_set = -1;
-        g_game_tabs = {}, g_words = {}, g_tabs_placed = false;
-    }
-    if (g_strip_looked || !calls || f.layout == 0) return;
-    g_strip_looked = true;
-    g_tab_pane = FindOwnPane(ctx, f.layout, "Pa_Category_04");
-    g_strip_ok = IsPart(g_tab_pane);
-    if (g_strip_ok) {   // (the fourth tab, which ours follows in the strip's animation, and the two tabs' words)
-        g_fourth_pane = FindOwnPane(ctx, f.layout, "Pa_Category_03");
-        g_tab_rest_y = Read<float>(g_tab_pane + kPaneOwnY);
-        std::uint64_t table = 0;
-        Call(ctx, kPaneTable, f.layout + 0x40, 0, 0, 0, 0, &table);
-        g_fourth_word = PaneIn(ctx, PartLayout(table, "Pa_Category_03"), "N_MenuChangeTextIn_00");
-        g_tab_word = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
-        // (the game's four tabs with their own places to go back to, and the five words, for the even spacing)
-        g_tab_put_back = 0;
-        for (int i = 0; i < 5; ++i) {
-            char name[16];
-            std::snprintf(name, sizeof name, "Pa_Category_%02d", i);
-            if (i < 4) {
-                const std::uint64_t tab = FindOwnPane(ctx, f.layout, name);
-                if (IsPart(tab)) {
-                    g_game_tabs[static_cast<std::size_t>(i)] = tab;
-                    g_game_tabs_x[static_cast<std::size_t>(i)] = Read<float>(tab + 0x6c);
-                }
-            }
-            g_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
-        }
-        g_spacing_said.clear();
-    }
-    LOG_INFO(Core, "coop: pause tab: the strip's fifth tab: Pa_Category_04 {:#x}{} (the game's tabs at x {:.0f}, {:.0f}, "
-                   "{:.0f}, {:.0f} in their parent)",
-             g_tab_pane, g_strip_ok ? "" : " (not a part: left alone, the Multiplayer page stays off)", g_game_tabs_x[0],
-             g_game_tabs_x[1], g_game_tabs_x[2], g_game_tabs_x[3]);
 }
 
 // The pages: our page over System's, or System's alone. The rows' texts once per opening.
@@ -952,14 +905,18 @@ std::string FocusedShownName() {
     return found == 1 ? name : std::string();
 }
 
-// System's Longshot Settings button, at each update of the pages: shown while Longshot Settings can be used (with the
-// page's own copy of it, its sixth category row, Debug). The game's cursor is never moved by a call: moved onto System's
-// button with f_8088ffc0 as the page was left, neither B nor + closed the menu any more (a run, 2026-11-19). The game
-// carries its cursor by the button's name: onto the page's sixth row as it opens from System's sixth button, so all
-// rows but the first are hidden as the page opens (ApplyPages) until the cursor is on the first (kDebugRowWaitMs at
-// most); back onto System's button as it is left. Where it went is logged. g_mutex.
-constexpr std::uint64_t kDebugRowWaitMs = 400;
-std::uint64_t g_debug_row_back_ms = 0;   // the page's sixth row shown again then (0: not hidden for the opening)
+// System's two buttons of ours, at each update of the pages: Multiplayer shown while our pages can be used, Longshot
+// Settings while it can (with its page's sixth row, its Debug category), System's lower buttons placed around them
+// (Options, Special Actions, Multiplayer, Longshot Settings, Title Screen). The game's cursor is never moved by a call:
+// moved onto System's button with f_8088ffc0 as a page was left, neither B nor + closed the menu any more (a run,
+// 2026-11-19). The game carries its cursor by the buttons' names, else to the nearest shown: so a page opening hides
+// its rows but the first (ApplyPages), and a page left by B hides System's other buttons, until the cursor is on the
+// one it should be (kRowsBackMs at most). Where it went is logged. g_mutex.
+constexpr std::uint64_t kRowsBackMs = 400;
+constexpr float kSystemTightStep = 160.0f;   // (the lower group with ours: five rows from Options down)
+std::uint64_t g_rows_back_ms = 0;            // the hidden ones shown again then (0: none hidden)
+std::string g_rows_back_when;                // ... or as soon as the game's cursor is on this button
+std::vector<std::pair<std::uint64_t, bool>> g_rows_hidden;   // (a pane, and whether it is shown again)
 int g_open_trace = 0, g_left_trace = 0;  // (trace) the game's cursor's button logged this many more times
 std::uint64_t g_open_since = 0, g_left_since = 0;
 std::string g_open_said, g_left_said;
@@ -973,37 +930,74 @@ void TraceCursor(const char* when, int* left, std::uint64_t since, std::string* 
     }
     if (now - since > 5000) *left = 0, said->clear();
 }
-void SettingsButton(void* ctx) {
+void HideRowsAMoment(void* ctx, std::vector<std::pair<std::uint64_t, bool>> panes, const char* until) {
+    for (const auto& [pane, back] : panes) {
+        if (pane != 0) SetVisible(ctx, pane, false);
+    }
+    g_rows_hidden = std::move(panes), g_rows_back_when = until, g_rows_back_ms = NowMs() + kRowsBackMs;
+}
+void PlacePaneY(void* ctx, std::uint64_t pane, float y) {
+    if (pane == 0 || Read<float>(pane + kPaneOwnY) == y) return;
+    CoopRuntime::Write(pane + kPaneOwnY, &y, sizeof y);
+    Call(ctx, kPaneMoved, pane);
+}
+// System's lower buttons in order, ours among them (shown: 1 Multiplayer, 2 Longshot Settings); or all at their own
+// places with none of ours.
+void PlaceSystemButtons(void* ctx, int shown) {
+    if (g_sys_buttons[2] == 0 || g_sys_buttons[3] == 0 || g_sys_buttons[4] == 0) return;
+    std::vector<std::uint64_t> order{g_sys_buttons[2], g_sys_buttons[3]};
+    if ((shown & 1) != 0) order.push_back(g_mp_button);
+    if ((shown & 2) != 0) order.push_back(g_settings_button);
+    order.push_back(g_sys_buttons[4]);
+    if (shown == 0) {
+        for (int r = 2; r < kRows; ++r) PlacePaneY(ctx, g_sys_buttons[static_cast<std::size_t>(r)], g_sys_rest_y[static_cast<std::size_t>(r)]);
+        return;
+    }
+    const float top = g_sys_rest_y[2], step = order.size() > 4 ? kSystemTightStep : g_sys_rest_y[2] - g_sys_rest_y[3];
+    for (std::size_t i = 0; i < order.size(); ++i) PlacePaneY(ctx, order[i], top - step * static_cast<float>(i));
+}
+void SystemButtons(void* ctx) {
     const std::uint64_t now = NowMs();
-    if (g_settings_button != 0) {
-        const int want = g_page.SettingsUsable() ? 1 : 0;
-        if (want != g_settings_button_shown) {
-            SetVisible(ctx, g_settings_button, want != 0);
-            g_settings_button_shown = want;
-            if (g_debug_row_back_ms == 0 && g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, want != 0);
-            LOG_INFO(Core, "coop: pause tab: System's Longshot Settings button {}", want != 0 ? "shown" : "hidden");
-        }
+    const int want = (g_page.Usable() && g_mp_button != 0 ? 1 : 0) | (g_page.SettingsUsable() && g_settings_button != 0 ? 2 : 0);
+    if (want != g_settings_button_shown) {
+        if (g_mp_button != 0) SetVisible(ctx, g_mp_button, (want & 1) != 0);
+        if (g_settings_button != 0) SetVisible(ctx, g_settings_button, (want & 2) != 0);
+        if (g_rows_back_ms == 0 && g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, (want & 2) != 0);
+        PlaceSystemButtons(ctx, want);
+        g_settings_button_shown = want;
+        LOG_INFO(Core, "coop: pause tab: System's buttons of ours: Multiplayer {}, Longshot Settings {}",
+                 (want & 1) != 0 ? "shown" : "hidden", (want & 2) != 0 ? "shown" : "hidden");
     }
-    // (the rows back once the game's cursor is on the first, or kDebugRowWaitMs at most)
-    if (g_debug_row_back_ms != 0 && (now >= g_debug_row_back_ms || FocusedShownName() == "Pa_Button_00")) {
-        g_debug_row_back_ms = 0;
-        for (int r = 1; r < kRows; ++r) {
-            if (g_set_buttons[static_cast<std::size_t>(r)] != 0) SetVisible(ctx, g_set_buttons[static_cast<std::size_t>(r)], true);
+    // (the rows hidden for an opening or a leaving back once the game's cursor is where it should be)
+    if (g_rows_back_ms != 0 && (now >= g_rows_back_ms || FocusedShownName() == g_rows_back_when)) {
+        g_rows_back_ms = 0;
+        for (const auto& [pane, back] : g_rows_hidden) {
+            if (pane != 0 && back) SetVisible(ctx, pane, true);
         }
-        if (g_settings_button_set != 0) SetVisible(ctx, g_settings_button_set, g_page.SettingsUsable());
+        g_rows_hidden.clear();
     }
-    if (g_page.TakeSettingsOpened()) {
-        g_set_page = 0, g_set_row = -1, g_set_seen_row = -1, g_live_poke = true;   // (the category: the cursor's row)
+    if (g_page.TakeOpened()) {
+        if (g_page.Which() == 1) {
+            g_set_page = 0, g_set_row = -1, g_set_seen_row = -1, g_live_poke = true;   // (the category: the cursor's row)
+            TestSettingsOnce();   // (COOP_TEST_LONGSHOT_SETTINGS=1 only)
+        } else {
+            g_live_poke = true;
+        }
         g_open_trace = 4, g_open_since = now, g_open_said.clear();
-        LOG_INFO(Core, "coop: pause tab: Longshot Settings opened from System");
-        TestSettingsOnce();   // (COOP_TEST_LONGSHOT_SETTINGS=1 only)
+        LOG_INFO(Core, "coop: pause tab: {} opened from System", g_page.Which() == 1 ? "Longshot Settings" : "the Multiplayer page");
     }
-    if (g_page.TakeSettingsLeft()) {
+    if (g_page.TakeLeft()) {
+        // (B: System's other buttons hidden a moment, so the game's cursor comes back to the page's button)
+        const bool settings = g_page.Which() == 1;
+        std::vector<std::pair<std::uint64_t, bool>> others;
+        for (const std::uint64_t b : g_sys_buttons) others.emplace_back(b, true);
+        others.emplace_back(settings ? g_mp_button : g_settings_button, (want & (settings ? 1 : 2)) != 0);
+        HideRowsAMoment(ctx, std::move(others), settings ? "Pa_Button_05" : "Pa_Button_06");
         g_left_trace = 4, g_left_since = now, g_left_said.clear();
-        LOG_INFO(Core, "coop: pause tab: Longshot Settings left (B): System again");
+        LOG_INFO(Core, "coop: pause tab: {} left (B): System again", settings ? "Longshot Settings" : "the Multiplayer page");
     }
-    TraceCursor("as Longshot Settings opened", &g_open_trace, g_open_since, &g_open_said, now);
-    TraceCursor("after Longshot Settings", &g_left_trace, g_left_since, &g_left_said, now);
+    TraceCursor("as the page opened", &g_open_trace, g_open_since, &g_open_said, now);
+    TraceCursor("after the page", &g_left_trace, g_left_since, &g_left_said, now);
 }
 
 // Where a page sits in the slides: System and Longshot Settings (in System's place) at 0, Multiplayer to the right.
@@ -1033,15 +1027,15 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
             for (const std::uint64_t pane : {g_system_pane, g_coop_pane, g_settings_pane}) {
                 if (pane != 0) SetVisible(ctx, pane, pane == (to != 0 ? to : g_system_pane));
             }
-            // (Longshot Settings opening from System's sixth button: all its rows but the first hidden a moment, so the
-            // game's cursor lands on Graphics: carried by the button's name it went to the sixth, Debug, and with that
-            // one hidden to the nearest, Motion (runs, 2026-11-19); SettingsButton shows them again)
-            if (d.page_from == 0 && d.page_to == 2 && g_settings_button_set != 0) {
-                SetVisible(ctx, g_settings_button_set, false);
-                for (int r = 1; r < kRows; ++r) {
-                    if (g_set_buttons[static_cast<std::size_t>(r)] != 0) SetVisible(ctx, g_set_buttons[static_cast<std::size_t>(r)], false);
-                }
-                g_debug_row_back_ms = NowMs() + kDebugRowWaitMs;
+            // (a page of ours opening from its System button: its rows but the first hidden a moment, so the game's
+            // cursor lands on the first: carried by the button's name it went to Longshot Settings' sixth row, Debug,
+            // and with that one hidden to the nearest, Motion (runs, 2026-11-19); SystemButtons shows them again)
+            if (d.page_from == 0 && (d.page_to == 1 || d.page_to == 2)) {
+                const auto& rows = d.page_to == 2 ? g_set_buttons : g_coop_buttons;
+                std::vector<std::pair<std::uint64_t, bool>> hide;
+                for (int r = 1; r < kRows; ++r) hide.emplace_back(rows[static_cast<std::size_t>(r)], true);
+                if (d.page_to == 2) hide.emplace_back(g_settings_button_set, g_page.SettingsUsable());
+                HideRowsAMoment(ctx, std::move(hide), "Pa_Button_00");
             }
         }
     }
@@ -1058,167 +1052,9 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
             LOG_INFO(Core, "coop: pause tab: {}'s controller picture {}", page, IsPart(controller) ? "hidden" : "not found");
         }
         // (and the Longshot Settings button our copies of System's page have too: the Multiplayer page's stays hidden;
-        // Longshot Settings' is its sixth category row, SettingsButton's)
-        if (g_settings_button_coop != 0) SetVisible(ctx, g_settings_button_coop, false);
-    }
-}
-
-// The five tabs one even gap apart between their words (the game's four moved from their 460 apart, ours after the
-// fourth), in the Plus menu with ours shown; elsewhere (the Minus menu, the strip closed) the game's at their own
-// places. The span stays the pack's: the first tab's centre where the game has it, ours kFifthGap after the fourth's own
-// place (pause_menu.py's FIFTH_GAP off the game's 460). A word's width is its text pane's drawn width (T_Text_00
-// +0x13c, read in a run 2026-11-19: Collection 294.7, Equipment 312.9, Items 159.0, System 201.2, Multiplayer 325.3;
-// +0x134 its left, -width/2: the words are centred). A width not read, or a gap under kMinWordGap (long words in
-// another language): the tabs where the pack and the game put them.
-constexpr float kFifthGap = 410.0f, kMinWordGap = 60.0f;
-constexpr std::uint64_t kTextDrawnWidth = 0x13c;
-bool TabsKnown() {
-    return std::all_of(g_game_tabs.begin(), g_game_tabs.end(), [](std::uint64_t t) { return t != 0; });
-}
-// Each tab's centre from the first's.
-std::array<float, 5> TabOffsets() {
-    std::array<float, 5> off{}, w{};
-    for (std::size_t i = 0; i < 4; ++i) off[i] = g_game_tabs_x[i] - g_game_tabs_x[0];
-    off[4] = off[3] + kFifthGap;
-    bool words = true;
-    float total = 0;
-    for (std::size_t i = 0; i < w.size(); ++i) {
-        w[i] = g_words[i] != 0 ? Read<float>(g_words[i] + kTextDrawnWidth) : 0.0f;
-        if (!std::isfinite(w[i]) || w[i] < 10.0f || w[i] > 2000.0f) words = false;
-        total += w[i];
-    }
-    const float gap = (off[4] + w[0] / 2 + w[4] / 2 - total) / 4;
-    if (!words || gap < kMinWordGap) return off;
-    float left = -w[0] / 2;
-    for (std::size_t i = 0; i < off.size(); ++i) {
-        off[i] = left + w[i] / 2;
-        left += w[i] + gap;
-    }
-    return off;
-}
-// A game tab's own x: evenly spaced (on), or its own.
-float TabX(int i, bool on) {
-    const std::size_t k = static_cast<std::size_t>(i);
-    return on ? g_game_tabs_x[0] + TabOffsets()[k] : g_game_tabs_x[k];
-}
-void PlaceTabs(void* ctx, bool on) {
-    if (!TabsKnown()) return;
-    for (int i = 0; i < 4; ++i) PlacePane(ctx, g_game_tabs[static_cast<std::size_t>(i)], TabX(i, on));
-    if (on != g_tabs_placed) {
-        g_tabs_placed = on;
-        LOG_INFO(Core, "coop: pause tab: the game's tabs {}", on ? "evenly spaced with ours" : "back at their own places");
-    }
-}
-// Ours after the fourth, wherever the strip's animation puts it (its place on the screen: ours sits under RootPane).
-void FollowFourthX(void* ctx) {
-    if (g_fourth_pane == 0 || !TabsKnown()) return;
-    const float x = Read<float>(g_fourth_pane + kPaneScreenX);
-    if (!std::isfinite(x)) return;
-    const std::array<float, 5> off = TabOffsets();
-    PlacePane(ctx, g_tab_pane, x + off[4] - off[3]);
-}
-
-// The strip: the fifth tab shown in the Plus menu (filled as a Plus tab, our word), lit while the Multiplayer page
-// shows, and System's tab lit when System is the page shown or Longshot Settings (in System's place) is.
-void ApplyStrip(void* ctx, const Facts& f, const Page::Do& d) {
-    const std::uint64_t layout = f.layout;
-    const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
-    // (only when the strip's look changes: a Do of the strip's update that only switches the pages, as Longshot Settings
-    // opening does, has no tab facts, and hid our tab and put the game's back at their places)
-    if (layout == 0 || tabs == 0 || !g_strip_ok || !d.set_tabs) return;
-    SetVisible(ctx, g_tab_pane, d.tab_shown);
-    if (!d.tab_shown) g_follow_had = false, g_alpha_set = g_word_set = -1;
-    g_tab_shown = d.tab_shown;
-    PlaceTabs(ctx, d.tab_shown);   // (also when the tabs go, as in the Minus menu: the game's places back)
-    if (!d.tab_shown) return;
-    const std::uint64_t tab3 = Read<std::uint64_t>(tabs + 8 * 3), tab4 = Read<std::uint64_t>(tabs + 8 * 4);
-    if (tab3 == 0 || tab4 == 0) return;
-    if (d.fill_tab) {
-        Call(ctx, kTabFill, tab4, kSystemPage, 1);   // (a Plus tab's look, as the game fills its four)
-        const bool text = SetText(ctx, layout, "Pa_Category_04/T_Text_00", "LayoutMsg/MenuOverlay_00",
-                                  "Pa_Category_04-T_Text_00");
-        Call(ctx, kTabOpen, tab4, 0);   // (opened and shown, as the game's fill ends for each of its tabs)
-        // Its word faded in: the strip's own "text in" animation fades in the game's four tabs' words only (it names
-        // their panes, 8 to 11), so ours stays at alpha 0 (seen in a run, 2026-11-18: N_MenuChangeTextIn_00's own
-        // alpha, +0x74, 0 in ours, 1 in the game's). Set to 1 with the game's alpha setter.
-        std::uint64_t table = 0;
-        Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
-        const std::uint64_t text_in = PaneIn(ctx, PartLayout(table, "Pa_Category_04"), "N_MenuChangeTextIn_00");
-        if (text_in != 0) CallAlpha(ctx, text_in, 1.0f);
-        LOG_INFO(Core, "coop: pause tab: the fifth tab filled (its word {}, {})", text ? "set" : "not set",
-                 text_in != 0 ? "faded in" : "its text pane not found");
-    }
-    Call(ctx, kTabLight, tab3, f.lit == kSystemPage && !d.tab_lit ? 1 : 0, 0);
-    Call(ctx, kTabLight, tab4, d.tab_lit ? 1 : 0, 0);
-}
-
-// (trace) The five words' widths and their centres from the first's, when they change (the words are filled as the
-// strip opens).
-void SaySpacing() {
-    std::string now = "words";
-    for (const std::uint64_t word : g_words) {
-        now += " " + std::to_string(word != 0 ? static_cast<int>(Read<float>(word + kTextDrawnWidth)) : -1);
-    }
-    now += ", centres";
-    for (const float o : TabOffsets()) now += " " + std::to_string(static_cast<int>(o));
-    if (now == g_spacing_said) return;
-    g_spacing_said = now;
-    LOG_INFO(Core, "coop: pause tab: the five tabs: {}", now);
-}
-
-// The even spacing kept: a game tab's place found put back (an animation of the strip's sets it) is set again, and the
-// first few times are logged with the place found.
-void KeepTabPlaces(void* ctx) {
-    if (!TabsKnown()) return;
-    for (std::size_t i = 0; i < g_game_tabs.size(); ++i) {
-        const std::uint64_t tab = g_game_tabs[i];
-        const float want = TabX(static_cast<int>(i), true), now = Read<float>(tab + 0x6c);
-        if (now == want) continue;
-        if (++g_tab_put_back <= 8) {
-            LOG_INFO(Core, "coop: pause tab: the game's tab {} was at x {:.0f}, not {:.0f}: set again ({} so far)", i, now,
-                     want, g_tab_put_back);
-        }
-        PlacePane(ctx, tab, want);
-    }
-}
-
-// Our tab through the strip's opening and closing, as the game's four: the strip's animation moves and fades the
-// parent of the game's tabs (seen in a run, 2026-11-19: the fourth tab's place on the screen, +0x50, from 1024 down to
-// 1000 in 300 ms as the strip opens, and its alpha with its parents', +0x78, from 0.16 to 1), and ours sits under
-// RootPane, out of that parent. So at each strip update ours takes the fourth's height (its own place, +0x70: RootPane
-// is the screen's origin, then kPaneMoved) and alpha (the alpha setter). Not when the two
-// are far apart (not the strip seen: ours stays where the pack put it).
-void FollowFourth(void* ctx) {
-    if (!g_tab_shown || g_fourth_pane == 0 || !g_strip_ok) return;
-    const float y = Read<float>(g_fourth_pane + kPaneScreenY), alpha = Read<float>(g_fourth_pane + kPaneScreenAlpha);
-    const float word = g_fourth_word != 0 ? Read<float>(g_fourth_word + kTextAlpha) : 1.0f;
-    if (!std::isfinite(y) || !std::isfinite(alpha) || !std::isfinite(word) || std::fabs(y - g_tab_rest_y) > kFollowMost) {
-        return;
-    }
-    // (one update ahead: these are the fourth's from the last frame, before the strip's own update moves it on)
-    const bool had = std::exchange(g_follow_had, true);
-    const float want_y = had ? Ahead(g_follow_y, y, g_tab_rest_y) : y;
-    const float want_alpha = had ? Ahead(g_follow_alpha, alpha, alpha >= g_follow_alpha ? 1.0f : 0.0f) : alpha;
-    const float want_word = had ? Ahead(g_follow_word, word, word >= g_follow_word ? 1.0f : 0.0f) : word;
-    g_follow_y = y, g_follow_alpha = alpha, g_follow_word = word;
-    if (Read<float>(g_tab_pane + kPaneOwnY) != want_y) {
-        CoopRuntime::Write(g_tab_pane + kPaneOwnY, &want_y, sizeof want_y);
-        Call(ctx, kPaneMoved, g_tab_pane);
-    }
-    // (the game's four kept at their even places, ours after the fourth)
-    KeepTabPlaces(ctx);
-    FollowFourthX(ctx);
-    SaySpacing();
-    // (the alphas only when they change, as the height: the strip settled, nothing is called)
-    if (const float a = std::clamp(want_alpha, 0.0f, 1.0f); a != g_alpha_set) {
-        CallAlpha(ctx, g_tab_pane, a);
-        g_alpha_set = a;
-    }
-    // (and its word fades in with the fourth's: the strip's "text in" animation names only the game's four words)
-    if (g_fourth_word != 0 && g_tab_word != 0) {
-        if (const float w = std::clamp(want_word, 0.0f, 1.0f); w != g_word_set) {
-            CallAlpha(ctx, g_tab_word + kTextAlphaBlock, w);
-            g_word_set = w;
+        // Longshot Settings' Longshot Settings button is its sixth category row, SystemButtons')
+        for (const std::uint64_t b : {g_settings_button_coop, g_mp_button_coop, g_mp_button_set}) {
+            if (b != 0) SetVisible(ctx, b, false);
         }
     }
 }
@@ -1635,7 +1471,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             lines = g_probe.Seen(f, NowMs());
             was = g_page.Shown();
             // This opening's panes first, so the page is usable only with the panes of the screens updating now (an
-            // undrawn page never takes System's R or A, and the mouse keeps the fifth tab out: MousePage -2).
+            // undrawn page never takes System's A: MousePage -2).
             gen = g_page.Track(f);
             if (!g_page.Shown()) SetView(View::kMain);
             // (B is ours in a view of the Multiplayer page, and in the Settings page's list)
@@ -1659,8 +1495,7 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
                     }
                 }
             }
-            if (f.kind == Kind::kStrip) LookStrip(ctx, calls, f, gen);
-            if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_strip_ok);
+            if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_mp_button != 0);
             if (f.kind != Kind::kBlocker) {   // (Longshot Settings: its page, System's button and Longshot's settings)
                 g_page.SetSettingsUsable(g_page.Usable() && g_settings_pane != 0 && g_settings_button != 0 &&
                                          CoopLongshotSettings::Available());
@@ -1672,7 +1507,6 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             if (f.kind == Kind::kPages && now_shown) focused = FocusedRow();
             if (d.any() && calls) {
                 if (f.kind == Kind::kPages) ApplyPages(ctx, f, d);
-                if (f.kind == Kind::kStrip) ApplyStrip(ctx, f, d);
                 if (f.kind == Kind::kStrip && d.set_page && g_pages_screen != 0 && g_pages_ok &&
                     Read<std::uint64_t>(g_pages_screen + kScreenLayout) == g_pages_layout) {
                     early_live = d.page_shown;
@@ -1686,15 +1520,10 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             }
             if (f.kind == Kind::kPages && calls) StepSlide(ctx, NowMs());   // (each update while the pages slide)
             if (f.kind == Kind::kPages && calls && now_shown && g_slide.dir == 0) KeepPageShown(ctx, g_page.Which());
-            if (f.kind == Kind::kPages && calls) SettingsButton(ctx);
-            if (f.kind == Kind::kStrip && ctx != nullptr && CanCall()) FollowFourth(ctx);
+            if (f.kind == Kind::kPages && calls) SystemButtons(ctx);
             // (the menu sounds of the presses the module took: the game starts none for them)
-            if (ctx != nullptr && CanCall()) {
-                if (f.kind == Kind::kStrip) {
-                    if (const char* sound = g_page.TakeStripSound()) PlaySound(ctx, screen, sound);
-                } else if (f.kind == Kind::kPages) {
-                    if (const char* sound = g_page.TakePagesSound()) PlaySound(ctx, screen, sound);
-                }
+            if (ctx != nullptr && CanCall() && f.kind == Kind::kPages) {
+                if (const char* sound = g_page.TakePagesSound()) PlaySound(ctx, screen, sound);
             }
         }
         for (const std::string& line : lines) LOG_INFO(Core, "{}", line);
@@ -1740,8 +1569,14 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                                                                      g_page.Field(1).text()) ^ g_page.Field(0).cursor() ^
                                             (g_page.Field(1).cursor() << 8);
             // (A on System's Longshot Settings button opens its page: the button's name read only while A is held)
-            g_page.SetOnSettingsButton((in & kPadA) != 0 && !g_page.Shown() && g_page.SettingsUsable() &&
-                                       FocusedShownName() == "Pa_Button_05");
+            {   // (which of System's buttons of ours the game's cursor is on: their names, read only while A is held)
+                int on = -1;
+                if ((in & kPadA) != 0 && !g_page.Shown()) {
+                    const std::string name = FocusedShownName();
+                    on = name == "Pa_Button_06" ? 0 : name == "Pa_Button_05" && g_page.SettingsUsable() ? 1 : -1;
+                }
+                g_page.SetSystemButton(on);
+            }
             out = g_page.OnPad(in, NowMs());
             typing = g_page.Typing() >= 0;
             const std::uint64_t field_now = std::hash<std::string>{}(g_page.Field(0).text() + '\n' +
@@ -1937,7 +1772,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
             if (typing || g_cell.load() >= 0 || (g_page.Which() == 1 && g_set_row.load() >= 0)) stick[1] = 0;
         }
-        if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (R on System)");
+        if (!was && shown) LOG_INFO(Core, "coop: pause tab: our page shown (A on its System button)");
         if (was && !shown) LOG_INFO(Core, "coop: pause tab: System back ({})", why);
         if (decide && !settings_shown) Act(row);
         if (pick_cell >= 0) ActCell(pick_cell);

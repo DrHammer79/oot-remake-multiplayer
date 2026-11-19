@@ -55,10 +55,19 @@ Page UsablePage() {
     return p;
 }
 
-// The menu open on System, the strip with the pack's five tabs, at `now`.
+// The menu open on System, the strip with `tabs` tabs (the page needs 4 or more), at `now`.
 void OnSystem(Page& p, std::uint64_t now, int tabs = 5) {
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
     p.OnScreen(Strip(0x9000, tabs, kSystemPage), now);
+}
+
+// A on one of System's buttons of ours (which: 0 the Multiplayer button, 1 Longshot Settings'), as the module tells
+// the page while A is held: the buttons the game gets.
+std::uint64_t Open(Page& p, std::uint64_t now, int which = 0) {
+    p.SetSystemButton(which);
+    const std::uint64_t got = p.OnPad(kPadA, now);
+    p.SetSystemButton(-1);
+    return got;
 }
 
 }  // namespace
@@ -90,66 +99,33 @@ TEST_CASE("pause tab: the screens are known by their class's vtable") {
     CHECK(0x80020000 + kPaneByName == 0x8045e300);
 }
 
-TEST_CASE("pause tab: the fourth tab's place and fades taken one update ahead, not past where they head") {
-    CHECK(Ahead(1023.83f, 1020.12f, 1000.0f) == doctest::Approx(1016.41f));   // (the strip's drop, a run's numbers)
-    CHECK(Ahead(1000.48f, 1000.34f, 1000.0f) == doctest::Approx(1000.20f));
-    CHECK(Ahead(1000.19f, 1000.0f, 1000.0f) == 1000.0f);                      // (at rest: stays)
-    CHECK(Ahead(1001.0f, 1000.2f, 1000.0f) == 1000.0f);                       // (not past its rest)
-    CHECK(Ahead(0.5f, 0.844f, 1.0f) == 1.0f);                                 // (a fade in: not past 1)
-    CHECK(Ahead(0.156f, 0.5f, 1.0f) == doctest::Approx(0.844f));
-    CHECK(Ahead(0.8f, 0.5f, 0.0f) == doctest::Approx(0.2f));                  // (a fade out)
-    CHECK(Ahead(0.4f, 0.1f, 0.0f) == 0.0f);
-    CHECK(Ahead(1.0f, 1.0f, 1.0f) == 1.0f);
-}
-
-TEST_CASE("pause tab: the fifth tab comes in with the strip's opening, filled once per opening") {
-    Page p = UsablePage();
-    auto d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), 1000);   // (closed)
-    CHECK_FALSE(d.tab_shown);
-    CHECK_FALSE(d.fill_tab);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 1016);   // (opening: with the game's four)
-    CHECK(d.set_tabs);
-    CHECK(d.tab_shown);
-    CHECK(d.fill_tab);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), 1300);   // (open: not filled again)
-    CHECK(d.set_tabs);
-    CHECK(d.tab_shown);
-    CHECK_FALSE(d.fill_tab);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), 2000);   // (closing: fading out with the four)
-    CHECK(d.tab_shown);
-    CHECK_FALSE(d.fill_tab);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), 2300);   // (closed: hidden)
-    CHECK_FALSE(d.tab_shown);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 3000);   // (the next opening: filled again)
-    CHECK(d.fill_tab);
-}
-
 TEST_CASE("pause tab: the presses the module takes have the game's own sounds") {
     Page p = UsablePage();
     OnSystem(p, 1000);
-    CHECK(p.TakeStripSound() == nullptr);
-    p.OnPad(kPadR, 1000);
-    CHECK(std::string(p.TakeStripSound()) == "mc_TabToRight");
-    CHECK(p.TakeStripSound() == nullptr);   // (once)
+    CHECK(p.TakePagesSound() == nullptr);
+    p.OnPad(kPadR, 1000);   // (R on System: the game's own, no sound of ours)
+    CHECK(p.TakePagesSound() == nullptr);
     p.OnPad(0, 1016);
-    p.OnPad(kPadA, 1032);
+    Open(p, 1032);   // (A on the Multiplayer button: taken from the game, so its sound is ours)
     CHECK(std::string(p.TakePagesSound()) == "button_decide");
+    CHECK(p.TakePagesSound() == nullptr);   // (once)
     p.OnPad(0, 1048);
-    p.OnPad(kPadL, 1064);
-    CHECK(std::string(p.TakeStripSound()) == "mc_TabToLeft");
+    p.OnPad(kPadA, 1064);   // (A on a row)
+    CHECK(std::string(p.TakePagesSound()) == "button_decide");
     p.OnPad(0, 1080);
-    p.OnPad(kPadL, 1096);   // (L on System: the game's own, no sound of ours)
-    CHECK(p.TakeStripSound() == nullptr);
+    p.OnPad(kPadL, 1096);   // (L on our page: the game's own, no sound of ours)
+    CHECK_FALSE(p.Shown());
+    CHECK(p.TakePagesSound() == nullptr);
 }
 
 TEST_CASE("pause tab: the menu closed on our page opens on it again, not after L") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
     OnSystem(p, now);
-    CHECK(p.OnPad(kPadR, now) == 0);
+    CHECK(Open(p, now) == 0);
     CHECK(p.Shown());
     p.OnPad(0, now + 16);
-    // The menu closes (B or +): our page goes with it.
+    // The menu closes (+): our page goes with it.
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 32);
     CHECK_FALSE(p.Shown());
     p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), now + 32);
@@ -170,7 +146,7 @@ TEST_CASE("pause tab: the menu closed on our page opens on it again, not after L
     // L, then the menu closed and opened again: System's.
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 2), now + 5300);
     p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 2), now + 5300);
-    p.OnPad(kPadL, now + 5400);
+    CHECK(p.OnPad(kPadL, now + 5400) == kPadL);   // (System back, and the L is the game's)
     CHECK_FALSE(p.Shown());
     p.OnPad(0, now + 5416);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 5500);
@@ -183,7 +159,7 @@ TEST_CASE("pause tab: the menu closed on our page opens on it again, not after L
 TEST_CASE("pause tab: back at the menu's first frame, the pages still at 0 while the strip opens") {
     Page p = UsablePage();
     OnSystem(p, 1000);
-    p.OnPad(kPadR, 1000);
+    Open(p, 1000);
     p.OnPad(0, 1016);
     p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), 1032);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), 1032);
@@ -191,12 +167,13 @@ TEST_CASE("pause tab: back at the menu's first frame, the pages still at 0 while
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 0), 1300);
     CHECK_FALSE(p.Shown());   // (closed: nothing)
     // As a run had it: the strip's first update of the opening comes first, the pages' last update still the closed
-    // one (old). The page is back there, set through the strip's update, its tab lit from the start.
+    // one (old). The page is back there, set through the strip's update, at once.
     const auto d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), 4000);
     CHECK(p.Shown());
     CHECK(d.set_page);
     CHECK(d.page_shown);
-    CHECK(d.tab_lit);
+    CHECK(d.page_to == 1);
+    CHECK(d.slide == 0);
     CHECK(p.OnPad(0, 4008) == 0);   // (the pad between them: it stays)
     CHECK(p.Shown());
     CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 0), 4018).set_page);   // (set already)
@@ -208,7 +185,7 @@ TEST_CASE("pause tab: back at the menu's first frame, the pages still at 0 while
 TEST_CASE("pause tab: a menu that opens on another page forgets ours") {
     Page p = UsablePage();
     OnSystem(p, 1000);
-    p.OnPad(kPadR, 1000);
+    Open(p, 1000);
     p.OnPad(0, 1016);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), 1032);
     CHECK_FALSE(p.Shown());
@@ -219,65 +196,90 @@ TEST_CASE("pause tab: a menu that opens on another page forgets ours") {
     CHECK_FALSE(p.Shown());
 }
 
-TEST_CASE("pause tab: R on System shows the page and lights the fifth tab, L gives System back") {
+TEST_CASE("pause tab: A on the Multiplayer button shows the page at once, L or R gives System back at once and is the game's") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
-    // First updates: our page hidden (System shown), the fifth tab shown, System's lit.
+    // First updates: our page hidden (System shown); the strip's ask nothing (the game's own tabs, System's lit).
     auto d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
     CHECK(d.set_page);
     CHECK_FALSE(d.page_shown);
     CHECK(d.set_texts);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
-    CHECK(d.set_tabs);
-    CHECK(d.tab_shown);
-    CHECK_FALSE(d.tab_lit);
-    CHECK(d.fill_tab);
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now).any());
     CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now).any());   // (nothing again)
     CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now).any());
-    // R: taken, the page shows at the next updates.
-    CHECK(p.OnPad(kPadR, now) == 0);
+    // R on System alone is the game's: nothing of ours.
+    CHECK(p.OnPad(kPadR, now) == kPadR);
+    CHECK_FALSE(p.Shown());
+    CHECK(p.OnPad(0, now + 4) == 0);
+    // A on another of System's buttons is the game's.
+    CHECK(p.OnPad(kPadA, now + 8) == kPadA);
+    CHECK_FALSE(p.Shown());
+    CHECK_FALSE(p.TakeOpened());
+    CHECK(p.OnPad(0, now + 12) == 0);
+    // A on the Multiplayer button: taken, the page shows at once at the next update (no slide).
+    CHECK(Open(p, now + 16) == 0);
     CHECK(p.Shown());
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 16);
+    CHECK(p.Which() == 0);
+    CHECK(p.TakeOpened());
+    CHECK_FALSE(p.TakeOpened());   // (once)
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 20);
     CHECK(d.set_page);
     CHECK(d.page_shown);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 16);
-    CHECK(d.set_tabs);
-    CHECK(d.tab_lit);
-    // R held: still the module's (no fresh R for the game).
-    CHECK(p.OnPad(kPadR, now + 32) == 0);
+    CHECK(d.page_from == 0);
+    CHECK(d.page_to == 1);
+    CHECK(d.slide == 0);
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 24).any());   // (no tab of ours to light)
+    // A held: still the module's (no fresh A for the game, and no row's A).
+    CHECK(p.OnPad(kPadA, now + 32) == 0);
+    CHECK_FALSE(p.TakeDecide());
     CHECK(p.OnPad(0, now + 48) == 0);
-    // L: back to System; L stays the module's until let go, so the game does not step to Items.
-    CHECK(p.OnPad(kPadL, now + 64) == 0);
+    // L: System back at once, and the L is the game's (on to Items).
+    CHECK(p.OnPad(kPadL, now + 64) == kPadL);
     CHECK_FALSE(p.Shown());
-    CHECK(p.TakeWhy() == "L");
-    CHECK(p.OnPad(kPadL, now + 80) == 0);
-    CHECK(p.OnPad(0, now + 96) == 0);
-    CHECK(p.OnPad(kPadL, now + 112) == kPadL);   // (a new L is the game's: Items)
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 120);
+    CHECK(p.TakeWhy() == "L or R on the Multiplayer page");
+    CHECK_FALSE(p.TakeLeft());   // (only B leaves for the button)
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 72);
     CHECK(d.set_page);
     CHECK_FALSE(d.page_shown);
-    // ZR and ZL do the same.
-    p.OnPad(0, now + 130);
-    CHECK(p.OnPad(kPadZR, now + 140) == 0);
+    CHECK(d.page_from == 1);
+    CHECK(d.page_to == 0);
+    CHECK(d.slide == 0);
+    CHECK(p.OnPad(kPadL, now + 80) == kPadL);   // (held: still the game's)
+    CHECK(p.OnPad(0, now + 96) == 0);
+    // R the same.
+    CHECK(Open(p, now + 112) == 0);
     CHECK(p.Shown());
-    CHECK(p.OnPad(kPadZL, now + 150) == 0);
+    CHECK(p.OnPad(0, now + 120) == 0);
+    CHECK(p.OnPad(kPadR, now + 130) == kPadR);
+    CHECK_FALSE(p.Shown());
+    // ZL and ZR do the same.
+    p.OnPad(0, now + 135);
+    CHECK(Open(p, now + 140) == 0);
+    p.OnPad(0, now + 145);
+    CHECK(p.OnPad(kPadZL, now + 150) == kPadZL);
+    CHECK_FALSE(p.Shown());
+    p.OnPad(0, now + 155);
+    CHECK(Open(p, now + 160) == 0);
+    p.OnPad(0, now + 165);
+    CHECK(p.OnPad(kPadZR, now + 170) == kPadZR);
     CHECK_FALSE(p.Shown());
 }
 
-TEST_CASE("pause tab: under the page the game gets only B, + and -, and up and down for its cursor, A is ours") {
+TEST_CASE("pause tab: under the page the game gets only + and -, and up and down for its cursor, A is ours, B leaves") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
     OnSystem(p, now);
-    REQUIRE(p.OnPad(kPadR, now) == 0);
+    REQUIRE(Open(p, now) == 0);
     p.OnPad(0, now + 1);
     const std::uint64_t x = 1ull << 2, y = 1ull << 3, left = 1ull << 12, right = 1ull << 14, stick_right = 1ull << 18;
     CHECK(p.OnPad(kPadA, now + 2) == 0);   // A: ours, not the System page's
     CHECK(p.TakeDecide());
     CHECK_FALSE(p.TakeDecide());
-    CHECK(p.OnPad(x | y | left | right | stick_right | kPadZL, now + 3) == 0);   // (ZL: back to System, taken)
+    // (ZL: back to System and the game's; the rest kept from it until let go)
+    CHECK(p.OnPad(x | y | left | right | stick_right | kPadZL, now + 3) == kPadZL);
     CHECK_FALSE(p.Shown());
     p.OnPad(0, now + 4);
-    REQUIRE(p.OnPad(kPadR, now + 5) == 0);
+    REQUIRE(Open(p, now + 5) == 0);
     p.OnPad(0, now + 6);
     // Up and down reach the game: the System page's focus moves, and the game's cursor frame with it over our rows.
     CHECK(p.OnPad(kPadDown, now + 7) == kPadDown);
@@ -285,13 +287,16 @@ TEST_CASE("pause tab: under the page the game gets only B, + and -, and up and d
     CHECK(p.OnPad(kPadDown | kPadA, now + 9) == kPadDown);
     CHECK(p.TakeDecide());
     p.OnPad(0, now + 10);
-    CHECK(p.OnPad(kPadB, now + 11) == kPadB);
-    CHECK(p.OnPad(kPadPlus, now + 12) == kPadPlus);
-    CHECK(p.OnPad(kPadMinus, now + 13) == kPadMinus);
-    CHECK(p.Shown());   // (the game acts on B, + and -; the screens' updates then give System back)
+    CHECK(p.OnPad(kPadPlus, now + 11) == kPadPlus);
+    CHECK(p.OnPad(kPadMinus, now + 12) == kPadMinus);
+    CHECK(p.Shown());   // (the game acts on + and -; the screens' updates then give System back)
+    // B on the page's own rows: ours, System back (the game's B would close the menu).
+    CHECK(p.OnPad(kPadB, now + 13) == 0);
+    CHECK_FALSE(p.Shown());
+    CHECK(p.TakeLeft());
 }
 
-TEST_CASE("pause tab: the page does not show off System, mid-step, in the Minus menu, without the pack or under a window") {
+TEST_CASE("pause tab: the page does not show off System, mid-step, in the Minus menu, on a strip of under four tabs or under a window") {
     std::uint64_t now = 1000;
     SUBCASE("on Items") {
         Page p = UsablePage();
@@ -299,46 +304,53 @@ TEST_CASE("pause tab: the page does not show off System, mid-step, in the Minus 
         p.OnScreen(Strip(0x9000, 5, 4), now);
         CHECK(p.OnPad(kPadR, now) == kPadR);   // (the game's: Items to System)
         CHECK_FALSE(p.Shown());
+        p.OnPad(0, now + 1);
+        CHECK(Open(p, now + 2) == kPadA);   // (the game's A: no button of ours there)
+        CHECK_FALSE(p.Shown());
     }
     SUBCASE("mid-step to System") {
         Page p = UsablePage();
         p.OnScreen(Pages(0xa000, 4, kSystemPage), now);
         p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
-        CHECK(p.OnPad(kPadR, now) == kPadR);
+        CHECK(Open(p, now) == kPadA);
         CHECK_FALSE(p.Shown());
     }
     SUBCASE("the Minus menu") {
         Page p = UsablePage();
         p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
         p.OnScreen(Strip(0x9000, 5, 2, 0), now);
-        CHECK(p.OnPad(kPadR, now) == kPadR);
+        CHECK(Open(p, now) == kPadA);
         CHECK_FALSE(p.Shown());
     }
-    SUBCASE("four tabs: the pack's layouts are not there") {
+    SUBCASE("three tabs: fewer than the game's four") {
         Page p = UsablePage();
-        OnSystem(p, now, 4);
-        CHECK(p.OnPad(kPadR, now) == kPadR);
+        OnSystem(p, now, 3);
+        CHECK(Open(p, now) == kPadA);
         CHECK_FALSE(p.Shown());
-        CHECK_FALSE(p.OnScreen(Strip(0x9000, 4, kSystemPage), now).set_tabs);   // (no fifth tab to touch)
+        // (the game's own four are enough: no tab of ours is needed)
+        p.OnPad(0, now + 1);
+        OnSystem(p, now + 2, 4);
+        CHECK(Open(p, now + 2) == 0);
+        CHECK(p.Shown());
     }
     SUBCASE("the menu still opening") {
         Page p = UsablePage();
         p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 1), now);
         p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), now);
-        CHECK(p.OnPad(kPadR, now) == kPadR);
+        CHECK(Open(p, now) == kPadA);
         CHECK_FALSE(p.Shown());
     }
     SUBCASE("a window over the System page (Save, Options, a question)") {
         Page p = UsablePage();
         OnSystem(p, now);
         p.OnScreen(Blocker(2), now);
-        CHECK(p.OnPad(kPadR, now + 10) == kPadR);
+        CHECK(Open(p, now + 10) == kPadA);
         CHECK_FALSE(p.Shown());
-        // Gone (state 0) for a while: R is ours again.
+        // Gone (state 0) for a while: the button's A is ours again.
         p.OnScreen(Blocker(0), now + 20);
         p.OnPad(0, now + 299);
         OnSystem(p, now + 300);
-        CHECK(p.OnPad(kPadR, now + 300) == 0);
+        CHECK(Open(p, now + 300) == 0);
         CHECK(p.Shown());
     }
     SUBCASE("the screens' updates stopped") {
@@ -347,7 +359,7 @@ TEST_CASE("pause tab: the page does not show off System, mid-step, in the Minus 
         // (the pad is polled every frame while the game runs; with no call at all it would be a stall of the whole
         // game, which keeps the screens fresh: AfterStall)
         for (std::uint64_t t = now + 16; t < now + 1000; t += 16) p.OnPad(0, t);
-        CHECK(p.OnPad(kPadR, now + 1000) == kPadR);
+        CHECK(Open(p, now + 1000) == kPadA);
         CHECK_FALSE(p.Shown());
     }
 }
@@ -356,15 +368,15 @@ TEST_CASE("pause tab: closing, the Minus menu, a window or Game Over give System
     std::uint64_t now = 1000;
     const auto shown = [&](Page& p) {
         OnSystem(p, now);
-        REQUIRE(p.OnPad(kPadR, now) == 0);
+        REQUIRE(Open(p, now) == 0);
         p.OnPad(0, now + 1);
         p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 2);
         REQUIRE(p.Shown());
     };
-    SUBCASE("B closes the menu") {
+    SUBCASE("+ closes the menu") {
         Page p = UsablePage();
         shown(p);
-        CHECK(p.OnPad(kPadB, now + 3) == kPadB);
+        CHECK(p.OnPad(kPadPlus, now + 3) == kPadPlus);
         const auto d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 20);
         CHECK_FALSE(p.Shown());
         CHECK(d.set_page);
@@ -561,26 +573,28 @@ TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width
     }
 }
 
-TEST_CASE("pause tab: a page whose panes or game calls are missing never shows, and the mouse keeps tab 5 out") {
+TEST_CASE("pause tab: a page whose panes or game calls are missing never shows, and the mouse is told so") {
     // (an old or mismatched pack, a module without the scratch API: the page would be undrawn, so System's A and
     // its focused button must stay System's; Act would otherwise run row 0 Host or row 4 Leave on System's buttons)
     std::uint64_t now = 1000;
     Page p;   // (not usable until the module says so)
     CHECK(p.MousePage() == -2);
     OnSystem(p, now);
-    CHECK(p.OnPad(kPadR, now) == kPadR);   // (the game's R: nothing of ours)
+    CHECK(Open(p, now) == kPadA);   // (the game's A: nothing of ours)
     CHECK_FALSE(p.Shown());
+    CHECK_FALSE(p.TakeOpened());
     p.OnPad(0, now + 1);
     CHECK(p.OnPad(kPadA, now + 2) == kPadA);   // (System's A)
     CHECK_FALSE(p.TakeDecide());
     p.OnPad(0, now + 3);
-    // Usable: tab 5 counts for the mouse, R shows the page.
+    // Usable: the mouse's tabs are the game's four (-1, shown or not: our page is in System's place), and A on the
+    // Multiplayer button shows the page.
     p.SetUsable(true);
     CHECK(p.MousePage() == -1);
     OnSystem(p, now + 4);
-    CHECK(p.OnPad(kPadR, now + 4) == 0);
+    CHECK(Open(p, now + 4) == 0);
     CHECK(p.Shown());
-    CHECK(p.MousePage() == 4);
+    CHECK(p.MousePage() == -1);
     // Its panes lost while it shows (a new screen whose look-up failed): System back at once, A not ours.
     p.OnPad(0, now + 5);
     p.SetUsable(false);
@@ -614,14 +628,16 @@ TEST_CASE("pause tab: a screen reopened at the same address, or with a new layou
     f.layout = 0x7000;
     CHECK(p.Track(f) != g2);
     CHECK(p.OnScreen(f, now + 40).set_texts);
-    // The strip the same way: its fifth tab set again.
+    // The strip the same way (nothing of ours is set in it, but a look-up there goes stale with it).
     const std::uint64_t s1 = p.Track(Strip(0x9000, 5, kSystemPage, kPlusMode, 1));
     CHECK(s1 != 0);
-    CHECK(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 50).set_tabs);
-    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 51).set_tabs);
+    CHECK(p.Track(Strip(0x9000, 5, kSystemPage)) == s1);   // (open)
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 50).any());
     p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), now + 60);
-    CHECK(p.Track(Strip(0x9000, 5, kSystemPage, kPlusMode, 1)) != s1);
-    CHECK(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 70).set_tabs);
+    const std::uint64_t s2 = p.Track(Strip(0x9000, 5, kSystemPage, kPlusMode, 1));
+    CHECK(s2 != s1);
+    CHECK(p.Track(Strip(0x9000, 5, kSystemPage)) == s2);
+    CHECK(p.Track(Strip(0x9100, 5, kSystemPage)) != s2);   // (a new address)
 }
 
 TEST_CASE("pause tab: co-op that came with the game's start, and a failed Host, show the Session view") {
@@ -718,34 +734,43 @@ TEST_CASE("pause tab: the rows' own views: Players, Let in and Join on the same 
     }
 }
 
-TEST_CASE("pause tab: in a view, B goes back to the five rows instead of closing the menu") {
+TEST_CASE("pause tab: in a view, B goes back to the five rows instead of leaving the page") {
     std::uint64_t now = 1000;
     Page p = UsablePage();
     OnSystem(p, now);
-    REQUIRE(p.OnPad(kPadR, now) == 0);
+    REQUIRE(Open(p, now) == 0);
     p.OnPad(0, now + 1);
-    CHECK(p.OnPad(kPadB, now + 2) == kPadB);   // (the five rows: B is the game's, it closes the menu)
-    CHECK_FALSE(p.TakeBack());
-    p.OnPad(0, now + 3);
     p.SetSubView(true);
-    CHECK(p.OnPad(kPadB, now + 4) == 0);   // (a view: ours)
+    CHECK(p.OnPad(kPadB, now + 2) == 0);   // (a view: ours)
     CHECK(p.TakeBack());
     CHECK_FALSE(p.TakeBack());
-    CHECK(p.OnPad(kPadB, now + 5) == 0);   // (held: still ours)
+    CHECK(p.Shown());   // (the page stays, on its five rows)
+    CHECK_FALSE(p.TakeLeft());
+    CHECK(p.OnPad(kPadB, now + 3) == 0);   // (held: still ours)
     p.SetSubView(false);
-    CHECK(p.OnPad(kPadB, now + 6) == 0);   // (still held from the view: not a fresh B for the game)
-    p.OnPad(0, now + 7);
-    CHECK(p.OnPad(kPadB, now + 8) == kPadB);
-    // The page going ends the view.
-    p.OnPad(0, now + 9);
-    p.SetSubView(true);
-    CHECK(p.OnPad(kPadL, now + 10) == 0);
+    CHECK(p.OnPad(kPadB, now + 4) == 0);   // (still held from the view: not a fresh B for the rows)
+    CHECK(p.Shown());
+    p.OnPad(0, now + 5);
+    // The five rows: B is ours too, System back (the game's B would close the menu), kept from the game until let go.
+    CHECK(p.OnPad(kPadB, now + 6) == 0);
     CHECK_FALSE(p.Shown());
-    p.OnPad(0, now + 11);
-    CHECK(p.OnPad(kPadB, now + 12) == kPadB);
+    CHECK(p.TakeLeft());
+    CHECK_FALSE(p.TakeBack());
+    CHECK(p.OnPad(kPadB, now + 7) == 0);
+    p.OnPad(0, now + 8);
+    CHECK(p.OnPad(kPadB, now + 9) == kPadB);   // (a new B on System: the game's)
+    // The page going ends the view.
+    p.OnPad(0, now + 10);
+    REQUIRE(Open(p, now + 11) == 0);
+    p.OnPad(0, now + 12);
+    p.SetSubView(true);
+    CHECK(p.OnPad(kPadL, now + 13) == kPadL);
+    CHECK_FALSE(p.Shown());
+    p.OnPad(0, now + 14);
+    CHECK(p.OnPad(kPadB, now + 15) == kPadB);
     CHECK_FALSE(p.TakeBack());
     p.SetSubView(true);   // (not shown: no view)
-    CHECK(p.OnPad(kPadB, now + 13) == kPadB);
+    CHECK(p.OnPad(kPadB, now + 16) == kPadB);
 }
 
 TEST_CASE("pause tab: a screen update nested on the same thread is told so, other threads are not") {
@@ -1027,7 +1052,7 @@ TEST_CASE("pause tab: a password shows as stars but for the letter typed into, a
 TEST_CASE("pause tab: the Join view's fields: typing takes every button from System until A or B") {
     Page p = UsablePage();
     OnSystem(p, 1000);
-    p.OnPad(kPadR, 1000);
+    Open(p, 1000);
     p.OnPad(0, 1016);
     REQUIRE(p.Shown());
     p.StartTyping(0);
@@ -1071,7 +1096,7 @@ TEST_CASE("pause tab: the Join view's fields: typing takes every button from Sys
 TEST_CASE("pause tab: typing ends when the page goes, and the Join view's rows say the fields") {
     Page p = UsablePage();
     OnSystem(p, 1000);
-    p.OnPad(kPadR, 1000);
+    Open(p, 1000);
     p.OnPad(0, 1016);
     p.StartTyping(0);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), 1100);   // (the menu closes)
@@ -1313,7 +1338,7 @@ TEST_CASE("pause tab: a stall of the whole game keeps the page, screens that sto
     std::uint64_t now = 1000;
     OnSystem(p, now);
     p.OnPad(0, now);
-    CHECK(p.OnPad(kPadR, now + 16) == 0);
+    CHECK(Open(p, now + 16) == 0);
     CHECK(p.Shown());
     OnSystem(p, now + 32);
     p.OnPad(0, now + 32);
@@ -1337,7 +1362,7 @@ TEST_CASE("pause tab: after a stall, the first call may be a screen's update: th
         std::uint64_t now = 1000;
         OnSystem(p, now);
         p.OnPad(0, now);
-        CHECK(p.OnPad(kPadR, now + 16) == 0);
+        CHECK(Open(p, now + 16) == 0);
         CHECK(p.Shown());
         OnSystem(p, now + 32);
         p.OnPad(0, now + 32);
@@ -1462,24 +1487,40 @@ TEST_CASE("pause tab: the mouse's steps stop for the player's own, the cursor ou
     CHECK(m.Step(At(t += 16, -1100, 650, 3)) == 0);
 }
 
-TEST_CASE("pause tab: R on System slides our page in, L slides it out, the menu opening on it shows it at once") {
+TEST_CASE("pause tab: our page comes and goes at once, and the menu opening on it shows it at once") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
     OnSystem(p, now);
     p.OnPad(0, now);
-    CHECK(p.OnPad(kPadR, now + 16) == 0);
+    CHECK(Open(p, now + 16) == 0);
     Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 32);
     CHECK(d.set_page);
     CHECK(d.page_shown);
-    CHECK(d.slide == 1);
+    CHECK(d.slide == 0);   // (in System's place: no slide)
     d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 48);
     CHECK_FALSE(d.set_page);   // (once)
+    // The menu closed on it, then opened again: on our page, at once.
     p.OnPad(0, now + 64);
-    p.OnPad(kPadL, now + 80);
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 96);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 3), now + 80);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 3), now + 80);
+    CHECK_FALSE(p.Shown());
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 0), now + 400);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 0), now + 400);
+    d = p.OnScreen(Strip(0x9000, 5, kSystemPage, kPlusMode, 1), now + 3000);
+    CHECK(p.Shown());
+    CHECK(d.set_page);
+    CHECK(d.page_shown);
+    CHECK(d.slide == 0);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage, 1), now + 3000);
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 3100);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 3100);
+    // L: System back at once, no slide.
+    p.OnPad(0, now + 3116);
+    CHECK(p.OnPad(kPadL, now + 3132) == kPadL);
+    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 3148);
     CHECK(d.set_page);
     CHECK_FALSE(d.page_shown);
-    CHECK(d.slide == -1);
+    CHECK(d.slide == 0);
 }
 
 TEST_CASE("pause tab: the slide follows the game's measured curve and moves the two pages a page's width") {
@@ -1504,7 +1545,7 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(system == doctest::Approx(0.0f));
 }
 
-TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in System's place, B back, R on, L the game's") {
+TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in System's place, B back, L or R the game's") {
     Page p = UsablePage();
     p.SetSettingsUsable(true);
     std::uint64_t now = 1000;
@@ -1512,70 +1553,64 @@ TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in Sy
     p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
     p.OnPad(0, now);
     // A on another of System's buttons is the game's.
-    p.SetOnSettingsButton(false);
+    p.SetSystemButton(-1);
     CHECK(p.OnPad(kPadA, now + 16) == kPadA);
     CHECK_FALSE(p.Shown());
     p.OnPad(0, now + 32);
     // A on the Longshot Settings button: the page at once, the game's A kept from it.
-    p.SetOnSettingsButton(true);
+    p.SetSystemButton(1);
     CHECK(p.OnPad(kPadA, now + 48) == 0);
-    CHECK(p.TakeSettingsOpened());
-    CHECK_FALSE(p.TakeSettingsOpened());
+    CHECK(p.TakeOpened());
+    CHECK_FALSE(p.TakeOpened());
     Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
     CHECK(d.set_page);
     CHECK(d.page_from == 0);
     CHECK(d.page_to == 2);
     CHECK(d.slide == 0);
     CHECK(p.Which() == 1);
-    CHECK(p.MousePage() == 5);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80);
-    CHECK_FALSE(d.tab_lit);   // (System's tab stays lit: the page is in its place)
-    p.SetOnSettingsButton(false);
+    CHECK(p.MousePage() == -1);   // (in System's place: the mouse's tabs stay the game's)
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80).any());   // (System's tab stays lit)
+    p.SetSystemButton(-1);
     // B in its list goes back to its rows; B on its rows goes back to System, its cursor on the button again.
     p.OnPad(0, now + 96);
     p.SetSubView(true);
     p.OnPad(kPadB, now + 112);
     CHECK(p.TakeBack());
     CHECK(p.Shown());
+    CHECK_FALSE(p.TakeLeft());
     p.SetSubView(false);
     p.OnPad(0, now + 128);
     CHECK(p.OnPad(kPadB, now + 144) == 0);   // (the game's B would close the menu)
     CHECK_FALSE(p.Shown());
-    CHECK(p.TakeSettingsLeft());
+    CHECK(p.TakeLeft());
+    CHECK(p.Which() == 1);
     d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 160);
     CHECK(d.set_page);
     CHECK(d.page_from == 2);
     CHECK(d.page_to == 0);
     CHECK(d.slide == 0);
-    // R on Longshot Settings: on to the Multiplayer page, sliding as from System.
+    // R on Longshot Settings: System back at once, and the R is the game's.
     p.OnPad(0, now + 176);
-    p.SetOnSettingsButton(true);
+    p.SetSystemButton(1);
     p.OnPad(kPadA, now + 192);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 208);
-    p.SetOnSettingsButton(false);
+    p.SetSystemButton(-1);
     p.OnPad(0, now + 224);
-    CHECK(p.OnPad(kPadR, now + 240) == 0);
+    CHECK(p.OnPad(kPadR, now + 240) == kPadR);
+    CHECK_FALSE(p.Shown());
+    CHECK(p.TakeWhy() == "L or R on Longshot Settings");
     d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 256);
     CHECK(d.set_page);
     CHECK(d.page_from == 2);
-    CHECK(d.page_to == 1);
-    CHECK(d.slide == 1);
-    CHECK(p.Which() == 0);
-    d = p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 272);
-    CHECK(d.tab_lit);
-    // L on the Multiplayer page: System, sliding.
-    p.OnPad(0, now + 288);
-    p.OnPad(kPadL, now + 304);
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 320);
-    CHECK(d.page_from == 1);
     CHECK(d.page_to == 0);
-    CHECK(d.slide == -1);
+    CHECK(d.slide == 0);
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 272).any());   // (the strip's: nothing of ours)
     // L on Longshot Settings: System back at once, and the L is the game's (on to Items).
     p.OnPad(0, now + 336);
-    p.SetOnSettingsButton(true);
+    p.SetSystemButton(1);
     p.OnPad(kPadA, now + 352);
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 368);
-    p.SetOnSettingsButton(false);
+    p.SetSystemButton(-1);
     p.OnPad(0, now + 384);
     CHECK(p.OnPad(kPadL, now + 400) == kPadL);
     CHECK_FALSE(p.Shown());
@@ -1591,19 +1626,43 @@ TEST_CASE("pause tab: without Longshot Settings (an older pack, or no settings f
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
     p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
     p.OnPad(0, now);
-    p.SetOnSettingsButton(true);
+    p.SetSystemButton(1);
     CHECK(p.OnPad(kPadA, now + 16) == kPadA);
     CHECK_FALSE(p.Shown());
-    CHECK_FALSE(p.TakeSettingsOpened());
-    // R on the Multiplayer page goes nowhere further.
+    CHECK_FALSE(p.TakeOpened());
+    p.SetSystemButton(-1);
+    // The Multiplayer button still opens its page.
     p.OnPad(0, now + 32);
-    p.OnPad(kPadR, now + 48);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
-    p.OnPad(0, now + 80);
-    p.OnPad(kPadR, now + 96);
-    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 112);
-    CHECK_FALSE(d.set_page);
+    CHECK(Open(p, now + 48) == 0);
+    CHECK(p.Shown());
+    CHECK(p.TakeOpened());
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
+    CHECK(d.set_page);
+    CHECK(d.page_to == 1);
     CHECK(p.Which() == 0);
+}
+
+TEST_CASE("pause tab: B on the Multiplayer page's rows gives System back, the game's cursor back on its button") {
+    Page p = UsablePage();
+    std::uint64_t now = 1000;
+    OnSystem(p, now);
+    REQUIRE(Open(p, now) == 0);
+    CHECK(p.TakeOpened());
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 16);
+    p.OnPad(0, now + 32);
+    CHECK_FALSE(p.TakeLeft());
+    CHECK(p.OnPad(kPadB, now + 48) == 0);   // (ours: the game's B would close the menu)
+    CHECK_FALSE(p.Shown());
+    CHECK(p.TakeLeft());
+    CHECK_FALSE(p.TakeLeft());   // (once)
+    CHECK(p.Which() == 0);
+    CHECK(p.TakeWhy() == "B on the Multiplayer page");
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
+    CHECK(d.set_page);
+    CHECK_FALSE(d.page_shown);
+    CHECK(d.page_from == 1);
+    CHECK(d.page_to == 0);
+    CHECK(d.slide == 0);
 }
 
 TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages, and the values a press asks for") {
