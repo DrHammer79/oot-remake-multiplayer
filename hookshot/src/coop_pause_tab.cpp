@@ -402,8 +402,10 @@ RowAction ActionFor(int row, const Session& s) {
         if (s.hosting) return s.code ? RowAction::kCopyCode : RowAction::kViewSession;   // (the code still coming)
         return s.in_one || s.by_launcher ? RowAction::kViewSession : RowAction::kViewJoin;
     case kRowPlayers:
+        if (!s.in_one && !s.by_launcher) return RowAction::kViewLan;   // (not in a session: the games on this network)
         return RowAction::kViewPlayers;
     case kRowLetIn:
+        if (!s.in_one && !s.by_launcher) return RowAction::kAutoRejoin;   // (not in a session: the switch)
         if (!s.hosting) return s.in_one && s.can_resync ? RowAction::kResync : RowAction::kNone;   // (only a host lets in)
         return s.invite && !s.asking ? RowAction::kPasteAnswer : RowAction::kViewLetIn;   // (a knock first)
     case kRowLeave:
@@ -455,6 +457,12 @@ RowAction ActionFor(View view, int row, const Session& s) {
         if (row == 0) return RowAction::kHostVoice;
         if (row == 1) return RowAction::kHostChat;
         return row == 2 ? RowAction::kKick : RowAction::kBan;
+    case View::kLan: {
+        if (s.in_one || s.by_launcher) return RowAction::kNone;
+        if (s.lan_listed > kRows - 1 && row == kRows - 2) return RowAction::kMoreLan;
+        const int i = PlayerIndex(s.lan_listed, s.lan_page, row);
+        return i >= 0 && i < 32 && (s.lan_joinable >> i & 1u) != 0 ? RowAction::kJoinLan : RowAction::kNone;
+    }
     case View::kLetIn:
         if (row == 0 && s.hosting && s.asking) return RowAction::kAllow;
         if (row == 1 && s.hosting && s.asking) return RowAction::kDeny;
@@ -544,7 +552,8 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else {
         rows[kRowJoinCode] = v.s.in_one || v.s.by_launcher ? "Session details" : "Join a game";
     }
-    rows[kRowPlayers] = v.players <= 0   ? "Players"
+    rows[kRowPlayers] = !v.s.in_one && !v.s.by_launcher ? "Games on this network"
+                        : v.players <= 0   ? "Players"
                         : v.players == 1 ? "Players: just you"
                                          : "Players: " + std::to_string(v.players);
     if (v.s.hosting) {
@@ -557,6 +566,8 @@ std::vector<std::string> RowTexts(const SessionView& v) {
         }
     } else if (v.s.in_one) {
         rows[kRowLetIn] = v.s.can_resync ? "Resync from host" : "Let in: the host does";
+    } else if (!v.s.by_launcher) {
+        rows[kRowLetIn] = !v.s.auto_rejoin ? "Auto-rejoin: Off" : v.s.rejoining ? "Auto-rejoin: On (trying...)" : "Auto-rejoin: On";
     } else {
         rows[kRowLetIn] = "Let in: when you host";
     }
@@ -587,6 +598,20 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         if (listed > kRows - 1) {
             const int pages = PlayerPages(listed);
             rows[kRows - 2] = "More players (" + std::to_string((v.s.page % pages + pages) % pages + 1) + "/" +
+                              std::to_string(pages) + ")";
+        }
+        break;
+    }
+    case View::kLan: {
+        const int listed = static_cast<int>(v.lan_rows.size());
+        if (listed == 0) rows[0] = "Looking for games...";
+        for (int r = 0; r < kRows - 1; ++r) {
+            const int i = PlayerIndex(listed, v.s.lan_page, r);
+            if (i >= 0) rows[static_cast<std::size_t>(r)] = v.lan_rows[static_cast<std::size_t>(i)];
+        }
+        if (listed > kRows - 1) {
+            const int pages = PlayerPages(listed);
+            rows[kRows - 2] = "More games (" + std::to_string((v.s.lan_page % pages + pages) % pages + 1) + "/" +
                               std::to_string(pages) + ")";
         }
         break;
@@ -707,6 +732,10 @@ const char* ActionWords(RowAction a) {
     case RowAction::kHostChat: return "their chat muted or unmuted for everyone";
     case RowAction::kKick: return "kick that player after a second A";
     case RowAction::kTypeRoom: return "the room name typed on its row";
+    case RowAction::kViewLan: return "the games on this network";
+    case RowAction::kJoinLan: return "join that game on this network";
+    case RowAction::kMoreLan: return "the next page of games on this network";
+    case RowAction::kAutoRejoin: return "auto-rejoin on or off";
     case RowAction::kTypePassword: return "the join password typed on its row";
     case RowAction::kJoinRoom: return "join that room through the kit's relay";
     case RowAction::kBan: return "ban that player for this session after a second A";

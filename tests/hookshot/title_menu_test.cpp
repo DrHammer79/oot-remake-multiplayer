@@ -843,3 +843,17 @@ TEST_CASE("title menu: approve_joins (the host's) is read from coop-options.ini,
     o.Write(coop, options);
     CHECK(IniGet(options, "approve_joins") == "yes");
 }
+
+TEST_CASE("title menu: auto_rejoin is off unless coop-options.ini turns it on, and the page's row writes it") {
+    CHECK_FALSE(Options::Read("", "").auto_rejoin);
+    CHECK(Options::Read("", "auto_rejoin = on\r\n").auto_rejoin);
+    Options o = Options::Read("", "");
+    o.auto_rejoin = true;
+    std::string coop, options;
+    o.Write(coop, options);
+    CHECK(options.find("auto_rejoin = on") != std::string::npos);
+    CHECK(Options::Read(coop, options).auto_rejoin);
+    o.auto_rejoin = false;
+    o.Write(coop, options);
+    CHECK_FALSE(Options::Read(coop, options).auto_rejoin);
+}

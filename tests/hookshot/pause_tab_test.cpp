@@ -432,7 +432,8 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
 
     for (const Session& s : {idle, joined, hosting_no_code, hosting}) {
         CHECK(ActionFor(kRowSession, s) == (s.in_one ? RowAction::kViewSession : RowAction::kHost));
-        CHECK(ActionFor(kRowPlayers, s) == RowAction::kViewPlayers);
+        // (not in a session, the Players row is the games on this network, and Let in is auto-rejoin's switch)
+        CHECK(ActionFor(kRowPlayers, s) == (s.in_one ? RowAction::kViewPlayers : RowAction::kViewLan));
         CHECK(ActionFor(kRowLeave, s) == (s.in_one ? RowAction::kConfirmLeave : RowAction::kNone));
         CHECK(ActionFor(-1, s) == RowAction::kNone);              // (no row under the cursor)
         CHECK(ActionFor(kRows, s) == RowAction::kNone);
@@ -447,12 +448,12 @@ TEST_CASE("pause tab: each row leads to co-op's own part, by what co-op is doing
     CHECK(ActionFor(kRowLetIn, hosting) == RowAction::kViewLetIn);
     CHECK(ActionFor(kRowLetIn, hosting_no_code) == RowAction::kViewLetIn);
     CHECK(ActionFor(kRowLetIn, joined) == RowAction::kNone);
-    CHECK(ActionFor(kRowLetIn, idle) == RowAction::kNone);
+    CHECK(ActionFor(kRowLetIn, idle) == RowAction::kAutoRejoin);
     Session resync = joined;
     resync.can_resync = true;
     CHECK(ActionFor(kRowLetIn, resync) == RowAction::kResync);
-    idle.can_resync = true;   // (not in a session: nothing to resync from)
-    CHECK(ActionFor(kRowLetIn, idle) == RowAction::kNone);
+    idle.can_resync = true;   // (not in a session: nothing to resync from; the row is auto-rejoin's)
+    CHECK(ActionFor(kRowLetIn, idle) == RowAction::kAutoRejoin);
     idle.can_resync = false;
     // Each has words for the log.
     for (RowAction a : {RowAction::kNone, RowAction::kOpenMain, RowAction::kCopyCode, RowAction::kAllow,
@@ -501,8 +502,13 @@ TEST_CASE("pause tab: the invite code's two rows: the host's Paste answer, a wai
 
 TEST_CASE("pause tab: the rows say what co-op is doing, in at most a row's width") {
     SessionView idle;
-    CHECK(RowTexts(idle) == std::vector<std::string>{"Host a game", "Join a game", "Players", "Let in: when you host",
-                                                     "Leave (not in a session)"});
+    CHECK(RowTexts(idle) == std::vector<std::string>{"Host a game", "Join a game", "Games on this network",
+                                                     "Auto-rejoin: Off", "Leave (not in a session)"});
+    idle.s.auto_rejoin = true;
+    CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: On");
+    idle.s.rejoining = true;
+    CHECK(RowTexts(idle)[kRowLetIn] == "Auto-rejoin: On (trying...)");
+    idle.s.auto_rejoin = idle.s.rejoining = false;
 
     SessionView host;
     host.s.hosting = host.s.in_one = true;
@@ -1069,4 +1075,33 @@ TEST_CASE("pause tab: the focused row is the System button's number under it, by
     CHECK(RowOfButton("Pa_Button_010") == -1);
     CHECK(RowOfButton("N_SlideList_00") == -1);
     CHECK(RowOfButton("") == -1);
+}
+
+TEST_CASE("pause tab: the games on this network: one a row, A joins one that can be joined, more than four turn pages") {
+    Session s;
+    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kNone);   // (none heard yet)
+    s.lan_listed = 2;
+    s.lan_joinable = 0b01;   // (the second: full, or another version)
+    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kJoinLan);
+    CHECK(ActionFor(View::kLan, 1, s) == RowAction::kNone);
+    CHECK(ActionFor(View::kLan, kRows - 1, s) == RowAction::kBack);
+    s.lan_listed = 7;
+    s.lan_joinable = 0x7f;
+    CHECK(ActionFor(View::kLan, kRows - 2, s) == RowAction::kMoreLan);
+    s.lan_page = 2;   // (the third page of three: the 7th game on its first row)
+    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kJoinLan);
+    CHECK(ActionFor(View::kLan, 1, s) == RowAction::kNone);
+    s.in_one = true;   // (nobody joins from inside a session)
+    CHECK(ActionFor(View::kLan, 0, s) == RowAction::kNone);
+    SessionView v;
+    auto rows = RowTexts(View::kLan, v);
+    CHECK(rows[0] == "Looking for games...");
+    CHECK(rows[kRows - 1] == "Back");
+    v.lan_rows = {"Mido's game (1/4)", "Saria's game (full)"};
+    rows = RowTexts(View::kLan, v);
+    CHECK(rows[0] == "Mido's game (1/4)");
+    CHECK(rows[1] == "Saria's game (full)");
+    v.lan_rows = {"a", "b", "c", "d", "e"};
+    rows = RowTexts(View::kLan, v);
+    CHECK(rows[kRows - 2] == "More games (1/2)");
 }

@@ -76,6 +76,14 @@ void JoinPasteNow();
 void JoinRoomNow(const std::string& room, const std::string& password);
 // A relay is set in coop-options.ini (relay = ...): a room name can be joined through it.
 bool RelaySet();
+// Auto-rejoin (coop_auto_rejoin.h; coop-options.ini auto_rejoin): on or off, saved at once; and whether a dropped
+// connection is being tried again now.
+bool AutoRejoin();
+void SetAutoRejoin(bool on);
+bool AutoRejoining();
+// The page's "Games on this network": join the game at that address and port, with `password` (the Join view's,
+// "" none). Refused or failed: the menu opens, its note says why.
+void JoinLanNow(const std::string& address, std::uint16_t port, const std::string& password);
 void RejoinNow();
 // A last game's code is kept (coop.ini last_invite); its host's name into `host` (may be null; "" when not known).
 bool Rejoin(std::string* host);

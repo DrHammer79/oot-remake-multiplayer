@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Auto-rejoin's planner (hookshot/src/coop_auto_rejoin.h): when the last friend's game is joined again by itself.
+#include <doctest/doctest.h>
+
+#include "coop_auto_rejoin.h"
+
+using namespace CoopAutoRejoin;
+
+namespace {
+
+Facts IdleOn() {
+    Facts f;
+    f.enabled = f.code = f.idle = true;
+    return f;
+}
+
+}  // namespace
+
+TEST_CASE("auto-rejoin: once at the game's start, a few seconds in, with the setting on and a last game kept") {
+    Planner p;
+    const Facts f = IdleOn();
+    CHECK_FALSE(p.Tick(f, 1000));
+    CHECK_FALSE(p.Tick(f, 1000 + kStartDelayMs - 1));
+    CHECK(p.Tick(f, 1000 + kStartDelayMs));
+    CHECK(p.Why() == "at the game's start");
+    CHECK_FALSE(p.Tick(f, 1000 + kStartDelayMs + 100));   // (once)
+    CHECK_FALSE(p.Tick(f, 100000));
+}
+
+TEST_CASE("auto-rejoin: never with the setting off, no last game, or co-op from the game's start") {
+    for (int which = 0; which < 3; ++which) {
+        Planner p;
+        Facts f = IdleOn();
+        if (which == 0) f.enabled = false;
+        if (which == 1) f.code = false;
+        if (which == 2) f.launcher = true;
+        for (std::uint64_t t = 1000; t < 100000; t += 500) CHECK_FALSE(p.Tick(f, t));
+    }
+}
+
+TEST_CASE("auto-rejoin: the player's own Host or Join before the start's moment: no join of its own") {
+    Planner p;
+    Facts f = IdleOn();
+    p.Tick(f, 1000);
+    f.player_acted = true;
+    f.idle = false;
+    CHECK_FALSE(p.Tick(f, 2000));
+    f.player_acted = false;
+    f.idle = true;   // (the player's join failed: still nothing of ours)
+    CHECK_FALSE(p.Tick(f, 1000 + kStartDelayMs + 10));
+}
+
+TEST_CASE("auto-rejoin: a dropped connection is tried again, five times, further apart, until it is in") {
+    Planner p;
+    Facts f = IdleOn();
+    p.Tick(f, 1000);
+    f.idle = false, f.guest_in = true;   // (in the friend's game)
+    CHECK_FALSE(p.Tick(f, 2000));
+    f.idle = true, f.guest_in = false;   // (it dropped)
+    CHECK_FALSE(p.Tick(f, 10000));
+    CHECK_FALSE(p.Tick(f, 10000 + kFirstRetryMs - 1));
+    CHECK(p.Tick(f, 10000 + kFirstRetryMs));
+    CHECK(p.Why() == "the connection dropped (try 1 of 5)");
+    CHECK(p.Retrying());
+    std::uint64_t t = 10000 + kFirstRetryMs;
+    for (int i = 2; i <= kTries; ++i) {   // (each try failed: idle again)
+        CHECK_FALSE(p.Tick(f, t + kRetryMs - 1));
+        t += kRetryMs;
+        CHECK(p.Tick(f, t));
+    }
+    CHECK_FALSE(p.Tick(f, t + kRetryMs));   // (five tried: it stops)
+    CHECK_FALSE(p.Retrying());
+    CHECK_FALSE(p.Tick(f, t + 10 * kRetryMs));
+}
+
+TEST_CASE("auto-rejoin: a try that gets in stops the tries, and the player's Leave is not a drop") {
+    Planner p;
+    Facts f = IdleOn();
+    p.Tick(f, 1000);
+    f.idle = false, f.guest_in = true;
+    p.Tick(f, 2000);
+    f.idle = true, f.guest_in = false;
+    p.Tick(f, 3000);
+    CHECK(p.Tick(f, 3000 + kFirstRetryMs));
+    f.idle = false, f.guest_in = true;   // (back in)
+    CHECK_FALSE(p.Tick(f, 3000 + kFirstRetryMs + 500));
+    CHECK_FALSE(p.Retrying());
+    f.idle = true, f.guest_in = false, f.player_left = true;   // (the player left)
+    CHECK_FALSE(p.Tick(f, 20000));
+    f.player_left = false;
+    CHECK_FALSE(p.Tick(f, 20000 + kFirstRetryMs + 1));
+    CHECK_FALSE(p.Retrying());
+}
+
+TEST_CASE("auto-rejoin: turned off while a drop is tried: no more tries") {
+    Planner p;
+    Facts f = IdleOn();
+    p.Tick(f, 1000);
+    f.idle = false, f.guest_in = true;
+    p.Tick(f, 2000);
+    f.idle = true, f.guest_in = false;
+    p.Tick(f, 3000);
+    f.enabled = false;
+    CHECK_FALSE(p.Tick(f, 3000 + kFirstRetryMs));
+    f.enabled = true;
+    CHECK_FALSE(p.Tick(f, 3000 + kFirstRetryMs + kRetryMs));   // (the plan was dropped with the setting)
+}

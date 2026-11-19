@@ -19,6 +19,9 @@
 #include "common/logging.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
+#include "coop/protocol/messages.hpp"
+#include "coop_lan.h"
+#include "coop_lan_net.h"
 #include "coop_mod_screens.h"
 #include "coop_pause.h"
 #include "coop_runtime.h"
@@ -45,6 +48,7 @@ std::atomic<std::uint64_t> g_confirm_until{0};
 std::atomic<int> g_confirm_row{-1}, g_confirm_view{0};
 // The Players view's page, and the player whose view shows (their number; the views kPlayer, kPlayerHost).
 std::atomic<int> g_players_page{0}, g_player{0};
+std::atomic<int> g_lan_page{0};   // the games on this network: the view's page
 static_assert(kMuteVoice == CoopLobby::kVoice && kMuteChat == CoopLobby::kChat);
 // Panes found, per opening of a screen (Page::Track's number; a menu reopened at the same address is looked up again,
 // so no pane of a freed layout is used). *_ok: both looked up for that opening and parts; the page is usable only then.
@@ -320,6 +324,19 @@ SessionView ViewNow(View view) {
         v.own_mutes = p->own_mutes;
         v.host_mutes = p->host_mutes;
     }
+    if (view == View::kMain && !v.s.in_one && !v.s.by_launcher) {
+        v.s.auto_rejoin = CoopPause::AutoRejoin();
+        v.s.rejoining = v.s.auto_rejoin && CoopPause::AutoRejoining();
+    }
+    if (view == View::kLan) {
+        const auto games = CoopLanNet::Games(NowMs());
+        v.s.lan_listed = static_cast<int>(games.size());
+        v.s.lan_page = g_lan_page.load();
+        for (std::size_t i = 0; i < games.size(); ++i) {
+            v.lan_rows.push_back(CoopLan::RowText(games[i], coop::protocol::kProtocolVersion));
+            if (i < 32 && CoopLan::Joinable(games[i], coop::protocol::kProtocolVersion)) v.s.lan_joinable |= 1u << i;
+        }
+    }
     if (view == View::kJoin) {
         v.s.rejoin = CoopPause::Rejoin(&v.rejoin_host);
         v.relay_set = CoopPause::RelaySet();   // (co-op's own lock: before ours, never inside it)
@@ -589,6 +606,27 @@ void Act(int row) {
     case RowAction::kResync: CoopSave::RequestResync(); break;   // (the chat says how it goes)
     case RowAction::kDeny: CoopHook::SendChat("/deny"); break;   // (its answer shows in the chat)
     case RowAction::kJoinPaste: CoopPause::JoinPasteNow(); break;
+    case RowAction::kViewLan:
+        g_lan_page = 0;
+        SetView(View::kLan);
+        CoopLanNet::Look(true, NowMs());   // (the listener opens at once: the first games come within two seconds)
+        break;
+    case RowAction::kMoreLan: g_lan_page = g_lan_page.load() + 1; break;
+    case RowAction::kJoinLan: {
+        const auto games = CoopLanNet::Games(NowMs());
+        const int i = PlayerIndex(static_cast<int>(games.size()), v.s.lan_page, row);
+        if (i >= 0 && i < static_cast<int>(games.size())) {
+            std::string password;
+            {
+                std::lock_guard lock(g_mutex);
+                password = g_page.Field(1).text();   // (the Join view's password, if typed)
+            }
+            const CoopLan::Heard& h = games[static_cast<std::size_t>(i)];
+            CoopPause::JoinLanNow(h.address, h.game.port, password);
+        }
+        break;
+    }
+    case RowAction::kAutoRejoin: CoopPause::SetAutoRejoin(!CoopPause::AutoRejoin()); break;
     case RowAction::kTypeRoom:
     case RowAction::kTypePassword: {
         std::lock_guard lock(g_mutex);
@@ -708,6 +746,10 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             if (!KeepConfirm(true, focused, g_confirm_row.load())) g_confirm_until = 0;   // (the cursor left that row)
             // (after our lock: the status and the Lobby take their own; read only when the rows are due)
             if (LiveDue(gen)) LiveRows(ctx, f.layout, gen, ViewNow(ViewShown()));
+        }
+        // (the games on this network heard while their view shows; the listener closes a while after)
+        if (f.kind == Kind::kPages) {
+            CoopLanNet::Look(now_shown && ViewShown() == View::kLan, NowMs());
         }
         if (early_live && calls && LiveDue(g_pages_gen)) LiveRows(ctx, g_pages_layout, g_pages_gen, ViewNow(ViewShown()));
         if (!now_shown) g_confirm_until = 0;
