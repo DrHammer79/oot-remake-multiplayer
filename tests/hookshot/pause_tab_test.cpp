@@ -1574,7 +1574,7 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
         all.push_back(r);
     }
     SettingRow vol;
-    vol.key = "volume", vol.name = "Volume", vol.text = "80", vol.tab = "Audio", vol.lo = 0, vol.hi = 100, vol.step = 5;
+    vol.key = "volume", vol.name = "Volume", vol.text = "80", vol.tab = "audio", vol.lo = 0, vol.hi = 100, vol.step = 5;   // (Longshot's: lower case)
     vol.value = 80;
     all.push_back(vol);
     SettingRow dbg;

@@ -3,6 +3,7 @@
 #include "coop_pause_tab.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <utility>
@@ -1056,8 +1057,15 @@ std::string ListValue(int players, int max, bool same_version) {
 std::vector<SettingRow> SettingsOf(const std::vector<SettingRow>& all, int category) {
     std::vector<SettingRow> out;
     if (category < 0 || category >= kRows) return out;
+    // (Longshot names its tabs in lower case, "graphics": the match ignores case)
+    const std::string want = kSettingTabs[static_cast<std::size_t>(category)];
+    const auto same = [](const std::string& a, const std::string& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+                   return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+               });
+    };
     for (const SettingRow& r : all) {
-        if (r.tab == kSettingTabs[static_cast<std::size_t>(category)]) out.push_back(r);
+        if (same(r.tab, want)) out.push_back(r);
     }
     return out;
 }
