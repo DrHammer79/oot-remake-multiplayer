@@ -512,6 +512,9 @@ inline constexpr std::size_t kListNameChars = 30, kListValueChars = 16;   // (th
 std::vector<ListLine> ListLines(const SessionView& v);
 // What a game's right column says: "2/4", "Full", "Other version" (it cannot be joined from here).
 std::string ListValue(int players, int max, bool same_version);
+// What a room's left column says: the name its host listed it under (the room name unless they picked one), with the
+// room name after it when that is another: "Saria's forest (forest-gang)".
+std::string ListName(const std::string& shown, const std::string& room);
 
 // --- The Settings page (the sixth tab): Longshot's own options, from its Insert menu ---
 // The page's five rows are the categories, Longshot's menu's tabs (its Debug tab and the FPS counter's developer rows

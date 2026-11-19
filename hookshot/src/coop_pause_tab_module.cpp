@@ -407,7 +407,7 @@ SessionView ViewNow(View view) {
         const CoopRoomList::Snapshot rooms = CoopRoomList::Now();
         for (const CoopRoomList::Room& r : rooms.rooms) {
             v.online_rows.push_back(CoopRoomList::CellText(r, coop::protocol::kProtocolVersion));
-            v.online_list.push_back(ListLine{r.room + " (" + r.host + ")",
+            v.online_list.push_back(ListLine{ListName(r.host, r.room),
                                              ListValue(r.players, r.max, r.protocol == coop::protocol::kProtocolVersion)});
         }
         v.online_state = rooms.state;

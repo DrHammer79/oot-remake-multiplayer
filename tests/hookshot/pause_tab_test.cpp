@@ -1175,7 +1175,7 @@ TEST_CASE("pause tab: the game browser: the rows choose the list and its page, t
     rows = RowTexts(View::kLan, v);
     CHECK(rows[0] == "Local games (2)");
     CHECK(rows[1] == "Online games (0)");
-    CHECK(ListLines(v)[0].name == "Room (host)");
+    CHECK(ListLines(v)[0].name == "Game");
     CHECK(ListLines(v)[1].name == "No relay set");
     v.online_state.clear();
     v.online_rows.assign(10, "kokiri (1/4)");
@@ -1204,6 +1204,11 @@ TEST_CASE("pause tab: the game browser: the rows choose the list and its page, t
     CHECK(ListValue(4, 4, true) == "Full");
     CHECK(ListValue(1, 4, false) == "Other version");
     CHECK(ListValue(3, 0, true) == "3");
+    // A room: the name its host listed it under, with the room name after it when that is another.
+    CHECK(ListName("forest-gang", "forest-gang") == "forest-gang");
+    CHECK(ListName("Forest-Gang", "forest-gang") == "Forest-Gang");   // (the same room name in another case)
+    CHECK(ListName("", "forest-gang") == "forest-gang");
+    CHECK(ListName("Saria's forest", "forest-gang") == "Saria's forest (forest-gang)");
 }
 
 TEST_CASE("pause tab: the browser's list: up and down among its games, Left to the rows, the row under the mouse") {
