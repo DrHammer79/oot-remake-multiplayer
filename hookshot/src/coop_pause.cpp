@@ -222,6 +222,9 @@ CoopPauseMenu::Session SessionNow() {
     if (s.hosting) {
         s.players = st.players;
         s.code = ShareCode(st);
+        // (the Host page's Join password row, shown on A, and its Let in and Refuse rows; the password is never logged)
+        if (st.state == HOS_COOP_HOSTING) s.password.assign(st.password, strnlen(st.password, sizeof st.password));
+        s.asking = CoopLobby::Asking();
     } else {
         s.players = static_cast<int>(CoopHook::PlayerList().size());
         s.code = st.state == HOS_COOP_WAIT_HOST ? st.answer : "";
@@ -579,6 +582,7 @@ void Save() {
     MicRows();   // (voice just turned on: the Microphone row's list)
     CoopHookshot::SetChatKey(g_menu.options().chat_key);   // the chat key too
     CoopHookshot::SetMapOptions(g_menu.options().map_players, g_menu.options().map_names);   // at once too
+    g_auto_rejoin_on = g_menu.options().auto_rejoin;   // (the Auto-rejoin row: counts at once, as the files have it now)
     LOG_INFO(Core, "coop: multiplayer tab: settings saved{}{}", ok ? "" : " (a file could not be written)",
              kit ? "" : " (no kit found: coop.ini only)");
     std::vector<std::string> note;
@@ -750,6 +754,38 @@ void Act(const Request& r) {
     case Request::Kind::kSaveSet:   // (Navi) solo or multiplayer saves (coop_save.h)
         g_menu.SetNote({CoopSave::ChooseSaveSet(r.text == "multiplayer")});
         g_menu.SetSaveSet(CoopSave::MultiplayerSaves());
+        break;
+    case Request::Kind::kSetPassword: {   // (the host's new join password, typed on the Host page: never logged)
+        const bool taken = CoopHookshot::HostMenu().SetPassword(r.text.c_str()) != 0;
+        LOG_INFO(Core, "coop: multiplayer tab: host: a new join password typed: {}", taken ? "handed to the host" : "not taken");
+        if (taken) {
+            g_menu.SetNote({"New join password: players who join from now on need it."});
+        } else {
+            const HosCoopStatus st = Status();   // (why, in plain words: the status' message)
+            const std::string why(st.message, strnlen(st.message, sizeof st.message));
+            g_menu.SetNote({"The join password was not changed.", why});
+        }
+        RefreshSession(true);
+        break;
+    }
+    case Request::Kind::kAllow:
+    case Request::Kind::kDeny: {   // (as the chat's /allow and /deny: the oldest asking; the chat says what came of it)
+        const bool allow = r.kind == Request::Kind::kAllow;
+        const bool sent = CoopHook::SendChat(allow ? "/allow" : "/deny");
+        LOG_INFO(Core, "coop: multiplayer tab: host: {} the player asking to join{}", allow ? "let in" : "turned away",
+                 sent ? "" : " (not sent)");
+        g_menu.SetNote({!sent  ? std::string("Not sent: co-op is not connected.")
+                        : allow ? "Letting " + r.text + " in."
+                                : r.text + " was turned away."});
+        RefreshSession(true);
+        break;
+    }
+    case Request::Kind::kRefreshFound:   // (the Find page's list asked again: the relay's rooms, or this network's games)
+        if (g_menu.find_online()) {
+            CoopRoomList::AskNow();
+        } else {
+            CoopLanNet::Forget();
+        }
         break;
     case Request::Kind::kNgPlus: {   // (Navi) New Game+ (coop_ngplus.h)
         CoopNgPlus::SetLevel(std::atoi(r.text.c_str()));

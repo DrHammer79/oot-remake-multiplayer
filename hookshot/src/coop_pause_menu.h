@@ -59,11 +59,14 @@ struct Request {
     // controller / keyboard (CoopInput::CycleController / CycleKeyboard),
     // applied and saved by the module, which then hands the new rows back
     // (SetInputRows). kLookParts: look() is the look chosen on the Customize
-    // page (coop_look_menu.h); worn when the menu closes.
+    // page (coop_look_menu.h); worn when the menu closes. kSetPassword: `text` is the host's new join password
+    // (CoopHostMenu::Menu::SetPassword; never logged). kAllow / kDeny: the oldest player asking to join let in or
+    // turned away (the chat's /allow, /deny); `text` is their name. kRefreshFound: the Find page's list asked again.
     enum class Kind { kHost, kJoin, kLeave, kSave, kLook, kPaste, kCopyInvite, kPasteAnswer, kCopyAnswer, kCopyLan,
                       kController, kKeyboard, kLookParts, kCopyVpn,
                       kNgPlus,     // (Navi) kNgPlus: `text` is the New Game+ level chosen (coop_ngplus.h)
-                      kSaveSet };  // (Navi) kSaveSet: `text` "multiplayer" or "solo" (CoopSave::ChooseSaveSet)
+                      kSaveSet,    // (Navi) kSaveSet: `text` "multiplayer" or "solo" (CoopSave::ChooseSaveSet)
+                      kSetPassword, kAllow, kDeny, kRefreshFound };
     Kind kind = Kind::kHost;
     std::string text;
 };
@@ -85,6 +88,8 @@ struct Session {
     int players = 0;           // in the session, this one included (0: not known)
     std::string code;          // the invite code (hosting), or the answer code (kWaitHost)
     std::vector<std::string> lines;   // what it is doing or what went wrong, in plain words
+    std::string password;      // the host's join password while it hosts ("" none): shown on A, never logged
+    std::vector<std::string> asking;  // who asks to join this host now, oldest first (CoopLobby::Asking)
 
     bool operator==(const Session&) const = default;
 };
@@ -207,7 +212,8 @@ private:
         kName, kLook, kPlayers, kVoice, kMic, kVoiceMode, kChatKey, kController, kKeyboard, kMapPlayers, kMapNames,
         kSameNetwork,
         kOpenCustomize, kNgPlus, kSaveSet,
-        kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort
+        kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
+        kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin
     };
     struct Line;   // a row, what it does and its help
     std::vector<Line> Lines() const;
@@ -232,6 +238,8 @@ private:
     bool typing_fresh_ = false;
     bool replace_typed_ = false;   // the Join field was opened with a code in it: a typed character starts a new one
     bool confirm_leave_ = false;   // Stop hosting / Leave was pressed once: the next press does it
+    bool show_password_ = false;   // the Host page shows the join password (A on its row; hidden on another page)
+    std::string new_password_;     // Change join password, while typed (handed to the host on Enter, then cleared)
     CoopTitleMenu::Options options_;
     std::string name_before_;      // the name as it was when its typing began
     std::string port_text_;        // port buffer while typing Host / Join Port

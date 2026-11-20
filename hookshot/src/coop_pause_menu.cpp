@@ -37,6 +37,33 @@ std::string Masked(const std::string& password) {
     return std::string(CodePoints(password), '*');
 }
 
+// The host's own join password as its row shows it on A: ten characters a line in two groups of five, at most three
+// lines (a longer one cut with "..." on its third), so each line fits a row's value.
+std::vector<std::string> PasswordLines(const std::string& password) {
+    std::vector<std::string> chars;
+    for (std::size_t i = 0; i < password.size();) {
+        std::size_t n = 1;
+        while (i + n < password.size() && (static_cast<unsigned char>(password[i + n]) & 0xC0) == 0x80) ++n;
+        chars.push_back(password.substr(i, n));
+        i += n;
+    }
+    std::vector<std::string> out;
+    for (std::size_t c = 0; c < chars.size() && out.size() < 3; c += 10) {
+        std::string line;
+        for (std::size_t k = c; k < chars.size() && k < c + 10; ++k) {
+            if (k > c && (k - c) % 5 == 0) line += ' ';
+            line += chars[k];
+        }
+        if (out.size() == 2 && chars.size() > 30) line += "...";
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+const char* const kJoinPasswordHelp =
+    "Your join password: friends type it with your room name or address. A shows it in groups of five, A again "
+    "hides it. Share it in DMs only.";
+
 std::string Joined(const std::vector<std::string>& lines) {
     std::string out;
     for (const std::string& line : lines) {
@@ -250,6 +277,17 @@ std::vector<Menu::Line> Menu::Lines() const {
         if (session_.by_launcher) {
             LauncherLines(out);
         } else if (host) {
+            // (who asks to join, the oldest first: let in or turned away here as with /allow and /deny in the chat)
+            if (session_.state == State::kHosting && !session_.asking.empty()) {
+                const std::string& who = session_.asking.front();
+                out.push_back({Action("Let in " + who, "Allow"), Act::kLetIn,
+                               who + " asks to join your game. Lets them in, as /allow in the chat does."});
+                out.push_back({Action("Refuse " + who, "Refuse"), Act::kRefuse,
+                               "Turns " + who + " away, as /deny in the chat does. They can ask again."});
+                if (session_.asking.size() > 1) {
+                    out.push_back({Note("+" + std::to_string(session_.asking.size() - 1) + " more ask"), Act::kNone, {}});
+                }
+            }
             out.push_back({Action("Copy the code again", "Copy", session_.code.empty()), Act::kCopyInvite,
                            "Puts your code on the clipboard again. Share it in DMs only: it contains your internet address."});
             out.push_back({Action("Paste friend's answer (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
@@ -261,6 +299,21 @@ std::vector<Menu::Line> Menu::Lines() const {
             out.push_back({Action("VPN", "Copy the line"), Act::kCopyVpn,
                            "For friends on a VPN with you (Radmin VPN, Hamachi, ZeroTier, Tailscale, WireGuard): copies one "
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
+            if (session_.state == State::kHosting && !session_.password.empty()) {
+                if (!show_password_) {
+                    out.push_back({Action("Join password", "Hidden"), Act::kShowPassword, kJoinPasswordHelp});
+                } else {
+                    const std::vector<std::string> shown = PasswordLines(session_.password);
+                    for (std::size_t i = 0; i < shown.size(); ++i) {
+                        out.push_back({Action(i == 0 ? "Join password" : "", shown[i]), Act::kShowPassword, kJoinPasswordHelp});
+                    }
+                }
+                const bool typing_password = typing_ && typing_act_ == Act::kNewPassword;
+                out.push_back({Action("Change join password", typing_password ? Masked(new_password_) + "_" : "Type"),
+                               Act::kNewPassword,
+                               "A new join password, typed on the keyboard; Enter gives it to your game. Players who "
+                               "join from now on need it; players already in stay. No spaces, at most 128 characters."});
+            }
             out.push_back({Action("Port", port_value), Act::kHostPort, kHostPortHelp});
             out.push_back({Action("Stop hosting", confirm_leave_ ? "Press again to confirm" : "Stop"), Act::kLeave,
                            "Ends your game for everyone in it."});
@@ -345,6 +398,10 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "your version."});
         out.push_back({Choice("Sort", CoopBrowse::SortWords(find_sort_)), Act::kFindSort,
                        "The most players first, the fewest first, or by name."});
+        out.push_back({Action("Refresh", "Ask again"), Act::kFindRefresh,
+                       find_online_ ? "Asks the relay for its public rooms again."
+                                    : "Forgets the games heard and listens again: the ones still hosting come back "
+                                      "within 2 seconds."});
         const std::vector<Found> games = FoundShown();
         for (const Found& g : games) {
             out.push_back({Action(g.name, g.players, !g.joinable), Act::kFindGame,
@@ -409,6 +466,12 @@ std::vector<Menu::Line> Menu::Lines() const {
                        Act::kRoom,
                        "Your room's name on the relay when you host: 3 to 24 letters, digits, - or _. Friends type "
                        "it to join. Empty: a join code instead."});
+        out.push_back({Toggle("List my room", options_.list_room), Act::kListRoom,
+                       "When you host with a room name, the room shows on your relay's public list (Browse games), so "
+                       "players can pick it. Never your join password. Off: only players who know the name find it."});
+        out.push_back({Toggle("Auto-rejoin", options_.auto_rejoin), Act::kAutoRejoin,
+                       "Joins your last friend's game again by itself: a few seconds after the game starts, and when "
+                       "the connection drops without you leaving. Off: you join again yourself."});
         out.push_back({Choice("Password on this network", options_.same_network_password ? "Needed" : "Not needed"),
                        Act::kSameNetwork,
                        "When you host, players on your own network (behind the same router) join without the join "
@@ -496,6 +559,9 @@ bool Menu::Selectable(const Line& line) const {
 }
 
 void Menu::Go(Page page, Act select) {
+    if (page != page_) {
+        show_password_ = false;   // (another page: the join password hidden again)
+    }
     page_ = page;
     typing_ = false;
     typing_act_ = Act::kNone;
@@ -558,6 +624,7 @@ void Menu::Show(const CoopTitleMenu::Options& options) {
 void Menu::Hide() {
     EndTyping(false);
     confirm_leave_ = false;
+    show_password_ = false;
     note_.clear();
 }
 
@@ -594,6 +661,10 @@ void Menu::SetSession(Session session) {
         typing_act_ = Act::kNone;
         typing_fresh_ = false;
         port_text_.clear();
+        new_password_.clear();
+    }
+    if (session_.password.empty()) {
+        show_password_ = false;   // (hosting stopped: a password shown later is shown on A again)
     }
     // The same row selected when it is still there (the rows of Host and Join change with the session).
     const auto same = std::find_if(after.begin(), after.end(), [act](const Line& l) { return l.act == act; });
@@ -669,6 +740,7 @@ std::string* Menu::Typed() {
     case Act::kJoinIp: return &join_ip_;
     case Act::kJoinPassword: return &join_password_;
     case Act::kFindSearch: return &find_search_;
+    case Act::kNewPassword: return &new_password_;
     case Act::kHostPort:
     case Act::kJoinPort: return &port_text_;
     default: break;
@@ -766,6 +838,26 @@ void Menu::EndTyping(bool keep) {
                                         : "Room name: 3 to 24 letters, digits, - or _. It was not changed."};
         }
         field = name_before_;
+        return;
+    }
+    if (act == Act::kNewPassword) {   // (never kept here: handed to the host on Enter, else dropped)
+        const std::string typed(Trim(new_password_));
+        new_password_.clear();
+        if (!keep) {
+            return;
+        }
+        if (typed.empty() || !CoopTitleMenu::PasswordOk(typed)) {
+            note_ = {typed.empty() ? "Join password: type the new one first. It was not changed."
+                                   : "Join password: no spaces, at most 128 characters. It was not changed."};
+            return;
+        }
+        request_ = Request{Request::Kind::kSetPassword, typed};
+        show_password_ = true;   // (the new one shown, once the host takes it; the selection stays on this row)
+        const auto lines = Lines();
+        const auto same = std::find_if(lines.begin(), lines.end(), [](const Line& l) { return l.act == Act::kNewPassword; });
+        if (same != lines.end()) {
+            selected_ = static_cast<std::size_t>(same - lines.begin());
+        }
         return;
     }
     if (act == Act::kFindSearch) {   // (the list follows it; Esc: the search as it was)
@@ -959,7 +1051,7 @@ bool Menu::Press(Input input) {
         case Input::kDown:
         {
             const bool to_join = act == Act::kCode && !Trim(join_).empty();
-            EndTyping(true);
+            EndTyping(act != Act::kNewPassword);   // (a new join password goes to the host on Enter only)
             if (to_join) {
                 Go(Page::kJoin, Act::kJoinNow);
             } else {
@@ -1172,6 +1264,35 @@ void Menu::Decide(Act act) {
     case Act::kFindSort:
         Change(act, 1);
         break;
+    case Act::kFindRefresh:   // (the list empties; the module asks again and hands the new one, SetFound)
+        found_.clear();
+        found_state_.clear();
+        request_ = Request{Request::Kind::kRefreshFound, {}};
+        Clamp();
+        break;
+    case Act::kShowPassword: {
+        show_password_ = !show_password_;
+        const auto lines = Lines();   // (on the row's first line, however many it has now)
+        const auto first =
+            std::find_if(lines.begin(), lines.end(), [](const Line& l) { return l.act == Act::kShowPassword; });
+        if (first != lines.end()) {
+            selected_ = static_cast<std::size_t>(first - lines.begin());
+        }
+        Clamp();
+        break;
+    }
+    case Act::kNewPassword:
+        new_password_.clear();
+        typing_ = true;
+        typing_act_ = Act::kNewPassword;
+        typing_fresh_ = false;
+        break;
+    case Act::kLetIn:
+    case Act::kRefuse:
+        if (!session_.asking.empty()) {
+            request_ = Request{act == Act::kLetIn ? Request::Kind::kAllow : Request::Kind::kDeny, session_.asking.front()};
+        }
+        break;
     case Act::kFindSearch:
         search_before_ = find_search_;
         typing_ = true;
@@ -1225,6 +1346,8 @@ void Menu::Decide(Act act) {
     case Act::kMapPlayers:
     case Act::kMapNames:
     case Act::kSameNetwork:
+    case Act::kListRoom:
+    case Act::kAutoRejoin:
         Change(act, 0);   // (a toggle: A flips it)
         break;
     case Act::kNone:
@@ -1308,6 +1431,14 @@ void Menu::Change(Act act, int step) {
         options_.map_names = step > 0 ? true : step < 0 ? false : !options_.map_names;
         request_ = Request{Request::Kind::kSave, {}};
         break;
+    case Act::kListRoom:
+        options_.list_room = step > 0 ? true : step < 0 ? false : !options_.list_room;
+        request_ = Request{Request::Kind::kSave, {}};
+        break;
+    case Act::kAutoRejoin:
+        options_.auto_rejoin = step > 0 ? true : step < 0 ? false : !options_.auto_rejoin;
+        request_ = Request{Request::Kind::kSave, {}};
+        break;
     case Act::kSaveSet:   // (Navi) two choices: either arrow flips it
         mp_saves_ = !mp_saves_;
         request_ = Request{Request::Kind::kSaveSet, mp_saves_ ? "multiplayer" : "solo"};
@@ -1369,7 +1500,7 @@ void Menu::Click(std::size_t row, int side) {
         return;
     }
     if (typing_ && row != selected_) {
-        EndTyping(true);
+        EndTyping(typing_act_ != Act::kNewPassword);   // (a new join password goes to the host on Enter only)
         return;   // (the click ended the typing; the next one chooses)
     }
     selected_ = row;
@@ -1419,10 +1550,14 @@ bool Menu::Char(std::uint32_t cp) {
     if (typing_act_ == Act::kRelay && (add.size() != 1 || add[0] == ' ')) {
         return true;   // (a relay line: no spaces, plain characters)
     }
+    if (typing_act_ == Act::kNewPassword && add == " ") {
+        return true;   // (a join password has no spaces)
+    }
     const std::size_t max_bytes = typing_act_ == Act::kRoom || typing_act_ == Act::kFindSearch ? 24
                                   : typing_act_ == Act::kRelay         ? 128
                                   : typing_act_ == Act::kJoinIp        ? kMaxIpBytes
-                                  : typing_act_ == Act::kJoinPassword ? CoopTitleMenu::kMaxPasswordBytes
+                                  : typing_act_ == Act::kJoinPassword || typing_act_ == Act::kNewPassword
+                                      ? CoopTitleMenu::kMaxPasswordBytes
                                                                       : kMaxJoinBytes;
     if (typing_act_ == Act::kName ? CodePoints(*t) >= CoopTitleMenu::kMaxNameChars : t->size() + add.size() > max_bytes) {
         return true;
@@ -1462,6 +1597,12 @@ bool Menu::Paste(std::string_view text) {
         EndTyping(true);
         if (note_.empty() && !Trim(join_).empty()) {
             Go(Page::kJoin, Act::kJoinNow);
+        }
+        return true;
+    }
+    if (typing_ && typing_act_ == Act::kNewPassword) {   // (in place of what was typed; Enter gives it to the host)
+        if (!line.empty()) {
+            new_password_ = line.substr(0, Utf8Start(line, std::min(line.size(), CoopTitleMenu::kMaxPasswordBytes)));
         }
         return true;
     }
@@ -1627,7 +1768,7 @@ View Menu::view() const {
             const bool typed_row = line->act == Act::kName || line->act == Act::kHostPort ||
                                    line->act == Act::kRelay || line->act == Act::kRoom ||
                                    line->act == Act::kJoinIp || line->act == Act::kJoinPort ||
-                                   line->act == Act::kJoinPassword;
+                                   line->act == Act::kJoinPassword || line->act == Act::kNewPassword;
             v.confirm = line->row.value.empty() || line->row.right ? "Open" : typed_row ? "Type" : "Choose";
         } else {
             v.change = "Change";
