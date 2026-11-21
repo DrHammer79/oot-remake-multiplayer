@@ -104,7 +104,6 @@ struct Options {
     std::string voice_key = "V";   // LICHII_COOP_VOICE_KEY as the Voice mode row names it (read only)
     std::string voice_mic;         // LICHII_COOP_VOICE_MIC: the voice's microphone by its name ("": the game's)
     bool map_players = true;       // LICHII_COOP_MAP (0: no other players on the minimap and the pause map)
-    std::string hud_size = "auto"; // LICHII_COOP_HUD_SIZE: the player list on the left (auto, full, compact, off)
     bool map_names = true;         // LICHII_COOP_MAP_NAMES (0: their icons without names)
     std::string relay = kDefaultRelay;   // relay (host and join rooms through it, Host.bat's too; kDefaultRelay without a
                                    // line; Co-op Settings' Relay row writes it)

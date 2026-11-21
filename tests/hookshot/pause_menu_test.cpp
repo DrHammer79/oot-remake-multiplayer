@@ -597,7 +597,7 @@ TEST_CASE("pause tab: Settings: name, Link's look, players and voice chat (off u
     CHECK(Names(m) == std::vector<std::string>{"Your name", "Link's look", "Players when you host",
                                                "Port when you host", "Relay", "Room name", "List my room", "Auto-rejoin",
                                                "Password on this network",
-                                               "Proximity voice chat", "Chat key", "Show players on map", "Names on map", "Player list", "New Game+",
+                                               "Proximity voice chat", "Chat key", "Show players on map", "Names on map", "New Game+",
                                                "Saves", "Original game"});   // (no patch 0015: no input rows)
     View v = m.view();
     CHECK(v.rows[0].value == "Saria");
@@ -681,7 +681,7 @@ TEST_CASE("pause tab: Settings: players on the map and their names, on unless tu
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
     View v = m.view();
-    REQUIRE(v.rows.size() == 17);   // (the port, relay, room, network password and chat key rows before them, New Game+, Saves and Original game after)
+    REQUIRE(v.rows.size() == 16);   // (the port, relay, room, network password and chat key rows before them, New Game+, Saves and Original game after)
     CHECK(v.rows[11].kind == RowKind::kToggle);
     CHECK(v.rows[11].on);
     CHECK(v.rows[12].on);
@@ -849,7 +849,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
                                                "Port when you host", "Relay", "Room name", "List my room", "Auto-rejoin",
                                                "Password on this network",
                                                "Proximity voice chat", "Chat key", "Controller",
-                                               "Keyboard and mouse", "Show players on map", "Names on map", "Player list",
+                                               "Keyboard and mouse", "Show players on map", "Names on map",
                                                "New Game+", "Saves", "Original game"});
     SelectRow(m, "Controller");
     View v = m.view();
@@ -875,7 +875,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(r->kind == Request::Kind::kKeyboard);
     // gone again (the module found no patch 0015): the selection stays on a row there is
     m.SetInputRows({}, {});
-    CHECK(Names(m).size() == 17);   // (with the port, the relay and room rows, the network password, two map rows, New Game+, Saves and Original game)
+    CHECK(Names(m).size() == 16);   // (with the port, the relay and room rows, the network password, two map rows, New Game+, Saves and Original game)
     CHECK_FALSE(Selected(m).empty());
 }
 
@@ -1664,7 +1664,7 @@ TEST_CASE("pause tab: Customize Link with a Character Select character picked sa
     CHECK(m.view().help == own);
 }
 
-TEST_CASE("pause tab: Settings: A, Left and Right on Original game and Player list (d501ce95: A did nothing on Original)") {
+TEST_CASE("pause tab: Settings: A, Left and Right on Original game (d501ce95: A did nothing on Original)") {
     Menu m;
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
@@ -1686,19 +1686,7 @@ TEST_CASE("pause tab: Settings: A, Left and Right on Original game and Player li
     m.Press(Input::kLeft);
     CHECK_FALSE(m.options().original_game);
     CHECK(m.TakeRequest()->kind == Request::Kind::kSave);
-
-    SelectRow(m, "Player list");
-    CHECK(RowNamed(m.view(), "Player list")->value == "Auto");   // (the default)
-    for (const char* next : {"Full", "Compact", "Off", "Auto"}) {   // A steps on, round
-        m.Press(Input::kDecide);
-        CHECK(m.TakeRequest()->kind == Request::Kind::kSave);
-        CHECK(RowNamed(m.view(), "Player list")->value == next);
-    }
-    m.Press(Input::kLeft);   // Left steps back
-    CHECK(RowNamed(m.view(), "Player list")->value == "Off");
-    CHECK(m.options().hud_size == "off");
-    m.Press(Input::kRight);
-    CHECK(m.options().hud_size == "auto");
+    CHECK(RowNamed(m.view(), "Player list") == nullptr);   // (0.11.8's drawn player list size: removed)
 }
 
 TEST_CASE("pause tab: Settings: Original game, A flips it and asks for a save") {

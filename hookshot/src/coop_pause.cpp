@@ -710,8 +710,7 @@ void Save() {
     CoopVoice::SetMicrophone(g_menu.options().voice_mic);   // and its microphone
     MicRows();   // (voice just turned on: the Microphone row's list)
     CoopHookshot::SetChatKey(g_menu.options().chat_key);   // the chat key too
-    CoopHookshot::SetMapOptions(g_menu.options().map_players, g_menu.options().map_names);
-    CoopHookshot::SetHudSize(g_menu.options().hud_size);   // (the player list: at once)   // at once too
+    CoopHookshot::SetMapOptions(g_menu.options().map_players, g_menu.options().map_names);   // at once too
     g_auto_rejoin_on = g_menu.options().auto_rejoin;   // (the Auto-rejoin row: counts at once, as the files have it now)
     {   // Original game (coop_original.h): the mods list follows the switch now; the rest counts from the next start
         std::string why;

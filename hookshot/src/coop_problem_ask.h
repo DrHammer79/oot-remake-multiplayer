@@ -8,7 +8,10 @@
 // game folder (host/hos_crash_dialog.h, hos_crash_record_name: crash-YYYYMMDDTHHMMSSZ[-<pid>-<n>].txt). An "unclean-"
 // record (the game ended without its own exit: a closed console, a split screen's instance stopped, a power cut) is not
 // asked about: those are mostly not problems. Which records were asked about: bug-reports/coop-asked.txt (ours; Longshot's
-// own shown.txt is left alone).
+// own shown.txt is left alone). A crash the kit has already sent to us (the player said yes to sending problem reports:
+// tools/release/kit/scripts/problem-send.ps1, linux-longshot/scripts/problem_report.py) is not asked about either: the kit
+// lists it in bug-reports/coop-sent.txt (a name a line) once the bot took the report. With sending off the file is never
+// written, and the ask stays as it was.
 //
 // Logic only, plus the two files (tests/hookshot/problem_ask_test.cpp).
 #pragma once
@@ -48,6 +51,8 @@ inline constexpr std::array<const char*, 4> kWords{"The game crashed last time."
 // written whole ("" when it is not there; false when it could not be written).
 std::vector<std::string> PendingNames(const std::filesystem::path& game_folder);
 std::string ReadAsked(const std::filesystem::path& game_folder);
+// bug-reports/coop-sent.txt, the kit's (read only here): "" when it is not there. Due() takes it with coop-asked.txt.
+std::string ReadSent(const std::filesystem::path& game_folder);
 bool WriteAsked(const std::filesystem::path& game_folder, const std::string& text);
 
 }  // namespace CoopProblemAsk

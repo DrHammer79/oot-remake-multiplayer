@@ -734,12 +734,73 @@ TEST_CASE("objects: Business Scrubs are each game's own shop (GitHub 253)") {
 }
 
 TEST_CASE("objects: Jabu-Jabu's child Ruto is each game's own, so a carried Ruto is never put down by a copy (#64)") {
-    CHECK(CoopObjects::IsOwnPuzzle("Npc_Zora_Ruto_Child_001"));
-    CHECK_FALSE(CoopObjects::IsShared("Npc_Zora_Ruto_Child_001"));
+    for (const char* ruto : {"Npc_Zora_Ruto_Child_001", "Npc_Zora_Ruto_Child_002"}) {
+        CHECK_MESSAGE(CoopObjects::IsOwnFollower(ruto), ruto);
+        CHECK_FALSE_MESSAGE(CoopObjects::IsShared(ruto), ruto);
+    }
     // Other Zoras, and adult Ruto, stay shared NPCs.
     CHECK(CoopObjects::IsShared("Npc_Zora_ZU_001"));
     CHECK(CoopObjects::IsShared("Npc_Zora_Ruto_Adult_001"));
-    CHECK_FALSE(CoopObjects::IsOwnPuzzle("Npc_Zora_Ruto_Adult_001"));
+    CHECK_FALSE(CoopObjects::IsOwnFollower("Npc_Zora_Ruto_Adult_001"));
+}
+
+TEST_CASE("objects: every actor whose AI goes with the local Link is each game's own (row 214)") {
+    // From the romfs AI scan (docs/objects.md "Followers"): the escape's Zelda waits for the player on her rail,
+    // the dogs follow the player, the horses come to the Link that calls them.
+    for (const char* own : {"Npc_Hylia_Zelda_Adult", "Npc_Hylia_Zelda_Adult_Scalable", "Animal_Dog_Brown",
+                            "Animal_Dog_White", "Animal_Dog_Richard_01", "Animal_Dog_Richard_03", "Animal_Dog_Base",
+                            "Animal_Epona_Adult", "Animal_Epona_Child", "Animal_Horse", "Animal_Horse_For_Ingo",
+                            "Npc_Hylia_Dampe_002"}) {
+        CHECK_MESSAGE(CoopObjects::IsOwnFollower(own), own);
+        CHECK_FALSE_MESSAGE(CoopObjects::IsShared(own), own);
+    }
+    // Not followers: they stay shared (child Zelda in the courtyard, Sheik, the wagon and archery horses, the
+    // cuccos with their carry claim, Pierre and the shop clerks who only turn to the Link).
+    for (const char* shared : {"Npc_Hylia_Zelda_Child", "Npc_Hylia_Sheik_Adult", "Animal_Horse_Wagon",
+                               "Animal_Horse_Archery", "Animal_Cucco", "Npc_Pierre_CallOcarina",
+                               "Npc_Goron_011_Shop_Child", "Npc_Hylia_051", "Npc_Kaepora",
+                               "Npc_Kaepora_LakeHylia", "Npc_Kaepora_DeathMountainTrail", "Npc_Hylia_Dampe_001"}) {
+        CHECK_FALSE_MESSAGE(CoopObjects::IsOwnFollower(shared), shared);
+        CHECK_MESSAGE(CoopObjects::IsShared(shared), shared);
+    }
+    CHECK_FALSE(CoopObjects::IsOwnFollower(""));
+}
+
+TEST_CASE("objects: the escape's Zelda is never listed, so no owner, no copy and no second share (row 214)") {
+    // Two games in the escape, each with its own Zelda (the same placement) next to a shared Stalfos.
+    Sync one;
+    Sync two;
+    const Seen zelda_one = Enemy(0x700, 0xbc81f7fc2d70d29dULL, 100, 2.0f, "Npc_Hylia_Zelda_Adult");
+    const Seen zelda_two = Enemy(0x900, 0xbc81f7fc2d70d29dULL, 100, 40.0f, "Npc_Hylia_Zelda_Adult");
+    const Seen stalfos = Enemy(0x100, 0x11, 2, 5.0f, "Enemy_Stalfos_AlwaysRespawn");
+    auto present = All<proto::ObjectPresent>(Tick(one, 0, {zelda_one, stalfos}));
+    REQUIRE(present.size() == 1);
+    REQUIRE(present[0].objects.size() == 1);  // the Stalfos only
+    CHECK(present[0].objects[0].id.value == 0x11);
+    CHECK_FALSE(one.IdOf(0x700).has_value());
+    CHECK(one.IdOf(0x100).has_value());
+    Tick(two, 0, {zelda_two});
+    CHECK_FALSE(two.IdOf(0x900).has_value());
+    // An older kit's owner for its id (it still shares her) binds to nothing here: nothing written to our Zelda.
+    const proto::ObjectId theirs{proto::ObjectKind::placed, 0, 0xbc81f7fc2d70d29dULL};
+    Own(one, theirs, 4, 1);
+    Own(one, theirs, 2, 2);
+    auto step = Tick(one, 100 * kMs, {zelda_one, stalfos});
+    CHECK_FALSE(one.IdOf(0x700).has_value());
+    for (const auto& w : step.writes) {
+        CHECK(w.address != 0x700);
+    }
+    // A player who leaves and joins again mid-escort starts afresh and still lists no Zelda; the game made her
+    // again (a new address, as after a load) is no new share either.
+    Sync rejoined;
+    const Seen zelda_again = Enemy(0x780, 0xbc81f7fc2d70d29dULL, 100, 2.0f, "Npc_Hylia_Zelda_Adult");
+    present = All<proto::ObjectPresent>(Tick(rejoined, 200 * kMs, {zelda_again, stalfos}));
+    REQUIRE(present.size() == 1);
+    CHECK(present[0].objects.size() == 1);
+    CHECK_FALSE(rejoined.IdOf(0x780).has_value());
+    const Seen zelda_scene_made = Enemy(0x7c0, ~0ULL, 100, 3.0f, "Npc_Hylia_Zelda_Adult_Scalable");
+    Tick(rejoined, 300 * kMs, {zelda_again, zelda_scene_made, stalfos});
+    CHECK_FALSE(rejoined.IdOf(0x7c0).has_value());
 }
 
 TEST_CASE("objects: the pond's owner is each game's own, its fish are shared (issue 151)") {
@@ -4352,7 +4413,8 @@ TEST_CASE("objects: a boss off the walk reads by its last life and its delete re
     CHECK(BossAliveKept({}, kGanon, last) == std::optional<bool>(true));
     // Back on the walk (a new reading): as read.
     CoopObjects::NoteBossLives({boss}, last);
-    CHECK_FALSE(last.at("Enemy_DungeonBoss_PhantomGanon").removed);
+    REQUIRE(last.at("Enemy_DungeonBoss_PhantomGanon").size() == 1);
+    CHECK_FALSE(last.at("Enemy_DungeonBoss_PhantomGanon").front().removed);
     // His death is read at life 0 while it runs; deleted after it: dead, before and after its delete request.
     boss.life = coop::protocol::ObjectLife{0, 42};
     CoopObjects::NoteBossLives({boss}, last);
@@ -4364,6 +4426,46 @@ TEST_CASE("objects: a boss off the walk reads by its last life and its delete re
     Seen unread = boss;
     unread.life.reset();
     CHECK_FALSE(BossAliveKept({unread}, kGanon, last).has_value());
+}
+
+TEST_CASE("objects: row 191: bodies of one name are read each by its own address (Gohma's eggs)") {
+    // Geno's four-player run: egg 0x1065043e00 at life 0 beside a new egg at life 1 logged its death on four
+    // walks, because both took turns in the one reading kept for their name.
+    using CoopObjects::BossLifeOf;
+    CoopObjects::BossLives last;
+    Seen dead = Chest(0x3e00, 0);
+    dead.name = "Enemy_DungeonBoss_Gohma_Egg";
+    dead.life = coop::protocol::ObjectLife{1, 1};
+    Seen fresh = Chest(0x9d98, 0);
+    fresh.name = dead.name;
+    fresh.life = coop::protocol::ObjectLife{1, 1};
+    CoopObjects::NoteBossLives({dead, fresh}, last);
+    dead.life = coop::protocol::ObjectLife{0, 1};
+    int deaths = 0;
+    for (int walk = 0; walk < 4; ++walk) {
+        for (const Seen* s : {&dead, &fresh}) {  // NoteBosses' death line: by the body's own last reading
+            const auto* was = BossLifeOf(last, s->name, s->address);
+            deaths += s->life->life <= 0 && (was == nullptr || was->life > 0) ? 1 : 0;
+        }
+        CoopObjects::NoteBossLives({dead, fresh}, last);
+    }
+    CHECK(deaths == 1);
+    REQUIRE(BossLifeOf(last, dead.name, 0x9d98));
+    CHECK(BossLifeOf(last, dead.name, 0x9d98)->life == 1);
+    CHECK(BossLifeOf(last, dead.name, 0x1) == nullptr);
+    CHECK(BossLifeOf(last, "Enemy_DungeonBoss_Gohma", 0x3e00) == nullptr);
+    // A deleted body's reading ends with the next new body of its name; a live one's stays.
+    CoopObjects::NoteBossRemoved(0x3e00, last);
+    Seen third = fresh;
+    third.address = 0x5948;
+    CoopObjects::NoteBossLives({fresh, third}, last);
+    CHECK(BossLifeOf(last, dead.name, 0x3e00) == nullptr);
+    CHECK(last.at(dead.name).size() == 2);
+    // A boss of one body made again at another address after its delete: the new body is the reading.
+    constexpr std::array<std::string_view, 1> kEgg{"Enemy_DungeonBoss_Gohma_Egg"};
+    CoopObjects::NoteBossRemoved(0x9d98, last);
+    CoopObjects::NoteBossRemoved(0x5948, last);
+    CHECK(CoopObjects::BossAliveKept({}, kEgg, last) == std::optional<bool>(true));  // removed alive
 }
 
 TEST_CASE("objects: a boss's death is read only at life 0, never from a body not read here (G2 review)") {
@@ -6904,6 +7006,36 @@ TEST_CASE("objects: the real hit goes everywhere: copy's DAMAGE, the owner's rep
     CHECK(step.writes[0].record == std::optional<proto::HitRecord>(rec));
 }
 
+TEST_CASE("objects: a boss copy's stand-in hit shows again after the owner's life went back up (a refill)") {
+    // Review of 1e000584 (m1): the mark of the last stand-in hit was never dropped, so after a boss's refill no hit
+    // showed on the copy until the owner's life fell below the life before the refill.
+    const std::string kBoss = "Enemy_DungeonBoss_Gohma";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)});
+    const proto::ObjectId id = *copy.IdOf(0x100);
+    Own(copy, id, 2, 1);
+    proto::ObjectSample s;
+    s.player_number = 2;
+    s.id = id;
+    s.epoch = 1;
+    s.state.life = proto::ObjectLife{9, 21};
+    copy.Receive(s);
+    REQUIRE(Tick(copy, 100 * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)}).writes.size() == 1);
+    s.state.life = proto::ObjectLife{21, 21};  // the owner's boss refilled
+    copy.Receive(s);
+    CHECK(Tick(copy, 13000 * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)}).writes.empty());
+    s.state.life = proto::ObjectLife{17, 21};  // its first hit after: above the old mark of 9, shown all the same
+    copy.Receive(s);
+    CHECK(Tick(copy, 26000 * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)}).writes.size() == 1);
+    int again = 0;
+    for (int i = 1; i <= 5; ++i) {  // and once only, as before
+        copy.Receive(s);
+        again += static_cast<int>(Tick(copy, (26000 + 600 * i) * kMs, {Enemy(0x100, 0x11, 21, 0.0f, kBoss)}).writes.size());
+    }
+    CHECK(again == 0);
+}
+
 TEST_CASE("objects: a boss copy replays the owner's stand-in hit once per drop of its life, not every sample") {
     // Four players, 2026-11-20: her game refused the replay, every later sample asked again, and a copy of Gohma
     // took about 690 refused hits in one fight, reacting to each.
@@ -7594,4 +7726,27 @@ TEST_CASE("objects: report 200, a copy of another game's encounter goes without 
     Sync own;
     Tick(own, 0, {Enemy(0x700, 0x1234, 8, 1.0f, kGuard)}, 2);
     CHECK_FALSE(own.GoesWithoutDeath(0x700, 10 * kMs));
+}
+
+TEST_CASE("boss turns: a sample's attack bits: read and attacking, read and between moves, not read (nothing)") {
+    using CoopObjects::AttackBits;
+    CHECK(AttackBits(true) == (proto::object_state::attack_read | proto::object_state::attacking));
+    CHECK(AttackBits(false) == proto::object_state::attack_read);
+    CHECK(AttackBits(std::nullopt) == 0);
+}
+
+TEST_CASE("boss-turns-older-0119: a game that takes boss turns lists its bosses with takes_turns, nothing else") {
+    for (const bool on : {false, true}) {
+        CAPTURE(on);
+        Sync sync;
+        sync.SetTakesTurns(on);
+        auto present = All<proto::ObjectPresent>(Tick(
+            sync, 0, {Enemy(0x100, 0x11, 20, 1.0f, "Enemy_DungeonBoss_PhantomGanon"), Enemy(0x200, 0x22, 2, 5.0f)}));
+        REQUIRE(present.size() == 1);
+        REQUIRE(present[0].objects.size() == 2);
+        for (const auto& e : present[0].objects) {
+            const bool boss = e.id.value == 0x11;
+            CHECK(((e.flags & proto::object_presence::takes_turns) != 0) == (on && boss));
+        }
+    }
 }

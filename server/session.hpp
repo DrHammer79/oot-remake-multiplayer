@@ -250,6 +250,25 @@ struct SessionConfig {
   float boss_near_m = 15.0f;
   float boss_near_margin_m = 4.0f;
   std::uint64_t boss_near_hold_us = 0;
+  // Boss turns (every player fights the boss): its AI fights only its
+  // owner's Link, so in a fight the boss takes turns. Once one owner has had
+  // it boss_turn_us (from the fight's start or the last change of owner), it
+  // goes to the next fit player by player number, round and round, who has it
+  // loaded, has played its intro and stands within boss_turn_m of it. Only at
+  // a calm moment: no hit on it for boss_turn_quiet_us (none passed on, and
+  // not the owner's own, boss_owner_hit_hold_us), its life above 0, and its
+  // owner's animation no death and no cutscene. 0: off.
+  // Every attack (2026-11-21, "constantly changing its target between attacks"): the attack-end edge below
+  // decides; boss_turn_us is only the least time with one owner, so a quick combo is not split.
+  std::uint64_t boss_turn_us = 4'000'000;
+  std::uint64_t boss_turn_quiet_us = 3'000'000;
+  float boss_turn_m = 40.0f;
+  // ...and only right at the end of the boss's own attack (boss-turns-0119): its owner's samples say an attack
+  // ran (object_state::attacking, the hook's addr::InAttackSequence: after a reaction it stays on until the
+  // boss's own next attack ends) and the latest one says it ended, within boss_turn_edge_us. An owner whose
+  // samples read no attacks (no attack_read: an older build) keeps its boss, as before the turns. A boss in a
+  // phase with no attack (Phantom Ganon in his paintings, Gohma on the ceiling) is never handed over there.
+  std::uint64_t boss_turn_edge_us = 1'000'000;
   // Row 149 (King Dodongo rolling forever): a boss (a group's root) whose
   // owner's samples keep one animation, one action verb and one life this
   // long is stuck in that move. Its owner's game re-chooses after about 25 s
@@ -269,6 +288,11 @@ struct SessionConfig {
   // to another player who has them, fight or not.
   std::uint64_t owner_paused_us = 6'000'000;
   std::uint64_t owner_dead_us = 10'000'000;
+  // A boss (its group's root) leaves an owner who died at once and one paused this long: its AI fights only its
+  // owner's Link, and a dead or paused one is nobody to fight (the boss stood idle until owner_dead_us). It goes to
+  // a player up and playing (best_other, fit only); a downed owner already loses it at once (dbno).
+  std::uint64_t boss_owner_dead_us = 0;
+  std::uint64_t boss_owner_paused_us = 2'000'000;
   // A player position older than this is not used for distances.
   std::uint64_t position_stale_us = 5'000'000;
   // Proximity voice (docs/protocol.md, "Voice"): VOICE_FRAME goes to the
@@ -450,6 +474,8 @@ struct Stats {
   std::uint64_t damage_relayed = 0;     // DAMAGE passed on to an owner
   std::uint64_t boss_to_hitter = 0;     // a boss asked over to the player who hurt it (issue 150)
   std::uint64_t boss_to_near = 0;       // a boss asked over to the player near it (issue 150)
+  std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)
+  std::uint64_t boss_kept_from_unready = 0;  // row 189: ticks a ready, unfit owner's boss was not asked to an unready game
   std::uint64_t boss_to_ready = 0;       // a boss asked from a game that has not played its intro to one that has
   std::uint64_t boss_stalled = 0;       // row 149: a boss held one move boss_stall_us: its fight lock freed
   std::uint64_t parts_to_root = 0;      // row 149: a fresh group member given its root's owner at the link
@@ -721,6 +747,10 @@ class Session {
     // an enemy went round P2, P3, P4, P2 ... when only the last one was kept).
     std::map<ConnectionId, std::uint64_t> gave_up;
     std::uint64_t changed_at = 0;  // the last change of owner; 0: never
+    // The last change of owner that was no boss turn (next_turn), for boss_hitter_cooldown_us: a turn passes at
+    // every attack's end (4 s), so a cooldown from changed_at would refuse nearly every stun from another player
+    // (Gohma's eye, a ball sent back into a copy Phantom Ganon or Ganondorf). 0: never.
+    std::uint64_t hitter_changed_at = 0;
     // The last state relayed from its owner, for a hand-over with no answer
     // and for a player who enters the scene later.
     std::optional<protocol::ObjectState> last_state;
@@ -739,6 +769,8 @@ class Session {
     std::map<ConnectionId, std::uint64_t> chased_by;
     // Games whose boss is not ready to be owned (object_presence::unready).
     std::set<ConnectionId> unready;
+    // Games that take boss turns (object_presence::takes_turns): an older build is never given a turn.
+    std::set<ConnectionId> takes_turns;
     // A HANDOVER_ASK the owner has not answered yet.
     struct Ask {
       ConnectionId to = 0;
@@ -750,6 +782,8 @@ class Session {
       // A BOMB_TAKE (native puppets phase 2): no answer means the owner's
       // game keeps the bomb (BOMB_ANSWER kept), not a move.
       bool bomb = false;
+      // A boss turn (next_turn): its change does not start boss_hitter_cooldown_us (hitter_changed_at).
+      bool turn = false;
     };
     std::optional<Ask> ask;
     // DAMAGE that came while the owner hold had not chosen its owner yet
@@ -767,6 +801,13 @@ class Session {
     std::string hold_key;
     std::uint64_t hold_since = 0;
     bool stalled = false;
+    // Boss turns (boss_turn_us): when its current fight began; 0: not in one.
+    std::uint64_t fight_began = 0;
+    // Boss turns, the attack edge (boss_turn_edge_us): as of its owner's latest sample of this epoch.
+    bool attack_read = false;         // the owner reads its attacks (object_state::attack_read)
+    bool attacking = false;           // in its attack sequence
+    std::uint16_t attack_epoch = 0;   // the epoch those two are of
+    std::uint64_t attack_ended_at = 0;  // its newest attack's end in that epoch; 0: none
   };
   using Objects = std::map<protocol::ObjectId, Object>;
 
@@ -951,10 +992,17 @@ class Session {
   bool place_known_in(const Connection& c, const std::string& scene,
                       std::uint64_t now_us) const;
   bool unfit_owner(const Connection& c, std::uint64_t now_us) const;
+  // The same for a boss's owner, sooner (boss_owner_dead_us, boss_owner_paused_us).
+  bool unfit_boss_owner(const Connection& c, std::uint64_t now_us) const;
   void mark_fight(Object& o, std::uint64_t now_us);
   bool in_fight(const Object& o, std::uint64_t now_us) const;
   // The owner hit it itself within boss_owner_hit_hold_us (issue 150).
   bool owner_hit_lately(const Object& o, std::uint64_t now_us) const;
+  // Boss turns (boss_turn_us): the player whose turn it is now, if a boss
+  // root in its fight is due for one at a calm moment.
+  std::optional<ConnectionId> next_turn(Object& o, ConnectionId owner, std::uint64_t now_us);
+  // Boss turns: the owner's attack edge from a sample of `epoch` (Object::attack_*).
+  void note_attack(Object& o, std::uint16_t epoch, const protocol::ObjectState& sample, std::uint64_t now_us);
   // Not handed to `to` yet (counted): `to` gave `o` up less than
   // handover_back_us ago (any player who did, report 138), or `o` changed
   // owner that lately and its owner still stands within handover_chase_m of

@@ -125,7 +125,12 @@ Hookshot only (patch `0012-coop-menu-tabs.patch`, with `0004-coop-title-menu.pat
 - **Text**: `add_labels(msbt, {label: text})` adds labels and texts to a message file (`LayoutMsg/*.msbt` in each `Mals/<language>` archive); the file's own labels keep their indices and texts. A text pane's own label is its path through the parts, joined by `-` (`PlusMenu_00.msbt` has `Pa_System_00-Pa_Button_00-T_Btn_00`), so a label for a copy's pane names the copy. Labels are letters, digits, `_` and `-`.
 - **Our words**: one file per language in `tools/puppet_pack/strings/`: `en.txt`, then `fr.txt`, `de.txt` and so on, or the game's code for one region (`USfr.txt`, `CNzh.txt`). A `[LayoutMsg/<file>.msbt]` line, then `label = text` lines, the labels in the style of that file's own. `load_strings("USfr")` reads `en.txt`, then `fr.txt`, then `USfr.txt` over it; a label a translation leaves out keeps its English text. Only our own words go in these files.
 
-### The pause menu's Multiplayer page (a button on System)
+### The pause menu's Multiplayer page (a button on System, until 0.11.9)
+
+**0.11.9: gone from the + menu.** One home per thing (the owner): co-op's pages are the - menu's Multiplayer, Lobby and
+Mods tabs (below), so the pack no longer makes `Pa_Coop_00`, System's Multiplayer button (`Pa_Button_06`) or its
+Customize Link button (`Pa_Button_07`); System keeps only Longshot Settings. What follows is how the + page worked and
+is kept for Longshot Settings, which still uses it.
 
 `tools/puppet_pack/pause_menu.py` (issue #264, piece 4) makes the layouts and texts of the Multiplayer page and Longshot Settings, opened from two buttons it adds to the System page; the tab strip stays the game's own four tabs (a fifth tab was tried first: a tester found the strip busier and its spacing off). The kits run it (`build.py --pause-tab`).
 
@@ -179,9 +184,22 @@ patch 0030); the check list is in coord's reports/ui-tabs-0119.md.
   among ours, L off the first is Map again, each with the game's tab sound (`mc_TabToRight` / `mc_TabToLeft`, played by
   the module on the strip); while one shows, its page has the pad but B, + and -. The module fills ours as - tabs
   (`kTabFill`), lights them (`kTabLight`) and keeps them one step after the - menu's last shown tab through the strip's
-  animation (`FollowMinus`: slot 3 with Character Select's header, else slot 2). Off unless `COOP_TEST_MINUS_TABS=1`
-  until the R1 probe (`COOP_TEST_SCREEN_PROBE=1`, autotest scenario `ui-minus-probe`) shows which screen can draw their
-  pages.
+  animation (`FollowMinus`: slot 3 with Character Select's header, else slot 2). On by default (they are co-op's one
+  home); `COOP_TEST_MINUS_TABS=0` turns them off.
+- **Their page** (`Pa_CoopMinus_00`, a part of the System page's own layout in the strip's layout, shown while one of
+  ours is lit, the Map page under it hidden): the game's own System buttons on the left and its Options rows
+  (`Pa_List_00..07`) on the right, their words through placeholders in `LayoutMsg/MenuOverlay_00` (`Coop_Minus_00..04`
+  the rows, `05..20` the list's lines, a name and a value each). Every view opens **on this page** (no jump to the +
+  menu): Multiplayer's Players, Co-op settings (co-op's menu's Customize Link, Settings, Commands and Local co-op pages
+  on the list), Local co-op and Your session; Lobby's Find a game (the game browser), Host and Join. Up and down move
+  the rows' cursor (the button's own Select animation is the focus frame); Right goes into the list when it has a line
+  to pick, up and down there, A picks it, Left or B back to the rows; on co-op's menu's page the list's moves are that
+  menu's own (Left and Right change a choice). B on a view's rows steps back a view (`BackOf`); B on a tab's own rows
+  is the game's (the menu closes). L and R change the tab from anywhere, the view back to that tab's rows. A field
+  (a room name, a password) is typed with the list as its keys, as on the + page. The Mods tab's page is its list (the
+  Mods tab of co-op's menu, `CoopModsTab::View`): B is its Back on a mod's page, else the game's. Lists longer than
+  the page show a page at a time (`< 1 of 3 >` in the header), never below a scroll. Everything works with co-op idle
+  (no session) and with or without Character Select (its `MenuOverlay_00` keeps our tabs, `pack_edit`).
 - **Customize** (`coop_snail_custom.h`): X on the Characters page opens his `CharacterCustomize_00` screen as he made
   it; co-op writes its rows into it (the six options a page of co-op's look: Link, Shields, Swords, Boots and
   gauntlets; ZL / ZR step a colour, A the any-colour mixer, Y the next page) through placeholder messages the kit adds
@@ -191,9 +209,10 @@ patch 0030); the check list is in coord's reports/ui-tabs-0119.md.
   is open (`CoopPauseTab::GameMenuUp`), any page of either menu, a mod's page too; before, they hid only when patch
   0018 saw a screen with the mouse, which Character Select's Characters page never has.
 
-### Customize Link (a button on System)
+### Customize Link (a button on System, until 0.11.9)
 
-System's third button of ours (the pack's `Pa_Button_07`, above Multiplayer) opens the Multiplayer page straight on Settings and look's Customize page, Link beside it (`Page::OpenedFrom` 2, `TakeCustomizeOpen`). B goes back step by step (a colour's editor, the list, the rows), and from the rows to System, the cursor on Customize Link again (`LeaveToButton`). An older pack has no such button: the module logs "Customize Link not in the pack" and the page is reached through Multiplayer as before.
+0.11.9: no such button; Customize Link is the first page of the - menu's Multiplayer > Co-op settings (and Character
+Select's Customize screen). Before: System's third button of ours (the pack's `Pa_Button_07`, above Multiplayer) opens the Multiplayer page straight on Settings and look's Customize page, Link beside it (`Page::OpenedFrom` 2, `TakeCustomizeOpen`). B goes back step by step (a colour's editor, the list, the rows), and from the rows to System, the cursor on Customize Link again (`LeaveToButton`). An older pack has no such button: the module logs "Customize Link not in the pack" and the page is reached through Multiplayer as before.
 
 ### Longshot Settings (a button on System)
 

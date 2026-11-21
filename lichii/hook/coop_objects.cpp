@@ -332,6 +332,50 @@ constexpr u64 kLastHitId = 0x1b18;
   // the copy's own AI took over: play again at most this often
 constexpr u64 kDriftLogUs = 5'000'000;
 constexpr u64 kActorComponents = 0x270;
+
+namespace {
+// Boss turns debug (always on, capped: no switch): each boss's attack starting or ending in our walk, with its five action
+// slots' verbs and their attribute bits; at most kMaxAttackNotes lines (plain enemies: their first 20 edges).
+void NoteAttackEdge(u64 actor, const std::string& name, bool attacking, const std::array<s32, 5>& verbs, u64 bits) {
+    static std::mutex m;
+    static std::map<u64, bool> last;
+    static std::size_t notes = 0, plain_notes = 0;
+    constexpr std::size_t kMaxAttackNotes = 400;
+    std::lock_guard lock(m);
+    if (last.size() >= 512) {
+        last.clear();  // (actors come and go with scenes: kept small; review-charsel-0118 m2)
+    }
+    auto [it, fresh] = last.try_emplace(actor, attacking);
+    if (!fresh && it->second == attacking) {
+        return;
+    }
+    it->second = attacking;
+    const bool boss = CoopObjects::IsBossOrPart(name);
+    if (notes >= kMaxAttackNotes || (!boss && plain_notes >= 20)) {
+        return;
+    }
+    ++notes;
+    if (!boss) {
+        ++plain_notes;
+    }
+    LOG_INFO(Core, "coop: bosses: turns: {} {:#x} {} (action verbs {} {} {} {} {}, attributes {:#x})", name, actor,
+             fresh ? (attacking ? "first read: attacking" : "first read: between moves")
+                   : (attacking ? "attack starts" : "attack ends"),
+             verbs[0], verbs[1], verbs[2], verbs[3], verbs[4], bits);
+}
+// Boss turns: each boss's attack sequence over our walks (CoopBossNative::addr::InAttackSequence: after a
+// reaction it stays on until its own next attack), kept by actor.
+bool InAttackSequenceOf(u64 actor, u64 bits, bool boss) {
+    namespace ba = CoopBossNative::addr;
+    static std::mutex m;
+    static std::map<u64, ba::AttackSequence> sequences;
+    std::lock_guard lock(m);
+    if (sequences.size() >= 512) {
+        sequences.clear();  // (actors come and go with scenes: kept small)
+    }
+    return ba::InAttackSequence(sequences[actor], bits, boss);
+}
+}  // namespace
 // LICHII_COOP_OBJECTS_AI_HOLD=1 or 2 (off by default; docs/objects.md
 // "Holding a copy's AI", coop_hold.h): the BSA component is table +0xb0
 // (0xcad060), and bit 0 of its u16 at +0xc4 is what QueryBsaIsBrainSkip (run
@@ -1930,6 +1974,7 @@ public:
         {
             std::lock_guard lock(g_unready_mutex);
             sync_.SetUnready(g_unready);
+            sync_.SetTakesTurns(CoopBossNative::TheTable().TurnsOn());
             sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
@@ -2073,7 +2118,7 @@ public:
                                            s.name, *owner, s.life_component, owner_dead, plain,
                                            plain && CoopBossNative::PlainDeath(life, owner_dead),
                                            s.animation ? s.animation->name : std::string{}, life,
-                                           s.position};
+                                           s.position, s.attacking};
                     list.push_back(std::move(b));
                 }
             }
@@ -4101,6 +4146,31 @@ private:
                         }  // our own hit: its own reaction runs (NoteOwnHit) unless it took life (NoteOwnDamage)
                     }
                 }
+                if (IsBossOrPart(s.name) || OnBrainPath(s.name)) {
+                    // Boss turns (Session::next_turn): its attack as its own game says (the attributes of
+                    // its current action verbs, Attack), sent in our samples so the server hands it on between attacks.
+                    if (const auto table = r.Ptr(a + kActorComponents)) {
+                        if (const auto bsa = r.Ptr(*table + CoopBossNative::addr::kComponentBsa); bsa && *bsa != 0) {
+                            namespace ba = CoopBossNative::addr;
+                            std::uint64_t bits = 0;
+                            std::array<s32, ba::kBsaActionSlots> verbs{};
+                            bool read = true;
+                            for (std::size_t slot = 0; slot < ba::kBsaActionSlots && read; ++slot) {
+                                const auto verb = r.Get<s32>(ba::ActionVerbAt(*bsa, slot));
+                                const auto word = verb ? r.Get<u64>(ba::ActionAttributesAt(*bsa, *verb)) : std::nullopt;
+                                read = verb && word;
+                                if (read) {
+                                    verbs[slot] = *verb;
+                                    bits |= *word;
+                                }
+                            }
+                            if (read) {
+                                s.attacking = InAttackSequenceOf(a, bits, IsBossOrPart(s.name));
+                                NoteAttackEdge(a, s.name, *s.attacking, verbs, bits);
+                            }
+                        }
+                    }
+                }
                 if (IsBossOrPart(s.name)) {
                     s.hit_ours.reset();  // issue 133: whose hit is for plain enemies (bosses: NewOwnHitAt, their sync)
                     s.slots = OtherSlots(r, a);  // issue 150
@@ -4477,7 +4547,7 @@ private:
         // caller that asks the game.
         const auto bsa = table ? r.Ptr(*table + CoopDbno::Body::addr::kComponentBsa) : std::nullopt;
         const auto emitter = table ? r.Ptr(*table + CoopDbno::Body::addr::kComponentEmitter) : std::nullopt;
-        CoopDbno::SetOurComponents(bsa.value_or(0), emitter.value_or(0), adult);
+        CoopDbno::SetOurComponents(bsa.value_or(0), emitter.value_or(0), adult, link);
         static const bool body_caller = [] {
             // A downed teammate's puppet (issue 150): its actor, from the puppet director's slots (the same
             // calc-thread caller chain, so its slots are not changing meanwhile).
@@ -6104,11 +6174,11 @@ void NoteBosses(const std::vector<Seen>& seen, const std::vector<std::pair<u64, 
     }
     for (const Seen& s : g_bosses) {
         // Every boss body's death as our walk reads it (the LANE1 checks look for this line in each game).
-        const auto was = g_boss_lives.find(s.name);
-        if (s.life && s.life->life <= 0 && (was == g_boss_lives.end() || was->second.life > 0)) {
+        // Once per body: by its own last reading (row 191: several eggs share the name).
+        const BossLifeSeen* was = BossLifeOf(g_boss_lives, s.name, s.address);
+        if (s.life && s.life->life <= 0 && (was == nullptr || was->life > 0)) {
             LOG_INFO(Core, "coop: bosses: {} {:#x} read at life 0 here ({}): its death", s.name, s.address,
-                     was == g_boss_lives.end() ? std::string("first reading")
-                                               : "from " + std::to_string(was->second.life));
+                     was == nullptr ? std::string("first reading") : "from " + std::to_string(was->life));
         }
     }
     NoteBossLives(g_bosses, g_boss_lives);

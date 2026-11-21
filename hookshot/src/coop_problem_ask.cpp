@@ -108,12 +108,24 @@ std::vector<std::string> PendingNames(const std::filesystem::path& game_folder) 
     return names;
 }
 
-std::string ReadAsked(const std::filesystem::path& game_folder) {
-    std::ifstream in(game_folder / "bug-reports" / "coop-asked.txt", std::ios::binary);
+namespace {
+
+std::string ReadSmall(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
     if (!in) return {};
     std::ostringstream s;
     s << in.rdbuf();
     return std::move(s).str().substr(0, 64 << 10);
+}
+
+}  // namespace
+
+std::string ReadAsked(const std::filesystem::path& game_folder) {
+    return ReadSmall(game_folder / "bug-reports" / "coop-asked.txt");
+}
+
+std::string ReadSent(const std::filesystem::path& game_folder) {
+    return ReadSmall(game_folder / "bug-reports" / "coop-sent.txt");
 }
 
 bool WriteAsked(const std::filesystem::path& game_folder, const std::string& text) {

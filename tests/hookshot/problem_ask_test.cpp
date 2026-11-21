@@ -94,6 +94,15 @@ TEST_CASE("problem ask: the game folder's files") {
     CHECK(WriteAsked(dir, AskedAfter(names)));
     CHECK(ReadAsked(dir) == "crash-20261121T110000Z.txt\n");
     CHECK_FALSE(Due(PendingNames(dir), ReadAsked(dir), kNow));
+    // A crash the kit already sent (bug-reports/coop-sent.txt, CRLF or LF) is not asked about; another one still is.
+    CHECK(ReadSent(dir).empty());
+    std::ofstream(dir / "bug-reports" / "pending" / "crash-20261121T113000Z-4242-1.txt") << "run_id: y\n";
+    CHECK(Due(PendingNames(dir), ReadAsked(dir) + "\n" + ReadSent(dir), kNow) ==
+          std::optional<std::string>("crash-20261121T113000Z-4242-1.txt"));
+    std::ofstream(dir / "bug-reports" / "coop-sent.txt", std::ios::binary) << "crash-20261121T113000Z-4242-1.txt\r\n";
+    CHECK(ReadSent(dir) == "crash-20261121T113000Z-4242-1.txt\r\n");
+    CHECK_FALSE(Due(PendingNames(dir), ReadAsked(dir) + "\n" + ReadSent(dir), kNow));
+    CHECK(Due(PendingNames(dir), ReadSent(dir), kNow) == std::optional<std::string>("crash-20261121T110000Z.txt"));
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

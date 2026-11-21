@@ -1018,7 +1018,9 @@ void LookForAsk() {
     std::vector<std::string> pending = CoopProblemAsk::PendingNames(folder);
     const std::int64_t now_s =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    const auto due = CoopProblemAsk::Due(pending, CoopProblemAsk::ReadAsked(folder), now_s);
+    // (the crashes the kit already sent to us are not asked about: coop_problem_ask.h)
+    const auto due = CoopProblemAsk::Due(
+        pending, CoopProblemAsk::ReadAsked(folder) + "\n" + CoopProblemAsk::ReadSent(folder), now_s);
     if (!due) return;
     {
         std::lock_guard lock(g_mutex);
@@ -1291,8 +1293,12 @@ void Init(const HosCoopApi* api) {
              g_native ? "; the 4th title button opens it too (LICHII_COOP_TITLE_NATIVE)" : "");
 }
 
+fs::path LookFile() {
+    return KitOptionsFile().value_or(CoopIni());
+}
+
 void SaveLook(const CoopLook::Look& look) {
-    const auto kit = KitOptionsFile();   // (the one the game reads: the kit's, or beside longshot.exe, as Save)
+    const auto kit = KitOptionsFile();   // (as LookFile: the kit's, or beside longshot.exe, else coop.ini below)
     std::string coop = ReadText(CoopIni());
     std::string options = kit ? ReadText(*kit) : std::string();
     const bool ok = !CoopLook::WriteSettings(look, coop, kit ? &options : nullptr) ||

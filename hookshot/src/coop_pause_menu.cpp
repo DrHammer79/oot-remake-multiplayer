@@ -620,14 +620,6 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "dungeon maps (not the world map). Off: neither shows them."});
         out.push_back({Toggle("Names on map", options_.map_names), Act::kMapNames,
                        "Each player's name beside their arrow on the maps. Off: the arrows only."});
-        out.push_back({Choice("Player list", options_.hud_size == "full"      ? std::string("Full")
-                                             : options_.hud_size == "compact" ? std::string("Compact")
-                                             : options_.hud_size == "off"     ? std::string("Off")
-                                                                              : std::string("Auto")),
-                       Act::kHudSize,
-                       "The other players on the left, under your hearts. Full: name, hearts and place. Compact: one "
-                       "line each, a bar of their hearts. Auto: full for up to 4 players, compact for more. Players "
-                       "in your area come first; at most 8, the rest as a count."});
         {   // (Navi) New Game+ (coop_ngplus.h)
             const std::string hearts = std::to_string(ngplus_hearts_ / 4) + (ngplus_hearts_ % 4 ? "+" : "");
             out.push_back({Choice("New Game+", ngplus_unlocked_ == 0 ? std::string("Locked: beat Ganon")
@@ -1658,7 +1650,6 @@ void Menu::Decide(Act act) {
     case Act::kKeyboard:
     case Act::kNgPlus:
     case Act::kSaveSet:
-    case Act::kHudSize:
         Change(act, 1);
         break;
     case Act::kVoice:
@@ -1767,16 +1758,6 @@ void Menu::Change(Act act, int step) {
         options_.map_names = step > 0 ? true : step < 0 ? false : !options_.map_names;
         request_ = Request{Request::Kind::kSave, {}};
         break;
-    case Act::kHudSize: {
-        static const char* kSizes[] = {"auto", "full", "compact", "off"};
-        int at = 0;
-        for (int i = 0; i < 4; ++i) {
-            if (options_.hud_size == kSizes[i]) at = i;
-        }
-        options_.hud_size = kSizes[(at + (step < 0 ? 3 : 1)) % 4];
-        request_ = Request{Request::Kind::kSave, {}};
-        break;
-    }
     case Act::kListRoom:
         options_.list_room = step > 0 ? true : step < 0 ? false : !options_.list_room;
         request_ = Request{Request::Kind::kSave, {}};

@@ -246,7 +246,7 @@ private:
         kSameNetwork, kGameKind,
         kOpenCustomize, kNgPlus, kSaveSet,
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
-        kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal, kHudSize
+        kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal
     };
     struct Line;   // a row, what it does and its help
     std::vector<Line> Lines() const;
