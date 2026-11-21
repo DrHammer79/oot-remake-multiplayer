@@ -111,8 +111,8 @@ class LayoutTest(unittest.TestCase):
         panes, parts = tm.read_layout(n)
         names = [p[0] for p in panes]
         want = ["Pa_Button_%02d" % i for i in range(4, 4 + tm.LIST_BUTTONS)] + [tm.HINT]
-        self.assertEqual(names, PANES + [tm.MARKER] + want)
-        self.assertEqual([p[0] for p in parts][-len(want):], want)
+        self.assertEqual(names, PANES + [tm.MARKER] + want + [tm.TOGGLE])
+        self.assertEqual([p[0] for p in parts][-len(want) - 1:-1], want)
         self.assertEqual([p[1] for p in panes[:8]], [p[1] for p in tm.read_layout(d)[0]])   # (nothing moves)
         for i, name in enumerate(want):
             rec = panes[names.index(name)][1]
@@ -123,6 +123,34 @@ class LayoutTest(unittest.TestCase):
             tm.add_list(n)
         with self.assertRaises(tm.TitleMenuError):
             tm.add_list(make_layout())   # (no marker)
+
+    def test_the_toggle_in_the_first_buttons_place_of_the_options_layout_stored_hidden(self):
+        n = tm.add_menu(make_layout())
+        panes, parts = tm.read_layout(n)
+        names = [p[0] for p in panes]
+        self.assertEqual(names[-1], tm.TOGGLE)
+        self.assertEqual(parts[-1][0], tm.TOGGLE)
+        rec, src = panes[-1][1], panes[names.index("Pa_Button_00")][1]
+        self.assertEqual(struct.unpack_from("<I", n, rec + 0x28)[0], struct.unpack_from("<I", n, src + 0x28)[0])
+        x, y = struct.unpack_from("<ff", n, rec + 0x1c)
+        sx, sy = struct.unpack_from("<ff", n, src + 0x1c)
+        self.assertEqual((x, y), (sx + tm.TOGGLE_MOVE[0], sy + tm.TOGGLE_MOVE[1]))
+        for got, want in zip(struct.unpack_from("<ff", n, rec + 0x10), tm.TOGGLE_SCALE):
+            self.assertAlmostEqual(got, want, places=6)
+        self.assertEqual(struct.unpack_from("<ff", n, rec + 0x2c), tm.TOGGLE_SIZE)
+        self.assertEqual(struct.unpack_from("<I", n, rec + 0x38)[0] & 1, 0)   # (stored hidden)
+        part = parts[-1][1]
+        layout = struct.unpack_from("<Q", n, part)[0]
+        self.assertEqual(n[layout:n.index(b"\0", layout)].decode(), tm.TOGGLE_LAYOUT)
+        self.assertEqual(struct.unpack_from("<I", n, part + 0x30)[0], 0)   # (no parameters of the title button's)
+        self.assertFalse(any(name.startswith("Pa_Button_") and name > "Pa_Button_13" for name in names))
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_toggle(n)
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_toggle(tm.add_marker(make_layout()))   # (no list)
+        for bad in ((0.0, 1.0), (1.0,), (1.0, float("nan")), (True, 1.0), [1.0, 1.0], (1.0, 17.0)):
+            with self.assertRaises(tm.TitleMenuError):
+                tm.ui_pack.clone_parts(make_layout(), [tm.ui_pack.Copy("Pa_Button_00", "Pa_X_00", scale=bad)])
 
     def test_refuses_a_layout_that_has_them(self):
         with self.assertRaises(tm.TitleMenuError):
@@ -141,7 +169,8 @@ class MsbtTest(unittest.TestCase):
         self.assertEqual(labels["0100"], 3)
         self.assertEqual([t[:-1].decode() for t in texts], ["New Game", "Continue", "Options", "Host a game", "Join a game",
                                                             "Co-op Settings", "Start", "Multiplayer", "Options",
-                                                            "Back"] + ["." * 64] * (len(tm.LIVE) - 1) + ["." * 160])   # (the live texts' placeholders)
+                                                            "Back"] + ["." * 64] * (len(tm.LIVE) - 1 - len(tm.TOGGLE_LIVE)) + ["." * 160]
+                         + ["." * 64] * len(tm.TOGGLE_LIVE))   # (the live texts' placeholders)
         self.assertEqual(struct.unpack_from("<I", tm.add_rows(m), 0x12)[0], len(tm.add_rows(m)))
 
     def test_labels_land_in_their_hash_bucket(self):
@@ -215,7 +244,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(set(written), set(made))
         layouts = [d for n, d in sarc.read_entries(written[tm.TITLE_ARCHIVE]) if n == tm.TITLE_LAYOUT]
         self.assertEqual(len(layouts), 2)
-        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 2 + tm.LIST_BUTTONS for d in layouts))
+        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 3 + tm.LIST_BUTTONS for d in layouts))
         _, _, labels, _ = tm.read_msbt(sarc.read(written["Mals/JPja.Product.110.sarc.zs"])[tm.MSG_FILE])
         self.assertIn("0106", labels)
         self.assertTrue(all(sizes[k] > before[k] for k in before))

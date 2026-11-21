@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -1840,9 +1841,23 @@ TEST_CASE("pause tab: the title's Host opens on its choices, hosts on Start host
     CHECK_FALSE(m.TakeRequest().has_value());   // (not hosted on opening)
     CHECK(Names(m) == std::vector<std::string>{"Who can join", "Players", "Start hosting"});
     CHECK(SelectedValue(m) == "Private");
+    // (Who can join is the title's toggle: its two cells, Private chosen; no other row has cells)
+    CHECK(m.view().rows[0].cells == std::array<std::string, 2>{"Private", "Public"});
+    CHECK(m.view().rows[0].cell == 0);
+    CHECK(m.view().rows[1].cell == -1);
+    CHECK(m.view().rows[2].cell == -1);
     m.Press(Input::kRight);   // (Anyone: the room name row)
     (void)m.TakeRequest();
     CHECK(Names(m) == std::vector<std::string>{"Who can join", "Players", "Room name", "Start hosting"});
+    CHECK(m.view().rows[0].cell == 1);
+    CHECK(SelectedValue(m) == "Public");
+    m.Press(Input::kDecide);   // (A flips it back, as the left and right do)
+    (void)m.TakeRequest();
+    CHECK(m.view().rows[0].cell == 0);
+    CHECK(Names(m) == std::vector<std::string>{"Who can join", "Players", "Start hosting"});
+    m.Press(Input::kRight);
+    (void)m.TakeRequest();
+    CHECK(m.view().rows[0].cell == 1);
     m.Press(Input::kLeft);
     (void)m.TakeRequest();
     SelectRow(m, "Start hosting");

@@ -97,6 +97,9 @@ class Copy(NamedTuple):
     # (w, h) given here for its pane, as that layout's own is not read.
     part_layout: Optional[str] = None
     size: Optional[tuple] = None
+    # The copy's scale (x, y) in place of the source's (the pane's +0x10 and +0x14, 1.0 on the game's own parts): a
+    # part layout drawn smaller where it goes than where the game uses it (the Options toggle in the title's column).
+    scale: Optional[tuple] = None
 
 
 def _q(d, o):
@@ -313,6 +316,10 @@ def _clone(d, panes, parts, copies, new_id, out_of_order):
             raise UiPackError("%r is not a name for a pane (printable ASCII, no spaces)" % c.name)
         if c.name in taken:
             raise UiPackError("the layout has a %s already" % c.name)
+        if c.scale is not None and not (
+                isinstance(c.scale, tuple) and len(c.scale) == 2 and
+                all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v <= 16 for v in c.scale)):
+            raise UiPackError("the scale of %s is not (x, y), each above 0 and at most 16" % c.name)
         taken.add(c.name)
         try:
             for v in c.move:
@@ -389,6 +396,9 @@ def _clone(d, panes, parts, copies, new_id, out_of_order):
         struct.pack_into("<H", r, 0x42, p0 + i)
         if c.hidden:
             struct.pack_into("<I", r, 0x38, struct.unpack_from("<I", r, 0x38)[0] & ~1)   # (bit 0: shown at start)
+        if c.scale is not None:
+            r[0x10:0x14] = _f32(c.scale[0], "the scale of %s" % c.name)
+            r[0x14:0x18] = _f32(c.scale[1], "the scale of %s" % c.name)
         if c.size is not None:
             r[0x2c:0x30] = _f32(c.size[0], "the size of %s" % c.name)
             r[0x30:0x34] = _f32(c.size[1], "the size of %s" % c.name)
