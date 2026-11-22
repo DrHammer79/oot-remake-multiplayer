@@ -91,8 +91,8 @@ class Client:
                 continue   # an older request's late reply (one that timed out here)
             return reply
 
-    def request(self, cmd, check=True, timeout=None, **args):
-        wait = timeout or self.timeout
+    def request(self, cmd, check=True, reply_timeout=None, **args):
+        wait = reply_timeout or self.timeout
         reconnected = False
         if self.sock is None:
             self._open()
@@ -140,16 +140,16 @@ class Client:
         clockwise from up (up = away from the camera), strength 0..1."""
         args = {"buttons": list(buttons), "frames": _frames(frames)}
         if stick is not None:
-            args["stick"] = [round(float(stick[0]) % 360.0, 2), round(max(0.0, min(1.0, float(stick[1]))), 3)]
+            args["stick"] = [round(float(stick[0]), 2) % 360.0, round(max(0.0, min(1.0, float(stick[1]))), 3)]
         if rstick is not None:
-            args["rstick"] = [round(float(rstick[0]) % 360.0, 2), round(max(0.0, min(1.0, float(rstick[1]))), 3)]
-        return self.request("input", timeout=self.timeout + frames / 20.0, **args)
+            args["rstick"] = [round(float(rstick[0]), 2) % 360.0, round(max(0.0, min(1.0, float(rstick[1]))), 3)]
+        return self.request("input", reply_timeout=self.timeout + frames / 20.0, **args)
 
     def warp(self, scene, entrance=None, timeout=60):
         args = {"scene": scene, "timeout": timeout}
         if entrance not in (None, ""):
             args["entrance"] = entrance
-        return self.request("warp", timeout=timeout + 15, **args)
+        return self.request("warp", reply_timeout=timeout + 15, **args)
 
     def flag(self, name, value=1):
         return self.request("flag", name=name, value=value)
@@ -161,7 +161,7 @@ class Client:
         return self.request("dump", tag=tag)
 
     def shot(self, path=None):
-        return self.request("shot", timeout=60, **({"path": path} if path else {}))
+        return self.request("shot", reply_timeout=60, **({"path": path} if path else {}))
 
 
 def _frames(n):
@@ -240,7 +240,7 @@ class Steering:
             self.detour_left -= 1
         dist = math.hypot(target[0] - pos[0], target[1] - pos[2])
         strength = round(max(0.45, min(1.0, dist / self.slow_within)), 3)
-        angle = round(angle % 360.0, 2)
+        angle = round(angle, 2) % 360.0
         self.last = (list(pos), camera, angle)
         return [angle, strength]
 

@@ -48,7 +48,7 @@ class FakeGame:
         self.server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
 
     def close(self):
         self.server.shutdown()
@@ -229,8 +229,8 @@ class PlayerServer(unittest.TestCase):
             g.close()
         self.tmp.cleanup()
 
-    def call(self, p, name, **args):
-        return self.tools[p].call(name, args)
+    def call(self, p, tool, **args):
+        return self.tools[p].call(tool, args)
 
     def test_tools_listed_and_named_per_player(self):
         reqs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
@@ -265,7 +265,7 @@ class PlayerServer(unittest.TestCase):
             self.call("p1", "press", buttons=["Q"])
         r = self.call("p1", "warp", scene="KokiriForest_Child", entrance="Start_Mido")
         self.assertEqual(r["state"]["scene"], "KokiriForest_Child")
-        self.assertEqual(self.games["p1"].log[-1]["entrance"], "Start_Mido")
+        self.assertEqual((self.games["p1"].log[-1]["entrance"], self.games["p1"].log[-1]["timeout"]), ("Start_Mido", 60))
         self.call("p1", "warp", scene="DekuTree")
         self.assertNotIn("entrance", self.games["p1"].log[-1])
         self.assertEqual(self.call("p1", "flag", name="F2", value=True)["was"], 0)
