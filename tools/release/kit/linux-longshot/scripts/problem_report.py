@@ -22,6 +22,7 @@ Files (data/logs): problem-reports.json (local reports' answer, sessions read, p
 (the queue; sent/ and held/ keep copies; result.txt the last result).
 """
 
+import threading
 import hashlib
 import io
 import ipaddress
@@ -435,20 +436,43 @@ class Kit:
     def address_file(self):
         return self.logs / "problem-send-address.txt"
 
-    def update_address(self, fetch=None):
-        """Looks the address up (short limit; only reads, sending still needs the player's yes) and caches a valid
-        answer in logs/problem-send-address.txt. Any failure keeps what was cached. fetch (tests) returns the text."""
+    def update_address(self, fetch=None, send=""):
+        """Looks the address up (only reads, sending still needs the player's yes) and caches a valid answer in
+        logs/problem-send-address.txt. Any failure keeps what was cached. fetch (tests) returns the text. With send
+        "off" nothing is requested. The whole lookup is bounded by wall time (urllib's timeout does not cover the
+        DNS lookup): it runs in a daemon thread that is waited for ADDRESS_LOOKUP_TIMEOUT seconds."""
+        if send == "off":
+            return ""
+        box = {}
+
+        def work():
+            try:
+                if fetch is None:
+                    ctx = ssl.create_default_context()
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+
+                    class NoRedirect(urllib.request.HTTPRedirectHandler):
+                        def redirect_request(self, *a, **k):
+                            return None
+
+                    req = urllib.request.Request(ADDRESS_LOOKUP, headers={"User-Agent": "Squadala-kit"})
+                    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), NoRedirect)
+                    with opener.open(req, timeout=ADDRESS_LOOKUP_TIMEOUT) as resp:
+                        if resp.status != 200:
+                            return
+                        box["text"] = resp.read(4096).decode("utf-8", "replace")
+                else:
+                    box["text"] = fetch()
+            except Exception:
+                pass
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        t.join(ADDRESS_LOOKUP_TIMEOUT)
+        if t.is_alive() or "text" not in box:
+            return ""
         try:
-            if fetch is None:
-                ctx = ssl.create_default_context()
-                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-                req = urllib.request.Request(ADDRESS_LOOKUP, headers={"User-Agent": "Squadala-kit"})
-                with urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx)).open(
-                        req, timeout=ADDRESS_LOOKUP_TIMEOUT) as resp:
-                    text = resp.read(4096).decode("utf-8", "replace")
-            else:
-                text = fetch()
-            u = address_from_text(text)
+            u = address_from_text(box["text"])
             if u:
                 self.logs.mkdir(parents=True, exist_ok=True)
                 self.address_file().write_text(u + "\n", encoding="utf-8")
@@ -840,7 +864,7 @@ def main(argv=None):
         send_queue(kit, user=user, pc=pc)
         return 0
     if cmd == "at-start":
-        kit.update_address()
+        kit.update_address(send=ss["send"])
         url = kit.url()
         if not ss["send"] and url:
             yes = ask(url)

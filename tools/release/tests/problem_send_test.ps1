@@ -72,6 +72,13 @@ Check ((Update-ProblemSendAddress $kit { "# c`nhttps://new.example.org/v1/proble
 Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'the cached lookup wins over the kit file'
 Check ((Update-ProblemSendAddress $kit { "http://evil.example.org/x`n" }) -eq '') 'an http lookup answer is refused'
 Check ((Update-ProblemSendAddress $kit { throw 'offline' }) -eq '') 'a failed lookup returns nothing'
+$script:lookupCalls = 0
+Check ((Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" } -Send 'off') -eq '' -and $script:lookupCalls -eq 0) 'sending off: no lookup at all'
+[void](Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" } -Send 'on')
+[void](Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" })
+Check ($script:lookupCalls -eq 2) 'sending on or not answered: the lookup is made'
+Remove-Item -LiteralPath (Join-Path $kit 'logs\problem-send-address.txt') -Force
+[void](Update-ProblemSendAddress $kit { "https://new.example.org/v1/problem-report`n" })
 Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'a failed lookup keeps the cache'
 Remove-Item -LiteralPath (Join-Path $kit 'logs\problem-send-address.txt') -Force
 Check ((Get-ProblemSendUrl $kit) -eq 'https://kit.example.org/v1/problem-report') 'without a cache the kit file is used'

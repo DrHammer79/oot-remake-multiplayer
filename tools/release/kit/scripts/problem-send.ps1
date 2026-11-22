@@ -66,7 +66,11 @@ $script:SendLookupMs = 4000
 # Looks the address up (same GitHub access as Update.bat), short time limit, and caches a valid answer in
 # logs\problem-send-address.txt. Any failure keeps what was cached (or the kit's file). It only reads: nothing is sent,
 # and sending still needs the player's yes. $Fetch (tests) returns the file's text.
-function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null) {
+# $Send is the player's answer: with 'off' (no sending) nothing is requested at all.
+# The whole lookup is bounded by wall time (HttpWebRequest.Timeout does not cover the DNS lookup): BeginGetResponse and
+# a wait of SendLookupMs, then Abort.
+function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null, [string]$Send = '') {
+    if ($Send -eq 'off') { return '' }
     try {
         if ($Fetch) { $text = & $Fetch }
         else {
@@ -76,8 +80,11 @@ function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null) {
             $req.ReadWriteTimeout = $script:SendLookupMs
             $req.AllowAutoRedirect = $false
             $req.UserAgent = 'Squadala-kit'
-            $resp = $req.GetResponse()
+            $ar = $req.BeginGetResponse($null, $null)
+            if (-not $ar.AsyncWaitHandle.WaitOne($script:SendLookupMs)) { try { $req.Abort() } catch { }; return '' }
+            $resp = $req.EndGetResponse($ar)
             try {
+                if ([int]$resp.StatusCode -ne 200) { return '' }
                 $r = New-Object System.IO.StreamReader($resp.GetResponseStream())
                 try { $text = $r.ReadToEnd(); if ($text.Length -gt 4096) { $text = '' } } finally { $r.Dispose() }
             } finally { $resp.Dispose() }
@@ -491,7 +498,8 @@ if ($SendPending) {
 }
 
 if ($AtStart) {
-    [void](Update-ProblemSendAddress $kit)
+    # Only when sending is on or not answered yet (the question needs the address); with 'off' no request is made.
+    [void](Update-ProblemSendAddress $kit -Send $sendState.send)
     $url = Get-ProblemSendUrl $kit
     if (-not $sendState.send -and $url) {
         $yes = Read-ProblemSendAnswer -Url $url

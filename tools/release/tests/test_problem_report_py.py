@@ -117,6 +117,22 @@ class Kit(unittest.TestCase):
         self.assertEqual(self.kit.url(), "https://new.example.org/v1/problem-report")
         self.assertEqual(self.kit.update_address(lambda: "http://evil.example.org/x\n"), "")
         self.assertEqual(self.kit.update_address(lambda: 1 / 0), "")
+        # sending off: no request at all; on or unanswered: asked; a slow lookup is cut by wall time
+        calls = []
+        self.assertEqual(self.kit.update_address(lambda: calls.append(1) or "https://x.example.org/a", send="off"), "")
+        self.assertEqual(calls, [])
+        self.kit.update_address(lambda: calls.append(1) or "https://x.example.org/a", send="on")
+        self.kit.update_address(lambda: calls.append(1) or "https://x.example.org/a", send="")
+        self.assertEqual(len(calls), 2)
+        import time, problem_report as pr
+        old, pr.ADDRESS_LOOKUP_TIMEOUT = pr.ADDRESS_LOOKUP_TIMEOUT, 0.3
+        try:
+            t0 = time.time()
+            self.assertEqual(self.kit.update_address(lambda: time.sleep(3) or "https://y.example.org/a"), "")
+            self.assertLess(time.time() - t0, 2)
+        finally:
+            pr.ADDRESS_LOOKUP_TIMEOUT = old
+        self.kit.update_address(lambda: "https://new.example.org/v1/problem-report\n")
         self.assertEqual(self.kit.url(), "https://new.example.org/v1/problem-report")
         # no cache: back to the kit's file
         self.kit.address_file().unlink()
