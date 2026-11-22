@@ -22,13 +22,22 @@ romfs:
 
 Writes <work>/cs (the copy), <work>/cs/build and <work>/cs/build-custom (his folders), and <work>/charsel-native.ips
 (every code patch of the two stages in one IPS32 file; the build fails when two write the same byte).
+
+  stage 3 (--data <repo>/tools/puppet_pack/charsel/data; --reuse keeps <work>'s stage 1 and 2 builds): the
+      repository's data: manifest.json, one CDLT1 delta per file (charsel_ui.make_delta) against the --romfs files,
+      and charsel-native.ips. Left out: the size table (the pack grows its own) and Common's .bntx (244 MB, only for
+      Link's picture: his cell's texture name points at one of the game's own, MapIconPlayer_00, instead). His English
+      texts are in the new message files' deltas; strings/*.txt put ours over them per language at pack time.
 """
 import argparse
+import json
 import os
 import shutil
 import struct
 import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 TEXT_EDITS = [
     ("mods/build.py",
@@ -148,14 +157,123 @@ def merge_ips(paths):
     return ips32(records)
 
 
+# Stage 3: what the pack makes, and where each file of his builds is (the first folder that has it).
+PLAIN = {   # (plain files) rel -> the game's file the delta is made from
+    "Sequence/ImportantMenu.module.ainb": "Sequence/ImportantMenu.module.ainb",
+    "Sequence/MinusMenu.module.ainb": "Sequence/MinusMenu.module.ainb",
+    "Sequence/MinusMenuToMain.module.ainb": "Sequence/MinusMenuToMain.module.ainb",
+    "Sequence/CharacterMenu.module.ainb": "Sequence/ImportantMenu.module.ainb",
+}
+ZS_SELF = ("RSDB/UIScreen.Product.111.rstbl.byml.zs", "UI/LayoutArchiveCategory.Product.100.byml.zs",
+           "GameData/GameDataList.Product.110.byml.zs", "SLink2/slink2.Product.111.bslnk.zs")
+COMMON = "UI/Layout2Archive/Common.Product.100.Nin_Ounce_NVN2.blarc.zs"
+COMMON_MEMBERS = {   # member -> the game's member its delta is made from
+    "MenuOverlay_00.buil": "MenuOverlay_00.buil", "PaMenuCategory_00.buil": "PaMenuCategory_00.buil",
+    "CharacterMenu_00.buil": "ImportantMenu_01.buil", "CharacterCustomize_00.buil": "ImportantMenu_01.buil",
+    "PaCharacterSlot_00.buil": "PaItemMenuBtn_00.buil", "PaCharacterKey_00.buil": "PaGuideKey_00.buil",
+}
+MALS_GLOB = "Mals/*.Product.110.sarc.zs"
+MALS_ANY = "Mals/USen.Product.110.sarc.zs"
+MALS_NEW = ("LayoutMsg/CharacterMenu_00.msbt", "LayoutMsg/CharacterCustomize_00.msbt")
+CUSTOM_MSG = "LayoutMsg/CharacterCustomize_00.msbt"
+PORTRAIT = (b"\0CharacterPortrait_000\0", b"\0MapIconPlayer_00\0")   # (his cell's texture -> the game's own)
+SLOTS, PLACEHOLDER = 13, "." * 64     # (merge_tables.SNAIL_SLOTS / SNAIL_PLACEHOLDER: co-op's words, module-written)
+
+
+def stage3(cs, romfs, data_dir):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+    from puppet_pack import charsel_ui, sarc, zs
+    from puppet_pack.merge_tables import SNAIL_SLOTS, SNAIL_PLACEHOLDER
+    assert (SNAIL_SLOTS, SNAIL_PLACEHOLDER) == (SLOTS, PLACEHOLDER)
+    dicts = zs.Dicts.from_romfs(romfs)
+    folders = [os.path.join(cs, "build-custom", STAGE2_MOD, "romfs")] + \
+        [os.path.join(cs, "build", m, "romfs") for m in ("Characters page", "Header four tabs", "Character models")]
+
+    def built(rel):
+        for f in folders:
+            p = os.path.join(f, *rel.split("/"))
+            if os.path.exists(p):
+                return open(p, "rb").read()
+        raise SystemExit("no build has " + rel)
+
+    def game(rel):
+        return open(os.path.join(romfs, *rel.split("/")), "rb").read()
+
+    os.makedirs(data_dir, exist_ok=True)
+    for old in os.listdir(data_dir):
+        if old.endswith(".cdelta") or old == "manifest.json":
+            os.remove(os.path.join(data_dir, old))
+    sizes = {}
+
+    def put(name, src, dst):
+        delta = charsel_ui.make_delta(src, dst)
+        assert charsel_ui.apply_delta(src, delta) == dst
+        open(os.path.join(data_dir, name), "wb").write(delta)
+        sizes[name] = len(delta)
+        return name
+
+    files = []
+    for i, (rel, src) in enumerate(sorted(PLAIN.items())):
+        files.append({"rel": rel, "zs": False, "from": src,
+                      "delta": put("p%02d.cdelta" % i, game(src), built(rel))})
+    for i, rel in enumerate(ZS_SELF):
+        files.append({"rel": rel, "zs": True, "from": rel,
+                      "delta": put("z%02d.cdelta" % i, dicts.decompress(game(rel)), dicts.decompress(built(rel)))})
+    van = sarc.read_entries(dicts.decompress(game(COMMON)))
+    his = sarc.read_entries(dicts.decompress(built(COMMON)))
+    vd, hd = dict(van), dict(his)
+    changed = {n for n, d in his if n not in vd or vd[n] != d}
+    assert changed == set(COMMON_MEMBERS), sorted(changed ^ set(COMMON_MEMBERS))
+    members = []
+    for i, (name, src) in enumerate(sorted(COMMON_MEMBERS.items())):
+        dst = hd[name]
+        if name == "CharacterMenu_00.buil":
+            old, new = PORTRAIT
+            assert dst.count(old) == 1 and len(new) <= len(old)
+            dst = dst.replace(old, new + b"\0" * (len(old) - len(new)))
+            sys.path.insert(0, os.path.join(cs, "tools"))
+            import layout   # (his parser: the layout with the game's texture name still reads)
+            layout.Layout(dst)
+        copies = sum(1 for n, _ in his if n == name)
+        m = {"name": name, "from": src, "delta": put("c%02d.cdelta" % i, vd[src], dst)}
+        if name not in vd:
+            m["copies"] = copies
+        else:
+            assert copies == sum(1 for n, _ in van if n == name)
+        members.append(m)
+    files.append({"rel": COMMON, "zs": True, "align": 16, "members": members})
+    hm = dict(sarc.read_entries(dicts.decompress(built(MALS_ANY))))
+    msgs = [{"name": n, "from": None, "delta": put("m%02d.cdelta" % i, b"", hm[n])} for i, n in enumerate(MALS_NEW)]
+    files.append({"glob": MALS_GLOB, "zs": True, "align": 16, "members": msgs, "strings": list(MALS_NEW),
+                  "labels": {CUSTOM_MSG: {"Coop_Custom_%02d" % i: PLACEHOLDER for i in range(SLOTS)}}})
+    manifest = {"format": "coop-charsel 1",
+                "about": "Link's Characters page, picker and Customize: Snail's OoT Character Select v0.2.1 (MIT), "
+                         "made by charsel/make_data.py; deltas against the game's own files",
+                "files": files}
+    with open(os.path.join(data_dir, "manifest.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(manifest, f, indent=1)
+        f.write("\n")
+    print("data:", data_dir, sum(sizes.values()), "bytes of deltas in", len(sizes), "files")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--snail", required=True)
     ap.add_argument("--image", required=True)
     ap.add_argument("--romfs", required=True)
     ap.add_argument("--work", required=True)
+    ap.add_argument("--data", help="stage 3: write the repository's data here")
+    ap.add_argument("--reuse", action="store_true", help="keep <work>'s stage 1 and 2 builds")
     a = ap.parse_args(argv)
     cs = os.path.join(a.work, "cs")
+    if not a.reuse:
+        build_stages(a, cs)
+    if a.data:
+        stage3(cs, a.romfs, a.data)
+        shutil.copyfile(os.path.join(a.work, "charsel-native.ips"), os.path.join(a.data, "charsel-native.ips"))
+
+
+def build_stages(a, cs):
     shutil.rmtree(cs, ignore_errors=True)
     shutil.copytree(a.snail, cs, ignore=shutil.ignore_patterns(".git", "build", "build-custom", "build-npc"))
     for rel, old, new in TEXT_EDITS:

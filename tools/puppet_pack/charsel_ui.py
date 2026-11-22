@@ -137,7 +137,7 @@ def _delta(name, data_dir):
         return f.read()
 
 
-def make(reader, dicts, recompress, manifest=None, data_dir=DATA):
+def make(reader, dicts, recompress, manifest=None, data_dir=DATA, strings=ui_pack.STRINGS):
     """({rel: file bytes as the game reads them}, growth, [new size-table keys and sizes]) for every file of the
     manifest; raises CharselError (or the reader's error) when any one cannot be made.
 
@@ -180,6 +180,12 @@ def make(reader, dicts, recompress, manifest=None, data_dir=DATA):
                     out += [(m["name"], data)] * m.get("copies", 1)   # (layouts are stored four times, as the game's)
             for member, labels in e.get("labels", {}).items():
                 out = [(n, ui_pack.add_labels(d, labels) if n == member else d) for n, d in out]
+            if e.get("strings"):   # (our words over his English, in the archive's language: strings/*.txt)
+                ours = ui_pack.load_strings(ui_pack.language_of(rel), strings)
+                for member in e["strings"]:
+                    if ours.get(member):
+                        out = [(n, ui_pack.add_labels(d, ours[member], replace=True) if n == member else d)
+                               for n, d in out]
             made = sarc.write(out, data_align=e.get("align", 16))
             files[rel] = recompress(dicts, raw, made) if e["zs"] else made
             growth.append((rel, len(plain), len(made), True))
