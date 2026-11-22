@@ -194,10 +194,19 @@ class GameFilesTest(unittest.TestCase):
         self.assertIn(b"SeqExecuteGenericWaitFrame", files[cm.MAP])
         rows = byml.loads(files["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
         keys = {r["Name"]: r.get("SortKey") for r in rows}
-        for page in ("MapMenu_00", "ImportantMenu_00", "ChallengeMenu_00", "PlusMenu_00"):
-            self.assertGreater(keys[cm.SCREEN], keys[page], page)
-        self.assertLess(keys[cm.SCREEN], keys["MenuOverlay_00"])
-        self.assertFalse(any(r.get("SortKey") == keys[cm.SCREEN] for r in rows if r["Name"] != cm.SCREEN))
+        # every screen at the pages' 5000 is a page of the pause menu (the - menu's three, the + menu's and its Action
+        # Guide list), none a popup that ours (5001) would now hide: those are all far above (windows 8751, the
+        # message dialog 9000)
+        self.assertEqual(sorted(n for n, k in keys.items() if k == 5000),
+                         ["ChallengeMenu_00", "ImportantMenu_00", "MapMenu_00", "PlusMenu_00", "SystemActionGuide_00"])
+        self.assertGreater(keys[cm.SCREEN], 5000)
+        self.assertEqual([n for n, k in keys.items() if k is not None and 5000 < k < 6000], [cm.SCREEN])
+        for over in ("MenuOverlay_00", "SystemWindow_00", "AmiiboWindow_00", "MessageDialog_00"):
+            self.assertGreater(keys[over], keys[cm.SCREEN], over)
+        windows = [n for n in keys if "Window" in n or "Dialog" in n]
+        self.assertTrue(windows)
+        for n in windows:
+            self.assertGreater(keys[n], keys[cm.SCREEN], n)
         lay = next(d for n, d in sarc.read_entries(files[cm.COMMON_ARCHIVE]) if n == cm.SCREEN + ".buil")
         names = [p.name for p in ui_pack.read_layout(lay)[0]]
         self.assertIn(pm.MINUS_PAGE, names)
