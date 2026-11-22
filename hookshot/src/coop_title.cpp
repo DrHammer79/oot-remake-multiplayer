@@ -777,7 +777,10 @@ void StepNative(void* ctx, std::uint64_t screen) {
     if (apply) StopBtnNum(ctx, layout, std::min(frame, static_cast<float>(CoopTitleNative::kButtons)));
     bool ok = true;
     for (int i = 0; i < look.buttons; ++i) {
-        ok = SetLiveText(ctx, layout, i, look.texts[static_cast<std::size_t>(i)]) && ok;
+        // The page's rows in the player's language (coop_i18n.h): a row the menu built in English
+        // ("Your name: 4090", "Port: 27510") is looked up whole as it is handed to the game —
+        // the rows with a value are the table's shapes, a field's own text comes back as it is.
+        ok = SetLiveText(ctx, layout, i, CoopI18n::Tr(look.texts[static_cast<std::size_t>(i)])) && ok;
     }
     if (g_column.layout != layout) FindColumn(ctx, screen, layout);
     const bool hint = !look.hint.empty() && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, CoopI18n::Tr(look.hint));

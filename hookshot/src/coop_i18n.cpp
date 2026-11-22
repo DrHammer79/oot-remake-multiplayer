@@ -1348,7 +1348,14 @@ constexpr Entry kzh_Hans[] = {
     {"The host only: your own values in percent: life 25 to 500, damage 25 to 400, enemies 100 to 300, in steps of 25.", "仅房主：你自己的百分比数值：生命 25 到 500，伤害 25 到 400，敌人数量 100 到 300，每次 25。"},
     {"difficulty: the server has not said it yet", "难度：服务器还没有给出"},
     {"difficulty: only the host can change it", "难度：只有房主能更改"},
-    {"difficulty: /difficulty auto, easy, normal or hard, or /difficulty custom <life> <damage> <enemies> (life 25-500, damage 25-400, enemies 100-300, steps of 25)", "难度：/difficulty auto、easy、normal 或 hard，或 /difficulty custom <生命> <伤害> <敌人数量>（生命 25-500，伤害 25-400，敌人数量 100-300，每次 25）"},
+    {"difficulty: /difficulty auto, easy, normal or hard, or /difficulty custom <life> <damage> <enemies> (life 25-500, damage 25-400, enemies 100-300, steps of 25)", "难度：/difficulty auto、easy、normal 或 hard，或 /difficulty custom <生命> <伤害> <敌人数量>（生命 25-500，伤害 25-400，敌人数量 100-300，每次 25）"},    // (the port's state on the details list, the "(you)" after the own name,
+    // the turned-away line's endings: pieces of lines the module composes)
+    {"open", "开放"},
+    {"shut", "未开放"},
+    {" (you)", "（你）"},
+    {" Leave.", " 请先离开。"},
+    {" Leave, then join again.", " 请先离开，稍后再加入。"},
+
 };
 
 // ---------------------------------------------------------------------------
@@ -2639,7 +2646,14 @@ constexpr Entry kzh_Hant[] = {
     {"The host only: your own values in percent: life 25 to 500, damage 25 to 400, enemies 100 to 300, in steps of 25.", "僅房主：你自己的百分比數值：生命 25 到 500，傷害 25 到 400，敵人數量 100 到 300，每次 25。"},
     {"difficulty: the server has not said it yet", "難度：伺服器還沒有給出"},
     {"difficulty: only the host can change it", "難度：只有房主能更改"},
-    {"difficulty: /difficulty auto, easy, normal or hard, or /difficulty custom <life> <damage> <enemies> (life 25-500, damage 25-400, enemies 100-300, steps of 25)", "難度：/difficulty auto、easy、normal 或 hard，或 /difficulty custom <生命> <傷害> <敵人數量>（生命 25-500，傷害 25-400，敵人數量 100-300，每次 25）"},
+    {"difficulty: /difficulty auto, easy, normal or hard, or /difficulty custom <life> <damage> <enemies> (life 25-500, damage 25-400, enemies 100-300, steps of 25)", "難度：/difficulty auto、easy、normal 或 hard，或 /difficulty custom <生命> <傷害> <敵人數量>（生命 25-500，傷害 25-400，敵人數量 100-300，每次 25）"},    // (the port's state on the details list, the "(you)" after the own name,
+    // the turned-away line's endings: pieces of lines the module composes)
+    {"open", "開放"},
+    {"shut", "未開放"},
+    {" (you)", "（你）"},
+    {" Leave.", " 請先離開。"},
+    {" Leave, then join again.", " 請先離開，稍後再加入。"},
+
 };
 
 std::string Trim(std::string s) {
@@ -3590,7 +3604,11 @@ constexpr SplitShape kSplitShapes[] = {
     // (0.11.9, ui-tabs)
     {{"", " (page ", " of ", ")"}, 1, 4, "{} (page {} of {})"},
     // (title-join: the title page's hint)
-    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)"},
+    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)"},    // (a page's header: the page's name and, when its rows take more than one
+    // page, "  < 1 of 3 >"; the name is the table's word, the two numbers as
+    // they are)
+    {{"", "  < ", " of ", " >"}, 1, 4, "{}  < {} of {} >"},
+
 };
 std::string PlaceIn(const Lang* lang, std::string_view en) {
     if (lang == nullptr || lang->entries == nullptr) {

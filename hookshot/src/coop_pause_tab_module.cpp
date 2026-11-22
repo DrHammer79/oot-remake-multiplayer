@@ -1173,7 +1173,9 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     for (int r = 0; r < kSettingRows; ++r) {
         char path[64];
         std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_Button_%02d/T_Btn_00", r);
-        LiveText(ctx, layout, gen, path, r < kRows ? 22 + r : 41, kSettingTabs[static_cast<std::size_t>(r)]);
+        // (the category's words in the player's language, as the pack's labels are)
+        LiveText(ctx, layout, gen, path, r < kRows ? 22 + r : 41,
+                 CoopI18n::Tr(kSettingTabs[static_cast<std::size_t>(r)]));
     }
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
     g_set_count = static_cast<int>(rows.size());
@@ -1191,9 +1193,12 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         if (on) {
             char path[64];
             std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Option_00", i);
-            LiveText(ctx, layout, gen, path, SetNameSlot(i), lines[k].name);
+            // The setting's name and its value in the player's language (coop_i18n.h): the rows are
+            // built in English in coop_pause_tab.cpp, and each is looked up as it is handed over.
+            LiveText(ctx, layout, gen, path, SetNameSlot(i), CoopI18n::Tr(lines[k].name));
             std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Text_00", i);
-            LiveText(ctx, layout, gen, path, SetValueSlot(i), lines[k].value.empty() ? std::string(" ") : lines[k].value);
+            LiveText(ctx, layout, gen, path, SetValueSlot(i),
+                     lines[k].value.empty() ? std::string(" ") : CoopI18n::Tr(lines[k].value));
         }
         if (g_set_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_set_vis[k] = on ? 1 : 0;
         // (the header a little dim, as the browser's; a setting bright when picked, or all while the rows have the pad)
