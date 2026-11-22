@@ -52,6 +52,7 @@
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
+#include "coop_presence_gates.h"
 #include "coop_every.h"
 #include "coop_event_result.h"
 #include "coop_cheat_items.h"
@@ -2101,6 +2102,25 @@ public:
             // Row 230: another game's Redead or Gibdo froze its owner's Link with our Link in its reach: ours takes
             // that scream's hit, no life (its game's SleepParalysis reaction).
             CoopObjects::HurtOurLinkNative(0, k.at, k.from, k.kind);
+        }
+        if (main_ != 0) {
+            // Row 233: a shared flag that gates dungeon pieces changed: which of them our game has now (the probe).
+            if (*scene != presence_scene_) {
+                presence_scene_ = *scene;
+                presence_.Reset();
+            }
+            CoopHook::EmulatorMemory memory(system.ApplicationMemory(), main_);
+            coop::host::GameFlags flags(memory);
+            const auto lines = presence_.Step(
+                CoopEvery::NowUs(), [&flags](std::uint32_t hash) { return flags.get_bool(hash); },
+                [this](std::string_view name) {
+                    std::size_t n = 0;
+                    for (const auto& [a, known] : names_) n += known.first == name ? 1 : 0;
+                    return n;
+                });
+            for (const std::string& line : lines) {
+                LOG_INFO(Core, "coop: objects: {}", line);
+            }
         }
         // A Gold Skulltula whose key this save already holds is not made again
         // (issue 89, 2026-11-16). The game reads a placement's key once, when
@@ -6048,6 +6068,8 @@ private:
     CoopPivot::Follower pivot_;
     u32 link_hit_said_ = 0xffffffffu;  // the scream probe: our Link's last hit id seen
     u32 link_hit_id_ = 0xffffffffu;    // row 230 (NoteOurLinkHit): our Link's last hit id read in the walk
+    CoopPresenceGates::Probe presence_;  // row 233
+    std::string presence_scene_;
 
     // Row 234 (Geno's survey): Volvagia's arena drops its rocks (Obj_FallingRock_A_06, from its
     // Obj_FallingRockManager's pool, aimed at the game's own Link: QueryDungeonGetPlayerPos) when Volvagia's

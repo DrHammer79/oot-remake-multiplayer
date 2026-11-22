@@ -185,12 +185,18 @@ Still to design (need a game run first):
   rises for it where he is owned (his turns pass him between the players), and in a game that does not own him he
   waits for his owner's verbs (that player is held until mashing frees them or his turn comes). Unit tests only;
   to check in a game: A and B each near a different hand: both grabbed; Dead Hand rises for each in turn.
-- Water Temple and others: placements whose `Presence.FlagName` is a shared flag that changes during play (the
-  water level's planes and waterfall, the Shadow tower's pillar and rubble, Bottom of the Well's water, the Forest
-  Temple's room 7 water and elevator, Ice Cavern pots, a Jabu-Jabu air wall) are probably read only at a scene
-  load. No proven live fix: deleting or making a placement live is proven for enemies, not for terrain collision.
-  First step: a log line when such a flag changes with our Link near a gated piece; then a live check.
-- Shadow Temple's falling pillar (`Dm_ShadowTemple_0015`): part of the presence item above.
+- Water Temple and others (row 233, enemies-01110: probe): the dungeon pieces whose `Presence.FlagName` is a
+  shared flag are now listed from the romfs (`tools/puppet_pack/presence_gates.py` ->
+  `lichii/hook/coop_presence_gates.inc`: 24 rows, 12 flags: the Water Temple's planes, waterfall, Room22 shutter
+  and air wall; the Shadow tower's pillar, rubble and altar steps; Bottom of the Well's water; the Forest Temple's
+  room 7 water and elevator; two Ice Cavern pots and their red ice; a Jabu-Jabu air wall; all `IsCheckLazy`
+  false). Whether the game takes such a piece away or puts it in when the flag changes in play, or only at the
+  next load, is the live check, and no fix is made before it (deleting or making a placement live is proven for
+  enemies only, not for terrain collision). Each game logs `coop: objects: presence: <flag> (<area>) went 1, now:
+  <piece> wanted|unwanted (N of M here) ...` when one of those flags changes, and again 3 s later. Run: Water
+  Temple, A raises or lowers the water at a symbol while B stands in the central room: the owner's lines show
+  what a game of one does, B's whether the same happens from the shared flag alone.
+- Shadow Temple's falling pillar (`Dm_ShadowTemple_0015`): in the probe's rows above (TowerBreak groups).
 - Volvagia's falling rocks (row 234, enemies-01110, code read): made by the arena (`Obj_FallingRockManager_A_03`,
   a pool of `Obj_FallingRock_A_06`), aimed at the local Link (`QueryDungeonGetPlayerPos`), switched on by
   Volvagia's `FallRockActivate` / `FallRockEffectActivate` plugs. No co-op rule matches `Obj_FallingRock_*` (not a
