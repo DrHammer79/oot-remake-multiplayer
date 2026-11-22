@@ -1031,7 +1031,8 @@ try {
         foreach ($p in $csNpcFiles + $csUiFiles + @('romfs\Sound\Resource\Voice.bars.zs', 'romfs\Model\Player_Dark_Link.bfres.zs',
                 'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Child_C005.Player_Child_C005.bfres.zs',
                 'romfs\Tex\a.bntx.zs', 'romfs\Phive\a.bphsh.zs', 'romfs\GameData\GameDataList.Product.110.byml.zs',
-                'romfs\Model\Player_Adult.Player_Adult.bfres.zs', 'romfs\Pack\Actor\Enemy_DarkLink.pack.zs')) {
+                'romfs\Model\Player_Adult.Player_Adult.bfres.zs', 'romfs\Pack\Actor\Enemy_DarkLink.pack.zs', 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs',
+                'romfs\Tex\Angin_Tile_A_Dark_Ac7.bntx.zs', 'romfs\Tex\Mt_Hairs_Player_Adult_Ah9.bntx.zs', 'romfs\Tex\Npc_Zelda_Alb.bntx.zs')) {
             $r = $p.Replace('\', '/')
             if ($r -notmatch '^romfs/') { continue }
             if (($r.Substring(6) -cmatch $KitCharselToolExclude) -ne (Test-KitCharacterSelectNpcFile $p)) { $exOk = $false; Write-Host "  exclude/NPC rule differ: $p" }

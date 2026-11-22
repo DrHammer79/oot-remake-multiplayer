@@ -1716,8 +1716,9 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
 # folder, checks every source file and every result by SHA-1 and refuses another game version. For part 'ui' it
 # skips the NPC part's files (--exclude: the rule of Test-KitCharacterSelectNpcFile). '' or why not.
 # The NPC part as player.py's --exclude (paths below romfs/, '/'): must say exactly what Test-KitCharacterSelectNpcFile
-# says for romfs files (launch_test.ps1 checks the two agree); change both together.
-$KitCharselToolExclude = '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+# says for romfs files (launch_test.ps1 checks the two agree); change both together. Link's own textures in Tex/ (named
+# *_Player_* or Angin_Tile_*) stay in the ui part (row 242).
+$KitCharselToolExclude = '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
 function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]$New, [string]$ModsDir, [string]$Downloads, [string]$Part) {
     $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
     $exeDir = Split-Path -Parent $ModsDir     # (the game's files: beside longshot.exe or a folder up, as Get-KitHookshotNeed looks)
