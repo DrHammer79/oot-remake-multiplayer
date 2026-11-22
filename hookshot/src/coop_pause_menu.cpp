@@ -742,7 +742,8 @@ std::vector<Menu::Line> Menu::Lines() const {
             out.push_back({Toggle("Character by age", char_ages_.on), Act::kCharAges,
                            "On: a character for child Link and one for adult Link. The one you pick on the "
                            "Characters page is for the age you are now; when Link grows up or goes back in time, "
-                           "you become the one picked for that age."});
+                           "you become the one picked for that age. The age you are in takes the character shown now on the "
+                           "next frame."});
             if (char_ages_.on) {
                 const auto name = [this](int n) {
                     for (const auto& [number, text] : char_ages_.characters) {
@@ -1794,6 +1795,8 @@ void Menu::Decide(Act act) {
     case Act::kDifficultyLife:
     case Act::kDifficultyDamage:
     case Act::kDifficultyCount:
+    case Act::kCharChild:
+    case Act::kCharAdult:
         Change(act, 1);
         break;
     case Act::kVoice:
@@ -1813,8 +1816,6 @@ void Menu::Decide(Act act) {
     case Act::kDbnoTime:
     case Act::kDbnoHold:
     case Act::kDbnoHearts:
-    case Act::kCharChild:
-    case Act::kCharAdult:
         Change(act, 1);
         break;
     case Act::kNone:

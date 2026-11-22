@@ -72,7 +72,13 @@ struct Input {
 struct Step {
     std::optional<std::int32_t> write;  // store this in the mod's value now
     bool stored_changed = false;        // the picks changed: save them
+    bool say = false;                   // log this write (the first of a run: a fight over the value is said once)
 };
+
+// A model is here (`files` nothing: unknown, so every pick counts as installed, as Pickable does).
+inline bool IsInstalled(std::int32_t pick, const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
+    return !files || CoopCharSlots::Installed(pick, *files);
+}
 
 class Picks {
 public:
@@ -91,7 +97,8 @@ public:
         wait_ = 0;
     }
 
-    Step Frame(const Input& in, const std::map<std::uint16_t, std::uint16_t>& files) {
+    // `files` nothing: the models are unknown (NPC models there, no pack to name them): every pick counts as installed.
+    Step Frame(const Input& in, const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
         Step out;
         if (!s_.on || !in.pick || !in.childhood || in.title) {
             last_seen_.reset();
@@ -99,7 +106,7 @@ public:
         }
         std::optional<std::int32_t>& mine = *in.childhood ? s_.child : s_.adult;
         if (in.page_open || in.swap_busy) {
-            if (last_seen_ && *in.pick != *last_seen_ && CoopCharSlots::Installed(*in.pick, files) && mine != *in.pick) {
+            if (last_seen_ && *in.pick != *last_seen_ && IsInstalled(*in.pick, files) && mine != *in.pick) {
                 mine = *in.pick;   // the player picked on his page: this age's character
                 out.stored_changed = true;
             }
@@ -113,9 +120,10 @@ public:
             out.stored_changed = true;
             return out;
         }
-        const std::int32_t want = CoopCharSlots::Installed(*mine, files) ? *mine : 0;
+        const std::int32_t want = IsInstalled(*mine, files) ? *mine : 0;
         if (*in.pick == want) {
             wait_ = 0;
+            said_ = -1;
             return out;
         }
         if (wait_ > 0) {
@@ -123,6 +131,8 @@ public:
             return out;
         }
         out.write = want;
+        out.say = said_ != want;
+        said_ = want;
         wait_ = kRewriteFrames;
         return out;
     }
@@ -131,6 +141,7 @@ private:
     Stored s_;
     std::optional<std::int32_t> last_seen_;
     int wait_ = 0;
+    std::int32_t said_ = -1;   // the value last written and logged, until the mod's value is the wanted one
 };
 
 // --- The pickable characters of the mod's characters.json ---
@@ -253,7 +264,7 @@ inline std::vector<Character> Pickable(const std::vector<Character>& list,
     std::vector<Character> out{{0, "Link"}};
     for (const auto& c : list) {
         if (c.number == 0) continue;
-        if (!files || CoopCharSlots::Installed(c.number, *files)) out.push_back(c);
+        if (IsInstalled(c.number, files)) out.push_back(c);
     }
     return out;
 }

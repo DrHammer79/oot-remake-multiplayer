@@ -3640,11 +3640,6 @@ void OnFrame(Core::System& system) {
 }
 
 namespace {
-// Rows 239/240/241 (coop_char_slots.h): our own Character Select pick, every frame of the module, co-op on or off, on
-// the title too, so no save load (title Continue or Load, System Load, Game Over's Try Again, a host's save after a
-// join) starts from a pick whose model is not here. 0.11.9 ran it only in a session and only in play: a solo game
-// never had it, and a guest had it from the load's first frame. Also registers the save files' fix (FixSavePick) on
-// the module's first frame, before the first title.
 // A Character Select pick per age (coop_char_ages.h): the two picks, kept in coop-character-ages.txt beside coop.ini.
 std::mutex g_char_ages_mutex;
 std::filesystem::path CharAgesFile() {
@@ -3665,7 +3660,7 @@ void SaveCharAges(const CoopCharAges::Stored& s) {
 
 // Each module frame after the pick guard: the age's pick written into the mod's value when it is not the shown one.
 void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
-                   const std::map<std::uint16_t, std::uint16_t>& files) {
+                   const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
     static const std::uint32_t childhood_hash = coop::host::flag_hash("Sequence_IsChildhood");
     static const std::uint32_t page_hash = coop::host::flag_hash("CharacterMenu_IsPageOpen");
     static const std::uint32_t camera_hash = coop::host::flag_hash("CharacterMenu_KeepUICamera");
@@ -3683,22 +3678,27 @@ void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
     in.title = CoopSave::TitleUp();
     CoopCharAges::Step step;
     CoopCharAges::Stored stored;
-    {
+    {   // (the file is written under the lock too: the menu's SetOn and SetPick write it from another thread)
         std::lock_guard lock(g_char_ages_mutex);
         step = CharAges().Frame(in, files);
         stored = CharAges().stored();
+        if (step.stored_changed) SaveCharAges(stored);
     }
     if (step.stored_changed) {
-        SaveCharAges(stored);
         LOG_INFO(Core, "coop: characters: by age: child {}, adult {}", stored.child.value_or(-1),
                  stored.adult.value_or(-1));
     }
-    if (step.write && coop::host::GameFlags::set_int(memory, pick_hash, *step.write)) {
+    if (step.write && coop::host::GameFlags::set_int(memory, pick_hash, *step.write) && step.say) {
         LOG_INFO(Core, "coop: characters: age {}: pick {} -> {} (shown from the next time the player is made)",
                  in.childhood.value_or(true) ? "child" : "adult", pick.value_or(0), *step.write);
     }
 }
 
+// Rows 239/240/241 (coop_char_slots.h): our own Character Select pick, every frame of the module, co-op on or off, on
+// the title too, so no save load (title Continue or Load, System Load, Game Over's Try Again, a host's save after a
+// join) starts from a pick whose model is not here. 0.11.9 ran it only in a session and only in play: a solo game
+// never had it, and a guest had it from the load's first frame. Also registers the save files' fix (FixSavePick) on
+// the module's first frame, before the first title.
 void PickGuardFrame(Core::System& system) {
     static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
     static const bool save_fix_set = [] {
@@ -3731,16 +3731,19 @@ void PickGuardFrame(Core::System& system) {
     }
     if (base == 0) return;
     if (tick++ % 600 == 0) files = CoopPuppetConfig::KnownCharacterFiles();   // (the pack's or the mod's, every 10 s)
-    if (!files) return;
     EmulatorMemory memory(system.ApplicationMemory(), base);
     const auto pick = coop::host::GameFlags(memory).get_int(pick_hash);
+    if (!files) {   // (NPC models but no pack to name them: a pick is kept; the age picks still run)
+        CharAgesFrame(memory, pick, files);
+        return;
+    }
     const auto step = own.Check(pick, *files);
     if (step.set && coop::host::GameFlags::set_int(memory, pick_hash, *step.set) && step.say) {
         LOG_INFO(Core, "coop: characters: pick {} has no model here (NPC characters not downloaded): back to {}{}",
                  pick.value_or(0), *step.set, CoopSave::TitleUp() ? " (on the title, before a load)" : "");
         g_pick_said = true;
     }
-    if (!step.set) CharAgesFrame(memory, pick, *files);
+    if (!step.set) CharAgesFrame(memory, pick, files);
 }
 
 void OnFrameBody(Core::System& system) {

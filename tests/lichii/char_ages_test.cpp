@@ -155,3 +155,39 @@ TEST_CASE("char ages: the rows offered are Link and the installed ones") {
     CHECK(CoopCharAges::Pickable(list, std::map<std::uint16_t, std::uint16_t>{}).size() == 1);   // none: Link
     CHECK(CoopCharAges::Pickable({}, std::nullopt).size() == 1);   // no list: Link
 }
+
+TEST_CASE("char ages: the models unknown (no pack): every pick counts as installed, a page pick is stored, an age change is written") {
+    const std::optional<std::map<std::uint16_t, std::uint16_t>> unknown;
+    Stored s;
+    s.on = true;
+    s.child = 77;
+    s.adult = 9;
+    Picks p(s);
+    auto st = p.Frame(At(true, 0), unknown);
+    REQUIRE(st.write);
+    CHECK(*st.write == 77);
+    Input page = At(true, 0);
+    page.page_open = true;
+    CHECK_FALSE(p.Frame(page, unknown).write);
+    page.pick = 5;  // picked on his page
+    st = p.Frame(page, unknown);
+    CHECK(st.stored_changed);
+    CHECK(p.stored().child == 5);
+    CHECK(p.Frame(At(false, 5), unknown).write == 9);  // grown up: the adult's pick
+    CHECK(CoopCharAges::IsInstalled(123, unknown));
+}
+
+TEST_CASE("char ages: a fight over the value is said once, not at every re-write") {
+    Stored s;
+    s.on = true;
+    s.child = 2;
+    s.adult = 9;
+    Picks p(s);
+    CHECK(p.Frame(At(true, 0), kFiles).say);
+    for (int i = 0; i < Picks::kRewriteFrames; ++i) p.Frame(At(true, 0), kFiles);
+    const auto again = p.Frame(At(true, 0), kFiles);
+    CHECK(again.write == 2);
+    CHECK_FALSE(again.say);
+    p.Frame(At(true, 2), kFiles);  // taken: settled
+    CHECK(p.Frame(At(true, 0), kFiles).say);
+}
