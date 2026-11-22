@@ -4,6 +4,8 @@
 
 #include <ostream>  // doctest prints string_view through it
 
+#include <cmath>
+#include <iterator>
 #include <cstring>
 #include <algorithm>
 #include <array>
@@ -134,6 +136,51 @@ TEST_CASE("objects: a scene's own enemy gets the same id on both games") {
                          Enemy(0x300, 0x1234, 2)});
     CHECK(one.IdOf(0x300)->value == 0x1234);
     CHECK(one.IdOf(0x300)->kind == proto::ObjectKind::placed);
+}
+
+TEST_CASE("objects: a hand we own holding our Link lists Dead Hand with grabbed_here (row 232)") {
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_DeadHand_Hand") == "Enemy_DeadHand");
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_DeadHand").empty());
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_Stalchild").empty());
+    const auto flags_of = [](const std::vector<proto::ObjectPresent>& present, std::uint64_t hash) {
+        std::optional<std::uint8_t> out;
+        for (const auto& p : present) {
+            for (const auto& e : p.objects) {
+                if (e.id.value == hash) out = e.flags;
+            }
+        }
+        return out;
+    };
+    const auto boss = [](int) { return Enemy(0x100, 0x11, 16, 0.0f, "Enemy_DeadHand"); };
+    const auto hand = [](bool grabbing) {
+        Seen s = Enemy(0x200, 0x22, 4, 5.0f, "Enemy_DeadHand_Hand");
+        s.attacking = grabbing;
+        return s;
+    };
+    Sync sync;
+    Tick(sync, 0, {boss(0), hand(false)}, 1);
+    Own(sync, *sync.IdOf(0x100), 2);  // Dead Hand is player 2's
+    Own(sync, *sync.IdOf(0x200), 1);  // the hand is ours (nearest to our Link)
+    auto present = All<proto::ObjectPresent>(Tick(sync, 2500 * kMs, {boss(0), hand(false)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
+    (void)sync.TakeNotes();
+    // Our hand grabs our Link: Dead Hand is wanted here (the server hands him over: Session::grab_owner).
+    present = All<proto::ObjectPresent>(Tick(sync, 2600 * kMs, {boss(0), hand(true)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) != 0);
+    CHECK((*flags_of(present, 0x22) & proto::object_presence::grabbed_here) == 0);  // only on the boss
+    auto notes = sync.TakeNotes();
+    CHECK(std::any_of(notes.begin(), notes.end(), [](const std::string& n) { return n.starts_with("grab: our "); }));
+    // It lets go: the bit goes.
+    present = All<proto::ObjectPresent>(Tick(sync, 2700 * kMs, {boss(0), hand(false)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
+    // A copy of another player's hand in its attack holds nobody of ours: no bit.
+    Own(sync, *sync.IdOf(0x200), 2, 1);
+    present = All<proto::ObjectPresent>(Tick(sync, 5000 * kMs, {boss(0), hand(true)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
 }
 
 TEST_CASE("objects: OBJECT_PRESENT on a change and every 2 s, and a new scene starts afresh") {
@@ -3573,8 +3620,8 @@ TEST_CASE("objects: GroupsOf picks the root by name, then the nearest in reach")
 
 TEST_CASE("objects: OBJECT_GROUP follows the presence, on a change and with each presence") {
     Sync sync;
-    std::vector<Seen> walk{Enemy(0x100, 0x11, 4, 0.0f, "Enemy_DeadHand"),
-                           Enemy(0x200, 0x22, 1, 5.0f, "Enemy_DeadHand_Hand")};
+    std::vector<Seen> walk{Enemy(0x100, 0x11, 4, 0.0f, "Enemy_DungeonBoss_Dodongo"),
+                           Enemy(0x200, 0x22, 1, 5.0f, "Enemy_BabyDodongo")};
     auto step = Tick(sync, 1000 * kMs, walk);
     // Presence first, then the group.
     REQUIRE(step.send.size() >= 2);
@@ -7907,3 +7954,240 @@ TEST_CASE("boss-turns-older-0119: a game that takes boss turns lists its bosses 
         }
     }
 }
+
+TEST_CASE("objects: a Redead's scream reaches each Link in its reach, not only its owner's (row 230)") {
+    CHECK(CoopObjects::IsScreamer("Enemy_ReDead"));
+    CHECK(CoopObjects::IsScreamer("Enemy_ReDead_ClimaxOnly"));
+    CHECK(CoopObjects::IsScreamer("Enemy_Gibdo"));
+    CHECK_FALSE(CoopObjects::IsScreamer("Enemy_ReDead_Dictionary"));
+    CHECK_FALSE(CoopObjects::IsScreamer("Enemy_Stalchild"));
+    CHECK(CoopObjects::IsScream("Shout", 0));
+    CHECK(CoopObjects::IsScream("CryStanding", 0));
+    CHECK(CoopObjects::IsScream("Wait", 0));             // no life taken, no bite: the scream
+    CHECK_FALSE(CoopObjects::IsScream("Attack_Loop", 0)); // the bite holding on
+    CHECK_FALSE(CoopObjects::IsScream("Wait", 2));
+    CHECK_FALSE(CoopObjects::IsScream("", 0));
+    // RedeadParam: 5.5 m and 45 degrees off its front (an identity rotation faces +z).
+    const proto::Quat ahead{0.0f, 0.0f, 0.0f, 1.0f};
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, 5}));
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, ahead, {2, 0, 3}));
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, 6}));   // too far
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, -3}));  // behind it
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {3, 0, 0}));   // at its side
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 4, 2}));   // a floor up
+    const float h = std::sqrt(0.5f);  // turned 90 degrees about y: faces +x
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, proto::Quat{0.0f, h, 0.0f, h}, {3, 0, 0}));
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, std::nullopt, {-3, 0, 0}));  // no rotation: the distance only
+
+    std::array<std::uint32_t, proto::kStrikeKindWords> kind{};
+    kind[0] = 0x00110003;
+    kind[10] = 0x42;
+    const auto redead = [](std::uint64_t a, const std::string& anim) {
+        Seen s = Enemy(a, 0x11, 8, 0.0f, "Enemy_ReDead");
+        s.animation = proto::Animation{anim, 0.0f, 1.0f};
+        return s;
+    };
+
+    // The owner: its scream froze our Link: its next sample carries that hit's kind, at once.
+    Sync owner;
+    Tick(owner, 0, {redead(0x200, "Wait")});
+    const proto::ObjectId oid = *owner.IdOf(0x200);
+    Own(owner, oid, 1);
+    Tick(owner, 10 * kMs, {redead(0x200, "Shout")});
+    owner.NoteOurLinkHit(0x200, kind, 0);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 20 * kMs, {redead(0x200, "Shout")}));
+    REQUIRE_FALSE(samples.empty());
+    REQUIRE(samples.back().state.strike);
+    CHECK(samples.back().state.strike->seq == 1);
+    CHECK(samples.back().state.strike->kind == kind);
+    // Its bite is not shared (the other Links are not held by it).
+    Sync biter;
+    Tick(biter, 0, {redead(0x210, "Wait")});
+    Own(biter, *biter.IdOf(0x210), 1);
+    Tick(biter, 10 * kMs, {redead(0x210, "Attack_Loop")});
+    biter.NoteOurLinkHit(0x210, kind, 2);
+    for (const auto& s : All<proto::ObjectSample>(Tick(biter, 10 * kMs + Sync::kSampleEveryUs, {redead(0x210, "Attack_Loop")}))) {
+        CHECK_FALSE(s.state.strike);
+    }
+    // A copy's hit on our Link is not ours to share (its owner's game shares its own).
+    Sync copy_of;
+    Tick(copy_of, 0, {redead(0x220, "Wait")});
+    Own(copy_of, *copy_of.IdOf(0x220), 2);
+    copy_of.NoteOurLinkHit(0x220, kind, 0);
+    for (const auto& s : All<proto::ObjectSample>(Tick(copy_of, 10 * kMs, {redead(0x220, "Shout")}))) {
+        CHECK_FALSE(s.state.strike);
+    }
+
+    // Another game's copy: our Link in its reach takes the hit, once per seq; out of its reach, not.
+    const auto copy_game = [&](const proto::Vec3& link) {
+        Sync copy;
+        Tick(copy, 0, {redead(0x300, "Wait")});
+        const proto::ObjectId cid = *copy.IdOf(0x300);
+        Own(copy, cid, 2, 3);
+        copy.SetPlayer(link);
+        proto::ObjectSample s{2, cid, 3, {}};
+        s.state.time = {15 * kMs, 1};
+        s.state.position = proto::Vec3{0.0f, 0.0f, 0.0f};
+        s.state.rotation = proto::Quat{0.0f, 0.0f, 0.0f, 1.0f};
+        s.state.strike = proto::ObjectStrike{1, kind};
+        copy.Receive(s);
+        Tick(copy, 20 * kMs, {redead(0x300, "Shout")});
+        auto strikes = copy.TakeLinkStrikes();
+        s.state.time = {25 * kMs, 1};
+        copy.Receive(s);  // the same scream again (its samples carry it a while): not twice
+        Tick(copy, 30 * kMs, {redead(0x300, "Shout")});
+        CHECK(copy.TakeLinkStrikes().empty());
+        return strikes;
+    };
+    const auto near = copy_game({0.0f, 0.0f, 3.0f});
+    REQUIRE(near.size() == 1);
+    CHECK(near[0].address == 0x300);
+    CHECK(near[0].kind == kind);
+    CHECK(near[0].at == proto::Vec3{0.0f, 0.0f, 3.0f});
+    CHECK(copy_game({0.0f, 0.0f, 9.0f}).empty());
+    CHECK(copy_game({0.0f, 0.0f, -3.0f}).empty());
+}
+
+TEST_CASE("objects: Dead Hand's hands are enemies of their own, each grabs its own owner's Link (row 232)") {
+    using CoopObjects::GroupInput;
+    const auto id = [](std::uint64_t v) { return proto::ObjectId{proto::ObjectKind::placed, 0, v}; };
+    CHECK(CoopObjects::IsBoss("Enemy_DeadHand"));
+    CHECK(CoopObjects::IsBossOrPart("Enemy_DeadHand"));
+    CHECK_FALSE(CoopObjects::IsBossOrPart("Enemy_DeadHand_Dictionary"));
+    CHECK(CoopObjects::PartOf("Enemy_DeadHand_Hand") == nullptr);
+    CHECK_FALSE(CoopObjects::IsBossOrPart("Enemy_DeadHand_Hand"));
+    CHECK(CoopObjects::IsShared("Enemy_DeadHand_Hand"));
+    // His room (Bottom of the Well's placements, 5 m around him): he is a boss group of his own, no hand follows him.
+    const std::vector<GroupInput> walk{{id(1), "Enemy_DeadHand", {0, 92, -105}},
+                                       {id(2), "Enemy_DeadHand_Hand", {5, 92, -103}},
+                                       {id(3), "Enemy_DeadHand_Hand", {0, 92, -108}},
+                                       {id(4), "Enemy_DeadHand_Hand", {-5, 92, -103}}};
+    const auto g = CoopObjects::GroupsOf(walk);
+    REQUIRE(g.size() == 1);
+    CHECK(g[0] == proto::ObjectGroupEntry{id(1), id(1), proto::object_group::boss});
+}
+
+TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own are deleted (also in a loop) and a turn hands the making over (row 231)") {
+    const std::string meg = "Enemy_MiddleBoss_Poe_Meg";
+    const std::string decoy = "Enemy_MiddleBoss_Poe_Meg_Dummy";
+    CHECK(CoopObjects::MinionMaker(decoy) == meg);
+    CHECK(CoopObjects::MinionMaker(meg).empty());
+
+    // A owns Meg: her three decoys are shared as made ids.
+    Sync a;
+    const Seen meg_a = Enemy(0x100, 0x77, 16, 0.0f, meg);
+    Tick(a, 0, {meg_a}, 1);
+    const proto::ObjectId meg_id = *a.IdOf(0x100);
+    Own(a, meg_id, 1);
+    Tick(a, 50 * kMs, {meg_a}, 1);
+    const auto spawns = All<proto::ObjectSpawn>(Tick(
+        a, 100 * kMs,
+        {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+         Enemy(0x112, ~0ULL, 1, 6.0f, decoy)},
+        1));
+    REQUIRE(spawns.size() == 3);
+    for (const auto& s : spawns) {
+        CHECK(s.id.kind == proto::ObjectKind::made);
+        CHECK(s.actor == decoy);
+    }
+    // (sent in walk order: by name, then x; picked by place here)
+    const auto spawn_at = [&spawns](float x) {
+        const auto it = std::find_if(spawns.begin(), spawns.end(), [x](const proto::ObjectSpawn& s) {
+            return s.state.position && std::fabs((*s.state.position)[0] - x) < 0.01f;
+        });
+        REQUIRE(it != spawns.end());
+        return *it;
+    };
+    const proto::ObjectSpawn seat_right = spawn_at(3.0f);
+    const proto::ObjectSpawn seat_left = spawn_at(-3.0f);
+
+    // B's copy of Meg makes her own decoys on the same seats (her own layout, the room's seats). B's spawn first:
+    // nothing of A's is being made here yet, so B's own is deleted at once, and A's is made instead.
+    Sync b;
+    const Seen meg_b = Enemy(0x200, 0x77, 16, 0.0f, meg);
+    Tick(b, 0, {meg_b}, 2);
+    Own(b, meg_id, 1);
+    Tick(b, 50 * kMs, {meg_b}, 2);
+    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, 3.0f, decoy)}, 2);
+    CHECK_FALSE(b.IdOf(0x210));
+    CHECK(b.Removes() == std::vector<std::uint64_t>{0x210});
+    b.Receive(seat_right);
+    Tick(b, 150 * kMs, {meg_b}, 2);
+    REQUIRE(b.Creates().size() == 1);
+
+    // The claim path: A's next decoy is being made here (not yet bound) when B's own Meg makes one on that same seat
+    // (within kClaimDistance, half a metre off): it may be the director's copy, so it waits; once the director's
+    // copy is bound it is not, and it is deleted. One decoy on that seat, A's.
+    b.Receive(seat_left);
+    Tick(b, 175 * kMs, {meg_b}, 2);  // (a received spawn is taken in this Tick, after its new actors)
+    Tick(b, 200 * kMs, {meg_b, Enemy(0x220, ~0ULL, 1, -2.5f, decoy)}, 2);
+    CHECK_FALSE(b.IdOf(0x220));
+    CHECK(b.Removes().empty());
+    const auto creates = b.Creates();
+    REQUIRE(creates.size() == 2);
+    const auto copy = std::find_if(creates.begin(), creates.end(), [](const auto& c) { return c.position[0] < 0.0f; });
+    REQUIRE(copy != creates.end());
+    b.Bind({{creates[0].key == copy->key ? creates[1].key : creates[0].key, 0x211}, {copy->key, 0x221}});
+    Tick(b, 250 * kMs,
+         {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x220, ~0ULL, 1, -2.5f, decoy),
+          Enemy(0x221, ~0ULL, 1, -3.0f, decoy)},
+         2);
+    REQUIRE(b.IdOf(0x221));
+    CHECK(*b.IdOf(0x221) == seat_left.id);
+    REQUIRE(b.IdOf(0x211));
+    CHECK(*b.IdOf(0x211) == seat_right.id);
+    CHECK_FALSE(b.IdOf(0x220));
+    CHECK(b.Removes() == std::vector<std::uint64_t>{0x220});
+
+    // Her copy remakes what we delete, again and again: still deleted every time (never matched by order, which was
+    // row 231's own bug); the loop is logged once.
+    std::uint64_t at = 300 * kMs;
+    (void)b.TakeNotes();
+    for (std::size_t made = 0; made <= CoopObjects::kMinionLoopMax + 2; ++made) {
+        const std::uint64_t own = 0x300 + made;
+        Tick(b, at, {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy),
+                     Enemy(own, ~0ULL, 1, -20.0f, decoy)},
+             2);
+        CHECK_FALSE(b.IdOf(own));
+        CHECK(b.Removes() == std::vector<std::uint64_t>{own});
+        at += 100 * kMs;
+    }
+    const auto notes = b.TakeNotes();
+    CHECK(std::count_if(notes.begin(), notes.end(),
+                        [](const std::string& n) { return n.find("(a loop): still deleted") != std::string::npos; }) == 1);
+
+    // Meg turns to B mid-cycle (a MiddleBoss turns every attack): A's decoys already made stay A's (made ids, their
+    // maker's); the decoys made from now on are B's to share, and A's game deletes its own new ones.
+    // (an owner change is taken in the next Tick, after that Tick's new actors: one Tick for it first)
+    Own(b, meg_id, 2, 1);
+    Own(a, meg_id, 2, 1);
+    Tick(b, at, {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy)}, 2);
+    Tick(a, at,
+         {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+          Enemy(0x112, ~0ULL, 1, 6.0f, decoy)},
+         1);
+    (void)b.Removes();
+    (void)a.Removes();
+    at += 100 * kMs;
+    const auto turned_all = All<proto::ObjectSpawn>(Tick(
+        b, at,
+        {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy),
+         Enemy(0x400, ~0ULL, 1, 9.0f, decoy)},
+        2));
+    std::vector<proto::ObjectSpawn> turned;  // (her own announce as B's late encounter is not a decoy)
+    std::copy_if(turned_all.begin(), turned_all.end(), std::back_inserter(turned),
+                 [&decoy](const proto::ObjectSpawn& s) { return s.actor == decoy; });
+    REQUIRE(turned.size() == 1);
+    CHECK(turned[0].id.kind == proto::ObjectKind::made);
+    CHECK(turned[0].id.maker == 2);
+    CHECK(*b.IdOf(0x211) == seat_right.id);
+    CHECK(*b.IdOf(0x221) == seat_left.id);
+    CHECK(b.Removes().empty());
+    Tick(a, at, {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+                 Enemy(0x112, ~0ULL, 1, 6.0f, decoy), Enemy(0x130, ~0ULL, 1, 12.0f, decoy)},
+         1);
+    CHECK(a.IdOf(0x110));
+    CHECK_FALSE(a.IdOf(0x130));
+    CHECK(a.Removes() == std::vector<std::uint64_t>{0x130});
+}
+

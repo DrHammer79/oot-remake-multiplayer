@@ -677,6 +677,7 @@ Error check_object_state(const ObjectState& s) {
     }
   }
   if (s.hit && s.hit->seq == 0) return Error::bad_value;  // (seqs count from 1)
+  if (s.strike && s.strike->seq == 0) return Error::bad_value;
   if (s.bsa) {
     const auto finite = [](const BossAction& a) {
       for (const auto& p : a.places) {
@@ -786,6 +787,12 @@ void write_object_state(const ObjectState& s, Writer& w) {
     component(ObjectComponent::hit, [&] {
       w.u32(s.hit->seq);
       for (std::uint32_t word : s.hit->record) w.u32(word);
+    });
+  }
+  if (s.strike) {
+    component(ObjectComponent::strike, [&] {
+      w.u32(s.strike->seq);
+      for (std::uint32_t word : s.strike->kind) w.u32(word);
     });
   }
 }
@@ -1501,6 +1508,13 @@ Error decode_component(ObjectComponent id, Reader& c, ObjectState& s, bool& know
       COOP_READ(c.u32(h.seq));
       if (h.seq == 0) return Error::bad_value;
       for (std::uint32_t& word : h.record) COOP_READ(c.u32(word));
+      return Error::none;
+    }
+    case ObjectComponent::strike: {
+      ObjectStrike& k = s.strike.emplace();
+      COOP_READ(c.u32(k.seq));
+      if (k.seq == 0) return Error::bad_value;
+      for (std::uint32_t& word : k.kind) COOP_READ(c.u32(word));
       return Error::none;
     }
     case ObjectComponent::bsa: {

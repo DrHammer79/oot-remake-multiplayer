@@ -52,6 +52,7 @@
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
+#include "coop_presence_gates.h"
 #include "coop_every.h"
 #include "coop_event_result.h"
 #include "coop_cheat_items.h"
@@ -2097,6 +2098,30 @@ public:
             sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
+        for (const CoopObjects::Sync::LinkStrike& k : sync_.TakeLinkStrikes()) {
+            // Row 230: another game's Redead or Gibdo froze its owner's Link with our Link in its reach: ours takes
+            // that scream's hit, no life (its game's SleepParalysis reaction).
+            CoopObjects::HurtOurLinkNative(0, k.at, k.from, k.kind);
+        }
+        if (main_ != 0) {
+            // Row 233: a shared flag that gates dungeon pieces changed: which of them our game has now (the probe).
+            if (*scene != presence_scene_) {
+                presence_scene_ = *scene;
+                presence_.Reset();
+            }
+            CoopHook::EmulatorMemory memory(system.ApplicationMemory(), main_);
+            coop::host::GameFlags flags(memory);
+            const auto lines = presence_.Step(
+                CoopEvery::NowUs(), [&flags](std::uint32_t hash) { return flags.get_bool(hash); },
+                [this](std::string_view name) {
+                    std::size_t n = 0;
+                    for (const auto& [a, known] : names_) n += known.first == name ? 1 : 0;
+                    return n;
+                });
+            for (const std::string& line : lines) {
+                LOG_INFO(Core, "coop: objects: {}", line);
+            }
+        }
         // A Gold Skulltula whose key this save already holds is not made again
         // (issue 89, 2026-11-16). The game reads a placement's key once, when
         // the scene's actors are made, and never looks again, so a key that
@@ -4369,10 +4394,12 @@ private:
             names.emplace(a, std::move(known));
         }
         names_ = std::move(names);
+        NoteFallingRocks();  // row 234: Volvagia's rocks, per game
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
         sync_.SetPlayer(player);
+        NoteOurLinkHit(r);  // row 230: a Redead's or Gibdo's scream on our Link
         sync_.SetLures(CoopProjectiles::TheLures().Get());  // issue 151: our cast lures
         player_ = player;
         {  // issue 144 / scrub sales: a scrub near our Link or bound into our event holds its flags
@@ -6040,6 +6067,62 @@ private:
     CoopEvery::Every scan_{CoopEvery::kTwoFramesUs};
     CoopPivot::Follower pivot_;
     u32 link_hit_said_ = 0xffffffffu;  // the scream probe: our Link's last hit id seen
+    u32 link_hit_id_ = 0xffffffffu;    // row 230 (NoteOurLinkHit): our Link's last hit id read in the walk
+    CoopPresenceGates::Probe presence_;  // row 233
+    std::string presence_scene_;
+
+    // Row 234 (Geno's survey): Volvagia's arena drops its rocks (Obj_FallingRock_A_06, from its
+    // Obj_FallingRockManager's pool, aimed at the game's own Link: QueryDungeonGetPlayerPos) when Volvagia's
+    // FallRockActivate plug switches it on; co-op shares none of them. Whether a game that does not own her drops
+    // its own is the live check: at most every 5 s, while new rocks come, one line with how many. Read only.
+    std::set<u64> rocks_seen_;
+    std::size_t rocks_new_ = 0;
+    u64 rocks_said_us_ = 0;
+    void NoteFallingRocks() {
+        std::set<u64> now;
+        for (const auto& [a, known] : names_) {
+            if (known.first.starts_with("Obj_FallingRock_")) {
+                now.insert(a);
+                rocks_new_ += rocks_seen_.contains(a) ? 0 : 1;
+            }
+        }
+        rocks_seen_ = std::move(now);
+        const u64 now_us = CoopEvery::NowUs();
+        if (rocks_new_ == 0 || now_us - rocks_said_us_ < 5'000'000) {
+            return;
+        }
+        LOG_INFO(Core, "coop: objects: rocks: {} new falling rocks in our game since the last line ({} live)",
+                 rocks_new_, rocks_seen_.size());
+        rocks_new_ = 0;
+        rocks_said_us_ = now_us;
+    }
+
+    // Row 230: our Link's Life took a new hit since the last walk (its last hit id moved): who dealt it, its kind
+    // words and the life it took, for the Sync (a screamer of ours shares its scream). Read only.
+    void NoteOurLinkHit(Reader& r) {
+        const u64 link = TheLinkActor().load();
+        const auto table = link != 0 ? r.Ptr(link + kActorComponents) : std::nullopt;
+        const auto life = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
+        const auto id = life ? r.Get<u32>(*life + kLastHitId) : std::nullopt;
+        if (!id || *id == link_hit_id_) {
+            return;
+        }
+        const bool first = link_hit_id_ == 0xffffffffu;
+        link_hit_id_ = *id;
+        if (first) {
+            return;  // (the hit before we looked)
+        }
+        const u64 attacker = r.Get<u64>(*life + kHitRecord).value_or(0);
+        const auto rec = r.Get<coop::protocol::HitRecord>(*life + kHitRecord);
+        if (attacker == 0 || !rec) {
+            return;
+        }
+        std::array<std::uint32_t, coop::protocol::kStrikeKindWords> kind{};
+        for (std::size_t i = 0; i < kind.size(); ++i) {
+            kind[i] = (*rec)[CoopHitReplay::kRecKind + i];
+        }
+        sync_.NoteOurLinkHit(attacker, kind, r.Get<s32>(*life + kLifeHurt).value_or(0));
+    }
     u64 pivot_actor_ = 0;
     u64 pivot_look_ms_ = 0;
     std::optional<std::int32_t> pivot_dir_said_;
