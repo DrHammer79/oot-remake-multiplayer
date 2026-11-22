@@ -1187,7 +1187,9 @@ TEST_CASE("flag watcher: a guest's older save joining a host's new file takes th
   CHECK(guest_game.get(kHookshot) == 0);
   CHECK(guest_game.get(kEmerald) == 0);
   CHECK(w.stats().snapshot_exact == 2);
-  // From now on the guest plays the host's file: its own new pickup goes out.
+  // From now on the guest plays the host's file: its own new pickup goes out (row 238: after the join's hold on a
+  // lowered max-rule value has ended, kResetQuietFrames of the game keeping it; no pickup comes in that second).
+  for (int i = 0; i <= FlagWatcher::kResetQuietFrames; ++i) CHECK(w.frame(store).empty());
   guest_game.values[kHookshot] = entry(kHookshot, 1, proto::FlagKind::int32);
   CHECK(only<proto::FlagSet>(w.frame(store)) ==
         std::vector{entry(kHookshot, 1, proto::FlagKind::int32)});
@@ -3383,6 +3385,50 @@ TEST_CASE("flag watcher: the host's older save lowers MaxLife, our game's write-
   // ...and the refight's container (12 -> 16, no higher than before the load) is real progress again.
   game_store.values[kMaxLife] = entry(kMaxLife, 16, proto::FlagKind::int32);
   CHECK(only<proto::FlagSet>(w.frame(store)) == std::vector{entry(kMaxLife, 16, proto::FlagKind::int32)});
+}
+
+TEST_CASE("flag watcher: a guest with more hearts joining a host with fewer follows the host, its write-back is not sent (row 238)") {
+  // corgidad's Mac guest (own save, 4 hearts) joined a host with 3: the snapshot wrote 3, the game's Life component
+  // wrote its 4 back, the max rule sent it and the host rose to 4. The join now holds the value as a host's save load
+  // does (rows 136/137): put back, never sent, until the game keeps it; a rise past 4 is real progress.
+  constexpr FlagKey kMaxLife{0xfbe01da1u, 0};  // PlayerStatus.MaxLife, max (quarter hearts: 12 = 3, 16 = 4)
+  constexpr FlagKey kMagic{0x12d63a97u, 0};    // PlayerStatus.MPMax, max: every max-rule capacity the same way
+  FakeStore game;
+  game.values[kMaxLife] = entry(kMaxLife, 16, proto::FlagKind::int32);
+  game.values[kMagic] = entry(kMagic, 96, proto::FlagKind::int32);
+  ItemFlagStore store(game);
+  FlagWatcher w(SharedFlags({kMaxLife, kMagic}), FlagRole::player);
+  CHECK(w.frame(store).empty());  // the baseline: the guest's own save
+  w.reset();                      // a new connection
+  CHECK(w.receive(proto::FlagSnapshot{
+      0, 1, {entry(kMaxLife, 12, proto::FlagKind::int32), entry(kMagic, 48, proto::FlagKind::int32)}}));
+  CHECK(w.frame(store).empty());
+  CHECK(game.get(kMaxLife) == 12u);
+  CHECK(w.reset_lowered(kMaxLife) == 12);
+  CHECK(w.reset_lowered(kMagic) == 48);
+  for (int round = 0; round < 5; ++round) {
+    game.values[kMaxLife] = entry(kMaxLife, 16, proto::FlagKind::int32);   // the game's write-back of its own
+    game.values[kMagic] = entry(kMagic, 96, proto::FlagKind::int32);
+    CHECK(w.frame(store).empty());
+    CHECK(game.get(kMaxLife) == 12u);
+    CHECK(game.get(kMagic) == 48u);
+  }
+  for (int i = 0; i <= FlagWatcher::kResetQuietFrames; ++i) CHECK(w.frame(store).empty());
+  CHECK_FALSE(w.reset_lowered(kMaxLife));
+}
+
+TEST_CASE("flag watcher: a guest with fewer hearts joining a host with more gets the host's value, a join with no lower value holds nothing (row 238)") {
+  constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
+  FakeStore game;
+  game.values[kMaxLife] = entry(kMaxLife, 12, proto::FlagKind::int32);
+  ItemFlagStore store(game);
+  FlagWatcher w(SharedFlags({kMaxLife}), FlagRole::player);
+  CHECK(w.frame(store).empty());
+  w.reset();
+  CHECK(w.receive(proto::FlagSnapshot{0, 1, {entry(kMaxLife, 16, proto::FlagKind::int32)}}));
+  CHECK(w.frame(store).empty());
+  CHECK(game.get(kMaxLife) == 16u);   // the host's 4 hearts, nothing sent
+  CHECK_FALSE(w.reset_lowered(kMaxLife));
 }
 
 TEST_CASE("flag watcher: a reset hold lets a rise past the old value through, ends at a load, a higher reset holds nothing") {

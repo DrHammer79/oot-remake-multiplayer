@@ -1031,6 +1031,29 @@ function Get-KitHookshotStamp([string]$Kit, [string]$Game = '') {
 # coop.ini and the options stay in the game folder).
 function Get-KitGameVariantRoot([string]$Kit) { return (Join-Path $Kit 'hookshot\game-variants') }
 
+# Rows 239/240 (black-join-0119): a game whose build-made files were being written when the window closed (a build, a
+# kept build put back, a copy from the game cache) still had the coop-built-from.txt of the build before it, so the next
+# start took the mixed files for that build: it kept them as that build for later and started them, and the world never
+# drew. Now coop-build-unfinished.txt goes into the game folder before anything writes those files and leaves only after
+# the new coop-built-from.txt is written: while it is there the game is never ready, never kept, and the module says so
+# on the title when the game is started some other way (coop_hookshot.cpp, kGameUnfinishedFile).
+$KitGameUnfinishedFile = 'coop-build-unfinished.txt'
+function Test-KitGameUnfinished([string]$Game) {
+    return [bool]$Game -and (Test-Path -LiteralPath (Join-Path $Game $KitGameUnfinishedFile))
+}
+# Before the game's build-made files are written ($What: what writes them, for the log and the next start's line).
+function Start-KitGameWrite([string]$Game, [string]$What) {
+    if (-not $Game) { return }
+    New-Item -ItemType Directory -Force -Path $Game | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $Game $KitGameUnfinishedFile),
+        "The co-op game was being written here ($What) and that did not finish. Start Squadala finishes it.`r`n")
+}
+# After the new coop-built-from.txt is written.
+function Complete-KitGameWrite([string]$Game) {
+    if (-not $Game) { return }
+    Remove-Item -LiteralPath (Join-Path $Game $KitGameUnfinishedFile) -Force -ErrorAction SilentlyContinue
+}
+
 # The stamp text as compared: line endings and trailing space do not count, plus the game's DLSS state (a game with
 # NVIDIA's runtime is kept apart: Test-KitHookshotDlss).
 function ConvertTo-KitVariantStamp([string]$Stamp, [bool]$Dlss) {
@@ -1076,6 +1099,8 @@ function Get-KitGameVariantFiles([string]$Game) {
 function Save-KitGameVariant([string]$Kit, [string]$Game, [int]$Keep = 3) {
     $stampFile = Join-Path $Game 'coop-built-from.txt'
     if (-not (Test-Path -LiteralPath $stampFile) -or -not (Get-KitHookshotExe $Game)) { return '' }
+    # (a write that did not finish: these files are not the build its stamp names, never kept as it)
+    if (Test-KitGameUnfinished $Game) { return '' }
     $files = @(Get-KitGameVariantFiles $Game)
     if (-not ($files | Where-Object { $_ -like '*longshot.exe' }) -or -not ($files -contains 'image.bin')) { return '' }
     $text = ConvertTo-KitVariantStamp ([System.IO.File]::ReadAllText($stampFile)) (Test-KitHookshotDlss $Game)
@@ -1214,6 +1239,12 @@ function Get-KitHookshotNeed([string]$Kit) {
     [void](Sync-KitCharselNativePatch $Kit (Join-Path $game 'mods\contents\0400486024DEC000\coop-puppet'))
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
+    if (Test-KitGameUnfinished $game) {
+        # (rows 239/240: a build, put back or copy stopped half way; a kept build of exactly this stamp still goes back)
+        $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
+        if (Find-KitGameVariant $Kit $want $wantDlss) { return 'variant' }
+        return 'unfinished'
+    }
     if ($have -ne $want) {
         # (row 210: a build of exactly this stamp kept from before, e.g. a code mod switched back: put back in seconds)
         $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
@@ -2237,6 +2268,7 @@ function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnl
         'pin' { 'Your co-op game was built for another game version than this kit uses: it is built again (about 15 minutes; the PC stays usable).' }
         'patches' { 'This update changes the co-op game a little: updating it (a few minutes).' }
         'mods' { 'A mod''s code patches changed (a mod with an exefs folder put in, changed or taken out, or switched on the Mods tab): the co-op game is built again with them, about 5 to 25 minutes (the PC stays usable). This build is kept, and so is the one before it: switching that mod back later takes seconds.' }
+        'unfinished' { 'The last build of the co-op game was stopped before it finished (its window was closed), so the game would start with half of its files and could show only a black screen. It is finished now (about 5 to 45 minutes; the PC stays usable).' }
         'variant' { 'The co-op game was built before with the mods'' code patches as they are now (a mod with an exefs folder switched back on the Mods tab): that build is put back (seconds, no build).' }
         'module' { 'Putting the updated co-op and the puppet pack into the co-op game (seconds to a minute).' }
         'quarantine' { Get-KitHookshotQuarantineText }
@@ -2250,6 +2282,7 @@ function Get-KitHookshotNeedQuestion([string]$Need) {
         'game' { 'Set it up now?' }
         'moved' { 'Build it again now?' }
         'pin' { 'Update it now?' }
+        'unfinished' { 'Finish it now?' }
         default { '' }
     }
 }
@@ -2580,24 +2613,78 @@ function Get-KitPackArgs([string]$Tool, [string]$From, [string]$Mod) {
     return @('-I', '-B', $Tool, '--romfs', $From, '--mod-dir', $Mod, '--title-rows', '--pause-tab')
 }
 
+# Row 235: the no-Python start. The puppet pack's menu files (coop_puppet.json "title_menu" and "pause_menu": larger copies
+# of files the game reads at boot) are only safe while the size table the game reads holds their sizes, which only
+# merge_tables.py can check. Without it, move them to <pack>\_coop-menus (the game never reads them there), where
+# merge_tables.py guard_menus keeps them too; its next run puts them back. Returns how many files it moved.
+function Move-KitMenuFilesAside([string]$Mods) {
+    $moved = 0
+    $packs = @(Get-ChildItem -LiteralPath (Join-Path $Mods 'contents') -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'coop-puppet' } | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'coop_puppet.json') })
+    foreach ($pack in $packs) {
+        # Only where another mod could win a size table the pack has (a same-name table in another mod folder; folders
+        # starting with _ are skipped as Longshot does): when the pack's own table is the only one, its menus are safe.
+        $tables = @(Get-ChildItem -LiteralPath (Join-Path $pack 'romfs\System\Resource') -Filter '*.rsizetable.zs' -File -ErrorAction SilentlyContinue | ForEach-Object Name)
+        $others = $false
+        foreach ($t in $tables) {
+            $hit = Get-ChildItem -LiteralPath $Mods -Recurse -Filter $t -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notlike "$pack\*" -and $_.FullName -like '*\romfs\System\Resource\*' -and $_.FullName -and $_.FullName.Substring($Mods.TrimEnd('\').Length) -notmatch '\\_[^\\]*\\' } | Select-Object -First 1
+            if ($hit) { $others = $true; break }
+        }
+        if (-not $others) { continue }
+        try {
+            $m = Get-Content -LiteralPath (Join-Path $pack 'coop_puppet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($key in 'title_menu', 'pause_menu') {
+                foreach ($rel in @($m.$key)) {
+                    if (-not ($rel -is [string]) -or -not $rel) { continue }
+                    $src = Join-Path $pack ('romfs\' + $rel.Replace('/', '\'))
+                    if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+                    $dst = Join-Path $pack ('_coop-menus\' + $rel.Replace('/', '\'))
+                    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+                    Move-Item -LiteralPath $src -Destination $dst -Force
+                    $moved++
+                }
+            }
+        } catch { }
+    }
+    return $moved
+}
+
 # #48: Longshot serves ONE resource size table, the winning mod's. A seed made on OOTRR's website (its folder put into
 # mods by hand) has its own, made without the puppet pack's entries, so the others could not be shown. Before the game
 # starts, tools\puppet_pack\merge_tables.py writes ONE table where the game reads it: that mod's entries and every
 # other mod's that is on (the pack's too), keeping its own in <mod>\_coop-size-table (undo: merge_tables.py --undo).
 # Last it writes <mod>\coop-merged.txt, which the module checks (MergedByKit) to keep the puppets on. Never stops the start. The lines it says, for the window.
-function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir) {
-    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir, [string]$Python = '') {
+    $python = if ($Python) { $Python } else { Join-Path $Kit 'hookshot\tools\python\python.exe' }
     $tool = Join-Path $Kit 'tools\puppet_pack\merge_tables.py'
     $mods = Join-Path $ExeDir 'mods'
     if (-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $mods)) { return @() }
-    if (-not (Test-Path -LiteralPath $python)) { return @("Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown.") }
+    if (-not (Test-Path -LiteralPath $python)) {
+        # Row 235: without the merge nobody checks that the size table the game reads holds the pack's menu files, and a
+        # mod whose table wins (Character Select) crashed both games at the title. So park them, as merge_tables.py's
+        # guard_menus does (the game keeps its own menus, co-op works from the Minus menu).
+        $parked = Move-KitMenuFilesAside $mods
+        $msg = "Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown."
+        if ($parked) { $msg += " The title's co-op rows and the pause menu's Multiplayer tab are off this start ($parked files kept aside); the next start with Python puts them back." }
+        return @($msg)
+    }
     $romfs = @((Join-Path $ExeDir 'romfs'), (Join-Path (Split-Path -Parent $ExeDir) 'romfs')) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Pack') } | Select-Object -First 1
     $pyArgs = @('-I', '-B', $tool, '--mods', $mods)
     if ($romfs) { $pyArgs += @('--romfs', $romfs) }
     $before = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" }) } catch { $out = @("Size tables: not merged ($($_.Exception.Message)).") }
+    $failed = $false
+    try {
+        $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" })
+        # Python died before main() (an import error, a Traceback) without saying either of its own lines: unchecked.
+        if ($LASTEXITCODE -ne 0 -and -not ($out | Where-Object { $_ -match '^\s*(Size tables|Menus):' })) { $failed = $true }
+    } catch { $out = @("Size tables: not merged ($($_.Exception.Message))."); $failed = $true }
     $ErrorActionPreference = $before
+    if ($failed) {
+        $parked = Move-KitMenuFilesAside $mods
+        if ($parked) { $out += "Menus: the merge did not run ($parked of the puppet pack's menu files kept aside; the title's co-op rows and the pause menu's Multiplayer tab are off this start)." }
+    }
     return $out
 }
 

@@ -1209,7 +1209,7 @@ def nup_scene_files(n):
         if kind == "d":
             out += n.glob(f"Banc/{scene}/*.bcett.byml.zs")
     for pattern in map_captures.FILES:  # the map pictures' places, for coop_maps.txt
-        out += n.glob(pattern)[:1]
+        out += ui_pack.newest(n.glob(pattern)) if pattern == title_menu.SCREEN_GLOB else n.glob(pattern)[:1]
     return out
 
 
