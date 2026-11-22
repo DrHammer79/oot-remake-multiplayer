@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_title_native.h"
 
+#include "coop_i18n.h"
+
 #include <algorithm>
 #include <vector>
 
@@ -20,15 +22,21 @@ std::string Fit(std::string t, std::size_t n) {
 
 std::string RowText(const CoopPauseMenu::Row& r) {
     using CoopPauseMenu::RowKind;
-    std::string t = r.name;
+    // The row's words in the player's language (coop_i18n.h), before the cut: a
+    // cut line is not the table's line any more. The table has no line for the
+    // game's own English (the tests read this file's lines as they are written).
+    const std::string name = CoopI18n::Tr(r.name);
+    const std::string value = CoopI18n::Tr(r.value);
+    std::string t = name;
     switch (r.kind) {
-    case RowKind::kToggle: t += std::string(": ") + (r.on ? "On" : "Off"); break;
+    case RowKind::kToggle: t += CoopI18n::Tr(": ") + (r.on ? CoopI18n::Tr("On") : CoopI18n::Tr("Off")); break;
     case RowKind::kChoice:
-        t += ": " + std::string(r.left ? "< " : "") + r.value + (r.right ? " >" : "");
+        t += CoopI18n::Tr(": ") + std::string(r.left ? "< " : "") + value + (r.right ? " >" : "");
         break;
     default:
         // (a value that only says the row's own word again, "Join: Join", is left off)
-        if (!r.value.empty() && (t.empty() || t.rfind(r.value, 0) != 0)) t += t.empty() ? r.value : ": " + r.value;
+        if (!value.empty() && (name.empty() || r.name.rfind(r.value, 0) != 0))
+            t += t.empty() ? value : CoopI18n::Tr(": ") + value;
         break;
     }
     return Fit(t, kTextBytes);
@@ -51,7 +59,9 @@ Look TypingLook(const CoopPauseMenu::View& v, char letter, int key) {
     const bool row = v.selected >= 0 && static_cast<std::size_t>(v.selected) < v.rows.size();
     if (row) {   // (the field's name and what is typed; a long one shows its end, where the typing goes)
         const CoopPauseMenu::Row& r = v.rows[static_cast<std::size_t>(v.selected)];
-        out.texts[static_cast<std::size_t>(Key::kField)] = r.value.empty() ? r.name : r.name + ": " + r.value;
+        out.texts[static_cast<std::size_t>(Key::kField)] =
+            r.value.empty() ? CoopI18n::Tr(r.name)
+                            : CoopI18n::Tr(r.name) + CoopI18n::Tr(": ") + CoopI18n::Tr(r.value);
     }
     out.texts[static_cast<std::size_t>(Key::kLetter)] =
         std::string("Letter: < ") + (letter == ' ' ? std::string("Space") : std::string(1, letter)) + " >";
@@ -115,13 +125,19 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
     for (int b = 0; b < l.back; ++b) {
         if (l.texts[static_cast<std::size_t>(b)].empty()) l.texts[static_cast<std::size_t>(b)] = " ";
     }
-    l.texts[static_cast<std::size_t>(l.back)] = "Back";
+    l.texts[static_cast<std::size_t>(l.back)] = CoopI18n::Tr("Back");
     l.rows[static_cast<std::size_t>(l.back)] = -1;
     l.focus = at >= 0 ? at - l.top : l.back;
-    // (more than one page: the page first, then what the row does)
+    // (more than one page: the page first, then what the row does — both in the player's
+    // language before the cut: the page is the table's shape, the row's help its line)
     const std::string paged =
-        l.pages > 1 ? "Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)" : std::string();
-    l.hint = Fit(paged.empty() ? v.help : v.help.empty() ? paged : paged + "   " + v.help, kHintBytes);
+        l.pages > 1
+            ? CoopI18n::Tr("Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)")
+            : std::string();
+    l.hint = Fit(paged.empty()   ? CoopI18n::Tr(v.help)
+                 : v.help.empty() ? paged
+                                  : paged + "   " + CoopI18n::Tr(v.help),
+                 kHintBytes);
     return l;
 }
 

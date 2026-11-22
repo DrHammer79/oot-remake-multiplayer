@@ -257,7 +257,7 @@ TEST_CASE("coop i18n: 0.11.7's rows and help bodies") {
         hans, "Start a new file with this on: you keep your 4+1 hearts, and enemies and bosses get 50% more life "
               "and 25% more damage for each level (up to NG+ 2 now). In a game you host your level counts for "
               "everyone. Off: the game as it is.");
-    CHECK(ng.find("保留你的 4+1 颗心") != std::string::npos);
+    CHECK(ng.find("保留 4+1 颗心") != std::string::npos);
     CHECK(ng.find("最高 NG+ 2") != std::string::npos);
     CHECK(ng.find("Start a new file") == std::string::npos);
     // The Saves row's help, whole.
@@ -266,8 +266,8 @@ TEST_CASE("coop i18n: 0.11.7's rows and help bodies") {
               "solo saves the first time), so co-op progress never mixes with your own. When you join a friend "
               "from the title screen you play the host's save, copied beside your multiplayer saves; your saves "
               "are not touched. Switched on the title screen with no file loaded.");
-    CHECK(saves.rfind("单人：你自己的存档。", 0) == 0);
-    CHECK(saves.find("联机：一套单独用于一起游玩的存档") != std::string::npos);
+    CHECK(saves.rfind("单人：用你的存档。", 0) == 0);
+    CHECK(saves.find("联机：独立的联机存档") != std::string::npos);
 }
 
 TEST_CASE("coop i18n: the pause menu's Multiplayer tab (the game's own page)") {
@@ -612,7 +612,7 @@ TEST_CASE("coop i18n: 0.11.8's screens (PR #308): the Multiplayer page, co-op's 
     CHECK(CoopI18n::Tr(hans, "Pasted: 12 characters.") == "已粘贴：12 个字符。");
     const std::string pc = CoopI18n::Tr(hans, "No PC called LIVINGROOM was found. To join a room by its name, set a relay "
                                               "first: Co-op Settings, Relay. Or type the host's IP address.");
-    CHECK(pc.rfind("没有找到叫 LIVINGROOM 的电脑", 0) == 0);
+    CHECK(pc.rfind("没找到叫 LIVINGROOM 的电脑", 0) == 0);
     // the Original game switch
     CHECK(CoopI18n::Tr(hans, "Original game") == "原版游戏");
     CHECK(CoopI18n::Tr(hant, "Start the game again to finish: it comes back as the original game.") ==
@@ -815,6 +815,9 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hant, "Room  forest-4821") == "房間  forest-4821");
     CHECK(CoopI18n::Tr(hans, "Join Saria again") == "再次加入 Saria");
     CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
+    // (the short page header: the name column cuts at 30 bytes and the full "第1页，共3页" shape was cut off mid-word)
+    CHECK(CoopI18n::Tr(hans, "Co-op settings  < 1 of 3 >") == "联机设置  < 1/3 >");
+    CHECK(CoopI18n::Tr(hant, "Customize Link  < 4 of 4 >") == "自訂林克  < 4/4 >");
 }
 
 TEST_CASE("coop i18n (help-lines): every row's help on the - page has a line in both Chinese tables and fits the caption") {

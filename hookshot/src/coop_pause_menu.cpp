@@ -2215,10 +2215,10 @@ View Menu::view() const {
         v.rows.push_back(Note(kSnailHomeNote));
         v.selected = 0;
         v.typing = typing_;
-        v.help_title = "Your name";
-        v.help = !note_.empty() ? Joined(note_)
-                                : std::string("The name the other players see over your Link and in the chat: 1 to 16 "
-                                              "characters.");
+        v.help_title = CoopI18n::Tr("Your name");
+        v.help = !note_.empty() ? JoinedTr(note_)
+                                : CoopI18n::Tr("The name the other players see over your Link and in the chat: 1 to 16 "
+                                               "characters.");
         return v;
     }
     if (page_ == Page::kCustomize) {   // (its own rows: coop_look_menu.h; Your name above them)
@@ -2242,12 +2242,12 @@ View Menu::view() const {
         }
         v.selected = !name_row ? c.selected : customize_name_ || typing_ ? 0 : c.selected + 1;
         v.typing = typing_;
-        v.help_title = name_row && (customize_name_ || typing_) ? "Your name" : c.help_title;
-        v.help = !note_.empty() ? Joined(note_)
+        v.help_title = name_row && (customize_name_ || typing_) ? CoopI18n::Tr("Your name") : CoopI18n::Tr(c.help_title);
+        v.help = !note_.empty() ? JoinedTr(note_)
                  : name_row && (customize_name_ || typing_)
-                     ? std::string("The name the other players see over your Link and in the chat: 1 to 16 characters.")
-                 : character_ ? (c.help.empty() ? CoopI18n::Tr(kCharacterNote) : c.help + " " + CoopI18n::Tr(kCharacterNote))
-                              : c.help;
+                     ? CoopI18n::Tr("The name the other players see over your Link and in the chat: 1 to 16 characters.")
+                 : character_ ? (c.help.empty() ? CoopI18n::Tr(kCharacterNote) : CoopI18n::Tr(c.help) + " " + CoopI18n::Tr(kCharacterNote))
+                              : CoopI18n::Tr(c.help);
         v.change = c.change;
         v.confirm = c.confirm;
         v.back = c.back;
@@ -2267,32 +2267,33 @@ View Menu::view() const {
                       (mine || session_.state == State::kFailed);
     switch (page_) {
     case Page::kMain:
-        v.help_title = "Multiplayer";
+        v.help_title = CoopI18n::Tr("Multiplayer");
         break;
     case Page::kHost:
-        v.help_title = "Host a game";
+        v.help_title = CoopI18n::Tr("Host a game");
         break;
     case Page::kJoin:
-        v.help_title = "Join a game";
+        v.help_title = CoopI18n::Tr("Join a game");
         break;
     case Page::kLocal:
-        v.help_title = "Local co-op";
-        v.help = "Split screen (experimental) runs two full games on this PC, one per player: about 10 GB of RAM each "
+        v.help_title = CoopI18n::Tr("Local co-op");
+        v.help = CoopI18n::Tr("Split screen (experimental) runs two full games on this PC, one per player: about 10 GB "
+                 "of RAM each "
                  "and a strong graphics card. Start two kits (or use Nucleus Co-op), give each game its own controller"
                  " in Settings, Controller (controller 1, controller 2 or the keyboard), then Host a game in one and "
                  "Join a game in the other with the Same network line. The steps are in PLAY-LAN.md. Native split "
-                 "screen, one game for both, comes in a later release.";
+                 "screen, one game for both, comes in a later release.");
         break;
     case Page::kSettings:
-        v.help_title = "Settings";
+        v.help_title = CoopI18n::Tr("Settings");
         break;
     case Page::kCommands:
-        v.help_title = "Commands";
+        v.help_title = CoopI18n::Tr("Commands");
         break;
     case Page::kCustomize:   // (above)
         break;
     case Page::kFind:
-        v.help_title = "Browse games";
+        v.help_title = CoopI18n::Tr("Browse games");
         break;
     }
     if (!note_.empty()) {
@@ -2300,21 +2301,25 @@ View Menu::view() const {
     } else if (said && !(line != nullptr && confirm_leave_)) {
         v.help = JoinedTr(session_.lines);
     } else if (line != nullptr) {
-        v.help = line->help;
+        v.help = CoopI18n::Tr(line->help);
     } else if (session_.by_launcher && (page_ == Page::kHost || page_ == Page::kJoin)) {
-        v.help = kByLauncher;   // (LauncherLines' page has no row to select)
+        v.help = CoopI18n::Tr(kByLauncher);   // (LauncherLines' page has no row to select)
     }
     if (mine && (host_page || join_page)) {
         v.hint = session_.code;
     }
+    // (the gold line in the player's language: the composed ones are the table's shapes)
     if (session_.by_launcher) {
-        v.gold = session_.players > 1 ? "Co-op is on: " + std::to_string(session_.players) + " players" : "Co-op is on";
+        v.gold = session_.players > 1
+                     ? CoopI18n::Tr("Co-op is on: " + std::to_string(session_.players) + " players")
+                     : CoopI18n::Tr("Co-op is on");
     } else if (mine && session_.hosting) {
-        v.gold = session_.state != State::kHosting ? "Starting your game..."
-                 : session_.players > 1 ? "Hosting: " + std::to_string(session_.players) + " players"
-                                        : "Hosting: waiting for friends";
+        v.gold = session_.state != State::kHosting ? CoopI18n::Tr("Starting your game...")
+                 : session_.players > 1
+                     ? CoopI18n::Tr("Hosting: " + std::to_string(session_.players) + " players")
+                     : CoopI18n::Tr("Hosting: waiting for friends");
     } else if (mine) {
-        v.gold = session_.state == State::kJoined ? "In a friend's game" : "Joining...";
+        v.gold = session_.state == State::kJoined ? CoopI18n::Tr("In a friend's game") : CoopI18n::Tr("Joining...");
     }
     if (typing_) {
         v.confirm = "Done";
