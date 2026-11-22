@@ -317,24 +317,81 @@ elif cmd == "strip":
     print("\n".join(dropped))
 '
 charsel_py() { "$PY" -I -B -c "$CHARSEL_PY" "$@"; }
+# One folder of the release zip, by Python's zipfile (no unzip on every system): charsel_unzip <zip> <folder in it> <out>.
+# Names with '..' or a leading '/' are refused.
+charsel_unzip() {
+    "$PY" -I -B -c '
+import os, sys, zipfile, shutil
+z, top, out = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
+with zipfile.ZipFile(z) as f:
+    for i in f.infolist():
+        if not i.filename.startswith(top) or i.is_dir():
+            continue
+        rel = i.filename[len(top):]
+        if not rel or rel.startswith("/") or ".." in rel.split("/"):
+            sys.exit("bad name in the zip: " + i.filename)
+        dst = os.path.join(out, *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with f.open(i) as a, open(dst, "wb") as b:
+            shutil.copyfileobj(a, b, 1 << 20)
+' "$1" "$2" "$3"
+}
+# Release 0.2.2 and later (tool_folder in the pin) carry none of the game's files: the zip's tool (player.py) makes the
+# characters' models, textures and menus from the game's own romfs (data/game/romfs) into the mod folder, with the
+# builder's Python (its numpy, zstandard, astc-encoder-py and texture2ddecoder). The NPC part is left out of its work
+# (--exclude) for a kit that has no yes: the same list as kit-paths.ps1's KitCharselToolExclude.
+CHARSEL_TOOL_EXCLUDE='^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+# charsel_tool <zip> <tool folder in it> <new mod folder> <part> <work folder>: nothing on success, else why on stdout.
+charsel_tool() {
+    local zip=$1 tfolder=$2 new=$3 part=$4 work=$5 romfs=$GAME/romfs out code=0 args
+    if [[ ! -f $romfs/Pack/ZsDic.pack.zs ]]; then
+        echo "the game's own files are not in $romfs (the tool makes the characters from them: set the game up first)"; return 0
+    fi
+    rm -rf "$work"; mkdir -p "$work"
+    if ! charsel_unzip "$zip" "$tfolder" "$work" || [[ ! -f $work/player.py ]]; then echo "$zip has no $tfolder/player.py"; rm -rf "$work"; return 0; fi
+    say "  Character Select: making the characters from your game's files (a few minutes, once; nothing leaves this PC) ..." >&2
+    args=(--romfs "$romfs" --mod "$new")
+    [[ $part == ui ]] && args+=(--exclude "$CHARSEL_TOOL_EXCLUDE")
+    out=$("$PY" -I -B "$work/player.py" "${args[@]}" 2>&1 | tee >(grep --line-buffered -E '^[[:space:]]+[0-9]+ of [0-9]+|^Making ' | sed 's/^[[:space:]]*/    /' >&2); exit "${PIPESTATUS[0]}") || code=$?
+    rm -rf "$work"
+    if ((code != 0)); then
+        if grep -q "No module named" <<<"$out"; then
+            echo "the builder's Python lacks a module the tool needs ($(grep -o "No module named '[^']*'" <<<"$out" | tail -n1))"
+        else
+            echo "the tool stopped ($(grep -v '^[[:space:]]*$' <<<"$out" | tail -n3 | tr '
+' '/' | sed 's|/$||; s|/|/ |g'))"
+        fi
+    fi
+    return 0
+}
 
 charsel_step() {
-    local pin=$LS/CHARACTER-SELECT.txt choice='' line rel url zip zsha zfolder folder ourl osha iurl isha want dir new dl why='' part have derive=0 json ips a=''
+    local pin=$LS/CHARACTER-SELECT.txt choice='' line rel url zip zsha zfolder tfolder folder ourl osha iurl isha want dir new dl why='' part have derive=0 json ips a=''
     [[ -f $pin ]] || return 0
     rel=$(pin_get "$pin" release || true) url=$(pin_get "$pin" url || true) zip=$(pin_get "$pin" zip || true)
     zsha=$(pin_get "$pin" zip_sha256 || true) zfolder=$(pin_get "$pin" zip_folder || true) folder=$(pin_get "$pin" folder || true)
-    ourl=$(pin_get "$pin" overlay_url || true) osha=$(pin_get "$pin" overlay_sha256 || true)
+    ourl=$(pin_get "$pin" overlay_url || true) osha=$(pin_get "$pin" overlay_sha256 || true) tfolder=$(pin_get "$pin" tool_folder || true)
     iurl=$(pin_get "$pin" ips_url || true) isha=$(pin_get "$pin" ips_sha256 || true)
     if [[ ! $rel =~ ^[A-Za-z0-9._-]+$ || ! $url =~ ^https:// || ! $zip =~ ^[A-Za-z0-9._-]+$ || ! $zsha =~ ^[0-9a-fA-F]{64}$ ||
-          -z $zfolder || $zfolder == *..* || ! $folder =~ ^[A-Za-z0-9][^/\\:*?\"\<\>\|]*$ || ! $ourl =~ ^https:// || ! $osha =~ ^[0-9a-fA-F]{64}$ ]]; then
+          -z $zfolder || $zfolder == *..* || $tfolder == *..* || $tfolder == /* || ! $folder =~ ^[A-Za-z0-9][^/\\:*?\"\<\>\|]*$ || ! $ourl =~ ^https:// || ! $osha =~ ^[0-9a-fA-F]{64}$ ]]; then
         warn 'data/longshot/CHARACTER-SELECT.txt is incomplete: Character Select is left out.'; return 0
     fi
     [[ -n $iurl && ( ! $iurl =~ ^https:// || ! $isha =~ ^[0-9a-fA-F]{64}$ ) ]] && iurl=''
     zsha=${zsha,,} osha=${osha,,} isha=${isha,,}
     dir=$CS_HOME/$folder
-    line=$(sed -n 's/^[[:space:]]*character_select[[:space:]]*=[[:space:]]*\(yes\|no\|ask\)[[:space:]]*\([#;].*\)\{0,1\}$/\1/p' "$DATA/coop-options.ini" 2>/dev/null | head -n1 || true)
+    line=$(sed -n 's/^[[:space:]]*character_select[[:space:]]*=[[:space:]]*\(yes\|no\|ask\|off\)[[:space:]]*\([#;].*\)\{0,1\}$/\1/p' "$DATA/coop-options.ini" 2>/dev/null | head -n1 || true)
     if [[ -n $line ]]; then choice=$line; [[ $choice == ask ]] && rm -f "$DATA/character-select-answer.txt"
-    else choice=$(head -n1 "$DATA/character-select-answer.txt" 2>/dev/null | tr -d '\r[:space:]' || true); [[ $choice == yes || $choice == no ]] || choice=ask
+    else choice=$(head -n1 "$DATA/character-select-answer.txt" 2>/dev/null | tr -d '\r[:space:]' || true); [[ $choice == yes || $choice == no || $choice == off ]] || choice=ask
+    fi
+    if [[ $choice == off ]]; then
+        # (character_select = off: the copy the kit put in is taken out, kept until the game is built without it; one
+        # the player put in by hand has no stamp and is never touched)
+        if [[ -d $dir && -f $dir/coop-charsel.txt ]]; then
+            if charsel_save_previous "$folder"; then say 'Character Select is off (character_select = off): taken out of the game'"'"'s mods folder. character_select = ask or yes puts it back.'
+            else warn 'Character Select could not be taken out: close the game and start again.'; fi
+        elif [[ -d $dir ]]; then say "Character Select is off, but the copy in $dir is your own: it is left as it is (delete the folder to remove it)."
+        fi
+        return 0
     fi
     if [[ $choice == ask ]]; then
         say ''
@@ -403,24 +460,11 @@ charsel_step() {
         fi
         if [[ -z $why ]]; then
             mkdir -p "$new"
-            # (the zip: <release>/mods/OoT Character Select/{romfs,exefs}; only that folder is taken, by Python's zipfile:
-            # no unzip on every system. Names with '..' or a leading '/' are refused)
-            if ! "$PY" -I -B -c '
-import os, sys, zipfile, shutil
-z, top, out = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
-with zipfile.ZipFile(z) as f:
-    for i in f.infolist():
-        if not i.filename.startswith(top) or i.is_dir():
-            continue
-        rel = i.filename[len(top):]
-        if not rel or rel.startswith("/") or ".." in rel.split("/"):
-            sys.exit("bad name in the zip: " + i.filename)
-        dst = os.path.join(out, *rel.split("/"))
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with f.open(i) as a, open(dst, "wb") as b:
-            shutil.copyfileobj(a, b, 1 << 20)
-' "$dl/$zip" "$zfolder" "$new" || [[ ! -d $new/romfs ]]; then
+            # (the zip: <release>/mods/OoT Character Select/{romfs,exefs}; only that folder is taken)
+            if ! charsel_unzip "$dl/$zip" "$zfolder" "$new" || [[ ! -d $new/romfs ]]; then
                 why="unpacking $zip failed"
+            elif [[ -n $tfolder ]]; then
+                why=$(charsel_tool "$dl/$zip" "$tfolder" "$new" "$part" "$dl/charsel-tool")
             fi
         fi
     fi

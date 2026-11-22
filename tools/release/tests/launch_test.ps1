@@ -1135,6 +1135,112 @@ try {
                @(Get-KitIpsRecords ([System.IO.File]::ReadAllBytes((Join-Path $csDir 'coop-charsel-code.ips')))).Count -eq 2 + $KitCharselCustomizer.Count) "Character Select: a 0.11.8 full copy keeps its NPC part, his patch stripped, his own kept aside, no download [$($r.Lines -join ' | ')]"
         Confirm-KitCharacterSelect $ck $cm
         Remove-Item -LiteralPath $csDir -Recurse -Force
+
+        # Release 0.2.2 and later (tool_folder in the pin): the zip holds the code patch and the voices; the tool in it makes
+        # the rest from the kit's own game\romfs. Stand-in zip with a player.py, a mock for the tool (no Python, no game).
+        $tk = Join-Path $hk 'charsel-tool'
+        $tg = Join-Path $tk 'game'
+        $tm = Join-Path $tg 'mods'
+        $tDl = Join-Path $tk 'hookshot\downloads'
+        $tDir = Join-Path $tm 'OoT Character Select'
+        $tPin = Join-Path $tk 'hookshot\CHARACTER-SELECT.txt'
+        $tCalls = New-Object System.Collections.Generic.List[object]
+        $tMade = @('UI\LayoutArchiveCategory.Product.100.byml.zs', 'Model\Player_Child.Player_Child.bfres.zs', 'Tex\Npc_A.bntx.zs',
+                   'Phive\Cloth\Player_Adult_CAC.Nin_Ounce_NVN2.bphcl', 'Model\Player_Adult_C115.Player_Adult.bfres.zs')
+        $tOk = {
+            param($python, $player, $romfs, $mod, $exclude)
+            $tCalls.Add(@{ Python = $python; Player = $player; PlayerText = (Get-Content -LiteralPath $player -Raw); Romfs = $romfs; Mod = $mod; Exclude = $exclude })
+            foreach ($f in $tMade) { if (-not $exclude -or $f.Replace('\', '/') -notmatch $exclude) { Write-File (Join-Path $mod "romfs\$f") "made $f" } }
+            @{ Code = 0; Lines = @('Making 5 files', 'Done: 5 files') }
+        }
+        $New_CsToolPin = {
+            param([string]$Tag)
+            $src = Join-Path $tk "src-$Tag"
+            $top = Join-Path $src "CS-$Tag\mods\OoT Character Select"
+            Write-File (Join-Path $top 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs') "voice $Tag"
+            [System.IO.Directory]::CreateDirectory((Join-Path $top 'exefs')) | Out-Null
+            [System.IO.File]::WriteAllBytes((Join-Path $top 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'), (& $New_CsIps $Tag))
+            Write-File (Join-Path $src "CS-$Tag\build-from-your-game\player.py") "# tool $Tag"
+            Write-File (Join-Path $src "CS-$Tag\build-from-your-game\recipes.json") '{}'
+            New-Item -ItemType Directory -Force -Path $tDl | Out-Null
+            $zip = Join-Path $tDl "CS-$Tag.zip"
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $src "CS-$Tag"
+            $zsha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            $json = Join-Path $tDl 'charsel-characters.json'
+            Write-File $json $csJson
+            $osha = (Get-FileHash -LiteralPath $json -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-File $tPin ("# pin`nrelease=$Tag`nurl=https://example.invalid/cs`nzip=CS-$Tag.zip`nzip_sha256=$zsha`n" +
+                "zip_folder=CS-$Tag/mods/OoT Character Select`ntool_folder=CS-$Tag/build-from-your-game`nfolder=OoT Character Select`n" +
+                "overlay_url=https://example.invalid/characters.json`noverlay_sha256=$osha`nips_url=`nips_sha256=`n")
+            return "$Tag $zsha $osha - full cz1"
+        }
+        $tWant = & $New_CsToolPin 't1'
+        Check ((Get-KitCharacterSelectPin $tk).tool_folder -eq 'CS-t1/build-from-your-game') 'Character Select 0.2.2: the pin names the tool folder in the zip'
+        $badPin = (Get-Content -LiteralPath $tPin -Raw) -replace 'tool_folder=.*', 'tool_folder=CS-t1/../x'
+        Write-File $tPin $badPin
+        Check ($null -eq (Get-KitCharacterSelectPin $tk)) 'Character Select 0.2.2: a tool folder with .. in the pin is refused'
+        $tWant = & $New_CsToolPin 't1'
+        # no game files yet: said, nothing put in, the verified zip kept for the next try
+        $r = Install-KitCharacterSelect $tk $tm '' 'full' '' $tOk
+        Check (-not $r.Ok -and $r.Why -match "game's own files" -and -not (Test-Path -LiteralPath $tDir) -and $tCalls.Count -eq 0 -and
+               (Test-Path -LiteralPath (Join-Path $tDl 'CS-t1.zip')) -and -not (Test-Path -LiteralPath (Join-Path $tm '_OoT Character Select.new')) -and
+               -not (Test-Path -LiteralPath (Join-Path $tDl 'charsel-tool'))) "Character Select 0.2.2: no game\romfs -> one line, nothing half put in [$($r.Lines -join ' | ')]"
+        Write-File (Join-Path $tg 'romfs\Pack\ZsDic.pack.zs') 'dic'
+        # the tool stops (another game version): its last lines are said, the old copy stays, the zip is kept
+        $tBad = { param($python, $player, $romfs, $mod, $exclude) @{ Code = 1; Lines = @('Making 5 files', '  FAILED Model/x.zs: Model/y.zs is not the one of game version 1.1.1', '1 files could not be made; the mod is not complete.') } }
+        $r = Install-KitCharacterSelect $tk $tm '' 'full' '' $tBad
+        Check (-not $r.Ok -and $r.Why -match 'the tool stopped' -and $r.Why -match 'game version 1\.1\.1' -and -not (Test-Path -LiteralPath $tDir) -and
+               (Test-Path -LiteralPath (Join-Path $tDl 'CS-t1.zip')) -and -not (Test-Path -LiteralPath (Join-Path $tm '_OoT Character Select.new'))) "Character Select 0.2.2: the tool stopping is said with its reason, nothing put in [$($r.Lines -join ' | ')]"
+        # the tool itself cannot start (no kit Python): the check says so, with no mock
+        $r = Install-KitCharacterSelect $tk $tm '' 'full'
+        Check (-not $r.Ok -and $r.Why -match "kit's Python" -and -not (Test-Path -LiteralPath $tDir)) "Character Select 0.2.2: no kit Python -> said, nothing put in [$($r.Lines -join ' | ')]"
+        Check ((Test-KitCharselPython (Join-Path $tk 'nope\python.exe')) -match 'not set up') 'Character Select 0.2.2: Test-KitCharselPython names a missing Python'
+        # the good run: the tool is given the kit's romfs and the new folder, the zip's voices and patch stay, the zip goes
+        $r = Install-KitCharacterSelect $tk $tm '' 'full' '' $tOk
+        $c = $tCalls[$tCalls.Count - 1]
+        Check ($r.Ok -and $r.Changed -and $tCalls.Count -eq 1 -and $c.Romfs -eq (Join-Path $tg 'romfs') -and $c.Mod -like '*_OoT Character Select.new' -and
+               $c.Exclude -eq '' -and (Split-Path -Leaf $c.Player) -eq 'player.py' -and $c.PlayerText -match 'tool t1' -and
+               (Read-KitFirstLine (Join-Path $tDir 'coop-charsel.txt')) -eq $tWant -and
+               @($tMade | Where-Object { -not (Test-Path -LiteralPath (Join-Path $tDir "romfs\$_")) }).Count -eq 0 -and
+               (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs')) -and
+               (Test-Path -LiteralPath (Join-Path $tDir 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips')) -and
+               -not (Test-Path -LiteralPath (Join-Path $tDir 'build-from-your-game')) -and
+               -not (Test-Path -LiteralPath (Join-Path $tDl 'CS-t1.zip')) -and -not (Test-Path -LiteralPath (Join-Path $tDl 'charsel-tool'))) "Character Select 0.2.2: the tool makes the game's part from game\romfs; voices and patch from the zip; zip and tool copy gone [$($r.Lines -join ' | ')]"
+        Confirm-KitCharacterSelect $tk $tm
+        # run again with the same pin: nothing is made again
+        $r = Install-KitCharacterSelect $tk $tm '' 'full' '' $tOk
+        Check ($r.Ok -and -not $r.Changed -and $tCalls.Count -eq 1 -and ($r.Lines -join ' ') -match 'there already') 'Character Select 0.2.2: run again -> there already, the tool not run again'
+        # the default part from the copy there needs no tool and no download
+        $r = Install-KitCharacterSelect $tk $tm '' 'ui' '' $tOk
+        Check ($r.Ok -and $r.Changed -and $tCalls.Count -eq 1 -and -not (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Tex')) -and
+               -not (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Sound')) -and (Test-Path -LiteralPath (Join-Path $tDir 'romfs\UI\LayoutArchiveCategory.Product.100.byml.zs'))) 'Character Select 0.2.2: full -> default part is made from the copy, no tool run'
+        Confirm-KitCharacterSelect $tk $tm
+        # the default part from scratch: the tool leaves the NPC part out (--exclude), the zip's voices are taken out
+        Remove-Item -LiteralPath $tDir -Recurse -Force
+        $tWant = & $New_CsToolPin 't1'
+        $r = Install-KitCharacterSelect $tk $tm '' 'ui' '' $tOk
+        $c = $tCalls[$tCalls.Count - 1]
+        $exOk = $c.Exclude -eq $KitCharselToolExclude
+        foreach ($f in $tMade) { $isNpc = Test-KitCharacterSelectNpcFile "romfs\$f"; if ([bool]($f.Replace('\', '/') -match $KitCharselToolExclude) -ne $isNpc) { $exOk = $false } }
+        foreach ($f in 'Sound/Resource/PlayerVoice_Adult_X.bars.zs', 'Pack/Actor/Enemy_MiddleBoss_DarkLink.pack.zs', 'Model/Player_Dark_Animation.Skeleton.bfres.zs') { if ($f -notmatch $KitCharselToolExclude) { $exOk = $false } }
+        foreach ($f in 'Model/Player_Adult.Player_Adult.bfres.zs', 'Model/Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'GameData/GameDataList.Product.110.byml.zs') { if ($f -match $KitCharselToolExclude) { $exOk = $false } }
+        Check ($r.Ok -and $r.Changed -and $tCalls.Count -eq 2 -and $exOk -and (Read-KitFirstLine (Join-Path $tDir 'coop-charsel.txt')) -eq ($tWant -replace ' full ', ' ui ') -and
+               -not (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Tex')) -and -not (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Sound')) -and
+               (Test-Path -LiteralPath (Join-Path $tDir 'romfs\UI\LayoutArchiveCategory.Product.100.byml.zs'))) "Character Select 0.2.2: the default part alone: the tool gets --exclude for the NPC part, same list as the kit's parts [$($r.Lines -join ' | ')]"
+        Confirm-KitCharacterSelect $tk $tm
+        # character_select = off: the kit's copy is taken out (kept until the game is built), a copy by hand is never touched
+        Write-File (Join-Path $tk 'coop-options.ini') "character_select = off`n"
+        Check ((Get-KitCharacterSelectChoice $tk) -eq 'off') 'Character Select off: coop-options.ini character_select = off is read'
+        Check ((Invoke-KitCharacterSelectStep $tk $tg) -and -not (Test-Path -LiteralPath $tDir) -and (Test-Path -LiteralPath (Join-Path $tm '_OoT Character Select.prev'))) 'Character Select off: the kit''s copy is taken out at the start'
+        Check ((Undo-KitCharacterSelect $tk $tm) -and (Test-Path -LiteralPath (Join-Path $tDir 'coop-charsel.txt'))) 'Character Select off: a failed build puts it back'
+        Check ((Invoke-KitCharacterSelectStep $tk $tg) -and -not (Test-Path -LiteralPath $tDir)) 'Character Select off: taken out again'
+        Confirm-KitCharacterSelect $tk $tm
+        Check (-not (Invoke-KitCharacterSelectStep $tk $tg) -and -not (Test-Path -LiteralPath $tDir)) 'Character Select off: nothing there, nothing done (and nothing downloaded)'
+        Write-File (Join-Path $tDir 'romfs\Model\mine.bin') 'mine'
+        $r = Invoke-KitCharacterSelectStep $tk $tg
+        Check (-not $r -and (Test-Path -LiteralPath (Join-Path $tDir 'romfs\Model\mine.bin'))) 'Character Select off: a copy the player put in by hand is left as it is'
+        Remove-Item -LiteralPath $tk -Recurse -Force -ErrorAction SilentlyContinue
+
         # The puppet pack follows the mod: put in, colours changed, or taken out -> made again (Get-PuppetPackHint).
         $pm = Join-Path $cm 'contents\0400486024DEC000\coop-puppet\coop_puppet.json'
         Check ((Get-KitCharacterSelectSeen $pm) -eq '') 'Character Select seen: none in mods'

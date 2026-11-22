@@ -1496,16 +1496,20 @@ function Get-KitCharacterSelectPin([string]$Kit) {
               $op.folder -match '^[A-Za-z0-9][^\\/:*?"<>|]*$' -and
               $op.overlay_url -match '^https://' -and $op.overlay_sha256 -match '^[0-9a-fA-F]{64}$')) { return $null }
     if ($op.ips_url -and ($op.ips_url -notmatch '^https://' -or $op.ips_sha256 -notmatch '^[0-9a-fA-F]{64}$')) { $op.ips_url = '' }
+    # tool_folder (0.2.2 and later): the zip's build-from-your-game folder; the models, textures and menus are made from
+    # the player's own game by its player.py. A pin without it (0.2.1) has everything in the zip.
+    if ($op.tool_folder -and ($op.tool_folder -match '\.\.' -or $op.tool_folder -match '^[/\\]')) { return $null }
     return $op
 }
 
-# The player's answer: coop-options.ini 'character_select = yes|no|ask' wins (ask: the question again); else the answer
+# The player's answer: coop-options.ini 'character_select = yes|no|ask|off' wins (ask: the question again; off: not
+# installed, and taken out when the kit put it in); else the answer
 # kept in hookshot\character-select-answer.txt (written at the question; no kit file has that name, so Update.bat keeps it;
 # not character-select.txt: Windows names ignore case, and that is the pin CHARACTER-SELECT.txt);
 # else 'ask'.
 function Get-KitCharacterSelectChoice([string]$Kit) {
     foreach ($line in @(Get-Content -LiteralPath (Join-Path $Kit 'coop-options.ini') -ErrorAction SilentlyContinue)) {
-        if ($line -match '^\s*character_select\s*=\s*(yes|no|ask)\s*([#;].*)?$') {
+        if ($line -match '^\s*character_select\s*=\s*(yes|no|ask|off)\s*([#;].*)?$') {
             $v = $Matches[1].ToLowerInvariant()
             if ($v -eq 'ask') { Remove-Item -LiteralPath (Join-Path $Kit 'hookshot\character-select-answer.txt') -Force -ErrorAction SilentlyContinue }
             return $v
@@ -1514,7 +1518,7 @@ function Get-KitCharacterSelectChoice([string]$Kit) {
     $kept = Join-Path $Kit 'hookshot\character-select-answer.txt'
     if (Test-Path -LiteralPath $kept) {
         $v = (Read-KitFirstLine $kept).ToLowerInvariant()
-        if ($v -eq 'yes' -or $v -eq 'no') { return $v }
+        if ($v -eq 'yes' -or $v -eq 'no' -or $v -eq 'off') { return $v }
     }
     return 'ask'
 }
@@ -1704,13 +1708,68 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
     return ''
 }
 
+# Release 0.2.2 and later carry none of the game's files: the zip's tool (player.py) makes the characters' models, textures
+# and menus from the game's own romfs (the kit's game\romfs) into the mod folder. Its Python is the kit's own
+# (hookshot\tools\python, the build tools': numpy, zstandard, astc-encoder-py and texture2ddecoder, pinned by tools.lock),
+# so nothing is installed with pip. The NPC part is left out of the tool's work (--exclude) for a kit that has no yes.
+$script:KitCharselToolExclude = '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+
+# '' when the kit's Python can run the tool, else why not (the modules the tool imports, as a one-line check).
+function Test-KitCharselPython([string]$Python) {
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { return "the kit's Python is not set up yet ($Python)" }
+    $out = @(& $Python -I -B -c 'import numpy, astc_encoder, texture2ddecoder, zstandard' 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) { return "the kit's Python lacks a module the tool needs ($((@($out) | Select-Object -Last 1)))" }
+    return ''
+}
+
+# Runs the tool: @{ Code; Lines (all it printed) }. The progress lines ("  300 of 2287 (40 s)") are shown as they come.
+function Invoke-KitCharselTool([string]$Python, [string]$Player, [string]$Romfs, [string]$Mod, [string]$Exclude) {
+    $a = @('-I', '-B', $Player, '--romfs', $Romfs, '--mod', $Mod)
+    if ($Exclude) { $a += @('--exclude', $Exclude) }
+    $lines = New-Object System.Collections.Generic.List[string]
+    & $Python @a 2>&1 | ForEach-Object {
+        $l = "$_"
+        $lines.Add($l)
+        if ($l -match '^\s+\d+ of \d+' -or $l -match '^Making ') { Write-Host "  $($l.Trim())" -ForegroundColor Gray }
+    }
+    return @{ Code = $LASTEXITCODE; Lines = $lines.ToArray() }
+}
+
+# The tool's part of an install, into $New (the mod folder as the zip has it): '' or why not. $Zip is the verified
+# download; $RunTool is for tests (the same arguments as Invoke-KitCharselTool, no Python check).
+function Invoke-KitCharacterSelectTool([string]$Kit, $Op, [string]$Zip, [string]$New, [string]$Part, [string]$Romfs, [string]$Work, [scriptblock]$RunTool = $null) {
+    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+    if (-not $RunTool) { $why = Test-KitCharselPython $python; if ($why) { return $why } }
+    if (-not (Test-Path -LiteralPath (Join-Path $Romfs 'Pack\ZsDic.pack.zs'))) {
+        return "the game's own files are not in $Romfs (the tool makes the characters from them: set the game up first)"
+    }
+    if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction Stop }
+    New-Item -ItemType Directory -Force -Path $Work | Out-Null
+    $depth = @($Op.tool_folder -split '/').Count
+    & "$env:SystemRoot\System32\tar.exe" -x -f $Zip -C $Work "--strip-components=$depth" "$($Op.tool_folder)" 2>&1 | Out-Null
+    $player = Join-Path $Work 'player.py'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $player)) { return "$($Op.zip) has no $($Op.tool_folder)\player.py" }
+    Write-Host "  Character Select: making the characters from your game's files (a few minutes, once; nothing leaves this PC) ..." -ForegroundColor Gray
+    $exclude = if ($Part -eq 'ui') { $script:KitCharselToolExclude } else { '' }
+    try {
+        $res = if ($RunTool) { & $RunTool $python $player $Romfs $New $exclude } else { Invoke-KitCharselTool $python $player $Romfs $New $exclude }
+    } catch { return "the tool could not be started ($($_.Exception.Message))" }
+    finally { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($res.Code -ne 0) {
+        # (the tool's last line names the file and why: another game version, a missing file, no disk)
+        $last = @($res.Lines | Where-Object { "$_".Trim() } | Select-Object -Last 3) -join ' / '
+        return "the tool stopped ($last)"
+    }
+    return ''
+}
+
 # Puts the mod in, or changes its part: @{ Ok; Changed (the folder was put in or replaced); Why; Lines }. $ModsDir: the
 # game's mods folder (<game>\mods, beside longshot.exe). $Part: 'full' (the player said yes to the NPC characters) or
 # 'ui' (every other kit). A Character Select folder the player put in by hand (no stamp) is never touched. The kit's
 # copy of the same release is changed in place (hard links, no download): a full one to its default part, or (a
 # 0.11.8 copy, or another strip) to the same part with his patch stripped. Else his release zip is downloaded. A
 # failure (offline, a download or SHA-256 mismatch, too little disk) is said in one line and leaves what was there.
-function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Downloads = '', [string]$Part = 'full') {
+function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Downloads = '', [string]$Part = 'full', [string]$Romfs = '', [scriptblock]$RunTool = $null) {
     $r = @{ Ok = $false; Changed = $false; Why = ''; Lines = @() }
     $op = Get-KitCharacterSelectPin $Kit
     if (-not $op) { $r.Ok = $true; return $r }
@@ -1753,10 +1812,12 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
             $ips = ''
         } else {
             $zipOk = (Test-Path -LiteralPath $zip) -and (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -eq $op.zip_sha256.ToUpperInvariant()
-            # (a 1 GB zip and 1.1 GB unpacked; the swap keeps the old folder until the new one is in place)
+            # (0.2.1: a 1 GB zip and 1.1 GB unpacked; 0.2.2: a 145 MB zip, 142 MB of voices and about 1 GB the tool makes; the
+            # swap keeps the old folder until the new one is in place)
             $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($ModsDir))
             $free = try { (New-Object System.IO.DriveInfo $root).AvailableFreeSpace } catch { [long]::MaxValue }
-            if ($free -lt $(if ($zipOk) { 2GB } else { 3GB })) { $why = "too little disk space (about 3 GB free needed on $root)" }
+            $need = if ($op.tool_folder) { if ($zipOk) { 2GB } else { 2.5GB } } else { if ($zipOk) { 2GB } else { 3GB } }
+            if ($free -lt $need) { $why = "too little disk space (about $([Math]::Ceiling($need / 1GB)) GB free needed on $root)" }
             elseif (-not $zipOk -and (Test-KitOffline)) { $why = 'offline' }
             if (-not $why) { $why = Get-KitDownload @("$($op.url)/$($op.zip)") $zip $op.zip_sha256 @() 2; if ($why) { $why = "the download of Snail's release failed ($why)" } }
             if (-not $why) { $why = Get-KitDownload @($op.overlay_url) $json $op.overlay_sha256 @() 2; if ($why) { $why = "the download of characters.json failed ($why)" } }
@@ -1769,6 +1830,10 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
                 & "$env:SystemRoot\System32\tar.exe" -x -f $zip -C $new "--strip-components=$depth" "$($op.zip_folder)" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { $why = "unpacking $($op.zip) failed (tar $LASTEXITCODE)" }
                 elseif (-not (Test-Path -LiteralPath (Join-Path $new 'romfs'))) { $why = "$($op.zip) has no $($op.zip_folder)/romfs" }
+            }
+            if (-not $why -and $op.tool_folder) {
+                if (-not $Romfs) { $Romfs = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($ModsDir))) 'romfs' }
+                $why = Invoke-KitCharacterSelectTool $Kit $op $zip $new $Part $Romfs (Join-Path $Downloads 'charsel-tool') $RunTool
             }
         }
         if (-not $why) { $why = Complete-KitCharacterSelectFolder $new $op $Part $json $ips $want }
@@ -1947,6 +2012,30 @@ function Set-KitOptionsCharacterSelect([string]$Kit, [string]$Value) {
     } catch { }
 }
 
+# character_select = off: the mod the kit put in (it has the kit's stamp) is taken out, kept like any change until the
+# game is built without it (Undo-/Confirm-KitCharacterSelect). A copy the player put in by hand is never touched.
+# @{ Ok; Changed; Lines }.
+function Remove-KitCharacterSelect([string]$Kit, [string]$ModsDir) {
+    $r = @{ Ok = $true; Changed = $false; Lines = @() }
+    $op = Get-KitCharacterSelectPin $Kit
+    if (-not $op) { return $r }
+    $dir = Join-Path $ModsDir $op.folder
+    if (-not (Test-Path -LiteralPath $dir)) { return $r }
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'coop-charsel.txt'))) {
+        $r.Lines += "Character Select is off, but the copy in $dir is your own: it is left as it is (delete the folder to remove it)."
+        return $r
+    }
+    try {
+        Save-KitCharacterSelectPrevious $ModsDir $op.folder
+        $r.Changed = $true
+        $r.Lines += 'Character Select is off (character_select = off): taken out of the game''s mods folder. character_select = ask or yes puts it back.'
+    } catch {
+        $r.Ok = $false
+        $r.Lines += "Character Select could not be taken out ($($_.Exception.Message)): close the game and start again."
+    }
+    return $r
+}
+
 # The start's step (play.ps1, before Get-KitHookshotNeed): every kit with the pin gets the Characters page (Snail's
 # default part); the NPC characters only on the player's yes (asked once; character_select = yes|no in
 # coop-options.ini or NPC-characters.bat changes it). $true when the mods folder changed (the game build and the pack
@@ -1955,6 +2044,11 @@ function Invoke-KitCharacterSelectStep([string]$Kit, [string]$GameDir, [int]$Sec
     if (-not (Get-KitCharacterSelectPin $Kit)) { return $false }
     $mods = Join-Path $GameDir 'mods'
     $choice = Get-KitCharacterSelectChoice $Kit
+    if ($choice -eq 'off') {
+        $r = Remove-KitCharacterSelect $Kit $mods
+        foreach ($l in $r.Lines) { Write-Host $l -ForegroundColor $(if ($r.Ok) { 'Gray' } else { 'Yellow' }) }
+        return $r.Changed
+    }
     if ($choice -eq 'ask') {
         $choice = if (Read-KitCharacterSelectAnswer $Seconds) { 'yes' } else { 'no' }
         Set-KitCharacterSelectChoice $Kit $choice
