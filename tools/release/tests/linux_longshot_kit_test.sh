@@ -419,17 +419,17 @@ cs2_pin() { printf 'release=v2\nurl=https://example.invalid/cs\nzip=CS-v2.zip\nz
 cs2_zip() { cp "$tmp/cs-rel2/CS-v2.zip" "$D/builder/charsel/CS-v2.zip"; }
 rm -rf "$D/game/romfs" "$CS" "$D/builder/charsel/tool" "$D/builder/charsel/tool-pending"; rm -f "$D/character-select-answer.txt"
 cs2_pin; cs2_zip
-# No game RomFS yet (a first start: the game is built after this step): the mod goes in, the tool waits.
+# No game RomFS yet (a first start: the game is built after this step): nothing of the mod goes in (no half mod: its code patch
+# alone would build into the game without its menus, tables and models), one line says it comes at the next start.
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t1.txt" 2>&1; export CODE=$?
-check 'Character Select tool: no game RomFS yet -> the mod is in (code patch for the build), its files wait, one line says so' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && [ ! -e "$2/romfs/Model/Made_By_Tool.bin" ] && [ -f "$3/builder/charsel/tool-pending" ] &&
-        [ -f "$3/builder/charsel/tool/player.py" ] && grep -q "right after it is built" "$1" && ! grep -q "was not installed" "$1"' _ "$tmp/build-t1.txt" "$CS" "$D"
-# The game RomFS is there (the build made it): the next start makes the files in place, ui part: --exclude given.
+check 'Character Select tool: no game RomFS yet -> nothing of the mod is put in (no half mod), one line says it comes at the next start' \
+    bash -c '[ $CODE -eq 0 ] && [ ! -e "$2" ] && [ ! -e "$3/builder/charsel/tool" ] && grep -q "put in at the next start" "$1" && ! grep -q "was not installed" "$1" && ! grep -q "Download the NPC" "$1"' _ "$tmp/build-t1.txt" "$CS" "$D"
+# The game RomFS is there (the build made it): the next start puts the mod in with its files made in the same step, ui part: --exclude given.
 mkdir -p "$D/game/romfs/Pack" && : >"$D/game/romfs/Pack/ZsDic.pack.zs"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 2>&1; export CODE=$?
-check 'Character Select tool: the RomFS there -> its files are made in place (ui part: --exclude), the wait is over, the tool is cleaned up' \
-    bash -c '[ $CODE -eq 0 ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" && [ ! -e "$3/builder/charsel/tool-pending" ] &&
-        [ ! -e "$3/builder/charsel/tool" ] && grep -q "its game files are made from your game" "$1"' _ "$tmp/build-t2.txt" "$CS" "$D"
+check 'Character Select tool: the RomFS there -> the mod goes in with its files made (ui part: --exclude), the tool is cleaned up' \
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" &&
+        [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t2.txt" "$CS" "$D"
 # A tool that fails (a game of another version): the exit code decides, its last line and a clear sentence are shown, nothing of the mod put in.
 rm -rf "$CS"; cs2_zip
 FAKE_TOOL_FAIL=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?

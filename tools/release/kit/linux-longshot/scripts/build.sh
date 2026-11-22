@@ -336,25 +336,6 @@ charsel_tool_make() {
     fi
     return 0
 }
-# A mod put in before the game existed (tool-pending): its files are made now, in place, from the game's RomFS. Run right after
-# the game build and at the start of every later start; the marker goes only when it worked.
-charsel_tool_later() {
-    local folder dir dl=$B/charsel part
-    [[ -f $dl/tool-pending ]] || return 0
-    folder=$(charsel_folder) || return 0
-    dir=$CS_HOME/$folder
-    [[ -f $dir/coop-charsel.txt ]] || { rm -rf "$dl/tool-pending" "$dl/tool"; return 0; }
-    [[ -f $GAME/romfs/Pack/ZsDic.pack.zs ]] || return 0
-    [[ -f $dl/tool/player.py ]] || { rm -f "$dl/tool-pending"; warn 'Character Select: its tool is gone, its game files are not made. Set character_select = ask in data/coop-options.ini and start again to fetch it.'; return 0; }
-    part=$(head -n1 "$dir/coop-charsel.txt" | awk '{ print ($5 == "ui") ? "ui" : "full" }')
-    if charsel_tool_make "$dir" "$part"; then
-        rm -rf "$dl/tool" "$dl/tool-pending"
-        say "Character Select: its game files are made from your game ($part part)."
-    else
-        warn "Character Select: its game files were not made: $cs_tool_why. The Characters page works as far as it can; start again to retry."
-    fi
-    return 0
-}
 charsel_step() {
     local pin=$LS/CHARACTER-SELECT.txt choice='' line rel url zip zsha zfolder folder ourl osha iurl isha want dir new dl why='' part have derive=0 json ips a=''
     [[ -f $pin ]] || return 0
@@ -369,6 +350,12 @@ charsel_step() {
     [[ -n $iurl && ( ! $iurl =~ ^https:// || ! $isha =~ ^[0-9a-fA-F]{64}$ ) ]] && iurl=''
     zsha=${zsha,,} osha=${osha,,} isha=${isha,,}
     dir=$CS_HOME/$folder
+    # A first start has no game RomFS yet (the game is built after this step) and the tool needs it: the mod is put in at the
+    # next start (then the game is built again with its code patch, as for any change). Nothing is half-installed.
+    if [[ -n $(pin_get "$pin" tool_folder || true) && ! -d $dir && ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then
+        say 'Character Select (the Characters page) is put in at the next start, once the game is built: its files are made from your game.'
+        return 0
+    fi
     line=$(sed -n 's/^[[:space:]]*character_select[[:space:]]*=[[:space:]]*\(yes\|no\|ask\)[[:space:]]*\([#;].*\)\{0,1\}$/\1/p' "$DATA/coop-options.ini" 2>/dev/null | head -n1 || true)
     if [[ -n $line ]]; then choice=$line; [[ $choice == ask ]] && rm -f "$DATA/character-select-answer.txt"
     else choice=$(head -n1 "$DATA/character-select-answer.txt" 2>/dev/null | tr -d '\r[:space:]' || true); [[ $choice == yes || $choice == no ]] || choice=ask
@@ -461,15 +448,15 @@ with zipfile.ZipFile(z) as f:
             fi
             # Since Character Select v0.2.2 (snaildev99) the zip's tool folder (the pin's tool_folder) makes the mod's
             # game-derived files (models, textures, menus, tables) from the game's own RomFS on this PC (charsel_tool_make).
-            # A first start has no data/game/romfs yet (the game is built after this step): the mod goes in without them
-            # (its code patch is all the build needs), the tool stays in $dl/tool and $dl/tool-pending says so; charsel_tool_later
-            # makes the files right after the game is built (or at the next start when that failed).
+            # All or nothing, as the Windows kit: a mod without them (its code patch alone) would build into the game and
+            # leave the Characters page with no menus, tables or models. So the mod is only put in when its files can be made
+            # in the same step; a first start (no data/game/romfs yet) waits (see the check before the question).
             local tfolder
             tfolder=$(pin_get "$pin" tool_folder || true)
             if [[ -z $why && -n $tfolder ]]; then
                 if [[ $tfolder == *..* || $tfolder == /* ]]; then why="the pin's tool_folder is not a folder of the zip"
                 else
-                    rm -rf "$dl/tool" "$dl/tool-pending"
+                    rm -rf "$dl/tool"
                     if ! "$PY" -I -B -c '
 import os, sys, zipfile, shutil
 z, top, out = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
@@ -486,9 +473,7 @@ with zipfile.ZipFile(z) as f:
             shutil.copyfileobj(a, b, 1 << 20)
 ' "$dl/$zip" "$tfolder" "$dl/tool" || [[ ! -f $dl/tool/player.py ]]; then
                         why="$zip has no $tfolder/player.py"; rm -rf "$dl/tool"
-                    elif [[ ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then
-                        : >"$dl/tool-pending"
-                        say "  Character Select's game files are made from your game right after it is built (there is no game here yet)."
+                    elif [[ ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then why="no game RomFS in $GAME/romfs to make its files from"; rm -rf "$dl/tool"
                     elif charsel_tool_make "$new" "$part"; then rm -rf "$dl/tool"
                     else why=$cs_tool_why; rm -rf "$dl/tool"
                     fi
@@ -517,7 +502,7 @@ with zipfile.ZipFile(z) as f:
     fi
     return 0
 }
-((check_only)) || { charsel_step; charsel_tool_later; }
+((check_only)) || charsel_step
 
 game_stamp=$GAME/coop-built-from.txt
 # The mods' code patches the game is built with (patches 0034/0035: mods/.../exefs/*.ips and *.pchtxt, folders starting
@@ -777,7 +762,6 @@ if ((ready && !rebuild && !check_only)); then
     charsel_confirm
 elif game_build; then
     charsel_confirm
-    charsel_tool_later
 elif charsel_undo && game_want="$src_stamp$(exefs_stamp)" && [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]]; then
     warn "$game_why"
     warn 'Character Select: the game could not be built with it, so it is taken back out for now and the game starts as it was (the next start tries again; character_select = no in data/coop-options.ini stops it).'
