@@ -754,10 +754,10 @@ TEST_CASE("difficulty: a placed enemy with no ground for its copies gets their w
   CHECK(x.Plan("Field", {}, 200, false, 200) == 0);
   CHECK_FALSE(x.NoSpot(kLone));
   CHECK(x.Plan("Room", walk, 200, false, 300) == 1);
-  // A placement the data does not have: no ground known, its weight.
+  // A placement the data does not have (a mod's added enemy): no copies and no fold, its own weight.
   constexpr std::uint64_t kUnknown = 0x7777'0000'0001ULL;
   CHECK(x.Plan("Room", {{"Enemy_Stalfos", kUnknown}}, 200, false, 400) == 0);
-  CHECK(x.NoSpot(kUnknown));
+  CHECK_FALSE(x.NoSpot(kUnknown));
 }
 
 TEST_CASE("difficulty: an extra's address is its own only while its actor is there") {

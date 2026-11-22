@@ -803,9 +803,8 @@ std::size_t Extras::Plan(std::string_view scene, const std::vector<Original>& wa
         }
         const std::optional<Area> area = areas_ ? areas_(o.hash) : std::nullopt;
         if (!area) {
-            if (ExtraCount(o.hash, count_pct) > 0) {
-                no_spot_.insert(o.hash);  // no placement data: no ground known
-            }
+            // A placement our baked data lacks was added by a mod (OOTRR Difficulty: more enemies, hordes): its mod
+            // already scaled it, so it keeps its own weight: no copies, no fold (ootrr-diff-compat D1).
             continue;
         }
         auto plan = plans_.find(area->name);
