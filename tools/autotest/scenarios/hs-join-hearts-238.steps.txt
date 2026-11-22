@@ -1,0 +1,30 @@
+# hs-join-hearts-238 (player row 238): a guest that joins with MORE hearts than the host takes the host's count and
+# does not raise the host (the join's ResetHold in FlagWatcher::apply_snapshot). Both games on their own save,
+# LICHII_COOP_CHEATS=1 for `give`.
+# Setup: both start and join (same hearts: 3). The server goes away; B (offline) gains a heart container (B 4, A 3);
+# the server comes back and B rejoins with its 4 against the host's 3.
+# PASS (shots decide, read both):
+#  1. j-before-A / j-before-B: equal hearts.  2. j-offline-B: B shows one heart more than A's j-offline-A.
+#  3. j-joined-A / -B (~10 s after the rejoin): BOTH show the host's count (A did not rise to B's), B went DOWN.
+#  4. j-picked-A / -B: after B takes a heart container, both show the host's count + 1.
+# Log: B "our Link's max life .* -> " lines; read A's log: no max-life rise at the rejoin. UNPROVEN if the rejoin sent no
+# join snapshot (B's log has no "welcomed as player" after the server's return): then the reconnect path is not the
+# join path and 238 needs a fresh-join variant (B's save made 4 hearts before its first start).
+#! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_CHEATS=1
+start A
+start B
+sleep 40
+load A B
+sleep 20
+shot j-before
+server stop
+sleep 10
+play B hs-join-hearts-238.B.txt
+shot j-offline
+server start
+sleep 40
+lines b-rejoined B min=2 coop: welcomed as player
+shot j-joined
+play B hs-join-hearts-238.B2.txt
+sleep 20
+shot j-picked

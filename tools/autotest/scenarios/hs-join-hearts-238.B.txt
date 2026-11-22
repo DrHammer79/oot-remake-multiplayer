@@ -1,0 +1,6 @@
+# B offline: gains a heart container (4 hearts here, the host stays on 3)
+mark b-offline
+wait 300
+give PlayerStatus.MaxLife
+wait 600
+mark b-gave
