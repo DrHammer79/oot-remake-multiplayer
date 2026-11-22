@@ -1,7 +1,7 @@
 # hs-customize-tunic (Longshot, row 246 / #314): the Kokiri Tunic changed in the game's Customize screen,
 # mid-session (no LICHII_COOP_COLOR: the colour the settings give, then the screen's). Needs Character Select ON:
 # the path is ui-snail-customize's, proven to reach the screen and change the tunic (lane 20261121-040125):
-# - menu -> L x3 to his Characters page -> A (picker) -> B -> X Customize (co-op's rows: Eye Colour, Kokiri Tunic,
+# - menu -> L x3 to his Characters page -> X Customize (co-op's rows: Eye Colour, Kokiri Tunic,
 # Cap Trim | Goron Tunic, Zora Tunic; CoopSnailCustom reads the pad: D-pad moves, ZR / ZL change the value).
 # A child, in the graveyard as the save loads; B (hs-customize-tunic.B.txt) watches A's spot.
 # (lane 091623: 'menu customize' opened co-op's page with no pause menu up: the presses went to the game)
@@ -21,10 +21,7 @@ wait 120
 press L
 wait 120
 mark a-characters
-press A
-wait 150
-press B
-wait 150
+# (lane 091943, v0.2.1 ui: A then B here left the whole menu: Customize straight from the page)
 press X                 # his Customize screen, co-op's rows (Eye Colour focused)
 wait 180
 press DDOWN             # Kokiri Tunic
