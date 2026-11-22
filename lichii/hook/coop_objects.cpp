@@ -2492,6 +2492,19 @@ public:
                         LOG_INFO(Core, "coop: world: {:016x} {} push node {:x}: its own start "
                                        "(main+{:#x}) asked to run again, from where it rests now",
                                  fix.hash, fix.name, *node, CoopWorld::BlockNode::kStartFn);
+                        // Row 244 probe (log only): a block-pull camera softlock may be this start running while
+                        // our Link grips the block; the untouched path (NodeRestWords) has no busy test.
+                        if (player_ && std::isfinite((*player_)[0])) {
+                            const float dx = (*player_)[0] - fix.to[0], dy = (*player_)[1] - fix.to[1],
+                                        dz = (*player_)[2] - fix.to[2];
+                            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                            if (d <= CoopWorld::WorldSync::kAtBlockM) {
+                                LOG_INFO(Core, "coop: world: {:016x} {} push node start while our Link is {:.2f} m "
+                                               "from it (grip reach; {}, row 244 probe)",
+                                         fix.hash, fix.name, d,
+                                         fix.untouched ? "untouched: no busy test" : "moved by us too");
+                            }
+                        }
                     } else {
                         LOG_INFO(Core, "coop: world: {:016x} {} push node {:x} already starts from "
                                        "where it rests: left alone",
