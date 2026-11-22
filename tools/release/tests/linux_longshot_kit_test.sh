@@ -202,10 +202,11 @@ check "build: with Character Select's code co-op's tab's patch is taken out and 
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/csn2.txt" 2>&1; export CODE=$?
 check "build: Character Select's code gone: co-op's tab's patch back in, the game as built with it (the kept build put back)" \
     bash -c '[ $CODE -eq 0 ] && [ -f "$1" ] && grep -q "coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips:" "$2"' _ "$csn" "$D/game/coop-built-from.txt"
-# The rule itself failing (Python's error) stops the start loudly: never read as 'his code' (patch out, game built again)
+# The rule itself failing (Python's error) is said plainly and the start goes on: never read as 'his code' (patch out,
+# game built again); the patch stays as it was
 : >"$log"
 FAKE_CHARSEL_FAIL=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/csn3.txt" 2>&1; export CODE=$?
-check "build: the Characters tab's rule failing stops with its error (patch kept, no game build)"     bash -c '[ $CODE -ne 0 ] && grep -q "fake rule broke" "$1" && grep -q "could not tell whether its code patch" "$1" && [ -f "$2" ] && ! grep -q "^make_game" "$3"' _ "$tmp/csn3.txt" "$csn" "$log"
+check "build: the Characters tab's rule failing is said with its error, the start goes on (patch kept, no game build)"     bash -c '[ $CODE -eq 0 ] && grep -q "fake rule broke" "$1" && grep -q "could not tell whether its code patch" "$1" && [ -f "$2" ] && ! grep -q "^make_game" "$3"' _ "$tmp/csn3.txt" "$csn" "$log"
 
 # NVIDIA DLSS (#234): --dlss asks for NVIDIA's license once (a terminal only), data/dlss.txt keeps the answer, the game is
 # built again with the SDK; --no-dlss takes it back. The game's stamp stays the release, pin and patches.
