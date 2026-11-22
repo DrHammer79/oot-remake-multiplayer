@@ -81,6 +81,9 @@ struct Seen {
     // our game last set them (sent in its samples).
     std::uint64_t bsa_component = 0;
     std::optional<coop::protocol::BossBsa> bsa;
+    // Row 222 (coop_boss_orders.h): for one of ours, the battle manager's orders our game gave it (sent in its
+    // samples, component 23).
+    std::optional<coop::protocol::BossOrders> orders;
     // Boss turns (0.11.8): an enemy's attack as its own game says (CoopBossNative::AttackFlagsAt: its BSA's current
     // action verb attribute Attack). nullopt: not read (no BSA, not an enemy).
     std::optional<bool> attacking;
@@ -409,7 +412,10 @@ inline constexpr std::uint64_t kMinionLoopUs = 3'000'000;
 // The actors with RedeadParam (Enemy_ReDead*, Enemy_Gibdo*, never their _Dictionary entries).
 bool IsScreamer(std::string_view name);
 // Row 222 (Twinrova, option C): a boss's battle manager (Enemy_KotakeKoumeBattleManager: it chooses its sisters'
-// battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager.
+// battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager by a game that
+// does not share its orders (option A, SetSharesOrders): one game without them keeps the group with its owner.
+// PresenceFlagsBattleManager: whether a manager's presence carries the bit.
+constexpr bool PresenceFlagsBattleManager(bool is_manager, bool shares_orders) { return is_manager && !shares_orders; }
 bool IsBattleManager(std::string_view name);
 // Row 232: the boss a summoned piece grabs for (Enemy_DeadHand_Hand -> Enemy_DeadHand), else empty. While a piece we
 // own is in its attack (its grab: it holds our own Link), our presence entry of that boss carries
@@ -1069,6 +1075,9 @@ public:
     // Boss turns: our game reads its bosses' attacks and takes turns (LICHII_COOP_BOSS_TURNS on): every boss
     // or part is listed with object_presence::takes_turns.
     void SetTakesTurns(bool on) { takes_turns_ = on; }
+    // Row 222 option A (coop_boss_orders.h): this game shares its battle managers' orders. Then it does not flag a
+    // manager object_presence::battle_manager (option C's server rule, for a game without the orders wrap).
+    void SetSharesOrders(bool on) { shares_orders_ = on; }
     // The boss actors whose death has begun (the boss glue; player report #105). A hit such a boss's game did
     // not take (its owner's killing hit, refused outside Gohma's weak point) is given to its Life step as its
     // life after the wait, as for any other enemy: its death plays out here (CoopBossNative lets it die).
@@ -1239,6 +1248,8 @@ public:
     // Native boss sync: each copy's latest owner's boss verbs, by the
     // copy's address (coop_boss_native.h puts them into the game).
     std::vector<std::pair<std::uint64_t, coop::protocol::BossBsa>> BossVerbsIn() const;
+    // Row 222: the owner's battle manager orders for our copies (by address), as BossVerbsIn.
+    std::vector<std::pair<std::uint64_t, coop::protocol::BossOrders>> BossOrdersIn() const;
     // The actors of the enemies we own, with their names (for the test drive).
     std::vector<std::pair<std::uint64_t, std::string>> Owned() const;
     // The player who owns the object at `address` (0: the server, none: not
@@ -1304,6 +1315,8 @@ private:
         std::optional<coop::protocol::BossBsa> bsa;         // native boss sync: ours, as last read
         std::optional<bool> attacking;                       // boss turns: its game's Attack attribute (Seen)
         std::optional<coop::protocol::BossBsa> bsa_in;      // native boss sync: a copy's, the owner's latest
+        std::optional<coop::protocol::BossOrders> orders;     // row 222: ours, as last read
+        std::optional<coop::protocol::BossOrders> orders_in;  // row 222: a copy's, the owner's latest
         bool boss_native = false;  // a bsa came for it once: its AI runs (never held), across owners
         coop::protocol::Vec3 velocity{};
         std::uint64_t seen_at = 0;
@@ -1320,6 +1333,7 @@ private:
         std::string sent_animation;
         std::string sent_slots;  // issue 150: the slot names last sent
         std::optional<std::uint32_t> sent_bsa_seq;  // native boss sync: the boss verbs' seq last sent
+        std::optional<std::uint32_t> sent_orders_seq;  // row 222: the battle orders' seq last sent
         std::uint32_t sequence = 0;
         // Protocol 14: the newest hit our game took on our own enemy (Seen::hit_record), in its samples until
         // hit_show_until (kHitShowUs; samples may be lost), seq counting from 1 (ObjectHit).
@@ -1779,6 +1793,7 @@ private:
     bool wake_ = true;
     std::vector<std::string> unready_;
     bool takes_turns_ = false;  // SetTakesTurns
+    bool shares_orders_ = false;  // SetSharesOrders
     std::vector<std::string> dying_;  // SetDying
     unsigned dying_finished_ = 0;     // DyingFinished
     std::size_t hurt_taken_ = 0;   // hurts the game took as asked

@@ -60,6 +60,7 @@
 #include "coop_hold.h"
 #include "coop_actor_events.h"
 #include "coop_boss_native.h"
+#include "coop_boss_orders.h"
 #include "coop_difficulty.h"
 #include "coop_puppet.h"
 #include "coop_pvp.h"
@@ -1948,6 +1949,7 @@ public:
                 if (CoopBossNative::Table& bosses = CoopBossNative::TheTable(); bosses.BrainOn()) {
                     bosses.Publish({});
                 }
+                CoopBossOrders::TheTable().Publish({});  // row 222: no owner or copy: our managers decide again
                 sharing_ = false;
             }
             return;
@@ -2027,6 +2029,13 @@ public:
                                        return CoopBossNative::TheTable().Step(guest, after_call, result,
                                                                               TheBossMain().load());
                                    });
+                // Row 222: the owner's battle manager orders put into our copies (coop_boss_orders.h).
+                CoopSvc::AddCaller(CoopBossOrders::Table::kCallerOrder,
+                                   [](CoopPuppet::Guest& guest, bool after_call,
+                                      std::uint64_t result, std::uint64_t) {
+                                       return CoopBossOrders::TheTable().Step(guest, after_call, result,
+                                                                              TheBossMain().load());
+                                   });
                 CoopSvc::AddCaller(kGrassCallerOrder,
                                    [](CoopPuppet::Guest& guest, bool after_call,
                                       std::uint64_t result, std::uint64_t now_ms) {
@@ -2095,6 +2104,7 @@ public:
             std::lock_guard lock(g_unready_mutex);
             sync_.SetUnready(g_unready);
             sync_.SetTakesTurns(CoopBossNative::TheTable().TurnsOn());
+            sync_.SetSharesOrders(CoopBossOrders::TheTable().On());  // row 222: option A, else C's flag
             sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
@@ -2273,6 +2283,25 @@ public:
             }
             for (const std::string& note : bosses.TakeNotes()) {
                 LOG_INFO(Core, "coop: bosses: {}", note);
+            }
+            // Row 222 (coop_boss_orders.h): the same parts for the battle manager's orders, then the owner's.
+            CoopBossOrders::Table& orders = CoopBossOrders::TheTable();
+            if (orders.On()) {
+                std::vector<CoopBossOrders::Member> members;
+                members.reserve(list.size());
+                for (const CoopBossNative::Boss& b : list) {
+                    members.push_back({b.actor,
+                                       b.role == CoopBossNative::Role::owner ? CoopBossOrders::Role::owner
+                                                                             : CoopBossOrders::Role::copy,
+                                       b.owner, b.name});
+                }
+                orders.Publish(members);
+                for (const auto& [address, state] : sync_.BossOrdersIn()) {
+                    orders.Receive(address, state);
+                }
+                for (const std::string& note : orders.TakeNotes()) {
+                    LOG_INFO(Core, "coop: bosses: {}", note);
+                }
             }
         }
         if (sync_.BlastDrops() != blast_drops_logged_) {
@@ -3291,6 +3320,7 @@ private:
             pvp_life_ = -1;
             pvp_watch_.Reset();
             CoopProjectiles::TheOwnShots().Reset();
+            CoopBossOrders::TheTable().Reset();  // row 222: its block and nodes were the old game's
             extras_.Reset();  // difficulty: that run's extra enemies are gone with it
             horde_.Reset();
             {
@@ -4341,6 +4371,7 @@ private:
                         s.bsa_component = r.Ptr(*table + CoopBossNative::addr::kComponentBsa).value_or(0);
                     }
                     s.bsa = CoopBossNative::TheTable().OwnerState(a);
+                    s.orders = CoopBossOrders::TheTable().OwnerOrders(a);  // row 222: its manager's orders, ours
                     if (own_hit_life) {
                         s.hit_at = NewOwnHitAt(r, a, *own_hit_life, s.position, own_hit_took_life);
                     } else if (CoopBossNative::TheTable().OwnShotNear(s.position)) {
