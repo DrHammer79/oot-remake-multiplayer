@@ -1153,14 +1153,10 @@ def guard_menus(root, romfs, say=print):
         win_name, short = _menu_short(Codec(romfs), order, pack_path, files)
     except (OSError, ValueError, MergeError) as e:
         win_name, short = f"a mod's (it could not be read: {e})", len(files)
-    # The title layout's Host toggle is a part of Common's layout: the title screen must load Common too (its row of
-    # the screens table), or the title crashes at the layout's load. Only the Title archive is kept then.
-    title_only = not short and _title_lacks_common(Codec(romfs), order, romfs, files)
-    park = list(files) if short else [rel for rel in files if _is_title_archive(rel)] if title_only else []
     try:
-        if park:
+        if short:
             moved = 0
-            for rel in park:
+            for rel in files:
                 src = os.path.join(pack_path, "romfs", *rel.split("/"))
                 if os.path.isfile(src):
                     dst = os.path.join(keep, *rel.split("/"))
@@ -1168,22 +1164,13 @@ def guard_menus(root, romfs, say=print):
                     os.replace(src, dst)
                     moved += 1
             if moved or os.path.isdir(keep):
-                if short:
-                    say(f"Menus: the game reads {win_name}'s size table, which lacks the sizes of {short} of the puppet "
-                        "pack's menu files: the title's co-op rows and the pause menu's Multiplayer tab are off this start "
-                        "(the game's own menus; co-op still works from the Minus menu). Turn that mod off, or merge the "
-                        "pack's entries into its table, and they come back.")
-                else:
-                    say("Menus: the screens table the game reads does not make the title load Common's layouts (a mod's "
-                        "UIScreen table won), which the title's Host toggle needs: the title's co-op rows are off this "
-                        "start (the game's own title; co-op still works from the Minus menu). Turn that mod off, or "
-                        "merge its screens table with the pack's, and they come back.")
-            if short:
-                return 0
+                say(f"Menus: the game reads {win_name}'s size table, which lacks the sizes of {short} of the puppet "
+                    "pack's menu files: the title's co-op rows and the pause menu's Multiplayer tab are off this start "
+                    "(the game's own menus; co-op still works from the Minus menu). Turn that mod off, or merge the "
+                    "pack's entries into its table, and they come back.")
+            return 0
         back = 0
         for rel in files:
-            if rel in park:
-                continue
             src = os.path.join(keep, *rel.split("/"))
             dst = os.path.join(pack_path, "romfs", *rel.split("/"))
             if not os.path.isfile(src):
@@ -1194,7 +1181,7 @@ def guard_menus(root, romfs, say=print):
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             os.replace(src, dst)
             back += 1
-        if os.path.isdir(keep) and not any(os.path.isfile(os.path.join(keep, *rel.split("/"))) for rel in park):
+        if os.path.isdir(keep):
             shutil.rmtree(keep, ignore_errors=True)
         if back:
             say(f"Menus: the size table the game reads holds the puppet pack's menu files again: the title's co-op "
@@ -1203,29 +1190,6 @@ def guard_menus(root, romfs, say=print):
     except OSError as e:
         say(f"Menus: the puppet pack's menu files could not be moved ({e}).")
         return 1
-
-
-def _is_title_archive(rel):
-    return rel.startswith("UI/Layout2Archive/Title.")
-
-
-def _title_lacks_common(codec, order, romfs, files):
-    """True when the pack's menu files hold a screens table (a pack with the Host toggle in its Title layout) and the
-    screens table the game reads (the last mod's that has one, else the game's own) has no Common after Title in
-    Title_00's ArchiveCategory, or cannot be read."""
-    ours = next((rel for rel in files if rel.startswith("RSDB/UIScreen.Product.")), None)
-    if ours is None:
-        return False
-    fname = ours.rsplit("/", 1)[1]
-    try:
-        having = [p for _, p in order if fname in rsdb_tables_of(p)]
-        path = os.path.join(having[-1], *RSDB, fname) if having else os.path.join(romfs, *RSDB, fname)
-        with open(path, "rb") as f:
-            rows = byml.loads(codec.unpack(f.read()))
-        row = next(r for r in rows if r.get("Name") == "Title_00")
-        return "Common" not in row.get("ArchiveCategory", [])
-    except (OSError, ValueError, KeyError, StopIteration, IndexError, TypeError, MergeError):
-        return True
 
 
 def load_table(codec, mod_path, fname):

@@ -537,54 +537,26 @@ class MenuGuardTest(unittest.TestCase):
         self.put(os.path.join(self.mods, *mod.split("/"), "romfs", *self.SCREENS.split("/")), raw)
 
     def with_screens_pack(self):
-        """The pack as build.py --title-rows makes it now: its UIScreen table in title_menu, Common on Title_00."""
+        """The pack with a UIScreen table in its menu files (CoopMenu_00 's row)."""
         self.put(os.path.join(self.pack, "coop_puppet.json"),
                  b'{"title_rows": true, "title_menu": ["%s", "%s", "%s"], "pause_menu": ["%s"]}'
                  % (TITLE.encode(), MALS.encode(), self.SCREENS.encode(), MALS.encode()))
         self.screens(PACK, ["Title", "Common"])
 
-    def test_the_toggle_needs_common_on_the_title_screen_or_the_title_archive_is_kept_out(self):
+    def test_a_pack_with_a_screens_table_keeps_its_title_archive_whatever_screens_table_wins(self):
+        """The title has no part from Common (the Host toggle is gone), so no UIScreen table parks the Title archive;
+        the pack's UIScreen row for CoopMenu_00 (pause menu) must not park it either."""
         self.with_screens_pack()
-        self.assertEqual(self.guard(), 0)   # (the pack's own table wins: Title and Common)
-        self.assertTrue(self.in_play(TITLE) and self.in_play(MALS))
-        self.assertEqual(self.lines, [])
-        # A seed made with its own size table (holding every size) and a screens table of its own, Title only:
         self.put_table("zz-site-seed", {self.crc(MALS): self.grown + 5, self.crc(TITLE): 230000})
-        self.screens("zz-site-seed", ["Title"])
-        self.assertEqual(self.guard(), 0)
-        self.assertFalse(self.in_play(TITLE))                  # (the layout with the toggle's part: out)
-        self.assertTrue(self.kept(TITLE) and self.in_play(MALS))   # (the pause tab and the rest stay)
-        self.assertIn("title's co-op rows are off", self.lines[0])
-        self.guard()   # (every start while it wins: nothing lost)
-        self.assertTrue(self.kept(TITLE))
-        self.screens("zz-site-seed", ["Title", "Common"])   # (merged with the pack's row: the title is safe)
+        for archives in (["Title"], ["Title", "Common"]):
+            self.screens("zz-site-seed", archives)
+            self.assertEqual(self.guard(), 0)
+            self.assertTrue(self.in_play(TITLE) and self.in_play(MALS))
+            self.assertFalse(self.kept(TITLE))
+            self.assertEqual(self.lines, [])
+        os.remove(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")))   # (no screens table at all)
         self.assertEqual(self.guard(), 0)
         self.assertTrue(self.in_play(TITLE) and not self.kept(TITLE))
-        self.assertIn("are back (1 files)", self.lines[0])
-
-    def test_a_winner_with_no_screens_table_or_an_unreadable_one_or_a_title_row_less_one_parks_the_title(self):
-        self.with_screens_pack()
-        self.put_table("zz-site-seed", {self.crc(MALS): self.grown + 5, self.crc(TITLE): 230000})
-        for make in (lambda: self.put(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")), b"not a table"),
-                     lambda: self.put(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")),
-                                      zstandard.ZstdCompressor(write_content_size=True).compress(
-                                          byml.dumps([{"ArchiveCategory": ["Title"], "Name": "Else_00"}])))):
-            make()
-            self.guard()
-            self.assertTrue(self.kept(TITLE), "parked")
-            self.assertTrue(self.in_play(MALS))
-            os.remove(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")))
-            self.screens("zz-site-seed", ["Title", "Common"])
-            self.guard()
-            self.assertTrue(self.in_play(TITLE), "back")
-            os.remove(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")))
-
-    def test_a_pack_without_a_screens_table_has_no_toggle_and_is_not_checked(self):
-        self.put_table("zz-site-seed", {self.crc(MALS): self.grown + 5, self.crc(TITLE): 230000})
-        self.screens("zz-site-seed", ["Title"])
-        self.assertEqual(self.guard(), 0)   # (an older pack: its title archive has no part from Common)
-        self.assertTrue(self.in_play(TITLE))
-        self.assertEqual(self.lines, [])
 
     def test_every_start_runs_the_guard_after_the_merge(self):
         self.put_table(PACK + ".old-b26", {self.crc(MALS): self.mals})
