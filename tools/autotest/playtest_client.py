@@ -160,8 +160,11 @@ class Client:
     def dump(self, tag):
         return self.request("dump", tag=tag)
 
-    def shot(self, path=None):
-        return self.request("shot", reply_timeout=60, **({"path": path} if path else {}))
+    def shot(self, name=None):
+        """A screenshot; the game saves it under its own playtest/shots/<name>.png and the reply gives the path."""
+        if name is not None and not TAG.match(name):
+            raise ValueError("a shot name is 1 to 64 letters, digits, - and _")
+        return self.request("shot", reply_timeout=60, **({"name": name} if name else {}))
 
 
 def _frames(n):

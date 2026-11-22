@@ -165,11 +165,19 @@ def runner_argv(a, game_a, game_b, port, pipe, d):
         argv.append("--no-load")
     elif a.load:
         argv += ["--load", a.load]
+    if getattr(a, "playtest", False):
+        argv += ["--playtest-ports", str(playtest_base(a.lane))]
     for kv in a.env:
         argv += ["--env", kv]
     if a.display:
         argv += ["--display", a.display]
     return argv
+
+
+def playtest_base(lane):
+    """The play-test bridge's port base: game A (p1) listens on base + 1, B (p2) on base + 2
+    (tools/autotest/playtest_client.py port_for: 5000 + N, or 5000 + 10*L + N on lane L)."""
+    return 5000 + 10 * int(lane or 0)
 
 
 def spawn_watchdog(d):
@@ -210,10 +218,12 @@ def start(a):
     s = {"started": time.time(), "dir": d, "lane": a.lane, "port": port, "booted": False,
          "max_s": int(a.max_minutes * 60), "idle_s": int(a.idle_minutes * 60), "lock_wait": a.lock_wait,
          "games": {}, "offsets": {}}
-    for x, g in zip(TAGS, (game_a, game_b)):
+    for i, (x, g) in enumerate(zip(TAGS, (game_a, game_b))):
         s["games"][x] = {"folder": os.path.abspath(g), "pipe": "%s-%s" % (pipe, x),
                          "commands": os.path.join(d, "commands-%s.txt" % x),
                          "log": os.path.join(d, "game-out-%s.txt" % x)}
+        if getattr(a, "playtest", False):
+            s["games"][x]["playtest_port"] = playtest_base(a.lane) + i + 1
     save(d, s)
     touch(d)
     lock = wait_lock(d, spawn_watchdog(d), a.lock_wait + 30)
@@ -230,6 +240,8 @@ def start(a):
     out = {"ok": code == 0, "session": d, "lane": a.lane, "lock": lock, "port": port,
            "boot": "played" if code == 0 else "FAILED (see steps.txt): the session is closed",
            "ends": "after %d min, or %d min without a command" % (a.max_minutes, a.idle_minutes)}
+    if getattr(a, "playtest", False):
+        out["playtest"] = {"p%d" % (i + 1): s["games"][x]["playtest_port"] for i, x in enumerate(TAGS)}
     if code != 0:
         out["stop"] = stop(argparse.Namespace(session=d))
     return out
@@ -531,6 +543,8 @@ def main(argv=None):
     st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length")
     st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
     st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
+    st.add_argument("--playtest", action="store_true",
+                    help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)

@@ -12,6 +12,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -110,10 +111,20 @@ class Game:
     """One game's tools: its bridge client, which player it is, and the run's log folder (shared by every game's
     server, so desync_check sees them all)."""
 
-    def __init__(self, player, client, log_dir):
-        self.player, self.client, self.log_dir = player.lower(), client, log_dir
+    def __init__(self, player, client, log_dir, session=None):
+        self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
 
     def call(self, name, args):
+        if self.session:
+            live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
+            live.touch(self.session)          # the session's watchdog counts this as a tester command
+        try:
+            return self._call(name, args)
+        finally:
+            if self.session:
+                live.touch(self.session)      # (a long walk_to or warp is not idle time)
+
+    def _call(self, name, args):
         c = self.client
         if name == "get_state":
             return c.state()
@@ -151,11 +162,13 @@ class Game:
             label = args.get("name") or "shot"
             if not pc.TAG.match(label):
                 raise ValueError("a name is letters, digits, - and _")
-            folder = os.path.join(self.log_dir, "shots")
-            os.makedirs(folder, exist_ok=True)
-            path = os.path.join(folder, "%s-%s-%d.png" % (self.player, label, int(time.time() * 1000)))
-            r = c.shot(path)
-            return dict(r, path=r.get("path") or path)
+            r = c.shot("%s-%s-%d" % (self.player, label, int(time.time() * 1000)))
+            got = r.get("path")
+            if got and os.path.isfile(got):   # a copy beside the run's logs: every game's shots in one place
+                folder = os.path.join(self.log_dir, "shots")
+                os.makedirs(folder, exist_ok=True)
+                r["copy"] = shutil.copy(got, os.path.join(folder, os.path.basename(got)))
+            return r
         raise ValueError("no tool %s" % name)
 
 
@@ -230,19 +243,21 @@ def serve(session, game=None):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--session", help="a two-game session (live.py start): the tools state, act, shot, checkpoint, "
-                   "desync_check")
+                   "desync_check; with --player: the session whose watchdog each call keeps awake")
     p.add_argument("--player", choices=pc.PLAYERS, help="one game's tools, through its play-test bridge")
     p.add_argument("--port", type=int, help="that game's bridge port (default: the player's, on --lane when given)")
     p.add_argument("--lane", type=int, help="a test lane (tools/autotest/lanes.py): its bridge ports")
     p.add_argument("--log-dir", default="playtest-logs",
                    help="the run's checkpoint logs and shots; give every game's server the same one")
     a = p.parse_args(argv)
-    if bool(a.session) == bool(a.player):
-        p.error("give --session or --player, one of them")
-    if a.session:
+    if not a.player:
+        if not a.session:
+            p.error("give --session, or --player (and --session when the games came from live.py start)")
         serve(os.path.abspath(a.session))
         return 0
-    serve(None, Game(a.player, pc.Client(a.port or pc.port_for(a.player, a.lane)), os.path.abspath(a.log_dir)))
+    session = os.path.abspath(a.session) if a.session else None
+    serve(None, Game(a.player, pc.Client(a.port or pc.port_for(a.player, a.lane)), os.path.abspath(a.log_dir),
+                     session))
     return 0
 
 
