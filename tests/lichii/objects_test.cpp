@@ -3574,8 +3574,8 @@ TEST_CASE("objects: GroupsOf picks the root by name, then the nearest in reach")
 
 TEST_CASE("objects: OBJECT_GROUP follows the presence, on a change and with each presence") {
     Sync sync;
-    std::vector<Seen> walk{Enemy(0x100, 0x11, 4, 0.0f, "Enemy_DeadHand"),
-                           Enemy(0x200, 0x22, 1, 5.0f, "Enemy_DeadHand_Hand")};
+    std::vector<Seen> walk{Enemy(0x100, 0x11, 4, 0.0f, "Enemy_DungeonBoss_Dodongo"),
+                           Enemy(0x200, 0x22, 1, 5.0f, "Enemy_BabyDodongo")};
     auto step = Tick(sync, 1000 * kMs, walk);
     // Presence first, then the group.
     REQUIRE(step.send.size() >= 2);
@@ -8046,12 +8046,13 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's Meg r
     }
 
     // B's copy of Meg makes her own decoys (her own layout): deleted, and A's made instead.
+    // (20 m off: within kClaimDistance of an owner's decoy being made here, one would be taken for it.)
     Sync b;
     const Seen meg_b = Enemy(0x200, 0x77, 16, 0.0f, meg);
     Tick(b, 0, {meg_b}, 2);
     Own(b, meg_id, 1);
     Tick(b, 50 * kMs, {meg_b}, 2);
-    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, -6.0f, decoy)}, 2);
+    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, -20.0f, decoy)}, 2);
     CHECK_FALSE(b.IdOf(0x210));
     CHECK(b.Removes() == std::vector<std::uint64_t>{0x210});
     b.Receive(spawns[0]);
@@ -8063,12 +8064,12 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's Meg r
     std::uint64_t at = 200 * kMs;
     std::size_t made = 0;
     for (; made <= CoopObjects::kMinionLoopMax; ++made) {
-        Tick(b, at, {meg_b, Enemy(0x300 + made, ~0ULL, 1, -6.0f, decoy)}, 2);
+        Tick(b, at, {meg_b, Enemy(0x300 + made, ~0ULL, 1, -20.0f, decoy)}, 2);
         at += 100 * kMs;
     }
     (void)b.Removes();
     const std::uint64_t late = 0x300 + made;
-    Tick(b, at, {meg_b, Enemy(late, ~0ULL, 1, -6.0f, decoy)}, 2);
+    Tick(b, at, {meg_b, Enemy(late, ~0ULL, 1, -20.0f, decoy)}, 2);
     REQUIRE(b.IdOf(late));
     CHECK(b.IdOf(late)->kind == proto::ObjectKind::placed);
     CHECK(b.Removes().empty());
