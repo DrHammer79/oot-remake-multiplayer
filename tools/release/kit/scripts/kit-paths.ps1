@@ -1588,7 +1588,10 @@ $script:KitCharselCustomizer = @(
     @('COLOUR_MORE', 0x8103AE80L, 0x8103B160L), @('COLOUR_KEEP', 0x83BCDC10L, 0x83BCDDE0L),
     @('COLOUR_TEX', 0x83BCCE70L, 0x83BCD000L))
 $script:KitCharselIpsShift = 0x8001FF00L
-$script:KitCharselStrip = 'cz1'   # (in the stamp: another list of regions makes the kit strip his patch again)
+# (in the stamp: another list of regions, or another default-part file rule, makes the kit make his folder again.
+# cz2, row 242: the default part keeps Link's own textures; a default part stamped with an older one lost them, so it
+# is never copied from: his release is unpacked again.)
+$script:KitCharselStrip = 'cz2'
 
 # An IPS32 file's records: @{ At (offset); Size (bytes it changes); From; To (the record's bytes in the file) }, or a
 # throw when it is not one. IPS32: 'IPS32', records (u32 BE offset, u16 BE size, the bytes; size 0: u16 BE run length
@@ -1687,7 +1690,8 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
         foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $New 'romfs') -Recurse -File -Force -ErrorAction Stop)) {
             if (Test-KitCharacterSelectNpcFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
         }
-        foreach ($d in 'Phive', 'Sound') {   # (romfs/Tex goes file by file above: Link's own textures stay) Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
+        # (romfs/Tex goes file by file above: Link's own textures stay)
+        foreach ($d in 'Phive', 'Sound') { Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
     }
     $code = @(Get-ChildItem -LiteralPath (Join-Path $New 'exefs') -Filter '*.ips' -File -ErrorAction SilentlyContinue)
     if ($code.Count -ne 1) { return "the release has $($code.Count) code patches, not one" }
@@ -1742,7 +1746,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
     $wantF = @($want -split ' ')
     $havePart = if ($haveF.Count -ge 5) { $haveF[4] } else { 'full' }
     $derive = $have -and (Test-Path -LiteralPath (Join-Path $dir 'romfs')) -and ($haveF[0..3] -join ' ') -eq ($wantF[0..3] -join ' ') -and
-              ($Part -eq 'ui' -or $havePart -eq 'full')
+              ($havePart -eq 'full' -or ($Part -eq 'ui' -and $haveF.Count -ge 6 -and $haveF[5] -eq $script:KitCharselStrip))
     if (-not $Downloads) { $Downloads = Join-Path $Kit 'hookshot\downloads' }
     $zip = Join-Path $Downloads $op.zip
     $json = Join-Path $Downloads 'charsel-characters.json'
