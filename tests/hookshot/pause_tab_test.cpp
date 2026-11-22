@@ -1939,6 +1939,73 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(system == doctest::Approx(0.0f));
 }
 
+TEST_CASE("pause tab (tabs-overhaul-01110): the - menu's tabs slide like the game's pages, the Map with them") {
+    // R on Map: ours in from the right as the Map's content goes out to the left; at the end ours in place.
+    auto o = MinusSlideAt(-1, 0, 0.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(0.0f));
+    o = MinusSlideAt(-1, 0, 1.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    // L on our first: back the other way.
+    o = MinusSlideAt(0, -1, 0.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(0, -1, 1.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(0.0f));
+    // Between ours: the next one from its side (R from the right, L from the left), the Map kept off the screen.
+    o = MinusSlideAt(0, 1, 0.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(2, 1, 0.0f);
+    CHECK(o.page == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(2, 1, 1.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    // Midway (the game's curve) somewhere between; none for no change.
+    o = MinusSlideAt(-1, 0, SlideProgress(67));
+    CHECK(o.page > 0.0f);
+    CHECK(o.page < kPageWidth);
+    CHECK(o.page + -o.map == doctest::Approx(kPageWidth));   // (the two a page apart all the way)
+    o = MinusSlideAt(1, 1, 0.3f);
+    CHECK(o.page == 0.0f);
+    CHECK(o.map == 0.0f);
+    o = MinusSlideAt(-1, -1, 0.3f);
+    CHECK(o.page == 0.0f);
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110): each - tab of ours keeps its cursor's row") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    p.OnPad(kPadR, now + 10), p.OnPad(0, now + 12);
+    REQUIRE(p.MinusTab() == 0);
+    p.SetMinusRows(0b1111);
+    p.OnPad(kPadDown, now + 14), p.OnPad(0, now + 16);
+    p.OnPad(kPadDown, now + 18), p.OnPad(0, now + 20);
+    CHECK(p.MinusRow() == 2);
+    // Lobby: its own first row; down once.
+    p.OnPad(kPadR, now + 22), p.OnPad(0, now + 24);
+    REQUIRE(p.MinusTab() == 1);
+    p.SetMinusRows(0b111);
+    CHECK(p.MinusRow() == 0);
+    p.OnPad(kPadDown, now + 26), p.OnPad(0, now + 28);
+    CHECK(p.MinusRow() == 1);
+    // Back to Multiplayer: its row 2 again; then Lobby: its row 1.
+    p.OnPad(kPadL, now + 30), p.OnPad(0, now + 32);
+    REQUIRE(p.MinusTab() == 0);
+    p.SetMinusRows(0b1111);
+    CHECK(p.MinusRow() == 2);
+    p.OnPad(kPadR, now + 34), p.OnPad(0, now + 36);
+    p.SetMinusRows(0b111);
+    CHECK(p.MinusRow() == 1);
+    // A row gone since (fewer rows now): the next shown one, as before.
+    p.OnPad(kPadL, now + 38), p.OnPad(0, now + 40);
+    p.SetMinusRows(0b0011);
+    CHECK(p.MinusRow() == 0);
+}
+
 TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page on Customize, and goes back to System") {
     Page p = UsablePage();
     std::uint64_t now = 1000;

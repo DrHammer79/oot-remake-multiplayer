@@ -232,7 +232,12 @@ void Page::MinusLineStep(int dir) {
 }
 
 void Page::MinusTabMoved() {
-    minus_row_ = 0, minus_rows_ = 0;   // (another page: its first row; the module sets its rows)
+    // (another page: the row its cursor was on when it was left, its first the first time, as the game's pages keep
+    // theirs; the module sets its rows, and a row gone since finds the next shown: SetMinusRows)
+    if (minus_row_tab_ >= 0 && minus_row_tab_ < kMinusTabs) minus_row_kept_[static_cast<std::size_t>(minus_row_tab_)] = minus_row_;
+    minus_row_ = minus_tab_ >= 0 && minus_tab_ < kMinusTabs ? minus_row_kept_[static_cast<std::size_t>(minus_tab_)] : 0;
+    minus_row_tab_ = minus_tab_;
+    minus_rows_ = 0;
     minus_list_ = false, minus_line_ = -1, minus_lines_ = 0, minus_raw_ = false, minus_raw_back_ = false;
     minus_in_view_ = false, minus_back_ = false, minus_list_back_ = false, minus_moves_ = 0, minus_line_decide_ = -1;
     minus_decide_ = -1;
@@ -697,6 +702,19 @@ std::pair<float, float> SlideOffsets(int dir, float p) {
     if (dir > 0) return {kPageWidth * (1.0f - p), -kPageWidth * p};
     if (dir < 0) return {kPageWidth * p, -kPageWidth * (1.0f - p)};
     return {0.0f, 0.0f};
+}
+
+MinusSlideOffsets MinusSlideAt(int from, int to, float p) {
+    p = std::clamp(p, 0.0f, 1.0f);
+    MinusSlideOffsets o;
+    if (from < 0 && to >= 0) {   // (R on Map: ours in from the right, the Map out to the left)
+        o.page = kPageWidth * (1.0f - p), o.map = -kPageWidth * p;
+    } else if (from >= 0 && to < 0) {   // (L on our first: ours out to the right, the Map back from the left)
+        o.page = kPageWidth * p, o.map = -kPageWidth * (1.0f - p);
+    } else if (from >= 0 && to >= 0 && from != to) {   // (between ours: the next from the side it lies on)
+        o.page = (to > from ? kPageWidth : -kPageWidth) * (1.0f - p), o.map = -kPageWidth;
+    }
+    return o;
 }
 
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms) {

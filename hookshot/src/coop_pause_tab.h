@@ -378,6 +378,8 @@ private:
     int minus_slide_ = 0;
     std::uint64_t minus_gen_ = 0;   // the strip opening whose - tabs were filled
     int minus_row_ = 0;             // MinusRow
+    std::array<int, kMinusTabs> minus_row_kept_{};   // each of our tabs' row when it was left (MinusTabMoved)
+    int minus_row_tab_ = -1;                         // the tab minus_row_ is for
     int minus_decide_ = -1;         // TakeMinusDecide
     std::uint32_t minus_rows_ = 0;  // SetMinusRows
     bool minus_in_view_ = false;        // SetMinusInView
@@ -652,6 +654,14 @@ float SlideProgress(std::uint64_t ms);
 // The pages' own x offsets at a slide's progress p (0..1): {ours, System's}, added to their own places. dir +1: ours
 // from the right to its place, System from its place to the left; dir -1: back.
 std::pair<float, float> SlideOffsets(int dir, float p);
+// The - menu's slide (tabs-overhaul-01110 (b)): from the Map (-1) to our tab `to` (0..kMinusTabs-1), back, or between
+// two of ours, at progress p (SlideProgress): the x offsets of our page (Pa_CoopMinus_00) and of the Map's content,
+// added to their own places, a page's width apart as the game's + pages slide. Between ours the Map stays hidden (its
+// offset a page off to the left); from == to: none.
+struct MinusSlideOffsets {
+    float page = 0.0f, map = 0.0f;
+};
+MinusSlideOffsets MinusSlideAt(int from, int to, float p);
 
 // What the rows say, in the game's own text panes (the module writes them through the pack's placeholder messages,
 // Coop_Live_NN, in LayoutMsg/PlusMenu_00): the session's state on the rows themselves.
@@ -986,6 +996,11 @@ inline constexpr std::uint64_t kSystemWindowVtable = 0x4befbf8;
 // the last 100 ms, through the same census (any thread; nothing without the variable).
 void CensusFromMenuState() noexcept;
 bool GameMenuUp() noexcept;
+// One of our - menu tabs (Multiplayer, Lobby, Mods) has the screen, its page shown or sliding in, as of the strip's
+// last update (tabs-overhaul-01110 (c): the - menu still counts the Map as its page then, so patch 0018 says "Map page
+// shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while
+// it is.
+bool OwnMinusPageShown() noexcept;
 // The pause menu's model actors (the menu manager's object, its four slots: Link on Equipment, and the picture Character
 // Select's Customize screen shows), 0 for an empty slot or with no menu. Any thread (reads only). The eyes' and hair's
 // colours are each actor's own material values, so the picture shows them only when they are dressed on these too.

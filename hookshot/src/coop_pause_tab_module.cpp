@@ -1818,6 +1818,7 @@ std::array<std::uint64_t, kMinusTabs> g_minus_tab_words{};   // each of ours' T_
 float g_minus_frame_x = 0.0f, g_minus_frame_y = 0.0f;
 bool g_minus_frame = false;
 bool g_minus_ok = false, g_minus_shown = false;
+float g_minus_page_x = 0.0f;   // Pa_CoopMinus_00's own x (LookMinusPage), the slide's offsets added to it
 // The strip's L and R labels (T_BtnL_00, T_BtnR_00) and their own places; whether the row is laid out as ours now.
 std::array<std::uint64_t, 2> g_strip_btns{};
 std::array<float, 2> g_strip_btns_x{};
@@ -1882,10 +1883,31 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
 // The strip's Do for ours: shown while the - menu's strip is open, filled once per opening as - tabs with our words,
 // ours lit (the game's Map then not). WHAT THE LANE RUN MUST CONFIRM: the strip's tab objects 4..6 take kTabFill with a
 // - category's look, and which screen draws these tabs' pages (R1); until then COOP_TEST_MINUS_TABS=1 only.
+// The - menu's slide (tabs-overhaul-01110 (b), MinusSlideAt): from (-1 the Map), to, and when it began (0 none). Set
+// on the strip's update (ApplyMinus), read on it (our page: ApplyMinusPage) and on the map screen's (FollowMapUnder).
+std::atomic<int> g_mslide_from{-1}, g_mslide_to{-1};
+std::atomic<std::uint64_t> g_mslide_ms{0};
+int g_minus_lit_was = -1;   // (g_mutex) the tab of ours lit at the last set (-1 the Map or none)
+bool MinusSliding(std::uint64_t now_ms) {
+    const std::uint64_t at = g_mslide_ms.load();
+    return at != 0 && now_ms >= at && now_ms - at < kSlideMs;
+}
+MinusSlideOffsets MinusSlideNow(std::uint64_t now_ms) {
+    if (!MinusSliding(now_ms)) return {};
+    return MinusSlideAt(g_mslide_from.load(), g_mslide_to.load(), SlideProgress(now_ms - g_mslide_ms.load()));
+}
+
 void ApplyMinus(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
     if (f.layout == 0 || tabs == 0 || !g_minus_ok || !d.set_minus) return;
     g_minus_shown = d.minus_shown;
+    if (d.minus_slide != 0 && d.minus_shown && d.minus_lit != g_minus_lit_was) {
+        // (the game's page slide, as its + pages: ours and the Map's content move together; the strip's own
+        // mc_TabToRight / mc_TabToLeft is the Page's strip sound)
+        g_mslide_from = g_minus_lit_was, g_mslide_to = d.minus_lit, g_mslide_ms = NowMs();
+    }
+    g_minus_lit_was = d.minus_shown ? d.minus_lit : -1;
+    if (!d.minus_shown) g_mslide_ms = 0;
     for (int i = 0; i < kMinusTabs; ++i) SetVisible(ctx, g_minus_panes[static_cast<std::size_t>(i)], d.minus_shown);
     if (!d.minus_shown) return;
     if (static_cast<int>(Read<std::uint32_t>(f.screen + kStripTabs)) < 4 + kMinusTabs) return;   // (an older strip)
@@ -2027,7 +2049,18 @@ std::array<std::string, kRows> g_minus_texts{};
 constexpr int kMinusSlots = kRows + 2 * kLinePanes;
 std::array<LiveSlot, kMinusSlots> g_minus_live{};
 std::atomic<bool> g_map_hide{false};                    // the Map page under ours to be hidden
-std::uint64_t g_map_root = 0, g_map_layout = 0;
+std::uint64_t g_map_layout = 0;
+// The Map page's own content in MapMenu_00 (read from the game's layout, tabs-overhaul-01110 (a)): hidden under ours.
+// Its RootPane is NOT hidden: it holds the - menu's full-screen backdrop BG_00 (3840 x 2160, material MenuOpenBg_00) and
+// the vignette (N_WorldMap_00/N_Vignette_00), which our page shows on as the game's own pages do (hiding the root left
+// ours on black). Each pane's own shown bit is kept and given back as it was.
+constexpr const char* kMapContent[] = {"N_LocalMap_00", "N_MiniMap_00", "N_Common_00", "Pa_WorldMap_00",
+                                       "N_EventEndIn_01", "Pa_KeySmall_00"};
+constexpr std::size_t kMapContentPanes = std::size(kMapContent);
+std::array<std::uint64_t, kMapContentPanes> g_map_content{};
+std::array<bool, kMapContentPanes> g_map_content_was{};
+std::array<float, kMapContentPanes> g_map_content_x{};   // their own x when a slide began
+bool g_map_sliding = false;
 bool g_map_hidden = false;                              // (the map screen's updates: one thread)
 
 // A part's animation (a path from `layout`, kAnimFind) stopped at its first frame or its last, the title's BtnNum way.
@@ -2098,7 +2131,7 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         for (std::size_t j = 0; j < 2; ++j) l.box_own[j] = l.box[j] != 0 && (Read<std::uint32_t>(l.box[j] + 0xa8) & 1u) != 0;
     }
     g_minus_lines = {}, g_minus_line_alpha.fill(1.0f), g_minus_rows_set.fill(-1.0f);
-    if (found == kRows) g_minus_page = page, g_minus_part = part;
+    if (found == kRows) g_minus_page = page, g_minus_part = part, g_minus_page_x = Read<float>(page + 0x6c);
     int frames = 0;
     for (const std::uint64_t q : g_minus_selects) frames += q != 0 ? 1 : 0;
     LOG_INFO(Core, "coop: pause tab: the - menu's page (Pa_CoopMinus_00): {} of {} buttons, {} focus frames (W_Select_00), "
@@ -2113,21 +2146,27 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
         g_minus_vis = -1, g_map_hide = false;
         return -1;
     }
+    const std::uint64_t now = NowMs();
     const int tab = g_minus_shown ? g_page.MinusTab() : -1;
-    const bool on = tab >= 0 && g_minus_page != 0;
-    g_map_hide = on;
+    // (L back to the Map: ours stays shown, its last tab's rows, while it slides out to the right)
+    const bool leaving = tab < 0 && g_minus_shown && g_minus_page_tab >= 0 && MinusSliding(now) &&
+                         g_mslide_to.load() < 0 && g_mslide_from.load() >= 0;
+    const bool on = (tab >= 0 || leaving) && g_minus_page != 0;
+    g_map_hide = tab >= 0 && g_minus_page != 0;
+    if (g_minus_page != 0) PlacePane(ctx, g_minus_page, g_minus_page_x + (on ? MinusSlideNow(now).page : 0.0f));
     if ((on ? 1 : 0) != g_minus_vis) {
         if (on) {
             for (const std::uint64_t q : g_minus_hide) SetVisible(ctx, q, false);
         }
         SetVisible(ctx, g_minus_page, on);
         g_minus_vis = on ? 1 : 0;
-        LOG_INFO(Core, "coop: pause tab: the - menu's page {}", on ? kMinusTabNames[tab] : "gone");
+        LOG_INFO(Core, "coop: pause tab: the - menu's page {}", on ? kMinusTabNames[tab >= 0 ? tab : g_minus_page_tab] : "gone");
     }
     if (!on) {
         g_minus_page_tab = -1;
         return -1;
     }
+    if (tab < 0) return -1;   // (leaving: its rows as they were)
     if (tab != g_minus_page_tab) {   // (another tab: its rows read again before they show)
         g_minus_page_tab = tab, g_minus_rows_ms = 0, g_minus_shown_rows = ~0u, g_minus_focus = -1;
         g_minus_texts = {};
@@ -2366,15 +2405,59 @@ void FollowMapUnder(void* ctx, std::uint64_t screen) {
     const std::uint64_t layout = Read<std::uint64_t>(screen + kScreenLayout);
     if (layout == 0) return;
     const int state = g_strip_state.load();
-    const bool want = g_map_hide.load() && NowMs() - g_strip_seen_ms.load() < 300 && (state == 1 || state == 2);
+    const std::uint64_t now = NowMs();
+    const bool up = now - g_strip_seen_ms.load() < 300 && (state == 1 || state == 2);
+    // (a slide between the Map and ours: the Map's content shown, moved with ours; else hidden under ours)
+    const bool sliding = up && MinusSliding(now) && (g_mslide_from.load() < 0 || g_mslide_to.load() < 0);
+    const bool want = g_map_hide.load() && up && !sliding;
+    const auto give_back = [&] {
+        for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+            if (g_map_content[i] != 0 && g_map_content_was[i]) SetVisible(ctx, g_map_content[i], true);
+        }
+    };
     if (layout != g_map_layout) {
-        if (g_map_hidden && g_map_root != 0) SetVisible(ctx, g_map_root, true);   // (an old layout's: shown back)
-        g_map_layout = layout, g_map_root = FindOwnPane(ctx, layout, "RootPane"), g_map_hidden = false;
+        if (g_map_hidden) give_back();   // (an old layout's: shown back)
+        g_map_layout = layout, g_map_hidden = false, g_map_sliding = false;
+        int found = 0;
+        for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+            g_map_content[i] = FindOwnPane(ctx, layout, kMapContent[i]);
+            found += g_map_content[i] != 0 ? 1 : 0;
+        }
+        LOG_INFO(Core, "coop: pause tab: the Map page's content: {} of {} panes found (its backdrop BG_00 stays)", found,
+                 kMapContentPanes);
     }
-    if (g_map_root == 0 || want == g_map_hidden) return;
-    SetVisible(ctx, g_map_root, !want);
+    // (the slide: each content pane's own x when it began, the offset added; given back when it ends)
+    if (sliding != g_map_sliding) {
+        if (sliding) {
+            for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+                if (g_map_content[i] != 0) g_map_content_x[i] = Read<float>(g_map_content[i] + 0x6c);
+            }
+        } else {
+            for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+                if (g_map_content[i] != 0) PlacePane(ctx, g_map_content[i], g_map_content_x[i]);
+            }
+        }
+        g_map_sliding = sliding;
+    }
+    if (sliding) {
+        const float off = MinusSlideNow(now).map;
+        for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+            if (g_map_content[i] != 0) PlacePane(ctx, g_map_content[i], g_map_content_x[i] + off);
+        }
+    }
+    if (want == g_map_hidden) return;
+    if (want) {
+        for (std::size_t i = 0; i < kMapContentPanes; ++i) {
+            const std::uint64_t q = g_map_content[i];
+            g_map_content_was[i] = q != 0 && (Read<std::uint32_t>(q + 0xa8) & 1u) != 0;
+            if (g_map_content_was[i]) SetVisible(ctx, q, false);
+        }
+    } else {
+        give_back();
+    }
     g_map_hidden = want;
-    LOG_INFO(Core, "coop: pause tab: the Map page under the - menu's page {}", want ? "hidden" : "shown again");
+    LOG_INFO(Core, "coop: pause tab: the Map page's content under the - menu's page {} (backdrop kept)",
+             want ? "hidden" : "shown again");
 }
 
 // The row of ours under the game's cursor frame (0..4): the pages screen's focused button, by the focus manager's walk
@@ -4220,6 +4303,10 @@ void CensusFromMenuState() noexcept {
 
 bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
+}
+
+bool OwnMinusPageShown() noexcept {
+    return g_map_hide.load() && MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
 }
 
 std::array<MenuActor, 4> MenuActors() noexcept {
