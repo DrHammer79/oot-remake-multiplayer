@@ -562,6 +562,15 @@ class PackRun:
 SCREEN_GLOB = "RSDB/UIScreen.Product.*.rstbl.byml.zs"   # the game's screens table (docs/game-ui.md)
 
 
+def newest(paths):
+    """The newest of the game's copies of a file as a list of one (a base game and its update both have it: the game
+    reads the highest number after .Product., 100 or 110), [] when there is none."""
+    def number(rel):
+        part = rel.split(".Product.")[-1].split(".")[0] if ".Product." in rel else ""
+        return int(part) if part.isdigit() else 0
+    return [max(paths, key=number)] if paths else []
+
+
 def edit_screens(reader, dicts, recompress, edit):
     """The screens table (UIScreen: one row per screen, keyed by Name, no __RowId) with `edit(rows)` applied: edit
     changes the list of row dicts in place or returns a new list (None: in place). Reads through `reader` (a PackRun
@@ -569,9 +578,9 @@ def edit_screens(reader, dicts, recompress, edit):
     the file in the builder's files and the entry in its growth ([(rel, plain length read, plain length made, True)]).
     merge_tables.py puts these rows into a mod's table that wins over the pack's, by Name."""
     from . import byml
-    found = reader.glob(SCREEN_GLOB)
-    if len(found) != 1:
-        raise UiPackError("no single %s in the game's files" % SCREEN_GLOB)
+    found = newest(reader.glob(SCREEN_GLOB))
+    if not found:
+        raise UiPackError("no %s in the game's files" % SCREEN_GLOB)
     rel = found[0]
     raw = reader.read(rel)
     plain = dicts.decompress(raw)
