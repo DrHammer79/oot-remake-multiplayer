@@ -107,6 +107,21 @@ class Kit(unittest.TestCase):
         f.write_text("http://reports.example.org/v1/problem-report\n")
         self.assertEqual(self.kit.url(), "")
 
+    def test_address_lookup(self):
+        f = self.root / "kit" / "scripts" / "problem-send-url.txt"
+        f.write_text("https://kit.example.org/v1/problem-report\n")
+        self.assertEqual(self.kit.url(), "https://kit.example.org/v1/problem-report")
+        # a looked-up address wins and is cached; a failure or a bad answer keeps the cache
+        got = self.kit.update_address(lambda: "# c\nhttps://new.example.org/v1/problem-report\n")
+        self.assertEqual(got, "https://new.example.org/v1/problem-report")
+        self.assertEqual(self.kit.url(), "https://new.example.org/v1/problem-report")
+        self.assertEqual(self.kit.update_address(lambda: "http://evil.example.org/x\n"), "")
+        self.assertEqual(self.kit.update_address(lambda: 1 / 0), "")
+        self.assertEqual(self.kit.url(), "https://new.example.org/v1/problem-report")
+        # no cache: back to the kit's file
+        self.kit.address_file().unlink()
+        self.assertEqual(self.kit.url(), "https://kit.example.org/v1/problem-report")
+
     def test_ask(self):
         self.assertTrue(pr.ask("https://x.org/p", 1, lambda s: "y\n", out=lambda *a: None))
         self.assertFalse(pr.ask("https://x.org/p", 1, lambda s: "\n", out=lambda *a: None))

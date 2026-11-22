@@ -59,6 +59,16 @@ FILE_EXT = re.compile(r"^(?i:exe|dll|txt|log|ini|json|zip|cpp|hpp|h|ps1|cmd|bat|
 ZIPS_KEPT = 10
 SEND_ASK_SECONDS = 20
 SEND_TIMEOUT = 15
+# The address can change without a release: docs/problem-send-address.txt on main (first line not a # comment).
+ADDRESS_LOOKUP = "https://raw.githubusercontent.com/daurosk/oot-remake-multiplayer/main/docs/problem-send-address.txt"
+ADDRESS_LOOKUP_TIMEOUT = 4
+
+
+def address_from_text(text):
+    """The first line that is not a # comment, when it is an allowed https address ('' otherwise)."""
+    lines = (text or "").splitlines()[:20]
+    u = next((l.strip() for l in lines if l.strip() and not l.strip().startswith("#")), "")
+    return u if re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?/[\w./-]*", u) else ""
 SEND_MAX_TRIES = 30
 SEND_MAX_DAYS = 30
 SEND_KEPT = 10
@@ -422,8 +432,37 @@ class Kit:
         except (OSError, IndexError):
             return ""
 
+    def address_file(self):
+        return self.logs / "problem-send-address.txt"
+
+    def update_address(self, fetch=None):
+        """Looks the address up (short limit; only reads, sending still needs the player's yes) and caches a valid
+        answer in logs/problem-send-address.txt. Any failure keeps what was cached. fetch (tests) returns the text."""
+        try:
+            if fetch is None:
+                ctx = ssl.create_default_context()
+                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                req = urllib.request.Request(ADDRESS_LOOKUP, headers={"User-Agent": "Squadala-kit"})
+                with urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx)).open(
+                        req, timeout=ADDRESS_LOOKUP_TIMEOUT) as resp:
+                    text = resp.read(4096).decode("utf-8", "replace")
+            else:
+                text = fetch()
+            u = address_from_text(text)
+            if u:
+                self.logs.mkdir(parents=True, exist_ok=True)
+                self.address_file().write_text(u + "\n", encoding="utf-8")
+            return u
+        except Exception:
+            return ""
+
     def url(self):
         u = os.environ.get("OOT_COOP_PROBLEM_SEND_URL", "").strip()
+        if not u:
+            try:
+                u = address_from_text(self.address_file().read_text(encoding="utf-8"))
+            except OSError:
+                u = ""
         if not u:
             try:
                 lines = (self.kit / "scripts" / "problem-send-url.txt").read_text(encoding="utf-8").splitlines()[:20]
@@ -806,6 +845,7 @@ def main(argv=None):
         send_queue(kit, user=user, pc=pc)
         return 0
     if cmd == "at-start":
+        kit.update_address()
         url = kit.url()
         if not ss["send"] and url:
             yes = ask(url)

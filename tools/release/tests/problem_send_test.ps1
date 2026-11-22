@@ -64,6 +64,16 @@ $env:OOT_COOP_PROBLEM_SEND_URL = 'http://127.0.0.1:1/v1/problem-report'
 Check ((Get-ProblemSendUrl $kit) -eq 'http://127.0.0.1:1/v1/problem-report') 'http to this PC (tests) is'
 $env:OOT_COOP_PROBLEM_SEND_URL = ''
 
+# The address looked up at a start (docs/problem-send-address.txt on main): cached, wins over the kit's file, never http
+[System.IO.File]::WriteAllText((Join-Path $kit 'scripts\problem-send-url.txt'), "https://kit.example.org/v1/problem-report`n")
+Check ((Update-ProblemSendAddress $kit { "# c`nhttps://new.example.org/v1/problem-report`n" }) -eq 'https://new.example.org/v1/problem-report') 'a lookup answer is read'
+Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'the cached lookup wins over the kit file'
+Check ((Update-ProblemSendAddress $kit { "http://evil.example.org/x`n" }) -eq '') 'an http lookup answer is refused'
+Check ((Update-ProblemSendAddress $kit { throw 'offline' }) -eq '') 'a failed lookup returns nothing'
+Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'a failed lookup keeps the cache'
+Remove-Item -LiteralPath (Join-Path $kit 'logs\problem-send-address.txt') -Force
+Check ((Get-ProblemSendUrl $kit) -eq 'https://kit.example.org/v1/problem-report') 'without a cache the kit file is used'
+
 # The answer kept
 $s = Set-ProblemSendChoice $kit $false
 Check ($s.send -eq 'off' -and -not $s.install) 'No: off, and no install id is made'

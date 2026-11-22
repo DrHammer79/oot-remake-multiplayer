@@ -39,6 +39,8 @@ function Get-ProblemSendStateFile([string]$Kit) { Join-Path $Kit 'logs\problem-s
 # when there is none: then the start does not ask and nothing is sent.
 function Get-ProblemSendUrl([string]$Kit) {
     $u = "$env:OOT_COOP_PROBLEM_SEND_URL".Trim()
+    # Then the address looked up at an earlier start (logs\problem-send-address.txt), then the kit's own file.
+    if (-not $u) { $u = Read-ProblemSendAddressText (Get-Content -LiteralPath (Join-Path $Kit 'logs\problem-send-address.txt') -TotalCount 20 -ErrorAction SilentlyContinue) }
     if (-not $u) {
         try {
             $u = "$(@(Get-Content -LiteralPath (Join-Path $Kit 'scripts\problem-send-url.txt') -TotalCount 20 -ErrorAction Stop |
@@ -47,6 +49,47 @@ function Get-ProblemSendUrl([string]$Kit) {
     }
     if ($u -match '^https://[A-Za-z0-9.-]+(:\d+)?/[\w./-]*$') { return $u }
     if ($u -match '^http://(127\.0\.0\.1|localhost)(:\d+)?/[\w./-]*$') { return $u }
+    ''
+}
+
+# The first line of a text that is not a # comment, when it is an allowed address ('' otherwise).
+function Read-ProblemSendAddressText($Lines) {
+    $u = "$(@($Lines | Where-Object { "$_".Trim() -and "$_".Trim() -notmatch '^#' }) | Select-Object -First 1)".Trim()
+    if ($u -match '^https://[A-Za-z0-9.-]+(:\d+)?/[\w./-]*$') { return $u }
+    ''
+}
+
+# The address can change without a new release: the file docs/problem-send-address.txt on main (one address line).
+$script:SendAddressLookup = 'https://raw.githubusercontent.com/daurosk/oot-remake-multiplayer/main/docs/problem-send-address.txt'
+$script:SendLookupMs = 4000
+
+# Looks the address up (same GitHub access as Update.bat), short time limit, and caches a valid answer in
+# logs\problem-send-address.txt. Any failure keeps what was cached (or the kit's file). It only reads: nothing is sent,
+# and sending still needs the player's yes. $Fetch (tests) returns the file's text.
+function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null) {
+    try {
+        if ($Fetch) { $text = & $Fetch }
+        else {
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+            $req = [System.Net.HttpWebRequest]::Create($script:SendAddressLookup)
+            $req.Timeout = $script:SendLookupMs
+            $req.ReadWriteTimeout = $script:SendLookupMs
+            $req.AllowAutoRedirect = $false
+            $req.UserAgent = 'Squadala-kit'
+            $resp = $req.GetResponse()
+            try {
+                $r = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                try { $text = $r.ReadToEnd(); if ($text.Length -gt 4096) { $text = '' } } finally { $r.Dispose() }
+            } finally { $resp.Dispose() }
+        }
+        $u = Read-ProblemSendAddressText ("$text" -split "`r?`n" | Select-Object -First 20)
+        if ($u) {
+            $dir = Join-Path $Kit 'logs'
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+            [System.IO.File]::WriteAllText((Join-Path $dir 'problem-send-address.txt'), "$u`n")
+            return $u
+        }
+    } catch { }
     ''
 }
 
@@ -452,6 +495,7 @@ if ($SendPending) {
 }
 
 if ($AtStart) {
+    [void](Update-ProblemSendAddress $kit)
     $url = Get-ProblemSendUrl $kit
     if (-not $sendState.send -and $url) {
         $yes = Read-ProblemSendAnswer -Url $url

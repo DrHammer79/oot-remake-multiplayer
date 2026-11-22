@@ -77,6 +77,16 @@ Players who answered the older local-only question are asked this once too (send
 `scripts/problem-send-url.txt` has no address yet does not ask and sends nothing. Yes makes a random install id (32 hex
 digits: nothing about the PC or the player; the bot's rate limit counts uploads by it) and turns the local reports on.
 
+**The address.** The kit ships with the bot's address on the first line of `scripts/problem-send-url.txt` (a Tailscale
+Funnel address, `https://squadala-reports.<tailnet>.ts.net/v1/problem-report`; it holds no PC or personal name). So an
+address change needs no release, each start (`-AtStart`, Linux `at-start`) first looks the address up in
+`docs/problem-send-address.txt` on `main` (raw.githubusercontent.com, the same GitHub access the updater has; 4 seconds at
+most; HTTPS only; the first line that is not a `#` comment) and caches a valid answer in `logs/problem-send-address.txt`.
+Order used: `OOT_COOP_PROBLEM_SEND_URL` (tests), the cache, the kit's file. A failed or invalid lookup keeps the cache.
+The lookup only reads; nothing is sent without the player's yes. When the address changes, edit
+`docs/problem-send-address.txt` on main (and the kit file at the next release). The coordinator watchdog checks the
+intake (`POST` answers 411 or 415) and the bot's heartbeat; see `tools/discord-bot/README.md`.
+
 **When.** The kit's start does not wait for the game (play.ps1 returns once it started; the Linux `start.sh` only sees
 it close). Right after the game starts, with sending on, a hidden window (`problem-send.ps1 -AfterGame`; Linux:
 `problem_report.py after-game`, in its own session) waits for that process to end, a crash too, then 20 s for
