@@ -1728,8 +1728,8 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
     $depth = @($Op.tool_folder -split '/').Count
     & "$env:SystemRoot\System32\tar.exe" -x -f $Zip -C $tool "--strip-components=$depth" "$($Op.tool_folder)" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $tool 'player.py'))) { return "$($Op.zip) has no $($Op.tool_folder)/player.py" }
-    # (-I drops PYTHON* variables and the current folder, but the script's own folder stays on the path: player.py finds its lib\ there,
-    # so it runs from the folder the kit just unpacked it into)
+    # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
+    # from another folder), so nothing else is needed)
     $a = @('-I', '-B', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
     if ($Part -eq 'ui') { $a += @('--exclude', '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$') }
     Write-Host "  making Character Select's files from your game (a minute or two, once) ..."

@@ -329,8 +329,8 @@ charsel_tool_make() {
     cs_tool_why=''
     [[ $part == full ]] || ex=(--exclude '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
     say "  making Character Select's files from your game (a minute or two, once) ..."
-    # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder, but the
-    # script's own folder is still on the path, which is how player.py finds its lib/: so it runs from the folder the kit unpacked it into)
+    # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
+    # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)
     if ! tout=$("$PY" -I -B "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$mod" ${ex[@]+"${ex[@]}"} 2>&1); then
         cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
         return 1
@@ -354,7 +354,7 @@ charsel_step() {
     # A first start has no game RomFS yet (the game is built after this step) and the tool needs it: the mod is put in at the
     # next start (then the game is built again with its code patch, as for any change). Nothing is half-installed.
     if [[ -n $(pin_get "$pin" tool_folder || true) && ! -d $dir && ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then
-        say 'Character Select (the Characters page) is put in at the next start, once the game is built: its files are made from your game.'
+        say 'Character Select (the Characters page) is put in at the next start, once the game is built: its files are made from your game, and that start builds the game again (a few minutes) with its code patch.'
         return 0
     fi
     line=$(sed -n 's/^[[:space:]]*character_select[[:space:]]*=[[:space:]]*\(yes\|no\|ask\)[[:space:]]*\([#;].*\)\{0,1\}$/\1/p' "$DATA/coop-options.ini" 2>/dev/null | head -n1 || true)
