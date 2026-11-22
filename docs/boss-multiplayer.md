@@ -100,6 +100,13 @@ except the split shots below.
   players the sisters swap targets every attack.
 - **Stage 2, Twinrova:** one body, one target: turns every attack. Later: a charged Mirror Shield blast from any
   player stuns her for all (stun for all).
+- **Row 222 (sisters held in an attack, the fight never ends; reports/twinrova-222-2.md):** each game's
+  `Enemy_KotakeKoumeBattleManager` chooses the sisters' battle state from its own Link, and only their brain and
+  action verbs are synced. Option C (enemies-01110, the safety net): the manager is flagged
+  `object_presence::battle_manager` and the server moves its group only from an unfit owner (paused, dead,
+  loading, gone) or an unready one, never by distance, a nearer player, a chase or a stun hit, so a new owner's
+  manager no longer takes over mid-fight on a state it never knew. Option A (one manager decides for every game,
+  its orders carried through the game's own message path) is its own branch, twinrova-a-01110.
 
 ### Ganondorf (Ganon's Tower)
 - **Energy ball rally, multi-ball, light arrows:** the same as Phantom Ganon's stage 2 (asked for): his ball at

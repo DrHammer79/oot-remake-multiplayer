@@ -1002,6 +1002,11 @@ inline constexpr std::uint8_t takes_turns = 1u << 4;
 // such an object with a game that sets this bit (OBJECT_OWNER never moves it to one that does not), so the death,
 // the key and the carpenter freed run in a game whose logic made the fight. An older server ignores the bit.
 inline constexpr std::uint8_t own_logic = 1u << 5;
+// Row 222 (Twinrova, option C): this object is a boss's battle manager (Enemy_KotakeKoumeBattleManager): its game's
+// manager chooses its sisters' battle state the whole fight, from its own Link, and no other game's manager knows
+// that state. The server moves such a group's root only from an unfit, unready or gone owner (Session::orders_root),
+// never by distance, a nearer player, a chase or a stun hit. An older server ignores the bit.
+inline constexpr std::uint8_t battle_manager = 1u << 6;
 }  // namespace object_presence
 
 struct ObjectPresence {

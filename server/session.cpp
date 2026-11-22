@@ -1575,6 +1575,7 @@ void Session::on_object_present(ConnectionId id, Connection& c, const ObjectPres
       o.present.insert(id);
       c.present.insert(oid);
       if (e.flags & object_presence::own_logic) o.own_logic.insert(id);  // row 212, as below
+      if (e.flags & object_presence::battle_manager) o.battle_manager = true;  // row 222, as below
       if (holding) {
         o.held = true;  // no owner and no OBJECT_OWNER yet: end_owner_hold decides
         continue;
@@ -1614,6 +1615,7 @@ void Session::on_object_present(ConnectionId id, Connection& c, const ObjectPres
     } else {
       o.own_logic.erase(id);
     }
+    if (e.flags & object_presence::battle_manager) o.battle_manager = true;  // row 222 (orders_root)
     // Tell a newcomer who owns it and the epoch to send with; its own made
     // enemy it knows.
     if (refresh || (fresh && !(o.made && o.owner == id))) {
@@ -1821,7 +1823,7 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
   }
   if ((o.boss || root->boss) && config_.boss_hitter_cooldown_us != 0) {
     // A hit that takes life stays with the owner (gohma-sync): only a stun.
-    if ((d.amount == 0 || config_.boss_hit_handover) && root->owner && *root->owner != id &&
+    if ((d.amount == 0 || config_.boss_hit_handover) && root->owner && *root->owner != id && !orders_root(*root) &&
         !root->ask && !busy(c) &&
         has_loaded(id, *root) && !root->unready.contains(id) &&
         (root->hitter_changed_at == 0 || now_us - root->hitter_changed_at >= config_.boss_hitter_cooldown_us) &&
@@ -2149,6 +2151,10 @@ std::optional<double> Session::distance_to(const Connection& c, const Object& o,
     return std::nullopt;
   }
   return metres(*c.position, *o.last_state->position);
+}
+
+bool Session::orders_root(const Object& o) const {
+  return o.boss && !o.root && o.battle_manager;
 }
 
 bool Session::unfit_fight_owner(const Connection& c, std::uint64_t now_us) const {
@@ -2790,6 +2796,16 @@ void Session::run_ownership(std::uint64_t now_us) {
 
     // Never mid-attack (attack_hold_max_us): a grab or hold stays on the player it holds until it lets go.
     if (mid_attack(o, now_us)) {
+      o.candidate.reset();
+      continue;
+    }
+
+    // Row 222 (twinrova-222-2, option C): a boss group whose root is a battle manager (object_presence::
+    // battle_manager: Twinrova's Enemy_KotakeKoumeBattleManager, no BSA of its own) keeps its owner but for the rules
+    // above (a paused, dead, loading or gone owner; an unready one). Its own game's manager chose the sisters'
+    // battle state from its own Link the whole fight, and a new owner's manager does not know that state, so a
+    // hand-over by distance, a nearer player or a chase held a sister in an attack whose next step never came.
+    if (orders_root(o)) {
       o.candidate.reset();
       continue;
     }

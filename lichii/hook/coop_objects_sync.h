@@ -408,6 +408,9 @@ inline constexpr std::uint64_t kMinionLoopUs = 3'000'000;
 // the player's own SleepParalysis reaction (Player ConditionParam, 210 frames), as in a game of one.
 // The actors with RedeadParam (Enemy_ReDead*, Enemy_Gibdo*, never their _Dictionary entries).
 bool IsScreamer(std::string_view name);
+// Row 222 (Twinrova, option C): a boss's battle manager (Enemy_KotakeKoumeBattleManager: it chooses its sisters'
+// battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager.
+bool IsBattleManager(std::string_view name);
 // A hit our Link took from a screamer is its scream (not its bite) when it plays the scream's AS node (Shout,
 // CryStanding), or took no life while it plays none of the bite's (Attack_*).
 bool IsScream(std::string_view animation, std::int32_t took);

@@ -746,6 +746,10 @@ bool IsSplitPart(std::string_view name) {
     return name == "Enemy_Floormaster_Little" || name == "Enemy_Floormaster_Little_Truth";
 }
 
+bool IsBattleManager(std::string_view name) {
+    return name == "Enemy_KotakeKoumeBattleManager";
+}
+
 bool IsScreamer(std::string_view name) {
     // Row 230: their packs' RedeadParam (the Gibdo's has the Redead's as its parent).
     return (name.starts_with("Enemy_ReDead") || name.starts_with("Enemy_Gibdo")) &&
@@ -3336,6 +3340,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         if (takes_turns_ && IsBossOrPart(o.name)) {
             flags |= proto::object_presence::takes_turns;  // boss turns: this build reads attacks
+        }
+        if (IsBattleManager(o.name)) {
+            flags |= proto::object_presence::battle_manager;  // row 222: its group moves only from an unfit owner
         }
         if (!bound_.contains(address) && OwnLogicEncounter(o.name, scene_)) {
             flags |= proto::object_presence::own_logic;  // row 212: our cell logic made it: it stays with such a game

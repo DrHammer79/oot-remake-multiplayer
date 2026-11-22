@@ -8095,3 +8095,49 @@ TEST_CASE("row 212: owned by a copy holder, the guard is asked back, its maker u
   h.receive(2, present_in("Field", {}), kChannelOwnership);
   CHECK(h.session.object_owner(placed(7)) == owned(0, 2));
 }
+
+// Row 222 (twinrova-222-2, option C): Twinrova's battle manager (object_presence::battle_manager) chose its sisters'
+// battle state from its own game's Link the whole fight; a hand-over by the near rule or a stun put a new owner's
+// manager on a state it never knew (a sister held in her attack). It moves only from an unfit owner.
+namespace {
+ObjectPresent manager_present(const std::string& scene, const std::vector<ObjectId>& ids) {
+  ObjectPresent p = present_in(scene, ids);
+  for (auto& e : p.objects) e.flags = static_cast<std::uint8_t>(e.flags | object_presence::battle_manager);
+  return p;
+}
+}  // namespace
+
+TEST_CASE("row 222: a battle manager's group never goes by the near rule or a stun, only from an unfit owner") {
+  OwnerHarness h(near_config());
+  h.receive(1, manager_present("Field", {placed(7)}), kChannelOwnership);
+  h.receive(2, manager_present("Field", {placed(7)}), kChannelOwnership);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);  // a fight
+  REQUIRE(h.session.object_in_fight(placed(7), h.now));
+  h.stand(1, 12);  // the owner by the wall
+  h.stand(2, 3);   // player 2 at the manager's place
+  h.clear();
+  h.run(15 * kSecond);  // (a plain boss goes to player 2 after 10 s: issue 150's case)
+  CHECK(h.asks() == 0);
+  CHECK(h.session.stats().boss_to_near == 0);
+  h.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);  // a stun from player 2
+  h.run(250'000);
+  CHECK(h.asks() == 0);
+  CHECK(h.session.stats().boss_to_hitter == 0);
+  CHECK(h.session.object_owner(placed(7)) == owned(1, 0));
+  // Its owner paused past fight_owner_paused_us: it goes on, as every boss.
+  h.receive(1, PlayerStatus{0, status::paused}, kChannelSession);
+  h.run(3 * kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+}
+
+TEST_CASE("row 222: without the battle manager bit the same boss goes to the nearer player (as before)") {
+  OwnerHarness h(near_config());
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);
+  h.stand(1, 12);
+  h.stand(2, 3);
+  h.clear();
+  h.run(15 * kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+}
