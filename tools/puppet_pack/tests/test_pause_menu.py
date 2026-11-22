@@ -218,6 +218,24 @@ class RowsTest(unittest.TestCase):
         with self.assertRaises(pm.PauseMenuError):
             pm.add_system_buttons(n)   # (twice)
 
+    def test_the_minus_pages_help_the_games_caption_text_below_the_rows_stored_hidden(self):
+        d = pm.add_system_buttons(pm.add_rows(system()))
+        n = pm.add_help(d)
+        panes, parts = ui_pack.read_layout(n)
+        self.assertEqual((panes[-1].name, parts[-1].name), (pm.HELP, pm.HELP))
+        self.assertEqual(panes[-1].id, ui_pack.part_id(pm.HELP))
+        x, y, parent, _ = pane(n, pm.HELP)
+        sx, sy, sparent, _ = pane(n, pm.HELP_SOURCE)
+        self.assertEqual((x, y, parent), (sx, sy - pm.HELP_BELOW, sparent))   # (in the rows' column, under the last)
+        self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-1].record)[0]), "PaActorCaption_00")
+        self.assertEqual(struct.unpack_from("<ff", n, panes[-1].record + 0x2c), pm.HELP_SIZE)
+        self.assertEqual(struct.unpack_from("<I", n, panes[-1].record + 0x38)[0] & 1, 0)   # (stored hidden)
+        for name in [p[0] for p in SYSTEM]:
+            self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
+        self.assertEqual(pm._system_layout(system()), n)   # (the System layout's edit adds it, last)
+        with self.assertRaises(pm.PauseMenuError):
+            pm.add_help(n)   # (twice)
+
     def test_another_part_layout_needs_its_size_and_takes_no_parameters(self):
         d = system()
         with self.assertRaises(ui_pack.UiPackError):
@@ -326,6 +344,8 @@ class BuildTest(unittest.TestCase):
         strip = msbt.read(msgs[pm.OVERLAY_MSG])
         for i in range(21):
             self.assertEqual(strip.text("Coop_Minus_%02d" % i), ["." * 64], i)
+        # (and the selected row's help, Coop_Minus_21: 512 dots, MinusWords' kHelpPlaceholder)
+        self.assertEqual(strip.text("Coop_Minus_21"), ["." * 512])
         self.assertTrue(all(sizes[k] > before[k] for k in before
                             if k not in (pm.OVERLAY_LAYOUT, pm.PAGES_LAYOUT, pm.SYSTEM_LAYOUT)))
         self.assertTrue(sizes[pm.SYSTEM_LAYOUT] > before[pm.SYSTEM_LAYOUT])
@@ -353,7 +373,9 @@ class BuildTest(unittest.TestCase):
             src = os.path.join(root, "romfs")
             files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
                                                     (pm.SYSTEM_LAYOUT, system())], data_align=16),
-                     title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16)}
+                     title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16),
+                     "RSDB/UIScreen.Product.111.rstbl.byml.zs": __import__("puppet_pack.byml", fromlist=["x"]).dumps(
+                         [{"ArchiveCategory": ["Title"], "Name": "Title_00"}])}
             for lang in LANGS:
                 files["Mals/%s.Product.110.sarc.zs" % lang] = sarc.write(
                     {pm.OVERLAY_MSG: make_msbt([("SystemMenu", "System")]),
@@ -364,7 +386,8 @@ class BuildTest(unittest.TestCase):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as f:
                     f.write(data)
-            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, title_menu.TITLE_ARCHIVE[:-3]: 50000})
+            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, title_menu.TITLE_ARCHIVE[:-3]: 50000,
+                           "RSDB/UIScreen.Product.111.rstbl.byml": 7000})
             for lang in LANGS:
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -424,7 +447,8 @@ class NupFilesTest(unittest.TestCase):
         class FakeNup:
             files = ["UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
                      "Mals/USen.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs", "Mals/EUfr.Product.110.sarc.zs",
-                     "Mals/JPja.Product.100.sarc.zs", "Pack/ZsDic.pack.zs"]
+                     "Mals/JPja.Product.100.sarc.zs", "Pack/ZsDic.pack.zs",
+                     "RSDB/UIScreen.Product.111.rstbl.byml.zs"]
 
             def glob(self, pattern):
                 d, _, name = pattern.rpartition("/")
@@ -432,6 +456,7 @@ class NupFilesTest(unittest.TestCase):
 
         self.assertEqual(build.nup_menu_files(FakeNup()), [
             "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
+            "RSDB/UIScreen.Product.111.rstbl.byml.zs",
             "Mals/EUfr.Product.110.sarc.zs", "Mals/JPja.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs"])
 
 

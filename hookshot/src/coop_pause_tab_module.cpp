@@ -280,6 +280,7 @@ bool SetText(void* ctx, std::uint64_t layout, const std::string& path, const std
 constexpr int kLiveSlots = 48;   // 0..4 the rows, 8..21 the browser's list, 22..40 the Settings page (the pack's 00..47)
 constexpr std::uint32_t kLivePlaceholder = 64;   // the placeholder's bytes (strings/en.txt)
 struct LiveSlot {
+    std::uint32_t room = kLivePlaceholder;   // the placeholder's bytes (the - page's help: kHelpPlaceholder)
     std::uint64_t gen = 0;      // the pages' opening it was looked up for (Page::Track): looked up again for each
     std::uint64_t text = 0;     // the placeholder's text in the loaded message file (0: not looked up)
     std::uint32_t extra = 0;    // what the game's length counts beyond the text (its 0 at the end: 1, else 0)
@@ -315,7 +316,7 @@ bool LiveLookupIn(void* ctx, LiveSlot& l, const std::string& file, const char* l
     char head[8] = {};
     CoopRuntime::Read(text, head, sizeof head);
     const bool dots = std::memcmp(head, "........", 8) == 0;
-    if (text == 0 || (!dots && text != l.text) || length < kLivePlaceholder || length > kLivePlaceholder + 1) {
+    if (text == 0 || (!dots && text != l.text) || length < l.room || length > l.room + 1) {
         const bool before = l.text != 0;
         l.text = 0, l.gen = 0;
         l.bad = !before;   // (never ours: an old pack; ours before: only this opening goes without, looked up again next)
@@ -327,7 +328,7 @@ bool LiveLookupIn(void* ctx, LiveSlot& l, const std::string& file, const char* l
     const bool first = l.text == 0;
     l.gen = gen;
     l.text = text;
-    l.extra = length - kLivePlaceholder;
+    l.extra = length - l.room;
     l.attrs = Read<std::uint64_t>(base + 0x10);
     if (first || moved) {
         LOG_INFO(Core, "coop: pause tab: live text: {} at {:#x}, the game counts {} byte(s) more than its text{}", label,
@@ -363,7 +364,7 @@ bool LiveText(void* ctx, std::uint64_t layout, std::uint64_t gen, const std::str
 bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSlot& l, const std::string& utf8,
                 bool force) {
     if (!force && l.shown == utf8) return true;
-    if (path.size() >= 0x40 || utf8.size() >= kLivePlaceholder || l.text == 0) {
+    if (path.size() >= 0x40 || utf8.size() >= l.room || l.text == 0) {
         return g_live_why = "no placeholder", false;
     }
     // [0x00] the path lookup's layout, [0x10] the path, [0x60] the reference.
@@ -2047,7 +2048,15 @@ std::uint64_t g_minus_rows_ms = 0;                      // the rows' words last 
 std::array<std::string, kRows> g_minus_texts{};
 // The rows' words (Coop_Minus_00..04) and the list's, a name and a value a line (Coop_Minus_05..20). (g_live_mutex)
 constexpr int kMinusSlots = kRows + 2 * kLinePanes;
-std::array<LiveSlot, kMinusSlots> g_minus_live{};
+// The selected row's help (0.11.10): the game's caption text under the rows (pause_menu.py's Pa_CoopHelp_00, a part of
+// PaActorCaption_00), its words through Coop_Minus_21 (512 dots: a few lines in any language).
+constexpr int kMinusHelpSlot = kMinusSlots;
+constexpr std::uint32_t kHelpPlaceholder = 512;
+constexpr const char* kMinusHelpPath = "Pa_CoopMinus_00/Pa_CoopHelp_00/T_Caption_00";
+std::array<LiveSlot, kMinusSlots + 1> g_minus_live{};
+std::uint64_t g_minus_help = 0;     // Pa_CoopHelp_00's pane (LookMinusPage; 0: an older pack). g_mutex
+std::string g_minus_help_text;      // the help shown ("" none: hidden), MinusWords. g_mutex
+int g_minus_help_vis = -1;          // shown (1) or not (0) as last set; -1 not set
 std::atomic<bool> g_map_hide{false};                    // the Map page under ours to be hidden
 std::atomic<bool> g_minus_on{false};                    // our page shown, its slide out back to the Map included
 std::uint64_t g_map_layout = 0;
@@ -2134,11 +2143,14 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     }
     g_minus_lines = {}, g_minus_line_alpha.fill(1.0f), g_minus_rows_set.fill(-1.0f);
     if (found == kRows) g_minus_page = page, g_minus_part = part, g_minus_page_x = Read<float>(page + 0x6c);
+    g_minus_help = PaneIn(ctx, part, "Pa_CoopHelp_00"), g_minus_help_text.clear(), g_minus_help_vis = -1;
+    if (g_minus_help != 0) SetVisible(ctx, g_minus_help, false), g_minus_help_vis = 0;   // (shown with a help: ApplyMinusPage)
     int frames = 0;
     for (const std::uint64_t q : g_minus_selects) frames += q != 0 ? 1 : 0;
     LOG_INFO(Core, "coop: pause tab: the - menu's page (Pa_CoopMinus_00): {} of {} buttons, {} focus frames (W_Select_00), "
-                   "{} list rows{}",
-             found, kRows, frames, lists, found == kRows ? "" : " (not used)");
+                   "{} list rows, {}{}",
+             found, kRows, frames, lists, g_minus_help != 0 ? "the help's caption" : "no help caption (an older pack)",
+             found == kRows ? "" : " (not used)");
 }
 
 // The strip's update, g_mutex: the page shown while one of ours is lit, its buttons those with words (MinusWords, set
@@ -2172,7 +2184,11 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     if (tab < 0) return -1;   // (leaving: its rows as they were)
     if (tab != g_minus_page_tab) {   // (another tab: its rows read again before they show)
         g_minus_page_tab = tab, g_minus_rows_ms = 0, g_minus_shown_rows = ~0u, g_minus_focus = -1;
-        g_minus_texts = {};
+        g_minus_texts = {}, g_minus_help_text.clear();
+    }
+    // (the help: shown while what is selected has one, its words set by MinusWords)
+    if (const int help = g_minus_help_text.empty() ? 0 : 1; g_minus_help != 0 && help != g_minus_help_vis) {
+        SetVisible(ctx, g_minus_help, help != 0), g_minus_help_vis = help;
     }
     std::uint32_t rows = 0;
     for (int r = 0; r < kRows; ++r) rows |= g_minus_texts[static_cast<std::size_t>(r)].empty() ? 0u : 1u << r;
@@ -2257,6 +2273,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     if (tab != static_cast<int>(MinusPage::kMods)) FollowSays();   // (a Host or Join refused: why, on the Session view)
     const View view = ViewShown();
     bool in_list = false;
+    int row_now = -1, line_now = -1;   // (the rows' cursor and the list's line, for the help)
     {
         std::lock_guard lock(g_mutex);
         if (static_cast<int>(view) != g_minus_view_seen) {   // (another view: its first row, Co-op settings' its page's)
@@ -2264,6 +2281,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
             g_page.MinusViewChanged(view == View::kMenu ? g_menu_tab.load() : 0);
         }
         in_list = g_page.MinusInList();
+        row_now = g_page.MinusRow(), line_now = g_page.MinusLine();
     }
     if (view == View::kMenu) g_menu_list = in_list;   // (co-op's menu's selected row in view while the list has the pad)
     const SessionView v = ViewNow(view);
@@ -2289,9 +2307,10 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
         }
         picked = ml.picked >= 0 ? ml.picked + 1 : -1;
     };
+    std::string menu_help;   // (co-op's menu's or the Mods tab's help for their row picked)
     if (mods) {
         CoopPauseMenu::View mv;
-        if (CoopModsTab::View(&mv, &raw_back)) menu_list(mv, -1, &g_minus_mods_top, "Mods");
+        if (CoopModsTab::View(&mv, &raw_back)) menu_list(mv, -1, &g_minus_mods_top, "Mods"), menu_help = mv.help;
     } else if (!v.typing_lines.empty()) {
         lines = v.typing_lines;   // (the keys: the Page's typing has the pad, the key picked bright)
         picked = v.typing_key + 1;
@@ -2304,6 +2323,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     } else if (view == View::kMenu) {
         int top = v.menu_top;
         menu_list(v.menu, v.menu_tab, &top, "");
+        menu_help = v.menu.help;
         int was = v.menu_top;
         g_menu_top.compare_exchange_strong(was, top);
     } else {
@@ -2313,6 +2333,17 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
         }
     }
     lines.resize(kLinePanes);
+    // (the help of what is selected: a row's, the list's line's, co-op's menu's or the Mods tab's; CoopPauseTab::MinusHelp)
+    HelpAt at;
+    at.view = view, at.tab = static_cast<MinusPage>(tab), at.list = in_list, at.typing = !v.typing_lines.empty();
+    at.row = rows[static_cast<std::size_t>(std::clamp(row_now, 0, kRows - 1))].empty() ? -1 : row_now;
+    at.menu = menu_help;
+    if (const int pick = raw ? picked : line_now; in_list && pick >= 0 && pick < kLinePanes) {
+        at.line = lines[static_cast<std::size_t>(pick)].act;
+        at.game = view == View::kLan && pick >= 1 && CellIndex(v.s, pick - 1) >= 0;
+    }
+    const std::string help_en = MinusHelp(at, v.s);
+    std::string help = help_en.empty() ? std::string() : HelpText(CoopI18n::Tr(help_en));
     // (the words: the rows' Coop_Minus_00..04, the lines' 05.. a name and a value each)
     std::array<std::string, kRows> texts{};
     for (std::size_t k = 0; k < texts.size(); ++k) texts[k] = rows[k];
@@ -2344,10 +2375,13 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
             const bool valued = put(kRows + 2 * i + 1, path, line.value.empty() ? std::string(" ") : line.value);
             if (!named || !valued) line.name.clear(), pickable &= ~(1u << i);   // (a line without its words: not shown)
         }
+        g_minus_live[kMinusHelpSlot].room = kHelpPlaceholder;
+        if (!help.empty() && !put(kMinusHelpSlot, kMinusHelpPath, help)) help.clear();   // (no caption: none shown)
     }
     std::lock_guard lock(g_mutex);
     if (g_minus_page_tab != tab || g_page.MinusTab() != tab) return;   // (another tab meanwhile: its own turn)
     g_minus_texts = texts, g_minus_rows_ms = NowMs();
+    g_minus_help_text = help;
     g_page.SetMinusInView(!mods && view != View::kMain);
     g_page.SetMinusLines(pickable, raw);
     g_page.SetMinusRawBack(raw_back);

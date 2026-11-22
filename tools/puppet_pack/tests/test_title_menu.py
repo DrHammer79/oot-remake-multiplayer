@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from puppet_pack import sarc, title_menu as tm  # noqa: E402
+from puppet_pack import byml, sarc, title_menu as tm  # noqa: E402
 
 PANES = ["RootPane", "N_All_00", "A_BtnAlign_00", "Pa_Button_00", "Pa_Button_01", "Pa_Button_02", "Pa_Button_03"]
 PARENT = [0xFFFFFFFF, 0, 1, 2, 2, 2, 2]
@@ -111,8 +111,8 @@ class LayoutTest(unittest.TestCase):
         panes, parts = tm.read_layout(n)
         names = [p[0] for p in panes]
         want = ["Pa_Button_%02d" % i for i in range(4, 4 + tm.LIST_BUTTONS)] + [tm.HINT]
-        self.assertEqual(names, PANES + [tm.MARKER] + want)
-        self.assertEqual([p[0] for p in parts][-len(want):], want)
+        self.assertEqual(names, PANES + [tm.MARKER] + want + [tm.TOGGLE])
+        self.assertEqual([p[0] for p in parts][-len(want) - 1:-1], want)
         self.assertEqual([p[1] for p in panes[:8]], [p[1] for p in tm.read_layout(d)[0]])   # (nothing moves)
         for i, name in enumerate(want):
             rec = panes[names.index(name)][1]
@@ -123,6 +123,34 @@ class LayoutTest(unittest.TestCase):
             tm.add_list(n)
         with self.assertRaises(tm.TitleMenuError):
             tm.add_list(make_layout())   # (no marker)
+
+    def test_the_toggle_in_the_first_buttons_place_of_the_options_layout_stored_hidden(self):
+        n = tm.add_menu(make_layout())
+        panes, parts = tm.read_layout(n)
+        names = [p[0] for p in panes]
+        self.assertEqual(names[-1], tm.TOGGLE)
+        self.assertEqual(parts[-1][0], tm.TOGGLE)
+        rec, src = panes[-1][1], panes[names.index("Pa_Button_00")][1]
+        self.assertEqual(struct.unpack_from("<I", n, rec + 0x28)[0], struct.unpack_from("<I", n, src + 0x28)[0])
+        x, y = struct.unpack_from("<ff", n, rec + 0x1c)
+        sx, sy = struct.unpack_from("<ff", n, src + 0x1c)
+        self.assertEqual((x, y), (sx + tm.TOGGLE_MOVE[0], sy + tm.TOGGLE_MOVE[1]))
+        for got, want in zip(struct.unpack_from("<ff", n, rec + 0x10), tm.TOGGLE_SCALE):
+            self.assertAlmostEqual(got, want, places=6)
+        self.assertEqual(struct.unpack_from("<ff", n, rec + 0x2c), tm.TOGGLE_SIZE)
+        self.assertEqual(struct.unpack_from("<I", n, rec + 0x38)[0] & 1, 0)   # (stored hidden)
+        part = parts[-1][1]
+        layout = struct.unpack_from("<Q", n, part)[0]
+        self.assertEqual(n[layout:n.index(b"\0", layout)].decode(), tm.TOGGLE_LAYOUT)
+        self.assertEqual(struct.unpack_from("<I", n, part + 0x30)[0], 0)   # (no parameters of the title button's)
+        self.assertFalse(any(name.startswith("Pa_Button_") and name > "Pa_Button_13" for name in names))
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_toggle(n)
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_toggle(tm.add_marker(make_layout()))   # (no list)
+        for bad in ((0.0, 1.0), (1.0,), (1.0, float("nan")), (True, 1.0), [1.0, 1.0], (1.0, 17.0)):
+            with self.assertRaises(tm.TitleMenuError):
+                tm.ui_pack.clone_parts(make_layout(), [tm.ui_pack.Copy("Pa_Button_00", "Pa_X_00", scale=bad)])
 
     def test_refuses_a_layout_that_has_them(self):
         with self.assertRaises(tm.TitleMenuError):
@@ -141,7 +169,8 @@ class MsbtTest(unittest.TestCase):
         self.assertEqual(labels["0100"], 3)
         self.assertEqual([t[:-1].decode() for t in texts], ["New Game", "Continue", "Options", "Host a game", "Join a game",
                                                             "Co-op Settings", "Start", "Multiplayer", "Options",
-                                                            "Back"] + ["." * 64] * (len(tm.LIVE) - 1) + ["." * 160])   # (the live texts' placeholders)
+                                                            "Back"] + ["." * 64] * (len(tm.LIVE) - 1 - len(tm.TOGGLE_LIVE)) + ["." * 160]
+                         + ["." * 64] * len(tm.TOGGLE_LIVE))   # (the live texts' placeholders)
         self.assertEqual(struct.unpack_from("<I", tm.add_rows(m), 0x12)[0], len(tm.add_rows(m)))
 
     def test_labels_land_in_their_hash_bucket(self):
@@ -174,9 +203,14 @@ class _Table:
         self.sizes[key] = value
 
 
+SCREENS = byml.dumps([{"ArchiveCategory": ["Title"], "BodyLayoutFile": "Title_00", "Class": "UITitleScreen", "Name": "Title_00"},
+                       {"ArchiveCategory": ["Common"], "Name": "Other_00"}])
+
+
 class BuildTest(unittest.TestCase):
     def romfs(self, root, broken=None):
         files = {tm.TITLE_ARCHIVE: sarc.write([(tm.TITLE_LAYOUT, make_layout())] * 2, data_align=16)}
+        files["RSDB/UIScreen.Product.111.rstbl.byml.zs"] = SCREENS
         for lang in ("EUen", "JPja", "USen"):
             msbt = make_msbt(["0000", "0001", "0002"], ["a", "b", "c"])
             if lang == broken:
@@ -193,7 +227,7 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
             self.romfs(src, broken)
-            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500})
+            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500, "RSDB/UIScreen.Product.111.rstbl.byml": 7000})
             for lang in ("EUen", "JPja", "USen"):
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -211,14 +245,51 @@ class BuildTest(unittest.TestCase):
     def test_every_file_when_all_can_be_made(self):
         made, written, sizes, before, err = self.run_build()
         self.assertIsNone(err)
-        self.assertEqual(len(made), 4)
+        self.assertEqual(len(made), 5)
         self.assertEqual(set(written), set(made))
         layouts = [d for n, d in sarc.read_entries(written[tm.TITLE_ARCHIVE]) if n == tm.TITLE_LAYOUT]
         self.assertEqual(len(layouts), 2)
-        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 2 + tm.LIST_BUTTONS for d in layouts))
+        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 3 + tm.LIST_BUTTONS for d in layouts))
         _, _, labels, _ = tm.read_msbt(sarc.read(written["Mals/JPja.Product.110.sarc.zs"])[tm.MSG_FILE])
         self.assertIn("0106", labels)
         self.assertTrue(all(sizes[k] > before[k] for k in before))
+
+    def test_the_title_screen_loads_common_after_title(self):
+        made, written, sizes, before, err = self.run_build()
+        self.assertIsNone(err)
+        rows = byml.loads(written["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
+        self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
+        self.assertEqual(rows[0]["Class"], "UITitleScreen")                 # (the rest of the row as it was)
+        self.assertEqual(rows[1], {"ArchiveCategory": ["Common"], "Name": "Other_00"})   # (other rows untouched)
+        rows = byml.loads(SCREENS)
+        tm.add_common_archive(rows)
+        tm.add_common_archive(rows)   # (twice: Common once)
+        self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_common_archive([{"ArchiveCategory": ["Common"], "Name": "Title_00"}])   # (not Title first)
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_common_archive([{"ArchiveCategory": ["Title"], "Name": "Else_00"}])
+
+    def test_edit_screens_chains_through_the_run_and_adds_a_row(self):
+        """The API other builders use (tabs-overhaul's CoopMenu_00 row): what an earlier builder made is read."""
+        import tempfile
+        made, written, sizes, before, err = self.run_build()
+        self.assertIsNone(err)
+        k = "RSDB/UIScreen.Product.111.rstbl.byml.zs"
+
+        class Run:   # (a PackRun's reader: the screens table as title_menu made it)
+            def glob(self, pattern):
+                return [k]
+
+            def read(self, rel):
+                return written[k]
+
+        row = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CoopMenu_00", "Name": "CoopMenu_00"}
+        rel, data, grew = tm.ui_pack.edit_screens(Run(), _Plain(), lambda d, raw, new: new, lambda rows: rows + [row])
+        got = byml.loads(data)
+        self.assertEqual([r["Name"] for r in got], ["Title_00", "Other_00", "CoopMenu_00"])
+        self.assertEqual(got[0]["ArchiveCategory"], ["Title", "Common"])   # (the title step's edit kept)
+        self.assertEqual((grew[0], grew[1] < grew[2], grew[3]), (k, True, True))
 
     def test_nothing_written_when_one_language_fails(self):
         made, written, sizes, before, err = self.run_build(broken="JPja")

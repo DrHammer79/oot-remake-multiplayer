@@ -9,6 +9,7 @@
 // (hos_coop_menu.h). Not thread-safe: the module guards it.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -33,6 +34,16 @@ struct Command {
     const char* help;    // one short paragraph
 };
 const std::vector<Command>& Commands();
+// The help of the main page's rows that open a page (Local co-op, Settings, Customize Link, Commands): the same words
+// on the - page's Settings and look rows (CoopPauseTab::MenuTabHelp), one source.
+inline constexpr const char* kLocalHelp = "Two players on this PC.";
+inline constexpr const char* kSettingsHelp =
+    "Your name, Link's look, how many players can join your game, voice chat, the chat key, which controller this "
+    "game reads, and players on the map.";
+inline constexpr const char* kCustomizeHelp =
+    "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture. Your Link wears it "
+    "when you close the menu.";
+inline constexpr const char* kCommandsHelp = "The chat's commands, and the key that opens the chat.";
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
 std::string ChatKeyWords(const std::string& chat_key);
@@ -136,6 +147,10 @@ struct Row {
     bool on = false;                  // kToggle
     bool left = false, right = false; // kChoice: it can go that way
     bool fixed = false;               // it cannot be used now
+    // A choice of two shown as the game's own Options toggle where the page can (the title's Host page: its two cells,
+    // the chosen one `cell`, 0 or 1; -1 none): the value's words then are cells[cell].
+    std::array<std::string, 2> cells{};
+    int cell = -1;
 };
 struct View {
     std::vector<Row> rows;
