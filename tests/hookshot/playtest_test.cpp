@@ -223,6 +223,12 @@ TEST_CASE("playtest: bad requests are refused with a reason, never acted on") {
     CHECK(ParseError(R"({"cmd":"warp","scene":"A","timeout":0})").find("timeout") != std::string::npos);
     CHECK(ParseError(R"({"cmd":"flag","name":"X"})").find("value") != std::string::npos);
     CHECK(ParseError(R"({"cmd":"flag","name":"X","value":1.5})").find("value") != std::string::npos);
+    // (past int32: refused here, never handed to the game's thread; review-01111-b)
+    CHECK(ParseError(R"({"cmd":"flag","name":"X","value":2147483648})").find("value") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"flag","name":"X","value":2150000000})").find("value") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"flag","name":"X","value":-2147483649})").find("value") != std::string::npos);
+    CHECK(Parse(R"({"cmd":"flag","name":"X","value":2147483647})")->value == "2147483647");
+    CHECK(Parse(R"({"cmd":"flag","name":"X","value":-2147483648})")->value == "-2147483648");
     CHECK(ParseError(R"({"cmd":"flag","name":"X Y","value":1})").find("name") != std::string::npos);
     CHECK(ParseError(R"({"cmd":"give"})").find("item") != std::string::npos);
     CHECK(ParseError(R"({"cmd":"give","item":"bombs#x"})").find("item") != std::string::npos);

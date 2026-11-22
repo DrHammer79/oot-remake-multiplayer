@@ -592,6 +592,10 @@ TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (iss
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee lots\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 9 9\n", error));
+    // past int32: refused (all digits, so only the overflow tells; review-01111-b)
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 2147483648\n", error));
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee -2147483649\n", error));
+    CHECK(Parse("setflag PlayerStatus.CurrentRupee 2147483647\n", error));
     Runner r(Must("setflag PouchData.Weapon_Shield_Deku.StockNum 0\nsetflag PlayerStatus.CurrentRupee 99\n"));
     std::vector<std::string> log;
     r.Advance(0.0, std::nullopt, log);

@@ -454,14 +454,17 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
         } else if (cmd == "SETFLAG") {
             // setflag NAME VALUE: this game's Int or Bool flag NAME (a GameDataList
             // name) to VALUE, through the game's queue. Test only.
-            int value = 0;
-            const auto* end = w.size() == 3 ? w[2].data() + w[2].size() : nullptr;
-            if (w.size() != 3 || std::from_chars(w[2].data(), end, value).ptr != end) {
-                return fail("want: setflag NAME VALUE (an Int or Bool flag, a whole number)");
+            // (ec checked too: a number past int32 is all digits, so the end alone passed it and the hook's
+            // conversion then threw on the game's thread; review-01111-b)
+            std::int32_t value = 0;
+            const std::string_view n = w.size() == 3 ? std::string_view(w[2]) : std::string_view();
+            const auto r = std::from_chars(n.data(), n.data() + n.size(), value);
+            if (w.size() != 3 || n.empty() || r.ec != std::errc{} || r.ptr != n.data() + n.size()) {
+                return fail("want: setflag NAME VALUE (an Int or Bool flag, a whole number that fits 32 bits)");
             }
             step.kind = Kind::setflag;
             step.mark = std::string(w[1]);
-            step.start = std::string(w[2]);
+            step.start = std::to_string(value);
         } else if (cmd == "NOFAIRY") {
             // nofairy: every bottle emptied (each BottleItem Enum, coop/host game_items.hpp letters::kBottles, set to
             // Empty: five setenum steps). A bottled fairy makes a lethal hit the game's own death and revive, never
@@ -1315,6 +1318,14 @@ void CheckFile(Core::System& system) {
     Begin(system, std::move(*script));
 }
 
+// A step's number, already checked by Parse; never throws (Do runs on the game's threads, where an exception
+// ends the game): 0 for anything that is not a whole int32.
+int Whole(std::string_view text) {
+    std::int32_t v = 0;
+    const auto r = std::from_chars(text.data(), text.data() + text.size(), v);
+    return r.ec == std::errc{} && r.ptr == text.data() + text.size() ? v : 0;
+}
+
 // The steps PlayNow does at once: the test-only ones that need no frames to pass (mark too).
 bool NowKind(Kind k) {
     switch (k) {
@@ -1352,7 +1363,7 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         }
         LOG_INFO(Core, "coop: test dress {}: {} asked", request.start, asked);
     } else if (request.kind == Kind::setflag) {
-        SetFlag(system, request.name, std::stoi(request.start));
+        SetFlag(system, request.name, Whole(request.start));
     } else if (request.kind == Kind::setenum) {
         SetEnum(system, request.name, request.start);
     } else if (request.kind == Kind::dump) {
@@ -1387,16 +1398,16 @@ void Do(Core::System& system, const Runner::Request& request, double now,
     } else if (request.kind == Kind::kill) {
         CoopObjects::QueueTestKill(request.name);  // logged where it is done
     } else if (request.kind == Kind::hit) {
-        CoopObjects::QueueTestHit(request.name, std::stoi(request.start));  // logged where it is done
+        CoopObjects::QueueTestHit(request.name, Whole(request.start));  // logged where it is done
     } else if (request.kind == Kind::stun) {
         CoopObjects::QueueTestStun(request.name);  // logged where it is done
     } else if (request.kind == Kind::drop) {
-        CoopObjects::QueueTestDrop(request.name, static_cast<float>(std::stoi(request.start)));  // logged there
+        CoopObjects::QueueTestDrop(request.name, static_cast<float>(Whole(request.start)));  // logged there
     } else if (request.kind == Kind::hurt) {
         if (g_state.link) {
             const std::array<float, 3> at = *g_state.link;
             const std::array<float, 3> from{at[0] + 1.0f, at[1], at[2]};  // a hit from a metre east
-            CoopObjects::HurtOurLink(std::stoi(request.name), at, from);
+            CoopObjects::HurtOurLink(Whole(request.name), at, from);
             LOG_INFO(Core, "coop: test hurt {}: asked", request.name);
         } else {
             LOG_INFO(Core, "coop: test hurt {}: no Link", request.name);

@@ -9,18 +9,75 @@ Talks to both games' bridges (standard library only) and checks, in this order, 
   5. warp: both to --scene; arrived, held;
   6. flag + dump: --flag set to 1 in A; after a few frames both dumps have it 1 (synced);
   7. give: bombs in A (needs LICHII_COOP_CHEATS=1);
-  8. resume: both run again.
+  8. a client killed in the middle of a long step (3600) lets game A run again at once;
+  9. resume: both run again;
+ 10. (Windows, with --session) while held each game's window answers (not hung), and last: B held, its window
+     closed, the process gone within 15 s.
 Each check prints PASS or FAIL with what was seen; the whole log is written as JSON to --out. Exit 0 all passed.
 
     python -I tools/autotest/bridge_proof.py --port-a 5011 --port-b 5012 --out <dir> [--hold 30]
-        [--scene KokiriForest_Child] [--flag <a shared flag name>]
+        [--scene KokiriForest_Child] [--flag <a shared flag name>] [--session <live.py session folder>]
 """
 import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import time
+
+WINDOWS = os.name == "nt"
+
+
+def windows_of(pid):
+    """(Windows) the visible top-level windows of a process."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def each(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+    user32.EnumWindows(proc(each), 0)
+    return found
+
+
+def answers(hwnd):
+    """(Windows) the window's thread takes a message within 2 s and Windows does not call it hung."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    result = ctypes.c_size_t()
+    ok = user32.SendMessageTimeoutW(wintypes.HWND(hwnd), 0, 0, 0, 0x0002, 2000, ctypes.byref(result))  # WM_NULL, SMTO_ABORTIFHUNG
+    return bool(ok) and not user32.IsHungAppWindow(wintypes.HWND(hwnd))
+
+
+def close_window(hwnd):
+    import ctypes
+    from ctypes import wintypes
+    ctypes.windll.user32.PostMessageW(wintypes.HWND(hwnd), 0x0010, 0, 0)  # WM_CLOSE
+
+
+def pid_alive(pid):
+    if WINDOWS:
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 class Bridge:
@@ -63,6 +120,7 @@ def main(argv=None):
     ap.add_argument("--hold", type=float, default=30.0)
     ap.add_argument("--scene", default="KokiriForest_Child")
     ap.add_argument("--flag", default="")
+    ap.add_argument("--session", help="live.py's session folder (pids.json: the games' processes, for the window checks)")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     log = []
@@ -72,6 +130,13 @@ def main(argv=None):
         results.append({"check": check, "pass": bool(ok), "seen": seen})
         print("%s %s: %s" % ("PASS" if ok else "FAIL", check, json.dumps(seen)[:400]), flush=True)
 
+    pids = {}
+    if a.session:
+        try:
+            pids = {k: int(v) for k, v in (json.load(open(os.path.join(a.session, "pids.json"), encoding="utf-8"))
+                                           .get("games") or {}).items() if v}
+        except (OSError, ValueError) as e:
+            print("no pids.json in %s (%s): the window checks are skipped" % (a.session, e))
     A, B = Bridge(a.port_a, "A"), Bridge(a.port_b, "B")
     games = {"A": A, "B": B}
 
@@ -91,7 +156,13 @@ def main(argv=None):
             r = call(g, "pause")
             note("pause " + g, r.get("ok") and r.get("paused"), r)
             before[g] = call(g, "state")
-        time.sleep(a.hold)
+        time.sleep(a.hold / 2)
+        if WINDOWS and pids:
+            for g in games:
+                hw = windows_of(pids.get(g, 0))
+                note("held %s: its window answers (not hung)" % g, hw and all(answers(h) for h in hw),
+                     {"pid": pids.get(g), "windows": len(hw)})
+        time.sleep(a.hold / 2)
         for g in games:
             s = call(g, "state")
             b = before[g]
@@ -155,9 +226,46 @@ def main(argv=None):
         for g in games:
             r = call(g, "shot", name="proof-end-" + g)
             note("shot end " + g, r.get("ok") and os.path.isfile(r.get("path", "")), {"path": r.get("path")})
+
+        # 8. a client killed in the middle of a long step: A runs again at once. (One client a game: ours lets go
+        # first, which resumes A; the stand-in client then holds it and steps 3600 frames, and is killed.)
+        A.close()
+        msgs = "".join(json.dumps(m) + chr(10) for m in ({"cmd": "pause"}, {"cmd": "step", "frames": 3600})).encode()
+        code = chr(10).join(["import socket, time",
+                             "s = socket.create_connection(('127.0.0.1', %d))" % a.port_a,
+                             "s.sendall(%r)" % msgs,
+                             "time.sleep(600)"])
+        child = subprocess.Popen([sys.executable, "-I", "-c", code])
+        time.sleep(3)
+        child.kill()
+        child.wait()
+        time.sleep(0.5)
+        A = games["A"] = Bridge(a.port_a, "A")
+        s1 = call("A", "state")
+        time.sleep(1.0)
+        s2 = call("A", "state")
+        note("client killed mid-step: A runs again", not s2.get("paused") and s2.get("frame", 0) - s1.get("frame", 0) > 20,
+             {"frames": [s1.get("frame"), s2.get("frame")], "paused": s2.get("paused")})
     except Exception as e:  # (a broken connection, a refused reply: a FAIL, and the games are let go below)
         note("exception", False, repr(e))
     finally:
+        # 10. last: B held and its window closed: the game exits promptly (its hold must not keep it alive).
+        if WINDOWS and pids.get("B"):
+            try:
+                call("B", "pause")
+                hw = windows_of(pids["B"])
+                for h in hw:
+                    close_window(h)
+                t0 = time.time()
+                while pid_alive(pids["B"]) and time.time() - t0 < 15:
+                    time.sleep(0.25)
+                gone = not pid_alive(pids["B"])
+                note("held B, window closed: the game exits within 15 s", gone and hw,
+                     {"windows": len(hw), "seconds": round(time.time() - t0, 1)})
+                if gone:
+                    games.pop("B").close()
+            except Exception as e:
+                note("held B, window closed", False, repr(e))
         for g in games:
             try:
                 r = call(g, "resume")

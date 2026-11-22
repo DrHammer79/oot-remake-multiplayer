@@ -287,12 +287,13 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         }
         if (val->kind == K::Bool) {
             r.value = val->boolean ? "1" : "0";
-        } else if (val->kind == K::Number && val->number == std::floor(val->number) && std::fabs(val->number) < 2.2e9) {
+        } else if (val->kind == K::Number && val->number == std::floor(val->number) && val->number >= -2147483648.0 &&
+                   val->number <= 2147483647.0) {  // (int32, as the game's Int flags; review-01111-b)
             r.value = std::to_string(static_cast<long long>(val->number));
         } else if (val->kind == K::String && PlainText(val->string, 128)) {
             r.value = val->string;  // an enum value's name: setenum
         } else {
-            error = "value: a whole number, true or false, or an enum value's name";
+            error = "value: a whole number from -2147483648 to 2147483647, true or false, or an enum value's name";
             return std::nullopt;
         }
         return r;
