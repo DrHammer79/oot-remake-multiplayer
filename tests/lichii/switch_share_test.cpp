@@ -32,7 +32,7 @@ struct Game {
 
     void Tick(std::uint64_t now_ms, bool others = true, const std::string& scene = kScene) {
         std::vector<proto::SwitchState> out;
-        holds = sharer.Tick(scene, {Seen{Plate(), 0x1000, on, true}}, others, now_ms, out, notes);
+        holds = sharer.Tick(scene, {Seen{Plate(), 0x1000, on, true}}, others, self, now_ms, out, notes);
         for (auto& m : out) {
             m.player_number = self;  // the server's relay writes the sender
             sent.push_back(m);
@@ -397,4 +397,80 @@ TEST_CASE("switch share: a guarded line not armed is still our own: our press is
     REQUIRE(out.size() == 1);
     CHECK(out[0].on);
     CHECK(out[0].plug == PlugKey("OnState"));
+}
+
+TEST_CASE("switch share: two players on one switch keep a third game's hold (row 244)") {
+    // piscesgamer97 (0.11.9, Dodongo's Cavern): two others stood on the moving-ground plate; each game held it for
+    // the other and sent nothing, so the third game let go every ~5 s and the plate's logic ran again.
+    std::array<Game, 3> g;
+    for (std::uint8_t i = 0; i < 3; ++i) g[i].self = static_cast<std::uint8_t>(i + 1);
+    std::array<bool, 3> pressing{true, true, false};
+    std::array<bool, 3> held{};  // our hold keeps the plug 1 from the first set until we let go
+    std::array<std::size_t, 3> delivered{};
+    std::array<std::size_t, 3> let_go{};
+    std::uint64_t t = 1000;
+    const auto count = [](const Game& x, const char* text) {
+        std::size_t n = 0;
+        for (const auto& line : x.notes) n += line.find(text) != std::string::npos ? 1 : 0;
+        return n;
+    };
+    const auto step = [&] {
+        t += 100;
+        for (std::size_t i = 0; i < 3; ++i) {
+            g[i].on = pressing[i] || held[i];
+            g[i].Tick(t);
+            if (!g[i].holds.empty()) held[i] = true;
+            const std::size_t n = count(g[i], "let go after");
+            if (n != let_go[i]) held[i] = false;
+            let_go[i] = n;
+        }
+        for (std::size_t i = 0; i < 3; ++i) {
+            for (; delivered[i] < g[i].sent.size(); ++delivered[i]) {
+                for (std::size_t j = 0; j < 3; ++j) {
+                    if (j != i) g[j].sharer.Receive(g[i].sent[delivered[i]], t);
+                }
+            }
+        }
+    };
+    // Both press in the same walk: both sent before either heard the other.
+    step();
+    CHECK(Has(g[0].notes, "our player's press: sent"));
+    CHECK(Has(g[1].notes, "our player's press: sent"));
+    for (int i = 0; i < 300; ++i) {  // 30 s
+        step();
+        CHECK(held[2]);
+    }
+    CHECK(count(g[2], "let go after") == 0);
+    CHECK(Has(g[0].notes, "ours is resent while held"));
+    CHECK_FALSE(Has(g[1].notes, "ours is resent while held"));
+    // The lowest number steps off: the other still presses, so the third game is held again after a short handover.
+    pressing[0] = false;
+    for (int i = 0; i < 100; ++i) step();
+    CHECK(held[2]);
+    const std::size_t lapses = count(g[2], "let go after");
+    for (int i = 0; i < 200; ++i) step();
+    CHECK(count(g[2], "let go after") == lapses);  // steady again: no lapse every ~5 s
+    // Both off: nothing latches; every game lets go and stays let go.
+    pressing[1] = false;
+    for (int i = 0; i < 150; ++i) step();
+    for (std::size_t i = 0; i < 3; ++i) CHECK_FALSE(held[i]);
+    const std::size_t sent = g[0].sent.size() + g[1].sent.size() + g[2].sent.size();
+    for (int i = 0; i < 100; ++i) step();
+    CHECK(g[0].sent.size() + g[1].sent.size() + g[2].sent.size() == sent);
+}
+
+TEST_CASE("switch share: without our number (0) nothing is resent while held, as before") {
+    Game a;
+    a.self = 0;
+    std::uint64_t t = 1000;
+    a.on = true;
+    a.Tick(t);
+    REQUIRE(a.sent.size() == 1);
+    proto::SwitchState on = a.sent[0];
+    on.player_number = 2;
+    for (int i = 0; i < 50; ++i) {
+        a.sharer.Receive(on, t);
+        a.Tick(t += 100);
+    }
+    CHECK(a.sent.size() == 1);
 }

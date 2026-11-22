@@ -3315,7 +3315,7 @@ private:
         std::vector<coop::protocol::SwitchState> out;
         std::vector<std::string> notes;
         const auto holds = CoopSwitchShare::TheSharer().Tick(scene, seen, !sync_.OthersHere(server_now_us).empty(),
-                                                             SteadyNowMs(), out, notes);
+                                                             sync_.Self(), SteadyNowMs(), out, notes);
         for (auto& m : out) {
             send.emplace_back(std::move(m));
         }

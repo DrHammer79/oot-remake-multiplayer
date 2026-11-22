@@ -677,6 +677,7 @@ The rule above needs every driven object's INPUT to reach the follower. `room_ob
 The one input with no path was a timed switch. So the timed switches get one mechanism, the switch's own state (`coop_switch_share.{h,cpp}`, `SWITCH_STATE`, [protocol.md](protocol.md)):
 - The presser's game sends the plug going on and off.
 - The others hold the same plug on their own switch with the game's set-bool every frame while it is on. Their own timer (`HoldGeneralTimerSwitch`), delays and gates then run, and their movers move.
+- Two players on one switch (row 244, piscesgamer97's 0.11.9 log: 13 times `let go after 5.1 s held` on Dodongo's moving-ground plate, its platform and camera ran again each time): each game held the plug for the other and sent nothing, so the third game let go every ~5 s. Now the lowest player number among the pressers keeps resending its press while it holds (`...: another player presses it too: ours is resent while held`).
 - The 12 plugs (`CoopRoomObjects::SwitchPlugs`, the generator's third table) are every switch output a room object reads that no CoopEyeSwitch line covers:
   - Dodongo: the moving ground and shortcut plate, two fire-wall eyes, the room 12 shutter plate.
   - Forest: the lamp, air wall and light plate, and the torch plate.

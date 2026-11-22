@@ -543,6 +543,7 @@ Fields:
 How it is sent and used:
 - The presser's game sends on when the plug goes 1, then again every 2 s while it stays 1, and off when it goes back to 0.
 - A game in the same scene holds the same plug on its own switch through the game's set-bool while the sender's is on, so its own logic runs. It lets go on off, or when 5 s pass without a resend.
+- Two players on one switch (row 244): a game that holds the plug for another player cannot tell its own press from its hold. Only the presser with the lowest player number keeps resending its on while it holds; the others stay quiet. Before, both went quiet and every other game let go every ~5 s. No new field, no bump.
 - A plug that is 1 while (or within 1 s after) a game holds it for another player is not sent back.
 - Nothing is sent with no other player in the scene.
 - Session channel, reliable, from either side. The server relays it to the sender's scene only and never keeps it, as `DUNGEON_EVENT`.
