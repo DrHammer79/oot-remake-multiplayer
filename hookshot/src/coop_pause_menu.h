@@ -40,8 +40,8 @@ inline constexpr const char* kSettingsHelp =
     "Your name, Link's look, how many players can join your game, voice chat, the chat key, which controller this "
     "game reads, and players on the map.";
 inline constexpr const char* kCustomizeHelp =
-    "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture of the result. Your "
-    "Link wears it when you close the menu; the other players see your tunic's colour.";
+    "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture. Your Link wears it "
+    "when you close the menu.";
 inline constexpr const char* kCommandsHelp = "The chat's commands, and the key that opens the chat.";
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
