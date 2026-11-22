@@ -283,6 +283,15 @@ while ($packQueue.Count -gt 0) {
 foreach ($s in (Get-ChildItem -LiteralPath (Join-Path $packTool 'strings') -Filter '*.txt')) {
     Copy-Text $s.FullName (Join-Path $kit "tools\puppet_pack\strings\$($s.Name)")
 }
+# Co-op's own Characters tab's data (charsel_ui.py: manifest.json, the deltas, charsel-native.ips, which the kit also
+# puts into the game's build: kit-paths.ps1 Sync-KitCharselNativePatch): byte for byte (the deltas and the code patch
+# are checked by their hashes), never through Copy-Text.
+$charselData = Join-Path $packTool 'charsel\data'
+if (-not (Test-Path -LiteralPath (Join-Path $charselData 'manifest.json'))) { throw "make_kit: tools\puppet_pack\charsel\data\manifest.json is not in the repo" }
+New-Item -ItemType Directory -Force -Path (Join-Path $kit 'tools\puppet_pack\charsel\data') | Out-Null
+foreach ($s in (Get-ChildItem -LiteralPath $charselData -File)) {
+    Copy-Item -LiteralPath $s.FullName -Destination (Join-Path $kit "tools\puppet_pack\charsel\data\$($s.Name)") -Force
+}
 
 # Optionally a Python for it.
 $pythonNote = 'not included (each PC needs Python 3 and zstandard)'

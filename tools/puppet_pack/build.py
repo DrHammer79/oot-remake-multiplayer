@@ -298,17 +298,40 @@ def character_project(variant, file):
 
 def charsel_native_wanted(mod_dir):
     """Whether the pack makes co-op's own Characters tab (charsel_ui.py): not when the Character Select mod is in the
-    mods (find_characters: on, with its models) with a code patch of its own (exefs/*.ips or *.pchtxt): his files and
-    his code are then the tab's. The kit decides the same for the code patch it puts in before the game's build
-    (kit-paths.ps1 Test-KitCharselNative), so the game and the pack agree."""
-    cs = find_characters(mod_dir, log=lambda *_: None)
-    if not cs:
-        return True
-    try:
-        names = os.listdir(os.path.join(cs["dir"], "exefs"))
-    except OSError:
-        return True
-    return not any(n.lower().endswith((".ips", ".pchtxt")) for n in names)
+    mods (its characters.json, where find_characters looks, switched on; with its NPC models or only its default
+    part) with a code patch of its own (exefs/*.ips or *.pchtxt): his files and his code are then the tab's. The kit
+    decides the same for the code patch it puts in before the game's build (kit-paths.ps1 Test-KitCharselNative), so
+    the game and the pack agree."""
+    here = os.path.abspath(mod_dir)
+    roots = [os.path.dirname(here)]
+    if os.path.basename(os.path.dirname(os.path.dirname(here))).lower() == "contents":
+        roots.append(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+    for root in roots:
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(root, name, CHARACTERS_FILE)
+            if name.startswith(("-", "_", ".")) or not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    doc = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(doc, dict) or doc.get("mod") != CHARACTERS_MOD or doc.get("format") != CHARACTERS_FORMAT:
+                continue
+            if len(roots) > 1 and mod_list_off(roots[1], (f"contents/{os.path.basename(root)}/{name}"
+                                                         if root == roots[0] else name)):
+                continue
+            try:
+                code = os.listdir(os.path.join(root, name, "exefs"))
+            except OSError:
+                code = []
+            if any(n.lower().endswith((".ips", ".pchtxt")) for n in code):
+                return False
+    return True
 
 
 def mod_list_off(mods_root, name):

@@ -3045,6 +3045,9 @@ class FullBuildTest(unittest.TestCase):
         with open(os.path.join(cs, "exefs", "E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"), "wb") as f:
             f.write(b"IPS32EEOF")
         self.assertFalse(build.charsel_native_wanted(pack))  # his code: his tab
+        os.remove(os.path.join(cs, "romfs", "Model", "Player_Child_C005.Player_Child.bfres.zs"))
+        self.assertIsNone(build.find_characters(pack, log=lambda *_: None))
+        self.assertFalse(build.charsel_native_wanted(pack))  # his default part alone (no NPC models), his code: his tab
         with open(os.path.join(mods, "coop-mods.list"), "w", encoding="utf-8") as f:
             f.write("coop-mods 1\noff OoT Character Select\n")
         self.assertTrue(build.charsel_native_wanted(pack))   # switched off: ours
