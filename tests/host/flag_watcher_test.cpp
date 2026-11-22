@@ -3414,7 +3414,7 @@ TEST_CASE("flag watcher: a guest with more hearts joining a host with fewer foll
     CHECK(game.get(kMaxLife) == 12u);
     CHECK(game.get(kMagic) == 48u);
   }
-  w.lowered_done(kMaxLife, 16);  // the walk saw Link's own max lowered
+  w.lowered_done(kMaxLife, 12);  // the walk saw Link's own max lowered
   for (int i = 0; i <= FlagWatcher::kResetQuietFrames; ++i) CHECK(w.frame(store).empty());
   CHECK_FALSE(w.reset_lowered(kMaxLife));
 }
@@ -3489,16 +3489,19 @@ TEST_CASE("flag watcher: a guest's own save load with more hearts than the group
   constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
   FakeStore game;
   game.values[kDoor] = entry(kDoor, 1);
+  game.values[kKey0] = entry(kKey0, 1);
   game.values[kMaxLife] = entry(kMaxLife, 16, proto::FlagKind::int32);
   ItemFlagStore store(game);
-  FlagWatcher w(SharedFlags({kDoor, kMaxLife}), FlagRole::player);
+  FlagWatcher w(SharedFlags({kDoor, kKey0, kMaxLife}), FlagRole::player);
   w.set_loading(true);
   w.frame(store);
-  CHECK(w.receive(proto::FlagSnapshot{0, 1, {entry(kDoor, 1), entry(kMaxLife, 16, proto::FlagKind::int32)}}));
+  CHECK(w.receive(proto::FlagSnapshot{
+      0, 1, {entry(kDoor, 1), entry(kKey0, 1), entry(kMaxLife, 16, proto::FlagKind::int32)}}));
   CHECK(w.frame(store).empty());
   w.set_scene(false);
   for (int i = 0; i < FlagWatcher::kTitleFrames; ++i) w.frame(store);
-  game.values[kDoor] = entry(kDoor, 0);  // the save: an older door state (the sign of a load) ...
+  game.values[kDoor] = entry(kDoor, 0);  // the save: older door and key states (the sign of a load: two go back) ...
+  game.values[kKey0] = entry(kKey0, 0);
   game.values[kMaxLife] = entry(kMaxLife, 20, proto::FlagKind::int32);  // ... and more hearts than the group
   CHECK(w.frame(store).empty());
   CHECK(game.get(kMaxLife) == 16u);  // the group's value back at once
