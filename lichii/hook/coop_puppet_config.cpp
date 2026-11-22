@@ -289,6 +289,25 @@ std::optional<std::map<std::uint16_t, std::uint16_t>> KnownCharacterFiles() {
     return std::map<std::uint16_t, std::uint16_t>{};
 }
 
+// The Character Select mod's characters.json text (the first one found where KnownCharacterFiles looks), or empty.
+std::string CharacterListText() {
+    std::filesystem::path load = Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir);
+    if (load.filename().empty()) load = load.parent_path();
+    std::vector<std::filesystem::path> roots{load / "0400486024DEC000"};
+    if (load.filename() == "contents") roots.push_back(load.parent_path());
+    std::error_code ec;
+    for (const auto& root : roots) {
+        for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            std::error_code fec;
+            const auto file = it->path() / "characters.json";
+            if (!std::filesystem::is_regular_file(file, fec)) continue;
+            std::ifstream in(file, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+    }
+    return {};
+}
+
 // A manifest of a pack built with --puppet-pvp (native puppets phase 4).
 bool PackPvp() {
     for (const auto& text : PackManifests()) {

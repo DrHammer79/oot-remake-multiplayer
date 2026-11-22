@@ -24,6 +24,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "coop_char_slots.h"
 
@@ -131,6 +132,131 @@ private:
     std::optional<std::int32_t> last_seen_;
     int wait_ = 0;
 };
+
+// --- The pickable characters of the mod's characters.json ---
+struct Character {
+    std::int32_t number = 0;
+    std::string name;
+    bool operator==(const Character&) const = default;
+};
+
+namespace detail {
+
+inline bool IsSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+struct Reader {
+    std::string_view t;
+    std::size_t at = 0;
+    void Space() {
+        while (at < t.size() && IsSpace(t[at])) ++at;
+    }
+    bool Eat(char c) {
+        Space();
+        if (at < t.size() && t[at] == c) {
+            ++at;
+            return true;
+        }
+        return false;
+    }
+    std::optional<std::string> String() {
+        Space();
+        if (at >= t.size() || t[at] != '"') return std::nullopt;
+        std::string out;
+        for (++at; at < t.size(); ++at) {
+            if (t[at] == '"') {
+                ++at;
+                return out;
+            }
+            if (t[at] == '\\' && at + 1 < t.size()) ++at;   // (an escaped character is kept as it is)
+            out += t[at];
+        }
+        return std::nullopt;
+    }
+    // Skips one value of any kind (an object or array by its brackets, a string, or a bare word up to , } ]).
+    bool Skip() {
+        Space();
+        if (at >= t.size()) return false;
+        if (t[at] == '"') return String().has_value();
+        if (t[at] == '{' || t[at] == '[') {
+            int depth = 0;
+            while (at < t.size()) {
+                if (t[at] == '"') {
+                    if (!String()) return false;
+                    continue;
+                }
+                if (t[at] == '{' || t[at] == '[') ++depth;
+                if (t[at] == '}' || t[at] == ']') --depth;
+                ++at;
+                if (depth == 0) return true;
+            }
+            return false;
+        }
+        while (at < t.size() && t[at] != ',' && t[at] != '}' && t[at] != ']') ++at;
+        return true;
+    }
+};
+
+}  // namespace detail
+
+// The characters a player can pick on the mod's page: the "characters" rows with "picker": true, in file order, by the
+// mod's stored number and name (a row without a number or a name is left out; a list that cannot be read is empty).
+// Which of them have a model on this PC is CoopCharSlots::Installed's question (Pickable).
+inline std::vector<Character> ParseCharacters(std::string_view text) {
+    std::vector<Character> out;
+    const auto key = text.find("\"characters\"");
+    if (key == std::string_view::npos) return out;
+    detail::Reader r{text, key + 12};
+    if (!r.Eat(':') || !r.Eat('[')) return out;
+    while (r.Eat('{')) {
+        Character c;
+        bool has_number = false, picker = false;
+        std::string name;
+        while (!r.Eat('}')) {
+            const auto k = r.String();
+            if (!k || !r.Eat(':')) return out;
+            r.Space();
+            if (*k == "number" || *k == "picker") {
+                const std::size_t from = r.at;
+                if (!r.Skip()) return out;
+                std::string_view v = text.substr(from, r.at - from);
+                while (!v.empty() && detail::IsSpace(v.back())) v.remove_suffix(1);
+                if (*k == "picker") {
+                    picker = v == "true";
+                } else {
+                    std::int32_t n = 0;
+                    const auto res = std::from_chars(v.data(), v.data() + v.size(), n);
+                    has_number = res.ec == std::errc{} && n >= 0;
+                    c.number = n;
+                }
+            } else if (*k == "name") {
+                const auto v = r.String();
+                if (!v) return out;
+                name = *v;
+            } else if (!r.Skip()) {
+                return out;
+            }
+            r.Eat(',');
+        }
+        if (has_number && picker && !name.empty()) {
+            c.name = std::move(name);
+            out.push_back(std::move(c));
+        }
+        if (!r.Eat(',')) break;
+    }
+    return out;
+}
+
+// The rows the settings page can offer: the pickable characters whose model is installed (`files` nothing: unknown,
+// all of them). Link (0) is always there, first.
+inline std::vector<Character> Pickable(const std::vector<Character>& list,
+                                       const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
+    std::vector<Character> out{{0, "Link"}};
+    for (const auto& c : list) {
+        if (c.number == 0) continue;
+        if (!files || CoopCharSlots::Installed(c.number, *files)) out.push_back(c);
+    }
+    return out;
+}
 
 // --- The module's glue (coop_hook.cpp; any thread): the picks kept in coop-character-ages.txt beside coop.ini ---
 Stored Current();

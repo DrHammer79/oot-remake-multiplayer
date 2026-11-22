@@ -43,6 +43,11 @@ void SelectRow(Menu& m, const std::string& name) {
     REQUIRE(Selected(m) == name);
 }
 
+bool Has(const Menu& m, const std::string& name) {
+    const auto names = Names(m);
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+
 Session Hosting(int players, std::string code = "ABCDE-FGHJK") {
     Session s;
     s.state = State::kHosting;
@@ -2159,4 +2164,40 @@ TEST_CASE("pause tab: Settings: Difficulty: the host changes it, the sliders und
     CHECK(s.view().help.find("The host chooses it") != std::string::npos);
     s.Press(Input::kRight);
     CHECK_FALSE(s.TakeRequest());
+}
+
+TEST_CASE("pause tab: Settings: Character by age shows only with the mod, then the two rows pick round the list") {
+    Menu m;
+    m.Show(CoopTitleMenu::Options{});
+    m.Open(Page::kSettings);
+    CHECK(Has(m, "Character by age") == false);   // (no mod: no rows)
+    m.SetCharacterAges(true, false, -1, -1, {{0, "Link"}, {2, "Saria"}, {8, "Zelda"}});
+    SelectRow(m, "Character by age");
+    CHECK(Has(m, "As a child") == false);   // (off: the two rows are hidden)
+    m.Press(Input::kDecide);
+    auto r = m.TakeRequest();
+    REQUIRE(r);
+    CHECK(r->kind == Request::Kind::kCharAges);
+    CHECK(r->text == "on");
+    m.SetCharacterAges(true, true, -1, 2, {{0, "Link"}, {2, "Saria"}, {8, "Zelda"}});
+    SelectRow(m, "As a child");
+    CHECK(SelectedValue(m) == "Not set");
+    m.Press(Input::kRight);   // (not set counts as the first: Link, so the next is Saria)
+    r = m.TakeRequest();
+    REQUIRE(r);
+    CHECK(r->kind == Request::Kind::kCharAges);
+    CHECK(r->text == "child=2");
+    CHECK(SelectedValue(m) == "Saria");
+    m.Press(Input::kLeft);
+    CHECK(m.TakeRequest()->text == "child=0");
+    CHECK(SelectedValue(m) == "Link");
+    m.Press(Input::kLeft);   // (round: Link back to the last)
+    CHECK(m.TakeRequest()->text == "child=8");
+    SelectRow(m, "As an adult");
+    CHECK(SelectedValue(m) == "Saria");
+    m.Press(Input::kRight);
+    CHECK(m.TakeRequest()->text == "adult=8");
+    SelectRow(m, "Character by age");
+    m.Press(Input::kLeft);
+    CHECK(m.TakeRequest()->text == "off");
 }

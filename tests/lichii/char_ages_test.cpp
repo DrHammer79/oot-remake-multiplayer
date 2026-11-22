@@ -121,3 +121,37 @@ TEST_CASE("char ages: the settings line round-trips, garbage is refused") {
     CHECK_FALSE(CoopCharAges::Parse("1 x 3"));
     CHECK_FALSE(CoopCharAges::Parse("1 -5 3"));
 }
+
+TEST_CASE("char ages: the pickable characters of a characters.json") {
+    // Made up: a row has a number, a name, a picker flag and sometimes a nested object.
+    const char* text = R"({"format": 1, "mod": "Made Up Mod", "characters": [
+        {"number": 0, "name": "Link", "picker": true},
+        {"number": 1, "name": "Retro \"Link\"", "picker": false},
+        {"number": 2, "name": "Saria", "picker": true, "file": 0, "bones": {"Child": 543, "Adult": 565}},
+        {"number": 8, "name": "Zelda", "picker": true, "file": 6},
+        {"name": "No number", "picker": true},
+        {"number": 9, "picker": true},
+        {"number": 10, "name": "Sheik", "picker": true, "file": 7}], "other": []})";
+    const auto list = CoopCharAges::ParseCharacters(text);
+    REQUIRE(list.size() == 4);
+    CHECK(list[0].number == 0);
+    CHECK(list[1].name == "Saria");
+    CHECK(list[2].number == 8);
+    CHECK(list[3].name == "Sheik");
+    CHECK(CoopCharAges::ParseCharacters("").empty());
+    CHECK(CoopCharAges::ParseCharacters(R"({"characters": [{"number": 2, "name": "Cut)").empty());
+    CHECK(CoopCharAges::ParseCharacters(R"({"characters": 5})").empty());
+}
+
+TEST_CASE("char ages: the rows offered are Link and the installed ones") {
+    const auto list = CoopCharAges::ParseCharacters(
+        R"({"characters": [{"number": 0, "name": "Link", "picker": true},
+            {"number": 2, "name": "Saria", "picker": true}, {"number": 3, "name": "Mido", "picker": true}]})");
+    const auto some = CoopCharAges::Pickable(list, kFiles);   // only Saria (2) has a model
+    REQUIRE(some.size() == 2);
+    CHECK(some[0].number == 0);
+    CHECK(some[1].number == 2);
+    CHECK(CoopCharAges::Pickable(list, std::nullopt).size() == 3);   // unknown: all
+    CHECK(CoopCharAges::Pickable(list, std::map<std::uint16_t, std::uint16_t>{}).size() == 1);   // none: Link
+    CHECK(CoopCharAges::Pickable({}, std::nullopt).size() == 1);   // no list: Link
+}

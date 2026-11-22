@@ -39,7 +39,9 @@
 #include "coop_pvp_game.h"
 #include "coop_room_list.h"
 #include "coop_runtime.h"
+#include "coop_char_ages.h"
 #include "coop_ngplus.h"
+#include "coop_puppet_config.h"
 #include "coop_save.h"
 #include <cstdlib>
 #include <filesystem>
@@ -888,6 +890,17 @@ void Copy(const std::string& text, const char* what) {
     });
 }
 
+// The Settings page's Character by age rows (coop_char_ages.h): the picks and the characters this PC can show.
+void FeedCharacterAges() {
+    const auto list = CoopCharAges::Pickable(CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText()),
+                                             CoopPuppetConfig::KnownCharacterFiles());
+    const auto stored = CoopCharAges::Current();
+    std::vector<std::pair<int, std::string>> rows;
+    for (const auto& c : list) rows.emplace_back(c.number, c.name);
+    g_menu.SetCharacterAges(list.size() > 1, stored.on, stored.child.value_or(-1), stored.adult.value_or(-1),
+                            std::move(rows));
+}
+
 void Act(const Request& r) {
     switch (r.kind) {
     case Request::Kind::kHost: Host(); break;
@@ -982,6 +995,15 @@ void Act(const Request& r) {
         LOG_INFO(Core, "coop: multiplayer tab: difficulty {}", choice && CoopDifficulty::Get().can_edit ? "asked" : "refused");
         break;
     }
+    case Request::Kind::kCharAges: {   // "on", "off", "child=N" or "adult=N" (coop_char_ages.h)
+        if (r.text == "on" || r.text == "off") {
+            CoopCharAges::SetOn(r.text == "on");
+        } else if (const bool child = r.text.rfind("child=", 0) == 0; child || r.text.rfind("adult=", 0) == 0) {
+            CoopCharAges::SetPick(child, std::atoi(r.text.c_str() + 6));
+        }
+        FeedCharacterAges();
+        break;
+    }
     case Request::Kind::kNgPlus: {   // (Navi) New Game+ (coop_ngplus.h)
         CoopNgPlus::SetLevel(std::atoi(r.text.c_str()));
         g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());
@@ -1009,6 +1031,7 @@ void ShowTab() {
     g_menu.Show(ReadOptions());
     g_menu.SetLook(CoopLook::Shown());   // the Customize page opens on the look waiting, else the one worn
     g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());   // (Navi) New Game+
+    FeedCharacterAges();
     g_menu.SetSaveSet(CoopSave::MultiplayerSaves());   // (Navi) the Saves row
     const std::string coop = ReadText(CoopIni());
     const auto last = CoopTitleMenu::IniGet(coop, "last_invite");
@@ -1566,6 +1589,7 @@ void Open(CoopPauseMenu::Page page) {
     g_menu.Show(ReadOptions());
     // (as the overlay's tab, ShowTab: the pause page's Settings and look opens Customize and Co-op settings here)
     g_menu.SetLook(CoopLook::Shown());
+    FeedCharacterAges();
     g_menu.SetNgPlus(CoopNgPlus::Level(), CoopNgPlus::Unlocked(), CoopNgPlus::Hearts());
     g_menu.SetSaveSet(CoopSave::MultiplayerSaves());
     InputRows();
