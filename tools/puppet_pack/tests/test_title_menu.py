@@ -261,11 +261,35 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
         self.assertEqual(rows[0]["Class"], "UITitleScreen")                 # (the rest of the row as it was)
         self.assertEqual(rows[1], {"ArchiveCategory": ["Common"], "Name": "Other_00"})   # (other rows untouched)
-        self.assertEqual(tm.add_common_archive(tm.add_common_archive(SCREENS)), tm.add_common_archive(SCREENS))
+        rows = byml.loads(SCREENS)
+        tm.add_common_archive(rows)
+        tm.add_common_archive(rows)   # (twice: Common once)
+        self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
         with self.assertRaises(tm.TitleMenuError):
-            tm.add_common_archive(byml.dumps([{"ArchiveCategory": ["Common"], "Name": "Title_00"}]))   # (not Title first)
+            tm.add_common_archive([{"ArchiveCategory": ["Common"], "Name": "Title_00"}])   # (not Title first)
         with self.assertRaises(tm.TitleMenuError):
-            tm.add_common_archive(byml.dumps([{"ArchiveCategory": ["Title"], "Name": "Else_00"}]))
+            tm.add_common_archive([{"ArchiveCategory": ["Title"], "Name": "Else_00"}])
+
+    def test_edit_screens_chains_through_the_run_and_adds_a_row(self):
+        """The API other builders use (tabs-overhaul's CoopMenu_00 row): what an earlier builder made is read."""
+        import tempfile
+        made, written, sizes, before, err = self.run_build()
+        self.assertIsNone(err)
+        k = "RSDB/UIScreen.Product.111.rstbl.byml.zs"
+
+        class Run:   # (a PackRun's reader: the screens table as title_menu made it)
+            def glob(self, pattern):
+                return [k]
+
+            def read(self, rel):
+                return written[k]
+
+        row = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CoopMenu_00", "Name": "CoopMenu_00"}
+        rel, data, grew = tm.ui_pack.edit_screens(Run(), _Plain(), lambda d, raw, new: new, lambda rows: rows + [row])
+        got = byml.loads(data)
+        self.assertEqual([r["Name"] for r in got], ["Title_00", "Other_00", "CoopMenu_00"])
+        self.assertEqual(got[0]["ArchiveCategory"], ["Title", "Common"])   # (the title step's edit kept)
+        self.assertEqual((grew[0], grew[1] < grew[2], grew[3]), (k, True, True))
 
     def test_nothing_written_when_one_language_fails(self):
         made, written, sizes, before, err = self.run_build(broken="JPja")

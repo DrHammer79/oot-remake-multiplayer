@@ -559,6 +559,28 @@ class PackRun:
         self.made.update(files)
 
 
+SCREEN_GLOB = "RSDB/UIScreen.Product.*.rstbl.byml.zs"   # the game's screens table (docs/game-ui.md)
+
+
+def edit_screens(reader, dicts, recompress, edit):
+    """The screens table (UIScreen: one row per screen, keyed by Name, no __RowId) with `edit(rows)` applied: edit
+    changes the list of row dicts in place or returns a new list (None: in place). Reads through `reader` (a PackRun
+    sees what an earlier builder of the run made, so edits chain). Returns (rel, compressed file, growth entry): put
+    the file in the builder's files and the entry in its growth ([(rel, plain length read, plain length made, True)]).
+    merge_tables.py puts these rows into a mod's table that wins over the pack's, by Name."""
+    from . import byml
+    found = reader.glob(SCREEN_GLOB)
+    if len(found) != 1:
+        raise UiPackError("no single %s in the game's files" % SCREEN_GLOB)
+    rel = found[0]
+    raw = reader.read(rel)
+    plain = dicts.decompress(raw)
+    rows = byml.loads(plain)
+    rows = edit(rows) or rows
+    made = byml.dumps(rows)
+    return rel, recompress(dicts, raw, made), (rel, len(plain), len(made), True)
+
+
 def edit_entries(entries, name, edit):
     """An archive's entries ([(name, bytes)], from sarc.read_entries) with every copy of `name`
     replaced by edit(copy), and {old bytes: new bytes}. The engine's archives hold some files
