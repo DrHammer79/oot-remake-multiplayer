@@ -3415,7 +3415,7 @@ TEST_CASE("flag watcher: a guest with more hearts joining a host with fewer foll
   CHECK_FALSE(w.reset_lowered(kMaxLife));
 }
 
-TEST_CASE("flag watcher: a guest with fewer hearts joining a host with more gets the host's value; a join with no lower value holds nothing (row 238)") {
+TEST_CASE("flag watcher: a guest with fewer hearts joining a host with more gets the host's value, a join with no lower value holds nothing (row 238)") {
   constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
   FakeStore game;
   game.values[kMaxLife] = entry(kMaxLife, 12, proto::FlagKind::int32);
