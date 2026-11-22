@@ -1,5 +1,5 @@
-# hs-block-grip, B: pushes the Deku basement block from its -z face toward +z while A grips it (phase 1) and while A
-# pulls it the same way (phase 2). See the A file.
+# hs-block-grip, B: grabs the Deku basement block's +x face (east; a wall is on its west) and pulls it toward +x while
+# A grips its +z face (phase 1), then pulls it again while A pulls it toward +z (phase 2). See the A file.
 mark start
 warp InsideTheDekuTree Entrance
 wait 1200
@@ -13,22 +13,24 @@ wait 300
 press A
 wait 2400
 mark after
-place -51.06 79.9 43.5   # on the goal side of the block (its goal anchor is at z 42.6)
+place -46.5 79.9 44.3    # east of the block, open floor (run 20261122-112254: B walked -49.2 47.1)
 wait 240
-toward -51.06 60.0 10    # face +z
+toward -60.0 44.3 10     # face west, toward the block
 mark b-placed
 wait 400                 # A grips from about here
-goto -51.06 45.3 0.3 300 # walk up to the -z face (block at 47.1)
+toward -60.0 44.3 90     # walk up to the +x face (a walk into it only shows "Grab")
 mark b-reach
-toward -51.06 60.0 150 A # PUSH toward +z, into A's grip (A held: a walk into it only shows "Grab")
+hold A 60                # GRAB
+mark b-grab
+toward -40.0 44.3 150 A  # PULL it toward +x, along A's grip
 wait 120
-mark b-push1
+mark b-pull1
 wait 1000                # A lets go, walks away and comes back
-goto -51.06 46.8 0.3 120 # the -z face again (block one step on, at about 48.6)
-wait 40
-toward -51.06 60.0 150 A # PUSH while A pulls the same way
-mark b-push2
-goto -51.06 41.5 0.5 300 # walk away: Link in control?
+toward -60.0 44.3 90     # back to the +x face
+hold A 60                # grab
+toward -40.0 44.3 150 A  # PULL while A pulls toward +z
+mark b-pull2
+goto -44.0 46.5 0.5 300  # walk away: Link in control?
 mark b-free
 wait 900
 mark end

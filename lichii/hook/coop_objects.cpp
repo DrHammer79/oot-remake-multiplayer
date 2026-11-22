@@ -801,6 +801,35 @@ public:
             block_ = result;
             return std::nullopt;  // next frame
         }
+        if (after_call && node_after_) {
+            // Row 244: the node's own start just ran on a followed block. Its target is a cell of its grid
+            // (CoopWorld::NodeTargetAtRest): a block left between cells by another player would slide there by
+            // itself in our game only (under our Link's grip too). Both places are put where it rests: idle there,
+            // its next push goes on from it as in the mover's game.
+            const NodeStart n = *std::exchange(node_after_, std::nullopt);
+            const auto at = CoopWorld::NodeTargetAtRest(
+                [&guest](u64 address) -> std::optional<u64> {
+                    u64 word = 0;
+                    return guest.Read(address, &word, 8) ? std::optional<u64>(word) : std::nullopt;
+                },
+                n.node, n.to);
+            if (!at.writes.empty()) {
+                float target[3] = {NAN, NAN, NAN};
+                for (int i = 0; i < 3; ++i) {
+                    guest.Read(n.node + CoopWorld::BlockNode::kTarget + 4u * i, &target[i], 4);
+                }
+                bool wrote = true;
+                for (const auto& w : at.writes) {
+                    wrote = guest.Write(w.address, &w.value, 4) && wrote;
+                }
+                const float dx = target[0] - n.to[0], dy = target[1] - n.to[1], dz = target[2] - n.to[2];
+                LOG_INFO(Core, "coop: world: push node {:x}: its start aimed {:.2f} m from where the block rests "
+                               "(a rest between grid cells); {} put at the rest place ({}), so it does not slide "
+                               "there by itself (row 244)",
+                         n.node, std::sqrt(dx * dx + dy * dy + dz * dz), wrote ? "its places" : "NOT all its places",
+                         at.where.size() == 2 ? at.where[0] + ", " + at.where[1] : at.where[0]);
+            }
+        }
         if (after_call && alias_after_) {
             // The play just made, on a townsperson: its slot names what its
             // own AI asked for again, so that AI's request of every frame
@@ -823,6 +852,7 @@ public:
         }
         if (!after_call) {
             alias_after_.reset();  // its play's frame ended before we were asked again
+            node_after_.reset();   // (its after-call never came: nothing to check)
             for (const u64 actor : std::exchange(releases_, {})) {
                 u32 flags = 0;
                 if (!Alive(guest, actor) || !guest.Read(actor + kActorFlags, &flags, 4)) {
@@ -1208,6 +1238,7 @@ public:
                 continue;
             }
             ++node_started_;
+            node_after_ = n;  // its target is read back after the call (row 244)
             CoopPuppet::Call c;
             c.function = main_ + CoopWorld::BlockNode::kStartFn;
             c.x[0] = node;
@@ -1529,6 +1560,7 @@ private:
     };
     std::vector<NodeStart> node_starts_;
     std::vector<NodeStart> work_node_starts_;
+    std::optional<NodeStart> node_after_;  // row 244: the start just called, its target checked after it
     std::size_t next_node_start_ = 0;
     std::size_t node_started_ = 0;
     std::size_t node_skipped_ = 0;

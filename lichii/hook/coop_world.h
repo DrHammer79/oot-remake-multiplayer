@@ -475,6 +475,16 @@ RestScan NodeRestWords(const std::function<std::optional<std::uint64_t>(std::uin
                        std::uint64_t node, const coop::protocol::Vec3& from,
                        const coop::protocol::Vec3& to, bool untouched = false);
 
+// Row 244: right after the node's own start ran on a followed block, where its push now goes. The start sets the
+// target (+0xfc) to a cell of the grid from its base (0xd6ef80), not to the place: a block another player left
+// between cells (a push or pull let go mid-step: the Deku basement block at z 44.85 between the cells 44.1 and 45.6
+// of its base 47.1, hs-block-grip) gets a target up to half a cell away, and the node then slides it there by itself
+// in our game only ("jumped back toward its old rest"; under our Link's grip in piscesgamer97's Dodongo's Cavern
+// block room). Non-empty `writes`: the start and target words to set to `to` so the node is idle where the block
+// rests (both places at `to`, as a node entered there); `where` names the moved one(s). Empty: already there.
+RestScan NodeTargetAtRest(const std::function<std::optional<std::uint64_t>(std::uint64_t)>& read,
+                          std::uint64_t node, const coop::protocol::Vec3& to);
+
 // Breaks and moves of placed world objects, shared by placement hash
 // (docs/world.md, "Broken for everyone" and "Moved for everyone"). Beside the
 // enemy sharing, which still carries a breakable's life: this adds what that
