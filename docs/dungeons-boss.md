@@ -583,6 +583,13 @@ one turn rule; it now also waits for the boss's own attack edge, read in the own
 - *The stall count goes on (`Table::Hold`)* through the re-choice's own short move, so a boss stuck after a forced
   hand-over reaches 3 re-choices and the server's stall rule frees its fight lock (row 149).
 - Each turn is logged by the server: `boss turns: <actor> of player N: its attack ended: to player M (turn K)`.
+- Every owner change of a boss (or a boss group's root) or a battle manager is logged by the server with the rule that made it
+  (row 222 follow-up, review-01111-b): `hand-over: <actor> (group G) player N -> player M: <why>`, for example `its
+  owner is unfit (dead 0 s)`, `its owner's game has not begun the fight (unready: intro or event)`, `a turn: its attack
+  ended`, `a stun by a copy (issue 150)`, `the near rule ...`, `its owner let go of it ...`; ` (the owner did not
+  answer)` is added when the change came without the owner's answer. In the first hs-twinrova-orders run (20261122-111320)
+  the two unlogged hand-overs were read from the games' logs: A still in its intro event (unready) -> B; B dead
+  (`DreamWorld_GameOver`) -> A. Both are those rules, not a bug.
 - Solo or idle: no other fit player, no turn; the hook reads attacks only to send them.
 
 **Every boss checked for the edge and for a phase change in a turn.** The edge is the generic read above (the same
