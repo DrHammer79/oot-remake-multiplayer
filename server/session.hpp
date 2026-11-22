@@ -137,6 +137,11 @@ struct SessionConfig {
   // unreliable 3 and 4. The protocol's own rates (60 samples and a few other
   // messages a second) stay well under them.
   std::uint32_t reliable_per_second = 60;
+  // A player's reliable messages (channels 0 to 2, not PING) over its rate wait in order and are handled as its
+  // budget refills, at most this many; past that they are dropped and counted (rate_limited). Before, every one over
+  // the rate was dropped: ENet had acknowledged it, so its sender never sent it again, and a flag, a kill, a break
+  // or a hand-over answer was lost for good (report 138's host: 137 in one 4-player session).
+  std::size_t reliable_queue_max = 4096;
   std::uint32_t unreliable_per_second = 240;
   // VOICE_FRAME (channel 5) has a budget of its own, so talking never takes
   // the poses' and samples' messages: 50 frames a second, bursts of twice.
@@ -380,7 +385,8 @@ struct Stats {
   std::uint64_t before_welcome = 0;  // anything but HELLO before WELCOME
   std::uint64_t repeated_hello = 0;  // HELLO from a player already in
   std::uint64_t after_refused = 0;   // packets from a connection being closed
-  std::uint64_t rate_limited = 0;    // over a player's message rate
+  std::uint64_t rate_limited = 0;    // over a player's message rate, dropped
+  std::uint64_t rate_deferred = 0;   // reliable ones over a player's rate, kept and handled later (in order)
   std::uint64_t relayed = 0;         // messages passed on (once per message)
   // Proximity voice. Relayed ones count in relayed too.
   std::uint64_t voice_relayed = 0;      // VOICE_FRAME passed on (once per frame)
@@ -650,6 +656,13 @@ class Session {
     std::uint64_t refused_at = 0;
     // Message budgets for the rate limits, in messages, refilled with time.
     double reliable_budget = 0;
+    // Reliable messages over the rate, in the order they came (reliable_queue_max).
+    struct Deferred {
+      std::uint8_t channel = 0;
+      protocol::Message message;
+      std::size_t bytes = 0;
+    };
+    std::deque<Deferred> deferred;
     double unreliable_budget = 0;
     double voice_budget = 0;
     // Proximity voice: the speakers this player hears now, by number, and
@@ -869,6 +882,11 @@ class Session {
   std::vector<ConnectionId> local_players(ConnectionId parent) const;
   // Whether a and b are one game's (the same connection, or its local players).
   bool same_game(ConnectionId a, ConnectionId b) const;
+  // After the rate check (on_player_message, or a deferred one from tick).
+  void dispatch_player_message(ConnectionId id, Connection& c, std::uint8_t channel, protocol::Message& message,
+                               std::uint64_t now_us);
+  // Handles a player's deferred reliable messages while its budget allows (tick).
+  void run_deferred(std::uint64_t now_us);
   void on_player_message(ConnectionId id, Connection& c, std::uint8_t channel,
                          protocol::Message& message, std::size_t bytes, std::uint64_t now_us);
   void on_join_partner(ConnectionId id, Connection& c, protocol::JoinPartner& j);

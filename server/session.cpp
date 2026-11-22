@@ -660,10 +660,60 @@ void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t cha
       (std::holds_alternative<LocalSample>(message) &&
        local_player(id, std::get<LocalSample>(message).seat)) ||
       (std::holds_alternative<LocalMessage>(message) && local_player(id, std::get<LocalMessage>(message).seat));
-  if (!host_save && !seat_envelope && !within_rate(c, channel, bytes, now_us)) {
-    ++stats_.rate_limited;
+  // Reliable messages wait in order behind any already waiting, and over the rate they wait instead of being dropped
+  // (reliable_queue_max). PING is answered at once or not at all (a late PONG would skew the clock), unreliable ones
+  // are dropped as before.
+  const bool waits = channel <= kChannelOwnership && !std::holds_alternative<Ping>(message) && !host_save &&
+                     !seat_envelope;
+  const auto defer = [&] {
+    if (c.deferred.size() >= config_.reliable_queue_max) {
+      ++stats_.rate_limited;
+      return;
+    }
+    ++stats_.rate_deferred;
+    c.deferred.push_back({channel, std::move(message), bytes});
+  };
+  if (waits && !c.deferred.empty()) {
+    defer();
     return;
   }
+  if (!host_save && !seat_envelope && !within_rate(c, channel, bytes, now_us)) {
+    if (waits) {
+      defer();
+    } else {
+      ++stats_.rate_limited;
+    }
+    return;
+  }
+  dispatch_player_message(id, c, channel, message, now_us);
+}
+
+void Session::run_deferred(std::uint64_t now_us) {
+  std::vector<ConnectionId> waiting;
+  for (const auto& [id, c] : connections_) {
+    if (!c.deferred.empty()) waiting.push_back(id);
+  }
+  for (const ConnectionId id : waiting) {
+    // Each step may remove players (a LEAVE): look the connection up again every time.
+    for (;;) {
+      auto it = connections_.find(id);
+      if (it == connections_.end() || it->second.deferred.empty()) break;
+      Connection& c = it->second;
+      if (c.state != State::joined) {
+        c.deferred.clear();
+        break;
+      }
+      Connection::Deferred& d = c.deferred.front();
+      if (!within_rate(c, d.channel, d.bytes, now_us)) break;
+      Connection::Deferred next = std::move(d);
+      c.deferred.pop_front();
+      dispatch_player_message(id, c, next.channel, next.message, now_us);
+    }
+  }
+}
+
+void Session::dispatch_player_message(ConnectionId id, Connection& c, std::uint8_t channel, Message& message,
+                                      std::uint64_t now_us) {
   if (const auto* ping = std::get_if<Ping>(&message)) {
     send(id, kChannelSession, Pong{ping->sender_time_us, now_us});
     return;
@@ -3507,6 +3557,7 @@ void Session::remove_player(ConnectionId id, LeaveReason reason, std::uint64_t n
 }
 
 void Session::tick(std::uint64_t now_us) {
+  run_deferred(now_us);  // reliable messages that waited for their sender's rate
   // Wrong-password counts whose window and block are both over.
   for (auto it = wrong_guesses_.begin(); it != wrong_guesses_.end();) {
     const WrongGuesses& g = it->second;

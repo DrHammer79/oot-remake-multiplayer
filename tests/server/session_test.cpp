@@ -737,13 +737,16 @@ TEST_CASE("a player flooding reliable messages is held to the rate, after a burs
   h.join(1, "Link");
   h.join(2, "Zelda");
   h.clear();
-  // 60 a second with bursts of 120: 200 at once lets 120 through.
+  // 60 a second with bursts of 120: 200 at once lets 120 through; the other 80 wait (reliable: never dropped
+  // under reliable_queue_max, row 164 follow-up).
   for (int i = 0; i < 200; ++i) h.receive(1, Chat{0, "spam"}, kChannelSession);
   CHECK(h.to(2).size() == 120);
-  CHECK(h.session.stats().rate_limited == 80);
-  // Half a second later, 30 more.
+  CHECK(h.session.stats().rate_limited == 0);
+  CHECK(h.session.stats().rate_deferred == 80);
+  // Half a second later, 30 more: the waiting ones first, the new ones wait behind them.
   h.clear();
   h.now += 500'000;
+  h.session.tick(h.now);
   for (int i = 0; i < 100; ++i) h.receive(1, Chat{0, "spam"}, kChannelSession);
   CHECK(h.to(2).size() == 30);
   // PINGs share the budget, so a flood of them gets no flood of PONGs.
@@ -755,6 +758,32 @@ TEST_CASE("a player flooding reliable messages is held to the rate, after a burs
   h.receive(1, TestPayload{1, {}}, kChannelPlayerSamples);
   CHECK(h.to(1).size() == 1);
   CHECK(h.to(2).size() == 1);
+}
+
+TEST_CASE("row 164 follow-up: reliable messages over the rate wait in order and none is lost, up to reliable_queue_max") {
+  SessionConfig config;
+  config.reliable_queue_max = 50;
+  Harness h(config);
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.clear();
+  // A burst of 120 goes at once, 50 wait, the rest past the queue are dropped and counted.
+  for (int i = 0; i < 200; ++i) h.receive(1, Chat{0, std::to_string(i)}, kChannelSession);
+  CHECK(h.to(2).size() == 120);
+  CHECK(h.session.stats().rate_deferred == 50);
+  CHECK(h.session.stats().rate_limited == 30);
+  // Over the next second the waiting ones go, in the order they came.
+  h.clear();
+  for (int i = 0; i < 10; ++i) {
+    h.now += 100'000;
+    h.session.tick(h.now);
+  }
+  std::vector<std::string> texts;
+  for (const auto& sent : h.to(2)) {
+    if (const auto* chat = std::get_if<Chat>(&sent.message)) texts.push_back(chat->text);
+  }
+  REQUIRE(texts.size() == 50);
+  for (int i = 0; i < 50; ++i) CHECK(texts[static_cast<std::size_t>(i)] == std::to_string(120 + i));
 }
 
 TEST_CASE("a player flooding samples is held to the unreliable rate") {
