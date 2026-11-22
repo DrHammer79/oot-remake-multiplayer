@@ -34,6 +34,100 @@ with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_
 [testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
 game's own control bridge, so they work wherever the windows are.
 
+## Bridge protocol
+
+The play-test bridge is a small part of the co-op module inside each game (`hookshot/src/coop_playtest.cpp`). An agent
+or MCP client drives one game per connection. It adds what Longshot's own control bridge lacks: **frame control** (the
+game holds still between calls). It also gives the co-op module's test commands and Longshot's input, shots and Link
+snapshot through one socket with one frame count.
+
+### Turning it on (off by default)
+
+Nothing listens unless the game is started with:
+
+| Switch | Value |
+|---|---|
+| `LICHII_COOP_PLAYTEST_PORT` | TCP port, 1024 to 65535. Unset, empty or `0`: the bridge is off and nothing listens |
+| `HOS_CONTROL` | Longshot's control socket (Linux) or pipe (Windows). The bridge forwards `input`, `shot` and the Link snapshot in `state` to it. Without it those answer `no_control` |
+| `LICHII_COOP_PLAYTEST_IDLE` | Seconds a hold may last with no command before the game resumes by itself (default 600, `0` never), in case the tester crashed |
+
+The shipped 0.11.12 kits (Windows and Linux) have the bridge built in but off. A tester turns it on for one game with
+these variables; `live.py start` sets them for each game it starts. The log says
+`coop: playtest: listening on 127.0.0.1:<port>` or `coop: playtest: off (<why>)`.
+
+**Ports, one per game:** player N on `5000 + N` (p1 5001, p2 5002, ... p4 5004). On test lane L: `5000 + 10*L + N`
+(lane 1: 5011, 5012). The MCP server takes the port as its argument.
+
+**Security:** bound to `127.0.0.1` only, never another address. One client at a time: a second connection gets one
+`busy` reply and is closed. It can do what Longshot's control bridge and the cheats panel can do (move Link, warp, set
+flags, give items), so it is for test copies with a throwaway save.
+
+### Messages
+
+One JSON object per line (UTF-8, `\n`), at most 64 KB a line. A request has `cmd` and an optional `id` (any JSON value,
+given back). Requests are answered in order, one reply each. Every reply carries:
+
+| Field | Meaning |
+|---|---|
+| `id` | The request's `id`, or `null` |
+| `ok` | `true`, or `false` with `error` (a code below) and `message` (for a person) |
+| `frame` | The game's frame count: calc frames since the game started (the module's per-frame hook). It is what `step` counts and what lines up two games' dumps |
+| `paused` | Whether the game is held now |
+
+Error codes: `bad_request` (unknown `cmd`, a missing or bad field), `busy` (another client), `no_control`
+(`HOS_CONTROL` unset or unreachable), `not_in_play` (no Link: title, file select, a load), `timeout`, `failed` (the
+game refused; `message` says why).
+
+```
+> {"id":1,"cmd":"hello"}
+< {"id":1,"ok":true,"frame":5321,"paused":false,"protocol":1,"module":"0.11.12","control":true,"coop":"connected"}
+```
+
+### Frame control
+
+The game holds inside its own per-frame hook: the calc thread waits there before the frame's update, so a held game
+does not advance at all (no Link, no enemies, no timers). The window, the sound thread, Longshot's control bridge and
+the co-op connection keep running. The other game's puppet of this player stands still while it is held. A tester
+holds **both** games and steps them in turn.
+
+| Command | Fields | Does |
+|---|---|---|
+| `pause` | | Holds the game at its next frame. Replies once it is held |
+| `resume` | | Lets it run in real time again |
+| `step` | `frames` (1 to 3600, default 1) | Lets exactly that many frames run, then holds. Replies when held again, with `from` (`frame - from == frames`). A running game is held first |
+
+### Commands
+
+| Command | Fields | Does / replies |
+|---|---|---|
+| `state` | | The state below. Does not advance the game |
+| `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
+| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs until Link is in that scene with no event or load (or the timeout), then holds. Replies with the `state` |
+| `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
+| `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give`, inside the held frame. Replies with what was given |
+| `dump` | `tag` (letters, digits, `-` and `_`) | Writes `<dump folder>/<tag>.json` with `frame`, `tag`, the `state` and every shared flag (the checkpoint's lists), inside the held frame. Replies with `path` and the flag count |
+| `shot` | `path` (optional PNG path) | A screenshot through Longshot's bridge. A held game runs 1 frame so a picture is presented (the reply's `advanced`: frames run, usually 1). Replies with `path`, `width`, `height` |
+
+### State
+
+```
+{"frame":5400,"paused":true,"scene":"KokiriForest_Child","room":null,"pos":[-7.5,0.0,71.1],"facing":90.0,
+ "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk",
+ "equips":{"sword":"KokiriSword","shield":"DekuShield","tunic":"Kokiri","boots":"Normal"},
+ "inventory":{"Slingshot":30,"DekuStick":10,"DekuNuts":20},"coop":{"state":"connected","players":2},
+ "snapshot_frame":5400}
+```
+
+`scene`, `pos`, `facing`, `camera`, `life`, `max_life`, `rupees`, `age`, `event`, `loading` and `prompt` are
+Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
+quarter hearts. `snapshot_frame` is the frame it was taken at (Link's last update; on a title, pause or load it is
+older than `frame`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
+stays `null` until the room is found in memory.
+
+Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
+angle `w - camera` (the sign is settled by the LANE1 proof run; `walk_to` learns it from how Link moves). The camera turns as Link walks, so steer in short `input` steps (5 to 10 frames) and read `camera`
+again each time.
+
 ## On a test lane: the lock and the watchdog
 
 `live.py start --lane N` takes the lane's game pair (`<kit root>\ls\laneN-A` / `-B`), its server port and its control
@@ -59,9 +153,9 @@ or tests while it runs.
 
 ## Rules for a tester
 
-- The games run in real time between steps: the bridge has no frame step yet. A step's own lines are what Link
-  does; between steps he stands still and the rest of the world goes on (enemies included). Put the moves that must
-  happen together in one `act`.
+- With the play-test bridge on ([Bridge protocol](#bridge-protocol)) the games are held between calls: nothing
+  happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
+  must happen together in one `act`.
 - Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
@@ -80,8 +174,8 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 
 ## Not there yet
 
-- **Frame step.** Pausing the game between steps (so a slow tester can play real-time fights) needs the control
-  bridge to hold the game loop: a change in the recomp's bridge, not the module.
+- **Frame step in a game.** The play-test bridge holds the game in the module ([Bridge protocol](#bridge-protocol));
+  that is not proven in a game yet. The LANE1 proof run for 0.11.12 checks it first.
 - **Enemies and owners in the state.** The state has Link's side only. The module's debug walk already reads every
   actor's name, place, life and animation, and the objects sync knows each one's owner; a `dump` of those beside the
   flags is the next step (then the checker compares positions and owners too).
