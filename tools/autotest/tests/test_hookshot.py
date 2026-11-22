@@ -863,6 +863,7 @@ class RunTest(unittest.TestCase):
             self.assertEqual([p.env["BOTH"] for p in started], ["1", "1"])
             # the play-test bridge on, each game on its own port: A = p1 = base + 1, B = p2 = base + 2
             self.assertEqual([p.env["LICHII_COOP_PLAYTEST_PORT"] for p in started], ["5011", "5012"])
+            self.assertEqual([p.env["LICHII_COOP_CHEATS"] for p in started], ["1", "1"])   # give needs it
             self.assertEqual([p.env["LICHII_COOP_TEST_OWN_SAVE"] for p in started], ["1", "1"])   # each game its own save
             # no crash ask on the title to take the load's A presses (TEST_GAME_DEFAULTS; smoke hs-players, kit-0119)
             self.assertEqual([p.env["LICHII_COOP_PROBLEM_ASK"] for p in started], ["0", "0"])

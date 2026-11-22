@@ -1180,6 +1180,7 @@ def run(a):
             if a.playtest_ports:
                 # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
                 env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
+                env.setdefault("LICHII_COOP_CHEATS", "1")   # the bridge's give goes through the cheats queue
             for kv in a.env:
                 k, v = kv.split("=", 1)
                 if k[:2] in ("A:", "B:"):
@@ -1392,7 +1393,8 @@ def main(argv=None):
     add_renderer_options(r)
     r.add_argument("--pipe", help="default coop-auto (a lane: its own)")
     r.add_argument("--playtest-ports", type=int, default=0, metavar="BASE",
-                   help="turn each game's play-test bridge on: A on BASE+1, B on BASE+2 (docs/playtest.md)")
+                   help="turn each game's play-test bridge on: A on BASE+1, B on BASE+2, with LICHII_COOP_CHEATS=1 "
+                        "for its give (docs/playtest.md)")
     add_test_delay_options(r)
     r.add_argument("--kit-a", help="start game A through this kit's own start (play.ps1 choose -Hookshot; its "
                                    "hookshot/game-folder.txt names --game-a): tools/autotest/kit_pair.py")
