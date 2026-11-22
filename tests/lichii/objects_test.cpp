@@ -8119,6 +8119,7 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
     // (within kClaimDistance, half a metre off): it may be the director's copy, so it waits; once the director's
     // copy is bound it is not, and it is deleted. One decoy on that seat, A's.
     b.Receive(seat_left);
+    Tick(b, 175 * kMs, {meg_b}, 2);  // (a received spawn is taken in this Tick, after its new actors)
     Tick(b, 200 * kMs, {meg_b, Enemy(0x220, ~0ULL, 1, -2.5f, decoy)}, 2);
     CHECK_FALSE(b.IdOf(0x220));
     CHECK(b.Removes().empty());
