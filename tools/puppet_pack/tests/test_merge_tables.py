@@ -742,6 +742,44 @@ class MergeRowsBetweenModsTest(MergeRowsTest):
         mt.undo(self.mods, self.say)
         self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", AI)), seed)
 
+    def test_the_screens_table_has_no_row_id_its_rows_are_keyed_by_name(self):
+        """The pack's Title_00 (Common added to its archives) and its CoopMenu_00 row, Character Select's CharacterMenu_00
+        row: all in the winner's UIScreen table, in the game's order then added rows, the winner's own rows kept."""
+        screens = "UIScreen.Product.111.rstbl.byml.zs"
+        title = {"ArchiveCategory": ["Title"], "Class": "UITitleScreen", "Name": "Title_00"}
+        other = {"ArchiveCategory": ["Common"], "Name": "Other_00"}
+        p = os.path.join(self.romfs, "RSDB", screens)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(zstandard.ZstdCompressor(write_content_size=True).compress(byml.dumps([title, other])))
+        title_common = dict(title, ArchiveCategory=["Title", "Common"])
+        coop = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CoopMenu_00", "Name": "CoopMenu_00"}
+        charsel = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CharacterMenu_00", "Name": "CharacterMenu_00"}
+        self.put_rows(PACK, [title_common, other, coop], screens)
+        self.put_rows(self.CS, [title, other, charsel], screens)
+        seed = self.put_rows(self.HAND, [title, other], screens)
+        self.assertEqual(self.run_all()[0], 0)
+        got = self.rows(self.HAND, screens)
+        self.assertEqual([r["Name"] for r in got], ["Title_00", "Other_00", "CoopMenu_00", "CharacterMenu_00"])   # (the pack's rows, then the others')
+        self.assertEqual(got[0]["ArchiveCategory"], ["Title", "Common"])
+        before = read(self.path(self.HAND, "romfs", "RSDB", screens))
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", screens)), before)   # (merged once: stamps hold)
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", screens)), seed)
+
+    def test_a_winner_that_changed_the_title_row_keeps_its_own(self):
+        screens = "UIScreen.Product.111.rstbl.byml.zs"
+        title = {"ArchiveCategory": ["Title"], "Name": "Title_00", "SortKey": 1}
+        p = os.path.join(self.romfs, "RSDB", screens)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(zstandard.ZstdCompressor(write_content_size=True).compress(byml.dumps([title])))
+        self.put_rows(PACK, [dict(title, ArchiveCategory=["Title", "Common"])], screens)
+        self.put_rows(self.HAND, [dict(title, SortKey=2)], screens)
+        self.run_all()
+        self.assertEqual(self.rows(self.HAND, screens), [dict(title, SortKey=2)])
+
     def test_the_other_order_gives_the_same_rows(self):
         self.both_mods()
         with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
