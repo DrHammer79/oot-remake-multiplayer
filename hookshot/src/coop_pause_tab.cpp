@@ -1804,6 +1804,9 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     }
     // (co-op's problem or hint as lines of text on the lines left, the release on the last when it is free: the hint
     // takes it when it needs it)
+    // (the why lines above ("Forward UDP 27510 to this PC", the server's words) were composed in English here and
+    // never went through add(), so they must be in the player's language before the wrap cuts them)
+    why = CoopI18n::Tr(why);
     const std::size_t left = lines.size() - at;
     if (!why.empty() && left > 0) {
         const bool all = release.empty() || Wrap(why, left, kListNameChars).size() >= left;

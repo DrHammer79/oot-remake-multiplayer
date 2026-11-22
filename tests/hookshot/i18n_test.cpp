@@ -815,6 +815,7 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hant, "Room  forest-4821") == "房間  forest-4821");
     CHECK(CoopI18n::Tr(hans, "Join Saria again") == "再次加入 Saria");
     CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
-    CHECK(CoopI18n::Tr(hans, "Co-op settings  < 1 of 3 >") == "联机设置  < 第1页，共3页 >");
-    CHECK(CoopI18n::Tr(hant, "Customize Link  < 4 of 4 >") == "自訂林克  < 第4頁，共4頁 >");
+    // (the short page header: the name column cuts at 30 bytes and the full "第1页，共3页" shape was cut off mid-word)
+    CHECK(CoopI18n::Tr(hans, "Co-op settings  < 1 of 3 >") == "联机设置  < 1/3 >");
+    CHECK(CoopI18n::Tr(hant, "Customize Link  < 4 of 4 >") == "自訂林克  < 4/4 >");
 }
