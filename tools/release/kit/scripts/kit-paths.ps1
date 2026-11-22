@@ -1031,6 +1031,29 @@ function Get-KitHookshotStamp([string]$Kit, [string]$Game = '') {
 # coop.ini and the options stay in the game folder).
 function Get-KitGameVariantRoot([string]$Kit) { return (Join-Path $Kit 'hookshot\game-variants') }
 
+# Rows 239/240 (black-join-0119): a game whose build-made files were being written when the window closed (a build, a
+# kept build put back, a copy from the game cache) still had the coop-built-from.txt of the build before it, so the next
+# start took the mixed files for that build: it kept them as that build for later and started them, and the world never
+# drew. Now coop-build-unfinished.txt goes into the game folder before anything writes those files and leaves only after
+# the new coop-built-from.txt is written: while it is there the game is never ready, never kept, and the module says so
+# on the title when the game is started some other way (coop_hookshot.cpp, kGameUnfinishedFile).
+$KitGameUnfinishedFile = 'coop-build-unfinished.txt'
+function Test-KitGameUnfinished([string]$Game) {
+    return [bool]$Game -and (Test-Path -LiteralPath (Join-Path $Game $KitGameUnfinishedFile))
+}
+# Before the game's build-made files are written ($What: what writes them, for the log and the next start's line).
+function Start-KitGameWrite([string]$Game, [string]$What) {
+    if (-not $Game) { return }
+    New-Item -ItemType Directory -Force -Path $Game | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $Game $KitGameUnfinishedFile),
+        "The co-op game was being written here ($What) and that did not finish. Start Squadala finishes it.`r`n")
+}
+# After the new coop-built-from.txt is written.
+function Complete-KitGameWrite([string]$Game) {
+    if (-not $Game) { return }
+    Remove-Item -LiteralPath (Join-Path $Game $KitGameUnfinishedFile) -Force -ErrorAction SilentlyContinue
+}
+
 # The stamp text as compared: line endings and trailing space do not count, plus the game's DLSS state (a game with
 # NVIDIA's runtime is kept apart: Test-KitHookshotDlss).
 function ConvertTo-KitVariantStamp([string]$Stamp, [bool]$Dlss) {
@@ -1076,6 +1099,8 @@ function Get-KitGameVariantFiles([string]$Game) {
 function Save-KitGameVariant([string]$Kit, [string]$Game, [int]$Keep = 3) {
     $stampFile = Join-Path $Game 'coop-built-from.txt'
     if (-not (Test-Path -LiteralPath $stampFile) -or -not (Get-KitHookshotExe $Game)) { return '' }
+    # (a write that did not finish: these files are not the build its stamp names, never kept as it)
+    if (Test-KitGameUnfinished $Game) { return '' }
     $files = @(Get-KitGameVariantFiles $Game)
     if (-not ($files | Where-Object { $_ -like '*longshot.exe' }) -or -not ($files -contains 'image.bin')) { return '' }
     $text = ConvertTo-KitVariantStamp ([System.IO.File]::ReadAllText($stampFile)) (Test-KitHookshotDlss $Game)
@@ -1211,6 +1236,12 @@ function Get-KitHookshotNeed([string]$Kit) {
     $have = if (Test-Path -LiteralPath $stampFile) { [System.IO.File]::ReadAllText($stampFile) } else { '' }
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
+    if (Test-KitGameUnfinished $game) {
+        # (rows 239/240: a build, put back or copy stopped half way; a kept build of exactly this stamp still goes back)
+        $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
+        if (Find-KitGameVariant $Kit $want $wantDlss) { return 'variant' }
+        return 'unfinished'
+    }
     if ($have -ne $want) {
         # (row 210: a build of exactly this stamp kept from before, e.g. a code mod switched back: put back in seconds)
         $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
@@ -2191,6 +2222,7 @@ function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnl
         'pin' { 'Your co-op game was built for another game version than this kit uses: it is built again (about 15 minutes; the PC stays usable).' }
         'patches' { 'This update changes the co-op game a little: updating it (a few minutes).' }
         'mods' { 'A mod''s code patches changed (a mod with an exefs folder put in, changed or taken out, or switched on the Mods tab): the co-op game is built again with them, about 5 to 25 minutes (the PC stays usable). This build is kept, and so is the one before it: switching that mod back later takes seconds.' }
+        'unfinished' { 'The last build of the co-op game was stopped before it finished (its window was closed), so the game would start with half of its files and could show only a black screen. It is finished now (about 5 to 45 minutes; the PC stays usable).' }
         'variant' { 'The co-op game was built before with the mods'' code patches as they are now (a mod with an exefs folder switched back on the Mods tab): that build is put back (seconds, no build).' }
         'module' { 'Putting the updated co-op and the puppet pack into the co-op game (seconds to a minute).' }
         'quarantine' { Get-KitHookshotQuarantineText }
@@ -2204,6 +2236,7 @@ function Get-KitHookshotNeedQuestion([string]$Need) {
         'game' { 'Set it up now?' }
         'moved' { 'Build it again now?' }
         'pin' { 'Update it now?' }
+        'unfinished' { 'Finish it now?' }
         default { '' }
     }
 }

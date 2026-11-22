@@ -100,6 +100,20 @@ try {
     Check ((Read-File (Join-Path $g 'user\save\slot0.bin')) -eq 'MY SAVE' -and (Read-File (Join-Path $g 'hookshot_coop.dll')) -eq 'MODULE') 'restore: saves and the module untouched'
     Check (-not @(Get-ChildItem -LiteralPath $g -Recurse -Filter '*.new' -File)) 'restore: no .new file left'
     Check ((Get-KitHookshotNeed $kit) -eq '') 'need: after the put back -> nothing'
+    # Rows 239/240: a write into the game that did not finish (the window closed during a build, a put back or a copy).
+    Start-KitGameWrite $g 'a build'
+    Check (Test-KitGameUnfinished $g) 'unfinished: marked before the game''s files are written'
+    Check ((Get-KitHookshotNeed $kit) -eq 'variant') 'need: unfinished with a kept build of this stamp -> variant (put back, no build)'
+    Check ((Save-KitGameVariant $kit $g) -eq '') 'save: half-written files are never kept as a build'
+    $keptCs = Find-KitGameVariant $kit $withCs $false
+    $keptStamp = Join-Path $keptCs 'stamp.txt'
+    $keptText = Read-File $keptStamp
+    Remove-Item -LiteralPath $keptStamp -Force
+    Check ((Get-KitHookshotNeed $kit) -eq 'unfinished') 'need: unfinished and nothing kept -> unfinished (a build), though the stamp matches'
+    Check ([bool](Get-KitHookshotNeedText 'unfinished') -and (Get-KitHookshotNeedQuestion 'unfinished') -eq 'Finish it now?') 'need text and question: unfinished'
+    Write-File $keptStamp $keptText
+    Complete-KitGameWrite $g
+    Check (-not (Test-KitGameUnfinished $g) -and (Get-KitHookshotNeed $kit) -eq '') 'unfinished: cleared after the new stamp -> nothing'
     # The plain build back: exefs_patches.txt goes (that build had none).
     Check ((Restore-KitGameVariant $plainDir $g) -and -not (Test-Path -LiteralPath (Join-Path $g 'exefs_patches.txt'))) 'restore: a build without code patches takes exefs_patches.txt away'
     Check ((Read-File (Join-Path $g 'longshot.exe')) -eq 'longshot.exe plain') 'restore: the plain exe'
@@ -126,7 +140,14 @@ try {
     # The build script keeps and puts back before its game cache and its build, and says why a build runs.
     $hb = [System.IO.File]::ReadAllText((Join-Path $scripts 'hookshot-build.ps1'))
     Check ($hb.IndexOf('Save-KitGameVariant $kit $Out') -gt 0 -and $hb.IndexOf('Save-KitGameVariant $kit $Out') -lt $hb.IndexOf('Find-KitHookshotCachedGame $gameWant')) 'build script: keeps the build before the game cache and the build'
-    Check ($hb -match 'Step "Building the game: \$\(Get-KitBuildWhyText \$stampWas \$gameWant\)') 'build script: the build step says why and how long'
+    Check ($hb -match 'else \{ Get-KitBuildWhyText \$stampWas \$gameWant \}' -and $hb -match 'Step "Building the game: \$why') 'build script: the build step says why and how long'
+    # Rows 239/240: every write into the game is marked first and cleared only after its stamp.
+    $mark = $hb.IndexOf("Start-KitGameWrite `$Out 'a build'")
+    Check ($mark -gt 0 -and $mark -lt $hb.IndexOf('$code = Invoke-MakeGame $buildArgs $buildLog') -and
+        $hb.IndexOf('Complete-KitGameWrite $Out', $hb.IndexOf('[System.IO.File]::WriteAllText($gameStamp, $gameWant)')) -gt 0) 'build script: the build marked before make_game, cleared after the stamp'
+    Check ($hb.IndexOf("Start-KitGameWrite `$Out 'a copy from the game cache'") -gt 0 -and $hb.IndexOf("Start-KitGameWrite `$Out 'a copy from the game cache'") -lt $hb.IndexOf('& robocopy $from $Out /E /XJD')) 'build script: the cache copy marked before robocopy'
+    Check ($hb.IndexOf("Start-KitGameWrite `$Out 'a copy from another kit'") -gt 0 -and $hb.IndexOf("Start-KitGameWrite `$Out 'a copy from another kit'") -lt $hb.IndexOf('& robocopy $from $Out /E /R:1')) 'build script: the copy from another kit marked before robocopy'
+    Check ($hb -match '-not \(Test-KitGameUnfinished \$Out\)') 'build script: an unfinished game is never ready'
 
     # --- Puppet packs, kept per characters ---------------------------------------------------------------
     $tools = Join-Path $tmp 'tools'
