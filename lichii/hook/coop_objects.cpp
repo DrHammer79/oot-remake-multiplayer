@@ -1602,8 +1602,8 @@ std::atomic<s32>& TheMaxLifeLowerTo() {
 }
 
 // Row 238: the walk saw our Link's own max at or under the hold's value (TakeMaxLifeLowerDone).
-std::atomic<bool>& TheMaxLifeLowerDone() {
-    static std::atomic<bool> done{false};
+std::atomic<s32>& TheMaxLifeLowerDone() {   // Link's own max the walk saw at or under the lower-to value; -1: none
+    static std::atomic<s32> done{-1};
     return done;
 }
 
@@ -4143,7 +4143,7 @@ private:
                     // Rows 136/137: the host's older save lowered MaxLife; row 181: a second pickup of a boss's one
                     // container was put back. The component follows it (never in the frame it was raised).
                     const s32 lower = TheMaxLifeLowerTo().load();
-                    if (lower >= 4 && max > 0 && max <= lower) TheMaxLifeLowerDone().store(true);  // row 238: already there
+                    if (lower >= 4 && max > 0 && max <= lower) TheMaxLifeLowerDone().store(max);  // row 238: already there
                     const auto lowered =
                         raised ? std::nullopt
                                : LoweredMaxLife(max, life, lower >= 0 ? std::optional<std::int32_t>(lower) : std::nullopt);
@@ -4153,7 +4153,7 @@ private:
                             memory_->Write32(value->first + 8, static_cast<u32>(*lowered->life));
                         }
                         memory_->Write32(value->second + 8, static_cast<u32>(lowered->max));
-                        TheMaxLifeLowerDone().store(true);  // row 238: the hold may end by its quiet time now
+                        TheMaxLifeLowerDone().store(lowered->max);  // row 238: the hold may end by its quiet time now
                         LOG_INFO(Core, "coop: objects: our Link's max life {} -> {} (MaxLife is held lower: the host "
                                        "loaded a save with fewer hearts, or a boss's one container was taken twice){}",
                                  max, lowered->max,
@@ -6168,8 +6168,9 @@ void AskRefill() {
     TheRefillAsked().store(true);
 }
 
-bool TakeMaxLifeLowerDone() {
-    return TheMaxLifeLowerDone().exchange(false);
+std::optional<std::int32_t> TakeMaxLifeLowerDone() {
+    const s32 seen = TheMaxLifeLowerDone().exchange(-1);
+    return seen >= 0 ? std::optional<std::int32_t>(seen) : std::nullopt;
 }
 
 void SetMaxLifeLowerTo(std::optional<std::int32_t> quarters) {

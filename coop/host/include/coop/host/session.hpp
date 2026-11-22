@@ -266,8 +266,8 @@ class Session {
     return watcher_ ? watcher_->reset_lowered(key) : std::nullopt;
   }
   // Emulator thread only: FlagWatcher::lowered_done (row 238).
-  void lowered_done(FlagKey key) {
-    if (watcher_) watcher_->lowered_done(key);
+  void lowered_done(FlagKey key, std::int32_t seen) {
+    if (watcher_) watcher_->lowered_done(key, seen);
   }
   // Emulator thread only: FlagWatcher::held_lower (rows 136/137 and 181).
   std::optional<std::int32_t> held_lower(FlagKey key) const {

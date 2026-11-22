@@ -285,6 +285,7 @@ void FlagWatcher::note_group(const FlagEntry& value, const FlagEntry* before) {
 void FlagWatcher::reset() {
   queue_.clear();
   reset_holds_.clear();  // rows 136/137: the old session's host's save
+  window_lowered_.clear();
   cap_holds_.clear();    // row 181: the old session's caps
   // Row 140: what was left to the game was the old session's group's.
   game_owned_.clear();
@@ -608,6 +609,13 @@ void FlagWatcher::take_origin(const FlagKey& key) {
   origin_.erase(o);
 }
 
+void FlagWatcher::hold_lowered(const FlagKey& key, std::int32_t low, std::int32_t had) {
+  ResetHold h{low, had};
+  // Row 238: MaxLife's live copy (Link's Life component) is lowered by the object walk: wait for its word.
+  h.awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;
+  reset_holds_[key] = h;
+}
+
 void FlagWatcher::apply_reset(FlagStore& store, const std::vector<FlagEntry>& flags) {
   if (!flags.empty()) group_known_ = true;
   for (const auto& entry : flags) {
@@ -624,9 +632,7 @@ void FlagWatcher::apply_reset(FlagStore& store, const std::vector<FlagEntry>& fl
     // of its higher one after that is still not progress.
     if (written || unwritten_.contains(key)) {
       if (had && had->kind == protocol::FlagKind::int32 && as_int(had->value) > as_int(entry.value)) {
-        reset_holds_[key] = ResetHold{static_cast<std::int32_t>(as_int(entry.value)),
-                                      static_cast<std::int32_t>(as_int(had->value))};
-        reset_holds_[key].awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;  // row 238: Link's Life component follows
+        hold_lowered(key, static_cast<std::int32_t>(as_int(entry.value)), static_cast<std::int32_t>(as_int(had->value)));
       } else if (had) {
         reset_holds_.erase(key);
       }
@@ -750,8 +756,24 @@ void FlagWatcher::end_window(FlagStore& store, std::vector<Outgoing>& out) {
     } else if (store.write_load_back(it->second)) {
       ++stats_.load_reverts;  // back to the group's value from before the load
       ++stats_.applied;
+      // Row 238: our own save has more of a max-rule value than the group (the host loaded an older one; a Game
+      // Over's Try Again): the game made Link from the save's higher max and writes it back; held as a host's save is.
+      if (now->kind == protocol::FlagKind::int32 && it->second.kind == protocol::FlagKind::int32 && store.is_max(key) &&
+          as_int(now->value) > as_int(it->second.value)) {
+        hold_lowered(key, static_cast<std::int32_t>(as_int(it->second.value)),
+                     static_cast<std::int32_t>(as_int(now->value)));
+      }
     }
   }
+  // The same for what was put back during the window (the diff's early write-back): the window has ended, so the
+  // holds made now outlive it.
+  for (const auto& [key, had] : window_lowered_) {
+    const auto g = group_.find(key);
+    if (g != group_.end() && g->second.kind == protocol::FlagKind::int32) {
+      hold_lowered(key, static_cast<std::int32_t>(as_int(g->second.value)), had);
+    }
+  }
+  window_lowered_.clear();
   if (role_ == FlagRole::host && !changed.empty()) {
     ++stats_.host_resets;
     reset_seen_ = true;
@@ -825,9 +847,8 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
         ++stats_.snapshot_exact;
         if (had && had->kind == protocol::FlagKind::int32 && entry.kind == protocol::FlagKind::int32 &&
             as_int(had->value) > as_int(entry.value)) {
-          reset_holds_[key] = ResetHold{static_cast<std::int32_t>(as_int(entry.value)),
-                                        static_cast<std::int32_t>(as_int(had->value))};
-          reset_holds_[key].awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;  // row 238: Link's Life component follows
+          hold_lowered(key, static_cast<std::int32_t>(as_int(entry.value)),
+                       static_cast<std::int32_t>(as_int(had->value)));
         }
       }
     }
@@ -1165,6 +1186,10 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
           if (store.write_load_back(group->second)) {
             ++stats_.load_reverts;
             ++stats_.applied;
+            if (now->kind == protocol::FlagKind::int32 && group->second.kind == protocol::FlagKind::int32 &&
+                store.is_max(key) && as_int(now->value) > as_int(group->second.value)) {
+              window_lowered_[key] = static_cast<std::int32_t>(as_int(now->value));  // row 238: held at the window's end
+            }
             it->second = group->second;
             continue;
           }

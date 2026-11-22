@@ -365,8 +365,12 @@ class FlagWatcher {
   static constexpr int kLowerWaitFrames = 30 * 60;  // row 238: how long a hold waits for the object walk
   // Row 238: the object walk saw our Link's own max at or under the hold's value (it lowered it, or it was):
   // the hold may end by its quiet time now. Emulator thread.
-  void lowered_done(FlagKey key) {
-    if (const auto it = reset_holds_.find(key); it != reset_holds_.end()) it->second.awaiting_walk = false;
+  // `seen` is Link's own max the walk saw (or lowered it to): only a value at or under THIS hold's counts, so an
+  // answer for an earlier, higher hold (replaced since) does not end the wait of the new one.
+  void lowered_done(FlagKey key, std::int32_t seen) {
+    if (const auto it = reset_holds_.find(key); it != reset_holds_.end() && seen <= it->second.low) {
+      it->second.awaiting_walk = false;
+    }
   }
   static constexpr std::uint64_t kDoubledGainFrames = 5 * 60;
   static constexpr std::int32_t kMaxDoubledGains = 4;
@@ -646,6 +650,11 @@ class FlagWatcher {
     bool awaiting_walk = false;
     int waited = 0;
   };
+  // Row 238: a max-rule int the group's value was put back over in a load window (a guest's own save with more than the
+  // group has): the value our game had, made a ResetHold when the window has ended (a window's start clears holds).
+  std::map<FlagKey, std::int32_t> window_lowered_;
+  // The one place that arms the hold for a value lowered from `had` to `low` (join, host save, guest's own load).
+  void hold_lowered(const FlagKey& key, std::int32_t low, std::int32_t had);
   std::map<FlagKey, ResetHold> reset_holds_;  // reset_lowered
   // Rows 136/137: a rise of a held key (diff); true when handled (not sent).
   bool hold_reset(FlagStore& store, FlagKey key, const protocol::FlagEntry& before, const protocol::FlagEntry& now,
