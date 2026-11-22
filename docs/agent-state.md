@@ -25,6 +25,8 @@ Branch `char-ages`, local and not yet pushed.
 - Open: handle the new request kind in `hookshot/src/coop_pause.cpp`; read the pickable characters from the mod's
   `characters.json`, filtered to the files co-op knows; pause menu tests; docs in [mods.md](mods.md) and
   [puppet.md](puppet.md); a game check (a pick per age switches at the Master Sword); then a pull request.
+- Wish: the picks belong on the Characters screen. Today the picker sets the current age's pick; the Settings rows
+  set either age.
 
 ## Planned: Character Select v0.2.2 in the kit
 
@@ -39,8 +41,7 @@ Branch `char-ages`, local and not yet pushed.
 - Report: an adult Zelda's back hair flips in front of her face after a spin attack.
 - Not reproduced in game yet: charged, quick and running spins, with the Master and Kokiri swords, on flat ground.
 - Cause, as far as the code shows: her cloth config lacks the guard that the NPC hair code has. The guard resets
-  the cloth when the head-to-hair angle goes past 80 degrees. The range of the back hair is also larger than the
-  NPC's.
+  the cloth when the head-to-hair angle goes past 80 degrees. Her back hair's max distance is 60.
 - The fix belongs to the mod author: add the guard or lower the range. We wait for exact repro steps before we
   report it.
 
@@ -59,8 +60,9 @@ Material for a submission to the mod author and to the Squadala community. Nothi
 
 ## Open reports for co-op
 
-- Customize colours do not reach Character Select characters on the player's own model. Co-op dresses only Link:
-  `DressCharacters` in `hookshot/src/coop_hookshot.cpp` returns early when a Character Select model is shown.
+- Customize colours do not reach Character Select characters on the player's own model. Co-op dresses only Link's
+  own eyes and hair: `LinkOnly` in `lichii/hook/coop_char_colours.h` gives nothing when a Character Select model is
+  shown (`ShownCharacter() != 0`, called from `DressCharacters` in `hookshot/src/coop_hookshot.cpp`).
 - The Cow's run animation (see A above).
 
 ## Deferred engine items
