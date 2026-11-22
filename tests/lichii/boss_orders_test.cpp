@@ -303,7 +303,7 @@ TEST_CASE("made ours: our manager's skipped orders go into its sister first, and
     CHECK(Frame(t, g).empty());
 }
 
-TEST_CASE("a new game drops the block, the parts and a call in flight; Reset does the same") {
+TEST_CASE("a new game drops the block, the parts and a call in flight, and Reset does the same") {
     constexpr std::uint64_t kMain2 = 0x90020000;
     Table t;
     FakeGuest g;
