@@ -11,7 +11,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
-if (-not $Server) { $Server = [System.IO.Path]::GetFullPath((Join-Path $here '..\..\..\integrate-0112\build\server\coop_server.exe')) }
+if (-not $Server) { $Server = [System.IO.Path]::GetFullPath((Join-Path $here '..\..\..\coop-kit\ls\kit-A\server\coop_server.exe')) }
 $repo = [System.IO.Path]::GetFullPath((Join-Path $here '..\..'))
 $py = Join-Path $repo '..\tools-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $py)) { $py = Join-Path $repo '..\oot-remake-recomp\.venv\Scripts\python.exe' }
@@ -25,10 +25,10 @@ function Get-GameDir([string]$Kit) {
 }
 function Invoke-Run([string]$Scenario) {
     Write-Host "== $Scenario"
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $runPs1 -Runtime hookshot -Lane 1 -Kit "$KitA,$KitB" -Scenario $Scenario -Timeout $Timeout -Server $Server
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $runPs1 -Runtime hookshot -Lane 1 -Scenario $Scenario -Timeout $Timeout -Server $Server
     Write-Host "== $Scenario exit $LASTEXITCODE"
 }
-$base = Join-Path (Get-GameDir $KitB) 'autotest-save'
+$base = Join-Path $KitB 'autotest-save'   # lane1-B is the game folder itself
 $keep = Join-Path $coopKit 'proof-join-hearts-238-save'
 Invoke-Run 'hs-join-hearts-238'
 if (Test-Path -LiteralPath $keep) { Remove-Item -LiteralPath $keep -Recurse -Force }

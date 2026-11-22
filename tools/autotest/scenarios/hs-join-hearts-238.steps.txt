@@ -18,7 +18,8 @@ load A B
 sleep 20
 shot j-before
 server stop
-sleep 10
+sleep 25   # B notices the loss only after ~12.5 s of silence (run 083315: its give went through first and A rose too)
+lines b-lost B min=1 connection lost; reconnecting
 play B hs-join-hearts-238.B.txt
 shot j-offline
 server start
