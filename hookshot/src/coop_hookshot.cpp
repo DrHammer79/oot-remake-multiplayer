@@ -815,7 +815,8 @@ const CoopDraw::MapShown* MapScene(bool camera, std::uint8_t self) {
         return nullptr;
     }
     const auto menu = CoopMapPage::MenuState();
-    const auto page = CoopMapPage::Shown(capture->dungeon);
+    // (tabs-overhaul-01110 (c): not over our - tabs, where the - menu still counts the Map as its page)
+    const auto page = CoopPauseTab::OwnMinusPageShown() ? std::nullopt : CoopMapPage::Shown(capture->dungeon);
     m.minimap.reset();
     // (row 199: also while the pause menu's tab strip is up, any page: patch 0018's menu_open is a screen that had the
     // mouse, which a mod's page such as Character Select's never has, so the marks drew over it. The Map page: m.page)

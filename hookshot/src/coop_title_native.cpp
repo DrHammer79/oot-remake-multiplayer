@@ -101,7 +101,11 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
         const int row = shown[static_cast<std::size_t>(l.top + b)];
         l.rows[static_cast<std::size_t>(b)] = row;
         l.texts[static_cast<std::size_t>(b)] = RowText(v.rows[static_cast<std::size_t>(row)]);
-        l.dim[static_cast<std::size_t>(b)] = v.rows[static_cast<std::size_t>(row)].fixed;
+        const CoopPauseMenu::Row& r = v.rows[static_cast<std::size_t>(row)];
+        l.dim[static_cast<std::size_t>(b)] = r.fixed;
+        if (l.toggle < 0 && (r.cell == 0 || r.cell == 1) && !r.cells[0].empty() && !r.cells[1].empty() && !r.fixed) {
+            l.toggle = b, l.toggle_name = r.name, l.toggle_cells = r.cells, l.toggle_cell = r.cell;
+        }
     }
     // (Back right under the page's last row, the buttons after it not shown; never under the third button: with two
     // shown, the game put its own word on the second, "Join" for our Back. A page of one row had Back three rows

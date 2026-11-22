@@ -1144,6 +1144,33 @@ try {
         Write-File (Join-Path $csDir 'characters.json') $csJsonN
         Write-File (Join-Path $csDir 'romfs\Model\Player_Child.Player_Child.bfres.zs') 'link'
         Check ((Get-KitCharacterSelectSeen $pm) -eq '') 'Character Select seen: the default part alone (no NPC model) counts as no characters, as the pack tool (no remake loop on a UI-only kit)'
+        # Co-op's own Characters tab (0.11.10): its code patch in the pack folder unless his mod (default part or full)
+        # has code of his; out when the pack left the tab out (no build loop). As build.py charsel_native_wanted.
+        $nk = Join-Path $cm '..\native-kit'
+        $nSrc = Join-Path $nk 'tools\puppet_pack\charsel\data\charsel-native.ips'
+        Write-File $nSrc 'IPS32EEOF'
+        $nMod = Split-Path -Parent $pm
+        $nDst = Join-Path $nMod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+        $csExefs = Join-Path $csDir 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+        $hadCode = Test-Path -LiteralPath $csExefs
+        if (-not $hadCode) { Write-File $csExefs 'his' }
+        $r1 = Sync-KitCharselNativePatch $nk $nMod
+        Check ($r1 -eq '' -and -not (Test-Path -LiteralPath $nDst)) "Characters tab: his default part with his code: ours stays out [$r1]"
+        Remove-Item -LiteralPath $csExefs -Force
+        $r2 = Sync-KitCharselNativePatch $nk $nMod
+        $r3 = Sync-KitCharselNativePatch $nk $nMod
+        Check ($r2 -eq 'in' -and $r3 -eq '' -and (Read-File $nDst) -eq 'IPS32EEOF') "Characters tab: no code of his: ours in, once [$r2 $r3]"
+        $nJson = Join-Path $nMod 'coop_puppet.json'
+        $nHad = Test-Path -LiteralPath $nJson
+        if (-not $nHad) {
+            Write-File $nJson '{"charsel_native": []}'
+            $r4 = Sync-KitCharselNativePatch $nk $nMod
+            Check ($r4 -eq 'out' -and -not (Test-Path -LiteralPath $nDst)) "Characters tab: the pack left it out: ours out [$r4]"
+            Remove-Item -LiteralPath $nJson -Force
+        }
+        Remove-Item -LiteralPath $nDst -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $nk -Recurse -Force
+        if ($hadCode) { Write-File $csExefs 'his' }
         Write-File (Join-Path $csDir 'romfs\Model\Player_Child_C005.Player_Child.bfres.zs') 'm'
         Write-File (Join-Path $csDir 'romfs\Model\Player_Adult_C005.Player_Adult.bfres.zs') 'm'
         $seenFull = 'OoT Character Select|62574416|fd7bbfa9000100b40b2c40b96b1d0051|5=7:Child+Adult'
