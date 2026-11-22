@@ -207,6 +207,8 @@ CZ = [("cz_head (HEAD_CALL)", 0x804D756C, 0x804D7570), ("cz_frame (FRAME_SITE)",
 SHIFT = 0x8001FF00
 def npc(rel):
     r = rel.replace("\\", "/")
+    if re.match(r"romfs/Tex/([^/]*_Player_|Angin_Tile_)", r, re.I):
+        return False   # Link own textures, named by his kept Link models (row 242; kit-paths.ps1 Test-KitCharacterSelectNpcFile)
     return bool(re.match(r"romfs/(Tex|Phive|Sound)/", r, re.I) or re.match(r"romfs/Model/Player_(Adult|Child)_C\d{3}\.", r, re.I)
                 or re.match(r"romfs/Model/Player_Dark_", r, re.I) or r.lower() == "romfs/pack/actor/enemy_middleboss_darklink.pack.zs")
 def records(d):
@@ -290,7 +292,7 @@ elif cmd == "complete":
                 p = os.path.join(r, n)
                 if npc(os.path.relpath(p, new)):
                     os.remove(p)
-        for d in ("Tex", "Phive", "Sound"):
+        for d in ("Phive", "Sound"):   # (romfs/Tex goes file by file above: Link own textures stay)
             shutil.rmtree(os.path.join(romfs, d), ignore_errors=True)
     ex = os.path.join(new, "exefs")
     code = sorted(n for n in os.listdir(ex) if n.lower().endswith(".ips") and os.path.isfile(os.path.join(ex, n))) if os.path.isdir(ex) else []
@@ -395,7 +397,7 @@ charsel_step() {
     fi
     part=ui
     [[ $choice == yes ]] && part=full
-    want="$rel $zsha $osha ${isha:--} $part cz1"
+    want="$rel $zsha $osha ${isha:--} $part cz2"   # (cz2, row 242: the default part keeps Link own textures; an older ui copy is never derived from)
     local what='the Characters page (NPC characters not downloaded)'
     [[ $part == full ]] && what='with its NPC characters'
     if [[ -d $dir && ! -f $dir/coop-charsel.txt ]]; then say "Character Select: your own copy in $dir is used as it is."; return 0; fi
@@ -404,7 +406,7 @@ charsel_step() {
     # The copy there, of this release (a 0.11.8 stamp, four fields: full): its part decides whether it can give the one wanted.
     local hf wf
     read -r -a hf <<<"$have"; read -r -a wf <<<"$want"
-    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( $part == ui || ${hf[4]:-full} == full ) ]]; then derive=1; fi
+    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( ${hf[4]:-full} == full || ( $part == ui && ${hf[5]:-} == cz2 ) ) ]]; then derive=1; fi
     dl=$B/charsel new=$CS_HOME/_$folder.new json=$dl/characters.json ips=''
     mkdir -p "$dl" "$CS_HOME"
     rm -rf "$new"
