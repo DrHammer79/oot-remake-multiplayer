@@ -180,6 +180,20 @@ foreach ($f in ($packSeen.Keys | Sort-Object)) { Copy-Text (Join-Path $packTool 
 foreach ($s in (Get-ChildItem -LiteralPath (Join-Path $packTool 'strings') -Filter '*.txt')) {
     Copy-Text $s.FullName (Join-Path $kit "tools\puppet_pack\strings\$($s.Name)")
 }
+# Every data folder a kit module reads (DATA = os.path.join(HERE, "<name>", "data"): charsel_ui.py's Characters tab,
+# coop_menu.py's CoopMenu_00): byte for byte (deltas and code patch checked by their hashes), never through Copy-Text.
+# The import walk above finds only .py files; a module without its data makes no tab on the players' PCs.
+foreach ($f in ($packSeen.Keys | Sort-Object)) {
+    foreach ($m in [regex]::Matches([IO.File]::ReadAllText((Join-Path $packTool $f)), 'os\.path\.join\(HERE,\s*"(\w+)",\s*"data"\)')) {
+        $sub = $m.Groups[1].Value
+        $dataDir = Join-Path $packTool "$sub\data"
+        if (-not (Get-ChildItem -LiteralPath $dataDir -File -ErrorAction SilentlyContinue)) { throw "tools\puppet_pack\$sub\data (read by $f) is not in the repo" }
+        New-Item -ItemType Directory -Force -Path (Join-Path $kit "tools\puppet_pack\$sub\data") | Out-Null
+        foreach ($s in (Get-ChildItem -LiteralPath $dataDir -File)) {
+            Copy-Item -LiteralPath $s.FullName -Destination (Join-Path $kit "tools\puppet_pack\$sub\data\$($s.Name)") -Force
+        }
+    }
+}
 
 # The Nucleus Co-op handler (split screen on one PC; docs/play-lan.md) and its few steps.
 Copy-Text (Join-Path $repo 'tools\nucleus\OoTCoop.js') (Join-Path $kit 'nucleus\OoTCoop.js')

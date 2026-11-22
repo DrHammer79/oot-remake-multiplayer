@@ -117,11 +117,16 @@ done
 for s in "$pack"/strings/*.txt; do   # ui_pack.py's words for the game's menus, read where the module is
     text "$s" "$kit/data/tools/puppet_pack/strings/$(basename "$s")"
 done
-# Co-op's own Characters tab's data (charsel_ui.py: manifest.json, the deltas, charsel-native.ips, which build.sh's
-# charsel_native_sync also puts into the game's build): byte for byte (checked by their hashes), never through text.
-[[ -f $pack/charsel/data/manifest.json ]] || die "tools/puppet_pack/charsel/data/manifest.json is not in the repo"
-mkdir -p "$kit/data/tools/puppet_pack/charsel/data"
-cp -- "$pack"/charsel/data/* "$kit/data/tools/puppet_pack/charsel/data/"
+# Every data folder a kit module reads (DATA = os.path.join(HERE, "<name>", "data"): charsel_ui.py's Characters tab and
+# its code patch (build.sh's charsel_native_sync), coop_menu.py's CoopMenu_00): byte for byte (checked by their hashes),
+# never through text. The import walk above finds only .py files.
+for f in $(printf '%s\n' "${!seen[@]}" | sort); do
+    while IFS= read -r sub; do
+        compgen -G "$pack/$sub/data/*" >/dev/null || die "tools/puppet_pack/$sub/data (read by $f) is not in the repo"
+        mkdir -p "$kit/data/tools/puppet_pack/$sub/data"
+        cp -- "$pack/$sub"/data/* "$kit/data/tools/puppet_pack/$sub/data/"
+    done < <(grep -oE 'os\.path\.join\(HERE, *"[A-Za-z0-9_]+", *"data"\)' "$pack/$f" | sed -E 's/.*HERE, *"([A-Za-z0-9_]+)".*/\1/' | sort -u)
+done
 text "$repo/docs/setup-linux.md" "$kit/data/docs/SETUP-LINUX.md"
 text "$repo/docs/known-issues.md" "$kit/data/docs/KNOWN-ISSUES.md"
 cp -- "$repo/LICENSE" "$kit/data/licenses/oot-remake-multiplayer-GPL-3.0.txt"
