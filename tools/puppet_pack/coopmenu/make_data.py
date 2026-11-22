@@ -13,7 +13,8 @@ HIS sequence helpers (mods/build.py: Graph, vanilla, t_*) as a library to give t
       Map page's own close, CoopMenu_00 closed and unloaded with it); + closes it the Map page's way to the + menu;
       L (only ever seen on co-op's first tab: the co-op module keeps L from the game on the others, and R / ZR on all
       three) plays CoopMenu_00's InChallenge, mc_TabToLeft and the Map's InChallenge backwards (in from the right),
-      then the Map page's main loop, which closes and unloads CoopMenu_00 once its InChallenge has played (Snail's
+      then, two frames on (so the Map's own checker never reads that same L: it would go on to Threads of Time),
+      the Map page's main loop, which closes and unloads CoopMenu_00 once its InChallenge has played (Snail's
       overlapping exit: no frame without a page). ZL / ZR there are the co-op module's (a list's pages).
 
 Needs a Python with his requirements.txt (ainb, mmh3) and the game's romfs:
@@ -94,9 +95,13 @@ def edit(B, path):
     # out: B / - (the Map page's close, 9), + (to the + menu, 35), L (back to the Map's main loop, 3)
     close = g.add(B.t_end(g.add(B.t_simultaneous([g.add(B.t_close_unload_screen(S))], then=9))))
     plus = g.add(B.t_end(g.add(B.t_simultaneous([g.add(B.t_close_unload_screen(S))], then=35))))
+    # (through a gate of two frames, Snail's picker's: the Map loop's own checker would read the same L in this frame
+    # and step on to Threads of Time, LANE1 rerun 2026-11-22 s12)
+    gate = g.add(B.t_sequential([g.add(B.t_wait_frames(1)), g.add(B.t_wait_frames(1))], then=3, root=True,
+                                same_frame=False))
     back = g.add(B.t_end(g.add(B.t_simultaneous(
         [g.add(B.t_play_anim(S, "InChallenge")), sound("mc_TabToLeft"), g.add(copy.deepcopy(hit_on))] +
-        from_last("InChallenge"), then=3))))
+        from_last("InChallenge"), then=gate))))
     left = g.add(B.t_bool_sel(4, T["L"], back, 23))
     plus_sel = g.add(B.t_bool_sel(4, T["Plus"], plus, left))
     closable = g.add(B.t_bool_sel(32, 0, close, plus_sel))

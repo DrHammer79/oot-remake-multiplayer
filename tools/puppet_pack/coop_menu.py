@@ -15,7 +15,8 @@ for ours, built from the player's own files at pack time:
       co-op module slides our rows with them on the game's curve); stored hidden, the module shows it once its rows
       have their words (no placeholder dots on the way in).
   UI/LayoutArchiveCategory: CoopMenu_00 listed under Common (in name order, as the game's list).
-  RSDB/UIScreen: the screen's row (no screen class, the menu's draw unit and sort key: Snail's page's row).
+  RSDB/UIScreen: the screen's row (no screen class, the menu's draw unit: Snail's page's row; its sort key one above
+      the pages', so it draws over the Map's screen left open under it).
   Mals/*: LayoutMsg/CoopMenu_00.msbt, a copy of Key Items' messages (a layout's text panes read their layout's file);
       our rows' words stay the strip's (LayoutMsg/MenuOverlay_00, loaded while the - menu shows).
   Sequence/Map.module.ainb: R / ZR on the Map open CoopMenu_00, B / - / + close it as the Map page closes, L goes back
@@ -50,10 +51,17 @@ PAGE_PARENT = "RootPane"
 PAGE_SOURCE = "Pa_Parts_00"            # (a part of the layout's own, in whose place ours goes, moved to the page's place)
 MAP = "Sequence/Map.module.ainb"
 MAP_SRC_SHA1 = "5de2c395f07e09f5b3ea071954e1708c66bfe0bf"
-MAP_DST_SHA1 = "62f70b94a938f43f7274e3f24b62522a85e810a4"
+MAP_DST_SHA1 = "f20e905dea4ce87172182223a336651a5183b55f"
 MANIFEST = {"format": "coop-menu 1", "files": [{"rel": MAP, "zs": False, "from": MAP, "delta": "map.cdelta"}]}
+# The screen's row: Snail's page's (Key Items' draw unit, loaded on demand), its sort key one above the menu pages' 5000.
+# The Map's screen stays open under ours (Snail's page opens after Key Items has closed; ours from the Map's own state),
+# and at the same key the Map drew over ours: its full-screen backdrop BG_00 (outside the Map's In / Out animations,
+# kept by the co-op module) left the whole page black, rows and vignette too (LANE1 rerun 2026-11-22, s02..s10 all
+# 0,0,0 under the strip). 5001 is still under everything above the pages (the HUD 6000+, the strip 8749, the system
+# windows 8751); the row has no IsEnableControl, so which screen reads the pad does not change.
+SORT_KEY = 5001
 ROW = {"ArchiveCategory": ["Common"], "BodyLayoutFile": SCREEN, "DrawUnitId": 1, "IsHeapReverse": True,
-       "Name": SCREEN, "SortKey": 5000}   # (Snail's page's row: Key Items' draw unit and sort key, loaded on demand)
+       "Name": SCREEN, "SortKey": SORT_KEY}
 
 
 class CoopMenuError(ValueError):

@@ -83,6 +83,13 @@ class TablesTest(unittest.TestCase):
         with self.assertRaises(cm.CoopMenuError):
             cm.add_row([{"Name": "MenuBG_00"}])
 
+    def test_row_draws_over_the_pages(self):
+        """Over the menu pages' screens (the Map's stays open under ours: at the same key it drew over ours, LANE1
+        2026-11-22), under the HUD's and the strip's; no IsEnableControl (the pad's screen unchanged)."""
+        self.assertGreater(cm.ROW["SortKey"], 5000)
+        self.assertLess(cm.ROW["SortKey"], 6000)
+        self.assertNotIn("IsEnableControl", cm.ROW)
+
 
 MAP_GAME = b"AIB " + bytes(range(256)) * 4
 MAP_OURS = MAP_GAME[:600] + b"co-op's page" * 20 + MAP_GAME[600:]
@@ -183,6 +190,14 @@ class GameFilesTest(unittest.TestCase):
         dicts = zs.Dicts.from_romfs(GAME)
         files, growth = cm.make(ui_pack.PackRun(GAME, _Table({})), dicts, lambda d, raw, data: data)
         self.assertEqual(hashlib.sha1(files[cm.MAP]).hexdigest(), cm.MAP_DST_SHA1)
+        # (L back to the Map goes through a two-frame gate: the game's file has no wait node)
+        self.assertIn(b"SeqExecuteGenericWaitFrame", files[cm.MAP])
+        rows = byml.loads(files["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
+        keys = {r["Name"]: r.get("SortKey") for r in rows}
+        for page in ("MapMenu_00", "ImportantMenu_00", "ChallengeMenu_00", "PlusMenu_00"):
+            self.assertGreater(keys[cm.SCREEN], keys[page], page)
+        self.assertLess(keys[cm.SCREEN], keys["MenuOverlay_00"])
+        self.assertFalse(any(r.get("SortKey") == keys[cm.SCREEN] for r in rows if r["Name"] != cm.SCREEN))
         lay = next(d for n, d in sarc.read_entries(files[cm.COMMON_ARCHIVE]) if n == cm.SCREEN + ".buil")
         names = [p.name for p in ui_pack.read_layout(lay)[0]]
         self.assertIn(pm.MINUS_PAGE, names)
