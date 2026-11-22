@@ -1454,6 +1454,7 @@ const char* RowHelp(RowAction a) {
     case RowAction::kMenuTab: return "This page's rows are on the list. Right or A to pick one.";
     case RowAction::kViewHost: return "Host a game: start it, then give your friends its code and let them in.";
     case RowAction::kViewLocal: return CoopPauseMenu::kLocalHelp;
+    case RowAction::kViewHostSettings: return "Co-op settings at the host rows: game, approving joins, PvP and Down but not out.";
     case RowAction::kNone: break;
     }
     return "";
