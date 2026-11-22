@@ -605,9 +605,20 @@ bool ScalesAsBoss(std::string_view name) {
     return rule != nullptr && (rule->why == "boss" || rule->why == "mini-boss");
 }
 
+namespace {
+// A placement hash our baked table does not have: a mod added it (OOTRR Difficulty), so it is never folded by kind
+// either: the mod already scaled it (ootrr-diff-compat D1). Hash 0 and all ones are made actors, not placements.
+bool ModAdded(std::uint64_t hash) {
+    return hash != 0 && hash != ~std::uint64_t{0} && !AreaOf(hash).has_value();
+}
+}  // namespace
+
 Kind AttackerKind(std::string_view name, std::uint64_t hash, bool no_spot) {
     if (ScalesAsBoss(name)) {
         return Kind::boss;
+    }
+    if (ModAdded(hash)) {
+        return Kind::enemy;
     }
     return no_spot || TreatmentOf(name, hash) == Treatment::fold ? Kind::folded_enemy : Kind::enemy;
 }
@@ -615,6 +626,9 @@ Kind AttackerKind(std::string_view name, std::uint64_t hash, bool no_spot) {
 Kind LifeKind(std::string_view name, std::uint64_t hash, bool no_spot) {
     if (ScalesAsBoss(name)) {
         return Kind::boss_life;
+    }
+    if (ModAdded(hash)) {
+        return Kind::enemy_life;
     }
     return no_spot || TreatmentOf(name, hash) == Treatment::fold ? Kind::folded_enemy_life : Kind::enemy_life;
 }

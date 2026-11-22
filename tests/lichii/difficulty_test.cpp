@@ -742,9 +742,11 @@ TEST_CASE("difficulty: a placed enemy with no ground for its copies gets their w
   CHECK(x.Plan("Room", walk, 200, false, 0) == 0);
   CHECK(x.NoSpot(kLone));
   CHECK(x.NoSpots() == 1);
-  CHECK(CoopDifficulty::LifeKind("Enemy_Stalfos", kLone, x.NoSpot(kLone)) == Kind::folded_enemy_life);
-  CHECK(CoopDifficulty::AttackerKind("Enemy_Stalfos", kLone, x.NoSpot(kLone)) == Kind::folded_enemy);
-  CHECK(CoopDifficulty::LifeKind("Enemy_Stalfos", kLone, false) == Kind::enemy_life);
+  // (kLone is a test hash; the kinds see a placement of the baked table, which a no-spot enemy always is.)
+  constexpr std::uint64_t kBaked = 0xadd2ec76107dc677ULL;
+  CHECK(CoopDifficulty::LifeKind("Enemy_Stalfos", kBaked, true) == Kind::folded_enemy_life);
+  CHECK(CoopDifficulty::AttackerKind("Enemy_Stalfos", kBaked, true) == Kind::folded_enemy);
+  CHECK(CoopDifficulty::LifeKind("Enemy_Stalfos", kBaked, false) == Kind::enemy_life);
   // A marker appears (another age's data, a test) and the count rises: still no copy on top of the weight.
   d.ground = {{4.0f, 0.0f, 0.0f}, {-4.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 4.0f}};
   CHECK(x.Plan("Room", walk, 400, false, 100) == 0);
@@ -1098,7 +1100,14 @@ TEST_CASE("difficulty: bosses and mini-bosses scale by the boss values") {
   constexpr std::uint64_t kPlain = 0x1234'5678'9abc'def0ULL;
   CHECK(CoopDifficulty::LifeKind("Enemy_DungeonBoss_Gohma", kPlain) == Kind::boss_life);
   CHECK(CoopDifficulty::AttackerKind("Enemy_DungeonBoss_Gohma", kPlain) == Kind::boss);
-  CHECK(CoopDifficulty::LifeKind("Enemy_DeadHand", kPlain) == Kind::folded_enemy_life);
+  CHECK(CoopDifficulty::LifeKind("Enemy_DeadHand", 0) == Kind::folded_enemy_life);  // a made one: no placement
+  // A placement our table does not have (a mod's added enemy) is plain whatever its kind; a baked one folds.
+  CHECK(CoopDifficulty::LifeKind("Enemy_DeadHand", kPlain) == Kind::enemy_life);
+  CHECK(CoopDifficulty::AttackerKind("Enemy_ReDead", kPlain) == Kind::enemy);
+  CHECK(CoopDifficulty::AttackerKind("Enemy_ReDead", kPlain, true) == Kind::enemy);
+  constexpr std::uint64_t kBakedReDead = 0xadd2ec76107dc677ULL;
+  CHECK(CoopDifficulty::AttackerKind("Enemy_ReDead", kBakedReDead) == Kind::folded_enemy);
+  CHECK(CoopDifficulty::LifeKind("Enemy_LikeLike", 0xb45720bb25faeb7eULL) == Kind::folded_enemy_life);
   CHECK(CoopDifficulty::AttackerKind("Enemy_Keese", kPlain) == Kind::enemy);
 
   auto kinds = std::make_unique<CoopDifficulty::Kinds>();
