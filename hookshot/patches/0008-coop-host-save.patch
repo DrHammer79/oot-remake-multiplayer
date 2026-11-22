@@ -1,4 +1,4 @@
-From 5059e4a81b3592e0a258e73d03321cf19e1ea750 Mon Sep 17 00:00:00 2001
+From 7c6769c57c1e41ae0b96094f8a326022fb8fd885 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 12 Nov 2026 18:34:41 -0900
 Subject: [PATCH] Co-op host save: the account save's folder and a re-mount,
@@ -13,37 +13,88 @@ made if missing). A guest of another player's session plays from
 when it joins, before a save is loaded. Nothing else changes: without the
 module, or with a host, the game's own save folder is used as before.
 ---
- host/nn_fs.c | 50 +++++++++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 49 insertions(+), 1 deletion(-)
+ host/nn_fs.c | 123 ++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 122 insertions(+), 1 deletion(-)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
-index 40f2c342..b09ff6a2 100644
+index 40f2c342..4b9e4918 100644
 --- a/host/nn_fs.c
 +++ b/host/nn_fs.c
-@@ -879,6 +879,9 @@ static int user_mount(const char *name, const char *sub) {
-     return ok;
+@@ -862,11 +862,61 @@ int hos_fs_save_root(char *out, size_t cap) {
  }
+ void hos_fs_save_end(void) { ReleaseSRWLockShared(&save_lock); }
  
 +/* (oot-remake-multiplayer's patch 0008) the account save's last mount (name, user folder) and, once the module asks for
-+   it, the folder it is mounted from instead of user\save\<uid> (a guest's <folder>-coop; its work copy save-work\<uid>-coop) */
++   it, the folder it is mounted from instead of user\save\<uid> (a guest's <uid>-coop, the multiplayer saves' <uid>-mp,
++   ...); empty while it is user\save\<uid> itself. Each folder has its own work copy and Save (coop_work_name). */
 +static char coop_save_name[32], coop_save_uid[40], coop_save_dir[HOS_FS_PATH];
- /* (1: owned, 0: unavailable, -1: another process owns it; never remove the ownership file) */
- static int save_own(Save *s) {
-     if (s->owned) return 1;
-@@ -899,11 +902,19 @@ static int save_own(Save *s) {
++/* (patch 0008) two folder paths the same: '\\' and '/' alike, no trailing separator, and on Windows without case */
++static int coop_same_dir(const char *a, const char *b) {
++    size_t na = strlen(a), nb = strlen(b);
++    while (na && (a[na - 1] == '\\' || a[na - 1] == '/')) na--;
++    while (nb && (b[nb - 1] == '\\' || b[nb - 1] == '/')) nb--;
++    if (na != nb) return 0;
++    for (size_t i = 0; i < na; i++) {
++        int x = (unsigned char)a[i], y = (unsigned char)b[i];
++        if (x == '/') x = '\\';
++        if (y == '/') y = '\\';
++#ifdef _WIN32
++        if (x >= 'A' && x <= 'Z') x += 'a' - 'A';
++        if (y >= 'A' && y <= 'Z') y += 'a' - 'A';
++#endif
++        if (x != y) return 0;
++    }
++    return 1;
++}
++/* (patch 0008) the work copy's name (in save-work) for the committed folder dir: a folder in user\save keeps its own name
++   (<uid>, <uid>-coop, <uid>-mp, <uid>-mp-coop), so every folder stages in its own work copy and a Save never serves two
++   committed folders; any other folder <uid>-at-<hash of its path>. 1 when it fits. */
++static int coop_work_name(char *out, size_t cap, const char *dir, const char *uid) {
++    char saves[HOS_FS_PATH], parent[HOS_FS_PATH];
++    const char *base = dir + strlen(dir);
++    while (base > dir && base[-1] != '\\' && base[-1] != '/') base--;
++    const size_t n = base > dir ? (size_t)(base - dir - 1) : 0;
++    if (*base && base > dir && n < sizeof parent &&
++        snprintf(saves, sizeof saves, "%s\\save", hos_user_dir) < (int)sizeof saves) {
++        memcpy(parent, dir, n);
++        parent[n] = 0;
++        if (coop_same_dir(parent, saves)) return snprintf(out, cap, "%s", base) < (int)cap;
++    }
++    unsigned h = 2166136261u;
++    for (const char *p = dir; *p; p++) {
++        int c = (unsigned char)*p;
++        if (c == '/') c = '\\';
++#ifdef _WIN32
++        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
++#endif
++        h = (h ^ (unsigned)c) * 16777619u;
++    }
++    return snprintf(out, cap, "%s-at-%08x", uid, h) < (int)cap;
++}
++
+ static int user_mount(const char *name, const char *sub) {
+     char root[HOS_FS_PATH];
+     const int is_save = !strncmp(sub, "save\\", 5);
+     if (is_save) AcquireSRWLockExclusive(&save_lock);
+     snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
++    /* (patch 0008) the account save read-only: from the folder the module mounted it from, as MountSaveData */
++    if (is_save && coop_save_dir[0] && !strcmp(sub + 5, coop_save_uid)) snprintf(root, sizeof root, "%s", coop_save_dir);
+     make_dirs(root);
+     CreateDirectoryA(root, NULL);
+     const int ok = mount(name, root, 1);
+@@ -899,11 +949,18 @@ static int save_own(Save *s) {
  }
  
  static int save_mount(const char *name, const char *uid) {
 -    char committed[HOS_FS_PATH], work[HOS_FS_PATH], parent[HOS_FS_PATH];
-+    char committed[HOS_FS_PATH], work[HOS_FS_PATH], parent[HOS_FS_PATH], coop_uid[48];
++    char committed[HOS_FS_PATH], work[HOS_FS_PATH], parent[HOS_FS_PATH], coop_uid[64];
      if (snprintf(committed, sizeof committed, "%s\\save\\%s", hos_user_dir, uid) >= (int)sizeof committed ||
          snprintf(parent, sizeof parent, "%s\\save-work", hos_user_dir) >= (int)sizeof parent ||
          !save_join(work, parent, uid)) return 0;
      AcquireSRWLockExclusive(&save_lock);
 +    if (coop_save_dir[0]) {   /* (oot-remake-multiplayer's patch 0008: the module's folder, with its own work copy) */
-+        snprintf(coop_uid, sizeof coop_uid, "%s-coop", uid);
 +        if (snprintf(committed, sizeof committed, "%s", coop_save_dir) >= (int)sizeof committed ||
-+            !save_join(work, parent, coop_uid)) {
++            !coop_work_name(coop_uid, sizeof coop_uid, coop_save_dir, uid) || !save_join(work, parent, coop_uid)) {
 +            ReleaseSRWLockExclusive(&save_lock);
 +            return 0;
 +        }
@@ -51,7 +102,33 @@ index 40f2c342..b09ff6a2 100644
      Save *s;
      for (s = saves; s && strcmp(s->work, work); s = s->next) {}
      int live = 0, direct = s && s->direct;
-@@ -995,12 +1006,49 @@ static int save_mount(const char *name, const char *uid) {
+@@ -919,6 +976,14 @@ static int save_mount(const char *name, const char *uid) {
+         return mounted;
+     }
+     if (s && s->handles) live = 1;
++    /* (patch 0008) a Save staging another committed folder than this one is never reused as it is: in use, refused;
++       else its unfinished save goes into its own folder (save_replay below), then it stages this one */
++    const int stale = s && !coop_same_dir(s->committed, committed);
++    if (stale && live) {
++        hos_log("fs: save: the work copy %s is in use for %s; refusing to mount it for %s", s->work, s->committed, committed);
++        ReleaseSRWLockExclusive(&save_lock);
++        return 0;
++    }
+     int ok = strlen(work) + sizeof ".journal.tmp" <= HOS_FS_PATH, pending = 0;
+     if (ok && !s) {
+         s = calloc(1, sizeof *s);
+@@ -958,6 +1023,10 @@ static int save_mount(const char *name, const char *uid) {
+             }
+             if (pending) ok = 0;
+         }
++        if (ok && stale) {
++            hos_log("fs: save: the work copy %s now stages %s (was %s)", s->work, committed, s->committed);
++            snprintf(s->committed, sizeof s->committed, "%s", committed);
++        }
+         if (ok) {
+             char tmp[HOS_FS_PATH];
+             ok = snprintf(tmp, sizeof tmp, "%s.tmp", s->journal) < (int)sizeof tmp && save_remove(tmp);
+@@ -995,12 +1064,64 @@ static int save_mount(const char *name, const char *uid) {
          if (!ok && s) s->direct = 1;
          AcquireSRWLockExclusive(&mount_lock);
          snprintf(save_root, sizeof save_root, "%s", committed);
@@ -69,13 +146,24 @@ index 40f2c342..b09ff6a2 100644
 +   and the account save mounted from another folder (made if missing; 1 when done). A guest of another player's
 +   session plays from <folder>-coop, into which the host's save comes; the module decides that when it joins, before a
 +   save is loaded, and the game's next reads come from there. Longshot 3.1 stages saves (a work copy, published at
-+   Commit): the folder becomes the committed one and save_mount makes its own work copy, as for user\save\<uid>. */
++   Commit): the folder becomes the committed one and save_mount makes its own work copy (save-work\<folder's name>), as
++   for user\save\<uid>; back to user\save\<uid> is Longshot's own mount again (save-work\<uid>). */
 +#ifdef _WIN32
 +#define HOS_COOP_FS_EXPORT __declspec(dllexport)
 +#else
 +#define HOS_COOP_FS_EXPORT __attribute__((visibility("default")))
 +#endif
-+HOS_COOP_FS_EXPORT int hos_coop_fs_save_root(char *out, size_t cap) { return out && cap && hos_fs_save_root(out, cap); }
++/* (Longshot 3.1's hos_fs_save_root is the control bridge's: it keeps save_lock until hos_fs_save_end, and a mount or a
++   remount after it would wait for ever; it also answers 0 while a save is half published. The module asks only which
++   folder the account save is mounted from, as on 3.0.) */
++HOS_COOP_FS_EXPORT int hos_coop_fs_save_root(char *out, size_t cap) {
++    if (!out || !cap) return 0;
++    AcquireSRWLockShared(&mount_lock);
++    const int have = save_root[0] && strlen(save_root) < cap;
++    if (have) snprintf(out, cap, "%s", save_root);
++    ReleaseSRWLockShared(&mount_lock);
++    return have;
++}
 +HOS_COOP_FS_EXPORT int hos_coop_fs_save_remount(const char *root) {
 +    char name[sizeof coop_save_name], uid[sizeof coop_save_uid], dir[HOS_FS_PATH], was[HOS_FS_PATH];
 +    if (!root || !*root || strlen(root) >= sizeof dir) return 0;
@@ -85,11 +173,15 @@ index 40f2c342..b09ff6a2 100644
 +    ReleaseSRWLockShared(&mount_lock);
 +    if (!name[0] || !uid[0]) return 0;
 +    snprintf(dir, sizeof dir, "%s", root);
++    for (size_t n = strlen(dir); n > 1 && (dir[n - 1] == '\\' || dir[n - 1] == '/');) dir[--n] = 0;
++    /* (back to user\save\<uid> itself: no module folder, so Longshot's own work copy save-work\<uid> stages it again) */
++    char own[HOS_FS_PATH];
++    const int is_own = snprintf(own, sizeof own, "%s\\save\\%s", hos_user_dir, uid) < (int)sizeof own && coop_same_dir(dir, own);
 +    make_dirs(dir);
 +    CreateDirectoryA(dir, NULL);
 +    AcquireSRWLockExclusive(&save_lock);
 +    snprintf(was, sizeof was, "%s", coop_save_dir);
-+    snprintf(coop_save_dir, sizeof coop_save_dir, "%s", dir);
++    snprintf(coop_save_dir, sizeof coop_save_dir, "%s", is_own ? "" : dir);
 +    ReleaseSRWLockExclusive(&save_lock);
 +    if (save_mount(name, uid)) return 1;
 +    AcquireSRWLockExclusive(&save_lock);   /* (not mounted: the next mount stays where it was) */
