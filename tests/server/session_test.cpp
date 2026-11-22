@@ -6688,6 +6688,65 @@ TEST_CASE("boss-copy-b: a boss owned by a game that has not played its intro goe
   CHECK(messages_to<HandoverAsk>(h, 2).empty());
 }
 
+namespace {
+ObjectState boss_state(const std::string& animation) {
+  ObjectState s = state_at(0, 11);
+  s.animation = Animation{animation, 1.0f, 1.0f};
+  return s;
+}
+}  // namespace
+
+TEST_CASE("row 164 follow-up: a boss leaves an owner held in a cutscene of its own, never in the boss's own event") {
+  OwnerHarness h;
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, boss_presence(object_presence::awake), kChannelOwnership);
+  h.receive(2, boss_presence(object_presence::awake), kChannelOwnership);
+  h.stand(1, 3);
+  h.stand(2, 5);
+  SUBCASE("the boss fights on (its own move): asked over after fight_owner_cutscene_us") {
+    h.receive(1, ObjectSample{0, placed(7), 0, boss_state("Walk")}, kChannelObjectSamples);
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);  // an item get, Navi's talk
+    h.clear();
+    h.run(2 * kSecond);
+    CHECK(h.asks() == 0);  // a short event keeps it
+    h.run(2 * kSecond);
+    CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+    CHECK(h.session.stats().boss_from_cutscene == 1);
+  }
+  SUBCASE("the boss plays its own event (an intro or phase change every game is in): kept") {
+    h.receive(1, ObjectSample{0, placed(7), 0, boss_state("C01-Enemy_DungeonBoss_Gohma-A-0")}, kChannelObjectSamples);
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    h.clear();
+    h.run(6 * kSecond);
+    CHECK(h.asks() == 0);
+    CHECK(h.session.stats().boss_from_cutscene == 0);
+  }
+  SUBCASE("the other game is in a cutscene too: kept") {
+    h.receive(1, ObjectSample{0, placed(7), 0, boss_state("Walk")}, kChannelObjectSamples);
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    h.receive(2, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    h.clear();
+    h.run(6 * kSecond);
+    CHECK(h.asks() == 0);
+  }
+}
+
+TEST_CASE("row 164 follow-up: fight_owner_cutscene_us 0 keeps a boss with an owner in a cutscene") {
+  SessionConfig config = quiet_config();
+  config.fight_owner_cutscene_us = 0;
+  OwnerHarness h(config);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, boss_presence(object_presence::awake), kChannelOwnership);
+  h.receive(2, boss_presence(object_presence::awake), kChannelOwnership);
+  h.stand(1, 3);
+  h.stand(2, 5);
+  h.receive(1, ObjectSample{0, placed(7), 0, boss_state("Walk")}, kChannelObjectSamples);
+  h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+  h.clear();
+  h.run(6 * kSecond);
+  CHECK(h.asks() == 0);
+}
+
 TEST_CASE("row 189: a ready owner that stands still keeps its boss from a game that has not begun the fight") {
   OwnerHarness h;
   h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);

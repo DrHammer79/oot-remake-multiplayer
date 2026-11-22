@@ -1438,6 +1438,7 @@ void Session::on_status(Connection& c, std::uint8_t flags, std::uint64_t now_us)
   };
   since(status::paused, c.paused_since);
   since(status::dead, c.dead_since);
+  since(status::in_cutscene, c.cutscene_since);
   c.status = flags;
 }
 
@@ -2194,6 +2195,20 @@ std::string Session::unfit_why(const Connection& c, std::uint64_t now_us) const 
   return "unfit";
 }
 
+bool Session::owner_in_own_cutscene(const Connection& c, const Object& o, std::uint64_t now_us) const {
+  if (!o.boss || config_.fight_owner_cutscene_us == 0 || c.cutscene_since == 0) return false;
+  if (now_us - c.cutscene_since < config_.fight_owner_cutscene_us) return false;
+  if (o.last_state) {
+    // The boss's own intro, phase change or death: every game plays it, the owner's AI is in it on purpose.
+    if (o.last_state->life && o.last_state->life->life <= 0) return false;
+    if (const auto& a = o.last_state->animation;
+        a && (coop::protocol::anim::IsDeath(a->name) || coop::protocol::anim::IsEvent(a->name))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool Session::unfit_owner(const Connection& c, std::uint64_t now_us) const {
   if (c.status & status::loading) return true;
   // Downed (or out): its enemies go to a player still up, whose game's AI
@@ -2788,17 +2803,25 @@ void Session::run_ownership(std::uint64_t now_us) {
     }
 
     // An owner whose game stands still gives it up, fight or not; a boss's sooner (its AI fights its Link alone).
-    if (unfit_owner(oc, now_us) || ((o.boss || in_fight(o, now_us)) && unfit_fight_owner(oc, now_us))) {
+    // A boss also leaves an owner held in a cutscene of its own game (row 164 follow-up), for a game in none.
+    const bool owner_cut = owner_in_own_cutscene(oc, o, now_us);
+    if (unfit_owner(oc, now_us) || ((o.boss || in_fight(o, now_us)) && unfit_fight_owner(oc, now_us)) || owner_cut) {
+      std::optional<ConnectionId> next = o.fish ? std::nullopt : best_other(o, owner, true, now_us);
+      if (owner_cut && next && connections_.at(*next).cutscene_since != 0) next.reset();  // its event: no better
       if (o.fish) {
         fish_owner(oid, o, owner, true, now_us);  // a hooked fish waits for it
-      } else if (auto next = best_other(o, owner, true, now_us)) {
+      } else if (next) {
         // Row 189: a boss in its fight (its owner's game ready) never goes to a game whose boss has not begun
         // it (unready: every game's boss would go back to its wait before the fight). It waits for its owner,
         // or for a ready game; an owner that leaves still gives it on (next_owner: nobody else has it).
         if (o.boss && !o.unready.contains(owner) && o.unready.contains(*next)) {
           ++stats_.boss_kept_from_unready;
         } else {
-          ask_handover(oid, o, *next, now_us, "its owner is unfit (" + unfit_why(oc, now_us) + ")");
+          const bool cut_only = owner_cut && !unfit_owner(oc, now_us) && !unfit_fight_owner(oc, now_us);
+          if (cut_only) ++stats_.boss_from_cutscene;
+          ask_handover(oid, o, *next, now_us,
+                       cut_only ? std::string("its owner is held in a cutscene of its own (row 164 follow-up)")
+                                : "its owner is unfit (" + unfit_why(oc, now_us) + ")");
         }
       }
       continue;
