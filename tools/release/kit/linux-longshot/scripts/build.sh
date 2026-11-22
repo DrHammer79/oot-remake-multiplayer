@@ -340,7 +340,7 @@ charsel_step() {
         say ''
         say 'The Characters page (in the - menu) comes with the kit: Character Select by Snail (snaildev99).'
         say "  Its NPC characters (Saria, Sheik, Darunia and over a hundred more) are an extra download from Snail's own"
-        say '  GitHub page (about 1 GB, once). Without them you play as Link, and the page tells you when a character is not'
+        say '  GitHub page (about 145 MB, once). Without them you play as Link, and the page tells you when a character is not'
         say '  downloaded. The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.'
         local q='Download the NPC characters for the Characters page? [y/N]' s
         choice=no
@@ -421,6 +421,43 @@ with zipfile.ZipFile(z) as f:
             shutil.copyfileobj(a, b, 1 << 20)
 ' "$dl/$zip" "$zfolder" "$new" || [[ ! -d $new/romfs ]]; then
                 why="unpacking $zip failed"
+            fi
+            # Since Character Select v0.2.2 (snaildev99) the zip's tool folder (the pin's tool_folder) makes the mod's
+            # game-derived files (models, textures, menus, tables) from the game's own RomFS on this PC: byte patches and
+            # colour recipes, each source and result checked by SHA-1. It needs numpy, zstandard (or pyzstd),
+            # astc-encoder-py and texture2ddecoder in $PY. A first start has no data/game/romfs yet: it says so and the
+            # next start (after the game build) makes them. Part ui skips the NPC part's files (charsel's npc rule).
+            local tfolder tout
+            local -a ex=()
+            tfolder=$(pin_get "$pin" tool_folder || true)
+            if [[ -z $why && -n $tfolder ]]; then
+                [[ $part == full ]] || ex=(--exclude '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
+                if [[ $tfolder == *..* || $tfolder == /* ]]; then why="the pin's tool_folder is not a folder of the zip"
+                elif [[ ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then why="no game RomFS in $GAME/romfs to make its files from yet (the next start does it)"
+                else
+                    rm -rf "$dl/tool"
+                    say "  making Character Select's files from your game (a minute or two, once) ..."
+                    if ! "$PY" -I -B -c '
+import os, sys, zipfile, shutil
+z, top, out = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
+with zipfile.ZipFile(z) as f:
+    for i in f.infolist():
+        if not i.filename.startswith(top) or i.is_dir():
+            continue
+        rel = i.filename[len(top):]
+        if not rel or rel.startswith("/") or ".." in rel.split("/"):
+            sys.exit("bad name in the zip: " + i.filename)
+        dst = os.path.join(out, *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with f.open(i) as a, open(dst, "wb") as b:
+            shutil.copyfileobj(a, b, 1 << 20)
+' "$dl/$zip" "$tfolder" "$dl/tool" || [[ ! -f $dl/tool/player.py ]]; then
+                        why="$zip has no $tfolder/player.py"
+                    elif ! tout=$("$PY" -I -B "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$new" ${ex[@]+"${ex[@]}"} 2>&1); then
+                        why="making its files from your game failed ($(printf '%s\n' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1))"
+                    fi
+                    rm -rf "$dl/tool"
+                fi
             fi
         fi
     fi
