@@ -205,12 +205,14 @@ CZ = [("cz_head (HEAD_CALL)", 0x804D756C, 0x804D7570), ("cz_frame (FRAME_SITE)",
       ("COLOUR_MORE", 0x8103AE80, 0x8103B160), ("COLOUR_KEEP", 0x83BCDC10, 0x83BCDDE0),
       ("COLOUR_TEX", 0x83BCCE70, 0x83BCD000)]
 SHIFT = 0x8001FF00
+# The NPC part, below romfs/: one rule for npc() and for the v0.2.2 tool --exclude (charsel_tool_make reads it with
+# "exclude"). Link own textures in Tex/ (*_Player_*, Angin_Tile_*: named by his kept Link models) are not NPC files
+# (row 242). Same rule as kit-paths.ps1 Test-KitCharacterSelectNpcFile / $KitCharselToolExclude.
+NPC_RULE = (r"^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_"
+            r"|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$")
 def npc(rel):
     r = rel.replace("\\", "/")
-    if re.match(r"romfs/Tex/([^/]*_Player_|Angin_Tile_)", r, re.I):
-        return False   # Link own textures, named by his kept Link models (row 242; kit-paths.ps1 Test-KitCharacterSelectNpcFile)
-    return bool(re.match(r"romfs/(Tex|Phive|Sound)/", r, re.I) or re.match(r"romfs/Model/Player_(Adult|Child)_C\d{3}\.", r, re.I)
-                or re.match(r"romfs/Model/Player_Dark_", r, re.I) or r.lower() == "romfs/pack/actor/enemy_middleboss_darklink.pack.zs")
+    return r[:6].lower() == "romfs/" and bool(re.search(NPC_RULE, r[6:], re.I))
 def records(d):
     if len(d) < 9 or d[:5] != b"IPS32":
         raise ValueError("not an IPS32 file")
@@ -269,7 +271,9 @@ def fresh(p, b):
     with open(p, "wb") as f:
         f.write(b)
 cmd = sys.argv[1]
-if cmd == "derive":
+if cmd == "exclude":
+    print(NPC_RULE)
+elif cmd == "derive":
     src, dst, part = sys.argv[2:5]
     for r, _, fs in os.walk(src):
         for n in fs:
@@ -323,13 +327,13 @@ charsel_py() { "$PY" -I -B -c "$CHARSEL_PY" "$@"; }
 # Character Select v0.2.2's tool (the zip's build-from-your-game, unpacked into $B/charsel/tool) makes the mod's game-derived
 # files from data/game/romfs: byte patches and colour recipes, each source and result checked by SHA-1; a game of another
 # version is refused file by file. charsel_tool_make <mod folder> <part>: 0, or 1 with the reason in cs_tool_why. Part ui
-# skips the NPC part's files (--exclude, charsel's npc rule: Link's own Tex *_Player_*/Angin_Tile_* stay, row 242). Needs numpy, zstandard, astc-encoder-py and texture2ddecoder in $PY.
+# skips the NPC part's files (--exclude: charsel's NPC_RULE, the one npc() uses). Needs numpy, zstandard, astc-encoder-py and texture2ddecoder in $PY.
 cs_tool_why=''
 charsel_tool_make() {
     local mod=$1 part=$2 tout dl=$B/charsel
     local -a ex=()
     cs_tool_why=''
-    [[ $part == full ]] || ex=(--exclude '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
+    [[ $part == full ]] || ex=(--exclude "$(charsel_py exclude)")
     say "  making Character Select's files from your game (a minute or two, once) ..."
     # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
     # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)

@@ -431,6 +431,10 @@ OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 
 check 'Character Select tool: the RomFS there -> the mod goes in with its files made (ui part: --exclude), the tool is cleaned up' \
     bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -qF -- "^Tex/(?![^/]*_Player_|Angin_Tile_)" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" &&
         [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t2.txt" "$CS" "$D"
+# One NPC rule: the --exclude build.sh passed (its NPC_RULE, the one npc() uses) is kit-paths.ps1's $KitCharselToolExclude.
+winrule=$(sed -n "s/^\$KitCharselToolExclude = '\(.*\)'\$/\1/p" "$repo/tools/release/kit/scripts/kit-paths.ps1")
+check 'Character Select tool: the Linux --exclude (NPC_RULE) is the Windows rule ($KitCharselToolExclude)' \
+    bash -c 'a=$(cat "$2/romfs/Model/Made_By_Tool.bin") && [ -n "$1" ] && [ "${a##*--exclude }" = "$1" ]' _ "$winrule" "$CS"
 # A tool that fails (a game of another version): the exit code decides, its last line and a clear sentence are shown, nothing of the mod put in.
 rm -rf "$CS"; cs2_zip
 FAKE_TOOL_FAIL=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?
