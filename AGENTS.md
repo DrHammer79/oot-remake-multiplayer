@@ -152,3 +152,25 @@ Full details: [docs/testing.md](docs/testing.md) (CI tiers, automatic tests). In
 - Follow the surrounding code: C++20, the existing names and file layout. No new dependency without a reason in the PR and an entry in `THIRD_PARTY_NOTICES.md`.
 - Change docs when behaviour changes: the area doc, `docs/sync-coverage.md` for what is shared, `docs/known-issues.md` for what players see.
 - Do not write release names or old version tags in the repository (`check_content.py` refuses them); give the date or the issue instead.
+
+## Play-testing the game (agent tester)
+
+This section is only for a session that was handed **running test games** with the play-test bridge on and an MCP
+server per game (`oot-p1`, `oot-p2`, ...; set up by the maintainer: [docs/playtest.md](docs/playtest.md), "Playing
+through the bridge"). Everything above still holds. A coding session never starts games itself.
+
+- You control each game through its own tools (`get_state`, `walk_to`, `press`, `step`, `warp`, `flag`, `give`,
+  `checkpoint`, `desync_check`, `screenshot`). Every reply has the game's frame count.
+- **The games are paused between your calls.** Nothing happens unless you act; a call runs only the frames it asks
+  for. Call `get_state` on every game first: a game whose tools you never called still runs.
+- Use `warp` (and `flag`, `give`) to set a test up. Do not walk across Hyrule to reach it.
+- Call `checkpoint` with the same tag on **every** game after each action that should sync. Let the other games run
+  a few frames first (`step 30`): a held game receives nothing.
+- After each scenario run `desync_check` (or `python -I tools/autotest/desync_check.py <log dir> --clients`).
+- Anything visible (a door, a chest lid, a puppet) is proven by a `screenshot`, never by flags alone.
+- A bug report needs: the scenario, the steps (the tool calls), what was expected, what happened, the first tag where
+  the games differ with each game's frame, and the shots.
+- The scenarios are in [tests/scenarios.md](tests/scenarios.md). Run them in order and write the results to the
+  report file you were given.
+- **Never edit the mod's source during a test run.** Report; do not fix. Fixing is a separate session, so a test run
+  cannot quietly hide what it was meant to catch.
