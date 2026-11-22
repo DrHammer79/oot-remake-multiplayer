@@ -1180,7 +1180,7 @@ def nup_menu_files(n):
     open Nup: their UI archives and every language's message archive. A .nup build extracts only what is named, and
     these are not the pack's own sources: without them both steps were left out ("No such file")."""
     out = []
-    for pattern in (title_menu.TITLE_ARCHIVE, pause_menu.COMMON_ARCHIVE):
+    for pattern in (title_menu.TITLE_ARCHIVE, pause_menu.COMMON_ARCHIVE, title_menu.SCREEN_GLOB):
         out += n.glob(pattern)[:1]
     newest = {}   # (a .nup has the base game's and the update's: the game reads the newest, Product.110 over 100)
     for rel in n.glob(pause_menu.MALS_GLOB):

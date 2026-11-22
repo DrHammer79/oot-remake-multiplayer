@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from puppet_pack import sarc, title_menu as tm  # noqa: E402
+from puppet_pack import byml, sarc, title_menu as tm  # noqa: E402
 
 PANES = ["RootPane", "N_All_00", "A_BtnAlign_00", "Pa_Button_00", "Pa_Button_01", "Pa_Button_02", "Pa_Button_03"]
 PARENT = [0xFFFFFFFF, 0, 1, 2, 2, 2, 2]
@@ -203,9 +203,14 @@ class _Table:
         self.sizes[key] = value
 
 
+SCREENS = byml.dumps([{"ArchiveCategory": ["Title"], "BodyLayoutFile": "Title_00", "Class": "UITitleScreen", "Name": "Title_00"},
+                       {"ArchiveCategory": ["Common"], "Name": "Other_00"}])
+
+
 class BuildTest(unittest.TestCase):
     def romfs(self, root, broken=None):
         files = {tm.TITLE_ARCHIVE: sarc.write([(tm.TITLE_LAYOUT, make_layout())] * 2, data_align=16)}
+        files["RSDB/UIScreen.Product.111.rstbl.byml.zs"] = SCREENS
         for lang in ("EUen", "JPja", "USen"):
             msbt = make_msbt(["0000", "0001", "0002"], ["a", "b", "c"])
             if lang == broken:
@@ -222,7 +227,7 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
             self.romfs(src, broken)
-            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500})
+            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500, "RSDB/UIScreen.Product.111.rstbl.byml": 7000})
             for lang in ("EUen", "JPja", "USen"):
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -240,7 +245,7 @@ class BuildTest(unittest.TestCase):
     def test_every_file_when_all_can_be_made(self):
         made, written, sizes, before, err = self.run_build()
         self.assertIsNone(err)
-        self.assertEqual(len(made), 4)
+        self.assertEqual(len(made), 5)
         self.assertEqual(set(written), set(made))
         layouts = [d for n, d in sarc.read_entries(written[tm.TITLE_ARCHIVE]) if n == tm.TITLE_LAYOUT]
         self.assertEqual(len(layouts), 2)
@@ -248,6 +253,19 @@ class BuildTest(unittest.TestCase):
         _, _, labels, _ = tm.read_msbt(sarc.read(written["Mals/JPja.Product.110.sarc.zs"])[tm.MSG_FILE])
         self.assertIn("0106", labels)
         self.assertTrue(all(sizes[k] > before[k] for k in before))
+
+    def test_the_title_screen_loads_common_after_title(self):
+        made, written, sizes, before, err = self.run_build()
+        self.assertIsNone(err)
+        rows = byml.loads(written["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
+        self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
+        self.assertEqual(rows[0]["Class"], "UITitleScreen")                 # (the rest of the row as it was)
+        self.assertEqual(rows[1], {"ArchiveCategory": ["Common"], "Name": "Other_00"})   # (other rows untouched)
+        self.assertEqual(tm.add_common_archive(tm.add_common_archive(SCREENS)), tm.add_common_archive(SCREENS))
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_common_archive(byml.dumps([{"ArchiveCategory": ["Common"], "Name": "Title_00"}]))   # (not Title first)
+        with self.assertRaises(tm.TitleMenuError):
+            tm.add_common_archive(byml.dumps([{"ArchiveCategory": ["Title"], "Name": "Else_00"}]))
 
     def test_nothing_written_when_one_language_fails(self):
         made, written, sizes, before, err = self.run_build(broken="JPja")

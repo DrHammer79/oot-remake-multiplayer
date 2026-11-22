@@ -30,6 +30,9 @@ TITLE_ARCHIVE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
 TITLE_LAYOUT = "Title_00.buil"
 MSG_FILE = "LayoutMsg/Title_00.msbt"
 MALS_GLOB = "Mals/*.Product.*.sarc.zs"
+SCREEN_GLOB = "RSDB/UIScreen.Product.*.rstbl.byml.zs"   # the screens table (docs/game-ui.md)
+SCREEN = "Title_00"                                     # its row: the title screen
+SCREEN_ARCHIVES = ["Title", "Common"]                   # its layouts' archives: the toggle's part is in Common
 BUTTON = "Pa_Button_%02d"
 FIRST_NEW = 4                 # Pa_Button_04: after the game's 00..03 (the older packs' first row)
 MARKER = "Pa_CoopMenu_00"     # the hidden part that says this pack has the menu (CoopTitleMenu::kMenuMarker)
@@ -165,8 +168,25 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, run=None
     run.commit(files, growth)
     for rel, data in files.items():
         write(out_romfs, rel, data)
-    log("title menu: Start, Multiplayer and Options on the title (%s, %d languages)" % (TITLE_LAYOUT, len(files) - 1))
+    log("title menu: Start, Multiplayer and Options on the title (%s, %d languages)" % (TITLE_LAYOUT, len(files) - 2))
     return list(files)
+
+
+def add_common_archive(table):
+    """The screens table (a BYML list of rows keyed by Name, no __RowId) with Title_00's ArchiveCategory holding
+    Common after Title: the game's layout loader finds a part's layout only in the screen's own archives, and the
+    Host page's toggle (PaOptionBtnL_00, Options' two-cell button) is Common's (the LANE1 probe of 2026-11-22: a
+    part from another archive made the title crash on a null read)."""
+    from . import byml
+    rows = byml.loads(table)
+    row = next((r for r in rows if isinstance(r, dict) and r.get("Name") == SCREEN), None)
+    if row is None:
+        raise TitleMenuError("the screens table has no %s" % SCREEN)
+    have = list(row.get("ArchiveCategory", []))
+    if not have or have[0] != SCREEN_ARCHIVES[0]:
+        raise TitleMenuError("%s's archives are %r, not Title first" % (SCREEN, have))
+    row["ArchiveCategory"] = have + [a for a in SCREEN_ARCHIVES if a not in have]
+    return byml.dumps(rows)
 
 
 def make(reader, dicts, recompress):
@@ -185,6 +205,14 @@ def make(reader, dicts, recompress):
     growth.append((TITLE_ARCHIVE, len(dicts.decompress(raw)), len(archive), True))
     growth.append((TITLE_LAYOUT, len(olds[0]), len(new[olds[0]]), False))
     files[TITLE_ARCHIVE] = recompress(dicts, raw, archive)
+    screens = reader.glob(SCREEN_GLOB)   # (the title screen loads Common's archive too: the toggle's part is there)
+    if len(screens) != 1:
+        raise TitleMenuError("no single %s in the game's files" % SCREEN_GLOB)
+    raw = reader.read(screens[0])
+    plain = dicts.decompress(raw)
+    made = add_common_archive(plain)
+    growth.append((screens[0], len(plain), len(made), True))
+    files[screens[0]] = recompress(dicts, raw, made)
     for rel in sorted(reader.glob(MALS_GLOB)):
         raw = reader.read(rel)
         plain = dicts.decompress(raw)

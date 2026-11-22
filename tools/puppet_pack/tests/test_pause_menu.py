@@ -373,7 +373,9 @@ class BuildTest(unittest.TestCase):
             src = os.path.join(root, "romfs")
             files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
                                                     (pm.SYSTEM_LAYOUT, system())], data_align=16),
-                     title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16)}
+                     title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16),
+                     "RSDB/UIScreen.Product.111.rstbl.byml.zs": __import__("puppet_pack.byml", fromlist=["x"]).dumps(
+                         [{"ArchiveCategory": ["Title"], "Name": "Title_00"}])}
             for lang in LANGS:
                 files["Mals/%s.Product.110.sarc.zs" % lang] = sarc.write(
                     {pm.OVERLAY_MSG: make_msbt([("SystemMenu", "System")]),
@@ -384,7 +386,8 @@ class BuildTest(unittest.TestCase):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as f:
                     f.write(data)
-            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, title_menu.TITLE_ARCHIVE[:-3]: 50000})
+            table = _Table({pm.COMMON_ARCHIVE[:-3]: 100000, title_menu.TITLE_ARCHIVE[:-3]: 50000,
+                           "RSDB/UIScreen.Product.111.rstbl.byml": 7000})
             for lang in LANGS:
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -444,7 +447,8 @@ class NupFilesTest(unittest.TestCase):
         class FakeNup:
             files = ["UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
                      "Mals/USen.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs", "Mals/EUfr.Product.110.sarc.zs",
-                     "Mals/JPja.Product.100.sarc.zs", "Pack/ZsDic.pack.zs"]
+                     "Mals/JPja.Product.100.sarc.zs", "Pack/ZsDic.pack.zs",
+                     "RSDB/UIScreen.Product.111.rstbl.byml.zs"]
 
             def glob(self, pattern):
                 d, _, name = pattern.rpartition("/")
@@ -452,6 +456,7 @@ class NupFilesTest(unittest.TestCase):
 
         self.assertEqual(build.nup_menu_files(FakeNup()), [
             "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs", pm.COMMON_ARCHIVE,
+            "RSDB/UIScreen.Product.111.rstbl.byml.zs",
             "Mals/EUfr.Product.110.sarc.zs", "Mals/JPja.Product.100.sarc.zs", "Mals/USen.Product.110.sarc.zs"])
 
 
