@@ -73,7 +73,8 @@ ROWS_KEEP = "_coop-rows"
 ROWS_HEAD = "coop-rows 1"
 ROWS_MARK = "coop-rows.txt"   # (the module's kRowsFile)
 MENU_KEEP = "_coop-menus"     # the pack's menu files while the table the game reads cannot hold them (guard_menus)
-MENU_KEYS = ("title_menu", "pause_menu")   # (coop_puppet.json: the files build.py's menu steps wrote)
+# (coop_puppet.json's "menu_keys": the file lists kept aside together, ui_pack.MENU_KEYS when the pack was made; a pack
+# without the field has the two old keys)
 MEMBERS_KEEP = "_coop-archives"   # a mod's own copies of archives the pack's members were merged into (merge_members)
 MEMBERS_HEAD = "coop-members 1"
 
@@ -1102,8 +1103,11 @@ def menu_files(pack_path):
             m = json.loads(f.read().decode("utf-8"))
     except (OSError, ValueError):
         return []
+    keys = m.get("menu_keys")
+    if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+        keys = list(ui_pack.OLD_MENU_KEYS)
     out = []
-    for key in MENU_KEYS:
+    for key in keys:
         for rel in m.get(key) or []:
             if isinstance(rel, str) and rel and rel not in out:
                 out.append(rel)

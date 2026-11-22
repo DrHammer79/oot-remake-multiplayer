@@ -64,6 +64,25 @@ try {
     $null = @(Invoke-KitSizeTableMerge $t.Kit $t.Exe $fake2)
     Check (In-Play $t) 'Python that reported its own Menus line: the kit parks nothing on top'
     Remove-Item -LiteralPath $fake, $fake2 -Force -ErrorAction SilentlyContinue
+
+    # 5. charsel-native-0119: the pack names its lists in "menu_keys" (puppet_pack ui_pack.MENU_KEYS); co-op's own
+    #    Characters tab's files (charsel_native: the screens table) go aside with the menus, all together.
+    $scr = 'RSDB/UIScreen.Product.111.rstbl.byml.zs'
+    $t = New-Tree $true; $made += $t
+    New-Item -ItemType Directory -Force -Path (Join-Path $t.Pack 'romfs\RSDB') | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs'), 'screens')
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack 'coop_puppet.json'),
+        "{`"title_menu`": [`"$rel`"], `"pause_menu`": [], `"charsel_native`": [`"$scr`"], `"menu_keys`": [`"title_menu`", `"pause_menu`", `"charsel_native`"]}")
+    $null = @(Invoke-KitSizeTableMerge $t.Kit $t.Exe)
+    Check ((-not (In-Play $t)) -and (Kept $t) -and -not (Test-Path -LiteralPath (Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs')) -and
+           (Test-Path -LiteralPath (Join-Path $t.Pack '_coop-menus\RSDB\UIScreen.Product.111.rstbl.byml.zs'))) 'menu_keys with charsel_native: the Characters tab''s files go aside with the menus'
+    # 6. A pack without "menu_keys" (made before it): the two old lists only.
+    $t = New-Tree $true; $made += $t
+    New-Item -ItemType Directory -Force -Path (Join-Path $t.Pack 'romfs\RSDB') | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs'), 'screens')
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack 'coop_puppet.json'), "{`"title_menu`": [`"$rel`"], `"pause_menu`": [], `"charsel_native`": [`"$scr`"]}")
+    $null = @(Invoke-KitSizeTableMerge $t.Kit $t.Exe)
+    Check ((Kept $t) -and (Test-Path -LiteralPath (Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs'))) 'no menu_keys (an old pack): only title_menu and pause_menu go aside'
 } finally {
     foreach ($t in $made) { Remove-Item -LiteralPath $t.Root -Recurse -Force -ErrorAction SilentlyContinue }
 }

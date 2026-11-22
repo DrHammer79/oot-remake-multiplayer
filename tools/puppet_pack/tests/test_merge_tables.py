@@ -14,7 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from puppet_pack import byml, merge_tables as mt, rstb, sarc  # noqa: E402
+from puppet_pack import byml, merge_tables as mt, rstb, sarc, ui_pack  # noqa: E402
 
 try:
     import zstandard
@@ -418,6 +418,7 @@ SEED = "randomizer-adzfteae2h83-s89dbd7a9"
 
 MALS = "Mals/USen.Product.110.sarc.zs"
 TITLE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
+SCREENS = "RSDB/UIScreen.Product.111.rstbl.byml.zs"   # (one of co-op's Characters tab's files)
 
 
 class ParkMenusTest(unittest.TestCase):
@@ -557,6 +558,33 @@ class MenuGuardTest(unittest.TestCase):
         self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS])
         os.remove(os.path.join(self.pack, "coop_puppet.json"))
         self.assertEqual(mt.menu_files(self.pack), [])
+
+    def charsel_pack(self, menu_keys=True):
+        """The pack with co-op's own Characters tab (charsel_native: one of its files, the screens table)."""
+        self.put(os.path.join(self.pack, "romfs", *SCREENS.split("/")), b"pack screens")
+        keys = b', "menu_keys": ["title_menu", "pause_menu", "charsel_native"]' if menu_keys else b""
+        self.put(os.path.join(self.pack, "coop_puppet.json"),
+                 b'{"title_menu": ["%s"], "pause_menu": ["%s"], "charsel_native": ["%s"]%s}'
+                 % (TITLE.encode(), MALS.encode(), SCREENS.encode(), keys))
+        self.put_table(PACK, {self.crc(MALS): self.grown, self.crc(TITLE): 230000, self.crc(SCREENS): 9000, 7: 70})
+
+    def test_the_menu_files_are_the_lists_the_pack_names_in_menu_keys(self):
+        # (charsel-native-0119: co-op's Characters tab's files go with the menus; one list, ui_pack.MENU_KEYS, written
+        # by build.py into the pack's json; a pack without "menu_keys" has the two old lists)
+        self.assertEqual(list(ui_pack.MENU_KEYS), ["title_menu", "pause_menu", "charsel_native"])
+        self.charsel_pack()
+        self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS, SCREENS])
+        self.charsel_pack(menu_keys=False)
+        self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS])
+
+    def test_a_table_holding_the_menus_but_not_the_characters_tab_keeps_them_all_aside(self):
+        # All or nothing: another mod's table wins with the menus' sizes but not the Characters tab's screens table
+        # (a seed's own table): every one of them aside, the game keeps its own menus and screens.
+        self.charsel_pack()
+        self.put_table("oot-remake-randomizer", {self.crc(MALS): self.grown, self.crc(TITLE): 230000, 7: 70})
+        self.guard()
+        self.assertFalse(self.in_play(MALS) or self.in_play(TITLE) or self.in_play(SCREENS))
+        self.assertTrue(self.kept(MALS) and self.kept(TITLE) and self.kept(SCREENS))
 
     def test_the_pack_reading_its_own_table_keeps_its_menus(self):
         self.assertEqual(self.guard(), 0)

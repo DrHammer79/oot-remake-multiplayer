@@ -2634,7 +2634,11 @@ function Move-KitMenuFilesAside([string]$Mods) {
         if (-not $others) { continue }
         try {
             $m = Get-Content -LiteralPath (Join-Path $pack 'coop_puppet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($key in 'title_menu', 'pause_menu') {
+            # (the pack's own list, coop_puppet.json "menu_keys" = puppet_pack ui_pack.MENU_KEYS, as merge_tables.py
+            # reads it; a pack without it: the two old keys. charsel_native, co-op's Characters tab, goes with them)
+            $keys = @($m.menu_keys | Where-Object { $_ -is [string] -and $_ })
+            if ($keys.Count -eq 0) { $keys = @('title_menu', 'pause_menu') }
+            foreach ($key in $keys) {
                 foreach ($rel in @($m.$key)) {
                     if (-not ($rel -is [string]) -or -not $rel) { continue }
                     $src = Join-Path $pack ('romfs\' + $rel.Replace('/', '\'))
