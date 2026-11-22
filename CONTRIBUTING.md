@@ -37,9 +37,9 @@ Every co-op screen, menu, tab, notice, name tag and HUD piece is built from the 
 - **Solo must work.** Whatever is not inherently multiplayer (settings, Customize, mod loading, solo options, save fixes) works with co-op idle. Check that path.
 - **Native to the game.** Use the game's own functions, actors, flags and assets through the hook layer; no poking memory from outside and no faking an effect by copying state or pixels.
 - **A remote action looks like the real one.** A hit another player lands shows on your screen the way a local hit does (flinch, flash, sparks, sound, health change).
-- **Screenshot proof for anything visible.** A log line only proves a message was sent. Visible results need a screenshot on every game they concern.
+- **Screenshot proof for anything visible.** A log line only proves a message was sent. List the visible checks under "Check in game" in the pull request; the maintainer's in-game run takes the screenshots.
 - **No telemetry.** Our builds never send crash reports, telemetry or statistics to Longshot or anyone else. Discord Rich Presence always shows the Squadala name, icon and our status.
-- **Tests and CI.** A bug fix starts with a failing unit test. The `linux (gcc)` job builds the tests with `-Werror`; changes under `lichii/hook/` or `hookshot/src/` also need a green Linux emulator hook compile (a manual full run if the small tier skipped it). A review OK counts only on a finished green run. Game runs happen one at a time and only the maintainer starts them. The details are in [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md).
+- **Tests and CI.** A bug fix starts with a failing unit test. The `linux (gcc)` job builds the tests with `-Werror`; changes under `lichii/hook/` or `hookshot/src/` also need the Linux emulator hook compile green, which a pull request into `main` runs. A review OK counts only on a finished green run. Details: [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md).
 
 ## Reporting bugs and desyncs
 
