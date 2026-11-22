@@ -362,6 +362,12 @@ class FlagWatcher {
     return it == cap_holds_.end() ? std::nullopt : std::optional<std::int32_t>(it->second.low);
   }
   static constexpr int kResetQuietFrames = 60;
+  static constexpr int kLowerWaitFrames = 30 * 60;  // row 238: how long a hold waits for the object walk
+  // Row 238: the object walk saw our Link's own max at or under the hold's value (it lowered it, or it was):
+  // the hold may end by its quiet time now. Emulator thread.
+  void lowered_done(FlagKey key) {
+    if (const auto it = reset_holds_.find(key); it != reset_holds_.end()) it->second.awaiting_walk = false;
+  }
   static constexpr std::uint64_t kDoubledGainFrames = 5 * 60;
   static constexpr std::int32_t kMaxDoubledGains = 4;
 
@@ -633,6 +639,12 @@ class FlagWatcher {
     int quiet = 0;           // frames the game has kept `low`
     int tries = 0;           // put-backs the game refused or undid
     std::uint64_t put_at = 0;  // the frame of the last put-back
+    // Row 238: a join or a host's save lowered MaxLife and Link's own Life component (the live copy the hearts are
+    // drawn from) has not been seen lowered yet: the hold outlives its quiet time until the object walk says it
+    // saw Link at or under `low` (lowered_done), at most kLowerWaitFrames. Else a game that never wrote its higher
+    // max back (so nothing refreshed the hold) lost it before the walk ran, and showed more hearts than the group.
+    bool awaiting_walk = false;
+    int waited = 0;
   };
   std::map<FlagKey, ResetHold> reset_holds_;  // reset_lowered
   // Rows 136/137: a rise of a held key (diff); true when handled (not sent).

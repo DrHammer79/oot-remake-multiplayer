@@ -1666,6 +1666,9 @@ public:
             // higher max back.
             CoopObjects::SetMaxLifeLowerTo(session_ ? session_->held_lower(coop::protocol::FlagKey{0xfbe01da1u, 0})
                                                     : std::nullopt);
+            if (session_ && CoopObjects::TakeMaxLifeLowerDone()) {
+                session_->lowered_done(coop::protocol::FlagKey{0xfbe01da1u, 0});  // row 238
+            }
             if (const auto to = CoopBoss::TakeMaxLifeWrite(); to && known) {
                 auto set = *max_life;
                 set.value = static_cast<std::uint32_t>(*to);

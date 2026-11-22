@@ -11,6 +11,9 @@
 namespace coop::host {
 namespace {
 
+// PlayerStatus.MaxLife: the one max-rule int with a live copy the object walk lowers (Link's Life component).
+constexpr std::uint32_t kMaxLifeHash = 0xfbe01da1u;
+
 using protocol::FlagEntry;
 
 void push(std::vector<Outgoing>& out, const protocol::Message& message) {
@@ -623,6 +626,7 @@ void FlagWatcher::apply_reset(FlagStore& store, const std::vector<FlagEntry>& fl
       if (had && had->kind == protocol::FlagKind::int32 && as_int(had->value) > as_int(entry.value)) {
         reset_holds_[key] = ResetHold{static_cast<std::int32_t>(as_int(entry.value)),
                                       static_cast<std::int32_t>(as_int(had->value))};
+        reset_holds_[key].awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;  // row 238: Link's Life component follows
       } else if (had) {
         reset_holds_.erase(key);
       }
@@ -823,6 +827,7 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
             as_int(had->value) > as_int(entry.value)) {
           reset_holds_[key] = ResetHold{static_cast<std::int32_t>(as_int(entry.value)),
                                         static_cast<std::int32_t>(as_int(had->value))};
+          reset_holds_[key].awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;  // row 238: Link's Life component follows
         }
       }
     }
@@ -1507,8 +1512,12 @@ void FlagWatcher::age_reset_holds(FlagStore& store, std::uint32_t step) {
     if (now && now->kind == protocol::FlagKind::int32 && as_int(now->value) == it->second.low) {
       it->second.quiet += static_cast<int>(step);
       if (it->second.quiet >= kResetQuietFrames) {
-        it = reset_holds_.erase(it);  // the game keeps the host's save's value: a rise from here is progress
-        continue;
+        if (it->second.awaiting_walk && it->second.waited < kLowerWaitFrames) {
+          it->second.waited += static_cast<int>(step);  // row 238: Link's own max not seen lowered yet
+        } else {
+          it = reset_holds_.erase(it);  // the game keeps the host's save's value: a rise from here is progress
+          continue;
+        }
       }
     } else {
       it->second.quiet = 0;
