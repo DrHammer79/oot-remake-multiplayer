@@ -174,11 +174,14 @@ Still to design (need a game run first):
   medium confidence: `MinionMaker` maps the decoy to Meg, so only Meg's owner keeps decoys and shares them (as
   Gohma's eggs); risk: the copy's Meg remakes them in a loop. Fuller: match by `MegDummy_SeatId` (blackboard layout
   to find live). First step: log decoy ids, orders and places per game in a two-game run.
-- Dead Hand: its hands are boss parts of Dead Hand (`PartRules` kSummoned), so they follow his owner and grab only
-  that player. Smallest fix, medium confidence: drop that rule and keep Dead Hand a boss by name in
-  `IsBossOrPart`; each hand then goes to its nearest player. Risk: a hand's grab sends `MessageAppear` to its own
-  game's Dead Hand, held in a game that does not own him, so he may not rise there. Later: hand Dead Hand to a
-  grabbing hand's owner (a summoner link the server does not follow).
+- Dead Hand (row 232, enemies-01110): his hands were boss parts of him (`PartRules` kSummoned), so they followed
+  his owner and grabbed only that player. They are placed enemies with their own AI, BSA and perception
+  (`DeadHand_Hand.action.basicattack` grabs the target it perceives: its own game's Link), so they are plain
+  enemies now: each goes to its nearest player, whose game grabs that player. Dead Hand stays a boss by name
+  (`IsBossOrPart`). A grab tells its own game's Dead Hand (`OneShotDeadHandHandSendMessage` `MessageAppear`); he
+  rises for it where he is owned (his turns pass him between the players), and in a game that does not own him he
+  waits for his owner's verbs (that player is held until mashing frees them or his turn comes). Unit tests only;
+  to check in a game: A and B each near a different hand: both grabbed; Dead Hand rises for each in turn.
 - Water Temple and others: placements whose `Presence.FlagName` is a shared flag that changes during play (the
   water level's planes and waterfall, the Shadow tower's pillar and rubble, Bottom of the Well's water, the Forest
   Temple's room 7 water and elevator, Ice Cavern pots, a Jabu-Jabu air wall) are probably read only at a scene

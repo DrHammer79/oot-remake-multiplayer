@@ -8001,3 +8001,22 @@ TEST_CASE("objects: a Redead's scream reaches each Link in its reach, not only i
     CHECK(copy_game({0.0f, 0.0f, 9.0f}).empty());
     CHECK(copy_game({0.0f, 0.0f, -3.0f}).empty());
 }
+
+TEST_CASE("objects: Dead Hand's hands are enemies of their own, each grabs its own owner's Link (row 232)") {
+    using CoopObjects::GroupInput;
+    const auto id = [](std::uint64_t v) { return proto::ObjectId{proto::ObjectKind::placed, 0, v}; };
+    CHECK(CoopObjects::IsBoss("Enemy_DeadHand"));
+    CHECK(CoopObjects::IsBossOrPart("Enemy_DeadHand"));
+    CHECK_FALSE(CoopObjects::IsBossOrPart("Enemy_DeadHand_Dictionary"));
+    CHECK(CoopObjects::PartOf("Enemy_DeadHand_Hand") == nullptr);
+    CHECK_FALSE(CoopObjects::IsBossOrPart("Enemy_DeadHand_Hand"));
+    CHECK(CoopObjects::IsShared("Enemy_DeadHand_Hand"));
+    // His room (Bottom of the Well's placements, 5 m around him): he is a boss group of his own, no hand follows him.
+    const std::vector<GroupInput> walk{{id(1), "Enemy_DeadHand", {0, 92, -105}},
+                                       {id(2), "Enemy_DeadHand_Hand", {5, 92, -103}},
+                                       {id(3), "Enemy_DeadHand_Hand", {0, 92, -108}},
+                                       {id(4), "Enemy_DeadHand_Hand", {-5, 92, -103}}};
+    const auto g = CoopObjects::GroupsOf(walk);
+    REQUIRE(g.size() == 1);
+    CHECK(g[0] == proto::ObjectGroupEntry{id(1), id(1), proto::object_group::boss});
+}

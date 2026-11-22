@@ -440,7 +440,12 @@ const std::vector<PartRule>& PartRules() {
         boss("Enemy_MiddleBoss_DarkLink", {"Enemy_MiddleBoss_DarkLink_EffectLocater"}, kAny);
         boss("Enemy_MiddleBoss_FlareDancer", {"Enemy_MiddleBoss_FlareDancer_FireBody"}, kAny);
         boss("Enemy_MiddleBoss_Poe_Meg", {"Enemy_MiddleBoss_Poe_Meg_Dummy"}, kAny);
-        boss("Enemy_DeadHand", {"Enemy_DeadHand_Hand"}, kSummoned);
+        // Row 232: Dead Hand's hands are no part of him. They are placed enemies of their own (their own AI, BSA and
+        // perception: DeadHand_Hand.action.basicattack grabs the target it perceives, its own game's Link), so as
+        // his parts they followed his owner and only that player was ever grabbed. Each now goes to its nearest
+        // player like any enemy; its grab tells its own game's Dead Hand (OneShotDeadHandHandSendMessage
+        // MessageAppear), who rises for it in his owner's game (his turns pass him between the players). Dead
+        // Hand stays a boss by name (IsBossOrPart).
         // Enemies with a part or a brood. Several of one kind may share a
         // room: a part follows the nearest.
         enemy("Enemy_Dodongo", {"Enemy_Dodongo_Attention"}, 10.0f);
@@ -576,6 +581,7 @@ bool IsBossOrPart(std::string_view name) {
     if (name.starts_with("Enemy_DungeonBoss_") || name.starts_with("Enemy_MiddleBoss_")) {
         return true;
     }
+    if (name == "Enemy_DeadHand") return true;  // (row 232: his hands are plain enemies, no part rule names him)
     for (const PartRule& rule : PartRules()) {
         if (rule.part.boss && rule.part.roots.front() == name) return true;
     }
