@@ -8021,7 +8021,7 @@ TEST_CASE("objects: Dead Hand's hands are enemies of their own, each grabs its o
     CHECK(g[0] == proto::ObjectGroupEntry{id(1), id(1), proto::object_group::boss});
 }
 
-TEST_CASE("objects: Meg's decoys come from her owner's game only; a copy's Meg remaking them in a loop is let be (row 231)") {
+TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's Meg remaking them in a loop is let be (row 231)") {
     const std::string meg = "Enemy_MiddleBoss_Poe_Meg";
     const std::string decoy = "Enemy_MiddleBoss_Poe_Meg_Dummy";
     CHECK(CoopObjects::MinionMaker(decoy) == meg);
