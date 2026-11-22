@@ -323,13 +323,13 @@ charsel_py() { "$PY" -I -B -c "$CHARSEL_PY" "$@"; }
 # Character Select v0.2.2's tool (the zip's build-from-your-game, unpacked into $B/charsel/tool) makes the mod's game-derived
 # files from data/game/romfs: byte patches and colour recipes, each source and result checked by SHA-1; a game of another
 # version is refused file by file. charsel_tool_make <mod folder> <part>: 0, or 1 with the reason in cs_tool_why. Part ui
-# skips the NPC part's files (--exclude, charsel's npc rule). Needs numpy, zstandard, astc-encoder-py and texture2ddecoder in $PY.
+# skips the NPC part's files (--exclude, charsel's npc rule: Link's own Tex *_Player_*/Angin_Tile_* stay, row 242). Needs numpy, zstandard, astc-encoder-py and texture2ddecoder in $PY.
 cs_tool_why=''
 charsel_tool_make() {
     local mod=$1 part=$2 tout dl=$B/charsel
     local -a ex=()
     cs_tool_why=''
-    [[ $part == full ]] || ex=(--exclude '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
+    [[ $part == full ]] || ex=(--exclude '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
     say "  making Character Select's files from your game (a minute or two, once) ..."
     # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
     # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)

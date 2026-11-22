@@ -429,7 +429,7 @@ check 'Character Select tool: no game RomFS yet -> nothing of the mod is put in 
 mkdir -p "$D/game/romfs/Pack" && : >"$D/game/romfs/Pack/ZsDic.pack.zs"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 2>&1; export CODE=$?
 check 'Character Select tool: the RomFS there -> the mod goes in with its files made (ui part: --exclude), the tool is cleaned up' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" &&
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -qF -- "^Tex/(?![^/]*_Player_|Angin_Tile_)" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" &&
         [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t2.txt" "$CS" "$D"
 # A tool that fails (a game of another version): the exit code decides, its last line and a clear sentence are shown, nothing of the mod put in.
 rm -rf "$CS"; cs2_zip
@@ -440,7 +440,7 @@ check 'Character Select tool: a failing tool (exit 1) -> not installed, its last
 rm -rf "$CS"; cs2_zip; printf 'character_select = yes\n' >>"$D/coop-options.ini"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
 check 'Character Select tool: the RomFS there at the install -> made at once, full part gets no --exclude' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Made_By_Tool.bin" ] && ! grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q "^v2 .* full cz1$" "$2/coop-charsel.txt" && [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t4.txt" "$CS" "$D"
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Made_By_Tool.bin" ] && ! grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q "^v2 .* full cz2$" "$2/coop-charsel.txt" && [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t4.txt" "$CS" "$D"
 # A tool_folder that leaves the zip is refused.
 rm -rf "$CS"; cs2_zip; cs2_pin 'CS-v2/../x'
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t5.txt" 2>&1
