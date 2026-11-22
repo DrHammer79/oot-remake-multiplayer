@@ -1176,6 +1176,33 @@ def guard_menus(root, romfs, say=print):
         return 1
 
 
+def park_menus(root, say=print):
+    """Row 235's other doors: a merge that could not finish (no zstandard package, an unreadable file) cannot say whether
+    the size table the game reads holds the menu files' sizes, and a pack's larger menu files over a smaller entry
+    crashed the game at the title. So, unchecked, they go to <pack>/_coop-menus as in guard_menus; the next run that can
+    check puts them back. Returns the number of files moved (never raises)."""
+    moved = 0
+    try:
+        order = load_order(root)
+        pack_path = next((p for n, p in order if fold(n) == PACK), None)
+        if pack_path is None:
+            return 0
+        keep = os.path.join(pack_path, MENU_KEEP)
+        for rel in menu_files(pack_path):
+            src = os.path.join(pack_path, "romfs", *rel.split("/"))
+            if os.path.isfile(src):
+                dst = os.path.join(keep, *rel.split("/"))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.replace(src, dst)
+                moved += 1
+    except OSError:
+        pass
+    if moved:
+        say(f"Menus: the title's co-op rows and the pause menu's Multiplayer tab are off this start ({moved} files "
+            "kept aside: the size tables could not be checked); the next start that can merge puts them back.")
+    return moved
+
+
 def load_table(codec, mod_path, fname):
     with open(os.path.join(mod_path, *RESOURCE, fname), "rb") as f:
         return codec.load(f.read())
@@ -1711,6 +1738,11 @@ def main(argv=None):
     except SystemExit:  # (zs._zstd: no zstandard package)
         print("Size tables: not merged (this Python has no zstandard package): with a mod that has its own size "
               "table, the other players can't be shown.")
+        park_menus(a.mods)
+        return 1
+    except Exception as e:  # (a file the merge could not read: the menus must not be left unchecked)
+        print(f"Size tables: not merged ({type(e).__name__}: {e}).")
+        park_menus(a.mods)
         return 1
 
 

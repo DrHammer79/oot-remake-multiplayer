@@ -420,6 +420,30 @@ MALS = "Mals/USen.Product.110.sarc.zs"
 TITLE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
 
 
+class ParkMenusTest(unittest.TestCase):
+    """Row 235: park_menus moves the pack's menu files aside without any zstandard or size table to check against."""
+
+    def test_unchecked_park_moves_the_menu_files_and_guard_style_keep_dir(self):
+        d = tempfile.mkdtemp(prefix="merge_tables_park_")
+        try:
+            pack = os.path.join(d, "mods", *PACK.split("/"))
+            os.makedirs(os.path.join(pack, "romfs"))
+            rel = "Mals/EUen.Nin_NX_NVN.zs"
+            os.makedirs(os.path.join(pack, "romfs", "Mals"))
+            with open(os.path.join(pack, "romfs", *rel.split("/")), "wb") as f:
+                f.write(b"x")
+            with open(os.path.join(pack, "coop_puppet.json"), "wb") as f:
+                f.write(b'{"title_menu": ["%s"], "pause_menu": []}' % rel.encode())
+            lines = []
+            self.assertEqual(mt.park_menus(os.path.join(d, "mods"), lines.append), 1)
+            self.assertFalse(os.path.isfile(os.path.join(pack, "romfs", *rel.split("/"))))
+            self.assertTrue(os.path.isfile(os.path.join(pack, mt.MENU_KEEP, *rel.split("/"))))
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(mt.park_menus(os.path.join(d, "mods"), lines.append), 0)   # (nothing left to move)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 @unittest.skipIf(zstandard is None, "needs zstandard")
 class MenuGuardTest(unittest.TestCase):
     """guard_menus: the pack's menu files (--title-rows / --pause-tab) only where the size table the game reads holds
