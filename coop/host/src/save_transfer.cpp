@@ -2,11 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <system_error>
 #include <utility>
+
+#include "coop/host/flags.hpp"
+#include "coop/host/game_items.hpp"
 
 namespace coop::host::save {
 
@@ -425,12 +429,24 @@ bool copy_dir_whole(const fs::path& from, const fs::path& to, std::string* error
   return true;
 }
 
-WriteResult write_coop_save(const fs::path& coop_dir, const SaveSlot& slot, const fs::path& own_dir) {
-  if (!is_coop_dir(coop_dir) || is_coop_dir(own_dir) || slot.files.empty()) return WriteResult::not_coop;
+WriteResult write_coop_save(const fs::path& coop_dir, const SaveSlot& host_slot, const fs::path& own_dir,
+                            int* own_kept) {
+  if (own_kept != nullptr) *own_kept = -1;
+  if (!is_coop_dir(coop_dir) || is_coop_dir(own_dir) || host_slot.files.empty()) return WriteResult::not_coop;
   std::error_code ec;
   if (fs::equivalent(coop_dir, own_dir, ec)) return WriteResult::not_coop;
   fs::create_directories(coop_dir, ec);
   if (ec) return WriteResult::failed;
+  // Row 249: the guest's own values (from the slot there now, else as kept at the last clear) in the host's save.
+  keep_own_values(coop_dir);
+  SaveSlot slot = host_slot;
+  if (const auto own = kept_own_values(coop_dir)) {
+    int n = 0;
+    for (auto& f : slot.files) {
+      if (f.name == kSlotFiles[0]) n = put_own_values(f.bytes, *own);
+    }
+    if (own_kept != nullptr) *own_kept = n;
+  }
   // The player's own settings, so the game does not start as on a new console.
   for (const char* name : {"option.sav", "account.sav"}) {
     const fs::path to = coop_dir / name;
@@ -491,6 +507,7 @@ int clear_coop_slots(const fs::path& coop_dir) {
   if (!is_coop_dir(coop_dir)) return -1;
   std::error_code ec;
   if (!fs::is_directory(coop_dir, ec)) return 0;
+  keep_own_values(coop_dir);  // (row 249: the guest's own values outlive its slots)
   std::vector<fs::path> gone;
   for (fs::directory_iterator it(coop_dir, ec), end; !ec && it != end; it.increment(ec)) {
     if (slot_name(it->path().filename().string()) && it->is_directory(ec)) gone.push_back(it->path());
@@ -525,6 +542,137 @@ FolderChoice folder_choice(std::optional<bool> env, bool can_switch, bool connec
 
 bool rejoined_in_game(bool decided, bool ended, bool connected, bool in_game) {
   return decided && ended && connected && in_game;
+}
+
+std::optional<SaveValueAt> save_value_at(std::span<const std::uint8_t> progress, std::uint32_t hash,
+                                         std::optional<std::uint32_t> type) {
+  constexpr std::uint32_t kSaveMagic = 0x01020304;
+  constexpr std::size_t kTable = 0x20;
+  constexpr std::uint32_t kEnd = 0x20;
+  if (hash == 0 || progress.size() < kTable || get_u32(progress, 0) != kSaveMagic) return std::nullopt;
+  const std::size_t pool = get_u32(progress, 8);
+  if (pool < kTable || pool > progress.size()) return std::nullopt;
+  std::optional<std::uint32_t> kind;
+  for (std::size_t at = kTable; at + 8 <= pool; at += 8) {
+    const std::uint32_t first = get_u32(progress, at), second = get_u32(progress, at + 4);
+    if (first == 0) {
+      if (second != (kind ? *kind + 1 : 0) || second == kEnd) return std::nullopt;
+      kind = second;
+    } else if (!kind) {
+      return std::nullopt;
+    } else if (first == hash) {
+      const bool inline_type = *kind == kSaveTypeInt || *kind == kSaveTypeEnum || *kind == kSaveTypeUInt;
+      if (inline_type && (!type || *type == *kind)) return SaveValueAt{at + 4, *kind};
+    }
+  }
+  return std::nullopt;
+}
+
+namespace {
+
+bool per_player_value(const ItemFlag& f) {
+  return f.rule == ItemRule::per_player && (f.kind == proto::FlagKind::int32 || f.kind == proto::FlagKind::uint32);
+}
+
+constexpr std::string_view kOwnValuesHead = "coop-own-values 1";
+
+}  // namespace
+
+std::vector<OwnValue> read_own_values(std::span<const std::uint8_t> progress) {
+  std::vector<OwnValue> out;
+  for (const auto& f : item_flags()) {
+    if (!per_player_value(f)) continue;
+    if (const auto at = save_value_at(progress, f.hash)) out.push_back({f.hash, get_u32(progress, at->offset)});
+  }
+  return out;
+}
+
+int put_own_values(std::vector<std::uint8_t>& progress, std::span<const OwnValue> own) {
+  static const std::uint32_t life_hash = flag_hash("PlayerStatus.Life");
+  static const std::uint32_t max_life_hash = flag_hash("PlayerStatus.MaxLife");
+  const auto max_life = save_value_at(progress, max_life_hash, kSaveTypeInt);
+  int n = 0;
+  for (const auto& v : own) {
+    const ItemFlag* f = find_item(v.hash);
+    if (f == nullptr || !per_player_value(*f)) continue;  // (only per-player values, whatever the file says)
+    if (v.hash == life_hash) {
+      // (never a Link with no life, never more than the host's save's hearts: those are shared, max)
+      const auto life = static_cast<std::int32_t>(v.value);
+      if (life <= 0 || (max_life && life > static_cast<std::int32_t>(get_u32(progress, max_life->offset)))) continue;
+    }
+    const auto at = save_value_at(progress, v.hash);
+    if (!at) continue;
+    for (std::size_t i = 0; i < 4; ++i) progress[at->offset + i] = static_cast<std::uint8_t>(v.value >> (8 * i));
+    ++n;
+  }
+  return n;
+}
+
+std::string own_values_text(std::span<const OwnValue> own) {
+  std::string out(kOwnValuesHead);
+  out += '\n';
+  for (const auto& v : own) {
+    char buf[16];
+    auto r = std::to_chars(buf, buf + sizeof buf, v.hash, 16);
+    out += "0x";
+    out.append(buf, r.ptr);
+    out += ' ';
+    r = std::to_chars(buf, buf + sizeof buf, v.value);
+    out.append(buf, r.ptr);
+    out += '\n';
+  }
+  return out;
+}
+
+std::optional<std::vector<OwnValue>> parse_own_values(std::string_view text) {
+  std::vector<OwnValue> out;
+  bool head = false;
+  while (!text.empty()) {
+    const auto nl = text.find('\n');
+    std::string_view line = text.substr(0, nl);
+    text = nl == std::string_view::npos ? std::string_view{} : text.substr(nl + 1);
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    if (line.empty()) continue;
+    if (!head) {
+      if (line != kOwnValuesHead) return std::nullopt;
+      head = true;
+      continue;
+    }
+    const auto sp = line.find(' ');
+    if (sp == std::string_view::npos || sp < 3 || line.substr(0, 2) != "0x" || sp + 1 >= line.size()) {
+      return std::nullopt;
+    }
+    const std::string_view h = line.substr(2, sp - 2), v = line.substr(sp + 1);
+    OwnValue o{};
+    const auto rh = std::from_chars(h.data(), h.data() + h.size(), o.hash, 16);
+    const auto rv = std::from_chars(v.data(), v.data() + v.size(), o.value);
+    if (rh.ec != std::errc{} || rh.ptr != h.data() + h.size() || rv.ec != std::errc{} ||
+        rv.ptr != v.data() + v.size()) {
+      return std::nullopt;
+    }
+    out.push_back(o);
+  }
+  if (!head) return std::nullopt;
+  return out;
+}
+
+bool keep_own_values(const fs::path& coop_dir) {
+  if (!is_coop_dir(coop_dir)) return false;
+  const auto slot = newest_slot(coop_dir);
+  if (!slot) return false;
+  const auto bytes = read_file(*slot / std::string(kSlotFiles[0]));
+  if (!bytes) return false;
+  const auto own = read_own_values(*bytes);
+  if (own.empty()) return false;  // (not a save this build can read: what was kept stays)
+  const std::string text = own_values_text(own);
+  return write_file(coop_dir / std::string(kOwnValuesFile),
+                    std::span(reinterpret_cast<const std::uint8_t*>(text.data()), text.size()));
+}
+
+std::optional<std::vector<OwnValue>> kept_own_values(const fs::path& coop_dir) {
+  const auto bytes = read_file(coop_dir / std::string(kOwnValuesFile));
+  if (!bytes) return std::nullopt;
+  return parse_own_values(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
 }
 
 }  // namespace coop::host::save

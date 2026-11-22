@@ -13,6 +13,7 @@
 // Plain code: no ENet, no emulator. The hook (lichii/hook/coop_save.cpp) feeds
 // it the network's messages and the file times.
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -338,8 +339,11 @@ enum class WriteResult {
 // option.sav and account.sav are copied in from `own_dir` when the co-op
 // folder has none yet (copied, never moved). Refuses any folder that is not
 // a co-op folder.
+// Row 249: the guest's own values (keep_own_values first, from the slot there now) go into the host's progress.sav
+// before it is written; `own_kept` (optional) says how many (-1: none kept yet, the first join: the host's values
+// are the start).
 WriteResult write_coop_save(const std::filesystem::path& coop_dir, const SaveSlot& slot,
-                            const std::filesystem::path& own_dir);
+                            const std::filesystem::path& own_dir, int* own_kept = nullptr);
 
 // Which save folder a game plays from (issue 167). Never from coop.ini's address: an invite join is 127.0.0.1
 // (the join helper) and an old address may be a friend's while this player now hosts.
@@ -496,8 +500,52 @@ class GuestNotices {
 };
 
 // The slot_NN folders of a co-op save folder taken away, so it holds nothing until the host's save comes (a guest
-// switching to it must not find an older host's save and load that). Refuses a folder that is not a co-op one.
+// switching to it must not find an older host's save and load that). The guest's own values are kept first
+// (keep_own_values, row 249). Refuses a folder that is not a co-op one.
 // Returns the folders removed, or -1.
 int clear_coop_slots(const std::filesystem::path& coop_dir);
+
+// Row 249: a guest's own values. Every value the game keeps per player (game_items.hpp ItemRule::per_player:
+// rupees, ammo, bottle contents, life, magic) lives for a guest only in its co-op folder's slots, which each join,
+// return to the title and Resync replace with the host's save. So before a co-op folder's slots are taken out or
+// written over, the guest's own values are read from its newest slot and kept in kOwnValuesFile in that folder, and
+// every host's save written there gets them back. The host's own saves and solo saves are never touched.
+
+// The saved game's records (tools/autotest/save_flags.py, little-endian): magic 0x01020304, the pool's offset at 8,
+// from 0x20 a table of 8-byte records. A record whose first word is 0 opens a type (its second word the type id, 0 to
+// 0x1f in order, then the end record 0x20); any other first word is a value's hash, and for the inline types (Int 2,
+// Enum 6, UInt 20) the second word is the value. No checksum.
+inline constexpr std::uint32_t kSaveTypeInt = 2;
+inline constexpr std::uint32_t kSaveTypeEnum = 6;
+inline constexpr std::uint32_t kSaveTypeUInt = 20;
+struct SaveValueAt {
+  std::size_t offset;  // of the value word
+  std::uint32_t type;
+};
+// Where the inline value `hash` (of the type `type`, or of any inline type when nothing) sits in a progress.sav, or
+// nothing (not a save, a table out of order, or no such value).
+std::optional<SaveValueAt> save_value_at(std::span<const std::uint8_t> progress, std::uint32_t hash,
+                                         std::optional<std::uint32_t> type = std::nullopt);
+
+struct OwnValue {
+  std::uint32_t hash;
+  std::uint32_t value;
+  bool operator==(const OwnValue&) const = default;
+};
+// The per-player values a progress.sav holds, in item_flags() order.
+std::vector<OwnValue> read_own_values(std::span<const std::uint8_t> progress);
+// `own` written into a progress.sav in place, each where that save has it. Life is kept only when it is not 0 and is
+// at most the save's PlayerStatus.MaxLife. Returns how many values were written.
+int put_own_values(std::vector<std::uint8_t>& progress, std::span<const OwnValue> own);
+
+inline constexpr std::string_view kOwnValuesFile = "coop-own-values.txt";
+std::string own_values_text(std::span<const OwnValue> own);
+// Nothing for a text that is not one (another version, a damaged line).
+std::optional<std::vector<OwnValue>> parse_own_values(std::string_view text);
+// The newest slot of a co-op folder read and its values kept in kOwnValuesFile (written whole). False when there is no
+// slot to read (the file, if any, is left as it is), not a co-op folder, or it could not be written.
+bool keep_own_values(const std::filesystem::path& coop_dir);
+// The values kept in a co-op folder, or nothing (none kept yet: the guest's first join).
+std::optional<std::vector<OwnValue>> kept_own_values(const std::filesystem::path& coop_dir);
 
 }  // namespace coop::host::save
