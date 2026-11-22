@@ -187,6 +187,39 @@ class PackStepTest(unittest.TestCase):
         with open(os.path.join(mod, "exefs", cu.BUILD_ID + ".ips"), "rb") as f:
             self.assertEqual(f.read(), b"IPS32EEOF")
 
+    def test_code_patch_removed(self):
+        mod = os.path.join(self.tmp.name, "pack")
+        src = os.path.join(self.data, "x.ips")
+        with open(src, "wb") as f:
+            f.write(b"IPS32EEOF")
+        cu.write_code_patch(mod, src)
+        cu.remove_code_patch(mod)
+        self.assertFalse(os.path.exists(os.path.join(mod, "exefs", cu.code_patch_name())))
+        cu.remove_code_patch(mod)   # (none there: no error)
+
+    def test_our_words_per_language(self):
+        """The new message files get strings/<language> over his English: the archive's language, en elsewhere."""
+        strings = os.path.join(self.tmp.name, "strings")
+        os.makedirs(strings)
+        with open(os.path.join(strings, "en.txt"), "w", encoding="utf-8") as f:
+            f.write("[LayoutMsg/CharacterCustomize_00.msbt]\nT_Head_00 = Customize Link\n")
+        with open(os.path.join(strings, "ja.txt"), "w", encoding="utf-8") as f:
+            f.write("[LayoutMsg/CharacterCustomize_00.msbt]\nT_Head_00 = カスタマイズ\n")
+        self.manifest["files"][3]["strings"] = ["LayoutMsg/CharacterCustomize_00.msbt"]
+        files, _g, _n = cu.make(ui_pack.PackRun(self.romfs, self.table), PlainDicts, recompress, self.manifest,
+                                self.data, strings=strings)
+
+        def head(lang):
+            m = dict(sarc.read_entries(files["Mals/%s.sarc.zs" % lang]))["LayoutMsg/CharacterCustomize_00.msbt"]
+            _h, _s, labels, texts = ui_pack.read_msbt(m)
+            return texts[labels["T_Head_00"]].decode("utf-8").rstrip("\0")
+        self.assertEqual(head("USen"), "Customize Link")
+        self.assertEqual(head("JPja"), "カスタマイズ")
+
+    def test_sources(self):
+        self.assertEqual(cu.sources(self.manifest), ["Sequence/Minus.ainb", "Sequence/CharacterMenu.ainb",
+                                                     "UI/Common.blarc.zs"])
+
     def test_shipped_manifest_reads(self):
         if os.path.exists(cu.MANIFEST):
             m = cu.load_manifest()

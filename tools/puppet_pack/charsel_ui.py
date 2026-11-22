@@ -208,6 +208,26 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, run=None
     return list(files)
 
 
+def sources(manifest=None):
+    """The game's files the manifest's plain and compressed entries are made from (the archives by name and the
+    language archives by glob are the pause menu's own: build.py nup_menu_files)."""
+    manifest = manifest or load_manifest()
+    out = []
+    for e in manifest["files"]:
+        for rel in (e.get("from"), e.get("rel")) if "members" not in e else (e.get("rel"),):
+            if rel and rel not in out:
+                out.append(rel)
+    return out
+
+
+def remove_code_patch(mod_dir):
+    """The code patch out of <mod_dir>/exefs (the tab left out: no code that opens screens the game lacks)."""
+    try:
+        os.remove(os.path.join(mod_dir, "exefs", code_patch_name()))
+    except OSError:
+        pass
+
+
 def code_patch_name():
     return BUILD_ID + ".ips"
 
