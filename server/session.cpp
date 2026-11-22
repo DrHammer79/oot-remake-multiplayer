@@ -1576,6 +1576,7 @@ void Session::on_object_present(ConnectionId id, Connection& c, const ObjectPres
       c.present.insert(oid);
       if (e.flags & object_presence::own_logic) o.own_logic.insert(id);  // row 212, as below
       if (e.flags & object_presence::battle_manager) o.battle_manager = true;  // row 222, as below
+      if (e.flags & object_presence::grabbed_here) o.grabbed.insert(id);       // row 232, as below
       if (holding) {
         o.held = true;  // no owner and no OBJECT_OWNER yet: end_owner_hold decides
         continue;
@@ -1616,6 +1617,11 @@ void Session::on_object_present(ConnectionId id, Connection& c, const ObjectPres
       o.own_logic.erase(id);
     }
     if (e.flags & object_presence::battle_manager) o.battle_manager = true;  // row 222 (orders_root)
+    if (e.flags & object_presence::grabbed_here) {
+      o.grabbed.insert(id);  // row 232 (grab_owner)
+    } else {
+      o.grabbed.erase(id);
+    }
     // Tell a newcomer who owns it and the epoch to send with; its own made
     // enemy it knows.
     if (refresh || (fresh && !(o.made && o.owner == id))) {
@@ -2155,6 +2161,17 @@ std::optional<double> Session::distance_to(const Connection& c, const Object& o,
 
 bool Session::orders_root(const Object& o) const {
   return o.boss && !o.root && o.battle_manager;
+}
+
+std::optional<ConnectionId> Session::grab_owner(const Object& o, ConnectionId owner, std::uint64_t now_us) const {
+  if (!o.boss || o.root || o.grabbed.empty() || o.grabbed.contains(owner) || orders_root(o)) return std::nullopt;
+  for (ConnectionId other : o.grabbed) {  // (lowest connection first: one answer while two are held)
+    if (other == owner || !o.present.contains(other) || !has_loaded(other, o) || o.unready.contains(other)) continue;
+    const auto it = connections_.find(other);
+    if (it == connections_.end() || busy(it->second) || unfit_fight_owner(it->second, now_us)) continue;
+    return other;
+  }
+  return std::nullopt;
 }
 
 bool Session::unfit_fight_owner(const Connection& c, std::uint64_t now_us) const {
@@ -2773,6 +2790,18 @@ void Session::run_ownership(std::uint64_t now_us) {
       }
     }
 
+    // Row 222 (twinrova-222-2, option C): a boss group whose root is a battle manager (object_presence::
+    // battle_manager: Twinrova's Enemy_KotakeKoumeBattleManager, no BSA of its own) keeps its owner but for the rules
+    // above (a paused, dead, loading or gone owner; an unready one), and takes no turns. Its own game's manager chose
+    // the sisters' battle state from its own Link the whole fight, and a new owner's manager does not know that
+    // state, so a turn, a hand-over by distance, a nearer player or a chase held a sister in an attack whose next
+    // step never came. (Above the turn rule: a manager has no BSA today, so no attack end is read, but should a
+    // game ever send one, it still does not turn.)
+    if (orders_root(o)) {
+      o.candidate.reset();
+      continue;
+    }
+
     // A boss in a fight takes turns: its AI fights only its owner's Link, so
     // every player gets it for a while (Phantom Ganon's ball, a charge, a
     // breath aimed at each in turn). Every other enemy too, among the players
@@ -2800,13 +2829,17 @@ void Session::run_ownership(std::uint64_t now_us) {
       continue;
     }
 
-    // Row 222 (twinrova-222-2, option C): a boss group whose root is a battle manager (object_presence::
-    // battle_manager: Twinrova's Enemy_KotakeKoumeBattleManager, no BSA of its own) keeps its owner but for the rules
-    // above (a paused, dead, loading or gone owner; an unready one). Its own game's manager chose the sisters'
-    // battle state from its own Link the whole fight, and a new owner's manager does not know that state, so a
-    // hand-over by distance, a nearer player or a chase held a sister in an attack whose next step never came.
-    if (orders_root(o)) {
-      o.candidate.reset();
+    // Row 232: a summoned piece of this boss (Dead Hand's hand) holds another game's own Link while its owner's game
+    // is not held: his AI rises only for a grab in his own game, so that game takes him (once his attack in his
+    // owner's game has ended, above). Two held games: he stays, and his turns pass him on.
+    if (auto grabbed = grab_owner(o, owner, now_us)) {
+      if (ask_handover(oid, o, *grabbed, now_us)) {
+        ++stats_.boss_to_grabbed;
+        const auto to = connections_.find(*grabbed);
+        log("boss grab: " + (o.actor.empty() ? std::string("a boss") : o.actor) + " of player " +
+            std::to_string(oc.number) + ": player " +
+            std::to_string(to != connections_.end() ? to->second.number : 0) + " is held by its summoned piece");
+      }
       continue;
     }
 

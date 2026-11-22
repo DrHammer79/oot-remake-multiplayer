@@ -1007,6 +1007,12 @@ inline constexpr std::uint8_t own_logic = 1u << 5;
 // that state. The server moves such a group's root only from an unfit, unready or gone owner (Session::orders_root),
 // never by distance, a nearer player, a chase or a stun hit. An older server ignores the bit.
 inline constexpr std::uint8_t battle_manager = 1u << 6;
+// Row 232 (Dead Hand): set on a boss's entry by a game where a summoned piece of that boss that this game owns holds
+// this game's own Link (one of Dead Hand's hands, owned here, in its grab). The boss's AI answers a grab only in its
+// own game (OneShotDeadHandHandSendMessage MessageAppear: he rises by the held Link), so a player grabbed in a game
+// that does not own him was held with nothing rising. The server hands the boss to that game once its owner's attack
+// has ended (Session::grab_owner), unless its owner is held too. An older server ignores the bit.
+inline constexpr std::uint8_t grabbed_here = 1u << 7;
 }  // namespace object_presence
 
 struct ObjectPresence {

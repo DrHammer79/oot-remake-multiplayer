@@ -750,6 +750,13 @@ bool IsBattleManager(std::string_view name) {
     return name == "Enemy_KotakeKoumeBattleManager";
 }
 
+std::string_view GrabbingSummoner(std::string_view name) {
+    // DeadHand_Hand.action.basicattack: the hand grabs the Link its own perception sees (its own game's), and tells
+    // its own game's Dead Hand, who rises by that Link.
+    if (name == "Enemy_DeadHand_Hand") return "Enemy_DeadHand";
+    return {};
+}
+
 bool IsScreamer(std::string_view name) {
     // Row 230: their packs' RedeadParam (the Gibdo's has the Redead's as its parent).
     return (name.starts_with("Enemy_ReDead") || name.starts_with("Enemy_Gibdo")) &&
@@ -799,7 +806,7 @@ std::string_view MinionMaker(std::string_view name) {
     // names: ExecutePoeMegMessageReceiver, MegDummy_SeatId) are made anew each cycle by each game's Meg, which rolls
     // its own layout, and got ids by order, so three made in one frame matched differently between games. Only
     // her owner's are kept and shared; a copy game makes those (as Gohma's eggs). A copy's Meg that remakes them
-    // in a loop is caught (kMinionLoopMax).
+    // in a loop is logged (kMinionLoopMax), still deleted.
     if (name == "Enemy_MiddleBoss_Poe_Meg_Dummy") return "Enemy_MiddleBoss_Poe_Meg";
     return {};
 }
@@ -1248,6 +1255,7 @@ void Sync::Reset() {
     refused_.clear();
     minion_refusals_.clear();
     minion_loop_.clear();
+    grabbing_.clear();
     decider_ = 0;
     // next_key_ and made_counter_ go on: the director never makes a key
     // twice, and the server keeps made ids until they are removed.
@@ -2789,7 +2797,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             send.emplace_back(std::move(spawn));
             notes_.emplace_back("split here: shared " + s->name);
         } else if (const std::string_view maker = MinionMaker(s->name);
-                   !maker.empty() && MinionOwner(maker, s->position) != 0 && !minion_loop_.contains(s->name)) {
+                   !maker.empty() && MinionOwner(maker, s->position) != 0) {
             if (MinionOwner(maker, s->position) == self) {
                 // Our boss made it: share it (the others make it from this).
                 o.id = {proto::ObjectKind::made, self, ++made_counter_};
@@ -2811,16 +2819,16 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                     if (!refused_.contains(s->address)) {
                         ++refused_count_;
                         // Row 231: a copy's boss that remakes what we delete, again and again (Meg's decoys: a
-                        // copy's Meg may make them anew when hers are gone), stops being refused here: from then
-                        // on ours are matched by order as before (SceneSpawnId), for the rest of the scene.
+                        // copy's Meg may make them anew when hers are gone), is still refused: matching ours by
+                        // order again would bring back row 231's different layouts and show the owner's beside
+                        // ours. The loop is logged once a scene per name, for the run to show whether it happens.
                         auto& times = minion_refusals_[s->name];
                         times.push_back(now_us);
                         while (!times.empty() && now_us - times.front() > kMinionLoopUs) times.pop_front();
-                        if (times.size() > kMinionLoopMax) {
-                            minion_loop_.insert(s->name);
+                        if (times.size() > kMinionLoopMax && minion_loop_.insert(s->name).second) {
                             notes_.emplace_back("minions: our copy of " + std::string(maker) + " made " +
                                                 std::to_string(times.size()) + " " + s->name +
-                                                " within 3 s (a loop): ours matched by order from now on");
+                                                " within 3 s (a loop): still deleted, the owner's kept");
                         }
                     }
                     refused.insert(s->address);
@@ -3057,7 +3065,10 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             const std::string anim = o.animation ? o.animation->name : std::string();
             if (!IsScreamer(o.name)) {
                 // (not a screamer: nothing to share)
-            } else if (!known || owner->second.player != self) {
+            } else if (!known) {
+                notes_.emplace_back("scream: our Link took a hit from " + o.name + " ('" + anim +
+                                    "'): no owner known (alone, or not yet given), nothing to share");
+            } else if (owner->second.player != self) {
                 notes_.emplace_back("scream: our Link took a hit from a copy of " + o.name + " ('" + anim +
                                     "'): not ours, its owner's game shares its own");
             } else if (!IsScream(anim, hit.took)) {
@@ -3198,6 +3209,29 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
 
     std::vector<proto::ObjectPresence> present;
     present.reserve(objects_.size() + away_.size());
+    // Row 232: a summoned piece we own in its attack holds our own Link: its boss is wanted here.
+    std::set<std::string, std::less<>> grabbing;
+    for (const auto& [address, o] : objects_) {
+        const std::string_view boss = GrabbingSummoner(o.name);
+        const auto owner = owners_.find(o.id);
+        if (!boss.empty() && o.attacking.value_or(false) && now_seen.contains(address) && owner != owners_.end() &&
+            owner->second.player == self) {
+            grabbing.insert(std::string(boss));
+        }
+    }
+    if (grabbing != grabbing_) {
+        for (const std::string& boss : grabbing) {
+            if (!grabbing_.contains(boss)) {
+                notes_.emplace_back("grab: our " + boss + "'s piece holds our Link: " + boss + " wanted here");
+            }
+        }
+        for (const std::string& boss : grabbing_) {
+            if (!grabbing.contains(boss)) {
+                notes_.emplace_back("grab: no piece of " + boss + " holds our Link now");
+            }
+        }
+        grabbing_ = grabbing;
+    }
     std::vector<proto::FishLureEntry> fish;  // issue 151: FISH_LURE
     for (auto& [address, o] : objects_) {
         if (o.dead_said) {
@@ -3343,6 +3377,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         if (IsBattleManager(o.name)) {
             flags |= proto::object_presence::battle_manager;  // row 222: its group moves only from an unfit owner
+        }
+        if (grabbing.contains(o.name)) {
+            flags |= proto::object_presence::grabbed_here;  // row 232: his piece holds our Link: he is wanted here
         }
         if (!bound_.contains(address) && OwnLogicEncounter(o.name, scene_)) {
             flags |= proto::object_presence::own_logic;  // row 212: our cell logic made it: it stays with such a game

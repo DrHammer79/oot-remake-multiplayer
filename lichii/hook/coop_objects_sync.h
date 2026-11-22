@@ -397,7 +397,7 @@ inline constexpr float kSplitReachM = 30.0f;  // a brood's reach (its GroupPart'
 std::string_view MinionMaker(std::string_view name);
 inline constexpr float kMinionReachM = 40.0f;
 // Row 231: more than this many of one minion made by a copy's boss within kMinionLoopUs (each deleted here) is a
-// loop: Meg makes 3 decoys a cycle, King Dodongo a few babies, Gohma an egg at a time.
+// loop (logged once, still deleted): Meg makes 3 decoys a cycle, King Dodongo a few babies, Gohma an egg at a time.
 inline constexpr std::size_t kMinionLoopMax = 12;
 inline constexpr std::uint64_t kMinionLoopUs = 3'000'000;
 
@@ -411,6 +411,11 @@ bool IsScreamer(std::string_view name);
 // Row 222 (Twinrova, option C): a boss's battle manager (Enemy_KotakeKoumeBattleManager: it chooses its sisters'
 // battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager.
 bool IsBattleManager(std::string_view name);
+// Row 232: the boss a summoned piece grabs for (Enemy_DeadHand_Hand -> Enemy_DeadHand), else empty. While a piece we
+// own is in its attack (its grab: it holds our own Link), our presence entry of that boss carries
+// object_presence::grabbed_here, and the server hands the boss to us (Session::grab_owner): his AI rises only for a
+// grab in his own game (OneShotDeadHandHandSendMessage MessageAppear).
+std::string_view GrabbingSummoner(std::string_view name);
 // A hit our Link took from a screamer is its scream (not its bite) when it plays the scream's AS node (Shout,
 // CryStanding), or took no life while it plays none of the bite's (Attack_*).
 bool IsScream(std::string_view animation, std::int32_t took);
@@ -1651,9 +1656,11 @@ private:
     std::set<std::uint64_t> refused_;  // our own rolls, to delete
     std::size_t refused_count_ = 0;
     // Row 231: when each boss minion name was last refused here (new actors only), and the names refused in a loop
-    // (over kMinionLoopMax within kMinionLoopUs): those are matched by order again for the rest of the scene.
+    // (over kMinionLoopMax within kMinionLoopUs): logged once a scene, still refused.
     std::map<std::string, std::deque<std::uint64_t>, std::less<>> minion_refusals_;
     std::set<std::string, std::less<>> minion_loop_;
+    // Row 232: the bosses whose summoned piece we own holds our Link now (GrabbingSummoner), as last told.
+    std::set<std::string, std::less<>> grabbing_;
     // Each other player's scene and the server time of its latest sample
     // (guarded by inbox_mutex_: PLAYER_SAMPLE comes too often for the inbox).
     std::map<std::uint8_t, std::pair<std::string, std::uint64_t>> scenes_;

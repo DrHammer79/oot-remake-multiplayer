@@ -137,6 +137,51 @@ TEST_CASE("objects: a scene's own enemy gets the same id on both games") {
     CHECK(one.IdOf(0x300)->kind == proto::ObjectKind::placed);
 }
 
+TEST_CASE("objects: a hand we own holding our Link lists Dead Hand with grabbed_here (row 232)") {
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_DeadHand_Hand") == "Enemy_DeadHand");
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_DeadHand").empty());
+    CHECK(CoopObjects::GrabbingSummoner("Enemy_Stalchild").empty());
+    const auto flags_of = [](const std::vector<proto::ObjectPresent>& present, std::uint64_t hash) {
+        std::optional<std::uint8_t> out;
+        for (const auto& p : present) {
+            for (const auto& e : p.objects) {
+                if (e.id.value == hash) out = e.flags;
+            }
+        }
+        return out;
+    };
+    const auto boss = [](int) { return Enemy(0x100, 0x11, 16, 0.0f, "Enemy_DeadHand"); };
+    const auto hand = [](bool grabbing) {
+        Seen s = Enemy(0x200, 0x22, 4, 5.0f, "Enemy_DeadHand_Hand");
+        s.attacking = grabbing;
+        return s;
+    };
+    Sync sync;
+    Tick(sync, 0, {boss(0), hand(false)}, 1);
+    Own(sync, *sync.IdOf(0x100), 2);  // Dead Hand is player 2's
+    Own(sync, *sync.IdOf(0x200), 1);  // the hand is ours (nearest to our Link)
+    auto present = All<proto::ObjectPresent>(Tick(sync, 2500 * kMs, {boss(0), hand(false)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
+    (void)sync.TakeNotes();
+    // Our hand grabs our Link: Dead Hand is wanted here (the server hands him over: Session::grab_owner).
+    present = All<proto::ObjectPresent>(Tick(sync, 2600 * kMs, {boss(0), hand(true)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) != 0);
+    CHECK((*flags_of(present, 0x22) & proto::object_presence::grabbed_here) == 0);  // only on the boss
+    auto notes = sync.TakeNotes();
+    CHECK(std::any_of(notes.begin(), notes.end(), [](const std::string& n) { return n.starts_with("grab: our "); }));
+    // It lets go: the bit goes.
+    present = All<proto::ObjectPresent>(Tick(sync, 2700 * kMs, {boss(0), hand(false)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
+    // A copy of another player's hand in its attack holds nobody of ours: no bit.
+    Own(sync, *sync.IdOf(0x200), 2, 1);
+    present = All<proto::ObjectPresent>(Tick(sync, 5000 * kMs, {boss(0), hand(true)}, 1));
+    REQUIRE(flags_of(present, 0x11));
+    CHECK((*flags_of(present, 0x11) & proto::object_presence::grabbed_here) == 0);
+}
+
 TEST_CASE("objects: OBJECT_PRESENT on a change and every 2 s, and a new scene starts afresh") {
     Sync sync;
     auto step = Tick(sync, 0, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 2)});
@@ -8021,7 +8066,7 @@ TEST_CASE("objects: Dead Hand's hands are enemies of their own, each grabs its o
     CHECK(g[0] == proto::ObjectGroupEntry{id(1), id(1), proto::object_group::boss});
 }
 
-TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's Meg remaking them in a loop is let be (row 231)") {
+TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own are deleted (also in a loop) and a turn hands the making over (row 231)") {
     const std::string meg = "Enemy_MiddleBoss_Poe_Meg";
     const std::string decoy = "Enemy_MiddleBoss_Poe_Meg_Dummy";
     CHECK(CoopObjects::MinionMaker(decoy) == meg);
@@ -8045,32 +8090,80 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's Meg r
         CHECK(s.actor == decoy);
     }
 
-    // B's copy of Meg makes her own decoys (her own layout): deleted, and A's made instead.
-    // (20 m off: within kClaimDistance of an owner's decoy being made here, one would be taken for it.)
+    // B's copy of Meg makes her own decoys on the same seats (her own layout, the room's seats). B's spawn first:
+    // nothing of A's is being made here yet, so B's own is deleted at once, and A's is made instead.
     Sync b;
     const Seen meg_b = Enemy(0x200, 0x77, 16, 0.0f, meg);
     Tick(b, 0, {meg_b}, 2);
     Own(b, meg_id, 1);
     Tick(b, 50 * kMs, {meg_b}, 2);
-    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, -20.0f, decoy)}, 2);
+    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, 3.0f, decoy)}, 2);
     CHECK_FALSE(b.IdOf(0x210));
     CHECK(b.Removes() == std::vector<std::uint64_t>{0x210});
     b.Receive(spawns[0]);
     Tick(b, 150 * kMs, {meg_b}, 2);
     REQUIRE(b.Creates().size() == 1);
 
-    // Her copy remakes what we delete, again and again: past kMinionLoopMax within kMinionLoopUs ours are matched
-    // by order again (placed ids), for the rest of the scene, never deleted in a loop.
-    std::uint64_t at = 200 * kMs;
-    std::size_t made = 0;
-    for (; made <= CoopObjects::kMinionLoopMax; ++made) {
-        Tick(b, at, {meg_b, Enemy(0x300 + made, ~0ULL, 1, -20.0f, decoy)}, 2);
+    // The claim path: A's next decoy is being made here (not yet bound) when B's own Meg makes one on that same seat
+    // (within kClaimDistance, half a metre off): it may be the director's copy, so it waits; once the director's copy is bound it is
+    // not, and it is deleted. One decoy on that seat, A's.
+    b.Receive(spawns[1]);
+    Tick(b, 200 * kMs, {meg_b, Enemy(0x220, ~0ULL, 1, -2.5f, decoy)}, 2);
+    CHECK_FALSE(b.IdOf(0x220));
+    CHECK(b.Removes().empty());
+    const auto creates = b.Creates();
+    REQUIRE(creates.size() == 2);
+    const auto copy = std::find_if(creates.begin(), creates.end(), [](const auto& c) { return c.position[0] < 0.0f; });
+    REQUIRE(copy != creates.end());
+    b.Bind({{creates[0].key == copy->key ? creates[1].key : creates[0].key, 0x211}, {copy->key, 0x221}});
+    Tick(b, 250 * kMs,
+         {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x220, ~0ULL, 1, -2.5f, decoy),
+          Enemy(0x221, ~0ULL, 1, -3.0f, decoy)},
+         2);
+    REQUIRE(b.IdOf(0x221));
+    CHECK(*b.IdOf(0x221) == spawns[1].id);
+    REQUIRE(b.IdOf(0x211));
+    CHECK(*b.IdOf(0x211) == spawns[0].id);
+    CHECK_FALSE(b.IdOf(0x220));
+    CHECK(b.Removes() == std::vector<std::uint64_t>{0x220});
+
+    // Her copy remakes what we delete, again and again: still deleted every time (never matched by order, which was
+    // row 231's own bug); the loop is logged once.
+    std::uint64_t at = 300 * kMs;
+    (void)b.TakeNotes();
+    for (std::size_t made = 0; made <= CoopObjects::kMinionLoopMax + 2; ++made) {
+        const std::uint64_t own = 0x300 + made;
+        Tick(b, at, {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy),
+                     Enemy(own, ~0ULL, 1, -20.0f, decoy)},
+             2);
+        CHECK_FALSE(b.IdOf(own));
+        CHECK(b.Removes() == std::vector<std::uint64_t>{own});
         at += 100 * kMs;
     }
-    (void)b.Removes();
-    const std::uint64_t late = 0x300 + made;
-    Tick(b, at, {meg_b, Enemy(late, ~0ULL, 1, -20.0f, decoy)}, 2);
-    REQUIRE(b.IdOf(late));
-    CHECK(b.IdOf(late)->kind == proto::ObjectKind::placed);
+    const auto notes = b.TakeNotes();
+    CHECK(std::count_if(notes.begin(), notes.end(),
+                        [](const std::string& n) { return n.find("(a loop): still deleted") != std::string::npos; }) == 1);
+
+    // Meg turns to B mid-cycle (a MiddleBoss turns every attack): A's decoys already made stay A's (made ids, their
+    // maker's); the decoys made from now on are B's to share, and A's game deletes its own new ones.
+    Own(b, meg_id, 2, 1);
+    Own(a, meg_id, 2, 1);
+    const auto turned = All<proto::ObjectSpawn>(Tick(
+        b, at,
+        {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy),
+         Enemy(0x400, ~0ULL, 1, 9.0f, decoy)},
+        2));
+    REQUIRE(turned.size() == 1);
+    CHECK(turned[0].id.kind == proto::ObjectKind::made);
+    CHECK(turned[0].id.maker == 2);
+    CHECK(*b.IdOf(0x211) == spawns[0].id);
+    CHECK(*b.IdOf(0x221) == spawns[1].id);
     CHECK(b.Removes().empty());
+    Tick(a, at, {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+                 Enemy(0x112, ~0ULL, 1, 6.0f, decoy), Enemy(0x130, ~0ULL, 1, 12.0f, decoy)},
+         1);
+    CHECK(a.IdOf(0x110));
+    CHECK_FALSE(a.IdOf(0x130));
+    CHECK(a.Removes() == std::vector<std::uint64_t>{0x130});
 }
+

@@ -180,17 +180,25 @@ Still to design (need a game run first):
   three made in one frame matched differently between games. Now (Geno's MinionMaker idea) `MinionMaker` maps the
   decoy to Meg: only her owner's game keeps its decoys and shares them (made ids, as Gohma's eggs); a copy game
   deletes its own and makes the owner's, so every game shows the owner's layout. His worry (a copy's Meg remaking
-  them in a loop) is caught for every boss minion: more than `kMinionLoopMax` (12) of one minion deleted within
-  3 s in one game, and that game matches its own by order again (as before) for the rest of the scene, with a
-  `minions: ... a loop` log line. Unit tests only; to check in a game: B watches A's Meg split: the same four
+  them in a loop) is logged for every boss minion: more than `kMinionLoopMax` (12) of one minion deleted within
+  3 s in one game gives one `minions: ... (a loop): still deleted, the owner's kept` line a scene; ours stay
+  deleted (matching them by order again would bring row 231 back and show the owner's decoys beside ours). A copy's
+  decoy made on the seat of an owner's decoy being made waits up to `kCreateWaitUs` (it may be the director's copy)
+  and goes once the copy is bound. A turn mid-cycle: the decoys made so far stay their maker's (made ids); those
+  made from then on are the new owner's to share. Unit tests only; to check in a game: B watches A's Meg split: the same four
   places on both screens; no `a loop` line.
 - Dead Hand (row 232, enemies-01110): his hands were boss parts of him (`PartRules` kSummoned), so they followed
   his owner and grabbed only that player. They are placed enemies with their own AI, BSA and perception
   (`DeadHand_Hand.action.basicattack` grabs the target it perceives: its own game's Link), so they are plain
   enemies now: each goes to its nearest player, whose game grabs that player. Dead Hand stays a boss by name
   (`IsBossOrPart`). A grab tells its own game's Dead Hand (`OneShotDeadHandHandSendMessage` `MessageAppear`); he
-  rises for it where he is owned (his turns pass him between the players), and in a game that does not own him he
-  waits for his owner's verbs (that player is held until mashing frees them or his turn comes). Unit tests only;
+  rises for it where he is owned. A game whose own hand holds its own Link lists Dead Hand with
+  `object_presence::grabbed_here` (a `grab:` log line), and the server hands him to that game once his attack in
+  his owner's game has ended (`Session::grab_owner`, `boss grab:` server line, `boss_to_grabbed`), unless his
+  owner's Link is held too (then his turns pass him on). The reverse (he sinks or is hit, and his hands let go): his
+  own game's AI tells its own hands; a hand owned by another game is a copy there and follows its owner's motion, so
+  the hand that holds a Link is in the same game as Dead Hand once the grab rule has moved him, and his own message
+  reaches it. Unit tests only;
   to check in a game: A and B each near a different hand: both grabbed; Dead Hand rises for each in turn.
 - Water Temple and others (row 233, enemies-01110: probe): the dungeon pieces whose `Presence.FlagName` is a
   shared flag are now listed from the romfs (`tools/puppet_pack/presence_gates.py` ->
