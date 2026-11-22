@@ -816,3 +816,32 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hans, "Join Saria again") == "再次加入 Saria");
     CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
 }
+
+TEST_CASE("coop i18n (help-lines): every row's help on the - page has a line in both Chinese tables and fits the caption") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    REQUIRE(hans != nullptr);
+    REQUIRE(hant != nullptr);
+    std::vector<std::string> helps;
+    // Every action but kNone (the enum's last is kViewHostSettings) has a help.
+    for (int a = static_cast<int>(CoopPauseTab::RowAction::kNone) + 1;
+         a <= static_cast<int>(CoopPauseTab::RowAction::kViewHostSettings); ++a) {
+        const std::string h = CoopPauseTab::RowHelp(static_cast<CoopPauseTab::RowAction>(a));
+        CHECK_MESSAGE(!h.empty(), "no help for RowAction " << a);
+        helps.push_back(h);
+    }
+    CHECK(std::string(CoopPauseTab::RowHelp(CoopPauseTab::RowAction::kNone)).empty());
+    for (int tab = 0; tab < 5; ++tab) helps.push_back(CoopPauseTab::MenuTabHelp(tab));
+    helps.push_back(CoopPauseTab::kGameHelp);
+    helps.push_back(CoopPauseTab::kTypingHelp);
+    for (const std::string& en : helps) {
+        if (en.empty()) continue;
+        for (const CoopI18n::Lang* lang : {hans, hant}) {
+            const std::string zh = Line(*lang, en.c_str());
+            CHECK_MESSAGE(!zh.empty(), lang->code << " has no line for: " << en);
+            // The caption holds a few short lines: the help, wrapped, is not cut with "..." in any language.
+            CHECK_MESSAGE(CoopPauseTab::HelpText(zh).find("...") == std::string::npos, lang->code << " too long: " << en);
+        }
+        CHECK_MESSAGE(CoopPauseTab::HelpText(en).find("...") == std::string::npos, "English too long: " << en);
+    }
+}

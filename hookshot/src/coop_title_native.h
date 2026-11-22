@@ -42,6 +42,13 @@ struct Look {
     int per_page = kRowButtons;                        // rows a page (the buttons less Back)
     std::string hint;                                  // the line under the rows: the page, or what the row does
     std::array<bool, kMaxButtons> dim{};               // a row that cannot be used now (a full game): shown dimmed
+    // The page's first row with two cells (Row::cells: the Host page's Who can join), shown as the game's Options
+    // toggle over its button (the pack's Pa_CoopToggle_00) where the module can: that button (-1: none on this page),
+    // the row's name, its two cells and the chosen one. The button keeps the row's text for when it cannot.
+    int toggle = -1;
+    std::string toggle_name;
+    std::array<std::string, 2> toggle_cells{};
+    int toggle_cell = 0;
 };
 // The buttons for the menu's view: `buttons` of the title's (kButtons, or up to kMaxButtons with the pack's list),
 // the rows a page at a time (`buttons` - 1 of them) with Back right under the page's last, on the page that holds the

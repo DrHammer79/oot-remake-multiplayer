@@ -54,6 +54,7 @@
 #include "coop_difficulty.h"
 #include "coop_actor_events.h"
 #include "coop_boss_native.h"
+#include "coop_boss_orders.h"
 #include "coop_boss_scenes.h"
 #include "coop_hallway.h"
 #include "coop_dbno_body.h"
@@ -114,6 +115,7 @@
 #include "hos_coop_actors.h"
 #include "hos_coop_nodes.h"
 #include "hos_coop_bosses.h"
+#include "hos_coop_boss_orders.h"
 #include "hos_coop_pads.h"
 #include "hos_coop_save_load.h"
 #include "hos_coop_sound.h"
@@ -432,6 +434,42 @@ void SetBossNative() {
              WrapIn(HOS_COOP_WRAP_BRAIN_VERB) ? "wrapped" : "not wrapped in this hookshot.exe",
              WrapIn(HOS_COOP_WRAP_ACTION_VERB) ? (actions ? "wrapped" : "wrapped, off") : "not wrapped",
              brain ? "" : ": bosses as before (owner's animations, gohma-sync)");
+}
+
+// Row 222 (coop_boss_orders.h): one battle manager for every game, when this hookshot.exe wraps the sisters' message
+// handler (patch 0036, row 25) and LICHII_COOP_BOSS_ORDERS is not 0. Asked with SetBossNative.
+void SetBossOrders() {
+    const bool on = WrapIn(HOS_COOP_WRAP_BOSS_ORDER) && Env("LICHII_COOP_BOSS_ORDERS") != "0";
+    CoopBossOrders::Table& t = CoopBossOrders::TheTable();
+    if (t.On() == on) {
+        return;
+    }
+    t.SetOn(on);
+    LOG_INFO(Core, "coop: bosses: battle manager orders {} ({})", on ? "shared" : "each game's own",
+             WrapIn(HOS_COOP_WRAP_BOSS_ORDER) ? (on ? "wrapped" : "wrapped, off by LICHII_COOP_BOSS_ORDERS")
+                                              : "not wrapped in this hookshot.exe");
+}
+
+// Every 10 s while orders move: the counts (the probe run's lines).
+void LogBossOrders() {
+    static std::uint64_t said_ms = 0;
+    static CoopBossOrders::Counts said{};
+    const std::uint64_t now = SteadyMs();
+    if (now - said_ms < 10'000) {
+        return;
+    }
+    const CoopBossOrders::Counts c = CoopBossOrders::TheTable().GetCounts();
+    if (c.owner_kept == said.owner_kept && c.copy_skipped == said.copy_skipped && c.delivered == said.delivered &&
+        c.copy_own_ran == said.copy_own_ran && c.dropped == said.dropped && c.restarts == said.restarts &&
+        c.replayed == said.replayed) {
+        return;
+    }
+    said_ms = now;
+    said = c;
+    LOG_INFO(Core, "coop: bosses: battle orders: ours sent {}; copies: {} owner's put in, {} own skipped, {} own run "
+                   "before the owner's came, {} dropped, {} started again; {} to unlisted actors; made ours: {} of our "
+                   "manager's skipped orders put in",
+             c.owner_kept, c.delivered, c.copy_skipped, c.copy_own_ran, c.dropped, c.restarts, c.unknown, c.replayed);
 }
 
 // Every 10 s while a boss is synced natively: the counts (first proof lines).
@@ -815,7 +853,8 @@ const CoopDraw::MapShown* MapScene(bool camera, std::uint8_t self) {
         return nullptr;
     }
     const auto menu = CoopMapPage::MenuState();
-    const auto page = CoopMapPage::Shown(capture->dungeon);
+    // (tabs-overhaul-01110 (c): not over our - tabs, where the - menu still counts the Map as its page)
+    const auto page = CoopPauseTab::OwnMinusPageShown() ? std::nullopt : CoopMapPage::Shown(capture->dungeon);
     m.minimap.reset();
     // (row 199: also while the pause menu's tab strip is up, any page: patch 0018's menu_open is a screen that had the
     // mouse, which a mod's page such as Character Select's never has, so the marks drew over it. The Map page: m.page)
@@ -1391,6 +1430,7 @@ void Frame(void* ctx, int site) {
         RunCalls(ctx);
         RequestHostAutoSave(ctx);   // (only when a guest's ask opened a round: CoopSave::TakeSaveRequest)
         LogBossNative();
+        LogBossOrders();
         CoopMapPage::Frame(ctx, g_api);   // the Map page's panes, found once while the game plays
         if (const auto menu = CoopMapPage::MenuState()) {  // minimap-b: the drop log's menu state (patch 0018)
             coop::host::map_drop_log().set_menu(menu->menu_open, menu->map_page);
@@ -1423,6 +1463,7 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         const WorldLevel level = HelloLevel(a, b);
         g_world_wraps.store(level.wraps);
         SetBossNative();
+        SetBossOrders();
         if (g_world_version.exchange(level.version) != level.version) {
             LOG_INFO(Core, "coop: world hooks: hookshot.exe has level {} (this module {}), wraps {:#x}{}", level.version,
                      HOS_COOP_WORLD_VERSION, level.wraps,
@@ -1733,6 +1774,35 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             return 0;
         }
         x[0] = 0;
+        return 1;
+    }
+    if (id == HOS_COOP_WRAP_BOSS_ORDER && phase == 0) {
+        // Row 222: a battle manager's order reaches a sister (x0 its receive node, x1 the message: +4 type, +0x10
+        // the payload). A copy's own manager's orders are skipped once the owner's have come (1: the handler does not
+        // run; x0 1, what it always returns).
+        CoopBossOrders::Table& t = CoopBossOrders::TheTable();
+        std::uint32_t type = 0;
+        if (x[1] == 0 || !CoopRuntime::Read(x[1] + CoopBossOrders::addr::kMessageType, &type, sizeof type) ||
+            !CoopBossOrders::IsOrder(type) || !t.On()) {
+            return 0;
+        }
+        std::uint64_t payload_at = 0;
+        CoopBossOrders::Payload payload{};
+        if (!CoopRuntime::Read(x[1] + CoopBossOrders::addr::kMessagePayload, &payload_at, sizeof payload_at) ||
+            payload_at == 0 || !CoopRuntime::Read(payload_at, payload.data(), payload.size())) {
+            return 0;
+        }
+        namespace oa = CoopBossOrders::addr;
+        std::uint64_t context = 0, owner = 0, actor = 0;
+        if (!CoopRuntime::Read(x[0] + oa::kNodeContext, &context, sizeof context) || context == 0 ||
+            !CoopRuntime::Read(context + oa::kContextOwner, &owner, sizeof owner) || owner == 0 ||
+            !CoopRuntime::Read(owner + oa::kOwnerActor, &actor, sizeof actor)) {
+            actor = 0;
+        }
+        if (!t.OnReceive(x[0], actor, type, payload, t_own_call)) {
+            return 0;
+        }
+        x[0] = 1;
         return 1;
     }
     if (id == HOS_COOP_WRAP_ACTION_VERB && phase == 0) {

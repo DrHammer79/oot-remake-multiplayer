@@ -488,6 +488,7 @@ struct Stats {
   std::uint64_t damage_relayed = 0;     // DAMAGE passed on to an owner
   std::uint64_t boss_to_hitter = 0;     // a boss asked over to the player who hurt it (issue 150)
   std::uint64_t boss_to_near = 0;       // a boss asked over to the player near it (issue 150)
+  std::uint64_t boss_to_grabbed = 0;    // row 232: a boss asked over to a game whose Link its summoned piece holds
   std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)
   std::uint64_t enemy_turns = 0;         // a plain enemy asked over to the next player's turn (enemy_turns)
   std::uint64_t boss_kept_from_unready = 0;  // row 189: ticks a ready, unfit owner's boss was not asked to an unready game
@@ -827,6 +828,8 @@ class Session {
     std::uint64_t fight_began = 0;
     // Boss turns, the attack edge (boss_turn_edge_us): as of its owner's latest sample of this epoch.
     bool attack_read = false;         // the owner reads its attacks (object_state::attack_read)
+    bool battle_manager = false;      // row 222: a game said it is a battle manager (object_presence::battle_manager)
+    std::set<ConnectionId> grabbed;   // row 232: games whose own Link a summoned piece of it holds (grabbed_here)
     bool attacking = false;           // in its attack sequence
     std::uint16_t attack_epoch = 0;   // the epoch those two are of
     std::uint64_t attack_ended_at = 0;  // its newest attack's end in that epoch; 0: none
@@ -1035,6 +1038,13 @@ class Session {
                         std::uint64_t now_us) const;
   bool unfit_owner(const Connection& c, std::uint64_t now_us) const;
   // The same for the owner of a boss or of an enemy in its fight, sooner (fight_owner_dead_us, fight_owner_paused_us).
+  // Row 222 (option C): a boss group's root that a game says is a battle manager (object_presence::battle_manager:
+  // Twinrova's KotakeKoumeBattleManager), with no root of its own. It changes owner only when its owner is
+  // unfit (paused, dead, loading, gone) or unready, never by distance, a nearer player, a chase or a stun hit.
+  bool orders_root(const Object& o) const;
+  // Row 232: a game whose own Link a summoned piece of this boss holds (object_presence::grabbed_here) while its
+  // owner's game is not held: the boss's AI answers that grab only there. None while its owner is held too.
+  std::optional<ConnectionId> grab_owner(const Object& o, ConnectionId owner, std::uint64_t now_us) const;
   bool unfit_fight_owner(const Connection& c, std::uint64_t now_us) const;
   void mark_fight(Object& o, std::uint64_t now_us);
   bool in_fight(const Object& o, std::uint64_t now_us) const;

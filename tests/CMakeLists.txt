@@ -107,6 +107,7 @@ add_executable(coop_tests
   lichii/boss_test.cpp
   lichii/boss_beaten_test.cpp
   lichii/boss_native_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_native.cpp
+  lichii/boss_orders_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_orders.cpp
   lichii/boss_scenes_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_scenes.cpp
   lichii/teleport_test.cpp
   lichii/hallway_test.cpp
@@ -120,6 +121,7 @@ add_executable(coop_tests
   lichii/difficulty_test.cpp
   lichii/ngplus_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ngplus_rules.cpp
   lichii/live_events_test.cpp
+  lichii/presence_gates_test.cpp
   lichii/logic_probe_test.cpp
   lichii/shared_scenes_test.cpp
   lichii/scrubs_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_scrubs.cpp

@@ -170,3 +170,32 @@ TEST_CASE("title native: the column is raised until its lowest box ends on the s
     const float tall = ColumnRaise(kScreenFoot - 900.0f, 500.0f, 0.0f, 1.0f);
     CHECK(500.0f + tall <= kScreenTop + 0.01f);
 }
+
+TEST_CASE("title native: a row with two cells is the page's toggle, on its button, none without, none when fixed") {
+    View v;
+    Row who = R("Who can join", "Private", RowKind::kChoice);
+    who.cells = {"Private", "Public"};
+    who.cell = 0;
+    who.left = who.right = true;
+    v.rows = {R("Players", "4", RowKind::kChoice), who, R("Start hosting")};
+    v.selected = 1;
+    Look l = LookFor(v, 0);
+    CHECK(l.toggle == 1);
+    CHECK(l.toggle_name == "Who can join");
+    CHECK(l.toggle_cells == std::array<std::string, 2>{"Private", "Public"});
+    CHECK(l.toggle_cell == 0);
+    CHECK(l.texts[1] == "Who can join: < Private >");   // (the button keeps the row's words: shown where no toggle can be)
+    v.rows[1].cell = 1;
+    CHECK(LookFor(v, 0).toggle_cell == 1);
+    v.rows[1].fixed = true;
+    CHECK(LookFor(v, 0).toggle == -1);
+    v.rows[1].fixed = false;
+    v.rows[1].cell = -1;
+    CHECK(LookFor(v, 0).toggle == -1);
+    v.rows[1].cell = 0;
+    v.rows[1].cells[1].clear();
+    CHECK(LookFor(v, 0).toggle == -1);
+    View none;
+    none.rows = {R("Start hosting")};
+    CHECK(LookFor(none, 0).toggle == -1);
+}

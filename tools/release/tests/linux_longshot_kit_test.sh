@@ -563,7 +563,7 @@ if [[ $(uname -s) == Linux ]]; then
     check 'start --help lists the options' has "$tmp/start3.txt" '--no-update'
     check 'start --help lists --pack' has "$tmp/start3.txt" '--pack'
     check 'start --help lists --problem-reports' has "$tmp/start3.txt" '--problem-reports'
-    check 'start: no problem-report address in the kit: nothing asked, nothing sent' bash -c '! grep -q "Send problem reports" "$1" && [ ! -e "$2/logs/problem-send.json" ]' _ "$tmp/start1.txt" "$D"
+    check 'start: no problem-report address in the kit: nothing asked, nothing sent' bash -c '! grep -q "automatic problem reports" "$1" && [ ! -e "$2/logs/problem-send.json" ]' _ "$tmp/start1.txt" "$D"
     bash "$kit/start-squadala.sh" --problem-reports nosend </dev/null >"$tmp/start4.txt" 2>&1
     check 'start --problem-reports nosend: sending off, kept' bash -c 'grep -q "\"send\": \"off\"" "$1"' _ "$D/logs/problem-send.json"
     bash "$kit/start-squadala.sh" --problem-reports maybe </dev/null >"$tmp/start5.txt" 2>&1; export CODE=$?
