@@ -232,7 +232,12 @@ void Page::MinusLineStep(int dir) {
 }
 
 void Page::MinusTabMoved() {
-    minus_row_ = 0, minus_rows_ = 0;   // (another page: its first row; the module sets its rows)
+    // (another page: the row its cursor was on when it was left, its first the first time, as the game's pages keep
+    // theirs; the module sets its rows, and a row gone since finds the next shown: SetMinusRows)
+    if (minus_row_tab_ >= 0 && minus_row_tab_ < kMinusTabs) minus_row_kept_[static_cast<std::size_t>(minus_row_tab_)] = minus_row_;
+    minus_row_ = minus_tab_ >= 0 && minus_tab_ < kMinusTabs ? minus_row_kept_[static_cast<std::size_t>(minus_tab_)] : 0;
+    minus_row_tab_ = minus_tab_;
+    minus_rows_ = 0;
     minus_list_ = false, minus_line_ = -1, minus_lines_ = 0, minus_raw_ = false, minus_raw_back_ = false;
     minus_in_view_ = false, minus_back_ = false, minus_list_back_ = false, minus_moves_ = 0, minus_line_decide_ = -1;
     minus_decide_ = -1;
@@ -241,9 +246,11 @@ void Page::MinusTabMoved() {
 
 std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
     if (minus_tab_ < 0) {
-        if ((down & kPadR) != 0 && strip_.lit == kMapCategory) {
+        const std::uint64_t right = minus_native_ ? kPadR | kPadZR : kPadR;   // (the sequence's own R / ZR)
+        if ((down & right) != 0 && strip_.lit == kMapCategory) {
             minus_tab_ = 0, minus_slide_ = 1;
             MinusTabMoved();
+            if (minus_native_) return buttons & ~swallow_;   // (the game's: the Map sequence opens CoopMenu_00)
             strip_sound_ = "mc_TabToRight";
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
@@ -269,10 +276,20 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             MinusTabMoved();
         }
         swallow_ |= kPadR;
+    } else if ((down & (kPadZL | kPadZR)) != 0 && !(minus_list_ && minus_raw_)) {
+        // (a list's page: the games list's 6 at a time, as the game's own long lists page)
+        // (swallowed on every tab and view, but it clicks only when the list really pages: review-01110-c)
+        minus_page_step_ = (down & kPadZR) != 0 ? 1 : -1;
+        if (minus_pageable_) strip_sound_ = "button_on";
+        swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
-        strip_sound_ = "mc_TabToLeft";
         MinusTabMoved();
+        if (minus_native_ && minus_tab_ < 0) {   // (the game's too: the Map sequence closes CoopMenu_00)
+            swallow_ |= buttons & ~(kPadL | kPadB | kPadPlus | kPadMinus);
+            return buttons & (kPadL | kPadB | kPadPlus | kPadMinus) & ~swallow_;
+        }
+        strip_sound_ = "mc_TabToLeft";
         swallow_ |= kPadL;
     } else if (minus_list_ && minus_raw_) {   // (co-op's menu's own page: the moves are its events)
         if ((down & kPadB) != 0 && (minus_rows_ != 0 || minus_raw_back_)) {
@@ -699,8 +716,29 @@ std::pair<float, float> SlideOffsets(int dir, float p) {
     return {0.0f, 0.0f};
 }
 
+MinusSlideOffsets MinusSlideAt(int from, int to, float p) {
+    p = std::clamp(p, 0.0f, 1.0f);
+    MinusSlideOffsets o;
+    if (from < 0 && to >= 0) {   // (R on Map: ours in from the right, the Map out to the left)
+        o.page = kPageWidth * (1.0f - p), o.map = -kPageWidth * p;
+    } else if (from >= 0 && to < 0) {   // (L on our first: ours out to the right, the Map back from the left)
+        o.page = kPageWidth * p, o.map = -kPageWidth * (1.0f - p);
+    } else if (from >= 0 && to >= 0 && from != to) {   // (between ours: the next from the side it lies on)
+        o.page = (to > from ? kPageWidth : -kPageWidth) * (1.0f - p), o.map = -kPageWidth;
+    }
+    return o;
+}
+
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms) {
     return (strip_state == 1 || strip_state == 2) && seen_ms != 0 && now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
+}
+
+bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t open_ms, std::uint64_t seen_ms,
+                    std::uint64_t now_ms) {
+    if (!hide || !up || sliding) return false;
+    if (!native) return true;
+    return open_ms != 0 && now_ms >= open_ms && now_ms - open_ms >= kMapUnderAfterMs && seen_ms != 0 &&
+           now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
 }
 
 namespace {
@@ -1405,6 +1443,164 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
     }
     for (std::string& r : rows) r = Fit(std::move(r));   // ("": the row not shown)
     return rows;
+}
+
+const char* RowHelp(RowAction a) {
+    switch (a) {
+    case RowAction::kOpenMain: return "Co-op's own menu: what co-op is doing now, with Host, Join, Stop and Leave.";
+    case RowAction::kCopyCode: return "Copies your game's room name or code. Send it to your friends so they can join.";
+    case RowAction::kAllow: return "Lets in the first player who asks to join your game.";
+    case RowAction::kHost: return "Starts hosting a game on this PC now. Your friends play on your save.";
+    case RowAction::kConfirmLeave: return "Leaves the game, or stops hosting yours. Press A again to confirm.";
+    case RowAction::kPasteAnswer: return "Pastes the answer code a friend sent you back, so they can come in.";
+    case RowAction::kCopyAnswer: return "Copies this game's answer code. Send it to the host so they can let you in.";
+    case RowAction::kViewPlayers: return "Everyone in the game. Pick a player to see what you can do.";
+    case RowAction::kViewLetIn: return "Players who ask to join your game: let them in or refuse them.";
+    case RowAction::kViewJoin: return "Join a friend's game: with a code they sent you, or the last game again.";
+    case RowAction::kBack: return "Back to the rows before. B does the same.";
+    case RowAction::kDeny: return "Refuses the first player who asks to join your game.";
+    case RowAction::kJoinPaste: return "Joins with the code you copied. You play on the host's save; yours are not touched.";
+    case RowAction::kRejoin: return "Joins the last game you played in again.";
+    case RowAction::kViewSession: return "Your game now: what co-op is doing, the lines to give your friends, and why it stopped.";
+    case RowAction::kCopyLan: return "Copies the line friends on your network use to join you.";
+    case RowAction::kCopyVpn: return "Copies the line friends on your VPN use to join you.";
+    case RowAction::kResync: return "Loads the host's save again, so your game matches theirs.";
+    case RowAction::kViewPlayer: return "This player: go to them, or mute their voice or chat for you.";
+    case RowAction::kMorePlayers: return "The next page of players.";
+    case RowAction::kHostControls: return "The host's controls for this player: mute them for everyone, kick or ban.";
+    case RowAction::kTeleport: return "Takes you to this player.";
+    case RowAction::kOwnVoice: return "Mutes this player's voice for you only, or lets you hear it again.";
+    case RowAction::kOwnChat: return "Hides this player's chat for you only, or shows it again.";
+    case RowAction::kHostVoice: return "Mutes this player's voice for everyone, or unmutes it.";
+    case RowAction::kHostChat: return "Mutes this player's chat for everyone, or unmutes it.";
+    case RowAction::kKick: return "Sends this player out of your game. Press A again to confirm.";
+    case RowAction::kBan: return "Keeps this player out until you stop hosting. Press A again to confirm.";
+    case RowAction::kTypeRoom: return "Type the room name your friend gave you.";
+    case RowAction::kTypePassword: return "Type the game's join password, if it has one.";
+    case RowAction::kJoinRoom: return "Joins that room with the password typed.";
+    case RowAction::kViewLan: return "Games on your network that you can join.";
+    case RowAction::kJoinLan: return "This game: type its join password if it has one, then join.";
+    case RowAction::kJoinLanGame: return "Joins this game with the password typed.";
+    case RowAction::kMoreLan: return "The next page of games.";
+    case RowAction::kAutoRejoin: return "When on, co-op joins the game again by itself if the connection drops.";
+    case RowAction::kShowPassword: return "Shows your game's join password, or hides it again.";
+    case RowAction::kViewPassword: return "Your game's join password: show it, or change it.";
+    case RowAction::kChangePassword: return "Type a new join password. Players who join from now on need it.";
+    case RowAction::kChangePort: return "Type the port your game uses when you host. Hosting starts again on it.";
+    case RowAction::kTypeRelay: return "Type the relay's address to see its public rooms. It is saved.";
+    case RowAction::kTypeSearch: return "Type words to find rooms with them in their names.";
+    case RowAction::kBrowseLan: return "Lists the games on your network.";
+    case RowAction::kBrowseOnline: return "Lists the public rooms online.";
+    case RowAction::kBrowsePage: return "The next page of games.";
+    case RowAction::kBrowseRefresh: return "Looks for games again.";
+    case RowAction::kListRoom: return "When on, your game's room is listed online while you host, so anyone can find it.";
+    case RowAction::kBrowseList: return "Switches between the public rooms online and the games on your network.";
+    case RowAction::kBrowseFilter: return "Which games the list shows: all, open ones, or this version only.";
+    case RowAction::kBrowseSort: return "The list's order: most players, fewest players, or by name.";
+    case RowAction::kTypeRoomName: return "Type the room name your game has when you host. It is saved.";
+    case RowAction::kViewMenu: return "Customize Link, co-op settings, the chat's commands and local co-op.";
+    case RowAction::kMenuTab: return "This page's rows are on the list. Right or A to pick one.";
+    case RowAction::kViewHost: return "Host a game: start it, then give your friends its code and let them in.";
+    case RowAction::kViewLocal: return CoopPauseMenu::kLocalHelp;
+    case RowAction::kViewHostSettings: return "Co-op settings at the host rows: game, approving joins, PvP and Down but not out.";
+    case RowAction::kNone: break;
+    }
+    return "";
+}
+
+const char* MenuTabHelp(int tab) {
+    switch (tab) {
+    case 0: return CoopPauseMenu::kCustomizeHelp;
+    case 1: return CoopPauseMenu::kSettingsHelp;
+    case 2: return CoopPauseMenu::kCommandsHelp;
+    case 3: return CoopPauseMenu::kLocalHelp;
+    default: return RowHelp(RowAction::kMenuTab);
+    }
+}
+
+std::string MinusHelp(const HelpAt& at, const Session& s) {
+    if (at.tab == MinusPage::kMods) return at.list ? at.menu : std::string();   // (its list only: it has no rows)
+    if (at.typing) return kTypingHelp;
+    if (at.list) {
+        if (at.view == View::kMenu) return at.menu;
+        return at.game ? kGameHelp : RowHelp(at.line);
+    }
+    if (at.row < 0) return {};
+    const RowAction a = at.view == View::kMain ? ActionFor(at.tab, at.row, s) : ActionFor(at.view, at.row, s);
+    return a == RowAction::kMenuTab ? MenuTabHelp(at.row) : RowHelp(a);
+}
+
+namespace {
+// The letter at `i` of `t`: its bytes and how wide it shows (a CJK letter or a full-width mark two, others one).
+std::pair<std::size_t, std::size_t> Letter(const std::string& t, std::size_t i) {
+    const unsigned char c = static_cast<unsigned char>(t[i]);
+    const std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xe ? 3 : (c >> 3) == 0x1e ? 4 : 1;
+    if (i + n > t.size()) return {t.size() - i, 1};
+    std::uint32_t cp = n == 1 ? c : c & (0xffu >> (n + 1));
+    for (std::size_t k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(t[i + k]) & 0x3fu);
+    const bool wide = (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
+                      (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) ||
+                      (cp >= 0xffe0 && cp <= 0xffe6);
+    return {n, wide ? 2 : 1};
+}
+
+std::size_t WidthOf(const std::string& t) {
+    std::size_t w = 0;
+    for (std::size_t i = 0; i < t.size();) {
+        const auto [n, v] = Letter(t, i);
+        w += v, i += n;
+    }
+    return w;
+}
+}  // namespace
+
+std::string HelpText(const std::string& utf8, std::size_t columns, std::size_t lines) {
+    // Letters in order onto lines; a line that would grow past `columns` ends at its last space (the word goes on to
+    // the next) or, with no space in it (Chinese), before the letter.
+    std::vector<std::string> out{std::string()};
+    std::size_t width = 0;
+    bool cut = false;
+    for (std::size_t i = 0; i < utf8.size() && !cut;) {
+        const auto [n, w] = Letter(utf8, i);
+        const std::string letter = utf8.substr(i, n);
+        i += n;
+        std::string& line = out.back();
+        const bool newline = letter == "\n";
+        if (newline || width + w > columns) {
+            std::string rest;
+            if (!newline && letter != " ") {
+                if (const std::size_t sp = line.rfind(' '); sp != std::string::npos && w == 1) {
+                    rest = line.substr(sp + 1);
+                    line.resize(sp);
+                }
+                rest += letter;
+            }
+            if (out.size() == lines) {
+                cut = true;
+                break;
+            }
+            out.push_back(rest);
+            width = WidthOf(out.back());
+            continue;
+        }
+        if (letter == " " && line.empty()) continue;   // (no line starts with a space)
+        line += letter;
+        width += w;
+    }
+    while (!out.empty() && out.back().empty()) out.pop_back();
+    if (cut && !out.empty()) {   // (longer than its lines: the last ends with "...")
+        std::string& last = out.back();
+        while (!last.empty() && WidthOf(last) + 3 > columns) {
+            std::size_t k = last.size() - 1;
+            while (k > 0 && (static_cast<unsigned char>(last[k]) & 0xc0) == 0x80) --k;   // (a whole letter off)
+            last.resize(k);
+        }
+        while (!last.empty() && last.back() == ' ') last.pop_back();
+        last += "...";
+    }
+    std::string text;
+    for (std::size_t k = 0; k < out.size(); ++k) text += (k ? "\n" : "") + out[k];
+    return text;
 }
 
 const char* ActionWords(RowAction a) {

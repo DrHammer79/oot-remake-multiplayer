@@ -310,10 +310,15 @@ def size_key(fname):
     return "RSDB/" + fname[:-3]
 
 
+def row_id(row):
+    """A row's key: __RowId, or Name in the tables that have no __RowId (UIScreen: the game's screens, one row each)."""
+    return row["__RowId"] if "__RowId" in row else row["Name"]
+
+
 def rows_of(data):
     rows = byml.loads(data)
-    if not isinstance(rows, list) or not all(isinstance(r, dict) and "__RowId" in r for r in rows):
-        raise MergeError("not a table of rows with __RowId")
+    if not isinstance(rows, list) or not all(isinstance(r, dict) and ("__RowId" in r or "Name" in r) for r in rows):
+        raise MergeError("not a table of rows with __RowId or Name")
     return rows
 
 
@@ -522,27 +527,38 @@ def merge_rows_one(root, codec, fname, win_name, win_path, pack_path, say, other
         pack_data = codec.unpack(pack_raw)
     orig_data = codec.unpack(orig_raw)
     rows = rows_of(orig_data)
-    have = {r["__RowId"] for r in rows}
-    added = [r for r in rows_of(pack_data) if r["__RowId"] not in have] if pack_table else []
-    # The other mods' rows (SHARED_NOTE): the mod nearer the winner first, so its row is taken where two changed one.
+    have = {row_id(r) for r in rows}
+    pack_rows = rows_of(pack_data) if pack_table else []
+    added = [r for r in pack_rows if row_id(r) not in have]
     taken, both, lengths = {}, [], []
-    if others:
+    games = {}
+    if os.path.isfile(game):
         with open(game, "rb") as f:
-            games = {r["__RowId"]: r for r in rows_of(codec.unpack(f.read()))}
-        mine = {r["__RowId"]: r for r in rows}
+            games = {row_id(r): r for r in rows_of(codec.unpack(f.read()))}
+    # The pack's changed rows of the game's own (UIScreen's Title_00 with Common added to its archives): taken where
+    # the winner's row is still the game's own, as another mod's changed row is.
+    mine = {row_id(r): r for r in rows}
+    if games:
+        take, b = changed_entries({row_id(r): r for r in pack_rows if row_id(r) in games}, games, mine)
+        both += b
+        taken.update(take)
+    # The other mods' rows (SHARED_NOTE): the mod nearer the winner first, so its row is taken where two changed one.
+    if others:
         for (_, p), t in reversed(list(zip(others, more))):
             with open(t, "rb") as f:
                 their_data = codec.unpack(f.read())
             lengths.append((p, len(their_data)))
-            take, b = changed_entries({r["__RowId"]: r for r in rows_of(their_data)}, games, mine,
-                                      skip={r["__RowId"] for r in added})
+            take, b = changed_entries({row_id(r): r for r in rows_of(their_data)}, games, mine,
+                                      skip={row_id(r) for r in added})
             both += [k for k in b if k not in both]
             for k, r in take.items():
                 taken.setdefault(k, r)
     if added or taken:
-        by_id = {r["__RowId"]: r for r in rows + added}
+        by_id = {row_id(r): r for r in rows + added}
         by_id.update(taken)
-        new_data = byml.dumps([by_id[k] for k in sorted(by_id, key=lambda s: s.encode("utf-8"))])
+        # (__RowId tables are sorted by it; a Name table keeps the game's order, new rows last)
+        keys = list(by_id) if any("__RowId" not in r for r in rows) else sorted(by_id, key=lambda s: s.encode("utf-8"))
+        new_data = byml.dumps([by_id[k] for k in keys])
         data = codec.pack(new_data, orig_raw)
     else:
         new_data, data = orig_data, orig_raw

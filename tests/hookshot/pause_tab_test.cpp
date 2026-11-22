@@ -1939,6 +1939,114 @@ TEST_CASE("pause tab: the slide follows the game's measured curve and moves the 
     CHECK(system == doctest::Approx(0.0f));
 }
 
+TEST_CASE("pause tab (tabs-overhaul-01110): the - menu's tabs slide like the game's pages, the Map with them") {
+    // R on Map: ours in from the right as the Map's content goes out to the left; at the end ours in place.
+    auto o = MinusSlideAt(-1, 0, 0.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(0.0f));
+    o = MinusSlideAt(-1, 0, 1.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    // L on our first: back the other way.
+    o = MinusSlideAt(0, -1, 0.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(0, -1, 1.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(0.0f));
+    // Between ours: the next one from its side (R from the right, L from the left), the Map kept off the screen.
+    o = MinusSlideAt(0, 1, 0.0f);
+    CHECK(o.page == doctest::Approx(kPageWidth));
+    CHECK(o.map == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(2, 1, 0.0f);
+    CHECK(o.page == doctest::Approx(-kPageWidth));
+    o = MinusSlideAt(2, 1, 1.0f);
+    CHECK(o.page == doctest::Approx(0.0f));
+    // Midway (the game's curve) somewhere between; none for no change.
+    o = MinusSlideAt(-1, 0, SlideProgress(67));
+    CHECK(o.page > 0.0f);
+    CHECK(o.page < kPageWidth);
+    CHECK(o.page + -o.map == doctest::Approx(kPageWidth));   // (the two a page apart all the way)
+    o = MinusSlideAt(1, 1, 0.3f);
+    CHECK(o.page == 0.0f);
+    CHECK(o.map == 0.0f);
+    o = MinusSlideAt(-1, -1, 0.3f);
+    CHECK(o.page == 0.0f);
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110): each - tab of ours keeps its cursor's row") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    p.OnPad(kPadR, now + 10), p.OnPad(0, now + 12);
+    REQUIRE(p.MinusTab() == 0);
+    p.SetMinusRows(0b1111);
+    p.OnPad(kPadDown, now + 14), p.OnPad(0, now + 16);
+    p.OnPad(kPadDown, now + 18), p.OnPad(0, now + 20);
+    CHECK(p.MinusRow() == 2);
+    // Lobby: its own first row; down once.
+    p.OnPad(kPadR, now + 22), p.OnPad(0, now + 24);
+    REQUIRE(p.MinusTab() == 1);
+    p.SetMinusRows(0b111);
+    CHECK(p.MinusRow() == 0);
+    p.OnPad(kPadDown, now + 26), p.OnPad(0, now + 28);
+    CHECK(p.MinusRow() == 1);
+    // Back to Multiplayer: its row 2 again; then Lobby: its row 1.
+    p.OnPad(kPadL, now + 30), p.OnPad(0, now + 32);
+    REQUIRE(p.MinusTab() == 0);
+    p.SetMinusRows(0b1111);
+    CHECK(p.MinusRow() == 2);
+    p.OnPad(kPadR, now + 34), p.OnPad(0, now + 36);
+    p.SetMinusRows(0b111);
+    CHECK(p.MinusRow() == 1);
+    // A row gone since (fewer rows now): the next shown one, as before.
+    p.OnPad(kPadL, now + 38), p.OnPad(0, now + 40);
+    p.SetMinusRows(0b0011);
+    CHECK(p.MinusRow() == 0);
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110): ZL and ZR on our page step the list's page, never the game's") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    p.OnPad(kPadR, now + 10), p.OnPad(0, now + 12);
+    p.OnPad(kPadR, now + 14), p.OnPad(0, now + 16);
+    REQUIRE(p.MinusTab() == 1);   // (Lobby)
+    p.TakeStripSound();
+    CHECK((p.OnPad(kPadZR, now + 18) & kPadZR) == 0);
+    CHECK(p.TakeMinusPageStep() == 1);
+    CHECK(p.TakeMinusPageStep() == 0);
+    CHECK(p.TakeStripSound() == nullptr);   // (a list of one page: kept from the game, but no click: review-01110-c)
+    p.SetMinusPageable(true);
+    p.OnPad(0, now + 19);
+    CHECK((p.OnPad(kPadZR, now + 19) & kPadZR) == 0);
+    CHECK(p.TakeMinusPageStep() == 1);
+    CHECK(std::string(p.TakeStripSound()) == "button_on");
+    p.OnPad(0, now + 20);
+    CHECK((p.OnPad(kPadZL, now + 22) & kPadZL) == 0);
+    CHECK(p.TakeMinusPageStep() == -1);
+    p.OnPad(0, now + 24);
+    CHECK(p.MinusTab() == 1);   // (the tab stays)
+}
+
+TEST_CASE("pause tab (review-01110-c): ZR on Mods is kept from the game (Map.module's own ZL / ZR) with no click") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    for (int i = 0; i < 3; ++i) p.OnPad(kPadR, now + 10 + 4 * i), p.OnPad(0, now + 12 + 4 * i);
+    REQUIRE(p.MinusTab() == 2);   // (Mods)
+    p.TakeStripSound();
+    CHECK((p.OnPad(kPadZR, now + 30) & kPadZR) == 0);
+    CHECK(p.TakeStripSound() == nullptr);
+    p.OnPad(0, now + 32);
+    CHECK((p.OnPad(kPadZL, now + 34) & kPadZL) == 0);   // (else Map.module's ZL: Threads of Time under our tab)
+    CHECK(p.TakeStripSound() == nullptr);
+    CHECK(p.MinusTab() == 2);
+}
+
 TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page on Customize, and goes back to System") {
     Page p = UsablePage();
     std::uint64_t now = 1000;
@@ -2826,4 +2934,82 @@ TEST_CASE("pause tab: co-op that came with the game: short rows, and the Lobby's
         CHECK(d[1].name == "Restart the game to change it");
     }
     CHECK(DetailLines(View::kHost, SessionView{})[0].name.empty());   // (not by the launcher: the rows say it all)
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110 step 2): native mode leaves the Map's R / ZR and L from Multiplayer to the game's sequence") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    p.SetMinusNative(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    // R on the Map: ours, and the game's too (the sequence opens CoopMenu_00 and plays its own tab sound).
+    CHECK((p.OnPad(kPadR, now + 10) & kPadR) != 0);
+    CHECK(p.MinusTab() == 0);
+    CHECK(p.TakeStripSound() == nullptr);
+    p.OnPad(0, now + 12);
+    // L on Multiplayer: back to the Map, the game's too.
+    CHECK((p.OnPad(kPadL, now + 14) & kPadL) != 0);
+    CHECK(p.MinusTab() == -1);
+    CHECK(p.TakeStripSound() == nullptr);
+    p.OnPad(0, now + 16);
+    // ZR on the Map: the same as R.
+    CHECK((p.OnPad(kPadZR, now + 18) & kPadZR) != 0);
+    CHECK(p.MinusTab() == 0);
+    p.OnPad(0, now + 20);
+    // Inside ours: R, ZR, ZL and L on Lobby / Mods are kept from the game (the sequence ignores them in ours).
+    CHECK((p.OnPad(kPadZR, now + 22) & kPadZR) == 0);
+    p.OnPad(0, now + 24);
+    CHECK((p.OnPad(kPadR, now + 26) & kPadR) == 0);
+    CHECK(p.MinusTab() == 1);
+    CHECK(std::string(p.TakeStripSound()) == "mc_TabToRight");
+    p.OnPad(0, now + 28);
+    CHECK((p.OnPad(kPadR, now + 30) & kPadR) == 0);
+    p.OnPad(0, now + 32);
+    REQUIRE(p.MinusTab() == 2);
+    CHECK((p.OnPad(kPadL, now + 34) & kPadL) == 0);
+    CHECK(p.MinusTab() == 1);
+    CHECK(std::string(p.TakeStripSound()) == "mc_TabToLeft");
+    p.OnPad(0, now + 36);
+    CHECK((p.OnPad(kPadL, now + 38) & kPadL) == 0);
+    p.OnPad(0, now + 40);
+    REQUIRE(p.MinusTab() == 0);
+    // A held through L back to the Map stays kept (no fresh A for the Map).
+    p.OnPad(kPadA, now + 42);
+    CHECK((p.OnPad(kPadA | kPadL, now + 44) & kPadA) == 0);
+    CHECK(p.MinusTab() == -1);
+    p.OnPad(0, now + 46);
+    // CoopMenu_00 never came: the module puts the Map back, no slide.
+    p.OnPad(kPadR, now + 48), p.OnPad(0, now + 50);
+    REQUIRE(p.MinusTab() == 0);
+    p.MinusToMap();
+    CHECK(p.MinusTab() == -1);
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110 step 2): without native mode the Map's ZR stays the game's and R is kept from it") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    CHECK((p.OnPad(kPadZR, now + 10) & kPadZR) != 0);
+    CHECK(p.MinusTab() == -1);
+    p.OnPad(0, now + 12);
+    CHECK((p.OnPad(kPadR, now + 14) & kPadR) == 0);
+    CHECK(p.MinusTab() == 0);
+    p.OnPad(0, now + 16);
+    CHECK((p.OnPad(kPadL, now + 18) & kPadL) == 0);
+    CHECK(p.MinusTab() == -1);
+}
+
+TEST_CASE("pause tab (tabs-overhaul-01110 step 2): the Map under CoopMenu_00 hides only after its out animation, back at once") {
+    // The strip's own page: hidden while ours shows and nothing slides.
+    CHECK(MapUnderHidden(true, true, false, false, 0, 0, 5000));
+    CHECK_FALSE(MapUnderHidden(true, true, true, false, 0, 0, 5000));
+    CHECK_FALSE(MapUnderHidden(false, true, false, false, 0, 0, 5000));
+    CHECK_FALSE(MapUnderHidden(true, false, false, false, 0, 0, 5000));
+    // Native: not before CoopMenu_00 has been open kMapUnderAfterMs, then while its updates come.
+    CHECK_FALSE(MapUnderHidden(true, true, false, true, 0, 0, 5000));
+    CHECK_FALSE(MapUnderHidden(true, true, false, true, 5000, 5000, 5000 + kMapUnderAfterMs - 1));
+    CHECK(MapUnderHidden(true, true, false, true, 5000, 5440, 5000 + kMapUnderAfterMs));
+    CHECK_FALSE(MapUnderHidden(true, true, false, true, 5000, 5000, 5000 + kMapUnderAfterMs + kMenuUpMs));   // (unloaded)
+    CHECK_FALSE(MapUnderHidden(false, true, false, true, 5000, 6000, 6000));   // (L: given back at once)
 }

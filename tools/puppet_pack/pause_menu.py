@@ -13,7 +13,8 @@ Writes into the puppet mod's romfs:
           eight of the game's Options rows (PaOptionBtnLevel_00: a name on the left, a value
           between arrows on the right) down the right half, where the controller picture is: the
           game browser's list (a header, then six games), and the settings' list; and Pa_Button_05
-          a copy of Pa_Button_03 below Pa_Button_04: System's Longshot Settings button. Stored hidden, so the System page never shows them; the module
+          a copy of Pa_Button_03 below Pa_Button_04: System's Longshot Settings button; Pa_CoopHelp_00 the
+          game's caption text (PaActorCaption_00) below the rows: the - page's help (add_help). Stored hidden, so the System page never shows them; the module
           shows the list on ours (its copy of the controller picture is hidden) and the buttons on
           System's
   Mals/<language>.Product.110.sarc.zs
@@ -222,9 +223,34 @@ def add_system_buttons(d):
                                new_id=_new_id)
 
 
+# The selected row's help on the - menu's page (0.11.10, help-lines): the game's own description text, the Items page's
+# caption (PaActorCaption_00: T_Caption_00, the words under an item's name, a few short lines), a part of
+# PaSystemMenu_00 under the page's rows on the left. Stored hidden: System's page and Longshot Settings' never show it;
+# the module shows it on the - page while a row has help, its words through Coop_Minus_21 (CoopPauseTab::HelpText
+# wraps them in the game's way, a few short lines).
+HELP = "Pa_CoopHelp_00"
+HELP_LAYOUT = "PaActorCaption_00"
+HELP_SOURCE = "Pa_Button_04"   # (the page's last row: the help goes below it, in the rows' column)
+HELP_BELOW = 300.0             # (from the last row's centre to the help's: the row is 180 high, the help's top under it)
+HELP_SIZE = (1000.0, 360.0)    # (CoopPauseTab::kHelpColumns letters a line, kHelpLines lines)
+
+
+def add_help(d):
+    """PaSystemMenu_00.buil with HELP: a part of HELP_LAYOUT (the game's caption text) in the rows' column, HELP_BELOW
+    under HELP_SOURCE, stored hidden."""
+    panes, _ = ui_pack.read_layout(d)
+    names = [p.name for p in panes]
+    if HELP_SOURCE not in names:
+        raise PauseMenuError("the layout has no %s" % HELP_SOURCE)
+    if HELP in names:
+        raise PauseMenuError("the layout has %s already" % HELP)
+    return ui_pack.clone_parts(d, [ui_pack.Copy(HELP_SOURCE, HELP, (0.0, -HELP_BELOW), hidden=True,
+                                                part_layout=HELP_LAYOUT, size=HELP_SIZE)], new_id=_new_id)
+
+
 def _system_layout(d):
-    """The System page's own layout with the browser's list and our two System buttons."""
-    return add_system_buttons(add_rows(d))
+    """The System page's own layout with the browser's list, our System button and the - page's help."""
+    return add_help(add_system_buttons(add_rows(d)))
 
 
 def _xy(d, name):
@@ -237,7 +263,8 @@ def _xy(d, name):
 
 # ---------------------------------------------------------------------------------------- build
 
-def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, run=None):
+def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, run=None,
+          minus_page=True):
     """The Common archive and every language's messages from the romfs folder, into out_romfs
     (write(out_romfs, rel, bytes)); their size table entries grown (`table`: rstb.Rstb). Returns
     the files written. `run`: the pack run's shared view (ui_pack.PackRun), the one the title rows'
@@ -245,7 +272,7 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=
     once; a view of its own when None. All or nothing, as title_menu.build: a failure raises before
     anything is written, so the pack never holds the tab without its page and texts."""
     run = run or ui_pack.PackRun(romfs, table)
-    files, growth = make(run, dicts, recompress, strings)
+    files, growth = make(run, dicts, recompress, strings, minus_page)
     run.check(growth)
     run.commit(files, growth)
     for rel, data in files.items():
@@ -255,10 +282,11 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=
     return list(files)
 
 
-def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
+def make(reader, dicts, recompress, strings=ui_pack.STRINGS, minus_page=True):
     """({rel: compressed bytes}, [(rel, plain length read, plain length made, required)]) for the
     Common archive and every language's messages (ui_pack.PackRun's growth); raises PauseMenuError
-    (or the reader's error) when any one cannot be made."""
+    (or the reader's error) when any one cannot be made. minus_page False: the strip gets the - menu's tabs without
+    MINUS_PAGE (co-op's own screen has it: coop_menu.py)."""
     from . import sarc
     files, growth = {}, []
     raw = reader.read(COMMON_ARCHIVE)
@@ -268,14 +296,16 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
     pages = [data for name, data in entries if name == PAGES_LAYOUT]
     if not pages:
         raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, PAGES_LAYOUT))
+    read = entries
     place, size = shown_page(pages[0])
-    overlay = lambda d: add_minus_page(add_tab(d), place, size)
+    overlay = (lambda d: add_minus_page(add_tab(d), place, size)) if minus_page else add_tab
     for layout, edit in ((OVERLAY_LAYOUT, overlay), (PAGES_LAYOUT, add_page), (SYSTEM_LAYOUT, _system_layout)):
         olds = [data for name, data in entries if name == layout]
         if not olds:
             raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, layout))
         entries, new = ui_pack.edit_entries(entries, layout, edit)   # (every copy of the layout)
         growth.append((layout, len(olds[0]), len(new[olds[0]]), False))
+    ui_pack.check_own_parts(read, entries, COMMON_ARCHIVE)   # (every part's layout in Common: the game's own rule)
     archive = sarc.write(entries, data_align=16)   # (as the game's own: 16)
     growth.append((COMMON_ARCHIVE, len(plain), len(archive), True))
     files[COMMON_ARCHIVE] = recompress(dicts, raw, archive)

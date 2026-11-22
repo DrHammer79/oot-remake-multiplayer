@@ -275,6 +275,19 @@ public:
     // tabs' pages is what the R1 probe answers (reports/ui-tabs-0119.md); until then the module keeps them off unless
     // COOP_TEST_MINUS_TABS=1.
     void SetMinusTabsUsable(bool usable) { minus_ok_ = usable; }
+    // Native mode (tabs-overhaul-01110 step 2): ours have their own screen, CoopMenu_00, which the game's Map sequence
+    // (the pack's Map.module) opens on the Map's R or ZR and closes on L from our first tab. Those presses are then the
+    // game's as well as ours (no swallow, no strip sound: the sequence plays mc_TabToRight / mc_TabToLeft); R and ZR
+    // inside ours and L on Lobby or Mods stay ours (kept from the game). Off: the strip's own page (Character Select's
+    // Map.module, or an older pack), every press of ours kept from the game as before.
+    void SetMinusNative(bool native) { minus_native_ = native; }
+    bool MinusNative() const { return minus_native_; }
+    // Back on the Map at once, no slide (the module: CoopMenu_00 never opened after R, e.g. another mod's Map.module).
+    void MinusToMap() {
+        if (minus_tab_ < 0) return;
+        minus_tab_ = -1, minus_slide_ = 0;
+        MinusTabMoved();
+    }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
@@ -312,6 +325,12 @@ public:
     std::uint32_t TakeMinusMoves() { return std::exchange(minus_moves_, 0u); }
     // The tab lit changed (or the - menu closed) since the last call: the module's view back to the tab's rows.
     bool MinusTabChanged() { return std::exchange(minus_tab_changed_, false); }
+    // ZL / ZR on our page (not typing, not co-op's menu's own page): the list's page before / after (-1 / +1), once:
+    // the games list pages by its 6 games so nothing is ever below a scroll (tabs-overhaul-01110). 0 none.
+    int TakeMinusPageStep() { return std::exchange(minus_page_step_, 0); }
+    // The list shown now has more than one page (the module: Lobby > Find with more games than fit). Only then does
+    // ZL / ZR click (button_on); elsewhere they are still kept from the game (Map.module's ZL is Threads of Time).
+    void SetMinusPageable(bool can) { minus_pageable_ = can; }
 
     // The Join view's two fields (the room name, the join password) and which one is typed into (-1: none). While one
     // is, the pad's buttons are all the page's (none reach System) and the keyboard's keys are the field's (Key, Char).
@@ -373,11 +392,14 @@ private:
     bool refused_a_ = false;
     int slide_ = 0;   // the next set_page's Do::slide
     bool minus_ok_ = false;    // SetMinusTabsUsable
+    bool minus_native_ = false;   // SetMinusNative
     int minus_tab_ = -1;       // MinusTab
     int minus_set_ = -2;       // the - tabs' state last set (Do::set_minus): -2 none, -1 shown none lit, else lit
     int minus_slide_ = 0;
     std::uint64_t minus_gen_ = 0;   // the strip opening whose - tabs were filled
     int minus_row_ = 0;             // MinusRow
+    std::array<int, kMinusTabs> minus_row_kept_{};   // each of our tabs' row when it was left (MinusTabMoved)
+    int minus_row_tab_ = -1;                         // the tab minus_row_ is for
     int minus_decide_ = -1;         // TakeMinusDecide
     std::uint32_t minus_rows_ = 0;  // SetMinusRows
     bool minus_in_view_ = false;        // SetMinusInView
@@ -390,6 +412,8 @@ private:
     bool minus_back_ = false, minus_list_back_ = false;
     std::uint32_t minus_moves_ = 0;     // TakeMinusMoves
     bool minus_tab_changed_ = false;    // MinusTabChanged
+    int minus_page_step_ = 0;           // TakeMinusPageStep
+    bool minus_pageable_ = false;       // SetMinusPageable
     void MinusLineStep(int dir);
     void MinusTabMoved();
     void MinusStep(int dir);
@@ -652,6 +676,14 @@ float SlideProgress(std::uint64_t ms);
 // The pages' own x offsets at a slide's progress p (0..1): {ours, System's}, added to their own places. dir +1: ours
 // from the right to its place, System from its place to the left; dir -1: back.
 std::pair<float, float> SlideOffsets(int dir, float p);
+// The - menu's slide (tabs-overhaul-01110 (b)): from the Map (-1) to our tab `to` (0..kMinusTabs-1), back, or between
+// two of ours, at progress p (SlideProgress): the x offsets of our page (Pa_CoopMinus_00) and of the Map's content,
+// added to their own places, a page's width apart as the game's + pages slide. Between ours the Map stays hidden (its
+// offset a page off to the left); from == to: none.
+struct MinusSlideOffsets {
+    float page = 0.0f, map = 0.0f;
+};
+MinusSlideOffsets MinusSlideAt(int from, int to, float p);
 
 // What the rows say, in the game's own text panes (the module writes them through the pack's placeholder messages,
 // Coop_Live_NN, in LayoutMsg/PlusMenu_00): the session's state on the rows themselves.
@@ -798,6 +830,39 @@ struct MenuList {
     int picked = -1;
 };
 MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list, int per_page = kCells);
+// --- The selected row's help (0.11.10, help-lines; the owner: co-op's rows show their help as the game's own pages do) ---
+// The - page shows the help of what is selected in the game's own description text (the Items page's caption, the
+// pack's Pa_CoopHelp_00 under the rows): a row's, a line's of the list on the right, co-op's menu's or the Mods tab's.
+// What A on a row or a line with this action does, for the player (English; the module translates it with
+// CoopI18n::Tr, and every one is a line of both Chinese tables). "" for kNone. One source: every row and line of the
+// tab gets its help from its action here.
+const char* RowHelp(RowAction a);
+// Co-op's menu's pages, as Settings and look's rows name them (kMenuTabNames): the help of the row that opens one,
+// the same words as co-op's menu's own row for it (coop_pause_menu.h's page helps).
+const char* MenuTabHelp(int tab);
+// A game of the browser's list, and the typing keys, as lines of the list (they have no action of their own).
+inline constexpr const char* kGameHelp = "A game you can join: A opens it, with a row for its join password if it has one.";
+inline constexpr const char* kTypingHelp =
+    "Left and Right pick a letter, A types it. Delete, OK and Cancel are below. A keyboard types too.";
+// Where the - page's cursor is, for its help.
+struct HelpAt {
+    View view = View::kMain;
+    MinusPage tab = MinusPage::kMultiplayer;
+    int row = -1;                          // the rows' cursor (the list does not have the pad), -1 none
+    bool list = false;                     // the list on the right has the pad
+    RowAction line = RowAction::kNone;     // ... its line picked: what A on it does
+    bool game = false;                     // ... the line picked is a game of the browser's
+    bool typing = false;                   // the typing keys are on the list
+    std::string menu;                      // co-op's menu's or the Mods tab's help for their row picked (the list's)
+};
+// The English help the - page shows there, "" none (the help hidden).
+std::string MinusHelp(const HelpAt& at, const Session& s);
+// The help as the game's own captions are (their message files hold them as a few short lines, a new line after some
+// 40 letters): broken at spaces into lines of at most `columns` letters (a Chinese letter counts two, as it is about
+// twice as wide; it may break anywhere), at most `lines` of them, the last cut with "..." when the help is longer.
+inline constexpr std::size_t kHelpColumns = 40, kHelpLines = 4;
+std::string HelpText(const std::string& utf8, std::size_t columns = kHelpColumns, std::size_t lines = kHelpLines);
+
 // The heading a row is under (a part's group on Customize Link: "Tunic", "Hylian Shield"; in a colour's mixer its
 // own heading, "Hylian Shield: Face"), "" none.
 std::string MenuHeadingOf(const CoopPauseMenu::View& menu, int row);
@@ -846,6 +911,12 @@ void SettingMove(int count, int dy, int* page, int* row, int per_page = kSetting
 // Row 199: the strip's last update says the menu is up: open or opening (state 1, 2) and seen within kMenuUpMs.
 inline constexpr std::uint64_t kMenuUpMs = 200;
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms);
+// The Map page's content under our - page hidden (FollowMapUnder): while ours shows (`hide`) and the menu is up, not
+// while the Map and ours slide. Native (CoopMenu_00): only once that screen has been open kMapUnderAfterMs (the Map
+// sequence's own out animation plays first) and its updates still come (seen within kMenuUpMs).
+inline constexpr std::uint64_t kMapUnderAfterMs = 450;
+bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t open_ms, std::uint64_t seen_ms,
+                    std::uint64_t now_ms);
 
 // The - strip's game tabs shown (3, or 4 with slot 3). The game's own code fills three - tabs; a fourth (Character
 // Select's Characters, in slot 0, his others after it) is filled only by his code patch, built into the game
@@ -992,6 +1063,11 @@ inline constexpr std::uint64_t kSystemWindowVtable = 0x4befbf8;
 // the last 100 ms, through the same census (any thread; nothing without the variable).
 void CensusFromMenuState() noexcept;
 bool GameMenuUp() noexcept;
+// One of our - menu tabs (Multiplayer, Lobby, Mods) has the screen, its page shown or sliding in, as of the strip's
+// last update (tabs-overhaul-01110 (c): the - menu still counts the Map as its page then, so patch 0018 says "Map page
+// shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while
+// it is.
+bool OwnMinusPageShown() noexcept;
 // The pause menu's model actors (the menu manager's object, its four slots: Link on Equipment, and the picture Character
 // Select's Customize screen shows), 0 for an empty slot or with no menu. Any thread (reads only). The eyes' and hair's
 // colours are each actor's own material values, so the picture shows them only when they are dressed on these too.

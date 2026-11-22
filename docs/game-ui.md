@@ -340,6 +340,11 @@ records, and how new parts go after the string pool so nothing moves).
 - In the table, the menus (`PlusMenu_00`, `MapMenu_00`, `ImportantMenu_00`, `ChallengeMenu_00`) share one `SortKey`;
   the tab strip's is higher, the system window's higher still (with `IsPauseLower`), and the message dialog's highest.
   (checked) Inferred: input goes to the open screens with `IsEnableControl`, the front-most by `SortKey`.
+- Two of those menu screens open at once at the same `SortKey`: co-op's `CoopMenu_00` (5000, opened from the Map's own
+  state with `MapMenu_00` still open) was not seen at all, all black under the strip, rows and vignette too: the Map's
+  full-screen `BG_00` (outside its In / Out animations) is inferred to draw over it. The game itself never has two
+  pages open (each tab change closes the other's screen first, as Snail's page does). `CoopMenu_00` is at 5001.
+  (LANE1 2026-11-22; the fix is to be checked in a run)
 - Still open: what sets `fm+0x22`, and how the game picks the screen that reads the pad. A run would settle it: log
   `fm+0x22`, `mgr+0x20[0..count]` and each open screen's `+0x1a4..+0x1a8` while walking, in the pause menu pressing L
   and R, on the System page's Save (a system window), and in a message dialog.
