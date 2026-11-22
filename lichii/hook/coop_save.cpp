@@ -365,6 +365,8 @@ void FixSlotsLocked() {
         std::FILE* in = nullptr;
 #ifdef _MSC_VER
         if (_wfopen_s(&in, file.c_str(), L"rb") != 0) in = nullptr;
+#elif defined(_WIN32)
+        in = _wfopen(file.c_str(), L"rb");  // llvm-mingw: a Windows path is wide too
 #else
         in = std::fopen(file.c_str(), "rb");
 #endif
@@ -388,6 +390,8 @@ void FixSlotsLocked() {
         std::FILE* out = nullptr;
 #ifdef _MSC_VER
         if (_wfopen_s(&out, tmp.c_str(), L"wb") != 0) out = nullptr;
+#elif defined(_WIN32)
+        out = _wfopen(tmp.c_str(), L"wb");  // llvm-mingw: a Windows path is wide too
 #else
         out = std::fopen(tmp.c_str(), "wb");
 #endif
