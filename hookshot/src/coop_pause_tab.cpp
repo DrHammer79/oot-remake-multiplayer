@@ -3,6 +3,7 @@
 #include "coop_pause_tab.h"
 
 #include "coop_browse.h"
+#include "coop_i18n.h"
 
 #include "hos_coop_host.h"
 
@@ -1597,8 +1598,10 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
     const int at_page = (page % pages + pages) % pages;
     // (the header has no value: the module hides its value box and arrows, so it never looks like a setting)
     // (the page with arrows a click on either half of the line turns: the module's mouse)
-    lines[0] = ListLine{FitTo(pages > 1 ? title + "  < " + std::to_string(at_page + 1) + " of " + std::to_string(pages) + " >"
-                                        : title,
+    // (the words in the player's language before the cut: a cut line is not the table's line any more)
+    const std::string head = CoopI18n::Tr(title);
+    lines[0] = ListLine{FitTo(pages > 1 ? head + "  < " + std::to_string(at_page + 1) + " of " + std::to_string(pages) + " >"
+                                        : head,
                               kListNameChars),
                         ""};
     for (int i = 0; i < per_page; ++i) {
@@ -1606,7 +1609,8 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
         lines[static_cast<std::size_t>(i) + 1] =
-            ListLine{FitTo(r.restart ? r.name + " *" : r.name, kListNameChars), FitTo(r.text, kListValueChars)};
+            ListLine{FitTo(r.restart ? CoopI18n::Tr(r.name) + " *" : CoopI18n::Tr(r.name), kListNameChars),
+                     FitTo(CoopI18n::Tr(r.text), kListValueChars)};
     }
     return lines;
 }
@@ -1765,9 +1769,9 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         const std::string port = v.port > 0 ? std::to_string(v.port) + " " : std::string();
         const std::size_t before = at;
         if (v.port_open) {
-            add("Port", port + "open");
+            add("Port", port + CoopI18n::Tr("open"));
         } else if (v.problem == HOS_COOP_PROBLEM_UPNP_REFUSED || v.problem == HOS_COOP_PROBLEM_NO_INVITE_CODE) {
-            add("Port", port + "shut");
+            add("Port", port + CoopI18n::Tr("shut"));
         } else if (v.port > 0) {
             add("Port", std::to_string(v.port));
         }
@@ -1851,7 +1855,9 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
         if (top > 0 && top == sel && menu.rows[static_cast<std::size_t>(top - 1)].kind == RowKind::kHeading) --top;
     }
     out.top = top;
-    std::string head = tab >= 0 && tab < kMenuTabs ? kMenuTabNames[static_cast<std::size_t>(tab)] : "";
+    // (the page's name in the player's language; the "< 1 of 3 >" when there are
+    // more pages goes around it as it is, the module's split shape reads the two)
+    std::string head = tab >= 0 && tab < kMenuTabs ? CoopI18n::Tr(kMenuTabNames[static_cast<std::size_t>(tab)]) : "";
     if (n > cells) {
         const int pages = (n + cells - 1) / cells;
         const int page = top + cells >= n ? pages : std::min(pages, (top + cells / 2) / cells + 1);
@@ -1861,15 +1867,20 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
     for (int c = 0; c < cells; ++c) {
         const int i = top + c;
         if (i >= n) break;
-        const CoopPauseMenu::Row& r = menu.rows[static_cast<std::size_t>(i)];
+        // (the row's words in the player's language before the cut: a note's line is
+        // long, and a cut line is not the table's line any more)
+        CoopPauseMenu::Row tr = menu.rows[static_cast<std::size_t>(i)];
+        tr.name = CoopI18n::Tr(tr.name);
+        tr.value = CoopI18n::Tr(tr.value);
         const std::size_t k = static_cast<std::size_t>(c) + 1;
         const bool typing = menu.typing && i == sel;
-        std::string name = r.name;
-        if (r.kind == RowKind::kNote && name.empty()) name = r.value;   // (a note's words, whichever holds them)
+        std::string name = tr.name;
+        if (tr.kind == RowKind::kNote && name.empty()) name = tr.value;   // (a note's words, whichever holds them)
         out.lines[k] = ListLine{FitTo(name.empty() ? std::string(" ") : name, kListNameChars),
-                                FitTo(r.kind == RowKind::kNote ? std::string() : MenuValue(r, typing), kListValueChars)};
+                                FitTo(tr.kind == RowKind::kNote ? std::string() : CoopI18n::Tr(MenuValue(tr, typing)),
+                                      kListValueChars)};
         out.rows[k] = i;
-        out.selectable[k] = r.kind != RowKind::kHeading && r.kind != RowKind::kNote;
+        out.selectable[k] = tr.kind != RowKind::kHeading && tr.kind != RowKind::kNote;
         if (list && i == sel) out.picked = c;
     }
     return out;
