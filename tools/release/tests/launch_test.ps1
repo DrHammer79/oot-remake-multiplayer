@@ -1115,10 +1115,7 @@ try {
         Check ((Read-KitOptions (Join-Path $ck 'coop-options.ini')).Count -eq 0) 'Character Select: coop-options.ini''s character_select is no game switch (not passed, not "skipped")'
         $csIps = Join-Path $csDir 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
         # (the pin back at v2, the folder's release, after the refused v3 above)
-        $want = & $New_CsPin 'v2' $csJson
-        # (a whole install deletes its zip; the row-242 installs below each need it again: kept aside here)
-        $csZipV2 = Join-Path $cDl 'CS-v2.zip'; Copy-Item -LiteralPath $csZipV2 -Destination "$csZipV2.keep" -Force
-        [void](Install-KitCharacterSelect $ck $cm); Confirm-KitCharacterSelect $ck $cm
+        $want = & $New_CsPin 'v2' $csJson; [void](Install-KitCharacterSelect $ck $cm); Confirm-KitCharacterSelect $ck $cm
         Write-File (Join-Path $ck 'coop-options.ini') "character_select = no`n"
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq ($want -replace ' full ', ' ui ') -and
                @($csNpcFiles | Where-Object { Test-Path -LiteralPath (Join-Path $csDir $_) }).Count -eq 0 -and
@@ -1131,18 +1128,15 @@ try {
         $cm242 = Join-Path $cg 'mods-242'
         $cs242 = Join-Path $cm242 'OoT Character Select'
         $csLinkTex = Join-Path $cs242 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs'
-        Copy-Item -LiteralPath "$csZipV2.keep" -Destination $csZipV2 -Force
         $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
         Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0]))) 'Character Select: a new default part keeps Link''s own textures (row 242)'
         Write-File (Join-Path $cs242 'coop-charsel.txt') ((($want -replace ' full ', ' ui ') -replace ' cz2$', ' cz1') + "`n")
         Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force
-        Copy-Item -LiteralPath "$csZipV2.keep" -Destination $csZipV2 -Force
         $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
         Check ($csOld.Ok -and $csOld.Changed -and (Test-Path -LiteralPath $csLinkTex) -and
                -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq ($want -replace ' full ', ' ui ')) 'Character Select: an old-rule default part (no Link textures) is made again with them (row 242)'
         Remove-Item -LiteralPath $cm242 -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $csZipV2, "$csZipV2.keep" -Force -ErrorAction SilentlyContinue
         Check ((Undo-KitCharacterSelect $ck $cm) -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq $want) 'Character Select undo: a failed build after the change puts the full copy back, its files whole'
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and -not (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: the default part again'
