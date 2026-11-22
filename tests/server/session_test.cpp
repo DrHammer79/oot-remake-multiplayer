@@ -8222,3 +8222,47 @@ TEST_CASE("row 222: without the battle manager bit the same boss goes to the nea
   h.run(15 * kSecond);
   CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
 }
+
+TEST_CASE("hand-over: every boss owner change logs its reason (review-01111-b 17)") {
+  const auto said = [](const std::vector<std::string>& lines, const std::string& part) {
+    return std::count_if(lines.begin(), lines.end(), [&](const std::string& l) {
+      return l.starts_with("hand-over: ") && l.find(part) != std::string::npos;
+    });
+  };
+  {  // the owner dies: player 1 -> player 2, "its owner is unfit (dead N s)"
+    std::vector<std::string> lines;
+    SessionConfig config = turn_config();
+    config.log = [&lines](const std::string& line) { lines.push_back(line); };
+    OwnerHarness h(config);
+    h.stand(1, 4);
+    h.stand(2, 6);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);
+    h.clear();
+    h.receive(1, PlayerStatus{0, status::dead}, kChannelSession);
+    h.run(500'000);
+    REQUIRE(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+    h.receive(1, HandoverState{0, placed(7), 0, state_at(0, 11)}, kChannelOwnership);
+    REQUIRE(h.session.object_owner(placed(7)) == owned(2, 1));
+    CHECK(said(lines, "player 1 -> player 2: its owner is unfit (dead ") == 1);
+    CHECK(said(lines, "no reason given") == 0);
+  }
+  {  // paused, no answer: the reason says so
+    std::vector<std::string> lines;
+    SessionConfig config = turn_config();
+    config.log = [&lines](const std::string& line) { lines.push_back(line); };
+    OwnerHarness h(config);
+    h.stand(1, 4);
+    h.stand(2, 6);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);
+    h.clear();
+    h.receive(1, PlayerStatus{0, status::paused}, kChannelSession);
+    h.run(3 * kSecond);
+    REQUIRE(h.asks() == 1);
+    h.run(10 * kSecond);
+    REQUIRE(h.session.object_owner(placed(7)) == owned(2, 1));
+    CHECK(said(lines, "player 1 -> player 2: its owner is unfit (paused ") == 1);
+    CHECK(said(lines, "(the owner did not answer)") == 1);
+  }
+}
