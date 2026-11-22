@@ -455,6 +455,19 @@ $own = @(Get-ChildItem $kit -Recurse -File | ForEach-Object { $_.FullName.Substr
 
 $size = (Get-ChildItem $kit -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ('Folder: {0:N0} MB' -f ($size / 1MB))
+# Self-check (review-01111-a; CI builds only the Linux kit, which checks the same): every file of every pack data folder
+# in the repo (tools\puppet_pack\<name>\data: charsel, coopmenu) is in the kit byte for byte, or no kit is made.
+$dataMiss = @()
+foreach ($d in (Get-ChildItem -LiteralPath $packTool -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'data') })) {
+    foreach ($s in (Get-ChildItem -LiteralPath (Join-Path $d.FullName 'data') -File)) {
+        $k = Join-Path $kit "tools\puppet_pack\$($d.Name)\data\$($s.Name)"
+        if (-not (Test-Path -LiteralPath $k) -or (Get-FileHash -LiteralPath $k).Hash -ne (Get-FileHash -LiteralPath $s.FullName).Hash) {
+            $dataMiss += "$($d.Name)\data\$($s.Name)"
+        }
+    }
+}
+if ($dataMiss.Count -gt 0) { throw "make_kit: the kit misses pack data (or it differs): $($dataMiss -join ', ')" }
+Write-Host "Pack data self-check: OK (every tools\puppet_pack\*\data file in the kit, byte for byte)"
 if (-not $NoZip) {
     $zip = "$kit.zip"
     & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $OutRoot $name

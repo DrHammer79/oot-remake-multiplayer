@@ -249,6 +249,19 @@ $own = @(Get-ChildItem $kit -Recurse -File | ForEach-Object { $_.FullName.Substr
     Where-Object { $_ -notmatch '^(?i)(logs\\|coop-options\.ini$)' } | Sort-Object)
 [System.IO.File]::WriteAllLines((Join-Path $kit 'MANIFEST.txt'), [string[]](@("# Files of $name, for Update.bat. Do not edit.", 'MANIFEST.txt') + $own))
 
+# Self-check (review-01111-a; CI builds only the Linux kit, which checks the same): every file of every pack data folder
+# in the repo (tools\puppet_pack\<name>\data: charsel, coopmenu) is in the kit byte for byte, or no kit is made.
+$dataMiss = @()
+foreach ($d in (Get-ChildItem -LiteralPath $packTool -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'data') })) {
+    foreach ($s in (Get-ChildItem -LiteralPath (Join-Path $d.FullName 'data') -File)) {
+        $k = Join-Path $kit "tools\puppet_pack\$($d.Name)\data\$($s.Name)"
+        if (-not (Test-Path -LiteralPath $k) -or (Get-FileHash -LiteralPath $k).Hash -ne (Get-FileHash -LiteralPath $s.FullName).Hash) {
+            $dataMiss += "$($d.Name)\data\$($s.Name)"
+        }
+    }
+}
+if ($dataMiss.Count -gt 0) { throw "make_kit_hookshot: the kit misses pack data (or it differs): $($dataMiss -join ', ')" }
+Write-Host "Pack data self-check: OK (every tools\puppet_pack\*\data file in the kit, byte for byte)"
 $size = (Get-ChildItem $kit -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ('Folder: {0:N1} MB, {1} files' -f ($size / 1MB), ($own.Count + 1))
 if (-not $NoZip) {
