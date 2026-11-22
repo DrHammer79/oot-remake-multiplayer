@@ -1,0 +1,34 @@
+# hs-block-grip, B: pushes the Deku basement block from its -z face toward +z while A grips it (phase 1) and while A
+# pulls it the same way (phase 2). See the A file.
+mark start
+warp InsideTheDekuTree Entrance
+wait 1200
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A
+wait 2400
+mark after
+place -51.06 79.9 43.5   # on the goal side of the block (its goal anchor is at z 42.6)
+wait 240
+toward -51.06 60.0 10    # face +z
+mark b-placed
+wait 400                 # A grips from about here
+goto -51.06 45.3 0.3 300 # walk up to the -z face (block at 47.1)
+mark b-reach
+toward -51.06 60.0 150 A # PUSH toward +z, into A's grip (A held: a walk into it only shows "Grab")
+wait 120
+mark b-push1
+wait 1000                # A lets go, walks away and comes back
+goto -51.06 46.8 0.3 120 # the -z face again (block one step on, at about 48.6)
+wait 40
+toward -51.06 60.0 150 A # PUSH while A pulls the same way
+mark b-push2
+goto -51.06 41.5 0.5 300 # walk away: Link in control?
+mark b-free
+wait 900
+mark end
