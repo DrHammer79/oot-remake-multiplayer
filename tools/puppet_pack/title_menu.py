@@ -47,7 +47,22 @@ ROW_STEP_Y = -110.0            # the game's buttons are 110 apart (Title_00: Pa_
 HINT = "Pa_CoopHint_00"
 # The rows' live texts (CoopTitle's native pages on the title's own buttons): a placeholder each, written over in the
 # game's memory by the co-op module (as the pause menu's Coop_Live_NN): one per button, then the hint line's (longer).
-LIVE = tuple(("Coop_Live_T%d" % i, "." * 64) for i in range(FIRST_NEW + LIST_BUTTONS)) + (("Coop_Live_Hint", "." * 160),)
+# The Host page's "Who can join" row is the game's own Options toggle (owner, 2026-11-21: "a slider for either public or
+# private"): TOGGLE, a part of the Options screen's two-cell layout TOGGLE_LAYOUT (SystemOption_00's Pa_ToggleBtn_00: its
+# name T_Option_00 on the left, two cells W_CheckL_00 / T_BtnON_00 and W_CheckR_00 / T_BtnOFF_00, its own Select,
+# UnSelect and Check animations), in Pa_Button_00's place, stored hidden. That layout and its textures are the Common
+# archive's (the title's own archive has neither): the part names it, and the game finds it there (a probe run settles
+# it; docs/hookshot.md). Drawn at TOGGLE_SCALE so it keeps to a title row's height (110), moved by TOGGLE_MOVE so its
+# name and cells sit centred under the column. Its three texts are live texts of their own (TOGGLE_LIVE): the module
+# shows the part over the row's title button (which stays the cursor's) and gives it its words.
+TOGGLE = "Pa_CoopToggle_00"
+TOGGLE_LAYOUT = "PaOptionBtnL_00"
+TOGGLE_SIZE = (1920.0, 126.0)     # its N_BtnWidth_00, as SystemOption_00 sizes it
+TOGGLE_SCALE = (0.8, 0.8)         # 126 high at 1.0: about 100 here, inside a row's 110
+TOGGLE_MOVE = (150.0, 0.0)        # its name (x -840) and cells (to x +920) about the column's middle
+TOGGLE_LIVE = tuple(("Coop_Live_Toggle%d" % i, "." * 64) for i in range(3))   # its name, the left cell, the right
+LIVE = (tuple(("Coop_Live_T%d" % i, "." * 64) for i in range(FIRST_NEW + LIST_BUTTONS)) + (("Coop_Live_Hint", "." * 160),)
+        + TOGGLE_LIVE)
 # The same rows for the languages whose game text is Chinese (the kit's Chinese layer keeps the
 # game's own tables, as its menus and messages do): the pack carries these words in that
 # language's Title_00.msbt, since the module only names the label (CoopTitleMenu::kMenuLabels)
@@ -107,9 +122,22 @@ def add_list(d):
     return ui_pack.clone_parts(d, copies, new_id=_new_id)
 
 
+def add_toggle(d):
+    """Title_00.buil (with the list) with TOGGLE after it: a part of TOGGLE_LAYOUT in Pa_Button_00's place (moved by
+    TOGGLE_MOVE, at TOGGLE_SCALE), under the same alignment pane, stored hidden. No title button (not a Pa_Button_NN)."""
+    panes, _ = read_layout(d)
+    names = [p[0] for p in panes]
+    if HINT not in names:
+        raise TitleMenuError("the layout has no %s (add_list first)" % HINT)
+    if TOGGLE in names:
+        raise TitleMenuError("the layout has the toggle already")
+    return ui_pack.clone_parts(d, [ui_pack.Copy(BUTTON % 0, TOGGLE, TOGGLE_MOVE, hidden=True, part_layout=TOGGLE_LAYOUT,
+                                                size=TOGGLE_SIZE, scale=TOGGLE_SCALE)], new_id=_new_id)
+
+
 def add_menu(d):
-    """The marker, then the list's buttons and the hint line."""
-    return add_list(add_marker(d))
+    """The marker, then the list's buttons and the hint line, then the Host page's toggle."""
+    return add_toggle(add_list(add_marker(d)))
 
 
 # ---------------------------------------------------------------------------------------- MSBT

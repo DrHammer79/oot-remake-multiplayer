@@ -9,6 +9,7 @@
 // (hos_coop_menu.h). Not thread-safe: the module guards it.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -146,6 +147,10 @@ struct Row {
     bool on = false;                  // kToggle
     bool left = false, right = false; // kChoice: it can go that way
     bool fixed = false;               // it cannot be used now
+    // A choice of two shown as the game's own Options toggle where the page can (the title's Host page: its two cells,
+    // the chosen one `cell`, 0 or 1; -1 none): the value's words then are cells[cell].
+    std::array<std::string, 2> cells{};
+    int cell = -1;
 };
 struct View {
     std::vector<Row> rows;
