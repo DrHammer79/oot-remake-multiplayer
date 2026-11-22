@@ -31,10 +31,9 @@ wait 60
 press ZR                # and the next
 wait 120
 mark a-page
-press B
+press B                 # back to the Characters page
 wait 150
-press B
-wait 150
+mark a-back
 press MINUS             # out of the menu
 wait 300                # worn on the next frame, the textures found
 mark a-after
