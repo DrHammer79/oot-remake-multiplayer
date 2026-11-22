@@ -101,6 +101,10 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "resume", "description": "Let the game run in real time again (a person takes over). The next call "
      "holds it again.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "log", "description": "This game's new co-op log lines (`coop:`) since the last call, the newest "
+     "%d at most; `match` keeps only lines containing that text. Needs --session (games from live.py start: p1 = A, "
+     "p2 = B). No frame passes." % live.MAX_LINES,
+     "inputSchema": {"type": "object", "properties": {"match": {"type": "string"}}}},
     {"name": "screenshot", "description": "A PNG of this game's screen (the path: open it to see). Use sparingly; "
      "get_state is cheaper. Anything visible is proven only by a picture. A held game runs 1 frame for it.",
      "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}},
@@ -113,6 +117,23 @@ class Game:
 
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
+        self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
+
+    def log_lines(self, match=None):
+        """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
+        if not self.session:
+            raise ValueError("log needs --session (games from live.py start); read the game's own log otherwise")
+        i = pc.player_index(self.player) - 1
+        if i >= len(live.TAGS):
+            raise ValueError("live.py starts games A and B only (p1, p2): %s has no session log" % self.player)
+        x = live.TAGS[i]
+        s = live.load(self.session)
+        if self.offsets is None:
+            self.offsets = {x: (s.get("offsets") or {}).get(x, 0)}   # from the end of the boot
+        lines = live.new_lines(self.session, {"games": s["games"], "offsets": self.offsets}, x)
+        if match:
+            lines = [ln for ln in lines if match in ln]
+        return {"frame": self.client.last_frame, "lines": lines}
 
     def call(self, name, args):
         if self.session:
@@ -158,6 +179,8 @@ class Game:
             code = desync_check.check_clients(self.log_dir, bool(args.get("all")),
                                               out=lambda s: buf.write(s + "\n"))
             return {"result": desync_check.RESULTS[code], "report": buf.getvalue()}
+        if name == "log":
+            return self.log_lines(args.get("match"))
         if name == "screenshot":
             label = args.get("name") or "shot"
             if not pc.TAG.match(label):

@@ -256,7 +256,7 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "walk_to", "press", "step", "warp", "flag", "give", "checkpoint",
-                          "desync_check", "pause", "resume", "screenshot"])
+                          "desync_check", "pause", "resume", "log", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
 
@@ -336,6 +336,28 @@ class PlayerServer(unittest.TestCase):
         live.write_json(live.watchdog_file(d), {"ended": "idle"})
         with self.assertRaises(SystemExit):
             g.call("step", {"frames": 1})
+
+    def test_log_lines_since_the_last_call(self):
+        d = os.path.join(self.tmp.name, "session")
+        os.makedirs(d)
+        logs = {x: os.path.join(d, "game-out-%s.txt" % x) for x in live.TAGS}
+        with open(logs["A"], "w", encoding="utf-8") as f:
+            f.write("boot line coop: before\n")
+        live.save(d, {"started": 1000.0, "offsets": {"A": os.path.getsize(logs["A"]), "B": 0},
+                      "games": {x: {"log": logs[x]} for x in live.TAGS}})
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        with open(logs["A"], "a", encoding="utf-8") as f:
+            f.write("[x] coop: objects: rocks: 3 new falling rocks in our game since the last line (3 live)\n"
+                    "[x] coop: other\nno co-op here\n")
+        out = g.call("log", {"match": "rocks:"})
+        self.assertEqual(len(out["lines"]), 1)
+        self.assertIn("3 new falling rocks", out["lines"][0])
+        self.assertEqual(g.call("log", {})["lines"], [])                 # nothing new since
+        self.assertEqual(live.load(d)["offsets"]["A"], len("boot line coop: before\n"))   # session file untouched
+        with self.assertRaises(ValueError):
+            self.tools["p1"].call("log", {})                             # no --session
+        with self.assertRaises(ValueError):
+            mcp_playtest.Game("p3", self.tools["p1"].client, self.tmp.name, session=d).log_lines()
 
     def test_main_needs_session_or_player(self):
         err = sys.stderr
