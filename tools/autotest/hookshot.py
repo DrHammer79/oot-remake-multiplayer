@@ -834,19 +834,29 @@ class Player:
 def to_play(bridge, log, timeout, clock=time.monotonic, sleep=time.sleep):
     """Title and file select to the world: A pressed every 2 s until the bridge says play with a map known."""
     deadline = clock() + timeout
+    last, said = {}, clock()
     while clock() < deadline:
         try:
             s = bridge.request("status")
         except BridgeError:
             s = {}
+        last = s
         game = s.get("game") or {}
         if s.get("state") == "play" and s.get("map") and not game.get("loading") and not game.get("event"):
             log("coop: test loaded (map %s)" % s.get("map"))
             return s
+        # (what it waits for, every 30 s: a game that is drawn but never "play with a map, not loading, no event" is
+        # told apart from one that is not there; player-<x>.txt had nothing when the load failed)
+        if clock() - said >= 30:
+            said = clock()
+            log("coop: test waiting for play: state=%s map=%s loading=%s event=%s frame=%s" %
+                (s.get("state"), s.get("map"), game.get("loading"), game.get("event"), s.get("frame")))
         if s.get("frame", 0) > 0:
             bridge.request("press", buttons=["A"], frames=8, wait=False, check=False)
         sleep(2.0)
-    raise TimeoutError("not in play after %d s" % timeout)
+    raise TimeoutError("not in play after %d s (last status: state=%s map=%s loading=%s event=%s)" %
+                       (timeout, last.get("state"), last.get("map"), (last.get("game") or {}).get("loading"),
+                        (last.get("game") or {}).get("event")))
 
 
 # The renderer's start is done: its pipelines are made (from the caches or compiled now). Until then the game shows

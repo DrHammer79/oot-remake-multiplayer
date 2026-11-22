@@ -1028,6 +1028,18 @@ try {
         foreach ($p in $csNpcFiles) { if (-not (Test-KitCharacterSelectNpcFile $p)) { $partsOk = $false } }
         foreach ($p in $csUiFiles + @('romfs\GameData\GameDataList.Product.110.byml.zs', 'exefs\E0F3.ips', 'romfs\Model\Player_Adult.Player_Adult.bfres.zs')) { if (Test-KitCharacterSelectNpcFile $p) { $partsOk = $false } }
         Check $partsOk 'Character Select parts: NPC files and default-part files told apart'
+        # v0.2.2: player.py's --exclude for part 'ui' ($KitCharselToolExclude) says what Test-KitCharacterSelectNpcFile says.
+        $exOk = $true
+        foreach ($p in $csNpcFiles + $csUiFiles + @('romfs\Sound\Resource\Voice.bars.zs', 'romfs\Model\Player_Dark_Link.bfres.zs',
+                'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Child_C005.Player_Child_C005.bfres.zs',
+                'romfs\Tex\a.bntx.zs', 'romfs\Phive\a.bphsh.zs', 'romfs\GameData\GameDataList.Product.110.byml.zs',
+                'romfs\Model\Player_Adult.Player_Adult.bfres.zs', 'romfs\Pack\Actor\Enemy_DarkLink.pack.zs', 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs',
+                'romfs\Tex\Angin_Tile_A_Dark_Ac7.bntx.zs', 'romfs\Tex\Mt_Hairs_Player_Adult_Ah9.bntx.zs', 'romfs\Tex\Npc_Zelda_Alb.bntx.zs')) {
+            $r = $p.Replace('\', '/')
+            if ($r -notmatch '^romfs/') { continue }
+            if (($r.Substring(6) -cmatch $KitCharselToolExclude) -ne (Test-KitCharacterSelectNpcFile $p)) { $exOk = $false; Write-Host "  exclude/NPC rule differ: $p" }
+        }
+        Check $exOk 'Character Select tool: the ui part''s --exclude and the NPC rule agree on every romfs file'
         # review-geno-0118: what the game was built with is kept until its build: nothing there before -> _<folder>.none;
         # a failed or declined build puts it back (play.ps1 Restore-KitCharacterSelectStart), a built one confirms it.
         $csNone = Join-Path $cm '_OoT Character Select.none'; $csPrev = Join-Path $cm '_OoT Character Select.prev'
@@ -1231,6 +1243,69 @@ try {
         Write-File (Join-Path $cm '_off\characters.json') $csJsonN
         Write-File (Join-Path $cm '_off\romfs\Model\Player_Adult_C006.Player_Adult.bfres.zs') 'm'
         Check ((Get-KitCharacterSelectSeen $pm) -eq $seenFull) 'Character Select seen: a folder starting with _ is skipped (the game skips it)'
+        # v0.2.2: the pin's tool_folder (the zip's build-from-your-game) makes the game-derived files from the game's RomFS with the
+        # kit's Python (a junction to a real Python here; skipped without one). A fake player.py writes Model\Made_By_Tool.bin
+        # holding its arguments, warns on stderr, and exits 1 when FAIL_TOOL is in its folder.
+        $tpy = if ($env:TEST_PYTHON) { $env:TEST_PYTHON } else { (Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+        $tHome = ''
+        if ($tpy -and $tpy -notmatch 'WindowsApps' -and (Test-Path -LiteralPath $tpy)) { try { $tHome = "$(& $tpy -I -c 'import sys; print(sys.base_prefix)' 2>$null)".Trim() } catch { $tHome = '' } }
+        if ($tHome -and (Test-Path -LiteralPath (Join-Path $tHome 'python.exe'))) {
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path (Join-Path $ck 'hookshot\tools') | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $ck 'hookshot\tools\python') -Value $tHome | Out-Null
+            $src2 = Join-Path $ck 'src-tool'
+            $top2 = Join-Path $src2 'CS-t\mods\OoT Character Select'
+            Write-File (Join-Path $top2 'romfs\UI\LayoutArchiveCategory.Product.100.byml.zs') 'ui'
+            [System.IO.Directory]::CreateDirectory((Join-Path $top2 'exefs')) | Out-Null
+            [System.IO.File]::WriteAllBytes((Join-Path $top2 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'), (& $New_CsIps 't'))
+            Write-File (Join-Path $src2 'CS-t\build-from-your-game\player.py') @'
+import os, sys
+a = sys.argv
+mod = a[a.index("--mod") + 1]
+rom = a[a.index("--romfs") + 1]
+sys.stderr.write("player.py:11: SyntaxWarning: invalid escape sequence\n")
+if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
+    sys.exit("not the game's RomFS folder")
+if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FAIL_TOOL")):
+    print("2287 files could not be made; the mod is not complete.")
+    sys.exit(1)
+os.makedirs(os.path.join(mod, "romfs", "Model"), exist_ok=True)
+open(os.path.join(mod, "romfs", "Model", "Made_By_Tool.bin"), "w").write(" ".join(a[1:]))
+print("Done: 1 file. The mod folder is ready.")
+'@
+            $zipT = Join-Path $cDl 'CS-t.zip'
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
+            $zshaT = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            $pinT = "# pin`nrelease=t`nurl=https://example.invalid/cs`nzip=CS-t.zip`nzip_sha256=$zshaT`nzip_folder=CS-t/mods/OoT Character Select`n" +
+                    "tool_folder=CS-t/build-from-your-game`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`noverlay_sha256=$(((Get-FileHash -LiteralPath (Join-Path $cDl 'charsel-characters.json') -Algorithm SHA256).Hash.ToLowerInvariant()))`n"
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') $pinT
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'no game RomFS' -and -not (Test-Path -LiteralPath $csDir)) "Character Select tool: no game RomFS -> not installed, the reason says why [$($r.Lines -join ' | ')]"
+            Write-File (Join-Path $cg 'romfs\Pack\ZsDic.pack.zs') 'z'
+            $r = Install-KitCharacterSelect $ck $cm
+            $made = Join-Path $csDir 'romfs\Model\Made_By_Tool.bin'
+            Check ($r.Ok -and (Test-Path -LiteralPath $made) -and (Get-Content -LiteralPath $made -Raw) -notmatch '--exclude' -and (Get-Content -LiteralPath $made -Raw) -match '--romfs' -and
+                   -not (Test-Path -LiteralPath (Join-Path $cDl 'charsel-tool'))) "Character Select tool: the RomFS there -> the tool makes its files in the mod folder (full part: no --exclude), its stderr warning is no failure, its folder is cleaned up [$($r.Lines -join ' | ')]"
+            Remove-Item -LiteralPath $csDir -Recurse -Force
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'   # (the zip is deleted after an install)
+            $r = Install-KitCharacterSelect $ck $cm '' 'ui'
+            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw) -match '--exclude') 'Character Select tool: part ui passes --exclude (no NPC files)'
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            # (the tool folder is unpacked fresh at each install: the failing marker goes into the zip's tool folder via a second zip)
+            $src3 = Join-Path $ck 'src-tool3'
+            Copy-Item -LiteralPath (Join-Path $src2 'CS-t') -Destination (Join-Path $src3 'CS-t') -Recurse
+            Write-File (Join-Path $src3 'CS-t\build-from-your-game\FAIL_TOOL') 'x'
+            Remove-Item -LiteralPath $zipT -Force -ErrorAction SilentlyContinue
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src3 'CS-t'
+            $zshaF = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ($pinT -replace $zshaT, $zshaF)
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'making its files from your game failed \(2287 files could not be made' -and ($r.Lines -join ' ') -match 'refused file by file' -and
+                   -not (Test-Path -LiteralPath $csDir)) "Character Select tool: a failing tool (exit 1) -> not installed, its last line and the other-version sentence shown [$($r.Lines -join ' | ')]"
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') (($pinT -replace $zshaT, $zshaF) -replace 'tool_folder=CS-t/build', 'tool_folder=CS-t/../build')
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not (Test-Path -LiteralPath $csDir)) 'Character Select tool: a tool_folder that leaves the zip makes the pin unusable (nothing installed)'
+        } else { Write-Host 'skip Character Select tool cases (no real Python: TEST_PYTHON)' }
     } finally { $env:OOT_COOP_OFFLINE = $onlineWas }
     Remove-Item -LiteralPath $ck -Recurse -Force -ErrorAction SilentlyContinue
     # A randomizer seed built before the puppet pack was made again: its size table lacks the pack's entries and the

@@ -469,6 +469,9 @@ jobs:
       - name: Linux Longshot kit tests
         if: matrix.job == 'gcc'
         run: bash tools/release/tests/linux_longshot_kit_test.sh
+      - name: Longshot builder's Python has Character Select's tool packages
+        if: matrix.job == 'gcc'
+        run: bash tools/release/tests/appimage_python_test.sh
       - name: Kit dependency licence tests (Linux)
         if: matrix.job == 'gcc'
         run: bash tools/release/tests/kit_deps_test.sh

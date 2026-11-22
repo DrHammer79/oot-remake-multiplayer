@@ -387,6 +387,71 @@ rm -f "$kit/data/longshot/CHARACTER-SELECT.txt" "$D/character-select-answer.txt"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs8.txt" 2>&1; export CODE=$?
 check 'Character Select: a kit without CHARACTER-SELECT.txt asks nothing and fetches nothing' bash -c '[ $CODE -eq 0 ] && ! grep -q "Character Select" "$1"' _ "$tmp/build-cs8.txt"
 
+# Character Select v0.2.2 (snaildev99): the pin's tool_folder, the zip's build-from-your-game, makes the mod's game-derived
+# files from data/game/romfs with the kit's Python. A fake player.py stands in: it writes Model/Made_By_Tool.bin holding
+# its arguments, says a warning on stderr, and exits 1 (its last line is the reason) when FAKE_TOOL_FAIL is set.
+T2="$tmp/cs-rel2/CS-v2"
+mkdir -p "$T2/mods/OoT Character Select/romfs/UI" "$T2/mods/OoT Character Select/romfs/Model" "$T2/mods/OoT Character Select/exefs" "$T2/build-from-your-game"
+printf 'ui' >"$T2/mods/OoT Character Select/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs"
+printf 'link' >"$T2/mods/OoT Character Select/romfs/Model/Player_Child.Player_Child.bfres.zs"
+cp "$tmp/cs-his.ips" "$T2/mods/OoT Character Select/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
+cat >"$T2/build-from-your-game/player.py" <<'PYEOF'
+import os, sys
+a = sys.argv
+mod = a[a.index("--mod") + 1]
+rom = a[a.index("--romfs") + 1]
+sys.stderr.write("player.py:11: SyntaxWarning: invalid escape sequence\n")
+if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
+    sys.exit("not the game's RomFS folder")
+if os.environ.get("FAKE_TOOL_FAIL"):
+    print("2287 files could not be made; the mod is not complete.")
+    sys.exit(1)
+os.makedirs(os.path.join(mod, "romfs", "Model"), exist_ok=True)
+open(os.path.join(mod, "romfs", "Model", "Made_By_Tool.bin"), "w").write(" ".join(a[1:]))
+print("Done: 1 file. The mod folder is ready.")
+PYEOF
+(cd "$tmp/cs-rel2" && "$py" -c 'import os, zipfile
+with zipfile.ZipFile("CS-v2.zip", "w") as z:
+    for r, _, fs in os.walk("CS-v2"):
+        for f in fs: z.write(os.path.join(r, f))')
+cs2_zsha=$(sha256sum "$tmp/cs-rel2/CS-v2.zip" | cut -d' ' -f1)
+cs2_pin() { printf 'release=v2\nurl=https://example.invalid/cs\nzip=CS-v2.zip\nzip_sha256=%s\nzip_folder=CS-v2/mods/OoT Character Select\ntool_folder=%s\nfolder=OoT Character Select\noverlay_url=https://example.invalid/characters.json\noverlay_sha256=%s\n' \
+    "$cs2_zsha" "${1:-CS-v2/build-from-your-game}" "$cs_osha" >"$kit/data/longshot/CHARACTER-SELECT.txt"; }
+cs2_zip() { cp "$tmp/cs-rel2/CS-v2.zip" "$D/builder/charsel/CS-v2.zip"; }
+rm -rf "$D/game/romfs" "$CS" "$D/builder/charsel/tool" "$D/builder/charsel/tool-pending"; rm -f "$D/character-select-answer.txt"
+cs2_pin; cs2_zip
+# No game RomFS yet (a first start: the game is built after this step): nothing of the mod goes in (no half mod: its code patch
+# alone would build into the game without its menus, tables and models), one line says it comes at the next start.
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t1.txt" 2>&1; export CODE=$?
+check 'Character Select tool: no game RomFS yet -> nothing of the mod is put in (no half mod), one line says it comes at the next start' \
+    bash -c '[ $CODE -eq 0 ] && [ ! -e "$2" ] && [ ! -e "$3/builder/charsel/tool" ] && grep -q "put in at the next start" "$1" && ! grep -q "was not installed" "$1" && ! grep -q "Download the NPC" "$1"' _ "$tmp/build-t1.txt" "$CS" "$D"
+# The game RomFS is there (the build made it): the next start puts the mod in with its files made in the same step, ui part: --exclude given.
+mkdir -p "$D/game/romfs/Pack" && : >"$D/game/romfs/Pack/ZsDic.pack.zs"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 2>&1; export CODE=$?
+check 'Character Select tool: the RomFS there -> the mod goes in with its files made (ui part: --exclude), the tool is cleaned up' \
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] && grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -qF -- "^Tex/(?![^/]*_Player_|Angin_Tile_)" "$2/romfs/Model/Made_By_Tool.bin" && grep -q -- "--romfs .*/game/romfs --mod" "$2/romfs/Model/Made_By_Tool.bin" &&
+        [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t2.txt" "$CS" "$D"
+# One NPC rule: the --exclude build.sh passed (its NPC_RULE, the one npc() uses) is kit-paths.ps1's $KitCharselToolExclude.
+winrule=$(sed -n "s/^\$KitCharselToolExclude = '\(.*\)'\$/\1/p" "$repo/tools/release/kit/scripts/kit-paths.ps1")
+check 'Character Select tool: the Linux --exclude (NPC_RULE) is the Windows rule ($KitCharselToolExclude)' \
+    bash -c 'a=$(cat "$2/romfs/Model/Made_By_Tool.bin") && [ -n "$1" ] && [ "${a##*--exclude }" = "$1" ]' _ "$winrule" "$CS"
+# A tool that fails (a game of another version): the exit code decides, its last line and a clear sentence are shown, nothing of the mod put in.
+rm -rf "$CS"; cs2_zip
+FAKE_TOOL_FAIL=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?
+check 'Character Select tool: a failing tool (exit 1) -> not installed, its last line and the other-version sentence shown, the start goes on' \
+    bash -c '[ $CODE -eq 0 ] && [ ! -e "$2" ] && grep -q "Character Select was not installed: making its files from your game failed (2287 files could not be made" "$1" && grep -q "refused file by file" "$1"' _ "$tmp/build-t3.txt" "$CS"
+# The RomFS there from the start (every start after the first): made while the mod goes in, full part with a yes (no --exclude).
+rm -rf "$CS"; cs2_zip; printf 'character_select = yes\n' >>"$D/coop-options.ini"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
+check 'Character Select tool: the RomFS there at the install -> made at once, full part gets no --exclude' \
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Made_By_Tool.bin" ] && ! grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q "^v2 .* full cz2$" "$2/coop-charsel.txt" && [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t4.txt" "$CS" "$D"
+# A tool_folder that leaves the zip is refused.
+rm -rf "$CS"; cs2_zip; cs2_pin 'CS-v2/../x'
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t5.txt" 2>&1
+check 'Character Select tool: a tool_folder with .. is refused' bash -c 'grep -q "not a folder of the zip" "$1" && [ ! -e "$2" ]' _ "$tmp/build-t5.txt" "$CS"
+rm -rf "$CS" "$D/game/romfs"; sed -i '/^character_select = /d' "$D/coop-options.ini"
+cs_pin
+
 # The randomizer the kit brings (data/longshot/OOTRR.txt): fetched and unpacked into data/game/tools/ootrr.
 mkdir -p "$tmp/ootrr-rel/ootrr-0.5.0-linux-x86_64"
 printf '#!/bin/sh\necho ootrr\n' >"$tmp/ootrr-rel/ootrr-0.5.0-linux-x86_64/ootrr"
