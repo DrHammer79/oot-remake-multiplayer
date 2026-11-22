@@ -624,6 +624,49 @@ King Dodongo rolled forever (Rolling_Start, Rolling_Loop_Start, Rolling_Loop, ne
 
 **Tests.** `objects_test` (row 169: told every walk while it plays, never for the owner's stun, also not when the owner is up a walk before the copy, nor for our own boss; the stun names), `boss_native_test` (row 169: own time, a hand-over during it chooses nothing again, counted once; without it the row 149 re-choose stays). **Not proven in game:** two players at King Dodongo, the guest's bomb in his mouth stuns him, the boss goes to the guest and the guest's hits end him (screenshots on both games: the guest's sword hit taking him from `Down` to his death, the host's screen showing the same).
 
+## Battle manager orders: one manager decides for every game (row 222, Twinrova, 0.11.10)
+
+The owner's report: the Twinrova fight got stuck, the sisters held in an attack. Read from the game's own files and
+main (build e0f3ccfa; no game run yet):
+- The fight is run by a third actor, `Enemy_KotakeKoumeBattleManager`, the group's root (Kotake and Koume are its
+  parts). It has no BSA, no Life and no AS, so the native boss sync never covered it. Its AI node
+  `ExecuteKotakeKoumeBattleManagerAI` (vtable main+0x49a8130; update slot 30, main+0x2720960) picks the fight from
+  its own game's Link and tells each sister what to do through the game's message manager (main+0x379740, the
+  manager `[[main+0x4cba700]]`): a 0x18-byte request naming the sister's actor id (`[client+0x3e8]`), type
+  0x70210000 or 0x70210001, and a payload copied from the manager node (+0xb8). Six send sites, all in that node
+  (main+0x27212e0 to main+0x27227c8).
+- Each sister's `ExecuteKotakeKoumeReceiveMessageProc` (vtable main+0x49a8568) takes them in its message handler, slot
+  39, main+0x2723f80 (x0 the node, x1 the message: +0 the sender's id, +4 the type, +0x10 the payload; main+0x2fa43d0
+  copies the 0x16-byte payload into node+0x54). Type 0x70210000 writes the blackboard keys
+  `DungeonBossKotake_CurrentBattleState` (s32), `_CurrentRollType` (s32), `_AttackStartPos` (vec3), `_IsMainMove`
+  (bool; `_IsPreMainMove` gets the old value); 0x70210001 writes `_IsUnderIntervalThreshold`. The sisters' action
+  sequences branch on those keys (`LandBattle.actionseq`). So their battle state came only from these two messages,
+  from each game's own manager: a copy's verbs were the owner's (native boss sync) but its battle state its own
+  manager's, and after a hand-over the new owner's sisters could start an attack that waited for an order their
+  manager never gave.
+
+The fix (`lichii/hook/coop_boss_orders.h`, Hookshot patch 0036, wrap row 10, protocol 16): the handler is wrapped.
+The owner's game lets each order run and keeps it; it goes out in that sister's own samples (component 23
+`orders`, [protocol.md](protocol.md)). A copy game skips its own manager's orders once the owner's first has come and
+puts the owner's into its sister through the same handler, called by our caller (order 46) on the game's calc thread
+with a message block of its own (made once with the game's malloc), each order once and in the owner's order. At a
+start, a hand-over or a gap it takes the owner's newest order of each type. Made ours, our own manager decides from
+then on. Until the owner's first order comes (a new copy, an older owner) its own orders run, as before. The copy's
+manager itself still runs (its SyncLife, its damage field); only its orders to the sisters are the owner's.
+`LICHII_COOP_BOSS_ORDERS=0` turns it off. Log lines: `coop: bosses: battle orders: ...` (counts every 10 s),
+`...: the owner's came: our own manager's orders are skipped`, `...: its receive node 0x...`.
+
+Other battle managers: `ExecuteGroupBattleManagerAI` / `ExecuteGroupBattleManagerMessageCommunication` (vtables
+main+0x49a3090, main+0x49a3258; enemy groups, no boss) use the same message family (its own payload copy,
+main+0x2fa4210): the same wrap of its handler (slot 39, main+0x26f5cd0) would fit, a row of its own. Not done here.
+The sisters' own messages to each other (`ExecuteEnemyCoopWriteBlackboardReceiveMessage`, types 0x3ddc000e/f) are
+not orders and are left to each game.
+
+Not proven in a game yet: the probe run (two games, hs-twinrova-native) must show the wrap's first-words check pass
+(`coop: bosses: battle manager orders shared (wrapped)`), `battle orders: ours sent N` in the owner's log and
+`N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
+hand-over.
+
 ## Not known yet (for the in-game check)
 
 1. Whether the force-set-matrix move into a room of the same scene loads that room's walls and floor, or Link falls through (the dungeon may stream rooms by `DungeonRoomIndex`). If he falls, the fallback is the scene change, which needs an event running.

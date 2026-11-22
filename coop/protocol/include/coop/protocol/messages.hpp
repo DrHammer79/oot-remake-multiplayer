@@ -29,7 +29,10 @@ namespace coop::protocol {
 // game's enemy takes the real hit through its own damage step (0.11.5, every hit shows on every screen).
 // 15: PLATFORM_CLOCK keys in a mover's GroundControl node (regions 0xfffe / 0xfffd, #196, 0.11.6): a protocol 14
 // reader refuses them as bad_value and drops the whole message, so a 0.11.5 game must be refused at HELLO.
-inline constexpr std::uint16_t kProtocolVersion = 15;
+// 16: OBJECT_SAMPLE component 23, a battle manager's orders (BossOrders, row 222 Twinrova, 0.11.10): a protocol 15
+// server keeps only the components it knows in an object's last state (HANDOVER_STATE), and a 0.11.9 game's copies
+// would follow their own manager again, so mixed versions are refused at HELLO.
+inline constexpr std::uint16_t kProtocolVersion = 16;
 // A public game (anyone joins without typing a password) lists itself on the relay's room list with this bit
 // on top of kProtocolVersion; the relay repeats the version as given. A listing without it is a private game
 // (or an older kit's): the joiner asks for the host's password and never tries the public one on it.
@@ -855,6 +858,7 @@ enum class ObjectComponent : std::uint16_t {
   bsa = 20,    // native boss sync: a boss's brain and action verbs (BossBsa below)
   hit = 21,    // protocol 14: the hit the owner's game took (ObjectHit below)
   strike = 22,  // row 230: a Redead's or Gibdo's scream that froze the owner's Link (ObjectStrike below)
+  orders = 23,  // protocol 16, row 222: the battle manager's orders this enemy took (BossOrders below)
 };
 
 struct ObjectLife {
@@ -966,6 +970,26 @@ struct ObjectStrike {
   bool operator==(const ObjectStrike&) const = default;
 };
 
+// Component 23 (protocol 16, row 222): the orders a boss part took from its game's battle manager, as the game's own
+// message (Twinrova: Enemy_KotakeKoumeBattleManager tells Kotake and Koume the battle state through messages
+// 0x70210000 and 0x70210001, read by ExecuteKotakeKoumeReceiveMessageProc). The owner's game sends the ones its
+// part took; a copy game puts the same messages into its part (coop_boss_orders.h), so one manager decides for
+// every game. `type` is the game's message type and `payload` its 0x16-byte payload, passed on unread. seq is the
+// owner's own count for this part, from 1; recent holds the newest kMaxBossOrders, oldest first.
+inline constexpr std::size_t kBossOrderPayload = 0x16;
+inline constexpr std::size_t kMaxBossOrders = 6;
+struct BossOrder {
+  std::uint32_t seq = 0;
+  std::uint32_t type = 0;
+  std::array<std::uint8_t, kBossOrderPayload> payload{};
+  bool operator==(const BossOrder&) const = default;
+};
+struct BossOrders {
+  std::uint32_t seq = 0;  // the newest order's seq
+  std::vector<BossOrder> recent;
+  bool operator==(const BossOrders&) const = default;
+};
+
 // The components of OBJECT_SAMPLE, OBJECT_SPAWN and HANDOVER_STATE. time is
 // always sent; the others when the sender has them. Floats must be finite.
 struct ObjectState {
@@ -981,6 +1005,7 @@ struct ObjectState {
   std::optional<BossBsa> bsa;                       // native boss sync: bosses only
   std::optional<ObjectHit> hit;                     // protocol 14: the owner's newest hit taken
   std::optional<ObjectStrike> strike;               // row 230: the owner's Link frozen by its scream
+  std::optional<BossOrders> orders;                 // protocol 16: its battle manager's orders (row 222)
   bool operator==(const ObjectState&) const = default;
 };
 

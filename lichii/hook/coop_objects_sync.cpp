@@ -1425,6 +1425,20 @@ std::vector<std::pair<std::uint64_t, proto::BossBsa>> Sync::BossVerbsIn() const 
     return out;
 }
 
+std::vector<std::pair<std::uint64_t, proto::BossOrders>> Sync::BossOrdersIn() const {
+    std::vector<std::pair<std::uint64_t, proto::BossOrders>> out;
+    for (const auto& [address, o] : objects_) {
+        if (!o.orders_in) {
+            continue;
+        }
+        const auto owner = owners_.find(o.id);
+        if (owner != owners_.end() && owner->second.player != 0 && owner->second.player != self_) {
+            out.emplace_back(address, *o.orders_in);
+        }
+    }
+    return out;
+}
+
 std::optional<std::uint8_t> Sync::OwnerOf(std::uint64_t address) const {
     const auto it = objects_.find(address);
     if (it == objects_.end()) {
@@ -1635,6 +1649,9 @@ proto::ObjectState Sync::StateOf(Object& o, std::uint64_t now_us) {
     }
     if (o.bsa) {
         state.bsa = o.bsa;  // native boss sync: a boss's brain and action verbs
+    }
+    if (o.orders) {
+        state.orders = o.orders;  // row 222: its battle manager's orders
     }
     if (o.rotation) {
         state.rotation = QuatOf(*o.rotation);
@@ -2308,6 +2325,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         o.slots = s.slots;
         o.bsa = s.bsa;
+        o.orders = s.orders;
         o.attacking = s.attacking;
         o.event_member = s.event_member;  // row 97
         o.sensor_in_area = s.sensor_in_area;  // row 138(8)
@@ -2696,6 +2714,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.animation = s->animation;
         o.slots = s->slots;
         o.bsa = s->bsa;
+        o.orders = s->orders;
         o.attacking = s->attacking;
         o.seen_at = now_us;
         o.name = s->name;
@@ -3097,7 +3116,8 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             const bool changed = life != o.sent_life || Moved(o.position, o.sent_position) ||
                                  Turned(rotation, o.sent_rotation) ||
                                  animation != o.sent_animation || slots != o.sent_slots ||
-                                 (o.bsa && o.sent_bsa_seq != o.bsa->seq);  // native boss sync: a new boss verb at once
+                                 (o.bsa && o.sent_bsa_seq != o.bsa->seq) ||  // native boss sync: a new boss verb at once
+                                 (o.orders && o.sent_orders_seq != o.orders->seq);  // row 222: a new order at once
             if (!o.sent_once || changed || now_us - o.sent_at >= kStillEveryUs) {
                 proto::ObjectSample sample;
                 sample.id = o.id;
@@ -3119,6 +3139,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 o.sent_slots = std::move(slots);
                 if (o.bsa) {
                     o.sent_bsa_seq = o.bsa->seq;
+                }
+                if (o.orders) {
+                    o.sent_orders_seq = o.orders->seq;
                 }
             }
         }
@@ -3984,6 +4007,7 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             // new owner's first state is the one the copy starts from.
             o->received.clear();
             o->bsa_in.reset();
+            o->orders_in.reset();
             if (owner->owner == self) {
                 // Ours now, where it stands here: nothing pulls it. A hit of
                 // ours not yet sent is already in its life, and the others
@@ -4025,6 +4049,9 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             if (sample->state.bsa) {
                 o->bsa_in = sample->state.bsa;  // native boss sync: the owner's boss verbs
                 o->boss_native = true;
+            }
+            if (sample->state.orders) {
+                o->orders_in = sample->state.orders;  // row 222: the owner's battle manager orders
             }
             if (sample->state.position && Finite(*sample->state.position)) {
                 const std::uint64_t t = sample->state.time.server_time_us;
