@@ -8266,3 +8266,20 @@ TEST_CASE("hand-over: every boss owner change logs its reason (review-01111-b 17
     CHECK(said(lines, "(the owner did not answer)") == 1);
   }
 }
+
+TEST_CASE("hand-over: a plain pack's root changes owner without a log line (it can change often)") {
+  std::vector<std::string> lines;
+  SessionConfig config = turn_config();
+  config.log = [&lines](const std::string& line) { lines.push_back(line); };
+  OwnerHarness h(config);
+  h.stand(1, 4);
+  h.stand(2, 6);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), 0}, {placed(8), placed(7), 0}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);
+  h.clear();
+  h.receive(1, PlayerStatus{0, status::dead}, kChannelSession);
+  h.run(15 * kSecond);  // a plain enemy's owner hold is 10 s; no answer: the change comes anyway
+  REQUIRE(h.session.object_owner(placed(7)).has_value());
+  CHECK(h.session.object_owner(placed(7))->first == 2);
+  CHECK(std::none_of(lines.begin(), lines.end(), [](const std::string& l) { return l.starts_with("hand-over: "); }));
+}
