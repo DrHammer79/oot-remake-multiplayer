@@ -1715,6 +1715,9 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
 # Python (numpy, zstandard, astc-encoder-py and texture2ddecoder, which the kit's Python has) into the unpacked
 # folder, checks every source file and every result by SHA-1 and refuses another game version. For part 'ui' it
 # skips the NPC part's files (--exclude: the rule of Test-KitCharacterSelectNpcFile). '' or why not.
+# The NPC part as player.py's --exclude (paths below romfs/, '/'): must say exactly what Test-KitCharacterSelectNpcFile
+# says for romfs files (launch_test.ps1 checks the two agree); change both together.
+$KitCharselToolExclude = '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
 function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]$New, [string]$ModsDir, [string]$Downloads, [string]$Part) {
     $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
     $exeDir = Split-Path -Parent $ModsDir     # (the game's files: beside longshot.exe or a folder up, as Get-KitHookshotNeed looks)
@@ -1731,7 +1734,7 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
     # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
     # from another folder), so nothing else is needed)
     $a = @('-I', '-B', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
-    if ($Part -eq 'ui') { $a += @('--exclude', '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$') }
+    if ($Part -eq 'ui') { $a += @('--exclude', $KitCharselToolExclude) }
     Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
     # (Windows PowerShell makes each stderr line of a program an error record: under a caller's 'Stop' a warning
     # would end the install. The exit code decides.)
