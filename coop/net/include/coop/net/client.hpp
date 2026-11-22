@@ -500,6 +500,7 @@ class Client {
 
   bool address_known_ = false;
   std::uint32_t address_host_ = 0;  // ENet's form, network byte order
+  bool used_same_network_key_ = false;  // the last JOIN_PROOF was the same-network key's
 
   std::uint64_t attempt_started_us_ = 0;
   // Held for the host's answer (JOIN_KNOCK): the attempt waits until then; 0: not held.

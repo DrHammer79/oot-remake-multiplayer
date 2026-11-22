@@ -1132,7 +1132,7 @@ def run(a):
                 if delay:
                     senv["OOT_COOP_TEST"] = "1"   # coop_server refuses the delay without it
                 server = subprocess.Popen([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
-                                          + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
+                                          + delay + a.server_arg, stdout=so, stderr=subprocess.STDOUT, env=senv)
             time.sleep(1)
         for i, x in enumerate(tags):
             g = games[x]
@@ -1354,6 +1354,8 @@ def main(argv=None):
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--keep-open", action="store_true")
     r.add_argument("--env", action="append", default=[], help="NAME=VALUE (or A:NAME=VALUE) for the games")
+    r.add_argument("--server-arg", action="append", default=[],
+                   help="one more argument for the coop_server it starts (row 251: --same-network-open)")
     r.add_argument("--every", type=float, default=3.0)
     r.add_argument("--timeout", type=int, default=900, help="seconds for the boot and the load")
     r.add_argument("--scenario-timeout", type=int, default=600)
