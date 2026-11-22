@@ -1291,6 +1291,13 @@ print("Done: 1 file. The mod folder is ready.")
             $r = Install-KitCharacterSelect $ck $cm '' 'ui'
             Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw) -match '--exclude') 'Character Select tool: part ui passes --exclude (no NPC files)'
             Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            # An empty NPC rule would exclude nothing (NPC files in the ui part): refused, nothing installed.
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
+            $ruleKept = $KitCharselToolExclude; $KitCharselToolExclude = ''
+            $r = Install-KitCharacterSelect $ck $cm '' 'ui'
+            $KitCharselToolExclude = $ruleKept
+            Check (-not $r.Ok -and "$($r.Why)" -match 'NPC rule' -and -not (Test-Path -LiteralPath $csDir)) 'Character Select tool: an empty NPC rule -> part ui refused, nothing installed'
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
             # (the tool folder is unpacked fresh at each install: the failing marker goes into the zip's tool folder via a second zip)
             $src3 = Join-Path $ck 'src-tool3'
             Copy-Item -LiteralPath (Join-Path $src2 'CS-t') -Destination (Join-Path $src3 'CS-t') -Recurse
