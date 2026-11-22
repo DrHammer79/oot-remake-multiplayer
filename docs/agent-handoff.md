@@ -110,7 +110,7 @@ the eye (`Obj_Base_OnOffAnim`) has no AI of its own, so a refused turn leaves it
   `LICHII_COOP_DEBUG_BOSS=1`. Kill-switches for tonight's features: `LICHII_COOP_PIVOT=0`, `LICHII_COOP_SPLIT_SHOTS=0`,
   `LICHII_COOP_BLOCK_NODE=0`.
 - **Live play-testing** ([playtest.md](playtest.md)): `tools/autotest/live.py` keeps both games open and takes one
-  step at a time; `dump TAG` checkpoints every shared flag; `desync_check.py`; `mcp_playtest.py` for Claude Code; the play-test bridge pauses each game between calls and steps N frames
+  step at a time; `dump TAG` checkpoints every shared flag; `desync_check.py`; `mcp_playtest.py` for an MCP client; the play-test bridge pauses each game between calls and steps N frames
   (playtest.md, "Playing through the bridge"). The tester rules are in AGENTS.md.
 - **Reading the romfs** for facts: `tools/puppet_pack` (`zs`, `byml`, `sarc`, `bfres`): maps in
   `Banc/<Scene>/*.bcett.byml.zs` (actors, `Dynamic` params, `Links`, `Presence`), packs in `Pack/Actor/<Name>.pack.zs`;
