@@ -144,9 +144,10 @@ def main():
         (tmp / "a64.h").write_text(h.A64)
         (tmp / "stubs.c").write_text(h.STUBS)
         libpath = tmp / "fs.dll"
-        # (Longshot's own Windows build of the harness: tests/test_fs_save_commit.py main)
+        # (Longshot's own Windows build of the harness: tests/test_fs_save_commit.py main; string.h first, as the game's
+        #  build has it before hos.h, whose inline helpers use memset and memcpy)
         subprocess.run([cc, "-std=gnu11", "-shared", "-O1", "-Wall", "-Wextra", "-Wno-unused-parameter",
-                        "-I", str(tmp), "-I", os.path.join(src, "host"),
+                        "-I", str(tmp), "-I", os.path.join(src, "host"), "-include", "string.h",
                         "-include", os.path.join(src, "gpu", "vk", "compat", "longshot_env.h"),
                         os.path.join(src, "host", "nn_fs.c"), str(tmp / "stubs.c"),
                         "-Wl,--export-all-symbols", "-o", str(libpath)], check=True)
