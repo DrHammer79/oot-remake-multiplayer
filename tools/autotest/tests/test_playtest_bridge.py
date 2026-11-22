@@ -15,7 +15,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
+import argparse  # noqa: E402
 import desync_check  # noqa: E402
+import live  # noqa: E402
 import mcp_playtest  # noqa: E402
 import playtest_client as pc  # noqa: E402
 
@@ -104,10 +106,15 @@ class FakeGame:
                 json.dump({"frame": self.frame, "tag": m["tag"], "state": self.state(), "flags": self.flags}, f)
             return {"ok": True, "path": path, "flags": len(self.flags)}
         if cmd == "shot":
+            if "path" in m:
+                return {"ok": False, "error": "bad_request", "message": "no client paths"}
             self.run(1)
-            with open(m["path"], "wb") as f:
+            folder = os.path.join(self.dump_dir, "playtest", "shots")
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, "%s.png" % m.get("name", "shot"))
+            with open(path, "wb") as f:
                 f.write(b"PNG")
-            return {"ok": True, "path": m["path"], "width": 1280, "height": 720, "advanced": 1}
+            return {"ok": True, "path": path, "width": 1280, "height": 720, "advanced": 1}
         return {"ok": False, "error": "bad_request", "message": "unknown cmd %s" % cmd}
 
 
@@ -308,11 +315,27 @@ class PlayerServer(unittest.TestCase):
 
     def test_screenshot(self):
         r = self.call("p2", "screenshot", name="door")
+        self.assertNotIn("path", self.games["p2"].log[-1])     # a name only: the game picks the folder
         self.assertTrue(os.path.exists(r["path"]))
         self.assertTrue(os.path.basename(r["path"]).startswith("p2-door-"))
         self.assertEqual(r["advanced"], 1)
+        self.assertEqual(os.path.dirname(r["copy"]), os.path.join(self.tmp.name, "shots"))   # beside the logs
+        self.assertTrue(os.path.exists(r["copy"]))
         with self.assertRaises(ValueError):
             self.call("p2", "screenshot", name="../x")
+
+    def test_a_live_session_is_kept_awake_and_an_ended_one_refused(self):
+        d = os.path.join(self.tmp.name, "session")
+        os.makedirs(d)
+        live.save(d, {"started": 1000.0, "games": {}, "offsets": {}})
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        live.touch(d)
+        os.utime(live.active_file(d), (1000.0, 1000.0))          # the last command long ago
+        g.call("step", {"frames": 1})
+        self.assertGreater(live.activity(d, {}), 1000.0 + 3600)   # touched now: the watchdog's idle clock restarts
+        live.write_json(live.watchdog_file(d), {"ended": "idle"})
+        with self.assertRaises(SystemExit):
+            g.call("step", {"frames": 1})
 
     def test_main_needs_session_or_player(self):
         err = sys.stderr
@@ -361,6 +384,25 @@ class DesyncClients(unittest.TestCase):
                 self.assertEqual(desync_check.main([d, "--clients"]), 1)
             finally:
                 sys.stdout = stdout
+
+
+
+class LiveStartPlaytest(unittest.TestCase):
+    def args(self, **kw):
+        a = dict(session="s", lane=None, game_a="ga", game_b="gb", server="coop_server.exe", port=None, boot_a=None,
+                 boot_b=None, load=None, no_load=False, no_restore=False, env=[], boot_timeout=900, max_minutes=30,
+                 idle_minutes=10, lock_wait=0, playtest=False)
+        a.update(kw)
+        return argparse.Namespace(**a)
+
+    def test_off_unless_asked(self):
+        self.assertNotIn("--playtest-ports", live.runner_argv(self.args(), "ga", "gb", 1, "p", "dir"))
+
+    def test_ports_match_the_mcp_servers(self):
+        for lane in (None, 1, 2):
+            argv = live.runner_argv(self.args(playtest=True, lane=lane), "ga", "gb", 1, "p", "dir")
+            base = int(argv[argv.index("--playtest-ports") + 1])
+            self.assertEqual((base + 1, base + 2), (pc.port_for("p1", lane), pc.port_for("p2", lane)))
 
 
 if __name__ == "__main__":

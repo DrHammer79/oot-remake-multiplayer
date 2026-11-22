@@ -113,7 +113,7 @@ only, no `pip install`.
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
 | `pause`, `resume` | Hold the game, or let it run in real time (a person takes over; the next call holds it again) |
-| `screenshot [name]` | A PNG of this game under `<log dir>/shots/` (the game runs one frame to show it) |
+| `screenshot [name]` | A PNG of this game: the game saves it as `<game>/playtest/shots/<player>-<name>-<time>.png` (it runs one frame to show it); a copy goes to `<log dir>/shots/` |
 
 Every reply carries the game's `frame`.
 
@@ -125,20 +125,26 @@ pathfinding, so give it points with a clear line between them and use `warp` for
 
 ### Setting up a run
 
-1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L
-   (`live.py start --lane L` sets `LICHII_COOP_PLAYTEST_PORT` and `HOS_CONTROL` for its games A = p1, B = p2).
-   Each game's log says `coop: playtest: listening on 127.0.0.1:<port>`.
-2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there).
-   In a project `.mcp.json` (the shape most MCP clients read):
+1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L.
+   `live.py start --playtest [--lane L]` does it for its two games (A = p1, B = p2: the runner's
+   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`; `HOS_CONTROL` was set already), and its
+   answer lists the ports. Give it `--max-minutes` for a long run (30 by default). By hand: set
+   `LICHII_COOP_PLAYTEST_PORT` (and `HOS_CONTROL`) in each game's environment. Each game's log says
+   `coop: playtest: listening on 127.0.0.1:<port>`.
+2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
+   and, for games from `live.py start`, the same `--session`: each call then counts as a tester command for the
+   session's watchdog (else it ends the session after `--idle-minutes`), and an ended session is refused. In a
+   project `.mcp.json` (the shape most MCP clients read):
 
    ```json
    {"mcpServers": {
-     "oot-p1": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p1", "--lane", "1", "--log-dir", "playtest-logs/run1"]},
-     "oot-p2": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p2", "--lane", "1", "--log-dir", "playtest-logs/run1"]}
+     "oot-p1": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p1", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]},
+     "oot-p2": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p2", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]}
    }}
    ```
 
-   `--port N` names a port outright. Three or four players: `oot-p3` and `oot-p4` the same way.
+   `--port N` names a port outright. Three or four players: `oot-p3` and `oot-p4` the same way (games started by
+   hand: `live.py` starts two).
 3. The tester follows [AGENTS.md](../AGENTS.md), "Play-testing the game", and runs [tests/scenarios.md](../tests/scenarios.md)
    in order.
 
