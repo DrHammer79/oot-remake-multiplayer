@@ -1010,7 +1010,8 @@ class Session {
   std::optional<ConnectionId> bomb_heir(const Object& o, ConnectionId except) const;
   // Gives the object to `next` (or nobody) with epoch + 1: HANDOVER_STATE to
   // the new owner, then OBJECT_OWNER to the scene.
-  // Every owner change goes through here. A boss, a group's root or a battle manager logs 'hand-over: ... why'.
+  // Every owner change goes through here. A boss (or a boss group's root) or a battle manager logs
+  // 'hand-over: ... why'.
   void change_owner(const protocol::ObjectId& oid, Object& o, std::optional<ConnectionId> next,
                     std::uint8_t old_owner, std::uint64_t now_us, const std::string& why);
   // Why unfit_owner / unfit_fight_owner holds (loading, downed, dead N s, paused N s), for the log.

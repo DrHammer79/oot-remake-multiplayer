@@ -2544,7 +2544,7 @@ void Session::finish_handover(const ObjectId& oid, Object& o, const ObjectState*
 
 void Session::change_owner(const ObjectId& oid, Object& o, std::optional<ConnectionId> next,
                            std::uint8_t old_owner, std::uint64_t now_us, const std::string& why) {
-  if (o.boss || o.serial != 0 || o.battle_manager) {
+  if (o.boss || o.battle_manager) {  // (a plain pack's root: not logged, it can change often)
     std::string to = "nobody";
     if (next) {
       if (auto it = connections_.find(*next); it != connections_.end()) {
