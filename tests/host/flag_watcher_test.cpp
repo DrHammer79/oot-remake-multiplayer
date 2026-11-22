@@ -3520,6 +3520,50 @@ TEST_CASE("flag watcher: a guest's own save load with more hearts than the group
   CHECK_FALSE(w.reset_lowered(kMaxLife));
 }
 
+TEST_CASE("flag watcher: a hold made inside a load window outlives its end, one made before it does not (row 238)") {
+  // Lane 1 run 122412: B rejoined; its Link was not made again (a reconnect rebuilds nothing), but the snapshot came
+  // inside a load window, and the window's end cleared the hold, so Link's own max stayed 20 over the group's 16.
+  // A window's end clears only the holds that began before the window (the game made Link from the flags in it).
+  constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
+  FakeStore game;
+  game.values[kMaxLife] = entry(kMaxLife, 20, proto::FlagKind::int32);
+  ItemFlagStore store(game);
+  FlagWatcher w(SharedFlags({kMaxLife}), FlagRole::player);
+  for (int i = 0; i <= FlagWatcher::kSettleFrames; ++i) w.frame(store);
+  w.reset();  // the reconnect
+  w.set_loading(true);
+  w.frame(store);  // the window opens
+  CHECK(w.settling());
+  CHECK(w.receive(proto::FlagSnapshot{0, 1, {entry(kMaxLife, 16, proto::FlagKind::int32)}}));
+  w.frame(store);
+  CHECK(w.reset_lowered(kMaxLife) == 16);  // made inside the window
+  w.set_loading(false);
+  for (int i = 0; i <= FlagWatcher::kSettleFrames + 1; ++i) w.frame(store);
+  CHECK_FALSE(w.settling());
+  CHECK(w.reset_lowered(kMaxLife) == 16);  // the window's end did not clear it
+  w.lowered_done(kMaxLife, 16);            // the walk lowered Link
+  for (int i = 0; i <= FlagWatcher::kResetQuietFrames; ++i) w.frame(store);
+  CHECK_FALSE(w.reset_lowered(kMaxLife));
+}
+
+TEST_CASE("flag watcher: a hold made before a load window is cleared at its end, Link was made again (rows 136/137)") {
+  constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
+  FakeStore game;
+  game.values[kMaxLife] = entry(kMaxLife, 20, proto::FlagKind::int32);
+  ItemFlagStore store(game);
+  FlagWatcher w(SharedFlags({kMaxLife}), FlagRole::player);
+  for (int i = 0; i <= FlagWatcher::kSettleFrames; ++i) w.frame(store);
+  CHECK(w.receive(proto::Message{proto::FlagReset{1, {entry(kMaxLife, 16, proto::FlagKind::int32)}}}));
+  w.frame(store);
+  CHECK(w.reset_lowered(kMaxLife) == 16);
+  w.set_loading(true);  // a scene load: Link is made again from the flags
+  w.frame(store);
+  w.set_loading(false);
+  for (int i = 0; i <= FlagWatcher::kSettleFrames + 1; ++i) w.frame(store);
+  CHECK_FALSE(w.settling());
+  CHECK_FALSE(w.reset_lowered(kMaxLife));
+}
+
 TEST_CASE("flag watcher: a guest with fewer hearts joining a host with more gets the host's value, a join with no lower value holds nothing (row 238)") {
   constexpr FlagKey kMaxLife{0xfbe01da1u, 0};
   FakeStore game;

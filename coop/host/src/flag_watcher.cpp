@@ -411,9 +411,11 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
     no_scene_frames_ = 0;
   } else if (!settling() && window_) {
     window_ = false;
-    // Rows 136/137: the game made Link (and its other live copies) again from the flags in this window.
-    reset_holds_.clear();
-    cap_holds_.clear();  // row 181: the game made Link's Life component from MaxLife too
+    // Rows 136/137: the game made Link (and its other live copies) again from the flags in this window. Only the
+    // holds that began before the window did (row 238: a hold made inside it, by a reconnect's snapshot or a reset
+    // that came mid-window, is for a value Link was not made from).
+    std::erase_if(reset_holds_, [this](const auto& h) { return h.second.made_at < window_since_; });
+    std::erase_if(cap_holds_, [this](const auto& h) { return h.second.made_at < window_since_; });  // row 181
     // Row 140: a save load (moved_) is another save: its floors are not owed the old one's.
     if (moved_) {
       owed_.clear();
@@ -611,6 +613,7 @@ void FlagWatcher::take_origin(const FlagKey& key) {
 
 void FlagWatcher::hold_lowered(const FlagKey& key, std::int32_t low, std::int32_t had) {
   ResetHold h{low, had};
+  h.made_at = frames_;
   // Row 238: MaxLife's live copy (Link's Life component) is lowered by the object walk: wait for its word.
   h.awaiting_walk = key.kind == protocol::FlagKeyKind::named && key.hash == kMaxLifeHash;
   reset_holds_[key] = h;
@@ -839,17 +842,20 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
       const std::optional<FlagEntry> had = entry.kind == protocol::FlagKind::int32 && store.is_max(key)
                                                ? store.read(key)
                                                : std::nullopt;
-      if (write_exact(store, entry)) {
+      const bool written = write_exact(store, entry);
+      if (written) {
         // The host's save decides (docs/flags.md, "Saves"): a game that joins
         // takes the group's value as it is, a lower one too. Merged (OR, max),
         // a guest's older save filled the host's new file with that save's
         // items and quests at once (player report #96).
         ++stats_.snapshot_exact;
-        if (had && had->kind == protocol::FlagKind::int32 && entry.kind == protocol::FlagKind::int32 &&
-            as_int(had->value) > as_int(entry.value)) {
-          hold_lowered(key, static_cast<std::int32_t>(as_int(entry.value)),
-                       static_cast<std::int32_t>(as_int(had->value)));
-        }
+      }
+      // Also when the write waits (unwritten_exact_, as apply_reset): the lowered value lands later, and our game's
+      // own higher value written back after that is still not progress.
+      if ((written || unwritten_.contains(key)) && had && had->kind == protocol::FlagKind::int32 &&
+          entry.kind == protocol::FlagKind::int32 && as_int(had->value) > as_int(entry.value)) {
+        hold_lowered(key, static_cast<std::int32_t>(as_int(entry.value)),
+                     static_cast<std::int32_t>(as_int(had->value)));
       }
     }
   }
@@ -1373,6 +1379,7 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
       back.key = key;
       back.value = as_bits((std::max)(as_int(before.value), std::int64_t{cap->second}));
       CapHold& hold = cap_holds_[key];
+      if (hold.made_at == 0) hold.made_at = frames_ != 0 ? frames_ : 1;
       hold.low = static_cast<std::int32_t>(as_int(back.value));
       hold.quiet = 0;
       hold.put_at = frames_;

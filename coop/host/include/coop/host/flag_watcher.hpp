@@ -635,6 +635,7 @@ class FlagWatcher {
     int tries = 0;             // put-backs in this hold (refused or undone by the game)
     int quiet = 0;             // frames the game has kept `low`
     std::uint64_t put_at = 0;  // the frame of the last put-back
+    std::uint64_t made_at = 0;  // row 238: the frame the hold began (a load window's end only clears older ones)
   };
   std::map<FlagKey, CapHold> cap_holds_;  // cap_max, held_lower (row 181)
   struct ResetHold {
@@ -649,6 +650,10 @@ class FlagWatcher {
     // max back (so nothing refreshed the hold) lost it before the walk ran, and showed more hearts than the group.
     bool awaiting_walk = false;
     int waited = 0;
+    // Row 238: the frame the hold began. A load window's end clears the holds made BEFORE the window began (the game
+    // made Link again from the flags in it); one made inside it (a reconnect's snapshot, a host's reset arriving
+    // mid-window) came after Link was made, so Link still has the higher max: the hold must outlive the window.
+    std::uint64_t made_at = 0;
   };
   // Row 238: a max-rule int the group's value was put back over in a load window (a guest's own save with more than the
   // group has): the value our game had, made a ResetHold when the window has ended (a window's start clears holds).
