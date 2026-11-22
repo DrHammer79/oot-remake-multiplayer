@@ -1234,6 +1234,9 @@ function Get-KitHookshotNeed([string]$Kit) {
     }
     $stampFile = Join-Path $game 'coop-built-from.txt'
     $have = if (Test-Path -LiteralPath $stampFile) { [System.IO.File]::ReadAllText($stampFile) } else { '' }
+    # (co-op's own Characters tab's code patch in or out first, as hookshot-build.ps1 does before its stamp: a kit
+    # update that brings it, or Character Select put in or taken out, then asks for the build that takes it)
+    [void](Sync-KitCharselNativePatch $Kit (Join-Path $game 'mods\contents\0400486024DEC000\coop-puppet'))
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
     if (Test-KitGameUnfinished $game) {
@@ -1875,7 +1878,7 @@ function Get-KitCharacterSelectModels([string]$Dir, $Doc) {
 # the Mods tab. The models are in the key (C #58, lane 051234): the NPC part taken out (a UI-only kit) or put in, or a
 # release that renumbers its characters, makes the pack again, so its puppets and the pick guard never name a model
 # that is not there; the mod switched off in the Mods tab makes it again without the characters.
-function Get-KitCharacterSelectSeen([string]$Manifest) {
+function Get-KitCharacterSelectSeen([string]$Manifest, [switch]$Folder) {
     $pack = Split-Path -Parent $Manifest
     $title = Split-Path -Parent $pack
     $contents = Split-Path -Parent $title
@@ -1885,11 +1888,12 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
             if ($d.Name -match '^[-_.]') { continue }
             $file = Join-Path $d.FullName 'characters.json'
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model'))) { continue }
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (-not $Folder -and -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model')))) { continue }
             try { $doc = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if ($doc.mod -ne 'OoT Character Select' -or $doc.format -ne 1) { continue }
             $listName = if ($root -eq $title) { "contents/$(Split-Path -Leaf $title)/$($d.Name)" } else { $d.Name }
             if (Test-KitModListOff $mods $listName) { continue }
+            if ($Folder) { return $d.FullName }   # (-Folder: the mod's folder, on, models or not: Test-KitCharselNative)
             $models = Get-KitCharacterSelectModels $d.FullName $doc
             if (-not $models) { continue }
             $c = $doc.puppet_colours
@@ -1897,6 +1901,48 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         }
     }
     return ''
+}
+
+# Co-op's own Characters tab (tools/puppet_pack/charsel_ui.py, 0.11.10; the owner: "our mod itself should natively
+# include the character tab even without downloading any of Snails mod"): its code patch, Snail's header and page
+# hooks for Link (charsel/data/charsel-native.ips), goes into the pack's exefs, where the game's build takes the
+# mods' code patches from (patches 0034/0035). Not when the Character Select mod is in the mods (on; with its NPC
+# models or only its default part: Get-KitCharacterSelectSeen -Folder) with a code patch of his: his files and code are the tab's then. The same rule as the
+# pack tool's (build.py charsel_native_wanted), so the game and the pack agree. $Manifest: the pack's
+# coop_puppet.json (it need not be there yet).
+function Test-KitCharselNative([string]$Manifest) {
+    $cs = Get-KitCharacterSelectSeen $Manifest -Folder
+    if (-not $cs) { return $true }
+    return -not @(Get-ChildItem -LiteralPath (Join-Path $cs 'exefs') -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in '.ips', '.pchtxt' }).Count
+}
+
+# The code patch put in or taken out of the pack folder $Mod (<exe dir>\mods\contents\0400486024DEC000\coop-puppet)
+# before the game's build reads the mods' code patches (hookshot-build.ps1, before Get-KitExefsStampLine): in when
+# Test-KitCharselNative says so and the pack there did not leave the tab out (its coop_puppet.json's "charsel_native"
+# empty: the pack tool could not make the tab for this game; else the next start would build the game again, and
+# again). The pack tool writes the same bytes into the pack it makes. Returns 'in', 'out' or '' (no change).
+function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
+    $src = Join-Path $Kit 'tools\puppet_pack\charsel\data\charsel-native.ips'
+    $dst = Join-Path $Mod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+    $manifest = Join-Path $Mod 'coop_puppet.json'
+    $want = (Test-Path -LiteralPath $src -PathType Leaf) -and (Test-KitCharselNative $manifest)
+    if ($want -and (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+        try {
+            $json = [System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json -ErrorAction Stop
+            if ($json.PSObject.Properties['charsel_native'] -and -not @($json.charsel_native).Count) { $want = $false }
+        } catch { }
+    }
+    $have = Test-Path -LiteralPath $dst -PathType Leaf
+    if ($want) {
+        if ($have -and (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash) { return '' }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+        return 'in'
+    }
+    if (-not $have) { return '' }
+    Remove-Item -LiteralPath $dst -Force
+    return 'out'
 }
 
 # What a pack's coop_puppet.json records of its characters, in Get-KitCharacterSelectSeen's form ('' for none).
