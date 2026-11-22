@@ -738,6 +738,24 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "dungeon maps (not the world map). Off: neither shows them."});
         out.push_back({Toggle("Names on map", options_.map_names), Act::kMapNames,
                        "Each player's name beside their arrow on the maps. Off: the arrows only."});
+        if (char_ages_.shown) {   // a Character Select pick per age (coop_char_ages.h)
+            out.push_back({Toggle("Character by age", char_ages_.on), Act::kCharAges,
+                           "On: a character for child Link and one for adult Link. The one you pick on the "
+                           "Characters page is for the age you are now; when Link grows up or goes back in time, "
+                           "you become the one picked for that age."});
+            if (char_ages_.on) {
+                const auto name = [this](int n) {
+                    for (const auto& [number, text] : char_ages_.characters) {
+                        if (number == n) return text;
+                    }
+                    return n <= 0 ? std::string("Link") : "Character " + std::to_string(n);
+                };
+                out.push_back({Choice("As a child", char_ages_.child < 0 ? std::string("Not set") : name(char_ages_.child)),
+                               Act::kCharChild, "Who you are as child Link. Left and Right choose."});
+                out.push_back({Choice("As an adult", char_ages_.adult < 0 ? std::string("Not set") : name(char_ages_.adult)),
+                               Act::kCharAdult, "Who you are as adult Link. Left and Right choose."});
+            }
+        }
         {   // (Navi) New Game+ (coop_ngplus.h)
             const std::string hearts = std::to_string(ngplus_hearts_ / 4) + (ngplus_hearts_ % 4 ? "+" : "");
             out.push_back({Choice("New Game+", ngplus_unlocked_ == 0 ? std::string("Locked: beat Ganon")
@@ -1781,6 +1799,7 @@ void Menu::Decide(Act act) {
     case Act::kVoice:
     case Act::kMapPlayers:
     case Act::kMapNames:
+    case Act::kCharAges:
     case Act::kSameNetwork:
     case Act::kListRoom:
     case Act::kAutoRejoin:
@@ -1794,6 +1813,8 @@ void Menu::Decide(Act act) {
     case Act::kDbnoTime:
     case Act::kDbnoHold:
     case Act::kDbnoHearts:
+    case Act::kCharChild:
+    case Act::kCharAdult:
         Change(act, 1);
         break;
     case Act::kNone:
@@ -1961,6 +1982,25 @@ void Menu::Change(Act act, int step) {
             difficulty_wish_ = next;
             request_ = Request{Request::Kind::kDifficulty, CoopDifficulty::FormatChoice(next)};
         }
+        break;
+    }
+    case Act::kCharAges:
+        char_ages_.on = step > 0 ? true : step < 0 ? false : !char_ages_.on;
+        request_ = Request{Request::Kind::kCharAges, char_ages_.on ? "on" : "off"};
+        break;
+    case Act::kCharChild:
+    case Act::kCharAdult: {   // round the pickable characters (Link first)
+        const auto& list = char_ages_.characters;
+        if (list.empty()) break;
+        int& pick = act == Act::kCharChild ? char_ages_.child : char_ages_.adult;
+        std::size_t at = 0;
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            if (list[i].first == pick) at = i;
+        }
+        at = (at + (step < 0 ? list.size() - 1 : 1)) % list.size();
+        pick = list[at].first;
+        request_ = Request{Request::Kind::kCharAges,
+                           std::string(act == Act::kCharChild ? "child=" : "adult=") + std::to_string(pick)};
         break;
     }
     case Act::kNgPlus:   // (Navi) Off, NG+ 1 ... the highest unlocked, round
@@ -2443,6 +2483,15 @@ void Menu::DifficultyLines(std::vector<Line>& out) const {
                    "How much damage enemies and bosses deal to players: 25% to 400% of the game's, in steps of 25."});
     out.push_back({Choice("Enemies", percent(values.count_pct)), Act::kDifficultyCount,
                    "How many enemies: 100% is the game's, 200% one more beside each, up to 300%, in steps of 25."});
+}
+
+void Menu::SetCharacterAges(bool shown, bool on, int child, int adult,
+                            std::vector<std::pair<int, std::string>> characters) {
+    char_ages_.shown = shown;
+    char_ages_.on = on;
+    char_ages_.child = child;
+    char_ages_.adult = adult;
+    char_ages_.characters = std::move(characters);
 }
 
 void Menu::SetNgPlus(int level, int unlocked, int hearts) {

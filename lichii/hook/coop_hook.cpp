@@ -130,6 +130,7 @@
 #include "coop_testinput.h"
 #include "coop_boundary.h"
 #include "coop_world.h"
+#include "coop_char_ages.h"
 #include "coop_char_slots.h"
 #include "coop_puppet_config.h"
 
@@ -3644,6 +3645,60 @@ namespace {
 // join) starts from a pick whose model is not here. 0.11.9 ran it only in a session and only in play: a solo game
 // never had it, and a guest had it from the load's first frame. Also registers the save files' fix (FixSavePick) on
 // the module's first frame, before the first title.
+// A Character Select pick per age (coop_char_ages.h): the two picks, kept in coop-character-ages.txt beside coop.ini.
+std::mutex g_char_ages_mutex;
+std::filesystem::path CharAgesFile() {
+    return Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "coop-character-ages.txt";
+}
+CoopCharAges::Picks& CharAges() {   // (with g_char_ages_mutex)
+    static CoopCharAges::Picks picks = [] {
+        std::ifstream in(CharAgesFile());
+        std::string line;
+        std::getline(in, line);
+        return CoopCharAges::Picks(CoopCharAges::Parse(line).value_or(CoopCharAges::Stored{}));
+    }();
+    return picks;
+}
+void SaveCharAges(const CoopCharAges::Stored& s) {
+    std::ofstream(CharAgesFile(), std::ios::trunc) << CoopCharAges::Format(s);
+}
+
+// Each module frame after the pick guard: the age's pick written into the mod's value when it is not the shown one.
+void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
+                   const std::map<std::uint16_t, std::uint16_t>& files) {
+    static const std::uint32_t childhood_hash = coop::host::flag_hash("Sequence_IsChildhood");
+    static const std::uint32_t page_hash = coop::host::flag_hash("CharacterMenu_IsPageOpen");
+    static const std::uint32_t camera_hash = coop::host::flag_hash("CharacterMenu_KeepUICamera");
+    static const std::uint32_t swap_hash = coop::host::flag_hash("CharacterMenu_FieldSwapPending");
+    static const std::uint32_t slide_hash = coop::host::flag_hash("CharacterMenu_Slide");
+    static const std::uint32_t slide_out_hash = coop::host::flag_hash("CharacterMenu_SlideOut");
+    static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
+    coop::host::GameFlags flags(memory);
+    CoopCharAges::Input in;
+    in.pick = pick;
+    in.childhood = flags.get_bool(childhood_hash);
+    in.page_open = flags.get_bool(page_hash).value_or(false);
+    in.swap_busy = flags.get_bool(camera_hash).value_or(false) || flags.get_bool(swap_hash).value_or(false) ||
+                   flags.get_int(slide_hash).value_or(0) != 0 || flags.get_int(slide_out_hash).value_or(0) != 0;
+    in.title = CoopSave::TitleUp();
+    CoopCharAges::Step step;
+    CoopCharAges::Stored stored;
+    {
+        std::lock_guard lock(g_char_ages_mutex);
+        step = CharAges().Frame(in, files);
+        stored = CharAges().stored();
+    }
+    if (step.stored_changed) {
+        SaveCharAges(stored);
+        LOG_INFO(Core, "coop: characters: by age: child {}, adult {}", stored.child.value_or(-1),
+                 stored.adult.value_or(-1));
+    }
+    if (step.write && coop::host::GameFlags::set_int(memory, pick_hash, *step.write)) {
+        LOG_INFO(Core, "coop: characters: age {}: pick {} -> {} (shown from the next time the player is made)",
+                 in.childhood.value_or(true) ? "child" : "adult", pick.value_or(0), *step.write);
+    }
+}
+
 void PickGuardFrame(Core::System& system) {
     static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
     static const bool save_fix_set = [] {
@@ -3685,6 +3740,7 @@ void PickGuardFrame(Core::System& system) {
                  pick.value_or(0), *step.set, CoopSave::TitleUp() ? " (on the title, before a load)" : "");
         g_pick_said = true;
     }
+    if (!step.set) CharAgesFrame(memory, pick, *files);
 }
 
 void OnFrameBody(Core::System& system) {
@@ -3885,3 +3941,20 @@ std::vector<PlayerRow> PlayerList() {
 }
 
 } // namespace CoopHook
+
+namespace CoopCharAges {
+Stored Current() {
+    std::lock_guard lock(CoopHook::g_char_ages_mutex);
+    return CoopHook::CharAges().stored();
+}
+void SetOn(bool on) {
+    std::lock_guard lock(CoopHook::g_char_ages_mutex);
+    CoopHook::CharAges().SetOn(on);
+    CoopHook::SaveCharAges(CoopHook::CharAges().stored());
+}
+void SetPick(bool child, std::int32_t n) {
+    std::lock_guard lock(CoopHook::g_char_ages_mutex);
+    CoopHook::CharAges().SetPick(child, n);
+    CoopHook::SaveCharAges(CoopHook::CharAges().stored());
+}
+} // namespace CoopCharAges
