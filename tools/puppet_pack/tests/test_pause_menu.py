@@ -218,6 +218,24 @@ class RowsTest(unittest.TestCase):
         with self.assertRaises(pm.PauseMenuError):
             pm.add_system_buttons(n)   # (twice)
 
+    def test_the_minus_pages_help_the_games_caption_text_below_the_rows_stored_hidden(self):
+        d = pm.add_system_buttons(pm.add_rows(system()))
+        n = pm.add_help(d)
+        panes, parts = ui_pack.read_layout(n)
+        self.assertEqual((panes[-1].name, parts[-1].name), (pm.HELP, pm.HELP))
+        self.assertEqual(panes[-1].id, ui_pack.part_id(pm.HELP))
+        x, y, parent, _ = pane(n, pm.HELP)
+        sx, sy, sparent, _ = pane(n, pm.HELP_SOURCE)
+        self.assertEqual((x, y, parent), (sx, sy - pm.HELP_BELOW, sparent))   # (in the rows' column, under the last)
+        self.assertEqual(ui_pack._cstr(n, struct.unpack_from("<Q", n, parts[-1].record)[0]), "PaActorCaption_00")
+        self.assertEqual(struct.unpack_from("<ff", n, panes[-1].record + 0x2c), pm.HELP_SIZE)
+        self.assertEqual(struct.unpack_from("<I", n, panes[-1].record + 0x38)[0] & 1, 0)   # (stored hidden)
+        for name in [p[0] for p in SYSTEM]:
+            self.assertEqual(pane(n, name)[:3], pane(d, name)[:3], name)   # the page's own panes where they were
+        self.assertEqual(pm._system_layout(system()), n)   # (the System layout's edit adds it, last)
+        with self.assertRaises(pm.PauseMenuError):
+            pm.add_help(n)   # (twice)
+
     def test_another_part_layout_needs_its_size_and_takes_no_parameters(self):
         d = system()
         with self.assertRaises(ui_pack.UiPackError):
@@ -326,6 +344,8 @@ class BuildTest(unittest.TestCase):
         strip = msbt.read(msgs[pm.OVERLAY_MSG])
         for i in range(21):
             self.assertEqual(strip.text("Coop_Minus_%02d" % i), ["." * 64], i)
+        # (and the selected row's help, Coop_Minus_21: 512 dots, MinusWords' kHelpPlaceholder)
+        self.assertEqual(strip.text("Coop_Minus_21"), ["." * 512])
         self.assertTrue(all(sizes[k] > before[k] for k in before
                             if k not in (pm.OVERLAY_LAYOUT, pm.PAGES_LAYOUT, pm.SYSTEM_LAYOUT)))
         self.assertTrue(sizes[pm.SYSTEM_LAYOUT] > before[pm.SYSTEM_LAYOUT])

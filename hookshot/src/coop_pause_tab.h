@@ -798,6 +798,39 @@ struct MenuList {
     int picked = -1;
 };
 MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list, int per_page = kCells);
+// --- The selected row's help (0.11.10, help-lines; the owner: co-op's rows show their help as the game's own pages do) ---
+// The - page shows the help of what is selected in the game's own description text (the Items page's caption, the
+// pack's Pa_CoopHelp_00 under the rows): a row's, a line's of the list on the right, co-op's menu's or the Mods tab's.
+// What A on a row or a line with this action does, for the player (English; the module translates it with
+// CoopI18n::Tr, and every one is a line of both Chinese tables). "" for kNone. One source: every row and line of the
+// tab gets its help from its action here.
+const char* RowHelp(RowAction a);
+// Co-op's menu's pages, as Settings and look's rows name them (kMenuTabNames): the help of the row that opens one,
+// the same words as co-op's menu's own row for it (coop_pause_menu.h's page helps).
+const char* MenuTabHelp(int tab);
+// A game of the browser's list, and the typing keys, as lines of the list (they have no action of their own).
+inline constexpr const char* kGameHelp = "A game you can join: A opens it, with a row for its join password if it has one.";
+inline constexpr const char* kTypingHelp =
+    "Left and Right pick a letter, A types it. Delete, OK and Cancel are below. A keyboard types too.";
+// Where the - page's cursor is, for its help.
+struct HelpAt {
+    View view = View::kMain;
+    MinusPage tab = MinusPage::kMultiplayer;
+    int row = -1;                          // the rows' cursor (the list does not have the pad), -1 none
+    bool list = false;                     // the list on the right has the pad
+    RowAction line = RowAction::kNone;     // ... its line picked: what A on it does
+    bool game = false;                     // ... the line picked is a game of the browser's
+    bool typing = false;                   // the typing keys are on the list
+    std::string menu;                      // co-op's menu's or the Mods tab's help for their row picked (the list's)
+};
+// The English help the - page shows there, "" none (the help hidden).
+std::string MinusHelp(const HelpAt& at, const Session& s);
+// The help as the game's own captions are (their message files hold them as a few short lines, a new line after some
+// 40 letters): broken at spaces into lines of at most `columns` letters (a Chinese letter counts two, as it is about
+// twice as wide; it may break anywhere), at most `lines` of them, the last cut with "..." when the help is longer.
+inline constexpr std::size_t kHelpColumns = 40, kHelpLines = 4;
+std::string HelpText(const std::string& utf8, std::size_t columns = kHelpColumns, std::size_t lines = kHelpLines);
+
 // The heading a row is under (a part's group on Customize Link: "Tunic", "Hylian Shield"; in a colour's mixer its
 // own heading, "Hylian Shield: Face"), "" none.
 std::string MenuHeadingOf(const CoopPauseMenu::View& menu, int row);

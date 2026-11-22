@@ -434,19 +434,15 @@ std::vector<Menu::Line> Menu::Lines() const {
                        : guest ? "The game you joined, and Leave the game."
                                : "Joins a friend's game with the code they sent you. You play on their save; your own saves "
                                  "are not touched."});
-        out.push_back({PageRow("Local co-op", "2 players"), Act::kOpenLocal, "Two players on this PC."});
+        out.push_back({PageRow("Local co-op", "2 players"), Act::kOpenLocal, kLocalHelp});
         out.push_back({PageRow("Settings", options_.name.size() > 12 ? options_.name.substr(0, Utf8Start(options_.name, 9)) + "..." : options_.name), Act::kOpenSettings,
-                       "Your name, Link's look, how many players can join your game, voice chat, the chat key, "
-                       "which controller this game reads, and players on the map."});
+                       kSettingsHelp});
         if (snail_home_) {   // (one home: Character Select's Customize screen; the page keeps Your name)
             out.push_back({PageRow("Customize Link", "Characters tab"), Act::kOpenCustomize, kSnailHomeNote});
         } else {
-            out.push_back({PageRow("Customize Link", "Colours"), Act::kOpenCustomize,
-                           "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture "
-                           "of the result. Your Link wears it when you close the menu; the other players see your tunic's "
-                           "colour."});
+            out.push_back({PageRow("Customize Link", "Colours"), Act::kOpenCustomize, kCustomizeHelp});
         }
-        out.push_back({PageRow("Commands", ChatKeyWords(options_.chat_key)), Act::kOpenCommands, "The chat's commands, and the key that opens the chat."});
+        out.push_back({PageRow("Commands", ChatKeyWords(options_.chat_key)), Act::kOpenCommands, kCommandsHelp});
         break;
     case Page::kHost: {
         const bool typing_port = typing_ && typing_act_ == Act::kHostPort;

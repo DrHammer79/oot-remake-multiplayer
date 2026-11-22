@@ -13,7 +13,8 @@ Writes into the puppet mod's romfs:
           eight of the game's Options rows (PaOptionBtnLevel_00: a name on the left, a value
           between arrows on the right) down the right half, where the controller picture is: the
           game browser's list (a header, then six games), and the settings' list; and Pa_Button_05
-          a copy of Pa_Button_03 below Pa_Button_04: System's Longshot Settings button. Stored hidden, so the System page never shows them; the module
+          a copy of Pa_Button_03 below Pa_Button_04: System's Longshot Settings button; Pa_CoopHelp_00 the
+          game's caption text (PaActorCaption_00) below the rows: the - page's help (add_help). Stored hidden, so the System page never shows them; the module
           shows the list on ours (its copy of the controller picture is hidden) and the buttons on
           System's
   Mals/<language>.Product.110.sarc.zs
@@ -222,9 +223,34 @@ def add_system_buttons(d):
                                new_id=_new_id)
 
 
+# The selected row's help on the - menu's page (0.11.10, help-lines): the game's own description text, the Items page's
+# caption (PaActorCaption_00: T_Caption_00, the words under an item's name, a few short lines), a part of
+# PaSystemMenu_00 under the page's rows on the left. Stored hidden: System's page and Longshot Settings' never show it;
+# the module shows it on the - page while a row has help, its words through Coop_Minus_21 (CoopPauseTab::HelpText
+# wraps them in the game's way, a few short lines).
+HELP = "Pa_CoopHelp_00"
+HELP_LAYOUT = "PaActorCaption_00"
+HELP_SOURCE = "Pa_Button_04"   # (the page's last row: the help goes below it, in the rows' column)
+HELP_BELOW = 300.0             # (from the last row's centre to the help's: the row is 180 high, the help's top under it)
+HELP_SIZE = (1000.0, 360.0)    # (CoopPauseTab::kHelpColumns letters a line, kHelpLines lines)
+
+
+def add_help(d):
+    """PaSystemMenu_00.buil with HELP: a part of HELP_LAYOUT (the game's caption text) in the rows' column, HELP_BELOW
+    under HELP_SOURCE, stored hidden."""
+    panes, _ = ui_pack.read_layout(d)
+    names = [p.name for p in panes]
+    if HELP_SOURCE not in names:
+        raise PauseMenuError("the layout has no %s" % HELP_SOURCE)
+    if HELP in names:
+        raise PauseMenuError("the layout has %s already" % HELP)
+    return ui_pack.clone_parts(d, [ui_pack.Copy(HELP_SOURCE, HELP, (0.0, -HELP_BELOW), hidden=True,
+                                                part_layout=HELP_LAYOUT, size=HELP_SIZE)], new_id=_new_id)
+
+
 def _system_layout(d):
-    """The System page's own layout with the browser's list and our two System buttons."""
-    return add_system_buttons(add_rows(d))
+    """The System page's own layout with the browser's list, our System button and the - page's help."""
+    return add_help(add_system_buttons(add_rows(d)))
 
 
 def _xy(d, name):
