@@ -224,6 +224,11 @@ public:
     // the boss though the game has not set the intro's HavePlayedEvent flag (Gohma's is not set by then;
     // big-run-0115 hs-boss-fix-gohma: the intro's owner read unready, and the server gave her to the other game).
     bool OwnIntroPlayed() const { return own_intro_played_; }
+    // Our game runs the boss's intro now (row 244): an event in its room before the fight, or one within
+    // kMinFightUs of the fight's start (the rest of it, as Gohma's own BossAppear), with our Link alive. Our boss is
+    // the cutscene's then (King Dodongo still in his pit, Gohma in her intro animations), not the fight's: as owner
+    // it would hold every other game's boss there (Readiness, `in_intro`). `event`: our game runs an event now.
+    bool InIntro(bool event, std::uint64_t now_us) const;
 
 private:
     struct Remote {
@@ -331,7 +336,11 @@ class Readiness {
 public:
     // `intro_played`: nothing when the flag is not read. `pre_battle`:
     // CoopObjects::LastBossPreBattle. `room`: the room we are in.
-    bool Step(std::uint8_t room, std::optional<bool> intro_played, std::optional<bool> pre_battle);
+    // `in_intro` (Sync::InIntro, row 244): our game plays the boss's intro now. Never ready then, whatever the flag
+    // says (a save that saw the intro before, or our game asked to play it again with the others, has it set
+    // already), and the boss leaving its pre-battle pose then is the intro moving it, not the fight.
+    bool Step(std::uint8_t room, std::optional<bool> intro_played, std::optional<bool> pre_battle,
+              bool in_intro = false);
     void Reset();
     // True once, at the Step that found our boss out of its pre-battle phase.
     bool TakeFoughtNews() { return std::exchange(fought_news_, false); }
