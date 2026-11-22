@@ -1728,6 +1728,59 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
 # says for romfs files (launch_test.ps1 checks the two agree); change both together. Link's own textures in Tex/ (named
 # *_Player_* or Angin_Tile_*) stay in the ui part (row 242).
 $KitCharselToolExclude = '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+# One argument line for CreateProcess (Windows PowerShell 5.1's Start-Process joins an array with plain spaces): each
+# argument quoted when it has a space, a tab or a quote, backslashes before a quote doubled.
+function ConvertTo-KitArgLine([string[]]$ArgList) {
+    @(foreach ($x in $ArgList) {
+        if ($x -ne '' -and $x -notmatch '[\s"]') { $x; continue }
+        '"' + ($x -replace '(\*)"', '$1$1\"' -replace '(\+)$', '$1$1') + '"'
+    }) -join ' '
+}
+
+# Runs a program with a time limit, its output (stdout and stderr, in their order, through cmd.exe's 2>&1) into a file:
+# @{ Code; Out (lines); Stopped ('' or why it was stopped) }. A program that writes nothing for $IdleSeconds, or runs longer than $MaxSeconds, is stopped
+# with its whole process tree (taskkill /T: Python's worker processes too), Code -1. A tool that hangs (Character Select's
+# tool on a damaged game dump: its workers die at start and are started again for good) can no longer hold the start.
+function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSeconds, [int]$MaxSeconds, [string]$WorkDir = '') {
+    $r = @{ Code = -1; Out = @(); Stopped = '' }
+    $o = [System.IO.Path]::GetTempFileName()
+    try {
+        # (cmd /s /c "<line>": the outer quotes go, the rest is run as written; inside quotes | ^ ( ) are plain characters)
+        $line = (ConvertTo-KitArgLine (@($Exe) + $ArgList)) + ' > "' + $o + '" 2>&1'
+        $sp = @{ FilePath = "$env:SystemRoot\System32\cmd.exe"; ArgumentList = "/d /s /c `"$line`""; NoNewWindow = $true; PassThru = $true
+                 ErrorAction = 'Stop' }
+        if ($WorkDir) { $sp.WorkingDirectory = $WorkDir }
+        $p = Start-Process @sp
+        $null = $p.Handle   # (keeps the exit code readable after the process ends)
+        $start = Get-Date; $seen = -1L; $quietSince = Get-Date
+        while (-not $p.WaitForExit(1000)) {
+            # (the length of the open file itself: a directory listing's size of a file still being written can lag)
+            $n = -1L
+            try { $fs = [System.IO.File]::Open($o, 'Open', 'Read', 'ReadWrite, Delete'); $n = $fs.Length; $fs.Dispose() } catch { }
+            if ($n -ne $seen) { $seen = $n; $quietSince = Get-Date }
+            $now = Get-Date
+            if (($now - $quietSince).TotalSeconds -ge $IdleSeconds) { $r.Stopped = "it wrote nothing for $IdleSeconds s" }
+            elseif (($now - $start).TotalSeconds -ge $MaxSeconds) { $r.Stopped = "it ran longer than $MaxSeconds s" }
+            if ($r.Stopped) {
+                & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $p.Id 2>&1 | Out-Null
+                [void]$p.WaitForExit(10000)
+                break
+            }
+        }
+        if (-not $r.Stopped) { $p.WaitForExit(); $r.Code = $p.ExitCode }
+        $r.Out = @([System.IO.File]::ReadAllLines($o))
+    } catch {
+        $r.Out = @("$($_.Exception.Message)"); $r.Code = -1
+    } finally {
+        Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue
+    }
+    return $r
+}
+
+# Time limits of the Character Select tool step: stopped when it writes nothing for 15 minutes (it prints a line every
+# 100 files, the slowest first) or runs longer than 2 hours (the whole set took about 140 s on a 24-thread PC).
+$KitCharselToolIdle = 900
+$KitCharselToolMax = 7200
 function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]$New, [string]$ModsDir, [string]$Downloads, [string]$Part) {
     $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
     $exeDir = Split-Path -Parent $ModsDir     # (the game's files: beside longshot.exe or a folder up, as Get-KitHookshotNeed looks)
@@ -1743,19 +1796,21 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $tool 'player.py'))) { return "$($Op.zip) has no $($Op.tool_folder)/player.py" }
     # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
     # from another folder), so nothing else is needed)
-    $a = @('-I', '-B', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
+    # (-u: each line reaches the output file at once, so the idle limit sees the tool's progress)
+    $a = @('-I', '-B', '-u', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
     if ($Part -eq 'ui') {
         # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
         if (-not $KitCharselToolExclude) { return 'the kit could not read its own NPC rule ($KitCharselToolExclude)' }
         $a += @('--exclude', $KitCharselToolExclude)
     }
     Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
-    # (Windows PowerShell makes each stderr line of a program an error record: under a caller's 'Stop' a warning
-    # would end the install. The exit code decides.)
-    $ErrorActionPreference = 'Continue'
-    $out = @(& $python @a 2>&1 | ForEach-Object { "$_" })
-    $code = $LASTEXITCODE
+    # (stdout and stderr go to files, not error records: a warning on its stderr is only text. The exit code decides.)
+    $run = Invoke-KitToolLimited $python $a $KitCharselToolIdle $KitCharselToolMax
+    $out = $run.Out; $code = $run.Code
     Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction SilentlyContinue
+    if ($run.Stopped) {
+        return "making its files from your game was stopped ($($run.Stopped)): its tool stopped answering. The game files it reads may be damaged (dump the game again); nothing of it was put in"
+    }
     if ($code -ne 0) {
         $last = @($out | Where-Object { "$_".Trim() }) | Select-Object -Last 1
         return "making its files from your game failed ($last). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file); nothing of it was put in"

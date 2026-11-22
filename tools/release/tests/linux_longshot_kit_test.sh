@@ -406,6 +406,12 @@ if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
 if os.environ.get("FAKE_TOOL_FAIL"):
     print("2287 files could not be made; the mod is not complete.")
     sys.exit(1)
+if os.environ.get("FAKE_TOOL_HANG"):
+    import subprocess, time
+    c = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])   # (a worker: must go with it)
+    open(os.environ["FAKE_TOOL_HANG"], "w").write(str(c.pid))
+    print("Making 2287 files", flush=True)
+    time.sleep(600)
 os.makedirs(os.path.join(mod, "romfs", "Model"), exist_ok=True)
 open(os.path.join(mod, "romfs", "Model", "Made_By_Tool.bin"), "w").write(" ".join(a[1:]))
 print("Done: 1 file. The mod folder is ready.")
@@ -440,6 +446,15 @@ rm -rf "$CS"; cs2_zip
 FAKE_TOOL_FAIL=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?
 check 'Character Select tool: a failing tool (exit 1) -> not installed, its last line and the other-version sentence shown, the start goes on' \
     bash -c '[ $CODE -eq 0 ] && [ ! -e "$2" ] && grep -q "Character Select was not installed: making its files from your game failed (2287 files could not be made" "$1" && grep -q "refused file by file" "$1"' _ "$tmp/build-t3.txt" "$CS"
+# A tool that hangs (writes nothing, a worker of its own): stopped at the idle limit with its process group, not installed,
+# the reason says it stopped answering, the start goes on.
+rm -rf "$CS"; cs2_zip
+t0=$SECONDS
+FAKE_TOOL_HANG="$tmp/hang-child.pid" CHARSEL_TOOL_IDLE=3 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3h.txt" 2>&1; export CODE=$?
+export TOOK=$((SECONDS - t0))
+check 'Character Select tool: a hanging tool -> stopped at the idle limit with its worker, not installed, the reason says so, the start goes on'     bash -c '[ $CODE -eq 0 ] && [ ! -e "$2" ] && [ $TOOK -lt 120 ] && [ -s "$3" ] && ! kill -0 "$(cat "$3")" 2>/dev/null &&
+        grep -q "Character Select was not installed: making its files from your game was stopped (it wrote nothing for 3 s): its tool stopped answering" "$1"' _ "$tmp/build-t3h.txt" "$CS" "$tmp/hang-child.pid"
+[ -s "$tmp/hang-child.pid" ] && kill "$(cat "$tmp/hang-child.pid")" 2>/dev/null || true
 # The RomFS there from the start (every start after the first): made while the mod goes in, full part with a yes (no --exclude).
 rm -rf "$CS"; cs2_zip; printf 'character_select = yes\n' >>"$D/coop-options.ini"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
