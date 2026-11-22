@@ -3,7 +3,7 @@
 For the maintainer's agent, from the agent that worked on the `test-kit-0117` branch. Everything here is information
 about the game (addresses, offsets, names, behaviour) and about our tools; nothing from the game's files. The code is
 the source: each item names where it lives. The full list of every address and offset the code names, with its
-comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (887 constants, 85 files; run it
+comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (run it
 again after a game update).
 
 ## 1. Actor and component memory (proven in game)
@@ -97,9 +97,11 @@ the eye (`Obj_Base_OnOffAnim`) has no AI of its own, so a refused turn leaves it
 
 ## 4. How our agent tests (tools, and what works)
 
-- **Build**: llvm-mingw from the kit's `hookshot/tools` (the module's toolchain); unit tests
-  `coop_tests -tce="lag*,traffic*"` and `coop_server_tests`. Note: `#ifdef _MSC_VER` for Windows-only code breaks
-  this build (a path is wide on llvm-mingw too); `_WIN32` is the safer test (fixed in `coop_save.cpp`).
+- **Build**: llvm-mingw from the kit's `hookshot/tools` (our agent's toolchain for the module; the maintainer's builds
+  and CI compile the module with MSVC on Windows and gcc/clang on Linux, and llvm-mingw builds only the game); unit
+  tests `coop_tests -tce="lag*,traffic*"` and `coop_server_tests`. Note: `#ifdef _MSC_VER` for Windows-only code
+  breaks an llvm-mingw build (a path is wide there too); `_WIN32` is the right test (`coop_save.cpp` uses it for
+  every file it opens).
 - **Two-game runs**: `tools/autotest/hookshot.py run` on two Hookshot test copies. Our scenarios warp at the title
   (`warp SCENE`, then A presses) with `#! noload`, an adult or child save copied into both copies, Save Profiles off for
   the run (its file select takes the title presses). Switches: `LICHII_COOP_CHEATS=1`, `LICHII_COOP_DEBUG_OBJECTS=1`,

@@ -1034,12 +1034,9 @@ void SetFlag(Core::System& system, const std::string& name, int value) {
     LOG_INFO(Core, "coop: test setflag {} ({}) {}: {}", name, type, value, ok ? "set" : "NOT set");
 }
 
-// setenum: this game's Enum flag (a name, or 0x and its hash) to the value of
-// that name, through the game's own queue (issue 193: a Threads of Time
-// quest's step). Test only. The value it had is logged too (as a hash), and
-// the value "?" only reads it (issue 91: which unnamed Enum holds a worn mask).
-// dump TAG (play-test kit): every shared dungeon and story flag's value in this game, as JSON next to the commands
-// file, so tools/autotest/desync_check.py can compare two games' checkpoints of one tag.
+// dump TAG (play-test kit): the value in this game of every flag in the shared dungeon and story lists
+// (CoopDungeon::Flags, CoopStory::Flags; not the live-only or autogen lists), as JSON next to the commands file,
+// so tools/autotest/desync_check.py can compare two games' checkpoints of one tag.
 void Dump(Core::System& system, const std::string& tag) {
     const std::filesystem::path commands = EnvPath();
     if (commands.empty()) {
@@ -1076,6 +1073,10 @@ void Dump(Core::System& system, const std::string& tag) {
     LOG_INFO(Core, "coop: test dump {}: {} flags written{}", tag, count, file ? "" : " (NOT written)");
 }
 
+// setenum: this game's Enum flag (a name, or 0x and its hash) to the value of
+// that name, through the game's own queue (issue 193: a Threads of Time
+// quest's step). Test only. The value it had is logged too (as a hash), and
+// the value "?" only reads it (issue 91: which unnamed Enum holds a worn mask).
 void SetEnum(Core::System& system, const std::string& name, const std::string& value) {
     CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
     std::uint32_t hash = 0;
