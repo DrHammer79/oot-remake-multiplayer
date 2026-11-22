@@ -51,7 +51,10 @@ these variables; `live.py start` sets them for each game it starts. The log says
 (lane 1: 5011, 5012). The MCP server takes the port as its argument.
 
 **Security:** bound to `127.0.0.1` only, never another address. One client at a time: a second connection gets one
-`busy` reply and is closed. It can do what Longshot's control bridge and the cheats panel can do (move Link, warp, set
+`busy` reply and is closed. **Keep one connection open for the whole session:** when the client's connection closes
+(it quit or crashed), a held game runs again at once, so a lost tester never leaves a game frozen. Dumps and shots go
+only into the game's own `playtest/dumps/` and `playtest/shots/` folders, named by a tag; no path is taken from the
+client. It can do what Longshot's control bridge and the cheats panel can do (move Link, warp, set
 flags, give items), so it is for test copies with a throwaway save.
 
 ### Messages
@@ -66,21 +69,25 @@ given back). Requests are answered in order, one reply each. Every reply carries
 | `frame` | The game's frame count: calc frames since the game started (the module's per-frame hook). It is what `step` counts and what lines up two games' dumps |
 | `paused` | Whether the game is held now |
 
+`input`, `step` and `warp` replies hold the end state nested as `"state": {...}`; `state` itself is flat.
+
 Error codes: `bad_request` (unknown `cmd`, a missing or bad field), `busy` (another client), `no_control`
 (`HOS_CONTROL` unset or unreachable), `not_in_play` (no Link: title, file select, a load), `timeout`, `failed` (the
 game refused; `message` says why).
 
 ```
 > {"id":1,"cmd":"hello"}
-< {"id":1,"ok":true,"frame":5321,"paused":false,"protocol":1,"module":"0.11.12","control":true,"coop":"connected"}
+< {"id":1,"ok":true,"frame":5321,"paused":false,"protocol":1,"control":true}
 ```
 
 ### Frame control
 
 The game holds inside its own per-frame hook: the calc thread waits there before the frame's update, so a held game
 does not advance at all (no Link, no enemies, no timers). The window, the sound thread, Longshot's control bridge and
-the co-op connection keep running. The other game's puppet of this player stands still while it is held. A tester
-holds **both** games and steps them in turn.
+the co-op connection keep running (the network thread answers the server's pings, so a held game is never dropped
+as timed out). The other game's puppet of this player stands still while it is held. The server does not know a game
+is held: an enemy or boss this game owns stays with it while the other game runs. So **always hold both games** and
+step them in turn, the same number of frames.
 
 | Command | Fields | Does |
 |---|---|---|
@@ -94,26 +101,26 @@ holds **both** games and steps them in turn.
 |---|---|---|
 | `state` | | The state below. Does not advance the game |
 | `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
-| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs until Link is in that scene with no event or load (or the timeout), then holds. Replies with the `state` |
+| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs (10 frames at a time) until Link is in that scene with no event or load, then holds again. Replies with `"arrived": true` and the `state`; after the timeout, still held, `timeout` with the state in `message` |
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
-| `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give`, inside the held frame. Replies with what was given |
-| `dump` | `tag` (letters, digits, `-` and `_`) | Writes `<dump folder>/<tag>.json` with `frame`, `tag`, the `state` and every shared flag (the checkpoint's lists), inside the held frame. Replies with `path` and the flag count |
-| `shot` | `path` (optional PNG path) | A screenshot through Longshot's bridge. A held game runs 1 frame so a picture is presented (the reply's `advanced`: frames run, usually 1). Replies with `path`, `width`, `height` |
+| `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
+| `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
+| `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
 ### State
 
 ```
 {"frame":5400,"paused":true,"scene":"KokiriForest_Child","room":null,"pos":[-7.5,0.0,71.1],"facing":90.0,
  "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk",
- "equips":{"sword":"KokiriSword","shield":"DekuShield","tunic":"Kokiri","boots":"Normal"},
- "inventory":{"Slingshot":30,"DekuStick":10,"DekuNuts":20},"coop":{"state":"connected","players":2},
- "snapshot_frame":5400}
+ "equips":{"weapon":"KokiriSword","shield":"DekuShield","head":null,"armor":"Kokiri","boots":"Normal"},
+ "inventory":{"PouchData.Item_Bomb.StockNum":0,"PouchData.Item_Hookshot.StockNum":1},"coop":{"players":[{"number":1,"name":"A","self":true,"state":"connected","scene":"KokiriForest_Child"}]},
+ "snapshot_present":5398,"control":true}
 ```
 
 `scene`, `pos`, `facing`, `camera`, `life`, `max_life`, `rupees`, `age`, `event`, `loading` and `prompt` are
 Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
-quarter hearts. `snapshot_frame` is the frame it was taken at (Link's last update; on a title, pause or load it is
-older than `frame`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
+quarter hearts. `snapshot_present` is Longshot's present count when it was taken (Link's last update; on a title,
+pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
 stays `null` until the room is found in memory.
 
 Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
