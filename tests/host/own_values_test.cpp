@@ -26,11 +26,17 @@ constexpr std::uint32_t kBomb = 0xdb1bcd4f;     // PouchData.Item_Bomb.StockNum 
 constexpr std::uint32_t kLife = 0x31ab5580;     // PlayerStatus.Life (int32, per player)
 constexpr std::uint32_t kBottleA = 0x7d48df76;  // ...BottleA.BottleItem (uint32, per player)
 constexpr std::uint32_t kWallet = 0x1d74617e;   // PouchData.Item_Wallet_Small.StockNum (shared, max)
+constexpr std::uint32_t kMP = 0x76b18200;       // PlayerStatus.MP (int32, per player)
+constexpr std::uint32_t kCapRupee = 0xe0010a50; // 0xf80f8077.Rupee: the wallet's capacity
+constexpr std::uint32_t kCapBomb = 0xe753508b;  // 0xf80f8077.Bomb: the bomb bag's
 const std::uint32_t kMaxLife = coop::host::flag_hash("PlayerStatus.MaxLife");
+const std::uint32_t kMPMax = coop::host::flag_hash("PlayerStatus.MPMax");
+const std::uint32_t kBottleAValid = coop::host::flag_hash("PlayerStatus.AssignableItem.BottleInfo.BottleA.IsValid");
 
 struct Values {
-  std::int32_t rupee = 0, bomb = 0, life = 12, max_life = 12, wallet = 1;
-  std::uint32_t bottle = 0;
+  std::int32_t rupee = 0, bomb = 0, life = 12, max_life = 12, wallet = 1, mp = 0, mp_max = 240, rupee_cap = 999,
+               bomb_cap = 40;
+  std::uint32_t bottle = 0, bottle_valid = 1;
 };
 
 // A saved game in tools/autotest/save_flags.py's layout: Bool (type 0), Int (type 2), UInt (type 20), padding.
@@ -45,13 +51,20 @@ Bytes FakeSave(const Values& v) {
   const auto rec = [&](std::uint32_t a, std::uint32_t b) { put(at, a), put(at + 4, b), at += 8; };
   for (std::uint32_t type = 0; type < 0x20; ++type) {
     rec(0, type);
-    if (type == 0) rec(kRupee, 1);  // a Bool with a per-player value's hash: never taken for it
+    if (type == 0) {
+      rec(kRupee, 1);  // a Bool with a per-player value's hash: never taken for it
+      rec(kBottleAValid, v.bottle_valid);
+    }
     if (type == 2) {
       rec(kRupee, static_cast<std::uint32_t>(v.rupee));
       rec(kBomb, static_cast<std::uint32_t>(v.bomb));
       rec(kLife, static_cast<std::uint32_t>(v.life));
       rec(kMaxLife, static_cast<std::uint32_t>(v.max_life));
       rec(kWallet, static_cast<std::uint32_t>(v.wallet));
+      rec(kMP, static_cast<std::uint32_t>(v.mp));
+      rec(kMPMax, static_cast<std::uint32_t>(v.mp_max));
+      rec(kCapRupee, static_cast<std::uint32_t>(v.rupee_cap));
+      rec(kCapBomb, static_cast<std::uint32_t>(v.bomb_cap));
     }
     if (type == 20) rec(kBottleA, v.bottle);
   }
@@ -126,10 +139,10 @@ TEST_CASE("own values: inline values are found by hash and type, a damaged table
 TEST_CASE("own values: only the per-player values are read and written, in place") {
   const Bytes guest = FakeSave({.rupee = 250, .bomb = 17, .life = 10, .max_life = 16, .wallet = 1, .bottle = 4});
   const auto own = save::read_own_values(guest);
-  REQUIRE(own.size() == 4);  // rupees, bombs, life, bottle A; never the wallet (shared, max) nor MaxLife
+  REQUIRE(own.size() == 5);  // life, MP, bottle A, rupees, bombs; never the wallet (shared, max), MaxLife or a capacity
   Bytes host = FakeSave({.rupee = 5, .bomb = 0, .life = 16, .max_life = 16, .wallet = 2, .bottle = 0});
   const Bytes host_before = host;
-  CHECK(save::put_own_values(host, own) == 4);
+  CHECK(save::put_own_values(host, own) == 5);
   CHECK(host.size() == host_before.size());
   CHECK(At(host, kRupee, 2) == 250);
   CHECK(At(host, kBomb) == 17);
@@ -143,17 +156,41 @@ TEST_CASE("own values: only the per-player values are read and written, in place
   CHECK(At(host, kWallet) == 2);
 }
 
-TEST_CASE("own values: life is kept only when alive and within the host's save's hearts") {
+TEST_CASE("own values: life is kept only when alive, at most the host's save's hearts") {
   Bytes host = FakeSave({.life = 12, .max_life = 12});
   const std::vector<save::OwnValue> dead{{kLife, 0}};
   CHECK(save::put_own_values(host, dead) == 0);
   CHECK(At(host, kLife) == 12);
   const std::vector<save::OwnValue> more{{kLife, 20}};
-  CHECK(save::put_own_values(host, more) == 0);
-  CHECK(At(host, kLife) == 12);
+  CHECK(save::put_own_values(host, more) == 1);
+  CHECK(At(host, kLife) == 12);  // (the host's save's hearts)
   const std::vector<save::OwnValue> some{{kLife, 7}};
   CHECK(save::put_own_values(host, some) == 1);
   CHECK(At(host, kLife) == 7);
+}
+
+TEST_CASE("own values: never more than the host's save holds room for, a bottle only where it has one") {
+  // The guest's 500 rupees, 30 bombs and 480 magic into a save with a 200 wallet, a 20 bomb bag and one meter.
+  const std::vector<save::OwnValue> own{{kRupee, 500}, {kBomb, 30}, {kMP, 480}, {kBottleA, 4}};
+  Bytes host = FakeSave({.rupee = 5, .bomb = 2, .mp = 100, .mp_max = 240, .rupee_cap = 200, .bomb_cap = 20});
+  CHECK(save::put_own_values(host, own) == 4);
+  CHECK(At(host, kRupee, 2) == 200);
+  CHECK(At(host, kBomb) == 20);
+  CHECK(At(host, kMP) == 240);
+  CHECK(At(host, kBottleA) == 4);
+  // No bomb bag in that save: no bombs. A negative count: 0. Within the room: as it was.
+  Bytes no_bag = FakeSave({.bomb = 0, .bomb_cap = 0});
+  const std::vector<save::OwnValue> some{{kBomb, 12}, {kRupee, static_cast<std::uint32_t>(-3)}, {kMP, 120}};
+  CHECK(save::put_own_values(no_bag, some) == 3);
+  CHECK(At(no_bag, kBomb) == 0);
+  CHECK(At(no_bag, kRupee, 2) == 0);
+  CHECK(At(no_bag, kMP) == 120);
+  // A bottle that save does not have keeps its own (empty) content.
+  Bytes no_bottle = FakeSave({.bottle = 0, .bottle_valid = 0});
+  const std::vector<save::OwnValue> fairy{{kBottleA, 6}};
+  CHECK(save::put_own_values(no_bottle, fairy) == 0);
+  CHECK(At(no_bottle, kBottleA) == 0);
+  CHECK(At(no_bottle, kBottleAValid, save::kSaveTypeBool) == 0);
 }
 
 TEST_CASE("own values: the kept file reads back, anything else is refused") {
@@ -192,7 +229,7 @@ TEST_CASE("own values: a guest keeps its rupees over rejoins, Resync and another
   CHECK(save::clear_coop_slots(coop) == 2);
   REQUIRE(fs::exists(coop / std::string(save::kOwnValuesFile)));
   REQUIRE(save::write_coop_save(coop, Slot({.rupee = 5, .bomb = 3}), own, &kept) == save::WriteResult::written);
-  CHECK(kept == 4);
+  CHECK(kept == 5);
   {
     const Bytes p = ReadFile(coop / "slot_00" / "progress.sav");
     CHECK(At(p, kRupee, 2) == 250);
@@ -246,5 +283,5 @@ TEST_CASE("own values: slots that are not saves this build can read leave what w
   CHECK_FALSE(save::keep_own_values(coop));
   const auto kept = save::kept_own_values(coop);
   REQUIRE(kept);
-  CHECK(*kept == std::vector<save::OwnValue>{{kLife, 12}, {kBottleA, 0}, {kRupee, 42}, {kBomb, 0}});  // (item_flags order)
+  CHECK(*kept == std::vector<save::OwnValue>{{kLife, 12}, {kMP, 0}, {kBottleA, 0}, {kRupee, 42}, {kBomb, 0}});  // (item_flags order)
 }

@@ -515,6 +515,7 @@ int clear_coop_slots(const std::filesystem::path& coop_dir);
 // from 0x20 a table of 8-byte records. A record whose first word is 0 opens a type (its second word the type id, 0 to
 // 0x1f in order, then the end record 0x20); any other first word is a value's hash, and for the inline types (Int 2,
 // Enum 6, UInt 20) the second word is the value. No checksum.
+inline constexpr std::uint32_t kSaveTypeBool = 0;
 inline constexpr std::uint32_t kSaveTypeInt = 2;
 inline constexpr std::uint32_t kSaveTypeEnum = 6;
 inline constexpr std::uint32_t kSaveTypeUInt = 20;
@@ -522,8 +523,8 @@ struct SaveValueAt {
   std::size_t offset;  // of the value word
   std::uint32_t type;
 };
-// Where the inline value `hash` (of the type `type`, or of any inline type when nothing) sits in a progress.sav, or
-// nothing (not a save, a table out of order, or no such value).
+// Where the inline value `hash` (of the type `type`, or of Int, Enum or UInt when nothing; a Bool only when asked
+// for) sits in a progress.sav, or nothing (not a save, a table out of order, or no such value).
 std::optional<SaveValueAt> save_value_at(std::span<const std::uint8_t> progress, std::uint32_t hash,
                                          std::optional<std::uint32_t> type = std::nullopt);
 
@@ -534,8 +535,9 @@ struct OwnValue {
 };
 // The per-player values a progress.sav holds, in item_flags() order.
 std::vector<OwnValue> read_own_values(std::span<const std::uint8_t> progress);
-// `own` written into a progress.sav in place, each where that save has it. Life is kept only when it is not 0 and is
-// at most the save's PlayerStatus.MaxLife. Returns how many values were written.
+// `own` written into a progress.sav in place, each where that save has it, never above that save's own capacity for
+// it (wallet, bomb bag, quiver, bullet bag, stick and nut capacity, MPMax, MaxLife; at least 0), a bottle's content
+// only where that save's bottle IsValid is true, and never a life of 0. Returns how many values were written.
 int put_own_values(std::vector<std::uint8_t>& progress, std::span<const OwnValue> own);
 
 inline constexpr std::string_view kOwnValuesFile = "coop-own-values.txt";

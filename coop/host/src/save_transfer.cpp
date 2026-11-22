@@ -561,7 +561,9 @@ std::optional<SaveValueAt> save_value_at(std::span<const std::uint8_t> progress,
     } else if (!kind) {
       return std::nullopt;
     } else if (first == hash) {
-      const bool inline_type = *kind == kSaveTypeInt || *kind == kSaveTypeEnum || *kind == kSaveTypeUInt;
+      // (a Bool only when asked for by type: a value's lookup never takes a flag with the same hash)
+      const bool inline_type = *kind == kSaveTypeInt || *kind == kSaveTypeEnum || *kind == kSaveTypeUInt ||
+                               (type && *kind == kSaveTypeBool);
       if (inline_type && (!type || *type == *kind)) return SaveValueAt{at + 4, *kind};
     }
   }
@@ -587,22 +589,65 @@ std::vector<OwnValue> read_own_values(std::span<const std::uint8_t> progress) {
   return out;
 }
 
+namespace {
+
+// What a per-player value may be in a save (review-01111-c): never more than that save's own capacity for it (its
+// wallet, bags, quiver, magic and hearts: shared by max, so the host's save has the group's), and a bottle's content
+// only in a bottle that save has. Capacities are the Int struct 0xf80f8077's members (game_items.cpp kCap*).
+struct OwnLimit {
+  std::uint32_t value;
+  std::uint32_t cap;       // an Int whose value is the most `value` may be (0: none of it)
+  std::uint32_t needs;     // a Bool that must be true for `value` to be written
+};
+const std::vector<OwnLimit>& own_limits() {
+  static const std::vector<OwnLimit> limits = [] {
+    const auto h = [](const char* name) { return flag_hash(name); };
+    const auto bottle = [&](const char* b) {
+      const std::string base = std::string("PlayerStatus.AssignableItem.BottleInfo.") + b;
+      return OwnLimit{h((base + ".BottleItem").c_str()), 0, h((base + ".IsValid").c_str())};
+    };
+    return std::vector<OwnLimit>{
+        {h("PlayerStatus.CurrentRupee"), 0xe0010a50, 0},             // 0xf80f8077.Rupee (the wallet)
+        {h("PouchData.Item_Bomb.StockNum"), 0xe753508b, 0},          // .Bomb (the bomb bag)
+        {h("PouchData.Item_Arrow_Normal.StockNum"), 0x418db791, 0},  // .Arrow (the quiver)
+        {h("PouchData.Item_DekuSeed.StockNum"), 0xae8cc742, 0},      // .DekuSeed (the bullet bag)
+        {h("PouchData.Item_DekuStick.StockNum"), 0x457616b0, 0},     // .DekuStick
+        {h("PouchData.Item_DekuNut.StockNum"), 0x735b00f7, 0},       // .DekuNut
+        {h("PlayerStatus.MP"), h("PlayerStatus.MPMax"), 0},
+        {h("PlayerStatus.Life"), h("PlayerStatus.MaxLife"), 0},
+        bottle("BottleA"), bottle("BottleB"), bottle("BottleC"), bottle("BottleD"), bottle("BottleE"),
+    };
+  }();
+  return limits;
+}
+
+}  // namespace
+
 int put_own_values(std::vector<std::uint8_t>& progress, std::span<const OwnValue> own) {
   static const std::uint32_t life_hash = flag_hash("PlayerStatus.Life");
-  static const std::uint32_t max_life_hash = flag_hash("PlayerStatus.MaxLife");
-  const auto max_life = save_value_at(progress, max_life_hash, kSaveTypeInt);
   int n = 0;
   for (const auto& v : own) {
     const ItemFlag* f = find_item(v.hash);
     if (f == nullptr || !per_player_value(*f)) continue;  // (only per-player values, whatever the file says)
-    if (v.hash == life_hash) {
-      // (never a Link with no life, never more than the host's save's hearts: those are shared, max)
-      const auto life = static_cast<std::int32_t>(v.value);
-      if (life <= 0 || (max_life && life > static_cast<std::int32_t>(get_u32(progress, max_life->offset)))) continue;
-    }
     const auto at = save_value_at(progress, v.hash);
     if (!at) continue;
-    for (std::size_t i = 0; i < 4; ++i) progress[at->offset + i] = static_cast<std::uint8_t>(v.value >> (8 * i));
+    std::uint32_t value = v.value;
+    const auto limit = std::find_if(own_limits().begin(), own_limits().end(),
+                                    [&](const OwnLimit& l) { return l.value == v.hash; });
+    if (limit != own_limits().end()) {
+      if (limit->needs != 0) {
+        const auto valid = save_value_at(progress, limit->needs, kSaveTypeBool);
+        if (!valid || get_u32(progress, valid->offset) == 0) continue;  // (no such bottle in this save)
+      }
+      if (limit->cap != 0) {
+        if (const auto cap = save_value_at(progress, limit->cap, kSaveTypeInt)) {
+          const auto most = std::max<std::int32_t>(0, static_cast<std::int32_t>(get_u32(progress, cap->offset)));
+          value = static_cast<std::uint32_t>(std::clamp(static_cast<std::int32_t>(value), 0, most));
+        }
+      }
+    }
+    if (v.hash == life_hash && static_cast<std::int32_t>(value) <= 0) continue;  // (never a Link with no life)
+    for (std::size_t i = 0; i < 4; ++i) progress[at->offset + i] = static_cast<std::uint8_t>(value >> (8 * i));
     ++n;
   }
   return n;
