@@ -958,6 +958,14 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
 // game's threads waited 645 ms for a core, the open screen was taken as closed and opened again on its first page, so
 // Y presses were lost): kWait, the screen kept as it is.
 enum class SnailEdge { kWait, kOpen, kClose };
+// A game screen's layout is looked at to tell whose it is (Character Select's Customize screen: SnailScreen; co-op's
+// CoopMenu_00: CoopMenuScreen) and the verdict is kept by the layout's address. The game frees a closed screen and may
+// make the next one at the very same screen and layout addresses (charsel-native-0119-5, run 4620f3e7: CoopMenu_00 came
+// at the addresses his Customize screen had just freed, his verdict was kept for ours, co-op waited for his panes in our
+// page, ours never took it and R went back to the Map). So the layout is looked at again: with no verdict yet, with
+// another screen object, and at every opening (the state turns 1, opening, or turns open, 1 or 2, from anything else: a
+// new screen at the same place starts there). `known_state`: the state at its last update (-1 none).
+bool LayoutLookAgain(bool known, std::uint64_t known_screen, int known_state, std::uint64_t screen, int state);
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
 // kDrive, co-op's keys; kPause, not updated for kSnailPauseMs (a stall, or gone without a close seen): the game gets

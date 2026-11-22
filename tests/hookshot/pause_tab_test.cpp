@@ -3013,3 +3013,23 @@ TEST_CASE("pause tab (tabs-overhaul-01110 step 2): the Map under CoopMenu_00 hid
     CHECK_FALSE(MapUnderHidden(true, true, false, true, 5000, 5000, 5000 + kMapUnderAfterMs + kMenuUpMs));   // (unloaded)
     CHECK_FALSE(MapUnderHidden(false, true, false, true, 5000, 6000, 6000));   // (L: given back at once)
 }
+
+TEST_CASE("pause tab (charsel-native-0119, run 4620f3e7): a screen layout's verdict is looked at again at every opening") {
+    // No verdict yet, or another screen object at that layout: look.
+    CHECK(LayoutLookAgain(false, 0, -1, 0x100, 1));
+    CHECK(LayoutLookAgain(true, 0x100, 2, 0x200, 2));
+    // The same screen open, frame after frame: kept (no pane walk each frame).
+    CHECK_FALSE(LayoutLookAgain(true, 0x100, 2, 0x100, 2));
+    CHECK_FALSE(LayoutLookAgain(true, 0x100, 1, 0x100, 1));
+    CHECK_FALSE(LayoutLookAgain(true, 0x100, 1, 0x100, 2));    // (opening -> open: the same opening)
+    // The run: his Customize screen closed (3, then 0) and CoopMenu_00 came at the very same screen and layout
+    // addresses, opening (1): looked at again, so his "his" / our "not ours" is not kept for it.
+    CHECK(LayoutLookAgain(true, 0x100, 3, 0x100, 1));
+    CHECK(LayoutLookAgain(true, 0x100, 0, 0x100, 1));
+    CHECK(LayoutLookAgain(true, 0x100, 0, 0x100, 2));          // (open again without an opening state seen)
+    CHECK(LayoutLookAgain(true, 0x100, 2, 0x100, 1));          // (freed while open, the next one opening there)
+    CHECK(LayoutLookAgain(true, 0x100, -1, 0x100, 1));         // (no state kept yet)
+    // Closing or closed: no new look (nothing to take).
+    CHECK_FALSE(LayoutLookAgain(true, 0x100, 2, 0x100, 3));
+    CHECK_FALSE(LayoutLookAgain(true, 0x100, 3, 0x100, 0));
+}
