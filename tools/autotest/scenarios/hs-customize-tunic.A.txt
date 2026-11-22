@@ -9,6 +9,8 @@
 mark start
 wait 300                # the save loaded, Link standing
 mark a-before
+press PLUS               # the pause menu up first (lane 091623: 'menu customize' alone opened no menu in the field)
+wait 240
 menu customize
 wait 240                # the page drawn (the first part row selected: Eye Colour)
 press DDOWN 10          # Kokiri Tunic
