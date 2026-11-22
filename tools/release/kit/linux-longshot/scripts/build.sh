@@ -329,7 +329,8 @@ charsel_tool_make() {
     cs_tool_why=''
     [[ $part == full ]] || ex=(--exclude '^(Tex|Phive|Sound)/|^Model/Player_(Adult|Child)_C[0-9]{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$')
     say "  making Character Select's files from your game (a minute or two, once) ..."
-    # (the exit code decides: a warning on its stderr is only text)
+    # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder, but the
+    # script's own folder is still on the path, which is how player.py finds its lib/: so it runs from the folder the kit unpacked it into)
     if ! tout=$("$PY" -I -B "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$mod" ${ex[@]+"${ex[@]}"} 2>&1); then
         cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
         return 1
