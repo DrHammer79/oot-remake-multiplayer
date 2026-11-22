@@ -2049,6 +2049,7 @@ std::array<std::string, kRows> g_minus_texts{};
 constexpr int kMinusSlots = kRows + 2 * kLinePanes;
 std::array<LiveSlot, kMinusSlots> g_minus_live{};
 std::atomic<bool> g_map_hide{false};                    // the Map page under ours to be hidden
+std::atomic<bool> g_minus_on{false};                    // our page shown, its slide out back to the Map included
 std::uint64_t g_map_layout = 0;
 // The Map page's own content in MapMenu_00 (read from the game's layout, tabs-overhaul-01110 (a)): hidden under ours.
 // Its RootPane is NOT hidden: it holds the - menu's full-screen backdrop BG_00 (3840 x 2160, material MenuOpenBg_00) and
@@ -2092,6 +2093,7 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     g_minus_hide.clear();
     g_minus_vis = -1, g_minus_page_tab = -1, g_minus_focus = -1, g_minus_shown_rows = ~0u, g_minus_rows_ms = 0;
     g_minus_texts = {};
+    g_map_hide = false, g_minus_on = false;   // (a new opening: nothing of ours shown yet)
     std::uint64_t table = 0;
     Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
     const std::uint64_t page = FindOwnPane(ctx, layout, "Pa_CoopMinus_00");
@@ -2143,7 +2145,7 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
 // after the lock), the cursor on the Page's row. The tab whose words are due (-1 none).
 int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     if (gen != g_minus_page_gen) {   // (another opening, not looked up: never through the old one's panes)
-        g_minus_vis = -1, g_map_hide = false;
+        g_minus_vis = -1, g_map_hide = false, g_minus_on = false;
         return -1;
     }
     const std::uint64_t now = NowMs();
@@ -2153,6 +2155,7 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
                          g_mslide_to.load() < 0 && g_mslide_from.load() >= 0;
     const bool on = (tab >= 0 || leaving) && g_minus_page != 0;
     g_map_hide = tab >= 0 && g_minus_page != 0;
+    g_minus_on = on;   // (OwnMinusPageShown: no map-page marks over ours while it slides out either, review-01110-c)
     if (g_minus_page != 0) PlacePane(ctx, g_minus_page, g_minus_page_x + (on ? MinusSlideNow(now).page : 0.0f));
     if ((on ? 1 : 0) != g_minus_vis) {
         if (on) {
@@ -2348,6 +2351,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     g_page.SetMinusInView(!mods && view != View::kMain);
     g_page.SetMinusLines(pickable, raw);
     g_page.SetMinusRawBack(raw_back);
+    g_page.SetMinusPageable(!mods && view == View::kLan && CellPages(BrowseListed(v.s)) > 1);
     const bool list_now = g_page.MinusInList() || g_page.Typing() >= 0;
     if (!raw && g_page.MinusInList()) picked = g_page.MinusLine();
     for (int i = 0; i < kLinePanes; ++i) {
@@ -4315,7 +4319,7 @@ bool GameMenuUp() noexcept {
 }
 
 bool OwnMinusPageShown() noexcept {
-    return g_map_hide.load() && MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
+    return (g_map_hide.load() || g_minus_on.load()) && MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
 }
 
 std::array<MenuActor, 4> MenuActors() noexcept {

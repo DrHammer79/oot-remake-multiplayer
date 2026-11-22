@@ -315,6 +315,9 @@ public:
     // ZL / ZR on our page (not typing, not co-op's menu's own page): the list's page before / after (-1 / +1), once:
     // the games list pages by its 6 games so nothing is ever below a scroll (tabs-overhaul-01110). 0 none.
     int TakeMinusPageStep() { return std::exchange(minus_page_step_, 0); }
+    // The list shown now has more than one page (the module: Lobby > Find with more games than fit). Only then does
+    // ZL / ZR click (button_on); elsewhere they are still kept from the game (Map.module's ZL is Threads of Time).
+    void SetMinusPageable(bool can) { minus_pageable_ = can; }
 
     // The Join view's two fields (the room name, the join password) and which one is typed into (-1: none). While one
     // is, the pad's buttons are all the page's (none reach System) and the keyboard's keys are the field's (Key, Char).
@@ -396,6 +399,7 @@ private:
     std::uint32_t minus_moves_ = 0;     // TakeMinusMoves
     bool minus_tab_changed_ = false;    // MinusTabChanged
     int minus_page_step_ = 0;           // TakeMinusPageStep
+    bool minus_pageable_ = false;       // SetMinusPageable
     void MinusLineStep(int dir);
     void MinusTabMoved();
     void MinusStep(int dir);

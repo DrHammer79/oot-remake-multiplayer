@@ -2018,12 +2018,33 @@ TEST_CASE("pause tab (tabs-overhaul-01110): ZL and ZR on our page step the list'
     CHECK((p.OnPad(kPadZR, now + 18) & kPadZR) == 0);
     CHECK(p.TakeMinusPageStep() == 1);
     CHECK(p.TakeMinusPageStep() == 0);
+    CHECK(p.TakeStripSound() == nullptr);   // (a list of one page: kept from the game, but no click: review-01110-c)
+    p.SetMinusPageable(true);
+    p.OnPad(0, now + 19);
+    CHECK((p.OnPad(kPadZR, now + 19) & kPadZR) == 0);
+    CHECK(p.TakeMinusPageStep() == 1);
     CHECK(std::string(p.TakeStripSound()) == "button_on");
     p.OnPad(0, now + 20);
     CHECK((p.OnPad(kPadZL, now + 22) & kPadZL) == 0);
     CHECK(p.TakeMinusPageStep() == -1);
     p.OnPad(0, now + 24);
     CHECK(p.MinusTab() == 1);   // (the tab stays)
+}
+
+TEST_CASE("pause tab (review-01110-c): ZR on Mods is kept from the game (Map.module's own ZL / ZR) with no click") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    for (int i = 0; i < 3; ++i) p.OnPad(kPadR, now + 10 + 4 * i), p.OnPad(0, now + 12 + 4 * i);
+    REQUIRE(p.MinusTab() == 2);   // (Mods)
+    p.TakeStripSound();
+    CHECK((p.OnPad(kPadZR, now + 30) & kPadZR) == 0);
+    CHECK(p.TakeStripSound() == nullptr);
+    p.OnPad(0, now + 32);
+    CHECK((p.OnPad(kPadZL, now + 34) & kPadZL) == 0);   // (else Map.module's ZL: Threads of Time under our tab)
+    CHECK(p.TakeStripSound() == nullptr);
+    CHECK(p.MinusTab() == 2);
 }
 
 TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page on Customize, and goes back to System") {

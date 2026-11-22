@@ -276,8 +276,9 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
         swallow_ |= kPadR;
     } else if ((down & (kPadZL | kPadZR)) != 0 && !(minus_list_ && minus_raw_)) {
         // (a list's page: the games list's 6 at a time, as the game's own long lists page)
+        // (swallowed on every tab and view, but it clicks only when the list really pages: review-01110-c)
         minus_page_step_ = (down & kPadZR) != 0 ? 1 : -1;
-        strip_sound_ = "button_on";
+        if (minus_pageable_) strip_sound_ = "button_on";
         swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
