@@ -1,4 +1,4 @@
-From 069e00c550fbb1c98d0ac47665624b591086b5c5 Mon Sep 17 00:00:00 2001
+From cd04f277d24672e33f139ab000011c6759a31886 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 16 Nov 2026 17:21:30 -0900
 Subject: [PATCH] Co-op and Longshot's crash reports: nothing sent, co-op's

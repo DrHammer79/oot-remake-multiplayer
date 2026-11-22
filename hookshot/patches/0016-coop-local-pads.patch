@@ -1,4 +1,4 @@
-From b0dc71fdc41b9c1f25902dc4baa3f88758ff76ee Mon Sep 17 00:00:00 2001
+From d5cf567f423772d3de7682e14aed4c589fa023b0 Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 12:26:46 -0900
 Subject: [PATCH] Co-op local pads: split-screen players get Npads 2 to 4

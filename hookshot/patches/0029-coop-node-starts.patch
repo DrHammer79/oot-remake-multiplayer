@@ -1,4 +1,4 @@
-From 1184ef3d2748ce11bb32d2ee0d583595a9beb219 Mon Sep 17 00:00:00 2001
+From 9c9eee444593c4a521fc75e3a375fda9436043ea Mon Sep 17 00:00:00 2001
 From: daurosk <354202035+daurosk@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 11:48:13 -0900
 Subject: [PATCH] Co-op AI node starts: the started node and its actor, to the

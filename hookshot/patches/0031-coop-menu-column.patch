@@ -1,4 +1,4 @@
-From 5e6338ede6fe3e97e66fd79d4e085663901f6e22 Mon Sep 17 00:00:00 2001
+From 7f9863e06afd6b07e6440cb8c5ef6001705eb97a Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Wed, 18 Nov 2026 21:05:51 -0900
 Subject: [PATCH] Co-op menu tabs: an opaque column, and the page arrow after a

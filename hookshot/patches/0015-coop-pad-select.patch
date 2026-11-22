@@ -1,4 +1,4 @@
-From 4771ecd2299586c91d7b31cee4936d03760218d4 Mon Sep 17 00:00:00 2001
+From 51a25cabfcb15a5e414549a6b7fca0d78dae1a0f Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 02:56:35 -0900
 Subject: [PATCH] Co-op pad select: this game's controller and keyboard, for
