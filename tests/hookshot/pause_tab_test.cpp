@@ -2006,6 +2006,26 @@ TEST_CASE("pause tab (tabs-overhaul-01110): each - tab of ours keeps its cursor'
     CHECK(p.MinusRow() == 0);
 }
 
+TEST_CASE("pause tab (tabs-overhaul-01110): ZL and ZR on our page step the list's page, never the game's") {
+    Page p = UsablePage();
+    p.SetMinusTabsUsable(true);
+    std::uint64_t now = 1000;
+    p.OnScreen(Strip(0x9000, 8, kMapCategory, kMinusMode), now);
+    p.OnPad(kPadR, now + 10), p.OnPad(0, now + 12);
+    p.OnPad(kPadR, now + 14), p.OnPad(0, now + 16);
+    REQUIRE(p.MinusTab() == 1);   // (Lobby)
+    p.TakeStripSound();
+    CHECK((p.OnPad(kPadZR, now + 18) & kPadZR) == 0);
+    CHECK(p.TakeMinusPageStep() == 1);
+    CHECK(p.TakeMinusPageStep() == 0);
+    CHECK(std::string(p.TakeStripSound()) == "button_on");
+    p.OnPad(0, now + 20);
+    CHECK((p.OnPad(kPadZL, now + 22) & kPadZL) == 0);
+    CHECK(p.TakeMinusPageStep() == -1);
+    p.OnPad(0, now + 24);
+    CHECK(p.MinusTab() == 1);   // (the tab stays)
+}
+
 TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page on Customize, and goes back to System") {
     Page p = UsablePage();
     std::uint64_t now = 1000;

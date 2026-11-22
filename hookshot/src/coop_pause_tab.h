@@ -312,6 +312,9 @@ public:
     std::uint32_t TakeMinusMoves() { return std::exchange(minus_moves_, 0u); }
     // The tab lit changed (or the - menu closed) since the last call: the module's view back to the tab's rows.
     bool MinusTabChanged() { return std::exchange(minus_tab_changed_, false); }
+    // ZL / ZR on our page (not typing, not co-op's menu's own page): the list's page before / after (-1 / +1), once:
+    // the games list pages by its 6 games so nothing is ever below a scroll (tabs-overhaul-01110). 0 none.
+    int TakeMinusPageStep() { return std::exchange(minus_page_step_, 0); }
 
     // The Join view's two fields (the room name, the join password) and which one is typed into (-1: none). While one
     // is, the pad's buttons are all the page's (none reach System) and the keyboard's keys are the field's (Key, Char).
@@ -392,6 +395,7 @@ private:
     bool minus_back_ = false, minus_list_back_ = false;
     std::uint32_t minus_moves_ = 0;     // TakeMinusMoves
     bool minus_tab_changed_ = false;    // MinusTabChanged
+    int minus_page_step_ = 0;           // TakeMinusPageStep
     void MinusLineStep(int dir);
     void MinusTabMoved();
     void MinusStep(int dir);

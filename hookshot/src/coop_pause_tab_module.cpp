@@ -3430,7 +3430,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         std::vector<std::uint32_t> menu_keys, menu_chars;
         bool menu_back = false;
         // The - menu's page (0.11.9): its tab, and what its pad did (Page's Take*), done after our lock
-        int minus_tab = -1, minus_line = -1;
+        int minus_tab = -1, minus_line = -1, minus_page_step = 0;
         std::uint32_t minus_moves = 0;
         bool minus_back = false, minus_list_back = false;
         CoopPauseMenu::View mv;
@@ -3635,6 +3635,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             if (minus_tab >= 0) {
                 minus_back = g_page.TakeMinusBack(), minus_list_back = g_page.TakeMinusListBack();
                 minus_line = g_page.TakeMinusLineDecide(), minus_moves = g_page.TakeMinusMoves();
+                minus_page_step = g_page.TakeMinusPageStep();
             }
             if (g_page.TakeCustomizeOpen()) {   // (the Customize Link button: Settings and look's Customize page)
                 g_customize_direct = true;
@@ -4213,6 +4214,14 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         if (minus_tab >= 0) {
             const View view = ViewShown();
             if (minus_back) SetView(BackOf(view));
+            if (minus_page_step != 0 && view == View::kLan) {   // (ZL / ZR: the games list's page before / after)
+                const SessionView lan = ViewNow(View::kLan);
+                const int pages = CellPages(BrowseListed(lan.s));
+                if (pages > 1) {
+                    g_cell_page = ((lan.s.cell_page + minus_page_step) % pages + pages) % pages, g_cell = -1;
+                    g_live_poke = true;
+                }
+            }
             if (minus_line >= 0 && view == View::kLan && minus_line >= 1) {
                 ActCell(minus_line - 1);
             } else if (minus_line >= 0) {
