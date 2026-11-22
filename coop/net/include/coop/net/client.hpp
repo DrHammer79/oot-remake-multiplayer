@@ -260,6 +260,11 @@ struct Event {
   // refused: during an automatic reconnect (this client was welcomed before),
   // not on the join the player started.
   bool reconnecting = false;
+  // refused: this client answered with the same-network key
+  // (protocol::kSameNetworkPassword: a host on this network, no password
+  // typed), so a wrong password means that host asks for its password on its
+  // own network too (docs/protocol.md "Same network").
+  bool same_network_key = false;
   DropReason drop_reason = DropReason::none;  // connect_failed, disconnected
   protocol::Message message;          // message
   std::uint8_t channel = 0;           // message, and the four after it
@@ -310,7 +315,9 @@ std::string_view refuse_reason_text(protocol::RefuseReason reason);
 
 // Text to show for a `refused` event. A wrong join password on an automatic
 // reconnect means the host started its server again (each start makes a new
-// password and invite; issue 85), so it says that; else refuse_reason_text.
+// password and invite; issue 85), so it says that; a wrong password for the
+// same-network key means the host on this network asks for its password
+// (row 251), so it says that; else refuse_reason_text.
 std::string_view refuse_text(const Event& event);
 
 class Client {

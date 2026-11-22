@@ -54,6 +54,12 @@ std::uint32_t ipv4_of(std::uint32_t enet_host);
 // 192.168/16 or link-local 169.254/16. Not 127/8: a relay's and a join
 // helper's connections come from there, for players from anywhere.
 bool is_same_network(std::uint32_t ipv4);
+// The same rule for an IPv6 address (its 16 bytes in network order): unique
+// local fc00::/7, link-local fe80::/10, and an IPv4-mapped one (::ffff:a.b.c.d)
+// by is_same_network. Not ::1 or ::ffff:127.x.y.z (as 127/8 above), and not an
+// IPv4-compatible or NAT64 one. ENet here speaks IPv4 only, so every peer goes
+// through is_same_network today; this keeps the rule whole for an IPv6 path.
+bool is_same_network_ipv6(const std::array<std::uint8_t, 16>& address);
 
 // Players a server takes unless told otherwise (coop_server --max-players).
 inline constexpr std::uint8_t kDefaultMaxPlayers = 16;

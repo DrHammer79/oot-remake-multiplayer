@@ -19,6 +19,7 @@
 #include "coop/net/enet_throttle.hpp"
 #include "coop/net/enet_waiting.hpp"
 #include "coop/protocol/codec.hpp"
+#include "coop/protocol/join_password.hpp"
 
 namespace coop::net {
 
@@ -166,6 +167,10 @@ std::string_view refuse_reason_text(proto::RefuseReason reason) {
 }
 
 std::string_view refuse_text(const Event& event) {
+  if (event.same_network_key && event.refuse_reason == proto::RefuseReason::bad_password) {
+    return "this host asks for its join password on its own network too: type the "
+           "password the host sent you, then join again";
+  }
   if (event.reconnecting && event.refuse_reason == proto::RefuseReason::bad_password) {
     return "the host restarted its server (it has a new join password now): ask the host "
            "for the new invite, then start Join.bat again with it";
@@ -528,6 +533,7 @@ void Client::on_receive(const std::uint8_t* data, std::size_t size,
       event.kind = EventKind::refused;
       event.refuse_reason = refused->reason;
       event.reconnecting = ever_welcomed_;
+      event.same_network_key = config_.join_password == proto::kSameNetworkPassword;
       push(std::move(event));
     } else if (channel == proto::kChannelProgress &&
                early_.size() < config_.max_early_messages) {
@@ -585,6 +591,7 @@ void Client::on_connected_message(proto::Message message, std::uint8_t channel) 
     Event event;
     event.kind = EventKind::refused;
     event.refuse_reason = refused->reason;
+    event.same_network_key = config_.join_password == proto::kSameNetworkPassword;
     push(std::move(event));
     return;
   }
