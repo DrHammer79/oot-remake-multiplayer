@@ -2097,6 +2097,11 @@ public:
             sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
+        for (const CoopObjects::Sync::LinkStrike& k : sync_.TakeLinkStrikes()) {
+            // Row 230: another game's Redead or Gibdo froze its owner's Link with our Link in its reach: ours takes
+            // that scream's hit, no life (its game's SleepParalysis reaction).
+            CoopObjects::HurtOurLinkNative(0, k.at, k.from, k.kind);
+        }
         // A Gold Skulltula whose key this save already holds is not made again
         // (issue 89, 2026-11-16). The game reads a placement's key once, when
         // the scene's actors are made, and never looks again, so a key that
@@ -4373,6 +4378,7 @@ private:
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
         sync_.SetPlayer(player);
+        NoteOurLinkHit(r);  // row 230: a Redead's or Gibdo's scream on our Link
         sync_.SetLures(CoopProjectiles::TheLures().Get());  // issue 151: our cast lures
         player_ = player;
         {  // issue 144 / scrub sales: a scrub near our Link or bound into our event holds its flags
@@ -6040,6 +6046,34 @@ private:
     CoopEvery::Every scan_{CoopEvery::kTwoFramesUs};
     CoopPivot::Follower pivot_;
     u32 link_hit_said_ = 0xffffffffu;  // the scream probe: our Link's last hit id seen
+    u32 link_hit_id_ = 0xffffffffu;    // row 230 (NoteOurLinkHit): our Link's last hit id read in the walk
+
+    // Row 230: our Link's Life took a new hit since the last walk (its last hit id moved): who dealt it, its kind
+    // words and the life it took, for the Sync (a screamer of ours shares its scream). Read only.
+    void NoteOurLinkHit(Reader& r) {
+        const u64 link = TheLinkActor().load();
+        const auto table = link != 0 ? r.Ptr(link + kActorComponents) : std::nullopt;
+        const auto life = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
+        const auto id = life ? r.Get<u32>(*life + kLastHitId) : std::nullopt;
+        if (!id || *id == link_hit_id_) {
+            return;
+        }
+        const bool first = link_hit_id_ == 0xffffffffu;
+        link_hit_id_ = *id;
+        if (first) {
+            return;  // (the hit before we looked)
+        }
+        const u64 attacker = r.Get<u64>(*life + kHitRecord).value_or(0);
+        const auto rec = r.Get<coop::protocol::HitRecord>(*life + kHitRecord);
+        if (attacker == 0 || !rec) {
+            return;
+        }
+        std::array<std::uint32_t, coop::protocol::kStrikeKindWords> kind{};
+        for (std::size_t i = 0; i < kind.size(); ++i) {
+            kind[i] = (*rec)[CoopHitReplay::kRecKind + i];
+        }
+        sync_.NoteOurLinkHit(attacker, kind, r.Get<s32>(*life + kLifeHurt).value_or(0));
+    }
     u64 pivot_actor_ = 0;
     u64 pivot_look_ms_ = 0;
     std::optional<std::int32_t> pivot_dir_said_;

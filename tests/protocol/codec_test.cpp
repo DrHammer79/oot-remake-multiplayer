@@ -1169,6 +1169,23 @@ TEST_CASE("object samples carry the owner's newest hit, component 21 (protocol 1
   CHECK(encode(s, out) == Error::bad_value);
 }
 
+TEST_CASE("object samples carry a scream that froze the owner's Link, component 22 (row 230)") {
+  ObjectSample s{0, test::kPlacedId, 3, {}};
+  s.state.time = {100, 1};
+  ObjectStrike strike;
+  strike.seq = 2;
+  strike.kind[0] = 0x00110003;
+  strike.kind[10] = 0xffffffffu;
+  s.state.strike = strike;
+  const Bytes b = must_encode(s);
+  Message back;
+  REQUIRE(decode(b, back) == Error::none);
+  CHECK(std::get<ObjectSample>(back) == s);
+  Bytes out;
+  s.state.strike->seq = 0;  // seqs count from 1
+  CHECK(encode(s, out) == Error::bad_value);
+}
+
 TEST_CASE("object id layout on the wire") {
   const Bytes b = must_encode(ObjectOwner{test::kMadeId, 2, 0x0102, 0x0a0b0c0d});
   REQUIRE(b.size() == kHeaderSize + 10 + 1 + 2 + 4);

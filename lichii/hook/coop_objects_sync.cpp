@@ -740,6 +740,35 @@ bool IsSplitPart(std::string_view name) {
     return name == "Enemy_Floormaster_Little" || name == "Enemy_Floormaster_Little_Truth";
 }
 
+bool IsScreamer(std::string_view name) {
+    // Row 230: their packs' RedeadParam (the Gibdo's has the Redead's as its parent).
+    return (name.starts_with("Enemy_ReDead") || name.starts_with("Enemy_Gibdo")) &&
+           name.find("_Dictionary") == std::string_view::npos;
+}
+
+bool IsScream(std::string_view animation, std::int32_t took) {
+    // The scream's AS nodes (AS/Enemy_ReDead.root, Enemy_Gibdo.root: Shout, CryStanding); the bite is Attack_*.
+    // A hit that took no life while it plays none of the bite's is the scream too.
+    if (animation == "Shout" || animation == "CryStanding") return true;
+    return took == 0 && !animation.empty() && !animation.starts_with("Attack");
+}
+
+bool InScreamReach(const proto::Vec3& enemy, const std::optional<proto::Quat>& facing, const proto::Vec3& link) {
+    const float dx = link[0] - enemy[0], dy = link[1] - enemy[1], dz = link[2] - enemy[2];
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) return false;
+    const float flat = std::sqrt(dx * dx + dz * dz);
+    if (flat > kScreamReachM || std::fabs(dy) > kScreamHighM) return false;
+    if (!facing || flat < 0.01f) return true;
+    // Its front: the rotation's z axis (column 2), on the ground.
+    const auto& q = *facing;  // x, y, z, w
+    const float fx = 2.0f * (q[0] * q[2] + q[3] * q[1]);
+    const float fz = 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]);
+    const float fl = std::sqrt(fx * fx + fz * fz);
+    if (!(fl > 1e-4f)) return true;
+    const float cosine = (fx * dx + fz * dz) / (fl * flat);
+    return cosine >= std::cos(kScreamAngleDeg * 3.14159265f / 180.0f);
+}
+
 std::string_view MinionMaker(std::string_view name) {
     // Made by the boss's own spawn action in the fight (Pack/Actor; the
     // Dodongo's: its AI node ExecuteDungeonBossDodongoSpawnBaby). The parts a
@@ -2991,6 +3020,27 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             send.emplace_back(std::move(spawn));
             o.announced = true;
         }
+        // Row 230: our own Link was frozen by this Redead's or Gibdo's scream (NoteOurLinkHit): its samples carry
+        // the hit's kind (ObjectStrike), so each other game whose Link is in the scream's reach freezes its own.
+        if (link_hit_ && link_hit_->attacker == address) {
+            const LinkHit hit = *std::exchange(link_hit_, std::nullopt);
+            const std::string anim = o.animation ? o.animation->name : std::string();
+            if (!IsScreamer(o.name)) {
+                // (not a screamer: nothing to share)
+            } else if (!known || owner->second.player != self) {
+                notes_.emplace_back("scream: our Link took a hit from a copy of " + o.name + " ('" + anim +
+                                    "'): not ours, its owner's game shares its own");
+            } else if (!IsScream(anim, hit.took)) {
+                notes_.emplace_back("scream: our Link took a hit from our " + o.name + " playing '" + anim + "' (" +
+                                    std::to_string(hit.took) + " quarters): not a scream, not shared");
+            } else {
+                o.strike_out = proto::ObjectStrike{++o.strike_seq, hit.kind};
+                o.strike_show_until = now_us + kHitShowUs;
+                o.sent_once = false;  // at once, not at the next sample
+                notes_.emplace_back("scream: our " + o.name + " froze our Link ('" + anim + "', " +
+                                    std::to_string(hit.took) + " quarters): shared for the Links in its reach");
+            }
+        }
         // The owner's samples.
         if (known && owner->second.player == self &&
             (!o.sent_once || now_us - o.sent_at >= kSampleEveryUs)) {
@@ -3015,6 +3065,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 if (o.hit_out && now_us < o.hit_show_until) {
                     sample.state.hit = o.hit_out;  // protocol 14: the hit our game took, for every copy
                 }
+                if (o.strike_out && now_us < o.strike_show_until) {
+                    sample.state.strike = o.strike_out;  // row 230: its scream froze our Link
+                }
                 send.emplace_back(sample);
                 o.sent_at = now_us;
                 o.sent_once = true;
@@ -3029,6 +3082,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             }
         }
     }
+    link_hit_.reset();  // row 230: a hit from an actor not shared (not in the walk) is not kept for a later one
 
     // churn-b: an away object that came back goes on with its owner; one
     // still off the walk after kAwayKeepUs is gone (left), its owner forgotten.
@@ -3922,6 +3976,25 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                     if (const auto& a = o->received.back().animation; o->play_frame && a) {
                         o->frame_loop.See(a->name, a->frame);  // coop_npc_anim.h
                     }
+                }
+            }
+            if (sample->state.strike && sample->state.strike->seq != o->strike_seq_in) {
+                // Row 230: the owner's Link was frozen by this one's scream: ours too when it stands in its reach.
+                o->strike_seq_in = sample->state.strike->seq;
+                const proto::Vec3 at =
+                    sample->state.position && Finite(*sample->state.position) ? *sample->state.position : o->position;
+                const std::optional<proto::Quat> facing = sample->state.rotation;
+                if (!IsScreamer(o->name)) {
+                    // (only a Redead's or Gibdo's)
+                } else if (!player_) {
+                    notes_.emplace_back("scream: the owner's " + o->name + " froze its Link; ours not seen: not frozen");
+                } else if (InScreamReach(at, facing, *player_)) {
+                    strikes_.push_back({o->address, at, *player_, sample->state.strike->kind});
+                    notes_.emplace_back("scream: the owner's " + o->name + " froze its Link; ours is in its reach (" +
+                                        std::to_string(Distance(at, *player_)) + " m): frozen here too");
+                } else {
+                    notes_.emplace_back("scream: the owner's " + o->name + " froze its Link; ours is out of its reach (" +
+                                        std::to_string(Distance(at, *player_)) + " m)");
                 }
             }
             if (!sample->state.life || !o->life) {

@@ -4,6 +4,7 @@
 
 #include <ostream>  // doctest prints string_view through it
 
+#include <cmath>
 #include <cstring>
 #include <algorithm>
 #include <array>
@@ -7906,4 +7907,97 @@ TEST_CASE("boss-turns-older-0119: a game that takes boss turns lists its bosses 
             CHECK(((e.flags & proto::object_presence::takes_turns) != 0) == (on && boss));
         }
     }
+}
+
+TEST_CASE("objects: a Redead's scream reaches each Link in its reach, not only its owner's (row 230)") {
+    CHECK(CoopObjects::IsScreamer("Enemy_ReDead"));
+    CHECK(CoopObjects::IsScreamer("Enemy_ReDead_ClimaxOnly"));
+    CHECK(CoopObjects::IsScreamer("Enemy_Gibdo"));
+    CHECK_FALSE(CoopObjects::IsScreamer("Enemy_ReDead_Dictionary"));
+    CHECK_FALSE(CoopObjects::IsScreamer("Enemy_Stalchild"));
+    CHECK(CoopObjects::IsScream("Shout", 0));
+    CHECK(CoopObjects::IsScream("CryStanding", 0));
+    CHECK(CoopObjects::IsScream("Wait", 0));             // no life taken, no bite: the scream
+    CHECK_FALSE(CoopObjects::IsScream("Attack_Loop", 0)); // the bite holding on
+    CHECK_FALSE(CoopObjects::IsScream("Wait", 2));
+    CHECK_FALSE(CoopObjects::IsScream("", 0));
+    // RedeadParam: 5.5 m and 45 degrees off its front (an identity rotation faces +z).
+    const proto::Quat ahead{0.0f, 0.0f, 0.0f, 1.0f};
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, 5}));
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, ahead, {2, 0, 3}));
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, 6}));   // too far
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 0, -3}));  // behind it
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {3, 0, 0}));   // at its side
+    CHECK_FALSE(CoopObjects::InScreamReach({0, 0, 0}, ahead, {0, 4, 2}));   // a floor up
+    const float h = std::sqrt(0.5f);  // turned 90 degrees about y: faces +x
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, proto::Quat{0.0f, h, 0.0f, h}, {3, 0, 0}));
+    CHECK(CoopObjects::InScreamReach({0, 0, 0}, std::nullopt, {-3, 0, 0}));  // no rotation: the distance only
+
+    std::array<std::uint32_t, proto::kStrikeKindWords> kind{};
+    kind[0] = 0x00110003;
+    kind[10] = 0x42;
+    const auto redead = [](std::uint64_t a, const std::string& anim) {
+        Seen s = Enemy(a, 0x11, 8, 0.0f, "Enemy_ReDead");
+        s.animation = proto::Animation{anim, 0.0f, 1.0f};
+        return s;
+    };
+
+    // The owner: its scream froze our Link: its next sample carries that hit's kind, at once.
+    Sync owner;
+    Tick(owner, 0, {redead(0x200, "Wait")});
+    const proto::ObjectId oid = *owner.IdOf(0x200);
+    Own(owner, oid, 1);
+    Tick(owner, 10 * kMs, {redead(0x200, "Shout")});
+    owner.NoteOurLinkHit(0x200, kind, 0);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 20 * kMs, {redead(0x200, "Shout")}));
+    REQUIRE_FALSE(samples.empty());
+    REQUIRE(samples.back().state.strike);
+    CHECK(samples.back().state.strike->seq == 1);
+    CHECK(samples.back().state.strike->kind == kind);
+    // Its bite is not shared (the other Links are not held by it).
+    Sync biter;
+    Tick(biter, 0, {redead(0x210, "Wait")});
+    Own(biter, *biter.IdOf(0x210), 1);
+    Tick(biter, 10 * kMs, {redead(0x210, "Attack_Loop")});
+    biter.NoteOurLinkHit(0x210, kind, 2);
+    for (const auto& s : All<proto::ObjectSample>(Tick(biter, 10 * kMs + Sync::kSampleEveryUs, {redead(0x210, "Attack_Loop")}))) {
+        CHECK_FALSE(s.state.strike);
+    }
+    // A copy's hit on our Link is not ours to share (its owner's game shares its own).
+    Sync copy_of;
+    Tick(copy_of, 0, {redead(0x220, "Wait")});
+    Own(copy_of, *copy_of.IdOf(0x220), 2);
+    copy_of.NoteOurLinkHit(0x220, kind, 0);
+    for (const auto& s : All<proto::ObjectSample>(Tick(copy_of, 10 * kMs, {redead(0x220, "Shout")}))) {
+        CHECK_FALSE(s.state.strike);
+    }
+
+    // Another game's copy: our Link in its reach takes the hit, once per seq; out of its reach, not.
+    const auto copy_game = [&](const proto::Vec3& link) {
+        Sync copy;
+        Tick(copy, 0, {redead(0x300, "Wait")});
+        const proto::ObjectId cid = *copy.IdOf(0x300);
+        Own(copy, cid, 2, 3);
+        copy.SetPlayer(link);
+        proto::ObjectSample s{2, cid, 3, {}};
+        s.state.time = {15 * kMs, 1};
+        s.state.position = proto::Vec3{0.0f, 0.0f, 0.0f};
+        s.state.rotation = proto::Quat{0.0f, 0.0f, 0.0f, 1.0f};
+        s.state.strike = proto::ObjectStrike{1, kind};
+        copy.Receive(s);
+        Tick(copy, 20 * kMs, {redead(0x300, "Shout")});
+        auto strikes = copy.TakeLinkStrikes();
+        s.state.time = {25 * kMs, 1};
+        copy.Receive(s);  // the same scream again (its samples carry it a while): not twice
+        Tick(copy, 30 * kMs, {redead(0x300, "Shout")});
+        CHECK(copy.TakeLinkStrikes().empty());
+        return strikes;
+    };
+    const auto near = copy_game({0.0f, 0.0f, 3.0f});
+    REQUIRE(near.size() == 1);
+    CHECK(near[0].address == 0x300);
+    CHECK(near[0].kind == kind);
+    CHECK(near[0].at == proto::Vec3{0.0f, 0.0f, 3.0f});
+    CHECK(copy_game({0.0f, 0.0f, 9.0f}).empty());
+    CHECK(copy_game({0.0f, 0.0f, -3.0f}).empty());
 }

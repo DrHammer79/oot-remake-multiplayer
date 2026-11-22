@@ -154,14 +154,19 @@ no other actor reads its state only at load (the turning floor's fix fits nowher
 room under a player (the hallway block fits nowhere else); the water level stays a change for everyone.
 
 Still to design (need a game run first):
-- Redead and Gibdo: the scream freezes only the owner's Link; every player in its range should freeze in their own
-  game. The freeze is the Redead's own (`Enemy_ReDead_Shout`, `ParalysisEnableDistMin/Max`, `ParalysisEnableAngleDiff`
-  and their `InTown` values). Planned: if the freeze reaches the owner's Link as a hit (its kind words), each game
-  in range gives its own Link that hit (`HurtOurLinkNative`, as PvP does). Probe (debug walk, `coop: scream:`
-  lines: every Redead/Gibdo animation change and every hit our Link takes with its kind words): run `st-redead`
-  (Graveyard_Adult, both players 4 m from the three Redeads at 113 97 9) saw no scream in 50 s: they stayed in
-  `Wait`/`Sit`. What starts the scream (time of day, the player moving or looking) is still to find. Not for this
-  release.
+- Redead and Gibdo (row 230, enemies-01110): the scream froze only the owner's Link. Read from the romfs: the
+  scream is the Redead's own sensor attack (`Redead.action.sleepparalysis`: `ExecuteSensorHitSetupAttack`, AS node
+  `Shout`/`CryStanding`) on its AI's target, which is only its own game's Link; the player takes it as a hit and
+  runs its own `SleepParalysis` reaction (Player ConditionParam: 210 frames, 120 invincible). Its reach is the
+  Redead's RedeadParam: `ParalysisEnableDistMax` 5.5 m, `ParalysisEnableAngleDiff` 45 degrees (the same in town;
+  the Gibdo's param has the Redead's as its parent). Now: the owner's game reads each new hit on its own Link (its
+  Life's last hit id) with its attacker; a hit from its own Redead/Gibdo while that one plays the scream (or one
+  that took no life outside the bite's `Attack_*`) goes in that enemy's samples as object component 22 `strike`
+  (its kind words). Each other game whose Link stands in that reach of its copy gives its own Link that hit with
+  no life (`HurtOurLinkNative`, as PvP's no-life kinds). Log lines `coop: objects: scream: ...` on both sides.
+  The bite is not shared (the other Links are not held). Unit tests only; to check in a game: B within 5 m in
+  front of a Redead A owns, A walks up until it screams: both Links freeze. (Geno's probe saw no scream in 50 s at
+  4 m: the scream needs the Redead to have noticed its target and face it within 45 degrees.)
 - Meg (Forest Temple): her decoys (`Enemy_MiddleBoss_Poe_Meg_Dummy`, no BSA, MaxLife 1, own AI) are made anew
   each cycle and get ids by order (`SceneSpawnId`), so three made in one frame can match differently between games;
   each game also rolls its own layout at Appear, and a copy's decoy AI fights the Mover. Likely cause: per-game

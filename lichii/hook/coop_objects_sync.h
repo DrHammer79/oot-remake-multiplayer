@@ -397,6 +397,24 @@ inline constexpr float kSplitReachM = 30.0f;  // a brood's reach (its GroupPart'
 std::string_view MinionMaker(std::string_view name);
 inline constexpr float kMinionReachM = 40.0f;
 
+// Row 230 (Geno's survey): a Redead's or Gibdo's scream freezes only its owner's Link. The scream is the game's own
+// sensor attack (Redead.action.sleepparalysis: ExecuteSensorHitSetupAttack) on the AI's target, and an AI targets
+// only its own game's Link, never a puppet. So the owner's game shares the hit its Link took (ObjectStrike, its
+// kind words) and every other game whose own Link stands in the scream's reach takes that hit (HurtOurLinkNative):
+// the player's own SleepParalysis reaction (Player ConditionParam, 210 frames), as in a game of one.
+// The actors with RedeadParam (Enemy_ReDead*, Enemy_Gibdo*, never their _Dictionary entries).
+bool IsScreamer(std::string_view name);
+// A hit our Link took from a screamer is its scream (not its bite) when it plays the scream's AS node (Shout,
+// CryStanding), or took no life while it plays none of the bite's (Attack_*).
+bool IsScream(std::string_view animation, std::int32_t took);
+// RedeadParam ParalysisEnableDistMax 5.5 m and ParalysisEnableAngleDiff 45 degrees (the same in town; the Gibdo's
+// are the Redead's): our Link within that reach of the enemy's place and front (no rotation: the distance only).
+inline constexpr float kScreamReachM = 5.5f;
+inline constexpr float kScreamHighM = 2.5f;  // (its DisableLookIKHeight: one floor)
+inline constexpr float kScreamAngleDeg = 45.0f;
+bool InScreamReach(const coop::protocol::Vec3& enemy, const std::optional<coop::protocol::Quat>& facing,
+                   const coop::protocol::Vec3& link);
+
 // A placed actor that may come into being in one game only, after the scene
 // loaded: the Gold Skulltula a player shakes out of a tree. Its owner names
 // it with OBJECT_SPAWN of its placed id; a game without that placement makes
@@ -867,6 +885,23 @@ public:
     // unloaded.
     void SetPlayer(std::optional<coop::protocol::Vec3> player) { player_ = player; }
 
+    // Row 230. Present thread, before Tick: our own Link took a new hit (its Life's last hit id moved) from the actor
+    // at `attacker`, with these kind words (the hit record's +0x250 words) and `took` quarters. The next Tick shares
+    // it when that actor is a screamer we own and the hit is its scream (IsScream).
+    void NoteOurLinkHit(std::uint64_t attacker, const std::array<std::uint32_t, coop::protocol::kStrikeKindWords>& kind,
+                        std::int32_t took) {
+        link_hit_ = LinkHit{attacker, kind, took};
+    }
+    // Row 230. Present thread, after Tick: the screams of other games' screamers that reach our Link (each once):
+    // the hook gives our Link that hit (CoopObjects::HurtOurLinkNative, no life).
+    struct LinkStrike {
+        std::uint64_t address = 0;  // our copy of the screamer
+        coop::protocol::Vec3 from{};  // its place
+        coop::protocol::Vec3 at{};    // our Link's
+        std::array<std::uint32_t, coop::protocol::kStrikeKindWords> kind{};
+    };
+    std::vector<LinkStrike> TakeLinkStrikes() { return std::exchange(strikes_, {}); }
+
     // Issue 200 (npc-anim). Present thread, before Tick: whether our Link is
     // in an event (a cutscene or a talk, PlayerReading::event_running). While
     // it is, every townsperson (Npc_, shared) within kEventNpcM of our Link
@@ -1279,6 +1314,11 @@ private:
         std::optional<coop::protocol::ObjectHit> hit_out;
         std::uint64_t hit_show_until = 0;
         std::uint32_t hit_seq = 0;
+        // Row 230: its scream froze our Link (ObjectStrike), in its samples until strike_show_until.
+        std::optional<coop::protocol::ObjectStrike> strike_out;
+        std::uint64_t strike_show_until = 0;
+        std::uint32_t strike_seq = 0;
+        std::uint32_t strike_seq_in = 0;  // copy side: the owner's newest scream taken here
         // Copy side.
         std::int32_t hit_sum = 0;
         std::uint64_t test_own_hit_until = 0;  // TestOwnHit
@@ -1542,6 +1582,13 @@ private:
     std::string scene_;
     std::uint64_t scene_since_ = 0;  // server time of the scene's first walk
     std::optional<coop::protocol::Vec3> player_;
+    struct LinkHit {  // row 230 (NoteOurLinkHit)
+        std::uint64_t attacker = 0;
+        std::array<std::uint32_t, coop::protocol::kStrikeKindWords> kind{};
+        std::int32_t took = 0;
+    };
+    std::optional<LinkHit> link_hit_;
+    std::vector<LinkStrike> strikes_;
     bool in_event_ = false;  // issue 200: SetEvent
     std::uint64_t event_end_ = 0;  // when the last event here ended (SetEvent)
     bool event_ours_ = false;  // G1: our Link is in it (SetEvent's ours)
