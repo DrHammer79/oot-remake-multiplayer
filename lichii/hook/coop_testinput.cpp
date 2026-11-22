@@ -443,6 +443,17 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
                 script.steps.push_back(std::move(bottle));
             }
             step.mark = std::string(kBottleItems[std::size(kBottleItems) - 1]);
+        } else if (cmd == "DUMP") {
+            // dump TAG: this game's shared dungeon and story flags (their values now) written as JSON next to the
+            // commands file (<file>.dump-TAG.json), for tools/autotest/desync_check.py. Test only (play-test kit).
+            const auto tag_char = [](char c) {
+                return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' || c == '_';
+            };
+            if (w.size() != 2 || w[1].empty() || !std::all_of(w[1].begin(), w[1].end(), tag_char)) {
+                return fail("want: dump TAG (letters, digits, - and _)");
+            }
+            step.kind = Kind::dump;
+            step.mark = std::string(w[1]);
         } else if (cmd == "SETENUM") {
             // setenum NAME VALUE: this game's Enum flag NAME (a GameDataList name,
             // or 0x and its hash: a Threads of Time quest's name is not in the
@@ -595,7 +606,7 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
         if (s.kind == Kind::warp || s.kind == Kind::give || s.kind == Kind::wear ||
             s.kind == Kind::assign || s.kind == Kind::dress || s.kind == Kind::chat || s.kind == Kind::kill || s.kind == Kind::drop || s.kind == Kind::hurt ||
             s.kind == Kind::hit || s.kind == Kind::stun ||
-            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu) {
+            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump) {
             requests_.push_back(Request{s.kind, s.mark, s.start});
             ++index_;
             continue;
@@ -769,8 +780,10 @@ std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, 
 #include "coop_boss.h"
 #include "coop_camera.h"
 #include "coop_flags.h"
+#include "coop_dungeon.h"
 #include "coop_hook.h"
 #include "coop_objects.h"
+#include "coop_story.h"
 #include "core/arm/debug.h"
 #include "core/core.h"
 #include "core/hle/kernel/k_process.h"
@@ -1025,6 +1038,44 @@ void SetFlag(Core::System& system, const std::string& name, int value) {
 // that name, through the game's own queue (issue 193: a Threads of Time
 // quest's step). Test only. The value it had is logged too (as a hash), and
 // the value "?" only reads it (issue 91: which unnamed Enum holds a worn mask).
+// dump TAG (play-test kit): every shared dungeon and story flag's value in this game, as JSON next to the commands
+// file, so tools/autotest/desync_check.py can compare two games' checkpoints of one tag.
+void Dump(Core::System& system, const std::string& tag) {
+    const std::filesystem::path commands = EnvPath();
+    if (commands.empty()) {
+        LOG_INFO(Core, "coop: test dump {}: no commands file to write next to", tag);
+        return;
+    }
+    CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+    coop::host::GameFlags flags(memory);
+    std::ostringstream out;
+    out << "{\"tag\": \"" << tag << "\", \"flags\": {";
+    bool first = true;
+    std::size_t count = 0;
+    const auto put = [&](const char* name, std::optional<std::int32_t> value) {
+        if (!value) return;
+        out << (first ? "" : ", ") << "\"" << name << "\": " << *value;
+        first = false;
+        ++count;
+    };
+    const auto as_int = [](std::optional<bool> b) -> std::optional<std::int32_t> {
+        if (!b) return std::nullopt;
+        return *b ? 1 : 0;
+    };
+    for (const auto& f : CoopDungeon::Flags()) {
+        put(f.name, f.is_int ? flags.get_int(f.hash) : as_int(flags.get_bool(f.hash)));
+    }
+    for (const auto& f : CoopStory::Flags()) {
+        put(f.name, as_int(flags.get_bool(f.hash)));
+    }
+    out << "}}\n";
+    std::filesystem::path path = commands;
+    path += ".dump-" + tag + ".json";
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file << out.str();
+    LOG_INFO(Core, "coop: test dump {}: {} flags written{}", tag, count, file ? "" : " (NOT written)");
+}
+
 void SetEnum(Core::System& system, const std::string& name, const std::string& value) {
     CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
     std::uint32_t hash = 0;
@@ -1262,6 +1313,8 @@ void OnFrame(Core::System& system) {
             SetFlag(system, request.name, std::stoi(request.start));
         } else if (request.kind == Kind::setenum) {
             SetEnum(system, request.name, request.start);
+        } else if (request.kind == Kind::dump) {
+            Dump(system, request.name);
         } else if (request.kind == Kind::place && !request.name.empty()) {
             const auto on = CoopObjects::TestPlatformPlace(request.name);
             const bool ok = on && CoopBoss::MoveLink(system, g_state.main,
