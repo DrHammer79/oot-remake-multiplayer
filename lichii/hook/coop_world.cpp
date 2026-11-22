@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_world.h"
+#include "coop_pickups.h"
 #include "coop_show_delay.h"
 
 #include <algorithm>
@@ -902,6 +903,15 @@ void WorldSync::MakeBreak(Object& o, Break& b, std::uint64_t now_us, Out& out) {
         o.remove = true;
         out.notes.push_back(
             Line("world: %016llx %s taken by another player: deleted%s", o.hash, o.name, ""));
+        return;
+    }
+    if (CoopPickups::IsOneTimeHolder(o.hash)) {
+        // Row 219: a seed's one-time pot, crate or beehive gives its item once (the breaker got it); a life of 0
+        // here would break ours natively and drop the item a second time. Ours goes at once, as a taken key.
+        o.remove = true;
+        out.notes.push_back(
+            Line("world: %016llx %s broken by another player: a one-time holder, deleted%s", o.hash, o.name,
+                 " (its item was given there)"));
         return;
     }
     if (o.faller) {

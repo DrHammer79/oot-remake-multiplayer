@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "coop_i18n.h"
 #include "coop_problem_ask.h"
 #include "coop_title_native.h"
 
@@ -64,6 +65,21 @@ TEST_CASE("problem ask: the words fit the title's buttons") {
     }
 }
 
+TEST_CASE("problem ask: the words fit the title's buttons in Chinese too") {
+    for (const char* code : {"zh-Hans", "zh-Hant"}) {
+        const CoopI18n::Lang* lang = nullptr;
+        for (int i = 0; i < CoopI18n::kLangCount; ++i) {
+            if (std::string(CoopI18n::kLangs[i].code) == code) lang = &CoopI18n::kLangs[i];
+        }
+        REQUIRE(lang != nullptr);
+        for (const char* w : kWords) {
+            const std::string text = CoopI18n::Tr(lang, w);
+            CHECK_MESSAGE(text != w, w);   // (each has its line)
+            CHECK(text.size() <= CoopTitleNative::kTextBytes);
+        }
+    }
+}
+
 TEST_CASE("problem ask: the game folder's files") {
     namespace fs = std::filesystem;
     const fs::path dir = fs::temp_directory_path() /
@@ -78,6 +94,15 @@ TEST_CASE("problem ask: the game folder's files") {
     CHECK(WriteAsked(dir, AskedAfter(names)));
     CHECK(ReadAsked(dir) == "crash-20261121T110000Z.txt\n");
     CHECK_FALSE(Due(PendingNames(dir), ReadAsked(dir), kNow));
+    // A crash the kit already sent (bug-reports/coop-sent.txt, CRLF or LF) is not asked about; another one still is.
+    CHECK(ReadSent(dir).empty());
+    std::ofstream(dir / "bug-reports" / "pending" / "crash-20261121T113000Z-4242-1.txt") << "run_id: y\n";
+    CHECK(Due(PendingNames(dir), ReadAsked(dir) + "\n" + ReadSent(dir), kNow) ==
+          std::optional<std::string>("crash-20261121T113000Z-4242-1.txt"));
+    std::ofstream(dir / "bug-reports" / "coop-sent.txt", std::ios::binary) << "crash-20261121T113000Z-4242-1.txt\r\n";
+    CHECK(ReadSent(dir) == "crash-20261121T113000Z-4242-1.txt\r\n");
+    CHECK_FALSE(Due(PendingNames(dir), ReadAsked(dir) + "\n" + ReadSent(dir), kNow));
+    CHECK(Due(PendingNames(dir), ReadSent(dir), kNow) == std::optional<std::string>("crash-20261121T110000Z.txt"));
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

@@ -219,6 +219,26 @@ TEST_CASE("char colours: the colours are the mod's, the iris shift is held to a 
     CHECK(EyeColour(8, 0) == std::nullopt);
 }
 
+TEST_CASE("char colours: the eyes' and hair's colours go on a Link model only (review: a character got your eyes)") {
+    using CoopCharColours::LinkColours;
+    using CoopCharColours::LinkOnly;
+    CHECK(LinkOnly(true, 0xFF123456u, 0x00ABCDEFu) == LinkColours{0x123456u, 0xABCDEFu});
+    CHECK(LinkOnly(true, std::nullopt, 0xABCDEFu) == LinkColours{std::nullopt, 0xABCDEFu});
+    CHECK(LinkOnly(false, 0x123456u, 0xABCDEFu) == LinkColours{});   // (a character: neither)
+    CHECK(LinkOnly(false, 0x123456u, std::nullopt) == LinkColours{});
+}
+
+TEST_CASE("char colours: the pause menu's model of your Link is the game's Pouch twin of the field player (lane: eyes)") {
+    using CoopCharColours::MenuModelOfPlayer;
+    CHECK(MenuModelOfPlayer("PouchPlayer_Child", "Player_Child"));
+    CHECK(MenuModelOfPlayer("PouchPlayer_Adult", "Player_Adult"));
+    CHECK_FALSE(MenuModelOfPlayer("PouchPlayer_Adult", "Player_Child"));   // (the other age: not this Link)
+    CHECK_FALSE(MenuModelOfPlayer("Player_Child", "Player_Child"));        // (the field actor's own name: not the menu's)
+    CHECK_FALSE(MenuModelOfPlayer("Tapestry_ChallengeMenu", "Player_Child"));
+    CHECK_FALSE(MenuModelOfPlayer("Pouch", ""));                            // (no field player: nothing)
+    CHECK_FALSE(MenuModelOfPlayer("", ""));
+}
+
 TEST_CASE("char colours: a puppet gets its player's hair, eyes and clothes through the model's own calls") {
     FakeGame f(Character());
     State s = StateFor();

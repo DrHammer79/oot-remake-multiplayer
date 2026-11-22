@@ -22,6 +22,10 @@
 #include "coop_look.h"
 #include "coop_look_menu.h"
 
+namespace CoopI18n {
+struct Lang;
+}
+
 namespace CoopSnailCustom {
 
 inline constexpr int kOptions = 6, kRows = 3;   // his layout: two columns of three
@@ -35,6 +39,12 @@ struct Texts {
     std::array<std::string, kOptions> labels{}, values{};
     bool operator==(const Texts&) const = default;
 };
+// What a pane of his screen is given for a text: a text pane's text is never empty (the game's set-message call
+// takes no empty one, as the pause tab's rows), so a place with nothing (an option past a character's last row, a
+// character with no options) shows a space.
+inline std::string PaneText(const std::string& s) { return s.empty() ? std::string(" ") : s; }
+// A value with its first letter a capital, as his screen's own values ("red" -> "Red"); see the .cpp.
+std::string Capitalised(std::string s);
 
 // Switch pad bits (nn::hid's), as the pause tab has them.
 inline constexpr std::uint64_t kA = 1ull << 0, kB = 1ull << 1, kY = 1ull << 3, kZL = 1ull << 8, kZR = 1ull << 9,
@@ -51,7 +61,9 @@ public:
     // One pad read's new presses while his screen shows: the presses his screen still gets (the d-pad and the stick;
     // B and - unless the mixer is open); the rest are co-op's.
     std::uint64_t Pad(std::uint64_t down);
+    // His screen's texts in the game's language (CoopI18n::Current); Shown(lang) in that one (nullptr: English).
     Texts Shown() const;
+    Texts Shown(const CoopI18n::Lang* lang) const;
     int Focus() const { return focus_; }
     bool Editing() const { return page_.editing(); }
     // The look after a change, once.

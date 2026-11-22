@@ -976,6 +976,16 @@ inline constexpr std::uint8_t targeting = 1u << 2;  // targeting our player
 // pre-battle phase (Gohma on the ceiling), so it must not own the boss; its AI
 // would hold every game's boss there.
 inline constexpr std::uint8_t unready = 1u << 3;
+// Boss turns (boss-turns-older-0119): this game reads its bosses' attacks (object_state::attack_read in its
+// samples when it owns one) and takes turns. An older build never sets it: the server gives it no turn, as a
+// boss it owned would never send an attack end and keep its one owner for the rest of the fight.
+inline constexpr std::uint8_t takes_turns = 1u << 4;
+// Row 212 (gerudo-212): this game's own level logic made this encounter (not a copy of another game's) and answers
+// its death with its own defeat event: Gerudo Fortress's cell guards (GerudoFortress_Common_Level_CarpenterSet_0N:
+// SageOfSpirit_RescueCarpenter, Player_Event EventPlayerWarpToTargetActor, GerudoThiefDropKey). The server keeps
+// such an object with a game that sets this bit (OBJECT_OWNER never moves it to one that does not), so the death,
+// the key and the carpenter freed run in a game whose logic made the fight. An older server ignores the bit.
+inline constexpr std::uint8_t own_logic = 1u << 5;
 }  // namespace object_presence
 
 struct ObjectPresence {
@@ -1082,6 +1092,10 @@ enum class DamageCause : std::uint8_t {
   // The hitter's copy of an enemy whose life cannot be read died in its game (its own death
   // animation as it left): no life drop to send, so the kill itself goes (amount 1).
   killed = 13,
+  // Row 177 (docs/objects.md, "Shots sent back"): the sender's Link sent the owner's shot (a made projectile,
+  // an enemy's light ball, rock or nut) back on its copy, by the hit the game sends that shot back with; the
+  // owner's game sends its real one back. Amount 0. Older modules take it as a hit of 0 on an unknown object.
+  reflected = 14,
 };
 
 // DAMAGE: life lost on a copy, for the owner to take off. Amount 0 or more.

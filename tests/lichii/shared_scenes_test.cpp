@@ -345,24 +345,28 @@ TEST_CASE("intro-ocarina: Saria's gift is never started in a game still in the o
     CHECK_FALSE(CoopSharedScenes::GateHolds("Dm_Kokiri_0150", flag));
     CHECK(CoopSharedScenes::GateHolds("Dm_Kokiri_0030", flag));  // no gate
 
-    // The opening: another player's (wrongly found) Saria's gift is skipped, not waited for.
+    // Another player's Saria's gift is never joined (rows 195/204: a part of a gift scene), not waited for.
     Joiner j;
     j.Started(1, "Dm_Kokiri_0150", "KokiriForest", kBridge, 100);
     CHECK_FALSE(j.Next(Free(120), kNotPlayed, flag));
     CHECK(j.Waiting() == 0);
-    CHECK(j.TakeNotes().back().find("our story is not there yet") != std::string::npos);
+    CHECK(j.TakeNotes().back().find("a part of a gift scene") != std::string::npos);
     // Unreadable flags hold nothing either.
     deku_tree.reset();
     blocker.reset();
     CHECK_FALSE(CoopSharedScenes::GateHolds("Dm_Kokiri_0150", flag));
 
-    // After the Deku Tree's last scene: played here too (a new visit of the forest).
+    // After the Deku Tree's last scene too (rows 195/204): joined alone, the timeline spent the gift with no
+    // ocarina; each game plays its own bridge scene.
     deku_tree = true;
     Joiner after;
     after.Started(1, "Dm_Kokiri_0150", "KokiriForest", kBridge, 100);
-    const auto got = after.Next(Free(120), kNotPlayed, flag);
-    REQUIRE(got);
-    CHECK(*got == "Dm_Kokiri_0150");
+    CHECK_FALSE(after.Next(Free(120), kNotPlayed, flag));
+    CHECK(after.Waiting() == 0);
+    CHECK(after.TakeNotes().back().find("a part of a gift scene") != std::string::npos);
+    Joiner gift;
+    gift.Started(1, "Dm_Kokiri_0155", "KokiriForest", kBridge, 100);
+    CHECK_FALSE(gift.Next(Free(120), kNotPlayed, flag));
     // Or the exit blocker gone (an open forest): it holds as well.
     deku_tree = false;
     blocker = false;
@@ -407,12 +411,15 @@ TEST_CASE("a story cutscene asked by its event setting is sent and joined by tha
         CHECK_MESSAGE(!IsStory(n), std::string(n));
     }
     // A story name whose flow changes what is the player's own (Talon woken: the Cucco taken from the pouch) is
-    // neither sent nor joined; a gift of an item co-op shares is (Zelda's letter, Saria's ocarina).
+    // neither sent nor joined; a gift of an item co-op shares is (Zelda's letter), except the parts of Saria's
+    // bridge scene, whose gift only its setting gives (rows 195/204).
     CHECK(CoopSharedScenes::IsShared("Dm_HrlCastle_0020"));
     CHECK_FALSE(Askable("Dm_HrlCastle_0020"));
     CHECK(CoopSharedScenes::NotShared("Dm_HrlCastle_0020") == "it changes the player's own things");
     CHECK(Askable("Dm_HrlCastle_0050"));
-    CHECK(Askable("Dm_Kokiri_0155"));
+    CHECK_FALSE(Askable("Dm_Kokiri_0155"));
+    CHECK_FALSE(Askable("Dm_Kokiri_0150"));
+    CHECK(CoopSharedScenes::IsShared("Dm_Kokiri_0150"));  // still a story name: its leftovers are recognised
     CHECK(CoopSharedScenes::NotShared("Meet_GreatFairy") == "the game has no event setting of that name");
     CHECK(CoopSharedScenes::NotShared("Dm_Kokiri_0070").empty());
     // A Great Fairy's fountain: its flow has the paid heal (Dm_FairyFountain_Din:Pay, 500 rupees), read once the
@@ -439,7 +446,8 @@ TEST_CASE("a story cutscene asked by its event setting is sent and joined by tha
         CHECK_MESSAGE(!Askable(n), std::string(n));
     }
     CHECK(Askable(kEntry));
-    CHECK(Askable("Dm_Kokiri_0150"));  // a movie only (no flowchart to read): shared, story order gated
+    // A movie only (no flowchart to read), and a part of Saria's gift scene: never joined (rows 195/204).
+    CHECK_FALSE(Askable("Dm_Kokiri_0150"));
     for (const auto& r : CoopSharedScenes::StorySettings()) {
         CHECK_MESSAGE(CoopSharedScenes::IsShared(r.flow), std::string(r.flow));
         CHECK(Askable(r.request));
@@ -537,6 +545,8 @@ TEST_CASE("no story cutscene shared in 0.11.3 stops being shared unless the game
                                  // reader's misread case reached an egg taken that its real cases never do)
         // a room's own state turned (kRoomStory): the twisted corridor (row 173)
         "Dm_ForestTemple_0005", "Dm_ForestTemple_0007",
+        // the parts of Saria's bridge scene, whose gift only its setting gives (kGiftParts, rows 195/204)
+        "Dm_Kokiri_0150", "Dm_Kokiri_0155",
         // the Great Fairies' paid heal (Dm_FairyFountain_Din:Pay, 500 rupees)
         "Dm_FairyFountain_Courage", "Dm_FairyFountain_Din", "Dm_FairyFountain_Frore", "Dm_FairyFountain_Nayru",
         "Dm_FairyFountain_Power", "Dm_FairyFountain_Wisdom",

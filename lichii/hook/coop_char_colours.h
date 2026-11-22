@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -141,6 +142,30 @@ Result Dress(const Game& game, State& state, const Options& options, bool put_ba
 // - Otherwise a puppet is dressed when its options change or its actor is new, and again every kAgainMs while it
 //   has any (a model not loaded at the first try), with put_back once it was ever dressed.
 // - A puppet the mod's own released routine dresses (Director::Dress, verified) is left to it.
+// The eyes' and hair's colours of a player's look (CoopLook's parts 18 and 19) go on a Link model only: Customize offers
+// them on Link alone, and a character's model has its own (review 0.11.9: a character picked, or a picker of others,
+// got your eyes). Every site that dresses a model takes them through this: the puppets, your own Link, the menu's.
+struct LinkColours {
+    std::optional<std::uint32_t> eyes, hair;
+    bool operator==(const LinkColours&) const = default;
+};
+inline LinkColours LinkOnly(bool link_model, std::optional<std::uint32_t> eyes, std::optional<std::uint32_t> hair) {
+    if (!link_model) return {};
+    if (eyes) *eyes &= 0xFFFFFFu;
+    if (hair) *hair &= 0xFFFFFFu;
+    return {eyes, hair};
+}
+
+// The pause menu's model of your Link: the game's menu shows the player as its own actor, named "Pouch" + the field
+// player's actor name (PouchPlayer_Child for Player_Child, PouchPlayer_Adult for Player_Adult: RSDB ActorInfo's
+// PouchPlayer rows; lane 0.11.9: menu "0: PouchPlayer_Child", field "Player_Child"). A model of any other name (a
+// picker's character, the menu's tapestry) is not your Link.
+inline bool MenuModelOfPlayer(std::string_view menu_name, std::string_view player_name) {
+    constexpr std::string_view kMenu = "Pouch";
+    if (player_name.empty() || menu_name.size() != kMenu.size() + player_name.size()) return false;
+    return menu_name.substr(0, kMenu.size()) == kMenu && menu_name.substr(kMenu.size()) == player_name;
+}
+
 struct Target {
     std::uint64_t actor = 0;
     std::uint64_t cell = 0;

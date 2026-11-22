@@ -122,7 +122,19 @@ std::vector<std::string_view> RequestNames() {
     return out;
 }
 
+namespace {
+// Rows 195/204 (docs/items.md "Saria's gift spent"): the parts of Saria's bridge scene. The setting
+// KokiriForest_ArriveLostWood plays Dm_Kokiri_0150 (timeline, no item) and then Dm_Kokiri_0155 (the Fairy Ocarina's
+// only get). A game asked for 0150 alone played the timeline and spent the gift there without it (the bridge zone and
+// Saria are deleted once HavePlayedEvent.Dm_Kokiri_0150 is 1); asked for 0155 alone it would play the get with no
+// Saria. Each game plays its own bridge scene; its played flags wait for the shared ocarina (CoopStory::GiftHolds).
+constexpr std::string_view kGiftParts[] = {"Dm_Kokiri_0150", "Dm_Kokiri_0155"};
+}  // namespace
+
 std::string_view NotShared(std::string_view name) {
+    if (std::find(std::begin(kGiftParts), std::end(kGiftParts), name) != std::end(kGiftParts)) {
+        return "a part of a gift scene (its setting gives the gift): joined alone it spends the gift here without it";
+    }
     if (std::find(std::begin(kNoSetting), std::end(kNoSetting), name) != std::end(kNoSetting)) {
         return "the game has no event setting of that name";
     }

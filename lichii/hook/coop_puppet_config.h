@@ -4,7 +4,9 @@
 // (hookshot/src/coop_hookshot.cpp) call Configure() when the puppets start.
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -42,6 +44,7 @@ CoopPuppet::PlannerSettings Settings(const EnvFn& env, const std::function<bool(
 void Configure(bool perceived_safe = true);
 // A coop_puppet.json is under LoadDir/<title id> (the puppet pack is installed).
 bool HasPack();
+std::map<std::uint16_t, std::uint16_t> CharacterFiles();
 #endif
 
 }  // namespace CoopPuppetConfig

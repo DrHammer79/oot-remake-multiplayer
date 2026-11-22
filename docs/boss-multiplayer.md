@@ -15,13 +15,21 @@ the plan; [dungeons-boss.md](dungeons-boss.md) says how the sync works today.
 - **Never stuck on a player who cannot fight** (2026-11-21, every enemy): a boss, or any enemy in its fight, leaves
   an owner who goes down or dies at once and one paused after 2 s (`fight_owner_dead_us`, `fight_owner_paused_us`;
   out of a fight the old 10 s and 6 s), for a player up and playing. With nobody up it stays where it is.
-- **Every enemy takes turns** (`enemy_turns`): the same rule as a boss's, between its attacks, among the players
-  within 12 m of it (`enemy_turn_m`: the ones fighting it, not one across the field). The server's `enemies:` line
-  counts them as `enemy turns`.
+- **Plain enemies can take turns too, OFF by default** (`enemy_turns`): the same rule as a boss's, between its
+  attacks, among the players within 12 m of it (`enemy_turn_m`). It stays off: a plain enemy's AI chases only its
+  owner's Link, so every turn walks it over to the other player and back (the shuttle of report 138, docs/objects.md
+  "Sticky target"), where solo a mob keeps the Link it fights; the chase, near and sticky rules already give it to
+  the player fighting it. On, the server's `enemies:` line counts them as `enemy turns`. (Also: only a boss or part
+  is listed with `object_presence::takes_turns` by the hook, so plain enemies would need that flag first.)
+- **A stun hands the boss to the stunner, also right after a turn:** a stun in another player's game (Gohma's eye,
+  a ball sent back into a copy Phantom Ganon or Ganondorf) asks the boss over at most every 8 s
+  (`boss_hitter_cooldown_us`), counted from the last change that was no turn (`Object::hitter_changed_at`): with a
+  turn at every attack, a count from every change refused nearly every stun.
 - The difficulty scales by the number of players (2 players: boss life 200%, damage 120%).
 
 What that does not give yet: **an attack aimed at more than one player at once**. The game's AI picks one target,
-and a shot or a grab is real only in the owner's game (a copy's own shots are refused, the owner's come as copies).
+and a shot or a grab is real only in the owner's game (a copy's own shots are refused, the owner's come as copies),
+except the split shots below.
 
 ## Tools we have or can build
 
@@ -29,7 +37,7 @@ and a shot or a grab is real only in the owner's game (a copy's own shots are re
 |---|---|---|
 | Turns | the boss fights each player in turn, between attacks | in (proof runs) |
 | Turn length | per boss: every attack, every second attack, every N s | to build (a server table by boss) |
-| Split shot | an attack's shot made in **every** game, aimed at that game's own Link: each player gets the ball / the rock / the beam at the same moment | to build (as the eggs that hatch in every game) |
+| Split shot | an attack's shot made in **every** game, aimed at that game's own Link: each player gets the ball / the rock / the beam at the same moment | in for Phantom Ganon's bolt, shockwaves and balls and Ganondorf's `DungeonBossGanondrof_Bullet_*` (#308, `CoopEnemyShots::IsSplitShot`); the rest to build |
 | Half split | a split shot in half the games, the other half the next time (every other attack) | to build on split shot |
 | Part targets | a boss of several bodies (Bongo Bongo's hands, Twinrova's sisters, Morpha's tentacles) gives each body its own target player | to build (owner per group member) |
 | Stun for all | a stun in one game stuns the boss for everyone (the stun hand-over already moves him to the stunner) | in |
@@ -131,8 +139,8 @@ a game run (unit tests only), for players to check:
 | What | Where it went | Check in a game |
 | --- | --- | --- |
 | Never mid-attack: no enemy changes owner by a chase, the near rule or a nearer player while its owner's attack runs (a grab or hold stays on its victim), at most 8 s | server `attack_hold_max_us`, `mid_attack` | B hits a Like Like holding A: A freed, A moves after |
-| Boss-style turns for one-on-one fighters: Iron Knuckles, Poe sisters Amy/Beth/Joelle, Stalfos, Lizalfos, Dinolfos, white Wolfos, the club Moblin (40 m, a downed owner left at once); their AI stays on the plain path | `FightsAsBoss` in `GroupsOf` | "boss turns:" lines for them in the server log |
-| Packs under one owner: Lizalfos/Dinolfos, Stalfos and Wolfos of one family within 25 m are one group (root: the lowest id), so their teamwork (messages between their AIs: `IsRequestingCoop`, `IsDisableMeleeBattle`...) runs whole in one game and a turn moves the pack together; boss-style when any of them fights as a boss | `PackFamily` in `GroupsOf` | one owner for both of a pair; one attacks at a time |
+| Not applied (geno-fix-0119): boss-style turns for one-on-one fighters (Iron Knuckles, Poe sisters Amy/Beth/Joelle, Stalfos, Lizalfos, Dinolfos, white Wolfos, the club Moblin). Their AI is a plain enemy's (it chases only its owner's Link), so boss rules would pass them between players: the mob shuttle the owner settled off (enemy_turns off) | none: they are plain enemies | no "boss turns:" lines for them |
+| Packs under one owner: Lizalfos/Dinolfos, Stalfos and Wolfos of one family within 25 m are one group (root: the lowest id), so their teamwork (messages between their AIs: `IsRequestingCoop`, `IsDisableMeleeBattle`...) runs whole in one game (never the boss bit: plain enemies, no turns; geno-fix-0119) | `PackFamily` in `GroupsOf` | one owner for both of a pair; one attacks at a time |
 | Anubis keeps its target (it mirrors the player moving it) | `KeepsTarget` in `Sync::StateOf` | the mirror follows one player |
 | Ganon bound for the last blow (`InsideGanonCastle_Dungeon_BossBind0`) shared like the other stage changes | `coop_boss_scenes` entry 12 | both games' Ganon bound |
 | The Flare Dancer's fireballs split | `kSplit` | each player gets their own fire |

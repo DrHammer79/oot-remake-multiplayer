@@ -231,7 +231,7 @@ struct LifeWrite {
 
 // Shared: enemies, animals (a cucco is Animal_Cucco), townspeople (Npc_, but
 // not Navi, held equipment or invisible helpers) and the breakable world
-// objects (coop_world.h). Not the order-puzzle actors (IsOwnPuzzle).
+// objects (coop_world.h). Not the order-puzzle actors (IsOwnPuzzle) or the followers (IsOwnFollower).
 bool IsShared(std::string_view name);
 
 // A puzzle or minigame each game runs on its own (issues 149, 151): the Scrub Brothers
@@ -240,6 +240,12 @@ bool IsShared(std::string_view name);
 // solve or the prize is shared (docs/dungeon.md, docs/items.md). The pond's
 // fish are shared (IsFish).
 bool IsOwnPuzzle(std::string_view name);
+
+// Row 214: an actor whose own AI goes with the local Link (waits for it, runs ahead of it, comes to it, is
+// carried by it): the Ganon's Castle escape's Zelda (Npc_Hylia_Zelda_Adult*), child Ruto, the dogs, Epona
+// and the ranch horses. Each game runs its own, never shared, so no owner's escort is put over a game whose
+// own Link and story flags are elsewhere, and a leave, a join or an owner change mid-escort moves nothing.
+bool IsOwnFollower(std::string_view name);
 
 // Issue 151 (fishing-2, fishing-3): a fish (Animal_Fish_*). Shared like any animal, with
 // one owner game; the lure rules in Sync (SetLures, FISH_LURE) move a fish to the game
@@ -435,6 +441,25 @@ inline constexpr std::uint64_t kEncounterWaitUs = 1'500'000;
 // fights' (Get_Stone*_DefeatBoss, SageOf*_DefeatBoss, Defeat_Ganon: the boss sync's). In a dungeon nothing changes:
 // its rooms keep their own kill counters and shutters, which may count a copy's death (not checked).
 bool CopyGoesWithoutDeath(std::string_view name, bool dungeon);
+// Row 212 (the owner's 0.11.8 playtest, gerudo-212): the same root through an owner change. The server's rules (an
+// owner busy or paused, a boss turn, the hitter, the near rule) handed player 2's cell guard to player 1, whose game
+// only had a copy: "now ours", so report 200's rule (a copy goes without a death) no longer held, the copy died as
+// player 1's own and player 1's cell logic ran the defeat event, the key drop and the carpenter's rescue for a fight
+// player 2 made. An encounter whose death our level logic answers with its own defeat event, and that our logic made
+// (not a copy), is listed with object_presence::own_logic: the server never gives it to a game that only has a copy.
+// Of the romfs's defeat and rescue entries that warp the Player (above), outside the boss fights only the Gerudo
+// Fortress cells' are such an encounter: Enemy_MiddleBoss_GerudoThief_0N in GerudoFortress_* (CarpenterSet_01..04;
+// DreamWorld's GerudoThiefStage is a boss stage: the boss sync's, unchanged).
+bool OwnLogicEncounter(std::string_view name, std::string_view scene);
+// Row 212: an actor each game runs on its own in this scene. Gerudo Fortress's four carpenters
+// (Npc_Hylia_013.._016_Adult, cell N holds Npc_Hylia_01(2+N)_Adult): each cell's logic
+// (GerudoFortress_Common_Level_CarpenterSet_0N) drives its carpenter from that game's own Found_*,
+// AppearGerudoThief_*, CloseShutter_* and the rescue (Dm_Gerudo_0020 with its settings, per game since report
+// 200), so a shared one put one game's carpenter (its pose, its owner's event: 'bound by the event' in the
+// rescuer's game) over another game's carpenter at another step. The rescue's results are shared flags
+// (report 99: DestroyGerudoThief_*, the keys, Saved_*, IsAfterHelpCarpenter_*, WarpPoint0N_ClearEvent), so each
+// game's own carpenter follows them natively. Elsewhere (Gerudo Valley's tent, Kakariko) they stay shared.
+bool IsOwnInScene(std::string_view name, std::string_view scene);
 inline constexpr std::uint64_t kEncounterStaleUs = 5'000'000;
 
 // An enemy animation that plays as it dies ("Die", "Dead_Fall",
@@ -517,13 +542,9 @@ bool IsBossPart(std::string_view name);
 // A boss or one of its parts named as one (what IsBoss was before row 149): the rules every boss actor shares
 // (its life, its hits, its slots and animations, its own native boss sync entry).
 bool IsBossOrPart(std::string_view name);
-// Enemy survey: one-on-one fighters given the group's boss bit (server-side boss turns and rules) while their AI
-// stays on the plain path: Iron Knuckles, Poe sisters Amy/Beth/Joelle, Stalfos, Lizalfos, Dinolfos, white Wolfos,
-// the club Moblin.
-bool FightsAsBoss(std::string_view name);
 // Pair/pack survey: the family of enemies that fight together by messages between their AIs ("lizalfos" for
 // Lizalfos and Dinolfos, "stalfos", "wolfos"; empty: none). GroupsOf puts one family within kPackReach in one group
-// (root: the lowest id), so the pack has one owner and its teamwork runs in one game.
+// (root: the lowest id), so the pack has one owner and its teamwork runs in one game; never the boss bit (plain enemies).
 std::string_view PackFamily(std::string_view name);
 inline constexpr float kPackReach = 25.0f;
 // An enemy that keeps its target (no attack read sent, so no turns): Anubis, which mirrors its target.
@@ -998,6 +1019,9 @@ public:
     // here): listed with object_presence::unready, so the server keeps them
     // with a game whose boss is fighting.
     void SetUnready(std::vector<std::string> names) { unready_ = std::move(names); }
+    // Boss turns: our game reads its bosses' attacks and takes turns (LICHII_COOP_BOSS_TURNS on): every boss
+    // or part is listed with object_presence::takes_turns.
+    void SetTakesTurns(bool on) { takes_turns_ = on; }
     // The boss actors whose death has begun (the boss glue; player report #105). A hit such a boss's game did
     // not take (its owner's killing hit, refused outside Gohma's weak point) is given to its Life step as its
     // life after the wait, as for any other enemy: its death plays out here (CoopBossNative lets it die).
@@ -1193,7 +1217,8 @@ public:
     // Report 200: the copy at `address` (a director's copy of another player's late encounter) is to die now, and
     // it is one that never dies by its own death here (CopyGoesWithoutDeath): it goes so from now on (deleted
     // with the dead ones, never given its killing life, left out of the boss sync; its kill stays remembered for an
-    // own one of ours, report 99). True for one that goes so.
+    // own one of ours, report 99). True for one that goes so. Row 219: also a placed copy of a seed's one-time
+    // flying pot (CoopPickups::IsOneTimeHolder): its death here would drop its item a second time.
     bool GoesWithoutDeath(std::uint64_t address, std::uint64_t now_us);
     bool GoneWithoutDeath(std::uint64_t address) const;
     std::uint8_t OwnerOf(const coop::protocol::ObjectId& id) const;
@@ -1688,6 +1713,7 @@ private:
     std::set<std::uint64_t> dead_;    // copies whose owner said dead kDeadGraceUs ago
     bool wake_ = true;
     std::vector<std::string> unready_;
+    bool takes_turns_ = false;  // SetTakesTurns
     std::vector<std::string> dying_;  // SetDying
     unsigned dying_finished_ = 0;     // DyingFinished
     std::size_t hurt_taken_ = 0;   // hurts the game took as asked

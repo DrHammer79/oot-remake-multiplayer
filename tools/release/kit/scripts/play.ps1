@@ -18,6 +18,9 @@ param(
     [switch]$Hookshot
 )
 $ErrorActionPreference = 'Stop'
+# The marker the co-op module looks for: a game started without it (its own start file by hand) says in the chat to use
+# Start Squadala (player report 225). Every game this script starts inherits it.
+$env:OOT_COOP_KIT_START = '1'
 . (Join-Path $PSScriptRoot 'coop-ini.ps1')
 . (Join-Path $PSScriptRoot 'kit-paths.ps1')
 . (Join-Path $PSScriptRoot 'hosting.ps1')
@@ -186,7 +189,7 @@ if ($Hookshot) {
     function Restore-KitCharacterSelectStart {
         if (-not $csMods) { return $false }
         try { if (-not (Undo-KitCharacterSelect $kit $csMods)) { return $false } } catch { return $false }
-        Write-Host 'Character Select: the game could not be built with it, so it is taken back out for now and the game starts as it was (the next start tries again; character_select = no in coop-options.ini stops it).' -ForegroundColor Yellow
+        Write-Host 'Character Select: the game could not be built with it, so it is taken back out for now and the game starts as it was (the next start tries again).' -ForegroundColor Yellow
         $n = Get-KitHookshotNeed $kit
         return (-not $n -or $n -eq 'offline')
     }
@@ -293,6 +296,7 @@ if ($Mode -eq 'title') {
     foreach ($l in @(Invoke-KitDiscordStatus $kit $emu)) { Write-Host $l }   # ('Playing Squadala!' on Discord)
     foreach ($l in @(Get-KitSteamInputHint)) { Write-Host $l -ForegroundColor Yellow }   # (player report 202: a Steam Controller outside Steam)
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
+    if ($game) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $game.Id } catch { } }   # (sending on: after it closes)
     if ($testKit -and $game) { [System.IO.File]::WriteAllText($testKit, "$($game.Id)`n") }
     Write-Host 'Game started. Host or Join in the game''s menu, first tab Multiplayer (controller: Minus and Plus together, or Home;'
     Write-Host 'keyboard: F1; on the title screen Minus alone). Same house: Host, then "Same network". On a VPN: Host, then "VPN".'
@@ -565,6 +569,7 @@ if ($Hookshot) {
     $started = Get-Date
     foreach ($l in @(Get-KitSteamInputHint)) { Write-Host $l -ForegroundColor Yellow }   # (player report 202: a Steam Controller outside Steam)
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
+    if ($game) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $game.Id } catch { } }   # (sending on: after it closes)
     Write-Host "Game started. Its log (longshot_log.txt in the game's logs folder) says 'coop: module loaded', then 'coop: connected'."
     exit 0
 }
@@ -598,6 +603,7 @@ if (Test-KitPuppetPackStale $packJson (Join-Path $kit 'tools\puppet_pack')) {
 $started = Get-Date
 foreach ($l in @(Get-KitSteamInputHint)) { Write-Host $l -ForegroundColor Yellow }   # (player report 202: a Steam Controller outside Steam)
 $game = Start-Process -FilePath $exe -WorkingDirectory $emu -PassThru
+if ($game) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $game.Id } catch { } }   # (sending on: after it closes)
 Write-Host 'Emulator started. Load the game; the co-op panel is in the top-left corner of the game.'
 
 # Join.bat: watch the emulator's log until the join worked or clearly did not, and then say

@@ -88,11 +88,15 @@ CoopPuppet::PlannerSettings Settings(const EnvFn& env, const std::function<bool(
 #ifdef LICHII_COOP
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "common/fs/path_util.h"
 #include "common/logging.h"
@@ -181,11 +185,45 @@ std::vector<std::string> PackCharacters() {
     return out;
 }
 
-// The mod's stored character numbers -> the pack's model files, from every manifest (PackCharacterNumbers).
+// The Character Select folder a manifest names ("characters": {"mod": "<folder>", ...}); "" when none.
+std::string PackCharacterMod(std::string_view manifest) {
+    const auto chars = manifest.find("\"characters\"");
+    if (chars == std::string_view::npos) return {};
+    const auto key = manifest.find("\"mod\"", chars);
+    if (key == std::string_view::npos) return {};
+    const auto colon = manifest.find(':', key + 5);
+    const auto open = colon == std::string_view::npos ? colon : manifest.find('"', colon);
+    const auto close = open == std::string_view::npos ? open : manifest.find('"', open + 1);
+    if (close == std::string_view::npos) return {};
+    return std::string(manifest.substr(open + 1, close - open - 1));
+}
+
+// The mod's stored character numbers -> the pack's model files, from every manifest (PackCharacterNumbers), each one
+// kept only while its model file is on disk in that mod's romfs/Model (C #58, lane 051234: a pack made while the NPC
+// characters were there, then a UI-only kit, must never let a pick or a puppet name a model that is gone). The mod is
+// looked for where tools/puppet_pack find_characters looks: beside the pack (LoadDir/<title>) and, for Hookshot's
+// mods/contents layout, in mods.
 std::map<std::uint16_t, std::uint16_t> PackCharacterFiles() {
     std::map<std::uint16_t, std::uint16_t> out;
+    std::filesystem::path load = Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir);
+    if (load.filename().empty()) load = load.parent_path();
+    std::vector<std::filesystem::path> roots{load / "0400486024DEC000"};
+    if (load.filename() == "contents") roots.push_back(load.parent_path());
     for (const auto& text : PackManifests()) {
-        out.merge(CoopPuppet::PackCharacterNumbers(text));
+        const std::string mod = PackCharacterMod(text);
+        if (mod.empty() || mod.find_first_of("/\\") != std::string::npos || mod == "." || mod == "..") continue;
+        for (const auto& [number, file] : CoopPuppet::PackCharacterNumbers(text)) {
+            bool there = false;
+            char name[64];
+            for (const char* v : {"Child", "Adult"}) {
+                std::snprintf(name, sizeof name, "Player_%s_C%03u.Player_%s.bfres.zs", v, static_cast<unsigned>(file), v);
+                for (const auto& root : roots) {
+                    std::error_code ec;
+                    if (std::filesystem::is_regular_file(root / mod / "romfs" / "Model" / name, ec)) there = true;
+                }
+            }
+            if (there) out.emplace(number, file);
+        }
     }
     return out;
 }
@@ -223,6 +261,8 @@ CoopPuppet::LookItems PackLook() {
 }  // namespace
 
 bool HasPack() { return !PackManifests().empty(); }
+// The stored character numbers the pack has models for (coop_char_slots.h: a pick outside them is put back).
+std::map<std::uint16_t, std::uint16_t> CharacterFiles() { return PackCharacterFiles(); }
 
 // A manifest of a pack built with --puppet-pvp (native puppets phase 4).
 bool PackPvp() {

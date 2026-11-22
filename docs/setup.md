@@ -99,6 +99,8 @@ The start window says what is wrong and what to do. What it checks:
 
 ## Built Longshot yourself?
 
+**You do not need your own Longshot build, and you never start `longshot.exe` yourself:** the kit builds its own game (in `hookshotgame`, with co-op inside) and **Start Squadala.bat** is the only way to start it. A Longshot you built or downloaded has no co-op, so it cannot see your friends. The kit's own `longshot.exe` started by hand has co-op but misses what the start file adds (the puppet pack, your settings, the update check): the game's chat then says it was not started with Start Squadala.bat.
+
 The kit never plays a Longshot you built with Longshot's own builder, and moving that game into the kit folder does nothing: co-op needs its own build of the Longshot release the kit is made for (`hookshot\PIN`, now v3.0.0-rc.6), with co-op's changes in its source. A nightly or dev build is another version, so it cannot be used either.
 
 Before the first build the kit asks once: **"Built Longshot yourself? ... Drag your Longshot game folder ... into this window"** (the folder with `longshot.exe`; just Enter, or 60 seconds, for no). The answer is kept in `hookshot\longshot-folder.txt`: to be asked again, delete that file before the game is built (once it is built, copy saves by hand, below). It then:
@@ -161,6 +163,6 @@ It must say the verification succeeded. If it fails, do not use the zip, and tel
 
 ## Reporting a problem
 
-After the game crashes, the next title screen asks once: "The game crashed last time. Please send /bugreport on Discord with the zip of collect-logs.cmd." Any button closes it, and it does not come back for that crash (it is never shown for a game that was only closed). To turn it off, set `LICHII_COOP_PROBLEM_ASK=0` in `coop-options.ini`.
+After the game crashes, the next title screen asks once: "The game crashed last time. Please send /bugreport on Discord with the zip of collect-logs.cmd." Any button closes it (the cursor is back on the title's first button, as before the page came up), and it does not come back for that crash (it is never shown for a game that was only closed). To turn it off, set `LICHII_COOP_PROBLEM_ASK=0` in `coop-options.ini`.
 
 Close the game and double-click `scripts\collect-logs.cmd` in the kit. It makes `coop-logs-<date>.zip` in the kit folder: the game's log, the co-op settings, the server logs, the build's log and the kit's version. With Nucleus split screen, every player's game log is in it (under `nucleus`). Then, on the [Squadala! Discord](https://discord.gg/GwtRKAqng5), type **`/bugreport`**, describe what you did and what went wrong, and attach that zip; the bot answers with your report's number. You may also describe it on the repo's [issue page](https://github.com/daurosk/oot-remake-multiplayer/issues) (give the report number there), but never attach the zip to a public issue. Addresses, your Windows user name, your PC name and any session password are masked in it; still, never paste addresses or log lines with addresses into a public issue.

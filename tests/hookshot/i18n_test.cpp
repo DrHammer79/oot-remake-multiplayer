@@ -4,14 +4,18 @@
 // code (Tr()'s shapes), and the English a table does not have.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "coop_i18n.h"
+#include "coop_pause_menu.h"
+#include "coop_pause_tab.h"
 
 namespace {
 
@@ -275,12 +279,9 @@ TEST_CASE("coop i18n: the pause menu's Multiplayer tab (the game's own page)") {
     CHECK(CoopI18n::Tr(hant, "Hosting") == "房間已開");
     CHECK(CoopI18n::Tr(hans, "Copy invite code") == "复制邀请码");
     CHECK(CoopI18n::Tr(hans, "Players: just you") == "人数：只有你");
-    CHECK(CoopI18n::Tr(hans, "Let in: nobody asks") == "放行：没人申请");
     CHECK(CoopI18n::Tr(hans, "Stop hosting") == "停止房间");
     CHECK(CoopI18n::Tr(hans, "Host a game") == "创建房间");
     CHECK(CoopI18n::Tr(hans, "Join a game") == "加入房间");
-    CHECK(CoopI18n::Tr(hans, "Auto-rejoin: Off") == "自动重连：关");
-    CHECK(CoopI18n::Tr(hans, "Auto-rejoin: trying...") == "自动重连：重试中…");
     // The rows with a value: the whole row is the shape's line.
     CHECK(CoopI18n::Tr(hans, "Room: 7QK-2") == "房间：7QK-2");
     CHECK(CoopI18n::Tr(hans, "Copy room: 7QK-2") == "复制房间：7QK-2");
@@ -623,4 +624,195 @@ TEST_CASE("coop i18n: 0.11.8's screens (PR #308): the Multiplayer page, co-op's 
     CHECK(CoopI18n::Tr(hant, "Relay") == "中轉");
     CHECK(CoopI18n::Tr(hans, "The game list's server in Co-op Settings (Relay) is not right. Clear it to use the kit's own.")
               .find("中继") == std::string::npos);
+}
+
+TEST_CASE("coop i18n: 0.11.9's - menu screens and Customize (ui-tabs)") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    CHECK(CoopI18n::Tr(hans, "Eyes") == "眼睛");
+    CHECK(CoopI18n::Tr(hant, "Hair") == "頭髮");
+    CHECK(CoopI18n::Tr(hans, "Boots and gauntlets") == "靴子与护手");
+    CHECK(CoopI18n::Tr(hans, "Hue") == "色相");
+    CHECK(CoopI18n::Tr(hans, "120 degrees") == "120 度");
+    CHECK(CoopI18n::Tr(hans, "Left and Right: from grey (0%) to the full colour (100%), 5% a press.") ==
+          "左右键：从灰色（0%）到全彩（100%），每按一次 5%。");
+    CHECK(CoopI18n::Tr(hans, "Shields (page 2 of 3)") == "盾牌（第 2/3 页）");
+    CHECK(CoopI18n::Tr(hant, "Swords (page 1 of 2)") == "劍（第 1/2 頁）");
+    CHECK(CoopI18n::Tr(hans, "Your game") == "你的房间");
+    CHECK(CoopI18n::Tr(hans, "Your game: Saria asks") == "你的房间：Saria 申请加入");
+    CHECK(CoopI18n::Tr(hans, "Your game: 3 ask") == "你的房间：3 人申请加入");
+    CHECK(CoopI18n::Tr(hans, "Saria (host)") == "Saria（房主）");
+    CHECK(CoopI18n::Tr(hans, "Find a game") == "找房间");
+    CHECK(CoopI18n::Tr(hant, "Debug") == "偵錯");
+}
+
+TEST_CASE("coop i18n: a character not downloaded (Snail's Character Select, coop_char_slots.h)") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    CHECK(CoopI18n::Tr(hans, "This character is not downloaded: press N at the kit's start to get Snail's NPC characters.") ==
+          "这个角色还没下载：在套件启动时按 N，即可获取 Snail 的 NPC 角色。");
+    const std::string other = " plays a character you have not downloaded, shown as Link (press N at the kit's start to "
+                              "get Snail's NPC characters).";
+    CHECK(CoopI18n::Tr(hans, "A player" + other) ==
+          "一名玩家 用的角色你还没下载，显示为林克（在套件启动时按 N，即可获取 Snail 的 NPC 角色）。");
+    // (the only caller writes "Player N": the number as every other Player line, 玩家 N)
+    CHECK(CoopI18n::Tr(hans, "Player 3" + other) ==
+          "玩家 3 用的角色你还没下载，显示为林克（在套件启动时按 N，即可获取 Snail 的 NPC 角色）。");
+    CHECK(CoopI18n::Tr(hant, "Player 3" + other).rfind("玩家 3 用的角色你還沒下載", 0) == 0);
+}
+
+// menu-parity-0119 (the owner: "no English left on zh games"): every row the pause menu's native co-op pages show, in
+// every view and every state of co-op the rows have words for, is a line (or a shape) of both Chinese tables, and so
+// is every row and help of Co-op settings, host rows included. A row left English fails here with its words.
+TEST_CASE("coop i18n: every native co-op row in every view and state has its Chinese") {
+    using namespace CoopPauseTab;
+    const CoopI18n::Lang* langs[] = {ByCode("zh-Hans"), ByCode("zh-Hant")};
+    const std::vector<std::string> names = {"Saria", "Mido"};
+    std::vector<SessionView> states;
+    {
+        SessionView v;   // nothing yet
+        states.push_back(v);
+        v.s.rejoin = true, v.rejoin_host = "Saria";
+        states.push_back(v);
+        v.rejoin_host.clear();
+        states.push_back(v);
+        v.room_field = "forest", v.room_ready = v.s.room_ready = true;
+        for (const bool relay : {false, true}) {
+            v.relay_set = relay;
+            states.push_back(v);
+        }
+        v.join_address = true, v.join_port = 27510;
+        states.push_back(v);
+        v.typing = 0;
+        states.push_back(v);
+        v.typing = 1;
+        states.push_back(v);
+        SessionView f;
+        f.s.failed = true;
+        states.push_back(f);
+    }
+    {
+        SessionView h;   // hosting
+        h.s.hosting = h.s.in_one = h.s.code = true;
+        h.connecting = true;
+        states.push_back(h);
+        h.connecting = false;
+        h.room = "forest", h.players = 2, h.port = 27510;
+        states.push_back(h);
+        h.asking = {"Mido"};
+        states.push_back(h);
+        h.asking = {"Mido", "Saria"}, h.s.asking = true, h.s.invite = true;
+        states.push_back(h);
+        h.confirm_leave = true;
+        states.push_back(h);
+        h.confirm_click = true;
+        states.push_back(h);
+        h.confirm_leave = h.confirm_click = false;
+        h.player_name = "Mido", h.names = names;
+        states.push_back(h);
+        h.confirm_kick = true;
+        states.push_back(h);
+    }
+    {
+        SessionView g;   // in a friend's game
+        g.s.in_one = true;
+        g.connecting = true;
+        states.push_back(g);
+        g.connecting = false, g.players = 3, g.host_name = "Saria", g.s.can_resync = true;
+        states.push_back(g);
+        g.confirm_leave = true;
+        states.push_back(g);
+        g.confirm_leave = false, g.s.wait_host = true;
+        states.push_back(g);
+        g.s.wait_host = false, g.turned_away = "full";
+        states.push_back(g);
+        SessionView l;
+        l.s.by_launcher = true;
+        states.push_back(l);
+    }
+    const auto english = [&](const std::string& row) {   // (a row that only holds a name is the name in any language)
+        if (row.empty() || std::find(names.begin(), names.end(), row) != names.end()) return false;
+        if (row.find_first_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") == std::string::npos) return false;
+        for (const CoopI18n::Lang* lang : langs) {
+            if (CoopI18n::Tr(lang, row) == row) return true;
+        }
+        return false;
+    };
+    const View views[] = {View::kMain, View::kPlayers, View::kLetIn, View::kJoin, View::kSession, View::kPlayer,
+                          View::kPlayerHost, View::kLan, View::kLanGame, View::kPassword, View::kMenu, View::kHost};
+    for (const SessionView& v : states) {
+        for (const View view : views) {
+            for (const std::string& row : RowTexts(view, v)) CHECK_MESSAGE(!english(row), row);
+        }
+        for (const MinusPage page : {MinusPage::kMultiplayer, MinusPage::kLobby}) {
+            for (const std::string& row : RowTexts(page, v)) CHECK_MESSAGE(!english(row), row);
+        }
+    }
+    // Co-op settings, as the hub's list shows it: not in a session, hosting with the rules in force, and as a guest.
+    std::vector<CoopPauseMenu::Session> sessions(3);
+    sessions[1].state = CoopPauseMenu::Session::State::kHosting, sessions[1].hosting = true, sessions[1].rules = true;
+    sessions[2].state = CoopPauseMenu::Session::State::kJoined, sessions[2].rules = true;
+    for (const CoopPauseMenu::Session& ss : sessions) {
+        CoopPauseMenu::Menu m;
+        m.Show(CoopTitleMenu::Options{});
+        m.SetSession(ss);
+        m.Open(CoopPauseMenu::Page::kSettings);
+        const std::size_t rows = m.view().rows.size();
+        for (std::size_t i = 0; i < rows; ++i) {
+            m.Select(i);
+            const CoopPauseMenu::View mv = m.view();
+            const CoopPauseMenu::Row& r = mv.rows[i];
+            const bool host_row = r.name == "Game" || r.name == "Approve joins" || r.name == "PvP" ||
+                                  r.name == "Down but not out" || r.name == "Bleed-out time" ||
+                                  r.name == "Revive hold" || r.name == "Revive hearts";
+            if (!host_row) continue;   // (the other rows' words: the 0.11.7 and 0.11.8 cases above)
+            CHECK_MESSAGE(!english(r.name), r.name);
+            if (static_cast<std::size_t>(mv.selected) == i) CHECK_MESSAGE(!english(mv.help), mv.help);
+        }
+    }
+}
+
+TEST_CASE("coop i18n: Difficulty's rows, /difficulty and the Commands page's new lines (row 226)") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    for (const char* row : {"Difficulty", "Automatic", "Enemy life", "Enemy damage", "Enemies"}) {
+        INFO(row);
+        CHECK(CoopI18n::Tr(hans, row) != row);
+        CHECK(CoopI18n::Tr(hant, row) != row);
+    }
+    CHECK(CoopI18n::Tr(hans, "Difficulty") == "难度");
+    CHECK(CoopI18n::Tr(hant, "Enemy damage") == "敵人傷害");
+    CHECK(CoopI18n::Tr(hans, "Only the host can change it.") == "只有房主能更改。");
+    CHECK(CoopI18n::Tr(hant, "The host only: how long a downed player waits for a revive, 10 to 240 seconds.")
+              .rfind("僅房主：", 0) == 0);
+    CHECK(CoopI18n::Tr(hans, "difficulty: only the host can change it") == "难度：只有房主能更改");
+    // The values line the help starts with, the chat's own shape (a preset's name translated in it).
+    CHECK(CoopI18n::Tr(hans, "Difficulty: Hard: life 200%, damage 150%, enemies 150%") !=
+          "Difficulty: Hard: life 200%, damage 150%, enemies 150%");
+}
+
+TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join, title-toggle) and the voice words (hud-native)") {
+    const CoopI18n::Lang* hans = ByCode("zh-Hans");
+    const CoopI18n::Lang* hant = ByCode("zh-Hant");
+    for (const CoopI18n::Lang* lang : {hans, hant}) {
+        REQUIRE(lang != nullptr);
+        // each is a line of the table, not English
+        for (const char* en : {"Who can join", "Private", "Public", "Public, password", "Code", "Press again",
+                               "Enter a code or address", "Paste a code", "Type an address",
+                               "A: Join   B: Back   Y: Refresh", "Joins the game with this password.",
+                               "Paste a code or type an address first.", "talking", "muted"}) {
+            const std::string tr = CoopI18n::Tr(lang, en);
+            CHECK_MESSAGE(tr != en, en);
+        }
+    }
+    CHECK(CoopI18n::Tr(hans, "Who can join") == "谁能加入");
+    CHECK(CoopI18n::Tr(hant, "Who can join") == "誰能加入");
+    CHECK(CoopI18n::Tr(hans, "Private") == "私人");
+    CHECK(CoopI18n::Tr(hant, "Public") == "公開");
+    CHECK(CoopI18n::Tr(hans, "Page 2 of 3 (ZL/ZR)") == "第 2/3 页（ZL/ZR）");
+    CHECK(CoopI18n::Tr(hant, "Page 1 of 2 (ZL/ZR)") == "第 1/2 頁（ZL/ZR）");
+    CHECK(CoopI18n::Tr(hans, "Room  forest-4821") == "房间  forest-4821");
+    CHECK(CoopI18n::Tr(hant, "Room  forest-4821") == "房間  forest-4821");
+    CHECK(CoopI18n::Tr(hans, "Join Saria again") == "再次加入 Saria");
+    CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
 }

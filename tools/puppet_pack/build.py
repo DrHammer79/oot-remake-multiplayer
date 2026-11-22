@@ -296,6 +296,26 @@ def character_project(variant, file):
     return f"Player_{variant}_C{file:03d}"
 
 
+def mod_list_off(mods_root, name):
+    """The Mods tab's list (mods/coop-mods.list, "coop-mods 1") names `name` (its path under mods with '/') off: the
+    first row for it, letters without case (as Longshot reads it). No list or no row: on (C #58: a mod switched off
+    loads no models, so its characters get no puppets)."""
+    fold = lambda t: "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in t.replace("\\", "/"))
+    try:
+        with open(os.path.join(mods_root, "coop-mods.list"), "rb") as f:
+            lines = f.read().decode("utf-8", "replace").split("\n")
+    except OSError:
+        return False
+    if lines[0].rstrip("\r") != "coop-mods 1":
+        return False
+    for line in lines[1:]:
+        line = line.rstrip("\r")
+        for state in ("on ", "off "):
+            if line.startswith(state) and fold(line[len(state):]) == fold(name):
+                return state == "off "
+    return False
+
+
 def find_characters(mod_dir, log=print):
     """The Character Select mod among the mods the pack is made into: {"mod": its folder, "files":
     {file number: [variants it has a model for]}, "heaps": {variant: {field: bytes}}, "numbers": {file:
@@ -318,6 +338,10 @@ def find_characters(mod_dir, log=print):
                 with open(path, encoding="utf-8") as f:
                     doc = json.load(f)
                 if doc.get("mod") != CHARACTERS_MOD or doc.get("format") != CHARACTERS_FORMAT:
+                    continue
+                if len(roots) > 1 and mod_list_off(roots[1], (f"contents/{os.path.basename(root)}/{name}"
+                                                             if root == roots[0] else name)):
+                    log(f"characters: {name} is switched off in the Mods tab: no character puppets from it")
                     continue
                 files, numbers = {}, {}
                 for row in doc["characters"]:
@@ -1477,11 +1501,13 @@ def write_look_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, slots, l
             ap_size = table.get(look_items.actor_param_path(item)) or 0
             table.add_new(look_items.actor_param_path(actor), max(ap_size, len(ap) + PACK_SIZE_MARGIN))
             table.add_new(look_items.model_info_path(actor), chain_entry(table, info_chain, info))
-            # Row 184: the copy's own AnimationParam (retargeted clips), sized as the item's.
+            # Row 184: the copy's own AnimationParam (retargeted clips), with room for each IsRetarget it adds
+            # (row 198: sized as the item's, the game refused to make the shield copies).
             anim = look_items.copy_animation_param(members, item, actor)
             if anim is not None:
                 anim_size = table.get(look_items.item_animation_param(members, item)[0]) or 0
-                table.add_new(anim[0], max(anim_size, len(anim[1]) + PACK_SIZE_MARGIN))
+                table.add_new(anim[0], look_items.copy_animation_param_entry(members, item, anim_size, anim[1],
+                                                                             PACK_SIZE_MARGIN))
             new_ai.append(look_items.info_row(ai_rows[item], item, slot))
             new_gai.append(dict(gai_rows.get(item, {}), __RowId=actor))
             paths = [dst]
@@ -1558,11 +1584,13 @@ def write_blade_items(romfs, out_romfs, dicts, table, ai_rows, gai_rows, copies,
             ap_size = table.get(look_items.actor_param_path(item)) or 0
             table.add_new(look_items.actor_param_path(actor), max(ap_size, len(ap) + PACK_SIZE_MARGIN))
             table.add_new(look_items.model_info_path(actor), chain_entry(table, info_chain, info))
-            # Row 184: the copy's own AnimationParam (retargeted clips), sized as the item's.
+            # Row 184: the copy's own AnimationParam (retargeted clips), with room for each IsRetarget it adds
+            # (row 198: sized as the item's, the game refused to make the shield copies).
             anim = look_items.copy_animation_param(members, item, actor)
             if anim is not None:
                 anim_size = table.get(look_items.item_animation_param(members, item)[0]) or 0
-                table.add_new(anim[0], max(anim_size, len(anim[1]) + PACK_SIZE_MARGIN))
+                table.add_new(anim[0], look_items.copy_animation_param_entry(members, item, anim_size, anim[1],
+                                                                             PACK_SIZE_MARGIN))
             new_ai.append(look_items.info_row_as(ai_rows[item], actor, copy_project))
             new_gai.append(dict(gai_rows.get(item, {}), __RowId=actor))
             files.append(dst)

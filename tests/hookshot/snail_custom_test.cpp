@@ -5,6 +5,7 @@
 #include <string>
 
 #include "coop_colors.h"
+#include "coop_i18n.h"
 #include "coop_snail_custom.h"
 
 using CoopLook::Look;
@@ -31,18 +32,17 @@ TEST_CASE("snail customize: his six options show co-op's parts, ZL / ZR step the
     REQUIRE(d.Active());
     auto t = d.Shown();
     CHECK(t.title == "Link (page 1 of 4)   Y: next page");
-    CHECK(t.labels[0] == "Hair Colour");
-    CHECK(t.labels[1] == "Eye Colour");
-    CHECK(t.labels[2] == "Kokiri Tunic");
-    CHECK(t.labels[3] == "Cap Trim");      // (his right column)
-    CHECK(t.labels[5] == "Zora Tunic");
-    CHECK(t.values[5] == "red");
-    CHECK(t.values[2] == "Game's own");
-    // The d-pad is his (his marker moves); co-op follows: right to Cap Trim, down twice to Zora Tunic.
+    CHECK(t.labels[0] == "Eye Colour");
+    CHECK(t.labels[1] == "Kokiri Tunic");
+    CHECK(t.labels[3] == "Goron Tunic");   // (his right column)
+    CHECK(t.labels[4] == "Zora Tunic");
+    CHECK(t.labels[5].empty());
+    CHECK(t.values[4] == "Red");   // (capitalised as his own values: the UI gate, review-ui-tabs-0119-4)
+    CHECK(t.values[1] == "Game's own");
+    // The d-pad is his (his marker moves); co-op follows: right to Goron Tunic, down to Zora Tunic.
     CHECK(d.Pad(kRight) == kRight);
     CHECK(d.Pad(kDown) == kDown);
-    CHECK(d.Pad(kDown) == kDown);
-    CHECK(d.Focus() == 5);
+    CHECK(d.Focus() == 4);
     // ZR: Zora Tunic to the next preset; never his (his option Int stays 0).
     CHECK(d.Pad(kZR) == 0);
     const auto change = d.TakeChange();
@@ -96,6 +96,21 @@ TEST_CASE("snail customize: a character with no colour options shows that, and i
     CHECK_FALSE(d.Editing());
 }
 
+TEST_CASE("snail customize: a place with nothing is given a space, never an empty text (Saria's screen, lane 035925)") {
+    Driver d;
+    d.Open(Look{}, 9);   // (a character: one row, the rest of his six places empty)
+    const auto t = d.Shown();
+    bool empty = false;
+    for (int f = 1; f < kOptions; ++f) empty = empty || t.labels[static_cast<std::size_t>(f)].empty();
+    REQUIRE(empty);   // (what the screen's write met: places with no text)
+    for (int f = 0; f < kOptions; ++f) {
+        CHECK_FALSE(PaneText(t.labels[static_cast<std::size_t>(f)]).empty());
+        CHECK_FALSE(PaneText(t.values[static_cast<std::size_t>(f)]).empty());
+    }
+    CHECK(PaneText("") == " ");
+    CHECK(PaneText("Eye Colour") == "Eye Colour");
+}
+
 TEST_CASE("snail customize: his option past a page's parts does nothing") {
     Driver d;
     d.Open(Look{}, 0);
@@ -107,4 +122,39 @@ TEST_CASE("snail customize: his option past a page's parts does nothing") {
     d.Pad(kA);
     CHECK_FALSE(d.TakeChange());
     CHECK_FALSE(d.Editing());
+}
+
+TEST_CASE("snail customize: his screen's texts in the game's language, as co-op's own pages (zh: no English left)") {
+    const CoopI18n::Lang* hans = nullptr;
+    for (int i = 0; i < CoopI18n::kLangCount; ++i) {
+        if (std::string(CoopI18n::kLangs[i].code) == "zh-Hans") hans = &CoopI18n::kLangs[i];
+    }
+    REQUIRE(hans != nullptr);
+    Driver d;
+    Look start;
+    start[Part::zora_tunic] = *CoopColors::Parse("red");
+    start[Part::goron_tunic] = 0x123456u;   // (a colour of their own: shown as it is)
+    d.Open(start, 0);
+    const auto t = d.Shown(hans);
+    CHECK(t.title.find("Y: next page") == std::string::npos);
+    CHECK(t.title.find("Y：下一页") != std::string::npos);
+    CHECK(t.labels[0] == CoopI18n::Tr(hans, "Eye Colour"));
+    CHECK(t.labels[0] != "Eye Colour");
+    CHECK(t.labels[1] == CoopI18n::Tr(hans, "Kokiri Tunic"));
+    CHECK(t.values[4] == CoopI18n::Tr(hans, "red"));
+    CHECK(t.values[4] != "red");
+    CHECK(t.values[4] != CoopI18n::Tr(hans, "Red"));   // (capitalised after the table: the colour, not a colour's red part)
+    CHECK(t.values[1] == CoopI18n::Tr(hans, "Game's own"));
+    CHECK(t.values[3] == d.Shown(nullptr).values[3]);   // (#123456 stays)
+    // English (no table): the same texts as before.
+    CHECK(d.Shown(nullptr).title == "Link (page 1 of 4)   Y: next page");
+    CHECK(d.Shown(nullptr).values[4] == "Red");
+}
+
+TEST_CASE("snail customize: values capitalised as his own (Red next to Game's own), the rest unchanged") {
+    CHECK(Capitalised("red") == "Red");
+    CHECK(Capitalised("Game's own") == "Game's own");
+    CHECK(Capitalised("#123456") == "#123456");
+    CHECK(Capitalised("") == "");
+    CHECK(Capitalised("çº¢è²") == "çº¢è²");   // (Chinese: unchanged)
 }

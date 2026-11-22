@@ -75,6 +75,8 @@ struct SessionConfig {
   std::uint8_t max_players = kDefaultMaxPlayers;
   // Interest (16 players, docs/protocol.md "Who gets which stream"): each
   // PLAYER_SAMPLE and PLAYER_POSE goes to a player by where the two are.
+  // "Same scene" here is the same PLACE in either era (Graveyard_Child and
+  // Graveyard_Adult: each draws the other's puppet; row 221).
   // Same scene within near_distance (game units), or either place unknown:
   // all of them. Same scene, farther: every far_pose_every-th pose (samples
   // all: they are small). Another scene: every other_scene_sample_every-th
@@ -263,9 +265,11 @@ struct SessionConfig {
   std::uint64_t boss_turn_us = 4'000'000;
   std::uint64_t boss_turn_quiet_us = 3'000'000;
   float boss_turn_m = 40.0f;
-  // Every enemy takes turns too (2026-11-21: the baseline for every mob, not bosses alone): the same rule, among
-  // the players near it (enemy_turn_m: the ones fighting it, not one across the field). Off: bosses only.
-  bool enemy_turns = true;
+  // Every enemy takes turns too (#308): the same rule, among the players near it (enemy_turn_m). OFF by default
+  // (review-geno-0119-4, owner): a plain enemy's AI chases only its owner's Link, so a turn at each attack's end
+  // walks it to the other player and back (report 138's shuttle; the turn skips the sticky/hand-back rules), where
+  // solo it keeps the Link it fights. The chase, near and sticky rules already give it to the player it fights.
+  bool enemy_turns = false;
   float enemy_turn_m = 12.0f;
   // ...and only right at the end of the boss's own attack (boss-turns-0119): its owner's samples say an attack
   // ran (object_state::attacking, the hook's addr::InAttackSequence: after a reaction it stays on until the
@@ -487,6 +491,9 @@ struct Stats {
   std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)
   std::uint64_t enemy_turns = 0;         // a plain enemy asked over to the next player's turn (enemy_turns)
   std::uint64_t boss_kept_from_unready = 0;  // row 189: ticks a ready, unfit owner's boss was not asked to an unready game
+  std::uint64_t boss_finish_kept = 0;  // row 215: hand-overs of a boss in its finish not made (asked or answered)
+  std::uint64_t kept_by_logic = 0;      // row 212: a hand-over to a game whose logic did not make it, refused
+  std::uint64_t back_to_logic = 0;      // row 212: asked back to a game whose logic made it
   std::uint64_t boss_to_ready = 0;       // a boss asked from a game that has not played its intro to one that has
   std::uint64_t boss_stalled = 0;       // row 149: a boss held one move boss_stall_us: its fight lock freed
   std::uint64_t parts_to_root = 0;      // row 149: a fresh group member given its root's owner at the link
@@ -758,6 +765,10 @@ class Session {
     // an enemy went round P2, P3, P4, P2 ... when only the last one was kept).
     std::map<ConnectionId, std::uint64_t> gave_up;
     std::uint64_t changed_at = 0;  // the last change of owner; 0: never
+    // The last change of owner that was no boss turn (next_turn), for boss_hitter_cooldown_us: a turn passes at
+    // every attack's end (4 s), so a cooldown from changed_at would refuse nearly every stun from another player
+    // (Gohma's eye, a ball sent back into a copy Phantom Ganon or Ganondorf). 0: never.
+    std::uint64_t hitter_changed_at = 0;
     // The last state relayed from its owner, for a hand-over with no answer
     // and for a player who enters the scene later.
     std::optional<protocol::ObjectState> last_state;
@@ -776,6 +787,12 @@ class Session {
     std::map<ConnectionId, std::uint64_t> chased_by;
     // Games whose boss is not ready to be owned (object_presence::unready).
     std::set<ConnectionId> unready;
+    // Games that take boss turns (object_presence::takes_turns): an older build is never given a turn.
+    std::set<ConnectionId> takes_turns;
+    // Row 212: games whose own level logic made it (object_presence::own_logic). Not empty: it is owned only by
+    // one of them (ask_handover refuses the others; run_ownership asks it back; its owner leaving gives it to
+    // another of them, or removes it when none is left).
+    std::set<ConnectionId> own_logic;
     // A HANDOVER_ASK the owner has not answered yet.
     struct Ask {
       ConnectionId to = 0;
@@ -787,6 +804,8 @@ class Session {
       // A BOMB_TAKE (native puppets phase 2): no answer means the owner's
       // game keeps the bomb (BOMB_ANSWER kept), not a move.
       bool bomb = false;
+      // A boss turn (next_turn): its change does not start boss_hitter_cooldown_us (hitter_changed_at).
+      bool turn = false;
     };
     std::optional<Ask> ask;
     // DAMAGE that came while the owner hold had not chosen its owner yet
@@ -811,6 +830,9 @@ class Session {
     bool attacking = false;           // in its attack sequence
     std::uint16_t attack_epoch = 0;   // the epoch those two are of
     std::uint64_t attack_ended_at = 0;  // its newest attack's end in that epoch; 0: none
+    // Row 215: its finish was logged (a boss root at life 0 or in its death, kept by its owner's game); cleared
+    // when it is no longer in one (a refill for its next phase), so the next finish logs again.
+    bool finish_noted = false;
     std::uint64_t attack_began_at = 0;  // when its running attack began (attack_hold_max_us); 0: none
   };
   using Objects = std::map<protocol::ObjectId, Object>;
@@ -947,9 +969,17 @@ class Session {
   // The end of the owner hold: each held object to the lowest player number
   // that lists it, announced to its scene.
   void end_owner_hold(std::uint64_t now_us);
-  // Asks the owner to let go of it to `to`; finish_handover follows.
-  void ask_handover(const protocol::ObjectId& oid, Object& o, ConnectionId to,
+  // Asks the owner to let go of it to `to`; finish_handover follows. False: not asked (no owner, `to` gone, or a
+  // boss in its finish, keeps_finish).
+  bool ask_handover(const protocol::ObjectId& oid, Object& o, ConnectionId to,
                     std::uint64_t now_us);
+  // Row 215: a boss root whose owner's last state says it is at life 0 or plays its death (anim::IsDeath).
+  static bool boss_finishing(const Object& o);
+  // Row 215: no boss changes owner in its finish (at life 0 or in its death): the game that runs the finish keeps
+  // it to the end, whatever rule asks (hitter, turns, near, chase, unfit owner, unready). True: `o` (a boss or a
+  // boss's part) stays. A part may still go to its boss's own owner (the group together). Only an owner that
+  // leaves or unloads it gives it on (drop_presence: nobody else could run it).
+  bool keeps_finish(Object& o, ConnectionId to);
   // The owner answered (or never did: answer null) and the object moves.
   void finish_handover(const protocol::ObjectId& oid, Object& o,
                        const protocol::ObjectState* answer, std::uint64_t now_us);
@@ -985,6 +1015,10 @@ class Session {
   // first (report 138).
   std::optional<ConnectionId> next_owner(const Object& o, ConnectionId except,
                                          std::uint64_t now_us) const;
+  // Row 212: of the games whose own logic made `o` (Object::own_logic), one that has it loaded, other than
+  // `except`: a fit one first, then the lowest player number. None: no such game has it.
+  std::optional<ConnectionId> logic_owner(const Object& o, std::optional<ConnectionId> except,
+                                          std::uint64_t now_us) const;
   // Joined, in the object's scene and with it loaded.
   bool has_loaded(ConnectionId id, const Object& o) const;
   // Metres from the player's Link to the object; none when either place is
@@ -995,6 +1029,10 @@ class Session {
   // one and its PLAYER_SAMPLE position is fresh.
   bool place_known_in(const Connection& c, const std::string& scene,
                       std::uint64_t now_us) const;
+  // The same for a place between two PLAYERS (lifting, PvP): `scene` in either era counts, as both games draw
+  // the other's puppet there (coop/protocol/scene_place.hpp). Objects keep place_known_in's exact scene.
+  bool place_known_near(const Connection& c, const std::string& scene,
+                        std::uint64_t now_us) const;
   bool unfit_owner(const Connection& c, std::uint64_t now_us) const;
   // The same for the owner of a boss or of an enemy in its fight, sooner (fight_owner_dead_us, fight_owner_paused_us).
   bool unfit_fight_owner(const Connection& c, std::uint64_t now_us) const;
@@ -1024,6 +1062,9 @@ class Session {
   void forget(Objects::iterator it);
   void unlink(const protocol::ObjectId& oid, Object& o);
   void announce_owner(const protocol::ObjectId& oid, const Object& o);
+  // To the joined players in `scene`'s place, either era (none when it is empty): for what is between players.
+  void send_to_place(const std::string& scene, std::optional<ConnectionId> except,
+                     std::uint8_t channel, const protocol::Message& m);
   // To every joined player in `scene` but `except`; empty scene: everyone.
   void send_to_scene(const std::string& scene, std::optional<ConnectionId> except,
                      std::uint8_t channel, const protocol::Message& m);

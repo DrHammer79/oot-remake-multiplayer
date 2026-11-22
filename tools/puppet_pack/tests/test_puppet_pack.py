@@ -1593,8 +1593,9 @@ class FullBuildTest(unittest.TestCase):
         with open(p, "wb") as f:
             f.write(data)
 
-    def add_hylian_shield(self):
-        """The Hylian Shield in the test romfs: its pack, model, texture and ActorInfo rows."""
+    def add_hylian_shield(self, anim_entry=None):
+        """The Hylian Shield in the test romfs: its pack, model, texture and ActorInfo rows. `anim_entry`: also its
+        AnimationParam (one resource, as the game's), with this size-table entry."""
         from puppet_pack import zs
         plain = zstandard.ZstdCompressor()
         item = "Weapon_Shield_Hylian"
@@ -1603,6 +1604,15 @@ class FullBuildTest(unittest.TestCase):
         members = {f"Actor/{item}.engine__actor__ActorParam.bgyml": byml.dumps(ap),
                    info: byml.dumps({"FmdbName": item, "ModelProjectName": item}),
                    "Component/ShieldParam/X.bgyml": byml.dumps({"A": 1})}
+        if anim_entry is not None:
+            anim = f"Component/AnimationParam/{item}.engine__component__AnimationParam.bgyml"
+            ap["Components"]["AnimationRef"] = "?" + anim
+            members[f"Actor/{item}.engine__actor__ActorParam.bgyml"] = byml.dumps(ap)
+            members[anim] = byml.dumps({"AnimationResources": [{"ModelProjectName": f"{item}_Animation"}]})
+            path = os.path.join(self.romfs, "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs")
+            t = rstb.Rstb.loads(zs.Dicts.from_romfs(self.romfs).decompress(build.read(path)))
+            t.set(anim, anim_entry)
+            self.write("System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs", plain.compress(t.dumps()))
         self.write(f"Pack/Actor/{item}.pack.zs", plain.compress(sarc.write(members)))
         model = b"FRES" + bytes(12) + b"\x1b\x00Mt_Weapon_Shield_Hylian_Alb\x00" + f"{item}\x00".encode()
         self.write(f"Model/{item}.{item}.bfres.zs", plain.compress(model))
@@ -1822,11 +1832,48 @@ class FullBuildTest(unittest.TestCase):
         with self.assertRaises(look_items.TunicError):
             look_items.model_info(looped, item)
 
+    def retarget_on(self):
+        from puppet_pack import look_items
+        old = look_items.COPY_RETARGET
+        look_items.COPY_RETARGET = True
+        self.addCleanup(setattr, look_items, "COPY_RETARGET", old)
+
+    def test_look_copy_keeps_the_items_animation_param(self):
+        # Row 198 (gear-colour-198-3, lane gc198-l5b): the game did not make a shield copy that has its own
+        # IsRetarget AnimationParam, even sized with room (both games: 'shield copy Weapon_Shield_Hylian_Look1 was
+        # not made by the game'); the puppet wore the game's shield, drawn in the viewer's own colours. By default no
+        # copy (Look slot, neutral, blade) gets one: its ActorParam keeps the item's AnimationRef, no new file, no
+        # size-table entry for it.
+        from puppet_pack import look_items, zs
+        self.assertFalse(look_items.COPY_RETARGET)
+        item, _, _ = self.add_hylian_shield(anim_entry=5344)
+        mod = os.path.join(self.dir, "mod")
+        said = []
+        m = build.build(self.romfs, mod, log=said.append, tunics=("red",), look_slots=2)
+        self.assertIsNotNone(m["look_items"], said)
+        d = zs.Dicts.from_romfs(self.romfs)
+        out = os.path.join(mod, "romfs")
+        t = rstb.Rstb.loads(d.decompress(build.read(os.path.join(
+            out, "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs"))))
+        game = sarc.read(d.decompress(build.read(os.path.join(self.romfs, f"Pack/Actor/{item}.pack.zs"))))
+        item_ref = byml.loads(game[look_items.actor_param_path(item)])["Components"]["AnimationRef"]
+        for k in range(1, m["look_items"]["neutral"] + 1):
+            actor = look_items.actor_name(item, k)
+            files = sarc.read(d.decompress(build.read(os.path.join(out, f"Pack/Actor/{actor}.pack.zs"))))
+            path = look_items.animation_param_path(actor)
+            self.assertNotIn(path, files, actor)
+            self.assertIsNone(t.get(path), actor)
+            comps = byml.loads(files[look_items.actor_param_path(actor)])["Components"]
+            self.assertEqual(comps["AnimationRef"], item_ref, actor)
+            self.assertNotIn(b"IsRetarget", b"".join(v for n, v in files.items() if "AnimationParam" in n), actor)
+
     def test_look_copy_retargets_its_animations(self):
         # Row 184: a copy names a model project of its own, so the item's animation project plays on it
         # only retargeted (as the game's child Epona plays the adult's clips). The copy gets its own
         # AnimationParam with IsRetarget on every resource; the item's own file stays as it was.
+        # (Row 198: off by default, look_items.COPY_RETARGET; this is the param the switch gives back.)
         from puppet_pack import look_items
+        self.retarget_on()
         ap = "Actor/{}.engine__actor__ActorParam.bgyml"
         mi = "Component/ModelInfo/{}.engine__component__ModelInfo.bgyml"
         an = "Component/AnimationParam/{}.engine__component__AnimationParam.bgyml"
@@ -1905,6 +1952,45 @@ class FullBuildTest(unittest.TestCase):
         ma, mb = (json.loads(build.read(os.path.join(d, "coop_puppet.json"))) for d in (a, b))
         self.assertEqual(mb["look_items"]["actors"], [item])
         self.assertEqual(ma["look_items"], mb["look_items"])
+
+    def test_look_copy_animation_param_has_room(self):
+        # Row 198 (0.11.9): a copy's AnimationParam adds IsRetarget (row 184), and the game parses a param in a heap
+        # of its size-table entry, which grows with its fields (the game's own: 5344 for one resource, 5376 with
+        # IsRetarget). Sized as the item's, the game refused to make every shield copy (the puppets kept the game's
+        # shield, drawn in your own colours). Every copy, the neutral one too, gets room for what it adds.
+        # (Row 198 again: the game refused them sized so too; off by default, COPY_RETARGET.)
+        from puppet_pack import look_items, zs
+        self.retarget_on()
+        item, _, _ = self.add_hylian_shield(anim_entry=5344)
+        mod = os.path.join(self.dir, "mod")
+        said = []
+        m = build.build(self.romfs, mod, log=said.append, tunics=("red",), look_slots=2)
+        self.assertIsNotNone(m["look_items"], said)
+        d = zs.Dicts.from_romfs(self.romfs)
+        out = os.path.join(mod, "romfs")
+        t = rstb.Rstb.loads(d.decompress(build.read(os.path.join(
+            out, "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs"))))
+        for k in range(1, m["look_items"]["neutral"] + 1):
+            actor = look_items.actor_name(item, k)
+            files = sarc.read(d.decompress(build.read(os.path.join(out, f"Pack/Actor/{actor}.pack.zs"))))
+            path = look_items.animation_param_path(actor)
+            self.assertEqual(byml.loads(files[path])["AnimationResources"],
+                             [{"IsRetarget": True, "ModelProjectName": f"{item}_Animation"}])
+            self.assertEqual(t.get(path), 5344 + look_items.RETARGET_ROOM, actor)
+            self.assertGreaterEqual(t.get(path), 5376)   # (the game's own entry of that shape)
+        # The rule alone: one resource without the field gets the room; one that had it, or none, gets nothing more.
+        an = "Component/AnimationParam/{}.engine__component__AnimationParam.bgyml"
+        ap = "Actor/{}.engine__actor__ActorParam.bgyml"
+
+        def members(resources):
+            return {ap.format(item): byml.dumps({"Components": {"AnimationRef": "?" + an.format(item)}}),
+                    an.format(item): byml.dumps({"AnimationResources": resources})}
+        two = members([{"ModelProjectName": "A"}, {"IsRetarget": False, "ModelProjectName": "B"}])
+        self.assertEqual(look_items.copy_animation_param_entry(two, item, 5464, b"x", 0),
+                         5464 + look_items.RETARGET_ROOM)
+        self.assertEqual(look_items.copy_animation_param_entry(members([{"IsRetarget": True, "ModelProjectName": "A"}]),
+                                                               item, 5376, b"x", 0), 5376)
+        self.assertEqual(look_items.copy_animation_param_entry(two, item, 10, b"x" * 100, 0x1000), 100 + 0x1000)
 
     def test_look_item_names(self):
         from puppet_pack import look_items, look_live
@@ -2913,6 +2999,30 @@ class FullBuildTest(unittest.TestCase):
         with self.assertRaises(build.BuildError):
             build.build(self.romfs, os.path.join(self.dir, "mod_x"), log=lambda *_: None,
                         skins=[("Mod", mod_src)], test_skin="Other", look_slots=0)
+
+    def test_find_characters_follows_models_and_mods_list(self):
+        # C #58 (lane 051234): only the models there count (a UI-only Character Select gives no characters), and a mod
+        # switched off in the Mods tab gives none (the game loads none of its models).
+        mods = os.path.join(self.dir, "mods_list")
+        cs = os.path.join(mods, "OoT Character Select")
+        os.makedirs(os.path.join(cs, "romfs", "Model"))
+        doc = {"format": 1, "mod": "OoT Character Select",
+               "actor_heaps": {v: {"InstanceHeapSize": 1, "PreActorRenderInfoHeapSize": 1} for v in build.VARIANTS},
+               "characters": [{"number": 7, "name": "Made Up", "file": 5}]}
+        with open(os.path.join(cs, build.CHARACTERS_FILE), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        pack = os.path.join(mods, "contents", "0400486024DEC000", "coop-puppet")
+        os.makedirs(pack)
+        self.assertIsNone(build.find_characters(pack, log=lambda *_: None))   # UI-only: no models
+        with open(os.path.join(cs, "romfs", "Model", "Player_Child_C005.Player_Child.bfres.zs"), "wb") as f:
+            f.write(b"made up")
+        self.assertEqual(build.find_characters(pack, log=lambda *_: None)["files"], {5: ["Child"]})
+        with open(os.path.join(mods, "coop-mods.list"), "w", encoding="utf-8", newline="") as f:
+            f.write("coop-mods 1\r\non contents/0400486024DEC000/coop-puppet\r\noff oot character select\r\n")
+        self.assertIsNone(build.find_characters(pack, log=lambda *_: None))
+        with open(os.path.join(mods, "coop-mods.list"), "w", encoding="utf-8") as f:
+            f.write("coop-mods 1\non OoT Character Select\n")
+        self.assertEqual(build.find_characters(pack, log=lambda *_: None)["numbers"], {5: 7})
 
     def test_build_characters(self):
         # A Character Select mod beside the pack (made-up data): a puppet per character and age it has a

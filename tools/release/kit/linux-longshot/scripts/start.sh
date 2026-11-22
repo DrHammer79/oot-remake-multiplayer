@@ -12,6 +12,8 @@
 #   bash start-squadala.sh --no-update         no update check this time
 #   bash start-squadala.sh --logs              collect the logs for a bug report, start nothing
 #   bash start-squadala.sh --pack              make the puppet pack again (how you see the others), start nothing
+#   bash start-squadala.sh --problem-reports send|nosend|on|off   send problem reports after games (or not); local
+#                                              reports at each start (or not); off turns both off (docs: problem-reports)
 # Started without a terminal (Steam's Game Mode, a desktop shortcut) it asks nothing: an update is
 # left for the next start from a terminal, and a game that is not built yet is said in a dialog.
 set -euo pipefail
@@ -25,7 +27,13 @@ while (($#)); do
         --pack) pack_only=1 ;;
         --game | --exefs | --jobs) build_args+=("$1" "${2-}"); shift ;;
         --rebuild | --check-only | --dlss | --no-dlss) build_args+=("$1") ;;
-        -h | --help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --problem-reports)
+            pr_py=$DATA/builder/image/usr/python/bin/python3
+            [[ -x $pr_py ]] || pr_py=$(command -v python3 || true)
+            [[ -n $pr_py ]] || fail 'Problem reports need Python 3 (python3), which this PC does not have.'
+            case ${2-} in send | nosend | on | off) ;; *) fail 'Use: --problem-reports send, nosend, on or off' ;; esac
+            exec "$pr_py" -I -B "$KIT/scripts/problem_report.py" --kit "$KIT" "$2" ;;
+        -h | --help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "Unknown option: $1 (bash start-squadala.sh --help lists them)" ;;
     esac
     shift
@@ -74,7 +82,7 @@ kit_game_running && fail 'The game of this kit is running already. Switch to its
 if ((pack_only)); then
     [[ -n $(kit_game_exe) ]] || fail 'The game is not built yet: start start-squadala.sh (it builds the game and makes the puppet pack).'
     rm -f "$GAME/mods/contents/0400486024DEC000/coop-puppet/.coop-stamp" "$DATA/pack-asked.txt"   # (and asks again)
-    bash "$KIT/scripts/build.sh" "${build_args[@]}"
+    OOT_COOP_PACK_FRESH=1 bash "$KIT/scripts/build.sh" "${build_args[@]}"   # (made, never put back from data/pack-variants)
     [[ -f $GAME/mods/contents/0400486024DEC000/coop-puppet/.coop-stamp ]] || fail 'The puppet pack was not made (said why above).'
     say 'Done: the puppet pack is made. Start start-squadala.sh to play.'
     exit 0
@@ -173,6 +181,12 @@ if [[ -n $py && -f $KIT/scripts/discord_status.py ]]; then
     "$py" -I -B "$KIT/scripts/discord_status.py" --options "$GAME/longshot_options.ini" --version-file "$KIT/VERSION.txt" 2>&1 |
         sed 's/^/  /' || true
 fi
+# Problem reports (scripts/problem_report.py, docs/problem-reports.md): asked once (No in 20 s; only with a terminal):
+# send the masked report of a game that had a co-op problem or a crash to the Squadala! team after it closes. With
+# yes, the sessions since the last report are queued and sent in the background. Never stops the start.
+if [[ -n $py && -f $KIT/scripts/problem_report.py ]]; then
+    "$py" -I -B "$KIT/scripts/problem_report.py" --kit "$KIT" at-start || true
+fi
 step 'Starting the game: Host or Join in its menu (Multiplayer)'
 # (as Longshot's own builder/linux/longshot-launch: nothing of a launcher's environment goes in; its
 # own update check is off, the kit's updater brings Longshot up to date with co-op)
@@ -192,8 +206,17 @@ fi
 export HOS_WINDOW_TITLE=$title HOS_WM_CLASS=squadala
 [[ -f $DATA/squadala-icon.png ]] && cp -f -- "$DATA/squadala-icon.png" "$GAME/longshot.png" 2>/dev/null || true
 kit_steam_input_hint   # (player report 202: a Steam Controller outside Steam; a warning only)
+export OOT_COOP_KIT_START=1   # the marker the co-op module looks for (a game started by hand says to use start-squadala.sh)
 cd "$GAME"
+# Not exec'd: once the game closes (a crash too), its problems are sent when the player said yes (problem_report.py
+# after-game-bg starts it on its own and returns at once; nothing waits for the upload).
+code=0
 if kit_tty; then
-    exec ./longshot
+    ./longshot || code=$?
+else
+    ./longshot >>"$LOGS/game-output.log" 2>&1 || code=$?
 fi
-exec ./longshot >>"$LOGS/game-output.log" 2>&1
+if [[ -n $py && -f $KIT/scripts/problem_report.py ]] && grep -qs '"send": "on"' "$LOGS/problem-send.json"; then
+    "$py" -I -B "$KIT/scripts/problem_report.py" --kit "$KIT" after-game-bg >/dev/null 2>&1 || true
+fi
+exit "$code"

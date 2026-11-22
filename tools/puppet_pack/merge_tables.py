@@ -47,13 +47,14 @@ Prints what it did, one line each. Exit 0 also when there is nothing to do; 1 wh
 import argparse
 import os
 import shutil
+import struct
 import sys
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from puppet_pack import byml, rstb, sarc, tunic, tunic_extra, ui_pack, zs  # noqa: E402
+    from puppet_pack import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
 else:
-    from . import byml, rstb, sarc, tunic, tunic_extra, ui_pack, zs
+    from . import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs
 
 LIST_FILE = "coop-mods.list"
 KEEP_DIR = "_coop-size-table"
@@ -600,10 +601,17 @@ def merge_members(root, romfs, say=print):
             put_back_stale(root, MEMBERS_KEEP, lambda path, rel: os.path.join(path, "romfs", rel), touched,
                            say, "Menus")
         for rel in files:
-            having = [(n, p) for n, p in order if os.path.isfile(os.path.join(p, "romfs", *rel.split("/")))]
+            real = [(n, p) for n, p in order if os.path.isfile(os.path.join(p, "romfs", *rel.split("/")))]
+            if not real:
+                continue
+            win_name, win_path = real[-1]
+            # Row 224: a mod that ships this language's messages only in English (Character Select: USen and EUen)
+            # gives its English messages to every other language (stand_in), so its labels are not lost there.
+            # (in load order, the winner last: a mod above it without this file is the nearest)
+            having = [(n, p) for n, p in order if p != win_path and (
+                (n, p) in real or (p != pack_path and stand_in(p, rel, romfs)))] + [(win_name, win_path)]
             if len(having) < 2:
                 continue
-            win_name, win_path = having[-1]
             pack = pack_path if any(p == pack_path for _, p in having[:-1]) else None
             others = [(n, p) for n, p in having[:-1] if p != pack_path]
             names = ", ".join(n for n, _ in others)
@@ -669,6 +677,43 @@ def add_snail_placeholders(entries):
     return out, changed
 
 
+def pack_edit(rel, name, theirs):
+    """The pack's own change of member `name` of archive `rel` made again on the winner's copies (theirs: {name:
+    [bytes]}), when both changed it: [bytes] or None (no such edit: the winner's is kept). 0.11.9, lane R1: Character
+    Select and the pack both change MenuOverlay_00.buil (the - menu's strip); keeping his alone lost co-op's tabs. The
+    pause menu's layouts get pause_menu's edits on his copy (his panes kept, ours added); a message file gets co-op's
+    labels (strings/<language>) added to his. Raises ui_pack.UiPackError (or the parsers' errors) when it cannot."""
+    if rel == pause_menu.COMMON_ARCHIVE:
+        if name == pause_menu.OVERLAY_LAYOUT:
+            pages = theirs.get(pause_menu.PAGES_LAYOUT) or []
+            if not pages:
+                raise ui_pack.UiPackError("no %s to place the - menu's page by" % pause_menu.PAGES_LAYOUT)
+            place, size = pause_menu.shown_page(pages[0])
+            edit = lambda d: pause_menu.add_minus_page(pause_menu.add_tab(d), place, size)
+        elif name == pause_menu.PAGES_LAYOUT:
+            edit = pause_menu.add_page
+        elif name == pause_menu.SYSTEM_LAYOUT:
+            edit = pause_menu._system_layout
+        else:
+            return None
+        return [edit(d) for d in theirs[name]]
+    # A randomizer seed (OOTRR 0.8: its Randomizer line in the title logo, Logo_USEU_0p, which Title_00.buil points
+    # at) and the pack both change the title layout; the seed's alone lost co-op's title rows (compat-0119). The title
+    # menu's rows go on the winner's copy, and its rows' texts on a Title_00.msbt the winner changed too.
+    if rel == title_menu.TITLE_ARCHIVE:
+        if name != title_menu.TITLE_LAYOUT:
+            return None
+        return [title_menu.add_menu(d) for d in theirs[name]]
+    if rel.startswith("Mals/") and name == title_menu.MSG_FILE:
+        return [title_menu.add_rows(d, title_menu.rows_for(rel)) for d in theirs[name]]
+    if rel.startswith("Mals/") and name.endswith(".msbt"):
+        ours = ui_pack.load_strings(ui_pack.language_of(rel)).get(name)
+        if not ours:
+            return None
+        return [ui_pack.add_labels(d, ours, replace=True) for d in theirs[name]]
+    return None
+
+
 ARCHIVE_DIRS = (("Mals",), ("UI", "Layout2Archive"))
 ARCHIVE_TAILS = (".sarc.zs", ".blarc.zs")
 
@@ -686,13 +731,148 @@ def archives_of(path):
     return out
 
 
+# Row 224 (Character Select's - menu tab read 'msgnotfound', and his page crashed): two ways a mod's messages were lost.
+# (1) He ships Mals only for USen and EUen; in every other language the game reads another mod's archive (the pack's,
+# a seed's) or its own, without his labels and message files. stand_in / english_stand_in: such a mod gives its English
+# messages for the languages it has none of, as the game itself has a text in each language.
+# (2) A message file two mods change was taken whole from the nearer one, the other's labels lost (and a member a mod
+# under the winner gave was not looked at again for the pack's: the - menu's co-op tab labels). merge_msbt: per label.
+ENGLISH = (("US", ("USen", "EUen")), ("", ("EUen", "USen")))   # (language prefix, English archives in that order)
+
+
+def stand_in(path, rel, romfs=None):
+    """The English message archive ("Mals/USen..." or "Mals/EUen...") a mod gives for `rel`, a Mals archive of a language
+    it ships none of; None when it ships `rel`, no English one, or the game has no English copy to tell its changes."""
+    if not rel.startswith("Mals/") or not romfs or os.path.isfile(os.path.join(path, "romfs", *rel.split("/"))):
+        return None
+    lang = ui_pack.language_of(rel)
+    tail = rel.split("/", 1)[1][len(lang):]
+    for prefix, names in ENGLISH:
+        if lang.startswith(prefix):
+            for en in names:
+                cand = "Mals/" + en + tail
+                if (cand != rel and os.path.isfile(os.path.join(path, "romfs", *cand.split("/")))
+                        and os.path.isfile(os.path.join(romfs, *cand.split("/")))):
+                    return cand
+            return None
+    return None
+
+
+def _msbt_attrs(sects):
+    """(ATR1 entry size, [entry bytes]) of read_msbt's sections; (0, None) without ATR1 or with empty entries."""
+    for magic, data in sects:
+        if magic == b"ATR1":
+            n, size = struct.unpack_from("<II", data, 0)
+            if not size:
+                return 0, None
+            if len(data) != 8 + n * size:   # (attribute strings after the entries: not written here)
+                raise ui_pack.UiPackError("the message file's attributes have strings, which are not merged here")
+            return size, [data[8 + i * size:8 + (i + 1) * size] for i in range(n)]
+    return 0, None
+
+
+def merge_msbt(base, game, theirs, only_new=False):
+    """A message file (MSBT bytes) `base` with another mod's labels: each label `theirs` adds or changes from the
+    game's (`game`, or None when the game has no such file) is put in, unless `base` changed that label as well (then
+    base's stays; named). only_new: only the labels the game does not have (english_stand_in). Every other label and
+    text of base is kept as it is. Returns (bytes, [labels both changed]). Raises ui_pack.UiPackError when one of them
+    is not a message file written here (then the caller keeps base whole)."""
+    for d in (base, theirs):
+        names = msbt.read(d).section_names()
+        if "LBL1" not in names or "TXT2" not in names or any(s not in ui_pack._GROWN for s in names):
+            raise ui_pack.UiPackError("a message file with sections not merged here")
+    header, sects, have, texts = ui_pack.read_msbt(base)
+    t_header, t_sects, t_have, t_texts = ui_pack.read_msbt(theirs)
+    if game is not None:
+        _, _, g_have, g_texts = ui_pack.read_msbt(game)
+    else:
+        g_have, g_texts = {}, []
+    if header[0x0c] != t_header[0x0c]:
+        raise ui_pack.UiPackError("the two message files are not in the same encoding")
+    size, attrs = _msbt_attrs(sects)
+    t_size, t_attrs = _msbt_attrs(t_sects)
+    have, texts = dict(have), list(texts)
+    attrs = list(attrs) if attrs is not None else None
+    clash, changed = [], False
+    for label, i in t_have.items():
+        mine = t_texts[i]
+        g = g_texts[g_have[label]] if label in g_have else None
+        if mine == g or (only_new and g is not None):
+            continue
+        attr = t_attrs[i] if attrs is not None and t_attrs is not None and t_size == size else b"\0" * size
+        if label in have:
+            w = texts[have[label]]
+            if w == mine:
+                continue
+            if w != g:
+                clash.append(label)   # (both changed it: base's stays)
+                continue
+            texts[have[label]] = mine
+            if attrs is not None:
+                attrs[have[label]] = attr
+            changed = True
+        else:
+            have[label] = len(texts)
+            texts.append(mine)
+            if attrs is not None:
+                attrs.append(attr)
+            changed = True
+    if not changed:
+        return base, clash
+    if attrs is not None:
+        sects = [(m, struct.pack("<II", len(attrs), size) + b"".join(attrs) if m == b"ATR1" else d) for m, d in sects]
+    return ui_pack.write_msbt(header, sects, have, texts), clash
+
+
+def english_stand_in(codec, mod_file, game_en_file, game_file):
+    """The archive (bytes) a mod with English messages only (stand_in) gives for another language: the game's own
+    archive of that language, with every message file the mod adds and every label it adds to one of the game's, in
+    the mod's English words (the game's labels keep their words in that language)."""
+    def members(path):
+        with open(path, "rb") as f:
+            return _members(codec.unpack(f.read()))
+    mine, _ = members(mod_file)
+    en, _ = members(game_en_file)
+    games, entries = members(game_file)
+    out, added = [], {}
+    for name, datas in mine.items():
+        if datas == en.get(name):
+            continue
+        if name not in en and name not in games:
+            added[name] = datas
+        elif (name.endswith(".msbt") and name in en and name in games
+              and len(datas) == len(en[name]) == len(games[name]) == 1):
+            try:
+                added[name] = [merge_msbt(games[name][0], en[name][0], datas[0], only_new=True)[0]]
+            except (ValueError, KeyError, IndexError, struct.error):
+                pass   # (not a message file written here: the game's words in this language stay)
+    for n, d in entries:
+        out.append((n, added.pop(n)[0] if n in added else d))
+    out.extend((n, x) for n in sorted(added) for x in added[n])
+    return sarc.write(out, data_align=16)
+
+
 def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say, others=()):
     """Merges one archive: the pack's members (pack_path, or None) and those of the other mods under the winner
     (others [(name, path)] in load order). Returns the size the written file needs, or 0."""
     path = os.path.join(win_path, "romfs", *rel.split("/"))
     pack_file = os.path.join(pack_path, "romfs", *rel.split("/")) if pack_path else None
-    more = [os.path.join(p, "romfs", *rel.split("/")) for _, p in others]
-    ins = "".join(f"in {file_line(root, t)}\n" for t in ([pack_file] if pack_file else []) + more)
+    game_romfs = game
+    for _ in rel.split("/"):
+        game_romfs = os.path.dirname(game_romfs)
+    more, english = [], {}   # (english: a mod's English archive standing in for this language -> the game's English)
+    for _, p in others:
+        t = os.path.join(p, "romfs", *rel.split("/"))
+        if not os.path.isfile(t):
+            en = stand_in(p, rel, game_romfs)   # (row 224; merge_members took the mod for it)
+            if en is None:
+                raise MergeError(f"{t} is gone")
+            t = os.path.join(p, "romfs", *en.split("/"))
+            english[t] = os.path.join(game_romfs, *en.split("/"))
+        more.append(t)
+    ins = "".join(f"in {file_line(root, t)}" + (f" for {ui_pack.language_of(rel)}" if t in english else "") + "\n"
+                  for t in ([pack_file] if pack_file else []) + more)
+    gave_english = [n for (n, _), t in zip(others, more) if t in english]
     whose = " and ".join((["the puppet pack's"] if pack_path else []) + [f"{n}'s" for n, _ in others])
     keep = os.path.join(win_path, MEMBERS_KEEP)
     orig_path = os.path.join(keep, *rel.split("/"))
@@ -716,19 +896,50 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     games, _ = _members(game_data)
     # The other mods, the one nearer the winner first (SHARED_NOTE), then the pack (under the mods the list names):
     # a member two of them changed is the nearer one's, as it was when that mod won the file.
-    take, both, lengths = {}, [], []
+    take, both, lengths, ontop, labels_kept, labelled = {}, [], [], [], [], []
     for mod_path, file in list(reversed([(p, t) for (_, p), t in zip(others, more)])) + (
             [(pack_path, pack_file)] if pack_file else []):
-        with open(file, "rb") as f:
-            their_data = codec.unpack(f.read())
-        lengths.append((mod_path, len(their_data)))
+        if file in english:   # (its size table sized its English copy, not this one: no length of it)
+            their_data = english_stand_in(codec, file, english[file], game)
+        else:
+            with open(file, "rb") as f:
+                their_data = codec.unpack(f.read())
+            lengths.append((mod_path, len(their_data)))
         for name, datas in _members(their_data)[0].items():
-            if datas == games.get(name) or datas == theirs.get(name) or name in take:
-                continue   # (left as the game has it, or the winner has the same, or a mod before gave it)
+            if datas == games.get(name) or datas == theirs.get(name):
+                continue   # (left as the game has it, or the winner has the same)
+            base = take.get(name, theirs.get(name, games.get(name)))
+            if (rel.startswith("Mals/") and name.endswith(".msbt") and base is not None and len(base) == 1
+                    and len(datas) == 1 and len(games.get(name) or [b""]) == 1):
+                # A message file: label by label (row 224), a label two changed stays the nearer one's (or the
+                # winner's). Not a message file written here: the member as below.
+                try:
+                    made, clash = merge_msbt(base[0], (games.get(name) or [None])[0], datas[0])
+                except (ValueError, KeyError, IndexError, struct.error):
+                    made = None
+                if made is not None:
+                    if made != base[0]:
+                        if theirs.get(name, games.get(name)) != games.get(name) or name in take:
+                            labelled.append(name)   # (both kept: the labels of each)
+                        take[name] = [made]
+                    labels_kept.extend(f"{name} {label}" for label in clash)
+                    continue
+            if name in take:
+                continue   # (a mod before gave it)
             if theirs.get(name, games.get(name)) == games.get(name):
                 take[name] = datas   # (the winner left it as the game has it, or has none)
             elif name not in both:
-                both.append(name)    # (both changed it: the winner's stays)
+                made = None
+                if mod_path == pack_path:   # (the pack's change made again on the winner's: both kept)
+                    try:
+                        made = pack_edit(rel, name, {**games, **theirs})
+                    except (ui_pack.UiPackError, OSError, ValueError, KeyError, IndexError, struct.error) as e:
+                        say(f"Menus: co-op's {name} could not be made on {win_name}'s ({e}).")
+                if made is not None:
+                    take[name] = made
+                    ontop.append(name)
+                else:
+                    both.append(name)    # (both changed it: the winner's stays)
     out, done = [], set()
     for n, d in entries:
         if n in take:
@@ -755,8 +966,14 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     write_atomic(path, data)
     say(f"Menus: the game reads {win_name}'s {rel}; merged in {whose} members ({len(take)}: "
         f"{', '.join(sorted(take)) or 'none'}). Its own copy is kept in {win_name}/{MEMBERS_KEEP}."
+        + (f" Both changed {', '.join(sorted(ontop))}: co-op's part made on {win_name}'s (both kept)."
+           if ontop else "")
         + (f" Both changed {', '.join(sorted(both))}: {win_name}'s kept (the co-op part of it is missing)."
            if both else "")
+        + (f" More than one changed {', '.join(sorted(set(labelled)))}: the labels of each kept." if labelled else "")
+        + (f" A label both changed, the nearer mod's kept: {', '.join(labels_kept)}." if labels_kept else "")
+        + (f" {', '.join(gave_english)}: no archive in this language, its English messages taken."
+           if gave_english else "")
         + (" Its Customize screen's messages got co-op's placeholders (co-op's customization in it)."
            if placeholders else ""))
     return need
@@ -1265,10 +1482,137 @@ def merge_gamedata_one(root, codec, fname, win_name, win_path, others, game, say
     return need
 
 
+ONE_TIME_FILE = "coop-one-time-keys.txt"   # beside the mods (the module's kOneTimeFile, coop_pickups.h)
+ONE_TIME_HEAD = "coop-one-time-keys 1"
+KEY_TABLE = "Bool64bitKey"   # the game's one table of 64-bit-key flags, keyed by a placement's Hash
+SAVED_ONCE = 24              # ResetTypeValue of a placement the save keeps done (chests, heart pieces)
+RESETTING = (88, 280)        # ResetTypeValue of pots, crates, rocks (88) and enemies, flying pots (280)
+BANC = "Banc"   # (under the game's romfs)
+# The placed one-time pickups by actor name: CoopPickups::IsPickup's kinds (Gold Skulltulas and their tokens, heart
+# containers and pieces, placed rupees and hearts, silver rupees) and the game's other placed items it saves once
+# (a Deku Nut, Seed and Stick, the fire arrows).
+PICKUP_PREFIXES = ("Obj_Rupee_", "Obj_RupeeToken_", "Obj_Heart", "Obj_DekuNut", "Obj_DekuSeed", "Obj_DekuStick",
+                   "Obj_Arrow_")
+PICKUP_NAMES = ("Enemy_Skulltula_Gold", "Obj_Token_Gold")
+
+
+def _num(v):
+    return v.v if isinstance(v, byml._Num) else v
+
+
+def is_placed_pickup(name):
+    return name in PICKUP_NAMES or name.startswith(PICKUP_PREFIXES) or (
+        name.startswith("Obj_") and "Heart_Piece" in name)
+
+
+def key_rows(data):
+    """{Hash: (ResetTypeValue, ExtraByte)} of a saved values list's 64-bit-key table."""
+    root = byml.loads(data)
+    rows = root.get("Data", {}).get(KEY_TABLE) if isinstance(root, dict) else None
+    if not isinstance(rows, list):
+        raise MergeError(f"no {KEY_TABLE} table")
+    out = {}
+    for r in rows:
+        if isinstance(r, dict) and "Hash" in r:
+            out[int(_num(r["Hash"]))] = (_num(r.get("ResetTypeValue", -1)), _num(r.get("ExtraByte", 0)) or 0)
+    return out
+
+
+def saved_once(row):
+    """A row the save keeps once done: type 24 and no ExtraByte (OOTRR pots.rs permanent)."""
+    return row is not None and row[0] == SAVED_ONCE and row[1] == 0
+
+
+def placed_pickups(codec, romfs):
+    """{Hash: actor name} of every placed one-time pickup in the game's own Banc (a seed keeps the placement's Hash
+    when it swaps the actor for another item, OOTRR slice/pickups.rs)."""
+    out = {}
+
+    def walk(v):
+        if isinstance(v, dict):
+            g, h = v.get("Gyaml"), v.get("Hash")
+            if isinstance(g, str) and h is not None and is_placed_pickup(g):
+                out[int(_num(h))] = g
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    for dirpath, _, fnames in os.walk(os.path.join(romfs, BANC)):
+        for f in sorted(fnames):
+            if ".bcett.byml" not in f:
+                continue
+            with open(os.path.join(dirpath, f), "rb") as fh:
+                walk(byml.loads(codec.unpack(fh.read())))
+    return out
+
+
+def one_time_keys(root, romfs, say=print):
+    """Row 219 (#84): the 64-bit keys of every placement the game, as it is served, gives once, written to
+    `<mods>/coop-one-time-keys.txt` for the co-op module, which shares them from the session's start (the host's
+    snapshot carries them to a player who joins or loads later, and a copy still loaded in another game goes):
+
+    - `pickup <hex>`: a placed one-time pickup of the game's own Banc whose key the served list keeps saved once;
+    - `holder <hex>`: a key the served list keeps saved once and the game's own list resets (88, 280): a randomizer
+      seed's shuffled pot, crate, flying pot, beehive, rock or grass (OOTRR pot_slice/persist.rs), which gives its
+      item once.
+
+    The served list is the winner's GameData/<the game's list> (merge_gamedata ran first), else the game's own; its
+    line `served <path under mods> <FNV-1a 64>` (or `served - -`) lets the module drop the holders when that list
+    changed since (a seed built or removed without a kit start). The file is written again only when the `game` or
+    `served` line changed. Returns 1 when it could not be written (said why), else 0."""
+    out_path = os.path.join(root, ONE_TIME_FILE)
+    gd = os.path.join(romfs, *GAMEDATA[1:]) if romfs else ""
+    lists = sorted(f for f in os.listdir(gd) if f.startswith("GameDataList") and f.endswith(GAMEDATA_TAIL)) \
+        if gd and os.path.isdir(gd) else []
+    if len(lists) != 1 or not os.path.isdir(os.path.join(romfs, BANC)):
+        if os.path.isfile(out_path):
+            os.remove(out_path)   # (no game files: an old list must not stay)
+        say("One-time pickups: not listed without the game's own GameData and Banc (--romfs): each is shared once "
+            "seen in a game, as before.")
+        return 0
+    fname = lists[0]
+    game_path = os.path.join(gd, fname)
+    having = [p for _, p in load_order(root) if fname in gamedata_of(p)]
+    served_path = os.path.join(having[-1], *GAMEDATA, fname) if having else game_path
+    game_line = "game " + fnv64(game_path)[0]
+    served_rel = os.path.relpath(served_path, root).replace(os.sep, "/") if having else "-"
+    served_line = f"served {served_rel} {fnv64(served_path)[0] if having else '-'}"   # (the hash last: a path has spaces)
+    old = (read_text(out_path) or "").split("\n")
+    if old[:3] == [ONE_TIME_HEAD, game_line, served_line]:
+        say("One-time pickups: listed already (the same game and saved values list as at an earlier start).")
+        return 0
+    try:
+        codec = Codec(romfs)
+        with open(game_path, "rb") as f:
+            game_rows = key_rows(codec.unpack(f.read()))
+        served_rows = game_rows
+        if having:
+            with open(served_path, "rb") as f:
+                served_rows = key_rows(codec.unpack(f.read()))
+        pickups = sorted(h for h in placed_pickups(codec, romfs) if saved_once(served_rows.get(h)))
+        holders = sorted(h for h, r in served_rows.items()
+                         if saved_once(r) and h in game_rows and game_rows[h][0] in RESETTING)
+    except (OSError, ValueError, KeyError, TypeError, MergeError) as e:
+        if os.path.isfile(out_path):
+            os.remove(out_path)
+        say(f"One-time pickups: not listed ({e}): each is shared once seen in a game, as before.")
+        return 1
+    text = "\n".join([ONE_TIME_HEAD, game_line, served_line] + [f"pickup {h:016x}" for h in pickups]
+                     + [f"holder {h:016x}" for h in holders]) + "\n"
+    write_atomic(out_path, text.encode("utf-8"))
+    say(f"One-time pickups: {len(pickups)} placed pickups and {len(holders)} one-time holders"
+        f"{' of ' + served_rel if having else ''} listed for co-op ({ONE_TIME_FILE}).")
+    return 0
+
+
 def undo(root, say=print):
     """Puts each kept original back, but only over the table the merge wrote: a new seed put into the folder since
     keeps its own table (the kept one is the old seed's). The kept folder and the mark go either way."""
     n = 0
+    if os.path.isfile(os.path.join(root, ONE_TIME_FILE)):   # (one_time_keys: written again at the next start)
+        os.remove(os.path.join(root, ONE_TIME_FILE))
     for name, path in find_mods(root).items():
         put_back_models(root, name, path, say)   # (merge_self_models: each Link model back where it was written)
         gamedata_keep = os.path.join(path, GAMEDATA_KEEP)
@@ -1355,6 +1699,7 @@ def main(argv=None):
         rows_failed, fit = merge_rows(a.mods, a.romfs)
         for k, n in merge_gamedata(a.mods, a.romfs).items():
             fit[k] = max(fit.get(k, 0), n)
+        once_failed = one_time_keys(a.mods, a.romfs)   # (row 219: on the saved values list the game will read)
         members_failed, members_fit = merge_members(a.mods, a.romfs)
         for k, n in members_fit.items():
             fit[k] = max(fit.get(k, 0), n)
@@ -1362,7 +1707,7 @@ def main(argv=None):
         failed = merge_mods(a.mods, a.romfs, fit=fit) + members_failed + models_failed
         # Last, on the tables as the game will read them: the pack's menu files only where they can load.
         menus_failed = guard_menus(a.mods, a.romfs)
-        return 1 if (failed or rows_failed or menus_failed) else 0
+        return 1 if (failed or rows_failed or menus_failed or once_failed) else 0
     except SystemExit:  # (zs._zstd: no zstandard package)
         print("Size tables: not merged (this Python has no zstandard package): with a mod that has its own size "
               "table, the other players can't be shown.")

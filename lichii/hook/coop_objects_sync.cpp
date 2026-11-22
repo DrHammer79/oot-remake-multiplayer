@@ -6,6 +6,7 @@
 #include "coop_dungeon.h"
 #include "coop_enemy_shots.h"
 #include "coop_guard.h"
+#include "coop_pickups.h"
 #include "coop_world.h"
 
 #include <algorithm>
@@ -260,6 +261,7 @@ std::optional<bool> BossHurt(const std::vector<Seen>& seen, std::span<const std:
 
 bool IsShared(std::string_view name) {
     if (IsOwnPuzzle(name)) return false;  // before the Npc_ rule: the pond owner is one
+    if (IsOwnFollower(name)) return false;  // before the Npc_ and Animal_ rules (row 214)
     // Enemy shots (Enemy_MoblinClub_ShockWave is named like an enemy)
     // stay with the spawn sync: the game whose enemy fired one sends it.
     if (CoopEnemyShots::IsEnemyShot(name)) return false;
@@ -269,11 +271,6 @@ bool IsShared(std::string_view name) {
         return !name.starts_with("Npc_Navi") && !name.starts_with("Npc_Equipment") &&
                !name.starts_with("Npc_Invisible");
     }
-    // The horse a player rides (CoopRide::kHorse) is each game's own: shared,
-    // one game's Epona was a copy, frozen or pulled back under its rider, or
-    // the other game drew two horses (its copy and the ride's stand-in).
-    // The ride sync (coop_ride.h) shows the other player's horse instead.
-    if (name == "Animal_Epona_Adult") return false;
     return name.starts_with("Enemy_") || name.starts_with("Animal_") ||
            CoopWorld::IsBreakable(name);
 }
@@ -298,13 +295,6 @@ bool IsOwnPuzzle(std::string_view name) {
     // and _GetGoldScale, coop/host game_items). The fish are shared (IsFish,
     // fishing-2): the lure rules give each fish to the game whose lure it
     // goes for.
-    // Player report #64 (dungeon-sync-b, Revirie's 0.11.0 log). Child Ruto in
-    // Jabu-Jabu (Npc_Zora_Ruto_Child_001) is lifted and carried by one Link
-    // (her 'Act_LiftRest' animations): her AI follows that game's own Link.
-    // Shared as an NPC copy, the owner's 'Crouch' was played over the carried
-    // Ruto, so she dropped as soon as she was picked up, and again when the
-    // owner left the room (a new owner). Each game runs its own Ruto; the
-    // room flags she sets (switches, rooms cleared) stay shared.
     // Player report #100 (GitHub #253). A Business Scrub
     // (Enemy_Scrub_Business, _Leaf, _Seed) is a shop: once beaten, its talk
     // event (Event/EventFlow/Enemy_Scrub_Business_Common) turns it to our
@@ -316,8 +306,42 @@ bool IsOwnPuzzle(std::string_view name) {
     // over a scrub our Link had beaten and was talking to (the fishman's and
     // Ruto's case). Each game runs its own; the items it sells stay shared.
     return name.starts_with("Enemy_Scrub_Deku_Brothers") || name.starts_with("Enemy_Scrub_Business") ||
-           name.starts_with("Enemy_Scrub_ForestStage") || name.starts_with("Npc_Hylia_Fishman") ||
-           name.starts_with("Npc_Zora_Ruto_Child");
+           name.starts_with("Enemy_Scrub_ForestStage") || name.starts_with("Npc_Hylia_Fishman");
+}
+
+bool IsOwnFollower(std::string_view name) {
+    // Row 214 (the owner's 0.11.8 playtest, Ganon's Castle collapse). An actor whose own AI goes with the
+    // local Link: it waits for it, runs ahead of it, comes to it or is carried by it. Each game's AI reads only
+    // its own Link and its own story flags (the escape's EscapeFromCrumblingGanonCastle_* are per game), so a
+    // copy that plays one owner's actor shows it going with that owner's Link, and an owner change (the
+    // distance rule, an event claim) puts one game's escort, at its place and step, on another game whose own
+    // AI is at another step: Zelda's owner went P4 -> P1 -> P2 -> P4 -> P2 in the escape and she was stuck
+    // for nearly every player. Each game runs its own; what they do for the story (flags, items) is shared by
+    // the flag and item syncs as before. From the game's own AI (romfs Pack/Actor, scan in docs/objects.md
+    // "Followers"):
+    // - Npc_Hylia_Zelda_Adult (and _Scalable): NpcHyliaZeldaAdult.AISchedulePatrolMove runs her rail and
+    //   waits at its points for the player (ReachToPlayerWhenRailPointWait, ReachToPlayerDistance,
+    //   IsPlayerGoesFirst). Placed in CrumblingGanonCastle (the escape), FinalBattleField and GanonStage.
+    // - Npc_Zora_Ruto_Child (player report #64): lifted and carried by one Link ('Act_LiftRest'); shared,
+    //   the owner's 'Crouch' was played over the carried Ruto, so she dropped as soon as she was picked up,
+    //   and again when the owner left the room (a new owner). Her room flags stay shared.
+    // - Animal_Dog_* (the Market's dogs, Richard in Market and Kakariko): Animal_Dog.brain.FollowPlayer.
+    // - Animal_Epona_Adult (CoopRide::kHorse), Animal_Epona_Child, Animal_Horse, Animal_Horse_For_Ingo:
+    //   HorseMoveToPlayer / QueryQuadrupedCalcFollowTargetPos (the horse comes to the Link that called it).
+    //   Shared, one game's Epona was a copy, frozen or pulled back under its rider, or the other game drew two
+    //   horses (its copy and the ride's stand-in); the ride sync (coop_ride.h) shows the other's horse.
+    // - Npc_Hylia_Dampe_002 (Dampe's ghost, the Graveyard race): its own AI, outside any event, runs the race
+    //   rail ahead of the player and paces by it (GetDampeRaceParam, DistWithPlayer, DistanceFromRailRatePos,
+    //   HasPassFirstRailPoint). The race's prize flag stays shared.
+    // Not followers: the wagon and archery horses (no follow in their AI), Navi (never shared, Npc_Navi), the
+    // shop clerks and Pierre (ToPlayerDistance only turns them to the Link that talks or calls), Kaepora (only
+    // the event nodes every NPC has, Event*AISchedule*: his flights are events, which the event claim gives to
+    // the player in them) and the living Dampe, Npc_Hylia_Dampe_001 (his digging tour's follow is event nodes
+    // too, EventFollowToTargetActor; his rounds stay shared, issue 200).
+    return name.starts_with("Npc_Hylia_Zelda_Adult") || name.starts_with("Npc_Zora_Ruto_Child") ||
+           name == "Npc_Hylia_Dampe_002" ||
+           name.starts_with("Animal_Dog_") || name.starts_with("Animal_Epona_") || name == "Animal_Horse" ||
+           name.starts_with("Animal_Horse_For_Ingo");
 }
 
 bool IsFish(std::string_view name) {
@@ -526,28 +550,12 @@ std::uint8_t AttackBits(std::optional<bool> attacking) {
                                      (*attacking ? proto::object_state::attacking : 0));
 }
 
-bool FightsAsBoss(std::string_view name) {
-    // Enemy survey (2026-11-21): one-on-one fighters that are no Enemy_MiddleBoss_ actor. Boss-style on the server
-    // only (the group's boss bit: 40 m turns, a downed owner left at once, the longer fight lock); their AI keeps
-    // the plain path (not IsBossOrPart: the native boss sync was never tried on them).
-    if (name.find("_Dictionary") != std::string_view::npos || name.find("_Haribote") != std::string_view::npos) {
-        return false;
-    }
-    static constexpr std::array<std::string_view, 9> kFighters{
-        "Enemy_IronKnuckle_", "Enemy_Poe_Amy", "Enemy_Poe_Beth", "Enemy_Poe_Joelle", "Enemy_Stalfos",
-        "Enemy_Lizalfos",     "Enemy_Dinolfos", "Enemy_Wolfos_White", "Enemy_Moblin_Club"};
-    for (const std::string_view f : kFighters) {
-        if (name.starts_with(f)) return true;
-    }
-    return false;
-}
-
 std::string_view PackFamily(std::string_view name) {
     // Pair/pack survey (2026-11-21): these fight together by messages each one's AI writes into its ally's
     // blackboard (Lizalfos/Dinolfos: SetBattlingAllyFromReferenceLink, IsRequestingCoop, IsReceivedCoop*Message;
     // Wolfos: AllAlliesDisableMelee, tag WolfosAlly, IsDisableMeleeBattle). A copy's held brain sends none, so
     // with two owners each game runs half a pair with no partner. One family near together is one group: one
-    // owner, the whole pack's teamwork in one game, and a turn moves the pack together.
+    // owner, the whole pack's teamwork in one game (no boss bit: plain enemies, no turns).
     if (name.find("_Dictionary") != std::string_view::npos || name.find("_Haribote") != std::string_view::npos) {
         return {};
     }
@@ -656,22 +664,15 @@ std::vector<proto::ObjectGroupEntry> GroupsOf(
                         if (std::isfinite(d2) && d2 <= kPackReach * kPackReach) root = &r;
                     }
                 }
-                // Boss-style when any of the pack near its root fights as one (a white Wolfos in a plain pack):
-                // the root's bit is what the server's turns read.
-                bool boss = FightsAsBoss(m.name) || FightsAsBoss(root->name);
-                for (std::size_t i = 0; !boss && i < walk.size(); ++i) {
-                    const GroupInput& r = walk[i];
-                    const float d2 = dist2(r, *root);
-                    boss = PackFamily(r.name) == family && FightsAsBoss(r.name) && std::isfinite(d2) &&
-                           d2 <= kPackReach * kPackReach;
-                }
-                // A lone plain one sends nothing unless it was linked before (then once, on its own again).
-                if (root != &m || boss || linked.contains(m.id)) {
-                    out.push_back({m.id, root->id, boss ? proto::object_group::boss : std::uint8_t{0}});
+                // Never the boss bit: their AI is a plain enemy's (it chases only its owner's Link), and the boss
+                // rules would pass the pack between players, the mob shuttle the owner settled off (geno-fix-0119).
+                // A lone one sends nothing unless it was linked before (then once, on its own again).
+                if (root != &m || linked.contains(m.id)) {
+                    out.push_back({m.id, root->id, std::uint8_t{0}});
                 }
                 continue;
             }
-            if (IsBossOrPart(m.name) || FightsAsBoss(m.name)) out.push_back({m.id, m.id, proto::object_group::boss});
+            if (IsBossOrPart(m.name)) out.push_back({m.id, m.id, proto::object_group::boss});
             continue;
         }
         const GroupInput* root = nullptr;
@@ -777,6 +778,23 @@ bool IsLateEncounter(std::string_view name) {
 
 bool CopyGoesWithoutDeath(std::string_view name, bool dungeon) {
     return !dungeon && IsLateEncounter(name);  // (a dungeon's rooms count their own kills: as before)
+}
+
+bool OwnLogicEncounter(std::string_view name, std::string_view scene) {
+    return scene.starts_with("GerudoFortress") && name.starts_with("Enemy_MiddleBoss_GerudoThief");
+}
+
+bool IsOwnInScene(std::string_view name, std::string_view scene) {
+    if (!scene.starts_with("GerudoFortress")) {
+        return false;
+    }
+    for (const std::string_view carpenter :
+         {"Npc_Hylia_013_Adult", "Npc_Hylia_014_Adult", "Npc_Hylia_015_Adult", "Npc_Hylia_016_Adult"}) {
+        if (name == carpenter) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string_view AnimationBase(std::string_view name) {
@@ -1378,13 +1396,16 @@ bool Sync::GoesWithoutDeath(std::uint64_t address, std::uint64_t now_us) {
     if (o.quiet_gone) {
         return true;
     }
-    if (!bound_.contains(address) || !IsLateEncounter(o.name)) {
+    // Row 219: a seed's one-time flying pot (CoopPickups::IsOneTimeHolder, by its placement) gives its item once, in
+    // the game where it died; its own death here would drop the item a second time.
+    const bool holder = o.id.kind == proto::ObjectKind::placed && CoopPickups::IsOneTimeHolder(o.id.value);
+    if (!holder && (!bound_.contains(address) || !IsLateEncounter(o.name))) {
         return false;  // only a director's copy of another game's encounter (our own game made the others)
     }
     if (const auto own = owners_.find(o.id); own != owners_.end() && own->second.player == self_) {
         return false;  // handed to us: ours to fight and to die here
     }
-    if (!CopyGoesWithoutDeath(o.name, CoopDungeon::IsDungeonScene(scene_))) {
+    if (!holder && !CopyGoesWithoutDeath(o.name, CoopDungeon::IsDungeonScene(scene_))) {
         return false;
     }
     // Its look follows its owner's own death until the owner's OBJECT_REMOVE dead deletes it (dead_now there);
@@ -1396,8 +1417,10 @@ bool Sync::GoesWithoutDeath(std::uint64_t address, std::uint64_t now_us) {
     o.hit_sum = 0;
     o.hit_place.reset();
     o.hit_record.reset();
-    notes_.emplace_back("report 200: its owner killed it: our copy of their encounter goes without a death here (its "
-                        "death would run our game's own defeat event with our Link): " + o.name);
+    notes_.emplace_back(holder ? "row 219: its owner killed it: a one-time holder, ours goes without a death here (its "
+                                 "death would drop its item again): " + o.name
+                               : "report 200: its owner killed it: our copy of their encounter goes without a death here "
+                                 "(its death would run our game's own defeat event with our Link): " + o.name);
     return true;
 }
 
@@ -1915,7 +1938,10 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     }
     for (const Seen& s : seen) {
         if (s.hash != 0 && s.hash != kNoHash) {
-            if (const auto t = taken_.find(s.hash); t != taken_.end() && RemovedWhenTaken(s.name)) {
+            // Row 219: a listed one-time placement goes by its key whatever its actor now is (a seed's
+            // swapped pickup, its one-time pot): CoopPickups::IsOneTime.
+            if (const auto t = taken_.find(s.hash);
+                t != taken_.end() && (RemovedWhenTaken(s.name) || CoopPickups::IsOneTime(s.hash))) {
                 // A chest has no near rule (issue 87): it is bound beside our
                 // Link too, and shown open (below, issue 195).
                 const bool chest = s.name.starts_with("Obj_TBox_");
@@ -2156,8 +2182,8 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 }
             }
         }
-        if (!IsShared(s.name)) {
-            continue;
+        if (!IsShared(s.name) || IsOwnInScene(s.name, scene_)) {
+            continue;  // (row 212: the fortress's carpenters are each game's own)
         }
         now_seen[s.address] = &s;
         const auto it = objects_.find(s.address);
@@ -3227,6 +3253,12 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         if (std::find(unready_.begin(), unready_.end(), o.name) != unready_.end()) {
             flags |= proto::object_presence::unready;
+        }
+        if (takes_turns_ && IsBossOrPart(o.name)) {
+            flags |= proto::object_presence::takes_turns;  // boss turns: this build reads attacks
+        }
+        if (!bound_.contains(address) && OwnLogicEncounter(o.name, scene_)) {
+            flags |= proto::object_presence::own_logic;  // row 212: our cell logic made it: it stays with such a game
         }
         present.push_back({o.id, flags});
     }

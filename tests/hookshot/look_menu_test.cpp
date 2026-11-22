@@ -233,14 +233,13 @@ TEST_CASE("look menu (0.11.9): the Character page: three pages of six, ZL and ZR
     start[Part::master_hilt] = *CoopColors::Parse("red");   // (a preset: its name shows)
     page.Open(start);
     auto v = page.view();
-    REQUIRE(v.rows.size() == 7);                    // the heading and six parts: one screen
+    REQUIRE(v.rows.size() == 6);                    // the heading and five parts: one screen
     CHECK(v.rows[0].kind == 3);
     CHECK(v.rows[0].name == "Link (page 1 of 4)");
-    CHECK(v.rows[1].name == "Hair Colour");
-    CHECK(v.rows[2].name == "Eye Colour");
-    CHECK(v.rows[3].name == "Kokiri Tunic");
-    CHECK(v.rows[4].name == "Cap Trim");
-    CHECK(v.rows[6].name == "Zora Tunic");
+    CHECK(v.rows[1].name == "Eye Colour");
+    CHECK(v.rows[2].name == "Kokiri Tunic");
+    CHECK(v.rows[3].name == "Cap Trim");
+    CHECK(v.rows[5].name == "Zora Tunic");
     CHECK(v.selected == 1);
     page.Press(Input::kPageNext);
     v = page.view();
@@ -264,11 +263,13 @@ TEST_CASE("look menu (0.11.9): the Character page: three pages of six, ZL and ZR
     page.Press(Input::kPagePrev);
     page.Press(Input::kPagePrev);
     CHECK(page.GroupShown() == 2u);
-    // Every part is on exactly one page.
+    // Every part is on exactly one page, but the hair: no row (0.11.9 lane, its tint too weak; on the wire still).
     std::vector<Part> seen;
     for (const auto& g : CoopLookMenu::Groups()) seen.insert(seen.end(), g.parts.begin(), g.parts.end());
-    CHECK(seen.size() == CoopLook::kParts);
-    for (const auto& info : CoopLook::Parts()) CHECK(std::count(seen.begin(), seen.end(), info.part) == 1);
+    CHECK(seen.size() == CoopLook::kParts - 1);
+    for (const auto& info : CoopLook::Parts()) {
+        CHECK(std::count(seen.begin(), seen.end(), info.part) == (info.part == Part::hair ? 0 : 1));
+    }
     // A on a part: the colour mixer, which a page turn leaves alone; X resets every part.
     page.Press(Input::kDown);
     page.Press(Input::kDown);
