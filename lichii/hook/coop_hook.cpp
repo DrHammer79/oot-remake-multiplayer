@@ -2357,6 +2357,22 @@ private:
                 reading->in_menu = menu->menu_open;
             }
 #endif
+            // Row 164 follow-up: our world standing still with no menu named (the quick-switch item menu) is
+            // paused too (coop/host/sampler.hpp WorldStill). LICHII_COOP_STILL=0 turns it off.
+            static const bool still_on = !(std::getenv("LICHII_COOP_STILL") != nullptr &&
+                                           std::string_view(std::getenv("LICHII_COOP_STILL")) == "0");
+            if (still_on) {
+                const bool was = world_still_.still();
+                reading->world_still = world_still_.step(*reading, CoopEvery::NowUs());
+                if (reading->world_still != was && !reading->in_menu.value_or(false)) {
+                    LOG_INFO(Core, "coop: status: our world {} (Link's '{}' at frame {:.1f}): {}",
+                             reading->world_still ? "stands still with no menu named" : "runs again",
+                             reading->animation ? reading->animation->name : std::string(),
+                             reading->animation ? reading->animation->frame : 0.0f,
+                             reading->world_still ? "paused for the others (the quick-switch menu or a stall)"
+                                                  : "playing");
+                }
+            }
         }
         return reading;
     }
@@ -2719,6 +2735,7 @@ private:
     bool queue_sizes_logged_ = false;  // the game's flag queue sizes, logged once
     // Kept across frames: a drawn sword shows in the game's memory for a moment only.
     coop::host::PlayerReader::DrawnState drawn_state_{};
+    coop::host::WorldStill world_still_;  // row 164 follow-up: our world standing still with no menu named
     bool sharing_ = false;  // a flag list is shared; set by Begin
     CoopBoss::StaleBossFlags stale_boss_;  // issue 148: shut boss doors from older builds
     bool boss_alive_due_ = false;          // row 159: BOSS_ALIVE to send after our own save load (host)
