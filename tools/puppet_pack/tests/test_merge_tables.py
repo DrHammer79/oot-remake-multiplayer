@@ -757,7 +757,7 @@ class MergeRowsBetweenModsTest(MergeRowsTest):
         charsel = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CharacterMenu_00", "Name": "CharacterMenu_00"}
         self.put_rows(PACK, [title_common, other, coop], screens)
         self.put_rows(self.CS, [title, other, charsel], screens)
-        seed = self.put_rows(self.HAND, [title, other], screens)
+        seed = read(self.put_rows(self.HAND, [title, other], screens))
         self.assertEqual(self.run_all()[0], 0)
         got = self.rows(self.HAND, screens)
         self.assertEqual([r["Name"] for r in got], ["Title_00", "Other_00", "CoopMenu_00", "CharacterMenu_00"])   # (the pack's rows, then the others')
