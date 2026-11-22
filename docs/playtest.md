@@ -236,9 +236,10 @@ pathfinding, so give it points with a clear line between them and use `warp` for
 
 1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L.
    `live.py start --playtest [--lane L]` does it for its two games (A = p1, B = p2: the runner's
-   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`; `HOS_CONTROL` was set already), and its
-   answer lists the ports. Give it `--max-minutes` for a long run (30 by default). By hand: set
-   `LICHII_COOP_PLAYTEST_PORT` (and `HOS_CONTROL`) in each game's environment. Each game's log says
+   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`, and `LICHII_COOP_CHEATS=1` for `give`;
+   `HOS_CONTROL` was set already), and its answer lists the ports. Give it `--max-minutes` for a long run (30 by
+   default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL` and `LICHII_COOP_CHEATS=1` in each game's
+   environment (or `live.py start --env A:LICHII_COOP_PLAYTEST_PORT=5011 --env B:...`). Each game's log says
    `coop: playtest: listening on 127.0.0.1:<port>`.
 2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
    and, for games from `live.py start`, the same `--session`: each call then counts as a tester command for the
