@@ -207,6 +207,8 @@ CZ = [("cz_head (HEAD_CALL)", 0x804D756C, 0x804D7570), ("cz_frame (FRAME_SITE)",
 SHIFT = 0x8001FF00
 def npc(rel):
     r = rel.replace("\\", "/")
+    if re.match(r"romfs/Tex/([^/]*_Player_|Angin_Tile_)", r, re.I):
+        return False   # Link own textures, named by his kept Link models (row 242; kit-paths.ps1 Test-KitCharacterSelectNpcFile)
     return bool(re.match(r"romfs/(Tex|Phive|Sound)/", r, re.I) or re.match(r"romfs/Model/Player_(Adult|Child)_C\d{3}\.", r, re.I)
                 or re.match(r"romfs/Model/Player_Dark_", r, re.I) or r.lower() == "romfs/pack/actor/enemy_middleboss_darklink.pack.zs")
 def records(d):
@@ -290,7 +292,7 @@ elif cmd == "complete":
                 p = os.path.join(r, n)
                 if npc(os.path.relpath(p, new)):
                     os.remove(p)
-        for d in ("Tex", "Phive", "Sound"):
+        for d in ("Phive", "Sound"):   # (romfs/Tex goes file by file above: Link own textures stay)
             shutil.rmtree(os.path.join(romfs, d), ignore_errors=True)
     ex = os.path.join(new, "exefs")
     code = sorted(n for n in os.listdir(ex) if n.lower().endswith(".ips") and os.path.isfile(os.path.join(ex, n))) if os.path.isdir(ex) else []
