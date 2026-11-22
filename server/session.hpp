@@ -808,7 +808,7 @@ class Session {
       // A boss turn (next_turn): its change does not start boss_hitter_cooldown_us (hitter_changed_at).
       bool turn = false;
       // Which rule asked (the 'hand-over:' log line, review-01111-b 17).
-      std::string why;
+      std::string why{};
     };
     std::optional<Ask> ask;
     // DAMAGE that came while the owner hold had not chosen its owner yet

@@ -2463,8 +2463,11 @@ bool Session::ask_handover(const ObjectId& oid, Object& o, ConnectionId to,
     ++stats_.kept_by_logic;
     return false;
   }
-  o.ask = Object::Ask{to, now_us};
-  o.ask->why = std::move(why);
+  Object::Ask ask;
+  ask.to = to;
+  ask.at = now_us;
+  ask.why = std::move(why);
+  o.ask = std::move(ask);
   o.candidate.reset();
   send(*o.owner, kChannelOwnership, HandoverAsk{oid, o.epoch, target->second.number});
   ++stats_.handover_asked;
