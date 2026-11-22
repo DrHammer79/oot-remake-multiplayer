@@ -451,6 +451,7 @@ constexpr Entry kzh_Hans[] = {
     {"In this co-op game the host sets this.", "联机时由房主设置。"},
     {"Counts after a restart.", "重启后生效。"},
     {"Type or Ctrl+V, then Enter. Esc: as it was.", "输入或按 Ctrl+V，然后按 Enter。Esc：保持原样。"},
+    {"{} characters ({} of {} bytes)", "{} 个字符（{} / {} 字节）"},
     {"Restart the game to use the changes.", "重启游戏以应用改动。"},
     {"Switch", "切换"},
     {"Co-op: waiting for the host's list of mods.", "联机：正在等待房主的模组列表。"},
@@ -1751,6 +1752,7 @@ constexpr Entry kzh_Hant[] = {
     {"In this co-op game the host sets this.", "連線時由房主設定。"},
     {"Counts after a restart.", "重新啟動後生效。"},
     {"Type or Ctrl+V, then Enter. Esc: as it was.", "輸入或按 Ctrl+V，然後按 Enter。Esc：保持原樣。"},
+    {"{} characters ({} of {} bytes)", "{} 個字符（{} / {} 字節）"},
     {"Restart the game to use the changes.", "重新啟動遊戲以套用變更。"},
     {"Switch", "切換"},
     {"Co-op: waiting for the host's list of mods.", "連線：正在等待房主的模組清單。"},
@@ -3602,11 +3604,13 @@ constexpr SplitShape kSplitShapes[] = {
     // (0.11.9, ui-tabs)
     {{"", " (page ", " of ", ")"}, 1, 4, "{} (page {} of {})"},
     // (title-join: the title page's hint)
-    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)"},    // (a page's header: the page's name and, when its rows take more than one
+    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)"},
+    // (a page's header: the page's name and, when its rows take more than one
     // page, "  < 1 of 3 >"; the name is the table's word, the two numbers as
     // they are)
     {{"", "  < ", " of ", " >"}, 1, 4, "{}  < {} of {} >"},
-
+    // (the Mods tab's typing hint: what was typed, in characters and in bytes)
+    {{"", " characters (", " of ", " bytes)"}, 0, 4, "{} characters ({} of {} bytes)"},
 };
 std::string PlaceIn(const Lang* lang, std::string_view en) {
     if (lang == nullptr || lang->entries == nullptr) {

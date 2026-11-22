@@ -683,25 +683,27 @@ CoopPauseMenu::View Tab::view() const {
     if (selected_ < lines.size() && Selectable(lines[selected_])) {
         v.selected = static_cast<int>(selected_);
         const Line& l = lines[selected_];
-        v.help_title = l.row.name;
-        v.help = l.help;
+        v.help_title = CoopI18n::Tr(l.row.name);
+        v.help = CoopI18n::Tr(l.help);
         if (typing_) {
             v.rows[selected_].value = TailShown(typed_) + "_";   // (the end: where the next character goes)
             v.typing = true;
-            v.help = "Type or Ctrl+V, then Enter. Esc: as it was.";   // (a line of the translation table: keep it whole)
-            v.hint = std::to_string(CharStarts(typed_).size()) + " characters (" + std::to_string(typed_.size()) +
-                     " of " + std::to_string(MaxLength(l.name)) + " bytes)";
+            v.help = CoopI18n::Tr("Type or Ctrl+V, then Enter. Esc: as it was.");   // (a line of the table: keep it whole)
+            // (the module's split shape reads "12 characters (34 of 64 bytes)" whole)
+            v.hint = CoopI18n::Tr(std::to_string(CharStarts(typed_).size()) + " characters (" +
+                                  std::to_string(typed_.size()) + " of " + std::to_string(MaxLength(l.name)) +
+                                  " bytes)");
         }
     }
     if (!note_.empty()) {
         v.gold = note_;
     } else if (src_.loader != nullptr && src_.loader->RestartNeeded().needed) {
-        v.gold = "Restart the game to use the changes.";
+        v.gold = CoopI18n::Tr("Restart the game to use the changes.");
     }
     const bool on_text = !typing_ && selected_ < lines.size() && IsText(lines[selected_]) && !lines[selected_].row.fixed;
-    v.change = typing_ ? "" : on_text ? "Paste" : "Switch";
-    v.confirm = typing_ ? "Done" : mod_.empty() ? "Open" : "Choose";
-    v.back = mod_.empty() && !typing_ ? "Close" : "Back";
+    v.change = typing_ ? "" : CoopI18n::Tr(on_text ? "Paste" : "Switch");
+    v.confirm = typing_ ? CoopI18n::Tr("Done") : CoopI18n::Tr(mod_.empty() ? "Open" : "Choose");
+    v.back = CoopI18n::Tr(mod_.empty() && !typing_ ? "Close" : "Back");
     return v;
 }
 

@@ -2244,7 +2244,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     const auto menu_list = [&](const CoopPauseMenu::View& mv, int menu_tab, int* top, const std::string& head) {
         MenuList ml = MenuLines(mv, menu_tab, *top, in_list, per_page);
         *top = ml.top;
-        if (!head.empty()) ml.lines[0].name = head;
+        if (!head.empty()) ml.lines[0].name = CoopI18n::Tr(head);
         lines = ml.lines;
         raw = true;
         for (std::size_t k = 0; k < static_cast<std::size_t>(kLinePanes) && k < ml.rows.size(); ++k) {

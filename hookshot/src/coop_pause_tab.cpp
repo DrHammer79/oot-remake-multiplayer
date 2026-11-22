@@ -1126,7 +1126,7 @@ std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
     case MinusPage::kMultiplayer:
         rows[0] = main[kRowPlayers];
         rows[1] = main[kRowSettings];
-        rows[2] = "Local co-op";
+        rows[2] = CoopI18n::Tr("Local co-op");
         if (v.s.hosting) {
             rows[3] = main[kRowHost];   // ("Your game", "Your game: Saria asks")
         } else if (v.s.in_one || v.s.by_launcher) {
@@ -1189,7 +1189,9 @@ std::vector<std::string> RowTexts(const SessionView& v) {
                         : v.players == 1 ? "Players: just you"
                                          : "Players: " + std::to_string(v.players);
     rows[kRowSettings] = "Co-op settings";
-    for (std::string& r : rows) r = Fit(std::move(r));
+    // (the rows in the player's language before the cut: the composed ones are the
+    // table's shapes, a player's own name comes back as it is)
+    for (std::string& r : rows) r = Fit(CoopI18n::Tr(std::move(r)));
     return rows;
 }
 
@@ -1394,7 +1396,9 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         break;
     }
     }
-    for (std::string& r : rows) r = Fit(std::move(r));   // ("": the row not shown)
+    // (the rows in the player's language before the cut: the composed ones are the
+    // table's shapes, a player's own name comes back as it is)
+    for (std::string& r : rows) r = Fit(CoopI18n::Tr(std::move(r)));   // ("": the row not shown)
     return rows;
 }
 
@@ -1598,10 +1602,11 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
     const int at_page = (page % pages + pages) % pages;
     // (the header has no value: the module hides its value box and arrows, so it never looks like a setting)
     // (the page with arrows a click on either half of the line turns: the module's mouse)
-    // (the words in the player's language before the cut: a cut line is not the table's line any more)
-    const std::string head = CoopI18n::Tr(title);
-    lines[0] = ListLine{FitTo(pages > 1 ? head + "  < " + std::to_string(at_page + 1) + " of " + std::to_string(pages) + " >"
-                                        : head,
+    // (the header in the player's language after it is built: the module's split shape reads
+    // "name  < 1 of 3 >" whole, the name is the table's word, before the cut)
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(pages > 1 ? title + "  < " + std::to_string(at_page + 1) + " of " +
+                                                                           std::to_string(pages) + " >"
+                                                     : title),
                               kListNameChars),
                         ""};
     for (int i = 0; i < per_page; ++i) {
@@ -1645,15 +1650,18 @@ std::vector<ListLine> ListLines(const SessionView& v) {
     std::string head = v.s.online ? "Public games" : "This network";
     if (pages > 1) head += "  < " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " +
                            std::to_string(pages) + " >";
-    lines[0] = ListLine{head, "Refresh", RowAction::kBrowseRefresh};
+    // (the heading and the words in the player's language, before the cut: the heading is
+    // the module's split shape, the list's own lines the server list brought are already ours)
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), FitTo(CoopI18n::Tr("Refresh"), kListValueChars),
+                        RowAction::kBrowseRefresh};
     const std::vector<ListLine>& list = v.s.online ? v.online_list : v.lan_list;
     if (list.empty()) {
-        lines[1].name = FitTo(v.browse_all_out ? std::string("None match the search or Show")
-                              : v.s.online     ? (v.online_state.empty() ? std::string("Asking the relay...") : v.online_state)
-                                               : std::string("Looking for games..."),
+        lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")
+                              : v.s.online     ? (v.online_state.empty() ? CoopI18n::Tr("Asking the relay...") : v.online_state)
+                                               : CoopI18n::Tr("Looking for games..."),
                               kListNameChars);
         if (v.s.online && !v.relay_set) {   // (no relay: typed here, saved as Co-op Settings' Relay row)
-            lines[1].name = "No relay set: A to type one";
+            lines[1].name = CoopI18n::Tr("No relay set: A to type one");
             lines[1].act = RowAction::kTypeRelay;
         }
         return lines;
@@ -1684,8 +1692,11 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     const bool launcher_view = v.s.by_launcher && (view == View::kHost || view == View::kJoin);
     if (view != View::kMain && view != View::kSession && view != View::kPassword && !launcher_view) return lines;
     std::size_t at = 1;
+    // (each line in the player's language before the cut: the names and the short values are
+    // the table's words, a room's own name comes back as it is)
     const auto add = [&](const std::string& name, const std::string& value) {
-        if (at < lines.size()) lines[at++] = ListLine{FitTo(name, kListNameChars), FitTo(value, kListValueChars)};
+        if (at < lines.size())
+            lines[at++] = ListLine{FitTo(CoopI18n::Tr(name), kListNameChars), FitTo(CoopI18n::Tr(value), kListValueChars)};
     };
     // (the release a short value: "Squadala! v0.11.6" is "v0.11.6")
     std::string release = v.version;
@@ -1697,7 +1708,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         header = "Co-op failed";
     } else if (!v.turned_away.empty()) {
         header = "Turned away";
-        why = v.turned_away + "." + (v.banned ? " Leave." : " Leave, then join again.");
+        why = v.turned_away + "." + CoopI18n::Tr(v.banned ? " Leave." : " Leave, then join again.");
     } else if (v.s.hosting) {
         header = "Hosting";
     } else if (v.s.wait_host) {
@@ -1708,7 +1719,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         header = "In a session";
     } else {
         header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
-        if (v.s.by_launcher && why.empty()) why = "Restart the game to change it";
+        if (v.s.by_launcher && why.empty()) why = CoopI18n::Tr("Restart the game to change it");
     }
     // (the header's value: hosting, who can reach this game. The header had none: the game's cursor frame, which
     // Longshot's mouse puts on the line under it, framed an empty box there, a tester's screenshot 2026-11-19)
@@ -1722,7 +1733,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
             reach = "Starting...";
         }
     }
-    lines[0] = ListLine{FitTo(header, kListNameChars), FitTo(reach, kListValueChars)};
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(header), kListNameChars), FitTo(CoopI18n::Tr(reach), kListValueChars)};
     // The host's known problems and hints in words of ours, one line each (the Router line above says the port's
     // state): the server's message ("the router did not open the port (UPnP, PCP and NAT-PMP are off on it, or it said
     // no)") cut over three lines read as pieces of a sentence (a tester's screenshot, 2026-11-19). Other messages as
@@ -1815,17 +1826,19 @@ std::string MenuValue(const CoopPauseMenu::Row& r, bool typing) {
     using CoopPauseMenu::RowKind;
     if (typing) return !r.value.empty() && r.value.back() == '_' ? r.value : r.value + "_";   // (some end in it already)
     switch (r.kind) {
-    case RowKind::kToggle: return !r.value.empty() ? r.value : r.on ? "On" : "Off";
+    // (the value in the player's language before the arrows go around it: "< 按玩家编号 >")
+    case RowKind::kToggle: return !r.value.empty() ? CoopI18n::Tr(r.value) : CoopI18n::Tr(r.on ? "On" : "Off");
     case RowKind::kChoice: {
-        std::string v = std::string(r.left ? "< " : "") + r.value + (r.right ? " >" : "");
-        // (with its arrows it would be cut: "< By player n..."; the value alone when that fits)
-        return v.size() > kListValueChars && r.value.size() <= kListValueChars ? r.value : v;
+        const std::string bare = CoopI18n::Tr(r.value);
+        std::string v = std::string(r.left ? "< " : "") + bare + (r.right ? " >" : "");
+        // (with its arrows it would be cut: "< 按玩家编..."; the value alone when that fits)
+        return v.size() > kListValueChars && bare.size() <= kListValueChars ? bare : v;
     }
     case RowKind::kHeading:
     case RowKind::kNote: return "";
     case RowKind::kAction: break;
     }
-    return r.value;
+    return CoopI18n::Tr(r.value);
 }
 
 std::string MenuHeadingOf(const CoopPauseMenu::View& menu, int row) {
@@ -1855,15 +1868,15 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
         if (top > 0 && top == sel && menu.rows[static_cast<std::size_t>(top - 1)].kind == RowKind::kHeading) --top;
     }
     out.top = top;
-    // (the page's name in the player's language; the "< 1 of 3 >" when there are
-    // more pages goes around it as it is, the module's split shape reads the two)
-    std::string head = tab >= 0 && tab < kMenuTabs ? CoopI18n::Tr(kMenuTabNames[static_cast<std::size_t>(tab)]) : "";
+    std::string head = tab >= 0 && tab < kMenuTabs ? kMenuTabNames[static_cast<std::size_t>(tab)] : "";
     if (n > cells) {
         const int pages = (n + cells - 1) / cells;
         const int page = top + cells >= n ? pages : std::min(pages, (top + cells / 2) / cells + 1);
         head += "  < " + std::to_string(page) + " of " + std::to_string(pages) + " >";
     }
-    out.lines[0] = ListLine{FitTo(head, kListNameChars), ""};
+    // (the header in the player's language after it is built: the module's split shape reads
+    // "name  < 1 of 3 >" whole, the name is the table's word, before the cut)
+    out.lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), ""};
     for (int c = 0; c < cells; ++c) {
         const int i = top + c;
         if (i >= n) break;

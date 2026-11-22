@@ -121,13 +121,19 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
     for (int b = 0; b < l.back; ++b) {
         if (l.texts[static_cast<std::size_t>(b)].empty()) l.texts[static_cast<std::size_t>(b)] = " ";
     }
-    l.texts[static_cast<std::size_t>(l.back)] = "Back";
+    l.texts[static_cast<std::size_t>(l.back)] = CoopI18n::Tr("Back");
     l.rows[static_cast<std::size_t>(l.back)] = -1;
     l.focus = at >= 0 ? at - l.top : l.back;
-    // (more than one page: the page first, then what the row does)
+    // (more than one page: the page first, then what the row does — both in the player's
+    // language before the cut: the page is the table's shape, the row's help its line)
     const std::string paged =
-        l.pages > 1 ? "Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)" : std::string();
-    l.hint = Fit(paged.empty() ? v.help : v.help.empty() ? paged : paged + "   " + v.help, kHintBytes);
+        l.pages > 1
+            ? CoopI18n::Tr("Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)")
+            : std::string();
+    l.hint = Fit(paged.empty()   ? CoopI18n::Tr(v.help)
+                 : v.help.empty() ? paged
+                                  : paged + "   " + CoopI18n::Tr(v.help),
+                 kHintBytes);
     return l;
 }
 

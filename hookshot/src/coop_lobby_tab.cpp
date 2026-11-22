@@ -529,18 +529,18 @@ View Tab::view() const {
     }
     if (selected_ < lines.size() && Selectable(lines[selected_].row.kind)) {
         v.selected = static_cast<int>(selected_);
-        v.help_title = lines[selected_].row.name;
-        v.help = lines[selected_].help;
+        v.help_title = CoopI18n::Tr(lines[selected_].row.name);
+        v.help = CoopI18n::Tr(lines[selected_].help);
         if (lines[selected_].row.kind == RowKind::kToggle) {
-            v.change = "Off / On";
+            v.change = CoopI18n::Tr("Off / On");
         }
     } else {
-        v.help_title = "Lobby";
-        v.help = lobby_.connected ? "" : "The players of your game show here once you host or join.";
+        v.help_title = CoopI18n::Tr("Lobby");
+        v.help = lobby_.connected ? "" : CoopI18n::Tr("The players of your game show here once you host or join.");
     }
     v.gold = note_;
-    v.confirm = "Choose";
-    v.back = player_ != 0 ? "Back" : "Close";
+    v.confirm = CoopI18n::Tr("Choose");
+    v.back = player_ != 0 ? CoopI18n::Tr("Back") : CoopI18n::Tr("Close");
     return v;
 }
 
