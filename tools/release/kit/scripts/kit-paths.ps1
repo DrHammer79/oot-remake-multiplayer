@@ -2534,17 +2534,52 @@ function Get-KitPackArgs([string]$Tool, [string]$From, [string]$Mod) {
     return @('-I', '-B', $Tool, '--romfs', $From, '--mod-dir', $Mod, '--title-rows', '--pause-tab')
 }
 
+# Row 235: the no-Python start. The puppet pack's menu files (coop_puppet.json "title_menu" and "pause_menu": larger copies
+# of files the game reads at boot) are only safe while the size table the game reads holds their sizes, which only
+# merge_tables.py can check. Without it, move them to <pack>\_coop-menus (the game never reads them there), where
+# merge_tables.py guard_menus keeps them too; its next run puts them back. Returns how many files it moved.
+function Move-KitMenuFilesAside([string]$Mods) {
+    $moved = 0
+    $packs = @(Get-ChildItem -LiteralPath (Join-Path $Mods 'contents') -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'coop-puppet' } | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'coop_puppet.json') })
+    foreach ($pack in $packs) {
+        try {
+            $m = Get-Content -LiteralPath (Join-Path $pack 'coop_puppet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($key in 'title_menu', 'pause_menu') {
+                foreach ($rel in @($m.$key)) {
+                    if (-not ($rel -is [string]) -or -not $rel) { continue }
+                    $src = Join-Path $pack ('romfs\' + $rel.Replace('/', '\'))
+                    if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+                    $dst = Join-Path $pack ('_coop-menus\' + $rel.Replace('/', '\'))
+                    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+                    Move-Item -LiteralPath $src -Destination $dst -Force
+                    $moved++
+                }
+            }
+        } catch { }
+    }
+    return $moved
+}
+
 # #48: Longshot serves ONE resource size table, the winning mod's. A seed made on OOTRR's website (its folder put into
 # mods by hand) has its own, made without the puppet pack's entries, so the others could not be shown. Before the game
 # starts, tools\puppet_pack\merge_tables.py writes ONE table where the game reads it: that mod's entries and every
 # other mod's that is on (the pack's too), keeping its own in <mod>\_coop-size-table (undo: merge_tables.py --undo).
 # Last it writes <mod>\coop-merged.txt, which the module checks (MergedByKit) to keep the puppets on. Never stops the start. The lines it says, for the window.
-function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir) {
-    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir, [string]$Python = '') {
+    $python = if ($Python) { $Python } else { Join-Path $Kit 'hookshot\tools\python\python.exe' }
     $tool = Join-Path $Kit 'tools\puppet_pack\merge_tables.py'
     $mods = Join-Path $ExeDir 'mods'
     if (-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $mods)) { return @() }
-    if (-not (Test-Path -LiteralPath $python)) { return @("Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown.") }
+    if (-not (Test-Path -LiteralPath $python)) {
+        # Row 235: without the merge nobody checks that the size table the game reads holds the pack's menu files, and a
+        # mod whose table wins (Character Select) crashed both games at the title. So park them, as merge_tables.py's
+        # guard_menus does (the game keeps its own menus, co-op works from the Minus menu).
+        $parked = Move-KitMenuFilesAside $mods
+        $msg = "Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown."
+        if ($parked) { $msg += " The title's co-op rows and the pause menu's Multiplayer tab are off this start ($parked files kept aside); the next start with Python puts them back." }
+        return @($msg)
+    }
     $romfs = @((Join-Path $ExeDir 'romfs'), (Join-Path (Split-Path -Parent $ExeDir) 'romfs')) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Pack') } | Select-Object -First 1
     $pyArgs = @('-I', '-B', $tool, '--mods', $mods)
     if ($romfs) { $pyArgs += @('--romfs', $romfs) }
