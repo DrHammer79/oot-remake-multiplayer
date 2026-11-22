@@ -7,7 +7,7 @@ Build-Hookshot-Coop.ps1 runs it with Hookshot's own Python on the Hookshot sourc
 downloaded (a source archive, not a git checkout). Strict: every hunk's context and
 removed lines must match the file exactly, at the line the hunk names or, as git's offset,
 at the nearest place within MAX_OFFSET lines below the hunk before (Longshot v3.1.0's Linux
-AppImage holds one file a few lines off its tag); a file the patch adds must not exist yet. Nothing is written unless every patch applies (all files are
+AppImage held one file a few lines off its tag; v3.1.1's matches its tag); a file the patch adds must not exist yet. Nothing is written unless every patch applies (all files are
 patched in memory first). Line ends are kept as the file has them.
 
 With --refresh, the source folder may hold an earlier set of patches: the keep folder has the
@@ -120,9 +120,10 @@ MAX_OFFSET = 200   # (lines a hunk's exact text may sit away from the line it na
 
 def near(lines, want, at, lowest):
     """The start of want's exact lines nearest to at, at most MAX_OFFSET lines away and not above lowest, or None.
-    Longshot v3.1.0's Linux AppImage was built a few commits before its tag: one file (gpu/vk/vk_draw.cpp) has the same
-    text four lines higher, so one set of patches must apply to both (as git's offset does). The text itself is never
-    matched loosely."""
+    Longshot v3.1.0's Linux AppImage was built a few commits before its tag: one file (gpu/vk/vk_draw.cpp) had the same
+    text four lines higher, so one set of patches had to apply to both (as git's offset does). v3.1.1 (the pin now, the
+    same commit as v3.1.0's tag) ships its tag's files exactly; the offset stays, as git's, for the next AppImage built
+    off its tag. The text itself is never matched loosely."""
     for d in range(1, MAX_OFFSET + 1):
         for p in (at - d, at + d):
             if lowest <= p <= len(lines) - len(want) and lines[p:p + len(want)] == want:
