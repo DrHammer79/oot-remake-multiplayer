@@ -8095,3 +8095,130 @@ TEST_CASE("row 212: owned by a copy holder, the guard is asked back, its maker u
   h.receive(2, present_in("Field", {}), kChannelOwnership);
   CHECK(h.session.object_owner(placed(7)) == owned(0, 2));
 }
+
+// Row 222 (twinrova-222-2, option C): Twinrova's battle manager (object_presence::battle_manager) chose its sisters'
+// battle state from its own game's Link the whole fight; a hand-over by the near rule or a stun put a new owner's
+// manager on a state it never knew (a sister held in her attack). It moves only from an unfit owner.
+namespace {
+ObjectPresent manager_present(const std::string& scene, const std::vector<ObjectId>& ids) {
+  ObjectPresent p = present_in(scene, ids);
+  for (auto& e : p.objects) e.flags = static_cast<std::uint8_t>(e.flags | object_presence::battle_manager);
+  return p;
+}
+}  // namespace
+
+TEST_CASE("row 222: a battle manager's group never goes by the near rule or a stun, only from an unfit owner") {
+  OwnerHarness h(near_config());
+  h.receive(1, manager_present("Field", {placed(7)}), kChannelOwnership);
+  h.receive(2, manager_present("Field", {placed(7)}), kChannelOwnership);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);  // a fight
+  REQUIRE(h.session.object_in_fight(placed(7), h.now));
+  h.stand(1, 12);  // the owner by the wall
+  h.stand(2, 3);   // player 2 at the manager's place
+  h.clear();
+  h.run(15 * kSecond);  // (a plain boss goes to player 2 after 10 s: issue 150's case)
+  CHECK(h.asks() == 0);
+  CHECK(h.session.stats().boss_to_near == 0);
+  h.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);  // a stun from player 2
+  h.run(250'000);
+  CHECK(h.asks() == 0);
+  CHECK(h.session.stats().boss_to_hitter == 0);
+  CHECK(h.session.object_owner(placed(7)) == owned(1, 0));
+  // Its owner paused past fight_owner_paused_us: it goes on, as every boss.
+  h.receive(1, PlayerStatus{0, status::paused}, kChannelSession);
+  h.run(3 * kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+}
+
+TEST_CASE("row 222: a battle manager whose attack ends after its 20 s takes no turn (orders_root above the turn rule)") {
+  TurnHarness h;
+  h.receive(1, turns_present("Field", {placed(7)}, object_presence::battle_manager), kChannelOwnership);
+  h.receive(2, turns_present("Field", {placed(7)}, object_presence::battle_manager), kChannelOwnership);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.stand(1, 6);
+  h.stand(2, 10);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);  // the fight begins
+  h.clear();
+  h.run(20 * kSecond + 500'000);
+  attack_ends(h, 1, 0, 11);  // (a plain boss turns to player 2 here: "boss turns: ... round")
+  h.run(250'000);
+  CHECK(h.asks() == 0);
+  CHECK(h.session.stats().boss_turns == 0);
+  CHECK(h.session.object_owner(placed(7)) == owned(1, 0));
+}
+
+// Row 232 (Dead Hand): his AI rises only for a grab in his own game, so a game whose own Link his hand holds
+// (object_presence::grabbed_here on his entry) takes him, unless his owner's Link is held too.
+namespace {
+ObjectPresent flagged_present(const std::string& scene, const std::vector<ObjectId>& ids, std::uint8_t flags) {
+  ObjectPresent p = present_in(scene, ids);
+  for (auto& e : p.objects) e.flags = static_cast<std::uint8_t>(e.flags | flags);
+  return p;
+}
+}  // namespace
+
+TEST_CASE("row 232: a boss goes to the game whose Link its summoned piece holds, not while its owner is held too") {
+  for (const bool owner_held : {false, true}) {
+    CAPTURE(owner_held);
+    OwnerHarness h(near_config());
+    h.receive(1, present_in("Field", {placed(7)}), kChannelOwnership);
+    h.receive(2, present_in("Field", {placed(7)}), kChannelOwnership);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);  // a fight
+    REQUIRE(h.session.object_owner(placed(7)) == owned(1, 0));
+    h.clear();
+    h.run(kSecond);
+    CHECK(h.asks() == 0);  // nobody held: he stays
+    if (owner_held) {
+      h.receive(1, flagged_present("Field", {placed(7)}, object_presence::grabbed_here), kChannelOwnership);
+    }
+    h.receive(2, flagged_present("Field", {placed(7)}, object_presence::grabbed_here), kChannelOwnership);
+    h.run(250'000);
+    if (owner_held) {
+      CHECK(h.asks() == 0);  // his own game answers its own grab; his turns pass him on
+      CHECK(h.session.stats().boss_to_grabbed == 0);
+    } else {
+      CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+      CHECK(h.session.stats().boss_to_grabbed == 1);
+    }
+  }
+}
+
+TEST_CASE("row 232: the grab hand-over waits for the owner's attack to end, and a battle manager never takes it") {
+  {
+    TurnHarness h;
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, true)}, kChannelObjectSamples);  // mid-attack
+    h.clear();
+    h.receive(2, turns_present("Field", {placed(7)}, object_presence::grabbed_here), kChannelOwnership);
+    h.run(250'000);
+    CHECK(h.asks() == 0);  // he is rising for player 1's Link: not taken mid-attack
+    attack_ends(h, 1, 0, 11);
+    h.run(250'000);
+    CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+  }
+  {
+    OwnerHarness h(near_config());
+    h.receive(1, manager_present("Field", {placed(7)}), kChannelOwnership);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+    h.receive(2, flagged_present("Field", {placed(7)},
+                                 object_presence::battle_manager | object_presence::grabbed_here),
+              kChannelOwnership);
+    h.clear();
+    h.run(kSecond);
+    CHECK(h.asks() == 0);
+    CHECK(h.session.stats().boss_to_grabbed == 0);
+  }
+}
+
+TEST_CASE("row 222: without the battle manager bit the same boss goes to the nearer player (as before)") {
+  OwnerHarness h(near_config());
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, state_at(0, 11)}, kChannelObjectSamples);
+  h.stand(1, 12);
+  h.stand(2, 3);
+  h.clear();
+  h.run(15 * kSecond);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+}

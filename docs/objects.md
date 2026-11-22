@@ -347,7 +347,7 @@ Enemies made of several actors share one owner and one fight (issue 105). `CoopO
 | `Enemy_MiddleBoss_DarkLink` | `_EffectLocater` | any | yes |
 | `Enemy_MiddleBoss_FlareDancer` | `_FireBody` | any | yes |
 | `Enemy_MiddleBoss_Poe_Meg` | `_Dummy` (her copies) | any | yes |
-| `Enemy_DeadHand` | `Enemy_DeadHand_Hand` | 40 m | yes |
+| `Enemy_DeadHand` | none (row 232: his hands are enemies of their own, each with its nearest player; he is a boss by name) | - | yes |
 | `Enemy_Dodongo` | `Enemy_Dodongo_Attention` | 10 m | no |
 | `Enemy_Tailpasaran` | `Enemy_Tailpasaran_Attention` | 10 m | no |
 | `Enemy_Anubis` | `Enemy_Anubis_MagicField` | 20 m | no |

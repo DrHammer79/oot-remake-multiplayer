@@ -4,6 +4,7 @@
 #include "coop/protocol/messages.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -541,6 +542,33 @@ std::string PuppetTunicsName(const TunicPaints& paints) {
     return name;
 }
 
+namespace {
+// The game's own child tunic body: the mean colour of its dark tile's green end colours (its own texture, ASTC),
+// read from `green`; nothing when the file has no such texture or no green in it.
+std::optional<std::uint32_t> GameDarkColour(const CoopLookTunic::Texels& green) {
+    for (const CoopLookTunic::Texture& t : green) {
+        if (t.name != "Angin_Tile_A_Dark_Alb") continue;
+        double sum[3] = {0, 0, 0};
+        std::size_t n = 0;
+        const auto lin = [](double v) { v /= 255.0; return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+        for (const CoopLookPaint::Rgb& c : CoopLookPaint::Ends(Format::astc, t.texels)) {
+            if (!CoopLookPaint::IsGreen(c)) continue;
+            for (int k = 0; k < 3; ++k) sum[k] += lin(c[static_cast<std::size_t>(k)]);
+            ++n;
+        }
+        if (n == 0) return std::nullopt;
+        std::uint32_t out = 0;
+        for (int k = 0; k < 3; ++k) {
+            const double l = sum[k] / static_cast<double>(n);
+            const double v = l <= 0.0031308 ? l * 12.92 : 1.055 * std::pow(l, 1 / 2.4) - 0.055;
+            out = out << 8 | static_cast<std::uint32_t>(std::clamp(v, 0.0, 1.0) * 255.0 + 0.5);
+        }
+        return out;
+    }
+    return std::nullopt;
+}
+}  // namespace
+
 CoopLookTunic::Texels PuppetTunicsTexels(const std::vector<std::pair<std::string, CoopLookTunic::Texels>>& copies,
                                          const CoopLookTunic::Texels& green, const TunicPaints& paints, const Cap* cap) {
     CoopLookTunic::Texels out;
@@ -550,7 +578,11 @@ CoopLookTunic::Texels PuppetTunicsTexels(const std::vector<std::pair<std::string
             out.insert(out.end(), texels.begin(), texels.end());
             continue;
         }
-        const CoopLookTunic::Texels painted = TunicPainted(green, paint->second, cap);   // (the trim too)
+        // (none, or the preset green 30D040: the game's own green, as the player's own Link wears it (TunicPainting);
+        // painted, 30D040 is a lime lighter than the game's tunic, row 243)
+        const bool own = !paint->second.tunic || (*paint->second.tunic & 0xFFFFFFu) == coop::protocol::slot_color(3);
+        const CoopLookTunic::Texels painted =
+            TunicPainted(green, own ? TunicPaint{std::nullopt, paint->second.cap} : paint->second, cap);   // (the trim too)
         std::optional<CoopLookTunic::Texels> darker;   // (the dark tile's: the main tile in the darker colour)
         for (std::size_t i = 0; i < texels.size(); ++i) {
             CoopLookTunic::Texture t = texels[i];   // (its name and offset: the copy's)
@@ -559,11 +591,14 @@ CoopLookTunic::Texels PuppetTunicsTexels(const std::vector<std::pair<std::string
             } else if (t.name.find("_Dark_") != std::string::npos && !painted.empty() &&   // (by its name: any order)
                        texels[0].texels.size() == t.texels.size()) {
                 if (!darker) {
-                    const std::uint32_t c = paint->second.tunic.value_or(0x30D040u);
                     const auto scaled = [](std::uint32_t v) {
                         return static_cast<std::uint32_t>(static_cast<float>(v & 0xFF) * kDarkScale + 0.5f);
                     };
-                    darker = TunicPainted(green, scaled(c >> 16) << 16 | scaled(c >> 8) << 8 | scaled(c));
+                    const auto darkened = [&](std::uint32_t c) { return scaled(c >> 16) << 16 | scaled(c >> 8) << 8 | scaled(c); };
+                    // (the game's own: its own dark tile's colour, read from green, as it is; else the preset's, scaled)
+                    const std::optional<std::uint32_t> own_dark = own ? GameDarkColour(green) : std::nullopt;
+                    darker = TunicPainted(green, own_dark ? *own_dark
+                                                           : darkened(own ? 0x30D040u : *paint->second.tunic));
                 }
                 if (!darker->empty() && (*darker)[0].texels.size() == t.texels.size()) t.texels = (*darker)[0].texels;
             }

@@ -45,6 +45,9 @@ void Configure(bool perceived_safe = true);
 // A coop_puppet.json is under LoadDir/<title id> (the puppet pack is installed).
 bool HasPack();
 std::map<std::uint16_t, std::uint16_t> CharacterFiles();
+// Rows 239/240/241: CharacterFiles() with a pack; without one, an empty map when Character Select has no NPC model
+// file at all (its UI-only part), nothing when it has some (unknown: picks are kept). coop_puppet_config.cpp.
+std::optional<std::map<std::uint16_t, std::uint16_t>> KnownCharacterFiles();
 #endif
 
 }  // namespace CoopPuppetConfig
