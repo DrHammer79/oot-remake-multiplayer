@@ -298,6 +298,13 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(got[0]["ArchiveCategory"], ["Title"])   # (the game's own row as it was)
         self.assertEqual((grew[0], grew[1] < grew[2], grew[3]), (k, True, True))
 
+    def test_the_newest_copy_of_the_screens_table_is_the_one_edited(self):
+        self.assertEqual(tm.ui_pack.newest(["RSDB/UIScreen.Product.100.rstbl.byml.zs", "RSDB/UIScreen.Product.111.rstbl.byml.zs"]),
+                         ["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
+        self.assertEqual(tm.ui_pack.newest(["RSDB/UIScreen.Product.111.rstbl.byml.zs", "RSDB/UIScreen.Product.100.rstbl.byml.zs"]),
+                         ["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
+        self.assertEqual(tm.ui_pack.newest([]), [])
+
     def test_nothing_written_when_one_language_fails(self):
         made, written, sizes, before, err = self.run_build(broken="JPja")
         self.assertIsNotNone(err)

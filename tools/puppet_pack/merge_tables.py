@@ -317,8 +317,9 @@ def row_id(row):
 
 def rows_of(data):
     rows = byml.loads(data)
-    if not isinstance(rows, list) or not all(isinstance(r, dict) and ("__RowId" in r or "Name" in r) for r in rows):
-        raise MergeError("not a table of rows with __RowId or Name")
+    ok = isinstance(rows, list) and all(isinstance(r, dict) for r in rows)
+    if not ok or not (all("__RowId" in r for r in rows) or all("__RowId" not in r and "Name" in r for r in rows)):
+        raise MergeError("not a table of rows with __RowId (or, with none of them, all with Name)")
     return rows
 
 
@@ -556,9 +557,8 @@ def merge_rows_one(root, codec, fname, win_name, win_path, pack_path, say, other
     if added or taken:
         by_id = {row_id(r): r for r in rows + added}
         by_id.update(taken)
-        # (__RowId tables are sorted by it; a Name table keeps the game's order, new rows last)
-        keys = list(by_id) if any("__RowId" not in r for r in rows) else sorted(by_id, key=lambda s: s.encode("utf-8"))
-        new_data = byml.dumps([by_id[k] for k in keys])
+        # (sorted by the key's bytes, as the game's own tables are: __RowId, or Name in UIScreen)
+        new_data = byml.dumps([by_id[k] for k in sorted(by_id, key=lambda s: s.encode("utf-8"))])
         data = codec.pack(new_data, orig_raw)
     else:
         new_data, data = orig_data, orig_raw
