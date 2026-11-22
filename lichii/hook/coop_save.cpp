@@ -363,7 +363,7 @@ void FixSlotsLocked() {
         if (!it->is_directory(dec)) continue;
         const fs::path file = it->path() / "progress.sav";
         std::FILE* in = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32  // (a Windows path is wide with MSVC and llvm-mingw alike: _WIN32, as ReadSaveSetLocked)
         if (_wfopen_s(&in, file.c_str(), L"rb") != 0) in = nullptr;
 #else
         in = std::fopen(file.c_str(), "rb");
@@ -386,7 +386,7 @@ void FixSlotsLocked() {
         }
         const fs::path tmp = it->path() / "progress.sav.coop-tmp";
         std::FILE* out = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32
         if (_wfopen_s(&out, tmp.c_str(), L"wb") != 0) out = nullptr;
 #else
         out = std::fopen(tmp.c_str(), "wb");

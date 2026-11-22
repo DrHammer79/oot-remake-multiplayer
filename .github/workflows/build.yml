@@ -156,6 +156,8 @@ jobs:
         run: python tools/autotest/tests/test_save_flags.py -v
       - name: Hookshot autotest driver tests
         run: python tools/autotest/tests/test_hookshot.py -v
+      - name: Live play-test kit tests (desync check, MCP server)
+        run: python tools/autotest/tests/test_playtest.py -v
       - name: hs.py shared game files tests
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Mods' code patches (Longshot patches 0034, 0035) tests
@@ -469,6 +471,9 @@ jobs:
       - name: Linux Longshot kit tests
         if: matrix.job == 'gcc'
         run: bash tools/release/tests/linux_longshot_kit_test.sh
+      - name: Longshot builder's Python has Character Select's tool packages
+        if: matrix.job == 'gcc'
+        run: bash tools/release/tests/appimage_python_test.sh
       - name: Kit dependency licence tests (Linux)
         if: matrix.job == 'gcc'
         run: bash tools/release/tests/kit_deps_test.sh

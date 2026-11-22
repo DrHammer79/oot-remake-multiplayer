@@ -1499,6 +1499,7 @@ function Get-KitCharacterSelectPin([string]$Kit) {
               $op.folder -match '^[A-Za-z0-9][^\\/:*?"<>|]*$' -and
               $op.overlay_url -match '^https://' -and $op.overlay_sha256 -match '^[0-9a-fA-F]{64}$')) { return $null }
     if ($op.ips_url -and ($op.ips_url -notmatch '^https://' -or $op.ips_sha256 -notmatch '^[0-9a-fA-F]{64}$')) { $op.ips_url = '' }
+    if ($op.tool_folder -and ($op.tool_folder -match '\.\.' -or $op.tool_folder -match '^[\\/]')) { return $null }
     return $op
 }
 
@@ -1534,7 +1535,7 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
     Write-Host ''
     Write-Host 'The Characters page (in the - menu) comes with the kit: Character Select by Snail (snaildev99).'
     Write-Host '  Its NPC characters (Saria, Sheik, Darunia and over a hundred more) are an extra download from Snail''s own'
-    Write-Host '  GitHub page (about 1 GB, once). Without them you play as Link, and the page tells you when a character is not'
+    Write-Host '  GitHub page (a 145 MB download, about 1.1 GB on disk, made from your own game in a few minutes, once). Without them you play as Link, and the page tells you when a character is not'
     Write-Host '  downloaded. The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.'
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
@@ -1716,6 +1717,52 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
     return ''
 }
 
+# Since Character Select v0.2.2 (snaildev99) the release makes the game-derived part of the mod on the player's PC:
+# the zip's mod folder holds his own files (the code patch, the voices, his page's graph), and its tool folder
+# (the pin's tool_folder, build-from-your-game) makes the rest from the game's own RomFS: models, textures, menu
+# archives and tables, as byte patches and colour recipes against the player's files. It runs with the kit's
+# Python (numpy, zstandard, astc-encoder-py and texture2ddecoder, which the kit's Python has) into the unpacked
+# folder, checks every source file and every result by SHA-1 and refuses another game version. For part 'ui' it
+# skips the NPC part's files (--exclude: the rule of Test-KitCharacterSelectNpcFile). '' or why not.
+# The NPC part as player.py's --exclude (paths below romfs/, '/'): must say exactly what Test-KitCharacterSelectNpcFile
+# says for romfs files (launch_test.ps1 checks the two agree); change both together. Link's own textures in Tex/ (named
+# *_Player_* or Angin_Tile_*) stay in the ui part (row 242).
+$KitCharselToolExclude = '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]$New, [string]$ModsDir, [string]$Downloads, [string]$Part) {
+    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+    $exeDir = Split-Path -Parent $ModsDir     # (the game's files: beside longshot.exe or a folder up, as Get-KitHookshotNeed looks)
+    $romfs = @((Join-Path $exeDir 'romfs'), (Join-Path (Split-Path -Parent $exeDir) 'romfs')) |
+             Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Pack\ZsDic.pack.zs') } | Select-Object -First 1
+    if (-not (Test-Path -LiteralPath $python)) { return "no $python to make its files with" }
+    if (-not $romfs) { return "no game RomFS beside $exeDir to make its files from" }
+    $tool = Join-Path $Downloads 'charsel-tool'
+    if (Test-Path -LiteralPath $tool) { Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction Stop }
+    New-Item -ItemType Directory -Force -Path $tool | Out-Null
+    $depth = @($Op.tool_folder -split '/').Count
+    & "$env:SystemRoot\System32\tar.exe" -x -f $Zip -C $tool "--strip-components=$depth" "$($Op.tool_folder)" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $tool 'player.py'))) { return "$($Op.zip) has no $($Op.tool_folder)/player.py" }
+    # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
+    # from another folder), so nothing else is needed)
+    $a = @('-I', '-B', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
+    if ($Part -eq 'ui') {
+        # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
+        if (-not $KitCharselToolExclude) { return 'the kit could not read its own NPC rule ($KitCharselToolExclude)' }
+        $a += @('--exclude', $KitCharselToolExclude)
+    }
+    Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
+    # (Windows PowerShell makes each stderr line of a program an error record: under a caller's 'Stop' a warning
+    # would end the install. The exit code decides.)
+    $ErrorActionPreference = 'Continue'
+    $out = @(& $python @a 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction SilentlyContinue
+    if ($code -ne 0) {
+        $last = @($out | Where-Object { "$_".Trim() }) | Select-Object -Last 1
+        return "making its files from your game failed ($last). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file); nothing of it was put in"
+    }
+    return ''
+}
+
 # Puts the mod in, or changes its part: @{ Ok; Changed (the folder was put in or replaced); Why; Lines }. $ModsDir: the
 # game's mods folder (<game>\mods, beside longshot.exe). $Part: 'full' (the player said yes to the NPC characters) or
 # 'ui' (every other kit). A Character Select folder the player put in by hand (no stamp) is never touched. The kit's
@@ -1765,7 +1812,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
             $ips = ''
         } else {
             $zipOk = (Test-Path -LiteralPath $zip) -and (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -eq $op.zip_sha256.ToUpperInvariant()
-            # (a 1 GB zip and 1.1 GB unpacked; the swap keeps the old folder until the new one is in place)
+            # (v0.2.2: a 145 MB zip, then 230 MB (default part) or 1.1 GB (with the NPC part) once the tool has made the game's files; the swap keeps the old folder until the new one is in place, so an update holds two copies: about 3 GB with the zip)
             $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($ModsDir))
             $free = try { (New-Object System.IO.DriveInfo $root).AvailableFreeSpace } catch { [long]::MaxValue }
             if ($free -lt $(if ($zipOk) { 2GB } else { 3GB })) { $why = "too little disk space (about 3 GB free needed on $root)" }
@@ -1781,6 +1828,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
                 & "$env:SystemRoot\System32\tar.exe" -x -f $zip -C $new "--strip-components=$depth" "$($op.zip_folder)" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { $why = "unpacking $($op.zip) failed (tar $LASTEXITCODE)" }
                 elseif (-not (Test-Path -LiteralPath (Join-Path $new 'romfs'))) { $why = "$($op.zip) has no $($op.zip_folder)/romfs" }
+                elseif ($op.tool_folder) { $why = Invoke-KitCharacterSelectTool $Kit $zip $op $new $ModsDir $Downloads $Part }
             }
         }
         if (-not $why) { $why = Complete-KitCharacterSelectFolder $new $op $Part $json $ips $want }
@@ -1793,7 +1841,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
             Save-KitCharacterSelectPrevious $ModsDir $op.folder
             try { [System.IO.Directory]::Move($new, $dir) }
             catch { [void](Undo-KitCharacterSelect $Kit $ModsDir); throw }
-            if (-not $derive) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }   # (1 GB on disk; a new pin downloads its own)
+            if (-not $derive) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }   # (145 MB on disk; a new pin downloads its own)
             $r.Changed = $true
         }
     } catch {
@@ -1972,7 +2020,7 @@ function Get-KitPackCharactersKey($Json) {
 # Every start after the question (row 206: the NPC characters on or off without editing a file): one line, and N within
 # $Seconds changes it. $true when N was pressed. No console (a scripted start): no wait, no change. $ReadKey: tests.
 function Read-KitCharacterSelectToggle([string]$Choice, [int]$Seconds = 2, [scriptblock]$ReadKey = $null) {
-    $now = if ($Choice -eq 'yes') { 'on (press N to take them out)' } else { 'off (press N to download them, about 1 GB)' }
+    $now = if ($Choice -eq 'yes') { 'on (press N to take them out)' } else { 'off (press N to make them, a 145 MB download and about 1.1 GB on disk)' }
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
     if ($redirected -and -not $ReadKey) { return $false }

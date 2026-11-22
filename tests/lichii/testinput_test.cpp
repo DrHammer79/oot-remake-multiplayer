@@ -560,6 +560,20 @@ TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (iss
     CHECK(requests[1].start == "99");
 }
 
+TEST_CASE("testinput: dump hands the hook a checkpoint tag (play-test kit)") {
+    std::string error;
+    CHECK_FALSE(Parse("dump\n", error));
+    CHECK_FALSE(Parse("dump a b\n", error));
+    CHECK_FALSE(Parse("dump ../x\n", error));  // a tag is part of a file name: no path
+    Runner r(Must("dump after_chest\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::dump);
+    CHECK(requests[0].name == "after_chest");
+}
+
 TEST_CASE("testinput: setenum hands the hook an Enum flag (name or 0x hash) and a value's name (issue 193)") {
     std::string error;
     CHECK_FALSE(Parse("setenum\n", error));
