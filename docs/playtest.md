@@ -112,6 +112,7 @@ only, no `pip install`.
 | `give item` | Gives the item through the cheats queue: it shows after the next frame (`step 1`) |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
+| `log [match]` | The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
 | `pause`, `resume` | Hold the game, or let it run in real time (a person takes over; the next call holds it again) |
 | `screenshot [name]` | A PNG of this game: the game saves it as `<game>/playtest/shots/<player>-<name>-<time>.png` (it runs one frame to show it); a copy goes to `<log dir>/shots/` |
 

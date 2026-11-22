@@ -111,3 +111,30 @@ held frame. `step 120` on all, checkpoint `four`; `step 300`, checkpoint `settle
 
 Expected: `desync_check` compares four games and agrees at `settled`; every game sees three puppets in the right
 places (one shot each).
+
+## 9. Volvagia's falling rocks in each game (row 234)
+
+Why: co-op shares none of the arena's rocks (no sync rule matches `Obj_FallingRock_*`), so each game drops its own,
+at its own Link, wherever its arena is switched on. The open question is whether the game that does not own
+Volvagia switches the arena on at all. Each game logs `coop: objects: rocks: N new falling rocks in our game since
+the last line (M live)` at most every 5 s (real time) while new rocks come (needs commit 2920301c: in every build of
+this line).
+
+Setup: games from `live.py start --playtest` (servers with `--session`, for the `log` tool). Both
+`warp VolvagiaStage VolvagiaStage` (the boss rush's arena: it places its own boss). Skip the boss title with
+`press A` and `step 180`, three times on each game. `get_state` on both, then put the two Links apart: p1
+`walk_to` about 8 m to one side of its start, p2 about 8 m to the other side (a clear line; read the positions
+first). `log` on both (it starts the count from here), checkpoint `arena`, `screenshot` both (`arena`).
+
+Act: let both games run the fight in turns, `step 600` on p1, then `step 600` on p2, and repeat. Read
+`log match "rocks:"` and `log match "bosses:"` on both after each round. When either game logs rocks, take
+`screenshot` on BOTH (`rocks-1`, `rocks-2`, ...), with no step between them, a few times. If no game shows rocks
+after 6000 frames each, the rock phase needs the boss hit first: give the hammer (`give`, an item name the cheats
+panel knows) and hit Volvagia when she surfaces, then go on. Note it in the report either way.
+
+Expected (PASS): both games log `rocks:` lines during the rock phase, with counts of the same order. Each game's
+shots show rocks landing around its own Link (p1's rocks near p1's Link, p2's near p2's), not only around the
+owner. Report each game's lines with their frames, which game owns Volvagia (`bosses:` lines), and the shot paths.
+
+Finding (report as row 234, not a fix): the game that does not own Volvagia never logs `rocks:` while the owner
+does (its arena is not switched on), or rocks show on one screen only.

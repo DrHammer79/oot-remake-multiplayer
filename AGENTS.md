@@ -159,7 +159,7 @@ This section is only for a session that was handed **running test games** with t
 server per game (`oot-p1`, `oot-p2`, ...; set up by the maintainer: [docs/playtest.md](docs/playtest.md), "Playing
 through the bridge"). Everything above still holds. A coding session never starts games itself.
 
-- You control each game through its own tools (`get_state`, `walk_to`, `press`, `step`, `warp`, `flag`, `give`,
+- You control each game through its own tools (`get_state`, `walk_to`, `press`, `step`, `warp`, `flag`, `give`, `log`,
   `checkpoint`, `desync_check`, `screenshot`). Every reply has the game's frame count.
 - **The games are paused between your calls.** Nothing happens unless you act; a call runs only the frames it asks
   for. Call `get_state` on every game first: a game whose tools you never called still runs.
