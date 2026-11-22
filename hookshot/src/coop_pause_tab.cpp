@@ -246,9 +246,11 @@ void Page::MinusTabMoved() {
 
 std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
     if (minus_tab_ < 0) {
-        if ((down & kPadR) != 0 && strip_.lit == kMapCategory) {
+        const std::uint64_t right = minus_native_ ? kPadR | kPadZR : kPadR;   // (the sequence's own R / ZR)
+        if ((down & right) != 0 && strip_.lit == kMapCategory) {
             minus_tab_ = 0, minus_slide_ = 1;
             MinusTabMoved();
+            if (minus_native_) return buttons & ~swallow_;   // (the game's: the Map sequence opens CoopMenu_00)
             strip_sound_ = "mc_TabToRight";
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
@@ -282,8 +284,12 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
         swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
-        strip_sound_ = "mc_TabToLeft";
         MinusTabMoved();
+        if (minus_native_ && minus_tab_ < 0) {   // (the game's too: the Map sequence closes CoopMenu_00)
+            swallow_ |= buttons & ~(kPadL | kPadB | kPadPlus | kPadMinus);
+            return buttons & (kPadL | kPadB | kPadPlus | kPadMinus) & ~swallow_;
+        }
+        strip_sound_ = "mc_TabToLeft";
         swallow_ |= kPadL;
     } else if (minus_list_ && minus_raw_) {   // (co-op's menu's own page: the moves are its events)
         if ((down & kPadB) != 0 && (minus_rows_ != 0 || minus_raw_back_)) {
@@ -725,6 +731,14 @@ MinusSlideOffsets MinusSlideAt(int from, int to, float p) {
 
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms) {
     return (strip_state == 1 || strip_state == 2) && seen_ms != 0 && now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
+}
+
+bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t open_ms, std::uint64_t seen_ms,
+                    std::uint64_t now_ms) {
+    if (!hide || !up || sliding) return false;
+    if (!native) return true;
+    return open_ms != 0 && now_ms >= open_ms && now_ms - open_ms >= kMapUnderAfterMs && seen_ms != 0 &&
+           now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
 }
 
 namespace {

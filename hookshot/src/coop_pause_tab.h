@@ -275,6 +275,19 @@ public:
     // tabs' pages is what the R1 probe answers (reports/ui-tabs-0119.md); until then the module keeps them off unless
     // COOP_TEST_MINUS_TABS=1.
     void SetMinusTabsUsable(bool usable) { minus_ok_ = usable; }
+    // Native mode (tabs-overhaul-01110 step 2): ours have their own screen, CoopMenu_00, which the game's Map sequence
+    // (the pack's Map.module) opens on the Map's R or ZR and closes on L from our first tab. Those presses are then the
+    // game's as well as ours (no swallow, no strip sound: the sequence plays mc_TabToRight / mc_TabToLeft); R and ZR
+    // inside ours and L on Lobby or Mods stay ours (kept from the game). Off: the strip's own page (Character Select's
+    // Map.module, or an older pack), every press of ours kept from the game as before.
+    void SetMinusNative(bool native) { minus_native_ = native; }
+    bool MinusNative() const { return minus_native_; }
+    // Back on the Map at once, no slide (the module: CoopMenu_00 never opened after R, e.g. another mod's Map.module).
+    void MinusToMap() {
+        if (minus_tab_ < 0) return;
+        minus_tab_ = -1, minus_slide_ = 0;
+        MinusTabMoved();
+    }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
@@ -379,6 +392,7 @@ private:
     bool refused_a_ = false;
     int slide_ = 0;   // the next set_page's Do::slide
     bool minus_ok_ = false;    // SetMinusTabsUsable
+    bool minus_native_ = false;   // SetMinusNative
     int minus_tab_ = -1;       // MinusTab
     int minus_set_ = -2;       // the - tabs' state last set (Do::set_minus): -2 none, -1 shown none lit, else lit
     int minus_slide_ = 0;
@@ -897,6 +911,12 @@ void SettingMove(int count, int dy, int* page, int* row, int per_page = kSetting
 // Row 199: the strip's last update says the menu is up: open or opening (state 1, 2) and seen within kMenuUpMs.
 inline constexpr std::uint64_t kMenuUpMs = 200;
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms);
+// The Map page's content under our - page hidden (FollowMapUnder): while ours shows (`hide`) and the menu is up, not
+// while the Map and ours slide. Native (CoopMenu_00): only once that screen has been open kMapUnderAfterMs (the Map
+// sequence's own out animation plays first) and its updates still come (seen within kMenuUpMs).
+inline constexpr std::uint64_t kMapUnderAfterMs = 450;
+bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t open_ms, std::uint64_t seen_ms,
+                    std::uint64_t now_ms);
 
 // The - strip's game tabs shown (3, or 4 with slot 3). The game's own code fills three - tabs; a fourth (Character
 // Select's Characters, in slot 0, his others after it) is filled only by his code patch, built into the game
