@@ -4,7 +4,7 @@ stick 1 0 8             # face right
 press ZL                # camera behind B
 wait 170
 mark b-before
-wait 1100               # A opens the pause menu and the page, changes the tunic, closes it
+wait 1850               # A opens the menu, his Customize screen, changes the tunic, closes it
 mark b-after
 wait 200
 mark b-end
