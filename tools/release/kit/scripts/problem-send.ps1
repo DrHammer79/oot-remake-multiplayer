@@ -63,32 +63,53 @@ function Read-ProblemSendAddressText($Lines) {
 $script:SendAddressLookup = 'https://raw.githubusercontent.com/daurosk/oot-remake-multiplayer/main/docs/problem-send-address.txt'
 $script:SendLookupMs = 4000
 
+# Runs $Work (a script block that returns text) in its own runspace and waits at most $Ms for it: a lookup that is stuck in
+# DNS or connect (HttpWebRequest.Timeout and BeginGetResponse do not bound those on .NET Framework, they run on the calling
+# thread) is left behind and gives $null. $Work runs in a fresh runspace: it sees only its arguments, not this script's
+# variables.
+function Invoke-ProblemSendTimed([scriptblock]$Work, [object[]]$ArgList = @(), [int]$Ms = 4000) {
+    $ps = $null
+    try {
+        $ps = [powershell]::Create()
+        [void]$ps.AddScript($Work.ToString())
+        foreach ($a in $ArgList) { [void]$ps.AddArgument($a) }
+        $h = $ps.BeginInvoke()
+        if (-not $h.AsyncWaitHandle.WaitOne($Ms)) { try { [void]$ps.BeginStop($null, $null) } catch { }; return $null }
+        $o = @($ps.EndInvoke($h))
+        $ps.Dispose()
+        if ($o.Count -eq 0) { return $null }
+        return "$($o[0])"
+    } catch { return $null }
+}
+
+$script:SendLookupWork = {
+    param($Url, $Ms)
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $req = [System.Net.HttpWebRequest]::Create($Url)
+    $req.Timeout = $Ms
+    $req.ReadWriteTimeout = $Ms
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = 'Squadala-kit'
+    $resp = $req.GetResponse()
+    try {
+        if ([int]$resp.StatusCode -ne 200) { return '' }
+        $r = New-Object System.IO.StreamReader($resp.GetResponseStream())
+        try { $t = $r.ReadToEnd(); if ($t.Length -gt 4096) { $t = '' } } finally { $r.Dispose() }
+        return $t
+    } finally { $resp.Dispose() }
+}
+
 # Looks the address up (same GitHub access as Update.bat), short time limit, and caches a valid answer in
 # logs\problem-send-address.txt. Any failure keeps what was cached (or the kit's file). It only reads: nothing is sent,
-# and sending still needs the player's yes. $Fetch (tests) returns the file's text.
+# and sending still needs the player's yes. $Fetch (tests) is the lookup's work block (it returns the file's text and goes
+# through the same timed path; it runs in its own runspace, see Invoke-ProblemSendTimed). $Ms = the wall-time limit.
 # $Send is the player's answer: with 'off' (no sending) nothing is requested at all.
-# The whole lookup is bounded by wall time (HttpWebRequest.Timeout does not cover the DNS lookup): BeginGetResponse and
-# a wait of SendLookupMs, then Abort.
-function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null, [string]$Send = '') {
+function Update-ProblemSendAddress([string]$Kit, [scriptblock]$Fetch = $null, [string]$Send = '', [int]$Ms = $script:SendLookupMs) {
     if ($Send -eq 'off') { return '' }
     try {
-        if ($Fetch) { $text = & $Fetch }
-        else {
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-            $req = [System.Net.HttpWebRequest]::Create($script:SendAddressLookup)
-            $req.Timeout = $script:SendLookupMs
-            $req.ReadWriteTimeout = $script:SendLookupMs
-            $req.AllowAutoRedirect = $false
-            $req.UserAgent = 'Squadala-kit'
-            $ar = $req.BeginGetResponse($null, $null)
-            if (-not $ar.AsyncWaitHandle.WaitOne($script:SendLookupMs)) { try { $req.Abort() } catch { }; return '' }
-            $resp = $req.EndGetResponse($ar)
-            try {
-                if ([int]$resp.StatusCode -ne 200) { return '' }
-                $r = New-Object System.IO.StreamReader($resp.GetResponseStream())
-                try { $text = $r.ReadToEnd(); if ($text.Length -gt 4096) { $text = '' } } finally { $r.Dispose() }
-            } finally { $resp.Dispose() }
-        }
+        if ($Fetch) { $text = Invoke-ProblemSendTimed $Fetch @() $Ms }
+        else { $text = Invoke-ProblemSendTimed $script:SendLookupWork @($script:SendAddressLookup, $Ms) $Ms }
+        if ($null -eq $text) { return '' }
         $u = Read-ProblemSendAddressText ("$text" -split "`r?`n" | Select-Object -First 20)
         if ($u) {
             $dir = Join-Path $Kit 'logs'

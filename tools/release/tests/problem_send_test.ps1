@@ -72,11 +72,19 @@ Check ((Update-ProblemSendAddress $kit { "# c`nhttps://new.example.org/v1/proble
 Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'the cached lookup wins over the kit file'
 Check ((Update-ProblemSendAddress $kit { "http://evil.example.org/x`n" }) -eq '') 'an http lookup answer is refused'
 Check ((Update-ProblemSendAddress $kit { throw 'offline' }) -eq '') 'a failed lookup returns nothing'
-$script:lookupCalls = 0
-Check ((Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" } -Send 'off') -eq '' -and $script:lookupCalls -eq 0) 'sending off: no lookup at all'
-[void](Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" } -Send 'on')
-[void](Update-ProblemSendAddress $kit { $script:lookupCalls++; "https://x.example.org/a`n" })
-Check ($script:lookupCalls -eq 2) 'sending on or not answered: the lookup is made'
+# (the lookup's work block runs in its own runspace: it counts by appending to a marker file, not a variable)
+$mark = Join-Path $kit 'lookup-marker.txt'
+$counted = [scriptblock]::Create("Add-Content -LiteralPath '$mark' -Value x; 'https://x.example.org/a'")
+Check ((Update-ProblemSendAddress $kit $counted -Send 'off') -eq '' -and -not (Test-Path -LiteralPath $mark)) 'sending off: no lookup at all'
+[void](Update-ProblemSendAddress $kit $counted -Send 'on')
+[void](Update-ProblemSendAddress $kit $counted)
+Check (@(Get-Content -LiteralPath $mark).Count -eq 2) 'sending on or not answered: the lookup is made'
+Remove-Item -LiteralPath $mark -Force
+# the wall-time bound: a lookup stuck for 4 s is cut at 300 ms and the cache is kept
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$slow = Update-ProblemSendAddress $kit { Start-Sleep -Seconds 4; 'https://slow.example.org/a' } -Ms 300
+$sw.Stop()
+Check ($slow -eq '' -and $sw.ElapsedMilliseconds -lt 2500) "a stuck lookup is cut by wall time ($($sw.ElapsedMilliseconds) ms)"
 Remove-Item -LiteralPath (Join-Path $kit 'logs\problem-send-address.txt') -Force
 [void](Update-ProblemSendAddress $kit { "https://new.example.org/v1/problem-report`n" })
 Check ((Get-ProblemSendUrl $kit) -eq 'https://new.example.org/v1/problem-report') 'a failed lookup keeps the cache'
