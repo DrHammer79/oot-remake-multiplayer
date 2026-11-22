@@ -1,4 +1,4 @@
-From f0ee087bb81793a419286adfaa39635c7d8f643c Mon Sep 17 00:00:00 2001
+From f7920ea7077b826aec5820f3066efdd97aff2d6b Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 00:35:10 -0900
 Subject: [PATCH] Co-op mods: the Mods tab's order and switches, read at the
@@ -15,13 +15,13 @@ the same file as the module's. Without a list file nothing changes. Host
 code only: no lift change.
 ---
  host/hos_coop_mods.h | 109 +++++++++++++++++++++++++++++++++++++++++++
- host/mods.c          |  57 +++++++++++++++++++++-
- 2 files changed, 164 insertions(+), 2 deletions(-)
+ host/mods.c          |  59 +++++++++++++++++++++++
+ 2 files changed, 168 insertions(+)
  create mode 100644 host/hos_coop_mods.h
 
 diff --git a/host/hos_coop_mods.h b/host/hos_coop_mods.h
 new file mode 100644
-index 0000000..55518eb
+index 00000000..55518ebd
 --- /dev/null
 +++ b/host/hos_coop_mods.h
 @@ -0,0 +1,109 @@
@@ -135,56 +135,62 @@ index 0000000..55518eb
 +
 +#endif
 diff --git a/host/mods.c b/host/mods.c
-index a43b3ae..674479f 100644
+index c5f63179..3176a2fc 100644
 --- a/host/mods.c
 +++ b/host/mods.c
-@@ -111,7 +111,7 @@ static int index_romfs(const char *host_dir, const char *rel, int depth) {
- }
+@@ -71,6 +71,7 @@ static Entry *find(const char *key) {
+ typedef struct {
+     char path[MAX_PATH], name[MAX_PATH];
+     int enabled, start_enabled;
++    int coop_rank;                          /* (co-op, patch 0011) the co-op Mods tab's rank: coop_mods_rank */
+     int romfs, exefs, cheats;               /* what it has */
+     int files, replaced, added, overridden; /* its RomFS files; those the game has, those it has not; those a mod below takes */
+     int exefs_files, exefs_built, exefs_waiting, exefs_other, exefs_bad;   /* its ExeFS patch files, by their state */
+@@ -845,6 +846,61 @@ static void find_sizes(void) {
+ static void mod_text(Mod *m);
  
- /* the mod folders under root, sorted (a mod: a folder holding romfs or exefs) */
--typedef struct { char path[MAX_PATH]; char name[MAX_PATH]; } Mod;
-+typedef struct { char path[MAX_PATH]; char name[MAX_PATH]; int rank, files; } Mod;   /* (co-op) rank, files: coop_mods_rank */
- static Mod *mods;
- static int nmods, cap_mods;
- static void find_mods(const char *dir, const char *name, int depth) {
-@@ -146,7 +146,52 @@ static void find_mods(const char *dir, const char *name, int depth) {
-     } while (FindNextFileA(f, &fd));
-     FindClose(f);
- }
--static int mod_cmp(const void *a, const void *b) { return _stricmp(((const Mod *)a)->name, ((const Mod *)b)->name); }
-+static int mod_cmp(const void *a, const void *b) {
-+    const Mod *x = (const Mod *)a, *y = (const Mod *)b;
-+    if (x->rank != y->rank) return x->rank < y->rank ? -1 : 1;   /* (co-op) the Mods tab's order; all 0 without its list */
-+    return _stricmp(x->name, y->name);
-+}
-+
+ /* hos_main.c, once the image is loaded (image_path: unused; ExeFS patches are applied when the game is built) */
 +/* (oot-remake-multiplayer, patch 0011, docs/mods.md) The co-op module's Mods tab cannot move or rename a mod while the
 +   game has its files open, and the mods are indexed before the module is loaded. So the tab writes its order and
 +   switches into <mods>\coop-mods.list, read here at the start, and this run's result goes into
 +   <mods>\coop-mods.applied, from which the tab knows what the running game uses (and whether a restart is needed).
-+   Without the list file nothing changes. The two files' lines: hos_coop_mods.h. */
++   Longshot 3.1 has its own list (mods.json, the Insert menu's Mods tab): without coop-mods.list that list is used as it
++   is; with it, the co-op list's order and switches go over it (its first row wins a file two mods have: it goes last,
++   as the lowest row of mods.json does) and the mods it does not name keep mods.json's order and switch, above it. The
++   two files' lines: hos_coop_mods.h. */
 +#include "hos_coop_mods.h"
 +static HosCoopModsList coop_list;
-+static void coop_mods_rank(const char *root) {   /* each mod's rank from the tab's list (-1: off) */
++static int coop_rank_cmp(const void *a, const void *b) {
++    const Mod *x = (const Mod *)a, *y = (const Mod *)b;
++    if (x->coop_rank != y->coop_rank) return x->coop_rank < y->coop_rank ? -1 : 1;
++    return x->start_enabled < y->start_enabled ? -1 : x->start_enabled > y->start_enabled;   /* (the place mods.json gave) */
++}
++static void coop_mods_rank(const char *root) {   /* each mod's rank from the tab's list (-1: off), over mods.json's */
 +    static char text[HOS_COOP_MODS_TEXT_MAX];
 +    char path[MAX_PATH];
 +    DWORD n = 0;
 +    snprintf(path, sizeof path, "%s\\%s", root, HOS_COOP_MODS_LIST_FILE);
 +    HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-+    if (f != INVALID_HANDLE_VALUE) {
-+        if (!ReadFile(f, text, sizeof text, &n, NULL)) n = 0;
-+        CloseHandle(f);
-+        if (hos_coop_mods_parse(text, n, &coop_list))
-+            hos_log("mods: %s: %d rows (the Mods tab's order and switches)", path, coop_list.count);
-+        else
-+            hos_log("mods: %s is not a mods list: left out", path);
++    if (f == INVALID_HANDLE_VALUE) return;
++    if (!ReadFile(f, text, sizeof text, &n, NULL)) n = 0;
++    CloseHandle(f);
++    if (!hos_coop_mods_parse(text, n, &coop_list)) {
++        hos_log("mods: %s is not a mods list: left out (mods.json's order and switches)", path);
++        return;
 +    }
++    hos_log("mods: %s: %d rows (the co-op Mods tab's order and switches, over mods.json's)", path, coop_list.count);
 +    for (int i = 0; i < nmods; i++) {
-+        mods[i].rank = hos_coop_mods_rank(&coop_list, mods[i].name);
-+        mods[i].files = -1;
++        mods[i].coop_rank = hos_coop_mods_rank(&coop_list, mods[i].name);
++        mods[i].start_enabled = i;   /* (scratch: the place in mods.json's order, for a stable sort) */
 +    }
++    qsort(mods, (size_t)nmods, sizeof *mods, coop_rank_cmp);
++    for (int i = 0; i < nmods; i++) {
++        if (mods[i].coop_rank < 0) mods[i].enabled = 0;
++        else if (mods[i].coop_rank > 0) mods[i].enabled = 1;
++    }
++    sync_tab();   /* (the Mods tab starts from this order: no change of this run) */
 +}
-+static void coop_mods_applied(const char *root) {   /* what this run indexed, for the tab */
++static void coop_mods_applied(const char *root) {   /* what this run indexed, for the co-op tab */
 +    char path[MAX_PATH], line[MAX_PATH + 32];
 +    DWORD done;
 +    snprintf(path, sizeof path, "%s\\%s", root, HOS_COOP_MODS_APPLIED_FILE);
@@ -193,41 +199,32 @@ index a43b3ae..674479f 100644
 +    int n = hos_coop_mods_applied_head(line, sizeof line, (unsigned long)GetCurrentProcessId());
 +    WriteFile(f, line, (DWORD)n, &done, NULL);
 +    for (int i = 0; i < nmods; i++) {
-+        n = hos_coop_mods_applied_row(line, sizeof line, mods[i].name, mods[i].rank < 0 ? -1 : mods[i].files);
++        n = hos_coop_mods_applied_row(line, sizeof line, mods[i].name, mods[i].enabled ? mods[i].files : -1);
 +        WriteFile(f, line, (DWORD)n, &done, NULL);
 +    }
 +    CloseHandle(f);
 +}
- 
- /* hos_main.c, once the image is loaded (image_path: kept for exefs patches, which are not applied here) */
++
  void hos_mods_init(const char *image_path) {
-@@ -162,21 +207,29 @@ void hos_mods_init(const char *image_path) {
-     }
-     if (GetFileAttributesA(root) == INVALID_FILE_ATTRIBUTES) return;
-     find_mods(root, "", 0);
-+    coop_mods_rank(root);   /* (co-op) */
+     (void)image_path;
+     char game_dir[MAX_PATH];
+@@ -862,9 +918,11 @@ void hos_mods_init(const char *image_path) {
+     find_mods(root_dir, "", 0);
      if (!nmods) {
-         hos_log("mods: none in %s (a mod: <name>\\romfs)", root);
-+        coop_mods_applied(root);   /* (co-op) */
+         hos_log("mods: none in %s (a mod: <name>\\romfs, <name>\\exefs or <name>\\cheats)", root_dir);
++        coop_mods_applied(root_dir);   /* (co-op) */
          return;
      }
-     qsort(mods, (size_t)nmods, sizeof *mods, mod_cmp);
-     for (int i = 0; i < nmods; i++) {
-+        if (mods[i].rank < 0) {   /* (co-op) */
-+            hos_log("mods: %s is off (the Mods tab)", mods[i].name);
-+            continue;
-+        }
-         char dir[MAX_PATH];
-         snprintf(dir, sizeof dir, "%s\\romfs", mods[i].path);
-         const int files = index_romfs(dir, "", 0);
-+        mods[i].files = files;   /* (co-op) */
-         snprintf(dir, sizeof dir, "%s\\exefs", mods[i].path);
-         if (GetFileAttributesA(dir) != INVALID_FILE_ATTRIBUTES)
-             hos_log("mods: %s: exefs patches are left out (the code is compiled ahead of time)", mods[i].name);
-         hos_log("mods: %s: %d RomFS files", mods[i].name, files);
+     read_state();
++    coop_mods_rank(root_dir);   /* (co-op) */
+     find_sizes();
+     for (int i = 0; i < nmods; i++) mods[i].start_enabled = mods[i].enabled;
+     start_key = state_key();
+@@ -896,6 +954,7 @@ void hos_mods_init(const char *image_path) {
      }
-     hos_log("mods: %d mods from %s: %zu RomFS entries", nmods, root, table_n);
-+    coop_mods_applied(root);   /* (co-op) */
+     for (int i = 0; i < nmods; i++) mod_text(&mods[i]);
+     hos_log("mods: %d mods from %s: %zu RomFS entries", nmods, root_dir, table_n);
++    coop_mods_applied(root_dir);   /* (co-op) */
  }
  
  /* nn_fs.c: the mod file for a RomFS path ("UI/x.zs", no mount, no leading slash), or 0 */
