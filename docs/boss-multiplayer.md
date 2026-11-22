@@ -191,10 +191,13 @@ Still to design (need a game run first):
   load. No proven live fix: deleting or making a placement live is proven for enemies, not for terrain collision.
   First step: a log line when such a flag changes with our Link near a gated piece; then a live check.
 - Shadow Temple's falling pillar (`Dm_ShadowTemple_0015`): part of the presence item above.
-- Volvagia's falling rocks: made by the arena (`Obj_FallingRockManager_A_03`, a pool of `Obj_FallingRock_A_06`),
-  aimed at the local Link (`QueryDungeonGetPlayerPos`), switched on by Volvagia's `FallRockActivate` /
-  `FallRockEffectActivate` plugs; co-op does not touch them. So each game may already drop its own rocks at its
-  own Link; whether a copy game switches them on is to check live (log rocks falling per game).
+- Volvagia's falling rocks (row 234, enemies-01110, code read): made by the arena (`Obj_FallingRockManager_A_03`,
+  a pool of `Obj_FallingRock_A_06`), aimed at the local Link (`QueryDungeonGetPlayerPos`), switched on by
+  Volvagia's `FallRockActivate` / `FallRockEffectActivate` plugs. No co-op rule matches `Obj_FallingRock_*` (not a
+  breakable, movable, faller or enemy), so each game drops its own rocks at its own Link wherever its arena is on.
+  What is left is whether a copy game's Volvagia (native boss sync: the owner's verbs, its own action modules)
+  switches its arena on: a `coop: objects: rocks: N new falling rocks` line, at most every 5 s, now shows it per
+  game. To check in a game: both logs show rock lines during her rock attack, the owner's and the other's.
 
 ## Order of work
 

@@ -4374,6 +4374,7 @@ private:
             names.emplace(a, std::move(known));
         }
         names_ = std::move(names);
+        NoteFallingRocks();  // row 234: Volvagia's rocks, per game
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
@@ -6047,6 +6048,32 @@ private:
     CoopPivot::Follower pivot_;
     u32 link_hit_said_ = 0xffffffffu;  // the scream probe: our Link's last hit id seen
     u32 link_hit_id_ = 0xffffffffu;    // row 230 (NoteOurLinkHit): our Link's last hit id read in the walk
+
+    // Row 234 (Geno's survey): Volvagia's arena drops its rocks (Obj_FallingRock_A_06, from its
+    // Obj_FallingRockManager's pool, aimed at the game's own Link: QueryDungeonGetPlayerPos) when Volvagia's
+    // FallRockActivate plug switches it on; co-op shares none of them. Whether a game that does not own her drops
+    // its own is the live check: at most every 5 s, while new rocks come, one line with how many. Read only.
+    std::set<u64> rocks_seen_;
+    std::size_t rocks_new_ = 0;
+    u64 rocks_said_us_ = 0;
+    void NoteFallingRocks() {
+        std::set<u64> now;
+        for (const auto& [a, known] : names_) {
+            if (known.first.starts_with("Obj_FallingRock_")) {
+                now.insert(a);
+                rocks_new_ += rocks_seen_.contains(a) ? 0 : 1;
+            }
+        }
+        rocks_seen_ = std::move(now);
+        const u64 now_us = CoopEvery::NowUs();
+        if (rocks_new_ == 0 || now_us - rocks_said_us_ < 5'000'000) {
+            return;
+        }
+        LOG_INFO(Core, "coop: objects: rocks: {} new falling rocks in our game since the last line ({} live)",
+                 rocks_new_, rocks_seen_.size());
+        rocks_new_ = 0;
+        rocks_said_us_ = now_us;
+    }
 
     // Row 230: our Link's Life took a new hit since the last walk (its last hit id moved): who dealt it, its kind
     // words and the life it took, for the Sync (a screamer of ours shares its scream). Read only.
