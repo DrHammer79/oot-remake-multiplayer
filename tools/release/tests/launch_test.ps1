@@ -945,7 +945,9 @@ try {
     $csNpcFiles = @('romfs\Tex\Npc_A.bntx.zs', 'romfs\Phive\Cloth\Player_Adult_CAC.Nin_Ounce_NVN2.bphcl', 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs',
                     'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Dark_Animation.Skeleton.bfres.zs', 'romfs\Model\Player_Adult_C115.Player_Adult.bfres.zs')
     $csUiFiles = @('romfs\UI\LayoutArchiveCategory.Product.100.byml.zs', 'romfs\Sequence\CharacterMenu.module.ainb', 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs',
-                   'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs')
+                   'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs',
+                   # (row 242: Link's own textures, named by his Link models, stay in the default part)
+                   'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs', 'romfs\Tex\Mt_Hairs_Player_Adult_Ah9.bntx.zs', 'romfs\Tex\Angin_Tile_A_Dark_Ac7.bntx.zs')
     # His code patch as IPS32: a kept record, one record in each customizer region his source names, a kept run record,
     # then $Extra (@(offset, bytes) pairs).
     $New_CsIps = {
@@ -981,7 +983,7 @@ try {
         Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ("# pin`nrelease=$Tag`nurl=https://example.invalid/cs`nzip=CS-$Tag.zip`nzip_sha256=$zsha`n" +
             "zip_folder=CS-$Tag/mods/OoT Character Select`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`n" +
             "overlay_sha256=$osha`nips_url=$IpsUrl`nips_sha256=$IpsSha`n")
-        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz1"
+        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2"
     }
     $csJson = '{"format": 1, "mod": "OoT Character Select", "puppet_colours": {"offset": 62574416, "head": "FD7BBFA9000100B40B2C40B96B1D0051"}, "characters": []}'
     $onlineWas = $env:OOT_COOP_OFFLINE; $env:OOT_COOP_OFFLINE = '0'
@@ -1078,7 +1080,7 @@ try {
         Remove-Item -LiteralPath (Join-Path $csDir 'coop-charsel.txt') -Force
         $r = Install-KitCharacterSelect $ck $cm
         Check ($r.Ok -and -not $r.Changed -and ($r.Lines -join ' ') -match 'your own copy') 'Character Select: the player''s own copy is used as it is'
-        Check (-not (Install-KitCharacterSelect $ck $cm '' 'ui').Changed -and (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Tex'))) 'Character Select: character_select = no leaves the player''s own copy as it is (NPC part too)'
+        Check (-not (Install-KitCharacterSelect $ck $cm '' 'ui').Changed -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: character_select = no leaves the player''s own copy as it is (NPC part too)'
         Write-File (Join-Path $csDir 'coop-charsel.txt') "$want`n"
         # The answer: coop-options.ini wins, else the kept answer, else asked (Enter, Y or 15 s: yes; N: no).
         Remove-Item -LiteralPath (Join-Path $ck 'hookshot\character-select-answer.txt') -Force -ErrorAction SilentlyContinue
@@ -1106,7 +1108,37 @@ try {
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq ($want -replace ' full ', ' ui ') -and
                @($csNpcFiles | Where-Object { Test-Path -LiteralPath (Join-Path $csDir $_) }).Count -eq 0 -and
                @($csUiFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $csDir $_)) }).Count -eq 0 -and
-               -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Tex')) -and (Test-Path -LiteralPath $csIps)) 'Character Select: character_select = no keeps the Characters page, takes the NPC part out (from the copy there, no download)'
+               -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Phive')) -and -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound')) -and
+               (Test-Path -LiteralPath $csIps)) 'Character Select: character_select = no keeps the Characters page and Link''s own textures, takes the NPC part out (from the copy there, no download)'
+        # Row 242: a default part made by the old rule (0.11.9/0.11.10: its stamp has no ui-rule field, all of romfs/Tex
+        # gone, Link's own textures too) is made again from his release, never copied from, so Link's textures come back.
+        # (its own mods folder: the kept copies of $cm stay as the checks below expect them)
+        $cm242 = Join-Path $cg 'mods-242'
+        $cs242 = Join-Path $cm242 'OoT Character Select'
+        # (a pin of its own with its zip in the downloads, a copy of that zip for the second install, which takes it
+        # away again; the pin and characters.json of the checks below put back after)
+        $csPinFile = Join-Path $ck 'hookshot\CHARACTER-SELECT.txt'
+        $csJsonFile = Join-Path $cDl 'charsel-characters.json'
+        $csPinKept = [System.IO.File]::ReadAllBytes($csPinFile)
+        $csJsonKept = if (Test-Path -LiteralPath $csJsonFile) { [System.IO.File]::ReadAllBytes($csJsonFile) } else { $null }
+        $want242 = (& $New_CsPin 'v242' $csJson) -replace ' full ', ' ui '
+        $csZip242 = Join-Path $cDl 'CS-v242.zip'
+        $csZipKept = Join-Path $cg 'CS-v242.zip.kept'
+        Copy-Item -LiteralPath $csZip242 -Destination $csZipKept -Force
+        $csLinkTex = Join-Path $cs242 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs'
+        $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
+        Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: a new default part keeps Link's own textures (row 242) [$($csNew.Why)]"
+        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2$', ' cz1') + "`n")
+        Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $csZipKept -Destination $csZip242 -Force
+        $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
+        Check ($csOld.Ok -and $csOld.Changed -and (Test-Path -LiteralPath $csLinkTex) -and
+               -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: an old-rule default part (no Link textures) is made again with them, not copied from (row 242) [$($csOld.Why)]"
+        [System.IO.File]::WriteAllBytes($csPinFile, $csPinKept)
+        if ($null -ne $csJsonKept) { [System.IO.File]::WriteAllBytes($csJsonFile, $csJsonKept) }
+        Remove-Item -LiteralPath $cm242, $csZipKept, $csZip242, (Join-Path $ck 'src-v242') -Recurse -Force -ErrorAction SilentlyContinue
         Check ((Undo-KitCharacterSelect $ck $cm) -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq $want) 'Character Select undo: a failed build after the change puts the full copy back, its files whole'
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and -not (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: the default part again'
@@ -1144,6 +1176,33 @@ try {
         Write-File (Join-Path $csDir 'characters.json') $csJsonN
         Write-File (Join-Path $csDir 'romfs\Model\Player_Child.Player_Child.bfres.zs') 'link'
         Check ((Get-KitCharacterSelectSeen $pm) -eq '') 'Character Select seen: the default part alone (no NPC model) counts as no characters, as the pack tool (no remake loop on a UI-only kit)'
+        # Co-op's own Characters tab (0.11.10): its code patch in the pack folder unless his mod (default part or full)
+        # has code of his; out when the pack left the tab out (no build loop). As build.py charsel_native_wanted.
+        $nk = Join-Path $cm '..\native-kit'
+        $nSrc = Join-Path $nk 'tools\puppet_pack\charsel\data\charsel-native.ips'
+        Write-File $nSrc 'IPS32EEOF'
+        $nMod = Split-Path -Parent $pm
+        $nDst = Join-Path $nMod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+        $csExefs = Join-Path $csDir 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+        $hadCode = Test-Path -LiteralPath $csExefs
+        if (-not $hadCode) { Write-File $csExefs 'his' }
+        $r1 = Sync-KitCharselNativePatch $nk $nMod
+        Check ($r1 -eq '' -and -not (Test-Path -LiteralPath $nDst)) "Characters tab: his default part with his code: ours stays out [$r1]"
+        Remove-Item -LiteralPath $csExefs -Force
+        $r2 = Sync-KitCharselNativePatch $nk $nMod
+        $r3 = Sync-KitCharselNativePatch $nk $nMod
+        Check ($r2 -eq 'in' -and $r3 -eq '' -and (Read-File $nDst) -eq 'IPS32EEOF') "Characters tab: no code of his: ours in, once [$r2 $r3]"
+        $nJson = Join-Path $nMod 'coop_puppet.json'
+        $nHad = Test-Path -LiteralPath $nJson
+        if (-not $nHad) {
+            Write-File $nJson '{"charsel_native": []}'
+            $r4 = Sync-KitCharselNativePatch $nk $nMod
+            Check ($r4 -eq 'out' -and -not (Test-Path -LiteralPath $nDst)) "Characters tab: the pack left it out: ours out [$r4]"
+            Remove-Item -LiteralPath $nJson -Force
+        }
+        Remove-Item -LiteralPath $nDst -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $nk -Recurse -Force
+        if ($hadCode) { Write-File $csExefs 'his' }
         Write-File (Join-Path $csDir 'romfs\Model\Player_Child_C005.Player_Child.bfres.zs') 'm'
         Write-File (Join-Path $csDir 'romfs\Model\Player_Adult_C005.Player_Adult.bfres.zs') 'm'
         $seenFull = 'OoT Character Select|62574416|fd7bbfa9000100b40b2c40b96b1d0051|5=7:Child+Adult'

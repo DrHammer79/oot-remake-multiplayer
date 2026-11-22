@@ -1234,6 +1234,9 @@ function Get-KitHookshotNeed([string]$Kit) {
     }
     $stampFile = Join-Path $game 'coop-built-from.txt'
     $have = if (Test-Path -LiteralPath $stampFile) { [System.IO.File]::ReadAllText($stampFile) } else { '' }
+    # (co-op's own Characters tab's code patch in or out first, as hookshot-build.ps1 does before its stamp: a kit
+    # update that brings it, or Character Select put in or taken out, then asks for the build that takes it)
+    [void](Sync-KitCharselNativePatch $Kit (Join-Path $game 'mods\contents\0400486024DEC000\coop-puppet'))
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
     if (Test-KitGameUnfinished $game) {
@@ -1560,8 +1563,13 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
 # Customize screen (UI, Sequence, Mals, RSDB, GameData, SLink2, the size table), Link's own models and packs, and
 # the code patch (exefs) without his customizer. No file of the default part names a file of the NPC part except
 # through the stored character, which the module keeps on an installed one (coop_char_slots.h). $Rel: '/' or '\'.
+# Link's own textures stay (row 242): his Link models Model/Player_<Age>.Player_<Age>, kept in the default part, name
+# 51 textures of his romfs/Tex (Mt_*_Player_<Age>_Ac1..7, Mt_Hairs_Player_Adult_Ah1..9, Angin_Tile_A[_Dark]_Ac1..7);
+# without them the game waits for them for good after a save load and the world stays black (LANE1 sul-D1..D7). Only
+# his NPC characters' textures (no _Player_ in the name, not Angin_Tile_) are NPC files.
 function Test-KitCharacterSelectNpcFile([string]$Rel) {
     $r = $Rel.Replace('\', '/')
+    if ($r -match '^romfs/Tex/([^/]*_Player_|Angin_Tile_)') { return $false }
     return [bool]($r -match '^romfs/(Tex|Phive|Sound)/' -or $r -match '^romfs/Model/Player_(Adult|Child)_C\d{3}\.' -or
                    $r -match '^romfs/Model/Player_Dark_' -or $r -eq 'romfs/Pack/Actor/Enemy_MiddleBoss_DarkLink.pack.zs')
 }
@@ -1580,7 +1588,10 @@ $script:KitCharselCustomizer = @(
     @('COLOUR_MORE', 0x8103AE80L, 0x8103B160L), @('COLOUR_KEEP', 0x83BCDC10L, 0x83BCDDE0L),
     @('COLOUR_TEX', 0x83BCCE70L, 0x83BCD000L))
 $script:KitCharselIpsShift = 0x8001FF00L
-$script:KitCharselStrip = 'cz1'   # (in the stamp: another list of regions makes the kit strip his patch again)
+# (in the stamp: another list of regions, or another default-part file rule, makes the kit make his folder again.
+# cz2, row 242: the default part keeps Link's own textures; a default part stamped with an older one lost them, so it
+# is never copied from: his release is unpacked again.)
+$script:KitCharselStrip = 'cz2'
 
 # An IPS32 file's records: @{ At (offset); Size (bytes it changes); From; To (the record's bytes in the file) }, or a
 # throw when it is not one. IPS32: 'IPS32', records (u32 BE offset, u16 BE size, the bytes; size 0: u16 BE run length
@@ -1679,7 +1690,8 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
         foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $New 'romfs') -Recurse -File -Force -ErrorAction Stop)) {
             if (Test-KitCharacterSelectNpcFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
         }
-        foreach ($d in 'Tex', 'Phive', 'Sound') { Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
+        # (romfs/Tex goes file by file above: Link's own textures stay)
+        foreach ($d in 'Phive', 'Sound') { Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
     }
     $code = @(Get-ChildItem -LiteralPath (Join-Path $New 'exefs') -Filter '*.ips' -File -ErrorAction SilentlyContinue)
     if ($code.Count -ne 1) { return "the release has $($code.Count) code patches, not one" }
@@ -1734,7 +1746,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
     $wantF = @($want -split ' ')
     $havePart = if ($haveF.Count -ge 5) { $haveF[4] } else { 'full' }
     $derive = $have -and (Test-Path -LiteralPath (Join-Path $dir 'romfs')) -and ($haveF[0..3] -join ' ') -eq ($wantF[0..3] -join ' ') -and
-              ($Part -eq 'ui' -or $havePart -eq 'full')
+              ($havePart -eq 'full' -or ($Part -eq 'ui' -and $haveF.Count -ge 6 -and $haveF[5] -eq $script:KitCharselStrip))
     if (-not $Downloads) { $Downloads = Join-Path $Kit 'hookshot\downloads' }
     $zip = Join-Path $Downloads $op.zip
     $json = Join-Path $Downloads 'charsel-characters.json'
@@ -1875,7 +1887,7 @@ function Get-KitCharacterSelectModels([string]$Dir, $Doc) {
 # the Mods tab. The models are in the key (C #58, lane 051234): the NPC part taken out (a UI-only kit) or put in, or a
 # release that renumbers its characters, makes the pack again, so its puppets and the pick guard never name a model
 # that is not there; the mod switched off in the Mods tab makes it again without the characters.
-function Get-KitCharacterSelectSeen([string]$Manifest) {
+function Get-KitCharacterSelectSeen([string]$Manifest, [switch]$Folder) {
     $pack = Split-Path -Parent $Manifest
     $title = Split-Path -Parent $pack
     $contents = Split-Path -Parent $title
@@ -1885,11 +1897,12 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
             if ($d.Name -match '^[-_.]') { continue }
             $file = Join-Path $d.FullName 'characters.json'
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model'))) { continue }
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (-not $Folder -and -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model')))) { continue }
             try { $doc = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if ($doc.mod -ne 'OoT Character Select' -or $doc.format -ne 1) { continue }
             $listName = if ($root -eq $title) { "contents/$(Split-Path -Leaf $title)/$($d.Name)" } else { $d.Name }
             if (Test-KitModListOff $mods $listName) { continue }
+            if ($Folder) { return $d.FullName }   # (-Folder: the mod's folder, on, models or not: Test-KitCharselNative)
             $models = Get-KitCharacterSelectModels $d.FullName $doc
             if (-not $models) { continue }
             $c = $doc.puppet_colours
@@ -1897,6 +1910,48 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         }
     }
     return ''
+}
+
+# Co-op's own Characters tab (tools/puppet_pack/charsel_ui.py, 0.11.10; the owner: "our mod itself should natively
+# include the character tab even without downloading any of Snails mod"): its code patch, Snail's header and page
+# hooks for Link (charsel/data/charsel-native.ips), goes into the pack's exefs, where the game's build takes the
+# mods' code patches from (patches 0034/0035). Not when the Character Select mod is in the mods (on; with its NPC
+# models or only its default part: Get-KitCharacterSelectSeen -Folder) with a code patch of his: his files and code are the tab's then. The same rule as the
+# pack tool's (build.py charsel_native_wanted), so the game and the pack agree. $Manifest: the pack's
+# coop_puppet.json (it need not be there yet).
+function Test-KitCharselNative([string]$Manifest) {
+    $cs = Get-KitCharacterSelectSeen $Manifest -Folder
+    if (-not $cs) { return $true }
+    return -not @(Get-ChildItem -LiteralPath (Join-Path $cs 'exefs') -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in '.ips', '.pchtxt' }).Count
+}
+
+# The code patch put in or taken out of the pack folder $Mod (<exe dir>\mods\contents\0400486024DEC000\coop-puppet)
+# before the game's build reads the mods' code patches (hookshot-build.ps1, before Get-KitExefsStampLine): in when
+# Test-KitCharselNative says so and the pack there did not leave the tab out (its coop_puppet.json's "charsel_native"
+# empty: the pack tool could not make the tab for this game; else the next start would build the game again, and
+# again). The pack tool writes the same bytes into the pack it makes. Returns 'in', 'out' or '' (no change).
+function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
+    $src = Join-Path $Kit 'tools\puppet_pack\charsel\data\charsel-native.ips'
+    $dst = Join-Path $Mod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+    $manifest = Join-Path $Mod 'coop_puppet.json'
+    $want = (Test-Path -LiteralPath $src -PathType Leaf) -and (Test-KitCharselNative $manifest)
+    if ($want -and (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+        try {
+            $json = [System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json -ErrorAction Stop
+            if ($json.PSObject.Properties['charsel_native'] -and -not @($json.charsel_native).Count) { $want = $false }
+        } catch { }
+    }
+    $have = Test-Path -LiteralPath $dst -PathType Leaf
+    if ($want) {
+        if ($have -and (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash) { return '' }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+        return 'in'
+    }
+    if (-not $have) { return '' }
+    Remove-Item -LiteralPath $dst -Force
+    return 'out'
 }
 
 # What a pack's coop_puppet.json records of its characters, in Get-KitCharacterSelectSeen's form ('' for none).
@@ -2567,24 +2622,78 @@ function Get-KitPackArgs([string]$Tool, [string]$From, [string]$Mod) {
     return @('-I', '-B', $Tool, '--romfs', $From, '--mod-dir', $Mod, '--title-rows', '--pause-tab')
 }
 
+# Row 235: the no-Python start. The puppet pack's menu files (coop_puppet.json "title_menu" and "pause_menu": larger copies
+# of files the game reads at boot) are only safe while the size table the game reads holds their sizes, which only
+# merge_tables.py can check. Without it, move them to <pack>\_coop-menus (the game never reads them there), where
+# merge_tables.py guard_menus keeps them too; its next run puts them back. Returns how many files it moved.
+function Move-KitMenuFilesAside([string]$Mods) {
+    $moved = 0
+    $packs = @(Get-ChildItem -LiteralPath (Join-Path $Mods 'contents') -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'coop-puppet' } | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'coop_puppet.json') })
+    foreach ($pack in $packs) {
+        # Only where another mod could win a size table the pack has (a same-name table in another mod folder; folders
+        # starting with _ are skipped as Longshot does): when the pack's own table is the only one, its menus are safe.
+        $tables = @(Get-ChildItem -LiteralPath (Join-Path $pack 'romfs\System\Resource') -Filter '*.rsizetable.zs' -File -ErrorAction SilentlyContinue | ForEach-Object Name)
+        $others = $false
+        foreach ($t in $tables) {
+            $hit = Get-ChildItem -LiteralPath $Mods -Recurse -Filter $t -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notlike "$pack\*" -and $_.FullName -like '*\romfs\System\Resource\*' -and $_.FullName -and $_.FullName.Substring($Mods.TrimEnd('\').Length) -notmatch '\\_[^\\]*\\' } | Select-Object -First 1
+            if ($hit) { $others = $true; break }
+        }
+        if (-not $others) { continue }
+        try {
+            $m = Get-Content -LiteralPath (Join-Path $pack 'coop_puppet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($key in 'title_menu', 'pause_menu') {
+                foreach ($rel in @($m.$key)) {
+                    if (-not ($rel -is [string]) -or -not $rel) { continue }
+                    $src = Join-Path $pack ('romfs\' + $rel.Replace('/', '\'))
+                    if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+                    $dst = Join-Path $pack ('_coop-menus\' + $rel.Replace('/', '\'))
+                    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+                    Move-Item -LiteralPath $src -Destination $dst -Force
+                    $moved++
+                }
+            }
+        } catch { }
+    }
+    return $moved
+}
+
 # #48: Longshot serves ONE resource size table, the winning mod's. A seed made on OOTRR's website (its folder put into
 # mods by hand) has its own, made without the puppet pack's entries, so the others could not be shown. Before the game
 # starts, tools\puppet_pack\merge_tables.py writes ONE table where the game reads it: that mod's entries and every
 # other mod's that is on (the pack's too), keeping its own in <mod>\_coop-size-table (undo: merge_tables.py --undo).
 # Last it writes <mod>\coop-merged.txt, which the module checks (MergedByKit) to keep the puppets on. Never stops the start. The lines it says, for the window.
-function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir) {
-    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir, [string]$Python = '') {
+    $python = if ($Python) { $Python } else { Join-Path $Kit 'hookshot\tools\python\python.exe' }
     $tool = Join-Path $Kit 'tools\puppet_pack\merge_tables.py'
     $mods = Join-Path $ExeDir 'mods'
     if (-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $mods)) { return @() }
-    if (-not (Test-Path -LiteralPath $python)) { return @("Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown.") }
+    if (-not (Test-Path -LiteralPath $python)) {
+        # Row 235: without the merge nobody checks that the size table the game reads holds the pack's menu files, and a
+        # mod whose table wins (Character Select) crashed both games at the title. So park them, as merge_tables.py's
+        # guard_menus does (the game keeps its own menus, co-op works from the Minus menu).
+        $parked = Move-KitMenuFilesAside $mods
+        $msg = "Size tables: not merged (no Python in $(Split-Path -Parent $python)): with a mod that has its own size table, the other players can't be shown."
+        if ($parked) { $msg += " The title's co-op rows and the pause menu's Multiplayer tab are off this start ($parked files kept aside); the next start with Python puts them back." }
+        return @($msg)
+    }
     $romfs = @((Join-Path $ExeDir 'romfs'), (Join-Path (Split-Path -Parent $ExeDir) 'romfs')) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Pack') } | Select-Object -First 1
     $pyArgs = @('-I', '-B', $tool, '--mods', $mods)
     if ($romfs) { $pyArgs += @('--romfs', $romfs) }
     $before = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" }) } catch { $out = @("Size tables: not merged ($($_.Exception.Message)).") }
+    $failed = $false
+    try {
+        $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" })
+        # Python died before main() (an import error, a Traceback) without saying either of its own lines: unchecked.
+        if ($LASTEXITCODE -ne 0 -and -not ($out | Where-Object { $_ -match '^\s*(Size tables|Menus):' })) { $failed = $true }
+    } catch { $out = @("Size tables: not merged ($($_.Exception.Message))."); $failed = $true }
     $ErrorActionPreference = $before
+    if ($failed) {
+        $parked = Move-KitMenuFilesAside $mods
+        if ($parked) { $out += "Menus: the merge did not run ($parked of the puppet pack's menu files kept aside; the title's co-op rows and the pause menu's Multiplayer tab are off this start)." }
+    }
     return $out
 }
 

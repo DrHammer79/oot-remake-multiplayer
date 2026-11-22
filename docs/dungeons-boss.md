@@ -168,6 +168,18 @@ LANE1 autotest hs-boss-full (runs 20261115-122137 and -130255): in A's game the 
 - Tested: `tests/server/session_test.cpp` (four `boss-copy-b` cases: chase/near refused while unready, an unready owner hands to a ready game, ready before nearer unready when the owner leaves, a late joiner's stun once ready), `tests/lichii/boss_native_test.cpp` (the event case waits for the grace), `boss_test.cpp` (Readiness, 2 cases), `objects_test.cpp` (BossPreBattle).
 - **Not proven in game.** Check (LANE1, hs-boss-full or hs-boss-fix-gohma): A walks in first and under her; during A's intro no "now ours" in B's log while B logs "not ready to own the boss"; A's copy (if it is one) never asks `BossAppear` twice; after B's own intro (if it plays) "now ours" comes within ~1 s. A late B logs "our boss left its pre-battle phase here" once its copy follows A's fight, and B's seed stun then hands B the boss ("now ours").
 
+## Not everyone skips the intro: the owner still in its intro (tracker row 244, 0.11.9)
+
+**Seen.** piscesgamer97, 0.11.9, public lobby (player-logs/piscesgamer97-20261122-065909): "boss fights seem to desync when everyone doesn't skip the cutscene. Dodongo was still stuck in the pit and Gohma was slightly bugged." In the log the King Dodongo intro was played by some games and skipped by others; the boss changed owner twice during and right after it, and the copy was 16 m from the owner's place when its own intro ended.
+
+**Why (root cause).** A game said it was ready to own the boss (`CoopBoss::Readiness`, object_presence `unready` off) by the save's `HavePlayedEvent.<intro>` flag, or once its boss left its pre-battle pose this visit, never by whether its own game was playing the intro *now*. Both are true in the middle of an intro: a save that saw the intro before (a public lobby mixes saves; a game asked to play the intro again with the others, `Director::Join`, keeps its old flag), and an intro's own animations take Gohma out of `Sleep`/`Pre_Battle_*`. Such an owner's boss is the cutscene's (King Dodongo in his pit, Gohma in her intro animations), and the owner sends nothing of its own events. So every game that skipped got the intro's boss: placed where the intro holds it, no moves, and hits on it refused by the owner's game. The server kept it there: the owner read ready, and a ready owner is never handed to a game for being ready.
+
+**Now.** `Sync::InIntro` (an event of ours in the boss room before the fight, or within `kMinFightUs` after its start: the rest of it, such as Gohma's own `BossAppear`; never while our Link is dead) goes into `Readiness::Step` as `in_intro`: never ready then, and the boss's pose then never counts as "left the pre-battle phase". The server's `boss_to_ready` then hands the boss to a game in the fight at once; while every game is in its intro the owner keeps it, as before. The owner's own game, now a copy, runs its own boss through its intro (`Table::SetEvent`) and takes the new owner's state after it. Log: `not ready to own the boss: our game plays its intro now`, then `ready to own the boss`.
+
+**Cases sharing the cause.** Every boss in the room table (Gohma, King Dodongo, Barinade, Phantom Ganon, Volvagia, Morpha, Bongo Bongo, Twinrova): one reading. Not covered: Ganondorf and Ganon (no room in the table, no readiness), mid-bosses (no intro). Solo or co-op idle: nothing sent.
+
+**Tests.** `tests/lichii/boss_test.cpp` (row 244: Readiness with `in_intro`, Sync::InIntro). **Not proven in game.** Check (LANE1, two games): A skips King Dodongo's intro, B watches it; A's log `ready to own the boss`, B's `not ready ...: our game plays its intro now`; the boss is A's (`now ours`) within a second; A fights him out of the pit while B watches; after B's intro, B's copy follows A. Screenshots on both games.
+
 ## Entering together: a copy's own event held by its owner's motion (tracker row 130, GitHub #173, 0.11.3)
 
 **Seen.** Two players walked into Gohma's room together; one softlocked, the other beat her. The softlocked game's log
@@ -623,6 +635,63 @@ King Dodongo rolled forever (Rolling_Start, Rolling_Loop_Start, Rolling_Loop, ne
 **Cases sharing the cause** (a stun the copy's own interrupt runs, with no own time): King Dodongo's bomb or bombchu in his mouth; Gohma's eye (seed, nut) when no shot end is read near her; Bongo Bongo's hands and his `Down`; Barinade's `Stun_*` and `Down_Tentacle_*`; Phantom Ganon and Ganondorf down after an arrow or a reflected ball; Twinrova's `Down_*`; Volvagia's hammer chance time; Morpha's chance time (the hookshot pull); Ganon's `Down_M_*`; the mid-bosses' stuns (Lizalfos, Gerudo thieves, Big Octo, Flare Dancer, the Poe sisters). All go through the one reading above. Plain enemies (Dodongos that eat bombs) are not on this path (`!plain`). Solo and co-op idle: no copies, nothing told.
 
 **Tests.** `objects_test` (row 169: told every walk while it plays, never for the owner's stun, also not when the owner is up a walk before the copy, nor for our own boss; the stun names), `boss_native_test` (row 169: own time, a hand-over during it chooses nothing again, counted once; without it the row 149 re-choose stays). **Not proven in game:** two players at King Dodongo, the guest's bomb in his mouth stuns him, the boss goes to the guest and the guest's hits end him (screenshots on both games: the guest's sword hit taking him from `Down` to his death, the host's screen showing the same).
+
+## Battle manager orders: one manager decides for every game (row 222, Twinrova, 0.11.11)
+
+The owner's report: the Twinrova fight got stuck, the sisters held in an attack. Read from the game's own files and
+main (build e0f3ccfa; no game run yet):
+- The fight is run by a third actor, `Enemy_KotakeKoumeBattleManager`, the group's root (Kotake and Koume are its
+  parts). It has no BSA, no Life and no AS, so the native boss sync never covered it. Its AI node
+  `ExecuteKotakeKoumeBattleManagerAI` (vtable main+0x49a8130; update slot 30, main+0x2720960) picks the fight from
+  its own game's Link and tells each sister what to do through the game's message manager (main+0x379740, the
+  manager `[[main+0x4cba700]]`): a 0x18-byte request naming the sister's actor id (`[client+0x3e8]`), type
+  0x70210000 or 0x70210001, and a payload copied from the manager node (+0xb8). Six send sites, all in that node
+  (main+0x27212e0 to main+0x27227c8).
+- Each sister's `ExecuteKotakeKoumeReceiveMessageProc` (vtable main+0x49a8568) takes them in its message handler, slot
+  39, main+0x2723f80 (x0 the node, x1 the message: +0 the sender's id, +4 the type, +0x10 the payload; main+0x2fa43d0
+  copies the 0x16-byte payload into node+0x54). Type 0x70210000 writes the blackboard keys
+  `DungeonBossKotake_CurrentBattleState` (s32), `_CurrentRollType` (s32), `_AttackStartPos` (vec3), `_IsMainMove`
+  (bool; `_IsPreMainMove` gets the old value); 0x70210001 writes `_IsUnderIntervalThreshold`. The sisters' action
+  sequences branch on those keys (`LandBattle.actionseq`). So their battle state came only from these two messages,
+  from each game's own manager: a copy's verbs were the owner's (native boss sync) but its battle state its own
+  manager's, and after a hand-over the new owner's sisters could start an attack that waited for an order their
+  manager never gave.
+
+The fix (`lichii/hook/coop_boss_orders.h`, Hookshot patch 0036, wrap row 10, protocol 16): the handler is wrapped.
+The owner's game lets each order run and keeps it; it goes out in that sister's own samples (component 23
+`orders`, [protocol.md](protocol.md)). A copy game skips its own manager's orders once the owner's first has come and
+puts the owner's into its sister through the same handler, called by our caller (order 46) on the game's calc thread
+with a message block of its own (made once with the game's malloc), each order once and in the owner's order. At a
+start, a hand-over or a gap it takes the owner's newest order of each type. Made ours, our own manager decides from
+then on; but its own orders were skipped while we were a copy, so it believes the sisters took orders they never did
+(its next order could wait for a state it thinks it gave). So its newest skipped order of each type is put into the
+sister first, and sent as ours: the sisters then stand where the manager that now decides thinks they do. Until the
+owner's first order comes (a new copy, an older owner) its own orders run, as before. The copy's
+manager itself still runs (its SyncLife, its damage field); only its orders to the sisters are the owner's.
+`LICHII_COOP_BOSS_ORDERS=0` turns it off. Option C (enemies-01110: the server moves a group whose root is flagged
+`battle_manager` only from an unfit owner) stays the fallback: a game flags the manager only when it does not share
+orders (no patch 0036, or switched off; `PresenceFlagsBattleManager`), and the server keeps the flag once any game
+sent it, so one game without A keeps the group with its owner; with A in every game it hands over as any boss group. Log lines: `coop: bosses: battle orders: ...` (counts every 10 s),
+`...: the owner's came: our own manager's orders are skipped`, `...: its receive node 0x...`.
+
+Other battle managers (checked in the game's files, romfs of the same build): no other actor runs a battle manager.
+`ExecuteGroupBattleManagerAI` (vtable main+0x49a3090) is in main but no actor's AI uses it. Its client side,
+`ExecuteGroupBattleManagerMessageCommunication` (main+0x49a3258, handler slot 39 main+0x26f5cd0), is only in Gohma's
+larvae (`Enemy_Gohma_Larva.utility.root`, blackboard `Enemy_GroupBattleManager_IsEnable`/`_Order`, the
+`LandBattle_GroupBattle` sequence); with no manager no order ever comes, so the larvae fight on their own AI (the
+native sync and Mover as any enemy). Nothing to wrap; a game update that adds a manager would need a row of its own.
+Twinrova merged (`Enemy_DungeonBoss_Twinrova`, phase 2) has no receive node and no manager link: her fight is her own
+AI and action sequences (`LandBattle`, `LandBattle_Climax`), which the native boss sync carries as any boss (she is in
+the boss lists, coop_boss.cpp). The manager's orders matter only in phase 1.
+A new game (the main base changes, or a new process: `Reset`) drops the parts, the message block (the old game's heap)
+and a call in flight, as the boss table's own block.
+The sisters' own messages to each other (`ExecuteEnemyCoopWriteBlackboardReceiveMessage`, types 0x3ddc000e/f) are
+not orders and are left to each game.
+
+Not proven in a game yet: the probe run (two games, hs-twinrova-native) must show the wrap's first-words check pass
+(`coop: bosses: battle manager orders shared (wrapped)`), `battle orders: ours sent N` in the owner's log and
+`N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
+hand-over.
 
 ## Not known yet (for the in-game check)
 

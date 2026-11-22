@@ -344,8 +344,13 @@ struct Glue {
                 }
                 // boss-copy-b: also ready once our boss left its pre-battle
                 // phase here (a late joiner's copy following the fight).
+                // Row 244: never while our game plays the intro (sync's phase from its last Tick, 100 ms ago): its
+                // boss is the cutscene's, and as owner it held every game that skipped on the intro's boss (King
+                // Dodongo in his pit, Gohma in her intro animations). The server then gives the boss to a game in
+                // the fight (boss_to_ready); with every game in the intro the owner keeps it, as before.
+                const bool in_intro = sync.InIntro(event, now_us);
                 const bool ready =
-                    readiness.Step(room->index, intro, CoopObjects::LastBossPreBattle(Bodies(*room)));
+                    readiness.Step(room->index, intro, CoopObjects::LastBossPreBattle(Bodies(*room)), in_intro);
                 if (readiness.TakeFoughtNews() && intro.has_value() && !*intro) {
                     LOG_INFO(Core, "coop: boss: our boss left its pre-battle phase here: ready to own it without our intro");
                 }
@@ -356,7 +361,9 @@ struct Glue {
                 if (unready.empty() != unready_logged_) {
                     unready_logged_ = unready.empty();
                     LOG_INFO(Core, "coop: boss: {} ({})",
-                             unready.empty() ? "ready to own the boss" : "not ready to own the boss: its intro is not played here",
+                             unready.empty() ? "ready to own the boss"
+                             : in_intro      ? "not ready to own the boss: our game plays its intro now"
+                                             : "not ready to own the boss: its intro is not played here",
                              room->intro);
                 }
                 CoopBossNative::TheTable().SetNotBegun(unready);  // (row 189: its wait is no stuck move)

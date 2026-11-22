@@ -28,6 +28,8 @@
 #include "hos_coop_actors.h"
 #include "hos_coop_nodes.h"
 #include "hos_coop_bosses.h"
+#include "hos_coop_boss_orders.h"
+#include "coop_boss_orders.h"
 #include "coop_svc.h"
 
 namespace {
@@ -930,6 +932,26 @@ TEST_CASE("hookshot: the save-load wraps (patch 0024) are four rows in 0005's ta
     CHECK(module.find("CoopSave::NoteGameOverSave()") != std::string::npos);
     CHECK(module.find("(level.wraps >> HOS_COOP_WRAP_GAME_OVER_SAVE & 1) != 0") != std::string::npos);
     CHECK(module.find("CoopSave::SetNativeSaveLoads(loads)") != std::string::npos);
+}
+
+TEST_CASE("hookshot: the boss orders wrap (patch 0036) is one row in 0005's table, its header hookshot/src's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0036-coop-boss-orders-wrap.patch");
+    CHECK(NewFile(patch, "host/hos_coop_boss_orders.h") ==
+          ReadFile(kRepo / "hookshot" / "src" / "hos_coop_boss_orders.h"));
+    char row[160];
+    std::snprintf(row, sizeof row, "+    (%u, 0x%llx, (0xd503237f, 0xd10103ff, 0xa9027bfd, 0xa9034ff4)),",
+                  HOS_COOP_WRAP_BOSS_ORDER, static_cast<unsigned long long>(CoopBossOrders::addr::kReceive));
+    CHECK_MESSAGE(patch.find(row) != std::string::npos, row);
+    // Free in the one wrap space (0005: 1-3, 0013: 4-5, 0024: 6-9, 0010: 16-23, 0014: 24).
+    CHECK(HOS_COOP_WRAP_BOSS_ORDER > HOS_COOP_WRAP_GAME_OVER_SAVE);
+    CHECK(HOS_COOP_WRAP_BOSS_ORDER < 16);
+    // After 0024's last row, at the table's end.
+    CHECK(patch.find("     (9, 0x32bbce0,") != std::string::npos);
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("id == HOS_COOP_WRAP_BOSS_ORDER && phase == 0") != std::string::npos);
+    CHECK(module.find("t.OnReceive(x[0], actor, type, payload, t_own_call)") != std::string::npos);
+    CHECK(module.find("WrapIn(HOS_COOP_WRAP_BOSS_ORDER) && Env(\"LICHII_COOP_BOSS_ORDERS\") != \"0\"") !=
+          std::string::npos);
 }
 
 TEST_CASE("hookshot: on Linux the exe exports every function the module finds in it by name") {

@@ -260,6 +260,7 @@ mkdir -p "$CSR/romfs/Model" "$CSR/romfs/Tex" "$CSR/romfs/UI" "$CSR/exefs" "$D/bu
 printf 'npc model' >"$CSR/romfs/Model/Player_Child_C000.Player_Child.bfres.zs"
 printf 'link' >"$CSR/romfs/Model/Player_Child.Player_Child.bfres.zs"
 printf 'tex' >"$CSR/romfs/Tex/Npc_A.bntx.zs"
+printf 'link tex' >"$CSR/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs"   # (row 242: Link's own, named by his Link model)
 printf 'ui' >"$CSR/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs"
 # His code patch as IPS32: a kept record, one record in each customizer region his source names, a kept run record.
 cs_ips() { "$py" -c '
@@ -307,8 +308,8 @@ cp "$tmp/cs-rel/CS-v1.zip" "$D/builder/charsel/CS-v1.zip"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs1.txt" 2>&1; export CODE=$?
 check 'Character Select: no -> the default part alone (the Characters page, Link), characters.json, stamped ui, credited, the answer kept' \
     bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] && [ -f "$2/romfs/Model/Player_Child.Player_Child.bfres.zs" ] &&
-        [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
-        [ -f "$2/characters.json" ] && [ ! -e "$2/INSTALL.txt" ] && grep -q "^v1 .* ui cz1$" "$2/coop-charsel.txt" && grep -q "belong to Nintendo" "$2/CREDITS-coop.txt" &&
+        [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
+        [ -f "$2/characters.json" ] && [ ! -e "$2/INSTALL.txt" ] && grep -q "^v1 .* ui cz2$" "$2/coop-charsel.txt" && grep -q "belong to Nintendo" "$2/CREDITS-coop.txt" &&
         grep -qx no "$3/character-select-answer.txt" && [ ! -e "$3/builder/charsel/CS-v1.zip" ] && [ ! -e "$3/game/mods/coop-mods.list" ]' _ "$tmp/build-cs1.txt" "$CS" "$D"
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select strip: the exefs patch keeps only the 2 records outside his customizer, his own whole beside it (outside exefs)' \
@@ -323,15 +324,15 @@ cp "$tmp/cs-rel/CS-v1.zip" "$D/builder/charsel/CS-v1.zip"
 : >"$log"; OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs3.txt" 2>&1; export CODE=$?
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select: character_select = yes gets the NPC part too, his patch still stripped' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && grep -q "^v1 .* full cz1$" "$2/coop-charsel.txt" &&
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && grep -q "^v1 .* full cz2$" "$2/coop-charsel.txt" &&
         [ "$CS_RECS" = 2 ]' _ "$tmp/build-cs3.txt" "$CS"
 check 'Character Select pack: UI-only -> full (NPC models put in) makes the puppet pack again' bash -c 'grep -q "^puppet_pack" "$1" && grep -q "models:" "$2/.coop-stamp"' _ "$log" "$P"
 # Off again: from the copy there (no zip here, nothing downloaded): the NPC part out, the Characters page kept.
 sed -i 's/^character_select = yes$/character_select = no/' "$D/coop-options.ini"
 : >"$log"; OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs4.txt" 2>&1; export CODE=$?
 check 'Character Select: character_select = no keeps the Characters page, takes the NPC part out, no download' \
-    bash -c '[ $CODE -eq 0 ] && [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex" ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] &&
-        grep -q "^v1 .* ui cz1$" "$2/coop-charsel.txt" && grep -q "exefs=OoT Character Select/exefs/" "$3/game/coop-built-from.txt" && ! grep -q downloading "$1"' _ "$tmp/build-cs4.txt" "$CS" "$D"
+    bash -c '[ $CODE -eq 0 ] && [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs" ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] &&
+        grep -q "^v1 .* ui cz2$" "$2/coop-charsel.txt" && grep -q "exefs=OoT Character Select/exefs/" "$3/game/coop-built-from.txt" && ! grep -q downloading "$1"' _ "$tmp/build-cs4.txt" "$CS" "$D"
 # (player report 210: the UI-only pack was kept in data/pack-variants when the full one was made: put back, not made)
 check 'Character Select pack: full -> UI-only (NPC models taken out) puts the UI-only pack made before back (not made again)' \
     bash -c '! grep -q "^puppet_pack" "$1" && grep -q "puppet pack: the one made before for these characters is put back" "$2"' _ "$log" "$tmp/build-cs4.txt"
@@ -365,7 +366,7 @@ cp "$tmp/cs-his.ips" "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs5.txt" 2>&1; export CODE=$?
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select: a 0.11.8 full copy keeps its NPC part, his patch stripped, his own kept aside, no download' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v1 .* full cz1$" "$2/coop-charsel.txt" &&
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v1 .* full cz2$" "$2/coop-charsel.txt" &&
         [ "$CS_RECS" = 2 ] && cmp -s "$2/coop-charsel-code.ips" "$3" && ! grep -q downloading "$1"' _ "$tmp/build-cs5.txt" "$CS" "$tmp/cs-his.ips"
 # A newer patch of his laid out otherwise (no record at cz_head): refused, the copy there kept as it was.
 cs_ips "$D/builder/charsel/code.ips" 0
@@ -373,7 +374,7 @@ cs_pin https://example.invalid/code.ips "$(sha256sum "$D/builder/charsel/code.ip
 cp "$tmp/cs-rel/CS-v1.zip" "$D/builder/charsel/CS-v1.zip"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs6.txt" 2>&1; export CODE=$?
 check 'Character Select strip: a patch without a customizer region is refused, the copy there kept' \
-    bash -c '[ $CODE -eq 0 ] && grep -q "nothing at cz_head" "$1" && grep -q "^v1 .* - full cz1$" "$2/coop-charsel.txt"' _ "$tmp/build-cs6.txt" "$CS"
+    bash -c '[ $CODE -eq 0 ] && grep -q "nothing at cz_head" "$1" && grep -q "^v1 .* - full cz2$" "$2/coop-charsel.txt"' _ "$tmp/build-cs6.txt" "$CS"
 cs_pin
 # A copy the player put in by hand (no stamp) is never touched.
 rm -f "$CS/coop-charsel.txt"
@@ -563,7 +564,7 @@ if [[ $(uname -s) == Linux ]]; then
     check 'start --help lists the options' has "$tmp/start3.txt" '--no-update'
     check 'start --help lists --pack' has "$tmp/start3.txt" '--pack'
     check 'start --help lists --problem-reports' has "$tmp/start3.txt" '--problem-reports'
-    check 'start: no problem-report address in the kit: nothing asked, nothing sent' bash -c '! grep -q "Send problem reports" "$1" && [ ! -e "$2/logs/problem-send.json" ]' _ "$tmp/start1.txt" "$D"
+    check 'start: no problem-report address in the kit: nothing asked, nothing sent' bash -c '! grep -q "automatic problem reports" "$1" && [ ! -e "$2/logs/problem-send.json" ]' _ "$tmp/start1.txt" "$D"
     bash "$kit/start-squadala.sh" --problem-reports nosend </dev/null >"$tmp/start4.txt" 2>&1
     check 'start --problem-reports nosend: sending off, kept' bash -c 'grep -q "\"send\": \"off\"" "$1"' _ "$D/logs/problem-send.json"
     bash "$kit/start-squadala.sh" --problem-reports maybe </dev/null >"$tmp/start5.txt" 2>&1; export CODE=$?

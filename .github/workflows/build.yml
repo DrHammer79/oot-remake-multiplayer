@@ -134,6 +134,8 @@ jobs:
         run: python tools/puppet_pack/tests/test_ui_pack.py -v
       - name: Pause menu Multiplayer tab and page tests
         run: python tools/puppet_pack/tests/test_pause_menu.py -v
+      - name: Co-op's own - menu screen (CoopMenu_00) tests
+        run: python tools/puppet_pack/tests/test_coop_menu.py -v
       - name: Difficulty designed enemies tests
         run: python tools/puppet_pack/tests/test_designed_enemies.py -v
       - name: Enemies deleted by our Link's area tests
@@ -290,6 +292,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/update_test.ps1
       - name: Kit path check tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/paths_test.ps1
+      - name: Kit no-Python menu park tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/menu_park_test.ps1
       - name: Kit hosting tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/hosting_test.ps1
       - name: Nucleus handler tests
