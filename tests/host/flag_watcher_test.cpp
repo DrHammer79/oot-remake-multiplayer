@@ -1187,7 +1187,9 @@ TEST_CASE("flag watcher: a guest's older save joining a host's new file takes th
   CHECK(guest_game.get(kHookshot) == 0);
   CHECK(guest_game.get(kEmerald) == 0);
   CHECK(w.stats().snapshot_exact == 2);
-  // From now on the guest plays the host's file: its own new pickup goes out.
+  // From now on the guest plays the host's file: its own new pickup goes out (row 238: after the join's hold on a
+  // lowered max-rule value has ended, kResetQuietFrames of the game keeping it; no pickup comes in that second).
+  for (int i = 0; i <= FlagWatcher::kResetQuietFrames; ++i) CHECK(w.frame(store).empty());
   guest_game.values[kHookshot] = entry(kHookshot, 1, proto::FlagKind::int32);
   CHECK(only<proto::FlagSet>(w.frame(store)) ==
         std::vector{entry(kHookshot, 1, proto::FlagKind::int32)});
