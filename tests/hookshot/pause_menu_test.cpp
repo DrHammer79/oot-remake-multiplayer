@@ -722,20 +722,14 @@ TEST_CASE("pause tab: Settings: the password on this network, not needed unless 
     // network needs the password, none otherwise. A file without it (every older one, and the kit's, where the line
     // is commented out) lets the network in; an older build's line hand-set to off keeps the password.
     CHECK(CoopTitleMenu::Options::Read("", "").same_network_open);
-    CHECK(CoopTitleMenu::Options::Read("", "# same_network_password = on
-").same_network_open);
-    CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_password = on
-").same_network_open);
-    CHECK(CoopTitleMenu::Options::Read("", "same_network_password = off
-").same_network_open);
-    CHECK(CoopTitleMenu::Options::Read("", "same_network_open = on
-").same_network_open);
-    CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_open = off
-").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "# same_network_password = on\n").same_network_open);
+    CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_password = on\n").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "same_network_password = off\n").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "same_network_open = on\n").same_network_open);
+    CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_open = off\n").same_network_open);
     CoopTitleMenu::Options o;
     o.same_network_open = false;
-    std::string coop_ini, options_ini = "same_network_open = on
-";
+    std::string coop_ini, options_ini = "same_network_open = on\n";
     o.Write(coop_ini, options_ini);
     CHECK(options_ini.find("same_network_password = on") != std::string::npos);
     CHECK(options_ini.find("# same_network_open = on") != std::string::npos);   // (the older line commented out)
