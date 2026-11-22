@@ -1,0 +1,25 @@
+# hs-customize-tunic (Longshot, row 246 / #314): the Kokiri Tunic changed on co-op's own Customize Link page in the
+# game, mid-session (no LICHII_COOP_COLOR: the colour the kit's settings give, then the page's). A child, in the
+# graveyard as the save loads; B (hs-customize-tunic.B.txt) faces A's spot and watches.
+# Run: tools\autotest\run.ps1 -Runtime hookshot -Lane 1 -Scenario hs-customize-tunic
+# Pass: shot a-before-A: A's Link in its start colour; a-page-A: the page, Kokiri Tunic row on a new colour, the
+# picture's Link in it; a-after-A: A's own Link in the new colour in the field; B's b-after-B: A's puppet in the
+# new colour. A's log: "coop: pause tab: settings and look: closed (Link wears the look chosen)", then "coop: look:
+# your Link's tunic is tunic-<new> now" and "part colour(s) sent (PLAYER_LOOK)"; B's log: P1 wears the new colour.
+mark start
+wait 300                # the save loaded, Link standing
+mark a-before
+menu customize
+wait 240                # the page drawn (the first part row selected: Eye Colour)
+press DDOWN             # Kokiri Tunic
+wait 60
+press DRIGHT            # the next colour
+wait 60
+press DRIGHT            # and the next
+wait 120
+mark a-page
+menu close
+wait 240                # worn on the next frame, the textures found
+mark a-after
+wait 300                # while B looks
+mark a-end
