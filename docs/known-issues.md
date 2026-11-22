@@ -1,8 +1,8 @@
-# Known issues in the newest release (0.11.9)
+# Known issues in the newest release (0.11.10)
 
 This is an early test release. Everything under "Works" was seen in our two-game tests: two copies of the game on one PC talking through the server, driven by the [autotest](../tools/autotest) scripts or played by hand, with the logs and screenshots of both games read afterwards. Testers play the releases on separate PCs, over a LAN and the internet. Please report what you see ([setup.md, Reporting a problem](setup.md#reporting-a-problem)); every open problem is on the [issues page](https://github.com/daurosk/oot-remake-multiplayer/issues).
 
-**Every player needs the same release.** 0.11.6, 0.11.7, 0.11.8 and 0.11.9 are protocol 15 and can join each other, but 0.11.9's fixes and menus need 0.11.9 in every game (0.11.6 also still has the crash after about an hour fixed in 0.11.7, tracker row 156): update together; they refuse every older version at join, with the note to run `Update.bat`. 0.11.0 to 0.11.4 are protocol 12 and 0.11.5 is protocol 14: a game and a server (or another game) of different protocol versions refuse each other, so a 0.11.5 or older game cannot join a 0.11.6 game: update together. A 0.10.1 or newer kit offers the update when you start it. A kit from before 0.10.1 cannot: download `Update.bat` from the release page into the kit folder and double-click it. `Revert.bat` goes back to the version you had before.
+**Every player needs the same release.** 0.11.6 to 0.11.10 are protocol 15 and can join each other, but 0.11.10's fixes need 0.11.10 in every game (0.11.6 also still has the crash after about an hour fixed in 0.11.7, tracker row 156): update together; they refuse every older version at join, with the note to run `Update.bat`. 0.11.0 to 0.11.4 are protocol 12 and 0.11.5 is protocol 14: a game and a server (or another game) of different protocol versions refuse each other, so a 0.11.5 or older game cannot join a 0.11.6 game: update together. A 0.10.1 or newer kit offers the update when you start it. A kit from before 0.10.1 cannot: download `Update.bat` from the release page into the kit folder and double-click it. `Revert.bat` goes back to the version you had before.
 
 **The game runs on Longshot v3.0.0** (Team MagicBean's recompilation; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot)). There is no emulator in this release: emulator players keep the last emulator release (the early test release of 2026-11-12 on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)), which cannot join a Longshot game. The first start builds the game from your own copy (10 to 45 minutes); later updates put the new co-op into it in a few minutes, or build it again when Longshot or our game patches move (0.11.6 builds it again, once, for Longshot v3.0.0). If Longshot's server cannot be reached, the build takes the same files from our [mirror](https://github.com/daurosk/oot-remake-multiplayer/releases/tag/longshot-mirror-v3.0.0), each checked by its SHA-256.
 
@@ -40,6 +40,17 @@ This is an early test release. Everything under "Works" was seen in our two-game
 - **Mods that sort before the co-op files** (fixed for 0.11.3): a randomizer seed from OOTRR's website, or another mod with its own game tables whose folder name sorts before the co-op files, no longer crashes the game 1 s into the start, and the other players show as usual.
 - **Joining by address** (new in 0.11.2, from bmitch87's PR #230): IP address, Port and Password rows in Join, and a Port row when you host.
 - **Chinese** (new in 0.11.2, from cirnoice9's PR #231): the co-op tabs in Simplified and Traditional Chinese when the game is set to Chinese.
+
+## New in 0.11.10
+
+In 0.11.10 (hotfix: update only, no game rebuild). From your reports (E'tykalu, Nicktendo, KerbexSenpai, Rick); checked in my two-game test runs and CI (the closed-window build marker and the Goron/Zora tunic are untested): tell me if it still happens.
+
+- **Black screen after Character Select's menu** (rows 239 to 241): with Character Select's menus only (the NPC models not downloaded), a pick whose model is not installed goes back to Link at once, on every frame, co-op on or off. With co-op on, a save that holds such a pick is stored as Link before it is loaded or sent to a guest; the original is kept beside it as `progress.sav.coop-pick-backup`. A solo save that already holds such a pick is not rewritten on disk; the per-frame guard keeps the game on Link.
+- **Unfinished build** (Windows kits only): a kit window closed during the update's build is never started as built; the next start finishes it.
+- **Customize page**: the title names the page first and adds "Y: page  A: exact hue" (also Simplified and Traditional Chinese).
+- **Puppet tunic green** (row 243): other players saw a default green tunic as lime; puppets now wear the game's own green, child and adult.
+
+Open in 0.11.10: **a puppet that shows no animation** (row 242), planned for the next release.
 
 ## New in 0.11.9
 
@@ -97,7 +108,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 - **Microsoft Defender** may warn about the zip or `Update.bat` ("Trojan:Script/Wacatac"): a false alarm on our scripts, which we report to Microsoft.
 
 - **The pause menu's Multiplayer page and the title's Host and Join rows** (new in 0.11.6, DrHammer79, [PR #281](https://github.com/daurosk/oot-remake-multiplayer/pull/281) and the PRs after it): the page and the rows are drawn in both games and the game starts with them (0.11.5 made its pack without them because they crashed the game at start). Typing a room name on the Join rows, the list of games on this network, rejoining by itself and the page through a stall are in the code, not yet checked in a game. The Multiplayer tab opens as before (**−** and **+**, Home or F1).
-- **Redead and Gibdo freeze only one player**, **Meg's decoys can differ per game** and **Dead Hand's hands grab only one player** (tracker rows 230 to 232): not fixed yet, planned for 0.11.10.
+- **Redead and Gibdo freeze only one player**, **Meg's decoys can differ per game** and **Dead Hand's hands grab only one player** (tracker rows 230 to 232): not fixed yet, planned for a later release.
 
 ## Not yet checked in a game, or only partly
 
