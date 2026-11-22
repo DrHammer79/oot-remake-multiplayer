@@ -1127,16 +1127,30 @@ try {
         # (its own mods folder: the kept copies of $cm stay as the checks below expect them)
         $cm242 = Join-Path $cg 'mods-242'
         $cs242 = Join-Path $cm242 'OoT Character Select'
+        # (a pin of its own with its zip in the downloads, a copy of that zip for the second install, which takes it
+        # away again; the pin and characters.json of the checks below put back after)
+        $csPinFile = Join-Path $ck 'hookshot\CHARACTER-SELECT.txt'
+        $csJsonFile = Join-Path $cDl 'charsel-characters.json'
+        $csPinKept = [System.IO.File]::ReadAllBytes($csPinFile)
+        $csJsonKept = if (Test-Path -LiteralPath $csJsonFile) { [System.IO.File]::ReadAllBytes($csJsonFile) } else { $null }
+        $want242 = (& $New_CsPin 'v242' $csJson) -replace ' full ', ' ui '
+        $csZip242 = Join-Path $cDl 'CS-v242.zip'
+        $csZipKept = Join-Path $cg 'CS-v242.zip.kept'
+        Copy-Item -LiteralPath $csZip242 -Destination $csZipKept -Force
         $csLinkTex = Join-Path $cs242 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs'
         $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
-        Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0]))) 'Character Select: a new default part keeps Link''s own textures (row 242)'
-        Write-File (Join-Path $cs242 'coop-charsel.txt') ((($want -replace ' full ', ' ui ') -replace ' cz2$', ' cz1') + "`n")
-        Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force
+        Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: a new default part keeps Link's own textures (row 242) [$($csNew.Why)]"
+        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2$', ' cz1') + "`n")
+        Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $csZipKept -Destination $csZip242 -Force
         $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
         Check ($csOld.Ok -and $csOld.Changed -and (Test-Path -LiteralPath $csLinkTex) -and
                -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
-               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq ($want -replace ' full ', ' ui ')) 'Character Select: an old-rule default part (no Link textures) is made again with them (row 242)'
-        Remove-Item -LiteralPath $cm242 -Recurse -Force -ErrorAction SilentlyContinue
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: an old-rule default part (no Link textures) is made again with them, not copied from (row 242) [$($csOld.Why)]"
+        [System.IO.File]::WriteAllBytes($csPinFile, $csPinKept)
+        if ($null -ne $csJsonKept) { [System.IO.File]::WriteAllBytes($csJsonFile, $csJsonKept) }
+        Remove-Item -LiteralPath $cm242, $csZipKept, $csZip242, (Join-Path $ck 'src-v242') -Recurse -Force -ErrorAction SilentlyContinue
         Check ((Undo-KitCharacterSelect $ck $cm) -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq $want) 'Character Select undo: a failed build after the change puts the full copy back, its files whole'
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and -not (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: the default part again'
