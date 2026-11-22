@@ -762,6 +762,16 @@ bool SnailCodeBuiltIn(std::string_view list) {
     });
 }
 
+bool CharselCodeBuiltIn(std::string_view list) {
+    if (SnailCodeBuiltIn(list)) return true;
+    return AnyCodeLine(list, [](std::string_view mod) {
+        const std::size_t slash = mod.rfind('/');
+        std::string leaf(slash == std::string_view::npos ? mod : mod.substr(slash + 1));
+        for (char& c : leaf) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return leaf == "coop-puppet";
+    });
+}
+
 std::vector<float> TabRowX(float first, float step, int game, const std::vector<float>& widths) {
     const int n = static_cast<int>(widths.size());
     std::vector<float> x(static_cast<std::size_t>(n), first);
