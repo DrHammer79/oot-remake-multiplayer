@@ -1920,8 +1920,8 @@ void ApplyMinus(void* ctx, const Facts& f, const Page::Do& d) {
 // game build, which needs the game started again.
 bool SnailCodeInGame() {
     static const bool built = [] {
-        const bool yes = SnailCodeBuiltIn(CoopPause::ExefsList());
-        LOG_INFO(Core, "coop: pause tab: Character Select's code in the game (exefs_patches.txt): {} (the - strip's "
+        const bool yes = CharselCodeBuiltIn(CoopPause::ExefsList());
+        LOG_INFO(Core, "coop: pause tab: a Characters tab's code in the game (Character Select's or co-op's own; exefs_patches.txt): {} (the - strip's "
                        "slot 3 {})",
                  yes ? "yes" : "no", yes ? "counts when shown" : "never counts: the game's code fills three - tabs");
         return yes;

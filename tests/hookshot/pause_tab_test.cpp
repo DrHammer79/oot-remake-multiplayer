@@ -2380,6 +2380,16 @@ TEST_CASE("exefs_patches.txt: a code patch the game was built with") {
   CHECK_FALSE(SnailCodeBuiltIn("Other mod\tE0.ips\t1\tcode\t\n"));
   CHECK_FALSE(SnailCodeBuiltIn("OoT Character Select\tE0.ips\t1\tunsupported\tanother version\n"));
   CHECK_FALSE(SnailCodeBuiltIn(""));
+  // A Characters tab's code: his, or co-op's own in the puppet pack (charsel-native-0119); not his name alone
+  constexpr const char* ours = "contents/0400486024DEC000/coop-puppet\tE0F3CCFA.ips\t5a5a5a5a\tcode\t\n";
+  CHECK(CharselCodeBuiltIn(ours));
+  CHECK_FALSE(SnailCodeBuiltIn(ours));
+  CHECK(CharselCodeBuiltIn("contents/0400486024dec000/Coop-Puppet\tE0.ips\t1\tcode\t\r\n"));
+  CHECK(CharselCodeBuiltIn("OoT Character Select\tE0.ips\t1\tcode\t\n"));
+  CHECK_FALSE(CharselCodeBuiltIn("contents/0400486024DEC000/coop-puppet\tE0.ips\t1\tunsupported\tanother version\n"));
+  CHECK_FALSE(CharselCodeBuiltIn("contents/0400486024DEC000/coop-puppet-old\tE0.ips\t1\tcode\t\n"));
+  CHECK_FALSE(CharselCodeBuiltIn("Other mod\tE0.ips\t1\tcode\t\n"));
+  CHECK(GameTabsShown(true, CharselCodeBuiltIn(ours)) == 4);
 }
 
 TEST_CASE("the - strip's tabs: one compact row by their words, centred where the game's were") {

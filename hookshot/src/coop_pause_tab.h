@@ -865,6 +865,12 @@ bool ModCodeBuiltIn(std::string_view exefs_list);
 // has "character select" in any case): his Characters tab and Customize screen are in the game, and his Customize
 // screen is the one home of Link's look (co-op's rows on it: coop_snail_custom.h; the owner, 0.11.9).
 bool SnailCodeBuiltIn(std::string_view exefs_list);
+// Whether a Characters tab's code is in the game: his (SnailCodeBuiltIn), or co-op's own (charsel-native-0119: the
+// puppet pack's exefs code patch, Snail's header, page and Customize hooks for Link, built from his MIT code; the
+// owner: "our mod itself should natively include the character tab even without downloading any of Snails mod"),
+// listed under the pack's folder (".../coop-puppet"). Either fills slot 3 and makes his Customize screen (the same
+// layout CharacterCustomize_00 in both) the one home of Link's look. The kit puts in one or the other, never both.
+bool CharselCodeBuiltIn(std::string_view exefs_list);
 // The - strip's tabs as one compact row (charsel-tab-0119; the owner, 0.11.9 kit: "It's extremely spread out"): before,
 // every tab sat one game step apart, a step the game sized for three or four tabs, so seven ran across the whole bar.
 // Now each two neighbours are as far apart as their words' half widths and the tightest gap the game itself leaves
