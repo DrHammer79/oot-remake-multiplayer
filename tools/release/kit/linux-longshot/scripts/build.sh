@@ -492,6 +492,42 @@ exefs_stamp() {
 }
 # A mod's name as patch 0011's host/mods.c compares them: ASCII letters without case, '\' as '/'.
 mod_fold() { local s=${1//\\//}; printf '%s' "$s" | LC_ALL=C tr 'A-Z' 'a-z'; }
+# Co-op's own Characters tab (charsel-native-0119; the owner: "our mod itself should natively include the character tab
+# even without downloading any of Snails mod"): its code patch (Snail's header, page and Customize hooks for Link, from
+# his MIT code: data/tools/puppet_pack/charsel/data/charsel-native.ips) goes into the pack folder's exefs before the
+# stamp, so the build takes it in; out when Character Select's own code is in the mods (his files and code are the
+# tab's then) or the pack said it left the tab out (coop_puppet.json "charsel_native": [], no build loop). The rule is
+# the pack tool's own (build.py charsel_native_wanted), as kit-paths.ps1 Sync-KitCharselNativePatch. Also after
+# charsel_undo below (Character Select put back as the game had it).
+charsel_native_sync() {
+    local src=$DATA/tools/puppet_pack/charsel/data/charsel-native.ips
+    local pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
+    local dst=$pack/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips want=0
+    if [[ -f $src && -x $PY ]]; then
+        "$PY" -I -B -c '
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from puppet_pack.build import charsel_native_wanted
+pack = sys.argv[2]
+want = charsel_native_wanted(pack)
+try:
+    with open(os.path.join(pack, "coop_puppet.json"), encoding="utf-8") as f:
+        doc = json.load(f)
+    if isinstance(doc, dict) and "charsel_native" in doc and not doc["charsel_native"]:
+        want = False
+except (OSError, ValueError):
+    pass
+sys.exit(0 if want else 1)' "$DATA/tools" "$pack" 2>/dev/null && want=1
+    fi
+    if ((want)); then
+        [[ -f $dst ]] && cmp -s "$src" "$dst" && return 0
+        mkdir -p "${dst%/*}" && cp -- "$src" "$dst"
+    elif [[ -f $dst ]]; then
+        rm -f -- "$dst"
+    fi
+    return 0
+}
+((check_only)) || charsel_native_sync
 game_want="$src_stamp$(exefs_stamp)"
 ready=0
 [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]] && ready=1
@@ -705,7 +741,7 @@ if ((ready && !rebuild && !check_only)); then
     charsel_confirm
 elif game_build; then
     charsel_confirm
-elif charsel_undo && game_want="$src_stamp$(exefs_stamp)" && [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]]; then
+elif charsel_undo && charsel_native_sync && game_want="$src_stamp$(exefs_stamp)" && [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]]; then
     warn "$game_why"
     warn 'Character Select: the game could not be built with it, so it is taken back out for now and the game starts as it was (the next start tries again; character_select = no in data/coop-options.ini stops it).'
 else

@@ -132,12 +132,24 @@ new file mode 100644
 EOF
 cat >"$kit/data/tools/puppet_pack/build.py" <<'EOF'
 import os, sys
-d = sys.argv[sys.argv.index("--mod-dir") + 1]
-os.makedirs(d, exist_ok=True)
-open(os.path.join(d, "coop_puppet.json"), "w").write("{}")
-with open(os.environ["FAKE_LOG"], "a") as f:
-    f.write("puppet_pack %s\n" % " ".join(sys.argv[1:]))
+
+
+def charsel_native_wanted(mod_dir):   # (the real rule, short: a mod with a code patch in the mods -> his tab, not ours)
+    import glob
+    mods = os.path.dirname(os.path.dirname(os.path.dirname(mod_dir)))
+    return not glob.glob(os.path.join(mods, "[!-_.]*", "exefs", "*.ips"))
+
+
+if __name__ == "__main__":
+    d = sys.argv[sys.argv.index("--mod-dir") + 1]
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "coop_puppet.json"), "w").write("{}")
+    with open(os.environ["FAKE_LOG"], "a") as f:
+        f.write("puppet_pack %s\n" % " ".join(sys.argv[1:]))
 EOF
+: >"$kit/data/tools/puppet_pack/__init__.py"
+mkdir -p "$kit/data/tools/puppet_pack/charsel/data"
+printf 'PATCHcharsel' >"$kit/data/tools/puppet_pack/charsel/data/charsel-native.ips"
 # (dumpcheck.py's stand-in: a file that starts with "nup" is the game; the pack's .nup search takes no other)
 cat >"$kit/data/tools/puppet_pack/dumpcheck.py" <<'EOF'
 import sys
@@ -169,11 +181,25 @@ check 'build: the module is put beside the game' [ "$(cat "$D/game/hookshot_coop
 check 'build: coop.ini beside the game, empty server and name left as comments, port 27510' \
     bash -c 'grep -q "^# server =$" "$1" && grep -q "^# name =$" "$1" && grep -q "^port = 27510$" "$1"' _ "$D/game/coop.ini"
 check 'build: the puppet pack goes in data/game/mods/contents/<title>/coop-puppet, with the title rows and the pause tab (--title-rows --pause-tab)' bash -c '[ -f "$1/game/mods/contents/0400486024DEC000/coop-puppet/coop_puppet.json" ] && grep -q "puppet_pack --romfs .*nup --mod-dir " "$2" && grep -q -- "--mod-dir .* --title-rows --pause-tab" "$2"' _ "$D" "$log"
+csn="$D/game/mods/contents/0400486024DEC000/coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
+check "build: co-op's own Characters tab's code patch goes into the pack's exefs before the game's build (no Character Select)" \
+    bash -c 'cmp -s "$1" "$2" && grep -q "coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips:" "$3"' _ \
+    "$D/tools/puppet_pack/charsel/data/charsel-native.ips" "$csn" "$D/game/coop-built-from.txt"
 check 'build: the game file is remembered' has "$D/game-files.txt" "Downloads/OoT [04004860224DEC000].nup"
 
 : >"$log"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build2.txt" 2>&1; export CODE=$?
 check 'build: a second start builds nothing' bash -c '[ $CODE -eq 0 ] && grep -q "built already" "$1" && ! grep -q "^make_game" "$2" && grep -q "puppet pack: built already" "$1"' _ "$tmp/build2.txt" "$log"
+# Character Select's own code in the mods (the stub's rule: a file says): his tab only, ours out, the game built again;
+# then gone again: ours back in, built again
+: >"$log"; mkdir -p "$D/game/mods/Fake CS/exefs"; printf 'his' >"$D/game/mods/Fake CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/csn1.txt" 2>&1; export CODE=$?
+check "build: with Character Select's code co-op's tab's patch is taken out and the game built again" \
+    bash -c '[ $CODE -eq 0 ] && [ ! -e "$1" ] && grep -q "^make_game" "$2"' _ "$csn" "$log"
+: >"$log"; rm -rf "$D/game/mods/Fake CS"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/csn2.txt" 2>&1; export CODE=$?
+check "build: Character Select's code gone: co-op's tab's patch back in, the game as built with it (the kept build put back)" \
+    bash -c '[ $CODE -eq 0 ] && [ -f "$1" ] && grep -q "coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips:" "$2"' _ "$csn" "$D/game/coop-built-from.txt"
 
 # NVIDIA DLSS (#234): --dlss asks for NVIDIA's license once (a terminal only), data/dlss.txt keeps the answer, the game is
 # built again with the SDK; --no-dlss takes it back. The game's stamp stays the release, pin and patches.
