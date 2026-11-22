@@ -6,6 +6,8 @@ the source: each item names where it lives. The full list of every address and o
 comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (run it
 again after a game update).
 
+What is done, open and waiting on (the coordination state, kept current): [agent-state.md](agent-state.md).
+
 ## 1. Actor and component memory (proven in game)
 
 | What | Where | Proven by |
