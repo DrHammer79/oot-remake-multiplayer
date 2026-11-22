@@ -24,7 +24,7 @@ $py = Join-Path $repo '..\oot-remake-recomp\.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $py)) { $py = Join-Path $repo '..\tools-venv\Scripts\python.exe' }
 if (-not (Test-Path -LiteralPath $py)) { $py = Join-Path $KitA 'hookshot\tools\python\python.exe' }   # (before it is moved)
 $coopKit = Split-Path -Parent (Split-Path -Parent ([System.IO.Path]::GetFullPath($KitA)))
-$runPs1 = [System.IO.Path]::GetFullPath((Join-Path $coopKit '..\oot-remake-multiplayer\tools\autotest\run.ps1'))
+$runPs1 = Join-Path $here 'run.ps1'   # this checkout's own (its scenarios; run.ps1 finds coop-kit by walking up)
 function Get-GameDir([string]$Kit) {
     $note = Join-Path $Kit 'hookshot\game-folder.txt'
     $g = if (Test-Path -LiteralPath $note) { "$(Get-Content -LiteralPath $note -TotalCount 1)".Trim() } else { 'hookshot\game' }
