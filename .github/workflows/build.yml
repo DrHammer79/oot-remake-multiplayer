@@ -156,6 +156,8 @@ jobs:
         run: python tools/autotest/tests/test_save_flags.py -v
       - name: Hookshot autotest driver tests
         run: python tools/autotest/tests/test_hookshot.py -v
+      - name: Live play-test kit tests (desync check, MCP server)
+        run: python tools/autotest/tests/test_playtest.py -v
       - name: hs.py shared game files tests
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Mods' code patches (Longshot patches 0034, 0035) tests

@@ -155,6 +155,7 @@ enum class Kind {
     setenum, // test only: an Enum flag (name or 0x hash) set to a value's name (issue 193: quests)
     sync,    // sync NAME N: wait here, buttons let go, until N games reached NAME
     menu,    // test only: menu customize|close, the Multiplayer tab's Customize page opened or the menu closed (issue 74)
+    dump,    // test only (play-test kit): this game's shared flags written to <commands file>.dump-TAG.json
 };
 
 struct Step {
