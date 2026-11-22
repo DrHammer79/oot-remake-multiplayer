@@ -23,6 +23,15 @@
 #include <thread>
 #include <vector>
 
+
+#include "common/logging.h"
+#include "coop_cheats.h"
+#include "coop_hook.h"
+#include "coop_playtest_core.h"
+#include "coop_testinput.h"
+#include "core/core.h"
+
+// (the platform's sockets and pipe after our own headers, as coop_lan_net.cpp: no Windows macro reaches them)
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -46,13 +55,6 @@ constexpr SocketHandle kNoSocket = INVALID_SOCKET;
 using SocketHandle = int;
 constexpr SocketHandle kNoSocket = -1;
 #endif
-
-#include "common/logging.h"
-#include "coop_cheats.h"
-#include "coop_hook.h"
-#include "coop_playtest_core.h"
-#include "coop_testinput.h"
-#include "core/core.h"
 
 namespace CoopPlaytest {
 namespace {
