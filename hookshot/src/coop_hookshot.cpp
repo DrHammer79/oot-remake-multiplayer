@@ -460,14 +460,16 @@ void LogBossOrders() {
     }
     const CoopBossOrders::Counts c = CoopBossOrders::TheTable().GetCounts();
     if (c.owner_kept == said.owner_kept && c.copy_skipped == said.copy_skipped && c.delivered == said.delivered &&
-        c.copy_own_ran == said.copy_own_ran && c.dropped == said.dropped && c.restarts == said.restarts) {
+        c.copy_own_ran == said.copy_own_ran && c.dropped == said.dropped && c.restarts == said.restarts &&
+        c.replayed == said.replayed) {
         return;
     }
     said_ms = now;
     said = c;
     LOG_INFO(Core, "coop: bosses: battle orders: ours sent {}; copies: {} owner's put in, {} own skipped, {} own run "
-                   "before the owner's came, {} dropped, {} started again; {} to unlisted actors",
-             c.owner_kept, c.delivered, c.copy_skipped, c.copy_own_ran, c.dropped, c.restarts, c.unknown);
+                   "before the owner's came, {} dropped, {} started again; {} to unlisted actors; made ours: {} of our "
+                   "manager's skipped orders put in",
+             c.owner_kept, c.delivered, c.copy_skipped, c.copy_own_ran, c.dropped, c.restarts, c.unknown, c.replayed);
 }
 
 // Every 10 s while a boss is synced natively: the counts (first proof lines).

@@ -8191,3 +8191,10 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
     CHECK(a.Removes() == std::vector<std::uint64_t>{0x130});
 }
 
+TEST_CASE("row 222: a battle manager is flagged for the server's option C only by a game that does not share orders") {
+    CHECK(CoopObjects::IsBattleManager("Enemy_KotakeKoumeBattleManager"));
+    CHECK_FALSE(CoopObjects::IsBattleManager("Enemy_DungeonBoss_Kotake"));
+    CHECK(CoopObjects::PresenceFlagsBattleManager(true, false));        // no orders wrap: C keeps it with its owner
+    CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(true, true));   // option A: it hands over as any boss group
+    CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(false, false));
+}

@@ -268,3 +268,37 @@ TEST_CASE("a malloc that gave nothing is asked again next frame, a frame whose c
     CHECK_FALSE(t.Step(g, true, 1, kMain));
     CHECK(t.GetCounts().delivered == 2);
 }
+
+TEST_CASE("made ours: our manager's skipped orders go into its sister first, and are sent as ours") {
+    Table t;
+    FakeGuest g;
+    g.Node(kNodeKotake, kKotake);
+    t.SetOn(true);
+    auto members = Sisters(Role::copy, Role::copy, 2);
+    t.Publish(members);
+    (void)t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(1), false);  // its own, before the owner's
+    t.Receive(kKotake, BossOrders{1, {Order(1, addr::kTypeState, 5)}});
+    CHECK(Frame(t, g).size() == 2);
+    // Our manager goes on in our game; its orders are skipped (the newest of each type kept).
+    CHECK(t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(2), false));
+    CHECK(t.OnReceive(kNodeKotake, kKotake, addr::kTypeInterval, PayloadOf(0), false));
+    CHECK(t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(3), false));
+    members = Sisters(Role::owner, Role::owner, 1);
+    t.Publish(members);
+    const auto calls = Frame(t, g);
+    REQUIRE(calls.size() == 2);  // the interval, then the newest state (the order our manager gave them)
+    CHECK(calls[0].x[0] == kNodeKotake);
+    CHECK(g.Get<std::uint32_t>(kBlock + addr::kMessageType) == addr::kTypeState);
+    CHECK(g.Get<std::uint8_t>(kBlock + addr::kBlockPayload) == 3);
+    CHECK(t.GetCounts().replayed == 2);
+    const auto mine = t.OwnerOrders(kKotake);
+    REQUIRE(mine);
+    CHECK(mine->seq == 2);
+    CHECK(mine->recent[0].type == addr::kTypeInterval);
+    CHECK(mine->recent[1].payload[0] == 3);
+    CHECK(Frame(t, g).empty());
+    // A copy made a copy of another owner keeps nothing of it.
+    members = Sisters(Role::copy, Role::copy, 3);
+    t.Publish(members);
+    CHECK(Frame(t, g).empty());
+}

@@ -93,7 +93,16 @@ void Table::Publish(std::span<const Member> members) {
             Note(m.name + ": battle orders: " +
                  (m.role == Role::owner ? std::string("ours now: our own manager's orders run")
                                         : "player " + std::to_string(m.owner) + "'s now: its orders come"));
+            std::vector<BossOrder> skipped = std::move(e.own_skipped);
             Forget(e);
+            e.own_skipped.clear();
+            e.replay.clear();
+            if (m.role == Role::owner && e.member.role == Role::copy && !skipped.empty()) {
+                // What our manager thinks it told the sister: put in first, so the two agree.
+                Note(m.name + ": battle orders: " + std::to_string(skipped.size()) +
+                     " skipped order(s) of our own manager put in first");
+                e.replay.assign(skipped.begin(), skipped.end());
+            }
         }
         e.member = m;
         next.emplace(m.actor, std::move(e));
@@ -137,6 +146,9 @@ bool Table::OnReceive(std::uint64_t node, std::uint64_t actor, std::uint32_t typ
         ++counts_.copy_own_ran;
         return false;
     }
+    // Skipped; the newest of its type is kept for a hand-over to us (Publish).
+    std::erase_if(e.own_skipped, [type](const BossOrder& o) { return o.type == type; });
+    e.own_skipped.push_back(BossOrder{0, type, payload});
     ++counts_.copy_skipped;
     return true;
 }
@@ -220,10 +232,24 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
             }
             break;
         case Pending::deliver:
-            if (const auto it = entries_.find(pending_actor_); it != entries_.end() && !it->second.queue.empty()) {
-                it->second.delivered = it->second.queue.front().seq;
-                it->second.queue.pop_front();
-                ++counts_.delivered;
+            if (const auto it = entries_.find(pending_actor_); it != entries_.end()) {
+                Entry& e = it->second;
+                if (pending_replay_ && !e.replay.empty() && e.member.role == Role::owner) {
+                    // Ours: kept and sent as any order our manager gives (the wrap let our own call run unkept).
+                    BossOrder o = e.replay.front();
+                    e.replay.pop_front();
+                    o.seq = e.mine.seq + 1;
+                    e.mine.seq = o.seq;
+                    e.mine.recent.push_back(o);
+                    if (e.mine.recent.size() > coop::protocol::kMaxBossOrders) {
+                        e.mine.recent.erase(e.mine.recent.begin());
+                    }
+                    ++counts_.replayed;
+                } else if (!pending_replay_ && !e.queue.empty()) {
+                    e.delivered = e.queue.front().seq;
+                    e.queue.pop_front();
+                    ++counts_.delivered;
+                }
             }
             break;
         case Pending::none:
@@ -234,14 +260,19 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
         return std::nullopt;
     }
     for (auto& [actor, e] : entries_) {
-        if (e.member.role != Role::copy || e.queue.empty() || e.node == 0) {
+        const bool replay = e.member.role == Role::owner && !e.replay.empty();
+        if (!replay && (e.member.role != Role::copy || e.queue.empty())) {
+            continue;
+        }
+        if (e.node == 0) {
             continue;  // (a copy whose node the wrap has not seen yet: its own manager's first order names it)
         }
+        std::deque<BossOrder>& from = replay ? e.replay : e.queue;
         if (!NodeIsOf(guest, e.node, actor)) {
             Note(e.member.name + ": battle orders: its node " + Hex(e.node) + " is no longer its: " +
-                 std::to_string(e.queue.size()) + " dropped");
-            counts_.dropped += e.queue.size();
-            e.queue.clear();
+                 std::to_string(from.size()) + " dropped");
+            counts_.dropped += from.size();
+            from.clear();
             e.node = 0;
             continue;
         }
@@ -256,7 +287,7 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
             pending_ = Pending::malloc;
             return c;
         }
-        const BossOrder& o = e.queue.front();
+        const BossOrder& o = from.front();
         // The sender: the id our own manager's last order named (the handler keeps it), so the message reads as
         // our manager's.
         std::uint32_t sender = 0xffffffffu;
@@ -279,6 +310,7 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
         c.copy_game = true;
         pending_ = Pending::deliver;
         pending_actor_ = actor;
+        pending_replay_ = replay;
         return c;
     }
     return std::nullopt;

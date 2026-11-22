@@ -412,7 +412,10 @@ inline constexpr std::uint64_t kMinionLoopUs = 3'000'000;
 // The actors with RedeadParam (Enemy_ReDead*, Enemy_Gibdo*, never their _Dictionary entries).
 bool IsScreamer(std::string_view name);
 // Row 222 (Twinrova, option C): a boss's battle manager (Enemy_KotakeKoumeBattleManager: it chooses its sisters'
-// battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager.
+// battle state from its own game's Link; no BSA of its own). Flagged object_presence::battle_manager by a game that
+// does not share its orders (option A, SetSharesOrders): one game without them keeps the group with its owner.
+// PresenceFlagsBattleManager: whether a manager's presence carries the bit.
+constexpr bool PresenceFlagsBattleManager(bool is_manager, bool shares_orders) { return is_manager && !shares_orders; }
 bool IsBattleManager(std::string_view name);
 // Row 232: the boss a summoned piece grabs for (Enemy_DeadHand_Hand -> Enemy_DeadHand), else empty. While a piece we
 // own is in its attack (its grab: it holds our own Link), our presence entry of that boss carries
@@ -1072,6 +1075,9 @@ public:
     // Boss turns: our game reads its bosses' attacks and takes turns (LICHII_COOP_BOSS_TURNS on): every boss
     // or part is listed with object_presence::takes_turns.
     void SetTakesTurns(bool on) { takes_turns_ = on; }
+    // Row 222 option A (coop_boss_orders.h): this game shares its battle managers' orders. Then it does not flag a
+    // manager object_presence::battle_manager (option C's server rule, for a game without the orders wrap).
+    void SetSharesOrders(bool on) { shares_orders_ = on; }
     // The boss actors whose death has begun (the boss glue; player report #105). A hit such a boss's game did
     // not take (its owner's killing hit, refused outside Gohma's weak point) is given to its Life step as its
     // life after the wait, as for any other enemy: its death plays out here (CoopBossNative lets it die).
@@ -1787,6 +1793,7 @@ private:
     bool wake_ = true;
     std::vector<std::string> unready_;
     bool takes_turns_ = false;  // SetTakesTurns
+    bool shares_orders_ = false;  // SetSharesOrders
     std::vector<std::string> dying_;  // SetDying
     unsigned dying_finished_ = 0;     // DyingFinished
     std::size_t hurt_taken_ = 0;   // hurts the game took as asked

@@ -651,9 +651,15 @@ The owner's game lets each order run and keeps it; it goes out in that sister's 
 puts the owner's into its sister through the same handler, called by our caller (order 46) on the game's calc thread
 with a message block of its own (made once with the game's malloc), each order once and in the owner's order. At a
 start, a hand-over or a gap it takes the owner's newest order of each type. Made ours, our own manager decides from
-then on. Until the owner's first order comes (a new copy, an older owner) its own orders run, as before. The copy's
+then on; but its own orders were skipped while we were a copy, so it believes the sisters took orders they never did
+(its next order could wait for a state it thinks it gave). So its newest skipped order of each type is put into the
+sister first, and sent as ours: the sisters then stand where the manager that now decides thinks they do. Until the
+owner's first order comes (a new copy, an older owner) its own orders run, as before. The copy's
 manager itself still runs (its SyncLife, its damage field); only its orders to the sisters are the owner's.
-`LICHII_COOP_BOSS_ORDERS=0` turns it off. Log lines: `coop: bosses: battle orders: ...` (counts every 10 s),
+`LICHII_COOP_BOSS_ORDERS=0` turns it off. Option C (enemies-01110: the server moves a group whose root is flagged
+`battle_manager` only from an unfit owner) stays the fallback: a game flags the manager only when it does not share
+orders (no patch 0036, or switched off; `PresenceFlagsBattleManager`), and the server keeps the flag once any game
+sent it, so one game without A keeps the group with its owner; with A in every game it hands over as any boss group. Log lines: `coop: bosses: battle orders: ...` (counts every 10 s),
 `...: the owner's came: our own manager's orders are skipped`, `...: its receive node 0x...`.
 
 Other battle managers: `ExecuteGroupBattleManagerAI` / `ExecuteGroupBattleManagerMessageCommunication` (vtables

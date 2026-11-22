@@ -20,8 +20,11 @@
 //   into its sister through the same handler, called by our caller on the game's calc thread, in the owner's
 //   order, each once. Its sisters then live the owner's battle state.
 // Until the owner's first order comes (a new copy, an older owner) the copy's own orders run, as before.
-// Hand-over: the new owner's own manager decides from then on (its orders now run); a game that became a copy
-// starts again from the new owner's newest order of each type.
+// Hand-over: the new owner's own manager decides from then on. Its own orders were skipped while it was a copy, so it
+// believes its sisters took orders they never did (its next order may wait for a state it thinks it gave): made
+// ours, its newest skipped order of each type is put into its sister first (and sent, as any order of ours), so the
+// sisters stand where the manager that now decides thinks they do. A game that became a copy starts again from the
+// new owner's newest order of each type.
 #pragma once
 
 #include <array>
@@ -87,6 +90,7 @@ struct Counts {
     std::uint64_t dropped = 0;        // owner's orders dropped (too many queued, or the part's node is gone)
     std::uint64_t restarts = 0;       // a copy started again from the owner's newest orders (new owner, or a gap)
     std::uint64_t unknown = 0;        // an order to an actor that is no synced part (solo, or not seen yet): ran
+    std::uint64_t replayed = 0;       // made ours: our manager's skipped orders put into its sister (and sent)
 };
 
 // The planner, without game memory: which of the owner's orders a copy puts in next (tested).
@@ -133,6 +137,8 @@ private:
         std::uint32_t delivered = 0;      // a copy: the newest owner seq put in (0: start again)
         std::uint32_t queued_up_to = 0;   // a copy: the newest owner seq queued
         std::deque<BossOrder> queue;      // a copy: the owner's orders to put in, oldest first
+        std::vector<BossOrder> own_skipped;  // a copy: our own manager's newest skipped order of each type, in order
+        std::deque<BossOrder> replay;     // made ours: those, to put in (and keep as ours) before anything else
     };
     void Note(std::string text);
     void Forget(Entry& e);
@@ -149,6 +155,7 @@ private:
     bool malloc_failed_ = false;  // this frame's malloc gave nothing: asked again next frame
     enum class Pending : std::uint8_t { none, malloc, deliver } pending_ = Pending::none;
     std::uint64_t pending_actor_ = 0;
+    bool pending_replay_ = false;
 };
 
 Table& TheTable();

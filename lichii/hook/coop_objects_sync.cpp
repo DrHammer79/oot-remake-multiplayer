@@ -3398,8 +3398,8 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         if (takes_turns_ && IsBossOrPart(o.name)) {
             flags |= proto::object_presence::takes_turns;  // boss turns: this build reads attacks
         }
-        if (IsBattleManager(o.name)) {
-            flags |= proto::object_presence::battle_manager;  // row 222: its group moves only from an unfit owner
+        if (PresenceFlagsBattleManager(IsBattleManager(o.name), shares_orders_)) {
+            flags |= proto::object_presence::battle_manager;  // row 222 C: its group moves only from an unfit owner
         }
         if (grabbing.contains(o.name)) {
             flags |= proto::object_presence::grabbed_here;  // row 232: his piece holds our Link: he is wanted here
