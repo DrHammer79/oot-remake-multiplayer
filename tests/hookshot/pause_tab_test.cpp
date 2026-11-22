@@ -3033,3 +3033,23 @@ TEST_CASE("pause tab (charsel-native-0119, run 4620f3e7): a screen layout's verd
     CHECK_FALSE(LayoutLookAgain(true, 0x100, 2, 0x100, 3));
     CHECK_FALSE(LayoutLookAgain(true, 0x100, 3, 0x100, 0));
 }
+
+TEST_CASE("pause tab (review-01111-a): Character Select's Customize verdict; a carried 'his' is never kept for CoopMenu_00") {
+    // His panes there: his, proven.
+    CHECK(SnailVerdictFrom(true, false, false, false).his);
+    CHECK_FALSE(SnailVerdictFrom(true, false, true, true).carried);
+    // Co-op's CoopMenu_00 page pane there: not his, even made at his freed screen and layout (run 4620f3e7).
+    CHECK_FALSE(SnailVerdictFrom(false, true, true, true).his);
+    CHECK_FALSE(SnailVerdictFrom(false, true, true, true).carried);
+    // Neither yet on the same screen object that was his (lane 061445: his opening before his panes): his, CARRIED, so
+    // SnailScreen looks again at every update; the next look with CoopMenu_00's pane found turns it to not his.
+    const SnailVerdict first = SnailVerdictFrom(false, false, true, true);
+    CHECK(first.his);
+    CHECK(first.carried);
+    CHECK_FALSE(SnailVerdictFrom(false, true, first.his, true).his);   // (CoopMenu_00's pane came late)
+    CHECK(SnailVerdictFrom(true, false, first.his, true).his);          // (his panes came late: his, proven)
+    CHECK_FALSE(SnailVerdictFrom(true, false, first.his, true).carried);
+    // Nothing carried to another screen object, or from a verdict that was not his.
+    CHECK_FALSE(SnailVerdictFrom(false, false, true, false).his);
+    CHECK_FALSE(SnailVerdictFrom(false, false, false, true).his);
+}

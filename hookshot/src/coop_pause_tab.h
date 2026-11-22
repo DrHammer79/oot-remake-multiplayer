@@ -966,6 +966,16 @@ enum class SnailEdge { kWait, kOpen, kClose };
 // another screen object, and at every opening (the state turns 1, opening, or turns open, 1 or 2, from anything else: a
 // new screen at the same place starts there). `known_state`: the state at its last update (-1 none).
 bool LayoutLookAgain(bool known, std::uint64_t known_screen, int known_state, std::uint64_t screen, int state);
+// Character Select's Customize screen's verdict at a look (SnailScreen): his panes there -> his; co-op's CoopMenu_00 page
+// pane there (Pa_CoopMinus_00) -> not his; neither, on the same screen object that was his (lane 061445: his screen
+// opening again before its panes) -> his, CARRIED: not proven, so looked at again at every update until his panes or ours
+// decide it (review-01111-a: CoopMenu_00 made at his freed addresses before its own pane is findable must not keep "his"
+// for the whole opening; CoopMenuScreen likewise expects late panes). Else not his.
+struct SnailVerdict {
+    bool his = false;
+    bool carried = false;
+};
+SnailVerdict SnailVerdictFrom(bool his_panes, bool ours_pane, bool was_his, bool same_screen);
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
 // kDrive, co-op's keys; kPause, not updated for kSnailPauseMs (a stall, or gone without a close seen): the game gets

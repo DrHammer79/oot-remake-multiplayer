@@ -819,6 +819,13 @@ bool LayoutLookAgain(bool known, std::uint64_t known_screen, int known_state, st
     return open(state) && !open(known_state);          // (open again after closing or closed)
 }
 
+SnailVerdict SnailVerdictFrom(bool his_panes, bool ours_pane, bool was_his, bool same_screen) {
+    if (his_panes) return {true, false};
+    if (ours_pane) return {false, false};
+    if (was_his && same_screen) return {true, true};
+    return {false, false};
+}
+
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms) {
     const bool up = MenuUpFrom(strip_state, strip_seen_ms, now_ms);
     if (open) {

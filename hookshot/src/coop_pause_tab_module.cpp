@@ -414,6 +414,7 @@ struct SnailLayout {
     std::uint64_t screen = 0;   // the screen it was looked at with
     bool his = false;           // his Customize screen's
     int state = -1;             // the screen's state at its last update (LayoutLookAgain)
+    bool carried = false;       // "his" kept without his panes (SnailVerdictFrom): looked at again at every update
 };
 std::map<std::uint64_t, SnailLayout> g_snail_layouts;   // a layout: his Customize screen's or not (once per screen)
 std::array<LiveSlot, kSnailSlots> g_snail_live{};
@@ -495,19 +496,28 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
     const int state = Read<std::uint8_t>(screen + kScreenState);
     auto known = g_snail_layouts.find(layout);
     const bool have = known != g_snail_layouts.end();
-    if (LayoutLookAgain(have, have ? known->second.screen : 0, have ? known->second.state : -1, screen, state)) {
+    if (LayoutLookAgain(have, have ? known->second.screen : 0, have ? known->second.state : -1, screen, state) ||
+        known->second.carried) {
         if (!have && g_snail_layouts.size() > 512) g_snail_layouts.clear();   // (a bound)
         const bool was = have && known->second.his;
-        // (his screen opening again on the same screen object may come before its panes, lane 061445: kept his, co-op
-        // waits for them below; but never co-op's own CoopMenu_00 made at his freed addresses, run 4620f3e7)
-        const bool his = his_panes() || (was && known->second.screen == screen &&
-                                          FindOwnPane(ctx, layout, "Pa_CoopMinus_00") == 0);
-        known = g_snail_layouts.insert_or_assign(layout, SnailLayout{screen, his, state}).first;
+        // (his screen opening again on the same screen object may come before its panes, lane 061445: "his" carried,
+        // co-op waits for them below; never co-op's own CoopMenu_00 made at his freed addresses, run 4620f3e7: its page
+        // pane decides, and a carried verdict is looked at again until one of them is there)
+        const bool mine = his_panes();
+        const SnailVerdict v = SnailVerdictFrom(mine, !mine && FindOwnPane(ctx, layout, "Pa_CoopMinus_00") != 0, was,
+                                                have && known->second.screen == screen);
+        const bool his = v.his;
+        known = g_snail_layouts.insert_or_assign(layout, SnailLayout{screen, his, state, v.carried}).first;
         if (his && !was) {
             LOG_INFO(Core, "coop: characters: Character Select's Customize screen found (layout {:#x})", layout);
         } else if (was && !his) {
             LOG_INFO(Core, "coop: characters: layout {:#x} (screen {:#x}) was Character Select's Customize screen's and "
                            "has not its panes now: not taken", layout, screen);
+            // (a carried "his" found to be another screen, co-op's CoopMenu_00: his screen as taken open let go)
+            if (g_snail_open && g_snail_layout == layout) {
+                g_snail_edge_ms = 0;
+                SnailClose("another screen at its place");
+            }
         }
     }
     known->second.state = state;
