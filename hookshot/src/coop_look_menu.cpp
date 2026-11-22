@@ -71,7 +71,7 @@ const char* Note(Part part) {
     case Part::gauntlets: return "The metal of the Silver and the Golden Gauntlets.";
     case Part::cap_trim:
         return "The cap's own trims: young Link's headband and knot, adult Link's hood trims (the cap's cloth is the tunic's). The other players see it on you too.";
-    case Part::eyes: return "The colour of the eyes, on your Link and seen by the other players.";
+    case Part::eyes: return "The colour of the eyes, on your Link or your character, and seen by the other players.";
     case Part::hair: return "The colour of the hair and the brows, on your Link and seen by the other players.";
     }
     return "";
@@ -241,6 +241,8 @@ const std::vector<Group>& Groups() {
         {"Swords", {Part::kokiri_blade, Part::kokiri_hilt, Part::master_blade, Part::master_hilt, Part::biggoron_blade,
                     Part::biggoron_hilt}},
         {"Boots and gauntlets", {Part::boots, Part::gauntlets}},
+        // (a Character Select character's own page: the colour that goes on its model, coop_char_colours.h ColoursOn)
+        {"Eyes", {Part::eyes}},
     };
     return kGroups;
 }
@@ -364,9 +366,9 @@ void Page::SetPaged(bool on) {
     selected_ = 1;
 }
 
-void Page::SetCharacter(std::uint16_t character, bool gear_shows) {
-    if (character == character_ && gear_shows == gear_shows_) return;
-    character_ = character, gear_shows_ = gear_shows;
+void Page::SetCharacter(std::uint16_t character, bool gear_shows, bool eyes_show) {
+    if (character == character_ && gear_shows == gear_shows_ && eyes_show == eyes_show_) return;
+    character_ = character, gear_shows_ = gear_shows, eyes_show_ = eyes_show;
     editing_.reset();
     group_ = 0;
     selected_ = 1;
@@ -374,8 +376,11 @@ void Page::SetCharacter(std::uint16_t character, bool gear_shows) {
 
 std::vector<std::size_t> Page::Offered() const {
     if (character_ == 0) return {0, 1, 2, 3};   // Link: every part
-    if (gear_shows_) return {1, 2};          // a character: its held gear only, once shown to work
-    return {};
+    // A character: its eyes (unless its model has no iris), and its held gear once shown to work.
+    std::vector<std::size_t> out;
+    if (eyes_show_) out.push_back(kEyesGroup);
+    if (gear_shows_) out.insert(out.end(), {1, 2});
+    return out;
 }
 
 std::size_t Page::GroupShown() const {

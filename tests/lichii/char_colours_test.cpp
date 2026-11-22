@@ -219,13 +219,123 @@ TEST_CASE("char colours: the colours are the mod's, the iris shift is held to a 
     CHECK(EyeColour(8, 0) == std::nullopt);
 }
 
-TEST_CASE("char colours: the eyes' and hair's colours go on a Link model only (review: a character got your eyes)") {
-    using CoopCharColours::LinkColours;
-    using CoopCharColours::LinkOnly;
-    CHECK(LinkOnly(true, 0xFF123456u, 0x00ABCDEFu) == LinkColours{0x123456u, 0xABCDEFu});
-    CHECK(LinkOnly(true, std::nullopt, 0xABCDEFu) == LinkColours{std::nullopt, 0xABCDEFu});
-    CHECK(LinkOnly(false, 0x123456u, 0xABCDEFu) == LinkColours{});   // (a character: neither)
-    CHECK(LinkOnly(false, 0x123456u, std::nullopt) == LinkColours{});
+TEST_CASE("char colours: the eyes' and hair's colours go on Link's model and a character's (player report 2026-11-22)") {
+    using CoopCharColours::ColoursOn;
+    using CoopCharColours::ModelColours;
+    CHECK(ColoursOn(false, 0xFF123456u, 0x00ABCDEFu) == ModelColours{0x123456u, 0xABCDEFu, false});
+    CHECK(ColoursOn(false, std::nullopt, 0xABCDEFu) == ModelColours{std::nullopt, 0xABCDEFu, false});
+    // A character: the same colours (before: neither), marked a character's (its real hair only).
+    CHECK(ColoursOn(true, 0x123456u, 0xABCDEFu) == ModelColours{0x123456u, 0xABCDEFu, true});
+    CHECK(ColoursOn(true, 0x123456u, std::nullopt) == ModelColours{0x123456u, std::nullopt, true});
+    // No colour set: nothing to put on (the model, and the mod's look of it, untouched).
+    const auto none = ColoursOn(true, std::nullopt, std::nullopt);
+    CHECK_FALSE(none.eyes);
+    CHECK_FALSE(none.hair);
+}
+
+TEST_CASE("char colours: the model key is the field actor's name and the character: an age or character switch is new") {
+    using CoopCharColours::ModelKey;
+    CHECK(ModelKey("Player_Child", 0) == ModelKey("Player_Child", 0));
+    CHECK(ModelKey("Player_Child", 0) != ModelKey("Player_Adult", 0));   // (age)
+    CHECK(ModelKey("Player_Child", 0) != ModelKey("Player_Child", 9));   // (Link to a character)
+    CHECK(ModelKey("Player_Child", 9) != ModelKey("Player_Child", 12));  // (one character to another)
+    CHECK(ModelKey("PouchPlayer_Child", 9) != ModelKey("Player_Child", 9));
+    CHECK(ModelKey("", 0) != 0);   // (never "unknown")
+}
+
+TEST_CASE("char colours: a character's model takes the eye colour, its stand-in hair keeps its own, Link's hair takes it") {
+    auto mats = Character();
+    mats[0].textures = 2;   // Mt_Hairs without the mod's palette: a stand-in (a character without hair)
+    Options o;
+    o.eyes_exact = EyeParam(0x00FF00);
+    o.hair_exact = HairParam(0xFF0000);
+    o.character = true;
+    FakeGame f(mats);
+    State s = StateFor();
+    Dress(f.AsGame(), s, o, false);
+    REQUIRE(f.sets.size() == 1);   // the iris only
+    CHECK(f.sets[0].mat == 1);
+    CHECK(f.sets[0].param == 2);
+    CHECK(f.sets[0].f[0] == doctest::Approx(EyeParam(0x00FF00)[0]));
+    // Its real hair (a palette from the mod) takes the hair colour, as the mod's own hair option.
+    FakeGame real(Character());
+    State r = StateFor();
+    Dress(real.AsGame(), r, o, false);
+    REQUIRE(real.sets.size() == 3);
+    CHECK(real.sets[0].mat == 0);
+    CHECK(real.sets[0].f[0] == doctest::Approx(HairParam(0xFF0000)[0][0]));
+    // Link's model: every hair material, palette or not.
+    o.character = false;
+    FakeGame link(mats);
+    State l = StateFor();
+    Dress(link.AsGame(), l, o, false);
+    CHECK(link.sets.size() == 3);
+}
+
+TEST_CASE("char colours: whether a model has the iris is known once its materials were looked up") {
+    Options o;
+    o.eyes_exact = EyeParam(0x00FF00);
+    FakeGame f(Character());
+    State s = StateFor();
+    CHECK_FALSE(HasIris(s));   // (not looked up yet: not known)
+    Dress(f.AsGame(), s, o, false);
+    REQUIRE(HasIris(s));
+    CHECK(*HasIris(s));
+    auto mats = Character();
+    mats[1].name = "Mt_Eye";   // a character without Mt_Eye_Inner: nothing is set, and it is known
+    FakeGame none(mats);
+    State n = StateFor();
+    const Result r = Dress(none.AsGame(), n, o, false);
+    CHECK_FALSE(r.failed);
+    CHECK(none.sets.empty());
+    REQUIRE(HasIris(n));
+    CHECK_FALSE(*HasIris(n));
+    mats[1].name = "Mt_Eye_Inner";
+    mats[1].params = {"x"};   // the material without ns_param_color2: no iris to colour either
+    FakeGame no_param(mats);
+    State p = StateFor();
+    Dress(no_param.AsGame(), p, o, false);
+    REQUIRE(HasIris(p));
+    CHECK_FALSE(*HasIris(p));
+}
+
+TEST_CASE("char colours: the wardrobe says a dressed actor's iris, and dresses a new model key at once") {
+    FakeGame f(Character());
+    Wardrobe w;
+    const Game g = f.AsGame();
+    Target t{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, ModelKey("Player_Child", 0)};
+    t.eyes = 0x00FF00u;
+    CHECK_FALSE(w.IrisOf(FakeGame::kActor));
+    CHECK(w.Frame(g, {t}, 1000, {}) > 0);
+    REQUIRE(w.IrisOf(FakeGame::kActor));
+    CHECK(*w.IrisOf(FakeGame::kActor));
+    CHECK_FALSE(w.IrisOf(FakeGame::kActor + 8));   // (not dressed)
+    CHECK(w.Frame(g, {t}, 1100, {}) == 0);          // nothing changed: not before kAgainMs
+    // The same actor, now a character (the mod swaps the model under the field player): looked up and dressed at once.
+    t.model = ModelKey("Player_Child", 9);
+    t.character = true;
+    f.sets.clear();
+    CHECK(w.Frame(g, {t}, 1200, {}) > 0);
+    CHECK(f.sets.size() == 1);   // (the eyes: no hair colour set)
+    // No colour set on a model never dressed: not touched at all (the mod's look of it stays).
+    Target plain{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, ModelKey("Player_Adult", 9)};
+    plain.character = true;
+    f.calls = 0;
+    CHECK(w.Frame(g, {plain}, 1300, {}) == 0);
+    CHECK(f.calls == 0);
+}
+
+TEST_CASE("char colours: your own model's iris is kept for the character it was found on") {
+    SetOwnIris(9, false);
+    REQUIRE(OwnIris(9));
+    CHECK_FALSE(*OwnIris(9));
+    CHECK_FALSE(OwnIris(0));    // (another character: not known)
+    CHECK_FALSE(OwnIris(12));
+    SetOwnIris(0, true);
+    CHECK(OwnIris(0) == std::optional<bool>(true));
+    CHECK_FALSE(OwnIris(9));
+    SetOwnIris(0, std::nullopt);
+    CHECK_FALSE(OwnIris(0));
 }
 
 TEST_CASE("char colours: the pause menu's model of your Link is the game's Pouch twin of the field player (lane: eyes)") {

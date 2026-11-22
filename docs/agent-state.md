@@ -60,9 +60,14 @@ Material for a submission to the mod author and to the Squadala community. Nothi
 
 ## Open reports for co-op
 
-- Customize colours do not reach Character Select characters on the player's own model. Co-op dresses only Link's
-  own eyes and hair: `LinkOnly` in `lichii/hook/coop_char_colours.h` gives nothing when a Character Select model is
-  shown (`ShownCharacter() != 0`, called from `DressCharacters` in `hookshot/src/coop_hookshot.cpp`).
+- Customize colours do not reach Character Select characters on the player's own model. Cause: co-op dressed only
+  Link's own eyes and hair (`LinkOnly` in `lichii/hook/coop_char_colours.h`, called from `DressCharacters` in
+  `hookshot/src/coop_hookshot.cpp`). Fixed in the code on branch `dress-colours`, not yet checked in a game: the Eye
+  Colour (and the ini's hair colour, real hair only) goes on every player model that has the material for it (your
+  own, the pause menu's model of it, the other players' character puppets); Customize offers a character an Eyes page
+  unless its model has no iris; an age or character switch dresses the new model at once. The tunics and the Cap trim
+  stay Link's. Open: the iris shift for a character whose iris texture is another colour (Impa's red). Details in
+  [puppet.md](puppet.md), "Co-op's colours on a character".
 - The Cow's run animation (see A above).
 
 ## Deferred engine items

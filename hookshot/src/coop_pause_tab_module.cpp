@@ -475,6 +475,12 @@ SnailWritten SnailWrite(void* ctx, const CoopSnailCustom::Texts& t, std::string&
     return failed.empty() ? SnailWritten::kAll : SnailWritten::kSome;
 }
 
+// A character's Eye Colour on his Customize screen: offered unless your model is known to have no iris
+// (CoopCharColours::OwnIris, found when the colour was put on).
+bool SnailEyes() {
+    return CoopCharColours::OwnIris(CoopCharColours::ShownCharacter()).value_or(true);
+}
+
 // One update of any game screen (OnScreen, before the kinds of ours): his Customize screen's.
 void SnailScreen(void* ctx, std::uint64_t screen) {
     if (ctx == nullptr || !CanCall()) return;
@@ -529,7 +535,7 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         // check keyed on a changed address never ran. Not there: co-op waits, his keys kept from his rows meanwhile,
         // and looks again at each update)
         g_snail_wait = !his_panes();
-        if (!g_snail_wait) g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
+        if (!g_snail_wait) g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter(), SnailEyes());
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen opened (screen {:#x}, layout {:#x}): {}",
                  screen, layout, g_snail_wait ? "his panes are not in its layout yet: co-op waits for them (his keys "
                                                 "kept from his rows)" : "co-op's customization in it");
@@ -538,7 +544,7 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         g_snail_shown = {};
         g_snail_failed_said.clear();
         for (auto& l : g_snail_live) l.shown.clear();
-        g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
+        g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter(), SnailEyes());
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: his panes are there now: co-op's "
                        "customization in it");
     }
