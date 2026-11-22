@@ -1728,37 +1728,55 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
 # says for romfs files (launch_test.ps1 checks the two agree); change both together. Link's own textures in Tex/ (named
 # *_Player_* or Angin_Tile_*) stay in the ui part (row 242).
 $KitCharselToolExclude = '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
-# One argument line for CreateProcess (Windows PowerShell 5.1's Start-Process joins an array with plain spaces): each
-# argument quoted when it has a space, a tab or a quote, backslashes before a quote doubled.
+# One argument line for CreateProcess (no shell: '|', '&', '^' and '%' are plain characters in it): each argument
+# quoted when it is empty or has a space, a tab or a quote; backslashes right before a quote, and at the end of a quoted
+# argument, doubled; a quote escaped. The program gets each argument back byte for byte (the C runtime's rules).
 function ConvertTo-KitArgLine([string[]]$ArgList) {
     @(foreach ($x in $ArgList) {
         if ($x -ne '' -and $x -notmatch '[\s"]') { $x; continue }
-        '"' + ($x -replace '(\*)"', '$1$1\"' -replace '(\+)$', '$1$1') + '"'
+        $q = [regex]::Replace($x, '(\\*)"', { param($m) $m.Groups[1].Value + $m.Groups[1].Value + '\"' })
+        $q = [regex]::Replace($q, '(\\+)$', { param($m) $m.Groups[1].Value + $m.Groups[1].Value })
+        '"' + $q + '"'
     }) -join ' '
 }
 
-# Runs a program with a time limit, its output (stdout and stderr, in their order, through cmd.exe's 2>&1) into a file:
-# @{ Code; Out (lines); Stopped ('' or why it was stopped) }. A program that writes nothing for $IdleSeconds, or runs longer than $MaxSeconds, is stopped
-# with its whole process tree (taskkill /T: Python's worker processes too), Code -1. A tool that hangs (Character Select's
-# tool on a damaged game dump: its workers die at start and are started again for good) can no longer hold the start.
+# Runs a program (no shell between) with a time limit: @{ Code; Out (its stdout and stderr lines, in the order they
+# came); Stopped ('' or why it was stopped) }. A program that writes nothing for $IdleSeconds, or runs longer than
+# $MaxSeconds, is stopped with its whole process tree (taskkill /T: Python's worker processes too), Code -1. A tool that
+# hangs (Character Select's tool on a damaged game dump: its workers die at start and are started again for good) can
+# no longer hold the start.
 function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSeconds, [int]$MaxSeconds, [string]$WorkDir = '') {
     $r = @{ Code = -1; Out = @(); Stopped = '' }
-    $o = [System.IO.Path]::GetTempFileName()
+    $lines = New-Object System.Collections.Generic.List[string]
     try {
-        # (cmd /s /c "<line>": the outer quotes go, the rest is run as written; inside quotes | ^ ( ) are plain characters)
-        $line = (ConvertTo-KitArgLine (@($Exe) + $ArgList)) + ' > "' + $o + '" 2>&1'
-        $sp = @{ FilePath = "$env:SystemRoot\System32\cmd.exe"; ArgumentList = "/d /s /c `"$line`""; NoNewWindow = $true; PassThru = $true
-                 ErrorAction = 'Stop' }
-        if ($WorkDir) { $sp.WorkingDirectory = $WorkDir }
-        $p = Start-Process @sp
-        $null = $p.Handle   # (keeps the exit code readable after the process ends)
-        $start = Get-Date; $seen = -1L; $quietSince = Get-Date
-        while (-not $p.WaitForExit(1000)) {
-            # (the length of the open file itself: a directory listing's size of a file still being written can lag)
-            $n = -1L
-            try { $fs = [System.IO.File]::Open($o, 'Open', 'Read', 'ReadWrite, Delete'); $n = $fs.Length; $fs.Dispose() } catch { }
-            if ($n -ne $seen) { $seen = $n; $quietSince = Get-Date }
+        $si = New-Object System.Diagnostics.ProcessStartInfo
+        $si.FileName = $Exe
+        $si.Arguments = ConvertTo-KitArgLine $ArgList
+        $si.UseShellExecute = $false
+        $si.CreateNoWindow = $true
+        $si.RedirectStandardOutput = $true
+        $si.RedirectStandardError = $true
+        if ($WorkDir) { $si.WorkingDirectory = $WorkDir }
+        $p = [System.Diagnostics.Process]::Start($si)
+        # (both pipes read line by line without a thread: one pending ReadLineAsync each, taken when it completes)
+        $readers = @($p.StandardOutput, $p.StandardError)
+        $tasks = @($readers[0].ReadLineAsync(), $readers[1].ReadLineAsync())
+        $start = Get-Date; $quietSince = $start; $exitedAt = $null
+        while ($tasks[0] -or $tasks[1]) {
+            $live = [System.Threading.Tasks.Task[]]@($tasks | Where-Object { $_ })
+            [void][System.Threading.Tasks.Task]::WaitAny($live, 1000)
+            for ($i = 0; $i -lt 2; $i++) {
+                while ($tasks[$i] -and $tasks[$i].IsCompleted) {
+                    $line = $tasks[$i].Result
+                    if ($null -eq $line) { $tasks[$i] = $null; break }
+                    $lines.Add($line); $quietSince = Get-Date
+                    $tasks[$i] = $readers[$i].ReadLineAsync()
+                }
+            }
+            if (-not ($tasks[0] -or $tasks[1])) { break }
             $now = Get-Date
+            # (it ended but a process it left holds the pipes open: what came is enough)
+            if ($p.HasExited) { if (-not $exitedAt) { $exitedAt = $now } elseif (($now - $exitedAt).TotalSeconds -ge 5) { break } }
             if (($now - $quietSince).TotalSeconds -ge $IdleSeconds) { $r.Stopped = "it wrote nothing for $IdleSeconds s" }
             elseif (($now - $start).TotalSeconds -ge $MaxSeconds) { $r.Stopped = "it ran longer than $MaxSeconds s" }
             if ($r.Stopped) {
@@ -1768,12 +1786,10 @@ function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSecon
             }
         }
         if (-not $r.Stopped) { $p.WaitForExit(); $r.Code = $p.ExitCode }
-        $r.Out = @([System.IO.File]::ReadAllLines($o))
     } catch {
-        $r.Out = @("$($_.Exception.Message)"); $r.Code = -1
-    } finally {
-        Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue
+        $lines.Add("$($_.Exception.Message)"); $r.Code = -1
     }
+    $r.Out = $lines.ToArray()
     return $r
 }
 
@@ -1804,7 +1820,7 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
         $a += @('--exclude', $KitCharselToolExclude)
     }
     Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
-    # (stdout and stderr go to files, not error records: a warning on its stderr is only text. The exit code decides.)
+    # (stdout and stderr are read as text, not error records: a warning on its stderr is only text. The exit code decides.)
     $run = Invoke-KitToolLimited $python $a $KitCharselToolIdle $KitCharselToolMax
     $out = $run.Out; $code = $run.Code
     Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction SilentlyContinue

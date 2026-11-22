@@ -1295,7 +1295,13 @@ print("Done: 1 file. The mod folder is ready.")
             Remove-Item -LiteralPath $csDir -Recurse -Force
             & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'   # (the zip is deleted after an install)
             $r = Install-KitCharacterSelect $ck $cm '' 'ui'
-            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw) -match '--exclude') 'Character Select tool: part ui passes --exclude (no NPC files)'
+            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw).EndsWith("--exclude $KitCharselToolExclude")) 'Character Select tool: part ui passes --exclude, the NPC rule byte for byte (its | ( ) ^ $ reach the tool as written)'
+            # Arguments reach a program exactly as given (no shell between): '&', '|', '^', '%', spaces, quotes, a trailing backslash.
+            $argsT = @('a b&c', 'x|y^z %PATH%', 'q"uote', 'tail\', 'two\\"', '', 'plain')
+            $echoOut = Join-Path $ck 'argv-echo.txt'
+            $echo = Invoke-KitToolLimited (Join-Path $ck 'hookshot\tools\python\python.exe') (@('-I', '-c', 'import sys; open(sys.argv[1], "w", encoding="utf-8", newline="").write("\n".join(sys.argv[2:]))', $echoOut) + $argsT) 30 60
+            $gotT = if (Test-Path -LiteralPath $echoOut) { [System.IO.File]::ReadAllText($echoOut) } else { '' }
+            Check ($echo.Code -eq 0 -and $gotT -ceq ($argsT -join "`n")) "Invoke-KitToolLimited: every argument reaches the program byte for byte [exit $($echo.Code): $gotT]"
             Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
             # An empty NPC rule would exclude nothing (NPC files in the ui part): refused, nothing installed.
             & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
