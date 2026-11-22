@@ -132,23 +132,19 @@ function Exit-ProblemSendLock($Lock) { if ($Lock) { try { $Lock.ReleaseMutex() }
 
 # The question (owner, 0.11.9): Y is yes; N, Enter or no key in $Seconds is no; no console is no. $ReadKey: tests.
 function Read-ProblemSendAnswer([int]$Seconds = $script:SendAskSeconds, [scriptblock]$ReadKey = $null, [string]$Url = '') {
-    $q = 'Send problem reports to the Squadala! team after your games? [y/N]'
+    $q = 'Send automatic problem reports to the Squadala team? (y/n)'
     Write-Host ''
-    Write-Host 'Problem reports: when a game you played had a co-op problem or a crash, the kit can send the team a small'
-    Write-Host '  report after the game closes: the problem lines from the game''s log and the crash record, masked first'
-    Write-Host '  (IP and MAC addresses, your user and PC names, players'' names, invite codes and passwords are taken'
-    Write-Host '  out; lines that may still hold an address are left out). Nothing is sent after a game without problems.'
-    Write-Host "  It goes to the Squadala! report bot$(if ($Url) { " ($(([uri]$Url).Host))" }), never to Longshot; a copy stays in logs\problem-send."
-    Write-Host '  Turn it off at any time: scripts\problem-report.cmd off.'
+    Write-Host $q
+    Write-Host '  Masked, only after a game with a problem. Turn off any time: scripts\problem-report.cmd off'
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
-    if ($redirected -and -not $ReadKey) { Write-Host "$q n (no console: no)"; return $false }
+    if ($redirected -and -not $ReadKey) { Write-Host "  n (no console: no)"; return $false }
     if (-not $ReadKey) { try { while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) } } catch { } }
     $end = (Get-Date).AddSeconds($Seconds)
     $left = -1
     while ((Get-Date) -lt $end) {
         $now = [int][Math]::Ceiling(($end - (Get-Date)).TotalSeconds)
-        if ($now -ne $left) { $left = $now; Write-Host -NoNewline "`r$q (no in $left s)  " }
+        if ($now -ne $left) { $left = $now; Write-Host -NoNewline "`r  (y/n, no in $left s)  " }
         $key = if ($ReadKey) { & $ReadKey } elseif ([Console]::KeyAvailable) { [Console]::ReadKey($true) } else { $null }
         if ($key) {
             if ("$($key.Key)" -eq 'Y') { Write-Host 'y'; return $true }

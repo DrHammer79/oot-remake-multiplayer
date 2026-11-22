@@ -50,6 +50,8 @@ function Key([string]$K) { $k2 = $K; { [pscustomobject]@{ Key = $k2 } }.GetNewCl
 Check ((Read-ProblemSendAnswer 5 (Key 'Y')) -eq $true) 'Y sends'
 Check ((Read-ProblemSendAnswer 5 (Key 'N')) -eq $false) 'N does not'
 Check ((Read-ProblemSendAnswer 5 (Key 'Enter')) -eq $false) 'Enter is No (the default)'
+$shown = @(& { [void](Read-ProblemSendAnswer 5 (Key 'N')) } 6>&1 | ForEach-Object { "$_" } | Where-Object { $_.Trim() -and $_.Trim() -ne 'n' -and $_ -notmatch 'no in \d' })
+Check ($shown.Count -eq 2 -and $shown[0] -match '\(y/n\)' -and $shown[1] -match 'problem-report\.cmd off') 'the question is one line and one line under it'
 $t0 = Get-Date
 Check ((Read-ProblemSendAnswer 1 { $null }) -eq $false) 'no key in time is No'
 Check (((Get-Date) - $t0).TotalSeconds -lt 4) 'the question does not wait past its time'

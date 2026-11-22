@@ -14,7 +14,7 @@ side: a few lines a session, and only problems not reported before.
 
 ## How a player meets it
 
-- **Asked once.** A start (`start.ps1`, step 5b) asks `Send problem reports to the Squadala! team after your games? [y/N]`
+- **Asked once.** A start (`start.ps1`, step 5b) asks `Send automatic problem reports to the Squadala team? (y/n)`
   (below, "Sending") when the kit has the bot's address; a kit without it asks the older `Make problem reports? [y/N]`
   (local zips only). No is the default either way. The answers are kept in `logs\problem-reports.json` and
   `logs\problem-send.json`.
@@ -64,14 +64,20 @@ skipped, and tried again at the next start, while the others are still read.
 
 ## Sending
 
-**The question.** A start asks once, with No as the default and 20 seconds to answer (no key, Enter or N: no; a start
-without a console or terminal: no, and asks again next time it has one):
+**The question.** On screen it is one short question and one line under it (the full text below is what it stands for):
+
+> Send automatic problem reports to the Squadala team? (y/n)
+>   Masked, only after a game with a problem. Turn off any time: scripts\problem-report.cmd off
+
+It is asked once at the first setup (`hookshot-build.ps1`) and at a start (`start.ps1`, Linux `start-squadala.sh`) of a kit that
+never answered. `y` is yes; `n`, Enter, no key in 20 seconds or no console/terminal is no (never blocks; a no from a missing
+console is asked again next time there is one). The full meaning of the question:
 
 > Problem reports: when a game you played had a co-op problem or a crash, the kit can send the team a small report after
 > the game closes: the problem lines from the game's log and the crash record, masked first (IP and MAC addresses, your
 > user and PC names, players' names, invite codes and passwords are taken out; lines that may still hold an address are
-> left out). Nothing is sent after a game without problems. It goes to the Squadala! report bot (*its host name*), never
-> to Longshot; a copy stays in logs\problem-send. Turn it off at any time: scripts\problem-report.cmd off.
+> left out). Nothing is sent after a game without problems. It goes to the Squadala! report bot, never to Longshot; a
+> copy stays in logs\problem-send. Turn it off at any time: scripts\problem-report.cmd off.
 
 Players who answered the older local-only question are asked this once too (sending is a new consent). A kit whose
 `scripts/problem-send-url.txt` has no address yet does not ask and sends nothing. Yes makes a random install id (32 hex

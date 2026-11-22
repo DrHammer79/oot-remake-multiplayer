@@ -127,6 +127,14 @@ class Kit(unittest.TestCase):
         self.assertFalse(pr.ask("https://x.org/p", 1, lambda s: "\n", out=lambda *a: None))
         self.assertFalse(pr.ask("https://x.org/p", 1, lambda s: None, out=lambda *a: None))
 
+    def test_ask_is_one_question_and_one_line(self):
+        lines = []
+        pr.ask("https://x.org/p", 1, lambda s: "n\n", out=lines.append)
+        text = [l for l in lines if l.strip() and l.strip() not in ("y", "n")]
+        self.assertEqual(len(text), 2)
+        self.assertIn("(y/n)", text[0])
+        self.assertIn("problem-reports off", text[1])
+
     def test_choice(self):
         s = pr.set_choice(self.kit, False)
         self.assertEqual((s["send"], s["install"]), ("off", ""))
