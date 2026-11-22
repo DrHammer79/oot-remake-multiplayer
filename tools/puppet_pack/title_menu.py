@@ -139,8 +139,11 @@ def add_toggle(d):
 
 
 def add_menu(d):
-    """The marker, then the list's buttons and the hint line, then the Host page's toggle."""
-    return add_toggle(add_list(add_marker(d)))
+    """The marker, then the list's buttons and the hint line. Not the Host page's toggle (add_toggle): its part's
+    layout is Common's and the title's archive is Title, so every boot crashed as the archive loaded (LANE1
+    2026-11-22, also with Common in Title_00's archives: add_common_archive); ui_pack.check_own_parts refuses it now.
+    Without the part the module keeps the row's own text (coop_title.cpp's toggle notes)."""
+    return add_list(add_marker(d))
 
 
 # ---------------------------------------------------------------------------------------- MSBT
@@ -168,7 +171,7 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, run=None
     run.commit(files, growth)
     for rel, data in files.items():
         write(out_romfs, rel, data)
-    log("title menu: Start, Multiplayer and Options on the title (%s, %d languages)" % (TITLE_LAYOUT, len(files) - 2))
+    log("title menu: Start, Multiplayer and Options on the title (%s, %d languages)" % (TITLE_LAYOUT, len(files) - 1))
     return list(files)
 
 
@@ -197,14 +200,12 @@ def make(reader, dicts, recompress):
     olds = [data for name, data in entries if name == TITLE_LAYOUT]
     if not olds:
         raise TitleMenuError("%s has no %s" % (TITLE_ARCHIVE, TITLE_LAYOUT))
-    entries, new = ui_pack.edit_entries(entries, TITLE_LAYOUT, add_menu)   # (every copy of the layout)
+    read, (entries, new) = entries, ui_pack.edit_entries(entries, TITLE_LAYOUT, add_menu)   # (every copy of the layout)
+    ui_pack.check_own_parts(read, entries, TITLE_ARCHIVE)
     archive = sarc.write(entries, data_align=16)   # (as the game's own: 16)
     growth.append((TITLE_ARCHIVE, len(dicts.decompress(raw)), len(archive), True))
     growth.append((TITLE_LAYOUT, len(olds[0]), len(new[olds[0]]), False))
     files[TITLE_ARCHIVE] = recompress(dicts, raw, archive)
-    rel, data, grew = ui_pack.edit_screens(reader, dicts, recompress, add_common_archive)
-    growth.append(grew)   # (the title screen loads Common's archive too: the toggle's part is there)
-    files[rel] = data
     for rel in sorted(reader.glob(MALS_GLOB)):
         raw = reader.read(rel)
         plain = dicts.decompress(raw)

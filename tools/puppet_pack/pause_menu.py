@@ -296,6 +296,7 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS, minus_page=True):
     pages = [data for name, data in entries if name == PAGES_LAYOUT]
     if not pages:
         raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, PAGES_LAYOUT))
+    read = entries
     place, size = shown_page(pages[0])
     overlay = (lambda d: add_minus_page(add_tab(d), place, size)) if minus_page else add_tab
     for layout, edit in ((OVERLAY_LAYOUT, overlay), (PAGES_LAYOUT, add_page), (SYSTEM_LAYOUT, _system_layout)):
@@ -304,6 +305,7 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS, minus_page=True):
             raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, layout))
         entries, new = ui_pack.edit_entries(entries, layout, edit)   # (every copy of the layout)
         growth.append((layout, len(olds[0]), len(new[olds[0]]), False))
+    ui_pack.check_own_parts(read, entries, COMMON_ARCHIVE)   # (every part's layout in Common: the game's own rule)
     archive = sarc.write(entries, data_align=16)   # (as the game's own: 16)
     growth.append((COMMON_ARCHIVE, len(plain), len(archive), True))
     files[COMMON_ARCHIVE] = recompress(dicts, raw, archive)

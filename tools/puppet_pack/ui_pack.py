@@ -180,6 +180,41 @@ def read_layout(layout):
         raise UiPackError("the layout is cut short or damaged (%s)" % e) from e
 
 
+def part_layouts(layout):
+    """[(part name, the layout it shows)] of a Layout2 layout: each part record's first word is its layout's name."""
+    d = bytes(layout)
+    _, parts = read_layout(d)
+    try:
+        return [(p.name, _cstr(d, _q(d, p.record))) for p in parts]
+    except (struct.error, IndexError, ValueError) as e:
+        raise UiPackError("the layout's parts are cut short or damaged (%s)" % e) from e
+
+
+def check_own_parts(before, after, archive):
+    """Raise UiPackError when an archive's entries as made (`after`, [(name, bytes)]) show a part whose layout the
+    same entries do not hold and the entries as read (`before`) did not show either: what an edit adds must come from
+    its own archive. The game's own archives never use another archive's layout (tabs-overhaul-01110: Boot, Common,
+    Title and ZeldaNotes checked): a screen finds a part's layout only in the archive it loaded the layout from.
+    LANE1 2026-11-22: the title's Host toggle (a part of Common's PaOptionBtnL_00 added to Title_00) crashed every boot
+    on a null read (guest 0x58) as the Title archive loaded, with Common in Title_00's ArchiveCategory too."""
+    old, had = {}, set()   # (the layouts as read, and every part layout they show: the archive's own already)
+    for n, data in before:
+        if n.endswith(".buil") and data not in old:
+            old[data] = n
+            try:
+                had.update(layout for _, layout in part_layouts(data))
+            except UiPackError:
+                pass   # (not a layout of the game's shape: none of its parts counted)
+    have = {n[:-len(".buil")] for n, _ in after if n.endswith(".buil")}
+    for n, data in after:
+        if not n.endswith(".buil") or data in old:
+            continue   # (a layout as it was read: the game's own)
+        for part, layout in part_layouts(data):
+            if layout not in have and layout not in had:
+                raise UiPackError("%s in %s shows %s, which is not in %s (the game would read a null layout as the "
+                                  "archive loads)" % (part, n, layout, archive))
+
+
 def part_id(name):
     """The id of a new pane and its part: CityHash64 of its name, as the game's own. The game finds a pane by name
     by hashing the name and looking for that id (main+0x43e300, the hash main+0xebf190, read from main 2026-11-18;

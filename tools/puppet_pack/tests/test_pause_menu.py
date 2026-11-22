@@ -270,7 +270,9 @@ LANGS = ("EUfr", "JPja", "USen")
 class BuildTest(unittest.TestCase):
     def romfs(self, root, broken=None):
         files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
-                                                (pm.SYSTEM_LAYOUT, system()), ("Other_00.buil", b"other")],
+                                                (pm.SYSTEM_LAYOUT, system()), ("Other_00.buil", b"other"),
+                                                (pm.HELP_LAYOUT + ".buil", b"caption"),   # (the parts' layouts
+                                                (pm.ROW_LAYOUT + ".buil", b"row")],       # ours add: Common's)
                                                data_align=16)}
         for lang in LANGS:
             page = make_msbt([("Pa_System_00-Pa_Button_00-T_Btn_00", "Save")])
@@ -372,7 +374,8 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
             files = {pm.COMMON_ARCHIVE: sarc.write([(pm.OVERLAY_LAYOUT, overlay()), (pm.PAGES_LAYOUT, pages()),
-                                                    (pm.SYSTEM_LAYOUT, system())], data_align=16),
+                                                    (pm.SYSTEM_LAYOUT, system()), (pm.HELP_LAYOUT + ".buil", b"caption"),
+                                                    (pm.ROW_LAYOUT + ".buil", b"row")], data_align=16),
                      title_menu.TITLE_ARCHIVE: sarc.write([(title_menu.TITLE_LAYOUT, title_layout())], data_align=16),
                      "RSDB/UIScreen.Product.111.rstbl.byml.zs": __import__("puppet_pack.byml", fromlist=["x"]).dumps(
                          [{"ArchiveCategory": ["Title"], "Name": "Title_00"}])}
