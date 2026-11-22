@@ -3034,7 +3034,7 @@ TEST_CASE("pause tab (charsel-native-0119, run 4620f3e7): a screen layout's verd
     CHECK_FALSE(LayoutLookAgain(true, 0x100, 3, 0x100, 0));
 }
 
-TEST_CASE("pause tab (review-01111-a): Character Select's Customize verdict; a carried 'his' is never kept for CoopMenu_00") {
+TEST_CASE("pause tab (review-01111-a): Character Select's Customize verdict, a carried 'his' is never kept for CoopMenu_00") {
     // His panes there: his, proven.
     CHECK(SnailVerdictFrom(true, false, false, false).his);
     CHECK_FALSE(SnailVerdictFrom(true, false, true, true).carried);
