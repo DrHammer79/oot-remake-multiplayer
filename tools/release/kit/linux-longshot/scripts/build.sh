@@ -503,7 +503,9 @@ charsel_native_sync() {
     local src=$DATA/tools/puppet_pack/charsel/data/charsel-native.ips
     local pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
     local dst=$pack/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips want=0
+    # (exit 10: ours wanted, 11: his code or the pack said no; anything else is Python failing: stop, never guess)
     if [[ -f $src && -x $PY ]]; then
+        local rc=0
         "$PY" -I -B -c '
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
@@ -517,7 +519,12 @@ try:
         want = False
 except (OSError, ValueError):
     pass
-sys.exit(0 if want else 1)' "$DATA/tools" "$pack" 2>/dev/null && want=1
+sys.exit(10 if want else 11)' "$DATA/tools" "$pack" || rc=$?
+        case $rc in
+            10) want=1 ;;
+            11) ;;
+            *) fail "co-op's Characters tab: could not tell whether its code patch goes into the game (python exit $rc, its error above)." ;;
+        esac
     fi
     if ((want)); then
         [[ -f $dst ]] && cmp -s "$src" "$dst" && return 0
