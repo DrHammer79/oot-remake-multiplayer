@@ -774,7 +774,7 @@ TEST_CASE("hookshot: Skip title screen chooses the game's own way, presses nothi
     // patch 0018 builds it on Linux too (Linux's stub is gone), so 0028 adds no Linux-only tick.
     const std::string menu = PatchedCode(patch, "host/oot_menu.c");
     CHECK(menu.find(Squashed("void hos_oot_menu_tick(Ctx *c, uint64_t screen) { if (!screen) return; "
-                             "hos_oot_autoload_screen(c, screen);")) != std::string::npos);
+                             "sprint_menu_tick(screen); hos_oot_autoload_screen(c, screen);")) != std::string::npos);
     CHECK(patch.find("+void hos_oot_menu_tick(") == std::string::npos);
     // The bridge asks the module's optional export; no module or co-op off: 0 (solo skips the title).
     const std::string bridge = PatchedCode(patch, "host/coop_bridge.c");
@@ -876,7 +876,7 @@ TEST_CASE("hookshot: the game's menu screens reach the module, the mouse knows a
     const auto in_menu = [&menu](const char* code) { return menu.find(Squashed(code)) != std::string::npos; };
     // In the one tick of both platforms, after 0028's call, before the screen's own update.
     const auto tick = menu.find(Squashed("void hos_oot_menu_tick(Ctx *c, uint64_t screen) { if (!screen) return; "
-                                         "hos_oot_autoload_screen(c, screen);"));
+                                         "sprint_menu_tick(screen); hos_oot_autoload_screen(c, screen);"));
     const auto ours = menu.find(Squashed("hos_coop_game_screen_now(c, screen);"));
     CHECK(tick != std::string::npos);
     CHECK((ours != std::string::npos && ours > tick && ours - tick < 300));
@@ -1288,10 +1288,11 @@ TEST_CASE("hookshot: a co-op build sends nothing to Longshot and is never a Long
     CHECK(patch.find("bool perf_report_init() {\n     folder = game_dir_path();\n+") != std::string::npos);
     CHECK(patch.find("+    if (true) return false;") != std::string::npos);
     // Every address empty, so the build's stamp has none and a sender has nowhere to send.
-    for (const char* key : {"crash_reports", "crash_issue", "perf_reports"}) {
-        CHECK(patch.find(std::string("\n+") + key + " =\n") != std::string::npos);
-        CHECK(patch.find(std::string("\n-") + key + " = https://") != std::string::npos);
-    }
+    // (Longshot 3.1: crash_reports is the one address it fills; it has no crash_issue, and its perf_reports is empty)
+    CHECK(patch.find("\n+crash_reports =\n") != std::string::npos);
+    CHECK(patch.find("\n-crash_reports = https://") != std::string::npos);
+    for (const char* key : {"crash_reports", "crash_issue", "perf_reports"})
+        CHECK(patch.find(std::string("\n+") + key + " = http") == std::string::npos);
     // Report manually opens co-op's page, not Longshot's issue form.
     CHECK(patch.find("+#define HOS_CRASH_ISSUES HOS_COOP_CRASH_REPORT_PAGE") != std::string::npos);
     CHECK(patch.find("+    snprintf(out->url, sizeof out->url, \"%s\", HOS_COOP_CRASH_REPORT_PAGE);") != std::string::npos);
