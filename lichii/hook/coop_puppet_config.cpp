@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_puppet_config.h"
+#include "coop_char_slots.h"
 
 #include <utility>
 
@@ -263,6 +264,30 @@ CoopPuppet::LookItems PackLook() {
 bool HasPack() { return !PackManifests().empty(); }
 // The stored character numbers the pack has models for (coop_char_slots.h: a pick outside them is put back).
 std::map<std::uint16_t, std::uint16_t> CharacterFiles() { return PackCharacterFiles(); }
+
+// Rows 239/240/241: the pack's map when there is a pack. Without one: no NPC model file at all in the Character Select
+// mod (its UI-only part, the kit's default) is an empty map (every NPC pick has no model here); NPC model files there
+// but no pack to name them is nothing (unknown: a pick is kept).
+std::optional<std::map<std::uint16_t, std::uint16_t>> KnownCharacterFiles() {
+    if (HasPack()) return PackCharacterFiles();
+    std::filesystem::path load = Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir);
+    if (load.filename().empty()) load = load.parent_path();
+    std::vector<std::filesystem::path> roots{load / "0400486024DEC000"};
+    if (load.filename() == "contents") roots.push_back(load.parent_path());
+    std::error_code ec;
+    for (const auto& root : roots) {
+        for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            std::error_code fec;
+            if (!std::filesystem::is_regular_file(it->path() / "characters.json", fec)) continue;
+            const auto model = it->path() / "romfs" / "Model";
+            for (std::filesystem::directory_iterator m(model, fec), mend; !fec && m != mend; m.increment(fec)) {
+                // (Player_<Age>_C<digits>: an NPC's model; the UI part's Player_<Age>_Cba_Animation is not one)
+                if (CoopCharSlots::IsNpcModelName(m->path().filename().string())) return std::nullopt;
+            }
+        }
+    }
+    return std::map<std::uint16_t, std::uint16_t>{};
+}
 
 // A manifest of a pack built with --puppet-pvp (native puppets phase 4).
 bool PackPvp() {

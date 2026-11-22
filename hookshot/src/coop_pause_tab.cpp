@@ -232,7 +232,12 @@ void Page::MinusLineStep(int dir) {
 }
 
 void Page::MinusTabMoved() {
-    minus_row_ = 0, minus_rows_ = 0;   // (another page: its first row; the module sets its rows)
+    // (another page: the row its cursor was on when it was left, its first the first time, as the game's pages keep
+    // theirs; the module sets its rows, and a row gone since finds the next shown: SetMinusRows)
+    if (minus_row_tab_ >= 0 && minus_row_tab_ < kMinusTabs) minus_row_kept_[static_cast<std::size_t>(minus_row_tab_)] = minus_row_;
+    minus_row_ = minus_tab_ >= 0 && minus_tab_ < kMinusTabs ? minus_row_kept_[static_cast<std::size_t>(minus_tab_)] : 0;
+    minus_row_tab_ = minus_tab_;
+    minus_rows_ = 0;
     minus_list_ = false, minus_line_ = -1, minus_lines_ = 0, minus_raw_ = false, minus_raw_back_ = false;
     minus_in_view_ = false, minus_back_ = false, minus_list_back_ = false, minus_moves_ = 0, minus_line_decide_ = -1;
     minus_decide_ = -1;
@@ -241,9 +246,11 @@ void Page::MinusTabMoved() {
 
 std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
     if (minus_tab_ < 0) {
-        if ((down & kPadR) != 0 && strip_.lit == kMapCategory) {
+        const std::uint64_t right = minus_native_ ? kPadR | kPadZR : kPadR;   // (the sequence's own R / ZR)
+        if ((down & right) != 0 && strip_.lit == kMapCategory) {
             minus_tab_ = 0, minus_slide_ = 1;
             MinusTabMoved();
+            if (minus_native_) return buttons & ~swallow_;   // (the game's: the Map sequence opens CoopMenu_00)
             strip_sound_ = "mc_TabToRight";
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
@@ -269,10 +276,20 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             MinusTabMoved();
         }
         swallow_ |= kPadR;
+    } else if ((down & (kPadZL | kPadZR)) != 0 && !(minus_list_ && minus_raw_)) {
+        // (a list's page: the games list's 6 at a time, as the game's own long lists page)
+        // (swallowed on every tab and view, but it clicks only when the list really pages: review-01110-c)
+        minus_page_step_ = (down & kPadZR) != 0 ? 1 : -1;
+        if (minus_pageable_) strip_sound_ = "button_on";
+        swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
-        strip_sound_ = "mc_TabToLeft";
         MinusTabMoved();
+        if (minus_native_ && minus_tab_ < 0) {   // (the game's too: the Map sequence closes CoopMenu_00)
+            swallow_ |= buttons & ~(kPadL | kPadB | kPadPlus | kPadMinus);
+            return buttons & (kPadL | kPadB | kPadPlus | kPadMinus) & ~swallow_;
+        }
+        strip_sound_ = "mc_TabToLeft";
         swallow_ |= kPadL;
     } else if (minus_list_ && minus_raw_) {   // (co-op's menu's own page: the moves are its events)
         if ((down & kPadB) != 0 && (minus_rows_ != 0 || minus_raw_back_)) {
@@ -699,8 +716,29 @@ std::pair<float, float> SlideOffsets(int dir, float p) {
     return {0.0f, 0.0f};
 }
 
+MinusSlideOffsets MinusSlideAt(int from, int to, float p) {
+    p = std::clamp(p, 0.0f, 1.0f);
+    MinusSlideOffsets o;
+    if (from < 0 && to >= 0) {   // (R on Map: ours in from the right, the Map out to the left)
+        o.page = kPageWidth * (1.0f - p), o.map = -kPageWidth * p;
+    } else if (from >= 0 && to < 0) {   // (L on our first: ours out to the right, the Map back from the left)
+        o.page = kPageWidth * p, o.map = -kPageWidth * (1.0f - p);
+    } else if (from >= 0 && to >= 0 && from != to) {   // (between ours: the next from the side it lies on)
+        o.page = (to > from ? kPageWidth : -kPageWidth) * (1.0f - p), o.map = -kPageWidth;
+    }
+    return o;
+}
+
 bool MenuUpFrom(int strip_state, std::uint64_t seen_ms, std::uint64_t now_ms) {
     return (strip_state == 1 || strip_state == 2) && seen_ms != 0 && now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
+}
+
+bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t open_ms, std::uint64_t seen_ms,
+                    std::uint64_t now_ms) {
+    if (!hide || !up || sliding) return false;
+    if (!native) return true;
+    return open_ms != 0 && now_ms >= open_ms && now_ms - open_ms >= kMapUnderAfterMs && seen_ms != 0 &&
+           now_ms >= seen_ms && now_ms - seen_ms < kMenuUpMs;
 }
 
 namespace {
@@ -735,6 +773,16 @@ bool SnailCodeBuiltIn(std::string_view list) {
         std::string m(mod);
         for (char& c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return m.find("character select") != std::string::npos;
+    });
+}
+
+bool CharselCodeBuiltIn(std::string_view list) {
+    if (SnailCodeBuiltIn(list)) return true;
+    return AnyCodeLine(list, [](std::string_view mod) {
+        const std::size_t slash = mod.rfind('/');
+        std::string leaf(slash == std::string_view::npos ? mod : mod.substr(slash + 1));
+        for (char& c : leaf) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return leaf == "coop-puppet";
     });
 }
 

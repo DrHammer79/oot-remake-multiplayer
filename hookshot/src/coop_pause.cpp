@@ -287,7 +287,7 @@ void RefreshSession(bool now) {
         g_menu.SetDifficulty({d.connected, d.can_edit, d.choice, d.values}, static_cast<int>(CoopHook::PlayerList().size()));
         g_menu.SetCharacter(CoopCharColours::ShownCharacter() != 0);   // (#308's Customize page: Link's colours wait)
         // (one home for Link's look: Character Select's Customize screen when his code is in the game)
-        g_menu.SetSnailHome(CoopPauseTab::SnailCodeBuiltIn(ExefsList()));
+        g_menu.SetSnailHome(CoopPauseTab::CharselCodeBuiltIn(ExefsList()));
     }
 }
 

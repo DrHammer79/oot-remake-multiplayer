@@ -137,6 +137,9 @@ namespace CoopHook {
 bool StartMapRefresh();  // rows 63/76: the game's HUD refresh after co-op writes a dungeon item (below)
 namespace {
 
+// Rows 239/240/241 (PickGuardFrame, below): a pick put back since the session's chat last said it.
+std::atomic<bool> g_pick_said{false};
+
 // The game and build the addresses in coop/host are for.
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 // The builds it knows: coop_game_build.h (docs/game-builds.md).
@@ -1778,26 +1781,17 @@ public:
         // hooks build a path from it; one chat line. Another player's such pick: their puppet is Link (Planner::ActorFor
         // finds no file); one line per player number.
         {
-            static CoopCharSlots::Own own_slot;
+            // Our own pick: PickGuardFrame (every frame of the module, co-op on or off, the title too). Here: its chat
+            // line in a session, and the others' picks.
             static CoopCharSlots::Others other_slots;
             static std::map<std::uint16_t, std::uint16_t> slot_files;
             static std::uint32_t slot_tick = 0;
-            if (view.game) {
+            if (g_pick_said.exchange(false)) chat_.Add(CoopCharSlots::MissingLine(true), true);
+            if (view.game && report.connected) {
                 if (slot_tick++ % 600 == 0) slot_files = CoopPuppetConfig::CharacterFiles();   // (the pack's, every 10 s)
-                static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
-                EmulatorMemory slot_memory(system.ApplicationMemory(), base_);
-                const auto pick = coop::host::GameFlags(slot_memory).get_int(pick_hash);
-                const auto step = own_slot.Check(pick, slot_files);
-                if (step.set && coop::host::GameFlags::set_int(slot_memory, pick_hash, *step.set) && step.say) {
-                    LOG_INFO(Core, "coop: characters: pick {} has no model here (NPC characters not downloaded): back to {}",
-                             pick.value_or(0), *step.set);
-                    chat_.Add(CoopCharSlots::MissingLine(true), true);
-                }
-                if (report.connected) {
-                    for (std::uint8_t n = 1; n < CoopCharSlots::Others::kNumbers; ++n) {
-                        if (other_slots.Tell(n, CoopLookShare::CharacterOf(n), slot_files)) {
-                            chat_.Add(CoopCharSlots::MissingLine(false, "Player " + std::to_string(n)), true);
-                        }
+                for (std::uint8_t n = 1; n < CoopCharSlots::Others::kNumbers; ++n) {
+                    if (other_slots.Tell(n, CoopLookShare::CharacterOf(n), slot_files)) {
+                        chat_.Add(CoopCharSlots::MissingLine(false, "Player " + std::to_string(n)), true);
                     }
                 }
             }
@@ -3645,7 +3639,56 @@ void OnFrame(Core::System& system) {
 }
 
 namespace {
+// Rows 239/240/241 (coop_char_slots.h): our own Character Select pick, every frame of the module, co-op on or off, on
+// the title too, so no save load (title Continue or Load, System Load, Game Over's Try Again, a host's save after a
+// join) starts from a pick whose model is not here. 0.11.9 ran it only in a session and only in play: a solo game
+// never had it, and a guest had it from the load's first frame. Also registers the save files' fix (FixSavePick) on
+// the module's first frame, before the first title.
+void PickGuardFrame(Core::System& system) {
+    static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
+    static const bool save_fix_set = [] {
+        CoopSave::SetSaveFix([](std::vector<std::uint8_t>& progress) -> std::string {
+            const auto files = CoopPuppetConfig::KnownCharacterFiles();
+            if (!files) return {};   // (NPC models there but no pack to name them: a pick is kept)
+            const auto fix = CoopCharSlots::FixSavePick(progress.data(), progress.size(), pick_hash, *files);
+            if (!fix.changed) return {};
+            return fmt::format("Character Select pick {} has no model here (NPC characters not downloaded): stored "
+                               "as Link in the save, so the world loads",
+                               fix.was.value_or(0));
+        });
+        return true;
+    }();
+    (void)save_fix_set;
+    static Kernel::KProcess* seen = nullptr;
+    static u64 base = 0;
+    static CoopCharSlots::Own own;
+    static std::optional<std::map<std::uint16_t, std::uint16_t>> files;
+    static std::uint32_t tick = 0;
+    auto* process = system.ApplicationProcess();
+    if (process == nullptr || system.GetApplicationProcessProgramID() != kOcarinaProgramId ||
+        CoopGameBuild::Find(Hex(system.GetApplicationProcessBuildID(), 8)) == nullptr) {
+        return;
+    }
+    if (process != seen) {
+        seen = process;
+        base = Coop::MainOf(system, process);
+        tick = 0;
+    }
+    if (base == 0) return;
+    if (tick++ % 600 == 0) files = CoopPuppetConfig::KnownCharacterFiles();   // (the pack's or the mod's, every 10 s)
+    if (!files) return;
+    EmulatorMemory memory(system.ApplicationMemory(), base);
+    const auto pick = coop::host::GameFlags(memory).get_int(pick_hash);
+    const auto step = own.Check(pick, *files);
+    if (step.set && coop::host::GameFlags::set_int(memory, pick_hash, *step.set) && step.say) {
+        LOG_INFO(Core, "coop: characters: pick {} has no model here (NPC characters not downloaded): back to {}{}",
+                 pick.value_or(0), *step.set, CoopSave::TitleUp() ? " (on the title, before a load)" : "");
+        g_pick_said = true;
+    }
+}
+
 void OnFrameBody(Core::System& system) {
+    PickGuardFrame(system);
     CoopObjects::OnFrame(system);
     {   // player report 120: the slot our game plays (Hookshot's patch 0025; solo too). Its own guard: a slot folder
         // that throws (a path the PC's code page cannot hold, no memory) costs only the slot, not the frame's co-op.

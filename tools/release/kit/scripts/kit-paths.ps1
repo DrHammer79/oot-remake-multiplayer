@@ -1031,6 +1031,29 @@ function Get-KitHookshotStamp([string]$Kit, [string]$Game = '') {
 # coop.ini and the options stay in the game folder).
 function Get-KitGameVariantRoot([string]$Kit) { return (Join-Path $Kit 'hookshot\game-variants') }
 
+# Rows 239/240 (black-join-0119): a game whose build-made files were being written when the window closed (a build, a
+# kept build put back, a copy from the game cache) still had the coop-built-from.txt of the build before it, so the next
+# start took the mixed files for that build: it kept them as that build for later and started them, and the world never
+# drew. Now coop-build-unfinished.txt goes into the game folder before anything writes those files and leaves only after
+# the new coop-built-from.txt is written: while it is there the game is never ready, never kept, and the module says so
+# on the title when the game is started some other way (coop_hookshot.cpp, kGameUnfinishedFile).
+$KitGameUnfinishedFile = 'coop-build-unfinished.txt'
+function Test-KitGameUnfinished([string]$Game) {
+    return [bool]$Game -and (Test-Path -LiteralPath (Join-Path $Game $KitGameUnfinishedFile))
+}
+# Before the game's build-made files are written ($What: what writes them, for the log and the next start's line).
+function Start-KitGameWrite([string]$Game, [string]$What) {
+    if (-not $Game) { return }
+    New-Item -ItemType Directory -Force -Path $Game | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $Game $KitGameUnfinishedFile),
+        "The co-op game was being written here ($What) and that did not finish. Start Squadala finishes it.`r`n")
+}
+# After the new coop-built-from.txt is written.
+function Complete-KitGameWrite([string]$Game) {
+    if (-not $Game) { return }
+    Remove-Item -LiteralPath (Join-Path $Game $KitGameUnfinishedFile) -Force -ErrorAction SilentlyContinue
+}
+
 # The stamp text as compared: line endings and trailing space do not count, plus the game's DLSS state (a game with
 # NVIDIA's runtime is kept apart: Test-KitHookshotDlss).
 function ConvertTo-KitVariantStamp([string]$Stamp, [bool]$Dlss) {
@@ -1076,6 +1099,8 @@ function Get-KitGameVariantFiles([string]$Game) {
 function Save-KitGameVariant([string]$Kit, [string]$Game, [int]$Keep = 3) {
     $stampFile = Join-Path $Game 'coop-built-from.txt'
     if (-not (Test-Path -LiteralPath $stampFile) -or -not (Get-KitHookshotExe $Game)) { return '' }
+    # (a write that did not finish: these files are not the build its stamp names, never kept as it)
+    if (Test-KitGameUnfinished $Game) { return '' }
     $files = @(Get-KitGameVariantFiles $Game)
     if (-not ($files | Where-Object { $_ -like '*longshot.exe' }) -or -not ($files -contains 'image.bin')) { return '' }
     $text = ConvertTo-KitVariantStamp ([System.IO.File]::ReadAllText($stampFile)) (Test-KitHookshotDlss $Game)
@@ -1209,8 +1234,17 @@ function Get-KitHookshotNeed([string]$Kit) {
     }
     $stampFile = Join-Path $game 'coop-built-from.txt'
     $have = if (Test-Path -LiteralPath $stampFile) { [System.IO.File]::ReadAllText($stampFile) } else { '' }
+    # (co-op's own Characters tab's code patch in or out first, as hookshot-build.ps1 does before its stamp: a kit
+    # update that brings it, or Character Select put in or taken out, then asks for the build that takes it)
+    [void](Sync-KitCharselNativePatch $Kit (Join-Path $game 'mods\contents\0400486024DEC000\coop-puppet'))
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
+    if (Test-KitGameUnfinished $game) {
+        # (rows 239/240: a build, put back or copy stopped half way; a kept build of exactly this stamp still goes back)
+        $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
+        if (Find-KitGameVariant $Kit $want $wantDlss) { return 'variant' }
+        return 'unfinished'
+    }
     if ($have -ne $want) {
         # (row 210: a build of exactly this stamp kept from before, e.g. a code mod switched back: put back in seconds)
         $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
@@ -1844,7 +1878,7 @@ function Get-KitCharacterSelectModels([string]$Dir, $Doc) {
 # the Mods tab. The models are in the key (C #58, lane 051234): the NPC part taken out (a UI-only kit) or put in, or a
 # release that renumbers its characters, makes the pack again, so its puppets and the pick guard never name a model
 # that is not there; the mod switched off in the Mods tab makes it again without the characters.
-function Get-KitCharacterSelectSeen([string]$Manifest) {
+function Get-KitCharacterSelectSeen([string]$Manifest, [switch]$Folder) {
     $pack = Split-Path -Parent $Manifest
     $title = Split-Path -Parent $pack
     $contents = Split-Path -Parent $title
@@ -1854,11 +1888,12 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
             if ($d.Name -match '^[-_.]') { continue }
             $file = Join-Path $d.FullName 'characters.json'
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model'))) { continue }
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (-not $Folder -and -not (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Model')))) { continue }
             try { $doc = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if ($doc.mod -ne 'OoT Character Select' -or $doc.format -ne 1) { continue }
             $listName = if ($root -eq $title) { "contents/$(Split-Path -Leaf $title)/$($d.Name)" } else { $d.Name }
             if (Test-KitModListOff $mods $listName) { continue }
+            if ($Folder) { return $d.FullName }   # (-Folder: the mod's folder, on, models or not: Test-KitCharselNative)
             $models = Get-KitCharacterSelectModels $d.FullName $doc
             if (-not $models) { continue }
             $c = $doc.puppet_colours
@@ -1866,6 +1901,48 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
         }
     }
     return ''
+}
+
+# Co-op's own Characters tab (tools/puppet_pack/charsel_ui.py, 0.11.10; the owner: "our mod itself should natively
+# include the character tab even without downloading any of Snails mod"): its code patch, Snail's header and page
+# hooks for Link (charsel/data/charsel-native.ips), goes into the pack's exefs, where the game's build takes the
+# mods' code patches from (patches 0034/0035). Not when the Character Select mod is in the mods (on; with its NPC
+# models or only its default part: Get-KitCharacterSelectSeen -Folder) with a code patch of his: his files and code are the tab's then. The same rule as the
+# pack tool's (build.py charsel_native_wanted), so the game and the pack agree. $Manifest: the pack's
+# coop_puppet.json (it need not be there yet).
+function Test-KitCharselNative([string]$Manifest) {
+    $cs = Get-KitCharacterSelectSeen $Manifest -Folder
+    if (-not $cs) { return $true }
+    return -not @(Get-ChildItem -LiteralPath (Join-Path $cs 'exefs') -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in '.ips', '.pchtxt' }).Count
+}
+
+# The code patch put in or taken out of the pack folder $Mod (<exe dir>\mods\contents\0400486024DEC000\coop-puppet)
+# before the game's build reads the mods' code patches (hookshot-build.ps1, before Get-KitExefsStampLine): in when
+# Test-KitCharselNative says so and the pack there did not leave the tab out (its coop_puppet.json's "charsel_native"
+# empty: the pack tool could not make the tab for this game; else the next start would build the game again, and
+# again). The pack tool writes the same bytes into the pack it makes. Returns 'in', 'out' or '' (no change).
+function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
+    $src = Join-Path $Kit 'tools\puppet_pack\charsel\data\charsel-native.ips'
+    $dst = Join-Path $Mod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+    $manifest = Join-Path $Mod 'coop_puppet.json'
+    $want = (Test-Path -LiteralPath $src -PathType Leaf) -and (Test-KitCharselNative $manifest)
+    if ($want -and (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+        try {
+            $json = [System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json -ErrorAction Stop
+            if ($json.PSObject.Properties['charsel_native'] -and -not @($json.charsel_native).Count) { $want = $false }
+        } catch { }
+    }
+    $have = Test-Path -LiteralPath $dst -PathType Leaf
+    if ($want) {
+        if ($have -and (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash) { return '' }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+        return 'in'
+    }
+    if (-not $have) { return '' }
+    Remove-Item -LiteralPath $dst -Force
+    return 'out'
 }
 
 # What a pack's coop_puppet.json records of its characters, in Get-KitCharacterSelectSeen's form ('' for none).
@@ -2191,6 +2268,7 @@ function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnl
         'pin' { 'Your co-op game was built for another game version than this kit uses: it is built again (about 15 minutes; the PC stays usable).' }
         'patches' { 'This update changes the co-op game a little: updating it (a few minutes).' }
         'mods' { 'A mod''s code patches changed (a mod with an exefs folder put in, changed or taken out, or switched on the Mods tab): the co-op game is built again with them, about 5 to 25 minutes (the PC stays usable). This build is kept, and so is the one before it: switching that mod back later takes seconds.' }
+        'unfinished' { 'The last build of the co-op game was stopped before it finished (its window was closed), so the game would start with half of its files and could show only a black screen. It is finished now (about 5 to 45 minutes; the PC stays usable).' }
         'variant' { 'The co-op game was built before with the mods'' code patches as they are now (a mod with an exefs folder switched back on the Mods tab): that build is put back (seconds, no build).' }
         'module' { 'Putting the updated co-op and the puppet pack into the co-op game (seconds to a minute).' }
         'quarantine' { Get-KitHookshotQuarantineText }
@@ -2204,6 +2282,7 @@ function Get-KitHookshotNeedQuestion([string]$Need) {
         'game' { 'Set it up now?' }
         'moved' { 'Build it again now?' }
         'pin' { 'Update it now?' }
+        'unfinished' { 'Finish it now?' }
         default { '' }
     }
 }

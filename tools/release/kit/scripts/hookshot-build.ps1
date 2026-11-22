@@ -211,6 +211,11 @@ if (-not $Out) {
 $Out = [System.IO.Path]::GetFullPath($Out)
 # What the game in $Out is made from: the tools' stamp, and the mods' code patches it is built with (patches 0034/0035:
 # Get-KitExefsStampLine; nothing more without code mods). The tools folder keeps $stamp.
+# Co-op's own Characters tab's code patch first, in the pack folder the build reads the mods from (in without the
+# Character Select mod's code, out with it: kit-paths.ps1 Sync-KitCharselNativePatch; the pack step writes the same).
+$charselSync = Sync-KitCharselNativePatch $kit (Join-Path $Out 'mods\contents\0400486024DEC000\coop-puppet')
+if ($charselSync -eq 'in') { Write-Host '  Characters tab: co-op''s own (Link) goes into the game''s build' }
+elseif ($charselSync -eq 'out') { Write-Host '  Characters tab: Character Select''s own (his mod is in the mods)' }
 $gameWant = $stamp + (Get-KitExefsStampLine $Out)
 $python = Join-Path $tools 'python\python.exe'
 
@@ -527,12 +532,16 @@ if (-not $Rebuild -and -not $CheckOnly -and $Out -ieq $defaultOut -and -not (Fin
         Write-Host '  The copy starts with that kit''s saves (as they are now); from then on each kit has its own.'
         $outWas = Test-Path -LiteralPath $Out
         New-Item -ItemType Directory -Force -Path $Out | Out-Null
-        & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XF coop.ini coop-options.ini *.log *_log.txt | Out-Null
+        # (marked first: robocopy may copy coop-built-from.txt before longshot.exe or image.bin, and a copy that stops
+        # half way must not look built: rows 239/240)
+        Start-KitGameWrite $Out 'a copy from another kit'
+        & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XF coop.ini coop-options.ini *.log *_log.txt $KitGameUnfinishedFile | Out-Null
         if ($LASTEXITCODE -ge 8 -or -not (Find-HookshotExe $Out)) {
             Write-Host "  Copying failed (robocopy $LASTEXITCODE): the game is built here instead." -ForegroundColor Yellow
             # (only a folder this copy made: one that was there before may hold the player's own files)
             if (-not $outWas) { Remove-Item -LiteralPath $Out -Recurse -Force -ErrorAction SilentlyContinue }
         } else {
+            Complete-KitGameWrite $Out
             Write-Host "  Copied to $Out (this kit's own game from now on)."
         }
         $global:LASTEXITCODE = 0
@@ -552,7 +561,23 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and $stampW
     $kept = if ($wantDlss -eq (Test-KitHookshotDlss $Out)) { Find-KitGameVariant $kit $gameWant $wantDlss } else { '' }
     if ($kept) {
         Step 'The game: putting back the build made before with these mods (seconds, instead of building it again)'
-        if (Restore-KitGameVariant $kept $Out) { Write-Host "  Put back into $Out." }
+        $wasUnfinished = Test-KitGameUnfinished $Out
+        Start-KitGameWrite $Out 'a kept build put back'
+        if (Restore-KitGameVariant $kept $Out) { Complete-KitGameWrite $Out; Write-Host "  Put back into $Out." }
+        else {
+            # (nothing was swapped in: the game is as it was, so an earlier stopped write stays marked and nothing else)
+            if (-not $wasUnfinished) { Complete-KitGameWrite $Out }
+            Write-Host '  It could not be put back (a file in use?): the game is built again instead.' -ForegroundColor Yellow
+        }
+    }
+}
+# Rows 239/240: a build, put back or copy stopped half way (Start-KitGameWrite's marker still there). Its kept build is
+# put back when there is one; otherwise the game is built again below, never started or kept as it is.
+if (-not $Rebuild -and -not $CheckOnly -and (Test-KitGameUnfinished $Out)) {
+    $kept = if ($wantDlss -eq (Test-KitHookshotDlss $Out)) { Find-KitGameVariant $kit $gameWant $wantDlss } else { '' }
+    if ($kept) {
+        Step 'The game: its last build was stopped half way; putting back the build made before with these mods (seconds)'
+        if (Restore-KitGameVariant $kept $Out) { Complete-KitGameWrite $Out; Write-Host "  Put back into $Out." }
         else { Write-Host '  It could not be put back (a file in use?): the game is built again instead.' -ForegroundColor Yellow }
     }
 }
@@ -573,7 +598,9 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and (Test-P
             $xd = @('user', 'save', 'autotest-save', 'mods') | ForEach-Object { Join-Path $from $_ }
             # (its build stamp last: a copy that stops half way leaves the old stamp, and the game is built again)
             $xf = @('hookshot_coop.dll', 'coop.ini', 'coop-options.ini', 'longshot_log.txt', 'longshot_log.old.txt', 'control.json', 'longshot_options.ini', 'language.txt',
-                'coop-built-from.txt') | ForEach-Object { Join-Path $from $_ }
+                'coop-built-from.txt', $KitGameUnfinishedFile) | ForEach-Object { Join-Path $from $_ }
+            # (marked first: a copy that stops half way leaves files of two builds, never started or kept as either)
+            Start-KitGameWrite $Out 'a copy from the game cache'
             & robocopy $from $Out /E /XJD /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD @xd /XF @xf | Out-Null
             if ($LASTEXITCODE -ge 8 -or -not (Find-HookshotExe $Out)) {
                 Write-Host "  Copying failed (robocopy $LASTEXITCODE): the game is built again instead." -ForegroundColor Yellow
@@ -581,6 +608,7 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and (Test-P
                 # (a copy without DLSS over a game that had it: NVIDIA's runtimes go too, as make_game.py's place_ngx_runtime does)
                 if (-not $wantDlss) { Remove-Item -LiteralPath (Join-Path $Out 'ngx') -Recurse -Force -ErrorAction SilentlyContinue }
                 Copy-Item -LiteralPath (Join-Path $from 'coop-built-from.txt') -Destination $oldStamp -Force
+                Complete-KitGameWrite $Out
                 Write-Host "  Copied into $Out; your saves and settings there are as they were."
             }
             $global:LASTEXITCODE = 0
@@ -589,7 +617,8 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and (Test-P
 }
 $gameStamp = Join-Path $Out 'coop-built-from.txt'
 $exe = Find-HookshotExe $Out
-$gameReady = $exe -and (Test-Path -LiteralPath $gameStamp) -and ([System.IO.File]::ReadAllText($gameStamp) -eq $gameWant)
+$gameReady = $exe -and (Test-Path -LiteralPath $gameStamp) -and ([System.IO.File]::ReadAllText($gameStamp) -eq $gameWant) -and
+    -not (Test-KitGameUnfinished $Out)
 
 # Game files that could not be taken, with why: said at the next game question (hookshot\game-rejected.txt).
 $gameRejected = Join-Path $hs 'game-rejected.txt'
@@ -764,7 +793,8 @@ if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
         Write-Host ('Warning: {0:N0} GB free on {1}; the first build wants about 60 GB.' -f ($free / 1GB), $drive) -ForegroundColor Yellow
     }
     # (why this build runs and about how long, in one line: player report 210, "a whole long process that takes forever")
-    Step "Building the game: $(Get-KitBuildWhyText $stampWas $gameWant) The PC stays usable."
+    $why = if (Test-KitGameUnfinished $Out) { 'its last build was stopped before it finished (its window was closed), so it is finished now (5 to 45 minutes).' } else { Get-KitBuildWhyText $stampWas $gameWant }
+    Step "Building the game: $why The PC stays usable."
     $buildLog = Join-Path $hs 'build.log'
     $buildArgs = $gameArgs + @('--out', $Out, '--work', $work, '--language', $Language)
     if ($Jobs) { $buildArgs += @('--jobs', "$Jobs") }
@@ -805,6 +835,9 @@ if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
             break
         }
     }
+    # (marked first, cleared after the new stamp: closing this window during the build leaves a game that is built again,
+    # never one started with half of its files: rows 239/240)
+    Start-KitGameWrite $Out 'a build'
     $code = Invoke-MakeGame $buildArgs $buildLog
     if ($code -ne 0) {
         # (make_game.py's own words for a failed SDK download are the Builder's, "untick NVIDIA DLSS": the kit's way is -NoDlss)
@@ -814,6 +847,7 @@ if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
     $exe = Find-HookshotExe $Out
     if (-not $exe) { Fail "The build finished but there is no longshot.exe in $Out. Its log: $buildLog" }
     [System.IO.File]::WriteAllText($gameStamp, $gameWant)
+    Complete-KitGameWrite $Out
 }
 # Where the game is, for Host-Hookshot.bat and Join-Hookshot.bat (play.ps1 -Hookshot).
 # (relative when it is inside the kit, so a copied or moved kit keeps its own game: kit-copy)
