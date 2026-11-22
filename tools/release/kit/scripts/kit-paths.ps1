@@ -1744,7 +1744,11 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
     # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
     # from another folder), so nothing else is needed)
     $a = @('-I', '-B', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
-    if ($Part -eq 'ui') { $a += @('--exclude', $KitCharselToolExclude) }
+    if ($Part -eq 'ui') {
+        # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
+        if (-not $KitCharselToolExclude) { return 'the kit could not read its own NPC rule ($KitCharselToolExclude)' }
+        $a += @('--exclude', $KitCharselToolExclude)
+    }
     Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
     # (Windows PowerShell makes each stderr line of a program an error record: under a caller's 'Stop' a warning
     # would end the install. The exit code decides.)
