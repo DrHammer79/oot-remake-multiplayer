@@ -806,12 +806,25 @@ void FlagWatcher::apply_snapshot(FlagStore& store) {
       ++stats_.kept_local;  // the host's answer to it is still to come
     } else if (is_delta(entry) || store.is_count(key)) {
       write(store, entry);  // a count's total, plus our change not sent yet
-    } else if (write_exact(store, entry)) {
-      // The host's save decides (docs/flags.md, "Saves"): a game that joins
-      // takes the group's value as it is, a lower one too. Merged (OR, max),
-      // a guest's older save filled the host's new file with that save's
-      // items and quests at once (player report #96).
-      ++stats_.snapshot_exact;
+    } else {
+      // Row 238: what our game had before, for a max-rule int the join lowers (the same ResetHold as a host's save
+      // load, apply_reset): a guest on its own save (4 hearts) joining a host with 3 wrote the 3, its Link's Life
+      // component wrote its own 4 back, and the max rule sent that rise as progress: the host's game rose to 4.
+      const std::optional<FlagEntry> had = entry.kind == protocol::FlagKind::int32 && store.is_max(key)
+                                               ? store.read(key)
+                                               : std::nullopt;
+      if (write_exact(store, entry)) {
+        // The host's save decides (docs/flags.md, "Saves"): a game that joins
+        // takes the group's value as it is, a lower one too. Merged (OR, max),
+        // a guest's older save filled the host's new file with that save's
+        // items and quests at once (player report #96).
+        ++stats_.snapshot_exact;
+        if (had && had->kind == protocol::FlagKind::int32 && entry.kind == protocol::FlagKind::int32 &&
+            as_int(had->value) > as_int(entry.value)) {
+          reset_holds_[key] = ResetHold{static_cast<std::int32_t>(as_int(entry.value)),
+                                        static_cast<std::int32_t>(as_int(had->value))};
+        }
+      }
     }
   }
   snapshot_.clear();
