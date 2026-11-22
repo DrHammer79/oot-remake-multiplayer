@@ -1949,6 +1949,7 @@ public:
                 if (CoopBossNative::Table& bosses = CoopBossNative::TheTable(); bosses.BrainOn()) {
                     bosses.Publish({});
                 }
+                CoopBossOrders::TheTable().Publish({});  // row 222: no owner or copy: our managers decide again
                 sharing_ = false;
             }
             return;
@@ -3319,6 +3320,7 @@ private:
             pvp_life_ = -1;
             pvp_watch_.Reset();
             CoopProjectiles::TheOwnShots().Reset();
+            CoopBossOrders::TheTable().Reset();  // row 222: its block and nodes were the old game's
             extras_.Reset();  // difficulty: that run's extra enemies are gone with it
             horde_.Reset();
             {

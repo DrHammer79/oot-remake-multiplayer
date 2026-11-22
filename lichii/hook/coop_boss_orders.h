@@ -125,6 +125,10 @@ public:
     std::optional<CoopPuppet::Call> Step(CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
                                          std::uint64_t main_base);
 
+    // A new game process (coop_objects.cpp, as the boss table's): every part, the block (its heap's) and any call
+    // in flight are dropped. Step does the same itself when main_base changes.
+    void Reset();
+
     Counts GetCounts() const;
     std::vector<std::string> TakeNotes();
 
@@ -142,6 +146,7 @@ private:
     };
     void Note(std::string text);
     void Forget(Entry& e);
+    void DropGame();  // (mutex_ held)
     static bool NodeIsOf(CoopPuppet::Guest& guest, std::uint64_t node, std::uint64_t actor);
 
     mutable std::mutex mutex_;
@@ -150,6 +155,7 @@ private:
     Counts counts_{};
     std::vector<std::string> notes_;
     // Our block in guest memory and the call in flight.
+    std::uint64_t main_base_ = 0;  // the game our block and nodes are of
     std::uint64_t block_ = 0;
     bool allocating_ = false;
     bool malloc_failed_ = false;  // this frame's malloc gave nothing: asked again next frame

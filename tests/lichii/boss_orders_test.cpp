@@ -302,3 +302,46 @@ TEST_CASE("made ours: our manager's skipped orders go into its sister first, and
     t.Publish(members);
     CHECK(Frame(t, g).empty());
 }
+
+TEST_CASE("a new game drops the block, the parts and a call in flight; Reset does the same") {
+    constexpr std::uint64_t kMain2 = 0x90020000;
+    Table t;
+    FakeGuest g;
+    g.Node(kNodeKotake, kKotake);
+    t.SetOn(true);
+    t.Publish(Sisters(Role::copy, Role::copy, 2));
+    (void)t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(1), false);
+    t.Receive(kKotake, BossOrders{1, {Order(1, addr::kTypeState, 5)}});
+    REQUIRE(Frame(t, g).size() == 2);  // the block's malloc, then the order
+    // A newer order is being put in when the game changes: its result is the old game's, not counted.
+    t.Receive(kKotake, BossOrders{2, {Order(1, addr::kTypeState, 5), Order(2, addr::kTypeState, 6)}});
+    auto call = t.Step(g, false, 0, kMain);
+    REQUIRE(call);
+    CHECK(call->function == kMain + addr::kReceive);
+    CHECK_FALSE(t.Step(g, true, 1, kMain2));
+    CHECK(t.GetCounts().delivered == 1);
+    // The new game's sisters: the old block is never written again, a new one is asked first.
+    g.bytes.clear();
+    g.Node(kNodeKotake, kKotake);
+    t.Publish(Sisters(Role::copy, Role::copy, 2));
+    (void)t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(1), false);
+    t.Receive(kKotake, BossOrders{1, {Order(1, addr::kTypeState, 9)}});
+    call = t.Step(g, false, 0, kMain2);
+    REQUIRE(call);
+    CHECK(call->function == kMain2 + addr::kMalloc);
+    constexpr std::uint64_t kBlock2 = 0x3100000;
+    call = t.Step(g, true, kBlock2, kMain2);
+    REQUIRE(call);
+    CHECK(call->function == kMain2 + addr::kReceive);
+    CHECK(call->x[1] == kBlock2);
+    CHECK(g.Get<std::uint32_t>(kBlock + addr::kMessageType) == 0);  // (nothing written to the old block)
+    // Reset (a new game process): the same, and the counts start again.
+    t.Reset();
+    CHECK(t.GetCounts().delivered == 0);
+    t.Publish(Sisters(Role::copy, Role::copy, 2));
+    (void)t.OnReceive(kNodeKotake, kKotake, addr::kTypeState, PayloadOf(1), false);
+    t.Receive(kKotake, BossOrders{1, {Order(1, addr::kTypeState, 9)}});
+    call = t.Step(g, false, 0, kMain2);
+    REQUIRE(call);
+    CHECK(call->function == kMain2 + addr::kMalloc);
+}

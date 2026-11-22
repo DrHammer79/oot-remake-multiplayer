@@ -624,7 +624,7 @@ King Dodongo rolled forever (Rolling_Start, Rolling_Loop_Start, Rolling_Loop, ne
 
 **Tests.** `objects_test` (row 169: told every walk while it plays, never for the owner's stun, also not when the owner is up a walk before the copy, nor for our own boss; the stun names), `boss_native_test` (row 169: own time, a hand-over during it chooses nothing again, counted once; without it the row 149 re-choose stays). **Not proven in game:** two players at King Dodongo, the guest's bomb in his mouth stuns him, the boss goes to the guest and the guest's hits end him (screenshots on both games: the guest's sword hit taking him from `Down` to his death, the host's screen showing the same).
 
-## Battle manager orders: one manager decides for every game (row 222, Twinrova, 0.11.10)
+## Battle manager orders: one manager decides for every game (row 222, Twinrova, 0.11.11)
 
 The owner's report: the Twinrova fight got stuck, the sisters held in an attack. Read from the game's own files and
 main (build e0f3ccfa; no game run yet):
@@ -662,9 +662,17 @@ orders (no patch 0036, or switched off; `PresenceFlagsBattleManager`), and the s
 sent it, so one game without A keeps the group with its owner; with A in every game it hands over as any boss group. Log lines: `coop: bosses: battle orders: ...` (counts every 10 s),
 `...: the owner's came: our own manager's orders are skipped`, `...: its receive node 0x...`.
 
-Other battle managers: `ExecuteGroupBattleManagerAI` / `ExecuteGroupBattleManagerMessageCommunication` (vtables
-main+0x49a3090, main+0x49a3258; enemy groups, no boss) use the same message family (its own payload copy,
-main+0x2fa4210): the same wrap of its handler (slot 39, main+0x26f5cd0) would fit, a row of its own. Not done here.
+Other battle managers (checked in the game's files, romfs of the same build): no other actor runs a battle manager.
+`ExecuteGroupBattleManagerAI` (vtable main+0x49a3090) is in main but no actor's AI uses it. Its client side,
+`ExecuteGroupBattleManagerMessageCommunication` (main+0x49a3258, handler slot 39 main+0x26f5cd0), is only in Gohma's
+larvae (`Enemy_Gohma_Larva.utility.root`, blackboard `Enemy_GroupBattleManager_IsEnable`/`_Order`, the
+`LandBattle_GroupBattle` sequence); with no manager no order ever comes, so the larvae fight on their own AI (the
+native sync and Mover as any enemy). Nothing to wrap; a game update that adds a manager would need a row of its own.
+Twinrova merged (`Enemy_DungeonBoss_Twinrova`, phase 2) has no receive node and no manager link: her fight is her own
+AI and action sequences (`LandBattle`, `LandBattle_Climax`), which the native boss sync carries as any boss (she is in
+the boss lists, coop_boss.cpp). The manager's orders matter only in phase 1.
+A new game (the main base changes, or a new process: `Reset`) drops the parts, the message block (the old game's heap)
+and a call in flight, as the boss table's own block.
 The sisters' own messages to each other (`ExecuteEnemyCoopWriteBlackboardReceiveMessage`, types 0x3ddc000e/f) are
 not orders and are left to each game.
 

@@ -210,6 +210,16 @@ bool Table::NodeIsOf(CoopPuppet::Guest& guest, std::uint64_t node, std::uint64_t
 std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after_call, std::uint64_t result,
                                             std::uint64_t main_base) {
     std::lock_guard lock(mutex_);
+    if (main_base != main_base_) {
+        // A new game (or none): our block was its heap's and every node its; a call in flight is not ours to
+        // finish (as coop_boss_native's block).
+        if (main_base_ != 0) {
+            Note("battle orders: a new game: block, parts and call in flight dropped");
+            DropGame();
+        }
+        main_base_ = main_base;
+        after_call = false;
+    }
     if (!after_call) {
         malloc_failed_ = false;
     }
@@ -314,6 +324,24 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
         return c;
     }
     return std::nullopt;
+}
+
+void Table::DropGame() {
+    entries_.clear();
+    block_ = 0;
+    allocating_ = false;
+    malloc_failed_ = false;
+    pending_ = Pending::none;
+    pending_actor_ = 0;
+    pending_replay_ = false;
+}
+
+void Table::Reset() {
+    std::lock_guard lock(mutex_);
+    DropGame();
+    main_base_ = 0;
+    counts_ = {};
+    notes_.clear();
 }
 
 Counts Table::GetCounts() const {
