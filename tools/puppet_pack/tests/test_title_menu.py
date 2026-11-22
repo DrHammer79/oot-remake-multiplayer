@@ -111,8 +111,8 @@ class LayoutTest(unittest.TestCase):
         panes, parts = tm.read_layout(n)
         names = [p[0] for p in panes]
         want = ["Pa_Button_%02d" % i for i in range(4, 4 + tm.LIST_BUTTONS)] + [tm.HINT]
-        self.assertEqual(names, PANES + [tm.MARKER] + want + [tm.TOGGLE])
-        self.assertEqual([p[0] for p in parts][-len(want) - 1:-1], want)
+        self.assertEqual(names, PANES + [tm.MARKER] + want)   # (no toggle: add_menu's notes)
+        self.assertEqual([p[0] for p in parts][-len(want):], want)
         self.assertEqual([p[1] for p in panes[:8]], [p[1] for p in tm.read_layout(d)[0]])   # (nothing moves)
         for i, name in enumerate(want):
             rec = panes[names.index(name)][1]
@@ -125,7 +125,7 @@ class LayoutTest(unittest.TestCase):
             tm.add_list(make_layout())   # (no marker)
 
     def test_the_toggle_in_the_first_buttons_place_of_the_options_layout_stored_hidden(self):
-        n = tm.add_menu(make_layout())
+        n = tm.add_toggle(tm.add_menu(make_layout()))   # (not in the pack: check_own_parts refuses it, below)
         panes, parts = tm.read_layout(n)
         names = [p[0] for p in panes]
         self.assertEqual(names[-1], tm.TOGGLE)
@@ -227,7 +227,7 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             src = os.path.join(root, "romfs")
             self.romfs(src, broken)
-            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500, "RSDB/UIScreen.Product.111.rstbl.byml": 7000})
+            table = _Table({tm.TITLE_ARCHIVE[:-3]: 1000, tm.TITLE_LAYOUT: 500})
             for lang in ("EUen", "JPja", "USen"):
                 table.set("Mals/%s.Product.110.sarc" % lang, 2000)
             before = dict(table.sizes)
@@ -245,22 +245,29 @@ class BuildTest(unittest.TestCase):
     def test_every_file_when_all_can_be_made(self):
         made, written, sizes, before, err = self.run_build()
         self.assertIsNone(err)
-        self.assertEqual(len(made), 5)
+        self.assertEqual(len(made), 4)   # (the archive and three languages: not the screens table)
         self.assertEqual(set(written), set(made))
         layouts = [d for n, d in sarc.read_entries(written[tm.TITLE_ARCHIVE]) if n == tm.TITLE_LAYOUT]
         self.assertEqual(len(layouts), 2)
-        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 3 + tm.LIST_BUTTONS for d in layouts))
+        self.assertTrue(all(len(tm.read_layout(d)[0]) == len(PANES) + 2 + tm.LIST_BUTTONS for d in layouts))
+        self.assertNotIn(tm.TOGGLE, [p[0] for p in tm.read_layout(layouts[0])[0]])
         _, _, labels, _ = tm.read_msbt(sarc.read(written["Mals/JPja.Product.110.sarc.zs"])[tm.MSG_FILE])
         self.assertIn("0106", labels)
         self.assertTrue(all(sizes[k] > before[k] for k in before))
 
-    def test_the_title_screen_loads_common_after_title(self):
+    def test_no_part_from_another_archive_and_the_screens_table_untouched(self):
+        """LANE1 2026-11-22 (tabs-overhaul-01110 and title-01110): the toggle's part (Common's PaOptionBtnL_00) in
+        the Title archive crashed every boot, Common in Title_00's archives or not. The pack refuses such a layout."""
         made, written, sizes, before, err = self.run_build()
         self.assertIsNone(err)
-        rows = byml.loads(written["RSDB/UIScreen.Product.111.rstbl.byml.zs"])
-        self.assertEqual(rows[0]["ArchiveCategory"], ["Title", "Common"])
-        self.assertEqual(rows[0]["Class"], "UITitleScreen")                 # (the rest of the row as it was)
-        self.assertEqual(rows[1], {"ArchiveCategory": ["Common"], "Name": "Other_00"})   # (other rows untouched)
+        self.assertNotIn("RSDB/UIScreen.Product.111.rstbl.byml.zs", written)
+        entries = sarc.read_entries(written[tm.TITLE_ARCHIVE])
+        tm.ui_pack.check_own_parts(entries, entries, tm.TITLE_ARCHIVE)   # (what the pack writes passes)
+        toggled = [(n, tm.add_toggle(d) if n == tm.TITLE_LAYOUT else d) for n, d in entries]
+        with self.assertRaisesRegex(tm.TitleMenuError, "PaOptionBtnL_00"):
+            tm.ui_pack.check_own_parts(entries, toggled, tm.TITLE_ARCHIVE)
+        # (the toggle's layout in the archive too: allowed, as a layout of its own archive)
+        tm.ui_pack.check_own_parts(entries, toggled + [("PaOptionBtnL_00.buil", make_layout())], tm.TITLE_ARCHIVE)
         rows = byml.loads(SCREENS)
         tm.add_common_archive(rows)
         tm.add_common_archive(rows)   # (twice: Common once)
@@ -282,13 +289,13 @@ class BuildTest(unittest.TestCase):
                 return [k]
 
             def read(self, rel):
-                return written[k]
+                return SCREENS
 
         row = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CoopMenu_00", "Name": "CoopMenu_00"}
         rel, data, grew = tm.ui_pack.edit_screens(Run(), _Plain(), lambda d, raw, new: new, lambda rows: rows + [row])
         got = byml.loads(data)
         self.assertEqual([r["Name"] for r in got], ["Title_00", "Other_00", "CoopMenu_00"])
-        self.assertEqual(got[0]["ArchiveCategory"], ["Title", "Common"])   # (the title step's edit kept)
+        self.assertEqual(got[0]["ArchiveCategory"], ["Title"])   # (the game's own row as it was)
         self.assertEqual((grew[0], grew[1] < grew[2], grew[3]), (k, True, True))
 
     def test_the_newest_copy_of_the_screens_table_is_the_one_edited(self):
