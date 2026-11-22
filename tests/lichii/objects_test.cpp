@@ -5,6 +5,7 @@
 #include <ostream>  // doctest prints string_view through it
 
 #include <cmath>
+#include <iterator>
 #include <cstring>
 #include <algorithm>
 #include <array>
@@ -8089,6 +8090,16 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
         CHECK(s.id.kind == proto::ObjectKind::made);
         CHECK(s.actor == decoy);
     }
+    // (sent in walk order: by name, then x; picked by place here)
+    const auto spawn_at = [&spawns](float x) {
+        const auto it = std::find_if(spawns.begin(), spawns.end(), [x](const proto::ObjectSpawn& s) {
+            return s.state.position && std::fabs((*s.state.position)[0] - x) < 0.01f;
+        });
+        REQUIRE(it != spawns.end());
+        return *it;
+    };
+    const proto::ObjectSpawn seat_right = spawn_at(3.0f);
+    const proto::ObjectSpawn seat_left = spawn_at(-3.0f);
 
     // B's copy of Meg makes her own decoys on the same seats (her own layout, the room's seats). B's spawn first:
     // nothing of A's is being made here yet, so B's own is deleted at once, and A's is made instead.
@@ -8100,14 +8111,14 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
     Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, 3.0f, decoy)}, 2);
     CHECK_FALSE(b.IdOf(0x210));
     CHECK(b.Removes() == std::vector<std::uint64_t>{0x210});
-    b.Receive(spawns[0]);
+    b.Receive(seat_right);
     Tick(b, 150 * kMs, {meg_b}, 2);
     REQUIRE(b.Creates().size() == 1);
 
     // The claim path: A's next decoy is being made here (not yet bound) when B's own Meg makes one on that same seat
-    // (within kClaimDistance, half a metre off): it may be the director's copy, so it waits; once the director's copy is bound it is
-    // not, and it is deleted. One decoy on that seat, A's.
-    b.Receive(spawns[1]);
+    // (within kClaimDistance, half a metre off): it may be the director's copy, so it waits; once the director's
+    // copy is bound it is not, and it is deleted. One decoy on that seat, A's.
+    b.Receive(seat_left);
     Tick(b, 200 * kMs, {meg_b, Enemy(0x220, ~0ULL, 1, -2.5f, decoy)}, 2);
     CHECK_FALSE(b.IdOf(0x220));
     CHECK(b.Removes().empty());
@@ -8121,9 +8132,9 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
           Enemy(0x221, ~0ULL, 1, -3.0f, decoy)},
          2);
     REQUIRE(b.IdOf(0x221));
-    CHECK(*b.IdOf(0x221) == spawns[1].id);
+    CHECK(*b.IdOf(0x221) == seat_left.id);
     REQUIRE(b.IdOf(0x211));
-    CHECK(*b.IdOf(0x211) == spawns[0].id);
+    CHECK(*b.IdOf(0x211) == seat_right.id);
     CHECK_FALSE(b.IdOf(0x220));
     CHECK(b.Removes() == std::vector<std::uint64_t>{0x220});
 
@@ -8146,18 +8157,30 @@ TEST_CASE("objects: Meg's decoys come from her owner's game only, a copy's own a
 
     // Meg turns to B mid-cycle (a MiddleBoss turns every attack): A's decoys already made stay A's (made ids, their
     // maker's); the decoys made from now on are B's to share, and A's game deletes its own new ones.
+    // (an owner change is taken in the next Tick, after that Tick's new actors: one Tick for it first)
     Own(b, meg_id, 2, 1);
     Own(a, meg_id, 2, 1);
-    const auto turned = All<proto::ObjectSpawn>(Tick(
+    Tick(b, at, {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy)}, 2);
+    Tick(a, at,
+         {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+          Enemy(0x112, ~0ULL, 1, 6.0f, decoy)},
+         1);
+    (void)b.Removes();
+    (void)a.Removes();
+    at += 100 * kMs;
+    const auto turned_all = All<proto::ObjectSpawn>(Tick(
         b, at,
         {meg_b, Enemy(0x211, ~0ULL, 1, 3.0f, decoy), Enemy(0x221, ~0ULL, 1, -3.0f, decoy),
          Enemy(0x400, ~0ULL, 1, 9.0f, decoy)},
         2));
+    std::vector<proto::ObjectSpawn> turned;  // (her own announce as B's late encounter is not a decoy)
+    std::copy_if(turned_all.begin(), turned_all.end(), std::back_inserter(turned),
+                 [&decoy](const proto::ObjectSpawn& s) { return s.actor == decoy; });
     REQUIRE(turned.size() == 1);
     CHECK(turned[0].id.kind == proto::ObjectKind::made);
     CHECK(turned[0].id.maker == 2);
-    CHECK(*b.IdOf(0x211) == spawns[0].id);
-    CHECK(*b.IdOf(0x221) == spawns[1].id);
+    CHECK(*b.IdOf(0x211) == seat_right.id);
+    CHECK(*b.IdOf(0x221) == seat_left.id);
     CHECK(b.Removes().empty());
     Tick(a, at, {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
                  Enemy(0x112, ~0ULL, 1, 6.0f, decoy), Enemy(0x130, ~0ULL, 1, 12.0f, decoy)},
