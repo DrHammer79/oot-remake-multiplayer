@@ -253,7 +253,7 @@ TEST_CASE("switch share: a plug that also raises our event asker is held only on
         };
         // Not armed: nothing held, nothing sent (our plug is 0), the wait is logged once.
         for (int i = 0; i < 5; ++i) {
-            const auto holds = b.Tick(l.scene, seen(false, false), true, t += 100, out, notes);
+            const auto holds = b.Tick(l.scene, seen(false, false), true, 2, t += 100, out, notes);
             CHECK(holds.empty());
         }
         CHECK(out.empty());
@@ -261,17 +261,17 @@ TEST_CASE("switch share: a plug that also raises our event asker is held only on
         if (at_load) {
             // The load guard came live: our asker still exists (it is deleted only at a load): still no hold.
             b.Receive(on, t);
-            CHECK(b.Tick(l.scene, seen(false, true), true, t += 100, out, notes).empty());
-            b.Tick(l.scene, {}, true, t += 100, out, notes);  // the room reloads: a walk without the switch
+            CHECK(b.Tick(l.scene, seen(false, true), true, 2, t += 100, out, notes).empty());
+            b.Tick(l.scene, {}, true, 2, t += 100, out, notes);  // the room reloads: a walk without the switch
         }
         // The guard flag came (our asker is gone or its trigger is false): the hold runs the room objects only.
         b.Receive(on, t);
-        auto holds = b.Tick(l.scene, seen(false, true), true, t += 100, out, notes);
+        auto holds = b.Tick(l.scene, seen(false, true), true, 2, t += 100, out, notes);
         REQUIRE(holds.size() == 1);
         CHECK(holds[0] == Hold{0x2000, PlugKey(l.plug)});
         CHECK(Has(notes, "ours held on"));
         // Our plug now 1 from that hold is not sent back as a press of ours.
-        holds = b.Tick(l.scene, seen(true, true), true, t += 100, out, notes);
+        holds = b.Tick(l.scene, seen(true, true), true, 2, t += 100, out, notes);
         CHECK(out.empty());
     }
 }
@@ -303,11 +303,11 @@ struct DekuD {
     // One walk: our switch at `address`, the load guard on in our game now or not.
     bool Held(bool flag_on, std::uint64_t address = 0x2000) {
         Press();
-        return !b.Tick("InsideTheDekuTree", {Seen{line, address, false, true, flag_on}}, true, t += 100, out, notes)
+        return !b.Tick("InsideTheDekuTree", {Seen{line, address, false, true, flag_on}}, true, 2, t += 100, out, notes)
                     .empty();
     }
     // One walk of this room without the switch (its room unloaded, or the game is reloading).
-    void Gone() { b.Tick("InsideTheDekuTree", {}, true, t += 100, out, notes); }
+    void Gone() { b.Tick("InsideTheDekuTree", {}, true, 2, t += 100, out, notes); }
 };
 }  // namespace
 
@@ -346,7 +346,7 @@ TEST_CASE("switch share: a new scene forgets the load guard's latch") {
     CHECK_FALSE(d.Held(false));
     std::vector<proto::SwitchState> out;
     std::vector<std::string> notes;
-    d.b.Tick("KokiriForest", {}, true, d.t += 50, out, notes);  // another scene, then back
+    d.b.Tick("KokiriForest", {}, true, 2, d.t += 50, out, notes);  // another scene, then back
     CHECK(d.Held(true));
 }
 
@@ -372,16 +372,16 @@ TEST_CASE("switch share: a remote press that ends while not armed logs the next 
     };
     const std::vector<Seen> unarmed{Seen{found[0], 0x2000, false, true, false}};  // its load guard off at the load
     b.Receive(on, t);
-    b.Tick("InsideTheDekuTree", unarmed, true, t += 100, out, notes);
-    b.Tick("InsideTheDekuTree", unarmed, true, t += 100, out, notes);
+    b.Tick("InsideTheDekuTree", unarmed, true, 2, t += 100, out, notes);
+    b.Tick("InsideTheDekuTree", unarmed, true, 2, t += 100, out, notes);
     CHECK(waits() == 1);
     proto::SwitchState off = on;
     off.on = false;
     b.Receive(off, t);
-    b.Tick("InsideTheDekuTree", unarmed, true, t += 100, out, notes);
+    b.Tick("InsideTheDekuTree", unarmed, true, 2, t += 100, out, notes);
     CHECK(waits() == 1);
     b.Receive(on, t);
-    b.Tick("InsideTheDekuTree", unarmed, true, t += 100, out, notes);
+    b.Tick("InsideTheDekuTree", unarmed, true, 2, t += 100, out, notes);
     CHECK(waits() == 2);
 }
 
@@ -392,7 +392,7 @@ TEST_CASE("switch share: a guarded line not armed is still our own: our press is
     Sharer a;
     std::vector<proto::SwitchState> out;
     std::vector<std::string> notes;
-    const auto holds = a.Tick("InsideTheDekuTree", {Seen{found[0], 0x3000, true, true, false}}, true, 1000, out, notes);
+    const auto holds = a.Tick("InsideTheDekuTree", {Seen{found[0], 0x3000, true, true, false}}, true, 2, 1000, out, notes);
     CHECK(holds.empty());
     REQUIRE(out.size() == 1);
     CHECK(out[0].on);
