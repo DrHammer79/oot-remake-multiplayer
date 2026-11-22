@@ -935,6 +935,10 @@ if (-not $PSBoundParameters.ContainsKey('Out') -and -not $Tools -and (Test-Path 
     } catch { Write-Host "  (no desktop shortcut: $($_.Exception.Message))" }
 }
 
+# Problem reports (problem-send.ps1, docs/problem-reports.md): the one-line y/n question at the first setup, when the kit
+# never answered it (Enter, no key in 20 s or no console is no; it asks again at a start). Never stops the build.
+try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -AtStart } catch { }
+
 Write-Host ''
 if (Test-Path -LiteralPath (Join-Path $kit 'Start Squadala.bat')) {
     Write-Host 'Done. The game is ready: "Start Squadala.bat" (or the desktop shortcut) starts it; Host and Join are in the game.' -ForegroundColor Green
