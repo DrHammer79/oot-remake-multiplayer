@@ -11,11 +11,11 @@ wait 300                # the save loaded, Link standing
 mark a-before
 menu customize
 wait 240                # the page drawn (the first part row selected: Eye Colour)
-press DDOWN             # Kokiri Tunic
+press DDOWN 10          # Kokiri Tunic
 wait 60
-press DRIGHT            # the next colour
+press DRIGHT 10          # the next colour
 wait 60
-press DRIGHT            # and the next
+press DRIGHT 10          # and the next
 wait 120
 mark a-page
 menu close
