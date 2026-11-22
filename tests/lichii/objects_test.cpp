@@ -6943,7 +6943,7 @@ TEST_CASE("objects: a dying copy boss gets its remaining life once when its owne
     CHECK(ours.DyingFinished() == 0);
 }
 
-TEST_CASE("enemies-dying-01111: a mini-boss copy whose owner's is dead dies once; its killing blow is not replayed again") {
+TEST_CASE("enemies-dying-01111: a mini-boss copy whose owner's is dead dies once, its killing blow is not replayed again") {
     // Run 20261122-092813: after the owner's kill every owner sample at life 0 replayed the killing blow on our
     // dying copy; each was refused and timed out ("did not take"), ~50 times. A boss no boss room names has no
     // director to name it dying: its owner saying it is dead is enough, and its death is given once.
