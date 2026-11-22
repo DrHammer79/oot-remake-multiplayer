@@ -1127,6 +1127,18 @@ def run(a):
         load = parse(read_script(a.load))   # (checked; the load itself is "A until play", see to_play)
     procs, bridges, server, commands = {}, {}, None, {}
     failed = None
+
+    def keep_pids():
+        # --keep-open: the games and the server outlive this run, so their pids go to pids.json in the run folder for
+        # whoever closes them later (tools/autotest/live.py's watchdog). Written again as each one starts.
+        if not a.keep_open:
+            return
+        try:
+            with open(os.path.join(out, "pids.json"), "w", encoding="utf-8") as f:
+                json.dump({"games": {x: p.pid for x, p in procs.items()}, "server": server.pid if server else None}, f)
+        except OSError as e:
+            say("pids.json not written: %s" % e)
+
     try:
         if a.server:
             with open(os.path.join(out, "server-out.txt"), "w") as so:
@@ -1138,6 +1150,7 @@ def run(a):
                     senv["OOT_COOP_TEST"] = "1"   # coop_server refuses the delay without it
                 server = subprocess.Popen([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
                                           + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
+            keep_pids()
             time.sleep(1)
         for i, x in enumerate(tags):
             g = games[x]
@@ -1175,6 +1188,7 @@ def run(a):
                     procs[x] = subprocess.Popen([exe], cwd=exe_dir(g), env=env, stdin=subprocess.DEVNULL, stdout=go,
                                                 stderr=subprocess.STDOUT, **kw)
             say("%s: started pid %d, bridge %s" % (x, procs[x].pid, sock))
+            keep_pids()
             bridges[x] = (sock, Bridge.connect(sock, timeout=120))
             if i == 0:
                 time.sleep(3)

@@ -38,8 +38,9 @@ TOOLS = [
     {"name": "shot", "description": "Screenshot one game or both: the PNG paths (open them to see the screen). "
      "Use sparingly; state is cheaper.",
      "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
-    {"name": "checkpoint", "description": "Write both games' shared dungeon and story flags under a tag "
-     "(letters, digits, - and _). Take one after every action that should sync, then run desync_check.",
+    {"name": "checkpoint", "description": "Write both games' shared dungeon and story flags and a screenshot of "
+     "each game under a tag (letters, digits, - and _). Take one after every action that should sync, then run "
+     "desync_check; open the shots for anything visible (flags alone are no proof of what a player sees).",
      "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "desync_check", "description": "Compare every checkpoint of the session: the first tag where the two "
      "games' shared flags differ, and which flags.",
@@ -64,7 +65,7 @@ def call(session, name, args):
     if name == "desync_check":
         buf = io.StringIO()
         code = desync_check.check(session, bool(args.get("all")), out=lambda s: buf.write(s + "\n"))
-        return {"result": ["agree", "desync", "nothing to compare"][code], "report": buf.getvalue()}
+        return {"result": ["agree", "desync", "nothing to compare", "incomplete"][code], "report": buf.getvalue()}
     raise ValueError("no tool %s" % name)
 
 
@@ -102,7 +103,7 @@ def serve(session):
             try:
                 out = call(session, params.get("name"), params.get("arguments") or {})
                 reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
-            except BaseException as e:  # (SystemExit from a bad tag too: an error the tester reads)
+            except (Exception, SystemExit) as e:  # (SystemExit from a bad tag too: an error the tester reads)
                 reply(id_, {"content": [{"type": "text", "text": "%s: %s" % (e.__class__.__name__, e)}],
                             "isError": True})
         elif method == "ping":
