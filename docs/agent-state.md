@@ -6,14 +6,15 @@ only: what is done, what is open, and what we wait on. The handoff for the maint
 
 Last updated: 2026-11-22.
 
-## Integration branch and open pull request
+## Integration and pull request #315
 
-- The integration branch is `test-kit-0117`. It tracks upstream main and carries the play-test kit, the agent
-  handoff, the address index and a build fix for the llvm-mingw toolchain.
-- Pull request [#315](https://github.com/daurosk/oot-remake-multiplayer/pull/315) on upstream is open. It has no
-  reply yet. The handoff to the maintainer's agent is waiting on its review. Its notes and addresses fold into
-  [agent-handoff.md](agent-handoff.md) and [addresses.md](addresses.md) once a reply arrives.
-- Nothing is merged to main from these branches without the maintainer's go.
+- Pull request [#315](https://github.com/daurosk/oot-remake-multiplayer/pull/315) (the play-test kit, the agent
+  handoff, the address index and a build fix for the llvm-mingw toolchain) is reviewed and merged into the 0.11.12
+  integration branch as authored; our fixes sit on top. Its branch `test-kit-0117` is no longer the integration branch.
+- The play-test kit has two layers: the live kit ([playtest.md](playtest.md)) and the play-test bridge with one MCP
+  server per game ("Playing through the bridge" there). The rules for an agent tester are in [AGENTS.md](../AGENTS.md),
+  section "Play-testing the game"; this page does not repeat them.
+- Nothing is merged to main without the maintainer's go.
 
 ## Work in progress: Character Select pick per age
 
@@ -28,13 +29,13 @@ Branch `char-ages`, local and not yet pushed.
 - Wish: the picks belong on the Characters screen. Today the picker sets the current age's pick; the Settings rows
   set either age.
 
-## Planned: Character Select v0.2.2 in the kit
+## Character Select v0.2.2 in the kit
 
 - The mod author released v0.2.2. It has the same characters as v0.2.1, but it ships as a zip that builds the mod on
   the player's own PC from the player's own game files. Its tool needs the game's romfs and four Python packages.
-- Planned: the kit installs v0.2.2 by running that tool on the kit's own romfs. The kit's pinned version
+- Done in the 0.11.12 line (pull request #312): the kit installs v0.2.2 by running that tool on the kit's own romfs. The kit's pinned version
   (`CHARACTER-SELECT.txt`) changes with it. Tested on the kit's romfs: 2287 files in 155 s, no errors.
-- Not started. It needs a decision before any public post.
+- The kit's script runs the mod's tool on the player's own game files; the NPC and default parts depend on it.
 
 ## Open report: Zelda's hair after a spin attack
 
@@ -72,6 +73,5 @@ Meg decoys, the Dead Hand hands, presence-gated placements, and the Volvagia roc
 
 ## Waiting on
 
-- A reply on pull request #315 from the maintainer's agent.
 - Exact repro steps for the Zelda hair report.
 - The maintainer's go before any public post or any change to main.
