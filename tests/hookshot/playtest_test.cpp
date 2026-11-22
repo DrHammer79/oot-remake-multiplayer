@@ -50,7 +50,7 @@ std::string ParseError(std::string_view line) {
 
 }  // namespace
 
-TEST_CASE("playtest: the port and idle switches; off unless a real port is given") {
+TEST_CASE("playtest: the port and idle switches: off unless a real port is given") {
     CHECK_FALSE(PortFrom(""));
     CHECK_FALSE(PortFrom("0"));
     CHECK_FALSE(PortFrom("80"));
@@ -154,7 +154,7 @@ TEST_CASE("playtest: the stick's angle and strength as Longshot's axes") {
     CHECK(near(StickAxes(NAN, 1), 0, 0));
 }
 
-TEST_CASE("playtest: every command parses; ids come back as given") {
+TEST_CASE("playtest: every command parses, ids come back as given") {
     for (const char* line : {R"({"cmd":"hello"})", R"({"cmd":"state","id":"s1"})", R"({"cmd":"pause"})",
                              R"({"cmd":"resume"})"}) {
         CHECK(Parse(line));
