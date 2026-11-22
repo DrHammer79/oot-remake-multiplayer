@@ -396,6 +396,10 @@ inline constexpr float kSplitReachM = 30.0f;  // a brood's reach (its GroupPart'
 // Empty when the name is no boss minion; else the maker's actor name.
 std::string_view MinionMaker(std::string_view name);
 inline constexpr float kMinionReachM = 40.0f;
+// Row 231: more than this many of one minion made by a copy's boss within kMinionLoopUs (each deleted here) is a
+// loop: Meg makes 3 decoys a cycle, King Dodongo a few babies, Gohma an egg at a time.
+inline constexpr std::size_t kMinionLoopMax = 12;
+inline constexpr std::uint64_t kMinionLoopUs = 3'000'000;
 
 // Row 230 (Geno's survey): a Redead's or Gibdo's scream freezes only its owner's Link. The scream is the game's own
 // sensor attack (Redead.action.sleepparalysis: ExecuteSensorHitSetupAttack) on the AI's target, and an AI targets
@@ -1643,6 +1647,10 @@ private:
     std::uint8_t decider_ = 0;
     std::set<std::uint64_t> refused_;  // our own rolls, to delete
     std::size_t refused_count_ = 0;
+    // Row 231: when each boss minion name was last refused here (new actors only), and the names refused in a loop
+    // (over kMinionLoopMax within kMinionLoopUs): those are matched by order again for the rest of the scene.
+    std::map<std::string, std::deque<std::uint64_t>, std::less<>> minion_refusals_;
+    std::set<std::string, std::less<>> minion_loop_;
     // Each other player's scene and the server time of its latest sample
     // (guarded by inbox_mutex_: PLAYER_SAMPLE comes too often for the inbox).
     std::map<std::uint8_t, std::pair<std::string, std::uint64_t>> scenes_;

@@ -8020,3 +8020,56 @@ TEST_CASE("objects: Dead Hand's hands are enemies of their own, each grabs its o
     REQUIRE(g.size() == 1);
     CHECK(g[0] == proto::ObjectGroupEntry{id(1), id(1), proto::object_group::boss});
 }
+
+TEST_CASE("objects: Meg's decoys come from her owner's game only; a copy's Meg remaking them in a loop is let be (row 231)") {
+    const std::string meg = "Enemy_MiddleBoss_Poe_Meg";
+    const std::string decoy = "Enemy_MiddleBoss_Poe_Meg_Dummy";
+    CHECK(CoopObjects::MinionMaker(decoy) == meg);
+    CHECK(CoopObjects::MinionMaker(meg).empty());
+
+    // A owns Meg: her three decoys are shared as made ids.
+    Sync a;
+    const Seen meg_a = Enemy(0x100, 0x77, 16, 0.0f, meg);
+    Tick(a, 0, {meg_a}, 1);
+    const proto::ObjectId meg_id = *a.IdOf(0x100);
+    Own(a, meg_id, 1);
+    Tick(a, 50 * kMs, {meg_a}, 1);
+    const auto spawns = All<proto::ObjectSpawn>(Tick(
+        a, 100 * kMs,
+        {meg_a, Enemy(0x110, ~0ULL, 1, 3.0f, decoy), Enemy(0x111, ~0ULL, 1, -3.0f, decoy),
+         Enemy(0x112, ~0ULL, 1, 6.0f, decoy)},
+        1));
+    REQUIRE(spawns.size() == 3);
+    for (const auto& s : spawns) {
+        CHECK(s.id.kind == proto::ObjectKind::made);
+        CHECK(s.actor == decoy);
+    }
+
+    // B's copy of Meg makes her own decoys (her own layout): deleted, and A's made instead.
+    Sync b;
+    const Seen meg_b = Enemy(0x200, 0x77, 16, 0.0f, meg);
+    Tick(b, 0, {meg_b}, 2);
+    Own(b, meg_id, 1);
+    Tick(b, 50 * kMs, {meg_b}, 2);
+    Tick(b, 100 * kMs, {meg_b, Enemy(0x210, ~0ULL, 1, -6.0f, decoy)}, 2);
+    CHECK_FALSE(b.IdOf(0x210));
+    CHECK(b.Removes() == std::vector<std::uint64_t>{0x210});
+    b.Receive(spawns[0]);
+    Tick(b, 150 * kMs, {meg_b}, 2);
+    REQUIRE(b.Creates().size() == 1);
+
+    // Her copy remakes what we delete, again and again: past kMinionLoopMax within kMinionLoopUs ours are matched
+    // by order again (placed ids), for the rest of the scene, never deleted in a loop.
+    std::uint64_t at = 200 * kMs;
+    std::size_t made = 0;
+    for (; made <= CoopObjects::kMinionLoopMax; ++made) {
+        Tick(b, at, {meg_b, Enemy(0x300 + made, ~0ULL, 1, -6.0f, decoy)}, 2);
+        at += 100 * kMs;
+    }
+    (void)b.Removes();
+    const std::uint64_t late = 0x300 + made;
+    Tick(b, at, {meg_b, Enemy(late, ~0ULL, 1, -6.0f, decoy)}, 2);
+    REQUIRE(b.IdOf(late));
+    CHECK(b.IdOf(late)->kind == proto::ObjectKind::placed);
+    CHECK(b.Removes().empty());
+}

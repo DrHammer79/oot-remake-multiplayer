@@ -791,6 +791,12 @@ std::string_view MinionMaker(std::string_view name) {
     // MinionOwner is 0 and nothing changes.
     if (name == "Enemy_DungeonBoss_Gohma_Egg") return "Enemy_DungeonBoss_Gohma";
     if (name == "Enemy_BabyDodongo") return "Enemy_DungeonBoss_Dodongo";
+    // Row 231 (Geno's survey): Meg's decoys (no BSA, MaxLife 1, their own AI that goes to the seat Meg's message
+    // names: ExecutePoeMegMessageReceiver, MegDummy_SeatId) are made anew each cycle by each game's Meg, which rolls
+    // its own layout, and got ids by order, so three made in one frame matched differently between games. Only
+    // her owner's are kept and shared; a copy game makes those (as Gohma's eggs). A copy's Meg that remakes them
+    // in a loop is caught (kMinionLoopMax).
+    if (name == "Enemy_MiddleBoss_Poe_Meg_Dummy") return "Enemy_MiddleBoss_Poe_Meg";
     return {};
 }
 
@@ -1236,6 +1242,8 @@ void Sync::Reset() {
     game_deletes_.clear();
     bound_.clear();
     refused_.clear();
+    minion_refusals_.clear();
+    minion_loop_.clear();
     decider_ = 0;
     // next_key_ and made_counter_ go on: the director never makes a key
     // twice, and the server keeps made ids until they are removed.
@@ -2777,7 +2785,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             send.emplace_back(std::move(spawn));
             notes_.emplace_back("split here: shared " + s->name);
         } else if (const std::string_view maker = MinionMaker(s->name);
-                   !maker.empty() && MinionOwner(maker, s->position) != 0) {
+                   !maker.empty() && MinionOwner(maker, s->position) != 0 && !minion_loop_.contains(s->name)) {
             if (MinionOwner(maker, s->position) == self) {
                 // Our boss made it: share it (the others make it from this).
                 o.id = {proto::ObjectKind::made, self, ++made_counter_};
@@ -2798,6 +2806,18 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 if (!waiting) {
                     if (!refused_.contains(s->address)) {
                         ++refused_count_;
+                        // Row 231: a copy's boss that remakes what we delete, again and again (Meg's decoys: a
+                        // copy's Meg may make them anew when hers are gone), stops being refused here: from then
+                        // on ours are matched by order as before (SceneSpawnId), for the rest of the scene.
+                        auto& times = minion_refusals_[s->name];
+                        times.push_back(now_us);
+                        while (!times.empty() && now_us - times.front() > kMinionLoopUs) times.pop_front();
+                        if (times.size() > kMinionLoopMax) {
+                            minion_loop_.insert(s->name);
+                            notes_.emplace_back("minions: our copy of " + std::string(maker) + " made " +
+                                                std::to_string(times.size()) + " " + s->name +
+                                                " within 3 s (a loop): ours matched by order from now on");
+                        }
                     }
                     refused.insert(s->address);
                 }

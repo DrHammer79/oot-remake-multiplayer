@@ -167,13 +167,16 @@ Still to design (need a game run first):
   The bite is not shared (the other Links are not held). Unit tests only; to check in a game: B within 5 m in
   front of a Redead A owns, A walks up until it screams: both Links freeze. (Geno's probe saw no scream in 50 s at
   4 m: the scream needs the Redead to have noticed its target and face it within 45 degrees.)
-- Meg (Forest Temple): her decoys (`Enemy_MiddleBoss_Poe_Meg_Dummy`, no BSA, MaxLife 1, own AI) are made anew
-  each cycle and get ids by order (`SceneSpawnId`), so three made in one frame can match differently between games;
-  each game also rolls its own layout at Appear, and a copy's decoy AI fights the Mover. Likely cause: per-game
-  layouts plus decoys matched by order (not missing messages: a copy's Meg runs her action modules). Smallest fix,
-  medium confidence: `MinionMaker` maps the decoy to Meg, so only Meg's owner keeps decoys and shares them (as
-  Gohma's eggs); risk: the copy's Meg remakes them in a loop. Fuller: match by `MegDummy_SeatId` (blackboard layout
-  to find live). First step: log decoy ids, orders and places per game in a two-game run.
+- Meg (Forest Temple; row 231, enemies-01110): her decoys (`Enemy_MiddleBoss_Poe_Meg_Dummy`, no BSA, MaxLife 1,
+  their own AI that goes to the seat Meg's message names: `ExecutePoeMegMessageReceiver`, `MegDummy_SeatId`) are
+  made anew each cycle by each game's Meg, which rolls its own layout, and got ids by order (`SceneSpawnId`), so
+  three made in one frame matched differently between games. Now (Geno's MinionMaker idea) `MinionMaker` maps the
+  decoy to Meg: only her owner's game keeps its decoys and shares them (made ids, as Gohma's eggs); a copy game
+  deletes its own and makes the owner's, so every game shows the owner's layout. His worry (a copy's Meg remaking
+  them in a loop) is caught for every boss minion: more than `kMinionLoopMax` (12) of one minion deleted within
+  3 s in one game, and that game matches its own by order again (as before) for the rest of the scene, with a
+  `minions: ... a loop` log line. Unit tests only; to check in a game: B watches A's Meg split: the same four
+  places on both screens; no `a loop` line.
 - Dead Hand (row 232, enemies-01110): his hands were boss parts of him (`PartRules` kSummoned), so they followed
   his owner and grabbed only that player. They are placed enemies with their own AI, BSA and perception
   (`DeadHand_Hand.action.basicattack` grabs the target it perceives: its own game's Link), so they are plain
