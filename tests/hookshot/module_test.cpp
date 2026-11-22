@@ -875,8 +875,9 @@ TEST_CASE("hookshot: the game's menu screens reach the module, the mouse knows a
     REQUIRE_FALSE(menu.empty());
     const auto in_menu = [&menu](const char* code) { return menu.find(Squashed(code)) != std::string::npos; };
     // In the one tick of both platforms, after 0028's call, before the screen's own update.
-    const auto tick = menu.find(Squashed("void hos_oot_menu_tick(Ctx *c, uint64_t screen) { if (!screen) return; "
-                                         "sprint_menu_tick(screen); hos_oot_autoload_screen(c, screen);"));
+    // (Longshot 3.1: the hunk's context starts inside the tick, the function's first line is its @@ header)
+    CHECK(patch.find(" @@ void hos_oot_menu_tick(Ctx *c, uint64_t screen) {\n     if (!screen) return;\n") != std::string::npos);
+    const auto tick = menu.find(Squashed("if (!screen) return; sprint_menu_tick(screen); hos_oot_autoload_screen(c, screen);"));
     const auto ours = menu.find(Squashed("hos_coop_game_screen_now(c, screen);"));
     CHECK(tick != std::string::npos);
     CHECK((ours != std::string::npos && ours > tick && ours - tick < 300));
