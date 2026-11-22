@@ -421,27 +421,88 @@ TITLE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
 
 
 class ParkMenusTest(unittest.TestCase):
-    """Row 235: park_menus moves the pack's menu files aside without any zstandard or size table to check against."""
+    """Row 235: park_menus and main() move the pack's menu files aside when the merge cannot check the size table the
+    game reads (no zstandard, a step that raised), but only where another mod that is on could win a pack table."""
 
-    def test_unchecked_park_moves_the_menu_files_and_guard_style_keep_dir(self):
+    REL = "Mals/EUen.Nin_NX_NVN.zs"
+
+    def make(self, other):
         d = tempfile.mkdtemp(prefix="merge_tables_park_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.mods = os.path.join(d, "mods")
+        self.pack = os.path.join(self.mods, *PACK.split("/"))
+        self.put(os.path.join(self.pack, "romfs", *self.REL.split("/")), b"x")
+        self.put(os.path.join(self.pack, *mt.RESOURCE, NAME), b"pack table")
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b'{"title_menu": ["%s"], "pause_menu": []}' % self.REL.encode())
+        if other:
+            self.put(os.path.join(self.mods, "OoT Character Select", *mt.RESOURCE, NAME), b"cs table")
+        return self.mods
+
+    @staticmethod
+    def put(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def in_play(self):
+        return os.path.isfile(os.path.join(self.pack, "romfs", *self.REL.split("/")))
+
+    def kept(self):
+        return os.path.isfile(os.path.join(self.pack, mt.MENU_KEEP, *self.REL.split("/")))
+
+    def test_another_mods_table_could_win_so_unchecked_park_moves_the_files(self):
+        mods = self.make(other=True)
+        lines = []
+        self.assertEqual(mt.park_menus(mods, lines.append), 1)
+        self.assertTrue(self.kept() and not self.in_play())
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(mt.park_menus(mods, lines.append), 0)   # (nothing left to move)
+
+    def test_the_pack_alone_keeps_its_menus(self):
+        mods = self.make(other=False)
+        self.assertEqual(mt.park_menus(mods, lambda _l: None), 0)
+        self.assertTrue(self.in_play() and not self.kept())
+
+    def test_a_mod_that_is_off_does_not_count(self):
+        mods = self.make(other=True)
+        self.put(os.path.join(mods, "coop-mods.list"), b"coop-mods 1\noff OoT Character Select\n")
+        self.assertEqual(mt.park_menus(mods, lambda _l: None), 0)
+        self.assertTrue(self.in_play())
+
+    def run_main(self, other, boom):
+        mods = self.make(other)
+        real = mt.merge_rows
+        mt.merge_rows = boom
         try:
-            pack = os.path.join(d, "mods", *PACK.split("/"))
-            os.makedirs(os.path.join(pack, "romfs"))
-            rel = "Mals/EUen.Nin_NX_NVN.zs"
-            os.makedirs(os.path.join(pack, "romfs", "Mals"))
-            with open(os.path.join(pack, "romfs", *rel.split("/")), "wb") as f:
-                f.write(b"x")
-            with open(os.path.join(pack, "coop_puppet.json"), "wb") as f:
-                f.write(b'{"title_menu": ["%s"], "pause_menu": []}' % rel.encode())
-            lines = []
-            self.assertEqual(mt.park_menus(os.path.join(d, "mods"), lines.append), 1)
-            self.assertFalse(os.path.isfile(os.path.join(pack, "romfs", *rel.split("/"))))
-            self.assertTrue(os.path.isfile(os.path.join(pack, mt.MENU_KEEP, *rel.split("/"))))
-            self.assertEqual(len(lines), 1)
-            self.assertEqual(mt.park_menus(os.path.join(d, "mods"), lines.append), 0)   # (nothing left to move)
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = mt.main(["--mods", mods])
         finally:
-            shutil.rmtree(d, ignore_errors=True)
+            mt.merge_rows = real
+        return code, out.getvalue()
+
+    def test_main_parks_when_zstandard_is_missing(self):
+        def boom(*_a):
+            raise SystemExit(1)
+        code, said = self.run_main(True, boom)
+        self.assertEqual(code, 1)
+        self.assertIn("zstandard", said)
+        self.assertTrue(self.kept() and not self.in_play())
+
+    def test_main_parks_when_a_merge_step_raises(self):
+        def boom(*_a):
+            raise KeyError("a table row")
+        code, said = self.run_main(True, boom)
+        self.assertEqual(code, 1)
+        self.assertIn("not merged", said)
+        self.assertTrue(self.kept() and not self.in_play())
+
+    def test_main_with_the_pack_alone_parks_nothing_when_a_step_raises(self):
+        def boom(*_a):
+            raise KeyError("a table row")
+        code, _said = self.run_main(False, boom)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.in_play() and not self.kept())
 
 
 @unittest.skipIf(zstandard is None, "needs zstandard")

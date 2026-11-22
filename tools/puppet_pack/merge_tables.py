@@ -1187,6 +1187,12 @@ def park_menus(root, say=print):
         pack_path = next((p for n, p in order if fold(n) == PACK), None)
         if pack_path is None:
             return 0
+        # Only where another mod that is on could win a table the pack has (the last mod in the load order having that
+        # table name is the one the game reads): when the pack's own table wins, its menus are safe, no check needed.
+        if all(fold(having[-1][0]) == PACK
+               for having in ([(n, p) for n, p in order if fname in tables_of(p)] for fname in tables_of(pack_path))
+               if having):
+            return 0
         keep = os.path.join(pack_path, MENU_KEEP)
         for rel in menu_files(pack_path):
             src = os.path.join(pack_path, "romfs", *rel.split("/"))

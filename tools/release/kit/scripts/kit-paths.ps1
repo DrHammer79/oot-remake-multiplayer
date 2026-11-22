@@ -2543,6 +2543,16 @@ function Move-KitMenuFilesAside([string]$Mods) {
     $packs = @(Get-ChildItem -LiteralPath (Join-Path $Mods 'contents') -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName 'coop-puppet' } | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'coop_puppet.json') })
     foreach ($pack in $packs) {
+        # Only where another mod could win a size table the pack has (a same-name table in another mod folder; folders
+        # starting with _ are skipped as Longshot does): when the pack's own table is the only one, its menus are safe.
+        $tables = @(Get-ChildItem -LiteralPath (Join-Path $pack 'romfs\System\Resource') -Filter '*.rsizetable.zs' -File -ErrorAction SilentlyContinue | ForEach-Object Name)
+        $others = $false
+        foreach ($t in $tables) {
+            $hit = Get-ChildItem -LiteralPath $Mods -Recurse -Filter $t -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notlike "$pack\*" -and $_.FullName -like '*\romfs\System\Resource\*' -and $_.FullName -and $_.FullName.Substring($Mods.TrimEnd('\').Length) -notmatch '\\_[^\\]*\\' } | Select-Object -First 1
+            if ($hit) { $others = $true; break }
+        }
+        if (-not $others) { continue }
         try {
             $m = Get-Content -LiteralPath (Join-Path $pack 'coop_puppet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             foreach ($key in 'title_menu', 'pause_menu') {
@@ -2585,8 +2595,17 @@ function Invoke-KitSizeTableMerge([string]$Kit, [string]$ExeDir, [string]$Python
     if ($romfs) { $pyArgs += @('--romfs', $romfs) }
     $before = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" }) } catch { $out = @("Size tables: not merged ($($_.Exception.Message)).") }
+    $failed = $false
+    try {
+        $out = @(& $python @pyArgs 2>&1 | ForEach-Object { "$_" })
+        # Python died before main() (an import error, a Traceback) without saying either of its own lines: unchecked.
+        if ($LASTEXITCODE -ne 0 -and -not ($out | Where-Object { $_ -match '^\s*(Size tables|Menus):' })) { $failed = $true }
+    } catch { $out = @("Size tables: not merged ($($_.Exception.Message))."); $failed = $true }
     $ErrorActionPreference = $before
+    if ($failed) {
+        $parked = Move-KitMenuFilesAside $mods
+        if ($parked) { $out += "Menus: the merge did not run ($parked of the puppet pack's menu files kept aside; the title's co-op rows and the pause menu's Multiplayer tab are off this start)." }
+    }
     return $out
 }
 
