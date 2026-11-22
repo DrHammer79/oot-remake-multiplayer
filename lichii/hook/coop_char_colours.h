@@ -200,6 +200,32 @@ struct Target {
     bool character = false;
 };
 
+// The wardrobe's targets are built here, field by name, never by position. A positional Target{...} in the frame
+// glue put the model key into `eyes` (the sixth field), so `model` stayed 0: a puppet made again as another actor, and
+// your own model after an age or character switch, kept the old model's material numbers (review of the
+// dress-colours branch; the puppets' key was broken that way since it was added). These are what the glue calls.
+// A puppet (Director::DressView): its model key is its actor's pack name (CoopPuppet_Adult_C007: age and character).
+inline Target PuppetTarget(std::uint64_t actor, std::uint64_t cell, std::uint32_t custom, bool mods_routine,
+                           std::string_view actor_name, const ModelColours& colours) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .custom = custom,
+                  .mods_routine = mods_routine,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = ModelKey(actor_name, 0),
+                  .character = colours.character};
+}
+// Your own model (cell 0) or the pause menu's model of it (its cell, its key: ModelKey of its name and the character).
+inline Target OwnTarget(std::uint64_t actor, std::uint64_t cell, std::uint64_t model, const ModelColours& colours) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = model,
+                  .character = colours.character};
+}
+
 // Whether a model has the iris the eye colour goes on (Mt_Eye_Inner with ns_param_color2), once its materials were
 // looked up: nothing before (not looked up yet), else whether any of its units has it.
 std::optional<bool> HasIris(const State& state);

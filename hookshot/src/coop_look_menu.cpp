@@ -72,7 +72,7 @@ const char* Note(Part part) {
     case Part::cap_trim:
         return "The cap's own trims: young Link's headband and knot, adult Link's hood trims (the cap's cloth is the tunic's). The other players see it on you too.";
     case Part::eyes: return "The colour of the eyes, on your Link or your character, and seen by the other players.";
-    case Part::hair: return "The colour of the hair and the brows, on your Link and seen by the other players.";
+    case Part::hair: return "The colour of the hair and the brows, on your Link or your character's own hair, and seen by the other players.";
     }
     return "";
 }

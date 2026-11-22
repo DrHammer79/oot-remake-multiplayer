@@ -1916,11 +1916,8 @@ void DressCharacters(void* ctx) {
     targets.reserve(views.size() + 1);
     for (const auto& v : views) {
         // (a puppet is made again as another actor on its player's age or character switch: CoopPuppet_Adult_C007)
-        CoopCharColours::Target t{v.actor, v.cell, v.custom, v.mods_routine, 0, std::hash<std::string>{}(v.actor_name)};
-        t.eyes = v.eyes;
-        t.hair = v.hair;
-        t.character = v.character;
-        targets.push_back(t);
+        targets.push_back(CoopCharColours::PuppetTarget(v.actor, v.cell, v.custom, v.mods_routine, v.actor_name,
+                                                        {v.eyes, v.hair, v.character}));
     }
     // (0.11.9: your own Link's eye colour, the look shown: the one chosen in Customize at once, a preview, else worn;
     // its cell of guest memory made once with the game's malloc, as a puppet's block)
@@ -1957,10 +1954,7 @@ void DressCharacters(void* ctx) {
         player = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
             if (actor == 0 || cell(i) == 0) return;
-            CoopCharColours::Target t{actor, cells[i], 0, false, 0, model};
-            t.eyes = own.eyes, t.hair = own.hair;
-            t.character = own.character;
-            targets.push_back(t);
+            targets.push_back(CoopCharColours::OwnTarget(actor, cells[i], model, own));
         };
         const auto name_of = [](std::uint64_t actor) {
             std::uint64_t at = 0;

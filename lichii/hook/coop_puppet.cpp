@@ -206,9 +206,15 @@ std::vector<Director::DressView> Director::DressTargets() const {
         }
         const auto on = CoopCharColours::ColoursOn(character, eyes, hair);   // (Link's model or a character's)
         eyes = on.eyes, hair = on.hair;
-        out.push_back({s.number, s.actor, s.block + block::kDress,
-                       t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u, character,
-                       character && character_apply_ != 0 && character_apply_state_ == 1, s.actor_name, eyes, hair});
+        out.push_back({.number = s.number,
+                       .actor = s.actor,
+                       .cell = s.block + block::kDress,
+                       .custom = t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u,
+                       .character = character,
+                       .mods_routine = character && character_apply_ != 0 && character_apply_state_ == 1,
+                       .actor_name = s.actor_name,
+                       .eyes = eyes,
+                       .hair = hair});
     }
     return out;
 }

@@ -208,7 +208,7 @@ public:
     // the host's rows (the host changes it there; everyone else sees it, dimmed).
     void SetDifficulty(const DifficultyState& state, int players);
     // Character Select (coop_char_colours.h ShownCharacter): this game shows a character, not Link, so the
-    // Customize page says only the Eye Colour shows on it and Link's other colours wait for Link (#308's live display).
+    // Customize page says the eye and hair colours show on it and Link's other colours wait for Link (#308's live display).
     void SetCharacter(bool picked) { character_ = picked; }
     // Character Select's code is in the game (coop_pause_tab.h SnailCodeBuiltIn): his Customize screen, with co-op's
     // rows (coop_snail_custom.h), is the one home of Link's look (the owner, 0.11.9: "one home per thing"). The Customize
@@ -217,7 +217,7 @@ public:
     bool SnailHome() const { return snail_home_; }
     static constexpr const char* kSnailHomeNote = "Link's colours are on the Characters tab: pick Link, then Customize.";
     static constexpr const char* kCharacterNote =
-        "A Character Select character is picked: it wears your Eye Colour when its model has eyes for it; the other colours show on Link when you pick Link again.";
+        "A Character Select character is picked: it wears your eye and hair colours where its model has them; the other colours show on Link when you pick Link again.";
     // The Find a game page's list (the Join page's first row): the games on this network or the relay's public
     // rooms, as the module hears them while the page shows (find_online() says which). A game picked fills the Join
     // page: `join` its room name or its address, `port` its port (0: the default), then Join.

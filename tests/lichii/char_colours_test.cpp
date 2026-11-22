@@ -303,7 +303,7 @@ TEST_CASE("char colours: the wardrobe says a dressed actor's iris, and dresses a
     FakeGame f(Character());
     Wardrobe w;
     const Game g = f.AsGame();
-    Target t{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, ModelKey("Player_Child", 0)};
+    Target t{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .eyes = std::nullopt, .hair = std::nullopt, .model = ModelKey("Player_Child", 0)};
     t.eyes = 0x00FF00u;
     CHECK_FALSE(w.IrisOf(FakeGame::kActor));
     CHECK(w.Frame(g, {t}, 1000, {}) > 0);
@@ -318,11 +318,57 @@ TEST_CASE("char colours: the wardrobe says a dressed actor's iris, and dresses a
     CHECK(w.Frame(g, {t}, 1200, {}) > 0);
     CHECK(f.sets.size() == 1);   // (the eyes: no hair colour set)
     // No colour set on a model never dressed: not touched at all (the mod's look of it stays).
-    Target plain{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, ModelKey("Player_Adult", 9)};
+    Target plain{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .eyes = std::nullopt, .hair = std::nullopt, .model = ModelKey("Player_Adult", 9)};
     plain.character = true;
     f.calls = 0;
     CHECK(w.Frame(g, {plain}, 1300, {}) == 0);
     CHECK(f.calls == 0);
+}
+
+TEST_CASE("char colours: the glue's targets carry the model key in `model`, the colours in `eyes` and `hair`") {
+    // (review of dress-colours: a positional Target{actor, cell, custom, routine, 0, key} put the key into `eyes`
+    // and left `model` 0, so no age, character or puppet switch was ever looked up anew)
+    using CoopCharColours::ModelColours;
+    const ModelColours c{0x00FF00u, 0xFF0000u, true};
+    const Target p = PuppetTarget(0x100, 0x200, 7, true, "CoopPuppet_Adult_C007", c);
+    CHECK(p.actor == 0x100u);
+    CHECK(p.cell == 0x200u);
+    CHECK(p.custom == 7u);
+    CHECK(p.mods_routine);
+    CHECK(p.iris_shift == 0);
+    CHECK(p.eyes == std::optional<std::uint32_t>(0x00FF00u));
+    CHECK(p.hair == std::optional<std::uint32_t>(0xFF0000u));
+    CHECK(p.model == ModelKey("CoopPuppet_Adult_C007", 0));
+    CHECK(p.character);
+    CHECK(PuppetTarget(0x100, 0x200, 7, true, "CoopPuppet_Child_C007", c).model != p.model);   // (age)
+    CHECK(PuppetTarget(0x100, 0x200, 7, true, "CoopPuppet_Adult_C012", c).model != p.model);   // (character)
+    const Target o = OwnTarget(0x300, 0x400, ModelKey("Player_Adult", 9), {0x123456u, std::nullopt, true});
+    CHECK(o.actor == 0x300u);
+    CHECK(o.cell == 0x400u);
+    CHECK(o.custom == 0u);
+    CHECK_FALSE(o.mods_routine);
+    CHECK(o.eyes == std::optional<std::uint32_t>(0x123456u));
+    CHECK_FALSE(o.hair);
+    CHECK(o.model == ModelKey("Player_Adult", 9));
+    CHECK(o.character);
+}
+
+TEST_CASE("char colours: a puppet made again as another actor at the same address is looked up and dressed at once") {
+    FakeGame f(Character());
+    Wardrobe w;
+    const Game g = f.AsGame();
+    const CoopCharColours::ModelColours c{0x00FF00u, std::nullopt, true};
+    CHECK(w.Frame(g, {PuppetTarget(FakeGame::kActor, FakeGame::kCell, 0, false, "CoopPuppet_Child_C007", c)}, 1000,
+                  {}) > 0);
+    const std::size_t looked = f.calls;
+    f.sets.clear();
+    CHECK(w.Frame(g, {PuppetTarget(FakeGame::kActor, FakeGame::kCell, 0, false, "CoopPuppet_Child_C007", c)}, 1100,
+                  {}) == 0);   // (the same model: not before kAgainMs)
+    // Its player switched age: another actor at the same address, before kAgainMs.
+    CHECK(w.Frame(g, {PuppetTarget(FakeGame::kActor, FakeGame::kCell, 0, false, "CoopPuppet_Adult_C007", c)}, 1200,
+                  {}) > 0);
+    CHECK(f.calls - looked > 1);   // (its materials looked up again, then the iris set)
+    CHECK(f.sets.size() == 1);
 }
 
 TEST_CASE("char colours: your own model's iris is kept for the character it was found on") {
@@ -422,7 +468,7 @@ TEST_CASE("char colours: the wardrobe dresses on a change, again after kAgainMs,
     const Game g = f.AsGame();
     std::vector<std::string> said;
     const auto say = [&](const std::string& l) { said.push_back(l); };
-    std::vector<Target> t{{FakeGame::kActor, FakeGame::kCell, Custom(2, 0, 0, 0), false, 0, std::nullopt, std::nullopt, 1}};
+    std::vector<Target> t{{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .custom = Custom(2, 0, 0, 0), .eyes = std::nullopt, .hair = std::nullopt, .model = 1}};
     CHECK(w.Frame(g, t, 1000, say) > 0);
     CHECK(said.size() == 1);
     CHECK(w.Frame(g, t, 1100, say) == 0);
@@ -464,7 +510,7 @@ TEST_CASE("char colours: a failed call waits kAgainMs and is said once (review M
     };
     std::vector<std::string> said;
     const auto say = [&](const std::string& l) { said.push_back(l); };
-    std::vector<Target> t{{FakeGame::kActor, FakeGame::kCell, Custom(2, 0, 0, 0), false, 0, std::nullopt, std::nullopt, 1}};
+    std::vector<Target> t{{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .custom = Custom(2, 0, 0, 0), .eyes = std::nullopt, .hair = std::nullopt, .model = 1}};
     w.SetViewer(Custom(5, 0, 0, 0));   // the viewer paints: due every frame, still held back after a failure
     CHECK(w.Frame(g, t, 1000, say) == 1);
     CHECK(w.Frame(g, t, 1016, say) == 0);
@@ -480,7 +526,7 @@ TEST_CASE("char colours: a puppet made again as another actor looks its material
     FakeGame f(Character());
     Wardrobe w;
     const Game g = f.AsGame();
-    std::vector<Target> t{{FakeGame::kActor, FakeGame::kCell, Custom(2, 0, 0, 0), false, 0, std::nullopt, std::nullopt, 1}};
+    std::vector<Target> t{{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .custom = Custom(2, 0, 0, 0), .eyes = std::nullopt, .hair = std::nullopt, .model = 1}};
     w.Frame(g, t, 1000, {});
     // The same address and block, another character with fewer materials: Mt_Hairs is now number 3 of 4.
     f.mats = {{"Mt_Skin", 1, 1, {}}, {"Mt_Eye_Inner", 1, 1, {"x", "y", "ns_param_color2"}}, {"Mt_A", 1, 1, {}},
