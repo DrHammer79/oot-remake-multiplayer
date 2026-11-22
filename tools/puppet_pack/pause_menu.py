@@ -263,7 +263,8 @@ def _xy(d, name):
 
 # ---------------------------------------------------------------------------------------- build
 
-def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, run=None):
+def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=ui_pack.STRINGS, run=None,
+          minus_page=True):
     """The Common archive and every language's messages from the romfs folder, into out_romfs
     (write(out_romfs, rel, bytes)); their size table entries grown (`table`: rstb.Rstb). Returns
     the files written. `run`: the pack run's shared view (ui_pack.PackRun), the one the title rows'
@@ -271,7 +272,7 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=
     once; a view of its own when None. All or nothing, as title_menu.build: a failure raises before
     anything is written, so the pack never holds the tab without its page and texts."""
     run = run or ui_pack.PackRun(romfs, table)
-    files, growth = make(run, dicts, recompress, strings)
+    files, growth = make(run, dicts, recompress, strings, minus_page)
     run.check(growth)
     run.commit(files, growth)
     for rel, data in files.items():
@@ -281,10 +282,11 @@ def build(romfs, out_romfs, dicts, table, write, recompress, log=print, strings=
     return list(files)
 
 
-def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
+def make(reader, dicts, recompress, strings=ui_pack.STRINGS, minus_page=True):
     """({rel: compressed bytes}, [(rel, plain length read, plain length made, required)]) for the
     Common archive and every language's messages (ui_pack.PackRun's growth); raises PauseMenuError
-    (or the reader's error) when any one cannot be made."""
+    (or the reader's error) when any one cannot be made. minus_page False: the strip gets the - menu's tabs without
+    MINUS_PAGE (co-op's own screen has it: coop_menu.py)."""
     from . import sarc
     files, growth = {}, []
     raw = reader.read(COMMON_ARCHIVE)
@@ -295,7 +297,7 @@ def make(reader, dicts, recompress, strings=ui_pack.STRINGS):
     if not pages:
         raise PauseMenuError("%s has no %s" % (COMMON_ARCHIVE, PAGES_LAYOUT))
     place, size = shown_page(pages[0])
-    overlay = lambda d: add_minus_page(add_tab(d), place, size)
+    overlay = (lambda d: add_minus_page(add_tab(d), place, size)) if minus_page else add_tab
     for layout, edit in ((OVERLAY_LAYOUT, overlay), (PAGES_LAYOUT, add_page), (SYSTEM_LAYOUT, _system_layout)):
         olds = [data for name, data in entries if name == layout]
         if not olds:

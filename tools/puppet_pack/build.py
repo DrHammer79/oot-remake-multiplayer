@@ -36,7 +36,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     __package__ = "puppet_pack"  # noqa: A001
 
-from . import ainb, asb_carry, byml, charsel_ui, dumpcheck, dungeon_rooms, hud, look_cap, look_items, look_live, look_metal, map_captures, nup, pause_menu, rstb, sarc, skin, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
+from . import ainb, asb_carry, byml, charsel_ui, coop_menu, dumpcheck, dungeon_rooms, hud, look_cap, look_items, look_live, look_metal, map_captures, nup, pause_menu, rstb, sarc, skin, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
 
 TITLE_ID = "0400486024DEC000"
 DEFAULT_MOD_NAME = "coop-puppet"
@@ -1226,7 +1226,7 @@ def nup_menu_files(n):
         if lang not in newest or _product(rel) > _product(newest[lang]):
             newest[lang] = rel
     out += [newest[lang] for lang in sorted(newest)]
-    for rel in charsel_ui.sources():   # (co-op's Characters tab: the game's files its deltas are made from)
+    for rel in charsel_ui.sources() + coop_menu.sources():   # (the Characters tab's and co-op's screen's files)
         if rel not in out and n.glob(rel):
             out.append(rel)
     return out
@@ -2309,14 +2309,35 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     # the co-op module that shows them (patch 0030); both stored hidden, so without the module the menu is the game's.
     # After the title rows, through the same view (ui_run): its labels join theirs in each language archive. All or
     # nothing.
+    # Co-op's own - menu screen (coop_menu.py, tabs-overhaul-01110): Multiplayer, Lobby and Mods as a page of the
+    # game's own right of the Map, when every file it is made from is the game's own and co-op's Characters tab is
+    # made (with the Character Select mod his layout category and screens table win). Tried first without writing
+    # (all of it can be made), so the pause menu leaves its page out of the strip only when the screen has it.
+    coop_screen = False
+    if pause_tab and charsel_native:
+        try:
+            coop_menu.make(ui_run, dicts, recompress)
+            coop_screen = True
+        except (coop_menu.CoopMenuError, charsel_ui.CharselError, ui_pack.UiPackError, sarc.SarcError, OSError,
+                ValueError, KeyError, IndexError, struct.error) as e:
+            log(f"co-op's - menu screen: left out ({e}); the - menu's tabs keep their page in the strip")
     pause_files = []
     if pause_tab:
         try:
             pause_files = pause_menu.build(romfs, out_romfs, dicts, table,
                                            lambda root, r, data: write(os.path.join(root, r), data), recompress, log,
-                                           run=ui_run)
+                                           run=ui_run, minus_page=not coop_screen)
         except (pause_menu.PauseMenuError, OSError, ValueError, KeyError, IndexError, struct.error) as e:
             log(f"pause menu: the Multiplayer tab left out ({e}); the pause menu keeps its four")
+            coop_screen = False
+    if coop_screen:
+        try:
+            pause_files += coop_menu.build(romfs, out_romfs, dicts, table,
+                                           lambda root, r, data: write(os.path.join(root, r), data), recompress,
+                                           log, run=ui_run)
+        except (coop_menu.CoopMenuError, charsel_ui.CharselError, ui_pack.UiPackError, sarc.SarcError, OSError,
+                ValueError, KeyError, IndexError, struct.error) as e:   # (it was made a moment ago: never seen)
+            log(f"co-op's - menu screen: NOT made after its trial ({e}); the - menu's tabs have no page this time")
 
     if characters:
         # The mod's own rows first, the pack's own over them, then the player's own Link's heaps (as the mod alone).
@@ -2381,6 +2402,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
         "title_rows": bool(title_rows),  # asked for (--title-rows); title_menu: what was made
         "title_menu": title_files,
         "pause_menu": pause_files,
+        "coop_screen": coop_screen,   # (co-op's own - menu screen CoopMenu_00 made: coop_menu.py)
         "charsel_native": charsel_files,   # (co-op's own Characters tab: its files; [] with Character Select's own)
         "source_sha256": {rel(romfs, p): hashlib.sha256(read(p)).hexdigest()
                           for p in (ai_path, gai_path, rs_path)},
