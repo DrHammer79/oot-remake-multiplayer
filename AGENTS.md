@@ -18,6 +18,20 @@ You are an AI coding agent and someone has handed you this repository. This page
 - It looks and behaves like the game's own menus: the game's focus frame, move and decide sounds, A to pick, B to go back one step.
 - A pull request that adds a drawn shape or a screen that does not fit is sent back in review. Name in the pull request the game pane or texture each new UI piece uses.
 
+## How we fix and build things
+
+These are the project's standing engineering rules. A review sends a change back for breaking one.
+
+- **Root cause, every related case.** No band-aids. Find the real cause and fix it there, then search the code for the same pattern (other bosses, enemies, scenes, flags, platforms, code paths) and fix every case that shares it, not only the reported one. In the PR say what the root cause is, which related cases you found, and how each is covered. A symptom patch, or a missed related case, is sent back.
+- **Solo must work.** Anything that is not inherently multiplayer must work with co-op idle (no host, no join): settings, Customize, the Mods tab and mod loading, solo difficulty options, story and save fixes. Test and say in the PR that the idle path still works.
+- **Native to the game.** Do it with the game's own functions, actors, flags, animations and assets, through the hook layer and our module. No poking game memory from outside, no copying state, poses or pixels to fake an effect. Name the game functions you used in the PR. Keep patches to the recomp small and generic; features live in the module.
+- **A remote action must look like the real one.** When another player hits an enemy, opens a door or lifts a platform, your screen shows what a local action shows through the game's own path: the enemy flinches, the hit flash, sparks and sound play, the health bar changes. A remote hit that is silent or invisible is a bug.
+- **Screenshot proof for anything visible.** A log line only proves a message was sent. For anything you can see (platforms, doors, actors, items, HUD, other players, menus), list the visible checks under "Check in game" in the PR; the maintainer's in-game run takes the screenshots on every game concerned. Do not call it proven from log lines.
+- **Nothing sent to Longshot.** Our builds never send crash reports, telemetry or performance statistics to Longshot or anyone else, not even opt-in. Players report problems through the Squadala! Discord `/bugreport` command and `scripts\collect-logs.cmd` ([docs/problem-reports.md](docs/problem-reports.md)).
+- **Discord Rich Presence is ours.** When the mod is loaded it always shows the Squadala name, icon and our own status (solo and co-op), replacing the game's own presence ([docs/presence.md](docs/presence.md)).
+- **Everything shipped must work together.** A change is checked against what else ships with it: other contributors' features, public and private games, Character Select, colour options, with and without the mod on the other side. Where two pieces clash, add a fix on top; do not drop either.
+- **Honest reports.** Say what you ran and what you did not. Never write "fixed" for what only a game run could show.
+
 ## Licence rules
 
 - The project is GPL-3.0. Your contribution is GPL-3.0.
@@ -90,6 +104,31 @@ Python tool tests (CI runs these; run the ones for what you touched): `python to
 A new test file goes in the `add_executable(coop_tests ...)` list in `tests/CMakeLists.txt`, and a new `lichii/hook` source it needs goes there too. Test names must not contain `;`.
 
 **You do not need the game.** You cannot run it and should not try: there are no game files here. The unit tests and CI are your proof. Whatever only the game can show goes in the PR's "Check in game" list; the maintainer checks it in one combined in-game test ([docs/testing.md](docs/testing.md)).
+
+### How tests and CI run
+
+Full details: [docs/testing.md](docs/testing.md) (CI tiers, automatic tests). In short:
+
+- **Unit tests first.** A bug fix starts with a test that fails for the cause, then the fix. Test names must not contain `;` (CMake configure fails). Run the CMake configure and the tests before you push.
+- **CI tiers.** The `Build` workflow runs a small tier on a push to your branch (the `linux (gcc)` job, Python tool tests, Content guard) and the full tier (Windows MSVC, gcc, clang, ASan, TSan, Python 3.10 and 3.12, Longshot Linux, emulator hook compiles) on a pull request into `main`. Do not push needlessly: one push per batch of commits.
+- **The Linux gcc job builds the tests with `-Werror`.** Fix warnings, do not silence them. On a branch, let that job finish (2 to 3 minutes) before you call the work green.
+- **Changes under `lichii/hook/` or `hookshot/src/`** also need a green Linux emulator hook compile (`linux-emulator (hook)`). The small tier skips it unless an emulator-only file changed, but a pull request into `main` runs it: check that job is green before you call the PR ready. GCC's emulator flags catch errors the module build does not (for example string truncation warnings).
+- **Green means finished.** A review OK, or "ready", is only valid on a run that has finished green and ran the tests your change touches. Quote the run id and job. "It will be OK once CI is green" is not an OK.
+- **Two-game tests** (`tools/autotest/` scenarios, maintainer only) need the game and run one at a time; the maintainer runs them for your "Check in game" list. Test listeners bind `127.0.0.1` only.
+
+## Reviews
+
+- Every change is reviewed by someone who did not write it, before it merges. Nothing merges unreviewed, however small.
+- A review checks the root cause and related cases, the solo path, native implementation, UI rules, screenshot proof for visible changes, protocol and docs updates, and the content rules above.
+- A review returns CHANGES for: a symptom patch, a missed related case, a hand-drawn UI shape or a screen that does not fit, a visible test with no screenshot, a remote hit that shows nothing, anything that only works in a session.
+- If you are the author, you do not review your own change. Answer review comments by pushing to the same branch.
+
+## Pull requests from outside contributors
+
+- Contributors' commits are merged as authored: `git merge --no-ff` of the PR head, never squash, rebase-rewrite or cherry-pick under another name. What review finds is fixed by the maintainers in a separate commit on top; contributors are not asked to redo the work, and the merge comment thanks them and names what was added.
+- A contributor's own commit trailers (including AI co-author lines) are kept as authored. Our own commits carry none.
+- When a release build starts, the maintainer sets a cutoff time. Commits pushed to a PR after it go into the next update (nobody chases a moving PR head); the PR comment says so.
+- Every merged contributor is listed in the README's Contributors section.
 
 ## How to contribute
 

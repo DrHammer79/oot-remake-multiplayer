@@ -807,6 +807,8 @@ class Session {
       bool bomb = false;
       // A boss turn (next_turn): its change does not start boss_hitter_cooldown_us (hitter_changed_at).
       bool turn = false;
+      // Which rule asked (the 'hand-over:' log line, review-01111-b 17).
+      std::string why{};
     };
     std::optional<Ask> ask;
     // DAMAGE that came while the owner hold had not chosen its owner yet
@@ -974,8 +976,9 @@ class Session {
   void end_owner_hold(std::uint64_t now_us);
   // Asks the owner to let go of it to `to`; finish_handover follows. False: not asked (no owner, `to` gone, or a
   // boss in its finish, keeps_finish).
+  // `why`: the rule that asks, for the 'hand-over:' log line (change_owner).
   bool ask_handover(const protocol::ObjectId& oid, Object& o, ConnectionId to,
-                    std::uint64_t now_us);
+                    std::uint64_t now_us, std::string why);
   // Row 215: a boss root whose owner's last state says it is at life 0 or plays its death (anim::IsDeath).
   static bool boss_finishing(const Object& o);
   // Row 215: no boss changes owner in its finish (at life 0 or in its death): the game that runs the finish keeps
@@ -1007,8 +1010,12 @@ class Session {
   std::optional<ConnectionId> bomb_heir(const Object& o, ConnectionId except) const;
   // Gives the object to `next` (or nobody) with epoch + 1: HANDOVER_STATE to
   // the new owner, then OBJECT_OWNER to the scene.
+  // Every owner change goes through here. A boss (or a boss group's root) or a battle manager logs
+  // 'hand-over: ... why'.
   void change_owner(const protocol::ObjectId& oid, Object& o, std::optional<ConnectionId> next,
-                    std::uint8_t old_owner, std::uint64_t now_us);
+                    std::uint8_t old_owner, std::uint64_t now_us, const std::string& why);
+  // Why unfit_owner / unfit_fight_owner holds (loading, downed, dead N s, paused N s), for the log.
+  std::string unfit_why(const Connection& c, std::uint64_t now_us) const;
   // The best other player who has it loaded: the nearest when places are
   // known, then the lowest number. fit_only: none who is loading, paused or
   // dead.

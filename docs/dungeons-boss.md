@@ -168,6 +168,18 @@ LANE1 autotest hs-boss-full (runs 20261115-122137 and -130255): in A's game the 
 - Tested: `tests/server/session_test.cpp` (four `boss-copy-b` cases: chase/near refused while unready, an unready owner hands to a ready game, ready before nearer unready when the owner leaves, a late joiner's stun once ready), `tests/lichii/boss_native_test.cpp` (the event case waits for the grace), `boss_test.cpp` (Readiness, 2 cases), `objects_test.cpp` (BossPreBattle).
 - **Not proven in game.** Check (LANE1, hs-boss-full or hs-boss-fix-gohma): A walks in first and under her; during A's intro no "now ours" in B's log while B logs "not ready to own the boss"; A's copy (if it is one) never asks `BossAppear` twice; after B's own intro (if it plays) "now ours" comes within ~1 s. A late B logs "our boss left its pre-battle phase here" once its copy follows A's fight, and B's seed stun then hands B the boss ("now ours").
 
+## Not everyone skips the intro: the owner still in its intro (tracker row 244, 0.11.9)
+
+**Seen.** piscesgamer97, 0.11.9, public lobby (player-logs/piscesgamer97-20261122-065909): "boss fights seem to desync when everyone doesn't skip the cutscene. Dodongo was still stuck in the pit and Gohma was slightly bugged." In the log the King Dodongo intro was played by some games and skipped by others; the boss changed owner twice during and right after it, and the copy was 16 m from the owner's place when its own intro ended.
+
+**Why (root cause).** A game said it was ready to own the boss (`CoopBoss::Readiness`, object_presence `unready` off) by the save's `HavePlayedEvent.<intro>` flag, or once its boss left its pre-battle pose this visit, never by whether its own game was playing the intro *now*. Both are true in the middle of an intro: a save that saw the intro before (a public lobby mixes saves; a game asked to play the intro again with the others, `Director::Join`, keeps its old flag), and an intro's own animations take Gohma out of `Sleep`/`Pre_Battle_*`. Such an owner's boss is the cutscene's (King Dodongo in his pit, Gohma in her intro animations), and the owner sends nothing of its own events. So every game that skipped got the intro's boss: placed where the intro holds it, no moves, and hits on it refused by the owner's game. The server kept it there: the owner read ready, and a ready owner is never handed to a game for being ready.
+
+**Now.** `Sync::InIntro` (an event of ours in the boss room before the fight, or within `kMinFightUs` after its start: the rest of it, such as Gohma's own `BossAppear`; never while our Link is dead) goes into `Readiness::Step` as `in_intro`: never ready then, and the boss's pose then never counts as "left the pre-battle phase". The server's `boss_to_ready` then hands the boss to a game in the fight at once; while every game is in its intro the owner keeps it, as before. The owner's own game, now a copy, runs its own boss through its intro (`Table::SetEvent`) and takes the new owner's state after it. Log: `not ready to own the boss: our game plays its intro now`, then `ready to own the boss`.
+
+**Cases sharing the cause.** Every boss in the room table (Gohma, King Dodongo, Barinade, Phantom Ganon, Volvagia, Morpha, Bongo Bongo, Twinrova): one reading. Not covered: Ganondorf and Ganon (no room in the table, no readiness), mid-bosses (no intro). Solo or co-op idle: nothing sent.
+
+**Tests.** `tests/lichii/boss_test.cpp` (row 244: Readiness with `in_intro`, Sync::InIntro). **Not proven in game.** Check (LANE1, two games): A skips King Dodongo's intro, B watches it; A's log `ready to own the boss`, B's `not ready ...: our game plays its intro now`; the boss is A's (`now ours`) within a second; A fights him out of the pit while B watches; after B's intro, B's copy follows A. Screenshots on both games.
+
 ## Entering together: a copy's own event held by its owner's motion (tracker row 130, GitHub #173, 0.11.3)
 
 **Seen.** Two players walked into Gohma's room together; one softlocked, the other beat her. The softlocked game's log
@@ -571,6 +583,13 @@ one turn rule; it now also waits for the boss's own attack edge, read in the own
 - *The stall count goes on (`Table::Hold`)* through the re-choice's own short move, so a boss stuck after a forced
   hand-over reaches 3 re-choices and the server's stall rule frees its fight lock (row 149).
 - Each turn is logged by the server: `boss turns: <actor> of player N: its attack ended: to player M (turn K)`.
+- Every owner change of a boss (or a boss group's root) or a battle manager is logged by the server with the rule that made it
+  (row 222 follow-up, review-01111-b): `hand-over: <actor> (group G) player N -> player M: <why>`, for example `its
+  owner is unfit (dead 0 s)`, `its owner's game has not begun the fight (unready: intro or event)`, `a turn: its attack
+  ended`, `a stun by a copy (issue 150)`, `the near rule ...`, `its owner let go of it ...`; ` (the owner did not
+  answer)` is added when the change came without the owner's answer. In the first hs-twinrova-orders run (20261122-111320)
+  the two unlogged hand-overs were read from the games' logs: A still in its intro event (unready) -> B; B dead
+  (`DreamWorld_GameOver`) -> A. Both are those rules, not a bug.
 - Solo or idle: no other fit player, no turn; the hook reads attacks only to send them.
 
 **Every boss checked for the edge and for a phase change in a turn.** The edge is the generic read above (the same

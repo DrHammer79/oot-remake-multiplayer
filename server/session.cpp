@@ -1834,7 +1834,10 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
         has_loaded(id, *root) && !root->unready.contains(id) &&
         (root->hitter_changed_at == 0 || now_us - root->hitter_changed_at >= config_.boss_hitter_cooldown_us) &&
         !owner_hit_lately(*root, now_us) && !owner_hit_lately(o, now_us)) {
-      if (ask_handover(root_id, *root, id, now_us)) ++stats_.boss_to_hitter;
+      if (ask_handover(root_id, *root, id, now_us,
+                       d.amount == 0 ? "a stun by a copy (issue 150)" : "the hitter takes it")) {
+        ++stats_.boss_to_hitter;
+      }
     }
     return;  // a boss is not moved by the distance rule below
   }
@@ -1857,7 +1860,7 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
   const auto theirs = distance_to(owner->second, o, now_us);
   if (mine && theirs && *mine <= config_.handover_near_m &&
       *mine + config_.handover_margin_m <= *theirs && !hands_back_soon(o, id, now_us)) {
-    ask_handover(d.id, o, id, now_us);
+    ask_handover(d.id, o, id, now_us, "the hitter is nearer than its owner");
   }
 }
 
@@ -2036,7 +2039,7 @@ void Session::on_object_group(ConnectionId id, Connection& c, const ObjectGroup&
         std::uint8_t old_owner = 0;
         if (auto it = connections_.find(*member.owner); it != connections_.end()) old_owner = it->second.number;
         ++stats_.parts_to_root;
-        change_owner(e.member, member, root.owner, old_owner, now_us);
+        change_owner(e.member, member, root.owner, old_owner, now_us, "a fresh part goes to its root's owner");
       }
     }
     if (group_of(member) != before) announce_owner(e.member, member);
@@ -2080,7 +2083,7 @@ void Session::drop_presence(ConnectionId id, std::uint8_t number, const ObjectId
     if (o.projectile) next = bomb_heir(o, id);
     if (next && o.projectile) ++stats_.bomb_handed_on;
     if (next) {
-      change_owner(oid, o, next, number, now_us);
+      change_owner(oid, o, next, number, now_us, "its owner let go of it (unloaded it or left)");
       return;
     }
     ObjectRemove r{number, oid, o.epoch, RemoveReason::gone, {}};
@@ -2097,7 +2100,7 @@ void Session::drop_presence(ConnectionId id, std::uint8_t number, const ObjectId
   if (o.owner != id) return;
   std::optional<ConnectionId> next = next_owner(o, id, now_us);
   if (kept && next && !o.own_logic.contains(*next)) next.reset();  // row 212: as a made one's, above
-  change_owner(oid, o, next, number, now_us);
+  change_owner(oid, o, next, number, now_us, "its owner let go of it (unloaded it or left)");
 }
 
 // Report 138: the owner let go of it (its game unloaded it, or it left). A
@@ -2177,6 +2180,18 @@ std::optional<ConnectionId> Session::grab_owner(const Object& o, ConnectionId ow
 bool Session::unfit_fight_owner(const Connection& c, std::uint64_t now_us) const {
   if (c.dead_since != 0 && now_us - c.dead_since >= config_.fight_owner_dead_us) return true;
   return c.paused_since != 0 && now_us - c.paused_since >= config_.fight_owner_paused_us;
+}
+
+std::string Session::unfit_why(const Connection& c, std::uint64_t now_us) const {
+  if (c.status & status::loading) return "loading";
+  if (c.dbno != DbnoState::up) return "downed";
+  if (c.dead_since != 0 && now_us >= c.dead_since) {
+    return "dead " + std::to_string((now_us - c.dead_since) / 1'000'000) + " s";
+  }
+  if (c.paused_since != 0 && now_us >= c.paused_since) {
+    return "paused " + std::to_string((now_us - c.paused_since) / 1'000'000) + " s";
+  }
+  return "unfit";
 }
 
 bool Session::unfit_owner(const Connection& c, std::uint64_t now_us) const {
@@ -2432,7 +2447,7 @@ bool Session::keeps_finish(Object& o, ConnectionId to) {
 }
 
 bool Session::ask_handover(const ObjectId& oid, Object& o, ConnectionId to,
-                           std::uint64_t now_us) {
+                           std::uint64_t now_us, std::string why) {
   auto target = connections_.find(to);
   if (!o.owner || target == connections_.end()) return false;
   if (keeps_finish(o, to)) {
@@ -2448,7 +2463,11 @@ bool Session::ask_handover(const ObjectId& oid, Object& o, ConnectionId to,
     ++stats_.kept_by_logic;
     return false;
   }
-  o.ask = Object::Ask{to, now_us};
+  Object::Ask ask;
+  ask.to = to;
+  ask.at = now_us;
+  ask.why = std::move(why);
+  o.ask = std::move(ask);
   o.candidate.reset();
   send(*o.owner, kChannelOwnership, HandoverAsk{oid, o.epoch, target->second.number});
   ++stats_.handover_asked;
@@ -2462,6 +2481,7 @@ void Session::finish_handover(const ObjectId& oid, Object& o, const ObjectState*
   const std::int64_t hits_after_ask = o.ask->hits;
   const bool bomb = o.ask->bomb;
   const bool turn = o.ask->turn;
+  const std::string why = o.ask->why + (answer ? "" : " (the owner did not answer)");
   o.ask.reset();
   // The player it was for left, changed scene or unloaded it meanwhile: the
   // owner keeps it. A bomb is a projectile, listed by nobody: its asker only
@@ -2521,12 +2541,23 @@ void Session::finish_handover(const ObjectId& oid, Object& o, const ObjectState*
     old_owner = it->second.number;
   }
   const std::uint64_t hitter_changed_at = o.hitter_changed_at;
-  change_owner(oid, o, to, old_owner, now_us);
+  change_owner(oid, o, to, old_owner, now_us, why);
   if (turn) o.hitter_changed_at = hitter_changed_at;  // a boss turn starts no hitter cooldown
 }
 
 void Session::change_owner(const ObjectId& oid, Object& o, std::optional<ConnectionId> next,
-                           std::uint8_t old_owner, std::uint64_t now_us) {
+                           std::uint8_t old_owner, std::uint64_t now_us, const std::string& why) {
+  if (o.boss || o.battle_manager) {  // (a plain pack's root: not logged, it can change often)
+    std::string to = "nobody";
+    if (next) {
+      if (auto it = connections_.find(*next); it != connections_.end()) {
+        to = "player " + std::to_string(it->second.number);
+      }
+    }
+    log("hand-over: " + (o.actor.empty() ? std::string("an object") : o.actor) +
+        (o.serial != 0 ? " (group " + std::to_string(o.serial) + ")" : std::string()) + " player " +
+        std::to_string(old_owner) + " -> " + to + ": " + (why.empty() ? std::string("no reason given") : why));
+  }
   o.previous_owner = o.owner;
   if (o.owner) o.gave_up[*o.owner] = stamp(now_us);
   if (next) o.gave_up.erase(*next);
@@ -2593,7 +2624,7 @@ void Session::on_bomb_take(ConnectionId id, Connection& c, const BombTake& m,
     return;
   }
   ++stats_.bomb_takes;
-  ask_handover(m.id, o, id, now_us);
+  ask_handover(m.id, o, id, now_us, "a bomb taken (BOMB_TAKE)");
   if (o.ask) o.ask->bomb = true;
 }
 
@@ -2688,7 +2719,9 @@ void Session::fish_owner(const ObjectId& oid, Object& o, ConnectionId owner, boo
     o.candidate.reset();
     // An owner that stands still with no lure near anyone: as any object.
     if (unfit) {
-      if (auto next = best_other(o, owner, true, now_us)) ask_handover(oid, o, *next, now_us);
+      if (auto next = best_other(o, owner, true, now_us)) {
+        ask_handover(oid, o, *next, now_us, "a fish's owner is unfit");
+      }
     }
     return;
   }
@@ -2700,7 +2733,7 @@ void Session::fish_owner(const ObjectId& oid, Object& o, ConnectionId owner, boo
       o.changed_at == 0 || now_us - o.changed_at >= config_.fish_lure_cooldown_us;
   if (settled && now_us - o.candidate_since >= config_.fish_lure_hold_us) {
     ++stats_.fish_to_lure;
-    ask_handover(oid, o, *want, now_us);
+    ask_handover(oid, o, *want, now_us, "a fish to the nearest lure");
   }
 }
 
@@ -2739,7 +2772,7 @@ void Session::run_ownership(std::uint64_t now_us) {
     if (!o.own_logic.empty() && !o.own_logic.contains(owner)) {
       if (auto keeper = logic_owner(o, owner, now_us)) {
         ++stats_.back_to_logic;
-        ask_handover(oid, o, *keeper, now_us);
+        ask_handover(oid, o, *keeper, now_us, "back to a game whose logic made it (row 212)");
       }
       continue;
     }
@@ -2749,7 +2782,7 @@ void Session::run_ownership(std::uint64_t now_us) {
       auto r = objects_.find(*o.root);
       if (r != objects_.end() && r->second.owner && r->second.owner != o.owner &&
           !r->second.ask && has_loaded(*r->second.owner, o)) {
-        ask_handover(oid, o, *r->second.owner, now_us);
+        ask_handover(oid, o, *r->second.owner, now_us, "a group member follows its root's owner");
       }
       continue;
     }
@@ -2765,7 +2798,7 @@ void Session::run_ownership(std::uint64_t now_us) {
         if (o.boss && !o.unready.contains(owner) && o.unready.contains(*next)) {
           ++stats_.boss_kept_from_unready;
         } else {
-          ask_handover(oid, o, *next, now_us);
+          ask_handover(oid, o, *next, now_us, "its owner is unfit (" + unfit_why(oc, now_us) + ")");
         }
       }
       continue;
@@ -2785,7 +2818,9 @@ void Session::run_ownership(std::uint64_t now_us) {
     // spot (boss-copy-b).
     if (o.boss && o.unready.contains(owner)) {
       if (auto next = best_other(o, owner, true, now_us); next && !o.unready.contains(*next)) {
-        if (ask_handover(oid, o, *next, now_us)) ++stats_.boss_to_ready;
+        if (ask_handover(oid, o, *next, now_us, "its owner's game has not begun the fight (unready: intro or event)")) {
+          ++stats_.boss_to_ready;
+        }
         continue;
       }
     }
@@ -2817,7 +2852,7 @@ void Session::run_ownership(std::uint64_t now_us) {
               std::to_string(from->second.number) + ": its attack ended: to player " +
               std::to_string(to->second.number) + " (turn " + std::to_string(stats_.boss_turns) + ")");
         }
-        ask_handover(oid, o, *next, now_us);
+        ask_handover(oid, o, *next, now_us, "a turn: its attack ended");
         if (o.ask) o.ask->turn = true;  // no hitter cooldown from a turn (hitter_changed_at)
         continue;
       }
@@ -2833,7 +2868,7 @@ void Session::run_ownership(std::uint64_t now_us) {
     // is not held: his AI rises only for a grab in his own game, so that game takes him (once his attack in his
     // owner's game has ended, above). Two held games: he stays, and his turns pass him on.
     if (auto grabbed = grab_owner(o, owner, now_us)) {
-      if (ask_handover(oid, o, *grabbed, now_us)) {
+      if (ask_handover(oid, o, *grabbed, now_us, "its piece holds that game's Link (row 232)")) {
         ++stats_.boss_to_grabbed;
         const auto to = connections_.find(*grabbed);
         log("boss grab: " + (o.actor.empty() ? std::string("a boss") : o.actor) + " of player " +
@@ -2877,7 +2912,7 @@ void Session::run_ownership(std::uint64_t now_us) {
           o.candidate_since = now_us;
         }
         if (now_us - o.candidate_since >= config_.boss_near_hold_us) {
-          if (ask_handover(oid, o, *want, now_us)) ++stats_.boss_to_near;
+          if (ask_handover(oid, o, *want, now_us, "a boss to the player near it (issue 150)")) ++stats_.boss_to_near;
         }
       }
       continue;
@@ -2896,7 +2931,7 @@ void Session::run_ownership(std::uint64_t now_us) {
     // members' chases as its own.
     if (auto chaser = chased_by(o, owner, now_us); chaser && !hands_back_soon(o, *chaser, now_us)) {
       ++stats_.handover_chased;
-      ask_handover(oid, o, *chaser, now_us);
+      ask_handover(oid, o, *chaser, now_us, "a copy chased its own player");
       continue;
     }
 
@@ -2933,7 +2968,7 @@ void Session::run_ownership(std::uint64_t now_us) {
       o.candidate_since = now_us;
     }
     if (now_us - o.candidate_since >= config_.handover_hold_us && !hands_back_soon(o, *want, now_us)) {
-      ask_handover(oid, o, *want, now_us);
+      ask_handover(oid, o, *want, now_us, "the near rule (a nearer player, out of a fight)");
     }
   }
 }
