@@ -333,7 +333,13 @@ charsel_tool_make() {
     local mod=$1 part=$2 tout dl=$B/charsel
     local -a ex=()
     cs_tool_why=''
-    [[ $part == full ]] || ex=(--exclude "$(charsel_py exclude)")
+    if [[ $part != full ]]; then
+        local rule
+        rule=$(charsel_py exclude 2>/dev/null) || rule=''
+        # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
+        [[ -n $rule ]] || { cs_tool_why="the kit could not read its own NPC rule (charsel exclude)"; return 1; }
+        ex=(--exclude "$rule")
+    fi
     say "  making Character Select's files from your game (a minute or two, once) ..."
     # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
     # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)
