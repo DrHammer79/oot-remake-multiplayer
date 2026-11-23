@@ -54,8 +54,9 @@ inline constexpr std::uint64_t kA = 1ull << 0, kB = 1ull << 1, kY = 1ull << 3, k
 
 class Driver {
 public:
-    // His screen opened on co-op's look (the one waiting, else worn), for the character shown (0 Link).
-    void Open(const CoopLook::Look& look, std::uint16_t character);
+    // His screen opened on co-op's look (the one waiting, else worn), for the character shown (0 Link). `eyes`: a
+    // character's Eye Colour is offered (false: its model is known to have no iris).
+    void Open(const CoopLook::Look& look, std::uint16_t character, bool eyes = true);
     void Close() { active_ = false; }
     bool Active() const { return active_; }
     // One pad read's new presses while his screen shows: the presses his screen still gets (the d-pad and the stick;
