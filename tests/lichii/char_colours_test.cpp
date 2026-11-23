@@ -542,3 +542,25 @@ TEST_CASE("char colours (row 207): whether Character Select is in this game, as 
     CoopCharColours::SetModPresent(false);
     CHECK_FALSE(CoopCharColours::ModPresent());
 }
+
+TEST_CASE("char colours (npc-customize-2): your own pick, read solo or in a session, is the character shown") {
+    using CoopCharColours::NoteOwnPick;
+    constexpr std::uint16_t kMax = 0x0FFF;   // (CoopLookShare::kCharacterMax)
+    // Every pick Character Select can store (its 117 characters, and the rest of the numbers a save may hold).
+    for (std::int32_t n = 1; n <= kMax; ++n) {
+        CHECK(NoteOwnPick(n, kMax) == n);
+        CHECK(CoopCharColours::ShownCharacter() == n);
+        CHECK(CoopCharColours::ModPresent());
+    }
+    // Link, or a number no character has: Link, and the mod is there (its Int is).
+    for (const std::int32_t n : {0, -1, int{kMax} + 1, 0x7FFFFFFF}) {
+        CHECK(NoteOwnPick(n, kMax) == 0);
+        CHECK(CoopCharColours::ShownCharacter() == 0);
+        CHECK(CoopCharColours::ModPresent());
+    }
+    // No such Int: no Character Select in this game.
+    NoteOwnPick(2, kMax);
+    CHECK(NoteOwnPick(std::nullopt, kMax) == 0);
+    CHECK(CoopCharColours::ShownCharacter() == 0);
+    CHECK_FALSE(CoopCharColours::ModPresent());
+}

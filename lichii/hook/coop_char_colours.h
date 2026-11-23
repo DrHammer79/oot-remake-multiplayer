@@ -260,6 +260,10 @@ std::uint16_t ShownCharacter();
 // live picture forces the menu's Link model, which that mod's code patches; Customize is in its screen.
 void SetModPresent(bool present);
 bool ModPresent();
+// Your own pick as the save holds it (CharacterMenu_SelectedCharacter; none: no Character Select), read every 30th
+// frame of the module, co-op on or off (coop_hook.cpp OwnCharacterFrame): sets ModPresent and ShownCharacter (a
+// number from 1 to `max`; anything else is Link, 0). Returns the character shown.
+std::uint16_t NoteOwnPick(std::optional<std::int32_t> pick, std::uint16_t max);
 
 // The one wardrobe of the game (the runtime's frame and coop_hook's reading of the six Ints).
 Wardrobe& TheWardrobe();

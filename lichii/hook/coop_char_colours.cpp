@@ -317,6 +317,13 @@ std::atomic<bool> g_mod_present{false};
 void SetModPresent(bool present) { g_mod_present.store(present, std::memory_order_relaxed); }
 bool ModPresent() { return g_mod_present.load(std::memory_order_relaxed); }
 std::uint16_t ShownCharacter() { return g_shown.load(std::memory_order_relaxed); }
+std::uint16_t NoteOwnPick(std::optional<std::int32_t> pick, std::uint16_t max) {
+    const std::uint16_t shown =
+        pick && *pick > 0 && *pick <= int{max} ? static_cast<std::uint16_t>(*pick) : std::uint16_t{0};
+    SetModPresent(pick.has_value());   // (row 207: its saved Int is there)
+    SetShownCharacter(shown);
+    return shown;
+}
 
 Wardrobe& TheWardrobe() {
     static Wardrobe w;

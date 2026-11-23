@@ -3798,10 +3798,7 @@ static void OwnCharacterFrame(EmulatorMemory& memory, std::optional<std::int32_t
     }
     // What the mod's own code puts on every player-like model, puppets too (coop_char_colours.h Wardrobe).
     CoopCharColours::TheWardrobe().SetViewer(0);
-    CoopCharColours::SetModPresent(pick.has_value());   // (row 207: its saved Int is there)
-    CoopCharColours::SetShownCharacter(pick && *pick > 0 && *pick <= CoopLookShare::kCharacterMax
-                                           ? static_cast<std::uint16_t>(*pick)
-                                           : std::uint16_t{0});
+    CoopCharColours::NoteOwnPick(pick, CoopLookShare::kCharacterMax);
 }
 
 void PickGuardFrame(Core::System& system) {
