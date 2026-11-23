@@ -4925,6 +4925,27 @@ TEST_CASE("objects: stun animations (issue 150)") {
     CHECK_FALSE(IsStunAnimation("Parry_St"));         // his volley
     CHECK_FALSE(IsStunAnimation("SmallDamage"));
     CHECK_FALSE(IsStunAnimation("Damage_St"));
+    // Review 01112-e: Dark Link's chance window and no-life stuns, Ganon's tail window.
+    CHECK(IsStunAnimation("Dark_Chance_St"));
+    CHECK(IsStunAnimation("Dark_Chance"));
+    CHECK(IsStunAnimation("Dark_Chance_Damage_B"));
+    CHECK(IsStunAnimation("DarkChanceStPreBerserk"));
+    CHECK(IsStunAnimation("Paralysis_St_D"));
+    CHECK(IsStunAnimation("Freeze"));
+    CHECK(IsStunAnimation("FreezeBreak"));
+    CHECK(IsStunAnimation("Tail_Chance"));
+    CHECK_FALSE(IsStunAnimation("Dark_Wait"));
+    CHECK_FALSE(IsStunAnimation("Dark_Move_Run"));
+    CHECK_FALSE(IsStunAnimation("Dark_Sword_Attack_Charge_From_L_Post"));
+    CHECK_FALSE(IsStunAnimation("Tail_NearDamage"));
+    // Their own moves, not stuns of a hit.
+    CHECK_FALSE(IsStunAnimation("BigChance"));               // Gerudo Thief
+    CHECK_FALSE(IsStunAnimation("Tired_Loop"));              // Kotake, Koume
+    CHECK_FALSE(IsStunAnimation("SpinChanceLp"));            // Morpha's tentacle
+    CHECK_FALSE(IsStunAnimation("Spin_Chance_St_Long"));
+    CHECK_FALSE(IsStunAnimation("Ceiling_Spawn_Chance_Lp"));  // Gohma
+    CHECK_FALSE(IsStunAnimation("Repel_Down"));              // Dead Hand
+    CHECK_FALSE(IsStunAnimation("Parry_Failure_St"));        // Ganondorf
 }
 
 TEST_CASE("objects: a boss copy stunned here sends a DAMAGE of 0 and keeps its stun (issue 150)") {

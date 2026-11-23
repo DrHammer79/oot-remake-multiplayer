@@ -546,7 +546,8 @@ bool UnderCeilingEnemy(const coop::protocol::Vec3& enemy, const coop::protocol::
 // no life, so a stun is the only sign of that hit. Row 211: also the stuns with
 // another first word: Ganondorf's LightBallDamage (his ball sent back into him),
 // Ganon's LightArrowDown / LightArrowDamage / Lightarrow, StunA.. (Lizalfos,
-// Gerudo Thief) and ShortStun (Big Octo).
+// Gerudo Thief), ShortStun (Big Octo), Dark Link's Dark_Chance / DarkChance,
+// Paralysis and Freeze, and Ganon's Tail_Chance.
 bool IsStunAnimation(std::string_view name);
 
 // An animation name without its level-of-detail suffix ("Wait_ModelOnlyLOD"
