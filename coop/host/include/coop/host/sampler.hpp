@@ -77,7 +77,13 @@ class WorldStill {
   static constexpr float kPlaceEpsilon = 1e-3f;      // metres
 
   // This reading at `now_us`; true while our world stands still.
-  bool step(const PlayerReading& reading, std::uint64_t now_us);
+  bool step(const PlayerReading& reading, std::uint64_t now_us) {
+    return step(reading.animation ? &*reading.animation : nullptr, reading.position,
+                reading.event_running.value_or(false), now_us);
+  }
+  // The same from its parts: `animation` null is not judged (none read, or not the game's own: a carried Link's
+  // reading plays the carried pose, CoopLiftPlayerGame::CarriedPose, held at one frame while its carrier stands).
+  bool step(const protocol::Animation* animation, const Vec3& position, bool event, std::uint64_t now_us);
   bool still() const { return still_; }
 
  private:

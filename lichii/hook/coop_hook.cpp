@@ -2363,7 +2363,13 @@ private:
                                            std::string_view(std::getenv("LICHII_COOP_STILL")) == "0");
             if (still_on) {
                 const bool was = world_still_.still();
-                reading->world_still = world_still_.step(*reading, CoopEvery::NowUs());
+                // pr-navi-01112: our Link lifted by another player's (native puppets phase 3) is not judged: its
+                // reading plays the carried pose ('Eaten' at frame 0, CarriedPose above), which stands still
+                // whenever its carrier does, while our world runs.
+                const bool carried = CoopLiftPlayerGame::Carried();
+                reading->world_still = world_still_.step(
+                    carried || !reading->animation ? nullptr : &*reading->animation, reading->position,
+                    reading->event_running.value_or(false), CoopEvery::NowUs());
                 if (reading->world_still != was && !reading->in_menu.value_or(false)) {
                     LOG_INFO(Core, "coop: status: our world {} (Link's '{}' at frame {:.1f}): {}",
                              reading->world_still ? "stands still with no menu named" : "runs again",

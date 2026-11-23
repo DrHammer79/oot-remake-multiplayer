@@ -2196,9 +2196,18 @@ std::string Session::unfit_why(const Connection& c, std::uint64_t now_us) const 
   return "unfit";
 }
 
-bool Session::owner_in_own_cutscene(const Connection& c, const Object& o, std::uint64_t now_us) const {
+bool Session::owner_in_own_cutscene(ConnectionId owner, const Connection& c, const Object& o,
+                                    std::uint64_t now_us) const {
   if (!o.boss || config_.fight_owner_cutscene_us == 0 || c.cutscene_since == 0) return false;
   if (now_us - c.cutscene_since < config_.fight_owner_cutscene_us) return false;
+  // pr-navi-01112: only a boss whose AI stands in that event. A boss that holds or throws its owner's Link plays
+  // that as an event in its owner's game (Morpha's tentacle grab, about 6 s: dungeons-boss.md "The boss's death"),
+  // its AI running: a hand-over then takes the boss from the grab it is in. So never mid-attack (the rule below the
+  // unfit ones, attack_hold_max_us), never while a piece of it holds its owner's Link (row 232, grabbed_here), and
+  // only once its owner's samples show one move unchanged that long (note_hold: animation, action verb, life; reset
+  // by a death, an event's animation, 'Sleep' and an unready owner, so the boss's own intro never counts).
+  if (mid_attack(o, now_us) || o.grabbed.contains(owner)) return false;
+  if (o.hold_since == 0 || now_us - o.hold_since < config_.fight_owner_cutscene_us) return false;
   if (o.last_state) {
     // The boss's own intro, phase change or death: every game plays it, the owner's AI is in it on purpose.
     if (o.last_state->life && o.last_state->life->life <= 0) return false;
@@ -2364,7 +2373,9 @@ bool Session::hands_back_soon(const Object& o, ConnectionId to, std::uint64_t no
 }
 
 void Session::note_hold(Object& o, const ObjectState& sample, std::uint64_t now_us) {
-  if (!o.boss || o.root || config_.boss_stall_us == 0) return;
+  // The move is tracked for every boss root (also row 164's owner_in_own_cutscene); only the stall below needs
+  // boss_stall_us.
+  if (!o.boss || o.root) return;
   // What the sample lacks is as last relayed.
   const ObjectState* last = o.last_state ? &*o.last_state : nullptr;
   const auto& animation = sample.animation ? sample.animation : last ? last->animation : std::nullopt;
@@ -2389,7 +2400,7 @@ void Session::note_hold(Object& o, const ObjectState& sample, std::uint64_t now_
     o.stalled = false;  // a new move (or a hit that took life, or none to judge): its fight counts again
     return;
   }
-  if (o.stalled || now_us - o.hold_since < config_.boss_stall_us) return;
+  if (config_.boss_stall_us == 0 || o.stalled || now_us - o.hold_since < config_.boss_stall_us) return;
   o.stalled = true;
   o.fight_until = 0;
   o.owner_hit_at = 0;
@@ -2805,7 +2816,7 @@ void Session::run_ownership(std::uint64_t now_us) {
 
     // An owner whose game stands still gives it up, fight or not; a boss's sooner (its AI fights its Link alone).
     // A boss also leaves an owner held in a cutscene of its own game (row 164 follow-up), for a game in none.
-    const bool owner_cut = owner_in_own_cutscene(oc, o, now_us);
+    const bool owner_cut = owner_in_own_cutscene(owner, oc, o, now_us);
     if (unfit_owner(oc, now_us) || ((o.boss || in_fight(o, now_us)) && unfit_fight_owner(oc, now_us)) || owner_cut) {
       std::optional<ConnectionId> next = o.fish ? std::nullopt : best_other(o, owner, true, now_us);
       if (owner_cut && next && connections_.at(*next).cutscene_since != 0) next.reset();  // its event: no better

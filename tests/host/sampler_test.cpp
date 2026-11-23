@@ -374,6 +374,16 @@ TEST_CASE("host sampler: WorldStill reads our Link's animation frame and place")
     CHECK_FALSE(w.step(r, now));
     CHECK_FALSE(w.step(r, now + 5'000'000));
   }
+  SUBCASE("pr-navi-01112: a carried Link (its reading's pose is not the game's own) is not judged, and anew after") {
+    // The hook passes no animation while our Link is lifted (CoopLiftPlayerGame::Carried): the carried pose is
+    // 'Eaten' at frame 0, rate 1, unmoved while the carrier stands.
+    const proto::Animation carried{"Eaten", 0.0f, 1.0f};
+    CHECK_FALSE(w.step(&carried, r.position, false, now));  // (were it judged, this would start the count)
+    CHECK_FALSE(w.step(nullptr, r.position, false, now));
+    CHECK_FALSE(w.step(nullptr, r.position, false, now + 5'000'000));
+    CHECK_FALSE(w.step(&*r.animation, r.position, false, now + 5'000'001));
+    CHECK(w.step(&*r.animation, r.position, false, now + 5'000'001 + WorldStill::kStillUs));
+  }
 }
 
 TEST_CASE("host sampler: each away bit goes out once on its change and back") {

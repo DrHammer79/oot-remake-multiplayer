@@ -67,22 +67,21 @@ std::uint8_t status_bits(std::uint8_t previous, const std::optional<PlayerReadin
   return flags;
 }
 
-bool WorldStill::step(const PlayerReading& reading, std::uint64_t now_us) {
-  const bool event = reading.event_running.value_or(false);
-  if (!reading.animation || reading.animation->rate == 0.0f || event) {
+bool WorldStill::step(const protocol::Animation* animation, const Vec3& position, bool event, std::uint64_t now_us) {
+  if (animation == nullptr || animation->rate == 0.0f || event) {
     // No animation read, a pose held on purpose, or our event (a cutscene may hold Link): not judged.
     seen_ = false;
     still_ = false;
     return false;
   }
-  const protocol::Animation& a = *reading.animation;
+  const protocol::Animation& a = *animation;
   const bool moved = !seen_ || a.name != name_ || std::fabs(a.frame - frame_) > kFrameEpsilon ||
-                     distance(reading.position, place_) > kPlaceEpsilon;
+                     distance(position, place_) > kPlaceEpsilon;
   if (moved) {
     seen_ = true;
     name_ = a.name;
     frame_ = a.frame;
-    place_ = reading.position;
+    place_ = position;
     changed_us_ = now_us;
     still_ = false;
     return false;

@@ -6777,6 +6777,46 @@ TEST_CASE("row 164 follow-up: a boss leaves an owner held in a cutscene of its o
   }
 }
 
+TEST_CASE("pr-navi-01112: a boss whose AI runs in its owner's cutscene (a grab, an attack, a new move) is kept") {
+  // A boss that holds or throws its owner's Link plays that as an event in its owner's game (Morpha's tentacle), its
+  // AI running: never handed over from that. Only a boss standing in one move while its owner's event runs is.
+  OwnerHarness h;
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, boss_presence(object_presence::awake), kChannelOwnership);
+  h.receive(2, boss_presence(object_presence::awake), kChannelOwnership);
+  h.stand(1, 3);
+  h.stand(2, 5);
+  SUBCASE("in its attack (attack_hold_max_us): kept") {
+    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, true, "Grab")}, kChannelObjectSamples);
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    h.clear();
+    h.run(6 * kSecond);
+    CHECK(h.asks() == 0);
+    CHECK(h.session.stats().boss_from_cutscene == 0);
+  }
+  SUBCASE("a piece of it holds its owner's Link (row 232): kept") {
+    h.receive(1, boss_presence(object_presence::awake | object_presence::grabbed_here), kChannelOwnership);
+    h.receive(1, ObjectSample{0, placed(7), 0, boss_state("Walk")}, kChannelObjectSamples);
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    h.clear();
+    h.run(6 * kSecond);
+    CHECK(h.session.stats().boss_from_cutscene == 0);
+  }
+  SUBCASE("its move changes every second: kept, once one move stands fight_owner_cutscene_us: asked over") {
+    h.receive(1, PlayerStatus{0, status::in_cutscene}, kChannelSession);
+    const char* moves[] = {"Walk", "Turn", "Walk", "Turn", "Walk", "Turn"};
+    for (const char* m : moves) {
+      h.receive(1, ObjectSample{0, placed(7), 0, boss_state(m)}, kChannelObjectSamples);
+      h.run(1 * kSecond);
+    }
+    CHECK(h.session.stats().boss_from_cutscene == 0);
+    h.clear();
+    h.run(4 * kSecond);
+    CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+    CHECK(h.session.stats().boss_from_cutscene == 1);
+  }
+}
+
 TEST_CASE("row 164 follow-up: fight_owner_cutscene_us 0 keeps a boss with an owner in a cutscene") {
   SessionConfig config = quiet_config();
   config.fight_owner_cutscene_us = 0;

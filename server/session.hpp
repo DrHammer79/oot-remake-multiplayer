@@ -1066,8 +1066,9 @@ class Session {
   // owner's game is not held: the boss's AI answers that grab only there. None while its owner is held too.
   std::optional<ConnectionId> grab_owner(const Object& o, ConnectionId owner, std::uint64_t now_us) const;
   bool unfit_fight_owner(const Connection& c, std::uint64_t now_us) const;
-  // A boss's owner in a cutscene of its own for fight_owner_cutscene_us while the boss plays none of its own.
-  bool owner_in_own_cutscene(const Connection& c, const Object& o, std::uint64_t now_us) const;
+  // A boss's owner in a cutscene of its own for fight_owner_cutscene_us while the boss plays none of its own, is in
+  // no attack, holds no Link of that game and has held one move that long (its AI stands in that event).
+  bool owner_in_own_cutscene(ConnectionId owner, const Connection& c, const Object& o, std::uint64_t now_us) const;
   void mark_fight(Object& o, std::uint64_t now_us);
   bool in_fight(const Object& o, std::uint64_t now_us) const;
   // The owner hit it itself within boss_owner_hit_hold_us (issue 150).
