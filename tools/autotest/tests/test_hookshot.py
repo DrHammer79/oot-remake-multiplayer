@@ -17,6 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import hookshot as hs  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))   # (tools: puppet_pack, PackStartTest)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAMEUI = 0x1000200000
@@ -986,6 +987,97 @@ class DropTest(unittest.TestCase):
         for bad in ("drop\n", "drop X\n", "drop X 0\n", "drop X 501\n", "drop X 1.5\n"):
             with self.assertRaises(hs.ScriptError):
                 hs.parse(bad)
+
+
+class PackStartTest(unittest.TestCase):
+    """Row 265 (0.11.12): a game this file starts gets the kit's start of the pack (play.ps1 Use-KitPuppetPack, then
+    Invoke-KitSizeTableMerge): your own tunic files first, then the merge, so another mod's Link model (Character
+    Select's) names your own tunic textures and the module can paint them (the Customize preview's Kokiri row)."""
+
+    CHILD = b"FRES" + bytes(12) + b"Angin_Tile_A_Alb\x00Angin_Tile_A_Dark_Alb\x00Mt_Cloth_Parts_Player_Child_Alb\x00"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="hookshot_pack_start_")
+        self.game = os.path.join(self.dir, "lane1-A")
+        self.mods = os.path.join(self.game, "mods")
+        self.pack = os.path.join(self.mods, *hs.PACK_REL[1:])
+        self.put(os.path.join(self.game, "longshot.exe"), b"")
+        self.put(os.path.join(self.pack, "coop_self", "green.Angin_Tile_S_Alb.bntx.zs"), b"own green tile")
+        self.put(os.path.join(self.pack, "coop_puppet.json"), json.dumps({
+            "tunics": {"green": ["x"]},
+            "self_files": {"green": {"Tex/Angin_Tile_S_Alb.bntx.zs": "coop_self/green.Angin_Tile_S_Alb.bntx.zs"}},
+        }).encode())
+        self.model = os.path.join(self.mods, "OoT Character Select", "romfs", "Model",
+                                  "Player_Child.Player_Child.bfres.zs")
+        self.put(self.model, self.CHILD)
+        self.tile = os.path.join(self.pack, "romfs", "Tex", "Angin_Tile_S_Alb.bntx.zs")
+        self.lines = []
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    @staticmethod
+    def put(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def test_folders_as_the_kit_finds_them(self):
+        mods, pack, romfs = hs.pack_folders(self.game)
+        self.assertEqual((mods, pack, romfs), (self.mods, self.pack, ""))
+        os.makedirs(os.path.join(self.game, "romfs", "Pack"))
+        self.assertEqual(hs.pack_folders(self.game)[2], os.path.join(self.game, "romfs"))
+
+    def test_your_tunic_files_go_in_before_the_merge(self):
+        from puppet_pack import merge_tables, self_tunic
+        calls = []
+        real_put, real_main = self_tunic.put, merge_tables.main
+        self_tunic.put = lambda pack, color, painted=True: calls.append(("put", pack, color)) or "green"
+        merge_tables.main = lambda argv=None: calls.append(("merge", argv)) or 0
+        try:
+            hs.pack_start(self.game, {"LICHII_COOP_COLOR": "yellow"}, self.lines.append)
+        finally:
+            self_tunic.put, merge_tables.main = real_put, real_main
+        self.assertEqual(calls, [("put", self.pack, "yellow"), ("merge", ["--mods", self.mods])])
+        self.assertEqual(self.lines, ["own tunic files: green"])
+
+    def test_the_colour_from_the_options_and_tunics_off(self):
+        from puppet_pack import merge_tables, self_tunic
+        self.put(os.path.join(self.game, "coop-options.ini"), b"color = red\n")
+        seen = []
+        real_put, real_main = self_tunic.put, merge_tables.main
+        self_tunic.put = lambda pack, color, painted=True: seen.append(color) or ""
+        merge_tables.main = lambda argv=None: 0
+        try:
+            hs.pack_start(self.game, {}, self.lines.append)
+            hs.pack_start(self.game, {"LICHII_COOP_TUNICS": "0"}, self.lines.append)
+        finally:
+            self_tunic.put, merge_tables.main = real_put, real_main
+        self.assertEqual(seen, ["red", ""])
+        self.assertEqual(self.lines, ["own tunic files: none (the game's green)"] * 2)
+
+    def test_character_selects_link_model_names_your_own_tunic(self):
+        try:
+            import zstandard  # noqa: F401 (merge_tables' size tables; CI installs it)
+        except ImportError:
+            self.skipTest("no zstandard")
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            hs.pack_start(self.game, {}, self.lines.append)
+        self.assertTrue(os.path.isfile(self.tile), said.getvalue())
+        with open(self.model, "rb") as f:
+            model = f.read()
+        self.assertIn(b"Angin_Tile_S_Alb\x00", model, said.getvalue())
+        self.assertNotIn(b"Angin_Tile_A_Alb\x00", model)
+        self.assertIn("names co-op's own tunic textures now", said.getvalue())
+
+    def test_no_pack_nothing(self):
+        shutil.rmtree(self.pack)
+        self.assertEqual(hs.pack_start(self.game, {}, self.lines.append), [])
+        self.assertEqual(self.lines, [])
+        with open(self.model, "rb") as f:
+            self.assertEqual(f.read(), self.CHILD)
 
 
 if __name__ == "__main__":
