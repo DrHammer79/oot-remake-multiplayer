@@ -49,7 +49,7 @@ TEST_CASE("look view: Link's middle at the window's middle, his height filling i
     }
 }
 
-TEST_CASE("look view: the eye is on the side the yaw names, a little above him, further for a taller Link") {
+TEST_CASE("look view: the eye is on the side the yaw names, above him, further for a taller Link") {
     const Window w = Square();
     const std::array<float, 3> feet{0, 0, 0};
     const Shot front = CoopLookView::Aim(feet, 1.9f, 0.0, w);   // yaw 0: from +z
@@ -98,6 +98,20 @@ TEST_CASE("look view: his feet show over a 0.5 m step in front of him (the Kakar
                 }
             }
         }
+    }
+}
+
+TEST_CASE("look view: the camera never lower than kElevationMin, where his feet fall more than kFeetDrop") {
+    // The whole screen as the window at a wide field of view: he is framed from so close that the line to his feet
+    // falls more than kFeetDrop even at the lowest elevation. The camera stays at kElevationMin, never lower.
+    const Window full{0.0f, 0.0f, 1.0f, 1.0f, 16.0f / 9.0f};
+    const std::array<float, 3> feet{0, 0, 0};
+    for (const float height : {1.35f, 1.9f}) {
+        const Shot s = CoopLookView::Aim(feet, height, 0.0, full, 2.0);
+        const double pitch =
+            std::atan2(s.eye[1] - s.target[1], std::hypot(s.eye[0] - s.target[0], s.eye[2] - s.target[2]));
+        CHECK(pitch == doctest::Approx(CoopLookView::kElevationMin).epsilon(1e-6));
+        CHECK(CoopLookView::FeetDrop(s, feet) > CoopLookView::kFeetDrop);
     }
 }
 
