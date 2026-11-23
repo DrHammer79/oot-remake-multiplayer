@@ -247,6 +247,12 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
      "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "interact", "description": "go_to_actor to within 1 m (`near_m`), face it, then as talk: press A only when "
+     "the `prompt` says an action is there. `walk` is go_to_actor's answer; a walk or turn that did not get there says "
+     "why and presses nothing. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
 ]
 
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
@@ -512,6 +518,10 @@ class Game:
             return ph.use_item(c, _word(args, "item"), _button(args))
         if name in ("talk", "open"):
             return ph.interact(c, name)
+        if name == "interact":
+            return ph.interact_with(c, _need_id(args), _word(args, "name"),
+                                    _bounded(args, "near_m", ph.INTERACT_M, 0.5, 10),
+                                    int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "pause":
             return c.pause()
         if name == "resume":

@@ -300,7 +300,7 @@ only, no `pip install`.
 | `give item` | Gives the item at once (the item, its `IsGet` and its ammo); the reply's `result` says what changed, and `get_state` with `inventory` true shows it with no step |
 | `kill actor [id]`, `hit actor amount [id]` (`actor` is the **name**. With no `id` the game takes the nearest actor of that name with a life. With the `id` and `name` `get_world` gave, it takes exactly that actor, and answers `refused: actor 7 (NAME) is gone` when the walk's list has no actor with that id and that name; an id is refused in solo. The tool steps up to 12 frames, looking every 2, for the answer in `state.strike`: `ok`, `refused: ...`, or `unknown: no result after 12 frames (the strike may still land: look with get_world)`. For a `kill` that struck, with an id, it then waits up to `wait_frames` more frames (default 36, a guess: S8 saw one die only after Link came near it; 0 to 600) for the actor to be gone, not alive or at life 0: `ok` with `died` true. If it is still alive: `struck: the hit landed, but NAME still lives after N frames` with `died` false (a far actor may not die until Link is near it, S8). With no id, or with no world list to look in, the answer is `struck: ...` with `died` null (not checked). A `hit` is `ok` when it struck. It never retries, because a second strike could land twice) | One `act` line each, then the wait above. |
 | `hurt quarter_hearts`, `place x y z [facing or face_x face_z]` (with a facing in degrees, 0 = +z, 90 = +x, or a point to look at, Link is placed and then turned by the test `face` line, 2 frames each: a chest or a talk needs no walk; both ways together are refused), `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
-| `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
+| `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open`, `interact id name [near_m] [max_frames]` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all] [flags_only]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed, every game's flags compared, and the games' actors compared by what [sync-coverage.md](sync-coverage.md) says about each name (below). `flags_only` leaves the actors out |
 | `log [match]` | **Raw, unmasked** (do not paste it into an issue; use `check_logs` for that). The game's new `coop:` log lines since the last call (`match`: only lines with that text, the oldest 80 of them; a `match` has a cursor of its own, so the plain cursor stays and the lines it left out come with the next plain `log`, and a plain `log` read in between can show a line again that a later `match` returns). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
@@ -327,7 +327,7 @@ need.
 
 ### Helpers: several calls in one
 
-`go_to_actor`, `face`, `attack`, `use_item`, `talk` and `open` are in `tools/autotest/playtest_helpers.py` (the MCP
+`go_to_actor`, `face`, `attack`, `use_item`, `talk`, `open` and `interact` are in `tools/autotest/playtest_helpers.py` (the MCP
 server calls them; a script can too). They only use the bridge's commands, so they add no game code. Rules:
 
 - Each takes the `id` and the `name` `get_world` gave, and looks the actor up in the world list again on every leg of
@@ -345,7 +345,7 @@ server calls them; a script can too). They only use the bridge's commands, so th
 - `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
   walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
 - `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
-  equips and each inventory entry (`inventory_changed`, one entry per item). `talk` and `open` press `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing.
+  equips and each inventory entry (`inventory_changed`, one entry per item). `talk` and `open` press `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
   on every `input` and `step`; the MCP tools do not take a `both` argument, so over MCP the tester steps the other game
   itself.

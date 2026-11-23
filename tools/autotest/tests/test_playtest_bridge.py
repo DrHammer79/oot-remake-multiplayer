@@ -372,7 +372,7 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
-                          "checkpoint",
+                          "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
@@ -1296,6 +1296,24 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["Y"]])
         r = ph.use_item(self.c, "Hookshot", button="X")
         self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"][-1], ["X"])
+
+    def test_interact_walks_to_the_actor_faces_it_and_presses_a(self):
+        self.game.prompt = "Open"
+        self.game.on_press = lambda buttons: setattr(self.game, "prompt", None)
+        r = self.tool.call("interact", {"id": 5, "name": "Obj_TBox_Wood"})
+        self.assertTrue(r["pressed"], r)
+        self.assertTrue(r["walk"]["arrived"])
+        self.assertLessEqual(r["walk"]["distance"], ph.INTERACT_M)
+        self.assertTrue(self.acts()[-1].startswith("face 6.00 3.00"), self.acts())
+        self.assertEqual(r["prompt_was"], "Open")
+
+    def test_interact_presses_nothing_when_it_did_not_get_there(self):
+        self.game.prompt = "Open"
+        r = self.tool.call("interact", {"id": 99, "name": "Obj_TBox_Wood"})
+        self.assertEqual((r["pressed"], r["result"]), (False, "not reached: gone"))
+        r = self.tool.call("interact", {"id": 7, "name": "Enemy_Far", "max_frames": 20})
+        self.assertEqual((r["pressed"], r["result"]), (False, "not reached: timed out"))
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "input" and "A" in (m.get("buttons") or [])])
 
     def test_interact_presses_a_only_when_there_is_a_prompt(self):
         r = ph.interact(self.c)
