@@ -591,6 +591,77 @@ class Game:
 CALLS_FILE = "calls.jsonl"
 
 
+# Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
+NO_FRAME_TOOLS = frozenset(("get_state", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
+                            "log", "check_logs", "session_status"))
+BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
+IN_STEP = (" Both games run the same frames: every frame this player's game runs (walks, presses, steps, a warp, a "
+           "test line), the other game runs too, so neither is held while the other plays. `player` is the game. ")
+
+
+def _pair_tool(tool, players):
+    t = json.loads(json.dumps(tool))
+    schema = t["inputSchema"]
+    schema.setdefault("properties", {})["player"] = {"type": "string", "enum": list(players)}
+    if t["name"] in BOTH_TOOLS:
+        t["description"] += " With no `player`: both games (`games`, by player)."
+    else:
+        schema["required"] = ["player"] + list(schema.get("required", []))
+    if t["name"] not in NO_FRAME_TOOLS:
+        t["description"] += IN_STEP
+    return t
+
+
+class Pair:
+    """Two games' tools in one server. A call that can run frames goes to its player's game through an InStep, so the
+    other game runs the same frames as they happen; what ran outside input, move and step (a warp, a test line, a
+    shot) is caught up after the call from the game's frame counts. Each reply says what the other game ran
+    (`other`)."""
+
+    def __init__(self, games):
+        self.games = dict(games)   # player -> Game, two of them
+        if len(self.games) != 2:
+            raise ValueError("a pair is two games")
+        self.tools = [_pair_tool(t, self.games) for t in PLAYER_TOOLS]
+
+    def _other(self, player):
+        return next(g for p, g in self.games.items() if p != player)
+
+    def call(self, name, args):
+        rest = {k: v for k, v in args.items() if k != "player"}
+        player = args.get("player")
+        if player is None and name in BOTH_TOOLS:
+            return {"games": {p: g.call(name, dict(rest)) for p, g in self.games.items()}}
+        if player not in self.games:
+            raise ValueError("player is one of %s" % ", ".join(self.games))
+        game, other = self.games[player], self._other(player)
+        if name in NO_FRAME_TOOLS:
+            return game.call(name, rest)
+        own = game.client
+        start = own.hello()["frame"]
+        pair = ph.InStep(own, other.client)
+        game.client = pair
+        note = {"player": other.player}
+        try:
+            return game.call(name, rest)
+        finally:
+            game.client = own
+            try:
+                note["caught_up"] = pair.catch_up((own.last_frame or start) - start)
+            except (OSError, ValueError, pc.BridgeError) as e:
+                note["error"] = "%s: %s" % (e.__class__.__name__, e)
+            note["frames"] = pair.stepped
+            note["in_step"] = "error" not in note
+            self.last_other = note
+
+    def answer(self, name, args):
+        self.last_other = None
+        out = self.call(name, args)
+        if self.last_other is not None and isinstance(out, dict):
+            out["other"] = self.last_other
+        return out
+
+
 class Args:
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -628,10 +699,13 @@ def call_log_path(session, log_dir):
 
 
 def serve(session, game=None, calllog=None):
-    """Answers MCP requests on stdin: the two-game session's tools (session), or one game's (game). `calllog`: the file
-    every call is also written to (a CallLog; docs/playtest.md, "Kit helpers")."""
-    tools = PLAYER_TOOLS if game else TOOLS
-    name = ("oot-%s" % game.player) if game else "oot-playtest"
+    """Answers MCP requests on stdin: the two-game session's tools (session), one game's (game), or a pair's (a Pair).
+    `calllog`: the file every call is also written to (a CallLog; docs/playtest.md, "Kit helpers")."""
+    if isinstance(game, Pair):
+        tools, name = game.tools, "oot-pair"
+    else:
+        tools = PLAYER_TOOLS if game else TOOLS
+        name = ("oot-%s" % game.player) if game else "oot-playtest"
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -655,7 +729,10 @@ def serve(session, game=None, calllog=None):
             began = time.time()
             try:
                 args = params.get("arguments") or {}
-                out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
+                if isinstance(game, Pair):
+                    out = game.answer(params.get("name"), args)
+                else:
+                    out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
                 if calllog:
                     calllog.write(params.get("name"), args, True, t=began)
                 reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
@@ -676,6 +753,8 @@ def main(argv=None):
     p.add_argument("--session", help="a two-game session (live.py start): the tools state, act, shot, checkpoint, "
                    "desync_check; with --player: the session whose watchdog each call keeps awake")
     p.add_argument("--player", choices=pc.PLAYERS, help="one game's tools, through its play-test bridge")
+    p.add_argument("--pair", action="store_true", help="both games' tools (p1 and p2) from one server, each call "
+                   "with a `player`; every frame one game runs, the other runs too")
     p.add_argument("--port", type=int, help="that game's bridge port (default: the player's, on --lane when given)")
     p.add_argument("--lane", type=int, help="a test lane (tools/autotest/lanes.py): its bridge ports")
     p.add_argument("--log-dir", default="playtest-logs",
@@ -684,6 +763,15 @@ def main(argv=None):
                    "the session folder, else in --log-dir)" % CALLS_FILE)
     p.add_argument("--no-call-log", action="store_true", help="write no call log")
     a = p.parse_args(argv)
+    if a.pair:
+        if a.player or a.port:
+            p.error("--pair takes both games' ports from --lane (or the default ports): no --player or --port")
+        session = os.path.abspath(a.session) if a.session else None
+        serve(None, Pair({q: Game(q, pc.Client(pc.port_for(q, a.lane)), os.path.abspath(a.log_dir), session)
+                          for q in ("p1", "p2")}),
+              calllog=None if a.no_call_log else kit_tools.CallLog(
+                  a.call_log or call_log_path(session, os.path.abspath(a.log_dir)), "oot-pair"))
+        return 0
     if not a.player:
         if not a.session:
             p.error("give --session, or --player (and --session when the games came from live.py start)")
