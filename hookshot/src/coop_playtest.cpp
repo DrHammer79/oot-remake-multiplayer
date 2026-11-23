@@ -27,6 +27,7 @@
 #include "common/logging.h"
 #include "coop_cheats.h"
 #include "coop_hook.h"
+#include "coop_pause.h"
 #include "coop_playtest_core.h"
 #include "coop_testinput.h"
 #include "core/core.h"
@@ -253,6 +254,7 @@ private:
 };
 
 Control g_control;  // (the bridge's thread only)
+bool g_verbs_kit = false, g_verbs_cheats = false;   // the gate for act, flag, warp and give (set at Start)
 
 // ---- the state ----
 
@@ -327,6 +329,7 @@ std::string StateMembers(bool full_world = false) {
         first = false;
     }
     out += "]}";
+    out += ",\"menu\":" + Quote(CoopPause::MenuState());
     out += WorldText(full_world);
     return out;
 }
@@ -344,9 +347,10 @@ std::string Handle(const Request& r) {
     const auto fail = [&](std::string_view code, std::string_view why) {
         return ErrorReply(r.id, gate.Frame(), gate.Held(), code, why);
     };
-    const auto played = [&](const std::string& lines, std::string& error) {
+    const auto played = [&](const std::string& lines, std::string& error,
+                            const std::vector<CoopTestInput::Kind>* allowed = nullptr) {
         bool done = false;
-        const bool ran = gate.RunHeld([&] { done = CoopTestInput::PlayNow(*g_system, lines, error); }, kHoldWait);
+        const bool ran = gate.RunHeld([&] { done = CoopTestInput::PlayNow(*g_system, lines, error, allowed); }, kHoldWait);
         if (!ran) error = "the game was not held in time (a load, or no frame hook)";
         return ran && done;
     };
@@ -374,6 +378,16 @@ std::string Handle(const Request& r) {
         std::uint64_t from = 0;
         if (!gate.Step(r.frames, kHoldWait, &from)) return fail("timeout", "the frames did not run in time");
         return ok("\"from\":" + std::to_string(from) + ",\"state\":" + StateObject());
+    }
+    // The commands that change the game reach the wire and other players' games: only in a kit run with cheats on.
+    if (r.cmd == "act" || r.cmd == "warp" || r.cmd == "flag" || r.cmd == "give") {
+        const std::string refusal = VerbRefusal(g_verbs_kit, g_verbs_cheats);
+        if (!refusal.empty()) return fail("refused", refusal);
+    }
+    if (r.cmd == "act") {
+        std::string error;
+        if (!played(r.lines, error, &CoopTestInput::ActKinds())) return fail("failed", error);
+        return ok("\"lines\":" + Quote(r.lines) + ",\"note\":\"asked: the game does it on its next frames\"");
     }
     if (r.cmd == "warp") {
         std::string error;
@@ -566,6 +580,9 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     g_gate = std::make_unique<Gate>(IdleFrom(Env("LICHII_COOP_PLAYTEST_IDLE")));
     g_enabled.store(true);
     CoopWorldSnapshot::TheStore().Enable(&BridgeFrame);  // the object walk fills the `world` list from now on
+    g_verbs_kit = EnvIsOn(Env("OOT_COOP_KIT_START"));
+    g_verbs_cheats = CoopCheats::On();
+    LOG_INFO(Core, "coop: playtest: {}", VerbGateLine(g_verbs_kit, g_verbs_cheats));
     g_thread = std::thread(Run);
     LOG_INFO(Core, "coop: playtest: listening on 127.0.0.1:{} (control {}; dumps and shots in {})", *port,
              Env("HOS_CONTROL").empty() ? "off: HOS_CONTROL unset" : "on", g_dir.generic_string());

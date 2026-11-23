@@ -2201,3 +2201,13 @@ TEST_CASE("pause tab: Settings: Character by age shows only with the mod, then t
     m.Press(Input::kLeft);
     CHECK(m.TakeRequest()->text == "off");
 }
+
+TEST_CASE("pause menu: every page has the word the play-test bridge's menu member shows") {
+    CHECK(std::string(PageWord(Page::kMain)) == "main");
+    CHECK(std::string(PageWord(Page::kCustomize)) == "customize");
+    CHECK(std::string(PageWord(Page::kFind)) == "find");
+    for (const Page p : {Page::kMain, Page::kHost, Page::kJoin, Page::kLocal, Page::kSettings, Page::kCommands,
+                         Page::kCustomize, Page::kFind}) {
+        CHECK(std::string(PageWord(p)) != "unknown");
+    }
+}

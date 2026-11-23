@@ -800,6 +800,60 @@ std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, 
 
 } // namespace CoopTestInput
 
+namespace CoopTestInput {
+
+const std::vector<Kind>& ActKinds() {
+    static const std::vector<Kind> kinds = {Kind::kill, Kind::hit,  Kind::hurt,    Kind::place, Kind::face,
+                                            Kind::aim,  Kind::wear, Kind::dress,   Kind::assign, Kind::chat,
+                                            Kind::menu, Kind::setflag, Kind::setenum};
+    return kinds;
+}
+
+const char* KindWord(Kind kind) {
+    switch (kind) {
+    case Kind::timed: return "timed";
+    case Kind::mark: return "mark";
+    case Kind::go: return "goto";
+    case Kind::toward: return "toward";
+    case Kind::warp: return "warp";
+    case Kind::give: return "give";
+    case Kind::wear: return "wear";
+    case Kind::assign: return "assign";
+    case Kind::dress: return "dress";
+    case Kind::chat: return "chat";
+    case Kind::place: return "place";
+    case Kind::face: return "face";
+    case Kind::aim: return "aim";
+    case Kind::kill: return "kill";
+    case Kind::hurt: return "hurt";
+    case Kind::hit: return "hit";
+    case Kind::stun: return "stun";
+    case Kind::drop: return "drop";
+    case Kind::setflag: return "setflag";
+    case Kind::setenum: return "setenum";
+    case Kind::sync: return "sync";
+    case Kind::menu: return "menu";
+    case Kind::dump: return "dump";
+    }
+    return "?";
+}
+
+std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed) {
+    for (const Step& s : script.steps) {
+        if (std::find(allowed.begin(), allowed.end(), s.kind) != allowed.end()) {
+            continue;
+        }
+        std::string list;
+        for (const Kind k : allowed) {
+            list += (list.empty() ? "" : " ") + std::string(KindWord(k));
+        }
+        return "line " + std::to_string(s.line) + ": " + KindWord(s.kind) + " is not allowed here (allowed: " + list + ")";
+    }
+    return {};
+}
+
+} // namespace CoopTestInput
+
 #ifdef LICHII_COOP
 
 #include <array>
@@ -1430,10 +1484,16 @@ void SetMenuOpener(MenuOpener opener) {
     g_menu_opener = std::move(opener);
 }
 
-bool PlayNow(Core::System& system, std::string_view lines, std::string& error) {
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error, const std::vector<Kind>* allowed) {
     auto script = Parse(lines, error);
     if (!script) {
         return false;
+    }
+    if (allowed) {
+        error = NotAllowed(*script, *allowed);
+        if (!error.empty()) {
+            return false;
+        }
     }
     std::lock_guard play_lock(g_play_mu);
     const auto player = PlayerXZ(system);

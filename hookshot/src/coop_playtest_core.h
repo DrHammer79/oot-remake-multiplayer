@@ -89,6 +89,7 @@ struct Request {
     std::optional<Axes> stick, rstick;
     bool exclusive = true;
     std::string scene, entrance, name, item, tag, value;
+    std::string lines;  // act: one test-script line (kill, hit, hurt, place, ...); PlayNow checks its kind
     double timeout_s = 60;
 };
 // The request on one line, or `error` (bad_request's message).
@@ -107,6 +108,15 @@ std::string Quote(std::string_view text);
 // A value as JSON on one line, no spaces (CoopModJson::Write is for files: it indents objects and ends with a
 // newline, which would split a reply in two).
 std::string Compact(const CoopModJson::Value& value);
+
+// The verbs that change the game (act, flag, warp, give) run only in a kit run (OOT_COOP_KIT_START: the kit's start
+// file and the autotest set it) with cheats on (LICHII_COOP_CHEATS). A real host's game connects to its own server at
+// 127.0.0.1, so a loopback server is no sign of a test. Empty when allowed, else the reason (the error reply's text).
+std::string VerbRefusal(bool kit_run, bool cheats);
+// The line the bridge logs at start: "verbs on|off (kit run: yes|no, cheats: on|off)".
+std::string VerbGateLine(bool kit_run, bool cheats);
+// Whether an environment value counts as on (set, not empty, not "0").
+bool EnvIsOn(std::string_view value);
 
 // The `world` member of `state` (docs/playtest.md): the actors near our Link from the object walk's last snapshot.
 // "" (no member) when the snapshot switch is off, so the old reply stays byte for byte the same. `now_frame` is the

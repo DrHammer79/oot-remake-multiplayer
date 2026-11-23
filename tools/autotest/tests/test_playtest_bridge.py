@@ -100,6 +100,8 @@ class FakeGame:
         if cmd == "give":
             self.items[m["item"]] = self.items.get(m["item"], 0) + 1
             return {"ok": True, "given": m["item"]}
+        if cmd == "act":
+            return {"ok": True, "lines": m["lines"]}
         if cmd == "dump":
             path = os.path.join(self.dump_dir, "%s.json" % m["tag"])
             with open(path, "w", encoding="utf-8") as f:
@@ -255,10 +257,40 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "walk_to", "press", "step", "warp", "flag", "give", "checkpoint",
+                         ["get_state", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                          "dress", "assign", "chat", "menu", "checkpoint",
                           "desync_check", "pause", "resume", "log", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
+
+    def test_verb_tools_send_one_checked_line_through_act(self):
+        cases = [("kill", {"actor": "Enemy_Test"}, "kill Enemy_Test"),
+                 ("hit", {"actor": "Enemy_Test", "amount": 3}, "hit Enemy_Test 3"),
+                 ("hurt", {"quarter_hearts": 4}, "hurt 4"),
+                 ("place", {"x": 1, "y": 0.5, "z": -2}, "place 1 0.5 -2"),
+                 ("wear", {"part": "head", "name": "Hat_A"}, "wear head Hat_A"),
+                 ("dress", {}, "dress all"),
+                 ("dress", {"part": "boots"}, "dress boots"),
+                 ("assign", {"item": "Bow"}, "assign Bow"),
+                 ("chat", {"text": "hello there"}, "chat hello there"),
+                 ("menu", {"page": "customize"}, "menu customize")]
+        for tool, args, line in cases:
+            self.assertEqual(self.call("p1", tool, **args)["lines"], line)
+            sent = self.games["p1"].log[-1]
+            self.assertEqual((sent["cmd"], sent["lines"]), ("act", line))
+
+    def test_verb_tools_refuse_bad_arguments_before_sending(self):
+        before = len(self.games["p1"].log)
+        bad = [("kill", {"actor": "a b"}), ("kill", {}), ("hit", {"actor": "E", "amount": 0}),
+               ("hit", {"actor": "E", "amount": 81}), ("hurt", {"quarter_hearts": "x"}),
+               ("place", {"x": 1, "y": 2}), ("place", {"x": float("nan"), "y": 0, "z": 0}),
+               ("wear", {"part": "tail", "name": "X"}), ("dress", {"part": "tail"}), ("assign", {"item": "A;B"}),
+               ("chat", {"text": "a;b"}), ("chat", {"text": "a\nb"}), ("chat", {"text": " "}),
+               ("chat", {"text": "x" * 201}), ("menu", {"page": "home"})]
+        for tool, args in bad:
+            with self.assertRaises(ValueError, msg=tool):
+                self.call("p1", tool, **args)
+        self.assertEqual(len(self.games["p1"].log), before)
 
     def test_press_warp_flag_give_step_resume(self):
         r = self.call("p1", "press", buttons=["a", "ZL"], stick_angle=90, stick_strength=1.0, frames=4)

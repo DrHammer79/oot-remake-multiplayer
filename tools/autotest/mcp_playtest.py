@@ -12,6 +12,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -56,6 +57,94 @@ FRAMES = {"type": "integer", "minimum": 1, "maximum": 3600}
 PAUSED = ("Every reply has the game's frame count; the game is paused between calls and only runs the frames a "
           "call asks for.")
 
+# The verbs that run one test line through the bridge's `act` (docs/playtest.md, "act"). Each is checked here before
+# it is sent; the bridge checks the kind again.
+WORD = re.compile(r"^[A-Za-z0-9_.:+-]{1,96}$")
+PARTS = ("weapon", "shield", "head", "armor", "boots", "hand")
+
+
+def _word(args, key):
+    v = str(args.get(key, ""))
+    if not WORD.match(v):
+        raise ValueError("%s: letters, digits and _ . : + - only (no spaces)" % key)
+    return v
+
+
+def _num(args, key, lo=None, hi=None):
+    try:
+        v = float(args[key])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("%s: a number" % key)
+    if v != v or v in (float("inf"), float("-inf")) or (lo is not None and v < lo) or (hi is not None and v > hi):
+        raise ValueError("%s: a number from %s to %s" % (key, lo, hi))
+    return ("%g" % v) if v != int(v) else str(int(v))
+
+
+def act_line(name, args):
+    """The one test line a verb tool sends (None: not a verb tool)."""
+    if name == "kill":
+        return "kill " + _word(args, "actor")
+    if name == "hit":
+        return "hit %s %s" % (_word(args, "actor"), _num(args, "amount", 1, 80))
+    if name == "hurt":
+        return "hurt " + _num(args, "quarter_hearts", 1, 80)
+    if name == "place":
+        return "place %s %s %s" % (_num(args, "x"), _num(args, "y"), _num(args, "z"))
+    if name == "wear":
+        part = str(args.get("part", ""))
+        if part not in PARTS:
+            raise ValueError("part: one of " + ", ".join(PARTS))
+        return "wear %s %s" % (part, _word(args, "name"))
+    if name == "dress":
+        part = str(args.get("part", "all"))
+        if part not in PARTS + ("all",):
+            raise ValueError("part: one of all, " + ", ".join(PARTS))
+        return "dress " + part
+    if name == "assign":
+        return "assign " + _word(args, "item")
+    if name == "chat":
+        text = str(args.get("text", ""))
+        if not text.strip() or len(text) > 200 or any(ord(c) < 32 or c in ";#" for c in text):
+            raise ValueError("text: 1 to 200 characters, no new line, ';' or '#'")
+        return "chat " + text
+    if name == "menu":
+        page = str(args.get("page", ""))
+        if page not in ("customize", "close"):
+            raise ValueError("page: customize or close")
+        return "menu " + page
+    return None
+
+
+ACT_NOTE = ("Needs a kit run with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
+            "use it on the test server only. The game does it on its next frames: step a few, then get_state.")
+ACT_TOOLS = [
+    {"name": "kill", "description": "Kill an enemy actor by its name (from get_state's world list). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["actor"], "properties": {"actor": {"type": "string"}}}},
+    {"name": "hit", "description": "Hit an actor for N quarter hearts. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["actor", "amount"],
+                     "properties": {"actor": {"type": "string"},
+                                    "amount": {"type": "integer", "minimum": 1, "maximum": 80}}}},
+    {"name": "hurt", "description": "Hurt Link for N quarter hearts (a hit from a metre east). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["quarter_hearts"],
+                     "properties": {"quarter_hearts": {"type": "integer", "minimum": 1, "maximum": 80}}}},
+    {"name": "place", "description": "Put Link at a point (x, y, z in metres). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["x", "y", "z"],
+                     "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}}},
+    {"name": "wear", "description": "Set what Link wears in a slot (the flags only; `dress` puts it on). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["part", "name"],
+                     "properties": {"part": {"type": "string", "enum": list(PARTS)}, "name": {"type": "string"}}}},
+    {"name": "dress", "description": "Put on what `wear` set, through the game's own equip call. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "properties": {"part": {"type": "string", "enum": ["all"] + list(PARTS)}}}},
+    {"name": "assign", "description": "Put an item on a button (Bow, Hookshot, Hammer, SlingShot, Bomb, ...). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
+    {"name": "chat", "description": "Send a chat message as this player. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
+    {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `menu` member "
+     "says where it is. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["page"],
+                     "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
+]
+
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
 PLAYER_TOOLS = [
     {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
@@ -90,6 +179,7 @@ PLAYER_TOOLS = [
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, or an item flag name the cheats "
      "panel knows). It is there after the next frame: step 1 before checking.",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
+] + ACT_TOOLS + [
     {"name": "checkpoint", "description": "Write this game's shared flags and state under a tag (letters, digits, "
      "- and _) with its frame count, to the run's checkpoint log. Take the same tag on EVERY game after each "
      "action that should sync, then run desync_check.",
@@ -168,6 +258,9 @@ class Game:
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":
             return c.give(args["item"])
+        line = act_line(name, args)
+        if line is not None:
+            return c.act(line)
         if name == "pause":
             return c.pause()
         if name == "resume":

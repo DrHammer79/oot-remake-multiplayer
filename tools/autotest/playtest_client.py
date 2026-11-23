@@ -157,6 +157,11 @@ class Client:
     def give(self, item):
         return self.request("give", item=item)
 
+    def act(self, line):
+        """One test line (kill, hit, hurt, place, face, aim, wear, dress, assign, chat, menu, setflag, setenum), run
+        inside the held frame. The bridge refuses any other kind, a second line, ';' and '#' (docs/playtest.md)."""
+        return self.request("act", lines=line)
+
     def dump(self, tag):
         return self.request("dump", tag=tag)
 

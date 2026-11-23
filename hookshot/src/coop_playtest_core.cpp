@@ -299,6 +299,21 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         }
         return r;
     }
+    if (c == "act") {
+        const auto lines = v->Text("lines");
+        if (!lines || lines->empty() || lines->size() > 256) {
+            error = "lines: one test line of at most 256 characters (kill NAME, hit NAME N, hurt N, place X Y Z, ...)";
+            return std::nullopt;
+        }
+        for (const char ch : *lines) {  // one line only: no second line, no comment, no control character
+            if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f || ch == '#' || ch == ';') {
+                error = "lines: one line, with no new line, ';' or '#'";
+                return std::nullopt;
+            }
+        }
+        r.lines = *lines;
+        return r;
+    }
     if (c == "give") {
         const auto item = v->Text("item");
         if (!item || !PlainText(*item, 128)) {
@@ -325,7 +340,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, warp, flag, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, act, warp, flag, give, dump or shot";
     return std::nullopt;
 }
 
@@ -394,6 +409,22 @@ std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool p
            Quote(message) + "}";
 }
 
+bool EnvIsOn(std::string_view value) { return !value.empty() && value != "0"; }
+
+std::string VerbRefusal(bool kit_run, bool cheats) {
+    if (!kit_run) {
+        return "refused: this is not a kit run (OOT_COOP_KIT_START is not set), and these commands reach the wire and "
+               "other players";
+    }
+    if (!cheats) return "refused: cheats are off (LICHII_COOP_CHEATS is not set)";
+    return {};
+}
+
+std::string VerbGateLine(bool kit_run, bool cheats) {
+    return std::string("verbs ") + (kit_run && cheats ? "on" : "off") + " (kit run: " + (kit_run ? "yes" : "no") +
+           ", cheats: " + (cheats ? "on" : "off") + ")";
+}
+
 namespace {
 std::string Num(float v) {
     char buf[32];
@@ -431,7 +462,6 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
         out += ",\"why\":" + Quote("stale: no walk for " + std::to_string(age) + " ms (a load, or the session ended)");
     } else if (snapshot->actors.empty()) {
         out += ",\"why\":\"empty: the walk ran and saw no actors\"";
-
     } else if (count == 0 && other > 0) {  // (state only: the dump lists them)
         out += ",\"why\":\"only other kinds near: dump lists them\"";
     }

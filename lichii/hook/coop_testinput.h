@@ -195,6 +195,16 @@ std::string WarpGiveUpLine(std::string_view target, double seconds, const std::o
 // "line N: why".
 std::optional<Script> Parse(std::string_view text, std::string& error);
 
+// The kinds the play-test bridge's `act` command may run (hookshot/src/coop_playtest.cpp): kill, hit, hurt, place, face,
+// aim, wear, dress, assign, chat, menu, setflag, setenum. The rest of what a script can do has its own bridge command or
+// makes no sense while the game is held (wait, hold, press, goto, toward, sync, mark, dump, warp, give, stun, drop).
+const std::vector<Kind>& ActKinds();
+// The word a script line starts with for this kind ("kill", "goto", ...; a timed step: "timed").
+const char* KindWord(Kind kind);
+// Empty when every step of `script` is one of `allowed`; else "line N: WORD is not allowed here (allowed: ...)". The check is
+// on the parsed kinds, so case, spacing and a hidden second line cannot get past it.
+std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
+
 // `aim` (row 173): where an arrow flying from `from` is put so it goes into `target`: `short_m` short of the target
 // on the line from `from` (at `from` when nearer than that), turned to face it (place, then the 3x3 rows, as the
 // actor's +0x31c..+0x34b: column 2 is the way it faces, column 1 the up nearest the world's). Nothing when the two
@@ -328,7 +338,10 @@ void OnFrame(Core::System& system);
 // assign, dress, place, face, aim, kill, hit, stun, drop, hurt, chat, menu, dump, mark. A `warp` (alone) begins a
 // script that asks again as frames run (OnFrame) until Link is in that scene. Timed steps (hold, goto, ...) are
 // refused: the bridge's own input moves Link. False with `error` for a bad or refused line.
-bool PlayNow(Core::System& system, std::string_view lines, std::string& error);
+// `allowed` (the bridge's `act` gives ActKinds()): a script with a step of another kind is refused whole, before any
+// step runs. Null: every kind PlayNow can do (the bridge's warp, flag and give lines).
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error,
+             const std::vector<Kind>* allowed = nullptr);
 
 // The value of every flag a dump writes (the shared dungeon and story lists; Bool as 0 or 1), in list order.
 std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& system);

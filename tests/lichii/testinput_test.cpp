@@ -805,3 +805,28 @@ TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, f
     CHECK_FALSE(AimPlace(eye, eye, 0.6f).has_value());
     CHECK_FALSE(AimPlace({std::nanf(""), 0.0f, 0.0f}, eye, 0.6f).has_value());
 }
+
+TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses the whole script otherwise") {
+    const auto& allowed = ActKinds();
+    CHECK(NotAllowed(Must("kill Enemy_Test\nhit Enemy_Test 2\nhurt 2\nplace 1 2 3\nface 1 2\nchat hello"), allowed).empty());
+    CHECK(NotAllowed(Must("menu customize"), allowed).empty());
+    CHECK(NotAllowed(Must("setflag some_flag 1"), allowed).empty());
+    // an unlisted kind: a wait, a warp, a give, a sync, a dump
+    const std::string wait = NotAllowed(Must("wait 1"), allowed);
+    CHECK(wait.find("not allowed here") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("warp Market_Child"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("give bombs"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("sync title 2"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("dump x"), allowed).empty());
+    // a hidden second command (new line), in a different case, behind a legal first one
+    const std::string hidden = NotAllowed(Must("kill Enemy_Test\nWARP Market_Child"), allowed);
+    CHECK(hidden.find("line 2") != std::string::npos);
+    CHECK(hidden.find("warp") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("KILL Enemy_Test\nGive bombs"), allowed).empty());
+    // the list in the message
+    CHECK(wait.find("kill") != std::string::npos);
+    CHECK(wait.find("chat") != std::string::npos);
+    // every kind has a word and a word that Parse reads back as that kind is how the table is kept honest
+    CHECK(std::string(KindWord(Kind::go)) == "goto");
+    for (const Kind k : allowed) CHECK(std::string(KindWord(k)) != "?");
+}

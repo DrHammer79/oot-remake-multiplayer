@@ -112,8 +112,20 @@ step them in turn, the same number of frames.
 | `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs (10 frames at a time) until Link is in that scene with no event or load, then holds again. Replies with `"arrived": true` and the `state`; after the timeout, still held, `timeout` with the state in `message` |
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
 | `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
+| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`: the game does it on its next frames, so `step` a few and read the `state`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
+
+**The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only in a
+kit run with cheats on: `OOT_COOP_KIT_START` set (the runner sets it) and `LICHII_COOP_CHEATS=1` (the runner sets it
+too). Otherwise the reply is `refused` with one of:
+
+- `refused: this is not a kit run (OOT_COOP_KIT_START is not set), and these commands reach the wire and other players`
+- `refused: cheats are off (LICHII_COOP_CHEATS is not set)`
+
+A real host's game connects to its own server at 127.0.0.1, so an address check could not tell a test from a real
+session; the kit variable is the gate. At start the module logs `coop: playtest: verbs on|off (kit run: yes|no,
+cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause` and `shot` are not gated.
 
 ### State
 
@@ -129,7 +141,8 @@ step them in turn, the same number of frames.
 Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
 quarter hearts. `snapshot_present` is Longshot's present count when it was taken (Link's last update; on a title,
 pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
-stays `null` until the room is found in memory.
+stays `null` until the room is found in memory. `menu` is the co-op menu's page (`"closed"`, or the page's name such as
+`"customize"`); it does not see the game's own pause screen.
 
 **`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
 the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk
@@ -250,6 +263,7 @@ only, no `pip install`.
 | `warp scene [entrance]` | The game's own scene change; it returns once Link is there with no event or load |
 | `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
 | `give item` | Gives the item through the cheats queue: it shows after the next frame (`step 1`) |
+| `kill actor`, `hit actor amount`, `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
 | `log [match]` | The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
