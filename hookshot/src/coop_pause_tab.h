@@ -224,6 +224,13 @@ public:
     // Longshot's settings there).
     void SetSettingsUsable(bool usable) { settings_ok_ = usable; }
     bool SettingsUsable() const { return settings_ok_; }
+    // Player report 261: the Longshot Settings button opens Longshot's OWN menu (its F1 / Insert menu: every row, its tabs
+    // and helps), not our copy of its rows on this page. On (the module can open that menu on this platform): A on the
+    // button never shows the page; TakeOpenLongshotMenu says once that the module opens Longshot's menu now. Off (no way
+    // to open it here): the button is not offered at all (SettingsUsable false), never our copy.
+    void SetLongshotMenu(bool can_open) { longshot_menu_ = can_open; }
+    bool LongshotMenu() const { return longshot_menu_; }
+    bool TakeOpenLongshotMenu() { return std::exchange(open_longshot_, false); }
     // Which of System's buttons of ours the game's cursor is on now (the module reads it while A is held): 0 the
     // Multiplayer button (Pa_Button_06), 1 the Longshot Settings button (Pa_Button_05), 2 the Customize Link button
     // (Pa_Button_07: the Multiplayer page, opened on Settings and look's Customize page), -1 neither. Its A opens that
@@ -422,6 +429,7 @@ private:
     const char* strip_sound_ = nullptr;
     int which_ = 0;   // our page shown: 0 Multiplayer, 1 Longshot Settings (kept while hidden: the menu opens on it again)
     bool settings_ok_ = false;
+    bool longshot_menu_ = false, open_longshot_ = false;   // SetLongshotMenu, TakeOpenLongshotMenu
     int system_button_ = -1;
     int opened_from_ = 0;
     bool customize_open_ = false;

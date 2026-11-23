@@ -2076,8 +2076,9 @@ TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page 
     CHECK_FALSE(p.TakeCustomizeOpen());
 }
 
-TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in System's place, B back, L or R the game's") {
+TEST_CASE("pause tab: Longshot Settings opens Longshot's own menu, never our copy of its rows (player report 261)") {
     Page p = UsablePage();
+    p.SetLongshotMenu(true);
     p.SetSettingsUsable(true);
     std::uint64_t now = 1000;
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
@@ -2087,68 +2088,52 @@ TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in Sy
     p.SetSystemButton(-1);
     CHECK(p.OnPad(kPadA, now + 16) == kPadA);
     CHECK_FALSE(p.Shown());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
     p.OnPad(0, now + 32);
-    // A on the Longshot Settings button: the page at once, the game's A kept from it.
+    // A on the Longshot Settings button: Longshot's own menu (once), the game's A kept from the button, no page of ours.
     p.SetSystemButton(1);
     CHECK(p.OnPad(kPadA, now + 48) == 0);
-    CHECK(p.TakeOpened());
+    CHECK(p.TakeOpenLongshotMenu());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    CHECK_FALSE(p.Shown());
     CHECK_FALSE(p.TakeOpened());
-    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
-    CHECK(d.set_page);
-    CHECK(d.page_from == 0);
-    CHECK(d.page_to == 2);
-    CHECK(d.slide == 0);
-    CHECK(p.Which() == 1);
-    CHECK(p.MousePage() == -1);   // (in System's place: the mouse's tabs stay the game's)
-    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80).any());   // (System's tab stays lit)
+    CHECK(p.Which() == 0);
+    // System's pages stay the game's: nothing set, System's tab lit.
+    CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64).set_page);
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80).any());
+    // Held, the A opens it no second time; let go and pressed again, it does.
+    CHECK(p.OnPad(kPadA, now + 96) == 0);
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    p.OnPad(0, now + 112);
+    CHECK(p.OnPad(kPadA, now + 128) == 0);
+    CHECK(p.TakeOpenLongshotMenu());
+    p.OnPad(0, now + 144);
     p.SetSystemButton(-1);
-    // B in its list goes back to its rows; B on its rows goes back to System, its cursor on the button again.
-    p.OnPad(0, now + 96);
-    p.SetSubView(true);
-    p.OnPad(kPadB, now + 112);
-    CHECK(p.TakeBack());
+    // The Multiplayer button's A still opens the Multiplayer page (0), not the Longshot Settings page.
+    p.SetSystemButton(0);
+    CHECK(p.OnPad(kPadA, now + 160) == 0);
     CHECK(p.Shown());
-    CHECK_FALSE(p.TakeLeft());
-    p.SetSubView(false);
-    p.OnPad(0, now + 128);
-    CHECK(p.OnPad(kPadB, now + 144) == 0);   // (the game's B would close the menu)
-    CHECK_FALSE(p.Shown());
-    CHECK(p.TakeLeft());
-    CHECK(p.Which() == 1);
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 160);
+    CHECK(p.Which() == 0);
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 176);
     CHECK(d.set_page);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
-    // R on Longshot Settings: System back at once, and the R is the game's.
-    p.OnPad(0, now + 176);
+    CHECK(d.page_to == 1);   // (the Multiplayer page; 2, the old Longshot Settings page, is never shown)
+}
+
+TEST_CASE("pause tab: Longshot Settings where its menu cannot be opened shows nothing of ours (player report 261)") {
+    Page p = UsablePage();
+    p.SetLongshotMenu(false);
+    p.SetSettingsUsable(true);   // (the module never offers it then; even so, no copy of its rows)
+    std::uint64_t now = 1000;
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
+    p.OnPad(0, now);
     p.SetSystemButton(1);
-    p.OnPad(kPadA, now + 192);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 208);
-    p.SetSystemButton(-1);
-    p.OnPad(0, now + 224);
-    CHECK(p.OnPad(kPadR, now + 240) == kPadR);
+    CHECK(p.OnPad(kPadA, now + 16) == 0);   // (kept from the game: it does not know the button)
     CHECK_FALSE(p.Shown());
-    CHECK(p.TakeWhy() == "L or R on Longshot Settings");
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 256);
-    CHECK(d.set_page);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
-    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 272).any());   // (the strip's: nothing of ours)
-    // L on Longshot Settings: System back at once, and the L is the game's (on to Items).
-    p.OnPad(0, now + 336);
-    p.SetSystemButton(1);
-    p.OnPad(kPadA, now + 352);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 368);
-    p.SetSystemButton(-1);
-    p.OnPad(0, now + 384);
-    CHECK(p.OnPad(kPadL, now + 400) == kPadL);
-    CHECK_FALSE(p.Shown());
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 416);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
+    CHECK_FALSE(p.TakeOpened());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    CHECK(p.Which() == 0);
 }
 
 TEST_CASE("pause tab: without Longshot Settings (an older pack, or no settings from Longshot), A on its place is the game's") {
