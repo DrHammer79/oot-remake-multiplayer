@@ -7738,6 +7738,53 @@ TEST_CASE("row 149: a stuck boss's freed fight lets a copy's chase hand it over"
   CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
 }
 
+TEST_CASE("row 222 follow-up: a boss part cut loose from its group keeps the group's fight, so no chase moves it") {
+  // Twinrova's merge: the battle manager (7) and the sisters leave every game, Twinrova (8) stays. Every fight mark
+  // of the group was on its root; on her own she must still be in that fight, or a copy's chase hands her over.
+  auto fight_on_root = [](OwnerHarness& h) {
+    h.receive(1, present_in("Field", {placed(7), placed(8)}), kChannelOwnership);
+    h.receive(2, present_in("Field", {placed(7), placed(8)}), kChannelOwnership);
+    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}, {placed(8), placed(7), object_group::boss}}},
+              kChannelOwnership);
+    h.stand(1, 34);
+    h.stand(2, 60);
+    ObjectState s = state_at(0, 24);
+    s.state = object_state::in_fight;
+    h.receive(1, ObjectSample{0, placed(8), 0, s}, kChannelObjectSamples);
+    CHECK(h.session.object_in_fight(placed(8), h.now));  // (read through its root)
+  };
+  auto chase = [](OwnerHarness& h) {
+    h.clear();
+    ObjectPresent p = present_in("Field", {placed(8)});
+    p.objects[0].flags = object_presence::targeting;
+    h.receive(2, p, kChannelOwnership);
+    for (int i = 0; i < 8; ++i) h.run(kSecond);
+  };
+  SessionConfig config = quiet_config();
+  config.boss_near_hold_us = 0;
+  {
+    // The root forgotten (nobody has it loaded any more).
+    OwnerHarness h(config);
+    fight_on_root(h);
+    h.receive(2, present_in("Field", {placed(8)}), kChannelOwnership);
+    h.receive(1, present_in("Field", {placed(8)}), kChannelOwnership);
+    CHECK_FALSE(h.session.object_owner(placed(7)).has_value());
+    CHECK(h.session.object_in_fight(placed(8), h.now));
+    chase(h);
+    CHECK(h.asks() == 0);
+    CHECK(h.session.object_owner(placed(8)) == owned(1, 0));
+  }
+  {
+    // The part made a root of its own by a game's group list.
+    OwnerHarness h(config);
+    fight_on_root(h);
+    h.receive(1, ObjectGroup{0, {{placed(8), placed(8), object_group::boss}}}, kChannelOwnership);
+    CHECK(h.session.object_in_fight(placed(8), h.now));
+    chase(h);
+    CHECK(h.asks() == 0);
+  }
+}
+
 TEST_CASE("row 149: a boss stuck in one move with no animation or life in its samples is never judged") {
   SessionConfig config = quiet_config();
   config.boss_near_hold_us = 0;
@@ -7763,7 +7810,7 @@ TEST_CASE("row 149: a boss part first listed by another game takes its root's ow
   CHECK(h.session.object_owner(placed(8)) == owned(2, 0));
   h.clear();
   h.receive(1, ObjectGroup{0, {{placed(8), placed(7), object_group::boss}}}, kChannelOwnership);
-  CHECK(h.session.object_owner(placed(8)) == owned(1, 1));
+  CHECK(h.session.object_owner(placed(8)) == owned(1, 0));
   CHECK(h.session.stats().parts_to_root == 1);
   CHECK(messages_to<HandoverAsk>(h, 2).empty());
   // Player 2's game learns it is a copy now.

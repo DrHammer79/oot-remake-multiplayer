@@ -695,6 +695,15 @@ and a call in flight, as the boss table's own block.
 The sisters' own messages to each other (`ExecuteEnemyCoopWriteBlackboardReceiveMessage`, types 0x3ddc000e/f) are
 not orders and are left to each game.
 
+**A part cut loose keeps its group's fight (twinrova-01112, proof run 20261123-001227).** At the merge both games remove
+the manager and the sisters, so the server forgets the group's root and Twinrova is a root of her own. The server keeps
+a group's fight lock on its root alone (`mark_fight`, `in_fight`), so she came out with none: "out of a fight" mid-fight,
+and the out-of-fight chase rule (issue 101, `a copy chased its own player`) moved her from player 2 to player 1 while
+her group's owner was player 2. Now `Session::unlink` and `Session::forget` give a member cut loose the root's lock
+(root forgotten, member listed as its own root, member moved to another root, which then takes it on). The rule is the
+server's, for every group (any boss whose root leaves or is regrouped while a part stays); the one seen in a run is
+Twinrova's merge. Test: session_test "row 222 follow-up: a boss part cut loose ...".
+
 Not proven in a game yet: the probe run (two games, hs-twinrova-native) must show the wrap's first-words check pass
 (`coop: bosses: battle manager orders shared (wrapped)`), `battle orders: ours sent N` in the owner's log and
 `N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
