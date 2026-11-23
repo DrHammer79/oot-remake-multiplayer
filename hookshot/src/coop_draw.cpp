@@ -310,19 +310,19 @@ float DrawBox(const HosCoopDraw& d, const std::optional<ChatBoxView>& box, const
         }
         return height;
     }
+    // The plain look (no pack, or a language the game's HUD font has no letters for): the same, in Hookshot's
+    // font, red when it was not sent; no box behind it and no red frame (owner, 2026-11-21: nothing drawn but text).
+    // Only when the game's own windows cannot carry the chat (LICHII_COOP_NATIVE_UI=0, no memory for the texts).
     const float width = at.width;
     const float height = px + 12.0f;
     const float top = d.height - kMargin - height;
-    if (box->failed) {
-        d.rect(d.user, kMargin - 2, top - 2, kMargin + width + 2, top + height + 2, Rgba(220, 60, 60, 230), 7.0f);
-    }
-    d.rect(d.user, kMargin, top, kMargin + width, top + height, Rgba(0, 0, 0, 190), 6.0f);
     const float room = width - 2 * kPad;
     if (box->text.empty()) {
         d.text(d.user, kMargin + kPad, top + 6, px, Rgba(255, 255, 255, 160),
                Elided(d, px, ChatPlaceholder(), room).c_str());
     } else {
-        d.text(d.user, kMargin + kPad, top + 6, px, Rgba(255, 255, 255, 255), Tail(d, px, box->text + "_", room).c_str());
+        d.text(d.user, kMargin + kPad, top + 6, px, box->failed ? Rgba(255, 122, 106, 255) : Rgba(255, 255, 255, 255),
+               Tail(d, px, box->text + "_", room).c_str());
     }
     return height;
 }
@@ -414,8 +414,7 @@ void DrawChat(const HosCoopDraw& d, const std::vector<ChatShown>& chat, float ab
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const std::string& text = rows[i].first;
         const int a = rows[i].second;
-        const float tw = d.text_width(d.user, px, text.c_str());
-        d.rect(d.user, kMargin - 4, y - 2, kMargin + tw + 4, y + px + 2, Rgba(0, 0, 0, a * 150 / 255), 4.0f);
+        // (no box behind the line, owner 2026-11-21; only when the game's own windows cannot carry the chat)
         d.text(d.user, kMargin, y, px, notice[i] ? Rgba(255, 220, 120, a) : Rgba(255, 255, 255, a), text.c_str());
         y += line;
     }
