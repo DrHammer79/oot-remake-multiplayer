@@ -748,7 +748,9 @@ TEST_CASE("a player flooding reliable messages is held to the rate, after a burs
   h.now += 500'000;
   h.session.tick(h.now);
   for (int i = 0; i < 100; ++i) h.receive(1, Chat{0, "spam"}, kChannelSession);
-  CHECK(h.to(2).size() == 30);
+  std::size_t chats = 0;  // (the tick's own PING to player 2 is no chat)
+  for (const Sent& sent : h.to(2)) chats += std::holds_alternative<Chat>(sent.message) ? 1 : 0;
+  CHECK(chats == 30);
   // PINGs share the budget, so a flood of them gets no flood of PONGs.
   h.clear();
   h.receive(1, Ping{1}, kChannelSession);
@@ -778,6 +780,7 @@ TEST_CASE("row 164 follow-up: reliable messages over the rate wait in order and 
     h.now += 100'000;
     h.session.tick(h.now);
   }
+  h.collect();
   std::vector<std::string> texts;
   for (const auto& sent : h.to(2)) {
     if (const auto* chat = std::get_if<Chat>(&sent.message)) texts.push_back(chat->text);
