@@ -1947,6 +1947,15 @@ TEST_CASE("rando: the hand-put seed's value on the wire") {
     CHECK_FALSE(ParseHandSeed("", &h, &f));
 }
 
+// The kit's merged.txt for a seed's size table (merge_tables.py stamp_text): the second line names the table written.
+void PutSizeStamp(const fs::path& seed, const std::string& table) {
+    const fs::path live = seed / "romfs" / "System" / "Resource" / table;
+    const std::string bytes = Get(live);
+    Put(seed / "_coop-size-table" / "merged.txt",
+        "coop-merged 1\nout " + seed.filename().string() + "/romfs/System/Resource/" + table + " " +
+            std::to_string(bytes.size()) + " " + Fnv64Hex(bytes) + "\n");
+}
+
 TEST_CASE("rando: two copies of a seed match by their files, also after the kit merged one") {
     const fs::path base = ModTestDir("coop-rando-hand-hash");
     const auto seed = [&](const std::string& name) {
@@ -1964,6 +1973,7 @@ TEST_CASE("rando: two copies of a seed match by their files, also after the kit 
     // The kit's start merged b: its table and actor rows rewritten, its own kept beside, its marks written.
     Put(b / "_coop-size-table" / "T.rsizetable.zs", "own table");
     Put(b / "romfs" / "System" / "Resource" / "T.rsizetable.zs", "merged table");
+    PutSizeStamp(b, "T.rsizetable.zs");
     Put(b / "_coop-rows" / "ActorInfo.Product.rstbl.byml.zs", "own rows");
     Put(b / "romfs" / "RSDB" / "ActorInfo.Product.rstbl.byml.zs", "merged rows");
     Put(b / kMergedFile, "coop-merged 1\n");
@@ -1988,6 +1998,41 @@ TEST_CASE("rando: two copies of a seed match by their files, also after the kit 
     CHECK(SeedFilesHash(base / "none").empty());
     const std::function<bool()> stop = [] { return true; };
     CHECK(SeedFilesHash(a, &stop).empty());
+}
+
+TEST_CASE("rando: a kept size table counts only while its stamp names the table now") {
+    const fs::path base = ModTestDir("coop-rando-hand-hash-stamp");
+    const auto seed = [&](const std::string& name, const std::string& table) {
+        const fs::path d = base / name;
+        Put(d / "romfs" / "Event" / "Flow.bfevfl.zs", "chest: hookshot");
+        Put(d / "romfs" / "System" / "Resource" / "T.rsizetable.zs", table);
+        Put(d / kSeedFile, "NAX1\n");
+        return d;
+    };
+    const std::string old_own = SeedFilesHash(seed("old", "old table"));
+    const std::string new_own = SeedFilesHash(seed("new", "new table"));
+    REQUIRE(old_own != new_own);
+    // The kit merged the old seed: its own table kept, a stamp naming the merged one.
+    const fs::path s = seed("s", "old table");
+    Put(s / "_coop-size-table" / "T.rsizetable.zs", "old table");
+    Put(s / "romfs" / "System" / "Resource" / "T.rsizetable.zs", "old merged");
+    PutSizeStamp(s, "T.rsizetable.zs");
+    CHECK(SeedFilesHash(s) == old_own);
+    // The seed is built again in the same folder: a new table, the old kept copy and stamp still there. The new table
+    // is the seed now (the old hash would make two players with the same new seed differ).
+    Put(s / "romfs" / "System" / "Resource" / "T.rsizetable.zs", "new table");
+    CHECK(SeedFilesHash(s) == new_own);
+    // No stamp, or one that names another file: the table itself.
+    fs::remove(s / "_coop-size-table" / "merged.txt");
+    CHECK(SeedFilesHash(s) == new_own);
+    Put(s / "_coop-size-table" / "merged.txt", "coop-merged 1\nout something/else 3 0000000000000000\n");
+    CHECK(SeedFilesHash(s) == new_own);
+    // A stamp that names the table now, the copy kept: back to the kept one.
+    Put(s / "romfs" / "System" / "Resource" / "T.rsizetable.zs", "old merged");
+    PutSizeStamp(s, "T.rsizetable.zs");
+    CHECK(SeedFilesHash(s) == old_own);
+    // A trailing separator on the folder changes nothing.
+    CHECK(SeedFilesHash(s / "") == old_own);
 }
 
 TEST_CASE("rando: the seed this run plays is a hand-put one only when not ours") {

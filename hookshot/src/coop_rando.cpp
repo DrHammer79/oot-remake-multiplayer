@@ -533,7 +533,29 @@ bool ParseHandSeed(std::string_view value, std::string* hash, std::string* folde
     return true;
 }
 
-std::string SeedFilesHash(const fs::path& folder, const std::function<bool()>* stop) {
+namespace {
+// The mod's own size table, kept by merge_tables.py when it rewrote the table in the mod (merged.txt: its second line
+// `out <table path under the mods folder> <length> <FNV-1a 64>` names the table it wrote). The kept copy counts only
+// while that line names the table now: a seed built again in the same folder leaves the old copy and stamp behind, and
+// the new table is the seed. Same rule as merge_tables.py original_table. Empty path: use the table itself.
+fs::path KeptSizeTable(const fs::path& folder, const fs::path& live, const fs::path& kept) {
+    std::error_code ec;
+    if (!fs::is_regular_file(kept, ec)) return {};
+    std::ifstream in(kept.parent_path() / "merged.txt", std::ios::binary);
+    std::string head, out;
+    if (!in || !std::getline(in, head) || !std::getline(in, out)) return {};
+    if (!out.empty() && out.back() == '\r') out.pop_back();
+    const std::string now = TablesStamp(folder.parent_path(), {live});  // "coop-tables 1\n<path> <length> <hash>\n"
+    const std::size_t at = now.find('\n');
+    const std::size_t end = now.find('\n', at + 1);
+    if (at == std::string::npos || end == std::string::npos) return {};
+    return out == "out " + now.substr(at + 1, end - at - 1) ? kept : fs::path();
+}
+}  // namespace
+
+std::string SeedFilesHash(const fs::path& folder_in, const std::function<bool()>* stop) {
+    fs::path folder = folder_in;
+    if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
     // path (lower case, '/') -> the file whose bytes stand for it
     std::vector<std::pair<std::string, fs::path>> files;
     std::error_code ec;
@@ -548,9 +570,10 @@ std::string SeedFilesHash(const fs::path& folder, const std::function<bool()>* s
         fs::path from = it->path();
         // The kit's start rewrites these in the mod whose tables win and keeps the mod's own beside (merge_tables.py).
         const fs::path name = it->path().filename();
+        fs::path kept_table;
         if (rel.rfind("system/resource/", 0) == 0 && rel.find('/', 16) == std::string::npos &&
-            fs::is_regular_file(folder / "_coop-size-table" / name, ec)) {
-            from = folder / "_coop-size-table" / name;
+            !(kept_table = KeptSizeTable(folder, it->path(), folder / "_coop-size-table" / name)).empty()) {
+            from = kept_table;
         } else if (rel.rfind("rsdb/", 0) == 0 && rel.find('/', 5) == std::string::npos &&
                    fs::is_regular_file(folder / "_coop-rows" / name, ec)) {
             from = folder / "_coop-rows" / name;
