@@ -44,6 +44,7 @@
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
+#include "coop_dbno_draw.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
 #include "coop_flag_native.h"
@@ -1148,7 +1149,20 @@ CoopDraw::Scene DrawScene() {
         s.chat = CoopDraw::ShownChat(CoopHook::ChatLines(), s.box.has_value());
     }
     s.markers = CoopHook::CurrentMarkers();
-    s.dbno = CoopDbno::Shown();  // down but not out: the ring
+    s.dbno = CoopDbno::Shown();  // down but not out: one line (coop_dbno_draw.h)
+    // With the game's own UI up (coop_native_ui.h: the banner is found and works), the line is held on the game's
+    // banner (SimpleInfo_00) and nothing is drawn; let go when down ends. Without it (LICHII_COOP_NATIVE_UI=0, a game
+    // that gave no memory): the drawn line, text only.
+    if (g_native_chat.load()) {
+        if (s.dbno) {
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::Line(*s.dbno));
+            s.dbno.reset();
+        } else if (CoopNativeUi::HeldBanner()) {
+            CoopNativeUi::EndBanner();
+        }
+    } else if (CoopNativeUi::HeldBanner()) {
+        CoopNativeUi::EndBanner();   // (the native UI went: the drawn line takes over)
+    }
     bool list = false, panel = false;
     {
         std::lock_guard lock(g_keys_mutex);
