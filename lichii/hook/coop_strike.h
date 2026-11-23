@@ -77,6 +77,13 @@ inline Pick PickTarget(const std::vector<Candidate>& actors, std::string_view na
     return pick;
 }
 
+// An actor co-op does not share that a test kill may still kill, in this game only: a Gold Skulltula in Not shared
+// (race) mode is each game's own mob (coop_gold_mode.h), so a local kill is what a player's own hit does. Nothing else:
+// the other unshared actors (enemy shots, the Scrub Brothers, unbound extras) stay `not shared`.
+inline bool OwnGameMob(std::string_view name, bool gold_not_shared) {
+    return gold_not_shared && name == "Enemy_Skulltula_Gold";
+}
+
 // What the walk left for the bridge about the newest strike it ran.
 struct Result {
     std::uint64_t seq = 0;

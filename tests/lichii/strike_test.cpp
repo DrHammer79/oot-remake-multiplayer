@@ -83,3 +83,26 @@ TEST_CASE("strike: each strike gets the next number, and the book keeps the newe
     CHECK_FALSE(book.Last());
     CHECK(book.LastAsked() == 0);
 }
+
+TEST_CASE("strike: a Not shared Gold Skulltula is this game's own mob, which a test kill may kill here") {
+    // Row 63, race mode: the shared list does not have it (not shared), the own-mob list does, and the kill lands
+    // there, by name or by id. Shared mode, or any other unshared actor: never an own mob.
+    CHECK(OwnGameMob("Enemy_Skulltula_Gold", true));
+    CHECK_FALSE(OwnGameMob("Enemy_Skulltula_Gold", false));
+    CHECK_FALSE(OwnGameMob("Enemy_Skulltula", true));
+    CHECK_FALSE(OwnGameMob("Scrub_Deku_Brothers_Manager", true));
+
+    const std::vector<Candidate> shared{Actor(0x10, "Enemy_Test", 4, 2.0f)};
+    const std::vector<Listed> listed{{0x50, "Enemy_Skulltula_Gold"}};
+    CHECK(PickTarget(shared, "Enemy_Skulltula_Gold", 0x50, listed).result == kNotShared);
+    CHECK(PickTarget(shared, "Enemy_Skulltula_Gold", 0).result == kNoLife);
+
+    const std::vector<Candidate> own{Actor(0x50, "Enemy_Skulltula_Gold", 1, 1.2f),
+                                     Actor(0x60, "Enemy_Skulltula_Gold", 0, 0.5f)};
+    const Pick by_name = PickTarget(own, "Enemy_Skulltula_Gold", 0);
+    CHECK(by_name.result == kDone);
+    CHECK(own[by_name.index].address == 0x50);  // the dead one nearer is skipped
+    const Pick by_id = PickTarget(own, "Enemy_Skulltula_Gold", 0x50);
+    CHECK(by_id.result == kDone);
+    CHECK(own[by_id.index].address == 0x50);
+}
