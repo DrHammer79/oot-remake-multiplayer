@@ -341,12 +341,12 @@ class PlayerServer(unittest.TestCase):
         d = os.path.join(self.tmp.name, "session")
         os.makedirs(d)
         logs = {x: os.path.join(d, "game-out-%s.txt" % x) for x in live.TAGS}
-        with open(logs["A"], "w", encoding="utf-8") as f:
+        with open(logs["A"], "w", encoding="utf-8", newline="") as f:
             f.write("boot line coop: before\n")
         live.save(d, {"started": 1000.0, "offsets": {"A": os.path.getsize(logs["A"]), "B": 0},
                       "games": {x: {"log": logs[x]} for x in live.TAGS}})
         g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
-        with open(logs["A"], "a", encoding="utf-8") as f:
+        with open(logs["A"], "a", encoding="utf-8", newline="") as f:
             f.write("[x] coop: objects: rocks: 3 new falling rocks in our game since the last line (3 live)\n"
                     "[x] coop: other\nno co-op here\n")
         out = g.call("log", {"match": "rocks:"})
@@ -363,7 +363,7 @@ class PlayerServer(unittest.TestCase):
         err = sys.stderr
         sys.stderr = io.StringIO()
         try:
-            for argv in ([], ["--session", "x", "--player", "p1"]):
+            for argv in ([], ["--player", "p9"], ["--player", "p1", "--lane", "x"]):   # (--session with --player is valid)
                 with self.assertRaises(SystemExit):
                     mcp_playtest.main(argv)
         finally:
