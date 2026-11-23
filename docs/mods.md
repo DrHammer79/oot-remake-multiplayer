@@ -34,7 +34,7 @@ A mod made for an emulator's `load\<title id>\<name>\romfs` folder works the sam
 - **The randomizer's row** reads **OoT Remake Randomizer** with a **Settings** button and no Off / On: press it to open its page, where the **Randomizer** switch, its seed, its settings and its status line are.
 - **Restart needed**: game files and code are read only when the game starts. The tab says what changes at the next start; nothing is ever rebuilt.
 
-The tab writes two files into the mods folder: `coop-mods.list` (order and switches) and `coop-mods.settings.json` (settings). The game reads the list at its start (our patch 0011). A game built without that patch loads every mod in its own order, and the tab cannot switch or move game file mods (code mods and settings still work).
+The tab writes two files into the mods folder: `coop-mods.list` (order and switches) and `coop-mods.settings.json` (settings). The game reads the list at its start (our patch 0011). A mod the list does not name is on, under the named ones, unless the list has the line `default off` (written by Original game): then it is off too. A game built without that patch loads every mod in its own order, and the tab cannot switch or move game file mods (code mods and settings still work).
 
 ### A mod that fails
 

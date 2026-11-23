@@ -982,12 +982,21 @@ function Get-KitCodeModsListHash([string]$List, $CodeMods) {
     if ($lines[0].TrimEnd("`r") -cne 'coop-mods 1') { return 'none' }
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $kept = @()
+    $defaultOff = $false
     foreach ($line in @($lines | Select-Object -Skip 1)) {
         $line = $line.TrimEnd("`r")
+        if ($line -ceq 'default off') { $defaultOff = $true; continue }
         if (-not ($line -cmatch '^(on|off) (.+)$')) { continue }
         $fold = ConvertTo-KitModFold $Matches[2]
         if (-not $seen.Add($fold)) { continue }
         if ($CodeMods.Contains($fold)) { $kept += "$($Matches[1]) $fold" }
+    }
+    # "default off" (Original game, hos_coop_mods.h): a code mod the list does not name is off too, so one put into the
+    # folder later is built out, as the game leaves its files out (player report 266).
+    if ($defaultOff) {
+        $unnamed = [string[]]@($CodeMods | Where-Object { -not $seen.Contains($_) })
+        [Array]::Sort($unnamed, [StringComparer]::Ordinal)
+        foreach ($fold in $unnamed) { $kept += "off $fold" }
     }
     if (-not $kept.Count) { return 'none' }
     # Rows that change nothing are no change (player report 210): the game puts the mods the list does not name under the
@@ -1984,19 +1993,22 @@ function Confirm-KitCharacterSelect([string]$Kit, [string]$ModsDir) {
 }
 
 # The Mods tab's list (<mods>\coop-mods.list, "coop-mods 1") names $Name (the path under mods with '/') off: the first
-# row for it, as the game reads it. No list, another version, or no row: on.
+# row for it, as the game reads it. No list, another version, or no row: on; no row in a list with the "default off"
+# line (Original game, hos_coop_mods.h): off.
 function Test-KitModListOff([string]$ModsDir, [string]$Name) {
     $list = Join-Path $ModsDir 'coop-mods.list'
     if (-not (Test-Path -LiteralPath $list -PathType Leaf)) { return $false }
+    $defaultOff = $false
     try {
         $lines = @(([System.IO.File]::ReadAllText($list, [System.Text.UTF8Encoding]::new($false))) -split "`n")
         if ($lines[0].TrimEnd("`r") -cne 'coop-mods 1') { return $false }
         $want = ConvertTo-KitModFold $Name
         foreach ($line in @($lines | Select-Object -Skip 1)) {
+            if ($line.TrimEnd("`r") -ceq 'default off') { $defaultOff = $true; continue }
             if ($line.TrimEnd("`r") -cmatch '^(on|off) (.+)$' -and (ConvertTo-KitModFold $Matches[2]) -ceq $want) { return $Matches[1] -ceq 'off' }
         }
     } catch { }
-    return $false
+    return $defaultOff
 }
 
 # The model files a Character Select folder has, as find_characters counts them: "<file>=<stored number>:<variants>"
@@ -2172,12 +2184,14 @@ function Get-KitCharacterSelectCopies([string]$ModsDir, [string]$Own = '') {
     if (-not (Test-Path -LiteralPath $ModsDir -PathType Container)) { return @() }
     $root = ([System.IO.Path]::GetFullPath($ModsDir)).TrimEnd('\') + '\'
     $off = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $defaultOff = $false   # (the list's "default off" line, Original game: a copy it does not name is off too)
     $list = Join-Path $ModsDir 'coop-mods.list'
     if (Test-Path -LiteralPath $list -PathType Leaf) {
         $lines = @(([System.IO.File]::ReadAllText($list, [System.Text.UTF8Encoding]::new($false))) -split "`n")
         if ($lines[0].TrimEnd("`r") -ceq 'coop-mods 1') {
-            $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
             foreach ($line in @($lines | Select-Object -Skip 1)) {
+                if ($line.TrimEnd("`r") -ceq 'default off') { $defaultOff = $true; continue }
                 if (-not ($line.TrimEnd("`r") -cmatch '^(on|off) (.+)$')) { continue }
                 $fold = ConvertTo-KitModFold $Matches[2]
                 if ($seen.Add($fold) -and $Matches[1] -ceq 'off') { [void]$off.Add($fold) }   # (each name's first row, as the game reads it)
@@ -2196,7 +2210,8 @@ function Get-KitCharacterSelectCopies([string]$ModsDir, [string]$Own = '') {
                 if ($d.Name -ine 'coop-puppet' -and
                     ($isOwn -or (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Sequence\CharacterMenu.module.ainb') -PathType Leaf)) -and
                     (Test-Path -LiteralPath (Join-Path $d.FullName 'exefs') -PathType Container)) {
-                    $found.Add(@{ Dir = $rel; Path = $d.FullName; Off = $off.Contains((ConvertTo-KitModFold $rel)) })
+                    $relFold = ConvertTo-KitModFold $rel
+                    $found.Add(@{ Dir = $rel; Path = $d.FullName; Off = ($off.Contains($relFold) -or ($defaultOff -and -not $seen.Contains($relFold))) })
                 }
                 continue
             }

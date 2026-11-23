@@ -359,13 +359,14 @@ elif cmd == "copies":
     # on: two copies put two code patches into one game. A row "off" in coop-mods.list: left alone.
     mods, mine = sys.argv[2], sys.argv[3]
     fold = lambda n: "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in n.replace(chr(92), "/"))
-    off, seen = set(), set()
+    off, seen, default_off = set(), set(), False   # (default_off: a "default off" line in the list, Original game)
     try:
         rows = open(os.path.join(mods, "coop-mods.list"), encoding="utf-8").read().split(chr(10))
     except OSError:
         rows = []
     if rows and rows[0].rstrip(chr(13)) == "coop-mods 1":
         for row in rows[1:]:
+            default_off = default_off or row.rstrip(chr(13)) == "default off"
             m = re.match(r"^(on|off) (.+)$", row.rstrip(chr(13)))
             if m and fold(m.group(2)) not in seen:
                 seen.add(fold(m.group(2)))
@@ -386,7 +387,7 @@ elif cmd == "copies":
                 own_copy = fold(rel) == fold(mine)   # (the kit copy: by its folder, whatever part of his romfs it has)
                 if (e.lower() != "coop-puppet" and (own_copy or os.path.isfile(os.path.join(p, "romfs", "Sequence", "CharacterMenu.module.ainb")))
                         and os.path.isdir(os.path.join(p, "exefs"))):
-                    copies.append((rel, p, fold(rel) in off))
+                    copies.append((rel, p, fold(rel) in off or (default_off and fold(rel) not in seen)))
                 continue
             if depth < 4:
                 walk(p, rel, depth + 1)
@@ -644,12 +645,13 @@ exefs_stamp() {
     ((${#rows[@]})) || return 0
     # The list's rows for these mods only (its first row per name, in its order, as the game reads it): switching or
     # moving a mod without code patches builds nothing again (kit-paths.ps1 Get-KitCodeModsListHash).
-    local list=none line name fold kept=() first=1
+    local list=none line name fold kept=() first=1 default_off=0
     local -A seen=()
     if [[ -f $mods/coop-mods.list ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
             line=${line%$'\r'}
             if ((first)); then first=0; [[ $line == 'coop-mods 1' ]] || break; continue; fi
+            [[ $line == 'default off' ]] && { default_off=1; continue; }
             case $line in 'on '?*) name=${line#on } ;; 'off '?*) name=${line#off } ;; *) continue ;; esac
             local sw=${line%% *}
             fold=$(mod_fold "$name")
@@ -657,6 +659,13 @@ exefs_stamp() {
             seen[$fold]=1
             [[ -n ${code[$fold]+x} ]] && kept+=("$sw $fold")
         done < "$mods/coop-mods.list"
+        # ("default off", Original game: a code mod the list does not name is off too, built out as the game leaves its
+        # files out, player report 266; kit-paths.ps1 Get-KitCodeModsListHash)
+        if ((default_off)); then
+            while IFS= read -r fold; do
+                [[ -n $fold && -z ${seen[$fold]+x} ]] && kept+=("off $fold")
+            done < <(printf '%s\n' "${!code[@]}" | LC_ALL=C sort)
+        fi
         # (rows that change nothing are no change, player report 210: the game puts the mods the list does not name under
         # the named ones, by folded name, on; rows all "on" in that same order, as Character Select switched off and on
         # again leaves, read as no list. kit-paths.ps1 Get-KitCodeModsListHash)
@@ -1060,8 +1069,9 @@ for cs_json in "$GAME"/mods/*/characters.json; do
     [[ -f $cs_json && -d ${cs_json%/*}/romfs/Model ]] || continue
     cs_name=${cs_json#"$GAME"/mods/}; cs_name=${cs_name%/characters.json}
     [[ $cs_name == [-_.]* ]] && continue
-    cs_row=$(awk -v n="$cs_name" 'NR == 1 { sub(/\r$/, ""); if ($0 != "coop-mods 1") exit } NR > 1 { sub(/\r$/, ""); s = $1; r = substr($0, length(s) + 2)
-        if ((s == "on" || s == "off") && tolower(r) == tolower(n)) { print s; exit } }' "$GAME/mods/coop-mods.list" 2>/dev/null || true)
+    cs_row=$(awk -v n="$cs_name" 'NR == 1 { sub(/\r$/, ""); if ($0 != "coop-mods 1") { done = 1; exit } } NR > 1 { sub(/\r$/, ""); if ($0 == "default off") { d = 1; next }
+        s = $1; r = substr($0, length(s) + 2)
+        if ((s == "on" || s == "off") && tolower(r) == tolower(n)) { print s; done = 1; exit } } END { if (!done && d) print "off" }' "$GAME/mods/coop-mods.list" 2>/dev/null || true)
     cs_models=$(cd "${cs_json%/*}/romfs/Model" && LC_ALL=C ls -1 | { grep -E '^Player_(Child|Adult)_C[0-9]{3}\.Player_(Child|Adult)\.bfres\.zs$' || true; } | sha256sum | cut -d' ' -f1)
     pack_stamp+=" characters:$(sha256_of "$cs_json") models:$cs_models list:${cs_row:-on}"; break
 done

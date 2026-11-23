@@ -1,4 +1,4 @@
-From 527b9be07284438c38f99ae28a705998b723a44d Mon Sep 17 00:00:00 2001
+From 1cc39d2a27dd2ab7b6d1986a2ca9fe7785c90a58 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 00:35:10 -0900
 Subject: [PATCH] Co-op mods: the Mods tab's order and switches, read at the
@@ -26,18 +26,22 @@ follow start_enabled (this start) instead of the switch.
 A mod whose patch files changed since the build (one not in the list with
 its hash, as exefs_status counts it) keeps its files on (its old code is in
 the game) and one log line says a build is needed.
+
+A list with a "default off" line (co-op's Original game, which names every
+mod off) leaves out a mod it does not name too, so a mod put into the
+folder after the list was written stays out (player report 266).
 ---
- host/hos_coop_mods.h | 216 +++++++++++++++++++++++++++++++++++++++++++
- host/mods.c          |  99 +++++++++++++++++++-
- 2 files changed, 310 insertions(+), 5 deletions(-)
+ host/hos_coop_mods.h | 227 +++++++++++++++++++++++++++++++++++++++++++
+ host/mods.c          | 100 ++++++++++++++++++-
+ 2 files changed, 322 insertions(+), 5 deletions(-)
  create mode 100644 host/hos_coop_mods.h
 
 diff --git a/host/hos_coop_mods.h b/host/hos_coop_mods.h
 new file mode 100644
-index 00000000..71189ba3
+index 00000000..cdc49726
 --- /dev/null
 +++ b/host/hos_coop_mods.h
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,227 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 +   The mods list between the co-op module's Mods tab and Hookshot's mod loader (oot-remake-multiplayer, docs/mods.md).
 +
@@ -49,8 +53,11 @@ index 00000000..71189ba3
 +         coop-mods 1
 +         on <name>              first row = wins a file two mods have (it is indexed last)
 +         off <name>             left out
++         default off            (optional, any line after the first) a mod the list does not name is off too
 +       <name> is the mod's name as Hookshot logs it: its path under the mods folder with '/'. A mod the list does not
-+       name is on and keeps Hookshot's own order (by name) under the named ones. Lines it does not know are skipped.
++       name is on and keeps Hookshot's own order (by name) under the named ones; with "default off" it is left out,
++       as an "off" row would (co-op's Original game, coop_original.h: a mod put into the folder after the switch went on
++       stays out too, player report 266). Lines it does not know are skipped (an older reader skips "default off").
 +
 +     <mods>/coop-mods.applied   written by Hookshot at each start: what this run indexed
 +         coop-mods-applied 1 <process id>
@@ -67,6 +74,7 @@ index 00000000..71189ba3
 +
 +#define HOS_COOP_MODS_VERSION 1
 +#define HOS_COOP_MODS_LIST_FILE "coop-mods.list"
++#define HOS_COOP_MODS_DEFAULT_OFF "default off"   /* the line that leaves the mods the list does not name out */
 +#define HOS_COOP_MODS_APPLIED_FILE "coop-mods.applied"
 +#define HOS_COOP_MODS_MAX 256    /* rows read; more are skipped */
 +#define HOS_COOP_MODS_NAME 260   /* a name with its 0 (MAX_PATH) */
@@ -80,6 +88,7 @@ index 00000000..71189ba3
 +
 +typedef struct HosCoopModsList {
 +    int count;
++    int default_off;   /* 1: the list has a "default off" line: a mod it does not name is off (hos_coop_mods_rank) */
 +    HosCoopModsRow rows[HOS_COOP_MODS_MAX];
 +} HosCoopModsList;
 +
@@ -100,6 +109,7 @@ index 00000000..71189ba3
 +    size_t at = 0;
 +    int line_no = 0;
 +    out->count = 0;
++    out->default_off = 0;
 +    while (at < n) {
 +        size_t end = at, len;
 +        const char *line = text + at;
@@ -114,6 +124,10 @@ index 00000000..71189ba3
 +        {
 +            int off;
 +            int i, known = 0;
++            if (len == sizeof HOS_COOP_MODS_DEFAULT_OFF - 1 && !memcmp(line, HOS_COOP_MODS_DEFAULT_OFF, len)) {
++                out->default_off = 1;
++                continue;
++            }
 +            if (len > 3 && !memcmp(line, "on ", 3)) off = 0, line += 3, len -= 3;
 +            else if (len > 4 && !memcmp(line, "off ", 4)) off = 1, line += 4, len -= 4;
 +            else continue;
@@ -129,13 +143,14 @@ index 00000000..71189ba3
 +    return line_no > 0;
 +}
 +
-+/* A mod's place: -1 = off; 0 = not in the list (Hookshot's own order, under the listed ones); else the higher wins
-+   (the list's first row has the highest). Mods are indexed by rising rank, then by name. */
++/* A mod's place: -1 = off (an "off" row, or not in a "default off" list); 0 = not in the list (Hookshot's own order,
++   under the listed ones); else the higher wins (the list's first row has the highest). Mods are indexed by rising rank,
++   then by name. */
 +static inline int hos_coop_mods_rank(const HosCoopModsList *list, const char *name) {
 +    int i;
 +    for (i = 0; i < list->count; i++)
 +        if (hos_coop_mods_same(list->rows[i].name, name)) return list->rows[i].off ? -1 : list->count - i;
-+    return 0;
++    return list->default_off ? -1 : 0;
 +}
 +
 +/* The applied file's lines (each with its '\n'); what snprintf returns. */
@@ -255,7 +270,7 @@ index 00000000..71189ba3
 +
 +#endif
 diff --git a/host/mods.c b/host/mods.c
-index c5f63179..4137ee90 100644
+index c5f63179..6db36c81 100644
 --- a/host/mods.c
 +++ b/host/mods.c
 @@ -71,6 +71,7 @@ static Entry *find(const char *key) {
@@ -278,7 +293,7 @@ index c5f63179..4137ee90 100644
              for (size_t i = 0; i < table_cap; i++) {
                  char key[MAX_PATH];
                  uint32_t size;
-@@ -845,6 +846,90 @@ static void find_sizes(void) {
+@@ -845,6 +846,91 @@ static void find_sizes(void) {
  static void mod_text(Mod *m);
  
  /* hos_main.c, once the image is loaded (image_path: unused; ExeFS patches are applied when the game is built) */
@@ -310,7 +325,8 @@ index c5f63179..4137ee90 100644
 +        hos_log("mods: %s is not a mods list: left out (mods.json's order and switches)", path);
 +        return;
 +    }
-+    hos_log("mods: %s: %d rows (the co-op Mods tab's order and switches, over mods.json's)", path, coop_list.count);
++    hos_log("mods: %s: %d rows (the co-op Mods tab's order and switches, over mods.json's)%s", path, coop_list.count,
++            coop_list.default_off ? "; default off: a mod it does not name is off too (Original game)" : "");
 +    for (int i = 0; i < nmods; i++) {
 +        mods[i].coop_rank = hos_coop_mods_rank(&coop_list, mods[i].name);
 +        mods[i].start_enabled = i;   /* (scratch: the place in mods.json's order, for a stable sort) */
@@ -369,7 +385,7 @@ index c5f63179..4137ee90 100644
  void hos_mods_init(const char *image_path) {
      (void)image_path;
      char game_dir[MAX_PATH];
-@@ -862,15 +947,19 @@ void hos_mods_init(const char *image_path) {
+@@ -862,15 +948,19 @@ void hos_mods_init(const char *image_path) {
      find_mods(root_dir, "", 0);
      if (!nmods) {
          hos_log("mods: none in %s (a mod: <name>\\romfs, <name>\\exefs or <name>\\cheats)", root_dir);
@@ -390,7 +406,7 @@ index c5f63179..4137ee90 100644
              hos_log("mods: %s: off (the Mods tab)", m->name);
              continue;
          }
-@@ -882,7 +971,6 @@ void hos_mods_init(const char *image_path) {
+@@ -882,7 +972,6 @@ void hos_mods_init(const char *image_path) {
          hos_log("mods: %s: %d RomFS files (%d replace the game's, %d added)%s%s", m->name, m->files, m->replaced, m->added,
                  m->exefs ? ", ExeFS patches" : "", m->cheats ? ", cheats" : "");
      }
@@ -398,7 +414,7 @@ index c5f63179..4137ee90 100644
      /* (the table served when no merged one is: the last enabled mod's own, host/prompts.c merging the prompts' entries into it.
         Without the game's RomFS to tell its name, the first table a mod has stands for it) */
      if (!sizes_key[0] && nshipped) {
-@@ -890,12 +978,13 @@ void hos_mods_init(const char *image_path) {
+@@ -890,12 +979,13 @@ void hos_mods_init(const char *image_path) {
          for (int s = 0; s < nshipped; s++) shipped[s].other = strcmp(shipped[s].key, sizes_key) != 0;
      }
      for (int s = 0; s < nshipped; s++)
