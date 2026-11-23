@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
 import kit_look  # noqa: E402
+import kit_route  # noqa: E402
 import kit_tools  # noqa: E402
 import kit_wait  # noqa: E402
 import playtest_client as pc  # noqa: E402
@@ -308,6 +309,21 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["what"], "properties": {
          "what": {"type": "string", "enum": list(kit_wait.WHATS)}, "id": {"type": ["integer", "string"]},
          "condition": {"type": "string"}, "max_frames": {"type": "integer", "minimum": 1, "maximum": kit_wait.MAX_FRAMES}}}},
+    {"name": "go_to", "description": "Walk to a place and end with a `look`. Give ONE of: `place` (a position name from the "
+     "scene's recorded data, tools/playtest/data; it walks the recorded routes, nearest start within 6 m, else a "
+     "straight line and says so), `id` + `name` (an actor, as go_to_actor), or `x` + `z`. Stops early and says why: a "
+     "scene change (through a door: that is the way out), a load, an event, hurt, a stuck walk (with the recorded "
+     "stuck-spot note if there is one). It does not climb, jump or read the game's collision. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "properties": dict(ACTOR_ARGS, place={"type": "string"}, x={"type": "number"},
+                                                          z={"type": "number"}, near_m={"type": "number"})}},
+    {"name": "record_route", "description": "Save a played walk as a route for the next tester. `action` start (begin "
+     "sampling Link's place from every reply of this game), save (needs `name`, lowercase words with hyphens, and an "
+     "optional `note`; writes tools/playtest/data/<scene>.json with points named NAME-1, NAME-2 ...; a point is kept "
+     "every 2 m) or cancel. Walk with walk_to, press or go_to between start and save. Only the places Link walked "
+     "through are saved, never anything from the game's files.",
+     "inputSchema": {"type": "object", "required": ["action"], "properties": {
+         "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
+         "note": {"type": "string", "maxLength": 290}}}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -412,6 +428,8 @@ class Game:
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
         self.match_offsets = {}   # one cursor per `log` match (the plain cursor is not moved by a match)
+        self.recorder = None   # a route being recorded (record_route)
+        self.route_dir = kit_route.DATA_DIR
         self.last_look = None   # what the last `look` saw (the next one says what changed)
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
@@ -503,13 +521,66 @@ class Game:
         since = _since(args) if name == "get_state" else None   # (refused before anything is asked of the game)
         try:
             # no reply carries the whole inventory or the world list unless asked for (get_state inventory=true)
-            out = pc.slim_state(self._call(name, args), inventory=name == "get_state" and bool(args.get("inventory")))
+            raw = self._call(name, args)
+            self._sample(raw)
+            out = pc.slim_state(raw, inventory=name == "get_state" and bool(args.get("inventory")))
             if name == "get_state":
                 out = self.history.reply({self.player: out}, since)[self.player]
             return out
         finally:
             if self.session:
                 live.touch(self.session)      # (a long walk_to or warp is not idle time)
+
+    def _go_to(self, args):
+        c = self.client
+        if args.get("place") is not None:
+            st = pc.game_of(c.state())
+            data = kit_route.load(st.get("scene") or "", self.route_dir)
+            out = kit_route.go_to(c, data, goal=_word(args, "place"))
+        elif args.get("id") is not None:
+            out = ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
+                                 int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        elif "x" in args and "z" in args:
+            out = kit_route.go_to(c, None, x=_num(args, "x"), z=_num(args, "z"))
+        else:
+            raise ValueError("go_to: give `place`, or `id` and `name`, or `x` and `z`")
+        st = c.state()
+        out.pop("state", None)
+        out["look"], self.last_look = kit_look.look(st, self.last_look)
+        return out
+
+    def _record_route(self, args):
+        action = args.get("action")
+        if action == "start":
+            st = pc.game_of(self.client.state())
+            if not st.get("scene"):
+                raise ValueError("no scene in the state yet")
+            self.recorder = kit_route.Recorder(st["scene"])
+            self.recorder.add(st.get("pos"), st["scene"])
+            return {"recording": True, "scene": st["scene"], "points": len(self.recorder.points)}
+        if self.recorder is None:
+            raise ValueError("no route is being recorded: call record_route start first")
+        if action == "cancel":
+            self.recorder = None
+            return {"recording": False}
+        if action == "save":
+            st = pc.game_of(self.client.state())
+            self.recorder.add(st.get("pos"), st.get("scene"))
+            out = kit_route.save_route(self.recorder, args.get("name"), args.get("note"), self.route_dir)
+            self.recorder = None
+            return out
+        raise ValueError("action: start, save or cancel")
+
+    def _sample(self, raw):
+        """A route being recorded takes the place in any reply that carries one."""
+        if self.recorder is None or not isinstance(raw, dict):
+            return
+        st = pc.game_of(raw) if isinstance(raw.get("state"), dict) or "pos" in raw else None
+        if st and st.get("pos"):
+            for e in raw.get("trace") or ():   # a walk_to's pushes: [frames, x, z, ...] on the way
+                if isinstance(e, list) and len(e) > 2:
+                    self.recorder.add([e[1], st["pos"][1], e[2]], st.get("scene"))
+            self.recorder.add(st["pos"], st.get("scene"))
 
     def _call(self, name, args):
         c = self.client
@@ -531,6 +602,10 @@ class Game:
                                           ident=args.get("id"), condition=args.get("condition"))
             out["look"], self.last_look = kit_look.look(st, self.last_look)
             return out
+        if name == "go_to":
+            return self._go_to(args)
+        if name == "record_route":
+            return self._record_route(args)
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
