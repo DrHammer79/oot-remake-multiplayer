@@ -659,40 +659,61 @@ TEST_CASE("hookshot draw: the title prompt draws its word where TitleAt says, on
 }
 
 // Down but not out (hookshot/src/coop_dbno_draw.h).
-TEST_CASE("dbno ring: the dots lit follow the revive, the caption says who") {
-    using CoopDbnoDraw::Lit;
-    CHECK(Lit(0.0f) == 0);
-    CHECK(Lit(-1.0f) == 0);
-    CHECK(Lit(0.5f) == CoopDbnoDraw::kDots / 2);
-    CHECK(Lit(0.99f) == CoopDbnoDraw::kDots - 1);
-    CHECK(Lit(1.0f) == CoopDbnoDraw::kDots);
-    CHECK(Lit(7.0f) == CoopDbnoDraw::kDots);
+TEST_CASE("dbno line: the caption says who, the line adds the clock and the revive's share") {
     using View = CoopDbno::View;
     CHECK(CoopDbnoDraw::Caption(View{View::Kind::downed, "", 0, 0, false}) == "You are down");
     CHECK(CoopDbnoDraw::Caption(View{View::Kind::downed, "Saria", 0, 0, false}) == "Saria is reviving you");
     CHECK(CoopDbnoDraw::Caption(View{View::Kind::reviving, "Saria", 0, 0, false}) == "Hold A to revive Saria");
     CHECK(CoopDbnoDraw::Caption(View{View::Kind::reviving, "Saria", 0, 0, true}) == "Reviving Saria");
+    CHECK(CoopDbnoDraw::Progress(0.0f).empty());
+    CHECK(CoopDbnoDraw::Progress(-1.0f).empty());
+    CHECK(CoopDbnoDraw::Progress(0.5f) == "50%");
+    CHECK(CoopDbnoDraw::Progress(0.999f) == "99%");
+    CHECK(CoopDbnoDraw::Progress(1.0f) == "100%");
+    CHECK(CoopDbnoDraw::Progress(7.0f) == "100%");
+    CHECK(CoopDbnoDraw::Line(View{View::Kind::downed, "", 32'000'000, 0.0f, false}) == "You are down  0:32");
+    CHECK(CoopDbnoDraw::Line(View{View::Kind::downed, "Saria", 32'000'000, 0.25f, false}) ==
+          "Saria is reviving you  0:32  25%");
+    CHECK(CoopDbnoDraw::Line(View{View::Kind::reviving, "Saria", 5'000'000, 0.0f, false}) ==
+          "Hold A to revive Saria  0:05");
+    CHECK(CoopDbnoDraw::Line(View{View::Kind::reviving, "Saria", 5'000'000, 0.6f, true}) == "Reviving Saria  0:05  60%");
+    // A share left from a let-go A is not shown while A is not held.
+    CHECK(CoopDbnoDraw::Line(View{View::Kind::reviving, "Saria", 5'000'000, 0.6f, false}) ==
+          "Hold A to revive Saria  0:05");
+    View watch{View::Kind::spectating, "Saria", 0, 0, false};
+    CHECK(CoopDbnoDraw::Line(watch) == "Watching Saria  A: next player");
 }
 
-TEST_CASE("dbno ring: drawn with the clock when the scene has it, and wanted for it alone") {
+TEST_CASE("dbno line: fits the picture's width, smaller on a narrow one, never under 12 px") {
+    // 16:9, a short line: the game look's size.
+    CHECK(CoopDbnoDraw::LinePx(1920, 1080, 20, 300) == doctest::Approx(32.4f));
+    // A narrow picture: the size that makes the line 90% of the width.
+    const float px = CoopDbnoDraw::LinePx(640, 1080, 20, 900);
+    CHECK(px * 900 / 20 <= 0.9f * 640 + 0.01f);
+    CHECK(px >= 12.0f);
+    CHECK(CoopDbnoDraw::LinePx(100, 1080, 20, 5000) == 12.0f);
+    CHECK(CoopDbnoDraw::LinePx(1280, 720, 0, 0) == doctest::Approx(21.6f));
+}
+
+TEST_CASE("dbno line: drawn as text only (no ring, no box), wanted for it alone") {
     CoopDraw::Scene s;
     CHECK_FALSE(CoopDraw::Wanted(s));
     s.dbno = CoopDbno::View{CoopDbno::View::Kind::downed, "", 32'000'000, 0.25f, false};
     CHECK(CoopDraw::Wanted(s));
     Canvas c(1280, 720);
     CoopDraw::Draw(c.d, s);
-    // The backing disc and the ring's dots, a quarter of them lit.
-    CHECK(c.Of("circle").size() == 1 + CoopDbnoDraw::kDots);
-    std::size_t lit = 0;
-    for (const auto& call : c.Of("circle")) {
-        lit += call.rgba == CoopDraw::Rgba(120, 230, 120, 255) ? 1 : 0;
+    CHECK(c.Of("circle").empty());
+    CHECK(c.Of("rect").empty());
+    CHECK(c.Of("triangle").empty());
+    const auto texts = c.Of("text");
+    REQUIRE_FALSE(texts.empty());
+    for (const auto& call : texts) {
+        CHECK(call.text == "You are down  0:32");
     }
-    CHECK(lit == CoopDbnoDraw::kDots / 4);
-    std::vector<std::string> texts;
-    for (const auto& call : c.Of("text")) {
-        texts.push_back(call.text);
-    }
-    CHECK(texts == std::vector<std::string>{"0:32", "You are down"});
+    // Inside the picture.
+    const float w = static_cast<float>(texts.back().text.size()) * texts.back().px * 0.5f;
+    CHECK(texts.back().x >= 0.0f);
+    CHECK(texts.back().x + w <= 1280.0f);
 }
 
 namespace {
