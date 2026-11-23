@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
 import playtest_client as pc  # noqa: E402
+import playtest_helpers as ph  # noqa: E402
 
 SCRIPT_HELP = (
     "Test script lines (tools/autotest/hookshot.py's format), ';' between them. Times are game frames (60 a second). "
@@ -70,6 +71,44 @@ def _word(args, key):
     return v
 
 
+def _ident(args):
+    """The optional actor `id` of kill and hit (the number get_world gives, or its 0x address) as an integer, or None.
+    It needs the actor's name beside it (the walk checks both); 0 and numbers past 64 bits are refused."""
+    v = args.get("id")
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        raise ValueError("id: the number get_world gives (or its 0x address)")
+    try:
+        n = v if isinstance(v, int) else int(v.strip(), 0)
+    except ValueError:
+        raise ValueError("id: the number get_world gives (or its 0x address)")
+    if not 0 < n < 2 ** 64:
+        raise ValueError("id: the number get_world gives (more than 0, less than 2^64)")
+    return n
+
+
+def _need_id(args):
+    n = _ident(args)
+    if n is None:
+        raise ValueError("id: the number get_world gives (with `name`, the name it gives for that id)")
+    return n
+
+
+def _button(args):
+    b = str(args.get("button", "Y")).upper()
+    if b not in pc.BUTTONS:
+        raise ValueError("button: one of " + " ".join(pc.BUTTONS))
+    return b
+
+
+def _bounded(args, key, default, lo, hi):
+    if key not in args:
+        return default
+    v = _num(args, key, lo, hi)
+    return float(v) if "." in v else int(v)
+
+
 def _num(args, key, lo=None, hi=None):
     try:
         v = float(args[key])
@@ -83,9 +122,11 @@ def _num(args, key, lo=None, hi=None):
 def act_line(name, args):
     """The one test line a verb tool sends (None: not a verb tool)."""
     if name == "kill":
-        return "kill " + _word(args, "actor")
+        who = _ident(args)
+        return "kill %s%s" % ("%d " % who if who else "", _word(args, "actor"))
     if name == "hit":
-        return "hit %s %s" % (_word(args, "actor"), _num(args, "amount", 1, 80))
+        who = _ident(args)
+        return "hit %s%s %s" % ("%d " % who if who else "", _word(args, "actor"), _num(args, "amount", 1, 80))
     if name == "hurt":
         return "hurt " + _num(args, "quarter_hearts", 1, 80)
     if name == "place":
@@ -118,14 +159,17 @@ def act_line(name, args):
 ACT_NOTE = ("Needs a test-runner start with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
             "use it on the test server only. The game does it on its next frames: step a few, then get_state.")
 ACT_TOOLS = [
-    {"name": "kill", "description": "Kill an enemy actor by its NAME (`name` from get_world): the game takes the "
-     "nearest actor of that name with a life (get_world lists them nearest first), not a particular id. " + ACT_NOTE,
-     "inputSchema": {"type": "object", "required": ["actor"], "properties": {"actor": {"type": "string"}}}},
-    {"name": "hit", "description": "Hit an actor for N quarter hearts, by its NAME (`name` from get_world): the game "
-     "takes the nearest actor of that name with a life (get_world lists them nearest first), not a particular id. "
-     + ACT_NOTE,
+    {"name": "kill", "description": "Kill an enemy actor: `actor` is its NAME from get_world. With no `id` the game "
+     "takes the nearest actor of that name with a life. With `id` (the id get_world gave, or its 0x address) it takes "
+     "exactly that actor, and refuses when no actor with that id and that name is there any more (it never falls back "
+     "to another of the name); an id is refused in solo. Up to 12 frames pass while it waits for the game's answer: "
+     "ok, `refused: actor 7 (NAME) is gone`, or `unknown: no result after 12 frames`. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["actor"],
+                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]}}}},
+    {"name": "hit", "description": "Hit an actor for N quarter hearts: `actor` is its NAME from get_world. `id` and the "
+     "answer are as for kill (no `id`: the nearest of that name with a life; up to 12 frames pass). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["actor", "amount"],
-                     "properties": {"actor": {"type": "string"},
+                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]},
                                     "amount": {"type": "integer", "minimum": 1, "maximum": 80}}}},
     {"name": "hurt", "description": "Hurt Link for N quarter hearts (a hit from a metre east). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["quarter_hearts"],
@@ -149,6 +193,40 @@ ACT_TOOLS = [
                      "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
 ]
 
+# The helpers of playtest_helpers.py as tools: a few calls in one, each bounded to 120 frames, each saying why it stopped.
+# They take the `id` and the `name` get_world gave for the actor and look it up again on every leg and every press.
+ACTOR_ARGS = {"id": {"type": ["integer", "string"]}, "name": {"type": "string"}}
+HELPER_NOTE = ("At most 120 frames pass (`max_frames` lowers it). The actor is looked up in the world list on every leg: it "
+               "stops with `gone` when the id is not there any more or has another name, and never goes for another "
+               "actor of that name. It needs the world list (connected and sharing): without one it says why. "
+               "It acts on this game only: step the other game by the same frames yourself.")
+HELPER_TOOLS = [
+    {"name": "go_to_actor", "description": "Walk Link to an actor, in legs of a few metres. `id` and `name` are the ones "
+     "get_world gave. Stops near it (arrived), or says why: gone, stuck (no 0.3 m closer over 60 frames; `moved_m` is how "
+     "far Link went), timed out, scene changed, loading, event. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
+    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
+     "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
+    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default, which "
+     "is a guess not yet confirmed in a game) in rounds until its life is 0 or the frames run out. Returns `result` "
+     "(dead, gone, alive, or stopped with `stopped` saying why) and its life before and after. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
+    {"name": "use_item", "description": "Put an item on a button (`assign`), press that button, and say what changed in "
+     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one the item goes on (Y by default, a "
+     "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"],
+                     "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
+    {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
+     "nothing is pressed and it says so. Returns the prompt and event after (12 frames pass when it presses).",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
+     "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
+]
+
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
 PLAYER_TOOLS = [
     {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
@@ -161,8 +239,7 @@ PLAYER_TOOLS = [
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
      "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
      "list exists only while the games are connected and sharing: an EMPTY list with a `why` is not 'nothing here'. "
-     "Read `why`. `kill` and `hit` take the `name`, and hit the nearest actor of that name with a life: `id` and "
-     "`addr` are for reading only. No frame passes.",
+     "Read `why`. `kill` and `hit` take the `name`, and with the `id` the exact actor (not in solo). No frame passes.",
      "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
                                                        "within_m": {"type": "number", "minimum": 0},
                                                        "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},
@@ -197,7 +274,7 @@ PLAYER_TOOLS = [
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, or an item flag name the cheats "
      "panel knows). It is there after the next frame: step 1 before checking.",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
-] + ACT_TOOLS + [
+] + ACT_TOOLS + HELPER_TOOLS + [
     {"name": "checkpoint", "description": "Write this game's shared flags and state under a tag (letters, digits, "
      "- and _) with its frame count, to the run's checkpoint log. Take the same tag on EVERY game after each "
      "action that should sync, then run desync_check.",
@@ -369,7 +446,21 @@ class Game:
             return c.give(args["item"])
         line = act_line(name, args)
         if line is not None:
+            if name in ("kill", "hit"):
+                return ph.strike(c, line, _word(args, "actor"), _ident(args))
             return c.act(line)
+        if name == "go_to_actor":
+            return ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
+                                  int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name == "face":
+            return ph.face(c, _need_id(args), _word(args, "name"))
+        if name == "attack":
+            return ph.attack(c, _need_id(args), _button(args), _word(args, "name"),
+                             int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name == "use_item":
+            return ph.use_item(c, _word(args, "item"), _button(args))
+        if name in ("talk", "open"):
+            return ph.interact(c, name)
         if name == "pause":
             return c.pause()
         if name == "resume":

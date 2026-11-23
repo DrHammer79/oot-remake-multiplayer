@@ -112,7 +112,7 @@ step them in turn, the same number of frames.
 | `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs (10 frames at a time) until Link is in that scene with no event or load, then holds again. Replies with `"arrived": true` and the `state`; after the timeout, still held, `timeout` with the state in `message` |
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
 | `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
-| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`: the game does it on its next frames, so `step` a few and read the `state`. Behind the verb gate below |
+| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`: the game does it on its next frames, so `step` a few and read the `state`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. With no world list (solo, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
@@ -153,6 +153,8 @@ the kinds that matter (player, enemy, npc, chest, door, switch, item) before `ot
 reads the place of every actor it sees and keeps up to 200, `other` last, because the sync checks need grass, bushes and
 beehives too. `state` lists only the nearest 40 of the known kinds and counts the rest (`total`, `other_count`); `dump`
 lists all of them. It is there only while the games are connected and sharing, because the object walk runs only then.
+
+**`strike`** (in `state`, after a `kill` or `hit`): `{"seq":4,"result":"done","name":"Enemy_Example","id":2147483648}`, the objects walk's answer to the strike with that `seq` (the `strike_seq` of the `act` reply). `result` is `done` (the strike was made), `gone` (an id was given and no actor with that id and that name is in the walk's list now: nothing else is struck, there is no fallback to another actor of the name), or `none with a life` (no actor to strike). It is absent until a strike was sent. Only the last strike is kept: a newer one replaces it.
 
 **An empty `actors` list does not mean "nothing here".** Solo (no co-op session) it is empty with `frame` null, and
 `why` says so. Each empty list carries a `why`:
@@ -269,7 +271,9 @@ only, no `pip install`.
 | `warp scene [entrance]` | The game's own scene change; it returns once Link is there with no event or load |
 | `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
 | `give item` | Gives the item through the cheats queue: it shows after the next frame (`step 1`) |
-| `kill actor`, `hit actor amount` (`actor` is a **name**: the game takes the nearest actor of that name with a life, never a chosen id; `get_world` lists them nearest first), `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
+| `kill actor [id]`, `hit actor amount [id]` (`actor` is the **name**. With no `id` the game takes the nearest actor of that name with a life. With the `id` and `name` `get_world` gave, it takes exactly that actor, and answers `refused: actor 7 (NAME) is gone` when the walk's list has no actor with that id and that name; an id is refused in solo. The tool steps up to 12 frames, looking every 2, for the answer in `state.strike`: `ok`, `refused: ...`, or `unknown: no result after 12 frames (the strike may still land: look with get_world)`. It never retries, because a second strike could land twice) | One `act` line each, then the wait above. |
+| `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
+| `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
 | `log [match]` | **Raw, unmasked** (do not paste it into an issue; use `check_logs` for that). The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
@@ -286,8 +290,35 @@ value after `password`, `token`, `secret` and `nickname` with `=` or `:`; the va
 `name '...'` and `player N '...'`; every double-quoted text; and the players' names, which are read from the games' own
 logs plus the words in `names`. A name of two characters or fewer is matched with its case. It is the filter of the
 tool, not a guarantee: a name that no log line printed in those forms and that the tester did not pass stays, and so
-does a host name written without a port. Nothing from a log goes into an issue or a pull request unmasked
-(AGENTS.md); quote only the lines you need.
+does a host name written without a port, or a dotted host name (`myhouse.duckdns.org`) with no port after it. A host
+name with no dot and a port of four or five digits (`DESKTOP-K3J9:7777`) is masked; the words `error`, `port`, `frame`
+and a few like them before a colon and a number are not. A name may hold an apostrophe with a letter after it
+(`O'Neil`). `check_logs` reads the `coop:` lines and the `coop voice:` lines, and a level word may come after one
+more `[tag] `. Nothing from a log goes into an issue or a pull request unmasked (AGENTS.md); quote only the lines you
+need.
+
+### Helpers: several calls in one
+
+`go_to_actor`, `face`, `attack`, `use_item`, `talk` and `open` are in `tools/autotest/playtest_helpers.py` (the MCP
+server calls them; a script can too). They only use the bridge's commands, so they add no game code. Rules:
+
+- Each takes the `id` and the `name` `get_world` gave, and looks the actor up in the world list again on every leg of
+  the walk and before every press. When the id is not in the list any more, or has another name, the answer is `gone`:
+  they never go for another actor of the name. A reused address (the game puts a new actor of the same name at the
+  address of one that went) is accepted: nothing here can tell it from the same actor, so read `life` and `pos` if it
+  matters.
+- At most 120 frames pass in one call (`max_frames` lowers it). Every answer says why it stopped: `go_to_actor`:
+  `near` (arrived), `gone`, `stuck` (Link got no 0.3 m nearer over 60 frames; `moved_m` is how far he went), `timed out`,
+  `scene changed`, `loading`, `event`, or a note that there is no world list. `attack`: `dead`, `gone`, `alive` (the
+  frames ran out with life left), or `stopped` with the reason of the walk. A refusal of the bridge comes back as the
+  reason, not as a crash.
+- `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
+  walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
+- `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
+  equips and inventory. `talk` and `open` press `A` only when the state's `prompt` is set.
+- They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
+  on every `input` and `step`; the MCP tools do not take a `both` argument, so over MCP the tester steps the other game
+  itself.
 
 Every reply carries the game's `frame`.
 

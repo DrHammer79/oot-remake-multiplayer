@@ -20,6 +20,7 @@ import desync_check  # noqa: E402
 import live  # noqa: E402
 import mcp_playtest  # noqa: E402
 import playtest_client as pc  # noqa: E402
+import playtest_helpers as ph  # noqa: E402
 
 
 class FakeGame:
@@ -36,6 +37,13 @@ class FakeGame:
         self.wall_x = None      # Link cannot pass this x
         self.scene_at = None    # (frame, scene): the scene changes once the frame count reaches it
         self.connections = 0
+        self.rupees, self.prompt = 5, None
+        self.on_press = None    # called with the buttons of each `input`
+        self.dump_hook = None   # called at each `dump`
+        self.solo = False       # kill/hit with an actor id are refused (no world list)
+        self.strike, self.pending, self.strike_seq = None, [], 0     # `state.strike`, results on their way, last number
+        self.strike_word, self.strike_delay = "done", 2   # the walk's answer (None: it never comes) and how many frames
+        self.strike_seq_in_reply = True
         game = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -68,13 +76,17 @@ class FakeGame:
                 self.pos[2] += 0.1 * stick[1] * math.cos(yaw)
             if self.scene_at and self.frame >= self.scene_at[0]:
                 self.scene = self.scene_at[1]
+            for at, rec in [p for p in self.pending if self.frame >= p[0]]:
+                self.strike = rec
+                self.pending.remove((at, rec))
 
     def state(self):
         return {"scene": self.scene, "room": None, "pos": [round(v, 4) for v in self.pos], "facing": 0.0,
-                "camera": self.camera, "life": 12, "max_life": 12, "rupees": 5, "age": "child", "event": False,
-                "loading": False, "prompt": None, "equips": {}, "inventory": dict(self.items),
+                "camera": self.camera, "life": 12, "max_life": 12, "rupees": self.rupees, "age": "child", "event": False,
+                "loading": False, "prompt": self.prompt, "equips": {}, "inventory": dict(self.items),
                 "coop": {"state": "connected", "players": 2}, "snapshot_frame": self.frame,
-                **({"world": self.world} if self.world is not None else {})}
+                **({"world": self.world} if self.world is not None else {}),
+                **({"strike": self.strike} if self.strike is not None else {})}
 
     def answer(self, m):
         cmd = m.get("cmd")
@@ -88,6 +100,8 @@ class FakeGame:
             return dict(self.state(), ok=True)
         if cmd in ("input", "step"):
             start = self.frame
+            if cmd == "input" and self.on_press and m.get("buttons"):
+                self.on_press(m["buttons"])
             self.run(m.get("frames", 1), m.get("stick"))
             self.paused = True
             return {"ok": True, "from": start, "state": self.state()}
@@ -103,8 +117,24 @@ class FakeGame:
             self.items[m["item"]] = self.items.get(m["item"], 0) + 1
             return {"ok": True, "given": m["item"]}
         if cmd == "act":
-            return {"ok": True, "lines": m["lines"]}
+            reply = {"ok": True, "lines": m["lines"]}
+            words = m["lines"].split()
+            if words and words[0] in ("kill", "hit"):
+                if len(words) > 1 and words[1].isdigit() and self.solo:
+                    return {"ok": False, "error": "refused", "message": "no world list: an actor id is resolved in "
+                            "the objects walk, which runs only while connected and sharing"}
+                self.strike_seq += 1
+                has_id = words[1].isdigit()
+                if self.strike_word is not None:
+                    self.pending.append((self.frame + self.strike_delay, {
+                        "seq": self.strike_seq, "result": self.strike_word, "name": words[2 if has_id else 1],
+                        "id": int(words[1]) if has_id else 0}))
+                if self.strike_seq_in_reply:
+                    reply["strike_seq"] = self.strike_seq
+            return reply
         if cmd == "dump":
+            if self.dump_hook:
+                self.dump_hook()
             path = os.path.join(self.dump_dir, "%s.json" % m["tag"])
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"frame": self.frame, "tag": m["tag"], "state": self.state(), "flags": self.flags}, f)
@@ -260,7 +290,8 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
-                          "dress", "assign", "chat", "menu", "checkpoint",
+                          "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
+                          "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
@@ -323,10 +354,9 @@ class PlayerServer(unittest.TestCase):
     def test_kill_hit_and_get_world_say_that_a_name_picks_the_nearest(self):
         by = {t["name"]: t["description"] for t in mcp_playtest.ACT_TOOLS + mcp_playtest.PLAYER_TOOLS}
         for name in ("kill", "hit"):
-            self.assertIn("nearest actor of that name with a life", by[name])
+            self.assertIn("nearest", by[name])
             self.assertIn("NAME", by[name])
-        self.assertIn("nearest actor of that name", by["get_world"])
-        self.assertIn("for reading only", by["get_world"])
+        self.assertIn("exact actor", by["get_world"])
 
     def test_get_world_reads_the_whole_list_and_filters(self):
         self.games["p1"].world = self.WORLD
@@ -385,9 +415,10 @@ class PlayerServer(unittest.TestCase):
                  ("chat", {"text": "hello there"}, "chat hello there"),
                  ("menu", {"page": "customize"}, "menu customize")]
         for tool, args, line in cases:
-            self.assertEqual(self.call("p1", tool, **args)["lines"], line)
-            sent = self.games["p1"].log[-1]
-            self.assertEqual((sent["cmd"], sent["lines"]), ("act", line))
+            r = self.call("p1", tool, **args)
+            self.assertEqual(r["line"] if tool in ("kill", "hit") else r["lines"], line)
+            sent = [m for m in self.games["p1"].log if m["cmd"] == "act"][-1]
+            self.assertEqual(sent["lines"], line)
 
     def test_verb_tools_refuse_bad_arguments_before_sending(self):
         before = len(self.games["p1"].log)
@@ -681,6 +712,37 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual(pc.mask_text("A cat saw a dog and A.", names=["A"]), "<name> cat saw a dog and <name>.")
         self.assertEqual(pc.mask_text("the Bob", names=["bob"]), "the <name>")
 
+    def test_check_logs_reads_the_voice_lines_and_a_level_after_one_more_tag(self):
+        d, _ = self.make_session(
+            "[hos 1] warning: coop voice: the microphone did not start\n"
+            "[hos 1] coop voice: the encoder failed to open\n"
+            "[hos 1] coop voice: opened\n"
+            "[hos 1] [Warning] warning: coop: slow frame\n"
+            "[hos 1] voice: not a co-op line, failed\n")
+        out = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d).call("check_logs", {})
+        self.assertEqual([(x["why"], x["line"]) for x in out["lines"]],
+                         [("level:warning", "warning: coop voice: the microphone did not start"),
+                          ("word:failed", "coop voice: the encoder failed to open"),
+                          ("level:warning", "[Warning] warning: coop: slow frame")])
+        self.assertEqual(out["read"], 4)
+
+    def test_the_mask_hides_a_host_without_a_dot_and_a_name_with_an_apostrophe(self):
+        for raw, want in (("connect to DESKTOP-K3J9:7777 failed", "connect to <host> failed"),
+                          ("host=DESKTOP-K3J9:7777 refused", "host=<hidden> refused"),
+                          ("lan MYPC:7777 up", "lan <host> up"),
+                          ("player 2 'Pat O'Neil' joined", "player 2 '<name>' joined"),
+                          ("name 'Rock'n'Roll' ok", "name '<name>' ok"),
+                          ("name 'Dan' and 'Bob' failed", "name '<name>' and 'Bob' failed")):
+            self.assertEqual(pc.mask_text(raw), want, raw)
+        for keep in ("coop: error:10054 reading", "coop: port:7777 open", "coop: frame:12345", "at 12:34:56 it failed"):
+            self.assertEqual(pc.mask_text(keep), keep)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "g.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("coop: player 2 'Pat O'Neil' joined\ncoop: on, name 'Rock'n'Roll'\n")
+            self.assertEqual(pc.session_names([path]), ["Pat O'Neil", "Rock'n'Roll"])
+        self.assertEqual(pc.mask_text("Pat O'Neil lost it", names=["Pat O'Neil"]), "<name> lost it")
+
     def test_the_mask_keeps_ordinary_text_and_hides_the_rest(self):
         keep = ["coop: look: the puppets' tunics are green now", "coop: version 0.11.10 build 1.2.3", "coop: frame 12345"]
         for line in keep:
@@ -773,6 +835,256 @@ class DesyncClients(unittest.TestCase):
             finally:
                 sys.stdout = stdout
 
+
+
+class StrikeAndHelpers(unittest.TestCase):
+    """kill and hit by id (rule Y) and the helpers of playtest_helpers.py, against the fake game."""
+
+    WORLD = {"frame": 1000, "age_ms": 40, "stale": False, "behind": False, "total": 3, "other_count": 0, "count": 3,
+             "actors": [
+                 {"id": 7, "addr": "0x80000007", "name": "Enemy_Far", "kind": "enemy", "pos": [30, 0, 0], "dist": 30.0,
+                  "life": 4, "max_life": 4, "owner": "server", "alive": True},
+                 {"id": 3, "addr": "0x80000003", "name": "Enemy_Near", "kind": "enemy", "pos": [6, 0, 0], "dist": 6.0,
+                  "life": 4, "max_life": 4, "owner": 2, "alive": True},
+                 {"id": 5, "addr": "0x80000005", "name": "Obj_TBox_Wood", "kind": "chest", "pos": [6, 0, 3],
+                  "dist": 6.7, "life": None, "max_life": None, "owner": None, "alive": None}]}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.game = FakeGame(dump_dir=self.tmp.name)
+        self.game.world = json.loads(json.dumps(self.WORLD))
+        self.other = FakeGame(dump_dir=tempfile.mkdtemp(dir=self.tmp.name))
+        self.tool = mcp_playtest.Game("p1", pc.Client(self.game.port), self.tmp.name)
+        self.c = self.tool.client
+
+    def tearDown(self):
+        self.tool.client.close()
+        self.game.close()
+        self.other.close()
+        self.tmp.cleanup()
+
+    def acts(self):
+        return [m["lines"] for m in self.game.log if m["cmd"] == "act"]
+
+    def actor(self, ident):
+        return next(a for a in self.game.world["actors"] if a["id"] == ident)
+
+    # --- kill and hit by id -------------------------------------------------------------------------------------
+    def test_an_id_goes_before_the_name_and_ok_comes_when_the_walk_struck(self):
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertEqual(r["result"], "ok")
+        self.assertEqual(self.acts(), ["kill 7 Enemy_Far"])
+        r = self.tool.call("hit", {"actor": "Enemy_Far", "id": "0x80000007", "amount": 3})
+        self.assertEqual(r["result"], "ok")
+        self.assertEqual(self.acts()[-1], "hit %d Enemy_Far 3" % 0x80000007)
+        r = self.tool.call("kill", {"actor": "Enemy_Far"})       # a name alone: as before
+        self.assertEqual((r["result"], self.acts()[-1]), ("ok", "kill Enemy_Far"))
+
+    def test_gone_is_refused_in_words_and_nothing_is_retried(self):
+        self.game.strike_word = "gone"
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertEqual(r["result"], "refused: actor 7 (Enemy_Far) is gone")
+        self.assertEqual(self.acts(), ["kill 7 Enemy_Far"])     # no second line, no other actor
+        self.game.strike_word = "none with a life"
+        r = self.tool.call("hit", {"actor": "Enemy_Far", "id": 7, "amount": 2})
+        self.assertEqual(r["result"], "refused: actor 7 (Enemy_Far) has no life left")
+        r = self.tool.call("kill", {"actor": "Enemy_Far"})
+        self.assertEqual(r["result"], "refused: none of that name has a life")
+
+    def test_no_result_after_12_frames_is_unknown_and_stops_there(self):
+        self.game.strike_word = None
+        start = self.game.frame
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("unknown: no result after 12 frames"), r["result"])
+        self.assertEqual(self.game.frame - start, 12)
+        self.assertEqual(self.acts(), ["kill 7 Enemy_Far"])
+
+    def test_a_late_result_inside_12_frames_still_counts(self):
+        self.game.strike_delay = 10
+        self.assertEqual(self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})["result"], "ok")
+
+    def test_a_newer_strike_in_the_book_is_not_taken_for_this_one(self):
+        self.game.strike = {"seq": 9, "result": "done", "name": "X", "id": 0}
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("unknown"), r["result"])
+
+    def test_solo_refuses_an_id_but_not_a_name(self):
+        self.game.solo = True
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("refused: no world list"), r["result"])
+        self.assertEqual(self.game.strike_seq, 0)               # nothing was queued
+        self.assertEqual(self.tool.call("kill", {"actor": "Enemy_Far"})["result"], "ok")
+
+    def test_a_module_without_strike_numbers_is_said_so(self):
+        self.game.strike_seq_in_reply = False
+        r = self.tool.call("kill", {"actor": "Enemy_Far"})
+        self.assertTrue(r["result"].startswith("unknown: the bridge gave no strike number"), r["result"])
+
+    def test_bad_ids_are_refused_before_anything_is_sent(self):
+        before = len(self.game.log)
+        for bad in (0, -3, "abc", True, 2 ** 64, 1.5, [7], "0x"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.tool.call("kill", {"actor": "Enemy_Far", "id": bad})
+        with self.assertRaises(ValueError):
+            self.tool.call("kill", {"id": 7})                    # an id needs the name beside it
+        with self.assertRaises(ValueError):
+            self.tool.call("hit", {"actor": "Enemy_Far", "id": 7, "amount": 0})
+        self.assertEqual(len(self.game.log), before)
+
+    def test_the_tool_texts_describe_the_id_and_the_wait(self):
+        by = {t["name"]: t["description"] for t in mcp_playtest.ACT_TOOLS + mcp_playtest.PLAYER_TOOLS}
+        for name in ("kill", "hit"):
+            self.assertIn("id", by[name])
+            self.assertIn("12 frames", by[name])
+        self.assertIn("never falls back", by["kill"])
+        self.assertIn("refused in solo", by["kill"])
+
+    # --- the helpers --------------------------------------------------------------------------------------------
+    def test_go_to_actor_arrives_within_the_bound(self):
+        r = ph.go_to_actor(self.c, 3)
+        self.assertTrue(r["arrived"], r)
+        self.assertEqual(r["reason"], "near")
+        self.assertLessEqual(r["frames"], ph.MAX_FRAMES)
+        self.assertLessEqual(r["distance"], ph.NEAR_M)
+        self.assertGreater(r["moved_m"], 3.0)
+
+    def test_go_to_actor_stops_when_the_id_is_gone_or_has_another_name(self):
+        r = ph.go_to_actor(self.c, 99)
+        self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Other")        # the name get_world gave is not the one there
+        self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
+        seen = []
+
+        def rename():
+            seen.append(1)
+            if len(seen) >= 3:
+                self.actor(3)["name"] = "Enemy_Reused"          # the address now holds another actor
+        self.game.dump_hook = rename
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
+        self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
+        self.assertLess(r["frames"], ph.MAX_FRAMES)
+
+    def test_go_to_actor_says_stuck_with_how_far_it_got(self):
+        self.game.wall_x = 1.0
+        r = ph.go_to_actor(self.c, 3, stuck_after=40)
+        self.assertEqual((r["arrived"], r["reason"], r["stuck"]), (False, "stuck", True))
+        self.assertLess(r["moved_m"], 3.0)
+        self.assertLessEqual(r["frames"], ph.MAX_FRAMES)
+
+    def test_go_to_actor_is_bounded_and_says_so(self):
+        r = ph.go_to_actor(self.c, 7, max_frames=20)
+        self.assertEqual((r["arrived"], r["reason"]), (False, "timed out"))
+        self.assertLessEqual(r["frames"], 20)
+        self.assertLessEqual(sum(m["frames"] for m in self.game.log if m["cmd"] == "input"), 20)
+
+    def test_go_to_actor_with_no_world_list_says_why(self):
+        self.game.world = {"frame": None, "why": "no co-op session: the world list is read only while connected and "
+                           "sharing", "count": 0, "actors": []}
+        r = ph.go_to_actor(self.c, 3)
+        self.assertFalse(r["arrived"])
+        self.assertTrue(r["reason"].startswith("no world list"), r["reason"])
+        self.game.world = None
+        self.assertTrue(ph.go_to_actor(self.c, 3)["reason"].startswith("no world list"))
+
+    def test_go_to_actor_leaves_the_other_game_alone_unless_both(self):
+        ph.go_to_actor(self.c, 3)
+        self.assertEqual(self.other.frame, 1000)
+        self.game.pos = [0.0, 0.0, 0.0]
+        pair = ph.InStep(self.c, pc.Client(self.other.port))
+        try:
+            start = self.game.frame
+            ph.go_to_actor(pair, 3)
+            self.assertGreater(self.game.frame, start)
+            self.assertEqual(self.other.frame - 1000, self.game.frame - start)   # the same frames in both games
+        finally:
+            pair.other.close()
+
+    def test_attack_walks_faces_and_presses_until_the_life_is_0(self):
+        self.game.on_press = lambda buttons: self.actor(3).update(life=max(0, self.actor(3)["life"] - 2)) \
+            if "Y" in buttons else None
+        r = ph.attack(self.c, 3)
+        self.assertEqual(r["result"], "dead", r)
+        self.assertEqual((r["life_before"], r["life_after"]), (4, 0))
+        self.assertLessEqual(r["frames"], ph.MAX_FRAMES)
+        self.assertTrue(any(m.get("lines", "").startswith("face ") for m in self.game.log if m["cmd"] == "act"))
+        self.assertEqual(sum(1 for m in self.game.log if m["cmd"] == "input" and m["buttons"] == ["Y"]), 2)
+
+    def test_attack_uses_the_button_it_is_given(self):
+        self.game.on_press = lambda buttons: self.actor(3).update(life=0) if "B" in buttons else None
+        self.assertEqual(ph.attack(self.c, 3, button="B")["result"], "dead")
+        self.assertFalse(any(m["buttons"] == ["Y"] for m in self.game.log if m["cmd"] == "input"))
+
+    def test_attack_never_presses_at_an_actor_that_is_gone(self):
+        self.assertEqual(ph.attack(self.c, 99)["stopped"], "gone")
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "input"])
+        # it leaves the list when the first press lands: the next round sees it gone and presses no more
+        self.game.on_press = lambda buttons: self.game.world["actors"].remove(self.actor(3))
+        r = ph.attack(self.c, 3)
+        self.assertEqual(r["result"], "gone")
+        self.assertEqual(sum(1 for m in self.game.log if m["cmd"] == "input" and m["buttons"] == ["Y"]), 1)
+
+    def test_attack_reports_a_walk_that_got_stuck_and_is_bounded(self):
+        self.game.wall_x = 1.0
+        r = ph.attack(self.c, 3)
+        self.assertEqual((r["result"], r["stopped"]), ("stopped", "stuck"))
+        self.assertTrue(r["stuck"])
+        self.assertLessEqual(r["frames"], ph.MAX_FRAMES)
+
+    def test_attack_that_does_not_kill_stops_at_the_frame_limit(self):
+        self.actor(3)["pos"] = [2, 0, 0]
+        r = ph.attack(self.c, 3, max_frames=60)
+        self.assertEqual(r["result"], "alive")
+        self.assertLessEqual(r["frames"], 60 + 2 * ph.PRESS_FRAMES)
+        self.assertEqual((r["life_before"], r["life_after"]), (4, 4))
+
+    def test_the_helper_tools_take_the_id_and_the_name_and_are_bounded(self):
+        r = self.tool.call("go_to_actor", {"id": "3", "name": "Enemy_Near"})
+        self.assertEqual((r["arrived"], r["reason"]), (True, "near"))
+        self.actor(3)["pos"] = [3, 0, 0]
+        self.game.on_press = lambda buttons: self.actor(3).update(life=0) if "B" in buttons else None
+        r = self.tool.call("attack", {"id": 3, "name": "Enemy_Near", "button": "b", "max_frames": 90})
+        self.assertEqual(r["result"], "dead")
+        self.assertEqual(self.tool.call("face", {"id": 3, "name": "Enemy_Near"})["reason"], "ok")
+        self.assertEqual(self.tool.call("go_to_actor", {"id": 3, "name": "Enemy_Wrong"})["reason"], "gone")
+        before = len(self.game.log)
+        for tool, args in (("go_to_actor", {"name": "Enemy_Near"}), ("go_to_actor", {"id": 3}),
+                           ("attack", {"id": 3, "name": "Enemy_Near", "button": "Q"}),
+                           ("attack", {"id": 3, "name": "Enemy_Near", "max_frames": 121}),
+                           ("go_to_actor", {"id": 3, "name": "E", "max_frames": 0}),
+                           ("go_to_actor", {"id": 0, "name": "E"}), ("use_item", {"item": "A;B"})):
+            with self.assertRaises(ValueError, msg=tool):
+                self.tool.call(tool, args)
+        self.assertEqual(len(self.game.log), before)
+        by = {t["name"]: t["description"] for t in mcp_playtest.PLAYER_TOOLS}
+        for name in ("go_to_actor", "attack"):
+            self.assertIn("120 frames", by[name])
+            self.assertIn("never goes for another", by[name])
+        self.assertIn("not yet confirmed", by["attack"])
+
+    def test_talk_and_open_press_a_only_with_a_prompt(self):
+        self.assertFalse(self.tool.call("talk", {})["pressed"])
+        self.game.prompt = "Open"
+        self.assertTrue(self.tool.call("open", {})["pressed"])
+
+    def test_use_item_assigns_presses_and_says_what_changed(self):
+        self.game.on_press = lambda buttons: setattr(self.game, "rupees", 9)
+        r = ph.use_item(self.c, "Bow")
+        self.assertEqual(r["changed"]["rupees"], {"was": 5, "now": 9})
+        self.assertIn("assign Bow", self.acts())
+        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["Y"]])
+        r = ph.use_item(self.c, "Hookshot", button="X")
+        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"][-1], ["X"])
+
+    def test_interact_presses_a_only_when_there_is_a_prompt(self):
+        r = ph.interact(self.c)
+        self.assertFalse(r["pressed"])
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "input"])
+        self.game.prompt = "Open"
+        self.game.on_press = lambda buttons: setattr(self.game, "prompt", None)
+        r = ph.interact(self.c, "open")
+        self.assertTrue(r["pressed"])
+        self.assertEqual((r["prompt_was"], r["prompt"]), ("Open", None))
+        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["A"]])
 
 
 class LiveStartPlaytest(unittest.TestCase):

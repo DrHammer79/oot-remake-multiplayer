@@ -192,13 +192,17 @@ class Client:
 # --- the log oracle (check_logs): the game's new `coop:` lines that say something went wrong, masked ---------------------
 # A line is flagged by its level (Longshot prints `warning: `, `error: ` or `critical: ` before the text of a LOG_WARNING,
 # LOG_ERROR or LOG_CRITICAL: most of the real warnings contain none of the words) or by one of the four words.
-LEVEL = re.compile(r"^(warning|error|critical): ")
+LEVEL = re.compile(r"^(?:\[[A-Za-z]+\] )?(warning|error|critical): ")   # (one more `[tag] ` may come before the level)
+_COOP_LINE = re.compile(r"\bcoop(?: voice)?:")   # the module's lines: `coop: ...` and the voice patch's `coop voice: ...`
 FLAG_WORDS = re.compile(r"\b(fail(?:ed|ure|ures|s)?|error|errors|refus(?:ed|es|al)|resync\w*)", re.IGNORECASE)
 MAX_FLAGGED = 40
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?!\.?\d)")
 # an IPv6 address has a `::` or a hex letter (a time such as 12:34:56 has neither)
 _IPV6 = re.compile(r"(?<![\w:])\[?(?=[0-9A-Fa-f:]*(?:::|[A-Fa-f]))(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}\]?(?::\d{1,5})?(?![\w:])")
 _DOTTED_HOST = re.compile(r"(?<![\w.-])(?:[A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z0-9-]*:\d{1,5}(?!\d)")   # myhouse.duckdns.org:7777
+# a host name without a dot, with a port (`DESKTOP-K3J9:7777`); the words that often stand before a number are kept
+_BARE_HOST = re.compile(r"(?<![\w.:-])(?!(?:error|errno|err|code|status|port|frame|seq|size|line|id|wsa|at|sec|ms)\b)"
+                        r"[A-Za-z][A-Za-z0-9-]{1,62}:\d{4,5}(?!\d)", re.IGNORECASE)
 _HOME = re.compile(r"(?i)([A-Z]:[\\/]+Users[\\/]+|/Users/|/home/)[^\\/\s\"']+")
 _ADDR = re.compile(r"\b0[xX][0-9A-Fa-f]{6,}\b")
 _HEX = re.compile(r"\b[0-9A-Fa-f]{32,}\b")
@@ -207,11 +211,12 @@ _HEX = re.compile(r"\b[0-9A-Fa-f]{32,}\b")
 _SECRET_STRONG = re.compile(r"(?i)\b(pass(?:word|phrase)?|token|secret|nick(?:name)?)\b(\s*[=:]\s*)(\"[^\"]*\"|\S+)")
 _SECRET_WEAK = re.compile(r"(?i)\b(key|name|user(?:name)?|host|server|room)\b(\s*=\s*)(\"[^\"]*\"|\S+)")
 _JOIN_PASSWORD = re.compile(r"(?i)\b(join password\s+)\S+")          # `coop: on, ..., join password {}`
-_NAMED = re.compile(r"(?i)\b(name|nick(?:name)?|player\s+\d+)(\s+)'[^'\n]*'")   # `player 2 'Bob' joined`, `name 'Bob'`
+# a name may hold an apostrophe that has a letter after it (O'Neil); the quote that closes it has none
+_NAMED = re.compile(r"(?i)\b(name|nick(?:name)?|player\s+\d+)(\s+)'(?:[^'\n]|'(?=\w))*'")   # `player 2 'Bob' joined`, `name 'Bob'`
 _QUOTED = re.compile(r'"[^"\n]*"')
 _TIME = re.compile(r"^\[hos [^\]]*\] ")
 _NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")   # live.NOISE: the emulator's own chatter
-_NAME_IN_LOG = re.compile(r"(?i)\b(?:name|nick(?:name)?|player\s+\d+)\s+'([^'\n]{1,40})'")
+_NAME_IN_LOG = re.compile(r"(?i)\b(?:name|nick(?:name)?|player\s+\d+)\s+'((?:[^'\n]|'(?=\w)){1,40})'")
 MAX_NAME_SCAN = 8 << 20
 
 
@@ -227,6 +232,7 @@ def mask_text(text, names=()):
     t = _DOTTED_HOST.sub("<host>", t)
     t = _IPV6.sub("<ip>", t)
     t = _IPV4.sub("<ip>", t)
+    t = _BARE_HOST.sub("<host>", t)
     t = _ADDR.sub("<addr>", t)
     t = _HEX.sub("<hex>", t)
     t = _JOIN_PASSWORD.sub(lambda m: m.group(1) + "<hidden>", t)
@@ -257,7 +263,7 @@ def session_names(paths):
 
 
 def read_log_since(path, offset):
-    """(the `coop:` lines written after byte `offset`, the new offset). Only whole lines are read: a half-written last
+    """(the `coop:` and `coop voice:` lines written after byte `offset`, the new offset). Only whole lines are read: a half-written last
     line stays for the next call. A file that is shorter than the offset (a new game on the same path) is read from
     its start. A missing file: ([], offset)."""
     try:
@@ -272,7 +278,7 @@ def read_log_since(path, offset):
     cut = data.rfind(b"\n") + 1
     data = data[:cut]
     lines = [_TIME.sub("", ln) for ln in data.decode("utf-8", "replace").splitlines()
-             if "coop:" in ln and not _NOISE.search(ln)]
+             if _COOP_LINE.search(ln) and not _NOISE.search(ln)]
     return lines, offset + cut
 
 
