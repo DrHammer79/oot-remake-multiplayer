@@ -485,3 +485,28 @@ TEST_CASE("gold mode: the first player in hosts from its welcome, with no host c
     CHECK(CoopGoldMode::InForce() == Mode::shared);
     CoopGoldMode::ResetForTest();
 }
+
+TEST_CASE("gold mode: Not shared, a guest's race never changes the host's save or the host's game") {
+    // Coordinator #11: the race goes into the guest's copy of the host's save (the bytes it got, written to its own
+    // co-op folder) and into the guest's game; the host's save and the host's game keep the host's count.
+    const std::vector<std::uint8_t> host_save = MakeSave(4, 1, {kSkull[1], kSkull[1] + 2, kWeb});
+    FakeGame host_game = MakeGame(4, true);
+    host_game.Bool(kSkull[1], true);
+    host_game.Bool(kSkull[1] + 2, true);
+    const FakeGame host_before = host_game;
+
+    // The guest: its copy of what the host sent gets its race (none yet: from 0).
+    const auto race = MakeRace(1, false, {kSkull[0], kSkull[0] + 2});
+    std::vector<std::uint8_t> guest_copy = host_save;
+    CHECK(CoopGoldMode::KeepRaceIn(guest_copy, &race, kSkull, kCount, kGet).done);
+    CHECK(guest_copy == MakeSave(1, 0, {kSkull[0], kSkull[0] + 2, kWeb}));
+    CHECK(host_save == MakeSave(4, 1, {kSkull[1], kSkull[1] + 2, kWeb}));   // the host's own, unchanged
+
+    // The guest's game after its load: its race goes back in there only.
+    FakeGame guest_game = MakeGame(0, false);
+    CHECK(CoopGoldMode::PutRaceBack(guest_game, race, kCount, kGet).done());
+    CHECK(guest_game.Value(kCount) == 1);
+    CHECK(host_game.flags == host_before.flags);
+    CHECK(CoopGoldMode::ReadRace(host_game, kSkull, kCount, kGet) ==
+          MakeRace(4, true, {kSkull[1], kSkull[1] + 2}));
+}
