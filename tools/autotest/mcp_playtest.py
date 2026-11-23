@@ -247,6 +247,12 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
      "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "interact", "description": "go_to_actor to within 1 m (`near_m`), face it, then as talk: press A only when "
+     "the `prompt` says an action is there. `walk` is go_to_actor's answer; a walk or turn that did not get there says "
+     "why and presses nothing. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
 ]
 
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
@@ -270,8 +276,8 @@ PLAYER_TOOLS = [
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
-    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) with the camera-relative stick, a "
-     "few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
+    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) by world direction (the module "
+     "makes the stick from each frame's camera), a few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
      "after max_frames; says why, the frames used and the distance left.",
      "inputSchema": {"type": "object", "required": ["x", "z"],
                      "properties": {"x": {"type": "number"}, "z": {"type": "number"},
@@ -512,6 +518,10 @@ class Game:
             return ph.use_item(c, _word(args, "item"), _button(args))
         if name in ("talk", "open"):
             return ph.interact(c, name)
+        if name == "interact":
+            return ph.interact_with(c, _need_id(args), _word(args, "name"),
+                                    _bounded(args, "near_m", ph.INTERACT_M, 0.5, 10),
+                                    int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "pause":
             return c.pause()
         if name == "resume":

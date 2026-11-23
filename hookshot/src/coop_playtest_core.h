@@ -4,6 +4,7 @@
 // the module's test commands); the unit tests (tests/hookshot/playtest_test.cpp) drive it with plain threads.
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -86,6 +87,41 @@ struct Axes {
 };
 Axes StickAxes(double angle_deg, double strength);
 
+// The left stick that walks Link toward world yaw `yaw_deg` (degrees, 0 toward +z, 90 toward +x: the state's `pos` and
+// `facing` convention) at `strength` (0 to 1), for the game's camera `clip_from_world` (row-major, clip = m * p, as
+// CoopCamera hands it). Stick up is the camera's forward on the ground (the way clip w grows: depth into the picture)
+// and stick right is the picture's right (the way clip x grows), both read from the matrix, so no handedness, yaw
+// offset or mirror is assumed. nullopt when the matrix gives no ground direction (a camera looking straight down, a
+// broken matrix).
+std::optional<Axes> MoveAxes(const std::array<float, 16>& clip_from_world, double yaw_deg, double strength);
+// The camera's yaw on the ground from the same matrix (degrees in [-180, 180), the state's convention), for replies.
+std::optional<double> ViewYaw(const std::array<float, 16>& clip_from_world);
+
+// A `move` in progress: the bridge thread starts and stops it, the game's input thread asks it at each pad read for
+// the stick to put in (hos_coop_pad), from the camera of the last drawn frame. Each read turns the world yaw into the
+// stick again, so a camera that turns while Link walks is followed on the next read.
+class MoveHold {
+   public:
+    struct Counts {
+        std::uint32_t reads = 0;      // pad reads while the move was on
+        std::uint32_t no_camera = 0;  // of those, reads with no usable camera: the stick was centred
+        std::optional<Axes> last;     // the last stick put in
+        std::optional<double> view;   // the camera yaw that stick came from
+    };
+    void Start(double yaw_deg, double strength);
+    Counts Stop();  // ends the move and gives what it did
+    bool On() const;
+    // The input thread: false when no move is on (the stick is left as it came). On: the stick's left axes
+    // (stick[0], stick[1], -32767 to 32767, y up) from `camera`, or centred when there is none.
+    bool Apply(const std::optional<std::array<float, 16>>& camera, std::int32_t stick[4]);
+
+   private:
+    mutable std::mutex mu_;
+    bool on_ = false;
+    double yaw_ = 0, strength_ = 0;
+    Counts counts_;
+};
+
 // A checked request.
 struct Request {
     std::string cmd;
@@ -93,6 +129,7 @@ struct Request {
     std::uint32_t frames = 1;
     std::vector<std::string> buttons;
     std::optional<Axes> stick, rstick;
+    double yaw = 0, strength = 1;  // move: world yaw in degrees, stick strength 0 to 1
     bool exclusive = true;
     std::string scene, entrance, name, item, tag, value;
     std::string lines;  // act: one test-script line (kill, hit, hurt, place, ...); PlayNow checks its kind

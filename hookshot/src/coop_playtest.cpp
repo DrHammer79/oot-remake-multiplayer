@@ -26,6 +26,7 @@
 
 #include "common/logging.h"
 #include "coop/host/game_items.hpp"
+#include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_hook.h"
 #include "coop_pause.h"
@@ -67,6 +68,7 @@ using CoopModJson::Value;
 std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_stop{false};
 std::unique_ptr<Gate> g_gate;
+MoveHold g_move;  // `move`: the world yaw the pad hook turns into the stick (PadMove)
 std::thread g_thread;
 Core::System* g_system = nullptr;
 std::filesystem::path g_dir;  // <game>/playtest
@@ -409,21 +411,57 @@ std::string Handle(const Request& r) {
         if (!gate.Step(r.frames, kHoldWait, &from)) return fail("timeout", "the frames did not run in time");
         return ok("\"from\":" + std::to_string(from));
     }
-    if (r.cmd == "input") {
-        if (!gate.Pause(kHoldWait)) return fail("timeout", "no frame came to hold at");
-        if (!g_control.SendLine(ControlInput(r, g_control.NextId()))) return fail("no_control", "HOS_CONTROL unset or unreachable");
-        // The status is asked before the last frame: that frame's Link update takes the snapshot, so the state in the
-        // reply is Link at the end of the step (a status asked after it would read an old snapshot).
-        std::uint64_t from = 0;
-        if (r.frames > 1 && !gate.Step(r.frames - 1, kHoldWait, &from)) {
+    // input and move: Longshot's sequence for `frames` frames, those frames run, then held. The status is asked before
+    // the last frame: that frame's Link update takes the snapshot, so the state in the reply is Link at the end of the
+    // step (a status asked after it would read an old snapshot). Empty on success (`from` and `status` set).
+    const auto run_pad = [&](const Request& pad, std::uint64_t& from, std::optional<Value>& status) -> std::string {
+        if (!g_control.SendLine(ControlInput(pad, g_control.NextId()))) return fail("no_control", "HOS_CONTROL unset or unreachable");
+        if (pad.frames > 1 && !gate.Step(pad.frames - 1, kHoldWait, &from)) {
             return fail("timeout", "the frames did not run in time");
         }
         const auto asked = g_control.Send("\"cmd\":\"status\"}");
         std::uint64_t last = 0;
         if (!gate.Step(1, kHoldWait, &last)) return fail("timeout", "the frames did not run in time");
-        if (r.frames == 1) from = last;
-        std::optional<Value> status = asked ? g_control.Await(*asked, 1500) : std::nullopt;
+        if (pad.frames == 1) from = last;
+        status = asked ? g_control.Await(*asked, 1500) : std::nullopt;
+        return {};
+    };
+    if (r.cmd == "input") {
+        if (!gate.Pause(kHoldWait)) return fail("timeout", "no frame came to hold at");
+        std::uint64_t from = 0;
+        std::optional<Value> status;
+        if (auto failed = run_pad(r, from, status); !failed.empty()) return failed;
         return ok("\"from\":" + std::to_string(from) + ",\"state\":" + StateObject(false, std::move(status)));
+    }
+    if (r.cmd == "move") {
+        // The world yaw becomes the stick at every pad read (PadMove, from hos_coop_pad) with the camera of the last
+        // drawn frame; Longshot's sequence only holds the real pad out (sticks centred) for the frames.
+        if (!gate.Pause(kHoldWait)) return fail("timeout", "no frame came to hold at");
+        const auto camera = CoopCamera::Latest();
+        if (!camera || !MoveAxes(camera->clip_from_world, r.yaw, r.strength)) {
+            return fail("no_camera", "no game camera to steer by (co-op off, or no frame drawn with the game's camera "
+                                     "yet: a title, a load): use input with a stick instead");
+        }
+        Request pad = r;
+        pad.stick.reset(), pad.rstick.reset(), pad.buttons.clear();
+        g_move.Start(r.yaw, r.strength);
+        std::uint64_t from = 0;
+        std::optional<Value> status;
+        const auto failed = run_pad(pad, from, status);
+        const auto did = g_move.Stop();
+        if (!failed.empty()) return failed;
+        std::string rest = "\"from\":" + std::to_string(from) + ",\"yaw\":" + Compact(Value::Of(r.yaw)) +
+                           ",\"reads\":" + std::to_string(did.reads) + ",\"no_camera\":" + std::to_string(did.no_camera);
+        rest += ",\"stick\":";
+        if (did.last) {
+            const double angle = std::atan2(did.last->x, did.last->y) * 180.0 / 3.14159265358979323846;
+            rest += "[" + Compact(Value::Of(std::round((angle < 0 ? angle + 360 : angle) * 100) / 100)) + "," +
+                    Compact(Value::Of(std::round(std::hypot(did.last->x, did.last->y) * 1000) / 1000)) + "]";
+        } else {
+            rest += "null";
+        }
+        rest += ",\"view\":" + (did.view ? Compact(Value::Of(std::round(*did.view * 10) / 10)) : std::string("null"));
+        return ok(rest + ",\"state\":" + StateObject(false, std::move(status)));
     }
     // The commands that change the game reach the wire and other players' games: only when the test runner asked for
     // them (LICHII_COOP_PLAYTEST_VERBS) and cheats are on.
@@ -695,6 +733,12 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     g_thread = std::thread(Run);
     LOG_INFO(Core, "coop: playtest: listening on 127.0.0.1:{} (control {}; dumps and shots in {})", *port,
              Env("HOS_CONTROL").empty() ? "off: HOS_CONTROL unset" : "on", g_dir.generic_string());
+}
+
+bool PadMove(std::int32_t stick[4]) {
+    if (!g_move.On()) return false;
+    const auto camera = CoopCamera::Latest();
+    return g_move.Apply(camera ? std::optional(camera->clip_from_world) : std::nullopt, stick);
 }
 
 void AtFrame() {

@@ -601,17 +601,52 @@ def main_root(repo=REPO):
         return repo
 
 
-def pid_alive(pid):
-    if pid <= 0:
-        return False
-    if WINDOWS:
-        r = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], capture_output=True, text=True)
-        return ('"%d"' % pid) in r.stdout
+def _win_pid_probe(pid):
+    """'alive', 'gone' or 'unknown' for a pid, from the process itself (OpenProcess and a zero wait on its handle).
+    Gone only when Windows says so: no such process (ERROR_INVALID_PARAMETER) or its handle is signalled (exited).
+    Anything else (access denied, an API error) is 'unknown'."""
+    import ctypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+    k.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+    k.WaitForSingleObject.restype = ctypes.c_ulong
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    h = k.OpenProcess(0x00100000 | 0x1000, False, pid)   # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        err = ctypes.get_last_error()
+        return "gone" if err == 87 else ("alive" if err == 5 else "unknown")   # 87 no such pid, 5 exists but denied
+    try:
+        w = k.WaitForSingleObject(h, 0)
+        return "gone" if w == 0 else ("alive" if w == 0x102 else "unknown")   # WAIT_OBJECT_0: exited; WAIT_TIMEOUT
+    finally:
+        k.CloseHandle(h)
+
+
+def _posix_pid_probe(pid):
     try:
         os.kill(pid, 0)
-        return True
+        return "alive"
+    except PermissionError:
+        return "alive"      # (exists, someone else's)
+    except ProcessLookupError:
+        return "gone"
     except OSError:
+        return "unknown"
+
+
+def pid_alive(pid, probe=None):
+    """False only when the process is known to be gone. A probe that cannot tell (an API error, a busy PC) counts as
+    alive: every caller ends a session, kills or takes a lock on False, so a wrong False is the harmful one (a live game
+    once had its session closed under it when one tasklist call came back empty). The lock's age limit still frees a
+    lock whose owner can never be probed."""
+    if pid <= 0:
         return False
+    probe = probe or (_win_pid_probe if WINDOWS else _posix_pid_probe)
+    try:
+        return probe(pid) != "gone"
+    except Exception:
+        return True
 
 
 def host_id():

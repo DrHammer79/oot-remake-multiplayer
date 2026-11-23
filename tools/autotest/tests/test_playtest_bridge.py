@@ -25,8 +25,9 @@ import playtest_helpers as ph  # noqa: E402
 
 class FakeGame:
     """A game's play-test bridge: held, it runs only the frames a command asks for; a closed connection lets it run.
-    Link walks 0.1 m a frame at full stick toward world yaw camera + bias + sign * stick angle (the real sign and
-    bias are what walk_to has to learn). `camera` None: the state reports no camera."""
+    Link walks 0.1 m a frame at full stick toward world yaw camera + bias + sign * stick angle for an `input`, and
+    toward the world yaw itself for a `move` (the module turns it into the stick with the frame's camera).
+    `camera` None: the state reports no camera. `move_camera` False: a `move` is refused with no_camera."""
 
     def __init__(self, camera=0.0, sign=1, bias=0.0, pos=(0.0, 0.0, 0.0), scene="ForestTemple", dump_dir=None):
         self.camera, self.sign, self.bias = camera, sign, bias
@@ -50,6 +51,7 @@ class FakeGame:
         self.no_teleport = {"BossStage"}   # maps Longshot's teleport list does not have
         self.via = None
         self.flip_at = None     # (frame): the stick's sign turns over from this frame on (a model that changes under the walk)
+        self.move_camera = True  # the module has a camera to turn a `move`'s yaw into the stick
         self.away_from = None   # (x, z): Link ignores the stick and walks directly away from this point
         self.faced = None       # the (x, z) of the last `face`
         self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
@@ -74,7 +76,7 @@ class FakeGame:
         self.server.shutdown()
         self.server.server_close()
 
-    def run(self, frames, stick=None):
+    def run(self, frames, stick=None, yaw=None):
         for _ in range(frames):
             self.frame += 1
             if self.flip_at is not None and self.frame == self.flip_at:
@@ -85,11 +87,11 @@ class FakeGame:
                 self.pos[0] += 0.1 * dx / n
                 self.pos[2] += 0.1 * dz / n
             elif stick and stick[1] > 0:
-                yaw = math.radians((self.camera or 0.0) + self.bias + self.sign * stick[0])
-                nx = self.pos[0] + 0.1 * stick[1] * math.sin(yaw)
+                w = math.radians(yaw if yaw is not None else (self.camera or 0.0) + self.bias + self.sign * stick[0])
+                nx = self.pos[0] + 0.1 * stick[1] * math.sin(w)
                 if self.wall_x is None or nx < self.wall_x:
                     self.pos[0] = nx
-                self.pos[2] += 0.1 * stick[1] * math.cos(yaw)
+                self.pos[2] += 0.1 * stick[1] * math.cos(w)
             if self.scene_at and self.frame >= self.scene_at[0]:
                 self.scene = self.scene_at[1]
             for at, rec in [p for p in self.pending if self.frame >= p[0]]:
@@ -132,6 +134,16 @@ class FakeGame:
             self.run(m.get("frames", 1), m.get("stick"))
             self.paused = True
             return {"ok": True, "from": start, "state": self.state()}
+        if cmd == "move":
+            if not self.move_camera:
+                return {"ok": False, "error": "no_camera", "message": "no game camera to steer by"}
+            start = self.frame
+            self.run(m.get("frames", 1), [0.0, m.get("strength", 1.0)], yaw=m["yaw"])
+            self.paused = True
+            cam = self.camera or 0.0
+            return {"ok": True, "from": start, "yaw": m["yaw"], "reads": m.get("frames", 1), "no_camera": 0,
+                    "stick": [round((m["yaw"] - cam) % 360.0, 2), m.get("strength", 1.0)], "view": cam,
+                    "state": self.state()}
         if cmd == "warp":
             if not self.event and (m.get("entrance") or m["scene"] in self.no_teleport):
                 # free play goes by Longshot's teleport: no start position, and only its own list of maps
@@ -263,10 +275,24 @@ class WalkTo(unittest.TestCase):
             self.assertTrue(r["arrived"], (cam, r["reason"], r["distance"]))
             self.assertLessEqual(r["distance"], 0.5)
 
-    def test_learns_a_mirrored_stick_and_an_offset(self):
+    def test_walks_straight_in_every_direction_by_world_yaw(self):
+        # The stick's sign and offset belong to the module (`move`): the walk goes the right way from its first push,
+        # whatever a stick would have needed (a mirrored stick, an offset), in all four quadrants.
         for sign, bias in ((-1, 0.0), (1, 40.0), (-1, -120.0), (1, 180.0)):
-            r = self.walk(FakeGame(camera=30.0, sign=sign, bias=bias), -5.0, 7.0, tolerance=0.3, max_frames=1500)
-            self.assertTrue(r["arrived"], (sign, bias, r["reason"], r["distance"]))
+            for tx, tz in ((5.0, 7.0), (-5.0, 7.0), (-5.0, -7.0), (5.0, -7.0)):
+                game = FakeGame(camera=30.0, sign=sign, bias=bias)
+                r = self.walk(game, tx, tz, tolerance=0.3, max_frames=1500)
+                self.assertTrue(r["arrived"], (sign, bias, tx, tz, r["reason"], r["distance"]))
+                self.assertLessEqual(r["frames"], 104)       # 8.6 m in a straight line: no wrong-way pushes
+                self.assertEqual([m for m in game.log if m["cmd"] == "input"], [])
+
+    def test_a_refused_move_stops_the_walk_and_says_why(self):
+        game = FakeGame()
+        game.move_camera = False
+        r = self.walk(game, 4.0, 4.0)
+        self.assertFalse(r["arrived"])
+        self.assertTrue(r["reason"].startswith("move refused: no_camera"), r["reason"])
+        self.assertEqual(r["frames"], 0)
 
     def test_no_camera_in_the_state(self):
         self.assertTrue(self.walk(FakeGame(camera=None, bias=70.0), 4.0, 4.0, max_frames=900)["arrived"])
@@ -275,10 +301,11 @@ class WalkTo(unittest.TestCase):
         game = FakeGame()
         r = self.walk(game, 3.0, 0.0, tolerance=0.2)
         self.assertTrue(r["arrived"])
-        inputs = [m for m in game.log if m["cmd"] == "input"]
-        self.assertTrue(inputs and all(m["frames"] <= 10 for m in inputs))
-        self.assertEqual(sum(m["frames"] for m in inputs), r["frames"])
-        self.assertTrue(all(0.0 <= m["stick"][0] < 360.0 and 0.0 < m["stick"][1] <= 1.0 for m in inputs))
+        moves = [m for m in game.log if m["cmd"] == "move"]
+        self.assertTrue(moves and all(m["frames"] <= 10 for m in moves))
+        self.assertEqual(sum(m["frames"] for m in moves), r["frames"])
+        self.assertTrue(all(-180.0 <= m["yaw"] < 180.0 and 0.0 < m["strength"] <= 1.0 for m in moves))
+        self.assertAlmostEqual(moves[0]["yaw"], 90.0)                    # +x: world yaw 90, whatever the camera
 
     def test_a_stale_snapshot_is_not_an_arrival(self):               # F1: null pos, never an old place
         game = FakeGame()
@@ -345,7 +372,7 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
-                          "checkpoint",
+                          "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
@@ -1270,6 +1297,24 @@ class StrikeAndHelpers(unittest.TestCase):
         r = ph.use_item(self.c, "Hookshot", button="X")
         self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"][-1], ["X"])
 
+    def test_interact_walks_to_the_actor_faces_it_and_presses_a(self):
+        self.game.prompt = "Open"
+        self.game.on_press = lambda buttons: setattr(self.game, "prompt", None)
+        r = self.tool.call("interact", {"id": 5, "name": "Obj_TBox_Wood"})
+        self.assertTrue(r["pressed"], r)
+        self.assertTrue(r["walk"]["arrived"])
+        self.assertLessEqual(r["walk"]["distance"], ph.INTERACT_M)
+        self.assertTrue(self.acts()[-1].startswith("face 6.00 3.00"), self.acts())
+        self.assertEqual(r["prompt_was"], "Open")
+
+    def test_interact_presses_nothing_when_it_did_not_get_there(self):
+        self.game.prompt = "Open"
+        r = self.tool.call("interact", {"id": 99, "name": "Obj_TBox_Wood"})
+        self.assertEqual((r["pressed"], r["result"]), (False, "not reached: gone"))
+        r = self.tool.call("interact", {"id": 7, "name": "Enemy_Far", "max_frames": 20})
+        self.assertEqual((r["pressed"], r["result"]), (False, "not reached: timed out"))
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "input" and "A" in (m.get("buttons") or [])])
+
     def test_interact_presses_a_only_when_there_is_a_prompt(self):
         r = ph.interact(self.c)
         self.assertFalse(r["pressed"])
@@ -1463,7 +1508,7 @@ class KitThreeFixes(unittest.TestCase):
                 self.tool.call("place", dict({"x": 1, "y": 2, "z": 3}, **extra))
         self.assertEqual(self.acts(), ["place 1 2 3"])
 
-    def test_walk_to_relearns_when_the_stick_turns_over_under_it(self):
+    def test_walk_to_is_not_fooled_when_the_stick_turns_over_under_it(self):
         game = FakeGame(camera=0.0)
         game.flip_at = 1060
         c = pc.Client(game.port)
@@ -1501,13 +1546,21 @@ class KitThreeFixes(unittest.TestCase):
         self.assertEqual(r["reason"], "timed out")
         self.assertEqual(len(r["trace"]), pc.TRACE_KEEP)
 
-    def test_a_short_graze_teaches_the_steering_nothing(self):
+    def test_steering_side_steps_when_stuck_and_comes_back(self):
         st = pc.Steering()
-        st.last = ([0.0, 0.0, 0.0], 0.0, 0.0)
-        st.learn([0.0, 0.0, 0.1], 0.0)                                   # 0.1 m: more than stuck, less than a clean move
-        self.assertEqual(st.fit[1]["n"], 0)
-        st.learn([0.0, 0.0, 0.5], 0.0)
-        self.assertEqual(st.fit[1]["n"], 1)
+        self.assertEqual(st.push([0.0, 0.0, 0.0], (5.0, 0.0)), [90.0, 1.0])
+        for _ in range(3):                                               # three pushes that move Link nowhere
+            yaw, _s = st.push([0.0, 0.0, 0.0], (5.0, 0.0))
+        self.assertEqual(yaw, 0.0)                                       # 90 - 90: aside, toward +z
+        st.push([0.0, 0.0, 0.5], (5.0, 0.0))
+        st.push([0.0, 0.0, 1.0], (5.0, 0.0))
+        yaw, _s = st.push([0.5, 0.0, 1.0], (5.0, 0.0))
+        self.assertAlmostEqual(yaw, pc.yaw_to([0.5, 0.0, 1.0], 5.0, 0.0), places=1)   # straight at it again
+        self.assertEqual(st.side_steps, 0)                               # stuck is not "getting farther"
+
+    def test_steering_eases_off_near_the_target(self):
+        self.assertEqual(pc.Steering().push([0.0, 0.0, 0.0], (0.0, 1.5))[1], 0.5)
+        self.assertEqual(pc.Steering().push([0.0, 0.0, 0.0], (0.0, 0.2))[1], pc.MIN_STRENGTH)
 
     # --- 7: the docs name the right form of live.py stop ---------------------------------------------------------------
     def test_the_docs_say_stop_session_with_its_flag(self):

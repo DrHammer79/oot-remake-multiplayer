@@ -156,6 +156,78 @@ Axes StickAxes(double angle_deg, double strength) {
     return out;
 }
 
+std::optional<Axes> MoveAxes(const std::array<float, 16>& m, double yaw_deg, double strength) {
+    if (!std::isfinite(yaw_deg) || !std::isfinite(strength)) return std::nullopt;
+    for (const float v : m) {
+        if (!std::isfinite(v)) return std::nullopt;
+    }
+    // Ground directions (x, z) in world space: forward = where clip w (depth) grows, right = where clip x grows. The
+    // x row may carry some of w (an off-centre or jittered projection): only its part across forward is the right.
+    double fx = m[12], fz = m[14];
+    const double fl = std::hypot(fx, fz);
+    if (!(fl > 1e-6)) return std::nullopt;
+    fx /= fl, fz /= fl;
+    double rx = m[0], rz = m[2];
+    const double along = rx * fx + rz * fz;
+    rx -= along * fx, rz -= along * fz;
+    const double rl = std::hypot(rx, rz);
+    if (!(rl > 1e-6 * std::max(1.0, std::hypot(static_cast<double>(m[0]), static_cast<double>(m[2]))))) {
+        return std::nullopt;
+    }
+    rx /= rl, rz /= rl;
+    strength = strength < 0 ? 0 : strength > 1 ? 1 : strength;
+    const double a = yaw_deg * 3.14159265358979323846 / 180.0;
+    const double dx = std::sin(a), dz = std::cos(a);
+    Axes out{(dx * rx + dz * rz) * strength, (dx * fx + dz * fz) * strength};
+    if (std::fabs(out.x) < 1e-9) out.x = 0;
+    if (std::fabs(out.y) < 1e-9) out.y = 0;
+    return out;
+}
+
+std::optional<double> ViewYaw(const std::array<float, 16>& m) {
+    const double fx = m[12], fz = m[14];
+    if (!std::isfinite(fx) || !std::isfinite(fz) || !(std::hypot(fx, fz) > 1e-6)) return std::nullopt;
+    double d = std::atan2(fx, fz) * 180.0 / 3.14159265358979323846;
+    if (d >= 180.0) d -= 360.0;
+    return d;
+}
+
+void MoveHold::Start(double yaw_deg, double strength) {
+    std::lock_guard lock(mu_);
+    on_ = true, yaw_ = yaw_deg, strength_ = strength, counts_ = {};
+}
+
+MoveHold::Counts MoveHold::Stop() {
+    std::lock_guard lock(mu_);
+    on_ = false;
+    return std::exchange(counts_, {});
+}
+
+bool MoveHold::On() const {
+    std::lock_guard lock(mu_);
+    return on_;
+}
+
+bool MoveHold::Apply(const std::optional<std::array<float, 16>>& camera, std::int32_t stick[4]) {
+    std::lock_guard lock(mu_);
+    if (!on_) return false;
+    ++counts_.reads;
+    const auto axes = camera ? MoveAxes(*camera, yaw_, strength_) : std::nullopt;
+    if (!axes) {
+        ++counts_.no_camera;
+        stick[0] = stick[1] = 0;
+        return true;
+    }
+    const auto axis = [](double v) {
+        v = v < -1 ? -1 : v > 1 ? 1 : v;
+        return static_cast<std::int32_t>(std::lround(v * 32767));
+    };
+    stick[0] = axis(axes->x), stick[1] = axis(axes->y);
+    counts_.last = axes;
+    counts_.view = ViewYaw(*camera);
+    return true;
+}
+
 namespace {
 
 constexpr std::string_view kButtons[] = {"A",  "B",    "X",     "Y",  "L",  "R",  "ZL",   "ZR",
@@ -246,6 +318,31 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
             }
         }
         if (!Stick(*v, "stick", r.stick, error) || !Stick(*v, "rstick", r.rstick, error)) return std::nullopt;
+        if (const auto* e = v->Get("exclusive"); e && e->kind != CoopModJson::Value::Kind::Bool) {
+            error = "exclusive: true or false";
+            return std::nullopt;
+        }
+        r.exclusive = v->Bool("exclusive").value_or(true);
+        return r;
+    }
+    if (c == "move") {
+        const auto f = Frames(*v, error);
+        if (!f) return std::nullopt;
+        r.frames = *f;
+        const auto yaw = v->Number("yaw");
+        if (!yaw || !std::isfinite(*yaw)) {
+            error = "yaw: the world direction in degrees (0 toward +z, 90 toward +x)";
+            return std::nullopt;
+        }
+        r.yaw = *yaw;
+        if (v->Get("strength")) {
+            const auto s = v->Number("strength");
+            if (!s || !(*s >= 0 && *s <= 1)) {
+                error = "strength: 0 to 1";
+                return std::nullopt;
+            }
+            r.strength = *s;
+        }
         if (const auto* e = v->Get("exclusive"); e && e->kind != CoopModJson::Value::Kind::Bool) {
             error = "exclusive: true or false";
             return std::nullopt;
@@ -344,7 +441,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, act, warp, flag, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, give, dump or shot";
     return std::nullopt;
 }
 

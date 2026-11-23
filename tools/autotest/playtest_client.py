@@ -5,8 +5,8 @@ docs/playtest.md, "Bridge protocol") listens on 127.0.0.1 only, one port per gam
 line each way. Every reply carries the game's frame count, which lines up two games' checkpoints later
 (desync_check.py --clients). A held game runs only the frames a command asks for.
 
-This file holds what is easy to change without a game build: the client, the camera-relative steering of walk_to
-(learnt from how Link actually moves), and the per-game checkpoint log. mcp_playtest.py --player turns it into MCP
+This file holds what is easy to change without a game build: the client, walk_to (world
+yaws through the bridge's `move`; the module makes the stick), and the per-game checkpoint log. mcp_playtest.py --player turns it into MCP
 tools. Standard library only.
 """
 import json
@@ -152,6 +152,16 @@ class Client:
         if rstick is not None:
             args["rstick"] = [round(float(rstick[0]), 2) % 360.0, round(max(0.0, min(1.0, float(rstick[1]))), 3)]
         return self.request("input", reply_timeout=self.timeout + frames / 20.0, **args)
+
+    def move(self, yaw, strength=1.0, frames=1, check=True):
+        """Walks toward world yaw `yaw` (degrees, 0 toward +z, 90 toward +x: the state's convention) for `frames`
+        frames, then the game is held again. The module turns the yaw into the stick at each pad read with the camera
+        of that frame, so a turning camera is followed. Replies with `stick` (the last [angle, strength] it used),
+        `view` (the camera's yaw it came from), `reads`, `no_camera` and the `state` at the end; `no_camera` as an
+        error when the game has no camera to steer by."""
+        args = {"yaw": round(float(yaw), 2), "strength": round(max(0.0, min(1.0, float(strength))), 3),
+                "frames": _frames(frames)}
+        return self.request("move", check=check, reply_timeout=self.timeout + frames / 20.0, **args)
 
     def warp(self, scene, entrance=None, timeout=60):
         timeout = float(timeout)
@@ -450,113 +460,69 @@ def yaw_to(pos, x, z):
     return math.degrees(math.atan2(x - pos[0], z - pos[2]))
 
 
-MIN_CLEAN_MOVE = 0.15      # metres a push has to move Link for its direction to teach the model anything
 TRACE_KEEP = 24            # the walk's reply keeps the last pushes, so a wrong walk can be read afterwards
 AWAY_METRES = 0.1          # how much farther than the push before a push has left Link (metres) to count as moving away
-AWAY_LIMIT = 3             # resets of the model for a walk that gets farther from the target, then the walk stops
+AWAY_LIMIT = 3             # side steps tried for a walk that keeps getting farther from the target, then the walk stops
+STUCK_METRES = 0.05        # a push that moves Link less than this got nowhere (a wall, a ledge)
+SLOW_WITHIN = 3.0          # metres from the target where the stick eases off (strength down to MIN_STRENGTH)
+MIN_STRENGTH = 0.45
 
 
 class Steering:
-    """Camera-relative steering. The model: Link walks toward world yaw camera + offset + sign * stick angle. The
-    bridge's starting guess is offset 0, sign +1 (docs/playtest.md); both are learnt from Link's real moves. The
-    offset is learnt for each sign; the sign whose offset fits the moves best wins (they tell apart once the stick
-    angle changes, as it does on any bend). A walk that gets nowhere for `stuck_after` pushes steps aside."""
+    """World-yaw steering for walk_to: each push asks the bridge's `move` for the yaw toward the target, and the module
+    turns it into the stick with the camera of that very frame (docs/playtest.md, "move"), so nothing is learnt and a
+    turning camera cannot send Link the wrong way. What is left here is getting round things: a walk that gets nowhere
+    for `stuck_after` pushes, or keeps getting farther from the target for `away_after` pushes (a slope, a current,
+    something pushing), steps aside 90 degrees for `detour_for` pushes, the other side each time."""
 
-    def __init__(self, slow_within=3.0, stuck_after=3, detour_for=3, sign=1):
-        self.slow_within, self.stuck_after, self.detour_for = slow_within, stuck_after, detour_for
-        self.sign = sign
-        self.fit = {1: {"offset": 0.0, "err": 0.0, "n": 0}, -1: {"offset": 0.0, "err": 0.0, "n": 0}}
-        self.last = None              # (pos, camera, stick angle) of the last push
-        self.stuck = self.detour_left = 0
+    def __init__(self, stuck_after=3, away_after=3, detour_for=3):
+        self.stuck_after, self.away_after, self.detour_for = stuck_after, away_after, detour_for
+        self.last = None          # (pos, distance) before the last push
+        self.stuck = self.away = self.detour_left = 0
         self.detour = 90.0
-        self.resets = 0
+        self.side_steps = 0       # side steps taken because the walk was getting farther
 
-    def reset(self):
-        """Forget what was learned (the model walked Link away from the target): the offset is learned again from the
-        next clean moves. The first reset keeps the sign, the second turns it over (a wrong sign is the one thing a
-        slow fit can take many pushes to find)."""
-        if self.resets == 1:
-            self.sign = -self.sign
-        self.resets += 1
-        self.fit = {1: {"offset": 0.0, "err": 0.0, "n": 0}, -1: {"offset": 0.0, "err": 0.0, "n": 0}}
-        self.last, self.stuck, self.detour_left = None, 0, 0
-
-    def learn(self, pos, camera):
-        if self.last is None:
-            return
-        lpos, lcam, lang = self.last
-        if math.hypot(pos[0] - lpos[0], pos[2] - lpos[2]) <= 0.05:
-            self.stuck += 1
-            if self.stuck >= self.stuck_after and not self.detour_left:
-                self.detour, self.detour_left, self.stuck = -self.detour, self.detour_for, 0
-            return
-        if math.hypot(pos[0] - lpos[0], pos[2] - lpos[2]) < MIN_CLEAN_MOVE:
-            return   # a graze along a wall or a ramp-up step: its direction says little about the stick, learn nothing
-        self.stuck = 0
-        seen = yaw_to(lpos, pos[0], pos[2])
-        for s, f in self.fit.items():
-            got = _wrap(seen - lcam - s * lang)            # what this sign says the offset is
-            if f["n"] == 0:
-                f["offset"] = got
-            else:
-                miss = _wrap(got - f["offset"])
-                f["err"] = 0.6 * f["err"] + 0.4 * abs(miss)
-                f["offset"] = _wrap(f["offset"] + 0.5 * miss)
-            f["n"] += 1
-        other = -self.sign
-        if self.fit[other]["n"] >= 2 and self.fit[other]["err"] + 10.0 < self.fit[self.sign]["err"]:
-            self.sign = other
-
-    def push(self, pos, camera, target):
-        """The stick [angle, strength] for Link at pos (metres) with the camera yaw (None: unknown, taken as 0) to
-        walk toward target (x, z)."""
-        camera = float(camera or 0.0)
-        self.learn(pos, camera)
-        want = yaw_to(pos, target[0], target[1])
-        angle = self.sign * _wrap(want - camera - self.fit[self.sign]["offset"])
-        if self.detour_left:
-            angle += self.detour
-            self.detour_left -= 1
+    def push(self, pos, target):
+        """The [world yaw, strength] for Link at pos (metres) to walk toward target (x, z)."""
         dist = math.hypot(target[0] - pos[0], target[1] - pos[2])
-        strength = round(max(0.45, min(1.0, dist / self.slow_within)), 3)
-        angle = round(angle, 2) % 360.0
-        self.last = (list(pos), camera, angle)
-        return [angle, strength]
+        if self.last is not None and not self.detour_left:
+            lpos, ldist = self.last
+            moved = math.hypot(pos[0] - lpos[0], pos[2] - lpos[2])
+            self.stuck = self.stuck + 1 if moved < STUCK_METRES else 0
+            self.away = self.away + 1 if dist > ldist + AWAY_METRES else 0
+            if self.stuck >= self.stuck_after or self.away >= self.away_after:
+                if self.away >= self.away_after:
+                    self.side_steps += 1
+                self.detour, self.detour_left, self.stuck, self.away = -self.detour, self.detour_for, 0, 0
+        yaw = yaw_to(pos, target[0], target[1])
+        if self.detour_left:
+            yaw += self.detour
+            self.detour_left -= 1
+        self.last = (list(pos), dist)
+        strength = round(max(MIN_STRENGTH, min(1.0, dist / SLOW_WITHIN)), 3)
+        return [round(_wrap(yaw), 2), strength]
 
 
 def walk_to(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
-    """Walks Link to (x, z) a few frames at a time (the game is held after each). Stops on arrival (within
-    `tolerance` metres), a scene change, a load or an event, or after max_frames. Returns why, the frames used,
-    the distance left and the last state."""
+    """Walks Link to (x, z) a few frames at a time with the bridge's `move` (the game is held after each). Stops on
+    arrival (within `tolerance` metres), a scene change, a load or an event, a refused move (no camera), a walk that
+    keeps getting farther after AWAY_LIMIT side steps, or after max_frames. Returns why, the frames used, the distance
+    left, the last state and `trace`: [frames used, x, z, distance left, world yaw, strength, stick] before each push,
+    the stick being the [angle, strength] the module made of the yaw."""
     st = game_of(client.state())
     scene = st.get("scene")
     steer = Steering()
     used = 0
-    trace = []            # [frames used, x, z, distance left, stick angle, strength, sign] before each push
-    prev, away, start_dist = None, 0, None
+    trace = []
+    start_dist = None
     while True:
         pos = st.get("pos")
         if not pos:
             return {"arrived": False, "reason": no_position_reason(st), "frames": used, "state": st}
         dist = math.hypot(x - pos[0], z - pos[2])
+        start_dist = dist if start_dist is None else start_dist
         out = {"frames": used, "distance": round(dist, 3), "state": st, "trace": trace[-TRACE_KEEP:],
                "target": [x, z]}
-        # farther from the target after three pushes in a row (the first one may be the push that taught the model): the
-        # model is wrong (a wrong camera or stick convention, or a push learned while sliding along a wall); start it
-        # again, and turn the sign over the second time. After AWAY_LIMIT resets the walk says so instead of walking on.
-        if prev is not None and dist > prev + AWAY_METRES:
-            away += 1
-            if away >= 3:
-                if steer.resets >= AWAY_LIMIT:
-                    return dict(out, arrived=False, reason="moving away: the walk got farther from the target (%.1f m "
-                                "now, %.1f m at the start) after %d restarts of the steering; the trace has each push" %
-                                (dist, start_dist, steer.resets))
-                steer.reset()
-                away = 0
-        elif prev is not None:
-            away = 0
-        prev = dist
-        start_dist = dist if start_dist is None else start_dist
         if dist <= tolerance:
             return dict(out, arrived=True, reason="arrived")
         if st.get("scene") != scene:
@@ -565,11 +531,18 @@ def walk_to(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
             return dict(out, arrived=False, reason="loading" if st.get("loading") else "event")
         if used >= max_frames:
             return dict(out, arrived=False, reason="timed out")
+        yaw, strength = steer.push(pos, (x, z))
+        if steer.side_steps > AWAY_LIMIT:
+            return dict(out, arrived=False, reason="moving away: the walk got farther from the target (%.1f m now, "
+                        "%.1f m at the start) after %d side steps; the trace has each push" %
+                        (dist, start_dist, AWAY_LIMIT))
         n = min(chunk, max_frames - used)
-        stick = steer.push(pos, st.get("camera"), (x, z))
-        trace.append([used, round(pos[0], 2), round(pos[2], 2), round(dist, 2), stick[0], stick[1], steer.sign])
+        r = client.move(yaw, strength, n, check=False)
+        if not r.get("ok"):
+            return dict(out, arrived=False, reason="move refused: %s: %s" % (r.get("error"), r.get("message")))
+        trace.append([used, round(pos[0], 2), round(pos[2], 2), round(dist, 2), yaw, strength, r.get("stick")])
         del trace[:-TRACE_KEEP]
-        st = game_of(client.input(stick, (), n))
+        st = game_of(r)
         used += n
 
 
