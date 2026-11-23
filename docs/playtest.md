@@ -370,7 +370,7 @@ Standard library only; tested without a game by `tools/autotest/tests/test_kit_t
 - **`step_until`** (a player tool, above): `step_until condition 120` instead of a `step`, `get_state`, `step` loop.
 - **Delta state.** Every `get_state` (player server) and `state` (session server, `live.py state`) reply carries a `state_id`. Pass it back as `since` and only what changed comes back: `changed` (dotted path to the new value: `pos`, `equips.shield`, `coop.players`; a list is one value), `removed` (paths that are gone), the `frame`, the new `state_id` and `since`. The counters that move on every look (`frame`, `snapshot_present`, `world_frame`, `id`, `ok`, `paused`) and the `inventory` are left out of the comparison (`inventory_count` says it changed). New `coop:` log lines (`live.py state`) are always whole: they are new since the last look already. The last 16 looks are kept (in memory on the player server; `state-history.json` in the session folder for `live.py`). An id that is not kept gives the whole state and a `why`; so does a player the old look did not have. `since` must be a whole number from 1. A player server numbers its looks from its own base (p1 from 100001, p2 from 200001), so an id from one player's server is "not kept" on another's.
 
-- **Call log and replay.** Every kit call is written as one JSON line to `calls.jsonl`: `{"t", "server", "tool", "args", "ok", "error"}` (`t` is when the call began, `server` is `oot-p1`..`oot-p4`, `oot-playtest`, or `live` for a `live.py` command, which is logged under its MCP tool name: `do` is `act`). Where: the session folder when the server has `--session`, else its `--log-dir`; `--call-log FILE` picks another file, `--no-call-log` turns it off. All servers of a run append to the one file, a line in one write, so the lines do not mix. A log that cannot be written never stops a test. Run it again:
+- **Call log and replay.** Every kit call is written as one JSON line to `calls.jsonl`: `{"t", "server", "tool", "args", "ok", "error"}` (`t` is when the call began, `server` is `oot-p1`..`oot-p4`, `oot-pair` (`--pair`, each call with its `player`), `oot-playtest`, or `live` for a `live.py` command, which is logged under its MCP tool name: `do` is `act`). Where: the session folder when the server has `--session`, else its `--log-dir`; `--call-log FILE` picks another file, `--no-call-log` turns it off. All servers of a run append to the one file, a line in one write, so the lines do not mix. A log that cannot be written never stops a test. Run it again:
 
   `python -I tools/autotest/live.py replay [FILE ...] --session DIR [--lane N] [--log-dir DIR] [--dry-run] [--keep-going] [--delay S] [--include-reads] [--include-failed]`
 
@@ -454,9 +454,13 @@ Nothing here has run in a game. The first run checks:
    outside them (a warp, a test line, a shot) right after the call, from the game's frame counts. So neither game is
    held while the other plays: its puppet keeps moving, and an enemy it owns is not frozen. Each such reply has
    `other`: the other player, the `frames` it ran, how many of them were `caught_up` after the call, and `in_step`
-   (false with an `error` when the other game could not be stepped). `get_state` and `step` with no `player` act on
-   both games (`games`, by player). A tool that runs no frame (get_world, checkpoint, log, ...) touches only its
-   game. A bridge takes one client at a time, so `oot-pair` replaces `oot-p1` and `oot-p2`: never register both.
+   (false with an `error` when the other game could not be stepped). When the player's game ran fewer frames than
+   asked (a pause, a load), the other game runs only what ran, and `short` says how many did not. `get_state` and
+   `step` with no `player` act on both games (`games`, by player); `pause` and `resume` always act on both, so one
+   game is never left running free. A tool that runs no frame (get_world, checkpoint, log, ...) touches only its
+   game. Calls are logged under the server `oot-pair` (with their `player`); `replay`, `save_script` and the script
+   check read them. A bridge takes one client at a time, so `oot-pair` replaces `oot-p1` and `oot-p2`: never
+   register both (`kit_doctor` checks an `oot-pair` entry has `--pair` and no `--player`).
 3. The tester follows [AGENTS.md](../AGENTS.md), "Play-testing the game", and runs [tests/scenarios.md](../tests/scenarios.md)
    in order.
 

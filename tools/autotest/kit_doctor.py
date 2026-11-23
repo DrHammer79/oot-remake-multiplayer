@@ -25,7 +25,7 @@ hs = lanes.hs
 TEMPLATE = os.path.join(HERE, "mcp.json.template")
 KIT_FILES = ("mcp_playtest.py", "playtest_client.py", "playtest_helpers.py", "live.py", "kit_tools.py", "lanes.py")
 DLL = "hookshot_coop.dll"
-SERVERS = ("oot-p1", "oot-p2", "oot-p3", "oot-p4", "oot-playtest")
+SERVERS = ("oot-p1", "oot-p2", "oot-p3", "oot-p4", "oot-pair", "oot-playtest")   # oot-pair: mcp_playtest --pair
 
 
 class Report:
@@ -189,7 +189,7 @@ def check_mcp(r, path, lane=None, which=shutil.which):
     base = os.path.dirname(os.path.abspath(path))
     oot = {k: v for k, v in servers.items() if k in SERVERS and isinstance(v, dict)}
     if not oot:
-        r.fail("mcp", "%s has no oot-p1 / oot-p2 server" % path)
+        r.fail("mcp", "%s has no oot-p1 / oot-p2 server (nor an oot-pair)" % path)
         return
     logs = set()
     for name in sorted(oot):
@@ -205,7 +205,12 @@ def check_mcp(r, path, lane=None, which=shutil.which):
         elif not os.path.isfile(script if os.path.isabs(script) else os.path.join(base, script)):
             bad.append("%s does not exist (relative paths are read from %s)" % (script, base))
         player = _opt(args, "--player")
-        if name != "oot-playtest" and player != name[4:]:
+        if name == "oot-pair":
+            if "--pair" not in args:
+                bad.append("args do not have --pair")
+            if player or _opt(args, "--port"):
+                bad.append("--pair takes no --player or --port (both games' ports come from --lane)")
+        elif name != "oot-playtest" and player != name[4:]:
             bad.append("--player is %s, not %s" % (player, name[4:]))
         got = _opt(args, "--lane")
         if name != "oot-playtest" and lane is not None and str(got) != str(lane):
@@ -218,8 +223,12 @@ def check_mcp(r, path, lane=None, which=shutil.which):
         if bad:
             r.fail("mcp " + name, "; ".join(bad))
         else:
-            port = pc.port_for(name[4:], int(got) if got else None) if name != "oot-playtest" else None
-            r.ok("mcp " + name, "ok" + (", bridge port %d" % port if port else ""))
+            lane_n = int(got) if got else None
+            if name == "oot-pair":
+                r.ok("mcp " + name, "ok, bridge ports p1 %d, p2 %d" % (pc.port_for("p1", lane_n), pc.port_for("p2", lane_n)))
+            else:
+                port = pc.port_for(name[4:], lane_n) if name != "oot-playtest" else None
+                r.ok("mcp " + name, "ok" + (", bridge port %d" % port if port else ""))
     if len(logs) > 1:
         r.fail("mcp log-dir", "the servers have different --log-dir (%s): desync_check reads one folder"
                % ", ".join(sorted(logs)))

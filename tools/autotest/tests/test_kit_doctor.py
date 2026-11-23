@@ -187,6 +187,20 @@ class Mcp(unittest.TestCase):
             self.assertNotIn(bad, text)
         self.assertIn("{LANE}", text)
 
+    def test_a_pair_server_needs_pair_and_no_player(self):
+        def pair(servers, extra=(), drop=None):
+            servers.clear()
+            args = ["-I", os.path.join(kd.HERE, "mcp_playtest.py"), "--pair", "--lane", "1", "--log-dir", "logs"]
+            servers["oot-pair"] = {"command": "python", "args": [x for x in args if x != drop] + list(extra)}
+        r = self.check(self.write(mutate=pair))
+        self.assertEqual(levels(r), {"mcp oot-pair": "OK"}, r.text())
+        self.assertIn("bridge ports p1 %d, p2 %d" % (kd.pc.port_for("p1", 1), kd.pc.port_for("p2", 1)),
+                      said(r, "mcp oot-pair"))
+        r = self.check(self.write(mutate=lambda s: pair(s, ["--player", "p1"])))
+        self.assertIn("takes no --player", said(r, "mcp oot-pair"))
+        r = self.check(self.write(mutate=lambda s: pair(s, drop="--pair")))
+        self.assertIn("do not have --pair", said(r, "mcp oot-pair"))
+
     def test_render_fills_the_placeholders_and_drops_what_is_not_given(self):
         data = kd.render_mcp(kd.TEMPLATE, 2, "sess", "logs")
         p1 = data["mcpServers"]["oot-p1"]["args"]

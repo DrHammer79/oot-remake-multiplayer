@@ -30,46 +30,58 @@ CLOSER_M = 0.3         # a leg that brings Link this much nearer is progress
 
 class InStep:
     """Two games in step: every frame the primary game runs through input(), move() or step() the other game runs too. Anything
-    else (state, world, act) goes to the primary only."""
+    else (state, world, act) goes to the primary only. The other game runs what the primary's frame count moved (`start`:
+    the primary's frame before the first call, else its last seen frame), so a call that ran fewer frames than it asked
+    (cut short, refused after a partial run) never puts the other game ahead; without frame counts, what was asked."""
 
-    def __init__(self, primary, other):
+    def __init__(self, primary, other, start=None):
         self.primary, self.other = primary, other
+        self.seen = start if start is not None else getattr(primary, "last_frame", None)
         self.stepped = 0   # frames the other game ran so far
+        self.short = 0     # frames asked that the primary did not run (so the other did not either)
 
     def __getattr__(self, name):
         return getattr(self.primary, name)
 
+    def _ran(self, asked):
+        """What the primary ran since the last look: its frame count's move, else `asked`."""
+        now = getattr(self.primary, "last_frame", None)
+        if self.seen is None or now is None:
+            ran = asked
+        else:
+            ran = max(0, int(now) - int(self.seen))
+        if now is not None:
+            self.seen = now
+        self.short += max(0, asked - ran)
+        return ran
+
     def _other(self, frames):
-        self.other.step(frames)
-        self.stepped += frames
+        while frames > 0:
+            n = min(frames, pc.MAX_FRAMES)
+            self.other.step(n)
+            self.stepped += n
+            frames -= n
 
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         r = self.primary.input(stick, buttons, frames, rstick)
-        self._other(frames)
+        self._other(self._ran(frames))
         return r
 
     def move(self, yaw, strength=1.0, frames=1, check=True):
         r = self.primary.move(yaw, strength, frames, check)
-        if r.get("ok"):                     # (a refused move ran no frames)
-            self._other(frames)
+        self._other(self._ran(frames if r.get("ok") else 0))   # (a refused move ran no frames)
         return r
 
     def step(self, frames=1):
         r = self.primary.step(frames)
-        self._other(frames)
+        self._other(self._ran(frames))
         return r
 
-    def catch_up(self, ran):
-        """Steps the other game by what the primary ran (`ran` frames, from its frame counts) beyond what was already
-        stepped: a warp or a test line runs frames that do not pass through input, move or step. Returns the frames
-        added."""
-        left = int(ran) - self.stepped
-        added = 0
-        while left > 0:
-            n = min(left, pc.MAX_FRAMES)
-            self._other(n)
-            added += n
-            left -= n
+    def catch_up(self):
+        """Steps the other game by what the primary ran since the last input, move or step (a warp, a test line, a shot,
+        or a call that failed after running some frames), from its frame count. Returns the frames added."""
+        added = self._ran(0)
+        self._other(added)
         return added
 
 
