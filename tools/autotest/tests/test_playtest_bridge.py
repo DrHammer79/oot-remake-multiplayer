@@ -301,6 +301,33 @@ class PlayerServer(unittest.TestCase):
                    actors=[self.WORLD["actors"][1], self.WORLD["actors"][0]][:1])
         self.assertTrue(pc.world_words({"world": cut}).get("enemy_near_at_least"))   # 59 known unseen, last one at 2 m
 
+    def test_a_list_cut_inside_four_metres_does_not_say_no_danger(self):
+        chest = {"id": 9, "addr": "0x80000009", "name": "Obj_TBox_Wood", "kind": "chest", "pos": [1, 0, 0],
+                 "dist": 3.0, "life": None, "max_life": None, "owner": None, "alive": None}
+        cut = {"frame": 5, "why": None, "total": 60, "other_count": 0, "count": 1, "actors": [chest]}
+        s = pc.world_words({"world": cut})
+        self.assertIsNone(s["danger"])                      # an enemy may stand at 2 m, unlisted
+        self.assertTrue(s["enemy_near_at_least"])
+        near = dict(chest, id=8, name="Enemy_Stalchild", kind="enemy", dist=2.0, life=4, max_life=4, alive=True)
+        self.assertTrue(pc.world_words({"world": dict(cut, actors=[near, chest])})["danger"])   # a True stays True
+        whole = dict(cut, total=1)
+        self.assertIs(pc.world_words({"world": whole})["danger"], False)                        # nothing was cut
+
+    def test_the_walk_ran_words_match_by_prefix(self):
+        for why in (None, "empty: the walk ran and saw no actors", "empty: some new wording",
+                    "only other kinds near: dump lists them", "only other kinds near, listed by dump"):
+            self.assertTrue(pc.walk_ran(why), why)
+        for why in ("no co-op session: the world list is read only while connected and sharing", "stale: x", ""):
+            self.assertFalse(pc.walk_ran(why), why)
+
+    def test_kill_hit_and_get_world_say_that_a_name_picks_the_nearest(self):
+        by = {t["name"]: t["description"] for t in mcp_playtest.ACT_TOOLS + mcp_playtest.PLAYER_TOOLS}
+        for name in ("kill", "hit"):
+            self.assertIn("nearest actor of that name with a life", by[name])
+            self.assertIn("NAME", by[name])
+        self.assertIn("nearest actor of that name", by["get_world"])
+        self.assertIn("for reading only", by["get_world"])
+
     def test_get_world_reads_the_whole_list_and_filters(self):
         self.games["p1"].world = self.WORLD
         r = self.call("p1", "get_world")

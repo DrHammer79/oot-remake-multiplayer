@@ -118,9 +118,12 @@ def act_line(name, args):
 ACT_NOTE = ("Needs a test-runner start with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
             "use it on the test server only. The game does it on its next frames: step a few, then get_state.")
 ACT_TOOLS = [
-    {"name": "kill", "description": "Kill an enemy actor by its name (from get_state's world list). " + ACT_NOTE,
+    {"name": "kill", "description": "Kill an enemy actor by its NAME (`name` from get_world): the game takes the "
+     "nearest actor of that name with a life (get_world lists them nearest first), not a particular id. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["actor"], "properties": {"actor": {"type": "string"}}}},
-    {"name": "hit", "description": "Hit an actor for N quarter hearts. " + ACT_NOTE,
+    {"name": "hit", "description": "Hit an actor for N quarter hearts, by its NAME (`name` from get_world): the game "
+     "takes the nearest actor of that name with a life (get_world lists them nearest first), not a particular id. "
+     + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["actor", "amount"],
                      "properties": {"actor": {"type": "string"},
                                     "amount": {"type": "integer", "minimum": 1, "maximum": 80}}}},
@@ -158,7 +161,8 @@ PLAYER_TOOLS = [
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
      "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
      "list exists only while the games are connected and sharing: an EMPTY list with a `why` is not 'nothing here'. "
-     "Read `why`. No frame passes.",
+     "Read `why`. `kill` and `hit` take the `name`, and hit the nearest actor of that name with a life: `id` and "
+     "`addr` are for reading only. No frame passes.",
      "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
                                                        "within_m": {"type": "number", "minimum": 0},
                                                        "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},

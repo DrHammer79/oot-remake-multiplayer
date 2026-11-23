@@ -188,7 +188,12 @@ WORLD_TAG = "world_query"   # the tag of the dump `Client.world` reads: one file
 KINDS = ("player", "enemy", "npc", "chest", "door", "switch", "item", "other")
 LIFE_WORDS = ("full", "ok", "low", "critical")
 # the `why` values of an empty list that still count as "the walk ran": the enemy words are then real zeros
-WALK_RAN = (None, "empty: the walk ran and saw no actors", "only other kinds near: dump lists them")
+# (matched by prefix, so a change of the C++ wording after the colon keeps the words)
+WALK_RAN_PREFIXES = ("empty:", "only other kinds")
+
+
+def walk_ran(why):
+    return why is None or (isinstance(why, str) and why.startswith(WALK_RAN_PREFIXES))
 
 
 def life_word(life, max_life):
@@ -205,18 +210,22 @@ def world_words(state):
     """Words next to the numbers, from a bridge `state` reply: `life_word`, `enemy_near` (living enemies within 10 m) and
     `danger` (one within 4 m). enemy_near and danger are None, never 0 and false, when the world list is not there
     (solo, stale, a module without it). `state` lists the nearest 40 known actors: when the list was cut inside 10 m
-    the count is a lower bound and `enemy_near_at_least` is true."""
+    the count is a lower bound and `enemy_near_at_least` is true; when it was cut inside 4 m and no listed enemy is that
+    close, `danger` is None (a True stays True)."""
     out = {"life_word": life_word(state.get("life"), state.get("max_life")), "enemy_near": None, "danger": None}
     w = state.get("world")
-    if not isinstance(w, dict) or w.get("why") not in WALK_RAN:
+    if not isinstance(w, dict) or not walk_ran(w.get("why")):
         return out
     listed = w.get("actors") or []
     foes = [a for a in listed if a.get("kind") == "enemy" and a.get("alive") is not False]
     out["enemy_near"] = sum(1 for a in foes if a.get("dist") is not None and a["dist"] <= 10)
     out["danger"] = any(a.get("dist") is not None and a["dist"] <= 4 for a in foes)
     known = (w.get("total") or 0) - (w.get("other_count") or 0)
-    if known > len(listed) and listed and (listed[-1].get("dist") or 0) <= 10:
+    cut = known > len(listed) and bool(listed)
+    if cut and (listed[-1].get("dist") or 0) <= 10:
         out["enemy_near_at_least"] = True
+    if cut and not out["danger"] and (listed[-1].get("dist") or 0) <= 4:
+        out["danger"] = None   # an unlisted enemy may stand nearer than the last one listed: unknown, not false
     return out
 
 
