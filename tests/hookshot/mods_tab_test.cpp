@@ -154,7 +154,13 @@ TEST_CASE("mods tab: a mod's page moves it and changes each kind of setting") {
 
     CHECK(tab.Press(Input::kBack));
     CHECK_FALSE(tab.on_mod_page());
-    CHECK(tab.view().selected == 0 + 1);  // back on Big HUD's row (under the restart note)
+    // back on Big HUD's row, the first under the restart note's rows (the note breaks at the list's width: 1 or more)
+    v = tab.view();
+    int notes = 0;
+    while (notes < static_cast<int>(v.rows.size()) && v.rows[static_cast<std::size_t>(notes)].kind == RowKind::kNote) ++notes;
+    CHECK(notes >= 1);
+    CHECK(v.rows[0].name.rfind("Restart needed: ", 0) == 0);
+    CHECK(v.selected == notes);
 }
 
 
