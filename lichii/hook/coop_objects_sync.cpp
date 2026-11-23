@@ -912,8 +912,15 @@ bool IsStunAnimation(std::string_view name) {
     // files: Morpha 'ChanceTime', 'Chance_time_St'; Volvagia 'ChanceTimeDamageStart'; the Poe sisters 'Chance_St',
     // 'ChanceTime_Loop'; Phantom Ganon and Ganondorf 'DownTimeReaction_Start'). Gohma's 'ChanceAfterAttack' and
     // 'Attack_Chance' are her own moves (the owner's too), not a stun of a hit.
-    return first == "Stun" || first == "Down" || first == "Fall" || first == "Faint" || first == "Chance" ||
-           first.starts_with("ChanceTime") || first.starts_with("DownTimeReaction");
+    // Row 211: the stuns whose first word is no Stun/Down word (read from every boss and mid-boss AS file): Ganondorf's
+    // knockdown by his own ball sent back ('LightBallDamage_Start/Loop/End', his interruptweakpointhit module, the
+    // light and the charge ball), Ganon's light-arrow knockdown ('LightArrowDown_*', 'LightArrowDamage_*',
+    // 'Lightarrow_Damage_*'), the Lizalfos' and the Gerudo Thief's 'StunA'..'StunC' / 'StunAirA'.., Big Octo's
+    // 'ShortStun_L/R'. Plain hit reactions ('Damage', 'SmallDamage') are no stun.
+    return first.starts_with("Stun") || first == "ShortStun" || first == "Down" || first == "Fall" ||
+           first == "Faint" || first == "Chance" || first.starts_with("ChanceTime") ||
+           first.starts_with("DownTimeReaction") || first == "LightBallDamage" || first == "LightArrowDown" ||
+           first == "LightArrowDamage" || first == "Lightarrow";
 }
 
 proto::Quat QuatOf(const Mat3& m) {

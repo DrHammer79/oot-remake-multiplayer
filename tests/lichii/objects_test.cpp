@@ -4911,6 +4911,20 @@ TEST_CASE("objects: stun animations (issue 150)") {
     CHECK_FALSE(IsStunAnimation("Mat_Stun"));
     CHECK_FALSE(IsStunAnimation("Downward"));
     CHECK_FALSE(IsStunAnimation(""));
+    // Row 211: stuns with another first word (every boss and mid-boss AS file).
+    CHECK(IsStunAnimation("LightBallDamage_Start"));  // Ganondorf: his ball sent back into him
+    CHECK(IsStunAnimation("LightBallDamage_Loop"));
+    CHECK(IsStunAnimation("LightBallDamage_End_ModelOnlyLOD"));
+    CHECK(IsStunAnimation("LightArrowDown_Start"));   // Ganon: a light arrow
+    CHECK(IsStunAnimation("LightArrowDamage_Loop"));
+    CHECK(IsStunAnimation("Lightarrow_Damage_St"));
+    CHECK(IsStunAnimation("StunA"));                  // Lizalfos, Gerudo Thief
+    CHECK(IsStunAnimation("StunAirB"));               // Lizalfos
+    CHECK(IsStunAnimation("ShortStun_L"));            // Big Octo
+    CHECK_FALSE(IsStunAnimation("LightBall"));        // Ganondorf's throw
+    CHECK_FALSE(IsStunAnimation("Parry_St"));         // his volley
+    CHECK_FALSE(IsStunAnimation("SmallDamage"));
+    CHECK_FALSE(IsStunAnimation("Damage_St"));
 }
 
 TEST_CASE("objects: a boss copy stunned here sends a DAMAGE of 0 and keeps its stun (issue 150)") {

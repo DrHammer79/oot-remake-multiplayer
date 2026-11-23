@@ -114,6 +114,16 @@ except the split shots below.
   every player at once (split shot; `DungeonBossGanondrof_Bullet_` is on the list, his own `Ganondorf_Bullet_*`
   names to be read in a run), and he goes down only when half of the players have sent theirs back into him; a
   light arrow from any player stuns him for all.
+- **Row 211 (a ball sent back by a player who does not own him):** the ball is a split shot, so the hitter's own
+  ball goes back natively in the hitter's game, into that game's copy Ganondorf. Its hit there is his own
+  weak-point interrupt (interruptweakpointhit, `DownTimeAtLightBallHit` / `DownTimeChargeLightBallHitArray`), and
+  it plays `LightBallDamage_Start/Loop/End`. The objects walk did not read that name as a stun
+  (`CoopObjects::IsStunAnimation`), so the copy's own stun was never told to the owner. Nobody got him handed over,
+  the owner's poses ran over the stun, and the return did nothing. Now the name is a stun, like the others with
+  another first word (Ganon's light-arrow downs, `StunA`.. of the Lizalfos and Gerudo Thief, Big Octo's
+  `ShortStun`). Phantom Ganon's ball knockdown is `Down_Fall*` / `DownTimeReaction*`, which was read already.
+  Open: his volley (`Parry`, an action of his own AI) runs only in the owner's game, so in a copy game the first
+  ball sent back stuns him.
 - Not tested yet (the boss rush stage did not place him from this save).
 
 ### Ganon (final battle)
