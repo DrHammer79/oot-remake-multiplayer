@@ -29,7 +29,9 @@
 #include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_hook.h"
+#include "coop_menu_state.h"
 #include "coop_pause.h"
+#include "coop_pause_tab.h"
 #include "coop_playtest_core.h"
 #include "coop_teleport_game.h"
 #include "coop_testinput.h"
@@ -358,6 +360,7 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
     }
     out += "]}";
     out += ",\"coop_menu\":" + Quote(CoopPause::MenuState());
+    out += ",\"menu\":" + CoopMenuState::Json(CoopPause::MenuTab(), CoopPauseTab::CustomizeScreen());
     out += WorldText(full_world);
     out += StrikeMember(CoopStrike::TheBook().Last());
     return out;

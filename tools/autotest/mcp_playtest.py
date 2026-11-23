@@ -40,7 +40,8 @@ SCRIPT_HELP = (
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
      "camera yaw (0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, whether an event or a load is "
-     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`. "
+     "running, the A-button prompt, what co-op's menus show (`menu`: a shot leaves the co-op pages out) and the new "
+     "co-op log lines since the last look. Both games without `player`. "
      "Every look has a `state_id`; pass it as `since` on the next call to get only what changed (`changed`, `removed`).",
      "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]},
                                                       "since": {"type": "integer", "minimum": 1}}}},
@@ -227,7 +228,8 @@ ACT_TOOLS = [
      "line). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
     {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `coop_menu` "
-     "member says which co-op page is open; it does not see the game's own pause screen (use screenshot). " + ACT_NOTE,
+     "member says which co-op page is open and `menu` its rows (a screenshot leaves the co-op pages out); neither "
+     "sees the game's own pause screen (use screenshot). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["page"],
                      "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
 ]
@@ -280,7 +282,9 @@ PLAYER_TOOLS = [
      "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
      "no world list (solo). The inventory is NOT in the reply unless you ask: `inventory_count` says how many items "
      "are set; `inventory` true adds those entries (about 290 on a full save: 10k tokens, ask once). The nearest "
-     "actors are in get_world. Every reply has a `state_id`; pass it as `since` on a later call and only what "
+     "actors are in get_world. `menu` is what co-op's menus show as text (its Insert-menu tab: page, row names, "
+     "focused row; Character Select's Customize screen: options, focused, page_no of pages): a screenshot leaves out "
+     "Longshot's overlays (the co-op pages), so read `menu` instead. Every reply has a `state_id`; pass it as `since` on a later call and only what "
      "changed comes back: `changed` (dotted path: new value, e.g. `pos`, `equips.weapon`), `removed`, the `frame` "
      "and a new `state_id` (an id that is no longer kept, the last 16 are, gives the whole state and says why). "
      "`frame`, `snapshot_present` and the like are left out of a delta: they move on every look. The `inventory` "
