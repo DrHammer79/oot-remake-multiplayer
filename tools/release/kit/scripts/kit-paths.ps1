@@ -1649,6 +1649,14 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
 # 51 textures of his romfs/Tex (Mt_*_Player_<Age>_Ac1..7, Mt_Hairs_Player_Adult_Ah1..9, Angin_Tile_A[_Dark]_Ac1..7);
 # without them the game waits for them for good after a save load and the world stays black (LANE1 sul-D1..D7). Only
 # his NPC characters' textures (no _Player_ in the name, not Angin_Tile_) are NPC files.
+# His release's voices (PlayerVoice_<Age>_<voice>.bars and their Stream/V<xx>Pl<Age>_*.bwav) are Link's own clips
+# changed by a voice model: made from the game's files, so never downloaded into a game (owner, C #11). Deleted in
+# every part; the puppet pack builds each character's voice from the player's own game (tools/puppet_pack/voices.py).
+function Test-KitCharacterSelectVoiceFile([string]$Rel) {
+    $r = $Rel.Replace('\', '/')
+    return [bool]($r -match '^romfs/Sound/Resource/PlayerVoice_' -or $r -match '^romfs/Sound/Resource/Stream/V[A-Za-z]{2}Pl(Child|Adult)_')
+}
+
 function Test-KitCharacterSelectNpcFile([string]$Rel) {
     $r = $Rel.Replace('\', '/')
     if ($r -match '^romfs/Tex/([^/]*_Player_|Angin_Tile_)') { return $false }
@@ -1672,8 +1680,9 @@ $script:KitCharselCustomizer = @(
 $script:KitCharselIpsShift = 0x8001FF00L
 # (in the stamp: another list of regions, or another default-part file rule, makes the kit make his folder again.
 # cz2, row 242: the default part keeps Link's own textures; a default part stamped with an older one lost them, so it
-# is never copied from: his release is unpacked again.)
-$script:KitCharselStrip = 'cz2'
+# is never copied from: his release is unpacked again. cz2v: his release's voice files are deleted, so a copy that
+# has them is made again.)
+$script:KitCharselStrip = 'cz2v'
 
 # An IPS32 file's records: @{ At (offset); Size (bytes it changes); From; To (the record's bytes in the file) }, or a
 # throw when it is not one. IPS32: 'IPS32', records (u32 BE offset, u16 BE size, the bytes; size 0: u16 BE run length
@@ -1767,8 +1776,14 @@ function Get-KitCharacterSelectWant($Op, [string]$Part = 'full') {
 # without his customizer (his own kept beside the folder's files as coop-charsel-code.ips, outside exefs, so the
 # build never takes it in and a later change strips it again), characters.json, the stamp and the credits. '' or why not.
 function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [string]$Json, [string]$Ips, [string]$Want) {
+    $root = ([System.IO.Path]::GetFullPath($New)).TrimEnd('\') + '\'
+    $sound = Join-Path $New 'romfs\Sound\Resource'
+    if (Test-Path -LiteralPath $sound) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $sound -Recurse -File -Force -ErrorAction Stop)) {
+            if (Test-KitCharacterSelectVoiceFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
+        }
+    }
     if ($Part -eq 'ui') {
-        $root = ([System.IO.Path]::GetFullPath($New)).TrimEnd('\') + '\'
         foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $New 'romfs') -Recurse -File -Force -ErrorAction Stop)) {
             if (Test-KitCharacterSelectNpcFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
         }
@@ -1841,7 +1856,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
         if ($derive) {
             # (its characters.json and, with a newer patch pinned, that patch come from the folder there)
             New-Item -ItemType Directory -Force -Path $new | Out-Null
-            $skip = if ($Part -eq 'ui') { { param($rel) Test-KitCharacterSelectNpcFile $rel } } else { { param($rel) $false } }
+            $skip = if ($Part -eq 'ui') { { param($rel) Test-KitCharacterSelectNpcFile $rel } } else { { param($rel) Test-KitCharacterSelectVoiceFile $rel } }
             Copy-KitTreeLinked $dir $new $skip
             $json = Join-Path $dir 'characters.json'
             $ips = ''
@@ -1988,6 +2003,23 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
             if (-not $models) { continue }
             $c = $doc.puppet_colours
             return "$($d.Name)|$(if ($c) { "$($c.offset)|$("$($c.head)".ToLowerInvariant())" } else { '|' })|$models"
+        }
+    }
+    return ''
+}
+
+# The SHA-256 (lower case) of $Rel (a romfs path) in the Character Select folder $Mod, looked for where
+# Get-KitCharacterSelectSeen looks (beside the pack, and in mods for the contents layout); '' when it is not there.
+function Get-KitCharacterSelectFileHash([string]$Manifest, [string]$Mod, [string]$Rel) {
+    if (-not $Mod -or $Mod -match '[\\/]' -or $Mod -eq '.' -or $Mod -eq '..' -or -not $Rel -or $Rel -match '(^|[\\/])\.\.([\\/]|$)') { return '' }
+    $title = Split-Path -Parent (Split-Path -Parent $Manifest)
+    $roots = @($title)
+    $contents = Split-Path -Parent $title
+    if ($contents -and (Split-Path -Leaf $contents) -ieq 'contents') { $roots += Split-Path -Parent $contents }
+    foreach ($root in $roots) {
+        $file = Join-Path (Join-Path (Join-Path $root $Mod) 'romfs') $Rel
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         }
     }
     return ''
@@ -2418,6 +2450,14 @@ function Get-PuppetPackHint([string]$Manifest, [string]$ToolDir) {
         $gaps = @(Get-KitPuppetPackGaps $Manifest $json)
         if ($gaps) {
             return "Puppet pack: incomplete ($($gaps[0]) is missing$(if ($gaps.Count -gt 1) { " and $($gaps.Count - 1) more" })). $script:KitPackRemake"
+        }
+        # The Character Select mod's sound lists changed since the pack was made (an update or a reinstall with the
+        # same characters): the pack's copy (the mod's lists plus each puppet's own, tools/puppet_pack
+        # character_voices) replaces the mod's, so it would hide the new one.
+        $bl = if ($json.characters) { $json.characters.barslist } else { $null }
+        if ($bl -and $bl.file -and $bl.sha256 -and
+            (Get-KitCharacterSelectFileHash $Manifest "$($json.characters.mod)" "$($bl.file)") -ne "$($bl.sha256)".ToLowerInvariant()) {
+            return "Puppet pack: made with other Character Select voices than the ones now in mods. $script:KitPackRemake"
         }
         # The Character Select mod put in, replaced or taken out since the pack was made (Install-KitCharacterSelect):
         # the pack's character puppets follow the mod's characters.json (tools/puppet_pack find_characters).

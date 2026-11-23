@@ -754,11 +754,6 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
     if (game && !SnapshotIsOld(status) && !SnapshotMissing(status)) {
         if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
         if (game->Bool("event") == false) {
-            if (entrance_given) {
-                return {WarpRoute::refuse, "not_in_event",
-                        "no event runs, so only Longshot's teleport can change scene, and it has no start position: "
-                        "call warp without an entrance, or restart the session with a boot script that warps there"};
-            }
             const auto want = AgeEnding(scene);
             const auto age = game->Text("age");
             if (!want.empty() && age && *age != want) {
@@ -766,7 +761,8 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
                         "Longshot's teleport lands at Link's current age (" + *age + "), so " + std::string(scene) +
                             " would not be taken as asked: ask for the " + *age + " map, or switch age first"};
             }
-            return {WarpRoute::teleport, {}, {}};
+            // An entrance names a start point, which Longshot's teleport cannot take: the game's map change event can.
+            return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}};
         }
     }
     return {WarpRoute::refuse, "not_in_play",

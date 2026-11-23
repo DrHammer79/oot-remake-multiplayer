@@ -1,0 +1,32 @@
+{
+  "preset": "before-morpha",
+  "version": 1,
+  "title": "Water Temple (Morpha): adult Link in the boss room, boss key, 8 hearts",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Master",
+      "Weapon_Shield_Hylia",
+      "hookshot",
+      "PouchData.Armor_Adult_HeavyBoot.StockNum"
+    ],
+    "hearts": 8,
+    "max_hearts": 8,
+    "boss_keys": [
+      "WaterTemple"
+    ],
+    "warp": {
+      "scene": "MorphaStage",
+      "entrance": "MorphaStage"
+    },
+    "flags": {
+      "0x560a64af": "Step07_2",
+      "Morpha_DeleteWater": 0,
+      "HavePlayedEvent.Demo_SageOfWater_BossDefeat": 0,
+      "HavePlayedEvent.Dm_WaterTemple_BossOut": 0
+    }
+  },
+  "notes": [
+    "Rush room MorphaStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest SageOfWater is put back to its step Step07_2 and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+  ]
+}

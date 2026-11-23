@@ -1,0 +1,32 @@
+{
+  "preset": "before-volvagia",
+  "version": 1,
+  "title": "Fire Temple (Volvagia): adult Link in the boss room, boss key, 8 hearts",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Master",
+      "Weapon_Shield_Hylia",
+      "hammer",
+      "PouchData.Armor_Adult_Goron.StockNum"
+    ],
+    "hearts": 8,
+    "max_hearts": 8,
+    "boss_keys": [
+      "FireTemple"
+    ],
+    "warp": {
+      "scene": "VolvagiaStage",
+      "entrance": "VolvagiaStage"
+    },
+    "flags": {
+      "0xeea87aec": "DefeatBoss",
+      "Volvagia_TemporaryDelete": 0,
+      "HavePlayedEvent.SageOfFire_DefeatBoss": 0,
+      "HavePlayedEvent.Dm_FireTemple_BossOut": 0
+    }
+  },
+  "notes": [
+    "Rush room VolvagiaStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest SageOfFire is put back to its step DefeatBoss and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+  ]
+}

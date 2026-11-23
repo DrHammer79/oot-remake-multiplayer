@@ -31,6 +31,7 @@
 #include "coop_hook.h"
 #include "coop_pause.h"
 #include "coop_playtest_core.h"
+#include "coop_teleport_game.h"
 #include "coop_testinput.h"
 #include "core/core.h"
 
@@ -492,11 +493,23 @@ std::string Handle(const Request& r) {
         // docs/scenes.md "Free-play scene change"); in free play, Longshot's control `teleport` (taken at Link's next
         // update, so frames must run). Refused at once, with the reason, when neither fits.
         const auto now = LinkStatus();
-        const WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
+        WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
         if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
         std::string wait_for = r.scene;   // the map to wait for: the teleport route takes Longshot's (Link's age, its spelling)
-        if (plan.route == WarpRoute::event) {
+        // Free play, an entrance or a map Longshot's list lacks (a boss stage): the game's own map change event
+        // (CoopTeleport::MapChange). Refused with the reason when the scene or start is not one the game has.
+        const auto ask_map_event = [&]() -> std::string {
+            if (const std::string problem = CoopTestInput::WarpProblem(r.scene, r.entrance); !problem.empty()) return problem;
+            if (!CoopTeleport::MapChange(r.scene, r.entrance)) {
+                return "the map change event is off (LICHII_COOP_TELEPORT=0 or LICHII_COOP_TELEPORT_EVENT=0) or " + r.scene +
+                       " has no start point in the module's list: give an entrance";
+            }
+            return {};
+        };
+        if (plan.route == WarpRoute::map_event) {
+            if (const std::string why = ask_map_event(); !why.empty()) return fail("failed", why);
+        } else if (plan.route == WarpRoute::event) {
             std::string error;
             const std::string line = "warp " + r.scene + (r.entrance.empty() ? "" : " " + r.entrance);
             if (!played(line, error)) return fail("failed", error);
@@ -518,22 +531,28 @@ std::string Handle(const Request& r) {
                 const std::string code = taken->Text("error").value_or("failed");
                 const std::string message = taken->Text("message").value_or("");
                 if (code == "not_found") {
-                    return fail("not_in_event", r.scene + " is not in Longshot's teleport list (" + message +
-                                                    ") and no event runs for the module's own warp: restart the "
-                                                    "session with a boot script that warps there");
+                    // Not in Longshot's list (a boss stage): the module's map change event takes any scene it knows.
+                    if (const std::string why = ask_map_event(); !why.empty()) {
+                        return fail("not_in_event", r.scene + " is not in Longshot's teleport list (" + message +
+                                                        ") and the module's map change event cannot take it: " + why);
+                    }
+                    plan.route = WarpRoute::map_event;
+                } else {
+                    return fail("failed", TeleportFailure(code, message));
                 }
-                return fail("failed", TeleportFailure(code, message));
             }
-            const TeleportWait wait = ReadTeleport(*taken, r.scene);
-            if (wait.failed) return fail(wait.code, wait.why);
-            wait_for = wait.wait_for;
+            if (plan.route != WarpRoute::map_event) {
+                const TeleportWait wait = ReadTeleport(*taken, r.scene);
+                if (wait.failed) return fail(wait.code, wait.why);
+                wait_for = wait.wait_for;
+            }
         }
         // Frames run (in steps of 10, held between them) until Link is in that scene with no event or load.
         while (std::chrono::steady_clock::now() < until) {
             if (!gate.Step(10, kHoldWait)) return fail("timeout", "the frames did not run in time");
             auto s = LinkStatus();
             if (s && WarpArrived(&*s, wait_for)) {
-                return ok("\"arrived\":true,\"map\":" + Quote(wait_for) + ",\"via\":" + Quote(plan.route == WarpRoute::event ? "event" : "teleport") +
+                return ok("\"arrived\":true,\"map\":" + Quote(wait_for) + ",\"via\":" + Quote(plan.route == WarpRoute::event ? "event" : plan.route == WarpRoute::map_event ? "map_event" : "teleport") +
                           ",\"state\":" + StateObject(false, std::move(s)));
             }
         }

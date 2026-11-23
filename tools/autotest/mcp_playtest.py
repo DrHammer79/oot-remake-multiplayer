@@ -23,6 +23,7 @@ import desync_check  # noqa: E402
 import live  # noqa: E402
 import kit_look  # noqa: E402
 import kit_route  # noqa: E402
+import kit_setup  # noqa: E402
 import kit_tools  # noqa: E402
 import kit_wait  # noqa: E402
 import playtest_client as pc  # noqa: E402
@@ -354,11 +355,10 @@ PLAYER_TOOLS = [
                      "properties": {"condition": {"type": "string"}, "max_frames": FRAMES,
                                     "chunk": {"type": "integer", "minimum": 1, "maximum": kit_tools.MAX_CHUNK}}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
-     "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
-     "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
-     "a map not in that list, the game takes the request ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load "
-     "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
-     "warps. Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
+     "optionally an entrance (a start position name in it), through the game's own scene change. In free play without an entrance it goes by Longshot's teleport (the maps of its "
+     "own list; it lands at the map's own start). With an entrance, or for a map not in that list (a boss stage such as "
+     "GohmaStage), the module opens the game's own map change event (needs LICHII_COOP_TELEPORT_EVENT; else `not_in_event` "
+     "with the reason). Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
      "name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event "
      "or load (up to `timeout` seconds, default 60), then is held. A warp asked while a talk is open waits until the "
      "talk ends and answers `timeout` meanwhile: end the talk first (A or B until `event` is false).",
@@ -370,6 +370,40 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"],
                      "properties": {"name": {"type": "string"},
                                     "value": {"type": ["integer", "boolean", "string"]}}}},
+    {"name": "setup", "description": "Set a test up in ONE call (instead of many flag/give/warp calls): hearts "
+     "(current life, 1-20), max_hearts (3-20), magic (0 none, 1 meter, 2 double), rupees, small_keys {Dungeon: n}, "
+     "boss_keys / maps / compasses [Dungeon], items [give names], flags {name: value}, and a last warp {scene, entrance} "
+     "(a boss stage such as GohmaStage works in free play). Dungeons: DekuTree, DodongoCavern, JabuJabu, ForestTemple, "
+     "FireTemple, WaterTemple, ShadowTemple, SpiritTemple, BottomOfTheWell, IceCavern, GerudoTrainingGround, "
+     "GerudoFortress, GanonsCastle, FinalBattleField. Runs in that order, stops at the first refused call and says which. "
+     "Needs the verb gate (LICHII_COOP_PLAYTEST_VERBS, LICHII_COOP_CHEATS). MaxLife may be written back by the game "
+     "(docs/items.md): read it with get_state after. In a pair, with no `player` it runs on BOTH games, one after the "
+     "other. What reaches the other game by itself (co-op sharing, docs/items.md, flags.md): items (max), small keys "
+     "(count deltas), maps, compasses, boss keys, story and dungeon flags, MaxLife and MPMax (max). Per player and NOT "
+     "shared: Life, MP, rupees, ammo. So set per-player parts on each game.",
+     "inputSchema": {"type": "object",
+                     "properties": {"hearts": {"type": "integer"}, "max_hearts": {"type": "integer"},
+                                    "magic": {"type": "integer"}, "rupees": {"type": "integer"},
+                                    "small_keys": {"type": "object"}, "boss_keys": {"type": "array"},
+                                    "maps": {"type": "array"}, "compasses": {"type": "array"},
+                                    "items": {"type": "array"}, "flags": {"type": "object"},
+                                    "warp": {"type": "object"}}}},
+    {"name": "preset", "description": "Apply a named test start (tools/playtest/data/presets/*.json) with one call: the same "
+     "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma, "
+     "before-dodongo, before-barinade, before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, "
+     "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
+     "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
+    {"name": "save_point", "description": "Save a test point under a tag (letters, digits, - and _): the module's shared flags "
+     "and Link's state (scene, place, life), in the run's checkpoint log. Retry a boss with load_point. Only what `dump` "
+     "lists is saved (shared dungeon, story and item flags).",
+     "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
+    {"name": "load_point", "description": "Restore the last test point saved under a tag by THIS game: writes every "
+     "flag that differs FIRST, then loads the scene again (also when Link is already in it: a room reads its boss state "
+     "when it loads), places Link and sets his life, then dumps again and replies `reloaded` (false when no load could be "
+     "told), `exact` (true only when reloaded and the dump equals the saved one) and `left` (the flags still different). A scene outside Longshot's teleport list "
+     "needs the map change event on (see warp). Needs the verb gate.",
+     "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
      "Weapon_Sword_Kokiri, or a full flag name such as IsGet.Item_Boomerang). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
@@ -629,6 +663,18 @@ class Game:
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":
             return c.give(args["item"])
+        if name == "preset":
+            return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]),
+                                                                      shared=args.get("_shared", True),
+                                                                      log_dir=self.log_dir, player=self.player)}
+        if name == "save_point":
+            return kit_setup.save_point(c, self.log_dir, self.player, args["tag"])
+        if name == "load_point":
+            return kit_setup.load_point(c, self.log_dir, self.player, args["tag"], shared=args.get("_shared", True))
+        if name == "setup":
+            return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k not in ("player", "_shared")},
+                                             shared=args.get("_shared", True),
+                                             log_dir=self.log_dir, player=self.player)}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):
             return ph.place_facing(c, act_line(name, args), face_point(args))
         line = act_line(name, args)
@@ -686,7 +732,7 @@ CALLS_FILE = "calls.jsonl"
 # Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
 NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
                             "log", "check_logs", "session_status"))
-BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
+BOTH_TOOLS = frozenset(("get_state", "step", "setup", "preset", "save_point", "load_point"))   # with no `player`: both games
 ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
 IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "
            "presses and steps as they happen; a warp's or a test line's frames right after it). `player` is the game. ")
@@ -727,6 +773,10 @@ class Pair:
         rest = {k: v for k, v in args.items() if k != "player"}
         player = args.get("player")
         if name in ALWAYS_BOTH or (player is None and name in BOTH_TOOLS):
+            if name in ("setup", "preset", "load_point"):
+                # Small keys are shared by count deltas: written in both games they would be added twice. The first
+                # game writes them; the second leaves them out and gets them by the share.
+                return {"games": {p: g.call(name, dict(rest, _shared=(i == 0))) for i, (p, g) in enumerate(self.games.items())}}
             return {"games": {p: g.call(name, dict(rest)) for p, g in self.games.items()}}
         if player not in self.games:
             raise ValueError("player is one of %s" % ", ".join(self.games))
