@@ -3408,6 +3408,64 @@ class FullBuildTest(unittest.TestCase):
         with mock.patch.object(voices.vm, "check", side_effect=ValueError("Saria: keeps Link's voice")):
             run("Ruto", "keeps Link's voice", "rule")
 
+    def test_build_character_voices_made(self):
+        # The whole pack build with voices made (voices.build stands in with made-up files): every made archive and
+        # stream file is written, each list names its own archive first. Regression: build() once imported the
+        # voices module over its own local "voices" dict, so every pack whose voices were made stopped with a
+        # TypeError while writing them.
+        plain = zstandard.ZstdCompressor()
+        rel_list = "Sound/ResourceListPack/BarslistPack.Product.111.byml.zs"
+        game = {"BarslistTable": {
+            "Player": {"Bars": ["Player.bars"]},
+            "Player_Child": {"Bars": ["Player.bars", "Player_Child.bars"]},
+            "Player_Adult": {"Bars": ["Player.bars", "Player_Adult.bars"]}}}
+        os.makedirs(os.path.dirname(os.path.join(self.romfs, rel_list)), exist_ok=True)
+        with open(os.path.join(self.romfs, rel_list), "wb") as f:
+            f.write(plain.compress(byml.dumps(game)))
+        self.write_link_voices(plain)
+        d = zs.Dicts.from_romfs(self.romfs)
+        mods = os.path.join(self.dir, "mods_made")
+        cs = os.path.join(mods, "OoT Character Select")
+        romfs = os.path.join(cs, "romfs")
+        os.makedirs(os.path.join(romfs, "Model"))
+        os.makedirs(os.path.dirname(os.path.join(romfs, rel_list)))
+        with open(os.path.join(romfs, "Model", "Player_Adult_C005.Player_Adult.bfres.zs"), "wb") as f:
+            f.write(plain.compress(b"made up"))
+        doc = {"format": 1, "mod": "OoT Character Select",
+               "actor_heaps": {v: {"InstanceHeapSize": 0x100, "PreActorRenderInfoHeapSize": 0x100}
+                               for v in build.VARIANTS},
+               "characters": [{"number": 0, "picker": True, "name": "Link"},
+                              {"number": 7, "file": 5, "picker": True, "name": "Saria"}]}
+        with open(os.path.join(cs, build.CHARACTERS_FILE), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        theirs = json.loads(json.dumps(game))
+        theirs["BarslistTable"]["Player_Adult_V07"] = {"Bars": ["PlayerVoice_Adult_Saria.bars", "Player.bars",
+                                                                "Player_Adult.bars"]}
+        with open(os.path.join(romfs, rel_list), "wb") as f:
+            f.write(plain.compress(byml.dumps(theirs)))
+        res, stream = voices.RESOURCE, voices.STREAM
+        archive = voices.bwav.bars_build([])
+        made = {"files": {f"{res}/CoopVoice_{v}_Custom_Saria.bars": archive for v in build.VARIANTS},
+                "lists": {v: {7: f"CoopVoice_{v}_Custom_Saria.bars"} for v in build.VARIANTS}}
+        made["files"][f"{stream}/V0aPlAdult_Wait_01.bwav"] = b"made up stream"
+        pack, said = os.path.join(mods, "pack"), []
+        with mock.patch.object(voices, "build", return_value=made):
+            m = build.build(self.romfs, pack, log=said.append, look_slots=0,
+                            characters=build.find_characters(pack, log=lambda *_: None))
+        out = byml.loads(d.decompress(build.read(os.path.join(pack, "romfs", rel_list))))["BarslistTable"]
+        self.assert_no_missing_voice(out, pack)
+        for v in build.VARIANTS:
+            self.assertEqual(out[f"Player_{v}_V07"]["Bars"], [f"CoopVoice_{v}_Custom_Saria.bars", "Player.bars",
+                                                              f"Player_{v}.bars"])
+            got = os.path.join(pack, "romfs", res, f"CoopVoice_{v}_Custom_Saria.bars.zs")
+            self.assertEqual(d.decompress(build.read(got)), archive)
+        with open(os.path.join(pack, "romfs", stream, "V0aPlAdult_Wait_01.bwav"), "rb") as f:
+            self.assertEqual(f.read(), b"made up stream")
+        self.assertFalse([x for x in said if "no voice for" in x], said)   # nobody silent: all made
+        self.assertTrue(any("wrote 3 voice files" in x for x in said), said)
+        self.assertEqual(m["sound_lists"]["CoopPuppet_Adult_C005"], "Player_Adult_V07")
+        self.assertTrue(m["characters"]["barslist"]["voices"])
+
     def test_skin_refusals(self):
         cases = [
             (("Mod", self.make_model_mod("with_code", exefs=True)), "exefs"),
