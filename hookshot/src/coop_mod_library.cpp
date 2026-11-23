@@ -80,19 +80,30 @@ bool Internal(std::string_view name) {
     return hos_coop_mods_own(std::string(name).c_str()) != 0;
 }
 
-// Its ExeFS patch files, as host/mods.c exefs_status counts them: the .ips and .pchtxt files right in its exefs folder.
-int ExefsPatchFiles(const fs::path& exefs) {
+// Its ExeFS patch files, as host/mods.c exefs_status finds and hashes them: the .ips and .pchtxt files right in its exefs
+// folder, each with the FNV-1a 32 of its bytes (a file that cannot be read is left out, as there).
+std::vector<std::pair<std::string, unsigned long>> ExefsPatchFiles(const fs::path& exefs) {
     std::error_code ec;
-    int n = 0;
+    std::vector<std::pair<std::string, unsigned long>> out;
     for (fs::directory_iterator it(exefs, ec), end; !ec && it != end; it.increment(ec)) {
         std::string ext = it->path().extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         std::error_code file_ec;
-        if ((ext == ".ips" || ext == ".pchtxt") && it->is_regular_file(file_ec)) {
-            ++n;
+        if ((ext != ".ips" && ext != ".pchtxt") || !it->is_regular_file(file_ec)) {
+            continue;
         }
+        std::ifstream in(it->path(), std::ios::binary);
+        if (!in) {
+            continue;
+        }
+        unsigned long h = HOS_COOP_MODS_FNV32_START;
+        char buf[4096];
+        while (in.read(buf, sizeof buf) || in.gcount() > 0) {
+            h = hos_coop_mods_fnv32(h, buf, static_cast<std::size_t>(in.gcount()));
+        }
+        out.emplace_back(ToUtf8(it->path().filename()), h);
     }
-    return n;
+    return out;
 }
 
 bool Listable(std::string_view name) {
@@ -559,7 +570,9 @@ void Found(const fs::path& dir, const std::string& name, bool off, std::vector<M
     mod.folder = dir;
     mod.has_romfs = fs::is_directory(dir / "romfs", ec);
     mod.has_exefs = fs::is_directory(dir / "exefs", ec);
-    mod.exefs_patches = mod.has_exefs ? ExefsPatchFiles(dir / "exefs") : 0;
+    if (mod.has_exefs) {
+        mod.exefs_patches = ExefsPatchFiles(dir / "exefs");
+    }
     mod.has_manifest = fs::is_regular_file(dir / kManifestFile, ec);
     mod.folder_off = off;
     mod.internal = Internal(name);

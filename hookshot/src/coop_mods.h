@@ -141,9 +141,14 @@ private:
     bool HostSets(const Mod& m, const Setting& s) const;          // locked
     bool SaveLocked(std::string* problem);
     void Say(const std::string& line) const;
+    // locked: the build's state of this mod's code (HOS_COOP_MODS_BUILT_*, hos_coop_mods_built_changed); -1 when not
+    // known (no build list, an older hookshot.exe, no patch file, a mod the game does not see)
+    int BuiltState(const Mod& m) const;
     // locked: -1 when the running game uses this mod as switched; else 0 or 1, what it uses instead (its code waits for a
     // game build, hos_coop_mods_as_built)
     int Held(const Mod& m) const;
+    // locked: its code in the game is older than its patch files (a new release put in by hand): a build is needed
+    bool CodeChanged(const Mod& m) const;
 
     const std::filesystem::path root_;
     const Hooks hooks_;

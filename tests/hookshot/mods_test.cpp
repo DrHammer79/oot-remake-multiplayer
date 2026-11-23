@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -33,6 +34,13 @@ std::string Slurp(const fs::path& p) {
     for (const char c : s.str()) {
         if (c != '\r') out += c;
     }
+    return out;
+}
+
+// A patch file's hash as exefs_patches.txt writes it (8 lower-case hex digits).
+std::string Fnv32Hex(const std::string& bytes) {
+    char out[16];
+    std::snprintf(out, sizeof out, "%08lx", hos_coop_mods_fnv32(HOS_COOP_MODS_FNV32_START, bytes.data(), bytes.size()));
     return out;
 }
 
@@ -264,8 +272,10 @@ TEST_CASE("mods: the folder is scanned as Hookshot's host/mods.c finds mods") {
     CHECK(by("-switched-off").folder_off);
     CHECK(by("coop-puppet-pack").internal);
     CHECK(by("exe-only").has_exefs);
-    CHECK(by("exe-only").exefs_patches == 1);   // (.ips and .pchtxt files, as host/mods.c exefs_status counts them)
-    CHECK(by("A-pack").exefs_patches == 0);
+    // (.ips and .pchtxt files, as host/mods.c exefs_status finds and hashes them)
+    CHECK(by("exe-only").exefs_patches == std::vector<std::pair<std::string, unsigned long>>{
+                                             {"main.ips", hos_coop_mods_fnv32(HOS_COOP_MODS_FNV32_START, "x", 1)}});
+    CHECK(by("A-pack").exefs_patches.empty());
     CHECK_FALSE(by("broken").problem.empty());
     CHECK(by("broken").manifest.id == "broken");   // its game files still count, under its folder's name
     CHECK(by("code-only").manifest.id == "dup");
@@ -384,6 +394,20 @@ TEST_CASE("mods: a code mod is used as the game was built for it (hos_coop_mods_
     const std::string cut = "x\tabc.ips\t1\tco";   // (a cut line is no code)
     CHECK(hos_coop_mods_built(cut.data(), cut.size(), "x") == HOS_COOP_MODS_BUILT_NAMED);
 
+    // A patch file as built: its name and hash (FNV-1a 32, "a" = e40c292c); another hash is a file changed since.
+    CHECK(hos_coop_mods_fnv32(HOS_COOP_MODS_FNV32_START, "a", 1) == 0xe40c292cUL);
+    CHECK(hos_coop_mods_built_file(list.data(), list.size(), "OoT Character Select", "abc.ips", 0x0badf00dUL));
+    CHECK(hos_coop_mods_built_file(list.data(), list.size(), "oot character select", "ABC.ips", 0x0badf00dUL));
+    CHECK_FALSE(hos_coop_mods_built_file(list.data(), list.size(), "OoT Character Select", "abc.ips", 0x0badf00eUL));
+    CHECK_FALSE(hos_coop_mods_built_file(list.data(), list.size(), "OoT Character Select", "new.ips", 0x0badf00dUL));
+    CHECK_FALSE(hos_coop_mods_built_file(list.data(), list.size(), "OoT Character", "abc.ips", 0x0badf00dUL));
+    CHECK(hos_coop_mods_built_changed(HOS_COOP_MODS_BUILT_CODE, 1) == HOS_COOP_MODS_BUILT_CHANGED);
+    CHECK(hos_coop_mods_built_changed(HOS_COOP_MODS_BUILT_CODE, 0) == HOS_COOP_MODS_BUILT_CODE);
+    CHECK(hos_coop_mods_built_changed(HOS_COOP_MODS_BUILT_NONE, 2) == HOS_COOP_MODS_BUILT_NONE);
+    // Its code changed since the build (a new release put in by hand): its old code is in the game, its files stay on.
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_CHANGED, 1, "OoT Character Select") == 1);
+    CHECK(hos_coop_mods_as_built(0, HOS_COOP_MODS_BUILT_CHANGED, 1, "OoT Character Select") == 1);
+
     // Its code in the game: its files stay on, also switched off. Patch files the build did not take: off, also
     // switched on. Named but nothing applied, or no patch file: as switched.
     CHECK(hos_coop_mods_as_built(0, HOS_COOP_MODS_BUILT_CODE, 1, "OoT Character Select") == 1);
@@ -424,7 +448,7 @@ TEST_CASE("mods: the Loader says a code mod's switch waits for a game build (Sta
         Put(t.root / HOS_COOP_MODS_APPLIED_FILE, text);
     }
     Put(t.root / HOS_COOP_MODS_LIST_FILE, "coop-mods 1\noff cs\non new code\non plain\n");
-    const std::string built = "# list\ncs\tabc.ips\t0badf00d\tcode\t\n";
+    const std::string built = "# list\ncs\tabc.ips\t" + Fnv32Hex("x") + "\tcode\t\n";   // (cs's abc.ips as it is)
     Loader loader(t.root, {nullptr, kPid, nullptr, [&] { return built; }});
     loader.Start();
     REQUIRE(loader.ExeReadsList());
@@ -459,6 +483,22 @@ TEST_CASE("mods: the Loader says a code mod's switch waits for a game build (Sta
     Loader plain(t.root, {nullptr, kPid, nullptr, nullptr});
     plain.Start();
     for (const Row& r : plain.Rows()) CHECK(r.note.find("Start Squadala") == std::string::npos);
+
+    // cs updated by hand (a new abc.ips, a new file beside it), the game started from longshot.exe: its old code is in the
+    // game, so its files stay on (host/mods.c), and the tab says the new code waits for a build.
+    Put(t.root / "cs" / "exefs" / "abc.ips", "x2");
+    Loader updated(t.root, {nullptr, kPid, nullptr, [&] { return built; }});
+    updated.Start();
+    const auto now = updated.Rows();
+    const auto cs = std::find_if(now.begin(), now.end(), [](const Row& r) { return r.name == "cs"; });
+    REQUIRE(cs != now.end());
+    CHECK(cs->on);
+    CHECK(cs->on_now);
+    CHECK(cs->note.find("code changed since the game was built") != std::string::npos);
+    restart = updated.RestartNeeded();
+    CHECK(std::count_if(restart.why.begin(), restart.why.end(), [](const std::string& w) {
+              return w.find("code changed since the game was built: start the game with Start Squadala") != std::string::npos;
+          }) == 1);
 }
 
 TEST_CASE("mods: coop-mods.applied is read as host/mods.c writes it") {
