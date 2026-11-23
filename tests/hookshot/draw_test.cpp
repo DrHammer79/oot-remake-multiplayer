@@ -380,6 +380,19 @@ TEST_CASE("hookshot draw: the other players under your hearts in the game look o
     CHECK(hearts[0].rgba == CoopDraw::Rgba(255, 255, 255, 255));
     CHECK(c.Of("rect").empty());
     CHECK(c.font == 0);  // Hookshot's own font again after drawing
+
+    // A long name and place on a narrow window: cut with "..." to the blocks' column, never past the picture.
+    CoopDraw::Scene longer;
+    longer.hud = {{"A very long player name that goes on and on", "Sacred Forest Meadow, by the Lost Woods", {4}, false}};
+    Canvas n(480, 720);
+    CoopDraw::Draw(n.d, longer, GameLook());
+    const auto cut = n.Of("text");
+    REQUIRE_FALSE(cut.empty());
+    for (const auto& t : cut) {
+        CHECK(t.x + static_cast<float>(t.text.size()) * t.px * 0.5f <= 480.0f);
+        CHECK(t.text.size() < 44);
+    }
+    CHECK(std::any_of(cut.begin(), cut.end(), [](const auto& t) { return t.text.find("...") != std::string::npos; }));
 }
 
 TEST_CASE("hookshot draw: game look name tags in the players' colours, over the game's shadow") {

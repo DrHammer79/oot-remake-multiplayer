@@ -32,6 +32,7 @@ constexpr float kHeartPx = 32.0f;
 constexpr float kHeartStep = 0.55f;
 constexpr float kChatGamePx = 23.0f;
 constexpr float kListGamePx = 24.0f;
+constexpr float kHudRoom = 0.3f;   // the HUD blocks' column: a name or place at most this share of the picture wide
 
 int Alpha(float a) {
     return std::clamp(static_cast<int>(a * 255.0f), 0, 255);
@@ -536,9 +537,12 @@ void DrawHud(const HosCoopDraw& d, const std::vector<HudBlock>& blocks, CoopVoic
     const float heart = kHeartPx * u;
     const float name_px = kHudNamePx * u;
     const float place_px = kHudPlacePx * u;
+    // A name or place never runs past the blocks' column (a long name, a narrow window): cut with "..." to
+    // kHudRoom of the picture's width (ui-audit-01112 B4: everything fits on the screen).
+    const float room = p.width * kHudRoom;
     if (own_voice != CoopVoice::Icon::none && !blocks.empty()) {   // our own row: "You" and our voice state
         Font(d, look.medium);
-        const std::string you = CoopI18n::Tr("You") + VoiceWords(own_voice);
+        const std::string you = Elided(d, name_px, CoopI18n::Tr("You") + VoiceWords(own_voice), room);
         GameText(d, x, y, name_px, Rgba(255, 255, 255, 255), you.c_str());
         y += name_px + kHudGap * u;
     }
@@ -552,7 +556,7 @@ void DrawHud(const HosCoopDraw& d, const std::vector<HudBlock>& blocks, CoopVoic
         const auto& b = blocks[i];
         const int a = b.dim ? 150 : 255;
         Font(d, look.medium);
-        GameText(d, x, y, name_px, Rgba(255, 255, 255, a), (b.name + VoiceWords(b.voice)).c_str());
+        GameText(d, x, y, name_px, Rgba(255, 255, 255, a), Elided(d, name_px, b.name + VoiceWords(b.voice), room).c_str());
         y += name_px + 2 * u;
         if (!b.hearts.empty()) {
             for (std::size_t i = 0; i < b.hearts.size(); ++i) {
@@ -568,7 +572,7 @@ void DrawHud(const HosCoopDraw& d, const std::vector<HudBlock>& blocks, CoopVoic
         }
         if (!b.place.empty()) {
             Font(d, look.regular);
-            GameText(d, x, y, place_px, Rgba(225, 225, 225, a), b.place.c_str());
+            GameText(d, x, y, place_px, Rgba(225, 225, 225, a), Elided(d, place_px, b.place, room).c_str());
             y += place_px;
         }
         y += kHudGap * u;
