@@ -91,7 +91,8 @@ GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uin
 // Not shared: this game's race so far, the progress.sav of the newest slot in the co-op folder `coop_dir`. Never the
 // player's own (single-player) saves: every player starts the race from 0 tokens (decision of 2026-11-23). None:
 // nothing, and KeepOwnGold starts the race from nothing.
-// Else the race kept beside the co-op folder (KeepRace), so a race guest's own count carries into its next session
+// The folder's slot counts only with the race mark (MarkRace): a Shared slot is never a race's start, also when a
+// session switches to Not shared midway. Else the race kept beside the co-op folder (KeepRace), so a race guest's own count carries into its next session
 // in the co-op game: a join empties the co-op folder before the host's save comes.
 std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir);
 

@@ -271,7 +271,12 @@ std::filesystem::path RaceFile(const std::filesystem::path& coop_dir) { return B
 std::filesystem::path RaceMark(const std::filesystem::path& coop_dir) { return Beside(coop_dir, "-gold-race.on"); }
 
 std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir) {
-    if (auto bytes = NewestProgress(coop_dir)) return bytes;
+    // The folder's slot only when it is a race (the mark): a Shared session's slot, also one that switched to Not shared
+    // midway (a Resync), holds the shared count, never a race's start.
+    std::error_code ec;
+    if (std::filesystem::exists(RaceMark(coop_dir), ec)) {
+        if (auto bytes = NewestProgress(coop_dir)) return bytes;
+    }
     std::ifstream in(RaceFile(coop_dir), std::ios::binary);
     if (!in) return std::nullopt;
     std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

@@ -244,6 +244,7 @@ TEST_CASE("gold mode: Not shared, the race starts from 0, never from the player'
     // A race so far in the co-op folder is kept.
     const std::vector<std::uint8_t> race = MakeSave(1, 1, {kSkull[1], kSkull[1] + 2});
     put(coop_dir / "slot_00", race);
+    CoopGoldMode::MarkRace(coop_dir, true);  // (written in a Not shared session)
     const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
     REQUIRE(so_far.has_value());
     CHECK(*so_far == race);
@@ -315,6 +316,34 @@ TEST_CASE("gold mode: Not shared, a race guest's count carries into its next ses
     const auto still = CoopGoldMode::RaceSoFar(coop_dir);
     REQUIRE(still.has_value());
     CHECK(*still == race);  // the earlier race, untouched
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("gold mode: a switch to Not shared midway starts the race from 0, never from the Shared count") {
+    // Review of 5a7a020b: the co-op folder's slot was written in the Shared part of the session (no mark). A Resync
+    // after the switch keeps none of its shared tokens: the race starts from 0, or from the race kept beside it.
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "coop_tests_race_switch";
+    fs::remove_all(root);
+    const fs::path coop_dir = root / "own-coop";
+    fs::create_directories(coop_dir / "slot_00");
+    const std::vector<std::uint8_t> shared = MakeSave(7, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2});
+    std::ofstream(coop_dir / "slot_00" / "progress.sav", std::ios::binary)
+        .write(reinterpret_cast<const char*>(shared.data()), static_cast<std::streamsize>(shared.size()));
+    CoopGoldMode::MarkRace(coop_dir, false);  // the Shared write
+    CHECK_FALSE(CoopGoldMode::RaceSoFar(coop_dir).has_value());
+    std::vector<std::uint8_t> host = MakeSave(7, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2, kWeb});
+    CHECK(CoopGoldMode::KeepOwnGold(host, nullptr, kSkull, kCount, kGet).done);
+    CHECK(host == MakeSave(0, 0, {kWeb}));
+
+    // A race kept from an earlier session is the start instead.
+    const std::vector<std::uint8_t> kept = MakeSave(1, 1, {kSkull[2], kSkull[2] + 2});
+    std::ofstream(CoopGoldMode::RaceFile(coop_dir), std::ios::binary)
+        .write(reinterpret_cast<const char*>(kept.data()), static_cast<std::streamsize>(kept.size()));
+    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
+    REQUIRE(so_far.has_value());
+    CHECK(*so_far == kept);
     std::error_code ec;
     fs::remove_all(root, ec);
 }

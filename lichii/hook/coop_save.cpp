@@ -427,9 +427,11 @@ void FixSlotsLocked() {
 // race from 0 tokens. Never the player's own saves (CoopGoldMode::RaceSoFar).
 save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in) {
     save::SaveSlot slot = slot_in;
-    CoopGoldMode::MarkRace(dir, CoopGoldMode::NotShared());  // (the slot written next is a race, or not)
+    // (read before the mark changes: the slot there counts only if it was a race; the slot written next is one, or not)
+    const std::optional<std::vector<std::uint8_t>> own =
+        CoopGoldMode::NotShared() ? CoopGoldMode::RaceSoFar(dir) : std::nullopt;
+    CoopGoldMode::MarkRace(dir, CoopGoldMode::NotShared());
     if (!CoopGoldMode::NotShared()) return slot;
-    const std::optional<std::vector<std::uint8_t>> own = CoopGoldMode::RaceSoFar(dir);
     const std::vector<std::uint8_t>* own_bytes = own ? &*own : nullptr;
     for (auto& f : slot.files) {
         if (f.name != "progress.sav") continue;
