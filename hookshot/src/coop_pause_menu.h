@@ -147,6 +147,11 @@ struct Row {
     bool on = false;                  // kToggle
     bool left = false, right = false; // kChoice: it can go that way
     bool fixed = false;               // it cannot be used now
+    // Words that are not the tab's own: a player's, a room's or a mod's text (a name, a room, a port, a password, a
+    // search, a mod's title or setting), or words already in the player's language. They are shown as they are and
+    // never looked up in the translation table (a player called "Link" must not read 林克, a name typed "On" must not
+    // become 开启). The tab's own words stay as they are: the row's name beside a text field is looked up, its value is not.
+    bool own_name = false, own_value = false;
     // A choice of two shown as the game's own Options toggle where the page can (the title's Host page: its two cells,
     // the chosen one `cell`, 0 or 1; -1 none): the value's words then are cells[cell].
     std::array<std::string, 2> cells{};

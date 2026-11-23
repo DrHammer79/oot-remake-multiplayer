@@ -692,6 +692,9 @@ struct ListLine {
     std::string name, value;   // the row's left text and its right one; both "" for a row not shown
     RowAction act = RowAction::kNone;   // an A on this line of the details (their Auto-rejoin), else nothing
     bool arrows = false;       // its value between the Options row's own arrows (N_Content_00): Left and Right change it
+    // The name / the value is shown as it is: a player's, a room's or a mod's own text, or words already in the player's
+    // language (never looked up in the translation table again: a player called "Link" stays "Link").
+    bool own_name = false, own_value = false;
 };
 
 // --- Typing with a pad: the list's rows are the keys ---

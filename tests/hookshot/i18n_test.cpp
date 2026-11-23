@@ -14,8 +14,10 @@
 #include <vector>
 
 #include "coop_i18n.h"
+#include "coop_lobby_tab.h"
 #include "coop_pause_menu.h"
 #include "coop_pause_tab.h"
+#include "coop_title_native.h"
 
 namespace {
 
@@ -847,4 +849,173 @@ TEST_CASE("coop i18n (help-lines): every row's help on the - page has a line in 
         }
         CHECK_MESSAGE(CoopPauseTab::HelpText(en).find("...") == std::string::npos, "English too long: " << en);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// A player's, a room's or a mod's own text is never looked up in the table (PR #313 review): a player called "Link"
+// must not read 林克, a name or room typed "On" must not become 开启. Only our own words are translated.
+namespace {
+
+// The Menu language row pinned to Simplified Chinese for a test (Current() reads the game's settings otherwise).
+struct Hans {
+    Hans() { CoopI18n::ForceLanguage("zh-Hans"); }
+    ~Hans() { CoopI18n::ForceLanguage(nullptr); }
+};
+
+CoopPauseMenu::Row Field(std::string name, std::string value, bool own_value = true) {
+    CoopPauseMenu::Row r;
+    r.name = std::move(name);
+    r.value = std::move(value);
+    r.own_value = own_value;
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("coop i18n (own text): the menu's text fields keep what the player typed, the words beside them are ours") {
+    const Hans hans;
+    // (the table does have these words: they are translated where they are the tab's own)
+    REQUIRE(CoopI18n::Tr("On") == "开启");
+    REQUIRE(CoopI18n::Tr("Link") == "林克");
+    // Not a text field: the tab's own value word is looked up, as before.
+    CHECK(CoopPauseTab::MenuValue(Field("Some row", "On", false), false) == "开启");
+    // A text field: the value as it is, typed or not.
+    CHECK(CoopPauseTab::MenuValue(Field("Your name", "Link"), false) == "Link");
+    CHECK(CoopPauseTab::MenuValue(Field("Room name", "On"), false) == "On");
+    CHECK(CoopPauseTab::MenuValue(Field("Room name", "On"), true) == "On_");
+    CoopPauseMenu::Row choice = Field("Mod setting", "On");
+    choice.kind = CoopPauseMenu::RowKind::kChoice;
+    choice.left = choice.right = true;
+    CHECK(CoopPauseTab::MenuValue(choice, false) == "< On >");   // (a mod's own choice word)
+
+    CoopPauseMenu::View v;
+    v.rows = {Field("Your name", "Link"), Field("Room name", "On"), Field("Port", "Off")};
+    CoopPauseTab::MenuList list = CoopPauseTab::MenuLines(v, 0, 0, false, 8);
+    CHECK(list.lines[1].name == "你的名字");
+    CHECK(list.lines[1].value == "Link");
+    CHECK(list.lines[2].name == "房间名");
+    CHECK(list.lines[2].value == "On");
+    CHECK(list.lines[3].value == "Off");
+    // typed "On" into the name: "On_", not 开启_
+    v.typing = true;
+    v.selected = 0;
+    v.rows[0].value = "On";
+    list = CoopPauseTab::MenuLines(v, 0, 0, true, 8);
+    CHECK(list.lines[1].value == "On_");
+    // A row of a player or a room (a bare name): its name stays as it is, whatever the table says about the word.
+    CoopPauseMenu::View names;
+    names.rows = {Field("Link", "", false), Field("Link", "", false)};
+    names.rows[0].own_name = true;
+    list = CoopPauseTab::MenuLines(names, 0, 0, false, 8);
+    CHECK(list.lines[1].name == "Link");
+    CHECK(list.lines[2].name == "林克");   // (the tab's own word "Link" is still the table's)
+    CHECK(list.lines[1].own_name);        // (the module draws the lines as they are: no second look-up)
+    CHECK(list.lines[1].own_value);
+}
+
+TEST_CASE("coop i18n (own text): the title's buttons and the typing look keep a player's name and a typed value") {
+    const Hans hans;
+    CHECK(CoopTitleNative::RowText(Field("Your name", "Link")) == "你的名字: Link");
+    CHECK(CoopTitleNative::RowText(Field("Room name", "On")) == "房间名: On");
+    CoopPauseMenu::Row bare = Field("Link", "", false);
+    CHECK(CoopTitleNative::RowText(bare) == "林克");   // (the tab's own word)
+    bare.own_name = true;
+    CHECK(CoopTitleNative::RowText(bare) == "Link");   // (a player's name)
+    // While typing: the field shows what was typed, as typed.
+    CoopPauseMenu::View v;
+    v.rows = {Field("Your name", "On_")};
+    v.selected = 0;
+    v.typing = true;
+    const CoopTitleNative::Look look = CoopTitleNative::TypingLook(v, 'a', CoopTitleNative::kFirstKey);
+    CHECK(look.texts[static_cast<std::size_t>(CoopTitleNative::Key::kField)] == "你的名字: On_");
+    // the keys are the module's own words, in the player's language here (the caller looks nothing up again)
+    CHECK(look.texts[static_cast<std::size_t>(CoopTitleNative::Key::kDelete)] == "删除");
+    CHECK(look.texts[static_cast<std::size_t>(CoopTitleNative::Key::kLetter)].rfind("字母", 0) == 0);
+}
+
+TEST_CASE("coop i18n (own text): the Players view's player rows are names, not lines of the table") {
+    const Hans hans;
+    CoopPauseTab::SessionView v;
+    v.names = {"Link", "Saria (host)", "Link (you)"};
+    const std::vector<std::string> rows = CoopPauseTab::RowTexts(CoopPauseTab::View::kPlayers, v);
+    CHECK(rows[0] == "Link");              // (not 林克)
+    CHECK(rows[1] == "Saria（房主）");     // (what is added after the name is the table's)
+    CHECK(rows[2] == "Link（你）");
+    CHECK(rows[CoopPauseTab::kRows - 1] == CoopI18n::Tr("Back"));
+}
+
+TEST_CASE("coop i18n (own text): the details list and the browser's list keep a room's, a host's and a game's own name") {
+    const Hans hans;
+    CoopPauseTab::SessionView idle;
+    idle.s.auto_rejoin = true;
+    idle.room_name = "Link";
+    std::vector<CoopPauseTab::ListLine> d = CoopPauseTab::DetailLines(CoopPauseTab::View::kMain, idle);
+    CHECK(d[1].name == "房间名");
+    CHECK(d[1].value == "Link");
+    CHECK(d[1].own_value);   // (the module draws the lines as they are)
+    idle.room_name = "On";
+    CHECK(CoopPauseTab::DetailLines(CoopPauseTab::View::kMain, idle)[1].value == "On");
+    idle.room_name.clear();
+    CHECK(CoopPauseTab::DetailLines(CoopPauseTab::View::kMain, idle)[1].value == "无");   // (the placeholder is ours)
+
+    CoopPauseTab::SessionView hosting;
+    hosting.s.hosting = true;
+    hosting.s.in_one = true;
+    hosting.room = "Kokiri Forest";
+    hosting.players = 1;
+    d = CoopPauseTab::DetailLines(CoopPauseTab::View::kMain, hosting);
+    CHECK(d[1].name == CoopI18n::Tr("Room"));
+    CHECK(d[1].value == "Kokiri Forest");   // (a place of the game's, but this one is the player's room name)
+
+    CoopPauseTab::SessionView browse;
+    browse.s.online = true;
+    browse.relay_set = true;
+    browse.s.online_listed = 2;
+    browse.online_list = {CoopPauseTab::ListLine{"Link", "Public game", CoopPauseTab::RowAction::kNone, false, true, true},
+                          CoopPauseTab::ListLine{"On", "Full", CoopPauseTab::RowAction::kNone, false, true, true}};
+    const std::vector<CoopPauseTab::ListLine> lines = CoopPauseTab::ListLines(browse);
+    CHECK(lines[1].name == "Link");   // (a room called Link)
+    CHECK(lines[2].name == "On");
+    CHECK(lines[1].own_name);
+}
+
+TEST_CASE("coop i18n (own text): the Lobby tab's players, hosts and public games are shown as they are") {
+    const Hans hans;
+    CoopLobbyTab::Tab t;
+    t.Show();
+    CoopLobbyTab::Lobby l;
+    l.games = {CoopLobbyTab::PublicGame{"link", "Link", "Public game, Players 1/8", true, true}};
+    t.Set(l);
+    CoopPauseMenu::View v = t.view();
+    bool flagged = false;
+    for (const CoopPauseMenu::Row& r : v.rows) {
+        if (r.name == "Link") flagged = r.own_name;
+    }
+    CHECK(flagged);
+    CoopPauseTab::MenuList list = CoopPauseTab::MenuLines(v, 0, 0, false, 8);
+    bool seen = false;
+    for (const CoopPauseTab::ListLine& line : list.lines) {
+        CHECK(line.name != "林克");
+        seen = seen || line.name == "Link";
+    }
+    CHECK(seen);
+
+    CoopLobbyTab::Lobby in;
+    in.connected = true;
+    in.max_players = 4;
+    CoopLobbyTab::Player me;
+    me.number = 1, me.name = "Link", me.self = true, me.host = true;
+    CoopLobbyTab::Player other;
+    other.number = 2, other.name = "On";
+    in.players = {me, other};
+    t.Set(in);
+    v = t.view();
+    list = CoopPauseTab::MenuLines(v, 0, 0, false, 8);
+    bool named = false;
+    for (const CoopPauseTab::ListLine& line : list.lines) {
+        CHECK(line.name != "开启");
+        CHECK(line.name != "林克");
+        named = named || line.name == "On";
+    }
+    CHECK(named);
 }

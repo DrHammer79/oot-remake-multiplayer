@@ -275,9 +275,12 @@ std::vector<Tab::Line> Tab::Lines() const {
     std::vector<Line> out;
     if (src_.loader == nullptr) return out;
     const std::vector<CoopMods::Row> rows = src_.loader->Rows();
-    const auto note = [&](std::string text) {
+    // (`own`: a mod's own words, or text already in the player's language: shown as they are, never looked up. The kit's
+    // own mod, the randomizer, is the one whose words are in the table.)
+    const auto note = [&](std::string text, bool own = false) {
         Line l;
         l.row = Make(std::move(text), "", RowKind::kNote);
+        l.row.own_name = own;
         l.act = Act::kNote;
         out.push_back(std::move(l));
     };
@@ -299,6 +302,7 @@ std::vector<Tab::Line> Tab::Lines() const {
         }
         for (const CoopMods::Row& m : rows) {
             Line l;
+            const bool kit = m.id == CoopRando::kId;   // (the others' title, version and text are the mod author's own)
             if (m.id == CoopRando::kId) {
                 // The randomizer's row is its name and a Settings button: its own switch ("Randomizer") is on its
                 // page, so an Off / On here (the mod's) would read as the randomizer's.
@@ -306,6 +310,7 @@ std::vector<Tab::Line> Tab::Lines() const {
             } else {
                 l.row = Make(m.title + (m.version.empty() || m.version == "0" ? "" : " " + m.version), "",
                              RowKind::kToggle);
+                l.row.own_name = !kit;
                 l.row.on = m.on;
                 l.row.fixed = !m.can_switch;
             }
@@ -313,6 +318,7 @@ std::vector<Tab::Line> Tab::Lines() const {
             l.name = m.name;
             l.help = m.description;
             if (!m.note.empty()) l.help += (l.help.empty() ? "" : "\n") + m.note;
+            l.own_help = !kit;
             out.push_back(std::move(l));
         }
         return out;
@@ -323,24 +329,28 @@ std::vector<Tab::Line> Tab::Lines() const {
         return out;
     }
     const CoopMods::Row& m = *it;
+    // (only the kit's own mod, the randomizer, has its words in the table; every other mod's title, description, author,
+    // note and settings are its author's own text, shown as they are: a mod called "Swords" is not 剑)
+    const bool kit = m.id == CoopRando::kId;
     Line head;
     head.row = Make(m.title, "", RowKind::kHeading);
+    head.row.own_name = !kit;
     out.push_back(head);
     if (!m.description.empty()) {
-        for (const std::string& line : NoteLines(m.description)) note(line);
+        for (const std::string& line : NoteLines(m.description)) note(line, !kit);
     }
     if (!m.author.empty()) {
         // The table's words around the author and the version, and the author's own
         // text through it too (the kit's randomizer writes a sentence there, which
         // the table has; a mod's own name is not in it and stays as it is).
-        std::string by = CoopI18n::Tr("By") + " " + CoopI18n::Tr(m.author);
+        std::string by = CoopI18n::Tr("By") + " " + (kit ? CoopI18n::Tr(m.author) : m.author);
         if (!m.version.empty()) {
             by += CoopI18n::Tr(", version") + " " + m.version;
         }
-        note(std::move(by));
+        note(std::move(by), true);   // (the words around the author are in the player's language, the author's are its own)
     }
     if (!m.note.empty()) {
-        for (const std::string& line : NoteLines(m.note)) note(line);
+        for (const std::string& line : NoteLines(m.note)) note(line, !kit);
     }
     if (m.id == CoopRando::kId && src_.rando) {
         if (std::string r = src_.rando(); !r.empty()) note("Randomizer: " + r);
@@ -351,6 +361,7 @@ std::vector<Tab::Line> Tab::Lines() const {
     on.row.fixed = !m.can_switch;
     on.act = Act::kOn;
     on.help = m.can_switch ? "Off: the game leaves this mod out from its next start." : m.note;
+    on.own_help = !m.can_switch && !kit;   // (a mod's note)
     out.push_back(on);
     for (const auto& [act, name, help] :
          {std::tuple{Act::kUp, "Move up", "Up: it wins a file it shares with the mods under it."},
@@ -400,14 +411,18 @@ std::vector<Tab::Line> Tab::Lines() const {
             break;
         }
         case CoopMods::SettingType::Text:
-            l.row = Make(caption, s.value.empty() ? "(empty)" : EndsShown(s.value), RowKind::kAction);
+            l.row = Make(caption, s.value.empty() ? CoopI18n::Tr("(empty)") : EndsShown(s.value), RowKind::kAction);
             break;
         }
         l.row.fixed = s.locked;
+        // (a setting of another mod: its caption, choice words and text are its author's own, shown as they are)
+        l.row.own_name = !kit;
+        l.row.own_value = !kit || s.setting.type == CoopMods::SettingType::Text;
         // The setting's own help and the restart note are two lines of the table,
         // put together here: the joined paragraph ("... (for it). Counts after a
         // restart.") is not a line of any table, so it would stay English.
         l.help = s.locked ? CoopI18n::Tr("In this co-op game the host sets this.") : s.setting.help;
+        l.own_help = !kit && !s.locked;
         if (s.setting.restart) {
             l.help += (l.help.empty() ? "" : " ") + CoopI18n::Tr("Counts after a restart.");
         }
@@ -683,8 +698,9 @@ CoopPauseMenu::View Tab::view() const {
     if (selected_ < lines.size() && Selectable(lines[selected_])) {
         v.selected = static_cast<int>(selected_);
         const Line& l = lines[selected_];
-        v.help_title = CoopI18n::Tr(l.row.name);
-        v.help = CoopI18n::Tr(l.help);
+        // (a mod's title, caption and help are its author's own text: not looked up in the table)
+        v.help_title = l.row.own_name ? l.row.name : CoopI18n::Tr(l.row.name);
+        v.help = l.own_help ? l.help : CoopI18n::Tr(l.help);
         if (typing_) {
             v.rows[selected_].value = TailShown(typed_) + "_";   // (the end: where the next character goes)
             v.typing = true;

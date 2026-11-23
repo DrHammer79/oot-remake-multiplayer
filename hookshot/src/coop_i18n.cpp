@@ -17,6 +17,7 @@
 #include "coop_i18n.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -3175,7 +3176,24 @@ const char* MenuLanguageCode(int setting) {
     return setting <= kCount ? kMenuLangs[setting - 1] : "en";   // (a newer Longshot's language: none of ours)
 }
 
+namespace {
+std::atomic<bool> g_forced_on{false};
+std::atomic<const Lang*> g_forced{nullptr};
+}  // namespace
+
+void ForceLanguage(const char* code) {
+    if (code == nullptr) {
+        g_forced_on = false;
+        return;
+    }
+    g_forced = ForCode(code);
+    g_forced_on = true;
+}
+
 const Lang* Current() {
+    if (g_forced_on) {
+        return g_forced;
+    }
     // Longshot's Menu language row: the tabs are drawn in that menu, with the
     // glyphs it merged for that language (vk_imgui.cpp script_fonts).
     if (const char* menu = MenuLanguageCode(MenuLanguageNow())) {

@@ -36,6 +36,10 @@ extern const int kLangCount;
 // each time: a change of the Menu language row shows at once).
 const Lang* Current();
 
+// Tests only: pins the language Current() answers to the table for `code` ("en" or an unknown code: English), so a
+// test can read the Chinese a row would show; nullptr gives the settings back.
+void ForceLanguage(const char* code);
+
 // The Menu language row's value in longshot_options.ini's text (0 Auto), -1
 // when the text has no such line (empty, or cut short while Longshot writes
 // it); the value after a read, `last` kept when the read had none (`good`

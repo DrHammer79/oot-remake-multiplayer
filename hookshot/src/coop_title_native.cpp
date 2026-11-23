@@ -25,8 +25,10 @@ std::string RowText(const CoopPauseMenu::Row& r) {
     // The row's words in the player's language (coop_i18n.h), before the cut: a
     // cut line is not the table's line any more. The table has no line for the
     // game's own English (the tests read this file's lines as they are written).
-    const std::string name = CoopI18n::Tr(r.name);
-    const std::string value = CoopI18n::Tr(r.value);
+    // A player's, a room's or a mod's own text on the row (Row::own_name, own_value: "Your name: Link") is put in as it
+    // is: a name that is also a word of the table must not turn into the table's line.
+    const std::string name = r.own_name ? r.name : CoopI18n::Tr(r.name);
+    const std::string value = r.own_value ? r.value : CoopI18n::Tr(r.value);
     std::string t = name;
     switch (r.kind) {
     case RowKind::kToggle: t += CoopI18n::Tr(": ") + (r.on ? CoopI18n::Tr("On") : CoopI18n::Tr("Off")); break;
@@ -60,13 +62,15 @@ Look TypingLook(const CoopPauseMenu::View& v, char letter, int key) {
     if (row) {   // (the field's name and what is typed; a long one shows its end, where the typing goes)
         const CoopPauseMenu::Row& r = v.rows[static_cast<std::size_t>(v.selected)];
         out.texts[static_cast<std::size_t>(Key::kField)] =
-            r.value.empty() ? CoopI18n::Tr(r.name)
-                            : CoopI18n::Tr(r.name) + CoopI18n::Tr(": ") + CoopI18n::Tr(r.value);
+            r.value.empty() ? (r.own_name ? r.name : CoopI18n::Tr(r.name))
+                            : (r.own_name ? r.name : CoopI18n::Tr(r.name)) + CoopI18n::Tr(": ") +
+                                  (r.own_value ? r.value : CoopI18n::Tr(r.value));   // (what is typed: as it is, "On_")
     }
+    // (the keys in the player's language here, not by the caller: the field's line above is the player's text)
     out.texts[static_cast<std::size_t>(Key::kLetter)] =
-        std::string("Letter: < ") + (letter == ' ' ? std::string("Space") : std::string(1, letter)) + " >";
-    out.texts[static_cast<std::size_t>(Key::kDelete)] = "Delete";
-    out.texts[static_cast<std::size_t>(Key::kOk)] = "OK";
+        CoopI18n::Tr(std::string("Letter: < ") + (letter == ' ' ? std::string("Space") : std::string(1, letter)) + " >");
+    out.texts[static_cast<std::size_t>(Key::kDelete)] = CoopI18n::Tr("Delete");
+    out.texts[static_cast<std::size_t>(Key::kOk)] = CoopI18n::Tr("OK");
     for (std::string& t : out.texts) {
         if (t.size() > kTextBytes) {   // (the field's end: the typing; never inside a letter of more bytes)
             std::size_t from = t.size() - (kTextBytes - 3);

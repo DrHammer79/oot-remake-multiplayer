@@ -180,6 +180,12 @@ Row InputChoice(const char* name, const std::string& label) {
     return Choice(name, colon == std::string::npos ? label : label.substr(colon + 2));
 }
 
+// A placeholder in a text field (empty: "Type", "None", "Hidden") in the player's language at once: the field's value is
+// then marked as the player's own (Row::own_value) and never looked up, so a room typed "None" stays "None".
+std::string Ph(const std::string& word) {
+    return CoopI18n::Tr(word);
+}
+
 Row Note(std::string text) {
     Row r;
     r.name = std::move(text);
@@ -481,7 +487,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
             if (session_.state == State::kHosting && !session_.password.empty()) {
                 if (!show_password_) {
-                    out.push_back({Action("Join password", "Hidden"), Act::kShowPassword, kJoinPasswordHelp});
+                    out.push_back({Action("Join password", Ph("Hidden")), Act::kShowPassword, kJoinPasswordHelp});
                 } else {
                     const std::vector<std::string> shown = PasswordLines(session_.password);
                     for (std::size_t i = 0; i < shown.size(); ++i) {
@@ -489,7 +495,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                     }
                 }
                 const bool typing_password = typing_ && typing_act_ == Act::kNewPassword;
-                out.push_back({Action("Change join password", typing_password ? Masked(new_password_) + "_" : "Type"),
+                out.push_back({Action("Change join password", typing_password ? Masked(new_password_) + "_" : Ph("Type")),
                                Act::kNewPassword,
                                "A new join password, typed on the keyboard; Enter gives it to your game. Players who "
                                "join from now on need it; players already in stay. No spaces, at most 128 characters."});
@@ -511,7 +517,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            options_.public_game ? kPublicHelp : kPrivateHelp});
             if (options_.public_game) {
                 out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                                   : options_.relay_room.empty()        ? std::string("None")
+                                                   : options_.relay_room.empty()        ? Ph("None")
                                                                                         : options_.relay_room),
                                Act::kRoom,
                                "Your public game's name in Public games: 3 to 24 letters, digits, - or _. A ready one is offered; change it if you like."});
@@ -567,7 +573,7 @@ std::vector<Menu::Line> Menu::Lines() const {
             out.push_back({Action("Room or address",
                                   typing_ip   ? join_ip_ + "_"
                                   : code_in   ? ShownCode(std::string(Trim(join_)))
-                                  : join_ip_.empty() ? std::string("Type")
+                                  : join_ip_.empty() ? Ph("Type")
                                                      : join_ip_,
                                   off),
                            Act::kJoinIp,
@@ -583,7 +589,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            "The host's UDP port (default 27510). Type a number from 1 to 65535."});
             out.push_back({Action("Password",
                                   typing_password ? Masked(join_password_) + "_"
-                                                  : join_password_.empty() ? std::string("Type") : Masked(join_password_),
+                                                  : join_password_.empty() ? Ph("Type") : Masked(join_password_),
                                   off),
                            Act::kJoinPassword,
                            "The host's join password: they see it on their Multiplayer page (Hosting, Join "
@@ -602,7 +608,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "in your home."});
         const bool typing_search = typing_ && typing_act_ == Act::kFindSearch;
         out.push_back({Action("Search", typing_search ? find_search_ + "_"
-                                        : find_search_.empty() ? std::string("Type") : find_search_),
+                                        : find_search_.empty() ? Ph("Type") : find_search_),
                        Act::kFindSearch, "Only the games whose name, or whose host's name, holds these letters."});
         out.push_back({Choice("Show", CoopBrowse::FilterWords(find_filter_)), Act::kFindFilter,
                        "All games; only the ones you can join (your version, room for one more); or every game of "
@@ -668,14 +674,14 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "65535."});
         out.push_back({Action("Relay", typing_ && typing_act_ == Act::kRelay ? options_.relay + "_"
                                        : options_.relay.empty() || options_.relay == CoopTitleMenu::kDefaultRelay
-                                           ? std::string(CoopTitleMenu::kDefaultRelayName)
+                                           ? Ph(CoopTitleMenu::kDefaultRelayName)
                                            : options_.relay),
                        Act::kRelay,
                        "The relay that finds rooms by name and lists public rooms. Squadala's own is built in; type "
                        "another (host or host:port) to use it instead. Cleared: Squadala's again. A change while you "
                        "host applies at your next Host."});
         out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                           : options_.relay_room.empty()        ? std::string("None")
+                                           : options_.relay_room.empty()        ? Ph("None")
                                                                                 : options_.relay_room),
                        Act::kRoom,
                        "Your room's name on the relay when you host: 3 to 24 letters, digits, - or _. Friends type "
@@ -760,6 +766,22 @@ std::vector<Menu::Line> Menu::Lines() const {
     case Page::kCustomize:   // (its own rows: coop_look_menu.h)
         break;
     }
+    // The rows that hold a player's, a room's or a host's own text: shown as they are, never looked up in the translation
+    // table (a player called "Link" or a room named "On" must not read 林克 or 开启). The words beside them are ours: the
+    // row's name, a field's empty placeholder (translated above, where it is made).
+    for (Line& line : out) {
+        switch (line.act) {
+        case Act::kName: case Act::kHostPort: case Act::kRelay: case Act::kRoom: case Act::kJoinIp: case Act::kJoinPort:
+        case Act::kJoinPassword: case Act::kNewPassword: case Act::kShowPassword: case Act::kCode: case Act::kFindSearch:
+        case Act::kOpenSettings:   // (Settings: the player's name in its value cell)
+            line.row.own_value = true;
+            break;
+        case Act::kFindGame:   // (a game's or a room's name; its players' count and kind are ours)
+            line.row.own_name = true;
+            break;
+        default: break;
+        }
+    }
     return out;
 }
 
@@ -789,7 +811,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     const bool typing_ip = typing_ && typing_act_ == Act::kJoinIp;
     const bool typing_password = typing_ && typing_act_ == Act::kJoinPassword;
     const std::string password = typing_password ? Masked(join_password_) + "_"
-                                 : join_password_.empty() ? std::string("None") : Masked(join_password_);
+                                 : join_password_.empty() ? Ph("None") : Masked(join_password_);
     if (!note_.empty() && note_[0].rfind("Turned away", 0) == 0) out.push_back({Note(note_[0]), Act::kNone, {}});
     if (!picked_.empty()) {
         const std::string asks = " asks for a password";
@@ -824,7 +846,7 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                        "The most players in your game, you included."});
         if (options_.public_game) {
             out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                               : options_.relay_room.empty()        ? std::string("None")
+                                               : options_.relay_room.empty()        ? Ph("None")
                                                                                     : options_.relay_room),
                            Act::kRoom, "Your game's name in Join a game: 3 to 24 letters, digits, - or _."});
         }
@@ -849,7 +871,7 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                        Act::kCopyInvite,
                        "The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code."});
         if (session_.state == State::kHosting && !session_.password.empty()) {
-            const std::string shown = show_password_ ? PasswordLines(session_.password).front() : std::string("Hidden");
+            const std::string shown = show_password_ ? PasswordLines(session_.password).front() : Ph("Hidden");
             out.push_back({Action("Password", shown), Act::kShowPassword,
                            "Your friend types it after picking your game. A shows it."});
         }
@@ -2210,6 +2232,7 @@ View Menu::view() const {
         Row name;
         name.name = "Your name";
         name.value = options_.name;
+        name.own_value = true;   // (the player's own name: never looked up, "Link" stays "Link")
         name.kind = RowKind::kAction;
         v.rows.push_back(std::move(name));
         v.rows.push_back(Note(kSnailHomeNote));
@@ -2228,6 +2251,7 @@ View Menu::view() const {
             Row name;
             name.name = "Your name";
             name.value = options_.name;
+            name.own_value = true;
             name.kind = RowKind::kAction;
             v.rows.push_back(std::move(name));
         }

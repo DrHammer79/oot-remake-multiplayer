@@ -66,6 +66,7 @@ private:
         Act act = Act::kNone;
         std::string name;  // kMod: the mod; kSetting: the setting's key
         std::string help;
+        bool own_help = false;   // the help is a mod author's own text: never looked up in the translation table
     };
     std::vector<Line> Lines() const;
     static bool Selectable(const Line& l);

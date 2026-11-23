@@ -968,13 +968,13 @@ void StepNative(void* ctx, std::uint64_t screen) {
     // be shown, the row's own text)
     const bool toggled = look.toggle >= 0 && g_toggle.layout == layout && g_toggle.usable;
     for (int i = 0; i < look.buttons; ++i) {
-        // The page's rows in the player's language (coop_i18n.h): a row the menu built in English
-        // ("Your name: 4090", "Port: 27510") is looked up whole as it is handed to the game —
-        // the rows with a value are the table's shapes, a field's own text comes back as it is.
-        ok = SetLiveText(ctx, layout, i, toggled && i == look.toggle ? std::string(" ") : CoopI18n::Tr(look.texts[static_cast<std::size_t>(i)])) && ok;
+        // The page's rows are already in the player's language (coop_title_native.cpp: RowText, TypingLook, LookFor), a
+        // field's own text and a player's or a room's name as it is: not looked up again here, which would turn a name
+        // that is also a word of the table ("Link") into the table's line.
+        ok = SetLiveText(ctx, layout, i, toggled && i == look.toggle ? std::string(" ") : look.texts[static_cast<std::size_t>(i)]) && ok;
     }
     if (g_column.layout != layout) FindColumn(ctx, screen, layout);
-    const bool hint = !look.hint.empty() && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, CoopI18n::Tr(look.hint));
+    const bool hint = !look.hint.empty() && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, look.hint);
     ShowColumn(ctx, screen, look.buttons, hint, look.dim);
     if (ok) StepToggle(ctx, screen, layout, look);
     else HideToggle(ctx);
