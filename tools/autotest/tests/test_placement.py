@@ -166,6 +166,33 @@ class WindowShot(unittest.TestCase):
         why = pl.screen_copy_problem((0, 0, 960, 600), mons, lambda x, y: x < 480)   # the right half under another
         self.assertIn("another window covers it", why)
 
+    def _lit(self, w, h):
+        rgb = bytearray(w * h * 3)
+        rgb[((h // 8) * w + w // 8) * 3] = 200
+        return bytes(rgb)
+
+    def test_pick_print_when_lit(self):
+        lit = self._lit(16, 16)
+        self.assertEqual(pl.pick_copy(lit, 16, 16, lambda: self.fail("no screen check"), lambda: self.fail("no copy")),
+                         (lit, "print"))
+
+    def test_pick_screen_when_print_black(self):
+        lit = self._lit(16, 16)
+        self.assertEqual(pl.pick_copy(bytes(16 * 16 * 3), 16, 16, lambda: "", lambda: lit), (lit, "screen"))
+        self.assertEqual(pl.pick_copy(None, 16, 16, lambda: "", lambda: lit), (lit, "screen"))
+
+    def test_pick_refuses_a_covered_window_without_copying(self):
+        with self.assertRaises(pl.PlacementError) as c:
+            pl.pick_copy(None, 16, 16, lambda: "another window covers it at 1,1", lambda: self.fail("no copy"))
+        self.assertIn("covers", str(c.exception))
+
+    def test_pick_refuses_a_black_screen_copy(self):
+        # The lane's games: GDI sees their windows black both ways, while they present. A black file is a wrong picture.
+        black = bytes(16 * 16 * 3)
+        with self.assertRaises(pl.PlacementError) as c:
+            pl.pick_copy(black, 16, 16, lambda: "", lambda: black)
+        self.assertIn("both black", str(c.exception))
+
     def test_screen_copy_refused_without_area(self):
         self.assertIn("no client area", pl.screen_copy_problem((10, 10, 10, 10), [(0, 0, 99, 99)], lambda x, y: True))
 

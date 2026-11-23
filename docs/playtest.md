@@ -43,8 +43,14 @@ show. To see a co-op page, use `live.py shot --window` (or the MCP `shot` tool w
 `<tag>-<ms>-window.png`, a copy of its window's client area, what the player sees. It is taken after the bridge shot,
 so a held game has just presented. The copy is `PrintWindow` first; when that gives a black picture, a copy of the
 screen there, but only when the window is wholly on one monitor and no other window covers it. Otherwise the reply has
-`window_error` with the reason and no file is written (never a picture of other windows). Windows only; the per-game
-MCP `screenshot` tool has no window copy.
+`window_error` with the reason and no file is written (never a picture of other windows). A screen copy that is black
+too is refused the same way. Windows only; the per-game MCP `screenshot` tool has no window copy.
+
+On the test lane's PC the window copy does not work yet: both games presented (swapchain 1280x720, mailbox), but
+`PrintWindow` and a screen copy of their uncovered windows were both black (GDI does not see these Vulkan windows).
+There `--window` answers `window_error` ("both black"), so a co-op page still cannot be seen in a lane run. Not tried
+yet: Windows.Graphics.Capture, or a bridge shot taken after the menu is drawn (a Longshot change; today only
+`RX_VK_SHOT_MENU` in a headless run draws the menu into shots).
 
 ## Bridge protocol
 

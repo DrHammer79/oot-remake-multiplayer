@@ -252,6 +252,23 @@ def screen_copy_problem(rect, monitor_rects, owner_at):
     return ""
 
 
+def pick_copy(printed, w, h, problem, copy_screen):
+    """(rgb, 'print' or 'screen') for window_shot, or a PlacementError: never a black or foreign picture.
+    printed: PrintWindow's pixels (None when it failed); problem(): why a screen copy would show other pixels ('' when
+    none); copy_screen(): the screen's pixels there. A screen copy that is black too is refused: GDI does not see some
+    Vulkan windows at all (the lane's games: black in PrintWindow and on a screen copy, while they present)."""
+    if printed is not None and not is_dark(printed, w, h):
+        return printed, "print"
+    why = problem()
+    if why:
+        raise PlacementError("window copy not usable: PrintWindow gave black and %s" % why)
+    rgb = copy_screen()
+    if is_dark(rgb, w, h):
+        raise PlacementError("window copy not usable: PrintWindow and the screen copy are both black "
+                             "(GDI does not see this window's picture)")
+    return rgb, "screen"
+
+
 def window_shot(hwnd, path):
     """Copies the client area of window hwnd into path (PNG). PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT) first;
     when that gives black (some Vulkan windows) a copy of the screen there, but only when the window is wholly on a
@@ -317,18 +334,19 @@ def window_shot(hwnd, path):
             raise PlacementError("GetDIBits failed")
         return bgra_to_rgb(buf.raw)
 
+    def problem():
+        rect = (o.x, o.y, o.x + w, o.y + h)
+        return screen_copy_problem(rect, [m["bounds"] for m in monitors()],   # (GA_ROOT = 2)
+                                   lambda x, y: u.GetAncestor(u.WindowFromPoint(wintypes.POINT(x, y)), 2) == hwnd)
+
+    def copy_screen():
+        if not g.BitBlt(mem, 0, 0, w, h, screen, o.x, o.y, 0x00CC0020):   # SRCCOPY
+            raise PlacementError("screen copy failed")
+        return read()
+
     try:
-        how = "print"
-        rgb = read() if u.PrintWindow(hwnd, mem, 3) else None   # PW_CLIENTONLY | PW_RENDERFULLCONTENT
-        if rgb is None or is_dark(rgb, w, h):
-            rect = (o.x, o.y, o.x + w, o.y + h)
-            why = screen_copy_problem(rect, [m["bounds"] for m in monitors()],
-                                      lambda x, y: u.GetAncestor(u.WindowFromPoint(wintypes.POINT(x, y)), 2) == hwnd)
-            if why:   # (GA_ROOT = 2) a screen copy would be other pixels: no picture rather than a wrong one
-                raise PlacementError("window copy not usable: PrintWindow gave black and %s" % why)
-            if not g.BitBlt(mem, 0, 0, w, h, screen, o.x, o.y, 0x00CC0020):   # SRCCOPY
-                raise PlacementError("screen copy failed")
-            rgb, how = read(), "screen"
+        printed = read() if u.PrintWindow(hwnd, mem, 3) else None   # PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        rgb, how = pick_copy(printed, w, h, problem, copy_screen)
     finally:
         g.SelectObject(mem, old)
         g.DeleteObject(bmp)
