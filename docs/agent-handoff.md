@@ -1,10 +1,12 @@
-# Agent handoff: what the test-kit-0117 work learned (2026-11-22)
+# Agent handoff: what the play-test kit work learned (2026-11-22)
 
-For the maintainer's agent, from the agent that worked on the `test-kit-0117` branch. Everything here is information
+For the maintainer's agent, from the agent that worked on the play-test kit branch (pull request #315). Everything here is information
 about the game (addresses, offsets, names, behaviour) and about our tools; nothing from the game's files. The code is
 the source: each item names where it lives. The full list of every address and offset the code names, with its
 comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (run it
 again after a game update).
+
+What is done, open and waiting on (the coordination state, kept current): [agent-state.md](agent-state.md).
 
 ## 1. Actor and component memory (proven in game)
 
@@ -108,7 +110,8 @@ the eye (`Obj_Base_OnOffAnim`) has no AI of its own, so a refused turn leaves it
   `LICHII_COOP_DEBUG_BOSS=1`. Kill-switches for tonight's features: `LICHII_COOP_PIVOT=0`, `LICHII_COOP_SPLIT_SHOTS=0`,
   `LICHII_COOP_BLOCK_NODE=0`.
 - **Live play-testing** ([playtest.md](playtest.md)): `tools/autotest/live.py` keeps both games open and takes one
-  step at a time; `dump TAG` checkpoints every shared flag; `desync_check.py`; `mcp_playtest.py` for Claude Code.
+  step at a time; `dump TAG` checkpoints every shared flag; `desync_check.py`; `mcp_playtest.py` for an MCP client; the play-test bridge pauses each game between calls and steps N frames
+  (playtest.md, "Playing through the bridge"). The tester rules are in AGENTS.md.
 - **Reading the romfs** for facts: `tools/puppet_pack` (`zs`, `byml`, `sarc`, `bfres`): maps in
   `Banc/<Scene>/*.bcett.byml.zs` (actors, `Dynamic` params, `Links`, `Presence`), packs in `Pack/Actor/<Name>.pack.zs`;
   AI graphs read only as names (grep printable strings out of `.ainb`). Scanning the whole romfs at once takes over
@@ -126,7 +129,7 @@ Any of these, as a reply comment or a docs file in a PR:
    Redead's scream.
 4. **Presence**: whether a placement's `Presence.FlagName` is checked again when a dungeon room streams back in, or
    only at a scene load.
-5. **A frame step in the control bridge**: a pause and "advance N frames" command, so an agent can play real-time
-   fights step by step (the one thing the live kit cannot do from the module).
+5. **A frame step in the control bridge**: done by the play-test bridge ([playtest.md](playtest.md)); the Longshot
+   control bridge itself still has none.
 6. **An AI-graph reader with the wiring** (node inputs and links), if your agent has one: ours reads names only.
 7. **Your agent's own handoff**: its scripts, memory notes and what it learned that is not written down.
