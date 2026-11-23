@@ -1839,3 +1839,41 @@ TEST_CASE("items: a spoiled trade item's retry and the timers follow the item (r
   CHECK(claim.raise("Step10") == step_hash("Step11"));
   CHECK(claim.raise("Step09_01") == step_hash("Step11"));
 }
+
+namespace rewards = coop::host::rewards;
+namespace letters = coop::host::letters;
+
+TEST_CASE("rewards: each once-per-save reward's Bool is its name's hash (row 272)") {
+  const auto check = [](const auto& sources) {
+    for (const rewards::Source& s : sources) {
+      INFO(s.name);
+      CHECK(coop::protocol::flag_hash(s.name) == s.hash);
+    }
+  };
+  check(rewards::kBottle);
+  check(rewards::kUpgrade);
+  check(rewards::kOther);
+}
+
+TEST_CASE("rewards: the bottle and upgrade units are item flags, each key in one unit (row 272)") {
+  std::set<std::uint32_t> seen;
+  const auto check = [&](const std::vector<std::vector<FlagKey>>& units, std::size_t size) {
+    CHECK(units.size() == size);
+    for (const auto& unit : units) {
+      CHECK(unit.size() == 2);
+      for (const FlagKey key : unit) {
+        INFO(key.hash);
+        CHECK(find_item(key.hash) != nullptr);
+        CHECK(seen.insert(key.hash).second);
+      }
+    }
+  };
+  check(rewards::bottle_units(), 5);
+  check(rewards::upgrade_units(), 18);
+  // A bottle slot is its StockNum and its IsValid, A to E.
+  const auto bottles = rewards::bottle_units();
+  for (std::size_t i = 0; i < letters::kBottles.size(); ++i) {
+    CHECK(bottles[i][1].hash == letters::kBottles[i].valid);
+    CHECK(find_item(bottles[i][0].hash)->name.starts_with("PouchData.Bottle"));
+  }
+}

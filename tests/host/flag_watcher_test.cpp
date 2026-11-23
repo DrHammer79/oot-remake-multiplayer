@@ -3896,3 +3896,154 @@ TEST_CASE("heart containers: only a shared named flag, and the item store takes 
   CHECK_FALSE(store.write(hearts_delta(-4)));  // a maximum never goes down by a change
   CHECK(game_store.get(kHeartMax) == 16u);
 }
+
+// Row 272: a once-per-save reward (a bottle) got in two games at once.
+namespace {
+
+constexpr FlagKey kAnju{0x7001u, 0};    // a bottle reward's own Bool (Anju's MiniGame_CatchCucco_IsCompleted)
+constexpr FlagKey kTalon{0x7002u, 0};   // another bottle reward's
+constexpr FlagKey kStockA{0x7100u, 0};  // bottle slot A: StockNum
+constexpr FlagKey kValidA{0x7101u, 0};  //                IsValid
+constexpr FlagKey kStockB{0x7200u, 0};
+constexpr FlagKey kValidB{0x7201u, 0};
+
+FakeStore bottle_game() {
+  FakeStore store;
+  for (FlagKey k : {kAnju, kTalon, kStockA, kValidA, kStockB, kValidB}) store.set(k, 0);
+  return store;
+}
+
+SharedFlags bottle_shared() { return SharedFlags({kStockA, kValidA, kStockB, kValidB}); }
+
+void bottle_guard(FlagWatcher& w) {
+  const std::vector<std::vector<FlagKey>> units{{kStockA, kValidA}, {kStockB, kValidB}};
+  const FlagKey sources[] = {kAnju, kTalon};
+  w.guard_reward(units, sources);
+}
+
+void give(FakeStore& store, FlagKey stock, FlagKey valid) {
+  store.set(stock, 1);
+  store.set(valid, 1);
+}
+
+}  // namespace
+
+TEST_CASE("reward guard: the rewards' own Bools are shared (row 272)") {
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  CHECK(w.shared().contains(kAnju));
+  CHECK(w.shared().contains(kTalon));
+}
+
+TEST_CASE("reward guard: our own bottle reward alone is sent (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  store.set(kAnju, 1);  // the flow sets its Bool, then gives the bottle
+  w.frame(store);
+  give(store, kStockA, kValidA);
+  const auto sent = entries(w.frame(store));
+  CHECK(has(sent, entry(kStockA, 1)));
+  CHECK(has(sent, entry(kValidA, 1)));
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: the same bottle reward got here after another player's copy came is put back (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  // Another player finished Anju's cuccos first: her Bool, then the bottle in their slot A.
+  w.receive(state({entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}));
+  w.frame(store);
+  CHECK(store.get(kValidA) == 1);
+  // Our game was past its flow's check (the same cutscene at the same time): it gives its own copy, into
+  // the first empty slot, B.
+  give(store, kStockB, kValidB);
+  const auto sent = entries(w.frame(store));
+  CHECK_FALSE(has(sent, entry(kStockB, 1)));
+  CHECK_FALSE(has(sent, entry(kValidB, 1)));
+  CHECK(store.get(kStockB) == 0);  // one bottle, as in every other game
+  CHECK(store.get(kValidB) == 0);
+  CHECK(store.get(kValidA) == 1);
+  CHECK(w.stats().rewards_guarded == 1);
+  const auto told = w.take_rewards_guarded();
+  REQUIRE(told.size() == 1);
+  CHECK(told[0].key == kStockB);
+  // Nothing goes out later either.
+  for (int f = 0; f < 5; ++f) CHECK(entries(w.frame(store)).empty());
+}
+
+TEST_CASE("reward guard: two players get the same bottle reward in the same tick: one bottle (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  // Our flow sets its Bool and gives into slot B in the same scan that another player's Bool and slot A
+  // land (both games' writes before either heard of the other).
+  store.set(kAnju, 1);
+  give(store, kStockB, kValidB);
+  w.receive(state({entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}));
+  const auto sent = entries(w.frame(store));
+  CHECK_FALSE(has(sent, entry(kValidB, 1)));
+  CHECK(store.get(kValidB) == 0);
+  CHECK(store.get(kValidA) == 1);
+  CHECK(w.stats().rewards_guarded == 1);
+}
+
+TEST_CASE("reward guard: two different bottle rewards at once are two bottles (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.receive(state({entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}));  // Anju's, from another player
+  w.frame(store);
+  store.set(kTalon, 1);  // ours is Talon's: its own Bool, in the same scan as the bottle
+  give(store, kStockB, kValidB);
+  const auto sent = entries(w.frame(store));
+  CHECK(has(sent, entry(kValidB, 1)));
+  CHECK(has(sent, entry(kTalon, 1)));
+  CHECK(store.get(kValidB) == 1);
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: a bottle with no reward given now (a shop, a randomizer chest) is kept (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.receive(state({entry(kStockA, 1), entry(kValidA, 1)}));  // another player's bottle, from no known reward
+  w.frame(store);
+  give(store, kStockB, kValidB);
+  CHECK(has(entries(w.frame(store)), entry(kValidB, 1)));
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: after the reward's time a bottle is not guarded (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.receive(state({entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}));
+  w.frame(store);
+  for (std::uint64_t f = 0; f <= FlagWatcher::kRewardFrames; ++f) w.frame(store);
+  give(store, kStockB, kValidB);
+  CHECK(has(entries(w.frame(store)), entry(kValidB, 1)));
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: the host puts back its own second copy too (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher h(bottle_shared(), FlagRole::host);
+  bottle_guard(h);
+  h.frame(store);
+  proto::FlagSet set{2, {entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}};
+  h.receive(proto::Message{set});
+  h.frame(store);
+  CHECK(store.get(kValidA) == 1);
+  give(store, kStockB, kValidB);
+  h.frame(store);
+  CHECK(store.get(kValidB) == 0);
+  CHECK(h.stats().rewards_guarded == 1);
+}

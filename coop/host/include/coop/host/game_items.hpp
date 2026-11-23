@@ -413,6 +413,57 @@ std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::op
                                                 const std::function<std::optional<bool>(std::uint32_t)>& valid,
                                                 const std::function<std::optional<std::uint32_t>(std::uint32_t)>& item);
 
+// Row 272 (docs/items.md, "Rewards given once per save"): a reward an NPC or a minigame gives once per save.
+// Its flow sets a saved Bool as it gives it (read from the game's Event/EventFlow), and that Bool was each
+// player's own, so every game gave the reward again; where the game gives it relative to what it holds (the
+// first empty bottle, the tier after the one it has, one more heart piece), the share added the copies up
+// (4 players, 4 bottles from Anju). The Bools are shared now (FlagWatcher::guard_reward /
+// share_pickup_named), and the bottle and upgrade gains are guarded against the same reward got in two games
+// at once (FlagWatcher::guard_reward).
+namespace rewards {
+struct Source {
+  std::uint32_t hash;     // flag_hash(name)
+  std::string_view name;  // the Bool in the game (each one is in GameDataList)
+};
+// Rewards that are a bottle.
+inline constexpr std::array<Source, 4> kBottle{{
+    {0x7a7961c3, "MiniGame_CatchCucco_IsCompleted"},  // Anju's cuccos, child (Minigame_CatchCucco)
+    {0x084da83f, "IsClear_Minigame_FindOutCucco"},    // Talon's cuccos, child (Minigame_FindOutCucco)
+    {0x9e47f045, "Npc_Hylia_048_BottleShop_Full"},    // the poe collector's 1000 points, adult
+    {0x170b5df2, "IsGet.Item_Bottle_Letter"},         // Ruto's Letter (shared since issue 58)
+}};
+// Rewards that are an upgrade's next tier (the flow picks the tier from what the pouch holds).
+inline constexpr std::array<Source, 4> kUpgrade{{
+    {0x9086a22e, "KakarikoVillage_GatheringTokenGold_GetReward10"},  // 10 tokens: a wallet
+    {0xcdcc9add, "KakarikoVillage_GatheringTokenGold_GetReward30"},  // 30 tokens: a wallet
+    {0x4bafdf70, "LostWood_HitTargetOfDekuScrub_FirstClear"},        // the Lost Woods target: a seed bag
+    {0x19e5a36b, "MiniGame_BombchuBowling_ClearFirstTime"},          // bombchu bowling's first prize: a bomb bag
+}};
+// Other once-per-save rewards: shared only (a heart piece is a count: two at once still add up, docs/items.md).
+inline constexpr std::array<Source, 8> kOther{{
+    {0x6b8fc751, "DeathMountain_Enemy_Scrub_Business_HeartPiece_01"},
+    {0xe41e1597, "HyruleField_Enemy_Scrub_Business_HeartPiece_01"},
+    {0x1d1793e9, "GoronLargePot_IsGetHeartPiece"},
+    {0x1657d7d8, "Minigame_SkullKidSession_IsGetHeartPiece"},
+    {0xcdd1c1dd, "MiniGame_BombchuBowling_ClearSecondTime"},          // a heart piece
+    {0x39dad76d, "KakarikoVillage_GatheringTokenGold_GetReward20"},   // the Stone of Agony
+    {0x8dc37ac6, "KakarikoVillage_GatheringTokenGold_GetReward40"},   // bombchus
+    {0xe3c6e4a3, "KakarikoVillage_GatheringTokenGold_GetReward50"},   // a heart piece
+}};
+// The bottle slots, each one unit: PouchData.Bottle<X>.StockNum and BottleInfo.Bottle<X>.IsValid.
+std::vector<std::vector<FlagKey>> bottle_units();
+// The upgrade tiers, each one unit: PouchData.<tier>.StockNum and IsGet.<tier> (wallets, bomb, seed, nut and
+// stick bags, quivers).
+std::vector<std::vector<FlagKey>> upgrade_units();
+// The keys of `sources`.
+template <std::size_t N>
+std::vector<FlagKey> keys(const std::array<Source, N>& sources) {
+  std::vector<FlagKey> out;
+  for (const Source& s : sources) out.emplace_back(s.hash, std::uint16_t{0});
+  return out;
+}
+}  // namespace rewards
+
 // When to mend (ItemFlagStore::mend), kept by the hook across frames: for
 // the first frames after Link comes into the game (a save or a scene
 // loaded: no Link, then Link), once a frame. The load may still be writing

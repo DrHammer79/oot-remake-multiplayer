@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -91,6 +92,7 @@ struct FlagStats {
   std::uint64_t host_resets = 0;       // host: FLAG_RESETs sent after its save load
   std::uint64_t reset_applied = 0;     // player: values written from a FLAG_RESET
   std::uint64_t counts_guarded = 0;    // a guarded count's gain taken back (guard_count)
+  std::uint64_t rewards_guarded = 0;   // row 272: a once-per-save reward got twice, put back (guard_reward)
   std::uint64_t doubled_gains = 0;     // a chest opened again here: its gain taken back (expect_doubled_gain)
   std::uint64_t raced_gains = 0;       // host: a player's guarded gain for a source the group had: not added
   std::uint64_t entries_unsent = 0;    // entries a message kind cannot carry: left out, the rest sent
@@ -291,6 +293,26 @@ class FlagWatcher {
   };
   // The gains guard_count put back since the last call, for the log.
   std::vector<CountGuarded> take_counts_guarded() { return std::exchange(counts_guarded_, {}); }
+
+  // Row 272: a reward the game gives once per save (a bottle, an upgrade's next tier), got in two games at
+  // once. Each game gives it relative to what it holds (the first empty bottle slot, the tier after the one
+  // it has), so a game that already holds the other player's copy gives a second one somewhere else, and
+  // the share (OR per slot, max per tier) keeps both. `units` are the reward's places, each one or more keys
+  // that are got together (a bottle slot: its StockNum and its IsValid); `sources` are the once-per-save
+  // Bools the reward's own flow sets as it gives it (Anju's MiniGame_CatchCucco_IsCompleted, ...), shared
+  // from now on (share_pickup_named), so a game that hears of one first does not give it at all.
+  // A source going 0 to 1 here (ours or another player's) allows one gain of a unit within kRewardFrames;
+  // every unit that goes from empty to got here in that time (another player's, or ours) uses one. Our own
+  // gain past what the sources allow is the same reward twice: put back (each of its keys, exactly) and
+  // never sent. Outside such a time nothing is guarded (a randomizer chest's bottle, a shop's). Co-op idle
+  // runs none of this (no session, no watcher).
+  void guard_reward(std::span<const std::vector<FlagKey>> units, std::span<const FlagKey> sources);
+  static constexpr std::uint64_t kRewardFrames = 60 * 60;  // a get scene's whole length, with room
+  struct RewardGuarded {
+    FlagKey key;  // the unit's first key
+  };
+  // The own gains guard_reward put back since the last call, for the log.
+  std::vector<RewardGuarded> take_rewards_guarded() { return std::exchange(rewards_guarded_, {}); }
 
   // Issue 195: our Link opened a chest that another player had opened
   // already (the hook shows it open, but its AI still lets it open again).
@@ -669,6 +691,33 @@ class FlagWatcher {
   std::map<FlagKey, FlagKey> guard_source_;  // a source: its count
   Table added_;                              // count deltas add() put in this frame
   std::vector<CountGuarded> counts_guarded_;  // take_counts_guarded
+  // guard_reward (row 272).
+  struct RewardGuard {
+    std::vector<std::vector<FlagKey>> units;
+    std::vector<FlagKey> sources;
+    std::int32_t allowed = 0;   // sources gone 0 to 1 in this time
+    std::int32_t used = 0;      // units got in this time
+    std::uint64_t until = 0;    // the time's last frame (0: none)
+  };
+  struct RewardUnit {
+    std::size_t guard = 0;
+    std::size_t unit = 0;
+    std::uint64_t pass = 0;     // the diff pass that decided `put_back`
+    bool put_back = false;
+  };
+  std::vector<RewardGuard> reward_guards_;
+  std::map<FlagKey, std::size_t> reward_source_;  // source -> guard
+  std::map<FlagKey, std::uint64_t> reward_source_pass_;  // the diff pass that counted an own source
+  std::map<FlagKey, RewardUnit> reward_key_;      // unit key -> its guard and unit
+  std::vector<RewardGuarded> rewards_guarded_;    // take_rewards_guarded
+  // A source went 0 to 1 here (ours or another player's).
+  void reward_source_on(std::size_t guard);
+  // Whether every key of the unit holding `key` is 0 in `value_of`.
+  bool reward_unit_empty(const RewardUnit& u, const std::function<std::uint32_t(FlagKey)>& value_of) const;
+  // Another player's write of `entry` is about to land: a source or a unit got.
+  void note_reward_received(FlagStore& store, const FlagEntry& entry);
+  // Our own change `before` -> `now` of `key`: true when it was put back (the reward got twice).
+  bool reward_put_back(FlagStore& store, FlagKey key, const FlagEntry& before, const FlagEntry& now);
   std::int32_t doubled_ = 0;                  // expect_doubled_gain: gains still to drop
   std::uint64_t doubled_until_ = 0;           // the frame they lapse
   void settle_guards(FlagStore& store, Table& changes);
