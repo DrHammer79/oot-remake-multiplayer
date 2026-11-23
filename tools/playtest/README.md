@@ -7,7 +7,7 @@ What testers (people and agents) write down for the next tester. Two folders:
 | [`scripts/`](scripts/README.md) | A script: kit calls that set a scene up or run one check. `live.py replay` runs it. |
 | [`data/`](data/README.md) | Facts about the game we wrote down: named positions and routes per scene, menu paths, stuck spots. |
 
-How to drive the games first: [docs/playtest.md](../../docs/playtest.md), "For agents".
+How to drive the games first: [docs/playtest-agents.md](../../docs/playtest-agents.md).
 
 ## The hard rule
 
