@@ -319,6 +319,34 @@ TEST_CASE("playtest: the move hold puts its stick in only while on, and counts w
     CHECK(hold.Stop().reads == 0);  // a new move starts its counts again
 }
 
+TEST_CASE("playtest: the pad thread reads the move hold while moves start and stop") {
+    // The pad hook skips the lock when no move is on; a read that races a Start or a Stop still gives
+    // either the untouched stick or the whole move, and every read it took is counted.
+    MoveHold hold;
+    std::atomic<bool> done{false};
+    std::atomic<std::uint32_t> taken{0}, bad{0};
+    std::thread pad([&] {
+        while (!done.load()) {
+            std::int32_t stick[4] = {7, 7, 0, 0};
+            if (hold.Apply(Camera(0, true), stick)) {
+                ++taken;
+                if (stick[0] != 32767 || stick[1] != 0) ++bad;
+            } else if (stick[0] != 7 || stick[1] != 7) {
+                ++bad;
+            }
+        }
+    });
+    std::uint32_t counted = 0;
+    for (int i = 0; i < 2000; ++i) {
+        hold.Start(-90, 1.0);
+        counted += hold.Stop().reads;
+    }
+    done = true;
+    pad.join();
+    CHECK(bad.load() == 0);
+    CHECK(counted == taken.load());
+}
+
 TEST_CASE("playtest: move parses its world yaw, strength and frames") {
     auto r = Parse(R"({"cmd":"move","yaw":-135.5,"frames":8})");
     REQUIRE(r);

@@ -72,10 +72,17 @@ def check_value(schema, v, where):
 
 
 def tool_table():
-    """{server kind: {tool name: input schema}}: "player" (oot-p1..p4) and "session" (oot-playtest, live)."""
+    """{server kind: {tool name: input schema}}: "player" (oot-p1..p4), "pair" (oot-pair: the player tools with a `player`)
+    and "session" (oot-playtest, live)."""
     import mcp_playtest
     return {"player": {t["name"]: t.get("inputSchema", {}) for t in mcp_playtest.PLAYER_TOOLS},
+            "pair": {t["name"]: mcp_playtest._pair_tool(t, ("p1", "p2")).get("inputSchema", {})
+                     for t in mcp_playtest.PLAYER_TOOLS},
             "session": {t["name"]: t.get("inputSchema", {}) for t in mcp_playtest.TOOLS}}
+
+
+def server_kind(server):
+    return "session" if server in ("oot-playtest", "live") else "pair" if server == "oot-pair" else "player"
 
 
 def check_call(call, table=None):
@@ -83,13 +90,13 @@ def check_call(call, table=None):
     table = table or tool_table()
     server, tool, args = call.get("server"), call.get("tool"), call.get("args", {})
     if not isinstance(server, str) or not kit_tools.NAME.match(server):
-        return ["server %r is not oot-p1 to oot-p4, oot-playtest or live" % (server,)]
+        return ["server %r is not oot-p1 to oot-p4, oot-pair, oot-playtest or live" % (server,)]
     if not isinstance(args, dict):
         return ["args must be an object"]
     extra = sorted(set(call) - CALL_KEYS)
     if extra:
         return ["unknown key %s (a call has %s)" % (", ".join(extra), ", ".join(sorted(CALL_KEYS)))]
-    tools = table["session" if server in ("oot-playtest", "live") else "player"]
+    tools = table[server_kind(server)]
     if tool not in tools:
         return ["%s has no tool %r" % (server, tool)]
     schema = tools[tool]

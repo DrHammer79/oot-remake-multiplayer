@@ -16,7 +16,7 @@ the call log (`calls.jsonl`) holds, so `live.py replay` runs it:
 - All five header lines are needed. `scene` is one map name. `kit` is the kit's call format when you made it
   (`KIT_VERSION` in `tools/autotest/kit_library.py`; today 1): a script from an older kit still runs if its calls
   are still valid, and the check says when one is not.
-- A call is `{"server": "oot-p1" (to p4), "oot-playtest" or "live", "tool": ..., "args": {...}}`. The check reads
+- A call is `{"server": "oot-p1" (to p4), "oot-pair" (with a `player` in args), "oot-playtest" or "live", "tool": ..., "args": {...}}`. The check reads
   each call against the tool's schema: a wrong tool name, a missing or unknown argument or a value out of range
   fails. Looks (`get_state`, `get_world`, shots) are skipped when a script is replayed.
 - **Make one from a run:** play it once, then
