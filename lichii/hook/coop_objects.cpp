@@ -803,6 +803,47 @@ public:
             block_ = result;
             return std::nullopt;  // next frame
         }
+        if (after_call && node_ask_) {
+            // Row 244: the game's own answer to what the start would ask (ForceOnState, kLogicBoolFn) for a followed
+            // block. On, with the rest off its goal: the start would put it back on its answer (the room load of a
+            // cleared puzzle), in our game only. Then not started: its places only go to the rest, as the mover's
+            // node is (its own pull never starts it again). Else the start runs now, as before.
+            const NodeStart n = *std::exchange(node_ask_, std::nullopt);
+            const bool force_on = (result & 1) != 0;
+            coop::protocol::Vec3 goal{NAN, NAN, NAN};
+            for (int i = 0; i < 3; ++i) {
+                guest.Read(n.node + CoopWorld::BlockNode::kGoal + 4u * i, &goal[i], 4);
+            }
+            if (CoopWorld::NodeMayStartAgain(force_on, goal, n.to)) {
+                if (auto start = NodeStartCall(guest, n)) {
+                    return start;
+                }
+            } else {
+                const float dx = n.to[0] - goal[0], dz = n.to[2] - goal[2];
+                const std::string put = PutNodeAtRest(guest, n);
+                LOG_INFO(Core, "coop: world: push node {:x}: its block's ForceOnState is on (its room's puzzle is "
+                               "cleared) and it rests {:.2f} m off its answer: not started again (its start would "
+                               "put it back on the answer); {} (row 244)",
+                         n.node, std::sqrt(dx * dx + dz * dz), put.empty() ? "its places already at the rest" : put);
+            }
+        }
+        if (after_call && node_after_) {
+            // Row 244: the node's own start just ran on a followed block. Its target is a cell of its grid
+            // (CoopWorld::NodeTargetAtRest): a block left between cells by another player would slide there by
+            // itself in our game only (under our Link's grip too). Both places are put where it rests: idle there,
+            // its next push goes on from it as in the mover's game.
+            const NodeStart n = *std::exchange(node_after_, std::nullopt);
+            float target[3] = {NAN, NAN, NAN};
+            for (int i = 0; i < 3; ++i) {
+                guest.Read(n.node + CoopWorld::BlockNode::kTarget + 4u * i, &target[i], 4);
+            }
+            const float dx = target[0] - n.to[0], dy = target[1] - n.to[1], dz = target[2] - n.to[2];
+            if (const std::string put = PutNodeAtRest(guest, n); !put.empty()) {
+                LOG_INFO(Core, "coop: world: push node {:x}: its start aimed {:.2f} m from where the block rests "
+                               "(a rest between grid cells); {}, so it does not slide there by itself (row 244)",
+                         n.node, std::sqrt(dx * dx + dy * dy + dz * dz), put);
+            }
+        }
         if (after_call && alias_after_) {
             // The play just made, on a townsperson: its slot names what its
             // own AI asked for again, so that AI's request of every frame
@@ -825,6 +866,11 @@ public:
         }
         if (!after_call) {
             alias_after_.reset();  // its play's frame ended before we were asked again
+            node_after_.reset();   // (its after-call never came: nothing to check)
+            if (node_ask_ && node_starts_.size() < 16) {
+                node_starts_.push_back(*node_ask_);  // its answer never came: asked again on the next frame
+            }
+            node_ask_.reset();
             for (const u64 actor : std::exchange(releases_, {})) {
                 u32 flags = 0;
                 if (!Alive(guest, actor) || !guest.Read(actor + kActorFlags, &flags, 4)) {
@@ -1205,16 +1251,24 @@ public:
                 ++node_skipped_;
                 continue;
             }
-            const std::array<std::uint8_t, 0x10> args{};
-            if (!guest.Write(block_ + kBlockNodeArgs, args.data(), args.size())) {
-                continue;
+            // Row 244: first the game's own lookup the start makes (its ForceOnState), on the block's logic
+            // ([[actor + 0x270] + 0x118], the start's own chain); its answer decides in the after-call. No logic:
+            // the start finds no bool either (its grid end).
+            u64 logic = 0;
+            u32 key = 0;
+            if (guest.Read(n.actor + CoopLogicProbe::addr::kActorLogic, &logic, 8) && logic != 0 &&
+                guest.Read(logic + CoopLogicProbe::addr::kLogicInner, &logic, 8) && logic != 0 &&
+                guest.Read(node + CoopWorld::BlockNode::kAnswerKey, &key, 4)) {
+                node_ask_ = n;
+                CoopPuppet::Call c;
+                c.function = main_ + CoopWorld::BlockNode::kLogicBoolFn;
+                c.x[0] = logic;
+                c.x[1] = key;
+                return c;
             }
-            ++node_started_;
-            CoopPuppet::Call c;
-            c.function = main_ + CoopWorld::BlockNode::kStartFn;
-            c.x[0] = node;
-            c.x[1] = block_ + kBlockNodeArgs;
-            return c;
+            if (auto start = NodeStartCall(guest, n)) {
+                return start;
+            }
         }
         return std::nullopt;
     }
@@ -1531,6 +1585,42 @@ private:
     };
     std::vector<NodeStart> node_starts_;
     std::vector<NodeStart> work_node_starts_;
+    std::optional<NodeStart> node_after_;  // row 244: the start just called, its target checked after it
+    std::optional<NodeStart> node_ask_;    // row 244: its ForceOnState just asked (the start's own lookup)
+    // deku-visuals-b: the node's own start on `n` (its enter args zeroed in our block), its target read back
+    // after it (node_after_). Nothing when the args cannot be written.
+    std::optional<CoopPuppet::Call> NodeStartCall(CoopPuppet::Guest& guest, const NodeStart& n) {
+        const std::array<std::uint8_t, 0x10> args{};
+        if (!guest.Write(block_ + kBlockNodeArgs, args.data(), args.size())) {
+            return std::nullopt;
+        }
+        ++node_started_;
+        node_after_ = n;
+        CoopPuppet::Call c;
+        c.function = main_ + CoopWorld::BlockNode::kStartFn;
+        c.x[0] = n.node;
+        c.x[1] = block_ + kBlockNodeArgs;
+        return c;
+    }
+    // Row 244: the node's start and target put at the block's rest `n.to` (CoopWorld::NodeTargetAtRest), so it is
+    // idle there and its next push goes on from it. Says what was put ("" when both already held it).
+    std::string PutNodeAtRest(CoopPuppet::Guest& guest, const NodeStart& n) {
+        const auto at = CoopWorld::NodeTargetAtRest(
+            [&guest](u64 address) -> std::optional<u64> {
+                u64 word = 0;
+                return guest.Read(address, &word, 8) ? std::optional<u64>(word) : std::nullopt;
+            },
+            n.node, n.to);
+        if (at.writes.empty()) {
+            return {};
+        }
+        bool wrote = true;
+        for (const auto& w : at.writes) {
+            wrote = guest.Write(w.address, &w.value, 4) && wrote;
+        }
+        return std::string(wrote ? "its places" : "NOT all its places") + " put at the rest place (" +
+               (at.where.size() == 2 ? at.where[0] + ", " + at.where[1] : at.where[0]) + ")";
+    }
     std::size_t next_node_start_ = 0;
     std::size_t node_started_ = 0;
     std::size_t node_skipped_ = 0;
