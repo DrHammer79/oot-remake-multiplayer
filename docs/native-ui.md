@@ -48,8 +48,14 @@ main with `tools/game_scan` for this change (2026-11-23); the screens themselves
   the game's own colours are read first and put back as soon as no line of ours is on the window.
 - **A notice**: the banner is found in the UI manager's list (`**0x84c9e098`, count `+8`, screens `+0x10`) by its
   vtable (`0x84c0d7c8`); our text goes into `T_Text_00`, then its open call (mode 2).
+- **Never over the game's own banner** (`CoopNativeUi::Banner`, every write of ours to it): the banner is free when it is
+  shut with no open asked (state 0, request below 1). When it is up or opening, the text in its `T_Text_00` text box
+  (the pointer the text box keeps at `+0xf0`, `f_80459680`) is ours only when it is in our block or is the pointer the
+  box held right after our own last set (a game that keeps a copy); anything else, or a box that cannot be read, is the
+  game's: the notice waits, the held line waits, and nothing of ours closes it.
 - **A held line** (`CoopNativeUi::HoldBanner(text)` / `EndBanner()`, from any thread): the banner is opened when it is
-  shut, its text set only when it changes, and it is closed (slot 6) when let go.
+  free, its text set only when it changes (one fixed slot of the block, written in place, so a clock that changes each
+  second never walks round the ring), and it is closed (slot 6) when let go, only while the banner is ours.
 - **Typing**: while the chat box is open the typed line is on the message window; lines that come meanwhile go to the
   banner; closing the box ends the line at once.
 
@@ -70,4 +76,4 @@ main with `tools/game_scan` for this change (2026-11-23); the screens themselves
 ## Not proven yet (one LANE1 screenshot run)
 
 Every step above in a game: the window's time unit, that the window shows our text on the name plate and the line,
-the name colour, the banner's own close, that the columns fit at 16:9 and a narrow window, in English and in Chinese.
+the name colour, the banner's own close, the text box pointer at `+0xf0` as the banner's owner test, that the columns fit at 16:9 and a narrow window, in English and in Chinese.

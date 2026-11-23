@@ -1033,7 +1033,7 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
         const auto rows = CoopNativeUi::Wrap(
             CoopNativeUi::Clean(line.speaker + ": " + line.text, CoopNativeUi::kTextBytes), CoopNativeUi::kBannerColumns, 99);
         banner.text = rows.empty() ? std::string() : rows.back();
-        if (CoopNativeUi::ShowNotice(game, g_native.ring, banner)) {
+        if (g_native.banner.Notice(game, g_native.ring, banner)) {
             g_native.typed = line.text;  // (shown: again only on a change)
             g_native.typed_ms = now;
         }
@@ -1043,7 +1043,7 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
         if (const auto said = g_native.feed.Next(now)) {
             CoopNativeUi::Shown banner = *said;
             if (!banner.speaker.empty()) banner.text = banner.speaker + ": " + banner.text;
-            if (!CoopNativeUi::ShowNotice(game, g_native.ring, banner)) g_native.feed.PutBack(*said);
+            if (!g_native.banner.Notice(game, g_native.ring, banner)) g_native.feed.PutBack(*said);
         }
     }
     return true;
@@ -1097,7 +1097,7 @@ void NativeStep(void* ctx) {
         g_native.failed_ms = now;
         return;
     }
-    const bool shown = line->notice ? CoopNativeUi::ShowNotice(game, g_native.ring, *line)
+    const bool shown = line->notice ? g_native.banner.Notice(game, g_native.ring, *line)
                                     : CoopNativeUi::ShowLine(game, g_native.ring, g_native.tint, *line);
     if (shown) {
         static bool said = false;

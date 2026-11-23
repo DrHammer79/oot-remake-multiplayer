@@ -315,6 +315,33 @@ std::uint64_t TextRing::Put(Game& game, std::string_view text) {
     return slot;
 }
 
+std::uint64_t TextRing::PutFixed(Game& game, std::size_t index, std::string_view text) {
+    if (base_ == 0 || index >= kFixed) return 0;
+    const std::string cut = Clean(text, kSlotText, true);
+    const std::uint64_t slot = base_ + (kSlots + index) * kSlotBytes;
+    std::string bytes = cut;
+    bytes.push_back('\0');
+    Ref ref;
+    ref.text = slot + sizeof(Ref);
+    ref.bytes = static_cast<std::uint32_t>(cut.size());
+    if (!game.Write(ref.text, bytes.data(), bytes.size()) || !WriteValue(game, slot, ref)) return 0;
+    return slot;
+}
+
+std::uint64_t PaneTextBox(Game& game, std::uint64_t screen, std::uint64_t pane_name) {
+    std::uint64_t layout = 0, inner = 0, box = 0;
+    std::uint32_t flags = 0;
+    if (!ReadValue(game, screen + addr::kScreenLayout, layout) || layout == 0) return 0;
+    const auto found = game.Call(game.At(addr::kPaneByName), {layout, game.At(pane_name), 0, 0, 0});
+    const std::uint64_t pane = found ? *found : 0;
+    // Only a text pane's text box, as the docs have it: *(*(pane+8)+8), checked by the pane's kind.
+    if (pane == 0 || !ReadValue(game, pane + addr::kPaneFlags, flags) || ((flags >> 22) & 0xF) != 2 ||
+        !ReadValue(game, pane + 8, inner) || inner == 0 || !ReadValue(game, inner + 8, box)) {
+        return 0;
+    }
+    return box;
+}
+
 std::uint64_t ScreenByVtable(Game& game, std::uint64_t vtable_offset) {
     const std::uint64_t vtable = game.At(vtable_offset);
     std::uint64_t got = 0, manager = 0, screens = 0;
@@ -361,16 +388,8 @@ bool NameTint::Colours(Game& game, const TextRing& ring, const float (&rgba)[8])
 }
 
 bool NameTint::Set(Game& game, const TextRing& ring, std::uint64_t screen, std::uint32_t rgb) {
-    std::uint64_t layout = 0, pane = 0, inner = 0, box = 0;
-    std::uint32_t flags = 0;
-    if (!ReadValue(game, screen + addr::kScreenLayout, layout) || layout == 0) return false;
-    const auto found = game.Call(game.At(addr::kPaneByName), {layout, game.At(addr::kNameT_Name_00), 0, 0, 0});
-    pane = found ? *found : 0;
-    // Only a text pane's text box, as the docs have it: *(*(pane+8)+8), checked by the pane's kind.
-    if (pane == 0 || !ReadValue(game, pane + addr::kPaneFlags, flags) || ((flags >> 22) & 0xF) != 2 ||
-        !ReadValue(game, pane + 8, inner) || inner == 0 || !ReadValue(game, inner + 8, box) || box == 0) {
-        return false;
-    }
+    const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Name_00);
+    if (box == 0) return false;
     float now[8] = {};
     if (!game.Read(box + addr::kBoxColour0, now, sizeof now)) return false;
     for (const float v : now) {
@@ -437,11 +456,36 @@ bool EndLine(Game& game, const TextRing& ring) {
     return WriteValue(game, screen + addr::kInGameTime, zero);
 }
 
-bool ShowNotice(Game& game, TextRing& ring, const Shown& notice) {
+Holds Banner::Holding(Game& game, const TextRing& ring) {
     const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
-    if (screen == 0) return false;
+    if (screen == 0) return Holds::kGames;  // (none: nothing to show on)
+    std::int8_t request = 0;
+    std::uint8_t state = 0;
+    if (!ReadValue(game, screen + addr::kScreenRequest, request) || !ReadValue(game, screen + addr::kScreenState, state)) {
+        return Holds::kGames;  // (unreadable: never cover it)
+    }
+    if (state == 0 && request < 1) return Holds::kNothing;  // shut, no open asked: free
+    // Up, or opening: whose text? Unreadable counts as the game's.
+    const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Text_00);
+    std::uint64_t text = 0;
+    if (box == 0 || !ReadValue(game, box + addr::kBoxText, text)) return Holds::kGames;
+    return (text != 0 && (ring.Owns(text) || text == ours_)) ? Holds::kOurs : Holds::kGames;
+}
+
+bool Banner::Set(Game& game, std::uint64_t screen, std::uint64_t ref) {
+    if (!SetPane(game, screen, addr::kNameT_Text_00, ref)) return false;
+    // What the text box holds after our set: ours from now on, even when the game keeps a copy of its own.
+    const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Text_00);
+    std::uint64_t text = 0;
+    ours_ = box != 0 && ReadValue(game, box + addr::kBoxText, text) ? text : 0;
+    return true;
+}
+
+bool Banner::Notice(Game& game, TextRing& ring, const Shown& notice) {
+    if (Holding(game, ring) == Holds::kGames) return false;  // the game's own banner: the notice waits
+    const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
     const std::uint64_t ref = ring.Put(game, notice.text);
-    return ref != 0 && SetPane(game, screen, addr::kNameT_Text_00, ref) && Open(game, screen, addr::kInfoOpenMode);
+    return screen != 0 && ref != 0 && Set(game, screen, ref) && Open(game, screen, addr::kInfoOpenMode);
 }
 
 namespace {
@@ -471,28 +515,30 @@ bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& 
         shown_.clear();
         return held.has_value();
     }
-    std::int8_t request = 0;
-    std::uint8_t state = 0;
-    ReadValue(game, screen + addr::kScreenRequest, request);
-    ReadValue(game, screen + addr::kScreenState, state);
+    const Holds holds = Holding(game, ring);
     if (!held) {
-        if (up_) {
+        if (up_ && holds == Holds::kOurs) {   // (closes only a banner of ours: never the game's own)
             std::uint64_t vtable = 0, close = 0;
             if (ReadValue(game, screen, vtable) && vtable != 0 && ReadValue(game, vtable + addr::kSlotClose * 8, close) &&
                 close != 0) {
                 game.Call(close, {screen, static_cast<std::uint64_t>(-1), 0, 0, 0});
             }
-            up_ = false;
-            shown_.clear();
         }
+        up_ = false;   // (let go: the notices may have the banner again)
+        shown_.clear();
         return false;
     }
     const auto pages = Wrap(Clean(*held, kTextBytes), kBannerColumns, kBannerLines);
     const std::string text = pages.empty() ? std::string() : pages.front();   // (one line: what fits the banner)
-    const bool shut = state == 0 && request < 1;  // closed (by itself, or never opened) and no open asked
+    if (holds == Holds::kGames) {
+        up_ = false;   // the game's own banner: the held line waits for it, set again once it is gone
+        shown_.clear();
+        return true;
+    }
+    const bool shut = holds == Holds::kNothing;  // closed (by itself, or never opened) and no open asked
     if (text != shown_ || !up_ || shut) {
-        const std::uint64_t ref = ring.Put(game, text);
-        if (ref == 0 || !SetPane(game, screen, addr::kNameT_Text_00, ref)) return true;
+        const std::uint64_t ref = ring.PutFixed(game, 0, text);
+        if (ref == 0 || !Set(game, screen, ref)) return true;
         if ((!up_ || shut) && !Open(game, screen, addr::kInfoOpenMode)) return true;
         shown_ = text;
         up_ = true;
