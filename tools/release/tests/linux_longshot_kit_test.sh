@@ -770,15 +770,26 @@ print("green")
 EOF
     cat >"$D/tools/puppet_pack/merge_tables.py" <<'EOF'
 import os, sys
-with open(os.environ["FAKE_LOG"], "a") as f:
-    f.write("merge_tables %s\n" % " ".join(sys.argv[1:]))
+
+
+def charsel_native_parked(pack):   # (build.sh's Characters-tab code rule reads it)
+    return False
+
+
+if __name__ == "__main__":
+    with open(os.environ["FAKE_LOG"], "a") as f:
+        f.write("merge_tables %s\n" % " ".join(sys.argv[1:]))
 EOF
     mkdir -p "$D/game/mods"
     : >"$log"
     bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start309.txt" 2>&1; export CODE=$?
     check 'start (#309): your tunic files, then the mods'"'"' Link models renamed to them, then the game' bash -c \
-        '[ $CODE -eq 0 ] && s=$(grep -n "^self_tunic " "$1" | cut -d: -f1) && m=$(grep -n "^merge_tables " "$1" | cut -d: -f1) &&
-         g=$(grep -n "^started " "$1" | cut -d: -f1) && [ -n "$s" ] && [ -n "$m" ] && [ -n "$g" ] && [ "$s" -lt "$m" ] && [ "$m" -lt "$g" ]' _ "$log"
+        '[ $CODE -eq 0 ] && s=$(grep -n "^self_tunic " "$1" | head -n1 | cut -d: -f1) && g=$(grep -n "^started " "$1" | head -n1 | cut -d: -f1) &&
+         [ -n "$s" ] && [ -n "$g" ] && m=$(grep -n "^merge_tables " "$1" | cut -d: -f1 | awk -v s="$s" "\$1 > s" | head -n1) &&
+         [ -n "$m" ] && [ "$m" -lt "$g" ]' _ "$log"
+    # (MsgNotFound fix: build.sh merges too, before its Characters-tab code rule and so before your tunic files)
+    check 'start: build.sh merges before its Characters-tab code rule (before the tunic step)' bash -c \
+        's=$(grep -n "^self_tunic " "$1" | head -n1 | cut -d: -f1) && b=$(grep -n "^merge_tables " "$1" | head -n1 | cut -d: -f1) && [ -n "$b" ] && [ "$b" -lt "$s" ]' _ "$log"
     check 'start (#309): self_tunic.py reads the pack, data/coop-options.ini (where Customize saves) and coop.ini' grep -qF \
         "self_tunic --pack $D/game/mods/contents/0400486024DEC000/coop-puppet --options $D/coop-options.ini --coop-ini $D/game/coop.ini" "$log"
     check 'start (#309): merge_tables.py gets the game'"'"'s mods folder and its own romfs (the dictionaries)' grep -qF \
