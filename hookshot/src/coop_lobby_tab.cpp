@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
 
 namespace CoopLobbyTab {
 
@@ -153,7 +154,22 @@ std::vector<Tab::Line> Tab::Lines() const {
         if (lobby_.games.empty()) {
             note(lobby_.games_state.empty() ? std::string("Looking for public games...") : lobby_.games_state);
         }
-        for (std::size_t i = 0; i < lobby_.games.size() && i < 255; ++i) {
+        // (more than a page: the Page row first, "Page  < 2/3 >", Left and Right or A turn it, round; then that page's
+        // games. Row 264: the whole list ran on under the menu's scroll, with nothing saying there were more)
+        const int pages = GamesPages(), page = GamesPage();
+        if (pages > 1) {
+            Line l;
+            l.row.name = "Page";
+            l.row.value = std::to_string(page + 1) + "/" + std::to_string(pages);
+            l.row.own_value = true;   // (two numbers, as they are)
+            l.row.kind = RowKind::kChoice;
+            l.row.left = l.row.right = true;   // (round: both ways always)
+            l.act = Act::kGamesPage;
+            l.help = "Left and Right (or A) turn the page of games.";
+            out.push_back(std::move(l));
+        }
+        const std::size_t first = static_cast<std::size_t>(page) * kGamesPerPage;
+        for (std::size_t i = first; i < lobby_.games.size() && i < first + kGamesPerPage && i < 255; ++i) {
             const PublicGame& g = lobby_.games[i];
             action(g.name, g.joinable ? CoopI18n::Tr("Join") : g.detail, Act::kJoinGame,
                    g.detail + (g.joinable ? std::string(". ") +
@@ -272,9 +288,22 @@ bool Selectable(RowKind kind) {
 
 }  // namespace
 
+int Tab::GamesPages() const {
+    return CoopListPages::Pages(static_cast<int>(lobby_.games.size()), kGamesPerPage);
+}
+
+int Tab::GamesPage() const {
+    return std::clamp(games_page_, 0, GamesPages() - 1);
+}
+
+void Tab::TurnGames(int dir) {
+    games_page_ = CoopListPages::Step(GamesPage(), GamesPages(), dir);
+}
+
 void Tab::Show() {
     player_ = 0;
     selected_ = 0;
+    games_page_ = 0;
     confirm_ = Act::kNone;
     note_.clear();
     Clamp();
@@ -290,6 +319,7 @@ void Tab::Set(Lobby lobby) {
     // In or out of a game, the page is another list (out of one: Public games): it starts at its top again.
     if (lobby_.connected != was_connected) {
         selected_ = 0;
+        games_page_ = 0;
         confirm_ = Act::kNone;
     }
     if (player_ != 0 && (Shown() == nullptr || !lobby_.connected)) {
@@ -403,6 +433,7 @@ void Tab::Decide(const Line& line) {
         note_ = g.is_public ? "Joining " + g.room + "..." : "Type the host's password on the Multiplayer tab.";
         return;
     }
+    case Act::kGamesPage: TurnGames(1); return;
     case Act::kRefreshGames: {
         Request r;
         r.kind = Request::Kind::kRefreshGames;
@@ -463,12 +494,16 @@ bool Tab::Press(Input input) {
     case Input::kUp: Move(-1); return true;
     case Input::kDown: Move(1); return true;
     case Input::kLeft:
-        if (line != nullptr && line->row.kind == RowKind::kToggle) {
+        if (line != nullptr && line->act == Act::kGamesPage) {
+            TurnGames(-1);
+        } else if (line != nullptr && line->row.kind == RowKind::kToggle) {
             Change(*line, -1);
         }
         return true;
     case Input::kRight:
-        if (line != nullptr && line->row.kind == RowKind::kToggle) {
+        if (line != nullptr && line->act == Act::kGamesPage) {
+            TurnGames(1);
+        } else if (line != nullptr && line->row.kind == RowKind::kToggle) {
             Change(*line, 1);
         }
         return true;
@@ -515,7 +550,10 @@ void Tab::Click(std::size_t row, int side) {
     Select(row);
     note_.clear();
     const Line& line = lines[row];
-    if (line.row.kind == RowKind::kToggle && side != 0) {
+    if (line.act == Act::kGamesPage) {
+        confirm_ = Act::kNone;
+        TurnGames(side < 0 ? -1 : 1);   // (the value's left half: the page before; its right half or the name: after)
+    } else if (line.row.kind == RowKind::kToggle && side != 0) {
         confirm_ = Act::kNone;
         Change(line, side);
     } else {
@@ -542,6 +580,8 @@ View Tab::view() const {
         v.help = picked.row.own_name ? picked.help : CoopI18n::Tr(picked.help);
         if (lines[selected_].row.kind == RowKind::kToggle) {
             v.change = CoopI18n::Tr("Off / On");
+        } else if (picked.act == Act::kGamesPage) {
+            v.change = CoopI18n::Tr("Turn the page");   // (the prompt strip's Left / Right words)
         }
     } else {
         v.help_title = CoopI18n::Tr("Lobby");

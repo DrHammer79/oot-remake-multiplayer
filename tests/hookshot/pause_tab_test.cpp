@@ -9,6 +9,7 @@
 #include <tuple>
 #include <vector>
 
+#include "coop_list_pages.h"
 #include "coop_pause_tab.h"
 #include "hos_coop_host.h"
 
@@ -1572,11 +1573,13 @@ TEST_CASE("pause tab: the game browser: the rows choose the list, search, filter
     rows = RowTexts(View::kLan, v);
     CHECK(rows[0] == "Public games (10)");
     lines = ListLines(v);
-    CHECK(lines[0].name == "Public games  < 1 of 2 >");   // (more than a page: the heading pages it)
+    // (more than a page: the heading says so, the page between the game's ZL and ZR letters: row 264)
+    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 1/2 " + CoopListPages::kZR);
+    CHECK(lines[0].name.size() <= kListNameChars);
     CHECK(lines[2].name == "kokiri (Saria)");
     v.s.cell_page = 1;   // (the second page: the 7th to 10th rooms)
     lines = ListLines(v);
-    CHECK(lines[0].name == "Public games  < 2 of 2 >");
+    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 2/2 " + CoopListPages::kZR);
     CHECK(lines[1].name == "kokiri (Saria)");
     CHECK(lines[2].name == "a room with a very long nam...");   // (cut to kListNameChars)
     CHECK(lines[2].name.size() <= kListNameChars);
