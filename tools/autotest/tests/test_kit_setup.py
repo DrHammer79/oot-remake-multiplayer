@@ -4,6 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import kit_setup as ks  # noqa: E402
+import playtest_client as pc  # noqa: E402
 
 
 class Fake:
@@ -153,15 +154,26 @@ class Points(unittest.TestCase):
             self.flags, self.log, self.pos, self.moves = {"A": 1, "Stuck": 5}, [], [1.0, 2.0, 3.0], True
 
         def dump(self, tag):
-            return {"flags": dict(self.flags), "state": {"scene": "S", "pos": list(self.pos), "life": 12}, "frame": 1}
+            return {"flags": {k: v for k, v in self.flags.items() if not k.startswith("0x")},   # the game's dump has no quest hashes
+                    "state": {"scene": "S", "pos": list(self.pos), "life": 12}, "frame": 1}
 
         def state(self):
             return {"scene": "S"}
 
         def flag(self, name, value=1):
             self.log.append(("flag", name, value))
-            if name != "Stuck":
+            if isinstance(value, str) and value.startswith("0x") and name not in self.enum_read:
+                raise pc.BridgeError({"error": "bad_request", "message": "not a value flag_read read"})
+            if name not in ("Stuck", "0xstuck"):
                 self.flags[name] = value
+
+        enum_read = ()
+
+        def flag_read(self, name):
+            self.log.append(("flag_read", name))
+            if name not in self.flags:
+                return {"ok": True, "name": name, "kind": "unknown", "value": None}
+            return {"ok": True, "name": name, "kind": "int", "value": self.flags[name]}
 
         def act(self, line):
             self.log.append(("act", line))
@@ -186,17 +198,91 @@ class Points(unittest.TestCase):
                             kinds.index("warp"))   # the flags go in first, then the scene loads again
             self.assertTrue(r["reloaded"])
 
-    def test_the_flags_a_setup_wrote_come_back_though_the_dump_cannot_show_them(self):
+    def test_the_hidden_flags_come_back_at_their_save_time_values_and_are_checked(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             c = self.C()
-            ks.apply(c, {"flags": {"0xabc": "DefeatBoss"}}, log_dir=d, player="p1")
+            ks.apply(c, {"flags": {"0xabc": 0, "0xkey": 1}}, log_dir=d, player="p1")   # boss alive, key in
+            c.flags["0xkey"] = 0                         # the key is used before the save: the save keeps 0, not 1
+            out = ks.save_point(c, d, "p1", "t")
+            self.assertEqual((out["setup_flags"], out["setup_flags_unread"]), (2, []))
+            c.flags.update({"0xabc": 1, "0xkey": 1})     # the boss beaten, a key got after the save
+            c.log.clear()
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual((c.flags["0xabc"], c.flags["0xkey"]), (0, 0))
+            self.assertEqual(r["setup_flags_written"], 2)
+            self.assertTrue(r["setup_flags_checked"])
+            self.assertEqual((r["left"], r["exact"]), ([], True))
+            kinds = [x[0] for x in c.log]
+            self.assertLess(c.log.index(("flag", "0xabc", 0)), kinds.index("warp"))   # written before the room loads
+            self.assertGreater(len(kinds) - 1 - kinds[::-1].index("flag_read"), kinds.index("warp"))   # read after it
+
+    def test_a_hidden_flag_that_does_not_come_back_is_a_mismatch(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            c.flags.pop("Stuck")
+            c.flags["0xstuck"] = 0                       # a hidden flag that ignores writes
+            ks.apply(c, {"flags": {"0xstuck": 0}}, log_dir=d, player="p1")
+            ks.save_point(c, d, "p1", "t")
+            c.flags["0xstuck"] = 1
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertFalse(r["setup_flags_checked"])
+            self.assertFalse(r["exact"])
+            self.assertEqual(r["left"], ["0xstuck"])
+            self.assertEqual(r["setup_flags_left"], {"0xstuck": {"want": 0, "now": 1}})
+
+    def test_an_enum_hash_the_bridge_refuses_is_not_checked(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            c.flags["0xq"] = "0x00000abc"                # an enum, read as its value's hash
+            ks.apply(c, {"flags": {"0xq": "Step05"}}, log_dir=d, player="p1")
+            c.flags["0xq"] = "0x00000abc"
+            ks.save_point(c, d, "p1", "t")
+            c.flags["0xq"] = "0x00000def"
+            r = ks.load_point(c, d, "p1", "t")           # (this fake game run never read it: the bridge refuses)
+            self.assertEqual(len(r["setup_flags_refused"]), 1)
+            self.assertFalse(r["setup_flags_checked"])
+            self.assertFalse(r["exact"])
+
+    def test_a_flag_the_game_does_not_have_is_named_unread(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"0xnone": 1}}, log_dir=d, player="p1")
+            c.flags.pop("0xnone")
+            out = ks.save_point(c, d, "p1", "t")
+            self.assertEqual((out["setup_flags"], out["setup_flags_unread"]), (0, ["0xnone"]))
+
+    def test_a_second_setup_replaces_the_first_ones_flags(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"0xabc": 1}}, log_dir=d, player="p1")
+            ks.apply(c, {"flags": {"0xdef": 2}}, log_dir=d, player="p1")
             ks.save_point(c, d, "p1", "t")
             c.log.clear()
             r = ks.load_point(c, d, "p1", "t")
             self.assertEqual(r["setup_flags_written"], 1)
-            kinds = [x[0] for x in c.log]
-            self.assertLess(c.log.index(("flag", "0xabc", "DefeatBoss")), kinds.index("warp"))   # written before the room loads
+            self.assertNotIn(("flag", "0xabc", 1), c.log)
+            self.assertIn(("flag", "0xdef", 2), c.log)
+            ks.forget_setup(d, "p1")   # a new server: nothing to put back
+            ks.save_point(c, d, "p1", "u")
+            self.assertEqual(ks.load_point(c, d, "p1", "u")["setup_flags_written"], 0)
+
+    def test_a_name_the_dump_lists_ends_at_the_saved_value_not_the_setups(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"A": 5}}, log_dir=d, player="p1")   # the setup wrote A=5 ...
+            c.flags["A"] = 1
+            ks.save_point(c, d, "p1", "t")                              # ... but the save has A=1
+            c.log.clear()
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual(r["setup_flags_written"], 0)               # A is the dump's, not the setup's
+            self.assertNotIn(("flag", "A", 5), c.log)
+            self.assertEqual(c.flags["A"], 1)
 
     def test_a_same_scene_load_that_cannot_be_told_is_not_exact(self):
         import tempfile

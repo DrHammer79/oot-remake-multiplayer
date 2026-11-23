@@ -353,6 +353,24 @@ std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& syst
 // One game flag by name: an Int, or a Bool as 0 or 1; a String64. Nothing when the game has no such flag.
 std::optional<std::int32_t> FlagInt(Core::System& system, std::string_view name);
 std::optional<std::string> FlagText(Core::System& system, std::string_view name);
+// One flag read for the play-test bridge's `flag_read`: read only, writes nothing. `name` is a GameData flag name, a
+// 0x hash, or key64:0xKEY. The kinds are tried in this order: Int, Bool, Enum, UInt, String64 (key64 only for the
+// key64: form). `kind` is "int", "bool", "enum", "uint", "key64", "text", or "unknown" when the game has no such flag
+// (or its flag table is not up). An Int's `live` is its table value without a write of ours still waiting in the
+// queue (GameFlags::get_int_live): `number` and `live` differ while a write waits.
+struct FlagReading {
+    std::string kind = "unknown";
+    std::optional<std::int64_t> number;  // int, bool (0 or 1), uint, key64 (0 or 1)
+    std::optional<std::uint32_t> hash;   // enum: the flag_hash of the value's name
+    std::string text;                    // text
+    std::optional<std::int32_t> live;    // int only
+};
+FlagReading ReadFlag(Core::System& system, std::string_view name);
+// Write an Enum flag (a name or a 0x hash) to a value given by its hash, through the game's own queue. Only the
+// bridge's `flag` calls it, and only with a value hash that `flag_read` read from that same flag in this game run
+// (CoopPlaytest::EnumValues), so no raw number is ever written to an Enum. Call it inside the held frame. False when
+// the flag is unknown or the write was not queued.
+bool SetEnumHash(Core::System& system, std::string_view name, std::uint32_t value);
 
 // The menu step's doer: the Hookshot module sets it (coop_pause.cpp); "customize" opens
 // the Multiplayer tab's Customize page, "close" closes the menu. True when asked.

@@ -127,16 +127,20 @@ def _read_json(path):
         return {}
 
 
+def forget_setup(log_dir, player):
+    """Drop what the last setup wrote (a new session starts with none)."""
+    try:
+        os.remove(_memory_file(log_dir, player))
+    except OSError:
+        pass
+
+
 def _remember(log_dir, player, flags):
-    """The flags a setup wrote, kept by game: the module's dump does not list them (a boss quest, a boss key), so a test
-    point could not otherwise put them back."""
-    if not flags:
-        return
-    data = _read_json(_memory_file(log_dir, player))
-    data.update(flags)
+    """The flags the LAST setup wrote, kept by game: the module's dump does not list them (a boss quest, a boss key), so
+    save_point reads these names (`flag_read`) and keeps the values they have at save time."""
     os.makedirs(log_dir, exist_ok=True)
     with open(_memory_file(log_dir, player), "w", encoding="utf-8") as fh:
-        json.dump(data, fh)
+        json.dump(flags, fh)
 
 
 def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None):
@@ -145,6 +149,7 @@ def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None)
     write reaches this game by itself. With `log_dir` and `player` the flags it wrote are kept for `save_point`."""
     done = []
     calls = plan(spec)
+    written = {}   # what this setup writes (it replaces what an earlier setup wrote)
     if not shared:
         calls = [c for c in calls if not delta_shared(c)]
     if "hearts" in spec and "max_hearts" not in spec:   # life above the game's own maximum is refused before any call
@@ -163,7 +168,10 @@ def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None)
             raise RuntimeError("step %d of %d (%s) failed: %s; done so far: %s" % (len(done) + 1, len(calls), " ".join(str(x) for x in call if x is not None), e, [d["call"] for d in done])) from e
         done.append({"call": list(call), "reply": reply})
         if call[0] == "flag" and log_dir and player:
-            _remember(log_dir, player, {call[1]: call[2]})
+            written[call[1]] = call[2]
+            _remember(log_dir, player, written)
+    if log_dir and player and not written:
+        forget_setup(log_dir, player)
     return done
 
 
@@ -222,17 +230,31 @@ def _saved(log_dir, player, tag):
     return found
 
 
+def _read_values(client, names):
+    """name -> the value `flag_read` gives now; a name the game has no flag for is left out."""
+    out = {}
+    for name in names:
+        r = client.flag_read(name)
+        if r.get("kind") not in (None, "unknown") and r.get("value") is not None:
+            out[name] = r["value"]
+    return out
+
+
 def save_point(client, log_dir, player, tag):
-    """Write a test point under `tag` (letters, digits, - and _)."""
+    """Write a test point under `tag` (letters, digits, - and _). The flags the last setup wrote and the dump does not
+    list (a boss quest, a boss key) are read now and kept with it: their values at save time."""
     out = pc.checkpoint(client, log_dir, player, tag)
     if out.get("error") or out.get("flags") is None:
         raise RuntimeError("save_point: %s" % (out.get("error") or "the dump has no flags"))
-    extra = _read_json(_memory_file(log_dir, player))   # what the last setup wrote and the dump cannot show
+    listed = _saved(log_dir, player, tag)["flags"]   # the dump just written (a name it lists is the dump's)
+    names = [n for n in _read_json(_memory_file(log_dir, player)) if n not in listed]
+    extra = _read_values(client, names)
     points = _read_json(_extra_file(log_dir, player))
     points[tag] = extra
     with open(_extra_file(log_dir, player), "w", encoding="utf-8") as fh:
         json.dump(points, fh)
     out["setup_flags"] = len(extra)
+    out["setup_flags_unread"] = sorted(set(names) - set(extra))
     return out
 
 
@@ -241,16 +263,22 @@ def load_point(client, log_dir, player, tag, warp_timeout=60, shared=True):
     it: a room reads its boss state when it loads, so a beaten room only comes back by a load), then Link is placed and
     his life set. Returns {"restored": n flags written, "reloaded": bool, "exact": bool, "left": [...]}. `reloaded` is
     true when the scene changed or Link stood somewhere else after the warp; false (and `exact` false) when no load can
-    be told: the room may then still be as the fight left it."""
+    be told: the room may then still be as the fight left it. The flags save_point read beside the dump are written
+    back and read again at the end: `setup_flags_checked` is true only when every one matches, and `exact` needs it."""
     e = _saved(log_dir, player, tag)
     want, st = e["flags"], e.get("state") or {}
-    now, cur = pc.read_dump(client.dump("restore-before"))
     scene = e.get("scene")
     written = 0
-    extra = _read_json(_extra_file(log_dir, player)).get(tag) or {}
-    for name, value in extra.items():   # not in the dump, so written always, and not checked after
-        if shared or not delta_shared(("flag", name)):
+    # The values save_point read beside the dump (a name the dump lists is left out: the saved dump value rules).
+    extra = {n: v for n, v in (_read_json(_extra_file(log_dir, player)).get(tag) or {}).items() if n not in want}
+    mine = {n: v for n, v in extra.items() if shared or not delta_shared(("flag", n))}
+    refused = []
+    for name, value in mine.items():
+        try:
             client.flag(name, value)
+        except pc.BridgeError as err:   # (an enum hash read in an earlier game run is refused: never a raw write)
+            refused.append("%s: %s" % (name, err))
+    now, cur = pc.read_dump(client.dump("restore-before"))
     for name, value in want.items():
         if not shared and delta_shared(("flag", name)):
             continue   # the other game's write comes here by the share
@@ -273,5 +301,11 @@ def load_point(client, log_dir, player, tag, warp_timeout=60, shared=True):
         client.flag("PlayerStatus.Life", st["life"])
     after, _ = pc.read_dump(client.dump("restore-after"))
     left = sorted(n for n, v in want.items() if (after or {}).get(n) != v and (shared or not delta_shared(("flag", n))))
+    back = _read_values(client, mine)
+    setup_left = sorted(n for n, v in mine.items() if back.get(n) != v)
+    checked = not setup_left
+    left = sorted(left + setup_left)
     return {"tag": tag, "restored": written, "reloaded": reloaded, "exact": not left and reloaded, "left": left[:20],
-            "scene": scene, "setup_flags_written": len(extra)}
+            "scene": scene, "setup_flags_written": len(mine) - len(refused), "setup_flags_checked": checked,
+            "setup_flags_left": {n: {"want": mine[n], "now": back.get(n)} for n in setup_left},
+            "setup_flags_refused": refused}

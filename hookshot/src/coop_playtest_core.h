@@ -158,8 +158,43 @@ std::string Quote(std::string_view text);
 // newline, which would split a reply in two).
 std::string Compact(const CoopModJson::Value& value);
 
-// The commands that change the game and reach the wire: act, warp, flag and give. state, dump, shot, input, step, pause
-// and resume are not gated.
+// `flag_read`: one flag's value, read only (docs/playtest.md). What the game held, as the module read it.
+struct FlagValue {
+    std::string kind = "unknown";        // int, bool, enum, uint, key64, text, unknown (no such flag)
+    std::optional<std::int64_t> number;  // int, bool and key64 (0 or 1), uint
+    std::optional<std::uint32_t> hash;   // enum: the flag_hash of the value's name
+    std::string text;                    // text
+    std::optional<std::int32_t> live;    // int: the table value without a write still waiting in the queue
+};
+// The reply's members for a read: "name", "kind", "value" (a number; for an enum the value's hash as "0x" and 8 hex
+// digits, the form `flag` takes back; text as a string; null when unknown) and, for an int, "pending" (true while a
+// write waits in the game's queue: `value` is that write, the table still holds the old one).
+std::string FlagReadMembers(std::string_view name, const FlagValue& v);
+// An enum value's hash as `flag_read` gives it ("0x" and 8 lowercase hex digits).
+std::string HashText(std::uint32_t hash);
+// "0x" and 1 to 8 hex digits, not 0: the hash. Anything else: nothing.
+std::optional<std::uint32_t> HashValue(std::string_view text);
+// Whether a `flag` value (ParseRequest's text) is a whole number: then it is written with setflag; a "0x" hash goes to
+// an Enum (EnumValues); any other text is an enum value's name (setenum).
+bool IsWholeNumber(std::string_view value);
+// The Enum values `flag_read` has read, by flag name as asked. `flag` writes a "0x" value hash only when it is one of
+// these for that same flag: a value the game itself held in this run, so no raw number reaches an Enum by mistake.
+class EnumValues {
+   public:
+    void Remember(std::string_view name, std::uint32_t hash);
+    bool Known(std::string_view name, std::uint32_t hash) const;
+
+   private:
+    mutable std::mutex mu_;
+    std::vector<std::pair<std::string, std::uint32_t>> seen_;
+};
+// Why a `flag` write of a "0x" value is refused ("" when it may go): not a hash, or not one `flag_read` read from this
+// flag.
+std::string EnumHashRefusal(const EnumValues& known, std::string_view name, std::string_view value);
+
+// The commands that change the game and reach the wire: act, warp, flag and give. state, dump, shot, input, step, pause,
+// resume and flag_read are not gated (flag_read writes nothing; it exists only where the bridge does: a play-test build
+// with LICHII_COOP_PLAYTEST_PORT set).
 bool GatedCommand(std::string_view cmd);
 // The gated commands run only when the test runner asked for them (LICHII_COOP_PLAYTEST_VERBS, set by tools/autotest
 // next to the bridge port and by nothing a player starts: not play.ps1, start.sh or coop-options.ini) and cheats are on

@@ -163,6 +163,9 @@ class FakeGame:
             was = self.flags.get(m["name"])
             self.flags[m["name"]] = m["value"]
             return {"ok": True, "was": was, "value": m["value"]}
+        if cmd == "flag_read":
+            v = self.flags.get(m["name"])
+            return {"ok": True, "name": m["name"], "kind": "unknown" if v is None else "int", "value": v}
         if cmd == "give":
             self.items[m["item"]] = self.items.get(m["item"], 0) + 1
             return {"ok": True, "given": m["item"]}
@@ -377,7 +380,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "flag_read", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -618,6 +621,8 @@ class PlayerServer(unittest.TestCase):
             self.assertEqual(self.games["p1"].via, "map_event")
         self.assertEqual(self.call("p1", "flag", name="F2", value=True)["was"], 0)
         self.assertIs(self.games["p1"].flags["F2"], True)
+        self.assertEqual(self.call("p1", "flag_read", name="F2")["value"], True)
+        self.assertEqual(self.call("p1", "flag_read", name="Nope")["kind"], "unknown")
         self.call("p1", "give", item="bombs")
         self.assertEqual(self.games["p1"].items, {"bombs": 1})
         self.assertEqual(self.call("p1", "step", frames=30)["frame"], 1036)
