@@ -1131,4 +1131,24 @@ bool Key(std::uint32_t vk, bool repeat) noexcept;
 bool Char(std::uint32_t cp) noexcept;
 bool KeysTaken() noexcept;
 
+// --- Which of System's buttons an A is for (player report 261) ---
+// A button's focus state byte (button+0x38, CoopModScreens::FocusState) as the owner's run of 2026-11-23 traced it while
+// the game's cursor moved: 1 the focus coming to it, 3 the focus on it, 2 the focus leaving it (a moment: the button the
+// cursor just left), 4 and 5 decided, 0 none. The cursor is on a button at 1 or 3; never at 2.
+inline constexpr bool CursorOnState(std::uint8_t state) { return state == 1 || state == 3; }
+// One shown button of System's page as the module read it: `ours` 0 Multiplayer (Pa_Button_06), 1 Longshot Settings
+// (Pa_Button_05), 2 Customize Link (Pa_Button_07), -1 one of the game's own (Options, Special Actions, Title Screen, ...);
+// its focus state and its hit box (the layout's units).
+struct SystemButtonSeen {
+    int ours = -1;
+    std::uint8_t state = 0;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+// The button of ours the game's cursor is on (0, 1, 2 as `ours`), -1 when it is on one of the game's own or on none:
+// only a button at CursorOnState counts. The A on Title Screen just after the cursor left Longshot Settings (Title
+// Screen 3, Longshot Settings 2) is the game's: it opened our Longshot Settings page instead of the game's Title
+// Screen question (player report 261). Two at it (the mouse moved the focus just before its click): the one under the
+// mouse (`mouse`: x, y in the layout's units), else the one the focus is coming to (1), else none.
+int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse);
+
 }  // namespace CoopPauseTab

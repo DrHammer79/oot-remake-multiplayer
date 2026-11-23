@@ -2201,4 +2201,29 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
     return out;
 }
 
+int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse) {
+    std::vector<const SystemButtonSeen*> at;
+    for (const SystemButtonSeen& b : seen) {
+        if (CursorOnState(b.state)) at.push_back(&b);
+    }
+    if (at.empty()) return -1;
+    if (at.size() == 1) return at.front()->ours;
+    if (mouse) {
+        const auto [x, y] = *mouse;
+        for (const SystemButtonSeen* b : at) {
+            if (x >= std::min(b->x0, b->x1) && x <= std::max(b->x0, b->x1) && y >= std::min(b->y0, b->y1) &&
+                y <= std::max(b->y0, b->y1)) {
+                return b->ours;
+            }
+        }
+    }
+    const SystemButtonSeen* coming = nullptr;
+    for (const SystemButtonSeen* b : at) {
+        if (b->state != 1) continue;
+        if (coming != nullptr) return -1;   // (two coming: not one to choose)
+        coming = b;
+    }
+    return coming != nullptr ? coming->ours : -1;
+}
+
 }  // namespace CoopPauseTab

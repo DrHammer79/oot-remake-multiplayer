@@ -3149,3 +3149,37 @@ TEST_CASE("pause tab (tabs-overhaul-01110 step 2): the Map under CoopMenu_00 hid
     CHECK_FALSE(MapUnderHidden(true, true, false, true, 5000, 5000, 5000 + kMapUnderAfterMs + kMenuUpMs));   // (unloaded)
     CHECK_FALSE(MapUnderHidden(false, true, false, true, 5000, 6000, 6000));   // (L: given back at once)
 }
+
+TEST_CASE("pause tab: an A on Title Screen just after the cursor left Longshot Settings is the game's (player report 261)") {
+    using CoopPauseTab::SystemButtonOf;
+    using CoopPauseTab::SystemButtonSeen;
+    // Boxes: Longshot Settings above Title Screen (the layout's units, y up).
+    const SystemButtonSeen ls_box{1, 0, -400, 100, 400, 200};
+    const SystemButtonSeen title_box{-1, 0, -400, -40, 400, 60};
+    const auto with = [](SystemButtonSeen b, std::uint8_t state) { b.state = state; return b; };
+    // The owner's run (2026-11-23): Title Screen 3 (the cursor on it), Longshot Settings 2 (left a moment ago).
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 2)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 2)}, std::nullopt) == -1);   // (coming to Title Screen)
+    // The cursor on Longshot Settings (settled, or coming to it from Title Screen): ours.
+    CHECK(SystemButtonOf({with(ls_box, 3)}, std::nullopt) == 1);
+    CHECK(SystemButtonOf({with(title_box, 2), with(ls_box, 1)}, std::nullopt) == 1);
+    // Only one leaving, none at the cursor: no button of ours.
+    CHECK(SystemButtonOf({with(ls_box, 2)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({}, std::nullopt) == -1);
+    // Two at the cursor (the mouse moved the focus just before its click): the one under the mouse ...
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 1)}, std::make_pair(0.0f, 150.0f)) == 1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 3)}, std::make_pair(0.0f, 10.0f)) == -1);
+    // ... else the one the focus comes to.
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 1)}, std::nullopt) == 1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 3)}, std::nullopt) == -1);
+    // The same for Customize Link and Multiplayer beside the game's own buttons.
+    const SystemButtonSeen cl_box{2, 0, -400, 300, 400, 400};
+    CHECK(SystemButtonOf({with(cl_box, 2), with(title_box, 3)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({with(cl_box, 3), with(ls_box, 2)}, std::nullopt) == 2);
+    CHECK(CoopPauseTab::CursorOnState(1));
+    CHECK(CoopPauseTab::CursorOnState(3));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(2));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(0));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(4));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(5));
+}
