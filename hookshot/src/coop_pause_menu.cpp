@@ -193,6 +193,20 @@ Row Note(std::string text) {
     return r;
 }
 
+// A row whose name is built around a player's or a room's own text ("Let in Saria"): the template in the player's
+// language, the text put in as it is (never looked up, never seen by the table's shapes).
+Row NamedAction(const std::string& before, const std::string& text, const std::string& after, std::string value,
+                bool fixed = false) {
+    Row r = Action(CoopI18n::TrAround(before, text, after), std::move(value), fixed);
+    r.own_name = true;
+    return r;
+}
+Row NamedNote(const std::string& before, const std::string& text, const std::string& after) {
+    Row r = Note(CoopI18n::TrAround(before, text, after));
+    r.own_name = true;
+    return r;
+}
+
 // The first words when a dim row is pressed, before why (its help).
 const char* const kNotNow = "Not now.";
 
@@ -345,6 +359,7 @@ struct Menu::Line {
     Row row;
     Act act = Act::kNone;
     std::string help;
+    bool help_done = false;   // the help is already in the player's language (built around a name: CoopI18n::TrAround)
 };
 
 // Co-op settings' host rows (row 226's audit, menu-parity-0119): the game's kind, join approval and the session's
@@ -463,10 +478,10 @@ std::vector<Menu::Line> Menu::Lines() const {
             // (who asks to join, the oldest first: let in or turned away here as with /allow and /deny in the chat)
             if (session_.state == State::kHosting && !session_.asking.empty()) {
                 const std::string& who = session_.asking.front();
-                out.push_back({Action("Let in " + who, "Allow"), Act::kLetIn,
-                               who + " asks to join your game. Lets them in, as /allow in the chat does."});
-                out.push_back({Action("Refuse " + who, "Refuse"), Act::kRefuse,
-                               "Turns " + who + " away, as /deny in the chat does. They can ask again."});
+                out.push_back({NamedAction("Let in ", who, "", "Allow"), Act::kLetIn,
+                               CoopI18n::TrAround("", who, " asks to join your game. Lets them in, as /allow in the chat does."), true});
+                out.push_back({NamedAction("Refuse ", who, "", "Refuse"), Act::kRefuse,
+                               CoopI18n::TrAround("Turns ", who, " away, as /deny in the chat does. They can ask again."), true});
                 if (session_.asking.size() > 1) {
                     out.push_back({Note("+" + std::to_string(session_.asking.size() - 1) + " more ask"), Act::kNone, {}});
                 }
@@ -554,7 +569,7 @@ std::vector<Menu::Line> Menu::Lines() const {
             // the next press)
             if (!note_.empty() && note_[0].rfind("Turned away", 0) == 0) out.push_back({Note(note_[0]), Act::kNone, {}});
             if (!rejoin_code_.empty()) {
-                out.push_back({Action("Join " + rejoin_host_ + " again", "Join", off), Act::kRejoin,
+                out.push_back({NamedAction("Join ", rejoin_host_, " again", "Join", off), Act::kRejoin,
                                "Joins the last game you were in, with the same code. It works while your friend is still "
                                "hosting that game."});
             }
@@ -790,7 +805,7 @@ std::vector<Menu::Line> Menu::Lines() const {
 // The title's Join list: the last game again, the games (this network's first), then Enter a code or address.
 void Menu::TitleListLines(std::vector<Line>& out, bool off) const {
     if (!rejoin_code_.empty()) {
-        out.push_back({Action("Join " + rejoin_host_ + " again", "", off), Act::kRejoin,
+        out.push_back({NamedAction("Join ", rejoin_host_, " again", "", off), Act::kRejoin,
                        "Joins the last game you were in, with the same code, while your friend still hosts it."});
     }
     const std::vector<Found>& games = found_;   // (as handed: this network's first; no search or sort here)
@@ -815,7 +830,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     if (!note_.empty() && note_[0].rfind("Turned away", 0) == 0) out.push_back({Note(note_[0]), Act::kNone, {}});
     if (!picked_.empty()) {
         const std::string asks = " asks for a password";
-        out.push_back({Note(TitleGameName(picked_, picked_host_, asks.size()) + asks), Act::kNone, {}});
+        out.push_back({NamedNote("", TitleGameName(picked_, picked_host_, asks.size()), asks), Act::kNone, {}});
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
                        "The host sees it on their Hosting screen. Type it with Letter, or on the keyboard."});
         out.push_back({Action("Join", "", off), Act::kJoinNow, "Joins the game with this password."});
@@ -857,13 +872,13 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
     }
     if (session_.state == State::kHosting && !session_.asking.empty()) {
         const std::string& who = session_.asking.front();
-        out.push_back({Action("Let in " + who, ""), Act::kLetIn, who + " asks to join your game."});
-        out.push_back({Action("Refuse " + who, ""), Act::kRefuse, "Turns " + who + " away. They can ask again."});
+        out.push_back({NamedAction("Let in ", who, "", ""), Act::kLetIn, CoopI18n::TrAround("", who, " asks to join your game."), true});
+        out.push_back({NamedAction("Refuse ", who, "", ""), Act::kRefuse, CoopI18n::TrAround("Turns ", who, " away. They can ask again."), true});
     }
     const std::string players =
         std::to_string(std::max(1, session_.players)) + "/" + std::to_string(options_.max_players);
     if (session_.public_game) {
-        out.push_back({Note("Room  " + options_.relay_room), Act::kNone, {}});
+        out.push_back({NamedNote("Room  ", options_.relay_room, ""), Act::kNone, {}});
         out.push_back({Note("Players  " + players), Act::kNone, {}});
     } else {
         out.push_back({Action("Code", session_.code.empty() ? std::string("Starting...") : ShownCode(session_.code),
@@ -2325,7 +2340,7 @@ View Menu::view() const {
     } else if (said && !(line != nullptr && confirm_leave_)) {
         v.help = JoinedTr(session_.lines);
     } else if (line != nullptr) {
-        v.help = CoopI18n::Tr(line->help);
+        v.help = line->help_done ? line->help : CoopI18n::Tr(line->help);
     } else if (session_.by_launcher && (page_ == Page::kHost || page_ == Page::kJoin)) {
         v.help = CoopI18n::Tr(kByLauncher);   // (LauncherLines' page has no row to select)
     }

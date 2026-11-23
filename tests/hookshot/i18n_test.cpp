@@ -1019,3 +1019,55 @@ TEST_CASE("coop i18n (own text): the Lobby tab's players, hosts and public games
     }
     CHECK(named);
 }
+
+TEST_CASE("coop i18n (own text): a line built around a name takes the template only, the name goes in as it is") {
+    const Hans hans;
+    // The names that are also words of the table, or places of the game, or read like the end of a line.
+    for (const char* name : {"Link", "On", "Saria", "Hyrule Field", "Kokiri Forest", "x left", "2 items", "Someone"}) {
+        CAPTURE(name);
+        CHECK(CoopI18n::TrAround("Let in ", name) == std::string("放行 ") + name);
+        CHECK(CoopI18n::TrAround("", name, " (you)") == std::string(name) + "（你）");
+        // (the same lines as Tr() of the finished line, for the names no word or place of the game reads like)
+    }
+    CHECK(CoopI18n::TrAround("Let in ", "Saria") == CoopI18n::Tr("Let in Saria"));
+    // Tr() itself keeps a name that is a word or a place as it is, in the chat's notices and the shapes
+    CHECK(CoopI18n::Tr("Link joined") == "Link 加入了");
+    CHECK(CoopI18n::Tr("On left") == "On 离开了");
+    CHECK(CoopI18n::Tr("Hyrule Field joined") == "Hyrule Field 加入了");
+    CHECK(CoopI18n::Tr("Let in Hyrule Field") == "放行 Hyrule Field");
+    CHECK(CoopI18n::Tr("Let in Link") == "放行 Link");
+    CHECK(CoopI18n::Tr("teleport: Link is coming to you") == CoopI18n::TrAround("teleport: ", "Link", " is coming to you"));
+    CHECK(CoopI18n::Tr("teleport: Link is coming to you").find("林克") == std::string::npos);
+    // The game's own stand-ins for no name are still the table's words, and a scene the game names is still translated.
+    CHECK(CoopI18n::Tr("Someone joined") == "某人 加入了");
+    CHECK(CoopI18n::Tr("teleport: stopped: you left Hyrule Field") == "传送：已停下：你离开了 海拉鲁平原");
+    CHECK(CoopI18n::Tr("teleport: Hyrule Field is coming to you").find("海拉鲁平原") == std::string::npos);   // (a player's name)
+
+    // The page's rows built around a name (Let in, Refuse, Teleport to, Kick, Joined, Room, Your game ...)
+    CoopPauseTab::SessionView v;
+    v.s.hosting = true;
+    v.asking = {"Link"};
+    std::vector<std::string> rows = CoopPauseTab::RowTexts(CoopPauseTab::View::kLetIn, v);
+    CHECK(rows[0] == "放行 Link");
+    CHECK(rows[1] == CoopI18n::TrAround("Refuse ", "Link"));
+    CHECK(rows[1].find("林克") == std::string::npos);
+    v.asking = {"Hyrule Field"};
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kLetIn, v)[0] == "放行 Hyrule Field");
+    CoopPauseTab::SessionView who;
+    who.s.player = 2;
+    who.player_name = "Link";
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kPlayer, who)[0] == CoopI18n::TrAround("Teleport to ", "Link"));
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kPlayer, who)[0].find("林克") == std::string::npos);
+    who.s.player = 1;
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kPlayer, who)[0] == "Link（你）");
+    CoopPauseTab::SessionView in;
+    in.s.in_one = true;
+    in.host_name = "Link";
+    in.room = "On";
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kSession, in)[0] == CoopI18n::TrAround("Joined ", "Link"));
+    CoopPauseTab::SessionView room;
+    room.s.hosting = true;
+    room.s.in_one = true;
+    room.room = "On";
+    CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kSession, room)[1] == CoopI18n::TrAround("Copy room: ", "On"));
+}

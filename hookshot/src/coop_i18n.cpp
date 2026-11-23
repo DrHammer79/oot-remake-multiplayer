@@ -3226,7 +3226,7 @@ constexpr Shape kShapes[] = {
     {"Co-op is on: ", " players", "Co-op is on: {} players", false},
     // (another player's character not downloaded: "Player 3 plays ...", coop_char_slots.h)
     {"", " plays a character you have not downloaded, shown as Link (press N at the kit's start to get Snail's NPC characters).",
-     "{} plays a character you have not downloaded, shown as Link (press N at the kit's start to get Snail's NPC characters).", true},
+     "{} plays a character you have not downloaded, shown as Link (press N at the kit's start to get Snail's NPC characters).", false},
     // (the caller writes "Player N": the number in the table's own "玩家 N", as every other Player line)
     {"Player ", " plays a character you have not downloaded, shown as Link (press N at the kit's start to get Snail's NPC characters).",
      "Player {} plays a character you have not downloaded, shown as Link (press N at the kit's start to get Snail's NPC characters).", false},
@@ -3437,6 +3437,7 @@ struct SplitShape {
     int words;    // bit i: part i is a word of the table too (a preset's name, an age)
     int count;    // pieces used
     const char* key;
+    int places;   // bit i: part i is a place of the game (a scene: "Hyrule Field"), the rest are names, as they are
 };
 bool SplitAll(std::string_view text, const SplitShape& shape, std::string_view* parts) {
     if (shape.count < 2 || shape.count > 8) {
@@ -3804,16 +3805,16 @@ constexpr SplitShape kSplitShapes[] = {
     {{"Difficulty: Automatic (", " player): life ", "%, damage ", "%, enemies ", "%; bosses: life ", "%, damage ", "%"}, 0, 7, "Difficulty: Automatic ({} player): life {}%, damage {}%, enemies {}%; bosses: life {}%, damage {}%"},
     {{"Difficulty: ", ": life ", "%, damage ", "%, enemies ", "%"}, 1, 5, "Difficulty: {}: life {}%, damage {}%, enemies {}%"},
     // /teleport's lines (coop_teleport.cpp)
-    {{"teleport: going to ", " in ", ""}, 0, 3, "teleport: going to {} in {}"},
-    {{"teleport: ", " has gone on to ", "; you are where they were. Type /teleport again to follow", ""}, 0, 3, "teleport: {} has gone on to {}; you are where they were. Type /teleport again to follow"},
-    {{"teleport: ", " is in ", ", a place for ", " Link; yours is ", "", ""}, 12, 5, "teleport: {} is in {}, a place for {} Link; yours is {}"},
+    {{"teleport: going to ", " in ", ""}, 0, 3, "teleport: going to {} in {}", 2},
+    {{"teleport: ", " has gone on to ", "; you are where they were. Type /teleport again to follow", ""}, 0, 3, "teleport: {} has gone on to {}; you are where they were. Type /teleport again to follow", 2},
+    {{"teleport: ", " is in ", ", a place for ", " Link; yours is ", "", ""}, 12, 5, "teleport: {} is in {}, a place for {} Link; yours is {}", 2},
     {{"teleport: ", " is ", " Link and you are ", ": no teleport to another age's Link", ""}, 6, 4, "teleport: {} is {} Link and you are {}: no teleport to another age's Link"},
     {{"teleport: ", " is busy now; you are where they were", ""}, 0, 2, "teleport: {} is busy now; you are where they were"},
     {{"teleport: no answer from ", "; you are where they were", ""}, 0, 2, "teleport: no answer from {}; you are where they were"},
     {{"teleport: no answer from ", " (an older build, or their game is busy)", ""}, 0, 2, "teleport: no answer from {} (an older build, or their game is busy)"},
     {{"teleport: ", " is in a dungeon: you may need its items to get on from there", ""}, 0, 2, "teleport: {} is in a dungeon: you may need its items to get on from there"},
-    {{"teleport: ", " is in ", ", a place /teleport cannot load (no start point known there)", ""}, 0, 3, "teleport: {} is in {}, a place /teleport cannot load (no start point known there)"},
-    {{"teleport: stopped: you left ", ""}, 0, 2, "teleport: stopped: you left {}"},
+    {{"teleport: ", " is in ", ", a place /teleport cannot load (no start point known there)", ""}, 0, 3, "teleport: {} is in {}, a place /teleport cannot load (no start point known there)", 2},
+    {{"teleport: stopped: you left ", ""}, 0, 2, "teleport: stopped: you left {}", 1},
     {{"teleport: stopped: ", " left", ""}, 0, 2, "teleport: stopped: {} left"},
     {{"teleport: ", " is coming to you", ""}, 0, 2, "teleport: {} is coming to you"},
     {{"teleport: asking ", " where they are", ""}, 0, 2, "teleport: asking {} where they are"},
@@ -3970,8 +3971,12 @@ std::string Tr(const Lang* lang, std::string_view en) {
             if (const Entry* word = Find(*lang, middle)) {
                 text = word->text;
             }
-        } else if (kept = PlaceIn(lang, middle); kept != middle) {
-            text = kept;   // a scene the game names ("Hyrule Field")
+        } else {
+            // A name (a player's, a room's, a mod's) goes in as it is: only the stand-ins the game writes when it has none
+            // ("Someone", "Player 3") are the table's words. Never the name looked up: a player called "Link" or
+            // "Hyrule Field" stays so.
+            kept = Who(lang, middle);
+            text = kept;
         }
         if (const Entry* entry = Find(*lang, shape.key)) {
             return Fill(entry->text, text);
@@ -3988,10 +3993,12 @@ std::string Tr(const Lang* lang, std::string_view en) {
             filled[i] = std::string(parts[i]);
             if ((shape.words & (1 << i)) != 0) {
                 filled[i] = Tr(lang, parts[i]);
+            } else if ((shape.places & (1 << i)) != 0) {
+                filled[i] = PlaceIn(lang, parts[i]);   // a scene the game names ("Hyrule Field")
             } else if (std::string counts; CountsLine(lang, parts[i], counts)) {
                 filled[i] = counts;   // "2 items, 1 keys": each count in its own words
-            } else if (const std::string place = PlaceIn(lang, parts[i]); place != parts[i]) {
-                filled[i] = place;   // a scene the game names ("Hyrule Field")
+            } else {
+                filled[i] = Who(lang, parts[i]);   // a name as it is (the stand-ins "Someone", "Player 3" in the table's words)
             }
             views[i] = filled[i];
         }
@@ -4008,6 +4015,18 @@ std::string Tr(const Lang* lang, std::string_view en) {
     return std::string(en);
 }
 
+
+std::string TrAround(std::string_view before, std::string_view text, std::string_view after) {
+    std::string probe(before);
+    probe += '';   // (a middle no table line, shape or place has)
+    probe += after;
+    std::string line = Tr(probe);
+    const std::size_t at = line.find('');
+    if (at == std::string::npos) {
+        return std::string(before) + std::string(text) + std::string(after);
+    }
+    return line.replace(at, 1, text);
+}
 
 // A place's name in the table's language (places.json's English); the name as
 // it is when the table has no line for it, and for English.
