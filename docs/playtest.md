@@ -277,7 +277,7 @@ only, no `pip install`.
 | `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
 | `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
-| `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
+| `desync_check [all] [flags_only]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed, every game's flags compared, and the games' actors compared by what [sync-coverage.md](sync-coverage.md) says about each name (below). `flags_only` leaves the actors out |
 | `log [match]` | **Raw, unmasked** (do not paste it into an issue; use `check_logs` for that). The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
 | `check_logs [since] [names]` | The oracle for "did anything go wrong". This game's new `coop:` lines that are flagged, **masked**. A line is flagged when it starts with the game's level prefix `warning: `, `error: ` or `critical: ` (most real warnings contain none of the four words, for example `connection lost; reconnecting`), or when it says `failed`, `error`, `refused` or `resync` (any case, also `fails`, `failure`, `refusal`, `resyncing`). Reply: `flagged` (how many), `lines` (the newest 40, each `{why, line}` with `why` = `level:warning`, `level:error`, `level:critical` or `word:<word>`; `left_out` counts the rest), `read` (all new `coop:` lines), `names_hidden` and `verdict`: `clean`, `flagged`, or `no log`. `since` is `last_check` (the default: since the last `check_logs` of this server, or the boot) or `boot`. It keeps its own place in the log (and reads only whole lines: a half-written last line waits for the next call), so it and `log` never take lines from each other. `names` (up to 20 words) are extra words to hide; the names the games print themselves (`name '...'`, `player N '...'`) are hidden without being passed. Needs `--session`; **it answers after the session ended** (that is when the last lines matter) and does not restart the idle clock. **A clean verdict is not proof**: it says only that the game printed none of these. No frame passes |
 | `session_status` | Is the run still sound: `bridge` (`connected`, `held`, `last_frame`, `connects`) and, with `--session`, `session` (`running`, or `ended` with the watchdog's reason; each game's `pid` and `alive`; `max_minutes_left`, `idle_minutes_left`). It asks the game nothing, works after the session ended, and does not restart the idle clock. No frame passes |
@@ -383,7 +383,36 @@ Nothing here has run in a game. The first run checks:
    in order.
 
 After a scenario, `python -I tools/autotest/desync_check.py <log dir> --clients` gives the same answer as the
-`desync_check` tool (exit 0 agree, 1 desync, 2 nothing compared, 3 incomplete).
+`desync_check` tool (exit 0 agree, 1 desync, 2 nothing compared, 3 incomplete). `--flags-only` leaves the actors out.
+
+#### What `desync_check` compares in the actors
+
+Each checkpoint keeps the whole `get_world` list of its game (`state.world`). For each tag, the first game's list is
+compared with every other game's, under these rules (code: `compare_world` in `desync_check.py`; the page is read by
+`sync_rows.py`; the numbers are in `TOL`):
+
+- **Only in the same area.** Both games in the same scene and their Links within 40 m, and neither list stale or
+  without a session. Otherwise the line says `not compared (...)` and why. (A rolled spawn is shared only near its
+  place, so apart the games roll their own.)
+- **One to one.** Actors of one name are paired by nearest place (the games' addresses differ). An actor in one game
+  with none to pair with in the other is a count difference, named.
+- **What is compared.** `alive`, `owner` and `life` exactly. The place only for placed static actors (chests, doors,
+  switches) and bosses, to 0.2 m. A moving enemy's place is never compared: each game stands at its own frame.
+- **The page decides what a difference means.** The row for the name (best glob wins: no wildcard first, then the most
+  literal characters; rows tied on it with different labels are both printed and the weaker label is used):
+  `live` is a desync; `?` is `live not proven: check it twice, then report what you saw`; `reload` is `shared, shown on
+  reload: not a desync`; `-`, or a Path starting with `none`, is not shared and left out (counted); a name with no row is
+  `no row in sync-coverage: not compared` (named). Only `live` rows give exit 1. The page's Enemies and Rolled spawns
+  rows are `?` until a game run proves them.
+- **Two looks.** A `live` difference counts only when the same one is in two checkpoints in a row, with both games 60 or
+  more frames further on in the second. The first look is `recheck after both games step 60 frames` and the exit status
+  is 3 (incomplete), never 0. Take a second checkpoint after stepping 60 frames or more. A difference that is gone in the
+  second checkpoint was a game still on its way.
+- **Older logs.** A checkpoint with no `world` (written before this) is compared on its flags only, with the same
+  output as before.
+
+Not proven in a game: the 0.2 m, 40 m and 60 frame numbers are guesses from the design, and no run has compared a real
+world yet.
 
 ### Rules for a tester on the bridge
 

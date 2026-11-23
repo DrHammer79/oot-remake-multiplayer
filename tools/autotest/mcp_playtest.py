@@ -280,8 +280,13 @@ PLAYER_TOOLS = [
      "action that should sync, then run desync_check.",
      "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "desync_check", "description": "Compare every game's checkpoints in the run's log folder, matched by "
-     "tag: the first tag where the games' shared flags differ, which flags, and each game's frame.",
-     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
+     "tag: the first tag where the games' shared flags differ, which flags, and each game's frame. It also compares "
+     "the games' actors (needs the Links in one scene within 40 m), by what docs/sync-coverage.md says about each "
+     "name: only a `live` row can be a desync, and only when the same difference is in two checkpoints in a row with "
+     "both games 60 or more frames further on (the first time it says recheck, result `incomplete`); a `?` row is "
+     "'live not proven', a `reload` row 'shown on reload', a name with no row 'not compared'. `flags_only` leaves "
+     "the actors out.",
+     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}, "flags_only": {"type": "boolean"}}}},
     {"name": "pause", "description": "Hold the game (it is held from the first call anyway). " + PAUSED,
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "resume", "description": "Let the game run in real time again (a person takes over). The next call "
@@ -470,7 +475,7 @@ class Game:
         if name == "desync_check":
             buf = io.StringIO()
             code = desync_check.check_clients(self.log_dir, bool(args.get("all")),
-                                              out=lambda s: buf.write(s + "\n"))
+                                              out=lambda s: buf.write(s + "\n"), flags_only=bool(args.get("flags_only")))
             return {"result": desync_check.RESULTS[code], "report": buf.getvalue()}
         if name == "log":
             return self.log_lines(args.get("match"))

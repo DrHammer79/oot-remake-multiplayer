@@ -6,6 +6,19 @@ they were taken; the first one with a difference is named, with every flag that 
 
     python -I tools/autotest/desync_check.py SESSION_DIR [--all]
 
+With --clients it also compares the games' actors (the `world` list a checkpoint keeps in its state), by what
+docs/sync-coverage.md says about each actor's name (sync_rows.py); --flags-only leaves that out. Rules:
+
+- Only when both games are in the same scene and their Links are within 40 m; otherwise "not compared (apart)".
+- Actors are matched one to one by name and nearest place (a game's addresses differ). Compared: alive, owner, life; the
+  place (0.2 m) only for placed static actors (chests, doors, switches) and bosses; a moving enemy's place never. An
+  actor in one game and not the other is a count difference, reported by name.
+- The page's row decides: Live `live` = a difference is a desync; `?` = "live not proven: check it twice, then report
+  what you saw"; `reload` = "shared, shown on reload"; `-` or Path `none` = not shared, left out; no row = "no row in
+  sync-coverage: not compared". Only `live` rows can make the exit status 1.
+- A `live` difference counts only when it is in two checkpoints in a row with both games 60 or more frames further on in
+  the second; the first time it is "recheck after step 60" and the exit status is 3, never 0.
+
 With --clients it reads a bridge run's log folder instead (mcp_playtest.py --player, one log per game, p1 to p4):
 the checkpoints are matched by tag across every game (the second use of a tag goes with the other games' second),
 each game's frame count at the tag is printed, and every game's flags are compared.
@@ -19,8 +32,16 @@ wrote no flags): never "agree" for a checkpoint that was not compared.
 import argparse
 import glob
 import json
+import math
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sync_rows  # noqa: E402
+
+TOL = {"static_m": 0.2, "area_m": 40.0, "life": 0, "settle_frames": 60}     # (every tolerance is here)
+STATIC_KINDS = ("chest", "door", "switch")           # placed actors that do not move: their place is compared
+BOSS_NAME = "Enemy_*Boss*"                            # a boss's place is shared (BOSS_ROOM)
 
 
 def compare(cp):
@@ -133,10 +154,160 @@ def compare_many(cps):
     return diff, None
 
 
-def check_clients(log_dir, show_all=False, out=print):
+def _dist(p, q):
+    return math.dist(p, q) if p and q and len(p) == len(q) else math.inf
+
+
+def world_usable(w):
+    """Why a checkpoint's world list cannot be compared, or None."""
+    if not isinstance(w, dict):
+        return "no world list in the checkpoint"
+    if w.get("stale"):
+        return "its world list is stale"
+    why = str(w.get("why") or "")
+    if why.startswith("no co-op session"):
+        return why
+    return None
+
+
+def pair_up(xs, ys):
+    """([(x, y)], [x left], [y left]): one to one, the nearest places first (an actor with no place goes last)."""
+    cand = sorted((_dist(x.get("pos"), y.get("pos")), i, j) for i, x in enumerate(xs) for j, y in enumerate(ys))
+    used_x, used_y, pairs = set(), set(), []
+    for _, i, j in cand:
+        if i not in used_x and j not in used_y:
+            used_x.add(i)
+            used_y.add(j)
+            pairs.append((xs[i], ys[j]))
+    return (pairs, [x for i, x in enumerate(xs) if i not in used_x], [y for j, y in enumerate(ys) if j not in used_y])
+
+
+def compare_world(cp_a, cp_b, rows, tol=TOL):
+    """Compare two checkpoints' actors by what sync-coverage says about each name. Replies {note, diffs, compared,
+    skipped, no_row}: `note` says why nothing was compared (else None); each diff is {name, field, a, b, label, text}
+    with `label` the page's (live, not proven, reload); `skipped` counts actors of not shared rows; `no_row` is
+    {name: count} of the actors no row speaks for. Never touches a game."""
+    out = {"note": None, "diffs": [], "compared": 0, "skipped": 0, "no_row": {}}
+    sa, sb = cp_a.get("state") or {}, cp_b.get("state") or {}
+    for who, w in (("A", sa.get("world")), ("B", sb.get("world"))):
+        why = world_usable(w)
+        if why:
+            out["note"] = "not compared (%s: %s)" % (who, why)
+            return out
+    if sa.get("scene") is None or sa.get("scene") != sb.get("scene"):
+        out["note"] = "not compared (scenes: A %s, B %s)" % (sa.get("scene"), sb.get("scene"))
+        return out
+    gap = _dist(sa.get("pos"), sb.get("pos"))
+    if gap == math.inf:
+        out["note"] = "not compared (a Link's place is unknown)"
+        return out
+    if gap > tol["area_m"]:
+        out["note"] = "not compared (apart: the Links are %.0f m apart, the limit is %.0f m)" % (gap, tol["area_m"])
+        return out
+    names = {}
+    for side, w in (("a", sa["world"]), ("b", sb["world"])):
+        for act in w.get("actors") or []:
+            if act.get("kind") != "player" and act.get("name"):
+                names.setdefault(act["name"], {"a": [], "b": []})[side].append(act)
+    for name in sorted(names):
+        xs, ys = names[name]["a"], names[name]["b"]
+        m = sync_rows.match(rows, name)
+        if m is None:
+            out["no_row"][name] = len(xs) + len(ys)
+            continue
+        if m["label"] == "not shared":
+            out["skipped"] += len(xs) + len(ys)
+            continue
+        pairs, left_a, left_b = pair_up(xs, ys)
+        out["compared"] += len(pairs)
+
+        def add(field, a, b, text):
+            out["diffs"].append({"name": name, "field": field, "a": a, "b": b, "label": m["label"],
+                                 "text": "%s: %s  [%s]" % (name, text, m["text"])})
+        for x, y in pairs:
+            for f in ("alive", "owner"):
+                if x.get(f) is not None and y.get(f) is not None and x[f] != y[f]:
+                    add(f, x[f], y[f], "%s differs (A %s, B %s)" % (f, x[f], y[f]))
+            lx, ly = x.get("life"), y.get("life")
+            if isinstance(lx, (int, float)) and isinstance(ly, (int, float)) and abs(lx - ly) > tol["life"]:
+                add("life", lx, ly, "life differs (A %s, B %s)" % (lx, ly))
+            if (x.get("kind") in STATIC_KINDS or sync_rows.fnmatch.fnmatchcase(name, BOSS_NAME)) \
+                    and _dist(x.get("pos"), y.get("pos")) > tol["static_m"] < math.inf:
+                add("pos", x.get("pos"), y.get("pos"), "place differs by %.2f m (the limit is %.2f m)"
+                    % (_dist(x["pos"], y["pos"]), tol["static_m"]))
+        if left_a or left_b:
+            na, nb = len(xs), len(ys)
+            add("count", na, nb, "%d in A, %d in B (%d in one game with no match in the other)"
+                % (na, nb, len(left_a) + len(left_b)))
+    return out
+
+
+def world_many(cps, rows, prev, tol=TOL):
+    """Compare the first game's world with each other game's (games p1.. in order). `prev` is {(games, name, field):
+    {game: frame}} of the `live` differences seen at the last compared tag: updated here. Replies None (no checkpoint
+    has a world: an older log), or {lines, confirmed, pending}."""
+    if not any(isinstance((cp.get("state") or {}).get("world"), dict) or "world" in (cp.get("state") or {})
+               for cp in cps.values()):
+        return None
+    if rows is None:
+        return {"lines": ["    world: not compared (docs/sync-coverage.md was not found)"], "confirmed": 0, "pending": 0}
+    games = sorted(cps)
+    lines, confirmed, pending, now, compared_any = [], 0, 0, {}, False
+    for other in games[1:]:
+        res = compare_world(cps[games[0]], cps[other], rows, tol)
+        pair = "%s~%s" % (games[0], other)
+        if res["note"]:
+            lines.append("    world %s: %s" % (pair, res["note"]))
+            continue
+        compared_any = True
+        counts = {"desync": 0, "recheck": 0, "finding": 0}
+        body = []
+        for d in res["diffs"]:
+            if d["label"] != "live":
+                counts["finding"] += 1
+                body.append("    world %s: %s" % (pair, d["text"]))
+                continue
+            k = (pair, d["name"], d["field"])
+            now[k] = {p: cps[p].get("frame") for p in (games[0], other)}
+            was = prev.get(k)
+            if was and all(isinstance(now[k][p], (int, float)) and isinstance(was.get(p), (int, float))
+                           and now[k][p] - was[p] >= tol["settle_frames"] for p in now[k]):
+                counts["desync"] += 1
+                body.append("    world %s: DESYNC %s" % (pair, d["text"]))
+            else:
+                counts["recheck"] += 1
+                body.append("    world %s: recheck after both games step %d frames: %s"
+                            % (pair, tol["settle_frames"], d["text"]))
+        confirmed += counts["desync"]
+        pending += counts["recheck"]
+        bits = ["%d desync" % counts["desync"] if counts["desync"] else "", "%d to recheck" % counts["recheck"]
+                if counts["recheck"] else "", "%d finding(s) not a desync (not proven or reload rows)"
+                % counts["finding"] if counts["finding"] else ""]
+        bits = [b for b in bits if b]
+        extra = ["%d actor(s) of not shared rows left out" % res["skipped"] if res["skipped"] else "",
+                 "%d name(s) with no row in sync-coverage: not compared (%s)"
+                 % (len(res["no_row"]), ", ".join(sorted(res["no_row"])[:6]) + (", ..." if len(res["no_row"]) > 6 else ""))
+                 if res["no_row"] else ""]
+        extra = [e for e in extra if e]
+        lines.append("    world %s: %s (%d actor(s) compared%s)" % (
+            pair, ", ".join(bits) if bits else "agree", res["compared"], "; " + "; ".join(extra) if extra else ""))
+        lines.extend(body)
+    if compared_any:
+        prev.clear()
+        prev.update(now)
+    return {"lines": lines, "confirmed": confirmed, "pending": pending}
+
+
+def check_clients(log_dir, show_all=False, out=print, flags_only=False, rows=None):
     """Like check, for the per-game logs of a bridge run (mcp_playtest.py --player): the tags are matched across
     every game that wrote a log, and each game's frame at the tag is printed. Same exit codes."""
     clients = read_clients(log_dir)
+    if rows is None and not flags_only:
+        try:
+            rows = sync_rows.load()[0]
+        except OSError:
+            rows = None
+    prev, pending = {}, 0
     if len(clients) < 2:
         out("nothing to compare: %d game log(s) in %s (need two or more *.checkpoints.jsonl)" % (len(clients), log_dir))
         return 2
@@ -154,13 +325,22 @@ def check_clients(log_dir, show_all=False, out=print):
             skipped += 1
             continue
         compared += 1
-        if not diff:
-            out("%s: agree (%s)" % (key, frames))
+        w = None if flags_only else world_many(cps, rows, prev)
+        confirmed = w["confirmed"] if w else 0
+        pending = w["pending"] if w else pending     # (only the last compared tag can still wait for a second look)
+        if not diff and not confirmed:
+            out("%s: %s (%s)" % (key, "agree" if not (w and w["pending"]) else "flags agree", frames))
+            for ln in (w["lines"] if w else []):
+                out(ln)
             continue
         bad += 1
-        out("%s: %d flag(s) differ (%s)%s" % (key, len(diff), frames, "" if bad > 1 else "  <- first desync"))
+        what = (["%d flag(s) differ" % len(diff)] if diff else []) + (
+            ["%d world difference(s) in two checkpoints in a row" % confirmed] if confirmed else [])
+        out("%s: %s (%s)%s" % (key, " and ".join(what), frames, "" if bad > 1 else "  <- first desync"))
         for name, vals in diff.items():
             out("    %s: %s" % (name, ", ".join("%s %s" % (p, v) for p, v in vals.items())))
+        for ln in (w["lines"] if w else []):
+            out(ln)
         if not show_all:
             break
     if bad:
@@ -168,8 +348,10 @@ def check_clients(log_dir, show_all=False, out=print):
     if not compared:
         out("nothing compared: no tag has every game's flags")
         return 2
-    if skipped:
-        out("incomplete: %d tag(s) not compared" % skipped)
+    if skipped or pending:
+        out("incomplete: %s%s" % ("%d tag(s) not compared" % skipped if skipped else "",
+                                  ("%s%d world difference(s) wait for a second checkpoint after both games step %d "
+                                   "frames" % ("; " if skipped else "", pending, TOL["settle_frames"])) if pending else ""))
         return 3
     return 0
 
@@ -180,8 +362,9 @@ def main(argv=None):
     p.add_argument("--all", action="store_true", help="every checkpoint with a difference, not only the first")
     p.add_argument("--clients", action="store_true",
                    help="per-game logs (<player>.checkpoints.jsonl from mcp_playtest.py --player), matched by tag")
+    p.add_argument("--flags-only", action="store_true", help="with --clients: compare the flags only, not the actors")
     a = p.parse_args(argv)
-    return check_clients(a.session, a.all) if a.clients else check(a.session, a.all)
+    return check_clients(a.session, a.all, flags_only=a.flags_only) if a.clients else check(a.session, a.all)
 
 
 if __name__ == "__main__":
