@@ -1073,3 +1073,33 @@ TEST_CASE("coop i18n (own text): a line built around a name takes the template o
     room.room = "On";
     CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kSession, room)[1] == CoopI18n::TrAround("Copy room: ", "On"));
 }
+
+TEST_CASE("coop i18n: the Settings page's Character by age rows, their helps and Not set (review-01112-e-4)") {
+    // The rows as the page builds them (shown and on, no pick yet), so a changed English line breaks this test.
+    CoopPauseMenu::Menu m;
+    m.Show(CoopTitleMenu::Options{});
+    m.SetCharacterAges(true, true, -1, -1, {{0, "Link"}, {2, "Saria"}});
+    m.Open(CoopPauseMenu::Page::kSettings);
+    int seen = 0;
+    const std::size_t rows = m.view().rows.size();
+    for (std::size_t i = 0; i < rows; ++i) {
+        m.Select(i);
+        const CoopPauseMenu::View mv = m.view();
+        const CoopPauseMenu::Row& r = mv.rows[i];
+        if (r.name != "Character by age" && r.name != "As a child" && r.name != "As an adult") continue;
+        ++seen;
+        for (const char* code : {"zh-Hans", "zh-Hant"}) {
+            const CoopI18n::Lang* lang = ByCode(code);
+            REQUIRE(lang != nullptr);
+            INFO(code, ": ", r.name);
+            CHECK(CoopI18n::Tr(lang, r.name) != r.name);
+            REQUIRE(static_cast<std::size_t>(mv.selected) == i);
+            CHECK(CoopI18n::Tr(lang, mv.help) != mv.help);
+            if (r.name != "Character by age") {
+                CHECK(r.value == "Not set");
+                CHECK(CoopI18n::Tr(lang, r.value) != r.value);
+            }
+        }
+    }
+    CHECK(seen == 3);
+}

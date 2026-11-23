@@ -3870,9 +3870,16 @@ CharPageState CharPageNow(coop::host::GameFlags& flags) {
 // Each module frame after the pick guard: the age's pick written into the mod's value when it is not the shown one.
 void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
                    const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
-    coop::host::GameFlags flags(memory);
     CoopCharAges::Input in;
     in.pick = pick;
+    {   // Off (the default) and no save-load hold: Frame only forgets the last pick seen; no flag is read
+        std::lock_guard lock(g_char_ages_mutex);
+        if (!CharAges().stored().on && !g_char_held.load(std::memory_order_relaxed)) {
+            CharAges().Frame(in, files);
+            return;
+        }
+    }
+    coop::host::GameFlags flags(memory);
     in.childhood = flags.get_bool(kChildhoodHash);
     const CharPageState page = CharPageNow(flags);
     in.page_open = page.page_open;
