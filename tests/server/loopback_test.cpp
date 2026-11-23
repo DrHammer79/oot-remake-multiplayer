@@ -3,6 +3,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -1190,4 +1191,39 @@ TEST_CASE("host service: with approve_joins it says so at the start, holds a joi
 
   service.stop();
   CHECK(said(log, "host approval: asked 1, let in 0, turned away 0, no answer 0, in without asking 0"));
+}
+
+TEST_CASE("loopback: what waits for a player that stops reading is counted, and goes when it reads again (row 260)") {
+  EnetLife enet;
+  ServerOptions options = server_options();
+  EnetServer server(options);
+  REQUIRE(server.start());
+  const std::uint16_t port = server.port();
+  Client a;
+  Client b;
+  a.connect(port);
+  REQUIRE(pump_until(server, {&a}, [&] { return a.connected; }));
+  a.send(hello_from("Link"), kChannelSession);
+  REQUIRE(pump_until(server, {&a}, [&] { return a.find<Welcome>() != nullptr; }));
+  b.connect(port);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.connected; }));
+  b.send(hello_from("Zelda"), kChannelSession);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<Welcome>() != nullptr; }));
+  CHECK(server.queues().peers == 2);
+
+  // b stops reading (its game hangs): what the server relays to it reliably waits, unacknowledged.
+  for (int i = 0; i < 20; ++i) a.send(Chat{0, "line " + std::to_string(i)}, kChannelSession);
+  REQUIRE(pump_until(server, {&a}, [&] { return server.queues().largest_outgoing > 200; }));
+  const std::size_t held = server.queues().largest_outgoing;
+  CHECK(server.queues().backlog_drops == 0);   // far under kMaxOutgoingBytes: b stays in
+
+  // b reads again: the chat comes through and the backlog goes.
+  REQUIRE(pump_until(server, {&a, &b}, [&] {
+    const auto chats = std::count_if(b.inbox.begin(), b.inbox.end(), [](const Received& r) {
+      return std::holds_alternative<Chat>(r.message);
+    });
+    return chats == 20 && server.queues().largest_outgoing < held;
+  }));
+  CHECK(server.queues().backlog_drops == 0);
+  CHECK(server.session().player_count() == 2);
 }

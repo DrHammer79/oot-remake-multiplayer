@@ -3749,6 +3749,24 @@ std::size_t Session::player_count() const {
       [](const auto& entry) { return entry.second.state == State::joined; }));
 }
 
+Session::Sizes Session::sizes() const {
+  Sizes out;
+  out.connections = connections_.size();
+  for (const auto& [id, c] : connections_) {
+    out.deferred += c.deferred.size();
+    out.deferred_bytes += c.deferred_bytes;
+    out.present += c.present.size();
+  }
+  out.objects = objects_.size();
+  out.flags = flags_.size();
+  for (const auto& [scene, dead] : dead_) out.dead += dead.size();
+  for (const auto& [scene, cuts] : grass_) out.grass += cuts.size();
+  out.world_scenes = world_.scenes();
+  out.world_entries = world_.entries();
+  out.actions = actions_.size();
+  return out;
+}
+
 std::optional<std::uint8_t> Session::host() const {
   if (!host_) return std::nullopt;
   return connections_.at(*host_).number;

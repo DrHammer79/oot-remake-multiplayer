@@ -2735,3 +2735,23 @@ TEST_CASE("client: as the host, another player's JOIN_KNOCK is a message, and JO
   const std::size_t at = wait_received<proto::JoinAllow>(client, server, from);
   CHECK(std::get<proto::JoinAllow>(server.received[at].message) == proto::JoinAllow{5, true, false});
 }
+
+TEST_CASE("enet: outgoing_bytes counts what waits to go and what is not acknowledged, nothing received (row 260)") {
+  ENetPeer peer{};
+  enet_list_clear(&peer.outgoingCommands);
+  enet_list_clear(&peer.outgoingSendReliableCommands);
+  enet_list_clear(&peer.sentReliableCommands);
+  enet_list_clear(&peer.dispatchedCommands);
+  CHECK(coop::net::outgoing_bytes(peer) == 0);
+  ENetOutgoingCommand queued{}, reliable{}, sent{}, fragment{};
+  queued.fragmentLength = 100;
+  reliable.fragmentLength = 1200;
+  sent.fragmentLength = 300;
+  fragment.fragmentLength = 1100;   // one fragment of a larger message: its own length
+  enet_list_insert(enet_list_end(&peer.outgoingCommands), &queued);
+  enet_list_insert(enet_list_end(&peer.outgoingCommands), &fragment);
+  enet_list_insert(enet_list_end(&peer.outgoingSendReliableCommands), &reliable);
+  enet_list_insert(enet_list_end(&peer.sentReliableCommands), &sent);
+  CHECK(coop::net::outgoing_bytes(peer) == 100 + 1100 + 1200 + 300);
+  CHECK(coop::net::kSlowPeerBytes < coop::net::kMaxOutgoingBytes);
+}

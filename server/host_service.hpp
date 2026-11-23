@@ -138,6 +138,8 @@ class HostService {
   bool port_failed() const { return port_failed_; }
   std::uint16_t port() const;
   const Session* session() const;
+  // The server's sizes and ENet's queues as one log line (host_memory_line; empty when not hosting). Row 260.
+  std::string memory_line() const;
   // The console's moderation (Session::admin); "not hosting" when not running.
   std::string admin(const std::string& line);
   // (Navi) New Game+: the hosting game's level (Session::set_ngplus). Between
@@ -184,6 +186,10 @@ class HostService {
 std::string show_ipv4(std::uint32_t ip);
 // The host's kept bans file (one lobby id of a player key, "k:" and hex, a line; comments and anything else skipped):
 // read sorted, written whole. The game's Host (coop-bans.txt) and coop_server --bans-file use it.
+// Row 260: what the in-process server holds, for the host's memory line every 30 s (coop_host_menu.cpp):
+// "server: <n> connections, deferred <n> (<bytes> B), ... ; enet: <n> peers, out <bytes> B (largest <bytes>), ...".
+std::string host_memory_line(const Session::Sizes& sizes, const EnetServer::Queues& queues);
+
 std::vector<std::string> read_ban_file(const std::string& path);
 void write_ban_file(const std::string& path, const std::vector<std::string>& bans);
 

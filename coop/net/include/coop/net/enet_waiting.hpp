@@ -48,6 +48,31 @@ inline std::size_t waiting_bytes(const ENetPeer& peer) {
   return total;
 }
 
+// What we gave ENet for `peer` that it still holds (row 260): queued and not
+// sent yet, and reliable sent but not acknowledged. ENet bounds none of it: a
+// reliable send past the peer's window stays queued (protocol.c, windowSize),
+// so to a peer that takes less than we send this only grows. Each command's
+// fragmentLength: a whole message's length, or one fragment's.
+inline std::size_t outgoing_bytes(const ENetPeer& peer) {
+  std::size_t total = 0;
+  auto add = [&total](const ENetList& list) {
+    for (const ENetListNode* node = list.sentinel.next; node != &list.sentinel; node = node->next) {
+      total += reinterpret_cast<const ENetOutgoingCommand*>(node)->fragmentLength;
+    }
+  };
+  add(peer.outgoingCommands);
+  add(peer.outgoingSendReliableCommands);
+  add(peer.sentReliableCommands);
+  return total;
+}
+
+// Past this much held for a peer, unreliable messages to it (samples, poses:
+// the next one replaces them) are not queued; reliable ones still are.
+inline constexpr std::size_t kSlowPeerBytes = std::size_t{1} << 20;
+// Past this much the peer is dropped (it reconnects): held for it any longer,
+// the memory would only grow.
+inline constexpr std::size_t kMaxOutgoingBytes = std::size_t{16} << 20;
+
 // Sets peer->totalWaitingData to what really waits. Returns the bytes ENet
 // had counted too many (the packets it threw away without subtracting).
 inline std::size_t mend_waiting_data(ENetPeer& peer) {
