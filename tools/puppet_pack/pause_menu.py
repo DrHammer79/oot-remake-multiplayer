@@ -231,8 +231,25 @@ def add_system_buttons(d):
 HELP = "Pa_CoopHelp_00"
 HELP_LAYOUT = "PaActorCaption_00"
 HELP_SOURCE = "Pa_Button_04"   # (the page's last row: the help goes below it, in the rows' column)
-HELP_BELOW = 300.0             # (from the last row's centre to the help's: the row is 180 high, the help's top under it)
-HELP_SIZE = (1000.0, 360.0)    # (CoopPauseTab::kHelpColumns letters a line, kHelpLines lines)
+# Where the help's words go (row 139, ui-fit-139-2). The caption's text pane (PaActorCaption_00's T_Caption_00, 1120 x
+# 180 at the part's origin) hangs DOWN from the part's y: its first line's top is at the help's y and every further line
+# goes below (seen on the 0.11.12 proof shots: 28.5 px a line on a 1280 x 720 shot of the 3840 x 2160 layout). 0.11.10
+# put the help 300 under the last row as if it were centred there, so on the game's page (Pa_Button_04 at y -516) the
+# lines began at -816 and the 4th (and part of the 3rd in some languages) ran off the screen's bottom, -1080, on every
+# page that shows a help (Multiplayer, Co-op settings, Commands, Lobby, Mods, co-op's menu). add_help refuses a layout
+# where kHelpLines lines would not fit between the last row and the bottom.
+HELP_BELOW = 150.0             # (the last row's centre to the first line's top: 90 to the row's bottom, then a gap)
+HELP_LINE = 85.5               # (a line of the caption's words, in the layout's units)
+HELP_LINES = 4                 # (CoopPauseTab::kHelpLines)
+SCREEN_BOTTOM = -1080.0        # (the layout's bottom edge: 2160 high, y up from the centre)
+HELP_MARGIN = 40.0             # (kept free between the last line and the screen's bottom edge)
+HELP_SIZE = (1120.0, HELP_LINES * HELP_LINE)   # (the caption's width; kHelpLines lines: the words' own box)
+
+
+def help_bottom(d):
+    """The bottom of HELP_LINES lines of help placed HELP_BELOW under HELP_SOURCE, in the layout's root frame."""
+    _, oy = ui_pack.frame_offset(d, HELP_SOURCE, "RootPane")
+    return oy + _xy(d, HELP_SOURCE)[1] - HELP_BELOW - HELP_LINES * HELP_LINE
 
 
 def add_help(d):
@@ -244,6 +261,13 @@ def add_help(d):
         raise PauseMenuError("the layout has no %s" % HELP_SOURCE)
     if HELP in names:
         raise PauseMenuError("the layout has %s already" % HELP)
+    try:
+        bottom = help_bottom(d)
+    except ui_pack.UiPackError as e:
+        raise PauseMenuError("the help's place: %s" % e) from e
+    if bottom < SCREEN_BOTTOM + HELP_MARGIN:
+        raise PauseMenuError("%d lines of help under %s would end at %.0f, off the screen (bottom %.0f)"
+                             % (HELP_LINES, HELP_SOURCE, bottom, SCREEN_BOTTOM))
     return ui_pack.clone_parts(d, [ui_pack.Copy(HELP_SOURCE, HELP, (0.0, -HELP_BELOW), hidden=True,
                                                 part_layout=HELP_LAYOUT, size=HELP_SIZE)], new_id=_new_id)
 

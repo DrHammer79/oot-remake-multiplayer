@@ -811,7 +811,7 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hant, "Who can join") == "誰能加入");
     CHECK(CoopI18n::Tr(hans, "Private") == "私人");
     CHECK(CoopI18n::Tr(hant, "Public") == "公開");
-    CHECK(CoopI18n::Tr(hans, "Page 2/3") == "第 2/3 页");   // (row 264: the page line, its ZL / ZR letters added after)
+    CHECK(CoopI18n::Tr(hans, "Page 2/3") == "第 2/3 页");   // (row 264: the page line; the title adds "(ZL/ZR)" after)
     CHECK(CoopI18n::Tr(hant, "Page 1/2") == "第 1/2 頁");
     CHECK(CoopI18n::Tr(hans, "Page") == "页");
     CHECK(CoopI18n::Tr(hant, "Turn the page") == "翻頁");
@@ -1072,4 +1072,42 @@ TEST_CASE("coop i18n (own text): a line built around a name takes the template o
     room.s.in_one = true;
     room.room = "On";
     CHECK(CoopPauseTab::RowTexts(CoopPauseTab::View::kSession, room)[1] == CoopI18n::TrAround("Copy room: ", "On"));
+}
+
+TEST_CASE("coop i18n: native rows show a table only when the game's own font set has its letters (row 139)") {
+    using CoopI18n::FontSet;
+    // The set the game loads for its language (romfs Font2: base, CNzh, TWzh, KRko, EUru).
+    CHECK(CoopI18n::FontSetFor("en") == FontSet::kBase);
+    CHECK(CoopI18n::FontSetFor("en-US") == FontSet::kBase);
+    CHECK(CoopI18n::FontSetFor("ja") == FontSet::kBase);   // (the base set holds Japanese: OT-UDTypos510)
+    CHECK(CoopI18n::FontSetFor("fr") == FontSet::kBase);
+    CHECK(CoopI18n::FontSetFor("zh-Hans") == FontSet::kCNzh);
+    CHECK(CoopI18n::FontSetFor("zh-CN") == FontSet::kCNzh);
+    CHECK(CoopI18n::FontSetFor("zh-Hant") == FontSet::kTWzh);
+    CHECK(CoopI18n::FontSetFor("zh-TW") == FontSet::kTWzh);
+    CHECK(CoopI18n::FontSetFor("zh-HK") == FontSet::kTWzh);
+    CHECK(CoopI18n::FontSetFor("ko") == FontSet::kKRko);
+    CHECK(CoopI18n::FontSetFor("KO-kr") == FontSet::kKRko);
+    CHECK(CoopI18n::FontSetFor("ru") == FontSet::kEUru);
+    CHECK(CoopI18n::FontSetFor("rus") == FontSet::kBase);   // (not "ru")
+    const CoopI18n::Lang* hans = CoopI18n::ForCode("zh-Hans");
+    const CoopI18n::Lang* hant = CoopI18n::ForCode("zh-Hant");
+    REQUIRE(hans != nullptr);
+    REQUIRE(hant != nullptr);
+    // The 0.11.12 proof: Menu language 13 (zh-Hans) on an English game drew boxes; now English.
+    CHECK(CoopI18n::Shown(hans, "en") == nullptr);
+    CHECK(CoopI18n::Shown(hans, "ja") == nullptr);
+    CHECK(CoopI18n::Shown(hans, "ko") == nullptr);
+    CHECK(CoopI18n::Shown(hans, "zh-Hant") == nullptr);
+    CHECK(CoopI18n::Shown(hant, "zh-CN") == nullptr);
+    // The game in that language: its font set has the letters, the table shows.
+    CHECK(CoopI18n::Shown(hans, "zh-Hans") == hans);
+    CHECK(CoopI18n::Shown(hans, "zh-CN") == hans);
+    CHECK(CoopI18n::Shown(hant, "zh-TW") == hant);
+    CHECK(CoopI18n::Shown(nullptr, "zh-CN") == nullptr);   // (English: Latin is in every set)
+    // Every table we ship names a set the game has (a new table must be added to Shown's list).
+    for (int i = 0; i < CoopI18n::kLangCount; ++i) {
+        if (CoopI18n::kLangs[i].entries == nullptr) continue;
+        CHECK(CoopI18n::Shown(&CoopI18n::kLangs[i], CoopI18n::kLangs[i].code) == &CoopI18n::kLangs[i]);
+    }
 }

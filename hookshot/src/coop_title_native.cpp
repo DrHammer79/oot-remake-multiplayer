@@ -131,10 +131,11 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
     l.texts[static_cast<std::size_t>(l.back)] = CoopI18n::Tr("Back");
     l.rows[static_cast<std::size_t>(l.back)] = -1;
     l.focus = at >= 0 ? at - l.top : l.back;
-    // (more than one page: the page first, between the game's own ZL and ZR letters (coop_list_pages.h), then what
-    // the row does; both in the player's language before the cut: the page is the table's shape, the row's help its
-    // line. Row 264: "Page 2 of 3 (ZL/ZR)" in words was not seen as something the pad can do)
-    const std::string paged = CoopListPages::Line(l.page, l.pages);
+    // (more than one page: the page first, "Page 2/3 (ZL/ZR)", then what the row does; both in the player's language
+    // before the cut: the page is the table's shape, the row's help its line. The buttons in words: the title's
+    // archive has no icon pane of the game's (coop_list_pages.h), and the game's letters in this words pane drew as
+    // empty boxes, row 264)
+    const std::string paged = CoopListPages::Line(l.page, l.pages, true);
     l.hint = Fit(paged.empty()   ? CoopI18n::Tr(v.help)
                  : v.help.empty() ? paged
                                   : paged + "   " + CoopI18n::Tr(v.help),

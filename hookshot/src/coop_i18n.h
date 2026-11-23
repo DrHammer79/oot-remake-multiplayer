@@ -55,6 +55,19 @@ int MenuLanguageSetting(std::string_view ini);
 int MenuLanguageAfterRead(int last, std::string_view ini, bool* good);
 const char* MenuLanguageCode(int setting);
 
+// The game's font sets (romfs Font2/*.bfarc, row 139, ui-fit-139-2): the game loads ONE at its start for its own
+// language (language.txt / HOS_LANGUAGE), and every native pane (the - menu's tabs and rows, the title's buttons, the
+// captions) draws with it. Their Normal.buif: the base Font = CetraDisplayPro (Latin) + OT-UDTypos510 (Japanese, JIS);
+// Font_CNzh adds FZYASHJW_Zhun (Simplified Chinese), Font_TWzh FZLTHB (Traditional), Font_KRko AsiaKKRST (Hangul),
+// Font_EUru ClarimoUDPE (Cyrillic). A Simplified line in the base set shows boxes for 联/设/你 (JIS has 机/置/的).
+enum class FontSet { kBase, kCNzh, kTWzh, kKRko, kEUru };
+// The set the game loads for its language code ("zh-CN" / "zh-Hans": kCNzh, "zh-TW" / "zh-Hant": kTWzh, "ko": kKRko,
+// "ru": kEUru, anything else, Japanese and English included: kBase).
+FontSet FontSetFor(std::string_view game_code);
+// The table the native panes show: the Menu language's table (`menu`, nullptr English) when the game's font set
+// (`game_code`) holds its letters, else English (nullptr): never boxes for missing letters.
+const Lang* Shown(const Lang* menu, std::string_view game_code);
+
 // The table for a language code (any case; "zh-Hans-CN" takes "zh-Hans"), or
 // nullptr for English and codes with no table.
 const Lang* ForCode(std::string_view code);

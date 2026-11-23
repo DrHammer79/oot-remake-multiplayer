@@ -707,6 +707,9 @@ struct ListLine {
     // The name / the value is shown as it is: a player's, a room's or a mod's own text, or words already in the player's
     // language (never looked up in the translation table again: a player called "Link" stays "Link").
     bool own_name = false, own_value = false;
+    // A list's heading with more than one page ("Public games  Page 1/2"): the page shows the game's own ZL and ZR
+    // button icons beside it (its controller picture's keys, coop_list_pages.h), as the words have no button letters.
+    bool paged = false;
 };
 
 // --- Typing with a pad: the list's rows are the keys ---
@@ -804,6 +807,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v);
 // network: its password, then Join; a room: the Join view with its name). ("Cells" below are the list's game rows.)
 inline constexpr int kCells = 6, kCellColumns = 1, kListRows = kCells + 1;
 inline constexpr std::size_t kListNameChars = 30, kListValueChars = 16;   // (the row's left box is 908 units, its right 682)
+// A line with no value (a header, a note, a hint's wrapped words): the module hides its value box (only a line with a
+// value shows one), so its words, left-aligned in the left box, may run on over the right box's room as well (row 139,
+// ui-fit-139-2: the Mods tab's 'Co-op: Player 2 (B): 1 mod ...' was cut at 30 beside an empty right half).
+inline constexpr std::size_t kListLineChars = kListNameChars + kListValueChars;
 // The list's rows for this page: the header, then a page of games ("" rows not shown). With nothing listed, the
 // first game row says why.
 std::vector<ListLine> ListLines(const SessionView& v);

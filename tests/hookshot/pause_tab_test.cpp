@@ -3,6 +3,7 @@
 // the module does to the game, what the pad lets through, and the probe's lines.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <thread>
@@ -958,15 +959,20 @@ TEST_CASE("pause tab: the details list on the right: the session, why co-op fail
     fv.s.failed = true;
     fv.version = "Squadala! v0.11.6";
     fv.why = "no answer from the relay 127.0.0.1:27530: is the address right, and is the relay running? (a relay from "
-             "before room names does not answer room names: ask the host for the join code)";
+             "before room names does not answer room names: ask the host for the join code; a relay behind a "
+             "firewall needs its UDP port open to the internet, and a relay on this PC needs the port forwarded)";
     d = DetailLines(View::kMain, fv);
     CHECK(d[0].name == "Co-op failed");
     CHECK(d[1].name.rfind("no answer from the relay", 0) == 0);
+    // (lines with no value: the hidden value box's room too, row 139)
+    std::size_t widest = 0;
     for (int i = 1; i < kListRows; ++i) {
         CHECK(!d[static_cast<std::size_t>(i)].name.empty());
         CHECK(d[static_cast<std::size_t>(i)].value.empty());
-        CHECK(d[static_cast<std::size_t>(i)].name.size() <= kListNameChars);
+        CHECK(d[static_cast<std::size_t>(i)].name.size() <= kListLineChars);
+        widest = std::max(widest, d[static_cast<std::size_t>(i)].name.size());
     }
+    CHECK(widest > kListNameChars);
     // (it needs every line: the release gives its line up, and the rest is cut)
     CHECK(d[kListRows - 1].name.substr(d[kListRows - 1].name.size() - 3) == "...");
     fv.why = "The port 27015 is in use";   // (a short one: the release on the line after it)
@@ -1529,6 +1535,7 @@ TEST_CASE("pause tab: the game browser: the rows choose the list, search, filter
     auto lines = ListLines(v);
     REQUIRE(lines.size() == static_cast<std::size_t>(kListRows));
     CHECK(lines[0].name == "This network");      // (one page: no page marks)
+    CHECK_FALSE(lines[0].paged);
     CHECK(lines[0].value == "Refresh");          // (its box asks the list again)
     CHECK(lines[0].act == RowAction::kBrowseRefresh);
     CHECK(lines[1].name == "Looking for games...");
@@ -1573,13 +1580,17 @@ TEST_CASE("pause tab: the game browser: the rows choose the list, search, filter
     rows = RowTexts(View::kLan, v);
     CHECK(rows[0] == "Public games (10)");
     lines = ListLines(v);
-    // (more than a page: the heading says so, the page between the game's ZL and ZR letters: row 264)
-    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 1/2 " + CoopListPages::kZR);
+    // (more than a page: the heading says so, and is marked paged: the module shows the game's ZL and ZR icons
+    // beside it, never letters in its words: row 264)
+    CHECK(lines[0].name == "Public games  Page 1/2");
+    CHECK(lines[0].paged);
     CHECK(lines[0].name.size() <= kListNameChars);
+    for (std::size_t i = 1; i < lines.size(); ++i) CHECK_FALSE(lines[i].paged);
     CHECK(lines[2].name == "kokiri (Saria)");
     v.s.cell_page = 1;   // (the second page: the 7th to 10th rooms)
     lines = ListLines(v);
-    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 2/2 " + CoopListPages::kZR);
+    CHECK(lines[0].name == "Public games  Page 2/2");
+    CHECK(lines[0].paged);
     CHECK(lines[1].name == "kokiri (Saria)");
     CHECK(lines[2].name == "a room with a very long nam...");   // (cut to kListNameChars)
     CHECK(lines[2].name.size() <= kListNameChars);
