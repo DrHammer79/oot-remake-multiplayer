@@ -1042,6 +1042,34 @@ class AwaitTest(unittest.TestCase):
         self.assertEqual(shots, ["after"])
 
 
+class GrammarTest(unittest.TestCase):
+    """Row 325 review: one scenario grammar for both readers. The same lists are in tests/lichii/testinput_test.cpp
+    ('testinput: the runner's grammar'): every line here is taken by both parsers or refused by both."""
+
+    TAKEN = ("wait 1", "wait 36000", "wait 0007", "hold A 36000", "press A 1", "stick -1 +1 5", "stick .5 -0.5 5",
+             "toward 1 2 36000", "goto 1.5 -2 0.2 600", "goto .5 5. 1", "goto 1e3 -1E-2", "goto 1000000 -1000000",
+             "await 0 x", "await 99999999999 x", "hit X 80", "drop X 500", "hurt 1", "setflag F -2147483648",
+             "setflag F 2147483647", "setflag F 007")
+    REFUSED = ("wait 0", "wait 36001", "wait +5", "wait -0", "wait 1_0", "wait 0000000001", "hold A 0", "press A 0",
+               "stick 0 0 0", "toward 1 2 0", "toward 1 2 36001", "goto 1 2 1 0", "await -1 x", "await +1 x",
+               "await 1_0 x", "goto 0x10 2", "goto 1_0 2", "goto inf 2", "goto nan 2", "goto 1000001 2", "goto 1e7 2",
+               "goto . 2", "goto 1e 2", "stick 0x1 0 5", "hit X 0", "hit X 81", "hit X ²", "drop X 501",
+               "hurt 81", "hurt ³", "setflag F 2147483648", "setflag F -2147483649", "setflag F --5",
+               "setflag F +5")
+
+    def test_taken_by_the_runner(self):
+        for line in self.TAKEN:
+            with self.subTest(line=line):
+                hs.parse(line + "\nmark z\n")
+
+    def test_refused_by_the_runner_as_the_line_s_error(self):
+        for line in self.REFUSED:
+            with self.subTest(line=line):
+                with self.assertRaises(hs.ScriptError) as e:
+                    hs.parse(line + "\nmark z\n")
+                self.assertIn("line 1:", str(e.exception))
+
+
 class ScenarioFilesTest(unittest.TestCase):
     """Row 325's proof pair parses (await, stun, event steps)."""
 

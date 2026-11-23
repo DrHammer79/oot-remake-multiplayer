@@ -45,6 +45,8 @@ WINDOWS = os.name == "nt"
 TICKS = 60.0              # script ticks a second
 PRESS_TICKS = 6           # press KEYS: held this long, then let go as long
 GOTO_TICKS = 600          # goto gives up after 10 s
+MAX_STEP_TICKS = 60 * 60 * 10  # a played step's TICKS: 1 up to this (coop_testinput.cpp kMaxStepTicks, 10 min)
+MAX_NUMBER = 1e6          # a coordinate, radius or stick value: at most this far from 0 (coop_testinput.cpp Number)
 MAIN_BASE = 0x80020000    # where Hookshot maps main (docs/hookshot.md)
 GAMEUI_SLOT = 0x4e7cfa8   # main offset of the GameUI module pointer (integration docs/player-state-map.md)
 POS_VALID = 0x58a         # GameUI +0x58a bit 0: the position below is Link's
@@ -123,20 +125,47 @@ class Step:
         return "Step(%s line %d)" % (self.kind, self.line)
 
 
+# One scenario grammar for both readers (row 325 review): the module's parser (lichii/hook/coop_testinput.cpp Parse,
+# LICHII_COOP_TEST_SCRIPT and the C++ test that reads every scenario) and this one take the same words for TICKS and
+# numbers, so a line one of them plays is never refused by the other. Whole numbers are plain digits (no sign, no
+# underscore), numbers plain decimals (no hex, no underscore, no inf/nan).
+_WHOLE = re.compile(r"[0-9]+")
+_DECIMAL = re.compile(r"[-+]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?")
+
+
 def _ticks(text):
-    try:
-        v = int(text)
-    except ValueError:
+    """A played step's TICKS (wait, hold, press, stick, goto, toward): 1 up to MAX_STEP_TICKS (module Ticks)."""
+    if len(text) > 9 or not _WHOLE.fullmatch(text):
         return None
-    return v if v >= 0 else None
+    v = int(text)
+    return v if 1 <= v <= MAX_STEP_TICKS else None
+
+
+def _whole_in(text, low, high):
+    """hit N, drop METRES, hurt QUARTER_HEARTS: plain digits from low to high (module from_chars + its range), or None.
+    (str.isdigit also takes digits int() refuses, such as superscripts: a ValueError, not the line's error.)"""
+    return int(text) if _WHOLE.fullmatch(text) and low <= int(text) <= high else None
+
+
+def _int32(text):
+    """setflag VALUE: a whole number, '-' allowed, that fits 32 bits (module from_chars into int32_t), or None."""
+    if not re.fullmatch(r"-?[0-9]+", text):
+        return None
+    v = int(text)
+    return v if -2 ** 31 <= v < 2 ** 31 else None
+
+
+def _await_ticks(text):
+    """await's TICKS, the runner's own step: any whole number from 0 up, 0 = no wait (module RunnerTicks)."""
+    return int(text) if _WHOLE.fullmatch(text) else None
 
 
 def _number(text):
-    try:
-        v = float(text)
-    except ValueError:
+    """A coordinate, radius or stick value: a plain decimal, finite, at most MAX_NUMBER from 0 (module Number)."""
+    if not _DECIMAL.fullmatch(text):
         return None
-    return v if math.isfinite(v) else None
+    v = float(text)
+    return v if math.isfinite(v) and abs(v) <= MAX_NUMBER else None
 
 
 def _axis(text):
@@ -280,12 +309,12 @@ def parse(text):
                 fail("want: %s %s" % (cmd.lower(), "ACTOR" if cmd == "KILL" else "ITEM"))
             s.kind, s.name = cmd.lower(), w[1]
         elif cmd == "HIT":
-            if len(w) != 3 or not w[2].isdigit() or not 1 <= int(w[2]) <= 80:
+            if len(w) != 3 or _whole_in(w[2], 1, 80) is None:
                 fail("want: hit ACTOR N (1 to 80)")
             s.kind, s.name, s.start = "hit", w[1], w[2]
         elif cmd == "DROP":
             # Row 178: the nearest boss of that name that this game owns goes METRES straight down (test only).
-            if len(w) != 3 or not w[2].isdigit() or not 1 <= int(w[2]) <= 500:
+            if len(w) != 3 or _whole_in(w[2], 1, 500) is None:
                 fail("want: drop ACTOR METRES (1 to 500)")
             s.kind, s.name, s.start = "drop", w[1], w[2]
         elif cmd == "STUN":
@@ -293,12 +322,12 @@ def parse(text):
                 fail("want: stun BOSS")
             s.kind, s.name = "stun", w[1]
         elif cmd == "HURT":
-            if len(w) != 2 or not w[1].isdigit() or not 1 <= int(w[1]) <= 80:
+            if len(w) != 2 or _whole_in(w[1], 1, 80) is None:
                 fail("want: hurt QUARTER_HEARTS (1 to 80)")
             s.kind, s.name = "hurt", w[1]
         elif cmd == "SETFLAG":
-            if len(w) != 3 or not w[2].lstrip("-").isdigit():
-                fail("want: setflag NAME VALUE (an Int or Bool flag, a whole number)")
+            if len(w) != 3 or _int32(w[2]) is None:
+                fail("want: setflag NAME VALUE (an Int or Bool flag, a whole number that fits 32 bits)")
             s.kind, s.name, s.start = "setflag", w[1], w[2]
         elif cmd == "NOFAIRY":
             if len(w) != 1:
@@ -347,13 +376,13 @@ def parse(text):
             # module step, so it plays on any build. A timeout is logged and the script goes on.
             pattern = line.strip()[len(w[0]):].strip()
             pattern = pattern[len(w[1]):].strip() if len(w) >= 2 else ""
-            if len(w) < 3 or _ticks(w[1]) is None or not pattern:
+            if len(w) < 3 or _await_ticks(w[1]) is None or not pattern:
                 fail("want: await TICKS REGEX (the rest of the line, matched in this game's log)")
             try:
                 re.compile(pattern)
             except re.error as e:
                 fail("await: bad REGEX: %s" % e)
-            s.kind, s.ticks, s.name = "await", _ticks(w[1]), pattern
+            s.kind, s.ticks, s.name = "await", _await_ticks(w[1]), pattern
         elif cmd == "MARK":
             if len(w) != 2:
                 fail("want: mark NAME (one word)")
