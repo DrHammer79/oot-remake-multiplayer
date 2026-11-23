@@ -1056,15 +1056,16 @@ bool Camera(double eye[3], double target[3]) {
     }
     // The game's camera turned with the orbit (patch 0036): its own eye, placed by its collision, kept and aimed at
     // Link. Otherwise (no patch 0036, the probe, a camera that does not follow): Aim's shot.
+    g_steer.Observe(game_eye, game_target);
     std::optional<Shot> shot;
     if (g_steer.Driving()) {
-        shot = Framed(game_eye, game_target, *aim, *link, g_orbit.window(), fov);
+        shot = Framed(game_eye, game_target, *aim, *link, g_orbit.window(), g_steer.FreeDistance(), fov);
     }
     if (!shot) {
         shot = aim;
     }
-    g_steer.Observe(game_eye, game_target);
-    g_steer.Want(DirectionOf(game_target, aim->eye));
+    g_steer.Want(DirectionOf(game_target, aim->eye),
+                 std::hypot(aim->eye[0] - game_target[0], aim->eye[1] - game_target[1], aim->eye[2] - game_target[2]));
     g_watch.Framed(now);
     for (int i = 0; i < 3; ++i) {
         eye[i] = shot->eye[i];
@@ -1073,7 +1074,7 @@ bool Camera(double eye[3], double target[3]) {
     return true;
 }
 
-bool Turn(float* yaw, float* pitch, int state) {
+bool Turn(float* yaw, float* pitch, int state, bool coop_on) {
     if (yaw == nullptr || pitch == nullptr) {
         return false;
     }
@@ -1081,7 +1082,7 @@ bool Turn(float* yaw, float* pitch, int state) {
     std::optional<std::string> note;
     {
         std::lock_guard lock(g_mutex);
-        angles = g_steer.Command({*yaw, *pitch}, state, g_orbit.Asked(NowMs()));
+        angles = g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()));
         note = g_steer.TakeNote();
     }
     if (note) {

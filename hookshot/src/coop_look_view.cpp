@@ -206,10 +206,10 @@ Shot ReAim(const Vec3& eye, const Vec3& point, const Window& window, double fov_
 }
 
 std::optional<Shot> Framed(const Vec3& game_eye, const Vec3& game_target, const Shot& aim, const Subject& link,
-                           const Window& window, double fov_y) {
+                           const Window& window, double free_distance, double fov_y) {
     const Vec3 d{game_eye[0] - game_target[0], game_eye[1] - game_target[1], game_eye[2] - game_target[2]};
     const double dist = std::sqrt(Dot(d, d));
-    if (!(dist >= kMinEye)) {
+    if (!(dist >= kMinEye) || !(dist < free_distance * kPulledIn)) {
         return std::nullopt;
     }
     const Vec3 a{aim.eye[0] - game_target[0], aim.eye[1] - game_target[1], aim.eye[2] - game_target[2]};
@@ -290,6 +290,7 @@ std::optional<Angles> Steer::Command(Angles now, int state, bool asked) {
         original_ = now;
         phase_ = Phase::probe;
         step_ = waited_ = off_ = 0;
+        free_ = 0;
         seen_.reset();
         [[fallthrough]];
     case Phase::probe: {
@@ -332,11 +333,12 @@ std::optional<Angles> Steer::Command(Angles now, int state, bool asked) {
         offset_pitch_ = s1.elevation - sign_pitch_ * c1.pitch;
         last_ = c1;
         phase_ = Phase::drive;
-        char line[192];
+        char line[320];
         std::snprintf(line, sizeof line,
                       "coop: look: the game camera turns with the Customize picture (the eye turns %.2f and %.2f "
-                      "times its yaw and pitch), so the game's collision places the eye",
-                      ratio_yaw, ratio_pitch);
+                      "times its yaw and pitch; its eye %.2f m from its target, the picture's own %.2f m), so the "
+                      "game's collision places the eye where it moves it in",
+                      ratio_yaw, ratio_pitch, free_, aim_distance_);
         note_ = line;
         return Drive();
     }
@@ -349,11 +351,16 @@ std::optional<Angles> Steer::Command(Angles now, int state, bool asked) {
 void Steer::Observe(const Vec3& game_eye, const Vec3& game_target) {
     if (const auto d = DirectionOf(game_target, game_eye)) {
         seen_ = d;
+        if (phase_ == Phase::probe || phase_ == Phase::drive) {
+            free_ = std::max(free_, std::hypot(game_eye[0] - game_target[0], game_eye[1] - game_target[1],
+                                               game_eye[2] - game_target[2]));
+        }
     }
 }
 
-void Steer::Want(const std::optional<Direction>& want) {
+void Steer::Want(const std::optional<Direction>& want, double aim_distance) {
     want_ = want;
+    aim_distance_ = aim_distance;
 }
 
 std::optional<std::string> Steer::TakeNote() {

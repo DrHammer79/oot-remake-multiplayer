@@ -12,6 +12,7 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -682,6 +683,29 @@ TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patc
     const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state)") !=
           std::string::npos);
+    // Asked with co-op off too, so a camera still turned is put back (review of fd5949c1).
+    CHECK(module.find("return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;") != std::string::npos);
+    const std::string live = ReadFile(kRepo / "hookshot" / "src" / "coop_look_live.cpp");
+    CHECK(live.find("g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()))") != std::string::npos);
+}
+
+TEST_CASE("hookshot: every export's guard site has a name of its own (a crash log names the right export)") {
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    REQUIRE_FALSE(module.empty());
+    const std::string key = "CoopBoundary::Site site{\"";
+    std::set<std::string> names;
+    int sites = 0;
+    for (std::size_t at = module.find(key); at != std::string::npos; at = module.find(key, at + 1)) {
+        const std::size_t from = at + key.size();
+        const std::string name = module.substr(from, module.find('"', from) - from);
+        CAPTURE(name);
+        CHECK(names.insert(name).second);
+        ++sites;
+    }
+    CHECK(sites > 10);
+    // The two camera exports: each its own.
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT void hos_coop_camera(uint64_t frame, const float* block, float width, float height) {\n"
+                      "    static CoopBoundary::Site site{\"hos_coop_camera\"};") != std::string::npos);
 }
 
 namespace {

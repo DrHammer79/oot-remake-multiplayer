@@ -301,16 +301,18 @@ TEST_CASE("look steer: re-aimed from any eye up to 50 degrees above, the point i
     }
 }
 
-TEST_CASE("look steer: from the eye the orbit wants, the framed picture is Aim's") {
+TEST_CASE("look steer: a wall beyond Aim's eye: from the eye the orbit wants, the framed picture is Aim's") {
     const Window w = Square();
     const Subject link{{12.5f, 3.0f, -40.0f}, 1.35f};
     const Vec3 game_target{12.5, 4.2, -40.0};
     const Shot aim = CoopLookView::Aim(link.feet, link.height, 0.7, w);
     const auto want = CoopLookView::DirectionOf(game_target, aim.eye);
     REQUIRE(want);
-    // The game's eye in that direction but further away (its own distance): brought in to Aim's.
-    const Vec3 far = EyeAt(game_target, want->yaw, want->elevation, Distance(aim.eye, game_target) + 3.0);
-    const auto shot = CoopLookView::Framed(far, game_target, aim, link, w);
+    // The game's eye in that direction, moved in by a wall from its free distance (5 m further than Aim's) to 3 m
+    // further than Aim's: brought in to Aim's.
+    const double aim_distance = Distance(aim.eye, game_target);
+    const Vec3 far = EyeAt(game_target, want->yaw, want->elevation, aim_distance + 3.0);
+    const auto shot = CoopLookView::Framed(far, game_target, aim, link, w, aim_distance + 5.0);
     REQUIRE(shot);
     CHECK(Distance(shot->eye, aim.eye) < 1e-6);
     const Vec3 middle{link.feet[0], link.feet[1] + link.height * 0.5, link.feet[2]};
@@ -330,7 +332,7 @@ TEST_CASE("look steer: a wall the game's collision found keeps the eye in front 
     const Shot aim = CoopLookView::Aim(link.feet, link.height, -2.0, w);
     // The game placed its eye 1.2 m from its target (a cliff behind): the eye stays there.
     const Vec3 near = EyeAt(game_target, 30.0, 25.0, 1.2);
-    const auto shot = CoopLookView::Framed(near, game_target, aim, link, w);
+    const auto shot = CoopLookView::Framed(near, game_target, aim, link, w, 4.0);
     REQUIRE(shot);
     CHECK(Distance(shot->eye, near) < 1e-9);
     const auto at = Project(*shot, {link.feet[0], link.feet[1] + link.height * 0.5, link.feet[2]}, w.aspect);
@@ -338,7 +340,98 @@ TEST_CASE("look steer: a wall the game's collision found keeps the eye in front 
     CHECK(at[1] == doctest::Approx((w.y0 + w.y1) * 0.5).epsilon(1e-6));
     // An eye almost straight above, the window high on the screen: the camera would have to tilt past straight down.
     CHECK_FALSE(CoopLookView::Framed(EyeAt(game_target, 30.0, 85.0, 2.0), game_target, aim, link,
-                                     Window{0.3f, 0.0f, 0.7f, 0.2f, 16.0f / 9.0f}, 1.1));
+                                     Window{0.3f, 0.0f, 0.7f, 0.2f, 16.0f / 9.0f}, 4.0, 1.1));
     // An eye almost on the target: none (Aim's picture instead).
-    CHECK_FALSE(CoopLookView::Framed(EyeAt(game_target, 30.0, 25.0, 0.1), game_target, aim, link, w));
+    CHECK_FALSE(CoopLookView::Framed(EyeAt(game_target, 30.0, 25.0, 0.1), game_target, aim, link, w, 4.0));
+}
+
+TEST_CASE("look steer: in open ground a game camera nearer than Aim's keeps Aim's picture (adult Link fits)") {
+    // Review of fd5949c1: the game's own distance may be under Aim's (adult Link, 45 degrees: Aim's eye 5.27 m
+    // away); framed from the game's 3 m eye his head was cut. Only an eye the collision moved in is framed.
+    const Window w = Square();
+    const Subject link{{40.0f, 0.0f, 12.0f}, 1.9f};
+    const Vec3 game_target{40.0, 1.6, 12.0};
+    for (const double fov : {0.785398, 1.047198}) {
+        CAPTURE(fov);
+        const Shot aim = CoopLookView::Aim(link.feet, link.height, 1.3, w, fov);
+        const auto want = CoopLookView::DirectionOf(game_target, aim.eye);
+        REQUIRE(want);
+        const double aim_distance = Distance(aim.eye, game_target);
+        for (const double free : {3.0, 4.0, aim_distance - 0.5}) {
+            CAPTURE(free);
+            REQUIRE(free < aim_distance);
+            // The eye at its free distance, or a little in from it (a slope, the camera's own easing): Aim's.
+            for (const double share : {1.0, 0.95}) {
+                const Vec3 eye = EyeAt(game_target, want->yaw, want->elevation, free * share);
+                CHECK_FALSE(CoopLookView::Framed(eye, game_target, aim, link, w, free, fov));
+            }
+            // Moved in by a wall: framed from where the game put it.
+            const Vec3 walled = EyeAt(game_target, want->yaw, want->elevation, free * 0.6);
+            const auto shot = CoopLookView::Framed(walled, game_target, aim, link, w, free, fov);
+            REQUIRE(shot);
+            CHECK(Distance(shot->eye, walled) < 1e-9);
+        }
+    }
+}
+
+TEST_CASE("look steer: the camera's free distance is the furthest its eye was seen since the probe began") {
+    Steer steer;
+    Camera cam;
+    cam.dist = 3.0;
+    CHECK(steer.FreeDistance() == 0.0);
+    for (int f = 0; f < 40; ++f) {
+        Frame(steer, cam, Direction{40.0, 30.0});
+    }
+    REQUIRE(steer.Driving());
+    CHECK(steer.FreeDistance() == doctest::Approx(3.0));
+    // A wall moves the eye in: the free distance stays.
+    cam.dist = 1.4;
+    for (int f = 0; f < 5; ++f) {
+        Frame(steer, cam, Direction{40.0, 30.0});
+    }
+    CHECK(steer.FreeDistance() == doctest::Approx(3.0));
+    // Open again further on (the camera's distance grows with its pitch): the furthest.
+    cam.dist = 3.6;
+    Frame(steer, cam, Direction{40.0, 30.0});
+    CHECK(steer.FreeDistance() == doctest::Approx(3.6));
+    // The page opened again: learned anew.
+    steer.Command(cam.angles, 3, false);
+    cam.dist = 2.5;
+    for (int f = 0; f < 40; ++f) {
+        Frame(steer, cam, Direction{40.0, 30.0});
+    }
+    CHECK(steer.FreeDistance() == doctest::Approx(2.5));
+}
+
+TEST_CASE("look steer: the log says the game eye's distance and Aim's, once, when the camera follows") {
+    Steer steer;
+    Camera cam;
+    cam.dist = 3.25;
+    for (int f = 0; f < 40; ++f) {
+        cam.Take(steer.Command(cam.angles, 3, true));
+        steer.Observe(cam.Eye(), cam.target);
+        steer.Want(Direction{40.0, 30.0}, 5.27);
+    }
+    REQUIRE(steer.Driving());
+    const auto note = steer.TakeNote();
+    REQUIRE(note);
+    CHECK(note->find("turns with the Customize picture") != std::string::npos);
+    CHECK(note->find("its eye 3.25 m from its target, the picture's own 5.27 m") != std::string::npos);
+    CHECK_FALSE(steer.TakeNote());
+}
+
+TEST_CASE("look steer: co-op switched off while the camera is turned puts its angles back, once") {
+    // hos_coop_turn asks with `coop_on && the page asked` (coop_look_live.cpp Turn): co-op off is a page left.
+    Steer steer;
+    Camera cam;
+    for (int f = 0; f < 40; ++f) {
+        Frame(steer, cam, Direction{-120.0, 30.0});
+    }
+    REQUIRE(steer.Driving());
+    const bool coop_on = false, page_asked = true;
+    const auto back = steer.Command(cam.angles, 3, coop_on && page_asked);
+    REQUIRE(back);
+    CHECK(back->yaw == doctest::Approx(12.0f));
+    CHECK(back->pitch == doctest::Approx(5.0f));
+    CHECK_FALSE(steer.Command(cam.angles, 3, coop_on && page_asked));
 }

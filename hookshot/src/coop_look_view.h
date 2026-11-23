@@ -134,12 +134,17 @@ Shot ReAim(const Vec3& eye, const Vec3& point, const Window& window, double fov_
 
 // Below this the game's eye is too near its target to frame Link from (metres).
 inline constexpr double kMinEye = 0.2;
-// The picture from the game's own eye (the camera turned with the orbit): the eye on the line from the game's
-// target to the game's eye, no further than Aim's eye is from that target (nearer when the game's collision moved
-// it in), aimed so that Link's middle stays at the window's middle. None when the game's eye is under kMinEye
-// from its target.
+// The game's eye counts as moved in by its collision when it is nearer its target than this share of the
+// furthest it was seen (its free distance).
+inline constexpr double kPulledIn = 0.9;
+// The picture from the game's own eye (the camera turned with the orbit), only where the game's collision moved
+// that eye in (nearer than kPulledIn of `free_distance`, the furthest the eye was seen from its target): the eye on
+// the line from the game's target to the game's eye, no further than Aim's eye is from that target, aimed so that
+// Link's middle stays at the window's middle. None (Aim's picture) in open ground: a game camera that sits nearer
+// than Aim's by itself would show Link bigger than the window. None also when the eye is under kMinEye from its
+// target, or the view would have to tilt past straight down.
 std::optional<Shot> Framed(const Vec3& game_eye, const Vec3& game_target, const Shot& aim, const Subject& link,
-                           const Window& window, double fov_y = kFovY);
+                           const Window& window, double free_distance, double fov_y = kFovY);
 
 // Turns the game's camera with the orbit. The camera's angles are not world angles: their sign and offset are
 // learned. First a probe (Aim's picture meanwhile): a few frames turning the camera a little from where it was,
@@ -172,8 +177,11 @@ public:
     std::optional<Angles> Command(Angles now, int state, bool asked);
     // The view hook (the game's thread): the eye and target the game's camera placed this frame.
     void Observe(const Vec3& game_eye, const Vec3& game_target);
-    // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now).
-    void Want(const std::optional<Direction>& want);
+    // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now), and how
+    // far Aim's eye is from that target (for the log).
+    void Want(const std::optional<Direction>& want, double aim_distance = 0.0);
+    // The furthest the game's eye was seen from its target since the probe began (0: none seen).
+    double FreeDistance() const { return free_; }
     Phase phase() const { return phase_; }
     // The game's camera turns with the orbit: its eye is the picture's.
     bool Driving() const { return phase_ == Phase::drive; }
@@ -195,6 +203,7 @@ private:
     Direction probe_seen_[kProbeSteps]{};
     double sign_yaw_ = 1, sign_pitch_ = 1;   // the eye's turn over the camera's
     double offset_yaw_ = 0, offset_pitch_ = 0;   // eye direction = sign * camera angle + offset
+    double free_ = 0, aim_distance_ = 0;         // metres
     std::optional<std::string> note_;
 };
 
@@ -258,7 +267,8 @@ bool LinkShown();
 void Ask(const Window& window);
 // hos_coop_view (the game's thread): 1 = eye and target replaced.
 bool Camera(double eye[3], double target[3]);
-// hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced.
-bool Turn(float* yaw, float* pitch, int state);
+// hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced. `coop_on` false (co-op switched off):
+// a camera still turned is put back once, then left alone.
+bool Turn(float* yaw, float* pitch, int state, bool coop_on);
 
 }  // namespace CoopLookView

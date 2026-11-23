@@ -2362,7 +2362,8 @@ COOP_HOOKSHOT_EXPORT int hos_coop_menu_picture(int tab, HosCoopMenuPicture* out)
 COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state) {
     static CoopBoundary::Site site{"hos_coop_turn"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
-        return g_on && CoopLookView::Turn(yaw, pitch, state) ? 1 : 0;
+        // (also with co-op off: a camera still turned is put back once)
+        return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;
     });
 }
 // The gameplay camera (hos_coop_view.h, patch 0019): around your own Link while the Customize page shows him.
@@ -2485,7 +2486,7 @@ COOP_HOOKSHOT_EXPORT int hos_coop_camera_wanted(uint64_t frame, float width, flo
     });
 }
 COOP_HOOKSHOT_EXPORT void hos_coop_camera(uint64_t frame, const float* block, float width, float height) {
-    static CoopBoundary::Site site{"hos_coop_turn"};
+    static CoopBoundary::Site site{"hos_coop_camera"};
     CoopExportGuard::Guard(site, [&] {
         if (!g_on || !CoopHookshot::CameraBlockOk(block, width, height)) {
             return;
