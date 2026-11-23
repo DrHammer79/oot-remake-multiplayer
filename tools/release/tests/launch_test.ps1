@@ -1269,6 +1269,12 @@ if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
 if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FAIL_TOOL")):
     print("2287 files could not be made; the mod is not complete.")
     sys.exit(1)
+if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "HANG_TOOL")):
+    import subprocess, time
+    c = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])   # (a worker: must go with it)
+    open(os.environ["CS_HANG_PID_FILE"], "w").write(str(c.pid))
+    print("Making 2287 files", flush=True)
+    time.sleep(600)
 os.makedirs(os.path.join(mod, "romfs", "Model"), exist_ok=True)
 open(os.path.join(mod, "romfs", "Model", "Made_By_Tool.bin"), "w").write(" ".join(a[1:]))
 print("Done: 1 file. The mod folder is ready.")
@@ -1289,7 +1295,13 @@ print("Done: 1 file. The mod folder is ready.")
             Remove-Item -LiteralPath $csDir -Recurse -Force
             & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'   # (the zip is deleted after an install)
             $r = Install-KitCharacterSelect $ck $cm '' 'ui'
-            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw) -match '--exclude') 'Character Select tool: part ui passes --exclude (no NPC files)'
+            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw).EndsWith("--exclude $KitCharselToolExclude")) 'Character Select tool: part ui passes --exclude, the NPC rule byte for byte (its | ( ) ^ $ reach the tool as written)'
+            # Arguments reach a program exactly as given (no shell between): '&', '|', '^', '%', spaces, quotes, a trailing backslash.
+            $argsT = @('a b&c', 'x|y^z %PATH%', 'q"uote', 'tail\', 'two\\"', '', 'plain')
+            $echoOut = Join-Path $ck 'argv-echo.txt'
+            $echo = Invoke-KitToolLimited (Join-Path $ck 'hookshot\tools\python\python.exe') (@('-I', '-c', 'import sys; open(sys.argv[1], "w", encoding="utf-8", newline="").write("\n".join(sys.argv[2:]))', $echoOut) + $argsT) 30 60
+            $gotT = if (Test-Path -LiteralPath $echoOut) { [System.IO.File]::ReadAllText($echoOut) } else { '' }
+            Check ($echo.Code -eq 0 -and $gotT -ceq ($argsT -join "`n")) "Invoke-KitToolLimited: every argument reaches the program byte for byte [exit $($echo.Code): $gotT]"
             Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
             # An empty NPC rule would exclude nothing (NPC files in the ui part): refused, nothing installed.
             & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
@@ -1309,6 +1321,27 @@ print("Done: 1 file. The mod folder is ready.")
             $r = Install-KitCharacterSelect $ck $cm
             Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'making its files from your game failed \(2287 files could not be made' -and ($r.Lines -join ' ') -match 'refused file by file' -and
                    -not (Test-Path -LiteralPath $csDir)) "Character Select tool: a failing tool (exit 1) -> not installed, its last line and the other-version sentence shown [$($r.Lines -join ' | ')]"
+            # A tool that hangs (writes nothing, a worker of its own): stopped at the idle limit with its whole process tree,
+            # not installed, the reason says it stopped answering.
+            $src4 = Join-Path $ck 'src-tool4'
+            Copy-Item -LiteralPath (Join-Path $src2 'CS-t') -Destination (Join-Path $src4 'CS-t') -Recurse
+            Write-File (Join-Path $src4 'CS-t\build-from-your-game\HANG_TOOL') 'x'
+            Remove-Item -LiteralPath $zipT -Force -ErrorAction SilentlyContinue
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src4 'CS-t'
+            $zshaH = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ($pinT -replace $zshaT, $zshaH)
+            $env:CS_HANG_PID_FILE = Join-Path $ck 'hang-child.pid'
+            $idleKept = $KitCharselToolIdle; $KitCharselToolIdle = 4
+            $t0 = Get-Date
+            $r = Install-KitCharacterSelect $ck $cm
+            $took = ((Get-Date) - $t0).TotalSeconds
+            $KitCharselToolIdle = $idleKept
+            $childPid = if (Test-Path -LiteralPath $env:CS_HANG_PID_FILE) { [int](Get-Content -LiteralPath $env:CS_HANG_PID_FILE -TotalCount 1) } else { 0 }
+            $childGone = $childPid -gt 0 -and -not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)
+            if (-not $childGone -and $childPid -gt 0) { Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
+            Remove-Item Env:\CS_HANG_PID_FILE -ErrorAction SilentlyContinue
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'was stopped \(it wrote nothing for 4 s\): its tool stopped answering' -and $took -lt 120 -and $childGone -and
+                   -not (Test-Path -LiteralPath $csDir)) "Character Select tool: a hanging tool -> stopped at the idle limit with its worker, not installed, the reason says so [$([int]$took) s, worker gone $childGone; $($r.Lines -join ' | ')]"
             Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') (($pinT -replace $zshaT, $zshaF) -replace 'tool_folder=CS-t/build', 'tool_folder=CS-t/../build')
             $r = Install-KitCharacterSelect $ck $cm
             Check (-not (Test-Path -LiteralPath $csDir)) 'Character Select tool: a tool_folder that leaves the zip makes the pin unusable (nothing installed)'
