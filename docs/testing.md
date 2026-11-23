@@ -526,6 +526,8 @@ How the start is driven: every question gets the answer `n`. A long game build (
 
 ### Which changes need a game build
 
+A kit that tests must not build its game from other patches than the game it already has (the lane kit once did, with old `hookshot\patches`, and ran a game of two builds for hours). Put the file `hookshot\hold-game.txt` (Linux: `data/hold-game.txt`) into such a test kit: its build then refuses, and says nothing was changed, when `hookshot\patches`, `PIN` or `TOOLS.txt` are not the ones in the game's `coop-built-from.txt`; `-Rebuild` does not get past it, only deleting the file or syncing the kit files does. Normal player kits never have the file, so their updates and `Revert.bat` build again as before. Independent of the file, the start and the build refuse a game whose files are not from one build (a file differs from the checksum in `.longshot_installed.json`) and never keep it as a variant. The tests are `tools/release/tests/kit_build_files_test.ps1` and the `mixed:` and `hold:` checks in `linux_longshot_kit_test.sh`.
+
 The game build (about an hour, the whole PC) depends only on the three inputs of the cache key (`hs.py key`). Everything else is module only: `hs.py build` on a cache hit, or `lanes.py install`, and takes seconds.
 
 | A branch changes | Needs |

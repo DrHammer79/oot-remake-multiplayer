@@ -498,6 +498,78 @@ game_want="$src_stamp$(exefs_stamp)"
 ready=0
 [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]] && ready=1
 
+# Two guards (kit-harden, as the Windows kit's Get-KitGameBuildMismatch and Get-KitHoldGameText). A game whose build files
+# are not the ones Longshot's own note (.longshot_installed.json, a sha1 for each file it copied in) names has files of
+# two builds (a file copied over from another build): it never starts, is never kept as a build, never built on. And a
+# test kit that has data/hold-game.txt never builds its game for patches or a pin other than the ones the game was built
+# from (the lane kit once built with old patches and left a game half old, half new). Players never need the marker.
+# game_mismatch $1: prints one line for each file of that folder (the game, or a kept build's files/) that is not the one
+# the note names; nothing when all are, or when there is no note or it has no sha1 (a fresh install, an older Longshot).
+game_mismatch() {
+    "$PY" -I -B - "$1" <<'PYEOF2' 2>/dev/null || true
+import hashlib, json, os, sys
+root = sys.argv[1]
+try:
+    with open(os.path.join(root, ".longshot_installed.json"), encoding="utf-8") as f:
+        note = json.load(f)
+except Exception:
+    sys.exit(0)
+if not isinstance(note, dict):
+    sys.exit(0)
+for name, row in note.items():
+    want = str(row.get("sha1", "")).lower() if isinstance(row, dict) else ""
+    if len(want) != 40 or any(c not in "0123456789abcdef" for c in want):
+        continue
+    rel = str(name).replace("\\", "/")
+    if rel.startswith("/") or ".." in rel.split("/"):
+        continue
+    path = os.path.join(root, rel)
+    if not os.path.isfile(path):
+        print(rel + " is missing (Longshot's note lists it)")
+        continue
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != want:
+        print(rel + " is not the file Longshot put into this game (its note says " + want[:8] + ", the file is " + h.hexdigest()[:8] + ")")
+PYEOF2
+}
+game_mixed_text() {   # $1: the lines of game_mismatch
+    printf "The co-op game's files are not from one build (a file of another build was copied over):\n"
+    while IFS= read -r l; do [[ -n $l ]] && printf '  - %s\n' "$l"; done <<<"$1"
+    printf "Nothing was changed. The game is not started and not kept as a build while it is like this. bash start-squadala.sh --rebuild builds the game again (5 to 60 minutes); your saves and settings stay."
+}
+hold_note=$DATA/hold-game.txt
+game_held_text() {   # prints the reason when this test kit holds its game, nothing otherwise
+    [[ -f $hold_note && -n $(kit_game_exe) && -f $game_stamp ]] || return 0
+    local have want names=''
+    have=$(tr -d '\r' <"$game_stamp"); have=${have%% exefs=*}
+    want=${game_want%% exefs=*}
+    [[ $have == "$want" ]] && return 0
+    [[ ${have%% *} != "${want%% *}" ]] && names='the Longshot release'
+    [[ $(printf '%s' "$have" | cut -d' ' -f2-) != $(printf '%s' "$want" | cut -d' ' -f2-) ]] && names+="${names:+ and }patches"
+    printf 'This kit is a test kit (data/hold-game.txt): its game is never built again for other patches or another Longshot release.\n'
+    printf '  The game was built from other %s than this kit has now.\n' "${names:-patches}"
+    printf "  Nothing was changed. To go on: put the kit's data/longshot (PIN, LINUX.txt, patches) of the build the game came from back, or, to build it again on purpose, delete data/hold-game.txt."
+}
+if ((!check_only)); then
+    held=$(game_held_text)
+    [[ -z $held ]] || fail "$held"
+    mixed=''
+    [[ -n $(kit_game_exe) ]] && mixed=$(game_mismatch "$GAME")
+    if [[ -n $mixed ]]; then
+        ((rebuild)) || fail "$(game_mixed_text "$mixed")"
+        # (--rebuild: the wrong files and the note go first, so the build puts every file in again; with no game and no
+        # stamp left, an interrupted build is a first build at the next start, never a game of two builds)
+        step 'The game: its files are not from one build; taking them out so the build puts every file in again'
+        while IFS= read -r l; do [[ -n $l ]] && say "  - $l"; done <<<"$mixed"
+        while IFS= read -r l; do rm -f -- "$GAME/${l%% *}"; done <<<"$mixed"
+        rm -f "$GAME/.longshot_installed.json" "$game_stamp"
+        ready=0
+    fi
+fi
+
 # NVIDIA DLSS (#234), as hookshot-build.ps1: only in a game built with NVIDIA's DLSS SDK, which nobody may pass on, so
 # each build downloads it once NVIDIA's license is accepted. --dlss asks once and data/dlss.txt keeps the answer (the
 # builds after an update keep DLSS); --no-dlss takes it back. Not in coop-built-from.txt (release, pin and patches).
@@ -544,9 +616,12 @@ for k in sorted(json.load(open(sys.argv[1], encoding="utf-8"))): print(k)' "$GAM
 variant_text() { printf '%s\ndlss=%s' "$(printf '%s\n' "$1" | tr -d '\r' | sed 's/[[:space:]]*$//')" "$2"; }
 variant_dir() { printf '%s/%s' "$variants" "$(printf '%s' "$1" | sha256sum | cut -c1-20)"; }
 variant_save() {
-    local have text dir part f bytes=0 free_kb
+    local have text dir part f bytes=0 free_kb bad
     have=$(cat "$game_stamp" 2>/dev/null) || return 0
     [[ -n $have && -n $(kit_game_exe) ]] || return 0
+    # (kit-harden: files of two builds are never kept as a build)
+    bad=$(game_mismatch "$GAME")
+    [[ -z $bad ]] || { say "  (this build is not kept for later: its files are not from one build: ${bad%%$'\n'*})"; return 0; }
     text=$(variant_text "$have" "$game_dlss")
     dir=$(variant_dir "$text")
     if [[ -f $dir/stamp.txt && $(cat "$dir/stamp.txt") == "$text" ]]; then touch "$dir/stamp.txt"; return 0; fi
@@ -573,6 +648,7 @@ variant_save() {
 }
 variant_restore() {   # $1: a kept build: staged as <name>.new, then swapped in; its stamp last
     local d=$1/files f staged=()
+    [[ -z $(game_mismatch "$d") ]] || return 1   # (kit-harden: a kept build of two builds is never put back)
     while IFS= read -r f; do
         { mkdir -p "$GAME/$(dirname -- "$f")" && cp -f -- "$d/$f" "$GAME/$f.new"; } ||
             { for f in "${staged[@]}"; do rm -f "$GAME/$f.new"; done; return 1; }
@@ -593,7 +669,7 @@ if ((!ready && !rebuild && !check_only)) && [[ -n $(kit_game_exe) && -f $game_st
     variant_save
     kept_text=$(variant_text "$game_want" "$want_dlss")
     kept=$(variant_dir "$kept_text")
-    if ((want_dlss == game_dlss)) && [[ -f $kept/stamp.txt && $(cat "$kept/stamp.txt") == "$kept_text" && -f $kept/built-from.txt && -f $kept/files/image.bin ]]; then
+    if ((want_dlss == game_dlss)) && [[ -f $kept/stamp.txt && $(cat "$kept/stamp.txt") == "$kept_text" && -f $kept/built-from.txt && -f $kept/files/image.bin && -z $(game_mismatch "$kept/files") ]]; then
         step 'The game: putting back the build made before with these mods (seconds, instead of building it again)'
         if variant_restore "$kept" && [[ $(cat "$game_stamp") == "$game_want" ]]; then
             ready=1
@@ -700,6 +776,9 @@ game_build() {
         ((want_dlss)) && no_dlss_hint=" This build was with NVIDIA DLSS: if NVIDIA's SDK could not be downloaded (offline?), bash start-squadala.sh --no-dlss builds the game without it."
         make_game "${build_args[@]}" || { game_fail "The build stopped. Its log: $LOGS/build.log$no_dlss_hint"; return 1; }
         [[ -n $(kit_game_exe) ]] || { game_fail "The build finished but there is no game in $GAME. Its log: $LOGS/build.log"; return 1; }
+        # (kit-harden: the finished build is checked against Longshot's note before the game counts as built)
+        bad=$(game_mismatch "$GAME")
+        [[ -z $bad ]] || { game_fail "The build finished but its files are not from one build: ${bad%%$'\n'*}. Its log: $LOGS/build.log"; return 1; }
         printf '%s' "$game_want" >"$game_stamp"
 }
 if ((ready && !rebuild && !check_only)); then

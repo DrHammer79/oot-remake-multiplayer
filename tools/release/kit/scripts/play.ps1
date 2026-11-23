@@ -210,6 +210,12 @@ if ($Hookshot) {
         Write-Host (Get-KitHookshotNeedText $need) -ForegroundColor Yellow
         exit 1
     }
+    # (kit-harden) Files of two builds, or a test kit whose patches are not its game's: never started, never built here.
+    if ($need -eq 'mixed' -or $need -eq 'held') {
+        Write-Host (Get-KitHookshotNeedText $need $hsGame $hsOnly $kit) -ForegroundColor Yellow
+        Wait-AnyKey 60
+        exit 1
+    }
     $built = $true
     if ($need) {
         Write-Host (Get-KitHookshotNeedText $need $hsGame $hsOnly)

@@ -838,7 +838,10 @@ function Find-KitHookshotGameToCopy([string]$Kit, [string]$Stamp, [string[]]$Oth
         if (-not (Get-KitHookshotExe $g)) { continue }
         $s = Join-Path $g 'coop-built-from.txt'
         if ((Test-KitHookshotDlss $g) -ne $Dlss) { continue }
-        if ((Test-Path -LiteralPath $s) -and [System.IO.File]::ReadAllText($s) -eq $Stamp) { return $g }
+        if ((Test-Path -LiteralPath $s) -and [System.IO.File]::ReadAllText($s) -eq $Stamp) {
+            if (@(Get-KitGameBuildMismatch $g).Count) { continue }   # (kit-harden: never copy a game whose files are of two builds)
+            return $g
+        }
     }
     return ''
 }
@@ -860,7 +863,10 @@ function Find-KitHookshotCachedGame([string]$Stamp, [string]$Root = '', [bool]$D
         $g = Join-Path $d.FullName 'game'
         if (-not (Test-Path -LiteralPath $s -PathType Leaf) -or -not (Get-KitHookshotExe $g)) { continue }
         if ((Test-KitHookshotDlss $g) -ne $Dlss) { continue }
-        if ((& $norm ([System.IO.File]::ReadAllText($s))) -eq $want) { return $g }
+        if ((& $norm ([System.IO.File]::ReadAllText($s))) -eq $want) {
+            if (@(Get-KitGameBuildMismatch $g).Count) { continue }   # (kit-harden)
+            return $g
+        }
     }
     return ''
 }
@@ -1094,6 +1100,69 @@ function Get-KitGameVariantFiles([string]$Game) {
     return $out
 }
 
+# --- Build files that belong together (kit-harden, 2026-11-23) ---
+# Longshot's finish notes every build file it copied in (.longshot_installed.json: name -> sha1 and stat). A game whose
+# files are from two builds (one file copied over, or one set put back that held only some of them: the lane game ran
+# an exe, an image.bin and a renderer from different builds for hours) must never start and never be kept as a build.
+# $Root: a game folder, or a kept build's files\ folder (its note is kept beside them). Returns one plain line per file
+# that is missing or is not the one the note names; @() when all match. A folder with no note, or a note that lists no
+# sha1 (a fresh install, a game before its first build, an older Longshot), cannot be checked and gives @(): the start
+# and the build go on as before.
+function Get-KitGameBuildMismatch([string]$Root) {
+    $note = Join-Path $Root '.longshot_installed.json'
+    if (-not (Test-Path -LiteralPath $note -PathType Leaf)) { return @() }
+    try { $j = [System.IO.File]::ReadAllText($note) | ConvertFrom-Json -ErrorAction Stop } catch { return @() }
+    if ($j -isnot [pscustomobject]) { return @() }
+    $out = @()
+    foreach ($p in @($j.PSObject.Properties)) {
+        $want = if ($p.Value -and $p.Value.PSObject.Properties['sha1']) { "$($p.Value.sha1)".ToLowerInvariant() } else { '' }
+        if ($want -notmatch '^[0-9a-f]{40}$') { continue }
+        $rel = "$($p.Name)" -replace '/', '\'
+        if ($rel -match '(^|\\)\.\.(\\|$)' -or [System.IO.Path]::IsPathRooted($rel)) { continue }
+        $path = Join-Path $Root $rel
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $out += "$rel is missing (Longshot's note lists it)"; continue }
+        $have = (Get-FileHash -LiteralPath $path -Algorithm SHA1).Hash.ToLowerInvariant()
+        if ($have -ne $want) { $out += "$rel is not the file Longshot put into this game (its note says $($want.Substring(0, 8)), the file is $($have.Substring(0, 8)))" }
+    }
+    return $out
+}
+
+# The line said when the game's files are from different builds ($Bad: Get-KitGameBuildMismatch). $Fix: what builds it
+# again on purpose (the Linux kit's words are its own).
+function Get-KitGameMixedText([string[]]$Bad, [string]$Fix = 'Build-Hookshot-Coop.bat -Rebuild') {
+    return ("The co-op game's files are not from one build, so the game is not started (a mixed game shows the wrong characters or texts, or crashes):`n" +
+        ((@($Bad) | ForEach-Object { "  - $_" }) -join "`n") + "`n" +
+        "Nothing was changed. This happens when one file was copied over or put back from another build. $Fix builds the game again (5 to 45 minutes); your saves and settings stay.")
+}
+
+# A test kit that must keep the game it has (kit-harden): hookshot\hold-game.txt in the kit says so. Normal kits never
+# have it: an update, Revert.bat or a mod switched on the Mods tab change the patches on purpose and the game is built
+# again. A held kit never builds the game for patches or a pin other than the ones its game was built from.
+function Get-KitHoldGameFile([string]$Kit) { return (Join-Path $Kit 'hookshot\hold-game.txt') }
+# The line to say when $Kit is held and its game was built from other patches or another Hookshot pin than the kit has
+# now (coop-built-from.txt: release, commit, patches; the mods' code patches line is a mod switch, not this), else ''.
+function Get-KitHoldGameText([string]$Kit, [string]$Game = '') {
+    if (-not (Test-Path -LiteralPath (Get-KitHoldGameFile $Kit))) { return '' }
+    if (-not $Game) { $Game = Get-KitHookshotGame $Kit }
+    $stampFile = Join-Path $Game 'coop-built-from.txt'
+    if (-not (Get-KitHookshotExe $Game) -or -not (Test-Path -LiteralPath $stampFile)) { return '' }   # (no game yet: the first build)
+    $want = Get-KitHookshotStamp $Kit $Game
+    if (-not $want) { return '' }
+    $core = { param($s) (@("$s" -replace "`r", '' -split "`n") | Where-Object { $_ -match '^(release|commit|patches)=' } | ForEach-Object { $_.TrimEnd() }) -join "`n" }
+    $have = & $core ([System.IO.File]::ReadAllText($stampFile))
+    $kitCore = & $core $want
+    if ($have -eq $kitCore) { return '' }
+    $names = @()
+    foreach ($k in 'release', 'commit', 'patches') {
+        $a = (@($have -split "`n") | Where-Object { $_ -like "$k=*" }) -join ''
+        $b = (@($kitCore -split "`n") | Where-Object { $_ -like "$k=*" }) -join ''
+        if ($a -ne $b) { $names += $k }
+    }
+    return ("This kit is a test kit (hookshot\hold-game.txt): its game is never built again for other patches or another pin.`n" +
+        "  The game was built from other $($names -join ' and ') than this kit has now (hookshot\patches and hookshot\PIN of this kit are not the ones its game was built from).`n" +
+        "  Nothing was changed. To go on: copy the kit's hookshot\patches, PIN and TOOLS.txt from the build the game came from, or, to build it again on purpose, delete hookshot\hold-game.txt.")
+}
+
 # Keeps the build in $Game (its coop-built-from.txt) in the kit's game-variants, unless it is there already. The line
 # to show, or '' when there was nothing to keep. $Keep: how many builds stay (the newest used).
 function Save-KitGameVariant([string]$Kit, [string]$Game, [int]$Keep = 3) {
@@ -1103,6 +1172,9 @@ function Save-KitGameVariant([string]$Kit, [string]$Game, [int]$Keep = 3) {
     if (Test-KitGameUnfinished $Game) { return '' }
     $files = @(Get-KitGameVariantFiles $Game)
     if (-not ($files | Where-Object { $_ -like '*longshot.exe' }) -or -not ($files -contains 'image.bin')) { return '' }
+    # (files of two builds are never kept as the build their stamp names: kit-harden)
+    $bad = @(Get-KitGameBuildMismatch $Game)
+    if ($bad.Count) { return "  (this build is not kept for later: its files are not from one build: $($bad[0]))" }
     $text = ConvertTo-KitVariantStamp ([System.IO.File]::ReadAllText($stampFile)) (Test-KitHookshotDlss $Game)
     $root = Get-KitGameVariantRoot $Kit
     $dir = Join-Path $root (Get-KitVariantKey $text)
@@ -1167,6 +1239,8 @@ function Find-KitGameVariant([string]$Kit, [string]$Stamp, [bool]$Dlss) {
     if (-not (Test-Path -LiteralPath $kept) -or [System.IO.File]::ReadAllText($kept) -ne $text) { return '' }
     if (-not (Test-Path -LiteralPath (Join-Path $dir 'files\image.bin')) -or -not (Test-Path -LiteralPath (Join-Path $dir 'built-from.txt'))) { return '' }
     if (-not (Get-ChildItem -LiteralPath (Join-Path $dir 'files') -Recurse -File -Filter 'longshot.exe' -ErrorAction SilentlyContinue)) { return '' }
+    # (a build kept before kit-harden may hold files of two builds: it is never put back)
+    if (@(Get-KitGameBuildMismatch (Join-Path $dir 'files')).Count) { return '' }
     return $dir
 }
 
@@ -1178,6 +1252,7 @@ function Restore-KitGameVariant([string]$Dir, [string]$Game) {
     $base = ([System.IO.Path]::GetFullPath($from)).TrimEnd('\') + '\'
     $files = @(Get-ChildItem -LiteralPath $from -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($base.Length) })
     if (-not $files) { return $false }
+    if (@(Get-KitGameBuildMismatch $from).Count) { return $false }   # (kit-harden: never put files of two builds into the game)
     $staged = @()
     try {
         foreach ($f in $files) {
@@ -1205,6 +1280,10 @@ function Restore-KitGameVariant([string]$Dir, [string]$Game) {
 }
 
 # What the kit's Hookshot game needs before it starts:
+#   'mixed'   (kit-harden) the game's build files are not the ones Longshot's note names (files of two builds): the start
+#             stops and names the file; Build-Hookshot-Coop.bat -Rebuild builds the game again
+#   'held'    (kit-harden) a test kit (hookshot\hold-game.txt) whose patches or pin are not the ones its game was built
+#             from: the start stops; nothing is built
 #   'quarantine' the co-op module is in neither the kit nor the game (antivirus took it, as a false alarm):
 #             a build cannot help, the player restores it (Get-KitHookshotQuarantineText)
 #   'game'    no game built yet (the first build, 10 to 45 minutes)
@@ -1236,12 +1315,16 @@ function Get-KitHookshotNeed([string]$Kit) {
     $have = if (Test-Path -LiteralPath $stampFile) { [System.IO.File]::ReadAllText($stampFile) } else { '' }
     $want = Get-KitHookshotStamp $Kit
     if (-not $want) { return '' }   # (a kit without hookshot\PIN or TOOLS.txt cannot build: nothing to do here)
+    # (kit-harden: a test kit that keeps its game never goes to other patches or pin; see Get-KitHoldGameText)
+    if (Get-KitHoldGameText $Kit $game) { return 'held' }
     if (Test-KitGameUnfinished $game) {
         # (rows 239/240: a build, put back or copy stopped half way; a kept build of exactly this stamp still goes back)
         $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
         if (Find-KitGameVariant $Kit $want $wantDlss) { return 'variant' }
         return 'unfinished'
     }
+    # (kit-harden: files of two builds, e.g. one copied over from another build: the game never starts like that)
+    if (@(Get-KitGameBuildMismatch $game).Count) { return 'mixed' }
     if ($have -ne $want) {
         # (row 210: a build of exactly this stamp kept from before, e.g. a code mod switched back: put back in seconds)
         $wantDlss = Test-Path -LiteralPath (Join-Path $Kit 'hookshot\dlss.txt')
@@ -2215,7 +2298,7 @@ function Test-KitPuppetPackStale([string]$Manifest, [string]$ToolDir) {
 # Get-KitHookshotNeedQuestion). A tester read the old "No co-op Hookshot game" as "couldn't find Hookshot"
 # and stopped: these say what is missing and that the kit sets it up.
 # $HsOnly: a Hookshot-only kit ("Start Squadala.bat"), which has no emulator and no Build-Hookshot-Coop.bat.
-function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnly = $false) {
+function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnly = $false, [string]$Kit = '') {
     # (kit-friction: players who had built Longshot asked whether it could be used, or moved it into the kit; one asked
     # where 60 GB goes. Sizes measured on a built kit, 2026-11-14)
     if ($HsOnly -and $Need -eq 'game') {
@@ -2235,6 +2318,8 @@ function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnl
         'variant' { 'The co-op game was built before with the mods'' code patches as they are now (a mod with an exefs folder switched back on the Mods tab): that build is put back (seconds, no build).' }
         'module' { 'Putting the updated co-op and the puppet pack into the co-op game (seconds to a minute).' }
         'quarantine' { Get-KitHookshotQuarantineText }
+        'mixed' { Get-KitGameMixedText @(Get-KitGameBuildMismatch $Game) }
+        'held' { Get-KitHoldGameText $Kit $Game }
         default { '' }
     }
 }

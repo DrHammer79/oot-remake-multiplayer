@@ -81,7 +81,8 @@ if ($Repair) {
     $need = Get-KitHookshotNeed $kit
     if ($need -eq 'offline') { Write-Host 'The game''s randomizer (OOTRR) is set up at the next start with internet.'; exit 0 }
     if ($need -ne 'module') {
-        if ($need) { Write-Host "The game: $(Get-KitHookshotNeedText $need (Get-KitHookshotGame $kit) $true)" -ForegroundColor Yellow; Write-Host '  ("Start Squadala.bat" does it at the next start.)' }
+        if ($need -eq 'mixed' -or $need -eq 'held') { Write-Host (Get-KitHookshotNeedText $need (Get-KitHookshotGame $kit) $true $kit) -ForegroundColor Yellow }
+        elseif ($need) { Write-Host "The game: $(Get-KitHookshotNeedText $need (Get-KitHookshotGame $kit) $true $kit)" -ForegroundColor Yellow; Write-Host '  ("Start Squadala.bat" does it at the next start.)' }
         else { Write-Host 'The game: its co-op parts and the randomizer (OOTRR) are the ones this version pins.' }
         exit 0
     }
@@ -212,6 +213,30 @@ $Out = [System.IO.Path]::GetFullPath($Out)
 # What the game in $Out is made from: the tools' stamp, and the mods' code patches it is built with (patches 0034/0035:
 # Get-KitExefsStampLine; nothing more without code mods). The tools folder keeps $stamp.
 $gameWant = $stamp + (Get-KitExefsStampLine $Out)
+# --- Two guards before anything in the game folder is touched (kit-harden, 2026-11-23) ---
+# 1. A test kit (hookshot\hold-game.txt) never builds its game for patches or a pin other than the ones the game was built
+#    from: a lane kit with old patches rebuilt a newer game and left it half old, half new.
+# 2. A game whose build files are not the ones Longshot's note names (a file copied over from another build) is not built
+#    on top of, kept, or copied over: it stops here and names the file. -Rebuild is the way to build it again on purpose;
+#    it takes the wrong files and the note out first, so Longshot copies every file in again, and the finished build is
+#    checked the same way at the end.
+if (-not $CheckOnly -and -not $PackOnly) {
+    $held = Get-KitHoldGameText $kit $Out
+    if ($held) { Fail $held }
+    $bad = if (Test-KitGameUnfinished $Out) { @() } else { @(Get-KitGameBuildMismatch $Out) }
+    if ($bad.Count -and -not $Rebuild) { Fail (Get-KitGameMixedText $bad) }
+    if ($bad.Count) {
+        Step 'The game: its files are not from one build; taking them out so the build puts every file in again'
+        $bad | ForEach-Object { Write-Host "  - $_" }
+        Start-KitGameWrite $Out 'a build of a game whose files were not from one build'
+        foreach ($line in $bad) {
+            $rel = ($line -split ' ', 2)[0]
+            $p = Join-Path $Out $rel
+            if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
+        }
+        Remove-Item -LiteralPath (Join-Path $Out '.longshot_installed.json') -Force -ErrorAction SilentlyContinue
+    }
+}
 $python = Join-Path $tools 'python\python.exe'
 
 # --- A Longshot of the player's own (kit-friction) -----------------------------------------------
@@ -841,6 +866,10 @@ if ($gameReady -and -not $Rebuild -and -not $CheckOnly) {
     }
     $exe = Find-HookshotExe $Out
     if (-not $exe) { Fail "The build finished but there is no longshot.exe in $Out. Its log: $buildLog" }
+    # (kit-harden: the build's own files are checked against Longshot's note before the game counts as built; a game that
+    # fails stays marked unfinished, so it is never started or kept)
+    $badAfter = @(Get-KitGameBuildMismatch $Out)
+    if ($badAfter.Count) { Fail ("The build finished but its files are not from one build (the game stays marked unfinished): " + ($badAfter -join '; ') + ". Its log: $buildLog") }
     [System.IO.File]::WriteAllText($gameStamp, $gameWant)
     Complete-KitGameWrite $Out
 }

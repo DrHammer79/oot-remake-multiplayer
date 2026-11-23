@@ -61,6 +61,8 @@ The terminal says what happened and what to do. Common ones:
 | "too old (glibc ...)" | Your Linux is older than 2022: update it. |
 | "Missing on this PC: curl" | Install it (`sudo apt install curl`, `sudo dnf install curl`, `sudo pacman -S curl`). |
 | The download or build stopped | Start again: it goes on from where it stopped. |
+| "The co-op game's files are not from one build" | A file of the built game is not the one Longshot put there (the message names it). Nothing was changed and the game is not started. `bash start-squadala.sh --rebuild` takes the wrong files out and builds the game again (5 to 60 minutes); saves and settings stay. A game without `.longshot_installed.json` (an older Longshot) is not checked. |
+| "This kit is a test kit (data/hold-game.txt)" | Only test kits have `data/hold-game.txt`; players never need it. The kit then never builds its game for other patches or another Longshot release than the game was built from. Put `data/longshot` (PIN, LINUX.txt, patches) of the build the game came from back, or delete `data/hold-game.txt` to build it again on purpose. |
 
 For a bug report: `bash start-squadala.sh --logs` writes `coop-logs-<time>.zip` beside it (passwords, codes,
 addresses and your user name are masked). On the [Squadala! Discord](https://discord.gg/GwtRKAqng5) type `/bugreport`, say what happened and
