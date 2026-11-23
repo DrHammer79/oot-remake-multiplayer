@@ -174,7 +174,7 @@ inline bool RefuseCreate(const std::string& actor, bool allow) {
 // false: the guest's first MB is not where it should be, or could not be
 // committed). A held bow or slingshot reads the wearer's Player component in
 // the game's bow update (f_82deee60, guest 0x7d8: the host crash of player
-// report 131 when a guest joined holding the slingshot; patch 0037 guards that
+// report 131 when a guest joined holding the slingshot; patch 0038 guards that
 // one read, a game built without it still makes it), the worn gear and
 // the puppet's own update read its other missing components: with null reads
 // faulting no Link puppet is safe, so none is made and other players show as

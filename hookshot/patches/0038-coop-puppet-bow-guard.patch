@@ -1,4 +1,4 @@
-From 7c62d7f7d033ddee70ad96395627aa0d687da9ca Mon Sep 17 00:00:00 2001
+From 6312c3d23fbc59966f62937c44a71774c6808ccf Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 23 Nov 2026 00:55:25 -0900
 Subject: [PATCH] Co-op bow guard: a bow or slingshot worn by another player's
@@ -25,25 +25,25 @@ only, words checked. Called from nx2/coop_hooks.py install().
  create mode 100644 nx2/coop_puppet_bow_guard.py
 
 diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py
-index cd126a73..a877c4c6 100644
+index cd126a73..a5ba68d7 100644
 --- a/nx2/coop_hooks.py
 +++ b/nx2/coop_hooks.py
 @@ -69,6 +69,8 @@ def install(lifter, img, build_id):
      coop_actor_lift.install(lifter, img, build_id)
      import coop_puppet_guard   # (patch 0002: the other players' Link)
      coop_puppet_guard.install(lifter, img, build_id)
-+    import coop_puppet_bow_guard   # (patch 0037: a bow or slingshot the other players' Link wears)
++    import coop_puppet_bow_guard   # (patch 0038: a bow or slingshot the other players' Link wears)
 +    coop_puppet_bow_guard.install(lifter, img, build_id)
      import coop_platform_lift   # (patch 0003: looping platforms' pause counters)
      coop_platform_lift.install(lifter, img, build_id)
      import coop_title_hooks   # (patch 0004: the title menu)
 diff --git a/nx2/coop_puppet_bow_guard.py b/nx2/coop_puppet_bow_guard.py
 new file mode 100644
-index 00000000..3ba46323
+index 00000000..9fc9c496
 --- /dev/null
 +++ b/nx2/coop_puppet_bow_guard.py
 @@ -0,0 +1,63 @@
-+"""Co-op's guard for a bow or slingshot worn by another player's Link (oot-remake-multiplayer's patch 0037, its
++"""Co-op's guard for a bow or slingshot worn by another player's Link (oot-remake-multiplayer's patch 0038, its
 +docs/hookshot.md "Link puppets").
 +
 +A co-op puppet (CoopPuppet_*) is a stripped copy of Link: its pack leaves out the Player component (PlayerRef, component

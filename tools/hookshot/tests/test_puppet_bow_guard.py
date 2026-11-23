@@ -1,4 +1,4 @@
-"""Tests for hookshot/patches 0037 (nx2/coop_puppet_bow_guard.py): the guard that sends a bow or slingshot worn by
+"""Tests for hookshot/patches 0038 (nx2/coop_puppet_bow_guard.py): the guard that sends a bow or slingshot worn by
 another player's Link (a puppet: no Player component) through the bow update's own exit instead of reading guest 0x7d8.
 
 The test takes the new file out of the patch and runs it alone (no Longshot source, no game): the install rules with a
@@ -21,7 +21,7 @@ FILE = "nx2/coop_puppet_bow_guard.py"
 
 
 def patch_text():
-    name = next(n for n in sorted(os.listdir(PATCHES)) if n.startswith("0037-"))
+    name = next(n for n in sorted(os.listdir(PATCHES)) if n.startswith("0038-"))
     with open(os.path.join(PATCHES, name), encoding="utf-8") as f:
         return name, f.read()
 
