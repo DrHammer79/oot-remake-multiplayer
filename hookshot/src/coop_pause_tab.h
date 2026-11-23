@@ -290,6 +290,9 @@ public:
     }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
+    int StripLit() const { return strip_.lit; }
+    bool StripUp() const { return strip_.state == 1 || strip_.state == 2; }
+    bool MinusStripOpen() const { return StripUp() && strip_.mode != kPlusMode; }   // (the - menu is the open screen)
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
     // RowTexts(MinusPage) not ""), set by the module for the tab lit. Up and down move the cursor among the rows shown
     // (the game's button_on), A picks the row under it (button_decide): TakeMinusDecide says which, once.
@@ -970,6 +973,29 @@ SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::
 inline constexpr std::uint64_t kSnailPauseMs = 300, kSnailGoneMs = 5000;
 enum class SnailPadState { kDrive, kPause, kGone };
 SnailPadState SnailPadFrom(std::uint64_t seen_ms, std::uint64_t now_ms);
+// The hop to Character Select's Characters tab (#322): with his code in the game the colours are on his Customize
+// screen, so A on co-op's Customize Link row, in the - menu, taps L for the player. The game's graph (Sequence/
+// MinusMenu) reads the pad, and its category setters (f_8342b7a0, f_8342b720, SeqOneShotSetCurrentMinusMenuCategory)
+// run inside its transition sequence, which co-op does not drive, so the taps are the game's own L: our tab to Map
+// (Page::MinusPad), then the game's, Map to Threads of Time to Key Items to Characters. The - menu's current category
+// (menu manager +0x52c) is read: the game's own - tabs are [6, 1, 2] = Key Items 6, Threads of Time 1, Map 2
+// (docs/game-ui.md), so the hop taps on while it is one of those, and is done when it is something else (Characters,
+// whose number is not known) or a tap moved nothing (the left edge). Given up after kHopMaxTaps taps or kHopMaxMs.
+struct CharactersHop {
+    int taps = 0;                 // L taps sent
+    int off_taps = 0;             // of those, sent with our page already gone (the game's own tabs)
+    int prev_lit = -1;            // the strip's lit category when the last of those was sent
+    std::uint64_t started_ms = 0, next_ms = 0;
+};
+enum class HopStep { kWait, kTapL, kDone, kGiveUp };
+inline constexpr int kHopMaxTaps = 7;
+inline bool GameMinusCategory(int category) { return category == 6 || category == 1 || category == 2; }
+inline constexpr std::uint64_t kHopMaxMs = 8000, kHopGapMs = 500;
+// `ours`: our page still shows (Page::MinusTab() >= 0); `minus_open`: the - menu is the open screen (its strip up, in
+// its - mode) and nothing is typed into (a field of ours, the chat box): anything else (closed, the Plus menu, another
+// screen, a load, typing) ends the hop at once with no more taps (kGiveUp); `lit`: the - menu's current category
+// (-1 not readable: waits).
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms);
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: the Character tab takes
 // them one update ahead to move with the fourth, not a frame after it.
