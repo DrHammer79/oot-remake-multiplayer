@@ -320,7 +320,7 @@ TEST_CASE("mods tab: an empty folder says where mods go") {
     std::string said;
     for (const auto& row : v.rows) {
         CHECK(row.kind == RowKind::kNote);
-        said += row.name;
+        said += (said.empty() ? "" : " ") + row.name;   // (the rows break at spaces: put them back)
     }
     REQUIRE_FALSE(v.rows.empty());
     CHECK(said.find("Put each mod in its own folder there.") != std::string::npos);
