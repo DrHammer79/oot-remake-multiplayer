@@ -221,6 +221,10 @@ or tests while it runs.
   happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
   must happen together in one `act`.
 - Set a test up with `place` and `setflag`; do not walk across Hyrule to reach it. `warp` in free play goes by Longshot's teleport (maps of its list, no entrance); with an entrance or a map outside the list, and no event running, it answers `not_in_event`: restart the session with a boot script that warps there. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
+- The pause menu's Key Items and Threads of Time tabs read `???` until the save has a key item and the owl's flag
+  (`UI_IsFinishChallengeMenuOpenEvent`): that is the game's own masked tab ([game-ui.md](game-ui.md), "The tab strip"),
+  not missing text. Set the flag and `give PouchData.Item_ZeldaLetter.StockNum` (a key item `give` accepts) first when a test
+  needs the tab names. In a session the flag is shared, so the other game follows.
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
   checkpoint takes its own shots: anything visible is proven by them, never by flags or log lines alone.
