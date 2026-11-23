@@ -505,6 +505,45 @@ TEST_CASE("native ui: a game that keeps its own copy of our text: ours until the
     CHECK_FALSE(b.Notice(w.g, w.ring, n));
 }
 
+TEST_CASE("native ui: once our banner is shut or let go, the game's next one from the same buffer is the game's") {
+    World w;
+    w.g.copy_to = 0x77000000;  // the game shows every banner text from one buffer of its own
+    ui::Banner b;
+    ui::Shown n;
+    n.notice = true;
+    n.text = "Ruto joined";
+    REQUIRE(b.Notice(w.g, w.ring, n));
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kOurs);
+    // Our notice ends (shut, no open asked) ...
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, 0);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 0);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kNothing);
+    // ... and the game opens its own banner, its text in the same buffer: the game's.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    CHECK_FALSE(b.Notice(w.g, w.ring, n));
+
+    // The same after a held line is let go: the game's banner from that buffer is never closed by us.
+    World v;
+    v.g.copy_to = 0x77000000;
+    ui::Banner h;
+    ui::HoldBanner("You are down  0:05");
+    REQUIRE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    REQUIRE(h.up());
+    v.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    v.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    ui::EndBanner();
+    CHECK_FALSE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    CHECK(v.g.CallsTo(kClose).size() == 1);  // ours: closed
+    // The close not taken yet, the game puts its own text up in the same buffer: the game's, never closed again.
+    CHECK(h.Holding(v.g, v.ring) == ui::Holds::kGames);
+    CHECK_FALSE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    CHECK(v.g.CallsTo(kClose).size() == 1);
+}
+
 TEST_CASE("native ui: a held banner line stays, changes its text in place, closes when let go") {
     World w;
     ui::Banner b;

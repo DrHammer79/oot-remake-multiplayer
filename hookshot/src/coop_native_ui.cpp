@@ -458,13 +458,21 @@ bool EndLine(Game& game, const TextRing& ring) {
 
 Holds Banner::Holding(Game& game, const TextRing& ring) {
     const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
-    if (screen == 0) return Holds::kGames;  // (none: nothing to show on)
+    if (screen == 0) {
+        ours_ = 0;   // (gone: whatever comes next is not ours)
+        return Holds::kGames;  // (none: nothing to show on)
+    }
     std::int8_t request = 0;
     std::uint8_t state = 0;
     if (!ReadValue(game, screen + addr::kScreenRequest, request) || !ReadValue(game, screen + addr::kScreenState, state)) {
         return Holds::kGames;  // (unreadable: never cover it)
     }
-    if (state == 0 && request < 1) return Holds::kNothing;  // shut, no open asked: free
+    if (state == 0 && request < 1) {
+        // Shut, no open asked: free. Our last text is done: a game that keeps its text in one buffer of its own shows
+        // its next banner from the same pointer, and that one is the game's, never ours.
+        ours_ = 0;
+        return Holds::kNothing;
+    }
     // Up, or opening: whose text? Unreadable counts as the game's.
     const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Text_00);
     std::uint64_t text = 0;
@@ -524,6 +532,7 @@ bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& 
                 game.Call(close, {screen, static_cast<std::uint64_t>(-1), 0, 0, 0});
             }
         }
+        if (up_) ours_ = 0;   // (let go: what the banner shows from now on is not the held line's)
         up_ = false;   // (let go: the notices may have the banner again)
         shown_.clear();
         return false;
