@@ -493,6 +493,12 @@ jobs:
       # Longshot's Linux clang and build.py's flags; the windows job does the same for Windows)
       - name: Our patches' Linux host code compiles (Longshot's clang, syntax only)
         run: bash tools/hookshot/host_compile_check.sh "$KIT"
+      # (Longshot's own tests of the input our patches change (0039: the Insert menu's pads), on the patched source)
+      - name: Longshot's input tests on the patched source
+        run: |
+          src="$KIT/data/builder/source"
+          python3 -I -B "$src/tests/test_pads_after_menu.py" --cc gcc-12
+          python3 -I -B "$src/tests/test_menu_text_field.py" --cxx g++-12
       - name: A first start without a game stops in plain words
         run: |
           set +e
