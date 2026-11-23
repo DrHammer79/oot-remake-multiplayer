@@ -460,7 +460,8 @@ Nothing here has run in a game. The first run checks:
    game is never left running free. A tool that runs no frame (get_world, checkpoint, log, ...) touches only its
    game. Calls are logged under the server `oot-pair` (with their `player`); `replay`, `save_script` and the script
    check read them. A bridge takes one client at a time, so `oot-pair` replaces `oot-p1` and `oot-p2`: never
-   register both (`kit_doctor` checks an `oot-pair` entry has `--pair` and no `--player`).
+   register both (`kit_doctor` fails an `.mcp.json` that has both, or an `oot-pair` without `--pair` or with a
+   `--player`).
 3. The tester follows [AGENTS.md](../AGENTS.md), "Play-testing the game", and runs [tests/scenarios.md](../tests/scenarios.md)
    in order.
 

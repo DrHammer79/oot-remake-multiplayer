@@ -229,6 +229,10 @@ def check_mcp(r, path, lane=None, which=shutil.which):
             else:
                 port = pc.port_for(name[4:], lane_n) if name != "oot-playtest" else None
                 r.ok("mcp " + name, "ok" + (", bridge port %d" % port if port else ""))
+    both = sorted(k for k in ("oot-p1", "oot-p2") if k in oot)
+    if "oot-pair" in oot and both:
+        r.fail("mcp oot-pair", "registered with %s: a bridge takes one client at a time, keep oot-pair or the per-game "
+               "servers, not both" % " and ".join(both))
     if len(logs) > 1:
         r.fail("mcp log-dir", "the servers have different --log-dir (%s): desync_check reads one folder"
                % ", ".join(sorted(logs)))
