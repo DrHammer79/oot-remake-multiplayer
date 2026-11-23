@@ -1,14 +1,17 @@
 """Tests for the play-test kit helpers that need no game (kit_tools.py): step_until's condition and wait, against the
 fake bridge of test_playtest_bridge.py. Run: python -I tools/autotest/tests/test_kit_tools.py"""
+import argparse
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import kit_tools  # noqa: E402
+import live  # noqa: E402
 import mcp_playtest  # noqa: E402
 import playtest_client as pc  # noqa: E402
 from test_playtest_bridge import FakeGame  # noqa: E402
@@ -167,6 +170,124 @@ class StepUntilTool(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.tool.call("step_until", {"condition": "event", "chunk": 0})
         self.assertEqual([m for m in self.game.log if m["cmd"] == "step"], [])
+
+
+class Delta(unittest.TestCase):
+    A = {"frame": 100, "scene": "S", "pos": [1.0, 0.0, 2.0], "life": 12, "event": False, "snapshot_present": 99,
+         "equips": {"weapon": "Kokiri", "shield": None}, "coop": {"players": [{"n": 1}]}, "inventory": {"X": 1}}
+
+    def test_only_what_changed_and_never_the_counters(self):
+        b = json.loads(json.dumps(self.A))
+        b.update(frame=160, snapshot_present=159)
+        self.assertEqual(kit_tools.delta(self.A, b), {"changed": {}, "removed": []})   # nothing but the counters moved
+        b["pos"] = [1.5, 0.0, 2.0]
+        b["equips"]["shield"] = "Deku"
+        b["inventory"] = {"X": 2}
+        d = kit_tools.delta(self.A, b)
+        self.assertEqual(d["changed"], {"pos": [1.5, 0.0, 2.0], "equips.shield": "Deku"})   # a list whole, an object by path
+        self.assertEqual(d["removed"], [])
+
+    def test_new_and_removed_fields(self):
+        b = json.loads(json.dumps(self.A))
+        del b["life"]
+        b["strike"] = {"seq": 1}
+        b["equips"] = {}
+        d = kit_tools.delta(self.A, b)
+        self.assertEqual(d["changed"], {"strike.seq": 1, "equips": {}})
+        self.assertEqual(d["removed"], ["equips.shield", "equips.weapon", "life"])
+
+    def test_history_gives_whole_then_delta_and_keeps_sixteen(self):
+        h = kit_tools.StateHistory()
+        first = h.reply({"A": dict(self.A)})["A"]
+        self.assertEqual((first["state_id"], first["scene"]), (1, "S"))
+        moved = dict(self.A, frame=130, life=8)
+        r = h.reply({"A": moved}, since=1)["A"]
+        self.assertEqual((r["state_id"], r["since"], r["frame"], r["changed"]), (2, 1, 130, {"life": 8}))
+        self.assertNotIn("scene", r)
+        r = h.reply({"A": moved}, since=2)["A"]                     # nothing moved
+        self.assertEqual((r["changed"], r["removed"]), ({}, []))
+        for _ in range(20):
+            h.add({"A": moved})
+        self.assertEqual(h.kept(), (8, 23))
+        r = h.reply({"A": moved}, since=1)["A"]                     # too old: the whole state, and why
+        self.assertEqual(r["scene"], "S")
+        self.assertIn("no look 1 kept", r["why"])
+        self.assertIn("9 to 24", r["why"])   # (the reply itself kept look 24)
+        r = h.reply({"A": moved}, since=999)["A"]
+        self.assertIn("no look 999 kept", r["why"])
+
+    def test_a_player_the_old_look_did_not_have_gets_the_whole_state(self):
+        h = kit_tools.StateHistory()
+        h.add({"A": dict(self.A)})
+        r = h.reply({"A": dict(self.A), "B": dict(self.A)}, since=1)
+        self.assertIn("changed", r["A"])
+        self.assertEqual(r["B"]["scene"], "S")
+        self.assertIn("why", r["B"])
+
+    def test_the_log_lines_always_come_whole_and_are_not_kept(self):
+        h = kit_tools.StateHistory()
+        h.add({"A": dict(self.A, log=["coop: one"])})
+        self.assertNotIn("log", h.get(1)["A"])
+        r = h.reply({"A": dict(self.A, log=["coop: two"])}, since=1)["A"]
+        self.assertEqual((r["changed"], r["log"]), ({}, ["coop: two"]))
+
+    def test_the_history_file_carries_over_between_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "state-history.json")
+            self.assertEqual(kit_tools.StateHistory(path).add({"A": dict(self.A)}), 1)
+            h = kit_tools.StateHistory(path)                       # (live.py runs once per call)
+            self.assertEqual(h.reply({"A": dict(self.A, life=4)}, since=1)["A"]["changed"], {"life": 4})
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("{cut")
+            self.assertEqual(kit_tools.StateHistory(path).add({"A": {}}), 1)   # a broken file starts again, no crash
+
+
+class DeltaTools(unittest.TestCase):
+    def test_get_state_since_on_a_player_server(self):
+        game = FakeGame()
+        tool = mcp_playtest.Game("p1", pc.Client(game.port), os.getcwd())
+        try:
+            whole = tool.call("get_state", {})
+            self.assertEqual(whole["state_id"], 1)
+            self.assertEqual(whole["scene"], "ForestTemple")
+            same = tool.call("get_state", {"since": 1})
+            self.assertEqual((same["changed"], same["removed"], same["state_id"]), ({}, [], 2))   # a held game: no change
+            game.rupees = 9
+            game.prompt = "Talk"
+            r = tool.call("get_state", {"since": 2, "inventory": True})
+            self.assertEqual(r["changed"], {"rupees": 9, "prompt": "Talk"})
+            self.assertEqual(r["frame"], 1000)
+            self.assertNotIn("scene", r)
+            for bad in (0, -1, "1", True, 1.5):
+                with self.assertRaises(ValueError, msg=repr(bad)):
+                    tool.call("get_state", {"since": bad})
+            self.assertEqual(tool.call("get_state", {})["state_id"], 4)   # a refused call took no id
+        finally:
+            tool.client.close()
+            game.close()
+
+    def test_live_state_since_and_the_cli_flag(self):
+        looks = iter([{"map": "M", "life": 12, "log": ["coop: a"]}, {"map": "M", "life": 8, "log": []}])
+        with tempfile.TemporaryDirectory() as d:
+            live.save(d, {"games": {}, "offsets": {}})
+            saved = live.look
+            live.look = lambda d, s, x: dict(next(looks))
+            try:
+                first = live.state(argparse.Namespace(session=d, player="A"))
+                self.assertEqual((first["A"]["state_id"], first["A"]["life"]), (1, 12))
+                r = live.state(argparse.Namespace(session=d, player="A", since=1))
+            finally:
+                live.look = saved
+            self.assertEqual((r["A"]["changed"], r["A"]["since"], r["A"]["log"]), ({"life": 8}, 1, []))
+            self.assertTrue(os.path.isfile(os.path.join(d, "state-history.json")))
+        with self.assertRaises(SystemExit):                       # --since takes a number
+            live.main(["state", "--session", "x", "--since", "soon"])
+
+    def test_the_session_state_tool_takes_since(self):
+        props = next(t for t in mcp_playtest.TOOLS if t["name"] == "state")["inputSchema"]["properties"]
+        self.assertIn("since", props)
+        with self.assertRaises(ValueError):
+            mcp_playtest.call("x", "state", {"since": 0})
 
 
 if __name__ == "__main__":

@@ -36,8 +36,10 @@ SCRIPT_HELP = (
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
      "camera yaw (0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, whether an event or a load is "
-     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`.",
-     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
+     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`. "
+     "Every look has a `state_id`; pass it as `since` on the next call to get only what changed (`changed`, `removed`).",
+     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]},
+                                                      "since": {"type": "integer", "minimum": 1}}}},
     {"name": "act", "description": "Play test script lines in one game, then return its state. " + SCRIPT_HELP,
      "inputSchema": {"type": "object", "required": ["player", "script"],
                      "properties": {"player": {"type": "string", "enum": ["A", "B"]},
@@ -102,6 +104,16 @@ def _button(args):
     if b not in pc.BUTTONS:
         raise ValueError("button: one of " + " ".join(pc.BUTTONS))
     return b
+
+
+def _since(args):
+    """The `since` of get_state and state: the state_id of an earlier look (a whole number from 1), or None."""
+    v = args.get("since")
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ValueError("since: the state_id of an earlier look (a whole number, 1 or more)")
+    return v
 
 
 def _bounded(args, key, default, lo, hi):
@@ -258,8 +270,14 @@ PLAYER_TOOLS = [
      "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
      "no world list (solo). The inventory is NOT in the reply unless you ask: `inventory_count` says how many items "
      "are set; `inventory` true adds those entries (about 290 on a full save: 10k tokens, ask once). The nearest "
-     "actors are in get_world. " + PAUSED,
-     "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"}}}},
+     "actors are in get_world. Every reply has a `state_id`; pass it as `since` on a later call and only what "
+     "changed comes back: `changed` (dotted path: new value, e.g. `pos`, `equips.weapon`), `removed`, the `frame` "
+     "and a new `state_id` (an id that is no longer kept, the last 16 are, gives the whole state and says why). "
+     "`frame`, `snapshot_present` and the like are left out of a delta: they move on every look. The `inventory` "
+     "is left out too (`inventory_count` changing says it did: ask for the whole state with `inventory` true). "
+     + PAUSED,
+     "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"},
+                                                      "since": {"type": "integer", "minimum": 1}}}},
     {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
      "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
@@ -375,6 +393,7 @@ class Game:
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
         self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
+        self.history = kit_tools.StateHistory()   # the last looks (get_state `since`)
 
     def log_lines(self, match=None):
         """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
@@ -457,9 +476,13 @@ class Game:
         if self.session:
             live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
             live.touch(self.session)          # the session's watchdog counts this as a tester command
+        since = _since(args) if name == "get_state" else None   # (refused before anything is asked of the game)
         try:
             # no reply carries the whole inventory or the world list unless asked for (get_state inventory=true)
-            return pc.slim_state(self._call(name, args), inventory=name == "get_state" and bool(args.get("inventory")))
+            out = pc.slim_state(self._call(name, args), inventory=name == "get_state" and bool(args.get("inventory")))
+            if name == "get_state":
+                out = self.history.reply({self.player: out}, since)[self.player]
+            return out
         finally:
             if self.session:
                 live.touch(self.session)      # (a long walk_to or warp is not idle time)
@@ -561,7 +584,7 @@ class Args:
 
 def call(session, name, args):
     if name == "state":
-        return live.state(Args(session=session, player=args.get("player")))
+        return live.state(Args(session=session, player=args.get("player"), since=_since(args)))
     if name == "act":
         return live.do(Args(session=session, player=args["player"], script=args["script"]))
     if name == "shot":

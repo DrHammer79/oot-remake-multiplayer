@@ -23,7 +23,7 @@ boot, as the lane runs do (`--no-restore` keeps whatever the copies hold).
                                            [--boot-a boot.A.txt --boot-b boot.B.txt] [--env K=V ...]
                                            [--max-minutes 30] [--idle-minutes 10] [--lock-wait S] [--no-restore]
     python -I tools/autotest/live.py do --session DIR A "goto 10.0 20.0 0.5 300; press A"
-    python -I tools/autotest/live.py state --session DIR [A|B]
+    python -I tools/autotest/live.py state --session DIR [A|B] [--since ID]
     python -I tools/autotest/live.py shot --session DIR [A|B]
     python -I tools/autotest/live.py checkpoint --session DIR TAG
     python -I tools/autotest/live.py stop --session DIR
@@ -39,6 +39,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hookshot  # noqa: E402  (the same folder)
+import kit_tools  # noqa: E402
 import lanes  # noqa: E402  (the same folder; it brings tools/hookshot/hs.py)
 
 TAGS = ("A", "B")
@@ -334,7 +335,9 @@ def state(a):
     s = open_session(d)
     out = {x: look(d, s, x) for x in ([a.player] if a.player else TAGS)}
     save(d, s)
-    return out
+    # every look gets a `state_id`; with `since` (an earlier look's id) only what changed comes back (the new log lines
+    # are new since the last look already, so they are always whole)
+    return kit_tools.StateHistory(os.path.join(d, "state-history.json")).reply(out, getattr(a, "since", None))
 
 
 def do(a):
@@ -594,6 +597,9 @@ def main(argv=None):
             q.add_argument("script", help="test script lines, ';' between them")
         elif name in ("state", "shot"):
             q.add_argument("player", nargs="?", choices=TAGS)
+            if name == "state":
+                q.add_argument("--since", type=int, metavar="ID",
+                               help="the state_id of an earlier look: only what changed since it (default: all)")
         elif name == "checkpoint":
             q.add_argument("tag")
     a = p.parse_args(argv)
