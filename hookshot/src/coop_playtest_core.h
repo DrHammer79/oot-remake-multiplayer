@@ -60,6 +60,10 @@ public:
     void Touch();
     // How the last hold ended by itself, once (for the log): "idle" or empty.
     std::string TakeEndNote();
+    // Called with true when a hold starts and false when it ends, on the calc thread under the gate's lock: it must
+    // not block or call the gate (the module passes it to co-op's network thread: CoopHook::SetHeld). Set before
+    // the first frame.
+    void OnHeld(std::function<void(bool)> on_held) { on_held_ = std::move(on_held); }
 
 private:
     mutable std::mutex mu_;
@@ -72,6 +76,7 @@ private:
     Clock::time_point touched_ = Clock::now();
     double idle_s_;
     std::string end_note_;
+    std::function<void(bool)> on_held_;
 };
 
 // The stick: angle in degrees (0 up, 90 right, clockwise), strength 0 to 1, as Longshot's axes (-1 to 1, y up).
