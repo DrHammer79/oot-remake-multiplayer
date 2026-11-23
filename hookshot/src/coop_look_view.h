@@ -97,12 +97,105 @@ public:
     // `fov_y`: the game's (FovFromClip), else kFovY.
     std::optional<Shot> Camera(const Vec3& game_eye, const Vec3& game_target, const std::optional<Subject>& link,
                                std::uint64_t now_ms, double fov_y = kFovY);
+    const Window& window() const { return window_; }
 
 private:
     Window window_{};
     std::optional<std::uint64_t> asked_ms_;
     std::optional<std::uint64_t> start_ms_;   // the turn's start; none: no turn
     double start_yaw_ = 0;
+};
+
+// The game's own camera turned with the orbit (patch 0036, hos_coop_turn.h), so the game's own collision places
+// the eye: a wall or a low ceiling between Link and the eye brings the eye nearer, as in play (look-camera: next to
+// a cliff, one side of the turn put the eye inside the rock). The game's camera hook asks for its yaw and pitch
+// (Steer::Command) before the camera's update; the view hook then gets the eye the game placed and the module keeps
+// it (Framed). Without patch 0036, or when the camera does not follow, the picture is Aim's as before.
+
+// The game camera's angles, in degrees (hos_coop_turn.h: yaw falls as the view turns right, pitch rises as it
+// tilts down).
+struct Angles {
+    float yaw = 0;
+    float pitch = 0;
+};
+
+// Where an eye is seen from a target, in degrees: its yaw as atan2(x, z) (Aim's convention) and how high it is.
+struct Direction {
+    double yaw = 0;
+    double elevation = 0;
+};
+// None when the two are (nearly) the same point.
+std::optional<Direction> DirectionOf(const Vec3& target, const Vec3& eye);
+// An angle in degrees wrapped into -180..180.
+double Wrap(double degrees);
+
+// The shot from `eye` that shows `point` at the window's middle (the eye stays where it is; only the aim turns).
+Shot ReAim(const Vec3& eye, const Vec3& point, const Window& window, double fov_y = kFovY);
+
+// Below this the game's eye is too near its target to frame Link from (metres).
+inline constexpr double kMinEye = 0.2;
+// The picture from the game's own eye (the camera turned with the orbit): the eye on the line from the game's
+// target to the game's eye, no further than Aim's eye is from that target (nearer when the game's collision moved
+// it in), aimed so that Link's middle stays at the window's middle. None when the game's eye is under kMinEye
+// from its target.
+std::optional<Shot> Framed(const Vec3& game_eye, const Vec3& game_target, const Shot& aim, const Subject& link,
+                           const Window& window, double fov_y = kFovY);
+
+// Turns the game's camera with the orbit. The camera's angles are not world angles: their sign and offset are
+// learned. First a probe (Aim's picture meanwhile): a few frames turning the camera a little from where it was,
+// to see which way its eye goes and by how much. Then each frame the camera is given the angles that put its eye
+// in the orbit's direction, from the offsets seen so far. A camera that does not follow (no view seen, or the eye
+// turning the wrong amount, or off by too much for too long) is put back and left alone until the page is left.
+// The angles it had are put back when the page is left. Not thread-safe: the caller's lock.
+class Steer {
+public:
+    enum class Phase : std::uint8_t { idle, probe, drive, lost };
+    // Probe: this many frames, each turning the camera this much more.
+    static constexpr int kProbeSteps = 5;
+    static constexpr double kProbeYaw = 3.0;     // degrees a frame
+    static constexpr double kProbePitch = 2.0;   // degrees a frame
+    // The eye's turn over the camera's must be within this (either sign), or the camera does not follow.
+    static constexpr double kRatioMin = 0.5;
+    static constexpr double kRatioMax = 2.0;
+    // Frames the probe waits for a view before it gives up.
+    static constexpr int kProbeWait = 30;
+    // How much of an offset seen is taken each frame.
+    static constexpr double kGain = 0.5;
+    // Off by more than these (degrees) for kLostFrames frames in a row: the camera does not follow.
+    static constexpr double kLostYaw = 20.0;
+    static constexpr double kLostElevation = 25.0;
+    static constexpr int kLostFrames = 45;
+
+    // The camera hook (the game's thread), before the camera's update: the angles to give it, or none. `state`:
+    // the camera's (3 follows Link, 4 the player's; others: another camera has the view). `asked`: the picture is
+    // still asked for.
+    std::optional<Angles> Command(Angles now, int state, bool asked);
+    // The view hook (the game's thread): the eye and target the game's camera placed this frame.
+    void Observe(const Vec3& game_eye, const Vec3& game_target);
+    // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now).
+    void Want(const std::optional<Direction>& want);
+    Phase phase() const { return phase_; }
+    // The game's camera turns with the orbit: its eye is the picture's.
+    bool Driving() const { return phase_ == Phase::drive; }
+    // A line for the log when the steering changed (once each).
+    std::optional<std::string> TakeNote();
+
+private:
+    std::optional<Angles> Restore();
+    void Lose(const std::string& why);
+    std::optional<Angles> Drive();
+
+    Phase phase_ = Phase::idle;
+    std::optional<Angles> original_;   // the camera's angles before the first turn: put back at the end
+    std::optional<Direction> want_;
+    std::optional<Direction> seen_;    // the last view, since the last command
+    Angles last_{};                    // the last command
+    int step_ = 0, waited_ = 0, off_ = 0;
+    Angles probe_cmd_[kProbeSteps]{};
+    Direction probe_seen_[kProbeSteps]{};
+    double sign_yaw_ = 1, sign_pitch_ = 1;   // the eye's turn over the camera's
+    double offset_yaw_ = 0, offset_pitch_ = 0;   // eye direction = sign * camera angle + offset
+    std::optional<std::string> note_;
 };
 
 // What the page shows, for the log (0.11.1: adult Link got the flat picture
@@ -165,5 +258,7 @@ bool LinkShown();
 void Ask(const Window& window);
 // hos_coop_view (the game's thread): 1 = eye and target replaced.
 bool Camera(double eye[3], double target[3]);
+// hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced.
+bool Turn(float* yaw, float* pitch, int state);
 
 }  // namespace CoopLookView

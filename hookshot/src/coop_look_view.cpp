@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <utility>
 
 namespace CoopLookView {
 
@@ -140,6 +142,224 @@ std::optional<Shot> Orbit::Camera(const Vec3& game_eye, const Vec3& game_target,
     }
     const double turn = static_cast<double>(now_ms - *start_ms_) / 1000.0 / kTurnSeconds;
     return Aim(link->feet, link->height, start_yaw_ + kTau * (turn - std::floor(turn)), window_, fov_y);
+}
+
+namespace {
+constexpr double kDeg = 57.29577951308232;
+}  // namespace
+
+double Wrap(double degrees) {
+    double w = std::fmod(degrees, 360.0);
+    if (w > 180.0) {
+        w -= 360.0;
+    } else if (w < -180.0) {
+        w += 360.0;
+    }
+    return w;
+}
+
+std::optional<Direction> DirectionOf(const Vec3& target, const Vec3& eye) {
+    const double x = eye[0] - target[0], y = eye[1] - target[1], z = eye[2] - target[2];
+    const double flat = std::hypot(x, z);
+    if (!(std::hypot(flat, y) > 1e-6)) {
+        return std::nullopt;
+    }
+    return Direction{flat > 1e-9 ? std::atan2(x, z) * kDeg : 0.0, std::atan2(y, flat) * kDeg};
+}
+
+Shot ReAim(const Vec3& eye, const Vec3& point, const Window& window, double fov_y) {
+    // The point is seen along v in the view's own terms (right, up, back), with v's depth -1: where the window's
+    // middle is. Find the yaw and pitch whose axes turn v onto the line from the eye to the point (AxesOf: world =
+    // vx right + vy up + vz back). Height: vy cos p + vz sin p = u_y. Across: atan2(x, z) = yaw + atan2(vx, k), with
+    // k = vz cos p - vy sin p, the root with k < 0 (the point in front of the eye).
+    const double t = std::tan(fov_y * 0.5);
+    const double nx = static_cast<double>(window.x0) + window.x1 - 1.0;
+    const double ny = 1.0 - (static_cast<double>(window.y0) + window.y1);
+    double vx = nx * t * window.aspect, vy = ny * t, vz = -1.0;
+    const double vl = std::sqrt(vx * vx + vy * vy + vz * vz);
+    vx /= vl, vy /= vl, vz /= vl;
+    Vec3 u{point[0] - eye[0], point[1] - eye[1], point[2] - eye[2]};
+    const double ul = std::sqrt(Dot(u, u));
+    Shot s;
+    s.eye = eye;
+    if (!(ul > 1e-9)) {
+        s.target = point;
+        return s;
+    }
+    for (auto& c : u) {
+        c /= ul;
+    }
+    const double r = std::hypot(vy, vz), phi = std::atan2(vz, vy);
+    const double turn = std::acos(std::clamp(u[1] / r, -1.0, 1.0));
+    double pitch = phi + turn;
+    double k = vz * std::cos(pitch) - vy * std::sin(pitch);
+    if (k > 0) {   // (the other root: the point in front of the eye, not behind it)
+        pitch = phi - turn;
+        k = vz * std::cos(pitch) - vy * std::sin(pitch);
+    }
+    const double yaw = std::atan2(u[0], u[2]) - std::atan2(vx, k);
+    const Axes a = AxesOf(yaw, pitch);
+    for (int i = 0; i < 3; ++i) {
+        s.target[i] = eye[i] - a.back[i] * ul;
+    }
+    return s;
+}
+
+std::optional<Shot> Framed(const Vec3& game_eye, const Vec3& game_target, const Shot& aim, const Subject& link,
+                           const Window& window, double fov_y) {
+    const Vec3 d{game_eye[0] - game_target[0], game_eye[1] - game_target[1], game_eye[2] - game_target[2]};
+    const double dist = std::sqrt(Dot(d, d));
+    if (!(dist >= kMinEye)) {
+        return std::nullopt;
+    }
+    const Vec3 a{aim.eye[0] - game_target[0], aim.eye[1] - game_target[1], aim.eye[2] - game_target[2]};
+    const double use = std::min(dist, std::sqrt(Dot(a, a)));
+    if (!(use >= kMinEye)) {
+        return std::nullopt;
+    }
+    Vec3 eye{};
+    for (int i = 0; i < 3; ++i) {
+        eye[i] = game_target[i] + d[i] / dist * use;
+    }
+    const double h = link.height > 0 ? link.height : 1.0;
+    const Vec3 middle{link.feet[0], link.feet[1] + h * 0.5, link.feet[2]};
+    const Shot shot = ReAim(eye, middle, window, fov_y);
+    // A camera above him that would have to tilt past straight down to put him in the window: Aim's picture instead.
+    const auto at = Project(shot, middle, window.aspect, fov_y);
+    if (!(std::fabs(at[0] - (static_cast<double>(window.x0) + window.x1) * 0.5) < 1e-3 &&
+          std::fabs(at[1] - (static_cast<double>(window.y0) + window.y1) * 0.5) < 1e-3)) {
+        return std::nullopt;
+    }
+    return shot;
+}
+
+std::optional<Angles> Steer::Restore() {
+    const auto back = original_;
+    original_.reset();
+    return back;
+}
+
+void Steer::Lose(const std::string& why) {
+    phase_ = Phase::lost;
+    note_ = "coop: look: the game camera does not turn with the Customize picture (" + why +
+            "): the picture keeps its own framing, and the camera is put back";
+}
+
+std::optional<Angles> Steer::Drive() {
+    if (seen_) {
+        // The offsets seen with the last command, taken in part (a view one frame late only shifts them a little).
+        offset_yaw_ = Wrap(offset_yaw_ + kGain * Wrap(seen_->yaw - sign_yaw_ * last_.yaw - offset_yaw_));
+        offset_pitch_ += kGain * (seen_->elevation - sign_pitch_ * last_.pitch - offset_pitch_);
+        const double off_yaw = std::fabs(Wrap(want_->yaw - seen_->yaw));
+        const double off_elevation = std::fabs(want_->elevation - seen_->elevation);
+        off_ = off_yaw > kLostYaw || off_elevation > kLostElevation ? off_ + 1 : 0;
+        seen_.reset();
+        if (off_ >= kLostFrames) {
+            char why[96];
+            std::snprintf(why, sizeof why, "off by %.0f degrees across and %.0f up for %d frames", off_yaw,
+                          off_elevation, kLostFrames);
+            Lose(why);
+            return Restore();
+        }
+    }
+    last_.yaw = static_cast<float>(Wrap(sign_yaw_ * Wrap(want_->yaw - offset_yaw_)));
+    last_.pitch = static_cast<float>(sign_pitch_ * (want_->elevation - offset_pitch_));
+    return last_;
+}
+
+std::optional<Angles> Steer::Command(Angles now, int state, bool asked) {
+    if (state != 3 && state != 4) {
+        // Another camera has the view (an event): its angles are not the ones to put back; the probe starts again.
+        phase_ = Phase::idle;
+        original_.reset();
+        seen_.reset();
+        return std::nullopt;
+    }
+    if (!asked || !want_) {
+        phase_ = Phase::idle;
+        seen_.reset();
+        return Restore();
+    }
+    if (!std::isfinite(now.yaw) || !std::isfinite(now.pitch)) {
+        return std::nullopt;
+    }
+    switch (phase_) {
+    case Phase::lost:
+        return Restore();
+    case Phase::idle:
+        original_ = now;
+        phase_ = Phase::probe;
+        step_ = waited_ = off_ = 0;
+        seen_.reset();
+        [[fallthrough]];
+    case Phase::probe: {
+        if (step_ > 0) {
+            if (!seen_) {
+                if (++waited_ > kProbeWait) {
+                    Lose("no view seen");
+                    return Restore();
+                }
+                return last_;   // (the same angles until a view of them is seen)
+            }
+            probe_seen_[step_ - 1] = *seen_;
+            seen_.reset();
+        }
+        if (step_ < kProbeSteps) {
+            // From where the camera was, a little more each frame; the pitch towards level (its limits are near 90).
+            const double toward = original_->pitch > 0 ? -1.0 : 1.0;
+            last_.yaw = static_cast<float>(Wrap(original_->yaw + kProbeYaw * step_));
+            last_.pitch = static_cast<float>(original_->pitch + toward * kProbePitch * step_);
+            probe_cmd_[step_++] = last_;
+            return last_;
+        }
+        // The eye's turn over the camera's, from the second view to the last (the first may be of the frame before).
+        const Angles& c0 = probe_cmd_[1];
+        const Angles& c1 = probe_cmd_[kProbeSteps - 1];
+        const Direction& s0 = probe_seen_[1];
+        const Direction& s1 = probe_seen_[kProbeSteps - 1];
+        const double ratio_yaw = Wrap(s1.yaw - s0.yaw) / Wrap(static_cast<double>(c1.yaw) - c0.yaw);
+        const double ratio_pitch = (s1.elevation - s0.elevation) / (static_cast<double>(c1.pitch) - c0.pitch);
+        const auto follows = [](double r) { return std::fabs(r) >= kRatioMin && std::fabs(r) <= kRatioMax; };
+        if (!follows(ratio_yaw) || !follows(ratio_pitch)) {
+            char why[96];
+            std::snprintf(why, sizeof why, "the eye turned %.2f and %.2f times the camera", ratio_yaw, ratio_pitch);
+            Lose(why);
+            return Restore();
+        }
+        sign_yaw_ = ratio_yaw > 0 ? 1 : -1;
+        sign_pitch_ = ratio_pitch > 0 ? 1 : -1;
+        offset_yaw_ = Wrap(s1.yaw - sign_yaw_ * c1.yaw);
+        offset_pitch_ = s1.elevation - sign_pitch_ * c1.pitch;
+        last_ = c1;
+        phase_ = Phase::drive;
+        char line[192];
+        std::snprintf(line, sizeof line,
+                      "coop: look: the game camera turns with the Customize picture (the eye turns %.2f and %.2f "
+                      "times its yaw and pitch), so the game's collision places the eye",
+                      ratio_yaw, ratio_pitch);
+        note_ = line;
+        return Drive();
+    }
+    case Phase::drive:
+        return Drive();
+    }
+    return std::nullopt;
+}
+
+void Steer::Observe(const Vec3& game_eye, const Vec3& game_target) {
+    if (const auto d = DirectionOf(game_target, game_eye)) {
+        seen_ = d;
+    }
+}
+
+void Steer::Want(const std::optional<Direction>& want) {
+    want_ = want;
+}
+
+std::optional<std::string> Steer::TakeNote() {
+    auto n = std::move(note_);
+    note_.reset();
+    return n;
 }
 
 namespace {

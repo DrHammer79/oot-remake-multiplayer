@@ -659,6 +659,31 @@ TEST_CASE("hookshot: a module tab may draw a picture beside its page (patch 0019
     CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_view(double eye[3], double target[3])") != std::string::npos);
 }
 
+TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patch 0036, hos_coop_turn.h)") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0036-coop-camera-angles.patch");
+    REQUIRE_FALSE(patch.empty());
+    CHECK(NewFile(patch, "host/hos_coop_turn.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_turn.h"));
+    // The bridge looks for the optional export; the camera hook asks it first, whatever the Mouse camera row, and
+    // writes the angles only in states 3 and 4, the pitch within the camera's limits.
+    CHECK(patch.find("GetProcAddress(m, \"hos_coop_turn\")") != std::string::npos);
+    CHECK(patch.find("+    if (cam && looks_like_camera(cam) && coop_turns(cam)) {") != std::string::npos);
+    CHECK(patch.find("+    if ((state != STATE_FOLLOWS && state != STATE_PLAYER) || !isfinite(yaw) || !isfinite(pitch)) return 0;") !=
+          std::string::npos);
+    CHECK(patch.find("+    if (pitch < lo) pitch = lo;") != std::string::npos);
+    // Host files only: no lift, no game code, no new hook in the game (hos_mouse_camera is already called).
+    for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
+        bool allowed = false;
+        for (const std::string prefix : {"diff --git a/host/coop_bridge.c ", "diff --git a/host/mouse_native.c ",
+                                         "diff --git a/host/hos_coop_turn.h "}) {
+            allowed = allowed || patch.compare(at, prefix.size(), prefix) == 0;
+        }
+        CHECK(allowed);
+    }
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state)") !=
+          std::string::npos);
+}
+
 namespace {
 
 // s without spaces, tabs and line ends.
