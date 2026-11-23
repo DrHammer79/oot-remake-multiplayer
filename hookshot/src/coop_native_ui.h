@@ -13,7 +13,7 @@
 // 1.1.1, the only one co-op supports), each checked on that build's main (docs/game-ui.md).
 //
 // Split for tests: the pure parts (Clean, SplitSpeaker, Columns, Wrap, ChatFeed, TypingLine) and the game steps
-// (ShowLine, ShowNotice, EndLine, NameTint), which go through the Game interface (the module's guest memory and its
+// (ShowLine, EndLine, NameTint, Banner), which go through the Game interface (the module's guest memory and its
 // game call), so tests/hookshot/native_ui_test.cpp runs them on a pretend game.
 #pragma once
 
@@ -63,6 +63,7 @@ inline constexpr std::uint64_t kSetColour0 = 0x150c740;       // f_8152c740 (tex
 inline constexpr std::uint64_t kSetColour1 = 0x150c810;       // f_8152c810 (text box, float rgba[4]): +0x1e4
 inline constexpr std::uint64_t kBoxColour0 = 0x1d4;           // the two colours as the text box keeps them
 inline constexpr std::uint64_t kBoxColour1 = 0x1e4;
+inline constexpr std::uint64_t kBoxText = 0xf0;               // the text box's text pointer (f_80459680 keeps it there)
 // Pane names the game has in its read-only data.
 inline constexpr std::uint64_t kNameT_Name_00 = 0x3cf41c6;    // "T_Name_00"
 inline constexpr std::uint64_t kNameT_Text_00 = 0x3dc2306;    // "T_Text_00"
@@ -184,7 +185,8 @@ public:
     static constexpr std::size_t kSlotText = kSlotBytes - sizeof(Ref) - 1;
     static constexpr std::size_t kSlots = 48;
     static constexpr std::size_t kScratchBytes = 64;
-    static constexpr std::size_t kBlockBytes = kSlotBytes * kSlots + kScratchBytes;
+    static constexpr std::size_t kFixed = 1;   // slots after the ring written in place (the held banner line)
+    static constexpr std::size_t kBlockBytes = kSlotBytes * (kSlots + kFixed) + kScratchBytes;
 
     void SetBlock(std::uint64_t base) { base_ = base; }
     bool HasBlock() const { return base_ != 0; }
@@ -193,7 +195,10 @@ public:
     // Writes the text (cleaned again, cut to kSlotText at a character; '\n' kept) and its Ref; the Ref's guest
     // address, or 0 when it could not be written.
     std::uint64_t Put(Game& game, std::string_view text);
-    std::uint64_t Scratch() const { return base_ == 0 ? 0 : base_ + kSlotBytes * kSlots; }
+    // Fixed slot `index` (< kFixed) written in place with the text: its Ref's address, or 0. Its text pointer never
+    // changes, so a line re-set every second (the held line's clock) never walks round the ring.
+    std::uint64_t PutFixed(Game& game, std::size_t index, std::string_view text);
+    std::uint64_t Scratch() const { return base_ == 0 ? 0 : base_ + kSlotBytes * (kSlots + kFixed); }
 
 private:
     std::uint64_t base_ = 0;
@@ -233,8 +238,9 @@ bool ShowLine(Game& game, TextRing& ring, NameTint& tint, const Shown& line, boo
 // Ends a line of ours early (the box closed): its time to 0, the window closes on its next step. Nothing when the
 // window shows something of the game's own.
 bool EndLine(Game& game, const TextRing& ring);
-// Shows a notice in the game's banner (T_Text_00), then open.
-bool ShowNotice(Game& game, TextRing& ring, const Shown& notice);
+// The text box of a text pane of the screen's layout, by the game's name string at main+`pane_name`: *(*(pane+8)+8)
+// for a pane of kind 2 (text); 0 when there is none.
+std::uint64_t PaneTextBox(Game& game, std::uint64_t screen, std::uint64_t pane_name);
 
 // ---------------------------------------------------------------- a held banner
 // A line that stays on the game's banner while it is held (down but not out: "You are down  0:32"); notices wait
@@ -243,16 +249,26 @@ void HoldBanner(std::string_view text);   // held, or its text changed
 void EndBanner();                         // let go: the banner closes, notices go on
 std::optional<std::string> HeldBanner();  // the held text, if any
 
+// The game's banner (SimpleInfo_00), every write of ours to it. It is never taken from the game: while it is up with
+// a text that is not ours (its T_Text_00 text box's pointer is not in our block and not the last one we set), a notice
+// waits and so does the held line; closing touches only a banner of ours.
 class Banner {
 public:
-    // Each frame on the game's thread with the held text: opens the banner when it is shut, sets T_Text_00 only when
-    // the text changed, closes it once let go. True while a held line is up (notices wait).
+    // What the banner holds now (kNothing: shut, no open asked).
+    Holds Holding(Game& game, const TextRing& ring);
+    // A notice (T_Text_00, then open). False when there is no banner or it shows the game's own: the notice waits.
+    bool Notice(Game& game, TextRing& ring, const Shown& notice);
+    // Each frame on the game's thread with the held text: opens the banner when it is shut, sets T_Text_00 (a fixed
+    // slot, in place) only when the text changed, closes it once let go. True while a held line is up or waits for the
+    // game's own banner to end (notices wait).
     bool Step(Game& game, TextRing& ring, const std::optional<std::string>& held);
     bool up() const { return up_; }
 
 private:
+    bool Set(Game& game, std::uint64_t screen, std::uint64_t ref);
     bool up_ = false;
     std::string shown_;
+    std::uint64_t ours_ = 0;   // the text box's pointer after our last set (the game may copy the text)
 };
 
 }  // namespace CoopNativeUi

@@ -26,6 +26,9 @@ struct FakeGame final : ui::Game {
     std::vector<Made> calls;
     std::map<std::uint64_t, std::uint64_t> returns;  // function -> x0
     std::set<std::uint64_t> missing;                 // functions that are not there
+    // The text box the game's pane setter writes: it keeps the text's pointer at +0xf0 (f_80459680), or a copy's
+    // (copy_to) when a game kept its own.
+    std::uint64_t set_box = 0, copy_to = 0;
 
     bool Read(std::uint64_t a, void* out, std::size_t n) override {
         auto* o = static_cast<std::uint8_t*>(out);
@@ -44,6 +47,11 @@ struct FakeGame final : ui::Game {
     std::optional<std::uint64_t> Call(std::uint64_t f, const std::array<std::uint64_t, 5>& x) override {
         if (missing.count(f) != 0) return std::nullopt;
         calls.push_back({f, x});
+        if (f == kMain + ui::addr::kSetPaneText && set_box != 0) {
+            std::uint64_t text = copy_to;
+            if (text == 0) Read(x[2], &text, sizeof text);   // (the Ref's first word)
+            Put<std::uint64_t>(set_box + ui::addr::kBoxText, text);
+        }
         const auto it = returns.find(f);
         return it != returns.end() ? it->second : 0;
     }
@@ -124,6 +132,8 @@ struct World {
         g.Put<std::uint64_t>(kInner + 8, kBox);
         const float game[8] = {1, 1, 1, 1, 0.9f, 0.9f, 0.9f, 1};
         g.Write(kBox + ui::addr::kBoxColour0, game, sizeof game);
+        g.set_box = kBox;
+        g.Put<std::uint64_t>(kBox + ui::addr::kBoxText, 0);
         (void)kVtable;
     }
     ui::Ref RefAt(std::uint64_t a) { return g.Get<ui::Ref>(a); }
@@ -309,7 +319,7 @@ TEST_CASE("native ui: texts live in the game's memory, the Ref as the game reads
     CHECK(r.Put(g, "b") == kBlock + ui::TextRing::kSlotBytes);
     CHECK(r.Owns(ref.text));
     CHECK_FALSE(r.Owns(kBlock + ui::TextRing::kBlockBytes));
-    CHECK(r.Scratch() == kBlock + ui::TextRing::kSlotBytes * ui::TextRing::kSlots);
+    CHECK(r.Scratch() == kBlock + ui::TextRing::kSlotBytes * (ui::TextRing::kSlots + ui::TextRing::kFixed));
     for (std::size_t i = 2; i < ui::TextRing::kSlots; ++i) r.Put(g, "z");
     CHECK(r.Put(g, "again") == kBlock);  // round again, long after
 }
@@ -427,10 +437,12 @@ TEST_CASE("native ui: the colour only on a text pane whose box holds colours") {
 TEST_CASE("native ui: a notice in the game's banner") {
     World w;
     REQUIRE(ui::ScreenByVtable(w.g, ui::addr::kInfoVtable) == kBanner);
+    ui::Banner b;
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kNothing);  // shut, no open asked
     ui::Shown n;
     n.notice = true;
     n.text = "Ruto joined";
-    REQUIRE(ui::ShowNotice(w.g, w.ring, n));
+    REQUIRE(b.Notice(w.g, w.ring, n));
     const auto sets = w.g.CallsTo(At(ui::addr::kSetPaneText));
     REQUIRE(sets.size() == 1);
     CHECK(sets[0].x[1] == 0x83de2306);  // T_Text_00
@@ -439,11 +451,100 @@ TEST_CASE("native ui: a notice in the game's banner") {
     REQUIRE(opens.size() == 1);
     CHECK(opens[0].x[0] == kBanner);
     CHECK(opens[0].x[1] == ui::addr::kInfoOpenMode);
+    // Up with our notice: ours, so the next notice replaces it.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kOurs);
+    n.text = "Ruto left";
+    CHECK(b.Notice(w.g, w.ring, n));
     w.g.Put<std::uint32_t>(kManager + ui::addr::kUiCount, 1);  // the banner not loaded
-    CHECK_FALSE(ui::ShowNotice(w.g, w.ring, n));
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    CHECK_FALSE(b.Notice(w.g, w.ring, n));
 }
 
-TEST_CASE("native ui: a held banner line stays, changes its text only when it changes, closes when let go") {
+TEST_CASE("native ui: the game's own banner is never covered: a notice waits for it") {
+    World w;
+    ui::Banner b;
+    // The game shows its own banner text (a pointer that is not ours).
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    w.g.Put<std::uint64_t>(kBox + ui::addr::kBoxText, 0x88000000);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    ui::Shown n;
+    n.notice = true;
+    n.text = "Ruto joined";
+    CHECK_FALSE(b.Notice(w.g, w.ring, n));
+    CHECK(w.g.CallsTo(At(ui::addr::kSetPaneText)).empty());
+    CHECK(w.g.CallsTo(kOpen).empty());
+    // Opening (state 0, an open asked) with the game's text: still the game's.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, 0);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    // Its text box unreadable: counted as the game's.
+    w.g.Put<std::uint32_t>(kPane + ui::addr::kPaneFlags, 1u << 22);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    w.g.Put<std::uint32_t>(kPane + ui::addr::kPaneFlags, 2u << 22);
+    // Gone (shut, no open asked): the notice goes.
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 0);
+    CHECK(b.Notice(w.g, w.ring, n));
+    CHECK(w.g.CallsTo(kOpen).size() == 1);
+}
+
+TEST_CASE("native ui: a game that keeps its own copy of our text: ours until the game sets another") {
+    World w;
+    w.g.copy_to = 0x77000000;  // the text box points at the game's copy, not at our block
+    ui::Banner b;
+    ui::Shown n;
+    n.notice = true;
+    n.text = "Ruto joined";
+    REQUIRE(b.Notice(w.g, w.ring, n));
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kOurs);
+    w.g.Put<std::uint64_t>(kBox + ui::addr::kBoxText, 0x88000000);  // the game's own text now
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    CHECK_FALSE(b.Notice(w.g, w.ring, n));
+}
+
+TEST_CASE("native ui: once our banner is shut or let go, the game's next one from the same buffer is the game's") {
+    World w;
+    w.g.copy_to = 0x77000000;  // the game shows every banner text from one buffer of its own
+    ui::Banner b;
+    ui::Shown n;
+    n.notice = true;
+    n.text = "Ruto joined";
+    REQUIRE(b.Notice(w.g, w.ring, n));
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kOurs);
+    // Our notice ends (shut, no open asked) ...
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, 0);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 0);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kNothing);
+    // ... and the game opens its own banner, its text in the same buffer: the game's.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    CHECK(b.Holding(w.g, w.ring) == ui::Holds::kGames);
+    CHECK_FALSE(b.Notice(w.g, w.ring, n));
+
+    // The same after a held line is let go: the game's banner from that buffer is never closed by us.
+    World v;
+    v.g.copy_to = 0x77000000;
+    ui::Banner h;
+    ui::HoldBanner("You are down  0:05");
+    REQUIRE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    REQUIRE(h.up());
+    v.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    v.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    ui::EndBanner();
+    CHECK_FALSE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    CHECK(v.g.CallsTo(kClose).size() == 1);  // ours: closed
+    // The close not taken yet, the game puts its own text up in the same buffer: the game's, never closed again.
+    CHECK(h.Holding(v.g, v.ring) == ui::Holds::kGames);
+    CHECK_FALSE(h.Step(v.g, v.ring, ui::HeldBanner()));
+    CHECK(v.g.CallsTo(kClose).size() == 1);
+}
+
+TEST_CASE("native ui: a held banner line stays, changes its text in place, closes when let go") {
     World w;
     ui::Banner b;
     CHECK_FALSE(ui::HeldBanner());
@@ -460,12 +561,16 @@ TEST_CASE("native ui: a held banner line stays, changes its text only when it ch
     CHECK(b.Step(w.g, w.ring, ui::HeldBanner()));
     const auto sets = w.g.CallsTo(At(ui::addr::kSetPaneText));
     REQUIRE(sets.size() == 2);
+    CHECK(sets[1].x[2] == sets[0].x[2]);  // the fixed slot, written in place: the ring does not move
+    CHECK(sets[0].x[2] == kBlock + ui::TextRing::kSlotBytes * ui::TextRing::kSlots);
     CHECK(w.g.Text(w.RefAt(sets[1].x[2]).text) == "You are down  0:31");
+    CHECK(w.ring.Put(w.g, "chat") == kBlock);  // the ring's first slot still next
     CHECK(w.g.CallsTo(kOpen).size() == 1);  // up already: not opened again
     // The banner closed by itself (state 0, nothing asked): opened again.
     w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 0);
     CHECK(b.Step(w.g, w.ring, ui::HeldBanner()));
     CHECK(w.g.CallsTo(kOpen).size() == 2);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
     ui::EndBanner();
     CHECK_FALSE(ui::HeldBanner());
     CHECK_FALSE(b.Step(w.g, w.ring, ui::HeldBanner()));
@@ -476,4 +581,31 @@ TEST_CASE("native ui: a held banner line stays, changes its text only when it ch
     CHECK_FALSE(b.up());
     CHECK_FALSE(b.Step(w.g, w.ring, std::nullopt));
     CHECK(w.g.CallsTo(kClose).size() == 1);  // once
+}
+
+TEST_CASE("native ui: the held line waits for the game's own banner, and never closes it") {
+    World w;
+    ui::Banner b;
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    w.g.Put<std::uint64_t>(kBox + ui::addr::kBoxText, 0x88000000);  // the game's own banner text
+    ui::HoldBanner("You are down  0:20");
+    CHECK(b.Step(w.g, w.ring, ui::HeldBanner()));  // held (notices wait) ...
+    CHECK_FALSE(b.up());                            // ... but not shown
+    CHECK(w.g.CallsTo(At(ui::addr::kSetPaneText)).empty());
+    CHECK(w.g.CallsTo(kOpen).empty());
+    // The game's banner gone: the held line shows.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, 0);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 0);
+    CHECK(b.Step(w.g, w.ring, ui::HeldBanner()));
+    CHECK(b.up());
+    CHECK(w.g.CallsTo(kOpen).size() == 1);
+    // The game takes the banner over, then the line is let go: the game's banner stays.
+    w.g.Put<std::uint8_t>(kBanner + ui::addr::kScreenState, ui::addr::kStateOpen);
+    w.g.Put<std::int8_t>(kBanner + ui::addr::kScreenRequest, 1);
+    w.g.Put<std::uint64_t>(kBox + ui::addr::kBoxText, 0x88000000);
+    ui::EndBanner();
+    CHECK_FALSE(b.Step(w.g, w.ring, ui::HeldBanner()));
+    CHECK(w.g.CallsTo(kClose).empty());
+    CHECK_FALSE(b.up());  // (notices are free to wait for it again)
 }
