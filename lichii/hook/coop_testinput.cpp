@@ -16,6 +16,8 @@
 #include <string_view>
 #include <utility>
 
+#include "coop_teleport.h"
+
 namespace CoopTestInput {
 
 namespace {
@@ -234,6 +236,37 @@ constexpr double kMinMagnitude = 0.45;     // slower near the point, never a cra
 
 } // namespace
 
+std::string WarpProblem(std::string_view scene, std::string_view start) {
+    if (!CoopTeleport::IsKnownScene(scene)) {
+        std::string why = "unknown scene '" + std::string(scene) + "'";
+        const auto like = CoopTeleport::ScenesLike(scene);
+        if (!like.empty()) {
+            why += " (did you mean ";
+            for (std::size_t i = 0; i < like.size(); ++i) {
+                why += (i ? ", " : "") + like[i];
+            }
+            why += "?)";
+        }
+        return why;
+    }
+    if (!start.empty()) {
+        const bool plain = start.size() <= 63 && std::all_of(start.begin(), start.end(), [](unsigned char c) {
+            return std::isalnum(c) || c == '_';
+        });
+        if (!plain) {
+            return "bad start name '" + std::string(start) + "' (letters, digits and _ only, at most 63)";
+        }
+    }
+    return {};
+}
+
+std::string WarpGiveUpLine(std::string_view target, double seconds, const std::optional<std::string>& scene) {
+    std::string line = "coop: test warp to " + std::string(target) + " did not happen in " +
+                       std::to_string(static_cast<int>(seconds)) + " s (";
+    line += scene ? "scene " + *scene : std::string("no save loaded: Link is in no scene");
+    return line + ")";
+}
+
 std::optional<Script> Parse(std::string_view text, std::string& error) {
     Script script;
     int number = 0;
@@ -327,6 +360,9 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             step.mark = std::string(w[1]);
             if (w.size() == 3) {
                 step.start = std::string(w[2]);
+            }
+            if (const auto problem = WarpProblem(w[1], step.start); !problem.empty()) {
+                return fail(problem);
             }
         } else if (cmd == "PLACE") {
             step.kind = Kind::place;
@@ -837,6 +873,8 @@ struct State {
         double since = 0.0;
         double asked = 0.0;
         std::optional<std::array<float, 2>> from;  // Link before the warp
+        int asks = 1;                              // times the request was written (the first one logs)
+        bool said_waiting = false;                 // "no save loaded yet" said once
     };
     std::optional<PendingWarp> warp;
 } g_state;  // only touched on the present thread
@@ -941,7 +979,13 @@ std::optional<Runner::Camera> CameraXZ() {
 // changes scene when Sequence_ReservedNextBanc is set (and clears it);
 // ChangeBancOnEvent also reads Sequence_ReservedNextStartPosName. The start
 // name is written first, so it is there when the scene is read.
-void Warp(Core::System& system, const std::string& scene, const std::string& start) {
+// Nothing is written for a scene the game does not have (WarpProblem), whoever asked: false then. `log`: the
+// request's own line; a re-ask (every 0.5 s) writes the same and says nothing.
+bool Warp(Core::System& system, const std::string& scene, const std::string& start, bool log) {
+    if (const auto problem = WarpProblem(scene, start); !problem.empty()) {
+        LOG_ERROR(Core, "coop: test warp to {} refused, nothing written: {}", scene, problem);
+        return false;
+    }
     CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
     coop::host::GameFlags flags(memory);
     const auto banc = coop::host::flag_hash("Sequence_ReservedNextBanc");
@@ -965,6 +1009,9 @@ void Warp(Core::System& system, const std::string& scene, const std::string& sta
     }
     const bool era_ok = child && coop::host::GameFlags::set_bool(memory, childhood, *child);
     const bool banc_ok = coop::host::GameFlags::set_string64_now(memory, banc, scene);
+    if (!log) {
+        return true;
+    }
     LOG_INFO(Core,
              "coop: test warp to {} (start {}): scene {} (type {}), start {} (type {}), "
              "position type {}, childhood {} {} (type {})",
@@ -973,6 +1020,7 @@ void Warp(Core::System& system, const std::string& scene, const std::string& sta
              start_type.value_or(-1), flags.find_type(position).value_or(-1),
              !child ? "-" : *child ? "child" : "adult", era_ok ? "set" : "NOT set",
              flags.find_type(childhood).value_or(-1));
+    return true;
 }
 
 // wear: writes the String64 flag PlayerStatus.Equip<slot> straight into the
@@ -1291,8 +1339,9 @@ void OnFrame(Core::System& system) {
     }
     for (const auto& request : r.runner->TakeRequests()) {
         if (request.kind == Kind::warp) {
-            Warp(system, request.name, request.start);
-            g_state.warp = State::PendingWarp{request.name, request.start, now, now, player};
+            if (Warp(system, request.name, request.start, true)) {
+                g_state.warp = State::PendingWarp{request.name, request.start, now, now, player};
+            }
         } else if (request.kind == Kind::wear) {
             Wear(system, request.start, request.name);
         } else if (request.kind == Kind::assign) {
@@ -1379,15 +1428,21 @@ void OnFrame(Core::System& system) {
         coop::host::PlayerReader reader(memory);
         const auto scene = reader.read_scene();
         if (scene && *scene == w.scene) {
-            LOG_INFO(Core, "coop: test warp done after {:.1f} s, Link at {:.2f} {:.2f}", now - w.since,
-                     player ? (*player)[0] : 0.0f, player ? (*player)[1] : 0.0f);
+            LOG_INFO(Core, "coop: test warp done after {:.1f} s ({} asks), Link at {:.2f} {:.2f}", now - w.since,
+                     w.asks, player ? (*player)[0] : 0.0f, player ? (*player)[1] : 0.0f);
             g_state.warp.reset();
         } else if (now - w.since > kWarpGiveUpS) {
-            LOG_ERROR(Core, "coop: test warp to {} did not happen in {} s (scene {})", w.scene,
-                      kWarpGiveUpS, scene.value_or("?"));
+            LOG_ERROR(Core, "{} after {} asks", WarpGiveUpLine(w.scene, kWarpGiveUpS, scene), w.asks);
             g_state.warp.reset();
         } else if (now - w.asked >= 0.5) {
-            Warp(system, w.scene, w.start);
+            // The request stays written until the game takes it, so a re-ask is silent: at the title (no save
+            // loaded) it used to print its line twice a second for the whole 90 s.
+            if (!scene && !w.said_waiting) {
+                w.said_waiting = true;
+                LOG_INFO(Core, "coop: test warp to {}: no save loaded yet, asking again every 0.5 s", w.scene);
+            }
+            Warp(system, w.scene, w.start, false);
+            ++w.asks;
             w.asked = now;
         }
     }
