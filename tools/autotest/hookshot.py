@@ -69,6 +69,44 @@ class ScriptError(Exception):
     pass
 
 
+# The scenes the module's test warp writes into the game (lichii/hook/coop_teleport.cpp IsKnownScene: the scenes of
+# coop_start_points.inc, which this reads from the repo's source, plus the one literal below). A scene it does not know
+# is refused there, with nothing written, and the runner would wait out its whole warp for a map that never comes:
+# `warp Market` (the scenes are Market_Child, Market_Adult) crashed a game worker before the module checked. So parse()
+# refuses it at once. Without the source (a kit) there is no list and nothing is checked.
+START_POINTS_INC = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                "lichii", "hook", "coop_start_points.inc")
+EXTRA_SCENES = ("BossRushIntervalRoom",)   # (a test keeps this and IsKnownScene's literal the same)
+_scenes = {}
+
+
+def known_scenes(path=START_POINTS_INC):
+    """The set of scene names the module's test warp knows, or None when the source file is not there."""
+    if path not in _scenes:
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            _scenes[path] = None
+        else:
+            found = set(re.findall(r'^\s*\{"([A-Za-z0-9_]+)",', text, re.M))
+            _scenes[path] = (found | set(EXTRA_SCENES)) if found else None
+    return _scenes[path]
+
+
+def scene_problem(name, scenes=None):
+    """Why `warp NAME` would be refused by the module ("" when it would not, or when the list is not known).
+    A number is the bridge's destination index and is left to the bridge."""
+    scenes = known_scenes() if scenes is None else scenes
+    if scenes is None or name in scenes or name.isdigit():
+        return ""
+    why = "unknown scene '%s'" % name
+    like = sorted(x for x in scenes if x.startswith(name))[:6]
+    if like:
+        why += " (did you mean %s?)" % ", ".join(like)
+    return why
+
+
 INCLUDE_DEPTH = 4
 
 
@@ -248,6 +286,8 @@ def parse(text):
                 fail("want: warp SCENE [START]")
             s.kind, s.name = "warp", w[1]
             s.start = w[2] if len(w) == 3 else ""
+            if scene_problem(s.name):
+                fail(scene_problem(s.name))
         elif cmd == "PLACE":
             # #196: "place PLATFORM UP": UP metres over the live place of that moving platform (the module's
             # TestPlatformPlace), for a rider on a floor that waves.

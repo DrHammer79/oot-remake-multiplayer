@@ -133,7 +133,10 @@ def do(a):
     s = load(d)
     x = a.player
     text = "\n".join(part.strip() for part in a.script.split(";") if part.strip()) + "\n"
-    steps = hookshot.parse(text)
+    try:
+        steps = hookshot.parse(text)
+    except hookshot.ScriptError as e:   # (a warp to a scene the module would refuse: nothing is sent)
+        return {"error": "ScriptError: %s" % e}
     b = bridge(s, x)
     err = None
     try:
@@ -252,7 +255,7 @@ def main(argv=None):
     a = p.parse_args(argv)
     out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop}[a.cmd](a)
     print(json.dumps(out, indent=1))
-    return 0
+    return 1 if a.cmd == "do" and "error" in out else 0
 
 
 if __name__ == "__main__":

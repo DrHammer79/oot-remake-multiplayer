@@ -984,5 +984,63 @@ class DropTest(unittest.TestCase):
                 hs.parse(bad)
 
 
+class WarpSceneCheckTest(unittest.TestCase):
+    """`warp Market` (the scenes are Market_Child and Market_Adult): the module's test warp refuses a scene it does not
+    know and nothing moves, so the runner refuses it at once instead of leaving a run that goes on with the scene
+    unchanged (the old module wrote the name into the game, which crashed a game worker, 2026-11-23)."""
+
+    def test_an_unknown_scene_is_refused_when_the_script_is_read(self):
+        with self.assertRaises(hs.ScriptError) as ctx:
+            hs.parse("wait 5\nwarp Market\n")
+        msg = str(ctx.exception)
+        self.assertTrue(msg.startswith("line 2: unknown scene 'Market'"), msg)
+        self.assertIn("Market_Adult", msg)
+        self.assertIn("Market_Child", msg)
+        for bad in ("warp NoSuchPlace Entrance\n", "warp market_child\n", "warp Market_Child/x\n"):
+            with self.assertRaises(hs.ScriptError):
+                hs.parse(bad)
+
+    def test_real_scenes_and_the_bridges_index_still_parse(self):
+        steps = hs.parse("warp Market_Child\nwarp InsideTheDekuTree Entrance\nwarp BossRushIntervalRoom\n"
+                         "warp PhantomGanonStage PhantomGanonStage\nwarp 3\n")
+        self.assertEqual([x.name for x in steps], ["Market_Child", "InsideTheDekuTree", "BossRushIntervalRoom",
+                                                   "PhantomGanonStage", "3"])
+
+    def test_nothing_is_sent_for_a_refused_script(self):
+        game = FakeGame()
+        b = game.connect()
+        with self.assertRaises(hs.ScriptError):
+            hs.Player(b, hs.Log(), clock=game.clock, sleep=game.clock.sleep).play(hs.parse("warp Market\n"))
+        game.close()
+        self.assertEqual(game.cmds("teleport"), [])
+
+    def test_the_list_is_read_from_the_modules_source_and_matches_it(self):
+        scenes = hs.known_scenes()
+        self.assertIsNotNone(scenes)
+        self.assertIn("Market_Child", scenes)
+        self.assertGreater(len(scenes), 70)
+        teleport = os.path.join(os.path.dirname(hs.START_POINTS_INC), "coop_teleport.cpp")
+        with open(teleport, encoding="utf-8") as f:
+            source = f.read()
+        for name in hs.EXTRA_SCENES:   # the one literal IsKnownScene has besides the start points
+            self.assertIn('"%s"' % name, source)
+
+    def test_without_the_source_nothing_is_checked(self):
+        self.assertIsNone(hs.known_scenes(os.path.join(HERE, "no-such-file.inc")))
+        self.assertEqual(hs.scene_problem("Market", scenes={"Market_Child"}),
+                         "unknown scene 'Market' (did you mean Market_Child?)")
+        self.assertEqual(hs.scene_problem("Market_Child", scenes={"Market_Child"}), "")
+
+    def test_live_do_says_so_and_sends_nothing(self):
+        import tempfile
+        import live
+        with tempfile.TemporaryDirectory() as d:
+            with open(live.session_file(d), "w", encoding="utf-8") as f:
+                json.dump({"games": {}}, f)
+            out = live.do(type("A", (), {"session": d, "player": "A", "script": "warp Market; wait 5"})())
+        self.assertIn("unknown scene 'Market'", out["error"])
+        self.assertNotIn("A", out)   # (no bridge was opened, no look taken)
+
+
 if __name__ == "__main__":
     unittest.main()
