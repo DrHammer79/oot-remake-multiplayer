@@ -196,7 +196,7 @@ def place_facing(client, place_line, point, frames=2):
 
 
 def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_frames=PRESS_FRAMES):
-    """go_to_actor, face, then press `button` (the sword; Y is a guess to confirm in the lane run) in rounds until the
+    """go_to_actor, face, then press `button` (the sword: Y, Longshot's attack button, host/nn_hid.c) in rounds until the
     actor's life is 0 or `max_frames` frames are used. The actor is looked up before the walk and before every press:
     nothing is pressed at an actor that is gone or has another name. Returns result (dead: its life was seen at 0;
     gone: it left the list in the fight, perhaps dead; alive: the frame limit, with a `hint` when its life never moved;
@@ -245,8 +245,8 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     if isinstance(out["life_after"], (int, float)) and out["life_after"] <= 0:
         out["result"] = "dead"
     elif out["rounds"] and out["life_after"] == before:
-        out["hint"] = ("its life never moved in %d rounds: the button %s may be wrong (it is a guess), or the sword is "
-                       "not out, or the actor cannot be hurt that way" % (out["rounds"], button))
+        out["hint"] = ("its life never moved in %d rounds (button %s): the sword may not be out, or the "
+                       "actor cannot be hurt that way (`fight` locks on first)" % (out["rounds"], button))
     return out
 
 
@@ -264,10 +264,13 @@ def _changed(before, after):
     return out
 
 
-def use_item(client, item, button="Y", frames=PRESS_FRAMES):
+ITEM_BUTTON = "ZR"    # the button `assign` puts an item on (lichii/hook/coop_testinput.cpp; Y is the sword)
+
+
+def use_item(client, item, button=ITEM_BUTTON, frames=PRESS_FRAMES):
     """`assign` the item (the bridge's `assign ITEM`), press `button` for `frames` frames and step as many, and return
-    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is a guess to confirm in the
-    lane run: it is the one the item was assigned to."""
+    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is ZR, the one `assign` puts
+    the item on (the bridge's `assign`, docs/testing.md); Y would swing the sword."""
     before = pc.game_of(client.state())
     client.act("assign " + item)
     client.step(2)

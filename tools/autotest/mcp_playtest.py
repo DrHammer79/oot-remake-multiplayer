@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_fight  # noqa: E402
 import kit_look  # noqa: E402
 import kit_route  # noqa: E402
 import kit_setup  # noqa: E402
@@ -104,8 +105,8 @@ def _need_id(args):
     return n
 
 
-def _button(args):
-    b = str(args.get("button", "Y")).upper()
+def _button(args, default="Y"):
+    b = str(args.get("button", default)).upper()
     if b not in pc.BUTTONS:
         raise ValueError("button: one of " + " ".join(pc.BUTTONS))
     return b
@@ -250,15 +251,15 @@ HELPER_TOOLS = [
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
-    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default, which "
-     "is a guess not yet confirmed in a game) in rounds until its life is 0 or the frames run out. Returns `result` "
+    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default: "
+     "Longshot's attack button) in rounds until its life is 0 or the frames run out. Returns `result` "
      "(dead, gone, alive, or stopped with `stopped` saying why) and its life before and after. " + HELPER_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "use_item", "description": "Put an item on a button (`assign`), press that button, and say what changed in "
-     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one the item goes on (Y by default, a "
-     "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
+     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one pressed: ZR by default, the "
+     "button `assign` puts the item on (Y is the sword). About 14 frames pass. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"],
                      "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
     {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
@@ -329,6 +330,20 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["action"], "properties": {
          "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
          "note": {"type": "string", "maxLength": 290}}}},
+    {"name": "fight", "description": "Fight ONE enemy (`id` and `name` from look or get_world): walk up to sword "
+     "reach, then slash with the lock-on held (ZL + Y, then Y let go), guard (ZL alone: the shield) for one round after Link "
+     "is hit, in short rounds until it is dead, "
+     "gone, Link is low (life 4 quarter hearts or less: he backs off and the fight ends as `low`), a scene change or "
+     "load, an event (a cutscene: it waits for no event, so wait it out first), a walk-up the game refuses, or four "
+     "walk-ups that get no nearer (`stuck`) stop it, or `max_frames` run out. Ends with a `look`. The buttons are Longshot's map (`lock` ZL, `sword` "
+     "Y, `shield` ZL: lock-on and shield are one button). Longshot's Toggle ZL/ZR setting must be off. When the "
+     "enemy's life never moves, `hint` says why it may be. `max_frames` is 600 by default, 1200 at most; "
+     "no round starts that would pass it (a back-off when low adds 14). The enemy is looked up in the world list every round and never swapped for another "
+     "of its name; it needs the world list. It acts on this game only.",
+     "inputSchema": {"type": "object", "required": ["id", "name"], "properties": dict(
+         ACTOR_ARGS, max_frames={"type": "integer", "minimum": 1, "maximum": kit_fight.MAX_FRAMES},
+         lock={"type": "string", "enum": list(pc.BUTTONS)}, sword={"type": "string", "enum": list(pc.BUTTONS)},
+         shield={"type": "string", "enum": list(pc.BUTTONS)}, min_life={"type": "integer", "minimum": 0})}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -641,6 +656,19 @@ class Game:
             return self._go_to(args)
         if name == "record_route":
             return self._record_route(args)
+        if name == "fight":
+            def button(key, default):
+                b = str(args.get(key, default)).upper()
+                if b not in pc.BUTTONS:
+                    raise ValueError("%s: one of %s" % (key, " ".join(pc.BUTTONS)))
+                return b
+            out = kit_fight.fight(c, _need_id(args), _word(args, "name"),
+                                  int(_bounded(args, "max_frames", kit_fight.MCP_FRAMES, 1, kit_fight.MAX_FRAMES)),
+                                  button("lock", kit_fight.LOCK), button("sword", kit_fight.SWORD),
+                                  button("shield", kit_fight.SHIELD),
+                                  int(_bounded(args, "min_life", kit_fight.MIN_LIFE, 0, 80)))
+            out["look"], self.last_look = kit_look.look(c.state(), self.last_look)
+            return out
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
@@ -703,7 +731,7 @@ class Game:
             return ph.attack(c, _need_id(args), _button(args), _word(args, "name"),
                              int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "use_item":
-            return ph.use_item(c, _word(args, "item"), _button(args))
+            return ph.use_item(c, _word(args, "item"), _button(args, ph.ITEM_BUTTON))
         if name in ("talk", "open"):
             return ph.interact(c, name)
         if name == "interact":
