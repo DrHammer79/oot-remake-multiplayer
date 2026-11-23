@@ -739,7 +739,7 @@ void AgreeStartTunic() {
     LOG_INFO(Core, "coop: look: your Link starts in {} (the puppet pack's tunic files; LICHII_COOP_SELF_TUNIC said "
                    "{}): the switch follows the files",
              start, hint.empty() ? std::string("none") : hint);
-#ifdef _MSC_VER
+#ifdef _WIN32
     _putenv_s("LICHII_COOP_SELF_TUNIC", start == "green" ? "" : start.c_str());
 #else
     if (start == "green") {
