@@ -258,7 +258,7 @@ Control g_control;  // (the bridge's thread only)
 
 std::string Field(const Value* game, const char* key) {
     const Value* v = game ? game->Get(key) : nullptr;
-    return v ? CoopModJson::Write(*v) : std::string("null");
+    return v ? Compact(*v) : std::string("null");
 }
 
 // The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
@@ -267,7 +267,7 @@ std::string StateMembers() {
     const auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
     const Value* game = status ? status->Get("game") : nullptr;
     if (game && game->kind != Value::Kind::Object) game = nullptr;
-    out += "\"scene\":" + (status && status->Get("map") ? CoopModJson::Write(*status->Get("map")) : Field(game, "map"));
+    out += "\"scene\":" + (status && status->Get("map") ? Compact(*status->Get("map")) : Field(game, "map"));
     out += ",\"room\":null";
     for (const char* k : {"pos", "facing", "camera", "life", "max_life", "rupees", "age", "event", "loading", "prompt"}) {
         out += ",\"" + std::string(k) + "\":" + Field(game, k);

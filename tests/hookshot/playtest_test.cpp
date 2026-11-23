@@ -242,6 +242,21 @@ TEST_CASE("playtest: bad requests are refused with a reason, never acted on") {
     CHECK(ParseError(std::string(kMaxLine + 1, ' ')).find("64 KB") != std::string::npos);
 }
 
+TEST_CASE("playtest: every reply is one line: nested values written compact, strings escaped") {
+    // (the JSON text has the escape \n inside a string: raw strings keep the backslash)
+    const auto v = CoopModJson::Parse(R"({"a":[1, 2.5, {"b":"x\ny"}], "c":{"d":true,"e":null}})");
+    REQUIRE(v);
+    const std::string c = Compact(*v);
+    CHECK(c == R"({"a":[1,2.5,{"b":"x\ny"}],"c":{"d":true,"e":null}})");
+    CHECK(c.find('\n') == std::string::npos);
+    CHECK(Quote("two\nlines") == R"("two\nlines")");
+    const std::string r = Reply(*v, 3, false, "\"state\":" + c);
+    CHECK(r.find('\n') == std::string::npos);
+    CHECK(CoopModJson::Parse(r));
+    CHECK(ErrorReply(*v, 3, true, "failed", "a\nb").find('\n') == std::string::npos);
+    CHECK(Reply(CoopModJson::Value::Of(7.0), 10, true, "") == R"({"id":7,"ok":true,"frame":10,"paused":true})");
+}
+
 TEST_CASE("playtest: an error reply carries the frame, the hold and a reason") {
     const std::string e = ErrorReply(CoopModJson::Value{}, 42, false, "busy", "another client \"x\"");
     CHECK(e.find("\"id\":null") != std::string::npos);

@@ -329,7 +329,31 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
 }
 
 std::string Quote(std::string_view text) {
-    return CoopModJson::Write(CoopModJson::Value::Of(std::string(text)));
+    return Compact(CoopModJson::Value::Of(std::string(text)));
+}
+
+std::string Compact(const CoopModJson::Value& value) {
+    using K = CoopModJson::Value::Kind;
+    switch (value.kind) {
+    case K::Array: {
+        std::string out = "[";
+        for (std::size_t i = 0; i < value.array.size(); ++i) out += (i ? "," : "") + Compact(value.array[i]);
+        return out + "]";
+    }
+    case K::Object: {
+        std::string out = "{";
+        for (std::size_t i = 0; i < value.object.size(); ++i) {
+            out += (i ? "," : "") + Quote(value.object[i].first) + ":" + Compact(value.object[i].second);
+        }
+        return out + "}";
+    }
+    default: {
+        // (a scalar: the file writer's text is one token, then its newline; control characters are escaped)
+        std::string out = CoopModJson::Write(value);
+        while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+        return out;
+    }
+    }
 }
 
 namespace {
@@ -356,7 +380,7 @@ std::string ControlInput(const Request& r, int control_id) {
 }
 
 std::string Reply(const CoopModJson::Value& id, std::uint64_t frame, bool paused, const std::string& rest) {
-    std::string out = "{\"id\":" + CoopModJson::Write(id) + ",\"ok\":true,\"frame\":" + std::to_string(frame) +
+    std::string out = "{\"id\":" + Compact(id) + ",\"ok\":true,\"frame\":" + std::to_string(frame) +
                       ",\"paused\":" + (paused ? "true" : "false");
     if (!rest.empty()) out += "," + rest;
     return out + "}";
@@ -364,7 +388,7 @@ std::string Reply(const CoopModJson::Value& id, std::uint64_t frame, bool paused
 
 std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool paused, std::string_view code,
                        std::string_view message) {
-    return "{\"id\":" + CoopModJson::Write(id) + ",\"ok\":false,\"frame\":" + std::to_string(frame) +
+    return "{\"id\":" + Compact(id) + ",\"ok\":false,\"frame\":" + std::to_string(frame) +
            ",\"paused\":" + (paused ? "true" : "false") + ",\"error\":" + Quote(code) + ",\"message\":" +
            Quote(message) + "}";
 }

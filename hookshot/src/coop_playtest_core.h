@@ -103,5 +103,8 @@ std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool p
                        std::string_view message);
 // A JSON string literal.
 std::string Quote(std::string_view text);
+// A value as JSON on one line, no spaces (CoopModJson::Write is for files: it indents objects and ends with a
+// newline, which would split a reply in two).
+std::string Compact(const CoopModJson::Value& value);
 
 }  // namespace CoopPlaytest
