@@ -60,8 +60,9 @@ struct EnetLife {
   ~EnetLife() { enet_deinitialize(); }
 };
 
-net::ClientConfig config_for(std::uint16_t port, const std::string& name) {
+net::ClientConfig config_for(std::uint16_t port, const std::string& name, std::uint32_t timeout_ms = 0) {
   net::ClientConfig c;
+  if (timeout_ms != 0) c.timeout_ms = timeout_ms;  // the server's loss noticed sooner
   c.host = "127.0.0.1";
   c.port = port;
   c.hello.build_id = "coop-tests 0";
@@ -82,8 +83,9 @@ SessionSettings with_flags() {
 
 // One player: a client, its session, and its game.
 struct Peer {
-  Peer(std::uint16_t port, const std::string& name, SessionSettings settings = with_flags())
-      : client(config_for(port, name)), session(client, std::move(settings)) {
+  Peer(std::uint16_t port, const std::string& name, SessionSettings settings = with_flags(),
+       std::uint32_t timeout_ms = 0)
+      : client(config_for(port, name, timeout_ms)), session(client, std::move(settings)) {
     test::make_game(memory);
     REQUIRE(client.start());
   }
@@ -292,6 +294,65 @@ TEST_CASE("session: a held game keeps sending its still player, so the other's p
   a.session.set_held(false);
   held_for(800);
   CHECK(fade_of_a() == 0.0f);
+}
+
+TEST_CASE("session: a reconnect while held sends the status and equipment again") {
+  EnetLife enet;
+  auto server = std::make_unique<coop::server::EnetServer>(any_port());
+  REQUIRE(server->start());
+  const std::uint16_t port = server->port();
+  std::vector<Peer*> peers;
+  Peer a(port, "Link", SessionSettings{}, 1000);  // a short timeout: the lost server is noticed sooner
+  a.session.set_color(0x00ff00ffu);               // so A has equipment to send
+  join(*server, peers, a);
+  // B counts A's status and equipment messages.
+  std::atomic<int> statuses{0}, equips{0};
+  SessionSettings bs;
+  bs.on_event = [&](const net::Event& e, net::Client&) {
+    if (e.kind != net::EventKind::message) return;
+    if (const auto* st = std::get_if<proto::PlayerStatus>(&e.message); st && st->player_number == a.number()) ++statuses;
+    if (const auto* eq = std::get_if<proto::PlayerEquip>(&e.message); eq && eq->player_number == a.number()) ++equips;
+  };
+  Peer b(port, "Zelda", bs, 1000);
+  join(*server, peers, b);
+  REQUIRE(pump(*server, peers, [&] { return b.session.with_presence([&](coop::presence::Presence& p) {
+    return p.player(a.number()) != nullptr && !p.player(a.number())->samples().empty();
+  }); }));
+
+  // A is held; the server restarts. B connects again first, so it is there
+  // when A's WELCOME comes and A sends its status and equipment.
+  a.session.set_held(true);
+  server.reset();
+  server = std::make_unique<coop::server::EnetServer>([&] {
+    auto o = any_port();
+    o.port = port;
+    return o;
+  }());
+  REQUIRE(server->start());
+  const auto connected = [](Peer& p) {
+    return p.session.with_client([](net::Client& c) { return c.state() == net::State::connected; });
+  };
+  const auto run_until = [&](bool with_a, const std::function<bool()>& done) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < end) {
+      server->service(1);
+      if (with_a) a.session.service();
+      b.step();
+      if (done()) return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  };
+  bool lost = false;
+  REQUIRE(run_until(false, [&] {
+    lost = lost || !connected(b);
+    return lost && connected(b);
+  }));
+  statuses = 0;
+  equips = 0;
+  CHECK(run_until(true, [&] { return connected(a) && statuses > 0 && equips > 0; }));
+  CHECK(statuses.load() > 0);
+  CHECK(equips.load() > 0);
 }
 
 TEST_CASE("session: a frame thread and a network thread per player share a flag") {

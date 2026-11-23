@@ -101,6 +101,37 @@ TEST_CASE("playtest: the hold is told when it starts and when it ends (co-op kee
     CHECK(ends.load() == 1);
 }
 
+TEST_CASE("playtest: the hold is told it ended on a step, a stop and the idle time") {
+    std::atomic<int> starts{0}, ends{0};
+    auto watch = [&](Gate& gate) {
+        gate.OnHeld([&](bool h) { (h ? starts : ends).fetch_add(1); });
+    };
+    {
+        Gate gate(0);
+        watch(gate);
+        FakeGame game(gate);
+        REQUIRE(gate.Pause(2s));
+        REQUIRE(gate.Step(3, 2s));  // the hold ends for 3 frames and starts again
+        CHECK(ends.load() == 1);
+        CHECK(starts.load() == 2);
+        // The module's Stop and a client leaving end the hold with Resume (coop_playtest.cpp Stop).
+        gate.Resume();
+        std::this_thread::sleep_for(50ms);
+        CHECK(ends.load() == 2);
+    }
+    starts = 0;
+    ends = 0;
+    {
+        Gate gate(0.05);  // the idle time runs out
+        watch(gate);
+        FakeGame game(gate);
+        REQUIRE(gate.Pause(2s));
+        std::this_thread::sleep_for(300ms);
+        CHECK_FALSE(gate.Held());
+        CHECK(starts.load() == ends.load());
+    }
+}
+
 TEST_CASE("playtest: step N runs exactly N frames and holds again, from a hold or from running") {
     Gate gate(0);
     FakeGame game(gate);

@@ -333,6 +333,7 @@ class Session {
   std::function<void(const net::Event&, net::Client&)> on_event_;
   std::function<std::uint64_t()> game_frame_age_us_;  // SessionSettings::game_frame_age_us
   bool sharing_ = false;  // set once, before any thread starts
+  bool welcomed_held_ = false;  // a WELCOME came while held: service() sends the status again
 
   // Guarded by presence_mutex_.
   std::mutex presence_mutex_;

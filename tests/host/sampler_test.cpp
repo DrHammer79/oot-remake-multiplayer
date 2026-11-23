@@ -286,6 +286,44 @@ TEST_CASE("host sampler: held, the last sample again each keep-alive, standing, 
   CHECK(next.samples[0].time.sequence > seq);
 }
 
+TEST_CASE("host sampler: frames after a hold stamp after the last held sample") {
+  Sampler s;
+  std::uint64_t now = kStart;
+  s.frame(at(1.0f), now);
+  const auto held = s.hold(now + 1'000'000);
+  REQUIRE(held);
+  const std::uint64_t held_at = decode({*held}).samples.at(0).time.server_time_us;
+  // Released: the game frame's time is up to 250 ms older than the held sample (frame_aligned_us).
+  std::uint64_t frame_us = held_at - 200'000;
+  std::uint64_t last = held_at;
+  int sent = 0;
+  for (int i = 0; i < 40; ++i, frame_us += kFrameUs) {
+    for (const auto& p : decode(s.frame(at(1.0f + 0.1f * static_cast<float>(i)), frame_us)).samples) {
+      CHECK(p.time.server_time_us > last);  // presence would drop an older one as too old
+      last = p.time.server_time_us;
+      ++sent;
+    }
+  }
+  CHECK(sent > 0);
+}
+
+TEST_CASE("host sampler: a reconnect while held sends the status, the equipment and the sample") {
+  Sampler s;
+  s.set_color(0x00ff00ffu);
+  s.frame(at(1.0f), kStart);
+  CHECK(s.hold_reconnected(kStart).size() == 3);
+  const auto d = decode(s.hold_reconnected(kStart + 1));
+  CHECK(d.statuses.size() == 1);
+  REQUIRE(d.equips.size() == 1);
+  CHECK(d.equips[0].equipment.color == std::optional<std::uint32_t>(0x00ff00ffu));
+  REQUIRE(d.samples.size() == 1);
+  CHECK(d.samples[0].position == at(1.0f).position);
+  CHECK(d.samples[0].velocity == Vec3{0, 0, 0});
+  // In a load: nothing.
+  s.frame(std::nullopt, kStart + kFrameUs);
+  CHECK(s.hold_reconnected(kStart + 2 * kFrameUs).empty());
+}
+
 TEST_CASE("host sampler: held in a load or before any sample, nothing") {
   Sampler s;
   CHECK_FALSE(s.hold(kStart));  // nothing sent yet

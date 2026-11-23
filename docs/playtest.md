@@ -98,10 +98,10 @@ does not advance at all (no Link, no enemies, no timers). The window, the sound 
 the co-op connection keep running (the network thread answers the server's pings, so a held game is never dropped
 as timed out). The other game's puppet of this player stands still while it is held: the network thread sends this
 player's last sample again every 200 ms (the keep-alive), standing and with the last animation, because a player
-whose samples stop fades out in 0.4 s and loses its puppet ([puppet.md](puppet.md) "Cases"). Nothing is sent while
-held in a load or on the title (no sample then). The server does not know a game
-is held: an enemy or boss this game owns stays with it while the other game runs. So **always hold both games** and
-step them in turn, the same number of frames.
+whose samples stop fades out in 0.4 s and loses its puppet ([puppet.md](puppet.md) "Cases"). After a reconnect while
+held it also sends the status and equipment again. Nothing is sent while held in a load or on the title (no sample
+then). The server does not know a game is held: an enemy or boss this game owns stays with it while the other game
+runs. So **always hold both games** and step them in turn, the same number of frames.
 
 | Command | Fields | Does |
 |---|---|---|

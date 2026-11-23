@@ -150,15 +150,24 @@ void Session::service() {
   // Held (set_held): no frame() comes, so the last sample goes again from here,
   // or the others would fade us out and delete our puppet (docs/puppet.md).
   if (held_.load(std::memory_order_relaxed) && client_.state() == net::State::connected) {
-    std::optional<Outgoing> again;
+    // A WELCOME while held: the status and equipment too (no frame() comes to
+    // send them after its reset), so the new connection's others see our gear.
+    std::vector<Outgoing> again;
     {
       std::lock_guard lock(sampler_mutex_);
-      again = sampler_.hold(client_.server_now_us());
+      const std::uint64_t now = client_.server_now_us();
+      if (std::exchange(welcomed_held_, false)) {
+        again = sampler_.hold_reconnected(now);
+      } else if (auto one = sampler_.hold(now)) {
+        again.push_back(std::move(*one));
+      }
     }
-    protocol::Message message;
-    if (again && protocol::decode(again->bytes, message) == protocol::Error::none) {
-      client_.send(message);
+    for (const Outgoing& o : again) {
+      protocol::Message message;
+      if (protocol::decode(o.bytes, message) == protocol::Error::none) client_.send(message);
     }
+  } else {
+    welcomed_held_ = false;  // the frames after the release send it (frame()'s reset)
   }
   client_.service(0);
   while (auto event = client_.next_event()) {
@@ -192,6 +201,7 @@ void Session::handle(const net::Event& event) {
     case EventKind::welcomed:
     case EventKind::reconnected: {
       inbox_.emplace_back(Control::reset);
+      welcomed_held_ = held_.load(std::memory_order_relaxed);
       std::lock_guard lock(presence_mutex_);
       presence_.on_welcome(event.welcome);
       break;

@@ -113,7 +113,18 @@ bool Sampler::should_send(const PlayerReading& reading, std::uint64_t now) const
 }
 
 std::vector<Outgoing> Sampler::frame(const std::optional<PlayerReading>& reading,
-                                     std::uint64_t server_now_us, bool title_up) {
+                                     std::uint64_t frame_us, bool title_up) {
+  // Just after a hold the frame's time can be older than the last held
+  // sample's: stamp after it (hold), each frame a little later, until the
+  // frames pass it.
+  std::uint64_t server_now_us = frame_us;
+  if (hold_floor_us_ != 0) {
+    if (frame_us <= hold_floor_us_) {
+      server_now_us = ++hold_floor_us_;
+    } else {
+      hold_floor_us_ = 0;
+    }
+  }
   std::vector<Outgoing> out;
   const std::uint8_t flags = status_bits(flags_, reading, title_up);
   if (!status_sent_ || flags != flags_) {
@@ -174,7 +185,25 @@ std::optional<Outgoing> Sampler::hold(std::uint64_t server_now_us) {
   push(out, sample);
   if (out.empty()) return std::nullopt;
   last_sent_ = std::move(sample);
+  hold_floor_us_ = server_now_us;
   return std::move(out.front());
+}
+
+std::vector<Outgoing> Sampler::hold_reconnected(std::uint64_t server_now_us) {
+  std::vector<Outgoing> out;
+  if (!previous_ || !last_sent_ || !last_sent_->position) return out;
+  push(out, protocol::PlayerStatus{protocol::kPlayerSelf, flags_});
+  status_sent_ = true;
+  if (equipment_sent_) push(out, protocol::PlayerEquip{protocol::kPlayerSelf, *equipment_sent_});
+  protocol::PlayerSample sample = *last_sent_;
+  const std::uint64_t at = std::max(server_now_us, last_sent_->time.server_time_us + 1);
+  sample.time = {at, sequence_};
+  sample.velocity = Vec3{0.0f, 0.0f, 0.0f};
+  ++sequence_;
+  push(out, sample);
+  last_sent_ = std::move(sample);
+  hold_floor_us_ = at;
+  return out;
 }
 
 }  // namespace coop::host
