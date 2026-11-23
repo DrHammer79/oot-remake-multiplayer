@@ -392,16 +392,48 @@ std::uint8_t NearestHair(std::uint32_t rgb) {
     return best;
 }
 
+namespace {
+// A colour's hue in degrees (0..360), its saturation and its value (0..1).
+struct Hsv {
+    float h = 0.0f, s = 0.0f, v = 0.0f;
+};
+Hsv ToHsv(std::uint32_t rgb) {
+    const float r = static_cast<float>((rgb >> 16) & 0xFF) / 255.0f, g = static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
+                b = static_cast<float>(rgb & 0xFF) / 255.0f;
+    const float hi = std::max({r, g, b}), lo = std::min({r, g, b}), span = hi - lo;
+    Hsv out;
+    out.v = hi;
+    out.s = hi > 0.0f ? span / hi : 0.0f;
+    if (span > 0.0f) {
+        if (hi == r) out.h = 60.0f * std::fmod((g - b) / span + 6.0f, 6.0f);
+        else if (hi == g) out.h = 60.0f * ((b - r) / span + 2.0f);
+        else out.h = 60.0f * ((r - g) / span + 4.0f);
+    }
+    return out;
+}
+}  // namespace
+
 std::uint8_t NearestCloth(std::uint32_t rgb) {
-    std::uint8_t best = 1;
-    long best_d = -1;
-    for (std::uint8_t i = 0; i < kCloths; i++) {
-        long d = 0;
-        for (int sh = 0; sh <= 16; sh += 8) {
-            const long a = static_cast<long>((rgb >> sh) & 0xFF), b = static_cast<long>((kClothRgb[i] >> sh) & 0xFF);
-            d += (a - b) * (a - b);
+    // The mod's clothing palettes are full-strength colours plus black and white, so a colour is matched by its hue
+    // (a dark blue is Blue, not the darker Purple a plain RGB distance picks); a grey or near-black colour by its
+    // brightness to Black or White.
+    constexpr float kGrey = 0.25f, kDark = 0.15f;
+    const Hsv want = ToHsv(rgb);
+    const auto index_of = [](std::uint32_t c) {
+        for (std::uint8_t i = 0; i < kCloths; i++) {
+            if (kClothRgb[i] == c) return static_cast<std::uint8_t>(i + 1);
         }
-        if (best_d < 0 || d < best_d) best_d = d, best = static_cast<std::uint8_t>(i + 1);
+        return std::uint8_t{1};
+    };
+    if (want.v < kDark || (want.s < kGrey && want.v < 0.5f)) return index_of(0x000000u);
+    if (want.s < kGrey) return index_of(0xFFFFFFu);
+    std::uint8_t best = 1;
+    float best_d = -1.0f;
+    for (std::uint8_t i = 0; i < kCloths; i++) {
+        const Hsv c = ToHsv(kClothRgb[i]);
+        if (c.s < kGrey) continue;   // (black and white are chosen above)
+        const float diff = std::fabs(c.h - want.h), d = std::min(diff, 360.0f - diff);
+        if (best_d < 0.0f || d < best_d) best_d = d, best = static_cast<std::uint8_t>(i + 1);
     }
     return best;
 }

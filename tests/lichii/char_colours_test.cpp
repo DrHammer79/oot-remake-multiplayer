@@ -247,7 +247,13 @@ TEST_CASE("char colours (npc-customize): Link's eyes and hair on a Link model, t
 TEST_CASE("char colours (npc-customize): the mod's nearest hair and clothing palette entries") {
     using namespace CoopCharColours;
     for (std::uint8_t i = 0; i < kCloths; ++i) CHECK(NearestCloth(kClothRgb[i]) == i + 1);
-    CHECK(NearestCloth(0x102080u) == 3);   // (a dark blue: Blue)
+    CHECK(NearestCloth(0x102080u) == 3);   // (a dark blue: Blue, by hue; plain RGB distance said Purple)
+    CHECK(NearestCloth(0x000040u) == 3);   // (a navy)
+    CHECK(NearestCloth(0x40FF40u) == 1);   // (a light green)
+    CHECK(NearestCloth(0xFF80FFu) == 4);   // (a pink: Purple)
+    CHECK(NearestCloth(0xC0C0C0u) == 7);   // (a light grey: White)
+    CHECK(NearestCloth(0x404040u) == 6);   // (a dark grey: Black)
+    CHECK(NearestCloth(0x100808u) == 6);   // (near black)
     CHECK(NearestHair(0xFFD050u) == 1);    // (a light blond: Blonde)
     CHECK(NearestHair(0x000000u) == 3);    // Black
     CHECK(NearestHair(0xF0F0F8u) == 9);    // White

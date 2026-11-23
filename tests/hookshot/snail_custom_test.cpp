@@ -93,7 +93,8 @@ TEST_CASE("snail customize (npc-customize): a character's screen shows its model
     auto t = d.Shown();
     CHECK(t.labels[0] == "Equipment");
     CHECK(t.values[0] == "Shown");
-    CHECK(t.labels[1] == " ");
+    CHECK(t.labels[1].empty());   // (the rest empty: the screen's write gives them a space, PaneText)
+    CHECK(PaneText(t.labels[1]) == " ");
     CHECK(t.title.find("Y:") == std::string::npos);   // (one page)
     d.Pad(kZR);
     const auto change = d.TakeChange();
@@ -112,7 +113,8 @@ TEST_CASE("snail customize (npc-customize): a character's screen shows its model
 
 TEST_CASE("snail customize: a place with nothing is given a space, never an empty text (Saria's screen, lane 035925)") {
     Driver d;
-    d.Open(Look{}, 9);   // (a character: one row, the rest of his six places empty)
+    d.Open(Look{}, 9);
+    d.SetRows(32 | 0x80);   // (a character whose model has the equipment only: one row, the rest of six places empty)
     const auto t = d.Shown();
     bool empty = false;
     for (int f = 1; f < kOptions; ++f) empty = empty || t.labels[static_cast<std::size_t>(f)].empty();

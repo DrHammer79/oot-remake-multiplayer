@@ -300,7 +300,8 @@ TEST_CASE("look (npc-customize): a character's parts are saved, read back and se
     // unset again: its line leaves the file
     look[Part::char_gear].reset();
     CHECK(CoopLook::WriteSettings(look, coop, nullptr));
-    CHECK(coop.find("look_char_gear = hidden") == std::string::npos);
+    CHECK_FALSE(CoopTitleMenu::IniGet(coop, "look_char_gear").has_value());   // (IniUnset leaves it as a "# " comment)
+    CHECK_FALSE(CoopLook::ReadParts(coop)[Part::char_gear]);
 }
 
 TEST_CASE("look: every part is saved under its own key, and read back") {

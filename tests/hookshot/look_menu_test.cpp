@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <string>
 
@@ -50,7 +51,11 @@ TEST_CASE("look menu: every part on the list, by item, under its heading") {
         parts += r.kind == 1;
         headings += r.kind == 3;
     }
-    CHECK(parts == static_cast<int>(CoopLook::kParts));
+    // (Link's list: every part but a character's, which are on the Character page)
+    const auto link_parts = std::count_if(CoopLook::Parts().begin(), CoopLook::Parts().end(),
+                                          [](const CoopLook::PartInfo& i) { return !CoopLook::IsCharacterPart(i.part); });
+    CHECK(parts == static_cast<int>(link_parts));
+    CHECK(link_parts == static_cast<std::ptrdiff_t>(CoopLook::kParts) - 6);
     CHECK(headings == 11);   // Tunic, 3 shields, 3 swords, Boots, Gauntlets, Eyes, Hair (0.11.9)
     CHECK(v.rows[static_cast<std::size_t>(v.selected)].kind == 1);   // a part, not a heading
     CHECK(v.rows[static_cast<std::size_t>(RowOf(page, "Hylian Shield", "Frame"))].value == "Game's own");
