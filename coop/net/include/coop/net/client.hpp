@@ -237,6 +237,9 @@ enum class DropReason : std::uint8_t {
   // Full datagrams did not get through while small ones did (we saw it, or
   // the server said so): connecting again with small ones (enet_path.hpp).
   small_path,
+  // Too much waited to go between us and the server (enet_waiting.hpp kMaxOutgoingBytes): the server dropped us
+  // (kDisconnectBacklog) or we stopped (our own send backlog). Reconnecting as for connection_lost (row 260).
+  backlog,
 };
 
 // How the link to the server looked (issue 143), for the log. Read from
@@ -248,6 +251,10 @@ struct LinkInfo {
   std::uint32_t mtu = 0;            // the datagram size both sides agreed
   std::uint32_t largest_sent = 0;   // our largest message on this connection, bytes
   std::uint32_t waiting_bytes = 0;  // what ENet holds for us now (enet_waiting.hpp)
+  // What ENet holds to send to the server (enet_waiting.hpp outgoing_bytes, row 260), as of the last service() and
+  // what was queued since; unreliable messages not queued while it was over kSlowPeerBytes, on this connection.
+  std::uint32_t outgoing_bytes = 0;
+  std::uint64_t unreliable_skipped = 0;
   // What ENet counted for unassembled messages it threw away and we took off
   // again on this connection (lost fragments; issue 175).
   std::uint64_t mended_bytes = 0;

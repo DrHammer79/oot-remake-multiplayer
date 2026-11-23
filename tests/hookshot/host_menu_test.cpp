@@ -575,3 +575,15 @@ TEST_CASE("host menu: with approve_joins the host's game is asked about a new pl
     game.client->stop();
     menu.Leave();
 }
+
+TEST_CASE("host menu: the process memory line reads this process's numbers (row 260)") {
+  const std::string line = CoopHostMenu::ProcessMemoryText();
+  CHECK(line.rfind("process:", 0) == 0);
+#ifdef _WIN32
+  CHECK(line.find(" private ") != std::string::npos);
+  CHECK(line.find(", handles ") != std::string::npos);
+#else
+  CHECK(line.find("VmRSS") != std::string::npos);
+#endif
+  CHECK(CoopHostMenu::kMemoryLineMs == 30'000);
+}

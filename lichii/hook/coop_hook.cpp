@@ -2656,7 +2656,11 @@ private:
             chat_.Add("reconnected as player " + std::to_string(event.welcome.player_number), true);
             break;
         case EventKind::disconnected:
-            chat_.Add("connection lost, reconnecting", true);
+            // Row 260: dropped because too much waited to go (a line far slower than the game's traffic): said so.
+            chat_.Add(event.drop_reason == coop::net::DropReason::backlog
+                          ? "connection too slow for the game's traffic, reconnecting"
+                          : "connection lost, reconnecting",
+                      true);
             break;
         case EventKind::refused:
             chat_.Add("server " + note_, true);
