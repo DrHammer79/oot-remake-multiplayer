@@ -3044,6 +3044,22 @@ TEST_CASE("world: a followed push puts the new rest in the push node's target an
     CHECK(CoopWorld::NodeRestWords(g.Reader(), kNode, to, {-51.06f, 79.27f, 45.62f}).writes.empty());
 }
 
+TEST_CASE("world: a cleared puzzle's block pulled off its answer does not start again (row 244)") {
+    // hs-block-grip diag 2 (2026-11-23): the Deku basement block loads on its answer (z 42.60) in both games, its
+    // room cleared (ForceOnState on). A pulled it to 44.85; B ran the node's start again there, took the start's
+    // room-load end and put its block back on the answer ("jumped back toward its old rest").
+    const proto::Vec3 goal{-51.06f, 79.27f, 42.6f};
+    const proto::Vec3 off{-51.06f, 79.27f, 44.85f};
+    CHECK_FALSE(CoopWorld::NodeMayStartAgain(true, goal, off));
+    CHECK_FALSE(CoopWorld::NodeMayStartAgain(true, goal, {-51.06f, 79.27f, 44.1f}));  // a whole cell off too
+    // On its answer (across; its height aside), the answer end agrees.
+    CHECK(CoopWorld::NodeMayStartAgain(true, goal, {-51.06f, 79.27f, 42.6f}));
+    CHECK(CoopWorld::NodeMayStartAgain(true, goal, {-51.0f, 82.0f, 42.65f}));
+    // Not cleared, or no goal: the start's grid end, as before (its places are put at the rest after it).
+    CHECK(CoopWorld::NodeMayStartAgain(false, goal, off));
+    CHECK(CoopWorld::NodeMayStartAgain(true, {NAN, NAN, NAN}, off));
+}
+
 TEST_CASE("world: a node start that aims at a grid cell is put back to the block's rest (row 244)") {
     // hs-block-grip (2026-11-22): A let the Deku basement block go mid-pull at z 44.85, between the cells 44.1 and
     // 45.6 of its base 47.1. B's node start set the target to the cell 44.1 and B's block slid there by itself

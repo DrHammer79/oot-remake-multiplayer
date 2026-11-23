@@ -397,6 +397,16 @@ inline constexpr std::uint64_t kStart = 0x108;
 // game runs it when the node is entered, not at each push (read from
 // Longshot v3.0.0-rc.3's lifted f_82771790, main at 0x80020000 there).
 inline constexpr std::uint64_t kStartFn = 0x2751790;
+// Row 244: the start has two ends. With a goal (+0x4c) and its block's logic bool under the key at +0xec true, it
+// aims +0xfc at the goal and asks the block's body onto the answer spot (+0x129 = 1); else +0xfc is a grid cell.
+// The key is Murmur3("ForceOnState") (0x304b4e37): the block's logic input plug, which the room graph feeds from
+// the room's "puzzle cleared" GameData flag (HoldGameDataGetBoolSimple, e.g. InsideTheDekuTree_Level_RoomH_
+// ClearBlock, set by TriggerGameDataSetBoolTrue once the block reaches its answer area). So that end is the room
+// load of a cleared puzzle: its block comes in on its answer. The start reads it with kLogicBoolFn(logic, key),
+// logic = [[actor + 0x270] + 0x118] (CoopLogicProbe::addr), a u8 result (bit 0).
+inline constexpr std::uint64_t kAnswerKey = 0xec;
+inline constexpr std::uint64_t kLogicBoolFn = 0x3db7c0;
+inline constexpr float kOnAnswerM = 0.1f;  // a rest this near its goal (across) is on its answer
 } // namespace BlockNode
 
 // Patch 0029 (hos_coop_nodes.h): HOS_COOP_WORLD_NODE_START's started nodes,
@@ -439,13 +449,6 @@ public:
         return out;
     }
     std::uint32_t Count() const noexcept { return count_.load(std::memory_order_acquire); }
-    // The start numbered `index` (0-based, as Count counts): (node, actor), zeros once its slot was reused.
-    std::pair<std::uint64_t, std::uint64_t> At(std::uint32_t index) const noexcept {
-        const std::uint32_t count = count_.load(std::memory_order_acquire);
-        if (index >= count || count - index > kSlots) return {0, 0};
-        const Slot& s = slots_[index % kSlots];
-        return {s.node.load(std::memory_order_acquire), s.actor.load(std::memory_order_acquire)};
-    }
     void Clear() noexcept {  // (a new game boot: the old nodes are another heap's)
         for (auto& s : slots_) {
             s.node.store(0, std::memory_order_relaxed);
@@ -491,6 +494,14 @@ RestScan NodeRestWords(const std::function<std::optional<std::uint64_t>(std::uin
 // rests (both places at `to`, as a node entered there); `where` names the moved one(s). Empty: already there.
 RestScan NodeTargetAtRest(const std::function<std::optional<std::uint64_t>(std::uint64_t)>& read,
                           std::uint64_t node, const coop::protocol::Vec3& to);
+
+// Row 244: whether a followed block's push node may run its own start again (BlockNode::kStartFn) for the rest
+// `to` another player left it at. Not when its ForceOnState is on (`force_on`: its room's puzzle is cleared) and
+// `to` is off its goal (`goal`, node +0x4c; NaN when it has none): the start would take its room-load end and put
+// the block back on its answer, in our game only, while in the mover's game it stays where it was pulled to (that
+// game's node never starts again mid-visit; pisces' Dodongo's Cavern and hs-block-grip's Deku basement: "jumped
+// back toward its old rest"). Then only its places go to the rest (NodeTargetAtRest), as the mover's node is.
+bool NodeMayStartAgain(bool force_on, const coop::protocol::Vec3& goal, const coop::protocol::Vec3& to);
 
 // Breaks and moves of placed world objects, shared by placement hash
 // (docs/world.md, "Broken for everyone" and "Moved for everyone"). Beside the

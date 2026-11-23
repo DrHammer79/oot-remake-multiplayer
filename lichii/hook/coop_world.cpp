@@ -2748,4 +2748,12 @@ RestScan NodeTargetAtRest(const std::function<std::optional<std::uint64_t>(std::
     return out;
 }
 
+bool NodeMayStartAgain(bool force_on, const proto::Vec3& goal, const proto::Vec3& to) {
+    if (!force_on || !std::isfinite(goal[0]) || !std::isfinite(goal[2])) {
+        return true;  // the start's grid end: the place it sets is put at the rest after it (NodeTargetAtRest)
+    }
+    const float dx = to[0] - goal[0], dz = to[2] - goal[2];
+    return std::sqrt(dx * dx + dz * dz) <= BlockNode::kOnAnswerM;  // on its answer: the answer end agrees
+}
+
 } // namespace CoopWorld
