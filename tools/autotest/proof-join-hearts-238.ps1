@@ -1,8 +1,8 @@
 # Player row 238 proof (lane 1, kits as kit_pair.py setup made them):
 #   proof-join-hearts-238.ps1 -KitA <kit-A> -KitB <kit-B> [-Rejoin]
 # hs-join-fresh-238: B's baseline save edited to one heart more than A's, B never joined: a fresh join (the reported
-# case). -Rejoin first runs hs-join-hearts-238 too (server restart: which game hosts afterwards is chance, so it is no
-# row 238 proof; see its header). B's baseline is put back from a copy in a finally block. No PASS from here: the shots
+# case). -Rejoin first runs hs-join-hearts-238 too (B gains a heart while the server is down and rejoins; B is frozen
+# over the server's restart so that A gets back in and hosts first: see its header). B's baseline is put back from a copy in a finally block. No PASS from here: the shots
 # decide (read the run folders printed); exit 0 when the runs ended.
 param(
     [Parameter(Mandatory)][string]$KitA,

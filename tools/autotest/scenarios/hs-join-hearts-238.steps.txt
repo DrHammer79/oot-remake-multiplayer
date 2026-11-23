@@ -1,11 +1,11 @@
 # hs-join-hearts-238 (player row 238): a guest that joins with MORE hearts than the host takes the host's count and
 # does not raise the host (the join's ResetHold in FlagWatcher::apply_snapshot). Both games on their own save,
 # LICHII_COOP_CHEATS=1 for `give`.
-# NOT A ROW 238 PROOF (run 20261123-030254): after `server start` the first game back in hosts (docs/protocol.md: the
+# Hosts after the restart (run 20261123-030254): the first game back in a restarted server hosts (docs/protocol.md: the
 # first player in hosts; a restarted server knows no earlier host). There B got back first, hosted with its 5 hearts and
-# A joined and took them (A "Synced with the group: 1 heart containers"): the join rule working, the roles swapped.
-# Which game wins is chance (both retry every <= 5 s), so proof-join-hearts-238.ps1 runs only hs-join-fresh-238. Kept
-# for the relay-restart host question (reports/hearts-238-01112.md).
+# A joined and took them (A "Synced with the group: 1 heart containers"): the join rule working, the roles swapped, by
+# chance (both retry every <= 5 s). So B is frozen (its process suspended) over `server start` until A is back in and
+# hosts again; a-hosts checks it (A never takes a join snapshot). Run by proof-join-hearts-238.ps1 -Rejoin.
 # Setup: both start and join (same hearts). The server goes away; B gains a heart container while its session still
 # runs (B notices the loss only after ~12 s of silence), so its own object walk raises its Link's Life component (B 1
 # more than A, for real); the server comes back and B rejoins with that against the host's count.
@@ -33,9 +33,14 @@ lines b-raised B min=1 coop: objects: our Link's max life \d+ -> \d+ \(from MaxL
 sleep 20
 lines b-lost B min=1 connection lost; reconnecting
 shot j-offline
+freeze B
 server start
+sleep 15
+lines a-back A min=2 coop: welcomed as player
+thaw B
 sleep 40
 lines b-rejoined B min=2 coop: welcomed as player
+lines a-hosts A max=0 coop: notice: Synced with the group
 lines b-lowered B min=1 coop: objects: our Link's max life .*MaxLife is held lower
 lines a-not-raised A max=0 coop: objects: our Link's max life \d+ -> \d+ \(from MaxLife\)
 shot j-joined
