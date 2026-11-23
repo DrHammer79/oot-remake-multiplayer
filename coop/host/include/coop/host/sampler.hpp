@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "coop/host/outgoing.hpp"
@@ -70,6 +71,10 @@ std::uint8_t status_bits(std::uint8_t previous, const std::optional<PlayerReadin
 // every screen. Read from the game itself: our Link's main animation (its AS slot 0) at a rate other than 0 whose frame
 // and place do not move for kStillUs while no event runs. Any change, or an animation at rate 0 (a pose held on
 // purpose), is a running world. One per game, fed every reading.
+// LICHII_COOP_STILL's value: WorldStill feeds `paused` only when it is "1" (pr-navi-01112: opt-in, off by default;
+// a held animation frame is no paused world: aiming, a ledge, a ladder, ice, a Like-Like's hold, a shock).
+inline bool world_still_on(const char* value) { return value != nullptr && std::string_view(value) == "1"; }
+
 class WorldStill {
  public:
   static constexpr std::uint64_t kStillUs = 300'000;  // 0.3 s: a held animation frame for that long is no game frame

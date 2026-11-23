@@ -327,6 +327,24 @@ TEST_CASE("host sampler: a world standing still with no menu named is paused (ro
   }
 }
 
+TEST_CASE("host sampler: WorldStill is opt-in, a held frame is no pause by default (pr-navi-01112)") {
+  // Aiming at a boss's eye, a ledge, a ladder, ice, a Like-Like's hold, a shock: each holds Link's frame while the
+  // world runs; as `paused` it would hand the boss away after fight_owner_paused_us. The quick-switch menu comes
+  // from the game's own screens (in_menu) instead.
+  CHECK_FALSE(world_still_on(nullptr));
+  CHECK_FALSE(world_still_on(""));
+  CHECK_FALSE(world_still_on("0"));
+  CHECK(world_still_on("1"));
+  namespace st = proto::status;
+  PlayerReading r = at(1.0f, false);
+  r.animation = proto::Animation{"Bow_Aim", 12.0f, 1.0f};  // a held aim frame, Link's place unchanged
+  CHECK(status_bits(0, r, false) == 0);                    // world_still not set: playing
+  SUBCASE("the quick-switch menu read from the game: in_menu, paused") {
+    r.in_menu = true;
+    CHECK(status_bits(0, r, false) == (st::in_menu | st::paused));
+  }
+}
+
 TEST_CASE("host sampler: WorldStill reads our Link's animation frame and place") {
   constexpr std::uint64_t kStep = 16'667;
   PlayerReading r = at(1.0f, false);

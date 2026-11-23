@@ -199,10 +199,30 @@ std::optional<Menu> MenuState() {
     Menu m{s.menu_open != 0, s.map_page != 0, s.hud_screen, s.panel_screen};
     if (s.size >= offsetof(HosCoopMenuState, screen_count)) m.hud_ran_ns_ago = s.hud_ran_ns_ago, m.hud_refreshes = s.hud_refreshes;
     if (s.size >= sizeof s) {  // (row 141: the running screens)
+        m.screens_known = true;
         m.screen_count = (std::min<std::uint32_t>)(s.screen_count, static_cast<std::uint32_t>(m.screens.size()));
         std::copy(s.screens, s.screens + m.screen_count, m.screens.begin());
     }
     return m;
+}
+
+std::optional<bool> QuickSwitchOpen(const Menu& menu) {
+    if (!menu.screens_known) {
+        return std::nullopt;
+    }
+    const std::uint64_t main = CoopRuntime::MainBase();
+    for (std::uint32_t i = 0; i < menu.screen_count && i < menu.screens.size(); ++i) {
+        const std::uint64_t screen = menu.screens[i];
+        const std::uint64_t vtable = screen != 0 ? Read64(screen) : 0;
+        if (main == 0 || vtable < main || vtable - main != kShortCutVtable) {
+            continue;
+        }
+        std::uint8_t state = 0;
+        if (CoopRuntime::Read(screen + kScreenStateAt, &state, 1) && ShortCutShows(vtable - main, state)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 namespace {
