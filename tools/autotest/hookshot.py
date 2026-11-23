@@ -43,6 +43,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import placement  # noqa: E402  (where the games' windows go: one monitor, no focus stolen)
+import lanes  # noqa: E402  (brings tools/hookshot/hs.py: run_quiet and popen_quiet start a console child with no window)
 
 WINDOWS = os.name == "nt"
 TICKS = 60.0              # script ticks a second
@@ -1085,7 +1086,7 @@ def kit_start_command(kit):
             "-Mode", "choose", "-Hookshot", "-NoUpdate"]
 
 
-def kit_start(kit, env, out, x, timeout=1200, run_cmd=subprocess.run):
+def kit_start(kit, env, out, x, timeout=1200, run_cmd=None):
     """Runs the kit's start for game x with env; the started game's process id. Its window's text: kit-start-<x>.txt."""
     pidfile = os.path.join(out, "kit-pid-%s.txt" % x)
     if os.path.exists(pidfile):
@@ -1093,7 +1094,7 @@ def kit_start(kit, env, out, x, timeout=1200, run_cmd=subprocess.run):
     env = dict(env, OOT_COOP_KIT=kit, OOT_COOP_TEST_KIT=pidfile, OOT_COOP_NO_SHORTCUT="1")
     text_path = os.path.join(out, "kit-start-%s.txt" % x)
     with open(text_path, "wb") as so:
-        r = run_cmd(kit_start_command(kit), cwd=kit, env=env, input=b"n\r\n" * 16, stdout=so,
+        r = (run_cmd or lanes.hs.run_quiet)(kit_start_command(kit), cwd=kit, env=env, input=b"n\r\n" * 16, stdout=so,
                     stderr=subprocess.STDOUT, timeout=timeout)
     text = read_text(text_path)
     pid = ""
@@ -1222,8 +1223,8 @@ def run(a):
                 delay = test_delay_args(a.test_delay_ms, a.test_jitter_ms)
                 if delay:
                     senv["OOT_COOP_TEST"] = "1"   # coop_server refuses the delay without it
-                server = subprocess.Popen([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
-                                          + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
+                server = lanes.hs.popen_quiet([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
+                                              + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
             keep_pids()
             time.sleep(1)
         for i, x in enumerate(tags):

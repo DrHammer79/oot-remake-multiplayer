@@ -250,9 +250,15 @@ def prepare(planned, kit_root, dry=False, say=print, restore=None):
     return ok
 
 
-def hs_restore(folder, dry):
+def _hs():
+    """tools/hookshot/hs.py (run_quiet and popen_quiet start a console child with no window)."""
     sys.path.insert(0, os.path.join(REPO, "tools", "hookshot"))
     import hs
+    return hs
+
+
+def hs_restore(folder, dry):
+    hs = _hs()
     if not dry:
         os.makedirs(folder, exist_ok=True)
     return hs.cache_restore(folder, dry=dry)
@@ -263,7 +269,7 @@ def hs_restore(folder, dry):
 def run_groups(planned, dry=False, say=print, runner=None):
     """Each group in its own thread, its scenarios one after another. Writes run.json into each run folder (run.ps1
     prints the folder as its last line). Returns [(group, run, folder or None, exit code)]."""
-    runner = runner or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, errors="replace"))
+    runner = runner or (lambda cmd: _hs().run_quiet(cmd, capture_output=True, text=True, errors="replace"))
     results, lock = [], threading.Lock()
 
     def one_run(s, r, cmd):
