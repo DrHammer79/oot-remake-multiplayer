@@ -6,10 +6,10 @@ Squadala! - online co-op for the Ocarina of Time remake on PC. (The repository k
 
 The goal of this project is working multiplayer in two stages:
 
-1. **Emulator first.** Add co-op to the Lichii emulator (Frizti's build), where the game already runs well. Up to 16 players see each other in the world, share progress, and fight the same enemies.
+1. **Emulator first (retired).** Co-op was first built into the Lichii emulator (Frizti's build). The emulator is retired since 0.11.12 and no longer shipped; the game now runs on Longshot. Up to 16 players see each other in the world, share progress, and fight the same enemies.
 2. **Then a recomp.** Carry the same co-op design into a native PC recompilation of the game. This is where releases are now: since 0.10.1 they run on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean's recompilation of the game, whose changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot)), with the same code, protocol and server. For 1.0, co-op is meant to ship as an add-on mod for the recomp rather than a patched build of our own.
 
-Both stages share one design, one wire protocol and one server, so what is learned on the emulator carries straight over to the recomp.
+Both stages share one design, one wire protocol and one server, so what was learned on the emulator carried straight over to the recomp.
 
 **Discord:** the Squadala! server, https://discord.gg/GwtRKAqng5, for players, testers and contributors. Found a bug? Type `/bugreport` there and attach the zip from `scripts\collect-logs.cmd` ([how](docs/setup.md#reporting-a-problem)).
 
@@ -86,7 +86,7 @@ Stage 0 is done, and the co-op of stage 1 now runs on Longshot: each part is che
 | Native puppets (0.11.6, off by default) | In progress, behind switches for testers and developers; nothing is checked in a game yet: the other players as real game bodies, in phases ([docs/native-puppets.md](docs/native-puppets.md)). Phase 1, a body of Link's own shapes (`--puppet-body`); phase 2, another player's bomb changes hands (`LICHII_COOP_BOMB_SHARE=1`, [docs/protocol.md](docs/protocol.md#bomb-hand-over-native-puppets-phase-2-bomb_take-bomb_answer-bomb_share)); phase 3, lifting a young player's copy the way Link lifts Ruto (pack `--puppet-liftable`, `LICHII_COOP_LIFT_PLAYER=1`, protocol types 535 to 538); phase 4, a PvP base on real bodies (pack `--puppet-pvp`, `LICHII_COOP_PVP_NATIVE=1`, protocol types 540 to 542): strikes are found on a player's copy and sent, but path B, the victim's own game working out the damage, is not live yet, so today's PvP is unchanged. Everything off leaves the game as it was. |
 | Recomp port of stages 0 to 6 | The release runs on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) (Team MagicBean's; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot)), a static recompilation of the same game build: the same co-op code, server and protocol. Needs a mesh-shader GPU (RTX 20 or newer, RX 6000 or newer). From 0.10.1 on, releases are Longshot only. Plan and state: [docs/hookshot.md](docs/hookshot.md). |
 
-The emulator side is a small patch on Frizti's Fritchii, pinned in [lichii/PIN](lichii/PIN); `lichii/fetch.ps1` fetches that source and applies the patches. See [lichii/README.md](lichii/README.md).
+The emulator side (a small patch on Frizti's Fritchii, pinned in [lichii/PIN](lichii/PIN)) is retired since 0.11.12: it is no longer built or shipped, and stays in the repo for reference ([lichii/README.md](lichii/README.md)). `lichii/hook/` is still compiled into the Longshot module.
 
 ## Building
 
@@ -111,7 +111,7 @@ Anyone can contribute: fork, branch, pull request. Every pull request is reviewe
 
 ## Credits
 
-- [Fritchii](https://github.com/Frizti/Fritchii) by Frizti (GPL-3.0): the emulator co-op is built into.
+- [Fritchii](https://github.com/Frizti/Fritchii) by Frizti (GPL-3.0): the emulator co-op was first built into (retired since 0.11.12).
 - [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) by Team MagicBean and contributors (GPL-3.0), whose changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) (NotRexed and contributors): the native PC build co-op also runs on ([docs/hookshot.md](docs/hookshot.md)).
 - [OOTRR](https://github.com/ootrando/ootrr) by REALAZK (GPL-3.0-or-later): the randomizer the kit downloads and runs on the player's PC ([docs/mods.md](docs/mods.md#the-randomizer)).
 - [OoT Character Select](https://github.com/snaildev99/OoT-Character-Select) by snaildev99 (Snail; its code MIT): play as the game's other characters. Character tab and Customize layout: Snail (snaildev99), OoT Character Select, used with his permission: without his mod the kit builds the − menu's Characters tab with Link and his Customize screen from his code on each player's PC (no game files shipped), and the page says where to get his mod for the other characters. Snail distributes it: at its first start the kit asks whether to get it (yes after 15 s; `character_select` in `coop-options.ini`), then downloads it from his own release page onto your PC and switches it on in the Mods tab ([docs/mods.md](docs/mods.md#character-select)). The kit carries none of its files; The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.

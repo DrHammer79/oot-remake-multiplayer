@@ -38,6 +38,7 @@
 #include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_cheats_panel.h"
+#include "coop_playtest.h"
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
@@ -1174,6 +1175,11 @@ void SetChatKey(const std::string& key) {
 // Enter went on to the game as its own key and shut the pause menu, a test run 2026-11-20)
 static std::atomic<bool> g_menu_keys_release{false};
 
+bool ChatOpen() {
+    std::lock_guard lock(g_box_mutex);
+    return g_box.open() || g_cheats.open();
+}
+
 bool KeysTaken() {
     if (CoopPauseTab::KeysTaken() || CoopPause::KeysTaken()) {
         g_menu_keys_release = true;
@@ -1345,6 +1351,7 @@ bool Start(const HosCoopApi* api) {
     CoopLongshotSettings::Init(api);   // Longshot's own settings for the Settings tab (patch 0032; none from an older Hookshot)
     CoopPause::Init(server);
     CoopTestInput::SetMenuOpener(CoopPause::TestMenu);   // (the autotest's menu step; only a commands file asks it)
+    CoopPlaytest::Start(g_system, CoopRuntime::GameDir());   // the play-test bridge: off unless LICHII_COOP_PLAYTEST_PORT
     CoopLook::StartModule();  // the look chosen in the pause menu (coop_look.h)
     return true;
 }
@@ -1386,6 +1393,11 @@ void TestState() {
 void Frame(void* ctx, int site) {
     if (g_original_on) {
         return;   // (original game: not even the window's title)
+    }
+    if (site == HOS_COOP_SITE_FRAME) {
+        // The play-test bridge's hold (docs/playtest.md): first, before any co-op work and with no lock of ours held,
+        // so a held frame has not run at all and nothing else waits on it. Off: one atomic load.
+        CoopPlaytest::AtFrame();
     }
     CoopWindowBrand::Tick(CoopRuntime::GameDir());  // the window's title and icon, co-op on or idle (solo too)
     if (!g_on) {
@@ -1869,6 +1881,7 @@ std::uint32_t Hold(std::uint64_t component, std::uint32_t bits) {
 }
 
 void Stop() {
+    CoopPlaytest::Stop();   // (a held game let go first)
     CoopModsRuntime::Stop();
     HostMenu().Leave();  // our own server goes after our own client
     CoopHold::TheHostTable().Clear();  // (no copy stays held once co-op is off)

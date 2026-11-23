@@ -53,8 +53,8 @@ Online co-op for the Ocarina of Time remake on PC. Up to 16 players see each oth
 |---|---|
 | `coop/` | Shared library: `protocol/` (messages and codec), `net/` (ENet transport, clock), `host/` (game memory readers, flags, saves), `presence/`, `overlay/`, `voice/` |
 | `server/` | `coop_server`: relays and decides, never runs the game (sessions, relay, UPnP, hole punching) |
-| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into both the emulator and the Longshot module. File list in `lichii/hook/core.cmake` |
-| `lichii/` (rest) | Emulator pin (`PIN`), fetch scripts and patches for Fritchii |
+| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into the Longshot module (it was also built into the retired emulator). File list in `lichii/hook/core.cmake` |
+| `lichii/` (rest) | Retired (0.11.12): emulator pin (`PIN`), fetch scripts and patches for Fritchii; not built or shipped, kept for reference |
 | `hookshot/src/` | The Longshot module: frame driver, menus, chat box, drawing, input |
 | `hookshot/patches/`, `hookshot/PIN` | Our small patches to Longshot and the commit they apply to |
 | `hookshot/compat/` | Stand-ins for the emulator API that `lichii/hook` uses |
@@ -110,9 +110,9 @@ A new test file goes in the `add_executable(coop_tests ...)` list in `tests/CMak
 Full details: [docs/testing.md](docs/testing.md) (CI tiers, automatic tests). In short:
 
 - **Unit tests first.** A bug fix starts with a test that fails for the cause, then the fix. Test names must not contain `;` (CMake configure fails). Run the CMake configure and the tests before you push.
-- **CI tiers.** The `Build` workflow runs a small tier on a push to your branch (the `linux (gcc)` job, Python tool tests, Content guard) and the full tier (Windows MSVC, gcc, clang, ASan, TSan, Python 3.10 and 3.12, Longshot Linux, emulator hook compiles) on a pull request into `main`. Do not push needlessly: one push per batch of commits.
+- **CI tiers.** The `Build` workflow runs a small tier on a push to your branch (the `linux (gcc)` job, Python tool tests, Content guard) and the full tier (Windows MSVC, gcc, clang, ASan, TSan, Python 3.10 and 3.12, Longshot Linux) on a pull request into `main`. Do not push needlessly: one push per batch of commits.
 - **The Linux gcc job builds the tests with `-Werror`.** Fix warnings, do not silence them. On a branch, let that job finish (2 to 3 minutes) before you call the work green.
-- **Changes under `lichii/hook/` or `hookshot/src/`** also need a green Linux emulator hook compile (`linux-emulator (hook)`). The small tier skips it unless an emulator-only file changed, but a pull request into `main` runs it: check that job is green before you call the PR ready. GCC's emulator flags catch errors the module build does not (for example string truncation warnings).
+- **Changes under `lichii/hook/` or `hookshot/src/`** also need the `linux (gcc)` job's strict compile of the Hookshot module green (step "Compile the hook code": g++-13, `COOP_HOOK_STRICT`, warnings as errors; it runs on every push). It catches errors the plain test build does not (for example string truncation warnings). The Fritchii emulator is retired (0.11.12): no job builds it.
 - **Green means finished.** A review OK, or "ready", is only valid on a run that has finished green and ran the tests your change touches. Quote the run id and job. "It will be OK once CI is green" is not an OK.
 - **Two-game tests** (`tools/autotest/` scenarios, maintainer only) need the game and run one at a time; the maintainer runs them for your "Check in game" list. Test listeners bind `127.0.0.1` only.
 
@@ -152,3 +152,25 @@ Full details: [docs/testing.md](docs/testing.md) (CI tiers, automatic tests). In
 - Follow the surrounding code: C++20, the existing names and file layout. No new dependency without a reason in the PR and an entry in `THIRD_PARTY_NOTICES.md`.
 - Change docs when behaviour changes: the area doc, `docs/sync-coverage.md` for what is shared, `docs/known-issues.md` for what players see.
 - Do not write release names or old version tags in the repository (`check_content.py` refuses them); give the date or the issue instead.
+
+## Play-testing the game (agent tester)
+
+This section is only for a session that was handed **running test games** with the play-test bridge on and an MCP
+server per game (`oot-p1`, `oot-p2`, ...; set up by the maintainer: [docs/playtest.md](docs/playtest.md), "Playing
+through the bridge"). Everything above still holds. A coding session never starts games itself.
+
+- You control each game through its own tools (`get_state`, `walk_to`, `press`, `step`, `warp`, `flag`, `give`, `log`,
+  `checkpoint`, `desync_check`, `screenshot`). Every reply has the game's frame count.
+- **The games are paused between your calls.** Nothing happens unless you act; a call runs only the frames it asks
+  for. Call `get_state` on every game first: a game whose tools you never called still runs.
+- Use `warp` (and `flag`, `give`) to set a test up. Do not walk across Hyrule to reach it.
+- Call `checkpoint` with the same tag on **every** game after each action that should sync. Let the other games run
+  a few frames first (`step 30`): a held game receives nothing.
+- After each scenario run `desync_check` (or `python -I tools/autotest/desync_check.py <log dir> --clients`).
+- Anything visible (a door, a chest lid, a puppet) is proven by a `screenshot`, never by flags alone.
+- A bug report needs: the scenario, the steps (the tool calls), what was expected, what happened, the first tag where
+  the games differ with each game's frame, and the shots.
+- The scenarios are in [tests/scenarios.md](tests/scenarios.md). Run them in order and write the results to the
+  report file you were given.
+- **Never edit the mod's source during a test run.** Report; do not fix. Fixing is a separate session, so a test run
+  cannot quietly hide what it was meant to catch.

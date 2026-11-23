@@ -912,8 +912,23 @@ bool IsStunAnimation(std::string_view name) {
     // files: Morpha 'ChanceTime', 'Chance_time_St'; Volvagia 'ChanceTimeDamageStart'; the Poe sisters 'Chance_St',
     // 'ChanceTime_Loop'; Phantom Ganon and Ganondorf 'DownTimeReaction_Start'). Gohma's 'ChanceAfterAttack' and
     // 'Attack_Chance' are her own moves (the owner's too), not a stun of a hit.
-    return first == "Stun" || first == "Down" || first == "Fall" || first == "Faint" || first == "Chance" ||
-           first.starts_with("ChanceTime") || first.starts_with("DownTimeReaction");
+    // Row 211: the stuns whose first word is no Stun/Down word (read from every boss and mid-boss AS file): Ganondorf's
+    // knockdown by his own ball sent back ('LightBallDamage_Start/Loop/End', his interruptweakpointhit module, the
+    // light and the charge ball), Ganon's light-arrow knockdown ('LightArrowDown_*', 'LightArrowDamage_*',
+    // 'Lightarrow_Damage_*'), the Lizalfos' and the Gerudo Thief's 'StunA'..'StunC' / 'StunAirA'.., Big Octo's
+    // 'ShortStun_L/R'. Plain hit reactions ('Damage', 'SmallDamage') are no stun.
+    // Dark Link: his chance window ('Dark_Chance_St/_Damage_B/_Ed', AS nodes 'DarkChanceSt'..; not every 'Dark_' word:
+    // 'Dark_Wait', 'Dark_Move_Run' are moves) and the player's no-life stuns in his AS ('Paralysis_*' a Deku Nut,
+    // 'Freeze' / 'FreezeBreak' an ice arrow). Ganon: 'Tail_Chance', the tail window his down goes on into.
+    // Not stuns (their own moves, which a copy plays from the owner's verbs): the Gerudo Thief's 'BigChance', Kotake's
+    // and Koume's 'Tired_*' (a brain verb), Morpha's tentacle 'SpinChance*' (its spin attack), Gohma's
+    // 'Ceiling_Spawn_Chance_*' (her larva drop), Dead Hand's 'Repel_Down' (a hit that takes life: its owner reacts).
+    return first.starts_with("Stun") || first == "ShortStun" || first == "Down" || first == "Fall" ||
+           first == "Faint" || first == "Chance" || first.starts_with("ChanceTime") ||
+           first.starts_with("DownTimeReaction") || first == "LightBallDamage" || first == "LightArrowDown" ||
+           first == "LightArrowDamage" || first == "Lightarrow" || base.starts_with("Dark_Chance") ||
+           first.starts_with("DarkChance") || first == "Paralysis" || first.starts_with("Freeze") ||
+           base.starts_with("Tail_Chance");
 }
 
 proto::Quat QuatOf(const Mat3& m) {
@@ -1454,6 +1469,23 @@ std::optional<std::uint8_t> Sync::OwnerOf(std::uint64_t address) const {
 bool Sync::OwnerSaysDead(std::uint64_t address) const {
     const auto it = objects_.find(address);
     return it != objects_.end() && (it->second.dead_at != 0 || it->second.owner_life_zero);
+}
+
+const Sync::Object* Sync::HeldByItsBoss(const Object& o) const {
+    if (!IsBossPart(o.name)) {
+        return nullptr;
+    }
+    const GroupPart* part = PartOf(o.name);
+    for (const auto& [address, other] : objects_) {
+        if (std::find(part->roots.begin(), part->roots.end(), other.name) == part->roots.end()) {
+            continue;
+        }
+        // Its boss, here and alive: not dead by its life, and no death said or begun for it.
+        if (other.dead_at == 0 && !other.dead_now && !other.owner_life_zero && !(other.life && *other.life <= 0)) {
+            return &other;
+        }
+    }
+    return nullptr;
 }
 
 bool Sync::GoesWithoutDeath(std::uint64_t address, std::uint64_t now_us) {
@@ -2916,9 +2948,30 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     Apply(self, now_us, send, writes);
     // Copies their owner saw die that are still here after the grace.
     dead_.clear();
-    for (const auto& [address, o] : objects_) {
-        if (o.dead_at != 0 && (o.dead_now || now_us - o.dead_at >= kDeadGraceUs)) {
+    for (auto& [address, o] : objects_) {
+        if (o.dead_at == 0) {
+            continue;
+        }
+        if (o.dead_now || now_us - o.dead_at < kDeadGraceUs) {
+            if (o.dead_now) {
+                dead_.insert(address);
+            }
+            continue;
+        }
+        const Object* boss = HeldByItsBoss(o);
+        if (boss == nullptr) {
             dead_.insert(address);
+        } else if (!o.held_said && now_us - o.dead_at >= kDeadGraceUs + kHeldSayUs) {
+            // Rows 257/258 (LANE1 proof): a leftover, its own death never ended it; held, not deleted under its boss.
+            o.held_said = true;
+            char line[320];
+            std::snprintf(line, sizeof line,
+                          "a boss part dead in its owner's game still here %llu s on: held by its boss %016llx %s, "
+                          "not deleted (rows 257/258): %016llx %s life %d",
+                          static_cast<unsigned long long>((now_us - o.dead_at) / 1'000'000),
+                          static_cast<unsigned long long>(boss->id.value), boss->name.c_str(),
+                          static_cast<unsigned long long>(o.id.value), o.name.c_str(), o.life.value_or(-1));
+            notes_.emplace_back(line);
         }
     }
 
@@ -2983,6 +3036,23 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 notes_.emplace_back("a hit the dying boss's game did not take: " +
                                     std::to_string(*o.life - o.hurt_target) +
                                     " given to its own Life step (its death has begun): " + o.name);
+            } else if (o.life && *o.life > 0 && o.hurt_target <= 0 && IsBossPart(o.name) && !o.death_given) {
+                // Rows 257/258 (Barinade, a co-op crash): another game killed a boss's part (a jellyfish), and our
+                // copy's game refused the replayed killing hit (the stand-in hit is no hit its rules take outside
+                // its weak time). Its life stayed 1, the copy was deleted from outside kDeadGraceUs later, and its
+                // boss never saw it die: its next phase (Phase4_St, the owner's) unstuck a jellyfish half deleted
+                // (ModelBind gone: a null write). The hitter's game judged the kill: the whole life goes into the
+                // part's own Life step (never a write), once, so its own death runs and tells its boss, as there.
+                ++hurt_missed_;
+                ++part_kills_stepped_;
+                o.death_given = true;
+                LifeWrite w{o.address, 0, *o.life, std::nullopt};
+                w.direct = true;
+                writes.push_back(w);
+                notes_.emplace_back("a killing hit the boss part's game did not take: its life " +
+                                    std::to_string(*o.life) +
+                                    " given to its own Life step (the hitter's game killed it; rows 257/258): " +
+                                    o.name);
             } else if (o.life && *o.life != o.hurt_target && IsBossOrPart(o.name)) {
                 // A boss copy is never written (boss-intro, the native rule): its game refused the owner's hit
                 // (Gohma holds her life at 1 outside her weak point), so its life stays what its own game says.
@@ -3954,7 +4024,10 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                     // came (no owner was ever named to us: a late entrant or
                     // a rejoin, issue 133) whose life we cannot read goes at
                     // once.
-                    if (o->life && *o->life > 0) {
+                    if (o->life && *o->life > 0 && o->death_given && IsBossPart(o->name)) {
+                        // Rows 257/258: its killing hit was replayed and refused, and its whole life already went to
+                        // its own Life step: no second killing blow (each jellyfish kill was replayed twice).
+                    } else if (o->life && *o->life > 0) {
                         Lower(*o, 0, now_us, writes, remove->player_number);
                     } else if (had == owners_.end() && !o->life) {
                         o->dead_now = true;

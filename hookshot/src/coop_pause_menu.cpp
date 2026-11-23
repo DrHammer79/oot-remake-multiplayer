@@ -180,10 +180,30 @@ Row InputChoice(const char* name, const std::string& label) {
     return Choice(name, colon == std::string::npos ? label : label.substr(colon + 2));
 }
 
+// A placeholder in a text field (empty: "Type", "None", "Hidden") in the player's language at once: the field's value is
+// then marked as the player's own (Row::own_value) and never looked up, so a room typed "None" stays "None".
+std::string Ph(const std::string& word) {
+    return CoopI18n::Tr(word);
+}
+
 Row Note(std::string text) {
     Row r;
     r.name = std::move(text);
     r.kind = RowKind::kNote;
+    return r;
+}
+
+// A row whose name is built around a player's or a room's own text ("Let in Saria"): the template in the player's
+// language, the text put in as it is (never looked up, never seen by the table's shapes).
+Row NamedAction(const std::string& before, const std::string& text, const std::string& after, std::string value,
+                bool fixed = false) {
+    Row r = Action(CoopI18n::TrAround(before, text, after), std::move(value), fixed);
+    r.own_name = true;
+    return r;
+}
+Row NamedNote(const std::string& before, const std::string& text, const std::string& after) {
+    Row r = Note(CoopI18n::TrAround(before, text, after));
+    r.own_name = true;
     return r;
 }
 
@@ -339,6 +359,7 @@ struct Menu::Line {
     Row row;
     Act act = Act::kNone;
     std::string help;
+    bool help_done = false;   // the help is already in the player's language (built around a name: CoopI18n::TrAround)
 };
 
 // Co-op settings' host rows (row 226's audit, menu-parity-0119): the game's kind, join approval and the session's
@@ -457,10 +478,10 @@ std::vector<Menu::Line> Menu::Lines() const {
             // (who asks to join, the oldest first: let in or turned away here as with /allow and /deny in the chat)
             if (session_.state == State::kHosting && !session_.asking.empty()) {
                 const std::string& who = session_.asking.front();
-                out.push_back({Action("Let in " + who, "Allow"), Act::kLetIn,
-                               who + " asks to join your game. Lets them in, as /allow in the chat does."});
-                out.push_back({Action("Refuse " + who, "Refuse"), Act::kRefuse,
-                               "Turns " + who + " away, as /deny in the chat does. They can ask again."});
+                out.push_back({NamedAction("Let in ", who, "", "Allow"), Act::kLetIn,
+                               CoopI18n::TrAround("", who, " asks to join your game. Lets them in, as /allow in the chat does."), true});
+                out.push_back({NamedAction("Refuse ", who, "", "Refuse"), Act::kRefuse,
+                               CoopI18n::TrAround("Turns ", who, " away, as /deny in the chat does. They can ask again."), true});
                 if (session_.asking.size() > 1) {
                     out.push_back({Note("+" + std::to_string(session_.asking.size() - 1) + " more ask"), Act::kNone, {}});
                 }
@@ -481,7 +502,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
             if (session_.state == State::kHosting && !session_.password.empty()) {
                 if (!show_password_) {
-                    out.push_back({Action("Join password", "Hidden"), Act::kShowPassword, kJoinPasswordHelp});
+                    out.push_back({Action("Join password", Ph("Hidden")), Act::kShowPassword, kJoinPasswordHelp});
                 } else {
                     const std::vector<std::string> shown = PasswordLines(session_.password);
                     for (std::size_t i = 0; i < shown.size(); ++i) {
@@ -489,7 +510,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                     }
                 }
                 const bool typing_password = typing_ && typing_act_ == Act::kNewPassword;
-                out.push_back({Action("Change join password", typing_password ? Masked(new_password_) + "_" : "Type"),
+                out.push_back({Action("Change join password", typing_password ? Masked(new_password_) + "_" : Ph("Type")),
                                Act::kNewPassword,
                                "A new join password, typed on the keyboard; Enter gives it to your game. Players who "
                                "join from now on need it; players already in stay. No spaces, at most 128 characters."});
@@ -511,7 +532,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            options_.public_game ? kPublicHelp : kPrivateHelp});
             if (options_.public_game) {
                 out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                                   : options_.relay_room.empty()        ? std::string("None")
+                                                   : options_.relay_room.empty()        ? Ph("None")
                                                                                         : options_.relay_room),
                                Act::kRoom,
                                "Your public game's name in Public games: 3 to 24 letters, digits, - or _. A ready one is offered; change it if you like."});
@@ -548,7 +569,7 @@ std::vector<Menu::Line> Menu::Lines() const {
             // the next press)
             if (!note_.empty() && note_[0].rfind("Turned away", 0) == 0) out.push_back({Note(note_[0]), Act::kNone, {}});
             if (!rejoin_code_.empty()) {
-                out.push_back({Action("Join " + rejoin_host_ + " again", "Join", off), Act::kRejoin,
+                out.push_back({NamedAction("Join ", rejoin_host_, " again", "Join", off), Act::kRejoin,
                                "Joins the last game you were in, with the same code. It works while your friend is still "
                                "hosting that game."});
             }
@@ -567,7 +588,7 @@ std::vector<Menu::Line> Menu::Lines() const {
             out.push_back({Action("Room or address",
                                   typing_ip   ? join_ip_ + "_"
                                   : code_in   ? ShownCode(std::string(Trim(join_)))
-                                  : join_ip_.empty() ? std::string("Type")
+                                  : join_ip_.empty() ? Ph("Type")
                                                      : join_ip_,
                                   off),
                            Act::kJoinIp,
@@ -583,7 +604,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                            "The host's UDP port (default 27510). Type a number from 1 to 65535."});
             out.push_back({Action("Password",
                                   typing_password ? Masked(join_password_) + "_"
-                                                  : join_password_.empty() ? std::string("Type") : Masked(join_password_),
+                                                  : join_password_.empty() ? Ph("Type") : Masked(join_password_),
                                   off),
                            Act::kJoinPassword,
                            "The host's join password: they see it on their Multiplayer page (Hosting, Join "
@@ -602,7 +623,7 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "in your home."});
         const bool typing_search = typing_ && typing_act_ == Act::kFindSearch;
         out.push_back({Action("Search", typing_search ? find_search_ + "_"
-                                        : find_search_.empty() ? std::string("Type") : find_search_),
+                                        : find_search_.empty() ? Ph("Type") : find_search_),
                        Act::kFindSearch, "Only the games whose name, or whose host's name, holds these letters."});
         out.push_back({Choice("Show", CoopBrowse::FilterWords(find_filter_)), Act::kFindFilter,
                        "All games; only the ones you can join (your version, room for one more); or every game of "
@@ -668,14 +689,14 @@ std::vector<Menu::Line> Menu::Lines() const {
                        "65535."});
         out.push_back({Action("Relay", typing_ && typing_act_ == Act::kRelay ? options_.relay + "_"
                                        : options_.relay.empty() || options_.relay == CoopTitleMenu::kDefaultRelay
-                                           ? std::string(CoopTitleMenu::kDefaultRelayName)
+                                           ? Ph(CoopTitleMenu::kDefaultRelayName)
                                            : options_.relay),
                        Act::kRelay,
                        "The relay that finds rooms by name and lists public rooms. Squadala's own is built in; type "
                        "another (host or host:port) to use it instead. Cleared: Squadala's again. A change while you "
                        "host applies at your next Host."});
         out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                           : options_.relay_room.empty()        ? std::string("None")
+                                           : options_.relay_room.empty()        ? Ph("None")
                                                                                 : options_.relay_room),
                        Act::kRoom,
                        "Your room's name on the relay when you host: 3 to 24 letters, digits, - or _. Friends type "
@@ -760,6 +781,22 @@ std::vector<Menu::Line> Menu::Lines() const {
     case Page::kCustomize:   // (its own rows: coop_look_menu.h)
         break;
     }
+    // The rows that hold a player's, a room's or a host's own text: shown as they are, never looked up in the translation
+    // table (a player called "Link" or a room named "On" must not read 林克 or 开启). The words beside them are ours: the
+    // row's name, a field's empty placeholder (translated above, where it is made).
+    for (Line& line : out) {
+        switch (line.act) {
+        case Act::kName: case Act::kHostPort: case Act::kRelay: case Act::kRoom: case Act::kJoinIp: case Act::kJoinPort:
+        case Act::kJoinPassword: case Act::kNewPassword: case Act::kShowPassword: case Act::kCode: case Act::kFindSearch:
+        case Act::kOpenSettings:   // (Settings: the player's name in its value cell)
+            line.row.own_value = true;
+            break;
+        case Act::kFindGame:   // (a game's or a room's name; its players' count and kind are ours)
+            line.row.own_name = true;
+            break;
+        default: break;
+        }
+    }
     return out;
 }
 
@@ -768,7 +805,7 @@ std::vector<Menu::Line> Menu::Lines() const {
 // The title's Join list: the last game again, the games (this network's first), then Enter a code or address.
 void Menu::TitleListLines(std::vector<Line>& out, bool off) const {
     if (!rejoin_code_.empty()) {
-        out.push_back({Action("Join " + rejoin_host_ + " again", "", off), Act::kRejoin,
+        out.push_back({NamedAction("Join ", rejoin_host_, " again", "", off), Act::kRejoin,
                        "Joins the last game you were in, with the same code, while your friend still hosts it."});
     }
     const std::vector<Found>& games = found_;   // (as handed: this network's first; no search or sort here)
@@ -789,11 +826,11 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     const bool typing_ip = typing_ && typing_act_ == Act::kJoinIp;
     const bool typing_password = typing_ && typing_act_ == Act::kJoinPassword;
     const std::string password = typing_password ? Masked(join_password_) + "_"
-                                 : join_password_.empty() ? std::string("None") : Masked(join_password_);
+                                 : join_password_.empty() ? Ph("None") : Masked(join_password_);
     if (!note_.empty() && note_[0].rfind("Turned away", 0) == 0) out.push_back({Note(note_[0]), Act::kNone, {}});
     if (!picked_.empty()) {
         const std::string asks = " asks for a password";
-        out.push_back({Note(TitleGameName(picked_, picked_host_, asks.size()) + asks), Act::kNone, {}});
+        out.push_back({NamedNote("", TitleGameName(picked_, picked_host_, asks.size()), asks), Act::kNone, {}});
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
                        "The host sees it on their Hosting screen. Type it with Letter, or on the keyboard."});
         out.push_back({Action("Join", "", off), Act::kJoinNow, "Joins the game with this password."});
@@ -824,7 +861,7 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                        "The most players in your game, you included."});
         if (options_.public_game) {
             out.push_back({Action("Room name", typing_ && typing_act_ == Act::kRoom ? options_.relay_room + "_"
-                                               : options_.relay_room.empty()        ? std::string("None")
+                                               : options_.relay_room.empty()        ? Ph("None")
                                                                                     : options_.relay_room),
                            Act::kRoom, "Your game's name in Join a game: 3 to 24 letters, digits, - or _."});
         }
@@ -835,13 +872,13 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
     }
     if (session_.state == State::kHosting && !session_.asking.empty()) {
         const std::string& who = session_.asking.front();
-        out.push_back({Action("Let in " + who, ""), Act::kLetIn, who + " asks to join your game."});
-        out.push_back({Action("Refuse " + who, ""), Act::kRefuse, "Turns " + who + " away. They can ask again."});
+        out.push_back({NamedAction("Let in ", who, "", ""), Act::kLetIn, CoopI18n::TrAround("", who, " asks to join your game."), true});
+        out.push_back({NamedAction("Refuse ", who, "", ""), Act::kRefuse, CoopI18n::TrAround("Turns ", who, " away. They can ask again."), true});
     }
     const std::string players =
         std::to_string(std::max(1, session_.players)) + "/" + std::to_string(options_.max_players);
     if (session_.public_game) {
-        out.push_back({Note("Room  " + options_.relay_room), Act::kNone, {}});
+        out.push_back({NamedNote("Room  ", options_.relay_room, ""), Act::kNone, {}});
         out.push_back({Note("Players  " + players), Act::kNone, {}});
     } else {
         out.push_back({Action("Code", session_.code.empty() ? std::string("Starting...") : ShownCode(session_.code),
@@ -849,7 +886,7 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                        Act::kCopyInvite,
                        "The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code."});
         if (session_.state == State::kHosting && !session_.password.empty()) {
-            const std::string shown = show_password_ ? PasswordLines(session_.password).front() : std::string("Hidden");
+            const std::string shown = show_password_ ? PasswordLines(session_.password).front() : Ph("Hidden");
             out.push_back({Action("Password", shown), Act::kShowPassword,
                            "Your friend types it after picking your game. A shows it."});
         }
@@ -2210,15 +2247,16 @@ View Menu::view() const {
         Row name;
         name.name = "Your name";
         name.value = options_.name;
+        name.own_value = true;   // (the player's own name: never looked up, "Link" stays "Link")
         name.kind = RowKind::kAction;
         v.rows.push_back(std::move(name));
         v.rows.push_back(Note(kSnailHomeNote));
         v.selected = 0;
         v.typing = typing_;
-        v.help_title = "Your name";
-        v.help = !note_.empty() ? Joined(note_)
-                                : std::string("The name the other players see over your Link and in the chat: 1 to 16 "
-                                              "characters.");
+        v.help_title = CoopI18n::Tr("Your name");
+        v.help = !note_.empty() ? JoinedTr(note_)
+                                : CoopI18n::Tr("The name the other players see over your Link and in the chat: 1 to 16 "
+                                               "characters.");
         return v;
     }
     if (page_ == Page::kCustomize) {   // (its own rows: coop_look_menu.h; Your name above them)
@@ -2228,6 +2266,7 @@ View Menu::view() const {
             Row name;
             name.name = "Your name";
             name.value = options_.name;
+            name.own_value = true;
             name.kind = RowKind::kAction;
             v.rows.push_back(std::move(name));
         }
@@ -2242,12 +2281,12 @@ View Menu::view() const {
         }
         v.selected = !name_row ? c.selected : customize_name_ || typing_ ? 0 : c.selected + 1;
         v.typing = typing_;
-        v.help_title = name_row && (customize_name_ || typing_) ? "Your name" : c.help_title;
-        v.help = !note_.empty() ? Joined(note_)
+        v.help_title = name_row && (customize_name_ || typing_) ? CoopI18n::Tr("Your name") : CoopI18n::Tr(c.help_title);
+        v.help = !note_.empty() ? JoinedTr(note_)
                  : name_row && (customize_name_ || typing_)
-                     ? std::string("The name the other players see over your Link and in the chat: 1 to 16 characters.")
-                 : character_ ? (c.help.empty() ? CoopI18n::Tr(kCharacterNote) : c.help + " " + CoopI18n::Tr(kCharacterNote))
-                              : c.help;
+                     ? CoopI18n::Tr("The name the other players see over your Link and in the chat: 1 to 16 characters.")
+                 : character_ ? (c.help.empty() ? CoopI18n::Tr(kCharacterNote) : CoopI18n::Tr(c.help) + " " + CoopI18n::Tr(kCharacterNote))
+                              : CoopI18n::Tr(c.help);
         v.change = c.change;
         v.confirm = c.confirm;
         v.back = c.back;
@@ -2267,32 +2306,33 @@ View Menu::view() const {
                       (mine || session_.state == State::kFailed);
     switch (page_) {
     case Page::kMain:
-        v.help_title = "Multiplayer";
+        v.help_title = CoopI18n::Tr("Multiplayer");
         break;
     case Page::kHost:
-        v.help_title = "Host a game";
+        v.help_title = CoopI18n::Tr("Host a game");
         break;
     case Page::kJoin:
-        v.help_title = "Join a game";
+        v.help_title = CoopI18n::Tr("Join a game");
         break;
     case Page::kLocal:
-        v.help_title = "Local co-op";
-        v.help = "Split screen (experimental) runs two full games on this PC, one per player: about 10 GB of RAM each "
+        v.help_title = CoopI18n::Tr("Local co-op");
+        v.help = CoopI18n::Tr("Split screen (experimental) runs two full games on this PC, one per player: about 10 GB "
+                 "of RAM each "
                  "and a strong graphics card. Start two kits (or use Nucleus Co-op), give each game its own controller"
                  " in Settings, Controller (controller 1, controller 2 or the keyboard), then Host a game in one and "
                  "Join a game in the other with the Same network line. The steps are in PLAY-LAN.md. Native split "
-                 "screen, one game for both, comes in a later release.";
+                 "screen, one game for both, comes in a later release.");
         break;
     case Page::kSettings:
-        v.help_title = "Settings";
+        v.help_title = CoopI18n::Tr("Settings");
         break;
     case Page::kCommands:
-        v.help_title = "Commands";
+        v.help_title = CoopI18n::Tr("Commands");
         break;
     case Page::kCustomize:   // (above)
         break;
     case Page::kFind:
-        v.help_title = "Browse games";
+        v.help_title = CoopI18n::Tr("Browse games");
         break;
     }
     if (!note_.empty()) {
@@ -2300,21 +2340,25 @@ View Menu::view() const {
     } else if (said && !(line != nullptr && confirm_leave_)) {
         v.help = JoinedTr(session_.lines);
     } else if (line != nullptr) {
-        v.help = line->help;
+        v.help = line->help_done ? line->help : CoopI18n::Tr(line->help);
     } else if (session_.by_launcher && (page_ == Page::kHost || page_ == Page::kJoin)) {
-        v.help = kByLauncher;   // (LauncherLines' page has no row to select)
+        v.help = CoopI18n::Tr(kByLauncher);   // (LauncherLines' page has no row to select)
     }
     if (mine && (host_page || join_page)) {
         v.hint = session_.code;
     }
+    // (the gold line in the player's language: the composed ones are the table's shapes)
     if (session_.by_launcher) {
-        v.gold = session_.players > 1 ? "Co-op is on: " + std::to_string(session_.players) + " players" : "Co-op is on";
+        v.gold = session_.players > 1
+                     ? CoopI18n::Tr("Co-op is on: " + std::to_string(session_.players) + " players")
+                     : CoopI18n::Tr("Co-op is on");
     } else if (mine && session_.hosting) {
-        v.gold = session_.state != State::kHosting ? "Starting your game..."
-                 : session_.players > 1 ? "Hosting: " + std::to_string(session_.players) + " players"
-                                        : "Hosting: waiting for friends";
+        v.gold = session_.state != State::kHosting ? CoopI18n::Tr("Starting your game...")
+                 : session_.players > 1
+                     ? CoopI18n::Tr("Hosting: " + std::to_string(session_.players) + " players")
+                     : CoopI18n::Tr("Hosting: waiting for friends");
     } else if (mine) {
-        v.gold = session_.state == State::kJoined ? "In a friend's game" : "Joining...";
+        v.gold = session_.state == State::kJoined ? CoopI18n::Tr("In a friend's game") : CoopI18n::Tr("Joining...");
     }
     if (typing_) {
         v.confirm = "Done";

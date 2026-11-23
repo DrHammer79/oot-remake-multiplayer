@@ -151,7 +151,7 @@ Goal: every boss fight the same in every game, run by the game's own code. Gohma
 
 **Now.** Our own shot's end is the second reading of our hit. coop_spawn's flights of ours (`Item_Bomb`, `Item_Bombchu`, `Item_DekuNut`, `Shootable_DekuSeed`, `NormalArrow`) that ended where they hit or went off (remove reason hit / exploded, the remove's place; the same ends PvP uses) go to `Table::NoteOwnShotEnd`; they are kept 20 frames (`kShotEndKeepSteps`). The objects walk asks `OwnShotNear` for every boss actor it reads whose hit id did not move, and calls `NoteOwnHit(actor, true)` when an end lies within 6 m (`kShotNearBoss`) of it. The rest is boss-fix's: the copy's skipped changes of the last 12 frames are made late (the stun), it runs its own changes for 120 frames, its stun animation sends the `DAMAGE` of 0, and the server hands the boss to the stunner. Copies only: an owner's boss (and solo play, which has no copies) never skips its own AI, so nothing changes there. A wall hit within 6 m only runs the copy's own AI for 2 s, then the owner's state again. Log: `<boss>: our own shot ended at it: the copy runs its own reaction`; the 10 s line's `(N late, M hits by our shots)`.
 
-**Cases sharing the cause** (a stun or opening from a hit that takes no life): Gohma's eye (seed, nut), King Dodongo's bomb or bombchu in the mouth, Bongo Bongo's hands (seed, arrow; each hand is a boss actor of the walk, so this holds where a hand has a BSA of its own, else only within 6 m of his root: not proven), Phantom Ganon and Ganondorf hit by an arrow, Twinrova, Ganon's arrows, mid-bosses' stuns from a nut: covered when the shot ends at the boss. **Not covered by this reading** (no shot end of ours at the boss): a reflected boss shot (Phantom Ganon's and Ganondorf's energy ball, Twinrova's beams on the Mirror Shield: the ball is the owner's shot, a copy in the other games), the boomerang and the hookshot (they come back; not in the hit/exploded ends PvP uses as far as read: Barinade's stem, Morpha's nucleus); those still stun only where their hit moves the hit id (Barinade's and Morpha's take life).
+**Cases sharing the cause** (a stun or opening from a hit that takes no life): Gohma's eye (seed, nut), King Dodongo's bomb or bombchu in the mouth, Bongo Bongo's hands (seed, arrow; each hand is a boss actor of the walk, so this holds where a hand has a BSA of its own, else only within 6 m of his root: not proven), Phantom Ganon and Ganondorf hit by an arrow, Twinrova, Ganon's arrows, mid-bosses' stuns from a nut: covered when the shot ends at the boss. **Not covered by this reading** (no shot end of ours at the boss): a reflected boss shot (Phantom Ganon's and Ganondorf's energy ball, Twinrova's beams on the Mirror Shield: the ball is the owner's shot, a copy in the other games), the boomerang and the hookshot until the row 164 follow-up (they come back, so they never end where they hit). Now their flight keeps its farthest point (`Flight::far_at`), where it turned: where it hit or held. A flight of ours that came back (`CoopSpawn::IsReturnShot`: `Weapon_Boomerang`, `Shootable_Hook`, `Shootable_HookLong`; at least 1 m out) is given to `NoteOwnShotEnd` at that point on the walk it turns (`Sync::ReturnTurns`: it came 0.25 m nearer than its farthest, or its farthest stood for 3 walks, a hookshot's tip held), not when it is gone: it comes back up to a second or more after its hit, past the copy's 12-frame look-back (`kLookBackSteps`) for the stun it skipped. One gone before its turn was read gives it when gone. So a boss copy within 6 m of it runs its own reaction, as for a seed: Barinade's stem and jellyfish, Morpha's nucleus pulled, the Flare Dancer's core. A throw that turned within 6 m of a boss without hitting it only lets the copy run its own AI for 2 s, as a wall hit does. Test: `spawn_test.cpp` (row 164 follow-up). Not proven in a game: that a guest's boomerang stuns Barinade's stem in the owner's game.
 
 **Test.** tests/lichii/boss_native_test.cpp (a shot's end near a copy runs its skipped stun late and counts once; far, NaN, old or on an owner's boss: nothing). In game: autotest `hs-boss-stun-gohma` (B, the copy, seeds her eye; screenshots at `b-stunN` must show her stunned in both games; then A, a copy after the hand-over, does the same).
 
@@ -164,7 +164,7 @@ LANE1 autotest hs-boss-full (runs 20261115-122137 and -130255): in A's game the 
 **Now.**
 - Server (`server/session.cpp`): an unready game never takes a boss by the chase rule or the out-of-fight near rule (as before for the fight-near and hit rules); `best_other` (owner gone or unfit) takes a ready game before an unready one, and an unready one only when no other is left. New rule: a boss whose owner is unready goes to a ready game at once (`boss_to_ready`): a game whose own intro began the fight there is the one whose boss is in the fight.
 - Module (`Table::SetEvent`): after our event a copy still runs its own changes for `kAfterEventSteps` (120 frames, about 2 s) before it takes the owner's state, so that hand-over can come first. Note: `our event is over (its own still runs for a moment)`.
-- *Ready without the intro* (`CoopBoss::Readiness`, coop_boss_game.cpp). A late joiner's game never plays the intro (its copy follows an owner already fighting), so by the flag alone it stayed unready for good and the hit rule refused its stun hand-over. Now a game is also ready once its own boss was seen in the pre-battle phase this visit and then out of it: the body's own animation (AS slot 0, read by the objects walk, `CoopObjects::LastBossPreBattle`): Gohma's `Sleep` / `Pre_Battle_*`. Kept until the room changes. A boss never seen in such an animation is ready by the flag only. Log once: `coop: boss: our boss left its pre-battle phase here: ready to own it without our intro`.
+- *Ready without the intro* (`CoopBoss::Readiness`, coop_boss_game.cpp). A late joiner's game never plays the intro (its copy follows an owner already fighting), so by the flag alone it stayed unready for good and the hit rule refused its stun hand-over. Now a game is also ready once its own boss was seen in the pre-battle phase this visit and then out of it: the body's own animation (AS slot 0, read by the objects walk, `CoopObjects::LastBossPreBattle`): Gohma's `Sleep` / `Pre_Battle_*`. Kept until the room changes. Also ready once our boss has lost life this visit (`CoopObjects::LastBossHurt`, row 164 follow-up): a boss waits at full life, so one below it is in its fight, and our copy follows it. Before, a late arrival at any boss but Gohma (no pre-battle animation is known for the others) stayed unready for the whole fight, and the server refused its stun hand-over. A boss at full life and never seen in such an animation is ready by the flag only. Log once: `coop: boss: our boss left its pre-battle phase here: ready to own it without our intro`.
 - Tested: `tests/server/session_test.cpp` (four `boss-copy-b` cases: chase/near refused while unready, an unready owner hands to a ready game, ready before nearer unready when the owner leaves, a late joiner's stun once ready), `tests/lichii/boss_native_test.cpp` (the event case waits for the grace), `boss_test.cpp` (Readiness, 2 cases), `objects_test.cpp` (BossPreBattle).
 - **Not proven in game.** Check (LANE1, hs-boss-full or hs-boss-fix-gohma): A walks in first and under her; during A's intro no "now ours" in B's log while B logs "not ready to own the boss"; A's copy (if it is one) never asks `BossAppear` twice; after B's own intro (if it plays) "now ours" comes within ~1 s. A late B logs "our boss left its pre-battle phase here" once its copy follows A's fight, and B's seed stun then hands B the boss ("now ours").
 
@@ -699,6 +699,56 @@ Not proven in a game yet: the probe run (two games, hs-twinrova-native) must sho
 (`coop: bosses: battle manager orders shared (wrapped)`), `battle orders: ours sent N` in the owner's log and
 `N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
 hand-over.
+
+## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
+
+**Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on
+the host's copy (`P2's killing blow replayed`, then `a hit the boss's game did not take: its life stays its game's`,
+`dead in its owner's game`, the second replay). Its life stayed 1, and 3 s later (`kDeadGraceUs`) the copy was
+deleted from outside (the 5 s line: `1 deletes`). Barinade's copy never saw a jellyfish die. One summary cycle after
+`copy ... plays 'Phase4_St'` (the owner's verb 125) the game crashed: `exception 0xc0000005 (write 0x100000000000,
+guest 0) at longshot.exe+0x72753`.
+
+**Read from main** (build e0f3ccfa, main base 0x80020000; no game run): guest lr 0x80980a04 = main+0x960a04, in
+main+0x9607f0, a member of the `ModelBind` component (string at main+0x95f60c). It clears the bound bone name: memset
+of its buffer (`[this+0x88]`, length `[this+0x90]` - 1). Its caller main+0x960340 (lr main+0x960494) takes
+`this` from main+0x2637340 (lr main+0x2637380), which reads the component as `[[actor+0x270]+0x18]` (main+0xf55ee0,
+which may be null) and checks nothing. main+0x2637340 is a callback (stored at main+0x4980b78) of the update
+main+0x2636f10 (vtable slot at main+0x4980ad0) of `ExecuteBarinadeJellyfishActionUnstick` (strings at main+0x2637024
+`TargetJellyfishIndex`, main+0x2637104). It is called through main+0x2db8950 (lr main+0x2db89e4) on the jellyfish
+its handle names. So the Unstick of her new phase reached a jellyfish with no ModelBind: `this` 0, buffer 0,
+length 0 - 1 = -1 (crash registers x0 = x1 = x19 = x20 = 0, x2 = x21 = -1). That jellyfish was one we were deleting,
+or had deleted. In the owner's game each jellyfish dies by its own death, which tells Barinade, before her phase
+moves on.
+
+**Now** (module only, `lichii/hook/coop_objects_sync.cpp`):
+- A boss part copy (`IsBossPart`: Barinade's jellyfish and arms, Morpha's tentacle, Bongo Bongo's hands, Gohma's
+  eggs and larvae, King Dodongo's babies, Twinrova's sisters, the mid-bosses' parts) whose replayed killing hit its
+  game refused gets its whole life through its own Life step (`LifeWrite::direct`, never a write), once. The hitter's
+  game judged the kill, so its own death runs here and tells its boss, as it did there. Log: `a killing hit the boss
+  part's game did not take: its life N given to its own Life step (the hitter's game killed it; rows 257/258)`. The
+  5 s line counts it: `(boss part kills to its Life step N)`.
+- Its owner's dead remove then replays no second killing blow.
+- A boss part whose boss is alive here is never deleted from outside after `kDeadGraceUs` (`Sync::HeldByItsBoss`).
+  Its own death ends it. Once its boss is dead here, or not on the walk, the grace delete is the fallback again.
+  A part still held `kHeldSayUs` (10 s) past the grace is said once, a leftover whose own death never ended it:
+  `a boss part dead in its owner's game still here N s on: held by its boss <id> <boss>, not deleted (rows 257/258):
+  <id> <part> life N`.
+- Unchanged: the boss itself (HeldLifeStep, SetDying, `a hit the boss's game did not take` for a refused hit that does
+  not kill), plain enemies (the write and grace path), our own parts (`a hit our boss's game did not take as a replay`).
+
+**Every boss's forced phase.** "The copy takes the owner's state again" (Resync after our hit or event) and the action
+stream put the owner's phase verbs into Barinade's copy at Phase2_St and Phase3_St in the same log with no crash. A
+copy's phase move is the owner's move, and it can only be safe when the copy's parts are what the owner's game had
+when it moved. A part deleted from outside, with no death of its own, is the one difference the copy cannot see. So
+the rule above covers every boss with parts, not one phase gate: Barinade (jellyfish, arms), Morpha (tentacle),
+Bongo Bongo (hands), Gohma (larvae), King Dodongo (babies), Twinrova (sisters), Phantom Ganon (painting riders),
+Ganon, Big Octo, Meg's dummies, Flare Dancer. Bosses without parts (Volvagia, Dark Link's body) were not touched.
+
+**Tests.** `objects_test` (rows 257/258: a refused part kill goes to its Life step once, with no second replay, and is
+not deleted while its boss lives; with no boss here the grace delete still runs; a boss's own refused killing hit is
+still not given). **Not proven in game:** two games, P2 owns Barinade and kills the jellyfish, the host's copy reaches
+Phase4_St with no crash, and the host's log shows `boss part kills to its Life step 5` and no `1 deletes` after each.
 
 ## Not known yet (for the in-game check)
 

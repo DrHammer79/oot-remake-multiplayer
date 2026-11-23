@@ -3,6 +3,7 @@
 #include "coop_pause_tab.h"
 
 #include "coop_browse.h"
+#include "coop_i18n.h"
 
 #include "hos_coop_host.h"
 
@@ -467,11 +468,19 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if (!shown_ && CanMinus(now_ms)) return MinusPad(buttons, down);   // (the - menu: its tabs of ours)
     if (!shown_) {
-        if ((down & kPadA) != 0 && system_button_ >= 0 && (system_button_ != 1 || settings_ok_) && CanShow(now_ms)) {
+        if ((down & kPadA) != 0 && system_button_ == 1 && settings_ok_ && longshot_menu_ && CanShow(now_ms)) {
+            // (player report 261: Longshot Settings is Longshot's own menu, opened over the pause menu by the module;
+            // never our copy of its rows. The A is ours: the game does not know the button)
+            open_longshot_ = true;
+            pages_sound_ = "button_decide";
+            swallow_ |= kPadA;
+            return buttons & ~swallow_;
+        }
+        if ((down & kPadA) != 0 && system_button_ >= 0 && system_button_ != 1 && CanShow(now_ms)) {
             // (A on one of System's buttons of ours: its page in System's place, at once; the game's own A never
             // reaches the button, whose name its selectors do not know. Customize Link's is the Multiplayer page,
             // opened on Settings and look's Customize page)
-            shown_ = true, decide_ = false, why_.clear(), which_ = system_button_ == 1 ? 1 : 0, sub_ = false, back_ = false;
+            shown_ = true, decide_ = false, why_.clear(), which_ = 0, sub_ = false, back_ = false;
             opened_from_ = system_button_;
             customize_open_ = system_button_ == 2;
             slide_ = 0;
@@ -577,7 +586,9 @@ const char* TypingTitle(int which) {
 std::vector<ListLine> TypingLines(int which, const TextField& f, char letter) {
     std::vector<ListLine> out(kListRows);
     out[0] = {TypingTitle(which), f.Shown(true, kListValueChars)};
+    out[0].own_value = true;   // (what is typed: the player's own text, never looked up)
     out[1] = {"Letter", std::string(1, letter)};
+    out[1].own_value = true;   // (a letter, "A", is not the table's word)
     out[1].arrows = true;
     out[2] = {"Delete", ""};
     out[3] = {"OK", ""};
@@ -819,11 +830,21 @@ bool LayoutLookAgain(bool known, std::uint64_t known_screen, int known_state, st
     return open(state) && !open(known_state);          // (open again after closing or closed)
 }
 
-SnailVerdict SnailVerdictFrom(bool his_panes, bool ours_pane, bool was_his, bool same_screen) {
-    if (his_panes) return {true, false};
-    if (ours_pane) return {false, false};
-    if (was_his && same_screen) return {true, true};
-    return {false, false};
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms) {
+    if (!minus_open) return HopStep::kGiveUp;   // (not the open screen any more: not one tap more)
+    if (h.started_ms == 0) h.started_ms = now_ms;
+    if (now_ms - h.started_ms > kHopMaxMs || h.taps >= kHopMaxTaps) return HopStep::kGiveUp;
+    if (now_ms < h.next_ms) return HopStep::kWait;
+    if (!ours) {
+        if (lit < 0) return HopStep::kWait;
+        if (!GameMinusCategory(lit)) return HopStep::kDone;   // (not Key Items, Threads or Map: Characters)
+        if (h.off_taps > 0 && lit == h.prev_lit) return HopStep::kDone;   // (the left edge: the last tap moved nothing)
+        h.prev_lit = lit;
+        ++h.off_taps;
+    }
+    ++h.taps;
+    h.next_ms = now_ms + kHopGapMs;
+    return HopStep::kTapL;
 }
 
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms) {
@@ -1173,6 +1194,19 @@ std::string Players(int n) {
     return n == 1 ? "just you" : std::to_string(n) + " players";
 }
 
+// A player's row of the Players view, "Saria", "Saria (you)" or "Saria (host)": the table's shape for what is
+// added after the name, the name itself put back as it is (a bare "Link" is a name, not a line of the table).
+std::string NameRowTr(const std::string& row) {
+    for (const std::string_view suffix : {std::string_view(" (you)"), std::string_view(" (host)")}) {
+        if (row.size() < suffix.size() || row.compare(row.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
+        std::string shape = CoopI18n::Tr("\x01" + std::string(suffix));   // (a middle no table has)
+        const std::size_t at = shape.find('\x01');
+        if (at == std::string::npos) return row;
+        return shape.replace(at, 1, row.substr(0, row.size() - suffix.size()));
+    }
+    return row;
+}
+
 }  // namespace
 
 std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
@@ -1187,7 +1221,7 @@ std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
     case MinusPage::kMultiplayer:
         rows[0] = main[kRowPlayers];
         rows[1] = main[kRowSettings];
-        rows[2] = "Local co-op";
+        rows[2] = CoopI18n::Tr("Local co-op");
         if (v.s.hosting) {
             rows[3] = main[kRowHost];   // ("Your game", "Your game: Saria asks")
         } else if (v.s.in_one || v.s.by_launcher) {
@@ -1220,6 +1254,7 @@ RowAction ActionFor(MinusPage page, int row, const Session& s) {
 
 std::vector<std::string> RowTexts(const SessionView& v) {
     std::vector<std::string> rows(kRows);
+    std::vector<char> done(kRows, 0);   // (a row already in the player's language: built around a name)
     // (0.11.9: five fixed entries; a word of what co-op does now only where it changes what the entry opens)
     rows[kRowFind] = "Find a game";
     if (v.s.failed && !v.s.in_one) {
@@ -1227,9 +1262,12 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.connecting && v.s.hosting) {
         rows[kRowHost] = "Starting to host...";
     } else if (v.s.hosting) {
-        rows[kRowHost] = v.asking.empty()      ? std::string("Your game")
-                         : v.asking.size() == 1 ? "Your game: " + v.asking.front() + " asks"
-                                                : "Your game: " + std::to_string(v.asking.size()) + " ask";
+        if (v.asking.size() == 1) {
+            rows[kRowHost] = CoopI18n::TrAround("Your game: ", v.asking.front(), " asks");   // (a name: put in as it is)
+            done[kRowHost] = true;
+        } else {
+            rows[kRowHost] = v.asking.empty() ? std::string("Your game") : "Your game: " + std::to_string(v.asking.size()) + " ask";
+        }
     } else {
         rows[kRowHost] = "Host a game";
     }
@@ -1250,13 +1288,22 @@ std::vector<std::string> RowTexts(const SessionView& v) {
                         : v.players == 1 ? "Players: just you"
                                          : "Players: " + std::to_string(v.players);
     rows[kRowSettings] = "Co-op settings";
-    for (std::string& r : rows) r = Fit(std::move(r));
+    // (the rows in the player's language before the cut: the composed ones are the
+    // table's shapes, a player's own name comes back as it is)
+    for (std::size_t i = 0; i < rows.size(); ++i) rows[i] = Fit(done[i] ? std::move(rows[i]) : CoopI18n::Tr(std::move(rows[i])));
     return rows;
 }
 
 std::vector<std::string> RowTexts(View view, const SessionView& v) {
     if (view == View::kMain) return RowTexts(v);
     std::vector<std::string> rows(kRows);
+    // How a row is put in the player's language at the end: 0 the whole row looked up (the table's words), 1 a player's name
+    // (only the " (you)" or " (host)" after it), 2 as it is (built around a name by CoopI18n::TrAround, or a typed text).
+    std::vector<char> how(kRows, 0);
+    const auto around = [&](int r, std::string_view before, const std::string& text, std::string_view after = {}) {
+        rows[static_cast<std::size_t>(r)] = CoopI18n::TrAround(before, text, after);
+        how[static_cast<std::size_t>(r)] = 2;
+    };
     rows[kRows - 1] = "Back";
     switch (view) {
     case View::kMain: break;
@@ -1265,7 +1312,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         if (listed == 0) rows[0] = v.s.in_one ? "Players: coming..." : "Not in a session";
         for (int r = 0; r < kRows - 1; ++r) {
             const int i = PlayerIndex(listed, v.s.page, r);
-            if (i >= 0) rows[static_cast<std::size_t>(r)] = v.names[static_cast<std::size_t>(i)];
+            if (i >= 0) {
+                rows[static_cast<std::size_t>(r)] = v.names[static_cast<std::size_t>(i)];
+                how[static_cast<std::size_t>(r)] = 1;
+            }
         }
         if (listed > kRows - 1) {
             const int pages = PlayerPages(listed);
@@ -1281,7 +1331,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         }
         // (the list shown and how many it keeps; A flips to the other one)
         rows[0] = std::string(v.s.online ? "Public games" : "This network") + " (" + std::to_string(BrowseListed(v.s)) + ")";
-        rows[1] = v.search.empty() && v.typing != 5 ? std::string("Search: A to type") : "Search: " + v.search;
+        if (v.search.empty() && v.typing != 5) rows[1] = "Search: A to type";
+        else around(1, "Search: ", v.search);
         rows[2] = std::string("Show: ") + CoopBrowse::FilterWords(v.s.browse_filter);
         rows[3] = std::string("Sort: ") + CoopBrowse::SortWords(v.s.browse_sort);
         break;
@@ -1302,10 +1353,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         if (v.s.player == 0) {
             rows[0] = "They left the session";
         } else if (v.s.player == 1) {
-            rows[0] = v.player_name + " (you)";
+            around(0, "", v.player_name, " (you)");
             rows[1] = "This is you";
         } else {
-            rows[0] = "Teleport to " + v.player_name;
+            around(0, "Teleport to ", v.player_name);
             rows[1] = (v.own_mutes & kMuteVoice) != 0 ? "Hear their voice again" : "Mute their voice (you)";
             rows[2] = (v.own_mutes & kMuteChat) != 0 ? "Show their chat again" : "Mute their chat (you)";
             if (v.s.hosting) rows[3] = "Host controls";
@@ -1318,8 +1369,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             rows[0] = (v.host_mutes & kMuteVoice) != 0 ? "Unmute voice for all" : "Mute voice for all";
             rows[1] = (v.host_mutes & kMuteChat) != 0 ? "Unmute chat for all" : "Mute chat for all";
             const std::string again = v.confirm_click ? "Again: " : "A again: ";   // (a name after it: short)
-            rows[2] = v.confirm_kick ? again + "kick " + v.player_name : "Kick " + v.player_name;
-            rows[3] = v.confirm_ban ? again + "ban " + v.player_name : "Ban for this session";
+            if (v.confirm_kick) around(2, again + "kick ", v.player_name);
+            else around(2, "Kick ", v.player_name);
+            if (v.confirm_ban) around(3, again + "ban ", v.player_name);
+            else rows[3] = "Ban for this session";
         }
         break;
     case View::kLetIn:
@@ -1327,8 +1380,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             rows[0] = v.s.hosting && v.s.invite ? "Paste answer code" : "Nobody asks to join";
             break;
         } else {
-            rows[0] = "Let in " + v.asking.front();
-            rows[1] = "Refuse " + v.asking.front();
+            around(0, "Let in ", v.asking.front());
+            around(1, "Refuse ", v.asking.front());
             if (v.asking.size() > 1) rows[2] = "+" + std::to_string(v.asking.size() - 1) + " more ask";
         }
         // (a friend whose way in was blocked sends an answer code: rarely needed, so here, not on the five rows)
@@ -1357,16 +1410,18 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             // (short labels: a tester saw "Room: A to type its name" squeezed to fit its button. The first field takes
             // a room name, or an address with its port after a colon, as the title's Join: "Room or address")
             // (typed: a short label, so an address and its port fit whole)
-            rows[1] = v.room_field.empty() && v.typing != 0 ? std::string("Room or IP: A to type")
-                      : (v.typing == 0 ? "Room or IP: " : "To: ") + v.room_field;
-            rows[2] = "Password: " + (v.password_field.empty() && v.typing != 1 ? std::string("A to type") : v.password_field);
+            if (v.room_field.empty() && v.typing != 0) rows[1] = "Room or IP: A to type";
+            else around(1, v.typing == 0 ? "Room or IP: " : "To: ", v.room_field);
+            if (v.password_field.empty() && v.typing != 1) rows[2] = "Password: A to type";
+            else around(2, "Password: ", v.password_field);
             if (v.room_ready) {
                 // (an address: the port it joins on, so a tester sees where it goes; another is typed after a colon)
                 rows[3] = v.join_address ? "Join (port " + std::to_string(v.join_port > 0 ? v.join_port : 27510) + ")"
                           : v.relay_set  ? "Join this room"
                                          : "Join room: no relay set";
             } else if (v.s.rejoin) {
-                rows[3] = v.rejoin_host.empty() ? "Join the last game again" : "Join " + v.rejoin_host + " again";
+                if (v.rejoin_host.empty()) rows[3] = "Join the last game again";
+                else around(3, "Join ", v.rejoin_host, " again");
             }
         }
         break;
@@ -1377,14 +1432,15 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             } else if (!v.note.empty()) {
                 rows[0] = v.note;   // (what the copy on this row did)
             } else {
-                rows[0] = !v.room.empty() ? "Room: " + v.room : v.s.code ? "Copy invite code" : "Room: coming...";
+                if (!v.room.empty()) around(0, "Room: ", v.room);
+                else rows[0] = v.s.code ? "Copy invite code" : "Room: coming...";
             }
             if (v.asking.empty()) {
                 rows[1] = v.s.invite ? "Let in: answer code" : "Nobody asks to join";
             } else if (v.asking.size() == 1) {
-                rows[1] = "Let in " + v.asking.front();
+                around(1, "Let in ", v.asking.front());
             } else {
-                rows[1] = "Let in " + v.asking.front() + " (+" + std::to_string(v.asking.size() - 1) + ")";
+                around(1, "Let in ", v.asking.front(), " (+" + std::to_string(v.asking.size() - 1) + ")");
             }
             rows[2] = "Session details";
             rows[kHostRowStop] = v.confirm_leave ? (v.confirm_click ? "Click again to stop" : "A again: stop hosting")
@@ -1429,7 +1485,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             } else {
                 rows[0] = "Hosting: " + Players(std::max(v.players, 1));
             }
-            rows[1] = !v.room.empty() ? "Copy room: " + v.room : v.s.code ? "Copy invite code" : "Room: coming...";
+            if (!v.room.empty()) around(1, "Copy room: ", v.room);
+            else rows[1] = v.s.code ? "Copy invite code" : "Room: coming...";
             rows[2] = "Copy same-network line";
             rows[3] = "Copy VPN line";
             break;
@@ -1446,7 +1503,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         } else if (v.connecting) {
             rows[0] = "Connecting...";
         } else if (v.s.in_one) {
-            rows[0] = v.host_name.empty() ? "In a session" : "Joined " + v.host_name;
+            if (v.host_name.empty()) rows[0] = "In a session";
+            else around(0, "Joined ", v.host_name);
         } else {
             rows[0] = v.s.by_launcher ? "Co-op is on" : "Not in a session";
         }
@@ -1455,7 +1513,11 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
         break;
     }
     }
-    for (std::string& r : rows) r = Fit(std::move(r));   // ("": the row not shown)
+    // (the rows in the player's language before the cut: the composed ones are the table's shapes. A row that is
+    // a player's name, "Link", is not a line of the table: only its " (you)" or " (host)" is looked up)
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        rows[i] = Fit(how[i] == 2 ? std::move(rows[i]) : how[i] == 1 ? NameRowTr(rows[i]) : CoopI18n::Tr(std::move(rows[i])));   // ("": the row not shown)
+    }
     return rows;
 }
 
@@ -1817,8 +1879,11 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
     const int at_page = (page % pages + pages) % pages;
     // (the header has no value: the module hides its value box and arrows, so it never looks like a setting)
     // (the page with arrows a click on either half of the line turns: the module's mouse)
-    lines[0] = ListLine{FitTo(pages > 1 ? title + "  < " + std::to_string(at_page + 1) + " of " + std::to_string(pages) + " >"
-                                        : title,
+    // (the header in the player's language after it is built: the module's split shape reads
+    // "name  < 1 of 3 >" whole, the name is the table's word, before the cut)
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(pages > 1 ? title + "  < " + std::to_string(at_page + 1) + " of " +
+                                                                           std::to_string(pages) + " >"
+                                                     : title),
                               kListNameChars),
                         ""};
     for (int i = 0; i < per_page; ++i) {
@@ -1826,7 +1891,8 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
         lines[static_cast<std::size_t>(i) + 1] =
-            ListLine{FitTo(r.restart ? r.name + " *" : r.name, kListNameChars), FitTo(r.text, kListValueChars)};
+            ListLine{FitTo(r.restart ? CoopI18n::Tr(r.name) + " *" : CoopI18n::Tr(r.name), kListNameChars),
+                     FitTo(CoopI18n::Tr(r.text), kListValueChars)};
     }
     return lines;
 }
@@ -1851,6 +1917,13 @@ void SettingMove(int count, int dy, int* page, int* row, int per_page) {
     *page = at / per_page, *row = at % per_page;
 }
 
+// Lines built here are already in the player's language where they hold the tab's words, and hold a player's, a room's
+// or a mod's own text as it is: the module draws them as they are (no second look-up in the table, which would turn a
+// name that is also a word of it, "Link", into 林克).
+static void MarkShown(std::vector<ListLine>* lines) {
+    for (ListLine& l : *lines) l.own_name = l.own_value = true;
+}
+
 std::vector<ListLine> ListLines(const SessionView& v) {
     std::vector<ListLine> lines(kListRows);
     if (v.s.in_one || v.s.by_launcher) return lines;
@@ -1861,25 +1934,34 @@ std::vector<ListLine> ListLines(const SessionView& v) {
     std::string head = v.s.online ? "Public games" : "This network";
     if (pages > 1) head += "  < " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " +
                            std::to_string(pages) + " >";
-    lines[0] = ListLine{head, "Refresh", RowAction::kBrowseRefresh};
+    // (the heading and the words in the player's language, before the cut: the heading is
+    // the module's split shape, the list's own lines the server list brought are already ours)
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), FitTo(CoopI18n::Tr("Refresh"), kListValueChars),
+                        RowAction::kBrowseRefresh};
     const std::vector<ListLine>& list = v.s.online ? v.online_list : v.lan_list;
     if (list.empty()) {
-        lines[1].name = FitTo(v.browse_all_out ? std::string("None match the search or Show")
-                              : v.s.online     ? (v.online_state.empty() ? std::string("Asking the relay...") : v.online_state)
-                                               : std::string("Looking for games..."),
+        lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")
+                              : v.s.online     ? (v.online_state.empty() ? CoopI18n::Tr("Asking the relay...") : v.online_state)
+                                               : CoopI18n::Tr("Looking for games..."),
                               kListNameChars);
         if (v.s.online && !v.relay_set) {   // (no relay: typed here, saved as Co-op Settings' Relay row)
-            lines[1].name = "No relay set: A to type one";
+            lines[1].name = CoopI18n::Tr("No relay set: A to type one");
             lines[1].act = RowAction::kTypeRelay;
         }
+        MarkShown(&lines);
         return lines;
     }
     for (int c = 0; c < kCells; ++c) {
         if (const int i = CellIndex(v.s, c); i >= 0 && static_cast<std::size_t>(i) < list.size()) {
             const ListLine& l = list[static_cast<std::size_t>(i)];
-            lines[static_cast<std::size_t>(c) + 1] = ListLine{FitTo(l.name, kListNameChars), FitTo(l.value, kListValueChars)};
+            // (a game's own name, a room's, is shown as the server brought it: it is not looked up; this
+            // network's lines are built from our own words and a count, so they are)
+            lines[static_cast<std::size_t>(c) + 1] =
+                ListLine{FitTo(l.own_name ? l.name : CoopI18n::Tr(l.name), kListNameChars),
+                         FitTo(l.own_value ? l.value : CoopI18n::Tr(l.value), kListValueChars)};
         }
     }
+    MarkShown(&lines);
     return lines;
 }
 
@@ -1900,8 +1982,13 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     const bool launcher_view = v.s.by_launcher && (view == View::kHost || view == View::kJoin);
     if (view != View::kMain && view != View::kSession && view != View::kPassword && !launcher_view) return lines;
     std::size_t at = 1;
-    const auto add = [&](const std::string& name, const std::string& value) {
-        if (at < lines.size()) lines[at++] = ListLine{FitTo(name, kListNameChars), FitTo(value, kListValueChars)};
+    // (each line in the player's language before the cut: the names and the short values are
+    // the table's words, a room's own name comes back as it is)
+    // (`own`: the value is a room's, a host's or a password: shown as it is, never looked up)
+    const auto add = [&](const std::string& name, const std::string& value, bool own = false) {
+        if (at < lines.size())
+            lines[at++] = ListLine{FitTo(CoopI18n::Tr(name), kListNameChars),
+                                   FitTo(own ? value : CoopI18n::Tr(value), kListValueChars)};
     };
     // (the release a short value: "Squadala! v0.11.6" is "v0.11.6")
     std::string release = v.version;
@@ -1913,7 +2000,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         header = "Co-op failed";
     } else if (!v.turned_away.empty()) {
         header = "Turned away";
-        why = v.turned_away + "." + (v.banned ? " Leave." : " Leave, then join again.");
+        why = v.turned_away + "." + CoopI18n::Tr(v.banned ? " Leave." : " Leave, then join again.");
     } else if (v.s.hosting) {
         header = "Hosting";
     } else if (v.s.wait_host) {
@@ -1924,7 +2011,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         header = "In a session";
     } else {
         header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
-        if (v.s.by_launcher && why.empty()) why = "Restart the game to change it";
+        if (v.s.by_launcher && why.empty()) why = CoopI18n::Tr("Restart the game to change it");
     }
     // (the header's value: hosting, who can reach this game. The header had none: the game's cursor frame, which
     // Longshot's mouse puts on the line under it, framed an empty box there, a tester's screenshot 2026-11-19)
@@ -1938,7 +2025,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
             reach = "Starting...";
         }
     }
-    lines[0] = ListLine{FitTo(header, kListNameChars), FitTo(reach, kListValueChars)};
+    lines[0] = ListLine{FitTo(CoopI18n::Tr(header), kListNameChars), FitTo(CoopI18n::Tr(reach), kListValueChars)};
     // The host's known problems and hints in words of ours, one line each (the Router line above says the port's
     // state): the server's message ("the router did not open the port (UPnP, PCP and NAT-PMP are off on it, or it said
     // no)") cut over three lines read as pieces of a sentence (a tester's screenshot, 2026-11-19). Other messages as
@@ -1958,7 +2045,11 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     if (v.s.hosting && v.says.empty()) {
         // (each line that can do something does it on an A or a click, as a tester expected of rows that look like
         // the game's Options: the room's name or code copied, the players listed, a new join password, another port)
-        add("Room", !v.room.empty() ? v.room : v.s.invite ? "Invite code" : "Coming...");
+        if (!v.room.empty()) {
+            add("Room", v.room, true);
+        } else {
+            add("Room", v.s.invite ? "Invite code" : "Coming...");
+        }
         if (v.s.code) lines[at - 1].act = RowAction::kCopyCode;
         add("Players in", std::to_string(std::max(v.players, 1)));
         if (v.s.listed > 1) lines[at - 1].act = RowAction::kViewPlayers;
@@ -1976,7 +2067,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
                     line += v.host_password[i];
                 }
                 if (r == 2 && v.host_password.size() > 30) line = FitTo(line + "...", kListValueChars);
-                add(r == 0 ? "Join password" : " ", line);
+                add(r == 0 ? "Join password" : " ", line, true);
                 lines[at - 1].act = RowAction::kChangePassword;
             }
         }
@@ -1985,20 +2076,24 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
         const std::string port = v.port > 0 ? std::to_string(v.port) + " " : std::string();
         const std::size_t before = at;
         if (v.port_open) {
-            add("Port", port + "open");
+            add("Port", port + CoopI18n::Tr("open"));
         } else if (v.problem == HOS_COOP_PROBLEM_UPNP_REFUSED || v.problem == HOS_COOP_PROBLEM_NO_INVITE_CODE) {
-            add("Port", port + "shut");
+            add("Port", port + CoopI18n::Tr("shut"));
         } else if (v.port > 0) {
             add("Port", std::to_string(v.port));
         }
         if (at > before) lines[at - 1].act = RowAction::kChangePort;
     } else if (v.s.in_one && !v.connecting && v.says.empty() && v.turned_away.empty()) {
-        if (!v.host_name.empty()) add("Host", v.host_name);
+        if (!v.host_name.empty()) add("Host", v.host_name, true);
         if (v.players > 0) add("Players", std::to_string(v.players));
     } else if (!v.s.in_one && !v.s.by_launcher && !v.s.failed && v.says.empty() && v.turned_away.empty()) {
         // (the room this game hosts under, and whether the relay lists it: set here as on the title's Co-op Settings,
         // a tester asked why it could not be set in the game)
-        add("Room name", v.room_name.empty() ? "None" : v.room_name);
+        if (v.room_name.empty()) {
+            add("Room name", "None");
+        } else {
+            add("Room name", v.room_name, true);
+        }
         lines[at - 1].act = RowAction::kTypeRoomName;
         add("List my room", v.s.list_room ? "On" : "Off");
         lines[at - 1].act = RowAction::kListRoom;
@@ -2009,12 +2104,16 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     }
     // (co-op's problem or hint as lines of text on the lines left, the release on the last when it is free: the hint
     // takes it when it needs it)
+    // (the why lines above ("Forward UDP 27510 to this PC", the server's words) were composed in English here and
+    // never went through add(), so they must be in the player's language before the wrap cuts them)
+    why = CoopI18n::Tr(why);
     const std::size_t left = lines.size() - at;
     if (!why.empty() && left > 0) {
         const bool all = release.empty() || Wrap(why, left, kListNameChars).size() >= left;
         for (const std::string& l : Wrap(why, all ? left : left - 1, kListNameChars)) lines[at++] = ListLine{l, ""};
     }
     if (!release.empty()) add("Release", release);
+    MarkShown(&lines);
     return lines;
 }
 
@@ -2029,19 +2128,24 @@ CoopPauseMenu::Page MenuTabPage(int tab) {
 
 std::string MenuValue(const CoopPauseMenu::Row& r, bool typing) {
     using CoopPauseMenu::RowKind;
+    // (what is typed is the player's: never looked up, "On" typed stays "On_")
     if (typing) return !r.value.empty() && r.value.back() == '_' ? r.value : r.value + "_";   // (some end in it already)
+    // (the tab's own words in the player's language, a player's or a mod's own text as it is)
+    const auto said = [&](const std::string& s) { return r.own_value ? s : CoopI18n::Tr(s); };
     switch (r.kind) {
-    case RowKind::kToggle: return !r.value.empty() ? r.value : r.on ? "On" : "Off";
+    // (the value in the player's language before the arrows go around it: "< 按玩家编号 >")
+    case RowKind::kToggle: return !r.value.empty() ? said(r.value) : CoopI18n::Tr(r.on ? "On" : "Off");
     case RowKind::kChoice: {
-        std::string v = std::string(r.left ? "< " : "") + r.value + (r.right ? " >" : "");
-        // (with its arrows it would be cut: "< By player n..."; the value alone when that fits)
-        return v.size() > kListValueChars && r.value.size() <= kListValueChars ? r.value : v;
+        const std::string bare = said(r.value);
+        std::string v = std::string(r.left ? "< " : "") + bare + (r.right ? " >" : "");
+        // (with its arrows it would be cut: "< 按玩家编..."; the value alone when that fits)
+        return v.size() > kListValueChars && bare.size() <= kListValueChars ? bare : v;
     }
     case RowKind::kHeading:
     case RowKind::kNote: return "";
     case RowKind::kAction: break;
     }
-    return r.value;
+    return said(r.value);
 }
 
 std::string MenuHeadingOf(const CoopPauseMenu::View& menu, int row) {
@@ -2077,21 +2181,30 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
         const int page = top + cells >= n ? pages : std::min(pages, (top + cells / 2) / cells + 1);
         head += "  < " + std::to_string(page) + " of " + std::to_string(pages) + " >";
     }
-    out.lines[0] = ListLine{FitTo(head, kListNameChars), ""};
+    // (the header in the player's language after it is built: the module's split shape reads
+    // "name  < 1 of 3 >" whole, the name is the table's word, before the cut)
+    out.lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), ""};
     for (int c = 0; c < cells; ++c) {
         const int i = top + c;
         if (i >= n) break;
-        const CoopPauseMenu::Row& r = menu.rows[static_cast<std::size_t>(i)];
+        // (the row's words in the player's language before the cut: a note's line is
+        // long, and a cut line is not the table's line any more)
+        // (a player's, a room's or a mod's own text, flagged on the row, is not looked up: the row's name beside
+        // a text field is the tab's word, the field's value is not)
+        const CoopPauseMenu::Row& tr = menu.rows[static_cast<std::size_t>(i)];
         const std::size_t k = static_cast<std::size_t>(c) + 1;
         const bool typing = menu.typing && i == sel;
-        std::string name = r.name;
-        if (r.kind == RowKind::kNote && name.empty()) name = r.value;   // (a note's words, whichever holds them)
+        std::string name = tr.own_name ? tr.name : CoopI18n::Tr(tr.name);
+        if (tr.kind == RowKind::kNote && name.empty()) {   // (a note's words, whichever holds them)
+            name = tr.own_value ? tr.value : CoopI18n::Tr(tr.value);
+        }
         out.lines[k] = ListLine{FitTo(name.empty() ? std::string(" ") : name, kListNameChars),
-                                FitTo(r.kind == RowKind::kNote ? std::string() : MenuValue(r, typing), kListValueChars)};
+                                FitTo(tr.kind == RowKind::kNote ? std::string() : MenuValue(tr, typing), kListValueChars)};
         out.rows[k] = i;
-        out.selectable[k] = r.kind != RowKind::kHeading && r.kind != RowKind::kNote;
+        out.selectable[k] = tr.kind != RowKind::kHeading && tr.kind != RowKind::kNote;
         if (list && i == sel) out.picked = c;
     }
+    MarkShown(&out.lines);   // (all in the player's language now: the module draws them as they are)
     return out;
 }
 

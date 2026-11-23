@@ -15,6 +15,7 @@ the plan; [dungeons-boss.md](dungeons-boss.md) says how the sync works today.
 - **Never stuck on a player who cannot fight** (2026-11-21, every enemy): a boss, or any enemy in its fight, leaves
   an owner who goes down or dies at once and one paused after 2 s (`fight_owner_dead_us`, `fight_owner_paused_us`;
   out of a fight the old 10 s and 6 s), for a player up and playing. With nobody up it stays where it is.
+- **Nor on a player held in a cutscene of their own** (row 164 follow-up): an item get, Navi's talk or a late intro of their own game holds the owner's Link, and the boss's AI (which fights that Link alone) stood with it on every screen. A boss whose owner has been `in_cutscene` for 3 s (`fight_owner_cutscene_us`; 0 off) goes to a player up, playing and in no cutscene. Never while the boss itself plays an event or its death or is at life 0 (its own intro, phase change or death: every game is in that one, the owner's AI is in it on purpose), and never to a game in a cutscene too. Only a boss whose AI stands in that event: never in its attack (`attack_hold_max_us`), never while a piece of it holds its owner's Link (row 232), and only once its owner's samples show one move (animation, action verb, life) unchanged for those 3 s, so a boss that grabs or throws its owner's Link (Morpha's tentacle: an event of about 6 s in its owner's game) keeps it. Stat `boss_from_cutscene`. Tests: `session_test.cpp` (row 164 follow-up).
 - **Plain enemies can take turns too, OFF by default** (`enemy_turns`): the same rule as a boss's, between its
   attacks, among the players within 12 m of it (`enemy_turn_m`). It stays off: a plain enemy's AI chases only its
   owner's Link, so every turn walks it over to the other player and back (the shuttle of report 138, docs/objects.md
@@ -113,6 +114,16 @@ except the split shots below.
   every player at once (split shot; `DungeonBossGanondrof_Bullet_` is on the list, his own `Ganondorf_Bullet_*`
   names to be read in a run), and he goes down only when half of the players have sent theirs back into him; a
   light arrow from any player stuns him for all.
+- **Row 211 (a ball sent back by a player who does not own him):** the ball is a split shot, so the hitter's own
+  ball goes back natively in the hitter's game, into that game's copy Ganondorf. Its hit there is his own
+  weak-point interrupt (interruptweakpointhit, `DownTimeAtLightBallHit` / `DownTimeChargeLightBallHitArray`), and
+  it plays `LightBallDamage_Start/Loop/End`. The objects walk did not read that name as a stun
+  (`CoopObjects::IsStunAnimation`), so the copy's own stun was never told to the owner. Nobody got him handed over,
+  the owner's poses ran over the stun, and the return did nothing. Now the name is a stun, like the others with
+  another first word (Ganon's light-arrow downs, `StunA`.. of the Lizalfos and Gerudo Thief, Big Octo's
+  `ShortStun`). Phantom Ganon's ball knockdown is `Down_Fall*` / `DownTimeReaction*`, which was read already.
+  Open: his volley (`Parry`, an action of his own AI) runs only in the owner's game, so in a copy game the first
+  ball sent back stuns him.
 - Not tested yet (the boss rush stage did not place him from this save).
 
 ### Ganon (final battle)

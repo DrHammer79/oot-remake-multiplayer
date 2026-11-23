@@ -4911,6 +4911,41 @@ TEST_CASE("objects: stun animations (issue 150)") {
     CHECK_FALSE(IsStunAnimation("Mat_Stun"));
     CHECK_FALSE(IsStunAnimation("Downward"));
     CHECK_FALSE(IsStunAnimation(""));
+    // Row 211: stuns with another first word (every boss and mid-boss AS file).
+    CHECK(IsStunAnimation("LightBallDamage_Start"));  // Ganondorf: his ball sent back into him
+    CHECK(IsStunAnimation("LightBallDamage_Loop"));
+    CHECK(IsStunAnimation("LightBallDamage_End_ModelOnlyLOD"));
+    CHECK(IsStunAnimation("LightArrowDown_Start"));   // Ganon: a light arrow
+    CHECK(IsStunAnimation("LightArrowDamage_Loop"));
+    CHECK(IsStunAnimation("Lightarrow_Damage_St"));
+    CHECK(IsStunAnimation("StunA"));                  // Lizalfos, Gerudo Thief
+    CHECK(IsStunAnimation("StunAirB"));               // Lizalfos
+    CHECK(IsStunAnimation("ShortStun_L"));            // Big Octo
+    CHECK_FALSE(IsStunAnimation("LightBall"));        // Ganondorf's throw
+    CHECK_FALSE(IsStunAnimation("Parry_St"));         // his volley
+    CHECK_FALSE(IsStunAnimation("SmallDamage"));
+    CHECK_FALSE(IsStunAnimation("Damage_St"));
+    // Review 01112-e: Dark Link's chance window and no-life stuns, Ganon's tail window.
+    CHECK(IsStunAnimation("Dark_Chance_St"));
+    CHECK(IsStunAnimation("Dark_Chance"));
+    CHECK(IsStunAnimation("Dark_Chance_Damage_B"));
+    CHECK(IsStunAnimation("DarkChanceStPreBerserk"));
+    CHECK(IsStunAnimation("Paralysis_St_D"));
+    CHECK(IsStunAnimation("Freeze"));
+    CHECK(IsStunAnimation("FreezeBreak"));
+    CHECK(IsStunAnimation("Tail_Chance"));
+    CHECK_FALSE(IsStunAnimation("Dark_Wait"));
+    CHECK_FALSE(IsStunAnimation("Dark_Move_Run"));
+    CHECK_FALSE(IsStunAnimation("Dark_Sword_Attack_Charge_From_L_Post"));
+    CHECK_FALSE(IsStunAnimation("Tail_NearDamage"));
+    // Their own moves, not stuns of a hit.
+    CHECK_FALSE(IsStunAnimation("BigChance"));               // Gerudo Thief
+    CHECK_FALSE(IsStunAnimation("Tired_Loop"));              // Kotake, Koume
+    CHECK_FALSE(IsStunAnimation("SpinChanceLp"));            // Morpha's tentacle
+    CHECK_FALSE(IsStunAnimation("Spin_Chance_St_Long"));
+    CHECK_FALSE(IsStunAnimation("Ceiling_Spawn_Chance_Lp"));  // Gohma
+    CHECK_FALSE(IsStunAnimation("Repel_Down"));              // Dead Hand
+    CHECK_FALSE(IsStunAnimation("Parry_Failure_St"));        // Ganondorf
 }
 
 TEST_CASE("objects: a boss copy stunned here sends a DAMAGE of 0 and keeps its stun (issue 150)") {
@@ -8197,4 +8232,124 @@ TEST_CASE("row 222: a battle manager is flagged for the server's option C only b
     CHECK(CoopObjects::PresenceFlagsBattleManager(true, false));        // no orders wrap: C keeps it with its owner
     CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(true, true));   // option A: it hands over as any boss group
     CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(false, false));
+}
+
+TEST_CASE("objects: a boss part another game killed that our copy refused dies by its own Life step, once (rows 257/258)") {
+    // #258 (host log): P2 owned Barinade and killed each jellyfish; our copy's game refused the replayed killing
+    // hit ("a hit the boss's game did not take"), the remove replayed it a second time, and kDeadGraceUs later the
+    // copy was deleted from outside. Barinade's next phase unstuck a jellyfish half deleted: a null write.
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    REQUIRE(CoopObjects::IsBossPart(kJelly));
+    Sync copy;
+    copy.SetHurt(true);
+    const auto walk = [&](std::int32_t boss_life, std::int32_t jelly_life) {
+        return std::vector<Seen>{Enemy(0x100, 0x11, boss_life, 0.0f, kBoss), Enemy(0x200, 0x12, jelly_life, 1.0f, kJelly)};
+    };
+    Tick(copy, 0, walk(20, 1));
+    const proto::ObjectId boss = *copy.IdOf(0x100);
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, boss, 2, 1);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(LifeSample(jelly, 0, 1));
+    auto step = Tick(copy, 100 * kMs, walk(20, 1));
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].address == 0x200);
+    CHECK(step.writes[0].hurt == 1);
+    CHECK_FALSE(step.writes[0].direct);  // the replay first: its game's own reaction where it takes it
+    // Refused: after the wait its whole life goes to its own Life step (never a write), once.
+    step = Tick(copy, 600 * kMs, walk(20, 1));
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].address == 0x200);
+    CHECK(step.writes[0].direct);
+    CHECK(step.writes[0].hurt == 1);
+    CHECK(step.writes[0].life == 0);
+    CHECK(copy.PartKillsStepped() == 1);
+    // Its owner's remove (dead) replays no second killing blow.
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    step = Tick(copy, 700 * kMs, walk(20, 1));
+    CHECK(step.writes.empty());
+    CHECK(Tick(copy, 1500 * kMs, walk(20, 1)).writes.empty());
+    CHECK(copy.PartKillsStepped() == 1);
+    // Never deleted from outside while its boss lives here (its own death ends it), also long past the grace.
+    Tick(copy, 700 * kMs + Sync::kDeadGraceUs + 500 * kMs, walk(20, 1));
+    CHECK(copy.Removes().empty());
+    Tick(copy, 700 * kMs + 4 * Sync::kDeadGraceUs, walk(20, 0));  // (its own death runs: life 0)
+    CHECK(copy.Removes().empty());
+    // Its boss dead here: the grace delete is the fallback again.
+    Tick(copy, 700 * kMs + 5 * Sync::kDeadGraceUs, walk(0, 0));
+    CHECK(copy.Removes() == std::vector<std::uint64_t>{0x200});
+}
+
+TEST_CASE("objects: a boss part's refused kill with no boss of it here still goes after the grace (rows 257/258)") {
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    auto step = Tick(copy, 100 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);  // the killing replay first
+    step = Tick(copy, 600 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].direct);  // refused: to its own Life step
+    CHECK(copy.Removes().empty());
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + 100 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    CHECK(copy.Removes() == std::vector<std::uint64_t>{0x200});
+}
+
+TEST_CASE("objects: a boss copy's refused killing hit is not given here, nor a plain enemy's (rows 257/258 scope)") {
+    // The boss itself keeps its own rules (HeldLifeStep, SetDying); a plain enemy keeps the write/grace path.
+    CHECK_FALSE(CoopObjects::IsBossPart("Enemy_DungeonBoss_Barinade"));
+    CHECK_FALSE(CoopObjects::IsBossPart("Enemy_Stalchild"));
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    const proto::ObjectId id = *copy.IdOf(0x100);
+    Own(copy, id, 2, 1);
+    copy.Receive(LifeSample(id, 0, 20));
+    auto step = Tick(copy, 100 * kMs, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);
+    step = Tick(copy, 600 * kMs, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    CHECK(step.writes.empty());
+    CHECK(copy.PartKillsStepped() == 0);
+}
+
+TEST_CASE("objects: a boss part its boss holds 10 s past the grace is said once, with the boss (rows 257/258)") {
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    const auto walk = std::vector<Seen>{Enemy(0x100, 0x11, 20, 0.0f, kBoss), Enemy(0x200, 0x12, 1, 1.0f, kJelly)};
+    const auto said = [&](Sync& s) {
+        int n = 0;
+        for (const auto& note : s.TakeNotes()) {
+            if (note.find("held by its boss") != std::string::npos) {
+                CHECK(note.find(kBoss) != std::string::npos);
+                CHECK(note.find(kJelly) != std::string::npos);
+                ++n;
+            }
+        }
+        return n;
+    };
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, walk);
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, *copy.IdOf(0x100), 2, 1);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    Tick(copy, 100 * kMs, walk);  // (dead_at here)
+    (void)copy.TakeNotes();
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + 100 * kMs, walk);
+    CHECK(copy.Removes().empty());
+    CHECK(said(copy) == 0);  // held, not yet a leftover
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + Sync::kHeldSayUs, walk);
+    CHECK(copy.Removes().empty());
+    CHECK(said(copy) == 1);
+    Tick(copy, 100 * kMs + 2 * (Sync::kDeadGraceUs + Sync::kHeldSayUs), walk);
+    CHECK(said(copy) == 0);  // once
+    CHECK(copy.Removes().empty());
 }

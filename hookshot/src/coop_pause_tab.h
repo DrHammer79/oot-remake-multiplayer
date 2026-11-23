@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "coop_pause_menu.h"
+#include "coop_screen_panes.h"
 #include "hos_coop_api.h"
 
 namespace CoopPauseTab {
@@ -224,6 +225,13 @@ public:
     // Longshot's settings there).
     void SetSettingsUsable(bool usable) { settings_ok_ = usable; }
     bool SettingsUsable() const { return settings_ok_; }
+    // Player report 261: the Longshot Settings button opens Longshot's OWN menu (its F1 / Insert menu: every row, its tabs
+    // and helps), not our copy of its rows on this page. On (the module can open that menu on this platform): A on the
+    // button never shows the page; TakeOpenLongshotMenu says once that the module opens Longshot's menu now. Off (no way
+    // to open it here): the button is not offered at all (SettingsUsable false), never our copy.
+    void SetLongshotMenu(bool can_open) { longshot_menu_ = can_open; }
+    bool LongshotMenu() const { return longshot_menu_; }
+    bool TakeOpenLongshotMenu() { return std::exchange(open_longshot_, false); }
     // Which of System's buttons of ours the game's cursor is on now (the module reads it while A is held): 0 the
     // Multiplayer button (Pa_Button_06), 1 the Longshot Settings button (Pa_Button_05), 2 the Customize Link button
     // (Pa_Button_07: the Multiplayer page, opened on Settings and look's Customize page), -1 neither. Its A opens that
@@ -290,6 +298,9 @@ public:
     }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
+    int StripLit() const { return strip_.lit; }
+    bool StripUp() const { return strip_.state == 1 || strip_.state == 2; }
+    bool MinusStripOpen() const { return StripUp() && strip_.mode != kPlusMode; }   // (the - menu is the open screen)
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
     // RowTexts(MinusPage) not ""), set by the module for the tab lit. Up and down move the cursor among the rows shown
     // (the game's button_on), A picks the row under it (button_decide): TakeMinusDecide says which, once.
@@ -422,6 +433,7 @@ private:
     const char* strip_sound_ = nullptr;
     int which_ = 0;   // our page shown: 0 Multiplayer, 1 Longshot Settings (kept while hidden: the menu opens on it again)
     bool settings_ok_ = false;
+    bool longshot_menu_ = false, open_longshot_ = false;   // SetLongshotMenu, TakeOpenLongshotMenu
     int system_button_ = -1;
     int opened_from_ = 0;
     bool customize_open_ = false;
@@ -692,6 +704,9 @@ struct ListLine {
     std::string name, value;   // the row's left text and its right one; both "" for a row not shown
     RowAction act = RowAction::kNone;   // an A on this line of the details (their Auto-rejoin), else nothing
     bool arrows = false;       // its value between the Options row's own arrows (N_Content_00): Left and Right change it
+    // The name / the value is shown as it is: a player's, a room's or a mod's own text, or words already in the player's
+    // language (never looked up in the translation table again: a player called "Link" stays "Link").
+    bool own_name = false, own_value = false;
 };
 
 // --- Typing with a pad: the list's rows are the keys ---
@@ -957,25 +972,19 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
 // closed (not 1, 2). A strip only not seen for a while is a stall, not a close (cs-customize-0119, lane gc198-l5b: the
 // game's threads waited 645 ms for a core, the open screen was taken as closed and opened again on its first page, so
 // Y presses were lost): kWait, the screen kept as it is.
+// Screens known by their panes, looked at again at each opening (row 262): coop_screen_panes.h.
+using CoopScreen::kScreenGapMs;
+using CoopScreen::kScreenLookMs;
+using CoopScreen::ScreenInstance;
+using CoopScreen::ScreenPanes;
 enum class SnailEdge { kWait, kOpen, kClose };
-// A game screen's layout is looked at to tell whose it is (Character Select's Customize screen: SnailScreen; co-op's
-// CoopMenu_00: CoopMenuScreen) and the verdict is kept by the layout's address. The game frees a closed screen and may
-// make the next one at the very same screen and layout addresses (charsel-native-0119-5, run 4620f3e7: CoopMenu_00 came
-// at the addresses his Customize screen had just freed, his verdict was kept for ours, co-op waited for his panes in our
-// page, ours never took it and R went back to the Map). So the layout is looked at again: with no verdict yet, with
+// The Map screen's content panes (FollowMapUnder) are kept by its layout's address. The game frees a closed screen and
+// may make the next one at the very same screen and layout addresses (charsel-native-0119-5, run 4620f3e7: CoopMenu_00
+// came at the addresses his Customize screen had just freed). So they are looked up again: with none kept yet, with
 // another screen object, and at every opening (the state turns 1, opening, or turns open, 1 or 2, from anything else: a
-// new screen at the same place starts there). `known_state`: the state at its last update (-1 none).
+// new screen at the same place starts there). `known_state`: the state at its last update (-1 none). (Whose screen a
+// layout is, his Customize screen's or CoopMenu_00's: ScreenPanes, row 262.)
 bool LayoutLookAgain(bool known, std::uint64_t known_screen, int known_state, std::uint64_t screen, int state);
-// Character Select's Customize screen's verdict at a look (SnailScreen): his panes there -> his; co-op's CoopMenu_00 page
-// pane there (Pa_CoopMinus_00) -> not his; neither, on the same screen object that was his (lane 061445: his screen
-// opening again before its panes) -> his, CARRIED: not proven, so looked at again at every update until his panes or ours
-// decide it (review-01111-a: CoopMenu_00 made at his freed addresses before its own pane is findable must not keep "his"
-// for the whole opening; CoopMenuScreen likewise expects late panes). Else not his.
-struct SnailVerdict {
-    bool his = false;
-    bool carried = false;
-};
-SnailVerdict SnailVerdictFrom(bool his_panes, bool ours_pane, bool was_his, bool same_screen);
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
 // kDrive, co-op's keys; kPause, not updated for kSnailPauseMs (a stall, or gone without a close seen): the game gets
@@ -985,6 +994,29 @@ SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::
 inline constexpr std::uint64_t kSnailPauseMs = 300, kSnailGoneMs = 5000;
 enum class SnailPadState { kDrive, kPause, kGone };
 SnailPadState SnailPadFrom(std::uint64_t seen_ms, std::uint64_t now_ms);
+// The hop to Character Select's Characters tab (#322): with his code in the game the colours are on his Customize
+// screen, so A on co-op's Customize Link row, in the - menu, taps L for the player. The game's graph (Sequence/
+// MinusMenu) reads the pad, and its category setters (f_8342b7a0, f_8342b720, SeqOneShotSetCurrentMinusMenuCategory)
+// run inside its transition sequence, which co-op does not drive, so the taps are the game's own L: our tab to Map
+// (Page::MinusPad), then the game's, Map to Threads of Time to Key Items to Characters. The - menu's current category
+// (menu manager +0x52c) is read: the game's own - tabs are [6, 1, 2] = Key Items 6, Threads of Time 1, Map 2
+// (docs/game-ui.md), so the hop taps on while it is one of those, and is done when it is something else (Characters,
+// whose number is not known) or a tap moved nothing (the left edge). Given up after kHopMaxTaps taps or kHopMaxMs.
+struct CharactersHop {
+    int taps = 0;                 // L taps sent
+    int off_taps = 0;             // of those, sent with our page already gone (the game's own tabs)
+    int prev_lit = -1;            // the strip's lit category when the last of those was sent
+    std::uint64_t started_ms = 0, next_ms = 0;
+};
+enum class HopStep { kWait, kTapL, kDone, kGiveUp };
+inline constexpr int kHopMaxTaps = 7;
+inline bool GameMinusCategory(int category) { return category == 6 || category == 1 || category == 2; }
+inline constexpr std::uint64_t kHopMaxMs = 8000, kHopGapMs = 500;
+// `ours`: our page still shows (Page::MinusTab() >= 0); `minus_open`: the - menu is the open screen (its strip up, in
+// its - mode) and nothing is typed into (a field of ours, the chat box): anything else (closed, the Plus menu, another
+// screen, a load, typing) ends the hop at once with no more taps (kGiveUp); `lit`: the - menu's current category
+// (-1 not readable: waits).
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms);
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: the Character tab takes
 // them one update ahead to move with the fourth, not a frame after it.

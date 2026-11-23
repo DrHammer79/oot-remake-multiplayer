@@ -147,6 +147,11 @@ struct Row {
     bool on = false;                  // kToggle
     bool left = false, right = false; // kChoice: it can go that way
     bool fixed = false;               // it cannot be used now
+    // Words that are not the tab's own: a player's, a room's or a mod's text (a name, a room, a port, a password, a
+    // search, a mod's title or setting), or words already in the player's language. They are shown as they are and
+    // never looked up in the translation table (a player called "Link" must not read 林克, a name typed "On" must not
+    // become 开启). The tab's own words stay as they are: the row's name beside a text field is looked up, its value is not.
+    bool own_name = false, own_value = false;
     // A choice of two shown as the game's own Options toggle where the page can (the title's Host page: its two cells,
     // the chosen one `cell`, 0 or 1; -1 none): the value's words then are cells[cell].
     std::array<std::string, 2> cells{};
@@ -230,7 +235,7 @@ public:
     // page keeps Your name and says where the colours are; the main page's Customize Link row says it too.
     void SetSnailHome(bool on) { snail_home_ = on; }
     bool SnailHome() const { return snail_home_; }
-    static constexpr const char* kSnailHomeNote = "Link's colours are on the Characters tab: pick Link, then Customize.";
+    static constexpr const char* kSnailHomeNote = "Link's colours are not on this page: press L until the Characters tab (the first tab of the - menu), pick Link, then Customize.";
     static constexpr const char* kCharacterNote =
         "A Character Select character is picked: it keeps its own colours (X on its Characters page); these colours show on Link when you pick Link again.";
     // The Find a game page's list (the Join page's first row): the games on this network or the relay's public

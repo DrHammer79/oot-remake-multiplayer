@@ -1,6 +1,6 @@
 # Third-party notices
 
-The co-op code in this repository is GPL-3.0 ([LICENSE](LICENSE)). This file lists the code by others that it uses or that a release kit (`tools/release/make_kit.ps1` for Windows, `tools/release/make_kit.sh` for Linux, [below](#in-the-linux-kit)) ships, with each one's licence. In a kit, the licence texts are in the `licenses\` folder and `SOURCE.txt` says where the source of that exact build is.
+The co-op code in this repository is GPL-3.0 ([LICENSE](LICENSE)). This file lists the code by others that it uses or that a release kit (`tools/release/make_kit_hookshot.ps1` for Windows, `tools/release/make_kit_linux.sh` for Linux) ships. **From 0.11.12 no kit ships the Fritchii emulator** (Fritchii, Qt, its libraries, the AppImage): the emulator rows below describe the older emulator kits only, with each one's licence. In a kit, the licence texts are in the `licenses\` folder and `SOURCE.txt` says where the source of that exact build is.
 
 No game files, keys or firmware are part of this repository or of any kit.
 
@@ -52,7 +52,7 @@ The kit's game build (`scripts\hookshot-build.ps1`, run by `Start Squadala.bat`;
 
 ## In the Linux kit
 
-The Linux kit (`tools/release/make_kit.sh`) holds the same co-op code, server and puppet pack tool as the Windows kit, with the emulator as one AppImage. Its `licenses/` folder has the same texts, and `licenses/appimage/` has `BUNDLED.txt`, the list of every library and plugin inside the AppImage with where each came from, and the licence text (`<package>.copyright`) of each one (written by `tools/release/appimage_licenses.sh` on the machine that built it).
+The older Linux emulator kit (made by `make_kit.sh`, retired and removed in 0.11.12) held the same co-op code, server and puppet pack tool as the Windows kit, with the emulator as one AppImage. Its `licenses/` folder has the same texts, and `licenses/appimage/` has `BUNDLED.txt`, the list of every library and plugin inside the AppImage with where each came from, and the licence text (`<package>.copyright`) of each one (written by `tools/release/appimage_licenses.sh` on the machine that built it).
 
 | Component | Where in the kit | Licence | Text |
 |---|---|---|---|

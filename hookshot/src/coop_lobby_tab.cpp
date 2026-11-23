@@ -100,22 +100,28 @@ const Player* Tab::Shown() const {
 
 std::vector<Tab::Line> Tab::Lines() const {
     std::vector<Line> out;
-    const auto heading = [&](std::string name) {
+    // (`own`: the name is a player's or a room's own text, or already in the player's language: shown as it is, never
+    // looked up in the table: a player called "Link" stays "Link")
+    const auto heading = [&](std::string name, bool own = false) {
         Line l;
         l.row.name = std::move(name);
+        l.row.own_name = own;
         l.row.kind = RowKind::kHeading;
         out.push_back(std::move(l));
     };
-    const auto note = [&](std::string text) {
+    const auto note = [&](std::string text, bool own = false) {
         Line l;
         l.row.name = std::move(text);
+        l.row.own_name = own;
         l.row.kind = RowKind::kNote;
         out.push_back(std::move(l));
     };
-    const auto action = [&](std::string name, std::string value, Act act, std::string help, std::uint8_t player = 0) {
+    const auto action = [&](std::string name, std::string value, Act act, std::string help, std::uint8_t player = 0,
+                            bool own = false) {
         Line l;
         l.row.name = std::move(name);
         l.row.value = std::move(value);
+        l.row.own_name = l.row.own_value = own;   // (the name and the value: a room's, a player's; the value already ours)
         l.act = act;
         l.player = player;
         l.help = std::move(help);
@@ -154,7 +160,7 @@ std::vector<Tab::Line> Tab::Lines() const {
                                                 (g.is_public ? CoopI18n::Tr("Press to join: no password needed.")
                                                              : CoopI18n::Tr("Press, then type the host's password."))
                                           : std::string()),
-                   static_cast<std::uint8_t>(i));
+                   static_cast<std::uint8_t>(i), true);
         }
         action("Refresh list", "Refresh", Act::kRefreshGames, "Asks the game list again now.");
         return out;
@@ -176,7 +182,7 @@ std::vector<Tab::Line> Tab::Lines() const {
                        (pl.colour.empty() ? "" : CoopI18n::Tr(", ") + pl.colour) +
                        (pl.host ? CoopI18n::Tr(", the host") : std::string()) + CoopI18n::Tr(". Press to see ") +
                        CoopI18n::Tr(pl.self ? "yourself." : "what you can do."),
-                   pl.number);
+                   pl.number, true);
         }
         if (lobby_.max_players > count) {
             const int open = lobby_.max_players - count;
@@ -213,7 +219,7 @@ std::vector<Tab::Line> Tab::Lines() const {
             game += "  " +
                     CoopI18n::Tr(Hearts(*lobby_.host_life) + " / " + Hearts(*lobby_.host_max) + " hearts");
         }
-        note(std::move(game));
+        note(std::move(game), true);   // (the place and the counts: already in the table's words)
         if (!lobby_.hosting && lobby_.can_resync) {
             action("Resync from host", "", Act::kResync,
                    "Gets the host's save again. Back on the title, it is switched to once the chat says Success; "
@@ -222,14 +228,14 @@ std::vector<Tab::Line> Tab::Lines() const {
         return out;
     }
 
-    heading(p->host ? CoopI18n::Tr("Host: ") + p->name : p->name);
+    heading(p->host ? CoopI18n::Tr("Host: ") + p->name : p->name, true);
     // Each part in the table's words before they are joined: the composed line is
     // not a key the table has ("Player 2, red").
     note(CoopI18n::Tr("Player") + " " + std::to_string(p->number) +
          (p->colour.empty() ? "" : CoopI18n::Tr(", ") + p->colour) +
          (p->self ? CoopI18n::Tr(" (you)") : ""));
     if (const std::string s = Summary(*p); !s.empty()) {
-        note(s);
+        note(s, true);   // (the parts are the table's words and the place already)
     }
     if (p->host_mutes != 0) {
         note("The host muted their " + MutedWords(p->host_mutes) + " for everyone.");
@@ -529,18 +535,21 @@ View Tab::view() const {
     }
     if (selected_ < lines.size() && Selectable(lines[selected_].row.kind)) {
         v.selected = static_cast<int>(selected_);
-        v.help_title = lines[selected_].row.name;
-        v.help = lines[selected_].help;
+        // (a player's or a room's name as it is; the help of such a row is built from words already in the table's
+        // language and the name)
+        const Line& picked = lines[selected_];
+        v.help_title = picked.row.own_name ? picked.row.name : CoopI18n::Tr(picked.row.name);
+        v.help = picked.row.own_name ? picked.help : CoopI18n::Tr(picked.help);
         if (lines[selected_].row.kind == RowKind::kToggle) {
-            v.change = "Off / On";
+            v.change = CoopI18n::Tr("Off / On");
         }
     } else {
-        v.help_title = "Lobby";
-        v.help = lobby_.connected ? "" : "The players of your game show here once you host or join.";
+        v.help_title = CoopI18n::Tr("Lobby");
+        v.help = lobby_.connected ? "" : CoopI18n::Tr("The players of your game show here once you host or join.");
     }
     v.gold = note_;
-    v.confirm = "Choose";
-    v.back = player_ != 0 ? "Back" : "Close";
+    v.confirm = CoopI18n::Tr("Choose");
+    v.back = player_ != 0 ? CoopI18n::Tr("Back") : CoopI18n::Tr("Close");
     return v;
 }
 

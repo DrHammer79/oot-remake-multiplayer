@@ -83,6 +83,9 @@
 #ifdef COOP_HOOKSHOT
 #include "coop_flag_native.h"
 #include "coop_map_page.h"  // patch 0018's menu state: PLAYER_STATUS in_menu/paused (Read)
+#include "coop_pause_files.h"   // CoopFiles::CoopIni: the game folder (StuckLoadFrame's record)
+#include "coop_problem_ask.h"   // the stuck load's record, asked about on the next title
+#include "coop_stuck_load.h"    // black-01112: a load that never ends
 #endif
 #include "coop_save.h"
 #include "coop_game_build.h"
@@ -139,6 +142,8 @@ namespace {
 
 // Rows 239/240/241 (PickGuardFrame, below): a pick put back since the session's chat last said it.
 std::atomic<bool> g_pick_said{false};
+// black-01112 (coop_stuck_load.h): a scene load ran CoopStuckLoad::kStuckMs; a session's Frame says so in the chat once.
+std::atomic<bool> g_stuck_said{false};
 
 // The game and build the addresses in coop/host are for.
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
@@ -1787,6 +1792,11 @@ public:
             static std::map<std::uint16_t, std::uint16_t> slot_files;
             static std::uint32_t slot_tick = 0;
             if (g_pick_said.exchange(false)) chat_.Add(CoopCharSlots::MissingLine(true), true);
+            if (g_stuck_said.exchange(false)) {   // black-01112 (StuckLoadFrame)
+                chat_.Add("The game has been loading for 2 minutes. If the screen stays black, close the game and "
+                          "send /bugreport on Discord with the zip of collect-logs.cmd.",
+                          true);
+            }
             if (view.game && report.connected) {
                 if (slot_tick++ % 600 == 0) slot_files = CoopPuppetConfig::CharacterFiles();   // (the pack's, every 10 s)
                 for (std::uint8_t n = 1; n < CoopCharSlots::Others::kNumbers; ++n) {
@@ -1882,7 +1892,9 @@ public:
         if (!reading) CoopTime::Loading(report.server_now_us);  // issue 159: a reload, a death
         CoopTime::Frame(system, view.game ? base_ : 0, report.connected ? session_.get() : nullptr,
                         report.server_now_us,
-                        reading && reading->event_running.value_or(false));  // issue 192: no nudge in a cutscene
+                        reading && reading->event_running.value_or(false),  // issue 192: no nudge in a cutscene
+                        // Row 164 follow-up: our game paused (a menu in front, no event), for the host's catch-up.
+                        reading && reading->in_menu.value_or(false) && !reading->event_running.value_or(false));
         // Boss rooms together (docs/dungeons-boss.md). Issue 148: the room's
         // "shut in" flag says when we are past its door.
         std::optional<bool> boss_shut_in;
@@ -2355,8 +2367,44 @@ private:
 #ifdef COOP_HOOKSHOT
             if (const auto menu = CoopMapPage::MenuState()) {
                 reading->in_menu = menu->menu_open;
+                // Row 164 follow-up (PR #316, pr-navi-01112): the quick-switch item menu (UIShortCutScreen) stops the
+                // world as the pause menu does but has no focused button, so menu_open never names it: read from
+                // the running screens (CoopMapPage::QuickSwitchOpen). A menu in front: in_menu, and paused out of
+                // our events (status_bits).
+                const bool quick = !menu->menu_open && CoopMapPage::QuickSwitchOpen(*menu).value_or(false);
+                if (quick) {
+                    reading->in_menu = true;
+                }
+                if (quick != quick_switch_) {
+                    LOG_INFO(Core, "coop: status: the quick-switch item menu {}",
+                             quick ? "is open: in a menu, paused for the others" : "closed");
+                    quick_switch_ = quick;
+                }
             }
 #endif
+            // PR #316's WorldStill (coop/host/sampler.hpp): our world read as standing still from our Link's held
+            // animation frame. Opt-in only, LICHII_COOP_STILL=1 (pr-navi-01112): many moves hold a frame while the
+            // world runs (aiming, a ledge, a ladder, frozen in ice, held by a Like-Like, a shock), and as `paused`
+            // each would hand a boss away after fight_owner_paused_us. The quick-switch menu is read above.
+            static const bool still_on = coop::host::world_still_on(std::getenv("LICHII_COOP_STILL"));
+            if (still_on) {
+                const bool was = world_still_.still();
+                // pr-navi-01112: our Link lifted by another player's (native puppets phase 3) is not judged: its
+                // reading plays the carried pose ('Eaten' at frame 0, CarriedPose above), which stands still
+                // whenever its carrier does, while our world runs.
+                const bool carried = CoopLiftPlayerGame::Carried();
+                reading->world_still = world_still_.step(
+                    carried || !reading->animation ? nullptr : &*reading->animation, reading->position,
+                    reading->event_running.value_or(false), CoopEvery::NowUs());
+                if (reading->world_still != was && !reading->in_menu.value_or(false)) {
+                    LOG_INFO(Core, "coop: status: our world {} (Link's '{}' at frame {:.1f}): {}",
+                             reading->world_still ? "stands still with no menu named" : "runs again",
+                             reading->animation ? reading->animation->name : std::string(),
+                             reading->animation ? reading->animation->frame : 0.0f,
+                             reading->world_still ? "paused for the others (the quick-switch menu or a stall)"
+                                                  : "playing");
+                }
+            }
         }
         return reading;
     }
@@ -2719,6 +2767,8 @@ private:
     bool queue_sizes_logged_ = false;  // the game's flag queue sizes, logged once
     // Kept across frames: a drawn sword shows in the game's memory for a moment only.
     coop::host::PlayerReader::DrawnState drawn_state_{};
+    coop::host::WorldStill world_still_;  // row 164 follow-up: our world standing still with no menu named
+    bool quick_switch_ = false;           // the quick-switch item menu was open at the last reading (its log line)
     bool sharing_ = false;  // a flag list is shared; set by Begin
     CoopBoss::StaleBossFlags stale_boss_;  // issue 148: shut boss doors from older builds
     bool boss_alive_due_ = false;          // row 159: BOSS_ALIVE to send after our own save load (host)
@@ -3687,8 +3737,79 @@ void PickGuardFrame(Core::System& system) {
     }
 }
 
+#ifdef COOP_HOOKSHOT
+// black-01112 (coop_stuck_load.h): every frame of the module, co-op on or off. The game's own scene load
+// (Sequence_IsLoadingBanc) still on after kStuckMs: one log line, a record in bug-reports/coop-stuck (the next title
+// asks for /bugreport: coop_title.cpp LookForAsk), one chat line in a session. Read every 6th frame (100 ms).
+void StuckLoadFrame(Core::System& system) {
+    static const std::uint32_t loading_hash = coop::host::flag_hash("Sequence_IsLoadingBanc");
+    static CoopStuckLoad::Watch watch;
+    static Kernel::KProcess* seen = nullptr;
+    static u64 base = 0;
+    static std::uint32_t tick = 0;
+    static std::string record;   // the record this run made (taken back when the load ends after all)
+    auto* process = system.ApplicationProcess();
+    if (process == nullptr || system.GetApplicationProcessProgramID() != kOcarinaProgramId ||
+        CoopGameBuild::Find(Hex(system.GetApplicationProcessBuildID(), 8)) == nullptr) {
+        return;
+    }
+    if (process != seen) {
+        seen = process, base = Coop::MainOf(system, process), tick = 0;
+        watch = {};
+    }
+    if (base == 0 || tick++ % 6 != 0) return;
+    EmulatorMemory memory(system.ApplicationMemory(), base);
+    CoopStuckLoad::Sample sample;
+    sample.title_up = CoopSave::TitleUp();
+    sample.loading = coop::host::GameFlags(memory).get_bool(loading_hash).value_or(false);
+    sample.link = !sample.title_up && !sample.loading && coop::host::PlayerReader(memory).read().has_value();
+    const std::uint64_t now = SteadyMs();
+    switch (watch.Frame(sample, now)) {
+    case CoopStuckLoad::Step::stuck: {
+        const std::int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count();
+        record = CoopProblemAsk::StuckName(now_s);
+        const std::string line =
+            fmt::format("a scene load (the game's Sequence_IsLoadingBanc) has run {} s and not ended: the game waits "
+                        "for something that does not come (row 242: a mod's file naming a file no folder has). "
+                        "Longshot's 'fs: ... not found' lines above name the missing files",
+                        watch.LoadMs() / 1000);
+        const bool kept = CoopProblemAsk::WriteStuck(CoopFiles::CoopIni().parent_path(), record, line + "\n");
+        LOG_WARNING(Core, "coop: stuck load: {}; {}", line,
+                    kept ? "the next title asks for /bugreport (bug-reports\\coop-stuck\\" + record + ")"
+                         : std::string("its record could not be written"));
+        if (Get() != nullptr) g_stuck_said = true;   // (a session's chat; solo: the log and the next title)
+        break;
+    }
+    case CoopStuckLoad::Step::ended:
+        LOG_INFO(Core, "coop: stuck load: it ended after all (Link is in the world): its record goes");
+        if (!record.empty()) CoopProblemAsk::RemoveStuck(CoopFiles::CoopIni().parent_path(), record);
+        record.clear();
+        break;
+    case CoopStuckLoad::Step::unclear:
+        LOG_INFO(Core, "coop: stuck load: no Link for {} s, with no scene load and no title (a cutscene, a movie or "
+                       "the staff roll; a black screen here is not a load): logged only",
+                 CoopStuckLoad::kStuckMs / 1000);
+        break;
+    case CoopStuckLoad::Step::none:
+        break;
+    }
+}
+#endif
+
 void OnFrameBody(Core::System& system) {
     PickGuardFrame(system);
+#ifdef COOP_HOOKSHOT
+    {   // (its own guard: a throw costs only this check, not the frame's co-op)
+        static CoopBoundary::Site site{"CoopHook::StuckLoadFrame"};
+        CoopBoundary::Run(site, [&] { StuckLoadFrame(system); },
+                          [](const char* where, const char* what, std::uint64_t n) {
+                              LOG_ERROR(Core, "coop: {} threw ({}, {} so far): the stuck-load check skipped this "
+                                              "frame", where, what, n);
+                          });
+    }
+#endif
     CoopObjects::OnFrame(system);
     {   // player report 120: the slot our game plays (Hookshot's patch 0025; solo too). Its own guard: a slot folder
         // that throws (a path the PC's code page cannot hold, no memory) costs only the slot, not the frame's co-op.

@@ -13,9 +13,13 @@ that table>` / `pack <FNV-1a 64 of the puppet pack's table of that name>` / `rul
 the table through); it holds the puppets again when either file changed since. `--undo` puts every original back.
 
 A winning table that already holds every puppet pack entry, each at least the pack's size (a mod maker merged the
-pack's entries in by hand, e.g. a skins mod), needs no merge: it is left as it is and marked `rule contains`. That is
-also the only way a winner under `contents/` other than the pack (a title's own mod folder, never rewritten here)
-keeps the puppets on.
+pack's entries in by hand, e.g. a skins mod), needs no merge: it is left as it is and marked `rule contains`.
+
+A mod under `contents/<title id>/` (where emulators keep a title's mods, e.g. Classic Link Voices) is a mod like any
+other here: merged when it wins, its original kept the same way. Until 0.11.12 such a winner was never rewritten, so
+the game read its table without the sizes of the other mods' files (the merged actor tables among them) and aborted at
+every boot in its RSDB loader (player report 259). The same holds for every file merged below: actor tables, menu
+archives, the saved values list.
 
 Our own seeds (`randomizer-*` with `coop-rando.txt`, built by the game) are left alone when they win: the module
 builds a seed beside every other table already (coop_rando StageSizeTables). When the puppet pack wins (a mod the Mods list does not name that sorts under
@@ -404,15 +408,6 @@ def merge_rows(root, romfs, say=print):
                 others = []
             if pack is None and not others:
                 continue
-            if fold(win_name).startswith("contents/") and fold(win_name) != PACK:  # (a title's own mod: never rewritten)
-                if pack is not None:
-                    tell(f"Actor tables: the game reads {win_name}'s RSDB/{fname}, without the puppet pack's rows: the "
-                        "other players can't be shown with it on. Turn it off.")
-                    failed += 1
-                else:
-                    tell(f"Actor tables: the game reads {win_name}'s RSDB/{fname}, without the rows of "
-                        f"{', '.join(n for n, _ in others)}: a mod under contents is not rewritten.")
-                continue
             kept = os.path.join(win_path, ROWS_KEEP, fname)
             if step == "plan":
                 touched.add(os.path.normcase(os.path.abspath(kept)))
@@ -632,15 +627,6 @@ def merge_members(root, romfs, say=print):
             pack = pack_path if any(p == pack_path for _, p in having[:-1]) else None
             others = [(n, p) for n, p in having[:-1] if p != pack_path]
             names = ", ".join(n for n, _ in others)
-            if fold(win_name).startswith("contents/") and fold(win_name) != PACK:  # (a title's own mod: never rewritten)
-                if pack is not None:
-                    tell(f"Menus: the game reads {win_name}'s {rel}, not the puppet pack's: the co-op menus' text and "
-                        "panes are missing with it on.")
-                    failed += 1
-                else:
-                    tell(f"Menus: the game reads {win_name}'s {rel}, without what {names} changed in it: a mod under "
-                        "contents is not rewritten.")
-                continue
             game = os.path.join(romfs, *rel.split("/")) if romfs else ""
             if not os.path.isfile(game):
                 if pack is not None:
@@ -1051,11 +1037,10 @@ def merge_mods(root, romfs, say=print, fit=None):
                         say(f"Size tables: the puppet pack's could not take the merged actor tables' sizes ({e}).")
                         failed += 1
                 continue
-            pack_in, title_mod = [], False
+            pack_in = []
         else:
-            title_mod = fold(win_name).startswith("contents/")
             if len(having) < 2 or is_ours(win_name, win_path):  # (one table, or our seed: left as it is but the fit)
-                if fit and not title_mod:
+                if fit:
                     try:
                         fit_in_place(codec, win_name, win_path, fname, fit, say)
                     except (OSError, ValueError, MergeError) as e:
@@ -1065,11 +1050,9 @@ def merge_mods(root, romfs, say=print, fit=None):
                 continue
             others = having[:-1]
             pack_in = [p for n, p in others if fold(n) == PACK]
-            if title_mod and not pack_in:
-                continue  # (a title's own mod, nothing of the puppets' under it: left alone as ever)
         try:
             merged_before = os.path.isfile(os.path.join(win_path, KEEP_DIR, STAMP))
-            if pack_in and (title_mod or (len(others) == 1 and not merged_before)):
+            if pack_in and len(others) == 1 and not merged_before:
                 own = load_table(codec, win_path, fname)
                 missing = missing_pack_entries(own, load_table(codec, pack_in[0], fname))
                 if not fit_ok(own, fit):
@@ -1078,13 +1061,6 @@ def merge_mods(root, romfs, say=print, fit=None):
                     write_mark(root, win_path, fname, "contains")
                     say(f"Size tables: the game reads {win_name}'s, which holds every puppet pack entry already "
                         "(left as it is): the other players can be shown.")
-                    continue
-                if title_mod:  # (never rewritten: a title's own mod)
-                    remove_mark(win_path)
-                    say(f"Size tables: the game reads {win_name}'s, which lacks {missing} of the puppet pack's "
-                        "entries (or holds them smaller): the other players can't be shown with it on. Merge the "
-                        "pack's entries into it, or turn it off.")
-                    failed += 1
                     continue
             failed += merge_one(root, codec, fname, win_name, win_path, others, say, fit)
         except (OSError, ValueError, MergeError) as e:
@@ -1140,7 +1116,7 @@ def guard_menus(root, romfs, say=print):
     as a failed resource, and the language archive failing at boot crashed the game (0xc0000005 reading guest 0x8 in
     sead::MainThread after 'prompts: switch icons': a copy of an older pack left in mods/contents as
     coop-puppet.old-b26 sorted after the pack, so its table won). When another mod's table wins and lacks them (a
-    title's own mod under contents/, never rewritten here; a merge that failed), the menu files go to
+    merge that failed), the menu files go to
     <pack>/_coop-menus (beside its romfs: the game never reads them there) and the game keeps its own menus (the module
     keeps the title rows and the pause tab off without their panes). They go back at the first start the table holds
     them again; a pack made since (its files in romfs again) drops the kept copies. Returns 1 when it could not move
@@ -1430,10 +1406,6 @@ def merge_gamedata(root, romfs, say=print):
             (win_name, win_path), others = having[-1], having[:-1]
             names = ", ".join(n for n, _ in others)
             game = os.path.join(romfs, "GameData", fname) if romfs else ""
-            if fold(win_name).startswith("contents/") and fold(win_name) != PACK:
-                tell(f"Saved values: the game reads {win_name}'s GameData/{fname}, without what {names} changed in it: a "
-                    "mod under contents is not rewritten.")
-                continue
             if not os.path.isfile(game):
                 tell(f"Saved values: {win_name} and {names} both ship GameData/{fname}; the game reads {win_name}'s. Not "
                     "merged without the game's own copy (--romfs): the others' values are missing.")

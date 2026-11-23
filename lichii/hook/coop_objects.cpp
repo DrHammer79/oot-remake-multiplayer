@@ -2718,6 +2718,15 @@ public:
             WriteLife(system.ApplicationMemory(), r, w);
         }
         if (switch_share_mode_ != 0) {
+            // Row 164 follow-up: the players whose world stands still (paused, the quick-switch menu, loading); their
+            // presses are not held meanwhile.
+            switch_away_.clear();
+            session->with_client([&](coop::net::Client& c) {
+                for (const auto& p : c.players()) {
+                    if ((p.status.value_or(0) & kSwitchAway) != 0) switch_away_.insert(p.number);
+                }
+                return 0;
+            });
             SwitchShare(system, r, *scene, server_now_us, send);
         }
         if (platforms_mode_ != 0) {
@@ -2909,6 +2918,9 @@ public:
     static constexpr u8 kCounterAway = coop::protocol::status::paused | coop::protocol::status::in_menu |
                                        coop::protocol::status::loading | coop::protocol::status::in_cutscene;
     std::set<u8> counter_away_;
+    // Row 164 follow-up: a presser whose world stands still (not a cutscene: a press often plays its own) is not held.
+    static constexpr u8 kSwitchAway = coop::protocol::status::paused | coop::protocol::status::loading;
+    std::set<u8> switch_away_;
     std::set<u64> counter_nodes_;  // the platform nodes the ring named, while their actor is here
     // Each counter node's placement in the room table, found once a scene (Counters).
     std::unordered_map<u64, const CoopRoomObjects::Placement*> counter_places_;
@@ -3383,7 +3395,7 @@ private:
         std::vector<coop::protocol::SwitchState> out;
         std::vector<std::string> notes;
         const auto holds = CoopSwitchShare::TheSharer().Tick(scene, seen, !sync_.OthersHere(server_now_us).empty(),
-                                                             sync_.Self(), SteadyNowMs(), out, notes);
+                                                             sync_.Self(), SteadyNowMs(), out, notes, switch_away_);
         for (auto& m : out) {
             send.emplace_back(std::move(m));
         }
@@ -5806,11 +5818,13 @@ private:
                 LOG_INFO(Core,
                          "coop: objects: share placed {} copies; off from where we put them "
                          "avg {:.3f} max {:.3f} over {}; game calls: {} moves, {} deletes, {} "
-                         "plays, {} frame sets; hurts taken {} missed {} (boss hits to its Life step {}, dying copies "
-                         "finished {}); own hits kept while a replay waited {}; boss copies kept in the room {}",
+                         "plays, {} frame sets; hurts taken {} missed {} (boss hits to its Life step {}, boss part kills to "
+                         "its Life step {}, dying copies finished {}); own hits kept while a replay waited {}; boss "
+                         "copies kept in the room {}",
                          placed_.size(), drift_count_ ? drift_sum_ / drift_count_ : 0.0f,
                          drift_max_, drift_count_, moved, deleted, played, framed, sync_.HurtsTaken(),
-                         sync_.HurtsMissed(), sync_.BossHitsStepped(), sync_.DyingFinished(),
+                         sync_.HurtsMissed(), sync_.BossHitsStepped(), sync_.PartKillsStepped(),
+                         sync_.DyingFinished(),
                          sync_.OwnHitsKept(), sync_.BossCopiesKept());
             }
             // Issue 101: which copy was furthest from where we put it, so

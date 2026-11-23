@@ -588,7 +588,7 @@ bool Host() {
     h.invite = 1;
     h.pvp = o.pvp ? 1 : 0;
     h.approve_joins = o.approve_joins ? 1 : 0;
-    h.same_network_open = o.same_network_open ? 1 : 0;   // (off, the default: this network's players need the password too)
+    h.same_network_open = o.same_network_open ? 1 : 0;   // (on, the default: this network's players need no password)
     h.max_players = static_cast<std::uint8_t>(o.max_players);
     // coop-options.ini's relay lines, as Host.bat uses them (issue 261: a room name friends type in Join a game).
     h.relay_via = o.relay.empty() ? nullptr : o.relay.c_str();
@@ -817,13 +817,14 @@ void CopyLan(bool vpn) {
     const CoopTitleMenu::LanSplit split = CoopTitleMenu::SplitLan(CoopFiles::LocalCards());
     const auto& addresses = vpn ? split.vpn : split.home;
     const std::uint64_t session = g_session;
-    const auto show = [vpn, session, addresses, port = st.port, password = std::string(st.password)](bool copied) {
+    const bool open = st.same_network_open != 0;   // (this network's players need no password: none on the line)
+    const auto show = [vpn, session, addresses, open, port = st.port, password = std::string(st.password)](bool copied) {
         if (session != g_session) {
             return;   // (hosted again or joined since: these lines are old)
         }
         g_lan_password = password;
-        g_lan_lines = vpn ? CoopTitleMenu::VpnLines(addresses, port, password, copied)
-                          : CoopTitleMenu::HomeLines(addresses, port, password, copied);
+        g_lan_lines = vpn ? CoopTitleMenu::VpnLines(addresses, port, password, copied, open)
+                          : CoopTitleMenu::HomeLines(addresses, port, password, copied, open);
         LOG_INFO(Core, "coop: multiplayer tab: host: {}: {} address(es){}", vpn ? "VPN" : "same network",
                  addresses.size(), copied ? ", the join line is on the clipboard" : "");
         RefreshSession(true);
@@ -832,7 +833,9 @@ void CopyLan(bool vpn) {
         show(false);
         return;
     }
-    CopyThen(CoopTitleMenu::LanJoinText(addresses.front().address, st.port, st.password), show);
+    CopyThen(CoopTitleMenu::LanJoinText(addresses.front().address, st.port,
+                                        CoopTitleMenu::LanLinePassword(addresses.front().address, st.password, open)),
+             show);
 }
 
 void TakeAnswer(const std::optional<std::string>& clip);   // (below)
@@ -1517,6 +1520,11 @@ CoopPauseMenu::Page NativePage() {
     return g_menu.page();
 }
 
+bool SnailHome() {
+    std::lock_guard lock(g_mutex);
+    return g_menu.SnailHome();
+}
+
 bool NativeOpen() {
     std::lock_guard lock(g_mutex);
     return g_native;
@@ -1881,7 +1889,9 @@ void PageCopyNow(PageCopy what) {
             SetPageNote(vpn ? "No VPN address found" : "No network address found");
             return;
         }
-        text = CoopTitleMenu::LanJoinText(addresses.front().address, st.port, st.password);
+        text = CoopTitleMenu::LanJoinText(
+            addresses.front().address, st.port,
+            CoopTitleMenu::LanLinePassword(addresses.front().address, st.password, st.same_network_open != 0));
         words = vpn ? "VPN line" : "network line";
         break;
     }

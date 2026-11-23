@@ -273,6 +273,41 @@ def fresh(p, b):
 cmd = sys.argv[1]
 if cmd == "exclude":
     print(NPC_RULE)
+elif cmd == "run":
+    # run IDLE MAX -- PROGRAM ARGS: the program with a time limit, its output passed on. One that writes nothing for IDLE s
+    # or runs longer than MAX s is stopped with its whole process group (its worker processes too): exit 124, last line
+    # "stopped: ...". (Character Select tool on a damaged game dump: its workers die at start and are started again for good.)
+    import signal, subprocess, threading, time
+    idle, most, argv = float(sys.argv[2]), float(sys.argv[3]), sys.argv[5:]
+    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    last = [time.monotonic()]
+    def pump():
+        for line in iter(p.stdout.readline, b""):
+            last[0] = time.monotonic()
+            sys.stdout.write(line.decode("utf-8", "replace"))
+            sys.stdout.flush()
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    start, why = time.monotonic(), ""
+    while p.poll() is None:
+        now = time.monotonic()
+        if now - last[0] >= idle:
+            why = "it wrote nothing for %d s" % idle
+        elif now - start >= most:
+            why = "it ran longer than %d s" % most
+        if why:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.wait()
+            break
+        time.sleep(0.5)
+    t.join(5)
+    if why:
+        print("stopped: " + why)
+        sys.exit(124)
+    sys.exit(p.returncode)
 elif cmd == "derive":
     src, dst, part = sys.argv[2:5]
     for r, _, fs in os.walk(src):
@@ -343,8 +378,18 @@ charsel_tool_make() {
     say "  making Character Select's files from your game (a minute or two, once) ..."
     # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
     # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)
-    if ! tout=$("$PY" -I -B "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$mod" ${ex[@]+"${ex[@]}"} 2>&1); then
-        cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
+    # (time limits as on Windows: stopped after 15 minutes without a line (it prints one every 100 files, the slowest first) or
+    # 2 hours in all, with its worker processes; -u: each line reaches the watcher at once)
+    local rc=0
+    tout=$(charsel_py run "${CHARSEL_TOOL_IDLE:-900}" "${CHARSEL_TOOL_MAX:-7200}" -- "$PY" -I -B -u "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$mod" ${ex[@]+"${ex[@]}"} 2>&1) || rc=$?
+    if ((rc == 124)); then
+        cs_tool_why="making its files from your game was stopped ($(printf '%s
+' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1 | sed 's/^stopped: //')): its tool stopped answering. The game files it reads may be damaged (dump the game again)"
+        return 1
+    fi
+    if ((rc != 0)); then
+        # (the reason: its last line that is not a Python warning ('file:N: SomeWarning: ...' and its indented source line))
+        cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | awk '/:[0-9]+: [A-Za-z]*Warning: /{w=1;next} w&&/^[[:space:]]/{next} {w=0} /[^[:space:]]/' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
         return 1
     fi
     return 0

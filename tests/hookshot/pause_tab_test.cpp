@@ -2076,8 +2076,9 @@ TEST_CASE("pause tab: System's Customize Link button opens the Multiplayer page 
     CHECK_FALSE(p.TakeCustomizeOpen());
 }
 
-TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in System's place, B back, L or R the game's") {
+TEST_CASE("pause tab: Longshot Settings opens Longshot's own menu, never our copy of its rows (player report 261)") {
     Page p = UsablePage();
+    p.SetLongshotMenu(true);
     p.SetSettingsUsable(true);
     std::uint64_t now = 1000;
     p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
@@ -2087,68 +2088,52 @@ TEST_CASE("pause tab: Longshot Settings opens from System's button with A, in Sy
     p.SetSystemButton(-1);
     CHECK(p.OnPad(kPadA, now + 16) == kPadA);
     CHECK_FALSE(p.Shown());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
     p.OnPad(0, now + 32);
-    // A on the Longshot Settings button: the page at once, the game's A kept from it.
+    // A on the Longshot Settings button: Longshot's own menu (once), the game's A kept from the button, no page of ours.
     p.SetSystemButton(1);
     CHECK(p.OnPad(kPadA, now + 48) == 0);
-    CHECK(p.TakeOpened());
+    CHECK(p.TakeOpenLongshotMenu());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    CHECK_FALSE(p.Shown());
     CHECK_FALSE(p.TakeOpened());
-    Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64);
-    CHECK(d.set_page);
-    CHECK(d.page_from == 0);
-    CHECK(d.page_to == 2);
-    CHECK(d.slide == 0);
-    CHECK(p.Which() == 1);
-    CHECK(p.MousePage() == -1);   // (in System's place: the mouse's tabs stay the game's)
-    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80).any());   // (System's tab stays lit)
+    CHECK(p.Which() == 0);
+    // System's pages stay the game's: nothing set, System's tab lit.
+    CHECK_FALSE(p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 64).set_page);
+    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 80).any());
+    // Held, the A opens it no second time; let go and pressed again, it does.
+    CHECK(p.OnPad(kPadA, now + 96) == 0);
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    p.OnPad(0, now + 112);
+    CHECK(p.OnPad(kPadA, now + 128) == 0);
+    CHECK(p.TakeOpenLongshotMenu());
+    p.OnPad(0, now + 144);
     p.SetSystemButton(-1);
-    // B in its list goes back to its rows; B on its rows goes back to System, its cursor on the button again.
-    p.OnPad(0, now + 96);
-    p.SetSubView(true);
-    p.OnPad(kPadB, now + 112);
-    CHECK(p.TakeBack());
+    // The Multiplayer button's A still opens the Multiplayer page (0), not the Longshot Settings page.
+    p.SetSystemButton(0);
+    CHECK(p.OnPad(kPadA, now + 160) == 0);
     CHECK(p.Shown());
-    CHECK_FALSE(p.TakeLeft());
-    p.SetSubView(false);
-    p.OnPad(0, now + 128);
-    CHECK(p.OnPad(kPadB, now + 144) == 0);   // (the game's B would close the menu)
-    CHECK_FALSE(p.Shown());
-    CHECK(p.TakeLeft());
-    CHECK(p.Which() == 1);
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 160);
+    CHECK(p.Which() == 0);
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    const Page::Do d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 176);
     CHECK(d.set_page);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
-    // R on Longshot Settings: System back at once, and the R is the game's.
-    p.OnPad(0, now + 176);
+    CHECK(d.page_to == 1);   // (the Multiplayer page; 2, the old Longshot Settings page, is never shown)
+}
+
+TEST_CASE("pause tab: Longshot Settings where its menu cannot be opened shows nothing of ours (player report 261)") {
+    Page p = UsablePage();
+    p.SetLongshotMenu(false);
+    p.SetSettingsUsable(true);   // (the module never offers it then; even so, no copy of its rows)
+    std::uint64_t now = 1000;
+    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now);
+    p.OnScreen(Strip(0x9000, 5, kSystemPage), now);
+    p.OnPad(0, now);
     p.SetSystemButton(1);
-    p.OnPad(kPadA, now + 192);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 208);
-    p.SetSystemButton(-1);
-    p.OnPad(0, now + 224);
-    CHECK(p.OnPad(kPadR, now + 240) == kPadR);
+    CHECK(p.OnPad(kPadA, now + 16) == 0);   // (kept from the game: it does not know the button)
     CHECK_FALSE(p.Shown());
-    CHECK(p.TakeWhy() == "L or R on Longshot Settings");
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 256);
-    CHECK(d.set_page);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
-    CHECK_FALSE(p.OnScreen(Strip(0x9000, 5, kSystemPage), now + 272).any());   // (the strip's: nothing of ours)
-    // L on Longshot Settings: System back at once, and the L is the game's (on to Items).
-    p.OnPad(0, now + 336);
-    p.SetSystemButton(1);
-    p.OnPad(kPadA, now + 352);
-    p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 368);
-    p.SetSystemButton(-1);
-    p.OnPad(0, now + 384);
-    CHECK(p.OnPad(kPadL, now + 400) == kPadL);
-    CHECK_FALSE(p.Shown());
-    d = p.OnScreen(Pages(0xa000, kSystemPage, kSystemPage), now + 416);
-    CHECK(d.page_from == 2);
-    CHECK(d.page_to == 0);
-    CHECK(d.slide == 0);
+    CHECK_FALSE(p.TakeOpened());
+    CHECK_FALSE(p.TakeOpenLongshotMenu());
+    CHECK(p.Which() == 0);
 }
 
 TEST_CASE("pause tab: without Longshot Settings (an older pack, or no settings from Longshot), A on its place is the game's") {
@@ -2553,6 +2538,101 @@ TEST_CASE("pause tab (0.11.9, lane 062917): Character Select's Customize screen 
     CHECK(SnailEdgeFrom(true, 1000, 0, 3006, 3008) == SnailEdge::kClose);
 }
 
+TEST_CASE("pause tab (row 262): a screen at addresses taken as another's is looked at again when it opens") {
+    // The owner's 0.11.11 game: another screen (no panes of his) at a layout and screen address pair, then freed; his
+    // Customize screen made at the same two addresses. Before: "not his" kept per address pair, never found.
+    ScreenPanes p;
+    int looks = 0;
+    bool his_panes = false;
+    const auto look = [&] { ++looks; return his_panes; };
+    // (one update a frame from `from` to `to`: the last one's verdict)
+    const auto frames = [&](ScreenPanes& s, bool open, std::uint64_t from, std::uint64_t to) {
+        bool ours = false;
+        for (std::uint64_t t = from; t <= to; t += 16) ours = s.Update(0x100, 0x200, open, t, look);
+        return ours;
+    };
+    CHECK_FALSE(frames(p, true, 1000, 1000 + kScreenLookMs + 32));   // the other screen, open past its window
+    const int settled = looks;
+    CHECK(settled > 1);   // (looked at through its opening's window)
+    CHECK_FALSE(frames(p, true, 1000 + kScreenLookMs + 48, 3000));
+    CHECK(looks == settled);   // (no game calls each frame once settled)
+    CHECK_FALSE(frames(p, false, 3016, 3100));   // it closes (state 3, then 0)
+    CHECK(looks == settled);   // (nothing looked at while closed)
+    his_panes = true;          // freed; his screen made at the same place
+    CHECK(p.Update(0x100, 0x200, true, 3116, look));   // its opening: looked at again, his
+    // The same with no closed update between (freed and made again between two frames): a gap in its updates.
+    ScreenPanes q;
+    his_panes = false;
+    CHECK_FALSE(frames(q, true, 1000, 1000 + kScreenLookMs + 32));
+    his_panes = true;
+    CHECK_FALSE(frames(q, true, 1000 + kScreenLookMs + 48, 2600));   // (no gap, no opening: held)
+    CHECK(q.Update(0x100, 0x200, true, 2600 + kScreenGapMs + 16, look));
+}
+
+TEST_CASE("pause tab (row 262): his panes that come a few frames after the opening are found in that opening") {
+    ScreenPanes p;
+    bool his_panes = false;
+    const auto look = [&] { return his_panes; };
+    CHECK_FALSE(p.Update(0x100, 0x200, false, 900, look));   // made, still closed: nothing decided
+    CHECK_FALSE(p.Update(0x100, 0x200, true, 1000, look));   // open, his panes not there yet
+    his_panes = true;
+    CHECK(p.Update(0x100, 0x200, true, 1050, look));   // there now, inside the opening's window
+    his_panes = false;
+    CHECK(p.Update(0x100, 0x200, false, 2000, look));   // closing: still his (its close is seen), nothing looked at
+    // Another screen at the layout: looked at anew.
+    CHECK_FALSE(p.Update(0x100, 0x300, true, 4000, look));
+    // A first update past the window with its panes there (a menu screen opened before the module saw it): found.
+    ScreenPanes q;
+    his_panes = true;
+    CHECK(q.Update(0x500, 0x600, true, 5000, look));
+    CHECK(q.size() == 1);
+}
+
+TEST_CASE("pause tab (row 262, review-01112-e): a screen taken as his is looked at again at each opening too") {
+    ScreenPanes p;
+    int looks = 0;
+    bool his_panes = true;
+    const auto look = [&] { ++looks; return his_panes; };
+    const auto frames = [&](bool open, std::uint64_t from, std::uint64_t to) {
+        bool ours = false;
+        for (std::uint64_t t = from; t <= to; t += 16) ours = p.Update(0x100, 0x200, open, t, look);
+        return ours;
+    };
+    CHECK(frames(true, 1000, 1500));   // his screen
+    CHECK(looks == 1);                 // (found at once: no more calls)
+    CHECK(frames(false, 1516, 1600));  // it closes
+    // Freed; ANOTHER screen made at the same two addresses (lane 053539's symptom): not taken as his.
+    his_panes = false;
+    CHECK_FALSE(frames(true, 1616, 1616 + 3 * kScreenLookMs));
+    // (the opening before at these addresses was his: looked at through the whole opening, for late panes)
+    CHECK(looks > 1 + static_cast<int>(kScreenLookMs / 16));
+    CHECK_FALSE(frames(false, 5000, 5100));
+    // His again, panes late in the reopening (lane 061445): past the window, still found in that opening (the opening
+    // before was not his, so this one looks for the window only; his panes within it are found).
+    CHECK_FALSE(frames(true, 5116, 5300));
+    his_panes = true;
+    CHECK(frames(true, 5316, 5400));
+    CHECK(frames(false, 5416, 5500));
+    // A reopening of his where the panes come later than the window: found, the opening before was his.
+    his_panes = false;
+    CHECK_FALSE(frames(true, 5516, 5516 + kScreenLookMs + 500));
+    his_panes = true;
+    CHECK(frames(true, 5516 + kScreenLookMs + 516, 5516 + kScreenLookMs + 600));
+}
+
+TEST_CASE("map page (row 262, review-01112-e): a new one of a screen at the same address is searched again") {
+    ScreenInstance at;
+    CHECK(at.Next(0x200, 0x100, true, 1000));         // first
+    CHECK_FALSE(at.Next(0x200, 0x100, true, 1016));   // the same, each frame
+    CHECK(at.Next(0x200, 0x180, true, 1032));         // another layout: another screen at that address
+    CHECK_FALSE(at.Next(0x200, 0x180, true, 1048));
+    CHECK(at.Next(0x300, 0x180, true, 1064));                      // another screen
+    CHECK(at.Next(0x300, 0x180, true, 1064 + kScreenGapMs + 1));   // a gap in its updates: freed and made again
+    CHECK_FALSE(at.Next(0x300, 0x180, false, 1300));               // closed
+    CHECK(at.Next(0x300, 0x180, true, 1316));                      // open after a closed update
+    CHECK(at.Next(0x300, 0x180, true, 1000));                      // (a clock that went back: a gap)
+}
+
 TEST_CASE("pause tab (cs-customize-0119, lane gc198-l5b): a stall keeps Character Select's Customize screen open") {
     // The lane: the game's threads waited 645 ms for a core; the open screen was taken as closed and opened again on its
     // first page, so 3 Y presses reached page 2 only. A strip not updated lately but last seen up is a stall: kept.
@@ -2569,6 +2649,62 @@ TEST_CASE("pause tab (cs-customize-0119, lane gc198-l5b): a stall keeps Characte
     CHECK(SnailPadFrom(1000, 1000 + kSnailGoneMs) == SnailPadState::kPause);
     CHECK(SnailPadFrom(1000, 1000 + kSnailGoneMs + 1) == SnailPadState::kGone);
     CHECK(SnailPadFrom(2000, 1000) == SnailPadState::kDrive);   // (a clock that went back)
+}
+
+TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the strip reads it, or the left edge") {
+    using namespace CoopPauseTab;
+    CharactersHop h;
+    // Our page shows: L (our tab to Map), then the pace.
+    CHECK(CharactersHopNext(h, true, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, true, true, 2, 1100) == HopStep::kWait);
+    // Our page gone, Map (2) current: the game's L (Map to Threads of Time 1), then Key Items (6), then Characters.
+    CHECK(CharactersHopNext(h, false, true, 2, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, false, true, 1, 2000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, false, true, 6, 2500) == HopStep::kTapL);   // (Key Items is the game's: one more tap)
+    CHECK(CharactersHopNext(h, false, true, 0, 3000) == HopStep::kDone);   // (anything else: Characters)
+    CHECK(GameMinusCategory(6));
+    CHECK(GameMinusCategory(1));
+    CHECK(GameMinusCategory(2));
+    CHECK_FALSE(GameMinusCategory(0));
+    CHECK_FALSE(GameMinusCategory(3));
+    CHECK_FALSE(GameMinusCategory(-1));
+    CharactersHop c4;
+    CHECK(CharactersHopNext(c4, false, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(c4, false, true, 6, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(c4, false, true, 4, 2000) == HopStep::kDone);
+    // The category not readable: waits.
+    CharactersHop unread;
+    CHECK(CharactersHopNext(unread, false, true, -1, 1000) == HopStep::kWait);
+    // The - menu no longer the open screen (closed, the Plus menu, another screen, a load, typing): over at once, no tap.
+    for (const bool ours : {true, false}) {
+        CharactersHop w;
+        CHECK(CharactersHopNext(w, ours, false, 2, 1000) == HopStep::kGiveUp);
+        CharactersHop mid;
+        CHECK(CharactersHopNext(mid, ours, true, 2, 1000) == HopStep::kTapL);
+        CHECK(CharactersHopNext(mid, ours, false, 2, 1600) == HopStep::kGiveUp);   // (shut between two taps)
+        CHECK(CharactersHopNext(mid, ours, false, 0, 1700) == HopStep::kGiveUp);   // (not "arrived" either)
+    }
+    // The left edge: a tap that moved nothing ends it (the strip's own numbering unknown).
+    CharactersHop e;
+    CHECK(CharactersHopNext(e, false, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(e, false, true, 1, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(e, false, true, 1, 2000) == HopStep::kDone);   // (a tap that left Threads where it was)
+    // The first game tap is not an edge before it has sent one.
+    CharactersHop f;
+    CHECK(CharactersHopNext(f, false, true, 2, 1000) == HopStep::kTapL);
+    // Given up: too many taps, or too long.
+    CharactersHop t;
+    std::uint64_t now = 1000;
+    int taps = 0;
+    for (int i = 0; i < 20; ++i, now += 600) {
+        const HopStep s = CharactersHopNext(t, true, true, 2, now);
+        if (s == HopStep::kTapL) ++taps;
+        if (s == HopStep::kGiveUp) break;
+    }
+    CHECK(taps == kHopMaxTaps);
+    CharactersHop slow;
+    CHECK(CharactersHopNext(slow, true, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(slow, true, true, 2, 1000 + kHopMaxMs + 1) == HopStep::kGiveUp);
 }
 
 TEST_CASE("pause tab: the fourth tab's place and fades taken one update ahead, not past where they head") {
@@ -3034,22 +3170,23 @@ TEST_CASE("pause tab (charsel-native-0119, run 4620f3e7): a screen layout's verd
     CHECK_FALSE(LayoutLookAgain(true, 0x100, 3, 0x100, 0));
 }
 
-TEST_CASE("pause tab (review-01111-a): Character Select's Customize verdict, a carried 'his' is never kept for CoopMenu_00") {
-    // His panes there: his, proven.
-    CHECK(SnailVerdictFrom(true, false, false, false).his);
-    CHECK_FALSE(SnailVerdictFrom(true, false, true, true).carried);
-    // Co-op's CoopMenu_00 page pane there: not his, even made at his freed screen and layout (run 4620f3e7).
-    CHECK_FALSE(SnailVerdictFrom(false, true, true, true).his);
-    CHECK_FALSE(SnailVerdictFrom(false, true, true, true).carried);
-    // Neither yet on the same screen object that was his (lane 061445: his opening before his panes): his, CARRIED, so
-    // SnailScreen looks again at every update; the next look with CoopMenu_00's pane found turns it to not his.
-    const SnailVerdict first = SnailVerdictFrom(false, false, true, true);
-    CHECK(first.his);
-    CHECK(first.carried);
-    CHECK_FALSE(SnailVerdictFrom(false, true, first.his, true).his);   // (CoopMenu_00's pane came late)
-    CHECK(SnailVerdictFrom(true, false, first.his, true).his);          // (his panes came late: his, proven)
-    CHECK_FALSE(SnailVerdictFrom(true, false, first.his, true).carried);
-    // Nothing carried to another screen object, or from a verdict that was not his.
-    CHECK_FALSE(SnailVerdictFrom(false, false, true, false).his);
-    CHECK_FALSE(SnailVerdictFrom(false, false, false, true).his);
+TEST_CASE("pause tab (run 4620f3e7): CoopMenu_00 made at his freed Customize screen's addresses is ours, never his") {
+    // SnailScreen and CoopMenuScreen each keep a ScreenPanes; both see every screen update (state 1/2: open).
+    ScreenPanes snail, coop;
+    bool his_panes = true, coop_pane = false;
+    const auto his = [&] { return his_panes; };
+    const auto ours = [&] { return coop_pane; };
+    // (one update of the screen: 1 his, 2 ours, 0 neither, 3 both)
+    const auto frame = [&](bool open, std::uint64_t t) {
+        return (snail.Update(0x100, 0x200, open, t, his) ? 1 : 0) + (coop.Update(0x100, 0x200, open, t, ours) ? 2 : 0);
+    };
+    CHECK(frame(true, 1000) == 1);  // his Customize screen
+    CHECK(frame(false, 1016) == 1);  // it closes (his close is seen)
+    // Freed; CoopMenu_00 made at the same screen and layout addresses, its page pane a few frames late.
+    his_panes = false;
+    CHECK(frame(true, 1032) == 0);  // (not his: his panes are not there)
+    coop_pane = true;
+    for (std::uint64_t t = 1048; t <= 1048 + 2 * kScreenLookMs; t += 16) {
+        CHECK(frame(true, t) == 2);  // ours from its pane on; never his for the whole opening
+    }
 }
