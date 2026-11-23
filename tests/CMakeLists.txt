@@ -159,6 +159,7 @@ add_executable(coop_tests
   lichii/char_colours_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_char_colours.cpp
   lichii/charsel_tidy_test.cpp
   lichii/char_slots_test.cpp
+  lichii/char_ages_test.cpp
   lichii/eye_switch_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_eye_switch.cpp
   lichii/event_result_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_event_result.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_ocarina.cpp
