@@ -1268,6 +1268,12 @@ CoopDraw::Scene DrawScene() {
     // scene (never on the title or a file screen, where Minus is not the - menu); the drawn list only when the pack has
     // no - tabs of ours (OpenPlayers false) or for tests (LICHII_COOP_SHOW_PLAYERS).
     static std::atomic<bool> native_list{true};
+    {   // Free play for F6's Minus, each frame: our Link's frame is fresh (none in a load or on the title) and no event
+        // (cutscene, talk) has control (CoopHook::CurrentMapView); the pause tab also reads the event manager itself.
+        thread_local CoopHook::MapView view;
+        const bool free_play = !CoopTitle::Up() && CoopHook::CurrentMapView(view) && !view.event;
+        CoopPauseTab::SetFreePlay(free_play);
+    }
     if (list_press) {
         const bool in_scene = !CoopTitle::Up() && std::any_of(rows.begin(), rows.end(), [](const CoopHook::PlayerRow& r) {
             return r.self && r.scene && !r.scene->empty();

@@ -1872,6 +1872,7 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         }
     }
     g_minus_ok = g_game_tabs[2] != 0;
+    if (g_minus_ok) g_players_no_tabs = false;   // (F6: this opening has our tabs, whatever an earlier one had)
     for (int i = 0; i < 2; ++i) {
         const std::uint64_t b = FindOwnPane(ctx, f.layout, i == 0 ? "T_BtnL_00" : "T_BtnR_00");
         g_strip_btns[static_cast<std::size_t>(i)] = b;
@@ -2455,7 +2456,23 @@ std::atomic<bool> g_hop_on{false};   // (a hop to the Characters tab runs: OnPad
 // window's or present's thread, OnPad on the input thread). g_players_no_tabs: a - menu opened without tabs of ours.
 std::mutex g_players_mutex;
 CoopPlayersOpen::Run g_players_run;
-std::atomic<bool> g_players_no_tabs{false};
+std::atomic<bool> g_players_no_tabs{false};   // (the last - menu opening looked up had no tabs of ours; a later one
+                                              // that has them clears it: LookStrip)
+// Free play as the module last read it (SetFreePlay: our Link in a scene, no event, no load), and when: a reading older
+// than kFreePlayFreshMs counts as not free.
+std::atomic<bool> g_free_play{false};
+std::atomic<std::uint64_t> g_free_play_ms{0};
+constexpr std::uint64_t kFreePlayFreshMs = 500;
+// The game's event manager: an event (cutscene, talk, item get) runs while [[main + 0x4e94840] + 0x68] is set
+// (lichii/hook/coop_live_events.h kEventStatePtr / kEventSession, docs/dungeons-boss.md). Read at each Minus press.
+constexpr std::uint64_t kEventStatePtr = 0x4e94840, kEventSession = 0x68;
+bool EventNow() {
+    const std::uint64_t manager = Read<std::uint64_t>(CoopRuntime::MainBase() + kEventStatePtr);
+    return manager != 0 && Read<std::uint64_t>(manager + kEventSession) != 0;
+}
+bool FreePlayNow() {
+    return g_free_play.load() && NowMs() - g_free_play_ms.load() < kFreePlayFreshMs && !EventNow();
+}
 void MinusDecide(int tab, int row) {
     if (tab < 0 || tab >= kMinusTabs) return;
     if (ViewShown() == View::kMenu) {
@@ -3820,8 +3837,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     CoopPlayersOpen::Seen seen;
                     seen.strip_open = g_page.MinusStripOpen();
                     seen.our_tab = g_page.MinusTab();
-                    seen.tabs_ok = g_minus_ok;
+                    // (this opening's lookup of our tabs: LookStrip for the strip's opening now, else not known yet)
+                    seen.tabs = !(g_strip_looked && g_strip_gen == g_strip_gen_now.load()) ? CoopPlayersOpen::Tabs::kUnknown
+                                : g_minus_ok                                                ? CoopPlayersOpen::Tabs::kYes
+                                                                                            : CoopPlayersOpen::Tabs::kNo;
+                    seen.free_play = !seen.strip_open && FreePlayNow();
                     seen.blocked = g_page.Typing() >= 0 || CoopHookshot::ChatOpen() || g_hop_on.load();
+                    const bool was_open = g_players_run.opened_after_second();
                     switch (g_players_run.Next(seen, NowMs())) {
                     case CoopPlayersOpen::Step::kPressMinus: in |= kPadMinus; break;
                     case CoopPlayersOpen::Step::kTapL: in |= kPadL; break;
@@ -3836,12 +3858,20 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         LOG_INFO(Core, "coop: pause tab: F6: the - menu has no tabs of ours (build the puppet pack "
                                        "again): F6 shows the list over the picture");
                         break;
+                    case CoopPlayersOpen::Step::kNotFree:
+                        LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): "
+                                       "Minus not pressed ({} pressed before)", g_players_run.presses());
+                        break;
                     case CoopPlayersOpen::Step::kGiveUp:
                         LOG_INFO(Core, "coop: pause tab: F6: given up (the - menu did not come, was shut, or typing) "
                                        "after {} press(es), {} tap(s)",
                                  g_players_run.presses(), g_players_run.taps());
                         break;
                     default: break;
+                    }
+                    if (!was_open && g_players_run.opened_after_second()) {
+                        LOG_INFO(Core, "coop: pause tab: F6: the - menu came only after the second Minus (a slow game): "
+                                       "if it shut again, that press was the one");
                     }
                 }
             }
@@ -4541,12 +4571,21 @@ bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
 }
 
+void SetFreePlay(bool free_play) noexcept {
+    g_free_play = free_play;
+    g_free_play_ms = NowMs();
+}
+
 bool OpenPlayers() noexcept {
     if (g_players_no_tabs.load()) return false;
     try {
         std::lock_guard lock(g_players_mutex);
         if (!g_players_run.On()) {
             const bool menu_up = GameMenuUp();
+            if (!menu_up && !FreePlayNow()) {
+                LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): nothing pressed");
+                return true;
+            }
             g_players_run.Start(NowMs(), menu_up);
             LOG_INFO(Core, "coop: pause tab: F6: to the Players view ({})",
                      menu_up ? "a menu is up: no Minus" : "Minus opens the - menu");

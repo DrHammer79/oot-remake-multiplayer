@@ -7,14 +7,20 @@
 using CoopPlayersOpen::Run;
 using CoopPlayersOpen::Seen;
 using CoopPlayersOpen::Step;
+using CoopPlayersOpen::Tabs;
 
 namespace {
-Seen Shut() { return Seen{}; }
-Seen Open(int tab, bool tabs_ok = true) {
+Seen Shut(bool free_play = true) {
+    Seen s;
+    s.free_play = free_play;
+    return s;
+}
+Seen Open(int tab, Tabs tabs = Tabs::kYes) {
     Seen s;
     s.strip_open = true;
     s.our_tab = tab;
-    s.tabs_ok = tabs_ok;
+    s.tabs = tabs;
+    s.free_play = true;
     return s;
 }
 }  // namespace
@@ -97,7 +103,47 @@ TEST_CASE("F6 players: a pack without our - tabs stops once the strip settled (F
     Run r;
     r.Start(0, false);
     CHECK(r.Next(Shut(), 0) == Step::kPressMinus);
-    CHECK(r.Next(Open(-1, false), 200) == Step::kWait);   // (just opened: its tabs are still being looked up)
-    CHECK(r.Next(Open(-1, false), 200 + CoopPlayersOpen::kTapGapMs) == Step::kNoTabs);
+    CHECK(r.Next(Open(-1, Tabs::kNo), 200) == Step::kWait);   // (just opened: settles first)
+    CHECK(r.Next(Open(-1, Tabs::kNo), 200 + CoopPlayersOpen::kTapGapMs) == Step::kNoTabs);
     CHECK_FALSE(r.On());
+    // This opening's lookup not run yet (a stall): no verdict, no tap, it waits; then the tabs are found and it taps.
+    Run late;
+    late.Start(0, true);
+    CHECK(late.Next(Open(-1, Tabs::kUnknown), 0) == Step::kWait);
+    CHECK(late.Next(Open(-1, Tabs::kUnknown), 3000) == Step::kWait);
+    CHECK(late.taps() == 0);
+    CHECK(late.Next(Open(-1, Tabs::kYes), 3100) == Step::kTapR);
+    // Never looked up within the run's limit: given up, not "no tabs" (the next F6 tries again).
+    Run never;
+    never.Start(0, true);
+    CHECK(never.Next(Open(-1, Tabs::kUnknown), 0) == Step::kWait);
+    CHECK(never.Next(Open(-1, Tabs::kUnknown), CoopPlayersOpen::kMostMs + 1) == Step::kGiveUp);
+}
+
+TEST_CASE("F6 players: Minus only in free play (no event, load or other screen)") {
+    // An event, a load or another screen with the - menu shut: nothing pressed, stopped.
+    Run cutscene;
+    cutscene.Start(0, false);
+    CHECK(cutscene.Next(Shut(false), 0) == Step::kNotFree);
+    CHECK(cutscene.presses() == 0);
+    CHECK_FALSE(cutscene.On());
+    // Free play at the first press, an event before the second: no second press.
+    Run talk;
+    talk.Start(0, false);
+    CHECK(talk.Next(Shut(), 0) == Step::kPressMinus);
+    CHECK(talk.Next(Shut(false), CoopPlayersOpen::kOpenWaitMs + 1) == Step::kNotFree);
+    CHECK(talk.presses() == 1);
+    // The strip opened after the second press (a stall): said, so the log can tell.
+    Run slow;
+    slow.Start(0, false);
+    CHECK(slow.Next(Shut(), 0) == Step::kPressMinus);
+    CHECK(slow.Next(Shut(), CoopPlayersOpen::kOpenWaitMs + 1) == Step::kPressMinus);
+    CHECK(slow.Next(Open(-1), CoopPlayersOpen::kOpenWaitMs + 900) == Step::kWait);
+    CHECK(slow.opened_after_second());
+    // In the - menu already (not free play there): the taps still go.
+    Run in_menu;
+    in_menu.Start(0, true);
+    Seen open = Open(2);
+    open.free_play = false;
+    CHECK(in_menu.Next(open, 0) == Step::kTapL);
 }
