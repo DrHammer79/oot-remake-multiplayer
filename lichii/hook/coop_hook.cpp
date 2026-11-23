@@ -1823,38 +1823,9 @@ public:
             static const std::uint32_t picked_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
             EmulatorMemory flag_memory(system.ApplicationMemory(), base_);
             const auto picked = coop::host::GameFlags(flag_memory).get_int(picked_hash);
-            // ... and that mod's Customize options for it (kCustomFlags: an Int each, 0 to 15; 0 is the model's own).
-            static const auto custom_hashes = [] {
-                std::array<std::uint32_t, CoopLookShare::kCustomFlags.size()> out{};
-                for (std::size_t i = 0; i < out.size(); ++i) {
-                    out[i] = coop::host::flag_hash(CoopLookShare::kCustomFlags[i]);
-                }
-                return out;
-            }();
-            // 0.11.9 (the owner: ONE customizer, co-op's own): the mod's own Customize options are held at 0, the
-            // model's own colours, so its code never paints over ours (its per-frame dresser changes only what an
-            // option sets; at 0 it reads and goes on; its Customize screen puts the model's own back for an option at 0).
-            std::array<std::optional<std::int32_t>, CoopLookShare::kCustomFlags.size()> values{};
-            for (std::size_t i = 0; i < custom_hashes.size(); ++i) {
-                values[i] = coop::host::GameFlags(flag_memory).get_int(custom_hashes[i]);
-            }
-            std::size_t cleared = 0;
-            for (const std::size_t i : CoopLookShare::OptionsToHold(values)) {
-                if (coop::host::GameFlags::set_int(flag_memory, custom_hashes[i], 0)) ++cleared;
-            }
-            static bool said_held = false;
-            if (cleared != 0 && !said_held) {
-                said_held = true;
-                LOG_INFO(Core, "coop: characters: Character Select's own Customize options set back to the model's own "
-                               "({} of them): co-op's look is the one customizer", cleared);
-            }
-            const std::uint32_t custom = 0;   // (none of the mod's own: nothing of them goes to the others either)
-            // What the mod's own code puts on every player-like model, puppets too (coop_char_colours.h Wardrobe).
-            CoopCharColours::TheWardrobe().SetViewer(custom);
-            CoopCharColours::SetModPresent(picked.has_value());   // (row 207: its saved Int is there)
-            CoopCharColours::SetShownCharacter(picked && *picked > 0 && *picked <= CoopLookShare::kCharacterMax
-                                                   ? static_cast<std::uint16_t>(*picked)
-                                                   : std::uint16_t{0});
+            // (The mod's own options held at 0, ModPresent and ShownCharacter: OwnCharacterFrame, every 30th frame of
+            // the module, co-op on or off. Here: the pick sent to the others.)
+            const std::uint32_t custom = 0;   // (none of the mod's own: nothing of them goes to the others)
             // A guest on the host's save sends its own pick and options, not the host's (CoopLookShare::OwnPick).
             using CoopLookShare::OwnPick;
             static OwnPick own_pick;
@@ -3796,6 +3767,43 @@ namespace {
 // join) starts from a pick whose model is not here. 0.11.9 ran it only in a session and only in play: a solo game
 // never had it, and a guest had it from the load's first frame. Also registers the save files' fix (FixSavePick) on
 // the module's first frame, before the first title.
+// npc-customize-2 (solo): your own Character Select pick and the mod's own Customize options, every 30th frame of the
+// module, co-op on or off (0.11.11 read them only in a session's Update, so a solo game's Customize screen, its
+// menu model and your own model took a picked character for Link and the mod's options were not held).
+static void OwnCharacterFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick) {
+    // The mod's Customize options for the pick (kCustomFlags: an Int each, 0 to 15; 0 is the model's own).
+    static const auto custom_hashes = [] {
+        std::array<std::uint32_t, CoopLookShare::kCustomFlags.size()> out{};
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            out[i] = coop::host::flag_hash(CoopLookShare::kCustomFlags[i]);
+        }
+        return out;
+    }();
+    // 0.11.9 (the owner: ONE customizer, co-op's own): the mod's own Customize options are held at 0, the
+    // model's own colours, so its code never paints over ours (its per-frame dresser changes only what an
+    // option sets; at 0 it reads and goes on; its Customize screen puts the model's own back for an option at 0).
+    std::array<std::optional<std::int32_t>, CoopLookShare::kCustomFlags.size()> values{};
+    for (std::size_t i = 0; i < custom_hashes.size(); ++i) {
+        values[i] = coop::host::GameFlags(memory).get_int(custom_hashes[i]);
+    }
+    std::size_t cleared = 0;
+    for (const std::size_t i : CoopLookShare::OptionsToHold(values)) {
+        if (coop::host::GameFlags::set_int(memory, custom_hashes[i], 0)) ++cleared;
+    }
+    static bool said_held = false;
+    if (cleared != 0 && !said_held) {
+        said_held = true;
+        LOG_INFO(Core, "coop: characters: Character Select's own Customize options set back to the model's own "
+                       "({} of them): co-op's look is the one customizer", cleared);
+    }
+    // What the mod's own code puts on every player-like model, puppets too (coop_char_colours.h Wardrobe).
+    CoopCharColours::TheWardrobe().SetViewer(0);
+    CoopCharColours::SetModPresent(pick.has_value());   // (row 207: its saved Int is there)
+    CoopCharColours::SetShownCharacter(pick && *pick > 0 && *pick <= CoopLookShare::kCharacterMax
+                                           ? static_cast<std::uint16_t>(*pick)
+                                           : std::uint16_t{0});
+}
+
 void PickGuardFrame(Core::System& system) {
     static const std::uint32_t pick_hash = coop::host::flag_hash("CharacterMenu_SelectedCharacter");
     static const bool save_fix_set = [] {
@@ -3827,6 +3835,10 @@ void PickGuardFrame(Core::System& system) {
         tick = 0;
     }
     if (base == 0) return;
+    if (tick % 30 == 0) {   // (your own pick for the Customize screen and the dressers, solo too)
+        EmulatorMemory memory(system.ApplicationMemory(), base);
+        OwnCharacterFrame(memory, coop::host::GameFlags(memory).get_int(pick_hash));
+    }
     if (tick++ % 600 == 0) files = CoopPuppetConfig::KnownCharacterFiles();   // (the pack's or the mod's, every 10 s)
     if (!files) return;
     EmulatorMemory memory(system.ApplicationMemory(), base);
