@@ -161,7 +161,8 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
         last_enemy = life
         a, w = ph._look(client, ident)
         st = pc.game_of(client.state())
-        if isinstance(a, dict) and isinstance(a.get("life"), (int, float)) and isinstance(last_enemy, (int, float))                 and a["life"] < last_enemy:
+        was, now_enemy = last_enemy, a.get("life") if isinstance(a, dict) else None
+        if isinstance(now_enemy, (int, float)) and isinstance(was, (int, float)) and now_enemy < was:
             out["hits"] += 1
         now_life = st.get("life")
         hurt_last = isinstance(now_life, (int, float)) and isinstance(mine, (int, float)) and now_life < mine
