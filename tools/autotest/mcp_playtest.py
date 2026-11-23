@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_setup  # noqa: E402
 import kit_tools  # noqa: E402
 import playtest_client as pc  # noqa: E402
 import playtest_helpers as ph  # noqa: E402
@@ -337,6 +338,21 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"],
                      "properties": {"name": {"type": "string"},
                                     "value": {"type": ["integer", "boolean", "string"]}}}},
+    {"name": "setup", "description": "Set a test up in ONE call (instead of many flag/give/warp calls): hearts "
+     "(current life, 1-20), max_hearts (3-20), magic (0 none, 1 meter, 2 double), rupees, small_keys {Dungeon: n}, "
+     "boss_keys / maps / compasses [Dungeon], items [give names], flags {name: value}, and a last warp {scene, entrance} "
+     "(a boss stage such as GohmaStage works in free play). Dungeons: DekuTree, DodongoCavern, JabuJabu, ForestTemple, "
+     "FireTemple, WaterTemple, ShadowTemple, SpiritTemple, BottomOfTheWell, IceCavern, GerudoTrainingGround, "
+     "GerudoFortress, GanonsCastle, FinalBattleField. Runs in that order, stops at the first refused call and says which. "
+     "Needs the verb gate (LICHII_COOP_PLAYTEST_VERBS, LICHII_COOP_CHEATS). MaxLife may be written back by the game "
+     "(docs/items.md): read it with get_state after.",
+     "inputSchema": {"type": "object",
+                     "properties": {"hearts": {"type": "integer"}, "max_hearts": {"type": "integer"},
+                                    "magic": {"type": "integer"}, "rupees": {"type": "integer"},
+                                    "small_keys": {"type": "object"}, "boss_keys": {"type": "array"},
+                                    "maps": {"type": "array"}, "compasses": {"type": "array"},
+                                    "items": {"type": "array"}, "flags": {"type": "object"},
+                                    "warp": {"type": "object"}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
      "Weapon_Sword_Kokiri, or a full flag name such as IsGet.Item_Boomerang). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
@@ -536,6 +552,8 @@ class Game:
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":
             return c.give(args["item"])
+        if name == "setup":
+            return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k != "player"})}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):
             return ph.place_facing(c, act_line(name, args), face_point(args))
         line = act_line(name, args)

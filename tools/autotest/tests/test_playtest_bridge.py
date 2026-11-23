@@ -378,7 +378,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -521,6 +521,16 @@ class PlayerServer(unittest.TestCase):
             with self.assertRaises(ValueError, msg=tool):
                 self.call("p1", tool, **args)
         self.assertEqual(len(self.games["p1"].log), before)
+
+    def test_setup_runs_a_spec_in_one_call_and_says_which_step_failed(self):
+        r = self.call("p1", "setup", hearts=5, rupees=50, small_keys={"ForestTemple": 2})
+        self.assertEqual(len(r["steps"]), 3)
+        f = self.games["p1"].flags
+        self.assertEqual((f["PlayerStatus.Life"], f["PlayerStatus.CurrentRupee"], f["DungeonInfo.ForestTemple.SmallKeyNum"]),
+                         (20, 50, 2))
+        self.assertNotIn("PlayerStatus.Life", self.games["p2"].flags)   # only the asked game
+        with self.assertRaises(Exception):
+            self.call("p1", "setup", hearts=0)
 
     def test_press_warp_flag_give_step_resume(self):
         r = self.call("p1", "press", buttons=["a", "ZL"], stick_angle=90, stick_strength=1.0, frames=4)
