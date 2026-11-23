@@ -8198,3 +8198,88 @@ TEST_CASE("row 222: a battle manager is flagged for the server's option C only b
     CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(true, true));   // option A: it hands over as any boss group
     CHECK_FALSE(CoopObjects::PresenceFlagsBattleManager(false, false));
 }
+
+TEST_CASE("objects: a boss part another game killed that our copy refused dies by its own Life step, once (rows 257/258)") {
+    // #258 (host log): P2 owned Barinade and killed each jellyfish; our copy's game refused the replayed killing
+    // hit ("a hit the boss's game did not take"), the remove replayed it a second time, and kDeadGraceUs later the
+    // copy was deleted from outside. Barinade's next phase unstuck a jellyfish half deleted: a null write.
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    REQUIRE(CoopObjects::IsBossPart(kJelly));
+    Sync copy;
+    copy.SetHurt(true);
+    const auto walk = [&](std::int32_t boss_life, std::int32_t jelly_life) {
+        return std::vector<Seen>{Enemy(0x100, 0x11, boss_life, 0.0f, kBoss), Enemy(0x200, 0x12, jelly_life, 1.0f, kJelly)};
+    };
+    Tick(copy, 0, walk(20, 1));
+    const proto::ObjectId boss = *copy.IdOf(0x100);
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, boss, 2, 1);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(LifeSample(jelly, 0, 1));
+    auto step = Tick(copy, 100 * kMs, walk(20, 1));
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].address == 0x200);
+    CHECK(step.writes[0].hurt == 1);
+    CHECK_FALSE(step.writes[0].direct);  // the replay first: its game's own reaction where it takes it
+    // Refused: after the wait its whole life goes to its own Life step (never a write), once.
+    step = Tick(copy, 600 * kMs, walk(20, 1));
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].address == 0x200);
+    CHECK(step.writes[0].direct);
+    CHECK(step.writes[0].hurt == 1);
+    CHECK(step.writes[0].life == 0);
+    CHECK(copy.PartKillsStepped() == 1);
+    // Its owner's remove (dead) replays no second killing blow.
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    step = Tick(copy, 700 * kMs, walk(20, 1));
+    CHECK(step.writes.empty());
+    CHECK(Tick(copy, 1500 * kMs, walk(20, 1)).writes.empty());
+    CHECK(copy.PartKillsStepped() == 1);
+    // Never deleted from outside while its boss lives here (its own death ends it), also long past the grace.
+    Tick(copy, 700 * kMs + Sync::kDeadGraceUs + 500 * kMs, walk(20, 1));
+    CHECK(copy.Removes().empty());
+    Tick(copy, 700 * kMs + 4 * Sync::kDeadGraceUs, walk(20, 0));  // (its own death runs: life 0)
+    CHECK(copy.Removes().empty());
+    // Its boss dead here: the grace delete is the fallback again.
+    Tick(copy, 700 * kMs + 5 * Sync::kDeadGraceUs, walk(0, 0));
+    CHECK(copy.Removes() == std::vector<std::uint64_t>{0x200});
+}
+
+TEST_CASE("objects: a boss part's refused kill with no boss of it here still goes after the grace (rows 257/258)") {
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    auto step = Tick(copy, 100 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);  // the killing replay first
+    step = Tick(copy, 600 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK(step.writes[0].direct);  // refused: to its own Life step
+    CHECK(copy.Removes().empty());
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + 100 * kMs, {Enemy(0x200, 0x12, 1, 0.0f, kJelly)});
+    CHECK(copy.Removes() == std::vector<std::uint64_t>{0x200});
+}
+
+TEST_CASE("objects: a boss copy's refused killing hit is not given here, nor a plain enemy's (rows 257/258 scope)") {
+    // The boss itself keeps its own rules (HeldLifeStep, SetDying); a plain enemy keeps the write/grace path.
+    CHECK_FALSE(CoopObjects::IsBossPart("Enemy_DungeonBoss_Barinade"));
+    CHECK_FALSE(CoopObjects::IsBossPart("Enemy_Stalchild"));
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    const proto::ObjectId id = *copy.IdOf(0x100);
+    Own(copy, id, 2, 1);
+    copy.Receive(LifeSample(id, 0, 20));
+    auto step = Tick(copy, 100 * kMs, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    REQUIRE(step.writes.size() == 1);
+    CHECK_FALSE(step.writes[0].direct);
+    step = Tick(copy, 600 * kMs, {Enemy(0x100, 0x11, 1, 0.0f, kBoss)});
+    CHECK(step.writes.empty());
+    CHECK(copy.PartKillsStepped() == 0);
+}

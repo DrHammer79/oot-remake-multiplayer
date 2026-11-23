@@ -1286,6 +1286,8 @@ public:
     std::size_t HurtsMissed() const { return hurt_missed_; }
     // Another player's hits our boss refused as a replay, given to its own Life step (boss-hits).
     std::size_t BossHitsStepped() const { return boss_hits_stepped_; }
+    // Rows 257/258: another game's kills of a boss part our copy's game refused, given to the part's own Life step.
+    std::size_t PartKillsStepped() const { return part_kills_stepped_; }
     // Copies dead here whose owner still showed life after every resend (a lost kill: the games stay split).
     std::size_t SplitKills() const { return split_kills_; }
     std::size_t HurtsLate() const { return hurt_late_; }
@@ -1487,6 +1489,10 @@ private:
     // The hits the game's Life step dealt o that count now (SetLifeEvents);
     // o.step_rest gets the part of `fell` that no step explains.
     std::int32_t StepHits(Object& o, std::int32_t fell, std::int32_t life, std::uint64_t now_us);
+    // Rows 257/258: a boss's part (Barinade's jellyfish) whose boss is still alive here is never deleted from
+    // outside after kDeadGraceUs: its boss holds it (a jellyfish stuck to Barinade, unstuck in her next phase),
+    // and a part deleted under it is a null write in the boss's own code. Its own death ends it.
+    bool HeldByItsBoss(const Object& o) const;
     void Lower(Object& o, std::int32_t life, std::uint64_t now_us, std::vector<LifeWrite>& writes,
                std::uint8_t hitter,
                const std::optional<coop::protocol::Vec3>& hit_at = std::nullopt,
@@ -1801,6 +1807,7 @@ private:
     std::size_t hurt_late_ = 0;    // late falls put back
     std::size_t hurt_missed_ = 0;  // hurts not taken after the wait (given to the Life step, or lost: never written)
     std::size_t boss_hits_stepped_ = 0;  // of those, another player's hits on our boss given to its Life step
+    std::size_t part_kills_stepped_ = 0;  // of those, another game's kills of a boss part copy (rows 257/258)
     std::size_t split_kills_ = 0;  // copies dead here, owner alive after the resends
     BlastNear blast_near_;
     std::size_t blast_drops_ = 0;
