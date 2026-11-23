@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_tools  # noqa: E402
 import playtest_client as pc  # noqa: E402
 import playtest_helpers as ph  # noqa: E402
 
@@ -285,6 +286,17 @@ PLAYER_TOOLS = [
          "frames": FRAMES}}},
     {"name": "step", "description": "Let the game run N frames with no input, then pause. " + PAUSED,
      "inputSchema": {"type": "object", "required": ["frames"], "properties": {"frames": FRAMES}}},
+    {"name": "step_until", "description": "Let the game run in steps of `chunk` frames (8 by default, up to 60) with no "
+     "input until a state field matches, then pause. `condition` is `field`, `!field` or `field OP value` (OP: == != < "
+     "<= > >=; the value is JSON or a bare word; a dotted path such as `equips.weapon` or `pos.1`): `event == false` "
+     "(a talk is over), `loading == false`, `scene == KokiriForest_Child`, `prompt` (something to talk to or open), "
+     "`life == 0`, `rupees >= 50`. It looks first, so a condition that holds already costs no frame. At most `max_frames` "
+     "(300 by default, up to 3600) pass. Reply: `met`, the field's `value`, `frames_run`, the last `state` and, "
+     "when not met, `why`. A field the state does not have is an error (a typo is not a time-out); a null field is 'do "
+     "not know' (a stale snapshot), never a match for an ordering. " + PAUSED,
+     "inputSchema": {"type": "object", "required": ["condition"],
+                     "properties": {"condition": {"type": "string"}, "max_frames": FRAMES,
+                                    "chunk": {"type": "integer", "minimum": 1, "maximum": kit_tools.MAX_CHUNK}}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
      "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
      "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
@@ -486,6 +498,9 @@ class Game:
             return c.input(stick, buttons, int(args.get("frames", 2)))
         if name == "step":
             return c.step(int(args["frames"]))
+        if name == "step_until":
+            return kit_tools.step_until(c, args.get("condition"), int(_bounded(args, "max_frames", 300, 1, 3600)),
+                                        int(_bounded(args, "chunk", kit_tools.CHUNK, 1, kit_tools.MAX_CHUNK)))
         if name == "warp":
             return c.warp(args["scene"], args.get("entrance"), _bounded(args, "timeout", 60, 1, 600))
         if name == "flag":
