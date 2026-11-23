@@ -1,13 +1,15 @@
-# Player row 238 proof, both variants in one go (lane 1, kits as kit_pair.py setup made them):
-#   proof-join-hearts-238.ps1 -KitA <kit-A> -KitB <kit-B>
-# 1. hs-join-hearts-238 (rejoin after B gained a heart offline), 2. hs-join-fresh-238 (B's baseline save edited to one heart
-# more than A's, B never joined: a fresh join). B's baseline is put back from a copy in a finally block. No PASS from here:
-# the shots decide (read the run folders printed); exit 0 when both runs ended.
+# Player row 238 proof (lane 1, kits as kit_pair.py setup made them):
+#   proof-join-hearts-238.ps1 -KitA <kit-A> -KitB <kit-B> [-Rejoin]
+# hs-join-fresh-238: B's baseline save edited to one heart more than A's, B never joined: a fresh join (the reported
+# case). -Rejoin first runs hs-join-hearts-238 too (server restart: which game hosts afterwards is chance, so it is no
+# row 238 proof; see its header). B's baseline is put back from a copy in a finally block. No PASS from here: the shots
+# decide (read the run folders printed); exit 0 when the runs ended.
 param(
     [Parameter(Mandatory)][string]$KitA,
     [Parameter(Mandatory)][string]$KitB,
     [int]$Timeout = 600,
-    [string]$Server = ''
+    [string]$Server = '',
+    [switch]$Rejoin
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -30,7 +32,7 @@ function Invoke-Run([string]$Scenario) {
 }
 $base = Join-Path $KitB 'autotest-save'   # lane1-B is the game folder itself
 $keep = Join-Path $coopKit 'proof-join-hearts-238-save'
-Invoke-Run 'hs-join-hearts-238'
+if ($Rejoin) { Invoke-Run 'hs-join-hearts-238' }
 if (Test-Path -LiteralPath $keep) { Remove-Item -LiteralPath $keep -Recurse -Force }
 Copy-Item -LiteralPath $base -Destination $keep -Recurse
 try {

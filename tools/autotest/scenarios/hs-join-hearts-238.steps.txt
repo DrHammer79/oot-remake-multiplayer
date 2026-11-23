@@ -1,6 +1,11 @@
 # hs-join-hearts-238 (player row 238): a guest that joins with MORE hearts than the host takes the host's count and
 # does not raise the host (the join's ResetHold in FlagWatcher::apply_snapshot). Both games on their own save,
 # LICHII_COOP_CHEATS=1 for `give`.
+# NOT A ROW 238 PROOF (run 20261123-030254): after `server start` the first game back in hosts (docs/protocol.md: the
+# first player in hosts; a restarted server knows no earlier host). There B got back first, hosted with its 5 hearts and
+# A joined and took them (A "Synced with the group: 1 heart containers"): the join rule working, the roles swapped.
+# Which game wins is chance (both retry every <= 5 s), so proof-join-hearts-238.ps1 runs only hs-join-fresh-238. Kept
+# for the relay-restart host question (reports/hearts-238-01112.md).
 # Setup: both start and join (same hearts). The server goes away; B gains a heart container while its session still
 # runs (B notices the loss only after ~12 s of silence), so its own object walk raises its Link's Life component (B 1
 # more than A, for real); the server comes back and B rejoins with that against the host's count.
@@ -31,7 +36,7 @@ shot j-offline
 server start
 sleep 40
 lines b-rejoined B min=2 coop: welcomed as player
-lines b-lowered B min=1 coop: objects: our Link's max life \d+ -> \d+ \(MaxLife is held lower
+lines b-lowered B min=1 coop: objects: our Link's max life .*MaxLife is held lower
 lines a-not-raised A max=0 coop: objects: our Link's max life \d+ -> \d+ \(from MaxLife\)
 shot j-joined
 play B hs-join-hearts-238.B2.txt

@@ -3213,6 +3213,7 @@ public:
     s32 link_life_logged_ = -1;
     s32 link_max_logged_ = -1;
     s32 flag_max_logged_ = -1;
+    s32 lower_logged_ = -1;   // row 238: the held value whose "already there" was logged (-1: none)
     bool hearts_to_link_ = true;  // LICHII_COOP_HEARTS_TO_LINK, on unless =0 (issue 88)
     // PvP hurts being given to our Link (GivePvp, CoopPvp::FollowLife).
     std::vector<CoopPvp::PendingGive> pvp_;
@@ -4143,7 +4144,15 @@ private:
                     // Rows 136/137: the host's older save lowered MaxLife; row 181: a second pickup of a boss's one
                     // container was put back. The component follows it (never in the frame it was raised).
                     const s32 lower = TheMaxLifeLowerTo().load();
-                    if (lower >= 4 && max > 0 && max <= lower) TheMaxLifeLowerDone().store(max);  // row 238: already there
+                    if (lower >= 4 && max > 0 && max <= lower) {
+                        TheMaxLifeLowerDone().store(max);  // row 238: already there
+                        if (lower != lower_logged_) {
+                            lower_logged_ = lower;
+                            LOG_INFO(Core, "coop: objects: our Link's max life {} is at or under the held {} (MaxLife is held "
+                                           "lower; the game made him from the group's value): nothing to lower", max, lower);
+                        }
+                    }
+                    if (lower < 0) lower_logged_ = -1;
                     const auto lowered =
                         raised ? std::nullopt
                                : LoweredMaxLife(max, life, lower >= 0 ? std::optional<std::int32_t>(lower) : std::nullopt);
