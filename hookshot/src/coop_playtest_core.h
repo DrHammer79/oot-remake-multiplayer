@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -112,7 +113,7 @@ class MoveHold {
 
    private:
     mutable std::mutex mu_;
-    bool on_ = false;
+    std::atomic<bool> on_{false};  // read without the lock first: the pad hook runs at every pad read
     double yaw_ = 0, strength_ = 0;
     Counts counts_;
 };
