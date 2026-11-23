@@ -395,8 +395,8 @@ bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSl
 }
 
 // --- Character Select's Customize screen with co-op's customization (0.11.9, coop_snail_custom.h) ---
-// His screen (layout CharacterCustomize_00) is known by its own panes, once per layout. While it is open its texts are
-// co-op's (through the pack's placeholders in his message file, LayoutMsg/CharacterCustomize_00 Coop_Custom_00..12,
+// His screen (layout CharacterCustomize_00) is known by its own panes, looked at each opening (row 262). While it is
+// open its texts are co-op's (through the pack's placeholders in his message file, LayoutMsg/CharacterCustomize_00 Coop_Custom_00..12,
 // added at the kit's start by merge_tables.py), its keys co-op's but the d-pad, B and -. Fallback: when his texts
 // cannot be set (no placeholders: a start without the merge), co-op keeps his keys but the d-pad, B and - from the
 // game there, so none of his six dead rows changes anything. g_snail_mutex (the game's screen updates and the pad).
@@ -410,11 +410,10 @@ bool g_snail_open = false, g_snail_fallback = false;
 bool g_snail_changed = false;
 std::uint64_t g_snail_screen = 0, g_snail_layout = 0, g_snail_seen_ms = 0, g_snail_gen = 0, g_snail_pad_last = 0;
 std::uint64_t g_snail_edge_ms = 0;   // when his screen's state was first seen open (0: not open), SnailEdgeFrom
-struct SnailLayout {
-    std::uint64_t screen = 0;   // the screen it was looked at with
-    bool his = false;           // his Customize screen's
-};
-std::map<std::uint64_t, SnailLayout> g_snail_layouts;   // a layout: his Customize screen's or not (once per screen)
+// Which layouts are his Customize screen's: looked at again at each opening (CoopPauseTab::ScreenPanes, row 262).
+ScreenPanes g_snail_layouts;
+std::uint64_t g_snail_found_layout = 0;   // (the layout last said found: said once per layout and screen)
+std::uint64_t g_snail_found_screen = 0;
 std::array<LiveSlot, kSnailSlots> g_snail_live{};
 CoopSnailCustom::Texts g_snail_shown;
 std::string g_snail_failed_said;   // (the panes last named as not set: said once per list)
@@ -486,25 +485,26 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         return FindOwnPane(ctx, layout, "T_Val_00_00") != 0 && FindOwnPane(ctx, layout, "T_Label_00") != 0 &&
                FindOwnPane(ctx, layout, "N_Mark_00") != 0;
     };
-    // (a layout is looked at once per screen it comes with. Lane 053539, 0.11.9: Saria's reopen failed every one of
-    // his panes at each update: the layout was known as his by its address alone, and a layout freed and made again at
-    // that address is another screen's. A known address with another screen is looked at again, either way.)
-    auto known = g_snail_layouts.find(layout);
-    if (known == g_snail_layouts.end() || known->second.screen != screen) {
-        if (known == g_snail_layouts.end() && g_snail_layouts.size() > 512) g_snail_layouts.clear();   // (a bound)
-        const bool was = known != g_snail_layouts.end() && known->second.his;
-        const bool his = his_panes();
-        known = g_snail_layouts.insert_or_assign(layout, SnailLayout{screen, his}).first;
-        if (his && !was) {
-            LOG_INFO(Core, "coop: characters: Character Select's Customize screen found (layout {:#x})", layout);
-        } else if (was && !his) {
-            LOG_INFO(Core, "coop: characters: layout {:#x} (screen {:#x}) was Character Select's Customize screen's and "
-                           "has not its panes now: not taken", layout, screen);
-        }
-    }
-    if (!known->second.his) return;
+    // (each opening of a screen looks at its panes again: CoopPauseTab::ScreenPanes. Lane 053539, 0.11.9: a layout
+    // freed and made again at the same address is another screen's; row 262, 0.11.11: so is a screen and its layout
+    // both made again at the same addresses, and a verdict kept per address pair missed his screen for good)
     const int state = Read<std::uint8_t>(screen + kScreenState);
-    if (state != 1 && state != 2) {
+    const bool open_now = state == 1 || state == 2;
+    const bool his = g_snail_layouts.Update(layout, screen, open_now, NowMs(), his_panes);
+    if (his && (layout != g_snail_found_layout || screen != g_snail_found_screen)) {
+        g_snail_found_layout = layout, g_snail_found_screen = screen;
+        LOG_INFO(Core, "coop: characters: Character Select's Customize screen found (screen {:#x}, layout {:#x})", screen,
+                 layout);
+    }
+    if (!his) {
+        // (a screen taken as his that now reads closed, or comes with other panes: left)
+        if (g_snail_open && screen == g_snail_screen && layout == g_snail_layout) {
+            g_snail_edge_ms = 0;
+            SnailClose(open_now ? "its panes are gone" : "closed");
+        }
+        return;
+    }
+    if (!open_now) {
         g_snail_edge_ms = 0;
         SnailClose("closed");
         return;
@@ -2564,29 +2564,22 @@ void ForgetCoopMenu(const char* why) {
 }
 
 // One update of a screen of no kind of ours while the - menu's tabs are native: CoopMenu_00's (its layout has
-// Pa_CoopMinus_00 and Key Items' W_Window_00; each layout looked at once per screen it comes with, as SnailScreen):
+// Pa_CoopMinus_00 and Key Items' W_Window_00; looked at each opening of a screen not ours yet, as SnailScreen):
 // its page looked up for each opening, shown and filled from here.
 void CoopMenuScreen(void* ctx, std::uint64_t screen) {
     const std::uint64_t layout = Read<std::uint64_t>(screen + kScreenLayout);
     if (layout == 0) return;
-    struct Seen {
-        std::uint64_t screen;
-        bool ours;
-    };
-    static std::map<std::uint64_t, Seen> layouts;
+    // (looked at again at each opening of a screen not taken as ours: CoopPauseTab::ScreenPanes, row 262)
+    static ScreenPanes layouts;
     static std::mutex layouts_mutex;
+    const int state = Read<std::uint8_t>(screen + kScreenState);
     {
         std::lock_guard lock(layouts_mutex);
-        auto known = layouts.find(layout);
-        if (known == layouts.end() || known->second.screen != screen) {
-            if (known == layouts.end() && layouts.size() > 512) layouts.clear();   // (a bound)
-            const bool ours =
-                FindOwnPane(ctx, layout, "Pa_CoopMinus_00") != 0 && FindOwnPane(ctx, layout, "W_Window_00") != 0;
-            known = layouts.insert_or_assign(layout, Seen{screen, ours}).first;
-        }
-        if (!known->second.ours) return;
+        const bool ours = layouts.Update(layout, screen, state == 1 || state == 2, NowMs(), [&] {
+            return FindOwnPane(ctx, layout, "Pa_CoopMinus_00") != 0 && FindOwnPane(ctx, layout, "W_Window_00") != 0;
+        });
+        if (!ours) return;
     }
-    const int state = Read<std::uint8_t>(screen + kScreenState);
     const std::uint64_t now = NowMs();
     const std::uint64_t gen = g_strip_gen_now.load();
     int words = -1;

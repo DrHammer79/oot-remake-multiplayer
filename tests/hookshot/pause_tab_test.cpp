@@ -2553,6 +2553,59 @@ TEST_CASE("pause tab (0.11.9, lane 062917): Character Select's Customize screen 
     CHECK(SnailEdgeFrom(true, 1000, 0, 3006, 3008) == SnailEdge::kClose);
 }
 
+TEST_CASE("pause tab (row 262): a screen at addresses taken as another's is looked at again when it opens") {
+    // The owner's 0.11.11 game: another screen (no panes of his) at a layout and screen address pair, then freed; his
+    // Customize screen made at the same two addresses. Before: "not his" kept per address pair, never found.
+    ScreenPanes p;
+    int looks = 0;
+    bool his_panes = false;
+    const auto look = [&] { ++looks; return his_panes; };
+    // (one update a frame from `from` to `to`: the last one's verdict)
+    const auto frames = [&](ScreenPanes& s, bool open, std::uint64_t from, std::uint64_t to) {
+        bool ours = false;
+        for (std::uint64_t t = from; t <= to; t += 16) ours = s.Update(0x100, 0x200, open, t, look);
+        return ours;
+    };
+    CHECK_FALSE(frames(p, true, 1000, 1000 + kScreenLookMs + 32));   // the other screen, open past its window
+    const int settled = looks;
+    CHECK(settled > 1);   // (looked at through its opening's window)
+    CHECK_FALSE(frames(p, true, 1000 + kScreenLookMs + 48, 3000));
+    CHECK(looks == settled);   // (no game calls each frame once settled)
+    CHECK_FALSE(frames(p, false, 3016, 3100));   // it closes (state 3, then 0)
+    CHECK(looks == settled);   // (nothing looked at while closed)
+    his_panes = true;          // freed; his screen made at the same place
+    CHECK(p.Update(0x100, 0x200, true, 3116, look));   // its opening: looked at again, his
+    // The same with no closed update between (freed and made again between two frames): a gap in its updates.
+    ScreenPanes q;
+    his_panes = false;
+    CHECK_FALSE(frames(q, true, 1000, 1000 + kScreenLookMs + 32));
+    his_panes = true;
+    CHECK_FALSE(frames(q, true, 1000 + kScreenLookMs + 48, 2600));   // (no gap, no opening: held)
+    CHECK(q.Update(0x100, 0x200, true, 2600 + kScreenGapMs + 16, look));
+}
+
+TEST_CASE("pause tab (row 262): his panes that come a few frames after the opening are found in that opening") {
+    ScreenPanes p;
+    bool his_panes = false;
+    const auto look = [&] { return his_panes; };
+    CHECK_FALSE(p.Update(0x100, 0x200, false, 900, look));   // made, still closed: nothing decided
+    CHECK_FALSE(p.Update(0x100, 0x200, true, 1000, look));   // open, his panes not there yet
+    his_panes = true;
+    CHECK(p.Update(0x100, 0x200, true, 1050, look));   // there now, inside the opening's window
+    // Taken as his: kept for these addresses through a reopening whose panes come late (lane 061445; SnailScreen
+    // waits for them) and while closed (its close is seen).
+    his_panes = false;
+    CHECK(p.Update(0x100, 0x200, false, 2000, look));
+    CHECK(p.Update(0x100, 0x200, true, 3000, look));
+    // Another screen at the layout: looked at anew.
+    CHECK_FALSE(p.Update(0x100, 0x300, true, 4000, look));
+    // A first update past the window with its panes there (a menu screen opened before the module saw it): found.
+    ScreenPanes q;
+    his_panes = true;
+    CHECK(q.Update(0x500, 0x600, true, 5000, look));
+    CHECK(q.size() == 1);
+}
+
 TEST_CASE("pause tab (cs-customize-0119, lane gc198-l5b): a stall keeps Character Select's Customize screen open") {
     // The lane: the game's threads waited 645 ms for a core; the open screen was taken as closed and opened again on its
     // first page, so 3 Y presses reached page 2 only. A strip not updated lately but last seen up is a stall: kept.
