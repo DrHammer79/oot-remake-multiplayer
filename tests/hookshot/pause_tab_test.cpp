@@ -3,6 +3,7 @@
 // the module does to the game, what the pad lets through, and the probe's lines.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <thread>
@@ -958,15 +959,20 @@ TEST_CASE("pause tab: the details list on the right: the session, why co-op fail
     fv.s.failed = true;
     fv.version = "Squadala! v0.11.6";
     fv.why = "no answer from the relay 127.0.0.1:27530: is the address right, and is the relay running? (a relay from "
-             "before room names does not answer room names: ask the host for the join code)";
+             "before room names does not answer room names: ask the host for the join code; a relay behind a "
+             "firewall needs its UDP port open to the internet, and a relay on this PC needs the port forwarded)";
     d = DetailLines(View::kMain, fv);
     CHECK(d[0].name == "Co-op failed");
     CHECK(d[1].name.rfind("no answer from the relay", 0) == 0);
+    // (lines with no value: the hidden value box's room too, row 139)
+    std::size_t widest = 0;
     for (int i = 1; i < kListRows; ++i) {
         CHECK(!d[static_cast<std::size_t>(i)].name.empty());
         CHECK(d[static_cast<std::size_t>(i)].value.empty());
-        CHECK(d[static_cast<std::size_t>(i)].name.size() <= kListNameChars);
+        CHECK(d[static_cast<std::size_t>(i)].name.size() <= kListLineChars);
+        widest = std::max(widest, d[static_cast<std::size_t>(i)].name.size());
     }
+    CHECK(widest > kListNameChars);
     // (it needs every line: the release gives its line up, and the rest is cut)
     CHECK(d[kListRows - 1].name.substr(d[kListRows - 1].name.size() - 3) == "...");
     fv.why = "The port 27015 is in use";   // (a short one: the release on the line after it)

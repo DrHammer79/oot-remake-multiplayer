@@ -4,6 +4,7 @@
 
 #include "coop_rando.h"
 #include "coop_i18n.h"
+#include "coop_text_fit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -132,9 +133,6 @@ struct Piece {
     bool stops = false;
 };
 
-int Cells(std::uint32_t cp) {
-    return cp >= 0x1100 ? 2 : 1;   // the wide scripts: CJK, kana, hangul, the fullwidth forms
-}
 
 bool Stops(std::uint32_t cp) {
     switch (cp) {
@@ -183,7 +181,7 @@ std::vector<Piece> Pieces(const std::string& text) {
         }
         Piece p;
         p.bytes = text.substr(i, n);
-        p.cells = Cells(cp);
+        p.cells = CoopTextFit::Half(cp);   // (half-letters: the native list's own measure, coop_text_fit.h)
         p.space = cp == ' ';
         p.stops = Stops(cp);
         out.push_back(std::move(p));
@@ -192,9 +190,11 @@ std::vector<Piece> Pieces(const std::string& text) {
     return out;
 }
 
-// A row takes about 85 cells at the menu's usual scale (a line of 44 Chinese
-// characters before the "…"); 76 keeps a margin for a larger UI scale.
-constexpr std::size_t kNoteCells = 76;
+// A note's line is a line of the - page's list with no value (row 139, ui-fit-139-2): CoopPauseTab cuts it to
+// kNoteLetters letters of width and bytes (CoopTextFit::Fit), so a line is broken here within both, never cut there.
+// (0.11.10 broke at 76 cells, the Insert menu's ImGui row, and the native list then cut each line at 30 letters.)
+constexpr std::size_t kNoteCells = 2 * kNoteLetters;   // half-letters
+constexpr std::size_t kNoteBytes = kNoteLetters;
 
 }  // namespace
 
@@ -206,14 +206,18 @@ std::vector<std::string> NoteLines(const std::string& text) {
         std::vector<Piece> left = Pieces(text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
         while (!left.empty()) {
             std::size_t cells = 0;
+            std::size_t bytes = 0;
             std::size_t stop = 0;
             std::size_t space = 0;
             std::size_t take = 0;
             for (; take < left.size(); ++take) {
-                if (cells + static_cast<std::size_t>(left[take].cells) > kNoteCells && take > 0) {
+                if ((cells + static_cast<std::size_t>(left[take].cells) > kNoteCells ||
+                     bytes + left[take].bytes.size() > kNoteBytes) &&
+                    take > 0) {
                     break;
                 }
                 cells += static_cast<std::size_t>(left[take].cells);
+                bytes += left[take].bytes.size();
                 if (left[take].stops) stop = take + 1;
                 if (left[take].space) space = take + 1;
             }

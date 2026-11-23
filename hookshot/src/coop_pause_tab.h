@@ -804,6 +804,10 @@ std::vector<std::string> RowTexts(View view, const SessionView& v);
 // network: its password, then Join; a room: the Join view with its name). ("Cells" below are the list's game rows.)
 inline constexpr int kCells = 6, kCellColumns = 1, kListRows = kCells + 1;
 inline constexpr std::size_t kListNameChars = 30, kListValueChars = 16;   // (the row's left box is 908 units, its right 682)
+// A line with no value (a header, a note, a hint's wrapped words): the module hides its value box (only a line with a
+// value shows one), so its words, left-aligned in the left box, may run on over the right box's room as well (row 139,
+// ui-fit-139-2: the Mods tab's 'Co-op: Player 2 (B): 1 mod ...' was cut at 30 beside an empty right half).
+inline constexpr std::size_t kListLineChars = kListNameChars + kListValueChars;
 // The list's rows for this page: the header, then a page of games ("" rows not shown). With nothing listed, the
 // first game row says why.
 std::vector<ListLine> ListLines(const SessionView& v);

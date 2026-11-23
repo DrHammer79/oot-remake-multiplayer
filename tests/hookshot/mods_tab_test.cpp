@@ -13,6 +13,8 @@
 #include "mod_temp.h"
 #include "coop_mods.h"
 #include "coop_mods_tab.h"
+#include "coop_pause_tab.h"
+#include "coop_text_fit.h"
 #include "coop_rando.h"
 
 namespace fs = std::filesystem;
@@ -328,13 +330,27 @@ TEST_CASE("mods tab: an empty folder says where mods go") {
 
 TEST_CASE("mods tab: a text longer than a row is handed over as several note rows") {
     using CoopModsTab::NoteLines;
-    // A NOTE row is one line over the row's width (hos_coop_menu.h) and Hookshot ends
-    // what does not fit with "…", so a longer text is cut here first.
+    // A NOTE row is a line of the - page's list with no value: CoopPauseTab cuts it to kListLineChars letters of width
+    // and bytes (row 139: 0.11.10 broke at 76 cells and the list cut each line at 30), so a longer text is broken here
+    // within both, and the list never cuts a note's line.
+    CHECK(CoopModsTab::kNoteLetters == CoopPauseTab::kListLineChars);
     const std::string text = "打乱宝箱、迷宫道具和奖励（OOTRR）。联机时所有人玩房主的种子，拾取共享。换种子只需重启游戏，不用重新构建。";
     const std::vector<std::string> lines = NoteLines(text);
-    REQUIRE(lines.size() == 2);
-    CHECK(lines[0] == "打乱宝箱、迷宫道具和奖励（OOTRR）。联机时所有人玩房主的种子，拾取共享。");
-    CHECK(lines[1] == "换种子只需重启游戏，不用重新构建。");
+    REQUIRE(lines.size() >= 2);
+    std::string joined;
+    for (const std::string& line : lines) {
+        CHECK(line.size() <= CoopModsTab::kNoteLetters);
+        CHECK(CoopTextFit::Halves(line) <= 2 * CoopModsTab::kNoteLetters);
+        CHECK(CoopTextFit::Fit(line, CoopPauseTab::kListLineChars) == line);   // (the list shows it whole)
+        joined += line;
+    }
+    CHECK(joined == text);
+    CHECK(lines[0].rfind("打乱宝箱、", 0) == 0);
+    // The Mods tab's co-op line of the 0.11.12 proof (cut at 30 beside an empty value box): one line, whole.
+    const std::string coop = "Co-op: Player 2 (B): 1 mod differs from the host's";
+    const std::vector<std::string> one = NoteLines(coop);
+    REQUIRE(!one.empty());
+    for (const std::string& line : one) CHECK(CoopTextFit::Fit(line, CoopPauseTab::kListLineChars) == line);
 
     // A newline is a break of its own; a short text is one row.
     CHECK(NoteLines("Short.") == std::vector<std::string>{"Short."});
@@ -374,7 +390,7 @@ TEST_CASE("mods tab: a mod's long description shows as several rows of its page"
                 joined += row.name;
             }
         }
-        CHECK(notes == 2);
+        CHECK(notes >= 2);
         CHECK(joined == description);
     }
     fs::remove_all(root, ec);

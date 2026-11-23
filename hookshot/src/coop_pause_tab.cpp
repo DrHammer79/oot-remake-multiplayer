@@ -1860,7 +1860,7 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
     lines[0] = ListLine{FitTo(CoopI18n::Tr(pages > 1 ? title + "  < " + std::to_string(at_page + 1) + " of " +
                                                                            std::to_string(pages) + " >"
                                                      : title),
-                              kListNameChars),
+                              kListLineChars),
                         ""};
     for (int i = 0; i < per_page; ++i) {
         const std::size_t at = static_cast<std::size_t>(at_page * per_page + i);
@@ -1919,7 +1919,7 @@ std::vector<ListLine> ListLines(const SessionView& v) {
         lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")
                               : v.s.online     ? (v.online_state.empty() ? CoopI18n::Tr("Asking the relay...") : v.online_state)
                                                : CoopI18n::Tr("Looking for games..."),
-                              kListNameChars);
+                              kListLineChars);
         if (v.s.online && !v.relay_set) {   // (no relay: typed here, saved as Co-op Settings' Relay row)
             lines[1].name = CoopI18n::Tr("No relay set: A to type one");
             lines[1].act = RowAction::kTypeRelay;
@@ -2085,8 +2085,8 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     why = CoopI18n::Tr(why);
     const std::size_t left = lines.size() - at;
     if (!why.empty() && left > 0) {
-        const bool all = release.empty() || Wrap(why, left, kListNameChars).size() >= left;
-        for (const std::string& l : Wrap(why, all ? left : left - 1, kListNameChars)) lines[at++] = ListLine{l, ""};
+        const bool all = release.empty() || Wrap(why, left, kListLineChars).size() >= left;
+        for (const std::string& l : Wrap(why, all ? left : left - 1, kListLineChars)) lines[at++] = ListLine{l, ""};
     }
     if (!release.empty()) add("Release", release);
     MarkShown(&lines);
@@ -2159,7 +2159,7 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
     }
     // (the header in the player's language after it is built: the module's split shape reads
     // "name  < 1 of 3 >" whole, the name is the table's word, before the cut)
-    out.lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), ""};
+    out.lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListLineChars), ""};
     for (int c = 0; c < cells; ++c) {
         const int i = top + c;
         if (i >= n) break;
@@ -2174,8 +2174,9 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
         if (tr.kind == RowKind::kNote && name.empty()) {   // (a note's words, whichever holds them)
             name = tr.own_value ? tr.value : CoopI18n::Tr(tr.value);
         }
-        out.lines[k] = ListLine{FitTo(name.empty() ? std::string(" ") : name, kListNameChars),
-                                FitTo(tr.kind == RowKind::kNote ? std::string() : MenuValue(tr, typing), kListValueChars)};
+        const std::string value = tr.kind == RowKind::kNote ? std::string() : MenuValue(tr, typing);
+        out.lines[k] = ListLine{FitTo(name.empty() ? std::string(" ") : name, value.empty() ? kListLineChars : kListNameChars),
+                                FitTo(value, kListValueChars)};
         out.rows[k] = i;
         out.selectable[k] = tr.kind != RowKind::kHeading && tr.kind != RowKind::kNote;
         if (list && i == sel) out.picked = c;
