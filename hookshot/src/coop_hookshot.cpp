@@ -494,19 +494,20 @@ void LogBossNative() {
         c.copy_life_held == said.copy_life_held && c.copy_killed == said.copy_killed &&
         c.copy_finished == said.copy_finished && c.copy_shot_hits == said.copy_shot_hits &&
         c.copy_hits_to_owner == said.copy_hits_to_owner && c.copy_own_stuns == said.copy_own_stuns &&
-        c.plain_wakes == said.plain_wakes && c.plain_deaths == said.plain_deaths) {
+        c.plain_wakes == said.plain_wakes && c.plain_deaths == said.plain_deaths &&
+        c.action_slot_busy == said.action_slot_busy && c.action_busy_again == said.action_busy_again) {
         return;
     }
     said_ms = now;
     said = c;
     LOG_INFO(Core, "coop: bosses: ours sent {} brain + {} action verbs ({} by plug); copies: {} own skipped, {} brain + "
-                   "{} action verbs put in ({} waited for a node), {} own run in our event or after our hit ({} late, {} hits by our shots, {} own stuns; "
+                   "{} action verbs put in ({} waited for a node; {} answered a busy slot, {} of them asked again next frame), {} own run in our event or after our hit ({} late, {} hits by our shots, {} own stuns; "
                    "{} hits that took life left to the owner), "
                    "{} own minions not made, {} busy; {} own Life steps held at 1, {} let die after the owner's, {} ended in their death; "
                    "plain enemies: {} own other phases told, {} own wakes run, {} deaths begun; "
                    "owner's brain verbs given to copies {} ({} the copy was in already)",
              c.owner_brain, c.owner_action, c.plug_actions, c.copy_skipped, c.brain_applied, c.action_applied,
-             c.action_waiting, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.busy, c.copy_life_held,
+             c.action_waiting, c.action_slot_busy, c.action_busy_again, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.busy, c.copy_life_held,
              c.copy_killed, c.copy_finished, c.plain_wants, c.plain_wakes, c.plain_deaths, c.brain_came,
              c.brain_already);
 }

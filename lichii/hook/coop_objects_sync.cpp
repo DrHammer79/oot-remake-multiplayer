@@ -555,6 +555,32 @@ std::uint8_t AttackBits(std::optional<bool> attacking) {
                                      (*attacking ? proto::object_state::attacking : 0));
 }
 
+std::vector<std::string_view> RallyMakers(const std::vector<Seen>& seen) {
+    std::vector<std::string_view> makers;
+    for (const Seen& s : seen) {
+        if (CoopEnemyShots::IsRallyBall(s.name)) {
+            for (const std::string_view m : CoopEnemyShots::MakersOf(s.name)) {
+                if (std::find(makers.begin(), makers.end(), m) == makers.end()) {
+                    makers.push_back(m);
+                }
+            }
+        }
+    }
+    return makers;
+}
+
+std::optional<bool> AttackWithRally(const Seen& s, const std::vector<std::string_view>& rally_makers) {
+    if (!s.attacking || *s.attacking) {
+        return s.attacking;
+    }
+    for (const std::string_view m : rally_makers) {
+        if (s.name.starts_with(m)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string_view PackFamily(std::string_view name) {
     // Pair/pack survey (2026-11-21): these fight together by messages each one's AI writes into its ally's
     // blackboard (Lizalfos/Dinolfos: SetBattlingAllyFromReferenceLink, IsRequestingCoop, IsReceivedCoop*Message;
@@ -1983,6 +2009,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     // place; a drop of life on a copy we do not own is our hit.
     // A pickup taken elsewhere (taken_, from the last Apply) is hidden.
     std::map<std::uint64_t, const Seen*> now_seen;
+    const std::vector<std::string_view> rally_makers = RallyMakers(seen);  // row 211: its attack goes on
     std::vector<const Seen*> fresh;
     std::set<std::uint64_t> hidden;
     {
@@ -2358,7 +2385,12 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.slots = s.slots;
         o.bsa = s.bsa;
         o.orders = s.orders;
-        o.attacking = s.attacking;
+        o.attacking = AttackWithRally(s, rally_makers);
+        const bool rally_held = o.attacking.value_or(false) && !s.attacking.value_or(true);
+        if (rally_held && !o.rally_held) {
+            notes_.emplace_back(o.name + ": its own rally ball flies here: its attack goes on, no boss turn (row 211)");
+        }
+        o.rally_held = rally_held;
         o.event_member = s.event_member;  // row 97
         o.sensor_in_area = s.sensor_in_area;  // row 138(8)
         if (s.hit_at) {
@@ -2747,7 +2779,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.slots = s->slots;
         o.bsa = s->bsa;
         o.orders = s->orders;
-        o.attacking = s->attacking;
+        o.attacking = AttackWithRally(*s, rally_makers);
         o.seen_at = now_us;
         o.name = s->name;
         o.breakable = CoopWorld::IsBreakable(s->name);

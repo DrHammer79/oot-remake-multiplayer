@@ -324,14 +324,20 @@ struct Counts {
     std::uint64_t owner_fell = 0;      // row 178: our boss fell far below its fight start (the fall guard)
     std::uint64_t moves_kept = 0;     // a resync's action the copy already runs (put in, none of its own since): not asked
     // Row 190: of our action requests (action_applied, copy_own_late, owner_restarted), the ones the game answered
-    // with kActionSlotBusy (the slot had taken a request that frame) or another refusal. Counted and said, not
-    // asked again: the owner's game sends every request it makes, also one its own game answered so.
+    // with kActionSlotBusy (the slot had taken a request that frame) or another refusal. Counted and said. A refusal
+    // is not asked again (the owner's game sends every request it makes, also one its own game answered so), and a
+    // busy slot after one of our own moves taken this frame neither (the owner's second ask of a frame: its own game
+    // answered it the same). Row 211 (shot-reflect-211-4): a busy slot with none of ours taken was the copy's own
+    // request of that frame (a hand-over's first frame: its own AI asked before the owner's verbs came and skip it),
+    // so the owner's move is asked again next frame (action_busy_again), at most kBusyAsks times.
     std::uint64_t action_slot_busy = 0;
+    std::uint64_t action_busy_again = 0;
     std::uint64_t action_refused = 0;
 };
 
 class Table {
 public:
+    static constexpr int kBusyAsks = 3;  // row 211: an owner's move answered busy, asked again on this many frames
     // Switches (LICHII_COOP_BOSS_NATIVE, LICHII_COOP_BOSS_ACTIONS): off -> no
     // skip, no apply, nothing kept (the old gohma-sync path alone).
     void SetOn(bool brain, bool actions);
@@ -609,6 +615,11 @@ private:
         // The front change of `due` or `own_late` is in the call Step asked last: it leaves its queue only once
         // that call is made (Step's after_call); a call not made asks it again. A queue cleared meanwhile: none.
         enum class Asking : std::uint8_t { none, due, late } asking = Asking::none;
+        // Row 211: the step one of our owner's moves was taken here (none busy after it is asked again), the step its
+        // front move was answered busy (not asked again in that step) and how often in a row.
+        std::uint64_t taken_step = ~std::uint64_t{0};
+        std::uint64_t busy_step = ~std::uint64_t{0};
+        int busy_asks = 0;
         std::uint64_t react_until = 0;  // (also a new mid-boss copy's start, kStartSteps)
         std::uint64_t seen_since = 0;   // the step it was first seen in our walk (its start's: #238)
         bool held = false;

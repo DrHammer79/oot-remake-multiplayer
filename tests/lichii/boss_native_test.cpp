@@ -2286,7 +2286,9 @@ TEST_CASE("native boss (row 190): the game's answer to an owner's move is counte
         t.TakeNotes();
         CHECK_FALSE(t.Step(g, true, answer, kMain));
         const Counts n = t.Totals();
-        CHECK(n.action_applied == 1);  // (as before: the move is not asked again)
+        // A refusal is not asked again; a busy slot (none of ours taken this frame) is, next frame (row 211).
+        CHECK(n.action_applied == (answer == addr::kActionSlotBusy ? 0u : 1u));
+        CHECK(n.action_busy_again == (answer == addr::kActionSlotBusy ? 1u : 0u));
         CHECK(n.action_slot_busy == (answer == addr::kActionSlotBusy ? 1u : 0u));
         CHECK(n.action_refused == (answer == addr::kActionNoSlot ? 1u : 0u));
         bool said = false;
@@ -2294,6 +2296,46 @@ TEST_CASE("native boss (row 190): the game's answer to an owner's move is counte
             said = said || line.find("was not taken by the game (" + std::to_string(answer)) != std::string::npos;
         }
         CHECK(said == (answer != addr::kActionTaken));
+    }
+}
+
+TEST_CASE("native boss (row 211): an owner's move answered busy is asked again next frame, not in the same one, "
+          "at most kBusyAsks times") {
+    // A hand-over's first frame: the copy's own AI asked its slot before the owner's verbs came, so the owner's
+    // first move (Ganondorf's shot, verb 112) was answered 3 and dropped: the copy never fired its own ball.
+    for (const int busy_frames : {1, 3, 4}) {
+        CAPTURE(busy_frames);
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({Gohma(Role::copy)});
+        BossAction a = *ActionFromRequest(GameRequest(11, 0xdead));
+        t.Receive(kActor, BossBsa{1, 2, a, {}});
+        FakeGuest g;
+        const std::int32_t verb = 2;
+        g.Write(kBsa + addr::kBsaBrainVerb, &verb, 4);
+        CHECK(t.OnActionVerb(kBsa, GameRequest(12, kNode), true, false));
+        auto c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        c = t.Step(g, true, kBlock, kMain);  // (the block) -> the move
+        REQUIRE(c);
+        REQUIRE(c->function == kMain + addr::kRequestActionVerb);
+        int asked = 1;
+        for (int frame = 0; frame < 8; ++frame) {
+            const bool busy = frame < busy_frames;
+            // The answer; in the same frame the move is not asked again.
+            CHECK_FALSE(t.Step(g, true, busy ? addr::kActionSlotBusy : addr::kActionTaken, kMain));
+            c = t.Step(g, false, 0, kMain);  // next frame
+            if (!c) {
+                break;
+            }
+            REQUIRE(c->function == kMain + addr::kRequestActionVerb);
+            ++asked;
+        }
+        const Counts n = t.Totals();
+        const int again = std::min(busy_frames, Table::kBusyAsks);
+        CHECK(asked == 1 + again);
+        CHECK(n.action_busy_again == static_cast<std::uint64_t>(again));
+        CHECK(n.action_applied == 1);  // taken once, or given up after kBusyAsks
     }
 }
 

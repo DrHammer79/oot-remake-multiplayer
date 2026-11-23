@@ -2409,6 +2409,9 @@ std::optional<ConnectionId> Session::next_turn(Object& o, ConnectionId owner, st
   // A shot of its owner's game in the air does not hold the turn: the edge above comes right after a shooting
   // attack, while its shots fly (Phantom Ganon's bolt and shockwaves: a hold on them meant no turn at all), and a
   // shot stays with the game that made it. His rally ball is each game's own (a split shot, coop_enemy_shots.h).
+  // A rally ball is the exception, read in its owner's game (row 211, CoopObjects::AttackWithRally): while it flies
+  // there, the boss's samples say it still attacks (his volley and the stun of a rally won are that attack), so no
+  // edge comes until the ball is gone.
   // The next player by number after the owner, round: in the boss's area,
   // ready (its intro played), up and playing.
   const auto own = connections_.find(owner);
