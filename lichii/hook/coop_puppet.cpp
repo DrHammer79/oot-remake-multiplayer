@@ -204,11 +204,17 @@ std::vector<Director::DressView> Director::DressTargets() const {
                 if (p.part == kHairPart) hair = p.colour;
             }
         }
-        const auto link = CoopCharColours::LinkOnly(!character, eyes, hair);   // (a Link puppet's only)
-        eyes = link.eyes, hair = link.hair;
-        out.push_back({s.number, s.actor, s.block + block::kDress,
-                       t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u, character,
-                       character && character_apply_ != 0 && character_apply_state_ == 1, s.actor_name, eyes, hair});
+        const auto on = CoopCharColours::ColoursOn(character, eyes, hair);   // (Link's model or a character's)
+        eyes = on.eyes, hair = on.hair;
+        out.push_back({.number = s.number,
+                       .actor = s.actor,
+                       .cell = s.block + block::kDress,
+                       .custom = t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u,
+                       .character = character,
+                       .mods_routine = character && character_apply_ != 0 && character_apply_state_ == 1,
+                       .actor_name = s.actor_name,
+                       .eyes = eyes,
+                       .hair = hair});
     }
     return out;
 }
