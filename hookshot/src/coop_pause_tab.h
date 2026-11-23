@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "coop_pause_menu.h"
+#include "coop_screen_panes.h"
 #include "hos_coop_api.h"
 
 namespace CoopPauseTab {
@@ -963,6 +964,11 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
 // closed (not 1, 2). A strip only not seen for a while is a stall, not a close (cs-customize-0119, lane gc198-l5b: the
 // game's threads waited 645 ms for a core, the open screen was taken as closed and opened again on its first page, so
 // Y presses were lost): kWait, the screen kept as it is.
+// Screens known by their panes, looked at again at each opening (row 262): coop_screen_panes.h.
+using CoopScreen::kScreenGapMs;
+using CoopScreen::kScreenLookMs;
+using CoopScreen::ScreenInstance;
+using CoopScreen::ScreenPanes;
 enum class SnailEdge { kWait, kOpen, kClose };
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
