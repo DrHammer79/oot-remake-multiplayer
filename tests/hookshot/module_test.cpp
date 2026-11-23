@@ -1082,6 +1082,16 @@ TEST_CASE("hookshot: a guest that joins with a file loaded asks for the host's s
     const std::string frame = body("void SwitchFrame(coop::net::Client& client) {");
     CHECK(frame.find("choice == save::FolderChoice::coop_later") != std::string::npos);
     CHECK(frame.find("save::rejoined_in_game(g_decided, g_ended, connected, g_in_game)") != std::string::npos);
+    // Row 273: a role change in the same client (host migration, a reconnect to a restarted server) ends the choice,
+    // every choice records its role, and on the title a game that is no live guest goes home through RemountLocked.
+    CHECK(frame.find("save::role_changed(g_decided, connected, g_decided_host,") != std::string::npos);
+    CHECK(frame.find("st == coop::net::State::refused || role;") != std::string::npos);
+    CHECK(frame.find("g_decided_host = connected && client.is_host();") != std::string::npos);
+    CHECK(in_game.find("g_decided_host = client.is_host();") != std::string::npos);
+    const auto home = frame.find("save::home_due(");
+    REQUIRE(home != std::string::npos);
+    CHECK(frame.find("g_live && g_use", home) != std::string::npos);
+    CHECK(frame.find("RemountLocked(own)", home) < frame.find("if (!g_decided && !g_dir.empty())", home));
     // On the title before the new save is in, a game still on an earlier host's co-op folder goes back to its own
     // first, through the one switch path (never the older save offered).
     const std::string pending = body("void PendingFrame() {");

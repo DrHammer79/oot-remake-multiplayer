@@ -6,7 +6,7 @@ Short answers about Squadala!, the co-op mod. Setting up is in [setup.md](setup.
 
 The **first player to join** the server is the host. The host's game is the one the others follow: time of day, and the shared progress when the host loads a save ([Playing from the host's save](play-online.md#playing-from-the-hosts-save)).
 
-When the host leaves, the host role **moves to another player** who is still in (the one with the lowest player number). Nobody needs to do anything. A player who joins later never takes the role by joining.
+When the host leaves, the host role **moves to another player** who is still in (the one who has been in the session longest). Nobody needs to do anything. A player who joins later never takes the role by joining. The new host plays from its own saves again: on the title right away, or, when it is playing the old host's save, on its next return to the title (no switch under a game being played). The same goes when the server restarts: the first game back hosts (it keeps its player number), and a game that comes back after it is a guest and gets that host's save.
 
 ## Host in the game or start-server.cmd?
 

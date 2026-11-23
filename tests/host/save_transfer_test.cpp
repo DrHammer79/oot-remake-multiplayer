@@ -583,6 +583,52 @@ TEST_CASE("save transfer: a new session with a file still loaded chooses again w
   CHECK_FALSE(rejoined_in_game(false, true, true, true));   // nothing chosen yet: the first choice decides
 }
 
+TEST_CASE("save transfer: a role change in the same client ends the choice (row 273)") {
+  using save::role_changed;
+  CHECK(role_changed(true, true, false, true));         // a guest hosts now (host migration, or first back)
+  CHECK(role_changed(true, true, true, false));         // the old host came back after another game: a guest now
+  CHECK_FALSE(role_changed(true, true, false, false));  // a reconnect that keeps the role is no end
+  CHECK_FALSE(role_changed(true, true, true, true));
+  CHECK_FALSE(role_changed(true, false, false, true));  // reconnecting (no host known yet): nothing read
+  CHECK_FALSE(role_changed(false, true, false, true));  // nothing chosen yet: the first choice decides
+}
+
+TEST_CASE("save transfer: back on the own folder on the title unless a live guest (row 273)") {
+  using save::home_due;
+  CHECK(home_due(true, true, false, false));         // hosts now, or the session ended: own saves on the title
+  CHECK_FALSE(home_due(true, true, false, true));    // a live guest (also while it reconnects) keeps the host's save
+  CHECK_FALSE(home_due(true, true, true, false));    // never under a game being played
+  CHECK_FALSE(home_due(true, false, false, false));  // the title's menu not up (a file being picked or loaded)
+  CHECK_FALSE(home_due(false, true, false, false));  // already on its own folder
+}
+
+TEST_CASE("save transfer: row 273's cases end on the folder of the role the game has") {
+  using save::FolderChoice;
+  // NS-leave-solo: a guest on the title (co-op folder), the host's game killed and the server restarted; the guest
+  // reconnects ALONE with the same client and is the first back, so it hosts (keeping its number 2). Before, a
+  // reconnect was never an end: it stayed on the co-op folder as a host until the game restarted.
+  bool over = save::role_changed(true, true, false, true);
+  CHECK(over);
+  CHECK(save::decide_again(true, over, false));
+  CHECK(save::folder_choice(std::nullopt, true, true, true, false) == FolderChoice::own);
+  // Host migration while the guest plays the host's save: no switch under the game; the session chooses again at
+  // once (the host keeps the saves it plays), and back on the title it goes home to its own folder.
+  over = save::role_changed(true, true, false, true);
+  CHECK_FALSE(save::decide_again(true, over, true));
+  CHECK(save::rejoined_in_game(true, over, true, true));
+  CHECK(save::home_due(true, true, false, false));
+  // A server restart where another game came back first: the old host is a guest now, on the title it asks for
+  // the new host's save (folder_choice's coop), in the game it asks and switches on the title (coop_later).
+  over = save::role_changed(true, true, true, false);
+  CHECK(save::decide_again(true, over, false));
+  CHECK(save::folder_choice(std::nullopt, true, true, false, false) == FolderChoice::coop);
+  CHECK(save::folder_choice(std::nullopt, true, true, false, true) == FolderChoice::coop_later);
+  // A reconnect to the same server (a timeout) with the same role: the guest keeps the host's save.
+  over = save::role_changed(true, true, false, false);
+  CHECK_FALSE(save::decide_again(true, over, false));
+  CHECK_FALSE(save::home_due(true, true, false, true));
+}
+
 TEST_CASE("save transfer: a co-op folder is emptied of slots before the host's save comes (issue 167)") {
   namespace fs = std::filesystem;
   const fs::path base = fs::temp_directory_path() / "coop-clear-slots-test";

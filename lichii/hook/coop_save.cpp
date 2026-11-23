@@ -88,6 +88,11 @@ bool g_title_up = false;   // the title's menu is up (NoteTitle, Hookshot's titl
 // the hold ends: a save that comes in during play is kept and switched to back on the title (PendingFrame).
 bool g_suspended = false;
 const void* g_decided_client = nullptr;   // the session's client it was made for
+// Row 273: the role the choice was made for (the host: its own saves; a guest: the host's). A host migration or a
+// reconnect to a restarted server can change it in the same client: that choice is over then (save::role_changed).
+bool g_decided_host = false;
+// Row 273: the own folder a switch back to failed for (save::home_due): not tried again every frame.
+fs::path g_home_failed;
 // The session the choice was made for was seen over while a file was loaded (the choice is kept then: no switch under
 // a game being played). A new session connected in that state chooses again (save::rejoined_in_game).
 bool g_ended = false;
@@ -158,6 +163,7 @@ void AskAtTitle();
 void DecideInGame(coop::net::Client& client) {
     g_decided = true;
     g_decided_client = &client;
+    g_decided_host = client.is_host();
     g_ended = false;
     if (client.is_host()) {
         g_use = false;
@@ -193,8 +199,18 @@ void SwitchFrame(coop::net::Client& client) {
     }
     {
         const auto st = client.state();
+        const bool connected = st == coop::net::State::connected && client.host_number() != 0;
+        // (row 273: the same client, but this game hosts now where it was a guest, or the other way round)
+        const bool role = &client == g_decided_client &&
+                          save::role_changed(g_decided, connected, g_decided_host, connected && client.is_host());
         bool over = &client != g_decided_client || st == coop::net::State::idle ||
-                    st == coop::net::State::stopped || st == coop::net::State::refused;
+                    st == coop::net::State::stopped || st == coop::net::State::refused || role;
+        if (role && (!g_in_game || !g_ended)) {
+            LOG_INFO(Core, "coop: save: this game {} now (player {}, the host player {}): the save folder is chosen "
+                           "again{}",
+                     client.is_host() ? "hosts" : "is a guest", client.player_number(), client.host_number(),
+                     g_in_game ? " for this session (a file is loaded: no switch under it)" : "");
+        }
         if (save::decide_again(g_decided, over, g_in_game)) {
             g_decided = false;   // the next session (the title menu's Host after a Join, a rejoin) decides again
             g_guest = save::GuestSession{};   // and asks for the host's save again: everything of the last one goes
@@ -208,13 +224,26 @@ void SwitchFrame(coop::net::Client& client) {
         } else if (g_decided && over) {
             g_ended = true;   // (a file is loaded: the choice is kept for the title, or for a rejoin below)
         }
-        const bool connected = st == coop::net::State::connected && client.host_number() != 0;
         if (!g_dir.empty() && save::rejoined_in_game(g_decided, g_ended, connected, g_in_game)) {
             LOG_INFO(Core, "coop: save: a new session with a file loaded: it chooses again");
             DecideInGame(client);
             over = false;
         }
         g_live = g_decided && !over;   // (decided below in this frame: on from the next one)
+    }
+    // Row 273: on the title with the co-op folder (the host's save) mounted, a game that is not a guest of a live
+    // session (it hosts now, or its session ended) goes back to its own folder: the title offers its own saves, and
+    // what it plays next is saved there, never into the co-op folder that the next join empties.
+    if (!g_dir.empty() && g_dir != g_home_failed &&
+        save::home_due(save::is_coop_dir(g_dir), g_title_up && !g_suspended, g_in_game, g_live && g_use)) {
+        const fs::path own = save::own_dir_of(g_dir);
+        if (RemountLocked(own)) {
+            LOG_INFO(Core, "coop: save: on the title and not a guest of a session: back on this game's own saves");
+        } else {
+            g_home_failed = g_dir;
+            LOG_WARNING(Core, "coop: save: could not switch the save folder back to {}: this game keeps {}",
+                        own.string(), g_dir.string());
+        }
     }
     if (!g_decided && !g_dir.empty()) {
         const bool connected = client.state() == coop::net::State::connected && client.host_number() != 0;
@@ -231,6 +260,7 @@ void SwitchFrame(coop::net::Client& client) {
         }
         g_decided = true;
         g_decided_client = &client;
+        g_decided_host = connected && client.is_host();
         // Both sides start on the game's own folder: a guest moves to the co-op one only once the host's save is
         // whole in it (PendingFrame), never onto an empty one.
         const fs::path own = save::is_coop_dir(g_dir) ? save::own_dir_of(g_dir) : g_dir;

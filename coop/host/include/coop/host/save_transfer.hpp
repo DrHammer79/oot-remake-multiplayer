@@ -373,6 +373,19 @@ bool decide_again(bool decided, bool over, bool in_game);
 // chooses again at once, without touching the folder (folder_choice's `own` for the host, `coop_later` for a guest).
 // `ended`: the session the choice was made for was seen over since.
 bool rejoined_in_game(bool decided, bool ended, bool connected, bool in_game);
+// Row 273: the choice was made for a role (host or guest) this game no longer has in the session it is connected to,
+// so that choice is over too (`over` for decide_again / rejoined_in_game). The role changes without a new client and
+// without the client going idle: a host migration (the host left, this guest hosts now), and a reconnect to a
+// restarted server, where the first game back hosts (a guest that came back first hosts, the old host that came back
+// later is a guest). A reconnect that keeps the role is not an end. `connected`: connected with a host known (the
+// role is only read then; during the reconnect nothing changes).
+bool role_changed(bool decided, bool connected, bool decided_as_host, bool is_host);
+// Row 273: a game on the co-op folder (the host's save) goes back to its own folder once it is on the title's menu
+// (`title_menu`: no file being picked) with no file played, and is not a guest of a live session: it hosts now (it
+// was a guest, or it took over the host's role while a file was played), or no session holds it (the session
+// ended). Never under a game being played or loaded; a live guest stays on the co-op folder (also while it
+// reconnects).
+bool home_due(bool on_coop_dir, bool title_menu, bool in_game, bool live_guest);
 
 // A guest's pending switch to the co-op folder (Hookshot), each frame: `go` only on the title's menu with the host's
 // save in and no file loaded (never during a load, where a re-mount changes the folder under the game's read: the
