@@ -77,7 +77,8 @@ ROWS_KEEP = "_coop-rows"
 ROWS_HEAD = "coop-rows 1"
 ROWS_MARK = "coop-rows.txt"   # (the module's kRowsFile)
 MENU_KEEP = "_coop-menus"     # the pack's menu files while the table the game reads cannot hold them (guard_menus)
-MENU_KEYS = ("title_menu", "pause_menu")   # (coop_puppet.json: the files build.py's menu steps wrote)
+# (coop_puppet.json's "menu_keys": the file lists kept aside together, ui_pack.MENU_KEYS when the pack was made; a pack
+# without the field has the two old keys)
 MEMBERS_KEEP = "_coop-archives"   # a mod's own copies of archives the pack's members were merged into (merge_members)
 MEMBERS_HEAD = "coop-members 1"
 
@@ -1078,12 +1079,39 @@ def menu_files(pack_path):
             m = json.loads(f.read().decode("utf-8"))
     except (OSError, ValueError):
         return []
+    keys = m.get("menu_keys")
+    if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+        keys = list(ui_pack.OLD_MENU_KEYS)
     out = []
-    for key in MENU_KEYS:
+    for key in keys:
         for rel in m.get(key) or []:
             if isinstance(rel, str) and rel and rel not in out:
                 out.append(rel)
     return out
+
+
+def charsel_native_parked(pack_path):
+    """Whether co-op's own Characters tab's files (coop_puppet.json "charsel_native", one of the menu lists) are kept
+    aside in <pack>/_coop-menus (guard_menus, park_menus, the kit's Move-KitMenuFilesAside) and not in the pack's romfs.
+    The tab's code patch (charsel-native.ips in the pack's exefs) must go with them: the game built with the tab's code
+    over the game's own three-tab menu files said MsgNotFound on slot 0, lost the Map tab and left L dead. So the kit's
+    code-patch rule (kit-paths.ps1 Sync-KitCharselNativePatch, build.sh charsel_native_sync) leaves the code out while
+    this is true, and the start parks or puts back before that rule runs."""
+    import json
+    try:
+        with open(os.path.join(pack_path, "coop_puppet.json"), "rb") as f:
+            m = json.loads(f.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    rels = m.get("charsel_native") if isinstance(m, dict) else None
+    for rel in rels if isinstance(rels, list) else []:
+        if not isinstance(rel, str) or not rel:
+            continue
+        parts = rel.split("/")
+        if (os.path.isfile(os.path.join(pack_path, MENU_KEEP, *parts))
+                and not os.path.isfile(os.path.join(pack_path, "romfs", *parts))):
+            return True
+    return False
 
 
 def _menu_short(codec, order, pack_path, files):

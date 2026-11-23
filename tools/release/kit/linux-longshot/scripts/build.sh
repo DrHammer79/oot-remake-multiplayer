@@ -607,6 +607,65 @@ exefs_stamp() {
 }
 # A mod's name as patch 0011's host/mods.c compares them: ASCII letters without case, '\' as '/'.
 mod_fold() { local s=${1//\\//}; printf '%s' "$s" | LC_ALL=C tr 'A-Z' 'a-z'; }
+# Co-op's own Characters tab (charsel-native-0119; the owner: "our mod itself should natively include the character tab
+# even without downloading any of Snails mod"): its code patch (Snail's header, page and Customize hooks for Link, from
+# his MIT code: data/tools/puppet_pack/charsel/data/charsel-native.ips) goes into the pack folder's exefs before the
+# stamp, so the build takes it in; out when Character Select's own code is in the mods (his files and code are the
+# tab's then) or the pack said it left the tab out (coop_puppet.json "charsel_native": [], no build loop). The rule is
+# the pack tool's own (build.py charsel_native_wanted), as kit-paths.ps1 Sync-KitCharselNativePatch. Also after
+# charsel_undo below (Character Select put back as the game had it). Out too while the tab's files are parked
+# (merge_tables.py charsel_native_parked: kept in <pack>/_coop-menus because the size table the game reads cannot hold
+# them): the tab's code over the game's own menu files said MsgNotFound on slot 0, lost the Map tab and left L dead.
+# So menus_merge (start.sh's merge, parking or putting back) runs first, and data/charsel-parked.txt keeps what this
+# saw: start.sh builds again when its own merge after the pack step parks or puts back otherwise.
+menus_merge() {
+    [[ -n $(kit_game_exe) && -d $GAME/mods && -x $PY && -f $DATA/tools/puppet_pack/merge_tables.py ]] || return 0
+    "$PY" -I -B "$DATA/tools/puppet_pack/merge_tables.py" --mods "$GAME/mods" --romfs "$GAME/romfs" 2>&1 | sed 's/^/  /' || true
+}
+charsel_native_sync() {
+    menus_merge
+    local src=$DATA/tools/puppet_pack/charsel/data/charsel-native.ips
+    local pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
+    local dst=$pack/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips want=0
+    # (exit 10: ours wanted, 11: his code or the pack said no; anything else is Python failing (a broken pack tool):
+    # said plainly with its error, the code patch left as it is (no guess, no rebuild), the start goes on)
+    if [[ -f $src && -x $PY ]]; then
+        local rc=0
+        "$PY" -I -B -c '
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from puppet_pack.build import charsel_native_wanted
+pack = sys.argv[2]
+want = charsel_native_wanted(pack)
+try:
+    with open(os.path.join(pack, "coop_puppet.json"), encoding="utf-8") as f:
+        doc = json.load(f)
+    if isinstance(doc, dict) and "charsel_native" in doc and not doc["charsel_native"]:
+        want = False
+except (OSError, ValueError):
+    pass
+from puppet_pack.merge_tables import charsel_native_parked
+parked = charsel_native_parked(pack)
+with open(sys.argv[3], "w", encoding="utf-8") as f:
+    f.write("1" if parked else "0")
+sys.exit(10 if want and not parked else 11)' "$DATA/tools" "$pack" "$DATA/charsel-parked.txt" || rc=$?
+        case $rc in
+            10) want=1 ;;
+            11) ;;
+            *) rm -f -- "$DATA/charsel-parked.txt"
+               warn "co-op's Characters tab: could not tell whether its code patch goes into the game (python exit $rc, its error above): left as it was."
+               return 0 ;;
+        esac
+    fi
+    if ((want)); then
+        [[ -f $dst ]] && cmp -s "$src" "$dst" && return 0
+        mkdir -p "${dst%/*}" && cp -- "$src" "$dst"
+    elif [[ -f $dst ]]; then
+        rm -f -- "$dst"
+    fi
+    return 0
+}
+((check_only)) || charsel_native_sync
 game_want="$src_stamp$(exefs_stamp)"
 ready=0
 [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]] && ready=1
@@ -820,7 +879,7 @@ if ((ready && !rebuild && !check_only)); then
     charsel_confirm
 elif game_build; then
     charsel_confirm
-elif charsel_undo && game_want="$src_stamp$(exefs_stamp)" && [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]]; then
+elif charsel_undo && charsel_native_sync && game_want="$src_stamp$(exefs_stamp)" && [[ -n $(kit_game_exe) && $(cat "$game_stamp" 2>/dev/null) == "$game_want" ]]; then
     warn "$game_why"
     warn 'Character Select: the game could not be built with it, so it is taken back out for now and the game starts as it was (the next start tries again; character_select = no in data/coop-options.ini stops it).'
 else

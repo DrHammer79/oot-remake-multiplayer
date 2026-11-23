@@ -2404,6 +2404,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
         "pause_menu": pause_files,
         "coop_screen": coop_screen,   # (co-op's own - menu screen CoopMenu_00 made: coop_menu.py)
         "charsel_native": charsel_files,   # (co-op's own Characters tab: its files; [] with Character Select's own)
+        "menu_keys": list(ui_pack.MENU_KEYS),   # (the lists above kept aside together: merge_tables, the kit's start)
         "source_sha256": {rel(romfs, p): hashlib.sha256(read(p)).hexdigest()
                           for p in (ai_path, gai_path, rs_path)},
     }
