@@ -14,7 +14,7 @@ Maintainer only, like the rest of `tools/autotest`: it needs two Hookshot test c
 | `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. |
 | `live.py do --session DIR A "lines"` | Plays test script lines in one game (`goto`, `toward`, `press`, `hold`, `warp`, `place`, `setflag`, `kill`, `hit`, ...; `;` between lines), then returns that game's state. |
 | `live.py state --session DIR [A\|B]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. |
-| `live.py shot --session DIR [A\|B] [--window]` | A screenshot of each game (a PNG path). It leaves out Longshot's Insert menu and every co-op page; `--window` adds a copy of the window (below, "What a bridge shot leaves out"). |
+| `live.py shot --session DIR [A\|B]` | A screenshot of each game (a PNG path). |
 | `live.py checkpoint --session DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. |
 | `live.py stop --session DIR` | Ends the session: the watchdog quits both games, kills what did not quit and the server, and lets the lane lock go. |
 | `tools/autotest/desync_check.py DIR` | Compares the checkpoints in order: the first tag where the two games' shared flags differ, and which flags, with the checkpoint's shots. Exit 0 every checkpoint compared and agrees, 1 desync, 2 nothing compared (no checkpoint, or none with both games' flags), 3 incomplete (one could not be compared). A plain script, no judgment. |
@@ -33,24 +33,6 @@ with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_
 `\\.\DISPLAY2`. A name that no monitor has stops the start with the list of monitors. Details and what to check:
 [testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
 game's own control bridge, so they work wherever the windows are.
-
-**What a bridge shot leaves out.** Longshot's control bridge copies the game's own picture at the present, before
-Longshot draws its Insert menu over the window (Longshot `gpu/vk/vk_replay.cpp`, `shot_ask_record`: "without Longshot
-overlays"). Every co-op page is a tab of that menu (Multiplayer, Customize, Mods; hookshot patch 0012). So a bridge
-shot never shows a co-op page, its rows or its text: with Customize open it shows only the page's live picture (the
-camera around your Link). The game's own screens (the pause screen, text boxes, the HUD) are the game's picture and do
-show. To see a co-op page, use `live.py shot --window` (or the MCP `shot` tool with `window` true): each game also gets
-`<tag>-<ms>-window.png`, a copy of its window's client area, what the player sees. It is taken after the bridge shot,
-so a held game has just presented. The copy is `PrintWindow` first; when that gives a black picture, a copy of the
-screen there, but only when the window is wholly on one monitor and no other window covers it. Otherwise the reply has
-`window_error` with the reason and no file is written (never a picture of other windows). A screen copy that is black
-too is refused the same way. Windows only; the per-game MCP `screenshot` tool has no window copy.
-
-On the test lane's PC the window copy does not work yet: both games presented (swapchain 1280x720, mailbox), but
-`PrintWindow` and a screen copy of their uncovered windows were both black (GDI does not see these Vulkan windows).
-There `--window` answers `window_error` ("both black"), so a co-op page still cannot be seen in a lane run. Not tried
-yet: Windows.Graphics.Capture, or a bridge shot taken after the menu is drawn (a Longshot change; today only
-`RX_VK_SHOT_MENU` in a headless run draws the menu into shots).
 
 ## Bridge protocol
 
