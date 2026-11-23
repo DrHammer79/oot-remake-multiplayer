@@ -210,7 +210,7 @@ that `start` starts), under the watchdog's own pid. The watchdog ends the sessio
 - the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening; 0 means no limit);
 - no tester command came for `--idle-minutes` (10 by default, 0 means never; counted from the end of the boot): the tester handed
   off, crashed or paused. Only tool calls count, not time spent thinking or writing notes: a tester that writes long
-  notes between calls needs a larger `--idle-minutes` (or 0);
+- a game ended by itself (asked of the process itself: on Windows its handle, not `tasklist`; a check that cannot tell, on a busy PC, counts as running, so a slow answer never ends a live session or frees a live lock);
 - a game ended by itself;
 - the watchdog is stopped by a signal, or fails.
 
