@@ -21,6 +21,8 @@ LEG_FRAMES = 30
 STUCK_FRAMES = 60      # no 0.3 m closer to the actor over this many frames: stuck
 STRIKE_FRAMES = 12     # a kill or hit waits at most this many frames for the walk's result
 STRIKE_LOOK = 2        # ... looking every this many frames
+DEATH_FRAMES = 36      # a kill that struck waits at most this many more frames for the actor's death (a guess: S8 saw one
+DEATH_LOOK = 6         # ... die only after Link came near it; looking every this many frames
 PRESS_FRAMES = 6
 CLOSER_M = 0.3         # a leg that brings Link this much nearer is progress
 
@@ -105,7 +107,7 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
         out["actor"] = a
         pos, at = _pos(st), a.get("pos")
         if pos is None or not at:
-            return dict(out, reason="no position (not in play?)")
+            return dict(out, reason=pc.no_position_reason(st) if pos is None else "no position (not in play?)")
         dist = math.hypot(at[0] - pos[0], at[2] - pos[2])
         out.update(distance=round(dist, 2), frames=used,
                    moved_m=round(math.hypot(pos[0] - start[0], pos[2] - start[2]), 2) if start else 0.0)
@@ -233,11 +235,37 @@ def interact(client, what="talk", frames=PRESS_FRAMES):
             "event": after.get("event"), "frames": 2 * frames}
 
 
+def _death(client, line, name, ident, out):
+    """A `kill` that struck is `ok` only when the actor is seen dead (gone from the list, not alive, or life 0) within
+    DEATH_FRAMES more frames: the strike is the hit, the death comes frames later (and, for an actor far from Link, may
+    not come: S8). Otherwise `struck: ...` with `died` false (it lives) or null (not checked: no id, or no world list);
+    `died_after` is the frames waited."""
+    if not ident:
+        return dict(out, result="struck: the hit landed (a kill without an id: its death is not checked; look with "
+                                "get_world)", died=None)
+    waited = 0
+    while True:
+        a, w = _look(client, ident)
+        why = _no_list(w)
+        if why:
+            return dict(out, result="struck: the hit landed, but its death could not be checked (%s)" % why, died=None)
+        life = (a or {}).get("life")
+        if _gone(a, name) or a.get("alive") is False or (isinstance(life, (int, float)) and life <= 0):
+            return dict(out, died=True, died_after=waited, frames=out["frames"] + waited)
+        if waited >= DEATH_FRAMES:
+            return dict(out, result="struck: the hit landed, but %s still lives after %d frames (a far actor may not "
+                                    "die until Link is near it: go near it and look with get_world)" % (name, waited),
+                        died=False, died_after=waited, frames=out["frames"] + waited)
+        client.step(DEATH_LOOK)
+        waited += DEATH_LOOK
+
+
 def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
     """Send one `kill [ID] NAME` or `hit [ID] NAME N` line (built and checked by mcp_playtest.act_line) and wait up to
     `frames` frames, looking every STRIKE_LOOK, for the objects walk's result in `state.strike`, matched by the strike's
-    number (no retry, no other actor). `ident` (the id in the line) is only for the words. Replies result: `ok` (the walk
-    struck it), `refused: actor 7 (NAME) is gone`, `refused: actor 7 (NAME) has no life left`, `refused: actor 7 (NAME) is
+    number (no retry, no other actor). `ident` (the id in the line) is for the words and, for a `kill`, to see the actor
+    die. Replies result: `ok` (a `hit`: the walk struck it; a `kill`: it struck and the actor was then seen dead, `died`
+    true), `struck: ...` (a kill that struck but the actor was not seen dead: `died` false, or null when not checked), `refused: actor 7 (NAME) is gone`, `refused: actor 7 (NAME) has no life left`, `refused: actor 7 (NAME) is
     here, but co-op does not share it ...`, `refused: no world list ...` (solo refuses an id), `refused: the strike queue
     is full ...`, or `unknown: no result after 12 frames` (the strike may still land: look with get_world)."""
     who = "%d " % ident if ident else ""
@@ -265,7 +293,8 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
         return {"result": "unknown: a newer strike replaced the result", "line": line, "seq": seq}
     word = last.get("result")
     if word == "done":
-        return {"result": "ok", "line": line, "seq": seq, "frames": used}
+        out = {"result": "ok", "line": line, "seq": seq, "frames": used}
+        return _death(client, line, name, ident, out) if line.startswith("kill") else out
     if word == "gone":
         return {"result": "refused: %s is gone" % label, "line": line, "seq": seq, "frames": used}
     if word == "not shared":

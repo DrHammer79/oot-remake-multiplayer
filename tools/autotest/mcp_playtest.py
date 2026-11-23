@@ -262,10 +262,13 @@ PLAYER_TOOLS = [
     {"name": "step", "description": "Let the game run N frames with no input, then pause. " + PAUSED,
      "inputSchema": {"type": "object", "required": ["frames"], "properties": {"frames": FRAMES}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
-     "optionally an entrance (a start position name in it), through the game's own scene change. The game runs "
-     "until Link is there with no event or load, then is held. Set a test up this way; do not walk across Hyrule.",
+     "optionally an entrance (a start position name in it), through the game's own scene change. The game takes it "
+     "ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load starts): in free play it is refused at once "
+     "(`not_in_event`); to start a test in another scene, restart the session with a boot script that warps. It runs "
+     "until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
      "inputSchema": {"type": "object", "required": ["scene"],
-                     "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"}}}},
+                     "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"},
+                                    "timeout": {"type": "number", "minimum": 1, "maximum": 600}}}},
     {"name": "flag", "description": "Set a game flag (a GameData flag name or a 0x hash) to a value: a number, "
      "true/false, or an enum value's name. Done inside the held frame; replies with the old value (was).",
      "inputSchema": {"type": "object", "required": ["name"],
@@ -444,7 +447,7 @@ class Game:
         if name == "step":
             return c.step(int(args["frames"]))
         if name == "warp":
-            return c.warp(args["scene"], args.get("entrance"))
+            return c.warp(args["scene"], args.get("entrance"), _bounded(args, "timeout", 60, 1, 600))
         if name == "flag":
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":

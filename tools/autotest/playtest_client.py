@@ -151,6 +151,9 @@ class Client:
         return self.request("input", reply_timeout=self.timeout + frames / 20.0, **args)
 
     def warp(self, scene, entrance=None, timeout=60):
+        timeout = float(timeout)
+        if not 1 <= timeout <= 600:
+            raise ValueError("timeout is 1 to 600 seconds")
         args = {"scene": scene, "timeout": timeout}
         if entrance not in (None, ""):
             args["entrance"] = entrance
@@ -388,6 +391,15 @@ def game_of(reply):
     return reply
 
 
+def no_position_reason(st):
+    """Why a state has no `pos`: the bridge gives null (and `snapshot_stale` true) when Longshot's Link snapshot is old
+    (a title, a pause, a load: no Link update ran), never an old place."""
+    if st.get("snapshot_stale"):
+        return ("stale position: Longshot has no fresh Link snapshot (a title, a pause or a load is on); "
+                "nothing is walked to or struck until it does")
+    return "no position in the state (not in play?)"
+
+
 # --- walk_to -------------------------------------------------------------------------------------------------------
 
 def _wrap(deg):
@@ -465,8 +477,7 @@ def walk_to(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
     while True:
         pos = st.get("pos")
         if not pos:
-            return {"arrived": False, "reason": "no position in the state (not in play?)", "frames": used,
-                    "state": st}
+            return {"arrived": False, "reason": no_position_reason(st), "frames": used, "state": st}
         dist = math.hypot(x - pos[0], z - pos[2])
         out = {"frames": used, "distance": round(dist, 3), "state": st}
         if dist <= tolerance:

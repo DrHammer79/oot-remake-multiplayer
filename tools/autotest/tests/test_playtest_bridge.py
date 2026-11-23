@@ -45,6 +45,9 @@ class FakeGame:
         self.strike_word, self.strike_delay = "done", 2   # the walk's answer (None: it never comes) and how many frames
         self.strike_seq_in_reply = True
         self.loading, self.queue_full = False, False
+        self.stale = False      # Longshot's Link snapshot is old (held on a title, a pause, a load): Link members null
+        self.event = False      # an event runs: only then the game takes a warp
+        self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
         game = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -80,12 +83,22 @@ class FakeGame:
             for at, rec in [p for p in self.pending if self.frame >= p[0]]:
                 self.strike = rec
                 self.pending.remove((at, rec))
+                if rec["seq"] in self.kill_seqs and rec["result"] == "done" and self.death_delay is not None:
+                    self.deaths.append((self.frame + self.death_delay, rec["id"]))
+            for at, ident in [d for d in self.deaths if self.frame >= d[0]]:
+                self.deaths.remove((at, ident))
+                for a in (self.world or {}).get("actors", []):
+                    if a["id"] == ident:
+                        a["alive"], a["life"] = False, 0
 
     def state(self):
-        return {"scene": self.scene, "room": None, "pos": [round(v, 4) for v in self.pos], "facing": 0.0,
-                "camera": self.camera, "life": 12, "max_life": 12, "rupees": self.rupees, "age": "child", "event": False,
-                "loading": self.loading, "prompt": self.prompt, "equips": {}, "inventory": dict(self.items),
-                "coop": {"state": "connected", "players": 2}, "snapshot_frame": self.frame,
+        link = {"pos": None, "facing": None, "camera": None, "life": None, "max_life": None, "rupees": None,
+                "age": None, "event": None, "loading": None, "prompt": None} if self.stale else {
+            "pos": [round(v, 4) for v in self.pos], "facing": 0.0, "camera": self.camera, "life": 12, "max_life": 12,
+            "rupees": self.rupees, "age": "child", "event": self.event, "loading": self.loading, "prompt": self.prompt}
+        return {"scene": self.scene, "room": None, **link, "equips": {}, "inventory": dict(self.items),
+                "coop": {"state": "connected", "players": 2}, "snapshot_present": self.frame - (500 if self.stale else 0),
+                "snapshot_stale": self.stale,
                 **({"world": self.world} if self.world is not None else {}),
                 **({"strike": self.strike} if self.strike is not None else {})}
 
@@ -107,6 +120,8 @@ class FakeGame:
             self.paused = True
             return {"ok": True, "from": start, "state": self.state()}
         if cmd == "warp":
+            if not self.event:
+                return {"ok": False, "error": "not_in_event", "message": "warp works only while an event runs"}
             self.scene = m["scene"]
             self.paused = True
             return {"ok": True, "arrived": True, "state": self.state()}
@@ -128,6 +143,8 @@ class FakeGame:
                     return {"ok": False, "error": "refused", "message": "the strike queue is full (16 wait for the "
                             "walk): step a few frames and send it again"}
                 self.strike_seq += 1
+                if words[0] == "kill":
+                    self.kill_seqs.add(self.strike_seq)
                 has_id = words[1].isdigit()
                 if self.strike_word is not None:
                     self.pending.append((self.frame + self.strike_delay, {
@@ -243,6 +260,13 @@ class WalkTo(unittest.TestCase):
         self.assertTrue(inputs and all(m["frames"] <= 10 for m in inputs))
         self.assertEqual(sum(m["frames"] for m in inputs), r["frames"])
         self.assertTrue(all(0.0 <= m["stick"][0] < 360.0 and 0.0 < m["stick"][1] <= 1.0 for m in inputs))
+
+    def test_a_stale_snapshot_is_not_an_arrival(self):               # F1: null pos, never an old place
+        game = FakeGame()
+        game.stale = True
+        r = self.walk(game, 0.0, 0.0)
+        self.assertFalse(r["arrived"])
+        self.assertTrue(r["reason"].startswith("stale position"), r["reason"])
 
     def test_stops_on_a_scene_change(self):
         game = FakeGame()
@@ -447,11 +471,20 @@ class PlayerServer(unittest.TestCase):
         self.assertNotIn("stick", self.games["p1"].log[-1])
         with self.assertRaises(ValueError):
             self.call("p1", "press", buttons=["Q"])
+        self.games["p1"].event = True            # (the game takes a warp only while an event runs)
         r = self.call("p1", "warp", scene="KokiriForest_Child", entrance="Start_Mido")
         self.assertEqual(r["state"]["scene"], "KokiriForest_Child")
         self.assertEqual((self.games["p1"].log[-1]["entrance"], self.games["p1"].log[-1]["timeout"]), ("Start_Mido", 60))
-        self.call("p1", "warp", scene="DekuTree")
+        self.call("p1", "warp", scene="DekuTree", timeout=25)
         self.assertNotIn("entrance", self.games["p1"].log[-1])
+        self.assertEqual(self.games["p1"].log[-1]["timeout"], 25)      # F3: the tool's timeout reaches the bridge
+        for bad in (0, 601, "x"):
+            with self.assertRaises(ValueError):
+                self.call("p1", "warp", scene="DekuTree", timeout=bad)
+        self.games["p1"].event = False
+        with self.assertRaises(pc.BridgeError) as e:                    # F2: in free play, refused at once
+            self.call("p1", "warp", scene="DekuTree")
+        self.assertEqual(e.exception.code, "not_in_event")
         self.assertEqual(self.call("p1", "flag", name="F2", value=True)["was"], 0)
         self.assertIs(self.games["p1"].flags["F2"], True)
         self.call("p1", "give", item="bombs")
@@ -881,8 +914,45 @@ class StrikeAndHelpers(unittest.TestCase):
         r = self.tool.call("hit", {"actor": "Enemy_Far", "id": "0x80000007", "amount": 3})
         self.assertEqual(r["result"], "ok")
         self.assertEqual(self.acts()[-1], "hit %d Enemy_Far 3" % 0x80000007)
-        r = self.tool.call("kill", {"actor": "Enemy_Far"})       # a name alone: as before
-        self.assertEqual((r["result"], self.acts()[-1]), ("ok", "kill Enemy_Far"))
+        r = self.tool.call("kill", {"actor": "Enemy_Far"})       # a name alone: it struck, its death is not checked
+        self.assertTrue(r["result"].startswith("struck: the hit landed"), r["result"])
+        self.assertIsNone(r["died"])
+        self.assertEqual(self.acts()[-1], "kill Enemy_Far")
+
+    def test_go_to_actor_refuses_on_a_stale_snapshot(self):           # F1
+        self.game.stale = True
+        r = ph.go_to_actor(self.c, 3)
+        self.assertTrue(r["reason"].startswith("stale position"), r)
+        self.assertFalse(r.get("arrived"))
+
+    def test_a_kill_is_ok_only_when_the_actor_is_seen_dead(self):        # F4
+        self.game.death_delay = 14                      # struck at frame +2, dies 14 frames after that
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertEqual((r["result"], r["died"]), ("ok", True))
+        self.assertGreater(r["died_after"], 0)           # it waited for the death, it did not say ok at the strike
+        self.assertFalse(self.actor(7)["alive"])
+
+    def test_a_kill_that_struck_but_did_not_kill_says_struck(self):
+        self.game.death_delay = None                    # a far actor that never dies
+        start = self.game.frame
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("struck: the hit landed, but Enemy_Far still lives after"), r["result"])
+        self.assertIs(r["died"], False)
+        self.assertLessEqual(self.game.frame - start, 2 + ph.STRIKE_FRAMES + ph.DEATH_FRAMES + ph.DEATH_LOOK)
+
+    def test_a_hit_does_not_wait_for_a_death(self):
+        self.game.death_delay = None
+        start = self.game.frame
+        r = self.tool.call("hit", {"actor": "Enemy_Far", "id": 7, "amount": 1})
+        self.assertEqual(r["result"], "ok")
+        self.assertLessEqual(self.game.frame - start, ph.STRIKE_FRAMES + ph.STRIKE_LOOK)
+
+    def test_a_kill_with_a_stale_world_list_says_it_could_not_check(self):
+        self.game.death_delay = None
+        self.game.dump_hook = lambda: self.game.world.update(stale=True, why="stale: no walk for 3000 ms")
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("struck: the hit landed, but its death could not be checked"), r["result"])
+        self.assertIsNone(r["died"])
 
     def test_gone_is_refused_in_words_and_nothing_is_retried(self):
         self.game.strike_word = "gone"
@@ -917,7 +987,7 @@ class StrikeAndHelpers(unittest.TestCase):
         r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
         self.assertTrue(r["result"].startswith("refused: no world list"), r["result"])
         self.assertEqual(self.game.strike_seq, 0)               # nothing was queued
-        self.assertEqual(self.tool.call("kill", {"actor": "Enemy_Far"})["result"], "ok")
+        self.assertTrue(self.tool.call("kill", {"actor": "Enemy_Far"})["result"].startswith("struck"))
 
     def test_a_module_without_strike_numbers_is_said_so(self):
         self.game.strike_seq_in_reply = False
