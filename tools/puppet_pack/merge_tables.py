@@ -1030,11 +1030,30 @@ def apply_fit(table, fit):
     return raised
 
 
+def drop_keep(root, win_path, fname):
+    """Removes the kept copy of the mod's own `fname` and, when it names that table, the stamp (the keep folder when
+    that leaves it empty). Whether the kept copy is still the table's original is for the caller to say."""
+    keep = os.path.join(win_path, KEEP_DIR)
+    kept = os.path.join(keep, fname)
+    if not os.path.isfile(kept):
+        return
+    os.remove(kept)
+    rel = os.path.relpath(os.path.join(win_path, *RESOURCE, fname), root).replace(os.sep, "/")
+    stamp = read_text(os.path.join(keep, STAMP))
+    if stamp is not None and (stamp.split("\n")[1:2] or [""])[0].startswith(f"out {rel} "):
+        os.remove(os.path.join(keep, STAMP))
+    try:
+        os.rmdir(keep)
+    except OSError:
+        pass   # (another table's copy or stamp is in there)
+
+
 def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
     """The size table the game reads, left as it is otherwise (one of our seeds, or the pack's alone), with the merged
     RSDB tables' entries raised. Raised from the table as the mod shipped it (original_table), which the first start
     that raises anything keeps in `_coop-size-table` with a stamp as merge_one does (undo puts it back): a second
-    start finds nothing to do, and a table that needs less now is not left with an earlier start's raise."""
+    start finds nothing to do, and a table that needs less now (also none: `fit` empty) is not left with an earlier
+    start's raise. A new table put in the mod that already holds the fit leaves no kept copy of the old one."""
     path = os.path.join(win_path, *RESOURCE, fname)
     source = original_table(root, win_path, fname)
     with open(source, "rb") as f:
@@ -1044,14 +1063,10 @@ def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
     if not apply_fit(table, fit):
         if source != path:   # (the original needs nothing now: an earlier start's raise goes, the mod's own table is back)
             write_atomic(path, raw)
-            for f in (os.path.join(keep, STAMP), source):
-                os.remove(f)
-            try:
-                os.rmdir(keep)
-            except OSError:
-                pass   # (another table's copy is in there)
             shown = "the puppet pack" if fold(win_name) == PACK else win_name
             say(f"Size tables: {shown}'s needs no raise now; its own table is back.")
+        # (else a new table, which holds the fit already: the kept copy and stamp of the old one are of no use)
+        drop_keep(root, win_path, fname)
         return
     data = codec.save(table, raw)
     with open(path, "rb") as f:
@@ -1071,6 +1086,10 @@ def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
         f"({', '.join(sorted(fit))}). Its own table is kept in {win_name}/{KEEP_DIR}.")
 
 
+def has_keep(win_path, fname):
+    return os.path.isfile(os.path.join(win_path, KEEP_DIR, fname))
+
+
 def merge_mods(root, romfs, say=print, fit=None):
     """Merges the winning table of each table name. Returns the number of tables it could not merge.
     `fit` (merge_rows): RSDB entries the table the game reads must hold at least."""
@@ -1088,7 +1107,7 @@ def merge_mods(root, romfs, say=print, fit=None):
             # each is built beside every other table, and the pack's table changing makes them be built again.
             others = [(n, p) for n, p in having[:-1] if not is_ours(n, p)]
             if not others:  # (the pack's table alone, or with our seeds only)
-                if fit:
+                if fit or has_keep(win_path, fname):
                     try:
                         fit_in_place(root, codec, win_name, win_path, fname, fit, say)
                     except (OSError, ValueError, MergeError) as e:
@@ -1099,7 +1118,7 @@ def merge_mods(root, romfs, say=print, fit=None):
         else:
             title_mod = fold(win_name).startswith("contents/")
             if len(having) < 2 or is_ours(win_name, win_path):  # (one table, or our seed: left as it is but the fit)
-                if fit and not title_mod:
+                if (fit or has_keep(win_path, fname)) and not title_mod:
                     try:
                         fit_in_place(root, codec, win_name, win_path, fname, fit, say)
                     except (OSError, ValueError, MergeError) as e:

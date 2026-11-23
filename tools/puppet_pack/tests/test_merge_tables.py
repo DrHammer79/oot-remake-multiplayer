@@ -688,6 +688,32 @@ class MergeRowsTest(unittest.TestCase):
         self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
         self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
 
+    def test_a_size_table_goes_back_down_also_when_the_fit_is_empty(self):
+        # The pack's actor table is gone: the merged actor tables need nothing from the size table any more (fit {}).
+        own = self.seed_with_own_tables()
+        own_sizes = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertGreater(self.sizes(SEED).get(AI_KEY), 4000)
+        os.remove(self.path(PACK, "romfs", "RSDB", AI))
+        failed, fit = self.run_all()
+        self.assertEqual((failed, fit), (0, {}))
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+        self.assertEqual(self.run_all()[0], 0)   # (the next start: nothing to do)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
+
+    def test_a_new_size_table_that_holds_the_fit_leaves_no_kept_copy_of_the_old_one(self):
+        self.seed_with_own_tables()
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertTrue(os.path.isfile(self.path(SEED, mt.KEEP_DIR, NAME)))
+        new_sizes = read(self.put_sizes(SEED, 90000))   # (a new seed's table: larger than the fit needs)
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), new_sizes)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR, NAME)))
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR, mt.STAMP)))
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), new_sizes)
+
     def test_a_stamp_names_a_table_input_by_its_mod_folder(self):
         self.assertEqual(mt.mod_of_table(os.path.join("a", "b", "mods", "m x", *mt.RESOURCE, NAME)),
                          os.path.join("a", "b", "mods", "m x"))
