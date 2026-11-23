@@ -378,7 +378,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "fight", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -1422,6 +1422,18 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertEqual(r["result"], "alive")
         self.assertLessEqual(r["frames"], 60 + 2 * ph.PRESS_FRAMES)
         self.assertEqual((r["life_before"], r["life_after"]), (4, 4))
+
+    def test_fight_tool_locks_on_slashes_and_ends_with_a_look(self):
+        self.actor(3)["pos"] = [1, 0, 0]
+        self.game.on_press = lambda buttons: self.actor(3).update(life=0) if "Y" in buttons and "ZL" in buttons else None
+        r = self.tool.call("fight", {"id": 3, "name": "Enemy_Near", "max_frames": 90})
+        self.assertEqual(r["result"], "dead", r)
+        self.assertIn("look", r)
+        self.assertTrue(any(m["buttons"] == ["ZL", "Y"] for m in self.game.log if m["cmd"] == "input"))
+        for args in ({"id": 3, "name": "Enemy_Near", "sword": "Q"}, {"id": 3}, {"name": "Enemy_Near"},
+                     {"id": 3, "name": "Enemy_Near", "max_frames": 1201}):
+            with self.assertRaises(ValueError, msg=args):
+                self.tool.call("fight", args)
 
     def test_the_helper_tools_take_the_id_and_the_name_and_are_bounded(self):
         r = self.tool.call("go_to_actor", {"id": "3", "name": "Enemy_Near"})

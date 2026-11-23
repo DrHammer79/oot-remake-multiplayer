@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_fight  # noqa: E402
 import kit_look  # noqa: E402
 import kit_route  # noqa: E402
 import kit_tools  # noqa: E402
@@ -324,6 +325,17 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["action"], "properties": {
          "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
          "note": {"type": "string", "maxLength": 290}}}},
+    {"name": "fight", "description": "Fight ONE enemy (`id` and `name` from look or get_world): walk up to sword "
+     "reach, then slash with the lock-on button held, shield after Link is hit, in short rounds until it is dead, "
+     "gone, Link is low (life 4 quarter hearts or less: he backs off and the fight ends as `low`), a scene change or "
+     "load stops it, or `max_frames` run out. Ends with a `look`. The buttons are guesses (`lock` ZL, `sword` Y, "
+     "`shield` R): when the enemy's life never moves, `hint` says the buttons may be wrong. At most 1200 frames pass "
+     "(`max_frames` lowers it). The enemy is looked up in the world list every round and never swapped for another "
+     "of its name; it needs the world list. It acts on this game only.",
+     "inputSchema": {"type": "object", "required": ["id", "name"], "properties": dict(
+         ACTOR_ARGS, max_frames={"type": "integer", "minimum": 1, "maximum": kit_fight.MAX_FRAMES},
+         lock={"type": "string", "enum": list(pc.BUTTONS)}, sword={"type": "string", "enum": list(pc.BUTTONS)},
+         shield={"type": "string", "enum": list(pc.BUTTONS)}, min_life={"type": "integer", "minimum": 0})}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -598,6 +610,19 @@ class Game:
             return self._go_to(args)
         if name == "record_route":
             return self._record_route(args)
+        if name == "fight":
+            def button(key, default):
+                b = str(args.get(key, default)).upper()
+                if b not in pc.BUTTONS:
+                    raise ValueError("%s: one of %s" % (key, " ".join(pc.BUTTONS)))
+                return b
+            out = kit_fight.fight(c, _need_id(args), _word(args, "name"),
+                                  int(_bounded(args, "max_frames", 600, 1, kit_fight.MAX_FRAMES)),
+                                  button("lock", kit_fight.LOCK), button("sword", kit_fight.SWORD),
+                                  button("shield", kit_fight.SHIELD),
+                                  int(_bounded(args, "min_life", kit_fight.MIN_LIFE, 0, 80)))
+            out["look"], self.last_look = kit_look.look(c.state(), self.last_look)
+            return out
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}

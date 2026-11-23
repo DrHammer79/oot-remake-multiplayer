@@ -166,6 +166,8 @@ jobs:
         run: python tools/autotest/tests/test_kit_look.py -v
       - name: Play-test wait_until tests
         run: python tools/autotest/tests/test_kit_wait.py -v
+      - name: Play-test fight tests
+        run: python tools/autotest/tests/test_kit_fight.py -v
       - name: Play-test go_to and record_route (routes) tests
         run: python tools/autotest/tests/test_kit_route.py -v
       - name: Play-test kit doctor tests
