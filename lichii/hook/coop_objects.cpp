@@ -50,6 +50,7 @@
 
 #include "coop_objects.h"
 #include "coop_strike.h"
+#include "coop_gold_mode.h"
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
@@ -187,6 +188,10 @@ constexpr u64 kEnemyKey = u64{1} << 63;
 constexpr u64 kExtraKey = kEnemyKey | u64{1} << 62;
 // Difficulty's night horde (coop_difficulty.h Horde): its own keys on the same list.
 constexpr u64 kHordeKey = kEnemyKey | u64{1} << 61;
+// Row 63: a Gold Skulltula's token another game's kill owes ours (CoopWorld::WorldSync::OweToken): its own keys
+// there, the placement's low 60 bits.
+constexpr u64 kTokenKey = kEnemyKey | u64{1} << 60;
+constexpr u64 kTokenKeyMask = (u64{1} << 60) - 1;
 constexpr int kMoverCallerOrder = CoopCallerOrders::kMover;  // after the puppets, spawn copies (10) and fairies (20)
 constexpr int kGrassCallerOrder = CoopCallerOrders::kGrass;  // the others' field grass cuts (coop_world.h)
 
@@ -2281,6 +2286,7 @@ public:
             }
             PlanExtras(*scene, seen, enemies);
             PlanHorde(*scene, self, server_now_us, seen, enemies);
+            PlanTokens(enemies);
             CoopSpawn::TheDirector().SetEnemies(main_, std::move(enemies));
         }
         for (const auto& note : sync_.TakeNotes()) {
@@ -2313,7 +2319,13 @@ public:
             // of a hammer switch or the box puzzle's last corner would raise our own asker's trigger here (a replay
             // that binds our Link): those world objects follow only once our game has played the event.
             world_.SetTriggerKeepers(TriggerFollowKeepers(system, *scene));
+            for (const auto& d : sync_.TakeGoldDeaths()) {
+                world_.OweToken(d.placement, d.at, server_now_us);  // row 63: the token comes from the share
+            }
             world_.Tick(*scene, self, server_now_us, seen, player_, world);
+            for (const u64 placement : world.token_keys) {
+                CoopWorld::QueueTokenKeys(placement);
+            }
             for (auto& m : world.send) {
                 send.emplace_back(std::move(m));
             }
@@ -2865,6 +2877,14 @@ public:
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
     std::vector<CoopScrubs::Seen> scrubs_seen_;
+    // This walk's own-game mobs (CoopStrike::OwnGameMob): not shared, so not in `seen`, but a test kill may kill them.
+    struct OwnMob {
+        u64 address = 0;
+        std::string name;
+        std::array<float, 3> position{};
+        std::optional<s32> life;
+    };
+    std::vector<OwnMob> own_mobs_;
     bool ocarina_probe_on_ = false;           // issue 152: LICHII_COOP_OCARINA_PROBE=1
     CoopOcarina::OcarinaProbe ocarina_probe_;
     CoopOcarina::HoldProbe ocarina_hold_probe_;
@@ -3954,6 +3974,7 @@ private:
         share_switches_.clear();  // room-objects
         platform_drivers_.clear();
         scrubs_seen_.clear();  // issue 149
+        own_mobs_.clear();
         std::vector<u64> actors;
         if (!List(r, actors)) {
             return false;
@@ -4265,6 +4286,18 @@ private:
                     g.position[i] = r.Get<float>(a + kActorPosition + 4 * i).value_or(0.0f);
                 }
                 gimmicks_.push_back(std::move(g));
+            }
+            if (CoopStrike::OwnGameMob(known.first, CoopGoldMode::NotShared())) {
+                OwnMob m;
+                m.address = a;
+                m.name = known.first;
+                for (std::size_t i = 0; i < 3; ++i) {
+                    m.position[i] = r.Get<float>(a + kActorPosition + 4 * i).value_or(0.0f);
+                }
+                if (const auto v = LifeValue(r, a)) {
+                    m.life = r.Get<s32>(v->first + 8);
+                }
+                own_mobs_.push_back(std::move(m));
             }
             if (!extra_unbound &&
                 (IsShared(known.first) || CoopWorld::IsWorldObject(known.first) ||
@@ -4922,6 +4955,37 @@ private:
         }
     }
 
+    // Row 63, Gold Skulltulas Shared: the tokens the world sync owes our game (another game's kill, ours
+    // made none), made by the game's own create where its Skulltula's copy was, then let go like a drop.
+    void PlanTokens(std::vector<CoopSpawn::Copy>& enemies) {
+        const auto made = world_.MadeTokens();
+        if (made.empty()) {
+            return;
+        }
+        for (const auto& [key, actor] : CoopSpawn::TheDirector().Live()) {
+            if ((key & ~kTokenKeyMask) != kTokenKey) {
+                continue;
+            }
+            for (const auto& t : made) {
+                if ((t.placement & kTokenKeyMask) == (key & kTokenKeyMask) && t.actor == 0) {
+                    world_.BindMadeToken(t.placement, actor);
+                    LOG_INFO(Core, "coop: world: token {:016x} made here by the share", t.placement);
+                }
+            }
+        }
+        for (const auto& t : world_.MadeTokens()) {
+            CoopSpawn::Copy c;
+            c.key = kTokenKey | (t.placement & kTokenKeyMask);
+            c.actor = "Obj_Token_Gold";
+            c.position = t.at;
+            c.act = t.actor != 0 ? CoopSpawn::Act::release : CoopSpawn::Act::show;
+            c.place = true;   // where the Skulltula's copy was; let go once made
+            c.remakes = 0;    // one taken is not made again
+            c.real = true;    // the game's own token: its pickup is the game's
+            enemies.push_back(std::move(c));
+        }
+    }
+
     // Difficulty (coop_difficulty.h Horde): more night Stalchild beside the
     // rolls this game keeps and shares, the more players stand near each.
     void PlanHorde(const std::string& scene, std::uint8_t self, u64 server_now_us, const std::vector<Seen>& seen,
@@ -5054,6 +5118,9 @@ private:
                 }
             }
             const CoopStrike::Pick pick = CoopStrike::PickTarget(candidates, name, strike.id, listed);
+            if (pick.result != CoopStrike::kDone && strike.amount == 0 && KillOwnMob(strike, writes)) {
+                continue;
+            }
             if (strike.seq != 0) {
                 CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), name, strike.id});
             }
@@ -5094,6 +5161,43 @@ private:
                      name, best->address, best->position[0], best->position[1], best->position[2],
                      best_m, best->life->life);
         }
+    }
+
+    // A test kill the shared list could not land, on this game's own mobs (a Not shared Gold Skulltula): written
+    // straight to its Life, in this game only; its death and token are this game's own (nothing is sent).
+    bool KillOwnMob(const TestStrike& strike, std::vector<LifeWrite>& writes) {
+        std::vector<CoopStrike::Candidate> mobs;
+        for (const OwnMob& m : own_mobs_) {
+            CoopStrike::Candidate c;
+            c.address = m.address;
+            c.name = m.name;
+            c.life = m.life;
+            if (player_) {
+                const float dx = m.position[0] - (*player_)[0];
+                const float dy = m.position[1] - (*player_)[1];
+                const float dz = m.position[2] - (*player_)[2];
+                c.metres = std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            mobs.push_back(c);
+        }
+        const CoopStrike::Pick pick = CoopStrike::PickTarget(mobs, strike.name, strike.id);
+        if (pick.result != CoopStrike::kDone) return false;
+        if (strike.seq != 0) {
+            CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), strike.name, strike.id});
+        }
+        const OwnMob& m = own_mobs_[pick.index];
+        LifeWrite w;
+        w.address = m.address;
+        w.life = 0;
+        w.hurt = std::max<std::int32_t>(*m.life, 1);
+        w.from = player_;
+        w.direct = true;
+        w.test_kill = true;
+        writes.push_back(w);
+        LOG_INFO(Core, "coop: test kill {} {:#x} at {:.2f} {:.2f} {:.2f} ({:.1f} m, life {}): hit, this game's own "
+                       "(not shared)", m.name, m.address, m.position[0], m.position[1], m.position[2],
+                 mobs[pick.index].metres, *m.life);
+        return true;
     }
 
     void WriteLife(Core::Memory::Memory& memory, Reader& r, const LifeWrite& w) {

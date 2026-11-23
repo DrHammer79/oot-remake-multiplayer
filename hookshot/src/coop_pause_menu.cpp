@@ -375,6 +375,19 @@ void Menu::HostRuleLines(std::vector<Line>& out, bool guest) const {
                          : std::string("On: each player who asks to join waits until you let them in or refuse them "
                                        "(Let in on Your game, or /allow and /deny in the chat). Applies at your next "
                                        "Host.")});
+    // Row 63 (coop_gold_mode.h): this player's choice for the next Host, as Approve joins; the session's mode
+    // holds until it ends.
+    const std::string gold_now =
+        live ? std::string(session_.gold_own ? "This game: Not shared." : "This game: Shared.") : std::string();
+    out.push_back({Choice("Gold Skulltulas", options_.gold_own ? "Not shared" : "Shared"), Act::kGoldSkulltulas,
+                   guest ? std::string(kYourNextHost) + " " + gold_now
+                   : live && options_.gold_own != session_.gold_own
+                       ? "Applies at your next Host: stop hosting, then start again. " + gold_now
+                       : std::string(options_.gold_own
+                                         ? "Not shared: a race. Each player's Gold Skulltulas, tokens and count are "
+                                           "their own. Applies at your next Host."
+                                         : "Shared: a kill drops the token in every game, and one pickup counts once "
+                                           "for everyone. Applies at your next Host.")});
     Row pvp = Toggle("PvP", live ? session_.pvp : options_.pvp);
     pvp.fixed = guest;
     out.push_back({pvp, Act::kPvp,
@@ -1823,6 +1836,7 @@ void Menu::Decide(Act act) {
     case Act::kOriginal:
     case Act::kGameKind:
     case Act::kApproveJoins:
+    case Act::kGoldSkulltulas:
     case Act::kPvp:
     case Act::kDbno:
         Change(act, 0);   // (a toggle: A flips it)
@@ -1942,6 +1956,10 @@ void Menu::Change(Act act, int step) {
         break;
     case Act::kApproveJoins:
         options_.approve_joins = step > 0 ? true : step < 0 ? false : !options_.approve_joins;
+        request_ = Request{Request::Kind::kSave, {}};
+        break;
+    case Act::kGoldSkulltulas:
+        options_.gold_own = !options_.gold_own;   // (two choices: either way flips it)
         request_ = Request{Request::Kind::kSave, {}};
         break;
     case Act::kPvp: {

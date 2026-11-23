@@ -135,20 +135,39 @@ bool FlagWatcher::receive(std::span<const std::uint8_t> bytes) {
   return receive(message);
 }
 
+std::size_t FlagWatcher::keep_local(std::span<const FlagKey> keys) {
+  std::size_t was = 0;
+  for (const FlagKey key : keys) {
+    local_.insert(key);
+    if (shared_.remove(key)) ++was;
+    pickups_.erase(key);
+    one_way_.erase(key);
+    guard_source_.erase(key);
+    guards_.erase(key);
+  }
+  return was;
+}
+
 bool FlagWatcher::share_one_way(FlagKey key) {
-  if (key.kind != FlagKeyKind::named || !one_way_.insert(key).second) return false;
+  if (key.kind != FlagKeyKind::named || local_.contains(key) || !one_way_.insert(key).second) return false;
   shared_.add(key);
   return true;
 }
 
 bool FlagWatcher::share_down_only(FlagKey key) {
-  if (key.kind != FlagKeyKind::named || up_only_.contains(key) || !down_only_.insert(key).second) return false;
+  if (key.kind != FlagKeyKind::named || local_.contains(key) || up_only_.contains(key) ||
+      !down_only_.insert(key).second) {
+    return false;
+  }
   shared_.add(key);
   return true;
 }
 
 bool FlagWatcher::share_up_only(FlagKey key) {
-  if (key.kind != FlagKeyKind::named || down_only_.contains(key) || !up_only_.insert(key).second) return false;
+  if (key.kind != FlagKeyKind::named || local_.contains(key) || down_only_.contains(key) ||
+      !up_only_.insert(key).second) {
+    return false;
+  }
   shared_.add(key);
   return true;
 }
@@ -185,12 +204,13 @@ void FlagWatcher::note_group_at_least(FlagKey key, std::int32_t value) {
 }
 
 bool FlagWatcher::share_pickup(FlagKey key) {
-  if (key.kind != FlagKeyKind::key64 || !pickups_.insert(key).second) return false;
+  if (key.kind != FlagKeyKind::key64 || local_.contains(key) || !pickups_.insert(key).second) return false;
   shared_.add(key);
   return true;
 }
 
 void FlagWatcher::guard_count(FlagKey count, std::span<const FlagKey> sources) {
+  if (local_.contains(count)) return;
   guards_.try_emplace(count);
   for (const FlagKey source : sources) {
     share_pickup(source);
@@ -205,7 +225,7 @@ void FlagWatcher::expect_doubled_gain() {
 }
 
 bool FlagWatcher::share_pickup_named(FlagKey key) {
-  if (key.kind != FlagKeyKind::named || !pickups_.insert(key).second) return false;
+  if (key.kind != FlagKeyKind::named || local_.contains(key) || !pickups_.insert(key).second) return false;
   shared_.add(key);
   return true;
 }
@@ -230,7 +250,7 @@ bool FlagWatcher::takes(const FlagEntry& entry) {
   const FlagKey key = key_of(entry);
   const bool one = entry.kind == protocol::FlagKind::boolean && entry.value != 0;
   if (!shared_.contains(key)) {
-    if (!learn_ || !one || key.kind != FlagKeyKind::key64 || learned_ >= kMaxLearned) {
+    if (!learn_ || !one || key.kind != FlagKeyKind::key64 || learned_ >= kMaxLearned || local_.contains(key)) {
       ++stats_.not_shared;
       return false;
     }

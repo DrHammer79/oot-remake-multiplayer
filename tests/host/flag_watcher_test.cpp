@@ -3703,3 +3703,38 @@ TEST_CASE("heart containers: only a shared named flag, and the item store takes 
   CHECK_FALSE(store.write(hearts_delta(-4)));  // a maximum never goes down by a change
   CHECK(game_store.get(kHeartMax) == 16u);
 }
+
+// Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): the keys, the count and its IsGet stay in each game.
+TEST_CASE("keep local: a Skulltula's key and the token count are never sent, nor written from a message") {
+  TokenStore store = token_game();
+  FlagWatcher w(token_shared(), FlagRole::player);
+  w.set_learn_pickups(true);
+  guard(w);
+  const FlagKey local[] = {kSkull, kSkull2, kTokens};
+  CHECK(w.keep_local(local) == 3);
+  CHECK_FALSE(w.shared().contains(kSkull));
+  CHECK_FALSE(w.shared().contains(kTokens));
+  CHECK(w.shared().contains(kChest));  // the rest is shared as before
+  CHECK(w.kept_local(kSkull));
+  w.frame(store);
+
+  // Our pickup: nothing about it goes out, and our count stays ours.
+  store.set(kSkull, 1);
+  store.tokens(6);
+  CHECK(entries(w.frame(store)).empty());
+  CHECK(run_hold(w, store).empty());
+  CHECK(store.tokens() == 6);
+
+  // Another game's pickup (a host from before, or a message on its way): not written here.
+  w.receive(state({entry(kSkull2, 1), token_total(9)}));
+  w.frame(store);
+  CHECK(store.values.at(kSkull2).value == 0);
+  CHECK(store.tokens() == 6);
+
+  // Never shared again: not by the guard, a pickup note, or learning.
+  guard(w);
+  CHECK_FALSE(w.share_pickup(kSkull));
+  CHECK_FALSE(w.shared().contains(kSkull));
+  CHECK_FALSE(w.shared().contains(kSkull2));
+  CHECK(w.pickups() == 0);
+}

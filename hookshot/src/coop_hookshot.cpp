@@ -1285,6 +1285,9 @@ bool Start(const HosCoopApi* api) {
                                                        : "by reading the tables (LICHII_COOP_FLAG_EVENTS=0)",
              g_flag_setters.load() ? "through the game's setters on its calc thread"
                                    : "into the game's queues (LICHII_COOP_FLAG_SETTERS=0)");
+    // Row 63: the host's Gold Skulltula choice (coop-options.ini gold_skulltulas) before co-op starts, so a Host.bat
+    // start, the first player in, puts it in force at its welcome (lane run of 2026-11-23: read later, it was lost).
+    CoopFiles::ReadOptions();
     CoopHook::Start();
     g_on = true;
     CoopModsRuntime::Start();  // the mods folder and the code mods (docs/mods.md)

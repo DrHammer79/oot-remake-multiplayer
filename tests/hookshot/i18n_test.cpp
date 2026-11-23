@@ -816,3 +816,21 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hans, "Join Saria again") == "再次加入 Saria");
     CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
 }
+
+TEST_CASE("coop i18n: the Gold Skulltulas row's joined help lines are translated whole") {
+    // Review of f36a8852: HostRuleLines joins two table lines; Tr has a line for each joined shape.
+    for (const char* code : {"zh-Hans", "zh-Hant"}) {
+        CAPTURE(code);
+        const CoopI18n::Lang* lang = ByCode(code);
+        REQUIRE(lang != nullptr);
+        for (const char* first : {"Applies at your next Host: stop hosting, then start again.",
+                                  "Your own setting for the next game you host; the game you are in keeps its host's."}) {
+            for (const char* now : {"This game: Shared.", "This game: Not shared."}) {
+                const std::string en = std::string(first) + " " + now;
+                CAPTURE(en);
+                const std::string zh = CoopI18n::Tr(lang, en);
+                CHECK(zh == CoopI18n::Tr(lang, first) + CoopI18n::Tr(lang, now));
+            }
+        }
+    }
+}

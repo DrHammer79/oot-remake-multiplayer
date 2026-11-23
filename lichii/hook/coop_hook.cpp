@@ -59,6 +59,7 @@
 #include "coop/presence/presence.hpp"
 #include "coop/version.hpp"
 #include "coop_boss.h"
+#include "coop_gold_mode.h"
 #include "coop_boss_beaten.h"
 #include "coop_frame_clock.h"
 #include "coop_boss_scenes.h"
@@ -532,6 +533,7 @@ public:
         config.hello.nickname = settings_.name;
         config.player_key = settings_.player_key;
         config.join_password = settings_.password;
+        CoopGoldMode::OnConnection();  // row 63: an earlier session's mode ends here; Shared until told
         client_ = std::make_unique<coop::net::Client>(std::move(config));
         if (!client_->start()) {
             LOG_ERROR(Core, "coop: ENet did not start; co-op is off");
@@ -580,6 +582,7 @@ public:
         // presents (high refresh presents up to 165 a second).
         session.clock = [] { return CoopEvery::NowUs(); };
         pickups_given_ = 0;
+        gold_local_ = false;  // a new session's watcher shares them until the mode says not
         // Called by service() on the network thread, with the client.
         session.on_event = [this](const coop::net::Event& event, coop::net::Client& client) {
             OnSessionEvent(event, client, false);
@@ -803,6 +806,16 @@ public:
         CoopDbno::OnEvent(event, client);  // down but not out (docs/play-online.md)
         CoopDifficulty::OnEvent(event, client);  // docs/play-online.md "Difficulty"
         CoopModShare::OnEvent(event, client);  // mods (docs/mods.md "Mods in co-op")
+        if (event.kind == coop::net::EventKind::welcomed ||
+            (event.kind == coop::net::EventKind::message && !client.is_host() &&
+             std::holds_alternative<coop::protocol::ModSettings>(event.message))) {
+            // Row 63: the Gold Skulltula mode in force (CoopModShare puts it: our choice as the first player in,
+            // else Shared until the host's MOD_SETTINGS).
+            LOG_INFO(Core, "coop: Gold Skulltulas: {} ({}): {}",
+                     event.kind == coop::net::EventKind::welcomed ? "welcomed" : "the host's settings",
+                     client.is_host() ? "the host" : "a guest",
+                     CoopGoldMode::NotShared() ? "Not shared" : (CoopGoldMode::Told() ? "Shared" : "Shared until told"));
+        }
         CoopSave::OnEvent(event, client);  // the host's save for the guests (issue 167)
         CoopHud::OnEvent(event);  // the others' hearts for the HUD (PLAYER_LIFE)
         CoopLookShare::OnEvent(event, client);  // looks of several parts (PLAYER_LOOK, coop_look_share.h)
@@ -892,6 +905,15 @@ public:
                 for (const std::string& count : CoopWorld::TakeGiveBacks()) {
                     LOG_INFO(Core, "coop: {}", CoopWorld::GiveBack(*game_store, count));
                 }
+                // Row 63: but a token the world sync made here (another game's kill, ours made none) has no
+                // placement for the game's pickup to set: its two keys are written here, within the count
+                // guard's hold of the count's gain, and the flag sync shares the take.
+                // A write the game refuses is tried again on the next frames (kTokenKeyTries).
+                for (const CoopWorld::TokenKeyJob& job : CoopWorld::TakeTokenKeys()) {
+                    if (const std::string line = CoopWorld::WriteTokenKeys(*game_store, job); !line.empty()) {
+                        LOG_INFO(Core, "coop: {}", line);
+                    }
+                }
             }
             if (sharing_) {
                 // Issue 138: grants wait for a loaded save, and the capacities
@@ -925,6 +947,21 @@ public:
                     ocarina_equip_.link(false, {});  // a load or scene change: the next stay asks again (row 103)
                 }
             }
+        }
+        if (session_ && !gold_local_ && CoopGoldMode::KeepLocalNow()) {
+            // Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): every Skulltula's two keys, the token
+            // count and its IsGet stay in this game for the rest of the session.
+            gold_local_ = true;
+            std::vector<coop::protocol::FlagKey> keys;
+            for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key));
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key + 2));
+            }
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}));
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenGet, std::uint16_t{0}));
+            const std::size_t was = session_->keep_local(keys);
+            LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: {} keys kept in this game ({} were shared)",
+                     keys.size(), was);
         }
         if (pickups_) {
             const auto keys = CoopPickups::Since(pickups_given_);
@@ -2735,6 +2772,7 @@ private:
     bool doubled_event_seen_ = false;     // its get scene (our Link's event) began
     static constexpr std::uint64_t kDoubledNoEventMs = 1000;
     std::size_t pickups_given_ = 0;  // CoopPickups keys handed to the session
+    bool gold_local_ = false;        // row 63: this session's Gold Skulltula flags kept in our game (Not shared)
     bool holding_logged_ = false;  // issue 129: HoldFlagStore held something last frame
     std::uint32_t sale_held_logged_ = 0;  // a scrub sale flag the hold kept last frame (log)
 #ifdef COOP_HOOKSHOT

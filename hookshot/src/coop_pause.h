@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <string>
 
+#include "coop_menu_state.h"
 #include "coop_pause_menu.h"
 #include "hos_coop_menu.h"
 #include "hos_coop_menu_picture.h"
@@ -144,5 +145,7 @@ bool TestMenu(const std::string& page);
 // page word (CoopPauseMenu::PageWord). It does not see the game's own pause screen, so "closed" is not "the game's
 // pause menu is shut".
 std::string MenuState();
+// The same menu for the bridge's `menu` member: open, its page word and its rows (coop_menu_state.h).
+CoopMenuState::Tab MenuTab();
 
 }  // namespace CoopPause

@@ -286,6 +286,7 @@ Options Options::Read(std::string_view coop_ini, std::string_view options_ini) {
     o.show_players = On(IniGet(options_ini, "LICHII_COOP_SHOW_PLAYERS"));
     o.pvp = On(IniGet(options_ini, "pvp"));
     o.approve_joins = On(IniGet(options_ini, "approve_joins"));
+    o.gold_own = IniGet(options_ini, "gold_skulltulas").value_or("") == "own";
     o.same_network_open = On(IniGet(options_ini, "same_network_open"));
     o.auto_rejoin = On(IniGet(options_ini, "auto_rejoin"));
     o.original_game = On(IniGet(options_ini, "original_game"));
@@ -381,6 +382,7 @@ void Options::Write(std::string& coop_ini, std::string& options_ini) const {
     if (On(IniGet(o, "approve_joins")) != approve_joins) {   // (Co-op settings' Approve joins; unchanged: as written)
         o = approve_joins ? IniSet(o, "approve_joins", "on", true) : IniUnset(o, "approve_joins");
     }
+    o = gold_own ? IniSet(o, "gold_skulltulas", "own", true) : IniUnset(o, "gold_skulltulas");
     o = auto_rejoin ? IniSet(o, "auto_rejoin", "on", true) : IniUnset(o, "auto_rejoin");
     o = original_game ? IniSet(o, "original_game", "on", true) : IniUnset(o, "original_game");
     o = same_network_open ? IniSet(o, "same_network_open", "on", true) : IniUnset(o, "same_network_open");
