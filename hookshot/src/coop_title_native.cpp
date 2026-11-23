@@ -2,6 +2,7 @@
 #include "coop_title_native.h"
 
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
 #include "coop_text_fit.h"
 
 #include <algorithm>
@@ -130,12 +131,10 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
     l.texts[static_cast<std::size_t>(l.back)] = CoopI18n::Tr("Back");
     l.rows[static_cast<std::size_t>(l.back)] = -1;
     l.focus = at >= 0 ? at - l.top : l.back;
-    // (more than one page: the page first, then what the row does — both in the player's
-    // language before the cut: the page is the table's shape, the row's help its line)
-    const std::string paged =
-        l.pages > 1
-            ? CoopI18n::Tr("Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)")
-            : std::string();
+    // (more than one page: the page first, between the game's own ZL and ZR letters (coop_list_pages.h), then what
+    // the row does; both in the player's language before the cut: the page is the table's shape, the row's help its
+    // line. Row 264: "Page 2 of 3 (ZL/ZR)" in words was not seen as something the pad can do)
+    const std::string paged = CoopListPages::Line(l.page, l.pages);
     l.hint = Fit(paged.empty()   ? CoopI18n::Tr(v.help)
                  : v.help.empty() ? paged
                                   : paged + "   " + CoopI18n::Tr(v.help),
@@ -157,8 +156,8 @@ float ColumnRaise(float lowest, float highest, float raised, float scale) {
 int PageJump(const CoopPauseMenu::View& v, const Look& l, int dir) {
     int at = -1;
     const std::vector<int> shown = Shown(v, &at);
-    const int page = l.page + (dir < 0 ? -1 : 1);
-    if (dir == 0 || l.pages <= 1 || page < 0 || page >= l.pages) return -1;
+    if (dir == 0 || l.pages <= 1) return -1;
+    const int page = CoopListPages::Step(l.page, l.pages, dir);   // (round at both ends, as every list: row 264)
     const int per_page = std::max(1, l.per_page);
     const std::size_t first = static_cast<std::size_t>(page) * static_cast<std::size_t>(per_page);
     return first < shown.size() ? shown[first] : -1;

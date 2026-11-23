@@ -74,6 +74,12 @@ join. A private one says *Needs the host's password*: pressing it opens Join wit
 field chosen. If nothing is listed it says *No public games right now*; if the list cannot be reached it says so and
 what to do.
 
+**More games than fit: pages.** Every list of games turns its pages the same way (row 264): **ZL** the page before,
+**ZR** the page after, round at both ends (ZR on the last page goes to the first). The list says it pages only when it
+does: **Page 2/3** between the game's own ZL and ZR button letters, on the title's Join a game (the line under Back)
+and on the - menu's Find a game (the list's heading). In the F1 menu (Lobby tab, Multiplayer > Find a game) a
+**Page < 2/3 >** row above the games turns it with Left and Right (or A), the same round.
+
 **What a public game keeps safe** (the host's side):
 
 - **Your address stays hidden.** A public game is reached only through the relay: no router forward, no invite code,

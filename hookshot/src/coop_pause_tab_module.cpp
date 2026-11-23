@@ -6,6 +6,7 @@
 // tests drive Page and Probe themselves).
 #include "coop_i18n.h"
 #include "coop_pause_tab.h"
+#include "coop_list_pages.h"
 #include "coop_browse.h"
 #include "coop_title.h"
 
@@ -3129,7 +3130,7 @@ void Act(int row, int line = -1, bool clicked = false, RowAction forced = RowAct
         }
         break;
     case RowAction::kBrowsePage:
-        g_cell_page = (v.s.cell_page + 1) % CellPages(BrowseListed(v.s)), g_cell = -1;
+        g_cell_page = CoopListPages::Step(v.s.cell_page, CellPages(BrowseListed(v.s)), 1), g_cell = -1;
         break;
     case RowAction::kBrowseList:
         g_online = !v.s.online, g_cell_page = 0, g_cell = -1;
@@ -4017,7 +4018,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             browse_refresh = true;
                         } else if (pages > 1) {
                             const int dir = x < (head.x0 + box_x) / 2 ? -1 : 1;
-                            g_cell_page = ((g_cell_page.load() + dir) % pages + pages) % pages, cell = -1;
+                            g_cell_page = CoopListPages::Step(g_cell_page.load(), pages, dir), cell = -1;
                             g_page.Sound("button_decide"), g_live_poke = true;
                         }
                     }
@@ -4435,7 +4436,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 const SessionView lan = ViewNow(View::kLan);
                 const int pages = CellPages(BrowseListed(lan.s));
                 if (pages > 1) {
-                    g_cell_page = ((lan.s.cell_page + minus_page_step) % pages + pages) % pages, g_cell = -1;
+                    g_cell_page = CoopListPages::Step(lan.s.cell_page, pages, minus_page_step), g_cell = -1;   // (round)
                     g_live_poke = true;
                 }
             }

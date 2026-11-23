@@ -4,6 +4,7 @@
 
 #include "coop_browse.h"
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
 #include "coop_text_fit.h"
 
 #include "hos_coop_host.h"
@@ -869,7 +870,7 @@ int BrowseListed(const Session& s) {
 }
 
 int CellPages(int listed) {
-    return listed <= kCells ? 1 : (listed + kCells - 1) / kCells;
+    return CoopListPages::Pages(listed, kCells);
 }
 
 int CellIndex(const Session& s, int cell) {
@@ -1905,14 +1906,14 @@ std::vector<ListLine> ListLines(const SessionView& v) {
     // (a heading of text: "Game | Players" with its value box read as a button that did nothing, a tester)
     // (the heading: the list and its page, "< 1 of 3 >" when there are more (a click on its left half goes back a
     // page, on its right half on); its box asks the list again (a click, or Y))
+    // (row 264: the page between the game's own ZL and ZR letters, "Public games  ZL Page 2/3 ZR", so the list says
+    // it pages and with which buttons; the page line is never cut, a long list name gives way: coop_list_pages.h)
     const int pages = CellPages(BrowseListed(v.s));
-    std::string head = v.s.online ? "Public games" : "This network";
-    if (pages > 1) head += "  < " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " +
-                           std::to_string(pages) + " >";
-    // (the heading and the words in the player's language, before the cut: the heading is
-    // the module's split shape, the list's own lines the server list brought are already ours)
-    lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), FitTo(CoopI18n::Tr("Refresh"), kListValueChars),
-                        RowAction::kBrowseRefresh};
+    const std::string head = CoopI18n::Tr(v.s.online ? "Public games" : "This network");
+    // (the heading and the words in the player's language, before the cut; the list's own lines the server list
+    // brought are already ours)
+    lines[0] = ListLine{CoopListPages::Heading(head, CoopListPages::Line(v.s.cell_page, pages), kListNameChars),
+                        FitTo(CoopI18n::Tr("Refresh"), kListValueChars), RowAction::kBrowseRefresh};
     const std::vector<ListLine>& list = v.s.online ? v.online_list : v.lan_list;
     if (list.empty()) {
         lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")
