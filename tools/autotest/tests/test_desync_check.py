@@ -277,21 +277,52 @@ class World(unittest.TestCase):
     def test_a_cut_list_is_compared_only_near_both_links(self):
         """Both lists hold 200 actors (the snapshot's cut). A crate only one game kept is beyond the cut, not a desync."""
         cut = {"total": 200}
-        far = actor("Obj_Door_Crate", (30, 0, 0), kind="other", dist=20.0, id=1)       # only A has it
+        # A's Link at the origin kept to 40 m, B's Link at x = 10 kept to 25 m
+        far = actor("Obj_Door_Crate", (-20, 0, 0), kind="other", dist=20.0, id=1)      # only A has it: 30 m from B's Link
         near_a = [actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=40.0, id=2), far]
         near_b = [actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=25.0, id=3)]
         a, b = cp(near_a, world_extra=cut), cp(near_b, world_extra=cut, pos=(10, 0, 0))
         r = dc.compare_world(a, b, self.rows)
+        self.assertEqual(r["cut"], {"a": 40.0, "b": 25.0})
         self.assertEqual(r["diffs"], [])
-        self.assertEqual(r["cut_m"], 15.0)                          # min(40, 25) - the 10 m between the Links
-        self.assertEqual(r["cut_left_out"], 3)                      # A's crate (20 m) and rock (40 m), B's rock (25 m)
-        near = actor("Obj_Door_Crate", (5, 0, 0), kind="other", dist=10.0, id=4)       # inside the complete zone
+        self.assertEqual(r["cut_left_out"], 1)                      # A's crate: inside A's 40 m, beyond B's 25 m
+        near = actor("Obj_Door_Crate", (5, 0, 0), kind="other", dist=5.0, id=4)        # inside both kept distances
         r = dc.compare_world(cp([near] + near_a, world_extra=cut), b, self.rows)
         self.assertEqual([d["field"] for d in r["diffs"]], ["count"])    # B should have kept it: a real difference
 
+    def test_an_actor_is_judged_against_both_links_95_and_65(self):
+        """Links 30 m apart, both lists cut and keep 100 m. A crate 95 m from A's Link and 65 m from B's Link is inside
+        both kept distances: B kept it, A (listing from its own place) has it too, nothing differs. A crate 105 m from
+        A and 75 m from B is beyond A's cut: A lacks it, B has it, and that is the cut, not a desync."""
+        cut = {"total": 200}
+        edge = [actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=100.0, id=1)]    # makes each list's kept distance 100
+        in_both = actor("Obj_Door_Crate", (95, 0, 0), kind="other", dist=95.0, id=2)   # 95 from A at 0, 65 from B at 30
+        in_b_only = actor("Obj_Door_Crate", (105, 0, 0), kind="other", dist=75.0, id=3)    # 105 from A: beyond A's cut
+        a = cp(edge + [in_both], world_extra=cut, pos=(0, 0, 0))
+        b_in_both = dict(in_both, id=12, dist=65.0)
+        b = cp(edge + [b_in_both, in_b_only], world_extra=cut, pos=(30, 0, 0))
+        r = dc.compare_world(a, b, self.rows)
+        self.assertEqual(r["cut"], {"a": 100.0, "b": 100.0})
+        self.assertEqual(r["diffs"], [])
+        self.assertEqual(r["cut_left_out"], 1)                      # the crate 105 m from A
+        # the old rule (each copy against its own Link, minus the gap) would have left out the 95 m crate and kept B's
+        # 75 m one: a false count difference. Here the count of crates is equal (A 1, B 1 compared).
+        self.assertEqual(r["compared"], 2)                          # the rock and the 95/65 crate
+
+    def test_a_cut_list_leaves_out_an_actor_with_no_place(self):
+        cut = {"total": 200}
+        a = cp([actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=10.0, id=1)], world_extra=cut)
+        b = cp([actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=10.0, id=2),
+                actor("Obj_Door_Crate", None, kind="other", id=3)], world_extra=cut)
+        r = dc.compare_world(a, b, self.rows)
+        self.assertEqual((r["diffs"], r["cut_left_out"]), ([], 1))
+        r = dc.compare_world(cp([actor("Enemy_Goma", None)]), cp([actor("Enemy_Goma", None)]), self.rows)
+        self.assertIsNone(r["cut"])                                 # whole lists: no limit, nothing left out
+        self.assertEqual(r["cut_left_out"], 0)
+
     def test_a_whole_list_has_no_cut(self):
         r = dc.compare_world(cp([actor("Enemy_Goma")]), cp([actor("Enemy_Goma")]), self.rows)
-        self.assertIsNone(r["cut_m"])
+        self.assertIsNone(r["cut"])
 
     def test_not_compared_notes(self):
         a = [actor("Enemy_Goma")]
@@ -375,7 +406,7 @@ class Settle(unittest.TestCase):
 
     def test_a_cut_list_gives_no_false_desync_over_two_checkpoints(self):
         cut = {"total": 200}
-        far = actor("Obj_Door_Crate", (30, 0, 0), kind="other", dist=20.0, id=1)
+        far = actor("Obj_Door_Crate", (-20, 0, 0), kind="other", dist=20.0, id=1)      # 30 m from B's Link: beyond B's cut
         a = [actor("Obj_Door_Rock", kind="other", dist=40.0, id=2), far]
         b = [actor("Obj_Door_Rock", kind="other", dist=25.0, id=3)]
         e = {"p1": [tagged("a", a, frame=1000, world_extra=cut), tagged("b", a, frame=1100, world_extra=cut)],

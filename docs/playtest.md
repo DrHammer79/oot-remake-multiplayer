@@ -398,11 +398,14 @@ compared with every other game's, under these rules (code: `compare_world` in `d
   without a session. Otherwise the line says `not compared (...)` and why. (A rolled spawn is shared only near its
   place, so apart the games roll their own.)
 - **A cut list is compared only near both Links.** A list with 200 actors was cut, and what it lacks is mostly actors
-  of kind `other` (crates, rocks, cracked walls, webs, falling floors) beyond the farthest one it kept. When either
-  list has 200 actors, only actors within the smaller of the two kept distances, minus the gap between the Links, of
-  their own Link are compared at all (a count or a missing actor farther out may be the cut). The line says
-  `a list was cut at 200 actors: only actors within N m of each Link compared (M left out)`. A scene with fewer than
-  200 actors is compared whole. A bare 200 is taken as a cut: the dump has no flag for it.
+  of kind `other` (crates, rocks, cracked walls, webs, falling floors) beyond the farthest one it kept. Each cut list
+  has its own kept distance, measured from its own game's Link. An actor is compared only when its place is within
+  A's kept distance of A's Link AND within B's kept distance of B's Link (a list that was not cut has no limit; an
+  actor with no place is left out when a list is cut). So with the Links 30 m apart and both lists keeping 100 m, a
+  crate 95 m from A and 65 m from B is compared, one 105 m from A is not. A count or a missing actor outside is
+  taken to be the cut. The line says `a list was cut at 200 actors: only actors inside the kept distance of each
+  game's own Link compared (A N m, B N m; M left out)`. A scene with fewer than 200 actors is compared whole. A bare
+  200 is taken as a cut: the dump has no flag for it.
 - **One to one.** Actors of one name are paired by nearest place (the games' addresses differ). An actor in one game
   with none to pair with in the other is a count difference, named.
 - **What is compared.** `alive`, `owner` and `life` exactly. The place only for placed static actors (chests, doors,
