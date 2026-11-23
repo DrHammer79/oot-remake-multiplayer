@@ -654,8 +654,21 @@ TEST_CASE("playtest: a give is refused while a load runs, and goes otherwise") {
     const auto fresh = Status(Snap(998));
     CHECK(GiveRefusal(&fresh).empty());
     CHECK(GiveRefusal(nullptr).empty());              // no reply: not a reason to refuse
+}
+
+TEST_CASE("playtest: a give is refused on an old sample with loading false, which is what a real load leaves") {
+    // No Link update runs during a load, so the sample from before it stays, with loading false and an old frame.
+    const auto old = Status(Snap(11890, false, false), 12984);
+    CHECK(GiveRefusal(&old).find("no fresh Link state") != std::string::npos);
+    CHECK(GiveRefusal(&old).find("not_ready") != std::string::npos);
+    const auto paused = Status(Snap(998, false, false), 1000 + static_cast<int>(kSnapshotSlack) + 1);
+    CHECK_FALSE(GiveRefusal(&paused).empty());        // just past the slack
+    const auto edge = Status(Snap(1000 - static_cast<int>(kSnapshotSlack), false, false));
+    CHECK(GiveRefusal(&edge).empty());                // within the slack: a running game
     const auto nogame = Status("null");
-    CHECK(GiveRefusal(&nogame).empty());              // the write itself says "not readable" when nothing is loaded
+    CHECK_FALSE(GiveRefusal(&nogame).empty());        // no sample at all (a title, or held since its start)
+    const auto typed = Status("{\"event\":false,\"loading\":false,\"age\":\"child\"}");
+    CHECK_FALSE(GiveRefusal(&typed).empty());         // only the typed members: still no sample
 }
 
 // ---- F2: warp by event, or by Longshot's teleport in free play ----

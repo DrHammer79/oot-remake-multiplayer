@@ -515,8 +515,9 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "give") {
         std::string error;
-        // Not while a load runs: it would put the save's values back over the gift (the status is asked without a step).
-        const auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
+        // Not while a load runs, and not without a fresh Link sample (a load sends no Link update, so the old sample
+        // still says `loading` false): one frame is run to take it, as `state` does; a pause or load stays refused.
+        const auto status = LinkStatus();
         if (const std::string why = GiveRefusal(status ? &*status : nullptr); !why.empty()) return fail("not_ready", why);
         if (!played("give " + r.item, error)) return fail("failed", error);
         // Written at once inside the held call (CoopTestInput::Give): the reply says what each flag was and is.

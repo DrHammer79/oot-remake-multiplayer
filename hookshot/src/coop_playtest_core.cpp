@@ -592,6 +592,11 @@ std::string GiveRefusal(const CoopModJson::Value* status) {
         return "a scene or save is loading and would put the old values back over the gift: step until the load "
                "ends (the state's `loading` is false), then give again";
     }
+    // An old or missing sample says nothing about a load (none runs a Link update). Not given, nothing is lost.
+    if (status && (SnapshotIsOld(status) || SnapshotMissing(status))) {
+        return "the game has no fresh Link state, so a load, a pause or a title may be on and would take the gift back "
+               "or lose it: step until the state's `not_ready` is null (Link in play), then give again";
+    }
     return "";
 }
 
