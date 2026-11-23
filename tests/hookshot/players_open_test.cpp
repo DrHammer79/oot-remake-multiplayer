@@ -37,7 +37,7 @@ TEST_CASE("F6 players: Minus opens the - menu, R taps to Multiplayer, then the P
     CHECK(r.presses() == 1);
 }
 
-TEST_CASE("F6 players: from Lobby or Mods it taps L; already on Multiplayer it shows at once") {
+TEST_CASE("F6 players: from Lobby or Mods it taps L, already on Multiplayer it shows at once") {
     Run r;
     r.Start(0, true);   // the - menu is up already: no Minus (it would shut it)
     CHECK(r.Next(Open(2), 0) == Step::kTapL);
