@@ -145,7 +145,7 @@ void EnetServer::service(std::uint32_t timeout_ms) {
   }
   for (ENetPeer* peer : backlogged) {
     ++backlog_drops_;
-    drop_now(peer, 0, "its line took far less than we sent it: " + std::to_string(net::outgoing_bytes(*peer)) +
+    drop_now(peer, net::kDisconnectBacklog, "its line took far less than we sent it: " + std::to_string(net::outgoing_bytes(*peer)) +
                           " bytes waited to go out (at most " + std::to_string(net::kMaxOutgoingBytes) + ")");
   }
   for (ENetPeer* peer : lost_full) {

@@ -13,6 +13,7 @@
 // Plain code: no ENet, no emulator. The hook (lichii/hook/coop_save.cpp) feeds
 // it the network's messages and the file times.
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -106,6 +107,10 @@ class Assembler {
 // At most this many parts wait in the host's outbox (four whole slots); a send
 // that would go past it is dropped (the hook logs it).
 inline constexpr std::size_t kMaxOutboxParts = 4 * protocol::kMaxSaveParts;
+// The whole outbox is at most four saves of protocol::kMaxSaveBytes: coop/net/enet_waiting.hpp kSlowPeerBytes (where
+// unreliable messages, the puppets, stop being queued to a slow link) is set above that (row 260). More here: raise it.
+static_assert(kMaxOutboxParts * protocol::kMaxSavePart <= 4 * std::size_t{protocol::kMaxSaveBytes},
+              "the save outbox grew: raise coop::net::kSlowPeerBytes with it");
 
 // What the host sends, and when (on the network thread under the hook's lock).
 // A guest's ask is answered AT ONCE with the newest slot on disk, also right

@@ -378,7 +378,9 @@ void Client::service(std::uint32_t wait_ms) {
           if (to_small) use_small_datagrams();
           if (state_ == State::connecting || state_ == State::handshaking ||
               state_ == State::connected) {
-            end_attempt(to_small ? DropReason::small_path : DropReason::connection_lost);
+            end_attempt(to_small                          ? DropReason::small_path
+                        : event.data == kDisconnectBacklog ? DropReason::backlog
+                                                           : DropReason::connection_lost);
           }
         }
         break;
@@ -431,7 +433,7 @@ void Client::service(std::uint32_t wait_ms) {
       end_attempt(DropReason::small_path);
     } else if ((state_ == State::handshaking || state_ == State::connected) && outgoing > kMaxOutgoingBytes) {
       // Row 260: ENet would hold all we send to a server that takes less, without end; connect again.
-      end_attempt(DropReason::connection_lost);
+      end_attempt(DropReason::backlog);
     }
   }
   enet_host_flush(host_);

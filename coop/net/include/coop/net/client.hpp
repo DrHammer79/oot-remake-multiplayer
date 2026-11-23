@@ -237,6 +237,9 @@ enum class DropReason : std::uint8_t {
   // Full datagrams did not get through while small ones did (we saw it, or
   // the server said so): connecting again with small ones (enet_path.hpp).
   small_path,
+  // Too much waited to go between us and the server (enet_waiting.hpp kMaxOutgoingBytes): the server dropped us
+  // (kDisconnectBacklog) or we stopped (our own send backlog). Reconnecting as for connection_lost (row 260).
+  backlog,
 };
 
 // How the link to the server looked (issue 143), for the log. Read from

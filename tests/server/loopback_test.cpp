@@ -1227,3 +1227,62 @@ TEST_CASE("loopback: what waits for a player that stops reading is counted, and 
   CHECK(server.queues().backlog_drops == 0);
   CHECK(server.session().player_count() == 2);
 }
+
+TEST_CASE("loopback: the largest save in flight to a player that is not reading never stops the puppets (row 260)") {
+  EnetLife enet;
+  ServerOptions options = server_options();
+  EnetServer server(options);
+  REQUIRE(server.start());
+  const std::uint16_t port = server.port();
+  Client a;   // the host (the first player in)
+  Client b;
+  a.connect(port);
+  REQUIRE(pump_until(server, {&a}, [&] { return a.connected; }));
+  a.send(hello_from("Link"), kChannelSession);
+  REQUIRE(pump_until(server, {&a}, [&] { return a.find<Welcome>() != nullptr; }));
+  b.connect(port);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.connected; }));
+  b.send(hello_from("Zelda"), kChannelSession);
+  REQUIRE(pump_until(server, {&a, &b}, [&] { return b.find<Welcome>() != nullptr; }));
+
+  // b stops reading while the host sends it a save of kMaxSaveBytes (every part, at once).
+  for (std::uint16_t i = 0; i < kMaxSaveParts; ++i) {
+    SavePart part;
+    part.to_player = 2;
+    part.transfer_id = 7;
+    part.total_size = kMaxSaveBytes;
+    part.count = kMaxSaveParts;
+    part.index = i;
+    part.data.assign(save_part_size(kMaxSaveBytes, i), static_cast<std::uint8_t>(i));
+    a.send(part, kChannelSession);
+  }
+  REQUIRE(pump_until(server, {&a}, [&] { return server.session().stats().save_parts == kMaxSaveParts; }));
+  const auto settle = [&] {   // (a few rounds without b: what can go to it went)
+    for (int round = 0; round < 100; ++round) {
+      server.service(1);
+      a.pump();
+    }
+  };
+  settle();
+  CHECK(server.queues().largest_outgoing >= kMaxSaveBytes / 2);
+  CHECK(server.queues().largest_outgoing < coop::net::kSlowPeerBytes);
+
+  // A pose of the host's (unreliable) is still queued to b, and reaches it once it reads.
+  PlayerSample sample;
+  sample.time = {2000, 1};
+  sample.position = Vec3{1.0f, 2.0f, 3.0f};
+  a.send(sample, kChannelPlayerSamples);
+  settle();
+  CHECK(server.queues().unreliable_skipped == 0);
+  CHECK(server.queues().backlog_drops == 0);
+  // (ENet's resends to b have backed off while it did not read: up to a few seconds)
+  const auto all_parts = [&] {
+    return std::count_if(b.inbox.begin(), b.inbox.end(), [](const Received& r) {
+             return std::holds_alternative<SavePart>(r.message);
+           }) == kMaxSaveParts;
+  };
+  bool got = false;
+  for (int tries = 0; tries < 4 && !got; ++tries) got = pump_until(server, {&a, &b}, all_parts);
+  CHECK(got);
+  CHECK(server.session().player_count() == 2);
+}

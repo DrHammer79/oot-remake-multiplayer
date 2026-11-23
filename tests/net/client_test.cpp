@@ -177,10 +177,10 @@ class FakeServer {
     enet_host_flush(host_);
   }
 
-  // Disconnect the client with notice.
-  void drop() {
+  // Disconnect the client with notice (`data`: the reason the server gives, enet_path.hpp).
+  void drop(enet_uint32 data = 0) {
     REQUIRE(last_peer != nullptr);
-    enet_peer_disconnect_now(last_peer, 0);
+    enet_peer_disconnect_now(last_peer, data);
     last_peer = nullptr;
   }
 
@@ -2754,4 +2754,19 @@ TEST_CASE("enet: outgoing_bytes counts what waits to go and what is not acknowle
   enet_list_insert(enet_list_end(&peer.sentReliableCommands), &sent);
   CHECK(coop::net::outgoing_bytes(peer) == 100 + 1100 + 1200 + 300);
   CHECK(coop::net::kSlowPeerBytes < coop::net::kMaxOutgoingBytes);
+}
+
+TEST_CASE("client: dropped by the server for a backlog, the reason is backlog, and it comes back (row 260)") {
+  FakeServer server;
+  Client client(config_for(server));
+  Events events;
+  REQUIRE(client.start());
+  welcome_client(client, server);
+  REQUIRE(wait_event(client, server, events, EventKind::welcomed));
+
+  server.drop(coop::net::kDisconnectBacklog);
+  REQUIRE(wait_event(client, server, events, EventKind::disconnected));
+  CHECK(events.all[*events.find(EventKind::disconnected)].drop_reason == DropReason::backlog);
+  welcome_client(client, server);
+  REQUIRE(wait_event(client, server, events, EventKind::reconnected));
 }

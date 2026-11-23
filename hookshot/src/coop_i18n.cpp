@@ -660,6 +660,7 @@ constexpr Entry kzh_Hans[] = {
     //      pickup notices, the item and place names) ----
     {"The blade.", "剑身。"},
     {"connection lost, reconnecting", "连接断了，正在重连"},
+    {"connection too slow for the game's traffic, reconnecting", "连接太慢，跟不上游戏的数据，正在重连"},
     {"the host muted your chat: nobody sees it", "房主屏蔽了你的聊天：现在没人看得到"},
     {"you host now: the Lobby's host controls are yours", "你现在是房主：「大厅」页的房主操作归你了"},
     {"Difficulty: could not be sent", "难度：没能发出去"},
@@ -2084,6 +2085,7 @@ constexpr Entry kzh_Hant[] = {
     //      pickup notices, the item and place names) ----
     {"The blade.", "劍身。"},
     {"connection lost, reconnecting", "連線斷了，正在重連"},
+    {"connection too slow for the game's traffic, reconnecting", "連線太慢，跟不上遊戲的資料，正在重連"},
     {"the host muted your chat: nobody sees it", "房主封鎖了你的聊天：現在沒人看得到"},
     {"you host now: the Lobby's host controls are yours", "你現在是房主：「大廳」頁的房主操作歸你了"},
     {"Difficulty: could not be sent", "難度：沒能發出去"},
