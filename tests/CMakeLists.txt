@@ -193,6 +193,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/discord_activity_test.cpp
   hookshot/skip_title_test.cpp
   hookshot/chatbox_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_chatbox.cpp
+  hookshot/players_open_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_players_open.cpp
   hookshot/cheats_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_cheats_panel.cpp
   hookshot/png_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_png.cpp
   hookshot/native_ui_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_native_ui.cpp
@@ -249,6 +250,8 @@ add_test(NAME coop_test_two_clients COMMAND coop_test --clients 2 --seconds 3 --
 
 # Where the test data files are (source paths are trimmed out of __FILE__, cmake/trim_paths.cmake).
 target_compile_definitions(coop_tests PRIVATE COOP_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+# The drawn debug panels (F7, F8; hookshot/src/coop_debug_panels.h) are tested, so the tests build them in.
+target_compile_definitions(coop_tests PRIVATE COOP_DEBUG_PANELS)
 
 # The sample code mod (hookshot/samples/hello-mod), loaded through the real loader by mod_plugins_test.cpp.
 add_library(coop_sample_mod MODULE ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/samples/hello-mod/hello_mod.c)

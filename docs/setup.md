@@ -135,7 +135,7 @@ With Discord open on the same PC, your Discord profile shows **Playing Squadala!
 
 <a id="co-op-on-hookshot"></a><a id="saves"></a><a id="emulator-setup-for-new-players"></a><a id="4-the-puppet-pack"></a><a id="linux-and-steam-deck"></a>
 
-The co-op keys in the game (chat **T**, player list **F6**, panel **F7**, item cheats **F8**), the chat commands and how saves are shared are the same as in the emulator kits: [setup-emulator.md](setup-emulator.md#co-op-on-hookshot) and [setup-emulator.md, "Saves"](setup-emulator.md#saves). That guide also covers the older emulator kits themselves (keys, firmware, the puppet pack, Linux).
+The co-op keys in the game (chat **T**, player list **F6**; the debug panel **F7** and item cheats **F8** are only in developer builds, not in release kits), the chat commands and how saves are shared are the same as in the emulator kits: [setup-emulator.md](setup-emulator.md#co-op-on-hookshot) and [setup-emulator.md, "Saves"](setup-emulator.md#saves). That guide also covers the older emulator kits themselves (keys, firmware, the puppet pack, Linux).
 
 ## NVIDIA DLSS
 

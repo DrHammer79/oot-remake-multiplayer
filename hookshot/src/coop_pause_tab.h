@@ -1111,6 +1111,13 @@ bool GameMenuUp() noexcept;
 // shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while
 // it is.
 bool OwnMinusPageShown() noexcept;
+// F6 (coop_players_open.h, ui-audit-01112 B5): opens the game's - menu on co-op's Multiplayer tab, Players view, with
+// the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
+// ours (seen once a - menu opened without them): F6's drawn list is used then.
+bool OpenPlayers() noexcept;
+// Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
+// module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
+void SetFreePlay(bool free_play) noexcept;
 // The pause menu's model actors (the menu manager's object, its four slots: Link on Equipment, and the picture Character
 // Select's Customize screen shows), 0 for an empty slot or with no menu. Any thread (reads only). The eyes' and hair's
 // colours are each actor's own material values, so the picture shows them only when they are dressed on these too.

@@ -39,10 +39,12 @@
 #include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_cheats_panel.h"
+#include "coop_debug_panels.h"
 #include "coop_playtest.h"
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
+#include "coop_dbno_draw.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
 #include "coop_flag_native.h"
@@ -1132,7 +1134,7 @@ CoopDraw::Scene DrawScene() {
         if (g_box.open() && !g_native_chat.load()) {  // (the game's message window shows it: NativeTyping)
             s.box = CoopDraw::ChatBoxView{g_box.text(), g_box.failed()};
         }
-        if (g_cheats.open()) {
+        if (CoopDebugPanels::kOn && g_cheats.open()) {   // (release kits: no F8 panel, coop_debug_panels.h)
             CoopDraw::CheatsView v;
             v.filter = g_cheats.filter();
             for (const auto& r : CheatRows()) {
@@ -1147,19 +1149,45 @@ CoopDraw::Scene DrawScene() {
         s.chat = CoopDraw::ShownChat(CoopHook::ChatLines(), s.box.has_value());
     }
     s.markers = CoopHook::CurrentMarkers();
-    s.dbno = CoopDbno::Shown();  // down but not out: the ring
-    bool list = false, panel = false;
+    s.dbno = CoopDbno::Shown();  // down but not out: one line (coop_dbno_draw.h)
+    // With the game's own UI up (coop_native_ui.h: the banner is found and works), the line is held on the game's
+    // banner (SimpleInfo_00) and nothing is drawn; let go when down ends. Without it (LICHII_COOP_NATIVE_UI=0, a game
+    // that gave no memory): the drawn line, text only.
+    // The banner's line always fits it with the clock / share / "A: next player" kept (BannerLine); spectating holds it
+    // only a few seconds after each change of whom we watch, so notices are not kept waiting for minutes (BannerHold).
+    if (g_native_chat.load()) {
+        static std::mutex hold_mutex;
+        static CoopDbnoDraw::BannerHold hold;
+        std::lock_guard hold_lock(hold_mutex);   // (DrawScene runs on the present's thread and from draw_wanted)
+        const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                           std::chrono::steady_clock::now().time_since_epoch())
+                                                           .count());
+        if (s.dbno && hold.Want(*s.dbno, now_ms)) {
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerColumns));
+        } else if (CoopNativeUi::HeldBanner()) {
+            CoopNativeUi::EndBanner();
+        }
+        if (!s.dbno) {
+            hold.Reset();
+        }
+        s.dbno.reset();   // (nothing drawn: the game's banner has it, or had it and let notices go on)
+    } else if (CoopNativeUi::HeldBanner()) {
+        CoopNativeUi::EndBanner();   // (the native UI went: the drawn line takes over)
+    }
+    bool list = false, panel = false, list_press = false, always = false;
     {
         std::lock_guard lock(g_keys_mutex);
         static bool panel_env = [] {
-            g_keys.panel = EnvOn("LICHII_COOP_DEBUG_PANEL");
+            g_keys.panel = CoopDebugPanels::kOn && EnvOn("LICHII_COOP_DEBUG_PANEL");
             return true;
         }();
         (void)panel_env;
         g_keys.Update(KeyDown(0x75 /* F6 */), KeyDown(0x76 /* F7 */));
-        static const bool always = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        static const bool always_env = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        always = always_env;
         list = g_keys.list || always;
-        panel = g_keys.panel;
+        list_press = g_keys.list_press && !always;
+        panel = CoopDebugPanels::kOn && g_keys.panel;   // (release kits: no F7 panel, coop_debug_panels.h)
     }
     auto rows = CoopHook::PlayerList();
     // The HUD blocks, players' colours and place names are the game look's
@@ -1236,7 +1264,23 @@ CoopDraw::Scene DrawScene() {
     if (!s.hud.empty()) {   // row 141: the blocks go below the game's own HUD as it is laid out now
         s.game_hud_bottom = CoopMapPage::GameHudBottom();
     }
-    if (list) {
+    // F6 (ui-audit-01112 B5): the game's own - menu, Multiplayer > Players (coop_players_open.h), when we are in a
+    // scene (never on the title or a file screen, where Minus is not the - menu); the drawn list only when the pack has
+    // no - tabs of ours (OpenPlayers false) or for tests (LICHII_COOP_SHOW_PLAYERS).
+    static std::atomic<bool> native_list{true};
+    {   // Free play for F6's Minus, each frame: our Link's frame is fresh (none in a load or on the title) and no event
+        // (cutscene, talk) has control (CoopHook::CurrentMapView); the pause tab also reads the event manager itself.
+        thread_local CoopHook::MapView view;
+        const bool free_play = !CoopTitle::Up() && CoopHook::CurrentMapView(view) && !view.event;
+        CoopPauseTab::SetFreePlay(free_play);
+    }
+    if (list_press) {
+        const bool in_scene = !CoopTitle::Up() && std::any_of(rows.begin(), rows.end(), [](const CoopHook::PlayerRow& r) {
+            return r.self && r.scene && !r.scene->empty();
+        });
+        native_list = in_scene && CoopPauseTab::OpenPlayers();
+    }
+    if (list && (always || !native_list.load())) {
         if (game) {
             for (auto& row : rows) {
                 if (row.scene && !row.scene->empty()) {
@@ -1273,7 +1317,8 @@ bool TypeKey(std::uint32_t vk, bool repeat) {
     }
     std::lock_guard lock(g_box_mutex);
     // The cheats panel (F8, LICHII_COOP_CHEATS=1) when it is open or the chat box is not.
-    if (g_cheats.open() || (!g_box.open() && CoopCheats::On())) {
+    // Release kits have no panel (coop_debug_panels.h): F8 opens nothing and takes no keys.
+    if (CoopDebugPanels::kOn && (g_cheats.open() || (!g_box.open() && CoopCheats::On()))) {
         const auto rows = CheatRows();
         if (g_cheats.Key(vk, repeat, rows.size())) {
             GiveChosen(rows);
