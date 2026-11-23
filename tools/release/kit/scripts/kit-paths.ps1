@@ -1993,6 +1993,23 @@ function Get-KitCharacterSelectSeen([string]$Manifest) {
     return ''
 }
 
+# The SHA-256 (lower case) of $Rel (a romfs path) in the Character Select folder $Mod, looked for where
+# Get-KitCharacterSelectSeen looks (beside the pack, and in mods for the contents layout); '' when it is not there.
+function Get-KitCharacterSelectFileHash([string]$Manifest, [string]$Mod, [string]$Rel) {
+    if (-not $Mod -or $Mod -match '[\\/]' -or $Mod -eq '.' -or $Mod -eq '..' -or -not $Rel -or $Rel -match '(^|[\\/])\.\.([\\/]|$)') { return '' }
+    $title = Split-Path -Parent (Split-Path -Parent $Manifest)
+    $roots = @($title)
+    $contents = Split-Path -Parent $title
+    if ($contents -and (Split-Path -Leaf $contents) -ieq 'contents') { $roots += Split-Path -Parent $contents }
+    foreach ($root in $roots) {
+        $file = Join-Path (Join-Path (Join-Path $root $Mod) 'romfs') $Rel
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    return ''
+}
+
 # What a pack's coop_puppet.json records of its characters, in Get-KitCharacterSelectSeen's form ('' for none).
 function Get-KitPackCharactersKey($Json) {
     $p = $Json.characters
@@ -2418,6 +2435,14 @@ function Get-PuppetPackHint([string]$Manifest, [string]$ToolDir) {
         $gaps = @(Get-KitPuppetPackGaps $Manifest $json)
         if ($gaps) {
             return "Puppet pack: incomplete ($($gaps[0]) is missing$(if ($gaps.Count -gt 1) { " and $($gaps.Count - 1) more" })). $script:KitPackRemake"
+        }
+        # The Character Select mod's sound lists changed since the pack was made (an update or a reinstall with the
+        # same characters): the pack's copy (the mod's lists plus each puppet's own, tools/puppet_pack
+        # character_voices) replaces the mod's, so it would hide the new one.
+        $bl = if ($json.characters) { $json.characters.barslist } else { $null }
+        if ($bl -and $bl.file -and $bl.sha256 -and
+            (Get-KitCharacterSelectFileHash $Manifest "$($json.characters.mod)" "$($bl.file)") -ne "$($bl.sha256)".ToLowerInvariant()) {
+            return "Puppet pack: made with other Character Select voices than the ones now in mods. $script:KitPackRemake"
         }
         # The Character Select mod put in, replaced or taken out since the pack was made (Install-KitCharacterSelect):
         # the pack's character puppets follow the mod's characters.json (tools/puppet_pack find_characters).

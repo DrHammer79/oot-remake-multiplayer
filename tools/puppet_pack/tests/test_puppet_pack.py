@@ -3165,6 +3165,130 @@ class FullBuildTest(unittest.TestCase):
         self.assertNotIn("PreActorRenderInfoHeapSize", out_ai["Player_Child"])
         self.assertNotIn("Cs_MadeUp", out_ai)
 
+    def test_build_character_voices(self):
+        # The Character Select mod's voice hook gives every Player_<Age> request the VIEWER's pick, so each puppet's
+        # row names its own sound list (made-up data): a character with a voice list its Player_<Age>_V<NN>, every
+        # other puppet CoopPuppet_<Age>, a copy of the game's Player_<Age> list the pack's BarslistPack adds to the
+        # mod's. Without the mod, without voice lists or without sound: the pack as before.
+        plain = zstandard.ZstdCompressor()
+        rel_list = "Sound/ResourceListPack/BarslistPack.Product.111.byml.zs"
+        game = {"BarslistTable": {
+            "Player": {"Bars": ["Player.bars"]},
+            "Player_Child": {"Bars": ["Player.bars", "Player_Child.bars"], "ChoiceAsset": ["SE_Child.casset.byml"]},
+            "Player_Adult": {"Bars": ["Player.bars", "Player_Adult.bars"], "ChoiceAsset": ["SE_Adult.casset.byml"]}}}
+        os.makedirs(os.path.dirname(os.path.join(self.romfs, rel_list)), exist_ok=True)
+        with open(os.path.join(self.romfs, rel_list), "wb") as f:
+            f.write(plain.compress(byml.dumps(game)))
+        mods = os.path.join(self.dir, "mods_voices")
+        cs = os.path.join(mods, "OoT Character Select")
+        romfs = os.path.join(cs, "romfs")
+        os.makedirs(os.path.join(romfs, "Model"))
+        os.makedirs(os.path.dirname(os.path.join(romfs, rel_list)))
+        for name in ("Player_Adult_C005.Player_Adult.bfres", "Player_Child_C009.Player_Child.bfres"):
+            with open(os.path.join(romfs, "Model", name + ".zs"), "wb") as f:
+                f.write(plain.compress(b"made up"))
+        doc = {"format": 1, "mod": "OoT Character Select",
+               "actor_heaps": {v: {"InstanceHeapSize": 0x100, "PreActorRenderInfoHeapSize": 0x100}
+                               for v in build.VARIANTS},
+               "characters": [{"number": 7, "file": 5}, {"number": 20, "file": 9}]}
+        with open(os.path.join(cs, build.CHARACTERS_FILE), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        theirs = json.loads(json.dumps(game))
+        theirs["BarslistTable"]["Player_Adult_V07"] = {"Bars": ["PlayerVoice_Adult_X.bars", "Player.bars",
+                                                                "Player_Adult.bars"]}
+        theirs["BarslistTable"]["Player_Child_V05"] = {"Bars": ["PlayerVoice_Child_Y.bars", "Player.bars"]}
+        theirs["BarslistTable"]["Enemy_Made_Up"] = {"Bars": ["Enemy.bars"]}
+        mod_file = os.path.join(romfs, rel_list)
+        with open(mod_file, "wb") as f:
+            f.write(plain.compress(byml.dumps(theirs)))
+        d = zs.Dicts.from_romfs(self.romfs)
+
+        def rows(root):
+            return {r["__RowId"]: r for r in byml.loads(d.decompress(build.read(
+                os.path.join(root, "RSDB/ActorInfo.Product.999.rstbl.byml.zs"))))}
+
+        game_rows = rows(self.romfs)
+        mod = os.path.join(mods, "pack")
+        said = []
+        m = build.build(self.romfs, mod, log=said.append, tunics=["red"], look_slots=0,
+                        characters=build.find_characters(mod, log=lambda *_: None))
+        out = byml.loads(d.decompress(build.read(os.path.join(mod, "romfs", rel_list))))["BarslistTable"]
+        for k, v in theirs["BarslistTable"].items():
+            self.assertEqual(out[k], v)                                   # every list of the mod's kept
+        self.assertEqual(out["CoopPuppet_Child"], game["BarslistTable"]["Player_Child"])
+        self.assertEqual(out["CoopPuppet_Adult"], game["BarslistTable"]["Player_Adult"])
+        ai = rows(os.path.join(mod, "romfs"))
+        self.assertEqual(ai["CoopPuppet_Adult_C005"]["SLinkUserName"], "Player_Adult_V07")   # its own voice
+        self.assertEqual(ai["CoopPuppet_Child_C009"]["SLinkUserName"], "CoopPuppet_Child")   # 20 = V14: none
+        self.assertEqual(ai["CoopPuppet_Child"]["SLinkUserName"], "CoopPuppet_Child")
+        self.assertEqual(ai["CoopPuppet_Adult_Red"]["SLinkUserName"], "CoopPuppet_Adult")
+        for v in build.VARIANTS:   # the player's own Link keeps its list (the hook gives it the pick's voice)
+            self.assertEqual(ai[f"Player_{v}"].get("SLinkUserName"), game_rows[f"Player_{v}"].get("SLinkUserName"))
+        self.assertEqual(m["sound_lists"]["CoopPuppet_Adult_C005"], "Player_Adult_V07")
+        self.assertEqual(m["sound_lists"]["CoopPuppet_Child_Red"], "CoopPuppet_Child")
+        self.assertEqual(set(m["sound_lists"]), {a["actor"] for a in m["actors"]})
+        with open(mod_file, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+        self.assertEqual(m["characters"]["barslist"], {"file": rel_list, "sha256": sha, "voices": True})
+        table = rstb.Rstb.loads(d.decompress(build.read(os.path.join(
+            mod, "romfs", "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs"))))
+        self.assertGreaterEqual(table.get(rel_list[:-3]), len(byml.dumps({"BarslistTable": out})))
+        self.assertTrue(any("2 voice lists" in line for line in said), said)
+
+        # The --sound-user test switch still names one list for all, and the BarslistPack stays the mod's own.
+        pack = os.path.join(mods, "pack_user")
+        user = next(r["SLinkUserName"] for r in game_rows.values() if r.get("SLinkUserName"))
+        m = build.build(self.romfs, pack, log=lambda *_: None, look_slots=0, sound_user=user,
+                        characters=build.find_characters(pack, log=lambda *_: None))
+        self.assertNotIn("sound_lists", m)
+        self.assertEqual(rows(os.path.join(pack, "romfs"))["CoopPuppet_Adult_C005"]["SLinkUserName"], user)
+        self.assertFalse(os.path.exists(os.path.join(pack, "romfs", rel_list)))
+
+        # Every case below: no BarslistPack in the pack, every puppet with the player's sound list, as before.
+        def as_before(pack, m):
+            self.assertFalse(os.path.exists(os.path.join(pack, "romfs", rel_list)))
+            self.assertNotIn("sound_lists", m)
+            for actor, row in rows(os.path.join(pack, "romfs")).items():
+                for v in build.VARIANTS:
+                    if actor.startswith(f"CoopPuppet_{v}"):
+                        self.assertEqual(row.get("SLinkUserName"), game_rows[f"Player_{v}"].get("SLinkUserName"),
+                                         actor)
+
+        # The mod's lists without a voice: recorded (the kit sees a change of the file), nothing else.
+        del theirs["BarslistTable"]["Player_Adult_V07"], theirs["BarslistTable"]["Player_Child_V05"]
+        with open(mod_file, "wb") as f:
+            f.write(plain.compress(byml.dumps(theirs)))
+        pack = os.path.join(mods, "pack_novoice")
+        m = build.build(self.romfs, pack, log=lambda *_: None, look_slots=0,
+                        characters=build.find_characters(pack, log=lambda *_: None))
+        as_before(pack, m)
+        self.assertFalse(m["characters"]["barslist"]["voices"])
+        # No BarslistPack in the mod.
+        os.remove(mod_file)
+        pack = os.path.join(mods, "pack_nolist")
+        m = build.build(self.romfs, pack, log=lambda *_: None, look_slots=0,
+                        characters=build.find_characters(pack, log=lambda *_: None))
+        as_before(pack, m)
+        self.assertNotIn("barslist", m["characters"])
+        # One that does not read: said, as before.
+        with open(mod_file, "wb") as f:
+            f.write(b"not a list")
+        pack, said = os.path.join(mods, "pack_bad"), []
+        m = build.build(self.romfs, pack, log=said.append, look_slots=0,
+                        characters=build.find_characters(pack, log=lambda *_: None))
+        as_before(pack, m)
+        self.assertTrue(any("could not be read" in line and "sound list" in line for line in said), said)
+        # No mod at all, and a pack without sound.
+        pack = os.path.join(self.dir, "pack_nomod")
+        m = build.build(self.romfs, pack, log=lambda *_: None, look_slots=0)
+        as_before(pack, m)
+        self.assertIsNone(m["characters"])
+        pack = os.path.join(mods, "pack_silent")
+        m = build.build(self.romfs, pack, log=lambda *_: None, look_slots=0, sound=False,
+                        characters=build.find_characters(pack, log=lambda *_: None))
+        self.assertFalse(os.path.exists(os.path.join(pack, "romfs", rel_list)))
+        self.assertNotIn("sound_lists", m)
+
     def test_skin_refusals(self):
         cases = [
             (("Mod", self.make_model_mod("with_code", exefs=True)), "exefs"),

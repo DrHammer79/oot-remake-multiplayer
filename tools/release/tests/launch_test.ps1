@@ -1199,6 +1199,22 @@ try {
         Check ((Get-KitCharacterSelectSeen $pm) -eq '') 'Character Select pack key: the mod switched off in the Mods tab counts as none (the pack is made again without its characters)'
         Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`non OoT Character Select`n"
         Check ((Get-KitCharacterSelectSeen $pm) -eq $seenFull) 'Character Select pack key: switched on again: the same key as the pack made with it'
+        # The pack's copy of the mod's sound lists (build.py character_voices) hides the mod's: a CS update that
+        # changes only that file makes the pack again (C #11).
+        $blRel = 'Sound/ResourceListPack/BarslistPack.Product.111.byml.zs'
+        Write-File (Join-Path $csDir "romfs\$blRel") 'lists'
+        $blSha = (Get-FileHash -LiteralPath (Join-Path $csDir "romfs\$blRel") -Algorithm SHA256).Hash.ToLowerInvariant()
+        Check ((Get-KitCharacterSelectFileHash $pm 'OoT Character Select' $blRel) -eq $blSha) 'Character Select voices: the hash of the mod''s sound lists in mods'
+        Check ((Get-KitCharacterSelectFileHash $pm 'OoT Character Select' '../characters.json') -eq '') 'Character Select voices: a path out of romfs is refused'
+        Check ((Get-KitCharacterSelectFileHash $pm '..' $blRel) -eq '') 'Character Select voices: a mod name out of mods is refused'
+        $pmJson = { param($sha) '{"actors": [], "sound": true, "tunics": {}, "tunics_off": true, "characters": {"mod": "OoT Character Select", "numbers": {"5": 7}, "variants": {"5": ["Child", "Adult"]}, "colours": {"offset": 62574416, "head": "fd7bbfa9000100b40b2c40b96b1d0051"}, "barslist": {"file": "' + $blRel + '", "sha256": "' + $sha + '", "voices": true}}}' }
+        Write-File $pm (& $pmJson $blSha)
+        Check ($null -eq (Get-PuppetPackHint $pm (Join-Path $ck 'no-tool'))) "Character Select voices: the same sound lists: nothing said [$(Get-PuppetPackHint $pm (Join-Path $ck 'no-tool'))]"
+        Write-File (Join-Path $csDir "romfs\$blRel") 'new lists'
+        Check ((Get-PuppetPackHint $pm (Join-Path $ck 'no-tool')) -match 'other Character Select voices') 'Character Select voices: the mod''s sound lists changed: the pack is made again'
+        Remove-Item -LiteralPath (Join-Path $csDir "romfs\$blRel") -Force
+        Check ((Get-PuppetPackHint $pm (Join-Path $ck 'no-tool')) -match 'other Character Select voices') 'Character Select voices: the mod''s sound lists gone: the pack is made again'
+        Remove-Item -LiteralPath $pm -Force
         Remove-Item -LiteralPath (Join-Path $cm 'coop-mods.list') -Force
         Check ($null -eq (Get-KitCharacterSelectSeen (Join-Path $ck 'elsewhere\coop_puppet.json'))) 'Character Select seen: a pack outside mods\contents has nothing to compare'
         Write-File (Join-Path $cm '_off\characters.json') $csJsonN
