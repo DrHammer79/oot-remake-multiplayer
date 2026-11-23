@@ -815,27 +815,6 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
     return x;
 }
 
-ScreenPanes::Seen& ScreenPanes::Entry(std::uint64_t layout, std::uint64_t screen, bool open, std::uint64_t now_ms) {
-    auto at = seen_.find(layout);
-    if (at == seen_.end()) {
-        if (seen_.size() >= 512) seen_.clear();   // (a bound: freed screens' layouts)
-        at = seen_.emplace(layout, Seen{}).first;
-        at->second.screen = ~screen;   // (taken as an opening below)
-    }
-    Seen& e = at->second;
-    const bool gap = now_ms < e.seen_ms || now_ms - e.seen_ms > kScreenGapMs;   // (a clock that went back: a gap too)
-    // (another screen at the layout: looked at anew. An opening of a screen not taken as ours: its "not ours" was
-    // another screen's at these addresses, or made before its panes were there, so it is looked at again. One taken as
-    // ours stays so for these addresses, as before: his panes may come late in a reopening, lane 061445, and SnailScreen
-    // waits for them)
-    if (e.screen != screen || (open && !e.ours && (!e.open || gap))) {
-        e = Seen{};
-        e.screen = screen, e.opened_ms = now_ms;
-    }
-    e.open = open, e.seen_ms = now_ms;
-    return e;
-}
-
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms) {
     const bool up = MenuUpFrom(strip_state, strip_seen_ms, now_ms);
     if (open) {

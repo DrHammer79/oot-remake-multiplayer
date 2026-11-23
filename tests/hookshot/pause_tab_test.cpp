@@ -2592,11 +2592,8 @@ TEST_CASE("pause tab (row 262): his panes that come a few frames after the openi
     CHECK_FALSE(p.Update(0x100, 0x200, true, 1000, look));   // open, his panes not there yet
     his_panes = true;
     CHECK(p.Update(0x100, 0x200, true, 1050, look));   // there now, inside the opening's window
-    // Taken as his: kept for these addresses through a reopening whose panes come late (lane 061445; SnailScreen
-    // waits for them) and while closed (its close is seen).
     his_panes = false;
-    CHECK(p.Update(0x100, 0x200, false, 2000, look));
-    CHECK(p.Update(0x100, 0x200, true, 3000, look));
+    CHECK(p.Update(0x100, 0x200, false, 2000, look));   // closing: still his (its close is seen), nothing looked at
     // Another screen at the layout: looked at anew.
     CHECK_FALSE(p.Update(0x100, 0x300, true, 4000, look));
     // A first update past the window with its panes there (a menu screen opened before the module saw it): found.
@@ -2604,6 +2601,51 @@ TEST_CASE("pause tab (row 262): his panes that come a few frames after the openi
     his_panes = true;
     CHECK(q.Update(0x500, 0x600, true, 5000, look));
     CHECK(q.size() == 1);
+}
+
+TEST_CASE("pause tab (row 262, review-01112-e): a screen taken as his is looked at again at each opening too") {
+    ScreenPanes p;
+    int looks = 0;
+    bool his_panes = true;
+    const auto look = [&] { ++looks; return his_panes; };
+    const auto frames = [&](bool open, std::uint64_t from, std::uint64_t to) {
+        bool ours = false;
+        for (std::uint64_t t = from; t <= to; t += 16) ours = p.Update(0x100, 0x200, open, t, look);
+        return ours;
+    };
+    CHECK(frames(true, 1000, 1500));   // his screen
+    CHECK(looks == 1);                 // (found at once: no more calls)
+    CHECK(frames(false, 1516, 1600));  // it closes
+    // Freed; ANOTHER screen made at the same two addresses (lane 053539's symptom): not taken as his.
+    his_panes = false;
+    CHECK_FALSE(frames(true, 1616, 1616 + 3 * kScreenLookMs));
+    // (the opening before at these addresses was his: looked at through the whole opening, for late panes)
+    CHECK(looks > 1 + static_cast<int>(kScreenLookMs / 16));
+    CHECK_FALSE(frames(false, 5000, 5100));
+    // His again, panes late in the reopening (lane 061445): past the window, still found in that opening (the opening
+    // before was not his, so this one looks for the window only; his panes within it are found).
+    CHECK_FALSE(frames(true, 5116, 5300));
+    his_panes = true;
+    CHECK(frames(true, 5316, 5400));
+    CHECK(frames(false, 5416, 5500));
+    // A reopening of his where the panes come later than the window: found, the opening before was his.
+    his_panes = false;
+    CHECK_FALSE(frames(true, 5516, 5516 + kScreenLookMs + 500));
+    his_panes = true;
+    CHECK(frames(true, 5516 + kScreenLookMs + 516, 5516 + kScreenLookMs + 600));
+}
+
+TEST_CASE("map page (row 262, review-01112-e): a new one of a screen at the same address is searched again") {
+    ScreenInstance at;
+    CHECK(at.Next(0x200, 0x100, true, 1000));         // first
+    CHECK_FALSE(at.Next(0x200, 0x100, true, 1016));   // the same, each frame
+    CHECK(at.Next(0x200, 0x180, true, 1032));         // another layout: another screen at that address
+    CHECK_FALSE(at.Next(0x200, 0x180, true, 1048));
+    CHECK(at.Next(0x300, 0x180, true, 1064));                      // another screen
+    CHECK(at.Next(0x300, 0x180, true, 1064 + kScreenGapMs + 1));   // a gap in its updates: freed and made again
+    CHECK_FALSE(at.Next(0x300, 0x180, false, 1300));               // closed
+    CHECK(at.Next(0x300, 0x180, true, 1316));                      // open after a closed update
+    CHECK(at.Next(0x300, 0x180, true, 1000));                      // (a clock that went back: a gap)
 }
 
 TEST_CASE("pause tab (cs-customize-0119, lane gc198-l5b): a stall keeps Character Select's Customize screen open") {

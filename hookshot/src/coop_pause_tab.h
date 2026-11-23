@@ -27,7 +27,6 @@
 
 #include <array>
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +34,7 @@
 #include <vector>
 
 #include "coop_pause_menu.h"
+#include "coop_screen_panes.h"
 #include "hos_coop_api.h"
 
 namespace CoopPauseTab {
@@ -961,46 +961,11 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
 // closed (not 1, 2). A strip only not seen for a while is a stall, not a close (cs-customize-0119, lane gc198-l5b: the
 // game's threads waited 645 ms for a core, the open screen was taken as closed and opened again on its first page, so
 // Y presses were lost): kWait, the screen kept as it is.
-// Which screens are one we look for by its panes (Character Select's Customize screen, SnailScreen; co-op's own
-// CoopMenu_00, CoopMenuScreen): a layout's panes are looked at again at EACH opening of its screen, never only once per
-// address. Row 262 (0.11.11, the owner's game): a layout was looked at once per (layout, screen) address pair, and a
-// verdict "not his" stayed for that pair for good. The game frees a menu screen with its layout and makes the next one
-// at the same addresses (lane 061445: Saria's 4th opening came at the same screen and layout as the three before), so
-// in a long session his Customize screen came at addresses already taken as another screen's (or seen before its panes
-// were there): never found, co-op's rows never on it, its keys his dead rows', and Link's look never changed (his log:
-// no "Customize screen found" at all in two sessions of 0.11.11; a fresh lane boot found it at once). Now:
-//  - a verdict is made only while the screen reads open (1, 2): an update while closed (0, 3) only notes the state;
-//  - another screen at the layout is looked at anew; an opening of a screen not taken as ours (open after an update
-//    closed, or after a gap of more than kScreenGapMs in its updates: freed and made again at the same place) forgets
-//    its "not ours" and looks again. One taken as ours stays ours for those addresses, as before (his panes may come
-//    late in a reopening, lane 061445: SnailScreen waits for them);
-//  - while open and not ours, it is looked at again at each update for kScreenLookMs after the opening (panes that come
-//    a few frames after the screen's first open update), then the verdict holds until the next opening.
-inline constexpr std::uint64_t kScreenGapMs = 200, kScreenLookMs = 1000;
-class ScreenPanes {
-public:
-    struct Seen {
-        std::uint64_t screen = 0;
-        bool ours = false, looked = false, open = false;
-        std::uint64_t seen_ms = 0, opened_ms = 0;
-    };
-    // One update of `screen` (its layout `layout`, open: its state 1 or 2): whether it is ours. `look()` (the game calls
-    // that find its panes) runs only when its panes must be looked at.
-    template <class Look>
-    bool Update(std::uint64_t layout, std::uint64_t screen, bool open, std::uint64_t now_ms, Look&& look) {
-        Seen& e = Entry(layout, screen, open, now_ms);
-        if (open && !e.ours && (!e.looked || now_ms - e.opened_ms <= kScreenLookMs)) {
-            e.ours = look();
-            e.looked = true;
-        }
-        return e.ours;
-    }
-    std::size_t size() const { return seen_.size(); }
-
-private:
-    Seen& Entry(std::uint64_t layout, std::uint64_t screen, bool open, std::uint64_t now_ms);
-    std::map<std::uint64_t, Seen> seen_;   // by layout
-};
+// Screens known by their panes, looked at again at each opening (row 262): coop_screen_panes.h.
+using CoopScreen::kScreenGapMs;
+using CoopScreen::kScreenLookMs;
+using CoopScreen::ScreenInstance;
+using CoopScreen::ScreenPanes;
 enum class SnailEdge { kWait, kOpen, kClose };
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
