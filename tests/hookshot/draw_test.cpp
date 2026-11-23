@@ -224,10 +224,11 @@ TEST_CASE("hookshot draw: name tags scaled from the scene target to the picture"
     CoopDraw::Scene s;
     s.markers = m;
     CoopDraw::Draw(c.d, s);
-    CHECK(c.Of("triangle").size() == 1);  // the edge arrow
-    CHECK(c.Of("circle").size() == 2);    // the dot and its dark rim (no dot for a head tag)
+    // No drawn shapes (B3): no edge arrow, no dot; the edge player gets no text either (it is off screen).
+    CHECK(c.Of("triangle").empty());
+    CHECK(c.Of("circle").empty());
     const auto texts = c.Of("text");
-    REQUIRE(texts.size() == 18);  // two tags, each 8 outline copies + the fill
+    REQUIRE(texts.size() == 9);  // one tag: 8 outline copies + the fill
     const auto& fill = texts[8];
     CHECK(fill.text == "Saria");
     CHECK(fill.px == doctest::Approx(25.2f));  // 3.5% of 720
@@ -423,18 +424,13 @@ TEST_CASE("hookshot draw: game look name tags in the players' colours, over the 
     Canvas c(1280, 720);
     CoopDraw::Draw(c.d, s, GameLook());
     const auto texts = c.Of("text");
-    REQUIRE(texts.size() == 18);
+    REQUIRE(texts.size() == 12);  // Saria and you; the edge player P3 gets nothing (B3: no arrows)
     CHECK(texts[5].text == "Saria");
     CHECK(texts[5].rgba == CoopDraw::Lifted(0xFF0000));
     CHECK(texts[5].font == 2);
     CHECK(texts[5].px == doctest::Approx(25.2f * 1.1f));  // the game's font a little bigger
     CHECK(texts[11].rgba == CoopDraw::Rgba(255, 210, 60, 255));  // yourself
-    CHECK(texts[17].text == "P3");
-    CHECK(texts[17].rgba == CoopDraw::Rgba(255, 255, 255, 255));  // nobody known: white
-    // The edge arrow in that player's colour too.
-    const auto arrows = c.Of("triangle");
-    REQUIRE(arrows.size() == 1);
-    CHECK(arrows[0].rgba == CoopDraw::Rgba(255, 255, 255, 255));
+    CHECK(c.Of("triangle").empty());
 }
 
 TEST_CASE("hookshot draw: game look chat, the name in its colour, no boxes, the box without a box") {
@@ -606,13 +602,19 @@ TEST_CASE("hookshot draw: a title screen line, with or without the Minus button"
         }
         CHECK(said);
         CHECK(c.Of("circle").empty());   // no button: nothing to press
+        for (const auto& t : c.Of("text")) CHECK(t.text != CoopDraw::kMinusText);
     }
     {
         Canvas c(1280, 720);
         CoopDraw::Scene s;
         s.title = CoopDraw::TitleView{"Multiplayer", true};
         CoopDraw::Draw(c.d, s, GameLook());
-        CHECK(c.Of("circle").size() == 2);   // the Minus button
+        // The Minus button as words, no drawn shapes (B10)
+        CHECK(c.Of("circle").empty());
+        CHECK(c.Of("rect").empty());
+        bool minus = false;
+        for (const auto& t : c.Of("text")) minus |= t.text == CoopDraw::kMinusText;
+        CHECK(minus);
     }
     CoopDraw::Scene none;
     none.title = CoopDraw::TitleView{};
@@ -706,12 +708,14 @@ TEST_CASE("hookshot draw: the title prompt draws its word where TitleAt says, on
     look.regular_metrics = {0.86f, 0.66f};
     CoopDraw::Draw(c.d, s, look);
     const auto b = CoopDraw::TitleAt(1920, 1080, *s.title, look.regular_metrics);
-    const auto circles = c.Of("circle");
-    REQUIRE(circles.size() == 2);
-    CHECK(circles[0].x == doctest::Approx(b.cx));
-    CHECK(circles[0].y == doctest::Approx(b.cy));
-    bool word = false;
+    CHECK(c.Of("circle").empty());
+    bool word = false, minus = false;
     for (const auto& t : c.Of("text")) {
+        if (t.text == CoopDraw::kMinusText && t.rgba == CoopDraw::Rgba(255, 255, 255, 255)) {   // centred on the button
+            minus = true;
+            CHECK(t.x + 3 * t.px * 0.5f / 2 == doctest::Approx(b.cx));
+            CHECK(t.y == doctest::Approx(b.text_top));
+        }
         if (t.text == "Multiplayer" && t.rgba == CoopDraw::Rgba(255, 255, 255, 255)) {   // (the fill, not its shadow)
             word = true;
             CHECK(t.x == doctest::Approx(b.text_x));
@@ -720,6 +724,7 @@ TEST_CASE("hookshot draw: the title prompt draws its word where TitleAt says, on
         }
     }
     CHECK(word);
+    CHECK(minus);
 }
 
 // Down but not out (hookshot/src/coop_dbno_draw.h).
