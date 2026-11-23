@@ -224,7 +224,10 @@ if (-not $CheckOnly -and -not $PackOnly) {
     $held = Get-KitHoldGameText $kit $Out
     if ($held) { Fail $held }
     $bad = if (Test-KitGameUnfinished $Out) { @() } else { @(Get-KitGameBuildMismatch $Out) }
-    if ($bad.Count -and -not $Rebuild) { Fail (Get-KitGameMixedText $bad) }
+    if ($bad.Count -and -not $Rebuild) {
+        if (Test-Path -LiteralPath (Join-Path $kit 'Start Squadala.bat')) { Fail (Get-KitGameMixedText $bad 'Start Squadala.bat asks whether to build the game again, and does it on yes') }
+        Fail (Get-KitGameMixedText $bad)
+    }
     if ($bad.Count) {
         Step 'The game: its files are not from one build; taking them out so the build puts every file in again'
         $bad | ForEach-Object { Write-Host "  - $_" }

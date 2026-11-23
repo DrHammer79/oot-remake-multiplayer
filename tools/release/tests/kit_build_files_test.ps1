@@ -64,8 +64,10 @@ try {
         Check ($bad.Count -eq 1 -and $bad[0] -like "$f *not the file Longshot put into this game*") "mismatch: $f swapped -> one line that names it"
         Check ((Get-KitHookshotNeed $kit) -eq 'mixed') "need: $f swapped -> mixed (never started)"
         $text = Get-KitHookshotNeedText 'mixed' $g $true $kit
-        Check ($text -like "*$f*" -and $text -like '*Nothing was changed*' -and $text -like '*-Rebuild*') "need text: names $f, says nothing was changed and how to build again"
-        Check ((Get-KitHookshotNeedQuestion 'mixed') -eq '') 'need question: none for mixed (it is never asked about)'
+        Check ($text -like "*$f*" -and $text -like '*Nothing was changed*' -and $text -like '*Start Squadala.bat asks*' -and $text -notlike '*Build-Hookshot-Coop.bat*') "need text (Longshot-only kit): names $f, says nothing was changed, the start asks, no Build-Hookshot-Coop.bat"
+        $text = Get-KitHookshotNeedText 'mixed' $g $false $kit
+        Check ($text -like '*Build-Hookshot-Coop.bat -Rebuild*') 'need text (full kit): names Build-Hookshot-Coop.bat -Rebuild'
+        Check ((Get-KitHookshotNeedQuestion 'mixed') -like '*again*') 'need question: mixed asks whether to build the game again'
         Check ((Save-KitGameVariant $kit $g) -like '*not kept*') "save: a set with $f swapped is not kept as a variant"
         Write-File (Join-Path $g $f) $keep
     }
@@ -126,8 +128,12 @@ try {
 
     # --- play.ps1 and hookshot-build.ps1 --------------------------------------------------------------------
     $play = [System.IO.File]::ReadAllText((Join-Path $scripts 'play.ps1'))
-    $i = $play.IndexOf("`$need -eq 'mixed' -or `$need -eq 'held'")
-    Check ($i -gt 0 -and $play.IndexOf('exit 1', $i) -gt $i -and $play.IndexOf('exit 1', $i) -lt $play.IndexOf('hookshot-build.ps1', $i)) 'play.ps1: mixed and held stop before any build or start'
+    $i = $play.IndexOf("`$need -eq 'held'")
+    Check ($i -gt 0 -and $play.IndexOf('exit 1', $i) -gt $i -and $play.IndexOf('exit 1', $i) -lt $play.IndexOf('hookshot-build.ps1', $i)) 'play.ps1: a held kit stops before any build or start'
+    # A mixed game: the start asks (the question is not empty, see the need question check), builds with -Rebuild on yes,
+    # and a no or a failed build never reaches the game start (Restore-KitCharacterSelectStart, which goes on to start, is skipped).
+    Check ($play -match "\`$buildArgs = if \(\`$need -eq 'mixed'\) \{ @\('-Rebuild'\) \}" -and $play -match "hookshot-build\.ps1'\) @buildArgs") 'play.ps1: a mixed game is built again with -Rebuild when the player says yes'
+    Check (([regex]::Matches($play, "\`$need -ne 'mixed' -and \(Restore-KitCharacterSelectStart\)")).Count -eq 2) 'play.ps1: a no or a failed build on a mixed game never goes on to start the game'
 
     $hb = [System.IO.File]::ReadAllText((Join-Path $scripts 'hookshot-build.ps1'))
     $guard = $hb.IndexOf('Get-KitHoldGameText $kit $Out')
@@ -169,6 +175,15 @@ try {
     Check ($r.Code -ne 0 -and $r.Text -like '*image.bin*' -and $r.Text -like '*Nothing was changed*' -and $r.Text -like '*-Rebuild*') "build: a mixed game is refused with the file named [$($r.Code)]"
     $after = (Get-ChildItem -LiteralPath $g1 -Recurse -File | ForEach-Object { "$($_.FullName)|$($_.Length)" }) -join ';'
     Check ($before -eq $after -and -not (Test-KitGameUnfinished $g1) -and -not (Test-Path -LiteralPath (Get-KitGameVariantRoot $k1))) 'build: the refusal changed nothing and kept nothing'
+
+    # The same in a Longshot-only (release) kit: it has no Build-Hookshot-Coop.bat, so the text says the start asks.
+    $k1r = New-FakeKit 'fake-mixed-release'
+    Write-File (Join-Path $k1r 'Start Squadala.bat') '@echo off'
+    $g1r = Join-Path $k1r 'hookshot\game'
+    Set-Build $g1r 'one' (Get-KitHookshotStamp $k1r)
+    Write-File (Join-Path $g1r 'image.bin') 'image.bin FROM ANOTHER BUILD'
+    $r = Invoke-Build $k1r
+    Check ($r.Code -ne 0 -and $r.Text -like '*image.bin*' -and $r.Text -like '*Start Squadala.bat asks*' -and $r.Text -notlike '*Build-Hookshot-Coop.bat*') "build (release kit, e.g. NVIDIA DLSS.bat): the refusal does not name Build-Hookshot-Coop.bat [$($r.Code)]"
 
     # A held kit with other patches than its game: refused, nothing changed.
     $k2 = New-FakeKit 'fake-held'

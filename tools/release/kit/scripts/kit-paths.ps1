@@ -1129,10 +1129,12 @@ function Get-KitGameBuildMismatch([string]$Root) {
 
 # The line said when the game's files are from different builds ($Bad: Get-KitGameBuildMismatch). $Fix: what builds it
 # again on purpose (the Linux kit's words are its own).
-function Get-KitGameMixedText([string[]]$Bad, [string]$Fix = 'Build-Hookshot-Coop.bat -Rebuild') {
+# $Fix is how the player gets the build, as the start of a sentence: a Longshot-only kit (Start Squadala.bat) has no
+# Build-Hookshot-Coop.bat, there the start asks.
+function Get-KitGameMixedText([string[]]$Bad, [string]$Fix = 'Build-Hookshot-Coop.bat -Rebuild builds the game again') {
     return ("The co-op game's files are not from one build, so the game is not started (a mixed game shows the wrong characters or texts, or crashes):`n" +
         ((@($Bad) | ForEach-Object { "  - $_" }) -join "`n") + "`n" +
-        "Nothing was changed. This happens when one file was copied over or put back from another build. $Fix builds the game again (5 to 45 minutes); your saves and settings stay.")
+        "Nothing was changed. This happens when one file was copied over or put back from another build. $Fix (5 to 45 minutes); your saves and settings stay.")
 }
 
 # A test kit that must keep the game it has (kit-harden): hookshot\hold-game.txt in the kit says so. Normal kits never
@@ -2318,7 +2320,7 @@ function Get-KitHookshotNeedText([string]$Need, [string]$Game = '', [bool]$HsOnl
         'variant' { 'The co-op game was built before with the mods'' code patches as they are now (a mod with an exefs folder switched back on the Mods tab): that build is put back (seconds, no build).' }
         'module' { 'Putting the updated co-op and the puppet pack into the co-op game (seconds to a minute).' }
         'quarantine' { Get-KitHookshotQuarantineText }
-        'mixed' { Get-KitGameMixedText @(Get-KitGameBuildMismatch $Game) }
+        'mixed' { if ($HsOnly) { Get-KitGameMixedText @(Get-KitGameBuildMismatch $Game) 'Start Squadala.bat asks whether to build the game again, and does it on yes' } else { Get-KitGameMixedText @(Get-KitGameBuildMismatch $Game) } }
         'held' { Get-KitHoldGameText $Kit $Game }
         default { '' }
     }
@@ -2331,6 +2333,7 @@ function Get-KitHookshotNeedQuestion([string]$Need) {
         'moved' { 'Build it again now?' }
         'pin' { 'Update it now?' }
         'unfinished' { 'Finish it now?' }
+        'mixed' { 'Build the game again now?' }
         default { '' }
     }
 }
