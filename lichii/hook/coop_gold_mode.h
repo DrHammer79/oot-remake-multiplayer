@@ -91,7 +91,22 @@ GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uin
 // Not shared: this game's race so far, the progress.sav of the newest slot in the co-op folder `coop_dir`. Never the
 // player's own (single-player) saves: every player starts the race from 0 tokens (decision of 2026-11-23). None:
 // nothing, and KeepOwnGold starts the race from nothing.
+// Else the race kept beside the co-op folder (KeepRace), so a race guest's own count carries into its next session
+// in the co-op game: a join empties the co-op folder before the host's save comes.
 std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir);
+
+// The race kept beside `coop_dir` (never inside it: the game mounts that folder): `<folder>-gold-race.sav`, and the
+// mark `<folder>-gold-race.on` that says the co-op folder's slot holds a race (a Not shared host's save with ours).
+std::filesystem::path RaceFile(const std::filesystem::path& coop_dir);
+std::filesystem::path RaceMark(const std::filesystem::path& coop_dir);
+
+// The host's save was just written into `coop_dir`: `race` true (Not shared, ours kept in it) sets the mark, false
+// (Shared) takes it away, so a Shared session's shared count never becomes a race's start. The kept race stays.
+void MarkRace(const std::filesystem::path& coop_dir, bool race);
+
+// Before the co-op folder is emptied (a join): with the mark, its newest slot's progress.sav is kept in RaceFile.
+// True when it was kept.
+bool KeepRace(const std::filesystem::path& coop_dir);
 
 // Test only: back to a fresh start (Shared, choice Shared).
 void ResetForTest();

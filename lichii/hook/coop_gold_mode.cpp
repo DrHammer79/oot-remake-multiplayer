@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <fstream>
+#include <iterator>
 #include <set>
 
 #include "coop/host/save_transfer.hpp"
@@ -242,7 +244,8 @@ void ResetForTest() {
     g_told.store(false);
 }
 
-std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir) {
+namespace {
+std::optional<std::vector<std::uint8_t>> NewestProgress(const std::filesystem::path& coop_dir) {
     namespace save = coop::host::save;
     const auto newest = save::newest_slot(coop_dir);
     if (!newest) return std::nullopt;
@@ -252,6 +255,57 @@ std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& 
         if (f.name == "progress.sav") return std::move(f.bytes);
     }
     return std::nullopt;
+}
+}  // namespace
+
+namespace {
+std::filesystem::path Beside(const std::filesystem::path& coop_dir, std::string_view tail) {
+    std::filesystem::path p = coop_dir;
+    if (!p.has_filename()) p = p.parent_path();  // a trailing separator
+    return p.parent_path() / (p.filename().string() + std::string(tail));
+}
+}  // namespace
+
+std::filesystem::path RaceFile(const std::filesystem::path& coop_dir) { return Beside(coop_dir, "-gold-race.sav"); }
+
+std::filesystem::path RaceMark(const std::filesystem::path& coop_dir) { return Beside(coop_dir, "-gold-race.on"); }
+
+std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir) {
+    if (auto bytes = NewestProgress(coop_dir)) return bytes;
+    std::ifstream in(RaceFile(coop_dir), std::ios::binary);
+    if (!in) return std::nullopt;
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (bytes.empty()) return std::nullopt;
+    return bytes;
+}
+
+void MarkRace(const std::filesystem::path& coop_dir, bool race) {
+    std::error_code ec;
+    if (race) {
+        std::ofstream(RaceMark(coop_dir), std::ios::binary | std::ios::trunc).put('1');
+    } else {
+        std::filesystem::remove(RaceMark(coop_dir), ec);
+    }
+}
+
+bool KeepRace(const std::filesystem::path& coop_dir) {
+    std::error_code ec;
+    if (!std::filesystem::exists(RaceMark(coop_dir), ec)) return false;
+    const auto bytes = NewestProgress(coop_dir);
+    if (!bytes || bytes->empty()) return false;
+    const std::filesystem::path to = RaceFile(coop_dir);
+    const std::filesystem::path tmp = to.string() + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+        if (!out) return false;
+    }
+    std::filesystem::rename(tmp, to, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    return true;
 }
 
 }  // namespace CoopGoldMode

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "coop/host/save_transfer.hpp"
 #include "coop_gold_mode.h"
 
 namespace proto = coop::protocol;
@@ -275,4 +276,45 @@ TEST_CASE("gold mode: the first player in hosts from its welcome, with no host c
     CoopGoldMode::OnWelcomed(true);
     CHECK(CoopGoldMode::InForce() == Mode::shared);
     CoopGoldMode::ResetForTest();
+}
+
+TEST_CASE("gold mode: Not shared, a race guest's count carries into its next session, a Shared one's never") {
+    // Review of 7f88444d: each join empties the co-op folder (coop_save.cpp clear_coop_slots) before the host's save
+    // comes. The race slot is kept beside the folder first (KeepRace), with the mark only (MarkRace).
+    namespace fs = std::filesystem;
+    namespace save = coop::host::save;
+    const fs::path root = fs::temp_directory_path() / "coop_tests_race_carry";
+    fs::remove_all(root);
+    const fs::path coop_dir = root / "own-coop";
+    const auto put = [](const fs::path& slot, const std::vector<std::uint8_t>& bytes) {
+        fs::create_directories(slot);
+        std::ofstream(slot / "progress.sav", std::ios::binary)
+            .write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    };
+    CHECK(CoopGoldMode::RaceFile(coop_dir).parent_path() == root);  // beside the folder, never in it
+
+    // Session 1, Not shared: the host's save was written with ours (mark on); our race got to 2 tokens.
+    const std::vector<std::uint8_t> race = MakeSave(2, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2});
+    put(coop_dir / "slot_00", race);
+    CoopGoldMode::MarkRace(coop_dir, true);
+    // Session 2's join: kept, then the folder is emptied; the race so far is still ours.
+    CHECK(CoopGoldMode::KeepRace(coop_dir));
+    CHECK(save::clear_coop_slots(coop_dir) == 1);
+    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
+    REQUIRE(so_far.has_value());
+    CHECK(*so_far == race);
+    std::vector<std::uint8_t> host = MakeSave(5, 1, {kSkull[2], kSkull[2] + 2, kWeb});
+    CHECK(CoopGoldMode::KeepOwnGold(host, &*so_far, kSkull, kCount, kGet).done);
+    CHECK(host == MakeSave(2, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2, kWeb}));
+
+    // A Shared session's save (mark off) is never kept: the race does not start from a shared count.
+    CoopGoldMode::MarkRace(coop_dir, false);
+    put(coop_dir / "slot_00", MakeSave(9, 1, {kSkull[2], kSkull[2] + 2}));
+    CHECK_FALSE(CoopGoldMode::KeepRace(coop_dir));
+    save::clear_coop_slots(coop_dir);
+    const auto still = CoopGoldMode::RaceSoFar(coop_dir);
+    REQUIRE(still.has_value());
+    CHECK(*still == race);  // the earlier race, untouched
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }

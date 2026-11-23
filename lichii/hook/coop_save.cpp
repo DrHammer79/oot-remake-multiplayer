@@ -152,6 +152,7 @@ bool RemountLocked(const fs::path& dir);
 void FixSlotsLocked();
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, bool played_from = true);
 void PendingFrame();
+void KeptRaceLocked(const fs::path& dir);
 void AskAtTitle();
 
 // Under g_mutex: a session's choice with a file loaded (a Join from the pause menu, a rejoin during play): nothing
@@ -247,6 +248,7 @@ void SwitchFrame(coop::net::Client& client) {
         g_use = choice == save::FolderChoice::coop;
         if (g_use) {
             g_pending = save::coop_dir_of(own);
+            KeptRaceLocked(g_pending);
             // Empty until the host's save comes: an older host's save there must not be the one loaded.
             if (const int n = save::clear_coop_slots(g_pending); n > 0) {
                 LOG_INFO(Core, "coop: save: {} older slot(s) taken out of {}", n, g_pending.string());
@@ -259,6 +261,14 @@ void SwitchFrame(coop::net::Client& client) {
         }
     }
     PendingFrame();
+}
+
+// Row 63: before the co-op folder `dir` is emptied, a race's slot is kept beside it (CoopGoldMode::KeepRace), so a
+// race guest's own count is the start of its next Not shared session in the co-op game.
+void KeptRaceLocked(const fs::path& dir) {
+    if (CoopGoldMode::KeepRace(dir)) {
+        LOG_INFO(Core, "coop: save: Gold Skulltulas not shared: the race so far kept beside {}", dir.string());
+    }
 }
 
 // Under g_mutex, each frame (Hookshot): the host's save that came is written whole into the pending co-op folder,
@@ -281,6 +291,7 @@ void PendingFrame() {
             g_use = false;
             return;
         }
+        KeptRaceLocked(g_pending);
         if (const int n = save::clear_coop_slots(g_pending); n > 0) {
             LOG_INFO(Core, "coop: save: {} older slot(s) taken out of {}", n, g_pending.string());
         }
@@ -416,6 +427,7 @@ void FixSlotsLocked() {
 // race from 0 tokens. Never the player's own saves (CoopGoldMode::RaceSoFar).
 save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in) {
     save::SaveSlot slot = slot_in;
+    CoopGoldMode::MarkRace(dir, CoopGoldMode::NotShared());  // (the slot written next is a race, or not)
     if (!CoopGoldMode::NotShared()) return slot;
     const std::optional<std::vector<std::uint8_t>> own = CoopGoldMode::RaceSoFar(dir);
     const std::vector<std::uint8_t>* own_bytes = own ? &*own : nullptr;
