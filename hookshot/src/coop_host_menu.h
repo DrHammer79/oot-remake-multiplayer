@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -138,6 +139,12 @@ void CopyText(char* out, std::size_t size, const std::string& text);
 // allocated and committed bytes, the handle count (Windows); resident and virtual bytes (Linux). Read-only, cheap
 // (no heap walk). The host's game logs it every kMemoryLineMs with the server's sizes (HostService::memory_line).
 std::string ProcessMemoryText();
+// The autotest's in-game host (tools/autotest hookshot.py --host-in-game, scenario step `menu host`): the game hosts
+// through its own Multiplayer > Host (CoopPause::TestHost), on the port and with the password the harness gives in
+// LICHII_COOP_TEST_HOST=PORT:PASSWORD (a password of 1 to 64 printable letters). Nothing for any other text. Test
+// only: such a host listens on 127.0.0.1 alone (Menu::RunHost) and opens no router port or invite.
+inline constexpr const char* kTestHostEnv = "LICHII_COOP_TEST_HOST";
+std::optional<std::pair<std::uint16_t, std::string>> ParseTestHost(std::string_view text);
 inline constexpr std::uint64_t kMemoryLineMs = 30'000;
 
 } // namespace CoopHostMenu

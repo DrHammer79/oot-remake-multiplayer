@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -74,6 +75,22 @@ int ProblemOf(coop::server::HostProblem p) {
 constexpr std::uint32_t kRoundMs = 5;
 
 } // namespace
+
+std::optional<std::pair<std::uint16_t, std::string>> ParseTestHost(std::string_view text) {
+    const std::size_t colon = text.find(':');
+    if (colon == std::string_view::npos || colon == 0 || colon > 5) return std::nullopt;
+    unsigned port = 0;
+    for (const char c : text.substr(0, colon)) {
+        if (c < '0' || c > '9') return std::nullopt;
+        port = port * 10 + static_cast<unsigned>(c - '0');
+    }
+    const std::string_view password = text.substr(colon + 1);
+    if (port == 0 || port > 65535 || password.empty() || password.size() > 64) return std::nullopt;
+    for (const char c : password) {
+        if (c < 0x21 || c > 0x7e) return std::nullopt;
+    }
+    return std::pair{static_cast<std::uint16_t>(port), std::string(password)};
+}
 
 #ifdef _WIN32
 std::string ProcessMemoryText() {
@@ -327,6 +344,11 @@ void Menu::RunHost(HostJob job) {
         config.counts = false;  // the game's log need not have them every 5 s
         config.log_invite = false;  // it holds the join password; the menu shows it
         config.log = [this](const std::string& text) { Say("coop: host: " + text); };
+        if (const char* test = std::getenv(kTestHostEnv); test != nullptr && ParseTestHost(test)) {
+            // The autotest's in-game host (ParseTestHost): its listener on 127.0.0.1 only, as every test listener.
+            config.bind = 0x7F000001u;
+            Say("coop: host: test host (LICHII_COOP_TEST_HOST): listening on 127.0.0.1 only");
+        }
         coop::server::HostService host(config);
         std::string why;
         if (!host.start(why)) {

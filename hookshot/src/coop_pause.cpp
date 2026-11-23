@@ -565,8 +565,9 @@ bool Busy() {
 void Save();
 
 // False when it did not start: refused (co-op is on already; the menu's note says so) or the host could not start
-// (the session's lines say why).
-bool Host() {
+// (the session's lines say why). `o`: the menu's options (the Host row), or the autotest's (TestHost: no router port,
+// no invite).
+bool Host(const CoopTitleMenu::Options& o, bool test) {
     g_player_acted = true;
     if (g_doing == "hosting" && !g_coop_on) {
         Save();
@@ -577,15 +578,14 @@ bool Host() {
         return false;
     }
     CoopHookshot::HostMenu().Leave();   // (a failed start: clear it)
-    const CoopTitleMenu::Options o = g_menu.options();
     CoopFiles::SetCoopEnvironment(o);
     HosCoopHostOptions h{};
     h.size = sizeof h;
     h.name = o.name.c_str();
     h.password = o.password.empty() ? nullptr : o.password.c_str();
     h.port = o.host_port;
-    h.upnp = 1;             // the router forward (nothing to set up)
-    h.invite = 1;
+    h.upnp = test ? 0 : 1;             // the router forward (nothing to set up)
+    h.invite = test ? 0 : 1;
     h.pvp = o.pvp ? 1 : 0;
     h.approve_joins = o.approve_joins ? 1 : 0;
     h.same_network_open = o.same_network_open ? 1 : 0;   // (on, the default: this network's players need no password)
@@ -618,6 +618,10 @@ bool Host() {
     LOG_INFO(Core, "coop: multiplayer tab: host: started (up to {} players, port {})", o.max_players, o.host_port);
     RefreshSession(true);
     return true;
+}
+
+bool Host() {
+    return Host(g_menu.options(), false);
 }
 
 // False when it did not start: refused (co-op on already, the code not readable; the menu's note says why) or the
@@ -1924,7 +1928,38 @@ std::string PageSays(std::uint64_t* gen) {
     return g_page_says;
 }
 
+// The autotest's in-game host (CoopHostMenu::ParseTestHost): the Multiplayer page's Host, on the harness's port and
+// password, a private game with no relay, router port or invite. The host thread listens on 127.0.0.1 only.
+bool TestHost() {
+    const char* text = std::getenv(CoopHostMenu::kTestHostEnv);
+    const auto test = text != nullptr ? CoopHostMenu::ParseTestHost(text) : std::nullopt;
+    if (!test) {
+        LOG_WARNING(Core, "coop: multiplayer tab: test host: {} is not PORT:PASSWORD: not hosting", CoopHostMenu::kTestHostEnv);
+        return false;
+    }
+    std::lock_guard lock(g_mutex);
+    FreshMain();
+    if (g_coop_on) {
+        LOG_WARNING(Core, "coop: multiplayer tab: test host: co-op came with the game's start: not hosting");
+        return false;
+    }
+    CoopTitleMenu::Options o = g_menu.options();
+    o.host_port = test->first;
+    o.password = test->second;
+    o.public_game = false;
+    o.approve_joins = false;
+    o.relay.clear();
+    o.relay_key.clear();
+    o.relay_room.clear();
+    o.list_room = false;
+    LOG_INFO(Core, "coop: multiplayer tab: test host on port {} (Multiplayer > Host, as the page's Host row)", o.host_port);
+    return Host(o, true);
+}
+
 bool TestMenu(const std::string& page) {
+    if (page == "host") {
+        return TestHost();
+    }
     if (page == "customize") {
         Open(CoopPauseMenu::Page::kCustomize);
         return true;

@@ -338,8 +338,8 @@ def parse(text):
                 fail("want: assign ITEM")
             s.kind, s.name = "assign", w[1]
         elif cmd == "MENU":
-            if len(w) != 2 or w[1].lower() not in ("customize", "close"):
-                fail("want: menu customize|close")
+            if len(w) != 2 or w[1].lower() not in ("customize", "close", "host"):
+                fail("want: menu customize|close|host")
             s.kind, s.name = "menu", w[1].lower()
         elif cmd == "MARK":
             if len(w) != 2:
@@ -954,6 +954,12 @@ def add_renderer_options(p, wait=600):
 #   records of earlier runs (a killed or crashed proof), so the page came up at a run's first title and took the
 #   load's A presses (smoke hs-players, kit-0119: B left on the title's Host page). A scenario that tests the ask
 #   turns it on in its switches.
+# Row 260: what game A gets for --host-in-game: co-op off at its start (no LICHII_COOP_SERVER), the in-game host's
+# port and password for its `menu host` step (hookshot/src/coop_host_menu.h ParseTestHost) and its name.
+def host_in_game_env(port, password):
+    return {"LICHII_COOP_TEST_HOST": "%d:%s" % (port, password), "LICHII_COOP_NAME": "A"}
+
+
 TEST_GAME_DEFAULTS = (("LICHII_COOP_TEST_OWN_SAVE", "1"), ("LICHII_COOP_PROBLEM_ASK", "0"))
 
 
@@ -1233,10 +1239,14 @@ def run(a):
             open(commands[x], "w").close()
             env = dict(os.environ, OOT_COOP_KIT_START="1", HOS_CONTROL=sock, HOS_CONTROL_MEM="ro", LICHII_COOP_TEST_COMMANDS=commands[x])
             test_game_defaults(env)   # its own save, no crash ask on the title (TEST_GAME_DEFAULTS): a switch can undo it
-            if a.server:
+            if a.server or (a.host_in_game and x != "A"):
                 env["LICHII_COOP_SERVER"] = "127.0.0.1:%d" % a.port
                 env["LICHII_COOP_NAME"] = x   # "A", "B": the scripts type /teleport A, /teleport B
                 env["LICHII_COOP_PASSWORD"] = a.password
+            elif a.host_in_game:
+                # Row 260: A starts with co-op off and hosts through its own Multiplayer > Host (its script's
+                # `menu host`), the in-process server players use; B joins it (it retries until A hosts).
+                env.update(host_in_game_env(a.port, a.password))
             if a.playtest_ports:
                 # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
                 env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
@@ -1436,6 +1446,9 @@ def main(argv=None):
     r.add_argument("--game-a", help="(required without --lane)")
     r.add_argument("--game-b", help="(required without --lane)")
     r.add_argument("--server", help="coop_server to start (none: the games use their coop.ini)")
+    r.add_argument("--host-in-game", action="store_true",
+                   help="no coop_server: game A hosts through its own Multiplayer > Host (script step `menu host`) on "
+                        "--port with --password, on 127.0.0.1 only; B joins it (row 260)")
     r.add_argument("--port", type=int, help="default 27560 (a lane: its own)")
     r.add_argument("--password", default="autotest-pass",
                    help="the join password of the server it starts, given to both games (every session has one)")
@@ -1492,6 +1505,13 @@ def main(argv=None):
     for kv in a.env:
         if "=" not in kv:
             p.error("--env NAME=VALUE")
+    if getattr(a, "host_in_game", False):
+        if a.server:
+            p.error("--host-in-game hosts in game A: no --server")
+        if not a.script_b:
+            p.error("--host-in-game needs --script-b (B joins A)")
+        if not re.fullmatch(r"[!-~]{1,64}", a.password):
+            p.error("--host-in-game: --password of 1 to 64 printable letters")
     if not a.lane:
         if not (a.game_a and a.game_b and a.out):
             p.error("--game-a, --game-b and --out (or --lane N)")

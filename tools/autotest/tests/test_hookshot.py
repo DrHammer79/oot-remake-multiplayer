@@ -261,9 +261,13 @@ class ParseTest(unittest.TestCase):
         self.assertIn("stun", hs.MODULE_ONLY)
 
     def test_menu_step_goes_to_the_module(self):
-        steps = hs.parse("menu Customize\nmenu close\n")
-        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close")])
+        steps = hs.parse("menu Customize\nmenu close\nmenu Host\n")
+        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host")])
         self.assertIn("menu", hs.MODULE_ONLY)
+
+    def test_host_in_game_env(self):  # row 260: A hosts through its own Multiplayer > Host
+        self.assertEqual(hs.host_in_game_env(27520, "autotest-pass"),
+                         {"LICHII_COOP_TEST_HOST": "27520:autotest-pass", "LICHII_COOP_NAME": "A"})
 
     def test_place_on_a_platform_goes_to_the_module(self):  # #196: a rider on a floor that waves
         s = hs.parse("place Obj_Deku_MoveFloor_A_01 0.3\n")[0]
@@ -296,8 +300,8 @@ class ParseTest(unittest.TestCase):
         for text, want in (("wait", "line 1: want: wait TICKS"), ("\n\nhold Q 3", "line 3: unknown key Q"),
                            ("stick 2 0 5", "line 1: want: STICK"), ("goto 1 2 0.1", "radius at least 0.2"),
                            ("jump", "unknown command jump"), ("# only", "no steps"),
-                           ("wear cape X", "want: wear"), ("dress hat", "want: dress"), ("menu", "want: menu customize|close"),
-                           ("menu map", "want: menu customize|close"), ("hurt", "want: hurt QUARTER_HEARTS"),
+                           ("wear cape X", "want: wear"), ("dress hat", "want: dress"), ("menu", "want: menu customize|close|host"),
+                           ("menu map", "want: menu customize|close|host"), ("hurt", "want: hurt QUARTER_HEARTS"),
                            ("hurt 0", "want: hurt QUARTER_HEARTS"), ("hurt 81", "want: hurt QUARTER_HEARTS"),
                            ("hurt 2x", "want: hurt QUARTER_HEARTS"), ("hit Enemy_DungeonBoss_Gohma", "want: hit ACTOR N"),
                            ("hit Enemy_DungeonBoss_Gohma 0", "want: hit ACTOR N"),
