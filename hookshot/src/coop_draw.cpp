@@ -839,28 +839,28 @@ TitleBox TitleAt(float width, float height, const TitleView& t, const FontMetric
     return b;
 }
 
-// A title screen line (TitleView): the words, bottom left, after the Minus
-// button when it has one, in the game's font with its soft shadow; the plain
-// look (no pack): the same with Hookshot's font.
+// A title screen line (TitleView), only where the title has no pane of its own for it (no puppet pack: with one the
+// title's rows and its hint line Pa_CoopHint_00 say it, coop_title.cpp): the words, bottom left, in the game's font
+// with its soft shadow (the plain look: Hookshot's font). No drawn shapes (B10 of reports/ui-audit-01112.md): the
+// Minus button is the text "(-)" where the button was, centred on its middle.
 static void DrawTitle(const HosCoopDraw& d, const TitleView& t, const Look* look) {
     if (t.prompt.empty()) {
         return;
     }
-    const float u = Picture(d).u;
     const std::uint32_t white = Rgba(255, 255, 255, 255);
     Font(d, look ? look->regular : 0);
     const TitleBox b = TitleAt(d.width, d.height, t, look ? look->regular_metrics : FontMetrics{});
+    const auto say = [&](float x, const char* words) {
+        if (look) {
+            GameText(d, x, b.text_top, b.px, white, words);
+        } else {
+            d.text(d.user, x, b.text_top, b.px, white, words);
+        }
+    };
     if (t.button) {
-        const float bar = std::max(1.0f, 1.5f * u);
-        d.circle(d.user, b.cx, b.cy, b.r, Rgba(0, 0, 0, 130), 0.0f);
-        d.circle(d.user, b.cx, b.cy, b.r, Rgba(255, 255, 255, 230), std::max(1.5f, 2.0f * u));
-        d.rect(d.user, b.cx - b.r * 0.5f, b.cy - bar, b.cx + b.r * 0.5f, b.cy + bar, white, 0.0f);
+        say(b.cx - d.text_width(d.user, b.px, kMinusText) / 2, kMinusText);
     }
-    if (look) {
-        GameText(d, b.text_x, b.text_top, b.px, white, t.prompt.c_str());
-    } else {
-        d.text(d.user, b.text_x, b.text_top, b.px, white, t.prompt.c_str());
-    }
+    say(b.text_x, t.prompt.c_str());
 }
 
 bool LookFontFits() {

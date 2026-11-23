@@ -152,6 +152,7 @@ struct TitleBox {
     float text_x = 0, text_top = 0, px = 0;
 };
 TitleBox TitleAt(float width, float height, const TitleView& t, const FontMetrics& m);
+inline constexpr const char* kMinusText = "(-)";   // the Minus button, as words (no drawn button)
 
 // The other players on the HUD minimap and on the pause menu's Map page
 // (docs/overlay.md, "Players on the map"; coop/overlay/map_icons.hpp): our

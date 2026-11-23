@@ -538,13 +538,19 @@ TEST_CASE("hookshot draw: a title screen line, with or without the Minus button"
         }
         CHECK(said);
         CHECK(c.Of("circle").empty());   // no button: nothing to press
+        for (const auto& t : c.Of("text")) CHECK(t.text != CoopDraw::kMinusText);
     }
     {
         Canvas c(1280, 720);
         CoopDraw::Scene s;
         s.title = CoopDraw::TitleView{"Multiplayer", true};
         CoopDraw::Draw(c.d, s, GameLook());
-        CHECK(c.Of("circle").size() == 2);   // the Minus button
+        // The Minus button as words, no drawn shapes (B10)
+        CHECK(c.Of("circle").empty());
+        CHECK(c.Of("rect").empty());
+        bool minus = false;
+        for (const auto& t : c.Of("text")) minus |= t.text == CoopDraw::kMinusText;
+        CHECK(minus);
     }
     CoopDraw::Scene none;
     none.title = CoopDraw::TitleView{};
@@ -638,12 +644,14 @@ TEST_CASE("hookshot draw: the title prompt draws its word where TitleAt says, on
     look.regular_metrics = {0.86f, 0.66f};
     CoopDraw::Draw(c.d, s, look);
     const auto b = CoopDraw::TitleAt(1920, 1080, *s.title, look.regular_metrics);
-    const auto circles = c.Of("circle");
-    REQUIRE(circles.size() == 2);
-    CHECK(circles[0].x == doctest::Approx(b.cx));
-    CHECK(circles[0].y == doctest::Approx(b.cy));
-    bool word = false;
+    CHECK(c.Of("circle").empty());
+    bool word = false, minus = false;
     for (const auto& t : c.Of("text")) {
+        if (t.text == CoopDraw::kMinusText && t.rgba == CoopDraw::Rgba(255, 255, 255, 255)) {   // centred on the button
+            minus = true;
+            CHECK(t.x + 3 * t.px * 0.5f / 2 == doctest::Approx(b.cx));
+            CHECK(t.y == doctest::Approx(b.text_top));
+        }
         if (t.text == "Multiplayer" && t.rgba == CoopDraw::Rgba(255, 255, 255, 255)) {   // (the fill, not its shadow)
             word = true;
             CHECK(t.x == doctest::Approx(b.text_x));
@@ -652,6 +660,7 @@ TEST_CASE("hookshot draw: the title prompt draws its word where TitleAt says, on
         }
     }
     CHECK(word);
+    CHECK(minus);
 }
 
 // Down but not out (hookshot/src/coop_dbno_draw.h).
