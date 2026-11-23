@@ -114,7 +114,12 @@ param(
     # -Hookshot: the module step, the puppet pack, the colour, the randomizer seeds), then play as usual. Two kit
     # folders, A then B ("kitA,kitB"), each with hookshot\game-folder.txt naming its game (-HookshotA/-B or the
     # lane's pair): tools\autotest\kit_pair.py setup makes them. Plain scenarios only (no steps files yet).
-    [string[]]$Kit = @()
+    [string[]]$Kit = @(),
+    # The monitor the game windows go to, by device name (Settings > System > Display: "DISPLAY2" is \\.\DISPLAY2).
+    # Default: $env:OOT_TEST_DISPLAY, else \\.\DISPLAY2. Resolved to that monitor's work area when the games start;
+    # a name no monitor has stops the run before any game starts. The windows are placed side by side there
+    # without taking the focus (tools\autotest\placement.py, docs/testing.md "Where the test games' windows go").
+    [string]$Display = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -244,6 +249,7 @@ if ($Runtime -eq 'hookshot') {
         $a += @('--test-delay-ms', "$([int]$Lag)", '--test-jitter-ms', "$([int]$Jitter)")
     }
     if ($Pipe -ne 'coop-auto') { $a += @('--pipe', $Pipe) }
+    if ($Display) { $a += @('--display', $Display) }
     if ($RendererWait -gt 0) { $a += @('--renderer-wait', "$RendererWait") }
     if ($RendererStall -gt 0) { $a += @('--renderer-stall', "$RendererStall") }
     if ($RendererLimit -gt 0) { $a += @('--renderer-limit', "$RendererLimit") }
@@ -381,8 +387,6 @@ public class AutotestWin {
  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref POINT p);
  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
- [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
- [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
  delegate bool EnumProc(IntPtr h, IntPtr l);
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
@@ -425,8 +429,6 @@ public class AutotestWin {
  // Real pixels: without this a scaled desktop gives rects in scaled units and the copy
  // misses part of the window.
  public static void DpiAware() { SetProcessDPIAware(); }
- // Moves the window and keeps it above other windows, so a screen copy sees the game.
- public static void Place(IntPtr h, int x, int y, int w, int ht) { SetWindowPos(h, new IntPtr(-1), x, y, w, ht, 0x40); }
  // The game's client area only (no title bar or border). PrintWindow with
  // PW_CLIENTONLY|PW_RENDERFULLCONTENT first; if it gives a black picture (Vulkan),
  // copy the screen where the client area is instead.
@@ -670,7 +672,10 @@ function Start-Game([string]$x) {
         Remove-Item Env:LICHII_COOP_SERVER -ErrorAction SilentlyContinue
     }
     $env:LICHII_COOP_TEST_SCRIPT = $s.Script
-    $s.Proc = Start-Process (Join-Path $s.Emu 'lichii.exe') -ArgumentList "-g `"$Game`"" -WorkingDirectory $s.Emu -PassThru
+    # Through placement.py launch: the window opens without taking the focus (Start-Process cannot do that).
+    $gamePid = (& $py[0] @pyArgs -I "$here\placement.py" launch --cwd $s.Emu -- (Join-Path $s.Emu 'lichii.exe') -g $Game | Out-String).Trim()
+    if ($LASTEXITCODE -or $gamePid -notmatch '^\d+$') { throw "game ${x}: placement.py launch failed: $gamePid" }
+    $s.Proc = Get-Process -Id ([int]$gamePid)
     Remove-Item Env:LICHII_COOP_TEST_SCRIPT
     foreach ($k in $old.Keys) { [Environment]::SetEnvironmentVariable($k, $old[$k]) }
     $s.Done = 0; $s.Marks = 0
@@ -691,14 +696,18 @@ function Wait-Joined([string]$x) {
         Start-Sleep -Milliseconds 500
     }
 }
-# Side by side on the main screen, so a screen copy works too.
+# Side by side on the chosen monitor ($Display), without taking the focus (placement.py: SWP_NOACTIVATE, no restore
+# call). Topmost only with -ScreenCopy (the copy needs the game above other windows); it stays on that monitor.
+function Display-Args { if ($Display) { @('--display', $Display) } else { @() } }
 function Place-Windows {
     $i = 0
     foreach ($x in $kits.Keys) {
-        $h = Game-Window $x
-        if ($h -ne [IntPtr]::Zero) {
-            [void][AutotestWin]::ShowWindow($h, 9)
-            [AutotestWin]::Place($h, 960 * $i, 0, 960, 600)
+        $p = $st[$x].Proc
+        if ($p -and -not $p.HasExited) {
+            $pa = @('--pid', "$($p.Id)", '--first-slot', "$i", '--slots', "$($kits.Count)") + @(Display-Args)
+            if ($ScreenCopy) { $pa += '--topmost' }
+            $o = (& $py[0] @pyArgs -I "$here\placement.py" place @pa 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE) { Write-Host "window placement: $o"; Note "window placement: $o" }
         }
         $i++
     }
@@ -948,6 +957,13 @@ function Stop-NetSim {
 $failed = $null
 $stepFails = 0
 $stepUnproven = 0
+# The emulator runtime's games and their window placement use Python (placement.py); a monitor name that does not
+# exist stops the run here, before any game window can open anywhere else.
+$py = @(Find-Python)
+$pyArgs = @($py | Select-Object -Skip 1)
+$mon = (& $py[0] @pyArgs -I "$here\placement.py" rects @(Display-Args) 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE) { throw $mon }
+Write-Host "windows go to: $mon"
 try {
     Start-Server
     Start-NetSim

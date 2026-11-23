@@ -404,6 +404,7 @@ class HookshotGames:
         self.server_delay = []   # hookshot.py test_delay_args: the TEST-ONLY delay (needs OOT_COOP_TEST=1)
         self.renderer = None     # (wait, stall, limit) for hookshot.wait_renderer; None: (timeout, its defaults)
         self.commands = {x: os.path.join(out, "commands-%s.txt" % x) for x in games}
+        self.display = None      # the monitor for the game windows (placement.py); None: $OOT_TEST_DISPLAY, else DISPLAY2
 
     def _log_path(self, x):
         # Longshot rc.3 wrote longshot_log.txt beside the exe, rc.4 in logs\ there: the newest one, else rc.3's place.
@@ -486,11 +487,15 @@ class HookshotGames:
             env[k] = v
         exe = os.path.join(hk.exe_dir(g), "longshot.exe" if WINDOWS else "longshot")
         go = open(os.path.join(self.out, "game-out-%s-%d.txt" % (x, self.runs[x])), "wb")
-        kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}
+        flags = getattr(hk, "popen_flags", None)   # (no window activation, see hookshot.popen_flags)
+        kw = flags() if flags else ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS
+                                    else {"start_new_session": True})
         self.procs[x] = subprocess.Popen([exe], cwd=hk.exe_dir(g), env=env, stdin=subprocess.DEVNULL, stdout=go,
                                          stderr=subprocess.STDOUT, **kw)
         go.close()
         self.say("%s: started pid %d, bridge %s" % (x, self.procs[x].pid, sock))
+        if getattr(hk, "place_games", None):   # (its window on the chosen monitor as soon as it is there)
+            hk.place_games({x: self.procs[x].pid}, self.display, self.say, wait=30.0)
         self.bridges[x] = (sock, hk.Bridge.connect(sock, timeout=120))
         if wait:
             self.wait_joined(x)
@@ -502,6 +507,8 @@ class HookshotGames:
         wait, stall, limit = self.renderer or (self.timeout, self.hk.RENDERER_STALL, self.hk.RENDERER_LIMIT)
         waited = self.hk.wait_renderer(lambda: self.log(x), lambda: self.alive(x), wait, stall, limit)
         self.say("%s: renderer ready (%.0f s waited)" % (x, waited))
+        if getattr(self.hk, "place_games", None):   # (the game can move its window when its renderer comes up)
+            self.hk.place_games({x: self.procs[x].pid}, self.display, self.say)
         t0 = time.monotonic()
         while JOINED not in self.log(x):
             if not self.alive(x):
@@ -663,6 +670,8 @@ def main(argv=None):
     r.add_argument("--expect-wait", type=float, default=60.0)
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--display", help="the monitor the game windows go to, by device name (default "
+                                     "$OOT_TEST_DISPLAY, else DISPLAY2): tools/autotest/placement.py")
     r.add_argument("--test-delay-ms", type=int, default=0,
                    help="TEST ONLY: the server holds every packet, this round trip in ms (half each way)")
     r.add_argument("--test-jitter-ms", type=int, default=0, help="TEST ONLY: +- up to this many ms each way")
@@ -713,6 +722,14 @@ def main(argv=None):
     say = hk.Log(os.path.join(a.out, "steps.txt"), echo=print)
     games = HookshotGames(hk, {"A": os.path.abspath(a.game_a), "B": os.path.abspath(a.game_b)}, a.out, a.server,
                           a.port, a.pipe, a.env, head["timeout"] or a.timeout, head, restore=not a.no_restore, say=say)
+    games.display = a.display
+    try:
+        mon = hk.placement.check_display(a.display) if WINDOWS else None
+    except hk.placement.PlacementError as e:   # (before any game window can open anywhere else)
+        say("window placement: %s" % e)
+        return 2
+    if mon:
+        say("windows go to %s (work area %s)" % (mon["name"], mon["work"]))
     games.server_delay = hk.test_delay_args(a.test_delay_ms, a.test_jitter_ms)
     games.renderer = (a.renderer_wait or games.timeout, a.renderer_stall or hk.RENDERER_STALL,
                       a.renderer_limit or hk.RENDERER_LIMIT)

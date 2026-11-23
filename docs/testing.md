@@ -313,6 +313,19 @@ What it does:
 
 The co-op switches are `-Switches` (default: the kit's own, puppet, objects and spawn sync, plus object debug lines), as `NAME=value`. Give them as one comma list, `-Switches "LICHII_COOP_PUPPET=1,LICHII_COOP_OBJECTS_CHEAT=1"`: with `powershell -File` that is how several arrive anyway (before 2026-11-09 such a list was set as one wrong variable, so the switches were silently off). The list replaces the default, and the runner prints each switch it sets. A switch written `A:NAME=value` (or `B:`) is set for that game only, for example a key that only A sets (`deku-map`, `deku-web`).
 
+### Where the test games' windows go
+
+A test game must never open over what someone is working on. Every run that starts games (`run.ps1`, the Longshot runner `hookshot.py run` and its steps runner `hs_steps.py`, and the live play-test kit `live.py start`) puts the two game windows on **one chosen monitor**, side by side (960x600 each, from the top left of that monitor's work area; smaller when the area is too small). The code is `tools/autotest/placement.py`; all of them use it.
+
+- **Pick the monitor by its device name** (Settings > System > Display shows the number; `\\.\DISPLAY2` is "display 2"). Strongest first: `-Display` (run.ps1, and the live kit's start script) or `--display` (`hookshot.py run`, `hs_steps.py run`, `live.py start`), then the environment variable `OOT_TEST_DISPLAY`, then the default `\\.\DISPLAY2`. `DISPLAY2` alone works too.
+- The name is turned into that monitor's work area (the screen minus the taskbar) when the games start, so a monitor that sits at a negative or large offset works, and a display added later (a virtual one, say) needs only the setting changed. Nothing assumes the monitor is the primary one or at 0,0.
+- A name no monitor has stops the run before any game starts, with the list of monitors found. It never falls back to another screen: that is where the windows would pop up over someone's work. `python tools/autotest/placement.py list` shows what is there and `placement.py rects` what a run would use.
+- No focus is taken. The games are started with their window shown without activation (`STARTF_USESHOWWINDOW` with `SW_SHOWNOACTIVATE`), placed with `SWP_NOACTIVATE` (never a restore call that activates), and placed again after their renderer comes up. A minimized window is shown with `SW_SHOWNOACTIVATE`. Topmost is used only for `run.ps1 -ScreenCopy` (the copy needs the game above other windows) and stays on the chosen monitor.
+- Screenshots do not depend on where the window is: the Longshot games save them through the control bridge (`shot`), and the emulator run's `Shot` reads the client area wherever the window is.
+- A failed placement of a started game is a line in `steps.txt` (`window placement: ...`), never a stopped run.
+
+Check it in the game (needs a game run): start both games while another window has the focus; the focus must stay, both windows must be on the chosen monitor, and `live.py shot` / the run's screenshots must still be good.
+
 ### Start place
 
 Every scenario starts from the same save. The game autosaves on each scene change (six rotating slots per user) and Continue loads the newest, so after a run that walked into Kakariko the next run used to start in Kakariko (chunk 1, 2026-11-09). The runner now copies each kit's **save baseline** (`<kit>\autotest-save\<user>\0400486024DEC000\`, outside the repo) back over the kit's saves before every boot, `start` steps included. Setting it up once:

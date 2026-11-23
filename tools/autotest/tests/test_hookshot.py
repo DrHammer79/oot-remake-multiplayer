@@ -22,6 +22,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GAMEUI = 0x1000200000
 
 
+class FakePlacement:
+    """placement.py with no real monitor: check_display answers for any name, place_pids records its calls (a CI
+    runner has no DISPLAY2, and a test must not move a real window)."""
+    calls, saved = [], None
+
+    @classmethod
+    def install(cls):
+        cls.calls = []
+        cls.saved = (hs.placement.check_display, hs.placement.place_pids)
+
+        def place(pids, display=None, topmost=False, wait=0.0, step=0.25, slots=None, count=None):
+            cls.calls.append({"pids": list(pids), "display": display, "slots": list(slots), "count": count})
+            return []
+        hs.placement.check_display = lambda arg=None: {"name": "\\\\.\\" + (arg or "DISPLAY2"), "work": (0, 0, 1920, 1032)}
+        hs.placement.place_pids = place
+        return cls.calls
+
+    @classmethod
+    def restore(cls):
+        hs.placement.check_display, hs.placement.place_pids = cls.saved
+
+
 class Clock:
     """Time that moves only when slept."""
 
@@ -844,20 +866,26 @@ class RunTest(unittest.TestCase):
             with open(os.path.join(tmp, "b.txt"), "w") as f:
                 f.write("press A\n")
             popen, connect = hs.subprocess.Popen, hs.Bridge.connect
+            placed = FakePlacement.install()
             hs.subprocess.Popen = Proc
             hs.Bridge.connect = classmethod(lambda cls, path, timeout=10.0: fakes[path].connect())
             try:
                 code = hs.main(["run", "--game-a", os.path.join(tmp, "A"), "--game-b", os.path.join(tmp, "B"),
                                 "--out", os.path.join(tmp, "out"), "--name", "t", "--script-a",
                                 os.path.join(tmp, "a.txt"), "--script-b", os.path.join(tmp, "b.txt"),
-                                "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1"])
+                                "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1",
+                                "--display", "DISPLAY7"])
             finally:
                 hs.subprocess.Popen, hs.Bridge.connect = popen, connect
+                FakePlacement.restore()
             out = os.path.join(tmp, "out")
             with open(os.path.join(out, "steps.txt")) as f:
                 self.assertEqual(code, 0, f.read())
             self.assertTrue(os.path.isdir(os.path.join(tmp, "A", "user", "save", "u")))   # baseline put back
             self.assertEqual([p.env["HOS_CONTROL_MEM"] for p in started], ["ro", "ro"])
+            if hs.WINDOWS:   # each game's window is placed on the chosen monitor: A in the first place, B in the second
+                self.assertEqual({c["display"] for c in placed}, {"DISPLAY7"})
+                self.assertEqual([c["slots"] for c in placed], [[0], [1], [0, 1]])
             self.assertEqual([p.env.get("ONLY_B") for p in started], [None, "1"])
             self.assertEqual([p.env["BOTH"] for p in started], ["1", "1"])
             self.assertEqual([p.env["LICHII_COOP_TEST_OWN_SAVE"] for p in started], ["1", "1"])   # each game its own save
@@ -982,6 +1010,41 @@ class DropTest(unittest.TestCase):
         for bad in ("drop\n", "drop X\n", "drop X 0\n", "drop X 501\n", "drop X 1.5\n"):
             with self.assertRaises(hs.ScriptError):
                 hs.parse(bad)
+
+
+class WindowPlacementTest(unittest.TestCase):
+    """hookshot.py run puts the game windows on the chosen monitor and never starts a game without one."""
+
+    def test_missing_monitor_stops_the_run_before_any_game_starts(self):
+        import tempfile
+        from unittest import mock
+        started = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(hs, "WINDOWS", True), \
+                mock.patch.object(hs.placement, "monitors", lambda: [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 1, 1)}]), \
+                mock.patch.object(hs.subprocess, "Popen", lambda *a, **k: started.append(a)):
+            open(os.path.join(tmp, "s.txt"), "w").close()
+            with self.assertRaises(SystemExit) as c:
+                hs.main(["run", "--game-a", tmp, "--game-b", tmp, "--out", os.path.join(tmp, "o"), "--script-a",
+                         os.path.join(tmp, "s.txt"), "--display", "DISPLAY9"])
+        self.assertIn("no monitor called DISPLAY9", str(c.exception))
+        self.assertEqual(started, [])
+
+    def test_games_start_without_activating_their_window(self):
+        flags = hs.popen_flags()
+        if hs.WINDOWS:
+            self.assertEqual(flags["startupinfo"].wShowWindow, 4)   # SW_SHOWNOACTIVATE
+            self.assertTrue(flags["startupinfo"].dwFlags & hs.subprocess.STARTF_USESHOWWINDOW)
+        else:
+            self.assertEqual(flags, {"start_new_session": True})
+
+    def test_a_failed_placement_is_said_and_does_not_end_the_run(self):
+        from unittest import mock
+        said = []
+        with mock.patch.object(hs, "WINDOWS", True), \
+                mock.patch.object(hs.placement, "place_pids", side_effect=hs.placement.PlacementError("no monitor")):
+            hs.place_games({"A": 1}, "DISPLAY9", said.append)
+        self.assertEqual(said, ["window placement: no monitor"])
 
 
 if __name__ == "__main__":

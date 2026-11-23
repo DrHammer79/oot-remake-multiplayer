@@ -25,6 +25,14 @@ Register the MCP server once from the repository folder, for a session started w
 claude mcp add oot-playtest -- python -I tools/autotest/mcp_playtest.py --session <session folder>
 ```
 
+## Where the game windows go
+
+`live.py start` puts both game windows side by side on one monitor and does not take the focus. Choose the monitor
+with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_TEST_DISPLAY`; the default is
+`\\.\DISPLAY2`. A name that no monitor has stops the start with the list of monitors. Details and what to check:
+[testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
+game's own control bridge, so they work wherever the windows are.
+
 ## Rules for a tester
 
 - The games run in real time between steps: the bridge has no frame step yet. A step's own lines are what Link

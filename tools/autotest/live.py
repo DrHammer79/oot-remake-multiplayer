@@ -67,6 +67,8 @@ def start(a):
         argv += ["--load", a.load]
     for kv in a.env:
         argv += ["--env", kv]
+    if a.display:
+        argv += ["--display", a.display]
     code = hookshot.main(argv)
     s = {"started": time.time(), "dir": d, "games": {"A": a.game_a, "B": a.game_b}, "offsets": {}}
     for x in TAGS:
@@ -239,6 +241,9 @@ def main(argv=None):
     st.add_argument("--no-load", action="store_true", help="the boot scripts take the title themselves")
     st.add_argument("--env", action="append", default=[], help="K=V, or A:K=V / B:K=V for one game")
     st.add_argument("--boot-timeout", type=int, default=900)
+    st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
+                                      "tools/autotest/placement.py" % (hookshot.placement.ENV,
+                                                                       hookshot.placement.DEFAULT_DISPLAY))
     for name in ("do", "state", "shot", "checkpoint", "stop"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)
