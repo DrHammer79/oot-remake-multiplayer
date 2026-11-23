@@ -343,7 +343,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
