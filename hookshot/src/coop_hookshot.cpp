@@ -66,6 +66,7 @@
 #include "coop_pad_order.h"
 #include "coop_rando.h"
 #include "coop_hook.h"
+#include "coop_native_tags.h"
 #include "coop_lobby_game.h"
 #include "coop_lobby_tab.h"
 #include "coop_voice.h"
@@ -504,6 +505,72 @@ void LogBossNative() {
              c.action_waiting, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.busy, c.copy_life_held,
              c.copy_killed, c.copy_finished, c.plain_wants, c.plain_wakes, c.plain_deaths, c.brain_came,
              c.brain_already);
+}
+
+// ---- Name tags on the game's own balloons (coop_native_tags.h, B3 of reports/ui-audit-01112.md), at the frame hook.
+// LICHII_COOP_NATIVE_TAGS=0: the overlay's drawn name text instead (no arrows, no dots either way). The game gave no
+// memory for the names: the drawn text too, said once in the log.
+class TagsGame final : public CoopNativeTags::Game {
+public:
+    explicit TagsGame(void* ctx) : ctx_(ctx) {}
+    std::uint64_t MainBase() const override { return CoopRuntime::MainBase(); }
+    bool Read(std::uint64_t a, void* out, std::size_t n) override { return CoopRuntime::Read(a, out, n); }
+    bool Write(std::uint64_t a, const void* in, std::size_t n) override { return CoopRuntime::Write(a, in, n); }
+    std::optional<std::uint64_t> Call(std::uint64_t f, const std::array<std::uint64_t, 5>& x) override {
+        HosCoopCall k{};
+        k.function = f;
+        for (std::size_t i = 0; i < x.size(); ++i) k.x[i] = x[i];
+        std::uint64_t x0 = 0;
+        if (g_api == nullptr || !g_api->call(ctx_, &k, &x0)) return std::nullopt;
+        return x0;
+    }
+
+private:
+    void* ctx_;
+};
+std::atomic<bool> g_tags_drawn{false};   // true: the overlay draws the name text (native off or failed)
+CoopNativeTags::Balloons g_balloons;     // the game's thread only
+
+void NativeTags(void* ctx) {
+    static const bool on = Env("LICHII_COOP_NATIVE_TAGS") != "0";
+    static bool said = false, said_fail = false;
+    if (!on) {
+        g_tags_drawn.store(true);
+        return;
+    }
+    TagsGame game(ctx);
+    std::vector<CoopNativeTags::Spot> spots;
+    const auto markers = CoopHook::CurrentMarkers();
+    if (markers && !markers->items.empty()) {
+        std::uint8_t self = 0;
+        const auto rows = CoopHook::PlayerList();
+        for (const auto& row : rows) {
+            if (row.self) self = row.number;
+        }
+        for (const auto& m : markers->items) {
+            if (m.edge || m.self || m.tag.empty() || !m.tag_head) continue;
+            CoopNativeTags::Spot s{m.tag, m.tag_x, m.tag_y, m.alpha, 0xFFFFFF};
+            for (const auto& row : rows) {
+                if (row.number != 0 && row.name == m.tag) s.rgb = CoopDraw::Lifted(CoopPuppet::NameColor(row.number, self));
+            }
+            spots.push_back(std::move(s));
+        }
+    }
+    if (spots.empty() && g_balloons.shown() == 0) return;   // solo, or nobody near: the balloons are not touched
+    const bool up = g_balloons.Step(game, spots, markers ? markers->width : 0.0f, markers ? markers->height : 0.0f);
+    if (g_balloons.no_memory()) {
+        g_tags_drawn.store(true);
+        if (!said_fail) {
+            said_fail = true;
+            LOG_WARNING(Core, "coop: native tags: the game gave no memory for the names; drawn name tags instead");
+        }
+        return;
+    }
+    if (up && g_balloons.shown() > 0 && !said) {
+        said = true;
+        LOG_INFO(Core, "coop: native tags: name tags on the game's balloons ({} shown, screen {:#x})", g_balloons.shown(),
+                 g_balloons.screen());
+    }
 }
 
 void RunCalls(void* ctx) {
@@ -960,6 +1027,9 @@ CoopDraw::Scene DrawScene() {
     }
     s.chat = CoopDraw::ShownChat(CoopHook::ChatLines(), s.box.has_value());
     s.markers = CoopHook::CurrentMarkers();
+    if (s.markers && !g_tags_drawn.load()) {   // the game's balloons carry the name tags (NativeTags): none drawn
+        std::erase_if(s.markers->items, [](const CoopHook::Marker& m) { return !m.self; });
+    }
     s.dbno = CoopDbno::Shown();  // down but not out: the ring
     bool list = false, panel = false;
     {
@@ -1435,7 +1505,8 @@ void Frame(void* ctx, int site) {
             if (CoopMapRefresh::TheRefresher().Due(now_ms)) CoopMapPage::AskHudRefresh();
         }
         RunCalls(ctx);
-        RequestHostAutoSave(ctx);   // (only when a guest's ask opened a round: CoopSave::TakeSaveRequest)
+        NativeTags(ctx);   // the name tags on the game's balloons
+        RequestHostAutoSave(ctx);  // (only when a guest's ask opened a round: CoopSave::TakeSaveRequest)
         LogBossNative();
         LogBossOrders();
         CoopMapPage::Frame(ctx, g_api);   // the Map page's panes, found once while the game plays

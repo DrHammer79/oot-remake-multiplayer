@@ -223,10 +223,11 @@ TEST_CASE("hookshot draw: name tags scaled from the scene target to the picture"
     CoopDraw::Scene s;
     s.markers = m;
     CoopDraw::Draw(c.d, s);
-    CHECK(c.Of("triangle").size() == 1);  // the edge arrow
-    CHECK(c.Of("circle").size() == 2);    // the dot and its dark rim (no dot for a head tag)
+    // No drawn shapes (B3): no edge arrow, no dot; the edge player gets no text either (it is off screen).
+    CHECK(c.Of("triangle").empty());
+    CHECK(c.Of("circle").empty());
     const auto texts = c.Of("text");
-    REQUIRE(texts.size() == 18);  // two tags, each 8 outline copies + the fill
+    REQUIRE(texts.size() == 9);  // one tag: 8 outline copies + the fill
     const auto& fill = texts[8];
     CHECK(fill.text == "Saria");
     CHECK(fill.px == doctest::Approx(25.2f));  // 3.5% of 720
@@ -360,18 +361,13 @@ TEST_CASE("hookshot draw: game look name tags in the players' colours, over the 
     Canvas c(1280, 720);
     CoopDraw::Draw(c.d, s, GameLook());
     const auto texts = c.Of("text");
-    REQUIRE(texts.size() == 18);
+    REQUIRE(texts.size() == 12);  // Saria and you; the edge player P3 gets nothing (B3: no arrows)
     CHECK(texts[5].text == "Saria");
     CHECK(texts[5].rgba == CoopDraw::Lifted(0xFF0000));
     CHECK(texts[5].font == 2);
     CHECK(texts[5].px == doctest::Approx(25.2f * 1.1f));  // the game's font a little bigger
     CHECK(texts[11].rgba == CoopDraw::Rgba(255, 210, 60, 255));  // yourself
-    CHECK(texts[17].text == "P3");
-    CHECK(texts[17].rgba == CoopDraw::Rgba(255, 255, 255, 255));  // nobody known: white
-    // The edge arrow in that player's colour too.
-    const auto arrows = c.Of("triangle");
-    REQUIRE(arrows.size() == 1);
-    CHECK(arrows[0].rgba == CoopDraw::Rgba(255, 255, 255, 255));
+    CHECK(c.Of("triangle").empty());
 }
 
 TEST_CASE("hookshot draw: game look chat, the name in its colour, no boxes, the box without a box") {

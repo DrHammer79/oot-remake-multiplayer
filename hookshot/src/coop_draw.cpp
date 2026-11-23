@@ -208,22 +208,10 @@ void DrawMarkers(const HosCoopDraw& d, const CoopHook::Markers& m, const Scene& 
         if (look && !k.self) {
             fill = WithAlpha(ColourOf(scene, k.tag), a);
         }
-        const std::uint32_t dark = Rgba(0, 0, 0, a * 3 / 4);
-        const float cx = ox + k.x * s, cy = oy + k.y * s;
-        if (k.edge) {
-            // A triangle at the edge pointing at the player.
-            const float r = std::max(6.0f, k.size * s / 2);
-            const float ca = std::cos(k.arrow_angle), sa = std::sin(k.arrow_angle);
-            d.triangle(d.user, cx + ca * r, cy + sa * r,                                        //
-                       cx - ca * r * 0.6f - sa * r * 0.8f, cy - sa * r * 0.6f + ca * r * 0.8f,  //
-                       cx - ca * r * 0.6f + sa * r * 0.8f, cy - sa * r * 0.6f - ca * r * 0.8f, fill);
-        } else if (!k.tag_head) {
-            // No head height known: a dot under the tag.
-            const float r = std::max(3.0f, k.size * s / 2);
-            d.circle(d.user, cx, cy, r + 1.5f, dark, 0.0f);
-            d.circle(d.user, cx, cy, r, fill, 0.0f);
-        }
-        if (k.tag.empty()) {
+        // No shapes (the owner's UI rule, B3 of reports/ui-audit-01112.md): a player just off screen or with no head
+        // height known gets no drawn arrow or dot, only its name where the overlay puts it. The name tags themselves
+        // are the game's balloons (coop_native_tags.h) unless those are off: then only this text is drawn.
+        if (k.edge || k.tag.empty()) {
             continue;
         }
         const float tw = d.text_width(d.user, px, k.tag.c_str());
