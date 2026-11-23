@@ -13,7 +13,7 @@ Maintainer only, like the rest of `tools/autotest`: it needs two Hookshot test c
 | --- | --- |
 | `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. |
 | `live.py do --session DIR A "lines"` | Plays test script lines in one game (`goto`, `toward`, `press`, `hold`, `warp`, `place`, `setflag`, `kill`, `hit`, ...; `;` between lines), then returns that game's state. |
-| `live.py state --session DIR [A\|B]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. |
+| `live.py state --session DIR [A\|B] [--since ID]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. Each look has a `state_id`; with `--since` only what changed comes back ("Kit helpers"). |
 | `live.py shot --session DIR [A\|B]` | A screenshot of each game (a PNG path). |
 | `live.py checkpoint --session DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. |
 | `live.py stop --session DIR` | Ends the session: the watchdog quits both games, kills what did not quit and the server, and lets the lane lock go. |
@@ -96,9 +96,12 @@ says why).
 The game holds inside its own per-frame hook: the calc thread waits there before the frame's update, so a held game
 does not advance at all (no Link, no enemies, no timers). The window, the sound thread, Longshot's control bridge and
 the co-op connection keep running (the network thread answers the server's pings, so a held game is never dropped
-as timed out). The other game's puppet of this player stands still while it is held. The server does not know a game
-is held: an enemy or boss this game owns stays with it while the other game runs. So **always hold both games** and
-step them in turn, the same number of frames.
+as timed out). The other game's puppet of this player stands still while it is held: the network thread sends this
+player's last sample again every 200 ms (the keep-alive), standing and with the last animation, because a player
+whose samples stop fades out in 0.4 s and loses its puppet ([puppet.md](puppet.md) "Cases"). After a reconnect while
+held it also sends the status and equipment again. Nothing is sent while held in a load or on the title (no sample
+then). The server does not know a game is held: an enemy or boss this game owns stays with it while the other game
+runs. So **always hold both games** and step them in turn, the same number of frames.
 
 | Command | Fields | Does |
 |---|---|---|
@@ -295,6 +298,7 @@ only, no `pip install`.
 | `walk_to x z [tolerance] [max_frames]` | Walks to the point 8 frames at a time with the bridge's `move` (the world yaw toward the target; the module makes the stick from each frame's camera), stopping on arrival (0.5 m by default), a scene change, a load, an event, a refused move (`move refused: no_camera: ...`) or `max_frames` (600). It says why it stopped, the frames used and the distance left, and keeps `trace` (the last 24 pushes: `[frames, x, z, distance, world yaw, strength, stick]`, the stick being the `[angle, strength]` the module made). A walk that gets nowhere for three pushes, or farther from the target for three pushes in a row, steps aside 90 degrees for three pushes, the other side each time; after three side steps for getting farther it stops with `moving away` instead of walking on |
 | `press [buttons] [stick_angle stick_strength] [frames]` | Holds the buttons (and the stick: 0 = up, away from the camera, 90 = right) for N frames (2 by default), then holds the game |
 | `step frames` | Lets N frames run with no input |
+| `step_until condition [max_frames] [chunk]` | Steps `chunk` frames at a time (8 by default, 1 to 60) until a state field matches, then holds. `condition` is `field`, `!field` or `field OP value` (OP: `==` `!=` `<` `<=` `>` `>=`; the value is JSON or a bare word; a dotted path reaches into objects and lists: `equips.weapon`, `pos.1`): `event == false`, `loading == false`, `scene == KokiriForest_Child`, `prompt`, `life == 0`, `rupees >= 50`. It looks first (a condition that holds costs no frame) and stops after `max_frames` (300 by default, 3600 at most). Reply: `met`, `value` (the field now), `frames_run`, the last `state`, and `why` when not met. A field the state does not have is an error (a typo is not a time-out). A null (a stale Link snapshot) is "do not know": it never matches an ordering, and `== null` matches it. It replaces a `step`, `get_state`, `step` loop ("Kit helpers") |
 | `warp scene [entrance] [timeout]` | The game's own scene change: by the module's request during an event, by Longshot's teleport in free play (a map of its list, no entrance; else `not_in_event` at once: use a boot script that warps). It returns once Link is there with no event or load; `timeout` is 1 to 600 seconds (default 60) |
 | `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
 | `give item` | Gives the item at once (the item, its `IsGet` and its ammo); the reply's `result` says what changed, and `get_state` with `inventory` true shows it with no step |
@@ -359,6 +363,35 @@ target). The yaw-to-stick maths is unit tested for both handednesses, every quad
 (`tests/hookshot/playtest_test.cpp`). A walk that gets nowhere for three pushes steps aside for three. Into a wall it times out, and near a wall a detour can also trip the moving-away stop, so `moving away` can mean blocked (read the `trace`): walk_to does no
 pathfinding, so give it points with a clear line between them and a boot-script warp or `place` for anything far. On a null position (stale snapshot) it stops with `stale position: ...`; it never says `arrived` from an old place. The walk that once went away from its target (Link from z 77.7 toward z 66) is what `move` replaces; the lane check is three targets in different directions on both games with the camera turned.
 
+### Kit helpers (`tools/autotest/kit_tools.py`)
+
+Standard library only; tested without a game by `tools/autotest/tests/test_kit_tools.py`.
+
+- **`step_until`** (a player tool, above): `step_until condition 120` instead of a `step`, `get_state`, `step` loop.
+- **Delta state.** Every `get_state` (player server) and `state` (session server, `live.py state`) reply carries a `state_id`. Pass it back as `since` and only what changed comes back: `changed` (dotted path to the new value: `pos`, `equips.shield`, `coop.players`; a list is one value), `removed` (paths that are gone), the `frame`, the new `state_id` and `since`. The counters that move on every look (`frame`, `snapshot_present`, `world_frame`, `id`, `ok`, `paused`) and the `inventory` are left out of the comparison (`inventory_count` says it changed). New `coop:` log lines (`live.py state`) are always whole: they are new since the last look already. The last 16 looks are kept (in memory on the player server; `state-history.json` in the session folder for `live.py`). An id that is not kept gives the whole state and a `why`; so does a player the old look did not have. `since` must be a whole number from 1. A player server numbers its looks from its own base (p1 from 100001, p2 from 200001), so an id from one player's server is "not kept" on another's.
+
+- **Call log and replay.** Every kit call is written as one JSON line to `calls.jsonl`: `{"t", "server", "tool", "args", "ok", "error"}` (`t` is when the call began, `server` is `oot-p1`..`oot-p4`, `oot-playtest`, or `live` for a `live.py` command, which is logged under its MCP tool name: `do` is `act`). Where: the session folder when the server has `--session`, else its `--log-dir`; `--call-log FILE` picks another file, `--no-call-log` turns it off. All servers of a run append to the one file, a line in one write, so the lines do not mix. A log that cannot be written never stops a test. Run it again:
+
+  `python -I tools/autotest/live.py replay [FILE ...] --session DIR [--lane N] [--log-dir DIR] [--dry-run] [--keep-going] [--delay S] [--include-reads] [--include-failed]`
+
+  With no FILE it reads `calls.jsonl` of `--session`; several files are merged by time. It runs the calls in order, each as the server that made it (a player server: that game's bridge, on `--lane`'s ports; `oot-playtest` and `live`: the session's tools, so those need `--session`). Calls that only looked (`get_state`, `get_world`, `log`, `screenshot`, ...) and calls that failed the first time are left out unless you ask; it stops at the first call that fails now unless `--keep-going`; `--dry-run` lists what it would run. The calls are the same, the game is not: a replay starts from the state the first run started from (a save, the same warp), and a `step_until` or a walk may land on other frames. It is not logged again. Exit code 1 when a call failed; the progress goes to stderr, the result (`ran`, `skipped`, `failed`) to stdout.
+
+### Kit doctor (`tools/autotest/kit_doctor.py`)
+
+Run it before a run (and when a run does not start): one line per check, `OK`, `WARN` or `FAIL`, the name and what is wrong. Exit code 1 when a line says `FAIL`. It starts nothing and changes nothing.
+
+`python -I tools/autotest/kit_doctor.py --lane 1 [--session DIR] [--mcp .mcp.json] [--running] [--players N] [--json]`
+
+(`--game-a FOLDER --game-b FOLDER` instead of `--lane` for two folders of your own.) It checks:
+
+- **python**: 3.10 or newer. **kit files**: `tools/autotest` has the play-test scripts.
+- **game A / game B**: the folder exists, has `longshot.exe` (in `bin/` or the folder), and `hookshot_coop.dll` next to it (the fix is `lanes.py install --lane N --dll ...`); a `WARN` when the shaders are not prepared yet. **game copies**: A and B are two folders.
+- **port p1, p2 ...**: the bridge port (5000 + N, or 5000 + 10*L + N on lane L). Before a run it must be free (a `WARN` names what is taken); with `--running` it must answer (a `FAIL` says no game listens: it did not start, was not started with `--playtest`, or its bridge is off). **port server**: the lane's server ports are free.
+- **session** (`--session DIR`): the folder is a `live.py start` session, has not ended, and each game process in `pids.json` is alive.
+- **mcp** (`--mcp FILE`, or `./.mcp.json` when there is one): each `oot-pN` server names a command that runs, an `mcp_playtest.py` that exists (a relative path is read from the folder of the `.mcp.json`), its own `--player`, the `--lane` you gave, a `--session` folder that exists; all servers share one `--log-dir`.
+
+`python -I tools/autotest/kit_doctor.py --write-mcp .mcp.json --lane 1 --session DIR --log-dir DIR` writes a `.mcp.json` from `tools/autotest/mcp.json.template` (`{LANE}`, `{SESSION}` and `{LOG_DIR}` filled in; an option you do not give is left out, and so is the `oot-playtest` session server when there is no `--session`). It never replaces a file without `--force`. The template has no paths of this PC: the script paths are relative to the repository folder, where the client runs. Register the file as in "Setting up a run".
+
 ### Check in game (first lane run of the strike by id, the helpers and the held list)
 
 Nothing here has run in a game. The first run checks:
@@ -388,7 +421,8 @@ Nothing here has run in a game. The first run checks:
    default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL`, `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1` in each game's
    environment (or `live.py start --env A:LICHII_COOP_PLAYTEST_PORT=5011 --env B:...`). Each game's log says
    `coop: playtest: listening on 127.0.0.1:<port>`.
-2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
+2. (`kit_doctor.py --write-mcp` writes the `.mcp.json` below for you; `kit_doctor.py --lane N` checks the run: "Kit doctor".)
+   Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
    and, for games from `live.py start`, the same `--session`: each call then counts as a tester command for the
    session's watchdog (else it ends the session after `--idle-minutes`), and an ended session is refused. In a
    project `.mcp.json` (the shape most MCP clients read):

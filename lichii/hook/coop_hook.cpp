@@ -141,6 +141,9 @@ namespace {
 // Rows 239/240/241 (PickGuardFrame, below): a pick put back since the session's chat last said it.
 std::atomic<bool> g_pick_said{false};
 
+// SetHeld: the play-test bridge holds the game; the network thread passes it to the session each round.
+std::atomic<bool> g_game_held{false};
+
 // The game and build the addresses in coop/host are for.
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
 // The builds it knows: coop_game_build.h (docs/game-builds.md).
@@ -1156,7 +1159,7 @@ public:
             ++presents_;
             const std::uint64_t now_us = CoopEvery::NowUs();
             if (samples_log_.Due(now_us)) {
-                const std::uint32_t seq = session_->sampler().next_sequence();
+                const std::uint32_t seq = session_->next_sample_sequence();
                 if (samples_log_at_ != 0 && now_us > samples_log_at_) {
                     const double seconds = static_cast<double>(now_us - samples_log_at_) / 1e6;
                     LOG_INFO(Core, "coop: samples: {:.1f} sent/s, {:.1f} presents/s",
@@ -2478,6 +2481,7 @@ private:
     void Run() {
         auto last_state = coop::net::State::idle;
         while (!stop_) {
+            session_->set_held(g_game_held.load(std::memory_order_relaxed));  // SetHeld
             session_->service();
             session_->with_client([](coop::net::Client& c) { CoopPose::Send(c, SteadyMs()); });
             RoomView room = session_->with_client([&](coop::net::Client& c) {
@@ -3965,6 +3969,10 @@ void SetColor(std::optional<std::uint32_t> color) {
     }
     LOG_INFO(Core, "coop: colour changed in the game: {}",
              color ? CoopColors::Text(*color) : std::string("none chosen (slot colour)"));
+}
+
+void SetHeld(bool held) {
+    g_game_held.store(held, std::memory_order_relaxed);
 }
 
 std::vector<OverlayLine> OverlayLines() {
