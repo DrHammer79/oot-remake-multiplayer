@@ -167,6 +167,7 @@ self_tunic_step() {
         [[ $own == green ]] && say "Your Link: the green tunic files; your coop-options.ini color is painted on in the game."
         [[ -n $own && $own != green ]] && say "Your Link: the $own tunic (coop-options.ini color)."
     fi
+    return 0   # (set -e: the && test above is false for green, which must not end the start)
 }
 self_tunic_step
 # #48: one size table for the game (a seed from OOTRR's website has its own, without the puppet pack's entries):
