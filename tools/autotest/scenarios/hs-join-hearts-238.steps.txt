@@ -19,7 +19,8 @@
 #  3. j-joined-A / -B (~40 s after the rejoin): BOTH show the host's count (A did not rise to B's), B went DOWN.
 #  4. j-picked-A / -B: after B takes a heart container, both show the host's count + 1.
 # Logs (lines steps below): B's walk raised its Link before the loss; B's walk lowered it after the rejoin
-# ("MaxLife is held lower"); A's Link never rose before B's pick.
+# ("MaxLife is held lower"); A's Link never rose before B's pick; b-hud-lowered: the game's own gauge refresh
+# (coop_life_gauge.h) took B's HUD from 20 down to 16, as its Link (both lane1 baselines have MaxLife 16, B gains 4).
 #! switches LICHII_COOP_DEBUG_FLAGS=1,LICHII_COOP_CHEATS=1
 start A
 start B
@@ -42,6 +43,7 @@ sleep 40
 lines b-rejoined B min=2 coop: welcomed as player
 lines a-hosts A max=0 coop: notice: Synced with the group
 lines b-lowered B min=1 coop: objects: our Link's max life .*MaxLife is held lower
+lines b-hud-lowered B min=1 coop: life gauge: the game's refresh ran: HUD max 20 -> 16 .*our Link's life -?\d+ of 16 \(
 lines a-not-raised A max=0 coop: objects: our Link's max life \d+ -> \d+ \(from MaxLife\)
 shot j-joined
 play B hs-join-hearts-238.B2.txt

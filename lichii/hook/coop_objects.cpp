@@ -49,6 +49,7 @@
 // dropped, and an actor counts as gone only when two walks in a row miss it.
 
 #include "coop_objects.h"
+#include "coop_life_gauge.h"
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
@@ -4130,6 +4131,7 @@ private:
                         LOG_INFO(Core, "coop: objects: our Link's max life {} -> {} (from MaxLife)",
                                  max, *raised);
                         CoopBoss::NoteMaxLifeFromOthers(*raised);   // (not our pickup: no heart claim)
+                        CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
                     }
                     // Another player took the boss's heart container: our hearts full, as its pickup fills them.
                     if (TheRefillAsked().load() && memory_ != nullptr &&
@@ -4137,6 +4139,7 @@ private:
                         const s32 full = raised ? *raised : max;
                         if (full > 0 && TheRefillAsked().exchange(false)) {
                             memory_->Write32(value->first + 8, static_cast<u32>(full));
+                            CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
                             LOG_INFO(Core, "coop: objects: our Link's life {} -> {} (another player took the heart "
                                            "container: as its pickup)", life, full);
                         }
@@ -4163,6 +4166,7 @@ private:
                         }
                         memory_->Write32(value->second + 8, static_cast<u32>(lowered->max));
                         TheMaxLifeLowerDone().store(lowered->max);  // row 238: the hold may end by its quiet time now
+                        CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
                         LOG_INFO(Core, "coop: objects: our Link's max life {} -> {} (MaxLife is held lower: the host "
                                        "loaded a save with fewer hearts, or a boss's one container was taken twice){}",
                                  max, lowered->max,
@@ -4726,6 +4730,7 @@ private:
         }
         memory_->Write32(life_at, static_cast<u32>(*want));
         TheLinkLife().store(*want);
+        CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
         LOG_INFO(Core, "coop: dbno: our Link's life {} -> {}", life, *want);
     }
 
@@ -4825,6 +4830,7 @@ private:
                              life);
                 } else if (memory_ != nullptr && memory_->IsValidVirtualAddressRange(life_at, 4)) {
                     memory_->Write32(life_at, static_cast<u32>(to));
+                    CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
                     LOG_INFO(Core, "coop: pvp: our Link's life {} -> {}{}", life, to,
                              it->replayed ? " (the game's hit was not taken)" : "");
                     life = to;
