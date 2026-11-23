@@ -67,6 +67,9 @@ public:
     Texts Shown(const CoopI18n::Lang* lang) const;
     int Focus() const { return focus_; }
     bool Editing() const { return page_.editing(); }
+    // The page of six shown (1 first) and how many there are (0: none to show, a character with no options).
+    int PageNo() const { return page_.GroupsOffered() == 0 ? 0 : static_cast<int>(page_.PageIndex()) + 1; }
+    int Pages() const { return static_cast<int>(page_.GroupsOffered()); }
     // The look after a change, once.
     std::optional<CoopLook::Look> TakeChange() { return page_.TakeChange(); }
 

@@ -369,5 +369,54 @@ class LiveCheckpoint(unittest.TestCase):
             self.assertEqual(cp["A"]["flags"], {"F": 1})
 
 
+class LiveMenu(unittest.TestCase):
+    """live.py state's `menu`: co-op's pages as text from the play-test bridge (a bridge shot leaves them out)."""
+
+    class Fake:
+        def __init__(self, reply=None, error=None):
+            self.reply, self.error, self.asked, self.closed = reply, error, [], False
+
+        def request(self, cmd):
+            self.asked.append(cmd)
+            if self.error:
+                raise self.error
+            return self.reply
+
+        def close(self):
+            self.closed = True
+
+    def test_the_menu_member_of_the_state(self):
+        menu = {"coop": {"open": True, "page": "customize"}, "customize_screen": {"open": False}}
+        f = self.Fake({"ok": True, "frame": 3, "menu": menu})
+        self.assertEqual(live.menu_of(5001, f), {"menu": menu})
+        self.assertEqual(f.asked, ["state"])
+        self.assertTrue(f.closed)
+
+    def test_an_older_module_says_so(self):
+        self.assertIn("no menu", live.menu_of(5001, self.Fake({"ok": True}))["menu_error"])
+
+    def test_no_bridge_is_an_error_not_a_crash(self):
+        f = self.Fake(error=ConnectionRefusedError("refused"))
+        self.assertIn("refused", live.menu_of(5001, f)["menu_error"])
+        self.assertTrue(f.closed)
+
+    def test_a_game_without_the_bridge_is_not_asked(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = {"games": {"A": {}}}
+            asked = []
+            orig = (live.bridge, live.snapshot, live.new_lines, live.menu_of)
+            try:
+                live.bridge = lambda s, x: type("B", (), {"close": lambda self: None})()
+                live.snapshot = lambda b: {"map": "m"}
+                live.new_lines = lambda d, s, x: []
+                live.menu_of = lambda port: asked.append(port) or {"menu": {}}
+                self.assertNotIn("menu", live.look(d, s, "A"))
+                s["games"]["A"]["playtest_port"] = 5011
+                self.assertEqual(live.look(d, s, "A")["menu"], {})
+                self.assertEqual(asked, [5011])
+            finally:
+                live.bridge, live.snapshot, live.new_lines, live.menu_of = orig
+
+
 if __name__ == "__main__":
     unittest.main()
