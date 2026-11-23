@@ -110,6 +110,23 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $t.Pack '_coop-menus\RSDB') | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $t.Pack '_coop-menus\RSDB\UIScreen.Product.111.rstbl.byml.zs'), 'old screens')
     Check (-not (Test-KitCharselNativeParked $t.Pack) -and (Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq '') 'an old kept copy beside the file in romfs: not parked, the code stays'
+    # 8. Row 265 (review-01112-g): play.ps1's Hookshot starts run the size-table merge AFTER the self-tunic step
+    #    (Use-KitPuppetPack puts your tunic tile in; merge_self_models renames other mods' Link models to it) and
+    #    before the game starts, every time: never skipped because the need-check loop merged earlier.
+    $lines = @([System.IO.File]::ReadAllLines((Join-Path (Split-Path -Parent $PSScriptRoot) 'kit\scripts\play.ps1')))
+    $starts = 0
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -notmatch 'Use-KitPuppetPack .*coop-puppet\\coop_puppet\.json') { continue }
+        $end = $i + 1
+        while ($end -lt $lines.Count -and $lines[$end] -notmatch '^\s*\$game = Start-Process') { $end++ }
+        $merge = @($lines[$i..$end] | Where-Object { $_ -match '^\s*foreach \(\$l in @\(Invoke-KitSizeTableMerge \$kit \$emu\)\) \{ Write-Host \$l \}' })
+        if ($lines[$i] -match "Join-Path \`$emu") {
+            $starts++
+            Check ($merge.Count -eq 1 -and $end -lt $lines.Count) "play.ps1 Hookshot start (line $($i + 1)): the size-table merge runs, unconditionally, after the self-tunic step and before the game"
+        }
+    }
+    Check ($starts -eq 2) "play.ps1: both Hookshot starts (title and play) checked ($starts)"
+    Check (-not (Select-String -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'kit\scripts\play.ps1') -SimpleMatch 'mergeFresh' -Quiet)) 'play.ps1: no flag skips the start''s merge'
 } finally {
     foreach ($t in $made) { Remove-Item -LiteralPath $t.Root -Recurse -Force -ErrorAction SilentlyContinue }
 }

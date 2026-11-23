@@ -795,6 +795,37 @@ EOF
     check 'start (#309): merge_tables.py gets the game'"'"'s mods folder and its own romfs (the dictionaries)' grep -qF \
         "merge_tables --mods $D/game/mods --romfs $D/game/romfs" "$log"
     check 'start (#309): it says your Link wears the green files with your colour painted on' has "$D/logs/start.log" 'your coop-options.ini color is painted on'
+    # Row 265 with the MsgNotFound rebuild (review-01112-g): when start.sh's merge parks the Characters tab's files and
+    # build.sh runs again (its pack step may make the pack again), your tunic files go in again BEFORE the merge after
+    # it, which renames the mods' Link models to them; the game starts after that merge.
+    cat >"$D/tools/puppet_pack/merge_tables.py" <<'EOF'
+import os, shutil, sys
+
+
+def charsel_native_parked(pack):
+    return os.path.isdir(os.path.join(pack, "_coop-menus"))
+
+
+if __name__ == "__main__":
+    pack = os.path.join(sys.argv[sys.argv.index("--mods") + 1], "contents", "0400486024DEC000", "coop-puppet")
+    count = os.environ["FAKE_MERGE_COUNT"]
+    n = (int(open(count).read() or 0) if os.path.exists(count) else 0) + 1
+    open(count, "w").write(str(n))
+    if n >= int(os.environ["FAKE_PARK_FROM"]):
+        os.makedirs(os.path.join(pack, "_coop-menus"), exist_ok=True)
+    else:
+        shutil.rmtree(os.path.join(pack, "_coop-menus"), ignore_errors=True)
+    with open(os.environ["FAKE_LOG"], "a") as f:
+        f.write("merge_tables %d\n" % n)
+EOF
+    : >"$log"; rm -f "$tmp/merges"
+    FAKE_MERGE_COUNT=$tmp/merges FAKE_PARK_FROM=2 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start265.txt" 2>&1; export CODE=$?
+    check 'start (row 265 + MsgNotFound rebuild): your tunic files again after the rebuild, before the last merge, then the game' bash -c \
+        '[ $CODE -eq 0 ] && grep -q "kept aside just now" "$2" && [ "$(grep -c "^self_tunic " "$1")" = 2 ] &&
+         t=$(grep -n "^self_tunic " "$1" | tail -n1 | cut -d: -f1) && m3=$(grep -n "^merge_tables 3$" "$1" | cut -d: -f1) &&
+         m4=$(grep -n "^merge_tables 4$" "$1" | cut -d: -f1) && g=$(grep -n "^started " "$1" | head -n1 | cut -d: -f1) &&
+         [ -n "$m3" ] && [ -n "$m4" ] && [ -n "$g" ] && [ "$m3" -lt "$t" ] && [ "$t" -lt "$m4" ] && [ "$m4" -lt "$g" ]' _ "$log" "$tmp/start265.txt"
+    rm -rf "$D/game/mods/contents/0400486024DEC000/coop-puppet/_coop-menus"
     rm -f "$D/tools/puppet_pack/self_tunic.py" "$D/tools/puppet_pack/merge_tables.py"
     chmod -w "$D"
     if [[ ! -w $D ]]; then

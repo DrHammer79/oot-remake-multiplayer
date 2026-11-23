@@ -160,12 +160,15 @@ fi
 pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
 py=$DATA/builder/image/usr/python/bin/python3
 [[ -x $py ]] || py=$(command -v python3 || true)
-if [[ -f $pack/coop_puppet.json && -n $py && -f $DATA/tools/puppet_pack/self_tunic.py ]]; then
-    own=$("$py" -I -B "$DATA/tools/puppet_pack/self_tunic.py" --pack "$pack" --options "$DATA/coop-options.ini" \
-        --coop-ini "$GAME/coop.ini" 2>/dev/null) || own=''
-    [[ $own == green ]] && say "Your Link: the green tunic files; your coop-options.ini color is painted on in the game."
-    [[ -n $own && $own != green ]] && say "Your Link: the $own tunic (coop-options.ini color)."
-fi
+self_tunic_step() {
+    if [[ -f $pack/coop_puppet.json && -n $py && -f $DATA/tools/puppet_pack/self_tunic.py ]]; then
+        own=$("$py" -I -B "$DATA/tools/puppet_pack/self_tunic.py" --pack "$pack" --options "$DATA/coop-options.ini" \
+            --coop-ini "$GAME/coop.ini" 2>/dev/null) || own=''
+        [[ $own == green ]] && say "Your Link: the green tunic files; your coop-options.ini color is painted on in the game."
+        [[ -n $own && $own != green ]] && say "Your Link: the $own tunic (coop-options.ini color)."
+    fi
+}
+self_tunic_step
 # #48: one size table for the game (a seed from OOTRR's website has its own, without the puppet pack's entries):
 # tools/puppet_pack/merge_tables.py, as the Windows kit's Invoke-KitSizeTableMerge. Never stops the start.
 start_merge() {
@@ -189,6 +192,7 @@ print(1 if charsel_native_parked(sys.argv[2]) else 0)' "$DATA/tools" "$pack" 2>/
     [[ $now == "$(cat "$DATA/charsel-parked.txt")" ]] && break
     say "Co-op's Characters tab: its menu files were $( ((now)) && echo 'kept aside' || echo 'put back') just now, so the game is brought up to date with them."
     bash "$KIT/scripts/build.sh" "${build_args[@]}"
+    self_tunic_step   # (a pack made again in that build: your tunic tile first, merge_self_models needs it: row 265)
     start_merge
 done
 # "Playing Squadala!" on Discord: the Squadala! application and this kit's release in longshot_options.ini
