@@ -2790,29 +2790,15 @@ BOOL CALLBACK FindGameWindow(HWND h, LPARAM out) {
 #endif
 
 // Player report 261: System's Longshot Settings button opens Longshot's own menu (the F1 / Insert menu, its every row, tab
-// and help), as the player's F1 does: the key handed to the game's window as a press (host/display.c WM_KEYDOWN notes it
-// for the menu, gpu/vk/vk_menu.cpp take_key_press), the window being in front (the menu opens only for the window in
-// front, and the A came from it). True: handed. Linux' window is SDL's, whose keys no message reaches: there the button
-// is not offered (CanOpenLongshotMenu), never our copy of the rows.
-constexpr bool CanOpenLongshotMenu() {
-#ifdef _WIN32
-    return true;
-#else
-    return false;
-#endif
-}
+// and help). The module asks Hookshot's menu for it through the export it already asks each tick (hos_coop_menu_wanted:
+// HOS_COOP_MENU_WANT_LONGSHOT, patch 0037), which opens it as Insert does but without a key press: the menu reads its
+// keys only while the game's window is in front, so the F1 this used to post to the window did nothing with the window
+// behind (a pad in hand, a second screen) and had no way at all on Linux (SDL's window gets no messages). Now one
+// call for both systems and any window.
+constexpr bool CanOpenLongshotMenu() { return true; }
 bool OpenLongshotMenu() {
-#ifdef _WIN32
-    HWND window = nullptr;
-    EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&window));
-    if (window == nullptr) return false;
-    constexpr WPARAM kF1 = 0x70;   // VK_F1: always opens the menu (Insert can be taken off it: Controls, Menu shortcut)
-    const LPARAM scan = static_cast<LPARAM>(MapVirtualKeyA(static_cast<UINT>(kF1), MAPVK_VK_TO_VSC)) << 16;
-    return PostMessageA(window, WM_KEYDOWN, kF1, scan | 1) != 0 &&
-           PostMessageA(window, WM_KEYUP, kF1, scan | 1 | (LPARAM{1} << 30) | (LPARAM{1} << 31)) != 0;
-#else
-    return false;
-#endif
+    CoopPause::WantLongshotMenu();
+    return true;
 }
 
 // (a test run's, LICHII_COOP_TEST_STATE=1 only: the left button as the file mouse.now in the game's folder says it,
@@ -3849,8 +3835,8 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             if (g_page.TakeOpenLongshotMenu()) {
                 const bool opened = OpenLongshotMenu();
                 LOG_INFO(Core, "coop: pause tab: Longshot Settings: {}",
-                         opened ? "Longshot's own menu opened (F1 handed to the game's window)"
-                                : "Longshot's own menu could not be opened (no game window)");
+                         opened ? "Longshot's own menu asked for (hos_coop_menu_wanted, whichever window is in front)"
+                                : "Longshot's own menu could not be asked for");
             }
             if (g_page.TakeRefusedA()) {
                 LOG_INFO(Core, "coop: pause tab: an A on System's button of ours while the page cannot show (usable {}, "
