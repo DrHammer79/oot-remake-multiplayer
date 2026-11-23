@@ -81,6 +81,19 @@ CoopDraw::Look GameLook() {
 
 }  // namespace
 
+TEST_CASE("hookshot map page: the quick-switch item menu is UIShortCutScreen opening or open (row 164 follow-up)") {
+    using CoopMapPage::ShortCutShows;
+    CHECK(CoopMapPage::kShortCutVtable == 0x84c0d430ull - 0x80020000ull);  // docs/game-ui.md, main at 0x80020000
+    CHECK(ShortCutShows(CoopMapPage::kShortCutVtable, 1));   // opening
+    CHECK(ShortCutShows(CoopMapPage::kShortCutVtable, 2));   // open
+    CHECK_FALSE(ShortCutShows(CoopMapPage::kShortCutVtable, 0));  // closed
+    CHECK_FALSE(ShortCutShows(CoopMapPage::kShortCutVtable, 3));  // closing: the world runs again
+    CHECK_FALSE(ShortCutShows(0x4be4a18, 2));  // UIChallengeMenuScreen (Threads of Time), the other N_SlideList_00
+    CHECK_FALSE(ShortCutShows(0x4be8300, 2));  // the HUD (UIMapMenuScreen): runs every frame in play
+    CoopMapPage::Menu older;  // an exe whose patch 0018 does not say the running screens: not known
+    CHECK_FALSE(older.screens_known);
+}
+
 TEST_CASE("hookshot draw: IM_COL32 layout") {
     CHECK(CoopDraw::Rgba(0x11, 0x22, 0x33, 0x44) == 0x44332211u);
 }

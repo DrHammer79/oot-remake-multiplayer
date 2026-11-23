@@ -1882,7 +1882,9 @@ public:
         if (!reading) CoopTime::Loading(report.server_now_us);  // issue 159: a reload, a death
         CoopTime::Frame(system, view.game ? base_ : 0, report.connected ? session_.get() : nullptr,
                         report.server_now_us,
-                        reading && reading->event_running.value_or(false));  // issue 192: no nudge in a cutscene
+                        reading && reading->event_running.value_or(false),  // issue 192: no nudge in a cutscene
+                        // Row 164 follow-up: our game paused (a menu in front, no event), for the host's catch-up.
+                        reading && reading->in_menu.value_or(false) && !reading->event_running.value_or(false));
         // Boss rooms together (docs/dungeons-boss.md). Issue 148: the room's
         // "shut in" flag says when we are past its door.
         std::optional<bool> boss_shut_in;
@@ -2355,8 +2357,44 @@ private:
 #ifdef COOP_HOOKSHOT
             if (const auto menu = CoopMapPage::MenuState()) {
                 reading->in_menu = menu->menu_open;
+                // Row 164 follow-up (PR #316, pr-navi-01112): the quick-switch item menu (UIShortCutScreen) stops the
+                // world as the pause menu does but has no focused button, so menu_open never names it: read from
+                // the running screens (CoopMapPage::QuickSwitchOpen). A menu in front: in_menu, and paused out of
+                // our events (status_bits).
+                const bool quick = !menu->menu_open && CoopMapPage::QuickSwitchOpen(*menu).value_or(false);
+                if (quick) {
+                    reading->in_menu = true;
+                }
+                if (quick != quick_switch_) {
+                    LOG_INFO(Core, "coop: status: the quick-switch item menu {}",
+                             quick ? "is open: in a menu, paused for the others" : "closed");
+                    quick_switch_ = quick;
+                }
             }
 #endif
+            // PR #316's WorldStill (coop/host/sampler.hpp): our world read as standing still from our Link's held
+            // animation frame. Opt-in only, LICHII_COOP_STILL=1 (pr-navi-01112): many moves hold a frame while the
+            // world runs (aiming, a ledge, a ladder, frozen in ice, held by a Like-Like, a shock), and as `paused`
+            // each would hand a boss away after fight_owner_paused_us. The quick-switch menu is read above.
+            static const bool still_on = coop::host::world_still_on(std::getenv("LICHII_COOP_STILL"));
+            if (still_on) {
+                const bool was = world_still_.still();
+                // pr-navi-01112: our Link lifted by another player's (native puppets phase 3) is not judged: its
+                // reading plays the carried pose ('Eaten' at frame 0, CarriedPose above), which stands still
+                // whenever its carrier does, while our world runs.
+                const bool carried = CoopLiftPlayerGame::Carried();
+                reading->world_still = world_still_.step(
+                    carried || !reading->animation ? nullptr : &*reading->animation, reading->position,
+                    reading->event_running.value_or(false), CoopEvery::NowUs());
+                if (reading->world_still != was && !reading->in_menu.value_or(false)) {
+                    LOG_INFO(Core, "coop: status: our world {} (Link's '{}' at frame {:.1f}): {}",
+                             reading->world_still ? "stands still with no menu named" : "runs again",
+                             reading->animation ? reading->animation->name : std::string(),
+                             reading->animation ? reading->animation->frame : 0.0f,
+                             reading->world_still ? "paused for the others (the quick-switch menu or a stall)"
+                                                  : "playing");
+                }
+            }
         }
         return reading;
     }
@@ -2719,6 +2757,8 @@ private:
     bool queue_sizes_logged_ = false;  // the game's flag queue sizes, logged once
     // Kept across frames: a drawn sword shows in the game's memory for a moment only.
     coop::host::PlayerReader::DrawnState drawn_state_{};
+    coop::host::WorldStill world_still_;  // row 164 follow-up: our world standing still with no menu named
+    bool quick_switch_ = false;           // the quick-switch item menu was open at the last reading (its log line)
     bool sharing_ = false;  // a flag list is shared; set by Begin
     CoopBoss::StaleBossFlags stale_boss_;  // issue 148: shut boss doors from older builds
     bool boss_alive_due_ = false;          // row 159: BOSS_ALIVE to send after our own save load (host)
