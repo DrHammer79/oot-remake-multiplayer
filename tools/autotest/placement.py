@@ -193,6 +193,154 @@ def place_window(hwnd, rect, topmost=False):
         raise PlacementError("SetWindowPos failed for window 0x%x" % hwnd)
 
 
+# ---- A copy of a game window's client area (live.py shot --window) ----
+# Longshot's control-bridge shot is the game's own picture only: Longshot's Insert menu, and with it every co-op page
+# (Multiplayer, Customize, Mods: tabs of that menu, hookshot patch 0012), is drawn over the window after that copy is
+# taken. A copy of the window is what the player sees.
+
+def png_bytes(w, h, rgb):
+    """A PNG (8-bit RGB) of w x h pixels from rgb: w*h*3 bytes, rows top to bottom."""
+    import struct
+    import zlib
+    if w <= 0 or h <= 0 or len(rgb) != w * h * 3:
+        raise ValueError("png_bytes: %d bytes for %dx%d" % (len(rgb), w, h))
+    stride = w * 3
+    raw = b"".join(b"\x00" + bytes(rgb[y * stride:(y + 1) * stride]) for y in range(h))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def bgra_to_rgb(bgra):
+    """GDI's 32-bit BGRA pixels as RGB bytes."""
+    out = bytearray(len(bgra) // 4 * 3)
+    out[0::3], out[1::3], out[2::3] = bgra[2::4], bgra[1::4], bgra[0::4]
+    return bytes(out)
+
+
+def is_dark(rgb, w, h):
+    """True when every one of 8x8 sample points is near black (PrintWindow's answer for a window it cannot copy;
+    run.ps1's Dark does the same test)."""
+    for y in range(h // 8, h, max(1, h // 8)):
+        for x in range(w // 8, w, max(1, w // 8)):
+            i = (y * w + x) * 3
+            if rgb[i] + rgb[i + 1] + rgb[i + 2] > 30:
+                return False
+    return True
+
+
+def sample_points(rect, n=4):
+    """n x n points spread inside rect (l, t, r, b), screen pixels: where a screen copy is checked."""
+    l, t, r, b = rect
+    return [(l + (r - l) * (2 * i + 1) // (2 * n), t + (b - t) * (2 * j + 1) // (2 * n))
+            for j in range(n) for i in range(n)]
+
+
+def screen_copy_problem(rect, monitor_rects, owner_at):
+    """Why a screen copy of rect would not be the window ('' when it would be): a part off every monitor, or another
+    window over it at a sample point. owner_at(x, y): the top-level window at that point (compared by the caller)."""
+    l, t, r, b = rect
+    if r <= l or b <= t:
+        return "the window has no client area (minimized?)"
+    if not any(ml <= l and mt <= t and r <= mr and b <= mb for ml, mt, mr, mb in monitor_rects):
+        return "the window is not wholly on one monitor"
+    for x, y in sample_points(rect):
+        if not owner_at(x, y):
+            return "another window covers it at %d,%d" % (x, y)
+    return ""
+
+
+def window_shot(hwnd, path):
+    """Copies the client area of window hwnd into path (PNG). PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT) first;
+    when that gives black (some Vulkan windows) a copy of the screen there, but only when the window is wholly on a
+    monitor and nothing covers it. Returns 'print' or 'screen'; raises PlacementError when no true copy can be made
+    (nothing is written then)."""
+    import ctypes
+    from ctypes import wintypes
+    u = _user32()
+    g = ctypes.WinDLL("gdi32", use_last_error=True)
+    try:
+        u.SetProcessDPIAware()
+    except OSError:
+        pass
+    u.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    u.GetDC.argtypes = [wintypes.HWND]
+    u.GetDC.restype = wintypes.HDC
+    u.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    u.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+    u.WindowFromPoint.argtypes = [wintypes.POINT]
+    u.WindowFromPoint.restype = wintypes.HWND
+    u.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    u.GetAncestor.restype = wintypes.HWND
+    g.CreateCompatibleDC.argtypes = [wintypes.HDC]
+    g.CreateCompatibleDC.restype = wintypes.HDC
+    g.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+    g.CreateCompatibleBitmap.restype = wintypes.HBITMAP
+    g.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+    g.SelectObject.restype = wintypes.HGDIOBJ
+    g.BitBlt.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HDC,
+                         ctypes.c_int, ctypes.c_int, wintypes.DWORD]
+    g.GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT, ctypes.c_void_p,
+                            ctypes.c_void_p, wintypes.UINT]
+    g.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    g.DeleteDC.argtypes = [wintypes.HDC]
+
+    if not hwnd or u.IsIconic(hwnd):
+        raise PlacementError("no window to copy (none found, or minimized)")
+    r = wintypes.RECT()
+    u.GetClientRect(hwnd, ctypes.byref(r))
+    o = wintypes.POINT(0, 0)
+    u.ClientToScreen(hwnd, ctypes.byref(o))
+    w, h = r.right - r.left, r.bottom - r.top
+    if w <= 0 or h <= 0:
+        raise PlacementError("the window has no client area")
+
+    class BIH(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                    ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", ctypes.c_long),
+                    ("biYPelsPerMeter", ctypes.c_long), ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD)]
+
+    screen = u.GetDC(None)
+    mem = g.CreateCompatibleDC(screen)
+    bmp = g.CreateCompatibleBitmap(screen, w, h)
+    old = g.SelectObject(mem, bmp)
+
+    def read():
+        bih = BIH()
+        bih.biSize, bih.biWidth, bih.biHeight, bih.biPlanes, bih.biBitCount = ctypes.sizeof(BIH), w, -h, 1, 32
+        buf = ctypes.create_string_buffer(w * h * 4)
+        if g.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bih), 0) != h:
+            raise PlacementError("GetDIBits failed")
+        return bgra_to_rgb(buf.raw)
+
+    try:
+        how = "print"
+        rgb = read() if u.PrintWindow(hwnd, mem, 3) else None   # PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        if rgb is None or is_dark(rgb, w, h):
+            rect = (o.x, o.y, o.x + w, o.y + h)
+            why = screen_copy_problem(rect, [m["bounds"] for m in monitors()],
+                                      lambda x, y: u.GetAncestor(u.WindowFromPoint(wintypes.POINT(x, y)), 2) == hwnd)
+            if why:   # (GA_ROOT = 2) a screen copy would be other pixels: no picture rather than a wrong one
+                raise PlacementError("window copy not usable: PrintWindow gave black and %s" % why)
+            if not g.BitBlt(mem, 0, 0, w, h, screen, o.x, o.y, 0x00CC0020):   # SRCCOPY
+                raise PlacementError("screen copy failed")
+            rgb, how = read(), "screen"
+    finally:
+        g.SelectObject(mem, old)
+        g.DeleteObject(bmp)
+        g.DeleteDC(mem)
+        u.ReleaseDC(None, screen)
+    part = path + ".part"
+    with open(part, "wb") as f:
+        f.write(png_bytes(w, h, rgb))
+    os.replace(part, path)
+    return how
+
+
 def check_display(arg=None):
     """The chosen monitor (dict), or a PlacementError; call it before starting games so a wrong name fails first."""
     return find_monitor(monitors(), display_name(arg))

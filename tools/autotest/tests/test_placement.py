@@ -117,5 +117,58 @@ class RealMonitors(unittest.TestCase):
         self.assertIn("DISPLAY99", err.getvalue())
 
 
+class WindowShot(unittest.TestCase):
+    """The pure parts of live.py shot --window's copy (the Win32 calls need a game window)."""
+
+    def test_png_round_trip(self):
+        import struct
+        import zlib
+        rgb = bytes(range(2 * 3 * 3))   # 2 wide, 3 high
+        png = pl.png_bytes(2, 3, rgb)
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", png[16:24]), (2, 3))
+        n = struct.unpack(">I", png[33:37])[0]
+        self.assertEqual(png[37:41], b"IDAT")
+        raw = zlib.decompress(png[41:41 + n])
+        self.assertEqual(raw, b"\x00" + rgb[0:6] + b"\x00" + rgb[6:12] + b"\x00" + rgb[12:18])
+        self.assertTrue(png.endswith(b"IEND\xaeB`\x82"))
+
+    def test_png_refuses_a_wrong_size(self):
+        with self.assertRaises(ValueError):
+            pl.png_bytes(2, 2, b"\x00" * 11)
+
+    def test_bgra_to_rgb(self):
+        self.assertEqual(pl.bgra_to_rgb(bytes([1, 2, 3, 255, 4, 5, 6, 0])), bytes([3, 2, 1, 6, 5, 4]))
+
+    def test_dark(self):
+        w, h = 16, 16
+        black = bytearray(w * h * 3)
+        self.assertTrue(pl.is_dark(black, w, h))
+        black[((h // 8) * w + w // 8) * 3] = 200   # one sample point lit
+        self.assertFalse(pl.is_dark(black, w, h))
+
+    def test_sample_points_inside(self):
+        pts = pl.sample_points((100, 50, 200, 150))
+        self.assertEqual(len(pts), 16)
+        self.assertTrue(all(100 <= x < 200 and 50 <= y < 150 for x, y in pts))
+
+    def test_screen_copy_ok_on_one_monitor_uncovered(self):
+        mons = [(0, 0, 1920, 1080), (1920, 0, 3840, 1080)]
+        self.assertEqual(pl.screen_copy_problem((1920, 0, 2880, 600), mons, lambda x, y: True), "")
+
+    def test_screen_copy_refused_off_screen(self):
+        mons = [(0, 0, 1920, 1080)]
+        self.assertIn("not wholly on one monitor", pl.screen_copy_problem((1500, 0, 2460, 600), mons, lambda x, y: True))
+        self.assertIn("not wholly on one monitor", pl.screen_copy_problem((-5000, 0, -4040, 600), mons, lambda x, y: True))
+
+    def test_screen_copy_refused_when_covered(self):
+        mons = [(0, 0, 1920, 1080)]
+        why = pl.screen_copy_problem((0, 0, 960, 600), mons, lambda x, y: x < 480)   # the right half under another
+        self.assertIn("another window covers it", why)
+
+    def test_screen_copy_refused_without_area(self):
+        self.assertIn("no client area", pl.screen_copy_problem((10, 10, 10, 10), [(0, 0, 99, 99)], lambda x, y: True))
+
+
 if __name__ == "__main__":
     unittest.main()

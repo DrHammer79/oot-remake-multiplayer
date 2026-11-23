@@ -376,12 +376,33 @@ def take_shot(s, x, path):
         b.close()
 
 
+def take_window_shot(pid, path, find=None, copy=None):
+    """A copy of game pid's window (what the player sees, Longshot's Insert menu and the co-op pages included) at
+    path: {"window": path, "how": "print"|"screen"}, or {"window_error": why} with nothing written."""
+    find = find or hookshot.placement.game_window
+    copy = copy or hookshot.placement.window_shot
+    if not pid:
+        return {"window_error": "no game process id in pids.json"}
+    try:
+        return {"window": path, "how": copy(find(pid), path)}
+    except (hookshot.placement.PlacementError, OSError, AttributeError) as e:
+        return {"window_error": str(e)}
+
+
 def shot(a):
     d = os.path.abspath(a.session)
     s = open_session(d)
     os.makedirs(os.path.join(d, "shots"), exist_ok=True)
-    return {x: take_shot(s, x, os.path.join(d, "shots", "%s-%d.png" % (x, int(time.time() * 1000))))
-            for x in ([a.player] if a.player else TAGS)}
+    pids = game_pids(d)[0] if getattr(a, "window", False) else {}
+    out = {}
+    for x in ([a.player] if a.player else TAGS):
+        base = os.path.join(d, "shots", "%s-%d" % (x, int(time.time() * 1000)))
+        got = take_shot(s, x, base + ".png")   # (first: a held game runs until it presents, so the window is new too)
+        if getattr(a, "window", False):
+            out[x] = {"shot": got, **take_window_shot(pids.get(x), base + "-window.png")}
+        else:
+            out[x] = got
+    return out
 
 
 def checkpoint(a):
@@ -594,6 +615,10 @@ def main(argv=None):
             q.add_argument("script", help="test script lines, ';' between them")
         elif name in ("state", "shot"):
             q.add_argument("player", nargs="?", choices=TAGS)
+            if name == "shot":
+                q.add_argument("--window", action="store_true",
+                               help="also a copy of the game window (Windows): the bridge shot leaves out Longshot's "
+                                    "Insert menu and every co-op page (Multiplayer, Customize, Mods)")
         elif name == "checkpoint":
             q.add_argument("tag")
     a = p.parse_args(argv)

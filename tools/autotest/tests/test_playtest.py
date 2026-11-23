@@ -369,5 +369,30 @@ class LiveCheckpoint(unittest.TestCase):
             self.assertEqual(cp["A"]["flags"], {"F": 1})
 
 
+class LiveWindowShot(unittest.TestCase):
+    """live.py shot --window: the window copy beside the bridge shot, or why there is none (never a wrong picture)."""
+
+    def test_copy(self):
+        seen = []
+        got = live.take_window_shot(42, "p.png", find=lambda pid: seen.append(pid) or 7,
+                                    copy=lambda h, path: seen.append((h, path)) or "print")
+        self.assertEqual(got, {"window": "p.png", "how": "print"})
+        self.assertEqual(seen, [42, (7, "p.png")])
+
+    def test_refused_copy_is_an_error_not_a_path(self):
+        def refuse(h, path):
+            raise live.hookshot.placement.PlacementError("window copy not usable: another window covers it at 1,1")
+        got = live.take_window_shot(42, "p.png", find=lambda pid: 7, copy=refuse)
+        self.assertEqual(got, {"window_error": "window copy not usable: another window covers it at 1,1"})
+
+    def test_no_pid(self):
+        self.assertIn("window_error", live.take_window_shot(None, "p.png", find=lambda p: 1, copy=lambda h, p: "x"))
+
+    def test_mcp_shot_offers_window(self):
+        tool = [t for t in mcp_playtest.TOOLS if t["name"] == "shot"][0]
+        self.assertIn("window", tool["inputSchema"]["properties"])
+        self.assertIn("Insert menu", tool["description"])
+
+
 if __name__ == "__main__":
     unittest.main()

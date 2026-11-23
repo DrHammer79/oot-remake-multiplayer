@@ -42,8 +42,11 @@ TOOLS = [
                      "properties": {"player": {"type": "string", "enum": ["A", "B"]},
                                     "script": {"type": "string"}}}},
     {"name": "shot", "description": "Screenshot one game or both: the PNG paths (open them to see the screen). "
-     "Use sparingly; state is cheaper.",
-     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
+     "Use sparingly; state is cheaper. The shot is the game's own picture: it leaves out Longshot's Insert menu and "
+     "every co-op page (Multiplayer, Customize, Mods). With window true each game also gets a copy of its window "
+     "(what the player sees, those pages included), or window_error saying why none could be made.",
+     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]},
+                                                      "window": {"type": "boolean"}}}},
     {"name": "checkpoint", "description": "Write both games' shared dungeon and story flags and a screenshot of "
      "each game under a tag (letters, digits, - and _). Take one after every action that should sync, then run "
      "desync_check; open the shots for anything visible (flags alone are no proof of what a player sees).",
@@ -550,7 +553,7 @@ def call(session, name, args):
     if name == "act":
         return live.do(Args(session=session, player=args["player"], script=args["script"]))
     if name == "shot":
-        return live.shot(Args(session=session, player=args.get("player")))
+        return live.shot(Args(session=session, player=args.get("player"), window=bool(args.get("window"))))
     if name == "checkpoint":
         return live.checkpoint(Args(session=session, tag=args["tag"]))
     if name == "desync_check":
