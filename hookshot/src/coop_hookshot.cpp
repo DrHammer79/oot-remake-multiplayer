@@ -2323,18 +2323,15 @@ void DressCharacters(void* ctx) {
     targets.reserve(views.size() + 1);
     for (const auto& v : views) {
         // (a puppet is made again as another actor on its player's age or character switch: CoopPuppet_Adult_C007)
-        targets.push_back(CoopCharColours::PuppetTarget(v.actor, v.cell, v.custom, v.mods_routine, v.actor_name,
-                                                        {v.eyes, v.hair, v.character}));
+        targets.push_back(CoopCharColours::PuppetTarget(v.actor, v.cell, v.mods_routine, v.actor_name,
+                                                        {v.custom, v.eyes, v.hair}));
     }
     // (0.11.9: your own Link's eye colour, the look shown: the one chosen in Customize at once, a preview, else worn;
     // its cell of guest memory made once with the game's malloc, as a puppet's block)
     // (and, while the menu is up, the pause menu's model actor that is your Link: Character Select's Customize picture
     // is a model of the menu's own, so the eyes chosen showed on your Link in the field but not in the picture,
-    // lane-0119 13:03. Your Link there: an actor of the field player's own actor name; never the picker's other
-    // characters (review). Each its own cell: 0 your Link's, 1..4 the menu's slots)
-    // (2026-11-22, player report: on a Character Select character too, your own model and the menu's: ColoursOn. The
-    // model key is the actor name and the character shown, so an age or character switch looks the materials up anew
-    // at once)
+    // lane-0119 13:03. Your Link there: an actor of the field player's own actor name, while you are Link; never the
+    // picker's other characters (review). Each its own cell: 0 your Link's, 1..4 the menu's slots)
     static std::array<std::uint64_t, 5> cells{};
     static std::array<bool, 5> cells_asked{};
     const auto cell = [&](std::size_t i) {
@@ -2353,15 +2350,21 @@ void DressCharacters(void* ctx) {
         return cells[i];
     };
     const CoopLook::Look shown = CoopLook::Shown();
+    // (npc-customize: Link's eyes and hair on your Link, the character parts on a character: CoopCharColours::ForModel.
+    // A character is always a target, so its model is looked up for its Customize page's rows and its equipment kept
+    // hidden; Link only with a colour to put on, as before.)
     const std::uint16_t character = CoopCharColours::ShownCharacter();
-    const auto own = CoopCharColours::ColoursOn(character != 0, shown[CoopLook::Part::eyes], shown[CoopLook::Part::hair]);
-    std::uint64_t player = 0;   // (looked for only with a colour to put on)
-    if (own.eyes || own.hair) {
-        BridgeGuest guest;
-        player = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
+    const auto own = CoopCharColours::ForModel(character == 0, [&shown](std::uint8_t number) {
+        const auto part = CoopLook::PartOf(number);
+        return part ? shown[*part] : std::nullopt;
+    });
+    if (own.eyes || own.hair || character != 0) {
+        // (the model key: the actor name and the character shown, ModelKey, so another pick or age is looked up anew;
+        // `picture`: dressed only on the Customize screen, its rows are the page's)
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
             if (actor == 0 || cell(i) == 0) return;
-            targets.push_back(CoopCharColours::OwnTarget(actor, cells[i], model, own));
+            targets.push_back(CoopCharColours::OwnTarget(actor, cells[i], model, own, character, i == 0,
+                                                         i != 0 && character != 0));
         };
         const auto name_of = [](std::uint64_t actor) {
             std::uint64_t at = 0;
@@ -2370,6 +2373,8 @@ void DressCharacters(void* ctx) {
             if (!CoopRuntime::Read(at, text, sizeof text - 1)) return std::string();
             return std::string(text);
         };
+        BridgeGuest guest;
+        const std::uint64_t player = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
         const std::string link = player != 0 ? name_of(player) : std::string();
         dress(player, 0, CoopCharColours::ModelKey(link, character));
         if (CoopPauseTab::GameMenuUp() && player != 0) {
@@ -2380,9 +2385,11 @@ void DressCharacters(void* ctx) {
                 if (menu[s].actor == 0) continue;
                 const std::string name = name_of(menu[s].actor);
                 seen += fmt::format("{}{}: {}", seen.empty() ? "" : ", ", s, name.empty() ? "?" : name);
-                if (CoopCharColours::MenuModelOfPlayer(name, link)) {
+                // (a character's picture only on Character Select's Customize screen, where the model shown is your
+                // pick: the picker's own may show another character under the same name)
+                if (CoopCharColours::MenuModelOfPlayer(name, link) &&
+                    (character == 0 || CoopPauseTab::CharacterCustomizeOpen()))
                     dress(menu[s].actor, 1 + s, CoopCharColours::ModelKey(name, character) ^ menu[s].id);
-                }
             }
             if (seen != said) {   // (what the menu holds, once a change: which of them is your Link)
                 said = seen;
@@ -2391,24 +2398,8 @@ void DressCharacters(void* ctx) {
         }
     }
     if (targets.empty()) return;
-    auto& wardrobe = CoopCharColours::TheWardrobe();
-    wardrobe.Frame(g, targets, SteadyMs(), [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });
-    // (whether your model has the iris the eye colour goes on: Customize's Eye Colour row for a character, said once a
-    // change)
-    if (player != 0 && (own.eyes || own.hair)) {
-        const auto iris = wardrobe.IrisOf(player);
-        static std::optional<std::pair<std::uint16_t, bool>> said_iris;
-        if (iris) {
-            CoopCharColours::SetOwnIris(character, iris);
-            if (!said_iris || *said_iris != std::pair{character, *iris}) {
-                said_iris = std::pair{character, *iris};
-                LOG_INFO(Core, "coop: look: your {} model {}",
-                         character != 0 ? fmt::format("character {}", character) : std::string("Link"),
-                         *iris ? "has the iris Mt_Eye_Inner: the Eye Colour shows on it"
-                               : "has no iris Mt_Eye_Inner: the Eye Colour does not show (Customize leaves its row out)");
-            }
-        }
-    }
+    CoopCharColours::TheWardrobe().Frame(g, targets, SteadyMs(),
+                                         [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });
 }
 
 // Local co-op (coop_local_game.h): the exe's pads (patch 0016, hos_coop_pads.h) and the Player's wraps 16, 17 and 19.

@@ -420,6 +420,7 @@ std::array<LiveSlot, kSnailSlots> g_snail_live{};
 CoopSnailCustom::Texts g_snail_shown;
 std::string g_snail_failed_said;   // (the panes last named as not set: said once per list)
 bool g_snail_wait = false;   // his screen open, his panes not found in its layout: co-op waits (keys kept from his rows)
+std::atomic<bool> g_snail_driven{false};   // (CharacterCustomizeOpen: any thread)
 std::size_t CountOf(const std::string& text, const char* what) {
     std::size_t n = 0;
     for (std::size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
@@ -431,6 +432,7 @@ void SnailClose(const char* why) {
     g_snail_open = false, g_snail_wait = false;
     const bool driven = g_snail.Active();
     g_snail.Close();
+    g_snail_driven = false;
     // (Link wears the look chosen, as when co-op's Customize closes; also one chosen before co-op let go of it)
     if (driven || std::exchange(g_snail_changed, false)) CoopLook::ApplyOnUnpause();
     g_snail_changed = false;
@@ -475,12 +477,6 @@ SnailWritten SnailWrite(void* ctx, const CoopSnailCustom::Texts& t, std::string&
         }
     }
     return failed.empty() ? SnailWritten::kAll : SnailWritten::kSome;
-}
-
-// A character's Eye Colour on his Customize screen: offered unless your model is known to have no iris
-// (CoopCharColours::OwnIris, found when the colour was put on).
-bool SnailEyes() {
-    return CoopCharColours::OwnIris(CoopCharColours::ShownCharacter()).value_or(true);
 }
 
 // One update of any game screen (OnScreen, before the kinds of ours): his Customize screen's.
@@ -538,7 +534,7 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         // check keyed on a changed address never ran. Not there: co-op waits, his keys kept from his rows meanwhile,
         // and looks again at each update)
         g_snail_wait = !his_panes();
-        if (!g_snail_wait) g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter(), SnailEyes());
+        if (!g_snail_wait) g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen opened (screen {:#x}, layout {:#x}): {}",
                  screen, layout, g_snail_wait ? "his panes are not in its layout yet: co-op waits for them (his keys "
                                                 "kept from his rows)" : "co-op's customization in it");
@@ -547,11 +543,17 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         g_snail_shown = {};
         g_snail_failed_said.clear();
         for (auto& l : g_snail_live) l.shown.clear();
-        g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter(), SnailEyes());
+        g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: his panes are there now: co-op's "
                        "customization in it");
     }
+    g_snail_driven = !g_snail_wait && g_snail.Active();
     if (g_snail_wait || !g_snail.Active()) return;
+    // npc-customize: the rows your character's model has (its look-up by the wardrobe; none known yet: every row)
+    {
+        const std::uint16_t character = CoopCharColours::ShownCharacter();
+        g_snail.SetRows(CoopCharColours::TheWardrobe().OwnRows(character));
+    }
     if (auto look = g_snail.TakeChange()) {
         CoopLook::SetPending(*look);   // (your Link wears it at once, a preview)
         g_snail_changed = true;
@@ -4587,6 +4589,8 @@ void CensusFromMenuState() noexcept {
     } catch (...) {
     }
 }
+
+bool CharacterCustomizeOpen() noexcept { return g_snail_driven.load(); }
 
 bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());

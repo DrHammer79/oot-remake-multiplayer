@@ -1113,6 +1113,8 @@ inline constexpr std::uint64_t kSystemWindowVtable = 0x4befbf8;
 // the last 100 ms, through the same census (any thread; nothing without the variable).
 void CensusFromMenuState() noexcept;
 bool GameMenuUp() noexcept;
+// npc-customize: Character Select's Customize screen is open and co-op drives it (any thread).
+bool CharacterCustomizeOpen() noexcept;
 // One of our - menu tabs (Multiplayer, Lobby, Mods) has the screen, its page shown or sliding in, as of the strip's
 // last update (tabs-overhaul-01110 (c): the - menu still counts the Map as its page then, so patch 0018 says "Map page
 // shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while

@@ -197,24 +197,29 @@ std::vector<Director::DressView> Director::DressTargets() const {
         if (s.phase != Phase::live || s.actor == 0 || s.block == 0) continue;
         const Target* t = Wanted(s.number);
         const bool character = IsCharacterActor(s.actor_name);
-        std::optional<std::uint32_t> eyes, hair;   // (0.11.9: the eyes and hair parts of their look, as received)
-        if (const auto parts = CoopLookShare::Of(s.number)) {
-            for (const auto& p : *parts) {
-                if (p.part == kEyesPart) eyes = p.colour;
-                if (p.part == kHairPart) hair = p.colour;
-            }
-        }
-        const auto on = CoopCharColours::ColoursOn(character, eyes, hair);   // (Link's model or a character's)
-        eyes = on.eyes, hair = on.hair;
+        // (their look as received: a Link puppet takes its eyes and hair parts, a character's puppet its character
+        // parts, npc-customize; CoopCharColours::ForModel is the one rule)
+        const auto parts = CoopLookShare::Of(s.number);
+        const auto colours = CoopCharColours::ForModel(
+            !character,
+            [&parts](std::uint8_t number) -> std::optional<std::uint32_t> {
+                if (parts) {
+                    for (const auto& p : *parts) {
+                        if (p.part == number) return p.colour;
+                    }
+                }
+                return std::nullopt;
+            },
+            t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u);
         out.push_back({.number = s.number,
                        .actor = s.actor,
                        .cell = s.block + block::kDress,
-                       .custom = t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u,
+                       .custom = colours.custom,
                        .character = character,
                        .mods_routine = character && character_apply_ != 0 && character_apply_state_ == 1,
                        .actor_name = s.actor_name,
-                       .eyes = eyes,
-                       .hair = hair});
+                       .eyes = colours.eyes,
+                       .hair = colours.hair});
     }
     return out;
 }
