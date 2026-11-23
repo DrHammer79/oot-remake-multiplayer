@@ -107,9 +107,9 @@ step them in turn, the same number of frames.
 
 | Command | Fields | Does / replies |
 |---|---|---|
-| `state` | | The state below. Does not advance the game |
+| `state` | | The state below. Does not advance the game, with one exception: when Longshot's Link snapshot is older than the frame and the game is held, `state` lets ONE frame run (a status pending) to take a fresh one. If none comes (a title, a pause or a load) the Link members are `null` and `snapshot_stale` is `true` |
 | `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
-| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs (10 frames at a time) until Link is in that scene with no event or load, then holds again. Replies with `"arrived": true` and the `state`; after the timeout, still held, `timeout` with the state in `message` |
+| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). **The game takes it only while an event runs** (a talk, a sign, the event a save load starts; [testing.md](testing.md)). In free play the verb answers at once `not_in_event` and changes nothing; to start a test in another scene, restart the session with a boot script that warps, or use `place` and `walk_to` inside the scene. While an event runs, the game runs (10 frames at a time) until Link is in that scene with no event or load (a fresh snapshot says so), then holds again. Replies with `"arrived": true` and the `state`; after `timeout` seconds, still held, `timeout` with the state in `message` |
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
 | `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
 | `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`: the game does it on its next frames, so `step` a few and read the `state`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. With no world list (solo, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
@@ -142,8 +142,12 @@ gated.
 
 `scene`, `pos`, `facing`, `camera`, `life`, `max_life`, `rupees`, `age`, `event`, `loading` and `prompt` are
 Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
-quarter hearts. `snapshot_present` is Longshot's present count when it was taken (Link's last update; on a title,
-pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
+quarter hearts. Longshot takes the snapshot only in a running Link update, so on a held game it is as old as the last
+frame that ran. The bridge therefore never gives an old one: if `snapshot_present` is more than 4 frames behind the
+reply's `frame` (a guess, not proven), a held game runs one frame and reads again; if the snapshot is still old (a
+title, a pause or a load: no Link update runs), every Link member except `scene` is `null` and `snapshot_stale` is
+`true` (`snapshot_present` stays so you can see how old). Treat `null` as "do not know", never as "arrived" or
+"did not move". The `input`, `warp` and `checkpoint` states follow the same rule. `snapshot_present` is Longshot's present count when it was taken. `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
 stays `null` until the room is found in memory. `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
 `"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
 tester who pressed Start reads the screen (`shot`), not this.
@@ -216,7 +220,7 @@ or tests while it runs.
 - With the play-test bridge on ([Bridge protocol](#bridge-protocol)) the games are held between calls: nothing
   happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
   must happen together in one `act`.
-- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
+- Set a test up with `place` and `setflag`; do not walk across Hyrule to reach it. `warp` works only while an event runs: in free play it answers `not_in_event`, so to start in another scene restart the session with a boot script that warps. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
   checkpoint takes its own shots: anything visible is proven by them, never by flags or log lines alone.
@@ -271,10 +275,10 @@ only, no `pip install`.
 | `walk_to x z [tolerance] [max_frames]` | Walks to the point 8 frames at a time, stopping on arrival (0.5 m by default), a scene change, a load, an event or `max_frames` (600). It says why it stopped, the frames used and the distance left |
 | `press [buttons] [stick_angle stick_strength] [frames]` | Holds the buttons (and the stick: 0 = up, away from the camera, 90 = right) for N frames (2 by default), then holds the game |
 | `step frames` | Lets N frames run with no input |
-| `warp scene [entrance]` | The game's own scene change; it returns once Link is there with no event or load |
+| `warp scene [entrance] [timeout]` | The game's own scene change, only while an event runs (in free play: `not_in_event` at once; use a boot script that warps). It returns once Link is there with no event or load; `timeout` is 1 to 600 seconds (default 60) |
 | `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
 | `give item` | Gives the item through the cheats queue: it shows after the next frame (`step 1`) |
-| `kill actor [id]`, `hit actor amount [id]` (`actor` is the **name**. With no `id` the game takes the nearest actor of that name with a life. With the `id` and `name` `get_world` gave, it takes exactly that actor, and answers `refused: actor 7 (NAME) is gone` when the walk's list has no actor with that id and that name; an id is refused in solo. The tool steps up to 12 frames, looking every 2, for the answer in `state.strike`: `ok`, `refused: ...`, or `unknown: no result after 12 frames (the strike may still land: look with get_world)`. It never retries, because a second strike could land twice) | One `act` line each, then the wait above. |
+| `kill actor [id]`, `hit actor amount [id]` (`actor` is the **name**. With no `id` the game takes the nearest actor of that name with a life. With the `id` and `name` `get_world` gave, it takes exactly that actor, and answers `refused: actor 7 (NAME) is gone` when the walk's list has no actor with that id and that name; an id is refused in solo. The tool steps up to 12 frames, looking every 2, for the answer in `state.strike`: `ok`, `refused: ...`, or `unknown: no result after 12 frames (the strike may still land: look with get_world)`. For a `kill` that struck, with an id, it then waits up to 36 more frames (a guess) for the actor to be gone, not alive or at life 0: `ok` with `died` true. If it is still alive: `struck: the hit landed, but NAME still lives after N frames` with `died` false (a far actor may not die until Link is near it, S8). With no id, or with no world list to look in, the answer is `struck: ...` with `died` null (not checked). A `hit` is `ok` when it struck. It never retries, because a second strike could land twice) | One `act` line each, then the wait above. |
 | `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
 | `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
@@ -313,7 +317,7 @@ server calls them; a script can too). They only use the bridge's commands, so th
   matters.
 - At most 120 frames pass in one call (`max_frames` lowers it). Every answer says why it stopped: `go_to_actor`:
   `near` (arrived), `gone`, `stuck` (Link got no 0.3 m nearer over 60 frames; `moved_m` is how far he went), `timed out`,
-  `scene changed`, `loading`, `event`, `stale world list: ...` or `no world list: ...`. `attack`: `dead`, `gone`,
+  `scene changed`, `loading`, `event`, `stale position: ...` (no fresh Link snapshot: the `state` Link members are null), `stale world list: ...` or `no world list: ...`. `attack`: `dead`, `gone`,
   `alive` (the frames ran out with life left; `hint` says so when its life never moved), or `stopped` with the reason
   of the walk or the fight. The scene, a load and the list are checked first, then `gone`: after a door or a load the
   list lacks the actor, and that says nothing about its death. A refusal of the bridge comes back as the reason, not as
@@ -332,14 +336,20 @@ Every reply carries the game's `frame`.
 `camera + stick angle`). It learns the real offset and whether the stick is mirrored from how Link actually moves on
 each push, and reads the camera again after every 8 frames. On a bend the right model shows itself within a few
 pushes. A walk that gets nowhere for three pushes steps aside for three. Into a wall it times out: walk_to does no
-pathfinding, so give it points with a clear line between them and use `warp` for anything far.
+pathfinding, so give it points with a clear line between them and a boot-script warp or `place` for anything far. On a null position (stale snapshot) it stops with `stale position: ...`; it never says `arrived` from an old place.
 
 ### Check in game (first lane run of the strike by id, the helpers and the held list)
 
 Nothing here has run in a game. The first run checks:
 
 - Hold the game (any `state`), wait 3 s, run `get_world`: the list is still there and `stale` is false. Then `kill`
-  with an `id` and `name` from it: `ok`. (A list that went stale in a held game, or a strike that says `gone`, fails this.)
+  with an `id` and `name` from it: `ok` (the strike landed and the actor was then seen dead, `died` true) or `struck: ...
+  still lives` (it was hit and did not die: far actors may not die until Link is near; note which). (A list that went
+  stale in a held game, or a strike that says `gone`, fails this.)
+- `get_state` on a held game right after `step`: `snapshot_present` is within 4 frames of `frame`, pos matches the world list's
+  Link, and `walk_to` to a point 5 m away stops near it (not `arrived` at 0 frames). In a title or pause the Link members are
+  null and `snapshot_stale` is true.
+- `warp` in free play answers `not_in_event` at once; with `timeout` 5 it never waits longer than about 5 s.
 - `kill` with an id of an enemy shot or a Scrub Brother in the list: `refused: ... does not share it`, not `gone`.
 - `kill` with the id of a normal enemy: only that enemy takes the hit, not another of the same name nearer to Link.
 - Walk through a door during `go_to_actor`: the answer is `scene changed`, not `gone`.
@@ -436,7 +446,7 @@ world yet.
 
 - The games are held between calls. Nothing happens unless you act. Hold **every** game: a game whose server
   you have not called yet still runs (call `get_state` on each first).
-- Set a test up with `warp`, `flag` and `give`. Do not walk across Hyrule.
+- Set a test up with `place`, `flag` and `give`; `warp` only works during an event, so start the session with a boot script that warps. Do not walk across Hyrule.
 - Take a `checkpoint` with the same tag on **every** game after each action that should sync. Let the other game
   run a few frames first (`step 30`): a flag reaches it over the network, and a held game receives nothing. Then
   run `desync_check`.
