@@ -374,7 +374,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "look", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -403,6 +403,16 @@ class PlayerServer(unittest.TestCase):
         s = self.call("p1", "get_state")
         self.assertEqual((s["enemy_near"], s["danger"]), (1, True))   # the dead one and the far one do not count
         self.assertNotIn("enemy_near_at_least", s)
+
+    def test_look_is_one_short_text_and_says_what_changed(self):
+        self.games["p1"].world = self.WORLD
+        text = self.call("p1", "look")
+        self.assertIsInstance(text, str)
+        self.assertIn("enemy: Enemy_Near #3", text)
+        self.assertIn("chest: Obj_TBox_Wood #5", text)
+        self.assertNotIn("Enemy_Far", text)           # past 25 m
+        self.assertIn("changed: first look", text)
+        self.assertTrue(self.call("p1", "look").endswith("changed: nothing"))
 
     def test_a_room_that_really_has_no_enemy_is_zero_not_null(self):
         self.games["p1"].world = {"frame": 5, "why": "empty: the walk ran and saw no actors", "count": 0, "actors": []}

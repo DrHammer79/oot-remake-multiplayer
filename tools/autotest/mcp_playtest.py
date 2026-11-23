@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_look  # noqa: E402
 import kit_tools  # noqa: E402
 import playtest_client as pc  # noqa: E402
 import playtest_helpers as ph  # noqa: E402
@@ -292,6 +293,12 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
                                                        "within_m": {"type": "number", "minimum": 0},
                                                        "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},
+    {"name": "look", "description": "ONE call for the whole situation, as short text (about 20 to 40 lines, no picture): "
+     "scene, Link (age, life, place, facing, sword and shield, ammo), doors, enemies (life, metres, world yaw and "
+     "ahead/left/right/behind), chests, switches, items, NPCs near, a running event, what A and B would do, and what "
+     "CHANGED since your last look. Yaw is the one `move` and `walk_to` use (0 = +z, 90 = +x). The text of a text box "
+     "and the C buttons are not readable through the kit yet and it says so. " + PAUSED,
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -396,6 +403,7 @@ class Game:
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
         self.match_offsets = {}   # one cursor per `log` match (the plain cursor is not moved by a match)
+        self.last_look = None   # what the last `look` saw (the next one says what changed)
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
         self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
@@ -506,6 +514,9 @@ class Game:
                 return {"frame": r["frame"], "actors": [], "why": "this module has no world list (an older build)"}
             return dict(pc.select_actors(r["world"], args.get("kind"), args.get("within_m"),
                                          args.get("limit", 50)), frame=r["frame"], world_frame=r["world"].get("frame"))
+        if name == "look":
+            text, self.last_look = kit_look.look(c.state(), self.last_look)
+            return text
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
@@ -592,7 +603,7 @@ CALLS_FILE = "calls.jsonl"
 
 
 # Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
-NO_FRAME_TOOLS = frozenset(("get_state", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
+NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
                             "log", "check_logs", "session_status"))
 BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
 IN_STEP = (" Both games run the same frames: every frame this player's game runs (walks, presses, steps, a warp, a "
@@ -735,7 +746,7 @@ def serve(session, game=None, calllog=None):
                     out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
                 if calllog:
                     calllog.write(params.get("name"), args, True, t=began)
-                reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
+                reply(id_, {"content": [{"type": "text", "text": out if isinstance(out, str) else json.dumps(out, indent=1)}]})
             except (Exception, SystemExit) as e:  # (SystemExit from a bad tag too: an error the tester reads)
                 if calllog and isinstance(params.get("name"), str):
                     calllog.write(params["name"], params.get("arguments"), False, "%s: %s" % (e.__class__.__name__, e),
