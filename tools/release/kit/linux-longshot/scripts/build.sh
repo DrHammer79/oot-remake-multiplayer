@@ -383,7 +383,8 @@ elif cmd == "copies":
                 continue
             rel = name + "/" + e if name else e
             if any(os.path.isdir(os.path.join(p, x)) for x in ("romfs", "exefs", "cheats")):
-                if (e.lower() != "coop-puppet" and os.path.isfile(os.path.join(p, "romfs", "Sequence", "CharacterMenu.module.ainb"))
+                own_copy = fold(rel) == fold(mine)   # (the kit copy: by its folder, whatever part of his romfs it has)
+                if (e.lower() != "coop-puppet" and (own_copy or os.path.isfile(os.path.join(p, "romfs", "Sequence", "CharacterMenu.module.ainb")))
                         and os.path.isdir(os.path.join(p, "exefs"))):
                     copies.append((rel, p, fold(rel) in off))
                 continue

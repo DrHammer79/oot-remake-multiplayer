@@ -2144,9 +2144,10 @@ function Set-KitOptionsCharacterSelect([string]$Kit, [string]$Value) {
 # byte the later one wins, so two releases' code are mixed, and the hand copy keeps his customizer. Both romfs load
 # too, each file from one of them. A copy is a folder whose romfs has his page's graph (Sequence\CharacterMenu.module.ainb)
 # and that has an exefs folder. The pack (contents\...\coop-puppet: our own Characters page when his is not there) is
-# never one. @{ Dir (relative, '/'); Path; Off (its Mods tab row says off: the game loads none of it and its code is
-# not built in) } for each, in the game's find order.
-function Get-KitCharacterSelectCopies([string]$ModsDir) {
+# never one. $Own: the kit's own copy (the pin's folder), a copy by its folder alone (a mod with exefs there), whatever
+# part of his romfs it has. @{ Dir (relative, '/'); Path; Off (its Mods tab row says off: the game loads none of it and
+# its code is not built in) } for each, in the game's find order.
+function Get-KitCharacterSelectCopies([string]$ModsDir, [string]$Own = '') {
     if (-not (Test-Path -LiteralPath $ModsDir -PathType Container)) { return @() }
     $root = ([System.IO.Path]::GetFullPath($ModsDir)).TrimEnd('\') + '\'
     $off = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -2170,8 +2171,9 @@ function Get-KitCharacterSelectCopies([string]$ModsDir) {
             foreach ($p in 'romfs', 'exefs', 'cheats') { if (Test-Path -LiteralPath (Join-Path $d.FullName $p) -PathType Container) { $isMod = $true } }
             if ($isMod) {
                 $rel = $d.FullName.Substring($root.Length) -replace '\\', '/'
+                $isOwn = $Own -and (ConvertTo-KitModFold $rel) -ceq (ConvertTo-KitModFold $Own)
                 if ($d.Name -ine 'coop-puppet' -and
-                    (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Sequence\CharacterMenu.module.ainb') -PathType Leaf) -and
+                    ($isOwn -or (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Sequence\CharacterMenu.module.ainb') -PathType Leaf)) -and
                     (Test-Path -LiteralPath (Join-Path $d.FullName 'exefs') -PathType Container)) {
                     $found.Add(@{ Dir = $rel; Path = $d.FullName; Off = $off.Contains((ConvertTo-KitModFold $rel)) })
                 }
@@ -2195,7 +2197,7 @@ function Resolve-KitCharacterSelectCopies([string]$Kit, [string]$ModsDir) {
     $r = @{ Changed = $false; Lines = @() }
     $op = Get-KitCharacterSelectPin $Kit
     if (-not $op) { return $r }
-    $copies = @(Get-KitCharacterSelectCopies $ModsDir)
+    $copies = @(Get-KitCharacterSelectCopies $ModsDir $op.folder)
     $mineFold = ConvertTo-KitModFold $op.folder
     $mine = @($copies | Where-Object { (ConvertTo-KitModFold $_.Dir) -ceq $mineFold })
     $others = @($copies | Where-Object { (ConvertTo-KitModFold $_.Dir) -cne $mineFold -and -not $_.Off })

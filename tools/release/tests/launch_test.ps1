@@ -1091,6 +1091,13 @@ try {
         Check (@(Get-KitCharacterSelectCopies $cm | Where-Object { -not $_.Off }).Count -eq 1) 'Character Select copies: one copy left on for the game and its build'
         $r = Resolve-KitCharacterSelectCopies $ck $cm
         Check (-not $r.Changed -and -not $r.Lines.Count) 'Character Select copies: a second start does nothing'
+        # The kit's own copy is one by its folder, whatever part of his romfs it has (a kit copy without his page's graph).
+        $csGraph = Join-Path $csDir 'romfs\Sequence\CharacterMenu.module.ainb'
+        $csHadGraph = Test-Path -LiteralPath $csGraph
+        if ($csHadGraph) { Move-Item -LiteralPath $csGraph -Destination "$csGraph.away" }
+        Check ((@(Get-KitCharacterSelectCopies $cm 'OoT Character Select' | Where-Object { $_.Dir -ceq 'OoT Character Select' }).Count -eq 1) -and
+               (@(Get-KitCharacterSelectCopies $cm | Where-Object { $_.Dir -ceq 'OoT Character Select' }).Count -eq 0)) 'Character Select copies: the kit copy is found by its folder, also without the graph file'
+        if ($csHadGraph) { Move-Item -LiteralPath "$csGraph.away" -Destination $csGraph }
         foreach ($d in (Join-Path $cm 'contents\0400486024DEC000\_OoT Character Select'), (Join-Path $cm '_My CS.2'), (Join-Path $cm '_My CS'), $csOffOne, $csPackCopy) { Remove-Item -LiteralPath $d -Recurse -Force }
         Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`noff OoT Character Select`n"
         # A new pin whose download fails (his page unreachable here): the old copy stays, nothing half put in.
