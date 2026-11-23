@@ -150,12 +150,20 @@ Without `--lane` the same watchdog runs (the end rules and the clean-up), with n
 The lane rules still hold: one game run at a time on the lane, only in a slot the coordinator gave, no local builds
 or tests while it runs.
 
+## Where the game windows go
+
+`live.py start` puts both game windows side by side on one monitor and does not take the focus. Choose the monitor
+with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_TEST_DISPLAY`; the default is
+`\\.\DISPLAY2`. A name that no monitor has stops the start with the list of monitors. Details and what to check:
+[testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
+game's own control bridge, so they work wherever the windows are.
+
 ## Rules for a tester
 
 - With the play-test bridge on ([Bridge protocol](#bridge-protocol)) the games are held between calls: nothing
   happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
   must happen together in one `act`.
-- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it.
+- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
   checkpoint takes its own shots: anything visible is proven by them, never by flags or log lines alone.

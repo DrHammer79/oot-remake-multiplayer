@@ -285,12 +285,13 @@ TEST_CASE("host menu: Join with a room name through a relay: the relay lets this
           "(issue 261)") {
     namespace relay = coop::server::relay;
     EnetLife enet;
-    relay::RelayServer relay_server(0, std::nullopt, relay::RelayConfig{});
+    relay::RelayServer relay_server(0, 0x7F000001u, relay::RelayConfig{});  // (127.0.0.1 only)
     REQUIRE(relay_server.start());
     const std::uint16_t relay_port = relay_server.port();
     relay::RelayLinkConfig lc;
     lc.relay_host = "127.0.0.1";
     lc.relay_port = relay_port;
+    lc.bind = 0x7F000001u;  // (127.0.0.1 only)
     lc.server_port = 1;  // no game server here: only the room is held
     lc.room = "forest-gang";
     std::atomic<bool> room_held{false};  // (set on the serving thread: link.room() is that thread's to read)

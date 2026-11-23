@@ -211,9 +211,15 @@ std::vector<Director::DressView> Director::DressTargets() const {
                 return std::nullopt;
             },
             t != nullptr && character ? static_cast<std::uint32_t>(t->custom & 0xFFFFFFu) : 0u);
-        out.push_back({s.number, s.actor, s.block + block::kDress, colours.custom, character,
-                       character && character_apply_ != 0 && character_apply_state_ == 1, s.actor_name, colours.eyes,
-                       colours.hair});
+        out.push_back({.number = s.number,
+                       .actor = s.actor,
+                       .cell = s.block + block::kDress,
+                       .custom = colours.custom,
+                       .character = character,
+                       .mods_routine = character && character_apply_ != 0 && character_apply_state_ == 1,
+                       .actor_name = s.actor_name,
+                       .eyes = colours.eyes,
+                       .hair = colours.hair});
     }
     return out;
 }

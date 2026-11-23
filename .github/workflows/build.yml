@@ -107,6 +107,8 @@ jobs:
         run: python tools/autotest/tests/test_playtest.py -v
       - name: Play-test bridge client and MCP tools tests (fake bridge)
         run: python tools/autotest/tests/test_playtest_bridge.py -v
+      - name: Test game window placement tests
+        run: python tools/autotest/tests/test_placement.py -v
       - name: hs.py shared game files tests
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Mods' code patches (Longshot patches 0034, 0035) tests
@@ -259,6 +261,8 @@ jobs:
         run: cscript //nologo //E:jscript tools/nucleus/test_handler.js
       - name: Kit launch-update tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/launch_test.ps1
+      - name: Kit test-mode game start (no window activation) tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/kit_test_start_test.ps1
       - name: Kit mod check tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/mods_test.ps1
       - name: Kit mod restart tests

@@ -47,6 +47,7 @@
 #include "coop_dbno_draw.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
+#include "coop_char_ages.h"
 #include "coop_flag_native.h"
 #include "coop_flags.h"
 #include "coop_game_build.h"
@@ -2062,6 +2063,12 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         if (phase == 0) {
             CoopSave::NoteGameSaveLoad(id != HOS_COOP_WRAP_SAVE_LOADED);
         }
+        if (phase == 0 && id == HOS_COOP_WRAP_SAVE_LOADED) {
+            // The save is in, the player not made yet (the area load after it makes it): a Character Select pick per
+            // age is written in place now (coop_char_ages.h). Writes the pick's live value only.
+            CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
+            CoopCharAges::AtSaveLoaded(memory);
+        }
         return 0;
     }
     if (id == HOS_COOP_WRAP_SOUND_EMIT) {
@@ -2173,6 +2180,13 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         // The game's own time change, with its exact time: the time sync's jump (coop_time_sync.h, GameSet).
         CoopTime::OnGameSet(static_cast<std::uint32_t>(x[1]), static_cast<std::uint32_t>(x[2]),
                             static_cast<std::int32_t>(x[3]));
+        return 0;
+    }
+    if (id == HOS_COOP_WRAP_FLAG_APPLY && phase == 1) {
+        // The game applied its queued flag writes (a save load's too): the pick held through a load is put back when
+        // the game wrote another over it (coop_char_ages.h LoadHold; nothing when none is held).
+        CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
+        CoopCharAges::AtFlagsApplied(memory);
         return 0;
     }
     if (id == HOS_COOP_WRAP_FLAG_APPLY && phase == 0) {
@@ -2322,10 +2336,9 @@ void DressCharacters(void* ctx) {
     std::vector<CoopCharColours::Target> targets;
     targets.reserve(views.size() + 1);
     for (const auto& v : views) {
-        CoopCharColours::Target t{v.actor, v.cell, v.custom, v.mods_routine, 0, std::hash<std::string>{}(v.actor_name)};
-        t.eyes = v.eyes;
-        t.hair = v.hair;
-        targets.push_back(t);
+        // (a puppet is made again as another actor on its player's age or character switch: CoopPuppet_Adult_C007)
+        targets.push_back(CoopCharColours::PuppetTarget(v.actor, v.cell, v.mods_routine, v.actor_name,
+                                                        {v.custom, v.eyes, v.hair}));
     }
     // (0.11.9: your own Link's eye colour, the look shown: the one chosen in Customize at once, a preview, else worn;
     // its cell of guest memory made once with the game's malloc, as a puppet's block)
@@ -2360,14 +2373,12 @@ void DressCharacters(void* ctx) {
         return part ? shown[*part] : std::nullopt;
     });
     if (own.eyes || own.hair || character != 0) {
-        const std::uint64_t kind = static_cast<std::uint64_t>(character) << 16;   // (another pick: another model)
+        // (the model key: the actor name and the character shown, ModelKey, so another pick or age is looked up anew;
+        // `picture`: dressed only on the Customize screen, its rows are the page's)
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
             if (actor == 0 || cell(i) == 0) return;
-            CoopCharColours::Target t{actor, cells[i], own.custom, false, 0, model | kind};
-            t.eyes = own.eyes, t.hair = own.hair;
-            t.own = i == 0, t.character = character;
-            t.picture = i != 0 && character != 0;   // (dressed only on the Customize screen: its rows are the page's)
-            targets.push_back(t);
+            targets.push_back(CoopCharColours::OwnTarget(actor, cells[i], model, own, character, i == 0,
+                                                         i != 0 && character != 0));
         };
         const auto name_of = [](std::uint64_t actor) {
             std::uint64_t at = 0;
@@ -2378,9 +2389,9 @@ void DressCharacters(void* ctx) {
         };
         BridgeGuest guest;
         const std::uint64_t player = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
-        dress(player, 0, 0);
+        const std::string link = player != 0 ? name_of(player) : std::string();
+        dress(player, 0, CoopCharColours::ModelKey(link, character));
         if (CoopPauseTab::GameMenuUp() && player != 0) {
-            const std::string link = name_of(player);
             static std::string said;
             std::string seen;
             const auto menu = CoopPauseTab::MenuActors();
@@ -2392,7 +2403,7 @@ void DressCharacters(void* ctx) {
                 // pick: the picker's own may show another character under the same name)
                 if (CoopCharColours::MenuModelOfPlayer(name, link) &&
                     (character == 0 || CoopPauseTab::CharacterCustomizeOpen()))
-                    dress(menu[s].actor, 1 + s, 0x6d656e7500000000ull | menu[s].id);
+                    dress(menu[s].actor, 1 + s, CoopCharColours::ModelKey(name, character) ^ menu[s].id);
             }
             if (seen != said) {   // (what the menu holds, once a change: which of them is your Link)
                 said = seen;

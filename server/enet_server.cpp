@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "bind_host.hpp"
 #include "coop/net/enet_path.hpp"
 #include "coop/net/enet_throttle.hpp"
 #include "coop/net/enet_waiting.hpp"
@@ -65,15 +66,8 @@ EnetServer::~EnetServer() {
 
 bool EnetServer::start() {
   if (host_ != nullptr) return true;
-  ENetAddress address{};
-  address.host = ENET_HOST_ANY;
-  if (options_.bind) {
-    const std::uint32_t v = *options_.bind;
-    const unsigned char b[4] = {static_cast<unsigned char>(v >> 24), static_cast<unsigned char>(v >> 16),
-                                static_cast<unsigned char>(v >> 8), static_cast<unsigned char>(v)};
-    std::memcpy(&address.host, b, 4);
-  }
-  address.port = options_.port;
+  if (!net::bind_allowed(options_.bind)) return false;  // (the test guard: no listener on all addresses)
+  const ENetAddress address = local_address(options_.bind, options_.port);
   host_ = enet_host_create(&address, options_.max_connections,
                            protocol::kChannelCount, 0, 0);
   if (host_ == nullptr) return false;

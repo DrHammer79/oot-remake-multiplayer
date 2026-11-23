@@ -174,7 +174,7 @@ inline constexpr std::uint8_t kLinkEyesPart = 18, kLinkHairPart = 19, kCharHairP
                               kCharCloth1Part = 22, kCharGearPart = 25;
 struct ModelColours {
     std::uint32_t custom = 0;                 // Options' nibbles: hair palette, gear, the three clothing palettes
-    std::optional<std::uint32_t> eyes, hair;  // exact colours (EyeParam / HairParam)
+    std::optional<std::uint32_t> eyes{}, hair{};  // exact colours (EyeParam / HairParam)
     bool operator==(const ModelColours&) const = default;
 };
 // `part(number)`: the look's colour of that part, if set. A Link model: Link's eyes and hair only. A character's: its
@@ -187,6 +187,15 @@ std::uint8_t NearestHair(std::uint32_t rgb);
 inline constexpr std::array<std::uint32_t, kCloths> kClothRgb = {0x00C000, 0xFF0000, 0x0000FF, 0x800080,
                                                                  0xFFFF00, 0x000000, 0xFFFFFF};
 std::uint8_t NearestCloth(std::uint32_t rgb);
+
+// What a dressed model is, so an age or character switch starts anew at once (its materials are another model's): the
+// field player's actor name (Player_Child, Player_Adult) and the character shown (0 Link). Never 0 (0 is "unknown").
+inline std::uint64_t ModelKey(std::string_view actor_name, std::uint16_t character) {
+    std::uint64_t h = 0xcbf29ce484222325ull;   // (FNV-1a: the same key on every run, for the log and tests)
+    for (const char c : actor_name) h = (h ^ static_cast<std::uint8_t>(c)) * 0x100000001b3ull;
+    h = (h ^ character) * 0x100000001b3ull;
+    return h == 0 ? 1 : h;
+}
 
 // The pause menu's model of your Link: the game's menu shows the player as its own actor, named "Pouch" + the field
 // player's actor name (PouchPlayer_Child for Player_Child, PouchPlayer_Adult for Player_Adult: RSDB ActorInfo's
@@ -205,10 +214,10 @@ struct Target {
     bool mods_routine = false;
     int iris_shift = 0;
     // 0.11.9: the player's eye colour (CoopLook's eyes part, 0xRRGGBB): dressed on any model, Link's too.
-    std::optional<std::uint32_t> eyes;
+    std::optional<std::uint32_t> eyes{};
     // 0.11.9: the player's hair colour (ForModel: Link's hair part on a Link model, the character's on a character's,
     // with the nearest palette entry in custom).
-    std::optional<std::uint32_t> hair;
+    std::optional<std::uint32_t> hair{};
     // What the puppet is (a hash of its actor's pack name): a puppet made again as another actor at the same
     // address, or in the same block, starts anew (its old model's material numbers are not this one's).
     std::uint64_t model = 0;
@@ -220,6 +229,36 @@ struct Target {
     // the page's while it is there: the field model may still be the earlier pick's until the menu closes.
     bool picture = false;
 };
+
+// The wardrobe's targets are built here, field by name, never by position. A positional Target{...} in the frame
+// glue put the model key into `eyes` (the sixth field), so `model` stayed 0: a puppet made again as another actor, and
+// your own model after an age or character switch, kept the old model's material numbers (review of the
+// dress-colours branch; the puppets' key was broken that way since it was added). These are what the glue calls.
+// A puppet (Director::DressView): its model key is its actor's pack name (CoopPuppet_Adult_C007: age and character).
+inline Target PuppetTarget(std::uint64_t actor, std::uint64_t cell, bool mods_routine, std::string_view actor_name,
+                           const ModelColours& colours) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .custom = colours.custom,
+                  .mods_routine = mods_routine,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = ModelKey(actor_name, 0)};
+}
+// Your own model (cell 0, `own`) or the pause menu's model of it (its cell; `picture`: Character Select's Customize
+// screen's model of your pick), keyed by ModelKey of its actor name and the character shown.
+inline Target OwnTarget(std::uint64_t actor, std::uint64_t cell, std::uint64_t model, const ModelColours& colours,
+                        std::uint16_t character, bool own, bool picture) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .custom = colours.custom,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = model,
+                  .own = own,
+                  .character = character,
+                  .picture = picture};
+}
 
 class Wardrobe {
 public:

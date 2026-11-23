@@ -41,6 +41,9 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import placement  # noqa: E402  (where the games' windows go: one monitor, no focus stolen)
+
 WINDOWS = os.name == "nt"
 TICKS = 60.0              # script ticks a second
 PRESS_TICKS = 6           # press KEYS: held this long, then let go as long
@@ -69,6 +72,44 @@ MODULE_ONLY = ("chat", "give", "wear", "dress", "assign", "place", "face", "aim"
 
 class ScriptError(Exception):
     pass
+
+
+# The scenes the module's test warp writes into the game (lichii/hook/coop_teleport.cpp IsKnownScene: the scenes of
+# coop_start_points.inc, which this reads from the repo's source, plus the one literal below). A scene it does not know
+# is refused there, with nothing written, and the runner would wait out its whole warp for a map that never comes:
+# `warp Market` (the scenes are Market_Child, Market_Adult) crashed a game worker before the module checked. So parse()
+# refuses it at once. Without the source (a kit) there is no list and nothing is checked.
+START_POINTS_INC = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                "lichii", "hook", "coop_start_points.inc")
+EXTRA_SCENES = ("BossRushIntervalRoom",)   # (a test keeps this and IsKnownScene's literal the same)
+_scenes = {}
+
+
+def known_scenes(path=START_POINTS_INC):
+    """The set of scene names the module's test warp knows, or None when the source file is not there."""
+    if path not in _scenes:
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            _scenes[path] = None
+        else:
+            found = set(re.findall(r'^\s*\{"([A-Za-z0-9_]+)",', text, re.M))
+            _scenes[path] = (found | set(EXTRA_SCENES)) if found else None
+    return _scenes[path]
+
+
+def scene_problem(name, scenes=None):
+    """Why `warp NAME` would be refused by the module ("" when it would not, or when the list is not known).
+    A number is the bridge's destination index and is left to the bridge."""
+    scenes = known_scenes() if scenes is None else scenes
+    if scenes is None or name in scenes or name.isdigit():
+        return ""
+    why = "unknown scene '%s'" % name
+    like = sorted(x for x in scenes if x.startswith(name))[:6]
+    if like:
+        why += " (did you mean %s?)" % ", ".join(like)
+    return why
 
 
 INCLUDE_DEPTH = 4
@@ -277,6 +318,8 @@ def parse(text):
                 fail("want: warp SCENE [START]")
             s.kind, s.name = "warp", w[1]
             s.start = w[2] if len(w) == 3 else ""
+            if scene_problem(s.name):
+                fail(scene_problem(s.name))
         elif cmd == "PLACE":
             # #196: "place PLATFORM UP": UP metres over the live place of that moving platform (the module's
             # TestPlatformPlace), for a rider on a floor that waves.
@@ -1046,6 +1089,31 @@ def test_game_defaults(env):
     return env
 
 
+def popen_flags():
+    """Popen keywords for a game: its own process group, its window shown without being activated (placement.py).
+    Kit mode (--kit-a/--kit-b) starts the game in the kit's play.ps1, which does the same (Start-KitTestGame)."""
+    return placement.popen_flags()
+
+
+def place_games(pids, display, say, wait=0.0, topmost=False):
+    """Puts the games' windows side by side on the chosen monitor (placement.py): A in the first place, B in the
+    second, whichever is placed first. pids: {tag: process id}. A game whose window is not there yet (after wait
+    seconds) is left for the next call; a failure is said, never fatal."""
+    if not WINDOWS or not pids:
+        return
+    tags = sorted(pids)
+    try:
+        placed = placement.place_pids([pids[x] for x in tags], display, topmost=topmost, wait=wait,
+                                      slots=["AB".index(x) for x in tags], count=2)
+    except Exception as e:   # (a placement problem must not end a run that has started: said in the steps)
+        say("window placement: %s" % e)
+        return
+    by_pid = {pids[x]: x for x in tags}
+    for pid, rect in placed:
+        say("%s: window placed at %d,%d %dx%d on %s" % (by_pid[pid], rect[0], rect[1], rect[2], rect[3],
+                                                         placement.display_name(display)))
+
+
 SAVE_USER = "5a3c9e1f0b7d24680000000000000001"   # the user folder a Hookshot game reads its saves from
 
 
@@ -1268,6 +1336,12 @@ def run(a):
                 # (else the kit would start another game than the one whose save was put back and whose log is read)
                 raise SystemExit("kit %s starts %s, not game %s: point its hookshot\\game-folder.txt there "
                                  "(tools/autotest/kit_pair.py setup)" % (kits[x], kit_game_folder(kits[x]), games[x]))
+    if WINDOWS:   # the monitor first: a wrong name fails here, before any game window can open anywhere else
+        try:
+            mon = placement.check_display(a.display)
+        except placement.PlacementError as e:
+            raise SystemExit("window placement: %s" % e)
+        say("windows go to %s (work area %s)" % (mon["name"], mon["work"]))
     started = {}
     scripts = {"A": a.script_a, "B": a.script_b}
     parsed = {}
@@ -1345,10 +1419,10 @@ def run(a):
                 if mismatch:   # (charsel-tab-0119: a code mod's menus without its code; the run says so first)
                     say("%s: WARNING: %s" % (x, mismatch))
                 with open(os.path.join(out, "game-out-%s.txt" % x), "wb") as go:
-                    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}
                     procs[x] = subprocess.Popen([exe], cwd=exe_dir(g), env=env, stdin=subprocess.DEVNULL, stdout=go,
-                                                stderr=subprocess.STDOUT, **kw)
+                                                stderr=subprocess.STDOUT, **popen_flags())
             say("%s: started pid %d, bridge %s" % (x, procs[x].pid, sock))
+            place_games({x: procs[x].pid}, a.display, say, wait=30.0)   # (its window as soon as it is there)
             keep_pids()
             bridges[x] = (sock, Bridge.connect(sock, timeout=120))
             if i == 0:
@@ -1364,6 +1438,8 @@ def run(a):
                                    a.renderer_limit)
             if a.renderer_wait > 0:
                 say("%s: renderer ready (%.0f s waited)" % (x, waited))
+        # (the game can move or resize its window when its renderer comes up: placed again, both)
+        place_games({x: procs[x].pid for x in tags}, a.display, say)
 
         def shooter(x, name):
             def shot(mark):
@@ -1541,6 +1617,8 @@ def main(argv=None):
     r.add_argument("--no-load", action="store_true")
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--keep-open", action="store_true")
+    r.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
+                                     "tools/autotest/placement.py" % (placement.ENV, placement.DEFAULT_DISPLAY))
     r.add_argument("--env", action="append", default=[], help="NAME=VALUE (or A:NAME=VALUE) for the games")
     r.add_argument("--server-arg", action="append", default=[],
                    help="one more argument for the coop_server it starts (row 251: --same-network-open)")

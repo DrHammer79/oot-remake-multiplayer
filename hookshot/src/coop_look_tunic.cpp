@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string_view>
 #include <utility>
 
@@ -314,6 +315,27 @@ std::shared_ptr<const Texels> Wardrobe::Load(const std::string& colour) {
 }
 
 void Wardrobe::Step(std::uint64_t now_ms) {
+    try {
+        Once(now_ms);
+    } catch (const std::exception& e) {
+        Failed(e.what());
+    }
+}
+
+void Wardrobe::Failed(const char* why) {
+    // The game goes on: the next step looks at every texture again (this one may have stopped half way).
+    look_now_ = true;
+    if (said_failed_ >= kFailedSaid) return;
+    try {
+        ++said_failed_;
+        host_.log("coop: look: the " + host_.what + " wardrobe's step failed (" + why + "): tried again at the next "
+                  "step" + (said_failed_ == kFailedSaid ? " (said no more)" : ""));
+    } catch (...) {
+        // (no memory even for the line: nothing said)
+    }
+}
+
+void Wardrobe::Once(std::uint64_t now_ms) {
     if (host_.textures == nullptr) return;   // (no game textures: nothing to look at)
     std::string want;
     {
