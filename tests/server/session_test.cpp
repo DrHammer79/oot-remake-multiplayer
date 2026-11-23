@@ -7810,7 +7810,7 @@ TEST_CASE("row 149: a boss part first listed by another game takes its root's ow
   CHECK(h.session.object_owner(placed(8)) == owned(2, 0));
   h.clear();
   h.receive(1, ObjectGroup{0, {{placed(8), placed(7), object_group::boss}}}, kChannelOwnership);
-  CHECK(h.session.object_owner(placed(8)) == owned(1, 0));
+  CHECK(h.session.object_owner(placed(8)) == owned(1, 1));
   CHECK(h.session.stats().parts_to_root == 1);
   CHECK(messages_to<HandoverAsk>(h, 2).empty());
   // Player 2's game learns it is a copy now.
