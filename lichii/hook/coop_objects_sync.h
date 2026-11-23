@@ -543,7 +543,11 @@ bool UnderCeilingEnemy(const coop::protocol::Vec3& enemy, const coop::protocol::
 // first word, LOD suffix off, is Stun, Down, Fall, Faint or Chance, or starts
 // with ChanceTime or DownTimeReaction (row 169: Morpha, Volvagia, the Poe
 // sisters, Phantom Ganon, Ganondorf). A seed in Gohma's eye stuns it and takes
-// no life, so a stun is the only sign of that hit.
+// no life, so a stun is the only sign of that hit. Row 211: also the stuns with
+// another first word: Ganondorf's LightBallDamage (his ball sent back into him),
+// Ganon's LightArrowDown / LightArrowDamage / Lightarrow, StunA.. (Lizalfos,
+// Gerudo Thief), ShortStun (Big Octo), Dark Link's Dark_Chance / DarkChance,
+// Paralysis and Freeze, and Ganon's Tail_Chance.
 bool IsStunAnimation(std::string_view name);
 
 // An animation name without its level-of-detail suffix ("Wait_ModelOnlyLOD"

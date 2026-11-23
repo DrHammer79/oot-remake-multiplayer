@@ -912,8 +912,23 @@ bool IsStunAnimation(std::string_view name) {
     // files: Morpha 'ChanceTime', 'Chance_time_St'; Volvagia 'ChanceTimeDamageStart'; the Poe sisters 'Chance_St',
     // 'ChanceTime_Loop'; Phantom Ganon and Ganondorf 'DownTimeReaction_Start'). Gohma's 'ChanceAfterAttack' and
     // 'Attack_Chance' are her own moves (the owner's too), not a stun of a hit.
-    return first == "Stun" || first == "Down" || first == "Fall" || first == "Faint" || first == "Chance" ||
-           first.starts_with("ChanceTime") || first.starts_with("DownTimeReaction");
+    // Row 211: the stuns whose first word is no Stun/Down word (read from every boss and mid-boss AS file): Ganondorf's
+    // knockdown by his own ball sent back ('LightBallDamage_Start/Loop/End', his interruptweakpointhit module, the
+    // light and the charge ball), Ganon's light-arrow knockdown ('LightArrowDown_*', 'LightArrowDamage_*',
+    // 'Lightarrow_Damage_*'), the Lizalfos' and the Gerudo Thief's 'StunA'..'StunC' / 'StunAirA'.., Big Octo's
+    // 'ShortStun_L/R'. Plain hit reactions ('Damage', 'SmallDamage') are no stun.
+    // Dark Link: his chance window ('Dark_Chance_St/_Damage_B/_Ed', AS nodes 'DarkChanceSt'..; not every 'Dark_' word:
+    // 'Dark_Wait', 'Dark_Move_Run' are moves) and the player's no-life stuns in his AS ('Paralysis_*' a Deku Nut,
+    // 'Freeze' / 'FreezeBreak' an ice arrow). Ganon: 'Tail_Chance', the tail window his down goes on into.
+    // Not stuns (their own moves, which a copy plays from the owner's verbs): the Gerudo Thief's 'BigChance', Kotake's
+    // and Koume's 'Tired_*' (a brain verb), Morpha's tentacle 'SpinChance*' (its spin attack), Gohma's
+    // 'Ceiling_Spawn_Chance_*' (her larva drop), Dead Hand's 'Repel_Down' (a hit that takes life: its owner reacts).
+    return first.starts_with("Stun") || first == "ShortStun" || first == "Down" || first == "Fall" ||
+           first == "Faint" || first == "Chance" || first.starts_with("ChanceTime") ||
+           first.starts_with("DownTimeReaction") || first == "LightBallDamage" || first == "LightArrowDown" ||
+           first == "LightArrowDamage" || first == "Lightarrow" || base.starts_with("Dark_Chance") ||
+           first.starts_with("DarkChance") || first == "Paralysis" || first.starts_with("Freeze") ||
+           base.starts_with("Tail_Chance");
 }
 
 proto::Quat QuatOf(const Mat3& m) {
