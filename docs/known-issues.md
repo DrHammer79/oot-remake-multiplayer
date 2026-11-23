@@ -89,7 +89,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 
 ## Known issues
 
-- **Gold Skulltulas Not shared: your race count is kept per computer, not per host**: your own tokens are kept beside the co-op save folder and come back when you join again. They are not kept for each host: after you play a race with another host, your next race carries that count. Loading a co-op save during a session can also bring back the tokens of that save instead of your latest count.
+- **Gold Skulltulas Not shared: your race is kept on your computer**: your own tokens with each of a host's saves come back when you join again and after a load. A new game of the host's starts every race from 0. Not checked in a game yet.
 - **Linux: away/paused state, Map page and HUD refresh** ([#150](https://github.com/daurosk/oot-remake-multiplayer/issues/150)): fixed in the code, not yet checked on Linux.
 - **Nucleus split screen or a direct start of `longshot.exe` after switching mods**: after switching Character Select, a Mods-tab mod or **Original game**, start once with **Start Squadala.bat** first, so the game is rebuilt for it. A start that skips the kit runs the game as the last kit start built it, with or without that mod's code (player report 202).
 - **Nucleus split screen keeps each instance's own `coop-options.ini`**: a setting changed later in the kit's `coop-options.ini`, and new settings from a newer kit, do not reach a split-screen player until that player's own copy is deleted (`coop-options.ini` in the Nucleus instance folder, such as `Instance0`; the next start copies the kit's again). Character Select is not affected.
