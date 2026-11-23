@@ -2,7 +2,7 @@
 # Builds the puppet Link packs from this PC's own copy of the game into the kit's emulator (a
 # LayeredFS mod in the emulator's load folder). Nothing from the game is in the kit: the packs
 # are made here, from your game's .nup file (read directly, no keys needed) or a RomFS dump,
-# and stay on this PC. Needs Python 3 with the zstandard package.
+# and stay on this PC. Needs Python 3 with the zstandard and numpy packages (numpy: the character voices).
 # Usage: ./make-puppet-pack.sh                        finds the .nup or dump, else asks
 #        ./make-puppet-pack.sh --romfs <.nup or folder>  no questions
 set -u
@@ -24,8 +24,8 @@ for p in python3 python; do
 done
 if [[ -z $python ]]; then
     echo 'No Python 3 found. Install it with your package manager, for example:'
-    echo '  sudo apt install python3 python3-zstandard     (Debian, Ubuntu)'
-    echo '  sudo pacman -S python python-zstandard         (Arch, SteamOS desktop mode)'
+    echo '  sudo apt install python3 python3-zstandard python3-numpy     (Debian, Ubuntu)'
+    echo '  sudo pacman -S python python-zstandard python-numpy          (Arch, SteamOS desktop mode)'
     exit 1
 fi
 if ! "$python" -c 'import zstandard' 2>/dev/null; then
@@ -33,6 +33,18 @@ if ! "$python" -c 'import zstandard' 2>/dev/null; then
     echo '  sudo apt install python3-zstandard   or   sudo pacman -S python-zstandard'
     echo "  or: $python -m pip install --user zstandard"
     exit 1
+fi
+# numpy makes the character voices from your game's own clips (docs/puppet.md). Without it, try pip once; else stop
+# here, so no pack is made whose characters say nothing.
+if ! "$python" -c 'import numpy' 2>/dev/null; then
+    echo 'Python is missing the numpy package (it makes the character voices). Trying pip ...'
+    "$python" -m pip install --user numpy >/dev/null 2>&1 || true
+    if ! "$python" -c 'import numpy' 2>/dev/null; then
+        echo 'Python is missing the numpy package. Install it, for example:'
+        echo '  sudo apt install python3-numpy   or   sudo pacman -S python-numpy'
+        echo "  or: $python -m pip install --user numpy"
+        exit 1
+    fi
 fi
 # The game check: finds the game's .nup in the emulator's game list folders, else the
 # emulator's RomFS dump, and says, one line per problem, what is wrong and what to do.

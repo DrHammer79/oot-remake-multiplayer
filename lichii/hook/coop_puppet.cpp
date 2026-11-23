@@ -421,9 +421,11 @@ void Director::NewFrame(Guest& guest, std::uint64_t now_ms) {
             if (have_state && state == addr::kStatePresent) {
                 Vec3 at{};
                 ReadValue(guest, slot.actor + addr::kActorPosition, at);
+                const auto list = sound_lists_.find(slot.actor_name);
                 Say("P" + std::to_string(slot.number) + " " + slot.actor_name + " spawned after " +
                     std::to_string(now_ms - slot.since_ms) + " ms: request " + Hex(slot.request) +
-                    ", actor " + Hex(slot.actor) + ", state 4, at " + VecText(at));
+                    ", actor " + Hex(slot.actor) + ", state 4, at " + VecText(at) +
+                    (list == sound_lists_.end() ? std::string{} : ", sound list " + list->second));
                 slot.phase = Phase::live;
                 slot.since_ms = now_ms;
                 slot.shown = Show::show;  // a new actor stands where it was made
@@ -2652,6 +2654,42 @@ std::vector<std::string> PackCharacterActors(std::string_view manifest) {
     return out;
 }
 
+std::map<std::string, std::string, std::less<>> PackSoundLists(std::string_view manifest) {
+    // "sound_lists": {"CoopPuppet_Adult_C005": "Player_Adult_V07", ...} (json.dumps: no '"' or '}' in a name).
+    std::map<std::string, std::string, std::less<>> out;
+    const auto at = manifest.find("\"sound_lists\"");
+    if (at == std::string_view::npos) {
+        return out;
+    }
+    const auto open = manifest.find_first_not_of(" \t\r\n:", at + 13);
+    if (open == std::string_view::npos || manifest[open] != '{') {
+        return out;
+    }
+    const auto close = manifest.find('}', open);
+    if (close == std::string_view::npos) {
+        return out;
+    }
+    std::string_view body = manifest.substr(open + 1, close - open - 1);
+    const auto text = [&body](std::string_view& value) {
+        const auto a = body.find('"');
+        const auto b = a == std::string_view::npos ? a : body.find('"', a + 1);
+        if (b == std::string_view::npos) {
+            return false;
+        }
+        value = body.substr(a + 1, b - a - 1);
+        body.remove_prefix(b + 1);
+        return true;
+    };
+    std::string_view actor;
+    std::string_view list;
+    while (text(actor) && text(list)) {
+        if (actor.rfind("CoopPuppet_", 0) == 0 && !list.empty() && list.size() <= 64) {
+            out.emplace(std::string(actor), std::string(list));
+        }
+    }
+    return out;
+}
+
 std::optional<std::pair<std::uint64_t, std::array<std::uint8_t, 16>>> PackCharacterColours(
     std::string_view manifest) {
     const std::size_t at = manifest.find("\"colours\"");
@@ -2916,6 +2954,7 @@ void Configure(PlannerSettings settings, bool verbose, Director::Log log) {
         g_director = std::make_unique<Director>(std::move(log), verbose, settings.debug_anim);
         g_director->SetPoseCopy(true);
         g_director->SetCharacterApply(settings.character_apply, settings.character_apply_head);
+        g_director->SetSoundLists(settings.sound_lists);
         g_director->SetNullReadsZero(settings.null_reads_zero);
         g_director->SetPerceived(settings.perceived && !settings.quiet_everywhere);
         // docs/puppet.md, "Colour". LICHII_COOP_PUPPET_TINT: 0 to 1, or off.
