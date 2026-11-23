@@ -592,8 +592,10 @@ bool KeepsTarget(std::string_view name);
 // Boss turns (0.11.8): a sample's object_state bits for an enemy's attack as its game read it (Seen::attacking):
 // attack_read whenever it was read, attacking with it while the attack runs; 0 when not read.
 std::uint8_t AttackBits(std::optional<bool> attacking);
-// Row 211 (shot-reflect-211-4): the makers (CoopEnemyShots::MakersOf) of every rally ball (IsRallyBall) in a walk.
-std::vector<std::string_view> RallyMakers(const std::vector<Seen>& seen);
+// Row 211 (shot-reflect-211-4): the makers (CoopEnemyShots::MakersOf) of every rally ball (IsRallyBall) among the
+// actor names of a walk. From the walk's whole actor list (Collect), not from Seen: a boss's shot is no shared object,
+// so it is never in Seen (proof run 20261123-045939: the hold never came on). Sync::SetRallyMakers before Tick.
+std::vector<std::string_view> RallyMakers(const std::vector<std::string>& actor_names);
 // Row 211: an enemy's attack as sent (Seen::attacking), kept on while a rally ball of its own flies in our game. His
 // light ball's shooting move (Ganondorf's BasicAttack, verb 112) ends as the ball leaves, and a boss turn passed
 // there (proof run 20261123-031042: three turns, each with his ball in the air) moved him to a game where no ball
@@ -1253,6 +1255,8 @@ public:
     // What Flush decided for each shared object that left the walk, as log
     // lines; taken (and cleared) by the caller.
     std::vector<std::string> TakeNotes() { return std::exchange(notes_, {}); }
+    // Row 211: the makers of the rally balls in this walk (RallyMakers), for the next Tick's AttackWithRally.
+    void SetRallyMakers(std::vector<std::string_view> makers) { rally_makers_ = std::move(makers); }
     std::optional<coop::protocol::ObjectId> IdOf(std::uint64_t address) const;
     // Difficulty's night horde (coop_difficulty.h Horde): how many players'
     // Links stand within kRollNearM of `at`, we among them: the others in our
@@ -1662,6 +1666,7 @@ private:
     // chest-late-b: why a chest read the open idle when another's flag came (log only).
     std::string ChestAlreadyOpenWhy(const Seen& s, std::uint64_t now_us) const;
     std::vector<std::string> notes_;
+    std::vector<std::string_view> rally_makers_;  // row 211 (SetRallyMakers)
     std::map<std::uint64_t, Object> objects_;  // by actor address
     std::vector<std::uint64_t> ours_now_;     // copies that became ours (TakeOursNow)
     std::vector<std::pair<std::uint64_t, std::string>> own_wakes_;  // report 109 (TakeOwnWakes)
