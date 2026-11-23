@@ -3458,6 +3458,7 @@ private:
             main_ = FindMain(system, process);
             actors_.clear();
             first_ = true;
+            list_said_ = false;  // row 267: the list head once per game process
             names_.clear();
             stamps_.clear();
             no_area_.clear();
@@ -6064,7 +6065,10 @@ private:
             node = r.Ptr(*node);
         }
         const bool whole = node && walked == *count;
-        if (first_ && whole) {
+        // Row 267: once per game process whatever the caller. Not first_: that is cleared only by Walk(), which
+        // runs only with LICHII_COOP_DEBUG_OBJECTS, so in normal play every Collect()/Pivot() scan said it.
+        if (whole && !list_said_) {
+            list_said_ = true;
             LOG_INFO(Core, "coop: objects: list head {:#x}, {} entries, {} actors", head, walked,
                      out.size());
         }
@@ -6390,7 +6394,8 @@ private:
     Sync sync_;
     Kernel::KProcess* process_ = nullptr;
     u64 main_ = 0;
-    bool first_ = true;
+    bool first_ = true;  // Walk()'s first pass (debug only): no "+" lines for what was there already
+    bool list_said_ = false;  // row 267: the list head line said for this game process
     std::unordered_map<u64, Actor> actors_;
 };
 

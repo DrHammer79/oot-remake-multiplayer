@@ -984,7 +984,10 @@ std::optional<Call> Director::Next(Slot& slot, Guest& guest, std::uint64_t now_m
                 return c;
             }
         }
-        if (matrix_call_ && t->show != Show::hold &&
+        // Row 268: held too (their cutscene). Navi's physics body undoes a plain write of her place in any
+        // show; without the setter in hold her body stayed where the last hide parked it (500 m down) and
+        // pulled her back each frame against our write: a tug of war, a 'snap ~500 m (warp)' line a frame.
+        if (matrix_call_ &&
             !(g_watch_places.load(std::memory_order_relaxed) && slot.number != 0 &&
               g_game_holds.load(std::memory_order_relaxed) == slot.number)) {
             if (auto c = Move(slot, guest)) {

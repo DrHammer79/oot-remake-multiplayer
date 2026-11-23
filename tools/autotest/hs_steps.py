@@ -50,6 +50,10 @@ JOINED = "coop: welcomed as player"
 # "The game crashed last time" page on the title to take the load's A presses.
 TEST_GAME_DEFAULTS = (("LICHII_COOP_TEST_OWN_SAVE", "1"), ("LICHII_COOP_PROBLEM_ASK", "0"))
 LIVE = re.compile(r"coop: objects: ([+-]) (CoopPuppet_\w+|Dm_Npc_Navi) (0x[0-9a-f]+)")
+# Lines the module says once per game process, checked in every game's log after the steps (row 267: the list
+# head was said at every object scan, 43% of a tester's 190 MB log). A game process starts with "coop: build".
+ONCE_PER_PROCESS = (("objects list head (row 267)", re.compile(r"(?m)^.*coop: objects: list head ")),)
+PROCESS_START = re.compile(r"(?m)^.*coop: build ")
 
 
 class StepsError(Exception):
@@ -184,6 +188,17 @@ def count_lines(text, pattern):
         return None
 
 
+def once_floods(text):
+    """(name, lines, processes) of each once-per-process line said more often than the log has game processes."""
+    processes = max(1, len(PROCESS_START.findall(text)))
+    out = []
+    for name, pattern in ONCE_PER_PROCESS:
+        got = len(pattern.findall(text))
+        if got > processes:
+            out.append((name, got, processes))
+    return out
+
+
 def live_actors(text):
     """The puppets and fairies alive in a game's log: name list (as run.ps1's Live-Actors)."""
     live = {}
@@ -253,7 +268,19 @@ class Runner:
             ended = self.g.ended_by_itself()
             for x in ended:
                 self.result(False, "game %s ended by itself during step %d" % (x, s.n))
+        self.check_floods()
         return self.fails
+
+    def check_floods(self):
+        """A FAIL line for each once-per-process line a game's log says more often (silent when none)."""
+        for x in ("A", "B"):
+            try:
+                text = self.g.log(x)
+            except Exception:  # a game this backend does not have
+                continue
+            for name, got, processes in once_floods(text or ""):
+                self.result(False, "%s: %s said %d times in %d game process(es), want at most once each" % (
+                    x, name, got, processes))
 
     def do_start(self, s):
         for x in s.args:

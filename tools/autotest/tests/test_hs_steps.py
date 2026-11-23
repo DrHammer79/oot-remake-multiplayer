@@ -200,6 +200,20 @@ class RunnerTest(unittest.TestCase):
         self.assertIn(("start", "A", right), self.g.calls)
         self.assertEqual(sum(1 for c in self.g.calls if c[0] == "kill" and str(c[2]).startswith("try")), 7)  # each try ends B, log kept
 
+    def test_a_once_per_process_line_said_again_is_a_fail(self):
+        # Row 267: "coop: objects: list head" at every object scan flooded a tester's log.
+        head = "[hos] coop: objects: list head 0x105f302870, 8 entries, 7 actors\n"
+        build = "[hos] coop: build hookshot v0\n"
+        self.g.logs["A"] = build + head
+        self.g.logs["B"] = build + head + build + head
+        self.assertEqual(self.r.run([]), 0)  # once per game process: no line at all
+        self.g.logs["A"] += head * 3
+        self.assertEqual(self.r.run([]), 1)
+        self.assertEqual(self.counts(), ["FAIL A: objects list head (row 267) said 4 times in 1 game process(es), "
+                                         "want at most once each"])
+        self.assertEqual(hs.once_floods(head * 2), [("objects list head (row 267)", 2, 1)])  # no build line: one
+        self.assertEqual(hs.once_floods(""), [])
+
     def test_start_waits_for_both_and_password_reaches_the_game(self):
         self.r.run(hs.parse_steps("password B secret\nstart A B\n"))
         self.assertEqual(self.g.calls[:4], [("start", "A", ""), ("start", "B", "secret"), ("wait", "A"),
