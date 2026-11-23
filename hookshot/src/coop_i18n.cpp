@@ -3450,7 +3450,7 @@ struct SplitShape {
     int words;    // bit i: part i is a word of the table too (a preset's name, an age)
     int count;    // pieces used
     const char* key;
-    int places;   // bit i: part i is a place of the game (a scene: "Hyrule Field"), the rest are names, as they are
+    int places = 0;   // bit i: part i is a place of the game (a scene: "Hyrule Field"), the rest are names, as they are
 };
 bool SplitAll(std::string_view text, const SplitShape& shape, std::string_view* parts) {
     if (shape.count < 2 || shape.count > 8) {
@@ -3814,63 +3814,63 @@ std::string FillAll(const char* text, const std::string_view* parts, int count) 
 
 constexpr SplitShape kSplitShapes[] = {
     // the host's difficulty notice (coop_difficulty.cpp Describe): numbers, plus the preset or the player count
-    {{"Difficulty: Automatic (", " players): life ", "%, damage ", "%, enemies ", "%; bosses: life ", "%, damage ", "%"}, 0, 7, "Difficulty: Automatic ({} players): life {}%, damage {}%, enemies {}%; bosses: life {}%, damage {}%"},
-    {{"Difficulty: Automatic (", " player): life ", "%, damage ", "%, enemies ", "%; bosses: life ", "%, damage ", "%"}, 0, 7, "Difficulty: Automatic ({} player): life {}%, damage {}%, enemies {}%; bosses: life {}%, damage {}%"},
-    {{"Difficulty: ", ": life ", "%, damage ", "%, enemies ", "%"}, 1, 5, "Difficulty: {}: life {}%, damage {}%, enemies {}%"},
+    {{"Difficulty: Automatic (", " players): life ", "%, damage ", "%, enemies ", "%; bosses: life ", "%, damage ", "%"}, 0, 7, "Difficulty: Automatic ({} players): life {}%, damage {}%, enemies {}%; bosses: life {}%, damage {}%", 0},
+    {{"Difficulty: Automatic (", " player): life ", "%, damage ", "%, enemies ", "%; bosses: life ", "%, damage ", "%"}, 0, 7, "Difficulty: Automatic ({} player): life {}%, damage {}%, enemies {}%; bosses: life {}%, damage {}%", 0},
+    {{"Difficulty: ", ": life ", "%, damage ", "%, enemies ", "%"}, 1, 5, "Difficulty: {}: life {}%, damage {}%, enemies {}%", 0},
     // /teleport's lines (coop_teleport.cpp)
     {{"teleport: going to ", " in ", ""}, 0, 3, "teleport: going to {} in {}", 2},
     {{"teleport: ", " has gone on to ", "; you are where they were. Type /teleport again to follow", ""}, 0, 3, "teleport: {} has gone on to {}; you are where they were. Type /teleport again to follow", 2},
     {{"teleport: ", " is in ", ", a place for ", " Link; yours is ", "", ""}, 12, 5, "teleport: {} is in {}, a place for {} Link; yours is {}", 2},
-    {{"teleport: ", " is ", " Link and you are ", ": no teleport to another age's Link", ""}, 6, 4, "teleport: {} is {} Link and you are {}: no teleport to another age's Link"},
-    {{"teleport: ", " is busy now; you are where they were", ""}, 0, 2, "teleport: {} is busy now; you are where they were"},
-    {{"teleport: no answer from ", "; you are where they were", ""}, 0, 2, "teleport: no answer from {}; you are where they were"},
-    {{"teleport: no answer from ", " (an older build, or their game is busy)", ""}, 0, 2, "teleport: no answer from {} (an older build, or their game is busy)"},
-    {{"teleport: ", " is in a dungeon: you may need its items to get on from there", ""}, 0, 2, "teleport: {} is in a dungeon: you may need its items to get on from there"},
+    {{"teleport: ", " is ", " Link and you are ", ": no teleport to another age's Link", ""}, 6, 4, "teleport: {} is {} Link and you are {}: no teleport to another age's Link", 0},
+    {{"teleport: ", " is busy now; you are where they were", ""}, 0, 2, "teleport: {} is busy now; you are where they were", 0},
+    {{"teleport: no answer from ", "; you are where they were", ""}, 0, 2, "teleport: no answer from {}; you are where they were", 0},
+    {{"teleport: no answer from ", " (an older build, or their game is busy)", ""}, 0, 2, "teleport: no answer from {} (an older build, or their game is busy)", 0},
+    {{"teleport: ", " is in a dungeon: you may need its items to get on from there", ""}, 0, 2, "teleport: {} is in a dungeon: you may need its items to get on from there", 0},
     {{"teleport: ", " is in ", ", a place /teleport cannot load (no start point known there)", ""}, 0, 3, "teleport: {} is in {}, a place /teleport cannot load (no start point known there)", 2},
     {{"teleport: stopped: you left ", ""}, 0, 2, "teleport: stopped: you left {}", 1},
-    {{"teleport: stopped: ", " left", ""}, 0, 2, "teleport: stopped: {} left"},
-    {{"teleport: ", " is coming to you", ""}, 0, 2, "teleport: {} is coming to you"},
-    {{"teleport: asking ", " where they are", ""}, 0, 2, "teleport: asking {} where they are"},
-    {{"teleport: next to ", ""}, 0, 2, "teleport: next to {}"},
+    {{"teleport: stopped: ", " left", ""}, 0, 2, "teleport: stopped: {} left", 0},
+    {{"teleport: ", " is coming to you", ""}, 0, 2, "teleport: {} is coming to you", 0},
+    {{"teleport: asking ", " where they are", ""}, 0, 2, "teleport: asking {} where they are", 0},
+    {{"teleport: next to ", ""}, 0, 2, "teleport: next to {}", 0},
     // the group's sync lines (coop/host/src/notify.cpp): its counts ("2 items, 1 songs") each in the table's words
-    {{"Synced with the group: ", ""}, 0, 2, "Synced with the group: {}"},
-    {{"...and ", " more from the group", ""}, 0, 2, "...and {} more from the group"},
+    {{"Synced with the group: ", ""}, 0, 2, "Synced with the group: {}", 0},
+    {{"...and ", " more from the group", ""}, 0, 2, "...and {} more from the group", 0},
     // the lobby's and the mods' notes
-    {{"", ": not connected", ""}, 0, 2, "{}: not connected"},
-    {{"", ": only the host can do that", ""}, 0, 2, "{}: only the host can do that"},
-    {{"", ": could not be sent", ""}, 0, 2, "{}: could not be sent"},
+    {{"", ": not connected", ""}, 0, 2, "{}: not connected", 0},
+    {{"", ": only the host can do that", ""}, 0, 2, "{}: only the host can do that", 0},
+    {{"", ": could not be sent", ""}, 0, 2, "{}: could not be sent", 0},
     // the reason is a line of the table too (coop/net/src/client.cpp's full sentences)
-    {{"refused: ", ""}, 1, 2, "refused: {}"},
-    {{"Mods: yours differ from the host's (", "): see the Mods tab", ""}, 0, 2, "Mods: yours differ from the host's ({}): see the Mods tab"},
-    {{"Mods: player ", " (", ") has ", " mods unlike yours", ""}, 0, 4, "Mods: player {} ({}) has {} mods unlike yours"},
-    {{"Mods: player ", " has ", " mods unlike yours", ""}, 0, 3, "Mods: player {} has {} mods unlike yours"},
-    {{"Mods: player ", " has ", " mod unlike yours", ""}, 0, 3, "Mods: player {} has {} mod unlike yours"},
-    {{"Mods: player ", " (", ") has ", " mod unlike yours", ""}, 0, 4, "Mods: player {} ({}) has {} mod unlike yours"},
+    {{"refused: ", ""}, 1, 2, "refused: {}", 0},
+    {{"Mods: yours differ from the host's (", "): see the Mods tab", ""}, 0, 2, "Mods: yours differ from the host's ({}): see the Mods tab", 0},
+    {{"Mods: player ", " (", ") has ", " mods unlike yours", ""}, 0, 4, "Mods: player {} ({}) has {} mods unlike yours", 0},
+    {{"Mods: player ", " has ", " mods unlike yours", ""}, 0, 3, "Mods: player {} has {} mods unlike yours", 0},
+    {{"Mods: player ", " has ", " mod unlike yours", ""}, 0, 3, "Mods: player {} has {} mod unlike yours", 0},
+    {{"Mods: player ", " (", ") has ", " mod unlike yours", ""}, 0, 4, "Mods: player {} ({}) has {} mod unlike yours", 0},
     // New Game+'s help while unlocked (coop_pause_menu.cpp): the hearts kept, then the level now.
-    {{"Start a new file with this on: you keep your ", " hearts, and enemies and bosses get 50% more life and 25% more damage for each level (up to NG+ ", " now). In a game you host your level counts for everyone. Off: the game as it is.", "", "", "", ""}, 0, 4, "Start a new file with this on: you keep your {} hearts, and enemies and bosses get 50% more life and 25% more damage for each level (up to NG+ {} now). In a game you host your level counts for everyone. Off: the game as it is."},
-    {{"Let in ", " (+", ")"}, 0, 3, "Let in {} (+{})"},
-    {{"More players (", "/", ")"}, 0, 3, "More players ({}/{})"},
-    {{"Local games (", ")"}, 0, 2, "Local games ({})"},
-    {{"Online games (", ")"}, 0, 2, "Online games ({})"},
-    {{"Next page (", "/", ")"}, 0, 3, "Next page ({}/{})"},
-    {{"teleport: ", " refused (reason ", ")"}, 0, 3, "teleport: {} refused (reason {})"},
-    {{"The text was longer than this setting takes (", "): the end was left out."}, 0, 2, "The text was longer than this setting takes ({}): the end was left out."},
-    {{"That text is longer than this setting takes (", "): nothing was changed."}, 0, 2, "That text is longer than this setting takes ({}): nothing was changed."},
-    {{"New Game+ ", ": start a new file to play it (your hearts carry over)."}, 0, 2, "New Game+ {}: start a new file to play it (your hearts carry over)."},
-    {{"Left and Right: less or more of it, ", " a press (0 to 255)."}, 0, 2, "Left and Right: less or more of it, {} a press (0 to 255)."},
+    {{"Start a new file with this on: you keep your ", " hearts, and enemies and bosses get 50% more life and 25% more damage for each level (up to NG+ ", " now). In a game you host your level counts for everyone. Off: the game as it is.", "", "", "", ""}, 0, 4, "Start a new file with this on: you keep your {} hearts, and enemies and bosses get 50% more life and 25% more damage for each level (up to NG+ {} now). In a game you host your level counts for everyone. Off: the game as it is.", 0},
+    {{"Let in ", " (+", ")"}, 0, 3, "Let in {} (+{})", 0},
+    {{"More players (", "/", ")"}, 0, 3, "More players ({}/{})", 0},
+    {{"Local games (", ")"}, 0, 2, "Local games ({})", 0},
+    {{"Online games (", ")"}, 0, 2, "Online games ({})", 0},
+    {{"Next page (", "/", ")"}, 0, 3, "Next page ({}/{})", 0},
+    {{"teleport: ", " refused (reason ", ")"}, 0, 3, "teleport: {} refused (reason {})", 0},
+    {{"The text was longer than this setting takes (", "): the end was left out."}, 0, 2, "The text was longer than this setting takes ({}): the end was left out.", 0},
+    {{"That text is longer than this setting takes (", "): nothing was changed."}, 0, 2, "That text is longer than this setting takes ({}): nothing was changed.", 0},
+    {{"New Game+ ", ": start a new file to play it (your hearts carry over)."}, 0, 2, "New Game+ {}: start a new file to play it (your hearts carry over).", 0},
+    {{"Left and Right: less or more of it, ", " a press (0 to 255)."}, 0, 2, "Left and Right: less or more of it, {} a press (0 to 255).", 0},
     // (0.11.8's screens, PR #308)
-    {{"Public games (", ")"}, 0, 2, "Public games ({})"},
-    {{"This network (", ")"}, 0, 2, "This network ({})"},
+    {{"Public games (", ")"}, 0, 2, "Public games ({})", 0},
+    {{"This network (", ")"}, 0, 2, "This network ({})", 0},
     // (0.11.9, ui-tabs)
-    {{"", " (page ", " of ", ")"}, 1, 4, "{} (page {} of {})"},
+    {{"", " (page ", " of ", ")"}, 1, 4, "{} (page {} of {})", 0},
     // (title-join: the title page's hint)
-    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)"},
+    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)", 0},
     // (a page's header: the page's name and, when its rows take more than one
     // page, "  < 1 of 3 >"; the name is the table's word, the two numbers as
     // they are)
-    {{"", "  < ", " of ", " >"}, 1, 4, "{}  < {} of {} >"},
+    {{"", "  < ", " of ", " >"}, 1, 4, "{}  < {} of {} >", 0},
     // (the Mods tab's typing hint: what was typed, in characters and in bytes)
-    {{"", " characters (", " of ", " bytes)"}, 0, 4, "{} characters ({} of {} bytes)"},
+    {{"", " characters (", " of ", " bytes)"}, 0, 4, "{} characters ({} of {} bytes)", 0},
 };
 std::string PlaceIn(const Lang* lang, std::string_view en) {
     if (lang == nullptr || lang->entries == nullptr) {
