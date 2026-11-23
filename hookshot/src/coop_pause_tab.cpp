@@ -821,7 +821,8 @@ HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit,
     if (now_ms - h.started_ms > kHopMaxMs || h.taps >= kHopMaxTaps) return HopStep::kGiveUp;
     if (now_ms < h.next_ms) return HopStep::kWait;
     if (!ours) {
-        if (lit >= kHopCharactersLit) return HopStep::kDone;
+        if (lit < 0) return HopStep::kWait;
+        if (!GameMinusCategory(lit)) return HopStep::kDone;   // (not Key Items, Threads or Map: Characters)
         if (h.off_taps > 0 && lit == h.prev_lit) return HopStep::kDone;   // (the left edge: the last tap moved nothing)
         h.prev_lit = lit;
         ++h.off_taps;

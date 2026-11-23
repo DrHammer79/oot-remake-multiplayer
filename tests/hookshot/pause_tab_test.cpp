@@ -2577,12 +2577,20 @@ TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the stri
     // Our page shows: L (our tab to Map), then the pace.
     CHECK(CharactersHopNext(h, true, true, 2, 1000) == HopStep::kTapL);
     CHECK(CharactersHopNext(h, true, true, 2, 1100) == HopStep::kWait);
-    // Our page gone, Map lit: the game's L (Map to Threads of Time), then Key Items, then Characters (lit 3).
+    // Our page gone, Map (2) current: the game's L (Map to Threads of Time 1), then Key Items (6), then Characters.
     CHECK(CharactersHopNext(h, false, true, 2, 1500) == HopStep::kTapL);
     CHECK(CharactersHopNext(h, false, true, 1, 2000) == HopStep::kTapL);
-    CHECK(CharactersHopNext(h, false, true, 0, 2500) == HopStep::kTapL);
-    CHECK(CharactersHopNext(h, false, true, 3, 3000) == HopStep::kDone);
-    // The strip not up: waits, taps nothing.
+    CHECK(CharactersHopNext(h, false, true, 6, 2500) == HopStep::kTapL);   // (Key Items is the game's: one more tap)
+    CHECK(CharactersHopNext(h, false, true, 0, 3000) == HopStep::kDone);   // (anything else: Characters)
+    CHECK(GameMinusCategory(6) && GameMinusCategory(1) && GameMinusCategory(2));
+    CHECK(!GameMinusCategory(0) && !GameMinusCategory(3) && !GameMinusCategory(-1));
+    CharactersHop c4;
+    CHECK(CharactersHopNext(c4, false, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(c4, false, true, 6, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(c4, false, true, 4, 2000) == HopStep::kDone);
+    // The category not readable: waits.
+    CharactersHop unread;
+    CHECK(CharactersHopNext(unread, false, true, -1, 1000) == HopStep::kWait);
     // The - menu no longer the open screen (closed, the Plus menu, another screen, a load, typing): over at once, no tap.
     for (const bool ours : {true, false}) {
         CharactersHop w;
@@ -2590,13 +2598,13 @@ TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the stri
         CharactersHop mid;
         CHECK(CharactersHopNext(mid, ours, true, 2, 1000) == HopStep::kTapL);
         CHECK(CharactersHopNext(mid, ours, false, 2, 1600) == HopStep::kGiveUp);   // (shut between two taps)
-        CHECK(CharactersHopNext(mid, ours, false, 3, 1700) == HopStep::kGiveUp);   // (not "arrived" either)
+        CHECK(CharactersHopNext(mid, ours, false, 0, 1700) == HopStep::kGiveUp);   // (not "arrived" either)
     }
     // The left edge: a tap that moved nothing ends it (the strip's own numbering unknown).
     CharactersHop e;
     CHECK(CharactersHopNext(e, false, true, 2, 1000) == HopStep::kTapL);
-    CHECK(CharactersHopNext(e, false, true, 0, 1500) == HopStep::kTapL);
-    CHECK(CharactersHopNext(e, false, true, 0, 2000) == HopStep::kDone);
+    CHECK(CharactersHopNext(e, false, true, 1, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(e, false, true, 1, 2000) == HopStep::kDone);   // (a tap that left Threads where it was)
     // The first game tap is not an edge before it has sent one.
     CharactersHop f;
     CHECK(CharactersHopNext(f, false, true, 2, 1000) == HopStep::kTapL);
