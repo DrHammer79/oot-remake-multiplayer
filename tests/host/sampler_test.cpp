@@ -324,6 +324,54 @@ TEST_CASE("host sampler: a reconnect while held sends the status, the equipment 
   CHECK(s.hold_reconnected(kStart + 2 * kFrameUs).empty());
 }
 
+TEST_CASE("host sampler: a reconnect while held to a new server uses its clock") {
+  Sampler s;
+  const std::uint64_t old_clock = 3'600'000'000ull;  // the old server ran an hour
+  s.frame(at(1.0f), old_clock);
+  REQUIRE(s.hold(old_clock + 1'000'000));
+  // The new server started a second ago.
+  const std::uint64_t now = 1'000'000;
+  const auto d = decode(s.hold_reconnected(now));
+  REQUIRE(d.samples.size() == 1);
+  CHECK(d.samples[0].time.server_time_us == now);
+  // Still held: the keep-alive goes on.
+  CHECK(s.hold(now + 100'000) == std::nullopt);
+  REQUIRE(s.hold(now + 200'000));
+  // Released, without and with the WELCOME's reset: frames send as Link moves, at their own times.
+  for (const bool reset : {false, true}) {
+    Sampler r = s;
+    if (reset) r.reset();
+    std::uint64_t frame_us = now + 300'000;
+    int sent = 0;
+    for (int i = 0; i < 30; ++i, frame_us += kFrameUs) {
+      for (const auto& p : decode(r.frame(at(2.0f + 0.1f * static_cast<float>(i)), frame_us)).samples) {
+        CHECK(p.time.server_time_us == frame_us);
+        ++sent;
+      }
+    }
+    CHECK(sent >= 5);
+  }
+}
+
+TEST_CASE("host sampler: the floor after a hold covers only a frame's age") {
+  // A held sample in one clock, then frames in a clock far behind it (a new server).
+  for (const bool reset : {false, true}) {
+    Sampler s;
+    s.frame(at(1.0f), 3'600'000'000ull);
+    REQUIRE(s.hold(3'601'000'000ull));
+    if (reset) s.reset();  // the WELCOME's reset
+    std::uint64_t frame_us = 1'000'000;
+    int sent = 0;
+    for (int i = 0; i < 30; ++i, frame_us += kFrameUs) {
+      for (const auto& p : decode(s.frame(at(2.0f + 0.1f * static_cast<float>(i)), frame_us)).samples) {
+        CHECK(p.time.server_time_us == frame_us);
+        ++sent;
+      }
+    }
+    CHECK(sent >= 5);
+  }
+}
+
 TEST_CASE("host sampler: held in a load or before any sample, nothing") {
   Sampler s;
   CHECK_FALSE(s.hold(kStart));  // nothing sent yet

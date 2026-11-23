@@ -298,7 +298,16 @@ TEST_CASE("session: a held game keeps sending its still player, so the other's p
 
 TEST_CASE("session: a reconnect while held sends the status and equipment again") {
   EnetLife enet;
-  auto server = std::make_unique<coop::server::EnetServer>(any_port());
+  // The old server has run an hour: its clock (time since it started) is far ahead of the new one's.
+  const auto started = std::chrono::steady_clock::now();
+  auto server = std::make_unique<coop::server::EnetServer>([&] {
+    auto o = any_port();
+    o.now_us = [started] {
+      const auto ran = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started);
+      return static_cast<std::uint64_t>(ran.count()) + 3'600'000'000ull;
+    };
+    return o;
+  }());
   REQUIRE(server->start());
   const std::uint16_t port = server->port();
   std::vector<Peer*> peers;
@@ -353,6 +362,51 @@ TEST_CASE("session: a reconnect while held sends the status and equipment again"
   CHECK(run_until(true, [&] { return connected(a) && statuses > 0 && equips > 0; }));
   CHECK(statuses.load() > 0);
   CHECK(equips.load() > 0);
+
+  // B keeps showing A: held, A's keep-alive goes on in the new server's clock; released, A's frames send again.
+  const auto fade_of_a = [&] {
+    const std::uint64_t now = b.session.with_client([](net::Client& c) { return c.server_now_us(); });
+    return b.session.with_presence([&](coop::presence::Presence& p) {
+      const auto pose = p.shown(a.number(), now);
+      return pose ? pose->fade : 0.0f;
+    });
+  };
+  REQUIRE(run_until(true, [&] { return fade_of_a() == 1.0f; }));
+  const auto lowest_for = [&](int ms, bool frames) {
+    float lowest = 1.0f;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+      server->service(1);
+      if (frames) a.step();
+      else a.session.service();
+      b.step();
+      lowest = std::min(lowest, fade_of_a());
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return lowest;
+  };
+  CHECK(lowest_for(1500, false) == 1.0f);
+  a.session.set_held(false);
+  CHECK(lowest_for(500, true) == 1.0f);
+  // Released, A walks: B's copy follows (a sample stamped in the old server's clock would keep it in place).
+  const auto x_of_a = [&] {
+    const std::uint64_t now = b.session.with_client([](net::Client& c) { return c.server_now_us(); });
+    return b.session.with_presence([&](coop::presence::Presence& p) {
+      const auto pose = p.shown(a.number(), now);
+      return pose ? pose->position[0] : 0.0f;
+    });
+  };
+  float x = 1.0f;
+  const auto walk_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+  while (std::chrono::steady_clock::now() < walk_end) {
+    x = std::min(x + 0.2f, 100.0f);
+    a.memory.put_vec3(test::Layout{}.game_ui + addr::kGameUiPosition, {x, 2.0f, 3.0f});
+    server->service(1);
+    a.step();
+    b.step();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  CHECK(x_of_a() > 20.0f);
 }
 
 TEST_CASE("session: a frame thread and a network thread per player share a flag") {

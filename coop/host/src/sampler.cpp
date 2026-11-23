@@ -69,6 +69,7 @@ void Sampler::reset() {
   previous_.reset();
   last_sent_.reset();
   equipment_sent_.reset();
+  hold_floor_us_ = 0;  // a new connection's clock
 }
 
 std::optional<Vec3> Sampler::velocity(const PlayerReading& reading, std::uint64_t now) const {
@@ -118,8 +119,9 @@ std::vector<Outgoing> Sampler::frame(const std::optional<PlayerReading>& reading
   // sample's: stamp after it (hold), each frame a little later, until the
   // frames pass it.
   std::uint64_t server_now_us = frame_us;
+  // The floor covers only a frame's age (kFrameAgeMaxUs). A frame further back is another clock (a new server).
   if (hold_floor_us_ != 0) {
-    if (frame_us <= hold_floor_us_) {
+    if (frame_us <= hold_floor_us_ && hold_floor_us_ - frame_us <= kFrameAgeMaxUs) {
       server_now_us = ++hold_floor_us_;
     } else {
       hold_floor_us_ = 0;
@@ -196,7 +198,9 @@ std::vector<Outgoing> Sampler::hold_reconnected(std::uint64_t server_now_us) {
   status_sent_ = true;
   if (equipment_sent_) push(out, protocol::PlayerEquip{protocol::kPlayerSelf, *equipment_sent_});
   protocol::PlayerSample sample = *last_sent_;
-  const std::uint64_t at = std::max(server_now_us, last_sent_->time.server_time_us + 1);
+  // The new connection's clock: after a server restart the old sample's time is the old server's uptime, and the
+  // others' presence forgot the old samples with their own WELCOME.
+  const std::uint64_t at = server_now_us;
   sample.time = {at, sequence_};
   sample.velocity = Vec3{0.0f, 0.0f, 0.0f};
   ++sequence_;
