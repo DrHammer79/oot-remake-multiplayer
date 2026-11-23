@@ -58,6 +58,12 @@ add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coo
 # compat/ first: its core/ and common/ headers stand in for the emulator's.
 target_include_directories(hookshot_coop PRIVATE compat src "${_coop_hook}" ../server)
 target_compile_definitions(hookshot_coop PRIVATE LICHII_COOP COOP_HOOKSHOT)
+# COOP_DEBUG_PANELS: the drawn debug panels, F7 (co-op panel) and F8 (item cheats); off, so release kits have no drawn
+# boxes (src/coop_debug_panels.h). A developer's or test build: -DCOOP_DEBUG_PANELS=ON.
+option(COOP_DEBUG_PANELS "Build the F7 co-op panel and the F8 item cheats panel into hookshot_coop" OFF)
+if(COOP_DEBUG_PANELS)
+  target_compile_definitions(hookshot_coop PRIVATE COOP_DEBUG_PANELS)
+endif()
 # coop_server_lib: the co-op server, run inside the game when the player hosts from the menu.
 target_link_libraries(hookshot_coop PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_server_lib
                       monocypher fmt::fmt coop_warnings)

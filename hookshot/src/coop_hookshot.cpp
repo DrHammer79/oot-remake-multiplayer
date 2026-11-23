@@ -38,6 +38,7 @@
 #include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_cheats_panel.h"
+#include "coop_debug_panels.h"
 #include "coop_playtest.h"
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
@@ -947,7 +948,7 @@ CoopDraw::Scene DrawScene() {
         if (g_box.open()) {
             s.box = CoopDraw::ChatBoxView{g_box.text(), g_box.failed()};
         }
-        if (g_cheats.open()) {
+        if (CoopDebugPanels::kOn && g_cheats.open()) {   // (release kits: no F8 panel, coop_debug_panels.h)
             CoopDraw::CheatsView v;
             v.filter = g_cheats.filter();
             for (const auto& r : CheatRows()) {
@@ -965,14 +966,14 @@ CoopDraw::Scene DrawScene() {
     {
         std::lock_guard lock(g_keys_mutex);
         static bool panel_env = [] {
-            g_keys.panel = EnvOn("LICHII_COOP_DEBUG_PANEL");
+            g_keys.panel = CoopDebugPanels::kOn && EnvOn("LICHII_COOP_DEBUG_PANEL");
             return true;
         }();
         (void)panel_env;
         g_keys.Update(KeyDown(0x75 /* F6 */), KeyDown(0x76 /* F7 */));
         static const bool always = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
         list = g_keys.list || always;
-        panel = g_keys.panel;
+        panel = CoopDebugPanels::kOn && g_keys.panel;   // (release kits: no F7 panel, coop_debug_panels.h)
     }
     auto rows = CoopHook::PlayerList();
     // The HUD blocks, players' colours and place names are the game look's
@@ -1086,7 +1087,8 @@ bool TypeKey(std::uint32_t vk, bool repeat) {
     }
     std::lock_guard lock(g_box_mutex);
     // The cheats panel (F8, LICHII_COOP_CHEATS=1) when it is open or the chat box is not.
-    if (g_cheats.open() || (!g_box.open() && CoopCheats::On())) {
+    // Release kits have no panel (coop_debug_panels.h): F8 opens nothing and takes no keys.
+    if (CoopDebugPanels::kOn && (g_cheats.open() || (!g_box.open() && CoopCheats::On()))) {
         const auto rows = CheatRows();
         if (g_cheats.Key(vk, repeat, rows.size())) {
             GiveChosen(rows);

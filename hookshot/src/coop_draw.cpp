@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "coop_dbno_draw.h"
+#include "coop_debug_panels.h"
 #include "coop_hud_hearts.h"
 #include "coop_hud_layout.h"
 #include "coop_i18n.h"
@@ -911,7 +912,7 @@ void Draw(const HosCoopDraw& d, const Scene& s, const Look& look) {
     if (game) {
         DrawHud(d, s.hud, s.own_voice, *game, s.game_hud_bottom, ChatTopGame(d, s, *game));
     }
-    if (s.panel) {
+    if (CoopDebugPanels::kOn && s.panel) {   // (release kits: none, coop_debug_panels.h)
         Font(d, 0);
         DrawPanel(d, *s.panel);
     }
@@ -923,7 +924,7 @@ void Draw(const HosCoopDraw& d, const Scene& s, const Look& look) {
     if (s.players) {
         DrawPlayers(d, *s.players, game);
     }
-    if (s.cheats) {
+    if (CoopDebugPanels::kOn && s.cheats) {
         Font(d, 0);
         DrawCheats(d, *s.cheats);
     }
