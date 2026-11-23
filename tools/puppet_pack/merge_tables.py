@@ -1308,6 +1308,18 @@ def merge_self_models(root, romfs, say=print):
         for name, path in find_mods(root).items():
             if fold(name) != PACK:
                 put_back_models(root, name, path, say)
+        if own_tile is not None:
+            # Row 265 (0.11.12): the pack on, but its romfs has none of your own tunic textures, because the start that
+            # puts them in (self_tunic.py, kit-paths.ps1 Set-KitSelfTunic) did not run before this merge (a lane's own
+            # install). A mod's Link model then wins and names the game's shared tunic textures: belt and boots take
+            # your colours but the tunic never does, in the field and in Customize's preview. Said at every start.
+            for name, path in order:
+                shipped = [rel for rel in SELF_MODELS.values()
+                           if fold(name) != PACK and os.path.isfile(os.path.join(path, "romfs", *rel.split("/")))]
+                if shipped:
+                    say(f"Your Link's colours: {name} has its own {', '.join(shipped)} and the puppet pack has none "
+                        "of your own tunic textures (put in by the kit's start before this merge: "
+                        "tools/puppet_pack/self_tunic.py): your Link's tunic keeps that model's colours.")
         return 0
     codec = Codec(romfs)
     failed = 0
