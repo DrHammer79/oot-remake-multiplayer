@@ -677,8 +677,6 @@ TEST_CASE("playtest: warp goes by the event request during an event and by the t
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, false, "KokiriForest").route == WarpRoute::event);
     CHECK(PlanWarp(&event, true, "KokiriForest").route == WarpRoute::event);     // the event request takes a start position
-    const auto boot = Status("{\"event\":true,\"loading\":false,\"age\":\"child\"}");   // no sample yet: the typed event
-    CHECK(PlanWarp(&boot, false, "KokiriForest").route == WarpRoute::event);
     const auto play = Status(Snap(999));
     CHECK(PlanWarp(&play, false, "KokiriForest").route == WarpRoute::teleport);
 }
@@ -702,6 +700,20 @@ TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missin
     }
     const auto nogame = Status("null");
     CHECK(PlanWarp(&nogame, false, "KokiriForest").route == WarpRoute::refuse);
+}
+
+TEST_CASE("playtest: a missing sample is treated like an old one by warp, the typed members alone do not count") {
+    // No Link sample yet (a game held since its start, a title): only the typed event, loading and age are there.
+    for (const char* typed : {"{\"event\":true,\"loading\":false,\"age\":\"child\"}",
+                              "{\"event\":false,\"loading\":false,\"age\":\"child\"}"}) {
+        const auto boot = Status(typed);
+        for (const bool entrance : {false, true}) {
+            const auto plan = PlanWarp(&boot, entrance, "KokiriForest");
+            CHECK(plan.route == WarpRoute::refuse);
+            CHECK(plan.code == "not_in_play");
+        }
+        CHECK_FALSE(WarpArrived(&boot, "KokiriForest"));   // typed event false, loading false and the right map: still no
+    }
 }
 
 TEST_CASE("playtest: a teleport to the other age's map is refused up front (Longshot picks the map by Link's age)") {

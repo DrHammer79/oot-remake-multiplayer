@@ -638,7 +638,8 @@ std::string_view AgeEnding(std::string_view scene) {
 
 WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene) {
     const auto* game = GameOf(status);
-    if (game && !SnapshotIsOld(status)) {
+    // A missing sample is no better than an old one: the typed members alone are not a Link sample (not_in_play).
+    if (game && !SnapshotIsOld(status) && !SnapshotMissing(status)) {
         if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
         if (game->Bool("event") == false) {
             if (entrance_given) {
@@ -677,7 +678,7 @@ TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scen
 
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene) {
     const auto* game = GameOf(status);
-    if (!game || SnapshotIsOld(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
+    if (!game || SnapshotIsOld(status) || SnapshotMissing(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
     const auto map = status->Text("map");
     if (!map) return false;
     if (SameName(*map, scene)) return true;

@@ -356,7 +356,7 @@ Nothing here has run in a game. The first run checks:
   Link, and `walk_to` to a point 5 m away stops near it (not `arrived` at 0 frames). In a title or pause the Link members are
   null and `snapshot_stale` is true.
 - `warp` in free play with an entrance answers `not_in_event` at once; `warp` to a map of Longshot's list moves Link (unproven: the "via teleport" path), and with `timeout` 5 it never waits longer than about 5 s.
-- `warp` during the save's arrival event (title just left): the module's request is taken, or `failed: ... refused: an event is playing`; an event in which Link's update does not run gives `not_in_play` even though the event request would work (not seen in a game yet).
+- `warp` during the save's arrival event (title just left): the module's request is taken, or `failed: ... refused: an event is playing`; an event in which Link's update does not run gives `not_in_play` even though the event request would work (not seen in a game yet). A `warp` treats a missing Link sample like an old one (the typed `event`, `loading` and `age` alone do not count), after the one frame `state` also runs.
 - `kill` with an id of an enemy shot or a Scrub Brother in the list: `refused: ... does not share it`, not `gone`.
 - `kill` with the id of a normal enemy: only that enemy takes the hit, not another of the same name nearer to Link.
 - Walk through a door during `go_to_actor`: the answer is `scene changed`, not `gone`.
