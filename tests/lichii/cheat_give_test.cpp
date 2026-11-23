@@ -69,6 +69,29 @@ TEST_CASE("cheat give: the words bombs, bow and hookshot stand for their item fl
     for (const std::string& name : Names("hookshot")) CHECK(IsItemFlag(name));
 }
 
+TEST_CASE("cheat give: a bare item name stands for its pouch count, else its IsGet flag") {
+    using namespace CoopCheatGive;
+    // The pouch count wins (Give marks IsGet got too); the full IsGet form still works as it is.
+    CHECK(Names("Item_Boomerang") == std::vector<std::string>{"PouchData.Item_Boomerang.StockNum"});
+    CHECK(Names("Weapon_Sword_Kokiri") == std::vector<std::string>{"PouchData.Weapon_Sword_Kokiri.StockNum"});
+    CHECK(Names("IsGet.Item_Boomerang") == std::vector<std::string>{"IsGet.Item_Boomerang"});
+    for (const std::string& name : Names("Item_Boomerang")) CHECK(IsItemFlag(name));
+    // A bare name the game has no flag for stays as typed, and Give says what form it wants.
+    CHECK(Names("Item_NoSuchThing") == std::vector<std::string>{"Item_NoSuchThing"});
+    FakeFlags f;
+    const auto r = Give(f, "Item_NoSuchThing");
+    CHECK_FALSE(r.ok);
+    CHECK(r.text.find("not an item flag") != std::string::npos);
+    CHECK(r.text.find("PouchData.Item_NoSuchThing.StockNum") != std::string::npos);
+    // The gift through the bare name writes the pouch count and the IsGet flag.
+    FakeFlags g;
+    g.has("PouchData.Item_Boomerang.StockNum", FlagKind::int32, 0);
+    g.has("IsGet.Item_Boomerang", FlagKind::boolean, 0);
+    for (const std::string& name : Names("Item_Boomerang")) CHECK(Give(g, name).ok);
+    CHECK(g.at("PouchData.Item_Boomerang.StockNum") == 1);
+    CHECK(g.at("IsGet.Item_Boomerang") == 1);
+}
+
 TEST_CASE("cheat give: the ammo counts are item flags too (per player: the panel does not list them)") {
     CHECK(CoopCheatGive::IsItemFlag(kBombs));
     CHECK(CoopCheatGive::IsItemFlag("PouchData.Item_Arrow_Normal.StockNum"));

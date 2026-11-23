@@ -49,6 +49,9 @@ class FakeGame:
         self.event = False      # an event runs: the module's warp (with an entrance) is taken only then
         self.no_teleport = {"BossStage"}   # maps Longshot's teleport list does not have
         self.via = None
+        self.flip_at = None     # (frame): the stick's sign turns over from this frame on (a model that changes under the walk)
+        self.away_from = None   # (x, z): Link ignores the stick and walks directly away from this point
+        self.faced = None       # the (x, z) of the last `face`
         self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
         game = self
 
@@ -74,7 +77,14 @@ class FakeGame:
     def run(self, frames, stick=None):
         for _ in range(frames):
             self.frame += 1
-            if stick and stick[1] > 0:
+            if self.flip_at is not None and self.frame == self.flip_at:
+                self.sign = -self.sign
+            if self.away_from is not None and stick and stick[1] > 0:
+                dx, dz = self.pos[0] - self.away_from[0], self.pos[2] - self.away_from[1]
+                n = math.hypot(dx, dz) or 1.0
+                self.pos[0] += 0.1 * dx / n
+                self.pos[2] += 0.1 * dz / n
+            elif stick and stick[1] > 0:
                 yaw = math.radians((self.camera or 0.0) + self.bias + self.sign * stick[0])
                 nx = self.pos[0] + 0.1 * stick[1] * math.sin(yaw)
                 if self.wall_x is None or nx < self.wall_x:
@@ -140,6 +150,10 @@ class FakeGame:
         if cmd == "act":
             reply = {"ok": True, "lines": m["lines"]}
             words = m["lines"].split()
+            if words and words[0] == "place" and len(words) == 4:
+                self.pos = [float(w) for w in words[1:]]
+            if words and words[0] == "face" and len(words) == 3:
+                self.faced = (float(words[1]), float(words[2]))
             if words and words[0] in ("kill", "hit"):
                 if len(words) > 1 and words[1].isdigit() and self.solo:
                     return {"ok": False, "error": "refused", "message": "no world list: an actor id is resolved in "
@@ -577,6 +591,7 @@ class PlayerServer(unittest.TestCase):
         out = g.call("log", {"match": "rocks:"})
         self.assertEqual(len(out["lines"]), 1)
         self.assertIn("3 new falling rocks", out["lines"][0])
+        self.assertEqual(g.call("log", {})["lines"], [ln for ln in out["lines"]] + ["[x] coop: other"])   # the plain cursor stays
         self.assertEqual(g.call("log", {})["lines"], [])                 # nothing new since
         self.assertEqual(live.load(d)["offsets"]["A"], len("boot line coop: before\n"))   # session file untouched
         with self.assertRaises(ValueError):
@@ -1283,6 +1298,211 @@ class LiveStartPlaytest(unittest.TestCase):
             argv = live.runner_argv(self.args(playtest=True, lane=lane), "ga", "gb", 1, "p", "dir")
             base = int(argv[argv.index("--playtest-ports") + 1])
             self.assertEqual((base + 1, base + 2), (pc.port_for("p1", lane), pc.port_for("p2", lane)))
+
+
+class KitThreeFixes(unittest.TestCase):
+    """The play-test kit made cheap and honest (playtest-kit-3): no bulk in a reply, an Empty prompt presses nothing, a
+    match does not eat the log, a zero count is no refusal, place with a facing, a walk that says it walks away."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.game = FakeGame(dump_dir=self.tmp.name)
+        self.game.items = {"Item_%03d" % i: 1 + i % 3 for i in range(290)}
+        self.game.items["Item_Zero"] = 0
+        self.game.world = {"frame": 1000, "age_ms": 40, "stale": False, "behind": False, "total": 1, "other_count": 0,
+                           "count": 1, "actors": [{"id": 3, "addr": "0x80000003", "name": "Enemy_Near", "kind": "enemy",
+                                                   "pos": [6, 0, 0], "dist": 6.0, "life": 4, "max_life": 4,
+                                                   "owner": 2, "alive": True}]}
+        self.tool = mcp_playtest.Game("p1", pc.Client(self.game.port), self.tmp.name)
+        self.c = self.tool.client
+
+    def tearDown(self):
+        self.tool.client.close()
+        self.game.close()
+        self.tmp.cleanup()
+
+    def acts(self):
+        return [m["lines"] for m in self.game.log if m["cmd"] == "act"]
+
+    # --- 1: the inventory only on request, in no verb reply ------------------------------------------------------------
+    def test_get_state_has_no_inventory_unless_asked(self):
+        r = self.tool.call("get_state", {})
+        self.assertNotIn("inventory", r)
+        self.assertNotIn("world", r)
+        self.assertEqual(r["inventory_count"], 290)                      # the zero entry is not counted
+        self.assertEqual(r["enemy_near"], 1)                             # the words still come from the world list
+        self.assertLess(len(json.dumps(r)), 1500)
+        r = self.tool.call("get_state", {"inventory": True})
+        self.assertEqual(len(r["inventory"]), 290)                       # non-zero entries only
+        self.assertNotIn("Item_Zero", r["inventory"])
+        self.assertNotIn("world", r)
+
+    def test_no_verb_reply_carries_the_inventory_or_the_world(self):
+        self.game.event = True
+        calls = [("warp", {"scene": "ForestTemple"}), ("step", {"frames": 2}), ("press", {"frames": 2}),
+                 ("place", {"x": 1, "y": 0, "z": 2}), ("place", {"x": 1, "y": 0, "z": 2, "facing": 90}),
+                 ("give", {"item": "bombs"}), ("hurt", {"quarter_hearts": 1}), ("flag", {"name": "F1", "value": 1}),
+                 ("walk_to", {"x": 1, "z": 1}), ("use_item", {"item": "Bow"}), ("talk", {}), ("open", {})]
+        self.game.prompt = "Open"
+        for name, args in calls:
+            text = json.dumps(self.tool.call(name, args))
+            self.assertNotIn('"inventory"', text, name)
+            self.assertNotIn('"world"', text, name)
+            self.assertNotIn("Item_100", text, name)
+            self.assertLess(len(text), 3000, name)
+
+    def test_use_item_names_the_inventory_entries_that_changed(self):
+        self.game.on_press = lambda buttons: self.game.items.update(Item_005=9, Item_New=1)
+        r = self.tool.call("use_item", {"item": "Bow"})
+        self.assertEqual(r["changed"]["inventory_changed"], {"Item_005": {"was": 3, "now": 9},
+                                                              "Item_New": {"was": 0, "now": 1}})
+        self.assertNotIn("inventory", r["state"])
+
+    def test_slim_state_leaves_a_reply_without_a_state_alone(self):
+        d = {"actors": [{"id": 1, "inventory": 5}], "frame": 3, "state": {"scene": "A", "inventory": {"x": 1, "y": 0}}}
+        r = pc.slim_state(d)
+        self.assertEqual(r["actors"], d["actors"])
+        self.assertEqual(r["state"], {"scene": "A", "inventory_count": 1})
+        self.assertEqual(d["state"]["inventory"], {"x": 1, "y": 0})      # the input is not changed
+
+    # --- 3: Empty is no prompt -----------------------------------------------------------------------------------------
+    def test_open_and_talk_press_nothing_for_an_empty_prompt(self):
+        for word in ("Empty", "empty", " None ", "", None):
+            self.game.prompt = word
+            for name in ("open", "talk"):
+                r = self.tool.call(name, {})
+                self.assertFalse(r["pressed"], (word, name))
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "input"])
+        self.game.prompt = "Open"
+        self.assertTrue(self.tool.call("open", {})["pressed"])
+
+    # --- 4: log with a match does not move the plain cursor -----------------------------------------------------------
+    def session(self, text=""):
+        d = os.path.join(self.tmp.name, "session")
+        os.makedirs(d, exist_ok=True)
+        logs = {x: os.path.join(d, "game-out-%s.txt" % x) for x in live.TAGS}
+        with open(logs["A"], "w", encoding="utf-8", newline="") as f:
+            f.write("boot coop: x\n")
+        live.save(d, {"started": 1000.0, "offsets": {"A": os.path.getsize(logs["A"]), "B": 0},
+                      "games": {x: {"log": logs[x]} for x in live.TAGS}})
+        g = mcp_playtest.Game("p1", self.c, self.tmp.name, session=d)
+        g.log_lines()          # the cursor starts after the boot
+        return g, logs["A"]
+
+    def write(self, path, text):
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            f.write(text)
+
+    def test_a_match_leaves_the_lines_it_did_not_return_for_the_next_look(self):
+        g, path = self.session()
+        self.write(path, "coop: a one\ncoop: b two\ncoop: a three\n")
+        self.assertEqual(g.call("log", {"match": "a "})["lines"], ["coop: a one", "coop: a three"])
+        self.assertEqual(g.call("log", {"match": "a "})["lines"], [])               # nothing new for this match
+        self.write(path, "coop: a four\n")
+        self.assertEqual(g.call("log", {"match": "a "})["lines"], ["coop: a four"])
+        self.assertEqual(g.call("log", {})["lines"], ["coop: a one", "coop: b two", "coop: a three", "coop: a four"])
+
+    def test_a_match_with_more_lines_than_the_limit_loses_none(self):
+        g, path = self.session()
+        n = live.MAX_LINES + 7
+        self.write(path, "".join("coop: m %d\ncoop: other %d\n" % (i, i) for i in range(n)))
+        first = g.call("log", {"match": "m "})["lines"]
+        second = g.call("log", {"match": "m "})["lines"]
+        self.assertEqual(len(first), live.MAX_LINES)
+        self.assertEqual(first + second, ["coop: m %d" % i for i in range(n)])
+
+    def test_a_half_written_line_waits_for_its_end(self):
+        g, path = self.session()
+        self.write(path, "coop: a one\ncoop: a tw")
+        self.assertEqual(g.call("log", {"match": "a "})["lines"], ["coop: a one"])
+        self.write(path, "o\n")
+        self.assertEqual(g.call("log", {"match": "a "})["lines"], ["coop: a two"])
+
+    # --- 5: a zero count is no refusal ---------------------------------------------------------------------------------
+    def test_a_zero_count_is_not_a_flagged_word(self):
+        quiet = ("coop: actors: in 10 s the game asked 4 creates (0 copies' shots refused), 2 deletes, 0 hits (life 0), "
+                 "0 lost; owners' deaths past a copy's own life stops 0, past its revive 0 (later steps kept dead 0)")
+        self.assertIsNone(pc.flag_reason(quiet))
+        self.assertIsNone(pc.flag_reason("coop: save: 0 failed, 0 errors, 0 refusals, 0 resyncs"))
+        self.assertEqual(pc.flag_reason(quiet.replace("(0 copies", "(3 copies")), "word:refused")
+        self.assertEqual(pc.flag_reason("coop: save: 10 failed"), "word:failed")
+        self.assertEqual(pc.flag_reason("coop: peer refused us (0 retries left)"), "word:refused")
+        self.assertEqual(pc.flag_reason("warning: coop: actors: in 10 s (0 copies' shots refused)"), "level:warning")
+
+    # --- 6: place with a facing, and a walk that says it walks away ---------------------------------------------------
+    def test_place_with_a_facing_places_then_turns(self):
+        r = self.tool.call("place", {"x": 10, "y": 1.5, "z": 20, "facing": 90})
+        self.assertEqual(self.acts(), ["place 10 1.5 20", "face 11.00 20.00"])
+        self.assertEqual(self.game.pos, [10.0, 1.5, 20.0])
+        self.assertEqual(self.game.faced, (11.0, 20.0))
+        self.assertEqual(r["frames"], 4)
+        r = self.tool.call("place", {"x": 0, "y": 0, "z": 0, "facing": 180})
+        self.assertEqual(self.acts()[-1], "face 0.00 -1.00")
+        self.tool.call("place", {"x": 0, "y": 0, "z": 0, "face_x": 5, "face_z": 7.5})
+        self.assertEqual(self.acts()[-2:], ["place 0 0 0", "face 5.00 7.50"])
+
+    def test_place_without_a_facing_is_one_line_and_bad_facings_are_refused(self):
+        self.tool.call("place", {"x": 1, "y": 2, "z": 3})
+        self.assertEqual(self.acts(), ["place 1 2 3"])
+        for extra in ({"facing": 90, "face_x": 1, "face_z": 1}, {"face_x": 1}, {"facing": 400},
+                      {"facing": float("nan")}):
+            with self.assertRaises(ValueError, msg=str(extra)):
+                self.tool.call("place", dict({"x": 1, "y": 2, "z": 3}, **extra))
+        self.assertEqual(self.acts(), ["place 1 2 3"])
+
+    def test_walk_to_relearns_when_the_stick_turns_over_under_it(self):
+        game = FakeGame(camera=0.0)
+        game.flip_at = 1060
+        c = pc.Client(game.port)
+        try:
+            r = pc.walk_to(c, 12.0, 9.0, tolerance=0.4, max_frames=1500)
+        finally:
+            c.close()
+            game.close()
+        self.assertTrue(r["arrived"], (r["reason"], r["distance"]))
+        self.assertTrue(r["trace"])
+
+    def test_walk_to_that_only_gets_farther_stops_and_says_so(self):
+        game = FakeGame()
+        game.away_from = (4.0, 4.0)
+        c = pc.Client(game.port)
+        try:
+            r = pc.walk_to(c, 4.0, 4.0, tolerance=0.3, max_frames=2000)
+        finally:
+            c.close()
+            game.close()
+        self.assertFalse(r["arrived"])
+        self.assertTrue(r["reason"].startswith("moving away"), r["reason"])
+        self.assertLess(r["frames"], 400)                                # it did not walk on for 2000 frames
+        self.assertLessEqual(len(r["trace"]), pc.TRACE_KEEP)
+        self.assertEqual(len(r["trace"][0]), 7)
+
+    def test_walk_to_reply_trace_is_bounded(self):
+        game = FakeGame()
+        c = pc.Client(game.port)
+        try:
+            r = pc.walk_to(c, 300.0, 0.0, tolerance=0.3, max_frames=800)
+        finally:
+            c.close()
+            game.close()
+        self.assertEqual(r["reason"], "timed out")
+        self.assertEqual(len(r["trace"]), pc.TRACE_KEEP)
+
+    def test_a_short_graze_teaches_the_steering_nothing(self):
+        st = pc.Steering()
+        st.last = ([0.0, 0.0, 0.0], 0.0, 0.0)
+        st.learn([0.0, 0.0, 0.1], 0.0)                                   # 0.1 m: more than stuck, less than a clean move
+        self.assertEqual(st.fit[1]["n"], 0)
+        st.learn([0.0, 0.0, 0.5], 0.0)
+        self.assertEqual(st.fit[1]["n"], 1)
+
+    # --- 7: the docs name the right form of live.py stop ---------------------------------------------------------------
+    def test_the_docs_say_stop_session_with_its_flag(self):
+        root = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+        for rel in ("docs/playtest.md",):
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                text = f.read()
+            self.assertNotRegex(text, r"live\.py (?:do|state|shot|checkpoint|stop) (?!--)[<\w]", rel)
 
 
 if __name__ == "__main__":

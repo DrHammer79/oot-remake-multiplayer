@@ -201,6 +201,8 @@ class Client:
 LEVEL = re.compile(r"^(?:\[[A-Za-z]+\] )?(warning|error|critical): ")   # (one more `[tag] ` may come before the level)
 _COOP_LINE = re.compile(r"\bcoop(?: voice)?:")   # the module's lines: `coop: ...` and the voice patch's `coop voice: ...`
 FLAG_WORDS = re.compile(r"\b(fail(?:ed|ure|ures|s)?|error|errors|refus(?:ed|es|al)|resync\w*)", re.IGNORECASE)
+# a count of zero is not the thing it counts: "(0 copies' shots refused)" in the periodic actors line says no refusal
+_ZERO_COUNT = re.compile(r"\(0 [^()]*\)|(?<![\w.])0 (?:fail\w*|errors?|refus\w*|resync\w*)(?!\w)", re.IGNORECASE)
 MAX_FLAGGED = 40
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?!\.?\d)")
 # an IPv6 address has a `::` or a hex letter (a time such as 12:34:56 has neither)
@@ -293,7 +295,7 @@ def flag_reason(line):
     m = LEVEL.search(line)
     if m:
         return "level:" + m.group(1)
-    m = FLAG_WORDS.search(line)
+    m = FLAG_WORDS.search(_ZERO_COUNT.sub(" ", line))
     return "word:" + m.group(1).lower() if m else None
 
 
@@ -386,6 +388,35 @@ def _frames(n):
     return n
 
 
+BULK_KEYS = ("inventory", "world")   # the members of a game state that cost thousands of tokens (about 290 items, 40 actors)
+
+
+def _is_state(d):
+    return isinstance(d, dict) and "inventory" in d and "scene" in d
+
+
+def slim_state(value, inventory=False):
+    """A copy of a tool reply without the bulk of every game state in it: the whole `inventory` (about 290 entries, 10 to
+    12 thousand tokens on every get_state, warp, step ...) is replaced by `inventory_count`, and the `world` list (the
+    nearest 40 actors; get_world has it) is left out. With `inventory`, the inventory stays, only its non-zero entries.
+    The input is not changed."""
+    if isinstance(value, list):
+        return [slim_state(v, inventory) for v in value]
+    if not isinstance(value, dict):
+        return value
+    if not _is_state(value):
+        return {k: slim_state(v, inventory) for k, v in value.items()}
+    out = {k: slim_state(v, inventory) for k, v in value.items() if k not in BULK_KEYS}
+    inv = value.get("inventory")
+    if isinstance(inv, dict):
+        out["inventory_count"] = sum(1 for v in inv.values() if v)
+        if inventory:
+            out["inventory"] = {k: v for k, v in inv.items() if v}
+    elif inv is not None and inventory:
+        out["inventory"] = inv
+    return out
+
+
 def game_of(reply):
     """The state in a reply: its "state" (or "game") object when it has one, else the reply itself (state)."""
     for key in ("state", "game"):
@@ -416,6 +447,12 @@ def yaw_to(pos, x, z):
     return math.degrees(math.atan2(x - pos[0], z - pos[2]))
 
 
+MIN_CLEAN_MOVE = 0.15      # metres a push has to move Link for its direction to teach the model anything
+TRACE_KEEP = 24            # the walk's reply keeps the last pushes, so a wrong walk can be read afterwards
+AWAY_METRES = 0.1          # how much farther than the push before a push has left Link (metres) to count as moving away
+AWAY_LIMIT = 3             # resets of the model for a walk that gets farther from the target, then the walk stops
+
+
 class Steering:
     """Camera-relative steering. The model: Link walks toward world yaw camera + offset + sign * stick angle. The
     bridge's starting guess is offset 0, sign +1 (docs/playtest.md); both are learnt from Link's real moves. The
@@ -429,6 +466,17 @@ class Steering:
         self.last = None              # (pos, camera, stick angle) of the last push
         self.stuck = self.detour_left = 0
         self.detour = 90.0
+        self.resets = 0
+
+    def reset(self):
+        """Forget what was learned (the model walked Link away from the target): the offset is learned again from the
+        next clean moves. The first reset keeps the sign, the second turns it over (a wrong sign is the one thing a
+        slow fit can take many pushes to find)."""
+        if self.resets == 1:
+            self.sign = -self.sign
+        self.resets += 1
+        self.fit = {1: {"offset": 0.0, "err": 0.0, "n": 0}, -1: {"offset": 0.0, "err": 0.0, "n": 0}}
+        self.last, self.stuck, self.detour_left = None, 0, 0
 
     def learn(self, pos, camera):
         if self.last is None:
@@ -439,6 +487,8 @@ class Steering:
             if self.stuck >= self.stuck_after and not self.detour_left:
                 self.detour, self.detour_left, self.stuck = -self.detour, self.detour_for, 0
             return
+        if math.hypot(pos[0] - lpos[0], pos[2] - lpos[2]) < MIN_CLEAN_MOVE:
+            return   # a graze along a wall or a ramp-up step: its direction says little about the stick, learn nothing
         self.stuck = 0
         seen = yaw_to(lpos, pos[0], pos[2])
         for s, f in self.fit.items():
@@ -479,12 +529,31 @@ def walk_to(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
     scene = st.get("scene")
     steer = Steering()
     used = 0
+    trace = []            # [frames used, x, z, distance left, stick angle, strength, sign] before each push
+    prev, away, start_dist = None, 0, None
     while True:
         pos = st.get("pos")
         if not pos:
             return {"arrived": False, "reason": no_position_reason(st), "frames": used, "state": st}
         dist = math.hypot(x - pos[0], z - pos[2])
-        out = {"frames": used, "distance": round(dist, 3), "state": st}
+        out = {"frames": used, "distance": round(dist, 3), "state": st, "trace": trace[-TRACE_KEEP:],
+               "target": [x, z]}
+        # farther from the target after three pushes in a row (the first one may be the push that taught the model): the
+        # model is wrong (a wrong camera or stick convention, or a push learned while sliding along a wall); start it
+        # again, and turn the sign over the second time. After AWAY_LIMIT resets the walk says so instead of walking on.
+        if prev is not None and dist > prev + AWAY_METRES:
+            away += 1
+            if away >= 3:
+                if steer.resets >= AWAY_LIMIT:
+                    return dict(out, arrived=False, reason="moving away: the walk got farther from the target (%.1f m "
+                                "now, %.1f m at the start) after %d restarts of the steering; the trace has each push" %
+                                (dist, start_dist, steer.resets))
+                steer.reset()
+                away = 0
+        elif prev is not None:
+            away = 0
+        prev = dist
+        start_dist = dist if start_dist is None else start_dist
         if dist <= tolerance:
             return dict(out, arrived=True, reason="arrived")
         if st.get("scene") != scene:
@@ -494,7 +563,10 @@ def walk_to(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
         if used >= max_frames:
             return dict(out, arrived=False, reason="timed out")
         n = min(chunk, max_frames - used)
-        st = game_of(client.input(steer.push(pos, st.get("camera"), (x, z)), (), n))
+        stick = steer.push(pos, st.get("camera"), (x, z))
+        trace.append([used, round(pos[0], 2), round(pos[2], 2), round(dist, 2), stick[0], stick[1], steer.sign])
+        del trace[:-TRACE_KEEP]
+        st = game_of(client.input(stick, (), n))
         used += n
 
 

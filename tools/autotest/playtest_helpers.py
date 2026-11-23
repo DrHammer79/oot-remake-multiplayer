@@ -147,6 +147,17 @@ def face(client, ident, name=None):
     return {"faced": True, "reason": "ok", "actor": a}
 
 
+def place_facing(client, place_line, point, frames=2):
+    """`place X Y Z` and then `face X Z` (the point to look at): the bridge puts Link on its next frames, so a frame pair
+    passes between the two lines and after the second. Returns the replies of both and the frames used."""
+    placed = client.act(place_line)
+    client.step(frames)
+    faced = client.act("face %.2f %.2f" % point)
+    client.step(frames)
+    return {"placed": placed, "faced": faced, "facing_at": [round(point[0], 2), round(point[1], 2)],
+            "frames": 2 * frames, "state": pc.game_of(client.state())}
+
+
 def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_frames=PRESS_FRAMES):
     """go_to_actor, face, then press `button` (the sword; Y is a guess to confirm in the lane run) in rounds until the
     actor's life is 0 or `max_frames` frames are used. The actor is looked up before the walk and before every press:
@@ -202,11 +213,18 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     return out
 
 
-CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "inventory", "age")
+CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age")
 
 
 def _changed(before, after):
-    return {k: {"was": before.get(k), "now": after.get(k)} for k in CHANGED if before.get(k) != after.get(k)}
+    out = {k: {"was": before.get(k), "now": after.get(k)} for k in CHANGED if before.get(k) != after.get(k)}
+    # the inventory is about 290 entries: only the ones that changed, one by one (under another key, so that the
+    # tool layer's `inventory` filter leaves it alone)
+    b, a = before.get("inventory") or {}, after.get("inventory") or {}
+    diff = {k: {"was": b.get(k, 0), "now": a.get(k, 0)} for k in sorted(set(b) | set(a)) if b.get(k, 0) != a.get(k, 0)}
+    if diff:
+        out["inventory_changed"] = diff
+    return out
 
 
 def use_item(client, item, button="Y", frames=PRESS_FRAMES):
@@ -222,11 +240,19 @@ def use_item(client, item, button="Y", frames=PRESS_FRAMES):
             "state": after}
 
 
+NO_PROMPT = ("", "empty", "none", "null", "nothing")
+
+
+def no_prompt(prompt):
+    """True when the A prompt says nothing is there: no value, or the word the game uses for it ("Empty")."""
+    return not prompt or (isinstance(prompt, str) and prompt.strip().lower() in NO_PROMPT)
+
+
 def interact(client, what="talk", frames=PRESS_FRAMES):
     """Press A when the state's `prompt` says an action is there (talk to an NPC, open a chest or a door); returns the
     new prompt and event. With no prompt nothing is pressed."""
     before = pc.game_of(client.state())
-    if not before.get("prompt"):
+    if no_prompt(before.get("prompt")):
         return {"result": "nothing to %s here: the A prompt is empty" % what, "pressed": False,
                 "prompt": before.get("prompt"), "event": before.get("event")}
     client.input(None, ["A"], frames)

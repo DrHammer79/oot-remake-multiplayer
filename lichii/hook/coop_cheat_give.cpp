@@ -60,20 +60,32 @@ std::int32_t Wanted(const coop::host::ItemFlag& item, std::int32_t was) {
 
 }  // namespace
 
+bool IsItemFlag(std::string_view name) { return Find(name) != nullptr; }
+
 std::vector<std::string> Names(std::string_view word) {
     if (word == "bombs") return {"PouchData.Item_BombBag_Small.StockNum"};
     if (word == "bow") return {"PouchData.Weapon_Range_Bow.StockNum"};
     if (word == "hookshot") return {"PouchData.Item_Hookshot.StockNum"};
+    // A bare item name (Item_Boomerang, Weapon_Sword_Kokiri): the pouch count, which Give also marks as got; else its
+    // IsGet flag. A name with a dot is a flag name and stays as it is.
+    if (!word.empty() && word.find('.') == std::string_view::npos) {
+        const std::string stock = "PouchData." + std::string(word) + ".StockNum";
+        if (IsItemFlag(stock)) return {stock};
+        const std::string got = "IsGet." + std::string(word);
+        if (IsItemFlag(got)) return {got};
+    }
     return {std::string(word)};
 }
-
-bool IsItemFlag(std::string_view name) { return Find(name) != nullptr; }
 
 Result Give(coop::host::FlagStore& game, std::string_view name) {
     Result out;
     const auto* item = Find(name);
     if (!item) {
         out.text = std::string(name) + ": not an item flag";
+        if (name.find('.') == std::string_view::npos) {
+            out.text += " (a bare item name such as Item_Boomerang needs a PouchData." + std::string(name) +
+                        ".StockNum or an IsGet." + std::string(name) + " flag, and this game has neither)";
+        }
         return out;
     }
     const auto now = game.read(coop::host::FlagKey(item->hash, 0));
