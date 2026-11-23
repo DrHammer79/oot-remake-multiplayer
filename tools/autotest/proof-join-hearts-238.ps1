@@ -1,7 +1,7 @@
 # Player row 238 proof, both variants in one go (lane 1, kits as kit_pair.py setup made them):
 #   proof-join-hearts-238.ps1 -KitA <kit-A> -KitB <kit-B>
-# 1. hs-join-hearts-238 (rejoin after B gained a heart offline), 2. hs-join-fresh-238 (B's baseline save edited to 4
-# hearts, B never joined: a fresh join). B's baseline is put back from a copy in a finally block. No PASS from here:
+# 1. hs-join-hearts-238 (rejoin after B gained a heart offline), 2. hs-join-fresh-238 (B's baseline save edited to one heart
+# more than A's, B never joined: a fresh join). B's baseline is put back from a copy in a finally block. No PASS from here:
 # the shots decide (read the run folders printed); exit 0 when both runs ended.
 param(
     [Parameter(Mandatory)][string]$KitA,
@@ -34,8 +34,16 @@ Invoke-Run 'hs-join-hearts-238'
 if (Test-Path -LiteralPath $keep) { Remove-Item -LiteralPath $keep -Recurse -Force }
 Copy-Item -LiteralPath $base -Destination $keep -Recurse
 try {
+    # One heart more than the host's own baseline (run 20261123-010422: both baselines had 16, so a fixed 16 was no
+    # difference at all). A's slot_00 is the save its `load` plays.
+    $aSave = Join-Path (Join-Path $KitA 'autotest-save') 'slot_00\progress.sav'
+    $aLine = "$(& $py -I (Join-Path $here 'save_flags.py') get $aSave int:0xfbe01da1)"
+    if ($LASTEXITCODE -ne 0 -or $aLine -notmatch '= (\d+)\s*$') { throw "cannot read A's MaxLife from ${aSave}: $aLine" }
+    $more = [int]$Matches[1] + 4
+    if ($more -gt 80) { throw "A's MaxLife $($Matches[1]) leaves no room for one heart more" }
+    Write-Host "A's baseline MaxLife $($Matches[1]); B's set to $more"
     foreach ($sav in Get-ChildItem -Path $base -Recurse -Filter progress.sav) {
-        & $py -I (Join-Path $here 'save_flags.py') set $sav.FullName int:0xfbe01da1=16 int:0x31ab5580=16
+        & $py -I (Join-Path $here 'save_flags.py') set $sav.FullName "int:0xfbe01da1=$more" "int:0x31ab5580=$more"
         if ($LASTEXITCODE -ne 0) { throw "save_flags set failed on $($sav.FullName)" }
     }
     Invoke-Run 'hs-join-fresh-238'
