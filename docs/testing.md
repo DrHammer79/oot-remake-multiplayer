@@ -523,6 +523,16 @@ The game build (about an hour, the whole PC) depends only on the three inputs of
 
 Before a chunk, `hs.py cache status` says HIT (module only) or MISS (one game build first, by the integrator, with `build-game.lock`; then `hs.py warmup` once and `lanes.py setup` from the warmed pair).
 
+## Windows firewall
+
+Windows Defender Firewall asks once for every program path that listens on all addresses (0.0.0.0), and a build folder has its own program paths. The unit tests therefore listen on `127.0.0.1` only and never prompt, in any build folder.
+
+- Every listener of the server library takes the address to bind (`bind` in its config: `ServerOptions`, `HostServiceConfig` and its `helper_bind` for the relay link and the router lookups, `JoinConfig`, `RelayLinkConfig`, the UPnP and PCP configs, `RelayServer`; `lookup_on_relay` and `list_rooms_on_relay` take it as a last argument). With no address it binds all addresses, as for a player: that default is tested (`tests/server/bind_guard_test.cpp`) and unchanged.
+- A guard (`coop/net/bind_guard.hpp`) is on in `coop_tests` and `coop_server_tests`: a bind to anything but `127.x.x.x` is refused and counted, and the program exits with an error at the end, so a new listener or test that forgets the address fails instead of opening the firewall. A test that needs another address is not written: UPnP, PCP and LAN discovery run against a fake router on `127.0.0.1`.
+- The `coop_server` and `coop_test` runs in ctest pass `--bind 127.0.0.1` (`coop_test` binds its own server to it unless `--server-only`).
+- `coop_server.exe` itself listens on all addresses, so Windows asks once per path where it runs: allow it once and reuse the same build folder instead of making a new one each time. To run a server on a test PC without a prompt, use a copy at a path that was already allowed.
+- To check a build folder: run both test programs, then `Get-NetFirewallApplicationFilter -PolicyStore ActiveStore | Where-Object Program -match '<folder name>'` returns nothing.
+
 ## CI
 
 GitHub Actions runs `Build` in two tiers (`.github/workflows/build.yml`): one full run per batch of branches, not one per branch.

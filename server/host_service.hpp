@@ -45,6 +45,10 @@ struct HostServiceConfig {
   std::uint16_t port = protocol::kDefaultPort;
   std::uint16_t port_tries = 1;
   std::optional<std::uint32_t> bind;  // as ServerOptions::bind
+  // The address the sockets that look for the router (UPnP, PCP / NAT-PMP) and the relay link bind to; none: all
+  // addresses, as for a player. Not `bind`: a public game binds the game port to 127.0.0.1 only, while its relay link
+  // must reach the internet. Tests: 127.0.0.1 (a listener on all addresses makes the Windows firewall ask).
+  std::optional<std::uint32_t> helper_bind;
   SessionConfig session;              // join_password must not be empty
   // ENet's connection slots: more than max_players, so one more player can
   // connect and be told the server is full.
