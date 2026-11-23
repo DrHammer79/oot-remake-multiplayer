@@ -307,9 +307,27 @@ void Table::Publish(const std::vector<Boss>& bosses) {
             }
             e.dying = b.own_death;
         } else {
-            e.dying = Dying(b.name);
+            // Probe 3 run 20261123-092928: Twinrova's sisters died here (life 0, their owner's death) mid-fight, no
+            // outro: their copies' own death flow (which starts the fusion event in the game that runs it) was
+            // skipped as any copy change, so neither game fused. A dead body runs its own death, as a plain enemy.
+            const bool was_dying = e.dying;
+            e.body_dead = b.own_death;
+            e.dying = Dying(b.name) || e.body_dead;
             if (e.dying && b.role == Role::copy) {
-                AddDyingLife(b.life_component);
+                if (Dying(b.name)) {
+                    AddDyingLife(b.life_component);  // (the outro's: its next step ends it. A dead body's Life is
+                                                     // free already, its owner's death released it: one that comes
+                                                     // back, a Bongo Bongo hand, a Stalfos, is held again)
+                }
+                if (!was_dying && e.body_dead) {
+                    if (e.wanted && !event_ && steps_ >= e.react_until) {
+                        MakeLate(e);  // its death's first changes, skipped a moment ago
+                    }
+                    ++counts_.body_deaths;
+                    Note(b.name + ": dead here (its life 0 or its owner's death): the copy runs all its own from now on");
+                }
+            } else if (was_dying && !e.dying && b.role == Role::copy) {
+                e.react_until = std::max(e.react_until, steps_ + kAfterEventSteps);  // (a part back from life 0)
             }
             if (b.role == Role::owner) {
                 Hold(e, b);
@@ -654,7 +672,7 @@ void Table::SetDying(std::vector<std::string> bodies) {
         }
     }
     for (auto& [bsa, e] : by_bsa_) {
-        const bool now = Dying(e.name);
+        const bool now = Dying(e.name) || e.body_dead;
         if (e.plain || now == e.dying) {
             continue;  // (a plain enemy's death is Publish's own_death)
         }

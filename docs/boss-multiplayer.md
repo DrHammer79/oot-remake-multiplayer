@@ -12,6 +12,11 @@ the plan; [dungeons-boss.md](dungeons-boss.md) says how the sync works today.
   wraps, which wait for the boss table while another thread holds it (2026-11-23, probe 3 f-19): they used to let
   the game run its own then, about once a second, so Twinrova's copy dropped the owner's fire attack for its own
   Fly_Start and started it over from PreAttack again and again, never reaching the shot.
+  A boss body that is dead in a game (its life 0 there, or its owner's death) runs its own changes on that game's copy
+  from then on, as a plain enemy does, whether or not the fight's outro has begun: Koume and Kotake's own death flow
+  starts the fusion event (run 20261123-092928: with every copy change skipped neither game fused), a Bongo Bongo
+  hand falls and grows back on its own (then takes the owner's verbs again and its Life is held again), a mini-boss
+  or Barinade jellyfish dies as in its owner's game.
 - **Boss turns** (#308 and `boss-turns-0119`): the boss goes to the next player by number at the end of **every**
   attack in its owner's game (4 s at least with one player, `boss_turn_us`, so a quick combo is not split), so its
   AI fights each player in turn. A player who is down, dead or paused is skipped, and is in the round again at the

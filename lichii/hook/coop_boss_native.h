@@ -256,7 +256,9 @@ struct Boss {
     // room), on the same path as a boss: one model for every enemy (fable-g4-enemies). What differs:
     // - its Life is never held here: the Sync's own rules share its kills (issue 133), a copy dies of our hit;
     // - `own_death`: its death runs here now (its life is 0 in our game, or its owner's died): the copy runs
-    //   every change of its own from then on, as a boss's named by SetDying;
+    //   every change of its own from then on, as a boss's named by SetDying. A boss body's too (PlainDeath, every
+    //   enemy): a body that dies before its fight's outro (Twinrova's Koume and Kotake, whose own death flow starts
+    //   the fusion event) runs its own death, as the owner's body does;
     // - its own brain asking for another brain verb than the owner's is told (TakeOwnWants): it wants to act
     //   on our Link (the wake and chase rules of the Sync hand it over, and NoteOwnWake lets it run).
     bool plain = false;
@@ -323,6 +325,7 @@ struct Counts {
     std::uint64_t plain_wants = 0;    // a plain enemy copy's own brain asked another brain verb than its owner's
     std::uint64_t plain_wakes = 0;    // a plain enemy copy's own wake let run (NoteOwnWake)
     std::uint64_t plain_deaths = 0;   // a plain enemy copy whose death began here: its own runs
+    std::uint64_t body_deaths = 0;    // a boss body copy dead here before its outro (Boss::own_death): its own runs
     std::uint64_t owner_stalls = 0;   // row 149: our boss held one move kStallSteps with no life change: re-chosen
     std::uint64_t owner_rechosen = 0; // its brain verb set again by our caller (a stall, or a copy just made ours)
     std::uint64_t owner_restarted = 0; // row 178: a copy made ours mid-move: that move started over as ours
@@ -636,7 +639,8 @@ private:
         // Owner: our event ended: send our brain verb as a change.
         bool record_after_event = false;
         std::uint64_t life_component = 0;  // (Publish's, for SetDying's release)
-        bool dying = false;                // its death has begun (SetDying; a plain one's own_death): its own game runs it
+        bool dying = false;                // its death has begun (SetDying, or Boss::own_death): its own game runs it
+        bool body_dead = false;            // a boss body's Boss::own_death (kept through SetDying)
         bool plain = false;                // (Boss::plain)
         // Owner (row 149): the move it holds now (animation, brain verb, last action verb, life), since which
         // step, the action requests its AI made since, and how often it was re-chosen in this move. `rechoose`:
