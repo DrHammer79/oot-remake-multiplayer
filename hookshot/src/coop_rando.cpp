@@ -533,7 +533,30 @@ bool ParseHandSeed(std::string_view value, std::string* hash, std::string* folde
     return true;
 }
 
-std::string SeedFilesHash(const fs::path& folder, const std::function<bool()>* stop) {
+namespace {
+// The mod's own copy of a file merge_tables.py rewrote in the mod (size table, actor rows, saved values, archive), kept
+// beside with a stamp whose second line `out <file path under the mods folder> <length> <FNV-1a 64>` names the file it
+// wrote. The kept copy counts only while that line names the file now: a seed built again in the same folder leaves the
+// old copy and stamp behind, and the new file is the seed. Same rule as merge_tables.py original_of / original_table.
+// Empty path: use the file itself.
+fs::path KeptCopy(const fs::path& folder, const fs::path& live, const fs::path& kept, const fs::path& stamp) {
+    std::error_code ec;
+    if (!fs::is_regular_file(kept, ec)) return {};
+    std::ifstream in(stamp, std::ios::binary);
+    std::string head, out;
+    if (!in || !std::getline(in, head) || !std::getline(in, out)) return {};
+    if (!out.empty() && out.back() == '\r') out.pop_back();
+    const std::string now = TablesStamp(folder.parent_path(), {live});  // "coop-tables 1\n<path> <length> <hash>\n"
+    const std::size_t at = now.find('\n');
+    const std::size_t end = now.find('\n', at + 1);
+    if (at == std::string::npos || end == std::string::npos) return {};
+    return out == "out " + now.substr(at + 1, end - at - 1) ? kept : fs::path();
+}
+}  // namespace
+
+std::string SeedFilesHash(const fs::path& folder_in, const std::function<bool()>* stop) {
+    fs::path folder = folder_in;
+    if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
     // path (lower case, '/') -> the file whose bytes stand for it
     std::vector<std::pair<std::string, fs::path>> files;
     std::error_code ec;
@@ -548,17 +571,25 @@ std::string SeedFilesHash(const fs::path& folder, const std::function<bool()>* s
         fs::path from = it->path();
         // The kit's start rewrites these in the mod whose tables win and keeps the mod's own beside (merge_tables.py).
         const fs::path name = it->path().filename();
+        // Each only while its stamp names the file now (KeptCopy). The size table's stamp is one for the mod, the others'
+        // are `<kept file>.txt`.
+        const auto per_file = [&](const fs::path& kept) {
+            fs::path stamp = kept;
+            return KeptCopy(folder, it->path(), kept, stamp += ".txt");
+        };
+        fs::path kept_copy;
         if (rel.rfind("system/resource/", 0) == 0 && rel.find('/', 16) == std::string::npos &&
-            fs::is_regular_file(folder / "_coop-size-table" / name, ec)) {
-            from = folder / "_coop-size-table" / name;
+            !(kept_copy = KeptCopy(folder, it->path(), folder / "_coop-size-table" / name,
+                                   folder / "_coop-size-table" / "merged.txt")).empty()) {
+            from = kept_copy;
         } else if (rel.rfind("rsdb/", 0) == 0 && rel.find('/', 5) == std::string::npos &&
-                   fs::is_regular_file(folder / "_coop-rows" / name, ec)) {
-            from = folder / "_coop-rows" / name;
+                   !(kept_copy = per_file(folder / "_coop-rows" / name)).empty()) {
+            from = kept_copy;
         } else if (rel.rfind("gamedata/", 0) == 0 && rel.find('/', 9) == std::string::npos &&
-                   fs::is_regular_file(folder / "_coop-gamedata" / name, ec)) {
-            from = folder / "_coop-gamedata" / name;  // (player report 206: other mods' saved values merged in)
-        } else if (fs::is_regular_file(folder / "_coop-archives" / rel_path, ec)) {
-            from = folder / "_coop-archives" / rel_path;  // (the pack's or another mod's archive members merged in)
+                   !(kept_copy = per_file(folder / "_coop-gamedata" / name)).empty()) {
+            from = kept_copy;  // (player report 206: other mods' saved values merged in)
+        } else if (!(kept_copy = per_file(folder / "_coop-archives" / rel_path)).empty()) {
+            from = kept_copy;  // (the pack's or another mod's archive members merged in)
         }
         ec.clear();
         files.emplace_back(std::move(rel), std::move(from));
