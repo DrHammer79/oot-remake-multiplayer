@@ -139,7 +139,7 @@ TEST_CASE("hookshot draw: chat at the bottom left, oldest first, long lines wrap
         joined += texts[i].text;
     }
     CHECK(joined == std::string(300, 'x'));
-    CHECK(c.Of("rect").size() == texts.size());  // a dark box behind each row
+    CHECK(c.Of("rect").empty());  // no box behind the rows (owner 2026-11-21: nothing drawn but text)
 }
 
 TEST_CASE("hookshot draw: a long notice breaks after a space, and the space is not drawn") {
@@ -443,7 +443,7 @@ TEST_CASE("hookshot draw: no game look without every piece, or with an older Hoo
     CoopDraw::Scene s;
     s.chat = {{"Saria: hi", false, 1.0f}};
     CoopDraw::Draw(old.d, s, look);
-    CHECK(old.Of("rect").size() == 1);  // the plain look's box
+    CHECK(old.Of("rect").empty());  // the plain look: no box behind the line either
     CHECK(old.Of("text").size() == 1);
 }
 
@@ -472,7 +472,8 @@ TEST_CASE("hookshot draw: the chat box at the bottom left, the lines above it an
     CHECK(texts[0].text == "hello_");               // the box (drawn first), with its caret
     CHECK(texts[2].text == "new");
     CHECK(texts[2].y + texts[2].px < texts[0].y);    // the lines above it
-    CHECK(t.Of("rect").size() == 2 + 2);             // refused: a red frame behind the box, + two line boxes
+    CHECK(t.Of("rect").empty());                     // no box, no red frame, no line boxes: text only
+    CHECK(texts[0].rgba == CoopDraw::Rgba(255, 122, 106, 255));  // refused: red text
 
     Canvas l(1280, 720);
     s.box = CoopDraw::ChatBoxView{std::string(300, 'y'), false};
