@@ -16,6 +16,7 @@ import playtest_client as pc
 
 MAX_FRAMES = 120       # one helper call runs at most this many frames in the game
 NEAR_M = 1.5           # "near an actor": within this many metres
+INTERACT_M = 1.0       # interact walks this near before it looks for the A prompt
 LEG_M = 4.0            # go_to_actor walks in legs of this length, looking the actor up again after each
 LEG_FRAMES = 30
 STUCK_FRAMES = 60      # no 0.3 m closer to the actor over this many frames: stuck
@@ -28,7 +29,7 @@ CLOSER_M = 0.3         # a leg that brings Link this much nearer is progress
 
 
 class InStep:
-    """Two games in step: every frame the primary game runs through input() or step() the other game runs too. Anything
+    """Two games in step: every frame the primary game runs through input(), move() or step() the other game runs too. Anything
     else (state, world, act) goes to the primary only."""
 
     def __init__(self, primary, other):
@@ -40,6 +41,12 @@ class InStep:
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         r = self.primary.input(stick, buttons, frames, rstick)
         self.other.step(frames)
+        return r
+
+    def move(self, yaw, strength=1.0, frames=1, check=True):
+        r = self.primary.move(yaw, strength, frames, check)
+        if r.get("ok"):                     # (a refused move ran no frames)
+            self.other.step(frames)
         return r
 
     def step(self, frames=1):
@@ -259,6 +266,19 @@ def interact(client, what="talk", frames=PRESS_FRAMES):
     after = pc.game_of(client.step(frames))
     return {"result": "pressed A", "pressed": True, "prompt_was": before.get("prompt"), "prompt": after.get("prompt"),
             "event": after.get("event"), "frames": 2 * frames}
+
+
+def interact_with(client, ident, name=None, near_m=INTERACT_M, max_frames=MAX_FRAMES):
+    """go_to_actor, face it, then interact (A only when the state's prompt says an action is there). Returns
+    interact's answer with `walk` (go_to_actor's); when the walk or the turn did not get there, `result` says why and
+    nothing is pressed."""
+    g = go_to_actor(client, ident, name, near_m, max_frames)
+    if not g["arrived"]:
+        return {"result": "not reached: %s" % g["reason"], "pressed": False, "walk": g}
+    f = face(client, ident, name or (g.get("actor") or {}).get("name"))
+    if not f["faced"]:
+        return {"result": "not faced: %s" % f["reason"], "pressed": False, "walk": g}
+    return dict(interact(client, "interact with"), walk=g)
 
 
 def _death(client, line, name, ident, out, death_frames=None):

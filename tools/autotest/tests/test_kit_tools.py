@@ -250,23 +250,40 @@ class DeltaTools(unittest.TestCase):
         tool = mcp_playtest.Game("p1", pc.Client(game.port), os.getcwd())
         try:
             whole = tool.call("get_state", {})
-            self.assertEqual(whole["state_id"], 1)
+            self.assertEqual(whole["state_id"], 100001)   # (p1 counts from 100000)
             self.assertEqual(whole["scene"], "ForestTemple")
-            same = tool.call("get_state", {"since": 1})
-            self.assertEqual((same["changed"], same["removed"], same["state_id"]), ({}, [], 2))   # a held game: no change
+            same = tool.call("get_state", {"since": 100001})
+            self.assertEqual((same["changed"], same["removed"], same["state_id"]), ({}, [], 100002))   # a held game: no change
             game.rupees = 9
             game.prompt = "Talk"
-            r = tool.call("get_state", {"since": 2, "inventory": True})
+            r = tool.call("get_state", {"since": 100002, "inventory": True})
             self.assertEqual(r["changed"], {"rupees": 9, "prompt": "Talk"})
             self.assertEqual(r["frame"], 1000)
             self.assertNotIn("scene", r)
             for bad in (0, -1, "1", True, 1.5):
                 with self.assertRaises(ValueError, msg=repr(bad)):
                     tool.call("get_state", {"since": bad})
-            self.assertEqual(tool.call("get_state", {})["state_id"], 4)   # a refused call took no id
+            self.assertEqual(tool.call("get_state", {})["state_id"], 100004)   # a refused call took no id
         finally:
             tool.client.close()
             game.close()
+
+    def test_an_id_from_another_players_server_is_not_kept(self):
+        game, other = FakeGame(), FakeGame()
+        p1 = mcp_playtest.Game("p1", pc.Client(game.port), os.getcwd())
+        p2 = mcp_playtest.Game("p2", pc.Client(other.port), os.getcwd())
+        try:
+            id1 = p1.call("get_state", {})["state_id"]
+            p2.call("get_state", {})
+            r = p2.call("get_state", {"since": id1})   # p1's id on p2's server: the whole state and a why
+            self.assertEqual(r["scene"], "ForestTemple")
+            self.assertIn("why", r)
+            self.assertNotEqual(id1, r["state_id"])
+        finally:
+            p1.client.close()
+            p2.client.close()
+            game.close()
+            other.close()
 
     def test_live_state_since_and_the_cli_flag(self):
         looks = iter([{"map": "M", "life": 12, "log": ["coop: a"]}, {"map": "M", "life": 8, "log": []}])
@@ -342,6 +359,12 @@ class CallLogTests(unittest.TestCase):
         self.assertEqual([c["args"]["frames"] for c in calls], [2, 3, 1])
         self.assertEqual(calls[0]["_at"], "p2.jsonl:1")
         self.assertEqual(calls[2]["_at"], "calls.jsonl:1")
+
+    def test_a_t_that_is_not_a_number_does_not_stop_the_read(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            for t, n in (('"soon"', 1), ("null", 2), ("true", 3), ("4", 4)):
+                f.write('{"t":%s,"server":"oot-p1","tool":"step","args":{"frames":%d}}\n' % (t, n))
+        self.assertEqual([c["args"]["frames"] for c in kit_tools.read_calls(self.path)], [1, 2, 3, 4])
 
     def test_serve_logs_calls_and_failures(self):
         game = FakeGame()
