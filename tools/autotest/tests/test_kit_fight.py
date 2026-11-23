@@ -9,12 +9,14 @@ import playtest_client as pc  # noqa: E402
 
 
 class Game:
-    """Link at the origin, one enemy (id 3). A press of the sword button takes `dmg` life off it when it is in reach
-    and the lock-on button is in the same press; `bite` takes Link's life off after each round."""
+    """Link at the origin, one enemy (id 3). A new press of the sword button takes `dmg` life off it when it is in
+    reach and the lock-on button is held with it (a sword held from the last input is no new swing); `bite` takes
+    Link's life off after each slash or guard."""
     def __init__(self, dist=6.0, life=3, dmg=1, bite=0, link_life=12, hits_work=True, scene_after=None, stale_after=None):
         self.dist, self.life, self.dmg, self.bite, self.link = dist, life, dmg, bite, link_life
         self.hits_work, self.scene_after, self.stale_after = hits_work, scene_after, stale_after
-        self.presses, self.moves, self.rounds, self.scene = [], [], 0, "A"
+        self.presses, self.frames, self.moves, self.rounds, self.scene = [], [], [], 0, "A"
+        self.steps, self.held = 0, []
         self.gone = False
 
     def state(self):
@@ -30,19 +32,25 @@ class Game:
 
     def input(self, stick, buttons, frames, rstick=None):
         self.presses.append(list(buttons))
-        if self.hits_work and "Y" in buttons and "ZL" in buttons and self.dist <= kit_fight.REACH_M:
+        self.frames.append(frames)
+        new_swing = "Y" in buttons and "Y" not in self.held
+        self.held = list(buttons)
+        if self.hits_work and new_swing and "ZL" in buttons and self.dist <= kit_fight.REACH_M:
             self.life = max(0, self.life - self.dmg)
-        self.link = max(0, self.link - self.bite)
-        self.rounds += 1
+        if buttons != ["ZL"] or frames == kit_fight.SHIELD_FRAMES:   # (a swing's let-go is part of its slash)
+            self.link = max(0, self.link - self.bite)
+            self.rounds += 1
         if self.scene_after is not None and self.rounds >= self.scene_after:
             self.scene = "B"
         return {"ok": True}
 
     def step(self, n):
+        self.steps += 1
         return {"ok": True}
 
     def move(self, yaw, strength=1.0, frames=1, check=True):
         self.moves.append(yaw)
+        self.held = []
         return {"ok": True}
 
 
@@ -63,15 +71,31 @@ class FightTest(unittest.TestCase):
         g = Game(dist=6.0, life=3)
         out = kit_fight.fight(g, 3, "Deku Baba")
         self.assertEqual((out["result"], out["life_before"], out["life_after"]), ("dead", 3, 0))
-        self.assertEqual(out["hits"], 3)
-        self.assertTrue(all(p == ["ZL", "Y"] for p in g.presses))       # lock-on held while the sword is pressed
+        self.assertEqual((out["hits"], out["slashes"]), (3, 3))
+        # each slash: lock-on and sword, then the sword let go with the lock-on still held
+        self.assertEqual(g.presses, [["ZL", "Y"], ["ZL"]] * 3)
+        self.assertEqual(g.frames, [kit_fight.SWING_FRAMES, kit_fight.RECOVER_FRAMES] * 3)
+
+    def test_no_step_after_an_input_so_the_lock_on_is_never_let_go(self):
+        g = Game(dist=1.0, life=5, bite=1, link_life=40)   # (hurt, so it guards too; never low)
+        out = kit_fight.fight(g, 3)
+        self.assertEqual(g.steps, 0)
+        self.assertGreaterEqual(out["guards"], 1)
+        self.assertTrue(all("ZL" in p for p in g.presses))
+        self.assertEqual(out["frames"], sum(g.frames))
+
+    def test_the_default_buttons_are_longshots_map(self):
+        self.assertEqual((kit_fight.LOCK, kit_fight.SWORD, kit_fight.SHIELD), ("ZL", "Y", "ZL"))
 
     def test_hurt_makes_link_shield_once_then_slash(self):
         g = Game(dist=1.0, life=4, bite=1)
         out = kit_fight.fight(g, 3)
-        self.assertGreaterEqual(out["hurt"], 1)
-        self.assertIn(["ZL", "R"], g.presses)
-        self.assertNotEqual(g.presses[g.presses.index(["ZL", "R"]) + 1], ["ZL", "R"])     # never two shields in a row
+        self.assertGreaterEqual((out["hurt"], out["guards"]), (1, 1))
+        guards = [i for i, f in enumerate(g.frames) if f == kit_fight.SHIELD_FRAMES]
+        self.assertTrue(guards)
+        for i in guards:
+            self.assertEqual(g.presses[i], ["ZL"])                       # the shield is ZL held without the sword
+            self.assertEqual(g.presses[i + 1], ["ZL", "Y"])              # never two guards in a row
 
     def test_low_life_backs_off_and_stops(self):
         g = Game(dist=1.0, life=50, bite=3, link_life=9)
@@ -106,13 +130,18 @@ class FightTest(unittest.TestCase):
         g = Game(dist=1.0, life=50, hits_work=False)
         out = kit_fight.fight(g, 3, max_frames=60)
         self.assertEqual(out["result"], "alive")
-        self.assertIn("button", out["hint"])
-        self.assertIn("ZL", out["hint"])
+        self.assertIn("lock-on ZL, sword Y", out["hint"])
+        self.assertIn("Gohma", out["hint"])
 
     def test_other_buttons_can_be_given(self):
         g = Game(dist=1.0, life=1)
-        kit_fight.fight(g, 3, lock="L", sword="B", max_frames=24)
-        self.assertEqual(g.presses[0], ["L", "B"])
+        kit_fight.fight(g, 3, lock="L", sword="B", shield="R", max_frames=24)
+        self.assertEqual(g.presses[:2], [["L", "B"], ["L"]])
+
+    def test_a_shield_button_apart_from_the_lock_on_is_held_with_it(self):
+        g = Game(dist=1.0, life=50, bite=1)
+        kit_fight.fight(g, 3, shield="R", max_frames=60)
+        self.assertIn(["ZL", "R"], g.presses)
 
     def test_bad_frame_limit_is_refused(self):
         with self.assertRaises(ValueError):

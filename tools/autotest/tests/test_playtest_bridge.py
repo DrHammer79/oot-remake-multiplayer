@@ -1473,7 +1473,9 @@ class StrikeAndHelpers(unittest.TestCase):
         r = self.tool.call("fight", {"id": 3, "name": "Enemy_Near", "max_frames": 90})
         self.assertEqual(r["result"], "dead", r)
         self.assertIn("look", r)
-        self.assertTrue(any(m["buttons"] == ["ZL", "Y"] for m in self.game.log if m["cmd"] == "input"))
+        inputs = [m["buttons"] for m in self.game.log if m["cmd"] == "input"]
+        self.assertEqual(inputs[:2], [["ZL", "Y"], ["ZL"]])        # Longshot's map: lock-on ZL, sword Y, let go
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "step"])   # ZL is never let go between inputs
         for args in ({"id": 3, "name": "Enemy_Near", "sword": "Q"}, {"id": 3}, {"name": "Enemy_Near"},
                      {"id": 3, "name": "Enemy_Near", "max_frames": 1201}):
             with self.assertRaises(ValueError, msg=args):
@@ -1501,7 +1503,8 @@ class StrikeAndHelpers(unittest.TestCase):
         for name in ("go_to_actor", "attack"):
             self.assertIn("120 frames", by[name])
             self.assertIn("never goes for another", by[name])
-        self.assertIn("not yet confirmed", by["attack"])
+        self.assertIn("Longshot's attack button", by["attack"])
+        self.assertIn("`shield` ZL", by["fight"])
 
     def test_talk_and_open_press_a_only_with_a_prompt(self):
         self.assertFalse(self.tool.call("talk", {})["pressed"])

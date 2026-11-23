@@ -251,8 +251,8 @@ HELPER_TOOLS = [
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
-    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default, which "
-     "is a guess not yet confirmed in a game) in rounds until its life is 0 or the frames run out. Returns `result` "
+    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default: "
+     "Longshot's attack button) in rounds until its life is 0 or the frames run out. Returns `result` "
      "(dead, gone, alive, or stopped with `stopped` saying why) and its life before and after. " + HELPER_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
@@ -331,10 +331,12 @@ PLAYER_TOOLS = [
          "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
          "note": {"type": "string", "maxLength": 290}}}},
     {"name": "fight", "description": "Fight ONE enemy (`id` and `name` from look or get_world): walk up to sword "
-     "reach, then slash with the lock-on button held, shield after Link is hit, in short rounds until it is dead, "
+     "reach, then slash with the lock-on held (ZL + Y, then Y let go), guard (ZL alone: the shield) for one round after Link "
+     "is hit, in short rounds until it is dead, "
      "gone, Link is low (life 4 quarter hearts or less: he backs off and the fight ends as `low`), a scene change or "
-     "load stops it, or `max_frames` run out. Ends with a `look`. The buttons are guesses (`lock` ZL, `sword` Y, "
-     "`shield` R): when the enemy's life never moves, `hint` says the buttons may be wrong. At most 1200 frames pass "
+     "load stops it, or `max_frames` run out. Ends with a `look`. The buttons are Longshot's map (`lock` ZL, `sword` "
+     "Y, `shield` ZL: lock-on and shield are one button). Longshot's Toggle ZL/ZR setting must be off. When the "
+     "enemy's life never moves, `hint` says why it may be. At most 1200 frames pass "
      "(`max_frames` lowers it). The enemy is looked up in the world list every round and never swapped for another "
      "of its name; it needs the world list. It acts on this game only.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": dict(

@@ -1,11 +1,20 @@
-"""`fight`: lock on to one enemy and slash it until it is dead, Link is low, or the frames are used. Standard library
-only; the caller adds the `look`. Built on the helpers in playtest_helpers (the enemy is looked up by id before every
-round, and a scene change, a load or a stale list stops the fight before anything is judged).
+"""`fight`: lock on to one enemy, slash it and guard until it is dead, Link is low, or the frames are used. Standard
+library only; the caller adds the `look`. Built on the helpers in playtest_helpers (the enemy is looked up by id before
+every round, and a scene change, a load or a stale list stops the fight before anything is judged).
 
     fight(client, ident, name)  ->  reply (result, enemy life before/after, Link's life, hits, hurt, rounds, hint)
 
-The buttons are guesses made without a game: lock-on `ZL`, sword `Y`, shield `R`. A fight whose enemy life never moves
-says so in `hint` (the buttons may be wrong); the first lane run settles them.
+The buttons are Longshot's own map (its host/nn_hid.c: the mouse's left button is Y, "attack", and its right button is
+ZL, "shield, lock on"; its tested-configurations page logs a ZL press that held the shield). So lock-on and the shield
+are one button, ZL: Link guards by holding ZL without Y. ZL is held through every slash and guard of a fight, from one
+`input` to the next (the game is held between them, so no frame sees it let go); only a walk up to the enemy lets it go.
+Y is let go after each swing, so every slash is a new press.
+
+The enemy's life is the world list's `life`: the objects walk's Life read (actor +0x270 component table, +0x2b8 the Life
+component, +0x1c10 the value, the s32 at +8; docs/addresses.md `kComponentLife`). No other address is read.
+
+Longshot's Toggle ZL/ZR setting (Insert menu, Controls) latches ZL on one press: with it on, each walk-up and new press
+turns the lock-on off and on in turn. Fight with it off (the default).
 """
 import math
 
@@ -14,11 +23,12 @@ import playtest_helpers as ph
 
 LOCK = "ZL"
 SWORD = "Y"
-SHIELD = "R"
+SHIELD = "ZL"        # the same button as the lock-on: ZL held without the sword raises the shield
 REACH_M = 2.2        # the sword reaches about this far; farther than this Link walks up first
 APPROACH_FRAMES = 12
-SLASH_FRAMES = 6
-SHIELD_FRAMES = 8
+SWING_FRAMES = 4     # the sword button held for a swing
+RECOVER_FRAMES = 8   # then let go (the lock-on still held), so the next swing is a new press
+SHIELD_FRAMES = 10
 BACK_OFF_FRAMES = 14
 MIN_LIFE = 4         # quarter hearts: at or below this Link backs off and the fight ends ("low")
 MAX_FRAMES = 1200
@@ -41,10 +51,28 @@ def _away_yaw(link, actor):
     return math.degrees(math.atan2(link[0] - q[0], link[2] - q[2])) % 360
 
 
-def _press(client, buttons, frames):
+def _buttons(*names):
+    """The buttons once each, in order (lock and shield are the same button by default)."""
+    out = []
+    for n in names:
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def _hold(client, buttons, frames):
+    """`input` holds the buttons for `frames` frames and the game is held again after: those frames are the only ones
+    that pass (no `step` after it, which would let every button go for as many frames more)."""
     client.input(None, list(buttons), frames)
-    client.step(frames)
-    return 2 * frames
+    return frames
+
+
+def _slash(client, lock, sword):
+    return _hold(client, _buttons(lock, sword), SWING_FRAMES) + _hold(client, _buttons(lock), RECOVER_FRAMES)
+
+
+def _guard(client, lock, shield):
+    return _hold(client, _buttons(lock, shield), SHIELD_FRAMES)
 
 
 def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWORD, shield=SHIELD, min_life=MIN_LIFE,
@@ -53,22 +81,23 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
     `low` (Link's life fell to `min_life` or less: he backed off), `stopped` (the scene changed, a load began, an event
     or a stale list: see `stopped`), `alive` (the frame limit; `hint` when its life never moved). Also `life_before`,
     `life_after` (the enemy's), `link_before`, `link_after`, `hits` (rounds in which its life went down), `hurt`
-    (rounds in which Link's did), `rounds`, `frames`."""
+    (rounds in which Link's did), `slashes`, `guards`, `rounds`, `frames`."""
     if not 1 <= int(max_frames) <= MAX_FRAMES:
         raise ValueError("max_frames is 1 to %d" % MAX_FRAMES)
     a, w = ph._look(client, ident)
     why = ph._no_list(w)
     if why or ph._gone(a, name):
-        return {"result": "stopped", "stopped": why or "gone", "rounds": 0, "frames": 0, "hits": 0, "hurt": 0}
+        return {"result": "stopped", "stopped": why or "gone", "rounds": 0, "frames": 0, "hits": 0, "hurt": 0,
+                "slashes": 0, "guards": 0}
     name = name or a.get("name")
     st = pc.game_of(client.state())
     scene = st.get("scene")
     before = a.get("life")
     out = {"result": "alive", "life_before": before, "life_after": before, "link_before": st.get("life"),
-           "link_after": st.get("life"), "hits": 0, "hurt": 0, "rounds": 0, "frames": 0}
+           "link_after": st.get("life"), "hits": 0, "hurt": 0, "slashes": 0, "guards": 0, "rounds": 0, "frames": 0}
     if isinstance(before, (int, float)) and before <= 0:
         return dict(out, result="dead", note="its life was already 0")
-    last_enemy, last_link, shielded = before, st.get("life"), False
+    last_enemy, last_link, guarded = before, st.get("life"), False
     while out["frames"] < int(max_frames):
         stop = ph._interrupted(st, scene, w)
         if stop:
@@ -95,13 +124,15 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
             q = a["pos"]
             r = pc.walk_to(client, q[0], q[2], tolerance=reach_m * 0.6, max_frames=APPROACH_FRAMES, chunk=APPROACH_FRAMES)
             out["frames"] += max(1, r.get("frames", 0))
-            shielded = False
-        elif hurt_now and not shielded:
-            out["frames"] += _press(client, (lock, shield), SHIELD_FRAMES)    # block the next blow, then slash again
-            shielded = True
+            guarded = False
+        elif hurt_now and not guarded:
+            out["frames"] += _guard(client, lock, shield)    # block the next blow, then slash again
+            out["guards"] += 1
+            guarded = True
         else:
-            out["frames"] += _press(client, (lock, sword), SLASH_FRAMES)
-            shielded = False
+            out["frames"] += _slash(client, lock, sword)
+            out["slashes"] += 1
+            guarded = False
         out["rounds"] += 1
         a, w = ph._look(client, ident)
         st = pc.game_of(client.state())
@@ -121,7 +152,8 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
     out["link_after"] = st.get("life")
     if isinstance(out["life_after"], (int, float)) and out["life_after"] <= 0:
         out["result"] = "dead"
-    elif out["rounds"] and out["life_after"] == before:
-        out["hint"] = ("its life never moved in %d rounds: the lock-on %s or sword %s button may be wrong (they are "
-                       "guesses), the sword may not be out, or it cannot be hurt that way" % (out["rounds"], lock, sword))
+    elif out["slashes"] and out["life_after"] == before:
+        out["hint"] = ("its life never moved in %d slashes (lock-on %s, sword %s): the sword may not be out or equipped, "
+                       "the lock-on may have taken another target, or it cannot be hurt that way (Gohma: only her eye "
+                       "while she is stunned, a Deku Seed first)" % (out["slashes"], lock, sword))
     return out

@@ -47,6 +47,10 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   `warp`, `step_until "event == false"` instead of a `step`, `get_state`, `step` loop.
 - Act with the helpers: `attack`, `face`, `talk`, `open`, `use_item`, `kill`/`hit` (the **name** from `get_world`, and
   the `id` when there are several).
+- Fight with `fight id name`: it walks up, locks on (`ZL`), slashes (`Y`) and guards (`ZL` alone) until the enemy's
+  life is 0, Link is low, or the frames run out, then answers `dead`, `gone`, `low`, `stopped` or `alive` with a `look`.
+  Then `desync_check` and look in the other game. A boss that needs a stun first (Gohma: a Deku Seed in her eye) needs
+  `use_item` before `fight`.
 - Let the other game run (`step 30`) after an action that should sync: a held game receives nothing.
 - Stuck? Try the data first ([tools/playtest/data](../tools/playtest/data/README.md): known stuck spots and how to
   get round them). If a step fails twice the same way, stop, write down what you saw and go to the next goal. Do not
