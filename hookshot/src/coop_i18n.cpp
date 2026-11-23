@@ -3606,7 +3606,7 @@ const Clause* ClauseOf(std::string_view text, std::string_view* data) {
 // A name the notice gives: a player's name as it is; the stand-ins notify.cpp
 // writes when it has none ("Someone", "Player 3") in the table's words.
 std::string Who(const Lang* lang, std::string_view who) {
-    if (who == "Someone" || (StartsWith(who, "Player ") && who.size() > 7 &&
+    if (who == "Someone" || who == "A player" || (StartsWith(who, "Player ") && who.size() > 7 &&
                              who.find_first_not_of("0123456789", 7) == std::string_view::npos)) {
         return Tr(lang, who);
     }
