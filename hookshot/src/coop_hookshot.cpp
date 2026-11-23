@@ -43,6 +43,7 @@
 #include "coop_draw.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
+#include "coop_char_ages.h"
 #include "coop_flag_native.h"
 #include "coop_flags.h"
 #include "coop_game_build.h"
@@ -1685,6 +1686,12 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         if (phase == 0) {
             CoopSave::NoteGameSaveLoad(id != HOS_COOP_WRAP_SAVE_LOADED);
         }
+        if (phase == 0 && id == HOS_COOP_WRAP_SAVE_LOADED) {
+            // The save is in, the player not made yet (the area load after it makes it): a Character Select pick per
+            // age is written in place now (coop_char_ages.h). Writes the pick's live value only.
+            CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
+            CoopCharAges::AtSaveLoaded(memory);
+        }
         return 0;
     }
     if (id == HOS_COOP_WRAP_SOUND_EMIT) {
@@ -1767,6 +1774,13 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         // The game's own time change, with its exact time: the time sync's jump (coop_time_sync.h, GameSet).
         CoopTime::OnGameSet(static_cast<std::uint32_t>(x[1]), static_cast<std::uint32_t>(x[2]),
                             static_cast<std::int32_t>(x[3]));
+        return 0;
+    }
+    if (id == HOS_COOP_WRAP_FLAG_APPLY && phase == 1) {
+        // The game applied its queued flag writes (a save load's too): the pick held through a load is put back when
+        // the game wrote another over it (coop_char_ages.h LoadHold; nothing when none is held).
+        CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
+        CoopCharAges::AtFlagsApplied(memory);
         return 0;
     }
     if (id == HOS_COOP_WRAP_FLAG_APPLY && phase == 0) {
