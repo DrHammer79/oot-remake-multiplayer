@@ -2,6 +2,7 @@
 #include "coop_title_native.h"
 
 #include "coop_i18n.h"
+#include "coop_text_fit.h"
 
 #include <algorithm>
 #include <vector>
@@ -10,13 +11,8 @@ namespace CoopTitleNative {
 
 namespace {
 
-// At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string Fit(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+// At most `n` letters of width (and bytes), cut before a letter's start, with "..." when cut (coop_text_fit.h).
+std::string Fit(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 }  // namespace
 
@@ -72,9 +68,11 @@ Look TypingLook(const CoopPauseMenu::View& v, char letter, int key) {
     out.texts[static_cast<std::size_t>(Key::kDelete)] = CoopI18n::Tr("Delete");
     out.texts[static_cast<std::size_t>(Key::kOk)] = CoopI18n::Tr("OK");
     for (std::string& t : out.texts) {
-        if (t.size() > kTextBytes) {   // (the field's end: the typing; never inside a letter of more bytes)
-            std::size_t from = t.size() - (kTextBytes - 3);
-            while (from < t.size() && (static_cast<unsigned char>(t[from]) & 0xC0) == 0x80) ++from;
+        if (t.size() > kTextBytes || CoopTextFit::Halves(t) > 2 * kTextBytes) {   // (the field's end: the typing)
+            std::size_t from = t.size() - std::min(t.size(), kTextBytes - 3);
+            while (from < t.size() && (CoopTextFit::Halves(t.substr(from)) > 2 * kTextBytes - 6 ||
+                                       (static_cast<unsigned char>(t[from]) & 0xC0) == 0x80))
+                ++from;   // (never inside a letter; the end that fits the button's width)
             t = "..." + t.substr(from);
         }
     }

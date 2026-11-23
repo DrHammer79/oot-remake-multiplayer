@@ -4,6 +4,7 @@
 
 #include "coop_browse.h"
 #include "coop_i18n.h"
+#include "coop_text_fit.h"
 
 #include "hos_coop_host.h"
 
@@ -1119,21 +1120,11 @@ RowAction ActionFor(View view, int row, const Session& s) {
 
 namespace {
 
-// At most kRowChars bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string Fit(std::string t) {
-    if (t.size() <= kRowChars) return t;
-    std::size_t n = kRowChars - 3;
-    while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xc0) == 0x80) --n;
-    return t.substr(0, n) + "...";
-}
+// At most kRowChars letters of width (and bytes), with "..." when cut (coop_text_fit.h).
+std::string Fit(std::string t) { return CoopTextFit::Fit(t, kRowChars); }
 
-// At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string FitWidth(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+// At most `n` letters of width (and bytes), with "..." when cut.
+std::string FitWidth(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 // A line over up to `rows` rows of `width` bytes, broken at spaces (a word longer than a row is cut); the last row ends
 // in "..." when more is left.
@@ -1147,11 +1138,7 @@ std::vector<std::string> Wrap(const std::string& text, std::size_t rows, std::si
             out.push_back(FitWidth(text.substr(at), width));
             break;
         }
-        std::size_t end = std::min(text.size(), at + width);
-        if (end < text.size() && text[end] != ' ') {
-            const std::size_t space = text.rfind(' ', end);
-            if (space != std::string::npos && space > at) end = space;
-        }
+        const std::size_t end = CoopTextFit::LineEnd(text, at, width);   // (by width; never inside a letter)
         out.push_back(text.substr(at, end - at));
         at = end;
     }
@@ -1793,12 +1780,7 @@ std::vector<std::string> Probe::Seen(const Facts& f, std::uint64_t now_ms) {
 
 namespace {
 // At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut (the list's columns are wider than a row).
-std::string FitTo(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+std::string FitTo(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 }  // namespace
 
