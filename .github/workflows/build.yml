@@ -143,6 +143,14 @@ jobs:
         run: python tools/release/tests/test_apply_patch.py -v
       - name: Kit Discord status tests
         run: python tools/release/tests/test_discord_status.py -v
+      # The Windows kit's puppet pack tool staged as make_kit_hookshot.ps1 stages it (kit_pack.ps1) and run from that
+      # copy alone: a module, data folder or strings file the pack needs and the kit misses fails here (the 0.11.12
+      # integrate-01110 kit lacked charsel\data and coopmenu\data). Here, not in the windows job: that one may run on the
+      # self-hosted PC, which has no Python on PATH.
+      - name: Windows kit puppet pack stage tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/kit_pack_test.ps1
       - name: Puppet pack command lines
         run: |
           python tools/puppet_pack/build.py --help
