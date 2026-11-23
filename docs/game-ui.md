@@ -591,10 +591,13 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   Items (category 6) is on only while one of the key items of `ItemDatabase::GetList(4)` passes the check
   `f_801a1160` (inferred: the item is owned); Threads of Time (category 1) is on only while the Bool
   `UI_IsFinishChallengeMenuOpenEvent` (`0x1450c74f`, read through `f_833a5f50`; [flags.md](flags.md), "Threads of
-  Time") is set, which only the owl at the Hyrule Field entrance does. So a fresh save, or a test state set up with
-  flags and warps, shows `Characters, ???, ???, Map, ...`; it is the same in the stock game. (checked in the
-  disassembly of `FillTabs`, 2026-11-23; the Key Items check is inferred) A test that needs the tabs named sets
-  `setflag UI_IsFinishChallengeMenuOpenEvent 1` and `give` a key item first (docs/playtest.md, "Rules for a tester").
+  Time") is set, which only the owl at the Hyrule Field entrance does (in a co-op session the flag is a shared story
+  flag, so another player's owl, or a `setflag` on one game, opens the tab on every game). So a fresh save, or a test
+  state set up with flags and warps, shows `Characters, ???, ???, Map, ...` on a build with Character Select's
+  Characters tab, and `???, ???, Map` without it; stock is inferred to be the same (the code read is the lane
+  build's). (checked in the disassembly of `FillTabs`, 2026-11-23, on the lane build; the Key Items check and the
+  stock case are inferred) A test that needs the tabs named sets `setflag UI_IsFinishChallengeMenuOpenEvent 1` and
+  gives a key item first (docs/playtest.md, "Rules for a tester").
 - `f_802ecf60`: on, it stops `CurrentOut` (`f_802f0fe0`) and plays `CurrentIn` (`f_802eda70(anim, 0, 1.0)`, or
   `f_802f0f00` when instant); off, the reverse; nothing when the animation is already at its end. (checked)
 
