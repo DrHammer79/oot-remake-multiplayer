@@ -369,6 +369,12 @@ records, and how new parts go after the string pool so nothing moves).
 - Tags in the text: byte `0x0E`, then u16 group, u16 type, u16 parameter size, the parameters. A colour is group 0 type 3
   with a u16 index; the game uses only 0 to 5 and `0xFFFF` (back to the default). A player's text must be cleaned of
   `0x0E` and control bytes before it is shown. (notes)
+- Button letters: the game writes its pad's buttons as private-use letters of its font, no tag: `StaticMsg/GuideKeyIcon`
+  A U+E040, B U+E041, X U+E042, Y U+E043, L U+E044, R U+E045, ZL U+E046, ZR U+E047, the + U+E04B, the - U+E04C, the
+  cross U+E049. `MenuOverlay_00`'s `T_BtnL_00` / `T_BtnR_00` (the tab strip's L and R) are U+E044 / U+E045, the
+  System page's controller picture (`PlusMenu_00` `Pa_BtnZL_00`, `Pa_BtnZR_00`) U+E046 / U+E047, `DoCommand_00`'s
+  `T_ZL_00` U+E046. Co-op's page lines use ZL and ZR (`coop_list_pages.h`, row 264). (checked: the USen message
+  archive, 1.1.0; whether a co-op pane's font draws them: the LANE1 screenshot in reports/lobby-pages-264.md)
 - Labels the game uses: `Title_00` 0000 to 0002 (co-op adds 0100 to 0102); `SystemWindow_00` the dialog's text as
   `%04d` and its buttons as `10%02d`; `SystemOption_00` `<Key>_Title`, `<Key>_Caption`, `<Key>_00...`; the banner's
   texts in `SimpleInfo_00` by type. (notes)

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_pause_menu.h"
 
+#include "coop_text_fit.h"
+
 #include "coop_browse.h"
 #include "coop_difficulty.h"
 
@@ -12,6 +14,7 @@
 
 #include "coop/protocol/join_password.hpp"
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
 
 namespace CoopPauseMenu {
 
@@ -317,14 +320,8 @@ std::string MicWords(const std::string& chosen, const std::vector<std::string>& 
         return "Default";
     }
     std::string words = chosen;
-    if (CodePoints(words) > kMicChars) {
-        std::size_t at = 0;
-        for (std::size_t points = 0; at < words.size(); ++at) {   // (the byte where character kMicChars - 3 starts)
-            if ((static_cast<unsigned char>(words[at]) & 0xc0) != 0x80 && points++ == kMicChars - 3) {
-                break;
-            }
-        }
-        words = words.substr(0, at) + "...";
+    if (CodePoints(words) > kMicChars || CoopTextFit::Halves(words) > 2 * kMicChars) {   // (by width, coop_text_fit.h)
+        words = words.substr(0, CoopTextFit::PrefixEnd(words, words.size(), 2 * kMicChars - 6)) + "...";
     }
     const bool there = std::find(listed.begin(), listed.end(), chosen) != listed.end();
     return there ? words : words + " (not connected)";
@@ -635,7 +632,15 @@ std::vector<Menu::Line> Menu::Lines() const {
                                     : "Forgets the games heard and listens again: the ones still hosting come back "
                                       "within 2 seconds."});
         const std::vector<Found> games = FoundShown();
-        for (const Found& g : games) {
+        const int pages = CoopListPages::Pages(static_cast<int>(games.size()), kFindPerPage);
+        const int page = FindPage(games.size());
+        if (pages > 1) {   // (row 264: the page, with its own row to turn it)
+            out.push_back({Choice("Page", std::to_string(page + 1) + "/" + std::to_string(pages)), Act::kFindPage,
+                           "Left and Right (or A) turn the page of games."});
+        }
+        const std::size_t first = static_cast<std::size_t>(page) * kFindPerPage;
+        for (std::size_t i = first; i < games.size() && i < first + kFindPerPage; ++i) {
+            const Found& g = games[i];
             out.push_back({Action(g.name, g.players, !g.joinable), Act::kFindGame,
                            g.joinable ? "Fills in the Join page with this game: then Join (with its password, if "
                                         "it asks one)."
@@ -1693,14 +1698,17 @@ void Menu::Decide(Act act) {
         request_ = Request{Request::Kind::kJoin, join_};
         break;
     case Act::kOpenFind:
+        find_page_ = 0;
         Go(Page::kFind);
         break;
     case Act::kFindList:
     case Act::kFindFilter:
     case Act::kFindSort:
+    case Act::kFindPage:
         Change(act, 1);
         break;
     case Act::kFindRefresh:   // (the list empties; the module asks again and hands the new one, SetFound)
+        find_page_ = 0;
         RefreshFound();
         break;
     case Act::kShowPassword: {
@@ -1738,6 +1746,7 @@ void Menu::Decide(Act act) {
         std::size_t k = 0;
         for (std::size_t i = 0; i < selected_ && i < lines.size(); ++i) k += lines[i].act == Act::kFindGame ? 1 : 0;
         const std::vector<Found> games = title_ ? found_ : FoundShown();
+        if (!title_) k += static_cast<std::size_t>(FindPage(games.size())) * kFindPerPage;   // (the page's first)
         if (k >= games.size()) break;
         const Found& g = games[k];
         const bool online = title_ ? g.online : find_online_;
@@ -1865,16 +1874,26 @@ void Menu::Change(Act act, int step) {
     case Act::kFindList:   // (two lists: either way flips it; the module hears the other one from now)
         find_online_ = !find_online_;
         found_.clear(), found_state_.clear();
+        find_page_ = 0;
         Clamp();
         break;
     case Act::kFindFilter:
         find_filter_ = (find_filter_ + (step < 0 ? CoopBrowse::kFilters - 1 : 1)) % CoopBrowse::kFilters;
+        find_page_ = 0;
         Clamp();
         break;
     case Act::kFindSort:
         find_sort_ = (find_sort_ + (step < 0 ? CoopBrowse::kSorts - 1 : 1)) % CoopBrowse::kSorts;
+        find_page_ = 0;
         Clamp();
         break;
+    case Act::kFindPage: {   // (round at both ends: ZR's rule, coop_list_pages.h)
+        const std::size_t games = FoundShown().size();
+        find_page_ = CoopListPages::Step(FindPage(games), CoopListPages::Pages(static_cast<int>(games), kFindPerPage),
+                                         step < 0 ? -1 : 1);
+        Clamp();
+        break;
+    }
     case Act::kGameKind:
         options_.public_game = !options_.public_game;   // (two choices: either way flips it)
         if (options_.public_game && options_.relay_room.empty()) {   // (a public game needs a name: a ready one)
@@ -2398,6 +2417,10 @@ void Menu::SetFound(std::vector<Found> games, std::string state) {
     found_ = std::move(games);
     found_state_ = std::move(state);
     if (page_ == Page::kFind && !typing_) Clamp();
+}
+
+int Menu::FindPage(std::size_t games) const {
+    return std::clamp(find_page_, 0, CoopListPages::Pages(static_cast<int>(games), kFindPerPage) - 1);
 }
 
 std::vector<Menu::Found> Menu::FoundShown() const {

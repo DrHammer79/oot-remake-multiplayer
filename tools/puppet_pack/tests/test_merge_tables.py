@@ -1755,15 +1755,15 @@ class SelfModelsTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.top, mt.MODELS_KEEP, *mt.SELF_MODELS["Child"].split("/"))), newer)
         self.assertTrue(self.model(self.top, "Child").endswith(b"new\x00"))
 
-    def assert_put_back(self):
+    def assert_put_back(self, warned=0):
         for m in (self.top, self.under):
             self.assertEqual(self.model(m, "Child"), self.child)
             self.assertEqual(self.model(m, "Adult"), self.adult)
             self.assertFalse(os.path.isdir(os.path.join(m, mt.MODELS_KEEP)))
-        self.assertEqual(len(self.lines), 2)   # (one line a mod)
+        self.assertEqual(len(self.lines), 2 + warned)   # (one line a mod, and a warning a mod when the pack is on)
         self.lines = []
-        self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)   # (the next start: nothing)
-        self.assertEqual(self.lines, [])
+        self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)   # (the next start: the warnings)
+        self.assertEqual(len(self.lines), warned)
 
     def test_the_pack_off_puts_every_mods_own_models_back(self):
         # (their copies named co-op's own tunic textures, which no mod has with the pack off: never left so)
@@ -1787,7 +1787,8 @@ class SelfModelsTest(unittest.TestCase):
                                self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
         self.lines = []
         self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)
-        self.assert_put_back()
+        self.assert_put_back(warned=2)   # (row 265: the pack on without them, each mod's Link models named)
+        self.assertTrue(all("none of your own tunic textures" in l and "self_tunic.py" in l for l in self.lines))
 
     def test_the_pack_off_keeps_a_model_changed_since(self):
         # (a new copy of the mod since the start that named it: its own, never the old kept one over it)
@@ -1805,6 +1806,23 @@ class SelfModelsTest(unittest.TestCase):
                                self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
         self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)
         self.assertEqual(self.model(self.top, "Child"), self.child)
+        # Row 265: said, a line for each mod whose Link models win (the lane proof had Character Select's own model
+        # and a pack whose start never put your tunic textures in: the tunic stayed the model's green, silently)
+        self.assertEqual(len(self.lines), 2)
+        self.assertTrue(any("OoT Character Select has its own " + mt.SELF_MODELS["Child"] + ", " +
+                            mt.SELF_MODELS["Adult"] in l for l in self.lines))
+
+    def test_no_word_about_a_mod_without_link_models_or_with_the_pack_off(self):
+        os.remove(os.path.join(self.pack, "romfs", "Tex",
+                               self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
+        for m in (self.top, self.under):
+            for rel in mt.SELF_MODELS.values():
+                os.remove(os.path.join(m, "romfs", *rel.split("/")))
+        mt.merge_self_models(self.mods, "", self.lines.append)
+        self.assertEqual(self.lines, [])
+        shutil.rmtree(self.pack)   # (no pack: nothing of yours to name, nothing said)
+        self.put(os.path.join(self.top, "romfs", *mt.SELF_MODELS["Child"].split("/")), self.child)
+        mt.merge_self_models(self.mods, "", self.lines.append)
         self.assertEqual(self.lines, [])
 
 

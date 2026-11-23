@@ -44,7 +44,7 @@ if(COOP_HOOK_STRICT AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     -Wno-error=range-loop-construct -Wno-error=maybe-uninitialized)
 endif()
 
-add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_window_brand.cpp src/coop_chatbox.cpp src/coop_cheats_panel.cpp
+add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coop_map_page.cpp src/coop_dbno_draw.cpp src/coop_png.cpp src/coop_window_brand.cpp src/coop_chatbox.cpp src/coop_players_open.cpp src/coop_native_ui.cpp src/coop_cheats_panel.cpp
   src/coop_host_menu.cpp src/coop_title.cpp src/coop_title_menu.cpp src/coop_input.cpp src/coop_pause.cpp
   src/coop_pause_menu.cpp src/coop_original.cpp src/coop_pause_files.cpp src/coop_i18n.cpp src/coop_null_page.cpp
   src/coop_mod_json.cpp src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
@@ -58,6 +58,12 @@ add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coo
 # compat/ first: its core/ and common/ headers stand in for the emulator's.
 target_include_directories(hookshot_coop PRIVATE compat src "${_coop_hook}" ../server)
 target_compile_definitions(hookshot_coop PRIVATE LICHII_COOP COOP_HOOKSHOT)
+# COOP_DEBUG_PANELS: the drawn debug panels, F7 (co-op panel) and F8 (item cheats); off, so release kits have no drawn
+# boxes (src/coop_debug_panels.h). A developer's or test build: -DCOOP_DEBUG_PANELS=ON.
+option(COOP_DEBUG_PANELS "Build the F7 co-op panel and the F8 item cheats panel into hookshot_coop" OFF)
+if(COOP_DEBUG_PANELS)
+  target_compile_definitions(hookshot_coop PRIVATE COOP_DEBUG_PANELS)
+endif()
 # coop_server_lib: the co-op server, run inside the game when the player hosts from the menu.
 target_link_libraries(hookshot_coop PRIVATE coop coop_net coop_host coop_presence coop_overlay coop_server_lib
                       monocypher fmt::fmt coop_warnings)

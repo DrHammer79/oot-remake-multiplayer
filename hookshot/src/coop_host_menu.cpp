@@ -75,6 +75,67 @@ constexpr std::uint32_t kRoundMs = 5;
 
 } // namespace
 
+#ifdef _WIN32
+std::string ProcessMemoryText() {
+    // (kernel32's K32 names and HeapSummary looked up by name: no psapi link, and builds whose headers lack them)
+    struct Counters {   // PROCESS_MEMORY_COUNTERS_EX
+        DWORD cb;
+        DWORD PageFaultCount;
+        SIZE_T PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+            QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage, PrivateUsage;
+    };
+    struct Summary {   // HEAP_SUMMARY
+        DWORD cb;
+        SIZE_T cbAllocated, cbCommitted, cbReserved, cbMaxReserve;
+    };
+    using MemoryInfo = BOOL(WINAPI*)(HANDLE, Counters*, DWORD);
+    using HeapSummaryFn = BOOL(WINAPI*)(HANDLE, DWORD, Summary*);
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    const auto info = kernel ? reinterpret_cast<MemoryInfo>(
+                                   reinterpret_cast<void*>(GetProcAddress(kernel, "K32GetProcessMemoryInfo")))
+                             : nullptr;
+    const auto summary = kernel ? reinterpret_cast<HeapSummaryFn>(
+                                      reinterpret_cast<void*>(GetProcAddress(kernel, "HeapSummary")))
+                                : nullptr;
+    const auto mb = [](std::uint64_t bytes) { return std::to_string(bytes / (1024 * 1024)) + " MB"; };
+    std::string out = "process:";
+    Counters c{};
+    c.cb = sizeof c;
+    if (info != nullptr && info(GetCurrentProcess(), &c, sizeof c)) {
+        out += " private " + mb(c.PrivateUsage) + ", working set " + mb(c.WorkingSetSize);
+    } else {
+        out += " (memory counters not read)";
+    }
+    Summary h{};
+    h.cb = sizeof h;
+    if (summary != nullptr && summary(GetProcessHeap(), 0, &h)) {
+        out += ", heap allocated " + mb(h.cbAllocated) + ", committed " + mb(h.cbCommitted);
+    }
+    using HandleCount = BOOL(WINAPI*)(HANDLE, PDWORD);
+    const auto count = kernel ? reinterpret_cast<HandleCount>(
+                                    reinterpret_cast<void*>(GetProcAddress(kernel, "GetProcessHandleCount")))
+                              : nullptr;
+    DWORD handles = 0;
+    if (count != nullptr && count(GetCurrentProcess(), &handles)) {
+        out += ", handles " + std::to_string(handles);
+    }
+    return out;
+}
+#else
+std::string ProcessMemoryText() {
+    std::ifstream status("/proc/self/status");
+    std::string line, out = "process:";
+    while (std::getline(status, line)) {
+        if (line.rfind("VmRSS:", 0) == 0 || line.rfind("VmSize:", 0) == 0 || line.rfind("RssAnon:", 0) == 0) {
+            std::string value = line.substr(line.find(':') + 1);
+            value.erase(0, value.find_first_not_of(" 	"));
+            out += " " + line.substr(0, line.find(':')) + " " + value;
+        }
+    }
+    return out == "process:" ? out + " (not read)" : out;
+}
+#endif
+
 void CopyText(char* out, std::size_t size, const std::string& text) {
     if (size == 0) {
         return;
@@ -288,9 +349,16 @@ void Menu::RunHost(HostJob job) {
                          "the server runs, but this game's co-op did not start (see the log)");
             }
         }
+        auto memory_said = std::chrono::steady_clock::now();
         while (!stop_) {
             host.set_ngplus(hooks_.ngplus_level ? hooks_.ngplus_level() : 0);   // (Navi) New Game+ (Hooks)
             host.service(kRoundMs);
+            // Row 260: what the host holds, every 30 s (the host's game only; a run reads the trend from the log).
+            if (const auto now = std::chrono::steady_clock::now();
+                now - memory_said >= std::chrono::milliseconds(kMemoryLineMs)) {
+                memory_said = now;
+                Say("coop: host: memory: " + ProcessMemoryText() + "; " + host.memory_line());
+            }
             if (!job.bans_file.empty() && host.session() != nullptr) {   // (a new ban by key: kept for next time)
                 std::vector<std::string> now = host.session()->key_bans();
                 if (now != bans) {

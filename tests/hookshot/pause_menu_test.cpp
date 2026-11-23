@@ -380,6 +380,63 @@ TEST_CASE("pause tab: Browse games: a public game joins in one press with no pas
     CHECK(m.NoteLines()[0].find("needs the host's password") != std::string::npos);
 }
 
+TEST_CASE("pause tab: Find a game pages its games by kFindPerPage under a Page row, round both ways (row 264)") {
+    Menu m;
+    CoopTitleMenu::Options o;
+    o.relay = "relay.example.net:27530";
+    m.Show(o);
+    m.Open(Page::kJoin);
+    SelectRow(m, "Browse games");
+    m.Press(Input::kDecide);
+    REQUIRE(m.page() == Page::kFind);
+    const auto nm = [](int i) { return std::string("room-") + (i < 10 ? "0" : "") + std::to_string(i); };
+    const auto rooms = [&](int n) {
+        std::vector<Menu::Found> out;
+        for (int i = 0; i < n; ++i) {
+            out.push_back({nm(i), "1/32", nm(i), 0, true, "Host", 31 - i, 32, true, false});   // (most players first)
+        }
+        return out;
+    };
+    m.SetFound(rooms(kFindPerPage), "");   // (one page: no Page row)
+    std::vector<std::string> names = Names(m);
+    CHECK(std::find(names.begin(), names.end(), "Page") == names.end());
+    CHECK(names.size() == 5u + kFindPerPage);
+    m.SetFound(rooms(2 * kFindPerPage + 3), "");   // (three pages)
+    names = Names(m);
+    REQUIRE(names.size() == 6u + kFindPerPage);
+    CHECK(names[5] == "Page");   // (right under Refresh, before the games)
+    CHECK(m.view().rows[5].value == "1/3");
+    CHECK(m.view().rows[5].kind == CoopPauseMenu::RowKind::kChoice);
+    CHECK(names[6] == "room-00");
+    SelectRow(m, "Page");
+    m.Press(Input::kRight);
+    CHECK(m.view().rows[5].value == "2/3");
+    CHECK(Selected(m) == "Page");   // (the cursor stays on it)
+    CHECK(Names(m)[6] == nm(kFindPerPage));
+    m.Press(Input::kDecide);   // (A: the page after)
+    CHECK(m.view().rows[5].value == "3/3");
+    CHECK(Names(m).size() == 6u + 3u);   // (the last page's three)
+    m.Press(Input::kRight);   // (round: the first)
+    CHECK(m.view().rows[5].value == "1/3");
+    m.Press(Input::kLeft);    // (round: the last)
+    CHECK(m.view().rows[5].value == "3/3");
+    // A game on the last page fills the Join page with its own room.
+    SelectRow(m, nm(2 * kFindPerPage + 2));
+    m.Press(Input::kDecide);
+    CHECK(m.page() == Page::kJoin);
+    CHECK(m.join_text() == nm(2 * kFindPerPage + 2) + "@relay.example.net:27530");
+    // Back on the list: it opens on its first page again; Sort starts it there too.
+    SelectRow(m, "Browse games");
+    m.Press(Input::kDecide);
+    m.SetFound(rooms(2 * kFindPerPage + 3), "");
+    CHECK(m.view().rows[5].value == "1/3");
+    SelectRow(m, "Page");
+    m.Press(Input::kRight);
+    SelectRow(m, "Sort");
+    m.Press(Input::kRight);
+    CHECK(m.view().rows[5].value == "1/3");
+}
+
 TEST_CASE("pause tab: Find a game lists what is heard, searches the relay's rooms, and a pick fills the Join page") {
     Menu m;
     CoopTitleMenu::Options o;

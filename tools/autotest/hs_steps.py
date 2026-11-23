@@ -484,6 +484,7 @@ class HookshotGames:
                     continue
                 k = k[2:]
             env[k] = v
+        hk.pack_start(g, env, lambda line: self.say("%s: %s" % (x, line)))   # (as the kit's start: row 265)
         exe = os.path.join(hk.exe_dir(g), "longshot.exe" if WINDOWS else "longshot")
         go = open(os.path.join(self.out, "game-out-%s-%d.txt" % (x, self.runs[x])), "wb")
         kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}

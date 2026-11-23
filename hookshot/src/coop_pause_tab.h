@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "coop_pause_menu.h"
+#include "coop_screen_panes.h"
 #include "hos_coop_api.h"
 
 namespace CoopPauseTab {
@@ -224,6 +225,13 @@ public:
     // Longshot's settings there).
     void SetSettingsUsable(bool usable) { settings_ok_ = usable; }
     bool SettingsUsable() const { return settings_ok_; }
+    // Player report 261: the Longshot Settings button opens Longshot's OWN menu (its F1 / Insert menu: every row, its tabs
+    // and helps), not our copy of its rows on this page. On (the module can open that menu on this platform): A on the
+    // button never shows the page; TakeOpenLongshotMenu says once that the module opens Longshot's menu now. Off (no way
+    // to open it here): the button is not offered at all (SettingsUsable false), never our copy.
+    void SetLongshotMenu(bool can_open) { longshot_menu_ = can_open; }
+    bool LongshotMenu() const { return longshot_menu_; }
+    bool TakeOpenLongshotMenu() { return std::exchange(open_longshot_, false); }
     // Which of System's buttons of ours the game's cursor is on now (the module reads it while A is held): 0 the
     // Multiplayer button (Pa_Button_06), 1 the Longshot Settings button (Pa_Button_05), 2 the Customize Link button
     // (Pa_Button_07: the Multiplayer page, opened on Settings and look's Customize page), -1 neither. Its A opens that
@@ -290,6 +298,9 @@ public:
     }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
+    int StripLit() const { return strip_.lit; }
+    bool StripUp() const { return strip_.state == 1 || strip_.state == 2; }
+    bool MinusStripOpen() const { return StripUp() && strip_.mode != kPlusMode; }   // (the - menu is the open screen)
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
     // RowTexts(MinusPage) not ""), set by the module for the tab lit. Up and down move the cursor among the rows shown
     // (the game's button_on), A picks the row under it (button_decide): TakeMinusDecide says which, once.
@@ -422,6 +433,7 @@ private:
     const char* strip_sound_ = nullptr;
     int which_ = 0;   // our page shown: 0 Multiplayer, 1 Longshot Settings (kept while hidden: the menu opens on it again)
     bool settings_ok_ = false;
+    bool longshot_menu_ = false, open_longshot_ = false;   // SetLongshotMenu, TakeOpenLongshotMenu
     int system_button_ = -1;
     int opened_from_ = 0;
     bool customize_open_ = false;
@@ -960,6 +972,11 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
 // closed (not 1, 2). A strip only not seen for a while is a stall, not a close (cs-customize-0119, lane gc198-l5b: the
 // game's threads waited 645 ms for a core, the open screen was taken as closed and opened again on its first page, so
 // Y presses were lost): kWait, the screen kept as it is.
+// Screens known by their panes, looked at again at each opening (row 262): coop_screen_panes.h.
+using CoopScreen::kScreenGapMs;
+using CoopScreen::kScreenLookMs;
+using CoopScreen::ScreenInstance;
+using CoopScreen::ScreenPanes;
 enum class SnailEdge { kWait, kOpen, kClose };
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms);
 // The pad while Character Select's Customize screen is taken as open, from when its screen last updated (`seen_ms`):
@@ -970,6 +987,29 @@ SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::
 inline constexpr std::uint64_t kSnailPauseMs = 300, kSnailGoneMs = 5000;
 enum class SnailPadState { kDrive, kPause, kGone };
 SnailPadState SnailPadFrom(std::uint64_t seen_ms, std::uint64_t now_ms);
+// The hop to Character Select's Characters tab (#322): with his code in the game the colours are on his Customize
+// screen, so A on co-op's Customize Link row, in the - menu, taps L for the player. The game's graph (Sequence/
+// MinusMenu) reads the pad, and its category setters (f_8342b7a0, f_8342b720, SeqOneShotSetCurrentMinusMenuCategory)
+// run inside its transition sequence, which co-op does not drive, so the taps are the game's own L: our tab to Map
+// (Page::MinusPad), then the game's, Map to Threads of Time to Key Items to Characters. The - menu's current category
+// (menu manager +0x52c) is read: the game's own - tabs are [6, 1, 2] = Key Items 6, Threads of Time 1, Map 2
+// (docs/game-ui.md), so the hop taps on while it is one of those, and is done when it is something else (Characters,
+// whose number is not known) or a tap moved nothing (the left edge). Given up after kHopMaxTaps taps or kHopMaxMs.
+struct CharactersHop {
+    int taps = 0;                 // L taps sent
+    int off_taps = 0;             // of those, sent with our page already gone (the game's own tabs)
+    int prev_lit = -1;            // the strip's lit category when the last of those was sent
+    std::uint64_t started_ms = 0, next_ms = 0;
+};
+enum class HopStep { kWait, kTapL, kDone, kGiveUp };
+inline constexpr int kHopMaxTaps = 7;
+inline bool GameMinusCategory(int category) { return category == 6 || category == 1 || category == 2; }
+inline constexpr std::uint64_t kHopMaxMs = 8000, kHopGapMs = 500;
+// `ours`: our page still shows (Page::MinusTab() >= 0); `minus_open`: the - menu is the open screen (its strip up, in
+// its - mode) and nothing is typed into (a field of ours, the chat box): anything else (closed, the Plus menu, another
+// screen, a load, typing) ends the hop at once with no more taps (kGiveUp); `lit`: the - menu's current category
+// (-1 not readable: waits).
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms);
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: the Character tab takes
 // them one update ahead to move with the fourth, not a frame after it.
@@ -1071,6 +1111,13 @@ bool GameMenuUp() noexcept;
 // shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while
 // it is.
 bool OwnMinusPageShown() noexcept;
+// F6 (coop_players_open.h, ui-audit-01112 B5): opens the game's - menu on co-op's Multiplayer tab, Players view, with
+// the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
+// ours (seen once a - menu opened without them): F6's drawn list is used then.
+bool OpenPlayers() noexcept;
+// Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
+// module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
+void SetFreePlay(bool free_play) noexcept;
 // The pause menu's model actors (the menu manager's object, its four slots: Link on Equipment, and the picture Character
 // Select's Customize screen shows), 0 for an empty slot or with no menu. Any thread (reads only). The eyes' and hair's
 // colours are each actor's own material values, so the picture shows them only when they are dressed on these too.
@@ -1090,5 +1137,25 @@ bool LayoutCursor(float* x, float* y, bool* left) noexcept;
 bool Key(std::uint32_t vk, bool repeat) noexcept;
 bool Char(std::uint32_t cp) noexcept;
 bool KeysTaken() noexcept;
+
+// --- Which of System's buttons an A is for (player report 261) ---
+// A button's focus state byte (button+0x38, CoopModScreens::FocusState) as the owner's run of 2026-11-23 traced it while
+// the game's cursor moved: 1 the focus coming to it, 3 the focus on it, 2 the focus leaving it (a moment: the button the
+// cursor just left), 4 and 5 decided, 0 none. The cursor is on a button at 1 or 3; never at 2.
+inline constexpr bool CursorOnState(std::uint8_t state) { return state == 1 || state == 3; }
+// One shown button of System's page as the module read it: `ours` 0 Multiplayer (Pa_Button_06), 1 Longshot Settings
+// (Pa_Button_05), 2 Customize Link (Pa_Button_07), -1 one of the game's own (Options, Special Actions, Title Screen, ...);
+// its focus state and its hit box (the layout's units).
+struct SystemButtonSeen {
+    int ours = -1;
+    std::uint8_t state = 0;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+// The button of ours the game's cursor is on (0, 1, 2 as `ours`), -1 when it is on one of the game's own or on none:
+// only a button at CursorOnState counts. The A on Title Screen just after the cursor left Longshot Settings (Title
+// Screen 3, Longshot Settings 2) is the game's: it opened our Longshot Settings page instead of the game's Title
+// Screen question (player report 261). Two at it (the mouse moved the focus just before its click): the one under the
+// mouse (`mouse`: x, y in the layout's units), else the one the focus is coming to (1), else none.
+int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse);
 
 }  // namespace CoopPauseTab

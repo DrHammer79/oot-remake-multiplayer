@@ -2,6 +2,8 @@
 #include "coop_title_native.h"
 
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
+#include "coop_text_fit.h"
 
 #include <algorithm>
 #include <vector>
@@ -10,13 +12,8 @@ namespace CoopTitleNative {
 
 namespace {
 
-// At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string Fit(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+// At most `n` letters of width (and bytes), cut before a letter's start, with "..." when cut (coop_text_fit.h).
+std::string Fit(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 }  // namespace
 
@@ -72,9 +69,11 @@ Look TypingLook(const CoopPauseMenu::View& v, char letter, int key) {
     out.texts[static_cast<std::size_t>(Key::kDelete)] = CoopI18n::Tr("Delete");
     out.texts[static_cast<std::size_t>(Key::kOk)] = CoopI18n::Tr("OK");
     for (std::string& t : out.texts) {
-        if (t.size() > kTextBytes) {   // (the field's end: the typing; never inside a letter of more bytes)
-            std::size_t from = t.size() - (kTextBytes - 3);
-            while (from < t.size() && (static_cast<unsigned char>(t[from]) & 0xC0) == 0x80) ++from;
+        if (t.size() > kTextBytes || CoopTextFit::Halves(t) > 2 * kTextBytes) {   // (the field's end: the typing)
+            std::size_t from = t.size() - std::min(t.size(), kTextBytes - 3);
+            while (from < t.size() && (CoopTextFit::Halves(t.substr(from)) > 2 * kTextBytes - 6 ||
+                                       (static_cast<unsigned char>(t[from]) & 0xC0) == 0x80))
+                ++from;   // (never inside a letter; the end that fits the button's width)
             t = "..." + t.substr(from);
         }
     }
@@ -132,12 +131,10 @@ Look LookFor(const CoopPauseMenu::View& v, int top, int buttons) {
     l.texts[static_cast<std::size_t>(l.back)] = CoopI18n::Tr("Back");
     l.rows[static_cast<std::size_t>(l.back)] = -1;
     l.focus = at >= 0 ? at - l.top : l.back;
-    // (more than one page: the page first, then what the row does — both in the player's
-    // language before the cut: the page is the table's shape, the row's help its line)
-    const std::string paged =
-        l.pages > 1
-            ? CoopI18n::Tr("Page " + std::to_string(l.page + 1) + " of " + std::to_string(l.pages) + " (ZL/ZR)")
-            : std::string();
+    // (more than one page: the page first, between the game's own ZL and ZR letters (coop_list_pages.h), then what
+    // the row does; both in the player's language before the cut: the page is the table's shape, the row's help its
+    // line. Row 264: "Page 2 of 3 (ZL/ZR)" in words was not seen as something the pad can do)
+    const std::string paged = CoopListPages::Line(l.page, l.pages);
     l.hint = Fit(paged.empty()   ? CoopI18n::Tr(v.help)
                  : v.help.empty() ? paged
                                   : paged + "   " + CoopI18n::Tr(v.help),
@@ -159,8 +156,8 @@ float ColumnRaise(float lowest, float highest, float raised, float scale) {
 int PageJump(const CoopPauseMenu::View& v, const Look& l, int dir) {
     int at = -1;
     const std::vector<int> shown = Shown(v, &at);
-    const int page = l.page + (dir < 0 ? -1 : 1);
-    if (dir == 0 || l.pages <= 1 || page < 0 || page >= l.pages) return -1;
+    if (dir == 0 || l.pages <= 1) return -1;
+    const int page = CoopListPages::Step(l.page, l.pages, dir);   // (round at both ends, as every list: row 264)
     const int per_page = std::max(1, l.per_page);
     const std::size_t first = static_cast<std::size_t>(page) * static_cast<std::size_t>(per_page);
     return first < shown.size() ? shown[first] : -1;

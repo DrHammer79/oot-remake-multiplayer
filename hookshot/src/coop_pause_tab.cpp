@@ -4,6 +4,8 @@
 
 #include "coop_browse.h"
 #include "coop_i18n.h"
+#include "coop_list_pages.h"
+#include "coop_text_fit.h"
 
 #include "hos_coop_host.h"
 
@@ -468,11 +470,19 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if (!shown_ && CanMinus(now_ms)) return MinusPad(buttons, down);   // (the - menu: its tabs of ours)
     if (!shown_) {
-        if ((down & kPadA) != 0 && system_button_ >= 0 && (system_button_ != 1 || settings_ok_) && CanShow(now_ms)) {
+        if ((down & kPadA) != 0 && system_button_ == 1 && settings_ok_ && longshot_menu_ && CanShow(now_ms)) {
+            // (player report 261: Longshot Settings is Longshot's own menu, opened over the pause menu by the module;
+            // never our copy of its rows. The A is ours: the game does not know the button)
+            open_longshot_ = true;
+            pages_sound_ = "button_decide";
+            swallow_ |= kPadA;
+            return buttons & ~swallow_;
+        }
+        if ((down & kPadA) != 0 && system_button_ >= 0 && system_button_ != 1 && CanShow(now_ms)) {
             // (A on one of System's buttons of ours: its page in System's place, at once; the game's own A never
             // reaches the button, whose name its selectors do not know. Customize Link's is the Multiplayer page,
             // opened on Settings and look's Customize page)
-            shown_ = true, decide_ = false, why_.clear(), which_ = system_button_ == 1 ? 1 : 0, sub_ = false, back_ = false;
+            shown_ = true, decide_ = false, why_.clear(), which_ = 0, sub_ = false, back_ = false;
             opened_from_ = system_button_;
             customize_open_ = system_button_ == 2;
             slide_ = 0;
@@ -815,6 +825,23 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
     return x;
 }
 
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms) {
+    if (!minus_open) return HopStep::kGiveUp;   // (not the open screen any more: not one tap more)
+    if (h.started_ms == 0) h.started_ms = now_ms;
+    if (now_ms - h.started_ms > kHopMaxMs || h.taps >= kHopMaxTaps) return HopStep::kGiveUp;
+    if (now_ms < h.next_ms) return HopStep::kWait;
+    if (!ours) {
+        if (lit < 0) return HopStep::kWait;
+        if (!GameMinusCategory(lit)) return HopStep::kDone;   // (not Key Items, Threads or Map: Characters)
+        if (h.off_taps > 0 && lit == h.prev_lit) return HopStep::kDone;   // (the left edge: the last tap moved nothing)
+        h.prev_lit = lit;
+        ++h.off_taps;
+    }
+    ++h.taps;
+    h.next_ms = now_ms + kHopGapMs;
+    return HopStep::kTapL;
+}
+
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms) {
     const bool up = MenuUpFrom(strip_state, strip_seen_ms, now_ms);
     if (open) {
@@ -843,7 +870,7 @@ int BrowseListed(const Session& s) {
 }
 
 int CellPages(int listed) {
-    return listed <= kCells ? 1 : (listed + kCells - 1) / kCells;
+    return CoopListPages::Pages(listed, kCells);
 }
 
 int CellIndex(const Session& s, int cell) {
@@ -1119,21 +1146,11 @@ RowAction ActionFor(View view, int row, const Session& s) {
 
 namespace {
 
-// At most kRowChars bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string Fit(std::string t) {
-    if (t.size() <= kRowChars) return t;
-    std::size_t n = kRowChars - 3;
-    while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xc0) == 0x80) --n;
-    return t.substr(0, n) + "...";
-}
+// At most kRowChars letters of width (and bytes), with "..." when cut (coop_text_fit.h).
+std::string Fit(std::string t) { return CoopTextFit::Fit(t, kRowChars); }
 
-// At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut.
-std::string FitWidth(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+// At most `n` letters of width (and bytes), with "..." when cut.
+std::string FitWidth(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 // A line over up to `rows` rows of `width` bytes, broken at spaces (a word longer than a row is cut); the last row ends
 // in "..." when more is left.
@@ -1147,11 +1164,7 @@ std::vector<std::string> Wrap(const std::string& text, std::size_t rows, std::si
             out.push_back(FitWidth(text.substr(at), width));
             break;
         }
-        std::size_t end = std::min(text.size(), at + width);
-        if (end < text.size() && text[end] != ' ') {
-            const std::size_t space = text.rfind(' ', end);
-            if (space != std::string::npos && space > at) end = space;
-        }
+        const std::size_t end = CoopTextFit::LineEnd(text, at, width);   // (by width; never inside a letter)
         out.push_back(text.substr(at, end - at));
         at = end;
     }
@@ -1793,12 +1806,7 @@ std::vector<std::string> Probe::Seen(const Facts& f, std::uint64_t now_ms) {
 
 namespace {
 // At most `n` bytes, cut before a UTF-8 sequence's start, with "..." when cut (the list's columns are wider than a row).
-std::string FitTo(std::string t, std::size_t n) {
-    if (t.size() <= n) return t;
-    std::size_t k = n - 3;
-    while (k > 0 && (static_cast<unsigned char>(t[k]) & 0xc0) == 0x80) --k;
-    return t.substr(0, k) + "...";
-}
+std::string FitTo(std::string t, std::size_t n) { return CoopTextFit::Fit(t, n); }
 
 }  // namespace
 
@@ -1898,14 +1906,14 @@ std::vector<ListLine> ListLines(const SessionView& v) {
     // (a heading of text: "Game | Players" with its value box read as a button that did nothing, a tester)
     // (the heading: the list and its page, "< 1 of 3 >" when there are more (a click on its left half goes back a
     // page, on its right half on); its box asks the list again (a click, or Y))
+    // (row 264: the page between the game's own ZL and ZR letters, "Public games  ZL Page 2/3 ZR", so the list says
+    // it pages and with which buttons; the page line is never cut, a long list name gives way: coop_list_pages.h)
     const int pages = CellPages(BrowseListed(v.s));
-    std::string head = v.s.online ? "Public games" : "This network";
-    if (pages > 1) head += "  < " + std::to_string((v.s.cell_page % pages + pages) % pages + 1) + " of " +
-                           std::to_string(pages) + " >";
-    // (the heading and the words in the player's language, before the cut: the heading is
-    // the module's split shape, the list's own lines the server list brought are already ours)
-    lines[0] = ListLine{FitTo(CoopI18n::Tr(head), kListNameChars), FitTo(CoopI18n::Tr("Refresh"), kListValueChars),
-                        RowAction::kBrowseRefresh};
+    const std::string head = CoopI18n::Tr(v.s.online ? "Public games" : "This network");
+    // (the heading and the words in the player's language, before the cut; the list's own lines the server list
+    // brought are already ours)
+    lines[0] = ListLine{CoopListPages::Heading(head, CoopListPages::Line(v.s.cell_page, pages), kListNameChars),
+                        FitTo(CoopI18n::Tr("Refresh"), kListValueChars), RowAction::kBrowseRefresh};
     const std::vector<ListLine>& list = v.s.online ? v.online_list : v.lan_list;
     if (list.empty()) {
         lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")
@@ -2174,6 +2182,31 @@ MenuList MenuLines(const CoopPauseMenu::View& menu, int tab, int top, bool list,
     }
     MarkShown(&out.lines);   // (all in the player's language now: the module draws them as they are)
     return out;
+}
+
+int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse) {
+    std::vector<const SystemButtonSeen*> at;
+    for (const SystemButtonSeen& b : seen) {
+        if (CursorOnState(b.state)) at.push_back(&b);
+    }
+    if (at.empty()) return -1;
+    if (at.size() == 1) return at.front()->ours;
+    if (mouse) {
+        const auto [x, y] = *mouse;
+        for (const SystemButtonSeen* b : at) {
+            if (x >= std::min(b->x0, b->x1) && x <= std::max(b->x0, b->x1) && y >= std::min(b->y0, b->y1) &&
+                y <= std::max(b->y0, b->y1)) {
+                return b->ours;
+            }
+        }
+    }
+    const SystemButtonSeen* coming = nullptr;
+    for (const SystemButtonSeen* b : at) {
+        if (b->state != 1) continue;
+        if (coming != nullptr) return -1;   // (two coming: not one to choose)
+        coming = b;
+    }
+    return coming != nullptr ? coming->ours : -1;
 }
 
 }  // namespace CoopPauseTab
