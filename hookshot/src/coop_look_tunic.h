@@ -178,8 +178,9 @@ public:
     // One step of the work, every frame or two (the game makes Link's
     // textures again on scene changes, cutscenes and its streaming, each time
     // without the override: found again within a step, not a second later).
-    // `now_ms` on any steady clock. One thread. Never throws: a step that fails (the PC out of memory, lane
-    // 2026-11-23) logs a `coop:` line and the next step looks at every texture again.
+    // `now_ms` on any steady clock. One thread. Catches std::exception: a step that fails that way (the PC out of
+    // memory, lane 2026-11-23) logs a `coop:` line and the next step looks at every texture again. Anything that is
+    // not a std::exception is not caught here: the catch (...) around WorkOnce in Work() (coop_look_live.cpp) covers it.
     void Step(std::uint64_t now_ms);
     // Look at the game's textures again at the next Step (the pause screen
     // closed: the equipment may have changed). Any thread.
