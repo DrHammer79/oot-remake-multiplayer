@@ -81,9 +81,8 @@ static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
 static int sampled_pad(int i, int k) { return pad_bind[i][k]; }
 static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
-static volatile LONG pad_count_now;
 static int sprint_now;   /* (Sprint's gamepad input, read with the pads: tests/test_sprint.py) */
-enum { SPRINT_PAD = 2 };
+@@SPRINT_ENUM@@
 static int sprint_read(void) { return sprint_now; }
 """
 
@@ -131,7 +130,7 @@ int main(void) {
     menu_open = 0; CHECK(game(s) == 0 && sprint_now == 0 && s[0] == 30000);
     CHECK(game(s) == 0 && sprint_now == 0);
     pads_down = 0; CHECK(game(s) == 0 && sprint_now == 0);
-    pads_down = PAD(LSTICK); CHECK(game(s) == 0 && sprint_now == SPRINT_PAD);
+    pads_down = PAD(LSTICK); CHECK(game(s) == 0 && (sprint_now & SPRINT_PAD));   /* (and SPRINT_L3: on the left stick's press) */
     pads_down = 0; pads_stick[0] = 0; CHECK(game(s) == 0);
 
     /* A trigger that stays down through the menu (worn, or past its rest), the menu closed with East (A) */
@@ -209,7 +208,7 @@ def main():
         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
         block(api, "enum { HOS_KEY_MOVE_UP") + ";",
         re.search(r"^enum \{ HOS_PAD_TOUCHPAD = \d+ \};", api, re.M).group(0),
-        PRELUDE,
+        PRELUDE.replace("@@SPRINT_ENUM@@", re.search(r"^enum \{ SPRINT_KEY = .*$", hid, re.M).group(0)),
         block(hid, "static const signed char pad_default[HOS_SW_N] =") + ";",
         block(hid, "static void stick_max("), block(hid, "static uint64_t hud_pad_mask("),
         block(hid, "static uint64_t bound_pad_buttons("), state,
