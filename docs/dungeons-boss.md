@@ -700,6 +700,56 @@ Not proven in a game yet: the probe run (two games, hs-twinrova-native) must sho
 `N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
 hand-over.
 
+## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
+
+**Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on
+the host's copy (`P2's killing blow replayed`, then `a hit the boss's game did not take: its life stays its game's`,
+`dead in its owner's game`, the second replay). Its life stayed 1, and 3 s later (`kDeadGraceUs`) the copy was
+deleted from outside (the 5 s line: `1 deletes`). Barinade's copy never saw a jellyfish die. One summary cycle after
+`copy ... plays 'Phase4_St'` (the owner's verb 125) the game crashed: `exception 0xc0000005 (write 0x100000000000,
+guest 0) at longshot.exe+0x72753`.
+
+**Read from main** (build e0f3ccfa, main base 0x80020000; no game run): guest lr 0x80980a04 = main+0x960a04, in
+main+0x9607f0, a member of the `ModelBind` component (string at main+0x95f60c). It clears the bound bone name: memset
+of its buffer (`[this+0x88]`, length `[this+0x90]` - 1). Its caller main+0x960340 (lr main+0x960494) takes
+`this` from main+0x2637340 (lr main+0x2637380), which reads the component as `[[actor+0x270]+0x18]` (main+0xf55ee0,
+which may be null) and checks nothing. main+0x2637340 is a callback (stored at main+0x4980b78) of the update
+main+0x2636f10 (vtable slot at main+0x4980ad0) of `ExecuteBarinadeJellyfishActionUnstick` (strings at main+0x2637024
+`TargetJellyfishIndex`, main+0x2637104). It is called through main+0x2db8950 (lr main+0x2db89e4) on the jellyfish
+its handle names. So the Unstick of her new phase reached a jellyfish with no ModelBind: `this` 0, buffer 0,
+length 0 - 1 = -1 (crash registers x0 = x1 = x19 = x20 = 0, x2 = x21 = -1). That jellyfish was one we were deleting,
+or had deleted. In the owner's game each jellyfish dies by its own death, which tells Barinade, before her phase
+moves on.
+
+**Now** (module only, `lichii/hook/coop_objects_sync.cpp`):
+- A boss part copy (`IsBossPart`: Barinade's jellyfish and arms, Morpha's tentacle, Bongo Bongo's hands, Gohma's
+  eggs and larvae, King Dodongo's babies, Twinrova's sisters, the mid-bosses' parts) whose replayed killing hit its
+  game refused gets its whole life through its own Life step (`LifeWrite::direct`, never a write), once. The hitter's
+  game judged the kill, so its own death runs here and tells its boss, as it did there. Log: `a killing hit the boss
+  part's game did not take: its life N given to its own Life step (the hitter's game killed it; rows 257/258)`. The
+  5 s line counts it: `(boss part kills to its Life step N)`.
+- Its owner's dead remove then replays no second killing blow.
+- A boss part whose boss is alive here is never deleted from outside after `kDeadGraceUs` (`Sync::HeldByItsBoss`).
+  Its own death ends it. Once its boss is dead here, or not on the walk, the grace delete is the fallback again.
+  A part still held `kHeldSayUs` (10 s) past the grace is said once, a leftover whose own death never ended it:
+  `a boss part dead in its owner's game still here N s on: held by its boss <id> <boss>, not deleted (rows 257/258):
+  <id> <part> life N`.
+- Unchanged: the boss itself (HeldLifeStep, SetDying, `a hit the boss's game did not take` for a refused hit that does
+  not kill), plain enemies (the write and grace path), our own parts (`a hit our boss's game did not take as a replay`).
+
+**Every boss's forced phase.** "The copy takes the owner's state again" (Resync after our hit or event) and the action
+stream put the owner's phase verbs into Barinade's copy at Phase2_St and Phase3_St in the same log with no crash. A
+copy's phase move is the owner's move, and it can only be safe when the copy's parts are what the owner's game had
+when it moved. A part deleted from outside, with no death of its own, is the one difference the copy cannot see. So
+the rule above covers every boss with parts, not one phase gate: Barinade (jellyfish, arms), Morpha (tentacle),
+Bongo Bongo (hands), Gohma (larvae), King Dodongo (babies), Twinrova (sisters), Phantom Ganon (painting riders),
+Ganon, Big Octo, Meg's dummies, Flare Dancer. Bosses without parts (Volvagia, Dark Link's body) were not touched.
+
+**Tests.** `objects_test` (rows 257/258: a refused part kill goes to its Life step once, with no second replay, and is
+not deleted while its boss lives; with no boss here the grace delete still runs; a boss's own refused killing hit is
+still not given). **Not proven in game:** two games, P2 owns Barinade and kills the jellyfish, the host's copy reaches
+Phase4_St with no crash, and the host's log shows `boss part kills to its Life step 5` and no `1 deletes` after each.
+
 ## Not known yet (for the in-game check)
 
 1. Whether the force-set-matrix move into a room of the same scene loads that room's walls and floor, or Link falls through (the dungeon may stream rooms by `DungeonRoomIndex`). If he falls, the fallback is the scene change, which needs an event running.
