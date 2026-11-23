@@ -1244,6 +1244,7 @@ def run(a):
             if a.playtest_ports:
                 # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
                 env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
+                env["LICHII_COOP_PLAYTEST_VERBS"] = "1"   # act, warp, flag, give: a player's game never gets this
                 env.setdefault("LICHII_COOP_CHEATS", "1")   # the bridge's give goes through the cheats queue
             for kv in a.env:
                 k, v = kv.split("=", 1)

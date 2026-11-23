@@ -254,7 +254,7 @@ private:
 };
 
 Control g_control;  // (the bridge's thread only)
-bool g_verbs_kit = false, g_verbs_cheats = false;   // the gate for act, flag, warp and give (set at Start)
+bool g_verbs_runner = false, g_verbs_cheats = false;   // the gate for act, flag, warp and give (set at Start)
 
 // ---- the state ----
 
@@ -329,7 +329,7 @@ std::string StateMembers(bool full_world = false) {
         first = false;
     }
     out += "]}";
-    out += ",\"menu\":" + Quote(CoopPause::MenuState());
+    out += ",\"coop_menu\":" + Quote(CoopPause::MenuState());
     out += WorldText(full_world);
     return out;
 }
@@ -379,9 +379,10 @@ std::string Handle(const Request& r) {
         if (!gate.Step(r.frames, kHoldWait, &from)) return fail("timeout", "the frames did not run in time");
         return ok("\"from\":" + std::to_string(from) + ",\"state\":" + StateObject());
     }
-    // The commands that change the game reach the wire and other players' games: only in a kit run with cheats on.
-    if (r.cmd == "act" || r.cmd == "warp" || r.cmd == "flag" || r.cmd == "give") {
-        const std::string refusal = VerbRefusal(g_verbs_kit, g_verbs_cheats);
+    // The commands that change the game reach the wire and other players' games: only when the test runner asked for
+    // them (LICHII_COOP_PLAYTEST_VERBS) and cheats are on.
+    if (GatedCommand(r.cmd)) {
+        const std::string refusal = VerbRefusal(g_verbs_runner, g_verbs_cheats);
         if (!refusal.empty()) return fail("refused", refusal);
     }
     if (r.cmd == "act") {
@@ -580,9 +581,9 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     g_gate = std::make_unique<Gate>(IdleFrom(Env("LICHII_COOP_PLAYTEST_IDLE")));
     g_enabled.store(true);
     CoopWorldSnapshot::TheStore().Enable(&BridgeFrame);  // the object walk fills the `world` list from now on
-    g_verbs_kit = EnvIsOn(Env("OOT_COOP_KIT_START"));
+    g_verbs_runner = EnvIsOn(Env("LICHII_COOP_PLAYTEST_VERBS"));
     g_verbs_cheats = CoopCheats::On();
-    LOG_INFO(Core, "coop: playtest: {}", VerbGateLine(g_verbs_kit, g_verbs_cheats));
+    LOG_INFO(Core, "coop: playtest: {}", VerbGateLine(g_verbs_runner, g_verbs_cheats));
     g_thread = std::thread(Run);
     LOG_INFO(Core, "coop: playtest: listening on 127.0.0.1:{} (control {}; dumps and shots in {})", *port,
              Env("HOS_CONTROL").empty() ? "off: HOS_CONTROL unset" : "on", g_dir.generic_string());

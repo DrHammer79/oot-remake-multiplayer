@@ -451,21 +451,30 @@ TEST_CASE("playtest: act takes one plain test line") {
     CHECK(ParseError(R"({"cmd":"nope"})").find("act") != std::string::npos);  // the command list names act
 }
 
-TEST_CASE("playtest: act, flag, warp and give run only in a kit run with cheats on") {
-    // (a real host's game connects to its own server at 127.0.0.1, so a loopback server never makes it a test)
+TEST_CASE("playtest: act, flag, warp and give run only when the test runner asked and cheats are on") {
+    // (the kit's start files set OOT_COOP_KIT_START for every player, and a real host's game connects to its own
+    // server at 127.0.0.1: neither makes a test. Only the runner's own variable does.)
     CHECK(VerbRefusal(true, true).empty());
-    const std::string no_kit = VerbRefusal(false, true);  // loopback server, no kit env: refused
-    CHECK(no_kit.find("OOT_COOP_KIT_START") != std::string::npos);
-    CHECK(VerbRefusal(false, false).find("OOT_COOP_KIT_START") != std::string::npos);
-    const std::string no_cheats = VerbRefusal(true, false);  // kit env, cheats off: refused
+    const std::string no_runner = VerbRefusal(false, true);  // a player's game with cheats on: refused
+    CHECK(no_runner.find("LICHII_COOP_PLAYTEST_VERBS") != std::string::npos);
+    CHECK(no_runner.find("OOT_COOP_KIT_START") == std::string::npos);
+    CHECK(VerbRefusal(false, false).find("LICHII_COOP_PLAYTEST_VERBS") != std::string::npos);
+    const std::string no_cheats = VerbRefusal(true, false);  // the runner, cheats off: refused
     CHECK(no_cheats.find("LICHII_COOP_CHEATS") != std::string::npos);
 }
 
+TEST_CASE("playtest: exactly act, warp, flag and give are gated") {
+    for (const char* cmd : {"act", "warp", "flag", "give"}) CHECK(GatedCommand(cmd));
+    for (const char* cmd : {"state", "dump", "shot", "input", "step", "pause", "resume", "hello", "nope", ""}) {
+        CHECK_FALSE(GatedCommand(cmd));
+    }
+}
+
 TEST_CASE("playtest: the gate line at start says what is on and why") {
-    CHECK(VerbGateLine(true, true) == "verbs on (kit run: yes, cheats: on)");
-    CHECK(VerbGateLine(true, false) == "verbs off (kit run: yes, cheats: off)");
-    CHECK(VerbGateLine(false, true) == "verbs off (kit run: no, cheats: on)");
-    CHECK(VerbGateLine(false, false) == "verbs off (kit run: no, cheats: off)");
+    CHECK(VerbGateLine(true, true) == "verbs on (test runner: yes, cheats: on)");
+    CHECK(VerbGateLine(true, false) == "verbs off (test runner: yes, cheats: off)");
+    CHECK(VerbGateLine(false, true) == "verbs off (test runner: no, cheats: on)");
+    CHECK(VerbGateLine(false, false) == "verbs off (test runner: no, cheats: off)");
 }
 
 TEST_CASE("playtest: an environment value is on when set, not empty and not 0") {

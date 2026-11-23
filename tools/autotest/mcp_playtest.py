@@ -115,7 +115,7 @@ def act_line(name, args):
     return None
 
 
-ACT_NOTE = ("Needs a kit run with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
+ACT_NOTE = ("Needs a test-runner start with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
             "use it on the test server only. The game does it on its next frames: step a few, then get_state.")
 ACT_TOOLS = [
     {"name": "kill", "description": "Kill an enemy actor by its name (from get_state's world list). " + ACT_NOTE,
@@ -137,10 +137,11 @@ ACT_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"part": {"type": "string", "enum": ["all"] + list(PARTS)}}}},
     {"name": "assign", "description": "Put an item on a button (Bow, Hookshot, Hammer, SlingShot, Bomb, ...). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
-    {"name": "chat", "description": "Send a chat message as this player. " + ACT_NOTE,
+    {"name": "chat", "description": "Send a chat message as this player (1 to 200 characters; no ';', '#' or new "
+     "line). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
-    {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `menu` member "
-     "says where it is. " + ACT_NOTE,
+    {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `coop_menu` "
+     "member says which co-op page is open; it does not see the game's own pause screen (use screenshot). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["page"],
                      "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
 ]

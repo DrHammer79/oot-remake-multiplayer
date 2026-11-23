@@ -402,6 +402,34 @@ class PlayerServer(unittest.TestCase):
             sys.stderr = err
 
 
+class VerbGateNotInPlayersFiles(unittest.TestCase):
+    """act, warp, flag and give are gated on LICHII_COOP_PLAYTEST_VERBS. A player's game must never get it: no file
+    the kit starts a game from names it (the review of playtest S3: OOT_COOP_KIT_START was set for every player)."""
+    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    NAME = "LICHII_COOP_PLAYTEST_VERBS"
+
+    def test_the_kits_start_files_and_options_never_name_it(self):
+        kit = os.path.join(self.ROOT, "tools", "release", "kit")
+        named = ["scripts/play.ps1", "linux-longshot/scripts/start.sh", "coop-options.ini"]
+        for rel in named:
+            self.assertTrue(os.path.isfile(os.path.join(kit, rel)), rel)   # (the test fails if a file moves)
+        checked = 0
+        for folder, _dirs, files in os.walk(kit):
+            for f in files:
+                path = os.path.join(folder, f)
+                with open(path, "rb") as fh:
+                    data = fh.read()
+                checked += 1
+                self.assertNotIn(self.NAME.encode(), data, os.path.relpath(path, kit))
+        self.assertGreater(checked, 3)
+
+    def test_the_runner_names_it_next_to_the_port(self):
+        with open(os.path.join(self.ROOT, "tools", "autotest", "hookshot.py"), encoding="utf-8") as f:
+            text = f.read()
+        i = text.index('env["LICHII_COOP_PLAYTEST_PORT"]')
+        self.assertIn(self.NAME, text[i:i + 300])
+
+
 class DesyncClients(unittest.TestCase):
     def write(self, d, player, rows):
         with open(pc.checkpoint_file(d, player), "w", encoding="utf-8") as f:

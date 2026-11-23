@@ -109,12 +109,17 @@ std::string Quote(std::string_view text);
 // newline, which would split a reply in two).
 std::string Compact(const CoopModJson::Value& value);
 
-// The verbs that change the game (act, flag, warp, give) run only in a kit run (OOT_COOP_KIT_START: the kit's start
-// file and the autotest set it) with cheats on (LICHII_COOP_CHEATS). A real host's game connects to its own server at
-// 127.0.0.1, so a loopback server is no sign of a test. Empty when allowed, else the reason (the error reply's text).
-std::string VerbRefusal(bool kit_run, bool cheats);
-// The line the bridge logs at start: "verbs on|off (kit run: yes|no, cheats: on|off)".
-std::string VerbGateLine(bool kit_run, bool cheats);
+// The commands that change the game and reach the wire: act, warp, flag and give. state, dump, shot, input, step, pause
+// and resume are not gated.
+bool GatedCommand(std::string_view cmd);
+// The gated commands run only when the test runner asked for them (LICHII_COOP_PLAYTEST_VERBS, set by tools/autotest
+// next to the bridge port and by nothing a player starts: not play.ps1, start.sh or coop-options.ini) and cheats are on
+// (LICHII_COOP_CHEATS). OOT_COOP_KIT_START is no sign of a test: the kit's start files set it for every player's game,
+// and so is a loopback server (a real host's game connects to its own server at 127.0.0.1). Empty when allowed, else
+// the reason (the error reply's text).
+std::string VerbRefusal(bool runner, bool cheats);
+// The line the bridge logs at start: "verbs on|off (test runner: yes|no, cheats: on|off)".
+std::string VerbGateLine(bool runner, bool cheats);
 // Whether an environment value counts as on (set, not empty, not "0").
 bool EnvIsOn(std::string_view value);
 

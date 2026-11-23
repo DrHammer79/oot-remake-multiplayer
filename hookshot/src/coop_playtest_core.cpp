@@ -411,17 +411,20 @@ std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool p
 
 bool EnvIsOn(std::string_view value) { return !value.empty() && value != "0"; }
 
-std::string VerbRefusal(bool kit_run, bool cheats) {
-    if (!kit_run) {
-        return "refused: this is not a kit run (OOT_COOP_KIT_START is not set), and these commands reach the wire and "
+bool GatedCommand(std::string_view cmd) { return cmd == "act" || cmd == "warp" || cmd == "flag" || cmd == "give"; }
+
+std::string VerbRefusal(bool runner, bool cheats) {
+    if (!runner) {
+        return "refused: this is not a test run (LICHII_COOP_PLAYTEST_VERBS is not set by the test runner), and these "
+               "commands reach the wire and "
                "other players";
     }
     if (!cheats) return "refused: cheats are off (LICHII_COOP_CHEATS is not set)";
     return {};
 }
 
-std::string VerbGateLine(bool kit_run, bool cheats) {
-    return std::string("verbs ") + (kit_run && cheats ? "on" : "off") + " (kit run: " + (kit_run ? "yes" : "no") +
+std::string VerbGateLine(bool runner, bool cheats) {
+    return std::string("verbs ") + (runner && cheats ? "on" : "off") + " (test runner: " + (runner ? "yes" : "no") +
            ", cheats: " + (cheats ? "on" : "off") + ")";
 }
 

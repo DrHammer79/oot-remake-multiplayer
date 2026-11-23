@@ -116,16 +116,19 @@ step them in turn, the same number of frames.
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
-**The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only in a
-kit run with cheats on: `OOT_COOP_KIT_START` set (the runner sets it) and `LICHII_COOP_CHEATS=1` (the runner sets it
-too). Otherwise the reply is `refused` with one of:
+**The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only when
+the test runner asked for them and cheats are on: `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1`. The runner
+(`tools/autotest/hookshot.py`, so `live.py start --playtest` too) sets both next to `LICHII_COOP_PLAYTEST_PORT`. No file
+a player starts from names `LICHII_COOP_PLAYTEST_VERBS`: not `play.ps1`, not `start.sh`, not `coop-options.ini`
+(`test_playtest_bridge.py` checks it). Otherwise the reply is `refused` with one of:
 
-- `refused: this is not a kit run (OOT_COOP_KIT_START is not set), and these commands reach the wire and other players`
+- `refused: this is not a test run (LICHII_COOP_PLAYTEST_VERBS is not set by the test runner), and these commands reach the wire and other players`
 - `refused: cheats are off (LICHII_COOP_CHEATS is not set)`
 
-A real host's game connects to its own server at 127.0.0.1, so an address check could not tell a test from a real
-session; the kit variable is the gate. At start the module logs `coop: playtest: verbs on|off (kit run: yes|no,
-cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause` and `shot` are not gated.
+`OOT_COOP_KIT_START` is no sign of a test: the kit's start files set it for every player's game. Nor is a loopback
+server: a real host's game connects to its own server at 127.0.0.1. At start the module logs `coop: playtest: verbs
+on|off (test runner: yes|no, cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause`, `resume` and `shot` are not
+gated.
 
 ### State
 
@@ -141,8 +144,9 @@ cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause` and `shot` are not g
 Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
 quarter hearts. `snapshot_present` is Longshot's present count when it was taken (Link's last update; on a title,
 pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
-stays `null` until the room is found in memory. `menu` is the co-op menu's page (`"closed"`, or the page's name such as
-`"customize"`); it does not see the game's own pause screen.
+stays `null` until the room is found in memory. `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
+`"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
+tester who pressed Start reads the screen (`shot`), not this.
 
 **`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
 the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk
@@ -282,9 +286,10 @@ pathfinding, so give it points with a clear line between them and use `warp` for
 
 1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L.
    `live.py start --playtest [--lane L]` does it for its two games (A = p1, B = p2: the runner's
-   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`, and `LICHII_COOP_CHEATS=1` for `give`;
+   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`, `LICHII_COOP_PLAYTEST_VERBS=1` and
+   `LICHII_COOP_CHEATS=1` (the gate of `act`, `warp`, `flag` and `give`);
    `HOS_CONTROL` was set already), and its answer lists the ports. Give it `--max-minutes` for a long run (30 by
-   default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL` and `LICHII_COOP_CHEATS=1` in each game's
+   default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL`, `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1` in each game's
    environment (or `live.py start --env A:LICHII_COOP_PLAYTEST_PORT=5011 --env B:...`). Each game's log says
    `coop: playtest: listening on 127.0.0.1:<port>`.
 2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
