@@ -138,6 +138,11 @@ struct SessionConfig {
   // messages a second) stay well under them.
   std::uint32_t reliable_per_second = 60;
   std::uint32_t unreliable_per_second = 240;
+  // Report 138 (4): after the host's save load (FLAG_RESET) a guest's FLAG_SET still in flight, sent before that
+  // guest's game had the reset, put its old values back (a guest's MaxLife 16 over the save's 12, a boss beaten
+  // again). For this long after a reset, a guest's change to a flag the reset set is refused, unless it is the
+  // reset's own value or a count change. 0: off.
+  std::uint64_t reset_fence_us = 2'000'000;
   // VOICE_FRAME (channel 5) has a budget of its own, so talking never takes
   // the poses' and samples' messages: 50 frames a second, bursts of twice.
   std::uint32_t voice_per_second = 60;
@@ -382,6 +387,7 @@ struct Stats {
   std::uint64_t after_refused = 0;   // packets from a connection being closed
   std::uint64_t rate_limited = 0;    // over a player's message rate
   std::uint64_t relayed = 0;         // messages passed on (once per message)
+  std::uint64_t reset_fenced = 0;    // a guest's flag change refused just after a host's save load (reset_fence_us)
   // Proximity voice. Relayed ones count in relayed too.
   std::uint64_t voice_relayed = 0;      // VOICE_FRAME passed on (once per frame)
   std::uint64_t voice_out_of_range = 0; // a listener left out: too far from the speaker
@@ -872,14 +878,14 @@ class Session {
   void on_player_message(ConnectionId id, Connection& c, std::uint8_t channel,
                          protocol::Message& message, std::size_t bytes, std::uint64_t now_us);
   void on_join_partner(ConnectionId id, Connection& c, protocol::JoinPartner& j);
-  void on_flag_set(Connection& c, protocol::Message& message);
-  void on_flag_state(ConnectionId id, Connection& c, protocol::Message& message);
+  void on_flag_set(Connection& c, protocol::Message& message, std::uint64_t now_us);
+  void on_flag_state(ConnectionId id, Connection& c, protocol::Message& message, std::uint64_t now_us);
   void on_flag_snapshot(ConnectionId id, Connection& c, const protocol::FlagSnapshot& part);
   // The host loaded a save (its FLAG_RESET; docs/flags.md, "Saves"). Every
   // session-wide state kept outside the flag table that the host's save
   // undoes is dropped here: add each owner's clear (locked doors' kept
   // breaks, the kills-late dead list, ...). Called once per FLAG_RESET.
-  void on_host_reset();
+  void on_host_reset(const std::vector<protocol::FlagEntry>& flags, std::uint64_t now_us);
   void on_save(ConnectionId id, Connection& c, protocol::Message& message);
   // Keeps an entry in the table; false when it is new and the table is full.
   bool keep_flag(const protocol::FlagEntry& e);
@@ -1165,6 +1171,9 @@ class Session {
   // Every shared flag value the host has sent, by key. Kept when
   // the host leaves; forgotten when the session empties.
   std::map<protocol::FlagKey, protocol::FlagEntry> flags_;
+  // The last host save load's values, refused from guests until reset_fence_until_ (reset_fence_us).
+  std::map<protocol::FlagKey, std::uint32_t> reset_fence_;
+  std::uint64_t reset_fence_until_ = 0;
   // Shared objects, by id. Forgotten when no game has them loaded.
   Objects objects_;
   std::uint32_t next_serial_ = 1;
