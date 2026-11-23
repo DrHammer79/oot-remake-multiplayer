@@ -264,10 +264,13 @@ def _changed(before, after):
     return out
 
 
-def use_item(client, item, button="Y", frames=PRESS_FRAMES):
+ITEM_BUTTON = "ZR"    # the button `assign` puts an item on (lichii/hook/coop_testinput.cpp; Y is the sword)
+
+
+def use_item(client, item, button=ITEM_BUTTON, frames=PRESS_FRAMES):
     """`assign` the item (the bridge's `assign ITEM`), press `button` for `frames` frames and step as many, and return
-    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is a guess to confirm in the
-    lane run: it is the one the item was assigned to."""
+    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is ZR, the one `assign` puts
+    the item on (the bridge's `assign`, docs/testing.md); Y would swing the sword."""
     before = pc.game_of(client.state())
     client.act("assign " + item)
     client.step(2)

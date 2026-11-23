@@ -375,9 +375,10 @@ server calls them; a script can too). They only use the bridge's commands, so th
   of the walk or the fight. The scene, a load and the list are checked first, then `gone`: after a door or a load the
   list lacks the actor, and that says nothing about its death. A refusal of the bridge comes back as the reason, not as
   a crash.
-- `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
-  walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
-- `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
+- `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` is
+  Longshot's attack button (see `fight`); the walk's leg size and stuck limit are guesses made without a game: the first
+  lane run sets them.
+- `use_item` puts the item on ZR (`assign`), presses ZR (`button` overrides it; Y is the sword), and lists what changed in life, rupees, event, prompt,
   equips and each inventory entry (`inventory_changed`, one entry per item). `talk` and `open` press `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
   on every `input`, `move` and `step`. Over MCP, the `--pair` server does this for every tool (below); with one server per

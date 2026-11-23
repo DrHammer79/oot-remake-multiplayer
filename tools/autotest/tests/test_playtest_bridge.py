@@ -1516,7 +1516,7 @@ class StrikeAndHelpers(unittest.TestCase):
         r = ph.use_item(self.c, "Bow")
         self.assertEqual(r["changed"]["rupees"], {"was": 5, "now": 9})
         self.assertIn("assign Bow", self.acts())
-        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["Y"]])
+        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["ZR"]])   # assign's button
         r = ph.use_item(self.c, "Hookshot", button="X")
         self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"][-1], ["X"])
 

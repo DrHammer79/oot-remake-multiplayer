@@ -105,8 +105,8 @@ def _need_id(args):
     return n
 
 
-def _button(args):
-    b = str(args.get("button", "Y")).upper()
+def _button(args, default="Y"):
+    b = str(args.get("button", default)).upper()
     if b not in pc.BUTTONS:
         raise ValueError("button: one of " + " ".join(pc.BUTTONS))
     return b
@@ -258,8 +258,8 @@ HELPER_TOOLS = [
                      "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "use_item", "description": "Put an item on a button (`assign`), press that button, and say what changed in "
-     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one the item goes on (Y by default, a "
-     "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
+     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one pressed: ZR by default, the "
+     "button `assign` puts the item on (Y is the sword). About 14 frames pass. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"],
                      "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
     {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
@@ -730,7 +730,7 @@ class Game:
             return ph.attack(c, _need_id(args), _button(args), _word(args, "name"),
                              int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "use_item":
-            return ph.use_item(c, _word(args, "item"), _button(args))
+            return ph.use_item(c, _word(args, "item"), _button(args, ph.ITEM_BUTTON))
         if name in ("talk", "open"):
             return ph.interact(c, name)
         if name == "interact":
