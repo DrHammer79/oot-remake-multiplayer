@@ -874,6 +874,20 @@ no slot (more players than slots) the pack's neutral copy (`"neutral"`, never pa
 guard" when one of your textures is found more than once. With Character Select, its own Customize options are held at
 0 (one customizer: ours) and the options a 0.11.8 game sends (part 62) are not kept.
 
+### A character's own parts (npc-customize)
+
+With a Character Select character picked, its Customize screen (Characters tab, X) shows co-op's Character page: Hair
+Colour, Eye Colour, Clothing Colour 1 to 3 and Equipment, only the rows that character's model has (read from its model
+by the wardrobe: real hair has the mod's hair palette, the iris is `Mt_Eye_Inner`, the clothing rows are its materials'
+palette lengths; Equipment on every model). They are look parts 20 to 25, one set for every character, saved as
+`look_char_*` and sent in `PLAYER_LOOK` like the others. `CoopCharColours::ForModel` is the one rule at every site
+that dresses a model: a Link model takes Link's eyes and hair (18, 19), a character's model its character parts (hair and
+eyes in any colour on the model's own parameters, the hair and clothes also as the mod's nearest palette texture), and
+Equipment Hidden clears the shown bit of the equipment's pieces each frame, as the mod's own code did. The sites: your
+character in the field and in its Customize picture, and the puppets. Solo too. The mod's six option Ints stay held at 0.
+Not done: a character whose iris texture is not the common blue one (Impa, Sheik) gets an eye colour shifted by its
+texture's hue (the mod's per-character hue table is not read).
+
 ### Gear colours on the puppets
 
 Branch `customizer-puppets`, Hookshot only. Every player sees the others' part colours on their puppets, not only the tunic. Files: `tools/puppet_pack/look_items.py` (the copies), `lichii/hook/coop_look_share.*` (slots and copies), `lichii/hook/coop_puppet.*` (which copy a puppet wears), `hookshot/src/coop_look_parts.*` and `coop_look_live.cpp` (`PaintPuppetCopy` and the puppets' wardrobe). No memory of the game is written for it: Longshot's texture overrides (patch 0020, as for your own Link) draw the copies' textures in each player's colours.

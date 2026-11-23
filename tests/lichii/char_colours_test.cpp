@@ -219,13 +219,88 @@ TEST_CASE("char colours: the colours are the mod's, the iris shift is held to a 
     CHECK(EyeColour(8, 0) == std::nullopt);
 }
 
-TEST_CASE("char colours: the eyes' and hair's colours go on a Link model only (review: a character got your eyes)") {
-    using CoopCharColours::LinkColours;
-    using CoopCharColours::LinkOnly;
-    CHECK(LinkOnly(true, 0xFF123456u, 0x00ABCDEFu) == LinkColours{0x123456u, 0xABCDEFu});
-    CHECK(LinkOnly(true, std::nullopt, 0xABCDEFu) == LinkColours{std::nullopt, 0xABCDEFu});
-    CHECK(LinkOnly(false, 0x123456u, 0xABCDEFu) == LinkColours{});   // (a character: neither)
-    CHECK(LinkOnly(false, 0x123456u, std::nullopt) == LinkColours{});
+TEST_CASE("char colours (npc-customize): Link's eyes and hair on a Link model, the character parts on a character's") {
+    using CoopCharColours::ForModel;
+    using CoopCharColours::ModelColours;
+    std::map<std::uint8_t, std::uint32_t> look = {{18, 0xFF123456u}, {19, 0x00ABCDEFu}};
+    const auto part = [&look](std::uint8_t n) -> std::optional<std::uint32_t> {
+        const auto it = look.find(n);
+        return it == look.end() ? std::nullopt : std::optional<std::uint32_t>(it->second);
+    };
+    CHECK(ForModel(true, part) == ModelColours{0, 0x123456u, 0xABCDEFu});
+    // A character with none of its own parts: Link's never (review 0.11.9), a 0.11.8 peer's options as they came.
+    CHECK(ForModel(false, part) == ModelColours{});
+    CHECK(ForModel(false, part, 0xFF000012u) == ModelColours{0x12u, std::nullopt, std::nullopt});
+    // Its own parts: exact hair and eyes, the hair's and clothes' nearest palette entries and Hidden as the options.
+    look[20] = 0x0A0808u;   // (near black: hair entry 3)
+    look[21] = 0x20C040u;
+    look[22] = 0xFF1010u;   // (red: clothing entry 2)
+    look[24] = 0xFFFFFFu;   // (white: entry 7)
+    look[25] = 1u;
+    const ModelColours c = ForModel(false, part, 0x12u);
+    CHECK(c.hair == 0x0A0808u);
+    CHECK(c.eyes == 0x20C040u);
+    CHECK(c.custom == (3u | (1u << 8) | (2u << 12) | (7u << 20)));
+    CHECK(ForModel(true, part) == ModelColours{0, 0x123456u, 0xABCDEFu});   // (Link keeps his own)
+}
+
+TEST_CASE("char colours (npc-customize): the mod's nearest hair and clothing palette entries") {
+    using namespace CoopCharColours;
+    for (std::uint8_t i = 0; i < kCloths; ++i) CHECK(NearestCloth(kClothRgb[i]) == i + 1);
+    CHECK(NearestCloth(0x102080u) == 3);   // (a dark blue: Blue)
+    CHECK(NearestHair(0xFFD050u) == 1);    // (a light blond: Blonde)
+    CHECK(NearestHair(0x000000u) == 3);    // Black
+    CHECK(NearestHair(0xF0F0F8u) == 9);    // White
+}
+
+TEST_CASE("char colours (npc-customize): Equipment Hidden clears the shown bit of the mod's handles, and shows again") {
+    using namespace CoopCharColours;
+    std::map<std::uint64_t, std::uint8_t> mem;
+    const auto put = [&](std::uint64_t a, const void* in, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) mem[a + i] = static_cast<const std::uint8_t*>(in)[i];
+        return true;
+    };
+    const auto put64 = [&](std::uint64_t a, std::uint64_t v) { put(a, &v, 8); };
+    const auto put32 = [&](std::uint64_t a, std::uint32_t v) { put(a, &v, 4); };
+    Game g;
+    g.read = [&](std::uint64_t a, void* out, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto it = mem.find(a + i);
+            if (it == mem.end()) return false;
+            static_cast<std::uint8_t*>(out)[i] = it->second;
+        }
+        return true;
+    };
+    g.write = put;
+    const std::uint64_t actor = 0x1000, comps = 0x2000, equip = 0x3000;
+    put64(actor + kActorComponents, comps);
+    put64(comps + kActorEquipment, equip);
+    // handle 0 (the sword: in the mask), 1 (the item in hand: not), 4 (the shield, being deleted: state 9)
+    const auto piece = [&](std::uint32_t k, std::uint64_t link, std::uint64_t at, std::uint32_t state) {
+        const std::uint64_t h = equip + kGearFirst + kGearStride * k;
+        put32(h + 0x10, 40 + k);
+        put64(h + 0x8, link);
+        put32(link + 0x48, 40 + k);
+        put64(link + 0x40, at);
+        put32(at + 0x2c, state);
+        put32(at + kActorFlags, 0x10003u);
+    };
+    piece(0, 0x4000, 0x5000, 1);
+    piece(1, 0x4100, 0x5100, 1);
+    piece(4, 0x4200, 0x5200, 9);
+    const auto flags = [&](std::uint64_t at) {
+        std::uint32_t v = 0;
+        g.read(at + kActorFlags, &v, 4);
+        return v;
+    };
+    CHECK(SetGearShown(g, actor, false) == 1);
+    CHECK(flags(0x5000) == 0x3u);       // hidden, its other bits kept
+    CHECK(flags(0x5100) == 0x10003u);   // the item in hand stays
+    CHECK(flags(0x5200) == 0x10003u);   // a piece being deleted is left alone
+    CHECK(SetGearShown(g, actor, false) == 0);
+    CHECK(SetGearShown(g, actor, true) == 1);
+    CHECK(flags(0x5000) == 0x10003u);
+    CHECK(SetGearShown(g, 0x9999, false) == 0);   // (no equipment: nothing)
 }
 
 TEST_CASE("char colours: the pause menu's model of your Link is the game's Pouch twin of the field player (lane: eyes)") {

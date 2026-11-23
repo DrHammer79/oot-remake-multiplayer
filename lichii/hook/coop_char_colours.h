@@ -115,6 +115,10 @@ struct State {
         std::array<std::array<std::int16_t, 3>, kNames> param{};
         std::uint64_t materials = 0;   // the unit's material count (+0xc8) when they were looked up
         bool looked_up = false;
+        // npc-customize: what the model has, read once at the look-up (reads only): real hair (Mt_Hairs with the mod's
+        // palette, not a stand-in), and the clothing rows its materials' palettes are for (bit 0..2).
+        bool hair_palette = false;
+        std::uint8_t cloth_rows = 0;
     };
     std::vector<Unit> units;
 };
@@ -126,11 +130,25 @@ struct Result {
     std::size_t units = 0; // model units found (0: the model is not there yet)
 };
 
+// npc-customize: the rows a character's Customize page offers, from its model (State after a look-up): bit 0 hair,
+// 1 eyes, 2..4 Clothing Color 1..3, 5 equipment (every model). kRowsKnown: the model was looked up.
+inline constexpr std::uint8_t kRowHair = 1, kRowEyes = 2, kRowCloth1 = 4, kRowGear = 32, kRowsKnown = 0x80;
+std::uint8_t Rows(const State& state);
+// The equipment component's handles hidden by "Hidden" (the mod's GEAR_HANDLES: every piece but the item in hand,
+// the head, the adult's tunics/boots/gauntlets drawn in place of the body, the bracelet and the Stone of Agony) and
+// the actor's shown bit (the word and bit the game's set-visible changes).
+inline constexpr std::uint64_t kActorEquipment = 0x200, kGearFirst = 0x20, kGearStride = 0x18, kActorFlags = 0x4AC;
+inline constexpr std::uint32_t kGearHandles = 0x11F0FD, kGearCount = 21, kShownBit = 0x10000;
+// Shows (shown) or hides the actor's equipment pieces; the count of pieces changed.
+std::size_t SetGearShown(const Game& game, std::uint64_t actor, bool shown);
+
 // Puts `custom`'s colours on the actor's model. put_back: an option at 0 sets the file's own values again (after
 // another hand changed them: the mod's own per-frame code with the viewer's options). `iris_shift` as EyeColour.
 // At most `max_calls` calls are made (Result::cut when it stopped there).
 Result Dress(const Game& game, State& state, std::uint32_t custom, bool put_back, int iris_shift = 0,
              std::size_t max_calls = SIZE_MAX);
+// npc-customize: only looks the model's materials up (no colour put on), for Rows.
+Result Learn(const Game& game, State& state, std::size_t max_calls = SIZE_MAX);
 // The same with the options given (co-op's exact eyes among them).
 Result Dress(const Game& game, State& state, const Options& options, bool put_back, int iris_shift = 0,
              std::size_t max_calls = SIZE_MAX);
@@ -145,16 +163,25 @@ Result Dress(const Game& game, State& state, const Options& options, bool put_ba
 // The eyes' and hair's colours of a player's look (CoopLook's parts 18 and 19) go on a Link model only: Customize offers
 // them on Link alone, and a character's model has its own (review 0.11.9: a character picked, or a picker of others,
 // got your eyes). Every site that dresses a model takes them through this: the puppets, your own Link, the menu's.
-struct LinkColours {
-    std::optional<std::uint32_t> eyes, hair;
-    bool operator==(const LinkColours&) const = default;
+// npc-customize (owner 2026-11-23): a character's model takes the character parts instead (CoopLook 20..25, one set
+// for every character): ForModel is the one rule at every site that dresses a model.
+inline constexpr std::uint8_t kLinkEyesPart = 18, kLinkHairPart = 19, kCharHairPart = 20, kCharEyesPart = 21,
+                              kCharCloth1Part = 22, kCharGearPart = 25;
+struct ModelColours {
+    std::uint32_t custom = 0;                 // Options' nibbles: hair palette, gear, the three clothing palettes
+    std::optional<std::uint32_t> eyes, hair;  // exact colours (EyeParam / HairParam)
+    bool operator==(const ModelColours&) const = default;
 };
-inline LinkColours LinkOnly(bool link_model, std::optional<std::uint32_t> eyes, std::optional<std::uint32_t> hair) {
-    if (!link_model) return {};
-    if (eyes) *eyes &= 0xFFFFFFu;
-    if (hair) *hair &= 0xFFFFFFu;
-    return {eyes, hair};
-}
+// `part(number)`: the look's colour of that part, if set. A Link model: Link's eyes and hair only. A character's: its
+// character parts; with none of them set, `legacy_custom` (a 0.11.8 peer's Character Select options, part 62).
+ModelColours ForModel(bool link_model, const std::function<std::optional<std::uint32_t>(std::uint8_t)>& part,
+                      std::uint32_t legacy_custom = 0);
+// The mod's hair palette entry (1..kHairs) nearest a colour, and its clothing palette entry (1..kCloths, the colours of
+// `cloth_rgb`, its CLOTH_VALUES in order).
+std::uint8_t NearestHair(std::uint32_t rgb);
+inline constexpr std::array<std::uint32_t, kCloths> kClothRgb = {0x00C000, 0xFF0000, 0x0000FF, 0x800080,
+                                                                 0xFFFF00, 0x000000, 0xFFFFFF};
+std::uint8_t NearestCloth(std::uint32_t rgb);
 
 // The pause menu's model of your Link: the game's menu shows the player as its own actor, named "Pouch" + the field
 // player's actor name (PouchPlayer_Child for Player_Child, PouchPlayer_Adult for Player_Adult: RSDB ActorInfo's
@@ -174,12 +201,16 @@ struct Target {
     int iris_shift = 0;
     // 0.11.9: the player's eye colour (CoopLook's eyes part, 0xRRGGBB): dressed on any model, Link's too.
     std::optional<std::uint32_t> eyes;
-    // 0.11.9: the player's hair colour (CoopLook's hair part): on a Link model only (the caller leaves it out for a
-    // character's).
+    // 0.11.9: the player's hair colour (ForModel: Link's hair part on a Link model, the character's on a character's,
+    // with the nearest palette entry in custom).
     std::optional<std::uint32_t> hair;
     // What the puppet is (a hash of its actor's pack name): a puppet made again as another actor at the same
     // address, or in the same block, starts anew (its old model's material numbers are not this one's).
     std::uint64_t model = 0;
+    // npc-customize: your own character, its number (its model's rows are kept for the Customize page: OwnRows);
+    // learn: look its model up even with nothing to put on.
+    bool own = false;
+    std::uint16_t character = 0;
 };
 
 class Wardrobe {
@@ -190,6 +221,12 @@ public:
     // Any thread.
     void SetViewer(std::uint32_t custom) { viewer_.store(custom & 0xFFFFFFu, std::memory_order_relaxed); }
     std::uint32_t Viewer() const { return viewer_.load(std::memory_order_relaxed); }
+    // The rows of your own character's model (Rows, with kRowsKnown) and its character number, once looked up; any
+    // thread. 0 before.
+    std::uint8_t OwnRows(std::uint16_t character) const {
+        const std::uint32_t v = own_rows_.load(std::memory_order_relaxed);
+        return (v >> 8) == character ? static_cast<std::uint8_t>(v & 0xFF) : std::uint8_t{0};
+    }
     // One frame; returns the calls made. `say`: a line for the log (a puppet's first dressing, a failure).
     std::size_t Frame(const Game& game, const std::vector<Target>& targets, std::uint64_t now_ms,
                       const std::function<void(const std::string&)>& say);
@@ -206,10 +243,12 @@ private:
         std::uint64_t retry_ms = 0;            // after a failed call: not before then (kAgainMs)
         bool said_failed = false;              // a failure is said once per puppet
         bool seen = false;
+        bool gear_hidden = false;              // its equipment hidden by us (shown again when that ends)
     };
     std::vector<Kept> kept_;
     std::size_t first_ = 0;                    // the target dressed first: one further each frame (the budget)
     std::atomic<std::uint32_t> viewer_{0};
+    std::atomic<std::uint32_t> own_rows_{0};   // (character << 8) | rows
 };
 
 // The character this game shows for its own player (the save's CharacterMenu_SelectedCharacter, 0: Link), as
