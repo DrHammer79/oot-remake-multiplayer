@@ -1520,6 +1520,11 @@ CoopPauseMenu::Page NativePage() {
     return g_menu.page();
 }
 
+bool SnailHome() {
+    std::lock_guard lock(g_mutex);
+    return g_menu.SnailHome();
+}
+
 bool NativeOpen() {
     std::lock_guard lock(g_mutex);
     return g_native;

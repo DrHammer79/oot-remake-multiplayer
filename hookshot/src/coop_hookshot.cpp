@@ -1389,6 +1389,11 @@ void SetChatKey(const std::string& key) {
 // Enter went on to the game as its own key and shut the pause menu, a test run 2026-11-20)
 static std::atomic<bool> g_menu_keys_release{false};
 
+bool ChatOpen() {
+    std::lock_guard lock(g_box_mutex);
+    return g_box.open() || g_cheats.open();
+}
+
 bool KeysTaken() {
     if (CoopPauseTab::KeysTaken() || CoopPause::KeysTaken()) {
         g_menu_keys_release = true;

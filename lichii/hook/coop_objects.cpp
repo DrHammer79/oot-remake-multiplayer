@@ -5818,11 +5818,13 @@ private:
                 LOG_INFO(Core,
                          "coop: objects: share placed {} copies; off from where we put them "
                          "avg {:.3f} max {:.3f} over {}; game calls: {} moves, {} deletes, {} "
-                         "plays, {} frame sets; hurts taken {} missed {} (boss hits to its Life step {}, dying copies "
-                         "finished {}); own hits kept while a replay waited {}; boss copies kept in the room {}",
+                         "plays, {} frame sets; hurts taken {} missed {} (boss hits to its Life step {}, boss part kills to "
+                         "its Life step {}, dying copies finished {}); own hits kept while a replay waited {}; boss "
+                         "copies kept in the room {}",
                          placed_.size(), drift_count_ ? drift_sum_ / drift_count_ : 0.0f,
                          drift_max_, drift_count_, moved, deleted, played, framed, sync_.HurtsTaken(),
-                         sync_.HurtsMissed(), sync_.BossHitsStepped(), sync_.DyingFinished(),
+                         sync_.HurtsMissed(), sync_.BossHitsStepped(), sync_.PartKillsStepped(),
+                         sync_.DyingFinished(),
                          sync_.OwnHitsKept(), sync_.BossCopiesKept());
             }
             // Issue 101: which copy was furthest from where we put it, so

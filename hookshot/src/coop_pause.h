@@ -64,6 +64,7 @@ void OpenNative(CoopPauseMenu::Page page);
 bool NativeInput(int event, int arg = 0, int arg2 = 0);
 CoopPauseMenu::View NativeView();
 bool NativeOpen();
+bool SnailHome();   // (Character Select's Customize screen is Link's colours' home: the Customize Link page has none)
 CoopPauseMenu::Page NativePage();   // (the page the menu shows now)
 void CloseNative();
 // B on the title's page leaves it (the Multiplayer rows again) rather than going back a page (Menu::BackLeaves).
