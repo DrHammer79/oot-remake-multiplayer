@@ -193,16 +193,22 @@ class Character:
     creature: bool = False
 
 
+def is_link_voice(voice):
+    """True for Link's own clips and any voice made from them (the player's banks, Dark Link's)."""
+    return voice == LINK or "Link" in voice or voice.startswith(("Player", "Vo_Pl"))
+
+
 def check_map(characters, voices, creature_voices):
     """Problems in the character -> voice table. voices: the voice types that were built (each with at
     least one usable clip); creature_voices: the ones that are creature sounds. A chain voice with no usable
     clip is passed over; the default must have clips, so every character has a voice."""
     bad = []
     for ch in characters:
-        if ch.name == LINK:
-            continue
-        if LINK in ch.chain + (ch.default,):
-            bad.append("%s: keeps Link's voice" % ch.name)
+        if not ch.chain and ch.default == LINK:
+            continue   # Link himself (and his other models): Link's own clips
+        near = [v for v in ch.chain + (ch.default,) if is_link_voice(v)]
+        if near:
+            bad.append("%s: keeps Link's voice (%s)" % (ch.name, ", ".join(near)))
         elif ch.default not in voices:
             bad.append("%s: default voice %s was not built" % (ch.name, ch.default))
         if ch.creature and ch.default not in creature_voices:

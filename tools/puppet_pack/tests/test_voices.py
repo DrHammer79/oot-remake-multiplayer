@@ -147,6 +147,11 @@ class Refused(unittest.TestCase):
             voices.build(game(saria=False), {2: "Saria"}, table, log=lambda *_: None)
         self.assertIn("default voice Hylia_Woman_1 was not built", str(e.exception))
 
+    def test_links_other_models_build_with_links_clips(self):
+        table = dict(TABLE, **{"Link (opening)": {"link": True}})
+        out = voices.build(game(), {1: "Link", 116: "Link (opening)", 2: "Saria"}, table, log=lambda *_: None)
+        self.assertEqual(set(out["lists"]["Child"]), {2})
+
     def test_bank_names(self):
         self.assertEqual(voices.bank_of("Custom_Saria"), "NV_USen_Custom_Saria")
         self.assertEqual(voices.bank_of("Hylia_Boy"), "NV_Hylia_Boy")
@@ -159,7 +164,8 @@ class Refused(unittest.TestCase):
             if row.get("link"):
                 continue
             self.assertTrue(row["chain"] and row["default"], name)
-            self.assertNotIn("Link", row["chain"] + [row["default"]], name)
+            for v in row["chain"] + [row["default"]]:
+                self.assertFalse(voices.vm.is_link_voice(v), (name, v))   # no non-Link character uses Link's clips
             if row["creature"]:
                 self.assertTrue(row["default"].startswith(("Enemy_", "Animal_", "NV_Cow")), name)
 

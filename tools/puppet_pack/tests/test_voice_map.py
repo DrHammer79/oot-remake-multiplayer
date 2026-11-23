@@ -147,6 +147,18 @@ class Map(unittest.TestCase):
         self.assertIn("a creature with the person's voice", bad[2])
         self.assertIn("a person with the creature voice", bad[3])
 
+    def test_a_voice_made_from_links_clips_is_refused(self):
+        chars = [vm.Character("Dark Link", ("Enemy_MiddleBoss_DarkLink",), "Hylia_Girl_Spry"),
+                 vm.Character("Saria", ("Custom_Saria",), "Player_Child")]
+        bad = vm.check_map(chars, self.VOICES | {"Enemy_MiddleBoss_DarkLink", "Player_Child"}, self.CREATURES)
+        self.assertEqual(len(bad), 2)
+        self.assertIn("Dark Link: keeps Link's voice (Enemy_MiddleBoss_DarkLink)", bad[0])
+        self.assertIn("Saria: keeps Link's voice (Player_Child)", bad[1])
+
+    def test_links_other_models_keep_links_clips(self):
+        chars = [vm.Character("Link (opening)", (), vm.LINK)]
+        self.assertEqual(vm.check_map(chars, self.VOICES, self.CREATURES), [])
+
     def test_a_chain_voice_without_clips_is_passed_over(self):
         chars = [vm.Character("Ruto", ("Custom_Ruto_Adult",), "Hylia_Girl_Spry")]
         self.assertEqual(vm.check_map(chars, self.VOICES, self.CREATURES), [])
