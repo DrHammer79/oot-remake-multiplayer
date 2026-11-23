@@ -343,7 +343,7 @@ TEST_CASE("playtest: a world snapshot older than 1.5 s is an empty list marked s
     s.frame = 8;
     s.taken_ms = 1000;
     s.actors.resize(3);
-    const std::string m = WorldMember(true, s, 8, 1000 + CoopWorldSnapshot::kStaleMs + 1);
+    const std::string m = WorldMember(true, s, 8 + CoopWorldSnapshot::kStaleFrames, 1000 + CoopWorldSnapshot::kStaleMs + 1);
     const auto v = CoopModJson::Parse("{" + m.substr(1) + "}");
     REQUIRE(v);
     const auto* w = v->Get("world");
@@ -435,7 +435,9 @@ TEST_CASE("playtest: a held state waits for a newer snapshot only when one is co
     CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(std::nullopt, 10, 1000));  // solo: no walk, no wait
     CHECK(CoopWorldSnapshot::WorthWaiting(s, 10, 1100));                   // fresh and behind: wait
     CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(s, 5, 1100));              // already at the frame
-    CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(s, 10, 1000 + CoopWorldSnapshot::kStaleMs + 1));  // stale: no wait
+    CHECK(CoopWorldSnapshot::WorthWaiting(s, 10, 1000 + CoopWorldSnapshot::kStaleMs + 1));  // (held: not stale)
+    CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(s, 5 + CoopWorldSnapshot::kStaleFrames,
+                                                1000 + CoopWorldSnapshot::kStaleMs + 1));  // stale: no wait
 }
 
 TEST_CASE("playtest: act takes one plain test line") {
@@ -483,12 +485,39 @@ TEST_CASE("playtest: an actor id in a strike is refused when there is no world l
 }
 
 TEST_CASE("playtest: a world list is live when there is a snapshot that is not stale") {
-    CHECK_FALSE(WorldListLive(std::nullopt, 5000));
+    CHECK_FALSE(WorldListLive(std::nullopt, 5000, 10));
     CoopWorldSnapshot::Snapshot s;
     s.taken_ms = 1000;
-    CHECK(WorldListLive(s, 1000));
-    CHECK(WorldListLive(s, 1000 + CoopWorldSnapshot::kStaleMs));
-    CHECK_FALSE(WorldListLive(s, 1001 + CoopWorldSnapshot::kStaleMs));
+    s.frame = 10;
+    CHECK(WorldListLive(s, 1000, 10));
+    CHECK(WorldListLive(s, 1000 + CoopWorldSnapshot::kStaleMs, 10));
+    CHECK(WorldListLive(s, 1001 + CoopWorldSnapshot::kStaleMs, 10 + CoopWorldSnapshot::kStaleFrames - 1));
+    CHECK_FALSE(WorldListLive(s, 1001 + CoopWorldSnapshot::kStaleMs, 10 + CoopWorldSnapshot::kStaleFrames));
+    CHECK(WorldListLive(s, 1000 + CoopWorldSnapshot::kStaleMs, 10 + CoopWorldSnapshot::kStaleFrames));  // (frames only)
+}
+
+TEST_CASE("playtest: a game held for seconds at the frame of its snapshot still has a world list") {
+    CoopWorldSnapshot::Snapshot s;
+    s.taken_ms = 1000;
+    s.frame = 700;
+    s.actors.resize(1);
+    CHECK(WorldListLive(s, 1000 + 5000, 700));  // held 5 s: no present, no new snapshot, and not stale
+    CHECK(WorldListLive(s, 1000 + 60000, 703));
+    const auto text = WorldMember(true, s, 700, 1000 + 5000, true);
+    CHECK(text.find("\"stale\":false") != std::string::npos);
+    CHECK(text.find("\"count\":1") != std::string::npos);
+    CHECK(StrikeIdRefusal("kill 4096 Enemy_Test", WorldListLive(s, 1000 + 5000, 700)).empty());
+    // the game then runs on with no walk (a load): stale once it is 30 frames past
+    CHECK_FALSE(WorldListLive(s, 1000 + 5000, 700 + CoopWorldSnapshot::kStaleFrames));
+}
+
+TEST_CASE("playtest: a kill or hit line is a strike line") {
+    CHECK(HasStrikeLine("kill Enemy_Test"));
+    CHECK(HasStrikeLine("  HIT 12 Enemy_Test 2"));
+    CHECK(HasStrikeLine("hurt 1\nkill Enemy_Test"));
+    CHECK_FALSE(HasStrikeLine("hurt 4"));
+    CHECK_FALSE(HasStrikeLine("chat kill"));
+    CHECK_FALSE(HasStrikeLine(""));
 }
 
 TEST_CASE("playtest: state.strike carries the newest strike result, and is absent before the first") {

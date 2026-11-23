@@ -156,15 +156,23 @@ struct Snapshot {
     std::uint64_t cost_us = 0;   // what building it took (the walk's own time, for the lane check)
 };
 
-inline constexpr std::uint64_t kStaleMs = 1500;  // a snapshot older than this (wall clock) is not shown
+inline constexpr std::uint64_t kStaleMs = 1500;    // a snapshot older than this (wall clock) ...
+inline constexpr std::uint64_t kStaleFrames = 30;  // ... and this many frames behind the game is not shown
 inline constexpr std::size_t kLimit = 200;       // actors kept per snapshot (the dump lists all of them)
 inline constexpr std::size_t kStateLimit = 40;   // actors of a known kind that `state` lists (nearest first)
+
+// A snapshot is stale when the walk stopped (a load, a closed room): it is older than kStaleMs AND the game has run
+// kStaleFrames frames past it. The walk runs on the game's presents, which a held game does not make, so a game held
+// for minutes at the frame of its last snapshot still has a current list; the wall clock alone would call it stale.
+inline bool IsStale(std::uint64_t snapshot_frame, std::uint64_t now_frame, std::uint64_t age_ms) {
+    return age_ms > kStaleMs && now_frame > snapshot_frame && now_frame - snapshot_frame >= kStaleFrames;
+}
 
 enum class Freshness { current, behind, stale };
 // stale: the walk stopped (a load, a closed room). behind: the game is further on than the snapshot (a held game
 // catches up within a few presents). The snapshot is shown in both cases, with its frame.
 inline Freshness Judge(std::uint64_t snapshot_frame, std::uint64_t now_frame, std::uint64_t age_ms) {
-    if (age_ms > kStaleMs) return Freshness::stale;
+    if (IsStale(snapshot_frame, now_frame, age_ms)) return Freshness::stale;
     return snapshot_frame < now_frame ? Freshness::behind : Freshness::current;
 }
 
@@ -173,7 +181,7 @@ inline Freshness Judge(std::uint64_t snapshot_frame, std::uint64_t now_frame, st
 inline bool WorthWaiting(const std::optional<Snapshot>& snap, std::uint64_t now_frame, std::uint64_t now_ms) {
     if (!snap) return false;
     const std::uint64_t age = now_ms >= snap->taken_ms ? now_ms - snap->taken_ms : 0;
-    return age <= kStaleMs && snap->frame < now_frame;
+    return !IsStale(snap->frame, now_frame, age) && snap->frame < now_frame;
 }
 
 // One writer (the walk, present thread), one reader (the bridge). Any thread may call Enabled.

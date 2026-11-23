@@ -44,6 +44,7 @@ class FakeGame:
         self.strike, self.pending, self.strike_seq = None, [], 0     # `state.strike`, results on their way, last number
         self.strike_word, self.strike_delay = "done", 2   # the walk's answer (None: it never comes) and how many frames
         self.strike_seq_in_reply = True
+        self.loading, self.queue_full = False, False
         game = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -83,7 +84,7 @@ class FakeGame:
     def state(self):
         return {"scene": self.scene, "room": None, "pos": [round(v, 4) for v in self.pos], "facing": 0.0,
                 "camera": self.camera, "life": 12, "max_life": 12, "rupees": self.rupees, "age": "child", "event": False,
-                "loading": False, "prompt": self.prompt, "equips": {}, "inventory": dict(self.items),
+                "loading": self.loading, "prompt": self.prompt, "equips": {}, "inventory": dict(self.items),
                 "coop": {"state": "connected", "players": 2}, "snapshot_frame": self.frame,
                 **({"world": self.world} if self.world is not None else {}),
                 **({"strike": self.strike} if self.strike is not None else {})}
@@ -123,6 +124,9 @@ class FakeGame:
                 if len(words) > 1 and words[1].isdigit() and self.solo:
                     return {"ok": False, "error": "refused", "message": "no world list: an actor id is resolved in "
                             "the objects walk, which runs only while connected and sharing"}
+                if self.queue_full:
+                    return {"ok": False, "error": "refused", "message": "the strike queue is full (16 wait for the "
+                            "walk): step a few frames and send it again"}
                 self.strike_seq += 1
                 has_id = words[1].isdigit()
                 if self.strike_word is not None:
@@ -985,6 +989,80 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertTrue(r["reason"].startswith("no world list"), r["reason"])
         self.game.world = None
         self.assertTrue(ph.go_to_actor(self.c, 3)["reason"].startswith("no world list"))
+
+    def test_an_actor_that_is_listed_but_not_shared_is_not_called_gone(self):
+        self.game.strike_word = "not shared"
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertEqual(r["result"], "refused: actor 7 (Enemy_Far) is here, but co-op does not share it, so a test "
+                                      "strike cannot reach it")
+        self.assertNotIn("gone", r["result"])
+
+    def test_a_full_queue_and_an_old_module_are_told_apart(self):
+        self.game.queue_full = True
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("refused: the strike queue is full"), r["result"])
+        self.game.queue_full, self.game.strike_seq_in_reply = False, False
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7})
+        self.assertTrue(r["result"].startswith("unknown: the bridge gave no strike number"), r["result"])
+        self.assertNotIn("older module?", r["result"])
+
+    def test_a_scene_change_is_not_called_gone(self):
+        # a leg through a door: the new scene's list lacks the actor and the old list goes stale
+        n = []
+
+        def leave():
+            n.append(1)
+            if len(n) >= 2:
+                self.game.scene = "KokiriForest"
+                self.game.world = {"frame": 1010, "stale": True, "count": 0, "actors": [],
+                                   "why": "stale: no walk for 2000 ms (a load, or the session ended)"}
+        self.game.dump_hook = leave
+        r = ph.go_to_actor(self.c, 7, name="Enemy_Far")
+        self.assertEqual((r["arrived"], r["reason"]), (False, "scene changed"))
+        # (the same with the actor simply missing from the new scene's list)
+        self.game.scene, self.game.world, n[:] = "ForestTemple", json.loads(json.dumps(self.WORLD)), []
+
+        def leave2():
+            n.append(1)
+            if len(n) >= 2:
+                self.game.scene = "KokiriForest"
+                self.game.world["actors"] = [a for a in self.game.world["actors"] if a["id"] != 7]
+        self.game.dump_hook = leave2
+        self.assertEqual(ph.go_to_actor(self.c, 7, name="Enemy_Far")["reason"], "scene changed")
+
+    def test_a_load_and_a_stale_list_are_reported_before_gone(self):
+        self.game.loading = True
+        self.assertEqual(ph.go_to_actor(self.c, 3, name="Enemy_Near")["reason"], "loading")
+        self.game.loading = False
+        self.game.world = {"frame": 900, "stale": True, "count": 0, "actors": [],
+                           "why": "stale: no walk for 2000 ms (a load, or the session ended)"}
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
+        self.assertTrue(r["reason"].startswith("stale world list"), r["reason"])
+        self.assertEqual(ph.face(self.c, 3, "Enemy_Near")["reason"][:16], "stale world list")
+        self.assertEqual(ph.attack(self.c, 3)["stopped"][:16], "stale world list")
+        # a walk that ran and saw no such actor is gone
+        self.game.world = {"frame": 1000, "stale": False, "count": 0, "actors": [],
+                           "why": "empty: the walk ran and saw no actors"}
+        self.assertEqual(ph.go_to_actor(self.c, 3, name="Enemy_Near")["reason"], "gone")
+
+    def test_attack_stops_with_the_scene_change_not_gone(self):
+        self.actor(3)["pos"] = [2, 0, 0]
+
+        def door(buttons):
+            self.game.scene = "KokiriForest"
+            self.game.world["actors"] = []
+        self.game.on_press = door
+        r = ph.attack(self.c, 3)
+        self.assertEqual((r["result"], r["stopped"]), ("stopped", "scene changed"))
+
+    def test_attack_says_when_the_life_never_moved(self):
+        self.actor(3)["pos"] = [2, 0, 0]
+        r = ph.attack(self.c, 3, max_frames=60)
+        self.assertEqual(r["result"], "alive")
+        self.assertIn("never moved", r["hint"])
+        self.assertIn("button Y", r["hint"])
+        self.game.on_press = lambda buttons: self.actor(3).update(life=3)
+        self.assertNotIn("hint", ph.attack(self.c, 3, max_frames=60))
 
     def test_go_to_actor_leaves_the_other_game_alone_unless_both(self):
         ph.go_to_actor(self.c, 3)

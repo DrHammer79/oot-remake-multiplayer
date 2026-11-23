@@ -522,10 +522,27 @@ std::string StrikeIdRefusal(std::string_view lines, bool world_list) {
     return "";
 }
 
-bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms) {
+bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms,
+                   std::uint64_t now_frame) {
     if (!snapshot) return false;
     const std::uint64_t age = now_ms >= snapshot->taken_ms ? now_ms - snapshot->taken_ms : 0;
-    return age <= CoopWorldSnapshot::kStaleMs;
+    return !CoopWorldSnapshot::IsStale(snapshot->frame, now_frame, age);
+}
+
+bool HasStrikeLine(std::string_view lines) {
+    std::size_t pos = 0;
+    while (pos <= lines.size()) {
+        std::size_t end = lines.find('\n', pos);
+        if (end == std::string_view::npos) end = lines.size();
+        std::string_view line = lines.substr(pos, end - pos);
+        pos = end + 1;
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+        std::size_t n = 0;
+        while (n < line.size() && line[n] != ' ' && line[n] != '\t' && line[n] != '\r') ++n;
+        const std::string cmd = Lower(line.substr(0, n));
+        if (cmd == "kill" || cmd == "hit") return true;
+    }
+    return false;
 }
 
 std::string StrikeMember(const std::optional<CoopStrike::Result>& last) {

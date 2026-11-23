@@ -101,8 +101,12 @@ TEST_CASE("world snapshot: the freshness rule") {
     CHECK(Judge(10, 12, 50) == Freshness::behind);
     CHECK(Judge(12, 10, 50) == Freshness::current);  // (a frame ahead of the count is not behind)
     CHECK(Judge(10, 10, kStaleMs) == Freshness::current);
-    CHECK(Judge(10, 10, kStaleMs + 1) == Freshness::stale);
-    CHECK(Judge(5, 10, kStaleMs + 1) == Freshness::stale);  // stale wins over behind
+    CHECK(Judge(10, 10, kStaleMs + 1) == Freshness::current);  // a held game does not age its list
+    CHECK(Judge(10, 10 + kStaleFrames - 1, kStaleMs + 1) == Freshness::behind);
+    CHECK(Judge(10, 10 + kStaleFrames, kStaleMs + 1) == Freshness::stale);
+    CHECK(Judge(5, 5 + kStaleFrames, kStaleMs + 1) == Freshness::stale);  // stale wins over behind
+    CHECK(Judge(10, 10 + kStaleFrames, kStaleMs) == Freshness::behind);   // frames alone do not make it stale
+    CHECK(Judge(10, 10 + kStaleFrames, 0) == Freshness::behind);
 }
 
 namespace {

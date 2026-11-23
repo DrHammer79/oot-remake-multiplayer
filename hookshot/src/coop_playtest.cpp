@@ -292,7 +292,7 @@ std::string WorldText(bool full) {
 // Whether the objects walk has a usable world list now (a snapshot that is not stale): false in solo.
 bool WorldListNow() {
     auto& store = CoopWorldSnapshot::TheStore();
-    return store.Enabled() && WorldListLive(store.Get(), SteadyMs());
+    return store.Enabled() && WorldListLive(store.Get(), SteadyMs(), g_gate ? g_gate->Frame() : 0);
 }
 
 // The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
@@ -354,10 +354,21 @@ std::string Handle(const Request& r) {
     const auto fail = [&](std::string_view code, std::string_view why) {
         return ErrorReply(r.id, gate.Frame(), gate.Held(), code, why);
     };
+    // `asked`: the strike numbers before and after the lines ran, read inside the held call (so a script that queues a
+    // strike between two calls cannot give an act with no strike a number).
+    struct Asked {
+        std::uint64_t before = 0, after = 0;
+    };
     const auto played = [&](const std::string& lines, std::string& error,
-                            const std::vector<CoopTestInput::Kind>* allowed = nullptr) {
+                            const std::vector<CoopTestInput::Kind>* allowed = nullptr, Asked* asked = nullptr) {
         bool done = false;
-        const bool ran = gate.RunHeld([&] { done = CoopTestInput::PlayNow(*g_system, lines, error, allowed); }, kHoldWait);
+        const bool ran = gate.RunHeld(
+            [&] {
+                if (asked) asked->before = CoopStrike::TheBook().LastAsked();
+                done = CoopTestInput::PlayNow(*g_system, lines, error, allowed);
+                if (asked) asked->after = CoopStrike::TheBook().LastAsked();
+            },
+            kHoldWait);
         if (!ran) error = "the game was not held in time (a load, or no frame hook)";
         return ran && done;
     };
@@ -400,12 +411,15 @@ std::string Handle(const Request& r) {
         if (const std::string refusal = StrikeIdRefusal(r.lines, listed); !refusal.empty()) {
             return fail("refused", refusal);
         }
-        const std::uint64_t asked = CoopStrike::TheBook().LastAsked();
-        if (!played(r.lines, error, &CoopTestInput::ActKinds())) return fail("failed", error);
+        Asked asked;
+        if (!played(r.lines, error, &CoopTestInput::ActKinds(), &asked)) return fail("failed", error);
         // The strikes this act queued: the walk leaves the result of the newest one in `state.strike` under this number.
-        const std::uint64_t seq = CoopStrike::TheBook().LastAsked();
+        // A kill or hit that got no number found the queue full (16 waiting): nothing was queued.
+        if (asked.after == asked.before && HasStrikeLine(r.lines)) {
+            return fail("refused", "the strike queue is full (16 wait for the walk): step a few frames and send it again");
+        }
         return ok("\"lines\":" + Quote(r.lines) + ",\"note\":\"asked: the game does it on its next frames\"" +
-                  (seq != asked ? ",\"strike_seq\":" + std::to_string(seq) : std::string()));
+                  (asked.after != asked.before ? ",\"strike_seq\":" + std::to_string(asked.after) : std::string()));
     }
     if (r.cmd == "warp") {
         std::string error;

@@ -127,7 +127,7 @@ bool EnvIsOn(std::string_view value);
 // The `world` member of `state` (docs/playtest.md): the actors near our Link from the object walk's last snapshot.
 // "" (no member) when the snapshot switch is off, so the old reply stays byte for byte the same. `now_frame` is the
 // bridge's frame count, `now_ms` the steady clock in ms. Returns `,"world":{...}`: frame (the snapshot's), age_ms,
-// stale (older than 1.5 s: then `actors` is empty), behind (the game is past the snapshot's frame), cost_us, count,
+// stale (older than 1.5 s and 30 frames behind the game: then `actors` is empty; a held game does not age it), behind (the game is past the snapshot's frame), cost_us, count,
 // total (actors in the snapshot), other_count (of them, kind "other": grass, pots), count (listed), actors
 // [{id,addr,name,kind,pos,dist,life,max_life,owner,alive}] nearest first. `id` is the actor's address in decimal and
 // `addr` the same in hex, as the LICHII_COOP_DEBUG_OBJECTS log prints it. `full` false (state): at most
@@ -143,8 +143,12 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
 // no id strike or a list is there; else the reply's text. A line that is not a strike is not looked at (the parser
 // checks the rest).
 std::string StrikeIdRefusal(std::string_view lines, bool world_list);
-// Whether the snapshot is a usable world list: there is one and it is not stale.
-bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms);
+// Whether the snapshot is a usable world list: there is one and it is not stale (CoopWorldSnapshot::IsStale: by the
+// wall clock and the game's frames together, so a held game keeps its list). `now_frame` is the bridge's frame count.
+bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms,
+                   std::uint64_t now_frame);
+// Whether the lines hold a `kill` or `hit` step (with an id or not): the strike queue gives each a number.
+bool HasStrikeLine(std::string_view lines);
 // The `strike` member of `state`: `,"strike":{seq,result,name,id}` for the newest strike the walk ran, or "" when none
 // ran yet (so the reply stays as it was for a game that never struck).
 std::string StrikeMember(const std::optional<CoopStrike::Result>& last);

@@ -58,10 +58,24 @@ def _look(client, ident):
 
 
 def _no_list(w):
-    """Why the world list cannot be used (solo, stale, an older module), or None when the walk ran."""
+    """Why the world list cannot be used, or None when the walk ran: `no world list: ...` (solo, an older module) or
+    `stale world list: ...` (the walk stopped: a load, the session ended). A list like that says nothing about the actor,
+    so a helper reports this, never `gone`."""
     if not w:
-        return "this module has no world list (an older build)"
-    return None if pc.walk_ran(w.get("why")) and not w.get("stale") else (w.get("why") or "no world list")
+        return "no world list: this module has none (an older build)"
+    if w.get("stale"):
+        return "stale world list: " + str(w.get("why") or "no walk for a while")
+    return None if pc.walk_ran(w.get("why")) else "no world list: " + str(w.get("why") or "none")
+
+
+def _interrupted(st, scene, w):
+    """The real reason a helper must stop before it judges the actor: the scene changed, a load is on, or the list is
+    unusable (checked in this order: after a door the new scene's list lacks the actor, which is no death)."""
+    if st.get("scene") != scene:
+        return "scene changed"
+    if st.get("loading"):
+        return "loading"
+    return _no_list(w)
 
 
 def _gone(a, name):
@@ -77,14 +91,15 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
     Returns arrived, reason, stuck, moved_m, frames, distance, actor (the last one seen)."""
     a, w = _look(client, ident)
     out = {"arrived": False, "reason": "", "stuck": False, "moved_m": 0.0, "frames": 0, "distance": None, "actor": a}
-    if _no_list(w) and a is None:
-        return dict(out, reason="no world list: " + str(_no_list(w)))
     name = name or (a or {}).get("name")
     st = pc.game_of(client.state())
     scene, used, still = st.get("scene"), 0, 0
     start = _pos(st)
     prev, leg_n = None, 0
     while True:
+        stop = _interrupted(st, scene, w)         # (before `gone`: a scene change or a stale list is not a death)
+        if stop:
+            return dict(out, reason=stop)
         if _gone(a, name):
             return dict(out, reason="gone")
         out["actor"] = a
@@ -99,10 +114,8 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
         prev = dist
         if dist <= near_m:
             return dict(out, arrived=True, reason="near")
-        if st.get("scene") != scene:
-            return dict(out, reason="scene changed")
-        if st.get("loading") or st.get("event"):
-            return dict(out, reason="loading" if st.get("loading") else "event")
+        if st.get("event"):
+            return dict(out, reason="event")
         if still >= stuck_after:
             return dict(out, reason="stuck", stuck=True)
         if used >= max_frames:
@@ -114,11 +127,14 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
         leg_n = max(1, r.get("frames", 0))
         used += leg_n
         a, w = _look(client, ident)
+        st = pc.game_of(client.state())     # (the state at the look, so the scene and the list agree)
 
 
 def face(client, ident, name=None):
     """Turn Link to the actor: the bridge's `face X Z` (the actor's place), then two frames. Looks the actor up first."""
     a, w = _look(client, ident)
+    if _no_list(w):
+        return {"faced": False, "reason": _no_list(w), "actor": a}
     if _gone(a, name):
         return {"faced": False, "reason": "gone", "actor": a}
     at = a.get("pos")
@@ -133,12 +149,13 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     """go_to_actor, face, then press `button` (the sword; Y is a guess to confirm in the lane run) in rounds until the
     actor's life is 0 or `max_frames` frames are used. The actor is looked up before the walk and before every press:
     nothing is pressed at an actor that is gone or has another name. Returns result (dead: its life was seen at 0;
-    gone: it left the list in the fight, perhaps dead; alive: the frame limit; stopped: the walk or the turn did not
-    finish, see `stopped`), life_before, life_after, frames, rounds."""
+    gone: it left the list in the fight, perhaps dead; alive: the frame limit, with a `hint` when its life never moved;
+    stopped: the walk or the turn did not finish, or the scene changed, a load began or the list went stale: see
+    `stopped`), life_before, life_after, frames, rounds."""
     a, w = _look(client, ident)
-    if _gone(a, name):
-        return {"result": "stopped", "stopped": "gone" if not _no_list(w) else "no world list: " + str(_no_list(w)),
-                "life_before": None, "life_after": None, "frames": 0, "rounds": 0}
+    if _no_list(w) or _gone(a, name):
+        return {"result": "stopped", "stopped": _no_list(w) or "gone", "life_before": None, "life_after": None,
+                "frames": 0, "rounds": 0}
     name = name or a.get("name")
     before = a.get("life")
     out = {"result": "alive", "life_before": before, "life_after": before, "frames": 0, "rounds": 0}
@@ -152,8 +169,12 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     if not f["faced"]:
         return dict(out, result="stopped", stopped=f["reason"])
     out["frames"] += 2
+    scene = pc.game_of(client.state()).get("scene")
     while out["frames"] < max_frames:
         a, w = _look(client, ident)
+        stop = _interrupted(pc.game_of(client.state()), scene, w)
+        if stop:
+            return dict(out, result="stopped", stopped=stop)
         if _gone(a, name):
             return dict(out, result="gone")
         life = a.get("life")
@@ -165,11 +186,17 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
         out["frames"] += 2 * press_frames
         out["rounds"] += 1
     a, w = _look(client, ident)
+    stop = _interrupted(pc.game_of(client.state()), scene, w)
+    if stop:
+        return dict(out, result="stopped", stopped=stop)
     if _gone(a, name):
         return dict(out, result="gone")
     out["life_after"] = a.get("life")
     if isinstance(out["life_after"], (int, float)) and out["life_after"] <= 0:
         out["result"] = "dead"
+    elif out["rounds"] and out["life_after"] == before:
+        out["hint"] = ("its life never moved in %d rounds: the button %s may be wrong (it is a guess), or the sword is "
+                       "not out, or the actor cannot be hurt that way" % (out["rounds"], button))
     return out
 
 
@@ -210,8 +237,9 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
     """Send one `kill [ID] NAME` or `hit [ID] NAME N` line (built and checked by mcp_playtest.act_line) and wait up to
     `frames` frames, looking every STRIKE_LOOK, for the objects walk's result in `state.strike`, matched by the strike's
     number (no retry, no other actor). `ident` (the id in the line) is only for the words. Replies result: `ok` (the walk
-    struck it), `refused: actor 7 (NAME) is gone`, `refused: actor 7 (NAME) has no life left`, `refused: no world list ...`
-    (solo refuses an id), or `unknown: no result after 12 frames` (the strike may still land: look with get_world)."""
+    struck it), `refused: actor 7 (NAME) is gone`, `refused: actor 7 (NAME) has no life left`, `refused: actor 7 (NAME) is
+    here, but co-op does not share it ...`, `refused: no world list ...` (solo refuses an id), `refused: the strike queue
+    is full ...`, or `unknown: no result after 12 frames` (the strike may still land: look with get_world)."""
     who = "%d " % ident if ident else ""
     label = "actor %s (%s)" % (who.strip(), name) if who else "an actor named %s" % name
     try:
@@ -221,7 +249,8 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
         return {"result": "refused: " + why, "line": line}
     seq = r.get("strike_seq")
     if not seq:
-        return {"result": "unknown: the bridge gave no strike number (an older module?)", "line": line}
+        return {"result": "unknown: the bridge gave no strike number (the module is older than the strike numbers; "
+                           "look with get_world)", "line": line}
     used, last = 0, None
     while True:
         last = client.state().get("strike")
@@ -239,6 +268,9 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
         return {"result": "ok", "line": line, "seq": seq, "frames": used}
     if word == "gone":
         return {"result": "refused: %s is gone" % label, "line": line, "seq": seq, "frames": used}
+    if word == "not shared":
+        return {"result": "refused: %s is here, but co-op does not share it, so a test strike cannot reach it" % label,
+                "line": line, "seq": seq, "frames": used}
     if word == "none with a life":
         return {"result": "refused: %s has no life left" % label if who else "refused: none of that name has a life",
                 "line": line, "seq": seq, "frames": used}

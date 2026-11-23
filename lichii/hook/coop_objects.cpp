@@ -5045,14 +5045,24 @@ private:
                 }
                 candidates.push_back(c);
             }
-            const CoopStrike::Pick pick = CoopStrike::PickTarget(candidates, name, strike.id);
+            // What the world list shows (names_, set by this walk's Collect) but the walk does not share is told apart
+            // from an actor that is gone.
+            std::vector<CoopStrike::Listed> listed;
+            if (strike.id != 0) {
+                if (const auto at = names_.find(strike.id); at != names_.end()) {
+                    listed.push_back({strike.id, at->second.first});
+                }
+            }
+            const CoopStrike::Pick pick = CoopStrike::PickTarget(candidates, name, strike.id, listed);
             if (strike.seq != 0) {
                 CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), name, strike.id});
             }
             if (pick.result != CoopStrike::kDone) {
                 LOG_INFO(Core, "coop: test {} {}{}: {}", strike.amount > 0 ? "hit" : "kill",
                          strike.id ? fmt::format("{} ", strike.id) : std::string(), name,
-                         pick.result == CoopStrike::kGone ? "gone (no such actor with that name)" : "none here with a life");
+                         pick.result == CoopStrike::kGone       ? "gone (no such actor with that name)"
+                         : pick.result == CoopStrike::kNotShared ? "not shared (it is here, co-op does not share it)"
+                                                                 : "none here with a life");
                 continue;
             }
             const Seen* best = &seen[pick.index];

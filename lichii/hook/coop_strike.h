@@ -14,6 +14,13 @@
 
 namespace CoopStrike {
 
+// An actor the walk knows by name and place but does not share (enemy shots, the Scrub Brothers, extras the director
+// has not bound): the world list shows it, a test strike cannot reach it.
+struct Listed {
+    std::uint64_t address = 0;
+    std::string_view name;
+};
+
 // One actor of the walk's own list.
 struct Candidate {
     std::uint64_t address = 0;
@@ -25,9 +32,10 @@ struct Candidate {
 inline constexpr std::string_view kDone = "done";
 inline constexpr std::string_view kGone = "gone";
 inline constexpr std::string_view kNoLife = "none with a life";
+inline constexpr std::string_view kNotShared = "not shared";
 
 struct Pick {
-    std::string_view result = kNoLife;  // done, gone or none with a life
+    std::string_view result = kNoLife;  // done, gone, not shared or none with a life
     std::size_t index = 0;              // into the candidates, when done
 };
 
@@ -35,7 +43,10 @@ struct Pick {
 // address, and only when it still has that name: no actor of the walk at that address, or one with another name, is
 // `gone` (never another actor of the same name: a new actor at a freed address with the same name cannot be told
 // apart from the old one, which docs/playtest.md accepts); the actor there with no life left is `none with a life`.
-inline Pick PickTarget(const std::vector<Candidate>& actors, std::string_view name, std::uint64_t id) {
+// `listed` (the actors the world list shows, optional): an id and name that are there but not among `actors` is
+// `not shared`, not `gone`: the actor is right there and co-op does not share it.
+inline Pick PickTarget(const std::vector<Candidate>& actors, std::string_view name, std::uint64_t id,
+                       const std::vector<Listed>& listed = {}) {
     Pick pick;
     if (id != 0) {
         for (std::size_t i = 0; i < actors.size(); ++i) {
@@ -46,6 +57,12 @@ inline Pick PickTarget(const std::vector<Candidate>& actors, std::string_view na
             return pick;
         }
         pick.result = kGone;
+        for (const Listed& l : listed) {
+            if (l.address == id && l.name == name) {
+                pick.result = kNotShared;
+                break;
+            }
+        }
         return pick;
     }
     bool found = false;
@@ -63,7 +80,7 @@ inline Pick PickTarget(const std::vector<Candidate>& actors, std::string_view na
 // What the walk left for the bridge about the newest strike it ran.
 struct Result {
     std::uint64_t seq = 0;
-    std::string result;  // done, gone or none with a life
+    std::string result;  // done, gone, not shared or none with a life
     std::string name;
     std::uint64_t id = 0;  // the id asked for; 0: by name
 };

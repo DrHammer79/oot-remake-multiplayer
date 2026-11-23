@@ -42,6 +42,16 @@ TEST_CASE("strike: an id that is no longer in the walk's list is gone, and never
     CHECK(PickTarget({}, "Enemy_Test", 0x10).result == kGone);
 }
 
+TEST_CASE("strike: an id the world list shows but the walk does not share is not shared, not gone") {
+    const std::vector<Candidate> actors{Actor(0x20, "Enemy_Test", 4, 3.0f)};
+    const std::vector<Listed> listed{{0x50, "Enemy_Shot"}};
+    CHECK(PickTarget(actors, "Enemy_Shot", 0x50, listed).result == kNotShared);
+    CHECK(PickTarget(actors, "Enemy_Other", 0x50, listed).result == kGone);   // another name at that address
+    CHECK(PickTarget(actors, "Enemy_Shot", 0x60, listed).result == kGone);    // not listed at all
+    CHECK(PickTarget(actors, "Enemy_Shot", 0x50).result == kGone);            // no list given
+    CHECK(PickTarget(actors, "Enemy_Test", 0x20, listed).result == kDone);    // shared wins
+}
+
 TEST_CASE("strike: an id whose actor now has another name is gone") {
     const std::vector<Candidate> actors{Actor(0x10, "Enemy_Other", 4, 9.0f), Actor(0x20, "Enemy_Test", 4, 3.0f)};
     CHECK(PickTarget(actors, "Enemy_Test", 0x10).result == kGone);

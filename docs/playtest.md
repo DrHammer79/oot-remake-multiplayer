@@ -154,13 +154,13 @@ reads the place of every actor it sees and keeps up to 200, `other` last, becaus
 beehives too. `state` lists only the nearest 40 of the known kinds and counts the rest (`total`, `other_count`); `dump`
 lists all of them. It is there only while the games are connected and sharing, because the object walk runs only then.
 
-**`strike`** (in `state`, after a `kill` or `hit`): `{"seq":4,"result":"done","name":"Enemy_Example","id":2147483648}`, the objects walk's answer to the strike with that `seq` (the `strike_seq` of the `act` reply). `result` is `done` (the strike was made), `gone` (an id was given and no actor with that id and that name is in the walk's list now: nothing else is struck, there is no fallback to another actor of the name), or `none with a life` (no actor to strike). It is absent until a strike was sent. Only the last strike is kept: a newer one replaces it.
+**`strike`** (in `state`, after a `kill` or `hit`): `{"seq":4,"result":"done","name":"Enemy_Example","id":2147483648}`, the objects walk's answer to the strike with that `seq` (the `strike_seq` of the `act` reply). `result` is `done` (the strike was made), `gone` (an id was given and no actor with that id and that name is in the walk's list now: nothing else is struck, there is no fallback to another actor of the name), `not shared` (the actor is in `get_world`'s list, but co-op does not share it, as with enemy shots and the Scrub Brothers: the walk does not see it as a target, so nothing is struck; this is not `gone`), or `none with a life` (no actor to strike). The queue holds 16 strikes: a 17th is refused with "the strike queue is full" and has no `strike_seq`. It is absent until a strike was sent. Only the last strike is kept: a newer one replaces it.
 
 **An empty `actors` list does not mean "nothing here".** Solo (no co-op session) it is empty with `frame` null, and
 `why` says so. Each empty list carries a `why`:
 
 - `"no co-op session: the world list is read only while connected and sharing"`: the walk never ran.
-- `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s.
+- `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s of wall clock and the game is 30 or more frames past it.
 - `"empty: the walk ran and saw no actors"`: connected, and the room really has none.
 - `"only other kinds near: dump lists them"`: `state` lists known kinds only, and the room has only grass, pots and the like.
 
@@ -176,8 +176,10 @@ lists all of them. It is there only while the games are connected and sharing, b
 - `frame` is the bridge's frame count when the walk began; the reply's own `frame` is the game's now. While the game
   is held, `state` waits up to 300 ms for a snapshot of that frame, but only when a fresh one is behind the frame (solo
   or stale: no wait); if none comes, `behind` is true and the older list is returned with its frame. A running game returns the newest list, which is a few frames old.
-- A snapshot older than 1.5 s of wall clock (a load, a closed room, the walk stopped) is not shown: `stale` is true,
-  `count` 0, `actors` empty, `why` says "stale", `age_ms` says how old.
+- A snapshot older than 1.5 s of wall clock **and** 30 or more frames behind the game (a load, a closed room, the
+  walk stopped) is not shown: `stale` is true, `count` 0, `actors` empty, `why` says "stale", `age_ms` says how old.
+  The walk runs on presents, and a held game makes none, so a held game keeps its last list however long the tester
+  waits: only the frames count then.
 - The list costs the object walk `cost_us` microseconds about every 100 ms. Without the bridge (the switch is never
   turned on) the walk does two relaxed atomic loads (before and after the actor loop) and the `state` text has no `world` member.
 
@@ -290,7 +292,8 @@ value after `password`, `token`, `secret` and `nickname` with `=` or `:`; the va
 `name '...'` and `player N '...'`; every double-quoted text; and the players' names, which are read from the games' own
 logs plus the words in `names`. A name of two characters or fewer is matched with its case. It is the filter of the
 tool, not a guarantee: a name that no log line printed in those forms and that the tester did not pass stays, and so
-does a host name written without a port, or a dotted host name (`myhouse.duckdns.org`) with no port after it. A host
+does a host name written without a port, or a dotted host name (`myhouse.duckdns.org`) with no port after it. The mask
+also takes too much: `texture:2048` and `slot:1234` are masked as hosts, and `MyPC:443` (a three-digit port) is not. A host
 name with no dot and a port of four or five digits (`DESKTOP-K3J9:7777`) is masked; the words `error`, `port`, `frame`
 and a few like them before a colon and a number are not. A name may hold an apostrophe with a letter after it
 (`O'Neil`). `check_logs` reads the `coop:` lines and the `coop voice:` lines, and a level word may come after one
@@ -309,9 +312,11 @@ server calls them; a script can too). They only use the bridge's commands, so th
   matters.
 - At most 120 frames pass in one call (`max_frames` lowers it). Every answer says why it stopped: `go_to_actor`:
   `near` (arrived), `gone`, `stuck` (Link got no 0.3 m nearer over 60 frames; `moved_m` is how far he went), `timed out`,
-  `scene changed`, `loading`, `event`, or a note that there is no world list. `attack`: `dead`, `gone`, `alive` (the
-  frames ran out with life left), or `stopped` with the reason of the walk. A refusal of the bridge comes back as the
-  reason, not as a crash.
+  `scene changed`, `loading`, `event`, `stale world list: ...` or `no world list: ...`. `attack`: `dead`, `gone`,
+  `alive` (the frames ran out with life left; `hint` says so when its life never moved), or `stopped` with the reason
+  of the walk or the fight. The scene, a load and the list are checked first, then `gone`: after a door or a load the
+  list lacks the actor, and that says nothing about its death. A refusal of the bridge comes back as the reason, not as
+  a crash.
 - `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
   walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
 - `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
@@ -327,6 +332,18 @@ Every reply carries the game's `frame`.
 each push, and reads the camera again after every 8 frames. On a bend the right model shows itself within a few
 pushes. A walk that gets nowhere for three pushes steps aside for three. Into a wall it times out: walk_to does no
 pathfinding, so give it points with a clear line between them and use `warp` for anything far.
+
+### Check in game (first lane run of the strike by id, the helpers and the held list)
+
+Nothing here has run in a game. The first run checks:
+
+- Hold the game (any `state`), wait 3 s, run `get_world`: the list is still there and `stale` is false. Then `kill`
+  with an `id` and `name` from it: `ok`. (A list that went stale in a held game, or a strike that says `gone`, fails this.)
+- `kill` with an id of an enemy shot or a Scrub Brother in the list: `refused: ... does not share it`, not `gone`.
+- `kill` with the id of a normal enemy: only that enemy takes the hit, not another of the same name nearer to Link.
+- Walk through a door during `go_to_actor`: the answer is `scene changed`, not `gone`.
+- The guesses made without a game, set by this run: the sword button `Y`, the 4 m leg of `go_to_actor` and its
+  60-frame stuck limit.
 
 ### Setting up a run
 
