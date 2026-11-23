@@ -464,11 +464,7 @@ std::int32_t Table::HeldLifeStep(std::uint64_t component, std::int32_t life, std
 }
 
 bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool own) {
-    std::unique_lock lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) {
-        ++counts_.busy;  // (racy count, for the log only)
-        return false;
-    }
+    std::lock_guard lock(mutex_);  // (waits: see the header, "The wraps")
     if (!brain_on_) {
         return false;
     }
@@ -504,11 +500,7 @@ bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool o
 }
 
 bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own) {
-    std::unique_lock lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) {
-        ++counts_.busy;
-        return false;
-    }
+    std::lock_guard lock(mutex_);  // (waits: see the header, "The wraps")
     if (!actions_on_) {
         return false;
     }
@@ -952,8 +944,8 @@ bool Table::CopyMakes(std::string_view maker) {
     if (maker.empty()) {
         return false;
     }
-    std::unique_lock lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock() || !brain_on_) {
+    std::lock_guard lock(mutex_);  // (waits: see the header, "The wraps")
+    if (!brain_on_) {
         return false;
     }
     for (const auto& [bsa, e] : by_bsa_) {
