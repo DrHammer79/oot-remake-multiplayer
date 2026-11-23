@@ -158,6 +158,12 @@ jobs:
         run: python tools/autotest/tests/test_playtest.py -v
       - name: Test game window placement tests
         run: python tools/autotest/tests/test_placement.py -v
+      - name: Play-test bridge client and MCP tools tests (fake bridge)
+        run: python tools/autotest/tests/test_playtest_bridge.py -v
+      - name: Play-test bridge proof checks tests
+        run: python tools/autotest/tests/test_bridge_proof.py -v
+      - name: Play-test desync check (world compare, sync-coverage rows) tests
+        run: python tools/autotest/tests/test_desync_check.py -v
       - name: hs.py shared game files tests
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Mods' code patches (Longshot patches 0034, 0035) tests

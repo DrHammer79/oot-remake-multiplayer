@@ -310,6 +310,20 @@ std::string MicWords(const std::string& chosen, const std::vector<std::string>& 
     return there ? words : words + " (not connected)";
 }
 
+const char* PageWord(Page page) {
+    switch (page) {
+    case Page::kMain: return "main";
+    case Page::kHost: return "host";
+    case Page::kJoin: return "join";
+    case Page::kLocal: return "local";
+    case Page::kSettings: return "settings";
+    case Page::kCommands: return "commands";
+    case Page::kCustomize: return "customize";
+    case Page::kFind: return "find";
+    }
+    return "unknown";
+}
+
 std::string ChatKeyWords(const std::string& chat_key) {
     std::string k = chat_key.empty() ? std::string("T") : chat_key;
     std::string low = k;

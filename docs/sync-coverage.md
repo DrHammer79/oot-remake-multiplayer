@@ -80,7 +80,8 @@ Dungeon state is in named flags that the room logic reads ([dungeon.md](dungeon.
 | Eye switches | `Obj_EyeSwitch_*` (5) | flags | ? | logs (Deku Tree slingshot room, chunk 4) | B's door or ladder stays: the Deku Tree ladder softlock (#129) | **P1** |
 | Crystal switches (hit) | `Obj_SwitchHit_*`, `Obj_InsideJabu_Jabu_SwitchHit_*`, `Obj_LakeHrl_SwitchHit_*`, `Obj_LightSwitchHitBase` | flags | ? | unit | As above | **P1** |
 | Rusted and hammer switches | `Obj_FireTemple_HammerSlipPillar_*` (*keys*, kept), hammer floor switches `Obj_HammerSwitch_*` (no key; a faller too since breakables-2) | world `WORLD_BREAK` as a *faller* (breakables: life 0 written in B, again each second while it stands, at most 10 times; never moved, never deleted; the same pillars in the Gerudo Training Ground are covered) + *keys* for a reload; flags | live (breakables) | unit | B's pillar stands: a missing bridge in the Fire Temple | **P1** |
-| Sun switches, mirrors, light beams | `Obj_SolarSwitch_*`, `Obj_SpiritTemple_Mirror`, `Obj_SpiritTemple_CapstanMirror`, `Obj_SpiritTemple_RayShaft_*` | outcome flags; mirror angle none | ? / - | - | Each player turns their own mirror; the door's flag is shared | P2 |
+| Sun switches | `Obj_SolarSwitch_*` | outcome flags | ? | - | The door's flag is shared; whether a loaded switch reacts live was never seen | P2 |
+| Mirrors and light beams | `Obj_SpiritTemple_Mirror`, `Obj_SpiritTemple_CapstanMirror`, `Obj_SpiritTemple_RayShaft_*` | none (the mirror angle is not shared) | - | - | Each player turns their own mirror; the door's flag is shared | P2 |
 | Torches lit for good | `Obj_CandleStick_*`, `Obj_*_CandleStick_*`, `Obj_ForestTemple_SwitchCandleStick_*`, `Obj_Well_CandleStick_*` (key) | flags; Well torch key, kept | ? | unit | The door the torches open | **P1** |
 | Shutters and barred doors | `Obj_*_SwitchShutter_*` (574 placements), `Obj_DoorChainLock*`, `Obj_Base_RestrictedDoor` | flags (`…_ShutterOpen`, `…_OpenDoor…`) + played events | ? | unit | A walks through, B's stays shut | **P1** |
 | Locked doors (small key) | `Obj_DoorChainLock*`, `Obj_*_DoorChainLock_*` | flags (`…_UnLock`) + the shared key count | ? | unit | The key is spent for everyone; if B's door does not open live, B is stuck (see Small keys) | **P1** |
@@ -99,6 +100,8 @@ Dungeon state is in named flags that the room logic reads ([dungeon.md](dungeon.
 | Hookshot targets, crumbling platforms, spikes, blades, guillotines, fire walls | `Obj_*HookShotTarget*`, `Obj_CrumblingGanonCastle_*`, `Obj_MoveSpike_*`, `Obj_ShadowTemple_*Blade*`, `Obj_FireWall*` | none (each game runs its own) | - | - | - | P3 |
 | Lens of Truth objects | `Obj_*_GlassTruth_*` | none (per player: each player's own lens) | - | - | - | P3 |
 | Mini-boss and boss rooms | boss actors | boss `BOSS_ROOM` (all in, intro together) + named `…_Boss_Defeat` | live | game (boss 20261110-124007: B moved in, intro) | Walk-out after the fight (boss-walkout, chunk 5); the blue warp and medal per player | **P1** (warp out) |
+| Enemies | `Enemy_*` | objects (owner, life samples, `DAMAGE`; [objects.md](objects.md)) | ? | - | An enemy alive in one game and dead in the other, or with another owner or life. Each game stands at its own frame, so a moving enemy's place is not compared | P2 |
+| Rolled spawns (the night Stalchild) | `Enemy_Stalchild*` | decider roll + `OBJECT_SPAWN` near; own roll apart (`Sync::RollerFor`, [objects.md](objects.md), "Rolled spawns") | ? | - | Shared while the players are within 40 m of where it rose; apart, each game rolls its own, so compare only in the same area | P2 |
 
 ## World and story
 
@@ -224,3 +227,5 @@ Merged into `integrate-p11`, with unit tests and review. None of it is proven in
 ## How to keep this page
 
 A fix branch changes its rows: Path, Live, Proven (with the run, once integrate-p8 has run it) and P. It adds a row for any actor class it finds that is missing here. Keep the P1 list in step.
+
+**The play-test reads this page.** `tools/autotest/desync_check.py` (through `tools/autotest/sync_rows.py`) reads every table that has a `Path` column, a `Live` column and a column whose header starts with `Actors`, to say what each actor of two games' checkpoints may differ in. So: write actor names in backticks in that column (a glob with `*` is fine; text outside backticks is never read); the Live cell starts with `live`, `reload`, `?` or `-` and has one value only (a split like `? / -` is two rows); a Path that starts with `none` means not shared; put a glob on one row only unless the rows really are the same class (`tools/autotest/tests/test_desync_check.py` lists the ones that are on two rows now and fails on a new one). An actor with no row is "not compared" in the report.

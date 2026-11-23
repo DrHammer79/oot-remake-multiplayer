@@ -1934,6 +1934,12 @@ std::string PageSays(std::uint64_t* gen) {
     return g_page_says;
 }
 
+std::string MenuState() {
+    std::lock_guard lock(g_mutex);
+    if (!g_shown && !g_native) return "closed";
+    return CoopPauseMenu::PageWord(g_menu.page());
+}
+
 bool TestMenu(const std::string& page) {
     if (page == "customize") {
         Open(CoopPauseMenu::Page::kCustomize);

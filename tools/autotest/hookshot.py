@@ -1201,6 +1201,18 @@ def run(a):
         load = parse(read_script(a.load))   # (checked; the load itself is "A until play", see to_play)
     procs, bridges, server, commands = {}, {}, None, {}
     failed = None
+
+    def keep_pids():
+        # --keep-open: the games and the server outlive this run, so their pids go to pids.json in the run folder for
+        # whoever closes them later (tools/autotest/live.py's watchdog). Written again as each one starts.
+        if not a.keep_open:
+            return
+        try:
+            with open(os.path.join(out, "pids.json"), "w", encoding="utf-8") as f:
+                json.dump({"games": {x: p.pid for x, p in procs.items()}, "server": server.pid if server else None}, f)
+        except OSError as e:
+            say("pids.json not written: %s" % e)
+
     try:
         if a.server:
             with open(os.path.join(out, "server-out.txt"), "w") as so:
@@ -1212,6 +1224,7 @@ def run(a):
                     senv["OOT_COOP_TEST"] = "1"   # coop_server refuses the delay without it
                 server = subprocess.Popen([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
                                           + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
+            keep_pids()
             time.sleep(1)
         for i, x in enumerate(tags):
             g = games[x]
@@ -1228,6 +1241,11 @@ def run(a):
                 env["LICHII_COOP_SERVER"] = "127.0.0.1:%d" % a.port
                 env["LICHII_COOP_NAME"] = x   # "A", "B": the scripts type /teleport A, /teleport B
                 env["LICHII_COOP_PASSWORD"] = a.password
+            if a.playtest_ports:
+                # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
+                env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
+                env["LICHII_COOP_PLAYTEST_VERBS"] = "1"   # act, warp, flag, give: a player's game never gets this
+                env.setdefault("LICHII_COOP_CHEATS", "1")   # the bridge's give goes through the cheats queue
             for kv in a.env:
                 k, v = kv.split("=", 1)
                 if k[:2] in ("A:", "B:"):
@@ -1249,6 +1267,7 @@ def run(a):
                                                 stderr=subprocess.STDOUT, **popen_flags())
             say("%s: started pid %d, bridge %s" % (x, procs[x].pid, sock))
             place_games({x: procs[x].pid}, a.display, say, wait=30.0)   # (its window as soon as it is there)
+            keep_pids()
             bridges[x] = (sock, Bridge.connect(sock, timeout=120))
             if i == 0:
                 time.sleep(3)
@@ -1442,6 +1461,9 @@ def main(argv=None):
     r.add_argument("--scenario-timeout", type=int, default=600)
     add_renderer_options(r)
     r.add_argument("--pipe", help="default coop-auto (a lane: its own)")
+    r.add_argument("--playtest-ports", type=int, default=0, metavar="BASE",
+                   help="turn each game's play-test bridge on: A on BASE+1, B on BASE+2, with LICHII_COOP_CHEATS=1 "
+                        "for its give (docs/playtest.md)")
     add_test_delay_options(r)
     r.add_argument("--kit-a", help="start game A through this kit's own start (play.ps1 choose -Hookshot; its "
                                    "hookshot/game-folder.txt names --game-a): tools/autotest/kit_pair.py")

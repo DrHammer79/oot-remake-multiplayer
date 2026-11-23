@@ -586,12 +586,43 @@ TEST_CASE("testinput: hit and stun hand the hook an actor name (and an amount), 
     CHECK(r.Done());
 }
 
+TEST_CASE("testinput: kill and hit take the actor's id before its name (S4)") {
+    std::string error;
+    Runner r(Must("kill 4096 Enemy_Test\nhit 8192 Enemy_Test 3\nkill Enemy_Test\nhit Enemy_Test 2\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 4);
+    CHECK(requests[0].kind == Kind::kill);
+    CHECK(requests[0].name == "Enemy_Test");
+    CHECK(requests[0].id == 4096);
+    CHECK(requests[1].kind == Kind::hit);
+    CHECK(requests[1].name == "Enemy_Test");
+    CHECK(requests[1].start == "3");
+    CHECK(requests[1].id == 8192);
+    CHECK(requests[2].id == 0);
+    CHECK(requests[3].id == 0);
+    CHECK(requests[3].start == "2");
+    // an id needs its name (never a number), is not zero, and nothing may follow
+    CHECK_FALSE(Parse("kill 4096\n", error));
+    CHECK_FALSE(Parse("kill 4096 77\n", error));
+    CHECK_FALSE(Parse("kill 0 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("kill 4096 Enemy_Test now\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("hit 4096 3\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test 0\n", error));
+}
+
 TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (issue 130)") {
     std::string error;
     CHECK_FALSE(Parse("setflag\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee lots\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 9 9\n", error));
+    // past int32: refused (all digits, so only the overflow tells; review-01111-b)
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 2147483648\n", error));
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee -2147483649\n", error));
+    CHECK(Parse("setflag PlayerStatus.CurrentRupee 2147483647\n", error));
     Runner r(Must("setflag PouchData.Weapon_Shield_Deku.StockNum 0\nsetflag PlayerStatus.CurrentRupee 99\n"));
     std::vector<std::string> log;
     r.Advance(0.0, std::nullopt, log);
@@ -800,4 +831,29 @@ TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, f
     CHECK((*up)[3 + 1 * 3 + 2] == doctest::Approx(1.0f));
     CHECK_FALSE(AimPlace(eye, eye, 0.6f).has_value());
     CHECK_FALSE(AimPlace({std::nanf(""), 0.0f, 0.0f}, eye, 0.6f).has_value());
+}
+
+TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses the whole script otherwise") {
+    const auto& allowed = ActKinds();
+    CHECK(NotAllowed(Must("kill Enemy_Test\nhit Enemy_Test 2\nhurt 2\nplace 1 2 3\nface 1 2\nchat hello"), allowed).empty());
+    CHECK(NotAllowed(Must("menu customize"), allowed).empty());
+    CHECK(NotAllowed(Must("setflag some_flag 1"), allowed).empty());
+    // an unlisted kind: a wait, a warp, a give, a sync, a dump
+    const std::string wait = NotAllowed(Must("wait 1"), allowed);
+    CHECK(wait.find("not allowed here") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("warp Market_Child"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("give bombs"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("sync title 2"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("dump x"), allowed).empty());
+    // a hidden second command (new line), in a different case, behind a legal first one
+    const std::string hidden = NotAllowed(Must("kill Enemy_Test\nWARP Market_Child"), allowed);
+    CHECK(hidden.find("line 2") != std::string::npos);
+    CHECK(hidden.find("warp") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("KILL Enemy_Test\nGive bombs"), allowed).empty());
+    // the list in the message
+    CHECK(wait.find("kill") != std::string::npos);
+    CHECK(wait.find("chat") != std::string::npos);
+    // every kind has a word and a word that Parse reads back as that kind is how the table is kept honest
+    CHECK(std::string(KindWord(Kind::go)) == "goto");
+    for (const Kind k : allowed) CHECK(std::string(KindWord(k)) != "?");
 }

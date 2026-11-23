@@ -169,6 +169,7 @@ struct Step {
     std::string mark;  // mark: its name; warp: the scene; give: the item; wear: the piece;
                        // assign: the item's name in the button enum (Bow, Hookshot, Hammer)
     std::string start; // warp: the start position name (empty: the scene's own); wear: the slot
+    std::uint64_t id = 0;  // kill and hit: the actor's address ("kill ID NAME"); 0: the nearest of that name
     float x = 0.0f;  // goto and toward: the world point (x, z); place: (x, y, z)
     float y = 0.0f;
     float z = 0.0f;
@@ -194,6 +195,16 @@ std::string WarpGiveUpLine(std::string_view target, double seconds, const std::o
 // Reads a script. On a bad line returns nothing and sets `error` to
 // "line N: why".
 std::optional<Script> Parse(std::string_view text, std::string& error);
+
+// The kinds the play-test bridge's `act` command may run (hookshot/src/coop_playtest.cpp): kill, hit, hurt, place, face,
+// aim, wear, dress, assign, chat, menu, setflag, setenum. The rest of what a script can do has its own bridge command or
+// makes no sense while the game is held (wait, hold, press, goto, toward, sync, mark, dump, warp, give, stun, drop).
+const std::vector<Kind>& ActKinds();
+// The word a script line starts with for this kind ("kill", "goto", ...; a timed step: "timed").
+const char* KindWord(Kind kind);
+// Empty when every step of `script` is one of `allowed`; else "line N: WORD is not allowed here (allowed: ...)". The check is
+// on the parsed kinds, so case, spacing and a hidden second line cannot get past it.
+std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
 
 // `aim` (row 173): where an arrow flying from `from` is put so it goes into `target`: `short_m` short of the target
 // on the line from `from` (at `from` when nearer than that), turned to face it (place, then the 3x3 rows, as the
@@ -267,6 +278,7 @@ public:
         std::string name;
         std::string start;
         std::array<float, 3> at{};  // place
+        std::uint64_t id = 0;       // kill and hit: the actor's address; 0: by name
     };
     std::vector<Request> TakeRequests() { return std::exchange(requests_, {}); }
     bool Done() const { return index_ >= script_.steps.size(); }
@@ -322,6 +334,22 @@ private:
 // and writes only the test-only steps there; they are played without a pad
 // and the file is emptied once read.
 void OnFrame(Core::System& system);
+
+// The play-test bridge (hookshot/src/coop_playtest.h): test-only lines done at once on the calling thread (the
+// game's calc thread while the bridge holds it), as a commands file's would be: setflag, setenum, give, wear,
+// assign, dress, place, face, aim, kill, hit, stun, drop, hurt, chat, menu, dump, mark. A `warp` (alone) begins a
+// script that asks again as frames run (OnFrame) until Link is in that scene. Timed steps (hold, goto, ...) are
+// refused: the bridge's own input moves Link. False with `error` for a bad or refused line.
+// `allowed` (the bridge's `act` gives ActKinds()): a script with a step of another kind is refused whole, before any
+// step runs. Null: every kind PlayNow can do (the bridge's warp, flag and give lines).
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error,
+             const std::vector<Kind>* allowed = nullptr);
+
+// The value of every flag a dump writes (the shared dungeon and story lists; Bool as 0 or 1), in list order.
+std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& system);
+// One game flag by name: an Int, or a Bool as 0 or 1; a String64. Nothing when the game has no such flag.
+std::optional<std::int32_t> FlagInt(Core::System& system, std::string_view name);
+std::optional<std::string> FlagText(Core::System& system, std::string_view name);
 
 // The menu step's doer: the Hookshot module sets it (coop_pause.cpp); "customize" opens
 // the Multiplayer tab's Customize page, "close" closes the menu. True when asked.

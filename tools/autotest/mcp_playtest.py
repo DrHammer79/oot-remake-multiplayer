@@ -12,11 +12,16 @@ import argparse
 import io
 import json
 import os
+import re
+import shutil
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import playtest_client as pc  # noqa: E402
+import playtest_helpers as ph  # noqa: E402
 
 SCRIPT_HELP = (
     "Test script lines (tools/autotest/hookshot.py's format), ';' between them. Times are game frames (60 a second). "
@@ -38,13 +43,462 @@ TOOLS = [
     {"name": "shot", "description": "Screenshot one game or both: the PNG paths (open them to see the screen). "
      "Use sparingly; state is cheaper.",
      "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
-    {"name": "checkpoint", "description": "Write both games' shared dungeon and story flags under a tag "
-     "(letters, digits, - and _). Take one after every action that should sync, then run desync_check.",
+    {"name": "checkpoint", "description": "Write both games' shared dungeon and story flags and a screenshot of "
+     "each game under a tag (letters, digits, - and _). Take one after every action that should sync, then run "
+     "desync_check; open the shots for anything visible (flags alone are no proof of what a player sees).",
      "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "desync_check", "description": "Compare every checkpoint of the session: the first tag where the two "
      "games' shared flags differ, and which flags.",
      "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
 ]
+
+
+PLAYER = {"type": "string", "enum": list(pc.PLAYERS)}
+FRAMES = {"type": "integer", "minimum": 1, "maximum": 3600}
+PAUSED = ("Every reply has the game's frame count; the game is paused between calls and only runs the frames a "
+          "call asks for.")
+
+# The verbs that run one test line through the bridge's `act` (docs/playtest.md, "act"). Each is checked here before
+# it is sent; the bridge checks the kind again.
+WORD = re.compile(r"^[A-Za-z0-9_.:+-]{1,96}$")
+PARTS = ("weapon", "shield", "head", "armor", "boots", "hand")
+
+
+def _word(args, key):
+    v = str(args.get(key, ""))
+    if not WORD.match(v):
+        raise ValueError("%s: letters, digits and _ . : + - only (no spaces)" % key)
+    return v
+
+
+def _ident(args):
+    """The optional actor `id` of kill and hit (the number get_world gives, or its 0x address) as an integer, or None.
+    It needs the actor's name beside it (the walk checks both); 0 and numbers past 64 bits are refused."""
+    v = args.get("id")
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        raise ValueError("id: the number get_world gives (or its 0x address)")
+    try:
+        n = v if isinstance(v, int) else int(v.strip(), 0)
+    except ValueError:
+        raise ValueError("id: the number get_world gives (or its 0x address)")
+    if not 0 < n < 2 ** 64:
+        raise ValueError("id: the number get_world gives (more than 0, less than 2^64)")
+    return n
+
+
+def _need_id(args):
+    n = _ident(args)
+    if n is None:
+        raise ValueError("id: the number get_world gives (with `name`, the name it gives for that id)")
+    return n
+
+
+def _button(args):
+    b = str(args.get("button", "Y")).upper()
+    if b not in pc.BUTTONS:
+        raise ValueError("button: one of " + " ".join(pc.BUTTONS))
+    return b
+
+
+def _bounded(args, key, default, lo, hi):
+    if key not in args:
+        return default
+    v = _num(args, key, lo, hi)
+    return float(v) if "." in v else int(v)
+
+
+def _num(args, key, lo=None, hi=None):
+    try:
+        v = float(args[key])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("%s: a number" % key)
+    if v != v or v in (float("inf"), float("-inf")) or (lo is not None and v < lo) or (hi is not None and v > hi):
+        raise ValueError("%s: a number from %s to %s" % (key, lo, hi))
+    return ("%g" % v) if v != int(v) else str(int(v))
+
+
+def act_line(name, args):
+    """The one test line a verb tool sends (None: not a verb tool)."""
+    if name == "kill":
+        who = _ident(args)
+        return "kill %s%s" % ("%d " % who if who else "", _word(args, "actor"))
+    if name == "hit":
+        who = _ident(args)
+        return "hit %s%s %s" % ("%d " % who if who else "", _word(args, "actor"), _num(args, "amount", 1, 80))
+    if name == "hurt":
+        return "hurt " + _num(args, "quarter_hearts", 1, 80)
+    if name == "place":
+        return "place %s %s %s" % (_num(args, "x"), _num(args, "y"), _num(args, "z"))
+    if name == "wear":
+        part = str(args.get("part", ""))
+        if part not in PARTS:
+            raise ValueError("part: one of " + ", ".join(PARTS))
+        return "wear %s %s" % (part, _word(args, "name"))
+    if name == "dress":
+        part = str(args.get("part", "all"))
+        if part not in PARTS + ("all",):
+            raise ValueError("part: one of all, " + ", ".join(PARTS))
+        return "dress " + part
+    if name == "assign":
+        return "assign " + _word(args, "item")
+    if name == "chat":
+        text = str(args.get("text", ""))
+        if not text.strip() or len(text) > 200 or any(ord(c) < 32 or c in ";#" for c in text):
+            raise ValueError("text: 1 to 200 characters, no new line, ';' or '#'")
+        return "chat " + text
+    if name == "menu":
+        page = str(args.get("page", ""))
+        if page not in ("customize", "close"):
+            raise ValueError("page: customize or close")
+        return "menu " + page
+    return None
+
+
+ACT_NOTE = ("Needs a test-runner start with cheats on (the bridge refuses otherwise). It reaches the other players' games, so "
+            "use it on the test server only. The game does it on its next frames: step a few, then get_state.")
+ACT_TOOLS = [
+    {"name": "kill", "description": "Kill an enemy actor: `actor` is its NAME from get_world. With no `id` the game "
+     "takes the nearest actor of that name with a life. With `id` (the id get_world gave, or its 0x address) it takes "
+     "exactly that actor, and refuses when no actor with that id and that name is there any more (it never falls back "
+     "to another of the name); an id is refused in solo. Up to 12 frames pass while it waits for the game's answer: "
+     "ok, `refused: actor 7 (NAME) is gone`, or `unknown: no result after 12 frames`. With an `id`, `ok` also needs "
+     "the actor seen dead within `wait_frames` more frames (default 36, a guess: S8 saw one die only after Link came "
+     "near it); else `struck: ...` with `died` false. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["actor"],
+                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]},
+                                    "wait_frames": {"type": "integer", "minimum": 0, "maximum": 600}}}},
+    {"name": "hit", "description": "Hit an actor for N quarter hearts: `actor` is its NAME from get_world. `id` and the "
+     "answer are as for kill (no `id`: the nearest of that name with a life; up to 12 frames pass). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["actor", "amount"],
+                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]},
+                                    "amount": {"type": "integer", "minimum": 1, "maximum": 80}}}},
+    {"name": "hurt", "description": "Hurt Link for N quarter hearts (a hit from a metre east). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["quarter_hearts"],
+                     "properties": {"quarter_hearts": {"type": "integer", "minimum": 1, "maximum": 80}}}},
+    {"name": "place", "description": "Put Link at a point (x, y, z in metres). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["x", "y", "z"],
+                     "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}}},
+    {"name": "wear", "description": "Set what Link wears in a slot (the flags only; `dress` puts it on). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["part", "name"],
+                     "properties": {"part": {"type": "string", "enum": list(PARTS)}, "name": {"type": "string"}}}},
+    {"name": "dress", "description": "Put on what `wear` set, through the game's own equip call. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "properties": {"part": {"type": "string", "enum": ["all"] + list(PARTS)}}}},
+    {"name": "assign", "description": "Put an item on a button (Bow, Hookshot, Hammer, SlingShot, Bomb, ...). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
+    {"name": "chat", "description": "Send a chat message as this player (1 to 200 characters; no ';', '#' or new "
+     "line). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
+    {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `coop_menu` "
+     "member says which co-op page is open; it does not see the game's own pause screen (use screenshot). " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["page"],
+                     "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
+]
+
+# The helpers of playtest_helpers.py as tools: a few calls in one, each bounded to 120 frames, each saying why it stopped.
+# They take the `id` and the `name` get_world gave for the actor and look it up again on every leg and every press.
+ACTOR_ARGS = {"id": {"type": ["integer", "string"]}, "name": {"type": "string"}}
+HELPER_NOTE = ("At most 120 frames pass (`max_frames` lowers it). The actor is looked up in the world list on every leg: it "
+               "stops with `gone` when the id is not there any more or has another name, and never goes for another "
+               "actor of that name. It needs the world list (connected and sharing): without one it says why. "
+               "It acts on this game only: step the other game by the same frames yourself.")
+HELPER_TOOLS = [
+    {"name": "go_to_actor", "description": "Walk Link to an actor, in legs of a few metres. `id` and `name` are the ones "
+     "get_world gave. Stops near it (arrived), or says why: gone, stuck (no 0.3 m closer over 60 frames; `moved_m` is how "
+     "far Link went), timed out, scene changed, loading, event. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
+    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
+     "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
+    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default, which "
+     "is a guess not yet confirmed in a game) in rounds until its life is 0 or the frames run out. Returns `result` "
+     "(dead, gone, alive, or stopped with `stopped` saying why) and its life before and after. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
+    {"name": "use_item", "description": "Put an item on a button (`assign`), press that button, and say what changed in "
+     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one the item goes on (Y by default, a "
+     "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"],
+                     "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
+    {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
+     "nothing is pressed and it says so. Returns the prompt and event after (12 frames pass when it presses).",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
+     "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
+]
+
+# One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
+PLAYER_TOOLS = [
+    {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
+     "facing and camera yaw (degrees: 0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, equips, "
+     "inventory, co-op status, event/loading and the A prompt, plus words: `life_word` (full, ok, low, critical), "
+     "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
+     "no world list (solo). " + PAUSED,
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
+     "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
+     "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
+     "list exists only while the games are connected and sharing: an EMPTY list with a `why` is not 'nothing here'. "
+     "Read `why`. `kill` and `hit` take the `name`, and with the `id` the exact actor (not in solo). No frame passes.",
+     "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
+                                                       "within_m": {"type": "number", "minimum": 0},
+                                                       "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},
+    {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
+     "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
+     "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
+    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) with the camera-relative stick, a "
+     "few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
+     "after max_frames; says why, the frames used and the distance left.",
+     "inputSchema": {"type": "object", "required": ["x", "z"],
+                     "properties": {"x": {"type": "number"}, "z": {"type": "number"},
+                                    "tolerance": {"type": "number", "minimum": 0.05}, "max_frames": FRAMES}}},
+    {"name": "press", "description": "Hold buttons (" + " ".join(pc.BUTTONS) + ") and optionally the stick "
+     "(angle in degrees: 0 = away from the camera, 90 = right; strength 0..1) for N frames (default 2), then "
+     "pause. Returns the state after.",
+     "inputSchema": {"type": "object", "properties": {
+         "buttons": {"type": "array", "items": {"type": "string", "enum": list(pc.BUTTONS)}},
+         "stick_angle": {"type": "number"}, "stick_strength": {"type": "number", "minimum": 0, "maximum": 1},
+         "frames": FRAMES}}},
+    {"name": "step", "description": "Let the game run N frames with no input, then pause. " + PAUSED,
+     "inputSchema": {"type": "object", "required": ["frames"], "properties": {"frames": FRAMES}}},
+    {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
+     "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
+     "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
+     "a map not in that list, the game takes the request ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load "
+     "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
+     "warps. Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
+     "inputSchema": {"type": "object", "required": ["scene"],
+                     "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"},
+                                    "timeout": {"type": "number", "minimum": 1, "maximum": 600}}}},
+    {"name": "flag", "description": "Set a game flag (a GameData flag name or a 0x hash) to a value: a number, "
+     "true/false, or an enum value's name. Done inside the held frame; replies with the old value (was).",
+     "inputSchema": {"type": "object", "required": ["name"],
+                     "properties": {"name": {"type": "string"},
+                                    "value": {"type": ["integer", "boolean", "string"]}}}},
+    {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, or an item flag name the cheats "
+     "panel knows). It is there after the next frame: step 1 before checking.",
+     "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
+] + ACT_TOOLS + HELPER_TOOLS + [
+    {"name": "checkpoint", "description": "Write this game's shared flags and state under a tag (letters, digits, "
+     "- and _) with its frame count, to the run's checkpoint log. Take the same tag on EVERY game after each "
+     "action that should sync, then run desync_check.",
+     "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
+    {"name": "desync_check", "description": "Compare every game's checkpoints in the run's log folder, matched by "
+     "tag: the first tag where the games' shared flags differ, which flags, and each game's frame. It also compares "
+     "the games' actors (needs the Links in one scene within 40 m), by what docs/sync-coverage.md says about each "
+     "name: only a `live` row can be a desync, and only when the same difference is in two checkpoints in a row with "
+     "both games 60 or more frames further on (the first time it says recheck, result `incomplete`); a `?` row is "
+     "'live not proven', a `reload` row 'shown on reload', a name with no row 'not compared'. `flags_only` leaves "
+     "the actors out.",
+     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}, "flags_only": {"type": "boolean"}}}},
+    {"name": "pause", "description": "Hold the game (it is held from the first call anyway). " + PAUSED,
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "resume", "description": "Let the game run in real time again (a person takes over). The next call "
+     "holds it again.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "log", "description": "This game's new co-op log lines (`coop:`) since the last call, the newest "
+     "%d at most; `match` keeps only lines containing that text. Needs --session (games from live.py start: p1 = A, "
+     "p2 = B). No frame passes." % live.MAX_LINES,
+     "inputSchema": {"type": "object", "properties": {"match": {"type": "string"}}}},
+    {"name": "check_logs", "description": "The oracle for 'did anything go wrong': this game's new `coop:` log lines "
+     "that are a warning, an error or a critical line (the game's level prefix) or say failed, error, refused or "
+     "resync, masked (IP addresses, host names, user names in paths, memory addresses, keys, player names, quoted "
+     "text are replaced; the players' names the games print are hidden by default). Each line has its `why`. `since` "
+     "is `last_check` (the default: since the last check_logs, or the boot) or `boot`. `names` are extra words to "
+     "hide. verdict: clean, flagged, or no log. A clean log is not proof that nothing is wrong: it only says the game "
+     "printed none of these. Works after the session ended. Needs --session. No frame passes.",
+     "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "enum": ["last_check", "boot"]},
+                                                       "names": {"type": "array", "items": {"type": "string"},
+                                                                 "maxItems": 20}}}},
+    {"name": "session_status", "description": "Is the run still sound: this game's bridge (connected, held, last "
+     "frame) and, with --session, the session (running or why it ended, each game's process alive, minutes left of "
+     "the maximum and of the idle limit). Answers also after the session ended. It does not touch the game and "
+     "does not count as a tester command for the idle watchdog. No frame passes.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "screenshot", "description": "A PNG of this game's screen (the path: open it to see). Use sparingly; "
+     "get_state is cheaper. Anything visible is proven only by a picture. A held game runs 1 frame for it.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}},
+]
+
+
+class Game:
+    """One game's tools: its bridge client, which player it is, and the run's log folder (shared by every game's
+    server, so desync_check sees them all)."""
+
+    def __init__(self, player, client, log_dir, session=None):
+        self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
+        self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
+        self.check_offset = None   # where check_logs read to (None: from the boot)
+        self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
+
+    def log_lines(self, match=None):
+        """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
+        if not self.session:
+            raise ValueError("log needs --session (games from live.py start); read the game's own log otherwise")
+        i = pc.player_index(self.player) - 1
+        if i >= len(live.TAGS):
+            raise ValueError("live.py starts games A and B only (p1, p2): %s has no session log" % self.player)
+        x = live.TAGS[i]
+        s = live.load(self.session)
+        if self.offsets is None:
+            self.offsets = {x: (s.get("offsets") or {}).get(x, 0)}   # from the end of the boot
+        lines = live.new_lines(self.session, {"games": s["games"], "offsets": self.offsets}, x)
+        if match:
+            lines = [ln for ln in lines if match in ln]
+        return {"frame": self.client.last_frame, "lines": lines}
+
+    def check_logs(self, since="last_check", names=()):
+        """The new flagged `coop:` lines of this game's log, masked (its own offsets: `log` and check_logs never take
+        lines from each other)."""
+        if not self.session:
+            raise ValueError("check_logs needs --session (games from live.py start); read the game's own log otherwise")
+        if since not in ("last_check", "boot"):
+            raise ValueError("since: last_check or boot")
+        if not isinstance(names, (list, tuple)) or len(names) > 20 or not all(isinstance(n, str) for n in names):
+            raise ValueError("names: up to 20 words")
+        i = pc.player_index(self.player) - 1
+        if i >= len(live.TAGS):
+            raise ValueError("live.py starts games A and B only (p1, p2): %s has no session log" % self.player)
+        x = live.TAGS[i]
+        s = live.load(self.session)
+        path = (s.get("games") or {}).get(x, {}).get("log")
+        boot = (s.get("offsets") or {}).get(x, 0)
+        start = boot if since == "boot" or self.check_offset is None else self.check_offset
+        if not path or not os.path.isfile(path):
+            return {"frame": self.client.last_frame, "verdict": "no log", "flagged": 0, "lines": [], "left_out": 0,
+                    "why": "this game's log file is not there (the session has no log path for %s)" % x}
+        lines, self.check_offset = pc.read_log_since(path, start)
+        hide = list(names) + [n for n in pc.session_names([g.get("log") for g in (s.get("games") or {}).values()])
+                              if n not in names]
+        out = pc.flagged_lines(lines, hide)
+        out.update(frame=self.client.last_frame, read=len(lines), names_hidden=len(hide),
+                   verdict="flagged" if out["flagged"] else "clean")
+        return out
+
+    def session_status(self):
+        """This game's bridge, and the session's state from its files (no request to the game: it stays as it is)."""
+        c = self.client
+        out = {"player": self.player, "bridge": {"connected": c.sock is not None, "held": c.held,
+                                                 "last_frame": c.last_frame, "connects": c.connects}}
+        if not self.session:
+            out["session"] = None
+            out["why"] = "no --session: only this game's bridge is known"
+            return out
+        d = self.session
+        s = live.load(d)
+        why = live.ended(d)
+        pids = live.game_pids(d)[0]
+        now = time.time()
+        sess = {"running": not why, "ended": why or None,
+                "games": {x: {"pid": p, "alive": bool(self.alive(p))} for x, p in sorted(pids.items())}}
+        if s.get("max_s"):
+            sess["max_minutes_left"] = max(0, round((s.get("started", now) + s["max_s"] - now) / 60, 1))
+        if s.get("booted") and s.get("idle_s"):
+            sess["idle_minutes_left"] = max(0, round((live.activity(d, s) + s["idle_s"] - now) / 60, 1))
+        sess["booted"] = bool(s.get("booted"))
+        out["session"] = sess
+        return out
+
+    def call(self, name, args):
+        if name == "session_status":
+            return self.session_status()   # (also for an ended session; never counts as a tester command)
+        if name == "check_logs":
+            # it only reads the log file, so it answers after the session ended too (that is when it is needed)
+            return self.check_logs(args.get("since", "last_check"), args.get("names") or ())
+        if self.session:
+            live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
+            live.touch(self.session)          # the session's watchdog counts this as a tester command
+        try:
+            return self._call(name, args)
+        finally:
+            if self.session:
+                live.touch(self.session)      # (a long walk_to or warp is not idle time)
+
+    def _call(self, name, args):
+        c = self.client
+        if name == "get_state":
+            s = c.state()
+            s.update(pc.world_words(s))   # life_word, enemy_near, danger beside the numbers
+            return s
+        if name == "get_world":
+            r = c.world()
+            if r["world"] is None:
+                return {"frame": r["frame"], "actors": [], "why": "this module has no world list (an older build)"}
+            return dict(pc.select_actors(r["world"], args.get("kind"), args.get("within_m"),
+                                         args.get("limit", 50)), frame=r["frame"], world_frame=r["world"].get("frame"))
+        if name == "get_actor":
+            r = c.world()
+            w = r["world"] or {}
+            a = pc.find_actor(w, args["id"])
+            out = {"frame": r["frame"], "world_frame": w.get("frame"), "found": a is not None, "actor": a}
+            if a is None:
+                out["why"] = w.get("why") or ("not in the list: it is gone, or not among the 200 nearest"
+                                              if r["world"] is not None else "this module has no world list")
+            return out
+        if name == "walk_to":
+            return pc.walk_to(c, float(args["x"]), float(args["z"]), float(args.get("tolerance", 0.5)),
+                              int(args.get("max_frames", 600)))
+        if name == "press":
+            buttons = [str(b).upper() for b in args.get("buttons") or []]
+            bad = [b for b in buttons if b not in pc.BUTTONS]
+            if bad:
+                raise ValueError("no button %s" % ", ".join(bad))
+            strength = float(args.get("stick_strength", 0))
+            stick = [float(args.get("stick_angle", 0)), strength] if strength > 0 else None
+            return c.input(stick, buttons, int(args.get("frames", 2)))
+        if name == "step":
+            return c.step(int(args["frames"]))
+        if name == "warp":
+            return c.warp(args["scene"], args.get("entrance"), _bounded(args, "timeout", 60, 1, 600))
+        if name == "flag":
+            return c.flag(args["name"], args.get("value", 1))
+        if name == "give":
+            return c.give(args["item"])
+        line = act_line(name, args)
+        if line is not None:
+            if name in ("kill", "hit"):
+                wait = int(_bounded(args, "wait_frames", ph.DEATH_FRAMES, 0, 600)) if name == "kill" else None
+                return ph.strike(c, line, _word(args, "actor"), _ident(args), death_frames=wait)
+            return c.act(line)
+        if name == "go_to_actor":
+            return ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
+                                  int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name == "face":
+            return ph.face(c, _need_id(args), _word(args, "name"))
+        if name == "attack":
+            return ph.attack(c, _need_id(args), _button(args), _word(args, "name"),
+                             int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name == "use_item":
+            return ph.use_item(c, _word(args, "item"), _button(args))
+        if name in ("talk", "open"):
+            return ph.interact(c, name)
+        if name == "pause":
+            return c.pause()
+        if name == "resume":
+            return c.resume()
+        if name == "checkpoint":
+            return pc.checkpoint(c, self.log_dir, self.player, args["tag"])
+        if name == "desync_check":
+            buf = io.StringIO()
+            code = desync_check.check_clients(self.log_dir, bool(args.get("all")),
+                                              out=lambda s: buf.write(s + "\n"), flags_only=bool(args.get("flags_only")))
+            return {"result": desync_check.RESULTS[code], "report": buf.getvalue()}
+        if name == "log":
+            return self.log_lines(args.get("match"))
+        if name == "screenshot":
+            label = args.get("name") or "shot"
+            if not pc.TAG.match(label):
+                raise ValueError("a name is letters, digits, - and _")
+            r = c.shot("%s-%s-%d" % (self.player, label, int(time.time() * 1000)))
+            got = r.get("path")
+            if got and os.path.isfile(got):   # a copy beside the run's logs: every game's shots in one place
+                folder = os.path.join(self.log_dir, "shots")
+                os.makedirs(folder, exist_ok=True)
+                r["copy"] = shutil.copy(got, os.path.join(folder, os.path.basename(got)))
+            return r
+        raise ValueError("no tool %s" % name)
 
 
 class Args:
@@ -64,7 +518,7 @@ def call(session, name, args):
     if name == "desync_check":
         buf = io.StringIO()
         code = desync_check.check(session, bool(args.get("all")), out=lambda s: buf.write(s + "\n"))
-        return {"result": ["agree", "desync", "nothing to compare"][code], "report": buf.getvalue()}
+        return {"result": ["agree", "desync", "nothing to compare", "incomplete"][code], "report": buf.getvalue()}
     raise ValueError("no tool %s" % name)
 
 
@@ -78,7 +532,10 @@ def reply(id_, result=None, error=None):
     sys.stdout.flush()
 
 
-def serve(session):
+def serve(session, game=None):
+    """Answers MCP requests on stdin: the two-game session's tools (session), or one game's (game)."""
+    tools = PLAYER_TOOLS if game else TOOLS
+    name = ("oot-%s" % game.player) if game else "oot-playtest"
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -94,15 +551,16 @@ def serve(session):
         if method == "initialize":
             reply(id_, {"protocolVersion": (req.get("params") or {}).get("protocolVersion", "2024-11-05"),
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "oot-playtest", "version": "1"}})
+                        "serverInfo": {"name": name, "version": "2"}})
         elif method == "tools/list":
-            reply(id_, {"tools": TOOLS})
+            reply(id_, {"tools": tools})
         elif method == "tools/call":
             params = req.get("params") or {}
             try:
-                out = call(session, params.get("name"), params.get("arguments") or {})
+                args = params.get("arguments") or {}
+                out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
                 reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
-            except BaseException as e:  # (SystemExit from a bad tag too: an error the tester reads)
+            except (Exception, SystemExit) as e:  # (SystemExit from a bad tag too: an error the tester reads)
                 reply(id_, {"content": [{"type": "text", "text": "%s: %s" % (e.__class__.__name__, e)}],
                             "isError": True})
         elif method == "ping":
@@ -113,9 +571,22 @@ def serve(session):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--session", required=True)
+    p.add_argument("--session", help="a two-game session (live.py start): the tools state, act, shot, checkpoint, "
+                   "desync_check; with --player: the session whose watchdog each call keeps awake")
+    p.add_argument("--player", choices=pc.PLAYERS, help="one game's tools, through its play-test bridge")
+    p.add_argument("--port", type=int, help="that game's bridge port (default: the player's, on --lane when given)")
+    p.add_argument("--lane", type=int, help="a test lane (tools/autotest/lanes.py): its bridge ports")
+    p.add_argument("--log-dir", default="playtest-logs",
+                   help="the run's checkpoint logs and shots; give every game's server the same one")
     a = p.parse_args(argv)
-    serve(os.path.abspath(a.session))
+    if not a.player:
+        if not a.session:
+            p.error("give --session, or --player (and --session when the games came from live.py start)")
+        serve(os.path.abspath(a.session))
+        return 0
+    session = os.path.abspath(a.session) if a.session else None
+    serve(None, Game(a.player, pc.Client(a.port or pc.port_for(a.player, a.lane)), os.path.abspath(a.log_dir),
+                     session))
     return 0
 
 

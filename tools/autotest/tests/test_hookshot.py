@@ -874,7 +874,7 @@ class RunTest(unittest.TestCase):
                                 "--out", os.path.join(tmp, "out"), "--name", "t", "--script-a",
                                 os.path.join(tmp, "a.txt"), "--script-b", os.path.join(tmp, "b.txt"),
                                 "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1",
-                                "--display", "DISPLAY7"])
+                                "--display", "DISPLAY7", "--playtest-ports", "5010"])
             finally:
                 hs.subprocess.Popen, hs.Bridge.connect = popen, connect
                 FakePlacement.restore()
@@ -888,6 +888,10 @@ class RunTest(unittest.TestCase):
                 self.assertEqual([c["slots"] for c in placed], [[0], [1], [0, 1]])
             self.assertEqual([p.env.get("ONLY_B") for p in started], [None, "1"])
             self.assertEqual([p.env["BOTH"] for p in started], ["1", "1"])
+            # the play-test bridge on, each game on its own port: A = p1 = base + 1, B = p2 = base + 2
+            self.assertEqual([p.env["LICHII_COOP_PLAYTEST_PORT"] for p in started], ["5011", "5012"])
+            self.assertEqual([p.env["LICHII_COOP_CHEATS"] for p in started], ["1", "1"])   # give needs it
+            self.assertEqual([p.env["LICHII_COOP_PLAYTEST_VERBS"] for p in started], ["1", "1"])   # act, warp, flag, give
             self.assertEqual([p.env["LICHII_COOP_TEST_OWN_SAVE"] for p in started], ["1", "1"])   # each game its own save
             # no crash ask on the title to take the load's A presses (TEST_GAME_DEFAULTS; smoke hs-players, kit-0119)
             self.assertEqual([p.env["LICHII_COOP_PROBLEM_ASK"] for p in started], ["0", "0"])

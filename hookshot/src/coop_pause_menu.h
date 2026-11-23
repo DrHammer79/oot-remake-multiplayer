@@ -33,6 +33,9 @@ struct Command {
     const char* help;    // one short paragraph
 };
 const std::vector<Command>& Commands();
+// The word the play-test bridge's `menu` state member shows for a page (docs/playtest.md): "main", "host", "join",
+// "local", "settings", "commands", "customize", "find".
+const char* PageWord(Page page);
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
 std::string ChatKeyWords(const std::string& chat_key);

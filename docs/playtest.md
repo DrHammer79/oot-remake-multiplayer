@@ -11,12 +11,13 @@ Maintainer only, like the rest of `tools/autotest`: it needs two Hookshot test c
 
 | Piece | What it does |
 | --- | --- |
-| `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Writes `session.json` in the session folder. |
+| `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. |
 | `live.py do DIR A "lines"` | Plays test script lines in one game (`goto`, `toward`, `press`, `hold`, `warp`, `place`, `setflag`, `kill`, `hit`, ...; `;` between lines), then returns that game's state. |
 | `live.py state DIR [A\|B]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. |
 | `live.py shot DIR [A\|B]` | A screenshot of each game (a PNG path). |
-| `live.py checkpoint DIR TAG` | Both games write every shared dungeon and story flag's value (the module's `dump TAG` test command, next to its commands file); both are kept as `checkpoints/TAG.json` with each game's status. |
-| `tools/autotest/desync_check.py DIR` | Compares the checkpoints in order: the first tag where the two games' shared flags differ, and which flags. Exit 0 agree, 1 desync, 2 nothing to compare. A plain script, no judgment. |
+| `live.py checkpoint DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. |
+| `live.py stop DIR` | Ends the session: the watchdog quits both games, kills what did not quit and the server, and lets the lane lock go. |
+| `tools/autotest/desync_check.py DIR` | Compares the checkpoints in order: the first tag where the two games' shared flags differ, and which flags, with the checkpoint's shots. Exit 0 every checkpoint compared and agrees, 1 desync, 2 nothing compared (no checkpoint, or none with both games' flags), 3 incomplete (one could not be compared). A plain script, no judgment. |
 | `tools/autotest/mcp_playtest.py --session DIR` | An MCP server (stdio, standard library only) with the tools `state`, `act`, `shot`, `checkpoint` and `desync_check`, so Claude Code calls them by name. |
 
 Register the MCP server once from the repository folder, for a session started with `live.py start`:
@@ -33,14 +34,196 @@ with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_
 [testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
 game's own control bridge, so they work wherever the windows are.
 
+## Bridge protocol
+
+The play-test bridge is a small part of the co-op module inside each game (`hookshot/src/coop_playtest.cpp`). An agent
+or MCP client drives one game per connection. It adds what Longshot's own control bridge lacks: **frame control** (the
+game holds still between calls). It also gives the co-op module's test commands and Longshot's input, shots and Link
+snapshot through one socket with one frame count.
+
+### Turning it on (off by default)
+
+Nothing listens unless the game is started with:
+
+| Switch | Value |
+|---|---|
+| `LICHII_COOP_PLAYTEST_PORT` | TCP port, 1024 to 65535. Unset, empty or `0`: the bridge is off and nothing listens |
+| `HOS_CONTROL` | Longshot's control socket (Linux) or pipe (Windows). The bridge forwards `input`, `shot` and the Link snapshot in `state` to it. Without it those answer `no_control` |
+| `LICHII_COOP_PLAYTEST_IDLE` | Seconds a hold may last with no command before the game resumes by itself (default 600, `0` never), in case the tester crashed |
+
+The module has the bridge built in but off. A tester turns it on for one game with
+these variables; `live.py start` sets them for each game it starts. The log says
+`coop: playtest: listening on 127.0.0.1:<port>` or `coop: playtest: off (<why>)`.
+
+**Ports, one per game:** player N on `5000 + N` (p1 5001, p2 5002, ... p4 5004). On test lane L: `5000 + 10*L + N`
+(lane 1: 5011, 5012). The MCP server takes the port as its argument.
+
+**Security:** bound to `127.0.0.1` only, never another address. One client at a time: a second connection gets one
+`busy` reply and is closed. **Keep one connection open for the whole session:** when the client's connection closes
+(it quit or crashed), a held game runs again at once, so a lost tester never leaves a game frozen. Dumps and shots go
+only into the game's own `playtest/dumps/` and `playtest/shots/` folders, named by a tag; no path is taken from the
+client. It can do what Longshot's control bridge and the cheats panel can do (move Link, warp, set
+flags, give items), so it is for test copies with a throwaway save.
+
+### Messages
+
+One JSON object per line (UTF-8, `\n`), at most 64 KB a line. A request has `cmd` and an optional `id` (any JSON value,
+given back). Requests are answered in order, one reply each. Every reply carries:
+
+| Field | Meaning |
+|---|---|
+| `id` | The request's `id`, or `null` |
+| `ok` | `true`, or `false` with `error` (a code below) and `message` (for a person) |
+| `frame` | The game's frame count: calc frames since the game started (the module's per-frame hook). It is what `step` counts and what lines up two games' dumps |
+| `paused` | Whether the game is held now |
+
+`input`, `step` and `warp` replies hold the end state nested as `"state": {...}`; `state` itself is flat.
+
+Error codes: `bad_request` (unknown `cmd`, a missing or bad field), `busy` (another client), `no_control`
+(`HOS_CONTROL` unset or unreachable), `not_in_play` (no Link: title, file select, a load), `timeout`, `failed` (the
+game refused; `message` says why).
+
+```
+> {"id":1,"cmd":"hello"}
+< {"id":1,"ok":true,"frame":5321,"paused":false,"protocol":1,"control":true}
+```
+
+### Frame control
+
+The game holds inside its own per-frame hook: the calc thread waits there before the frame's update, so a held game
+does not advance at all (no Link, no enemies, no timers). The window, the sound thread, Longshot's control bridge and
+the co-op connection keep running (the network thread answers the server's pings, so a held game is never dropped
+as timed out). The other game's puppet of this player stands still while it is held. The server does not know a game
+is held: an enemy or boss this game owns stays with it while the other game runs. So **always hold both games** and
+step them in turn, the same number of frames.
+
+| Command | Fields | Does |
+|---|---|---|
+| `pause` | | Holds the game at its next frame. Replies once it is held |
+| `resume` | | Lets it run in real time again |
+| `step` | `frames` (1 to 3600, default 1) | Lets exactly that many frames run, then holds. Replies when held again, with `from` (`frame - from == frames`). A running game is held first |
+
+### Commands
+
+| Command | Fields | Does / replies |
+|---|---|---|
+| `state` | | The state below. Does not advance the game, with one exception: when Longshot's Link snapshot is older than the frame and the game is held, `state` lets ONE frame run (a status pending) to take a fresh one. If none comes (a title, a pause or a load) the Link members are `null` and `snapshot_stale` is `true` |
+| `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
+| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). Two ways, picked from a fresh snapshot (`PlanWarp`). **While an event runs** (a talk, a sign, the event a save load starts) the module's own request goes in; the game takes that only then ([scenes.md](scenes.md) "Free-play scene change": the game reads `Sequence_ReservedNextBanc` only while an event runs; [testing.md](testing.md)). **In free play** the verb asks Longshot's control `teleport` (the Cheats page's list: fields, villages, dungeon entrances; the game takes it at Link's next update, so frames run), the way `hookshot.py` boot-script warps go; the reply has `"via":"teleport"` (or `"event"`) and `"map"`, the map it waited for. Longshot picks the map for Link's current age, in its own spelling: the verb waits for the map in Longshot's reply, not for the name asked, so any case of the name works; a name ending in the other age (`KokiriForest_Adult` on a child Link) answers `wrong_age` at once, and a teleport Longshot sent but the game's event manager did not accept (`accepted` false) answers `refused` at once instead of waiting out the timeout. The teleport has no start position and no map outside its list, so in free play an `entrance`, or a map not in the list (a boss stage), answers `not_in_event` at once and changes nothing: restart the session with a boot script that warps there, or use `place` and `walk_to` inside the scene. The free-play path is not proven through this verb in a game yet (Longshot refuses a teleport while an event plays, so one asked during the save's arrival event answers `failed: Longshot's teleport: refused: an event is playing ...`; Longshot also allows one teleport every 8 s per game, so two warps in a row on one game answer `failed` with `another teleport is still in progress`). The game runs (10 frames at a time) until Link is in that scene with no event or load (a fresh snapshot says so), then holds again. Replies with `"arrived": true` and the `state`; after `timeout` seconds, still held, `timeout` with the state in `message` |
+| `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
+| `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
+| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`: the game does it on its next frames, so `step` a few and read the `state`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. With no world list (solo, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
+| `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
+| `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
+
+**The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only when
+the test runner asked for them and cheats are on: `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1`. The runner
+(`tools/autotest/hookshot.py`, so `live.py start --playtest` too) sets both next to `LICHII_COOP_PLAYTEST_PORT`. No file
+a player starts from names `LICHII_COOP_PLAYTEST_VERBS`: not `play.ps1`, not `start.sh`, not `coop-options.ini`
+(`test_playtest_bridge.py` checks it). Otherwise the reply is `refused` with one of:
+
+- `refused: this is not a test run (LICHII_COOP_PLAYTEST_VERBS is not set by the test runner), and these commands reach the wire and other players`
+- `refused: cheats are off (LICHII_COOP_CHEATS is not set)`
+
+`OOT_COOP_KIT_START` is no sign of a test: the kit's start files set it for every player's game. Nor is a loopback
+server: a real host's game connects to its own server at 127.0.0.1. At start the module logs `coop: playtest: verbs
+on|off (test runner: yes|no, cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause`, `resume` and `shot` are not
+gated.
+
+### State
+
+```
+{"frame":5400,"paused":true,"scene":"KokiriForest_Child","room":null,"pos":[-7.5,0.0,71.1],"facing":90.0,
+ "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk",
+ "equips":{"weapon":"KokiriSword","shield":"DekuShield","head":null,"armor":"Kokiri","boots":"Normal"},
+ "inventory":{"PouchData.Item_Bomb.StockNum":0,"PouchData.Item_Hookshot.StockNum":1},"coop":{"players":[{"number":1,"name":"A","self":true,"state":"connected","scene":"KokiriForest_Child"}]},
+ "snapshot_present":5398,"control":true}
+```
+
+`scene`, `pos`, `facing`, `camera`, `life`, `max_life`, `rupees`, `age`, `event`, `loading` and `prompt` are
+Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
+quarter hearts. Longshot takes the snapshot only in a running Link update, so on a held game it is as old as the last
+frame that ran. The bridge therefore never gives an old one: if `snapshot_present` is more than 4 frames behind the
+reply's `frame` (the constant `kSnapshotSlack`, 4; a margin, not measured: while a game runs, Longshot answers a `status` at Link's next update, so the gap is about 0 to 1 presents, and it keeps the old sample only after its 250 ms wait for an update, Longshot `control.c` `cmd_status`: `oot_sample_ask`, 250 ms deadline), a held game runs one frame and reads again; if the snapshot is still old (a
+title, a pause or a load: no Link update runs), every Link member except `scene` is `null` and `snapshot_stale` is
+`true` (`snapshot_present` stays so you can see how old). Treat `null` as "do not know", never as "arrived" or
+"did not move". The `input`, `warp` and `checkpoint` states follow the same rule. `snapshot_present` is Longshot's present count when it was taken. `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
+stays `null` until the room is found in memory. `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
+`"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
+tester who pressed Start reads the screen (`shot`), not this.
+
+**`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
+the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk
+reads the place of every actor it sees and keeps up to 200, `other` last, because the sync checks need grass, bushes and
+beehives too. `state` lists only the nearest 40 of the known kinds and counts the rest (`total`, `other_count`); `dump`
+lists all of them. It is there only while the games are connected and sharing, because the object walk runs only then.
+
+**`strike`** (in `state`, after a `kill` or `hit`): `{"seq":4,"result":"done","name":"Enemy_Example","id":2147483648}`, the objects walk's answer to the strike with that `seq` (the `strike_seq` of the `act` reply). `result` is `done` (the strike was made), `gone` (an id was given and no actor with that id and that name is in the walk's list now: nothing else is struck, there is no fallback to another actor of the name), `not shared` (the actor is in `get_world`'s list, but co-op does not share it, as with enemy shots and the Scrub Brothers: the walk does not see it as a target, so nothing is struck; this is not `gone`), or `none with a life` (no actor to strike). The queue holds 16 strikes: a 17th is refused with "the strike queue is full" and has no `strike_seq`. It is absent until a strike was sent. Only the last strike is kept: a newer one replaces it.
+
+**An empty `actors` list does not mean "nothing here".** Solo (no co-op session) it is empty with `frame` null, and
+`why` says so. Each empty list carries a `why`:
+
+- `"no co-op session: the world list is read only while connected and sharing"`: the walk never ran.
+- `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s of wall clock and the game is 30 or more frames past it.
+- `"empty: the walk ran and saw no actors"`: connected, and the room really has none.
+- `"only other kinds near: dump lists them"`: `state` lists known kinds only, and the room has only grass, pots and the like.
+
+```
+"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"total":31,"other_count":30,"count":1,"actors":[
+  {"id":2147483648,"addr":"0x80000000","name":"Enemy_Example","kind":"enemy","pos":[1.5,0.0,-3.2],"dist":4.0,"life":2,"max_life":4,
+   "owner":"server","alive":true}]}
+```
+
+- `id` is the actor's address in decimal and `addr` the same in hex, as the `LICHII_COOP_DEBUG_OBJECTS` log prints it.
+- `owner` is `"server"`, a player number, or `null` (the sharing does not know the actor). `life`, `max_life` and
+  `alive` are read for enemies only; for any other kind they are `null` (unknown, not dead).
+- `frame` is the bridge's frame count when the walk began; the reply's own `frame` is the game's now. While the game
+  is held, `state` waits up to 300 ms for a snapshot of that frame, but only when a fresh one is behind the frame (solo
+  or stale: no wait); if none comes, `behind` is true and the older list is returned with its frame. A running game returns the newest list, which is a few frames old.
+- A snapshot older than 1.5 s of wall clock **and** 30 or more frames behind the game (a load, a closed room, the
+  walk stopped) is not shown: `stale` is true, `count` 0, `actors` empty, `why` says "stale", `age_ms` says how old.
+  The walk runs on presents, and a held game makes none, so a held game keeps its last list however long the tester
+  waits: only the frames count then.
+- The list costs the object walk `cost_us` microseconds about every 100 ms. Without the bridge (the switch is never
+  turned on) the walk does two relaxed atomic loads (before and after the actor loop) and the `state` text has no `world` member.
+
+Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
+angle `w - camera` (the sign is settled by the LANE1 proof run; `walk_to` learns it from how Link moves). The camera turns as Link walks, so steer in short `input` steps (5 to 10 frames) and read `camera`
+again each time.
+
+## On a test lane: the lock and the watchdog
+
+`live.py start --lane N` takes the lane's game pair (`<kit root>\ls\laneN-A` / `-B`), its server port and its control
+pipes (`coop-laneN-A` / `-B`) from `tools/autotest/lanes.py`, and holds the lane's lock (`laneN.lock`) for the whole
+session: the games stay open after the boot, so the lock must too. A busy lane refuses the session at once
+(`--lock-wait S` waits for it). The lock is held by the session's watchdog (`live.py watchdog`, a process of its own
+that `start` starts), under the watchdog's own pid. The watchdog ends the session when:
+
+- `live.py stop` asks;
+- the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening; 0 means no limit);
+- no tester command came for `--idle-minutes` (10 by default, 0 means never; counted from the end of the boot): the tester handed
+  off, crashed or paused. Only tool calls count, not time spent thinking or writing notes: a tester that writes long
+  notes between calls needs a larger `--idle-minutes` (or 0);
+- a game ended by itself;
+- the watchdog is stopped by a signal, or fails.
+
+Then it asks both games to quit, kills what is still running 15 s later and the server, and lets the lock go;
+`watchdog.json` in the session folder says why and what happened. Commands on an ended session are refused. A
+watchdog killed outright cannot clean up, but the lock names its pid, so the lock is stale as soon as it is gone.
+Without `--lane` the same watchdog runs (the end rules and the clean-up), with no lock.
+
+The lane rules still hold: one game run at a time on the lane, only in a slot the coordinator gave, no local builds
+or tests while it runs.
+
 ## Rules for a tester
 
-- The games run in real time between steps: the bridge has no frame step yet. A step's own lines are what Link
-  does; between steps he stands still and the rest of the world goes on (enemies included). Put the moves that must
-  happen together in one `act`.
-- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
+- With the play-test bridge on ([Bridge protocol](#bridge-protocol)) the games are held between calls: nothing
+  happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
+  must happen together in one `act`.
+- Set a test up with `place` and `setflag`; do not walk across Hyrule to reach it. `warp` in free play goes by Longshot's teleport (maps of its list, no entrance); with an entrance or a map outside the list, and no event running, it answers `not_in_event`: restart the session with a boot script that warps there. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
-- Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open).
+- Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
+  checkpoint takes its own shots: anything visible is proven by them, never by flags or log lines alone.
 - A report says: the scenario, the steps, what was expected, what happened, and the first checkpoint that differs.
 - A test run reports; it does not change the mod. Fixing is a separate session, so a run cannot quietly hide what it
   was meant to catch.
@@ -55,11 +238,11 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 
 ## Not there yet
 
-- **Frame step.** Pausing the game between steps (so a slow tester can play real-time fights) needs the control
-  bridge to hold the game loop: a change in the recomp's bridge, not the module.
-- **Enemies and owners in the state.** The state has Link's side only. The module's debug walk already reads every
-  actor's name, place, life and animation, and the objects sync knows each one's owner; a `dump` of those beside the
-  flags is the next step (then the checker compares positions and owners too).
+- **Frame step in a game.** The play-test bridge holds the game in the module ([Bridge protocol](#bridge-protocol));
+  that is not proven in a game yet. `tools/autotest/bridge_proof.py` on a test lane checks it first.
+- **World list and the actor compare in a game.** `get_world`, `get_actor` and the actor compare of `desync_check` are
+  built and unit-tested. None has run in a game: the list needs a lane run (connected games, an enemy in the room), and
+  the compare's numbers (0.2 m, 40 m, 60 frames) and the helpers' limits are guesses until then.
 - **More than two games** (the runner starts A and B).
 - **Lag on purpose.** The runner's `--test-delay-ms` and `--test-jitter-ms` give the server a delay; a live session
   can pass them through `start` once it takes them.
@@ -75,3 +258,234 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 - Child and adult Link in different eras at once.
 - Tonight's survey fixes ([boss-multiplayer.md](boss-multiplayer.md), "Whole-game survey"): the Forest Temple
   basement floor turned by one player, a Lizalfos pair's owner, a Like Like grab while another player is near.
+
+## Playing through the bridge: one MCP server per game
+
+With the play-test bridge on (see "Bridge protocol"), each game gets its own MCP server,
+`tools/autotest/mcp_playtest.py --player pN`. The server keeps one bridge connection open for as long as it runs. It
+holds the game at its first call, so **the game is paused between calls**: it runs only the frames a call asks for.
+When the server exits, the connection closes and the game runs again (so does a crashed tester's). Standard library
+only, no `pip install`.
+
+| Tool | What it does |
+| --- | --- |
+| `get_state` | Scene, room, Link's position `[x, y, z]` in metres, facing and camera yaw (0 = +z, 90 = +x), life, rupees, age, equips, inventory, co-op status, event, loading, A prompt. No frame passes. The MCP tool adds words beside the numbers: `life_word` (full, ok above half, low at half or less, critical at a quarter or less), `enemy_near` (living enemies within 10 m) and `danger` (one within 4 m). The last two are null, never 0 or false, when there is no world list; `enemy_near_at_least` is true when the 40 listed actors were cut inside 10 m (the count is then a lower bound) |
+| `get_world [kind] [within_m] [limit]` | The actors near Link from the bridge's world list, nearest first: `id`, `addr`, `name`, `kind`, `pos`, `dist`, `life`, `max_life`, `owner` (`"server"`, a player number, or null = unknown), `alive`. It reads the whole list (up to 200) through a `dump` under the tag `world_query`, not the 40 of `state`. `kind` is one of player, enemy, npc, chest, door, switch, item, other; `within_m` is a distance in metres; `limit` is 1 to 200 (50 by default). The reply has `matched`, `of` and `truncated`, and keeps the list's `why`: **an empty list with a `why` is not "nothing here"** (solo, stale, or no walk yet). No frame passes |
+| `get_actor id` | One actor by `id` (the number `get_world` gives) or by `0x...` address. `found` is false with a `why` when it is gone, outside the 200 nearest, or there is no list |
+| `walk_to x z [tolerance] [max_frames]` | Walks to the point 8 frames at a time, stopping on arrival (0.5 m by default), a scene change, a load, an event or `max_frames` (600). It says why it stopped, the frames used and the distance left |
+| `press [buttons] [stick_angle stick_strength] [frames]` | Holds the buttons (and the stick: 0 = up, away from the camera, 90 = right) for N frames (2 by default), then holds the game |
+| `step frames` | Lets N frames run with no input |
+| `warp scene [entrance] [timeout]` | The game's own scene change: by the module's request during an event, by Longshot's teleport in free play (a map of its list, no entrance; else `not_in_event` at once: use a boot script that warps). It returns once Link is there with no event or load; `timeout` is 1 to 600 seconds (default 60) |
+| `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
+| `give item` | Gives the item through the cheats queue: it shows after the next frame (`step 1`) |
+| `kill actor [id]`, `hit actor amount [id]` (`actor` is the **name**. With no `id` the game takes the nearest actor of that name with a life. With the `id` and `name` `get_world` gave, it takes exactly that actor, and answers `refused: actor 7 (NAME) is gone` when the walk's list has no actor with that id and that name; an id is refused in solo. The tool steps up to 12 frames, looking every 2, for the answer in `state.strike`: `ok`, `refused: ...`, or `unknown: no result after 12 frames (the strike may still land: look with get_world)`. For a `kill` that struck, with an id, it then waits up to `wait_frames` more frames (default 36, a guess: S8 saw one die only after Link came near it; 0 to 600) for the actor to be gone, not alive or at life 0: `ok` with `died` true. If it is still alive: `struck: the hit landed, but NAME still lives after N frames` with `died` false (a far actor may not die until Link is near it, S8). With no id, or with no world list to look in, the answer is `struck: ...` with `died` null (not checked). A `hit` is `ok` when it struck. It never retries, because a second strike could land twice) | One `act` line each, then the wait above. |
+| `hurt quarter_hearts`, `place x y z`, `wear part name`, `dress [part]`, `assign item`, `chat text`, `menu page` | One `act` line each (the arguments are checked here first: no spaces in a name, `amount` and `quarter_hearts` 1 to 80, `part` one of weapon, shield, head, armor, boots, hand, `page` customize or close). Same gate and refusal text as `act`. They take effect on the next frames: `step`, then `get_state` |
+| `go_to_actor id name [near_m] [max_frames]`, `face id name`, `attack id name [button] [max_frames]`, `use_item item [button]`, `talk`, `open` | The helpers below: a few calls in one, each bounded to 120 frames, each saying why it stopped |
+| `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
+| `desync_check [all] [flags_only]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed, every game's flags compared, and the games' actors compared by what [sync-coverage.md](sync-coverage.md) says about each name (below). `flags_only` leaves the actors out |
+| `log [match]` | **Raw, unmasked** (do not paste it into an issue; use `check_logs` for that). The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
+| `check_logs [since] [names]` | The oracle for "did anything go wrong". This game's new `coop:` lines that are flagged, **masked**. A line is flagged when it starts with the game's level prefix `warning: `, `error: ` or `critical: ` (most real warnings contain none of the four words, for example `connection lost; reconnecting`), or when it says `failed`, `error`, `refused` or `resync` (any case, also `fails`, `failure`, `refusal`, `resyncing`). Reply: `flagged` (how many), `lines` (the newest 40, each `{why, line}` with `why` = `level:warning`, `level:error`, `level:critical` or `word:<word>`; `left_out` counts the rest), `read` (all new `coop:` lines), `names_hidden` and `verdict`: `clean`, `flagged`, or `no log`. `since` is `last_check` (the default: since the last `check_logs` of this server, or the boot) or `boot`. It keeps its own place in the log (and reads only whole lines: a half-written last line waits for the next call), so it and `log` never take lines from each other. `names` (up to 20 words) are extra words to hide; the names the games print themselves (`name '...'`, `player N '...'`) are hidden without being passed. Needs `--session`; **it answers after the session ended** (that is when the last lines matter) and does not restart the idle clock. **A clean verdict is not proof**: it says only that the game printed none of these. No frame passes |
+| `session_status` | Is the run still sound: `bridge` (`connected`, `held`, `last_frame`, `connects`) and, with `--session`, `session` (`running`, or `ended` with the watchdog's reason; each game's `pid` and `alive`; `max_minutes_left`, `idle_minutes_left`). It asks the game nothing, works after the session ended, and does not restart the idle clock. No frame passes |
+| `pause`, `resume` | Hold the game, or let it run in real time (a person takes over; the next call holds it again) |
+| `screenshot [name]` | A PNG of this game: the game saves it as `<game>/playtest/shots/<player>-<name>-<time>.png` (it runs one frame to show it); a copy goes to `<log dir>/shots/` |
+
+**What `check_logs` masks.** IPv4 addresses (also before a full stop or a comma) and IPv6 addresses, with a port; a
+host name with a port (`myhouse.duckdns.org:7777`); the user name in `C:/Users/<name>`, `/home/<name>` and
+`/Users/<name>` paths; memory addresses (`0x` and six or more hex digits); hex strings of 32 or more characters; the
+value after `password`, `token`, `secret` and `nickname` with `=` or `:`; the value after `name`, `host`, `server`,
+`room` and `key` with `=` only (`coop: host: refused ...` is a real prefix and keeps its words); the join password;
+`name '...'` and `player N '...'`; every double-quoted text; and the players' names, which are read from the games' own
+logs plus the words in `names`. A name of two characters or fewer is matched with its case. It is the filter of the
+tool, not a guarantee: a name that no log line printed in those forms and that the tester did not pass stays, and so
+does a host name written without a port, or a dotted host name (`myhouse.duckdns.org`) with no port after it. The mask
+also takes too much: `texture:2048` and `slot:1234` are masked as hosts, and `MyPC:443` (a three-digit port) is not. A host
+name with no dot and a port of four or five digits (`DESKTOP-K3J9:7777`) is masked; the words `error`, `port`, `frame`
+and a few like them before a colon and a number are not. A name may hold an apostrophe with a letter after it
+(`O'Neil`). `check_logs` reads the `coop:` lines and the `coop voice:` lines, and a level word may come after one
+more `[tag] `. Nothing from a log goes into an issue or a pull request unmasked (AGENTS.md); quote only the lines you
+need.
+
+### Helpers: several calls in one
+
+`go_to_actor`, `face`, `attack`, `use_item`, `talk` and `open` are in `tools/autotest/playtest_helpers.py` (the MCP
+server calls them; a script can too). They only use the bridge's commands, so they add no game code. Rules:
+
+- Each takes the `id` and the `name` `get_world` gave, and looks the actor up in the world list again on every leg of
+  the walk and before every press. When the id is not in the list any more, or has another name, the answer is `gone`:
+  they never go for another actor of the name. A reused address (the game puts a new actor of the same name at the
+  address of one that went) is accepted: nothing here can tell it from the same actor, so read `life` and `pos` if it
+  matters.
+- At most 120 frames pass in one call (`max_frames` lowers it). Every answer says why it stopped: `go_to_actor`:
+  `near` (arrived), `gone`, `stuck` (Link got no 0.3 m nearer over 60 frames; `moved_m` is how far he went), `timed out`,
+  `scene changed`, `loading`, `event`, `stale position: ...` (no fresh Link snapshot: the `state` Link members are null), `stale world list: ...` or `no world list: ...`. `attack`: `dead`, `gone`,
+  `alive` (the frames ran out with life left; `hint` says so when its life never moved), or `stopped` with the reason
+  of the walk or the fight. The scene, a load and the list are checked first, then `gone`: after a door or a load the
+  list lacks the actor, and that says nothing about its death. A refusal of the bridge comes back as the reason, not as
+  a crash.
+- `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
+  walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
+- `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
+  equips and inventory. `talk` and `open` press `A` only when the state's `prompt` is set.
+- They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
+  on every `input` and `step`; the MCP tools do not take a `both` argument, so over MCP the tester steps the other game
+  itself.
+
+Every reply carries the game's `frame`.
+
+**walk_to's stick.** The stick is camera-relative. walk_to starts from the bridge's model (walk toward world yaw
+`camera + stick angle`). It learns the real offset and whether the stick is mirrored from how Link actually moves on
+each push, and reads the camera again after every 8 frames. On a bend the right model shows itself within a few
+pushes. A walk that gets nowhere for three pushes steps aside for three. Into a wall it times out: walk_to does no
+pathfinding, so give it points with a clear line between them and a boot-script warp or `place` for anything far. On a null position (stale snapshot) it stops with `stale position: ...`; it never says `arrived` from an old place.
+
+### Check in game (first lane run of the strike by id, the helpers and the held list)
+
+Nothing here has run in a game. The first run checks:
+
+- Hold the game (any `state`), wait 3 s, run `get_world`: the list is still there and `stale` is false. Then `kill`
+  with an `id` and `name` from it: `ok` (the strike landed and the actor was then seen dead, `died` true) or `struck: ...
+  still lives` (it was hit and did not die: far actors may not die until Link is near; note which). (A list that went
+  stale in a held game, or a strike that says `gone`, fails this.)
+- `get_state` on a held game right after `step`: `snapshot_present` is within 4 frames of `frame`, pos matches the world list's
+  Link, and `walk_to` to a point 5 m away stops near it (not `arrived` at 0 frames). In a title or pause the Link members are
+  null and `snapshot_stale` is true.
+- `warp` in free play with an entrance answers `not_in_event` at once; `warp` to a map of Longshot's list moves Link (unproven: the "via teleport" path), and with `timeout` 5 it never waits longer than about 5 s.
+- `warp` during the save's arrival event (title just left): the module's request is taken, or `failed: ... refused: an event is playing`; an event in which Link's update does not run gives `not_in_play` even though the event request would work (not seen in a game yet).
+- `kill` with an id of an enemy shot or a Scrub Brother in the list: `refused: ... does not share it`, not `gone`.
+- `kill` with the id of a normal enemy: only that enemy takes the hit, not another of the same name nearer to Link.
+- Walk through a door during `go_to_actor`: the answer is `scene changed`, not `gone`.
+- The guesses made without a game, set by this run: the sword button `Y`, the 4 m leg of `go_to_actor` and its
+  60-frame stuck limit.
+
+### Setting up a run
+
+1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L.
+   `live.py start --playtest [--lane L]` does it for its two games (A = p1, B = p2: the runner's
+   `--playtest-ports BASE` sets each game's `LICHII_COOP_PLAYTEST_PORT`, `LICHII_COOP_PLAYTEST_VERBS=1` and
+   `LICHII_COOP_CHEATS=1` (the gate of `act`, `warp`, `flag` and `give`);
+   `HOS_CONTROL` was set already), and its answer lists the ports. Give it `--max-minutes` for a long run (30 by
+   default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL`, `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1` in each game's
+   environment (or `live.py start --env A:LICHII_COOP_PLAYTEST_PORT=5011 --env B:...`). Each game's log says
+   `coop: playtest: listening on 127.0.0.1:<port>`.
+2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
+   and, for games from `live.py start`, the same `--session`: each call then counts as a tester command for the
+   session's watchdog (else it ends the session after `--idle-minutes`), and an ended session is refused. In a
+   project `.mcp.json` (the shape most MCP clients read):
+
+   ```json
+   {"mcpServers": {
+     "oot-p1": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p1", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]},
+     "oot-p2": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p2", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]}
+   }}
+   ```
+
+   The same with the `claude` command, one line per game (run from the repository folder; `--scope project` writes
+   `.mcp.json`, `--scope local` keeps it to you; a Claude session sees the servers only if they were registered
+   before it started):
+
+   ```sh
+   claude mcp add oot-p1 -- python -I tools/autotest/mcp_playtest.py --player p1 --lane 1 --session <session folder> --log-dir <log dir>
+   claude mcp add oot-p2 -- python -I tools/autotest/mcp_playtest.py --player p2 --lane 1 --session <session folder> --log-dir <log dir>
+   claude mcp list    # both must show Connected
+   ```
+
+   `--port N` names a port outright. Three or four players: `oot-p3` and `oot-p4` the same way (games started by
+   hand: `live.py` starts two).
+3. The tester follows [AGENTS.md](../AGENTS.md), "Play-testing the game", and runs [tests/scenarios.md](../tests/scenarios.md)
+   in order.
+
+After a scenario, `python -I tools/autotest/desync_check.py <log dir> --clients` gives the same answer as the
+`desync_check` tool (exit 0 agree, 1 desync, 2 nothing compared, 3 incomplete). `--flags-only` leaves the actors out.
+
+#### What `desync_check` compares in the actors
+
+Each checkpoint keeps the `get_world` list of its game (`state.world`; the dump lists every kind, but the snapshot
+behind it keeps at most 200 actors: the known kinds first, then the nearest to that game's own Link). For each tag,
+the first game's list is
+compared with every other game's, under these rules (code: `compare_world` in `desync_check.py`; the page is read by
+`sync_rows.py`; the numbers are in `TOL`):
+
+- **Only in the same area.** Both games in the same scene and their Links within 40 m, and neither list stale or
+  without a session. Otherwise the line says `not compared (...)` and why. (A rolled spawn is shared only near its
+  place, so apart the games roll their own.)
+- **A cut list is compared only near both Links.** A list with 200 actors was cut, and what it lacks is mostly actors
+  of kind `other` (crates, rocks, cracked walls, webs, falling floors) beyond the farthest one it kept. Each cut list
+  has its own kept distance, measured from its own game's Link. An actor is compared only when its place is within
+  A's kept distance of A's Link AND within B's kept distance of B's Link (a list that was not cut has no limit; an
+  actor with no place is left out when a list is cut). So with the Links 30 m apart and both lists keeping 100 m, a
+  crate 95 m from A and 65 m from B is compared, one 105 m from A is not. A count or a missing actor outside is
+  taken to be the cut. The line says `a list was cut at 200 actors: only actors inside the kept distance of each
+  game's own Link compared (A N m, B N m; M left out)`. A scene with fewer than 200 actors is compared whole. A bare
+  200 is taken as a cut: the dump has no flag for it.
+- **One to one.** Actors of one name are paired by nearest place (the games' addresses differ). An actor in one game
+  with none to pair with in the other is a count difference, named.
+- **What is compared.** `alive`, `owner` and `life` exactly. The place only for placed static actors (chests, doors,
+  switches) and bosses, to 0.2 m. A moving enemy's place is never compared: each game stands at its own frame.
+- **The page decides what a difference means.** The row for the name (best glob wins: no wildcard first, then the most
+  literal characters; rows tied on it with different labels are both printed and the weaker label is used):
+  `live` is a desync; `?` is `live not proven: check it twice, then report what you saw`; `reload` is `shared, shown on
+  reload: not a desync`; `-`, or a Path starting with `none`, is not shared and left out (counted); a name with no row is
+  `no row in sync-coverage: not compared` (named). Only `live` rows give exit 1. A placed actor or boss with no place
+  in one game is not compared for its place and is named (`no place in one game: place not compared`). A row for the
+  mini-boss and boss rooms has no actor names, so a boss lands on the Enemies row unless a `live` row names it
+  (`Enemy_*Boss*` is checked for its place only when one does). The page's Enemies and Rolled spawns
+  rows are `?` until a game run proves them.
+- **Two looks.** A `live` difference counts only when the same one is in two checkpoints in a row, with both games 60 or
+  more frames further on in the second. The first look is `recheck after both games step 60 frames` and the exit status
+  is 3 (incomplete), never 0. Take a second checkpoint after stepping 60 frames or more. A difference that is gone in the
+  second checkpoint was a game still on its way. The second look must be of the same actors: it matches the first
+  by the two games' actor ids (a different Deku Baba does not confirm another one). A DESYNC line gives the actor (id
+  and place in both games), `first seen at TAG (frames)`, `confirmed at TAG (frames)`, and the page's row (line, Path,
+  Live), so a report can quote it.
+- **Older logs.** A checkpoint with no `world` (written before this) is compared on its flags only, with the same
+  output as before.
+
+Not proven in a game: the 0.2 m, 40 m and 60 frame numbers are guesses from the design, and no run has compared a real
+world yet.
+
+### Rules for a tester on the bridge
+
+- The games are held between calls. Nothing happens unless you act. Hold **every** game: a game whose server
+  you have not called yet still runs (call `get_state` on each first).
+- Set a test up with `place`, `flag` and `give`; `warp` in free play goes by Longshot's teleport (a map of its list, no entrance, unproven); for an entrance or another map start the session with a boot script that warps. Do not walk across Hyrule.
+- Take a `checkpoint` with the same tag on **every** game after each action that should sync. Let the other game
+  run a few frames first (`step 30`): a flag reaches it over the network, and a held game receives nothing. Then
+  run `desync_check`.
+- Use `get_state` to look and `screenshot` only when the picture matters. Anything visible is proven by a picture,
+  never by flags alone.
+- A bug report has: the scenario, the steps (tool calls), what was expected, what happened, the first tag that
+  differs with each game's frame, and the shots.
+- Never edit the mod's source during a test run. Report; fixing is a separate session.
+
+## Lag on purpose
+
+Two games on one PC really go through the network stack. Each game's co-op module connects to the server with ENet
+(UDP) at `127.0.0.1:<server port>` (`lichii/hook/coop_hook.cpp`, `coop/net/src/client.cpp`), so its packets pass
+through loopback sockets like any other program's. The play-test bridge is TCP on loopback too: shape only the
+server's UDP port, or the tester's own calls are delayed as well.
+
+- **Longshot (the kits): the server's test delay.** `coop_server --test-delay-ms N --test-jitter-ms J` with
+  `OOT_COOP_TEST=1` holds every packet (N is the round trip, half each way). `run.ps1 -Runtime hookshot -Lag N -Jitter J`
+  and `groups.py --lag N` pass it on ([testing.md](testing.md), "On Longshot: the server's test delay"). This is the
+  repeatable choice: same rules every run, nothing to install.
+- **Windows, any build: Clumsy.** Filter on the server's port only, for example
+  `udp and (udp.DstPort == 27511 or udp.SrcPort == 27511)` (Clumsy sees loopback packets: both directions go
+  through the loopback interface). Then lag, drop, out-of-order. It needs administrator rights (WinDivert), so it
+  is for a person's PC, not an unattended lane run.
+- **Linux: tc netem on lo, on the server's port only.** Plain `tc qdisc add dev lo root netem delay 150ms loss 5%`
+  delays every loopback packet, the bridge included, and each packet crosses `lo` twice (out and in), so it doubles.
+  On the port only:
+
+  ```sh
+  sudo tc qdisc add dev lo root handle 1: prio
+  sudo tc qdisc add dev lo parent 1:3 handle 30: netem delay 75ms loss 2.5%
+  sudo tc filter add dev lo parent 1:0 protocol ip u32 match ip protocol 17 0xff match ip dport 27511 0xffff flowid 1:3
+  sudo tc filter add dev lo parent 1:0 protocol ip u32 match ip protocol 17 0xff match ip sport 27511 0xffff flowid 1:3
+  # ... run the scenarios ...
+  sudo tc qdisc del dev lo root
+  ```
+
+  Each direction gets 75 ms here, so the round trip is about 150 ms.
+- **The emulator build: `tools/netsim/netsim.py`**, the UDP relay ([testing.md](testing.md), "Bad connections").
+
+Run the same scenario without lag first, then with it, and compare the two `desync_check` reports.
