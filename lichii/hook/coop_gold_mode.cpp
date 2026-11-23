@@ -56,6 +56,11 @@ void OnHosting() {
     if (!g_told.exchange(true)) g_in_force.store(g_choice.load());
 }
 
+void OnWelcomed(bool hosting) {
+    OnConnection();
+    if (hosting) OnHosting();
+}
+
 void OnHostSettings(const std::vector<proto::ModSetting>& settings) {
     if (const auto mode = FromSettings(settings)) {
         g_in_force.store(*mode);

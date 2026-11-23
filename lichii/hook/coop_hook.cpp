@@ -803,6 +803,16 @@ public:
         CoopDbno::OnEvent(event, client);  // down but not out (docs/play-online.md)
         CoopDifficulty::OnEvent(event, client);  // docs/play-online.md "Difficulty"
         CoopModShare::OnEvent(event, client);  // mods (docs/mods.md "Mods in co-op")
+        if (event.kind == coop::net::EventKind::welcomed ||
+            (event.kind == coop::net::EventKind::message && !client.is_host() &&
+             std::holds_alternative<coop::protocol::ModSettings>(event.message))) {
+            // Row 63: the Gold Skulltula mode in force (CoopModShare puts it: our choice as the first player in,
+            // else Shared until the host's MOD_SETTINGS).
+            LOG_INFO(Core, "coop: Gold Skulltulas: {} ({}): {}",
+                     event.kind == coop::net::EventKind::welcomed ? "welcomed" : "the host's settings",
+                     client.is_host() ? "the host" : "a guest",
+                     CoopGoldMode::NotShared() ? "Not shared" : (CoopGoldMode::Told() ? "Shared" : "Shared until told"));
+        }
         CoopSave::OnEvent(event, client);  // the host's save for the guests (issue 167)
         CoopHud::OnEvent(event);  // the others' hearts for the HUD (PLAYER_LIFE)
         CoopLookShare::OnEvent(event, client);  // looks of several parts (PLAYER_LOOK, coop_look_share.h)

@@ -194,11 +194,13 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
     case EventKind::reconnected:
     case EventKind::disconnected:
         g.Reset();  // each connection starts with nothing; the server gives the rest
-        if (event.kind == EventKind::welcomed) {
-            CoopGoldMode::OnConnection();  // a new session: Shared until its host says (a rejoin keeps it)
-        }
         g.connected = event.kind != EventKind::disconnected;
         g.hosting = g.connected && client.is_host();
+        if (event.kind == EventKind::welcomed) {
+            // A new session: Shared until its host says (a rejoin keeps it). The first player in is the host
+            // from here and gets no host change: its own choice is in force now.
+            CoopGoldMode::OnWelcomed(g.hosting);  // (coop_hook.cpp logs the mode)
+        }
         g.host_number = client.host_number();
         for (const auto& p : client.players()) {
             g.names[p.number] = p.nickname;

@@ -252,3 +252,27 @@ TEST_CASE("gold mode: Not shared, the race starts from 0, never from the player'
     std::error_code ec;
     fs::remove_all(root, ec);
 }
+
+TEST_CASE("gold mode: the first player in hosts from its welcome, with no host change, and plays its own choice") {
+    // Lane run of 2026-11-23: a Not shared host that was the first player in played Shared, since OnHosting ran
+    // only on a host change and the first player gets none.
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetChoice(Mode::own);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK(CoopGoldMode::Told());
+    CHECK(CoopGoldMode::NotShared());
+    CHECK(CoopGoldMode::KeepLocalNow());
+
+    // A guest's welcome: Shared until the host says, whatever its own choice.
+    CoopGoldMode::OnWelcomed(false);
+    CHECK_FALSE(CoopGoldMode::Told());
+    CHECK(CoopGoldMode::InForce() == Mode::shared);
+    CoopGoldMode::OnHostSettings({CoopGoldMode::AsSetting(Mode::own)});
+    CHECK(CoopGoldMode::KeepLocalNow());
+
+    // A Shared host's welcome after a Not shared session: Shared.
+    CoopGoldMode::SetChoice(Mode::shared);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK(CoopGoldMode::InForce() == Mode::shared);
+    CoopGoldMode::ResetForTest();
+}

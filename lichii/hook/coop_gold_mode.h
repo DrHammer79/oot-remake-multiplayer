@@ -54,6 +54,9 @@ Mode Choice();
 // that nobody told a mode, it takes its own choice; a host's MOD_SETTINGS set it.
 void OnConnection();
 void OnHosting();
+// A new session's welcome: OnConnection, then OnHosting when this game is the host from the start (the first
+// player in gets no host change, so OnHosting alone never ran for it: its Not shared choice was lost).
+void OnWelcomed(bool hosting);
 void OnHostSettings(const std::vector<coop::protocol::ModSetting>& settings);
 
 // The mode in force. Any thread, cheap (one atomic load).
