@@ -705,6 +705,80 @@ TEST_CASE("playtest: exactly act, warp, flag and give are gated") {
     }
 }
 
+TEST_CASE("playtest: flag_read takes a name only and is not gated (it writes nothing)") {
+    auto r = Parse(R"({"cmd":"flag_read","name":"Gohma_DefeatBoss","id":4})");
+    REQUIRE(r);
+    CHECK(r->cmd == "flag_read");
+    CHECK(r->name == "Gohma_DefeatBoss");
+    CHECK(Parse(R"({"cmd":"flag_read","name":"key64:0x12AB"})")->name == "key64:0x12AB");
+    CHECK(Parse(R"({"cmd":"flag_read","name":"0x1A2B"})")->name == "0x1A2B");
+    CHECK(ParseError(R"({"cmd":"flag_read"})").find("name") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"flag_read","name":"A;setflag B 1"})").find("name") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"flag_read","name":"X","value":1})").find("only reads") != std::string::npos);
+    CHECK_FALSE(GatedCommand("flag_read"));
+    CHECK(ParseError(R"({"cmd":"nope"})").find("flag_read") != std::string::npos);
+}
+
+TEST_CASE("playtest: flag_read replies with the kind and the value, an enum as the hash flag takes back") {
+    FlagValue v;
+    v.kind = "bool";
+    v.number = 1;
+    CHECK(FlagReadMembers("Gohma_DefeatBoss", v) == R"("name":"Gohma_DefeatBoss","kind":"bool","value":1)");
+    v = {};
+    v.kind = "int";
+    v.number = 2;
+    v.live = 2;
+    CHECK(FlagReadMembers("K.SmallKeyNum", v) == R"("name":"K.SmallKeyNum","kind":"int","value":2,"pending":false)");
+    v.live = 0;  // a write of 2 still waits in the game's queue
+    CHECK(FlagReadMembers("K.SmallKeyNum", v).find(R"("pending":true)") != std::string::npos);
+    v = {};
+    v.kind = "enum";
+    v.hash = 0xABCu;
+    CHECK(FlagReadMembers("Q.Step", v) == R"("name":"Q.Step","kind":"enum","value":"0x00000abc")");
+    v = {};
+    v.kind = "text";
+    v.text = "Weapon_Sword_Kokiri";
+    CHECK(FlagReadMembers("PlayerStatus.EquipWeapon", v).find(R"("value":"Weapon_Sword_Kokiri")") != std::string::npos);
+    v = {};
+    v.kind = "int";
+    v.number = -5;
+    CHECK(FlagReadMembers("X", v).find(R"("value":-5)") != std::string::npos);
+    CHECK(FlagReadMembers("Nope", FlagValue{}) == R"("name":"Nope","kind":"unknown","value":null)");
+    // a whole reply is one line
+    const std::string reply = Reply(CoopModJson::Value::Of(4.0), 10, true, FlagReadMembers("Nope", FlagValue{}));
+    CHECK(reply.find('\n') == std::string::npos);
+    CHECK(reply.find(R"("ok":true)") != std::string::npos);
+}
+
+TEST_CASE("playtest: flag writes an enum hash only when flag_read read it from that same flag") {
+    CHECK(HashText(0xABCu) == "0x00000abc");
+    CHECK(HashValue("0x00000abc") == 0xABCu);
+    CHECK(HashValue("0XFFFFFFFF") == 0xFFFFFFFFu);
+    CHECK_FALSE(HashValue("0x0"));
+    CHECK_FALSE(HashValue("0x"));
+    CHECK_FALSE(HashValue("0x123456789"));
+    CHECK_FALSE(HashValue("0xG1"));
+    CHECK_FALSE(HashValue("12"));
+    CHECK(IsWholeNumber("0"));
+    CHECK(IsWholeNumber("-3"));
+    CHECK_FALSE(IsWholeNumber("0x1F"));  // (a hash is no number: it was once taken as setflag)
+    CHECK_FALSE(IsWholeNumber("-"));
+    CHECK_FALSE(IsWholeNumber("Done"));
+    CHECK_FALSE(IsWholeNumber(""));
+
+    EnumValues known;
+    // nothing read yet: refused, with the reason
+    CHECK(EnumHashRefusal(known, "Q.Step", "0x00000abc").find("flag_read") != std::string::npos);
+    known.Remember("Q.Step", 0xABCu);
+    CHECK(EnumHashRefusal(known, "Q.Step", "0x00000abc").empty());
+    CHECK(EnumHashRefusal(known, "Q.Step", "0xABC").empty());  // the same hash, written shorter
+    CHECK_FALSE(EnumHashRefusal(known, "Q.Step", "0x00000abd").empty());   // another value
+    CHECK_FALSE(EnumHashRefusal(known, "Other.Step", "0x00000abc").empty());  // another flag
+    CHECK(EnumHashRefusal(known, "Q.Step", "0x0").find("not 0") != std::string::npos);
+    known.Remember("Q.Step", 0xABCu);  // (a repeat is kept once)
+    CHECK(known.Known("Q.Step", 0xABCu));
+}
+
 TEST_CASE("playtest: an actor id in a strike is refused when there is no world list (solo), a name alone is not") {
     CHECK(StrikeIdRefusal("kill 4096 Enemy_Test", true).empty());
     CHECK(StrikeIdRefusal("kill Enemy_Test", false).empty());

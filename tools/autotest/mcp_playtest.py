@@ -370,6 +370,10 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"],
                      "properties": {"name": {"type": "string"},
                                     "value": {"type": ["integer", "boolean", "string"]}}}},
+    {"name": "flag_read", "description": "Read one game flag (a GameData flag name, a 0x hash or key64:0xKEY); "
+     "writes nothing. Replies with kind (int, bool, enum, uint, key64, text, unknown) and value (an enum as its value's "
+     "hash, which `flag` takes back for that flag in this game run; an int has pending: true while a write waits).",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "setup", "description": "Set a test up in ONE call (instead of many flag/give/warp calls): hearts "
      "(current life, 1-20), max_hearts (3-20), magic (0 none, 1 meter, 2 double), rupees, small_keys {Dungeon: n}, "
      "boss_keys / maps / compasses [Dungeon], items [give names], flags {name: value}, and a last warp {scene, entrance} "
@@ -662,6 +666,8 @@ class Game:
             return c.warp(args["scene"], args.get("entrance"), _bounded(args, "timeout", 60, 1, 600))
         if name == "flag":
             return c.flag(args["name"], args.get("value", 1))
+        if name == "flag_read":
+            return c.flag_read(args["name"])
         if name == "give":
             return c.give(args["item"])
         if name == "preset":

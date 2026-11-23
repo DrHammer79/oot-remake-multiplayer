@@ -175,6 +175,11 @@ class Client:
     def flag(self, name, value=1):
         return self.request("flag", name=name, value=value)
 
+    def flag_read(self, name):
+        """One flag's value, read only: {"kind": int|bool|enum|uint|key64|text|unknown, "value": ...}. An enum's value
+        is its hash ("0x..."), which `flag` takes back for that flag in this game run."""
+        return self.request("flag_read", name=name)
+
     def give(self, item):
         return self.request("give", item=item)
 

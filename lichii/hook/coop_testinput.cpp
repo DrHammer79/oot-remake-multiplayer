@@ -1214,6 +1214,68 @@ std::optional<std::string> FlagText(Core::System& system, std::string_view name)
 }
 
 namespace {
+// A 0x name (0x and 1 to 8 hex digits, not 0) as its hash; else the flag_hash of the name.
+std::uint32_t NameHash(std::string_view name) {
+    if (name.size() > 2 && name.size() <= 10 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
+        std::uint32_t hash = 0;
+        const char* end = name.data() + name.size();
+        if (std::from_chars(name.data() + 2, end, hash, 16).ptr == end && hash != 0) return hash;
+        return 0;
+    }
+    return coop::host::flag_hash(std::string(name));
+}
+}  // namespace
+
+FlagReading ReadFlag(Core::System& system, std::string_view name) {
+    std::lock_guard play_lock(g_play_mu);
+    PlayerXZ(system);
+    CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+    coop::host::GameFlags flags(memory);
+    FlagReading out;
+    if (name.starts_with("key64:0x") || name.starts_with("key64:0X")) {
+        std::uint64_t key = 0;
+        const char* end = name.data() + name.size();
+        if (std::from_chars(name.data() + 8, end, key, 16).ptr == end && key != 0) {
+            if (const auto v = flags.get_key64(key)) {
+                out.kind = "key64";
+                out.number = *v ? 1 : 0;
+            }
+        }
+        return out;
+    }
+    const std::uint32_t hash = NameHash(name);
+    if (hash == 0) return out;
+    if (const auto v = flags.get_int(hash)) {
+        out.kind = "int";
+        out.number = *v;
+        out.live = flags.get_int_live(hash);
+    } else if (const auto b = flags.get_bool(hash)) {
+        out.kind = "bool";
+        out.number = *b ? 1 : 0;
+    } else if (const auto e = flags.get_enum(hash)) {
+        out.kind = "enum";
+        out.hash = *e;
+    } else if (const auto u = flags.get_uint(hash)) {
+        out.kind = "uint";
+        out.number = *u;
+    } else if (auto t = flags.get_string64(hash)) {
+        out.kind = "text";
+        out.text = std::move(*t);
+    }
+    return out;
+}
+
+bool SetEnumHash(Core::System& system, std::string_view name, std::uint32_t value) {
+    std::lock_guard play_lock(g_play_mu);
+    PlayerXZ(system);
+    CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+    const std::uint32_t hash = NameHash(name);
+    const bool ok = hash != 0 && value != 0 && coop::host::GameFlags::set_enum(memory, hash, value);
+    LOG_INFO(Core, "coop: test setenum {} {:#010x}: {}", name, value, ok ? "set" : "NOT set");
+    return ok;
+}
+
+namespace {
 
 // dump TAG (play-test kit): the value in this game of every flag in the shared dungeon and story lists
 // (CoopDungeon::Flags, CoopStory::Flags; not the live-only or autogen lists), as JSON next to the commands file,

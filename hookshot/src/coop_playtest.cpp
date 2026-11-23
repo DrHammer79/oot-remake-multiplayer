@@ -9,6 +9,7 @@
 // - warp, flag, give: the module's test commands (CoopTestInput::PlayNow), the game's own sequence and flag
 //   setters and the cheats panel's give, on the game's calc thread inside the hold;
 // - dump: the shared flags (CoopTestInput::SharedFlags) and the state, as one JSON file in <game>/playtest/dumps.
+// - flag_read: one flag by name (CoopTestInput::ReadFlag), read only, inside the hold.
 // A client that leaves (closed, crashed) lets a held game go at once.
 #include "coop_playtest.h"
 
@@ -258,6 +259,7 @@ private:
 };
 
 Control g_control;  // (the bridge's thread only)
+EnumValues g_enum_values;   // the enum values flag_read read: the only hashes `flag` writes back
 bool g_verbs_runner = false, g_verbs_cheats = false;   // the gate for act, flag, warp and give (set at Start)
 
 // ---- the state ----
@@ -562,13 +564,44 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "flag") {
         std::string error;
-        const bool number = !r.value.empty() && (r.value[0] == '-' || (r.value[0] >= '0' && r.value[0] <= '9'));
+        const bool number = IsWholeNumber(r.value);
+        if (!number && HashValue(r.value)) {
+            // An Enum's value by hash: only one flag_read read from this flag in this run (never a raw number).
+            if (const std::string why = EnumHashRefusal(g_enum_values, r.name, r.value); !why.empty()) {
+                return fail("bad_request", why);
+            }
+            const auto hash = *HashValue(r.value);
+            bool done = false;
+            if (!gate.RunHeld([&] { done = CoopTestInput::SetEnumHash(*g_system, r.name, hash); }, kHoldWait)) {
+                return fail("timeout", "the game was not held in time");
+            }
+            if (!done) return fail("failed", "the enum write was not queued (" + r.name + " unknown, or the queue full)");
+            return ok("\"name\":" + Quote(r.name) + ",\"value\":" + Quote(HashText(hash)));
+        }
+        if (!number && r.value.size() > 1 && r.value[0] == '0' && (r.value[1] == 'x' || r.value[1] == 'X')) {
+            return fail("bad_request", EnumHashRefusal(g_enum_values, r.name, r.value));
+        }
         const auto was = CoopTestInput::FlagInt(*g_system, r.name);
         const std::string line = (number ? "setflag " : "setenum ") + r.name + " " + r.value;
         if (!played(line, error)) return fail("failed", error);
         const auto now = CoopTestInput::FlagInt(*g_system, r.name);
         return ok("\"name\":" + Quote(r.name) + ",\"was\":" + (was ? std::to_string(*was) : "null") +
                   ",\"value\":" + (number ? (now ? std::to_string(*now) : "null") : Quote(r.value)));
+    }
+    if (r.cmd == "flag_read") {
+        // Read only: nothing is written, so it is not gated (it exists only where the bridge does: a play-test run).
+        FlagValue v;
+        const bool ran = gate.RunHeld([&] {
+            auto got = CoopTestInput::ReadFlag(*g_system, r.name);
+            v.kind = std::move(got.kind);
+            v.number = got.number;
+            v.hash = got.hash;
+            v.text = std::move(got.text);
+            v.live = got.live;
+        }, kHoldWait);
+        if (!ran) return fail("timeout", "the game was not held in time");
+        if (v.kind == "enum" && v.hash) g_enum_values.Remember(r.name, *v.hash);
+        return ok(FlagReadMembers(r.name, v));
     }
     if (r.cmd == "give") {
         std::string error;

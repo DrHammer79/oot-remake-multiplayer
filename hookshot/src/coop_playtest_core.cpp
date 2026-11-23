@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <system_error>
 #include <utility>
 
 namespace CoopPlaytest {
@@ -374,6 +375,19 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         }
         return r;
     }
+    if (c == "flag_read") {
+        const auto name = v->Text("name");
+        if (!name || !PlainText(*name, 128)) {
+            error = "name: a flag name, a 0x hash or key64:0xKEY";
+            return std::nullopt;
+        }
+        if (v->Get("value")) {
+            error = "value: not taken; flag_read only reads (flag writes)";
+            return std::nullopt;
+        }
+        r.name = *name;
+        return r;
+    }
     if (c == "flag") {
         const auto name = v->Text("name");
         if (!name || !PlainText(*name, 128)) {
@@ -441,7 +455,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, give, dump or shot";
     return std::nullopt;
 }
 
@@ -521,6 +535,76 @@ std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool p
     return "{\"id\":" + Compact(id) + ",\"ok\":false,\"frame\":" + std::to_string(frame) +
            ",\"paused\":" + (paused ? "true" : "false") + ",\"error\":" + Quote(code) + ",\"message\":" +
            Quote(message) + "}";
+}
+
+std::string HashText(std::uint32_t hash) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "0x%08x", static_cast<unsigned>(hash));
+    return buf;
+}
+
+std::optional<std::uint32_t> HashValue(std::string_view text) {
+    if (text.size() < 3 || text.size() > 10 || text[0] != '0' || (text[1] != 'x' && text[1] != 'X')) return std::nullopt;
+    std::uint32_t hash = 0;
+    const char* end = text.data() + text.size();
+    const auto [ptr, ec] = std::from_chars(text.data() + 2, end, hash, 16);
+    if (ec != std::errc{} || ptr != end || hash == 0) return std::nullopt;
+    return hash;
+}
+
+bool IsWholeNumber(std::string_view value) {
+    if (!value.empty() && value[0] == '-') value.remove_prefix(1);
+    if (value.empty()) return false;
+    for (const char ch : value) {
+        if (ch < '0' || ch > '9') return false;
+    }
+    return true;
+}
+
+std::string FlagReadMembers(std::string_view name, const FlagValue& v) {
+    std::string out = "\"name\":" + Quote(name) + ",\"kind\":" + Quote(v.kind) + ",\"value\":";
+    if (v.kind == "enum" && v.hash) {
+        out += Quote(HashText(*v.hash));
+    } else if (v.kind == "text") {
+        out += Quote(v.text);
+    } else if (v.kind != "unknown" && v.number) {
+        out += std::to_string(*v.number);
+    } else {
+        out += "null";
+    }
+    if (v.kind == "int") {
+        const bool pending = v.number && v.live && *v.number != *v.live;
+        out += std::string(",\"pending\":") + (pending ? "true" : "false");
+    }
+    return out;
+}
+
+void EnumValues::Remember(std::string_view name, std::uint32_t hash) {
+    std::lock_guard lock(mu_);
+    for (const auto& [n, h] : seen_) {
+        if (n == name && h == hash) return;
+    }
+    if (seen_.size() >= 4096) seen_.erase(seen_.begin());  // (a bound: a run reads far fewer)
+    seen_.emplace_back(std::string(name), hash);
+}
+
+bool EnumValues::Known(std::string_view name, std::uint32_t hash) const {
+    std::lock_guard lock(mu_);
+    for (const auto& [n, h] : seen_) {
+        if (n == name && h == hash) return true;
+    }
+    return false;
+}
+
+std::string EnumHashRefusal(const EnumValues& known, std::string_view name, std::string_view value) {
+    const auto hash = HashValue(value);
+    if (!hash) return "value: a 0x enum value hash is 0x and 1 to 8 hex digits, not 0";
+    if (!known.Known(name, *hash)) {
+        return "value: " + std::string(value) + " is not a value flag_read read from " + std::string(name) +
+               " in this game run; write an enum by its value's name, or read the flag first (a raw number is never "
+               "written to an Enum)";
+    }
+    return {};
 }
 
 bool EnvIsOn(std::string_view value) { return !value.empty() && value != "0"; }
