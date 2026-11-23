@@ -164,6 +164,8 @@ jobs:
         run: python tools/autotest/tests/test_kit_tools.py -v
       - name: Play-test look (one-call situation text) tests
         run: python tools/autotest/tests/test_kit_look.py -v
+      - name: Play-test wait_until tests
+        run: python tools/autotest/tests/test_kit_wait.py -v
       - name: Play-test kit doctor tests
         run: python tools/autotest/tests/test_kit_doctor.py -v
       - name: Shared play-test library (scripts and data) tests

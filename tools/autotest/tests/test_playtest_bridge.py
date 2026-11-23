@@ -374,7 +374,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "look", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "look", "wait_until", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -413,6 +413,15 @@ class PlayerServer(unittest.TestCase):
         self.assertNotIn("Enemy_Far", text)           # past 25 m
         self.assertIn("changed: first look", text)
         self.assertTrue(self.call("p1", "look").endswith("changed: nothing"))
+
+    def test_wait_until_runs_frames_and_ends_with_a_look(self):
+        out = self.call("p1", "wait_until", what="prompt", max_frames=16)
+        self.assertFalse(out["met"])
+        self.assertEqual(out["frames_run"], 16)
+        self.assertIn("Link ", out["look"])
+        self.games["p1"].prompt = "Talk"
+        out = self.call("p1", "wait_until", what="prompt")
+        self.assertEqual((out["met"], out["frames_run"]), (True, 0))
 
     def test_a_room_that_really_has_no_enemy_is_zero_not_null(self):
         self.games["p1"].world = {"frame": 5, "why": "empty: the walk ran and saw no actors", "count": 0, "actors": []}

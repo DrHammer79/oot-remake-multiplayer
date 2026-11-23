@@ -23,6 +23,7 @@ import desync_check  # noqa: E402
 import live  # noqa: E402
 import kit_look  # noqa: E402
 import kit_tools  # noqa: E402
+import kit_wait  # noqa: E402
 import playtest_client as pc  # noqa: E402
 import playtest_helpers as ph  # noqa: E402
 
@@ -299,6 +300,14 @@ PLAYER_TOOLS = [
      "CHANGED since your last look. Yaw is the one `move` and `walk_to` use (0 = +z, 90 = +x). The text of a text box "
      "and the C buttons are not readable through the kit yet and it says so. " + PAUSED,
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "wait_until", "description": "Let the game run (in chunks of 8 frames) until `what` happens, then reply with "
+     "`met`, why it stopped and a `look` text. `what`: event_over, scene_changed, enemy_dead (with `id` from look), "
+     "enemies_clear (none alive within 10 m), on_ground (height steady for two looks), prompt (A has something to do) or "
+     "condition (with `condition`, as step_until). It stops early, and says so in `stopped`, when Link is hurt, dies, "
+     "a scene loads, or an event starts (unless that is what you wait for). One call instead of a step loop. " + PAUSED,
+     "inputSchema": {"type": "object", "required": ["what"], "properties": {
+         "what": {"type": "string", "enum": list(kit_wait.WHATS)}, "id": {"type": ["integer", "string"]},
+         "condition": {"type": "string"}, "max_frames": {"type": "integer", "minimum": 1, "maximum": kit_wait.MAX_FRAMES}}}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -517,6 +526,11 @@ class Game:
         if name == "look":
             text, self.last_look = kit_look.look(c.state(), self.last_look)
             return text
+        if name == "wait_until":
+            out, st = kit_wait.wait_until(c, args.get("what"), _bounded(args, "max_frames", 300, 1, kit_wait.MAX_FRAMES),
+                                          ident=args.get("id"), condition=args.get("condition"))
+            out["look"], self.last_look = kit_look.look(st, self.last_look)
+            return out
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
