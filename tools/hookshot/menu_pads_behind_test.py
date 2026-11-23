@@ -66,6 +66,7 @@ static HANDLE CreateThread(void *a, size_t s, LPTHREAD_START_ROUTINE fn, void *a
 static int CloseHandle(HANDLE h) { (void)h; return 1; }
 static void Sleep(DWORD ms) { (void)ms; }
 void hos_host_thread_register_self(const char *name) { (void)name; }
+int hos_input_xinput_counts(int p) { (void)p; return 1; }   /* (our patch 0015, pad_sdl.c: every XInput pad is this game's) */
 static void hos_log(const char *format, ...) { (void)format; }
 static int64_t now_ns = 1000000000LL;
 static int64_t hos_now_ns(void) { return now_ns; }
