@@ -746,7 +746,8 @@ SessionView ViewNow(View view) {
             v.online_rows.push_back(CoopRoomList::CellText(r, coop::protocol::kProtocolVersion));
             // (the same words as the Lobby tab's Public games: CoopRoomList::DetailText)
             v.online_list.push_back(ListLine{ListName(r.host, r.room),
-                                             CoopI18n::Tr(CoopRoomList::DetailText(r, coop::protocol::kProtocolVersion))});
+                                             CoopI18n::Tr(CoopRoomList::DetailText(r, coop::protocol::kProtocolVersion)),
+                                             RowAction::kNone, false, true, true});   // (the room's name is its own; the detail is already ours)
         }
         const CoopRoomList::Snapshot all = CoopRoomList::Now();
         v.online_state = all.state.empty() ? std::string() : CoopI18n::Tr(all.state);
@@ -955,10 +956,14 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Option_00", i);
             // The browser's own words (the header, "Looking for games...", a relay's state) in the
             // player's language; a game's name is the player's own and comes back unchanged.
-            LiveText(ctx, layout, gen, path, name_slot, CoopI18n::Tr(lines[k].name));
+            // (a line the page built is already in the player's language: own_name and own_value, never looked up
+            // again, which would turn a player called "Link" into 林克)
+            LiveText(ctx, layout, gen, path, name_slot, lines[k].own_name ? lines[k].name : CoopI18n::Tr(lines[k].name));
             std::snprintf(path, sizeof path, "Pa_Coop_00/Pa_List_%02d/T_Text_00", i);
             LiveText(ctx, layout, gen, path, value_slot,
-                     lines[k].value.empty() ? std::string(" ") : CoopI18n::Tr(lines[k].value));
+                     lines[k].value.empty()  ? std::string(" ")
+                     : lines[k].own_value    ? lines[k].value
+                                             : CoopI18n::Tr(lines[k].value));
             if (const int box = lines[k].value.empty() ? 0 : 1; g_list_box_vis[k] != box) {
                 for (std::size_t j = 0; j < 2; ++j) {   // (with a value: as the layout has them; a line of text: none)
                     if (const std::uint64_t b = g_list_box[k][j]; b != 0) SetVisible(ctx, b, box != 0 && g_list_box_own[k][j]);
@@ -1174,7 +1179,9 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     for (int r = 0; r < kSettingRows; ++r) {
         char path[64];
         std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_Button_%02d/T_Btn_00", r);
-        LiveText(ctx, layout, gen, path, r < kRows ? 22 + r : 41, kSettingTabs[static_cast<std::size_t>(r)]);
+        // (the category's words in the player's language, as the pack's labels are)
+        LiveText(ctx, layout, gen, path, r < kRows ? 22 + r : 41,
+                 CoopI18n::Tr(kSettingTabs[static_cast<std::size_t>(r)]));
     }
     const std::vector<SettingRow> rows = SettingsOf(SettingsNow(NowMs()), g_set_category.load());
     g_set_count = static_cast<int>(rows.size());
@@ -1192,9 +1199,12 @@ void LiveSettings(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         if (on) {
             char path[64];
             std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Option_00", i);
-            LiveText(ctx, layout, gen, path, SetNameSlot(i), lines[k].name);
+            // The setting's name and its value in the player's language (coop_i18n.h): the rows are
+            // built in English in coop_pause_tab.cpp, and each is looked up as it is handed over.
+            LiveText(ctx, layout, gen, path, SetNameSlot(i), CoopI18n::Tr(lines[k].name));
             std::snprintf(path, sizeof path, "Pa_Settings_00/Pa_List_%02d/T_Text_00", i);
-            LiveText(ctx, layout, gen, path, SetValueSlot(i), lines[k].value.empty() ? std::string(" ") : lines[k].value);
+            LiveText(ctx, layout, gen, path, SetValueSlot(i),
+                     lines[k].value.empty() ? std::string(" ") : CoopI18n::Tr(lines[k].value));
         }
         if (g_set_vis[k] != (on ? 1 : 0)) SetVisible(ctx, pane, on), g_set_vis[k] = on ? 1 : 0;
         // (the header a little dim, as the browser's; a setting bright when picked, or all while the rows have the pad)
@@ -1239,7 +1249,7 @@ void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionV
         // handed to the game: the rows with a value ("Room: 3", "Kick Saria") are the table's shapes.
         const std::string& text = rows[static_cast<std::size_t>(i)];
         if (text.empty()) blank |= 1u << i;
-        LiveText(ctx, layout, gen, path, i, text.empty() ? std::string(" ") : CoopI18n::Tr(text));   // (a pane's text is never empty)
+        LiveText(ctx, layout, gen, path, i, text.empty() ? std::string(" ") : text);   // (a pane's text is never empty; the rows are already in the player's language: RowTexts, whose bare player names must not be looked up)
     }
     g_rows_blank = blank;
     LiveCells(ctx, layout, gen, v);
@@ -2319,7 +2329,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     const auto menu_list = [&](const CoopPauseMenu::View& mv, int menu_tab, int* top, const std::string& head) {
         MenuList ml = MenuLines(mv, menu_tab, *top, in_list, per_page);
         *top = ml.top;
-        if (!head.empty()) ml.lines[0].name = head;
+        if (!head.empty()) ml.lines[0].name = CoopI18n::Tr(head);
         lines = ml.lines;
         raw = true;
         for (std::size_t k = 0; k < static_cast<std::size_t>(kLinePanes) && k < ml.rows.size(); ++k) {
@@ -3755,7 +3765,11 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     std::vector<ListLine> lines(kListRows);
                     lines[0] = {sel_ok ? mv.rows[static_cast<std::size_t>(mv.selected)].name : std::string("Type"),
                                 sel_ok ? mv.rows[static_cast<std::size_t>(mv.selected)].value : std::string()};
+                    // (the field's text is the player's own, a letter is not the table's word; a mod setting's caption is the mod's)
+                    lines[0].own_value = true;
+                    lines[0].own_name = sel_ok && mv.rows[static_cast<std::size_t>(mv.selected)].own_name;
                     lines[1] = {"Letter", std::string(1, kMenuLetters[g_menu_letter % nl] == ' ' ? '_' : kMenuLetters[g_menu_letter % nl])};
+                    lines[1].own_value = true;
                     lines[1].arrows = true;
                     lines[2] = {"Delete", ""};
                     lines[3] = {"OK", ""};
