@@ -56,6 +56,8 @@ def check_value(schema, v, where):
     kind = schema.get("type")
     if kind and not _type_ok(kind, v):
         return ["%s: should be a %s" % (where, kind)]
+    if isinstance(v, str) and len(v) > MAX_TEXT:
+        out.append("%s: longer than %d characters (a note, not a log)" % (where, MAX_TEXT))
     if "enum" in schema and v not in schema["enum"]:
         out.append("%s: %r is not one of %s" % (where, v, ", ".join(map(str, schema["enum"]))))
     if isinstance(v, (int, float)) and not isinstance(v, bool):

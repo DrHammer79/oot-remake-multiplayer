@@ -157,9 +157,11 @@ class StateHistory:
     """The last KEEP looks: an id for each, and what every player showed then. In memory (an MCP server), or in a file
     (`path`: live.py runs once per call, so the history lives beside the session)."""
 
-    def __init__(self, path=None, keep=KEEP):
+    def __init__(self, path=None, keep=KEEP, start=1):
+        """`start`: the first id. Each player's server starts at its own number, so an id from one player's server
+        is "not kept" on another's and cannot pass for one of its looks."""
         self.path, self.keep = path, keep
-        self.data = {"next": 1, "looks": {}}
+        self.data = {"next": start, "looks": {}}
         if path:
             try:
                 with open(path, encoding="utf-8") as f:
@@ -245,7 +247,8 @@ def read_calls(paths):
                 if isinstance(c, dict) and NAME.match(str(c.get("server"))) and isinstance(c.get("tool"), str):
                     c["_at"] = "%s:%d" % (os.path.basename(p), n)
                     out.append(c)
-    out.sort(key=lambda c: c.get("t", 0))   # (stable: lines of one file keep their order)
+    out.sort(key=lambda c: c["t"] if isinstance(c.get("t"), (int, float)) and not isinstance(c.get("t"), bool) else 0)
+    # (stable: lines of one file keep their order; a missing or odd t sorts first)
     return out
 
 

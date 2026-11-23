@@ -125,6 +125,8 @@ class Scripts(Folder):
         self.says(one({"server": "oot-p1", "tool": "press", "args": {"buttons": ["Q"]}}), "is not one of")
         self.says(one({"server": "oot-p1", "tool": "press", "args": {"stick_strength": 3}}), "above 1")
         self.says(one({"server": "oot-p1", "tool": "step", "args": {"frames": 1}, "when": 5}), "unknown key when")
+        self.says(one({"server": "oot-p1", "tool": "chat", "args": {"text": "x" * 301}}), "longer than 300")
+        self.assertEqual(one({"server": "oot-p1", "tool": "chat", "args": {"text": "x" * 300}}), [])
         self.says(one({"server": "oot-p1", "tool": "step", "args": [1]}), "args must be an object")
         self.assertEqual(one({"server": "oot-p1", "tool": "press", "args": {"buttons": ["A", "UP"], "frames": 2}}), [])
 

@@ -393,7 +393,8 @@ class Game:
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
         self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
-        self.history = kit_tools.StateHistory()   # the last looks (get_state `since`)
+        # the last looks (get_state `since`); ids start at 100000 x the player's number, so p1's id means nothing to p2
+        self.history = kit_tools.StateHistory(start=pc.player_index(self.player) * 100000 + 1)
 
     def log_lines(self, match=None):
         """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
