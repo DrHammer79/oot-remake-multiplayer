@@ -3221,6 +3221,87 @@ class FullBuildTest(unittest.TestCase):
         build.build(self.romfs, mod, log=lambda *_: None, look_slots=0, characters=build.find_characters(mod))
         self.assertEqual(member("CoopPuppet_Adult_C005", anim), game[anim])
 
+    def test_character_own_sets(self):
+        # A character with clips of its own (the cow, 2026-11-23): the mod's AnimationParam names Player_<age>_<set>C_
+        # Animation, which the mod's code turns into the PLAYER's pick. A puppet names its character's file itself.
+        p = "Component/AnimationParam/A.bgyml"
+        doc = {"AnimationResources": [{"ModelProjectName": n, "IsRetarget": True} for n in
+                                      ("Player_Adult_02_Animation", "Player_Adult_04C_Animation",
+                                       "Player_Adult_01C_Animation")]}
+        data = byml.dumps(doc)
+        has = {build.own_set_file("Adult", "04", 111)}
+        self.assertEqual(build.own_set_file("Adult", "04", 111), "Model/Player_Adult_04_Animation_C111.anim.bfres.zs")
+
+        def names(out):
+            return [r["ModelProjectName"] for r in byml.loads(out[p])["AnimationResources"]]
+        out = build.character_own_sets({p: data}, 111, has.__contains__)
+        self.assertEqual(names(out), ["Player_Adult_02_Animation", "Player_Adult_04_Animation_C111",
+                                      "Player_Adult_01_Animation"])     # 01: no file of its own, the game's set
+        self.assertTrue(all(r["IsRetarget"] for r in byml.loads(out[p])["AnimationResources"]))
+        out = build.character_own_sets({p: data}, 5, has.__contains__)     # a character without own clips
+        self.assertEqual(names(out), ["Player_Adult_02_Animation", "Player_Adult_04_Animation",
+                                      "Player_Adult_01_Animation"])
+        # Nothing to rename (a mod without own clips): the same bytes, as before.
+        plain = byml.dumps({"AnimationResources": [{"ModelProjectName": "Player", "IsRetarget": True}]})
+        self.assertIs(build.character_own_sets({p: plain}, 111, has.__contains__)[p], plain)
+        self.assertEqual(build.character_own_sets({}, 111, has.__contains__), {})
+        # Only the whole name: a longer or other name is left alone.
+        odd = byml.dumps({"AnimationResources": [{"ModelProjectName": "Player_Adult_04C_Animation_X"},
+                                                 {"ModelProjectName": "Player_Kid_04C_Animation"}]})
+        self.assertIs(build.character_own_sets({p: odd}, 111, has.__contains__)[p], odd)
+
+    def test_character_puppets_name_their_own_clip_files(self):
+        # Build: the cow (file 111) has its own set 04, file 5 has none; each puppet names its own file or the game's
+        # set, and the size-table entry covers the longest param of them.
+        plain = zstandard.ZstdCompressor()
+        mods = os.path.join(self.dir, "mods_cs_own")
+        cs = os.path.join(mods, "OoT Character Select")
+        romfs = os.path.join(cs, "romfs")
+        os.makedirs(os.path.join(romfs, "Model"))
+        os.makedirs(os.path.join(romfs, "Pack", "Actor"))
+        for f in (5, 111):
+            with open(os.path.join(romfs, "Model", f"Player_Adult_C{f:03d}.Player_Adult.bfres.zs"), "wb") as out:
+                out.write(plain.compress(b"x" * 300))
+        with open(os.path.join(romfs, build.own_set_file("Adult", "04", 111)), "wb") as out:
+            out.write(plain.compress(b"y" * 300))
+        doc = {"format": 1, "mod": "OoT Character Select",
+               "actor_heaps": {v: {"InstanceHeapSize": 0x100, "PreActorRenderInfoHeapSize": 0x100}
+                               for v in ("Adult", "Child")},
+               "characters": [{"number": 7, "file": 5}, {"number": 113, "file": 111}]}
+        with open(os.path.join(cs, build.CHARACTERS_FILE), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        anim = "Component/AnimationParam/P.engine__component__AnimationParam.bgyml"
+        game = fake_player_pack("Adult")
+        theirs = dict(game)
+        theirs[anim] = byml.dumps({"AnimationResources": [{"ModelProjectName": n, "IsRetarget": True} for n in
+                                                          ("Player_Adult_02_Animation", "Player_Adult_04C_Animation",
+                                                           "Player_Adult_01C_Animation")]})
+        with open(os.path.join(romfs, "Pack", "Actor", "Player_Adult.pack.zs"), "wb") as f:
+            f.write(plain.compress(sarc.write(theirs)))
+        d = zs.Dicts.from_romfs(self.romfs)
+        rs = "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs"
+        t = rstb.Rstb.loads(d.decompress(build.read(os.path.join(self.romfs, rs))))
+        t.set(anim, 5344)
+        self.write(rs, plain.compress(t.dumps()))
+        mod = os.path.join(mods, "pack")
+        build.build(self.romfs, mod, log=lambda *_: None, look_slots=0, characters=build.find_characters(mod))
+
+        def member(actor, path):
+            raw = build.read(os.path.join(mod, "romfs", "Pack", "Actor", f"{actor}.pack.zs"))
+            return sarc.read(d.decompress(raw)).get(path)
+
+        def names(data):
+            return [r["ModelProjectName"] for r in byml.loads(data)["AnimationResources"]]
+        cow = member("CoopPuppet_Adult_C111", anim)
+        self.assertEqual(names(cow), ["Player_Adult_02_Animation", "Player_Adult_04_Animation_C111",
+                                      "Player_Adult_01_Animation"])
+        self.assertEqual(names(member("CoopPuppet_Adult_C005", anim)),
+                         ["Player_Adult_02_Animation", "Player_Adult_04_Animation", "Player_Adult_01_Animation"])
+        self.assertEqual(member("CoopPuppet_Adult", anim), game[anim])          # a Link puppet: the game's
+        out = rstb.Rstb.loads(d.decompress(build.read(os.path.join(mod, "romfs", rs))))
+        self.assertEqual(out.get(anim), max(build.character_param_entry(5344, game[anim], theirs[anim]),
+                                            build.character_param_entry(5344, game[anim], cow)))
+
     def test_character_animation_params(self):
         a, b = "Component/AnimationParam/A.bgyml", "Component/AnimationParam/B.bgyml"
         game = {a: b"1", b: b"2", "Component/ModelInfo/M.bgyml": b"3"}

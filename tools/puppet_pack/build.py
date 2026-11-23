@@ -28,6 +28,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -310,6 +311,37 @@ def character_animation_params(members, mod_members):
     of that pack (`mod_members`) changed. Nothing else of the mod's pack is taken."""
     return {p: mod_members[p] for p in members
             if p.startswith(ANIMATION_PARAM_DIR) and p in mod_members and mod_members[p] != members[p]}
+
+
+# A character with clips of its own (the cow, 2026-11-23): the mod's AnimationParam names the sets 04 and 01
+# Player_<age>_<set>C_Animation, and the mod's code turns that name into the file of the character the player picked
+# (Model/Player_<age>_<set>_Animation_C<nnn>.anim.bfres, its own clips where it has them) or into the game's set. That
+# code goes by the player's own pick, not by the actor, so a character's puppet names its character's file itself.
+OWN_SET_NAME = re.compile(r"Player_(Adult|Child)_(\d\d)C_Animation")
+
+
+def own_set_file(age, anim_set, file):
+    return f"Model/Player_{age}_{anim_set}_Animation_C{file:03d}.anim.bfres.zs"
+
+
+def character_own_sets(params, file, has_file):
+    """{path: bytes} of the AnimationParams `params` (character_animation_params) for the character `file`: each set
+    named OWN_SET_NAME becomes Player_<age>_<set>_Animation_C<file> when has_file(own_set_file(...)), else the game's
+    Player_<age>_<set>_Animation. A param without such a set is returned as it is."""
+    out = {}
+    for path, data in params.items():
+        doc = byml.loads(data)
+        renamed = False
+        for r in doc.get("AnimationResources", []) if isinstance(doc, dict) else []:
+            m = OWN_SET_NAME.fullmatch(str(r.get("ModelProjectName", "")))
+            if m:
+                age, anim_set = m.groups()
+                own = has_file(own_set_file(age, anim_set, file))
+                r["ModelProjectName"] = (f"Player_{age}_{anim_set}_Animation_C{file:03d}" if own
+                                         else f"Player_{age}_{anim_set}_Animation")
+                renamed = True
+        out[path] = byml.dumps(doc, struct.unpack_from("<H", data, 2)[0]) if renamed else data
+    return out
 
 
 def character_param_entry(game_entry, old, new):
@@ -2197,6 +2229,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     if clients:
         jobs = [j for job in jobs for j in (job, (*job[:5], True))]
     mod_anims = {}   # variant: the mod's changed AnimationParams for its characters' puppets
+    param_entries = {}   # member path: the game's size-table entry of a param the mod changed
 
     def character_anims(v, members):
         if v not in mod_anims:
@@ -2211,7 +2244,7 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
                     theirs = {}
                 mod_anims[v] = character_animation_params(members, theirs)
                 for path, data in mod_anims[v].items():
-                    entry = table.get(path)
+                    entry = param_entries[path] = table.get(path)
                     if entry is not None:
                         table.set(path, max(entry, character_param_entry(entry, members[path], data)))
                     log(f"characters: the Player_{v} puppets take {characters['mod']}'s {path} (retargeted clips)")
@@ -2239,7 +2272,18 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
                 raise BuildError(f"missing {rel(romfs, src)}")
             members = sarc.read(dicts.decompress(read(src)))
             if char is not None:
-                members = {**members, **character_anims(v, members)}
+                mod_romfs = os.path.join(characters["dir"], "romfs")
+                params = character_own_sets(character_anims(v, members), char,
+                                            lambda rel: os.path.isfile(os.path.join(mod_romfs, rel)))
+                for path, data in params.items():   # one entry per member path: the longest of the puppets
+                    entry = param_entries[path]     # the game's: the growth counts from it, never twice
+                    if data == mod_anims[v][path]:
+                        continue
+                    log(f"characters: {actor} names its sets in {path}: "
+                        + ", ".join(r["ModelProjectName"] for r in byml.loads(data)["AnimationResources"]))
+                    if entry is not None:
+                        table.set(path, max(table.get(path), character_param_entry(entry, members[path], data)))
+                members = {**members, **params}
         pack, ap, names, keys = build_pack(members, v, sound, player_footsteps, sound_user, actor, project,
                                            basic_xlink=basic_xlink, perception=None if quiet else seen_by,
                                            as_ref=wears[1][v] if wears else None, body=body,
