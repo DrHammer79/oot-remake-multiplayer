@@ -3906,17 +3906,19 @@ constexpr FlagKey kStockA{0x7100u, 0};  // bottle slot A: StockNum
 constexpr FlagKey kValidA{0x7101u, 0};  //                IsValid
 constexpr FlagKey kStockB{0x7200u, 0};
 constexpr FlagKey kValidB{0x7201u, 0};
+constexpr FlagKey kStockC{0x0100u, 0};  // a slot whose keys sort before the rewards' Bools (as slot B's IsValid does)
+constexpr FlagKey kValidC{0x0101u, 0};
 
 FakeStore bottle_game() {
   FakeStore store;
-  for (FlagKey k : {kAnju, kTalon, kStockA, kValidA, kStockB, kValidB}) store.set(k, 0);
+  for (FlagKey k : {kAnju, kTalon, kStockA, kValidA, kStockB, kValidB, kStockC, kValidC}) store.set(k, 0);
   return store;
 }
 
-SharedFlags bottle_shared() { return SharedFlags({kStockA, kValidA, kStockB, kValidB}); }
+SharedFlags bottle_shared() { return SharedFlags({kStockA, kValidA, kStockB, kValidB, kStockC, kValidC}); }
 
 void bottle_guard(FlagWatcher& w) {
-  const std::vector<std::vector<FlagKey>> units{{kStockA, kValidA}, {kStockB, kValidB}};
+  const std::vector<std::vector<FlagKey>> units{{kStockA, kValidA}, {kStockB, kValidB}, {kStockC, kValidC}};
   const FlagKey sources[] = {kAnju, kTalon};
   w.guard_reward(units, sources);
 }
@@ -4046,4 +4048,74 @@ TEST_CASE("reward guard: the host puts back its own second copy too (row 272)") 
   h.frame(store);
   CHECK(store.get(kValidB) == 0);
   CHECK(h.stats().rewards_guarded == 1);
+}
+
+TEST_CASE("reward guard: another player's bottle whose keys sort before the reward's Bool still counts (row 272)") {
+  // Review of 6b3fb1d7: entries land in key order, so a slot key below the Bool came before it and was lost.
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  w.receive(state({entry(kStockC, 1), entry(kValidC, 1), entry(kAnju, 1)}));
+  w.frame(store);
+  CHECK(store.get(kValidC) == 1);
+  give(store, kStockB, kValidB);  // ours, into the next empty slot
+  w.frame(store);
+  CHECK(store.get(kValidB) == 0);
+  CHECK(w.stats().rewards_guarded == 1);
+}
+
+TEST_CASE("reward guard: another player's bottle in an earlier message than its Bool still counts (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  w.receive(state({entry(kStockA, 1), entry(kValidA, 1)}));  // the bottle a frame before its flow's Bool
+  w.frame(store);
+  w.receive(state({entry(kAnju, 1)}));
+  w.frame(store);
+  give(store, kStockB, kValidB);
+  w.frame(store);
+  CHECK(store.get(kValidB) == 0);
+  CHECK(w.stats().rewards_guarded == 1);
+}
+
+TEST_CASE("reward guard: the review's three-bottle case gives the group two (row 272)") {
+  // Both hold slot A; another player gets Anju's bottle in slot C; our game, mid-cutscene, gets theirs and
+  // then its own flow gives the next empty slot, B.
+  FakeStore store = bottle_game();
+  store.set(kStockA, 1);
+  store.set(kValidA, 1);
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  w.receive(state({entry(kAnju, 1), entry(kStockC, 1), entry(kValidC, 1)}));
+  w.frame(store);
+  give(store, kStockB, kValidB);
+  const auto sent = entries(w.frame(store));
+  CHECK_FALSE(has(sent, entry(kValidB, 1)));
+  CHECK(store.get(kValidA) + store.get(kValidB) + store.get(kValidC) == 2);
+}
+
+TEST_CASE("reward guard: what a join brings is no reward given now (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  // The join snapshot: Anju's Bool and her bottle, got long ago in the host's save.
+  proto::FlagSnapshot part;
+  part.part = 0;
+  part.part_count = 1;
+  part.flags = {entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)};
+  w.receive(part);
+  w.frame(store);
+  CHECK(store.get(kValidA) == 1);
+  // A bottle got here now (a shop's, say): not the same reward.
+  give(store, kStockB, kValidB);
+  CHECK(has(entries(w.frame(store)), entry(kValidB, 1)));
+  CHECK(w.stats().rewards_guarded == 0);
 }

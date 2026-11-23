@@ -433,14 +433,20 @@ inline constexpr std::array<Source, 4> kBottle{{
     {0x170b5df2, "IsGet.Item_Bottle_Letter"},         // Ruto's Letter (shared since issue 58)
 }};
 // Rewards that are an upgrade's next tier (the flow picks the tier from what the pouch holds).
-inline constexpr std::array<Source, 4> kUpgrade{{
+inline constexpr std::array<Source, 10> kUpgrade{{
     {0x9086a22e, "KakarikoVillage_GatheringTokenGold_GetReward10"},  // 10 tokens: a wallet
     {0xcdcc9add, "KakarikoVillage_GatheringTokenGold_GetReward30"},  // 30 tokens: a wallet
     {0x4bafdf70, "LostWood_HitTargetOfDekuScrub_FirstClear"},        // the Lost Woods target: a seed bag
     {0x19e5a36b, "MiniGame_BombchuBowling_ClearFirstTime"},          // bombchu bowling's first prize: a bomb bag
+    {0x893fa7cb, "MiniGame_HitTarget_HrlCity_Get_BulletBag"},           // the Market gallery: a seed bag
+    {0xdda8aaf7, "MiniGame_HitTarget_Kakariko_Get_Quiver"},             // the Kakariko gallery: a quiver
+    {0x7c6e3b6b, "MiniGame_HorseBackArchery_Get_Quiver"},               // horseback archery: a quiver
+    {0x1fb5294d, "GoronCity_GetBombBag_fromGoron006"},                  // the rolling Goron: a bomb bag
+    {0x5db0e8ed, "LostWood_ScrubForestStage_SkullMaskEventLaunched"},   // Deku Theater, Skull Mask: sticks
+    {0xcdf86c43, "LostWood_ScrubForestStage_TrueMaskEventLaunched"},    // Deku Theater, Mask of Truth: nuts
 }};
 // Other once-per-save rewards: shared only (a heart piece is a count: two at once still add up, docs/items.md).
-inline constexpr std::array<Source, 8> kOther{{
+inline constexpr std::array<Source, 10> kOther{{
     {0x6b8fc751, "DeathMountain_Enemy_Scrub_Business_HeartPiece_01"},
     {0xe41e1597, "HyruleField_Enemy_Scrub_Business_HeartPiece_01"},
     {0x1d1793e9, "GoronLargePot_IsGetHeartPiece"},
@@ -449,6 +455,8 @@ inline constexpr std::array<Source, 8> kOther{{
     {0x39dad76d, "KakarikoVillage_GatheringTokenGold_GetReward20"},   // the Stone of Agony
     {0x8dc37ac6, "KakarikoVillage_GatheringTokenGold_GetReward40"},   // bombchus
     {0xe3c6e4a3, "KakarikoVillage_GatheringTokenGold_GetReward50"},   // a heart piece
+    {0x3f43245b, "MiniGame_HorsebackArchery_GotaHeart"},              // horseback archery: a heart piece
+    {0x46e5bc53, "MiniGame_HorsebackArchery_ISGetSpecialPrize"},
 }};
 // The bottle slots, each one unit: PouchData.Bottle<X>.StockNum and BottleInfo.Bottle<X>.IsValid.
 std::vector<std::vector<FlagKey>> bottle_units();
