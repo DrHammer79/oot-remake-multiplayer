@@ -3,7 +3,7 @@
 For the maintainer's agent, from the agent that worked on the `test-kit-0117` branch. Everything here is information
 about the game (addresses, offsets, names, behaviour) and about our tools; nothing from the game's files. The code is
 the source: each item names where it lives. The full list of every address and offset the code names, with its
-comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (888 constants, 85 files; run it
+comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (892 constants, 86 files; run it
 again after a game update).
 
 What is done, open and waiting on (the coordination state, kept current): [agent-state.md](agent-state.md).
@@ -109,6 +109,9 @@ the eye (`Obj_Base_OnOffAnim`) has no AI of its own, so a refused turn leaves it
   `LICHII_COOP_BLOCK_NODE=0`.
 - **Live play-testing** ([playtest.md](playtest.md)): `tools/autotest/live.py` keeps both games open and takes one
   step at a time; `dump TAG` checkpoints every shared flag; `desync_check.py`; `mcp_playtest.py` for Claude Code.
+  The play-test bridge in our module holds the game and runs an exact number of frames (`step`), walks by world
+  direction (`move`), and `--pair` drives both games from one MCP server. An agent starts here:
+  [playtest-agents.md](playtest-agents.md); shared scripts and known stuck spots: `tools/playtest/`.
 - **Reading the romfs** for facts: `tools/puppet_pack` (`zs`, `byml`, `sarc`, `bfres`): maps in
   `Banc/<Scene>/*.bcett.byml.zs` (actors, `Dynamic` params, `Links`, `Presence`), packs in `Pack/Actor/<Name>.pack.zs`;
   AI graphs read only as names (grep printable strings out of `.ainb`). Scanning the whole romfs at once takes over
@@ -126,7 +129,7 @@ Any of these, as a reply comment or a docs file in a PR:
    Redead's scream.
 4. **Presence**: whether a placement's `Presence.FlagName` is checked again when a dungeon room streams back in, or
    only at a scene load.
-5. **A frame step in the control bridge**: a pause and "advance N frames" command, so an agent can play real-time
-   fights step by step (the one thing the live kit cannot do from the module).
+5. **A frame step in the control bridge** (done for our module: `step` in [playtest.md](playtest.md), exact frames
+   then hold). Still wanted: the same in Longshot's own bridge, so no module is needed.
 6. **An AI-graph reader with the wiring** (node inputs and links), if your agent has one: ours reads names only.
 7. **Your agent's own handoff**: its scripts, memory notes and what it learned that is not written down.
