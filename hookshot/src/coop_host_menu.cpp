@@ -221,6 +221,7 @@ int Menu::HostStart(const HosCoopHostOptions* o) {
         status_ = HosCoopStatus{};
         status_.size = sizeof status_;
         status_.state = HOS_COOP_STARTING;
+        status_.same_network_open = job.same_network_open ? 1 : 0;   // (the lines for this network's players)
         CopyText(status_.password, sizeof status_.password, job.password);
     }
     stop_ = false;

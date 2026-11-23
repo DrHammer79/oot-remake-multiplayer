@@ -10,6 +10,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <span>
 #include <utility>
@@ -19,6 +20,7 @@
 #include "coop/net/enet_throttle.hpp"
 #include "coop/net/enet_waiting.hpp"
 #include "coop/protocol/codec.hpp"
+#include "coop/protocol/join_password.hpp"
 
 namespace coop::net {
 
@@ -166,6 +168,10 @@ std::string_view refuse_reason_text(proto::RefuseReason reason) {
 }
 
 std::string_view refuse_text(const Event& event) {
+  if (event.same_network_key && event.refuse_reason == proto::RefuseReason::bad_password) {
+    return "this host asks for its join password on its own network too: type the "
+           "password the host sent you, then join again";
+  }
   if (event.reconnecting && event.refuse_reason == proto::RefuseReason::bad_password) {
     return "the host restarted its server (it has a new join password now): ask the host "
            "for the new invite, then start Join.bat again with it";
@@ -528,6 +534,7 @@ void Client::on_receive(const std::uint8_t* data, std::size_t size,
       event.kind = EventKind::refused;
       event.refuse_reason = refused->reason;
       event.reconnecting = ever_welcomed_;
+      event.same_network_key = used_same_network_key_;
       push(std::move(event));
     } else if (channel == proto::kChannelProgress &&
                early_.size() < config_.max_early_messages) {
@@ -585,6 +592,7 @@ void Client::on_connected_message(proto::Message message, std::uint8_t channel) 
     Event event;
     event.kind = EventKind::refused;
     event.refuse_reason = refused->reason;
+    event.same_network_key = used_same_network_key_;
     push(std::move(event));
     return;
   }
@@ -794,11 +802,20 @@ void Client::refuse_unencrypted() {
 bool Client::answer_challenge(const proto::JoinChallenge& challenge,
                               std::span<const std::uint8_t> packet) {
   if (!challenge.key_share || !key_pair_) return false;
+  // No password typed and a host on this network: the same-network key (row
+  // 251), for every way a game joins (the menus, coop.ini, the launcher's
+  // variables, a rejoin).
+  unsigned char b[4];
+  std::memcpy(b, &address_host_, 4);   // (ENet's form: the bytes in network order)
+  const std::string password(proto::answer_password(
+      config_.join_password, (std::uint32_t{b[0]} << 24) | (std::uint32_t{b[1]} << 16) |
+                                 (std::uint32_t{b[2]} << 8) | std::uint32_t{b[3]}));
+  used_same_network_key_ = password == proto::kSameNetworkPassword;
   std::optional<proto::TrafficKeys> keys =
-      proto::derive_traffic_keys(*key_pair_, *challenge.key_share, config_.join_password,
+      proto::derive_traffic_keys(*key_pair_, *challenge.key_share, password,
                                  hello_packet_, packet, /*is_server=*/false);
   const proto::JoinProofBytes proof = proto::join_proof(
-      config_.join_password, challenge.nonce, key_pair_->share(), *challenge.key_share);
+      password, challenge.nonce, key_pair_->share(), *challenge.key_share);
   key_pair_.reset();
   hello_packet_.clear();
   if (!keys) return false;

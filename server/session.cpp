@@ -288,6 +288,7 @@ void Session::on_join_proof(ConnectionId id, Connection& c, const JoinProof& pro
     same_network = true;
     password = std::string(protocol::kSameNetworkPassword);
     ++stats_.same_network_joins;
+    log("a player on this network joins without the join password (same-network key, private address)");
   }
   c.nonce = {};  // used once: a second proof on this connection finds no nonce to match
   std::vector<std::uint8_t> hello_packet = std::move(c.hello_packet);
@@ -3392,9 +3393,17 @@ std::uint32_t ipv4_of(std::uint32_t enet_host) {
          std::uint32_t{b[3]};
 }
 
-bool is_same_network(std::uint32_t ipv4) {
-  const std::uint32_t a = ipv4 >> 24, b = (ipv4 >> 16) & 255u;
-  return a == 10 || (a == 172 && (b & 0xF0u) == 16) || (a == 192 && b == 168) || (a == 169 && b == 254);
+bool is_same_network(std::uint32_t ipv4) { return protocol::is_same_network_ipv4(ipv4); }
+
+bool is_same_network_ipv6(const std::array<std::uint8_t, 16>& address) {
+  if ((address[0] & 0xFEu) == 0xFCu) return true;                          // fc00::/7
+  if (address[0] == 0xFEu && (address[1] & 0xC0u) == 0x80u) return true;   // fe80::/10
+  for (std::size_t i = 0; i < 10; ++i) {
+    if (address[i] != 0) return false;
+  }
+  if (address[10] != 0xFFu || address[11] != 0xFFu) return false;          // ::ffff:a.b.c.d only
+  return is_same_network((std::uint32_t{address[12]} << 24) | (std::uint32_t{address[13]} << 16) |
+                         (std::uint32_t{address[14]} << 8) | std::uint32_t{address[15]});
 }
 
 void Session::refuse(ConnectionId id, Connection& c, RefuseReason reason,

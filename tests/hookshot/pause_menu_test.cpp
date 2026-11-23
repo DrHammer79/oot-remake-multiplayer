@@ -609,7 +609,7 @@ TEST_CASE("pause tab: Settings: name, Link's look, players and voice chat (off u
     CHECK(v.rows[5].value == "None");   // (no room name)
     CHECK_FALSE(v.rows[6].on);   // (List my room: off unless turned on)
     CHECK_FALSE(v.rows[7].on);   // (Auto-rejoin too)
-    CHECK(v.rows[8].value == "Needed");   // (the password on this network: needed unless chosen)
+    CHECK(v.rows[8].value == "Not needed");   // (the password on this network: not needed unless chosen, row 251)
     CHECK(v.rows[9].value == "Private game");   // (the host rows: what the next Host uses)
     CHECK_FALSE(v.rows[10].on);   // (Approve joins: off unless turned on)
     CHECK_FALSE(v.rows[11].on);   // (PvP too)
@@ -706,32 +706,38 @@ TEST_CASE("pause tab: Settings: players on the map and their names, on unless tu
     CHECK(m.options().map_names);
 }
 
-TEST_CASE("pause tab: Settings: the password on this network, needed unless chosen, saved") {
+TEST_CASE("pause tab: Settings: the password on this network, not needed unless chosen (row 251), saved") {
     Menu m;
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
     SelectRow(m, "Password on this network");
-    CHECK(m.view().rows[static_cast<std::size_t>(m.view().selected)].value == "Needed");   // (the default)
+    CHECK(m.view().rows[static_cast<std::size_t>(m.view().selected)].value == "Not needed");   // (the default)
     m.Press(Input::kDecide);
-    CHECK(m.options().same_network_open);
-    CHECK(m.TakeRequest()->kind == Request::Kind::kSave);
-    CHECK(m.view().rows[static_cast<std::size_t>(m.view().selected)].value == "Not needed");
-    m.Press(Input::kLeft);   // (two choices: either way flips it)
     CHECK_FALSE(m.options().same_network_open);
-    // coop-options.ini: same_network_open = on while it is not needed, no line otherwise; a file without the line
-    // (every older one) and an older same_network_password line keep it needed.
-    CHECK_FALSE(CoopTitleMenu::Options::Read("", "").same_network_open);
+    CHECK(m.TakeRequest()->kind == Request::Kind::kSave);
+    CHECK(m.view().rows[static_cast<std::size_t>(m.view().selected)].value == "Needed");
+    m.Press(Input::kLeft);   // (two choices: either way flips it)
+    CHECK(m.options().same_network_open);
+    // coop-options.ini: one line, the kit's own (Host.bat reads it too): same_network_password = on while this
+    // network needs the password, none otherwise. A file without it (every older one, and the kit's, where the line
+    // is commented out) lets the network in; an older build's line hand-set to off keeps the password.
+    CHECK(CoopTitleMenu::Options::Read("", "").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "# same_network_password = on\n").same_network_open);
     CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_password = on\n").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "same_network_password = off\n").same_network_open);
+    CHECK(CoopTitleMenu::Options::Read("", "same_network_open = on\n").same_network_open);
+    CHECK_FALSE(CoopTitleMenu::Options::Read("", "same_network_open = off\n").same_network_open);
     CoopTitleMenu::Options o;
-    o.same_network_open = true;
-    std::string coop_ini, options_ini;
-    o.Write(coop_ini, options_ini);
-    CHECK(options_ini.find("same_network_open = on") != std::string::npos);
-    CHECK(CoopTitleMenu::Options::Read(coop_ini, options_ini).same_network_open);
     o.same_network_open = false;
+    std::string coop_ini, options_ini = "same_network_open = on\n";
     o.Write(coop_ini, options_ini);
-    CHECK(options_ini.find("# same_network_open = on") != std::string::npos);   // (commented out, as IniUnset does)
+    CHECK(options_ini.find("same_network_password = on") != std::string::npos);
+    CHECK(options_ini.find("# same_network_open = on") != std::string::npos);   // (the older line commented out)
     CHECK_FALSE(CoopTitleMenu::Options::Read(coop_ini, options_ini).same_network_open);
+    o.same_network_open = true;
+    o.Write(coop_ini, options_ini);
+    CHECK(options_ini.find("# same_network_password = on") != std::string::npos);   // (commented out, as IniUnset does)
+    CHECK(CoopTitleMenu::Options::Read(coop_ini, options_ini).same_network_open);
 }
 
 TEST_CASE("pause tab: a name the server would refuse is not kept") {

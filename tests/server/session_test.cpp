@@ -4733,6 +4733,52 @@ TEST_CASE("join password: which addresses are the same network") {
   CHECK(!is_same_network(ipv4_of(enet_address(100, 64, 0, 1))));    // (a carrier's NAT, a VPN's: not this network)
   CHECK(!is_same_network(ipv4_of(enet_address(25, 1, 2, 3))));
   CHECK(!is_same_network(ipv4_of(enet_address(8, 8, 8, 8))));
+  // The ranges' edges (row 251: LAN joins need no password, the internet's still do).
+  CHECK(is_same_network(ipv4_of(enet_address(10, 0, 0, 0))));
+  CHECK(is_same_network(ipv4_of(enet_address(10, 255, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(9, 255, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(11, 0, 0, 0))));
+  CHECK(!is_same_network(ipv4_of(enet_address(172, 15, 255, 255))));
+  CHECK(is_same_network(ipv4_of(enet_address(172, 16, 0, 0))));
+  CHECK(is_same_network(ipv4_of(enet_address(192, 168, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(192, 167, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(192, 169, 0, 0))));
+  CHECK(is_same_network(ipv4_of(enet_address(169, 254, 0, 0))));
+  CHECK(!is_same_network(ipv4_of(enet_address(169, 253, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(169, 255, 0, 0))));
+  CHECK(!is_same_network(ipv4_of(enet_address(0, 0, 0, 0))));
+  CHECK(!is_same_network(ipv4_of(enet_address(255, 255, 255, 255))));
+  CHECK(!is_same_network(ipv4_of(enet_address(127, 255, 255, 255))));
+}
+
+TEST_CASE("join password: which IPv6 addresses are the same network, IPv4-mapped ones by their IPv4") {
+  using V6 = std::array<std::uint8_t, 16>;
+  const auto mapped = [](std::uint8_t a, std::uint8_t b, std::uint8_t c, std::uint8_t d) {
+    return V6{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, a, b, c, d};
+  };
+  CHECK(is_same_network_ipv6(V6{0xFC, 0x00, 1}));                     // fc00::/7, both halves
+  CHECK(is_same_network_ipv6(V6{0xFD, 0x12, 0x34}));
+  CHECK(!is_same_network_ipv6(V6{0xFB, 0xFF}));
+  CHECK(!is_same_network_ipv6(V6{0xFE, 0x00}));
+  CHECK(is_same_network_ipv6(V6{0xFE, 0x80}));                        // fe80::/10
+  CHECK(is_same_network_ipv6(V6{0xFE, 0xBF, 0xFF}));
+  CHECK(!is_same_network_ipv6(V6{0xFE, 0xC0}));                       // (fec0::, the old site-local: not taken)
+  CHECK(!is_same_network_ipv6(V6{0xFE, 0x7F}));
+  CHECK(!is_same_network_ipv6(V6{0x20, 0x01, 0x0d, 0xb8}));           // a global one
+  CHECK(!is_same_network_ipv6(V6{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}));   // ::1 (as 127/8)
+  CHECK(!is_same_network_ipv6(V6{}));                                 // ::
+  CHECK(is_same_network_ipv6(mapped(192, 168, 1, 20)));
+  CHECK(is_same_network_ipv6(mapped(10, 0, 0, 1)));
+  CHECK(is_same_network_ipv6(mapped(172, 31, 0, 1)));
+  CHECK(is_same_network_ipv6(mapped(169, 254, 1, 1)));
+  CHECK(!is_same_network_ipv6(mapped(127, 0, 0, 1)));                 // (a relay's and a helper's)
+  CHECK(!is_same_network_ipv6(mapped(8, 8, 8, 8)));
+  CHECK(!is_same_network_ipv6(mapped(100, 64, 0, 1)));
+  // IPv4-compatible (::a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) are not mapped ones: a private IPv4 there is not
+  // this network.
+  CHECK(!is_same_network_ipv6(V6{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 20}));
+  CHECK(!is_same_network_ipv6(V6{0, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 20}));
+  CHECK(!is_same_network_ipv6(V6{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xFF, 0xFF, 192, 168, 1, 20}));
 }
 
 TEST_CASE("join password: no proof at all times out like a missing HELLO") {

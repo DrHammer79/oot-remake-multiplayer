@@ -602,6 +602,35 @@ TEST_CASE("client: a JOIN_CHALLENGE is answered once with the proof of the join 
   CHECK(client.state() == State::refused);
 }
 
+TEST_CASE("client: a host on this network that still asks for its password says so (row 251)") {
+  // The game joins a private address with no password typed with the same-network key; a host that keeps the
+  // password for its own network refuses it as a wrong password, and the line says what to do.
+  FakeServer server;
+  ClientConfig config = config_for(server);
+  config.join_password = std::string(proto::kSameNetworkPassword);
+  Client client(config);
+  Events events;
+  REQUIRE(client.start());
+  REQUIRE(pump(client, server, [&] { return server.find<proto::Hello>().has_value(); }));
+  proto::JoinNonce nonce{};
+  server.send_challenge(nonce, std::string(proto::kSameNetworkPassword));
+  REQUIRE(pump(client, server, [&] { return server.find<proto::JoinProof>().has_value(); }));
+  server.cipher.reset();
+  server.send(proto::Refused{proto::RefuseReason::bad_password}, proto::kChannelSession);
+  REQUIRE(wait_event(client, server, events, EventKind::refused));
+  const Event& refused = events.all[*events.find(EventKind::refused)];
+  CHECK(refused.same_network_key);
+  CHECK(refuse_text(refused).starts_with("this host asks for its join password on its own network too"));
+  // Any other refusal keeps its own text.
+  Event full = refused;
+  full.refuse_reason = proto::RefuseReason::server_full;
+  CHECK(refuse_text(full) == refuse_reason_text(proto::RefuseReason::server_full));
+  // A typed password keeps the plain wrong-password text.
+  Event typed = refused;
+  typed.same_network_key = false;
+  CHECK(refuse_text(typed).starts_with("wrong join password"));
+}
+
 TEST_CASE("client: with no join password typed a challenge is still answered (the server refuses it)") {
   FakeServer server;
   ClientConfig config = config_for(server);
