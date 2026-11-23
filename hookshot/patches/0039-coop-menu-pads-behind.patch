@@ -1,4 +1,4 @@
-From 16b79bfac671c86399d6207bbbcfdef7e37502f0 Mon Sep 17 00:00:00 2001
+From f2dc0ce227fa25e8702ef4b16d695e7863878229 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 23 Nov 2026 02:42:08 -0900
 Subject: [PATCH] Co-op menu: the Insert menu takes the pads the game would,
@@ -8,14 +8,11 @@ Patch 0037 let the co-op module open Longshot's own menu with no key (HOS_COOP_M
 
 nn_hid.c: one pad path in front and behind (pads_to_game): while the menu is open the pads are its own and each waits until let go after it closes; behind with the pads not the game's, pad_raw_now is 0. A test's presses (HOS_INPUT_SCRIPT, the control bridge) while the menu is open are the menu's too, as the pad inputs bound to them, and kept from the game (test_presses_to_menu). hos_pad_raw gives both.
 vk_menu.cpp: the pads with no focus test of the menu's (the host decides); Restart/Quit's second press and the Controls page's confirmation take the player's pad behind other windows (mine || pad_last).
-tests: test_pads_after_menu covers the behind path and the test's presses; test_input_background and test_menu_text_field follow the code.
+(Longshot's tests/ is not in the Linux AppImage the kit patches: the behaviour test is oot-remake-multiplayer's tools/hookshot/menu_pads_behind_test.py, on the patched source. tests/test_pads_after_menu.py, test_input_background.py and test_menu_text_field.py still cut the old blocks.)
 ---
- gpu/vk/vk_menu.cpp             | 15 ++++--
- host/nn_hid.c                  | 96 +++++++++++++++++++++++++---------
- tests/test_input_background.py |  4 +-
- tests/test_menu_text_field.py  |  2 +
- tests/test_pads_after_menu.py  | 52 ++++++++++++++++--
- 5 files changed, 133 insertions(+), 36 deletions(-)
+ gpu/vk/vk_menu.cpp | 15 ++++++--
+ host/nn_hid.c      | 96 +++++++++++++++++++++++++++++++++-------------
+ 2 files changed, 81 insertions(+), 30 deletions(-)
 
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
 index fc75d6c1..9424f577 100644
@@ -204,134 +201,6 @@ index 433a349b..c006eef3 100644
      }
      if (connected && !played) {
          read_input(&buttons, &taps, stick);
-diff --git a/tests/test_input_background.py b/tests/test_input_background.py
-index 91addcab..fee3b81d 100644
---- a/tests/test_input_background.py
-+++ b/tests/test_input_background.py
-@@ -61,8 +61,10 @@ def main():
-     read = block(hid, "static void read_input(")
-     behind = read[read.index("if (!input_in_front)"):]
-     behind = behind[:behind.index("goto done;") + len("goto done;")]
--    if "pads_in_background(" not in behind or "pads_read(" not in behind:
-+    if "pads_in_background(" not in behind or "pads_to_game(" not in behind:
-         raise SystemExit("behind another window the pads are never read")
-+    if "InterlockedExchange(&pad_raw_now, 0)" not in behind:
-+        raise SystemExit("behind another window, with the pads not the game's, the Insert menu would still take them")
-     if "key(" in behind or "mouse" in behind:
-         raise SystemExit("behind another window the keyboard or mouse would reach the game")
-     option = replay[replay.index("t.option = "):]
-diff --git a/tests/test_menu_text_field.py b/tests/test_menu_text_field.py
-index 263ef6a2..c645b9b0 100644
---- a/tests/test_menu_text_field.py
-+++ b/tests/test_menu_text_field.py
-@@ -178,6 +178,7 @@ void tap(int button, int count = 1) {
- }
- // The host's raw pad callback and the menu's edge/repeat path, not a latched game-button word.
- uint32_t pad_raw_now = 0;
-+uint32_t pad_raw_test = 0;   // (patch 0039: a test's presses while the menu is open)
- @@PAD_RAW@@
- void routed_tick() {
-     const bool mine = true;
-@@ -190,6 +191,7 @@ void routed_tick() {
-     @@FOCUSED@@
-     (void)chord_now;
-     (void)pad_last;
-+    (void)mine;   // (patch 0039: the pads need no focus test of the menu's)
- }
- void test_toggle_text_isolation() {
-     startup("1920x800");
-diff --git a/tests/test_pads_after_menu.py b/tests/test_pads_after_menu.py
-index dc8c9466..2d3648d9 100644
---- a/tests/test_pads_after_menu.py
-+++ b/tests/test_pads_after_menu.py
-@@ -3,7 +3,9 @@
- The press that closes the menu, and every pad input still down from it, must not reach the game until let go. Each
- waits on its own: one that stays down (a worn trigger, a Guide button, something resting on a second pad) used to keep
- every button and both sticks of every pad from the game. Production's pads_read, bound_pad_buttons and read_input's
--pad block are compiled with fakes for SDL, XInput and the clock; no device is read.
-+pad block (pads_to_game, the same behind other windows: patch 0039 of oot-remake-multiplayer) and the test's presses'
-+(test_presses_to_menu: HOS_INPUT_SCRIPT and the control bridge while the menu is open are its own, as the pad inputs
-+bound to them, hos_pad_raw) are compiled with fakes for SDL, XInput and the clock; no device is read.
- 
- python -I -B tests/test_pads_after_menu.py [--cc gcc]
- """
-@@ -98,6 +100,22 @@ static uint64_t game(int32_t stick[4]) {
-     game_pads(&buttons, stick);
-     return buttons;
- }
-+/* one read of the game's with the window behind another one (Controller in background on) */
-+static uint64_t game_behind(int32_t stick[4]) {
-+    now_ns += 16000000;
-+    uint64_t buttons = 0;
-+    memset(stick, 0, 4 * sizeof *stick);
-+    sprint_now = 0;
-+    (void)pads_to_game(&buttons, stick, NULL, 0);
-+    return buttons;
-+}
-+/* one read of the game's with a test's presses (the script's or the control bridge's) and no pad */
-+static uint64_t game_test(uint64_t pressed, int32_t stick[4]) {
-+    uint64_t buttons = pressed;
-+    stick[0] = pressed ? 20000 : 0, stick[1] = stick[2] = stick[3] = 0;
-+    test_presses_to_menu(&buttons, stick);
-+    return buttons;
-+}
- #define PAD(p) (1ULL << HOS_PAD_##p)
- #define SW(b) (1ULL << HOS_SW_##b)
- 
-@@ -147,7 +165,26 @@ int main(void) {
-     menu_open = 0; CHECK(game(s) == 0);
-     pads_down |= PAD(WEST) | PAD(DOWN); CHECK(game(s) == (SW(Y) | SW(DOWN)));
-     pads_down = 0; CHECK(game(s) == 0);
-+
-+    /* Behind other windows (patch 0039): the same, the open menu's pads never reach the game; the menu has them */
-+    menu_open = 1; pads_down = PAD(SOUTH); CHECK(game_behind(s) == 0 && hos_pad_raw() == PAD(SOUTH));
-+    menu_open = 0; CHECK(game_behind(s) == 0);   /* (the B that closed it waits until let go) */
-+    pads_down = 0; CHECK(game_behind(s) == 0);
-+    pads_down = PAD(SOUTH); CHECK(game_behind(s) == SW(B));
-+    pads_down = 0; CHECK(game_behind(s) == 0);
-+
-+    /* A test's presses while the menu is open: the menu's, as the pad inputs bound to them, not the game's (sticks too) */
-+    menu_open = 1;
-+    CHECK(game_test(SW(B), s) == 0 && s[0] == 0 && hos_pad_raw() == PAD(SOUTH));
-+    CHECK(game_test(SW(A) | SW(DOWN), s) == 0 && hos_pad_raw() == (PAD(EAST) | PAD(DOWN)));
-+    menu_open = 0;
-+    CHECK(game_test(SW(A), s) == 0 && hos_pad_raw() == 0);   /* the press that closed it waits until let go, */
-+    CHECK(game_test(0, s) == 0);
-+    CHECK(game_test(SW(A), s) == SW(A) && s[0] == 20000);   /* then counts again, */
-+    CHECK(game_test(SW(B), s) == SW(B) && hos_pad_raw() == 0);   /* and with the menu shut never reaches it */
-+    CHECK(game_test(0, s) == 0);
-     puts("PASS: after the Insert menu each pad input waits until let go; the others and the sticks count at once");
-+    puts("PASS: behind other windows the open menu's pads are its own, and a test's presses are the menu's while it is open");
-     return 0;
- }
- """
-@@ -160,7 +197,10 @@ def main():
-     hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-     api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
-     read = block(hid, "static void read_input(")
--    pads = block(read, "{   /* (longshot) while the Insert menu is open the pads are its own")
-+    if "down = pads_to_game(buttons, stick, &deck_builtin_input, 1);" not in read:
-+        raise SystemExit("read_input no longer gives the pads through pads_to_game")
-+    if "test_presses_to_menu(buttons, stick);" not in read:
-+        raise SystemExit("read_input no longer gives a test's presses to the open menu")
-     state = hid[hid.index("static volatile LONG pad_raw_now;"):hid.index("uint32_t hos_pad_raw(")]
-     code = "\n".join((
-         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
-@@ -175,9 +215,11 @@ def main():
-         # (the XInput code before pads_read: its thread and its reading; never started here, SDL has the pads)
-         hid[hid.index("static volatile int xinput_pads_now;"):hid.index("static void pads_read(")],
-         block(hid, "static void pads_read("),
--        # (read_input's `down`, the buttons down at this read, which the cut block fills for the player's input check below it;
--        #  deck_builtin_input is read_input's local the cut block passes to pads_read)
--        "static void game_pads(uint64_t *buttons, int32_t stick[4]) {\n    uint64_t down = 0;\n    int deck_builtin_input = 0;\n    (void)deck_builtin_input;\n    " + pads + "\n    (void)down;\n}",
-+        block(hid, "uint32_t hos_pad_raw("),
-+        block(hid, "static uint64_t pads_to_game("),
-+        block(hid, "static void test_presses_to_menu("),
-+        "static void game_pads(uint64_t *buttons, int32_t stick[4]) {\n    int deck_builtin_input = 0;\n"
-+        "    (void)pads_to_game(buttons, stick, &deck_builtin_input, 1);\n}",
-         MAIN))
-     with tempfile.TemporaryDirectory(prefix="longshot-pads-after-menu-") as tmp:
-         src = Path(tmp) / "t.c"
 -- 
 2.56.0.windows.4
 

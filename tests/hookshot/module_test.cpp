@@ -966,8 +966,9 @@ TEST_CASE("hookshot: the Insert menu takes the pads the game would, whichever wi
     CHECK(patch.find("+    test_presses_to_menu(buttons, stick);") != std::string::npos);
     CHECK(patch.find("+uint32_t hos_pad_raw(void) { return (uint32_t)pad_raw_now | (uint32_t)pad_raw_test; }") !=
           std::string::npos);
-    // Longshot's own test of the pads after the menu covers both paths.
-    CHECK(patch.find("tests/test_pads_after_menu.py") != std::string::npos);
+    // Only what the Linux AppImage ships (no tests/): the behaviour test is ours, on the patched source.
+    CHECK(patch.find("diff --git a/tests/") == std::string::npos);
+    CHECK(ReadFile(kRepo / "tools" / "hookshot" / "menu_pads_behind_test.py").find("pads_to_game") != std::string::npos);
 }
 
 TEST_CASE("hookshot: the boss orders wrap (patch 0036) is one row in 0005's table, its header hookshot/src's") {
