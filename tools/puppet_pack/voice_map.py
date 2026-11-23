@@ -129,16 +129,6 @@ def clip_class(clip_name):
     return None
 
 
-def pick(event, by_class, n):
-    """n clips for one of Link's events from a voice's usable clips ({class: [clip, ...]}): the first
-    class in prefs(event) that has any, repeated in turn when the voice has fewer than n."""
-    for c in prefs(event):
-        clips = by_class.get(c) or []
-        if clips:
-            return [clips[i % len(clips)] for i in range(n)]
-    return []
-
-
 def cap_s(event, link_longest):
     """The longest a clip may be for this event, or None when the event has no cap."""
     return link_longest + MARGIN_S if event in FREQUENT else None
@@ -168,8 +158,10 @@ def check_clips(clips, link_names):
             bad.append("%s: not one of Link's voice clips" % where)
             continue
         seen.setdefault((c.voice, c.age), set()).add(c.link_name)
-        if c.source.startswith("Vo_Pl"):
+        if c.source.startswith("Vo_Pl") or is_link_voice(c.source):
             bad.append("%s: Link's own voice" % where)
+        elif is_link_voice(c.voice):
+            bad.append("%s: an archive made from Link's voice" % where)
         elif clip_class(c.source) is None:
             bad.append("%s: clip kind not allowed (speech, laugh, cry or unknown)" % where)
         cap = cap_s(ev, c.link_longest)

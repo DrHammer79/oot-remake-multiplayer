@@ -1022,7 +1022,13 @@ elif [[ -n $pack_from && -e $pack_from ]]; then
     if [[ ! -f $mod/coop_puppet.json ]]; then say '  puppet pack: none yet'
     elif [[ $(cat "$mod/.coop-stamp" 2>/dev/null) != "$pack_stamp" ]]; then say '  puppet pack: made for another pack tool or other Character Select characters'
     fi
-    say '  Making the puppet pack (how you see the other players; 1 to 4 minutes) ...'
+    say '  Making the puppet pack (how you see the other players; 1 to 4 minutes, about 15 more for Character Select voices) ...'
+    # numpy makes Character Select's voices from the game's own clips (docs/puppet.md); without it they are silent.
+    if ! "$PY" -I -c 'import numpy' 2>/dev/null; then
+        "$PY" -I -m pip install --quiet numpy >/dev/null 2>&1 || true
+        "$PY" -I -c 'import numpy' 2>/dev/null ||
+            say "  numpy could not be installed in Longshot's builder Python: Character Select's characters stay silent"
+    fi
     [[ -n ${OOT_COOP_PACK_FRESH-} ]] || pack_save   # (kept: switching Character Select back puts it back in seconds)
     if "$PY" -I -B "$DATA/tools/puppet_pack/build.py" --romfs "$pack_from" --mod-dir "$mod" --title-rows --pause-tab 2>&1 | sed 's/^/    /'; then
         printf '%s' "$pack_stamp" >"$mod/.coop-stamp"

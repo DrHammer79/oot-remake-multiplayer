@@ -12,7 +12,10 @@ asset, found by the crc32 of the name. A long clip is a "prefetch" BWAV: the arc
 import struct
 import zlib
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:      # reading and writing archives needs no numpy; decoding and encoding do
+    np = None
 
 CHANNEL = 0x4C   # bytes per channel in a BWAV header
 NO_BWAV = 0xFFFFFFFF

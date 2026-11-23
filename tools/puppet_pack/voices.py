@@ -4,16 +4,19 @@
 No sound is shipped. For each character, every one of Link's voice clips (Vo_Pl<Age>_*) gets a stand-in cut
 from clips the game already has for that character's voice type (voice_table.json). The clips are trimmed,
 scaled to Link's loudness, encoded and written into the shape of Link's own clip: an archive
-PlayerVoice_<Age>_<key>.bars under Link's name hashes, plus a stream file for each clip that Link streams. The
+CoopVoice_<Age>_<key>.bars under Link's name hashes, plus a stream file for each clip that Link streams. The
 Character Select hook turns a request for Player_<Age> into the list Player_<Age>_V<NN>; the list names our
 archive before Link's, so the game finds our clip first. voice_map.check() is the gate: when a rule breaks, no
-voice is written and the pack is built as before.
+voice is written, and silent() gives every character a silent archive instead (never Link's clips).
 """
 import json
 import os
 import zlib
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:      # build() needs numpy; silent() does not
+    np = None
 
 from . import bwav
 from . import voice_map as vm
@@ -223,10 +226,48 @@ def choose(event, voices, n, cap, rate):
 
 
 def stream_code(i):
-    """Two letters for a voice archive's stream files: 'VAaPl...' keeps the length of 'Vo_Pl...'."""
-    if i >= 26 * 26:
+    """Two characters for a voice archive's stream files: 'V0aPl...' keeps the length of 'Vo_Pl...'. A digit first, so
+    a name never matches the mod's own 'V<2 letters>Pl...' files (on a disk that ignores case too). The last code is
+    the silent archive's."""
+    if i >= 10 * 26 - 1:
         raise VoiceError("too many voice archives")
-    return chr(65 + i // 26) + chr(97 + i % 26)
+    return chr(48 + i // 26) + chr(97 + i % 26)
+
+
+SILENT_CODE = "9z"
+
+
+def archive_name(age, key):
+    """Our archives are CoopVoice_<Age>_..., never the mod's PlayerVoice_<Age>_<voice> (which the kit deletes)."""
+    return f"CoopVoice_{age}_{key}"
+
+
+def silent(files, log=print):
+    """A silent stand-in for each of Link's voice clips, per age; needs no numpy. For a character whose voice was not
+    made: its list names this archive before Link's, so it says nothing (never Link's voice).
+    -> {"files": {rel: bytes}, "archives": {age: archive file name}}. Raises VoiceError without Link's archive."""
+    out_files, archives = {}, {}
+    for age in VARIANTS:
+        data = files.bars(f"{RESOURCE}/Player_{age}.bars")
+        if data is None:
+            raise VoiceError(f"no {RESOURCE}/Player_{age}.bars")
+        assets, streams = [], {}
+        for n, (amta, at) in sorted(bwav.bars_names(data).items()):
+            if not n.startswith(f"Vo_Pl{age}_") or at is None:
+                continue
+            head, stream = bwav.clip_bytes(data, 14, (0,) * 16, bytes(8), at)
+            if stream is not None:
+                sname = streams.get(len(n))
+                if sname is None:
+                    sname = streams[len(n)] = "V" + SILENT_CODE + n[3:]
+                    out_files[f"{STREAM}/{sname}.bwav"] = stream
+                amta = bwav.with_amta_name(amta, sname)
+            assets.append((zlib.crc32(n.encode("latin1")), amta, head))
+        if not assets:
+            raise VoiceError(f"no voice clips in {RESOURCE}/Player_{age}.bars")
+        archives[age] = archive_name(age, "Silent") + ".bars"
+        out_files[f"{RESOURCE}/{archives[age]}"] = bwav.bars_build(assets)
+    return {"files": out_files, "archives": archives}
 
 
 def build(files, characters, table=None, log=print):
@@ -235,6 +276,8 @@ def build(files, characters, table=None, log=print):
     files: .bars(rel) -> the unpacked archive or None; .stream(rel) -> a stream file's bytes or None.
     -> {"files": {rel: bytes} (archives unpacked, streams as they are), "lists": {age: {number: archive}},
         "clips": [vm.Clip]}. Raises VoiceError or ValueError (a broken rule) when no voice may be written."""
+    if np is None:
+        raise ImportError("numpy is not installed")
     table = load_table() if table is None else table
     links = {a: Link(files, a) for a in VARIANTS}
     # Each character's row; the characters that share a chain and default share an archive.
@@ -264,7 +307,7 @@ def build(files, characters, table=None, log=print):
             if v.startswith(("Enemy_", "Animal_", "NV_Cow")):
                 creatures.add(v)
         for i, key in enumerate(sorted(keys)):
-            archive = f"PlayerVoice_{age}_{key[0]}" + ("" if sum(k[0] == key[0] for k in keys) == 1 else f"_{i}")
+            archive = archive_name(age, key[0]) + ("" if sum(k[0] == key[0] for k in keys) == 1 else f"_{i}")
             code = stream_code(i)
             chain = [voices[v] for v in key if voices[v]]
             slots = {}

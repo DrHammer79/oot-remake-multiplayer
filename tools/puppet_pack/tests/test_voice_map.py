@@ -69,24 +69,19 @@ class Classes(unittest.TestCase):
         self.assertEqual(vm.prefs("Shield_S")[0], "EFFORT")
 
 
-class Pick(unittest.TestCase):
-    def test_first_class_that_has_clips_rotates_to_links_count(self):
-        by = {"DAMAGE": ["d0", "d1"], "SURPRISE": ["s0"]}
-        self.assertEqual(vm.pick("SwordAttack_S", by, 5), ["s0"] * 5)
-        self.assertEqual(vm.pick("Damage_M", by, 3), ["d0", "d1", "d0"])
-
-    def test_a_voice_with_any_clip_fills_every_event(self):
-        by = {"BREATH": ["b0"]}
-        for ev in ("SwordAttack_S", "Damage_B", "Jump_S", "Shield_B", "Dm_X"):
-            self.assertEqual(vm.pick(ev, by, 2), ["b0", "b0"])
-
-    def test_no_clips_gives_nothing(self):
-        self.assertEqual(vm.pick("Jump_S", {}, 4), [])
-
-
 class Clips(unittest.TestCase):
     def test_good_clips_pass(self):
         self.assertEqual(vm.check_clips(full(), LINK_NAMES), [])
+
+    def test_a_clip_of_links_voice_is_refused_by_itself(self):
+        # Each gate stands alone: check_clips refuses Link's voice without check_map having run.
+        c = full()
+        c[0] = c[0].__class__(**{**c[0].__dict__, "voice": "Dark_Link"})
+        c[1] = c[1].__class__(**{**c[1].__dict__, "source": "PlayerVoice_Child_Saria_Jump"})
+        bad = vm.check_clips(c, LINK_NAMES)
+        self.assertTrue(bad[0].startswith("Dark_Link Child Vo_PlChild_SwordAttack_S_01"), bad)
+        self.assertTrue(bad[0].endswith("an archive made from Link's voice"), bad)
+        self.assertTrue(bad[1].endswith("(PlayerVoice_Child_Saria_Jump): Link's own voice"), bad)
 
     def test_frequent_event_over_the_cap_is_an_outlier(self):
         bad = vm.check_clips(full(length=0.41), LINK_NAMES)

@@ -500,21 +500,64 @@ def character_voices(characters, romfs, dicts, log=print):
         for v in VARIANTS:
             lists[puppet_sound_list(v)] = copy.deepcopy(base[f"Player_{v}"])
         log(f"characters: {len(voiced)} voice lists in {characters['mod']}'s {r}; puppets get their own sound lists")
-        # Every pickable character's voice, made here from the player's own game (voices.py). Not made: the mod's
-        # lists as they are.
-        made = None
+        # Every pickable character's voice, made here from the player's own game (voices.py). The kit deletes the
+        # mod's own voice files, so no list may still name one: a character whose voice is not made (no numpy, a
+        # broken rule, a picker row the table does not know, a list for a number that is no picker row) gets the
+        # silent archive, never Link's clips. Link's own models keep the game's Player_<Age> list (no V list).
+        from . import voices
+        names = characters.get("names") or {}
+        made, why = None, None
         try:
-            from . import voices   # needs numpy; without it, no voices
-            made = voices.build(voices.RomfsFiles(romfs, dicts), characters.get("names") or {}, log=log)
+            made = voices.build(voices.RomfsFiles(romfs, dicts), names, log=log)
         except (ImportError, OSError, ValueError, KeyError, IndexError, struct.error) as e:
+            why = str(e)
             log(f"characters: no voices made ({e})")
+        files = dict(made["files"]) if made else {}
         if made:
             for v in VARIANTS:
                 for number, archive in made["lists"][v].items():
                     lists[voice_list(v, number)] = voices.list_entry(base[f"Player_{v}"], archive)
             log(f"characters: voices made for {len(made['lists']['Child'])} characters "
                 f"({len(made['files'])} files)")
-        return {**found, "doc": doc, "lists": set(lists), "made": made}
+        try:
+            table = voices.load_table()
+        except (OSError, ValueError) as e:
+            table = {}
+            log(f"characters: {os.path.basename(voices.TABLE)} could not be read ({e})")
+        link = {n for n, name in names.items() if (table.get(name) or {}).get("link")}
+        unvoiced = {}   # list name -> character number
+        for v in VARIANTS:
+            done = set(made["lists"][v]) if made else set()
+            for k in [k for k in lists if k.startswith(f"Player_{v}_V")]:
+                try:
+                    number = int(k[len(f"Player_{v}_V"):], 16)
+                except ValueError:
+                    number = None
+                if number in link:   # a Link model: the game's own Player_<Age> list, never the mod's deleted files
+                    lists[k] = copy.deepcopy(base[f"Player_{v}"])
+                elif number not in done:
+                    unvoiced[k] = number
+            for number in names:
+                if number not in done and number not in link:
+                    unvoiced[voice_list(v, number)] = number
+        if unvoiced:
+            who = sorted({names.get(n) or ("#%s" % n) for n in unvoiced.values()})
+            reason = why or "the mod has a voice list for a number that is no picker row"
+            try:
+                quiet = voices.silent(voices.RomfsFiles(romfs, dicts), log=log)
+            except (OSError, ValueError, KeyError, IndexError, struct.error) as e:
+                quiet = None
+                for k in unvoiced:
+                    del lists[k]
+                log(f"characters: no voice for {', '.join(who)} ({reason}), and no silent archive ({e}): "
+                    f"their lists are left out")
+            if quiet:
+                files.update(quiet["files"])
+                for k in unvoiced:
+                    v = "Child" if k.startswith("Player_Child_") else "Adult"
+                    lists[k] = voices.list_entry(base[f"Player_{v}"], quiet["archives"][v])
+                log(f"characters: no voice for {', '.join(who)} ({reason}): they are silent")
+        return {**found, "doc": doc, "lists": set(lists), "made": made, "files": files}
     return None
 
 
@@ -2376,16 +2419,16 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
         key = strip_zs(voiced["rel"])
         table.set(key, max(table.get(key) or 0, ((len(data) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN))
         log(f"wrote {voiced['rel']} ({characters['mod']}'s with {', '.join(puppet_sound_list(v) for v in VARIANTS)})")
-        if voiced.get("made"):
-            from . import voices
-            like = read(os.path.join(romfs, voices.RESOURCE, "Player_Child.bars.zs"))
-            for r, data in sorted(voiced["made"]["files"].items()):
+        if voiced.get("files"):
+            from . import voices as voice_files   # not "voices": build() has a local of that name
+            like = read(os.path.join(romfs, voice_files.RESOURCE, "Player_Child.bars.zs"))
+            for r, data in sorted(voiced["files"].items()):
                 if r.endswith(".bars"):
                     write(os.path.join(out_romfs, r + ".zs"), recompress(dicts, like, data))
                     table.add_new(r, ((len(data) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN)
                 else:
                     write(os.path.join(out_romfs, r), data)
-            log(f"wrote {len(voiced['made']['files'])} voice files")
+            log(f"wrote {len(voiced['files'])} voice files")
     for path, new in ((ai_path, ai_new), (gai_path, gai_new), (rs_path, table.dumps())):
         r = rel(romfs, path)
         write(os.path.join(out_romfs, r), recompress(dicts, read(path), new))

@@ -324,7 +324,7 @@ function Invoke-PuppetPackStep([string]$exeDir) {
         # (why, in one line: Get-PuppetPackHint's reason; and about how long: 1 to 4 minutes, measured 3:19 on a fast PC)
         $why = if (Test-Path -LiteralPath (Join-Path $mod 'coop_puppet.json')) { Get-PuppetPackHint (Join-Path $mod 'coop_puppet.json') $packDir } else { 'Puppet pack: none yet.' }
         if ($why) { Write-Host "  $(($why -split '\. ')[0])." }
-        Write-Host '  Making the puppet pack (how you see the other players; 1 to 4 minutes) ...'
+        Write-Host '  Making the puppet pack (how you see the other players; 1 to 4 minutes, about 15 more for Character Select voices) ...'
         # (the pack there is kept for later: switching Character Select back puts it back in seconds)
         $keptPack = if (-not $PackOnly) { Save-KitPuppetPack $kit $mod } else { '' }
         $ErrorActionPreference = 'Continue'

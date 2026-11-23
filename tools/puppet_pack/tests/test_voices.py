@@ -6,6 +6,7 @@ import os
 import sys
 import unittest
 import zlib
+from unittest import mock
 
 import numpy as np
 
@@ -86,13 +87,13 @@ class Build(unittest.TestCase):
         for age in ("Child", "Adult"):
             got = self.out["lists"][age]
             self.assertNotIn(0, got)
-            self.assertEqual(got[2], f"PlayerVoice_{age}_Custom_Saria.bars")
-            self.assertEqual(got[7], f"PlayerVoice_{age}_Kokiri_Girl_Spry.bars")
-            self.assertEqual(got[108], f"PlayerVoice_{age}_Enemy_ReDead.bars")
+            self.assertEqual(got[2], f"CoopVoice_{age}_Custom_Saria.bars")
+            self.assertEqual(got[7], f"CoopVoice_{age}_Kokiri_Girl_Spry.bars")
+            self.assertEqual(got[108], f"CoopVoice_{age}_Enemy_ReDead.bars")
             self.assertIn(f"{voices.RESOURCE}/{got[2]}", self.out["files"])
 
     def test_every_link_voice_clip_has_a_stand_in_and_nothing_else(self):
-        d = self.out["files"][f"{voices.RESOURCE}/PlayerVoice_Child_Custom_Saria.bars"]
+        d = self.out["files"][f"{voices.RESOURCE}/CoopVoice_Child_Custom_Saria.bars"]
         assets, _ = bwav.read_bars(d)
         want = {zlib.crc32(n.encode()) for n in ("Vo_PlChild_SwordAttack_S_01", "Vo_PlChild_SwordAttack_S_02",
                                                  "Vo_PlChild_Wait_01")}
@@ -100,16 +101,16 @@ class Build(unittest.TestCase):
 
     def test_clips_come_from_the_characters_own_voice_and_fit(self):
         by = {(c.voice, c.link_name): c for c in self.out["clips"]}
-        swing = by["PlayerVoice_Child_Custom_Saria", "Vo_PlChild_SwordAttack_S_01"]
+        swing = by["CoopVoice_Child_Custom_Saria", "Vo_PlChild_SwordAttack_S_01"]
         self.assertEqual(swing.source, "NV_Custom_Saria_WeaponSwingS00")
         self.assertLessEqual(swing.length, swing.link_longest + 0.15)
-        self.assertEqual(by["PlayerVoice_Child_Custom_Saria", "Vo_PlChild_Wait_01"].source,
+        self.assertEqual(by["CoopVoice_Child_Custom_Saria", "Vo_PlChild_Wait_01"].source,
                          "NV_Custom_Saria_Ease00")
         self.assertNotIn("NV_Custom_Saria_TalkPositive00", {c.source for c in self.out["clips"]})
         # A voice type the game lacks falls to the default of the character's sex and age.
-        self.assertEqual(by["PlayerVoice_Child_Kokiri_Girl_Spry", "Vo_PlChild_Wait_01"].source,
+        self.assertEqual(by["CoopVoice_Child_Kokiri_Girl_Spry", "Vo_PlChild_Wait_01"].source,
                          "NV_Hylia_Girl_Spry_Painful00")
-        self.assertEqual(by["PlayerVoice_Child_Enemy_ReDead", "Vo_PlChild_SwordAttack_S_01"].source,
+        self.assertEqual(by["CoopVoice_Child_Enemy_ReDead", "Vo_PlChild_SwordAttack_S_01"].source,
                          "Enemy_ReDead_DamageVoice_00")
 
     def test_loudness_meets_links(self):
@@ -117,12 +118,12 @@ class Build(unittest.TestCase):
             self.assertLessEqual(abs(c.rms_db - c.link_rms_db), 3.0, (c.voice, c.link_name))
 
     def test_a_streamed_slot_gets_its_own_stream_file(self):
-        d = self.out["files"][f"{voices.RESOURCE}/PlayerVoice_Child_Custom_Saria.bars"]
+        d = self.out["files"][f"{voices.RESOURCE}/CoopVoice_Child_Custom_Saria.bars"]
         assets, _ = bwav.read_bars(d)
         meta, at = assets[zlib.crc32(b"Vo_PlChild_Wait_01")]
         name = bwav.amta_name(meta)
         self.assertEqual(len(name), len("Vo_PlChild_Wait_01"))
-        self.assertTrue(name.startswith("V") and not name.startswith("Vo_"))
+        self.assertRegex(name, r"^V[0-9][a-z]PlChild_")   # never the mod's V<2 letters>Pl... nor Link's Vo_Pl...
         stream = self.out["files"][f"{voices.STREAM}/{name}.bwav"]
         self.assertEqual(stream[8:12], d[at + 8:at + 12])
         x, _ = bwav.decode(stream)
@@ -130,10 +131,48 @@ class Build(unittest.TestCase):
 
     def test_list_entry_puts_the_voice_archive_first(self):
         base = {"Bars": ["Player.bars", "Player_Child.bars"], "ChoiceAsset": ["a.casset.byml"]}
-        e = voices.list_entry(base, "PlayerVoice_Child_Custom_Saria.bars")
-        self.assertEqual(e["Bars"], ["PlayerVoice_Child_Custom_Saria.bars", "Player.bars", "Player_Child.bars"])
+        e = voices.list_entry(base, "CoopVoice_Child_Custom_Saria.bars")
+        self.assertEqual(e["Bars"], ["CoopVoice_Child_Custom_Saria.bars", "Player.bars", "Player_Child.bars"])
         self.assertEqual(e["ChoiceAsset"], ["a.casset.byml"])
         self.assertEqual(base["Bars"], ["Player.bars", "Player_Child.bars"])
+
+
+class Silent(unittest.TestCase):
+    def test_every_one_of_links_clips_gets_silence(self):
+        files = game()
+        out = voices.silent(files, log=lambda *_: None)
+        for age in ("Child", "Adult"):
+            self.assertEqual(out["archives"][age], f"CoopVoice_{age}_Silent.bars")
+            d = out["files"][f"{voices.RESOURCE}/CoopVoice_{age}_Silent.bars"]
+            got, _ = bwav.read_bars(d)
+            link = [n for n in bwav.bars_names(files.bars(f"{voices.RESOURCE}/Player_{age}.bars"))
+                    if n.startswith("Vo_Pl")]
+            self.assertEqual(sorted(got), sorted(zlib.crc32(n.encode()) for n in link))   # Link's clips, all of them
+            for h, (meta, at) in got.items():
+                sname = bwav.amta_name(meta)
+                if zlib.crc32(sname.encode()) == h:
+                    x, _ = bwav.decode(d, at)
+                else:
+                    self.assertRegex(sname, f"^V9zPl{age}_")
+                    x, _ = bwav.decode(out["files"][f"{voices.STREAM}/{sname}.bwav"])
+                self.assertFalse(np.any(x), sname)
+        self.assertIn(f"{voices.STREAM}/V9zPlChild_Wait_01.bwav", out["files"])
+
+    def test_it_needs_no_numpy(self):
+        files = game()
+        with mock.patch.object(voices, "np", None), mock.patch.object(bwav, "np", None):
+            out = voices.silent(files, log=lambda *_: None)
+            self.assertEqual(len(out["archives"]), 2)
+            with self.assertRaisesRegex(ImportError, "numpy"):
+                voices.build(files, CHARS, TABLE, log=lambda *_: None)
+
+    def test_stream_codes_never_match_the_mods(self):
+        codes = [voices.stream_code(i) for i in range(259)]
+        self.assertEqual(len(set(codes)), 259)
+        self.assertNotIn(voices.SILENT_CODE, codes)
+        self.assertTrue(all(c[0].isdigit() and c[1].islower() for c in codes))
+        with self.assertRaises(voices.VoiceError):
+            voices.stream_code(259)
 
 
 class Refused(unittest.TestCase):
