@@ -122,6 +122,14 @@ class TestPlaytestLibrary(unittest.TestCase):
             self.write("tools/playtest/data/a.json", line + "\n")
             self.assertEqual(self.problems("tools/playtest/data/a.json"), [], line)
 
+    def test_a_runs_own_files_are_refused_anywhere(self):
+        for path in ("calls.jsonl", "tools/autotest/calls.jsonl", "sessions/run1/session.json", "x/state-history.json",
+                     ".mcp.json", "playtest-logs/a.log", "playtest-logs/shots/p1-1.png", "run/shots/a.PNG", "docs/sessions/a.md"):
+            self.assertEqual(len(self.problems(path)) >= 1, True, path)
+        for path in ("tools/playtest/scripts/calls-example.jsonl", "tools/autotest/mcp.json.template", "docs/shots.md",
+                     "tools/release/kit/assets/squadala-icon.png", "coop/session.cpp"):
+            self.assertEqual(self.problems(path), [], path)
+
     def test_the_repository_has_none(self):
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         found = [f"{path}: {w}" for path in check_content.tracked_files(root)

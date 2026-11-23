@@ -59,6 +59,11 @@ PLAYTEST_LOCAL = re.compile(
     r"|(?<![\d.])(?!127\.0\.0\.1(?![\d.]))\d{1,3}(?:\.\d{1,3}){3}(?![\d.])"   # an IPv4 address
 )
 
+# What a play-test run writes (shots, call logs, session files, the .mcp.json with local paths): never committed,
+# wherever it sits. Shots are pictures of the game.
+PLAYTEST_OUTPUT_FILES = ("calls.jsonl", "state-history.json", "session.json", ".mcp.json")
+PLAYTEST_OUTPUT_DIRS = ("playtest-logs", "sessions")
+
 # Files that may name a release because they cannot change ("path": "why").
 RELEASE_NAME_ALLOWED = {}
 
@@ -161,12 +166,24 @@ def test_name_problems(root, path):
     return found
 
 
+def playtest_output_problems(path):
+    """A file a play-test run writes (shot, call log, session file, .mcp.json), wherever it was put in the tree."""
+    parts = path.replace("\\", "/").split("/")
+    if parts[-1].lower() in PLAYTEST_OUTPUT_FILES:
+        return ["is a play-test run's own file (keep it outside git; add only your tools/playtest file)"]
+    if any(part in PLAYTEST_OUTPUT_DIRS for part in parts[:-1]):
+        return ["is in a play-test run folder (keep it outside git; add only your tools/playtest file)"]
+    if "shots" in parts[:-1] and parts[-1].lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+        return ["is a shot of the game (never commit it)"]
+    return []
+
+
 def playtest_problems(root, path):
     """What a file of the play-test library may not be or hold: not text we wrote, too big, or naming this PC."""
     norm = path.replace("\\", "/")
+    found = playtest_output_problems(norm)
     if not norm.startswith(PLAYTEST_DIR):
-        return []
-    found = []
+        return found
     if not norm.lower().endswith(PLAYTEST_EXTENSIONS):
         found.append("only .md, .json and .jsonl files go in tools/playtest (no pictures, logs or game files)")
     full = os.path.join(root, path)

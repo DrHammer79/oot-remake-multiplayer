@@ -19,6 +19,10 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   attachment on a public issue or pull request ([setup.md](setup.md)). `check_logs` masks lines for you to quote;
   `log` is raw: never paste it.
 - Never write an address, IP address, user name, password or local path from a run into a file, an issue or a commit.
+- A run writes into the working folder by default (`playtest-logs/`, `shots/*.png`, `calls.jsonl`, `.mcp.json`, a
+  `sessions/` folder). `.gitignore` and `check_content` keep these out, but do not rely on them: put `--log-dir` and
+  `--session` outside the repository when you can, and **add only your `tools/playtest/` file** (`git add
+  tools/playtest/...`), never `git add -A` or `git add .`.
 
 ## 1. Start
 
