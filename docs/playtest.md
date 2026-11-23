@@ -387,13 +387,21 @@ After a scenario, `python -I tools/autotest/desync_check.py <log dir> --clients`
 
 #### What `desync_check` compares in the actors
 
-Each checkpoint keeps the whole `get_world` list of its game (`state.world`). For each tag, the first game's list is
+Each checkpoint keeps the `get_world` list of its game (`state.world`; the dump lists every kind, but the snapshot
+behind it keeps at most 200 actors: the known kinds first, then the nearest to that game's own Link). For each tag,
+the first game's list is
 compared with every other game's, under these rules (code: `compare_world` in `desync_check.py`; the page is read by
 `sync_rows.py`; the numbers are in `TOL`):
 
 - **Only in the same area.** Both games in the same scene and their Links within 40 m, and neither list stale or
   without a session. Otherwise the line says `not compared (...)` and why. (A rolled spawn is shared only near its
   place, so apart the games roll their own.)
+- **A cut list is compared only near both Links.** A list with 200 actors was cut, and what it lacks is mostly actors
+  of kind `other` (crates, rocks, cracked walls, webs, falling floors) beyond the farthest one it kept. When either
+  list has 200 actors, only actors within the smaller of the two kept distances, minus the gap between the Links, of
+  their own Link are compared at all (a count or a missing actor farther out may be the cut). The line says
+  `a list was cut at 200 actors: only actors within N m of each Link compared (M left out)`. A scene with fewer than
+  200 actors is compared whole. A bare 200 is taken as a cut: the dump has no flag for it.
 - **One to one.** Actors of one name are paired by nearest place (the games' addresses differ). An actor in one game
   with none to pair with in the other is a count difference, named.
 - **What is compared.** `alive`, `owner` and `life` exactly. The place only for placed static actors (chests, doors,
@@ -402,12 +410,18 @@ compared with every other game's, under these rules (code: `compare_world` in `d
   literal characters; rows tied on it with different labels are both printed and the weaker label is used):
   `live` is a desync; `?` is `live not proven: check it twice, then report what you saw`; `reload` is `shared, shown on
   reload: not a desync`; `-`, or a Path starting with `none`, is not shared and left out (counted); a name with no row is
-  `no row in sync-coverage: not compared` (named). Only `live` rows give exit 1. The page's Enemies and Rolled spawns
+  `no row in sync-coverage: not compared` (named). Only `live` rows give exit 1. A placed actor or boss with no place
+  in one game is not compared for its place and is named (`no place in one game: place not compared`). A row for the
+  mini-boss and boss rooms has no actor names, so a boss lands on the Enemies row unless a `live` row names it
+  (`Enemy_*Boss*` is checked for its place only when one does). The page's Enemies and Rolled spawns
   rows are `?` until a game run proves them.
 - **Two looks.** A `live` difference counts only when the same one is in two checkpoints in a row, with both games 60 or
   more frames further on in the second. The first look is `recheck after both games step 60 frames` and the exit status
   is 3 (incomplete), never 0. Take a second checkpoint after stepping 60 frames or more. A difference that is gone in the
-  second checkpoint was a game still on its way.
+  second checkpoint was a game still on its way. The second look must be of the same actors: it matches the first
+  by the two games' actor ids (a different Deku Baba does not confirm another one). A DESYNC line gives the actor (id
+  and place in both games), `first seen at TAG (frames)`, `confirmed at TAG (frames)`, and the page's row (line, Path,
+  Live), so a report can quote it.
 - **Older logs.** A checkpoint with no `world` (written before this) is compared on its flags only, with the same
   output as before.
 

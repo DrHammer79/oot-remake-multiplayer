@@ -41,10 +41,11 @@ def page_rows():
     return sr.load(p)
 
 
-def actor(name, pos=(0, 0, 0), kind="enemy", life=None, owner="server", alive=True, i=[0]):
+def actor(name, pos=(0, 0, 0), kind="enemy", life=None, owner="server", alive=True, id=None, dist=1.0, i=[0]):
     i[0] += 1
-    return {"id": i[0], "addr": "0x%x" % i[0], "name": name, "kind": kind, "pos": list(pos), "dist": 1.0, "life": life,
-            "max_life": life, "owner": owner, "alive": alive}
+    n = id if id is not None else i[0]
+    return {"id": n, "addr": "0x%x" % n, "name": name, "kind": kind, "pos": None if pos is None else list(pos),
+            "dist": dist, "life": life, "max_life": life, "owner": owner, "alive": alive}
 
 
 def cp(actors, frame=1000, scene="Forest", pos=(0, 0, 0), world_extra=None):
@@ -131,6 +132,48 @@ class RealPage(unittest.TestCase):
         rolled = sr.match(self.rows, "Enemy_Stalchild")
         self.assertEqual(rolled["rows"][0]["name"].split(" (")[0], "Rolled spawns")
 
+    def test_the_overlaps_and_their_winners(self):
+        def win(n):
+            m = sr.match(self.rows, n)
+            return m["glob"], m["label"], [r["name"].split(" (")[0] for r in m["rows"]]
+        self.assertEqual(win("Obj_Fairy"), ("Obj_Fairy", "not proven", ["Drops"]))
+        self.assertEqual(win("Obj_FairyX"), ("Obj_Fairy*", "not shared", ["Fairies"]))
+        self.assertEqual(win("Item_Token_Gold")[0], "Item_Token_Gold")
+        self.assertEqual(win("Item_Dungeon_Map")[0], "Item_Dungeon_*")
+        self.assertEqual(win("Item_Other")[0], "Item_*")
+        self.assertEqual(win("Obj_Rupee_Silver"), ("Obj_Rupee_Silver", "not proven", ["Silver rupees"]))
+        self.assertEqual(win("Obj_CandleStick_TimeExtinguish")[:2], ("Obj_CandleStick_TimeExtinguish", "not shared"))
+        self.assertEqual(win("Obj_CandleStick_A")[0], "Obj_CandleStick_*")
+        self.assertEqual(win("Obj_WaterTemple_WaterPlane")[0], "Obj_WaterTemple_WaterPlane*")
+        self.assertEqual(win("Obj_Foo_WaterPlane2")[0], "Obj_*_WaterPlane*")
+
+    def test_each_known_tie_prints_both_rows_and_the_weaker_label(self):
+        m = sr.match(self.rows, "Obj_Rupee_Green")
+        self.assertTrue(m["tied"])
+        self.assertEqual(m["label"], "not proven")
+        self.assertEqual(len(m["rows"]), 2)
+        self.assertEqual(sr.match(self.rows, "Obj_Heart")["label"], "not proven")
+        t = sr.match(self.rows, "Obj_TBox_Basic")
+        self.assertEqual((t["tied"], len(t["rows"])), (True, 2))
+        ff = sr.match(self.rows, "FallingFloor_A_03")
+        self.assertTrue(ff["tied"])
+        self.assertEqual(len(ff["rows"]), 3)
+
+    def test_a_stalchild_prints_live_not_proven(self):
+        m = sr.match(self.rows, "Enemy_Stalchild")
+        self.assertEqual(m["label"], "not proven")
+        self.assertIn("live not proven", m["text"])
+        self.assertNotIn("not shared", m["text"])
+
+    def test_the_names_that_are_not_actor_prefixes_are_the_known_fragments(self):
+        """`unprefixed` lists the backticked tokens with no actor prefix: names of other kinds (a few are real actor
+        names) and fragments of a note. A new one is a page change to look at: it is listed here, then added or fixed."""
+        names = sorted({g for _, g in sr.unprefixed(self.rows)})
+        sys.stderr.write("\nunprefixed tokens in sync-coverage.md: %s\n" % ", ".join(names))
+        self.assertEqual(names, ["*ElevatorLift*", "*InteractiveSpiderWebParts*", "FallingFloor_A_03",
+                                 "FallingLadder_A_01", "HammerDropFloor", "HammerDropPillar", "HammerStair",
+                                 "Land_kokiri_Plant_*", "WallCrack", "WaterTemple_Room00_WaterLevel", "_Cleared"])
+
     def test_row_83_is_split(self):
         self.assertEqual(sr.match(self.rows, "Obj_SolarSwitch_A")["rows"][0]["name"], "Sun switches")
         self.assertEqual(sr.match(self.rows, "Obj_SolarSwitch_A")["label"], "not proven")
@@ -207,6 +250,49 @@ class World(unittest.TestCase):
         r = dc.compare_world(cp(a), cp(b), self.rows)
         self.assertEqual((r["diffs"], r["no_row"], r["compared"]), ([], {}, 0))
 
+    def test_a_diff_names_the_actor_and_the_row(self):
+        a, b = [actor("Enemy_Goma", (1, 2, 3), life=3, id=7)], [actor("Enemy_Goma", (1, 2, 4), life=1, id=19)]
+        d = dc.compare_world(cp(a), cp(b), self.rows)["diffs"][0]["text"]
+        self.assertIn("A id 7 at (1.0, 2.0, 3.0)", d)
+        self.assertIn("B id 19 at (1.0, 2.0, 4.0)", d)
+        self.assertIn("docs/sync-coverage.md:", d)
+        self.assertIn("Path: boss", d)                  # the Bosses row
+        self.assertIn("Live: live", d)
+
+    def test_a_count_difference_names_the_unmatched_actors(self):
+        a = [actor("Enemy_Goma", (0, 0, 0), id=1), actor("Enemy_Goma", (4, 0, 0), id=2)]
+        b = [actor("Enemy_Goma", (0, 0, 0), id=5)]
+        d = dc.compare_world(cp(a), cp(b), self.rows)["diffs"][0]["text"]
+        self.assertIn("no match in B: A id 2 at (4.0, 0.0, 0.0)", d)
+
+    def test_a_static_actor_with_no_place_is_noted_not_a_difference(self):
+        a = [actor("Obj_Door_A", (5, 0, 0), kind="door")]
+        b = [actor("Obj_Door_A", None, kind="door")]
+        r = dc.compare_world(cp(a), cp(b), self.rows)
+        self.assertEqual((r["diffs"], r["no_place"]), ([], {"Obj_Door_A": 1}))
+        del b[0]["pos"]
+        r = dc.compare_world(cp(a), cp(b), self.rows)               # (no pos key at all: no crash)
+        self.assertEqual((r["diffs"], r["no_place"]), ([], {"Obj_Door_A": 1}))
+
+    def test_a_cut_list_is_compared_only_near_both_links(self):
+        """Both lists hold 200 actors (the snapshot's cut). A crate only one game kept is beyond the cut, not a desync."""
+        cut = {"total": 200}
+        far = actor("Obj_Door_Crate", (30, 0, 0), kind="other", dist=20.0, id=1)       # only A has it
+        near_a = [actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=40.0, id=2), far]
+        near_b = [actor("Obj_Door_Rock", (0, 0, 0), kind="other", dist=25.0, id=3)]
+        a, b = cp(near_a, world_extra=cut), cp(near_b, world_extra=cut, pos=(10, 0, 0))
+        r = dc.compare_world(a, b, self.rows)
+        self.assertEqual(r["diffs"], [])
+        self.assertEqual(r["cut_m"], 15.0)                          # min(40, 25) - the 10 m between the Links
+        self.assertEqual(r["cut_left_out"], 3)                      # A's crate (20 m) and rock (40 m), B's rock (25 m)
+        near = actor("Obj_Door_Crate", (5, 0, 0), kind="other", dist=10.0, id=4)       # inside the complete zone
+        r = dc.compare_world(cp([near] + near_a, world_extra=cut), b, self.rows)
+        self.assertEqual([d["field"] for d in r["diffs"]], ["count"])    # B should have kept it: a real difference
+
+    def test_a_whole_list_has_no_cut(self):
+        r = dc.compare_world(cp([actor("Enemy_Goma")]), cp([actor("Enemy_Goma")]), self.rows)
+        self.assertIsNone(r["cut_m"])
+
     def test_not_compared_notes(self):
         a = [actor("Enemy_Goma")]
         self.assertIn("scenes", dc.compare_world(cp(a), cp(a, scene="Water"), self.rows)["note"])
@@ -261,6 +347,43 @@ class Settle(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(any("recheck after both games step 60 frames" in ln for ln in out))
         self.assertTrue(any("DESYNC" in ln and "Enemy_Goma" in ln for ln in out))
+
+    def test_a_desync_line_carries_its_evidence(self):
+        g, h = [actor("Enemy_Goma", (1, 0, 0), life=3, id=7)], [actor("Enemy_Goma", (1, 0, 0), life=1, id=19)]
+        e = {"p1": [tagged("a", g, frame=1000), tagged("b", g, frame=1100)],
+             "p2": [tagged("a", h, frame=1005), tagged("b", h, frame=1110)]}
+        line = [ln for ln in run(e)[1] if "DESYNC" in ln][0]
+        for part in ("Enemy_Goma", "A id 7", "B id 19", "first seen at a (p1 frame 1000, p2 frame 1005)",
+                     "confirmed at b (p1 frame 1100, p2 frame 1110)", "docs/sync-coverage.md:", "Path: boss"):
+            self.assertIn(part, line)
+
+    def test_the_first_seen_tag_is_kept_across_close_sightings(self):
+        g, h = [actor("Enemy_Goma", life=3, id=7)], [actor("Enemy_Goma", life=1, id=19)]
+        e = {"p1": [tagged("a", g, frame=1000), tagged("b", g, frame=1030), tagged("c", g, frame=1100)],
+             "p2": [tagged("a", h, frame=1000), tagged("b", h, frame=1030), tagged("c", h, frame=1100)]}
+        line = [ln for ln in run(e)[1] if "DESYNC" in ln][0]
+        self.assertIn("first seen at a (p1 frame 1000, p2 frame 1000), confirmed at c", line)
+
+    def test_another_actor_of_the_same_name_does_not_confirm(self):
+        g1, h1 = [actor("Enemy_Goma", life=3, id=7)], [actor("Enemy_Goma", life=1, id=19)]
+        g2, h2 = [actor("Enemy_Goma", life=3, id=8)], [actor("Enemy_Goma", life=1, id=20)]
+        e = {"p1": [tagged("a", g1, frame=1000), tagged("b", g2, frame=1100)],
+             "p2": [tagged("a", h1, frame=1000), tagged("b", h2, frame=1100)]}
+        code, out = run(e)
+        self.assertEqual(code, 3)
+        self.assertFalse(any("DESYNC" in ln for ln in out))
+
+    def test_a_cut_list_gives_no_false_desync_over_two_checkpoints(self):
+        cut = {"total": 200}
+        far = actor("Obj_Door_Crate", (30, 0, 0), kind="other", dist=20.0, id=1)
+        a = [actor("Obj_Door_Rock", kind="other", dist=40.0, id=2), far]
+        b = [actor("Obj_Door_Rock", kind="other", dist=25.0, id=3)]
+        e = {"p1": [tagged("a", a, frame=1000, world_extra=cut), tagged("b", a, frame=1100, world_extra=cut)],
+             "p2": [tagged("a", b, frame=1000, world_extra=cut, pos=(10, 0, 0)),
+                    tagged("b", b, frame=1100, world_extra=cut, pos=(10, 0, 0))]}
+        code, out = run(e)
+        self.assertEqual(code, 0)
+        self.assertTrue(any("a list was cut at 200 actors" in ln for ln in out))
 
     def test_the_first_sighting_alone_is_incomplete_never_agree(self):
         g, h = [actor("Enemy_Goma", life=3)], [actor("Enemy_Goma", life=1)]

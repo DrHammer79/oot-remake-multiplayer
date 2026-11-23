@@ -16,6 +16,11 @@ docs/sync-coverage.md says about each actor's name (sync_rows.py); --flags-only 
 - The page's row decides: Live `live` = a difference is a desync; `?` = "live not proven: check it twice, then report
   what you saw"; `reload` = "shared, shown on reload"; `-` or Path `none` = not shared, left out; no row = "no row in
   sync-coverage: not compared". Only `live` rows can make the exit status 1.
+- A world list the snapshot cut at 200 actors may lack actors of kind `other` (crates, rocks) beyond the farthest one it
+  kept. When either list has 200 actors, only actors within (the smaller of the lists' kept distances) minus (the gap
+  between the Links) of their own Link are compared at all, and the line says so.
+- A DESYNC line names the actor (id and place in both games), the first tag and frames it was seen at, the confirming
+  tag and frames, and the page's row (line, Path, Live). The key that a second sighting must match includes the ids.
 - A `live` difference counts only when it is in two checkpoints in a row with both games 60 or more frames further on in
   the second; the first time it is "recheck after step 60" and the exit status is 3, never 0.
 
@@ -39,7 +44,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sync_rows  # noqa: E402
 
-TOL = {"static_m": 0.2, "area_m": 40.0, "life": 0, "settle_frames": 60}     # (every tolerance is here)
+TOL = {"static_m": 0.2, "area_m": 40.0, "life": 0, "settle_frames": 60, "cut_total": 200}     # (every tolerance is here)
 STATIC_KINDS = ("chest", "door", "switch")           # placed actors that do not move: their place is compared
 BOSS_NAME = "Enemy_*Boss*"                            # a boss's place is shared (BOSS_ROOM)
 
@@ -182,12 +187,37 @@ def pair_up(xs, ys):
     return (pairs, [x for i, x in enumerate(xs) if i not in used_x], [y for j, y in enumerate(ys) if j not in used_y])
 
 
+def _where(pos):
+    return "(%s)" % ", ".join("%.1f" % v for v in pos) if isinstance(pos, (list, tuple)) and pos else "no place"
+
+
+def _who(side, act):
+    return "%s id %s at %s" % (side, act.get("id"), _where(act.get("pos")))
+
+
+def cut_radius(w, tol=TOL):
+    """None when a game's world list is whole; else how far from its own Link the list is complete (m). The snapshot
+    keeps 200 actors, the known kinds first and then the nearest to its own Link (CoopWorldSnapshot::Select), so a list
+    with 200 actors may lack actors of kind `other` (crates, rocks) beyond the farthest one it kept."""
+    acts = w.get("actors") or []
+    if max(w.get("total") or 0, len(acts)) < tol["cut_total"]:
+        return None
+    def dists(kinds):
+        return [a["dist"] for a in acts if isinstance(a.get("dist"), (int, float))
+                and (kinds is None or a.get("kind") in kinds)]
+    return max(dists(("other",)) or dists(None) or [0.0])
+
+
 def compare_world(cp_a, cp_b, rows, tol=TOL):
     """Compare two checkpoints' actors by what sync-coverage says about each name. Replies {note, diffs, compared,
-    skipped, no_row}: `note` says why nothing was compared (else None); each diff is {name, field, a, b, label, text}
-    with `label` the page's (live, not proven, reload); `skipped` counts actors of not shared rows; `no_row` is
-    {name: count} of the actors no row speaks for. Never touches a game."""
-    out = {"note": None, "diffs": [], "compared": 0, "skipped": 0, "no_row": {}}
+    skipped, no_row, no_place, cut_m, cut_left_out}: `note` says why nothing was compared (else None); each diff is
+    {name, field, a, b, label, key, text} (`text` names both actors by id and place, and the page's row by line, Path and
+    Live) with `label` the page's (live, not proven, reload); `skipped` counts actors of not shared rows; `no_row` is
+    {name: count} of the actors no row speaks for; `no_place` is {name: count} of placed actors whose place is missing.
+    When a world list was cut at 200 actors, only actors within `cut_m` of each Link are compared at all (a count or
+    a missing actor beyond it may be the cut, not a desync). Never touches a game."""
+    out = {"note": None, "diffs": [], "compared": 0, "skipped": 0, "no_row": {}, "no_place": {}, "cut_m": None,
+           "cut_left_out": 0}
     sa, sb = cp_a.get("state") or {}, cp_b.get("state") or {}
     for who, w in (("A", sa.get("world")), ("B", sb.get("world"))):
         why = world_usable(w)
@@ -204,11 +234,19 @@ def compare_world(cp_a, cp_b, rows, tol=TOL):
     if gap > tol["area_m"]:
         out["note"] = "not compared (apart: the Links are %.0f m apart, the limit is %.0f m)" % (gap, tol["area_m"])
         return out
+    radii = [r for r in (cut_radius(sa["world"], tol), cut_radius(sb["world"], tol)) if r is not None]
+    cut_m = max(min(radii) - gap, 0.0) if radii else None
+    out["cut_m"] = cut_m
     names = {}
     for side, w in (("a", sa["world"]), ("b", sb["world"])):
         for act in w.get("actors") or []:
-            if act.get("kind") != "player" and act.get("name"):
-                names.setdefault(act["name"], {"a": [], "b": []})[side].append(act)
+            if act.get("kind") == "player" or not act.get("name"):
+                continue
+            d = act.get("dist")
+            if cut_m is not None and not (isinstance(d, (int, float)) and d <= cut_m):
+                out["cut_left_out"] += 1
+                continue
+            names.setdefault(act["name"], {"a": [], "b": []})[side].append(act)
     for name in sorted(names):
         xs, ys = names[name]["a"], names[name]["b"]
         m = sync_rows.match(rows, name)
@@ -220,32 +258,47 @@ def compare_world(cp_a, cp_b, rows, tol=TOL):
             continue
         pairs, left_a, left_b = pair_up(xs, ys)
         out["compared"] += len(pairs)
+        row = " / ".join("docs/sync-coverage.md:%d \"%s\", Path: %s, Live: %s"
+                         % (r["line"], r["name"].split(" (")[0], r["path"], r["live"]) for r in m["rows"])
 
-        def add(field, a, b, text):
-            out["diffs"].append({"name": name, "field": field, "a": a, "b": b, "label": m["label"],
-                                 "text": "%s: %s  [%s]" % (name, text, m["text"])})
+        def add(field, a, b, what, who, key):
+            out["diffs"].append({"name": name, "field": field, "a": a, "b": b, "label": m["label"], "key": key,
+                                 "text": "%s: %s (%s)  [row %s; %s]" % (name, what, who, row, m["text"])})
         for x, y in pairs:
+            who = "%s, %s" % (_who("A", x), _who("B", y))
+            ids = (x.get("id"), y.get("id"))
             for f in ("alive", "owner"):
                 if x.get(f) is not None and y.get(f) is not None and x[f] != y[f]:
-                    add(f, x[f], y[f], "%s differs (A %s, B %s)" % (f, x[f], y[f]))
+                    add(f, x[f], y[f], "%s differs (A %s, B %s)" % (f, x[f], y[f]), who, (name, f) + ids)
             lx, ly = x.get("life"), y.get("life")
             if isinstance(lx, (int, float)) and isinstance(ly, (int, float)) and abs(lx - ly) > tol["life"]:
-                add("life", lx, ly, "life differs (A %s, B %s)" % (lx, ly))
-            if (x.get("kind") in STATIC_KINDS or sync_rows.fnmatch.fnmatchcase(name, BOSS_NAME)) \
-                    and _dist(x.get("pos"), y.get("pos")) > tol["static_m"] < math.inf:
-                add("pos", x.get("pos"), y.get("pos"), "place differs by %.2f m (the limit is %.2f m)"
-                    % (_dist(x["pos"], y["pos"]), tol["static_m"]))
+                add("life", lx, ly, "life differs (A %s, B %s)" % (lx, ly), who, (name, "life") + ids)
+            if x.get("kind") in STATIC_KINDS or sync_rows.fnmatch.fnmatchcase(name, BOSS_NAME):
+                d = _dist(x.get("pos"), y.get("pos"))
+                if d == math.inf:
+                    out["no_place"][name] = out["no_place"].get(name, 0) + 1
+                elif d > tol["static_m"]:
+                    add("pos", x.get("pos"), y.get("pos"), "place differs by %.2f m (the limit is %.2f m)"
+                        % (d, tol["static_m"]), who, (name, "pos") + ids)
         if left_a or left_b:
             na, nb = len(xs), len(ys)
-            add("count", na, nb, "%d in A, %d in B (%d in one game with no match in the other)"
-                % (na, nb, len(left_a) + len(left_b)))
+            who = "; ".join(["no match in B: " + ", ".join(_who("A", x) for x in left_a[:4])] * bool(left_a)
+                            + ["no match in A: " + ", ".join(_who("B", y) for y in left_b[:4])] * bool(left_b))
+            add("count", na, nb, "%d in A, %d in B" % (na, nb), who,
+                (name, "count", tuple(sorted(str(x.get("id")) for x in left_a)),
+                 tuple(sorted(str(y.get("id")) for y in left_b))))
     return out
 
 
-def world_many(cps, rows, prev, tol=TOL):
-    """Compare the first game's world with each other game's (games p1.. in order). `prev` is {(games, name, field):
-    {game: frame}} of the `live` differences seen at the last compared tag: updated here. Replies None (no checkpoint
-    has a world: an older log), or {lines, confirmed, pending}."""
+def _frames(fr):
+    return ", ".join("%s frame %s" % (p, fr[p]) for p in sorted(fr))
+
+
+def world_many(cps, rows, prev, tag="", tol=TOL):
+    """Compare the first game's world with each other game's (games p1.. in order). `prev` is {key: {frames, tag,
+    first}} of the `live` differences seen at the last compared tag (key: games pair + the actor's name, field and ids):
+    updated here. `tag` is this checkpoint's tag. Replies None (no checkpoint has a world: an older log), or {lines,
+    confirmed, pending}."""
     if not any(isinstance((cp.get("state") or {}).get("world"), dict) or "world" in (cp.get("state") or {})
                for cp in cps.values()):
         return None
@@ -267,13 +320,15 @@ def world_many(cps, rows, prev, tol=TOL):
                 counts["finding"] += 1
                 body.append("    world %s: %s" % (pair, d["text"]))
                 continue
-            k = (pair, d["name"], d["field"])
-            now[k] = {p: cps[p].get("frame") for p in (games[0], other)}
+            k = (pair,) + d["key"]
+            fr = {p: cps[p].get("frame") for p in (games[0], other)}
             was = prev.get(k)
-            if was and all(isinstance(now[k][p], (int, float)) and isinstance(was.get(p), (int, float))
-                           and now[k][p] - was[p] >= tol["settle_frames"] for p in now[k]):
+            now[k] = {"frames": fr, "tag": tag, "first": was["first"] if was else {"tag": tag, "frames": fr}}
+            if was and all(isinstance(fr[p], (int, float)) and isinstance(was["frames"].get(p), (int, float))
+                           and fr[p] - was["frames"][p] >= tol["settle_frames"] for p in fr):
                 counts["desync"] += 1
-                body.append("    world %s: DESYNC %s" % (pair, d["text"]))
+                body.append("    world %s: DESYNC %s; first seen at %s (%s), confirmed at %s (%s)"
+                            % (pair, d["text"], was["first"]["tag"], _frames(was["first"]["frames"]), tag, _frames(fr)))
             else:
                 counts["recheck"] += 1
                 body.append("    world %s: recheck after both games step %d frames: %s"
@@ -284,10 +339,15 @@ def world_many(cps, rows, prev, tol=TOL):
                 if counts["recheck"] else "", "%d finding(s) not a desync (not proven or reload rows)"
                 % counts["finding"] if counts["finding"] else ""]
         bits = [b for b in bits if b]
+
+        def named(d, what):
+            return "%d %s (%s)" % (len(d), what, ", ".join(sorted(d)[:6]) + (", ..." if len(d) > 6 else ""))
         extra = ["%d actor(s) of not shared rows left out" % res["skipped"] if res["skipped"] else "",
-                 "%d name(s) with no row in sync-coverage: not compared (%s)"
-                 % (len(res["no_row"]), ", ".join(sorted(res["no_row"])[:6]) + (", ..." if len(res["no_row"]) > 6 else ""))
-                 if res["no_row"] else ""]
+                 named(res["no_row"], "name(s) with no row in sync-coverage: not compared") if res["no_row"] else "",
+                 named(res["no_place"], "name(s) with no place in one game: place not compared")
+                 if res["no_place"] else "",
+                 "a list was cut at %d actors: only actors within %.0f m of each Link compared (%d left out)"
+                 % (tol["cut_total"], res["cut_m"], res["cut_left_out"]) if res["cut_m"] is not None else ""]
         extra = [e for e in extra if e]
         lines.append("    world %s: %s (%d actor(s) compared%s)" % (
             pair, ", ".join(bits) if bits else "agree", res["compared"], "; " + "; ".join(extra) if extra else ""))
@@ -325,7 +385,7 @@ def check_clients(log_dir, show_all=False, out=print, flags_only=False, rows=Non
             skipped += 1
             continue
         compared += 1
-        w = None if flags_only else world_many(cps, rows, prev)
+        w = None if flags_only else world_many(cps, rows, prev, key)
         confirmed = w["confirmed"] if w else 0
         pending = w["pending"] if w else pending     # (only the last compared tag can still wait for a second look)
         if not diff and not confirmed:
