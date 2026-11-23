@@ -551,4 +551,61 @@ std::string StrikeMember(const std::optional<CoopStrike::Result>& last) {
            ",\"name\":" + Quote(last->name) + ",\"id\":" + std::to_string(last->id) + "}";
 }
 
+namespace {
+const CoopModJson::Value* GameOf(const CoopModJson::Value* status) {
+    const auto* game = status ? status->Get("game") : nullptr;
+    return game && game->kind == CoopModJson::Value::Kind::Object ? game : nullptr;
+}
+}  // namespace
+
+bool SnapshotIsOld(const CoopModJson::Value* status) {
+    const auto* game = GameOf(status);
+    if (!game) return false;
+    const auto at = game->Number("frame"), now = status->Number("frame");
+    return at && now && *now - *at > kSnapshotSlack;
+}
+
+std::string LinkMembers(const CoopModJson::Value* status) {
+    const auto* game = GameOf(status);
+    const bool old = SnapshotIsOld(status);
+    std::string out;
+    for (const char* k : {"pos", "facing", "camera", "life", "max_life", "rupees", "age", "event", "loading", "prompt"}) {
+        const auto* v = old || !game ? nullptr : game->Get(k);
+        out += ",\"" + std::string(k) + "\":" + (v ? Compact(*v) : std::string("null"));
+    }
+    const auto* at = game ? game->Get("frame") : nullptr;
+    out += ",\"snapshot_present\":" + (at ? Compact(*at) : std::string("null"));
+    out += std::string(",\"snapshot_stale\":") + (old ? "true" : "false");
+    return out;
+}
+
+std::string WarpRefusal(const CoopModJson::Value* status) {
+    const auto* game = GameOf(status);
+    if (game && !SnapshotIsOld(status)) {
+        if (game->Bool("event") == true) return "";
+        if (game->Bool("event") == false) {
+            return "warp works only while an event runs (a talk, a sign, the one a save load starts): no event runs in "
+                   "free play, so the game would never take the scene. To change scene in play, restart the session "
+                   "with a boot script that warps; to move within a scene use place or walk_to";
+        }
+    }
+    return "warp works only while an event runs, and this game's state is not readable now (no Link update: a title, a "
+           "pause or a load). Try again once the game runs";
+}
+
+bool WarpArrived(const CoopModJson::Value* status, std::string_view scene) {
+    const auto* game = GameOf(status);
+    if (!game || SnapshotIsOld(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
+    const auto map = status->Text("map");
+    if (!map) return false;
+    if (*map == scene) return true;
+    for (const std::string_view suffix : {"_Child", "_Adult"}) {
+        if (scene.size() > suffix.size() && scene.substr(scene.size() - suffix.size()) == suffix &&
+            scene.substr(0, scene.size() - suffix.size()) == *map) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace CoopPlaytest

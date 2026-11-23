@@ -541,3 +541,118 @@ TEST_CASE("playtest: an environment value is on when set, not empty and not 0") 
     CHECK_FALSE(EnvIsOn(""));
     CHECK_FALSE(EnvIsOn("0"));
 }
+
+// ---- F1: Longshot's Link snapshot is old while the game is held ----
+
+namespace {
+// A status reply as Longshot's control bridge gives it: `frame` is its present count now, `game.frame` the snapshot's.
+CoopModJson::Value Status(const std::string& game, int frame = 1000, const std::string& map = "\"KokiriForest\"") {
+    std::string error;
+    auto v = CoopModJson::Parse("{\"id\":1,\"ok\":true,\"frame\":" + std::to_string(frame) + ",\"map\":" + map +
+                                    ",\"game\":" + game + "}",
+                                &error);
+    REQUIRE_MESSAGE(v, error);
+    return *v;
+}
+// A game object as the control bridge samples it, taken at present `frame`.
+std::string Snap(int frame, bool event = false, bool loading = false) {
+    return "{\"frame\":" + std::to_string(frame) +
+           ",\"pos\":[1.5,100.0,-2.5],\"facing\":90,\"camera\":45,\"life\":12,\"max_life\":16,\"rupees\":7,"
+           "\"age\":\"child\",\"event\":" + (event ? "true" : "false") +
+           ",\"loading\":" + (loading ? "true" : "false") + ",\"prompt\":\"Talk\"}";
+}
+}  // namespace
+
+TEST_CASE("playtest: a snapshot is old only when it is behind the reply's present by more than the slack") {
+    CHECK_FALSE(SnapshotIsOld(nullptr));
+    const auto same = Status(Snap(1000));
+    CHECK_FALSE(SnapshotIsOld(&same));
+    const auto close = Status(Snap(1000 - static_cast<int>(kSnapshotSlack)));
+    CHECK_FALSE(SnapshotIsOld(&close));
+    const auto edge = Status(Snap(1000 - static_cast<int>(kSnapshotSlack) - 1));
+    CHECK(SnapshotIsOld(&edge));
+    const auto old = Status(Snap(11890), 12984);   // the S8 numbers: held, 1094 presents behind
+    CHECK(SnapshotIsOld(&old));
+    // no game, a null game, or a game with only the typed event/loading/age (no sample ever taken): not old
+    const auto none = Status("null");
+    CHECK_FALSE(SnapshotIsOld(&none));
+    const auto typed = Status("{\"event\":false,\"loading\":false,\"age\":\"child\"}");
+    CHECK_FALSE(SnapshotIsOld(&typed));
+}
+
+TEST_CASE("playtest: LinkMembers gives the snapshot's values when it is fresh") {
+    const auto fresh = Status(Snap(998));
+    const std::string m = LinkMembers(&fresh);
+    CHECK(m.find(",\"pos\":[1.5,100,-2.5]") != std::string::npos);
+    CHECK(m.find(",\"facing\":90") != std::string::npos);
+    CHECK(m.find(",\"life\":12") != std::string::npos);
+    CHECK(m.find(",\"rupees\":7") != std::string::npos);
+    CHECK(m.find(",\"prompt\":\"Talk\"") != std::string::npos);
+    CHECK(m.find(",\"snapshot_present\":998") != std::string::npos);
+    CHECK(m.find(",\"snapshot_stale\":false") != std::string::npos);
+}
+
+TEST_CASE("playtest: LinkMembers shows null for every Link member of an old snapshot, never the old position") {
+    const auto old = Status(Snap(11890), 12984);
+    const std::string m = LinkMembers(&old);
+    for (const char* k : {"pos", "facing", "camera", "life", "max_life", "rupees", "age", "event", "loading", "prompt"}) {
+        CHECK_MESSAGE(m.find(std::string(",\"") + k + "\":null") != std::string::npos, k);
+    }
+    CHECK(m.find("1.5") == std::string::npos);                       // no old number leaks
+    CHECK(m.find(",\"snapshot_present\":11890") != std::string::npos);  // how old it is stays visible
+    CHECK(m.find(",\"snapshot_stale\":true") != std::string::npos);
+}
+
+TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale") {
+    const std::string none = LinkMembers(nullptr);
+    CHECK(none.find(",\"pos\":null") != std::string::npos);
+    CHECK(none.find(",\"snapshot_present\":null") != std::string::npos);
+    CHECK(none.find(",\"snapshot_stale\":false") != std::string::npos);
+    const auto nogame = Status("null");
+    CHECK(LinkMembers(&nogame).find(",\"pos\":null") != std::string::npos);
+    // only the typed three: event, loading and age come through; the rest is null; not stale
+    const auto typed = Status("{\"event\":true,\"loading\":false,\"age\":\"adult\"}");
+    const std::string t = LinkMembers(&typed);
+    CHECK(t.find(",\"event\":true") != std::string::npos);
+    CHECK(t.find(",\"age\":\"adult\"") != std::string::npos);
+    CHECK(t.find(",\"pos\":null") != std::string::npos);
+    CHECK(t.find(",\"snapshot_stale\":false") != std::string::npos);
+}
+
+// ---- F2: warp only while an event runs ----
+
+TEST_CASE("playtest: warp is refused in free play with the reason, and allowed during an event") {
+    const auto play = Status(Snap(999));
+    const std::string no = WarpRefusal(&play);
+    CHECK(no.find("only while an event runs") != std::string::npos);
+    CHECK(no.find("boot script") != std::string::npos);
+    const auto event = Status(Snap(999, true));
+    CHECK(WarpRefusal(&event).empty());
+    const auto boot = Status("{\"event\":true,\"loading\":false,\"age\":\"child\"}");   // no sample yet: the typed event
+    CHECK(WarpRefusal(&boot).empty());
+}
+
+TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missing") {
+    const auto old = Status(Snap(100), 5000);
+    CHECK(WarpRefusal(&old).find("not readable") != std::string::npos);
+    CHECK(WarpRefusal(nullptr).find("not readable") != std::string::npos);
+    const auto nogame = Status("null");
+    CHECK(WarpRefusal(&nogame).find("not readable") != std::string::npos);
+}
+
+TEST_CASE("playtest: warp arrived needs the scene, no event, no load and a fresh snapshot") {
+    const auto in = Status(Snap(999), 1000, "\"KokiriForest\"");
+    CHECK(WarpArrived(&in, "KokiriForest"));
+    CHECK(WarpArrived(&in, "KokiriForest_Child"));     // the map may not carry the age
+    CHECK_FALSE(WarpArrived(&in, "Market_Child"));
+    CHECK_FALSE(WarpArrived(&in, "Kokiri"));
+    const auto exact = Status(Snap(999), 1000, "\"KokiriForest_Child\"");
+    CHECK(WarpArrived(&exact, "KokiriForest_Child"));
+    const auto loading = Status(Snap(999, false, true), 1000, "\"KokiriForest\"");
+    CHECK_FALSE(WarpArrived(&loading, "KokiriForest"));
+    const auto event = Status(Snap(999, true), 1000, "\"KokiriForest\"");
+    CHECK_FALSE(WarpArrived(&event, "KokiriForest"));
+    const auto old = Status(Snap(100), 5000, "\"KokiriForest\"");
+    CHECK_FALSE(WarpArrived(&old, "KokiriForest"));        // an old snapshot's event/loading say nothing now
+    CHECK_FALSE(WarpArrived(nullptr, "KokiriForest"));
+}

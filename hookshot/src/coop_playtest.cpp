@@ -295,19 +295,33 @@ bool WorldListNow() {
     return store.Enabled() && WorldListLive(store.Get(), SteadyMs(), g_gate ? g_gate->Frame() : 0);
 }
 
-// The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
-std::string StateMembers(bool full_world = false) {
+constexpr auto kHoldWait = 5000ms;  // a hold (or a held job) that does not come in this time: timeout
+
+// Longshot's status with a Link snapshot that is not old (SnapshotIsOld). Longshot takes that snapshot only in a running
+// Link update while a status is asked, so a held game gives the one from its last such status. Old and held: ask a
+// status, let ONE frame run (its Link update takes the snapshot) and read that reply. Still old after that (a title, a
+// pause, a load: no Link update runs): the old reply, which LinkMembers shows as null with `snapshot_stale`.
+std::optional<Value> LinkStatus() {
+    auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
+    if (status && SnapshotIsOld(&*status) && g_gate && g_gate->Held()) {
+        const auto id = g_control.Send("\"cmd\":\"status\"}");
+        if (id && g_gate->Step(1, kHoldWait)) {
+            if (auto fresh = g_control.Await(*id, 1500)) status = std::move(fresh);
+        }
+    }
+    return status;
+}
+
+// The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op. `status`: a
+// status reply already read (input asks it before its last frame); none: LinkStatus() reads one.
+std::string StateMembers(bool full_world = false, std::optional<Value> status = std::nullopt) {
     std::string out;
-    const auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
+    if (!status) status = LinkStatus();
     const Value* game = status ? status->Get("game") : nullptr;
     if (game && game->kind != Value::Kind::Object) game = nullptr;
     out += "\"scene\":" + (status && status->Get("map") ? Compact(*status->Get("map")) : Field(game, "map"));
     out += ",\"room\":null";
-    for (const char* k : {"pos", "facing", "camera", "life", "max_life", "rupees", "age", "event", "loading", "prompt"}) {
-        out += ",\"" + std::string(k) + "\":" + Field(game, k);
-    }
-    // (Longshot's present count when the snapshot was taken; our frame count is the reply's `frame`)
-    out += ",\"snapshot_present\":" + Field(game, "frame");
+    out += LinkMembers(status ? &*status : nullptr);
     out += ",\"control\":" + std::string(status ? "true" : "false");
     Core::System& sys = *g_system;
     out += ",\"equips\":{";
@@ -341,11 +355,11 @@ std::string StateMembers(bool full_world = false) {
     return out;
 }
 
-std::string StateObject(bool full_world = false) { return "{" + StateMembers(full_world) + "}"; }
+std::string StateObject(bool full_world = false, std::optional<Value> status = std::nullopt) {
+    return "{" + StateMembers(full_world, std::move(status)) + "}";
+}
 
 // ---- the commands ----
-
-constexpr auto kHoldWait = 5000ms;  // a hold (or a held job) that does not come in this time: timeout
 
 std::string Handle(const Request& r) {
     Gate& gate = *g_gate;
@@ -393,9 +407,18 @@ std::string Handle(const Request& r) {
     if (r.cmd == "input") {
         if (!gate.Pause(kHoldWait)) return fail("timeout", "no frame came to hold at");
         if (!g_control.SendLine(ControlInput(r, g_control.NextId()))) return fail("no_control", "HOS_CONTROL unset or unreachable");
+        // The status is asked before the last frame: that frame's Link update takes the snapshot, so the state in the
+        // reply is Link at the end of the step (a status asked after it would read an old snapshot).
         std::uint64_t from = 0;
-        if (!gate.Step(r.frames, kHoldWait, &from)) return fail("timeout", "the frames did not run in time");
-        return ok("\"from\":" + std::to_string(from) + ",\"state\":" + StateObject());
+        if (r.frames > 1 && !gate.Step(r.frames - 1, kHoldWait, &from)) {
+            return fail("timeout", "the frames did not run in time");
+        }
+        const auto asked = g_control.Send("\"cmd\":\"status\"}");
+        std::uint64_t last = 0;
+        if (!gate.Step(1, kHoldWait, &last)) return fail("timeout", "the frames did not run in time");
+        if (r.frames == 1) from = last;
+        std::optional<Value> status = asked ? g_control.Await(*asked, 1500) : std::nullopt;
+        return ok("\"from\":" + std::to_string(from) + ",\"state\":" + StateObject(false, std::move(status)));
     }
     // The commands that change the game reach the wire and other players' games: only when the test runner asked for
     // them (LICHII_COOP_PLAYTEST_VERBS) and cheats are on.
@@ -422,6 +445,12 @@ std::string Handle(const Request& r) {
                   (asked.after != asked.before ? ",\"strike_seq\":" + std::to_string(asked.after) : std::string()));
     }
     if (r.cmd == "warp") {
+        // The game takes a reserved scene only while an event runs (docs/testing.md, `warp`): in free play it never
+        // does (a talk, a sign or the load's own event is such an event). Refused at once with the reason, instead of
+        // holding the game for the whole timeout.
+        const auto now = LinkStatus();
+        const std::string refusal = WarpRefusal(now ? &*now : nullptr);
+        if (!refusal.empty()) return fail("not_in_event", refusal);
         std::string error;
         const std::string line = "warp " + r.scene + (r.entrance.empty() ? "" : " " + r.entrance);
         if (!played(line, error)) return fail("failed", error);
@@ -429,11 +458,9 @@ std::string Handle(const Request& r) {
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
         while (std::chrono::steady_clock::now() < until) {
             if (!gate.Step(10, kHoldWait)) return fail("timeout", "the frames did not run in time");
-            const auto s = g_control.Call("\"cmd\":\"status\"}", 1500);
-            const Value* game = s ? s->Get("game") : nullptr;
-            const auto map = s ? s->Text("map") : std::nullopt;
-            if (map && *map == r.scene && game && game->Bool("event") == false && game->Bool("loading") == false) {
-                return ok("\"arrived\":true,\"state\":" + StateObject());
+            auto s = LinkStatus();
+            if (s && WarpArrived(&*s, r.scene)) {
+                return ok("\"arrived\":true,\"state\":" + StateObject(false, std::move(s)));
             }
         }
         return ErrorReply(r.id, gate.Frame(), gate.Held(), "timeout",

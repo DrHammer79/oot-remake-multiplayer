@@ -124,6 +124,26 @@ std::string VerbGateLine(bool runner, bool cheats);
 // Whether an environment value counts as on (set, not empty, not "0").
 bool EnvIsOn(std::string_view value);
 
+// Longshot's Link snapshot (the control bridge's `status`, `game`) is taken only in a running Link update while a status
+// is asked; a held game keeps the old one. `status` is the whole reply: its `frame` is Longshot's present count now,
+// `game.frame` the present count the snapshot was taken at. Old: the snapshot is more than kSnapshotSlack presents behind
+// (a guess: a running game takes it within a present or two; not tuned in a game yet). No `game.frame` (no sample was
+// ever taken: only the typed event, loading and age) is not old.
+inline constexpr double kSnapshotSlack = 4;
+bool SnapshotIsOld(const CoopModJson::Value* status);
+// The state's Link members from that reply, each with a leading comma: pos, facing, camera, life, max_life, rupees,
+// age, event, loading, prompt, snapshot_present and snapshot_stale. An old snapshot shows null in every Link member (a
+// walk that trusts a stale pos says "arrived" 11 m away) and `"snapshot_stale":true`; `snapshot_present` keeps its number.
+// No reply (`status` null) or no `game`: all null, `snapshot_stale` false (`control` says why).
+std::string LinkMembers(const CoopModJson::Value* status);
+
+// `warp` (the game's own scene change): taken only while an event runs. Empty when `status` (a reply with a fresh Link
+// snapshot) says one runs; else the refusal's text. A snapshot that is old or missing cannot say, so it refuses too.
+std::string WarpRefusal(const CoopModJson::Value* status);
+// Whether Link is in `scene` now: `status`'s map is the scene (a `_Child` or `_Adult` ending names the age too, the map
+// may not carry it: not seen in a game yet, so either spelling counts) and its fresh snapshot says no event and no load.
+bool WarpArrived(const CoopModJson::Value* status, std::string_view scene);
+
 // The `world` member of `state` (docs/playtest.md): the actors near our Link from the object walk's last snapshot.
 // "" (no member) when the snapshot switch is off, so the old reply stays byte for byte the same. `now_frame` is the
 // bridge's frame count, `now_ms` the steady clock in ms. Returns `,"world":{...}`: frame (the snapshot's), age_ms,
