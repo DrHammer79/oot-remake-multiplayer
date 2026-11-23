@@ -5,8 +5,8 @@
 // wide scripts counted as one letter (a 28-character Korean microphone name) and, in Wrap, a cut inside a
 // multi-byte letter (a Chinese line has no spaces) run past the pane or show a broken letter.
 //
-// A text's width is counted in half-letters: an ordinary letter is 2, the letters the game's font draws about half
-// again as wide (W, M, m, w, @, %) are 3, a wide script's character (CJK, kana, hangul, fullwidth forms) is 4. A
+// A text's width is counted in half-letters: an ordinary letter is 2, the widest letters of the game's font (W, @, %)
+// are 3, a wide script's character (CJK, kana, hangul, fullwidth forms) is 4. A
 // budget of `n` letters is 2 * n half-letters, so every text that fitted before still fits and the byte limit is kept
 // as well (the pane's text buffer): a cut text is never longer than before. Logic only: tests/hookshot/text_fit_test.cpp.
 #pragma once
@@ -40,7 +40,7 @@ inline std::uint32_t Decode(std::string_view s, std::size_t at, std::size_t* byt
 
 // Half-letters one code point takes.
 inline int Half(std::uint32_t cp) {
-    if (cp == 'W' || cp == 'M' || cp == 'm' || cp == 'w' || cp == '@' || cp == '%') return 3;
+    if (cp == 'W' || cp == '@' || cp == '%') return 3;
     const bool wide = (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7A3) ||
                       (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE30 && cp <= 0xFE6F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
                       (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x20000 && cp <= 0x3FFFD);
