@@ -249,6 +249,48 @@ if ($Hookshot) {
     $emu = Split-Path -Parent $exe
     $ini = Join-Path $emu 'coop.ini'
 }
+# The autotest's kit mode only (OOT_COOP_TEST_KIT): starts the game with its window shown WITHOUT activation
+# (STARTF_USESHOWWINDOW, SW_SHOWNOACTIVATE), as tools/autotest/placement.py does for the games it starts itself, so a
+# test game opening does not take the focus from the window being worked in. Start-Process cannot do that. The
+# environment is this process's (CreateProcess with a null environment block), as Start-Process gives it. The
+# player's own start below stays Start-Process. Returns the process id.
+function Start-KitTestGame([string]$Exe, [string]$Dir) {
+    if (-not ('KitNoActivate' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class KitNoActivate {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct STARTUPINFO {
+        public int cb; public string lpReserved, lpDesktop, lpTitle;
+        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public short wShowWindow, cbReserved2;
+        public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcessW(string app, string cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags,
+        IntPtr env, string dir, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    public static int Start(string exe, string dir) {
+        STARTUPINFO si = new STARTUPINFO();
+        si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+        si.dwFlags = 1;        // STARTF_USESHOWWINDOW
+        si.wShowWindow = 4;    // SW_SHOWNOACTIVATE
+        PROCESS_INFORMATION pi;
+        if (!CreateProcessW(exe, "\"" + exe + "\"", IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, dir, ref si, out pi))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return pi.dwProcessId;
+    }
+}
+'@
+    }
+    return [KitNoActivate]::Start($Exe, $Dir)
+}
 # Switches from coop-options.ini (the lines without a '#' in front), as variables for the game: your colour
 # (LICHII_COOP_COLOR, which the pack step below puts on your own Link) among them. A file of the kit is passed
 # by its full path.
@@ -295,7 +337,11 @@ if ($Mode -eq 'title') {
     foreach ($l in @(Invoke-KitSizeTableMerge $kit $emu)) { Write-Host $l }   # (#48: a seed from OOTRR's website)
     foreach ($l in @(Invoke-KitDiscordStatus $kit $emu)) { Write-Host $l }   # ('Playing Squadala!' on Discord)
     foreach ($l in @(Get-KitSteamInputHint)) { Write-Host $l -ForegroundColor Yellow }   # (player report 202: a Steam Controller outside Steam)
-    $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
+    if ($testKit) {   # (the autotest's kit mode: no window activation, Start-KitTestGame above)
+        $game = Get-Process -Id (Start-KitTestGame $exe (Split-Path -Parent $exe))
+    } else {
+        $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
+    }
     if ($game) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $game.Id } catch { } }   # (sending on: after it closes)
     if ($testKit -and $game) { [System.IO.File]::WriteAllText($testKit, "$($game.Id)`n") }
     Write-Host 'Game started. Host or Join in the game''s menu, first tab Multiplayer (controller: Minus and Plus together, or Home;'

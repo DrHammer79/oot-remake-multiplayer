@@ -951,7 +951,8 @@ def test_game_defaults(env):
 
 
 def popen_flags():
-    """Popen keywords for a game: its own process group, its window shown without being activated (placement.py)."""
+    """Popen keywords for a game: its own process group, its window shown without being activated (placement.py).
+    Kit mode (--kit-a/--kit-b) starts the game in the kit's play.ps1, which does the same (Start-KitTestGame)."""
     return placement.popen_flags()
 
 

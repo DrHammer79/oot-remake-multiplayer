@@ -298,6 +298,8 @@ jobs:
         run: cscript //nologo //E:jscript tools/nucleus/test_handler.js
       - name: Kit launch-update tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/launch_test.ps1
+      - name: Kit test-mode game start (no window activation) tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/kit_test_start_test.ps1
       - name: Kit mod check tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/mods_test.ps1
       - name: Kit mod restart tests

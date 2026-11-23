@@ -676,6 +676,8 @@ function Start-Game([string]$x) {
     $gamePid = (& $py[0] @pyArgs -I "$here\placement.py" launch --cwd $s.Emu -- (Join-Path $s.Emu 'lichii.exe') -g $Game | Out-String).Trim()
     if ($LASTEXITCODE -or $gamePid -notmatch '^\d+$') { throw "game ${x}: placement.py launch failed: $gamePid" }
     $s.Proc = Get-Process -Id ([int]$gamePid)
+    # (the game is not this process's child: without a handle held from here, ExitCode would read empty)
+    [void]$s.Proc.Handle
     Remove-Item Env:LICHII_COOP_TEST_SCRIPT
     foreach ($k in $old.Keys) { [Environment]::SetEnvironmentVariable($k, $old[$k]) }
     $s.Done = 0; $s.Marks = 0
@@ -699,13 +701,15 @@ function Wait-Joined([string]$x) {
 # Side by side on the chosen monitor ($Display), without taking the focus (placement.py: SWP_NOACTIVATE, no restore
 # call). Topmost only with -ScreenCopy (the copy needs the game above other windows); it stays on that monitor.
 function Display-Args { if ($Display) { @('--display', $Display) } else { @() } }
-function Place-Windows {
+# -Release: place again, not topmost (the end of a -KeepOpen -ScreenCopy run: the games stay open, no longer above
+# other windows).
+function Place-Windows([switch]$Release) {
     $i = 0
     foreach ($x in $kits.Keys) {
         $p = $st[$x].Proc
         if ($p -and -not $p.HasExited) {
             $pa = @('--pid', "$($p.Id)", '--first-slot', "$i", '--slots', "$($kits.Count)") + @(Display-Args)
-            if ($ScreenCopy) { $pa += '--topmost' }
+            if ($ScreenCopy -and -not $Release) { $pa += '--topmost' }
             $o = (& $py[0] @pyArgs -I "$here\placement.py" place @pa 2>&1 | Out-String).Trim()
             if ($LASTEXITCODE) { Write-Host "window placement: $o"; Note "window placement: $o" }
         }
@@ -1015,6 +1019,7 @@ try {
         Stop-NetSim
     }
     foreach ($x in $kits.Keys) { if (Test-Path $st[$x].Log) { Copy-Item $st[$x].Log "$out\eden_log-$x.txt" } }
+    if ($KeepOpen -and $ScreenCopy) { try { Place-Windows -Release } catch { Write-Host "window placement: $($_.Exception.Message)" } }
     if (-not $KeepOpen) {
         foreach ($x in $kits.Keys) { $p = $st[$x].Proc; if ($p) { [void]$p.WaitForExit(15000) } }
         Restore-RunSettings

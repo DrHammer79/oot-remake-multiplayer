@@ -362,6 +362,35 @@ class HookshotGamesTest(unittest.TestCase):
                 p.wait(10)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_each_start_places_its_window_on_the_chosen_monitor(self):
+        """start() gives the game the no-activation start flags and places its window (hookshot.place_games)."""
+        calls, flags = [], []
+        self.g.hk.popen_flags = lambda: flags.append(1) or {}
+        self.g.hk.place_games = lambda pids, display, say, wait=0.0, topmost=False: calls.append((dict(pids), display, wait))
+        self.g.display = "DISPLAY7"
+        self.g.start("B", "pw", wait=False)
+        self.assertEqual(flags, [1])
+        self.assertEqual(calls, [({"B": self.g.procs["B"].pid}, "DISPLAY7", 30.0)])
+
+    def test_run_stops_before_any_game_when_the_monitor_is_missing(self):
+        """main run: a --display no monitor has is an error (exit 2) before the server or any game starts."""
+        import hookshot
+        from unittest import mock
+        with mock.patch.object(hs, "WINDOWS", True), \
+                mock.patch.object(hookshot.placement, "monitors",
+                                  lambda: [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 10, 10)}]), \
+                mock.patch.object(hs.HookshotGames, "server_start", side_effect=AssertionError("a start happened")):
+            steps = os.path.join(self.tmp, "s.steps.txt")
+            with open(steps, "w") as f:
+                f.write("start A\n")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = hs.main(["run", "--steps", steps, "--game-a", self.games["A"], "--game-b", self.games["B"],
+                                "--out", os.path.join(self.tmp, "o2"), "--display", "DISPLAY9"])
+        self.assertEqual(code, 2)
+        with open(os.path.join(self.tmp, "o2", "steps.txt")) as f:
+            self.assertIn("no monitor called DISPLAY9", f.read())
+
     def test_fresh_log_each_start_and_the_old_one_kept(self):
         log = os.path.join(self.games["B"], "longshot_log.txt")
         with open(log, "w") as f:

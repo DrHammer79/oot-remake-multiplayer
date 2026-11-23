@@ -49,8 +49,9 @@ class PlacementError(Exception):
 
 def popen_flags():
     """Popen keywords for a game: its own process group, and (Windows) its window shown without being activated.
-    STARTF_USESHOWWINDOW with SW_SHOWNOACTIVATE is what the game's first ShowWindow uses, so a test game opening does
-    not take the focus from the window being worked in."""
+    STARTF_USESHOWWINDOW with SW_SHOWNOACTIVATE is what a game's first ShowWindow(SW_SHOWNORMAL / SHOWDEFAULT) uses, so
+    a test game opening does not take the focus from the window being worked in. A game that activates itself
+    (SetForegroundWindow, a raise) is not stopped by this: the lane check shows whether Longshot does."""
     if os.name != "nt":
         return {"start_new_session": True}
     si = subprocess.STARTUPINFO()
