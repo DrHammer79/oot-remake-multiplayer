@@ -1505,8 +1505,8 @@ void Frame(void* ctx, int site) {
             if (CoopMapRefresh::TheRefresher().Due(now_ms)) CoopMapPage::AskHudRefresh();
         }
         RunCalls(ctx);
-        NativeTags(ctx);   // the name tags on the game's balloons
         RequestHostAutoSave(ctx);  // (only when a guest's ask opened a round: CoopSave::TakeSaveRequest)
+        NativeTags(ctx);   // the name tags on the game's balloons
         LogBossNative();
         LogBossOrders();
         CoopMapPage::Frame(ctx, g_api);   // the Map page's panes, found once while the game plays
