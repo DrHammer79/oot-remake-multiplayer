@@ -210,23 +210,32 @@ if ($Hookshot) {
         Write-Host (Get-KitHookshotNeedText $need) -ForegroundColor Yellow
         exit 1
     }
+    # (kit-harden) Files of two builds, or a test kit whose patches are not its game's: never started, never built here.
+    if ($need -eq 'held') {
+        Write-Host (Get-KitHookshotNeedText $need $hsGame $hsOnly $kit) -ForegroundColor Yellow
+        Wait-AnyKey 60
+        exit 1
+    }
+    # ('mixed' goes on below: the start names the file, asks, and builds the game again with -Rebuild on yes. The game is
+    # never started in any other case: a no, or a build that failed, ends the start here.)
     $built = $true
     if ($need) {
-        Write-Host (Get-KitHookshotNeedText $need $hsGame $hsOnly)
+        Write-Host (Get-KitHookshotNeedText $need $hsGame $hsOnly $kit)
         # The long builds ask first (yes by itself after a minute, so an unattended start still builds).
         $question = Get-KitHookshotNeedQuestion $need
         if ($question -and -not (Read-YesNo "$question (then the game starts; closing this window cancels)" 60)) {
-            if (Restore-KitCharacterSelectStart) { $built = $false }
+            if ($need -ne 'mixed' -and (Restore-KitCharacterSelectStart)) { $built = $false }
             else {
-                Write-Host $(if ($hsOnly) { 'Not now. Start "Start Squadala.bat" again when you want to set it up.' } else { 'Not now. Build-Hookshot-Coop.bat sets it up (SETUP.md, "Play on Hookshot"); then start this again.' })
+                Write-Host $(if ($need -eq 'mixed') { 'Not now. The game is not started with files of two builds; start again and answer yes to build it again.' } elseif ($hsOnly) { 'Not now. Start "Start Squadala.bat" again when you want to set it up.' } else { 'Not now. Build-Hookshot-Coop.bat sets it up (SETUP.md, "Play on Hookshot"); then start this again.' })
                 exit 1
             }
         } else {
             $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-            & $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'hookshot-build.ps1')
+            $buildArgs = if ($need -eq 'mixed') { @('-Rebuild') } else { @() }
+            & $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'hookshot-build.ps1') @buildArgs
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "The co-op game could not be brought up to date (above: why). $hsRetry to try again."
-                if (Restore-KitCharacterSelectStart) { $built = $false }
+                if ($need -ne 'mixed' -and (Restore-KitCharacterSelectStart)) { $built = $false }
                 else { Wait-AnyKey 60; exit 1 }
             }
             $hsGame = Get-KitHookshotGame $kit
