@@ -2367,7 +2367,7 @@ public:
                     CoopBossNative::Boss b{s.address, s.bsa_component,
                                            *owner == self ? CoopBossNative::Role::owner : CoopBossNative::Role::copy,
                                            s.name, *owner, s.life_component, owner_dead, plain,
-                                           plain && CoopBossNative::PlainDeath(life, owner_dead),
+                                           CoopBossNative::PlainDeath(life, owner_dead),  // (every body)
                                            s.animation ? s.animation->name : std::string{}, life,
                                            s.position, s.attacking};
                     list.push_back(std::move(b));

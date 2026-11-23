@@ -280,6 +280,87 @@ TEST_CASE("native boss (probe 3 f-19): the wraps wait for a busy table, never le
     CHECK(owner.Totals().owner_action == static_cast<std::uint64_t>(kAsks));  // every owner's ask kept to send
 }
 
+TEST_CASE("native boss: a boss body dead before its outro runs its own death on a copy (Twinrova's sisters)") {
+    // Probe 3 run 20261123-092928: Koume and Kotake died mid-fight (no outro); their copies' own death flow (which
+    // starts the fusion event) was skipped, so neither game fused.
+    Table t;
+    t.SetOn(true, true);
+    Boss koume{kActor, kBsa, Role::copy, "Enemy_DungeonBoss_Koume", 2};
+    t.Publish({koume});
+    t.Receive(kActor, BossBsa{1, 4, std::nullopt, {}});
+    CHECK(t.OnActionVerb(kBsa, GameRequest(141, kNode), true, false));  // alive: its own change skipped
+    koume.own_death = PlainDeath(0, true);
+    t.Publish({koume});
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(141, kNode), false, false));  // dead here: its own death runs
+    CHECK_FALSE(t.OnBrainVerb(kBsa, 7, true, false));
+    t.SetDying({});  // (the room's outro list, empty: not the fight's end) keeps it
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(141, kNode), false, false));
+    CHECK(t.Totals().body_deaths == 1);
+    const auto notes = t.TakeNotes();
+    CHECK(std::any_of(notes.begin(), notes.end(), [](const std::string& n) { return n.find("dead here") != n.npos; }));
+    // Back from life 0 (a part that grows back): the owner's verbs again, after a short own time.
+    koume.own_death = false;
+    t.Publish({koume});
+    CHECK(t.Totals().body_deaths == 1);
+    // A boss we own that dies: nothing changes for the wraps (our game runs it anyway).
+    Table ours;
+    ours.SetOn(true, true);
+    Boss own{kActor, kBsa, Role::owner, "Enemy_DungeonBoss_Koume", 2};
+    own.own_death = true;
+    ours.Publish({own});
+    CHECK_FALSE(ours.OnActionVerb(kBsa, GameRequest(141, kNode), true, false));
+    CHECK(ours.Totals().body_deaths == 0);
+}
+
+TEST_CASE("native boss: a boss body back from its death (a Bongo Bongo hand) takes the owner's verbs and is held again") {
+    constexpr std::uint64_t kLife = 0x7000000;
+    Table t;
+    t.SetOn(true, true);
+    Boss hand{kActor, kBsa, Role::copy, "Enemy_DungeonBoss_BongoBongo_LeftHand", 2, kLife};
+    t.Publish({hand});
+    t.Receive(kActor, BossBsa{1, 4, std::nullopt, {}});
+    CHECK(t.HeldLifeStep(kLife, 3, 5) == 2);  // alive: never dies of our hits
+    hand.owner_dead = true;  // the owner's hand down (its life 0 in the owner's samples)
+    hand.own_death = PlainDeath(0, true);
+    t.Publish({hand});
+    CHECK(t.HeldLifeStep(kLife, 3, 5) == 5);  // released: dies with the owner's
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(9, kNode), true, false));  // its own fall and regrowth run
+    hand.owner_dead = false;  // grown back in the owner's game
+    hand.own_death = PlainDeath(3, false);
+    t.Publish({hand});
+    CHECK(t.HeldLifeStep(kLife, 3, 5) == 2);  // held again, not finished by its next hit
+    CHECK(t.HeldLifeStep(kLife, 3, 1) == 1);
+    // After a short own time (kAfterEventSteps) it takes the owner's verbs again.
+    FakeGuest g;
+    for (std::uint64_t i = 0; i <= Table::kAfterEventSteps; ++i) {
+        (void)t.Step(g, false, 0, kMain);
+    }
+    CHECK(t.OnActionVerb(kBsa, GameRequest(9, kNode), true, false));
+}
+
+TEST_CASE("native boss: every boss and mini-boss body dead here runs its own death on a copy") {
+    for (const char* name : {"Enemy_DungeonBoss_Kotake", "Enemy_DungeonBoss_Gohma", "Enemy_DungeonBoss_Volvagia",
+                             "Enemy_DungeonBoss_Barinade_Jellyfish", "Enemy_MiddleBoss_Stalfos",
+                             "Enemy_MiddleBoss_Lizalfos"}) {
+        CAPTURE(name);
+        Table t;
+        t.SetOn(true, true);
+        Boss b{kActor, kBsa, Role::copy, name, 2};
+        t.Publish({b});
+        t.Receive(kActor, BossBsa{1, 4, std::nullopt, {}});
+        FakeGuest g;
+        for (std::uint64_t i = 0; i <= Table::kStartSteps; ++i) {
+            (void)t.Step(g, false, 0, kMain);  // (a new mini-boss copy runs its own start first)
+        }
+        CHECK(t.OnBrainVerb(kBsa, 9, true, false));
+        b.own_death = PlainDeath(0, false);  // its life 0 read here
+        t.Publish({b});
+        CHECK_FALSE(t.OnBrainVerb(kBsa, 9, true, false));
+        CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(141, kNode), true, false));
+        CHECK(t.Totals().body_deaths == 1);
+    }
+}
+
 TEST_CASE("native boss: a copy boss's own minion is not made, the owner's own is") {
     Table t;
     t.SetOn(true, true);
