@@ -2,6 +2,7 @@
 // (coop_look_view.h).
 #include "coop_look_view.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace CoopLookView {
@@ -30,11 +31,13 @@ bool Window::Valid() const {
            x0 >= 0 && y0 >= 0 && x1 <= 1 && y1 <= 1 && x1 > x0 && y1 > y0 && aspect > 0;
 }
 
-Shot Aim(const std::array<float, 3>& feet, float height, double yaw, const Window& window, double fov_y) {
-    const Axes a = AxesOf(yaw, kElevation);
+namespace {
+
+// The shot from `yaw` at `elevation` and distance `d`: Link's middle at the window's middle.
+Shot AimAt(const std::array<float, 3>& feet, double h, double yaw, double elevation, double d, const Window& window,
+           double fov_y) {
+    const Axes a = AxesOf(yaw, elevation);
     const double t = std::tan(fov_y * 0.5);
-    const double h = height > 0 ? height : 1.0;
-    const double d = h / (kFill * (window.y1 - window.y0) * 2.0 * t);
     // The window's middle in the view's terms (-1 to 1, y up).
     const double nx = static_cast<double>(window.x0) + window.x1 - 1.0;
     const double ny = 1.0 - (static_cast<double>(window.y0) + window.y1);
@@ -44,6 +47,42 @@ Shot Aim(const std::array<float, 3>& feet, float height, double yaw, const Windo
         // Aimed beside him, so that he stands at the window's middle; the eye d behind that aim.
         s.target[i] = middle[i] - a.right[i] * nx * d * t * window.aspect - a.up[i] * ny * d * t;
         s.eye[i] = s.target[i] + a.back[i] * d;
+    }
+    return s;
+}
+
+// How much of the window's height he fills, head to feet, in a shot.
+double Filled(const Shot& s, const std::array<float, 3>& feet, double h, const Window& window, double fov_y) {
+    const auto top = Project(s, {feet[0], feet[1] + h, feet[2]}, window.aspect, fov_y);
+    const auto bottom = Project(s, {feet[0], feet[1], feet[2]}, window.aspect, fov_y);
+    return (bottom[1] - top[1]) / (static_cast<double>(window.y1) - window.y0);
+}
+
+}  // namespace
+
+double FeetDrop(const Shot& shot, const std::array<float, 3>& feet) {
+    return std::atan2(shot.eye[1] - feet[1], std::hypot(shot.eye[0] - feet[0], shot.eye[2] - feet[2]));
+}
+
+Shot Aim(const std::array<float, 3>& feet, float height, double yaw, const Window& window, double fov_y) {
+    const double h = height > 0 ? height : 1.0;
+    // Start at the distance that fits his height into kFill of the window seen straight on, and at the elevation
+    // whose line to his feet would fall kFeetDrop. Then a few steps: the window's place and the near-far of the
+    // view move both a little, and each step corrects the elevation by the drop missed and the distance by the
+    // fill missed.
+    double elevation = kElevationMin;
+    double d = h / (kFill * (window.y1 - window.y0) * 2.0 * std::tan(fov_y * 0.5));
+    Shot s = AimAt(feet, h, yaw, elevation, d, window, fov_y);
+    for (int step = 0; step < 12; ++step) {
+        const double next = std::clamp(elevation + kFeetDrop - FeetDrop(s, feet), kElevationMin, kElevationMax);
+        const double filled = Filled(s, feet, h, window, fov_y);
+        const double next_d = filled > 0 ? d * filled / kFill : d;
+        if (std::fabs(next - elevation) < 1e-7 && std::fabs(next_d - d) < 1e-7 * d) {
+            break;
+        }
+        elevation = next;
+        d = next_d;
+        s = AimAt(feet, h, yaw, elevation, d, window, fov_y);
     }
     return s;
 }

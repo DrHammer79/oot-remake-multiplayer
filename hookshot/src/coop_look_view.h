@@ -38,9 +38,17 @@ inline constexpr double kFovY = 0.785398;   // 45 degrees
 // The field of view FovFromClip believes: outside it, kFovY.
 inline constexpr double kFovMin = 0.17;   // 10 degrees
 inline constexpr double kFovMax = 2.1;    // 120 degrees
-// One turn around Link, in seconds; the camera a little above his middle.
+// One turn around Link, in seconds.
 inline constexpr double kTurnSeconds = 16.0;
-inline constexpr double kElevation = 0.14;   // radians (8 degrees)
+// The camera looks down on him so that the line from the eye to his feet falls
+// this much: a step or ledge edge up to 0.5 m high, 0.9 m or more in front of
+// him, stays below that line, so his feet show over it (beta-test-1: at 8
+// degrees up, a stone step's edge in Kakariko hid him). The game's collision
+// is not used here (docs/puppet.md "The Link customizer"): walls and low
+// ceilings between the eye and him can still show.
+inline constexpr double kFeetDrop = 0.5236;       // radians (30 degrees)
+inline constexpr double kElevationMin = 0.14;     // radians (8 degrees): the eye never lower
+inline constexpr double kElevationMax = 0.7854;   // radians (45 degrees): never steeper
 // Link's height fills this much of the window's height.
 inline constexpr double kFill = 0.85;
 // Asked for no later than this ago: still the picture (the menu draws at the
@@ -56,8 +64,13 @@ std::optional<double> FovFromClip(const std::array<float, 16>& clip_from_world);
 
 // The shot that shows Link (his feet, his height) in the middle of the
 // window, from `yaw` (the direction from him to the eye, as atan2(x, z): the
-// game's views' convention), filling kFill of the window's height.
+// game's views' convention), filling kFill of the window's height, looking
+// down on him so that his feet show over a step (kFeetDrop).
 Shot Aim(const std::array<float, 3>& feet, float height, double yaw, const Window& window, double fov_y = kFovY);
+
+// How steeply the line from a shot's eye down to his feet falls, in radians
+// (Aim makes it kFeetDrop, within kElevationMin and kElevationMax).
+double FeetDrop(const Shot& shot, const std::array<float, 3>& feet);
 
 // The yaw that looks at Link's front, from the game's own camera (behind
 // him): its direction turned round.
