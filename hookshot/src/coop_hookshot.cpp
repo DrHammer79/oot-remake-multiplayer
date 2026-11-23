@@ -2351,6 +2351,7 @@ void DressCharacters(void* ctx) {
             CoopCharColours::Target t{actor, cells[i], own.custom, false, 0, model | kind};
             t.eyes = own.eyes, t.hair = own.hair;
             t.own = i == 0, t.character = character;
+            t.picture = i != 0 && character != 0;   // (dressed only on the Customize screen: its rows are the page's)
             targets.push_back(t);
         };
         const auto name_of = [](std::uint64_t actor) {

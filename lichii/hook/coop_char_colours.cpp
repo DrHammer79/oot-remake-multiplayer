@@ -222,7 +222,9 @@ public:
         // The model component, the player's kind only (the mod's own check: its +0xf8 is the player model's).
         const std::uint64_t component = R64(R64(s_.actor + kActorComponents) + 8);
         const std::uint64_t kind = R64(g_.main_base + kModelTypeGot);
-        if (component == 0 || kind == 0 || Virtual(component, 0xf8) != kind) return;
+        if (component == 0 || kind == 0) return;
+        s_.other_kind = Virtual(component, 0xf8) != kind;
+        if (s_.other_kind) return;
         const std::uint64_t model = R64(component + 0x18);
         const auto count = Rv<std::int32_t>(model + 0x20);
         const std::uint64_t list = R64(model + 0x28);
@@ -346,10 +348,12 @@ Result Learn(const Game& game, State& state, std::size_t max_calls) {
 }
 
 std::uint8_t Rows(const State& state) {
+    if (state.other_kind) return static_cast<std::uint8_t>(kRowGear | kRowsKnown);
     std::uint8_t rows = 0;
     bool any = false;
     for (const State::Unit& u : state.units) {
-        if (!u.looked_up) continue;
+        if (u.unit == 0) continue;
+        if (!u.looked_up) return 0;   // (part of the model only: not known yet)
         any = true;
         if (u.hair_palette) rows |= kRowHair;
         if (u.material[kHairNames.size()] >= 0 && u.param[kHairNames.size()][2] >= 0) rows |= kRowEyes;
@@ -520,6 +524,7 @@ std::size_t Wardrobe::Frame(const Game& game, const std::vector<Target>& targets
     std::size_t calls = 0;
     // One target further each frame comes first, so a budget that runs out never leaves the same puppets last.
     first_ = targets.empty() ? 0 : (first_ + 1) % targets.size();
+    std::optional<std::uint32_t> own_rows, picture_rows;   // (character << 8) | rows
     for (std::size_t n = 0; n < targets.size(); n++) {
         const Target& t = targets[(first_ + n) % targets.size()];
         auto it = std::find_if(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.state.actor == t.actor; });
@@ -547,8 +552,10 @@ std::size_t Wardrobe::Frame(const Game& game, const std::vector<Target>& targets
             k.gear_hidden = hide;
         }
         if (t.mods_routine || calls >= kCallsPerFrame || now_ms < k.retry_ms) continue;
-        // Your own character's model is looked up even with nothing to put on, for its Customize page's rows.
-        if (t.own && t.character != 0 && Rows(k.state) == 0) {
+        // Your own character's model, and its picture on the Customize screen, looked up even with nothing to put on,
+        // for the page's rows. Every frame: a model already looked up costs reads only (no call), and one put in its
+        // place (another pick, the field model changed when the menu closes) is looked up again.
+        if ((t.own || t.picture) && t.character != 0) {
             const Result r = Learn(game, k.state, kCallsPerFrame - calls);
             calls += r.calls;
             if (r.failed) {
@@ -556,9 +563,11 @@ std::size_t Wardrobe::Frame(const Game& game, const std::vector<Target>& targets
                 continue;
             }
         }
-        if (t.own) {
-            const std::uint8_t rows = t.character != 0 ? Rows(k.state) : std::uint8_t{0};
-            own_rows_.store((static_cast<std::uint32_t>(t.character) << 8) | rows, std::memory_order_relaxed);
+        if (t.picture && t.character != 0) {
+            picture_rows = (static_cast<std::uint32_t>(t.character) << 8) | Rows(k.state);
+        } else if (t.own) {
+            own_rows = (static_cast<std::uint32_t>(t.character) << 8) |
+                       (t.character != 0 ? Rows(k.state) : std::uint8_t{0});
         }
         Options o = Options::Of(t.custom);
         if (t.eyes) o.eyes_exact = EyeParam(*t.eyes);
@@ -598,6 +607,12 @@ std::size_t Wardrobe::Frame(const Game& game, const std::vector<Target>& targets
         k.at_ms = now_ms;
     }
     kept_.erase(std::remove_if(kept_.begin(), kept_.end(), [](const Kept& k) { return !k.seen; }), kept_.end());
+    // The page's rows: the picture's while Customize shows one, else your own model's (OwnRows).
+    if (picture_rows) {
+        own_rows_.store(*picture_rows, std::memory_order_relaxed);
+    } else if (own_rows) {
+        own_rows_.store(*own_rows, std::memory_order_relaxed);
+    }
     return calls;
 }
 

@@ -121,6 +121,9 @@ struct State {
         std::uint8_t cloth_rows = 0;
     };
     std::vector<Unit> units;
+    // npc-customize-2: the actor's model is there but not of the player model's kind (the mod's own check), so the
+    // mod puts none of its options on it: no colourable parts, only the equipment row (Rows).
+    bool other_kind = false;
 };
 
 struct Result {
@@ -131,7 +134,9 @@ struct Result {
 };
 
 // npc-customize: the rows a character's Customize page offers, from its model (State after a look-up): bit 0 hair,
-// 1 eyes, 2..4 Clothing Color 1..3, 5 equipment (every model). kRowsKnown: the model was looked up.
+// 1 eyes, 2..4 Clothing Color 1..3, 5 equipment (every model). kRowsKnown: every unit of the model was looked up (a
+// model with no colourable parts, or not of the player model's kind: kRowGear | kRowsKnown, the equipment only); 0:
+// not known yet (the page shows every row).
 inline constexpr std::uint8_t kRowHair = 1, kRowEyes = 2, kRowCloth1 = 4, kRowGear = 32, kRowsKnown = 0x80;
 std::uint8_t Rows(const State& state);
 // The equipment component's handles hidden by "Hidden" (the mod's GEAR_HANDLES: every piece but the item in hand,
@@ -211,6 +216,9 @@ struct Target {
     // learn: look its model up even with nothing to put on.
     bool own = false;
     std::uint16_t character = 0;
+    // npc-customize-2: the menu's model of your pick on Character Select's Customize screen (the picture). Its rows are
+    // the page's while it is there: the field model may still be the earlier pick's until the menu closes.
+    bool picture = false;
 };
 
 class Wardrobe {

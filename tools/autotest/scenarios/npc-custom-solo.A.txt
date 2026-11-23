@@ -1,7 +1,8 @@
-# npc-custom-solo (npc-customize-2, LANE1, -NoCoop: co-op idle). A only.
-# Pick Saria in Character Select, X Customize: her rows (Hair/Eye/Clothing/Equipment), change hair (red), eyes,
-# clothing rows and the equipment, shots each; field shots; walk to Kakariko (autosave keeps the pick for the
-# restart run); then page through the picker (shots) to find Cow.
+# npc-custom-solo (npc-customize-2, LANE1). A only, co-op IDLE: the module loaded, no server (run through hookshot.py
+# without --server; NOT run.ps1 -NoCoop, which turns the module off).
+# Pick Saria in Character Select, X Customize: her rows (left Hair/Eye/Clothing, right Clothing 2/3/Equipment); hair
+# red, eyes, clothing, DRIGHT to the right column: Equipment Hidden, Clothing 3 and 2, a shot each; field shots; walk
+# to Kakariko (the autosave keeps the pick for npc-custom-restart); then the picker's pages (Cow: page 7, 5th).
 mark start
 wait 300
 press MINUS
@@ -39,21 +40,24 @@ wait 60
 press ZR
 wait 120
 mark row3
-press DDOWN
+press DRIGHT
+wait 60
+mark right-col
+press ZR
+wait 120
+mark gear-hidden
+press DUP
+wait 60
+press ZR
 wait 60
 press ZR
 wait 120
-mark row4
-press DDOWN
+mark cloth3
+press DUP
 wait 60
 press ZR
 wait 120
-mark row5
-press DDOWN
-wait 60
-press ZR
-wait 120
-mark row6
+mark cloth2
 press B
 wait 180
 mark cust-back

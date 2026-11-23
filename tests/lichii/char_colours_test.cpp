@@ -564,3 +564,63 @@ TEST_CASE("char colours (npc-customize-2): your own pick, read solo or in a sess
     CHECK(CoopCharColours::ShownCharacter() == 0);
     CHECK_FALSE(CoopCharColours::ModPresent());
 }
+
+TEST_CASE("char colours (npc-customize-2): a model's rows: what it has, only Equipment for none, unknown until all is read") {
+    constexpr std::uint8_t kSaria = kRowHair | kRowEyes | kRowCloth1 | 8 | kRowGear | kRowsKnown;
+    constexpr std::uint8_t kGearOnly = kRowGear | kRowsKnown;
+    FakeGame saria(Character());
+    State s = StateFor();
+    CHECK(Rows(s) == 0);   // (not looked up: the page shows every row)
+    Learn(saria.AsGame(), s);
+    CHECK(Rows(s) == kSaria);
+    // A model with nothing colourable (Cow: no hair, eye or clothing palette material): Equipment only, known.
+    FakeGame cow({{"Mt_Body", 1, 1, {}}, {"Mt_Horn", 1, 1, {}}});
+    State c = StateFor();
+    Learn(cow.AsGame(), c);
+    CHECK(Rows(c) == kGearOnly);
+    // A model the mod's check refuses (not the player model's kind): none of its options go on it, Equipment only.
+    FakeGame other(Character());
+    other.W64(FakeGame::kCompVt + 0xf8, 0x1234);
+    State o = StateFor();
+    Learn(other.AsGame(), o);
+    CHECK(Rows(o) == kGearOnly);
+    // Part of a model read (the call budget ran out): not known yet.
+    State part = StateFor();
+    part.units.resize(2);
+    part.units[0].unit = 0x100, part.units[0].looked_up = true;
+    part.units[1].unit = 0x200;
+    CHECK(Rows(part) == 0);
+}
+
+TEST_CASE("char colours (npc-customize-2): the page's rows are the Customize picture's, else your model's, looked up again") {
+    constexpr std::uint16_t kCow = 113;
+    FakeGame f(Character());
+    // The picture: the menu's model of your pick, another actor, a model of another kind (the Cow's picture here).
+    constexpr std::uint64_t kPicture = 0x40000, kPicComps = 0x41000, kPicComponent = 0x42000, kPicVt = 0x43000;
+    f.W64(kPicture + kActorComponents, kPicComps);
+    f.W64(kPicComps + 8, kPicComponent);
+    f.W64(kPicComponent, kPicVt);
+    f.W64(kPicVt + 0xf8, 0x1234);
+    Wardrobe w;
+    const Game g = f.AsGame();
+    Target field{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, 1};
+    field.own = true, field.character = kCow;
+    // The field model is still the earlier pick's (Saria's materials) while the menu shows the Cow: its rows are not
+    // the Cow's page.
+    w.Frame(g, {field}, 1000, {});
+    CHECK(w.OwnRows(kCow) == (kRowHair | kRowEyes | kRowCloth1 | 8 | kRowGear | kRowsKnown));
+    Target picture{kPicture, FakeGame::kCell + 0x1000, 0, false, 0, std::nullopt, std::nullopt, 2};
+    picture.character = kCow, picture.picture = true;
+    w.Frame(g, {field, picture}, 1001, {});
+    CHECK(w.OwnRows(kCow) == (kRowGear | kRowsKnown));
+    // The menu closes and the field model becomes the Cow's (other units, nothing colourable): looked up again.
+    f.mats = {{"Mt_Body", 1, 1, {}}};
+    constexpr std::uint64_t kCowUnit = 0x15800;
+    f.W64(FakeGame::kUnitPtr, kCowUnit);
+    f.W64(kCowUnit, FakeGame::kUnitVt);
+    f.W64(kCowUnit + 0x108, FakeGame::kObjs);
+    w.Frame(g, {field}, 1002, {});
+    CHECK(w.OwnRows(kCow) == (kRowGear | kRowsKnown));
+    // Another pick's number: none of these rows.
+    CHECK(w.OwnRows(2) == 0);
+}

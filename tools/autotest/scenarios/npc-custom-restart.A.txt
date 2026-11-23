@@ -1,12 +1,11 @@
-# npc-custom-restart (npc-customize-2): after npc-custom-solo, run --no-restore (the save from Kakariko as Saria).
-# Field shot (Saria with her changed parts kept), Customize shot (values kept), then pick Cow (page 7, 5th, from the
-# cursor on Saria: ZR x6, DRIGHT x3), its Customize (Equipment only), field.
+# npc-custom-restart (npc-customize-2): after npc-custom-solo, run --no-restore (no load script: the game continues
+# from the Kakariko autosave by itself; the first ~40 s are its load). Character Select's own pick is not kept by
+# that save (Link after a restart: the mod's own behaviour), so Saria is picked again: her Customize shows co-op's
+# values KEPT from coop-options.ini (look_char_*), the model wears them; then Cow (page 7, 5th from Saria's column:
+# ZR x6, DRIGHT x3): its Customize has only Equipment; field.
 mark start
-wait 300
+wait 2400
 mark field-restart
-stick 0 -1 60
-wait 200
-mark field-restart-face
 press MINUS
 wait 150
 press L
@@ -15,6 +14,10 @@ press L
 wait 120
 press L
 wait 150
+press DRIGHT
+wait 60
+press A
+wait 240
 press X
 wait 200
 mark cust-restart
@@ -42,16 +45,12 @@ wait 60
 mark cow-focus
 press A
 wait 240
-mark cow-picked
 press X
 wait 200
 mark cow-cust
 press ZR
 wait 120
 mark cow-gear
-press DDOWN
-wait 60
-mark cow-down
 press B
 wait 180
 press B
