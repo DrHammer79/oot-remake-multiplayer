@@ -147,12 +147,24 @@ struct WarpPlan {
     std::string code;  // for `refuse`: the bridge's error code (not_in_play, not_in_event)
     std::string why;   // for `refuse`: the text
 };
-// Which way, from `status` (a reply with a fresh Link snapshot: an old or missing one cannot say, so it refuses) and
-// whether the caller named an `entrance`: an event runs -> event; none and no entrance -> teleport; none and an entrance
-// -> refuse (the teleport has no start position, the event-only request does).
-WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given);
-// Whether Link is in `scene` now: `status`'s map is the scene (a `_Child` or `_Adult` ending names the age too, the map
-// may not carry it: not seen in a game yet, so either spelling counts) and its fresh snapshot says no event and no load.
+// Which way, from `status` (a reply with a fresh Link snapshot: an old or missing one cannot say, so it refuses), whether
+// the caller named an `entrance`, and the `scene` asked: an event runs -> event; none and no entrance -> teleport; none
+// and an entrance -> refuse (the teleport has no start position, the event-only request does). Longshot's teleport picks
+// the map for Link's current age, so a `scene` ending in the other age (`_Child`/`_Adult`, any case) is refused
+// (`wrong_age`) on that route; the event request sets the age itself.
+WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene);
+// What the teleport route does with Longshot's ok reply (`sent`, `map`: the map it sent, `accepted`: the game's event
+// manager's answer): `accepted` false fails now (`refused`) instead of waiting out the timeout; else wait for `map`
+// (Longshot's spelling, for Link's age), or for the scene asked when the reply has none.
+struct TeleportWait {
+    bool failed = false;
+    std::string code, why;
+    std::string wait_for;
+};
+TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scene);
+// Whether Link is in `scene` now: `status`'s map is the scene (any case; a `_Child` or `_Adult` ending names the age too,
+// the map may not carry it: not seen in a game yet, so either spelling counts) and its fresh snapshot says no event and
+// no load.
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene);
 
 // The `world` member of `state` (docs/playtest.md): the actors near our Link from the object walk's last snapshot.

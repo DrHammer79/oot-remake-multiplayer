@@ -257,8 +257,9 @@ def _death(client, line, name, ident, out, death_frames=None):
             return dict(out, result="struck: the hit landed, but %s still lives after %d frames (a far actor may not "
                                     "die until Link is near it: go near it and look with get_world)" % (name, waited),
                         died=False, died_after=waited, frames=out["frames"] + waited)
-        client.step(DEATH_LOOK)
-        waited += DEATH_LOOK
+        look = min(DEATH_LOOK, limit - waited)      # exactly `limit` frames in all, not a block of DEATH_LOOK over
+        client.step(look)
+        waited += look
 
 
 def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=None):

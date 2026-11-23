@@ -114,14 +114,28 @@ def players_connected(state):
     return len(players) >= 2 and all(p.get("state") in ("connected", "quiet") for p in players)
 
 
+def scene_matches(in_state, scene):
+    """The module's rule (WarpArrived): the same name in any case, or `scene` with its `_Child`/`_Adult` ending is the
+    map (the map may not carry the age)."""
+    have, want = str(in_state or "").lower(), str(scene or "").lower()
+    if not have or not want:
+        return False
+    if have == want:
+        return True
+    return any(want.endswith(x) and want[:-len(x)] == have for x in ("_child", "_adult"))
+
+
 def warp_verdict(reply, scene):
     """(pass, seen) for the warp check: it arrived in `scene` and the game is held. In free play the warp goes by
     Longshot's teleport (a map of its list, no entrance); a refusal (`not_in_event`: the scene is not in that list) is a
     FAIL here, with its message in `seen`, so a wrong --scene is told apart from a hang."""
     st = reply.get("state") or {}
     seen = {"ok": reply.get("ok"), "error": reply.get("error"), "scene": st.get("scene"), "frame": reply.get("frame"),
-            "via": reply.get("via"), "message": reply.get("message")}
-    return bool(reply.get("ok") and reply.get("arrived") and st.get("scene") == scene and reply.get("paused")), seen
+            "via": reply.get("via"), "map": reply.get("map"), "message": reply.get("message")}
+    # Longshot's teleport picks the map for Link's age: the reply's `map` (what it sent) is what Link should be in
+    want = reply.get("map") or scene
+    return bool(reply.get("ok") and reply.get("arrived") and scene_matches(st.get("scene"), want)
+                and reply.get("paused")), seen
 
 
 def moved_verdict(before, after, reply):

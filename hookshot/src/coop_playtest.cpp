@@ -449,9 +449,10 @@ std::string Handle(const Request& r) {
         // docs/scenes.md "Free-play scene change"); in free play, Longshot's control `teleport` (taken at Link's next
         // update, so frames must run). Refused at once, with the reason, when neither fits.
         const auto now = LinkStatus();
-        const WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty());
+        const WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
         if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
+        std::string wait_for = r.scene;   // the map to wait for: the teleport route takes Longshot's (Link's age, its spelling)
         if (plan.route == WarpRoute::event) {
             std::string error;
             const std::string line = "warp " + r.scene + (r.entrance.empty() ? "" : " " + r.entrance);
@@ -480,18 +481,21 @@ std::string Handle(const Request& r) {
                 }
                 return fail("failed", "Longshot's teleport: " + code + ": " + message);
             }
+            const TeleportWait wait = ReadTeleport(*taken, r.scene);
+            if (wait.failed) return fail(wait.code, wait.why);
+            wait_for = wait.wait_for;
         }
         // Frames run (in steps of 10, held between them) until Link is in that scene with no event or load.
         while (std::chrono::steady_clock::now() < until) {
             if (!gate.Step(10, kHoldWait)) return fail("timeout", "the frames did not run in time");
             auto s = LinkStatus();
-            if (s && WarpArrived(&*s, r.scene)) {
-                return ok("\"arrived\":true,\"via\":" + Quote(plan.route == WarpRoute::event ? "event" : "teleport") +
+            if (s && WarpArrived(&*s, wait_for)) {
+                return ok("\"arrived\":true,\"map\":" + Quote(wait_for) + ",\"via\":" + Quote(plan.route == WarpRoute::event ? "event" : "teleport") +
                           ",\"state\":" + StateObject(false, std::move(s)));
             }
         }
         return ErrorReply(r.id, gate.Frame(), gate.Held(), "timeout",
-                          "not in " + r.scene + " after " + std::to_string(static_cast<int>(r.timeout_s)) +
+                          "not in " + wait_for + " after " + std::to_string(static_cast<int>(r.timeout_s)) +
                               " s; held; the state: " + StateObject());
     }
     if (r.cmd == "flag") {

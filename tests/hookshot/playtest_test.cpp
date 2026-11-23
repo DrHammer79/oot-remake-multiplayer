@@ -623,17 +623,17 @@ TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale")
 
 TEST_CASE("playtest: warp goes by the event request during an event and by the teleport in free play") {
     const auto event = Status(Snap(999, true));
-    CHECK(PlanWarp(&event, false).route == WarpRoute::event);
-    CHECK(PlanWarp(&event, true).route == WarpRoute::event);     // the event request takes a start position
+    CHECK(PlanWarp(&event, false, "KokiriForest").route == WarpRoute::event);
+    CHECK(PlanWarp(&event, true, "KokiriForest").route == WarpRoute::event);     // the event request takes a start position
     const auto boot = Status("{\"event\":true,\"loading\":false,\"age\":\"child\"}");   // no sample yet: the typed event
-    CHECK(PlanWarp(&boot, false).route == WarpRoute::event);
+    CHECK(PlanWarp(&boot, false, "KokiriForest").route == WarpRoute::event);
     const auto play = Status(Snap(999));
-    CHECK(PlanWarp(&play, false).route == WarpRoute::teleport);
+    CHECK(PlanWarp(&play, false, "KokiriForest").route == WarpRoute::teleport);
 }
 
 TEST_CASE("playtest: warp with an entrance in free play is refused with the way out") {
     const auto play = Status(Snap(999));
-    const auto plan = PlanWarp(&play, true);
+    const auto plan = PlanWarp(&play, true, "KokiriForest");
     CHECK(plan.route == WarpRoute::refuse);
     CHECK(plan.code == "not_in_event");
     CHECK(plan.why.find("without an entrance") != std::string::npos);
@@ -643,13 +643,63 @@ TEST_CASE("playtest: warp with an entrance in free play is refused with the way 
 TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missing") {
     const auto old = Status(Snap(100, true));
     for (const bool entrance : {false, true}) {
-        CHECK(PlanWarp(&old, entrance).route == WarpRoute::refuse);
-        CHECK(PlanWarp(&old, entrance).code == "not_in_play");
-        CHECK(PlanWarp(&old, entrance).why.find("not readable") != std::string::npos);
-        CHECK(PlanWarp(nullptr, entrance).why.find("not readable") != std::string::npos);
+        CHECK(PlanWarp(&old, entrance, "KokiriForest").route == WarpRoute::refuse);
+        CHECK(PlanWarp(&old, entrance, "KokiriForest").code == "not_in_play");
+        CHECK(PlanWarp(&old, entrance, "KokiriForest").why.find("not readable") != std::string::npos);
+        CHECK(PlanWarp(nullptr, entrance, "KokiriForest").why.find("not readable") != std::string::npos);
     }
     const auto nogame = Status("null");
-    CHECK(PlanWarp(&nogame, false).route == WarpRoute::refuse);
+    CHECK(PlanWarp(&nogame, false, "KokiriForest").route == WarpRoute::refuse);
+}
+
+TEST_CASE("playtest: a teleport to the other age's map is refused up front (Longshot picks the map by Link's age)") {
+    const auto child = Status(Snap(999));                                  // Snap: age child
+    CHECK(PlanWarp(&child, false, "KokiriForest_Child").route == WarpRoute::teleport);
+    CHECK(PlanWarp(&child, false, "kokiriforest_child").route == WarpRoute::teleport);   // any case
+    const auto plan = PlanWarp(&child, false, "KokiriForest_Adult");
+    CHECK(plan.route == WarpRoute::refuse);
+    CHECK(plan.code == "wrong_age");
+    CHECK(plan.why.find("child") != std::string::npos);
+    CHECK(PlanWarp(&child, false, "kokiriforest_ADULT").route == WarpRoute::refuse);
+    const auto event = Status(Snap(999, true));
+    CHECK(PlanWarp(&event, false, "KokiriForest_Adult").route == WarpRoute::event);   // the event request sets the age itself
+}
+
+TEST_CASE("playtest: the teleport's reply says what to wait for and fails at once when the game did not accept it") {
+    auto parse = [](const std::string& text) {
+        std::string error;
+        auto v = CoopModJson::Parse(text, &error);
+        REQUIRE_MESSAGE(v, error);
+        return *v;
+    };
+    // Longshot sent the map for Link's age, in its own spelling: wait for that, not for the name asked
+    const auto sent = parse("{\"ok\":true,\"sent\":true,\"map\":\"KokiriForest_Child\",\"accepted\":true}");
+    const auto w = ReadTeleport(sent, "kokiriforest_adult");
+    CHECK_FALSE(w.failed);
+    CHECK(w.wait_for == "KokiriForest_Child");
+    // no map in the reply: the name asked
+    const auto nomap = parse("{\"ok\":true,\"sent\":true,\"map\":null,\"accepted\":true}");
+    CHECK(ReadTeleport(nomap, "Market_Child").wait_for == "Market_Child");
+    // the game's event manager did not accept it: fail now with the map in the text, do not wait out the timeout
+    const auto no = parse("{\"ok\":true,\"sent\":true,\"map\":\"Market_Child\",\"accepted\":false}");
+    const auto f = ReadTeleport(no, "Market_Child");
+    CHECK(f.failed);
+    CHECK(f.code == "refused");
+    CHECK(f.why.find("Market_Child") != std::string::npos);
+    CHECK(f.why.find("accept") != std::string::npos);
+    // no `accepted` member (an older Longshot): not a failure
+    const auto old = parse("{\"ok\":true,\"sent\":true,\"map\":\"Market_Child\"}");
+    CHECK_FALSE(ReadTeleport(old, "Market_Child").failed);
+}
+
+TEST_CASE("playtest: warp arrived compares scene names in any case") {
+    const auto in = Status(Snap(999), 1000, "\"KokiriForest_Child\"");
+    CHECK(WarpArrived(&in, "kokiriforest_child"));
+    CHECK(WarpArrived(&in, "KOKIRIFOREST_CHILD"));
+    CHECK_FALSE(WarpArrived(&in, "KOKIRIFOREST"));       // (unchanged rule: only the scene's ending is dropped)
+    const auto bare = Status(Snap(999), 1000, "\"KokiriForest\"");
+    CHECK(WarpArrived(&bare, "kokiriforest_ADULT"));    // (the age ending is dropped, as before)
+    CHECK_FALSE(WarpArrived(&bare, "Market"));
 }
 
 TEST_CASE("playtest: warp arrived needs the scene, no event, no load and a fresh snapshot") {

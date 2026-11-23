@@ -957,6 +957,13 @@ class StrikeAndHelpers(unittest.TestCase):
         with self.assertRaises(Exception):
             self.tool.call("kill", {"actor": "Enemy_Far", "id": 7, "wait_frames": 601})
 
+    def test_the_death_wait_is_exactly_wait_frames(self):             # reviewer-6 nit: no rounding up to a block of 6
+        self.game.death_delay = None
+        start = self.game.frame
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7, "wait_frames": 10})
+        self.assertEqual(r["died_after"], 10)
+        self.assertLessEqual(self.game.frame - start, 2 + ph.STRIKE_FRAMES + 10)
+
     def test_a_hit_does_not_wait_for_a_death(self):
         self.game.death_delay = None
         start = self.game.frame

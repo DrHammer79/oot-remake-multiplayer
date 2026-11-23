@@ -33,6 +33,17 @@ class WarpVerdict(unittest.TestCase):
         r = {"ok": True, "arrived": True, "paused": True, "frame": 9, "state": {"scene": "KokiriForest_Child"}}
         self.assertTrue(bp.warp_verdict(r, "KokiriForest_Child")[0])
 
+    def test_the_scene_matches_as_the_module_matches_it(self):   # same rule as WarpArrived: case, and no age ending
+        def arrived(scene_in_state, asked, **extra):
+            r = dict({"ok": True, "arrived": True, "paused": True, "state": {"scene": scene_in_state}}, **extra)
+            return bp.warp_verdict(r, asked)[0]
+        self.assertTrue(arrived("KokiriForest", "KokiriForest_Child"))     # the map may not carry the age
+        self.assertTrue(arrived("kokiriforest_child", "KokiriForest_Child"))
+        self.assertFalse(arrived("Market", "KokiriForest_Child"))
+        # Longshot's teleport picks the map for Link's age: the reply's `map` is what to compare with
+        self.assertTrue(arrived("KokiriForest_Child", "KokiriForest_Adult", map="KokiriForest_Child"))
+        self.assertFalse(arrived("KokiriForest_Adult", "KokiriForest_Adult", map="KokiriForest_Child"))
+
     def test_wrong_scene_not_held_timeout_or_other_errors_fail(self):
         r = {"ok": True, "arrived": True, "paused": True, "state": {"scene": "DekuTree"}}
         self.assertFalse(bp.warp_verdict(r, "KokiriForest_Child")[0])

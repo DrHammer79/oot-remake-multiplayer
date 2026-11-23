@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_playtest_core.h"
 
+#include <cctype>
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -579,15 +581,44 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     return out;
 }
 
-WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given) {
+namespace {
+bool SameName(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    }
+    return true;
+}
+
+// "child", "adult" or "" from a scene name's ending (any case).
+std::string_view AgeEnding(std::string_view scene) {
+    for (const std::string_view suffix : {"_Child", "_Adult"}) {
+        if (scene.size() > suffix.size() && SameName(scene.substr(scene.size() - suffix.size()), suffix)) {
+            return suffix == "_Child" ? "child" : "adult";
+        }
+    }
+    return {};
+}
+}  // namespace
+
+WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene) {
     const auto* game = GameOf(status);
     if (game && !SnapshotIsOld(status)) {
         if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
         if (game->Bool("event") == false) {
-            if (!entrance_given) return {WarpRoute::teleport, {}, {}};
-            return {WarpRoute::refuse, "not_in_event",
-                    "no event runs, so only Longshot's teleport can change scene, and it has no start position: call "
-                    "warp without an entrance, or restart the session with a boot script that warps there"};
+            if (entrance_given) {
+                return {WarpRoute::refuse, "not_in_event",
+                        "no event runs, so only Longshot's teleport can change scene, and it has no start position: "
+                        "call warp without an entrance, or restart the session with a boot script that warps there"};
+            }
+            const auto want = AgeEnding(scene);
+            const auto age = game->Text("age");
+            if (!want.empty() && age && *age != want) {
+                return {WarpRoute::refuse, "wrong_age",
+                        "Longshot's teleport lands at Link's current age (" + *age + "), so " + std::string(scene) +
+                            " would not be taken as asked: ask for the " + *age + " map, or switch age first"};
+            }
+            return {WarpRoute::teleport, {}, {}};
         }
     }
     return {WarpRoute::refuse, "not_in_play",
@@ -595,15 +626,29 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given) {
             "game runs"};
 }
 
+TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scene) {
+    TeleportWait out;
+    const auto map = reply.Text("map");
+    out.wait_for = (map && !map->empty()) ? *map : std::string(scene);
+    if (reply.Bool("accepted") == false) {
+        out.failed = true;
+        out.code = "refused";
+        out.why = "Longshot sent the teleport to " + out.wait_for +
+                  ", but the game's event manager did not accept it (an event or a load was in the way): try again "
+                  "when the game is in free play (Longshot allows one teleport every 8 s)";
+    }
+    return out;
+}
+
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene) {
     const auto* game = GameOf(status);
     if (!game || SnapshotIsOld(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
     const auto map = status->Text("map");
     if (!map) return false;
-    if (*map == scene) return true;
+    if (SameName(*map, scene)) return true;
     for (const std::string_view suffix : {"_Child", "_Adult"}) {
-        if (scene.size() > suffix.size() && scene.substr(scene.size() - suffix.size()) == suffix &&
-            scene.substr(0, scene.size() - suffix.size()) == *map) {
+        if (scene.size() > suffix.size() && SameName(scene.substr(scene.size() - suffix.size()), suffix) &&
+            SameName(scene.substr(0, scene.size() - suffix.size()), *map)) {
             return true;
         }
     }

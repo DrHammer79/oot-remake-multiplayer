@@ -269,7 +269,7 @@ PLAYER_TOOLS = [
      "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
      "a map not in that list, the game takes the request ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load "
      "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
-     "warps. It runs until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
+     "warps. Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
      "inputSchema": {"type": "object", "required": ["scene"],
                      "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"},
                                     "timeout": {"type": "number", "minimum": 1, "maximum": 600}}}},
