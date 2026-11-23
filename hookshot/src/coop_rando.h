@@ -142,7 +142,9 @@ bool ParseHandSeed(std::string_view value, std::string* hash, std::string* folde
 // What makes two copies of a seed the same world: every file under <folder>/romfs, by path (lower case, '/') and
 // bytes, in path order, as FNV-1a 64 (16 lower-case hex). The files the kit's start rewrites in a winning mod are read
 // from the copies it keeps of the mod's own (merge_tables.py: romfs/System/Resource/<f> from _coop-size-table/<f>,
-// romfs/RSDB/<f> from _coop-rows/<f>), so two players match after their own merges. Nothing outside romfs counts
+// romfs/RSDB/<f> from _coop-rows/<f>, and the GameData lists and Mals archives from _coop-gamedata, _coop-archives), so
+// two players match after their own merges. A kept copy counts only while its stamp names the file now (a seed built
+// again in the folder is read as it is). Nothing outside romfs counts
 // (coop-seed.txt, the kit's marks). Empty: no files, one could not be read, or `stop` turned true.
 std::string SeedFilesHash(const std::filesystem::path& folder, const std::function<bool()>* stop = nullptr);
 // The chat lines about the host's hand-put seed: this game's (a guest) and the one the host gets (TellLine's limit).
