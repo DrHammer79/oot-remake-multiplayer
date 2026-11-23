@@ -11,6 +11,8 @@
     "front-to-beside": {"start": "chest-front", "steps": ["chest-beside"], "note": "Two places, a short walk or a place call."}
   },
   "menu_paths": {},
-  "stuck_spots": [],
-  "notes": ["Positions are from tools/autotest/scenarios/chest-other.A.txt (metres, the game's own coordinates)."]
+  "stuck_spots": [
+    {"x": 6.5, "y": 108.5, "z": 8.6, "radius": 1.0, "note": "place here (beside the chest): the camera ended inside the chest's side and A answered with an empty prompt, so the chest did not open.", "fix": "Place Link at chest-front instead and face the chest."}
+  ],
+  "notes": ["Positions are from tools/autotest/scenarios/chest-other.A.txt (metres, the game's own coordinates).", "The stuck spot is from a two-game play-test run on 2026-11-23 (one try, not repeated)."]
 }

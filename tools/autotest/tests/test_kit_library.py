@@ -260,5 +260,29 @@ class WholeFolder(Folder):
         self.says(kit_library.check_all(self.root)[0], "data: the folder is missing")
 
 
+class Docs(unittest.TestCase):
+    """The pages that explain the library: their relative links go somewhere, and the entry points name the page."""
+    REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+
+    def read(self, rel):
+        with open(os.path.join(self.REPO, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_links_resolve(self):
+        import re
+        pages = ["docs/playtest-agents.md", "tools/playtest/README.md", "tools/playtest/scripts/README.md",
+                 "tools/playtest/data/README.md"]
+        for rel in pages:
+            base = os.path.dirname(os.path.join(self.REPO, rel))
+            for target in re.findall(r"\]\(([^)#\s]+)", self.read(rel)):
+                if "://" in target:
+                    continue
+                self.assertTrue(os.path.exists(os.path.normpath(os.path.join(base, target))), "%s links %s" % (rel, target))
+
+    def test_entry_points_name_the_agents_page(self):
+        self.assertIn("playtest-agents.md", self.read("AGENTS.md"))
+        self.assertIn("playtest-agents.md", self.read("docs/README.md"))
+
+
 if __name__ == "__main__":
     unittest.main()
