@@ -507,8 +507,8 @@ public:
         bool character = false;
         bool mods_routine = false;
         std::string actor_name;   // (a puppet made again as another actor starts anew)
-        std::optional<std::uint32_t> eyes;   // the player's eye colour, exact (ForModel: part 18 Link, 21 a character)
-        std::optional<std::uint32_t> hair;   // the player's hair colour (ForModel: part 19 Link, 20 a character)
+        std::optional<std::uint32_t> eyes{};   // the player's eye colour, exact (ForModel: part 18 Link, 21 a character)
+        std::optional<std::uint32_t> hair{};   // the player's hair colour (ForModel: part 19 Link, 20 a character)
     };
     std::vector<DressView> DressTargets() const;
     // Any thread: bit n set while puppet n's actor is live in this scene and

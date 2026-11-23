@@ -174,7 +174,7 @@ inline constexpr std::uint8_t kLinkEyesPart = 18, kLinkHairPart = 19, kCharHairP
                               kCharCloth1Part = 22, kCharGearPart = 25;
 struct ModelColours {
     std::uint32_t custom = 0;                 // Options' nibbles: hair palette, gear, the three clothing palettes
-    std::optional<std::uint32_t> eyes, hair;  // exact colours (EyeParam / HairParam)
+    std::optional<std::uint32_t> eyes{}, hair{};  // exact colours (EyeParam / HairParam)
     bool operator==(const ModelColours&) const = default;
 };
 // `part(number)`: the look's colour of that part, if set. A Link model: Link's eyes and hair only. A character's: its
@@ -214,10 +214,10 @@ struct Target {
     bool mods_routine = false;
     int iris_shift = 0;
     // 0.11.9: the player's eye colour (CoopLook's eyes part, 0xRRGGBB): dressed on any model, Link's too.
-    std::optional<std::uint32_t> eyes;
+    std::optional<std::uint32_t> eyes{};
     // 0.11.9: the player's hair colour (ForModel: Link's hair part on a Link model, the character's on a character's,
     // with the nearest palette entry in custom).
-    std::optional<std::uint32_t> hair;
+    std::optional<std::uint32_t> hair{};
     // What the puppet is (a hash of its actor's pack name): a puppet made again as another actor at the same
     // address, or in the same block, starts anew (its old model's material numbers are not this one's).
     std::uint64_t model = 0;
