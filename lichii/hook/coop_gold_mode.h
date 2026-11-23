@@ -21,14 +21,17 @@
 // choice. A guest that hears no value (a host from before this) plays Shared.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "coop/host/flags.hpp"
 #include "coop/protocol/messages.hpp"
 
 namespace CoopGoldMode {
@@ -69,12 +72,11 @@ bool Told();
 // welcome, where a mode left from an earlier session could still be in force.
 inline bool KeepLocalNow() { return Told() && NotShared(); }
 
-// Not shared, a guest: the host's save (at join, and at Resync from host) is written with this game's own Gold
-// Skulltulas (review of f36a8852): `host` is the host's progress.sav, changed in place; `own` this game's last
-// progress.sav (its co-op slot, else its own save; nullptr: none, a race from nothing). Each placement key in
-// `skulltula_keys` and key + 2 take `own`'s state in the save's 64-bit key set, and the Int `count_hash` and the
-// Bool `get_hash` take `own`'s value (0 without one). The save layout: tools/autotest/save_flags.py. A host's save
-// that does not read as one is left as it is.
+// Not shared, a guest: the host's save (at join, and at Resync from host) is written with this game's own race with
+// that host (review of f36a8852; KeepRaceIn below). Each placement key in `skulltula_keys` and key + 2 take the race's
+// state in the save's 64-bit key set, and the Int `count_hash` and the Bool `get_hash` take the race's value (0
+// without one). The save layout: tools/autotest/save_flags.py. A host's save that does not read as one is left as it
+// is.
 struct GoldKept {
     bool done = false;        // the host's save read and changed as said
     int host_keys = 0;        // gold keys the host's save had
@@ -84,30 +86,67 @@ struct GoldKept {
     bool keys_left = false;   // ours could not be added: the host's save has no key set
     std::string why;          // not done: why
 };
-GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uint8_t>* own,
-                     std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
-                     std::uint32_t get_hash);
 
-// Not shared: this game's race so far, the progress.sav of the newest slot in the co-op folder `coop_dir`. Never the
-// player's own (single-player) saves: every player starts the race from 0 tokens (decision of 2026-11-23). None:
-// nothing, and KeepOwnGold starts the race from nothing.
-// The folder's slot counts only with the race mark (MarkRace): a Shared slot is never a race's start, also when a
-// session switches to Not shared midway. Else the race kept beside the co-op folder (KeepRace), so a race guest's own count carries into its next session
-// in the co-op game: a join empties the co-op folder before the host's save comes.
-std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir);
+// Not shared: one player's race with one host's game (DECISIONS 2026-11-23 18:49): the Skulltulas it took (each
+// placement key and key + 2), its token count and IsGet. Kept per player and per host, beside coop.ini
+// (`gold-race/<race id>.txt`), so it is remembered between sessions and put back after every save load. Never taken
+// from the host's save or from the player's own (single-player) saves: a race with a host starts from 0 tokens.
+struct Race {
+    std::set<std::uint64_t> keys;
+    std::int32_t count = 0;
+    bool get = false;
+    bool empty() const { return keys.empty() && count == 0 && !get; }
+    // Adds `other` (its keys, the higher count, IsGet if either): true when this race grew. Tokens are never spent,
+    // so a race only grows: a save load that shows fewer (an older save) never takes any away.
+    bool Join(const Race& other);
+    bool operator==(const Race&) const = default;
+};
 
-// The race kept beside `coop_dir` (never inside it: the game mounts that folder): `<folder>-gold-race.sav`, and the
-// mark `<folder>-gold-race.on` that says the co-op folder's slot holds a race (a Not shared host's save with ours).
-std::filesystem::path RaceFile(const std::filesystem::path& coop_dir);
-std::filesystem::path RaceMark(const std::filesystem::path& coop_dir);
+// The race as text (one `count N`, `get 0|1` and `key <hex>` per line) and back; nullopt for a text that is not one.
+std::string RaceText(const Race& race);
+std::optional<Race> ParseRace(std::string_view text);
 
-// The host's save was just written into `coop_dir`: `race` true (Not shared, ours kept in it) sets the mark, false
-// (Shared) takes it away, so a Shared session's shared count never becomes a race's start. The kept race stays.
-void MarkRace(const std::filesystem::path& coop_dir, bool race);
+// The race's file for `race_id` in `dir`, read (nullopt: none, or not a race) and written whole (through a
+// temporary file). An id that is not 16 hex digits has no file.
+std::filesystem::path RaceFile(const std::filesystem::path& dir, std::string_view race_id);
+std::optional<Race> LoadRace(const std::filesystem::path& dir, std::string_view race_id);
+bool SaveRace(const std::filesystem::path& dir, std::string_view race_id, const Race& race);
 
-// Before the co-op folder is emptied (a join): with the mark, its newest slot's progress.sav is kept in RaceFile.
-// True when it was kept.
-bool KeepRace(const std::filesystem::path& coop_dir);
+// The host's save (a progress.sav, `host`, changed in place) written with `race` (nullptr: none, a race from 0).
+GoldKept KeepRaceIn(std::vector<std::uint8_t>& host, const Race* race,
+                    std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
+                    std::uint32_t get_hash);
+
+// The race id: the host's game, 16 hex digits. Each game's own id is a tag of its player key
+// (coop::protocol::player_key_tag); a Not shared host sends the session's id in its MOD_SETTINGS coop entry
+// (key kRaceKey). A guest takes the host's; a host takes its own, unless a host before it told the session one (a
+// migration keeps the race of the game the session plays). Empty: not known (a host from before this), and the race
+// is then kept for this session only.
+inline constexpr std::string_view kRaceKey = "gold_race";
+std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key);
+void SetOwnRaceId(std::string id);   // at start (the hook)
+std::string RaceId();                // the session's; "" until known
+std::optional<coop::protocol::ModSetting> RaceSetting();   // the host's entry: Not shared with a known id
+
+// This player's race with the session's host (RaceId), in memory and in `dir` (SetRaceDir: `gold-race` beside
+// coop.ini). Any thread. TheRace: the race so far (read from its file the first time an id is asked; none: a race from
+// 0). GrowRace: `seen` added (Race::Join) and, when it grew, written to its file at once; true when it grew. With no
+// race id the race lives for this session only. A new connection (OnConnection) forgets the one in memory.
+void SetRaceDir(std::filesystem::path dir);
+Race TheRace();
+bool GrowRace(const Race& seen);
+
+// The game's Gold Skulltula state through `game` (read), and the race put back into it (write): each key of the race
+// not set in the game is set, the count raised to the race's, IsGet set. Nothing lowers the game's.
+std::optional<Race> ReadRace(coop::host::FlagStore& game, std::span<const std::uint64_t> skulltula_keys,
+                             std::uint32_t count_hash, std::uint32_t get_hash);
+struct PutBack {
+    int written = 0;   // flags written
+    int failed = 0;    // writes the game refused (try again)
+    int unread = 0;    // flags that could not be read (the save not in yet)
+    bool done() const { return failed == 0 && unread == 0; }
+};
+PutBack PutRaceBack(coop::host::FlagStore& game, const Race& race, std::uint32_t count_hash, std::uint32_t get_hash);
 
 // Test only: back to a fresh start (Shared, choice Shared).
 void ResetForTest();

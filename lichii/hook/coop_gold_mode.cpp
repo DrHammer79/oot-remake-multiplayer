@@ -3,11 +3,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <set>
 
-#include "coop/host/save_transfer.hpp"
+#include "coop/protocol/traffic_crypto.hpp"
 
 namespace CoopGoldMode {
 
@@ -17,6 +20,18 @@ namespace {
 std::atomic<Mode> g_choice{Mode::shared};
 std::atomic<Mode> g_in_force{Mode::shared};
 std::atomic<bool> g_told{false};  // this connection has a mode (a host's settings, or our own Host)
+std::mutex g_race_mutex;
+std::string g_own_race;   // SetOwnRaceId
+std::string g_race;       // the session's race id ("" until known)
+std::filesystem::path g_race_dir;          // SetRaceDir
+std::optional<std::string> g_cached_id;    // the id g_cached is for (nullopt: none read yet)
+Race g_cached;
+
+bool IsRaceId(std::string_view id) {
+    return id.size() == 16 && std::all_of(id.begin(), id.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
 }  // namespace
 
 std::string_view Value(Mode mode) {
@@ -51,11 +66,19 @@ Mode Choice() {
 void OnConnection() {
     g_told.store(false);
     g_in_force.store(Mode::shared);
+    std::lock_guard lock(g_race_mutex);
+    g_race.clear();
+    g_cached_id.reset();
+    g_cached = Race{};
 }
 
 void OnHosting() {
-    // A host after a migration keeps the mode its old host told it.
-    if (!g_told.exchange(true)) g_in_force.store(g_choice.load());
+    // A host after a migration keeps the mode its old host told it, and its race id (the game the session plays).
+    if (!g_told.exchange(true)) {
+        g_in_force.store(g_choice.load());
+        std::lock_guard lock(g_race_mutex);
+        g_race = g_own_race;
+    }
 }
 
 void OnWelcomed(bool hosting) {
@@ -68,6 +91,40 @@ void OnHostSettings(const std::vector<proto::ModSetting>& settings) {
         g_in_force.store(*mode);
         g_told.store(true);
     }
+    for (const proto::ModSetting& s : settings) {
+        if (s.mod_id == kModId && s.key == kRaceKey && IsRaceId(s.value)) {
+            std::lock_guard lock(g_race_mutex);
+            g_race = s.value;
+        }
+    }
+}
+
+std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key) {
+    const auto tag = proto::player_key_tag(player_key, "oot-coop gold race v1");
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string id;
+    for (const std::uint8_t b : tag) {
+        id.push_back(kHex[b >> 4]);
+        id.push_back(kHex[b & 15]);
+    }
+    return id;
+}
+
+void SetOwnRaceId(std::string id) {
+    std::lock_guard lock(g_race_mutex);
+    g_own_race = IsRaceId(id) ? std::move(id) : std::string();
+}
+
+std::string RaceId() {
+    std::lock_guard lock(g_race_mutex);
+    return g_race;
+}
+
+std::optional<proto::ModSetting> RaceSetting() {
+    if (!NotShared()) return std::nullopt;
+    std::string id = RaceId();
+    if (id.empty()) return std::nullopt;
+    return proto::ModSetting{std::string(kModId), std::string(kRaceKey), std::move(id)};
 }
 
 bool Told() {
@@ -180,9 +237,9 @@ std::optional<SaveView> ReadSave(const std::vector<std::uint8_t>& d, std::uint32
 
 }  // namespace
 
-GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uint8_t>* own,
-                     std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
-                     std::uint32_t get_hash) {
+GoldKept KeepRaceIn(std::vector<std::uint8_t>& host, const Race* race,
+                    std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
+                    std::uint32_t get_hash) {
     GoldKept out;
     std::set<std::uint64_t> gold;
     for (const std::uint64_t k : skulltula_keys) {
@@ -194,11 +251,6 @@ GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uin
         out.why = "the host's save: " + out.why;
         return out;
     }
-    std::optional<SaveView> o;
-    if (own != nullptr) {
-        std::string why;
-        o = ReadSave(*own, count_hash, get_hash, why);  // ours unreadable: a race from nothing
-    }
     std::vector<std::uint64_t> keys;
     for (const std::uint64_t k : h->keys) {
         if (gold.count(k) != 0) {
@@ -207,8 +259,8 @@ GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uin
             keys.push_back(k);
         }
     }
-    if (o) {
-        for (const std::uint64_t k : o->keys) {
+    if (race != nullptr) {
+        for (const std::uint64_t k : race->keys) {
             if (gold.count(k) != 0) keys.push_back(k);
         }
     }
@@ -217,8 +269,8 @@ GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uin
     out.own_keys = static_cast<int>(
         std::count_if(keys.begin(), keys.end(), [&](std::uint64_t k) { return gold.count(k) != 0; }));
     if (h->count_at) out.host_count = static_cast<std::int32_t>(Word(host, *h->count_at));
-    if (o && o->count_at) out.own_count = static_cast<std::int32_t>(Word(*own, *o->count_at));
-    const std::uint32_t own_get = (o && o->get_at) ? Word(*own, *o->get_at) : 0;
+    if (race != nullptr) out.own_count = race->count;
+    const std::uint32_t own_get = (race != nullptr && race->get) ? 1 : 0;
 
     if (h->count_at) PutWord(host, *h->count_at, static_cast<std::uint32_t>(out.own_count));
     if (h->get_at) PutWord(host, *h->get_at, own_get);
@@ -242,67 +294,109 @@ void ResetForTest() {
     g_choice.store(Mode::shared);
     g_in_force.store(Mode::shared);
     g_told.store(false);
+    std::lock_guard lock(g_race_mutex);
+    g_own_race.clear();
+    g_race.clear();
+    g_race_dir.clear();
+    g_cached_id.reset();
+    g_cached = Race{};
+}
+
+bool Race::Join(const Race& other) {
+    bool grew = false;
+    for (const std::uint64_t k : other.keys) grew |= keys.insert(k).second;
+    if (other.count > count) {
+        count = other.count;
+        grew = true;
+    }
+    if (other.get && !get) {
+        get = true;
+        grew = true;
+    }
+    return grew;
 }
 
 namespace {
-std::optional<std::vector<std::uint8_t>> NewestProgress(const std::filesystem::path& coop_dir) {
-    namespace save = coop::host::save;
-    const auto newest = save::newest_slot(coop_dir);
-    if (!newest) return std::nullopt;
-    auto slot = save::read_slot(*newest);
-    if (!slot) return std::nullopt;
-    for (auto& f : slot->files) {
-        if (f.name == "progress.sav") return std::move(f.bytes);
-    }
-    return std::nullopt;
-}
+constexpr std::string_view kRaceHeader = "oot-coop gold race 1";
 }  // namespace
 
-namespace {
-std::filesystem::path Beside(const std::filesystem::path& coop_dir, std::string_view tail) {
-    std::filesystem::path p = coop_dir;
-    if (!p.has_filename()) p = p.parent_path();  // a trailing separator
-    return p.parent_path() / (p.filename().string() + std::string(tail));
-}
-}  // namespace
-
-std::filesystem::path RaceFile(const std::filesystem::path& coop_dir) { return Beside(coop_dir, "-gold-race.sav"); }
-
-std::filesystem::path RaceMark(const std::filesystem::path& coop_dir) { return Beside(coop_dir, "-gold-race.on"); }
-
-std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir) {
-    // The folder's slot only when it is a race (the mark): a Shared session's slot, also one that switched to Not shared
-    // midway (a Resync), holds the shared count, never a race's start.
-    std::error_code ec;
-    if (std::filesystem::exists(RaceMark(coop_dir), ec)) {
-        if (auto bytes = NewestProgress(coop_dir)) return bytes;
+std::string RaceText(const Race& race) {
+    std::string out(kRaceHeader);
+    out += "\ncount " + std::to_string(race.count) + "\nget " + (race.get ? "1" : "0") + "\n";
+    char line[32];
+    for (const std::uint64_t k : race.keys) {
+        std::snprintf(line, sizeof line, "key %016llx\n", static_cast<unsigned long long>(k));
+        out += line;
     }
-    std::ifstream in(RaceFile(coop_dir), std::ios::binary);
+    return out;
+}
+
+std::optional<Race> ParseRace(std::string_view text) {
+    Race race;
+    bool header = false;
+    while (!text.empty()) {
+        const std::size_t nl = text.find('\n');
+        std::string_view line = text.substr(0, nl);
+        text = nl == std::string_view::npos ? std::string_view() : text.substr(nl + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        if (line.empty()) continue;
+        if (!header) {
+            if (line != kRaceHeader) return std::nullopt;
+            header = true;
+            continue;
+        }
+        const std::size_t sp = line.find(' ');
+        if (sp == std::string_view::npos) return std::nullopt;
+        const std::string_view name = line.substr(0, sp);
+        const std::string_view value = line.substr(sp + 1);
+        const char* const first = value.data();
+        const char* const last = value.data() + value.size();
+        if (name == "key") {
+            std::uint64_t k = 0;
+            const auto r = std::from_chars(first, last, k, 16);
+            if (r.ec != std::errc() || r.ptr != last || k == 0) return std::nullopt;
+            race.keys.insert(k);
+        } else if (name == "count") {
+            std::int32_t n = 0;
+            const auto r = std::from_chars(first, last, n);
+            if (r.ec != std::errc() || r.ptr != last || n < 0) return std::nullopt;
+            race.count = n;
+        } else if (name == "get") {
+            if (value != "0" && value != "1") return std::nullopt;
+            race.get = value == "1";
+        } else {
+            return std::nullopt;
+        }
+    }
+    if (!header) return std::nullopt;
+    return race;
+}
+
+std::filesystem::path RaceFile(const std::filesystem::path& dir, std::string_view race_id) {
+    if (!IsRaceId(race_id)) return {};
+    return dir / (std::string(race_id) + ".txt");
+}
+
+std::optional<Race> LoadRace(const std::filesystem::path& dir, std::string_view race_id) {
+    const std::filesystem::path file = RaceFile(dir, race_id);
+    if (file.empty()) return std::nullopt;
+    std::ifstream in(file, std::ios::binary);
     if (!in) return std::nullopt;
-    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (bytes.empty()) return std::nullopt;
-    return bytes;
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    return ParseRace(text);
 }
 
-void MarkRace(const std::filesystem::path& coop_dir, bool race) {
+bool SaveRace(const std::filesystem::path& dir, std::string_view race_id, const Race& race) {
+    const std::filesystem::path to = RaceFile(dir, race_id);
+    if (to.empty()) return false;
     std::error_code ec;
-    if (race) {
-        std::ofstream(RaceMark(coop_dir), std::ios::binary | std::ios::trunc).put('1');
-    } else {
-        std::filesystem::remove(RaceMark(coop_dir), ec);
-    }
-}
-
-bool KeepRace(const std::filesystem::path& coop_dir) {
-    std::error_code ec;
-    if (!std::filesystem::exists(RaceMark(coop_dir), ec)) return false;
-    const auto bytes = NewestProgress(coop_dir);
-    if (!bytes || bytes->empty()) return false;
-    const std::filesystem::path to = RaceFile(coop_dir);
-    const std::filesystem::path tmp = to.string() + ".tmp";
+    std::filesystem::create_directories(dir, ec);
+    std::filesystem::path tmp = to;
+    tmp += ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        out.write(reinterpret_cast<const char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+        const std::string text = RaceText(race);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
         if (!out) return false;
     }
     std::filesystem::rename(tmp, to, ec);
@@ -311,6 +405,90 @@ bool KeepRace(const std::filesystem::path& coop_dir) {
         return false;
     }
     return true;
+}
+
+namespace {
+// Under g_race_mutex: the race for the session's id, read from its file when the id changed.
+Race& CachedLocked() {
+    if (g_cached_id != g_race) {
+        g_cached_id = g_race;
+        g_cached = Race{};
+        if (!g_race.empty() && !g_race_dir.empty()) {
+            if (auto kept = LoadRace(g_race_dir, g_race)) g_cached = std::move(*kept);
+        }
+    }
+    return g_cached;
+}
+}  // namespace
+
+void SetRaceDir(std::filesystem::path dir) {
+    std::lock_guard lock(g_race_mutex);
+    g_race_dir = std::move(dir);
+    g_cached_id.reset();
+}
+
+Race TheRace() {
+    std::lock_guard lock(g_race_mutex);
+    return CachedLocked();
+}
+
+bool GrowRace(const Race& seen) {
+    std::lock_guard lock(g_race_mutex);
+    Race& race = CachedLocked();
+    if (!race.Join(seen)) return false;
+    if (!g_race.empty() && !g_race_dir.empty()) SaveRace(g_race_dir, g_race, race);
+    return true;
+}
+
+std::optional<Race> ReadRace(coop::host::FlagStore& game, std::span<const std::uint64_t> skulltula_keys,
+                             std::uint32_t count_hash, std::uint32_t get_hash) {
+    const auto count = game.read(proto::FlagKey(count_hash, std::uint16_t{0}));
+    if (!count) return std::nullopt;   // no save in the game yet
+    Race race;
+    race.count = static_cast<std::int32_t>(count->value);
+    if (const auto get = game.read(proto::FlagKey(get_hash, std::uint16_t{0}))) race.get = get->value != 0;
+    for (const std::uint64_t k : skulltula_keys) {
+        for (const std::uint64_t key : {k, k + 2}) {
+            const auto now = game.read(proto::FlagKey::key64_flag(key));
+            if (now && now->value != 0) race.keys.insert(key);
+        }
+    }
+    return race;
+}
+
+PutBack PutRaceBack(coop::host::FlagStore& game, const Race& race, std::uint32_t count_hash, std::uint32_t get_hash) {
+    PutBack out;
+    const auto put = [&](const proto::FlagEntry& entry) {
+        if (game.write(entry)) {
+            ++out.written;
+        } else {
+            ++out.failed;
+        }
+    };
+    for (const std::uint64_t key : race.keys) {
+        const proto::FlagKey k = proto::FlagKey::key64_flag(key);
+        const auto now = game.read(k);
+        if (!now) {
+            ++out.unread;
+        } else if (now->value == 0) {
+            put(proto::FlagEntry(k, proto::FlagKind::boolean, 1));
+        }
+    }
+    const proto::FlagKey count_key(count_hash, std::uint16_t{0});
+    if (const auto now = game.read(count_key); !now) {
+        ++out.unread;
+    } else if (static_cast<std::int32_t>(now->value) < race.count) {
+        put(proto::FlagEntry(count_key, now->kind, static_cast<std::uint32_t>(race.count)));
+    }
+    if (race.get) {
+        const proto::FlagKey get_key(get_hash, std::uint16_t{0});
+        if (const auto now = game.read(get_key); !now) {
+            ++out.unread;
+        } else if (now->value == 0) {
+            put(proto::FlagEntry(get_key, now->kind, 1));
+        }
+    }
+    return out;
 }
 
 }  // namespace CoopGoldMode

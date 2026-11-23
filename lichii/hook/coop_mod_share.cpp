@@ -264,12 +264,14 @@ void Frame(coop::host::Session* session) {
                 send_list = *mine;
             }
             if (g.hosting) {
-                // Co-op's own host settings first (CoopGoldMode: the mode in force, never cut off below), then
-                // the mods'. A mod that calls itself "coop" cannot give the same key.
+                // Co-op's own host settings first (CoopGoldMode: the mode in force and, Not shared, the race id;
+                // never cut off below), then the mods'. A mod that calls itself "coop" cannot give the same keys.
                 std::vector<proto::ModSetting> shared{CoopGoldMode::AsSetting(CoopGoldMode::InForce())};
+                if (auto race = CoopGoldMode::RaceSetting()) shared.push_back(std::move(*race));
                 if (g.provider.shared) {
                     for (proto::ModSetting& s : g.provider.shared()) {
-                        if (s.mod_id != CoopGoldMode::kModId || s.key != CoopGoldMode::kKey) {
+                        if (s.mod_id != CoopGoldMode::kModId ||
+                            (s.key != CoopGoldMode::kKey && s.key != CoopGoldMode::kRaceKey)) {
                             shared.push_back(std::move(s));
                         }
                     }
