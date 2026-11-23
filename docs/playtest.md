@@ -347,8 +347,8 @@ server calls them; a script can too). They only use the bridge's commands, so th
 - `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
   equips and each inventory entry (`inventory_changed`, one entry per item). `talk` and `open` press `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
-  on every `input` and `step`; the MCP tools do not take a `both` argument, so over MCP the tester steps the other game
-  itself.
+  on every `input`, `move` and `step`. Over MCP, the `--pair` server does this for every tool (below); with one server per
+  game the tester steps the other game itself.
 
 Every reply carries the game's `frame`.
 
@@ -412,6 +412,17 @@ Nothing here has run in a game. The first run checks:
 
    `--port N` names a port outright. Three or four players: `oot-p3` and `oot-p4` the same way (games started by
    hand: `live.py` starts two).
+
+   **Both games in step (`--pair`).** One server instead of the two: `claude mcp add oot-pair -- python -I
+   tools/autotest/mcp_playtest.py --pair --lane 1 --session <session folder> --log-dir <log dir>`. It holds both
+   bridges (p1 and p2, ports from `--lane`). Every tool is the per-game tool with a `player`. Every frame that
+   player's game runs, the other game runs too: walks, presses and steps frame for frame (`InStep`), and what ran
+   outside them (a warp, a test line, a shot) right after the call, from the game's frame counts. So neither game is
+   held while the other plays: its puppet keeps moving, and an enemy it owns is not frozen. Each such reply has
+   `other`: the other player, the `frames` it ran, how many of them were `caught_up` after the call, and `in_step`
+   (false with an `error` when the other game could not be stepped). `get_state` and `step` with no `player` act on
+   both games (`games`, by player). A tool that runs no frame (get_world, checkpoint, log, ...) touches only its
+   game. A bridge takes one client at a time, so `oot-pair` replaces `oot-p1` and `oot-p2`: never register both.
 3. The tester follows [AGENTS.md](../AGENTS.md), "Play-testing the game", and runs [tests/scenarios.md](../tests/scenarios.md)
    in order.
 

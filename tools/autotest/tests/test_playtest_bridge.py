@@ -52,6 +52,7 @@ class FakeGame:
         self.via = None
         self.flip_at = None     # (frame): the stick's sign turns over from this frame on (a model that changes under the walk)
         self.move_camera = True  # the module has a camera to turn a `move`'s yaw into the stick
+        self.warp_frames = 0    # frames a warp runs before it answers
         self.away_from = None   # (x, z): Link ignores the stick and walks directly away from this point
         self.faced = None       # the (x, z) of the last `face`
         self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
@@ -119,6 +120,8 @@ class FakeGame:
 
     def answer(self, m):
         cmd = m.get("cmd")
+        if cmd == "hello":
+            return {"ok": True, "protocol": 1, "control": True}
         if cmd == "pause":
             self.paused = True
             return {"ok": True}
@@ -149,6 +152,7 @@ class FakeGame:
                 # free play goes by Longshot's teleport: no start position, and only its own list of maps
                 return {"ok": False, "error": "not_in_event", "message": "refused: free play, by the teleport only"}
             self.via = "event" if self.event else "teleport"
+            self.run(self.warp_frames)
             self.scene = m["scene"]
             self.paused = True
             return {"ok": True, "arrived": True, "state": self.state()}
@@ -862,6 +866,90 @@ class PlayerServer(unittest.TestCase):
                     mcp_playtest.main(argv)
         finally:
             sys.stderr = err
+
+
+class PairServer(unittest.TestCase):
+    """--pair: one server, both games; the frames one game runs, the other runs too."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.games = {p: FakeGame(dump_dir=tempfile.mkdtemp(dir=self.tmp.name)) for p in ("p1", "p2")}
+        self.pair = mcp_playtest.Pair({p: mcp_playtest.Game(p, pc.Client(g.port), self.tmp.name)
+                                       for p, g in self.games.items()})
+
+    def tearDown(self):
+        for g in self.pair.games.values():
+            g.client.close()
+        for g in self.games.values():
+            g.close()
+        self.tmp.cleanup()
+
+    def frames(self):
+        return {p: g.frame for p, g in self.games.items()}
+
+    def test_every_tool_takes_a_player_and_only_state_and_step_can_go_without(self):
+        by = {t["name"]: t for t in self.pair.tools}
+        self.assertEqual(list(by), [t["name"] for t in mcp_playtest.PLAYER_TOOLS])
+        for name, t in by.items():
+            self.assertEqual(t["inputSchema"]["properties"]["player"]["enum"], ["p1", "p2"])
+            self.assertEqual("player" in t["inputSchema"].get("required", []), name not in ("get_state", "step"), name)
+            self.assertEqual("Both games run the same frames" in t["description"],
+                             name not in mcp_playtest.NO_FRAME_TOOLS, name)
+        self.assertEqual(by["walk_to"]["inputSchema"]["required"], ["player", "x", "z"])
+        self.assertNotIn("player", mcp_playtest.PLAYER_TOOLS[0]["inputSchema"]["properties"])   # (a copy)
+
+    def test_a_walk_runs_the_same_frames_in_the_other_game(self):
+        r = self.pair.answer("walk_to", {"player": "p1", "x": 2.0, "z": 0.0})
+        self.assertTrue(r["arrived"], r)
+        ran = self.games["p1"].frame - 1000
+        self.assertGreater(ran, 0)
+        self.assertEqual(self.games["p2"].frame - 1000, ran)
+        self.assertEqual(r["other"], {"player": "p2", "frames": ran, "caught_up": 0, "in_step": True})
+        self.assertEqual(self.games["p2"].pos, [0.0, 0.0, 0.0])    # stepped, never moved
+
+    def test_frames_outside_input_and_step_are_caught_up(self):
+        self.games["p2"].warp_frames = 40
+        r = self.pair.answer("warp", {"player": "p2", "scene": "KokiriForest_Child"})
+        self.assertEqual(self.frames(), {"p1": 1040, "p2": 1040})
+        self.assertEqual(r["other"]["caught_up"], 40)
+        self.pair.answer("screenshot", {"player": "p1"})   # a shot runs 1 frame
+        self.assertEqual(self.frames(), {"p1": 1041, "p2": 1041})
+
+    def test_no_player_state_and_step_are_both_games(self):
+        r = self.pair.answer("step", {"frames": 7})
+        self.assertEqual(self.frames(), {"p1": 1007, "p2": 1007})
+        self.assertEqual(sorted(r["games"]), ["p1", "p2"])
+        self.assertNotIn("other", r)
+        r = self.pair.answer("get_state", {})
+        self.assertEqual(r["games"]["p2"]["scene"], "ForestTemple")
+        self.assertEqual(self.frames(), {"p1": 1007, "p2": 1007})
+
+    def test_a_look_runs_no_frame_and_a_missing_player_is_refused(self):
+        r = self.pair.answer("get_world", {"player": "p1"})
+        self.assertNotIn("other", r)
+        self.assertEqual(self.frames(), {"p1": 1000, "p2": 1000})
+        self.assertEqual([m["cmd"] for m in self.games["p2"].log], [])   # the other game was not even asked
+        with self.assertRaisesRegex(ValueError, "player is one of p1, p2"):
+            self.pair.answer("walk_to", {"x": 1, "z": 0})
+        with self.assertRaisesRegex(ValueError, "player is one of"):
+            self.pair.answer("press", {"player": "p3"})
+
+    def test_served_as_oot_pair(self):
+        reqs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                 "params": {"name": "press", "arguments": {"player": "p2", "buttons": ["A"], "frames": 3}}}]
+        stdin, stdout = sys.stdin, sys.stdout
+        sys.stdin = io.StringIO("".join(json.dumps(r) + "\n" for r in reqs))
+        sys.stdout = io.StringIO()
+        try:
+            mcp_playtest.serve(None, self.pair)
+            out = [json.loads(ln) for ln in sys.stdout.getvalue().splitlines()]
+        finally:
+            sys.stdin, sys.stdout = stdin, stdout
+        self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-pair")
+        body = json.loads(out[1]["result"]["content"][0]["text"])
+        self.assertEqual(body["other"]["frames"], 3)
+        self.assertEqual(self.frames(), {"p1": 1003, "p2": 1003})
 
 
 class VerbGateNotInPlayersFiles(unittest.TestCase):

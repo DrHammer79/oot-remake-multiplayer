@@ -34,25 +34,43 @@ class InStep:
 
     def __init__(self, primary, other):
         self.primary, self.other = primary, other
+        self.stepped = 0   # frames the other game ran so far
 
     def __getattr__(self, name):
         return getattr(self.primary, name)
 
+    def _other(self, frames):
+        self.other.step(frames)
+        self.stepped += frames
+
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         r = self.primary.input(stick, buttons, frames, rstick)
-        self.other.step(frames)
+        self._other(frames)
         return r
 
     def move(self, yaw, strength=1.0, frames=1, check=True):
         r = self.primary.move(yaw, strength, frames, check)
         if r.get("ok"):                     # (a refused move ran no frames)
-            self.other.step(frames)
+            self._other(frames)
         return r
 
     def step(self, frames=1):
         r = self.primary.step(frames)
-        self.other.step(frames)
+        self._other(frames)
         return r
+
+    def catch_up(self, ran):
+        """Steps the other game by what the primary ran (`ran` frames, from its frame counts) beyond what was already
+        stepped: a warp or a test line runs frames that do not pass through input, move or step. Returns the frames
+        added."""
+        left = int(ran) - self.stepped
+        added = 0
+        while left > 0:
+            n = min(left, pc.MAX_FRAMES)
+            self._other(n)
+            added += n
+            left -= n
+        return added
 
 
 def _pos(state):
