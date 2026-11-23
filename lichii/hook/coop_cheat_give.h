@@ -17,7 +17,8 @@
 namespace CoopCheatGive {
 
 // The item flags a gift word stands for: `bombs`, `bow` and `hookshot` are the flags of each, any other word is a
-// flag name as it is.
+// flag name as it is, except a bare item name (Item_Boomerang), which is its PouchData.<name>.StockNum flag, else its
+// IsGet.<name> flag, when the game has one of them.
 std::vector<std::string> Names(std::string_view word);
 
 // A name in the list of item flags (shared or per player: the ammo counts are per player).

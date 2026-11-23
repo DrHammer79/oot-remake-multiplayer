@@ -261,9 +261,15 @@ def bridge(s, x):
     return hookshot.Bridge.connect(s["games"][x]["pipe"], timeout=15)
 
 
-def new_lines(d, s, x):
-    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest)."""
+def new_lines(d, s, x, match=None):
+    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest).
+    With `match` (a text), only the lines holding it, the OLDEST MAX_LINES of them; the cursor given moves past the lines
+    looked at only when all their matches were returned (more than MAX_LINES: it stops after the last one returned, so
+    no match is lost). The caller keeps this cursor apart from the plain one: the lines a match left out are still there
+    for a plain look."""
     path = s["games"][x]["log"]
+    if match:
+        return _new_matching(path, s, x, match)
     try:
         with open(path, "rb") as f:
             f.seek(s["offsets"].get(x, 0))
@@ -276,6 +282,31 @@ def new_lines(d, s, x):
     if len(lines) > MAX_LINES:
         lines = ["(%d older lines left out)" % (len(lines) - MAX_LINES)] + lines[-MAX_LINES:]
     return lines
+
+
+def _new_matching(path, s, x, match):
+    try:
+        with open(path, "rb") as f:
+            start = s["offsets"].get(x, 0)
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return []
+    out, end, pos, capped = [], start, 0, False
+    for raw in data.splitlines(keepends=True):
+        if not raw.endswith(b"\n"):
+            break   # a half-written last line: left for the next look
+        pos += len(raw)
+        ln = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if "coop:" in ln and not NOISE.search(ln) and match in ln:
+            out.append(re.sub(r"^\[hos [^\]]*\] ", "", ln))
+            if len(out) >= MAX_LINES:
+                end, capped = start + pos, True
+                break
+    if not capped:
+        end = start + pos   # every complete line was looked at, and every match is in `out`
+    s["offsets"][x] = end
+    return out
 
 
 def snapshot(b):

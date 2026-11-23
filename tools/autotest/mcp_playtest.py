@@ -10,6 +10,7 @@ hand (newline-delimited JSON-RPC 2.0 on stdin/stdout: initialize, tools/list, to
 """
 import argparse
 import io
+import math
 import json
 import os
 import re
@@ -119,6 +120,20 @@ def _num(args, key, lo=None, hi=None):
     return ("%g" % v) if v != int(v) else str(int(v))
 
 
+def face_point(args):
+    """The (x, z) a `place` turns Link to: `face_x` and `face_z`, or a point 1 m from the place along `facing` degrees
+    (0 = +z, 90 = +x). The two ways together, or half of the first, are refused."""
+    has_pt = "face_x" in args or "face_z" in args
+    if has_pt and "facing" in args:
+        raise ValueError("facing, or face_x and face_z: not both")
+    if has_pt:
+        if "face_x" not in args or "face_z" not in args:
+            raise ValueError("face_x and face_z come together")
+        return float(_num(args, "face_x")), float(_num(args, "face_z"))
+    deg = math.radians(float(_num(args, "facing", -360, 360)))
+    return float(_num(args, "x")) + math.sin(deg), float(_num(args, "z")) + math.cos(deg)
+
+
 def act_line(name, args):
     """The one test line a verb tool sends (None: not a verb tool)."""
     if name == "kill":
@@ -177,9 +192,13 @@ ACT_TOOLS = [
     {"name": "hurt", "description": "Hurt Link for N quarter hearts (a hit from a metre east). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["quarter_hearts"],
                      "properties": {"quarter_hearts": {"type": "integer", "minimum": 1, "maximum": 80}}}},
-    {"name": "place", "description": "Put Link at a point (x, y, z in metres). " + ACT_NOTE,
+    {"name": "place", "description": "Put Link at a point (x, y, z in metres). With `facing` (degrees: 0 = +z, "
+     "90 = +x) or `face_x` and `face_z` (a point to look at) he is also turned that way, so a chest or a talk needs "
+     "no walk or guess; then 4 frames pass and the reply has `placed` and `faced`. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["x", "y", "z"],
-                     "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}}},
+                     "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"},
+                                    "facing": {"type": "number", "minimum": -360, "maximum": 360},
+                                    "face_x": {"type": "number"}, "face_z": {"type": "number"}}}},
     {"name": "wear", "description": "Set what Link wears in a slot (the flags only; `dress` puts it on). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["part", "name"],
                      "properties": {"part": {"type": "string", "enum": list(PARTS)}, "name": {"type": "string"}}}},
@@ -234,10 +253,12 @@ HELPER_TOOLS = [
 PLAYER_TOOLS = [
     {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
      "facing and camera yaw (degrees: 0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, equips, "
-     "inventory, co-op status, event/loading and the A prompt, plus words: `life_word` (full, ok, low, critical), "
+     "co-op status, event/loading and the A prompt, plus words: `life_word` (full, ok, low, critical), "
      "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
-     "no world list (solo). " + PAUSED,
-     "inputSchema": {"type": "object", "properties": {}}},
+     "no world list (solo). The inventory is NOT in the reply unless you ask: `inventory_count` says how many items "
+     "are set; `inventory` true adds those entries (about 290 on a full save: 10k tokens, ask once). The nearest "
+     "actors are in get_world. " + PAUSED,
+     "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"}}}},
     {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
      "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
@@ -281,11 +302,12 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"],
                      "properties": {"name": {"type": "string"},
                                     "value": {"type": ["integer", "boolean", "string"]}}}},
-    {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, or an item flag name). Written at "
+    {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
+     "Weapon_Sword_Kokiri, or a full flag name such as IsGet.Item_Boomerang). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
      "new value (`no change: ... already N` when Link had it; `failed` with the reason when it was not given; `partial` "
      "true when the item is in but its IsGet or a grant was not; `not_ready` while a load runs). "
-     "get_state.inventory shows it without a step. Bombs and arrows are counts per player: `bombs` gives the small "
+     "get_state with inventory=true shows it without a step. Bombs and arrows are counts per player: `bombs` gives the small "
      "bag and 20 bombs; a bomb that can be lifted also needs PlayerStatus.LiftGrade (docs/items.md).",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
 ] + ACT_TOOLS + HELPER_TOOLS + [
@@ -306,8 +328,9 @@ PLAYER_TOOLS = [
     {"name": "resume", "description": "Let the game run in real time again (a person takes over). The next call "
      "holds it again.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "log", "description": "This game's new co-op log lines (`coop:`) since the last call, the newest "
-     "%d at most; `match` keeps only lines containing that text. Needs --session (games from live.py start: p1 = A, "
-     "p2 = B). No frame passes." % live.MAX_LINES,
+     "%d at most; `match` keeps only lines containing that text (the oldest %d of them; a `match` has its "
+     "own cursor, so the lines it left out are still there for the next call without it). Needs --session (games from live.py start: p1 = A, "
+     "p2 = B). No frame passes." % (live.MAX_LINES, live.MAX_LINES),
      "inputSchema": {"type": "object", "properties": {"match": {"type": "string"}}}},
     {"name": "check_logs", "description": "The oracle for 'did anything go wrong': this game's new `coop:` log lines "
      "that are a warning, an error or a critical line (the game's level prefix) or say failed, error, refused or "
@@ -336,6 +359,7 @@ class Game:
 
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
+        self.match_offsets = {}   # one cursor per `log` match (the plain cursor is not moved by a match)
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
         self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
@@ -351,9 +375,13 @@ class Game:
         s = live.load(self.session)
         if self.offsets is None:
             self.offsets = {x: (s.get("offsets") or {}).get(x, 0)}   # from the end of the boot
-        lines = live.new_lines(self.session, {"games": s["games"], "offsets": self.offsets}, x)
         if match:
-            lines = [ln for ln in lines if match in ln]
+            # a match has a cursor of its own (it starts where the plain one is): the plain cursor stays, so the lines
+            # the match left out are still there for the next plain `log`
+            cur = self.match_offsets.setdefault(match, dict(self.offsets))
+            lines = live.new_lines(self.session, {"games": s["games"], "offsets": cur}, x, match)
+            return {"frame": self.client.last_frame, "lines": lines}
+        lines = live.new_lines(self.session, {"games": s["games"], "offsets": self.offsets}, x)
         return {"frame": self.client.last_frame, "lines": lines}
 
     def check_logs(self, since="last_check", names=()):
@@ -418,7 +446,8 @@ class Game:
             live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
             live.touch(self.session)          # the session's watchdog counts this as a tester command
         try:
-            return self._call(name, args)
+            # no reply carries the whole inventory or the world list unless asked for (get_state inventory=true)
+            return pc.slim_state(self._call(name, args), inventory=name == "get_state" and bool(args.get("inventory")))
         finally:
             if self.session:
                 live.touch(self.session)      # (a long walk_to or warp is not idle time)
@@ -463,6 +492,8 @@ class Game:
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":
             return c.give(args["item"])
+        if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):
+            return ph.place_facing(c, act_line(name, args), face_point(args))
         line = act_line(name, args)
         if line is not None:
             if name in ("kill", "hit"):
