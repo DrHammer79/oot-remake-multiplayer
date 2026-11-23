@@ -796,6 +796,7 @@ public:
     std::optional<CoopPuppet::Call> Step(CoopPuppet::Guest& guest, bool after_call,
                                          std::uint64_t result, std::uint64_t now_ms) {
         std::lock_guard lock(mutex_);
+        DiagNodeAfterStart(guest, now_ms);
         if (after_call && allocating_) {
             allocating_ = false;
             block_ = result;
@@ -807,6 +808,7 @@ public:
             // itself in our game only (under our Link's grip too). Both places are put where it rests: idle there,
             // its next push goes on from it as in the mover's game.
             const NodeStart n = *std::exchange(node_after_, std::nullopt);
+            diag_ = {n.node, n.actor, now_ms + 3000, 0};
             const auto at = CoopWorld::NodeTargetAtRest(
                 [&guest](u64 address) -> std::optional<u64> {
                     u64 word = 0;
@@ -1560,6 +1562,32 @@ private:
     };
     std::vector<NodeStart> node_starts_;
     std::vector<NodeStart> work_node_starts_;
+    // Row 244 diagnostic: for 3 s after a node start, the node's +0x40/+0x4c/+0xfc/+0x108 and the block's place,
+    // every 100 ms ("push node diag"), to see which field still carries the old cell (the jump back).
+    struct NodeDiag {
+        u64 node = 0, actor = 0, until_ms = 0, last_ms = 0;
+    } diag_;
+    void DiagNodeAfterStart(CoopPuppet::Guest& guest, std::uint64_t now_ms) {
+        if (diag_.node == 0 || (diag_.last_ms != 0 && now_ms < diag_.last_ms + 100)) return;
+        if (now_ms > diag_.until_ms) {
+            diag_ = {};
+            return;
+        }
+        diag_.last_ms = now_ms;
+        float v[4][3] = {};
+        float pos[3] = {NAN, NAN, NAN};
+        const u64 offs[4] = {CoopWorld::BlockNode::kBase, CoopWorld::BlockNode::kGoal, CoopWorld::BlockNode::kTarget,
+                             CoopWorld::BlockNode::kStart};
+        for (int k = 0; k < 4; ++k) {
+            for (int i = 0; i < 3; ++i) guest.Read(diag_.node + offs[k] + 4u * i, &v[k][i], 4);
+        }
+        for (int i = 0; i < 3; ++i) guest.Read(diag_.actor + kActorPosition + 4u * i, &pos[i], 4);
+        LOG_INFO(Core,
+                 "coop: world: push node diag {:x}: +0x40 ({:.2f} {:.2f} {:.2f}) +0x4c ({:.2f} {:.2f} {:.2f}) "
+                 "+0xfc ({:.2f} {:.2f} {:.2f}) +0x108 ({:.2f} {:.2f} {:.2f}) block ({:.2f} {:.2f} {:.2f})",
+                 diag_.node, v[0][0], v[0][1], v[0][2], v[1][0], v[1][1], v[1][2], v[2][0], v[2][1], v[2][2],
+                 v[3][0], v[3][1], v[3][2], pos[0], pos[1], pos[2]);
+    }
     std::optional<NodeStart> node_after_;  // row 244: the start just called, its target checked after it
     std::size_t next_node_start_ = 0;
     std::size_t node_started_ = 0;
