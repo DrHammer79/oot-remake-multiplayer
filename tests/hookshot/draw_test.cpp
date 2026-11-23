@@ -268,12 +268,57 @@ TEST_CASE("hookshot draw: the player list while F6 is held, as the co-op window'
     s.players = std::vector<CoopHook::PlayerRow>{me, other};
     CHECK(CoopDraw::Wanted(s));
     CoopDraw::Draw(c.d, s);
-    const auto texts = c.Of("text");
-    REQUIRE(texts.size() == 15);
+    // Each cell outlined (eight dark copies, then the word): no box (ui-audit-01112 B5).
+    const auto all = c.Of("text");
+    REQUIRE(all.size() == 15 * 9);
+    std::vector<Call> texts;
+    for (std::size_t i = 8; i < all.size(); i += 9) {
+        texts.push_back(all[i]);
+    }
     CHECK(texts[0].text == "#");
     CHECK(texts[0].y > 720.0f / 6);              // below a sixth of the height
     CHECK(texts[10].rgba != texts[5].rgba);     // the reconnecting row is dim
-    CHECK(c.Of("rect").size() == 1);
+    CHECK(c.Of("rect").empty());
+    CHECK(c.Of("circle").empty());
+}
+
+TEST_CASE("hookshot draw: the F6 list fits a narrow picture and 16 players, smaller, never past an edge") {
+    // 16 players with long names and places: the list as drawn stays inside the picture.
+    std::vector<CoopHook::PlayerRow> rows;
+    for (std::uint8_t n = 1; n <= 16; ++n) {
+        CoopHook::PlayerRow r;
+        r.number = n;
+        r.name = "A rather long player name " + std::to_string(n);
+        r.self = n == 1;
+        r.state = "connected";
+        r.ms = 100;
+        r.scene = "Lost Woods, Sacred Forest Meadow";
+        rows.push_back(r);
+    }
+    for (const auto& [w, h] : std::vector<std::pair<int, int>>{{1280, 720}, {640, 720}, {800, 1200}, {1920, 1080}}) {
+        Canvas c(w, h);
+        CoopDraw::Scene s;
+        s.players = rows;
+        CoopDraw::Draw(c.d, s);
+        const auto texts = c.Of("text");
+        REQUIRE_FALSE(texts.empty());
+        for (const auto& t : texts) {
+            const float tw = static_cast<float>(t.text.size()) * t.px * 0.5f;   // Canvas's text_width
+            CHECK(t.x >= 0.0f);
+            CHECK(t.x + tw <= static_cast<float>(w) + 0.5f);
+            CHECK(t.y + t.px <= static_cast<float>(h) + 0.5f);
+        }
+        CHECK(c.Of("rect").empty());
+    }
+    // The pure fit: a list that fits keeps its size; one too wide shrinks to the room; never under the least size.
+    const auto measure = [](float px) { return std::vector<float>{px * 10, px * 20}; };
+    const auto fits = CoopDraw::PlayerListAt(1920, 1080, 180, 3, 20, 1.25f, measure);
+    CHECK(fits.px == doctest::Approx(20.0f));
+    const auto narrow = CoopDraw::PlayerListAt(600, 1080, 180, 3, 20, 1.25f, measure);
+    CHECK(narrow.px < 20.0f);
+    CHECK(narrow.width <= 600 - 2 * 16.0f + 0.5f);
+    const auto tiny = CoopDraw::PlayerListAt(50, 60, 10, 16, 20, 1.25f, measure);
+    CHECK(tiny.px == doctest::Approx(CoopDraw::kListLeastPx));
 }
 
 TEST_CASE("hookshot draw: the panel at the top left, and F7 turns it over on each press") {

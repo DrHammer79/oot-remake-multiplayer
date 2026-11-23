@@ -224,6 +224,19 @@ bool GameLook(const HosCoopDraw& d, const Look& look);
 std::vector<std::vector<std::string>> PlayerCells(const std::vector<CoopHook::PlayerRow>& rows,
                                                   bool place = false);
 
+// The F6 list's size: its text size, each column's width, the gap between columns, a row's height, and the whole
+// list's width and height. PlayerListAt starts at `px` and makes it smaller until the list (`rows` rows, a row
+// `line_k` times the text size, `measure(px)` its columns' widths) fits in the picture below `top`, with a margin;
+// never under kListLeastPx (a list that cannot fit at that size is as small as it gets).
+inline constexpr float kListLeastPx = 10.0f;
+struct PlayerListSize {
+    float px = 0;
+    std::vector<float> widths;
+    float gap = 0, line = 0, width = 0, height = 0;
+};
+PlayerListSize PlayerListAt(float width, float height, float top, std::size_t rows, float px, float line_k,
+                            const std::function<std::vector<float>(float)>& measure);
+
 // The keys (docs/hookshot.md): F6 held shows the player list, F7 turns the
 // panel on and off. Tab and Enter, the emulator's keys, are the game's Plus
 // on Hookshot. Update turns the panel over when F7 goes down.
