@@ -217,10 +217,18 @@ def write_mark(root, win_path, fname, rule="merged"):
 def stamp_text(root, out_path, inputs, out_line=None, fit=None):
     lines = [STAMP_HEAD, "out " + (out_line or file_line(root, out_path))]
     # (an input is another mod's table: named by the bytes it shipped with, as original_table reads them)
-    lines += sorted("in " + in_line(root, p, original_table(root, os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(p)))), os.path.basename(p))) for p in inputs)
+    lines += sorted("in " + in_line(root, p, original_table(root, mod_of_table(p), os.path.basename(p)))
+                    for p in inputs)
     lines += [f"fit {k} {n}" for k, n in sorted((fit or {}).items())]
     return "\n".join(lines) + "\n"
+
+
+def mod_of_table(table_path):
+    """The mod folder of a size table path `<mod>/romfs/System/Resource/<file>`."""
+    parts = os.path.normpath(table_path).split(os.sep)
+    if tuple(parts[-1 - len(RESOURCE):-1]) != RESOURCE:
+        raise ValueError(f"not a size table path: {table_path}")
+    return os.sep.join(parts[:-1 - len(RESOURCE)]) or os.sep
 
 
 def read_text(path):
@@ -1032,13 +1040,23 @@ def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
     with open(source, "rb") as f:
         raw = f.read()
     table = codec.load(raw)
+    keep = os.path.join(win_path, KEEP_DIR)
     if not apply_fit(table, fit):
+        if source != path:   # (the original needs nothing now: an earlier start's raise goes, the mod's own table is back)
+            write_atomic(path, raw)
+            for f in (os.path.join(keep, STAMP), source):
+                os.remove(f)
+            try:
+                os.rmdir(keep)
+            except OSError:
+                pass   # (another table's copy is in there)
+            shown = "the puppet pack" if fold(win_name) == PACK else win_name
+            say(f"Size tables: {shown}'s needs no raise now; its own table is back.")
         return
     data = codec.save(table, raw)
     with open(path, "rb") as f:
         if f.read() == data:
             return
-    keep = os.path.join(win_path, KEEP_DIR)
     if source == path:   # (the mod's own table: a new seed or pack put there, or the first start with it)
         os.makedirs(keep, exist_ok=True)
         shutil.copyfile(path, os.path.join(keep, fname) + ".tmp")

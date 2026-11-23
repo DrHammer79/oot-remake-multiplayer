@@ -671,6 +671,29 @@ class MergeRowsTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
         self.assertEqual(read(self.path(SEED, "romfs", "RSDB", AI)), own)
 
+    def test_a_size_table_that_needs_less_now_goes_back_down_to_the_one_the_mod_shipped(self):
+        # fit_in_place raises from the table as it shipped; with nothing to raise now the earlier start's raise goes.
+        own = self.seed_with_own_tables()
+        own_sizes = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertGreater(self.sizes(SEED).get(AI_KEY), 4000)
+        self.assertTrue(os.path.isfile(self.path(SEED, mt.KEEP_DIR, mt.STAMP)))
+        self.put_rows(PACK, self.game_rows())   # (a pack without puppets: the merged table grows no more)
+        self.put_sizes(PACK, 3000)
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+        self.assertTrue(any("needs no raise now" in l for l in self.lines), self.lines)
+        self.assertEqual(self.run_all()[0], 0)   # (the next start: nothing to do, nothing written)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+
+    def test_a_stamp_names_a_table_input_by_its_mod_folder(self):
+        self.assertEqual(mt.mod_of_table(os.path.join("a", "b", "mods", "m x", *mt.RESOURCE, NAME)),
+                         os.path.join("a", "b", "mods", "m x"))
+        with self.assertRaises(ValueError):
+            mt.mod_of_table(os.path.join("a", NAME))
+
     def test_a_new_seed_put_over_the_merged_one_is_kept_as_the_new_original(self):
         self.seed_with_own_tables()
         self.run_all()
