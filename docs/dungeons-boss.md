@@ -582,7 +582,9 @@ one turn rule; it now also waits for the boss's own attack edge, read in the own
   over; no rally ever reached a stun. The ball and his answer to it (the volley, or the stun of a rally won) are one
   attack. So the owner's walk keeps the boss's `attacking` on while a rally ball of its own (a boss ball a sword sends
   back: Ganondorf's `_Bullet_LightBall` and `_Bullet_ChargeLightBall`, Phantom Ganon's `_Bullet_LightBall`) is in
-  that walk, and the edge comes when the ball is gone (it hit a Link or a wall; sent back into him it ends in his
+  that walk's actor list (read in `Collect` and handed to the sync, `Sync::SetRallyMakers`: a shot is no shared
+  object, so it is never in the walk's shared list; the first build read that list and the hold never came on, run
+  20261123-045939, where no turn came only because the other player was still loading), and the edge comes when the ball is gone (it hit a Link or a wall; sent back into him it ends in his
   stun, which holds the turn anyway). Logged once a hold: `<boss>: its own rally ball flies here: its attack goes on,
   no boss turn (row 211)`. Every other boss shot checked (the kShots / kSplit tables): their makers never answer
   them (Phantom Ganon's bolt and shockwaves, Ganondorf's shockwave, thunder and spread, Ganon's shots, King Dodongo's

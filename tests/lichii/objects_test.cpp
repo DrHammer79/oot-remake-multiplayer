@@ -7982,29 +7982,51 @@ TEST_CASE("row 211: a boss's attack goes on while a rally ball of its own flies 
         s.attacking = attacking;
         return s;
     };
-    const Seen dorf = seen("Enemy_DungeonBoss_Ganondorf", false);
+    const std::string dorf_name = "Enemy_DungeonBoss_Ganondorf";
+    const Seen dorf = seen(dorf_name, false);
     const Seen phantom = seen("Enemy_DungeonBoss_PhantomGanon", false);
     const Seen twinrova = seen("Enemy_DungeonBoss_Twinrova", false);
     // No ball: as read.
-    CHECK(RallyMakers({dorf}).empty());
-    CHECK(AttackWithRally(dorf, RallyMakers({dorf})) == false);
+    CHECK(RallyMakers({dorf_name}).empty());
+    CHECK(AttackWithRally(dorf, RallyMakers({dorf_name})) == false);
     // His light ball, his charge ball, Phantom Ganon's ball: each holds its maker's attack.
     for (const char* ball : {"DungeonBossGanondrof_Bullet_LightBall", "DungeonBossGanondrof_Bullet_ChargeLightBall",
                              "DungeonBossPhantomGanon_Bullet_LightBall"}) {
         CAPTURE(ball);
-        const auto makers = RallyMakers({dorf, seen(ball, std::nullopt)});
+        const auto makers = RallyMakers({dorf_name, ball});
         CHECK(AttackWithRally(phantom, makers) == true);
         CHECK(AttackWithRally(twinrova, makers) == false);
-        CHECK(AttackWithRally(seen("Enemy_DungeonBoss_Ganondorf", true), makers) == true);
+        CHECK(AttackWithRally(seen(dorf_name, true), makers) == true);
         CHECK_FALSE(AttackWithRally(seen("Enemy_DungeonBoss_PhantomGanon", std::nullopt), makers).has_value());
     }
-    CHECK(AttackWithRally(dorf, RallyMakers({dorf, seen("DungeonBossGanondrof_Bullet_LightBall", std::nullopt)})) ==
-          true);
-    // Shots no one rallies hold nothing: his shockwave, Phantom Ganon's bolt, Twinrova's beams, Volvagia's rocks.
+    CHECK(AttackWithRally(dorf, RallyMakers({dorf_name, "DungeonBossGanondrof_Bullet_LightBall"})) == true);
+    // Shots no one rallies hold nothing: his shockwave, Phantom Ganon's bolt, Twinrova's beams, Octorok rocks.
     for (const char* shot : {"DungeonBossGanondrof_Bullet_ShockWave", "PhantomGanon_Bullet_Thunder",
                              "Twinrova_Bullet_FireBeam", "Ganondorf_Bullet_Thunder", "Octorok_Bullet"}) {
         CAPTURE(shot);
-        CHECK(RallyMakers({dorf, seen(shot, std::nullopt)}).empty());
+        CHECK(RallyMakers({dorf_name, shot}).empty());
+    }
+}
+
+TEST_CASE("row 211: the sync holds a boss's attack from the walk's rally balls (no shared object: never in Seen)") {
+    // Proof run 20261123-045939: the ball is no shared object, so RallyMakers over Seen never saw it and the hold
+    // never came on. The walk hands the makers in (SetRallyMakers) before each Tick.
+    for (const bool ball : {false, true}) {
+        CAPTURE(ball);
+        Sync sync;
+        Seen boss = Enemy(0x100, 0x11, 70, 0.0f, "Enemy_DungeonBoss_Ganondorf");
+        boss.attacking = true;
+        Tick(sync, 0, {boss});
+        (void)sync.TakeNotes();
+        boss.attacking = false;  // BasicAttack (verb 112) fell into 103 as the ball left
+        sync.SetRallyMakers(CoopObjects::RallyMakers(
+            ball ? std::vector<std::string>{"DungeonBossGanondrof_Bullet_LightBall"} : std::vector<std::string>{}));
+        Tick(sync, 100 * kMs, {boss});
+        bool said = false;
+        for (const std::string& line : sync.TakeNotes()) {
+            said = said || line.find("its own rally ball flies here") != std::string::npos;
+        }
+        CHECK(said == ball);
     }
 }
 

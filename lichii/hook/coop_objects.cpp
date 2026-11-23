@@ -4079,6 +4079,7 @@ private:
             horde_.Bind(horde);
         }
         const u64 now_ms = SteadyNowMs();
+        std::vector<std::string> rally_balls;  // row 211: the boss balls a sword sends back, alive in this walk
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
             // walk between (our adult Link where the last scene's TerrainScenePermanent was): the cached name
@@ -4117,6 +4118,9 @@ private:
                 known.second = *extra;  // difficulty: an extra enemy is shared by its own placement id
             }
             member_log(a, known.first);  // G1: the game's own event member test, for the log
+            if (CoopEnemyShots::IsRallyBall(known.first)) {
+                rally_balls.push_back(known.first);  // (no shared object: never in Seen)
+            }
             // Difficulty: a made actor that may be an extra the director has not bound yet waits for it.
             const bool extra_unbound = (known.second == 0 || known.second == ~u64{0}) &&
                                        extras_.Holds(known.first, now_ms);
@@ -4474,6 +4478,7 @@ private:
                 CoopScrubSale::TheBusy().See(t.hash, distance, now_us, t.in_event);
             }
         }
+        sync_.SetRallyMakers(RallyMakers(rally_balls));  // row 211: for this walk's Tick (AttackWithRally)
         if (debug_) {  // research: the field grass that is no actor (world.md)
             for (const std::string& line : foliage_.Look(
                      [&r](u64 address) { return r.Get<u64>(address); }, main_, player)) {

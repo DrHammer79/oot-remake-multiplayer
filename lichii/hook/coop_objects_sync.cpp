@@ -555,11 +555,11 @@ std::uint8_t AttackBits(std::optional<bool> attacking) {
                                      (*attacking ? proto::object_state::attacking : 0));
 }
 
-std::vector<std::string_view> RallyMakers(const std::vector<Seen>& seen) {
+std::vector<std::string_view> RallyMakers(const std::vector<std::string>& actor_names) {
     std::vector<std::string_view> makers;
-    for (const Seen& s : seen) {
-        if (CoopEnemyShots::IsRallyBall(s.name)) {
-            for (const std::string_view m : CoopEnemyShots::MakersOf(s.name)) {
+    for (const std::string& name : actor_names) {
+        if (CoopEnemyShots::IsRallyBall(name)) {
+            for (const std::string_view m : CoopEnemyShots::MakersOf(name)) {
                 if (std::find(makers.begin(), makers.end(), m) == makers.end()) {
                     makers.push_back(m);
                 }
@@ -2009,7 +2009,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     // place; a drop of life on a copy we do not own is our hit.
     // A pickup taken elsewhere (taken_, from the last Apply) is hidden.
     std::map<std::uint64_t, const Seen*> now_seen;
-    const std::vector<std::string_view> rally_makers = RallyMakers(seen);  // row 211: its attack goes on
+    const std::vector<std::string_view>& rally_makers = rally_makers_;  // row 211: its attack goes on
     std::vector<const Seen*> fresh;
     std::set<std::uint64_t> hidden;
     {
