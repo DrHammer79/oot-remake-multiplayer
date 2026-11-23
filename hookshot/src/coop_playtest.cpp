@@ -25,6 +25,7 @@
 
 
 #include "common/logging.h"
+#include "coop/host/game_items.hpp"
 #include "coop_cheats.h"
 #include "coop_hook.h"
 #include "coop_pause.h"
@@ -297,13 +298,15 @@ bool WorldListNow() {
 
 constexpr auto kHoldWait = 5000ms;  // a hold (or a held job) that does not come in this time: timeout
 
-// Longshot's status with a Link snapshot that is not old (SnapshotIsOld). Longshot takes that snapshot only in a running
-// Link update while a status is asked, so a held game gives the one from its last such status. Old and held: ask a
-// status, let ONE frame run (its Link update takes the snapshot) and read that reply. Still old after that (a title, a
-// pause, a load: no Link update runs): the old reply, which LinkMembers shows as null with `snapshot_stale`.
+// Longshot's status with a Link snapshot that is not old (SnapshotIsOld) and not missing (SnapshotMissing). Longshot
+// takes that snapshot only in a running Link update while a status is asked, so a held game gives the one from its last
+// such status, and a game held since its start has none at all (the first state on a fresh hold). Old or missing and
+// held: ask a status, let ONE frame run (its Link update takes the snapshot) and read that reply. Still none after that
+// (a title, a pause, a load: no Link update runs): the reply as it is, which LinkMembers shows as null, with
+// `snapshot_stale` (old) and `not_ready` (the reason) saying why.
 std::optional<Value> LinkStatus() {
     auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
-    if (status && SnapshotIsOld(&*status) && g_gate && g_gate->Held()) {
+    if (status && (SnapshotIsOld(&*status) || SnapshotMissing(&*status)) && g_gate && g_gate->Held()) {
         const auto id = g_control.Send("\"cmd\":\"status\"}");
         if (id && g_gate->Step(1, kHoldWait)) {
             if (auto fresh = g_control.Await(*id, 1500)) status = std::move(fresh);
@@ -334,10 +337,12 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
     }
     out += "},\"inventory\":{";
     first = true;
-    for (const auto& item : CoopCheats::Items()) {
-        const auto v = CoopTestInput::FlagInt(sys, item);
+    // Every item flag, the per-player counts too (bombs, arrows, seeds, rupees): the panel's list leaves those out.
+    for (const auto& item : coop::host::item_flags()) {
+        if (!item.on) continue;
+        const auto v = CoopTestInput::FlagInt(sys, item.name);
         if (!v) continue;
-        out += std::string(first ? "" : ",") + Quote(item) + ":" + std::to_string(*v);
+        out += std::string(first ? "" : ",") + Quote(std::string(item.name)) + ":" + std::to_string(*v);
         first = false;
     }
     out += "},\"coop\":{\"players\":[";
@@ -511,7 +516,11 @@ std::string Handle(const Request& r) {
     if (r.cmd == "give") {
         std::string error;
         if (!played("give " + r.item, error)) return fail("failed", error);
-        return ok("\"item\":" + Quote(r.item) + ",\"note\":\"queued: in the inventory after the next frame\"");
+        // Written at once inside the held call (CoopTestInput::Give): the reply says what each flag was and is.
+        const std::string result = CoopTestInput::LastGive();
+        if (result.find("NOT given") != std::string::npos) return fail("failed", result);
+        return ok("\"item\":" + Quote(r.item) + ",\"result\":" + Quote(result) +
+                  ",\"note\":\"written now: the inventory already shows it (no step needed)\"");
     }
     if (r.cmd == "dump") {
         std::string body, error;

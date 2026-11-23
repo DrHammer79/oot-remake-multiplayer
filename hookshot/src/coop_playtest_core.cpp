@@ -567,6 +567,25 @@ bool SnapshotIsOld(const CoopModJson::Value* status) {
     return at && now && *now - *at > kSnapshotSlack;
 }
 
+bool SnapshotMissing(const CoopModJson::Value* status) {
+    if (!status) return false;
+    const auto* game = GameOf(status);
+    return !game || !game->Number("frame");
+}
+
+std::string NotReadyReason(const CoopModJson::Value* status) {
+    if (!status) return "no answer from Longshot's control bridge, so there is no Link sample (see `control`)";
+    if (SnapshotIsOld(status)) {
+        return "the Link sample is older than the frame: no Link update ran (a title, a pause or a load is on); "
+               "step a frame in play, then read the state again";
+    }
+    if (SnapshotMissing(status)) {
+        return "no Link sample has been taken yet: Longshot takes it in a running Link update (a title, a pause or a "
+               "load runs none); step a frame in play, then read the state again";
+    }
+    return "";
+}
+
 std::string LinkMembers(const CoopModJson::Value* status) {
     const auto* game = GameOf(status);
     const bool old = SnapshotIsOld(status);
@@ -578,6 +597,8 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     const auto* at = game ? game->Get("frame") : nullptr;
     out += ",\"snapshot_present\":" + (at ? Compact(*at) : std::string("null"));
     out += std::string(",\"snapshot_stale\":") + (old ? "true" : "false");
+    const std::string why = NotReadyReason(status);
+    out += ",\"not_ready\":" + (why.empty() ? std::string("null") : Quote(why));
     return out;
 }
 

@@ -344,6 +344,9 @@ void OnFrame(Core::System& system);
 // step runs. Null: every kind PlayNow can do (the bridge's warp, flag and give lines).
 bool PlayNow(Core::System& system, std::string_view lines, std::string& error,
              const std::vector<Kind>* allowed = nullptr);
+// What the last `give` did, one text for all its flags ("NAME was -> now; ..."; "no change: ... already N"; "NOT
+// given: why"). Any thread. Empty before the first give.
+std::string LastGive();
 
 // The value of every flag a dump writes (the shared dungeon and story lists; Bool as 0 or 1), in list order.
 std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& system);

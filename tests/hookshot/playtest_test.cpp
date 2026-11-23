@@ -619,6 +619,35 @@ TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale")
     CHECK(t.find(",\"snapshot_stale\":false") != std::string::npos);
 }
 
+TEST_CASE("playtest: a reply with no sample at all is missing, not old, and no reply is neither") {
+    CHECK_FALSE(SnapshotMissing(nullptr));
+    const auto fresh = Status(Snap(998));
+    CHECK_FALSE(SnapshotMissing(&fresh));
+    const auto nogame = Status("null");                 // a game held since its start: no sample yet
+    CHECK(SnapshotMissing(&nogame));
+    const auto typed = Status("{\"event\":false,\"loading\":false,\"age\":\"child\"}");
+    CHECK(SnapshotMissing(&typed));                      // only the typed members: still no sample
+    const auto old = Status(Snap(11890), 12984);
+    CHECK_FALSE(SnapshotMissing(&old));                  // old is a different case
+}
+
+TEST_CASE("playtest: not_ready says why the Link members are null, and is null when they are not") {
+    const auto fresh = Status(Snap(998));
+    CHECK(NotReadyReason(&fresh).empty());
+    CHECK(LinkMembers(&fresh).find(",\"not_ready\":null") != std::string::npos);
+
+    const auto nogame = Status("null");
+    const std::string none = LinkMembers(&nogame);
+    CHECK(none.find(",\"pos\":null") != std::string::npos);
+    CHECK(none.find(",\"not_ready\":\"no Link sample has been taken yet") != std::string::npos);
+
+    const auto old = Status(Snap(11890), 12984);
+    CHECK(LinkMembers(&old).find(",\"not_ready\":\"the Link sample is older than the frame") != std::string::npos);
+
+    // no reply at all: the reason points to `control`
+    CHECK(LinkMembers(nullptr).find(",\"not_ready\":\"no answer from Longshot") != std::string::npos);
+}
+
 // ---- F2: warp by event, or by Longshot's teleport in free play ----
 
 TEST_CASE("playtest: warp goes by the event request during an event and by the teleport in free play") {

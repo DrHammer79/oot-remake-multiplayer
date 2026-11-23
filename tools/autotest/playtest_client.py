@@ -25,8 +25,11 @@ MAX_FRAMES = 3600
 
 
 class BridgeError(Exception):
-    """The game refused a command (ok false): its error code (bad_request, busy, no_control, not_in_play, timeout,
-    failed) and message."""
+    """The game refused a command (ok false): its error code (bad_request, busy, no_control, not_in_play,
+    not_in_event, wrong_age, refused, timeout, failed) and message. `not_in_event`: a warp in free play that only an
+    event can take (an entrance, or a map Longshot's teleport does not list); `wrong_age`: a scene name ending in the
+    other age than Link's; `refused`: a verb the gate shuts, a strike id with no world list, or a full
+    strike queue."""
 
     def __init__(self, reply):
         super().__init__("%s: %s" % (reply.get("error"), reply.get("message", "")))
@@ -397,6 +400,8 @@ def no_position_reason(st):
     if st.get("snapshot_stale"):
         return ("stale position: Longshot has no fresh Link snapshot (a title, a pause or a load is on); "
                 "nothing is walked to or struck until it does")
+    if st.get("not_ready"):
+        return "stale position: not ready: %s" % st["not_ready"]
     return "no position in the state (not in play?)"
 
 

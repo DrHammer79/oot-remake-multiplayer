@@ -899,6 +899,7 @@ std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed) {
 #include "coop/host/flags.hpp"
 #include "coop/host/game_flags.hpp"
 #include "coop/host/player_reader.hpp"
+#include "coop_cheat_give.h"
 #include "coop_cheats.h"
 #include "coop_every.h"
 #include "coop_boss.h"
@@ -1265,31 +1266,31 @@ void SetEnum(Core::System& system, const std::string& name, const std::string& v
              known ? fmt::format("{:#010x}", *was) : std::string("-"));
 }
 
-// give: bombs, bow and hookshot are the item flags of each; any other name is
-// given as it is. Needs LICHII_COOP_CHEATS=1 (applied on the co-op frame).
-void Give(const std::string& item) {
-    std::vector<std::string> names;
-    if (item == "bombs") {
-        names = {"PouchData.Item_BombBag_Small.StockNum", "PouchData.Item_Bomb.StockNum"};
-    } else if (item == "bow") {
-        names = {"PouchData.Weapon_Range_Bow.StockNum", "PouchData.Item_Quiver_Small.StockNum",
-                 "PouchData.Item_Arrow_Normal.StockNum"};
-    } else if (item == "hookshot") {
-        names = {"PouchData.Item_Hookshot.StockNum"};
+// give: bombs, bow and hookshot are the item flags of each; any other name is given as it is. Needs
+// LICHII_COOP_CHEATS=1. The flags are written at once, into the game's own store (as setflag does), not queued for
+// the co-op frame: the bridge's held call (and a script step) sees the new value as soon as this returns, and a game
+// with no co-op session gets it too. What it did is logged and kept for LastGive.
+std::mutex g_give_mu;
+std::string g_last_give;
+
+void Give(Core::System& system, const std::string& item) {
+    std::string said;
+    if (!CoopCheats::On()) {
+        said = item + ": NOT given (LICHII_COOP_CHEATS is off)";
+        LOG_INFO(Core, "coop: test give {}", said);
     } else {
-        names = {item};
-    }
-    const auto known = CoopCheats::Items();
-    for (const auto& name : names) {
-        const bool listed = std::find(known.begin(), known.end(), name) != known.end();
-        if (listed && CoopCheats::On()) {
-            CoopCheats::Give(name);
+        CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+        coop::host::GameFlagStore store(memory);
+        for (const auto& name : CoopCheatGive::Names(item)) {
+            const auto done = CoopCheatGive::Give(store, name);
+            const std::string line = done.ok ? (done.changed ? "" : "no change: ") + done.text
+                                             : "NOT given: " + done.text;
+            LOG_INFO(Core, "coop: test give {}: {}", name, line);
+            said += (said.empty() ? "" : "; ") + line;
         }
-        LOG_INFO(Core, "coop: test give {}: {}", name,
-                 !CoopCheats::On() ? "NOT given (LICHII_COOP_CHEATS is off)"
-                 : listed          ? "queued"
-                                   : "NOT given (unknown item flag)");
     }
+    std::lock_guard lock(g_give_mu);
+    g_last_give = said;
 }
 
 void StopRunning() {
@@ -1505,11 +1506,16 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         const bool sent = CoopHook::SendChat(request.name);
         LOG_INFO(Core, "coop: test chat '{}': {}", request.name, sent ? "sent" : "NOT sent");
     } else {
-        Give(request.name);
+        Give(system, request.name);
     }
 }
 
 } // namespace
+
+std::string LastGive() {
+    std::lock_guard lock(g_give_mu);
+    return g_last_give;
+}
 
 void SetMenuOpener(MenuOpener opener) {
     g_menu_opener = std::move(opener);

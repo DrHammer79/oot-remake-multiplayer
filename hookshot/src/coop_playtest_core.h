@@ -131,8 +131,17 @@ bool EnvIsOn(std::string_view value);
 // ever taken: only the typed event, loading and age) is not old.
 inline constexpr double kSnapshotSlack = 4;
 bool SnapshotIsOld(const CoopModJson::Value* status);
+// Whether a reply has no Link sample at all: `status` is there, and its `game` is null, or has no `frame` (Longshot
+// takes a sample only when a status is asked in a running Link update, so a game held since its start has none yet).
+// Not the same as old: a sample that never came cannot be told from "behind" by its frame. A reply that is itself
+// absent is not missing a sample (there is no reply: `control` says so).
+bool SnapshotMissing(const CoopModJson::Value* status);
+// The reason the Link members are null, "" when they are not (a fresh sample is in the reply): no reply, no sample
+// yet, or an old sample. Shown as `not_ready` in the state, so a tester never reads a silent null.
+std::string NotReadyReason(const CoopModJson::Value* status);
 // The state's Link members from that reply, each with a leading comma: pos, facing, camera, life, max_life, rupees,
-// age, event, loading, prompt, snapshot_present and snapshot_stale. An old snapshot shows null in every Link member (a
+// age, event, loading, prompt, snapshot_present, snapshot_stale and not_ready (null, or the reason the members are null:
+// NotReadyReason). An old snapshot shows null in every Link member (a
 // walk that trusts a stale pos says "arrived" 11 m away) and `"snapshot_stale":true`; `snapshot_present` keeps its number.
 // No reply (`status` null) or no `game`: all null, `snapshot_stale` false (`control` says why).
 std::string LinkMembers(const CoopModJson::Value* status);
