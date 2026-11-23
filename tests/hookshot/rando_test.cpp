@@ -957,7 +957,7 @@ std::vector<std::string> PresetChoices(const CoopMods::Loader& loader) {
 std::size_t Generates(const World& w, const char* preset) {
     std::size_t n = 0;
     const char* own = OwnPresetString(preset);  // the kit's own presets are given to OOTRR as their settings string
-    if (*own != ' ') preset = own;
+    if (*own) preset = own;
     const std::wstring want = L"generate " + std::wstring(preset, preset + std::strlen(preset)) + L" ";
     for (const auto& r : w.runs) n += r.find(want) != std::wstring::npos ? 1 : 0;
     return n;
