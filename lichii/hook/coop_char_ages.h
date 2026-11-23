@@ -9,7 +9,8 @@
 // - at a save load (patch 0024's wrap 6, AfterLoadSaveData, on the game's thread, before the area load makes the
 //   player) writes the pick for the save's age straight into the Int's live value (GameFlags::set_int_now), then holds
 //   it through the load: after each pass of the game's flag applier (wrap 1, phase 1) a value the game put back is
-//   written again (LoadHold). The queued path alone came too late: the save's own pick was in when the player was made;
+//   written again (LoadHold). The queued path alone came too late: the save's own pick was in when the player was made.
+//   The hold ends as soon as the pick wanted for Link's age now is another (an age change soon after the load);
 // - each frame (Picks::Frame) writes the pick for the age Link is (Sequence_IsChildhood) through the queued setter, so
 //   an age change and anything else that changes the value is put right before the next time the player is made.
 // The page stays the one picker: what the player picks there becomes the pick for the age they are now.
@@ -165,34 +166,56 @@ private:
 };
 
 // The pick held in place through a save load (the game's thread; the caller locks). Loaded at wrap 6 (the save is
-// in, the player not made yet), Applied after each pass of the game's flag applier, until Stop (the frame: his page
-// or swap, a pick changed) or kHoldMs. Its summary is said once, by the frame.
+// in, the player not made yet), Applied after each pass of the game's flag applier, until it ends: the next load, his
+// page or swap or a pick learnt (Stop, the frame), the pick wanted for Link's age now is not the held one any more
+// (Follow: the Master Sword or the Door of Time within kHoldMs of the load, a pick set on the settings rows, the
+// feature turned off), or kHoldMs. Its summary is said once, by the frame.
 class LoadHold {
 public:
     static constexpr std::int64_t kHoldMs = 20000;   // a save load's area load, with room (a slow PC)
 
+    enum class End : std::uint8_t {
+        kStopped,      // his page or swap, a pick learnt
+        kNextLoad,     // another save load
+        kWantChanged,  // the age or the picks changed: the held value is not this age's pick now
+        kTime,         // kHoldMs
+    };
     struct Summary {
         std::int32_t want = 0;
         std::uint32_t passes = 0;                 // applier passes seen while held
         std::uint32_t put_back = 0;               // of them, the ones after which the value was not ours any more
         std::optional<std::int32_t> game_value;   // the last value found there instead of ours
+        End end = End::kStopped;
     };
 
     // `want` the pick for the save's age (Wanted; nothing: not held), `live` the Int's live value now. Returns the
     // value to write in place now (nothing: it is there already, or not held).
     std::optional<std::int32_t> Loaded(std::optional<std::int32_t> want, std::optional<std::int32_t> live,
                                        std::int64_t now_ms) {
-        Stop();   // (a hold of an earlier load: its summary is said)
+        Stop(End::kNextLoad);   // (a hold of an earlier load: its summary is said)
         if (!want || !live) return std::nullopt;
         held_ = want;
         until_ = now_ms + kHoldMs;
         return *live != *want ? want : std::nullopt;
     }
+    // Before each Applied and each frame: the picks and Link's age now (`childhood` nothing: not read, kept). When the
+    // value wanted now (Wanted) is not the held one, the hold ends: holding it would put the other age's pick in
+    // place while the game makes this age's player.
+    void Follow(const Stored& s, std::optional<bool> childhood,
+                const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
+        if (!held_) return;
+        if (!s.on) {
+            Stop(End::kWantChanged);
+            return;
+        }
+        if (!childhood) return;
+        if (Wanted(s, childhood, files) != held_) Stop(End::kWantChanged);
+    }
     // After an applier pass: the value to write in place again (the game put another back), or nothing.
     std::optional<std::int32_t> Applied(std::optional<std::int32_t> live, std::int64_t now_ms) {
         if (!held_) return std::nullopt;
         if (now_ms >= until_) {
-            Stop();
+            Stop(End::kTime);
             return std::nullopt;
         }
         ++passes_;
@@ -204,13 +227,15 @@ public:
         return std::nullopt;
     }
     bool held() const { return held_.has_value(); }
+    // Of this hold, the times the game put another value back (1: the write Applied just returned is the first).
+    std::uint32_t put_backs() const { return put_back_; }
     // The frame each frame: past kHoldMs it stops (no applier pass may come after the load).
     void Expire(std::int64_t now_ms) {
-        if (held_ && now_ms >= until_) Stop();
+        if (held_ && now_ms >= until_) Stop(End::kTime);
     }
-    void Stop() {
+    void Stop(End why = End::kStopped) {
         if (!held_) return;
-        summary_ = Summary{*held_, passes_, put_back_, game_value_};
+        summary_ = Summary{*held_, passes_, put_back_, game_value_, why};
         held_.reset();
         passes_ = put_back_ = 0;
         game_value_.reset();
@@ -224,6 +249,16 @@ private:
     std::optional<std::int32_t> game_value_;
     std::optional<Summary> summary_;
 };
+
+inline const char* EndName(LoadHold::End e) {
+    switch (e) {
+    case LoadHold::End::kStopped: return "his page, swap or a pick learnt";
+    case LoadHold::End::kNextLoad: return "the next load";
+    case LoadHold::End::kWantChanged: return "the age or the picks changed";
+    case LoadHold::End::kTime: return "time";
+    }
+    return "?";
+}
 
 // --- The pickable characters of the mod's characters.json ---
 struct Character {

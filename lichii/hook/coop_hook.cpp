@@ -3723,20 +3723,22 @@ void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
         if (step.stored_changed) SaveCharAges(stored);
     }
     if (step.stored_changed || !std::exchange(published, true)) PublishCharAges(stored);
-    {   // The save load's hold: stopped by his page or swap (the player picks) or a pick learnt; said once.
+    {   // The save load's hold: stopped by his page or swap (the player picks), a pick learnt, or another pick wanted
+        // for the age now (an age change); said once.
         std::optional<CoopCharAges::LoadHold::Summary> said;
         {
             std::lock_guard lock(g_char_hold_mutex);
             if (in.page_open || in.swap_busy || step.stored_changed) g_char_hold.Stop();
+            g_char_hold.Follow(stored, in.childhood, files);
             g_char_hold.Expire(CharNowMs());
             g_char_held.store(g_char_hold.held(), std::memory_order_relaxed);
             said = g_char_hold.TakeSummary();
         }
         if (said) {
             LOG_INFO(Core, "coop: characters: save load: pick {} held through {} flag applier passes, the game put "
-                           "{} back {} times",
+                           "{} back {} times; ended by {}",
                      said->want, said->passes, said->game_value ? std::to_string(*said->game_value) : std::string("-"),
-                     said->put_back);
+                     said->put_back, CoopCharAges::EndName(said->end));
         }
     }
     if (step.stored_changed) {
@@ -4075,18 +4077,23 @@ void AtSaveLoaded(coop::host::WritableGameMemory& memory) {
              flags.get_int_live(CoopHook::kPickHash).value_or(-1));
 }
 
-// Wrap 1, phase 1 (the game's flag applier ran): while held, a value the game put back is written in place again.
+// Wrap 1, phase 1 (the game's flag applier ran): while held, a value the game put back is written in place again,
+// as long as it is still the pick wanted for Link's age now (an age change ends the hold here, on the game's thread,
+// before the frame sees it: no pass writes the other age's pick).
 void AtFlagsApplied(coop::host::WritableGameMemory& memory) {
     if (!CoopHook::g_char_held.load(std::memory_order_relaxed)) return;
-    const auto live = coop::host::GameFlags(memory).get_int_live(CoopHook::kPickHash);
+    const CoopHook::CharAgesView view = CoopHook::CharAgesViewNow();
+    coop::host::GameFlags flags(memory);
+    const auto childhood = flags.get_bool(CoopHook::kChildhoodHash);
+    const auto live = flags.get_int_live(CoopHook::kPickHash);
     std::optional<std::int32_t> write;
     bool first = false;
     {
         std::lock_guard lock(CoopHook::g_char_hold_mutex);
+        CoopHook::g_char_hold.Follow(view.stored, childhood, view.files);
         write = CoopHook::g_char_hold.Applied(live, CoopHook::CharNowMs());
         CoopHook::g_char_held.store(CoopHook::g_char_hold.held(), std::memory_order_relaxed);
-        static std::uint64_t puts = 0;
-        if (write) first = puts++ == 0;
+        first = write && CoopHook::g_char_hold.put_backs() == 1;   // (once per hold: each load says its first)
     }
     if (write) {
         const bool ok = CoopHook::WriteCharPickNow(memory, *write);

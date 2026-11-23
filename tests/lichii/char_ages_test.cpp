@@ -271,3 +271,83 @@ TEST_CASE("char ages: a save load with the pick already there, not held, stopped
     CHECK(h.Loaded(9, 2, 300) == 9);   // a second load (Try Again soon after): its own hold, the first one said
     REQUIRE(h.TakeSummary());
 }
+
+TEST_CASE("char ages: an age change soon after a save load ends the hold, the other age's pick is not put back") {
+    using CoopCharAges::LoadHold;
+    Stored s;
+    s.on = true;
+    s.child = 2;   // Saria
+    s.adult = 9;   // Sheik
+    LoadHold h;
+    // An adult save (it loads at the Temple of Time): Sheik held.
+    CHECK(h.Loaded(CoopCharAges::Wanted(s, false, kFiles), 0, 1000) == 9);
+    h.Follow(s, false, kFiles);          // still the adult: held
+    CHECK(h.Applied(0, 1010) == 9);
+    // The Master Sword put back within the hold: Link is a child now, the frame writes Saria (2).
+    h.Follow(s, true, kFiles);
+    CHECK_FALSE(h.held());
+    CHECK_FALSE(h.Applied(2, 1020));     // Saria stays: Sheik is not written over the child's pick
+    CHECK_FALSE(h.Applied(0, 1030));     // and the game's own changes are the frame's again
+    const auto said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->want == 9);
+    CHECK(said->end == LoadHold::End::kWantChanged);
+}
+
+TEST_CASE("char ages: the hold follows the picks: age unknown keeps it, a pick set or turned off ends it") {
+    using CoopCharAges::LoadHold;
+    Stored s;
+    s.on = true;
+    s.child = 2;
+    s.adult = 9;
+    LoadHold h;
+    CHECK(h.Loaded(2, 0, 0) == 2);
+    h.Follow(s, std::nullopt, kFiles);   // the age not read this pass (mid-load): kept
+    CHECK(h.held());
+    h.Follow(s, true, kFiles);
+    CHECK(h.held());
+    s.child = 8;                         // the settings rows: another pick for the child
+    h.Follow(s, true, kFiles);
+    CHECK_FALSE(h.held());
+    REQUIRE(h.TakeSummary());
+    CHECK(h.Loaded(8, 0, 10) == 8);
+    s.on = false;                        // the feature turned off
+    h.Follow(s, true, kFiles);
+    CHECK_FALSE(h.held());
+    s.on = true;
+    s.child = 77;                        // a pick with no model here: Link (0) wanted
+    CHECK(h.Loaded(CoopCharAges::Wanted(s, true, kFiles), 2, 20) == 0);
+    h.Follow(s, true, kFiles);
+    CHECK(h.held());
+    s.child.reset();                     // no pick for the age any more: nothing wanted, not held
+    h.Follow(s, true, kFiles);
+    CHECK_FALSE(h.held());
+}
+
+TEST_CASE("char ages: each hold counts its own put-backs and says how it ended") {
+    using CoopCharAges::LoadHold;
+    LoadHold h;
+    CHECK(h.Loaded(2, 0, 0) == 2);
+    CHECK(h.Applied(0, 1) == 2);
+    CHECK(h.put_backs() == 1);           // the first of this hold: said
+    CHECK(h.Applied(0, 2) == 2);
+    CHECK(h.put_backs() == 2);
+    CHECK(h.Loaded(2, 0, 100) == 2);     // System Load: a new hold
+    auto said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->end == LoadHold::End::kNextLoad);
+    CHECK(said->put_back == 2);
+    CHECK(h.put_backs() == 0);
+    CHECK(h.Applied(0, 101) == 2);
+    CHECK(h.put_backs() == 1);           // its first is said too
+    h.Stop();
+    said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->end == LoadHold::End::kStopped);
+    CHECK(h.Loaded(2, 0, 200) == 2);
+    h.Expire(200 + LoadHold::kHoldMs);
+    said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->end == LoadHold::End::kTime);
+    CHECK(std::string(CoopCharAges::EndName(LoadHold::End::kWantChanged)) == "the age or the picks changed");
+}
