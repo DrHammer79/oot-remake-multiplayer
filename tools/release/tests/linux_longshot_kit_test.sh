@@ -382,6 +382,98 @@ check 'Character Select: the player'"'"'s own copy is used as it is' bash -c 'gr
 rm -rf "$CS"
 sed -i '/^character_select = /d' "$D/coop-options.ini"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >/dev/null 2>&1   # (the game built again without it)
+# Release 0.2.2 and later (tool_folder in the pin): the zip holds the code patch and the voices, and his tool
+# (build-from-your-game/player.py, a stub here) makes the game's part from data/game/romfs with the builder's Python.
+T2="$tmp/cs-rel2"
+mkdir -p "$T2/CS-v2/mods/OoT Character Select/romfs/Sound" "$T2/CS-v2/mods/OoT Character Select/exefs" "$T2/CS-v2/build-from-your-game"
+printf 'voice' >"$T2/CS-v2/mods/OoT Character Select/romfs/Sound/PlAdult_X.bwav"
+cp "$tmp/cs-his.ips" "$T2/CS-v2/mods/OoT Character Select/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
+cat >"$T2/CS-v2/build-from-your-game/player.py" <<'EOP'
+import os, re, sys
+a = sys.argv[1:]
+log = os.environ["CS_TOOL_LOG"]
+open(log, "a").write("ARGS " + " ".join(a) + "\n")
+romfs = a[a.index("--romfs") + 1]
+mod = a[a.index("--mod") + 1]
+ex = a[a.index("--exclude") + 1] if "--exclude" in a else ""
+if os.environ.get("FAKE_TOOL_NOMOD"):
+    sys.stderr.write("Traceback (most recent call last):\nModuleNotFoundError: No module named 'astc_encoder'\n")
+    sys.exit(1)
+if os.environ.get("FAKE_TOOL_FAIL"):
+    print("Making 3 files")
+    print("  FAILED Model/x.zs: Model/y.zs is not the one of game version 1.1.1")
+    print("1 files could not be made; the mod is not complete.")
+    sys.exit(1)
+if not os.path.isfile(os.path.join(romfs, "Pack", "ZsDic.pack.zs")):
+    sys.exit("no game files")
+for f in ("UI/LayoutArchiveCategory.Product.100.byml.zs", "Model/Player_Child.Player_Child.bfres.zs",
+          "Model/Player_Child_C000.Player_Child.bfres.zs", "Tex/Npc_A.bntx.zs"):
+    if ex and re.search(ex, f):
+        continue
+    p = os.path.join(mod, "romfs", *f.split("/"))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w").write("made " + f)
+print("Making 4 files")
+print("  4 of 4 (1 s)")
+EOP
+printf 'recipes' >"$T2/CS-v2/build-from-your-game/recipes.json"
+(cd "$T2" && "$py" -c 'import os, zipfile
+with zipfile.ZipFile("CS-v2.zip", "w") as z:
+    for r, _, fs in os.walk("CS-v2"):
+        for f in fs: z.write(os.path.join(r, f))')
+cs2_zsha=$(sha256sum "$T2/CS-v2.zip" | cut -d' ' -f1)
+cs2_pin() { printf 'release=v2\nurl=https://example.invalid/cs\nzip=CS-v2.zip\nzip_sha256=%s\nzip_folder=CS-v2/mods/OoT Character Select\ntool_folder=CS-v2/build-from-your-game\nfolder=OoT Character Select\noverlay_url=https://example.invalid/characters.json\noverlay_sha256=%s\nips_url=\nips_sha256=\n' \
+    "$cs2_zsha" "$cs_osha" >"$kit/data/longshot/CHARACTER-SELECT.txt"; }
+cs2_zip() { cp "$T2/CS-v2.zip" "$D/builder/charsel/CS-v2.zip"; }
+export CS_TOOL_LOG="$tmp/cs-tool.log"; : >"$CS_TOOL_LOG"
+cs2_pin; cs2_zip
+rm -rf "$CS" "$D/game/romfs"
+sed -i '/^character_select = /d' "$D/coop-options.ini"; printf 'character_select = no\n' >>"$D/coop-options.ini"
+# no game files: said, nothing put in, the verified zip kept for the next start
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t0.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: no data/game/romfs -> one line says so, nothing put in, the tool not run' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "game.s own files are not in" "$1" && [ ! -e "$2" ] && [ ! -s "$3" ] && [ -f "$4/builder/charsel/CS-v2.zip" ]' _ "$tmp/build-t0.txt" "$CS" "$CS_TOOL_LOG" "$D"
+mkdir -p "$D/game/romfs/Pack"; printf 'dic' >"$D/game/romfs/Pack/ZsDic.pack.zs"
+# the tool stops (another game version): its last lines are said, nothing put in
+FAKE_TOOL_FAIL=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t1.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: the tool stops -> its reason is said, nothing put in, no half folder left' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "the tool stopped" "$1" && grep -q "game version 1.1.1" "$1" && [ ! -e "$2" ] && [ ! -e "$3/game/mods/_OoT Character Select.new" ]' _ "$tmp/build-t1.txt" "$CS" "$D"
+# a Python without a module the tool needs
+FAKE_TOOL_NOMOD=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: a module the tool needs is missing -> the line names it, nothing put in' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "lacks a module" "$1" && grep -q "astc_encoder" "$1" && [ ! -e "$2" ]' _ "$tmp/build-t2.txt" "$CS"
+# the default part: the tool gets the game's romfs and --exclude for the NPC files; the zip's voices and patch stay
+: >"$CS_TOOL_LOG"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: the default part: the tool is given data/game/romfs and --exclude, the NPC files are not made' \
+    bash -c '[ $CODE -eq 0 ] && [ "$(grep -c ^ARGS "$3")" = 1 ] && grep -q -- "--romfs .*/data/game/romfs --mod .*/data/game/mods/_OoT Character Select.new " "$3" && grep -q -- "--exclude " "$3" &&
+        [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] && [ -f "$2/romfs/Model/Player_Child.Player_Child.bfres.zs" ] &&
+        [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex" ] && grep -q "^v2 .* ui cz1$" "$2/coop-charsel.txt" &&
+        [ ! -e "$2/build-from-your-game" ] && [ ! -e "$4/builder/charsel/charsel-tool" ] && [ ! -e "$4/builder/charsel/CS-v2.zip" ]' _ "$tmp/build-t3.txt" "$CS" "$CS_TOOL_LOG" "$D"
+# run again: nothing is made again
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: run again with the same pin -> there already, the tool not run again' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "(there already)" "$1" && [ "$(grep -c ^ARGS "$2")" = 1 ]' _ "$tmp/build-t4.txt" "$CS_TOOL_LOG"
+# yes: the NPC part too, no --exclude
+rm -rf "$CS"; cs2_zip
+sed -i 's/^character_select = no$/character_select = yes/' "$D/coop-options.ini"
+: >"$CS_TOOL_LOG"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t5.txt" 2>&1; export CODE=$?
+check 'Character Select 0.2.2: yes -> the tool runs without --exclude, the NPC files are made' \
+    bash -c '[ $CODE -eq 0 ] && ! grep -q -- "--exclude" "$3" && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v2 .* full cz1$" "$2/coop-charsel.txt"' _ "$tmp/build-t5.txt" "$CS" "$CS_TOOL_LOG"
+# character_select = off: the kit's copy is taken out, nothing is downloaded, the tool not run
+sed -i 's/^character_select = yes$/character_select = off/' "$D/coop-options.ini"
+: >"$CS_TOOL_LOG"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t6.txt" 2>&1; export CODE=$?
+check "Character Select off: the kit's copy is taken out, the tool not run" \
+    bash -c '[ $CODE -eq 0 ] && grep -q "Character Select is off" "$1" && [ ! -e "$2" ] && [ ! -s "$3" ]' _ "$tmp/build-t6.txt" "$CS" "$CS_TOOL_LOG"
+# off, and a copy the player put in by hand (no stamp): left as it is
+mkdir -p "$CS/romfs/Model"; printf 'mine' >"$CS/romfs/Model/mine.bin"
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t7.txt" 2>&1; export CODE=$?
+check 'Character Select off: a copy the player put in by hand is left as it is' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "is your own" "$1" && [ -f "$2/romfs/Model/mine.bin" ]' _ "$tmp/build-t7.txt" "$CS"
+rm -rf "$CS" "$D/game/romfs"
+sed -i '/^character_select = /d' "$D/coop-options.ini"
 rm -f "$kit/data/longshot/CHARACTER-SELECT.txt" "$D/character-select-answer.txt"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs8.txt" 2>&1; export CODE=$?
 check 'Character Select: a kit without CHARACTER-SELECT.txt asks nothing and fetches nothing' bash -c '[ $CODE -eq 0 ] && ! grep -q "Character Select" "$1"' _ "$tmp/build-cs8.txt"
