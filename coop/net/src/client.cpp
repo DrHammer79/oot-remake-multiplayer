@@ -378,7 +378,9 @@ void Client::service(std::uint32_t wait_ms) {
           if (to_small) use_small_datagrams();
           if (state_ == State::connecting || state_ == State::handshaking ||
               state_ == State::connected) {
-            end_attempt(to_small ? DropReason::small_path : DropReason::connection_lost);
+            end_attempt(to_small                          ? DropReason::small_path
+                        : event.data == kDisconnectBacklog ? DropReason::backlog
+                                                           : DropReason::connection_lost);
           }
         }
         break;
@@ -423,10 +425,15 @@ void Client::service(std::uint32_t wait_ms) {
     link_.loss_percent = static_cast<std::uint32_t>(
         static_cast<std::uint64_t>(peer_->packetLoss) * 100 / ENET_PEER_PACKET_LOSS_SCALE);
     link_.mtu = peer_->mtu;
+    const std::size_t outgoing = outgoing_bytes(*peer_);
+    link_.outgoing_bytes = static_cast<std::uint32_t>(std::min<std::size_t>(outgoing, 0xffffffffu));
     if ((state_ == State::handshaking || state_ == State::connected) &&
         full_datagrams_lost(path_mark_, *peer_, host_->serviceTime)) {
       use_small_datagrams();
       end_attempt(DropReason::small_path);
+    } else if ((state_ == State::handshaking || state_ == State::connected) && outgoing > kMaxOutgoingBytes) {
+      // Row 260: ENet would hold all we send to a server that takes less, without end; connect again.
+      end_attempt(DropReason::backlog);
     }
   }
   enet_host_flush(host_);
@@ -846,13 +853,20 @@ bool Client::send_packet(std::span<const std::uint8_t> plain, std::uint8_t chann
     if (!sealed) return false;
     bytes = *sealed;
   }
-  ENetPacket* packet =
-      enet_packet_create(bytes.data(), bytes.size(), packet_flags(channel));
+  const std::uint32_t flags = packet_flags(channel);
+  if ((flags & ENET_PACKET_FLAG_RELIABLE) == 0 && link_.outgoing_bytes > kSlowPeerBytes) {
+    // Row 260: a backlog to the server: an unreliable message (the next one replaces it) is not queued.
+    ++link_.unreliable_skipped;
+    return false;
+  }
+  ENetPacket* packet = enet_packet_create(bytes.data(), bytes.size(), flags);
   if (packet == nullptr) return false;
   if (enet_peer_send(peer_, channel, packet) != 0) {
     enet_packet_destroy(packet);
     return false;
   }
+  link_.outgoing_bytes = static_cast<std::uint32_t>(
+      std::min<std::size_t>(std::size_t{link_.outgoing_bytes} + bytes.size(), 0xffffffffu));
   link_.largest_sent = std::max<std::uint32_t>(link_.largest_sent,
                                                static_cast<std::uint32_t>(bytes.size()));
   return true;

@@ -70,6 +70,21 @@ std::string HostService::admin(const std::string& line) {
   return server_->admin(line);
 }
 
+std::string host_memory_line(const Session::Sizes& s, const EnetServer::Queues& q) {
+  const auto n = [](std::uint64_t v) { return std::to_string(v); };
+  return "server: " + n(s.connections) + " connections, deferred " + n(s.deferred) + " (" + n(s.deferred_bytes) +
+         " B), objects " + n(s.objects) + " (listed " + n(s.present) + "), flags " + n(s.flags) + ", dead " +
+         n(s.dead) + ", grass " + n(s.grass) + ", world " + n(s.world_entries) + " in " + n(s.world_scenes) +
+         " scenes, actions " + n(s.actions) + "; enet: " + n(q.peers) + " peers, out " + n(q.outgoing_bytes) +
+         " B (largest " + n(q.largest_outgoing) + "), in " + n(q.waiting_bytes) + " B, unreliable not queued " +
+         n(q.unreliable_skipped) + ", dropped for backlog " + n(q.backlog_drops);
+}
+
+std::string HostService::memory_line() const {
+  if (!server_ || stopped_) return {};
+  return host_memory_line(server_->session().sizes(), server_->queues());
+}
+
 std::vector<std::string> read_ban_file(const std::string& path) {
   std::vector<std::string> out;
   if (path.empty()) return out;

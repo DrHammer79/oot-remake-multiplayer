@@ -62,7 +62,7 @@ STICK_KEYS = {  # full stick directions: (stick, x, y)
 }
 WEAR_SLOTS = ("weapon", "shield", "head", "armor", "boots", "hand")
 MODULE_ONLY = ("chat", "give", "wear", "dress", "assign", "place", "face", "aim", "kill", "hit", "stun", "drop", "hurt", "setflag", "setenum", "menu",
-               "dump")
+               "dump", "event")
 
 
 class ScriptError(Exception):
@@ -314,6 +314,13 @@ def parse(text):
             if len(w) != 2 or not re.fullmatch(r"[A-Za-z0-9_-]+", w[1]):
                 fail("want: dump TAG (letters, digits, - and _)")
             s.kind, s.name = "dump", w[1]
+        elif cmd == "EVENT":
+            # event NAME: our game asked to play that event setting by name (the module's live-event requester).
+            # boss-route-01112: a boss rush stage reached by `warp` misses its rematch boot event; Barinade and
+            # Ganondorf appear only through theirs (DreamBossStage_Rematch_Barinade_Start / _Ganondorf_Start).
+            if len(w) != 2 or not re.fullmatch(r"[A-Za-z0-9_]+", w[1]):
+                fail("want: event NAME (an event setting's name: letters, digits and _)")
+            s.kind, s.name = "event", w[1]
         elif cmd == "SETENUM":
             if len(w) != 3:
                 fail("want: setenum NAME VALUE (an Enum flag, or 0xHASH, and a value's name)")
@@ -996,6 +1003,59 @@ def find_log(game):
     return max(found, key=os.path.getmtime) if found else None
 
 
+# ------------------------------------------------------------------------------- the pack's start, as the kit's
+# What the kit's start does to the puppet pack before each game (play.ps1: Use-KitPuppetPack, then
+# Invoke-KitSizeTableMerge; start.sh the same), for a game this file starts itself: your own Link's tunic files in
+# the colour it will wear (tools/puppet_pack/self_tunic.py), THEN the merge (tools/puppet_pack/merge_tables.py),
+# whose row-202 step gives another mod's Link model (Character Select's) co-op's own tunic names only when those
+# files are there. Row 265 (0.11.12): a lane started without them wore Character Select's model on the game's shared
+# tunic textures, so Customize's Kokiri row recoloured only the belt and boots. Never stops the start.
+PACK_REL = ("mods", "contents", "0400486024DEC000", "coop-puppet")
+
+
+def pack_folders(game):
+    """(mods folder, the pack, the game's romfs or '') of a game folder, as Invoke-KitSizeTableMerge finds them."""
+    exe = exe_dir(game)
+    mods = os.path.join(exe, "mods")
+    if not os.path.isdir(mods):
+        mods = os.path.join(game, "mods")
+    pack = os.path.join(os.path.dirname(mods), *PACK_REL)
+    romfs = next((r for r in (os.path.join(exe, "romfs"), os.path.join(os.path.dirname(exe), "romfs"),
+                              os.path.join(game, "romfs")) if os.path.isdir(os.path.join(r, "Pack"))), "")
+    return mods, pack, romfs
+
+
+def pack_start(game, env, say):
+    """The kit's start of the pack for one game (env: the game's switches). Returns the lines said."""
+    mods, pack, romfs = pack_folders(game)
+    if not os.path.isfile(os.path.join(pack, "coop_puppet.json")):
+        return []
+    tools = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile(os.path.join(tools, "puppet_pack", "self_tunic.py")):
+        # (bigrun-0115: a copy of tools/autotest alone kept the game in green files)
+        line = "own tunic files NOT set: tools/puppet_pack is missing beside tools/autotest"
+        say(line)
+        return [line]
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    lines = []
+    try:
+        from puppet_pack import merge_tables, self_tunic
+        ini = next((p for p in (os.path.join(game, "coop-options.ini"), os.path.join(exe_dir(game), "coop-options.ini"))
+                    if os.path.isfile(p)), os.path.join(game, "coop-options.ini"))
+        color = self_tunic.start_color(env.get("LICHII_COOP_COLOR", ""), ini, os.path.join(game, "coop.ini"),
+                                       env.get("LICHII_COOP_TUNICS", ""))
+        got = self_tunic.put(pack, color)
+        lines.append("own tunic files: %s" % (got or "none (the game's green)"))
+        if os.path.isdir(mods):
+            merge_tables.main(["--mods", mods] + (["--romfs", romfs] if romfs else []))
+    except Exception as e:  # (the kit's start never stops on it either)
+        lines.append("pack start failed (%s: %s)" % (type(e).__name__, e))
+    for line in lines:
+        say(line)
+    return lines
+
+
 # ---------------------------------------------------------------------------------------------- the kit's own start
 # Kit mode (run --kit-a/--kit-b, run.ps1 -Kit): each game is started by its kit's own start, play.ps1 choose -Hookshot
 # as "Start Squadala.bat" runs it, so what a player's start does runs for real before the game: the update check
@@ -1194,6 +1254,7 @@ def run(a):
                 say("%s: the kit's own start (%s)" % (x, kits[x]))
                 procs[x] = PidProcess(kit_start(kits[x], env, out, x))
             else:
+                pack_start(g, env, lambda line, x=x: say("%s: %s" % (x, line)))   # (the kit's start does it: row 265)
                 mismatch = code_mods_mismatch(exe_dir(g))
                 if mismatch:   # (charsel-tab-0119: a code mod's menus without its code; the run says so first)
                     say("%s: WARNING: %s" % (x, mismatch))

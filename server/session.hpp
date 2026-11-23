@@ -615,6 +615,22 @@ class Session {
   // Addresses with recent wrong join passwords (max_wrong_passwords).
   std::size_t wrong_guess_addresses() const { return wrong_guesses_.size(); }
   std::size_t player_count() const;
+  // How much the session holds now (row 260: the host's memory line, every 30 s): each a count of entries, the
+  // deferred one also in bytes. Each is bounded (its own cap); a number that only grows is the one to look at.
+  struct Sizes {
+    std::size_t connections = 0;
+    std::size_t deferred = 0;        // reliable messages waiting for their sender's rate
+    std::size_t deferred_bytes = 0;
+    std::size_t present = 0;         // objects listed by the games, all told
+    std::size_t objects = 0;
+    std::size_t flags = 0;
+    std::size_t dead = 0;            // placed enemies killed, all scenes
+    std::size_t grass = 0;           // grass cuts, all scenes
+    std::size_t world_scenes = 0;
+    std::size_t world_entries = 0;
+    std::size_t actions = 0;         // queued for the transport
+  };
+  Sizes sizes() const;
   // The host's player number; none while the session is empty.
   std::optional<std::uint8_t> host() const;
   // The bans by player key now (the kept ones and this session's), for the

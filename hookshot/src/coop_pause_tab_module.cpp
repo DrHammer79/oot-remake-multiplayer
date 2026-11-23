@@ -6,6 +6,8 @@
 // tests drive Page and Probe themselves).
 #include "coop_i18n.h"
 #include "coop_pause_tab.h"
+#include "coop_list_pages.h"
+#include "coop_players_open.h"
 #include "coop_browse.h"
 #include "coop_title.h"
 
@@ -1538,8 +1540,9 @@ void KeepPageShown(void* ctx, int which) {
     }
 }
 
-// The pages screen's one shown button in a focus state, by its name ("" none, or more than one): System's Longshot
-// Settings button (Pa_Button_05) is not a row RowOfButton knows.
+// The pages screen's one shown button the game's cursor is on (CursorOnState: the focus on it or coming to it; never
+// the one it is leaving), by its name ("" none, or more than one): System's Longshot Settings button (Pa_Button_05) is
+// not a row RowOfButton knows. (Player report 261: the one the focus left a moment ago counted too.)
 std::string FocusedShownName() {
     const std::uint64_t pages = g_pages_screen;
     if (pages == 0) return {};
@@ -1548,49 +1551,40 @@ std::string FocusedShownName() {
     int found = 0;
     for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
         const std::uint8_t state = CoopModScreens::FocusState(read, b);
-        if (state == 0 || (state & 0xfe) == 4 || !CoopModScreens::HitBox(read, b)) continue;
+        if (!CursorOnState(state) || !CoopModScreens::HitBox(read, b)) continue;
         name = CoopModScreens::ButtonName(read, b);
         ++found;
     }
     return found == 1 ? name : std::string();
 }
 
-// Which of System's buttons of ours the game's cursor is on or going to (0 Multiplayer, 1 Longshot Settings, -1
-// neither): any shown one in a focus state but leaving. FocusedShownName wants one alone, and while the focus moves
-// (Longshot's mouse moved it just before its click's A) two are: that A went to the game, which does not know the
-// button and then took no B, + or A (the menu stuck open, a test run 2026-11-20).
+// Which of System's buttons of ours the game's cursor is on (0 Multiplayer, 1 Longshot Settings, 2 Customize Link, -1
+// one of the game's own or none): SystemButtonOf over every shown button of the page, the game's own too, so an A on
+// Title Screen just after the cursor left Longshot Settings is Title Screen's (player report 261: it opened our old
+// Longshot Settings page). Two at the cursor while the focus moves (Longshot's mouse moved it just before its click's
+// A): the one under the mouse, else the one the focus comes to; an A on ours that went to the game left the menu stuck
+// open (a test run 2026-11-20). g_mutex.
 int OurSystemButtonFocused() {
     const std::uint64_t pages = g_pages_screen;
     if (pages == 0) return -1;
     const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
-    bool mp = false, ls = false, cl = false;
-    std::optional<CoopModScreens::Box> mp_box, ls_box, cl_box;
+    std::vector<SystemButtonSeen> seen;
     for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
         const std::uint8_t state = CoopModScreens::FocusState(read, b);
         const auto box = CoopModScreens::HitBox(read, b);
         if (state == 0 || (state & 0xfe) == 4 || !box) continue;
         const std::string name = CoopModScreens::ButtonName(read, b);
-        if (name == "Pa_Button_06" && g_mp_button != 0) mp = true, mp_box = box;   // (0.11.9: never; an old pack's)
-        if (name == "Pa_Button_05" && g_page.SettingsUsable()) ls = true, ls_box = box;
-        if (name == "Pa_Button_07" && g_cl_button != 0) cl = true, cl_box = box;
+        int ours = -1;
+        if (name == "Pa_Button_06" && g_mp_button != 0) ours = 0;   // (0.11.9: never; an old pack's)
+        if (name == "Pa_Button_05" && g_page.SettingsUsable()) ours = 1;
+        if (name == "Pa_Button_07" && g_cl_button != 0) ours = 2;
+        seen.push_back({ours, state, box->x0, box->y0, box->x1, box->y1});
     }
-    if (static_cast<int>(mp) + static_cast<int>(ls) + static_cast<int>(cl) > 1) {
-        // (two while the focus moves from one to another: the one under the mouse, else the focused one's name)
-        float x = 0, y = 0;
-        bool held = false;
-        if (LayoutCursor(&x, &y, &held)) {
-            const auto in = [&](const std::optional<CoopModScreens::Box>& b) {
-                return b && x >= std::min(b->x0, b->x1) && x <= std::max(b->x0, b->x1) && y >= std::min(b->y0, b->y1) &&
-                       y <= std::max(b->y0, b->y1);
-            };
-            if (ls && in(ls_box)) return 1;
-            if (cl && in(cl_box)) return 2;
-            if (mp && in(mp_box)) return 0;
-        }
-        const std::string name = FocusedShownName();
-        return name == "Pa_Button_05" ? 1 : name == "Pa_Button_07" ? 2 : mp ? 0 : cl ? 2 : 1;
-    }
-    return mp ? 0 : ls ? 1 : cl ? 2 : -1;
+    float x = 0, y = 0;
+    bool held = false;
+    std::optional<std::pair<float, float>> mouse;
+    if (LayoutCursor(&x, &y, &held)) mouse = std::make_pair(x, y);
+    return SystemButtonOf(seen, mouse);
 }
 
 // System's two buttons of ours, at each update of the pages: Multiplayer shown while our pages can be used, Longshot
@@ -1820,6 +1814,9 @@ void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
 // shows four - tabs: Characters, Key Items, Threads of Time, Map), else slot 2 (the game hides slot 3 there). g_mutex.
 std::uint64_t g_strip_gen = 0;
 bool g_strip_looked = false;
+// F6 (coop_players_open.h): the last - menu opening looked up had no tabs of ours (F6's drawn list then); a later
+// opening that has them clears it (LookStrip).
+std::atomic<bool> g_players_no_tabs{false};
 std::array<std::uint64_t, 4> g_game_tabs{};
 std::array<float, 4> g_game_tabs_x{};
 std::array<std::uint64_t, 4> g_game_words{};   // each game tab's T_Text_00: its drawn width says whether the tab shows a word
@@ -1872,6 +1869,7 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         }
     }
     g_minus_ok = g_game_tabs[2] != 0;
+    if (g_minus_ok) g_players_no_tabs = false;   // (F6: this opening has our tabs, whatever an earlier one had)
     for (int i = 0; i < 2; ++i) {
         const std::uint64_t b = FindOwnPane(ctx, f.layout, i == 0 ? "T_BtnL_00" : "T_BtnR_00");
         g_strip_btns[static_cast<std::size_t>(i)] = b;
@@ -2452,6 +2450,25 @@ int MinusCategoryNow() {
     return manager != 0 ? Read<std::int32_t>(manager + 0x52c) : -1;
 }
 std::atomic<bool> g_hop_on{false};   // (a hop to the Characters tab runs: OnPad taps L for it)
+// F6 (coop_players_open.h): the - menu opened on our Multiplayer tab's Players view. g_players_mutex: the run (F6 on the
+// window's or present's thread, OnPad on the input thread). g_players_no_tabs: a - menu opened without tabs of ours.
+std::mutex g_players_mutex;
+CoopPlayersOpen::Run g_players_run;
+// Free play as the module last read it (SetFreePlay: our Link in a scene, no event, no load), and when: a reading older
+// than kFreePlayFreshMs counts as not free.
+std::atomic<bool> g_free_play{false};
+std::atomic<std::uint64_t> g_free_play_ms{0};
+constexpr std::uint64_t kFreePlayFreshMs = 500;
+// The game's event manager: an event (cutscene, talk, item get) runs while [[main + 0x4e94840] + 0x68] is set
+// (lichii/hook/coop_live_events.h kEventStatePtr / kEventSession, docs/dungeons-boss.md). Read at each Minus press.
+constexpr std::uint64_t kEventStatePtr = 0x4e94840, kEventSession = 0x68;
+bool EventNow() {
+    const std::uint64_t manager = Read<std::uint64_t>(CoopRuntime::MainBase() + kEventStatePtr);
+    return manager != 0 && Read<std::uint64_t>(manager + kEventSession) != 0;
+}
+bool FreePlayNow() {
+    return g_free_play.load() && NowMs() - g_free_play_ms.load() < kFreePlayFreshMs && !EventNow();
+}
 void MinusDecide(int tab, int row) {
     if (tab < 0 || tab >= kMinusTabs) return;
     if (ViewShown() == View::kMenu) {
@@ -2806,29 +2823,15 @@ BOOL CALLBACK FindGameWindow(HWND h, LPARAM out) {
 #endif
 
 // Player report 261: System's Longshot Settings button opens Longshot's own menu (the F1 / Insert menu, its every row, tab
-// and help), as the player's F1 does: the key handed to the game's window as a press (host/display.c WM_KEYDOWN notes it
-// for the menu, gpu/vk/vk_menu.cpp take_key_press), the window being in front (the menu opens only for the window in
-// front, and the A came from it). True: handed. Linux' window is SDL's, whose keys no message reaches: there the button
-// is not offered (CanOpenLongshotMenu), never our copy of the rows.
-constexpr bool CanOpenLongshotMenu() {
-#ifdef _WIN32
-    return true;
-#else
-    return false;
-#endif
-}
+// and help). The module asks Hookshot's menu for it through the export it already asks each tick (hos_coop_menu_wanted:
+// HOS_COOP_MENU_WANT_LONGSHOT, patch 0037), which opens it as Insert does but without a key press: the menu reads its
+// keys only while the game's window is in front, so the F1 this used to post to the window did nothing with the window
+// behind (a pad in hand, a second screen) and had no way at all on Linux (SDL's window gets no messages). Now one
+// call for both systems and any window.
+constexpr bool CanOpenLongshotMenu() { return true; }
 bool OpenLongshotMenu() {
-#ifdef _WIN32
-    HWND window = nullptr;
-    EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&window));
-    if (window == nullptr) return false;
-    constexpr WPARAM kF1 = 0x70;   // VK_F1: always opens the menu (Insert can be taken off it: Controls, Menu shortcut)
-    const LPARAM scan = static_cast<LPARAM>(MapVirtualKeyA(static_cast<UINT>(kF1), MAPVK_VK_TO_VSC)) << 16;
-    return PostMessageA(window, WM_KEYDOWN, kF1, scan | 1) != 0 &&
-           PostMessageA(window, WM_KEYUP, kF1, scan | 1 | (LPARAM{1} << 30) | (LPARAM{1} << 31)) != 0;
-#else
-    return false;
-#endif
+    CoopPause::WantLongshotMenu();
+    return true;
 }
 
 // (a test run's, LICHII_COOP_TEST_STATE=1 only: the left button as the file mouse.now in the game's folder says it,
@@ -3137,7 +3140,7 @@ void Act(int row, int line = -1, bool clicked = false, RowAction forced = RowAct
         }
         break;
     case RowAction::kBrowsePage:
-        g_cell_page = (v.s.cell_page + 1) % CellPages(BrowseListed(v.s)), g_cell = -1;
+        g_cell_page = CoopListPages::Step(v.s.cell_page, CellPages(BrowseListed(v.s)), 1), g_cell = -1;
         break;
     case RowAction::kBrowseList:
         g_online = !v.s.online, g_cell_page = 0, g_cell = -1;
@@ -3837,6 +3840,50 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     g_live_poke = true;
                 }
             }
+            {   // F6: the - menu on our Multiplayer tab, Players view (coop_players_open.h): the game's own Minus, R, L
+                std::lock_guard players_lock(g_players_mutex);
+                if (g_players_run.On()) {
+                    CoopPlayersOpen::Seen seen;
+                    seen.strip_open = g_page.MinusStripOpen();
+                    seen.our_tab = g_page.MinusTab();
+                    // (this opening's lookup of our tabs: LookStrip for the strip's opening now, else not known yet)
+                    seen.tabs = !(g_strip_looked && g_strip_gen == g_strip_gen_now.load()) ? CoopPlayersOpen::Tabs::kUnknown
+                                : g_minus_ok                                                ? CoopPlayersOpen::Tabs::kYes
+                                                                                            : CoopPlayersOpen::Tabs::kNo;
+                    seen.free_play = !seen.strip_open && FreePlayNow();
+                    seen.blocked = g_page.Typing() >= 0 || CoopHookshot::ChatOpen() || g_hop_on.load();
+                    const bool was_open = g_players_run.opened_after_second();
+                    switch (g_players_run.Next(seen, NowMs())) {
+                    case CoopPlayersOpen::Step::kPressMinus: in |= kPadMinus; break;
+                    case CoopPlayersOpen::Step::kTapL: in |= kPadL; break;
+                    case CoopPlayersOpen::Step::kTapR: in |= kPadR; break;
+                    case CoopPlayersOpen::Step::kShowPlayers:
+                        SetView(View::kPlayers);
+                        LOG_INFO(Core, "coop: pause tab: F6: the Players view, after {} Minus press(es) and {} tap(s)",
+                                 g_players_run.presses(), g_players_run.taps());
+                        break;
+                    case CoopPlayersOpen::Step::kNoTabs:
+                        g_players_no_tabs = true;
+                        LOG_INFO(Core, "coop: pause tab: F6: the - menu has no tabs of ours (build the puppet pack "
+                                       "again): F6 shows the list over the picture");
+                        break;
+                    case CoopPlayersOpen::Step::kNotFree:
+                        LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): "
+                                       "Minus not pressed ({} pressed before)", g_players_run.presses());
+                        break;
+                    case CoopPlayersOpen::Step::kGiveUp:
+                        LOG_INFO(Core, "coop: pause tab: F6: given up (the - menu did not come, was shut, or typing) "
+                                       "after {} press(es), {} tap(s)",
+                                 g_players_run.presses(), g_players_run.taps());
+                        break;
+                    default: break;
+                    }
+                    if (!was_open && g_players_run.opened_after_second()) {
+                        LOG_INFO(Core, "coop: pause tab: F6: the - menu came only after the second Minus (a slow game): "
+                                       "if it shut again, that press was the one");
+                    }
+                }
+            }
             if (g_hop_on.load()) {   // (the hop: the game's own L, tapped; our page's L first, then the game's)
                 const auto step = CoopPauseTab::CharactersHopNext(g_hop, g_page.MinusTab() >= 0,
                                                                     g_page.MinusStripOpen() && g_page.Typing() < 0 &&
@@ -3865,8 +3912,8 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             if (g_page.TakeOpenLongshotMenu()) {
                 const bool opened = OpenLongshotMenu();
                 LOG_INFO(Core, "coop: pause tab: Longshot Settings: {}",
-                         opened ? "Longshot's own menu opened (F1 handed to the game's window)"
-                                : "Longshot's own menu could not be opened (no game window)");
+                         opened ? "Longshot's own menu asked for (hos_coop_menu_wanted, whichever window is in front)"
+                                : "Longshot's own menu could not be asked for");
             }
             if (g_page.TakeRefusedA()) {
                 LOG_INFO(Core, "coop: pause tab: an A on System's button of ours while the page cannot show (usable {}, "
@@ -4025,7 +4072,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             browse_refresh = true;
                         } else if (pages > 1) {
                             const int dir = x < (head.x0 + box_x) / 2 ? -1 : 1;
-                            g_cell_page = ((g_cell_page.load() + dir) % pages + pages) % pages, cell = -1;
+                            g_cell_page = CoopListPages::Step(g_cell_page.load(), pages, dir), cell = -1;
                             g_page.Sound("button_decide"), g_live_poke = true;
                         }
                     }
@@ -4443,7 +4490,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 const SessionView lan = ViewNow(View::kLan);
                 const int pages = CellPages(BrowseListed(lan.s));
                 if (pages > 1) {
-                    g_cell_page = ((lan.s.cell_page + minus_page_step) % pages + pages) % pages, g_cell = -1;
+                    g_cell_page = CoopListPages::Step(lan.s.cell_page, pages, minus_page_step), g_cell = -1;   // (round)
                     g_live_poke = true;
                 }
             }
@@ -4537,6 +4584,30 @@ void CensusFromMenuState() noexcept {
 
 bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
+}
+
+void SetFreePlay(bool free_play) noexcept {
+    g_free_play = free_play;
+    g_free_play_ms = NowMs();
+}
+
+bool OpenPlayers() noexcept {
+    if (g_players_no_tabs.load()) return false;
+    try {
+        std::lock_guard lock(g_players_mutex);
+        if (!g_players_run.On()) {
+            const bool menu_up = GameMenuUp();
+            if (!menu_up && !FreePlayNow()) {
+                LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): nothing pressed");
+                return true;
+            }
+            g_players_run.Start(NowMs(), menu_up);
+            LOG_INFO(Core, "coop: pause tab: F6: to the Players view ({})",
+                     menu_up ? "a menu is up: no Minus" : "Minus opens the - menu");
+        }
+    } catch (...) {
+    }
+    return true;
 }
 
 bool OwnMinusPageShown() noexcept {

@@ -8542,3 +8542,25 @@ TEST_CASE("hand-over: a plain pack's root changes owner without a log line (it c
   CHECK(h.session.object_owner(placed(7))->first == 2);
   CHECK(std::none_of(lines.begin(), lines.end(), [](const std::string& l) { return l.starts_with("hand-over: "); }));
 }
+
+TEST_CASE("world: entries counts every scene's breaks, places, hits and cuts (row 260)") {
+  WorldStore world;
+  CHECK(world.entries() == 0);
+  WorldBreak b;
+  b.scene = "spot04";
+  b.hash = 1;
+  CHECK(world.on_break(b));
+  WorldPlace place;
+  place.scene = "spot04";
+  place.hash = 2;
+  world.on_place(place);
+  WorldHit hit;
+  hit.scene = "spot04";
+  hit.hash = 3;
+  world.on_hit(hit);
+  world.on_hit(hit);
+  CHECK(world.entries() == 4);
+  CHECK(world.scenes() == 1);
+  world.forget("spot04");
+  CHECK(world.entries() == 0);
+}

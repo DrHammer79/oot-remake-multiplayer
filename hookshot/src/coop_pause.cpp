@@ -1398,6 +1398,10 @@ int Wanted() {
     return g_wanted.exchange(HOS_COOP_MENU_WANT_NOTHING);
 }
 
+void WantLongshotMenu() {
+    g_wanted = kWantLongshotMenu;
+}
+
 // Ctrl and Shift held now. Windows: GetKeyState. Linux: the game's own SDL (SDL2 or SDL3, the library the game
 // loaded: CoopClipboard::GameSdl; Longshot loads it RTLD_LOCAL, so RTLD_DEFAULT never saw it and Ctrl+V did not
 // paste on Linux), whose KMOD_CTRL / KMOD_SHIFT bits are the same in both; without SDL, neither.

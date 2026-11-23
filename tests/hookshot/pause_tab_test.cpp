@@ -9,6 +9,7 @@
 #include <tuple>
 #include <vector>
 
+#include "coop_list_pages.h"
 #include "coop_pause_tab.h"
 #include "hos_coop_host.h"
 
@@ -1572,11 +1573,13 @@ TEST_CASE("pause tab: the game browser: the rows choose the list, search, filter
     rows = RowTexts(View::kLan, v);
     CHECK(rows[0] == "Public games (10)");
     lines = ListLines(v);
-    CHECK(lines[0].name == "Public games  < 1 of 2 >");   // (more than a page: the heading pages it)
+    // (more than a page: the heading says so, the page between the game's ZL and ZR letters: row 264)
+    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 1/2 " + CoopListPages::kZR);
+    CHECK(lines[0].name.size() <= kListNameChars);
     CHECK(lines[2].name == "kokiri (Saria)");
     v.s.cell_page = 1;   // (the second page: the 7th to 10th rooms)
     lines = ListLines(v);
-    CHECK(lines[0].name == "Public games  < 2 of 2 >");
+    CHECK(lines[0].name == std::string("Public games  ") + CoopListPages::kZL + " Page 2/2 " + CoopListPages::kZR);
     CHECK(lines[1].name == "kokiri (Saria)");
     CHECK(lines[2].name == "a room with a very long nam...");   // (cut to kListNameChars)
     CHECK(lines[2].name.size() <= kListNameChars);
@@ -3189,4 +3192,38 @@ TEST_CASE("pause tab (run 4620f3e7): CoopMenu_00 made at his freed Customize scr
     for (std::uint64_t t = 1048; t <= 1048 + 2 * kScreenLookMs; t += 16) {
         CHECK(frame(true, t) == 2);  // ours from its pane on; never his for the whole opening
     }
+}
+
+TEST_CASE("pause tab: an A on Title Screen just after the cursor left Longshot Settings is the game's (player report 261)") {
+    using CoopPauseTab::SystemButtonOf;
+    using CoopPauseTab::SystemButtonSeen;
+    // Boxes: Longshot Settings above Title Screen (the layout's units, y up).
+    const SystemButtonSeen ls_box{1, 0, -400, 100, 400, 200};
+    const SystemButtonSeen title_box{-1, 0, -400, -40, 400, 60};
+    const auto with = [](SystemButtonSeen b, std::uint8_t state) { b.state = state; return b; };
+    // The owner's run (2026-11-23): Title Screen 3 (the cursor on it), Longshot Settings 2 (left a moment ago).
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 2)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 2)}, std::nullopt) == -1);   // (coming to Title Screen)
+    // The cursor on Longshot Settings (settled, or coming to it from Title Screen): ours.
+    CHECK(SystemButtonOf({with(ls_box, 3)}, std::nullopt) == 1);
+    CHECK(SystemButtonOf({with(title_box, 2), with(ls_box, 1)}, std::nullopt) == 1);
+    // Only one leaving, none at the cursor: no button of ours.
+    CHECK(SystemButtonOf({with(ls_box, 2)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({}, std::nullopt) == -1);
+    // Two at the cursor (the mouse moved the focus just before its click): the one under the mouse ...
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 1)}, std::make_pair(0.0f, 150.0f)) == 1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 3)}, std::make_pair(0.0f, 10.0f)) == -1);
+    // ... else the one the focus comes to.
+    CHECK(SystemButtonOf({with(title_box, 3), with(ls_box, 1)}, std::nullopt) == 1);
+    CHECK(SystemButtonOf({with(title_box, 1), with(ls_box, 3)}, std::nullopt) == -1);
+    // The same for Customize Link and Multiplayer beside the game's own buttons.
+    const SystemButtonSeen cl_box{2, 0, -400, 300, 400, 400};
+    CHECK(SystemButtonOf({with(cl_box, 2), with(title_box, 3)}, std::nullopt) == -1);
+    CHECK(SystemButtonOf({with(cl_box, 3), with(ls_box, 2)}, std::nullopt) == 2);
+    CHECK(CoopPauseTab::CursorOnState(1));
+    CHECK(CoopPauseTab::CursorOnState(3));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(2));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(0));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(4));
+    CHECK_FALSE(CoopPauseTab::CursorOnState(5));
 }

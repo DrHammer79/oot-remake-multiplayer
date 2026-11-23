@@ -114,7 +114,7 @@ Nothing is ever changed in your Longshot's folders. Without a folder, the kit st
 
 Given your Longshot folder (above), the first build copies its save slots (`user\save\<account>\slot_NN`, with `account.sav` and `option.sav`) into the co-op game's `user\save\<account>\`. It only copies: your Longshot's saves stay as they are, and a slot the co-op game has already is never overwritten (it says which it left). The saves are the game's own files, so a save from a nightly should load too when it is the same game version (not tested yet).
 
-Already set up? Copy by hand: close both games, keep a copy of the kit's `hookshot\game\bin\user\save` if it has slots you want, then copy the `slot_NN` folders (and `account.sav`, `option.sav`) from `<your Longshot>\bin\user\save\<account>\` (or `<your Longshot>\user\save\...`) to the same place under the kit's `hookshot\game\bin\`.
+Already set up? Copy by hand: close both games, keep a copy of the kit's `hookshot\game\user\save` if it has slots you want, then copy the `slot_NN` folders (and `account.sav`, `option.sav`) from `<your Longshot>\bin\user\save\<account>\` (or `<your Longshot>\user\save\...`) to the same place under the kit's `hookshot\game\`.
 
 ## The randomizer
 
@@ -135,7 +135,7 @@ With Discord open on the same PC, your Discord profile shows **Playing Squadala!
 
 <a id="co-op-on-hookshot"></a><a id="saves"></a><a id="emulator-setup-for-new-players"></a><a id="4-the-puppet-pack"></a><a id="linux-and-steam-deck"></a>
 
-The co-op keys in the game (chat **T**, player list **F6**, panel **F7**, item cheats **F8**), the chat commands and how saves are shared are the same as in the emulator kits: [setup-emulator.md](setup-emulator.md#co-op-on-hookshot) and [setup-emulator.md, "Saves"](setup-emulator.md#saves). That guide also covers the older emulator kits themselves (keys, firmware, the puppet pack, Linux).
+The co-op keys in the game (chat **T**, player list **F6**; the debug panel **F7** and item cheats **F8** are only in developer builds, not in release kits), the chat commands and how saves are shared are the same as in the emulator kits: [setup-emulator.md](setup-emulator.md#co-op-on-hookshot) and [setup-emulator.md, "Saves"](setup-emulator.md#saves). That guide also covers the older emulator kits themselves (keys, firmware, the puppet pack, Linux).
 
 ## NVIDIA DLSS
 

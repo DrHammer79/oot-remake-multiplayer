@@ -66,6 +66,10 @@ std::string TitleGameName(const std::string& name, const std::string& host, std:
 // values in force, so the sliders open where the game is.
 // (protocol types only here: coop_difficulty.h uses std::max, which a file with windows.h before this one breaks)
 constexpr int kDifficultyRows = 5;
+// The Find a game page (Hookshot's menu, F1) lists this many games a page, under a "Page  < 2/3 >" row that Left and
+// Right (or A) turn, round (row 264, coop_list_pages.h: every game list pages; none runs on under the menu's scroll).
+// The title's own Join list pages on its buttons instead (CoopTitleNative::LookFor).
+inline constexpr int kFindPerPage = 8;
 int DifficultyIndex(const coop::protocol::DifficultyChoice& choice);
 coop::protocol::DifficultyChoice DifficultyAt(const coop::protocol::DifficultyChoice& now,
                                               const coop::protocol::DifficultyValues& in_force, int index);
@@ -298,7 +302,7 @@ private:
         kName, kLook, kPlayers, kVoice, kMic, kVoiceMode, kChatKey, kController, kKeyboard, kMapPlayers, kMapNames,
         kSameNetwork, kGameKind,
         kOpenCustomize, kNgPlus, kSaveSet,
-        kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
+        kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh, kFindPage,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
         kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
         kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount
@@ -320,6 +324,7 @@ private:
     std::string* Typed();
     void SyncManualJoinFromText();
     std::vector<Found> FoundShown() const;   // the Find page's games the search keeps, in its order
+    int FindPage(std::size_t games) const;   // find_page_ within the pages `games` take now
     void UpdateJoinFromIpPort();
     bool InSession() const;
 
@@ -363,6 +368,7 @@ private:
     bool find_online_ = true;                 // the Find a game page lists the relay's rooms (else this network's)
     std::string find_search_, search_before_; // its search, as typed
     int find_filter_ = 0, find_sort_ = 0;      // its filter and order (CoopBrowse)
+    int find_page_ = 0;                        // its page of games (kFindPerPage a page; FindPage keeps it in range)
     std::vector<Found> found_;                // what it lists now (SetFound), the search kept
     std::string found_state_;                 // why it lists none ("" looking)
     Session session_;

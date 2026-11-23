@@ -134,6 +134,11 @@ RejoinId RejoinIds(const std::string& client_id, const std::string& password, co
 
 // Copies `text` into a fixed C string, cut to fit, always ended.
 void CopyText(char* out, std::size_t size, const std::string& text);
+// Row 260: this process's memory as one log line: private (commit) bytes, the working set, the process heap's
+// allocated and committed bytes, the handle count (Windows); resident and virtual bytes (Linux). Read-only, cheap
+// (no heap walk). The host's game logs it every kMemoryLineMs with the server's sizes (HostService::memory_line).
+std::string ProcessMemoryText();
+inline constexpr std::uint64_t kMemoryLineMs = 30'000;
 
 } // namespace CoopHostMenu
 

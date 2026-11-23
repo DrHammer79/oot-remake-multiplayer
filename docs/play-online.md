@@ -74,6 +74,12 @@ join. A private one says *Needs the host's password*: pressing it opens Join wit
 field chosen. If nothing is listed it says *No public games right now*; if the list cannot be reached it says so and
 what to do.
 
+**More games than fit: pages.** Every list of games turns its pages the same way (row 264): **ZL** the page before,
+**ZR** the page after, round at both ends (ZR on the last page goes to the first). The list says it pages only when it
+does: **Page 2/3** between the game's own ZL and ZR button letters, on the title's Join a game (the line under Back)
+and on the - menu's Find a game (the list's heading). In the F1 menu (Lobby tab, Multiplayer > Find a game) a
+**Page < 2/3 >** row above the games turns it with Left and Right (or A), the same round.
+
 **What a public game keeps safe** (the host's side):
 
 - **Your address stays hidden.** A public game is reached only through the relay: no router forward, no invite code,
@@ -237,7 +243,7 @@ For `server_allow` and `server_bind`: remove the `#` in front of the line, put i
 
 ## Playing from the host's save
 
-Everyone plays from the host's save: when you join, the host's game sends the save it is playing to yours, and your game keeps it in its own co-op save folder (your own saves are never touched). Nothing is pressed for you; the chat says when to load:
+Everyone plays from the host's save: when you join, the host's game sends the save it is playing to yours, and your game keeps it in its own co-op save folder (your own saves are never touched). Your rupees, ammo, bottle contents, life and magic stay your own: before the host's save goes into that folder, your game reads them from your newest save there (or from `coop-own-values.txt` beside the slots, kept each time the slots are cleared) and puts them into it, at every join, return to the title, Resync and with another host. Your first join with that folder starts from the host's (row 249). Nothing is pressed for you; the chat says when to load:
 
 1. **"Host save loading, don't load a save."** The host's save is on its way. Wait on the title screen (it takes a few seconds).
 2. **"Success, load any save."** It is in: press Continue (or pick any save in Load). At the title every save there is the host's.

@@ -351,6 +351,8 @@ class HookshotGamesTest(unittest.TestCase):
         hk.exe_dir = lambda g: g
         hk.restore_save = lambda g: restored.append(g) or True
         hk.Bridge = Bridge
+        self.packed = []   # (row 265: the kit's start of the pack, before each game start)
+        hk.pack_start = lambda g, env, say: self.packed.append((g, env.get("X"))) or []
         self.restored = restored
         self.g = hs.HookshotGames(hk, self.games, self.out, None, 27560, "coop-test", ["X=1"], 30,
                                   {"switches": [], "start": None, "timeout": None, "server": []}, say=said.append)
@@ -382,6 +384,17 @@ class HookshotGamesTest(unittest.TestCase):
         self.assertEqual(self.g.ended_by_itself(), [])
         self.g.close("B")
         self.g.finish()
+
+    def test_each_start_puts_the_pack_as_the_kits_start_first(self):
+        # (row 265: your own tunic files, then the merge, before the game reads its mods; a restart again)
+        order, popen = [], hs.subprocess.Popen
+        self.g.hk.pack_start = lambda g, env, say: order.append(("pack", g, env.get("X"))) or []
+        hs.subprocess.Popen = lambda args, **k: order.append(("game",)) or popen(args, **k)
+        try:
+            self.g.start("A", "", wait=False)
+        finally:
+            hs.subprocess.Popen = popen
+        self.assertEqual(order, [("pack", self.games["A"], "1"), ("game",)])
 
     def test_each_start_gets_the_test_defaults_a_switch_wins(self):
         # Its own save and no crash ask on the title (a crash record of an earlier run took the load's A presses:

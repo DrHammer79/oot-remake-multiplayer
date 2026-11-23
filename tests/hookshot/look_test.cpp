@@ -59,6 +59,7 @@ public:
             return false;
         }
         ++reads[a];
+        max_read = std::max(max_read, n);
         std::memcpy(out, bytes_.data() + (a - base_), n);
         return true;
     }
@@ -112,6 +113,7 @@ public:
     std::size_t overrides() const { return overrides_.size(); }
     int overridden = 0;
     mutable std::map<std::uint64_t, int> reads;   // Read calls by address
+    mutable std::size_t max_read = 0;               // the largest Read asked for
 
 private:
     void Drop(std::uint64_t a, std::uint64_t n) {
@@ -352,6 +354,32 @@ TEST_CASE("look tunic: a texture is known by its exact texels, with no file in f
     CHECK(found.listed == 3);
     CHECK(found.unread == 1);
     CHECK(found.heads == 1);
+}
+
+TEST_CASE("look tunic: a large texture is compared a piece at a time, its last byte too (row 260)") {
+    // Larger than one piece and not a whole number of them: the compare reads the game's memory in pieces of at most
+    // kComparePiece (a buffer on the worker's stack, no heap per texture) and still sees every byte.
+    constexpr std::size_t kLarge = 3 * CoopLookTunic::kComparePiece + 100;
+    std::vector<std::uint8_t> texels(kLarge);
+    for (std::size_t i = 0; i < texels.size(); ++i) {
+        texels[i] = static_cast<std::uint8_t>(i * 13 + i / 251);
+    }
+    FakeTextures m(kBase, 0x40000);
+    std::memcpy(m.at(kBase + 0x1000), texels.data(), kLarge);
+    m.Make(kBase + 0x1000, kLarge);   // the same texels
+    std::memcpy(m.at(kBase + 0x20000), texels.data(), kLarge);
+    m.at(kBase + 0x20000)[kLarge - 1] ^= 0xFF;
+    m.Make(kBase + 0x20000, kLarge);   // the same but its very last byte
+
+    const auto colour = std::make_shared<const CoopLookTunic::Texels>(
+        CoopLookTunic::Texels{CoopLookTunic::Texture{"Big", 0, texels}});
+    const auto found = CoopLookTunic::Find(m, {colour});
+    REQUIRE(found.places.size() == 1);
+    CHECK(found.places[0].address == kBase + 0x1000);
+    CHECK(found.places[0].size == kLarge);
+    CHECK(found.heads == 1);   // the other: its first bytes only
+    CHECK(m.max_read > 0);
+    CHECK(m.max_read <= CoopLookTunic::kComparePiece);
 }
 
 TEST_CASE("look tunic: your Link's textures are found and drawn over, the game's memory and a puppet's copy left alone") {

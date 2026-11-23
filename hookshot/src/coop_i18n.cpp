@@ -660,6 +660,7 @@ constexpr Entry kzh_Hans[] = {
     //      pickup notices, the item and place names) ----
     {"The blade.", "剑身。"},
     {"connection lost, reconnecting", "连接断了，正在重连"},
+    {"connection too slow for the game's traffic, reconnecting", "连接太慢，跟不上游戏的数据，正在重连"},
     {"the host muted your chat: nobody sees it", "房主屏蔽了你的聊天：现在没人看得到"},
     {"you host now: the Lobby's host controls are yours", "你现在是房主：「大厅」页的房主操作归你了"},
     {"Difficulty: could not be sent", "难度：没能发出去"},
@@ -946,6 +947,9 @@ constexpr Entry kzh_Hans[] = {
     {"Public game", "公开游戏"},
     {"Official public game", "官方公开游戏"},
     {"Public games", "公开游戏"},
+    {"Page", "页"},
+    {"Turn the page", "翻页"},
+    {"Left and Right (or A) turn the page of games.", "左右键（或A）翻到上一页或下一页的游戏。"},
     {"Public games ({})", "公开游戏（{}）"},
     {"Private game (the default): friends join with your code or room name and the password. Nobody else can join.", "私人游戏（默认）：朋友用你的代码或房间名加上密码加入。其他人无法加入。"},
     {"Public game: shows in Public games and anyone can join, no password. Only through the game list's server, so players never see your internet address. Kick or ban players from the Lobby tab. Players can change the shared progress of the save you host from.", "公开游戏：任何人无需密码可加入；只经列表服务器，看不到你的 IP。可在“大厅”踢人。"},
@@ -1094,7 +1098,7 @@ constexpr Entry kzh_Hans[] = {
     {"You are in a friend's game: leave it first (Join a game).", "你在朋友的房间里：请先离开（“加入房间”）。"},
     {"Starts your game on this PC. They play on your save.", "在这台电脑上开房。他们在你的存档里游玩。"},
     {"Room  {}", "房间  {}"},
-    {"Page {} of {} (ZL/ZR)", "第 {}/{} 页（ZL/ZR）"},
+    {"Page {}/{}", "第 {}/{} 页"},
     {"The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code.", "邀请码已复制。私信发给朋友；他选“加入房间”>“输入邀请码或地址”>“粘贴邀请码”。"},
     {"Your friend types it after picking your game. A shows it.", "朋友选了你的房间后输入它。按 A 显示。"},
     {"For friends on your home network: copies one line they paste in Enter a code.", "给同一家庭网络的朋友：复制一行，他在“输入邀请码或地址”里粘贴。"},
@@ -2084,6 +2088,7 @@ constexpr Entry kzh_Hant[] = {
     //      pickup notices, the item and place names) ----
     {"The blade.", "劍身。"},
     {"connection lost, reconnecting", "連線斷了，正在重連"},
+    {"connection too slow for the game's traffic, reconnecting", "連線太慢，跟不上遊戲的資料，正在重連"},
     {"the host muted your chat: nobody sees it", "房主封鎖了你的聊天：現在沒人看得到"},
     {"you host now: the Lobby's host controls are yours", "你現在是房主：「大廳」頁的房主操作歸你了"},
     {"Difficulty: could not be sent", "難度：沒能發出去"},
@@ -2368,6 +2373,9 @@ constexpr Entry kzh_Hant[] = {
     {"Public game", "公開遊戲"},
     {"Official public game", "官方公開遊戲"},
     {"Public games", "公開遊戲"},
+    {"Page", "頁"},
+    {"Turn the page", "翻頁"},
+    {"Left and Right (or A) turn the page of games.", "左右鍵（或A）翻到上一頁或下一頁的遊戲。"},
     {"Public games ({})", "公開遊戲（{}）"},
     {"Private game (the default): friends join with your code or room name and the password. Nobody else can join.", "私人遊戲（預設）：朋友用你的代碼或房間名加上密碼加入。其他人無法加入。"},
     {"Public game: shows in Public games and anyone can join, no password. Only through the game list's server, so players never see your internet address. Kick or ban players from the Lobby tab. Players can change the shared progress of the save you host from.", "公開遊戲：任何人無需密碼可加入；只經列表伺服器，看不到你的 IP。可在「大廳」踢人。"},
@@ -2516,7 +2524,7 @@ constexpr Entry kzh_Hant[] = {
     {"You are in a friend's game: leave it first (Join a game).", "你在朋友的房間裡：請先離開（「加入房間」）。"},
     {"Starts your game on this PC. They play on your save.", "在這台電腦上開房。他們在你的存檔裡遊玩。"},
     {"Room  {}", "房間  {}"},
-    {"Page {} of {} (ZL/ZR)", "第 {}/{} 頁（ZL/ZR）"},
+    {"Page {}/{}", "第 {}/{} 頁"},
     {"The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code.", "邀請碼已複製。私訊發給朋友；他選「加入房間」>「輸入邀請碼或位址」>「貼上邀請碼」。"},
     {"Your friend types it after picking your game. A shows it.", "朋友選了你的房間後輸入它。按 A 顯示。"},
     {"For friends on your home network: copies one line they paste in Enter a code.", "給同一家庭網路的朋友：複製一行，他在「輸入邀請碼或位址」裡貼上。"},
@@ -3877,8 +3885,8 @@ constexpr SplitShape kSplitShapes[] = {
     {{"This network (", ")"}, 0, 2, "This network ({})", 0},
     // (0.11.9, ui-tabs)
     {{"", " (page ", " of ", ")"}, 1, 4, "{} (page {} of {})", 0},
-    // (title-join: the title page's hint)
-    {{"Page ", " of ", " (ZL/ZR)"}, 0, 3, "Page {} of {} (ZL/ZR)", 0},
+    // (row 264: every game list's page line, coop_list_pages.h; the game's ZL and ZR letters around it are added after)
+    {{"Page ", "/", ""}, 0, 3, "Page {}/{}", 0},
     // (a page's header: the page's name and, when its rows take more than one
     // page, "  < 1 of 3 >"; the name is the table's word, the two numbers as
     // they are)

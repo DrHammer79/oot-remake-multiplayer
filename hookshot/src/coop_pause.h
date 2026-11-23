@@ -46,6 +46,10 @@ bool Page(int tab, HosCoopMenuPage* out);
 bool Picture(int tab, HosCoopMenuPicture* out);
 bool Input(int tab, int event, int arg, int arg2);
 int Wanted();
+// What hos_coop_menu_wanted says for Longshot's own menu (patch 0037's HOS_COOP_MENU_WANT_LONGSHOT, gpu/vk/hos_coop_menu.h).
+inline constexpr int kWantLongshotMenu = -3;
+// The pause menu's Longshot Settings button: Longshot's own menu opens at the next menu tick, in front or not.
+void WantLongshotMenu();
 
 // The window's keys and characters (Unicode) while the tab types into a
 // field: true when taken. Hookshot's own keys (F1, Insert) are never taken.

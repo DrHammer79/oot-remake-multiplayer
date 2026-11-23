@@ -1118,6 +1118,13 @@ bool GameMenuUp() noexcept;
 // shown" and co-op's map-page marks drew every player's icon over our tab). Any thread. The Map page's marks wait while
 // it is.
 bool OwnMinusPageShown() noexcept;
+// F6 (coop_players_open.h, ui-audit-01112 B5): opens the game's - menu on co-op's Multiplayer tab, Players view, with
+// the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
+// ours (seen once a - menu opened without them): F6's drawn list is used then.
+bool OpenPlayers() noexcept;
+// Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
+// module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
+void SetFreePlay(bool free_play) noexcept;
 // The pause menu's model actors (the menu manager's object, its four slots: Link on Equipment, and the picture Character
 // Select's Customize screen shows), 0 for an empty slot or with no menu. Any thread (reads only). The eyes' and hair's
 // colours are each actor's own material values, so the picture shows them only when they are dressed on these too.
@@ -1137,5 +1144,25 @@ bool LayoutCursor(float* x, float* y, bool* left) noexcept;
 bool Key(std::uint32_t vk, bool repeat) noexcept;
 bool Char(std::uint32_t cp) noexcept;
 bool KeysTaken() noexcept;
+
+// --- Which of System's buttons an A is for (player report 261) ---
+// A button's focus state byte (button+0x38, CoopModScreens::FocusState) as the owner's run of 2026-11-23 traced it while
+// the game's cursor moved: 1 the focus coming to it, 3 the focus on it, 2 the focus leaving it (a moment: the button the
+// cursor just left), 4 and 5 decided, 0 none. The cursor is on a button at 1 or 3; never at 2.
+inline constexpr bool CursorOnState(std::uint8_t state) { return state == 1 || state == 3; }
+// One shown button of System's page as the module read it: `ours` 0 Multiplayer (Pa_Button_06), 1 Longshot Settings
+// (Pa_Button_05), 2 Customize Link (Pa_Button_07), -1 one of the game's own (Options, Special Actions, Title Screen, ...);
+// its focus state and its hit box (the layout's units).
+struct SystemButtonSeen {
+    int ours = -1;
+    std::uint8_t state = 0;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+// The button of ours the game's cursor is on (0, 1, 2 as `ours`), -1 when it is on one of the game's own or on none:
+// only a button at CursorOnState counts. The A on Title Screen just after the cursor left Longshot Settings (Title
+// Screen 3, Longshot Settings 2) is the game's: it opened our Longshot Settings page instead of the game's Title
+// Screen question (player report 261). Two at it (the mouse moved the focus just before its click): the one under the
+// mouse (`mouse`: x, y in the layout's units), else the one the focus is coming to (1), else none.
+int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse);
 
 }  // namespace CoopPauseTab
