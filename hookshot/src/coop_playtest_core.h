@@ -202,8 +202,10 @@ std::string GiveRefusal(const CoopModJson::Value* status);
 // `warp`: two ways to change scene. While an event runs, the module's own request (`Sequence_ReservedNextBanc`, the test
 // script's `warp`; the game takes it only then, docs/scenes.md "Free-play scene change"). In free play, Longshot's control
 // bridge `teleport` (the Cheats page's destination list; the game takes it at Link's next update; the way hookshot.py's
-// boot-script warps go), which knows only its own list of maps and has no start position (`entrance`).
-enum class WarpRoute { refuse, event, teleport };
+// boot-script warps go), which knows only its own list of maps and has no start position (`entrance`). A third way
+// (`map_event`, step 2 of kit-setup): in free play with an `entrance`, or a map Longshot's list lacks (a boss stage), the
+// module asks the game's own map change event (CoopTeleport::MapChange, as an entrance does it).
+enum class WarpRoute { refuse, event, teleport, map_event };
 struct WarpPlan {
     WarpRoute route = WarpRoute::refuse;
     std::string code;  // for `refuse`: the bridge's error code (not_in_play, not_in_event)

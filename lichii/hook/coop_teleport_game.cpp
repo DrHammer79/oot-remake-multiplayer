@@ -166,6 +166,8 @@ struct Glue {
     // the entrance asked, and how the move went (taken by TakeRespawnMove).
     bool want_beside = false;
     bool want_entrance = false;
+    // MapChange (the play-test bridge's warp): the scene and start point to ask the map change event for.
+    std::optional<std::pair<std::string, std::string>> want_map;
     std::optional<bool> respawn_moved;
     // Any thread -> the hook's chat box.
     std::vector<std::string> lines;
@@ -308,6 +310,25 @@ bool ToEntrance() {
     return true;
 }
 
+bool MapChange(std::string scene, std::string start) {
+    Glue& g = TheGlue();
+    std::lock_guard lock(g.mutex);
+    if (!g.on || !g.by_event) {
+        LOG_INFO(Core, "coop: teleport: map change to {}: off (needs the map change event)", scene);
+        return false;
+    }
+    if (start.empty()) {
+        const auto first = DefaultStart(scene);
+        if (!first) {
+            LOG_INFO(Core, "coop: teleport: map change to {}: no start point known", scene);
+            return false;
+        }
+        start = *first;
+    }
+    g.want_map = std::make_pair(std::move(scene), std::move(start));
+    return true;
+}
+
 std::optional<bool> TakeRespawnMove() {
     Glue& g = TheGlue();
     std::lock_guard lock(g.mutex);
@@ -390,8 +411,10 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
     std::vector<Answered> answers;
     bool want_beside = false;
     bool want_entrance = false;
+    std::optional<std::pair<std::string, std::string>> want_map;
     {
         std::lock_guard lock(g.mutex);
+        want_map = std::exchange(g.want_map, std::nullopt);
         g.answer = AnswerFor(local, g.grounded);
         want = std::exchange(g.want, std::nullopt);
         answers = std::exchange(g.answers, {});
@@ -426,6 +449,21 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
             g.entrance_until_us = now + Glue::kEntranceOpenUs;
             respawn_moved = true;
             LOG_INFO(Core, "coop: teleport: respawn at the entrance {} of {}", *start, *local.scene);
+        }
+    }
+    if (want_map) {
+        // The bridge's warp: the same map change event as the respawn's entrance, with the scene and start asked for.
+        if (main_base == 0 || local.loading_banc || local.event) {
+            LOG_INFO(Core, "coop: teleport: map change to {} at {}: not now ({})", want_map->first, want_map->second,
+                     main_base == 0 ? "no game" : local.loading_banc ? "a load runs" : "an event runs");
+        } else {
+            Trip::Actions map;
+            map.scene = want_map->first;
+            map.start = want_map->second;
+            map.start_event = true;
+            all.push_back(std::move(map));
+            g.entrance_until_us = now + Glue::kEntranceOpenUs;
+            LOG_INFO(Core, "coop: teleport: map change to {} at {} (play-test warp)", want_map->first, want_map->second);
         }
     }
     for (const auto& a : answers) {

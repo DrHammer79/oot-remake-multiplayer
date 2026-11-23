@@ -886,13 +886,17 @@ TEST_CASE("playtest: warp goes by the event request during an event and by the t
     CHECK(PlanWarp(&play, false, "KokiriForest").route == WarpRoute::teleport);
 }
 
-TEST_CASE("playtest: warp with an entrance in free play is refused with the way out") {
+TEST_CASE("playtest: warp with an entrance in free play goes by the game's map change event") {
     const auto play = Status(Snap(999));
-    const auto plan = PlanWarp(&play, true, "KokiriForest");
-    CHECK(plan.route == WarpRoute::refuse);
-    CHECK(plan.code == "not_in_event");
-    CHECK(plan.why.find("without an entrance") != std::string::npos);
-    CHECK(plan.why.find("boot script") != std::string::npos);
+    CHECK(PlanWarp(&play, true, "KokiriForest").route == WarpRoute::map_event);
+    CHECK(PlanWarp(&play, true, "GohmaStage").route == WarpRoute::map_event);
+    // The age rule holds on this route too: the map change event does not change Link's age.
+    const auto adult = PlanWarp(&play, true, "KokiriForest_Adult");
+    CHECK(adult.route == WarpRoute::refuse);
+    CHECK(adult.code == "wrong_age");
+    // During an event the module's own request still takes the start.
+    const auto event = Status(Snap(999, true));
+    CHECK(PlanWarp(&event, true, "GohmaStage").route == WarpRoute::event);
 }
 
 TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missing") {

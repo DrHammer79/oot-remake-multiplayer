@@ -322,11 +322,10 @@ PLAYER_TOOLS = [
                      "properties": {"condition": {"type": "string"}, "max_frames": FRAMES,
                                     "chunk": {"type": "integer", "minimum": 1, "maximum": kit_tools.MAX_CHUNK}}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
-     "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
-     "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
-     "a map not in that list, the game takes the request ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load "
-     "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
-     "warps. Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
+     "optionally an entrance (a start position name in it), through the game's own scene change. In free play without an entrance it goes by Longshot's teleport (the maps of its "
+     "own list; it lands at the map's own start). With an entrance, or for a map not in that list (a boss stage such as "
+     "GohmaStage), the module opens the game's own map change event (needs LICHII_COOP_TELEPORT_EVENT; else `not_in_event` "
+     "with the reason). Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
      "name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event "
      "or load (up to `timeout` seconds, default 60), then is held. A warp asked while a talk is open waits until the "
      "talk ends and answers `timeout` meanwhile: end the talk first (A or B until `event` is false).",

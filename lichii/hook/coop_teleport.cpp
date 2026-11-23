@@ -303,6 +303,15 @@ bool IsKnownScene(std::string_view scene) {
     return false;
 }
 
+std::optional<std::string> DefaultStart(std::string_view scene) {
+    for (const auto& p : kStartPoints) {
+        if (p.scene == scene) {
+            return std::string(p.name);
+        }
+    }
+    return std::nullopt;
+}
+
 std::vector<std::string> ScenesLike(std::string_view name, std::size_t most) {
     std::vector<std::string> out;
     if (name.empty()) {
