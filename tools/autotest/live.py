@@ -169,7 +169,7 @@ def runner_argv(a, game_a, game_b, port, pipe, d):
         argv += ["--playtest-ports", str(playtest_base(a.lane))]
     for kv in a.env:
         argv += ["--env", kv]
-    if a.display:
+    if getattr(a, "display", None):
         argv += ["--display", a.display]
     return argv
 

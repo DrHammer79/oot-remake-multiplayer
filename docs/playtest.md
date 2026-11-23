@@ -51,7 +51,7 @@ Nothing listens unless the game is started with:
 | `HOS_CONTROL` | Longshot's control socket (Linux) or pipe (Windows). The bridge forwards `input`, `shot` and the Link snapshot in `state` to it. Without it those answer `no_control` |
 | `LICHII_COOP_PLAYTEST_IDLE` | Seconds a hold may last with no command before the game resumes by itself (default 600, `0` never), in case the tester crashed |
 
-The shipped 0.11.12 kits (Windows and Linux) have the bridge built in but off. A tester turns it on for one game with
+The module has the bridge built in but off. A tester turns it on for one game with
 these variables; `live.py start` sets them for each game it starts. The log says
 `coop: playtest: listening on 127.0.0.1:<port>` or `coop: playtest: off (<why>)`.
 
@@ -182,7 +182,7 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 ## Not there yet
 
 - **Frame step in a game.** The play-test bridge holds the game in the module ([Bridge protocol](#bridge-protocol));
-  that is not proven in a game yet. The LANE1 proof run for 0.11.12 checks it first.
+  that is not proven in a game yet. `tools/autotest/bridge_proof.py` on a test lane checks it first.
 - **Enemies and owners in the state.** The state has Link's side only. The module's debug walk already reads every
   actor's name, place, life and animation, and the objects sync knows each one's owner; a `dump` of those beside the
   flags is the next step (then the checker compares positions and owners too).
@@ -252,6 +252,16 @@ pathfinding, so give it points with a clear line between them and use `warp` for
      "oot-p1": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p1", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]},
      "oot-p2": {"command": "python", "args": ["-I", "tools/autotest/mcp_playtest.py", "--player", "p2", "--lane", "1", "--session", "sessions/run1", "--log-dir", "playtest-logs/run1"]}
    }}
+   ```
+
+   The same with the `claude` command, one line per game (run from the repository folder; `--scope project` writes
+   `.mcp.json`, `--scope local` keeps it to you; a Claude session sees the servers only if they were registered
+   before it started):
+
+   ```sh
+   claude mcp add oot-p1 -- python -I tools/autotest/mcp_playtest.py --player p1 --lane 1 --session <session folder> --log-dir <log dir>
+   claude mcp add oot-p2 -- python -I tools/autotest/mcp_playtest.py --player p2 --lane 1 --session <session folder> --log-dir <log dir>
+   claude mcp list    # both must show Connected
    ```
 
    `--port N` names a port outright. Three or four players: `oot-p3` and `oot-p4` the same way (games started by
