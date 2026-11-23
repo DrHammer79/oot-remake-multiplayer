@@ -585,6 +585,16 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   `Unopened`, string `0x83ce30d7`, when disabled); the tab of the category at `+0x358` is highlighted with
   `f_802ecf60(tab, on, instant)`. In the Minus menu the tabs are [6, 1, 2] and tab 3 is hidden (`f_802edef0`). `+0x350`
   is the mode (Plus or Minus); `+0x308` and `+0x310` the `MinusToPlus` and `PlusToMinus` animations. (checked)
+- **A tab that reads `???` is the game's own masked tab, not lost text.** The third argument of `f_80a8ab50` is whether
+  the page is open to the player; when it is 0 the tab shows `Unopened` (`???` in English; the label is in the stock
+  `MenuOverlay_00`, a mod's merged copy and our pack keep it). In the Minus menu `FillTabs` decides it per tab: Key
+  Items (category 6) is on only while one of the key items of `ItemDatabase::GetList(4)` passes the check
+  `f_801a1160` (inferred: the item is owned); Threads of Time (category 1) is on only while the Bool
+  `UI_IsFinishChallengeMenuOpenEvent` (`0x1450c74f`, read through `f_833a5f50`; [flags.md](flags.md), "Threads of
+  Time") is set, which only the owl at the Hyrule Field entrance does. So a fresh save, or a test state set up with
+  flags and warps, shows `Characters, ???, ???, Map, ...`; it is the same in the stock game. (checked in the
+  disassembly of `FillTabs`, 2026-11-23; the Key Items check is inferred) A test that needs the tabs named sets
+  `setflag UI_IsFinishChallengeMenuOpenEvent 1` and `give` a key item first (docs/playtest.md, "Rules for a tester").
 - `f_802ecf60`: on, it stops `CurrentOut` (`f_802f0fe0`) and plays `CurrentIn` (`f_802eda70(anim, 0, 1.0)`, or
   `f_802f0f00` when instant); off, the reverse; nothing when the animation is already at its end. (checked)
 
