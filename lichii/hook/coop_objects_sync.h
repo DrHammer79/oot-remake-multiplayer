@@ -1155,6 +1155,9 @@ public:
     // is still on our walk this long after is deleted with the game's delete
     // request (its own death, if the life we wrote started one, is done).
     static constexpr std::uint64_t kDeadGraceUs = 3'000'000;
+    // Rows 257/258: a boss part its boss still holds this long past kDeadGraceUs is said once (a leftover: its own
+    // death never ended it).
+    static constexpr std::uint64_t kHeldSayUs = 10'000'000;
     // Present thread, every frame: where each copy we do not own should be.
     void Poses(std::uint64_t now_us, std::vector<PoseWrite>& out) const;
 
@@ -1455,6 +1458,7 @@ private:
         std::int32_t boss_stand_in_life = 0;   // a boss copy: the owner's life its stand-in hit was replayed for (once each)
         std::optional<std::int32_t> owner_life;  // its owner's last life, from the owner's samples (KeepBossLives)
         bool death_given = false;      // a dying copy boss's remaining life went to its own Life step (once)
+        bool held_said = false;        // rows 257/258: said once, held by its boss kHeldSayUs past the grace
         bool dead_now = false;  // a kill from before we came: deleted at once
         bool quiet_gone = false;  // report 200: its owner killed it away from our Link's fight: deleted, no death
         // enemy-sync-3 (issue 133): our enemy, killed by another game's hit
@@ -1491,8 +1495,9 @@ private:
     std::int32_t StepHits(Object& o, std::int32_t fell, std::int32_t life, std::uint64_t now_us);
     // Rows 257/258: a boss's part (Barinade's jellyfish) whose boss is still alive here is never deleted from
     // outside after kDeadGraceUs: its boss holds it (a jellyfish stuck to Barinade, unstuck in her next phase),
-    // and a part deleted under it is a null write in the boss's own code. Its own death ends it.
-    bool HeldByItsBoss(const Object& o) const;
+    // and a part deleted under it is a null write in the boss's own code. Its own death ends it. Returns that boss
+    // (nullptr: not held).
+    const Object* HeldByItsBoss(const Object& o) const;
     void Lower(Object& o, std::int32_t life, std::uint64_t now_us, std::vector<LifeWrite>& writes,
                std::uint8_t hitter,
                const std::optional<coop::protocol::Vec3>& hit_at = std::nullopt,

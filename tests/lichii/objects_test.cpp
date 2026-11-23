@@ -8283,3 +8283,38 @@ TEST_CASE("objects: a boss copy's refused killing hit is not given here, nor a p
     CHECK(step.writes.empty());
     CHECK(copy.PartKillsStepped() == 0);
 }
+
+TEST_CASE("objects: a boss part its boss holds 10 s past the grace is said once, with the boss (rows 257/258)") {
+    const std::string kBoss = "Enemy_DungeonBoss_Barinade";
+    const std::string kJelly = "Enemy_DungeonBoss_Barinade_Jellyfish";
+    const auto walk = std::vector<Seen>{Enemy(0x100, 0x11, 20, 0.0f, kBoss), Enemy(0x200, 0x12, 1, 1.0f, kJelly)};
+    const auto said = [&](Sync& s) {
+        int n = 0;
+        for (const auto& note : s.TakeNotes()) {
+            if (note.find("held by its boss") != std::string::npos) {
+                CHECK(note.find(kBoss) != std::string::npos);
+                CHECK(note.find(kJelly) != std::string::npos);
+                ++n;
+            }
+        }
+        return n;
+    };
+    Sync copy;
+    copy.SetHurt(true);
+    Tick(copy, 0, walk);
+    const proto::ObjectId jelly = *copy.IdOf(0x200);
+    Own(copy, *copy.IdOf(0x100), 2, 1);
+    Own(copy, jelly, 2, 1);
+    copy.Receive(proto::ObjectRemove{2, jelly, 1, proto::RemoveReason::dead, {}});
+    Tick(copy, 100 * kMs, walk);  // (dead_at here)
+    (void)copy.TakeNotes();
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + 100 * kMs, walk);
+    CHECK(copy.Removes().empty());
+    CHECK(said(copy) == 0);  // held, not yet a leftover
+    Tick(copy, 100 * kMs + Sync::kDeadGraceUs + Sync::kHeldSayUs, walk);
+    CHECK(copy.Removes().empty());
+    CHECK(said(copy) == 1);
+    Tick(copy, 100 * kMs + 2 * (Sync::kDeadGraceUs + Sync::kHeldSayUs), walk);
+    CHECK(said(copy) == 0);  // once
+    CHECK(copy.Removes().empty());
+}

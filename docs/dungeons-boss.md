@@ -731,6 +731,9 @@ moves on.
 - Its owner's dead remove then replays no second killing blow.
 - A boss part whose boss is alive here is never deleted from outside after `kDeadGraceUs` (`Sync::HeldByItsBoss`).
   Its own death ends it. Once its boss is dead here, or not on the walk, the grace delete is the fallback again.
+  A part still held `kHeldSayUs` (10 s) past the grace is said once, a leftover whose own death never ended it:
+  `a boss part dead in its owner's game still here N s on: held by its boss <id> <boss>, not deleted (rows 257/258):
+  <id> <part> life N`.
 - Unchanged: the boss itself (HeldLifeStep, SetDying, `a hit the boss's game did not take` for a refused hit that does
   not kill), plain enemies (the write and grace path), our own parts (`a hit our boss's game did not take as a replay`).
 

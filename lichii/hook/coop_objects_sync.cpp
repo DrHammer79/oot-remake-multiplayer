@@ -1456,9 +1456,9 @@ bool Sync::OwnerSaysDead(std::uint64_t address) const {
     return it != objects_.end() && (it->second.dead_at != 0 || it->second.owner_life_zero);
 }
 
-bool Sync::HeldByItsBoss(const Object& o) const {
+const Sync::Object* Sync::HeldByItsBoss(const Object& o) const {
     if (!IsBossPart(o.name)) {
-        return false;
+        return nullptr;
     }
     const GroupPart* part = PartOf(o.name);
     for (const auto& [address, other] : objects_) {
@@ -1467,10 +1467,10 @@ bool Sync::HeldByItsBoss(const Object& o) const {
         }
         // Its boss, here and alive: not dead by its life, and no death said or begun for it.
         if (other.dead_at == 0 && !other.dead_now && !other.owner_life_zero && !(other.life && *other.life <= 0)) {
-            return true;
+            return &other;
         }
     }
-    return false;
+    return nullptr;
 }
 
 bool Sync::GoesWithoutDeath(std::uint64_t address, std::uint64_t now_us) {
@@ -2933,9 +2933,30 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     Apply(self, now_us, send, writes);
     // Copies their owner saw die that are still here after the grace.
     dead_.clear();
-    for (const auto& [address, o] : objects_) {
-        if (o.dead_at != 0 && (o.dead_now || (now_us - o.dead_at >= kDeadGraceUs && !HeldByItsBoss(o)))) {
+    for (auto& [address, o] : objects_) {
+        if (o.dead_at == 0) {
+            continue;
+        }
+        if (o.dead_now || now_us - o.dead_at < kDeadGraceUs) {
+            if (o.dead_now) {
+                dead_.insert(address);
+            }
+            continue;
+        }
+        const Object* boss = HeldByItsBoss(o);
+        if (boss == nullptr) {
             dead_.insert(address);
+        } else if (!o.held_said && now_us - o.dead_at >= kDeadGraceUs + kHeldSayUs) {
+            // Rows 257/258 (LANE1 proof): a leftover, its own death never ended it; held, not deleted under its boss.
+            o.held_said = true;
+            char line[320];
+            std::snprintf(line, sizeof line,
+                          "a boss part dead in its owner's game still here %llu s on: held by its boss %016llx %s, "
+                          "not deleted (rows 257/258): %016llx %s life %d",
+                          static_cast<unsigned long long>((now_us - o.dead_at) / 1'000'000),
+                          static_cast<unsigned long long>(boss->id.value), boss->name.c_str(),
+                          static_cast<unsigned long long>(o.id.value), o.name.c_str(), o.life.value_or(-1));
+            notes_.emplace_back(line);
         }
     }
 
