@@ -2443,9 +2443,18 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
 // A row picked on our page (after the lock): its action, the tab's own row's (ActionFor(MinusPage)) or its view's
 // (Act); a view it opens shows on the same page.
 void Act(int row, int line, bool clicked, RowAction forced);
+CoopPauseTab::CharactersHop g_hop;
+std::atomic<bool> g_hop_on{false};   // (a hop to the Characters tab runs: OnPad taps L for it)
 void MinusDecide(int tab, int row) {
     if (tab < 0 || tab >= kMinusTabs) return;
-    if (ViewShown() == View::kMenu) {   // (Co-op settings: the row's page on the list, and the list has the pad)
+    if (ViewShown() == View::kMenu) {
+        if (row == 0 && CoopPause::SnailHome()) {   // (Customize Link, with Character Select in the game: its screen is the home)
+            std::lock_guard lock(g_mutex);
+            g_hop = {};
+            g_hop_on = true;
+            LOG_INFO(Core, "coop: pause tab: Customize Link: on to the Characters tab (Character Select's Customize screen)");
+            return;
+        }   // (Co-op settings: the row's page on the list, and the list has the pad)
         if (row >= 0 && row < kMenuTabs && g_menu_tab.exchange(row) != row) g_menu_top = 0;
         std::lock_guard lock(g_mutex);
         g_page.MinusEnterList();
@@ -3792,6 +3801,16 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 } else if (!g_menu_typing_lines.empty()) {
                     g_menu_typing_lines.clear();
                     g_live_poke = true;
+                }
+            }
+            if (g_hop_on.load()) {   // (the hop: the game's own L, tapped; our page's L first, then the game's)
+                const auto step = CoopPauseTab::CharactersHopNext(g_hop, g_page.MinusTab() >= 0, g_page.StripUp(),
+                                                                    g_page.StripLit(), NowMs());
+                if (step == CoopPauseTab::HopStep::kTapL) in |= kPadL;
+                else if (step != CoopPauseTab::HopStep::kWait) {
+                    g_hop_on = false;
+                    LOG_INFO(Core, "coop: pause tab: the hop to the Characters tab {} after {} taps (strip lit {})",
+                             step == CoopPauseTab::HopStep::kDone ? "arrived" : "given up", g_hop.taps, g_page.StripLit());
                 }
             }
             out = g_page.OnPad(in, NowMs());

@@ -290,6 +290,8 @@ public:
     }
     // Ours shown now: 0 Multiplayer, 1 Lobby, 2 Mods; -1 none.
     int MinusTab() const { return minus_tab_; }
+    int StripLit() const { return strip_.lit; }
+    bool StripUp() const { return strip_.state == 1 || strip_.state == 2; }
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
     // RowTexts(MinusPage) not ""), set by the module for the tab lit. Up and down move the cursor among the rows shown
     // (the game's button_on), A picks the row under it (button_decide): TakeMinusDecide says which, once.
@@ -970,6 +972,23 @@ SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::
 inline constexpr std::uint64_t kSnailPauseMs = 300, kSnailGoneMs = 5000;
 enum class SnailPadState { kDrive, kPause, kGone };
 SnailPadState SnailPadFrom(std::uint64_t seen_ms, std::uint64_t now_ms);
+// The hop to Character Select's Characters tab (#322): with his code in the game the colours are on his Customize
+// screen, so A on co-op's Customize Link row, in the - menu, taps L for the player. There is no native call that sets
+// the - menu's tab (the game's graph reads the pad: Sequence/MinusMenu), so the taps are the game's own L: our tab to
+// Map (Page::MinusPad), then the game's, Map to Threads to Key Items to Characters. It ends on the strip's lit category
+// reading Characters' (3: his slot 3, as the game's three are 0 to 2: inferred, not yet seen) or, as the Characters tab
+// is the left edge, a tap that moved nothing; given up after kHopMaxTaps taps or kHopMaxMs.
+struct CharactersHop {
+    int taps = 0;                 // L taps sent
+    int off_taps = 0;             // of those, sent with our page already gone (the game's own tabs)
+    int prev_lit = -1;            // the strip's lit category when the last of those was sent
+    std::uint64_t started_ms = 0, next_ms = 0;
+};
+enum class HopStep { kWait, kTapL, kDone, kGiveUp };
+inline constexpr int kHopMaxTaps = 7, kHopCharactersLit = 3;
+inline constexpr std::uint64_t kHopMaxMs = 8000, kHopGapMs = 500;
+// `ours`: our page still shows (Page::MinusTab() >= 0); `strip_ok`: the strip is up (state 1 or 2); `lit`: its lit category.
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool strip_ok, int lit, std::uint64_t now_ms);
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: the Character tab takes
 // them one update ahead to move with the fourth, not a frame after it.

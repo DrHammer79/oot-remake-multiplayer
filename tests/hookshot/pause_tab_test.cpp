@@ -2571,6 +2571,43 @@ TEST_CASE("pause tab (cs-customize-0119, lane gc198-l5b): a stall keeps Characte
     CHECK(SnailPadFrom(2000, 1000) == SnailPadState::kDrive);   // (a clock that went back)
 }
 
+TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the strip reads it, or the left edge") {
+    using namespace CoopPauseTab;
+    CharactersHop h;
+    // Our page shows: L (our tab to Map), then the pace.
+    CHECK(CharactersHopNext(h, true, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, true, true, 2, 1100) == HopStep::kWait);
+    // Our page gone, Map lit: the game's L (Map to Threads of Time), then Key Items, then Characters (lit 3).
+    CHECK(CharactersHopNext(h, false, true, 2, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, false, true, 1, 2000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, false, true, 0, 2500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(h, false, true, 3, 3000) == HopStep::kDone);
+    // The strip not up: waits, taps nothing.
+    CharactersHop w;
+    CHECK(CharactersHopNext(w, false, false, 2, 1000) == HopStep::kWait);
+    // The left edge: a tap that moved nothing ends it (the strip's own numbering unknown).
+    CharactersHop e;
+    CHECK(CharactersHopNext(e, false, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(e, false, true, 0, 1500) == HopStep::kTapL);
+    CHECK(CharactersHopNext(e, false, true, 0, 2000) == HopStep::kDone);
+    // The first game tap is not an edge before it has sent one.
+    CharactersHop f;
+    CHECK(CharactersHopNext(f, false, true, 2, 1000) == HopStep::kTapL);
+    // Given up: too many taps, or too long.
+    CharactersHop t;
+    std::uint64_t now = 1000;
+    int taps = 0;
+    for (int i = 0; i < 20; ++i, now += 600) {
+        const HopStep s = CharactersHopNext(t, true, true, 2, now);
+        if (s == HopStep::kTapL) ++taps;
+        if (s == HopStep::kGiveUp) break;
+    }
+    CHECK(taps == kHopMaxTaps);
+    CharactersHop slow;
+    CHECK(CharactersHopNext(slow, false, false, 2, 1000) == HopStep::kWait);
+    CHECK(CharactersHopNext(slow, false, false, 2, 1000 + kHopMaxMs + 1) == HopStep::kGiveUp);
+}
+
 TEST_CASE("pause tab: the fourth tab's place and fades taken one update ahead, not past where they head") {
     CHECK(Ahead(1023.83f, 1020.12f, 1000.0f) == doctest::Approx(1016.41f));   // (the strip's drop, a run's numbers)
     CHECK(Ahead(1000.48f, 1000.34f, 1000.0f) == doctest::Approx(1000.20f));
