@@ -678,6 +678,14 @@ Error check_object_state(const ObjectState& s) {
   }
   if (s.hit && s.hit->seq == 0) return Error::bad_value;  // (seqs count from 1)
   if (s.strike && s.strike->seq == 0) return Error::bad_value;
+  if (s.variants) {
+    if (s.variants->recent.size() > kMaxBossVariants) return Error::bad_value;
+    std::uint32_t before = 0;
+    for (const BossVariant& v : s.variants->recent) {
+      if (v.seq == 0 || v.seq <= before || !ValidVariantName(v.name)) return Error::bad_value;
+      before = v.seq;
+    }
+  }
   if (s.orders) {
     if (s.orders->recent.size() > kMaxBossOrders) return Error::bad_value;
     std::uint32_t before = 0;
@@ -814,7 +822,28 @@ void write_object_state(const ObjectState& s, Writer& w) {
       }
     });
   }
+  if (s.variants) {
+    component(ObjectComponent::variants, [&] {
+      w.u8(static_cast<std::uint8_t>(s.variants->recent.size()));
+      for (const BossVariant& v : s.variants->recent) {
+        w.u32(v.seq);
+        w.str(v.name);
+      }
+    });
+  }
 }
+
+}  // namespace
+
+bool ValidVariantName(std::string_view name) {
+  if (name.size() > kMaxBossVariantChars) return false;
+  for (const char ch : name) {
+    if (ch < 0x21 || ch > 0x7e) return false;  // printable ASCII, no space
+  }
+  return true;
+}
+
+namespace {
 
 bool has_duplicate_id(const std::vector<ObjectPresence>& objects) {
   std::vector<ObjectId> ids;
@@ -1543,6 +1572,21 @@ Error decode_component(ObjectComponent id, Reader& c, ObjectState& s, bool& know
         if (o.seq == 0 || o.seq <= before || o.seq > b.seq) return Error::bad_value;
         before = o.seq;
         for (std::uint8_t& byte : o.payload) COOP_READ(c.u8(byte));
+      }
+      return Error::none;
+    }
+    case ObjectComponent::variants: {
+      BossVariants& b = s.variants.emplace();
+      std::uint8_t count = 0;
+      COOP_READ(c.u8(count));
+      if (count > kMaxBossVariants) return Error::bad_value;
+      std::uint32_t before = 0;
+      for (std::uint8_t i = 0; i < count; ++i) {
+        BossVariant& v = b.recent.emplace_back();
+        COOP_READ(c.u32(v.seq));
+        COOP_TRY(c.str(v.name, kMaxBossVariantChars));
+        if (v.seq == 0 || v.seq <= before || !ValidVariantName(v.name)) return Error::bad_value;
+        before = v.seq;
       }
       return Error::none;
     }

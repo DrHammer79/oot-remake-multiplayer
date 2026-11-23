@@ -1226,6 +1226,60 @@ TEST_CASE("object samples carry a battle manager's orders, component 23 (protoco
   CHECK(decode_bytes(raw) == Error::bad_value);
 }
 
+TEST_CASE("object samples carry the owner's boss action variations, component 24 (row 222 part 2, no bump)") {
+  CHECK(static_cast<int>(ObjectComponent::variants) == 24);
+  ObjectSample s{0, test::kPlacedId, 3, {}};
+  s.state.time = {100, 1};
+  s.state.variants = BossVariants{{BossVariant{7, ""}, BossVariant{9, "Ice"}, BossVariant{12, "1FeintFire"}}};
+  const Bytes bytes = must_encode(s);
+  Message back;
+  REQUIRE(decode(bytes, back) == Error::none);
+  CHECK(std::get<ObjectSample>(back) == s);
+  // An older build (no component 24) skips it by its length and reads the rest: the same sample with the
+  // component's id turned into one it does not know.
+  ObjectSample older = s;
+  older.state.variants.reset();
+  older.state.life = ObjectLife{3, 10};
+  s.state.life = older.state.life;
+  Bytes raw = must_encode(s);
+  const Bytes without = must_encode(older);
+  bool patched = false;
+  for (std::size_t i = 0; i + 1 < raw.size(); ++i) {
+    // The component header: u16 id 24 (little-endian) then u16 length; the one that is not in `without`.
+    if (raw[i] == 24 && raw[i + 1] == 0 && raw.size() > without.size()) {
+      Bytes probe = raw;
+      probe[i] = 30;  // an id no build knows yet
+      Message m;
+      if (decode(probe, m) == Error::none && std::get<ObjectSample>(m) == older) {
+        patched = true;
+        break;
+      }
+    }
+  }
+  CHECK(patched);
+  // No component: none after decoding (an older sender).
+  REQUIRE(decode(without, back) == Error::none);
+  CHECK_FALSE(std::get<ObjectSample>(back).state.variants);
+  // Refused: seqs from 1 and rising, at most kMaxBossVariants, names printable ASCII up to kMaxBossVariantChars.
+  Bytes out;
+  s.state.variants = BossVariants{{BossVariant{0, "Ice"}}};
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.variants = BossVariants{{BossVariant{3, "Ice"}, BossVariant{3, "Fire"}}};
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.variants = BossVariants{{BossVariant{1, "with space"}}};
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.variants = BossVariants{{BossVariant{1, std::string(kMaxBossVariantChars + 1, 'a')}}};
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.variants = BossVariants{std::vector<BossVariant>(kMaxBossVariants + 1)};
+  for (std::size_t i = 0; i < s.state.variants->recent.size(); ++i) {
+    s.state.variants->recent[i].seq = static_cast<std::uint32_t>(i + 1);
+  }
+  CHECK(encode(s, out) == Error::bad_value);
+  CHECK(ValidVariantName(""));
+  CHECK(ValidVariantName("StartBattle"));
+  CHECK_FALSE(ValidVariantName("a	b"));
+}
+
 TEST_CASE("object id layout on the wire") {
   const Bytes b = must_encode(ObjectOwner{test::kMadeId, 2, 0x0102, 0x0a0b0c0d});
   REQUIRE(b.size() == kHeaderSize + 10 + 1 + 2 + 4);
