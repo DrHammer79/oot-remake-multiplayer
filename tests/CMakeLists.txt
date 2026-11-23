@@ -221,6 +221,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/pause_tab_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_pause_tab.cpp
   hookshot/title_native_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_title_native.cpp
   hookshot/problem_ask_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_problem_ask.cpp
+  hookshot/stuck_load_test.cpp
   hookshot/auto_rejoin_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_auto_rejoin.cpp
   hookshot/lan_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_lan.cpp
   hookshot/playtest_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_playtest_core.cpp

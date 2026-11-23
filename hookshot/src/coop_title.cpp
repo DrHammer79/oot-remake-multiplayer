@@ -1001,6 +1001,7 @@ void StepNative(void* ctx, std::uint64_t screen) {
 std::atomic<bool> g_ask{false};
 bool g_ask_looked = false;                 // (g_mutex)
 std::vector<std::string> g_ask_pending;    // (g_mutex) the game folder's records when it was looked for
+bool g_ask_stuck = false;                  // (g_mutex) the record asked about is a stuck load's (coop_stuck_load.h)
 std::uint64_t g_ask_since = 0;             // (g_mutex) when it came up
 bool g_ask_focused = false;                // (g_mutex) OK has the title's cursor
 constexpr std::uint64_t kAskQuietMs = 700;   // presses this soon after it came up are the ones that brought the title
@@ -1017,6 +1018,7 @@ void LookForAsk() {
     if (Env("LICHII_COOP_PROBLEM_ASK") == "0") return;
     const std::filesystem::path folder = AskFolder();
     std::vector<std::string> pending = CoopProblemAsk::PendingNames(folder);
+    for (std::string& name : CoopProblemAsk::StuckNames(folder)) pending.push_back(std::move(name));   // (black-01112)
     const std::int64_t now_s =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     // (the crashes the kit already sent to us are not asked about: coop_problem_ask.h)
@@ -1026,10 +1028,12 @@ void LookForAsk() {
     {
         std::lock_guard lock(g_mutex);
         g_ask_pending = std::move(pending);
+        g_ask_stuck = CoopProblemAsk::IsStuck(*due);
         g_ask_since = NowMs(), g_ask_focused = false;
     }
     g_ask = true;
-    LOG_INFO(Core, "coop: title: the game crashed last time ({}): the title asks for /bugreport once", *due);
+    LOG_INFO(Core, "coop: title: {} last time ({}): the title asks for /bugreport once",
+             CoopProblemAsk::IsStuck(*due) ? "a load never ended" : "the game crashed", *due);
 }
 
 // `seen`: the player pressed on it (it is not asked again for these records); else co-op's page or a host save's load
@@ -1050,16 +1054,22 @@ void CloseAsk(bool seen) {
     if (seen && !CoopProblemAsk::WriteAsked(AskFolder(), CoopProblemAsk::AskedAfter(pending))) {
         LOG_WARNING(Core, "coop: title: bug-reports\\coop-asked.txt could not be written: the ask may come again");
     }
+    if (seen) {   // (a stuck load's records are ours: asked about once, then gone)
+        for (const std::string& name : pending) {
+            if (CoopProblemAsk::IsStuck(name)) CoopProblemAsk::RemoveStuck(AskFolder(), name);
+        }
+    }
     LOG_INFO(Core, "coop: title: the /bugreport ask {}", seen ? "seen and closed" : "shut (the title went to co-op)");
 }
 
 void StepAsk(void* ctx, std::uint64_t screen) {
     const std::uint64_t layout = Read64(screen + kTitleLayout);
     if (layout == 0) return;
-    bool apply = false, focus = false;
+    bool apply = false, focus = false, stuck = false;
     const char* sound = nullptr;
     {
         std::lock_guard lock(g_mutex);
+        stuck = g_ask_stuck;
         const std::uint64_t now = NowMs();
         if (now >= g_apply_next) apply = true, g_apply_next = now + 250;
         focus = !std::exchange(g_ask_focused, true);
@@ -1071,7 +1081,8 @@ void StepAsk(void* ctx, std::uint64_t screen) {
     KeepFocusShown(ctx, screen, CoopTitleNative::kButtons);
     bool ok = true;
     for (int i = 0; i < CoopTitleNative::kButtons; ++i) {
-        ok = SetLiveText(ctx, layout, i, CoopI18n::Tr(CoopProblemAsk::kWords[static_cast<std::size_t>(i)])) && ok;
+        const auto& words = stuck ? CoopProblemAsk::kStuckWords : CoopProblemAsk::kWords;
+        ok = SetLiveText(ctx, layout, i, CoopI18n::Tr(words[static_cast<std::size_t>(i)])) && ok;
     }
     if (!ok) {   // (an older pack: no page of ours on the title, so no ask)
         CloseAsk(false);

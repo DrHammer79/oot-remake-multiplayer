@@ -126,6 +126,18 @@ Squadala! team (report #N): ...`). The queue: `logs\problem-send\<date>-<report 
 file is never written and the ask is as before. A game started again before the upload finished (about 20 s after the
 crash, longer without network) still asks.
 
+**A load that never ends (black-01112).** Row 242's black world was a mod's model naming textures no folder had: the
+game waited for them for good and nothing said so. Now, solo and co-op, the module watches the game's own scene load
+(`Sequence_IsLoadingBanc`, `hookshot/src/coop_stuck_load.h`): still on after 2 minutes of the game running (a pause, the window in the background or the PC asleep adds at most 1 s; counted only once the title has
+been up, so the first start's long boot never counts; the title stops it) it logs `coop: stuck load: ...`, writes a
+record `<game>\bug-reports\coop-stuck\stuck-<UTC>.txt` and, in a session, says so in the chat. The next title asks
+once, on the same page as the crash ask: "Loading got stuck last time. Please send /bugreport on Discord with the zip of
+collect-logs.cmd." A load that ends after all (a slow PC) takes its record back. Cutscenes without Link (the New Game
+intro, the staff roll, warps) are not a scene load: they never count; a long stretch with no Link, no load and no title
+is only logged (`no Link for 120 s ...: logged only`). Patch 0008 makes Longshot log every RomFS file the game opens
+that neither the game nor any mod has (`fs: OpenFile(rom:/...): not found: neither the game nor any mod has it`), so the
+log names the file such a load waits for.
+
 **The bot's side.** `tools/discord-bot/intake_core.py` (its README, "Problem-report intake"): POST `/v1/problem-report`
 only, 256 KB at most, `application/zip` only, both ids 32 hex digits, at most 4 uploads an hour and 12 a day per
 install, 10 an hour per sending address (kept in memory only, never logged), 60 an hour from everyone. The zip must hold
