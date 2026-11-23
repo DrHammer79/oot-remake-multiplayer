@@ -13,6 +13,8 @@ Both stages share one design, one wire protocol and one server, so what is learn
 
 **Discord:** the Squadala! server, https://discord.gg/GwtRKAqng5, for players, testers and contributors. Found a bug? Type `/bugreport` there and attach the zip from `scripts\collect-logs.cmd` ([how](docs/setup.md#reporting-a-problem)).
 
+**Docs:** [docs/README.md](docs/README.md) lists every page in `docs/` with what it answers and when to read it.
+
 ## Play the newest release
 
 **[Squadala! v0.11.11](https://github.com/daurosk/oot-remake-multiplayer/releases/tag/v0.11.11)** is the newest build (the releases are pre-releases, which GitHub's "latest" link skips; the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases) lists them all). It runs on [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) v3.0.0, its first full release (Team MagicBean and contributors, GPL-3.0; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) by NotRexed and contributors), a native PC version of the game that the kit builds on your PC from your own copy. Longshot is the version we build on until something better is out.
