@@ -1,6 +1,6 @@
 # Updates a co-op kit to the newest release, keeping everything of the player's.
 #
-# Update.bat runs this (make_kit.ps1 puts this whole script inside Update.bat, so the one
+# Update.bat runs this (make_kit_hookshot.ps1 puts this whole script inside Update.bat, so the one
 # file also works dropped into an old kit that has no updater yet).
 #
 #   update.ps1 [-Kit <kit folder>] [-Yes]   update this kit (asks before it starts, unless -Yes)
@@ -379,7 +379,7 @@ function Merge-KitOptionsWith([string]$NewKit, [string[]]$Mine, [string[]]$New, 
     return ,(Merge-KitOptions $Mine $New $Version)
 }
 
-# The kit's own copy of the options a fresh kit has (make_kit.ps1).
+# The kit's own copy of the options a fresh kit has (make_kit_hookshot.ps1).
 $OptionsDefault = 'scripts\coop-options.default.ini'
 
 # Adds to the kit's coop-options.ini every key scripts\coop-options.default.ini has and it

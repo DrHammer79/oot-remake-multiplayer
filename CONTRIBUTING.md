@@ -39,7 +39,7 @@ Every co-op screen, menu, tab, notice, name tag and HUD piece is built from the 
 - **A remote action looks like the real one.** A hit another player lands shows on your screen the way a local hit does (flinch, flash, sparks, sound, health change).
 - **Screenshot proof for anything visible.** A log line only proves a message was sent. List the visible checks under "Check in game" in the pull request; the maintainer's in-game run takes the screenshots.
 - **No telemetry.** Our builds never send crash reports, telemetry or statistics to Longshot or anyone else. Discord Rich Presence always shows the Squadala name, icon and our status.
-- **Tests and CI.** A bug fix starts with a failing unit test. The `linux (gcc)` job builds the tests with `-Werror`; changes under `lichii/hook/` or `hookshot/src/` also need the Linux emulator hook compile green, which a pull request into `main` runs. A review OK counts only on a finished green run. Details: [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md).
+- **Tests and CI.** A bug fix starts with a failing unit test. The `linux (gcc)` job builds the tests with `-Werror`; changes under `lichii/hook/` or `hookshot/src/` also need the `linux (gcc)` job's strict compile of the hook (the Hookshot module) green. A review OK counts only on a finished green run. Details: [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md).
 
 ## Reporting bugs and desyncs
 

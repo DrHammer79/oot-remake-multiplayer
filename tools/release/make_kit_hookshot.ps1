@@ -1,7 +1,7 @@
 # Builds the Hookshot-only co-op kit (no emulator): one folder (and a zip of it) a player unzips and starts with
 # "Start Squadala.bat". No emulator, Fritchii or Lichii file goes in: each player builds the Hookshot game on
 # their own PC from their own game (scripts\hookshot-build.ps1), and Host and Join are in the game itself.
-# make_kit.ps1 still makes the emulator kits (the older releases); this script shares its kit scripts.
+# This is the only Windows kit builder: the emulator kit builder (make_kit.ps1) was removed in 0.11.12 with the emulator.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\release\make_kit_hookshot.ps1 -Release <tag>
 #
@@ -151,7 +151,7 @@ foreach ($p in $hsPatches) { Copy-Item -LiteralPath $p.FullName -Destination (Jo
 
 # The puppet pack tool (hookshot-build.ps1 runs it with Hookshot's own Python): every module build.py imports.
 $packTool = Join-Path $repo 'tools\puppet_pack'
-# (make_kit.ps1's list: its tests and the scene-placing test helper stay out), plus every module build.py imports.
+# (the former emulator kit builder's list: its tests and the scene-placing test helper stay out), plus every module build.py imports.
 $packFiles = @('ainb.py', 'build.py', '__init__.py', 'byml.py', 'dumpcheck.py', 'dungeon_rooms.py', 'hud.py', 'nup.py', 'rstb.py',
     'sarc.py', 'texture.py', 'title_menu.py', 'tunic.py', 'tunic_extra.py', 'zs.py', 'merge_tables.py')   # (merge_tables.py: play.ps1, #48)
 # And every module those import, and theirs (title_menu.py -> ui_pack.py -> msbt.py): one missing from the kit stops

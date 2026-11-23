@@ -53,8 +53,8 @@ Online co-op for the Ocarina of Time remake on PC. Up to 16 players see each oth
 |---|---|
 | `coop/` | Shared library: `protocol/` (messages and codec), `net/` (ENet transport, clock), `host/` (game memory readers, flags, saves), `presence/`, `overlay/`, `voice/` |
 | `server/` | `coop_server`: relays and decides, never runs the game (sessions, relay, UPnP, hole punching) |
-| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into both the emulator and the Longshot module. File list in `lichii/hook/core.cmake` |
-| `lichii/` (rest) | Emulator pin (`PIN`), fetch scripts and patches for Fritchii |
+| `lichii/hook/` | The co-op game code: puppets, objects, flags, dungeons, chat commands. Built into the Longshot module (it was also built into the retired emulator). File list in `lichii/hook/core.cmake` |
+| `lichii/` (rest) | Retired (0.11.12): emulator pin (`PIN`), fetch scripts and patches for Fritchii; not built or shipped, kept for reference |
 | `hookshot/src/` | The Longshot module: frame driver, menus, chat box, drawing, input |
 | `hookshot/patches/`, `hookshot/PIN` | Our small patches to Longshot and the commit they apply to |
 | `hookshot/compat/` | Stand-ins for the emulator API that `lichii/hook` uses |
@@ -110,9 +110,9 @@ A new test file goes in the `add_executable(coop_tests ...)` list in `tests/CMak
 Full details: [docs/testing.md](docs/testing.md) (CI tiers, automatic tests). In short:
 
 - **Unit tests first.** A bug fix starts with a test that fails for the cause, then the fix. Test names must not contain `;` (CMake configure fails). Run the CMake configure and the tests before you push.
-- **CI tiers.** The `Build` workflow runs a small tier on a push to your branch (the `linux (gcc)` job, Python tool tests, Content guard) and the full tier (Windows MSVC, gcc, clang, ASan, TSan, Python 3.10 and 3.12, Longshot Linux, emulator hook compiles) on a pull request into `main`. Do not push needlessly: one push per batch of commits.
+- **CI tiers.** The `Build` workflow runs a small tier on a push to your branch (the `linux (gcc)` job, Python tool tests, Content guard) and the full tier (Windows MSVC, gcc, clang, ASan, TSan, Python 3.10 and 3.12, Longshot Linux) on a pull request into `main`. Do not push needlessly: one push per batch of commits.
 - **The Linux gcc job builds the tests with `-Werror`.** Fix warnings, do not silence them. On a branch, let that job finish (2 to 3 minutes) before you call the work green.
-- **Changes under `lichii/hook/` or `hookshot/src/`** also need a green Linux emulator hook compile (`linux-emulator (hook)`). The small tier skips it unless an emulator-only file changed, but a pull request into `main` runs it: check that job is green before you call the PR ready. GCC's emulator flags catch errors the module build does not (for example string truncation warnings).
+- **Changes under `lichii/hook/` or `hookshot/src/`** also need the `linux (gcc)` job's strict compile of the Hookshot module green (step "Compile the hook code": g++-13, `COOP_HOOK_STRICT`, warnings as errors; it runs on every push). It catches errors the plain test build does not (for example string truncation warnings). The Fritchii emulator is retired (0.11.12): no job builds it.
 - **Green means finished.** A review OK, or "ready", is only valid on a run that has finished green and ran the tests your change touches. Quote the run id and job. "It will be OK once CI is green" is not an OK.
 - **Two-game tests** (`tools/autotest/` scenarios, maintainer only) need the game and run one at a time; the maintainer runs them for your "Check in game" list. Test listeners bind `127.0.0.1` only.
 
