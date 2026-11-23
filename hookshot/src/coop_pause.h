@@ -142,8 +142,9 @@ bool Rejoin(std::string* host);
 // of it.
 void PasteAnswerNow();
 
-// The autotest's `menu customize|close` step (LICHII_COOP_TEST_COMMANDS only, coop_testinput.h): the menu opened
-// on the Customize page, or closed. Never asked in a player's game (no commands file there).
+// The autotest's `menu customize|close|host` step (LICHII_COOP_TEST_COMMANDS only, coop_testinput.h): the menu
+// opened on the Customize page, or closed, or the game hosts through the Multiplayer page's Host
+// (LICHII_COOP_TEST_HOST, CoopHostMenu::ParseTestHost). Never asked in a player's game (no commands file there).
 bool TestMenu(const std::string& page);
 
 }  // namespace CoopPause

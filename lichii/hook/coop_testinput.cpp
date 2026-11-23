@@ -356,12 +356,13 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             const auto to = static_cast<std::size_t>(w.back().data() + w.back().size() - line.data());
             step.mark = std::string(line.substr(from, to - from));
         } else if (cmd == "MENU") {
-            // menu customize|close: the Customize page opened, or the menu closed. Test only.
+            // menu customize|close|host: the Customize page opened, the menu closed, or the game hosts through the
+            // Multiplayer page's Host (hookshot.py --host-in-game: LICHII_COOP_TEST_HOST). Test only.
             std::string page = w.size() == 2 ? std::string(w[1]) : std::string{};
             std::transform(page.begin(), page.end(), page.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (page != "customize" && page != "close") {
-                return fail("want: menu customize|close");
+            if (page != "customize" && page != "close" && page != "host") {
+                return fail("want: menu customize|close|host");
             }
             step.kind = Kind::menu;
             step.mark = page;
