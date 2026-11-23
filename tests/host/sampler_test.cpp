@@ -308,6 +308,74 @@ TEST_CASE("host sampler: status_bits, every away bit (issue 150, away-status)") 
   }
 }
 
+TEST_CASE("host sampler: a world standing still with no menu named is paused (row 164 follow-up, quick switch)") {
+  namespace st = proto::status;
+  PlayerReading r = at(1.0f, false);
+  SUBCASE("paused, not in_menu, cleared when it runs again") {
+    r.world_still = true;
+    CHECK(status_bits(0, r, false) == st::paused);
+    r.world_still = false;
+    CHECK(status_bits(st::paused, r, false) == 0);
+  }
+  SUBCASE("in our event: not paused (a cutscene may hold Link)") {
+    r.world_still = true;
+    r.event_running = true;
+    CHECK(status_bits(0, r, false) == st::in_cutscene);
+  }
+  SUBCASE("no Link: loading only") {
+    CHECK(status_bits(st::paused, std::nullopt, false) == st::loading);
+  }
+}
+
+TEST_CASE("host sampler: WorldStill reads our Link's animation frame and place") {
+  constexpr std::uint64_t kStep = 16'667;
+  PlayerReading r = at(1.0f, false);
+  r.animation = proto::Animation{"Wait", 0.0f, 1.0f};
+  WorldStill w;
+  std::uint64_t now = 1'000'000;
+  SUBCASE("a frame that steps every reading: running") {
+    for (int i = 0; i < 60; ++i) {
+      r.animation->frame += 1.0f;
+      CHECK_FALSE(w.step(r, now += kStep));
+    }
+  }
+  SUBCASE("a frame held 0.3 s: still, until it steps again") {
+    CHECK_FALSE(w.step(r, now));
+    CHECK_FALSE(w.step(r, now + WorldStill::kStillUs - 1));
+    CHECK(w.step(r, now + WorldStill::kStillUs));
+    CHECK(w.step(r, now + 10'000'000));   // a long pause stays still
+    r.animation->frame += 1.0f;
+    CHECK_FALSE(w.step(r, now + 10'000'000 + kStep));
+  }
+  SUBCASE("rate 0 (a pose held on purpose): never still") {
+    r.animation->rate = 0.0f;
+    CHECK_FALSE(w.step(r, now));
+    CHECK_FALSE(w.step(r, now + 5'000'000));
+  }
+  SUBCASE("our event: never still, and judged anew after it") {
+    r.event_running = true;
+    CHECK_FALSE(w.step(r, now));
+    CHECK_FALSE(w.step(r, now + 5'000'000));
+    r.event_running = false;
+    CHECK_FALSE(w.step(r, now + 5'000'001));
+    CHECK(w.step(r, now + 5'000'001 + WorldStill::kStillUs));
+  }
+  SUBCASE("a new animation or a move starts the count again") {
+    CHECK_FALSE(w.step(r, now));
+    r.animation->name = "Run";
+    CHECK_FALSE(w.step(r, now + 200'000));
+    CHECK_FALSE(w.step(r, now + 400'000));   // 0.2 s since the change
+    r.position[0] += 0.5f;
+    CHECK_FALSE(w.step(r, now + 600'000));
+    CHECK(w.step(r, now + 900'000));
+  }
+  SUBCASE("no animation read: not judged") {
+    r.animation.reset();
+    CHECK_FALSE(w.step(r, now));
+    CHECK_FALSE(w.step(r, now + 5'000'000));
+  }
+}
+
 TEST_CASE("host sampler: each away bit goes out once on its change and back") {
   namespace st = proto::status;
   Sampler s;
