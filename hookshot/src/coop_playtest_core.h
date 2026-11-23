@@ -102,8 +102,13 @@ std::string ControlInput(const Request& r, int control_id);
 
 // The reply's first fields: id, ok, frame, paused; `rest` (a JSON object's members, may be empty) after them.
 std::string Reply(const CoopModJson::Value& id, std::uint64_t frame, bool paused, const std::string& rest);
+// An error answer always names a reason: an empty `message` (a line the game refused without a word, or Longshot's
+// error with no message) becomes a sentence that says so and names the code.
 std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool paused, std::string_view code,
                        std::string_view message);
+// The reason for a failed Longshot teleport: its code and message, never just the code (an empty message says that
+// Longshot gave none, and where else to look).
+std::string TeleportFailure(std::string_view code, std::string_view message);
 // A JSON string literal.
 std::string Quote(std::string_view text);
 // A value as JSON on one line, no spaces (CoopModJson::Write is for files: it indents objects and ends with a

@@ -484,7 +484,7 @@ std::string Handle(const Request& r) {
                                                     ") and no event runs for the module's own warp: restart the "
                                                     "session with a boot script that warps there");
                 }
-                return fail("failed", "Longshot's teleport: " + code + ": " + message);
+                return fail("failed", TeleportFailure(code, message));
             }
             const TeleportWait wait = ReadTeleport(*taken, r.scene);
             if (wait.failed) return fail(wait.code, wait.why);

@@ -271,7 +271,8 @@ PLAYER_TOOLS = [
      "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
      "warps. Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
      "name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event "
-     "or load (up to `timeout` seconds, default 60), then is held.",
+     "or load (up to `timeout` seconds, default 60), then is held. A warp asked while a talk is open waits until the "
+     "talk ends and answers `timeout` meanwhile: end the talk first (A or B until `event` is false).",
      "inputSchema": {"type": "object", "required": ["scene"],
                      "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"},
                                     "timeout": {"type": "number", "minimum": 1, "maximum": 600}}}},

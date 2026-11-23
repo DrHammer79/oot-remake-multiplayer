@@ -597,7 +597,8 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   Characters tab, and `???, ???, Map` without it; stock is inferred to be the same (the code read is the lane
   build's). (checked in the disassembly of `FillTabs`, 2026-11-23, on the lane build; the Key Items check and the
   stock case are inferred) A test that needs the tabs named sets `setflag UI_IsFinishChallengeMenuOpenEvent 1` and
-  gives a key item first (docs/playtest.md, "Rules for a tester").
+  gives key items first (docs/playtest.md, "Rules for a tester": the Zelda's Letter alone did not name the tab in a
+  two-game run; five items together did).
 - `f_802ecf60`: on, it stops `CurrentOut` (`f_802f0fe0`) and plays `CurrentIn` (`f_802eda70(anim, 0, 1.0)`, or
   `f_802f0f00` when instant); off, the reverse; nothing when the animation is already at its end. (checked)
 

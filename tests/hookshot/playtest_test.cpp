@@ -267,6 +267,24 @@ TEST_CASE("playtest: an error reply carries the frame, the hold and a reason") {
     CHECK(CoopModJson::Parse(e));  // valid JSON, the quote escaped
 }
 
+TEST_CASE("playtest: a failed answer always names a reason, even when the game or Longshot gave none") {
+    const auto none = CoopModJson::Value{};
+    const std::string empty = ErrorReply(none, 1, false, "failed", "");
+    CHECK(empty.find("\"error\":\"failed\"") != std::string::npos);
+    CHECK(empty.find("\"message\":\"\"") == std::string::npos);        // not an empty message
+    CHECK(empty.find("no reason was given") != std::string::npos);
+    CHECK(CoopModJson::Parse(empty));
+    const std::string given = ErrorReply(none, 1, false, "failed", "line 1: want: wait TICKS");
+    CHECK(given.find("want: wait TICKS") != std::string::npos);
+    CHECK(given.find("no reason was given") == std::string::npos);       // a real reason is kept as it is
+    // Longshot's teleport: the code and the message; with no message, a sentence that says so.
+    CHECK(TeleportFailure("failed", "not in play") == "Longshot's teleport: failed: not in play");
+    const std::string bare = TeleportFailure("failed", "");
+    CHECK(bare.find("failed") != std::string::npos);
+    CHECK(bare.find("no message") != std::string::npos);
+    CHECK(TeleportFailure("", "").find("failed") != std::string::npos);   // no code either
+}
+
 TEST_CASE("playtest: the world member is absent when the snapshot switch is off") {
     CHECK(WorldMember(false, std::nullopt, 10, 1000).empty());
     CoopWorldSnapshot::Snapshot s;

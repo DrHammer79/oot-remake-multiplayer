@@ -226,11 +226,20 @@ or tests while it runs.
 - With the play-test bridge on ([Bridge protocol](#bridge-protocol)) the games are held between calls: nothing
   happens unless you act. Without it (the older `act` path) they run in real time between steps: put the moves that
   must happen together in one `act`.
+- A `warp` asked while a talk or a sign is open waits for that event: the game takes the scene request only after the
+  event ends, so the verb answers `timeout` (held, `event` still true) until then. End the talk first (press A or B until
+  `state.event` is false), then warp; or ask with a `timeout` long enough for the presses. Seen in a two-game run: a
+  Market soldier's talk, a `warp` with `timeout` 40 gave `timeout`; about ten A/B presses later the game took the
+  request and Link arrived with an arrival event (about 200 frames, a fresh Link sample every frame).
 - Set a test up with `place` and `setflag`; do not walk across Hyrule to reach it. `warp` in free play goes by Longshot's teleport (maps of its list, no entrance); with an entrance or a map outside the list, and no event running, it answers `not_in_event`: restart the session with a boot script that warps there. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - The pause menu's Key Items and Threads of Time tabs read `???` until the save has a key item and the owl's flag
   (`UI_IsFinishChallengeMenuOpenEvent`): that is the game's own masked tab ([game-ui.md](game-ui.md), "The tab strip"),
-  not missing text. Set the flag and `give PouchData.Item_ZeldaLetter.StockNum` (a key item `give` accepts) first when a test
-  needs the tab names. In a session the flag is shared, so the other game follows.
+  not missing text. Set the flag, and `give` `PouchData.Item_PocketEgg.StockNum`, `Item_OddMushroom`, `Item_Stone_Forest`,
+  `Item_Ocarina_Fairy` and `Item_Medal_Forest` (all five, the same `PouchData.<item>.StockNum` form) first when a test needs the
+  tab names. Seen in a two-game run: with all five the Key Items tab is named, and the Zelda's Letter alone leaves it `???`
+  (so the Letter is not a Key Items item for the tab). Which of the five is enough was not tried one by one (the Fairy
+  Ocarina is already in these saves, so it is probably not the one). In a session the flag is shared, so the other game
+  follows.
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open). A
   checkpoint takes its own shots: anything visible is proven by them, never by flags or log lines alone.
