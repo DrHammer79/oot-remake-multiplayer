@@ -1649,6 +1649,14 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
 # 51 textures of his romfs/Tex (Mt_*_Player_<Age>_Ac1..7, Mt_Hairs_Player_Adult_Ah1..9, Angin_Tile_A[_Dark]_Ac1..7);
 # without them the game waits for them for good after a save load and the world stays black (LANE1 sul-D1..D7). Only
 # his NPC characters' textures (no _Player_ in the name, not Angin_Tile_) are NPC files.
+# His release's voices (PlayerVoice_<Age>_<voice>.bars and their Stream/V<xx>Pl<Age>_*.bwav) are Link's own clips
+# changed by a voice model: made from the game's files, so never downloaded into a game (owner, C #11). Deleted in
+# every part; the puppet pack builds each character's voice from the player's own game (tools/puppet_pack/voices.py).
+function Test-KitCharacterSelectVoiceFile([string]$Rel) {
+    $r = $Rel.Replace('\', '/')
+    return [bool]($r -match '^romfs/Sound/Resource/PlayerVoice_' -or $r -match '^romfs/Sound/Resource/Stream/V[A-Za-z]{2}Pl(Child|Adult)_')
+}
+
 function Test-KitCharacterSelectNpcFile([string]$Rel) {
     $r = $Rel.Replace('\', '/')
     if ($r -match '^romfs/Tex/([^/]*_Player_|Angin_Tile_)') { return $false }
@@ -1672,8 +1680,9 @@ $script:KitCharselCustomizer = @(
 $script:KitCharselIpsShift = 0x8001FF00L
 # (in the stamp: another list of regions, or another default-part file rule, makes the kit make his folder again.
 # cz2, row 242: the default part keeps Link's own textures; a default part stamped with an older one lost them, so it
-# is never copied from: his release is unpacked again.)
-$script:KitCharselStrip = 'cz2'
+# is never copied from: his release is unpacked again. cz2v: his release's voice files are deleted, so a copy that
+# has them is made again.)
+$script:KitCharselStrip = 'cz2v'
 
 # An IPS32 file's records: @{ At (offset); Size (bytes it changes); From; To (the record's bytes in the file) }, or a
 # throw when it is not one. IPS32: 'IPS32', records (u32 BE offset, u16 BE size, the bytes; size 0: u16 BE run length
@@ -1767,8 +1776,14 @@ function Get-KitCharacterSelectWant($Op, [string]$Part = 'full') {
 # without his customizer (his own kept beside the folder's files as coop-charsel-code.ips, outside exefs, so the
 # build never takes it in and a later change strips it again), characters.json, the stamp and the credits. '' or why not.
 function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [string]$Json, [string]$Ips, [string]$Want) {
+    $root = ([System.IO.Path]::GetFullPath($New)).TrimEnd('\') + '\'
+    $sound = Join-Path $New 'romfs\Sound\Resource'
+    if (Test-Path -LiteralPath $sound) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $sound -Recurse -File -Force -ErrorAction Stop)) {
+            if (Test-KitCharacterSelectVoiceFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
+        }
+    }
     if ($Part -eq 'ui') {
-        $root = ([System.IO.Path]::GetFullPath($New)).TrimEnd('\') + '\'
         foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $New 'romfs') -Recurse -File -Force -ErrorAction Stop)) {
             if (Test-KitCharacterSelectNpcFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
         }
@@ -1841,7 +1856,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
         if ($derive) {
             # (its characters.json and, with a newer patch pinned, that patch come from the folder there)
             New-Item -ItemType Directory -Force -Path $new | Out-Null
-            $skip = if ($Part -eq 'ui') { { param($rel) Test-KitCharacterSelectNpcFile $rel } } else { { param($rel) $false } }
+            $skip = if ($Part -eq 'ui') { { param($rel) Test-KitCharacterSelectNpcFile $rel } } else { { param($rel) Test-KitCharacterSelectVoiceFile $rel } }
             Copy-KitTreeLinked $dir $new $skip
             $json = Join-Path $dir 'characters.json'
             $ips = ''

@@ -211,6 +211,10 @@ def npc(rel):
         return False   # Link own textures, named by his kept Link models (row 242; kit-paths.ps1 Test-KitCharacterSelectNpcFile)
     return bool(re.match(r"romfs/(Tex|Phive|Sound)/", r, re.I) or re.match(r"romfs/Model/Player_(Adult|Child)_C\d{3}\.", r, re.I)
                 or re.match(r"romfs/Model/Player_Dark_", r, re.I) or r.lower() == "romfs/pack/actor/enemy_middleboss_darklink.pack.zs")
+def voice(rel):
+    # his release voices: Link clips changed by a voice model, never put into a game (kit-paths.ps1 Test-KitCharacterSelectVoiceFile)
+    r = rel.replace("\\", "/")
+    return bool(re.match(r"romfs/Sound/Resource/PlayerVoice_", r) or re.match(r"romfs/Sound/Resource/Stream/V[A-Za-z]{2}Pl(Child|Adult)_", r))
 def records(d):
     if len(d) < 9 or d[:5] != b"IPS32":
         raise ValueError("not an IPS32 file")
@@ -275,7 +279,7 @@ if cmd == "derive":
         for n in fs:
             a = os.path.join(r, n)
             rel = os.path.relpath(a, src)
-            if part == "ui" and npc(rel):
+            if (part == "ui" and npc(rel)) or voice(rel):
                 continue
             b = os.path.join(dst, rel)
             os.makedirs(os.path.dirname(b), exist_ok=True)
@@ -286,6 +290,11 @@ if cmd == "derive":
 elif cmd == "complete":
     new, part, js, ips, want, rel = sys.argv[2:8]
     romfs = os.path.join(new, "romfs")
+    for r, _, fs in os.walk(os.path.join(romfs, "Sound", "Resource")):
+        for n in fs:
+            p = os.path.join(r, n)
+            if voice(os.path.relpath(p, new)):
+                os.remove(p)
     if part == "ui":
         for r, _, fs in os.walk(romfs):
             for n in fs:
@@ -372,7 +381,7 @@ charsel_step() {
     fi
     part=ui
     [[ $choice == yes ]] && part=full
-    want="$rel $zsha $osha ${isha:--} $part cz2"   # (cz2, row 242: the default part keeps Link own textures; an older ui copy is never derived from)
+    want="$rel $zsha $osha ${isha:--} $part cz2v"   # (cz2, row 242: the default part keeps Link own textures; an older ui copy is never derived from. cz2v: his voice files deleted)
     local what='the Characters page (NPC characters not downloaded)'
     [[ $part == full ]] && what='with its NPC characters'
     if [[ -d $dir && ! -f $dir/coop-charsel.txt ]]; then say "Character Select: your own copy in $dir is used as it is."; return 0; fi
@@ -381,7 +390,7 @@ charsel_step() {
     # The copy there, of this release (a 0.11.8 stamp, four fields: full): its part decides whether it can give the one wanted.
     local hf wf
     read -r -a hf <<<"$have"; read -r -a wf <<<"$want"
-    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( ${hf[4]:-full} == full || ( $part == ui && ${hf[5]:-} == cz2 ) ) ]]; then derive=1; fi
+    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( ${hf[4]:-full} == full || ( $part == ui && ${hf[5]:-} == cz2v ) ) ]]; then derive=1; fi
     dl=$B/charsel new=$CS_HOME/_$folder.new json=$dl/characters.json ips=''
     mkdir -p "$dl" "$CS_HOME"
     rm -rf "$new"

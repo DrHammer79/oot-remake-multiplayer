@@ -943,6 +943,7 @@ try {
     $csDir = Join-Path $cm 'OoT Character Select'
     # The two parts (Test-KitCharacterSelectNpcFile): NPC files go only with a yes; the rest every kit gets.
     $csNpcFiles = @('romfs\Tex\Npc_A.bntx.zs', 'romfs\Phive\Cloth\Player_Adult_CAC.Nin_Ounce_NVN2.bphcl', 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs',
+                    'romfs\Sound\Resource\Stream\VXxPlChild_Jump_S_01.bwav', 'romfs\Sound\Resource\Npc_X.bars.zs',
                     'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Dark_Animation.Skeleton.bfres.zs', 'romfs\Model\Player_Adult_C115.Player_Adult.bfres.zs')
     $csUiFiles = @('romfs\UI\LayoutArchiveCategory.Product.100.byml.zs', 'romfs\Sequence\CharacterMenu.module.ainb', 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs',
                    'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs',
@@ -983,7 +984,7 @@ try {
         Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ("# pin`nrelease=$Tag`nurl=https://example.invalid/cs`nzip=CS-$Tag.zip`nzip_sha256=$zsha`n" +
             "zip_folder=CS-$Tag/mods/OoT Character Select`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`n" +
             "overlay_sha256=$osha`nips_url=$IpsUrl`nips_sha256=$IpsSha`n")
-        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2"
+        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2v"
     }
     $csJson = '{"format": 1, "mod": "OoT Character Select", "puppet_colours": {"offset": 62574416, "head": "FD7BBFA9000100B40B2C40B96B1D0051"}, "characters": []}'
     $onlineWas = $env:OOT_COOP_OFFLINE; $env:OOT_COOP_OFFLINE = '0'
@@ -1028,6 +1029,10 @@ try {
         foreach ($p in $csNpcFiles) { if (-not (Test-KitCharacterSelectNpcFile $p)) { $partsOk = $false } }
         foreach ($p in $csUiFiles + @('romfs\GameData\GameDataList.Product.110.byml.zs', 'exefs\E0F3.ips', 'romfs\Model\Player_Adult.Player_Adult.bfres.zs')) { if (Test-KitCharacterSelectNpcFile $p) { $partsOk = $false } }
         Check $partsOk 'Character Select parts: NPC files and default-part files told apart'
+        $voiceOk = (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\PlayerVoice_Child_Saria.bars.zs') -and (Test-KitCharacterSelectVoiceFile 'romfs/Sound/Resource/Stream/VSaPlAdult_Damage_M_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Npc_X.bars.zs') -and -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Stream\Vo_PlChild_Jump_S_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\ResourceListPack\BarslistPack.Product.111.byml.zs')
+        Check $voiceOk 'Character Select voices: his voice archives and stream files told apart from the rest'
         # review-geno-0118: what the game was built with is kept until its build: nothing there before -> _<folder>.none;
         # a failed or declined build puts it back (play.ps1 Restore-KitCharacterSelectStart), a built one confirms it.
         $csNone = Join-Path $cm '_OoT Character Select.none'; $csPrev = Join-Path $cm '_OoT Character Select.prev'
@@ -1038,6 +1043,8 @@ try {
         $r = Install-KitCharacterSelect $ck $cm
         Confirm-KitCharacterSelect $ck $cm
         Check ($r.Changed -and (Test-Path -LiteralPath $csDir) -and -not (Test-Path -LiteralPath $csNone)) 'Character Select confirm: a built game drops the kept state'
+        Check (-not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs')) -and -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\Stream\VXxPlChild_Jump_S_01.bwav')) -and
+               (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\Npc_X.bars.zs'))) 'Character Select: his release''s voice files are deleted in the full part, his other sound files kept'
         # its code patch is in the game's stamp, so the start's check asks for the 'mods' build (patches 0034/0035)
         Check ((Get-KitExefsStampLine $cg) -match 'exefs=OoT Character Select/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348\.ips:') 'Character Select: its .ips is in the game stamp (the build takes it in)'
         $r = Install-KitCharacterSelect $ck $cm
@@ -1129,7 +1136,7 @@ try {
         $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
         Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: a new default part keeps Link's own textures (row 242) [$($csNew.Why)]"
-        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2$', ' cz1') + "`n")
+        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2v$', ' cz1') + "`n")
         Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $csZipKept -Destination $csZip242 -Force
         $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
