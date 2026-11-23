@@ -344,8 +344,10 @@ def find_characters(mod_dir, log=print):
                                                              if root == roots[0] else name)):
                     log(f"characters: {name} is switched off in the Mods tab: no character puppets from it")
                     continue
-                files, numbers = {}, {}
+                files, numbers, names = {}, {}, {}
                 for row in doc["characters"]:
+                    if row.get("picker") and "number" in row and "name" in row:
+                        names[int(row["number"])] = str(row["name"])
                     if "file" not in row:
                         continue
                     n = int(row["file"])
@@ -368,7 +370,7 @@ def find_characters(mod_dir, log=print):
                 continue
             if files:
                 return {"mod": name, "dir": os.path.join(root, name), "files": files, "heaps": heaps,
-                        "numbers": numbers, "colours": colours}
+                        "numbers": numbers, "names": names, "colours": colours}
     return None
 
 
@@ -498,7 +500,21 @@ def character_voices(characters, romfs, dicts, log=print):
         for v in VARIANTS:
             lists[puppet_sound_list(v)] = copy.deepcopy(base[f"Player_{v}"])
         log(f"characters: {len(voiced)} voice lists in {characters['mod']}'s {r}; puppets get their own sound lists")
-        return {**found, "doc": doc, "lists": set(lists)}
+        # Every pickable character's voice, made here from the player's own game (voices.py). Not made: the mod's
+        # lists as they are.
+        made = None
+        try:
+            from . import voices   # needs numpy; without it, no voices
+            made = voices.build(voices.RomfsFiles(romfs, dicts), characters.get("names") or {}, log=log)
+        except (ImportError, OSError, ValueError, KeyError, IndexError, struct.error) as e:
+            log(f"characters: no voices made ({e})")
+        if made:
+            for v in VARIANTS:
+                for number, archive in made["lists"][v].items():
+                    lists[voice_list(v, number)] = voices.list_entry(base[f"Player_{v}"], archive)
+            log(f"characters: voices made for {len(made['lists']['Child'])} characters "
+                f"({len(made['files'])} files)")
+        return {**found, "doc": doc, "lists": set(lists), "made": made}
     return None
 
 
@@ -2360,6 +2376,16 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
         key = strip_zs(voiced["rel"])
         table.set(key, max(table.get(key) or 0, ((len(data) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN))
         log(f"wrote {voiced['rel']} ({characters['mod']}'s with {', '.join(puppet_sound_list(v) for v in VARIANTS)})")
+        if voiced.get("made"):
+            from . import voices
+            like = read(os.path.join(romfs, voices.RESOURCE, "Player_Child.bars.zs"))
+            for r, data in sorted(voiced["made"]["files"].items()):
+                if r.endswith(".bars"):
+                    write(os.path.join(out_romfs, r + ".zs"), recompress(dicts, like, data))
+                    table.add_new(r, ((len(data) + 0x1F) & ~0x1F) + PACK_SIZE_MARGIN)
+                else:
+                    write(os.path.join(out_romfs, r), data)
+            log(f"wrote {len(voiced['made']['files'])} voice files")
     for path, new in ((ai_path, ai_new), (gai_path, gai_new), (rs_path, table.dumps())):
         r = rel(romfs, path)
         write(os.path.join(out_romfs, r), recompress(dicts, read(path), new))

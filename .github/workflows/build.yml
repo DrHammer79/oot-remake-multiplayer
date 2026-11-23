@@ -132,6 +132,8 @@ jobs:
         run: python tools/puppet_pack/tests/test_bwav.py -v
       - name: Character Select voice rules tests
         run: python tools/puppet_pack/tests/test_voice_map.py -v
+      - name: Character Select voice builder tests
+        run: python tools/puppet_pack/tests/test_voices.py -v
       - name: Title menu rows tests
         run: python tools/puppet_pack/tests/test_title_menu.py -v
       - name: UI pack library tests (parts, labels, strings files)

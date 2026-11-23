@@ -10,7 +10,8 @@ The rules (user decisions, 2026-11-23):
   none keeps Link's voice.
 - Frequent events (sword swings, rolls, jumps, climbs, hits taken, lifting) are no longer than Link's
   longest clip for that event plus MARGIN_S.
-- Loudness matches Link's clip in the same slot (RMS, within LOUDER_DB louder or QUIETER_DB quieter).
+- Loudness matches Link's clips for the same event (their median RMS, within LOUDER_DB louder or
+  QUIETER_DB quieter).
 - Only short, wordless clip kinds: no laughs, cries or speech lines (KINDS lists the allowed ones).
 - An event gets as many clips as Link has for it, so the game rotates them as it does Link's.
 - People fall back to a neutral voice of their sex and age; creatures fall back to a creature voice.
@@ -150,7 +151,7 @@ class Clip:
     length: float        # seconds, after trimming
     link_longest: float  # seconds, Link's longest clip for the same event
     rms_db: float        # loudness after the gain
-    link_rms_db: float   # loudness of Link's clip in the same slot
+    link_rms_db: float   # loudness of Link's clips for the same event (median)
 
 
 def check_clips(clips, link_names):
@@ -194,16 +195,16 @@ class Character:
 
 def check_map(characters, voices, creature_voices):
     """Problems in the character -> voice table. voices: the voice types that were built (each with at
-    least one usable clip); creature_voices: the ones that are creature sounds."""
+    least one usable clip); creature_voices: the ones that are creature sounds. A chain voice with no usable
+    clip is passed over; the default must have clips, so every character has a voice."""
     bad = []
     for ch in characters:
         if ch.name == LINK:
             continue
-        for v in ch.chain + (ch.default,):
-            if v == LINK:
-                bad.append("%s: keeps Link's voice" % ch.name)
-            elif v not in voices:
-                bad.append("%s: voice %s was not built" % (ch.name, v))
+        if LINK in ch.chain + (ch.default,):
+            bad.append("%s: keeps Link's voice" % ch.name)
+        elif ch.default not in voices:
+            bad.append("%s: default voice %s was not built" % (ch.name, ch.default))
         if ch.creature and ch.default not in creature_voices:
             bad.append("%s: a creature with the person's voice %s as its default" % (ch.name, ch.default))
         if not ch.creature and ch.default in creature_voices:

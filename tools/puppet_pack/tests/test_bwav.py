@@ -15,14 +15,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from puppet_pack import bwav  # noqa: E402
 
 
-def template(prefetch, n_here, n_full=None):
-    """A one-channel ADPCM BWAV header in the game's layout, with silent data."""
-    d = bytearray(0x80)
+def template(prefetch, n_here, n_full=None, channels=1):
+    """An ADPCM BWAV header in the game's layout, with silent data."""
+    start = 0x80 if channels == 1 else 0xC0
+    d = bytearray(start)
     struct.pack_into("<4sHH", d, 0, b"BWAV", 0xFEFF, 1)
-    struct.pack_into("<HH", d, 0x0C, prefetch, 1)
-    struct.pack_into("<HHIII", d, 0x10, 1, 0, 48000, n_full or n_here, n_here)
-    struct.pack_into("<II", d, 0x10 + 0x30, 0x80, 0x80)
-    return bytes(d) + bytes((n_here + 13) // 14 * 8)
+    struct.pack_into("<HH", d, 0x0C, prefetch, channels)
+    for c in range(channels):
+        b = 0x10 + bwav.CHANNEL * c
+        struct.pack_into("<HHIII", d, b, 1, c, 48000, n_full or n_here, n_here)
+        struct.pack_into("<II", d, b + 0x30, start + c * 0x100, start + c * 0x100)
+    return bytes(d) + bytes((n_here + 13) // 14 * 8 * channels)
 
 
 def amta(name):
@@ -88,6 +91,14 @@ class Codec(unittest.TestCase):
         head, stream = bwav.clip_bytes(template(1, 280, 5000), len(x), coefs, data)
         self.assertEqual(bwav.header(head)["channels"][0]["n"], 100)
         self.assertEqual(bwav.header(stream)["channels"][0]["n"], 100)
+
+    def test_a_two_channel_template_gives_one_channel(self):
+        x = sine(500)
+        (coefs, data), = bwav.encode_adpcm([x])
+        clip, _ = bwav.clip_bytes(template(0, 14, channels=2), len(x), coefs, data)
+        self.assertEqual(len(bwav.header(clip)["channels"]), 1)
+        y, _ = bwav.decode(clip)
+        self.assertGreater(snr_db(x, y), 30.0)
 
     def test_wrong_data_length_is_refused(self):
         with self.assertRaises(bwav.BwavError):

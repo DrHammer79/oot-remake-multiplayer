@@ -137,15 +137,19 @@ class Map(unittest.TestCase):
 
     def test_link_voice_unbuilt_voice_and_wrong_defaults(self):
         chars = [vm.Character("Saria", ("Link",), "Hylia_Girl_Spry"),
-                 vm.Character("Mido", ("Mido",), "Hylia_Girl_Spry"),
+                 vm.Character("Mido", ("Mido",), "Hylia_Boy"),
                  vm.Character("Wolfos", ("Enemy_Wolfos",), "Hylia_Girl_Spry", creature=True),
                  vm.Character("Malon", ("Custom_Saria",), "Enemy_Wolfos")]
         bad = vm.check_map(chars, self.VOICES, self.CREATURES)
         self.assertEqual(len(bad), 4)
         self.assertIn("keeps Link's voice", bad[0])
-        self.assertIn("Mido was not built", bad[1])
+        self.assertIn("default voice Hylia_Boy was not built", bad[1])
         self.assertIn("a creature with the person's voice", bad[2])
         self.assertIn("a person with the creature voice", bad[3])
+
+    def test_a_chain_voice_without_clips_is_passed_over(self):
+        chars = [vm.Character("Ruto", ("Custom_Ruto_Adult",), "Hylia_Girl_Spry")]
+        self.assertEqual(vm.check_map(chars, self.VOICES, self.CREATURES), [])
 
     def test_check_raises_with_every_problem(self):
         chars = [vm.Character("Saria", ("Custom_Saria",), "Hylia_Girl_Spry")]

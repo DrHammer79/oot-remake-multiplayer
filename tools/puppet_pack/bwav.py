@@ -155,8 +155,19 @@ def fit_coefs(x, rounds=12):
     return [int(round(v * 2048)) for pair in pairs for v in pair]
 
 
-def encode_adpcm(clips):
-    """[(16 coefficients, data bytes)] for a list of int16 clips (DSP ADPCM)."""
+def encode_adpcm(clips, batch=64):
+    """[(16 coefficients, data bytes)] for a list of int16 clips (DSP ADPCM). Clips of like length are encoded
+    side by side, `batch` at a time (each batch runs to its longest clip)."""
+    order = sorted(range(len(clips)), key=lambda i: len(clips[i]))
+    out = [None] * len(clips)
+    for b in range(0, len(order), batch):
+        part = order[b:b + batch]
+        for i, r in zip(part, _encode([clips[i] for i in part])):
+            out[i] = r
+    return out
+
+
+def _encode(clips):
     if not clips:
         return []
     count = len(clips)
@@ -204,11 +215,11 @@ def encode_adpcm(clips):
 
 def clip_bytes(template, n, coefs, data, at=0):
     """A one-channel ADPCM clip of `n` samples (`coefs`, `data` from encode_adpcm) in the shape of the template BWAV
-    at `at`: -> (the BWAV for the archive, the stream file or None). A prefetch template gives a head of at most its
+    at `at` (its first channel's header): -> (the BWAV for the archive, the stream file or None). A prefetch template gives a head of at most its
     own head's samples in the archive and the whole clip as the stream file; else the whole clip."""
     h = header(template, at)
-    if len(h["channels"]) != 1 or h["channels"][0]["enc"] != 1:
-        raise BwavError("the template is not one ADPCM channel")
+    if h["channels"][0]["enc"] != 1:
+        raise BwavError("the template is not ADPCM")
     ch = h["channels"][0]
     start = ch["start"]
     if len(data) != (n + 13) // 14 * 8:
@@ -217,7 +228,8 @@ def clip_bytes(template, n, coefs, data, at=0):
     def made(prefetch, here):
         head = bytearray(template[at:at + start])
         struct.pack_into("<I", head, 0x08, zlib.crc32(data))
-        struct.pack_into("<H", head, 0x0C, prefetch)
+        struct.pack_into("<HH", head, 0x0C, prefetch, 1)   # one channel, also from a two-channel template
+        struct.pack_into("<H", head, 0x10 + 0x02, 2)        # centre, as the game's one-channel clips
         struct.pack_into("<II", head, 0x10 + 0x08, n, here)
         struct.pack_into("<16h", head, 0x10 + 0x10, *coefs)
         struct.pack_into("<Hhh", head, 0x10 + 0x44, data[0], 0, 0)
