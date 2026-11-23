@@ -152,6 +152,12 @@ class Refused(unittest.TestCase):
         out = voices.build(game(), {1: "Link", 116: "Link (opening)", 2: "Saria"}, table, log=lambda *_: None)
         self.assertEqual(set(out["lists"]["Child"]), {2})
 
+    def test_only_link_and_dark_link_keep_links_clips(self):
+        table = voices.load_table()
+        self.assertEqual({n for n, r in table.items() if r.get("link")}, {"Link", "Link (opening)", "Dark Link"})
+        chars = [voices.vm.Character("Dark Link", (), voices.vm.LINK)]
+        self.assertEqual(voices.vm.check_map(chars, set(), set()), [])   # Dark Link sounds like Link
+
     def test_bank_names(self):
         self.assertEqual(voices.bank_of("Custom_Saria"), "NV_USen_Custom_Saria")
         self.assertEqual(voices.bank_of("Hylia_Boy"), "NV_Hylia_Boy")

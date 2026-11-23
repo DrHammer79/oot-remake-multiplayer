@@ -730,11 +730,7 @@
    "creature": false
   },
   "Dark Link": {
-   "chain": [
-    "Hylia_MA_Man_1"
-   ],
-   "default": "Hylia_MA_Man_Quiet",
-   "creature": false
+   "link": true
   },
   "Skull Kid": {
    "chain": [
