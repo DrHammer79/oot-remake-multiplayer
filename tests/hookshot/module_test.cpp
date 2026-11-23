@@ -953,6 +953,24 @@ TEST_CASE("hookshot: Longshot's own menu opens by a want, not a posted key (patc
     CHECK(ReadFile(kRepo / "hookshot" / "src" / "hos_coop_menu.h").find("WANT_LONGSHOT") == std::string::npos);
 }
 
+TEST_CASE("hookshot: the Insert menu takes the pads the game would, whichever window is in front (patch 0039, report 261)") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0039-coop-menu-pads-behind.patch");
+    // The menu: no focus test on the pads; the host decides which are the game's.
+    CHECK(patch.find("-    const uint32_t raw = mine && host && host->pad_raw ? host->pad_raw() : 0, pad_press = raw & ~pad_held;") !=
+          std::string::npos);
+    CHECK(patch.find("+    const uint32_t raw = host && host->pad_raw ? host->pad_raw() : 0, pad_press = raw & ~pad_held;") !=
+          std::string::npos);
+    // The host: behind other windows the pads take the menu's path, or none at all; a test's presses are the open menu's.
+    CHECK(patch.find("+            pads_to_game(buttons, stick, NULL, 0);") != std::string::npos);
+    CHECK(patch.find("+        else InterlockedExchange(&pad_raw_now, 0);") != std::string::npos);
+    CHECK(patch.find("+    test_presses_to_menu(buttons, stick);") != std::string::npos);
+    CHECK(patch.find("+uint32_t hos_pad_raw(void) { return (uint32_t)pad_raw_now | (uint32_t)pad_raw_test; }") !=
+          std::string::npos);
+    // Only what the Linux AppImage ships (no tests/): the behaviour test is ours, on the patched source.
+    CHECK(patch.find("diff --git a/tests/") == std::string::npos);
+    CHECK(ReadFile(kRepo / "tools" / "hookshot" / "menu_pads_behind_test.py").find("pads_to_game") != std::string::npos);
+}
+
 TEST_CASE("hookshot: the boss orders wrap (patch 0036) is one row in 0005's table, its header hookshot/src's") {
     const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0036-coop-boss-orders-wrap.patch");
     CHECK(NewFile(patch, "host/hos_coop_boss_orders.h") ==
