@@ -21,6 +21,7 @@
 #include "coop_colors.h"
 #include "coop_dbno_game.h"
 #include "coop_difficulty.h"
+#include "coop_gold_mode.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
 #include "coop_host_menu.h"
@@ -252,6 +253,7 @@ CoopPauseMenu::Session SessionNow() {
         const CoopDbno::Rules rules = CoopDbno::Current();
         s.rules = true;
         s.pvp = CoopPvp::On();
+        s.gold_own = CoopGoldMode::NotShared();
         s.dbno = rules.on;
         s.dbno_bleed_s = rules.bleed_s;
         s.dbno_revive_tenths = rules.revive_tenths;
@@ -581,6 +583,7 @@ bool Host() {
     CoopHookshot::HostMenu().Leave();   // (a failed start: clear it)
     const CoopTitleMenu::Options o = g_menu.options();
     CoopFiles::SetCoopEnvironment(o);
+    CoopGoldMode::SetChoice(o.gold_own ? CoopGoldMode::Mode::own : CoopGoldMode::Mode::shared);   // (row 63)
     HosCoopHostOptions h{};
     h.size = sizeof h;
     h.name = o.name.c_str();

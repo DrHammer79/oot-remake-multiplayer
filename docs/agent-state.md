@@ -15,6 +15,13 @@ Last updated: 2026-11-22.
   [agent-handoff.md](agent-handoff.md) and [addresses.md](addresses.md) once a reply arrives.
 - Nothing is merged to main from these branches without the maintainer's go.
 
+## Work in progress: Gold Skulltulas shared or not
+
+Branch `token-share` (worker token-share). A host setting, `coop-options.ini` `gold_skulltulas = own`, sent as
+`MOD_SETTINGS` mod `coop` key `gold_skulltula`. Shared: the owed token (`WorldSync::OweToken`). Not shared:
+`FlagWatcher::keep_local`. Unit tests done; the lane run (a kill in A, the pickup in B, both modes) is open.
+See [world.md](world.md), "Gold Skulltulas: shared or not".
+
 ## Work in progress: Character Select pick per age
 
 Branch `char-ages`, local and not yet pushed.

@@ -184,6 +184,8 @@ class Session {
   // loaded in the game (FlagWatcher::share_pickup). False when flags are not
   // shared or it was known.
   bool share_pickup(FlagKey key) { return watcher_ && watcher_->share_pickup(key); }
+  // FlagWatcher::keep_local. Emulator thread only, like share_pickup. 0 when flags are not shared.
+  std::size_t keep_local(std::span<const FlagKey> keys) { return watcher_ ? watcher_->keep_local(keys) : 0; }
   // FlagWatcher::share_one_way. Emulator thread only, like share_pickup.
   bool share_one_way(FlagKey key) { return watcher_ && watcher_->share_one_way(key); }
   // FlagWatcher::share_down_only. Emulator thread only, like share_pickup.
