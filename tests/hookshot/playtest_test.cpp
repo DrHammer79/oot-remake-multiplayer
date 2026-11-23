@@ -619,14 +619,64 @@ TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale")
     CHECK(t.find(",\"snapshot_stale\":false") != std::string::npos);
 }
 
+TEST_CASE("playtest: a reply with no sample at all is missing, not old, and no reply is neither") {
+    CHECK_FALSE(SnapshotMissing(nullptr));
+    const auto fresh = Status(Snap(998));
+    CHECK_FALSE(SnapshotMissing(&fresh));
+    const auto nogame = Status("null");                 // a game held since its start: no sample yet
+    CHECK(SnapshotMissing(&nogame));
+    const auto typed = Status("{\"event\":false,\"loading\":false,\"age\":\"child\"}");
+    CHECK(SnapshotMissing(&typed));                      // only the typed members: still no sample
+    const auto old = Status(Snap(11890), 12984);
+    CHECK_FALSE(SnapshotMissing(&old));                  // old is a different case
+}
+
+TEST_CASE("playtest: not_ready says why the Link members are null, and is null when they are not") {
+    const auto fresh = Status(Snap(998));
+    CHECK(NotReadyReason(&fresh).empty());
+    CHECK(LinkMembers(&fresh).find(",\"not_ready\":null") != std::string::npos);
+
+    const auto nogame = Status("null");
+    const std::string none = LinkMembers(&nogame);
+    CHECK(none.find(",\"pos\":null") != std::string::npos);
+    CHECK(none.find(",\"not_ready\":\"no Link sample has been taken yet") != std::string::npos);
+
+    const auto old = Status(Snap(11890), 12984);
+    CHECK(LinkMembers(&old).find(",\"not_ready\":\"the Link sample is older than the frame") != std::string::npos);
+
+    // no reply at all: the reason points to `control`
+    CHECK(LinkMembers(nullptr).find(",\"not_ready\":\"no answer from Longshot") != std::string::npos);
+}
+
+TEST_CASE("playtest: a give is refused while a load runs, and goes otherwise") {
+    const auto loading = Status(Snap(998, false, true));
+    CHECK(GiveRefusal(&loading).find("loading") != std::string::npos);
+    const auto fresh = Status(Snap(998));
+    CHECK(GiveRefusal(&fresh).empty());
+    CHECK(GiveRefusal(nullptr).empty());              // no reply: not a reason to refuse
+}
+
+TEST_CASE("playtest: a give is refused on an old sample with loading false, which is what a real load leaves") {
+    // No Link update runs during a load, so the sample from before it stays, with loading false and an old frame.
+    const auto old = Status(Snap(11890, false, false), 12984);
+    CHECK(GiveRefusal(&old).find("no fresh Link state") != std::string::npos);
+    CHECK(GiveRefusal(&old).find("not_ready") != std::string::npos);
+    const auto paused = Status(Snap(998, false, false), 1000 + static_cast<int>(kSnapshotSlack) + 1);
+    CHECK_FALSE(GiveRefusal(&paused).empty());        // just past the slack
+    const auto edge = Status(Snap(1000 - static_cast<int>(kSnapshotSlack), false, false));
+    CHECK(GiveRefusal(&edge).empty());                // within the slack: a running game
+    const auto nogame = Status("null");
+    CHECK_FALSE(GiveRefusal(&nogame).empty());        // no sample at all (a title, or held since its start)
+    const auto typed = Status("{\"event\":false,\"loading\":false,\"age\":\"child\"}");
+    CHECK_FALSE(GiveRefusal(&typed).empty());         // only the typed members: still no sample
+}
+
 // ---- F2: warp by event, or by Longshot's teleport in free play ----
 
 TEST_CASE("playtest: warp goes by the event request during an event and by the teleport in free play") {
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, false, "KokiriForest").route == WarpRoute::event);
     CHECK(PlanWarp(&event, true, "KokiriForest").route == WarpRoute::event);     // the event request takes a start position
-    const auto boot = Status("{\"event\":true,\"loading\":false,\"age\":\"child\"}");   // no sample yet: the typed event
-    CHECK(PlanWarp(&boot, false, "KokiriForest").route == WarpRoute::event);
     const auto play = Status(Snap(999));
     CHECK(PlanWarp(&play, false, "KokiriForest").route == WarpRoute::teleport);
 }
@@ -650,6 +700,20 @@ TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missin
     }
     const auto nogame = Status("null");
     CHECK(PlanWarp(&nogame, false, "KokiriForest").route == WarpRoute::refuse);
+}
+
+TEST_CASE("playtest: a missing sample is treated like an old one by warp, the typed members alone do not count") {
+    // No Link sample yet (a game held since its start, a title): only the typed event, loading and age are there.
+    for (const char* typed : {"{\"event\":true,\"loading\":false,\"age\":\"child\"}",
+                              "{\"event\":false,\"loading\":false,\"age\":\"child\"}"}) {
+        const auto boot = Status(typed);
+        for (const bool entrance : {false, true}) {
+            const auto plan = PlanWarp(&boot, entrance, "KokiriForest");
+            CHECK(plan.route == WarpRoute::refuse);
+            CHECK(plan.code == "not_in_play");
+        }
+        CHECK_FALSE(WarpArrived(&boot, "KokiriForest"));   // typed event false, loading false and the right map: still no
+    }
 }
 
 TEST_CASE("playtest: a teleport to the other age's map is refused up front (Longshot picks the map by Link's age)") {

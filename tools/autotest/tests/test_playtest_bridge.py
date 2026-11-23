@@ -101,6 +101,7 @@ class FakeGame:
         return {"scene": self.scene, "room": None, **link, "equips": {}, "inventory": dict(self.items),
                 "coop": {"state": "connected", "players": 2}, "snapshot_present": self.frame - (500 if self.stale else 0),
                 "snapshot_stale": self.stale,
+                "not_ready": "the Link sample is older than the frame" if self.stale else None,
                 **({"world": self.world} if self.world is not None else {}),
                 **({"strike": self.strike} if self.strike is not None else {})}
 
@@ -271,6 +272,13 @@ class WalkTo(unittest.TestCase):
         r = self.walk(game, 0.0, 0.0)
         self.assertFalse(r["arrived"])
         self.assertTrue(r["reason"].startswith("stale position"), r["reason"])
+
+    def test_a_missing_first_sample_gives_its_reason_not_a_silent_null(self):    # S10 (d): fresh hold, no sample yet
+        why = pc.no_position_reason({"pos": None, "snapshot_stale": False,
+                                     "not_ready": "no Link sample has been taken yet"})
+        self.assertTrue(why.startswith("stale position: not ready: no Link sample"), why)
+        self.assertEqual(pc.no_position_reason({"pos": None, "snapshot_stale": False, "not_ready": None}),
+                         "no position in the state (not in play?)")
 
     def test_stops_on_a_scene_change(self):
         game = FakeGame()

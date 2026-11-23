@@ -567,6 +567,39 @@ bool SnapshotIsOld(const CoopModJson::Value* status) {
     return at && now && *now - *at > kSnapshotSlack;
 }
 
+bool SnapshotMissing(const CoopModJson::Value* status) {
+    if (!status) return false;
+    const auto* game = GameOf(status);
+    return !game || !game->Number("frame");
+}
+
+std::string NotReadyReason(const CoopModJson::Value* status) {
+    if (!status) return "no answer from Longshot's control bridge, so there is no Link sample (see `control`)";
+    if (SnapshotIsOld(status)) {
+        return "the Link sample is older than the frame: no Link update ran (a title, a pause or a load is on); "
+               "step a frame in play, then read the state again";
+    }
+    if (SnapshotMissing(status)) {
+        return "no Link sample has been taken yet: Longshot takes it in a running Link update (a title, a pause or a "
+               "load runs none); step a frame in play, then read the state again";
+    }
+    return "";
+}
+
+std::string GiveRefusal(const CoopModJson::Value* status) {
+    const auto* game = GameOf(status);
+    if (game && game->Bool("loading") == true) {
+        return "a scene or save is loading and would put the old values back over the gift: step until the load "
+               "ends (the state's `loading` is false), then give again";
+    }
+    // An old or missing sample says nothing about a load (none runs a Link update). Not given, nothing is lost.
+    if (status && (SnapshotIsOld(status) || SnapshotMissing(status))) {
+        return "the game has no fresh Link state, so a load, a pause or a title may be on and would take the gift back "
+               "or lose it: step until the state's `not_ready` is null (Link in play), then give again";
+    }
+    return "";
+}
+
 std::string LinkMembers(const CoopModJson::Value* status) {
     const auto* game = GameOf(status);
     const bool old = SnapshotIsOld(status);
@@ -578,6 +611,8 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     const auto* at = game ? game->Get("frame") : nullptr;
     out += ",\"snapshot_present\":" + (at ? Compact(*at) : std::string("null"));
     out += std::string(",\"snapshot_stale\":") + (old ? "true" : "false");
+    const std::string why = NotReadyReason(status);
+    out += ",\"not_ready\":" + (why.empty() ? std::string("null") : Quote(why));
     return out;
 }
 
@@ -603,7 +638,8 @@ std::string_view AgeEnding(std::string_view scene) {
 
 WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene) {
     const auto* game = GameOf(status);
-    if (game && !SnapshotIsOld(status)) {
+    // A missing sample is no better than an old one: the typed members alone are not a Link sample (not_in_play).
+    if (game && !SnapshotIsOld(status) && !SnapshotMissing(status)) {
         if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
         if (game->Bool("event") == false) {
             if (entrance_given) {
@@ -642,7 +678,7 @@ TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scen
 
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene) {
     const auto* game = GameOf(status);
-    if (!game || SnapshotIsOld(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
+    if (!game || SnapshotIsOld(status) || SnapshotMissing(status) || game->Bool("event") != false || game->Bool("loading") != false) return false;
     const auto map = status->Text("map");
     if (!map) return false;
     if (SameName(*map, scene)) return true;

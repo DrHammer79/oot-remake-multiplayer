@@ -252,12 +252,13 @@ def main(argv=None):
 
         # 7. give
         r = call("A", "give", item="bombs")
-        call("A", "step", frames=6)      # (queued: the item is in the inventory some frames later)
+        # (the give is written inside the held call: no step is needed; the state lists the per-player counts too)
         s = call("A", "state")
         inv = s.get("inventory") or {}
+        bag = inv.get("PouchData.Item_BombBag_Small.StockNum")
         bombs = inv.get("PouchData.Item_Bomb.StockNum")
-        # (S8: the item read null after 2 frames; 6 frames and the keys seen are kept for the next run: unproven)
-        note("give bombs A", r.get("ok") and (bombs or 0) > 0, {"reply": r, "bombs": bombs, "keys": sorted(inv)[:12]})
+        note("give bombs A", r.get("ok") and (bag or 0) > 0 and (bombs or 0) > 0,
+             {"reply": r, "bag": bag, "bombs": bombs, "keys": sorted(inv)[:12]})
 
         for g in games:
             r = call(g, "shot", name="proof-end-" + g)
