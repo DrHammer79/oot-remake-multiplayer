@@ -162,4 +162,19 @@ std::vector<Outgoing> Sampler::frame(const std::optional<PlayerReading>& reading
   return out;
 }
 
+std::optional<Outgoing> Sampler::hold(std::uint64_t server_now_us) {
+  if (!previous_ || !last_sent_ || !last_sent_->position) return std::nullopt;
+  const std::uint64_t last = last_sent_->time.server_time_us;
+  if (server_now_us <= last || server_now_us - last < settings_.keepalive_us) return std::nullopt;
+  protocol::PlayerSample sample = *last_sent_;
+  sample.time = {server_now_us, sequence_};
+  sample.velocity = Vec3{0.0f, 0.0f, 0.0f};  // held: standing, not moving on
+  ++sequence_;
+  std::vector<Outgoing> out;
+  push(out, sample);
+  if (out.empty()) return std::nullopt;
+  last_sent_ = std::move(sample);
+  return std::move(out.front());
+}
+
 }  // namespace coop::host

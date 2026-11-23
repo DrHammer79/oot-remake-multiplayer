@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -245,6 +246,52 @@ TEST_CASE("session: samples reach the other player's presence") {
     return s && s->position[0] == 5.0f;
   }));
   CHECK(a.session.sampler().last_sample().has_value());
+}
+
+TEST_CASE("session: a held game keeps sending its still player, so the other's puppet stays") {
+  EnetLife enet;
+  coop::server::EnetServer server(any_port());
+  REQUIRE(server.start());
+  std::vector<Peer*> peers;
+  Peer a(server.port(), "Link", SessionSettings{});
+  join(server, peers, a);
+  Peer b(server.port(), "Zelda", SessionSettings{});
+  join(server, peers, b);
+  const std::uint8_t na = a.number();
+
+  // How B draws A now (Presence::shown, as the puppet planner): the pose's fade, 0 with none (no puppet then).
+  auto fade_of_a = [&] {
+    const std::uint64_t now = b.session.with_client([](net::Client& c) { return c.server_now_us(); });
+    return b.session.with_presence([&](coop::presence::Presence& p) {
+      const auto pose = p.shown(na, now);
+      return pose ? pose->fade : 0.0f;
+    });
+  };
+  REQUIRE(pump(server, peers, [&] { return fade_of_a() == 1.0f; }));
+
+  // A is held (the play-test bridge's hold): no frame(), only its network thread's service().
+  auto held_for = [&](int ms) {
+    float lowest = 1.0f;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+      server.service(1);
+      a.session.service();
+      b.step();
+      lowest = std::min(lowest, fade_of_a());
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return lowest;
+  };
+  a.session.set_held(true);
+  CHECK(held_for(1500) == 1.0f);  // longer than extrapolation and fade (400 ms) and the 1 s settle
+  CHECK(b.session.with_presence([&](coop::presence::Presence& p) {
+    return p.player(na)->samples().back().velocity == proto::Vec3{0.0f, 0.0f, 0.0f};
+  }));
+
+  // Not held and no frame (a game stopped some other way): A fades out, as before.
+  a.session.set_held(false);
+  held_for(800);
+  CHECK(fade_of_a() == 0.0f);
 }
 
 TEST_CASE("session: a frame thread and a network thread per player share a flag") {

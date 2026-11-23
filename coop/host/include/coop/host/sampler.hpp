@@ -81,6 +81,15 @@ class Sampler {
   // velocity afresh. The sequence keeps counting.
   void reset();
 
+  // The game is held and runs no frame() (the play-test bridge's hold,
+  // docs/playtest.md "Frame control"): the last sample sent again with this
+  // time and no velocity, once the keep-alive time has passed since it. The
+  // others then see a player standing still, not one whose samples stopped:
+  // presence fades those out after extrapolate_us + fade_us, and a faded
+  // player has no puppet (docs/puppet.md). Nothing while not in play (the
+  // last frame() had no reading) or before any sample.
+  std::optional<Outgoing> hold(std::uint64_t server_now_us);
+
   // The player changed their colour while the game runs (docs/puppet.md,
   // "Changing your colour in the game"): the next frame() sends it in
   // PLAYER_EQUIP. Unset after a colour ("by player number" in the menu):

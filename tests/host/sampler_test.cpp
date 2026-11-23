@@ -248,6 +248,52 @@ TEST_CASE("host sampler: turning, scene and age changes send a sample while stil
   CHECK(next(r) == 0);
 }
 
+TEST_CASE("host sampler: held, the last sample again each keep-alive, standing, with a new sequence") {
+  Sampler s;
+  for (int i = 0; i < 10; ++i) s.frame(at(0.1f * static_cast<float>(i)), kStart + i * kFrameUs);
+  const std::uint64_t moved = kStart + 9 * kFrameUs;
+  REQUIRE(s.last_sample());
+  const auto last = *s.last_sample();
+  CHECK(last.velocity != Vec3{0, 0, 0});
+  // The game is held from here: no frame() comes.
+  CHECK_FALSE(s.hold(moved + 100'000));  // keep-alive time not passed yet
+  const std::uint32_t seq = s.next_sequence();
+  const auto again = s.hold(moved + 200'000);
+  REQUIRE(again);
+  const auto d = decode({*again});
+  REQUIRE(d.samples.size() == 1);
+  CHECK(d.samples[0].position == last.position);
+  CHECK(d.samples[0].rotation == last.rotation);
+  CHECK(d.samples[0].scene == last.scene);
+  CHECK(d.samples[0].velocity == Vec3{0, 0, 0});  // standing, not sliding on
+  CHECK(d.samples[0].time.server_time_us == moved + 200'000);
+  CHECK(d.samples[0].time.sequence == seq);
+  CHECK(s.next_sequence() == seq + 1);  // presence drops a repeated sequence
+  CHECK_FALSE(s.hold(moved + 300'000));
+  CHECK(s.hold(moved + 400'000));
+  // Ten held seconds: never a gap longer than the keep-alive and a step.
+  std::uint64_t at_us = moved + 400'000, sent = at_us;
+  for (int i = 0; i < 1000; ++i) {
+    at_us += 10'000;
+    if (s.hold(at_us)) {
+      CHECK(at_us - sent <= 210'000);
+      sent = at_us;
+    }
+  }
+  // Released: the frames go on with a higher sequence (Link walks on).
+  const auto next = decode(s.frame(at(1.5f), at_us + kFrameUs));
+  REQUIRE(next.samples.size() == 1);
+  CHECK(next.samples[0].time.sequence > seq);
+}
+
+TEST_CASE("host sampler: held in a load or before any sample, nothing") {
+  Sampler s;
+  CHECK_FALSE(s.hold(kStart));  // nothing sent yet
+  s.frame(at(1.0f), kStart);
+  s.frame(std::nullopt, kStart + kFrameUs);  // a load: no Link
+  CHECK_FALSE(s.hold(kStart + 2'000'000));
+}
+
 TEST_CASE("host sampler: no reading, no sample, the status loading") {
   Sampler s;
   const auto d = decode(s.frame(std::nullopt, kStart));

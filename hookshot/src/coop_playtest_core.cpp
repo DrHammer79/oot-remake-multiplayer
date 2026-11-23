@@ -47,6 +47,7 @@ void Gate::AtFrame() {
     if (budget_ > 0 && --budget_ > 0) return;  // a step still running
     if (!want_hold_) return;
     held_ = true;
+    if (on_held_) on_held_(true);
     cv_.notify_all();
     while (want_hold_ && budget_ == 0) {
         while (!jobs_.empty()) {
@@ -66,6 +67,7 @@ void Gate::AtFrame() {
         cv_.wait_for(lock, std::chrono::milliseconds(50));
     }
     held_ = false;
+    if (on_held_) on_held_(false);
     cv_.notify_all();
 }
 

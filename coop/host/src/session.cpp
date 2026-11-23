@@ -68,11 +68,16 @@ FrameReport Session::frame(const std::optional<PlayerReading>& reading, FlagStor
 
   std::vector<Outbound> out;
   if (report.connected) {
-    if (std::exchange(reset_sampler_, false)) sampler_.reset();
-    sampler_.set_player_number(number);
-    const std::uint64_t sample_us =
-        frame_aligned_us(report.server_now_us, game_frame_age_us_ ? game_frame_age_us_() : 0);
-    for (const Outgoing& m : sampler_.frame(reading, sample_us, title_up_)) {
+    std::vector<Outgoing> sampled;
+    {
+      std::lock_guard lock(sampler_mutex_);
+      if (std::exchange(reset_sampler_, false)) sampler_.reset();
+      sampler_.set_player_number(number);
+      const std::uint64_t sample_us =
+          frame_aligned_us(report.server_now_us, game_frame_age_us_ ? game_frame_age_us_() : 0);
+      sampled = sampler_.frame(reading, sample_us, title_up_);
+    }
+    for (const Outgoing& m : sampled) {
       protocol::Message message;
       if (protocol::decode(m.bytes, message) == protocol::Error::none) {
         out.emplace_back(std::move(message));
@@ -142,6 +147,19 @@ void Session::service() {
   std::lock_guard lock(net_mutex_);
   for (auto& out : outbox_) send(out);
   outbox_.clear();
+  // Held (set_held): no frame() comes, so the last sample goes again from here,
+  // or the others would fade us out and delete our puppet (docs/puppet.md).
+  if (held_.load(std::memory_order_relaxed) && client_.state() == net::State::connected) {
+    std::optional<Outgoing> again;
+    {
+      std::lock_guard lock(sampler_mutex_);
+      again = sampler_.hold(client_.server_now_us());
+    }
+    protocol::Message message;
+    if (again && protocol::decode(again->bytes, message) == protocol::Error::none) {
+      client_.send(message);
+    }
+  }
   client_.service(0);
   while (auto event = client_.next_event()) {
     handle(*event);

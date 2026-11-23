@@ -34,6 +34,7 @@
 // While not connected frame() reads nothing and sends nothing; changes the
 // game made meanwhile are found at the first connected frame.
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -146,7 +147,14 @@ class Session {
   // starts velocity afresh, as after a WELCOME; the connection is kept.
   void reset() { reset_sampler_ = true; }
   // Emulator thread: the player's colour changed (Sampler::set_color).
-  void set_color(std::optional<std::uint32_t> color) { sampler_.set_color(color); }
+  void set_color(std::optional<std::uint32_t> color) {
+    std::lock_guard lock(sampler_mutex_);
+    sampler_.set_color(color);
+  }
+  // Any thread: the game is held now (the play-test bridge's hold: no frame()
+  // comes while it lasts). service() then sends the last sample again each
+  // keep-alive time (Sampler::hold), so the others keep a still puppet of us.
+  void set_held(bool held) { held_.store(held, std::memory_order_relaxed); }
 
   // Network thread: sends what frame() queued, runs the client once without
   // waiting, and handles every event that came.
@@ -275,7 +283,14 @@ class Session {
   }
 
   // Emulator thread only (the parts frame() uses), for tests and the overlay.
+  // While held, service() also sends samples: read the sequence with
+  // next_sample_sequence() then.
   const Sampler& sampler() const { return sampler_; }
+  // Any thread: Sampler::next_sequence, under the sampler's lock.
+  std::uint32_t next_sample_sequence() {
+    std::lock_guard lock(sampler_mutex_);
+    return sampler_.next_sequence();
+  }
   // Null when no flags are shared.
   const FlagWatcher* flags() const { return watcher_ ? &*watcher_ : nullptr; }
 
@@ -296,8 +311,12 @@ class Session {
   void send(Outbound& out);              // network thread, under net_mutex_
   void queue_flags(const std::vector<Outgoing>& out, std::vector<Outbound>& to);
 
-  // Emulator thread only.
+  // Emulator thread, and the network thread while held (set_held): the
+  // sampler under sampler_mutex_ (taken after net_mutex_, never before).
+  std::mutex sampler_mutex_;
   Sampler sampler_;
+  std::atomic<bool> held_{false};
+  // Emulator thread only.
   std::optional<FlagWatcher> watcher_;
   bool reset_sampler_ = false;
   bool scene_readable_ = true;  // set_scene_readable

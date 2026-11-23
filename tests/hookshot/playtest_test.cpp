@@ -82,6 +82,25 @@ TEST_CASE("playtest: pause holds the game still, resume lets it run") {
     CHECK_FALSE(gate.Held());
 }
 
+TEST_CASE("playtest: the hold is told when it starts and when it ends (co-op keeps sending the still player)") {
+    Gate gate(0);
+    std::atomic<int> starts{0}, ends{0};
+    std::atomic<bool> held{false};
+    gate.OnHeld([&](bool h) {
+        held.store(h);
+        (h ? starts : ends).fetch_add(1);
+    });
+    FakeGame game(gate);
+    REQUIRE(gate.Pause(2s));
+    CHECK(held.load());
+    CHECK(starts.load() == 1);
+    CHECK(ends.load() == 0);
+    gate.Resume();
+    std::this_thread::sleep_for(50ms);
+    CHECK_FALSE(held.load());
+    CHECK(ends.load() == 1);
+}
+
 TEST_CASE("playtest: step N runs exactly N frames and holds again, from a hold or from running") {
     Gate gate(0);
     FakeGame game(gate);

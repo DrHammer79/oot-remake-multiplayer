@@ -684,6 +684,9 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     g_system = &system;
     g_dir = game_dir / "playtest";
     g_gate = std::make_unique<Gate>(IdleFrom(Env("LICHII_COOP_PLAYTEST_IDLE")));
+    // A held game runs no frame and sends no sample: co-op's network thread sends the last one again, so the
+    // others keep a still puppet of this player (docs/playtest.md "Frame control").
+    g_gate->OnHeld([](bool held) { CoopHook::SetHeld(held); });
     g_enabled.store(true);
     CoopWorldSnapshot::TheStore().Enable(&BridgeFrame);  // the object walk fills the `world` list from now on
     g_verbs_runner = EnvIsOn(Env("LICHII_COOP_PLAYTEST_VERBS"));
