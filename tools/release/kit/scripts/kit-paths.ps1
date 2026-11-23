@@ -2981,3 +2981,48 @@ function Invoke-KitDiscordStatus([string]$Kit, [string]$ExeDir) {
     $ErrorActionPreference = $before
     return $out
 }
+
+# ---- The start window's lines in a file (player report 266: what the start and the update said was not in the logs) ----
+# Start Squadala's window is copied into <kit>\hookshot\logs\start-log.txt (collect-logs.ps1 zips it, and the one
+# before as start-log.1.txt): a transcript of this PowerShell, started fresh by start.ps1 and appended to by the
+# play.ps1 and update.ps1 it starts (OOT_COOP_START_LOG names the file for them). One process writes it at a time: a
+# script stops its own transcript before it starts one of them and goes on after (Suspend/Resume below). The lines of
+# the other programs it starts (the game build, the puppet pack) are in their own logs. Never stops a start: a file
+# that cannot be written leaves the start without it.
+function Get-KitStartLogPath([string]$Kit) { return (Join-Path $Kit 'hookshot\logs\start-log.txt') }
+
+# Starts this process's copy: -Fresh (start.ps1) keeps the last start's file as start-log.1.txt and begins a new one;
+# else appends to OOT_COOP_START_LOG's file, or does nothing when no start named one. True when it runs.
+function Start-KitStartLog([string]$Kit, [switch]$Fresh) {
+    if ($global:KitStartLogOn) { return $true }
+    try {
+        if ($Fresh) {
+            $log = Get-KitStartLogPath $Kit
+            $dir = Split-Path -Parent $log
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            if (Test-Path -LiteralPath $log) { Move-Item -LiteralPath $log -Destination (Join-Path $dir 'start-log.1.txt') -Force -ErrorAction Stop }
+        } elseif ($env:OOT_COOP_START_LOG) {
+            $log = $env:OOT_COOP_START_LOG
+        } else {
+            return $false
+        }
+        Start-Transcript -LiteralPath $log -Append -Force -ErrorAction Stop | Out-Null
+        $env:OOT_COOP_START_LOG = $log
+        $global:KitStartLogOn = $true
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Stops this process's copy for a child that writes the file itself (play.ps1, update.ps1): whether it was on, for
+# Resume-KitStartLog after the child.
+function Suspend-KitStartLog {
+    if (-not $global:KitStartLogOn) { return $false }
+    $global:KitStartLogOn = $false
+    try { Stop-Transcript -ErrorAction Stop | Out-Null } catch { }
+    return $true
+}
+function Resume-KitStartLog([bool]$Was) {
+    if ($Was) { [void](Start-KitStartLog '') }
+}

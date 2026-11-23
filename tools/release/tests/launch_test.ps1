@@ -1523,6 +1523,31 @@ exit 0
     } finally {
         Remove-Item -LiteralPath $lf -Recurse -Force -ErrorAction SilentlyContinue
     }
+    # The start window's lines (player report 266): start.ps1 begins a fresh start-log.txt (the one before kept as .1),
+    # play.ps1 / update.ps1 append to the file OOT_COOP_START_LOG names; one writer at a time (Suspend/Resume).
+    $sl = Join-Path ([System.IO.Path]::GetTempPath()) "coop-startlog-$PID"
+    $envBefore = $env:OOT_COOP_START_LOG
+    try {
+        $env:OOT_COOP_START_LOG = ''
+        Check (-not (Start-KitStartLog $sl)) 'start log: no start named one -> none (play.ps1 from another .bat)'
+        Write-File (Join-Path $sl 'hookshot\logs\start-log.txt') "LAST START`n"
+        Check (Start-KitStartLog $sl -Fresh) 'start log: start.ps1 begins one'
+        Write-Host 'START-LOG LINE ONE'
+        Check ((Get-KitStartLogPath $sl) -eq $env:OOT_COOP_START_LOG) 'start log: named for the scripts it starts'
+        Check (Suspend-KitStartLog) 'start log: stopped for a child (it was on)'
+        Check (-not (Suspend-KitStartLog)) 'start log: a second stop: it was off'
+        Resume-KitStartLog $true
+        Write-Host 'START-LOG LINE TWO'
+        [void](Suspend-KitStartLog)
+        $text = [System.IO.File]::ReadAllText((Get-KitStartLogPath $sl))
+        Check ($text -match 'START-LOG LINE ONE' -and $text -match 'START-LOG LINE TWO' -and $text -notmatch 'LAST START') "start log: this start's lines, appended after a child [$($text.Length) chars]"
+        Check ([System.IO.File]::ReadAllText((Join-Path $sl 'hookshot\logs\start-log.1.txt')) -eq "LAST START`n") 'start log: the start before kept as start-log.1.txt'
+        Check ([bool](Select-String -LiteralPath (Join-Path $kitSrc 'scripts\collect-logs.ps1') -SimpleMatch "hookshot\logs\`$startLog")) 'collect-logs: zips the start logs'
+    } finally {
+        [void](Suspend-KitStartLog)
+        $env:OOT_COOP_START_LOG = $envBefore
+        Remove-Item -LiteralPath $sl -Recurse -Force -ErrorAction SilentlyContinue
+    }
     # collect-logs finds the game more ways than the start (player report: no longshot_log.txt in the zip)
     $lk = Join-Path ([System.IO.Path]::GetTempPath()) "coop-logexes-$PID"
     try {
