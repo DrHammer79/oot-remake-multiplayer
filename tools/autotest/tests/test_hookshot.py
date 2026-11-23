@@ -24,6 +24,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GAMEUI = 0x1000200000
 
 
+class FakePlacement:
+    """placement.py with no real monitor: check_display answers for any name, place_pids records its calls (a CI
+    runner has no DISPLAY2, and a test must not move a real window)."""
+    calls, saved = [], None
+
+    @classmethod
+    def install(cls):
+        cls.calls = []
+        cls.saved = (hs.placement.check_display, hs.placement.place_pids)
+
+        def place(pids, display=None, topmost=False, wait=0.0, step=0.25, slots=None, count=None):
+            cls.calls.append({"pids": list(pids), "display": display, "slots": list(slots), "count": count})
+            return []
+        hs.placement.check_display = lambda arg=None: {"name": "\\\\.\\" + (arg or "DISPLAY2"), "work": (0, 0, 1920, 1032)}
+        hs.placement.place_pids = place
+        return cls.calls
+
+    @classmethod
+    def restore(cls):
+        hs.placement.check_display, hs.placement.place_pids = cls.saved
+
+
 class Clock:
     """Time that moves only when slept."""
 
@@ -853,6 +875,7 @@ class RunTest(unittest.TestCase):
             with open(os.path.join(tmp, "b.txt"), "w") as f:
                 f.write("press A\n")
             popen, connect = hs.subprocess.Popen, hs.Bridge.connect
+            placed = FakePlacement.install()
             hs.subprocess.Popen = Proc
             hs.Bridge.connect = classmethod(lambda cls, path, timeout=10.0: fakes[path].connect())
             try:
@@ -860,14 +883,18 @@ class RunTest(unittest.TestCase):
                                 "--out", os.path.join(tmp, "out"), "--name", "t", "--script-a",
                                 os.path.join(tmp, "a.txt"), "--script-b", os.path.join(tmp, "b.txt"),
                                 "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1",
-                                "--playtest-ports", "5010"])
+                                "--playtest-ports", "5010", "--display", "DISPLAY7"])
             finally:
                 hs.subprocess.Popen, hs.Bridge.connect = popen, connect
+                FakePlacement.restore()
             out = os.path.join(tmp, "out")
             with open(os.path.join(out, "steps.txt")) as f:
                 self.assertEqual(code, 0, f.read())
             self.assertTrue(os.path.isdir(os.path.join(tmp, "A", "user", "save", "u")))   # baseline put back
             self.assertEqual([p.env["HOS_CONTROL_MEM"] for p in started], ["ro", "ro"])
+            if hs.WINDOWS:   # each game's window is placed on the chosen monitor: A in the first place, B in the second
+                self.assertEqual({c["display"] for c in placed}, {"DISPLAY7"})
+                self.assertEqual([c["slots"] for c in placed], [[0], [1], [0, 1]])
             self.assertEqual([p.env.get("ONLY_B") for p in started], [None, "1"])
             self.assertEqual([p.env["BOTH"] for p in started], ["1", "1"])
             # the play-test bridge on, each game on its own port: A = p1 = base + 1, B = p2 = base + 2
@@ -1203,6 +1230,97 @@ class PackStartTest(unittest.TestCase):
         self.assertEqual(self.lines, [])
         with open(self.model, "rb") as f:
             self.assertEqual(f.read(), self.CHILD)
+class WindowPlacementTest(unittest.TestCase):
+    """hookshot.py run puts the game windows on the chosen monitor and never starts a game without one."""
+
+    def test_missing_monitor_stops_the_run_before_any_game_starts(self):
+        import tempfile
+        from unittest import mock
+        started = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(hs, "WINDOWS", True), \
+                mock.patch.object(hs.placement, "monitors", lambda: [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 1, 1)}]), \
+                mock.patch.object(hs.subprocess, "Popen", lambda *a, **k: started.append(a)):
+            open(os.path.join(tmp, "s.txt"), "w").close()
+            with self.assertRaises(SystemExit) as c:
+                hs.main(["run", "--game-a", tmp, "--game-b", tmp, "--out", os.path.join(tmp, "o"), "--script-a",
+                         os.path.join(tmp, "s.txt"), "--display", "DISPLAY9"])
+        self.assertIn("no monitor called DISPLAY9", str(c.exception))
+        self.assertEqual(started, [])
+
+    def test_games_start_without_activating_their_window(self):
+        flags = hs.popen_flags()
+        if hs.WINDOWS:
+            self.assertEqual(flags["startupinfo"].wShowWindow, 4)   # SW_SHOWNOACTIVATE
+            self.assertTrue(flags["startupinfo"].dwFlags & hs.subprocess.STARTF_USESHOWWINDOW)
+        else:
+            self.assertEqual(flags, {"start_new_session": True})
+
+    def test_a_failed_placement_is_said_and_does_not_end_the_run(self):
+        from unittest import mock
+        said = []
+        with mock.patch.object(hs, "WINDOWS", True), \
+                mock.patch.object(hs.placement, "place_pids", side_effect=hs.placement.PlacementError("no monitor")):
+            hs.place_games({"A": 1}, "DISPLAY9", said.append)
+        self.assertEqual(said, ["window placement: no monitor"])
+
+
+class WarpSceneCheckTest(unittest.TestCase):
+    """`warp Market` (the scenes are Market_Child and Market_Adult): the module's test warp refuses a scene it does not
+    know and nothing moves, so the runner refuses it at once instead of leaving a run that goes on with the scene
+    unchanged (the old module wrote the name into the game, which crashed a game worker, 2026-11-23)."""
+
+    def test_an_unknown_scene_is_refused_when_the_script_is_read(self):
+        with self.assertRaises(hs.ScriptError) as ctx:
+            hs.parse("wait 5\nwarp Market\n")
+        msg = str(ctx.exception)
+        self.assertTrue(msg.startswith("line 2: unknown scene 'Market'"), msg)
+        self.assertIn("Market_Adult", msg)
+        self.assertIn("Market_Child", msg)
+        for bad in ("warp NoSuchPlace Entrance\n", "warp market_child\n", "warp Market_Child/x\n"):
+            with self.assertRaises(hs.ScriptError):
+                hs.parse(bad)
+
+    def test_real_scenes_and_the_bridges_index_still_parse(self):
+        steps = hs.parse("warp Market_Child\nwarp InsideTheDekuTree Entrance\nwarp BossRushIntervalRoom\n"
+                         "warp PhantomGanonStage PhantomGanonStage\nwarp 3\n")
+        self.assertEqual([x.name for x in steps], ["Market_Child", "InsideTheDekuTree", "BossRushIntervalRoom",
+                                                   "PhantomGanonStage", "3"])
+
+    def test_nothing_is_sent_for_a_refused_script(self):
+        game = FakeGame()
+        b = game.connect()
+        with self.assertRaises(hs.ScriptError):
+            hs.Player(b, hs.Log(), clock=game.clock, sleep=game.clock.sleep).play(hs.parse("warp Market\n"))
+        game.close()
+        self.assertEqual(game.cmds("teleport"), [])
+
+    def test_the_list_is_read_from_the_modules_source_and_matches_it(self):
+        scenes = hs.known_scenes()
+        self.assertIsNotNone(scenes)
+        self.assertIn("Market_Child", scenes)
+        self.assertGreater(len(scenes), 70)
+        teleport = os.path.join(os.path.dirname(hs.START_POINTS_INC), "coop_teleport.cpp")
+        with open(teleport, encoding="utf-8") as f:
+            source = f.read()
+        for name in hs.EXTRA_SCENES:   # the one literal IsKnownScene has besides the start points
+            self.assertIn('"%s"' % name, source)
+
+    def test_without_the_source_nothing_is_checked(self):
+        self.assertIsNone(hs.known_scenes(os.path.join(HERE, "no-such-file.inc")))
+        self.assertEqual(hs.scene_problem("Market", scenes={"Market_Child"}),
+                         "unknown scene 'Market' (did you mean Market_Child?)")
+        self.assertEqual(hs.scene_problem("Market_Child", scenes={"Market_Child"}), "")
+
+    def test_live_do_says_so_and_sends_nothing(self):
+        import tempfile
+        import live
+        with tempfile.TemporaryDirectory() as d:
+            with open(live.session_file(d), "w", encoding="utf-8") as f:
+                json.dump({"games": {}}, f)
+            out = live.do(type("A", (), {"session": d, "player": "A", "script": "warp Market; wait 5"})())
+        self.assertIn("unknown scene 'Market'", out["error"])
+        self.assertNotIn("A", out)   # (no bridge was opened, no look taken)
 
 
 if __name__ == "__main__":

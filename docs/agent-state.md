@@ -61,10 +61,28 @@ Material for a submission to the mod author and to the Squadala community. Nothi
 
 ## Open reports for co-op
 
-- Customize colours do not reach Character Select characters on the player's own model. Co-op dresses only Link's
-  own eyes and hair: `LinkOnly` in `lichii/hook/coop_char_colours.h` gives nothing when a Character Select model is
-  shown (`ShownCharacter() != 0`, called from `DressCharacters` in `hookshot/src/coop_hookshot.cpp`).
+- Customize colours do not reach Character Select characters on the player's own model. Cause: co-op dressed only
+  Link's own eyes and hair (`LinkOnly` in `lichii/hook/coop_char_colours.h`, called from `DressCharacters` in
+  `hookshot/src/coop_hookshot.cpp`). Fixed in the code on branch `dress-colours`, not yet checked in a game: the Eye
+  Colour (and the ini's hair colour, real hair only) goes on every player model that has the material for it (your
+  own, the pause menu's model of it, the other players' character puppets); Customize offers a character an Eyes page
+  unless its model has no iris; an age or character switch dresses the new model at once. The tunics and the Cap trim
+  stay Link's. Open: the iris shift for a character whose iris texture is another colour (Impa's red). Details in
+  [puppet.md](puppet.md), "Co-op's colours on a character".
 - The Cow's run animation (see A above).
+- A crash at start while the PC's memory ran out (a `std::bad_alloc` thrown out of the look worker's thread). Fixed in
+  the code on branch `look-crash`, not yet checked in a game: the texture compare no longer allocates a heap buffer
+  per texture, and a pass of the look worker that throws is logged (`coop: look: the look worker's pass failed`) and
+  tried again at the next pass. Two things are left open on purpose:
+  - The fix to `GameTextures::List` (the `filled` count when all four tries are short of room) has no unit test: the
+    function reads game memory, so only a game run shows it. To check in a game: several cold boots, no
+    `coop: look:` failed line and no crash record.
+  - The frame thread has no such guard. Under the same memory exhaustion a throw on the frame thread would still end
+    the game. Not changed here: a guard there touches every frame call of the module and needs its own review.
+  - The memory growth itself is not ours to fix. The maintainer is fixing the host's memory growth at the root, across
+    all host-only paths. The look fix above (the compare in `Same`, `hookshot/src/coop_look_tunic.cpp`, reads into a
+    stack buffer instead of the heap) stays as it is and is not extended to other paths; it is already on the
+    integration branch.
 
 ## Deferred engine items
 

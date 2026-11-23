@@ -56,8 +56,11 @@ struct Options {
     // 0.11.9: co-op's own eye colour, exact (EyeParam of the look's eyes part); over `eyes` when set.
     std::optional<std::array<float, 3>> eyes_exact;
     // 0.11.9: co-op's own hair colour (HairParam: colour 0, colour 1, the brows'); over `hair` when set. Link models
-    // only (a character's stand-in hair keeps its own).
+    // and a character's real hair (Options::character).
     std::optional<std::array<std::array<float, 3>, 3>> hair_exact;
+    // A Character Select character's model: hair_exact goes on its real hair only (a material the mod gave a palette;
+    // Mt_Hairs without one is a stand-in, as for the mod's own hair option). Link's model: every hair material.
+    bool character = false;
     static Options Of(std::uint32_t custom);
     bool Colours() const {
         return hair != 0 || eyes != 0 || eyes_exact || hair_exact || clothes[0] != 0 || clothes[1] != 0 ||
@@ -142,18 +145,32 @@ Result Dress(const Game& game, State& state, const Options& options, bool put_ba
 // - Otherwise a puppet is dressed when its options change or its actor is new, and again every kAgainMs while it
 //   has any (a model not loaded at the first try), with put_back once it was ever dressed.
 // - A puppet the mod's own released routine dresses (Director::Dress, verified) is left to it.
-// The eyes' and hair's colours of a player's look (CoopLook's parts 18 and 19) go on a Link model only: Customize offers
-// them on Link alone, and a character's model has its own (review 0.11.9: a character picked, or a picker of others,
-// got your eyes). Every site that dresses a model takes them through this: the puppets, your own Link, the menu's.
-struct LinkColours {
+// The eyes' and hair's colours of a player's look (CoopLook's parts 18 and 19) go on the player's model, Link's or a
+// Character Select character's (player report, 2026-11-22: a character picked, your own or a puppet, showed none of
+// co-op's colours; before, Link models only). Each goes where the model has the material for it, else nothing is done:
+// the iris Mt_Eye_Inner's ns_param_color2 for the eyes, the hair materials for the hair, a character's real hair only
+// (Options::character: the mod's own stand-in rule). The tunics and the Cap trim stay Link's: they are Link's own
+// textures, which no character draws. No colour set: nothing is put on (the model keeps its own, the mod's look too).
+// Every site that dresses a player model takes them through this: the puppets, your own model, the menu's.
+// (The menu's models of OTHER characters, Character Select's picker, are not the player: MenuModelOfPlayer.)
+struct ModelColours {
     std::optional<std::uint32_t> eyes, hair;
-    bool operator==(const LinkColours&) const = default;
+    bool character = false;   // a character's model (Options::character)
+    bool operator==(const ModelColours&) const = default;
 };
-inline LinkColours LinkOnly(bool link_model, std::optional<std::uint32_t> eyes, std::optional<std::uint32_t> hair) {
-    if (!link_model) return {};
+inline ModelColours ColoursOn(bool character, std::optional<std::uint32_t> eyes, std::optional<std::uint32_t> hair) {
     if (eyes) *eyes &= 0xFFFFFFu;
     if (hair) *hair &= 0xFFFFFFu;
-    return {eyes, hair};
+    return {eyes, hair, character};
+}
+
+// What a dressed model is, so an age or character switch starts anew at once (its materials are another model's): the
+// field player's actor name (Player_Child, Player_Adult) and the character shown (0 Link). Never 0 (0 is "unknown").
+inline std::uint64_t ModelKey(std::string_view actor_name, std::uint16_t character) {
+    std::uint64_t h = 0xcbf29ce484222325ull;   // (FNV-1a: the same key on every run, for the log and tests)
+    for (const char c : actor_name) h = (h ^ static_cast<std::uint8_t>(c)) * 0x100000001b3ull;
+    h = (h ^ character) * 0x100000001b3ull;
+    return h == 0 ? 1 : h;
 }
 
 // The pause menu's model of your Link: the game's menu shows the player as its own actor, named "Pouch" + the field
@@ -174,13 +191,44 @@ struct Target {
     int iris_shift = 0;
     // 0.11.9: the player's eye colour (CoopLook's eyes part, 0xRRGGBB): dressed on any model, Link's too.
     std::optional<std::uint32_t> eyes;
-    // 0.11.9: the player's hair colour (CoopLook's hair part): on a Link model only (the caller leaves it out for a
-    // character's).
+    // 0.11.9: the player's hair colour (CoopLook's hair part): on Link's hair, a character's real hair (ColoursOn).
     std::optional<std::uint32_t> hair;
     // What the puppet is (a hash of its actor's pack name): a puppet made again as another actor at the same
     // address, or in the same block, starts anew (its old model's material numbers are not this one's).
     std::uint64_t model = 0;
+    // A Character Select character's model (Options::character).
+    bool character = false;
 };
+
+// The wardrobe's targets are built here, field by name, never by position. A positional Target{...} in the frame
+// glue put the model key into `eyes` (the sixth field), so `model` stayed 0: a puppet made again as another actor, and
+// your own model after an age or character switch, kept the old model's material numbers (review of the
+// dress-colours branch; the puppets' key was broken that way since it was added). These are what the glue calls.
+// A puppet (Director::DressView): its model key is its actor's pack name (CoopPuppet_Adult_C007: age and character).
+inline Target PuppetTarget(std::uint64_t actor, std::uint64_t cell, std::uint32_t custom, bool mods_routine,
+                           std::string_view actor_name, const ModelColours& colours) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .custom = custom,
+                  .mods_routine = mods_routine,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = ModelKey(actor_name, 0),
+                  .character = colours.character};
+}
+// Your own model (cell 0) or the pause menu's model of it (its cell, its key: ModelKey of its name and the character).
+inline Target OwnTarget(std::uint64_t actor, std::uint64_t cell, std::uint64_t model, const ModelColours& colours) {
+    return Target{.actor = actor,
+                  .cell = cell,
+                  .eyes = colours.eyes,
+                  .hair = colours.hair,
+                  .model = model,
+                  .character = colours.character};
+}
+
+// Whether a model has the iris the eye colour goes on (Mt_Eye_Inner with ns_param_color2), once its materials were
+// looked up: nothing before (not looked up yet), else whether any of its units has it.
+std::optional<bool> HasIris(const State& state);
 
 class Wardrobe {
 public:
@@ -193,6 +241,8 @@ public:
     // One frame; returns the calls made. `say`: a line for the log (a puppet's first dressing, a failure).
     std::size_t Frame(const Game& game, const std::vector<Target>& targets, std::uint64_t now_ms,
                       const std::function<void(const std::string&)>& say);
+    // HasIris of the actor's model as last dressed (nothing: not dressed, or not looked up yet). The calc thread.
+    std::optional<bool> IrisOf(std::uint64_t actor) const;
 
 private:
     struct Kept {
@@ -216,6 +266,11 @@ private:
 // coop_hook reads it twice a second. Any thread.
 void SetShownCharacter(std::uint16_t number);
 std::uint16_t ShownCharacter();
+// Whether your own model shows the eye colour (Wardrobe::IrisOf of your field player), for the character it was found
+// on: Customize offers a character's Eye Colour row unless its model is known to have no iris (the owner: never a row
+// that does nothing). Nothing when not known for `character` (not dressed yet: the row is offered). Any thread.
+void SetOwnIris(std::uint16_t character, std::optional<bool> iris);
+std::optional<bool> OwnIris(std::uint16_t character);
 // Character Select's code and data are in this game (its saved Int CharacterMenu_SelectedCharacter exists; the hook
 // reads it twice a second). Any thread. Row 207 (0.11.9): co-op then never opens its own Customize on System, whose
 // live picture forces the menu's Link model, which that mod's code patches; Customize is in its screen.

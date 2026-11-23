@@ -15,6 +15,7 @@
 
 #include <enet/enet.h>
 
+#include "coop/net/bind_guard.hpp"
 #include "coop/protocol/join_password.hpp"
 #include "coop/protocol/messages.hpp"
 #include "host_service.hpp"
@@ -319,6 +320,8 @@ void Menu::RunHost(HostJob job) {
         coop::server::HostServiceConfig config;
         config.port = job.port;
         config.port_tries = kPortTries;
+        config.bind = coop::net::test_bind();         // (none: all addresses; tests: 127.0.0.1)
+        config.helper_bind = coop::net::test_bind();
         config.session.join_password = job.password;
         config.session.pvp = job.pvp;
         config.session.approve_joins = job.approve_joins;
@@ -555,6 +558,7 @@ void Menu::RunJoin(JoinJob job) {
         config.password = job.password;
         config.stun_servers = StunServers();
         config.game_port = hooks_.helper_port;
+        config.bind = coop::net::test_bind();   // (none: all addresses; tests: 127.0.0.1)
         config.direct_ms = hooks_.direct_ms;
         if (hooks_.client_id) {
             if (const std::string id = hooks_.client_id(); !id.empty()) {
@@ -658,7 +662,7 @@ void Menu::RunRelayJoin(RelayJoinJob job_in) {
             return;
         }
         at.port = job.join.relay_port;
-        const auto result = relay::lookup_on_relay(at, job.join, [this] { return stop_.load(); });
+        const auto result = relay::lookup_on_relay(at, job.join, [this] { return stop_.load(); }, coop::net::test_bind());
         if (stop_) {
             return;
         }

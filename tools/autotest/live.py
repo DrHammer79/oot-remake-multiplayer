@@ -169,6 +169,8 @@ def runner_argv(a, game_a, game_b, port, pipe, d):
         argv += ["--playtest-ports", str(playtest_base(a.lane))]
     for kv in a.env:
         argv += ["--env", kv]
+    if getattr(a, "display", None):
+        argv += ["--display", a.display]
     return argv
 
 
@@ -299,7 +301,10 @@ def do(a):
     s = open_session(d)
     x = a.player
     text = "\n".join(part.strip() for part in a.script.split(";") if part.strip()) + "\n"
-    steps = hookshot.parse(text)
+    try:
+        steps = hookshot.parse(text)
+    except hookshot.ScriptError as e:   # (a warp to a scene the module would refuse: nothing is sent)
+        return {"error": "ScriptError: %s" % e}
     b = bridge(s, x)
     err = None
     try:
@@ -537,6 +542,9 @@ def main(argv=None):
     st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
     st.add_argument("--playtest", action="store_true",
                     help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
+    st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
+                                      "tools/autotest/placement.py" % (hookshot.placement.ENV,
+                                                                       hookshot.placement.DEFAULT_DISPLAY))
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)
@@ -551,7 +559,7 @@ def main(argv=None):
     out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
            "watchdog": watchdog}[a.cmd](a)
     print(json.dumps(out, indent=1))
-    return 0
+    return 1 if a.cmd == "do" and "error" in out else 0
 
 
 if __name__ == "__main__":

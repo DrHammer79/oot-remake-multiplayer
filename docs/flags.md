@@ -79,6 +79,8 @@ So writing the live byte directly would skip the saved copy and the save-file ma
 
 **String64** (issue 57). The same holds for a String64: the applier copies a queued slot's text into the entry's live text (+0x68, size +0x70) and into its saved copy (+0xb8, size +0xc0, unless entry +0x10 bit 31 is set), marks the entry changed, ORs its file mask into M + 0x660 and puts the hash in the change ring at M + 0x648. The queue: slot count M + 0x630, slots of 0x58 at M + 0x638, word M + 0x640 (the Bool queue's word layout). `GameFlags::set_string64` writes it so, through the game's push 0x376b9b0 on Hookshot (its `{text, hash}` argument on the game's stack, the bridge's `scratch`) and into the queue on the emulator; `get_string64` sees a write of ours that still waits there. `set_string64_now` (the live text only) stays for the tests' warp: a value written that way goes back at the next scene load, as `PlayerStatus.EquipOcarina` did.
 
+**An Int in place** (`GameFlags::set_int_now`, `get_int_live`). The Character Select pick at a save load must be in the Int's live value (+0x1c) before the game makes the player, and a queued write is applied too late there (`coop_char_ages.h`). `set_int_now` stores the live value only and its caller queues the same value with `set_int` after it, so the applier does the rest (a saved copy if the Int has one, the save-file mask, the change ring). `get_int_live` reads the entry only, as the game's getter 0x837070 does, not a write of ours still waiting. Whether a live store holds until the player is made is a game question: the log says (`coop: characters: save load ...`).
+
 ## Which flags are which
 
 | Kind | Where | Evidence |

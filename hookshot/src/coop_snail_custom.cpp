@@ -22,9 +22,9 @@ int Neighbour(int f, Dir dir) {
     return to >= 0 && to < kOptions ? to : -1;
 }
 
-void Driver::Open(const CoopLook::Look& look, std::uint16_t character) {
+void Driver::Open(const CoopLook::Look& look, std::uint16_t character, bool eyes) {
     page_.SetPaged(true);
-    page_.SetCharacter(character, false);
+    page_.SetCharacter(character, false, eyes);
     page_.Open(look);
     focus_ = 0;   // (his screen opens on its first option)
     active_ = true;
