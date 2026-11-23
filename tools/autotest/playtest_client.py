@@ -165,11 +165,89 @@ class Client:
     def dump(self, tag):
         return self.request("dump", tag=tag)
 
+    def world(self):
+        """The whole world list (up to 200 actors, `state` shows only the nearest 40 known kinds): the bridge's `dump`
+        under a fixed tag, read back from the game's own folder. Replies {"frame", "world"}; world is None when this
+        build of the module has no world member."""
+        r = self.dump(WORLD_TAG)
+        try:
+            with open(r["path"], encoding="utf-8") as f:
+                data = json.load(f)
+        except (KeyError, OSError, ValueError) as e:
+            raise ValueError("the world list could not be read back from the dump: %s" % e)
+        return {"frame": r.get("frame"), "world": (data.get("state") or {}).get("world")}
+
     def shot(self, name=None):
         """A screenshot; the game saves it under its own playtest/shots/<name>.png and the reply gives the path."""
         if name is not None and not TAG.match(name):
             raise ValueError("a shot name is 1 to 64 letters, digits, - and _")
         return self.request("shot", reply_timeout=60, **({"name": name} if name else {}))
+
+
+WORLD_TAG = "world_query"   # the tag of the dump `Client.world` reads: one file, overwritten each time
+KINDS = ("player", "enemy", "npc", "chest", "door", "switch", "item", "other")
+LIFE_WORDS = ("full", "ok", "low", "critical")
+# the `why` values of an empty list that still count as "the walk ran": the enemy words are then real zeros
+WALK_RAN = (None, "empty: the walk ran and saw no actors", "only other kinds near: dump lists them")
+
+
+def life_word(life, max_life):
+    """full: at max; ok: above half; low: half or less; critical: a quarter or less. None when unknown."""
+    if not isinstance(life, (int, float)) or not isinstance(max_life, (int, float)) or max_life <= 0:
+        return None
+    if life >= max_life:
+        return "full"
+    ratio = life / max_life
+    return "critical" if ratio <= 0.25 else "low" if ratio <= 0.5 else "ok"
+
+
+def world_words(state):
+    """Words next to the numbers, from a bridge `state` reply: `life_word`, `enemy_near` (living enemies within 10 m) and
+    `danger` (one within 4 m). enemy_near and danger are None, never 0 and false, when the world list is not there
+    (solo, stale, a module without it). `state` lists the nearest 40 known actors: when the list was cut inside 10 m
+    the count is a lower bound and `enemy_near_at_least` is true."""
+    out = {"life_word": life_word(state.get("life"), state.get("max_life")), "enemy_near": None, "danger": None}
+    w = state.get("world")
+    if not isinstance(w, dict) or w.get("why") not in WALK_RAN:
+        return out
+    listed = w.get("actors") or []
+    foes = [a for a in listed if a.get("kind") == "enemy" and a.get("alive") is not False]
+    out["enemy_near"] = sum(1 for a in foes if a.get("dist") is not None and a["dist"] <= 10)
+    out["danger"] = any(a.get("dist") is not None and a["dist"] <= 4 for a in foes)
+    known = (w.get("total") or 0) - (w.get("other_count") or 0)
+    if known > len(listed) and listed and (listed[-1].get("dist") or 0) <= 10:
+        out["enemy_near_at_least"] = True
+    return out
+
+
+def select_actors(world, kind=None, within_m=None, limit=50):
+    """The actors of a world list that match: a `kind` and/or a distance (nearest first, ties by id), at most `limit`.
+    Replies the list's own members (frame, why, stale, behind, age_ms, total, other_count) beside `matched` (how many
+    matched), `of` (how many the list holds) and `actors`. `why` stays, so an empty answer never reads as 'nothing here'
+    when the list is just not there."""
+    if kind is not None and kind not in KINDS:
+        raise ValueError("kind: one of " + ", ".join(KINDS))
+    if within_m is not None and (not isinstance(within_m, (int, float)) or within_m < 0):
+        raise ValueError("within_m: a number of metres, 0 or more")
+    limit = int(limit)
+    if not 1 <= limit <= 200:
+        raise ValueError("limit: 1 to 200")
+    actors = world.get("actors") or []
+    hit = [a for a in actors if (kind is None or a.get("kind") == kind)
+           and (within_m is None or (a.get("dist") is not None and a["dist"] <= within_m))]
+    hit.sort(key=lambda a: (a.get("dist") if a.get("dist") is not None else 1e9, a.get("id", 0)))
+    out = {k: world[k] for k in ("frame", "age_ms", "stale", "behind", "why", "total", "other_count") if k in world}
+    out.update({"matched": len(hit), "of": len(actors), "truncated": len(hit) > limit, "actors": hit[:limit]})
+    return out
+
+
+def find_actor(world, ident):
+    """One actor by id (a number or its decimal text) or by address (`0x...`); None when it is not in the list."""
+    text = str(ident).strip().lower()
+    for a in world.get("actors") or []:
+        if text == str(a.get("id")) or (text.startswith("0x") and text == str(a.get("addr", "")).lower()):
+            return a
+    return None
 
 
 def _frames(n):

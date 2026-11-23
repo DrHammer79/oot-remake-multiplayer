@@ -32,6 +32,7 @@ class FakeGame:
         self.pos, self.scene, self.frame, self.paused = list(pos), scene, 1000, False
         self.flags, self.items, self.log = {"F1": 0, "F2": 0}, {}, []
         self.dump_dir = dump_dir
+        self.world = None       # the `world` member of the state (None: this module has none)
         self.wall_x = None      # Link cannot pass this x
         self.scene_at = None    # (frame, scene): the scene changes once the frame count reaches it
         self.connections = 0
@@ -72,7 +73,8 @@ class FakeGame:
         return {"scene": self.scene, "room": None, "pos": [round(v, 4) for v in self.pos], "facing": 0.0,
                 "camera": self.camera, "life": 12, "max_life": 12, "rupees": 5, "age": "child", "event": False,
                 "loading": False, "prompt": None, "equips": {}, "inventory": dict(self.items),
-                "coop": {"state": "connected", "players": 2}, "snapshot_frame": self.frame}
+                "coop": {"state": "connected", "players": 2}, "snapshot_frame": self.frame,
+                **({"world": self.world} if self.world is not None else {})}
 
     def answer(self, m):
         cmd = m.get("cmd")
@@ -257,11 +259,92 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "checkpoint",
                           "desync_check", "pause", "resume", "log", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
+
+    WORLD = {"frame": 1000, "age_ms": 40, "stale": False, "behind": False, "total": 5, "other_count": 1, "count": 4,
+             "actors": [
+                 {"id": 7, "addr": "0x80000007", "name": "Enemy_Far", "kind": "enemy", "pos": [30, 0, 0], "dist": 30.0,
+                  "life": 4, "max_life": 4, "owner": "server", "alive": True},
+                 {"id": 3, "addr": "0x80000003", "name": "Enemy_Near", "kind": "enemy", "pos": [2, 0, 0], "dist": 2.0,
+                  "life": 4, "max_life": 4, "owner": 2, "alive": True},
+                 {"id": 4, "addr": "0x80000004", "name": "Enemy_Dead", "kind": "enemy", "pos": [1, 0, 0], "dist": 1.0,
+                  "life": 0, "max_life": 4, "owner": None, "alive": False},
+                 {"id": 5, "addr": "0x80000005", "name": "Obj_TBox_Wood", "kind": "chest", "pos": [6, 0, 0],
+                  "dist": 6.0, "life": None, "max_life": None, "owner": None, "alive": None}]}
+
+    def test_get_state_has_words_and_null_enemies_when_there_is_no_list(self):
+        s = self.call("p1", "get_state")
+        self.assertEqual((s["life_word"], s["enemy_near"], s["danger"]), ("full", None, None))   # no world: unknown
+        self.games["p1"].world = {"frame": None, "why": "no co-op session: the world list is read only while "
+                                  "connected and sharing", "count": 0, "actors": []}
+        s = self.call("p1", "get_state")
+        self.assertIsNone(s["enemy_near"])
+        self.games["p1"].world = self.WORLD
+        s = self.call("p1", "get_state")
+        self.assertEqual((s["enemy_near"], s["danger"]), (1, True))   # the dead one and the far one do not count
+        self.assertNotIn("enemy_near_at_least", s)
+
+    def test_a_room_that_really_has_no_enemy_is_zero_not_null(self):
+        self.games["p1"].world = {"frame": 5, "why": "empty: the walk ran and saw no actors", "count": 0, "actors": []}
+        s = self.call("p1", "get_state")
+        self.assertEqual((s["enemy_near"], s["danger"]), (0, False))
+
+    def test_life_words_and_a_cut_list(self):
+        for life, mx, word in [(12, 12, "full"), (8, 12, "ok"), (6, 12, "low"), (3, 12, "critical"), (0, 12, "critical"),
+                               (None, 12, None), (4, 0, None)]:
+            self.assertEqual(pc.life_word(life, mx), word, (life, mx))
+        cut = dict(self.WORLD, total=60, other_count=0, count=2,
+                   actors=[self.WORLD["actors"][1], self.WORLD["actors"][0]][:1])
+        self.assertTrue(pc.world_words({"world": cut}).get("enemy_near_at_least"))   # 59 known unseen, last one at 2 m
+
+    def test_get_world_reads_the_whole_list_and_filters(self):
+        self.games["p1"].world = self.WORLD
+        r = self.call("p1", "get_world")
+        self.assertEqual((r["matched"], r["of"], r["truncated"]), (4, 4, False))
+        self.assertEqual([a["id"] for a in r["actors"]], [4, 3, 5, 7])           # nearest first
+        self.assertEqual(self.games["p1"].log[-1]["cmd"], "dump")                  # the full list comes from a dump
+        self.assertEqual(self.games["p1"].log[-1]["tag"], pc.WORLD_TAG)
+        r = self.call("p1", "get_world", kind="enemy", within_m=10)
+        self.assertEqual([a["id"] for a in r["actors"]], [4, 3])
+        self.assertEqual(r["matched"], 2)
+        r = self.call("p1", "get_world", limit=1)
+        self.assertEqual((r["matched"], len(r["actors"]), r["truncated"]), (4, 1, True))
+        with self.assertRaises(ValueError):
+            self.call("p1", "get_world", kind="monster")
+        with self.assertRaises(ValueError):
+            self.call("p1", "get_world", limit=0)
+        with self.assertRaises(ValueError):
+            self.call("p1", "get_world", within_m=-1)
+
+    def test_an_empty_list_keeps_its_why(self):
+        why = "no co-op session: the world list is read only while connected and sharing"
+        self.games["p1"].world = {"frame": None, "why": why, "count": 0, "actors": []}
+        r = self.call("p1", "get_world", kind="enemy")
+        self.assertEqual((r["matched"], r["why"]), (0, why))
+        r = self.call("p1", "get_actor", id=3)
+        self.assertFalse(r["found"])
+        self.assertEqual(r["why"], why)
+
+    def test_a_module_without_a_world_member_says_so(self):
+        self.games["p1"].world = None
+        r = self.call("p1", "get_world")
+        self.assertEqual(r["actors"], [])
+        self.assertIn("no world list", r["why"])
+        self.assertIn("no world list", self.call("p1", "get_actor", id=3)["why"])
+
+    def test_get_actor_by_id_text_or_address(self):
+        self.games["p1"].world = self.WORLD
+        for ident in (3, "3", "0x80000003", "0X80000003"):
+            r = self.call("p1", "get_actor", id=ident)
+            self.assertTrue(r["found"], ident)
+            self.assertEqual(r["actor"]["name"], "Enemy_Near")
+        r = self.call("p1", "get_actor", id=99)
+        self.assertFalse(r["found"])
+        self.assertIn("gone", r["why"])
 
     def test_verb_tools_send_one_checked_line_through_act(self):
         cases = [("kill", {"actor": "Enemy_Test"}, "kill Enemy_Test"),

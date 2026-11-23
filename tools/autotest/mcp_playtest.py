@@ -150,8 +150,21 @@ ACT_TOOLS = [
 PLAYER_TOOLS = [
     {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
      "facing and camera yaw (degrees: 0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, equips, "
-     "inventory, co-op status, event/loading and the A prompt. " + PAUSED,
+     "inventory, co-op status, event/loading and the A prompt, plus words: `life_word` (full, ok, low, critical), "
+     "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
+     "no world list (solo). " + PAUSED,
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
+     "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
+     "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
+     "list exists only while the games are connected and sharing: an EMPTY list with a `why` is not 'nothing here'. "
+     "Read `why`. No frame passes.",
+     "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
+                                                       "within_m": {"type": "number", "minimum": 0},
+                                                       "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},
+    {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
+     "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
+     "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
     {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) with the camera-relative stick, a "
      "few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
      "after max_frames; says why, the frames used and the distance left.",
@@ -239,7 +252,24 @@ class Game:
     def _call(self, name, args):
         c = self.client
         if name == "get_state":
-            return c.state()
+            s = c.state()
+            s.update(pc.world_words(s))   # life_word, enemy_near, danger beside the numbers
+            return s
+        if name == "get_world":
+            r = c.world()
+            if r["world"] is None:
+                return {"frame": r["frame"], "actors": [], "why": "this module has no world list (an older build)"}
+            return dict(pc.select_actors(r["world"], args.get("kind"), args.get("within_m"),
+                                         args.get("limit", 50)), frame=r["frame"], world_frame=r["world"].get("frame"))
+        if name == "get_actor":
+            r = c.world()
+            w = r["world"] or {}
+            a = pc.find_actor(w, args["id"])
+            out = {"frame": r["frame"], "world_frame": w.get("frame"), "found": a is not None, "actor": a}
+            if a is None:
+                out["why"] = w.get("why") or ("not in the list: it is gone, or not among the 200 nearest"
+                                              if r["world"] is not None else "this module has no world list")
+            return out
         if name == "walk_to":
             return pc.walk_to(c, float(args["x"]), float(args["z"]), float(args.get("tolerance", 0.5)),
                               int(args.get("max_frames", 600)))
