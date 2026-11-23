@@ -46,7 +46,9 @@ class FakeGame:
         self.strike_seq_in_reply = True
         self.loading, self.queue_full = False, False
         self.stale = False      # Longshot's Link snapshot is old (held on a title, a pause, a load): Link members null
-        self.event = False      # an event runs: only then the game takes a warp
+        self.event = False      # an event runs: the module's warp (with an entrance) is taken only then
+        self.no_teleport = {"BossStage"}   # maps Longshot's teleport list does not have
+        self.via = None
         self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
         game = self
 
@@ -120,8 +122,10 @@ class FakeGame:
             self.paused = True
             return {"ok": True, "from": start, "state": self.state()}
         if cmd == "warp":
-            if not self.event:
-                return {"ok": False, "error": "not_in_event", "message": "warp works only while an event runs"}
+            if not self.event and (m.get("entrance") or m["scene"] in self.no_teleport):
+                # free play goes by Longshot's teleport: no start position, and only its own list of maps
+                return {"ok": False, "error": "not_in_event", "message": "refused: free play, by the teleport only"}
+            self.via = "event" if self.event else "teleport"
             self.scene = m["scene"]
             self.paused = True
             return {"ok": True, "arrived": True, "state": self.state()}
@@ -471,7 +475,7 @@ class PlayerServer(unittest.TestCase):
         self.assertNotIn("stick", self.games["p1"].log[-1])
         with self.assertRaises(ValueError):
             self.call("p1", "press", buttons=["Q"])
-        self.games["p1"].event = True            # (the game takes a warp only while an event runs)
+        self.games["p1"].event = True            # (an event runs: the module's own request, with an entrance)
         r = self.call("p1", "warp", scene="KokiriForest_Child", entrance="Start_Mido")
         self.assertEqual(r["state"]["scene"], "KokiriForest_Child")
         self.assertEqual((self.games["p1"].log[-1]["entrance"], self.games["p1"].log[-1]["timeout"]), ("Start_Mido", 60))
@@ -482,9 +486,12 @@ class PlayerServer(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.call("p1", "warp", scene="DekuTree", timeout=bad)
         self.games["p1"].event = False
-        with self.assertRaises(pc.BridgeError) as e:                    # F2: in free play, refused at once
-            self.call("p1", "warp", scene="DekuTree")
-        self.assertEqual(e.exception.code, "not_in_event")
+        self.call("p1", "warp", scene="DekuTree")                       # F2: free play goes by Longshot's teleport
+        self.assertEqual(self.games["p1"].via, "teleport")
+        for kw in ({"entrance": "Start_Mido"}, {"scene": "BossStage"}):  # ... which has no start and a short list
+            with self.assertRaises(pc.BridgeError) as e:
+                self.call("p1", "warp", **dict({"scene": "DekuTree"}, **kw))
+            self.assertEqual(e.exception.code, "not_in_event")
         self.assertEqual(self.call("p1", "flag", name="F2", value=True)["was"], 0)
         self.assertIs(self.games["p1"].flags["F2"], True)
         self.call("p1", "give", item="bombs")
@@ -939,6 +946,16 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertTrue(r["result"].startswith("struck: the hit landed, but Enemy_Far still lives after"), r["result"])
         self.assertIs(r["died"], False)
         self.assertLessEqual(self.game.frame - start, 2 + ph.STRIKE_FRAMES + ph.DEATH_FRAMES + ph.DEATH_LOOK)
+
+    def test_wait_frames_sets_how_long_a_kill_waits_for_the_death(self):   # the 36-frame default is a parameter
+        self.game.death_delay = 14
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7, "wait_frames": 0})
+        self.assertIs(r["died"], False)                 # no wait: not seen dead yet
+        self.game.death_delay = 14
+        r = self.tool.call("kill", {"actor": "Enemy_Far", "id": 7, "wait_frames": 120})
+        self.assertIs(r["died"], True)
+        with self.assertRaises(Exception):
+            self.tool.call("kill", {"actor": "Enemy_Far", "id": 7, "wait_frames": 601})
 
     def test_a_hit_does_not_wait_for_a_death(self):
         self.game.death_delay = None

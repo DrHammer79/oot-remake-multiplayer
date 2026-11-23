@@ -137,9 +137,20 @@ bool SnapshotIsOld(const CoopModJson::Value* status);
 // No reply (`status` null) or no `game`: all null, `snapshot_stale` false (`control` says why).
 std::string LinkMembers(const CoopModJson::Value* status);
 
-// `warp` (the game's own scene change): taken only while an event runs. Empty when `status` (a reply with a fresh Link
-// snapshot) says one runs; else the refusal's text. A snapshot that is old or missing cannot say, so it refuses too.
-std::string WarpRefusal(const CoopModJson::Value* status);
+// `warp`: two ways to change scene. While an event runs, the module's own request (`Sequence_ReservedNextBanc`, the test
+// script's `warp`; the game takes it only then, docs/scenes.md "Free-play scene change"). In free play, Longshot's control
+// bridge `teleport` (the Cheats page's destination list; the game takes it at Link's next update; the way hookshot.py's
+// boot-script warps go), which knows only its own list of maps and has no start position (`entrance`).
+enum class WarpRoute { refuse, event, teleport };
+struct WarpPlan {
+    WarpRoute route = WarpRoute::refuse;
+    std::string code;  // for `refuse`: the bridge's error code (not_in_play, not_in_event)
+    std::string why;   // for `refuse`: the text
+};
+// Which way, from `status` (a reply with a fresh Link snapshot: an old or missing one cannot say, so it refuses) and
+// whether the caller named an `entrance`: an event runs -> event; none and no entrance -> teleport; none and an entrance
+// -> refuse (the teleport has no start position, the event-only request does).
+WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given);
 // Whether Link is in `scene` now: `status`'s map is the scene (a `_Child` or `_Adult` ending names the age too, the map
 // may not carry it: not seen in a game yet, so either spelling counts) and its fresh snapshot says no event and no load.
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene);

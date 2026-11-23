@@ -619,25 +619,37 @@ TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale")
     CHECK(t.find(",\"snapshot_stale\":false") != std::string::npos);
 }
 
-// ---- F2: warp only while an event runs ----
+// ---- F2: warp by event, or by Longshot's teleport in free play ----
 
-TEST_CASE("playtest: warp is refused in free play with the reason, and allowed during an event") {
-    const auto play = Status(Snap(999));
-    const std::string no = WarpRefusal(&play);
-    CHECK(no.find("only while an event runs") != std::string::npos);
-    CHECK(no.find("boot script") != std::string::npos);
+TEST_CASE("playtest: warp goes by the event request during an event and by the teleport in free play") {
     const auto event = Status(Snap(999, true));
-    CHECK(WarpRefusal(&event).empty());
+    CHECK(PlanWarp(&event, false).route == WarpRoute::event);
+    CHECK(PlanWarp(&event, true).route == WarpRoute::event);     // the event request takes a start position
     const auto boot = Status("{\"event\":true,\"loading\":false,\"age\":\"child\"}");   // no sample yet: the typed event
-    CHECK(WarpRefusal(&boot).empty());
+    CHECK(PlanWarp(&boot, false).route == WarpRoute::event);
+    const auto play = Status(Snap(999));
+    CHECK(PlanWarp(&play, false).route == WarpRoute::teleport);
+}
+
+TEST_CASE("playtest: warp with an entrance in free play is refused with the way out") {
+    const auto play = Status(Snap(999));
+    const auto plan = PlanWarp(&play, true);
+    CHECK(plan.route == WarpRoute::refuse);
+    CHECK(plan.code == "not_in_event");
+    CHECK(plan.why.find("without an entrance") != std::string::npos);
+    CHECK(plan.why.find("boot script") != std::string::npos);
 }
 
 TEST_CASE("playtest: warp says it cannot tell when the snapshot is old or missing") {
-    const auto old = Status(Snap(100), 5000);
-    CHECK(WarpRefusal(&old).find("not readable") != std::string::npos);
-    CHECK(WarpRefusal(nullptr).find("not readable") != std::string::npos);
+    const auto old = Status(Snap(100, true));
+    for (const bool entrance : {false, true}) {
+        CHECK(PlanWarp(&old, entrance).route == WarpRoute::refuse);
+        CHECK(PlanWarp(&old, entrance).code == "not_in_play");
+        CHECK(PlanWarp(&old, entrance).why.find("not readable") != std::string::npos);
+        CHECK(PlanWarp(nullptr, entrance).why.find("not readable") != std::string::npos);
+    }
     const auto nogame = Status("null");
-    CHECK(WarpRefusal(&nogame).find("not readable") != std::string::npos);
+    CHECK(PlanWarp(&nogame, false).route == WarpRoute::refuse);
 }
 
 TEST_CASE("playtest: warp arrived needs the scene, no event, no load and a fresh snapshot") {

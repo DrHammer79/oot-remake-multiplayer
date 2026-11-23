@@ -23,10 +23,11 @@ class PlayersConnected(unittest.TestCase):
 
 
 class WarpVerdict(unittest.TestCase):
-    def test_a_refusal_in_free_play_passes(self):
-        ok, seen = bp.warp_verdict({"ok": False, "error": "not_in_event"}, "KokiriForest_Child")
-        self.assertTrue(ok)
-        self.assertEqual(seen["error"], "not_in_event")
+    def test_a_refusal_fails_with_its_message_in_the_seen(self):
+        ok, seen = bp.warp_verdict({"ok": False, "error": "not_in_event", "message": "not in the list"},
+                                   "KokiriForest_Child")
+        self.assertFalse(ok)
+        self.assertEqual((seen["error"], seen["message"]), ("not_in_event", "not in the list"))
 
     def test_an_arrival_in_the_scene_while_held_passes(self):
         r = {"ok": True, "arrived": True, "paused": True, "frame": 9, "state": {"scene": "KokiriForest_Child"}}

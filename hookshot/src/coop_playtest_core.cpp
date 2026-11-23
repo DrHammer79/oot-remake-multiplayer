@@ -579,18 +579,20 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     return out;
 }
 
-std::string WarpRefusal(const CoopModJson::Value* status) {
+WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given) {
     const auto* game = GameOf(status);
     if (game && !SnapshotIsOld(status)) {
-        if (game->Bool("event") == true) return "";
+        if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
         if (game->Bool("event") == false) {
-            return "warp works only while an event runs (a talk, a sign, the one a save load starts): no event runs in "
-                   "free play, so the game would never take the scene. To change scene in play, restart the session "
-                   "with a boot script that warps; to move within a scene use place or walk_to";
+            if (!entrance_given) return {WarpRoute::teleport, {}, {}};
+            return {WarpRoute::refuse, "not_in_event",
+                    "no event runs, so only Longshot's teleport can change scene, and it has no start position: call "
+                    "warp without an entrance, or restart the session with a boot script that warps there"};
         }
     }
-    return "warp works only while an event runs, and this game's state is not readable now (no Link update: a title, a "
-           "pause or a load). Try again once the game runs";
+    return {WarpRoute::refuse, "not_in_play",
+            "this game's state is not readable now (no Link update: a title, a pause or a load). Try again once the "
+            "game runs"};
 }
 
 bool WarpArrived(const CoopModJson::Value* status, std::string_view scene) {

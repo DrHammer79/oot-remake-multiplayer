@@ -6,7 +6,7 @@ Talks to both games' bridges (standard library only) and checks, in this order, 
   2. step: 60 frames on each advance exactly 60;
   3. shot: one screenshot of each game;
   4. input: A walks (stick up, 30 frames): Link moved, and the frame advanced 30;
-  5. warp: both to --scene; arrived and held, or refused at once with not_in_event (the game takes it only during an event);
+  5. warp: both to --scene (free play: Longshot's teleport); arrived, held;
   6. flag + dump: --flag set to 1 in A; after a few frames both dumps have it 1 (synced);
   7. give: bombs in A (needs LICHII_COOP_CHEATS=1);
   8. a client killed in the middle of a long step (3600) lets game A run again at once;
@@ -115,14 +115,13 @@ def players_connected(state):
 
 
 def warp_verdict(reply, scene):
-    """(pass, seen) for the warp check. The game takes a warp only while an event runs (docs/testing.md), so in free play
-    the right answer is a quick `not_in_event` refusal: that PASSES (the verb says no in words instead of waiting out
-    the timeout). An accepted warp passes when it arrived in `scene` and the game is held."""
+    """(pass, seen) for the warp check: it arrived in `scene` and the game is held. In free play the warp goes by
+    Longshot's teleport (a map of its list, no entrance); a refusal (`not_in_event`: the scene is not in that list) is a
+    FAIL here, with its message in `seen`, so a wrong --scene is told apart from a hang."""
     st = reply.get("state") or {}
-    seen = {"ok": reply.get("ok"), "error": reply.get("error"), "scene": st.get("scene"), "frame": reply.get("frame")}
-    if reply.get("ok"):
-        return bool(reply.get("arrived") and st.get("scene") == scene and reply.get("paused")), seen
-    return reply.get("error") == "not_in_event", seen
+    seen = {"ok": reply.get("ok"), "error": reply.get("error"), "scene": st.get("scene"), "frame": reply.get("frame"),
+            "via": reply.get("via"), "message": reply.get("message")}
+    return bool(reply.get("ok") and reply.get("arrived") and st.get("scene") == scene and reply.get("paused")), seen
 
 
 def moved_verdict(before, after, reply):
@@ -213,12 +212,12 @@ def main(argv=None):
         seen.update(camera=(r.get("state") or {}).get("camera"))
         note("input stick 30 frames A: Link moved, frame +30", ok, seen)
 
-        # 5. warp both. In free play the game refuses (not_in_event): that is the expected answer; use a boot script
-        # that warps to start in another scene (docs/playtest.md).
+        # 5. warp both. In free play it goes by Longshot's teleport (a map of its list, no entrance); unproven through
+        # this verb until a lane run (docs/playtest.md).
         for g in games:
             r = call(g, "warp", scene=a.scene, timeout=60)
             ok, seen = warp_verdict(r, a.scene)
-            note("warp %s %s (arrives, or is refused: not_in_event)" % (a.scene, g), ok, seen)
+            note("warp %s %s" % (a.scene, g), ok, seen)
 
         # 6. flag in A, synced to B (both stepped), dumps agree
         if a.flag:

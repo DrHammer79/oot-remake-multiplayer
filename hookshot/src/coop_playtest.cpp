@@ -445,22 +445,49 @@ std::string Handle(const Request& r) {
                   (asked.after != asked.before ? ",\"strike_seq\":" + std::to_string(asked.after) : std::string()));
     }
     if (r.cmd == "warp") {
-        // The game takes a reserved scene only while an event runs (docs/testing.md, `warp`): in free play it never
-        // does (a talk, a sign or the load's own event is such an event). Refused at once with the reason, instead of
-        // holding the game for the whole timeout.
+        // Two ways (PlanWarp): while an event runs, the module's own scene request (the game takes it only then,
+        // docs/scenes.md "Free-play scene change"); in free play, Longshot's control `teleport` (taken at Link's next
+        // update, so frames must run). Refused at once, with the reason, when neither fits.
         const auto now = LinkStatus();
-        const std::string refusal = WarpRefusal(now ? &*now : nullptr);
-        if (!refusal.empty()) return fail("not_in_event", refusal);
-        std::string error;
-        const std::string line = "warp " + r.scene + (r.entrance.empty() ? "" : " " + r.entrance);
-        if (!played(line, error)) return fail("failed", error);
-        // Frames run (in steps of 10, held between them) until Link is in that scene with no event or load.
+        const WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty());
+        if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
+        if (plan.route == WarpRoute::event) {
+            std::string error;
+            const std::string line = "warp " + r.scene + (r.entrance.empty() ? "" : " " + r.entrance);
+            if (!played(line, error)) return fail("failed", error);
+        } else {
+            const auto id = g_control.Send("\"cmd\":\"teleport\",\"to\":" + Quote(r.scene) +
+                                           ",\"wait\":true,\"timeout\":" + std::to_string(static_cast<int>(r.timeout_s)) + "}");
+            if (!id) return fail("no_control", "HOS_CONTROL unset or unreachable: the free-play warp needs Longshot's teleport");
+            std::optional<Value> taken;
+            while (!taken && std::chrono::steady_clock::now() < until) {
+                if (!gate.Step(2, kHoldWait)) return fail("timeout", "the frames did not run in time");
+                taken = g_control.Await(*id, 50);
+            }
+            if (!taken) {
+                return ErrorReply(r.id, gate.Frame(), gate.Held(), "timeout",
+                                  "Longshot did not take the teleport within " + std::to_string(static_cast<int>(r.timeout_s)) +
+                                      " s (it takes it at Link's next update, in play)");
+            }
+            if (taken->Bool("ok") != true) {
+                const std::string code = taken->Text("error").value_or("failed");
+                const std::string message = taken->Text("message").value_or("");
+                if (code == "not_found") {
+                    return fail("not_in_event", r.scene + " is not in Longshot's teleport list (" + message +
+                                                    ") and no event runs for the module's own warp: restart the "
+                                                    "session with a boot script that warps there");
+                }
+                return fail("failed", "Longshot's teleport: " + code + ": " + message);
+            }
+        }
+        // Frames run (in steps of 10, held between them) until Link is in that scene with no event or load.
         while (std::chrono::steady_clock::now() < until) {
             if (!gate.Step(10, kHoldWait)) return fail("timeout", "the frames did not run in time");
             auto s = LinkStatus();
             if (s && WarpArrived(&*s, r.scene)) {
-                return ok("\"arrived\":true,\"state\":" + StateObject(false, std::move(s)));
+                return ok("\"arrived\":true,\"via\":" + Quote(plan.route == WarpRoute::event ? "event" : "teleport") +
+                          ",\"state\":" + StateObject(false, std::move(s)));
             }
         }
         return ErrorReply(r.id, gate.Frame(), gate.Held(), "timeout",

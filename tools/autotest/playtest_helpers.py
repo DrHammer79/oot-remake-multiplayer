@@ -235,11 +235,12 @@ def interact(client, what="talk", frames=PRESS_FRAMES):
             "event": after.get("event"), "frames": 2 * frames}
 
 
-def _death(client, line, name, ident, out):
+def _death(client, line, name, ident, out, death_frames=None):
     """A `kill` that struck is `ok` only when the actor is seen dead (gone from the list, not alive, or life 0) within
     DEATH_FRAMES more frames: the strike is the hit, the death comes frames later (and, for an actor far from Link, may
     not come: S8). Otherwise `struck: ...` with `died` false (it lives) or null (not checked: no id, or no world list);
-    `died_after` is the frames waited."""
+    `died_after` is the frames waited. `death_frames` (the `kill` tool's `wait_frames`) replaces DEATH_FRAMES."""
+    limit = DEATH_FRAMES if death_frames is None else int(death_frames)
     if not ident:
         return dict(out, result="struck: the hit landed (a kill without an id: its death is not checked; look with "
                                 "get_world)", died=None)
@@ -252,7 +253,7 @@ def _death(client, line, name, ident, out):
         life = (a or {}).get("life")
         if _gone(a, name) or a.get("alive") is False or (isinstance(life, (int, float)) and life <= 0):
             return dict(out, died=True, died_after=waited, frames=out["frames"] + waited)
-        if waited >= DEATH_FRAMES:
+        if waited >= limit:
             return dict(out, result="struck: the hit landed, but %s still lives after %d frames (a far actor may not "
                                     "die until Link is near it: go near it and look with get_world)" % (name, waited),
                         died=False, died_after=waited, frames=out["frames"] + waited)
@@ -260,7 +261,7 @@ def _death(client, line, name, ident, out):
         waited += DEATH_LOOK
 
 
-def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
+def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=None):
     """Send one `kill [ID] NAME` or `hit [ID] NAME N` line (built and checked by mcp_playtest.act_line) and wait up to
     `frames` frames, looking every STRIKE_LOOK, for the objects walk's result in `state.strike`, matched by the strike's
     number (no retry, no other actor). `ident` (the id in the line) is for the words and, for a `kill`, to see the actor
@@ -294,7 +295,7 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES):
     word = last.get("result")
     if word == "done":
         out = {"result": "ok", "line": line, "seq": seq, "frames": used}
-        return _death(client, line, name, ident, out) if line.startswith("kill") else out
+        return _death(client, line, name, ident, out, death_frames) if line.startswith("kill") else out
     if word == "gone":
         return {"result": "refused: %s is gone" % label, "line": line, "seq": seq, "frames": used}
     if word == "not shared":

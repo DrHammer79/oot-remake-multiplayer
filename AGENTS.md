@@ -125,7 +125,7 @@ through the bridge"). Everything above still holds. A coding session never start
   `screenshot`, and more: the list is in [docs/playtest.md](docs/playtest.md)). Every reply has the game's frame count.
 - **The games are paused between your calls.** Nothing happens unless you act; a call runs only the frames it asks
   for. Call `get_state` on every game first: a game whose tools you never called still runs.
-- Use `warp` (and `flag`, `give`) to set a test up. Do not walk across Hyrule to reach it.
+- Use `warp` (and `flag`, `give`) to set a test up: `warp` in free play goes by Longshot's teleport (a map of its list, no start position); for another map or an entrance, start the session with a boot script that warps. Do not walk across Hyrule to reach it.
 - Call `checkpoint` with the same tag on **every** game after each action that should sync. Let the other games run
   a few frames first (`step 30`): a held game receives nothing.
 - After each scenario run `desync_check` (or `python -I tools/autotest/desync_check.py <log dir> --clients`).

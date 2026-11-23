@@ -163,9 +163,12 @@ ACT_TOOLS = [
      "takes the nearest actor of that name with a life. With `id` (the id get_world gave, or its 0x address) it takes "
      "exactly that actor, and refuses when no actor with that id and that name is there any more (it never falls back "
      "to another of the name); an id is refused in solo. Up to 12 frames pass while it waits for the game's answer: "
-     "ok, `refused: actor 7 (NAME) is gone`, or `unknown: no result after 12 frames`. " + ACT_NOTE,
+     "ok, `refused: actor 7 (NAME) is gone`, or `unknown: no result after 12 frames`. With an `id`, `ok` also needs "
+     "the actor seen dead within `wait_frames` more frames (default 36, a guess: S8 saw one die only after Link came "
+     "near it); else `struck: ...` with `died` false. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["actor"],
-                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]}}}},
+                     "properties": {"actor": {"type": "string"}, "id": {"type": ["integer", "string"]},
+                                    "wait_frames": {"type": "integer", "minimum": 0, "maximum": 600}}}},
     {"name": "hit", "description": "Hit an actor for N quarter hearts: `actor` is its NAME from get_world. `id` and the "
      "answer are as for kill (no `id`: the nearest of that name with a life; up to 12 frames pass). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["actor", "amount"],
@@ -262,10 +265,11 @@ PLAYER_TOOLS = [
     {"name": "step", "description": "Let the game run N frames with no input, then pause. " + PAUSED,
      "inputSchema": {"type": "object", "required": ["frames"], "properties": {"frames": FRAMES}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
-     "optionally an entrance (a start position name in it), through the game's own scene change. The game takes it "
-     "ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load starts): in free play it is refused at once "
-     "(`not_in_event`); to start a test in another scene, restart the session with a boot script that warps. It runs "
-     "until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
+     "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
+     "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
+     "a map not in that list, the game takes the request ONLY WHILE AN EVENT RUNS (a talk, a sign, the one a save load "
+     "starts): in free play that is refused at once (`not_in_event`); restart the session with a boot script that "
+     "warps. It runs until Link is there with no event or load (up to `timeout` seconds, default 60), then is held.",
      "inputSchema": {"type": "object", "required": ["scene"],
                      "properties": {"scene": {"type": "string"}, "entrance": {"type": "string"},
                                     "timeout": {"type": "number", "minimum": 1, "maximum": 600}}}},
@@ -455,7 +459,8 @@ class Game:
         line = act_line(name, args)
         if line is not None:
             if name in ("kill", "hit"):
-                return ph.strike(c, line, _word(args, "actor"), _ident(args))
+                wait = int(_bounded(args, "wait_frames", ph.DEATH_FRAMES, 0, 600)) if name == "kill" else None
+                return ph.strike(c, line, _word(args, "actor"), _ident(args), death_frames=wait)
             return c.act(line)
         if name == "go_to_actor":
             return ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
