@@ -380,8 +380,8 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "setup", "description": "Set a test up in ONE call (instead of many flag/give/warp calls): hearts "
      "(current life, 1-20), max_hearts (3-20), magic (0 none, 1 meter, 2 double), rupees, small_keys {Dungeon: n}, "
-     "boss_keys / maps / compasses [Dungeon], items [give names], flags {name: value}, and a last warp {scene, entrance} "
-     "(a boss stage such as GohmaStage works in free play). Dungeons: DekuTree, DodongoCavern, JabuJabu, ForestTemple, "
+     "boss_keys / maps / compasses [Dungeon], items [give names], flags {name: value}, then a warp {scene, entrance} "
+     "and a place {x, y, z} after it (Link put at a point of the new scene). Dungeons: DekuTree, DodongoCavern, JabuJabu, ForestTemple, "
      "FireTemple, WaterTemple, ShadowTemple, SpiritTemple, BottomOfTheWell, IceCavern, GerudoTrainingGround, "
      "GerudoFortress, GanonsCastle, FinalBattleField. Runs in that order, stops at the first refused call and says which. "
      "Needs the verb gate (LICHII_COOP_PLAYTEST_VERBS, LICHII_COOP_CHEATS). MaxLife may be written back by the game "
@@ -395,9 +395,10 @@ PLAYER_TOOLS = [
                                     "small_keys": {"type": "object"}, "boss_keys": {"type": "array"},
                                     "maps": {"type": "array"}, "compasses": {"type": "array"},
                                     "items": {"type": "array"}, "flags": {"type": "object"},
-                                    "warp": {"type": "object"}}}},
+                                    "warp": {"type": "object"}, "place": {"type": "object"}}}},
     {"name": "preset", "description": "Apply a named test start (tools/playtest/data/presets/*.json) with one call: the same "
-     "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma, "
+     "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma (child, the corridor before Gohma's door: walk "
+     "through it), "
      "before-dodongo, before-barinade, before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, "
      "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
      "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",

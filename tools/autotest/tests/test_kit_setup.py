@@ -29,12 +29,24 @@ class Fake:
     def warp(self, scene, entrance=None, timeout=60):
         return self._do("warp", scene, entrance)
 
+    def act(self, line):
+        return self._do("act", line)
+
 
 class Plan(unittest.TestCase):
     def test_life_is_quarter_hearts_and_the_warp_comes_last(self):
         calls = ks.plan({"warp": {"scene": "GohmaStage", "entrance": "GohmaStage"}, "hearts": 5, "max_hearts": 5})
         self.assertEqual(calls, [("flag", "PlayerStatus.MaxLife", 20), ("flag", "PlayerStatus.Life", 20),
                                  ("warp", "GohmaStage", "GohmaStage")])
+
+    def test_place_comes_after_the_warp_and_is_checked(self):
+        calls = ks.plan({"place": {"x": -12, "y": 48.5, "z": 66.5}, "warp": {"scene": "InsideTheDekuTree", "entrance": "Entrance"},
+                         "hearts": 3})
+        self.assertEqual(calls[-2:], [("warp", "InsideTheDekuTree", "Entrance"), ("place", -12.0, 48.5, 66.5)])
+        for bad in ({"x": 1, "y": 2}, {"x": 1, "y": 2, "z": "3"}, {"x": 1, "y": 2, "z": float("nan")},
+                    {"x": True, "y": 2, "z": 3}, {"x": 1, "y": 2, "z": 3, "w": 4}, [1, 2, 3], {"x": 1e9, "y": 0, "z": 0}):
+            with self.assertRaises(ValueError, msg=bad):
+                ks.plan({"place": bad})
 
     def test_items_first_then_magic_rupees_keys(self):
         calls = ks.plan({"magic": 2, "rupees": 99, "items": ["bow"], "small_keys": {"ForestTemple": 3},
@@ -84,6 +96,11 @@ class Plan(unittest.TestCase):
 
 
 class Apply(unittest.TestCase):
+    def test_place_is_sent_as_one_place_line_after_the_warp(self):
+        c = Fake()
+        ks.apply(c, {"warp": {"scene": "InsideTheDekuTree", "entrance": "Entrance"}, "place": {"x": -12, "y": 48.5, "z": 66.5}})
+        self.assertEqual(c.log, [("warp", "InsideTheDekuTree", "Entrance"), ("act", "place -12.0 48.5 66.5")])
+
     def test_runs_every_call_in_order(self):
         c = Fake()
         done = ks.apply(c, {"hearts": 3, "items": ["bombs"], "warp": {"scene": "S"}})
@@ -130,8 +147,10 @@ class Presets(unittest.TestCase):
         starts = open(os.path.join(REPO, "lichii/hook/coop_start_points.inc"), encoding="utf-8").read()
         for name in ks.presets():
             calls = ks.plan(ks.load_preset(name))
-            self.assertEqual(calls[-1][0], "warp", name)       # the warp is last
-            scene, start = calls[-1][1], calls[-1][2]
+            kinds = [c[0] for c in calls]
+            self.assertEqual(kinds.count("warp"), 1, name)
+            self.assertTrue(all(k == "place" for k in kinds[kinds.index("warp") + 1:]), name)   # only a place after it
+            scene, start = calls[kinds.index("warp")][1], calls[kinds.index("warp")][2]
             self.assertIn('{"%s", "%s"' % (scene, start), starts, name)
             for c in calls:
                 if c[0] == "give":
@@ -139,6 +158,22 @@ class Presets(unittest.TestCase):
                                   text, (name, c))
                 elif c[0] == "flag" and not c[1].startswith(("PlayerStatus.", "DungeonInfo.")):
                     self.assertIn(c[1], text, (name, c))
+
+    def test_the_gohma_preset_walks_in_through_the_door_not_the_rush_room(self):
+        # A free-play warp into the boss rush's GohmaStage left both games black, with no control and no camera
+        # (kit-fight's lane run). The preset goes into the Deku Tree, clears the boss room's and the intro's flags so
+        # the door's own trigger runs, and puts Link in the corridor before the door (as gohma-door).
+        calls = ks.plan(ks.load_preset("deku-before-gohma"))
+        self.assertIn(("warp", "InsideTheDekuTree", "Entrance"), calls)
+        self.assertNotIn("GohmaStage", [c[1] for c in calls if c[0] == "warp"])
+        self.assertEqual(calls[-1], ("place", -12.0, 48.5, 66.5))
+        flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+        for name in ("HavePlayedEvent.InsideTheDekuTree_BossArea_ShutIn", "HavePlayedEvent.Dm_Deku_BossIn",
+                     "HavePlayedEvent.Dm_Deku_BossOut", "HavePlayedEvent.InsideTheDekuTree_BossArea_Warp",
+                     "InsideTheDekuTree_BossArea_ShutIn", "InsideTheDekuTree_BossArea_ChangeENVForBoss",
+                     "Gohma_IsLightingForBattle", "Gohma_DefeatBoss", "HavePlayedEvent.InsideTheDekuTree_BossDie"):
+            self.assertEqual(flags.get(name), 0, name)
+        self.assertEqual(flags.get("0x7d776b61"), "DefeatBoss")
 
     def test_a_bad_preset_name_is_refused_with_the_list(self):
         for bad in ("nope", "../x", "", None, "A"):

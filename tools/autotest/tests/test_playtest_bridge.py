@@ -576,7 +576,9 @@ class PlayerServer(unittest.TestCase):
 
     def test_preset_applies_a_named_start_and_a_wrong_name_lists_the_right_ones(self):
         r = self.call("p1", "preset", name="deku-before-gohma")
-        self.assertEqual(r["steps"][-1]["call"], ["warp", "GohmaStage", "GohmaStage"])
+        self.assertEqual([s["call"] for s in r["steps"][-2:]], [["warp", "InsideTheDekuTree", "Entrance"],
+                                                                ["place", -12.0, 48.5, 66.5]])
+        self.assertEqual(self.games["p1"].pos, [-12.0, 48.5, 66.5])   # the corridor before Gohma's door
         self.assertEqual(self.games["p1"].flags["Gohma_DefeatBoss"], 0)
         with self.assertRaises(Exception) as e:
             self.call("p1", "preset", name="nope")
