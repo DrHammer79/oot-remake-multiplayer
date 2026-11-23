@@ -268,6 +268,50 @@ TEST_CASE("testinput: goto with the game's camera, which turns behind Link as he
     }
 }
 
+TEST_CASE("testinput: warp refuses a scene name the game does not have, so nothing is written (2026-11-23 crash)") {
+    // "Market" is not a map name (Market_Child and Market_Adult are): the module wrote it into the game's next-scene
+    // request and a game worker crashed right after the load began.
+    std::string error;
+    CHECK_FALSE(Parse("warp Market\n", error));
+    CHECK(error.find("line 1") == 0);
+    CHECK(error.find("unknown scene 'Market'") != std::string::npos);
+    CHECK(error.find("Market_Adult") != std::string::npos);  // says what was likely meant
+    CHECK(error.find("Market_Child") != std::string::npos);
+    // The whole script is refused, not just the line: no step before it runs either.
+    CHECK_FALSE(Parse("wait 5\nwarp NoSuchPlace Entrance\ngive bombs\n", error));
+    CHECK(error.find("line 2") == 0);
+    CHECK_FALSE(Parse("warp market_child\n", error));  // exact case
+    CHECK_FALSE(Parse("warp Market_Child/../x\n", error));
+    // The names a real run uses still go through.
+    CHECK(Parse("warp Market_Child\nwarp Market_Adult Market_Entrance\nwarp InsideTheDekuTree Entrance\n", error));
+    CHECK(Parse("warp PhantomGanonStage PhantomGanonStage\nwarp WaterTemple StartPos_SageOfWater\n", error));
+    CHECK(Parse("warp BossRushIntervalRoom\n", error));
+}
+
+TEST_CASE("testinput: warp refuses a start name the game's String64 cannot hold or that is not a plain name") {
+    std::string error;
+    CHECK_FALSE(Parse("warp Market_Child Market Entrance\n", error));  // (three words: the line shape)
+    CHECK_FALSE(Parse("warp Market_Child Market-Entrance\n", error));
+    CHECK(error.find("bad start name") != std::string::npos);
+    CHECK_FALSE(Parse("warp Market_Child " + std::string(64, 'A') + "\n", error));
+    CHECK(Parse("warp Market_Child " + std::string(63, 'A') + "\n", error));
+    CHECK(WarpProblem("Market_Child", "").empty());
+    CHECK(WarpProblem("Market_Child", "Market_FrontOfHyruleCastle").empty());
+    CHECK_FALSE(WarpProblem("", "").empty());
+    CHECK_FALSE(WarpProblem("Market", "").empty());
+}
+
+TEST_CASE("testinput: the warp give-up line says when no save is loaded instead of scene ?") {
+    const std::string none = WarpGiveUpLine("KokiriForest_Child", 90.0, std::nullopt);
+    CHECK(none.find("scene ?") == std::string::npos);
+    CHECK(none.find("no save loaded") != std::string::npos);
+    CHECK(none.find("KokiriForest_Child") != std::string::npos);
+    CHECK(none.find("90 s") != std::string::npos);
+    const std::string there = WarpGiveUpLine("KokiriForest_Child", 90.0, std::string("Market_Child"));
+    CHECK(there.find("scene Market_Child") != std::string::npos);
+    CHECK(there.find("no save") == std::string::npos);
+}
+
 TEST_CASE("testinput: warp and give are handed to the hook once, in order") {
     std::string error;
     CHECK_FALSE(Parse("warp\n", error));
