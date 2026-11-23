@@ -181,7 +181,12 @@ def playtest_base(lane):
 
 
 def spawn_watchdog(d):
-    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008}   # DETACHED_PROCESS: outlives the shell
+    # It must outlive the shell that started it, and it must not make a window flash. DETACHED_PROCESS has no console, so
+    # every console program the watchdog (or lanes.running_in, tasklist, git ...) starts gets a NEW visible console
+    # window: a chain of flashing windows through a run. CREATE_NO_WINDOW gives it a hidden console its children share;
+    # CREATE_NEW_PROCESS_GROUP keeps the shell's Ctrl+C away from it, and with its own console the shell's closing does
+    # not end it.
+    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | lanes.hs.CREATE_NO_WINDOW}
           if os.name == "nt" else {"start_new_session": True})
     with open(os.path.join(d, "watchdog.txt"), "ab") as log:
         return subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "watchdog", "--session", d],
