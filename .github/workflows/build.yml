@@ -111,6 +111,8 @@ jobs:
         run: python tools/hookshot/tests/test_hs_share.py -v
       - name: Mods' code patches (Longshot patches 0034, 0035) tests
         run: python tools/hookshot/tests/test_exefs_patches.py -v
+      - name: Puppet bow guard (Longshot patch 0038) tests
+        run: python tools/hookshot/tests/test_puppet_bow_guard.py -v
       - name: The kit's size table, actor rows and menu archives merge tests
         run: python tools/puppet_pack/tests/test_merge_tables.py -v
       - name: Test lanes tests
