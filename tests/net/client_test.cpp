@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "coop/net/client.hpp"
+#include "coop/net/enet_path.hpp"
 #include "coop/net/enet_waiting.hpp"
 #include "coop/protocol/codec.hpp"
 

@@ -17,6 +17,7 @@
 
 #include <enet/enet.h>
 
+#include "coop/net/enet_waiting.hpp"
 #include "coop/protocol/codec.hpp"
 #include "coop/protocol/join_password.hpp"
 #include "coop/protocol/traffic_crypto.hpp"
