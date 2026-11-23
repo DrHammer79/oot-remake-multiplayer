@@ -985,7 +985,7 @@ std::recursive_mutex g_play_mu;
 #define COOP_WIDEN(x) COOP_WIDEN2(x)
 
 std::filesystem::path EnvPath() {
-#ifdef _MSC_VER
+#ifdef _WIN32
     wchar_t* value = nullptr;
     std::size_t size = 0;
     if (_wdupenv_s(&value, &size, COOP_WIDEN(COOP_TEST_ENV)) != 0 || value == nullptr) {

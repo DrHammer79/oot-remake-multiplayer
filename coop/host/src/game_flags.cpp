@@ -310,6 +310,18 @@ std::optional<std::int32_t> GameFlags::get_int(std::uint32_t hash) {
   return static_cast<std::int32_t>(*v);
 }
 
+std::optional<std::int32_t> GameFlags::get_int_live(std::uint32_t hash) {
+  const auto mgr = manager(memory_);
+  if (!mgr) return std::nullopt;
+  const auto index = find(memory_, *mgr, kInt, hash);
+  if (!index) return std::nullopt;
+  const auto entries = read_ptr(memory_, *mgr + kInt.entries);
+  if (!entries) return std::nullopt;
+  const auto v = read_u32(memory_, *entries + kInt.stride * *index + kInt.value);
+  if (!v) return std::nullopt;
+  return static_cast<std::int32_t>(*v);
+}
+
 std::optional<float> GameFlags::get_float(std::uint32_t hash) {
   const auto mgr = manager(memory_);
   if (!mgr) return std::nullopt;
@@ -438,6 +450,19 @@ bool GameFlags::set_string64_now(WritableGameMemory& m, std::uint32_t hash,
   std::array<std::uint8_t, kMaxString64Bytes> bytes{};
   std::copy(text.begin(), text.end(), bytes.begin());
   return m.write(*buffer, std::span<const std::uint8_t>(bytes.data(), text.size() + 1));
+}
+
+bool GameFlags::set_int_now(WritableGameMemory& m, std::uint32_t hash, std::int32_t value) {
+  const auto mgr = manager(m);
+  if (!mgr) return false;
+  const auto index = find(m, *mgr, kInt, hash);
+  if (!index) return false;
+  const auto entries = read_ptr(m, *mgr + kInt.entries);
+  if (!entries) return false;
+  const auto v = static_cast<std::uint32_t>(value);
+  const std::array<std::uint8_t, 4> bytes{static_cast<std::uint8_t>(v), static_cast<std::uint8_t>(v >> 8),
+                                          static_cast<std::uint8_t>(v >> 16), static_cast<std::uint8_t>(v >> 24)};
+  return m.write(*entries + kInt.stride * *index + kInt.value, std::span<const std::uint8_t>(bytes.data(), 4));
 }
 
 std::optional<GameFlags::QueueSizes> GameFlags::queue_sizes() {

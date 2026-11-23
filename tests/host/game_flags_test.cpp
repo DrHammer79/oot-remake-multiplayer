@@ -352,6 +352,25 @@ TEST_CASE("game flags: a String64 written at once into its buffer, and its type 
   CHECK_FALSE(flags.find_type(0x99));
 }
 
+TEST_CASE("game flags: an Int written at once into its entry, and its live value read past the queue") {
+  auto w = game();
+  GameFlags f(w);
+  w.mem.put_u32(kIntEntries + 0x1c, 3);
+  REQUIRE(GameFlags::set_int(w, 0x22, 5));   // queued, not applied
+  CHECK(f.get_int(0x22) == 5);
+  CHECK(f.get_int_live(0x22) == 3);          // what the game's getter reads now
+  CHECK(GameFlags::set_int_now(w, 0x22, -2));
+  CHECK(coop::host::read_u32(w.mem, kIntEntries + 0x1c) == static_cast<std::uint32_t>(-2));
+  CHECK(f.get_int_live(0x22) == -2);
+  CHECK(coop::host::read_u32(w.mem, kMgr + 0xd0 + 0x30) == 0x30100001u);   // the queue: only the set_int's slot
+  CHECK_FALSE(GameFlags::set_int_now(w, 0x25, 1));   // unknown
+  CHECK_FALSE(f.get_int_live(0x25));
+  CHECK_FALSE(GameFlags::set_int_now(w, 0x11, 1));   // a Bool is not an Int
+  w.mem.put_u64(FakeMemory::kBase + 0x4e842a8, 0);
+  CHECK_FALSE(GameFlags::set_int_now(w, 0x22, 1));   // the manager not up
+  CHECK_FALSE(f.get_int_live(0x22));
+}
+
 TEST_CASE("game flags: the writes waiting in the game's queues, as its applier is about to take them") {
   using coop::host::GameFlagType;
   using coop::host::GameFlagWrite;
