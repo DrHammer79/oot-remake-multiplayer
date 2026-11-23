@@ -418,6 +418,20 @@ std::string ReadScenario(const std::filesystem::path& path, int depth = 0) {
 }
 }  // namespace
 
+TEST_CASE("testinput: await is the runner's own step: its shape checked, no module step (row 325)") {
+    std::string error;
+    const auto script = Parse("await 3600 anim Enemy_DungeonBoss_Dodongo \\S+ 'Rolling_Loop'$\nmark after\n", error);
+    REQUIRE_MESSAGE(script.has_value(), error);
+    REQUIRE(script->steps.size() == 1);
+    CHECK(script->steps[0].kind == Kind::mark);
+    CHECK(script->steps[0].line == 2);
+    CHECK(Parse("await 0 x\nmark after\n", error).has_value());  // (the runner takes 0 too)
+    CHECK_FALSE(Parse("await 600\nmark after\n", error));
+    CHECK(error.find("await TICKS REGEX") != std::string::npos);
+    CHECK_FALSE(Parse("await soon foo\nmark after\n", error));
+    CHECK_FALSE(Parse("await 600 foo\n", error));  // (no module step at all: "no steps")
+}
+
 TEST_CASE("testinput: every autotest scenario script parses") {
     const std::filesystem::path dir =
         std::filesystem::path(COOP_TEST_SOURCE_DIR) / ".." / "tools" / "autotest" / "scenarios";

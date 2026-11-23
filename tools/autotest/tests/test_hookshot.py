@@ -1054,6 +1054,22 @@ class ScenarioFilesTest(unittest.TestCase):
             self.assertIn("stun", kinds)
             self.assertIn("event", kinds)
 
+    def test_every_runner_verb_is_the_modules(self):
+        # Row 325 review: the module's own parser (lichii/hook/coop_testinput.cpp Parse) reads every scenario too
+        # (testinput_test 'every autotest scenario script parses', and the emulator played them whole), so a verb
+        # only this runner plays (await) must still be one of its verbs, or that test goes red on a scenario using it.
+        import re
+        with open(os.path.join(HERE, "..", "hookshot.py"), encoding="utf-8") as f:
+            runner = f.read()
+        with open(os.path.join(HERE, "..", "..", "..", "lichii", "hook", "coop_testinput.cpp"), encoding="utf-8") as f:
+            module = set(re.findall(r'cmd == "([A-Z]+)"', f.read()))
+        verbs = set(re.findall(r'cmd == "([A-Z]+)"', runner))
+        for group in re.findall(r'cmd in \(([^)]*)\)', runner):
+            verbs.update(re.findall(r'"([A-Z]+)"', group))
+        self.assertIn("AWAIT", verbs)
+        self.assertGreater(len(verbs), 20)
+        self.assertEqual(sorted(verbs - module), [], "verbs hookshot.py reads that coop_testinput.cpp's Parse does not")
+
 
 class PackStartTest(unittest.TestCase):
     """Row 265 (0.11.12): a game this file starts gets the kit's start of the pack (play.ps1 Use-KitPuppetPack, then

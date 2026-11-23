@@ -520,6 +520,15 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             }
             step.kind = Kind::mark;
             step.mark = std::string(w[1]);
+        } else if (cmd == "AWAIT") {
+            // tools/autotest/hookshot.py's own step (row 325): it reads the game's log until a new line matches, the
+            // module is never asked anything for it (never in the commands file). One scenario grammar for both
+            // readers: its shape is checked here and it makes no module step (test_hookshot.py checks that every
+            // verb the runner reads is one of this parser's).
+            if (w.size() < 3 || !Ticks(w[1], step.ticks)) {
+                return fail("want: await TICKS REGEX (the runner's own step)");
+            }
+            continue;
         } else {
             return fail("unknown command " + std::string(w[0]));
         }
