@@ -707,6 +707,9 @@ struct ListLine {
     // The name / the value is shown as it is: a player's, a room's or a mod's own text, or words already in the player's
     // language (never looked up in the translation table again: a player called "Link" stays "Link").
     bool own_name = false, own_value = false;
+    // A list's heading with more than one page ("Public games  Page 1/2"): the page shows the game's own ZL and ZR
+    // button icons beside it (its controller picture's keys, coop_list_pages.h), as the words have no button letters.
+    bool paged = false;
 };
 
 // --- Typing with a pad: the list's rows are the keys ---

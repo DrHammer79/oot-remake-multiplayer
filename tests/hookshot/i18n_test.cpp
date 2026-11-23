@@ -811,7 +811,7 @@ TEST_CASE("coop i18n: the title's Host and Join pages, Who can join (title-join,
     CHECK(CoopI18n::Tr(hant, "Who can join") == "誰能加入");
     CHECK(CoopI18n::Tr(hans, "Private") == "私人");
     CHECK(CoopI18n::Tr(hant, "Public") == "公開");
-    CHECK(CoopI18n::Tr(hans, "Page 2/3") == "第 2/3 页");   // (row 264: the page line, its ZL / ZR letters added after)
+    CHECK(CoopI18n::Tr(hans, "Page 2/3") == "第 2/3 页");   // (row 264: the page line; the title adds "(ZL/ZR)" after)
     CHECK(CoopI18n::Tr(hant, "Page 1/2") == "第 1/2 頁");
     CHECK(CoopI18n::Tr(hans, "Page") == "页");
     CHECK(CoopI18n::Tr(hant, "Turn the page") == "翻頁");

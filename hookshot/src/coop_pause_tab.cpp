@@ -1913,14 +1913,16 @@ std::vector<ListLine> ListLines(const SessionView& v) {
     // (a heading of text: "Game | Players" with its value box read as a button that did nothing, a tester)
     // (the heading: the list and its page, "< 1 of 3 >" when there are more (a click on its left half goes back a
     // page, on its right half on); its box asks the list again (a click, or Y))
-    // (row 264: the page between the game's own ZL and ZR letters, "Public games  ZL Page 2/3 ZR", so the list says
-    // it pages and with which buttons; the page line is never cut, a long list name gives way: coop_list_pages.h)
+    // (row 264: "Public games  Page 2/3" with the game's own ZL and ZR icons beside the heading (`paged`: the module
+    // shows the page's controller keys there), so the list says it pages and with which buttons; the page line is
+    // never cut, a long list name gives way: coop_list_pages.h)
     const int pages = CellPages(BrowseListed(v.s));
     const std::string head = CoopI18n::Tr(v.s.online ? "Public games" : "This network");
     // (the heading and the words in the player's language, before the cut; the list's own lines the server list
     // brought are already ours)
     lines[0] = ListLine{CoopListPages::Heading(head, CoopListPages::Line(v.s.cell_page, pages), kListNameChars),
                         FitTo(CoopI18n::Tr("Refresh"), kListValueChars), RowAction::kBrowseRefresh};
+    lines[0].paged = pages > 1;
     const std::vector<ListLine>& list = v.s.online ? v.online_list : v.lan_list;
     if (list.empty()) {
         lines[1].name = FitTo(v.browse_all_out ? CoopI18n::Tr("None match the search or Show")

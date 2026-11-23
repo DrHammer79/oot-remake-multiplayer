@@ -80,7 +80,7 @@ TEST_CASE("title native: three rows a page and Back, the page that holds the sel
     CHECK(l.focus == 0);
     CHECK(l.top == 0);
     CHECK(l.pages == 2);
-    CHECK(l.hint == std::string(CoopListPages::kZL) + " Page 1/2 " + CoopListPages::kZR);   // (the game's ZL, ZR letters)
+    CHECK(l.hint == "Page 1/2 (ZL/ZR)");   // (the buttons in words: the title has no icon pane of the game's, row 264)
     v.selected = 4;   // (Port: the fourth shown row, the next page; never a scroll)
     l = LookFor(v, l.top);
     CHECK(l.top == 3);
@@ -88,7 +88,7 @@ TEST_CASE("title native: three rows a page and Back, the page that holds the sel
     CHECK(l.rows[0] == 4);
     CHECK(l.rows[1] == 5);
     CHECK(l.focus == 0);
-    CHECK(l.hint == std::string(CoopListPages::kZL) + " Page 2/2 " + CoopListPages::kZR);
+    CHECK(l.hint == "Page 2/2 (ZL/ZR)");
     CHECK(l.texts[2] == "Back");   // (two rows on the last page: Back right under them)
     CHECK(l.back == 2);
     v.selected = 5;
@@ -152,7 +152,7 @@ TEST_CASE("title native: with the pack's list, every row on one page, Back right
     CHECK(l.rows[0] == 13);
     CHECK(l.focus == 7);
     CHECK(l.texts[13] == "Back");
-    CHECK(l.hint == std::string(CoopListPages::kZL) + " Page 2/3 " + CoopListPages::kZR + "   Joins this game.");   // (the page first, then what the row does)
+    CHECK(l.hint == "Page 2/3 (ZL/ZR)   Joins this game.");   // (the page first, then what the row does)
     CHECK(PageJump(v, l, 1) == 26);
     CHECK(PageJump(v, l, -1) == 0);
     v.selected = 26;   // (the last page: ZR round to the first page's first row, ZL the page before)
