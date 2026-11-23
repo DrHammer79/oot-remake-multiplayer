@@ -7974,6 +7974,40 @@ TEST_CASE("boss turns: a sample's attack bits: read and attacking, read and betw
     CHECK(AttackBits(std::nullopt) == 0);
 }
 
+TEST_CASE("row 211: a boss's attack goes on while a rally ball of its own flies in its game (no boss turn mid-rally)") {
+    using CoopObjects::AttackWithRally;
+    using CoopObjects::RallyMakers;
+    auto seen = [](std::string name, std::optional<bool> attacking) {
+        Seen s = Enemy(0x100, 0x11, 70, 0.0f, std::move(name));
+        s.attacking = attacking;
+        return s;
+    };
+    const Seen dorf = seen("Enemy_DungeonBoss_Ganondorf", false);
+    const Seen phantom = seen("Enemy_DungeonBoss_PhantomGanon", false);
+    const Seen twinrova = seen("Enemy_DungeonBoss_Twinrova", false);
+    // No ball: as read.
+    CHECK(RallyMakers({dorf}).empty());
+    CHECK(AttackWithRally(dorf, RallyMakers({dorf})) == false);
+    // His light ball, his charge ball, Phantom Ganon's ball: each holds its maker's attack.
+    for (const char* ball : {"DungeonBossGanondrof_Bullet_LightBall", "DungeonBossGanondrof_Bullet_ChargeLightBall",
+                             "DungeonBossPhantomGanon_Bullet_LightBall"}) {
+        CAPTURE(ball);
+        const auto makers = RallyMakers({dorf, seen(ball, std::nullopt)});
+        CHECK(AttackWithRally(phantom, makers) == true);
+        CHECK(AttackWithRally(twinrova, makers) == false);
+        CHECK(AttackWithRally(seen("Enemy_DungeonBoss_Ganondorf", true), makers) == true);
+        CHECK_FALSE(AttackWithRally(seen("Enemy_DungeonBoss_PhantomGanon", std::nullopt), makers).has_value());
+    }
+    CHECK(AttackWithRally(dorf, RallyMakers({dorf, seen("DungeonBossGanondrof_Bullet_LightBall", std::nullopt)})) ==
+          true);
+    // Shots no one rallies hold nothing: his shockwave, Phantom Ganon's bolt, Twinrova's beams, Volvagia's rocks.
+    for (const char* shot : {"DungeonBossGanondrof_Bullet_ShockWave", "PhantomGanon_Bullet_Thunder",
+                             "Twinrova_Bullet_FireBeam", "Ganondorf_Bullet_Thunder", "Octorok_Bullet"}) {
+        CAPTURE(shot);
+        CHECK(RallyMakers({dorf, seen(shot, std::nullopt)}).empty());
+    }
+}
+
 TEST_CASE("boss-turns-older-0119: a game that takes boss turns lists its bosses with takes_turns, nothing else") {
     for (const bool on : {false, true}) {
         CAPTURE(on);

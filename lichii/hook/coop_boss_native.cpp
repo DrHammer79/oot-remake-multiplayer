@@ -1158,6 +1158,9 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
             return true;
         }
         const BossAction& action = std::get<BossAction>(d.change.what);
+        if (e.busy_step == steps_) {
+            break;  // row 211: its slot is busy this frame: asked again next frame
+        }
         if (e.own_node == 0) {
             ++counts_.action_waiting;  // (asked again next frame; the changes after it wait too)
             break;
@@ -1251,11 +1254,28 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
             ++counts_.brain_applied;
             Made(true);
             break;
-        case Pending::action:
-            ++counts_.action_applied;
+        case Pending::action: {
             NoteAnswer("the owner's move", result, true);
+            Entry* e = Find(pending_bsa_);
+            if (e != nullptr && result == addr::kActionSlotBusy && e->taken_step != steps_ &&
+                e->busy_asks < kBusyAsks) {
+                // Row 211: the copy's own request took the slot this frame, not one of ours: ours next frame.
+                ++e->busy_asks;
+                e->busy_step = steps_;
+                ++counts_.action_busy_again;
+                Made(false);
+                break;
+            }
+            if (e != nullptr) {
+                e->busy_asks = 0;
+                if (result == addr::kActionTaken) {
+                    e->taken_step = steps_;
+                }
+            }
+            ++counts_.action_applied;
             Made(true);
             break;
+        }
         case Pending::late: {
             ++counts_.copy_own_late;
             const Entry* e = Find(pending_bsa_);

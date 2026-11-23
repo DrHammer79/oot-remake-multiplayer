@@ -118,6 +118,10 @@ bool IsEnemyShot(std::string_view name) {
     return Find(name) != nullptr;
 }
 
+bool IsRallyBall(std::string_view name) {
+    return IsEnemyShot(name) && (name.ends_with("_Bullet_LightBall") || name.ends_with("_Bullet_ChargeLightBall"));
+}
+
 std::vector<std::string_view> MakersOf(std::string_view shot) {
     std::vector<std::string_view> out;
     if (const Shot* s = Find(shot)) {

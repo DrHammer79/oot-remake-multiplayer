@@ -592,6 +592,14 @@ bool KeepsTarget(std::string_view name);
 // Boss turns (0.11.8): a sample's object_state bits for an enemy's attack as its game read it (Seen::attacking):
 // attack_read whenever it was read, attacking with it while the attack runs; 0 when not read.
 std::uint8_t AttackBits(std::optional<bool> attacking);
+// Row 211 (shot-reflect-211-4): the makers (CoopEnemyShots::MakersOf) of every rally ball (IsRallyBall) in a walk.
+std::vector<std::string_view> RallyMakers(const std::vector<Seen>& seen);
+// Row 211: an enemy's attack as sent (Seen::attacking), kept on while a rally ball of its own flies in our game. His
+// light ball's shooting move (Ganondorf's BasicAttack, verb 112) ends as the ball leaves, and a boss turn passed
+// there (proof run 20261123-031042: three turns, each with his ball in the air) moved him to a game where no ball
+// flies, so the owner's volley ('Parry_Ready') and the stun of a rally won ran in a game that had just become a copy
+// and the new owner's verbs took them over. Not read stays not read.
+std::optional<bool> AttackWithRally(const Seen& s, const std::vector<std::string_view>& rally_makers);
 // Row 149: the root a boss part follows in a walk (PartOf's roots in order, the nearest in reach; on a tie the
 // the first in the walk), as GroupsOf picks it; nothing for no boss part or no root in the walk. `names` and `places`
 // are the walk's, one per actor.
@@ -1323,6 +1331,7 @@ private:
         std::vector<coop::protocol::SlotAnimation> slots;  // issue 150: a boss's, as last read
         std::optional<coop::protocol::BossBsa> bsa;         // native boss sync: ours, as last read
         std::optional<bool> attacking;                       // boss turns: its game's Attack attribute (Seen)
+        bool rally_held = false;                             // row 211: attacking only for its rally ball (said once)
         std::optional<coop::protocol::BossBsa> bsa_in;      // native boss sync: a copy's, the owner's latest
         std::optional<coop::protocol::BossOrders> orders;     // row 222: ours, as last read
         std::optional<coop::protocol::BossOrders> orders_in;  // row 222: a copy's, the owner's latest

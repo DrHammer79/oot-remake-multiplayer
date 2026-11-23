@@ -574,6 +574,31 @@ one turn rule; it now also waits for the boss's own attack edge, read in the own
   an older build: a game takes turns only when its presence lists the boss with `object_presence::takes_turns`
   (boss-turns-older-0119), else it would keep the boss for the rest of the fight; the next game by number gets it. A phase with no
   attack (Phantom Ganon in his paintings, Gohma on the ceiling, Volvagia burrowed) never gives a turn.
+- *A rally ball holds the attack (row 211, shot-reflect-211-4; `CoopObjects::AttackWithRally`,
+  `CoopEnemyShots::IsRallyBall`).* Ganondorf's light ball leaves during BasicAttack (verb 112), and the verb falls into
+  103 (no attribute) while the ball still flies at the player: an attack end by the read above. In the proof run
+  20261123-031042 (B owner) each of the three turns passed there, ball in the air: B sent the ball back, his own Ganon
+  began his volley ('Parry_Ready'), but B's game had just become a copy and A's verbs (no ball in A's game) took it
+  over; no rally ever reached a stun. The ball and his answer to it (the volley, or the stun of a rally won) are one
+  attack. So the owner's walk keeps the boss's `attacking` on while a rally ball of its own (a boss ball a sword sends
+  back: Ganondorf's `_Bullet_LightBall` and `_Bullet_ChargeLightBall`, Phantom Ganon's `_Bullet_LightBall`) is in
+  that walk, and the edge comes when the ball is gone (it hit a Link or a wall; sent back into him it ends in his
+  stun, which holds the turn anyway). Logged once a hold: `<boss>: its own rally ball flies here: its attack goes on,
+  no boss turn (row 211)`. Every other boss shot checked (the kShots / kSplit tables): their makers never answer
+  them (Phantom Ganon's bolt and shockwaves, Ganondorf's shockwave, thunder and spread, Ganon's shots, King Dodongo's
+  fire, Volvagia's rocks, the Moblin club wave, Flare Dancer fire), so a hand-over mid-flight changes nothing: each
+  game keeps its own shot (split) or the shot stays with the game that made it, and they keep the no-hold rule
+  above. Twinrova's beams (sent back by the Mirror Shield) belong to a battle-manager group, which takes no turns (row
+  222). Bongo Bongo, Barinade, Morpha, Gohma and Dark Link fire no shot that outlives an attack.
+- *The copy takes the owner's first move after a hand-over (row 211, `Table::Step`).* At a hand-over's first frame
+  the copy's own AI has already asked its action slot (its own requests are skipped only once the owner's verbs
+  came), so the owner's first move answered 3 (the slot took a request this frame) and was dropped: Ganondorf's
+  copy played BasicAttack's animation without its node, so the copy never fired its own (split) ball, and each game
+  saw only the balls of its own turns (2 per game in ~5 min). A busy answer with none of our moves taken for that
+  boss this frame is now asked again next frame (at most `Table::kBusyAsks`, 3); a busy one after ours was taken
+  this frame (the owner's second ask in a frame, which its own game answered the same) and every other refusal are
+  still not asked again (row 190). Generic: every boss and every brain-path enemy copy. Counted in the
+  `bosses: ours sent` line: `N answered a busy slot, M of them asked again next frame`.
 - *The new owner goes on (`CoopBossNative::PlanMadeOurs`).* Handed over between moves, the copy's own brain asked the
   move its body runs: nothing is asked again, its AI goes on from that phase and move. Mid-move (a forced hand-over:
   owner downed or gone) the row 178 start-over or the row 149 re-choice, as before.
