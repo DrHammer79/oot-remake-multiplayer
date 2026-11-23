@@ -468,11 +468,19 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if (!shown_ && CanMinus(now_ms)) return MinusPad(buttons, down);   // (the - menu: its tabs of ours)
     if (!shown_) {
-        if ((down & kPadA) != 0 && system_button_ >= 0 && (system_button_ != 1 || settings_ok_) && CanShow(now_ms)) {
+        if ((down & kPadA) != 0 && system_button_ == 1 && settings_ok_ && longshot_menu_ && CanShow(now_ms)) {
+            // (player report 261: Longshot Settings is Longshot's own menu, opened over the pause menu by the module;
+            // never our copy of its rows. The A is ours: the game does not know the button)
+            open_longshot_ = true;
+            pages_sound_ = "button_decide";
+            swallow_ |= kPadA;
+            return buttons & ~swallow_;
+        }
+        if ((down & kPadA) != 0 && system_button_ >= 0 && system_button_ != 1 && CanShow(now_ms)) {
             // (A on one of System's buttons of ours: its page in System's place, at once; the game's own A never
             // reaches the button, whose name its selectors do not know. Customize Link's is the Multiplayer page,
             // opened on Settings and look's Customize page)
-            shown_ = true, decide_ = false, why_.clear(), which_ = system_button_ == 1 ? 1 : 0, sub_ = false, back_ = false;
+            shown_ = true, decide_ = false, why_.clear(), which_ = 0, sub_ = false, back_ = false;
             opened_from_ = system_button_;
             customize_open_ = system_button_ == 2;
             slide_ = 0;

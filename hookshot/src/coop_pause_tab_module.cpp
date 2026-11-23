@@ -1254,7 +1254,8 @@ void LiveRows(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionV
     g_rows_blank = blank;
     LiveCells(ctx, layout, gen, v);
     ApplyBlankRows(ctx);   // (after LiveCells: it finds the rows' panes)
-    if (g_page.SettingsUsable()) LiveSettings(ctx, layout, gen);
+    // (player report 261: never filled now: Longshot Settings opens Longshot's own menu, the page never shows)
+    if (g_page.SettingsUsable() && g_page.Shown() && g_page.Which() == 1) LiveSettings(ctx, layout, gen);
 }
 
 // The pages' panes, looked up once per opening (`calls`: ctx may call(); else looked up at a later update).
@@ -2796,6 +2797,32 @@ BOOL CALLBACK FindGameWindow(HWND h, LPARAM out) {
 }
 #endif
 
+// Player report 261: System's Longshot Settings button opens Longshot's own menu (the F1 / Insert menu, its every row, tab
+// and help), as the player's F1 does: the key handed to the game's window as a press (host/display.c WM_KEYDOWN notes it
+// for the menu, gpu/vk/vk_menu.cpp take_key_press), the window being in front (the menu opens only for the window in
+// front, and the A came from it). True: handed. Linux' window is SDL's, whose keys no message reaches: there the button
+// is not offered (CanOpenLongshotMenu), never our copy of the rows.
+constexpr bool CanOpenLongshotMenu() {
+#ifdef _WIN32
+    return true;
+#else
+    return false;
+#endif
+}
+bool OpenLongshotMenu() {
+#ifdef _WIN32
+    HWND window = nullptr;
+    EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&window));
+    if (window == nullptr) return false;
+    constexpr WPARAM kF1 = 0x70;   // VK_F1: always opens the menu (Insert can be taken off it: Controls, Menu shortcut)
+    const LPARAM scan = static_cast<LPARAM>(MapVirtualKeyA(static_cast<UINT>(kF1), MAPVK_VK_TO_VSC)) << 16;
+    return PostMessageA(window, WM_KEYDOWN, kF1, scan | 1) != 0 &&
+           PostMessageA(window, WM_KEYUP, kF1, scan | 1 | (LPARAM{1} << 30) | (LPARAM{1} << 31)) != 0;
+#else
+    return false;
+#endif
+}
+
 // (a test run's, LICHII_COOP_TEST_STATE=1 only: the left button as the file mouse.now in the game's folder says it,
 // "1" down, "0" up, when the PC's own state does not show a test's injected clicks; read at most every 15 ms)
 bool TestLeftButton(bool held) {
@@ -3425,8 +3452,9 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             if (f.kind == Kind::kPages) LookPages(ctx, calls, f, gen);
             if (f.kind != Kind::kBlocker) g_page.SetUsable(CanCall() && g_pages_ok && g_settings_button != 0);
             if (f.kind != Kind::kBlocker) {   // (Longshot Settings: its page, System's button and Longshot's settings)
-                g_page.SetSettingsUsable(g_page.Usable() && g_settings_pane != 0 && g_settings_button != 0 &&
-                                         CoopLongshotSettings::Available());
+                // (player report 261: the button opens Longshot's own menu; offered only where the module can open it)
+                g_page.SetLongshotMenu(CanOpenLongshotMenu());
+                g_page.SetSettingsUsable(g_page.Usable() && g_settings_button != 0 && g_page.LongshotMenu());
             }
             d = g_page.OnScreen(f, NowMs());
             now_shown = g_page.Shown();
@@ -3825,6 +3853,12 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 g_menu_tab = 0, g_menu_list = false, g_menu_top = 0, g_menu_focus_reset = true;
                 SetView(View::kMenu);
                 LOG_INFO(Core, "coop: pause tab: Customize Link from System: Settings and look's Customize page");
+            }
+            if (g_page.TakeOpenLongshotMenu()) {
+                const bool opened = OpenLongshotMenu();
+                LOG_INFO(Core, "coop: pause tab: Longshot Settings: {}",
+                         opened ? "Longshot's own menu opened (F1 handed to the game's window)"
+                                : "Longshot's own menu could not be opened (no game window)");
             }
             if (g_page.TakeRefusedA()) {
                 LOG_INFO(Core, "coop: pause tab: an A on System's button of ours while the page cannot show (usable {}, "
