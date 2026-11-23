@@ -442,14 +442,14 @@ check 'Character Select 0.2.2: the tool stops -> its reason is said, nothing put
 FAKE_TOOL_NOMOD=1 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t2.txt" 2>&1; export CODE=$?
 check 'Character Select 0.2.2: a module the tool needs is missing -> the line names it, nothing put in' \
     bash -c '[ $CODE -eq 0 ] && grep -q "lacks a module" "$1" && grep -q "astc_encoder" "$1" && [ ! -e "$2" ]' _ "$tmp/build-t2.txt" "$CS"
-# the default part: the tool gets the game's romfs and --exclude for the NPC files; the zip's voices and patch stay
+# the default part: the tool gets the game's romfs and --exclude for the NPC files; the zip's voices (romfs/Sound) are dropped with the NPC part, the code patch stays
 : >"$CS_TOOL_LOG"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t3.txt" 2>&1; export CODE=$?
 check 'Character Select 0.2.2: the default part: the tool is given data/game/romfs and --exclude, the NPC files are not made' \
     bash -c '[ $CODE -eq 0 ] && [ "$(grep -c ^ARGS "$3")" = 1 ] && grep -q -- "--romfs .*/data/game/romfs --mod .*/data/game/mods/_OoT Character Select.new " "$3" && grep -q -- "--exclude " "$3" &&
         [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] && [ -f "$2/romfs/Model/Player_Child.Player_Child.bfres.zs" ] &&
         [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex" ] && grep -q "^v2 .* ui cz1$" "$2/coop-charsel.txt" &&
-        [ -f "$2/romfs/Sound/PlAdult_X.bwav" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
+        [ ! -e "$2/romfs/Sound" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
         [ ! -e "$2/build-from-your-game" ] && [ ! -e "$4/builder/charsel/charsel-tool" ] && [ ! -e "$4/builder/charsel/CS-v2.zip" ]' _ "$tmp/build-t3.txt" "$CS" "$CS_TOOL_LOG" "$D"
 # run again: nothing is made again
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
@@ -461,7 +461,7 @@ sed -i 's/^character_select = no$/character_select = yes/' "$D/coop-options.ini"
 : >"$CS_TOOL_LOG"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t5.txt" 2>&1; export CODE=$?
 check 'Character Select 0.2.2: yes -> the tool runs without --exclude, the NPC files are made' \
-    bash -c '[ $CODE -eq 0 ] && ! grep -q -- "--exclude" "$3" && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v2 .* full cz1$" "$2/coop-charsel.txt"' _ "$tmp/build-t5.txt" "$CS" "$CS_TOOL_LOG"
+    bash -c '[ $CODE -eq 0 ] && ! grep -q -- "--exclude" "$3" && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ -f "$2/romfs/Sound/PlAdult_X.bwav" ] && grep -q "^v2 .* full cz1$" "$2/coop-charsel.txt"' _ "$tmp/build-t5.txt" "$CS" "$CS_TOOL_LOG"
 # character_select = off: the kit's copy is taken out, nothing is downloaded, the tool not run
 sed -i 's/^character_select = yes$/character_select = off/' "$D/coop-options.ini"
 : >"$CS_TOOL_LOG"
