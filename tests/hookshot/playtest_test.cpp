@@ -283,6 +283,8 @@ TEST_CASE("playtest: the world member with no snapshot yet is an empty list with
     REQUIRE(w);
     CHECK(w->Get("frame")->kind == CoopModJson::Value::Kind::Null);
     CHECK(w->Get("actors")->array.empty());
+    // solo: the reason says so, so a tester does not read "nothing here"
+    CHECK(Compact(*w->Get("why")).find("no co-op session") != std::string::npos);
 }
 
 TEST_CASE("playtest: the world member lists actors with owner, alive and both frames") {
@@ -312,14 +314,25 @@ TEST_CASE("playtest: the world member lists actors with owner, alive and both fr
     CHECK(w->Get("age_ms")->number == 200);
     CHECK(Compact(*w->Get("stale")) == "false");
     CHECK(Compact(*w->Get("behind")) == "true");  // the game is at 10, the snapshot at 8
-    CHECK(w->Get("count")->number == 2);
+    CHECK(w->Get("count")->number == 1);  // `state`: the known kinds only, grass is counted
+    CHECK(w->Get("total")->number == 2);
+    CHECK(w->Get("other_count")->number == 1);
+    CHECK(w->Get("why") == nullptr);  // not empty: no reason
     const auto& a0 = w->Get("actors")->array[0];
+    CHECK(a0.Get("id")->number == 4660);
+    CHECK(Compact(*a0.Get("addr")) == "\"0x1234\"");  // the id in hex, as the debug log prints addresses
     CHECK(Compact(*a0.Get("owner")) == "\"server\"");
     CHECK(Compact(*a0.Get("kind")) == "\"enemy\"");
     CHECK(Compact(*a0.Get("alive")) == "true");
     CHECK(a0.Get("pos")->array.size() == 3);
     CHECK(a0.Get("pos")->array[2].number == doctest::Approx(-3.25).epsilon(0.05));
-    const auto& a1 = w->Get("actors")->array[1];
+    const std::string whole = WorldMember(true, s, 10, 1200, true);  // `dump`: the grass too
+    const auto fv = CoopModJson::Parse("{" + whole.substr(1) + "}");
+    REQUIRE(fv);
+    const auto* fw = fv->Get("world");
+    REQUIRE(fw);
+    CHECK(fw->Get("count")->number == 2);
+    const auto& a1 = fw->Get("actors")->array[1];
     CHECK(Compact(*a1.Get("owner")) == "null");  // unknown owner: null
     CHECK(Compact(*a1.Get("alive")) == "null");  // no life read: unknown, not dead
     CHECK(Compact(*a1.Get("life")) == "null");
@@ -339,4 +352,62 @@ TEST_CASE("playtest: a world snapshot older than 1.5 s is an empty list marked s
     CHECK(w->Get("count")->number == 0);
     CHECK(w->Get("actors")->array.empty());
     CHECK(w->Get("age_ms")->number == 1501);
+    CHECK(Compact(*w->Get("why")).find("stale: no walk for 1501 ms") != std::string::npos);
+}
+
+TEST_CASE("playtest: an empty snapshot that is fresh says the walk ran and saw nothing") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 8;
+    s.taken_ms = 1000;
+    const std::string m = WorldMember(true, s, 8, 1100);
+    const auto v = CoopModJson::Parse("{" + m.substr(1) + "}");
+    REQUIRE(v);
+    const auto* w = v->Get("world");
+    REQUIRE(w);
+    CHECK(Compact(*w->Get("stale")) == "false");
+    CHECK(w->Get("count")->number == 0);
+    CHECK(Compact(*w->Get("why")).find("empty:") != std::string::npos);
+}
+
+TEST_CASE("playtest: state lists at most 40 known-kind actors and counts the rest, the dump lists them all") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 8;
+    s.taken_ms = 1000;
+    for (int i = 0; i < 60; ++i) {  // 60 enemies then 100 grass (the snapshot is sorted known kinds first)
+        CoopWorldSnapshot::WorldActor a;
+        a.id = 100 + static_cast<std::uint64_t>(i);
+        a.name = "Enemy_Test";
+        a.kind = CoopWorldSnapshot::Kind::enemy;
+        s.actors.push_back(a);
+    }
+    for (int i = 0; i < 100; ++i) {
+        CoopWorldSnapshot::WorldActor a;
+        a.id = 1000 + static_cast<std::uint64_t>(i);
+        a.name = "Obj_Plant_Grass_A";
+        s.actors.push_back(a);
+    }
+    const auto parse = [&](bool full) {
+        const std::string m = WorldMember(true, s, 8, 1000, full);
+        return CoopModJson::Parse("{" + m.substr(1) + "}");
+    };
+    const auto brief = parse(false);
+    REQUIRE(brief);
+    CHECK(brief->Get("world")->Get("count")->number == 40);
+    CHECK(brief->Get("world")->Get("actors")->array.size() == 40);
+    CHECK(brief->Get("world")->Get("total")->number == 160);
+    CHECK(brief->Get("world")->Get("other_count")->number == 100);
+    const auto whole = parse(true);
+    REQUIRE(whole);
+    CHECK(whole->Get("world")->Get("count")->number == 160);
+    CHECK(whole->Get("world")->Get("actors")->array.size() == 160);
+}
+
+TEST_CASE("playtest: a held state waits for a newer snapshot only when one is coming") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 5;
+    s.taken_ms = 1000;
+    CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(std::nullopt, 10, 1000));  // solo: no walk, no wait
+    CHECK(CoopWorldSnapshot::WorthWaiting(s, 10, 1100));                   // fresh and behind: wait
+    CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(s, 5, 1100));              // already at the frame
+    CHECK_FALSE(CoopWorldSnapshot::WorthWaiting(s, 10, 1000 + CoopWorldSnapshot::kStaleMs + 1));  // stale: no wait
 }

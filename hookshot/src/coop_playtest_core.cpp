@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_playtest_core.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -402,9 +403,12 @@ std::string Num(float v) {
 }  // namespace
 
 std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Snapshot>& snapshot,
-                        std::uint64_t now_frame, std::uint64_t now_ms) {
+                        std::uint64_t now_frame, std::uint64_t now_ms, bool full) {
     if (!enabled) return "";
-    if (!snapshot) return ",\"world\":{\"frame\":null,\"stale\":false,\"count\":0,\"actors\":[]}";
+    if (!snapshot) {
+        return ",\"world\":{\"frame\":null,\"stale\":false,\"total\":0,\"other_count\":0,\"count\":0,"
+               "\"why\":\"no co-op session: the world list is read only while connected and sharing\",\"actors\":[]}";
+    }
     const std::uint64_t age = now_ms >= snapshot->taken_ms ? now_ms - snapshot->taken_ms : 0;
     const auto fresh = CoopWorldSnapshot::Judge(snapshot->frame, now_frame, age);
     const bool stale = fresh == CoopWorldSnapshot::Freshness::stale;
@@ -413,12 +417,28 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
                       ",\"stale\":" + (stale ? "true" : "false") +
                       ",\"behind\":" + (fresh == CoopWorldSnapshot::Freshness::behind ? "true" : "false") +
                       ",\"cost_us\":" + std::to_string(snapshot->cost_us);
-    const std::size_t count = stale ? 0 : snapshot->actors.size();
-    out += ",\"count\":" + std::to_string(count) + ",\"actors\":[";
+    // The snapshot is sorted known kinds first, so the known ones lead; `state` stops at kStateLimit of them.
+    std::size_t other = 0;
+    for (const auto& a : snapshot->actors) other += a.kind == CoopWorldSnapshot::Kind::other ? 1 : 0;
+    std::size_t count = stale ? 0 : snapshot->actors.size();
+    if (!full && count > 0) {
+        const std::size_t known = snapshot->actors.size() - other;
+        count = std::min(known, CoopWorldSnapshot::kStateLimit);
+    }
+    out += ",\"total\":" + std::to_string(stale ? 0 : snapshot->actors.size()) +
+           ",\"other_count\":" + std::to_string(stale ? 0 : other) + ",\"count\":" + std::to_string(count);
+    if (stale) {
+        out += ",\"why\":" + Quote("stale: no walk for " + std::to_string(age) + " ms (a load, or the session ended)");
+    } else if (snapshot->actors.empty()) {
+        out += ",\"why\":\"empty: the walk ran and saw no actors\"";
+    }
+    out += ",\"actors\":[";
     for (std::size_t i = 0; i < count; ++i) {
         const auto& a = snapshot->actors[i];
+        char hex[24];
+        std::snprintf(hex, sizeof hex, "0x%llx", static_cast<unsigned long long>(a.id));
         out += i ? "," : "";
-        out += "{\"id\":" + std::to_string(a.id) + ",\"name\":" + Quote(a.name) + ",\"kind\":\"" +
+        out += "{\"id\":" + std::to_string(a.id) + ",\"addr\":\"" + hex + "\",\"name\":" + Quote(a.name) + ",\"kind\":\"" +
                CoopWorldSnapshot::KindName(a.kind) + "\",\"pos\":[" + Num(a.pos[0]) + "," + Num(a.pos[1]) + "," +
                Num(a.pos[2]) + "],\"dist\":" + Num(a.dist) +
                ",\"life\":" + (a.life ? std::to_string(*a.life) : "null") +

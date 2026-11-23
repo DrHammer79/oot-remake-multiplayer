@@ -269,24 +269,26 @@ std::uint64_t SteadyMs() {
 }
 
 // The world list (docs/playtest.md, "State"). Held: the game stands at a frame, so wait up to 300 ms for the object
-// walk (the present thread keeps running) to publish a snapshot of that frame; running: the newest one, with its frame.
-std::string WorldText() {
+// walk (the present thread keeps running) to publish a snapshot of that frame, but only when one is coming (there is a
+// fresh one, behind the frame); with none (solo) or a stale one it does not wait. Running: the newest one, with its
+// frame. `full`: the dump's whole list; else the nearest 40 known kinds.
+std::string WorldText(bool full) {
     auto& store = CoopWorldSnapshot::TheStore();
     if (!store.Enabled()) return "";
     const std::uint64_t now = g_gate ? g_gate->Frame() : 0;
     auto snap = store.Get();
     if (g_gate && g_gate->Held()) {
         const auto until = std::chrono::steady_clock::now() + 300ms;
-        while ((!snap || snap->frame < now) && std::chrono::steady_clock::now() < until) {
+        while (CoopWorldSnapshot::WorthWaiting(snap, now, SteadyMs()) && std::chrono::steady_clock::now() < until) {
             std::this_thread::sleep_for(10ms);
             snap = store.Get();
         }
     }
-    return WorldMember(true, snap, now, SteadyMs());
+    return WorldMember(true, snap, now, SteadyMs(), full);
 }
 
 // The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
-std::string StateMembers() {
+std::string StateMembers(bool full_world = false) {
     std::string out;
     const auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
     const Value* game = status ? status->Get("game") : nullptr;
@@ -325,11 +327,11 @@ std::string StateMembers() {
         first = false;
     }
     out += "]}";
-    out += WorldText();
+    out += WorldText(full_world);
     return out;
 }
 
-std::string StateObject() { return "{" + StateMembers() + "}"; }
+std::string StateObject(bool full_world = false) { return "{" + StateMembers(full_world) + "}"; }
 
 // ---- the commands ----
 
@@ -424,7 +426,7 @@ std::string Handle(const Request& r) {
         std::filesystem::create_directories(g_dir / "dumps", ec);
         const auto path = g_dir / "dumps" / (r.tag + ".json");
         std::ofstream f(path, std::ios::binary | std::ios::trunc);
-        f << "{\"frame\":" << gate.Frame() << ",\"tag\":" << Quote(r.tag) << ",\"state\":" << StateObject() << ","
+        f << "{\"frame\":" << gate.Frame() << ",\"tag\":" << Quote(r.tag) << ",\"state\":" << StateObject(true) << ","
           << body << "}\n";
         if (!f) return fail("failed", "the dump file could not be written");
         LOG_INFO(Core, "coop: playtest: dump {} at frame {}: {} flags", r.tag, gate.Frame(), count);

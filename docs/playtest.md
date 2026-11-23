@@ -132,25 +132,34 @@ pause or load it is older). `control` is false when Longshot's bridge did not an
 stays `null` until the room is found in memory.
 
 **`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
-the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...), at most 200.
-It is there only while the games are connected and sharing, because the object walk runs only then; alone it is an
-empty list with `frame` null.
+the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk
+reads the place of every actor it sees and keeps up to 200, `other` last, because the sync checks need grass, bushes and
+beehives too. `state` lists only the nearest 40 of the known kinds and counts the rest (`total`, `other_count`); `dump`
+lists all of them. It is there only while the games are connected and sharing, because the object walk runs only then.
+
+**An empty `actors` list does not mean "nothing here".** Solo (no co-op session) it is empty with `frame` null, and
+`why` says so. Each empty list carries a `why`:
+
+- `"no co-op session: the world list is read only while connected and sharing"`: the walk never ran.
+- `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s.
+- `"empty: the walk ran and saw no actors"`: connected, and the room really has none.
 
 ```
-"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"count":1,"actors":[
-  {"id":2147483648,"name":"Enemy_Example","kind":"enemy","pos":[1.5,0.0,-3.2],"dist":4.0,"life":2,"max_life":4,
+"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"total":31,"other_count":30,"count":1,"actors":[
+  {"id":2147483648,"addr":"0x80000000","name":"Enemy_Example","kind":"enemy","pos":[1.5,0.0,-3.2],"dist":4.0,"life":2,"max_life":4,
    "owner":"server","alive":true}]}
 ```
 
+- `id` is the actor's address in decimal and `addr` the same in hex, as the `LICHII_COOP_DEBUG_OBJECTS` log prints it.
 - `owner` is `"server"`, a player number, or `null` (the sharing does not know the actor). `life`, `max_life` and
   `alive` are read for enemies only; for any other kind they are `null` (unknown, not dead).
 - `frame` is the bridge's frame count when the walk began; the reply's own `frame` is the game's now. While the game
-  is held, `state` waits up to 300 ms for a snapshot of that frame; if none comes, `behind` is true and the older list
-  is returned with its frame. A running game returns the newest list, which is a few frames old.
+  is held, `state` waits up to 300 ms for a snapshot of that frame, but only when a fresh one is behind the frame (solo
+  or stale: no wait); if none comes, `behind` is true and the older list is returned with its frame. A running game returns the newest list, which is a few frames old.
 - A snapshot older than 1.5 s of wall clock (a load, a closed room, the walk stopped) is not shown: `stale` is true,
-  `count` 0, `actors` empty, `age_ms` says how old.
+  `count` 0, `actors` empty, `why` says "stale", `age_ms` says how old.
 - The list costs the object walk `cost_us` microseconds about every 100 ms. Without the bridge (the switch is never
-  turned on) the walk does one atomic load and the `state` text has no `world` member.
+  turned on) the walk does two relaxed atomic loads (before and after the actor loop) and the `state` text has no `world` member.
 
 Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
 angle `w - camera` (the sign is settled by the LANE1 proof run; `walk_to` learns it from how Link moves). The camera turns as Link walks, so steer in short `input` steps (5 to 10 frames) and read `camera`

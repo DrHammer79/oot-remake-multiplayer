@@ -112,8 +112,13 @@ std::string Compact(const CoopModJson::Value& value);
 // "" (no member) when the snapshot switch is off, so the old reply stays byte for byte the same. `now_frame` is the
 // bridge's frame count, `now_ms` the steady clock in ms. Returns `,"world":{...}`: frame (the snapshot's), age_ms,
 // stale (older than 1.5 s: then `actors` is empty), behind (the game is past the snapshot's frame), cost_us, count,
-// actors [{id,name,kind,pos,dist,life,max_life,owner,alive}] nearest first. No snapshot yet: `actors` empty, `frame` null.
+// total (actors in the snapshot), other_count (of them, kind "other": grass, pots), count (listed), actors
+// [{id,addr,name,kind,pos,dist,life,max_life,owner,alive}] nearest first. `id` is the actor's address in decimal and
+// `addr` the same in hex, as the LICHII_COOP_DEBUG_OBJECTS log prints it. `full` false (state): at most
+// kStateLimit actors of a known kind, the "other" ones only counted; true (dump): all the snapshot's actors.
+// An empty `actors` has a `why`: "no co-op session: ..." (no snapshot), "stale: no walk for N ms ..." or "empty: the
+// walk ran and saw no actors". No snapshot yet: `frame` null.
 std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Snapshot>& snapshot,
-                        std::uint64_t now_frame, std::uint64_t now_ms);
+                        std::uint64_t now_frame, std::uint64_t now_ms, bool full = false);
 
 }  // namespace CoopPlaytest

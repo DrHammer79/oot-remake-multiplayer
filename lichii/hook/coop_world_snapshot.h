@@ -6,7 +6,8 @@
 // This file is the game-free part: the kind table, the owner and alive rules, the sort-and-cut, the store and the
 // freshness rule. Tested in tests/lichii/objects_world_test.cpp.
 //
-// Off (nothing called Enable): the walk does one atomic load and nothing else.
+// Off (nothing called Enable): the walk does two relaxed atomic loads (one before the actor loop, one after it) and
+// nothing else.
 #pragma once
 
 #include <algorithm>
@@ -156,7 +157,8 @@ struct Snapshot {
 };
 
 inline constexpr std::uint64_t kStaleMs = 1500;  // a snapshot older than this (wall clock) is not shown
-inline constexpr std::size_t kLimit = 200;       // actors kept per snapshot
+inline constexpr std::size_t kLimit = 200;       // actors kept per snapshot (the dump lists all of them)
+inline constexpr std::size_t kStateLimit = 40;   // actors of a known kind that `state` lists (nearest first)
 
 enum class Freshness { current, behind, stale };
 // stale: the walk stopped (a load, a closed room). behind: the game is further on than the snapshot (a held game
@@ -164,6 +166,14 @@ enum class Freshness { current, behind, stale };
 inline Freshness Judge(std::uint64_t snapshot_frame, std::uint64_t now_frame, std::uint64_t age_ms) {
     if (age_ms > kStaleMs) return Freshness::stale;
     return snapshot_frame < now_frame ? Freshness::behind : Freshness::current;
+}
+
+// Whether a held `state` should wait for a newer snapshot: only when one exists, is not stale and is behind the frame.
+// With none (solo: the walk does not run) or a stale one, no snapshot is coming, so waiting would only cost time.
+inline bool WorthWaiting(const std::optional<Snapshot>& snap, std::uint64_t now_frame, std::uint64_t now_ms) {
+    if (!snap) return false;
+    const std::uint64_t age = now_ms >= snap->taken_ms ? now_ms - snap->taken_ms : 0;
+    return age <= kStaleMs && snap->frame < now_frame;
 }
 
 // One writer (the walk, present thread), one reader (the bridge). Any thread may call Enabled.
@@ -190,7 +200,7 @@ public:
         snapshot_ = std::move(s);
         has_ = true;
     }
-    void Clear() {  // a new scene or no session: the old list is not this world
+    void Clear() {  // (called by Disable only; a scene change or a closed session shows as `stale` after 1.5 s)
         std::lock_guard lock(mutex_);
         snapshot_ = Snapshot{};
         has_ = false;
