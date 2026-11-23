@@ -6,6 +6,7 @@
 
 #include "coop_draw.h"
 #include "coop_i18n.h"
+#include "coop_native_ui.h"
 
 namespace CoopDbnoDraw {
 
@@ -42,6 +43,82 @@ std::string Line(const CoopDbno::View& view) {
         line += "  " + p;
     }
     return line;
+}
+
+namespace {
+
+// The words before the live part, with `name` in place of the view's name and "(out of sight)" only with `sight`.
+std::string Head(const CoopDbno::View& view, const std::string& name, bool sight) {
+    CoopDbno::View v = view;
+    v.name = name;
+    v.elsewhere = view.elsewhere && sight;
+    if (v.kind == CoopDbno::View::Kind::spectating) {
+        return CoopI18n::Tr("Watching") + " " + v.name + (v.elsewhere ? " " + CoopI18n::Tr("(out of sight)") : std::string());
+    }
+    return Caption(v);
+}
+
+// The live part: the clock and the share, or "A: next player".
+std::string Tail(const CoopDbno::View& view) {
+    if (view.kind == CoopDbno::View::Kind::spectating) {
+        return CoopI18n::Tr("A: next player");
+    }
+    std::string tail = CoopDbno::Clock(view.left_us);
+    const bool reviving = view.kind == CoopDbno::View::Kind::downed ? !view.name.empty() : view.holding;
+    if (const std::string p = Progress(view.progress); reviving && !p.empty()) {
+        tail += "  " + p;
+    }
+    return tail;
+}
+
+// `s` without its last UTF-8 character.
+void PopChar(std::string& s) {
+    while (!s.empty() && (static_cast<unsigned char>(s.back()) & 0xC0) == 0x80) {
+        s.pop_back();
+    }
+    if (!s.empty()) {
+        s.pop_back();
+    }
+}
+
+}  // namespace
+
+std::string BannerLine(const CoopDbno::View& view, std::size_t columns) {
+    const std::string tail = Tail(view);
+    const auto fits = [&](const std::string& head) {
+        return CoopNativeUi::Columns(head) + 2 + CoopNativeUi::Columns(tail) <= columns;
+    };
+    std::string head = Head(view, view.name, true);
+    if (!fits(head)) {
+        head = Head(view, view.name, false);
+    }
+    std::string name = view.name;
+    while (!fits(head) && !name.empty()) {
+        PopChar(name);
+        head = Head(view, name.empty() ? std::string("...") : name + "...", false);
+        if (name.empty()) break;
+    }
+    while (!fits(head) && !head.empty()) {   // (a translation too long by itself: its end goes, never the live part)
+        PopChar(head);
+    }
+    if (head.empty()) {
+        return tail;
+    }
+    return head + "  " + tail;
+}
+
+bool BannerHold::Want(const CoopDbno::View& view, std::uint64_t now_ms) {
+    if (view.kind != CoopDbno::View::Kind::spectating) {
+        spectating_ = false;
+        return true;
+    }
+    if (!spectating_ || view.name != name_ || view.elsewhere != elsewhere_) {
+        spectating_ = true;
+        name_ = view.name;
+        elsewhere_ = view.elsewhere;
+        since_ms_ = now_ms;
+    }
+    return now_ms - since_ms_ < kSpectateHoldMs;
 }
 
 float LinePx(float width, float height, float measured_at_px, float measured_width) {

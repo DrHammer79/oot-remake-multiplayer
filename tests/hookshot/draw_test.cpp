@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "coop_dbno_draw.h"
+#include "coop_native_ui.h"
 #include "coop_draw.h"
 #include "coop_hud_layout.h"
 #include "coop_map_page.h"
@@ -741,6 +742,79 @@ TEST_CASE("dbno line: the caption says who, the line adds the clock and the revi
           "Hold A to revive Saria  0:05");
     View watch{View::Kind::spectating, "Saria", 0, 0, false};
     CHECK(CoopDbnoDraw::Line(watch) == "Watching Saria  A: next player");
+}
+
+TEST_CASE("dbno banner line: always fits the game's banner, the clock / share / next player never cut") {
+    using View = CoopDbno::View;
+    const std::string ascii16 = "Abcdefghijklmnop";                                    // 16 letters, 16 columns
+    std::string wide16;                                                                 // 16 wide letters, 32 columns
+    for (int i = 0; i < 16; ++i) wide16 += "å­";                              // (U+5B57)
+    const std::size_t cols = CoopNativeUi::kBannerColumns;
+    for (const char* lang : {"en", "zh-Hans"}) {
+        CoopI18n::ForceLanguage(lang);
+        for (const std::string& name : {std::string("Saria"), ascii16, wide16}) {
+            const std::vector<View> views{
+                View{View::Kind::downed, "", 32'000'000, 0.0f, false},
+                View{View::Kind::downed, name, 32'000'000, 0.6f, false},
+                View{View::Kind::reviving, name, 5'000'000, 0.0f, false},
+                View{View::Kind::reviving, name, 5'000'000, 0.6f, true},
+                View{View::Kind::spectating, name, 0, 0.0f, false, false},
+                View{View::Kind::spectating, name, 0, 0.0f, false, true},
+            };
+            for (const auto& v : views) {
+                const std::string line = CoopDbnoDraw::BannerLine(v, cols);
+                INFO(lang << " " << line);
+                CHECK(CoopNativeUi::Columns(line) <= cols);
+                // One page on the banner as its step cuts it: the whole line, nothing lost.
+                const auto pages = CoopNativeUi::Wrap(CoopNativeUi::Clean(line, CoopNativeUi::kTextBytes), cols, 1);
+                REQUIRE_FALSE(pages.empty());
+                CHECK(pages.front() == line);
+                if (v.kind == View::Kind::spectating) {
+                    CHECK(line.size() >= CoopI18n::Tr("A: next player").size());
+                    CHECK(line.compare(line.size() - CoopI18n::Tr("A: next player").size(), std::string::npos,
+                                       CoopI18n::Tr("A: next player")) == 0);
+                } else {
+                    CHECK(line.find(CoopDbno::Clock(v.left_us)) != std::string::npos);
+                    if (v.progress > 0 && (v.kind == View::Kind::downed ? !v.name.empty() : v.holding)) {
+                        CHECK(line.size() >= 3);
+                        CHECK(line.compare(line.size() - 3, 3, "60%") == 0);
+                    }
+                }
+            }
+        }
+    }
+    CoopI18n::ForceLanguage(nullptr);
+    // A short line is the drawn line, word for word.
+    const View short_one{View::Kind::reviving, "Saria", 5'000'000, 0.6f, true};
+    CHECK(CoopDbnoDraw::BannerLine(short_one, cols) == CoopDbnoDraw::Line(short_one));
+    // Too long: "(out of sight)" goes before the name is cut; the name is cut with "...".
+    const View far{View::Kind::spectating, ascii16, 0, 0.0f, false, true};
+    const std::string far_line = CoopDbnoDraw::BannerLine(far, cols);
+    CHECK(far_line.find("(out of sight)") == std::string::npos);
+    CHECK(far_line.find(ascii16) != std::string::npos);
+    const std::string cut = CoopDbnoDraw::BannerLine(View{View::Kind::downed, wide16, 32'000'000, 0.6f, false}, 30);
+    CHECK(cut.find("...") != std::string::npos);
+    CHECK(CoopNativeUi::Columns(cut) <= 30);
+}
+
+TEST_CASE("dbno banner hold: downed and reviving always, spectating a few seconds after each change") {
+    using View = CoopDbno::View;
+    CoopDbnoDraw::BannerHold h;
+    CHECK(h.Want(View{View::Kind::downed, "", 32'000'000, 0, false}, 0));
+    CHECK(h.Want(View{View::Kind::reviving, "Saria", 5'000'000, 0, true}, 100'000));
+    View watch{View::Kind::spectating, "Saria", 0, 0, false, false};
+    CHECK(h.Want(watch, 1000));
+    CHECK(h.Want(watch, 1000 + CoopDbnoDraw::kSpectateHoldMs - 1));
+    CHECK_FALSE(h.Want(watch, 1000 + CoopDbnoDraw::kSpectateHoldMs));   // let go: notices go on
+    CHECK_FALSE(h.Want(watch, 600'000));
+    watch.name = "Mido";                                               // A: the next player
+    CHECK(h.Want(watch, 600'001));
+    CHECK_FALSE(h.Want(watch, 600'001 + CoopDbnoDraw::kSpectateHoldMs));
+    watch.elsewhere = true;                                            // out of sight now: said again
+    CHECK(h.Want(watch, 700'000));
+    h.Reset();                                                         // up again, later down and watching again
+    watch.elsewhere = false;
+    CHECK(h.Want(watch, 900'000));
 }
 
 TEST_CASE("dbno line: fits the picture's width, smaller on a narrow one, never under 12 px") {

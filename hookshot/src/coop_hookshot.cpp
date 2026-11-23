@@ -1153,13 +1153,24 @@ CoopDraw::Scene DrawScene() {
     // With the game's own UI up (coop_native_ui.h: the banner is found and works), the line is held on the game's
     // banner (SimpleInfo_00) and nothing is drawn; let go when down ends. Without it (LICHII_COOP_NATIVE_UI=0, a game
     // that gave no memory): the drawn line, text only.
+    // The banner's line always fits it with the clock / share / "A: next player" kept (BannerLine); spectating holds it
+    // only a few seconds after each change of whom we watch, so notices are not kept waiting for minutes (BannerHold).
     if (g_native_chat.load()) {
-        if (s.dbno) {
-            CoopNativeUi::HoldBanner(CoopDbnoDraw::Line(*s.dbno));
-            s.dbno.reset();
+        static std::mutex hold_mutex;
+        static CoopDbnoDraw::BannerHold hold;
+        std::lock_guard hold_lock(hold_mutex);   // (DrawScene runs on the present's thread and from draw_wanted)
+        const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                           std::chrono::steady_clock::now().time_since_epoch())
+                                                           .count());
+        if (s.dbno && hold.Want(*s.dbno, now_ms)) {
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerColumns));
         } else if (CoopNativeUi::HeldBanner()) {
             CoopNativeUi::EndBanner();
         }
+        if (!s.dbno) {
+            hold.Reset();
+        }
+        s.dbno.reset();   // (nothing drawn: the game's banner has it, or had it and let notices go on)
     } else if (CoopNativeUi::HeldBanner()) {
         CoopNativeUi::EndBanner();   // (the native UI went: the drawn line takes over)
     }
