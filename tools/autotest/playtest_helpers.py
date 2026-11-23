@@ -250,7 +250,7 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     return out
 
 
-CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age")
+CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age", "body", "room")
 
 
 def _changed(before, after):

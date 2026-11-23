@@ -121,7 +121,7 @@ runs. So **always hold both games** and step them in turn, the same number of fr
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value`. A `0x` value goes to an Enum and is taken only when `flag_read` read that hash from that same flag in this game run (no raw number is written to an Enum) |
 | `flag_read` | `name` (a GameData flag name, a `0x` hash or `key64:0xKEY`) | Reads one flag inside the held frame; writes nothing, so it is not gated (it exists only where the bridge does). Replies with `kind` (`int`, `bool`, `enum`, `uint`, `key64`, `text`, `unknown`) and `value` (an enum as its value's hash `0x` and 8 hex digits; `null` when unknown); an `int` also has `pending` (true while a write of ours still waits in the game's queue) |
 | `give` | `item` (`bombs`, `bow`, `hookshot`, a bare item name such as `Item_Boomerang` or `Weapon_Sword_Kokiri` (its `PouchData.<name>.StockNum` count if the game has one, else its `IsGet.<name>` flag; neither: the reply says which two it looked for), or a full item flag name such as `IsGet.Item_Boomerang` or `PouchData.Item_Bomb.StockNum`) | The test script's `give`, needs `LICHII_COOP_CHEATS=1`. The flags are written at once inside the held call (the item, its `IsGet`, and the ammo and capacity the game gives with it, never lowered), not queued for a frame: the reply's `result` says what each flag was and is (`no change: ... already 1` when Link had the item; `failed` with the reason when the item was not written; `partial` true when the item is in but its `IsGet` or a grant was not, `result` naming the flag); `get_state` with `inventory` true shows it with no step. Refused with `not_ready` while a load runs or when there is no fresh Link sample (a load sends no Link update, so the old sample cannot tell; a pause and a title the same): the give runs one frame first to take a sample, as `state` does, and if none comes the answer is `not_ready`, nothing written. Step until `state.not_ready` is null, then give again. `bombs` is the small bag and 20 bombs, `bow` the bow with the small quiver and 30 arrows. A bomb that can be lifted also needs `PlayerStatus.LiftGrade` (docs/items.md, "Bombs from the cheat") |
-| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`. Written at once inside the held call: `place`, `face`, `wear`, `assign`, `setflag`, `setenum`. Queued for the next frames (`step` a few, then read the `state`): `dress`, `kill`, `hit`, `aim`, `hurt`, `chat`, `menu`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. With no world list (solo, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
+| `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`. Written at once inside the held call: `place`, `face`, `wear`, `assign`, `setflag`, `setenum`. Queued for the next frames (`step` a few, then read the `state`): `dress`, `kill`, `hit`, `aim`, `hurt`, `chat`, `menu`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. Without the sharing walk's list (solo, where the list is the solo walk's, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
@@ -143,7 +143,7 @@ gated.
 
 ```
 {"frame":5400,"paused":true,"scene":"KokiriForest_Child","room":null,"pos":[-7.5,0.0,71.1],"facing":90.0,
- "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk",
+ "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk","body":"child",
  "equips":{"weapon":"KokiriSword","shield":"DekuShield","head":null,"armor":"Kokiri","boots":"Normal"},
  "inventory":{"PouchData.Item_Bomb.StockNum":0,"PouchData.Item_Hookshot.StockNum":1},"coop":{"players":[{"number":1,"name":"A","self":true,"state":"connected","scene":"KokiriForest_Child"}]},
  "snapshot_present":5398,"control":true}
@@ -159,8 +159,13 @@ title, a pause or a load: no Link update runs), every Link member except `scene`
 `snapshot_present`): a `state` with no sample runs one frame to take it the same way (the first on a fresh hold, and every one at a title or a file select until Link is in play), and if none comes the members are
 `null` with `snapshot_stale` `false`. `not_ready` is `null` when the sample is fresh, else the reason the Link members
 are `null` (no answer from the control bridge, no sample yet, or an old one): a `null` is never silent. Treat `null` as "do not know", never as "arrived" or
-"did not move". The `input`, `warp` and `checkpoint` states follow the same rule. `snapshot_present` is Longshot's present count when it was taken. `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
-stays `null` until the room is found in memory. `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
+"did not move". The `input`, `warp` and `checkpoint` states follow the same rule. `snapshot_present` is Longshot's present count when it was taken. `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`.
+`room` is the dungeon room Link stands in, guessed from the puppet pack's rooms table (`coop_rooms.txt`, the same guess
+the Fairy and the joiner use: the room of the nearest placement, `lichii/hook/coop_rooms.h`) at the Link sample's
+`pos`; it is a guess, not the game's own room number, and `null` outside a dungeon, without a pack, with no placement
+near, or when the sample is old. `body` is `"child"` or `"adult"` from the name of our own Link actor in the world list
+(`Player_Child`, `Player_Adult`): it follows the actor the game made, so it is right at once after an area change,
+where Longshot's `age` can lag. It is `null` without a live world list (a load). `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
 `"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
 tester who pressed Start reads the screen (`shot`), not this.
 
@@ -187,20 +192,22 @@ Character Select character with irises:
 the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk
 reads the place of every actor it sees and keeps up to 200, `other` last, because the sync checks need grass, bushes and
 beehives too. `state` lists only the nearest 40 of the known kinds and counts the rest (`total`, `other_count`); `dump`
-lists all of them. It is there only while the games are connected and sharing, because the object walk runs only then.
+lists all of them. In a session the sharing walk makes it. In solo play a light walk of its own makes it (names and
+places only, every 100 ms, only while the bridge is on): `solo` is `true` then, `owner` is `null`, and a `kill` or
+`hit` with an id is refused (strikes run in the sharing walk only).
 
 **`strike`** (in `state`, after a `kill` or `hit`): `{"seq":4,"result":"done","name":"Enemy_Example","id":2147483648}`, the objects walk's answer to the strike with that `seq` (the `strike_seq` of the `act` reply). `result` is `done` (the strike was made), `gone` (an id was given and no actor with that id and that name is in the walk's list now: nothing else is struck, there is no fallback to another actor of the name), `not shared` (the actor is in `get_world`'s list, but co-op does not share it, as with enemy shots and the Scrub Brothers: the walk does not see it as a target, so nothing is struck; this is not `gone`. One exception: a `kill` of a Gold Skulltula in Not shared mode (race, docs/world.md) is `done` on this game's own Skulltula, in this game only, since there it is each game's own enemy; the log line ends `this game's own (not shared)`), or `none with a life` (no actor to strike). The queue holds 16 strikes: a 17th is refused with "the strike queue is full" and has no `strike_seq`. It is absent until a strike was sent. Only the last strike is kept: a newer one replaces it.
 
-**An empty `actors` list does not mean "nothing here".** Solo (no co-op session) it is empty with `frame` null, and
-`why` says so. Each empty list carries a `why`:
+**An empty `actors` list does not mean "nothing here".** Each empty list carries a `why`:
 
-- `"no co-op session: the world list is read only while connected and sharing"`: the walk never ran.
+- `"no co-op session: the world list is read only while connected and sharing"`: no walk ran yet (a title, or a
+  module with object sharing off).
 - `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s of wall clock and the game is 30 or more frames past it.
 - `"empty: the walk ran and saw no actors"`: connected, and the room really has none.
 - `"only other kinds near: dump lists them"`: `state` lists known kinds only, and the room has only grass, pots and the like.
 
 ```
-"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"total":31,"other_count":30,"count":1,"actors":[
+"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"solo":false,"total":31,"other_count":30,"count":1,"actors":[
   {"id":2147483648,"addr":"0x80000000","name":"Enemy_Example","kind":"enemy","pos":[1.5,0.0,-3.2],"dist":4.0,"life":2,"max_life":4,
    "owner":"server","alive":true}]}
 ```

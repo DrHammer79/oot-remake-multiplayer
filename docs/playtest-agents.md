@@ -59,9 +59,12 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
 ## 3. Read state
 
 - `get_state`: scene, Link's place `[x, y, z]` in metres, facing (0 = +z, 90 = +x), life, event, loading, the A
-  prompt. Pass the last `state_id` as `since` and only what changed comes back.
+  prompt, `room` (a dungeon room, guessed from the puppet pack's rooms table) and `body` (child or adult, from our Link
+  actor: trust it over `age` right after an area change). Pass the last `state_id` as `since` and only what changed
+  comes back.
 - `get_world [kind] [within_m]`: the actors near Link (enemies, chests, doors, switches), with an `id` you pass to the
-  helpers. An empty list with a `why` is not "nothing here".
+  helpers, solo too (`solo` true: there `kill`/`hit` take the name only). An empty list with a `why` is not "nothing
+  here".
 - `check_logs`: the oracle for "did anything go wrong": flagged `coop:` lines, **masked**. A clean verdict is not proof.
 - `session_status`: is the run still sound (bridge connected, session not ended, both games alive).
 - Pos and facing are the game's last running snapshot: after steps on a held game they can be old

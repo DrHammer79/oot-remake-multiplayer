@@ -791,6 +791,14 @@ TEST_CASE("testinput: aim X Y Z hands the hook the world point our next arrow is
     CHECK(log[0] == "mark aimed");
 }
 
+TEST_CASE("testinput: aim steers our arrow and our slingshot seed, nothing else") {
+    CHECK(Aimable("NormalArrow"));
+    CHECK(Aimable("Shootable_DekuSeed"));
+    CHECK_FALSE(Aimable("CoopShot_Arrow"));  // another player's shot
+    CHECK_FALSE(Aimable("Item_DekuNut"));
+    CHECK_FALSE(Aimable("Obj_DekuSeed"));  // a pickup
+}
+
 TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, facing it (row 173)") {
     // Row 173's relief: the arrow let go 2 m in front of Link (z -4.0 at bow height), the eye 6.1 m on and 5.3 m up.
     const std::array<float, 3> from{-56.5f, 126.2f, -4.0f};

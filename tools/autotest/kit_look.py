@@ -62,7 +62,7 @@ def look(state, previous=None):
     eq = s.get("equips") or {}
     life = "%s/%s" % (s.get("life"), s.get("max_life")) if _num(s.get("life")) else "?"
     lines.append("Link %s, life %s quarter hearts, %s rupees, sword %s shield %s" % (
-        s.get("age") or "?", life, s.get("rupees", "?"), eq.get("weapon") or "none", eq.get("shield") or "none"))
+        _age(s) or "?", life, s.get("rupees", "?"), eq.get("weapon") or "none", eq.get("shield") or "none"))
     if link:
         lines.append("at %.1f %.1f %.1f facing %s" % (link[0], link[1], link[2],
                                                       "%d" % round(facing) if _num(facing) else "?"))
@@ -96,10 +96,16 @@ def look(state, previous=None):
                 lines.append("%s: %d more" % (kind, len(live) - PER_KIND[kind]))
         if not seen:
             lines.append("actors: nothing of note within %d m" % NEAR_M)
-    summary = {"scene": s.get("scene"), "life": s.get("life"), "age": s.get("age"), "pos": link,
+    summary = {"scene": s.get("scene"), "life": s.get("life"), "age": _age(s), "pos": link,
                "event": bool(s.get("event")), "seen": seen, "prompt": a_now}
     lines.extend(changed(previous, summary))
     return "\n".join(lines), summary
+
+
+def _age(s):
+    """Our Link's age: the module's `body` (the name of our Link actor, right at once after an area change) when it
+    is known, else Longshot's `age`."""
+    return s.get("body") or s.get("age")
 
 
 def changed(old, new):

@@ -215,6 +215,11 @@ std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, 
 // `aim`: a nocked arrow is let go when it moves more than this between two frames (its flight is ~113 m/s, ~1.9 m
 // a frame at 60; a nocked one moves with Link's hands, well under it).
 inline constexpr float kAimLetGoM = 1.0f;
+// `aim`: the projectiles of ours it steers, by actor name: the bow's arrow and the slingshot's seed
+// (coop_projectiles.cpp names both; another player's shot is a CoopShot_ stand-in, never one of these).
+inline bool Aimable(std::string_view name) {
+    return name == "NormalArrow" || name == "Shootable_DekuSeed";
+}
 
 // wear SLOT: the PlayerStatus flag name for weapon, shield, head, armor or
 // boots (any case), e.g. "EquipHeadArmor"; nothing for another word.
