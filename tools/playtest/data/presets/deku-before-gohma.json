@@ -1,0 +1,27 @@
+{
+  "preset": "deku-before-gohma",
+  "version": 1,
+  "title": "Child Link in Gohma's room, boss not beaten, slingshot and sticks",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Kokiri",
+      "Weapon_Shield_Deku",
+      "PouchData.Weapon_Range_SlingShot.StockNum"
+    ],
+    "hearts": 3,
+    "max_hearts": 3,
+    "flags": {
+      "Gohma_DefeatBoss": 0
+    },
+    "boss_keys": [
+      "DekuTree"
+    ],
+    "warp": {
+      "scene": "GohmaStage",
+      "entrance": "GohmaStage"
+    }
+  },
+  "notes": [
+    "GohmaStage is the rush room (the boss fight without the dungeon). Gohma_DefeatBoss is the flag the autotest scenarios clear."
+  ]
+}

@@ -14,6 +14,9 @@ A spec is a dict (the body of a preset file, tools/playtest/data/presets/*.json,
 Names only: nothing from the game. `plan` checks a spec and returns the calls, `apply` runs them on a client and
 returns what each one answered. Unknown spec keys are an error, so a typo never passes as "set".
 """
+import glob
+import json
+import os
 import re
 
 # The flag-name dungeon key (DungeonInfo.<key>.SmallKeyNum): the game's own spelling, which is not always the
@@ -115,3 +118,31 @@ def apply(client, spec, warp_timeout=60):
             raise RuntimeError("step %d of %d (%s) failed: %s; done so far: %s" % (len(done) + 1, len(plan(spec)), " ".join(str(x) for x in call if x is not None), e, done)) from e
         done.append({"call": list(call), "reply": reply})
     return done
+
+
+PRESETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                       "tools", "playtest", "data", "presets")
+
+
+def presets(root=PRESETS):
+    """name -> title of every preset file (data only: flag, item and scene names)."""
+    out = {}
+    for f in sorted(glob.glob(os.path.join(root, "*.json"))):
+        with open(f, encoding="utf-8") as fh:
+            out[os.path.basename(f)[:-5]] = json.load(fh).get("title", "")
+    return out
+
+
+def load_preset(name, root=PRESETS):
+    """The spec of a preset by name. A name is letters, digits and - only (no path); the file is checked by `plan`."""
+    if not isinstance(name, str) or not re.match(r"^[a-z0-9-]{1,48}$", name):
+        raise ValueError("preset: a name of lowercase letters, digits and - (one of: %s)" % ", ".join(presets(root)))
+    path = os.path.join(root, name + ".json")
+    if not os.path.isfile(path):
+        raise ValueError("preset %r: not found (one of: %s)" % (name, ", ".join(presets(root))))
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if data.get("preset") != name or data.get("version") != 1 or not isinstance(data.get("spec"), dict):
+        raise ValueError("preset %r: the file needs preset (its name), version 1 and a spec" % name)
+    plan(data["spec"])   # a bad file is refused before any call
+    return data["spec"]

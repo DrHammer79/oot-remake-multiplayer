@@ -353,6 +353,12 @@ PLAYER_TOOLS = [
                                     "maps": {"type": "array"}, "compasses": {"type": "array"},
                                     "items": {"type": "array"}, "flags": {"type": "object"},
                                     "warp": {"type": "object"}}}},
+    {"name": "preset", "description": "Apply a named test start (tools/playtest/data/presets/*.json) with one call: the same "
+     "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma, "
+     "before-dodongo, before-barinade, before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, "
+     "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
+     "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
      "Weapon_Sword_Kokiri, or a full flag name such as IsGet.Item_Boomerang). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
@@ -552,6 +558,8 @@ class Game:
             return c.flag(args["name"], args.get("value", 1))
         if name == "give":
             return c.give(args["item"])
+        if name == "preset":
+            return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]))}
         if name == "setup":
             return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k != "player"})}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):

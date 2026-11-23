@@ -1,0 +1,26 @@
+{
+  "preset": "before-bongo-bongo",
+  "version": 1,
+  "title": "Shadow Temple (Bongo Bongo): adult Link in the boss room, boss key, 8 hearts",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Master",
+      "Weapon_Shield_Hylia",
+      "bow",
+      "PouchData.Armor_Adult_HoverBoot.StockNum"
+    ],
+    "hearts": 8,
+    "max_hearts": 8,
+    "boss_keys": [
+      "ShadowTemple"
+    ],
+    "magic": 1,
+    "warp": {
+      "scene": "BongoBongoStage",
+      "entrance": "BongoBongoStage"
+    }
+  },
+  "notes": [
+    "Rush room BongoBongoStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios; this preset does not set the boss's own defeat flag (its name is not in the repo yet), so a boss already beaten in the save stays beaten."
+  ]
+}

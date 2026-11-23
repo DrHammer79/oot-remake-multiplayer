@@ -152,10 +152,8 @@ class FakeGame:
                     "stick": [round((m["yaw"] - cam) % 360.0, 2), m.get("strength", 1.0)], "view": cam,
                     "state": self.state()}
         if cmd == "warp":
-            if not self.event and (m.get("entrance") or m["scene"] in self.no_teleport):
-                # free play goes by Longshot's teleport: no start position, and only its own list of maps
-                return {"ok": False, "error": "not_in_event", "message": "refused: free play, by the teleport only"}
-            self.via = "event" if self.event else "teleport"
+            # free play: Longshot's teleport (no start position, its own list of maps), else the module's map change event
+            self.via = "event" if self.event else "map_event" if (m.get("entrance") or m["scene"] in self.no_teleport) else "teleport"
             self.run(self.warp_frames)
             self.scene = m["scene"]
             self.paused = True
@@ -378,7 +376,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "preset", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -532,6 +530,14 @@ class PlayerServer(unittest.TestCase):
         with self.assertRaises(Exception):
             self.call("p1", "setup", hearts=0)
 
+    def test_preset_applies_a_named_start_and_a_wrong_name_lists_the_right_ones(self):
+        r = self.call("p1", "preset", name="deku-before-gohma")
+        self.assertEqual(r["steps"][-1]["call"], ["warp", "GohmaStage", "GohmaStage"])
+        self.assertEqual(self.games["p1"].flags["Gohma_DefeatBoss"], 0)
+        with self.assertRaises(Exception) as e:
+            self.call("p1", "preset", name="nope")
+        self.assertIn("deku-start", str(e.exception))
+
     def test_press_warp_flag_give_step_resume(self):
         r = self.call("p1", "press", buttons=["a", "ZL"], stick_angle=90, stick_strength=1.0, frames=4)
         self.assertEqual(r["frame"], 1004)
@@ -555,10 +561,9 @@ class PlayerServer(unittest.TestCase):
         self.games["p1"].event = False
         self.call("p1", "warp", scene="DekuTree")                       # F2: free play goes by Longshot's teleport
         self.assertEqual(self.games["p1"].via, "teleport")
-        for kw in ({"entrance": "Start_Mido"}, {"scene": "BossStage"}):  # ... which has no start and a short list
-            with self.assertRaises(pc.BridgeError) as e:
-                self.call("p1", "warp", **dict({"scene": "DekuTree"}, **kw))
-            self.assertEqual(e.exception.code, "not_in_event")
+        for kw in ({"entrance": "Start_Mido"}, {"scene": "BossStage"}):  # ... which has no start and a short list: the map change event
+            self.call("p1", "warp", **dict({"scene": "DekuTree"}, **kw))
+            self.assertEqual(self.games["p1"].via, "map_event")
         self.assertEqual(self.call("p1", "flag", name="F2", value=True)["was"], 0)
         self.assertIs(self.games["p1"].flags["F2"], True)
         self.call("p1", "give", item="bombs")

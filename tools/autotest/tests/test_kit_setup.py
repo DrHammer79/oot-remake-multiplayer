@@ -80,5 +80,48 @@ class Apply(unittest.TestCase):
         self.assertEqual(c.log, [])
 
 
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+
+
+def _source_text():
+    out = []
+    for sub in ("coop/host/src", "lichii/hook", "tools/autotest/scenarios", "docs"):
+        for dp, _, fs in os.walk(os.path.join(REPO, sub)):
+            for f in fs:
+                if f.endswith((".cpp", ".h", ".hpp", ".inc", ".txt", ".md")):
+                    with open(os.path.join(dp, f), encoding="utf-8", errors="replace") as fh:
+                        out.append(fh.read())
+    return chr(10).join(out)
+
+
+class Presets(unittest.TestCase):
+    def test_the_shipped_presets_are_there(self):
+        names = set(ks.presets())
+        self.assertTrue({"deku-start", "deku-before-gohma", "before-dodongo", "before-barinade", "before-phantom-ganon",
+                         "before-volvagia", "before-morpha", "before-bongo-bongo", "before-twinrova",
+                         "before-ganondorf"} <= names, names)
+
+    def test_every_preset_plans_and_every_name_is_one_the_repository_already_uses(self):
+        text = _source_text()
+        starts = open(os.path.join(REPO, "lichii/hook/coop_start_points.inc"), encoding="utf-8").read()
+        for name in ks.presets():
+            calls = ks.plan(ks.load_preset(name))
+            self.assertEqual(calls[-1][0], "warp", name)       # the warp is last
+            scene, start = calls[-1][1], calls[-1][2]
+            self.assertIn('{"%s", "%s"' % (scene, start), starts, name)
+            for c in calls:
+                if c[0] == "give":
+                    self.assertIn(c[1].split(".")[1] if c[1].startswith("PouchData.") else c[1] if "_" in c[1] else "",
+                                  text, (name, c))
+                elif c[0] == "flag" and not c[1].startswith(("PlayerStatus.", "DungeonInfo.")):
+                    self.assertIn(c[1], text, (name, c))
+
+    def test_a_bad_preset_name_is_refused_with_the_list(self):
+        for bad in ("nope", "../x", "", None, "A"):
+            with self.assertRaises(ValueError) as e:
+                ks.load_preset(bad)
+            self.assertIn("deku-start", str(e.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
