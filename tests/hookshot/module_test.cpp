@@ -938,6 +938,21 @@ TEST_CASE("hookshot: the save-load wraps (patch 0024) are four rows in 0005's ta
     CHECK(module.find("CoopSave::SetNativeSaveLoads(loads)") != std::string::npos);
 }
 
+TEST_CASE("hookshot: Longshot's own menu opens by a want, not a posted key (patch 0037, player report 261)") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0037-coop-menu-want-longshot.patch");
+    CHECK(patch.find("+#define HOS_COOP_MENU_WANT_LONGSHOT (-3)") != std::string::npos);
+    CHECK(patch.find("coop_want == HOS_COOP_MENU_WANT_LONGSHOT") != std::string::npos);
+    // The module's number is the patch's, and nothing posts a key to the game's window any more.
+    const std::string pause = ReadFile(kRepo / "hookshot" / "src" / "coop_pause.h");
+    CHECK(pause.find("kWantLongshotMenu = -3;") != std::string::npos);
+    const std::string tab = ReadFile(kRepo / "hookshot" / "src" / "coop_pause_tab_module.cpp");
+    CHECK(tab.find("CoopPause::WantLongshotMenu()") != std::string::npos);
+    CHECK(tab.find("PostMessageA") == std::string::npos);
+    CHECK(tab.find("WM_KEYDOWN") == std::string::npos);
+    // The old header test (0012) still holds: the want is a new patch's line, not a change of 0012's file.
+    CHECK(ReadFile(kRepo / "hookshot" / "src" / "hos_coop_menu.h").find("WANT_LONGSHOT") == std::string::npos);
+}
+
 TEST_CASE("hookshot: the boss orders wrap (patch 0036) is one row in 0005's table, its header hookshot/src's") {
     const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0036-coop-boss-orders-wrap.patch");
     CHECK(NewFile(patch, "host/hos_coop_boss_orders.h") ==
