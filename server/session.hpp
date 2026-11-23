@@ -313,6 +313,11 @@ struct SessionConfig {
   // to a player up and playing (best_other, fit only); a downed owner already loses it at once (dbno).
   std::uint64_t fight_owner_dead_us = 0;
   std::uint64_t fight_owner_paused_us = 2'000'000;
+  // A boss leaves an owner in a cutscene of its own game this long (an item get, Navi's talk, a late intro of its
+  // own): the boss's AI stands in the owner's event, so it stood still on every screen. Never while the boss itself
+  // plays an event, its death or is at life 0 (its own intro, phase change or death: every game is in that one), and
+  // only to a game up, playing and in no cutscene. 0: off.
+  std::uint64_t fight_owner_cutscene_us = 3'000'000;
   // A player position older than this is not used for distances.
   std::uint64_t position_stale_us = 5'000'000;
   // Proximity voice (docs/protocol.md, "Voice"): VOICE_FRAME goes to the
@@ -497,6 +502,7 @@ struct Stats {
   std::uint64_t boss_to_grabbed = 0;    // row 232: a boss asked over to a game whose Link its summoned piece holds
   std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)
   std::uint64_t enemy_turns = 0;         // a plain enemy asked over to the next player's turn (enemy_turns)
+  std::uint64_t boss_from_cutscene = 0;  // a boss asked away from an owner in a cutscene of its own
   std::uint64_t boss_kept_from_unready = 0;  // row 189: ticks a ready, unfit owner's boss was not asked to an unready game
   std::uint64_t boss_finish_kept = 0;  // row 215: hand-overs of a boss in its finish not made (asked or answered)
   std::uint64_t kept_by_logic = 0;      // row 212: a hand-over to a game whose logic did not make it, refused
@@ -733,6 +739,7 @@ class Session {
     std::uint8_t status = 0;
     std::uint64_t paused_since = 0;
     std::uint64_t dead_since = 0;
+    std::uint64_t cutscene_since = 0;  // in_cutscene since (0: not)
     // DBNO_STATE as the player last said it: a downed player owns no enemy.
     protocol::DbnoState dbno = protocol::DbnoState::up;
     // It entered a scene and has not been sent that scene's spawns yet.
@@ -1059,6 +1066,8 @@ class Session {
   // owner's game is not held: the boss's AI answers that grab only there. None while its owner is held too.
   std::optional<ConnectionId> grab_owner(const Object& o, ConnectionId owner, std::uint64_t now_us) const;
   bool unfit_fight_owner(const Connection& c, std::uint64_t now_us) const;
+  // A boss's owner in a cutscene of its own for fight_owner_cutscene_us while the boss plays none of its own.
+  bool owner_in_own_cutscene(const Connection& c, const Object& o, std::uint64_t now_us) const;
   void mark_fight(Object& o, std::uint64_t now_us);
   bool in_fight(const Object& o, std::uint64_t now_us) const;
   // The owner hit it itself within boss_owner_hit_hold_us (issue 150).
