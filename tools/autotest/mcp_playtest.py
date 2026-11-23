@@ -305,15 +305,16 @@ MOVE_TOOLS = [
     {"name": "push", "description": "Push a block (`id` + `name` from get_world) `distance_m` metres along world yaw "
      "`yaw` (0 = +z, 90 = +x; none: from Link toward the block). Link walks to the block's far side from the push, "
      "faces it and leans on it at full stick. `result`: pushed, stuck (it did not move for 48 frames while Link leaned "
-     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), not reached (the walk to its "
-     "side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
+     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
+     "frame ran), not reached (the walk to its side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name", "distance_m"], "properties": dict(
          ACTOR_ARGS, distance_m={"type": "number", "minimum": 0.1, "maximum": 20}, yaw={"type": "number"},
          max_frames={"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES})}},
     {"name": "jump", "description": "Run straight at (`x`, `z`) at full stick so Link jumps off the edge by himself (a "
      "run off a ledge jumps; a walk only drops), with no side steps, until he is on the ground near the point. "
      "`land_y` is the far side's height. `result`: landed, fell (on the ground over 1 m below `land_y`), respawned "
-     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), or a stop (an event, a "
+     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), stopped (a move was "
+     "refused: no camera; no frame ran), or a stop (an event, a "
      "scene change, timed out). `airborne` says whether the height moved on the way; `trace` is [frames, x, y, z]."
      + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["x", "z"], "properties": {

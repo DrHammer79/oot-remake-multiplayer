@@ -40,6 +40,8 @@ class Sim:
         self.event_on_draw = False
         self.hurt_at = None
         self.no_list = False
+        self.refuse_move = False   # every `move` answers no_camera and runs no frame
+        self.refused = 0
 
     # --- the bridge ---
     def state(self):
@@ -82,6 +84,9 @@ class Sim:
         return {"ok": True, "state": self.state()}
 
     def move(self, yaw, strength=1.0, frames=1, check=True):
+        if self.refuse_move:
+            self.refused += 1
+            return {"ok": False, "error": "no_camera", "no_camera": True, "state": self.state()}
         for _ in range(frames):
             self._walk(yaw, strength)
             self._frames(1)
@@ -205,6 +210,15 @@ class Shoot(unittest.TestCase):
         self.assertEqual(r["result"], "fired")
         self.assertEqual(r["ammo_after"], 4)
 
+    def test_a_scene_change_after_a_point_shot_is_reported(self):
+        g = Sim()
+        orig = g.step
+        g.step = lambda frames=1: (setattr(g, "scene", "Spot04") if g.frame > 200 else None, orig(frames))[1]
+        r = km.shoot(g, "slingshot", at=[0, 1, 5])
+        self.assertEqual(r["result"], "fired", r)
+        self.assertIn("scene changed", r["reason"])
+        self.assertIn("not judged", r["reason"])
+
     def test_no_list_and_gone_and_bad_args(self):
         g = Sim(actors=[eye()])
         g.no_list = True
@@ -243,6 +257,22 @@ class Climb(unittest.TestCase):
         r = km.climb(g)
         self.assertEqual(r["result"], "stopped", r)
         self.assertIn("top", r["reason"])
+
+    def test_the_top_ledge_stops_without_walking_on(self):
+        g = Sim(ladder=(0.0, 0.0, 0.0, 2.0))
+        orig = g._stick
+        top = []
+
+        def stick(s):
+            if g.pos[1] >= 2.0 - 1e-9:      # at the top the stick walks Link onto the ledge
+                top.append(1)
+                g.pos[2] += 0.1
+                return
+            orig(s)
+        g._stick = stick
+        r = km.climb(g)
+        self.assertEqual(r["result"], "stopped", r)
+        self.assertLessEqual(len(top), 2 * km.CHUNK, r)
 
     def test_down(self):
         g = Sim(pos=(0.0, 5.0, 0.0), ladder=(0.0, 0.0, 0.0, 5.0))
@@ -292,6 +322,18 @@ class Push(unittest.TestCase):
         self.assertEqual(r["result"], "stuck", r)
         self.assertIn("did not move", r["reason"])
 
+    def test_a_refused_move_stops_it(self):
+        g = Sim(actors=[block()])
+        orig = g.act
+        g.act = lambda line: (setattr(g, "refuse_move", g.refuse_move or line.startswith("face")), orig(line))[1]
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["result"], "stopped", r)
+        self.assertEqual(r["reason"], "move refused: no_camera")
+        self.assertEqual(g.refused, 1)
+        frames_before = r["frames"]
+        self.assertEqual(r["moved_m"], 0.0)
+        self.assertEqual(g.frame - 100, frames_before)    # only frames that ran are counted
+
     def test_no_list_and_gone(self):
         g = Sim(actors=[block()])
         g.no_list = True
@@ -319,6 +361,25 @@ class Jump(unittest.TestCase):
         g = Sim(ground=lambda x, z: 0.0 if z < 5 else -3.0)
         r = km.jump(g, 0.0, 10.0, land_y=0.0)
         self.assertEqual(r["result"], "fell", r)
+
+    def test_a_refused_move_stops_it(self):
+        g = Sim(ground=self.gap(2.0))
+        g.refuse_move = True
+        r = km.jump(g, 0.0, 10.0, land_y=0.0)
+        self.assertEqual(r["result"], "stopped", r)
+        self.assertEqual(r["reason"], "move refused: no_camera")
+        self.assertEqual(r["frames"], 0)
+        self.assertEqual(g.refused, 1)
+
+    def test_one_steady_look_in_the_air_is_not_a_landing(self):
+        g = Sim(pos=(0.0, 0.0, 9.8))
+        ys = iter([0.0, 0.5, 0.5, 0.2, 0.0, 0.0, 0.0, 0.0])
+        orig = g.state
+        g.state = lambda: dict(orig(), pos=[g.pos[0], next(ys, 0.0), g.pos[2]])
+        g.move = lambda yaw, strength=1.0, frames=1, check=True: (g._frames(frames), {"ok": True})[1]
+        r = km.jump(g, 0.0, 10.0, land_y=0.0)
+        self.assertEqual(r["result"], "landed", r)
+        self.assertGreaterEqual(len(r["trace"]), 6, r)
 
     def test_stuck_at_a_wall(self):
         g = Sim()

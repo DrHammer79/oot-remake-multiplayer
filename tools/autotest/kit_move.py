@@ -88,6 +88,15 @@ class _Watch:
         return None
 
 
+def _refused(reply):
+    """Why a `move` reply says no frame ran (an error such as `no_camera`, or an event), None when it ran."""
+    if not isinstance(reply, dict):
+        return None
+    if reply.get("ok") is False or reply.get("no_camera") is True:
+        return str(reply.get("error") or ("no_camera" if reply.get("no_camera") is True else "refused"))
+    return None
+
+
 def _base(st):
     return {"frames": 0, "start": _pos(st), "trace": []}
 
@@ -211,7 +220,7 @@ def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frame
     client.input(None, [], RELEASE_FRAMES)
     used += RELEASE_FRAMES
 
-    seen, judged, why = 0, None, None
+    seen, judged, why, ended = 0, None, None, None
     while seen < watch_frames:
         n = min(WATCH_LOOK, watch_frames - seen)
         client.step(n)
@@ -229,8 +238,10 @@ def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frame
             out["trace"].append([used + seen, now.get("life") if now else None])
             if judged == "hit":
                 break
-        if watch.stop(st) and watch.stop(st) != "event":
+        ended = watch.stop(st)
+        if ended and ended != "event":
             break
+        ended = None
     out["frames"] = used + seen
     ammo_after = ammo_of(st, ammo_item)
     out["ammo_after"] = ammo_after
@@ -238,6 +249,8 @@ def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frame
     if judged:
         out["seen"] = why
         return _out(out, judged, "the target: " + why, st)
+    if ended:
+        return _out(out, "fired", ended + " after the shot (not judged)", st)
     if ammo_item and ammo_before is not None and ammo_after is not None and not spent:
         return _out(out, "not fired", "the ammo did not go down (%s %s): the item did not leave Link" %
                     (ammo_item, ammo_after), st)
@@ -294,6 +307,9 @@ def climb(client, up=True, to_y=None, face=None, max_frames=MAX_FRAMES, chunk=CH
             dy = pos[1] - last[1]
             flat = math.hypot(pos[0] - last[0], pos[2] - last[2])
             if abs(dy) < CLIMB_STEP_M:
+                if flat > 0.3 and moved_once and to_y is None:
+                    return _out(out, "stopped", "Link stepped off the %s onto the ledge (%.2f m across at height %.2f)"
+                                % ("top" if up else "bottom", flat, pos[1]), st)
                 if flat > 0.3 and not moved_once:
                     return _out(out, "not climbing", "Link moved %.2f m across and %.2f m up or down: he is walking, "
                                 "not on a ladder or vines (face the wall with `face`)" % (flat, dy), st)
@@ -303,6 +319,8 @@ def climb(client, up=True, to_y=None, face=None, max_frames=MAX_FRAMES, chunk=CH
                             st)
             else:
                 still, moved_once = 0, True
+        if to_y is None and moved_once and still >= 2:   # not 4 looks of stick at the top: Link would walk off it
+            return _out(out, "stopped", "the height stays at %.2f: the %s" % (pos[1], "top" if up else "bottom"), st)
         if still >= stuck_looks:
             if to_y is None and moved_once:
                 return _out(out, "stopped", "the height stays at %.2f: the %s" % (pos[1], "top" if up else "bottom"),
@@ -328,7 +346,7 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
 
     Results: `pushed` (the block moved the distance), `stuck` (it did not move for `stuck_looks` looks while Link stayed
     on it: it is blocked, at its end, or not a block that moves), `slipped` (Link moved but the block did not: he slid
-    off its side), `not reached` (the walk to the block's side stopped), or a stop (gone, no world list, scene changed,
+    off its side), `stopped` (the bridge refused the move: no camera, an event; no frame ran), `not reached` (the walk to the block's side stopped), or a stop (gone, no world list, scene changed,
     event, hurt, timed out). `moved_m` is how far the block went along the push."""
     st = _st(client)
     out = _base(st)
@@ -390,7 +408,9 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
             return _out(out, "timed out", "the block moved %.2f m of %.2f" % (moved, distance_m), st)
         last_moved, last_link = moved, link
         n = min(chunk, max_frames - out["frames"])
-        client.move(yaw, 1.0, n, check=False)
+        why = _refused(client.move(yaw, 1.0, n, check=False))
+        if why:
+            return _out(out, "stopped", "move refused: " + why, st)
         out["frames"] += n
 
 
@@ -401,9 +421,10 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
     a walk off it only drops), until he lands near the point. No detours: a side step at a ledge is a fall.
 
     `land_y`: the height of the far side. Results: `landed` (within `tolerance` of the point and on the ground, and
-    not more than FALL_M below `land_y`), `fell` (on the ground more than FALL_M below `land_y`, or past the point and
-    below it), `respawned` (Link was put back: a pit or a void; the life may be lower), `stuck` (no nearer for
-    `stuck_looks` looks: a wall, or the edge does not jump), or a stop (scene changed, event, timed out). The trace
+    not more than FALL_M below `land_y`), `fell` (on the ground more than FALL_M below `land_y`), `respawned` (Link was put back: a pit or a void; the life may be lower), `stuck` (no nearer for
+    `stuck_looks` looks: a wall, or the edge does not jump), `stopped` (the bridge refused the move: no camera, an
+    event; no frame ran), or a stop (scene changed, event, timed out). On the ground means two looks in a row with the
+    height steady (ON_GROUND_M), so the top of the arc is not taken for a landing. The trace
     has [frames, x, y, z] at each look."""
     st = _st(client)
     out = _base(st)
@@ -435,13 +456,13 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
             ground += 1
         out["airborne"] = out.get("airborne") or air
         below = land_y is not None and pos[1] < land_y - FALL_M
-        if ground >= 1 and below:
+        if ground >= 2 and below:
             return _out(out, "fell", "on the ground at %.2f, %.2f below the landing" % (pos[1], land_y - pos[1]), st)
-        if dist <= tolerance and ground >= 1:
+        if dist <= tolerance and ground >= 2:
             return _out(out, "landed", "at the point, height %.2f%s" % (pos[1], "" if air else " (no jump was seen)"),
                         st)
-        if dist < best - JUMP_STEP_M:
-            best, still = dist, 0
+        if dist < best - JUMP_STEP_M or dist <= tolerance:   # at the point: waiting to land is not stuck
+            best, still = min(best, dist), 0
         else:
             still += 1
         if still >= stuck_looks:
@@ -451,5 +472,7 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
             return _out(out, "timed out", "%.2f m from the point" % dist, st)
         last, prev_y = pos, pos[1]
         n = min(chunk, max_frames - out["frames"])
-        client.move(pc.yaw_to(pos, x, z) % 360, 1.0, n, check=False)
+        why = _refused(client.move(pc.yaw_to(pos, x, z) % 360, 1.0, n, check=False))
+        if why:
+            return _out(out, "stopped", "move refused: " + why, st)
         out["frames"] += n
