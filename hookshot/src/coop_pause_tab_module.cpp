@@ -1820,6 +1820,9 @@ void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
 // shows four - tabs: Characters, Key Items, Threads of Time, Map), else slot 2 (the game hides slot 3 there). g_mutex.
 std::uint64_t g_strip_gen = 0;
 bool g_strip_looked = false;
+// F6 (coop_players_open.h): the last - menu opening looked up had no tabs of ours (F6's drawn list then); a later
+// opening that has them clears it (LookStrip).
+std::atomic<bool> g_players_no_tabs{false};
 std::array<std::uint64_t, 4> g_game_tabs{};
 std::array<float, 4> g_game_tabs_x{};
 std::array<std::uint64_t, 4> g_game_words{};   // each game tab's T_Text_00: its drawn width says whether the tab shows a word
@@ -2456,8 +2459,6 @@ std::atomic<bool> g_hop_on{false};   // (a hop to the Characters tab runs: OnPad
 // window's or present's thread, OnPad on the input thread). g_players_no_tabs: a - menu opened without tabs of ours.
 std::mutex g_players_mutex;
 CoopPlayersOpen::Run g_players_run;
-std::atomic<bool> g_players_no_tabs{false};   // (the last - menu opening looked up had no tabs of ours; a later one
-                                              // that has them clears it: LookStrip)
 // Free play as the module last read it (SetFreePlay: our Link in a scene, no event, no load), and when: a reading older
 // than kFreePlayFreshMs counts as not free.
 std::atomic<bool> g_free_play{false};
