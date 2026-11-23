@@ -1,4 +1,4 @@
-From ca104ef770339a9f8a803cf5da080c26af25c6e2 Mon Sep 17 00:00:00 2001
+From 16b79bfac671c86399d6207bbbcfdef7e37502f0 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 23 Nov 2026 02:42:08 -0900
 Subject: [PATCH] Co-op menu: the Insert menu takes the pads the game would,
@@ -11,11 +11,11 @@ vk_menu.cpp: the pads with no focus test of the menu's (the host decides); Resta
 tests: test_pads_after_menu covers the behind path and the test's presses; test_input_background and test_menu_text_field follow the code.
 ---
  gpu/vk/vk_menu.cpp             | 15 ++++--
- host/nn_hid.c                  | 94 +++++++++++++++++++++++++---------
+ host/nn_hid.c                  | 96 +++++++++++++++++++++++++---------
  tests/test_input_background.py |  4 +-
  tests/test_menu_text_field.py  |  2 +
- tests/test_pads_after_menu.py  | 52 +++++++++++++++++--
- 5 files changed, 132 insertions(+), 35 deletions(-)
+ tests/test_pads_after_menu.py  | 52 ++++++++++++++++--
+ 5 files changed, 133 insertions(+), 36 deletions(-)
 
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
 index fc75d6c1..9424f577 100644
@@ -60,7 +60,7 @@ index fc75d6c1..9424f577 100644
                          pending = &r, changed = true;
                      } else {   // (as Restart now: saved first, as the window's own close does not force the pipeline cache)
 diff --git a/host/nn_hid.c b/host/nn_hid.c
-index 433a349b..f907d2cf 100644
+index 433a349b..c006eef3 100644
 --- a/host/nn_hid.c
 +++ b/host/nn_hid.c
 @@ -983,7 +983,14 @@ int hos_sdl_pad_npad(int npad, uint64_t *raw, int32_t stick[4]);   /* (pad_sdl.c
@@ -190,7 +190,12 @@ index 433a349b..f907d2cf 100644
      if (hos_input_keyboard_mode() == 2) {   /* (patch 0015) no keyboard or mouse in this game (display.c lets the mouse
                                                 go): the camera is the game's and its pad's, its own follow included */
          hos_mouse_native_stick(1);
-@@ -1677,7 +1721,7 @@ static void npad_states(Ctx *c) {
+@@ -1673,11 +1717,11 @@ static void npad_states(Ctx *c) {
+         static const char *env;
+         static int looked;
+         if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
+-        if (game_in_front() || pads_in_background(env, rx_option(4, 0))) {
++        if (game_in_front() || pads_in_background(env, rx_option(4, 0)) || hos_input_pad_pick() > 0) {   /* (patch 0039: as read_input) */
              uint64_t menu_buttons = 0;
              int32_t menu_stick[4] = {0, 0, 0, 0};
              pads_read(&menu_buttons, menu_stick, NULL);
