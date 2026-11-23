@@ -25,6 +25,7 @@
 #include "coop_look_tunic.h"
 #include "coop_settings.h"
 #include "coop_title_menu.h"
+#include "../test_temp.h"
 
 using CoopLook::Look;
 using CoopLook::Part;
@@ -1372,7 +1373,7 @@ TEST_CASE("look: coop.ini as Customize and Join write it keeps co-op on") {
     look[Part::hylian_emblem].reset();
     CHECK(CoopLook::WriteSettings(look, coop, nullptr));
 
-    const auto ini = std::filesystem::temp_directory_path() / "coop_tests_module.ini";
+    const auto ini = ModTestDir("coop_tests_module").replace_extension(".ini");
     {
         std::ofstream out(ini, std::ios::binary | std::ios::trunc);
         out << coop;
