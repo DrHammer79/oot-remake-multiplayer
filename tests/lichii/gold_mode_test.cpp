@@ -529,31 +529,46 @@ TEST_CASE("gold mode: the host's playthroughs per slot, and a new game's") {
     std::string a, b, fresh;
     {
         CoopGoldMode::Playthroughs pts(dir);
-        a = pts.OnSlot("slot a", false);   // a save of before: an id of its own, kept
+        a = pts.OnSlot("slot_00", false);   // a load of a save from before: an id of its own, kept
         CHECK(a.size() == 16);
-        CHECK(pts.OnSlot("slot a", false) == a);
-        b = pts.OnSlot("slot_b", false);
+        CHECK(pts.Current() == a);
+        CHECK(pts.OnSlot("slot_00", false) == a);
+        b = pts.OnSlot("slot_01", false);   // an older playthrough, loaded once
         CHECK(b != a);
-        // A new game: its own id, the same until the title.
+        CHECK(pts.OnSlot("slot_00", false) == a);   // back to A
+        // Review of af66da86: a save while playing A is A, whatever slot it goes to (another slot, a rotated autosave
+        // slot never seen).
+        CHECK(pts.OnSlot("slot_01", true) == a);
+        CHECK(pts.OnSlot("slot_02", true) == a);
+        CHECK(pts.Current() == a);
+        CHECK(pts.OnSlot("slot_01", false) == a);   // slot_01 now holds A
+        CHECK(pts.OnSlot("", false).empty());
+
+        // Load X, the title, New Game: a fresh id, the same until the title; saved into the slot loaded before it.
+        pts.OnTitle();
         fresh = pts.OnNewGame();
         CHECK(fresh != a);
         CHECK(pts.OnNewGame() == fresh);
-        // Saved into slot a (written over): the slot is now that new game's.
-        CHECK(pts.OnSlot("slot a", true) == fresh);
-        // Another new game, then the title and a load of slot_b: slot_b keeps its own.
-        const std::string other = pts.OnNewGame();
-        CHECK(other != fresh);
+        CHECK(pts.OnSlot("slot_00", true) == fresh);
+        CHECK(pts.OnSlot("slot_03", true) == fresh);   // its next autosave into another slot
+        // Load X, the title, New Game (not saved), the title, Continue X: X's own.
+        pts.OnSlot("slot_02", false);
         pts.OnTitle();
-        CHECK(pts.OnSlot("slot_b", true) == b);   // (a write with no new game first: the same playthrough)
-        CHECK(pts.OnNewGame() != other);          // (the title forgot it)
-        CHECK(pts.OnSlot("slot_b", false) == b);  // a load after a new game: the slot's own
-        CHECK(pts.OnSlot("", false).empty());
+        const std::string unsaved = pts.OnNewGame();
+        CHECK(unsaved != fresh);
+        pts.OnTitle();
+        CHECK(pts.OnSlot("slot_02", false) == a);
+        CHECK(pts.OnNewGame() != unsaved);   // (the title forgot that new game)
     }
     // Kept across runs.
     CoopGoldMode::Playthroughs again(dir);
-    CHECK(again.Slots().size() == 2);
-    CHECK(again.OnSlot("slot a", false) == fresh);
-    CHECK(again.OnSlot("slot_b", false) == b);
+    CHECK(again.Slots().size() == 4);
+    CHECK(again.Current().empty());
+    CHECK(again.OnSlot("slot_00", false) == fresh);
+    CHECK(again.OnSlot("slot_01", false) == a);
+    // Hosting began mid-game (nothing in force yet), and the game saves: that slot's own.
+    CoopGoldMode::Playthroughs mid(dir);
+    CHECK(mid.OnSlot("slot_03", true) == fresh);
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

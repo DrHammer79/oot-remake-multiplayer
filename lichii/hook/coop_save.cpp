@@ -671,6 +671,7 @@ void NoteTitle(bool title_up) {
         FixSlotsLocked();      // (rows 239/240/241: before the player can load one of them)
         g_played.on_title();   // (a new pick follows: a file, or New Game)
         if (g_playthroughs) g_playthroughs->OnTitle();
+        g_playthrough_slot.reset();   // (the next load or save is a new pick, even of the same slot)
         g_title_seen = true;
         if (std::exchange(g_guest_played, false)) g_title_ask = true;   // (decided by the next OnFrame: TitleResync)
     }
@@ -1064,6 +1065,7 @@ void PlaythroughLocked(bool new_game) {
     if (new_game && !g_playthrough_new) {
         g_playthrough_new = true;
         id = g_playthroughs->OnNewGame();
+        g_playthrough_slot.reset();   // (its first save, even into the slot played before, takes the new game's id)
         if (CoopGoldMode::NotShared()) {
             LOG_INFO(Core, "coop: save: a new game: each guest's Gold Skulltula race with it starts from 0");
         }

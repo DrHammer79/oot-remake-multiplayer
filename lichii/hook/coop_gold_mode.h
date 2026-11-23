@@ -134,23 +134,26 @@ std::optional<coop::protocol::ModSetting> RaceSetting();   // the host's entry: 
 // (the slot the host plays is not known on this runtime) the id is the key's alone, as before.
 std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key, std::string_view playthrough);
 std::string NewPlaythroughId();
-// The host's playthrough ids per slot folder (its name), kept in `dir`/playthroughs.txt. OnNewGame: the game plays a
-// new game not saved yet: a fresh id, the same until the title. OnSlot: the slot the game plays is known; when the
-// game saved into it (`by_write`) right after a new game, the slot takes the new game's id (the old save there was
-// written over); else the slot's own id (a fresh one the first time). OnTitle: a new pick follows.
+// The host's playthrough ids per slot folder (its name), kept in `dir`/playthroughs.txt, and the one in force.
+// OnNewGame: the game plays a new game not saved yet: a fresh id, the same until the title. OnSlot, a load
+// (`by_write` false): the slot's own id (a fresh one the first time) is in force. OnSlot, a save (`by_write`): the game
+// saves what it plays, so the slot takes the id in force (a new game saved over an old one, a save into another or a
+// rotated autosave slot); with none in force yet (hosting began mid-game), the slot's own. OnTitle: a new pick follows.
 class Playthroughs {
 public:
     explicit Playthroughs(std::filesystem::path dir = {});
     std::string OnNewGame();
     std::string OnSlot(const std::string& slot, bool by_write);
-    void OnTitle() { pending_.clear(); }
+    void OnTitle() { new_game_ = false; }
+    const std::string& Current() const { return current_; }
     const std::map<std::string, std::string>& Slots() const { return slots_; }
 
 private:
     void Save() const;
     std::filesystem::path dir_;
     std::map<std::string, std::string> slots_;
-    std::string pending_;   // the new game's id until it is saved into a slot (or the title)
+    std::string current_;   // the playthrough in force ("" : none known yet)
+    bool new_game_ = false;   // a new game's id taken since the title
 };
 // The host side: this game's player key (at start) and the playthrough its game plays now ("" : not known). While this
 // game hosts the session it started (not a host after a migration, which keeps the told id) the session's race id

@@ -182,20 +182,30 @@ Playthroughs::Playthroughs(std::filesystem::path dir) : dir_(std::move(dir)) {
 }
 
 std::string Playthroughs::OnNewGame() {
-    if (pending_.empty()) pending_ = NewPlaythroughId();
-    return pending_;
+    if (!new_game_) {
+        new_game_ = true;
+        current_ = NewPlaythroughId();
+    }
+    return current_;
 }
 
 std::string Playthroughs::OnSlot(const std::string& slot, bool by_write) {
     if (slot.empty() || slot.find('\n') != std::string::npos) return {};
     std::string& id = slots_[slot];
-    const bool fresh_game = by_write && !pending_.empty();
-    if (fresh_game || id.empty()) {
-        id = fresh_game ? pending_ : NewPlaythroughId();
+    if (by_write && !current_.empty()) {
+        if (id != current_) {
+            id = current_;   // the game saved what it plays into this slot
+            Save();
+        }
+        return current_;
+    }
+    if (id.empty()) {
+        id = NewPlaythroughId();
         Save();
     }
-    pending_.clear();
-    return id;
+    current_ = id;
+    new_game_ = false;
+    return current_;
 }
 
 void Playthroughs::Save() const {
