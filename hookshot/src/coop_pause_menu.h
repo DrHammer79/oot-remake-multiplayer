@@ -235,7 +235,7 @@ public:
     // page keeps Your name and says where the colours are; the main page's Customize Link row says it too.
     void SetSnailHome(bool on) { snail_home_ = on; }
     bool SnailHome() const { return snail_home_; }
-    static constexpr const char* kSnailHomeNote = "Link's colours are on the Characters tab: pick Link, then Customize.";
+    static constexpr const char* kSnailHomeNote = "Link's colours are not on this page: press L until the Characters tab (the first tab of the - menu), pick Link, then Customize.";
     static constexpr const char* kCharacterNote =
         "A Character Select character is picked: it keeps its own colours (X on its Characters page); these colours show on Link when you pick Link again.";
     // The Find a game page's list (the Join page's first row): the games on this network or the relay's public

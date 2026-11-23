@@ -815,6 +815,23 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
     return x;
 }
 
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms) {
+    if (!minus_open) return HopStep::kGiveUp;   // (not the open screen any more: not one tap more)
+    if (h.started_ms == 0) h.started_ms = now_ms;
+    if (now_ms - h.started_ms > kHopMaxMs || h.taps >= kHopMaxTaps) return HopStep::kGiveUp;
+    if (now_ms < h.next_ms) return HopStep::kWait;
+    if (!ours) {
+        if (lit < 0) return HopStep::kWait;
+        if (!GameMinusCategory(lit)) return HopStep::kDone;   // (not Key Items, Threads or Map: Characters)
+        if (h.off_taps > 0 && lit == h.prev_lit) return HopStep::kDone;   // (the left edge: the last tap moved nothing)
+        h.prev_lit = lit;
+        ++h.off_taps;
+    }
+    ++h.taps;
+    h.next_ms = now_ms + kHopGapMs;
+    return HopStep::kTapL;
+}
+
 SnailEdge SnailEdgeFrom(bool open, std::uint64_t edge_ms, int strip_state, std::uint64_t strip_seen_ms, std::uint64_t now_ms) {
     const bool up = MenuUpFrom(strip_state, strip_seen_ms, now_ms);
     if (open) {
