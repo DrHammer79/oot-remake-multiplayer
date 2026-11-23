@@ -734,6 +734,28 @@ Not proven in a game yet: the probe run (two games, hs-twinrova-native) must sho
 `N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
 hand-over.
 
+## Variations: the owner's attack variation reaches every copy (row 222 part 2, Twinrova's fire/ice)
+
+A boss move asked "by plug" carries a short name the game adds to the action's command (main+0xbe070 builds
+`RangedAttack` plain = Fire, `RangedAttack:Ice` = Ice, and the feints `1FeintFire` ...). Before, only "by plug or not"
+was sent, so a copy named whatever plug its own AI last asked for that move: Twinrova's copy threw ice for the owner's
+fire (probe 2, run 20261123-055243). Every boss move with variants had the same gap, not only Twinrova's.
+
+- Owner: the action-verb wrap reads the plug name of every request (`CoopBossNative::PlugName`), and the table keeps
+  it with the change; the boss sample sends the names of the action changes in its recent list as OBJECT_SAMPLE
+  component 24 (`BossVariants`: per change its seq + the name, empty = asked plain; at most 8 names of 32 printable
+  characters). No protocol bump: an older peer skips the unknown component and keeps today's behaviour.
+- Copy: the name of the change it puts in (also a resync and a restart) decides the plug: empty -> no plug, even when
+  its own AI's last plug was `Ice`; a name -> written once into a pool of 16 name slots after the request block (the
+  block is `kRequestSize + 16 * 40` bytes) and asked with that address; no name (an older owner) -> its own AI's plug,
+  as before. A move kept (not asked again) also compares the variation, so the same action in another variation is a
+  new move.
+- Tests: boss_native_test (owner keeps names by seq; plain, named and unknown put-ins, a full pool, a resync), codec_test
+  'component 24' (round trip, an older build skips it, refusals).
+
+Not proven in a game yet: hs-twinrova-fire must show fire for fire and ice for ice on the copy, the floor on both
+screens. Merges only after the owner's OK on component 24.
+
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
 **Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on

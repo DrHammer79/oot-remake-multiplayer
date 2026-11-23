@@ -655,7 +655,7 @@ private:
             BossChange change;
             bool resync = false;  // the state now, not a call the owner made: skipped when already so
             bool counted = false; // (a brain verb: counted in brain_came once, also when asked again)
-            std::optional<std::string> variant;  // row 222 part 2: an action's, the owner's (nothing: not known)
+            std::optional<std::string> variant = std::nullopt;  // row 222 part 2: an action's, the owner's (nothing: not known)
         };
         std::deque<Due> due;
         std::uint32_t queued_seq = 0;  // the owner's newest change queued (or made)
