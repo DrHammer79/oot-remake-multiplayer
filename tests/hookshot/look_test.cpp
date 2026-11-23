@@ -19,6 +19,7 @@
 #include "coop/protocol/messages.hpp"
 #include "coop_colors.h"
 #include "coop_look.h"
+#include "coop_char_colours.h"
 #include "coop_look_paint.h"
 #include "coop_look_parts.h"
 #include "coop_look_tunic.h"
@@ -259,6 +260,48 @@ TEST_CASE("look: every part has its number, a key and a row, and the numbers nev
     CHECK(static_cast<int>(Part::master_blade) == 11);
     CHECK(static_cast<int>(Part::gauntlets) == 16);
     CHECK(static_cast<int>(Part::cap_trim) == 17);
+    CHECK(static_cast<int>(Part::char_hair) == 20);   // (npc-customize: a character's own parts)
+    CHECK(static_cast<int>(Part::char_eyes) == 21);
+    CHECK(static_cast<int>(Part::char_cloth1) == 22);
+    CHECK(static_cast<int>(Part::char_gear) == 25);
+    CHECK(CoopCharColours::kCharHairPart == static_cast<int>(Part::char_hair));   // (the dresser's numbers are these)
+    CHECK(CoopCharColours::kCharEyesPart == static_cast<int>(Part::char_eyes));
+    CHECK(CoopCharColours::kCharCloth1Part == static_cast<int>(Part::char_cloth1));
+    CHECK(CoopCharColours::kCharGearPart == static_cast<int>(Part::char_gear));
+    CHECK(CoopCharColours::kLinkEyesPart == static_cast<int>(Part::eyes));
+    CHECK(CoopCharColours::kLinkHairPart == static_cast<int>(Part::hair));
+}
+
+TEST_CASE("look (npc-customize): a character's parts are saved, read back and sent like the others") {
+    Look look;
+    look[Part::char_hair] = 0xC02020u;
+    look[Part::char_cloth2] = CoopColors::Parse("blue");
+    look[Part::char_gear] = CoopLook::kGearHidden;
+    std::string coop = "server = 1.2.3.4\n";
+    CHECK(CoopLook::WriteSettings(look, coop, nullptr));
+    CHECK(coop.find("look_char_hair = #C02020") != std::string::npos);
+    CHECK(coop.find("look_char_cloth2 = blue") != std::string::npos);
+    CHECK(coop.find("look_char_gear = hidden") != std::string::npos);
+    std::vector<std::string> errors;
+    const Look back = CoopLook::ReadParts(coop, &errors);
+    CHECK(errors.empty());
+    CHECK(back[Part::char_hair] == 0xC02020u);
+    CHECK(back[Part::char_cloth2] == look[Part::char_cloth2]);
+    CHECK(back[Part::char_gear] == CoopLook::kGearHidden);
+    CHECK_FALSE(CoopLook::ReadParts("look_char_gear = shown\n")[Part::char_gear]);
+    CoopLook::ReadParts("look_char_gear = maybe\n", &errors);
+    CHECK(errors.size() == 1);
+    // the wire: by number, and back
+    const auto wire = CoopLook::Wire(look);
+    REQUIRE(wire.size() == 3);
+    CHECK(wire[0] == std::pair<std::uint8_t, std::uint32_t>{20, 0xC02020u});
+    CHECK(wire[2] == std::pair<std::uint8_t, std::uint32_t>{25, CoopLook::kGearHidden});
+    CHECK(CoopLook::FromWire(wire) == look);
+    // unset again: its line leaves the file
+    look[Part::char_gear].reset();
+    CHECK(CoopLook::WriteSettings(look, coop, nullptr));
+    CHECK_FALSE(CoopTitleMenu::IniGet(coop, "look_char_gear").has_value());   // (IniUnset leaves it as a "# " comment)
+    CHECK_FALSE(CoopLook::ReadParts(coop)[Part::char_gear]);
 }
 
 TEST_CASE("look: every part is saved under its own key, and read back") {
@@ -814,7 +857,7 @@ TEST_CASE("look parts: every gear part has a texture, every texture once") {
             parts.insert(r.part);
         }
     }
-    CHECK(parts.size() == CoopLook::kParts - 4);
+    CHECK(parts.size() == CoopLook::kParts - 10);   // (and a character's six: CoopCharColours, no texture of ours)
 }
 
 TEST_CASE("look parts: the gear painted in a look, a painting's name says its colours") {

@@ -2351,13 +2351,22 @@ void DressCharacters(void* ctx) {
         return cells[i];
     };
     const CoopLook::Look shown = CoopLook::Shown();
-    const auto own = CoopCharColours::LinkOnly(CoopCharColours::ShownCharacter() == 0, shown[CoopLook::Part::eyes],
-                                               shown[CoopLook::Part::hair]);
-    if (own.eyes || own.hair) {
+    // (npc-customize: Link's eyes and hair on your Link, the character parts on a character: CoopCharColours::ForModel.
+    // A character is always a target, so its model is looked up for its Customize page's rows and its equipment kept
+    // hidden; Link only with a colour to put on, as before.)
+    const std::uint16_t character = CoopCharColours::ShownCharacter();
+    const auto own = CoopCharColours::ForModel(character == 0, [&shown](std::uint8_t number) {
+        const auto part = CoopLook::PartOf(number);
+        return part ? shown[*part] : std::nullopt;
+    });
+    if (own.eyes || own.hair || character != 0) {
+        const std::uint64_t kind = static_cast<std::uint64_t>(character) << 16;   // (another pick: another model)
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
             if (actor == 0 || cell(i) == 0) return;
-            CoopCharColours::Target t{actor, cells[i], 0, false, 0, model};
+            CoopCharColours::Target t{actor, cells[i], own.custom, false, 0, model | kind};
             t.eyes = own.eyes, t.hair = own.hair;
+            t.own = i == 0, t.character = character;
+            t.picture = i != 0 && character != 0;   // (dressed only on the Customize screen: its rows are the page's)
             targets.push_back(t);
         };
         const auto name_of = [](std::uint64_t actor) {
@@ -2379,7 +2388,11 @@ void DressCharacters(void* ctx) {
                 if (menu[s].actor == 0) continue;
                 const std::string name = name_of(menu[s].actor);
                 seen += fmt::format("{}{}: {}", seen.empty() ? "" : ", ", s, name.empty() ? "?" : name);
-                if (CoopCharColours::MenuModelOfPlayer(name, link)) dress(menu[s].actor, 1 + s, 0x6d656e7500000000ull | menu[s].id);
+                // (a character's picture only on Character Select's Customize screen, where the model shown is your
+                // pick: the picker's own may show another character under the same name)
+                if (CoopCharColours::MenuModelOfPlayer(name, link) &&
+                    (character == 0 || CoopPauseTab::CharacterCustomizeOpen()))
+                    dress(menu[s].actor, 1 + s, 0x6d656e7500000000ull | menu[s].id);
             }
             if (seen != said) {   // (what the menu holds, once a change: which of them is your Link)
                 said = seen;

@@ -461,6 +461,7 @@ std::array<LiveSlot, kSnailSlots> g_snail_live{};
 CoopSnailCustom::Texts g_snail_shown;
 std::string g_snail_failed_said;   // (the panes last named as not set: said once per list)
 bool g_snail_wait = false;   // his screen open, his panes not found in its layout: co-op waits (keys kept from his rows)
+std::atomic<bool> g_snail_driven{false};   // (CharacterCustomizeOpen: any thread)
 std::size_t CountOf(const std::string& text, const char* what) {
     std::size_t n = 0;
     for (std::size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
@@ -472,6 +473,7 @@ void SnailClose(const char* why) {
     g_snail_open = false, g_snail_wait = false;
     const bool driven = g_snail.Active();
     g_snail.Close();
+    g_snail_driven = false;
     // (Link wears the look chosen, as when co-op's Customize closes; also one chosen before co-op let go of it)
     if (driven || std::exchange(g_snail_changed, false)) CoopLook::ApplyOnUnpause();
     g_snail_changed = false;
@@ -586,7 +588,13 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: his panes are there now: co-op's "
                        "customization in it");
     }
+    g_snail_driven = !g_snail_wait && g_snail.Active();
     if (g_snail_wait || !g_snail.Active()) return;
+    // npc-customize: the rows your character's model has (its look-up by the wardrobe; none known yet: every row)
+    {
+        const std::uint16_t character = CoopCharColours::ShownCharacter();
+        g_snail.SetRows(CoopCharColours::TheWardrobe().OwnRows(character));
+    }
     if (auto look = g_snail.TakeChange()) {
         CoopLook::SetPending(*look);   // (your Link wears it at once, a preview)
         g_snail_changed = true;
@@ -4726,6 +4734,8 @@ void CensusFromMenuState() noexcept {
     } catch (...) {
     }
 }
+
+bool CharacterCustomizeOpen() noexcept { return g_snail_driven.load(); }
 
 bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());

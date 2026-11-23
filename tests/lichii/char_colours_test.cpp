@@ -219,13 +219,94 @@ TEST_CASE("char colours: the colours are the mod's, the iris shift is held to a 
     CHECK(EyeColour(8, 0) == std::nullopt);
 }
 
-TEST_CASE("char colours: the eyes' and hair's colours go on a Link model only (review: a character got your eyes)") {
-    using CoopCharColours::LinkColours;
-    using CoopCharColours::LinkOnly;
-    CHECK(LinkOnly(true, 0xFF123456u, 0x00ABCDEFu) == LinkColours{0x123456u, 0xABCDEFu});
-    CHECK(LinkOnly(true, std::nullopt, 0xABCDEFu) == LinkColours{std::nullopt, 0xABCDEFu});
-    CHECK(LinkOnly(false, 0x123456u, 0xABCDEFu) == LinkColours{});   // (a character: neither)
-    CHECK(LinkOnly(false, 0x123456u, std::nullopt) == LinkColours{});
+TEST_CASE("char colours (npc-customize): Link's eyes and hair on a Link model, the character parts on a character's") {
+    using CoopCharColours::ForModel;
+    using CoopCharColours::ModelColours;
+    std::map<std::uint8_t, std::uint32_t> look = {{18, 0xFF123456u}, {19, 0x00ABCDEFu}};
+    const auto part = [&look](std::uint8_t n) -> std::optional<std::uint32_t> {
+        const auto it = look.find(n);
+        return it == look.end() ? std::nullopt : std::optional<std::uint32_t>(it->second);
+    };
+    CHECK(ForModel(true, part) == ModelColours{0, 0x123456u, 0xABCDEFu});
+    // A character with none of its own parts: Link's never (review 0.11.9), a 0.11.8 peer's options as they came.
+    CHECK(ForModel(false, part) == ModelColours{});
+    CHECK(ForModel(false, part, 0xFF000012u) == ModelColours{0x12u, std::nullopt, std::nullopt});
+    // Its own parts: exact hair and eyes, the hair's and clothes' nearest palette entries and Hidden as the options.
+    look[20] = 0x0A0808u;   // (near black: hair entry 3)
+    look[21] = 0x20C040u;
+    look[22] = 0xFF1010u;   // (red: clothing entry 2)
+    look[24] = 0xFFFFFFu;   // (white: entry 7)
+    look[25] = 1u;
+    const ModelColours c = ForModel(false, part, 0x12u);
+    CHECK(c.hair == 0x0A0808u);
+    CHECK(c.eyes == 0x20C040u);
+    CHECK(c.custom == (3u | (1u << 8) | (2u << 12) | (7u << 20)));
+    CHECK(ForModel(true, part) == ModelColours{0, 0x123456u, 0xABCDEFu});   // (Link keeps his own)
+}
+
+TEST_CASE("char colours (npc-customize): the mod's nearest hair and clothing palette entries") {
+    using namespace CoopCharColours;
+    for (std::uint8_t i = 0; i < kCloths; ++i) CHECK(NearestCloth(kClothRgb[i]) == i + 1);
+    CHECK(NearestCloth(0x102080u) == 3);   // (a dark blue: Blue, by hue; plain RGB distance said Purple)
+    CHECK(NearestCloth(0x000040u) == 3);   // (a navy)
+    CHECK(NearestCloth(0x40FF40u) == 1);   // (a light green)
+    CHECK(NearestCloth(0xFF80FFu) == 4);   // (a pink: Purple)
+    CHECK(NearestCloth(0xC0C0C0u) == 7);   // (a light grey: White)
+    CHECK(NearestCloth(0x404040u) == 6);   // (a dark grey: Black)
+    CHECK(NearestCloth(0x100808u) == 6);   // (near black)
+    CHECK(NearestHair(0xFFD050u) == 1);    // (a light blond: Blonde)
+    CHECK(NearestHair(0x000000u) == 3);    // Black
+    CHECK(NearestHair(0xF0F0F8u) == 9);    // White
+}
+
+TEST_CASE("char colours (npc-customize): Equipment Hidden clears the shown bit of the mod's handles, and shows again") {
+    using namespace CoopCharColours;
+    std::map<std::uint64_t, std::uint8_t> mem;
+    const auto put = [&](std::uint64_t a, const void* in, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) mem[a + i] = static_cast<const std::uint8_t*>(in)[i];
+        return true;
+    };
+    const auto put64 = [&](std::uint64_t a, std::uint64_t v) { put(a, &v, 8); };
+    const auto put32 = [&](std::uint64_t a, std::uint32_t v) { put(a, &v, 4); };
+    Game g;
+    g.read = [&](std::uint64_t a, void* out, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto it = mem.find(a + i);
+            if (it == mem.end()) return false;
+            static_cast<std::uint8_t*>(out)[i] = it->second;
+        }
+        return true;
+    };
+    g.write = put;
+    const std::uint64_t actor = 0x1000, comps = 0x2000, equip = 0x3000;
+    put64(actor + kActorComponents, comps);
+    put64(comps + kActorEquipment, equip);
+    // handle 0 (the sword: in the mask), 1 (the item in hand: not), 4 (the shield, being deleted: state 9)
+    const auto piece = [&](std::uint32_t k, std::uint64_t link, std::uint64_t at, std::uint32_t state) {
+        const std::uint64_t h = equip + kGearFirst + kGearStride * k;
+        put32(h + 0x10, 40 + k);
+        put64(h + 0x8, link);
+        put32(link + 0x48, 40 + k);
+        put64(link + 0x40, at);
+        put32(at + 0x2c, state);
+        put32(at + kActorFlags, 0x10003u);
+    };
+    piece(0, 0x4000, 0x5000, 1);
+    piece(1, 0x4100, 0x5100, 1);
+    piece(4, 0x4200, 0x5200, 9);
+    const auto flags = [&](std::uint64_t at) {
+        std::uint32_t v = 0;
+        g.read(at + kActorFlags, &v, 4);
+        return v;
+    };
+    CHECK(SetGearShown(g, actor, false) == 1);
+    CHECK(flags(0x5000) == 0x3u);       // hidden, its other bits kept
+    CHECK(flags(0x5100) == 0x10003u);   // the item in hand stays
+    CHECK(flags(0x5200) == 0x10003u);   // a piece being deleted is left alone
+    CHECK(SetGearShown(g, actor, false) == 0);
+    CHECK(SetGearShown(g, actor, true) == 1);
+    CHECK(flags(0x5000) == 0x10003u);
+    CHECK(SetGearShown(g, 0x9999, false) == 0);   // (no equipment: nothing)
 }
 
 TEST_CASE("char colours: the pause menu's model of your Link is the game's Pouch twin of the field player (lane: eyes)") {
@@ -460,4 +541,86 @@ TEST_CASE("char colours (row 207): whether Character Select is in this game, as 
     CHECK(CoopCharColours::ModPresent());
     CoopCharColours::SetModPresent(false);
     CHECK_FALSE(CoopCharColours::ModPresent());
+}
+
+TEST_CASE("char colours (npc-customize-2): your own pick, read solo or in a session, is the character shown") {
+    using CoopCharColours::NoteOwnPick;
+    constexpr std::uint16_t kMax = 0x0FFF;   // (CoopLookShare::kCharacterMax)
+    // Every pick Character Select can store (its 117 characters, and the rest of the numbers a save may hold).
+    for (std::int32_t n = 1; n <= kMax; ++n) {
+        CHECK(NoteOwnPick(n, kMax) == n);
+        CHECK(CoopCharColours::ShownCharacter() == n);
+        CHECK(CoopCharColours::ModPresent());
+    }
+    // Link, or a number no character has: Link, and the mod is there (its Int is).
+    for (const std::int32_t n : {0, -1, int{kMax} + 1, 0x7FFFFFFF}) {
+        CHECK(NoteOwnPick(n, kMax) == 0);
+        CHECK(CoopCharColours::ShownCharacter() == 0);
+        CHECK(CoopCharColours::ModPresent());
+    }
+    // No such Int: no Character Select in this game.
+    NoteOwnPick(2, kMax);
+    CHECK(NoteOwnPick(std::nullopt, kMax) == 0);
+    CHECK(CoopCharColours::ShownCharacter() == 0);
+    CHECK_FALSE(CoopCharColours::ModPresent());
+}
+
+TEST_CASE("char colours (npc-customize-2): a model's rows: what it has, only Equipment for none, unknown until all is read") {
+    constexpr std::uint8_t kSaria = kRowHair | kRowEyes | kRowCloth1 | 8 | kRowGear | kRowsKnown;
+    constexpr std::uint8_t kGearOnly = kRowGear | kRowsKnown;
+    FakeGame saria(Character());
+    State s = StateFor();
+    CHECK(Rows(s) == 0);   // (not looked up: the page shows every row)
+    Learn(saria.AsGame(), s);
+    CHECK(Rows(s) == kSaria);
+    // A model with nothing colourable (Cow: no hair, eye or clothing palette material): Equipment only, known.
+    FakeGame cow({{"Mt_Body", 1, 1, {}}, {"Mt_Horn", 1, 1, {}}});
+    State c = StateFor();
+    Learn(cow.AsGame(), c);
+    CHECK(Rows(c) == kGearOnly);
+    // A model the mod's check refuses (not the player model's kind): none of its options go on it, Equipment only.
+    FakeGame other(Character());
+    other.W64(FakeGame::kCompVt + 0xf8, 0x1234);
+    State o = StateFor();
+    Learn(other.AsGame(), o);
+    CHECK(Rows(o) == kGearOnly);
+    // Part of a model read (the call budget ran out): not known yet.
+    State part = StateFor();
+    part.units.resize(2);
+    part.units[0].unit = 0x100, part.units[0].looked_up = true;
+    part.units[1].unit = 0x200;
+    CHECK(Rows(part) == 0);
+}
+
+TEST_CASE("char colours (npc-customize-2): the page's rows are the Customize picture's, else your model's, looked up again") {
+    constexpr std::uint16_t kCow = 113;
+    FakeGame f(Character());
+    // The picture: the menu's model of your pick, another actor, a model of another kind (the Cow's picture here).
+    constexpr std::uint64_t kPicture = 0x40000, kPicComps = 0x41000, kPicComponent = 0x42000, kPicVt = 0x43000;
+    f.W64(kPicture + kActorComponents, kPicComps);
+    f.W64(kPicComps + 8, kPicComponent);
+    f.W64(kPicComponent, kPicVt);
+    f.W64(kPicVt + 0xf8, 0x1234);
+    Wardrobe w;
+    const Game g = f.AsGame();
+    Target field{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, 1};
+    field.own = true, field.character = kCow;
+    // The field model is still the earlier pick's (Saria's materials) while the menu shows the Cow: its rows are not
+    // the Cow's page.
+    w.Frame(g, {field}, 1000, {});
+    CHECK(w.OwnRows(kCow) == (kRowHair | kRowEyes | kRowCloth1 | 8 | kRowGear | kRowsKnown));
+    Target picture{kPicture, FakeGame::kCell + 0x1000, 0, false, 0, std::nullopt, std::nullopt, 2};
+    picture.character = kCow, picture.picture = true;
+    w.Frame(g, {field, picture}, 1001, {});
+    CHECK(w.OwnRows(kCow) == (kRowGear | kRowsKnown));
+    // The menu closes and the field model becomes the Cow's (other units, nothing colourable): looked up again.
+    f.mats = {{"Mt_Body", 1, 1, {}}};
+    constexpr std::uint64_t kCowUnit = 0x15800;
+    f.W64(FakeGame::kUnitPtr, kCowUnit);
+    f.W64(kCowUnit, FakeGame::kUnitVt);
+    f.W64(kCowUnit + 0x108, FakeGame::kObjs);
+    w.Frame(g, {field}, 1002, {});
+    CHECK(w.OwnRows(kCow) == (kRowGear | kRowsKnown));
+    // Another pick's number: none of these rows.
+    CHECK(w.OwnRows(2) == 0);
 }
