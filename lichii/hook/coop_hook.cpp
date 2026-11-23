@@ -3734,7 +3734,7 @@ void StuckLoadFrame(Core::System& system) {
             fmt::format("a scene load (the game's Sequence_IsLoadingBanc) has run {} s and not ended: the game waits "
                         "for something that does not come (row 242: a mod's file naming a file no folder has). "
                         "Longshot's 'fs: ... not found' lines above name the missing files",
-                        watch.LoadMs(now) / 1000);
+                        watch.LoadMs() / 1000);
         const bool kept = CoopProblemAsk::WriteStuck(CoopFiles::CoopIni().parent_path(), record, line + "\n");
         LOG_WARNING(Core, "coop: stuck load: {}; {}", line,
                     kept ? "the next title asks for /bugreport (bug-reports\\coop-stuck\\" + record + ")"

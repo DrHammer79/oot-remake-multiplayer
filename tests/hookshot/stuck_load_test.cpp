@@ -113,11 +113,67 @@ TEST_CASE("stuck load: quitting to the title from a black screen keeps the recor
     CHECK(r.stuck == 1);
 }
 
-TEST_CASE("stuck load: LoadMs is the current load's time") {
+TEST_CASE("stuck load: LoadMs is the current load's running time") {
     Watch w;
     CHECK(w.Frame(kTitle, 100) == Step::none);
+    CHECK(w.Frame(kLoading, 600) == Step::none);
+    CHECK(w.Frame(kLoading, 900) == Step::none);
+    CHECK(w.LoadMs() == 300);
+    CHECK(w.Frame(kPlay, 1'000) == Step::none);
+    CHECK(w.LoadMs() == 0);
+}
+
+// review-01111-a-2: the module's frame stops while the game does not run; such a gap is never a load's time.
+TEST_CASE("stuck load: a pause mid-load (the emulator's pause) is not stuck") {
+    Run r;
+    r.For(1'000, kTitle);
+    r.For(60'000, kLoading);
+    r.at += 10 * 60'000;   // (paused ten minutes: no frames)
+    r.For(30'000, kLoading);
+    CHECK(r.stuck == 0);
+    r.For(5'000, kPlay);   // (the load ends)
+    CHECK(r.stuck == 0);
+    CHECK(r.ended == 0);
+}
+
+TEST_CASE("stuck load: the window in the background (pause on unfocus), again and again, is not stuck") {
+    Run r;
+    r.For(1'000, kTitle);
+    for (int i = 0; i < 20; ++i) {   // (4 s of frames, then 3 minutes away: 20 times)
+        r.For(4'000, kLoading);
+        r.at += 3 * 60'000;
+    }
+    CHECK(r.stuck == 0);   // (80 s of frames + 19 capped gaps of 1 s)
+    CHECK(r.w.LoadMs() < kStuckMs);
+}
+
+TEST_CASE("stuck load: the PC asleep in a cutscene or a load is neither stuck nor unclear") {
+    Run r;
+    r.For(1'000, kTitle);
+    r.For(30'000, kNoLink);
+    r.at += 8 * 3'600'000;   // (eight hours asleep)
+    r.For(30'000, kNoLink);
+    CHECK(r.unclear == 0);
+    r.For(30'000, kLoading);
+    r.at += 8 * 3'600'000;
+    r.For(30'000, kLoading);
+    CHECK(r.stuck == 0);
+}
+
+TEST_CASE("stuck load: a pause does not hide a real stuck load (2 minutes of frames still count)") {
+    Run r;
+    r.For(1'000, kTitle);
+    r.For(60'000, kLoading);
+    r.at += 10 * 60'000;
+    CHECK(r.stuck == 0);
+    r.For(61'000, kLoading);   // (60 s + 1 s capped gap + 61 s: over 2 minutes of the game running)
+    CHECK(r.stuck == 1);
+}
+
+TEST_CASE("stuck load: a clock that goes back adds nothing") {
+    Watch w;
+    CHECK(w.Frame(kTitle, 5'000) == Step::none);
+    CHECK(w.Frame(kLoading, 6'000) == Step::none);
     CHECK(w.Frame(kLoading, 1'000) == Step::none);
-    CHECK(w.LoadMs(31'000) == 30'000);
-    CHECK(w.Frame(kPlay, 2'000) == Step::none);
-    CHECK(w.LoadMs(3'000) == 0);
+    CHECK(w.LoadMs() == 0);
 }

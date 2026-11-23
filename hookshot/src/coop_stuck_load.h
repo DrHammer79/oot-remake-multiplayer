@@ -13,6 +13,10 @@
 // start: shader caches made on a fresh install can take minutes there), and the title being up stops it.
 // "No Link, not loading, not the title" for kStuckMs is only logged (Unclear), never asked about: it tells a log
 // reader whether a black screen had the loading flag on or not.
+// Time is the game's running time, not the wall clock (review-01111-a-2): each sample adds the time since the one
+// before, at most kMaxStepMs. The module's frame does not run while the game is paused (the emulator's pause, the
+// window in the background with pause-on-unfocus, the PC asleep), so such a gap counts kMaxStepMs, never its length.
+// A stuck load still presents frames (a black picture at the game's rate), so its time counts in full.
 //
 // Logic only (tests/hookshot/stuck_load_test.cpp); the frame's reads are in coop_hook.cpp (StuckLoadFrame).
 #pragma once
@@ -24,6 +28,8 @@ namespace CoopStuckLoad {
 // A scene load this long is a load that does not end (a normal one takes seconds; a slow disk's first load of a big
 // scene well under a minute).
 inline constexpr std::uint64_t kStuckMs = 120'000;
+// The most one sample adds (the module samples every 100 ms; a longer gap is a pause, not a load's time).
+inline constexpr std::uint64_t kMaxStepMs = 1'000;
 
 struct Sample {
     bool title_up = false;   // the title's menu is up (CoopSave::TitleUp)
@@ -40,7 +46,14 @@ enum class Step {
 
 class Watch {
 public:
-    Step Frame(const Sample& s, std::uint64_t now_ms) {
+    // `wall_ms`: a steady clock; only the capped step since the last sample is used (run_ms_).
+    Step Frame(const Sample& s, std::uint64_t wall_ms) {
+        if (sampled_) {
+            const std::uint64_t step = wall_ms > last_wall_ ? wall_ms - last_wall_ : 0;
+            run_ms_ += step < kMaxStepMs ? step : kMaxStepMs;
+        }
+        sampled_ = true, last_wall_ = wall_ms;
+        const std::uint64_t now_ms = run_ms_;
         if (s.title_up) {
             title_seen_ = true;
             load_since_ = unclear_since_ = 0;
@@ -73,11 +86,14 @@ public:
         }
         return Step::none;
     }
-    // How long the current load has run (0: none), for the log line.
-    std::uint64_t LoadMs(std::uint64_t now_ms) const { return loading_ ? now_ms - load_since_ : 0; }
+    // How long the current load has run in the game's running time (0: none), for the log line.
+    std::uint64_t LoadMs() const { return loading_ ? run_ms_ - load_since_ : 0; }
     bool Marked() const { return marked_; }
 
 private:
+    bool sampled_ = false;
+    std::uint64_t last_wall_ = 0;
+    std::uint64_t run_ms_ = 0;   // the game's running time: the samples' steps, each at most kMaxStepMs
     bool title_seen_ = false;
     bool loading_ = false;
     bool marked_ = false;

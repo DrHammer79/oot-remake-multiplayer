@@ -128,7 +128,7 @@ crash, longer without network) still asks.
 
 **A load that never ends (black-01112).** Row 242's black world was a mod's model naming textures no folder had: the
 game waited for them for good and nothing said so. Now, solo and co-op, the module watches the game's own scene load
-(`Sequence_IsLoadingBanc`, `hookshot/src/coop_stuck_load.h`): still on after 2 minutes (counted only once the title has
+(`Sequence_IsLoadingBanc`, `hookshot/src/coop_stuck_load.h`): still on after 2 minutes of the game running (a pause, the window in the background or the PC asleep adds at most 1 s; counted only once the title has
 been up, so the first start's long boot never counts; the title stops it) it logs `coop: stuck load: ...`, writes a
 record `<game>\bug-reports\coop-stuck\stuck-<UTC>.txt` and, in a session, says so in the chat. The next title asks
 once, on the same page as the crash ask: "Loading got stuck last time. Please send /bugreport on Discord with the zip of
