@@ -3,6 +3,7 @@
 #include "coop_mod_library.h"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -73,14 +74,25 @@ std::string_view Leaf(std::string_view name) {
     return slash == std::string_view::npos ? name : name.substr(slash + 1);
 }
 
-bool StartsFolded(std::string_view s, std::string_view prefix) {
-    return s.size() >= prefix.size() && NameSame(s.substr(0, prefix.size()), prefix);
+// Co-op's own packs (the puppet pack, the HUD pack): the kit installs and updates them (hos_coop_mods_own: host/mods.c
+// keeps them as switched).
+bool Internal(std::string_view name) {
+    return hos_coop_mods_own(std::string(name).c_str()) != 0;
 }
 
-// Co-op's own packs (the puppet pack, the HUD pack): the kit installs and updates them.
-bool Internal(std::string_view name) {
-    const std::string_view leaf = Leaf(name);
-    return StartsFolded(leaf, "coop-puppet") || StartsFolded(leaf, "coop_hud") || StartsFolded(leaf, "coop-hud");
+// Its ExeFS patch files, as host/mods.c exefs_status counts them: the .ips and .pchtxt files right in its exefs folder.
+int ExefsPatchFiles(const fs::path& exefs) {
+    std::error_code ec;
+    int n = 0;
+    for (fs::directory_iterator it(exefs, ec), end; !ec && it != end; it.increment(ec)) {
+        std::string ext = it->path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::error_code file_ec;
+        if ((ext == ".ips" || ext == ".pchtxt") && it->is_regular_file(file_ec)) {
+            ++n;
+        }
+    }
+    return n;
 }
 
 bool Listable(std::string_view name) {
@@ -547,6 +559,7 @@ void Found(const fs::path& dir, const std::string& name, bool off, std::vector<M
     mod.folder = dir;
     mod.has_romfs = fs::is_directory(dir / "romfs", ec);
     mod.has_exefs = fs::is_directory(dir / "exefs", ec);
+    mod.exefs_patches = mod.has_exefs ? ExefsPatchFiles(dir / "exefs") : 0;
     mod.has_manifest = fs::is_regular_file(dir / kManifestFile, ec);
     mod.folder_off = off;
     mod.internal = Internal(name);

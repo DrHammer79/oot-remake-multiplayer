@@ -1,4 +1,4 @@
-From f7920ea7077b826aec5820f3066efdd97aff2d6b Mon Sep 17 00:00:00 2001
+From d5c50116fa14271dee187ead1aecd9e87395beb8 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 00:35:10 -0900
 Subject: [PATCH] Co-op mods: the Mods tab's order and switches, read at the
@@ -13,18 +13,27 @@ into <mods>/coop-mods.applied, from which the tab says whether a restart is
 needed. host/hos_coop_mods.h (plain C, header only) is the two files' format,
 the same file as the module's. Without a list file nothing changes. Host
 code only: no lift change.
+
+A mod with ExeFS patches is used at each start as the game was built for it
+(hos_coop_mods_as_built, against exefs_patches.txt): its code is in the game
+only after a build, so a switch made since (the game then started from
+longshot.exe, which does not build) waits for the next build. Its code in
+the game: its files stay on; patch files the build did not take: its files
+stay off. The switch is kept as set, one log line says so. exefs_status now
+runs before the index, and the index, the size table and coop-mods.applied
+follow start_enabled (this start) instead of the switch.
 ---
- host/hos_coop_mods.h | 109 +++++++++++++++++++++++++++++++++++++++++++
- host/mods.c          |  59 +++++++++++++++++++++++
- 2 files changed, 168 insertions(+)
+ host/hos_coop_mods.h | 173 +++++++++++++++++++++++++++++++++++++++++++
+ host/mods.c          |  93 +++++++++++++++++++++--
+ 2 files changed, 261 insertions(+), 5 deletions(-)
  create mode 100644 host/hos_coop_mods.h
 
 diff --git a/host/hos_coop_mods.h b/host/hos_coop_mods.h
 new file mode 100644
-index 00000000..55518ebd
+index 00000000..85e5b0d4
 --- /dev/null
 +++ b/host/hos_coop_mods.h
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,173 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 +   The mods list between the co-op module's Mods tab and Hookshot's mod loader (oot-remake-multiplayer, docs/mods.md).
 +
@@ -133,9 +142,73 @@ index 00000000..55518ebd
 +    return files < 0 ? snprintf(out, cap, "off %s\n", name) : snprintf(out, cap, "on %d %s\n", files, name);
 +}
 +
++/* Co-op's own packs (the puppet pack, the HUD pack): the kit keeps them on and builds the game with them; never listed.
++   A name whose last part starts with coop-puppet, coop_hud or coop-hud. */
++static inline int hos_coop_mods_own(const char *name) {
++    static const char *const own[] = {"coop-puppet", "coop_hud", "coop-hud"};
++    const char *leaf = name, *p;
++    size_t i, k;
++    for (p = name; *p; p++)
++        if (*p == '/' || *p == '\\') leaf = p + 1;
++    for (i = 0; i < sizeof own / sizeof own[0]; i++) {
++        for (k = 0; own[i][k] && hos_coop_mods_fold((unsigned char)leaf[k]) == own[i][k]; k++) {}
++        if (!own[i][k]) return 1;
++    }
++    return 0;
++}
++
++/* A mod's code against the game's build (player report: a code mod switched in the Mods tab, then the game started from
++   longshot.exe, which does not build). The game is compiled ahead of time, and a mod's ExeFS patches go into it only when
++   it is built (the kit's Start Squadala builds again when they changed). The build lists what it took in
++   <game>/exefs_patches.txt (nx2/exefs_patches.py): "<mod>\t<file>\t<hash>\t<kind>[\t<note>]" a line, '#' a comment,
++   <kind> code or data (applied), other, empty or bad (not applied). The build lists only the mods that were on, and writes
++   no list when no mod had a patch file (nx2/make_game.py): no list reads as an empty one (n = 0). */
++#define HOS_COOP_MODS_BUILT_NONE 0   /* the list names none of its files: the game was built while it was off (or gone) */
++#define HOS_COOP_MODS_BUILT_CODE 1   /* code or data of it applied: its code is in the game */
++#define HOS_COOP_MODS_BUILT_NAMED 2  /* named, nothing applied (another game version's, empty): its code changes nothing */
++static inline int hos_coop_mods_built(const char *list, size_t n, const char *name) {
++    size_t at = 0;
++    int named = 0;
++    while (at < n) {
++        size_t end = at, len, f = 0, field = 0;
++        const char *line = list + at;
++        while (end < n && list[end] != '\n') end++;
++        len = end - at;
++        at = end + 1;
++        if (!len || line[0] == '#') continue;
++        while (f < len && line[f] != '\t') f++;
++        if (f == len || strlen(name) != f) continue;
++        {
++            size_t k;
++            int same = 1;
++            for (k = 0; k < f && same; k++)
++                same = hos_coop_mods_fold((unsigned char)line[k]) == hos_coop_mods_fold((unsigned char)name[k]);
++            if (!same) continue;
++        }
++        named = 1;
++        for (f = 0; f < len && field < 3; f++)   /* (the fourth field: the kind) */
++            if (line[f] == '\t') field++;
++        if (field == 3 && f + 4 <= len && (!memcmp(line + f, "code", 4) || !memcmp(line + f, "data", 4)))
++            return HOS_COOP_MODS_BUILT_CODE;
++    }
++    return named ? HOS_COOP_MODS_BUILT_NAMED : HOS_COOP_MODS_BUILT_NONE;
++}
++
++/* Whether a mod's files are used this start: as the game was built for it, not as switched since. A mod whose code is in
++   the game keeps its files on (its code reads them); a mod with ExeFS patch files the build did not take keeps its files
++   off (its files without its code: Character Select's picks do nothing, and its tables lack what the kit's start merges
++   in). The next game build (Start Squadala) takes the switch, code and files together. Co-op's own packs: as switched.
++   on: the switch; built: hos_coop_mods_built; patch_files: its .ips and .pchtxt files. */
++static inline int hos_coop_mods_as_built(int on, int built, int patch_files, const char *name) {
++    if (hos_coop_mods_own(name)) return on;
++    if (built == HOS_COOP_MODS_BUILT_CODE) return 1;
++    if (built == HOS_COOP_MODS_BUILT_NONE && patch_files > 0) return 0;
++    return on;
++}
++
 +#endif
 diff --git a/host/mods.c b/host/mods.c
-index c5f63179..3176a2fc 100644
+index c5f63179..130a1768 100644
 --- a/host/mods.c
 +++ b/host/mods.c
 @@ -71,6 +71,7 @@ static Entry *find(const char *key) {
@@ -146,7 +219,19 @@ index c5f63179..3176a2fc 100644
      int romfs, exefs, cheats;               /* what it has */
      int files, replaced, added, overridden; /* its RomFS files; those the game has, those it has not; those a mod below takes */
      int exefs_files, exefs_built, exefs_waiting, exefs_other, exefs_bad;   /* its ExeFS patch files, by their state */
-@@ -845,6 +846,61 @@ static void find_sizes(void) {
+@@ -757,9 +758,9 @@ static int fit_sizes(void) {
+             continue;
+         }
+         tables++;
+-        if (!shipped[s].other && mods[shipped[s].mod].enabled) {
++        if (!shipped[s].other && mods[shipped[s].mod].start_enabled) {
+             merged += restbl_merge(out, base, t);
+-        } else if (mods[shipped[s].mod].enabled) {   /* (another version's: the entries of its own mod's files) */
++        } else if (mods[shipped[s].mod].start_enabled) {   /* (another version's: the entries of its own mod's files) */
+             for (size_t i = 0; i < table_cap; i++) {
+                 char key[MAX_PATH];
+                 uint32_t size;
+@@ -845,6 +846,84 @@ static void find_sizes(void) {
  static void mod_text(Mod *m);
  
  /* hos_main.c, once the image is loaded (image_path: unused; ExeFS patches are applied when the game is built) */
@@ -199,16 +284,39 @@ index c5f63179..3176a2fc 100644
 +    int n = hos_coop_mods_applied_head(line, sizeof line, (unsigned long)GetCurrentProcessId());
 +    WriteFile(f, line, (DWORD)n, &done, NULL);
 +    for (int i = 0; i < nmods; i++) {
-+        n = hos_coop_mods_applied_row(line, sizeof line, mods[i].name, mods[i].enabled ? mods[i].files : -1);
++        n = hos_coop_mods_applied_row(line, sizeof line, mods[i].name, mods[i].start_enabled ? mods[i].files : -1);
 +        WriteFile(f, line, (DWORD)n, &done, NULL);
 +    }
 +    CloseHandle(f);
++}
++/* A mod with ExeFS patches is used this start as the game was built for it (hos_coop_mods_as_built): its code is compiled
++   into the game only by a build, and the co-op Mods tab (or mods.json) may have switched it since, with the game then
++   started from longshot.exe, which does not build. Its code without its files, or its files without its code, is a game
++   no build made (Character Select: picks that do nothing, or its tables without the rows the kit's start merges in). So
++   the switch waits for the next build (Start Squadala builds when a mod's code patches changed), code and files
++   together. The switch itself is kept as set: the tab and the build read it. Runs after exefs_status (m->exefs_files) */
++static void coop_mods_as_built(const char *game_dir) {
++    char list_path[MAX_PATH];
++    snprintf(list_path, sizeof list_path, "%sexefs_patches.txt", game_dir);
++    char *built = read_text(list_path);   /* (none: the game was built when no mod had a patch file) */
++    for (int i = 0; i < nmods; i++) {
++        Mod *m = &mods[i];
++        if (!m->exefs) continue;
++        const int state = hos_coop_mods_built(built ? built : "", built ? strlen(built) : 0, m->name);
++        const int use = hos_coop_mods_as_built(m->enabled, state, m->exefs_files, m->name);
++        if (use == m->start_enabled) continue;
++        m->start_enabled = use;
++        hos_log("mods: %s: switched %s in the Mods tab, but the game was built %s its code: it stays %s this start, as the game "
++                "was built for it. Its code changes only with a game build: start the game with Start Squadala", m->name,
++                m->enabled ? "on" : "off", use ? "with" : "without", use ? "on" : "off");
++    }
++    free(built);
 +}
 +
  void hos_mods_init(const char *image_path) {
      (void)image_path;
      char game_dir[MAX_PATH];
-@@ -862,9 +918,11 @@ void hos_mods_init(const char *image_path) {
+@@ -862,15 +941,19 @@ void hos_mods_init(const char *image_path) {
      find_mods(root_dir, "", 0);
      if (!nmods) {
          hos_log("mods: none in %s (a mod: <name>\\romfs, <name>\\exefs or <name>\\cheats)", root_dir);
@@ -220,7 +328,31 @@ index c5f63179..3176a2fc 100644
      find_sizes();
      for (int i = 0; i < nmods; i++) mods[i].start_enabled = mods[i].enabled;
      start_key = state_key();
-@@ -896,6 +954,7 @@ void hos_mods_init(const char *image_path) {
++    exefs_status(game_dir);   /* (co-op: before the index, which coop_mods_as_built decides) */
++    coop_mods_as_built(game_dir);   /* (co-op) */
+     for (int i = 0; i < nmods; i++) {
+         Mod *m = &mods[i];
+-        if (!m->enabled) {
++        if (!m->start_enabled) {   /* (co-op, patch 0011: as the game was built for it, coop_mods_as_built) */
+             hos_log("mods: %s: off (the Mods tab)", m->name);
+             continue;
+         }
+@@ -882,7 +965,6 @@ void hos_mods_init(const char *image_path) {
+         hos_log("mods: %s: %d RomFS files (%d replace the game's, %d added)%s%s", m->name, m->files, m->replaced, m->added,
+                 m->exefs ? ", ExeFS patches" : "", m->cheats ? ", cheats" : "");
+     }
+-    exefs_status(game_dir);
+     /* (the table served when no merged one is: the last enabled mod's own, host/prompts.c merging the prompts' entries into it.
+        Without the game's RomFS to tell its name, the first table a mod has stands for it) */
+     if (!sizes_key[0] && nshipped) {
+@@ -890,12 +972,13 @@ void hos_mods_init(const char *image_path) {
+         for (int s = 0; s < nshipped; s++) shipped[s].other = strcmp(shipped[s].key, sizes_key) != 0;
+     }
+     for (int s = 0; s < nshipped; s++)
+-        if (!shipped[s].other && mods[shipped[s].mod].enabled) snprintf(sizes_fallback, sizeof sizes_fallback, "%s", shipped[s].host);
++        if (!shipped[s].other && mods[shipped[s].mod].start_enabled) snprintf(sizes_fallback, sizeof sizes_fallback, "%s", shipped[s].host);
+     if (fit_sizes()) {
+         /* (served in the game's table's place: hos_mods_romfs) */
      }
      for (int i = 0; i < nmods; i++) mod_text(&mods[i]);
      hos_log("mods: %d mods from %s: %zu RomFS entries", nmods, root_dir, table_n);

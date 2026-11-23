@@ -69,6 +69,10 @@ public:
         unsigned long pid = 0;
         // Whether that process runs now (a coop-mods.starting of a game that still starts is not a crash). Unset: no.
         std::function<bool(unsigned long)> running;
+        // The game's build list, <game>/exefs_patches.txt ("" when the build wrote none), read once at Start: a mod with
+        // code patches is used as the game was built for it until Start Squadala builds again (hos_coop_mods_as_built,
+        // patch 0011). Unset: not known, and nothing is said about it.
+        std::function<std::string()> exefs_list;
     };
 
     Loader(std::filesystem::path mods_root, Hooks hooks);
@@ -137,6 +141,9 @@ private:
     bool HostSets(const Mod& m, const Setting& s) const;          // locked
     bool SaveLocked(std::string* problem);
     void Say(const std::string& line) const;
+    // locked: -1 when the running game uses this mod as switched; else 0 or 1, what it uses instead (its code waits for a
+    // game build, hos_coop_mods_as_built)
+    int Held(const Mod& m) const;
 
     const std::filesystem::path root_;
     const Hooks hooks_;
@@ -146,6 +153,7 @@ private:
     bool started_ = false;
     bool exe_reads_list_ = false;
     std::vector<std::string> files_now_;                 // what this run indexed, in its order
+    std::optional<std::string> exefs_list_;              // Hooks::exefs_list at Start
     std::map<std::string, std::string> code_now_;        // name -> problem ("" loaded), of the code tried at the start
     std::map<std::string, std::string> restart_values_;  // "id\nkey" -> the value at the start, "restart" settings
     std::map<std::string, std::string> changed_;         // name -> reason (NoteChanged)

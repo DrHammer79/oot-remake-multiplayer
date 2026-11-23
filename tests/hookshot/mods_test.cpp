@@ -264,6 +264,8 @@ TEST_CASE("mods: the folder is scanned as Hookshot's host/mods.c finds mods") {
     CHECK(by("-switched-off").folder_off);
     CHECK(by("coop-puppet-pack").internal);
     CHECK(by("exe-only").has_exefs);
+    CHECK(by("exe-only").exefs_patches == 1);   // (.ips and .pchtxt files, as host/mods.c exefs_status counts them)
+    CHECK(by("A-pack").exefs_patches == 0);
     CHECK_FALSE(by("broken").problem.empty());
     CHECK(by("broken").manifest.id == "broken");   // its game files still count, under its folder's name
     CHECK(by("code-only").manifest.id == "dup");
@@ -365,6 +367,100 @@ TEST_CASE("mods: hos_coop_mods.h is the same file in the module and in patch 001
     CHECK(NewFile(patch, "host/hos_coop_mods.h") == Slurp(kRepo / "hookshot" / "src" / "hos_coop_mods.h"));
 }
 
+TEST_CASE("mods: a code mod is used as the game was built for it (hos_coop_mods_built, hos_coop_mods_as_built)") {
+    // exefs_patches.txt as nx2/exefs_patches.py write_list writes it: mod, file, hash, kind, note
+    const std::string list =
+        "# The mods' ExeFS patch files this game was built with (nx2/exefs_patches.py): mod, file, FNV-1a of its bytes, kind, note\n"
+        "OoT Character Select\tabc.ips\t0badf00d\tcode\t\n"
+        "Other Version\tdef.ips\t01020304\tother\tanother build id\n"
+        "contents/0400486024DEC000/coop-puppet\tp.ips\t05060708\tdata\t\n";
+    const auto built = [&](const char* name) { return hos_coop_mods_built(list.data(), list.size(), name); };
+    CHECK(built("OoT Character Select") == HOS_COOP_MODS_BUILT_CODE);
+    CHECK(built("oot character select") == HOS_COOP_MODS_BUILT_CODE);   // (names compare as host/mods.c sorts them)
+    CHECK(built("Other Version") == HOS_COOP_MODS_BUILT_NAMED);
+    CHECK(built("OoT Character") == HOS_COOP_MODS_BUILT_NONE);           // (a whole name only)
+    CHECK(built("Never Built") == HOS_COOP_MODS_BUILT_NONE);
+    CHECK(hos_coop_mods_built("", 0, "OoT Character Select") == HOS_COOP_MODS_BUILT_NONE);   // (no list: none built)
+    const std::string cut = "x\tabc.ips\t1\tco";   // (a cut line is no code)
+    CHECK(hos_coop_mods_built(cut.data(), cut.size(), "x") == HOS_COOP_MODS_BUILT_NAMED);
+
+    // Its code in the game: its files stay on, also switched off. Patch files the build did not take: off, also
+    // switched on. Named but nothing applied, or no patch file: as switched.
+    CHECK(hos_coop_mods_as_built(0, HOS_COOP_MODS_BUILT_CODE, 1, "OoT Character Select") == 1);
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_CODE, 1, "OoT Character Select") == 1);
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_NONE, 1, "OoT Character Select") == 0);
+    CHECK(hos_coop_mods_as_built(0, HOS_COOP_MODS_BUILT_NONE, 1, "OoT Character Select") == 0);
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_NONE, 0, "empty exefs") == 1);
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_NAMED, 1, "Other Version") == 1);
+    CHECK(hos_coop_mods_as_built(0, HOS_COOP_MODS_BUILT_NAMED, 1, "Other Version") == 0);
+    // Co-op's own packs: as switched (the kit keeps them on and builds with them).
+    CHECK(hos_coop_mods_own("contents/0400486024DEC000/coop-puppet"));
+    CHECK(hos_coop_mods_own("Coop_HUD-2"));
+    CHECK_FALSE(hos_coop_mods_own("my coop-puppet copy"));
+    CHECK(hos_coop_mods_as_built(1, HOS_COOP_MODS_BUILT_NONE, 1, "contents/0400486024DEC000/coop-puppet") == 1);
+}
+
+TEST_CASE("mods: the Loader says a code mod's switch waits for a game build (Start Squadala), not a restart") {
+    TempMods t("coop-mods-held-test");
+    t.Romfs("cs");
+    Put(t.root / "cs" / "exefs" / "abc.ips", "x");
+    t.Romfs("new code");
+    Put(t.root / "new code" / "exefs" / "def.pchtxt", "y");
+    t.Romfs("plain");
+    constexpr unsigned long kPid = 99;
+    // This start, from longshot.exe: the game was built with cs's code and without "new code" (host/mods.c kept both so),
+    // in the index order (the list's first row last).
+    {
+        char line[400];
+        std::string text;
+        hos_coop_mods_applied_head(line, sizeof line, kPid);
+        text += line;
+        hos_coop_mods_applied_row(line, sizeof line, "plain", 1);
+        text += line;
+        hos_coop_mods_applied_row(line, sizeof line, "new code", -1);
+        text += line;
+        hos_coop_mods_applied_row(line, sizeof line, "cs", 1);
+        text += line;
+        Put(t.root / HOS_COOP_MODS_APPLIED_FILE, text);
+    }
+    Put(t.root / HOS_COOP_MODS_LIST_FILE, "coop-mods 1\noff cs\non new code\non plain\n");
+    const std::string built = "# list\ncs\tabc.ips\t0badf00d\tcode\t\n";
+    Loader loader(t.root, {nullptr, kPid, nullptr, [&] { return built; }});
+    loader.Start();
+    REQUIRE(loader.ExeReadsList());
+    const auto rows = loader.Rows();
+    const auto row = [&](const char* n) {
+        return *std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.name == n; });
+    };
+    CHECK_FALSE(row("cs").on);
+    CHECK(row("cs").on_now);
+    CHECK(row("cs").note.find("build it out") != std::string::npos);
+    CHECK(row("new code").on);
+    CHECK_FALSE(row("new code").on_now);
+    CHECK(row("new code").note.find("build it in") != std::string::npos);
+    CHECK(row("plain").note.empty());
+    auto restart = loader.RestartNeeded();
+    REQUIRE(restart.why.size() == 2);
+    CHECK(restart.why[0].find("Start Squadala to build it in") != std::string::npos);
+    CHECK(restart.why[1].find("Start Squadala to build it out") != std::string::npos);
+
+    // Switched back as built: nothing waits. A mod without code still counts from the next start.
+    std::string problem;
+    REQUIRE(loader.SetOn("cs", true, &problem));
+    REQUIRE(loader.SetOn("new code", false, &problem));
+    CHECK_FALSE(loader.RestartNeeded().needed);
+    REQUIRE(loader.SetOn("plain", false, &problem));
+    restart = loader.RestartNeeded();
+    REQUIRE(restart.why.size() == 1);
+    CHECK(restart.why[0].find("from the next start") == std::string::npos);
+    CHECK(restart.why[0].find("off or gone") != std::string::npos);
+
+    // Without the build list (an older module host, a test): as before, nothing said about code.
+    Loader plain(t.root, {nullptr, kPid, nullptr, nullptr});
+    plain.Start();
+    for (const Row& r : plain.Rows()) CHECK(r.note.find("Start Squadala") == std::string::npos);
+}
+
 TEST_CASE("mods: coop-mods.applied is read as host/mods.c writes it") {
     char line[600];
     std::string text;
@@ -455,7 +551,7 @@ TEST_CASE("mods: the Loader switches, moves and says when a restart is needed") 
         Put(t.root / HOS_COOP_MODS_APPLIED_FILE, text);
     }
     std::vector<std::string> log;
-    Loader loader(t.root, {[&](const std::string& l) { log.push_back(l); }, kPid, nullptr});
+    Loader loader(t.root, {[&](const std::string& l) { log.push_back(l); }, kPid, nullptr, nullptr});
     loader.Start();
     CHECK(loader.ExeReadsList());
     REQUIRE_FALSE(log.empty());
@@ -512,7 +608,7 @@ TEST_CASE("mods: the Loader switches, moves and says when a restart is needed") 
     CHECK(loader.RestartNeeded().why.back() == "A new seed: it is used from the next start.");
 
     // A second Loader (the next start) reads back what the first one saved.
-    Loader next(t.root, {nullptr, kPid, nullptr});
+    Loader next(t.root, {nullptr, kPid, nullptr, nullptr});
     next.Start();
     CHECK(next.Value("bee", "boot") == "1");
     CHECK(next.CodeToLoad().empty());
@@ -523,7 +619,7 @@ TEST_CASE("mods: without patch 0011 the tab cannot switch or move game files, bu
     t.Romfs("a");
     t.Json("c", R"({"code": "c.dll", "settings": [{"key": "x"}]})");
     Put(t.root / "c" / "c.dll", "MZ");
-    Loader loader(t.root, {nullptr, 1, nullptr});   // no coop-mods.applied: an older hookshot.exe
+    Loader loader(t.root, {nullptr, 1, nullptr, nullptr});   // no coop-mods.applied: an older hookshot.exe
     loader.Start();
     CHECK_FALSE(loader.ExeReadsList());
     std::string problem;
@@ -545,7 +641,7 @@ TEST_CASE("mods: an applied file from another process is an earlier run's") {
     char line[100];
     hos_coop_mods_applied_head(line, sizeof line, 5);
     Put(t.root / HOS_COOP_MODS_APPLIED_FILE, line);
-    Loader loader(t.root, {nullptr, 6, nullptr});
+    Loader loader(t.root, {nullptr, 6, nullptr, nullptr});
     loader.Start();
     CHECK_FALSE(loader.ExeReadsList());
 }
@@ -556,7 +652,7 @@ TEST_CASE("mods: in co-op the host's value of a shared setting is shown locked a
         {"key": "seed", "type": "text", "shared": true, "restart": true},
         {"key": "hints", "type": "toggle"}]})");
     t.Json("mine", R"({"id": "mine", "coop": "own", "settings": [{"key": "x", "type": "toggle", "shared": true}]})");
-    Loader loader(t.root, {nullptr, 1, nullptr});
+    Loader loader(t.root, {nullptr, 1, nullptr, nullptr});
     loader.Start();
     REQUIRE(loader.Set("rando", "seed", "MINE"));
     CHECK(loader.SharedValues() == std::vector<SharedValue>{{"rando", "seed", "MINE"}});  // not "own" mods, not unshared
@@ -587,11 +683,11 @@ TEST_CASE("mods: in co-op the host's value of a shared setting is shown locked a
     CHECK_FALSE(loader.Settings("rando")[0].locked);
     CHECK(loader.Set("rando", "seed", "AGAIN"));
 
-    Loader again(t.root, {nullptr, 2, nullptr});  // the next start, before joining
+    Loader again(t.root, {nullptr, 2, nullptr, nullptr});  // the next start, before joining
     again.Start();
     CHECK(again.Value("rando", "seed") == "AGAIN");
     loader.SetHostValues(std::vector<SharedValue>{{"rando", "seed", "HOST2"}});
-    Loader third(t.root, {nullptr, 3, nullptr});
+    Loader third(t.root, {nullptr, 3, nullptr, nullptr});
     third.Start();
     CHECK(third.Value("rando", "seed") == "HOST2");
 }

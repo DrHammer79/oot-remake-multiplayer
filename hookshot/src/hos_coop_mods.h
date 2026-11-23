@@ -106,4 +106,68 @@ static inline int hos_coop_mods_applied_row(char *out, size_t cap, const char *n
     return files < 0 ? snprintf(out, cap, "off %s\n", name) : snprintf(out, cap, "on %d %s\n", files, name);
 }
 
+/* Co-op's own packs (the puppet pack, the HUD pack): the kit keeps them on and builds the game with them; never listed.
+   A name whose last part starts with coop-puppet, coop_hud or coop-hud. */
+static inline int hos_coop_mods_own(const char *name) {
+    static const char *const own[] = {"coop-puppet", "coop_hud", "coop-hud"};
+    const char *leaf = name, *p;
+    size_t i, k;
+    for (p = name; *p; p++)
+        if (*p == '/' || *p == '\\') leaf = p + 1;
+    for (i = 0; i < sizeof own / sizeof own[0]; i++) {
+        for (k = 0; own[i][k] && hos_coop_mods_fold((unsigned char)leaf[k]) == own[i][k]; k++) {}
+        if (!own[i][k]) return 1;
+    }
+    return 0;
+}
+
+/* A mod's code against the game's build (player report: a code mod switched in the Mods tab, then the game started from
+   longshot.exe, which does not build). The game is compiled ahead of time, and a mod's ExeFS patches go into it only when
+   it is built (the kit's Start Squadala builds again when they changed). The build lists what it took in
+   <game>/exefs_patches.txt (nx2/exefs_patches.py): "<mod>\t<file>\t<hash>\t<kind>[\t<note>]" a line, '#' a comment,
+   <kind> code or data (applied), other, empty or bad (not applied). The build lists only the mods that were on, and writes
+   no list when no mod had a patch file (nx2/make_game.py): no list reads as an empty one (n = 0). */
+#define HOS_COOP_MODS_BUILT_NONE 0   /* the list names none of its files: the game was built while it was off (or gone) */
+#define HOS_COOP_MODS_BUILT_CODE 1   /* code or data of it applied: its code is in the game */
+#define HOS_COOP_MODS_BUILT_NAMED 2  /* named, nothing applied (another game version's, empty): its code changes nothing */
+static inline int hos_coop_mods_built(const char *list, size_t n, const char *name) {
+    size_t at = 0;
+    int named = 0;
+    while (at < n) {
+        size_t end = at, len, f = 0, field = 0;
+        const char *line = list + at;
+        while (end < n && list[end] != '\n') end++;
+        len = end - at;
+        at = end + 1;
+        if (!len || line[0] == '#') continue;
+        while (f < len && line[f] != '\t') f++;
+        if (f == len || strlen(name) != f) continue;
+        {
+            size_t k;
+            int same = 1;
+            for (k = 0; k < f && same; k++)
+                same = hos_coop_mods_fold((unsigned char)line[k]) == hos_coop_mods_fold((unsigned char)name[k]);
+            if (!same) continue;
+        }
+        named = 1;
+        for (f = 0; f < len && field < 3; f++)   /* (the fourth field: the kind) */
+            if (line[f] == '\t') field++;
+        if (field == 3 && f + 4 <= len && (!memcmp(line + f, "code", 4) || !memcmp(line + f, "data", 4)))
+            return HOS_COOP_MODS_BUILT_CODE;
+    }
+    return named ? HOS_COOP_MODS_BUILT_NAMED : HOS_COOP_MODS_BUILT_NONE;
+}
+
+/* Whether a mod's files are used this start: as the game was built for it, not as switched since. A mod whose code is in
+   the game keeps its files on (its code reads them); a mod with ExeFS patch files the build did not take keeps its files
+   off (its files without its code: Character Select's picks do nothing, and its tables lack what the kit's start merges
+   in). The next game build (Start Squadala) takes the switch, code and files together. Co-op's own packs: as switched.
+   on: the switch; built: hos_coop_mods_built; patch_files: its .ips and .pchtxt files. */
+static inline int hos_coop_mods_as_built(int on, int built, int patch_files, const char *name) {
+    if (hos_coop_mods_own(name)) return on;
+    if (built == HOS_COOP_MODS_BUILT_CODE) return 1;
+    if (built == HOS_COOP_MODS_BUILT_NONE && patch_files > 0) return 0;
+    return on;
+}
+
 #endif

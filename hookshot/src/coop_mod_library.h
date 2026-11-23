@@ -101,7 +101,8 @@ struct Mod {
     Manifest manifest;
     bool has_manifest = false;
     bool has_romfs = false;
-    bool has_exefs = false;         // Hookshot leaves code patches out; shown so the player knows
+    bool has_exefs = false;         // an exefs folder: code patches, built into the game by a game build
+    int exefs_patches = 0;          // its .ips and .pchtxt files there (host/mods.c counts the same)
     bool internal = false;          // co-op's own packs: always on, not listed, not compared
     bool folder_off = false;        // Hookshot's own switch: a folder name starting with '-' or '_'
     bool listable = false;          // its name can go into coop-mods.list (plain ASCII, short enough)
