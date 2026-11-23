@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "coop_mod_json.h"
+#include "coop_strike.h"
 #include "coop_world_snapshot.h"
 
 namespace CoopPlaytest {
@@ -135,5 +136,17 @@ bool EnvIsOn(std::string_view value);
 // walk ran and saw no actors". No snapshot yet: `frame` null.
 std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Snapshot>& snapshot,
                         std::uint64_t now_frame, std::uint64_t now_ms, bool full = false);
+
+// The strike acts (docs/playtest.md): `kill ID NAME` and `hit ID NAME N` name an actor by the id `get_world` lists. The
+// id is resolved in the objects walk, which runs only while connected and sharing, so with no usable world list (no
+// snapshot, or one older than the stale limit) an id is refused before anything is queued. Empty when the lines have
+// no id strike or a list is there; else the reply's text. A line that is not a strike is not looked at (the parser
+// checks the rest).
+std::string StrikeIdRefusal(std::string_view lines, bool world_list);
+// Whether the snapshot is a usable world list: there is one and it is not stale.
+bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms);
+// The `strike` member of `state`: `,"strike":{seq,result,name,id}` for the newest strike the walk ran, or "" when none
+// ran yet (so the reply stays as it was for a game that never struck).
+std::string StrikeMember(const std::optional<CoopStrike::Result>& last);
 
 }  // namespace CoopPlaytest

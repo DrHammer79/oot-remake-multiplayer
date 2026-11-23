@@ -169,6 +169,7 @@ struct Step {
     std::string mark;  // mark: its name; warp: the scene; give: the item; wear: the piece;
                        // assign: the item's name in the button enum (Bow, Hookshot, Hammer)
     std::string start; // warp: the start position name (empty: the scene's own); wear: the slot
+    std::uint64_t id = 0;  // kill and hit: the actor's address ("kill ID NAME"); 0: the nearest of that name
     float x = 0.0f;  // goto and toward: the world point (x, z); place: (x, y, z)
     float y = 0.0f;
     float z = 0.0f;
@@ -277,6 +278,7 @@ public:
         std::string name;
         std::string start;
         std::array<float, 3> at{};  // place
+        std::uint64_t id = 0;       // kill and hit: the actor's address; 0: by name
     };
     std::vector<Request> TakeRequests() { return std::exchange(requests_, {}); }
     bool Done() const { return index_ >= script_.steps.size(); }

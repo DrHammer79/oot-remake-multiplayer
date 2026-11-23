@@ -470,6 +470,35 @@ TEST_CASE("playtest: exactly act, warp, flag and give are gated") {
     }
 }
 
+TEST_CASE("playtest: an actor id in a strike is refused when there is no world list (solo), a name alone is not") {
+    CHECK(StrikeIdRefusal("kill 4096 Enemy_Test", true).empty());
+    CHECK(StrikeIdRefusal("kill Enemy_Test", false).empty());
+    CHECK(StrikeIdRefusal("hit Enemy_Test 3", false).empty());
+    CHECK(StrikeIdRefusal("chat 123 hello", false).empty());
+    CHECK(StrikeIdRefusal("", false).empty());
+    CHECK(StrikeIdRefusal("kill 4096 Enemy_Test", false).find("no world list") == 0);
+    CHECK(StrikeIdRefusal("hit 4096 Enemy_Test 3", false).find("no world list") == 0);
+    CHECK(StrikeIdRefusal("KILL\t4096 Enemy_Test", false).find("no world list") == 0);
+    CHECK(StrikeIdRefusal("hurt 1\nkill Enemy_Test\nhit 12 Enemy_Test 2", false).find("no world list") == 0);
+}
+
+TEST_CASE("playtest: a world list is live when there is a snapshot that is not stale") {
+    CHECK_FALSE(WorldListLive(std::nullopt, 5000));
+    CoopWorldSnapshot::Snapshot s;
+    s.taken_ms = 1000;
+    CHECK(WorldListLive(s, 1000));
+    CHECK(WorldListLive(s, 1000 + CoopWorldSnapshot::kStaleMs));
+    CHECK_FALSE(WorldListLive(s, 1001 + CoopWorldSnapshot::kStaleMs));
+}
+
+TEST_CASE("playtest: state.strike carries the newest strike result, and is absent before the first") {
+    CHECK(StrikeMember(std::nullopt).empty());
+    CHECK(StrikeMember(CoopStrike::Result{3, "gone", "Enemy_Test", 4096}) ==
+          ",\"strike\":{\"seq\":3,\"result\":\"gone\",\"name\":\"Enemy_Test\",\"id\":4096}");
+    CHECK(StrikeMember(CoopStrike::Result{4, "none with a life", "Enemy_Test", 0}) ==
+          ",\"strike\":{\"seq\":4,\"result\":\"none with a life\",\"name\":\"Enemy_Test\",\"id\":0}");
+}
+
 TEST_CASE("playtest: the gate line at start says what is on and why") {
     CHECK(VerbGateLine(true, true) == "verbs on (test runner: yes, cheats: on)");
     CHECK(VerbGateLine(true, false) == "verbs off (test runner: yes, cheats: off)");

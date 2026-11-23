@@ -586,6 +586,33 @@ TEST_CASE("testinput: hit and stun hand the hook an actor name (and an amount), 
     CHECK(r.Done());
 }
 
+TEST_CASE("testinput: kill and hit take the actor's id before its name (S4)") {
+    std::string error;
+    Runner r(Must("kill 4096 Enemy_Test\nhit 8192 Enemy_Test 3\nkill Enemy_Test\nhit Enemy_Test 2\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 4);
+    CHECK(requests[0].kind == Kind::kill);
+    CHECK(requests[0].name == "Enemy_Test");
+    CHECK(requests[0].id == 4096);
+    CHECK(requests[1].kind == Kind::hit);
+    CHECK(requests[1].name == "Enemy_Test");
+    CHECK(requests[1].start == "3");
+    CHECK(requests[1].id == 8192);
+    CHECK(requests[2].id == 0);
+    CHECK(requests[3].id == 0);
+    CHECK(requests[3].start == "2");
+    // an id needs its name (never a number), is not zero, and nothing may follow
+    CHECK_FALSE(Parse("kill 4096\n", error));
+    CHECK_FALSE(Parse("kill 4096 77\n", error));
+    CHECK_FALSE(Parse("kill 0 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("kill 4096 Enemy_Test now\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("hit 4096 3\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test 0\n", error));
+}
+
 TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (issue 130)") {
     std::string error;
     CHECK_FALSE(Parse("setflag\n", error));

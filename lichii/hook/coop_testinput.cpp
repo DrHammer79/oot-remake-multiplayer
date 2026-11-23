@@ -267,6 +267,28 @@ std::string WarpGiveUpLine(std::string_view target, double seconds, const std::o
     return line + ")";
 }
 
+bool AllDigits(std::string_view s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+// The words of "kill [ID] NAME" and "hit [ID] NAME N": a first word that is all digits is the actor's id (its address, as
+// get_world lists it), and then the actor's name must follow (never a number). `at` is where the NAME is; `id` the id
+// (0: none given). False for an id of 0 or too long, or an id with no name after it.
+bool StrikeId(const std::vector<std::string_view>& w, std::size_t& at, std::uint64_t& id) {
+    at = 1;
+    id = 0;
+    if (w.size() < 2 || !AllDigits(w[1])) {
+        return true;
+    }
+    const std::string_view n = w[1];
+    const auto r = std::from_chars(n.data(), n.data() + n.size(), id);
+    if (r.ec != std::errc{} || r.ptr != n.data() + n.size() || id == 0 || w.size() < 3 || AllDigits(w[2])) {
+        return false;
+    }
+    at = 2;
+    return true;
+}
+
 std::optional<Script> Parse(std::string_view text, std::string& error) {
     Script script;
     int number = 0;
@@ -402,11 +424,16 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             step.kind = Kind::menu;
             step.mark = page;
         } else if (cmd == "KILL") {
-            if (w.size() != 2) {
-                return fail("want: kill ACTOR");
+            // kill NAME, or kill ID NAME (the ID is the address get_world lists; the NAME is the one it lists with it)
+            std::size_t at = 1;
+            if (!StrikeId(w, at, step.id)) {
+                return fail("want: kill [ID] ACTOR (an ID needs the actor's name after it)");
+            }
+            if (w.size() != at + 1) {
+                return fail("want: kill [ID] ACTOR");
             }
             step.kind = Kind::kill;
-            step.mark = std::string(w[1]);
+            step.mark = std::string(w[at]);
         } else if (cmd == "DROP") {
             // drop ACTOR METRES: test only (row 178's fall guard): the nearest boss of that name that our game owns
             // is put METRES straight down by the set-matrix call the copies are placed with (a copy: not moved).
@@ -421,13 +448,17 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             step.start = std::string(w[2]);
         } else if (cmd == "HIT") {
             int amount = 0;
-            const std::string_view n = w.size() == 3 ? std::string_view(w[2]) : std::string_view();
+            std::size_t at = 1;
+            if (!StrikeId(w, at, step.id)) {
+                return fail("want: hit [ID] ACTOR N (1 to 80; an ID needs the actor's name after it)");
+            }
+            const std::string_view n = w.size() == at + 2 ? std::string_view(w[at + 1]) : std::string_view();
             const auto r = std::from_chars(n.data(), n.data() + n.size(), amount);
-            if (w.size() != 3 || r.ec != std::errc{} || r.ptr != n.data() + n.size() || amount < 1 || amount > 80) {
-                return fail("want: hit ACTOR N (1 to 80)");
+            if (w.size() != at + 2 || r.ec != std::errc{} || r.ptr != n.data() + n.size() || amount < 1 || amount > 80) {
+                return fail("want: hit [ID] ACTOR N (1 to 80)");
             }
             step.kind = Kind::hit;
-            step.mark = std::string(w[1]);
+            step.mark = std::string(w[at]);
             step.start = std::to_string(amount);
         } else if (cmd == "STUN") {
             if (w.size() != 2) {
@@ -646,7 +677,7 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
             s.kind == Kind::assign || s.kind == Kind::dress || s.kind == Kind::chat || s.kind == Kind::kill || s.kind == Kind::drop || s.kind == Kind::hurt ||
             s.kind == Kind::hit || s.kind == Kind::stun ||
             s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump) {
-            requests_.push_back(Request{s.kind, s.mark, s.start});
+            requests_.push_back(Request{s.kind, s.mark, s.start, {}, s.id});
             ++index_;
             continue;
         }
@@ -1450,9 +1481,9 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         }
         CoopObjects::QueueTestAim(request.at[0], request.at[1], request.at[2]);
     } else if (request.kind == Kind::kill) {
-        CoopObjects::QueueTestKill(request.name);  // logged where it is done
+        CoopObjects::QueueTestKill(request.name, request.id);  // logged where it is done
     } else if (request.kind == Kind::hit) {
-        CoopObjects::QueueTestHit(request.name, Whole(request.start));  // logged where it is done
+        CoopObjects::QueueTestHit(request.name, Whole(request.start), request.id);  // logged where it is done
     } else if (request.kind == Kind::stun) {
         CoopObjects::QueueTestStun(request.name);  // logged where it is done
     } else if (request.kind == Kind::drop) {

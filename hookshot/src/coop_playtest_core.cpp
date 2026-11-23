@@ -485,4 +485,53 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
     return out + "]}";
 }
 
+namespace {
+bool Digits(std::string_view s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+}
+std::string Lower(std::string_view s) {
+    std::string out(s);
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](unsigned char c) { return static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c); });
+    return out;
+}
+}  // namespace
+
+std::string StrikeIdRefusal(std::string_view lines, bool world_list) {
+    if (world_list) return "";
+    std::size_t pos = 0;
+    while (pos <= lines.size()) {
+        std::size_t end = lines.find('\n', pos);
+        if (end == std::string_view::npos) end = lines.size();
+        const std::string_view line = lines.substr(pos, end - pos);
+        pos = end + 1;
+        std::vector<std::string_view> words;
+        for (std::size_t i = 0; i < line.size();) {
+            while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r')) ++i;
+            const std::size_t start = i;
+            while (i < line.size() && line[i] != ' ' && line[i] != '\t' && line[i] != '\r') ++i;
+            if (i > start) words.push_back(line.substr(start, i - start));
+        }
+        if (words.size() < 2) continue;
+        const std::string cmd = Lower(words[0]);
+        if ((cmd == "kill" || cmd == "hit") && Digits(words[1])) {
+            return "no world list: an actor id is resolved in the objects walk, which runs only while connected and "
+                   "sharing; use the name alone (the nearest of that name) or connect first";
+        }
+    }
+    return "";
+}
+
+bool WorldListLive(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, std::uint64_t now_ms) {
+    if (!snapshot) return false;
+    const std::uint64_t age = now_ms >= snapshot->taken_ms ? now_ms - snapshot->taken_ms : 0;
+    return age <= CoopWorldSnapshot::kStaleMs;
+}
+
+std::string StrikeMember(const std::optional<CoopStrike::Result>& last) {
+    if (!last) return "";
+    return ",\"strike\":{\"seq\":" + std::to_string(last->seq) + ",\"result\":" + Quote(last->result) +
+           ",\"name\":" + Quote(last->name) + ",\"id\":" + std::to_string(last->id) + "}";
+}
+
 }  // namespace CoopPlaytest

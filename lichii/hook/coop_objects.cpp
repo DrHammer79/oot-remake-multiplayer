@@ -49,6 +49,7 @@
 // dropped, and an actor counts as gone only when two walks in a row miss it.
 
 #include "coop_objects.h"
+#include "coop_strike.h"
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
@@ -433,6 +434,8 @@ bool& ForgetKeptFlag() {  // a host save load: WorldSync::ForgetKept before the 
 struct TestStrike {
     std::string name;
     std::int32_t amount = 0;  // 0: a kill (its whole life); -1: a stun (TestStun)
+    std::uint64_t id = 0;     // the actor's address when the strike names one (0: the nearest of the name)
+    std::uint64_t seq = 0;    // CoopStrike::Book number; 0: a stun (no result is kept)
 };
 struct TestPlatformPlaces {  // TestPlatformPlace: the last walk's moving platforms nearest our Link, by name
     std::mutex mutex;
@@ -5023,28 +5026,37 @@ private:
                          sync_.TestStun(name, player_, self) ? "said" : "not a copy (none here, or ours)");
                 continue;
             }
-            const Seen* best = nullptr;
-            float best_m = 0.0f;
+            // The walk's own list, not the snapshot the bridge shows: a strike with an id lands on that actor or on
+            // none (CoopStrike::PickTarget), and what happened is kept for the bridge's `state.strike`.
+            std::vector<CoopStrike::Candidate> candidates;
+            candidates.reserve(seen.size());
             for (const Seen& s : seen) {
-                if (s.name != name || !s.life || s.life->life <= 0) {
-                    continue;
+                CoopStrike::Candidate c;
+                c.address = s.address;
+                c.name = s.name;
+                if (s.life) {
+                    c.life = s.life->life;
                 }
-                float m = 0.0f;
                 if (player_) {
                     const float dx = s.position[0] - (*player_)[0];
                     const float dy = s.position[1] - (*player_)[1];
                     const float dz = s.position[2] - (*player_)[2];
-                    m = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    c.metres = std::sqrt(dx * dx + dy * dy + dz * dz);
                 }
-                if (!best || m < best_m) {
-                    best = &s;
-                    best_m = m;
-                }
+                candidates.push_back(c);
             }
-            if (!best) {
-                LOG_INFO(Core, "coop: test {} {}: none here with a life", strike.amount > 0 ? "hit" : "kill", name);
+            const CoopStrike::Pick pick = CoopStrike::PickTarget(candidates, name, strike.id);
+            if (strike.seq != 0) {
+                CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), name, strike.id});
+            }
+            if (pick.result != CoopStrike::kDone) {
+                LOG_INFO(Core, "coop: test {} {}{}: {}", strike.amount > 0 ? "hit" : "kill",
+                         strike.id ? fmt::format("{} ", strike.id) : std::string(), name,
+                         pick.result == CoopStrike::kGone ? "gone (no such actor with that name)" : "none here with a life");
                 continue;
             }
+            const Seen* best = &seen[pick.index];
+            const float best_m = candidates[pick.index].metres;
             if (strike.amount > 0) {
                 // A partial hit: through the game's own Life step, never past its stops (no test_kill).
                 LifeWrite w;
@@ -6350,24 +6362,30 @@ void QueueTestDrop(std::string name, float metres) {
     }
 }
 
-void QueueTestKill(std::string name) {
+std::uint64_t QueueTestKill(std::string name, std::uint64_t id) {
     std::lock_guard lock(KeyRefundMutex());
-    if (TestKillQueue().size() < 16) {
-        TestKillQueue().push_back({std::move(name), 0});
+    if (TestKillQueue().size() >= 16) {
+        return 0;
     }
+    const std::uint64_t seq = CoopStrike::TheBook().Asked();
+    TestKillQueue().push_back({std::move(name), 0, id, seq});
+    return seq;
 }
 
-void QueueTestHit(std::string name, std::int32_t amount) {
+std::uint64_t QueueTestHit(std::string name, std::int32_t amount, std::uint64_t id) {
     std::lock_guard lock(KeyRefundMutex());
-    if (TestKillQueue().size() < 16 && amount > 0) {
-        TestKillQueue().push_back({std::move(name), amount});
+    if (TestKillQueue().size() >= 16 || amount <= 0) {
+        return 0;
     }
+    const std::uint64_t seq = CoopStrike::TheBook().Asked();
+    TestKillQueue().push_back({std::move(name), amount, id, seq});
+    return seq;
 }
 
 void QueueTestStun(std::string name) {
     std::lock_guard lock(KeyRefundMutex());
     if (TestKillQueue().size() < 16) {
-        TestKillQueue().push_back({std::move(name), -1});
+        TestKillQueue().push_back({std::move(name), -1, 0, 0});
     }
 }
 

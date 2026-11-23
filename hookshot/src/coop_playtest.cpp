@@ -289,6 +289,12 @@ std::string WorldText(bool full) {
     return WorldMember(true, snap, now, SteadyMs(), full);
 }
 
+// Whether the objects walk has a usable world list now (a snapshot that is not stale): false in solo.
+bool WorldListNow() {
+    auto& store = CoopWorldSnapshot::TheStore();
+    return store.Enabled() && WorldListLive(store.Get(), SteadyMs());
+}
+
 // The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
 std::string StateMembers(bool full_world = false) {
     std::string out;
@@ -331,6 +337,7 @@ std::string StateMembers(bool full_world = false) {
     out += "]}";
     out += ",\"coop_menu\":" + Quote(CoopPause::MenuState());
     out += WorldText(full_world);
+    out += StrikeMember(CoopStrike::TheBook().Last());
     return out;
 }
 
@@ -387,8 +394,18 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "act") {
         std::string error;
+        // An actor id is resolved in the objects walk, which runs only with a world list: with none, refuse it here
+        // (never run it as a name, which would strike another actor).
+        const bool listed = WorldListNow();
+        if (const std::string refusal = StrikeIdRefusal(r.lines, listed); !refusal.empty()) {
+            return fail("refused", refusal);
+        }
+        const std::uint64_t asked = CoopStrike::TheBook().LastAsked();
         if (!played(r.lines, error, &CoopTestInput::ActKinds())) return fail("failed", error);
-        return ok("\"lines\":" + Quote(r.lines) + ",\"note\":\"asked: the game does it on its next frames\"");
+        // The strikes this act queued: the walk leaves the result of the newest one in `state.strike` under this number.
+        const std::uint64_t seq = CoopStrike::TheBook().LastAsked();
+        return ok("\"lines\":" + Quote(r.lines) + ",\"note\":\"asked: the game does it on its next frames\"" +
+                  (seq != asked ? ",\"strike_seq\":" + std::to_string(seq) : std::string()));
     }
     if (r.cmd == "warp") {
         std::string error;

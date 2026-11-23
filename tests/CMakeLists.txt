@@ -59,6 +59,7 @@ add_executable(coop_tests
   lichii/rooms_test.cpp
   lichii/objects_test.cpp
   lichii/objects_world_test.cpp
+  lichii/strike_test.cpp
   lichii/bomb_share_test.cpp
   lichii/lift_player_test.cpp
   lichii/show_delay_test.cpp
