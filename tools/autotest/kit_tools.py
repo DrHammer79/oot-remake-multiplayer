@@ -212,7 +212,8 @@ class StateHistory:
 # --- the call log and its replay ------------------------------------------------------------------------------------
 
 READ_ONLY = frozenset(("state", "get_state", "get_world", "get_actor", "log", "check_logs", "session_status", "pause",
-                       "resume", "shot", "screenshot"))   # nothing to run again: they only look (or move a log cursor)
+                       "resume", "shot", "screenshot", "look"))   # nothing to run again: they only look (or move a log cursor)
+NOT_REPLAYED = frozenset(("record_route",))   # writes a repo data file, not the game: a replay would only be refused
 NAME = re.compile(r"^(oot-p[1-4]|oot-pair|oot-playtest|live)$")   # oot-pair: mcp_playtest --pair (p1 and p2)
 
 
@@ -266,7 +267,7 @@ def replay(files, session=None, lane=None, log_dir=None, include_reads=False, in
     try:
         for c in calls:
             tool = c["tool"]
-            if (tool in READ_ONLY and not include_reads) or (not c.get("ok", True) and not include_failed):
+            if tool in NOT_REPLAYED or (tool in READ_ONLY and not include_reads) or (not c.get("ok", True) and not include_failed):
                 skipped += 1
                 continue
             say("%s %s %s %s" % (c["_at"], c["server"], tool, json.dumps(c.get("args") or {}, separators=(",", ":"))))

@@ -162,6 +162,12 @@ jobs:
         run: python tools/autotest/tests/test_playtest_bridge.py -v
       - name: Play-test kit helpers tests (step_until, delta state, call log, doctor)
         run: python tools/autotest/tests/test_kit_tools.py -v
+      - name: Play-test look (one-call situation text) tests
+        run: python tools/autotest/tests/test_kit_look.py -v
+      - name: Play-test wait_until tests
+        run: python tools/autotest/tests/test_kit_wait.py -v
+      - name: Play-test go_to and record_route (routes) tests
+        run: python tools/autotest/tests/test_kit_route.py -v
       - name: Play-test kit doctor tests
         run: python tools/autotest/tests/test_kit_doctor.py -v
       - name: Shared play-test library (scripts and data) tests

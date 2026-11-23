@@ -442,6 +442,10 @@ class Replay(unittest.TestCase):
         self.assertEqual((self.ran, r["ran"]), ([], 3))
         self.assertEqual(len(self.said), 3)
 
+    def test_record_route_and_look_are_never_run_again(self):
+        self.assertIn("record_route", kit_tools.NOT_REPLAYED)
+        self.assertIn("look", kit_tools.READ_ONLY)
+
     def test_stops_at_the_first_failure_unless_told_to_go_on(self):
         def boom(server, tool, args):
             self.ran.append(tool)

@@ -378,7 +378,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -407,6 +407,46 @@ class PlayerServer(unittest.TestCase):
         s = self.call("p1", "get_state")
         self.assertEqual((s["enemy_near"], s["danger"]), (1, True))   # the dead one and the far one do not count
         self.assertNotIn("enemy_near_at_least", s)
+
+    def test_look_is_one_short_text_and_says_what_changed(self):
+        self.games["p1"].world = self.WORLD
+        text = self.call("p1", "look")
+        self.assertIsInstance(text, str)
+        self.assertIn("enemy: Enemy_Near #3", text)
+        self.assertIn("chest: Obj_TBox_Wood #5", text)
+        self.assertNotIn("Enemy_Far", text)           # past 25 m
+        self.assertIn("changed: first look", text)
+        self.assertTrue(self.call("p1", "look").endswith("changed: nothing"))
+
+    def test_wait_until_runs_frames_and_ends_with_a_look(self):
+        out = self.call("p1", "wait_until", what="prompt", max_frames=16)
+        self.assertFalse(out["met"])
+        self.assertEqual(out["frames_run"], 16)
+        self.assertIn("Link ", out["look"])
+        self.games["p1"].prompt = "Talk"
+        out = self.call("p1", "wait_until", what="prompt")
+        self.assertEqual((out["met"], out["frames_run"]), (True, 0))
+
+    def test_go_to_xz_ends_with_a_look_and_record_route_saves_the_walk(self):
+        import shutil
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        g = self.tools["p1"]
+        g.route_dir = folder
+        out = self.call("p1", "go_to", x=3, z=0)
+        self.assertIn("look", out)
+        self.assertNotIn("state", out)
+        with self.assertRaises(ValueError):
+            self.call("p1", "go_to")
+        with self.assertRaises(ValueError):
+            self.call("p1", "record_route", action="save", name="a-walk")      # not started
+        self.call("p1", "record_route", action="start")
+        self.call("p1", "go_to", x=9, z=0)
+        got = self.call("p1", "record_route", action="save", name="a-walk", note="Walked 9 m east.")
+        self.assertGreaterEqual(got["points"], 2)
+        self.assertTrue(os.listdir(folder))
+        out = self.call("p1", "go_to", place="a-walk-1")                       # the saved data is used at once
+        self.assertEqual(out["plan"][-1], "a-walk-1")
 
     def test_a_room_that_really_has_no_enemy_is_zero_not_null(self):
         self.games["p1"].world = {"frame": 5, "why": "empty: the walk ran and saw no actors", "count": 0, "actors": []}

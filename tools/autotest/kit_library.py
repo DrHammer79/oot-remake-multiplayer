@@ -172,7 +172,7 @@ def save_script(calls_files, out_path, what, scene, start, expect, keep_reads=Fa
     calls = kit_tools.read_calls(calls_files)
     keep = []
     for c in calls:
-        if (c["tool"] in kit_tools.READ_ONLY and not keep_reads) or (not c.get("ok", True) and not keep_failed):
+        if c["tool"] in kit_tools.NOT_REPLAYED or (c["tool"] in kit_tools.READ_ONLY and not keep_reads) or (not c.get("ok", True) and not keep_failed):
             continue
         keep.append({"server": c["server"], "tool": c["tool"], "args": c.get("args") or {}})
     head = ["# what: %s" % what, "# scene: %s" % scene, "# start: %s" % start, "# expect: %s" % expect,
