@@ -3222,13 +3222,37 @@ const Lang* Current() {
     if (g_forced_on) {
         return g_forced;
     }
-    // Longshot's Menu language row: the tabs are drawn in that menu, with the
-    // glyphs it merged for that language (vk_imgui.cpp script_fonts).
+    // Longshot's Menu language row picks the table, but our tabs are the game's own panes now (0.11.9 on), drawn with
+    // the font set the game loaded for ITS language, not Longshot's ImGui fonts: a table that set has no letters for
+    // shows English (row 139, ui-fit-139-2: menu_language 13 on an English game drew boxes).
+    static const std::string game_code = ReadLanguage();   // (read once: the game picks its font set at its start)
     if (const char* menu = MenuLanguageCode(MenuLanguageNow())) {
-        return ForCode(menu);
+        return Shown(ForCode(menu), game_code);
     }
-    static const Lang* const game = ForCode(ReadLanguage());   // (Auto)
+    static const Lang* const game = Shown(ForCode(game_code), game_code);   // (Auto)
     return game;
+}
+
+FontSet FontSetFor(std::string_view game_code) {
+    const auto starts = [&](std::string_view code) {
+        return game_code.size() >= code.size() && SameCode(game_code.substr(0, code.size()), code) &&
+               (game_code.size() == code.size() || game_code[code.size()] == '-' || game_code[code.size()] == '_');
+    };
+    if (starts("ko")) return FontSet::kKRko;
+    if (starts("ru")) return FontSet::kEUru;
+    if (starts("zh")) {
+        const Lang* t = ForCode(game_code);
+        return t != nullptr && std::string_view(t->code) == "zh-Hant" ? FontSet::kTWzh : FontSet::kCNzh;
+    }
+    return FontSet::kBase;
+}
+
+const Lang* Shown(const Lang* menu, std::string_view game_code) {
+    if (menu == nullptr) return nullptr;
+    // (the set a table's letters need: our tables are the two Chinese ones; a new table names its set here)
+    const std::string_view code = menu->code;
+    const FontSet needs = code == "zh-Hant" ? FontSet::kTWzh : code == "zh-Hans" ? FontSet::kCNzh : FontSet::kBase;
+    return FontSetFor(game_code) == needs ? menu : nullptr;
 }
 
 namespace {

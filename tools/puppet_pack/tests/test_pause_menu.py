@@ -4,6 +4,7 @@ game files.
     python tools/puppet_pack/tests/test_pause_menu.py
 """
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -235,6 +236,29 @@ class RowsTest(unittest.TestCase):
         self.assertEqual(pm._system_layout(system()), n)   # (the System layout's edit adds it, last)
         with self.assertRaises(pm.PauseMenuError):
             pm.add_help(n)   # (twice)
+
+    def test_the_help_fits_above_the_screens_bottom_on_the_games_page(self):
+        # row 139 (ui-fit-139-2): the caption's lines hang down from the help's y; on the game's own page (Pa_Button_04
+        # at y -516) four lines must end above the bottom edge, -1080, where 0.11.10's 300 put the 4th line off it
+        d = pm.add_system_buttons(pm.add_rows(system()))
+        y4 = pane(d, pm.HELP_SOURCE)[1]
+        game = ui_pack.move_panes(d, {pm.HELP_SOURCE: (0.0, -516.0 - y4)})
+        self.assertGreaterEqual(pm.help_bottom(game), pm.SCREEN_BOTTOM + pm.HELP_MARGIN)
+        self.assertLess(-516.0 - 300.0 - pm.HELP_LINES * pm.HELP_LINE, pm.SCREEN_BOTTOM)   # (the old place: off)
+        n = pm.add_help(game)
+        self.assertEqual(pane(n, pm.HELP)[1], -516.0 - pm.HELP_BELOW)
+        self.assertGreater(-516.0 - 90.0, -516.0 - pm.HELP_BELOW)   # (under the last row's bottom edge, not on it)
+        low = ui_pack.move_panes(d, {pm.HELP_SOURCE: (0.0, -800.0 - y4)})
+        with self.assertRaises(pm.PauseMenuError):
+            pm.add_help(low)   # (a page whose last row is so low the help would run off: refused, not shipped)
+
+    def test_the_helps_lines_are_the_modules(self):
+        # pause_menu's HELP_LINES and the module's kHelpLines (CoopPauseTab::HelpText's cut) are the same number
+        header = os.path.join(os.path.dirname(__file__), "..", "..", "..", "hookshot", "src", "coop_pause_tab.h")
+        with open(header, encoding="utf-8") as f:
+            m = re.search(r"kHelpColumns = (\d+), kHelpLines = (\d+);", f.read())
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(2)), pm.HELP_LINES)
 
     def test_another_part_layout_needs_its_size_and_takes_no_parameters(self):
         d = system()
