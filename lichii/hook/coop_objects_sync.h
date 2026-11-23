@@ -81,6 +81,7 @@ struct Seen {
     // our game last set them (sent in its samples).
     std::uint64_t bsa_component = 0;
     std::optional<coop::protocol::BossBsa> bsa;
+    std::optional<coop::protocol::BossVariants> variants;  // row 222 part 2: with bsa, its action variations (component 24)
     // Row 222 (coop_boss_orders.h): for one of ours, the battle manager's orders our game gave it (sent in its
     // samples, component 23).
     std::optional<coop::protocol::BossOrders> orders;
@@ -1263,6 +1264,8 @@ public:
     // Native boss sync: each copy's latest owner's boss verbs, by the
     // copy's address (coop_boss_native.h puts them into the game).
     std::vector<std::pair<std::uint64_t, coop::protocol::BossBsa>> BossVerbsIn() const;
+    // Row 222 part 2: the owner's action variations that came with a copy's BossVerbsIn state (component 24).
+    std::optional<coop::protocol::BossVariants> BossVariantsIn(std::uint64_t address) const;
     // Row 222: the owner's battle manager orders for our copies (by address), as BossVerbsIn.
     std::vector<std::pair<std::uint64_t, coop::protocol::BossOrders>> BossOrdersIn() const;
     // The actors of the enemies we own, with their names (for the test drive).
@@ -1333,6 +1336,8 @@ private:
         std::optional<bool> attacking;                       // boss turns: its game's Attack attribute (Seen)
         bool rally_held = false;                             // row 211: attacking only for its rally ball (said once)
         std::optional<coop::protocol::BossBsa> bsa_in;      // native boss sync: a copy's, the owner's latest
+        std::optional<coop::protocol::BossVariants> variants;     // row 222 part 2: ours, with bsa
+        std::optional<coop::protocol::BossVariants> variants_in;  // row 222 part 2: a copy's, with bsa_in
         std::optional<coop::protocol::BossOrders> orders;     // row 222: ours, as last read
         std::optional<coop::protocol::BossOrders> orders_in;  // row 222: a copy's, the owner's latest
         bool boss_native = false;  // a bsa came for it once: its AI runs (never held), across owners

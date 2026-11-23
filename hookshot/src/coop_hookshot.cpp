@@ -2146,7 +2146,15 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         if (!t.ActionsOn()) {
             return 0;
         }
-        if (!t.OnActionVerb(x[0], r, (x[2] & 1) != 0, t_own_call)) {
+        // Row 222 part 2: the plug's name, the move's variation ('Ice', a feint, ...), kept by an owner to send.
+        std::optional<std::string> plug_name;
+        if (r[CoopBossNative::addr::kReqHasPlug] == 1) {
+            std::uint64_t plug = 0;
+            std::memcpy(&plug, r.data() + CoopBossNative::addr::kReqPlug, sizeof plug);
+            plug_name = CoopBossNative::VariantName(
+                [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); }, plug);
+        }
+        if (!t.OnActionVerb(x[0], r, (x[2] & 1) != 0, t_own_call, std::move(plug_name))) {
             return 0;
         }
         // Skipped: the result its callers pass up is what the game gives for a request it took (0, its main path

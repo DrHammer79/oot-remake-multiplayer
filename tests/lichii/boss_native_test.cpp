@@ -167,7 +167,7 @@ TEST_CASE("native boss: a copy's action waits for its own node, then is asked wi
     auto c = t.Step(g, false, 0, kMain);  // first a block for the request
     REQUIRE(c);
     CHECK(c->function == kMain + addr::kMalloc);
-    CHECK(c->x[0] == addr::kRequestSize);
+    CHECK(c->x[0] == addr::kBlockSize);
     c = t.Step(g, true, kBlock, kMain);
     REQUIRE(c);
     CHECK(c->function == kMain + addr::kRequestActionVerb);
@@ -2451,4 +2451,207 @@ TEST_CASE("native boss: boss turns: every boss fights the Player only (puppets u
     t.Publish({baba});
     CHECK_FALSE(t.PlayerOnlyBoss());
     CHECK_FALSE(t.KeepsLinkAsAttacker(kActor));
+}
+
+namespace {
+
+// Row 222 part 2: a request an AI asks by plug (no place), its plug at `plug`.
+Request PlugRequest(std::int32_t verb, std::uint64_t node, std::uint64_t plug) {
+    Request r = GameRequest(verb, node, false);
+    std::memcpy(r.data() + addr::kReqPlug, &plug, 8);
+    r[addr::kReqHasPlug] = 1;
+    return r;
+}
+
+Boss Twinrova(Role role, std::uint8_t owner = 2) {
+    return Boss{kActor, kBsa, role, "Enemy_DungeonBoss_Twinrova", owner};
+}
+
+std::string CString(FakeGuest& g, std::uint64_t at) {
+    std::string s;
+    for (char ch = g.Get<char>(at); ch != '\0' && s.size() < 64; ch = g.Get<char>(at + s.size())) {
+        s.push_back(ch);
+    }
+    return s;
+}
+
+} // namespace
+
+TEST_CASE("native boss: row 222 part 2, a plug's variation name: a short printable C string, else none") {
+    FakeGuest g;
+    constexpr std::uint64_t kIce = 0x6000000;
+    g.Write(kIce, "Ice", 4);
+    const auto read = [&g](std::uint64_t a, void* out, std::size_t n) { return g.Read(a, out, n); };
+    CHECK(VariantName(read, kIce) == std::optional<std::string>("Ice"));
+    CHECK_FALSE(VariantName(read, 0));
+    g.Write(kIce + 0x100, "", 1);
+    CHECK_FALSE(VariantName(read, kIce + 0x100));  // empty: not a plug name
+    g.Write(kIce + 0x200, "Fire Ice", 9);
+    CHECK_FALSE(VariantName(read, kIce + 0x200));  // a space: not one we send
+    const std::string longer(coop::protocol::kMaxBossVariantChars + 1, 'a');
+    g.Write(kIce + 0x300, longer.c_str(), longer.size() + 1);
+    CHECK_FALSE(VariantName(read, kIce + 0x300));  // no end within kMaxBossVariantChars
+    const std::string longest(coop::protocol::kMaxBossVariantChars, 'b');
+    g.Write(kIce + 0x400, longest.c_str(), longest.size() + 1);
+    CHECK(VariantName(read, kIce + 0x400) == std::optional<std::string>(longest));
+    // A bulk read that fails (a page's end after the name): read byte by byte up to its end.
+    const auto edge = [&g](std::uint64_t a, void* out, std::size_t n) { return n == 1 && g.Read(a, out, n); };
+    CHECK(VariantName(edge, kIce) == std::optional<std::string>("Ice"));
+    const auto none = [](std::uint64_t, void*, std::size_t) { return false; };
+    CHECK_FALSE(VariantName(none, kIce));
+}
+
+TEST_CASE("native boss: row 222 part 2, the owner keeps its actions' variations by seq") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::owner, 1)});
+    constexpr std::uint64_t kPlug = 0x5000000;
+    std::optional<BossVariants> v;
+    CHECK_FALSE(t.OwnerState(kActor, &v));
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false, "Ice");         // seq 1
+    t.OnActionVerb(kBsa, GameRequest(121, kNode), true, false);                       // seq 2: plain (Fire)
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false);                // seq 3: a plug not read
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false, "Fire Ice");    // seq 4: not a name we send
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false, "1FeintFire");  // seq 5
+    auto s = t.OwnerState(kActor, &v);
+    REQUIRE(s);
+    CHECK(s->seq == 5);
+    REQUIRE(v);
+    CHECK(v->recent == std::vector<BossVariant>{{1, "Ice"}, {2, ""}, {5, "1FeintFire"}});
+    CHECK(t.Totals().owner_variants == 3);
+    // Eight brain changes push every action out of recent: its action now's variation still goes (older than recent).
+    for (int i = 0; i < 8; ++i) {
+        t.OnBrainVerb(kBsa, 3 + i, true, false);
+    }
+    s = t.OwnerState(kActor, &v);
+    REQUIRE(s);
+    CHECK(s->recent.front().seq == 6);
+    REQUIRE(v);
+    CHECK(v->recent == std::vector<BossVariant>{{5, "1FeintFire"}});
+    CHECK(ActionVariantOf(*s, v) == std::optional<std::string>("1FeintFire"));
+    // An action whose plug could not be read: its action now has no variation known (none sent for it).
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false);
+    s = t.OwnerState(kActor, &v);
+    REQUIRE(s);
+    CHECK_FALSE(v);
+    CHECK_FALSE(ActionVariantOf(*s, v));
+    // More named actions than a sample holds: the newest kMaxBossVariants.
+    for (int i = 0; i < 10; ++i) {
+        t.OnActionVerb(kBsa, PlugRequest(121, kNode, kPlug), true, false, "Ice");
+    }
+    s = t.OwnerState(kActor, &v);
+    REQUIRE(s);
+    REQUIRE(v);
+    CHECK(v->recent.size() == coop::protocol::kMaxBossVariants);
+    CHECK(v->recent.back().seq == s->seq);
+    // A copy has none to send.
+    Table copy;
+    copy.SetOn(true, true);
+    copy.Publish({Twinrova(Role::copy)});
+    CHECK_FALSE(copy.OwnerState(kActor, &v));
+    CHECK_FALSE(v);
+}
+
+TEST_CASE("native boss: row 222 part 2, a copy asks the owner's variation, not its own AI's last plug") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    FakeGuest g;
+    constexpr std::uint64_t kOwnIce = 0x5000000;  // its own AI's plug string 'Ice'
+    g.Write(kOwnIce, "Ice", 4);
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    t.OnActionVerb(kBsa, PlugRequest(121, kNode, kOwnIce), true, false, "Ice");  // its own AI chose Ice
+    BossAction a = *ActionFromRequest(GameRequest(121, 0, false));  // the owner's, by plug: no place
+    a.changed = true;
+    BossBsa s{1, 2, a, {BossChange{1, a}}};
+    t.Receive(kActor, s, BossVariants{{{1, "1FeintFire"}}});
+    REQUIRE(t.Step(g, false, 0, kMain));  // the block
+    auto c = t.Step(g, true, kBlock, kMain);
+    REQUIRE(c);
+    CHECK(c->function == kMain + addr::kRequestActionVerb);
+    const std::uint64_t pooled = g.Get<std::uint64_t>(kBlock + addr::kReqPlug);
+    CHECK(g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 1);
+    CHECK(pooled == kBlock + addr::kRequestSize);  // the pool's first slot, after the request
+    CHECK(CString(g, pooled) == "1FeintFire");     // the owner's feint, not its own 'Ice'
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqNode) == kNode);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // The owner's plain ask with no place: no plug, though its own AI's last for this move was 'Ice'.
+    s = BossBsa{2, 2, a, {BossChange{1, a}, BossChange{2, a}}};
+    t.Receive(kActor, s, BossVariants{{{1, "1FeintFire"}, {2, ""}}});
+    REQUIRE(t.Step(g, false, 0, kMain));
+    CHECK(g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 0);
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqPlug) == 0);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // The feint again: the same pooled string (written once, never moved).
+    s = BossBsa{3, 2, a, {BossChange{1, a}, BossChange{2, a}, BossChange{3, a}}};
+    t.Receive(kActor, s, BossVariants{{{1, "1FeintFire"}, {2, ""}, {3, "1FeintFire"}}});
+    REQUIRE(t.Step(g, false, 0, kMain));
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqPlug) == pooled);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // Another name: the next slot.
+    s = BossBsa{4, 2, a, {BossChange{1, a}, BossChange{2, a}, BossChange{3, a}, BossChange{4, a}}};
+    t.Receive(kActor, s, BossVariants{{{2, ""}, {3, "1FeintFire"}, {4, "Ice"}}});
+    REQUIRE(t.Step(g, false, 0, kMain));
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqPlug) == pooled + addr::kVariantSlotSize);
+    CHECK(CString(g, pooled + addr::kVariantSlotSize) == "Ice");
+    CHECK(CString(g, pooled) == "1FeintFire");  // (the first slot kept)
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // An older owner (no variations sent): its own AI's plug for this move, as before.
+    s = BossBsa{5, 2, a, {BossChange{4, a}, BossChange{5, a}}};
+    t.Receive(kActor, s);
+    REQUIRE(t.Step(g, false, 0, kMain));
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqPlug) == kOwnIce);
+    CHECK(g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 1);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    const Counts n = t.Totals();
+    CHECK(n.variant_named == 3);
+    CHECK(n.variant_plain == 1);
+    CHECK(n.variant_unknown == 1);
+    CHECK(n.variant_pool_full == 0);
+    CHECK(n.action_applied == 5);
+}
+
+TEST_CASE("native boss: row 222 part 2, a full name pool asks as before") {
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    t.OnActionVerb(kBsa, GameRequest(121, kNode), true, false);  // (its node; no plug of its own)
+    const BossAction a = *ActionFromRequest(GameRequest(121, 0, false));
+    std::vector<BossChange> recent;
+    for (std::uint32_t seq = 1; seq <= addr::kVariantSlots + 1; ++seq) {
+        recent.push_back(BossChange{seq, a});
+        if (recent.size() > coop::protocol::kMaxBossChanges) {
+            recent.erase(recent.begin());
+        }
+        t.Receive(kActor, BossBsa{seq, 2, a, recent}, BossVariants{{{seq, "V" + std::to_string(seq)}}});
+        if (seq == 1) {
+            REQUIRE(t.Step(g, false, 0, kMain));  // the block
+        }
+        REQUIRE(t.Step(g, seq == 1, seq == 1 ? kBlock : 0, kMain));
+        CHECK_FALSE(t.Step(g, true, 0, kMain));
+    }
+    const Counts n = t.Totals();
+    CHECK(n.variant_named == addr::kVariantSlots);
+    CHECK(n.variant_pool_full == 1);  // the 17th name: asked as before (no plug of its own here)
+    CHECK(g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 0);
+}
+
+TEST_CASE("native boss: row 222 part 2, a resync's action takes the variation of the owner's action now") {
+    BossAction a;
+    a.verb = 121;
+    BossBsa s{7, 2, a, {BossChange{5, a}, BossChange{6, BossBrain{3, true}}, BossChange{7, BossBrain{4, true}}}};
+    CHECK(ActionVariantOf(s, BossVariants{{{4, "Ice"}, {5, "1FeintIce"}}}) == std::optional<std::string>("1FeintIce"));
+    CHECK_FALSE(ActionVariantOf(s, BossVariants{{{4, "Ice"}}}));  // its action change has none: not known
+    CHECK_FALSE(ActionVariantOf(s, std::nullopt));                 // an older owner
+    s.recent = {BossChange{6, BossBrain{3, true}}, BossChange{7, BossBrain{4, true}}};
+    CHECK(ActionVariantOf(s, BossVariants{{{2, "Ice"}, {5, ""}}}) == std::optional<std::string>(""));
+    s.action.reset();
+    CHECK_FALSE(ActionVariantOf(s, BossVariants{{{5, "Ice"}}}));
+    CHECK(VariantOf(BossVariants{{{5, "Ice"}}}, 5) == std::optional<std::string>("Ice"));
+    CHECK_FALSE(VariantOf(BossVariants{{{5, "Ice"}}}, 6));
+    CHECK_FALSE(VariantOf(BossVariants{{{5, "Ice"}}}, 0));
 }

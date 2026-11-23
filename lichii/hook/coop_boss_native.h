@@ -58,6 +58,8 @@ using coop::protocol::BossAction;
 using coop::protocol::BossBsa;
 using coop::protocol::BossBrain;
 using coop::protocol::BossChange;
+using coop::protocol::BossVariant;
+using coop::protocol::BossVariants;
 
 namespace addr {
 inline constexpr std::uint64_t kActorComponents = 0x270;  // actor -> component table
@@ -162,6 +164,12 @@ inline constexpr std::size_t kReqFlags = 0x50;    // u16
 // move starts over from its start, its module's own sub-state with it).
 inline constexpr std::uint16_t kReqStartOver = 0x100;
 inline constexpr std::size_t kReqNode = 0x58;     // the asking AI node
+// Row 222 part 2: our request block holds the request, then a pool of the owner's variation names (plug strings,
+// each written once into its own slot and never moved: the game may keep a plug pointer past the request).
+inline constexpr std::size_t kVariantSlots = 16;
+inline constexpr std::size_t kVariantSlotSize = 40;  // kMaxBossVariantChars + its end, rounded up
+static_assert(kVariantSlotSize > coop::protocol::kMaxBossVariantChars);
+inline constexpr std::size_t kBlockSize = kRequestSize + kVariantSlots * kVariantSlotSize;
 inline constexpr std::uint32_t kKind = 4;
 inline constexpr std::uint32_t kKind2 = 0x11a;
 inline constexpr std::uint32_t kKind3 = 0x10;
@@ -198,6 +206,40 @@ Request RequestFromAction(const BossAction& a, const OwnAsk& ask);
 // else its last ask of all (`last`). Nothing when it never asked (no node yet).
 std::optional<OwnAsk> AskFor(const std::map<std::pair<std::int32_t, std::int32_t>, OwnAsk>& by_move,
                              const std::map<std::int32_t, OwnAsk>& by_slot, std::uint64_t last, const BossAction& a);
+
+// Row 222 part 2 (component 24): a boss move's variation is its request's plug name. The game runs the command
+// '<verb's name>:<plug>' (no plug: the plain command; main+0xbe070): Twinrova's ranged attack is plain for Fire and
+// 'Ice', '1FeintFire', ... for the others; every boss move asked by plug likewise ('StartBattle', ...). The plug is
+// a const char*. VariantName reads it: the name when it is 1 to kMaxBossVariantChars printable characters ending in
+// a 0 (ValidVariantName), else nothing (not a name we can send). `read` is bool(std::uint64_t address, void* out,
+// std::size_t size), the guest reader; a bulk read that fails (a page's end) is read again byte by byte.
+template <class Read>
+std::optional<std::string> VariantName(Read&& read, std::uint64_t plug) {
+    if (plug == 0) {
+        return std::nullopt;
+    }
+    std::array<char, coop::protocol::kMaxBossVariantChars + 1> b{};
+    const bool bulk = read(plug, b.data(), b.size());
+    std::string name;
+    for (std::size_t i = 0; i < b.size(); ++i) {
+        if (!bulk && !read(plug + i, &b[i], 1)) {
+            return std::nullopt;
+        }
+        if (b[i] == '\0') {
+            if (name.empty() || !coop::protocol::ValidVariantName(name)) {
+                return std::nullopt;
+            }
+            return name;
+        }
+        name.push_back(b[i]);
+    }
+    return std::nullopt;  // no end within kMaxBossVariantChars: not a name
+}
+// The owner's variation of its action change `seq` (nothing: not known; an older owner, or a name it could not read).
+std::optional<std::string> VariantOf(const std::optional<BossVariants>& v, std::uint32_t seq);
+// The variation of `state.action` (a resync's move): its newest action change in recent, else (all of recent brain
+// changes) the newest entry older than recent, which the owner sends for its action now (Table::OwnerState).
+std::optional<std::string> ActionVariantOf(const BossBsa& state, const std::optional<BossVariants>& v);
 
 enum class Role : std::uint8_t { owner, copy };
 // A boss whose new copy runs its own start first (Table::kStartSteps): a
@@ -333,6 +375,14 @@ struct Counts {
     std::uint64_t action_slot_busy = 0;
     std::uint64_t action_busy_again = 0;
     std::uint64_t action_refused = 0;
+    // Row 222 part 2: the owner's action requests whose variation we keep to send (plain or a plug name); a copy's
+    // put-ins named by the owner's variation (plain: no plug; a name: our pooled string), by its own AI's as before
+    // (an older owner, or a name not read), or not named for want of room in the name pool (asked as before).
+    std::uint64_t owner_variants = 0;
+    std::uint64_t variant_plain = 0;
+    std::uint64_t variant_named = 0;
+    std::uint64_t variant_unknown = 0;
+    std::uint64_t variant_pool_full = 0;
 };
 
 class Table {
@@ -360,7 +410,10 @@ public:
     // a busy table lets the game run its own. changed: the game's w2 (the
     // verb changed), sent with the owner's action and given to the copies.
     bool OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool own);
-    bool OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own);
+    // Row 222 part 2: `plug_name`, the request's plug read as a name (VariantName; the wrap reads it for every
+    // request with a plug): an owner's action keeps it as its variation (component 24), "" for a plain ask.
+    bool OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own,
+                      std::optional<std::string> plug_name = std::nullopt);
 
     // Our game runs an event now (the boss glue, every frame; the player
     // reader's event flag). Copies then run their own changes; the owner keeps
@@ -493,13 +546,20 @@ public:
     // The owner's state to send for one of our bosses; nothing before its
     // first change was seen.
     std::optional<BossBsa> OwnerState(std::uint64_t actor) const;
+    // The same, with its action changes' variations (row 222 part 2, component 24; read under one lock, so their
+    // seqs match the state's): the names for its action changes in recent, and the one for its action now when that
+    // is older than recent; the newest kMaxBossVariants. `variants` stays empty when none is known.
+    std::optional<BossBsa> OwnerState(std::uint64_t actor, std::optional<BossVariants>* variants) const;
 
     // An owner's state for a copy (from its OBJECT_SAMPLE). Its changes the
     // copy has not had are queued in the owner's order and made by Step, one
     // call each. When the copy missed more than the sample holds, or the
     // owner is new (Publish), it starts from the state now. An older sample
     // than the newest had (seq not above it) is dropped.
-    void Receive(std::uint64_t actor, const BossBsa& state);
+    // `variants`: the owner's variations sent with it (component 24; none from an older owner): a put-in names the
+    // owner's variation of its change, else the copy's own AI's plug (AskFor) as before.
+    void Receive(std::uint64_t actor, const BossBsa& state,
+                 const std::optional<BossVariants>& variants = std::nullopt);
 
     // The caller (coop_callers.h contract), order kCallerOrder.
     std::optional<CoopPuppet::Call> Step(CoopPuppet::Guest& guest, bool after_call,
@@ -587,10 +647,15 @@ private:
         bool have_mine = false;
         // Copy: the owner's latest, and its changes still to make here.
         std::optional<BossBsa> wanted;
+        std::optional<BossVariants> wanted_variants;  // row 222 part 2: the owner's, with `wanted`
+        // Owner (row 222 part 2): the variations of our action changes in mine.recent, and of our action now.
+        std::vector<BossVariant> mine_variants;
+        std::optional<BossVariant> mine_action_variant;
         struct Due {
             BossChange change;
             bool resync = false;  // the state now, not a call the owner made: skipped when already so
             bool counted = false; // (a brain verb: counted in brain_came once, also when asked again)
+            std::optional<std::string> variant;  // row 222 part 2: an action's, the owner's (nothing: not known)
         };
         std::deque<Due> due;
         std::uint32_t queued_seq = 0;  // the owner's newest change queued (or made)
@@ -658,6 +723,7 @@ private:
         // module where the copy's body was: Phantom Ganon in RushAttack's dive with his rigid body forced no-hit).
         std::optional<BossAction> restart_action;
         OwnAsk restart_ask;
+        std::optional<std::string> restart_variant;  // row 222 part 2: put_variant's, named in its restart
         // Row 178's fall guard: its first seen height, and its falls rechosen while below.
         std::optional<float> start_y;
         std::optional<coop::protocol::Vec3> start;  // (its first seen place, for the put back)
@@ -668,6 +734,7 @@ private:
         // since, asks nothing: the copy runs that move already (asking it again started King Dodongo's roll
         // over after every sword hit, on every hitter's screen).
         std::optional<BossAction> put_action;
+        std::optional<std::string> put_variant;  // row 222 part 2: the variation it was put in with
         bool own_action_ran = false;
     };
     void Hold(Entry& e, const Boss& b);   // the owner's stall check (Publish)
@@ -680,6 +747,11 @@ private:
                                         bool* made);
     void Record(Entry& e, std::variant<BossBrain, BossAction> what);
     void Resync(Entry& e, const BossBsa& state);
+    // Row 222 part 2: `ask` named with the owner's variation: not known: as it is (the copy's own AI's, AskFor);
+    // "": no plug (the plain command); a name: its string in our block's pool (written once, never moved). A pool
+    // with no room or a write that fails leaves `ask` as it is. Counted. Needs block_.
+    void WithVariant(CoopPuppet::Guest& guest, const std::optional<std::string>& variant, OwnAsk& ask);
+    std::vector<std::string> pool_;  // the names in our block's pool, by slot (cleared with block_)
     Entry* Find(std::uint64_t bsa);
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
