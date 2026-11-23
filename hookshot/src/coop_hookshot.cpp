@@ -937,8 +937,8 @@ const CoopDraw::MapShown* MapScene(bool camera, std::uint8_t self) {
 }
 
 // ---- Chat as the game's own UI (coop_native_ui.h, docs/native-ui.md), on the game's thread at the frame hook: the
-// chat lines in the game's message window, notices and the held line (down but not out) in its banner, the typed
-// line in the message window. Nothing of it is drawn. LICHII_COOP_NATIVE_UI=0, or a game that gives no memory for
+// chat lines, notices, the typed line and the held line (down but not out) all on the game's banner (SimpleInfo_00,
+// its frame and font). Nothing of it is drawn. LICHII_COOP_NATIVE_UI=0, or a game that gives no memory for
 // the texts: the drawn lines and box of before (text only, no box behind them).
 class NativeGame final : public CoopNativeUi::Game {
 public:
@@ -963,12 +963,11 @@ struct Native {
     enum class Block { kNone, kFailed, kHave } block = Block::kNone;
     CoopNativeUi::TextRing ring;
     CoopNativeUi::ChatFeed feed;
-    CoopNativeUi::NameTint tint;
     CoopNativeUi::Banner banner;
-    bool typing = false;          // the typed line is on the game's window
+    bool typing = false;          // the typed line is on the game's banner
     std::string typed;            // what it shows
     std::uint64_t typed_ms = 0;
-    std::uint64_t failed_ms = 0;  // the window was not free: tried again a second later
+    std::uint64_t failed_ms = 0;  // the banner was not free: tried again a second later
     bool said_wait = false;
 };
 Native g_native;                             // the game's thread only
@@ -999,8 +998,8 @@ Colours SpeakerColours() {
     return out;
 }
 
-// The chat box open: the typed line in the game's message window ("you", the text, a caret), changing as it is
-// typed; lines that come meanwhile go to the banner. True while the box is open (the window is the box's).
+// The chat box open: the typed line on the game's banner ("you: hello_"), changing as it is typed. Lines that come
+// meanwhile wait (the banner is the box's) and show once it closes. True while the box is open.
 bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& colours) {
     std::optional<std::pair<std::string, bool>> box;
     {
@@ -1009,7 +1008,7 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
     }
     if (!box) {
         if (g_native.typing) {
-            CoopNativeUi::EndLine(game, g_native.ring);
+            g_native.banner.End(game, g_native.ring);
             g_native.typing = false;
         }
         g_native.typed.clear();
@@ -1017,36 +1016,20 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
     }
     auto line = CoopNativeUi::TypingLine(CoopI18n::Tr("you"), box->first, box->second, CoopI18n::Tr("(not sent)"));
     if (const auto c = colours.find("you"); c != colours.end()) line.colour = c->second;
-    // Again on a change, and before its time runs out (kTypingSeconds). While the window holds a message of the
-    // game's own the typed line waits for it (the keys still type); nothing is drawn.
-    const bool due = !g_native.typing || line.text != g_native.typed || now > g_native.typed_ms + 30000;
-    if (due && CoopNativeUi::ShowLine(game, g_native.ring, g_native.tint, line, g_native.typing)) {
+    // Again on a change, and before its time runs out (kTypingSeconds); while the banner shows the game's own (or the
+    // held line) the typed line waits for it, the keys still type. Nothing is drawn.
+    const bool due = !g_native.typing || !g_native.banner.showing() || line.text != g_native.typed ||
+                     now > g_native.typed_ms + 30000;
+    if (due && now >= g_native.failed_ms + 250 &&
+        g_native.banner.Show(game, g_native.ring, line, now)) {
         static bool said = false;
-        if (!std::exchange(said, true)) LOG_INFO(Core, "coop: native ui: typing in the game's message window");
+        if (!std::exchange(said, true)) LOG_INFO(Core, "coop: native ui: typing on the game's banner");
         g_native.typing = true;
         g_native.typed = line.text;
         g_native.typed_ms = now;
-    } else if (!g_native.typing && !g_native.banner.up() &&
-               (line.text != g_native.typed || now > g_native.typed_ms + 6000)) {
-        // The window holds a message of the game's own: the typed line on the banner meanwhile (its last line; again
-        // on a change, and every 6 s while the banner may have closed by itself).
-        CoopNativeUi::Shown banner = line;
-        banner.notice = true;
-        const auto rows = CoopNativeUi::Wrap(
-            CoopNativeUi::Clean(line.speaker + ": " + line.text, CoopNativeUi::kTextBytes), CoopNativeUi::kBannerColumns, 99);
-        banner.text = rows.empty() ? std::string() : rows.back();
-        if (g_native.banner.Notice(game, g_native.ring, banner)) {
-            g_native.typed = line.text;  // (shown: again only on a change)
-            g_native.typed_ms = now;
-        }
-        return true;
-    }
-    if (!g_native.banner.up()) {
-        if (const auto said = g_native.feed.Next(now)) {
-            CoopNativeUi::Shown banner = *said;
-            if (!banner.speaker.empty()) banner.text = banner.speaker + ": " + banner.text;
-            if (!g_native.banner.Notice(game, g_native.ring, banner)) g_native.feed.PutBack(*said);
-        }
+    } else if (due && !g_native.banner.showing()) {
+        g_native.typing = false;
+        g_native.failed_ms = now;   // (the game's own banner, or the held line: tried again shortly)
     }
     return true;
 }
@@ -1066,7 +1049,7 @@ void NativeStep(void* ctx) {
         g_native.ring.SetBlock((*block + 15) & ~std::uint64_t{15});
         g_native.block = Native::Block::kHave;
         g_native_chat = true;
-        LOG_INFO(Core, "coop: native ui: chat in the game's message window and banner (texts at {:#x})", *block);
+        LOG_INFO(Core, "coop: native ui: chat on the game's banner (SimpleInfo_00; texts at {:#x})", *block);
     }
     const auto lines = CoopHook::ChatLines();
     const Colours colours = SpeakerColours();
@@ -1082,40 +1065,26 @@ void NativeStep(void* ctx) {
         in.push_back(std::move(c));
     }
     g_native.feed.Update(in, now);
-    // The held line (down but not out) keeps the banner; notices wait meanwhile.
-    g_native.banner.Step(game, g_native.ring, CoopNativeUi::HeldBanner());
+    // The held line (down but not out) keeps the banner; a page of ours whose time is over closes. Pages wait
+    // meanwhile.
+    if (g_native.banner.Step(game, g_native.ring, CoopNativeUi::HeldBanner(), now)) return;
     if (NativeTyping(game, now, colours)) return;
-    if (g_native.tint.tinted()) {
-        const std::uint64_t screen = CoopNativeUi::InGameScreen(game);
-        if (screen != 0 && CoopNativeUi::WindowHolds(game, screen, g_native.ring) != CoopNativeUi::Holds::kOurs) {
-            g_native.tint.Restore(game, g_native.ring);  // our line is done: the game's own name colour again
-        }
-    }
     if (g_native.feed.Busy(now) || now < g_native.failed_ms + 1000) return;
     std::optional<CoopNativeUi::Shown> line = g_native.feed.Next(now);
     if (!line) return;
-    if (line->notice && g_native.banner.up()) {
-        g_native.feed.PutBack(*line);  // (the held line has the banner)
-        g_native.failed_ms = now;
-        return;
-    }
-    const bool shown = line->notice ? g_native.banner.Notice(game, g_native.ring, *line)
-                                    : CoopNativeUi::ShowLine(game, g_native.ring, g_native.tint, *line);
-    if (shown) {
+    if (g_native.banner.Show(game, g_native.ring, *line, now)) {
         static bool said = false;
         if (!std::exchange(said, true)) {
-            LOG_INFO(Core, "coop: native ui: first chat line shown by the game ({})",
-                     line->notice ? "banner" : "message window");
+            LOG_INFO(Core, "coop: native ui: first {} shown on the game's banner", line->notice ? "notice" : "chat line");
         }
         return;
     }
-    // No window now (the title, a load) or a message of the game's own on it: tried again in a second, until the
-    // line is stale (ChatFeed::kStaleMs). Nothing drawn meanwhile.
+    // No banner now (the title, a load) or one of the game's own on it: tried again in a second, until the line is
+    // stale (ChatFeed::kStaleMs). Nothing drawn meanwhile.
     g_native.feed.PutBack(*line);
     g_native.failed_ms = now;
     if (!std::exchange(g_native.said_wait, true)) {
-        LOG_INFO(Core, "coop: native ui: the game's {} is not free now; the line waits",
-                 line->notice ? "banner" : "message window");
+        LOG_INFO(Core, "coop: native ui: the game's banner is not free now; the line waits");
     }
 }
 

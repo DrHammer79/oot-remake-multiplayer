@@ -7,6 +7,7 @@ import glob
 import json
 import math
 import os
+import re
 import shutil
 import socket
 import struct
@@ -977,6 +978,20 @@ class NoFairyTest(unittest.TestCase):
             emptied = {s.name for s in steps[:hurts[0]] if s.kind == "setenum" and s.start == "Empty"}
             with self.subTest(scenario=os.path.basename(f)):
                 self.assertTrue(set(hs.BOTTLE_ITEMS) <= emptied, "add `nofairy` before the first hurt")
+
+    def test_every_scenario_chat_line_fits_the_protocol(self):
+        # A chat line over coop::protocol::kMaxChatChars (200 characters) is refused by the client ("NOT sent"):
+        # proof-01112-c run 3 lost its long line that way (236 characters).
+        header = os.path.join(HERE, "..", "..", "..", "coop", "protocol", "include", "coop", "protocol", "messages.hpp")
+        with open(header, encoding="utf-8") as h:
+            limit = int(re.search(r"kMaxChatChars = (\d+);", h.read()).group(1))
+        for f in sorted(glob.glob(os.path.join(HERE, "..", "scenarios", "*.txt"))):
+            if f.endswith(".steps.txt"):
+                continue
+            for s in hs.parse(hs.read_script(f)):
+                if s.kind == "chat":
+                    with self.subTest(scenario=os.path.basename(f), chat=s.name[:30]):
+                        self.assertLessEqual(len(s.name), limit)
 
 
 class DropTest(unittest.TestCase):

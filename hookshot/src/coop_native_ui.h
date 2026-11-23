@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Co-op's chat as the game's own UI (docs/native-ui.md): no overlay, nothing drawn.
 //
-// The chat lines are the game's in-game message window (MessageInGame_00: the speaker's name on its name plate over
-// the line, the game's font, frame, animations and its own hiding in cutscenes and menus), the room notices are the
-// game's banner (SimpleInfo_00), and the line being typed (the chat box, T) is the message window too, the typed text
-// and a caret changing as it is typed.
+// Everything is the game's banner (SimpleInfo_00: its W_Bg_00 frame, its T_Text_00 line in the game's font, its own
+// in and out animation): the chat lines ("Saria: hi", in the speaker's colour, a long line in pages), the room notices
+// ("Ruto joined"), the line being typed (the chat box, T: "you: hello_") and the held line of down but not out.
+//
+// Not the game's MessageInGame_00: that screen is the game's voice SUBTITLE line (docs/game-ui.md, "The message
+// window"): no frame pane at all, its name plate shown only while the player's option "Subtitle Speaker-Name Display"
+// is on and the whole line only while "Subtitle Display" is on. Chat there was a bare word at the bottom, no name
+// (proof-01112-c run 3), and nothing at all with subtitles off.
 //
 // How: a game text pane shows its text from a message reference {const char* utf8, u32 bytes, i64 -1} and keeps the
 // pointer, so our texts live in one block of guest memory from the game's malloc (TextRing), and the reference goes
-// to the game's own pane setter or into the window where the game's own show call puts its text (f_833d25c0 ->
-// f_834091d0: +0x2b0). The game's functions and fields are in addr, as main+ offsets of build e0f3ccfaf50065ae (game
-// 1.1.1, the only one co-op supports), each checked on that build's main (docs/game-ui.md).
+// to the game's own pane setter (f_8045b970). The game's functions and fields are in addr, as main+ offsets of build
+// e0f3ccfaf50065ae (game 1.1.1, the only one co-op supports), each checked on that build's main (docs/game-ui.md).
 //
 // Split for tests: the pure parts (Clean, SplitSpeaker, Columns, Wrap, ChatFeed, TypingLine) and the game steps
-// (ShowLine, EndLine, NameTint, Banner), which go through the Game interface (the module's guest memory and its
-// game call), so tests/hookshot/native_ui_test.cpp runs them on a pretend game.
+// (TextTint, Banner), which go through the Game interface (the module's guest memory and its game call), so
+// tests/hookshot/native_ui_test.cpp runs them on a pretend game.
 #pragma once
 
 #include <array>
@@ -31,23 +34,18 @@
 namespace CoopNativeUi {
 
 // ---------------------------------------------------------------- the game
-// main+ offsets (main at 0x80020000 on Longshot and Hookshot: f_833d2690 is main+0x33b2690). Each checked on the 1.1.1
-// main with tools/game_scan (docs/game-ui.md, "The message window", "The banner", "Text colour").
+// main+ offsets (main at 0x80020000 on Longshot and Hookshot). Each checked on the 1.1.1 main with tools/game_scan
+// (docs/game-ui.md, "The banner", "Text colour").
 namespace addr {
-// The in-game message window (UIMessageInGameScreen).
-inline constexpr std::uint64_t kInGameHolder = 0x4e84518;     // global: what f_833d25c0 hands the getter
-inline constexpr std::uint64_t kInGameGet = 0x33b2690;        // (*holder) -> the screen (MessageInGame_00's hash), or 0
-inline constexpr std::uint64_t kInGameVtable = 0x4be9678;     // 0x84c09678
-inline constexpr std::uint64_t kInGameText = 0x2b0;           // the message reference T_Message_00 is set from (24 bytes)
-inline constexpr std::uint64_t kInGameShow = 0x2d0;           // u8: 1 = the step puts +0x2b0 into T_Message_00
-inline constexpr std::uint64_t kInGameTime = 0x408;           // f32: time left, counted down by slot 40; closes at 0
-inline constexpr float kTimePerSecond = 30.0f;                // (the game's default 180; read as 30 a second: NOT proven)
-inline constexpr std::uint64_t kScreenRequest = 0x1a5;        // s8, and
-inline constexpr std::uint64_t kScreenState = 0x1a6;          // u8: f_833d25c0 sets +0x2d0 unless state 0 and request < 1
-inline constexpr std::uint8_t kStateOpen = 2;                 // the state of an open screen (slot 72 sets it)
 // The banner (UISimpleInfoScreen; what its constructor at 0x8069c778 stores in the object).
 inline constexpr std::uint64_t kInfoVtable = 0x4bed7c8;       // 0x84c0d7c8
-inline constexpr std::uint64_t kInfoOpenMode = 2;             // slot 5's mode (the game: 2 or 3)
+inline constexpr std::uint64_t kInfoOpenMode = 2;             // slot 5's mode (the game's f_83419b10: 2 or 3)
+inline constexpr std::uint64_t kInfoType = 0x2b0;             // its "Type" animation (slot 93 f_80de2490 finds it)
+inline constexpr std::uint64_t kAnimFirstFrame = 0x2d0fe0;    // f_802f0fe0 (animation): at its first frame, stopped
+// A screen's request and state.
+inline constexpr std::uint64_t kScreenRequest = 0x1a5;        // s8: open raises it, close lowers it
+inline constexpr std::uint64_t kScreenState = 0x1a6;          // u8: 2 open (slot 72)
+inline constexpr std::uint8_t kStateOpen = 2;
 // Every screen: its layout; the UI manager's screens.
 inline constexpr std::uint64_t kScreenLayout = 0x28;
 inline constexpr std::uint64_t kUiManagerGot = 0x4c7e098;     // **this: the UI manager
@@ -65,7 +63,6 @@ inline constexpr std::uint64_t kBoxColour0 = 0x1d4;           // the two colours
 inline constexpr std::uint64_t kBoxColour1 = 0x1e4;
 inline constexpr std::uint64_t kBoxText = 0xf0;               // the text box's text pointer (f_80459680 keeps it there)
 // Pane names the game has in its read-only data.
-inline constexpr std::uint64_t kNameT_Name_00 = 0x3cf41c6;    // "T_Name_00"
 inline constexpr std::uint64_t kNameT_Text_00 = 0x3dc2306;    // "T_Text_00"
 // The game's malloc (CoopPuppet::addr::kMalloc).
 inline constexpr std::uint64_t kMalloc = 0x14c6c90;
@@ -106,12 +103,11 @@ std::size_t Columns(std::string_view utf8);
 // Never empty for a text with something in it.
 std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::size_t lines);
 
-// What fits on the game's panes (their size in the 3840x2160 layout: MessageInGame_00's T_MessageWhiteOut_00 is 2200
-// x 200 at 0.9, two lines; SimpleInfo_00's T_Text_00 2100 x 86 at 0.8, one line). The columns are a safe guess at
-// the game's font: NOT proven on screen (the LANE1 screenshot run settles them).
-inline constexpr std::size_t kLineColumns = 44, kLineLines = 2;
+// What fits on the banner's line (SimpleInfo_00's T_Text_00 is 2100 x 86 at 0.8 in the 3840x2160 layout, inside its
+// W_Bg_00 frame of 1880 x 136: one line). The columns are a safe guess at the game's font: NOT proven on screen (the
+// LANE1 screenshot run settles them).
 inline constexpr std::size_t kBannerColumns = 48, kBannerLines = 1;
-inline constexpr std::size_t kNameColumns = 20;               // the name plate (T_Name_00, 1250 at 0.8)
+inline constexpr std::size_t kNameColumns = 20;               // a speaker's name at most (the rest of the line is said)
 
 // ---------------------------------------------------------------- chat
 inline constexpr std::size_t kSpeakerBytes = 48;
@@ -126,32 +122,37 @@ struct ChatIn {            // CoopHook::ChatLine, without the hook (a notice alr
 
 struct Shown {
     std::string speaker;  // "" for a notice
-    std::string text;     // one page: at most kLineLines lines (a notice: kBannerLines)
+    std::string text;     // one page: what fits the banner's line after "speaker: "
     bool notice = false;
-    float seconds = 0.0f;       // how long the game shows it
+    bool first = true;          // the line's first page (a later page is never dropped as stale: its line has begun)
+    float seconds = 0.0f;       // how long the banner shows it
     std::uint64_t came_ms = 0;  // when it came (ChatFeed)
     std::uint32_t colour = 0;   // the speaker's, 0xRRGGBB; 0: the game's own
 };
 
-// New chat lines in, one page at a time out, as fast as the game's window shows them. A line is new once: lines are
-// told apart by text and the time they came (now - age, in steps of kSameMs). A long line is several pages, in turn.
-// While one shows the rest wait; at most kWaiting wait (the oldest goes); pages older than kStaleMs when their turn
-// comes are dropped, so a burst from 16 players never lags.
+// The page as the banner's line: "speaker: text", or the text alone.
+std::string BannerText(const Shown& page);
+
+// New chat lines in, one page at a time out, as fast as the banner shows them. A line is new once: lines are told
+// apart by text and the time they came (now - age, in steps of kSameMs). A long line is several pages, in turn, each
+// "speaker: " and what fits after it. While one shows the rest wait; at most kWaiting pages wait (the oldest goes); a
+// line older than kStaleMs when its turn comes is dropped, every page of it (a line already begun shows to its end),
+// so a burst from 16 players never lags.
 class ChatFeed {
 public:
-    static constexpr std::size_t kWaiting = 12;
+    static constexpr std::size_t kWaiting = 16;
     static constexpr std::uint64_t kSameMs = 500;
     static constexpr std::uint64_t kStaleMs = 20000;
 
     void Update(const std::vector<ChatIn>& lines, std::uint64_t now_ms);
-    // The next page to show once the window is free at `now_ms`; it is then busy for that page's seconds.
+    // The next page to show once the banner is free at `now_ms`; it is then busy for that page's seconds.
     std::optional<Shown> Next(std::uint64_t now_ms);
-    // A page Next gave that could not be shown yet: first again, and the window not busy.
+    // A page Next gave that could not be shown yet: first again, and the banner not busy.
     void PutBack(Shown line);
     bool Busy(std::uint64_t now_ms) const { return now_ms < busy_until_; }
     std::size_t waiting() const { return waiting_.size(); }
 
-    // How long a page shows: 3 s and 60 ms a column, at most 8 s.
+    // How long a page shows: 3 s and 60 ms a column, at most 6 s.
     static float Seconds(std::size_t columns);
 
 private:
@@ -161,8 +162,8 @@ private:
     bool primed_ = false;  // the lines there before the first Update are not shown again
 };
 
-// The line being typed as the window shows it: the speaker, then the end of the typed text that fits the window's
-// lines ("..." before it when it does not all fit), a caret, and "(not sent)" after a send that failed.
+// The line being typed as the banner shows it: the speaker, then the end of the typed text that fits the line after
+// "speaker: " ("..." before it when it does not all fit), a caret, and "(not sent)" after a send that failed.
 inline constexpr float kTypingSeconds = 60.0f;  // kept up while typing (shown again before it runs out)
 Shown TypingLine(std::string_view speaker, std::string_view typed, bool failed, std::string_view not_sent = "(not sent)");
 
@@ -208,67 +209,65 @@ private:
 // ---------------------------------------------------------------- game steps
 // A screen the UI manager has, by its vtable (a main+ offset); 0 when none.
 std::uint64_t ScreenByVtable(Game& game, std::uint64_t vtable_offset);
-// The in-game message window, or 0 (not loaded: the title, a load; or not this build's window).
-std::uint64_t InGameScreen(Game& game);
-// What the window holds now.
+// What a screen holds now.
 enum class Holds { kNothing, kOurs, kGames };
-Holds WindowHolds(Game& game, std::uint64_t screen, const TextRing& ring);
+// The text box of a text pane of the screen's layout, by the game's name string at main+`pane_name`: *(*(pane+8)+8)
+// for a pane of kind 2 (text); 0 when there is none.
+std::uint64_t PaneTextBox(Game& game, std::uint64_t screen, std::uint64_t pane_name);
 
-// The speaker's name plate in the player's colour (the text pane's own two colours: the game's colour tag has only 6),
-// and the game's own colours back. The game's colours are read once, before the first change.
-class NameTint {
+// A text pane in a player's colour (the text box's own two colours: the game's colour tag has only 6), and the
+// game's own colours back. The game's colours are read once, before the first change.
+class TextTint {
 public:
-    bool Set(Game& game, const TextRing& ring, std::uint64_t screen, std::uint32_t rgb);
+    bool Set(Game& game, const TextRing& ring, std::uint64_t screen, std::uint64_t pane_name, std::uint32_t rgb);
     bool Restore(Game& game, const TextRing& ring);
     bool tinted() const { return tinted_; }
 
 private:
     bool Colours(Game& game, const TextRing& ring, const float (&rgba)[8]);
-    std::uint64_t box_ = 0;     // the name pane's text box
+    std::uint64_t box_ = 0;     // the pane's text box
     bool saved_ = false, tinted_ = false;
     float game_[8] = {};        // its two colours as the game had them
     std::uint32_t now_ = 0;
 };
 
-// Shows one page in the game's message window as f_833d25c0 shows a message of its own: the speaker on T_Name_00,
-// the page as the window's message, its time, the show flag, then open. False when the window is not there, holds a
-// message of the game's own, or a step failed. `refresh`: a line that changes while it shows (the typed line): when
-// the window is up, only its text and time change (no opening animation again).
-bool ShowLine(Game& game, TextRing& ring, NameTint& tint, const Shown& line, bool refresh = false);
-// Ends a line of ours early (the box closed): its time to 0, the window closes on its next step. Nothing when the
-// window shows something of the game's own.
-bool EndLine(Game& game, const TextRing& ring);
-// The text box of a text pane of the screen's layout, by the game's name string at main+`pane_name`: *(*(pane+8)+8)
-// for a pane of kind 2 (text); 0 when there is none.
-std::uint64_t PaneTextBox(Game& game, std::uint64_t screen, std::uint64_t pane_name);
-
 // ---------------------------------------------------------------- a held banner
-// A line that stays on the game's banner while it is held (down but not out: "You are down  0:32"); notices wait
-// meanwhile. From any thread: the module's frame step (Banner::Step, the game's thread) shows it.
+// A line that stays on the game's banner while it is held (down but not out: "You are down  0:32"); chat and notices
+// wait meanwhile. From any thread: the module's frame step (Banner::Step, the game's thread) shows it.
 void HoldBanner(std::string_view text);   // held, or its text changed
-void EndBanner();                         // let go: the banner closes, notices go on
+void EndBanner();                         // let go: the banner closes, chat goes on
 std::optional<std::string> HeldBanner();  // the held text, if any
 
 // The game's banner (SimpleInfo_00), every write of ours to it. It is never taken from the game: while it is up with
-// a text that is not ours (its T_Text_00 text box's pointer is not in our block and not the last one we set), a notice
-// waits and so does the held line; closing touches only a banner of ours.
+// a text that is not ours (its T_Text_00 text box's pointer is not in our block and not the last one we set), a page
+// waits and so does the held line; closing touches only a banner of ours. Each text goes up as the game's own
+// f_83419b10 puts one: the ordinary look (its Type animation at its first frame), T_Text_00, then open.
 class Banner {
 public:
     // What the banner holds now (kNothing: shut, no open asked).
     Holds Holding(Game& game, const TextRing& ring);
-    // A notice (T_Text_00, then open). False when there is no banner or it shows the game's own: the notice waits.
-    bool Notice(Game& game, TextRing& ring, const Shown& notice);
+    // A page (a chat line's page, a notice, the typed line) for its seconds from `now_ms`, in the speaker's colour
+    // (a notice: the game's). Up with ours already: only the text (and colour) change, no opening again. False when
+    // there is no banner, it shows the game's own, or the held line has it: the page waits.
+    bool Show(Game& game, TextRing& ring, const Shown& page, std::uint64_t now_ms);
+    // Our page ends now (the chat box closed): the banner closes if it is ours.
+    void End(Game& game, const TextRing& ring);
     // Each frame on the game's thread with the held text: opens the banner when it is shut, sets T_Text_00 (a fixed
-    // slot, in place) only when the text changed, closes it once let go. True while a held line is up or waits for the
-    // game's own banner to end (notices wait).
-    bool Step(Game& game, TextRing& ring, const std::optional<std::string>& held);
-    bool up() const { return up_; }
+    // slot, in place) only when the text changed, closes it once let go; closes a page of ours whose time is over;
+    // gives the game's own colour back once the banner is not ours. True while a held line is up or waits for the
+    // game's own banner to end (pages wait).
+    bool Step(Game& game, TextRing& ring, const std::optional<std::string>& held, std::uint64_t now_ms);
+    bool up() const { return up_; }              // the held line is up
+    bool showing() const { return page_; }       // a page of ours is up
 
 private:
     bool Set(Game& game, std::uint64_t screen, std::uint64_t ref);
-    bool up_ = false;
+    void Close(Game& game, std::uint64_t screen);
+    bool up_ = false, page_ = false;
+    std::uint64_t until_ = 0;  // the page's time
     std::string shown_;
     std::uint64_t ours_ = 0;   // the text box's pointer after our last set (the game may copy the text)
+    TextTint tint_;
 };
 
 }  // namespace CoopNativeUi
