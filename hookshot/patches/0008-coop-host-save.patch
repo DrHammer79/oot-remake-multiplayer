@@ -12,12 +12,17 @@ made if missing). A guest of another player's session plays from
 <folder>-coop, into which the host's save comes; the module decides that
 when it joins, before a save is loaded. Nothing else changes: without the
 module, or with a host, the game's own save folder is used as before.
+
+black-01112: OpenFile logs, always, a file of the game's RomFS that neither
+the game nor any mod has (the first 32 distinct paths, then every 256th
+such open with the count): player report 242's black world (a mod's model
+naming textures no folder had) left nothing in the log.
 ---
- host/nn_fs.c | 123 ++++++++++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 122 insertions(+), 1 deletion(-)
+ host/nn_fs.c | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 159 insertions(+), 1 deletion(-)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
-index 40f2c342..4b9e4918 100644
+index 40f2c342..fa745c1b 100644
 --- a/host/nn_fs.c
 +++ b/host/nn_fs.c
 @@ -862,11 +862,61 @@ int hos_fs_save_root(char *out, size_t cap) {
@@ -193,3 +198,54 @@ index 40f2c342..4b9e4918 100644
  /* nn::fs::IsSaveDataExisting(ApplicationId, account::Uid const&) -> bool */
  HLE(_ZN2nn2fs18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE) {
      char root[HOS_FS_PATH];
+@@ -1118,6 +1239,42 @@ int hos_fs_resolve_read(const char *guest, char *path, size_t cap) {
+     fs_overlay_path(guest, path, cap);
+     return 1;
+ }
++/* (oot-remake-multiplayer's patch 0008, black-01112) a file of the game's RomFS that the game opens and that neither
++   the game nor any mod has: always logged, the first 32 distinct paths, then every 256th such open with the count. A mod
++   whose file names a file no folder has (player report 242: Character Select's Link models without their textures) made
++   the game wait for it for good, a black world with nothing in the log; the module's stuck-load line points here. */
++static int coop_rom_mount(const char *guest) {
++    const char *colon = strchr(guest, ':');
++    if (!colon || !hos_romfs_dir) return 0;
++    const size_t n = (size_t)(colon - guest);
++    int rom = 0;
++    AcquireSRWLockShared(&mount_lock);
++    for (int i = 0; i < nmounts; i++) {
++        if (strlen(mounts[i].name) == n && !strncmp(mounts[i].name, guest, n)) {
++            rom = !mounts[i].writable && !mounts[i].save && !strcmp(mounts[i].root, hos_romfs_dir);
++            break;
++        }
++    }
++    ReleaseSRWLockShared(&mount_lock);
++    return rom;
++}
++static void coop_rom_not_found(const char *guest) {
++    static SRWLOCK lock = SRWLOCK_INIT;
++    static char seen[32][160];
++    static int nseen;
++    static unsigned misses;
++    if (!coop_rom_mount(guest)) return;
++    AcquireSRWLockExclusive(&lock);
++    const unsigned count = ++misses;
++    int known = 0, first = 0;
++    for (int i = 0; i < nseen && !known; i++) known = !strncmp(seen[i], guest, sizeof seen[i] - 1);
++    if (!known && nseen < 32) { snprintf(seen[nseen++], sizeof seen[0], "%s", guest); first = 1; }
++    ReleaseSRWLockExclusive(&lock);
++    if (first)
++        hos_log("fs: OpenFile(%s): not found: neither the game nor any mod has it (%u such opens so far)", guest, count);
++    else if (count % 256 == 0)
++        hos_log("fs: %u opens of game files that neither the game nor any mod has (the latest %s)", count, guest);
++}
+ /* OpenFile(FileHandle*, char const* path, int mode): mode bit 0 read, bit 1 write, bit 2 append */
+ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
+     char path[HOS_FS_PATH];
+@@ -1171,6 +1328,7 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
+     if (h == INVALID_HANDLE_VALUE) {
+         if (save) { ReleaseSRWLockExclusive(&save_lock); if (away) hos_vcore_back(); }
+         if (hos_trace || fs_trace()) hos_log("fs: OpenFile(%s): not found", g);
++        else if (!want_write && !save) coop_rom_not_found(g);   /* (patch 0008, black-01112) */
+         RET(R_PATH_NOT_FOUND);
+         return;
+     }

@@ -499,6 +499,7 @@ constexpr Entry kzh_Hans[] = {
     {"Push to talk", "按键说话"},
     // (the start screen's ask for a /bugreport after a crash, coop_problem_ask.h kWords: 40 bytes each at most)
     {"The game crashed last time.", "游戏上次崩溃了。"},
+    {"Loading got stuck last time.", "上次载入卡住了。"},
     {"Please send /bugreport on Discord", "请在 Discord 发送 /bugreport"},
     {"with the zip of collect-logs.cmd.", "附上 collect-logs.cmd 的压缩包。"},
     {"OK", "确定"},
@@ -1911,6 +1912,7 @@ constexpr Entry kzh_Hant[] = {
     {"Push to talk", "按鍵說話"},
     // (the start screen's ask for a /bugreport after a crash, coop_problem_ask.h kWords: 40 bytes each at most)
     {"The game crashed last time.", "遊戲上次當機了。"},
+    {"Loading got stuck last time.", "上次載入卡住了。"},
     {"Please send /bugreport on Discord", "請在 Discord 傳送 /bugreport"},
     {"with the zip of collect-logs.cmd.", "附上 collect-logs.cmd 的壓縮檔。"},
     {"OK", "確定"},

@@ -83,6 +83,9 @@
 #ifdef COOP_HOOKSHOT
 #include "coop_flag_native.h"
 #include "coop_map_page.h"  // patch 0018's menu state: PLAYER_STATUS in_menu/paused (Read)
+#include "coop_pause_files.h"   // CoopFiles::CoopIni: the game folder (StuckLoadFrame's record)
+#include "coop_problem_ask.h"   // the stuck load's record, asked about on the next title
+#include "coop_stuck_load.h"    // black-01112: a load that never ends
 #endif
 #include "coop_save.h"
 #include "coop_game_build.h"
@@ -139,6 +142,8 @@ namespace {
 
 // Rows 239/240/241 (PickGuardFrame, below): a pick put back since the session's chat last said it.
 std::atomic<bool> g_pick_said{false};
+// black-01112 (coop_stuck_load.h): a scene load ran CoopStuckLoad::kStuckMs; a session's Frame says so in the chat once.
+std::atomic<bool> g_stuck_said{false};
 
 // The game and build the addresses in coop/host are for.
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
@@ -1787,6 +1792,11 @@ public:
             static std::map<std::uint16_t, std::uint16_t> slot_files;
             static std::uint32_t slot_tick = 0;
             if (g_pick_said.exchange(false)) chat_.Add(CoopCharSlots::MissingLine(true), true);
+            if (g_stuck_said.exchange(false)) {   // black-01112 (StuckLoadFrame)
+                chat_.Add("The game has been loading for 2 minutes. If the screen stays black, close the game and "
+                          "send /bugreport on Discord with the zip of collect-logs.cmd.",
+                          true);
+            }
             if (view.game && report.connected) {
                 if (slot_tick++ % 600 == 0) slot_files = CoopPuppetConfig::CharacterFiles();   // (the pack's, every 10 s)
                 for (std::uint8_t n = 1; n < CoopCharSlots::Others::kNumbers; ++n) {
@@ -3687,8 +3697,79 @@ void PickGuardFrame(Core::System& system) {
     }
 }
 
+#ifdef COOP_HOOKSHOT
+// black-01112 (coop_stuck_load.h): every frame of the module, co-op on or off. The game's own scene load
+// (Sequence_IsLoadingBanc) still on after kStuckMs: one log line, a record in bug-reports/coop-stuck (the next title
+// asks for /bugreport: coop_title.cpp LookForAsk), one chat line in a session. Read every 6th frame (100 ms).
+void StuckLoadFrame(Core::System& system) {
+    static const std::uint32_t loading_hash = coop::host::flag_hash("Sequence_IsLoadingBanc");
+    static CoopStuckLoad::Watch watch;
+    static Kernel::KProcess* seen = nullptr;
+    static u64 base = 0;
+    static std::uint32_t tick = 0;
+    static std::string record;   // the record this run made (taken back when the load ends after all)
+    auto* process = system.ApplicationProcess();
+    if (process == nullptr || system.GetApplicationProcessProgramID() != kOcarinaProgramId ||
+        CoopGameBuild::Find(Hex(system.GetApplicationProcessBuildID(), 8)) == nullptr) {
+        return;
+    }
+    if (process != seen) {
+        seen = process, base = Coop::MainOf(system, process), tick = 0;
+        watch = {};
+    }
+    if (base == 0 || tick++ % 6 != 0) return;
+    EmulatorMemory memory(system.ApplicationMemory(), base);
+    CoopStuckLoad::Sample sample;
+    sample.title_up = CoopSave::TitleUp();
+    sample.loading = coop::host::GameFlags(memory).get_bool(loading_hash).value_or(false);
+    sample.link = !sample.title_up && !sample.loading && coop::host::PlayerReader(memory).read().has_value();
+    const std::uint64_t now = SteadyMs();
+    switch (watch.Frame(sample, now)) {
+    case CoopStuckLoad::Step::stuck: {
+        const std::int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count();
+        record = CoopProblemAsk::StuckName(now_s);
+        const std::string line =
+            fmt::format("a scene load (the game's Sequence_IsLoadingBanc) has run {} s and not ended: the game waits "
+                        "for something that does not come (row 242: a mod's file naming a file no folder has). "
+                        "Longshot's 'fs: ... not found' lines above name the missing files",
+                        watch.LoadMs(now) / 1000);
+        const bool kept = CoopProblemAsk::WriteStuck(CoopFiles::CoopIni().parent_path(), record, line + "\n");
+        LOG_WARNING(Core, "coop: stuck load: {}; {}", line,
+                    kept ? "the next title asks for /bugreport (bug-reports\\coop-stuck\\" + record + ")"
+                         : std::string("its record could not be written"));
+        if (Get() != nullptr) g_stuck_said = true;   // (a session's chat; solo: the log and the next title)
+        break;
+    }
+    case CoopStuckLoad::Step::ended:
+        LOG_INFO(Core, "coop: stuck load: it ended after all (Link is in the world): its record goes");
+        if (!record.empty()) CoopProblemAsk::RemoveStuck(CoopFiles::CoopIni().parent_path(), record);
+        record.clear();
+        break;
+    case CoopStuckLoad::Step::unclear:
+        LOG_INFO(Core, "coop: stuck load: no Link for {} s, with no scene load and no title (a cutscene, a movie or "
+                       "the staff roll; a black screen here is not a load): logged only",
+                 CoopStuckLoad::kStuckMs / 1000);
+        break;
+    case CoopStuckLoad::Step::none:
+        break;
+    }
+}
+#endif
+
 void OnFrameBody(Core::System& system) {
     PickGuardFrame(system);
+#ifdef COOP_HOOKSHOT
+    {   // (its own guard: a throw costs only this check, not the frame's co-op)
+        static CoopBoundary::Site site{"CoopHook::StuckLoadFrame"};
+        CoopBoundary::Run(site, [&] { StuckLoadFrame(system); },
+                          [](const char* where, const char* what, std::uint64_t n) {
+                              LOG_ERROR(Core, "coop: {} threw ({}, {} so far): the stuck-load check skipped this "
+                                              "frame", where, what, n);
+                          });
+    }
+#endif
     CoopObjects::OnFrame(system);
     {   // player report 120: the slot our game plays (Hookshot's patch 0025; solo too). Its own guard: a slot folder
         // that throws (a path the PC's code page cannot hold, no memory) costs only the slot, not the frame's co-op.
