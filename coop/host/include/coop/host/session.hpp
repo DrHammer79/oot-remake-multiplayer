@@ -246,6 +246,10 @@ class Session {
     watcher_->guard_reward(units, sources);
     return true;
   }
+  // Emulator thread only: FlagWatcher::set_reward_self (row 272).
+  void set_reward_self(std::uint8_t number) {
+    if (watcher_) watcher_->set_reward_self(number);
+  }
   // Emulator thread only: FlagWatcher::take_rewards_guarded.
   std::vector<FlagWatcher::RewardGuarded> take_rewards_guarded() {
     return watcher_ ? watcher_->take_rewards_guarded() : std::vector<FlagWatcher::RewardGuarded>{};

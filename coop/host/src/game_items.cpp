@@ -1,6 +1,7 @@
 #include "coop/host/game_items.hpp"
 
 #include <algorithm>
+#include <initializer_list>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -1014,40 +1015,43 @@ bool ItemFlagStore::is_max(FlagKey key) {
 
 namespace coop::host::rewards {
 
-std::vector<std::vector<FlagKey>> bottle_units() {
-  // PouchData.Bottle<A-E>.StockNum, in the order of letters::kBottles (A-E).
-  constexpr std::array<std::uint32_t, 5> kStock{0xd53ce3a7, 0xfca29a04, 0x893216a1, 0x5324f9d3, 0xc92b16be};
-  std::vector<std::vector<FlagKey>> out;
-  for (std::size_t i = 0; i < kStock.size(); ++i) {
-    out.push_back({FlagKey(kStock[i], std::uint16_t{0}), FlagKey(letters::kBottles[i].valid, std::uint16_t{0})});
+std::vector<std::vector<FlagKey>> units(Family family) {
+  const auto pairs = [](std::initializer_list<std::array<std::uint32_t, 2>> list) {
+    std::vector<std::vector<FlagKey>> out;
+    for (const auto& p : list) out.push_back({FlagKey(p[0], std::uint16_t{0}), FlagKey(p[1], std::uint16_t{0})});
+    return out;
+  };
+  switch (family) {
+    case Family::bottle:  // {PouchData.Bottle<X>.StockNum, BottleInfo.Bottle<X>.IsValid}, A to E
+      return pairs({{0xd53ce3a7, letters::kBottles[0].valid},
+                    {0xfca29a04, letters::kBottles[1].valid},
+                    {0x893216a1, letters::kBottles[2].valid},
+                    {0x5324f9d3, letters::kBottles[3].valid},
+                    {0xc92b16be, letters::kBottles[4].valid}});
+    // {PouchData.<tier>.StockNum, IsGet.<tier>}, small to large
+    case Family::wallet:
+      return pairs({{0x1d74617e, 0xb6e5a3a5}, {0x2d2c874b, 0xd1360de8}, {0xafa4bb52, 0xb5031190}});
+    case Family::bomb_bag:
+      return pairs({{0xb0a1bf51, 0xa63f1e2d}, {0xe5ff45aa, 0xb2c478da}, {0xbd3ca2c6, 0x968a5a79}});
+    case Family::seed_bag:  // Item_BulletBag_*
+      return pairs({{0xdc52acaf, 0x488ca1be}, {0x9a30a9e5, 0xe6cd55d2}, {0x7b9673f5, 0xb669f025}});
+    case Family::nut_bag:
+      return pairs({{0x19b80dbc, 0x2bedd82e}, {0xeaa1785e, 0x960820db}, {0xd60e4b23, 0x9a5db0b6}});
+    case Family::stick_bag:
+      return pairs({{0x2fe6ab1a, 0xde2389d4}, {0x41db7ab5, 0xcbf00480}, {0x48e53698, 0xa10f2dcf}});
+    case Family::quiver:
+      return pairs({{0xa8c3e1fb, 0x0a550531}, {0x3bb370e1, 0x9d872202}, {0xd331c7da, 0x21985b09}});
+    case Family::none:
+      break;
   }
-  return out;
+  return {};
 }
 
-std::vector<std::vector<FlagKey>> upgrade_units() {
-  // {PouchData.<tier>.StockNum, IsGet.<tier>}
-  constexpr std::array<std::array<std::uint32_t, 2>, 18> kTiers{{
-      {0x1d74617e, 0xb6e5a3a5},  // Item_Wallet_Small
-      {0x2d2c874b, 0xd1360de8},  // Item_Wallet_Medium
-      {0xafa4bb52, 0xb5031190},  // Item_Wallet_Large
-      {0xb0a1bf51, 0xa63f1e2d},  // Item_BombBag_Small
-      {0xe5ff45aa, 0xb2c478da},  // Item_BombBag_Medium
-      {0xbd3ca2c6, 0x968a5a79},  // Item_BombBag_Large
-      {0xdc52acaf, 0x488ca1be},  // Item_BulletBag_Small
-      {0x9a30a9e5, 0xe6cd55d2},  // Item_BulletBag_Medium
-      {0x7b9673f5, 0xb669f025},  // Item_BulletBag_Large
-      {0x19b80dbc, 0x2bedd82e},  // Item_NutBag_Small
-      {0xeaa1785e, 0x960820db},  // Item_NutBag_Medium
-      {0xd60e4b23, 0x9a5db0b6},  // Item_NutBag_Large
-      {0x2fe6ab1a, 0xde2389d4},  // Item_StickBag_Small
-      {0x41db7ab5, 0xcbf00480},  // Item_StickBag_Medium
-      {0x48e53698, 0xa10f2dcf},  // Item_StickBag_Large
-      {0xa8c3e1fb, 0x0a550531},  // Item_Quiver_Small
-      {0x3bb370e1, 0x9d872202},  // Item_Quiver_Medium
-      {0xd331c7da, 0x21985b09},  // Item_Quiver_Large
-  }};
-  std::vector<std::vector<FlagKey>> out;
-  for (const auto& t : kTiers) out.push_back({FlagKey(t[0], std::uint16_t{0}), FlagKey(t[1], std::uint16_t{0})});
+std::vector<FlagKey> sources(Family family) {
+  std::vector<FlagKey> out;
+  for (const Source& s : kGuarded) {
+    if (s.family == family) out.emplace_back(s.hash, std::uint16_t{0});
+  }
   return out;
 }
 

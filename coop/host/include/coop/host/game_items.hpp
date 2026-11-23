@@ -421,55 +421,53 @@ std::optional<std::uint32_t> ruto_letter_bottle(std::optional<bool> got, std::op
 // share_pickup_named), and the bottle and upgrade gains are guarded against the same reward got in two games
 // at once (FlagWatcher::guard_reward).
 namespace rewards {
+// What a reward gives: each family is guarded on its own (FlagWatcher::guard_reward), so a reward of one
+// never pays for a gain of another.
+enum class Family : std::uint8_t { bottle, wallet, seed_bag, quiver, bomb_bag, stick_bag, nut_bag, none };
+inline constexpr std::array<Family, 7> kFamilies{Family::bottle,   Family::wallet,    Family::seed_bag, Family::quiver,
+                                                 Family::bomb_bag, Family::stick_bag, Family::nut_bag};
 struct Source {
   std::uint32_t hash;     // flag_hash(name)
   std::string_view name;  // the Bool in the game (each one is in GameDataList)
+  Family family;
 };
-// Rewards that are a bottle.
-inline constexpr std::array<Source, 4> kBottle{{
-    {0x7a7961c3, "MiniGame_CatchCucco_IsCompleted"},  // Anju's cuccos, child (Minigame_CatchCucco)
-    {0x084da83f, "IsClear_Minigame_FindOutCucco"},    // Talon's cuccos, child (Minigame_FindOutCucco)
-    {0x9e47f045, "Npc_Hylia_048_BottleShop_Full"},    // the poe collector's 1000 points, adult
-    {0x170b5df2, "IsGet.Item_Bottle_Letter"},         // Ruto's Letter (shared since issue 58)
-}};
-// Rewards that are an upgrade's next tier (the flow picks the tier from what the pouch holds).
-inline constexpr std::array<Source, 10> kUpgrade{{
-    {0x9086a22e, "KakarikoVillage_GatheringTokenGold_GetReward10"},  // 10 tokens: a wallet
-    {0xcdcc9add, "KakarikoVillage_GatheringTokenGold_GetReward30"},  // 30 tokens: a wallet
-    {0x4bafdf70, "LostWood_HitTargetOfDekuScrub_FirstClear"},        // the Lost Woods target: a seed bag
-    {0x19e5a36b, "MiniGame_BombchuBowling_ClearFirstTime"},          // bombchu bowling's first prize: a bomb bag
-    {0x893fa7cb, "MiniGame_HitTarget_HrlCity_Get_BulletBag"},           // the Market gallery: a seed bag
-    {0xdda8aaf7, "MiniGame_HitTarget_Kakariko_Get_Quiver"},             // the Kakariko gallery: a quiver
-    {0x7c6e3b6b, "MiniGame_HorseBackArchery_Get_Quiver"},               // horseback archery: a quiver
-    {0x1fb5294d, "GoronCity_GetBombBag_fromGoron006"},                  // the rolling Goron: a bomb bag
-    {0x5db0e8ed, "LostWood_ScrubForestStage_SkullMaskEventLaunched"},   // Deku Theater, Skull Mask: sticks
-    {0xcdf86c43, "LostWood_ScrubForestStage_TrueMaskEventLaunched"},    // Deku Theater, Mask of Truth: nuts
+// Rewards that are a bottle or an upgrade's next tier (each upgrade flow asks the pouch's tier,
+// EventQueryIsExistInPouch, and gives the next).
+inline constexpr std::array<Source, 14> kGuarded{{
+    {0x7a7961c3, "MiniGame_CatchCucco_IsCompleted", Family::bottle},  // Anju's cuccos, child (Minigame_CatchCucco)
+    {0x084da83f, "IsClear_Minigame_FindOutCucco", Family::bottle},    // Talon's cuccos, child (Minigame_FindOutCucco)
+    {0x9e47f045, "Npc_Hylia_048_BottleShop_Full", Family::bottle},    // the poe collector's 1000 points, adult
+    {0x170b5df2, "IsGet.Item_Bottle_Letter", Family::bottle},         // Ruto's Letter (shared since issue 58)
+    {0x9086a22e, "KakarikoVillage_GatheringTokenGold_GetReward10", Family::wallet},  // 10 tokens
+    {0xcdcc9add, "KakarikoVillage_GatheringTokenGold_GetReward30", Family::wallet},  // 30 tokens
+    {0x4bafdf70, "LostWood_HitTargetOfDekuScrub_FirstClear", Family::seed_bag},      // the Lost Woods target
+    {0x893fa7cb, "MiniGame_HitTarget_HrlCity_Get_BulletBag", Family::seed_bag},      // the Market gallery
+    {0xdda8aaf7, "MiniGame_HitTarget_Kakariko_Get_Quiver", Family::quiver},          // the Kakariko gallery
+    {0x7c6e3b6b, "MiniGame_HorseBackArchery_Get_Quiver", Family::quiver},            // horseback archery
+    {0x19e5a36b, "MiniGame_BombchuBowling_ClearFirstTime", Family::bomb_bag},        // bombchu bowling's first prize
+    {0x1fb5294d, "GoronCity_GetBombBag_fromGoron006", Family::bomb_bag},             // the rolling Goron
+    {0x5db0e8ed, "LostWood_ScrubForestStage_SkullMaskEventLaunched", Family::stick_bag},  // Deku Theater
+    {0xcdf86c43, "LostWood_ScrubForestStage_TrueMaskEventLaunched", Family::nut_bag},     // Deku Theater
 }};
 // Other once-per-save rewards: shared only (a heart piece is a count: two at once still add up, docs/items.md).
 inline constexpr std::array<Source, 10> kOther{{
-    {0x6b8fc751, "DeathMountain_Enemy_Scrub_Business_HeartPiece_01"},
-    {0xe41e1597, "HyruleField_Enemy_Scrub_Business_HeartPiece_01"},
-    {0x1d1793e9, "GoronLargePot_IsGetHeartPiece"},
-    {0x1657d7d8, "Minigame_SkullKidSession_IsGetHeartPiece"},
-    {0xcdd1c1dd, "MiniGame_BombchuBowling_ClearSecondTime"},          // a heart piece
-    {0x39dad76d, "KakarikoVillage_GatheringTokenGold_GetReward20"},   // the Stone of Agony
-    {0x8dc37ac6, "KakarikoVillage_GatheringTokenGold_GetReward40"},   // bombchus
-    {0xe3c6e4a3, "KakarikoVillage_GatheringTokenGold_GetReward50"},   // a heart piece
-    {0x3f43245b, "MiniGame_HorsebackArchery_GotaHeart"},              // horseback archery: a heart piece
-    {0x46e5bc53, "MiniGame_HorsebackArchery_ISGetSpecialPrize"},
+    {0x6b8fc751, "DeathMountain_Enemy_Scrub_Business_HeartPiece_01", Family::none},
+    {0xe41e1597, "HyruleField_Enemy_Scrub_Business_HeartPiece_01", Family::none},
+    {0x1d1793e9, "GoronLargePot_IsGetHeartPiece", Family::none},
+    {0x1657d7d8, "Minigame_SkullKidSession_IsGetHeartPiece", Family::none},
+    {0xcdd1c1dd, "MiniGame_BombchuBowling_ClearSecondTime", Family::none},         // a heart piece
+    {0x39dad76d, "KakarikoVillage_GatheringTokenGold_GetReward20", Family::none},  // the Stone of Agony
+    {0x8dc37ac6, "KakarikoVillage_GatheringTokenGold_GetReward40", Family::none},  // bombchus
+    {0xe3c6e4a3, "KakarikoVillage_GatheringTokenGold_GetReward50", Family::none},  // a heart piece
+    {0x3f43245b, "MiniGame_HorsebackArchery_GotaHeart", Family::none},             // horseback archery: a heart piece
+    {0x46e5bc53, "MiniGame_HorsebackArchery_ISGetSpecialPrize", Family::none},
 }};
-// The bottle slots, each one unit: PouchData.Bottle<X>.StockNum and BottleInfo.Bottle<X>.IsValid.
-std::vector<std::vector<FlagKey>> bottle_units();
-// The upgrade tiers, each one unit: PouchData.<tier>.StockNum and IsGet.<tier> (wallets, bomb, seed, nut and
-// stick bags, quivers).
-std::vector<std::vector<FlagKey>> upgrade_units();
-// The keys of `sources`.
-template <std::size_t N>
-std::vector<FlagKey> keys(const std::array<Source, N>& sources) {
-  std::vector<FlagKey> out;
-  for (const Source& s : sources) out.emplace_back(s.hash, std::uint16_t{0});
-  return out;
-}
+// A family's units, each one or more keys got together: a bottle slot (PouchData.Bottle<X>.StockNum and
+// BottleInfo.Bottle<X>.IsValid, A to E); an upgrade's tiers (PouchData.<tier>.StockNum and IsGet.<tier>, small
+// to large).
+std::vector<std::vector<FlagKey>> units(Family family);
+// A family's reward Bools, from kGuarded.
+std::vector<FlagKey> sources(Family family);
 }  // namespace rewards
 
 // When to mend (ItemFlagStore::mend), kept by the hook across frames: for

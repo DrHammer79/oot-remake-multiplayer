@@ -4119,3 +4119,84 @@ TEST_CASE("reward guard: what a join brings is no reward given now (row 272)") {
   CHECK(has(entries(w.frame(store)), entry(kValidB, 1)));
   CHECK(w.stats().rewards_guarded == 0);
 }
+
+TEST_CASE("reward guard: another player's bottle with no reward and our own Anju bottle are both kept (row 272)") {
+  // Review of 26dbfa8d: a gain with no reward of its sender (a randomizer chest's bottle) used Anju's allowance.
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  w.receive(state({entry(kStockA, 1), entry(kValidA, 1)}));  // player 1: a chest's bottle
+  w.frame(store);
+  store.set(kAnju, 1);  // ours: Anju's reward
+  give(store, kStockB, kValidB);
+  CHECK(has(entries(w.frame(store)), entry(kValidB, 1)));
+  CHECK(store.get(kValidA) + store.get(kValidB) == 2);
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: one player's chest bottle and another's Anju bottle: our own Anju copy is put back (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.frame(store);
+  w.frame(store);
+  w.receive(proto::FlagState{1, {entry(kStockA, 1), entry(kValidA, 1)}});                  // player 1: a chest's
+  w.receive(proto::FlagState{2, {entry(kAnju, 1), entry(kStockC, 1), entry(kValidC, 1)}});  // player 2: Anju's
+  w.frame(store);
+  give(store, kStockB, kValidB);  // ours: the same Anju reward, its flow past the check
+  w.frame(store);
+  CHECK(store.get(kValidB) == 0);
+  CHECK(store.get(kValidA) + store.get(kValidC) == 2);
+  CHECK(w.stats().rewards_guarded == 1);
+}
+
+TEST_CASE("reward guard: our own Bool coming back in the host's answer is ours, not another player's (row 272)") {
+  FakeStore store = bottle_game();
+  FlagWatcher w(bottle_shared(), FlagRole::player);
+  bottle_guard(w);
+  w.set_reward_self(3);
+  w.frame(store);
+  w.frame(store);
+  store.set(kAnju, 1);
+  w.frame(store);
+  give(store, kStockA, kValidA);
+  w.frame(store);
+  w.receive(proto::FlagState{3, {entry(kAnju, 1), entry(kStockA, 1), entry(kValidA, 1)}});  // the host's answer
+  w.frame(store);
+  w.receive(proto::FlagState{1, {entry(kStockB, 1), entry(kValidB, 1)}});  // player 1: a shop's bottle
+  w.frame(store);
+  store.set(kStockC, 1);  // ours: a shop's bottle too
+  store.set(kValidC, 1);
+  CHECK(has(entries(w.frame(store)), entry(kValidC, 1)));
+  CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("reward guard: a scrub's stick upgrade and a Skulltula wallet at once are both kept (row 272)") {
+  // Review of 26dbfa8d: one guard held every tier, so another family's gain used the wallet's allowance.
+  constexpr FlagKey kReward10{0x8001u, 0};  // KakarikoVillage_GatheringTokenGold_GetReward10
+  constexpr FlagKey kTheater{0x8002u, 0};   // the Deku Theater's stick prize
+  constexpr FlagKey kStickM{0x8100u, 0}, kStickMGot{0x8101u, 0};
+  constexpr FlagKey kWalletM{0x8200u, 0}, kWalletMGot{0x8201u, 0};
+  FakeStore store;
+  for (FlagKey k : {kReward10, kTheater, kStickM, kStickMGot, kWalletM, kWalletMGot}) store.set(k, 0);
+  FlagWatcher w(SharedFlags({kStickM, kStickMGot, kWalletM, kWalletMGot}), FlagRole::player);
+  const std::vector<std::vector<FlagKey>> sticks{{kStickM, kStickMGot}};
+  const std::vector<std::vector<FlagKey>> wallets{{kWalletM, kWalletMGot}};
+  const FlagKey stick_bools[] = {kTheater};
+  const FlagKey wallet_bools[] = {kReward10};
+  w.guard_reward(sticks, stick_bools);
+  w.guard_reward(wallets, wallet_bools);
+  w.frame(store);
+  w.frame(store);
+  w.receive(state({entry(kStickM, 1), entry(kStickMGot, 1)}));  // player 1 buys a scrub's stick upgrade
+  w.frame(store);
+  store.set(kReward10, 1);  // ours: the 10-token wallet
+  store.set(kWalletM, 1);
+  store.set(kWalletMGot, 1);
+  const auto sent = entries(w.frame(store));
+  CHECK(has(sent, entry(kWalletM, 1)));
+  CHECK(store.get(kWalletM) == 1);
+  CHECK(w.stats().rewards_guarded == 0);
+}

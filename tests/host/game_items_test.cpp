@@ -1850,15 +1850,18 @@ TEST_CASE("rewards: each once-per-save reward's Bool is its name's hash (row 272
       CHECK(coop::protocol::flag_hash(s.name) == s.hash);
     }
   };
-  check(rewards::kBottle);
-  check(rewards::kUpgrade);
+  check(rewards::kGuarded);
   check(rewards::kOther);
+  for (const rewards::Source& s : rewards::kGuarded) CHECK(s.family != rewards::Family::none);
+  for (const rewards::Source& s : rewards::kOther) CHECK(s.family == rewards::Family::none);
 }
 
-TEST_CASE("rewards: the bottle and upgrade units are item flags, each key in one unit (row 272)") {
+TEST_CASE("rewards: every family has its units and its Bools, each key in one unit (row 272)") {
   std::set<std::uint32_t> seen;
-  const auto check = [&](const std::vector<std::vector<FlagKey>>& units, std::size_t size) {
-    CHECK(units.size() == size);
+  std::size_t bools = 0;
+  for (const rewards::Family family : rewards::kFamilies) {
+    const auto units = rewards::units(family);
+    CHECK(units.size() == (family == rewards::Family::bottle ? 5U : 3U));
     for (const auto& unit : units) {
       CHECK(unit.size() == 2);
       for (const FlagKey key : unit) {
@@ -1867,13 +1870,25 @@ TEST_CASE("rewards: the bottle and upgrade units are item flags, each key in one
         CHECK(seen.insert(key.hash).second);
       }
     }
-  };
-  check(rewards::bottle_units(), 5);
-  check(rewards::upgrade_units(), 18);
-  // A bottle slot is its StockNum and its IsValid, A to E.
-  const auto bottles = rewards::bottle_units();
+    const auto sources = rewards::sources(family);
+    CHECK_FALSE(sources.empty());
+    bools += sources.size();
+  }
+  CHECK(bools == rewards::kGuarded.size());
+  CHECK(rewards::units(rewards::Family::none).empty());
+  // A bottle slot is its StockNum and its IsValid, A to E; a tier its StockNum and its IsGet.
+  const auto bottles = rewards::units(rewards::Family::bottle);
   for (std::size_t i = 0; i < letters::kBottles.size(); ++i) {
     CHECK(bottles[i][1].hash == letters::kBottles[i].valid);
     CHECK(find_item(bottles[i][0].hash)->name.starts_with("PouchData.Bottle"));
+  }
+  for (const auto family : {rewards::Family::wallet, rewards::Family::quiver, rewards::Family::bomb_bag}) {
+    for (const auto& unit : rewards::units(family)) {
+      const std::string_view stock = find_item(unit[0].hash)->name;
+      const std::string_view got = find_item(unit[1].hash)->name;
+      CHECK(stock.starts_with("PouchData."));
+      CHECK(got.starts_with("IsGet."));
+      CHECK(stock.substr(10, stock.size() - 19) == got.substr(6));  // PouchData.<tier>.StockNum / IsGet.<tier>
+    }
   }
 }

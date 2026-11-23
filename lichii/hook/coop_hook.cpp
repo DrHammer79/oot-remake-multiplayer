@@ -777,10 +777,9 @@ public:
                                   skulltulas);
         }
         if (sharing_) {  // row 272: once-per-save rewards (bottles, upgrades) given once for the group
-            session_->guard_reward(coop::host::rewards::bottle_units(),
-                                   coop::host::rewards::keys(coop::host::rewards::kBottle));
-            session_->guard_reward(coop::host::rewards::upgrade_units(),
-                                   coop::host::rewards::keys(coop::host::rewards::kUpgrade));
+            for (const auto family : coop::host::rewards::kFamilies) {  // each family on its own
+                session_->guard_reward(coop::host::rewards::units(family), coop::host::rewards::sources(family));
+            }
             for (const auto& r : coop::host::rewards::kOther) {
                 session_->share_pickup_named(coop::protocol::FlagKey(r.hash, std::uint16_t{0}));
             }
@@ -1504,6 +1503,14 @@ public:
                      "coop: flags: count {:#010x} +{} here was a pickup another player had taken: "
                      "put back, not sent",
                      g.count.hash, g.amount);
+        }
+        if (sharing_) {  // row 272: our number, so the host's answer to our own reward Bool counts as ours
+            std::uint8_t self = 0;
+            session_->with_client([&](coop::net::Client& c) {
+                self = c.player_number();
+                return 0;
+            });
+            session_->set_reward_self(self);
         }
         for (const auto& g : session_->take_rewards_guarded()) {  // row 272 (docs/items.md)
             const auto* item = coop::host::find_item(g.key.hash);

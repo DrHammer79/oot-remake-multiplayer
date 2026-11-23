@@ -302,13 +302,17 @@ class FlagWatcher {
   // that are got together (a bottle slot: its StockNum and its IsValid); `sources` are the once-per-save
   // Bools the reward's own flow sets as it gives it (Anju's MiniGame_CatchCucco_IsCompleted, ...), shared
   // from now on (share_pickup_named), so a game that hears of one first does not give it at all.
-  // Each source going 0 to 1 here (ours or another player's) in the last kRewardFrames allows one unit got;
-  // each unit that went from empty to got here in that time (another player's copy, or ours kept) uses one.
-  // Other players' writes are judged once a frame, each unit and source as a whole (judge_rewards), so
-  // neither the keys' order nor a unit that comes in an earlier message than its source changes the count.
-  // Our own gain past what the sources allow is the same reward twice: put back in the same frame (each of
-  // its keys, exactly) and never sent. Outside such a time nothing is guarded (a randomizer chest's bottle, a shop's). Co-op idle
-  // runs none of this (no session, no watcher).
+  // One guard per reward family (bottles; wallets; seed bags; quivers; bomb bags; stick and nut capacity):
+  // each family's sources only ever pay for that family's units. Within it, every sender (each player, and
+  // our own game) is counted apart over the last kRewardFrames: a Bool its flow set (or sent, even when ours
+  // had it already) and a unit that went from empty to got. A sender's units count only up to its own Bools,
+  // so a unit with no reward of its sender (a shop's bottle, a randomizer chest's) never uses another
+  // reward's allowance. Our own gain is the same reward twice when another player's paired copy came and
+  // every Bool on in that time is used up: put back in the same frame (each of its keys, exactly), never
+  // sent. Other players' writes are judged once a frame, each unit and Bool as a whole (judge_rewards), so
+  // the keys' order and a unit that comes a message before its Bool do not change the count; a join or reset
+  // counts nothing. The flow's own give cannot be stopped from here (it read the Bool before the other
+  // player's came, and our hook has no part in the game's pouch write). Co-op idle runs none of this.
   void guard_reward(std::span<const std::vector<FlagKey>> units, std::span<const FlagKey> sources);
   static constexpr std::uint64_t kRewardFrames = 60 * 60;  // a get scene's whole length, with room
   struct RewardGuarded {
@@ -316,6 +320,8 @@ class FlagWatcher {
   };
   // The own gains guard_reward put back since the last call, for the log.
   std::vector<RewardGuarded> take_rewards_guarded() { return std::exchange(rewards_guarded_, {}); }
+  // Our own player number, so the host's answer to our own reward Bool is not taken for another player's.
+  void set_reward_self(std::uint8_t number) { reward_self_ = number; }
 
   // Issue 195: our Link opened a chest that another player had opened
   // already (the hook shows it open, but its AI still lets it open again).
@@ -695,13 +701,19 @@ class FlagWatcher {
   Table added_;                              // count deltas add() put in this frame
   std::vector<CountGuarded> counts_guarded_;  // take_counts_guarded
   // guard_reward (row 272).
+  static constexpr std::uint8_t kRewardSelf = 0xff;  // our own game, as a sender
+  struct RewardEvent {
+    std::uint64_t at = 0;      // the frame
+    std::uint8_t sender = 0;   // who: a player number, or kRewardSelf
+    bool gain = false;         // a unit got; else `source` went on (or came, from another player's flow)
+    FlagKey source{};
+  };
   struct RewardGuard {
     std::vector<std::vector<FlagKey>> units;
     std::vector<bool> got;             // each unit as last judged (any key not 0)
     std::vector<FlagKey> sources;
     std::vector<bool> source_on;       // each source as last judged
-    std::deque<std::uint64_t> sources_at;  // frames a source went 0 to 1 here, the last kRewardFrames
-    std::deque<std::uint64_t> gains_at;    // frames a unit was got here (another player's or ours kept), same
+    std::deque<RewardEvent> events;    // the last kRewardFrames
     bool ready = false;                // every key read once: the save's own is no reward given now
   };
   struct RewardUnit {
@@ -713,11 +725,14 @@ class FlagWatcher {
   std::vector<RewardGuard> reward_guards_;
   std::map<FlagKey, std::pair<std::size_t, std::size_t>> reward_source_;  // source -> guard, its index
   std::map<FlagKey, RewardUnit> reward_key_;      // unit key -> its guard and unit
-  std::set<FlagKey> reward_received_;             // unit and source keys other players wrote since the last judge
+  std::map<FlagKey, std::uint8_t> reward_received_;  // unit and source keys other players wrote, by whom
   bool reward_quiet_ = false;                     // a join or reset state came: judged without counting
+  std::uint8_t reward_self_ = 0;                  // set_reward_self: our player number (0: not known)
   std::vector<RewardGuarded> rewards_guarded_;    // take_rewards_guarded
   // Drops what is older than kRewardFrames.
   void prune_reward(RewardGuard& guard) const;
+  // Whether our own gain of a unit now is a reward got twice (guard_reward).
+  bool reward_twice(RewardGuard& guard) const;
   // Another player's write of `entry` landed (or is about to): judged at judge_rewards().
   void note_reward_received(FlagStore& store, const protocol::FlagEntry& entry);
   // Once a frame, after every received write and before our own changes are read: each source and unit as a
