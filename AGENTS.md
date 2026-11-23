@@ -120,8 +120,9 @@ This section is only for a session that was handed **running test games** with t
 server per game (`oot-p1`, `oot-p2`, ...; set up by the maintainer: [docs/playtest.md](docs/playtest.md), "Playing
 through the bridge"). Everything above still holds. A coding session never starts games itself.
 
-- You control each game through its own tools (`get_state`, `walk_to`, `press`, `step`, `warp`, `flag`, `give`, `log`,
-  `checkpoint`, `desync_check`, `screenshot`). Every reply has the game's frame count.
+- You control each game through its own tools (`get_state`, `get_world`, `get_actor`, `walk_to`, `press`, `step`, `warp`,
+  `flag`, `give`, `kill`, `go_to_actor`, `attack`, `checkpoint`, `desync_check`, `check_logs`, `session_status`, `log`,
+  `screenshot`, and more: the list is in [docs/playtest.md](docs/playtest.md)). Every reply has the game's frame count.
 - **The games are paused between your calls.** Nothing happens unless you act; a call runs only the frames it asks
   for. Call `get_state` on every game first: a game whose tools you never called still runs.
 - Use `warp` (and `flag`, `give`) to set a test up. Do not walk across Hyrule to reach it.

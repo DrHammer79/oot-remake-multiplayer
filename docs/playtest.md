@@ -198,7 +198,8 @@ that `start` starts), under the watchdog's own pid. The watchdog ends the sessio
 - `live.py stop` asks;
 - the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening; 0 means no limit);
 - no tester command came for `--idle-minutes` (10 by default, 0 means never; counted from the end of the boot): the tester handed
-  off, crashed or paused;
+  off, crashed or paused. Only tool calls count, not time spent thinking or writing notes: a tester that writes long
+  notes between calls needs a larger `--idle-minutes` (or 0);
 - a game ended by itself;
 - the watchdog is stopped by a signal, or fails.
 
@@ -235,9 +236,9 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 
 - **Frame step in a game.** The play-test bridge holds the game in the module ([Bridge protocol](#bridge-protocol));
   that is not proven in a game yet. `tools/autotest/bridge_proof.py` on a test lane checks it first.
-- **World list: the client and the checker.** The `world` member is in the bridge's `state` and `dump`. The client's
-  `get_world` and `get_actor`, and the checker that compares positions and owners of the two games, come next.
-  Not proven in a game: the list needs a lane run (connected games, an enemy in the room).
+- **World list and the actor compare in a game.** `get_world`, `get_actor` and the actor compare of `desync_check` are
+  built and unit-tested. None has run in a game: the list needs a lane run (connected games, an enemy in the room), and
+  the compare's numbers (0.2 m, 40 m, 60 frames) and the helpers' limits are guesses until then.
 - **More than two games** (the runner starts A and B).
 - **Lag on purpose.** The runner's `--test-delay-ms` and `--test-jitter-ms` give the server a delay; a live session
   can pass them through `start` once it takes them.
