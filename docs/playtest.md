@@ -371,6 +371,22 @@ Standard library only; tested without a game by `tools/autotest/tests/test_kit_t
 
   With no FILE it reads `calls.jsonl` of `--session`; several files are merged by time. It runs the calls in order, each as the server that made it (a player server: that game's bridge, on `--lane`'s ports; `oot-playtest` and `live`: the session's tools, so those need `--session`). Calls that only looked (`get_state`, `get_world`, `log`, `screenshot`, ...) and calls that failed the first time are left out unless you ask; it stops at the first call that fails now unless `--keep-going`; `--dry-run` lists what it would run. The calls are the same, the game is not: a replay starts from the state the first run started from (a save, the same warp), and a `step_until` or a walk may land on other frames. It is not logged again. Exit code 1 when a call failed; the progress goes to stderr, the result (`ran`, `skipped`, `failed`) to stdout.
 
+### Kit doctor (`tools/autotest/kit_doctor.py`)
+
+Run it before a run (and when a run does not start): one line per check, `OK`, `WARN` or `FAIL`, the name and what is wrong. Exit code 1 when a line says `FAIL`. It starts nothing and changes nothing.
+
+`python -I tools/autotest/kit_doctor.py --lane 1 [--session DIR] [--mcp .mcp.json] [--running] [--players N] [--json]`
+
+(`--game-a FOLDER --game-b FOLDER` instead of `--lane` for two folders of your own.) It checks:
+
+- **python**: 3.10 or newer. **kit files**: `tools/autotest` has the play-test scripts.
+- **game A / game B**: the folder exists, has `longshot.exe` (in `bin/` or the folder), and `hookshot_coop.dll` next to it (the fix is `lanes.py install --lane N --dll ...`); a `WARN` when the shaders are not prepared yet. **game copies**: A and B are two folders.
+- **port p1, p2 ...**: the bridge port (5000 + N, or 5000 + 10*L + N on lane L). Before a run it must be free (a `WARN` names what is taken); with `--running` it must answer (a `FAIL` says no game listens: it did not start, was not started with `--playtest`, or its bridge is off). **port server**: the lane's server ports are free.
+- **session** (`--session DIR`): the folder is a `live.py start` session, has not ended, and each game process in `pids.json` is alive.
+- **mcp** (`--mcp FILE`, or `./.mcp.json` when there is one): each `oot-pN` server names a command that runs, an `mcp_playtest.py` that exists (a relative path is read from the folder of the `.mcp.json`), its own `--player`, the `--lane` you gave, a `--session` folder that exists; all servers share one `--log-dir`.
+
+`python -I tools/autotest/kit_doctor.py --write-mcp .mcp.json --lane 1 --session DIR --log-dir DIR` writes a `.mcp.json` from `tools/autotest/mcp.json.template` (`{LANE}`, `{SESSION}` and `{LOG_DIR}` filled in; an option you do not give is left out, and so is the `oot-playtest` session server when there is no `--session`). It never replaces a file without `--force`. The template has no paths of this PC: the script paths are relative to the repository folder, where the client runs. Register the file as in "Setting up a run".
+
 ### Check in game (first lane run of the strike by id, the helpers and the held list)
 
 Nothing here has run in a game. The first run checks:
@@ -400,7 +416,8 @@ Nothing here has run in a game. The first run checks:
    default). By hand: set `LICHII_COOP_PLAYTEST_PORT`, `HOS_CONTROL`, `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1` in each game's
    environment (or `live.py start --env A:LICHII_COOP_PLAYTEST_PORT=5011 --env B:...`). Each game's log says
    `coop: playtest: listening on 127.0.0.1:<port>`.
-2. Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
+2. (`kit_doctor.py --write-mcp` writes the `.mcp.json` below for you; `kit_doctor.py --lane N` checks the run: "Kit doctor".)
+   Register one MCP server per game, all with the **same** `--log-dir` (desync_check reads every game's log there),
    and, for games from `live.py start`, the same `--session`: each call then counts as a tester command for the
    session's watchdog (else it ends the session after `--idle-minutes`), and an ended session is refused. In a
    project `.mcp.json` (the shape most MCP clients read):
