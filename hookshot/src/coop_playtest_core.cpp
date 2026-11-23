@@ -431,6 +431,9 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
         out += ",\"why\":" + Quote("stale: no walk for " + std::to_string(age) + " ms (a load, or the session ended)");
     } else if (snapshot->actors.empty()) {
         out += ",\"why\":\"empty: the walk ran and saw no actors\"";
+
+    } else if (count == 0 && other > 0) {  // (state only: the dump lists them)
+        out += ",\"why\":\"only other kinds near: dump lists them\"";
     }
     out += ",\"actors\":[";
     for (std::size_t i = 0; i < count; ++i) {

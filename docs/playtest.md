@@ -143,6 +143,7 @@ lists all of them. It is there only while the games are connected and sharing, b
 - `"no co-op session: the world list is read only while connected and sharing"`: the walk never ran.
 - `"stale: no walk for N ms (a load, or the session ended)"`: the last list is older than 1.5 s.
 - `"empty: the walk ran and saw no actors"`: connected, and the room really has none.
+- `"only other kinds near: dump lists them"`: `state` lists known kinds only, and the room has only grass, pots and the like.
 
 ```
 "world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"total":31,"other_count":30,"count":1,"actors":[

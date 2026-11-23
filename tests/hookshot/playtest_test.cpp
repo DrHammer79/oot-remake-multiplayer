@@ -369,6 +369,32 @@ TEST_CASE("playtest: an empty snapshot that is fresh says the walk ran and saw n
     CHECK(Compact(*w->Get("why")).find("empty:") != std::string::npos);
 }
 
+TEST_CASE("playtest: a room with only other kinds gives state an empty list with a why, and the dump lists them") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 8;
+    s.taken_ms = 1000;
+    for (int i = 0; i < 3; ++i) {
+        CoopWorldSnapshot::WorldActor a;
+        a.id = 1000 + static_cast<std::uint64_t>(i);
+        a.name = "Obj_Plant_Grass_A";
+        s.actors.push_back(a);
+    }
+    const auto parse = [&](bool full) {
+        const std::string m = WorldMember(true, s, 8, 1000, full);
+        return CoopModJson::Parse("{" + m.substr(1) + "}");
+    };
+    const auto brief = parse(false);
+    REQUIRE(brief);
+    const auto* w = brief->Get("world");
+    CHECK(w->Get("count")->number == 0);
+    CHECK(w->Get("other_count")->number == 3);
+    CHECK(Compact(*w->Get("why")).find("only other kinds near: dump lists them") != std::string::npos);
+    const auto whole = parse(true);
+    REQUIRE(whole);
+    CHECK(whole->Get("world")->Get("count")->number == 3);
+    CHECK(whole->Get("world")->Get("why") == nullptr);
+}
+
 TEST_CASE("playtest: state lists at most 40 known-kind actors and counts the rest, the dump lists them all") {
     CoopWorldSnapshot::Snapshot s;
     s.frame = 8;
