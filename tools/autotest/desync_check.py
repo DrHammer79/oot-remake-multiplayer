@@ -17,8 +17,9 @@ docs/sync-coverage.md says about each actor's name (sync_rows.py); --flags-only 
   what you saw"; `reload` = "shared, shown on reload"; `-` or Path `none` = not shared, left out; no row = "no row in
   sync-coverage: not compared". Only `live` rows can make the exit status 1.
 - A world list the snapshot cut at 200 actors may lack actors of kind `other` (crates, rocks) beyond the farthest one it
-  kept. When either list has 200 actors, only actors within (the smaller of the lists' kept distances) minus (the gap
-  between the Links) of their own Link are compared at all, and the line says so.
+  kept. When either list has 200 actors, an actor is compared only when it lies within the first game's kept distance of
+  the first game's Link AND within the second game's kept distance of the second game's Link (a list that was not cut
+  has no limit; an actor with no place is left out when a list is cut), and the line says so.
 - A DESYNC line names the actor (id and place in both games), the first tag and frames it was seen at, the confirming
   tag and frames, and the page's row (line, Path, Live). The key that a second sighting must match includes the ids.
 - A `live` difference counts only when it is in two checkpoints in a row with both games 60 or more frames further on in
@@ -208,15 +209,25 @@ def cut_radius(w, tol=TOL):
     return max(dists(("other",)) or dists(None) or [0.0])
 
 
+def _inside_cuts(pos, link_a, ra, link_b, rb):
+    """True when an actor at `pos` (world metres) is inside A's kept radius round A's Link and inside B's kept radius
+    round B's Link. A radius of None (a list that was not cut) never limits. No place, no answer: False."""
+    if not pos:
+        return False
+    return all(r is None or _dist(pos, link) <= r for link, r in ((link_a, ra), (link_b, rb)))
+
+
 def compare_world(cp_a, cp_b, rows, tol=TOL):
     """Compare two checkpoints' actors by what sync-coverage says about each name. Replies {note, diffs, compared,
-    skipped, no_row, no_place, cut_m, cut_left_out}: `note` says why nothing was compared (else None); each diff is
+    skipped, no_row, no_place, cut, cut_left_out}: `note` says why nothing was compared (else None); each diff is
     {name, field, a, b, label, key, text} (`text` names both actors by id and place, and the page's row by line, Path and
     Live) with `label` the page's (live, not proven, reload); `skipped` counts actors of not shared rows; `no_row` is
     {name: count} of the actors no row speaks for; `no_place` is {name: count} of placed actors whose place is missing.
-    When a world list was cut at 200 actors, only actors within `cut_m` of each Link are compared at all (a count or
-    a missing actor beyond it may be the cut, not a desync). Never touches a game."""
-    out = {"note": None, "diffs": [], "compared": 0, "skipped": 0, "no_row": {}, "no_place": {}, "cut_m": None,
+    When a world list was cut at 200 actors (`cut` = {"a": radius or None, "b": radius or None}, in metres from that
+    game's own Link), an actor is compared only when it is within A's radius of A's Link AND within B's radius of B's
+    Link (a whole list has no radius), and never without a place: a count or a missing actor beyond a radius may be the
+    cut, not a desync. Never touches a game."""
+    out = {"note": None, "diffs": [], "compared": 0, "skipped": 0, "no_row": {}, "no_place": {}, "cut": None,
            "cut_left_out": 0}
     sa, sb = cp_a.get("state") or {}, cp_b.get("state") or {}
     for who, w in (("A", sa.get("world")), ("B", sb.get("world"))):
@@ -234,16 +245,15 @@ def compare_world(cp_a, cp_b, rows, tol=TOL):
     if gap > tol["area_m"]:
         out["note"] = "not compared (apart: the Links are %.0f m apart, the limit is %.0f m)" % (gap, tol["area_m"])
         return out
-    radii = [r for r in (cut_radius(sa["world"], tol), cut_radius(sb["world"], tol)) if r is not None]
-    cut_m = max(min(radii) - gap, 0.0) if radii else None
-    out["cut_m"] = cut_m
+    ra, rb = cut_radius(sa["world"], tol), cut_radius(sb["world"], tol)
+    cut = ra is not None or rb is not None
+    out["cut"] = {"a": ra, "b": rb} if cut else None
     names = {}
     for side, w in (("a", sa["world"]), ("b", sb["world"])):
         for act in w.get("actors") or []:
             if act.get("kind") == "player" or not act.get("name"):
                 continue
-            d = act.get("dist")
-            if cut_m is not None and not (isinstance(d, (int, float)) and d <= cut_m):
+            if cut and not _inside_cuts(act.get("pos"), sa.get("pos"), ra, sb.get("pos"), rb):
                 out["cut_left_out"] += 1
                 continue
             names.setdefault(act["name"], {"a": [], "b": []})[side].append(act)
@@ -288,6 +298,10 @@ def compare_world(cp_a, cp_b, rows, tol=TOL):
                 (name, "count", tuple(sorted(str(x.get("id")) for x in left_a)),
                  tuple(sorted(str(y.get("id")) for y in left_b))))
     return out
+
+
+def _radius_text(r):
+    return "whole list" if r is None else "%.0f m" % r
 
 
 def _frames(fr):
@@ -346,8 +360,10 @@ def world_many(cps, rows, prev, tag="", tol=TOL):
                  named(res["no_row"], "name(s) with no row in sync-coverage: not compared") if res["no_row"] else "",
                  named(res["no_place"], "name(s) with no place in one game: place not compared")
                  if res["no_place"] else "",
-                 "a list was cut at %d actors: only actors within %.0f m of each Link compared (%d left out)"
-                 % (tol["cut_total"], res["cut_m"], res["cut_left_out"]) if res["cut_m"] is not None else ""]
+                 "a list was cut at %d actors: only actors inside the kept distance of each game's own Link compared "
+                 "(A %s, B %s; %d left out)"
+                 % (tol["cut_total"], _radius_text(res["cut"]["a"]), _radius_text(res["cut"]["b"]),
+                    res["cut_left_out"]) if res["cut"] else ""]
         extra = [e for e in extra if e]
         lines.append("    world %s: %s (%d actor(s) compared%s)" % (
             pair, ", ".join(bits) if bits else "agree", res["compared"], "; " + "; ".join(extra) if extra else ""))
