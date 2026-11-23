@@ -168,6 +168,7 @@ struct Glue {
     bool want_entrance = false;
     // MapChange (the play-test bridge's warp): the scene and start point to ask the map change event for.
     std::optional<std::pair<std::string, std::string>> want_map;
+    int map_frames_left = 0;   // frames a map change that could not start (an event or a load) is kept for
     std::optional<bool> respawn_moved;
     // Any thread -> the hook's chat box.
     std::vector<std::string> lines;
@@ -326,6 +327,7 @@ bool MapChange(std::string scene, std::string start) {
         start = *first;
     }
     g.want_map = std::make_pair(std::move(scene), std::move(start));
+    g.map_frames_left = 300;   // about 5 s: an event or a load at this frame lets the next free frame start it
     return true;
 }
 
@@ -414,7 +416,7 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
     std::optional<std::pair<std::string, std::string>> want_map;
     {
         std::lock_guard lock(g.mutex);
-        want_map = std::exchange(g.want_map, std::nullopt);
+        want_map = g.want_map;   // kept until it starts or its frames run out (below)
         g.answer = AnswerFor(local, g.grounded);
         want = std::exchange(g.want, std::nullopt);
         answers = std::exchange(g.answers, {});
@@ -454,9 +456,18 @@ void Frame(Core::System& system, std::uint64_t main_base, const std::optional<co
     if (want_map) {
         // The bridge's warp: the same map change event as the respawn's entrance, with the scene and start asked for.
         if (main_base == 0 || local.loading_banc || local.event) {
-            LOG_INFO(Core, "coop: teleport: map change to {} at {}: not now ({})", want_map->first, want_map->second,
-                     main_base == 0 ? "no game" : local.loading_banc ? "a load runs" : "an event runs");
+            std::lock_guard lock(g.mutex);
+            if (--g.map_frames_left <= 0) {
+                g.want_map.reset();
+                LOG_INFO(Core, "coop: teleport: map change to {} at {}: dropped, no free frame for 5 s ({})",
+                         want_map->first, want_map->second,
+                         main_base == 0 ? "no game" : local.loading_banc ? "a load runs" : "an event runs");
+            }
         } else {
+            {
+                std::lock_guard lock(g.mutex);
+                g.want_map.reset();
+            }
             Trip::Actions map;
             map.scene = want_map->first;
             map.start = want_map->second;

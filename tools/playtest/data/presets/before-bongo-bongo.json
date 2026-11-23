@@ -18,9 +18,15 @@
     "warp": {
       "scene": "BongoBongoStage",
       "entrance": "BongoBongoStage"
+    },
+    "flags": {
+      "0x7a91dbd5": "DefeatBoss",
+      "HavePlayedEvent.ShadowTemple_BossWin": 0,
+      "HavePlayedEvent.Dm_ShadowTemple_BossOut": 0
     }
   },
   "notes": [
-    "Rush room BongoBongoStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios; this preset does not set the boss's own defeat flag (its name is not in the repo yet), so a boss already beaten in the save stays beaten."
+    "Rush room BongoBongoStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest SageOfShadow is put back to its step DefeatBoss and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
   ]
 }

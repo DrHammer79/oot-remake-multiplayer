@@ -7,6 +7,9 @@ import kit_setup as ks  # noqa: E402
 
 
 class Fake:
+    def state(self):
+        return {"max_life": 40}
+
     def __init__(self, fail_on=None):
         self.log, self.fail_on = [], fail_on
 
@@ -36,12 +39,32 @@ class Plan(unittest.TestCase):
         calls = ks.plan({"magic": 2, "rupees": 99, "items": ["bow"], "small_keys": {"ForestTemple": 3},
                          "boss_keys": ["JabuJabu"]})
         self.assertEqual(calls, [("give", "bow"), ("give", "Item_FairyBless_MP"), ("give", "Item_FairyBless_MPDouble"),
+                                 ("flag", "PlayerStatus.MPMax", 480), ("flag", "PlayerStatus.MP", 480),
                                  ("flag", "PlayerStatus.CurrentRupee", 99),
                                  ("flag", "DungeonInfo.ForestTemple.SmallKeyNum", 3),
                                  ("flag", "DungeonInfo.InsideJabuJabuBelly.IsGetBossKey", 1)])
 
     def test_no_magic_clears_the_meter(self):
-        self.assertEqual(ks.plan({"magic": 0}), [("flag", "PlayerStatus.MPMax", 0), ("flag", "PlayerStatus.MP", 0)])
+        calls = ks.plan({"magic": 0})
+        self.assertIn(("flag", "IsGet.Item_FairyBless_MP", 0), calls)
+        self.assertIn(("flag", "PouchData.Item_FairyBless_MPDouble.StockNum", 0), calls)
+        self.assertEqual(calls[-2:], [("flag", "PlayerStatus.MPMax", 0), ("flag", "PlayerStatus.MP", 0)])
+
+    def test_single_magic_takes_double_away(self):
+        calls = ks.plan({"magic": 1})
+        self.assertEqual(calls[0], ("give", "Item_FairyBless_MP"))
+        self.assertIn(("flag", "IsGet.Item_FairyBless_MPDouble", 0), calls)
+        self.assertEqual(calls[-2:], [("flag", "PlayerStatus.MPMax", 240), ("flag", "PlayerStatus.MP", 240)])
+
+    def test_hearts_above_the_maximum_are_refused(self):
+        with self.assertRaises(ValueError):
+            ks.plan({"hearts": 5, "max_hearts": 3})
+        c = Fake()
+        c.state = lambda: {"max_life": 12}
+        with self.assertRaises(ValueError):
+            ks.apply(c, {"hearts": 5})
+        self.assertEqual(c.log, [])
+        ks.apply(c, {"hearts": 3})
 
     def test_a_warp_without_an_entrance(self):
         self.assertEqual(ks.plan({"warp": {"scene": "KokiriForest_Child"}}), [("warp", "KokiriForest_Child", None)])
@@ -127,10 +150,10 @@ class Points(unittest.TestCase):
     class C:
         """A game whose flag `Stuck` ignores writes: the restore must say it is not exact."""
         def __init__(self):
-            self.flags, self.log = {"A": 1, "Stuck": 5}, []
+            self.flags, self.log, self.pos, self.moves = {"A": 1, "Stuck": 5}, [], [1.0, 2.0, 3.0], True
 
         def dump(self, tag):
-            return {"flags": dict(self.flags), "state": {"scene": "S", "pos": [1.0, 2.0, 3.0], "life": 12}, "frame": 1}
+            return {"flags": dict(self.flags), "state": {"scene": "S", "pos": list(self.pos), "life": 12}, "frame": 1}
 
         def state(self):
             return {"scene": "S"}
@@ -145,6 +168,8 @@ class Points(unittest.TestCase):
 
         def warp(self, *a):
             self.log.append(("warp",) + a)
+            if self.moves:   # a load puts Link at the scene's start
+                self.pos = [9.0, 9.0, 9.0]
 
     def test_exact_only_when_the_second_dump_equals_the_saved_one(self):
         import tempfile
@@ -156,7 +181,35 @@ class Points(unittest.TestCase):
             self.assertEqual((r["restored"], r["exact"], r["left"]), (2, False, ["Stuck"]))
             self.assertIn(("act", "place 1.0 2.0 3.0"), c.log)
             self.assertIn(("flag", "PlayerStatus.Life", 12), c.log)
-            self.assertFalse([x for x in c.log if x[0] == "warp"])   # already in the scene
+            kinds = [x[0] for x in c.log]
+            self.assertLess(max(i for i, k in enumerate(kinds) if k == "flag" and c.log[i][1] != "PlayerStatus.Life"),
+                            kinds.index("warp"))   # the flags go in first, then the scene loads again
+            self.assertTrue(r["reloaded"])
+
+    def test_a_same_scene_load_that_cannot_be_told_is_not_exact(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            c.moves = False
+            ks.save_point(c, d, "p1", "t")
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual((r["reloaded"], r["exact"], r["left"]), (False, False, ["Stuck"][:0]))
+            self.assertTrue([x for x in c.log if x[0] == "warp"])
+
+    def test_the_second_game_leaves_the_delta_shared_keys_out(self):
+        import tempfile
+        c = Fake()
+        ks.apply(c, {"small_keys": {"ForestTemple": 2}, "rupees": 5}, shared=False)
+        self.assertEqual([x for x in c.log if "SmallKeyNum" in str(x)], [])
+        self.assertTrue([x for x in c.log if "CurrentRupee" in str(x)])
+        with tempfile.TemporaryDirectory() as d:
+            p = self.C()
+            p.flags["DungeonInfo.ForestTemple.SmallKeyNum"] = 2
+            ks.save_point(p, d, "p1", "t")
+            p.flags["DungeonInfo.ForestTemple.SmallKeyNum"] = 0
+            r = ks.load_point(p, d, "p1", "t", shared=False)
+            self.assertEqual(r["restored"], 0)
+            self.assertEqual(r["left"], [])
 
     def test_a_missing_tag_is_refused(self):
         import tempfile

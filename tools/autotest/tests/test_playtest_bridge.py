@@ -156,6 +156,7 @@ class FakeGame:
             self.via = "event" if self.event else "map_event" if (m.get("entrance") or m["scene"] in self.no_teleport) else "teleport"
             self.run(self.warp_frames)
             self.scene = m["scene"]
+            self.pos = [3.0, 0.0, -3.0]   # a load puts Link at the scene's start
             self.paused = True
             return {"ok": True, "arrived": True, "state": self.state()}
         if cmd == "flag":
@@ -521,8 +522,8 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual(len(self.games["p1"].log), before)
 
     def test_setup_runs_a_spec_in_one_call_and_says_which_step_failed(self):
-        r = self.call("p1", "setup", hearts=5, rupees=50, small_keys={"ForestTemple": 2})
-        self.assertEqual(len(r["steps"]), 3)
+        r = self.call("p1", "setup", hearts=5, max_hearts=5, rupees=50, small_keys={"ForestTemple": 2})
+        self.assertEqual(len(r["steps"]), 4)   # rupees, keys, max life, life
         f = self.games["p1"].flags
         self.assertEqual((f["PlayerStatus.Life"], f["PlayerStatus.CurrentRupee"], f["DungeonInfo.ForestTemple.SmallKeyNum"]),
                          (20, 50, 2))
@@ -921,6 +922,13 @@ class PairServer(unittest.TestCase):
         r = self.pair.answer("setup", {"rupees": 7})
         self.assertEqual(set(r["games"]), {"p1", "p2"})
         self.assertEqual([g.flags["PlayerStatus.CurrentRupee"] for g in self.games.values()], [7, 7])
+
+    def test_both_games_get_a_delta_shared_count_written_once(self):
+        self.pair.answer("setup", {"small_keys": {"ForestTemple": 2}, "rupees": 7})
+        key = "DungeonInfo.ForestTemple.SmallKeyNum"
+        self.assertEqual(self.games["p1"].flags[key], 2)
+        self.assertNotIn(key, self.games["p2"].flags)   # the share brings it, written here it would be added again
+        self.assertEqual(self.games["p2"].flags["PlayerStatus.CurrentRupee"], 7)   # per player: written on each
 
     def test_every_tool_takes_a_player_and_only_the_both_tools_can_go_without(self):
         by = {t["name"]: t for t in self.pair.tools}

@@ -366,9 +366,10 @@ PLAYER_TOOLS = [
      "and Link's state (scene, place, life), in the run's checkpoint log. Retry a boss with load_point. Only what `dump` "
      "lists is saved (shared dungeon, story and item flags).",
      "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
-    {"name": "load_point", "description": "Restore the last test point saved under a tag by THIS game: goes to its scene, writes "
-     "every flag that differs, places Link and sets his life, then dumps again and replies `exact` (true only when the "
-     "dump equals the saved one) and `left` (the flags still different). A scene outside Longshot's teleport list "
+    {"name": "load_point", "description": "Restore the last test point saved under a tag by THIS game: writes every "
+     "flag that differs FIRST, then loads the scene again (also when Link is already in it: a room reads its boss state "
+     "when it loads), places Link and sets his life, then dumps again and replies `reloaded` (false when no load could be "
+     "told), `exact` (true only when reloaded and the dump equals the saved one) and `left` (the flags still different). A scene outside Longshot's teleport list "
      "needs the map change event on (see warp). Needs the verb gate.",
      "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
@@ -571,13 +572,15 @@ class Game:
         if name == "give":
             return c.give(args["item"])
         if name == "preset":
-            return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]))}
+            return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]),
+                                                                      shared=args.get("_shared", True))}
         if name == "save_point":
             return kit_setup.save_point(c, self.log_dir, self.player, args["tag"])
         if name == "load_point":
-            return kit_setup.load_point(c, self.log_dir, self.player, args["tag"])
+            return kit_setup.load_point(c, self.log_dir, self.player, args["tag"], shared=args.get("_shared", True))
         if name == "setup":
-            return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k != "player"})}
+            return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k not in ("player", "_shared")},
+                                             shared=args.get("_shared", True))}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):
             return ph.place_facing(c, act_line(name, args), face_point(args))
         line = act_line(name, args)
@@ -676,6 +679,10 @@ class Pair:
         rest = {k: v for k, v in args.items() if k != "player"}
         player = args.get("player")
         if name in ALWAYS_BOTH or (player is None and name in BOTH_TOOLS):
+            if name in ("setup", "preset", "load_point"):
+                # Small keys are shared by count deltas: written in both games they would be added twice. The first
+                # game writes them; the second leaves them out and gets them by the share.
+                return {"games": {p: g.call(name, dict(rest, _shared=(i == 0))) for i, (p, g) in enumerate(self.games.items())}}
             return {"games": {p: g.call(name, dict(rest)) for p, g in self.games.items()}}
         if player not in self.games:
             raise ValueError("player is one of %s" % ", ".join(self.games))
