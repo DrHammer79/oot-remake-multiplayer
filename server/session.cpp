@@ -3140,10 +3140,17 @@ ObjectOwner Session::owner_message(const ObjectId& oid, const Object& o) const {
   return ObjectOwner{oid, owner, o.epoch, group_of(o)};
 }
 
+// A group's fight is kept on its root alone (mark_fight and in_fight go to the root), so a member cut loose from it
+// (its root forgotten, the member a root of its own, or moved to another root) keeps that fight lock as its own.
+// Row 222 follow-up (twinrova-01112): Twinrova's manager and sisters leave every game at her merge; Twinrova, on her
+// own again with no lock of her own, read "out of a fight" mid-fight and the chase rule (issue 101) moved her.
 void Session::unlink(const ObjectId& oid, Object& o) {
   if (!o.root) return;
   auto r = objects_.find(*o.root);
-  if (r != objects_.end()) r->second.members.erase(oid);
+  if (r != objects_.end()) {
+    r->second.members.erase(oid);
+    o.fight_until = std::max(o.fight_until, r->second.fight_until);
+  }
   o.root.reset();
 }
 
@@ -3151,11 +3158,13 @@ void Session::forget(Objects::iterator it) {
   const ObjectId oid = it->first;
   unlink(oid, it->second);
   const std::set<ObjectId> members = std::move(it->second.members);
+  const std::uint64_t group_fight_until = it->second.fight_until;
   objects_.erase(it);
-  // What followed it is on its own again.
+  // What followed it is on its own again, still in the group's fight.
   for (const ObjectId& m : members) {
     auto mi = objects_.find(m);
     if (mi == objects_.end()) continue;
+    mi->second.fight_until = std::max(mi->second.fight_until, group_fight_until);
     mi->second.root.reset();
     announce_owner(m, mi->second);
   }
