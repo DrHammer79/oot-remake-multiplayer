@@ -641,6 +641,36 @@ class MergeRowsTest(unittest.TestCase):
         self.assertIn("CoopPuppet_Adult", ids)
         self.assertNotIn("CoopPuppet_Child", ids)  # (from the kept copy, not the merged one)
 
+    def test_the_size_a_merge_needs_never_counts_what_an_earlier_merge_raised(self):
+        # The seed's size table is raised to the merged actor table's size (fit_in_place) and kept as it shipped. A
+        # second merge (the pack made again) sized itself from the raised entry: need = E + d + d' for E + d'.
+        own = self.seed_with_own_tables()
+        own_sizes = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        codec = mt.Codec(self.romfs)
+
+        def want():
+            """The size the merge needs, from the files as they shipped: the pack's table and the seed's kept ones."""
+            new = len(codec.unpack(read(self.path(SEED, "romfs", "RSDB", AI))))
+            pack = len(codec.unpack(read(self.path(PACK, "romfs", "RSDB", AI))))
+            kept = len(codec.unpack(read(self.path(SEED, mt.ROWS_KEEP, AI))))
+            return max(5000 + max(0, new - pack), 4000 + max(0, new - kept))
+
+        fit1 = self.run_all()[1]
+        self.assertEqual(fit1[AI_KEY], want())
+        self.assertEqual(self.sizes(SEED).get(AI_KEY), fit1[AI_KEY])
+        written = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        self.run_all()
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), written)   # a second start: same
+        self.put_rows(PACK, self.pack_rows() + [{"__RowId": "CoopPuppet_Adult", "Heap": 7}])   # (a longer pack)
+        fit2 = self.run_all()[1]
+        self.assertEqual(fit2[AI_KEY], want())
+        self.assertEqual(self.sizes(SEED).get(AI_KEY), want())
+        self.assertEqual(read(self.path(SEED, mt.KEEP_DIR, NAME)), own_sizes)   # (the seed's own, as it shipped)
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), own_sizes)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+        self.assertEqual(read(self.path(SEED, "romfs", "RSDB", AI)), own)
+
     def test_a_new_seed_put_over_the_merged_one_is_kept_as_the_new_original(self):
         self.seed_with_own_tables()
         self.run_all()

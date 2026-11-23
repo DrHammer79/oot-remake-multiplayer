@@ -216,7 +216,9 @@ def write_mark(root, win_path, fname, rule="merged"):
 
 def stamp_text(root, out_path, inputs, out_line=None, fit=None):
     lines = [STAMP_HEAD, "out " + (out_line or file_line(root, out_path))]
-    lines += sorted("in " + file_line(root, p) for p in inputs)
+    # (an input is another mod's table: named by the bytes it shipped with, as original_table reads them)
+    lines += sorted("in " + in_line(root, p, original_table(root, os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(p)))), os.path.basename(p))) for p in inputs)
     lines += [f"fit {k} {n}" for k, n in sorted((fit or {}).items())]
     return "\n".join(lines) + "\n"
 
@@ -475,14 +477,14 @@ def changed_entries(theirs, games, mine, skip=()):
     return take, both
 
 
-def size_needed(codec, key, new_length, copies):
+def size_needed(root, codec, key, new_length, copies):
     """The size the game needs for a merged file: each mod's size table entry for the copy it sized (copies: [(mod
     path, that copy's length)]), plus what the merged one is longer than it. 0 when no table names the file."""
     need = 0
     for mod_path, length in copies:
         for t in tables_of(mod_path):
             try:
-                entry = load_table(codec, mod_path, t).get(key)
+                entry = load_table(codec, mod_path, t, root).get(key)
             except (OSError, ValueError, MergeError):
                 entry = None
             if entry is not None:
@@ -549,7 +551,7 @@ def merge_rows_one(root, codec, fname, win_name, win_path, pack_path, say, other
     # The size the game needs for it: as the pack sized its own copy (build.py: the game's entry plus the bytes it
     # grew, plus a margin), plus the bytes this one is longer than the pack's; and as the mod sized its own.
     key = size_key(fname)
-    need = size_needed(codec, key, len(new_data),
+    need = size_needed(root, codec, key, len(new_data),
                        ([(pack_path, len(pack_data))] if pack_path else []) + [(win_path, len(orig_data))] + lengths)
     rel = os.path.relpath(table_path, root).replace(os.sep, "/")
     stamp = rows_stamp(root, table_path, pack_table, f"{rel} {len(data)} {fnv64_bytes(data)}", more)
@@ -981,7 +983,7 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
         new_data, data = win_data, orig_raw
     # The size the game needs for it: each table's entry for the copy it sized, plus what this one is longer.
     key = rel[:-3] if rel.endswith(".zs") else rel
-    need = size_needed(codec, key, len(new_data), lengths + [(win_path, len(win_data))])
+    need = size_needed(root, codec, key, len(new_data), lengths + [(win_path, len(win_data))])
     rel_out = os.path.relpath(path, root).replace(os.sep, "/")
     stamp = f"{MEMBERS_HEAD}\nout {rel_out} {len(data)} {fnv64_bytes(data)}\n{ins}"
     if need:
@@ -1020,18 +1022,35 @@ def apply_fit(table, fit):
     return raised
 
 
-def fit_in_place(codec, win_name, win_path, fname, fit, say):
+def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
     """The size table the game reads, left as it is otherwise (one of our seeds, or the pack's alone), with the merged
-    RSDB tables' entries raised. Raises only, so a second start finds nothing to do."""
+    RSDB tables' entries raised. Raised from the table as the mod shipped it (original_table), which the first start
+    that raises anything keeps in `_coop-size-table` with a stamp as merge_one does (undo puts it back): a second
+    start finds nothing to do, and a table that needs less now is not left with an earlier start's raise."""
     path = os.path.join(win_path, *RESOURCE, fname)
-    with open(path, "rb") as f:
+    source = original_table(root, win_path, fname)
+    with open(source, "rb") as f:
         raw = f.read()
     table = codec.load(raw)
-    if apply_fit(table, fit):
-        write_atomic(path, codec.save(table, raw))
-        shown = "the puppet pack" if fold(win_name) == PACK else win_name
-        say(f"Size tables: the game reads {shown}'s; raised the entries of the merged actor tables "
-            f"({', '.join(sorted(fit))}).")
+    if not apply_fit(table, fit):
+        return
+    data = codec.save(table, raw)
+    with open(path, "rb") as f:
+        if f.read() == data:
+            return
+    keep = os.path.join(win_path, KEEP_DIR)
+    if source == path:   # (the mod's own table: a new seed or pack put there, or the first start with it)
+        os.makedirs(keep, exist_ok=True)
+        shutil.copyfile(path, os.path.join(keep, fname) + ".tmp")
+        os.replace(os.path.join(keep, fname) + ".tmp", os.path.join(keep, fname))
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    # (the stamp before the table, as merge_one)
+    write_atomic(os.path.join(keep, STAMP),
+                 stamp_text(root, path, [], f"{rel} {len(data)} {fnv64_bytes(data)}", fit).encode("utf-8"))
+    write_atomic(path, data)
+    shown = "the puppet pack" if fold(win_name) == PACK else win_name
+    say(f"Size tables: the game reads {shown}'s; raised the entries of the merged actor tables "
+        f"({', '.join(sorted(fit))}). Its own table is kept in {win_name}/{KEEP_DIR}.")
 
 
 def merge_mods(root, romfs, say=print, fit=None):
@@ -1053,7 +1072,7 @@ def merge_mods(root, romfs, say=print, fit=None):
             if not others:  # (the pack's table alone, or with our seeds only)
                 if fit:
                     try:
-                        fit_in_place(codec, win_name, win_path, fname, fit, say)
+                        fit_in_place(root, codec, win_name, win_path, fname, fit, say)
                     except (OSError, ValueError, MergeError) as e:
                         say(f"Size tables: the puppet pack's could not take the merged actor tables' sizes ({e}).")
                         failed += 1
@@ -1064,7 +1083,7 @@ def merge_mods(root, romfs, say=print, fit=None):
             if len(having) < 2 or is_ours(win_name, win_path):  # (one table, or our seed: left as it is but the fit)
                 if fit and not title_mod:
                     try:
-                        fit_in_place(codec, win_name, win_path, fname, fit, say)
+                        fit_in_place(root, codec, win_name, win_path, fname, fit, say)
                     except (OSError, ValueError, MergeError) as e:
                         say(f"Size tables: {win_name}'s could not take the merged actor tables' sizes ({e}): the "
                             "other players can't be shown with it on.")
@@ -1078,7 +1097,7 @@ def merge_mods(root, romfs, say=print, fit=None):
             merged_before = os.path.isfile(os.path.join(win_path, KEEP_DIR, STAMP))
             if pack_in and (title_mod or (len(others) == 1 and not merged_before)):
                 own = load_table(codec, win_path, fname)
-                missing = missing_pack_entries(own, load_table(codec, pack_in[0], fname))
+                missing = missing_pack_entries(own, load_table(codec, pack_in[0], fname, root))
                 if not fit_ok(own, fit):
                     missing += 1  # (the merged actor tables need larger entries: merged, never 'contains')
                 if missing == 0:
@@ -1200,8 +1219,26 @@ def guard_menus(root, romfs, say=print):
         return 1
 
 
-def load_table(codec, mod_path, fname):
-    with open(os.path.join(mod_path, *RESOURCE, fname), "rb") as f:
+def original_table(root, mod_path, fname):
+    """The size table file to READ for a mod's `fname`: the mod's own table, kept in `_coop-size-table` when this tool
+    has rewritten the table in the mod (the stamp's `out` line names the table there now: merge_one, fit_in_place),
+    else the table itself. The same rule as original_of. Read as written, the entries this tool raised before (a
+    merge's growth, the fit) count as the mod's own sizes, and each later merge of the same table adds its growth
+    on top of the earlier one."""
+    path = os.path.join(mod_path, *RESOURCE, fname)
+    keep = os.path.join(mod_path, KEEP_DIR)
+    kept = os.path.join(keep, fname)
+    stamp = read_text(os.path.join(keep, STAMP))
+    if (stamp is not None and os.path.isfile(kept) and os.path.isfile(path)
+            and stamp.split("\n")[1:2] == ["out " + file_line(root, path)]):
+        return kept
+    return path
+
+
+def load_table(codec, mod_path, fname, root=None):
+    """A mod's size table as it shipped (root given: original_table), else the file as it is (the table the game reads)."""
+    path = original_table(root, mod_path, fname) if root else os.path.join(mod_path, *RESOURCE, fname)
+    with open(path, "rb") as f:
         return codec.load(f.read())
 
 
@@ -1233,8 +1270,8 @@ def merge_one(root, codec, fname, win_name, win_path, others, say, fit=None):
         orig_raw = f.read()
     table = codec.load(orig_raw)
     loaded = []
-    for (n, _), p in zip(others, inputs):
-        with open(p, "rb") as f:
+    for (n, mod_path), p in zip(others, inputs):
+        with open(original_table(root, mod_path, fname), "rb") as f:   # (as it shipped: not what a start raised in it)
             loaded.append(codec.load(f.read()))
     added, raised = merge(table, loaded)
     raised += apply_fit(table, fit or {})
@@ -1492,7 +1529,7 @@ def merge_gamedata_one(root, codec, fname, win_name, win_path, others, game, say
     else:
         new_data, data = orig_data, orig_raw
     key = "GameData/" + fname[:-3]
-    need = size_needed(codec, key, len(new_data), [(p, len(d)) for _, p, d, _, _ in loaded])
+    need = size_needed(root, codec, key, len(new_data), [(p, len(d)) for _, p, d, _, _ in loaded])
     rel = os.path.relpath(path, root).replace(os.sep, "/")
     stamp = f"{GAMEDATA_HEAD}\nout {rel} {len(data)} {fnv64_bytes(data)}\n{ins}"
     if need:
