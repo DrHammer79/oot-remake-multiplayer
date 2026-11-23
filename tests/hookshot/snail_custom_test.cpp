@@ -86,9 +86,20 @@ TEST_CASE("snail customize: A opens co-op's any-colour mixer in his six places, 
     CHECK_FALSE(d.Editing());
 }
 
-TEST_CASE("snail customize: a character with no colour options shows that, and its keys change nothing") {
+TEST_CASE("snail customize: a character's screen offers its Eye Colour (player report 2026-11-22)") {
     Driver d;
     d.Open(Look{}, 9);
+    const auto t = d.Shown();
+    CHECK(t.labels[0] == "Eye Colour");
+    CHECK(t.labels[1].empty());   // (one option: the other places show nothing)
+    CHECK(t.title.find("Y:") == std::string::npos);   // (one page)
+    d.Pad(kZR);
+    REQUIRE(d.TakeChange());
+}
+
+TEST_CASE("snail customize: a character with no colour options shows that, and its keys change nothing") {
+    Driver d;
+    d.Open(Look{}, 9, false);   // (its model has no iris)
     const auto t = d.Shown();
     CHECK(t.labels[0] == CoopLookMenu::kNoColourOptions);
     CHECK(t.title.find("Y:") == std::string::npos);
