@@ -284,25 +284,26 @@ std::vector<std::string> TakeGiveBacks() {
 
 namespace {
 std::mutex token_keys_mutex;
-std::vector<std::uint64_t> token_keys;
+std::vector<TokenKeyJob> token_keys;
 }  // namespace
 
-void QueueTokenKeys(std::uint64_t placement) {
+void QueueTokenKeys(std::uint64_t placement, int tries) {
     std::lock_guard lock(token_keys_mutex);
     if (token_keys.size() < 64) {
-        token_keys.push_back(placement);
+        token_keys.push_back(TokenKeyJob{placement, tries});
     }
 }
 
-std::vector<std::uint64_t> TakeTokenKeys() {
+std::vector<TokenKeyJob> TakeTokenKeys() {
     std::lock_guard lock(token_keys_mutex);
     return std::exchange(token_keys, {});
 }
 
-std::string WriteTokenKeys(coop::host::FlagStore& game, std::uint64_t placement) {
+std::string WriteTokenKeys(coop::host::FlagStore& game, TokenKeyJob job) {
     int written = 0;
     int already = 0;
-    for (const std::uint64_t key : {placement, placement + 2}) {
+    int failed = 0;
+    for (const std::uint64_t key : {job.placement, job.placement + 2}) {
         const coop::protocol::FlagKey k = coop::protocol::FlagKey::key64_flag(key);
         if (const auto now = game.read(k); now && now->value != 0) {
             ++already;
@@ -310,11 +311,34 @@ std::string WriteTokenKeys(coop::host::FlagStore& game, std::uint64_t placement)
         }
         if (game.write(coop::protocol::FlagEntry(k, coop::protocol::FlagKind::boolean, 1))) {
             ++written;
+        } else {
+            ++failed;
         }
     }
-    char line[128];
-    std::snprintf(line, sizeof line, "world: %016llx token we made was taken here: %d of its 2 keys written (%d were set)",
-                  static_cast<unsigned long long>(placement), written, already);
+    const int tries = job.tries + 1;
+    char line[192];
+    if (failed > 0 && tries < kTokenKeyTries) {
+        QueueTokenKeys(job.placement, tries);
+        if (job.tries > 0) {
+            return {};  // still refused: no line each frame
+        }
+        std::snprintf(line, sizeof line,
+                      "world: %016llx token we made was taken here: %d of its 2 keys written (%d were set), "
+                      "%d refused: trying again",
+                      static_cast<unsigned long long>(job.placement), written, already, failed);
+        return line;
+    }
+    if (failed > 0) {
+        std::snprintf(line, sizeof line,
+                      "world: %016llx token we made was taken here: %d of its 2 keys still refused after %d tries: "
+                      "given up (the Skulltula can come back after a reload)",
+                      static_cast<unsigned long long>(job.placement), failed, tries);
+        return line;
+    }
+    std::snprintf(line, sizeof line,
+                  "world: %016llx token we made was taken here: %d of its 2 keys written (%d were set)%s",
+                  static_cast<unsigned long long>(job.placement), written, already,
+                  job.tries > 0 ? ", after a retry" : "");
     return line;
 }
 

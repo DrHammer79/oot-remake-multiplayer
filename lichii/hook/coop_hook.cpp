@@ -530,6 +530,7 @@ public:
         config.hello.nickname = settings_.name;
         config.player_key = settings_.player_key;
         config.join_password = settings_.password;
+        CoopGoldMode::OnConnection();  // row 63: an earlier session's mode ends here; Shared until told
         client_ = std::make_unique<coop::net::Client>(std::move(config));
         if (!client_->start()) {
             LOG_ERROR(Core, "coop: ENet did not start; co-op is off");
@@ -894,8 +895,11 @@ public:
                 // Row 63: but a token the world sync made here (another game's kill, ours made none) has no
                 // placement for the game's pickup to set: its two keys are written here, within the count
                 // guard's hold of the count's gain, and the flag sync shares the take.
-                for (const std::uint64_t placement : CoopWorld::TakeTokenKeys()) {
-                    LOG_INFO(Core, "coop: {}", CoopWorld::WriteTokenKeys(*game_store, placement));
+                // A write the game refuses is tried again on the next frames (kTokenKeyTries).
+                for (const CoopWorld::TokenKeyJob& job : CoopWorld::TakeTokenKeys()) {
+                    if (const std::string line = CoopWorld::WriteTokenKeys(*game_store, job); !line.empty()) {
+                        LOG_INFO(Core, "coop: {}", line);
+                    }
                 }
             }
             if (sharing_) {
@@ -931,7 +935,7 @@ public:
                 }
             }
         }
-        if (session_ && !gold_local_ && CoopGoldMode::NotShared()) {
+        if (session_ && !gold_local_ && CoopGoldMode::KeepLocalNow()) {
             // Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): every Skulltula's two keys, the token
             // count and its IsGet stay in this game for the rest of the session.
             gold_local_ = true;

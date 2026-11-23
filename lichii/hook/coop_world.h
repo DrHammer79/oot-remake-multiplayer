@@ -167,10 +167,20 @@ std::vector<std::uint64_t> TakeTakenPlacements();
 std::string GiveBack(coop::host::FlagStore& game, std::string_view count);
 // Row 63: the placements of tokens we made and our player took (WorldSync::Out::token_keys), from the
 // objects' thread to the frame that writes the game's flags. Thread safe.
-void QueueTokenKeys(std::uint64_t placement);
-std::vector<std::uint64_t> TakeTokenKeys();
-// Writes 1 to the placement's key and to key + 2 where not 1 yet (the frame that writes flags). The log line.
-std::string WriteTokenKeys(coop::host::FlagStore& game, std::uint64_t placement);
+// `tries`: the writes done before (a retry).
+struct TokenKeyJob {
+    std::uint64_t placement = 0;
+    int tries = 0;
+};
+void QueueTokenKeys(std::uint64_t placement, int tries = 0);
+std::vector<TokenKeyJob> TakeTokenKeys();
+// A write the game refused (its queue busy, issue 175) is tried again on the next frames, up to this many
+// writes in all (about 5 s): without the key the Skulltula would come back after a reload (review of f36a8852).
+inline constexpr int kTokenKeyTries = 300;
+// Writes 1 to the placement's key and to key + 2 where not 1 yet (the frame that writes flags). A failed
+// write queues the job again (QueueTokenKeys, tries + 1) until kTokenKeyTries. The log line: empty for a
+// retry that failed again (no line each frame).
+std::string WriteTokenKeys(coop::host::FlagStore& game, TokenKeyJob job);
 
 // Research for signs (issue 90; docs/world.md, "Signs: the probe"). A sign's
 // cut is not in its life and its pack keeps no flag for it, and whether the

@@ -3367,3 +3367,89 @@ TEST_CASE("world: Not shared: nothing is owed, a token taken here sends no break
     CHECK(c.Removes().empty());
     CoopGoldMode::ResetForTest();
 }
+
+namespace {
+// Key64 flags; the first `refuse` writes fail (the game's queue busy, issue 175).
+class BusyKeyStore final : public coop::host::FlagStore {
+public:
+    std::map<std::uint64_t, std::uint32_t> keys;
+    int refuse = 0;
+    int writes = 0;
+    std::optional<proto::FlagEntry> read(coop::host::FlagKey key) override {
+        const auto it = keys.find(key.key);
+        if (it == keys.end()) {
+            return std::nullopt;
+        }
+        return proto::FlagEntry(key, proto::FlagKind::boolean, it->second);
+    }
+    bool write(const proto::FlagEntry& e) override {
+        ++writes;
+        if (refuse > 0) {
+            --refuse;
+            return false;
+        }
+        keys[e.key.key] = e.value;
+        return true;
+    }
+};
+}  // namespace
+
+TEST_CASE("world: a made token's key write the game refuses is tried again (review of f36a8852)") {
+    CoopWorld::TakeTokenKeys();  // nothing left from another test
+    constexpr std::uint64_t kPlacement = 0x032f42f523be6425ull;
+
+    SUBCASE("written at once: one line, nothing queued") {
+        BusyKeyStore game;
+        const std::string line = CoopWorld::WriteTokenKeys(game, {kPlacement, 0});
+        CHECK(line.find("2 of its 2 keys written (0 were set)") != std::string::npos);
+        CHECK(game.keys[kPlacement] == 1);
+        CHECK(game.keys[kPlacement + 2] == 1);
+        CHECK(CoopWorld::TakeTokenKeys().empty());
+    }
+    SUBCASE("refused three times: queued again until both keys are set") {
+        BusyKeyStore game;
+        game.refuse = 3;
+        CoopWorld::QueueTokenKeys(kPlacement);
+        std::vector<std::string> lines;
+        int frames = 0;
+        for (auto jobs = CoopWorld::TakeTokenKeys(); !jobs.empty(); jobs = CoopWorld::TakeTokenKeys()) {
+            ++frames;
+            REQUIRE(frames < 10);
+            REQUIRE(jobs.size() == 1);
+            CHECK(jobs[0].placement == kPlacement);
+            if (std::string line = CoopWorld::WriteTokenKeys(game, jobs[0]); !line.empty()) {
+                lines.push_back(std::move(line));
+            }
+        }
+        CHECK(game.keys[kPlacement] == 1);
+        CHECK(game.keys[kPlacement + 2] == 1);
+        CHECK(frames == 3);  // frame 1: both refused; frame 2: one refused, one written; frame 3: the last
+        REQUIRE(lines.size() == 2);  // the first refusal and the end, no line for the silent retry
+        CHECK(lines[0].find("refused: trying again") != std::string::npos);
+        CHECK(lines[1].find("after a retry") != std::string::npos);
+    }
+    SUBCASE("refused for good: given up after kTokenKeyTries, with a line") {
+        BusyKeyStore game;
+        game.refuse = 1 << 20;
+        CoopWorld::QueueTokenKeys(kPlacement);
+        int frames = 0;
+        std::string last;
+        for (auto jobs = CoopWorld::TakeTokenKeys(); !jobs.empty(); jobs = CoopWorld::TakeTokenKeys()) {
+            ++frames;
+            REQUIRE(frames <= CoopWorld::kTokenKeyTries);
+            if (std::string line = CoopWorld::WriteTokenKeys(game, jobs[0]); !line.empty()) {
+                last = std::move(line);
+            }
+        }
+        CHECK(frames == CoopWorld::kTokenKeyTries);
+        CHECK(last.find("given up") != std::string::npos);
+        CHECK(game.keys.empty());
+    }
+    SUBCASE("a key already set is not written again") {
+        BusyKeyStore game;
+        game.keys[kPlacement] = 1;
+        const std::string line = CoopWorld::WriteTokenKeys(game, {kPlacement, 0});
+        CHECK(line.find("1 of its 2 keys written (1 were set)") != std::string::npos);
+        CHECK(game.writes == 1);
+    }
+}

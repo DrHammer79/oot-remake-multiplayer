@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_gold_mode.h"
 
+#include <algorithm>
 #include <atomic>
+#include <set>
 
 namespace CoopGoldMode {
 
@@ -59,8 +61,172 @@ void OnHostSettings(const std::vector<proto::ModSetting>& settings) {
     }
 }
 
+bool Told() {
+    return g_told.load();
+}
+
 Mode InForce() {
     return g_in_force.load(std::memory_order_relaxed);
+}
+
+namespace {
+
+// The save's layout (tools/autotest/save_flags.py; all little-endian): magic, the pool's offset at 8, from 0x20 a
+// table of 8-byte records (a 0 first word opens type 0, 1, ... in order; the end record 0x20 is followed by a pair
+// whose second word is the 64-bit key set's offset, 0 for none). The set: ascending u64 keys, a u64 0, the file's end.
+struct SaveView {
+    std::size_t end_pair = 0;  // the end record's pair
+    std::size_t set_at = 0;    // the key set (0: none)
+    std::vector<std::uint64_t> keys;
+    std::optional<std::size_t> count_at;  // the Int's value word
+    std::optional<std::size_t> get_at;    // the Bool's value word
+};
+
+std::uint32_t Word(const std::vector<std::uint8_t>& d, std::size_t at) {
+    return static_cast<std::uint32_t>(d[at]) | static_cast<std::uint32_t>(d[at + 1]) << 8 |
+           static_cast<std::uint32_t>(d[at + 2]) << 16 | static_cast<std::uint32_t>(d[at + 3]) << 24;
+}
+void PutWord(std::vector<std::uint8_t>& d, std::size_t at, std::uint32_t v) {
+    for (int i = 0; i < 4; ++i) d[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(v >> (8 * i));
+}
+std::uint64_t Quad(const std::vector<std::uint8_t>& d, std::size_t at) {
+    return static_cast<std::uint64_t>(Word(d, at)) | static_cast<std::uint64_t>(Word(d, at + 4)) << 32;
+}
+
+std::optional<SaveView> ReadSave(const std::vector<std::uint8_t>& d, std::uint32_t count_hash,
+                                 std::uint32_t get_hash, std::string& why) {
+    constexpr std::uint32_t kMagic = 0x01020304;
+    constexpr std::size_t kTable = 0x20;
+    constexpr std::uint32_t kBool = 0;
+    constexpr std::uint32_t kInt = 2;
+    constexpr std::uint32_t kEnd = 0x20;
+    if (d.size() < kTable || Word(d, 0) != kMagic) {
+        why = "not a saved game";
+        return std::nullopt;
+    }
+    const std::size_t pool = Word(d, 8);
+    if (pool < kTable || pool > d.size()) {
+        why = "bad pool offset";
+        return std::nullopt;
+    }
+    SaveView v;
+    std::optional<std::uint32_t> kind;
+    for (std::size_t at = kTable; at + 8 <= pool; at += 8) {
+        const std::uint32_t first = Word(d, at);
+        const std::uint32_t second = Word(d, at + 4);
+        if (first == 0) {
+            if (second != (kind ? *kind + 1 : 0)) {
+                why = "types out of order";
+                return std::nullopt;
+            }
+            if (second == kEnd) {
+                if (at + 16 > pool) {
+                    why = "the end record's pair runs into the pool";
+                    return std::nullopt;
+                }
+                v.end_pair = at + 8;
+                break;
+            }
+            kind = second;
+        } else if (!kind) {
+            why = "an entry before the first type";
+            return std::nullopt;
+        } else if (*kind == kInt && first == count_hash) {
+            v.count_at = at + 4;
+        } else if (*kind == kBool && first == get_hash) {
+            v.get_at = at + 4;
+        }
+    }
+    if (v.end_pair == 0) {
+        why = "no end record";
+        return std::nullopt;
+    }
+    v.set_at = Word(d, v.end_pair + 4);
+    if (v.set_at == 0) return v;
+    if (v.set_at < pool || v.set_at + 8 > d.size()) {
+        why = "the key set is outside the file";
+        return std::nullopt;
+    }
+    for (std::size_t at = v.set_at;; at += 8) {
+        if (at + 8 > d.size()) {
+            why = "the key set has no closing zero";
+            return std::nullopt;
+        }
+        const std::uint64_t k = Quad(d, at);
+        if (k == 0) {
+            if (at + 8 != d.size()) {
+                why = "bytes after the key set";
+                return std::nullopt;
+            }
+            break;
+        }
+        if (!v.keys.empty() && k <= v.keys.back()) {
+            why = "the key set is not ascending";
+            return std::nullopt;
+        }
+        v.keys.push_back(k);
+    }
+    return v;
+}
+
+}  // namespace
+
+GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uint8_t>* own,
+                     std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
+                     std::uint32_t get_hash) {
+    GoldKept out;
+    std::set<std::uint64_t> gold;
+    for (const std::uint64_t k : skulltula_keys) {
+        gold.insert(k);
+        gold.insert(k + 2);
+    }
+    const auto h = ReadSave(host, count_hash, get_hash, out.why);
+    if (!h) {
+        out.why = "the host's save: " + out.why;
+        return out;
+    }
+    std::optional<SaveView> o;
+    if (own != nullptr) {
+        std::string why;
+        o = ReadSave(*own, count_hash, get_hash, why);  // ours unreadable: a race from nothing
+    }
+    std::vector<std::uint64_t> keys;
+    for (const std::uint64_t k : h->keys) {
+        if (gold.count(k) != 0) {
+            ++out.host_keys;
+        } else {
+            keys.push_back(k);
+        }
+    }
+    if (o) {
+        for (const std::uint64_t k : o->keys) {
+            if (gold.count(k) != 0) keys.push_back(k);
+        }
+    }
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    out.own_keys = static_cast<int>(
+        std::count_if(keys.begin(), keys.end(), [&](std::uint64_t k) { return gold.count(k) != 0; }));
+    if (h->count_at) out.host_count = static_cast<std::int32_t>(Word(host, *h->count_at));
+    if (o && o->count_at) out.own_count = static_cast<std::int32_t>(Word(*own, *o->count_at));
+    const std::uint32_t own_get = (o && o->get_at) ? Word(*own, *o->get_at) : 0;
+
+    if (h->count_at) PutWord(host, *h->count_at, static_cast<std::uint32_t>(out.own_count));
+    if (h->get_at) PutWord(host, *h->get_at, own_get);
+    if (h->set_at == 0) {
+        // No key set to rewrite: the host's save has no gold keys either. Ours are not added (a new set's place is
+        // not known), so the Skulltulas we took are alive again in this save.
+        out.keys_left = out.own_keys > 0;
+        out.own_keys = 0;
+    } else {
+        host.resize(h->set_at);
+        for (const std::uint64_t k : keys) {
+            for (int i = 0; i < 8; ++i) host.push_back(static_cast<std::uint8_t>(k >> (8 * i)));
+        }
+        host.insert(host.end(), 8, 0);
+    }
+    out.done = true;
+    return out;
 }
 
 void ResetForTest() {
