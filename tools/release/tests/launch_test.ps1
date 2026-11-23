@@ -784,6 +784,18 @@ try {
     Check ((Get-KitHookshotNeed $hk) -eq '') 'hookshot need: the list moved a mod without code patches, a repeated row is not read -> nothing'
     Write-File (Join-Path $g 'mods\coop-mods.list') "coop-mods 1`noff OoT Character Select`n"
     Check ((Get-KitHookshotNeed $hk) -eq 'mods') 'hookshot need: switched off on the Mods tab -> mods (built without it)'
+    # Original game's "default off" (report 266): a code mod the list does not name is off, as the game reads it: the
+    # same stamp as its "off" row, so a code mod put in after the list was written is built out, not in.
+    $offRow = Get-KitCodeModsListHash (Join-Path $g 'mods\coop-mods.list') ([System.Collections.Generic.HashSet[string]]@('oot character select'))
+    Write-File (Join-Path $g 'mods\coop-mods.list') "coop-mods 1`r`ndefault off`r`noff Romfs Only`r`n"
+    $unnamed = Get-KitCodeModsListHash (Join-Path $g 'mods\coop-mods.list') ([System.Collections.Generic.HashSet[string]]@('oot character select'))
+    Check ($unnamed -ne 'none' -and $unnamed -ceq $offRow) "code mods list hash: unnamed in a default off list = its off row ($unnamed / $offRow)"
+    Check (Test-KitModListOff (Join-Path $g 'mods') 'OoT Character Select') 'mod list off: a mod a default off list does not name is off'
+    Write-File (Join-Path $g 'mods\coop-mods.list') "coop-mods 1`ndefault off`non OoT Character Select`n"
+    Check (-not (Test-KitModListOff (Join-Path $g 'mods') 'OoT Character Select')) 'mod list off: its own "on" row wins over default off'
+    Write-File (Join-Path $g 'mods\coop-mods.list') "coop-mods 1`ndefault  off`n"
+    Check (-not (Test-KitModListOff (Join-Path $g 'mods') 'OoT Character Select')) 'mod list off: only the exact "default off" line counts'
+    Write-File (Join-Path $g 'mods\coop-mods.list') "coop-mods 1`noff OoT Character Select`n"
     # (the code mod and the Mods tab's list only: the puppet pack beside them stays, or the need is 'module')
     Remove-Item -LiteralPath (Join-Path $g 'mods\OoT Character Select') -Recurse -Force
     Remove-Item -LiteralPath (Join-Path $g 'mods\coop-mods.list') -Force
@@ -1080,6 +1092,11 @@ try {
         Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`noff OoT Character Select`noff Off CS`n"
         $cps = @(Get-KitCharacterSelectCopies $cm)
         Check (($cps | ForEach-Object { "$($_.Dir)=$($_.Off)" }) -join ',' -ceq 'contents/0400486024DEC000/OoT Character Select=False,My CS=False,Off CS=True,OoT Character Select=True') "Character Select copies: found as the game finds mods, the pack left out, Mods tab Off read [$(($cps | ForEach-Object { $_.Dir }) -join ',')]"
+        # (Original game's "default off", report 266: the copies the list does not name are off too; the file put back after)
+        Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`ndefault off`non Off CS`n"
+        $cps = @(Get-KitCharacterSelectCopies $cm)
+        Check (($cps | ForEach-Object { "$($_.Dir)=$($_.Off)" }) -join ',' -ceq 'contents/0400486024DEC000/OoT Character Select=True,My CS=True,Off CS=False,OoT Character Select=True') 'Character Select copies: a default off list leaves the copies it does not name off'
+        Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`noff OoT Character Select`noff Off CS`n"
         $r = Resolve-KitCharacterSelectCopies $ck $cm
         Check (-not $r.Changed -and (Test-Path -LiteralPath $csHand) -and (Test-Path -LiteralPath $csOther) -and ($r.Lines -join ' ') -match '2 copies are on') 'Character Select copies: the kit copy switched off -> the player chose; two of his on: said, nothing moved'
         Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`non OoT Character Select`noff Off CS`n"
@@ -1505,6 +1522,31 @@ exit 0
         Check (@(Get-KitHookshotLogFiles '').Count -eq 0) 'hookshot log files: no folder, none'
     } finally {
         Remove-Item -LiteralPath $lf -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    # The start window's lines (player report 266): start.ps1 begins a fresh start-log.txt (the one before kept as .1),
+    # play.ps1 / update.ps1 append to the file OOT_COOP_START_LOG names; one writer at a time (Suspend/Resume).
+    $sl = Join-Path ([System.IO.Path]::GetTempPath()) "coop-startlog-$PID"
+    $envBefore = $env:OOT_COOP_START_LOG
+    try {
+        $env:OOT_COOP_START_LOG = ''
+        Check (-not (Start-KitStartLog $sl)) 'start log: no start named one -> none (play.ps1 from another .bat)'
+        Write-File (Join-Path $sl 'hookshot\logs\start-log.txt') "LAST START`n"
+        Check (Start-KitStartLog $sl -Fresh) 'start log: start.ps1 begins one'
+        Write-Host 'START-LOG LINE ONE'
+        Check ((Get-KitStartLogPath $sl) -eq $env:OOT_COOP_START_LOG) 'start log: named for the scripts it starts'
+        Check (Suspend-KitStartLog) 'start log: stopped for a child (it was on)'
+        Check (-not (Suspend-KitStartLog)) 'start log: a second stop: it was off'
+        Resume-KitStartLog $true
+        Write-Host 'START-LOG LINE TWO'
+        [void](Suspend-KitStartLog)
+        $text = [System.IO.File]::ReadAllText((Get-KitStartLogPath $sl))
+        Check ($text -match 'START-LOG LINE ONE' -and $text -match 'START-LOG LINE TWO' -and $text -notmatch 'LAST START') "start log: this start's lines, appended after a child [$($text.Length) chars]"
+        Check ([System.IO.File]::ReadAllText((Join-Path $sl 'hookshot\logs\start-log.1.txt')) -eq "LAST START`n") 'start log: the start before kept as start-log.1.txt'
+        Check ([bool](Select-String -LiteralPath (Join-Path $kitSrc 'scripts\collect-logs.ps1') -SimpleMatch "hookshot\logs\`$startLog")) 'collect-logs: zips the start logs'
+    } finally {
+        [void](Suspend-KitStartLog)
+        $env:OOT_COOP_START_LOG = $envBefore
+        Remove-Item -LiteralPath $sl -Recurse -Force -ErrorAction SilentlyContinue
     }
     # collect-logs finds the game more ways than the start (player report: no longshot_log.txt in the zip)
     $lk = Join-Path ([System.IO.Path]::GetTempPath()) "coop-logexes-$PID"

@@ -114,19 +114,26 @@ def find_mods(root):
     return out
 
 
-def read_list(root):
-    """The Mods tab's rows [(name, off)] from coop-mods.list, or [] (no list, or not version 1)."""
+DEFAULT_OFF = "default off"   # hos_coop_mods.h HOS_COOP_MODS_DEFAULT_OFF: a mod the list does not name is off too
+
+
+def read_list_default(root):
+    """The Mods tab's rows [(name, off)] from coop-mods.list and whether it has the "default off" line (Original game:
+    a mod the list does not name is off, hos_coop_mods_rank); ([], False) with no list, or not version 1."""
     try:
         with open(os.path.join(root, LIST_FILE), "rb") as f:
             text = f.read().decode("utf-8", "replace")
     except OSError:
-        return []
+        return [], False
     lines = text.split("\n")
     if lines[0].rstrip("\r") != "coop-mods 1":
-        return []
-    rows, seen = [], set()
+        return [], False
+    rows, seen, default_off = [], set(), False
     for line in lines[1:]:
         line = line.rstrip("\r")
+        if line == DEFAULT_OFF:
+            default_off = True
+            continue
         if line.startswith("on ") and len(line) > 3:
             name, off = line[3:], False
         elif line.startswith("off ") and len(line) > 4:
@@ -137,15 +144,22 @@ def read_list(root):
             continue
         seen.add(fold(name))
         rows.append((name, off))
-    return rows
+    return rows, default_off
+
+
+def read_list(root):
+    """The Mods tab's rows [(name, off)] from coop-mods.list, or [] (no list, or not version 1)."""
+    return read_list_default(root)[0]
 
 
 def load_order(root):
-    """The mods that are on, in the order Longshot indexes them (the last one's file wins)."""
-    rows = read_list(root)
+    """The mods that are on, in the order Longshot indexes them (the last one's file wins). A mod the list does not
+    name keeps Longshot's own place, or is off with the list's "default off" line."""
+    rows, default_off = read_list_default(root)
     rank = {fold(n): (-1 if off else len(rows) - i) for i, (n, off) in enumerate(rows)}
+    unnamed = -1 if default_off else 0
     mods = find_mods(root)
-    on = [(rank.get(fold(n), 0), fold(n), n) for n in mods if rank.get(fold(n), 0) >= 0]
+    on = [(rank.get(fold(n), unnamed), fold(n), n) for n in mods if rank.get(fold(n), unnamed) >= 0]
     return [(n, mods[n]) for _, _, n in sorted(on)]
 
 

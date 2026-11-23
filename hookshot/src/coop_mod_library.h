@@ -127,12 +127,16 @@ struct State {
     std::vector<std::string> order;  // mod names, the first wins a file two mods have
     std::vector<std::string> off;    // mod names turned off
     std::map<std::string, std::map<std::string, std::string>> settings;  // by mod id, then key
+    // the list's "default off" line (hos_coop_mods.h, Original game): a mod the list does not name is off, so a mod
+    // put into the folder later joins the order off, not on (player report 266)
+    bool default_off = false;
 
     bool IsOff(std::string_view name) const;
 };
 
 // The state for the mods found: names of mods that are gone dropped, mods the order does not name yet added under
-// the named ones in Hookshot's own order (so adding them changes nothing), internal mods never named.
+// the named ones in Hookshot's own order (so adding them changes nothing: on, or off with default_off), internal mods
+// never named.
 void Normalize(State& state, const std::vector<Mod>& mods);
 
 // coop-mods.list's text for the state (hos_coop_mods.h), and the state a list's text gives (order and off only).

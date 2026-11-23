@@ -27,6 +27,8 @@ $env:OOT_COOP_KIT_START = '1'
 . (Join-Path $PSScriptRoot 'relay-join.ps1')
 . (Join-Path $PSScriptRoot 'invite.ps1')
 $kit = Split-Path -Parent $PSScriptRoot
+# (Start Squadala's start log: this script's lines too, when start.ps1 began one, kit-paths.ps1 Start-KitStartLog)
+[void](Start-KitStartLog $kit)
 $emu = Join-Path $kit 'emulator'
 $exe = Join-Path $emu 'lichii.exe'
 $ini = Join-Path $emu 'user\config\coop.ini'
@@ -152,8 +154,10 @@ if (-not $NoUpdate -and (Test-Path $updater)) {
             # play.ps1 starts the game afterwards.
             $copy = Join-Path ([System.IO.Path]::GetTempPath()) ('oot-coop-update-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.ps1')
             Copy-Item -LiteralPath $updater -Destination $copy
+            $logWas = Suspend-KitStartLog   # (the update writes the start log itself meanwhile)
             & $ps -NoProfile -ExecutionPolicy Bypass -File $copy -Kit $kit -Launch
             $code = $LASTEXITCODE
+            Resume-KitStartLog $logWas
             Remove-Item -LiteralPath $copy -Force -ErrorAction SilentlyContinue
             if ($code -eq 3) {
                 $next = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'play.ps1'))
@@ -161,6 +165,7 @@ if (-not $NoUpdate -and (Test-Path $updater)) {
                     if ($pair[1]) { $next += $pair }
                 }
                 if ($Hookshot) { $next += '-Hookshot' }
+                [void](Suspend-KitStartLog)   # (the new play.ps1 goes on in the start log)
                 & $ps @next -NoUpdate
                 exit $LASTEXITCODE
             }

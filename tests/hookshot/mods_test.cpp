@@ -372,6 +372,56 @@ TEST_CASE("mods: hos_coop_mods_parse skips what it does not know and keeps a nam
     CHECK(list->count == HOS_COOP_MODS_MAX);
 }
 
+TEST_CASE("mods: a \"default off\" list leaves out every mod it does not name (Original game, report 266)") {
+    auto list = std::make_unique<HosCoopModsList>();
+    // Without the line: a mod the list does not name is on (rank 0), as before.
+    const std::string plain = "coop-mods 1\noff a\non b\n";
+    REQUIRE(hos_coop_mods_parse(plain.data(), plain.size(), list.get()));
+    CHECK(list->default_off == 0);
+    CHECK(hos_coop_mods_rank(list.get(), "new") == 0);
+    // With it (any line after the first, CRLF too): the unnamed one is off; named rows keep their place and switch.
+    const std::string text = "coop-mods 1\r\n# Original game\r\noff a\r\ndefault off\r\non b\r\n";
+    REQUIRE(hos_coop_mods_parse(text.data(), text.size(), list.get()));
+    CHECK(list->default_off == 1);
+    CHECK(list->count == 2);
+    CHECK(hos_coop_mods_rank(list.get(), "a") == -1);
+    CHECK(hos_coop_mods_rank(list.get(), "B") == 1);
+    CHECK(hos_coop_mods_rank(list.get(), "new") == -1);
+    CHECK(hos_coop_mods_rank(list.get(), "contents/0400486024DEC000/coop-puppet") == -1);
+    CHECK(ExeOrder(text, {"a", "b", "new", "z"}) == std::vector<std::string>{"b"});
+    // Only the exact line: a near miss is skipped as any unknown line; a reused list starts without it.
+    for (const char* near : {"default  off", "default off x", "Default off", "default on"}) {
+        const std::string t = std::string("coop-mods 1\n") + near + "\n";
+        REQUIRE(hos_coop_mods_parse(t.data(), t.size(), list.get()));
+        CHECK(list->default_off == 0);
+    }
+    REQUIRE(hos_coop_mods_parse(text.data(), text.size(), list.get()));
+    REQUIRE(hos_coop_mods_parse(plain.data(), plain.size(), list.get()));
+    CHECK(list->default_off == 0);
+
+    // The Mods tab reads, keeps and writes it: a mod put in later joins the order off, and the index leaves it out.
+    TempMods t("coop-mods-default-off-test");
+    for (const char* n : {"a", "b", "c"}) t.Romfs(n);
+    const auto mods = Scan(t.root);
+    State s;
+    REQUIRE(ReadListText("coop-mods 1\ndefault off\noff a\noff b\n", s));
+    CHECK(s.default_off);
+    Normalize(s, mods);
+    CHECK(s.IsOff("c"));
+    const std::string written = ListText(s, mods);
+    CHECK(written == "coop-mods 1\ndefault off\noff a\noff b\noff c\n");
+    CHECK(IndexOrder(mods, s).empty());
+    CHECK(ExeOrder(written, {"a", "b", "c", "d"}).empty());
+    State back;
+    REQUIRE(ReadListText(written, back));
+    CHECK(back.default_off);
+    REQUIRE(ReadListText("coop-mods 1\noff a\n", back));
+    CHECK_FALSE(back.default_off);
+    // Switched on in the tab: that row is on; the line stays for the mods still unnamed.
+    s.off = {"a", "b"};
+    CHECK(ListText(s, mods) == "coop-mods 1\ndefault off\noff a\noff b\non c\n");
+}
+
 TEST_CASE("mods: hos_coop_mods.h is the same file in the module and in patch 0011") {
     const std::string patch = Slurp(kRepo / "hookshot" / "patches" / "0011-coop-mods.patch");
     CHECK(NewFile(patch, "host/hos_coop_mods.h") == Slurp(kRepo / "hookshot" / "src" / "hos_coop_mods.h"));

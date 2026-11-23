@@ -368,6 +368,21 @@ class MergeTablesTest(unittest.TestCase):
         self.assertEqual(self.table("bbb-listed").by_crc, {1: 100, 2: 5, 3: 6, 4: 4})
         self.assertEqual([n for n, _ in mt.load_order(self.mods)][-1], "bbb-listed")
 
+    def test_a_default_off_list_leaves_out_every_mod_it_does_not_name(self):
+        # Original game (report 266, hos_coop_mods.h "default off"): a mod put in after the list was written is off,
+        # as the game leaves it out; the pack too when not named on.
+        self.put_table(PACK, {1: 100})
+        self.put_table("late-seed", {2: 5})
+        self.put_table("named-on", {3: 6})
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\r\ndefault off\r\non named-on\r\n")
+        self.assertEqual([n for n, _ in mt.load_order(self.mods)], ["named-on"])
+        self.assertEqual(mt.read_list_default(self.mods), ([("named-on", False)], True))
+        self.assertEqual(mt.read_list(self.mods), [("named-on", False)])
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\non named-on\n")   # without the line: the unnamed ones are on, as before
+        self.assertEqual(sorted(n for n, _ in mt.load_order(self.mods)), sorted([PACK, "late-seed", "named-on"]))
+
     def test_folders_with_a_leading_dash_or_underscore_are_no_mods(self):
         self.put_table(PACK, {1: 100})
         self.put_table("-old-site", {2: 5})

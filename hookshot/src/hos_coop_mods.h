@@ -9,8 +9,11 @@
          coop-mods 1
          on <name>              first row = wins a file two mods have (it is indexed last)
          off <name>             left out
+         default off            (optional, any line after the first) a mod the list does not name is off too
        <name> is the mod's name as Hookshot logs it: its path under the mods folder with '/'. A mod the list does not
-       name is on and keeps Hookshot's own order (by name) under the named ones. Lines it does not know are skipped.
+       name is on and keeps Hookshot's own order (by name) under the named ones; with "default off" it is left out,
+       as an "off" row would (co-op's Original game, coop_original.h: a mod put into the folder after the switch went on
+       stays out too, player report 266). Lines it does not know are skipped (an older reader skips "default off").
 
      <mods>/coop-mods.applied   written by Hookshot at each start: what this run indexed
          coop-mods-applied 1 <process id>
@@ -27,6 +30,7 @@
 
 #define HOS_COOP_MODS_VERSION 1
 #define HOS_COOP_MODS_LIST_FILE "coop-mods.list"
+#define HOS_COOP_MODS_DEFAULT_OFF "default off"   /* the line that leaves the mods the list does not name out */
 #define HOS_COOP_MODS_APPLIED_FILE "coop-mods.applied"
 #define HOS_COOP_MODS_MAX 256    /* rows read; more are skipped */
 #define HOS_COOP_MODS_NAME 260   /* a name with its 0 (MAX_PATH) */
@@ -40,6 +44,7 @@ typedef struct HosCoopModsRow {
 
 typedef struct HosCoopModsList {
     int count;
+    int default_off;   /* 1: the list has a "default off" line: a mod it does not name is off (hos_coop_mods_rank) */
     HosCoopModsRow rows[HOS_COOP_MODS_MAX];
 } HosCoopModsList;
 
@@ -60,6 +65,7 @@ static inline int hos_coop_mods_parse(const char *text, size_t n, HosCoopModsLis
     size_t at = 0;
     int line_no = 0;
     out->count = 0;
+    out->default_off = 0;
     while (at < n) {
         size_t end = at, len;
         const char *line = text + at;
@@ -74,6 +80,10 @@ static inline int hos_coop_mods_parse(const char *text, size_t n, HosCoopModsLis
         {
             int off;
             int i, known = 0;
+            if (len == sizeof HOS_COOP_MODS_DEFAULT_OFF - 1 && !memcmp(line, HOS_COOP_MODS_DEFAULT_OFF, len)) {
+                out->default_off = 1;
+                continue;
+            }
             if (len > 3 && !memcmp(line, "on ", 3)) off = 0, line += 3, len -= 3;
             else if (len > 4 && !memcmp(line, "off ", 4)) off = 1, line += 4, len -= 4;
             else continue;
@@ -89,13 +99,14 @@ static inline int hos_coop_mods_parse(const char *text, size_t n, HosCoopModsLis
     return line_no > 0;
 }
 
-/* A mod's place: -1 = off; 0 = not in the list (Hookshot's own order, under the listed ones); else the higher wins
-   (the list's first row has the highest). Mods are indexed by rising rank, then by name. */
+/* A mod's place: -1 = off (an "off" row, or not in a "default off" list); 0 = not in the list (Hookshot's own order,
+   under the listed ones); else the higher wins (the list's first row has the highest). Mods are indexed by rising rank,
+   then by name. */
 static inline int hos_coop_mods_rank(const HosCoopModsList *list, const char *name) {
     int i;
     for (i = 0; i < list->count; i++)
         if (hos_coop_mods_same(list->rows[i].name, name)) return list->rows[i].off ? -1 : list->count - i;
-    return 0;
+    return list->default_off ? -1 : 0;
 }
 
 /* The applied file's lines (each with its '\n'); what snprintf returns. */

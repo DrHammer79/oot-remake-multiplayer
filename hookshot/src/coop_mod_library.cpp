@@ -696,6 +696,13 @@ void Normalize(State& state, const std::vector<Mod>& mods) {
             off.push_back(m->name);
         }
     }
+    if (state.default_off) {   // (the ones no row named are off, as Hookshot reads the list: hos_coop_mods_rank)
+        for (const std::string& name : order) {
+            if (!has(state.order, name) && !has(off, name)) {
+                off.push_back(name);
+            }
+        }
+    }
     state.order = std::move(order);
     state.off = std::move(off);
 }
@@ -704,6 +711,10 @@ std::string ListText(const State& state, const std::vector<Mod>& mods) {
     State s = state;
     Normalize(s, mods);
     std::string text = "coop-mods " + std::to_string(HOS_COOP_MODS_VERSION) + "\n";
+    if (s.default_off) {
+        text += HOS_COOP_MODS_DEFAULT_OFF;
+        text += '\n';
+    }
     std::size_t rows = 0;
     for (const std::string& name : s.order) {
         if (rows++ == HOS_COOP_MODS_MAX) {
@@ -723,6 +734,7 @@ bool ReadListText(std::string_view text, State& state) {
     }
     state.order.clear();
     state.off.clear();
+    state.default_off = list->default_off != 0;
     for (int i = 0; i < list->count; ++i) {
         state.order.emplace_back(list->rows[i].name);
         if (list->rows[i].off) {
