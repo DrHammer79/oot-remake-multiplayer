@@ -817,6 +817,7 @@ namespace {
 HostServiceConfig service_config(std::vector<std::string>* log) {
   HostServiceConfig config;
   config.port = 0;  // any free port
+  config.bind = 0x7F000001u;  // 127.0.0.1 only: a test listens on no other address
   config.session.join_password = kTestPassword;
   if (log != nullptr) config.log = [log](const std::string& line) { log->push_back(line); };
   return config;
@@ -853,7 +854,7 @@ TEST_CASE("host service: a player joins with the password, the status counts the
   REQUIRE(port != 0);
   CHECK(service.status().state == HostState::kHosting);
   CHECK(service.status().port == port);
-  CHECK(said(log, "listening on port " + std::to_string(port) + " (all network adapters"));
+  CHECK(said(log, "listening on port " + std::to_string(port) + " (only 127.0.0.1"));
   CHECK(said(log, "players must give the join password to join; the traffic is encrypted"));
 
   Client a;

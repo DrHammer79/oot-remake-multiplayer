@@ -62,6 +62,10 @@ inline constexpr std::uint64_t kLateTexelsMs = 1000;
 inline constexpr std::size_t kLateChecks = 64;
 // A texture file's header is at most this long (the game's are 4096 bytes).
 inline constexpr std::uint64_t kMaxOffset = 0x10000;
+// A texture's texels are compared with the game's memory in reads of at most this many bytes, into the stack.
+inline constexpr std::size_t kComparePiece = 0x10000;
+// A wardrobe step that failed (no memory left: std::bad_alloc) is said at most this many times.
+inline constexpr int kFailedSaid = 20;
 
 // A coop_look file. Nothing, and why, for one that is cut short, of another
 // version, or with a texture this code cannot place (no room for a header,
@@ -174,7 +178,9 @@ public:
     // One step of the work, every frame or two (the game makes Link's
     // textures again on scene changes, cutscenes and its streaming, each time
     // without the override: found again within a step, not a second later).
-    // `now_ms` on any steady clock. One thread.
+    // `now_ms` on any steady clock. One thread. Catches std::exception: a step that fails that way (the PC out of
+    // memory, lane 2026-11-23) logs a `coop:` line and the next step looks at every texture again. Anything that is
+    // not a std::exception is not caught here: the catch (...) around WorkOnce in Work() (coop_look_live.cpp) covers it.
     void Step(std::uint64_t now_ms);
     // Look at the game's textures again at the next Step (the pause screen
     // closed: the equipment may have changed). Any thread.
@@ -190,6 +196,8 @@ public:
 
 private:
     std::shared_ptr<const Texels> Load(const std::string& colour);
+    void Once(std::uint64_t now_ms);
+    void Failed(const char* why);
 
     Host host_;
     mutable std::mutex mutex_;
@@ -224,6 +232,7 @@ private:
     std::string said_places_;     // (row 198: the places last logged)
     int said_places_count_ = 0;   // ... how many times (at most kPlacesSaid)
     int said_taken_ = 0;                      // "override(s) taken away" lines said (at most 20)
+    int said_failed_ = 0;                     // "a step ... failed" lines said (at most kFailedSaid)
 };
 
 }  // namespace CoopLookTunic

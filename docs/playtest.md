@@ -38,7 +38,7 @@ game's own control bridge, so they work wherever the windows are.
 - The games run in real time between steps: the bridge has no frame step yet. A step's own lines are what Link
   does; between steps he stands still and the rest of the world goes on (enemies included). Put the moves that must
   happen together in one `act`.
-- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it.
+- Set a test up with `warp`, `place` and `setflag`; do not walk across Hyrule to reach it. `warp` takes a real scene name (`Market_Child`, not `Market`); an unknown one is refused with an `unknown scene` line and nothing is written ([testing.md](testing.md)).
 - Take a `checkpoint` on both games after every action that should sync, then run `desync_check`.
 - Use `state` to look; `shot` only when the picture matters (a puppet in the wrong place, a door drawn open).
 - A report says: the scenario, the steps, what was expected, what happened, and the first checkpoint that differs.

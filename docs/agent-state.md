@@ -69,6 +69,15 @@ Material for a submission to the mod author and to the Squadala community. Nothi
   stay Link's. Open: the iris shift for a character whose iris texture is another colour (Impa's red). Details in
   [puppet.md](puppet.md), "Co-op's colours on a character".
 - The Cow's run animation (see A above).
+- A crash at start while the PC's memory ran out (a `std::bad_alloc` thrown out of the look worker's thread). Fixed in
+  the code on branch `look-crash`, not yet checked in a game: the texture compare no longer allocates a heap buffer
+  per texture, and a pass of the look worker that throws is logged (`coop: look: the look worker's pass failed`) and
+  tried again at the next pass. Two things are left open on purpose:
+  - The fix to `GameTextures::List` (the `filled` count when all four tries are short of room) has no unit test: the
+    function reads game memory, so only a game run shows it. To check in a game: several cold boots, no
+    `coop: look:` failed line and no crash record.
+  - The frame thread has no such guard. Under the same memory exhaustion a throw on the frame thread would still end
+    the game. Not changed here: a guard there touches every frame call of the module and needs its own review.
 
 ## Deferred engine items
 

@@ -24,6 +24,8 @@
 //   toward -7.5 71.1 8     push the stick toward that point for 8 ticks
 //                          (Link turns to face it)
 //   warp KakarikoVillage_Child Kakariko_WellSide
+//                          (the scene must be a real scene name, such as Market_Child, not Market: an unknown
+//                          name is refused with a "coop: test script ... unknown scene" line and nothing is written)
 //   chat /teleport Saria   (the rest of the line, sent as the chat box sends it)
 //                          test only: changes scene the way the game's own
 //                          sequence does (Sequence_ReservedNextBanc), to the
@@ -177,6 +179,17 @@ struct Step {
 struct Script {
     std::vector<Step> steps;
 };
+
+// Why `warp scene [start]` must not be asked of the game, or an empty string when it may. The scene must be one the
+// game has (CoopTeleport::IsKnownScene; the error names the likely ones: "Market" is not a scene, Market_Child and
+// Market_Adult are). A start, when given, must be a plain name of at most 63 characters (letters, digits, '_'): the
+// game's start names are not all known to the code, so one that is only unknown is left to the game. Nothing is
+// written into the game for a scene or start that gets a reason here.
+std::string WarpProblem(std::string_view scene, std::string_view start);
+
+// The "gave up" line of a warp that never happened. `scene` is the scene the game is in now: nothing when no save is
+// loaded (Link is nowhere: the title, a load), which the line says in words instead of "scene ?".
+std::string WarpGiveUpLine(std::string_view target, double seconds, const std::optional<std::string>& scene);
 
 // Reads a script. On a bad line returns nothing and sets `error` to
 // "line N: why".
