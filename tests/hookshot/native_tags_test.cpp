@@ -236,3 +236,26 @@ TEST_CASE("native tags: no colour on a pane that is not a text pane, no memory: 
     CHECK(c.shown() == 0);
     CHECK(h.Count(T::addr::kSetPaneText) == 0);
 }
+
+TEST_CASE("native tags: the map probe lists the MapIcon layouts a screen points at, with their offsets") {
+    FakeGame g;
+    const std::uint64_t screen = 0xe0000000;
+    const auto layout = [&](std::uint64_t at, const char* name) {
+        g.Put<std::uint64_t>(at + 0xf8, at + 0x800);           // its resource
+        g.Put<std::uint64_t>(at + 0x800 + 0x18, at + 0x900);   // the resource's name
+        g.Write(at + 0x900, name, std::strlen(name) + 1);
+    };
+    layout(0xe1000000, "PaMapIconPlayer_00");
+    layout(0xe2000000, "PaMapFloorTabBtn_00");
+    g.Put<std::uint64_t>(screen + 0x10, 0xe1000000);
+    g.Put<std::uint64_t>(screen + 0x18, 0xe2000000);
+    g.Put<std::uint64_t>(screen + 0x20, 0x1234);       // not a guest pointer
+    g.Put<std::uint64_t>(screen + 0x28, 0xe3000000);   // a pointer to something with no name
+    const auto held = T::LayoutsHeld(g, screen, 0x100, "MapIcon");
+    REQUIRE(held.size() == 1);
+    CHECK(held[0].offset == 0x10);
+    CHECK(held[0].layout == 0xe1000000);
+    CHECK(held[0].name == "PaMapIconPlayer_00");
+    CHECK(T::LayoutsHeld(g, screen, 0x100, "").size() == 2);
+    CHECK(T::LayoutsHeld(g, 0, 0x100, "").empty());
+}

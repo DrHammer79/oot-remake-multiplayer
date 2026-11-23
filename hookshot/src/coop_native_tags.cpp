@@ -149,6 +149,28 @@ bool MovePane(Game& game, std::uint64_t pane, const std::array<float, 2>& at) {
     return game.Call(game.MainBase() + addr::kPaneMarkB, {pane, 0, 0, 0, 0}).has_value();
 }
 
+std::vector<Held> LayoutsHeld(Game& game, std::uint64_t screen, std::size_t bytes, std::string_view contains) {
+    std::vector<Held> out;
+    std::vector<std::uint64_t> words(bytes / 8);
+    if (screen == 0 || words.empty() || !game.Read(screen, words.data(), words.size() * 8)) return out;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::uint64_t p = words[i];
+        std::uint64_t res = 0, name_at = 0;
+        if (p < 0x80000000ull || (p & 7) != 0 || !ReadValue(game, p + 0xf8, res) || res < 0x80000000ull ||
+            !ReadValue(game, res + 0x18, name_at) || name_at < 0x80000000ull) {
+            continue;
+        }
+        char text[48] = {};
+        if (!game.Read(name_at, text, sizeof text - 1)) continue;
+        const std::string name(text);   // (the last byte stays 0)
+        bool readable = name.size() >= 4;
+        for (const char c : name) readable = readable && c > 0x20 && c < 0x7f;
+        if (!readable || name.find(contains) == std::string::npos) continue;
+        out.push_back({i * 8, p, name});
+    }
+    return out;
+}
+
 bool Balloons::Block(Game& game) {
     if (block_ != 0) return true;
     if (block_failed_) return false;

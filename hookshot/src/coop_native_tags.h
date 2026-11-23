@@ -95,6 +95,18 @@ std::uint64_t ScreenByVtable(Game& game, std::uint64_t vtable_offset);
 // f_8022a3e0 would place another way (flag bit 8).
 bool MovePane(Game& game, std::uint64_t pane, const std::array<float, 2>& at);
 
+// B8's probe (LICHII_COOP_MAP_PROBE=1, a run to learn how the game makes its map icons): the layouts a screen object
+// points at straight from its first `bytes` (8-byte words), with the name each layout's resource gives (layout+0xf8
+// -> resource, resource+0x18 -> its name), kept when the name has `contains`. Other pointers are left out by that
+// name not being 4 or more printable characters.
+inline constexpr std::uint64_t kMapMenuVtable = 0x84c08300 - 0x80020000;   // UIMapMenuScreen (the HUD and its maps)
+struct Held {
+    std::uint64_t offset = 0;  // screen+
+    std::uint64_t layout = 0;
+    std::string name;
+};
+std::vector<Held> LayoutsHeld(Game& game, std::uint64_t screen, std::size_t bytes, std::string_view contains);
+
 // Keeps the tags on the game's balloons. Step each frame on the game's thread; HideAll when co-op stops showing tags.
 class Balloons {
 public:

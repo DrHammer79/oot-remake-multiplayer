@@ -531,9 +531,44 @@ private:
 std::atomic<bool> g_tags_drawn{false};   // true: the overlay draws the name text (native off or failed)
 CoopNativeTags::Balloons g_balloons;     // the game's thread only
 
+// B8's probe (LICHII_COOP_MAP_PROBE=1, off by default): every 5 s, the MapIcon layouts the HUD's map screen holds
+// and the balloon screen's shown parts, into the log (how the game makes its own map icons; whether our balloons stay).
+void MapProbe(void* ctx) {
+    static const bool on = Env("LICHII_COOP_MAP_PROBE") == "1";
+    static std::uint64_t next = 0;
+    if (!on || SteadyMs() < next) return;
+    next = SteadyMs() + 5000;
+    TagsGame game(ctx);
+    const std::uint64_t map = CoopNativeTags::ScreenByVtable(game, CoopNativeTags::kMapMenuVtable);
+    std::string held;
+    for (const auto& h : CoopNativeTags::LayoutsHeld(game, map, 0x3000, "MapIcon")) {
+        held += fmt::format(" +{:#x}={:#x} {}", h.offset, h.layout, h.name);
+    }
+    LOG_INFO(Core, "coop: map probe: map screen {:#x}, MapIcon layouts:{}", map, held.empty() ? " none" : held);
+    const std::uint64_t balloons = CoopNativeTags::ScreenByVtable(game, CoopNativeTags::addr::kBalloonVtable);
+    std::string parts;
+    for (std::size_t i = 0; i < CoopNativeTags::addr::kParts && balloons != 0; ++i) {
+        std::uint64_t part = 0, root = 0;
+        float xy[2] = {}, alpha = 0;
+        CoopRuntime::Read(balloons + CoopNativeTags::addr::kPartTable + i * CoopNativeTags::addr::kPartStride, &part, 8);
+        if (const auto r = part != 0 ? game.Call(CoopRuntime::MainBase() + CoopNativeTags::addr::kPartRootPane,
+                                                 {part + 0x40, 0, 0, 0, 0})
+                                     : std::nullopt) {
+            root = *r;
+        }
+        if (root != 0) {
+            CoopRuntime::Read(root + CoopNativeTags::addr::kPaneXY, xy, sizeof xy);
+            CoopRuntime::Read(root + 0x78, &alpha, sizeof alpha);
+        }
+        parts += fmt::format(" {}:{:.0f},{:.0f} a{:.2f}", i, xy[0], xy[1], alpha);
+    }
+    LOG_INFO(Core, "coop: map probe: balloon screen {:#x} parts{} (ours shown: {})", balloons, parts, g_balloons.shown());
+}
+
 void NativeTags(void* ctx) {
     static const bool on = Env("LICHII_COOP_NATIVE_TAGS") != "0";
     static bool said = false, said_fail = false;
+    MapProbe(ctx);
     if (!on) {
         g_tags_drawn.store(true);
         return;
