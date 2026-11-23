@@ -23,7 +23,8 @@ boot, as the lane runs do (`--no-restore` keeps whatever the copies hold).
                                            [--boot-a boot.A.txt --boot-b boot.B.txt] [--env K=V ...]
                                            [--max-minutes 30] [--idle-minutes 10] [--lock-wait S] [--no-restore]
     python -I tools/autotest/live.py do --session DIR A "goto 10.0 20.0 0.5 300; press A"
-    python -I tools/autotest/live.py state --session DIR [A|B]
+    python -I tools/autotest/live.py state --session DIR [A|B] [--since ID]
+    python -I tools/autotest/live.py replay [FILE ...] [--session DIR] [--dry-run]   (run a call log again)
     python -I tools/autotest/live.py shot --session DIR [A|B]
     python -I tools/autotest/live.py checkpoint --session DIR TAG
     python -I tools/autotest/live.py stop --session DIR
@@ -39,6 +40,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hookshot  # noqa: E402  (the same folder)
+import kit_tools  # noqa: E402
 import lanes  # noqa: E402  (the same folder; it brings tools/hookshot/hs.py)
 
 TAGS = ("A", "B")
@@ -334,7 +336,9 @@ def state(a):
     s = open_session(d)
     out = {x: look(d, s, x) for x in ([a.player] if a.player else TAGS)}
     save(d, s)
-    return out
+    # every look gets a `state_id`; with `since` (an earlier look's id) only what changed comes back (the new log lines
+    # are new since the last look already, so they are always whole)
+    return kit_tools.StateHistory(os.path.join(d, "state-history.json")).reply(out, getattr(a, "since", None))
 
 
 def do(a):
@@ -560,6 +564,21 @@ def stop(a, wait=60.0, clock=time.monotonic, sleep=time.sleep, alive=None):
     return {"ended": w["ended"], "closed": w.get("closed")}
 
 
+CALLS_FILE = "calls.jsonl"
+# the CLI commands that are kit calls, under the MCP tool each one is (docs/playtest.md, "Kit helpers")
+LOGGED = {"do": ("act", ("player", "script")), "state": ("state", ("player", "since")), "shot": ("shot", ("player",)),
+          "checkpoint": ("checkpoint", ("tag",))}
+
+
+def log_call(a, ok, error, began):
+    """Writes a CLI command to the session's call log (server `live`), so `live.py replay` can run it again."""
+    if a.cmd not in LOGGED or not os.path.isdir(a.session):
+        return
+    tool, keys = LOGGED[a.cmd]
+    args = {k: getattr(a, k) for k in keys if getattr(a, k, None) is not None}
+    kit_tools.CallLog(os.path.join(a.session, CALLS_FILE), "live").write(tool, args, ok, error, t=began)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -594,11 +613,38 @@ def main(argv=None):
             q.add_argument("script", help="test script lines, ';' between them")
         elif name in ("state", "shot"):
             q.add_argument("player", nargs="?", choices=TAGS)
+            if name == "state":
+                q.add_argument("--since", type=int, metavar="ID",
+                               help="the state_id of an earlier look: only what changed since it (default: all)")
         elif name == "checkpoint":
             q.add_argument("tag")
+    rp = sub.add_parser("replay", help="run the calls of a call log again (docs/playtest.md, \"Kit helpers\")")
+    rp.add_argument("files", nargs="*", metavar="FILE", help="call logs (default: calls.jsonl of --session)")
+    rp.add_argument("--session", help="the session the games are in (needed for oot-playtest and live calls)")
+    rp.add_argument("--lane", type=int, help="a test lane: the bridge ports of the player servers")
+    rp.add_argument("--log-dir", default="playtest-logs", help="where checkpoint logs and shots go (as the servers' --log-dir)")
+    rp.add_argument("--include-reads", action="store_true", help="also repeat the calls that only look (get_state ...)")
+    rp.add_argument("--include-failed", action="store_true", help="also repeat the calls that failed the first time")
+    rp.add_argument("--keep-going", action="store_true", help="go on after a call that fails (default: stop there)")
+    rp.add_argument("--dry-run", action="store_true", help="list the calls, run nothing")
+    rp.add_argument("--delay", type=float, default=0.0, help="s to wait between calls")
     a = p.parse_args(argv)
-    out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
-           "watchdog": watchdog}[a.cmd](a)
+    if a.cmd == "replay":
+        files = a.files or ([os.path.join(a.session, CALLS_FILE)] if a.session else [])
+        if not files:
+            p.error("replay: give a call log FILE, or --session")
+        out = kit_tools.replay(files, a.session, a.lane, a.log_dir, a.include_reads, a.include_failed, a.keep_going,
+                               a.dry_run, a.delay, say=lambda s: print(s, file=sys.stderr))
+        print(json.dumps(out, indent=1))
+        return 1 if out["failed"] else 0
+    began = time.time()
+    try:
+        out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
+               "watchdog": watchdog}[a.cmd](a)
+    except (Exception, SystemExit) as e:
+        log_call(a, False, "%s: %s" % (e.__class__.__name__, e), began)
+        raise
+    log_call(a, "error" not in out, out.get("error") if isinstance(out, dict) else None, began)
     print(json.dumps(out, indent=1))
     return 1 if a.cmd == "do" and "error" in out else 0
 

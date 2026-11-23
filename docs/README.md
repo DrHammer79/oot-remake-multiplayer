@@ -76,6 +76,7 @@ One line per page: what it answers and when to read it. Read this page, then onl
 |---|---|---|
 | [testing.md](testing.md) | The test kit: two PCs, unit tests, input scripts, making the kit | You run or write a test, or need a script command |
 | [playtest.md](playtest.md) | Live play-testing with two games, one step at a time, the rules for a tester | You drive the two-game lane (a person or Claude) |
+| [playtest-agents.md](playtest-agents.md) | How an agent starts, drives, reads, shoots and replays a play-test, and the shared scripts and data folders (`tools/playtest/`) | You were handed running test games, or want to share a script or a position |
 | [soak.md](soak.md) | `coop_test`: the stage 0 soak | You test the server under traffic |
 | [ci-runner.md](ci-runner.md) | The self-hosted CI runner | CI is slow or you change the runner |
 | [problem-reports.md](problem-reports.md) | The masked problem-report zip and the report bot | You change what a report holds or how it is sent |
