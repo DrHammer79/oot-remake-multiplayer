@@ -2582,8 +2582,12 @@ TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the stri
     CHECK(CharactersHopNext(h, false, true, 1, 2000) == HopStep::kTapL);
     CHECK(CharactersHopNext(h, false, true, 6, 2500) == HopStep::kTapL);   // (Key Items is the game's: one more tap)
     CHECK(CharactersHopNext(h, false, true, 0, 3000) == HopStep::kDone);   // (anything else: Characters)
-    CHECK(GameMinusCategory(6) && GameMinusCategory(1) && GameMinusCategory(2));
-    CHECK(!GameMinusCategory(0) && !GameMinusCategory(3) && !GameMinusCategory(-1));
+    CHECK(GameMinusCategory(6));
+    CHECK(GameMinusCategory(1));
+    CHECK(GameMinusCategory(2));
+    CHECK_FALSE(GameMinusCategory(0));
+    CHECK_FALSE(GameMinusCategory(3));
+    CHECK_FALSE(GameMinusCategory(-1));
     CharactersHop c4;
     CHECK(CharactersHopNext(c4, false, true, 2, 1000) == HopStep::kTapL);
     CHECK(CharactersHopNext(c4, false, true, 6, 1500) == HopStep::kTapL);
