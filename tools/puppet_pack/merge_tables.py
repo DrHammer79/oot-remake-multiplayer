@@ -214,13 +214,37 @@ def write_mark(root, win_path, fname, rule="merged"):
     return mark
 
 
-def stamp_text(root, out_path, inputs, out_line=None, fit=None):
+def stamp_names(stamp, line):
+    """Whether a stamp's file is the file `line` (a file_line) now: the stamp's `out` line names it (the file this
+    tool wrote), or its `prev` line does. Every stamp is written BEFORE its file; a re-write that stopped in between
+    leaves the stamp naming a file that is not there and the file as the earlier write left it, which `prev` names:
+    the file the stopped write was about to replace. That file is this tool's own earlier output, so the kept copy is
+    still the mod's original (taking the earlier output as the mod's own loses the shipped file for good)."""
+    if stamp is None:
+        return False
+    lines = stamp.split("\n")
+    return lines[1:2] == ["out " + line] or ("prev " + line) in lines[2:]
+
+
+def without_prev(stamp):
+    """A stamp as it is compared with the one about to be written: without its `prev` line (the file the last write
+    replaced, which a finished write's stamp keeps but a new one is not asked to repeat)."""
+    return stamp if stamp is None else "".join(l + "\n" for l in stamp.split("\n")[:-1] if not l.startswith("prev "))
+
+
+def prev_line(root, path, ours):
+    """The `prev` line of the stamp about to be written for `path`: the file there now, when it is this tool's own
+    earlier output (`ours`: a re-write); nothing for the mod's own file (the kept copy is made from it)."""
+    return f"prev {file_line(root, path)}\n" if ours else ""
+
+
+def stamp_text(root, out_path, inputs, out_line=None, fit=None, prev=""):
     lines = [STAMP_HEAD, "out " + (out_line or file_line(root, out_path))]
     # (an input is another mod's table: named by the bytes it shipped with, as original_table reads them)
     lines += sorted("in " + in_line(root, p, original_table(root, mod_of_table(p), os.path.basename(p)))
                     for p in inputs)
     lines += [f"fit {k} {n}" for k, n in sorted((fit or {}).items())]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" + prev
 
 
 def mod_of_table(table_path):
@@ -345,9 +369,8 @@ def put_back_stale(root, keep_name, target_of, touched, say, label, mark=None):
                     continue
                 rel = os.path.relpath(kept, keep)
                 stamp = read_text(kept + ".txt")
-                out = next((l[4:] for l in (stamp or "").split("\n") if l.startswith("out ")), None)
                 target = target_of(path, rel)
-                if out and os.path.isfile(target) and out == file_line(root, target):
+                if os.path.isfile(target) and stamp_names(stamp, file_line(root, target)):
                     shutil.copyfile(kept, target + ".tmp")
                     os.replace(target + ".tmp", target)
                     back.append(rel.replace(os.sep, "/"))
@@ -453,6 +476,7 @@ def rows_stamp(root, table_path, pack_table, out_line=None, more=()):
 
 def stamp_holds(old, head):
     """A stamp written for exactly these files: the head, then nothing but its fit line."""
+    old = without_prev(old)
     return old is not None and old.startswith(head) and (old == head or old[len(head):].startswith("fit "))
 
 
@@ -517,8 +541,7 @@ def merge_rows_one(root, codec, fname, win_name, win_path, pack_path, say, other
         need = next((int(l.split()[2]) for l in old.split("\n") if l.startswith("fit ") and len(l.split()) == 3), 0)
         say(f"Actor tables: {win_name}'s RSDB/{fname} has {whose} rows already (merged at an earlier start).")
         return (f"table {fname} {fnv64(table_path)[0]} {fnv64(pack_table)[0]}" if pack_path else None), need
-    ours = old is not None and old.split("\n")[1:2] == ["out " + file_line(root, table_path)] \
-        and os.path.isfile(orig_path)
+    ours = stamp_names(old, file_line(root, table_path)) and os.path.isfile(orig_path)
     if not ours:  # (the mod's own table: a new seed put there, or the first start with it)
         os.makedirs(keep, exist_ok=True)
         shutil.copyfile(table_path, orig_path + ".tmp")
@@ -565,6 +588,7 @@ def merge_rows_one(root, codec, fname, win_name, win_path, pack_path, say, other
     stamp = rows_stamp(root, table_path, pack_table, f"{rel} {len(data)} {fnv64_bytes(data)}", more)
     if need:
         stamp += f"fit {key} {need}\n"
+    stamp += prev_line(root, table_path, ours)
     # The stamp before the table, as merge_one: stopped in between, the original is never a merged table.
     write_atomic(stamp_path, stamp.encode("utf-8"))
     write_atomic(table_path, data)
@@ -871,8 +895,7 @@ def original_of(root, mod_path, rel):
     path = os.path.join(mod_path, "romfs", *rel.split("/"))
     kept = os.path.join(mod_path, MEMBERS_KEEP, *rel.split("/"))
     stamp = read_text(kept + ".txt")
-    if (stamp is not None and os.path.isfile(kept) and os.path.isfile(path)
-            and stamp.split("\n")[1:2] == ["out " + file_line(root, path)]):
+    if os.path.isfile(kept) and os.path.isfile(path) and stamp_names(stamp, file_line(root, path)):
         return kept
     return path
 
@@ -916,7 +939,7 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     if stamp_holds(old, head):
         say(f"Menus: {win_name}'s {rel} has {whose} members already (merged at an earlier start).")
         return next((int(l.split()[2]) for l in old.split("\n") if l.startswith("fit ") and len(l.split()) == 3), 0)
-    ours = old is not None and old.split("\n")[1:2] == ["out " + file_line(root, path)] and os.path.isfile(orig_path)
+    ours = stamp_names(old, file_line(root, path)) and os.path.isfile(orig_path)
     if not ours:  # (the mod's own archive: the first start with it, or a new copy of the mod)
         os.makedirs(os.path.dirname(orig_path), exist_ok=True)
         shutil.copyfile(path, orig_path + ".tmp")
@@ -996,6 +1019,7 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     stamp = f"{MEMBERS_HEAD}\nout {rel_out} {len(data)} {fnv64_bytes(data)}\n{ins}"
     if need:
         stamp += f"fit {key} {need}\n"
+    stamp += prev_line(root, path, ours)
     write_atomic(stamp_path, stamp.encode("utf-8"))   # (the stamp first, as merge_rows_one)
     write_atomic(path, data)
     say(f"Menus: the game reads {win_name}'s {rel}; merged in {whose} members ({len(take)}: "
@@ -1072,14 +1096,16 @@ def fit_in_place(root, codec, win_name, win_path, fname, fit, say):
     with open(path, "rb") as f:
         if f.read() == data:
             return
-    if source == path:   # (the mod's own table: a new seed or pack put there, or the first start with it)
+    ours = source != path   # (an earlier start's raise is in the mod: the kept copy is the original)
+    if not ours:   # (the mod's own table: a new seed or pack put there, or the first start with it)
         os.makedirs(keep, exist_ok=True)
         shutil.copyfile(path, os.path.join(keep, fname) + ".tmp")
         os.replace(os.path.join(keep, fname) + ".tmp", os.path.join(keep, fname))
     rel = os.path.relpath(path, root).replace(os.sep, "/")
-    # (the stamp before the table, as merge_one)
+    # (the stamp before the table, with the replaced raise as `prev`, as merge_one)
     write_atomic(os.path.join(keep, STAMP),
-                 stamp_text(root, path, [], f"{rel} {len(data)} {fnv64_bytes(data)}", fit).encode("utf-8"))
+                 stamp_text(root, path, [], f"{rel} {len(data)} {fnv64_bytes(data)}", fit,
+                            prev_line(root, path, ours)).encode("utf-8"))
     write_atomic(path, data)
     shown = "the puppet pack" if fold(win_name) == PACK else win_name
     say(f"Size tables: the game reads {shown}'s; raised the entries of the merged actor tables "
@@ -1266,8 +1292,7 @@ def original_table(root, mod_path, fname):
     keep = os.path.join(mod_path, KEEP_DIR)
     kept = os.path.join(keep, fname)
     stamp = read_text(os.path.join(keep, STAMP))
-    if (stamp is not None and os.path.isfile(kept) and os.path.isfile(path)
-            and stamp.split("\n")[1:2] == ["out " + file_line(root, path)]):
+    if os.path.isfile(kept) and os.path.isfile(path) and stamp_names(stamp, file_line(root, path)):
         return kept
     return path
 
@@ -1293,12 +1318,11 @@ def merge_one(root, codec, fname, win_name, win_path, others, say, fit=None):
     stamp_path = os.path.join(keep, STAMP)
     inputs = [os.path.join(p, *RESOURCE, fname) for _, p in others]
     old = read_text(stamp_path)
-    if old is not None and old == stamp_text(root, table_path, inputs, fit=fit):
+    if old is not None and without_prev(old) == stamp_text(root, table_path, inputs, fit=fit):
         write_mark(root, win_path, fname)
         say(f"Size tables: {win_name} has the other mods' entries already (merged at an earlier start).")
         return 0
-    ours = old is not None and old.split("\n")[1:2] == ["out " + file_line(root, table_path)] \
-        and os.path.isfile(orig_path)
+    ours = stamp_names(old, file_line(root, table_path)) and os.path.isfile(orig_path)
     if not ours:  # (the mod's own table: a new seed put there, or the first start with it)
         os.makedirs(keep, exist_ok=True)
         shutil.copyfile(table_path, orig_path + ".tmp")
@@ -1313,11 +1337,12 @@ def merge_one(root, codec, fname, win_name, win_path, others, say, fit=None):
     added, raised = merge(table, loaded)
     raised += apply_fit(table, fit or {})
     data = codec.save(table, orig_raw) if (added or raised) else orig_raw
-    # The stamp names the table about to be written BEFORE it is written: stopped in between, the next start sees the
-    # table is not that one (still the original) and keeps it as the original, never a merged table as the original.
+    # The stamp names the table about to be written BEFORE it is written (and, as `prev`, the table it replaces when
+    # that is an earlier merge's): stopped in between, the next start sees the table is not the one the stamp names
+    # and takes it for the mod's own only when it is no merge's output (stamp_names), never a merged table.
     rel = os.path.relpath(table_path, root).replace(os.sep, "/")
-    write_atomic(stamp_path, stamp_text(root, table_path, inputs,
-                                        f"{rel} {len(data)} {fnv64_bytes(data)}", fit).encode("utf-8"))
+    write_atomic(stamp_path, stamp_text(root, table_path, inputs, f"{rel} {len(data)} {fnv64_bytes(data)}", fit,
+                                        prev_line(root, table_path, ours)).encode("utf-8"))
     write_atomic(table_path, data)
     write_mark(root, win_path, fname)
     names = ", ".join("the puppet pack" if fold(n) == PACK else n for n, _ in others)
@@ -1406,9 +1431,13 @@ def merge_self_models(root, romfs, say=print):
                     os.replace(kept + ".tmp", kept)
                 with open(kept, "rb") as f:
                     raw = f.read()
-                data = self_model(codec.unpack(raw), age)
-                write_atomic(target, codec.pack(data, raw))
-                write_atomic(stamp_path, f"{MODELS_HEAD}\nout {file_line(root, target)}\n".encode("utf-8"))
+                data = codec.pack(self_model(codec.unpack(raw), age), raw)
+                # (the stamp names the model about to be written BEFORE it is written, as the tables' stamps: stopped
+                # in between, the model is still the mod's own and the next start keeps it as that; written the other
+                # way round, the next start found the named model with no stamp and took it for the mod's own)
+                rel_out = os.path.relpath(target, root).replace(os.sep, "/")
+                write_atomic(stamp_path, f"{MODELS_HEAD}\nout {rel_out} {len(data)} {fnv64_bytes(data)}\n".encode("utf-8"))
+                write_atomic(target, data)
                 say(f"Your Link's colours: {name}'s {rel} names co-op's own tunic textures now (its own copy kept in "
                     f"{name}/{MODELS_KEEP}).")
             except (OSError, ValueError, MergeError, tunic.TunicError) as e:
@@ -1513,7 +1542,7 @@ def merge_gamedata_one(root, codec, fname, win_name, win_path, others, game, say
     if stamp_holds(old, head):
         say(f"Saved values: {win_name}'s GameData/{fname} has {whose} values already (merged at an earlier start).")
         return next((int(l.split()[2]) for l in old.split("\n") if l.startswith("fit ") and len(l.split()) == 3), 0)
-    ours = old is not None and old.split("\n")[1:2] == ["out " + file_line(root, path)] and os.path.isfile(orig_path)
+    ours = stamp_names(old, file_line(root, path)) and os.path.isfile(orig_path)
     if not ours:  # (the mod's own list: the first start with it, or a new copy of the mod)
         os.makedirs(keep, exist_ok=True)
         shutil.copyfile(path, orig_path + ".tmp")
@@ -1571,6 +1600,7 @@ def merge_gamedata_one(root, codec, fname, win_name, win_path, others, game, say
     stamp = f"{GAMEDATA_HEAD}\nout {rel} {len(data)} {fnv64_bytes(data)}\n{ins}"
     if need:
         stamp += f"fit {key} {need}\n"
+    stamp += prev_line(root, path, ours)
     write_atomic(stamp_path, stamp.encode("utf-8"))   # (the stamp first, as merge_rows_one)
     write_atomic(path, data)
     say(f"Saved values: the game reads {win_name}'s GameData/{fname}; merged with {whose} ({len(decided)} changed "
@@ -1718,9 +1748,8 @@ def undo(root, say=print):
             back = []
             for f in sorted(os.listdir(gamedata_keep)):
                 stamp = read_text(os.path.join(gamedata_keep, f + ".txt")) if f.endswith(GAMEDATA_TAIL) else None
-                out = next((l[4:] for l in (stamp or "").split("\n") if l.startswith("out ")), None)
                 target = os.path.join(path, *GAMEDATA, f)
-                if out and os.path.isfile(target) and out == file_line(root, target):
+                if os.path.isfile(target) and stamp_names(stamp, file_line(root, target)):
                     shutil.copyfile(os.path.join(gamedata_keep, f), target)
                     back.append(f)
             shutil.rmtree(gamedata_keep)
@@ -1737,9 +1766,8 @@ def undo(root, say=print):
                     kept = os.path.join(dirpath, f)
                     rel = os.path.relpath(kept, members_keep).replace(os.sep, "/")
                     stamp = read_text(kept + ".txt")
-                    out = next((l[4:] for l in (stamp or "").split("\n") if l.startswith("out ")), None)
                     target = os.path.join(path, "romfs", *rel.split("/"))
-                    if out and os.path.isfile(target) and out == file_line(root, target):
+                    if os.path.isfile(target) and stamp_names(stamp, file_line(root, target)):
                         shutil.copyfile(kept, target)
                         back.append(rel)
             shutil.rmtree(members_keep)
@@ -1751,9 +1779,8 @@ def undo(root, say=print):
             back = []
             for f in sorted(os.listdir(rows_keep)):
                 stamp = read_text(os.path.join(rows_keep, f + ".txt")) if f.endswith(RSDB_TAIL) else None
-                out = next((l[4:] for l in (stamp or "").split("\n") if l.startswith("out ")), None)
                 table = os.path.join(path, *RSDB, f)
-                if out and os.path.isfile(table) and out == file_line(root, table):
+                if os.path.isfile(table) and stamp_names(stamp, file_line(root, table)):
                     shutil.copyfile(os.path.join(rows_keep, f), table)
                     back.append(f)
             shutil.rmtree(rows_keep)
@@ -1766,11 +1793,10 @@ def undo(root, say=print):
         stamp = read_text(os.path.join(keep, STAMP))
         if stamp is None:
             continue
-        out = next((l[4:] for l in stamp.split("\n") if l.startswith("out ")), None)
         back = False
         for f in os.listdir(keep):
             table = os.path.join(path, *RESOURCE, f)
-            if f.endswith(TAIL) and os.path.isfile(table) and out == file_line(root, table):
+            if f.endswith(TAIL) and os.path.isfile(table) and stamp_names(stamp, file_line(root, table)):
                 shutil.copyfile(os.path.join(keep, f), table)
                 back = True
         shutil.rmtree(keep)

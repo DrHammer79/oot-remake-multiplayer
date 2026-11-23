@@ -30,6 +30,26 @@ def read(path):
         return f.read()
 
 
+@contextlib.contextmanager
+def stopped_at(*paths, nth=1):
+    """merge_tables.write_atomic stops (OSError) at the nth write to any of `paths`, as a power cut or a killed
+    process would between two writes of one merge: the writes before it are done, the later ones never happen."""
+    real, seen = mt.write_atomic, []
+
+    def stopping(path, data):
+        if os.path.normcase(os.path.abspath(path)) in {os.path.normcase(os.path.abspath(p)) for p in paths}:
+            seen.append(path)
+            if len(seen) == nth:
+                raise OSError("stopped")
+        real(path, data)
+
+    mt.write_atomic = stopping
+    try:
+        yield seen
+    finally:
+        mt.write_atomic = real
+
+
 @unittest.skipIf(zstandard is None, "needs zstandard")
 class MergeTablesTest(unittest.TestCase):
     def setUp(self):
@@ -714,6 +734,65 @@ class MergeRowsTest(unittest.TestCase):
         self.assertEqual(self.run_all()[0], 0)
         self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), new_sizes)
 
+    # A re-raise writes its stamp before the table. Stopped between the two, the stamp names a table that is not
+    # there and the table is the earlier raise: it must not be taken as the mod's own table (restamp).
+    def stop_a_re_raise(self):
+        """A seed with its own tables, raised once; then a longer pack makes a second raise that stops after its
+        stamp. Returns (the seed's size table as it shipped, as the first raise left it)."""
+        self.seed_with_own_tables()
+        shipped = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        self.assertEqual(self.run_all()[0], 0)
+        raised = read(self.path(SEED, "romfs", "System", "Resource", NAME))
+        self.assertNotEqual(raised, shipped)
+        self.put_rows(PACK, self.pack_rows() + [{"__RowId": "CoopPuppet_Adult", "Heap": 7}])   # (a longer pack, its
+        self.put_sizes(PACK, 9000)   # entry larger: the fit grows, a second raise)
+        with stopped_at(self.path(SEED, "romfs", "System", "Resource", NAME)) as seen:
+            self.assertEqual(self.run_all()[0], 1)
+        self.assertTrue(seen)   # (the stamp was written, the table not)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), raised)
+        return shipped, raised
+
+    def test_a_re_raise_stopped_after_its_stamp_leaves_undo_the_shipped_table(self):
+        shipped, _ = self.stop_a_re_raise()
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), shipped)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+
+    def test_a_re_raise_stopped_after_its_stamp_then_a_shorter_pack_gives_the_shipped_table_back(self):
+        shipped, _ = self.stop_a_re_raise()
+        self.put_rows(PACK, self.game_rows())   # (a pack without puppets: the fit is empty now)
+        self.put_sizes(PACK, 3000)
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), shipped)
+        self.assertFalse(os.path.exists(self.path(SEED, mt.KEEP_DIR)))
+
+    def test_a_re_raise_stopped_after_its_stamp_then_a_shorter_pack_raises_from_the_shipped_table(self):
+        shipped, raised = self.stop_a_re_raise()
+        self.put_rows(PACK, self.pack_rows())   # (the first pack again: the first raise's fit, not the second's)
+        self.put_sizes(PACK, 5000)
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), raised)
+        self.assertEqual(read(self.path(SEED, mt.KEEP_DIR, NAME)), shipped)   # (still the shipped one, not the raise)
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(SEED, "romfs", "System", "Resource", NAME)), shipped)
+
+    def test_a_re_merge_of_actor_rows_stopped_after_its_stamp_leaves_undo_the_seeds_own_table(self):
+        own = self.seed_with_own_tables()
+        self.assertEqual(self.run_all()[0], 0)
+        merged = read(self.path(SEED, "romfs", "RSDB", AI))
+        self.assertNotEqual(merged, own)
+        self.put_rows(PACK, self.pack_rows() + [{"__RowId": "CoopPuppet_Adult", "Heap": 7}])
+        with stopped_at(self.path(SEED, "romfs", "RSDB", AI)) as seen:
+            self.assertGreaterEqual(self.run_all()[0], 1)
+        self.assertTrue(seen)
+        self.assertEqual(read(self.path(SEED, "romfs", "RSDB", AI)), merged)
+        self.assertEqual(self.run_all()[0], 0)   # (the next start finishes it, from the seed's own rows)
+        self.assertEqual(sorted(r["__RowId"] for r in self.rows(SEED)),
+                         sorted(["Npc_Mido", "Player_Child", "Rando_Item", "CoopPuppet_Child", "CoopShot_Seed",
+                                 "CoopPuppet_Adult"]))
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(SEED, "romfs", "RSDB", AI)), own)
+
     def test_a_stamp_names_a_table_input_by_its_mod_folder(self):
         self.assertEqual(mt.mod_of_table(os.path.join("a", "b", "mods", "m x", *mt.RESOURCE, NAME)),
                          os.path.join("a", "b", "mods", "m x"))
@@ -979,6 +1058,22 @@ class MergeGameDataTest(unittest.TestCase):
         mt.undo(self.mods, say=self.lines.append)
         self.assertEqual(read(os.path.join(self.mods, self.HAND, "romfs", "GameData", GD)), self.seed_raw)
         self.assertFalse(os.path.exists(os.path.join(self.mods, self.HAND, mt.GAMEDATA_KEEP)))
+
+    def test_a_re_merge_stopped_after_its_stamp_leaves_undo_the_seeds_own_list(self):
+        self.merge()
+        served = read(os.path.join(self.mods, self.HAND, "romfs", "GameData", GD))
+        cs = self.game_list()
+        cs["Data"]["Int"].append({"Hash": byml.UInt(900), "DefaultValue": 1})   # (the mod's value changed)
+        cs["MetaData"]["AllDataSaveSize"] = 108
+        self.put(os.path.join(self.mods, self.CS, "romfs", "GameData", GD), cs)
+        with stopped_at(os.path.join(self.mods, self.HAND, "romfs", "GameData", GD)) as seen:
+            self.merge()
+        self.assertTrue(seen)   # (the stamp was written, the list not)
+        self.assertEqual(read(os.path.join(self.mods, self.HAND, "romfs", "GameData", GD)), served)
+        self.merge()   # (the next start finishes it)
+        self.assertEqual(self.served(self.HAND)[0][("Int", 900)], 1)
+        mt.undo(self.mods, say=self.lines.append)
+        self.assertEqual(read(os.path.join(self.mods, self.HAND, "romfs", "GameData", GD)), self.seed_raw)
 
     def test_the_other_order_gives_the_same_list(self):
         with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
@@ -1293,6 +1388,22 @@ class MergeMembersTest(unittest.TestCase):
         self.assertEqual(self.served()["Hdr.msbt"], b"mod header")
         self.assertTrue(any("could not be made" in l and "no such pane" in l for l in self.lines))
         self.assertTrue(any("Both changed Hdr.msbt: " in l and "kept" in l for l in self.lines))
+
+    def test_a_re_merge_stopped_after_its_stamp_leaves_undo_the_mods_own_archive(self):
+        self.merge()
+        served = read(os.path.join(self.mod, "romfs", *MALS.split("/")))
+        self.put(os.path.join(self.pack, "romfs", *MALS.split("/")), self.archive(
+            dict(self.game, **{"A.msbt": b"pack A2"})))
+        with stopped_at(os.path.join(self.mod, "romfs", *MALS.split("/"))) as seen:
+            self.merge()
+        self.assertTrue(seen)   # (the stamp was written, the archive not)
+        self.assertEqual(read(os.path.join(self.mod, "romfs", *MALS.split("/"))), served)
+        self.merge()   # (the next start finishes it)
+        got = self.served()
+        self.assertEqual(got["A.msbt"], b"pack A2")
+        self.assertNotIn("Coop.msbt", got)   # (merged from the mod's own archive, not from the earlier merge)
+        mt.undo(self.mods, say=self.lines.append)
+        self.assertEqual(read(os.path.join(self.mod, "romfs", *MALS.split("/"))), self.mod_raw)
 
     def test_a_new_pack_merges_again_from_the_mods_own_copy(self):
         self.merge()
@@ -1640,6 +1751,18 @@ class SelfModelsTest(unittest.TestCase):
             self.assertEqual(self.model(m, "Child"), self.child)
             self.assertEqual(self.model(m, "Adult"), self.adult)
             self.assertFalse(os.path.isdir(os.path.join(m, mt.MODELS_KEEP)))
+
+    def test_a_start_stopped_between_the_model_and_its_stamp_leaves_undo_the_mods_own_model(self):
+        # (the stamp is written before the model, as the tables': stopped in between, the model is still the mod's own)
+        target = os.path.join(self.top, "romfs", *mt.SELF_MODELS["Child"].split("/"))
+        stamp = os.path.join(self.top, mt.MODELS_KEEP, *mt.SELF_MODELS["Child"].split("/")) + ".txt"
+        with stopped_at(target, stamp, nth=2) as seen:   # (the second of the two writes)
+            self.assertGreaterEqual(mt.merge_self_models(self.mods, "", self.lines.append), 1)
+        self.assertEqual(len(seen), 2)
+        mt.merge_self_models(self.mods, "", self.lines.append)   # (the next start does it again)
+        self.assertIn(self.tunic.tile_name("green", self.tunic.SELF_LETTER).encode() + b"\x00", self.model(self.top, "Child"))
+        mt.undo(self.mods, say=self.lines.append)
+        self.assertEqual(self.model(self.top, "Child"), self.child)
 
     def test_a_new_copy_of_the_mod_is_done_again_from_its_own(self):
         mt.merge_self_models(self.mods, "", self.lines.append)
