@@ -1823,10 +1823,14 @@ TEST_CASE("rando: a run whose actor table lacks the pack's rows holds the pack a
 
 // The stamp the kit writes beside a kept copy (merge_tables.py): a head line, then `out <the file it wrote, under the
 // mods folder> <length> <FNV-1a 64>` for the file in the seed now. `live` is under the seed's romfs.
-void PutKeptStamp(const fs::path& seed, const fs::path& stamp, const std::string& head, const fs::path& live) {
+std::string KeptStampLine(const fs::path& seed, const fs::path& live) {
     const std::string bytes = Get(seed / "romfs" / live);
-    Put(seed / stamp, head + "\nout " + seed.filename().string() + "/romfs/" + live.generic_string() + " " +
-                          std::to_string(bytes.size()) + " " + Fnv64Hex(bytes) + "\n");
+    return seed.filename().string() + "/romfs/" + live.generic_string() + " " + std::to_string(bytes.size()) + " " +
+           Fnv64Hex(bytes);
+}
+
+void PutKeptStamp(const fs::path& seed, const fs::path& stamp, const std::string& head, const fs::path& live) {
+    Put(seed / stamp, head + "\nout " + KeptStampLine(seed, live) + "\n");
 }
 
 // SeedFilesHash takes the kept copy of a file the kit rewrote only while its stamp names the file now (a seed built
@@ -1863,6 +1867,14 @@ void CheckKeptCopyNeedsItsStamp(const std::string& dir, const fs::path& live_rel
     PutKeptStamp(s, stamp_rel, head, live_rel);
     CHECK(SeedFilesHash(s) == old_own);
     CHECK(SeedFilesHash(s / "") == old_own);  // (a trailing separator on the folder changes nothing)
+    // A re-write that stopped after its stamp: `out` names a file that is not there, `prev` the earlier merge's file
+    // that is. The kept copy is still the seed's own.
+    Put(s / stamp_rel, head + "\nout something/else 3 0000000000000000\nfit k 5\nprev " + KeptStampLine(s, live_rel) +
+                           "\n");
+    CHECK(SeedFilesHash(s) == old_own);
+    // `prev` naming another file (a new file put in since): the file itself.
+    Put(s / "romfs" / live_rel, "new file");
+    CHECK(SeedFilesHash(s) == new_own);
 }
 
 TEST_CASE("rando: a kept size table counts only while its stamp names the table now") {
