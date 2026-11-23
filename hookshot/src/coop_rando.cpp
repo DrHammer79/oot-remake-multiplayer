@@ -537,20 +537,32 @@ namespace {
 // The mod's own copy of a file merge_tables.py rewrote in the mod (size table, actor rows, saved values, archive), kept
 // beside with a stamp whose second line `out <file path under the mods folder> <length> <FNV-1a 64>` names the file it
 // wrote. The kept copy counts only while that line names the file now: a seed built again in the same folder leaves the
-// old copy and stamp behind, and the new file is the seed. Same rule as merge_tables.py original_of / original_table.
-// Empty path: use the file itself.
+// old copy and stamp behind, and the new file is the seed. A `prev <file path> <length> <FNV-1a 64>` line (after `out`)
+// names the file the stamp replaced when that was the kit's own earlier output; a merge that stopped after its stamp
+// leaves that file live and `out` naming one never written, so either line counts. Same rule as merge_tables.py
+// stamp_names. Empty path: use the file itself.
 fs::path KeptCopy(const fs::path& folder, const fs::path& live, const fs::path& kept, const fs::path& stamp) {
     std::error_code ec;
     if (!fs::is_regular_file(kept, ec)) return {};
     std::ifstream in(stamp, std::ios::binary);
-    std::string head, out;
-    if (!in || !std::getline(in, head) || !std::getline(in, out)) return {};
-    if (!out.empty() && out.back() == '\r') out.pop_back();
+    std::string head, line;
+    if (!in || !std::getline(in, head)) return {};
+    std::vector<std::string> lines;  // the stamp's lines after the head, `out` first
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+    }
+    if (lines.empty()) return {};
     const std::string now = TablesStamp(folder.parent_path(), {live});  // "coop-tables 1\n<path> <length> <hash>\n"
     const std::size_t at = now.find('\n');
     const std::size_t end = now.find('\n', at + 1);
     if (at == std::string::npos || end == std::string::npos) return {};
-    return out == "out " + now.substr(at + 1, end - at - 1) ? kept : fs::path();
+    const std::string file = now.substr(at + 1, end - at - 1);
+    if (lines[0] == "out " + file) return kept;
+    for (std::size_t i = 1; i < lines.size(); ++i) {
+        if (lines[i] == "prev " + file) return kept;
+    }
+    return {};
 }
 }  // namespace
 
