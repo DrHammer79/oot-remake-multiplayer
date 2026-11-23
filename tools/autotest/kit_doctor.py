@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import socket
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +27,7 @@ TEMPLATE = os.path.join(HERE, "mcp.json.template")
 KIT_FILES = ("mcp_playtest.py", "playtest_client.py", "playtest_helpers.py", "live.py", "kit_tools.py", "lanes.py")
 DLL = "hookshot_coop.dll"
 SERVERS = ("oot-p1", "oot-p2", "oot-p3", "oot-p4", "oot-pair", "oot-playtest")   # oot-pair: mcp_playtest --pair
+DEFAULT_LOG_DIR = "playtest-logs"   # (mcp_playtest.py --log-dir default)
 
 
 class Report:
@@ -69,6 +71,16 @@ def check_python(r, version=None):
                % ".".join(map(str, v)))
     else:
         r.ok("python", ".".join(map(str, v)))
+
+
+def python_version(cmd):
+    """The (major, minor, micro) of the python a .mcp.json starts, or None when it cannot be asked."""
+    try:
+        out = hs.run_quiet([cmd, "-I", "-c", "import sys; print(*sys.version_info[:3])"], capture_output=True, text=True,
+                           timeout=15).stdout.split()
+        return tuple(int(x) for x in out[:3]) if len(out) >= 3 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 def check_repo(r, root=HERE):
@@ -174,8 +186,9 @@ def _opt(args, flag):
     return None
 
 
-def check_mcp(r, path, lane=None, which=shutil.which):
-    """A project .mcp.json: each oot server points at files that exist, the lane that is meant, and one log folder."""
+def check_mcp(r, path, lane=None, which=shutil.which, probe=None):
+    """A project .mcp.json: each oot server points at files that exist, the lane that is meant, and one log folder.
+    probe(command) gives the (major, minor, micro) of the python the file starts (None: not asked)."""
     if not os.path.isfile(path):
         r.fail("mcp", "no %s (python -I tools/autotest/kit_doctor.py --write-mcp %s --lane N makes one)"
                % (path, os.path.basename(path)))
@@ -213,13 +226,22 @@ def check_mcp(r, path, lane=None, which=shutil.which):
         elif name != "oot-playtest" and player != name[4:]:
             bad.append("--player is %s, not %s" % (player, name[4:]))
         got = _opt(args, "--lane")
-        if name != "oot-playtest" and lane is not None and str(got) != str(lane):
+        lane_ok = got is None or got.lstrip("-").isdigit()
+        if name != "oot-playtest" and not lane_ok:
+            bad.append("--lane is %r, not a lane number" % got)
+        elif name != "oot-playtest" and lane is not None and str(got) != str(lane):
             bad.append("--lane is %s, not %s" % (got, lane))
+        if probe and not bad and (which(cmd) or os.path.isfile(cmd)):
+            v = probe(cmd)
+            if v is None:
+                bad.append("command %r could not be asked for its version" % cmd)
+            elif v < (3, 10):
+                bad.append("command %r is Python %s: the kit needs 3.10 or newer" % (cmd, ".".join(map(str, v))))
         session = _opt(args, "--session")
         if session and not os.path.isdir(session if os.path.isabs(session) else os.path.join(base, session)):
             bad.append("--session %s is not a folder yet" % session)
-        if _opt(args, "--log-dir"):
-            logs.add(_opt(args, "--log-dir"))
+        if name != "oot-playtest":
+            logs.add(_opt(args, "--log-dir") or DEFAULT_LOG_DIR)   # (a missing --log-dir is the default folder)
         if bad:
             r.fail("mcp " + name, "; ".join(bad))
         else:
@@ -307,7 +329,7 @@ def main(argv=None):
         check_session(r, a.session)
     mcp = a.mcp or (".mcp.json" if os.path.isfile(".mcp.json") else None)
     if mcp:
-        check_mcp(r, mcp, a.lane)
+        check_mcp(r, mcp, a.lane, probe=python_version)
     else:
         r.warn("mcp", "no .mcp.json looked at (--mcp FILE, or --write-mcp FILE makes one)")
     if a.json:

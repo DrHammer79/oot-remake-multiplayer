@@ -174,6 +174,15 @@ class Mcp(unittest.TestCase):
             json.dump(data, f)
         return path
 
+    def good(self):
+        """A .mcp.json whose script paths and session folder exist."""
+        def point(servers):
+            for s in servers.values():
+                s["args"] = [os.path.join(kd.HERE, "mcp_playtest.py") if a == "tools/autotest/mcp_playtest.py" else a
+                             for a in s["args"]]
+        os.makedirs(os.path.join(self.d, "sess"), exist_ok=True)
+        return self.write(mutate=point)
+
     def check(self, path, lane=1):
         r = kd.Report()
         kd.check_mcp(r, path, lane, which=lambda c: c)
@@ -254,6 +263,47 @@ class Mcp(unittest.TestCase):
         self.assertIn("--lane is 1, not 2", said(r, "mcp oot-p1"))
         self.assertIn("command '' is not found", said(r, "mcp oot-playtest"))
         self.assertIn("different --log-dir", said(r, "mcp log-dir"))
+
+    def test_a_missing_log_dir_counts_as_the_default_folder(self):
+        def drop(servers):
+            a = servers["oot-p2"]["args"]
+            del a[a.index("--log-dir"):a.index("--log-dir") + 2]
+        r = self.check(self.write(mutate=drop))
+        self.assertIn("different --log-dir", said(r, "mcp log-dir"))
+        self.assertIn(kd.DEFAULT_LOG_DIR, said(r, "mcp log-dir"))
+
+        def both_default(servers):
+            for n in ("oot-p1", "oot-p2"):
+                a = servers[n]["args"]
+                del a[a.index("--log-dir"):a.index("--log-dir") + 2]
+        r = self.check(self.write(mutate=both_default))
+        self.assertNotIn("mcp log-dir", [n for _, n, _ in r.lines])
+
+    def test_a_lane_that_is_not_a_number_is_a_fail_not_a_crash(self):
+        def junk(servers):
+            a = servers["oot-p1"]["args"]
+            a[a.index("--lane") + 1] = "one"
+        r = self.check(self.write(mutate=junk), lane=None)
+        self.assertEqual(levels(r)["mcp oot-p1"], "FAIL")
+        self.assertIn("not a lane number", said(r, "mcp oot-p1"))
+
+    def test_the_python_the_file_starts_must_be_3_10_or_newer(self):
+        path = self.good()
+        asked = []
+        r = kd.Report()
+        kd.check_mcp(r, path, 1, which=lambda c: c, probe=lambda c: asked.append(c) or (3, 9, 1))
+        self.assertTrue(asked)
+        self.assertIn("Python 3.9.1", said(r, "mcp oot-p1"))
+        r = kd.Report()
+        kd.check_mcp(r, path, 1, which=lambda c: c, probe=lambda c: (3, 12, 0))
+        self.assertEqual(levels(r)["mcp oot-p1"], "OK")
+        r = kd.Report()
+        kd.check_mcp(r, path, 1, which=lambda c: c, probe=lambda c: None)
+        self.assertIn("could not be asked", said(r, "mcp oot-p1"))
+
+    def test_python_version_asks_the_real_interpreter(self):
+        self.assertEqual(kd.python_version(sys.executable), tuple(sys.version_info[:3]))
+        self.assertIsNone(kd.python_version(os.path.join(self.d, "no-such-python")))
 
     def test_a_missing_or_broken_file(self):
         r = kd.Report()
