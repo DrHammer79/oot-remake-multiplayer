@@ -522,7 +522,6 @@ class Game:
         try:
             # no reply carries the whole inventory or the world list unless asked for (get_state inventory=true)
             raw = self._call(name, args)
-            self._sample(raw)
             out = pc.slim_state(raw, inventory=name == "get_state" and bool(args.get("inventory")))
             if name == "get_state":
                 out = self.history.reply({self.player: out}, since)[self.player]
@@ -532,7 +531,7 @@ class Game:
                 live.touch(self.session)      # (a long walk_to or warp is not idle time)
 
     def _go_to(self, args):
-        c = self.client
+        c = self._driver()
         if args.get("place") is not None:
             st = pc.game_of(c.state())
             data = kit_route.load(st.get("scene") or "", self.route_dir)
@@ -571,19 +570,12 @@ class Game:
             return out
         raise ValueError("action: start, save or cancel")
 
-    def _sample(self, raw):
-        """A route being recorded takes the place in any reply that carries one."""
-        if self.recorder is None or not isinstance(raw, dict):
-            return
-        st = pc.game_of(raw) if isinstance(raw.get("state"), dict) or "pos" in raw else None
-        if st and st.get("pos"):
-            for e in raw.get("trace") or ():   # a walk_to's pushes: [frames, x, z, ...] on the way
-                if isinstance(e, list) and len(e) > 2:
-                    self.recorder.add([e[1], st["pos"][1], e[2]], st.get("scene"))
-            self.recorder.add(st["pos"], st.get("scene"))
+    def _driver(self):
+        """The client, wrapped to sample Link's place into the route being recorded (if any)."""
+        return kit_route.Sampling(self.client, self.recorder) if self.recorder is not None else self.client
 
     def _call(self, name, args):
-        c = self.client
+        c = self._driver()
         if name == "get_state":
             s = c.state()
             s.update(pc.world_words(s))   # life_word, enemy_near, danger beside the numbers

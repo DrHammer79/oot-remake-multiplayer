@@ -104,6 +104,62 @@ class RouteTest(unittest.TestCase):
         self.assertIn("hurt", out["reason"])
         self.assertEqual(len(c.walks), 1)
 
+    def test_a_hit_mid_leg_stops_too(self):
+        c = FakeWalk([0, 0, 1], free=False)       # the leg times out, and Link lost life on the way
+        c.life = 8
+        c2 = FakeWalk([0, 0, 1], free=False)
+        orig = Walker.__call__
+
+        def hurt_then_stuck(self, *a, **k):
+            r = orig(self, *a, **k)
+            self.c.life = 4
+            r["state"] = self.c.state()
+            return r
+        kit_route.pc.walk_to = lambda *a, **k: hurt_then_stuck(Walker(c2), *a, **k)
+        out = kit_route.go_to(c2, DATA, goal="c")
+        self.assertIn("hurt", out["reason"])
+
+    def test_sampling_keeps_the_corner_of_an_l_shaped_walk(self):
+        class Raw:
+            def __init__(self):
+                self.pos = [0.0, 1.0, 0.0]
+
+            def state(self):
+                return {"pos": list(self.pos), "scene": "S"}
+
+            def move(self, yaw, strength=1.0, frames=1, check=True):
+                import math
+                self.pos[0] += math.sin(math.radians(yaw)) * 1.0
+                self.pos[2] += math.cos(math.radians(yaw)) * 1.0
+                return {"ok": True, "state": {"pos": list(self.pos), "scene": "S"}}
+
+        raw = Raw()
+        rec = kit_route.Recorder("S")
+        rec.add(raw.pos, "S")
+        c = kit_route.Sampling(raw, rec)
+        for _ in range(20):
+            c.move(90)             # 20 m east ...
+        for _ in range(60):
+            c.move(0)              # ... then 60 m north: more than the walk_to trace keeps
+        corner = [p for p in rec.points if abs(p[0] - 20) < 1 and abs(p[2]) < 2.5]
+        self.assertTrue(corner, rec.points)
+        self.assertEqual(c.state()["scene"], "S")     # other calls pass through
+        self.assertLessEqual(len(rec.points), kit_route.MAX_POINTS)
+
+    def test_a_failed_check_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            rec = kit_route.Recorder("S")
+            rec.add([0, 0, 0], "S")
+            rec.add([5, 0, 0], "S")
+            orig = kit_route.kit_library.check_data
+            kit_route.kit_library.check_data = lambda p: (_ for _ in ()).throw(RuntimeError("boom"))
+            try:
+                with self.assertRaises(RuntimeError):
+                    kit_route.save_route(rec, "x-route", "", folder)
+            finally:
+                kit_route.kit_library.check_data = orig
+            self.assertEqual(os.listdir(folder), [])
+
     def test_unknown_place_and_xz(self):
         c = FakeWalk([0, 0, 1])
         self.assertIn("no position", self.go(c, goal="zzz")["reason"])

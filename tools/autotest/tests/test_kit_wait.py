@@ -32,7 +32,44 @@ def enemy(alive=True):
     return {"world": {"actors": [{"id": 3, "kind": "enemy", "alive": alive, "life": 4 if alive else 0, "dist": 3.0}]}}
 
 
+def stale(**kw):
+    return {"world": dict({"actors": [], "stale": True, "why": "no walk for 900 ms (a load, or the session ended)"}, **kw)}
+
+
+def no_session():
+    return {"world": {"actors": [], "why": "no co-op session"}}
+
+
 class WaitTest(unittest.TestCase):
+    def test_a_stale_list_is_not_an_empty_room(self):
+        c = Client([st(**enemy()), st(**stale())])
+        out, _ = kit_wait.wait_until(c, "enemies_clear", max_frames=16)
+        self.assertFalse(out["met"])
+        self.assertIn("no walk for", out["why"])
+
+    def test_no_session_is_not_an_empty_room(self):
+        out, _ = kit_wait.wait_until(Client([st(**no_session())]), "enemies_clear", max_frames=8)
+        self.assertFalse(out["met"])
+        self.assertIn("no co-op session", out["why"])
+
+    def test_a_stale_list_is_not_a_death(self):
+        c = Client([st(**enemy()), st(**stale())])
+        out, _ = kit_wait.wait_until(c, "enemy_dead", ident=3, max_frames=16)
+        self.assertFalse(out["met"])
+
+    def test_gone_after_seen_is_met_but_says_gone(self):
+        c = Client([st(**enemy()), st()])
+        out, _ = kit_wait.wait_until(c, "enemy_dead", ident=3, max_frames=16)
+        self.assertTrue(out["met"])
+        self.assertIn("gone", out["note"])
+
+    def test_a_string_id_is_a_number(self):
+        c = Client([st(**enemy()), st(**enemy(False))])
+        out, _ = kit_wait.wait_until(c, "enemy_dead", ident="3", max_frames=16)
+        self.assertTrue(out["met"])
+        with self.assertRaises(ValueError):
+            kit_wait.wait_until(c, "enemy_dead", ident="x")
+
     def test_already_true_costs_no_frame(self):
         c = Client([st(event=False)])
         out, _ = kit_wait.wait_until(c, "event_over")

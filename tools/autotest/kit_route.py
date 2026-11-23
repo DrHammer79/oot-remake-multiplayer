@@ -116,13 +116,13 @@ def go_to(client, data, goal=None, x=None, z=None):
         frames += r.get("frames", 0)
         st = pc.game_of(r["state"]) if isinstance(r.get("state"), dict) else pc.game_of(client.state())
         out.update(frames=frames, state=st)
-        if r.get("arrived"):
-            if isinstance(life, (int, float)) and isinstance(st.get("life"), (int, float)) and st["life"] < life:
-                return dict(out, reason="hurt (life %s -> %s)" % (life, st["life"]))
-            continue
         why = r.get("reason", "")
         if why == "scene changed" or st.get("scene") != scene:
             return dict(out, reason="scene changed", scene=st.get("scene"))
+        if isinstance(life, (int, float)) and isinstance(st.get("life"), (int, float)) and st["life"] < life:
+            return dict(out, reason="hurt (life %s -> %s)" % (life, st["life"]))   # (after a leg, arrived or not)
+        if r.get("arrived"):
+            continue
         pos = st.get("pos") or [wx, 0, wz]
         out["stuck_note"] = stuck_note(data, pos[0], pos[2])
         return dict(out, reason=why or "stopped")
@@ -143,6 +143,32 @@ class Recorder:
             return False
         self.points.append((round(pos[0], 2), round(pos[1], 2), round(pos[2], 2)))
         return True
+
+
+class Sampling:
+    """The game's client while a route is recorded: every move, step and input reply that carries Link's place adds it
+    to the recorder, so the corners of a walk are kept whichever tool walked it. Anything else goes to the client."""
+
+    def __init__(self, client, recorder):
+        self.client, self.recorder = client, recorder
+
+    def __getattr__(self, name):
+        return getattr(self.client, name)
+
+    def _take(self, r):
+        st = pc.game_of(r) if isinstance(r, dict) else None
+        if st and st.get("pos"):
+            self.recorder.add(st["pos"], st.get("scene"))
+        return r
+
+    def move(self, *a, **k):
+        return self._take(self.client.move(*a, **k))
+
+    def step(self, *a, **k):
+        return self._take(self.client.step(*a, **k))
+
+    def input(self, *a, **k):
+        return self._take(self.client.input(*a, **k))
 
 
 def save_route(rec, name, note, folder=DATA_DIR, title=None):
@@ -169,12 +195,15 @@ def save_route(rec, name, note, folder=DATA_DIR, title=None):
         names.append(n)
     data["routes"][name] = {"start": names[0], "steps": names[1:], "note": (note or "A recorded walk.")[:290]}
     tmp = os.path.join(folder, slug(rec.scene) + ".tmp.json")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(data, f, indent=1)
-        f.write("\n")
-    problems = [p for p in kit_library.check_data(tmp) if "the name is lowercase words" not in p]
-    if problems:
-        os.remove(tmp)
-        raise ValueError("the route would break the data file: " + "; ".join(problems[:3]))
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=1)
+            f.write("\n")
+        problems = [p for p in kit_library.check_data(tmp) if "the name is lowercase words" not in p]
+        if problems:
+            raise ValueError("the route would break the data file: " + "; ".join(problems[:3]))
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return {"saved": os.path.basename(path), "route": name, "points": len(names)}
