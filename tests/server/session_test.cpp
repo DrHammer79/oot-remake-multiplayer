@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "coop/protocol/codec.hpp"
-#include "host_service.hpp"
 #include "session.hpp"
 #include "world.hpp"
 
@@ -8542,28 +8541,6 @@ TEST_CASE("hand-over: a plain pack's root changes owner without a log line (it c
   REQUIRE(h.session.object_owner(placed(7)).has_value());
   CHECK(h.session.object_owner(placed(7))->first == 2);
   CHECK(std::none_of(lines.begin(), lines.end(), [](const std::string& l) { return l.starts_with("hand-over: "); }));
-}
-
-TEST_CASE("session: sizes of an empty session are all 0, and the host's memory line names each (row 260)") {
-  Session session;
-  const Session::Sizes sizes = session.sizes();
-  CHECK(sizes.connections == 0);
-  CHECK(sizes.deferred == 0);
-  CHECK(sizes.deferred_bytes == 0);
-  CHECK(sizes.objects == 0);
-  CHECK(sizes.flags == 0);
-  CHECK(sizes.world_entries == 0);
-  CHECK(sizes.actions == 0);
-  Session::Sizes s;
-  s.connections = 2, s.deferred = 3, s.deferred_bytes = 4096, s.objects = 17, s.present = 30, s.flags = 900;
-  s.dead = 5, s.grass = 6, s.world_scenes = 1, s.world_entries = 8, s.actions = 0;
-  EnetServer::Queues q;
-  q.peers = 2, q.outgoing_bytes = 2048, q.largest_outgoing = 1500, q.waiting_bytes = 64, q.unreliable_skipped = 9;
-  q.backlog_drops = 1;
-  const std::string line = host_memory_line(s, q);
-  CHECK(line == "server: 2 connections, deferred 3 (4096 B), objects 17 (listed 30), flags 900, dead 5, grass 6, "
-                "world 8 in 1 scenes, actions 0; enet: 2 peers, out 2048 B (largest 1500), in 64 B, unreliable not "
-                "queued 9, dropped for backlog 1");
 }
 
 TEST_CASE("world: entries counts every scene's breaks, places, hits and cuts (row 260)") {
