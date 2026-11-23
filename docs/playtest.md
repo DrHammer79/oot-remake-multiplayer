@@ -144,8 +144,8 @@ session: the games stay open after the boot, so the lock must too. A busy lane r
 that `start` starts), under the watchdog's own pid. The watchdog ends the session when:
 
 - `live.py stop` asks;
-- the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening);
-- no tester command came for `--idle-minutes` (10 by default; counted from the end of the boot): the tester handed
+- the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening; 0 means no limit);
+- no tester command came for `--idle-minutes` (10 by default, 0 means never; counted from the end of the boot): the tester handed
   off, crashed or paused;
 - a game ended by itself;
 - the watchdog is stopped by a signal, or fails.

@@ -203,6 +203,16 @@ def wait_lock(d, proc, timeout, clock=time.monotonic, sleep=time.sleep):
     return "the watchdog did not answer in %d s" % timeout
 
 
+def ends_text(max_minutes, idle_minutes):
+    """What the answer to `start` says about when the session ends on its own (0 = no limit)."""
+    parts = []
+    if max_minutes:
+        parts.append("after %d min" % max_minutes)
+    if idle_minutes:
+        parts.append("%d min without a command" % idle_minutes)
+    return (", or ".join(parts) if parts else "never by itself") + " (live.py stop, or a game that ended)"
+
+
 def start(a):
     d = os.path.abspath(a.session)
     os.makedirs(d, exist_ok=True)
@@ -239,7 +249,7 @@ def start(a):
     touch(d)
     out = {"ok": code == 0, "session": d, "lane": a.lane, "lock": lock, "port": port,
            "boot": "played" if code == 0 else "FAILED (see steps.txt): the session is closed",
-           "ends": "after %d min, or %d min without a command" % (a.max_minutes, a.idle_minutes)}
+           "ends": ends_text(a.max_minutes, a.idle_minutes)}
     if getattr(a, "playtest", False):
         out["playtest"] = {"p%d" % (i + 1): s["games"][x]["playtest_port"] for i, x in enumerate(TAGS)}
     if code != 0:
@@ -448,7 +458,7 @@ def watch(d, clock=time.time, sleep=time.sleep, alive=None, every=WATCH_EVERY):
         now = clock()
         if os.path.exists(stop_file(d)):
             return "stop asked"
-        if now - s["started"] >= s["max_s"]:
+        if s["max_s"] and now - s["started"] >= s["max_s"]:   # (0: no limit)
             return "maximum duration (%d min) reached" % (s["max_s"] // 60)
         if s.get("booted"):
             if s.get("idle_s") and now - activity(d, s) >= s["idle_s"]:
@@ -540,7 +550,7 @@ def main(argv=None):
     st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
                                       "tools/autotest/placement.py" % (hookshot.placement.ENV,
                                                                        hookshot.placement.DEFAULT_DISPLAY))
-    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length")
+    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length; 0: no limit")
     st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
     st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
     st.add_argument("--playtest", action="store_true",

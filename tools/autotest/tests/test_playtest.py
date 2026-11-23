@@ -201,6 +201,23 @@ class LiveWatchdog(unittest.TestCase):
         self.assertIn("maximum duration (30 min)", live.watch(self.d, clock=c, sleep=c.sleep, alive=lambda p: True))
         self.assertGreaterEqual(c.t, 1000.0 + 1800)
 
+    def test_maximum_minutes_0_means_no_limit(self):
+        # 0 must not end the session at once: only a stop request (here after a simulated day) does.
+        write_session(self.d, max_s=0, idle_s=0)
+        c = FakeClock(1000.0)
+
+        def sleep(s):
+            c.sleep(s)
+            if c.t > 1000.0 + 86400:
+                open(live.stop_file(self.d), "w").close()
+        self.assertEqual(live.watch(self.d, clock=c, sleep=sleep, alive=lambda p: True), "stop asked")
+        self.assertGreater(c.t, 1000.0 + 86400)
+
+    def test_no_limits_say_so_in_the_answer(self):
+        self.assertEqual(live.ends_text(0, 0), "never by itself (live.py stop, or a game that ended)")
+        self.assertEqual(live.ends_text(30, 10), "after 30 min, or 10 min without a command (live.py stop, or a game that ended)")
+        self.assertEqual(live.ends_text(0, 5), "5 min without a command (live.py stop, or a game that ended)")
+
     def test_idle_ends_only_after_the_boot(self):
         write_session(self.d, booted=False)
         live.touch(self.d)
