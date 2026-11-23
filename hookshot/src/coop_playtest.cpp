@@ -439,8 +439,8 @@ std::string Handle(const Request& r) {
         if (!gate.Pause(kHoldWait)) return fail("timeout", "no frame came to hold at");
         const auto camera = CoopCamera::Latest();
         if (!camera || !MoveAxes(camera->clip_from_world, r.yaw, r.strength)) {
-            return fail("no_camera", "no game camera to steer by (co-op off, or no frame drawn with the game's camera "
-                                     "yet: a title, a load): use input with a stick instead");
+            return fail("no_camera", "no game camera to steer by (no frame drawn with the game's camera yet: a title, a "
+                                     "load): use input with a stick instead");
         }
         Request pad = r;
         pad.stick.reset(), pad.rstick.reset(), pad.buttons.clear();
@@ -726,6 +726,7 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     // others keep a still puppet of this player (docs/playtest.md "Frame control").
     g_gate->OnHeld([](bool held) { CoopHook::SetHeld(held); });
     g_enabled.store(true);
+    CoopCamera::SetToolWanted(true);  // `move` steers by the camera when solo or before a session too
     CoopWorldSnapshot::TheStore().Enable(&BridgeFrame);  // the object walk fills the `world` list from now on
     g_verbs_runner = EnvIsOn(Env("LICHII_COOP_PLAYTEST_VERBS"));
     g_verbs_cheats = CoopCheats::On();
@@ -749,6 +750,7 @@ void AtFrame() {
 void Stop() {
     if (!g_enabled.exchange(false)) return;
     g_stop.store(true);
+    CoopCamera::SetToolWanted(false);
     CoopWorldSnapshot::TheStore().Disable();
     g_gate->Resume();
     if (g_thread.joinable()) g_thread.join();

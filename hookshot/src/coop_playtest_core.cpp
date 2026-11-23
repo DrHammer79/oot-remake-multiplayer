@@ -204,13 +204,13 @@ MoveHold::Counts MoveHold::Stop() {
 }
 
 bool MoveHold::On() const {
-    std::lock_guard lock(mu_);
-    return on_;
+    return on_.load(std::memory_order_acquire);
 }
 
 bool MoveHold::Apply(const std::optional<std::array<float, 16>>& camera, std::int32_t stick[4]) {
+    if (!on_.load(std::memory_order_acquire)) return false;  // no move: no lock taken
     std::lock_guard lock(mu_);
-    if (!on_) return false;
+    if (!on_) return false;                                  // stopped since
     ++counts_.reads;
     const auto axes = camera ? MoveAxes(*camera, yaw_, strength_) : std::nullopt;
     if (!axes) {

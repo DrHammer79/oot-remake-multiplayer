@@ -187,6 +187,35 @@ class Mcp(unittest.TestCase):
             self.assertNotIn(bad, text)
         self.assertIn("{LANE}", text)
 
+    def test_a_pair_server_needs_pair_and_no_player(self):
+        def pair(servers, extra=(), drop=None):
+            servers.clear()
+            args = ["-I", os.path.join(kd.HERE, "mcp_playtest.py"), "--pair", "--lane", "1", "--log-dir", "logs"]
+            servers["oot-pair"] = {"command": "python", "args": [x for x in args if x != drop] + list(extra)}
+        r = self.check(self.write(mutate=pair))
+        self.assertEqual(levels(r), {"mcp oot-pair": "OK"}, r.text())
+        self.assertIn("bridge ports p1 %d, p2 %d" % (kd.pc.port_for("p1", 1), kd.pc.port_for("p2", 1)),
+                      said(r, "mcp oot-pair"))
+        r = self.check(self.write(mutate=lambda s: pair(s, ["--player", "p1"])))
+        self.assertIn("takes no --player", said(r, "mcp oot-pair"))
+        r = self.check(self.write(mutate=lambda s: pair(s, drop="--pair")))
+        self.assertIn("do not have --pair", said(r, "mcp oot-pair"))
+
+    def test_a_pair_server_next_to_the_per_game_servers_fails(self):
+        def both(servers):
+            for v in servers.values():
+                v["args"] = [os.path.join(kd.HERE, "mcp_playtest.py") if x == "tools/autotest/mcp_playtest.py" else x
+                             for x in v["args"]]
+            servers.pop("oot-playtest", None)
+            servers["oot-pair"] = {"command": "python", "args": ["-I", os.path.join(kd.HERE, "mcp_playtest.py"),
+                                                                 "--pair", "--lane", "1", "--log-dir", "logs"]}
+        os.makedirs(os.path.join(self.d, "sess"))
+        r = self.check(self.write(mutate=both))
+        self.assertTrue(r.failed(), r.text())
+        fails = [t for level, n, t in r.lines if level == "FAIL"]
+        self.assertEqual(len(fails), 1, r.text())
+        self.assertIn("registered with oot-p1 and oot-p2", fails[0])
+
     def test_render_fills_the_placeholders_and_drops_what_is_not_given(self):
         data = kd.render_mcp(kd.TEMPLATE, 2, "sess", "logs")
         p1 = data["mcpServers"]["oot-p1"]["args"]

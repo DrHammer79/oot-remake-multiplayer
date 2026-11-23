@@ -213,7 +213,7 @@ class StateHistory:
 
 READ_ONLY = frozenset(("state", "get_state", "get_world", "get_actor", "log", "check_logs", "session_status", "pause",
                        "resume", "shot", "screenshot"))   # nothing to run again: they only look (or move a log cursor)
-NAME = re.compile(r"^(oot-p[1-4]|oot-playtest|live)$")
+NAME = re.compile(r"^(oot-p[1-4]|oot-pair|oot-playtest|live)$")   # oot-pair: mcp_playtest --pair (p1 and p2)
 
 
 class CallLog:
@@ -257,7 +257,8 @@ def replay(files, session=None, lane=None, log_dir=None, include_reads=False, in
     """Runs the calls of a call log again, in order. Calls that only look are left out (`include_reads`), and so are the
     ones that failed the first time (`include_failed`). It stops at the first call that fails now (`keep_going`: runs on).
     `runner(server, tool, args)` is what runs one call (a test gives its own); the default drives the games of `session`
-    (server oot-p1..p4: that game's bridge, on `lane`'s ports; oot-playtest and live: the session's own tools).
+    (server oot-p1..p4: that game's bridge, on `lane`'s ports; oot-pair: p1 and p2 in step, as --pair runs them;
+    oot-playtest and live: the session's own tools).
     Returns {"ran", "skipped", "failed": [[position, error]]}."""
     calls = read_calls(files)
     runner = runner or _Runner(session, lane, log_dir)
@@ -295,6 +296,7 @@ class _Runner:
     def __init__(self, session, lane, log_dir):
         self.session, self.lane, self.log_dir = session, lane, log_dir or "playtest-logs"
         self.games = {}
+        self.pair = None   # the oot-pair calls' Pair, over the same Games
 
     def __call__(self, server, tool, args):
         import mcp_playtest
@@ -303,11 +305,16 @@ class _Runner:
             if not self.session:
                 raise ValueError("a session folder is needed (--session)")
             return mcp_playtest.call(self.session, tool, args)
-        player = server[4:]
-        if player not in self.games:
-            self.games[player] = mcp_playtest.Game(player, pc.Client(pc.port_for(player, self.lane)),
-                                                   os.path.abspath(self.log_dir), self.session)
-        return self.games[player].call(tool, args)
+        def game(player):   # one client per game: a bridge serves one at a time, so oot-p1 and oot-pair share it
+            if player not in self.games:
+                self.games[player] = mcp_playtest.Game(player, pc.Client(pc.port_for(player, self.lane)),
+                                                       os.path.abspath(self.log_dir), self.session)
+            return self.games[player]
+        if server == "oot-pair":
+            if self.pair is None:
+                self.pair = mcp_playtest.Pair({q: game(q) for q in ("p1", "p2")})
+            return self.pair.answer(tool, args)
+        return game(server[4:]).call(tool, args)
 
     def close(self):
         for g in self.games.values():

@@ -12,11 +12,13 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import argparse  # noqa: E402
 import desync_check  # noqa: E402
+import kit_tools  # noqa: E402
 import live  # noqa: E402
 import mcp_playtest  # noqa: E402
 import playtest_client as pc  # noqa: E402
@@ -53,6 +55,7 @@ class FakeGame:
         self.flip_at = None     # (frame): the stick's sign turns over from this frame on (a model that changes under the walk)
         self.move_camera = True  # the module has a camera to turn a `move`'s yaw into the stick
         self.warp_frames = 0    # frames a warp runs before it answers
+        self.cut = None         # an input or a step runs at most this many frames (cut short: an event, a load)
         self.away_from = None   # (x, z): Link ignores the stick and walks directly away from this point
         self.faced = None       # the (x, z) of the last `face`
         self.kill_seqs, self.deaths, self.death_delay = set(), [], 3   # a struck kill's actor dies this many frames later
@@ -134,7 +137,8 @@ class FakeGame:
             start = self.frame
             if cmd == "input" and self.on_press and m.get("buttons"):
                 self.on_press(m["buttons"])
-            self.run(m.get("frames", 1), m.get("stick"))
+            frames = m.get("frames", 1) if self.cut is None else min(self.cut, m.get("frames", 1))
+            self.run(frames, m.get("stick"))
             self.paused = True
             return {"ok": True, "from": start, "state": self.state()}
         if cmd == "move":
@@ -891,6 +895,10 @@ class PairServer(unittest.TestCase):
         by = {t["name"]: t for t in self.pair.tools}
         self.assertEqual(list(by), [t["name"] for t in mcp_playtest.PLAYER_TOOLS])
         for name, t in by.items():
+            if name in ("pause", "resume"):   # both games always: no player to give
+                self.assertNotIn("player", t["inputSchema"]["properties"], name)
+                self.assertNotIn("player", t["inputSchema"].get("required", []), name)
+                continue
             self.assertEqual(t["inputSchema"]["properties"]["player"]["enum"], ["p1", "p2"])
             self.assertEqual("player" in t["inputSchema"].get("required", []), name not in ("get_state", "step"), name)
             self.assertEqual("Both games run the same frames" in t["description"],
@@ -933,6 +941,34 @@ class PairServer(unittest.TestCase):
             self.pair.answer("walk_to", {"x": 1, "z": 0})
         with self.assertRaisesRegex(ValueError, "player is one of"):
             self.pair.answer("press", {"player": "p3"})
+
+    def test_pause_and_resume_are_both_games(self):
+        # One game resumed alone would run free while the other is held: the two would drift apart.
+        r = self.pair.answer("resume", {"player": "p1"})
+        self.assertEqual(sorted(r["games"]), ["p1", "p2"])
+        self.assertEqual({p: g.paused for p, g in self.games.items()}, {"p1": False, "p2": False})
+        self.pair.answer("pause", {})
+        self.assertEqual({p: g.paused for p, g in self.games.items()}, {"p1": True, "p2": True})
+
+    def test_a_call_cut_short_runs_only_what_ran_in_the_other_game(self):
+        self.games["p1"].cut = 4   # an event cuts every press of p1 to 4 frames
+        r = self.pair.answer("press", {"player": "p1", "buttons": ["A"], "frames": 10})
+        self.assertEqual(self.frames(), {"p1": 1004, "p2": 1004})   # p2 not ahead
+        self.assertEqual(r["other"], {"player": "p2", "frames": 4, "caught_up": 0, "short": 6, "in_step": True})
+
+    def test_a_pair_call_log_replays_in_step_on_the_same_bridges(self):
+        # The replay runner runs oot-pair lines through a Pair over the very Games it uses for oot-p1 and oot-p2 lines
+        # (a bridge serves one client at a time).
+        log = os.path.join(self.tmp.name, "calls.jsonl")
+        kit_tools.CallLog(log, "oot-p1").write("step", {"frames": 2}, True, None, 1)
+        kit_tools.CallLog(log, "oot-pair").write("press", {"player": "p2", "buttons": ["A"], "frames": 3}, True, None, 2)
+        ports = {p: g.port for p, g in self.games.items()}
+        runner = kit_tools._Runner(None, None, self.tmp.name)
+        with mock.patch.object(pc, "port_for", lambda player, lane=None: ports[player]):
+            r = kit_tools.replay([log], runner=runner, say=lambda _: None)
+        self.assertEqual((r["ran"], r["failed"]), (2, []))
+        self.assertEqual(self.frames(), {"p1": 1005, "p2": 1003})
+        self.assertIs(runner.pair.games["p1"], runner.games["p1"])
 
     def test_served_as_oot_pair(self):
         reqs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},

@@ -595,15 +595,19 @@ CALLS_FILE = "calls.jsonl"
 NO_FRAME_TOOLS = frozenset(("get_state", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
                             "log", "check_logs", "session_status"))
 BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
-IN_STEP = (" Both games run the same frames: every frame this player's game runs (walks, presses, steps, a warp, a "
-           "test line), the other game runs too, so neither is held while the other plays. `player` is the game. ")
+ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
+IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "
+           "presses and steps as they happen; a warp's or a test line's frames right after it). `player` is the game. ")
 
 
 def _pair_tool(tool, players):
     t = json.loads(json.dumps(tool))
     schema = t["inputSchema"]
     schema.setdefault("properties", {})["player"] = {"type": "string", "enum": list(players)}
-    if t["name"] in BOTH_TOOLS:
+    if t["name"] in ALWAYS_BOTH:
+        t["description"] += " Both games, always (`games`, by player): a pair is held or runs together."
+        del schema["properties"]["player"]
+    elif t["name"] in BOTH_TOOLS:
         t["description"] += " With no `player`: both games (`games`, by player)."
     else:
         schema["required"] = ["player"] + list(schema.get("required", []))
@@ -630,7 +634,7 @@ class Pair:
     def call(self, name, args):
         rest = {k: v for k, v in args.items() if k != "player"}
         player = args.get("player")
-        if player is None and name in BOTH_TOOLS:
+        if name in ALWAYS_BOTH or (player is None and name in BOTH_TOOLS):
             return {"games": {p: g.call(name, dict(rest)) for p, g in self.games.items()}}
         if player not in self.games:
             raise ValueError("player is one of %s" % ", ".join(self.games))
@@ -639,7 +643,7 @@ class Pair:
             return game.call(name, rest)
         own = game.client
         start = own.hello()["frame"]
-        pair = ph.InStep(own, other.client)
+        pair = ph.InStep(own, other.client, start)
         game.client = pair
         note = {"player": other.player}
         try:
@@ -647,10 +651,12 @@ class Pair:
         finally:
             game.client = own
             try:
-                note["caught_up"] = pair.catch_up((own.last_frame or start) - start)
+                note["caught_up"] = pair.catch_up()
             except (OSError, ValueError, pc.BridgeError) as e:
                 note["error"] = "%s: %s" % (e.__class__.__name__, e)
             note["frames"] = pair.stepped
+            if pair.short:
+                note["short"] = pair.short   # frames asked that this game did not run: the other did not run them
             note["in_step"] = "error" not in note
             self.last_other = note
 

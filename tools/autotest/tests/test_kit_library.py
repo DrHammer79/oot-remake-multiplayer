@@ -135,6 +135,30 @@ class Scripts(Folder):
         self.assertEqual(kit_library.check_call(ok, self.table), [])
         self.says(kit_library.check_call({"server": "live", "tool": "get_world", "args": {}}, self.table), "no tool")
 
+    def test_pair_calls_are_checked_with_a_player(self):
+        # mcp_playtest --pair writes server oot-pair: the player tools, each with the game it went to.
+        one = lambda c: kit_library.check_call(c, self.table)  # noqa: E731
+        self.assertEqual(one({"server": "oot-pair", "tool": "press", "args": {"player": "p2", "buttons": ["A"]}}), [])
+        self.assertEqual(one({"server": "oot-pair", "tool": "step", "args": {"frames": 3}}), [])   # both games
+        self.assertEqual(one({"server": "oot-pair", "tool": "resume", "args": {}}), [])
+        self.says(one({"server": "oot-pair", "tool": "press", "args": {"buttons": ["A"]}}), "missing argument player")
+        self.says(one({"server": "oot-pair", "tool": "press", "args": {"player": "p3"}}), "is not one of")
+        self.says(one({"server": "oot-p1", "tool": "press", "args": {"player": "p1"}}), "no argument player")
+        self.says(one({"server": "oot-pairs", "tool": "step", "args": {}}), "oot-pair")
+
+    def test_a_pair_call_log_is_read_saved_and_replayed(self):
+        log = os.path.join(self.root, "calls.jsonl")
+        w = lambda tool, args: kit_tools.CallLog(log, "oot-pair").write(tool, args, True, None, 1)  # noqa: E731
+        w("press", {"player": "p1", "buttons": ["A"], "frames": 2})
+        w("get_state", {"player": "p2"})
+        self.assertEqual([c["server"] for c in kit_tools.read_calls([log])], ["oot-pair", "oot-pair"])
+        out = os.path.join(self.root, "scripts", "a-pair.jsonl")
+        self.assertEqual(kit_library.save_script([log], out, "A press.", "KokiriForest_Child", "Start.", "Nothing."), 1)
+        self.assertEqual(kit_library.check_script(out, self.table), [])
+        ran = []
+        kit_tools.replay([out], runner=lambda s, t, a: ran.append((s, t, a)), say=lambda _: None)
+        self.assertEqual(ran, [("oot-pair", "press", {"player": "p1", "buttons": ["A"], "frames": 2})])
+
 
 class SavingAScript(Folder):
     def test_a_call_log_becomes_a_script_without_looks_and_failures(self):
