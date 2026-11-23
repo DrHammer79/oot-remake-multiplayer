@@ -2137,6 +2137,95 @@ function Set-KitOptionsCharacterSelect([string]$Kit, [string]$Value) {
     } catch { }
 }
 
+# black-cs-01112: a second Character Select copy. The game and its build take every mod folder (host/mods.c and
+# nx2/exefs_patches.py find_mods: a folder holding romfs, exefs or cheats, up to four deep, none of its folders named
+# with '-', '_' or '.' first). So a copy the player put in by hand beside the kit's (another folder name, or under
+# contents\0400486024DEC000\, the emulators' place) puts TWO of his code patches into one game: where both write a
+# byte the later one wins, so two releases' code are mixed, and the hand copy keeps his customizer. Both romfs load
+# too, each file from one of them. A copy is a folder whose romfs has his page's graph (Sequence\CharacterMenu.module.ainb)
+# and that has an exefs folder. The pack (contents\...\coop-puppet: our own Characters page when his is not there) is
+# never one. @{ Dir (relative, '/'); Path; Off (its Mods tab row says off: the game loads none of it and its code is
+# not built in) } for each, in the game's find order.
+function Get-KitCharacterSelectCopies([string]$ModsDir) {
+    if (-not (Test-Path -LiteralPath $ModsDir -PathType Container)) { return @() }
+    $root = ([System.IO.Path]::GetFullPath($ModsDir)).TrimEnd('\') + '\'
+    $off = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $list = Join-Path $ModsDir 'coop-mods.list'
+    if (Test-Path -LiteralPath $list -PathType Leaf) {
+        $lines = @(([System.IO.File]::ReadAllText($list, [System.Text.UTF8Encoding]::new($false))) -split "`n")
+        if ($lines[0].TrimEnd("`r") -ceq 'coop-mods 1') {
+            $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($line in @($lines | Select-Object -Skip 1)) {
+                if (-not ($line.TrimEnd("`r") -cmatch '^(on|off) (.+)$')) { continue }
+                $fold = ConvertTo-KitModFold $Matches[2]
+                if ($seen.Add($fold) -and $Matches[1] -ceq 'off') { [void]$off.Add($fold) }   # (each name's first row, as the game reads it)
+            }
+        }
+    }
+    $walk = {
+        param([string]$dir, [int]$depth)
+        foreach ($d in @(Get-ChildItem -LiteralPath $dir -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            if ($d.Name -match '^[-_.]') { continue }
+            $isMod = $false
+            foreach ($p in 'romfs', 'exefs', 'cheats') { if (Test-Path -LiteralPath (Join-Path $d.FullName $p) -PathType Container) { $isMod = $true } }
+            if ($isMod) {
+                $rel = $d.FullName.Substring($root.Length) -replace '\\', '/'
+                if ($d.Name -ine 'coop-puppet' -and
+                    (Test-Path -LiteralPath (Join-Path $d.FullName 'romfs\Sequence\CharacterMenu.module.ainb') -PathType Leaf) -and
+                    (Test-Path -LiteralPath (Join-Path $d.FullName 'exefs') -PathType Container)) {
+                    $found.Add(@{ Dir = $rel; Path = $d.FullName; Off = $off.Contains((ConvertTo-KitModFold $rel)) })
+                }
+                continue
+            }
+            if ($depth -lt 4) { & $walk $d.FullName ($depth + 1) }
+        }
+    }
+    $found = New-Object System.Collections.Generic.List[object]
+    & $walk $ModsDir 1
+    return @($found.ToArray())
+}
+
+# Every Character Select copy but the kit's own (mods\<pin folder>) that the game would load is set aside: renamed
+# with '_' first in its own folder (the game and its build skip such a folder; the player renames it back to use it),
+# so one code patch and one romfs go into the game. Nothing is set aside when the kit's copy is switched off in the
+# Mods tab (the player chose his own copy) or not there; two copies there and none of them the kit's: said, left as
+# they are (which one the player wants is theirs to say). Run while the game is closed (the start, before the build's
+# stamp: a copy set aside changes it, so the game is built again with one code patch). @{ Changed; Lines }.
+function Resolve-KitCharacterSelectCopies([string]$Kit, [string]$ModsDir) {
+    $r = @{ Changed = $false; Lines = @() }
+    $op = Get-KitCharacterSelectPin $Kit
+    if (-not $op) { return $r }
+    $copies = @(Get-KitCharacterSelectCopies $ModsDir)
+    $mineFold = ConvertTo-KitModFold $op.folder
+    $mine = @($copies | Where-Object { (ConvertTo-KitModFold $_.Dir) -ceq $mineFold })
+    $others = @($copies | Where-Object { (ConvertTo-KitModFold $_.Dir) -cne $mineFold -and -not $_.Off })
+    if (-not $others.Count) { return $r }
+    if (-not $mine.Count -or $mine[0].Off) {
+        if ($others.Count -gt 1) {
+            $r.Lines += "Character Select: $($others.Count) copies are on ($((@($others | ForEach-Object { "mods\$($_.Dir -replace '/', '\')" })) -join ', ')): " +
+                        'their code patches go into one game and can give a black screen or a crash. Switch all but one off in the Mods tab.'
+        }
+        return $r
+    }
+    foreach ($c in $others) {
+        $parent = Split-Path -Parent $c.Path
+        $leaf = Split-Path -Leaf $c.Path
+        $to = Join-Path $parent "_$leaf"
+        for ($i = 2; Test-Path -LiteralPath $to; $i++) { $to = Join-Path $parent "_$leaf.$i" }
+        try {
+            [System.IO.Directory]::Move($c.Path, $to)
+            $r.Changed = $true
+            $r.Lines += "Character Select: a second copy, mods\$($c.Dir -replace '/', '\'), was set aside as $($to.Substring($ModsDir.TrimEnd('\').Length + 1)): " +
+                        "two copies put two code patches into one game (a black screen or a crash). The kit's copy, mods\$($op.folder), stays. " +
+                        "To play with yours: switch the kit's off in the Mods tab, close the game, rename yours back."
+        } catch {
+            $r.Lines += "Character Select: a second copy, mods\$($c.Dir -replace '/', '\'), could not be set aside ($("$($_.Exception.Message)".Trim())): " +
+                        'two code patches go into one game and can give a black screen or a crash. Close the game, then remove one of them.'
+        }
+    }
+    return $r
+}
+
 # The start's step (play.ps1, before Get-KitHookshotNeed): every kit with the pin gets the Characters page (Snail's
 # default part); the NPC characters only on the player's yes (asked once; character_select = yes|no in
 # coop-options.ini or NPC-characters.bat changes it). $true when the mods folder changed (the game build and the pack
@@ -2157,7 +2246,10 @@ function Invoke-KitCharacterSelectStep([string]$Kit, [string]$GameDir, [int]$Sec
     }
     $r = Install-KitCharacterSelect $Kit $mods '' $(if ($choice -eq 'yes') { 'full' } else { 'ui' })
     foreach ($l in $r.Lines) { Write-Host $l -ForegroundColor $(if ($r.Ok -or $r.Why -eq 'offline') { 'Gray' } else { 'Yellow' }) }
-    return $r.Changed
+    # (black-cs-01112: one copy of his mod in the game, after the kit's own is in place)
+    $two = Resolve-KitCharacterSelectCopies $Kit $mods
+    foreach ($l in $two.Lines) { Write-Host $l -ForegroundColor Yellow }
+    return ($r.Changed -or $two.Changed)
 }
 
 # The resource size tables (romfs\System\Resource\*.rsizetable.zs) of the mods the game loads besides the randomizer's

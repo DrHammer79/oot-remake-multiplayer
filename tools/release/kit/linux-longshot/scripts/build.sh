@@ -352,6 +352,65 @@ elif cmd == "complete":
         "Its code is under the MIT licence (Copyright (c) 2026 snaildev99; LICENSE.txt here when it could be fetched).",
         "The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.",
         "Switch it off in the game'"'"'s Mods tab.", ""]).encode())
+elif cmd == "copies":
+    # black-cs-01112, as kit-paths.ps1 Resolve-KitCharacterSelectCopies: every Character Select copy the game loads (a
+    # mod folder, found as host/mods.c finds them, whose romfs has Sequence/CharacterMenu.module.ainb and that has exefs;
+    # never the pack coop-puppet) but the kit own (mods/<folder>) is set aside as _<name> when the kit copy is there and
+    # on: two copies put two code patches into one game. A row "off" in coop-mods.list: left alone.
+    mods, mine = sys.argv[2], sys.argv[3]
+    fold = lambda n: "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in n.replace(chr(92), "/"))
+    off, seen = set(), set()
+    try:
+        rows = open(os.path.join(mods, "coop-mods.list"), encoding="utf-8").read().split(chr(10))
+    except OSError:
+        rows = []
+    if rows and rows[0].rstrip(chr(13)) == "coop-mods 1":
+        for row in rows[1:]:
+            m = re.match(r"^(on|off) (.+)$", row.rstrip(chr(13)))
+            if m and fold(m.group(2)) not in seen:
+                seen.add(fold(m.group(2)))
+                if m.group(1) == "off":
+                    off.add(fold(m.group(2)))
+    copies = []
+    def walk(d, name, depth):
+        try:
+            entries = sorted(os.listdir(d))
+        except OSError:
+            return
+        for e in entries:
+            p = os.path.join(d, e)
+            if e.startswith((".", "-", "_")) or not os.path.isdir(p):
+                continue
+            rel = name + "/" + e if name else e
+            if any(os.path.isdir(os.path.join(p, x)) for x in ("romfs", "exefs", "cheats")):
+                if (e.lower() != "coop-puppet" and os.path.isfile(os.path.join(p, "romfs", "Sequence", "CharacterMenu.module.ainb"))
+                        and os.path.isdir(os.path.join(p, "exefs"))):
+                    copies.append((rel, p, fold(rel) in off))
+                continue
+            if depth < 4:
+                walk(p, rel, depth + 1)
+    walk(mods, "", 1)
+    own = [c for c in copies if fold(c[0]) == fold(mine)]
+    others = [c for c in copies if fold(c[0]) != fold(mine) and not c[2]]
+    if others and (not own or own[0][2]):
+        if len(others) > 1:
+            print("Character Select: %d copies are on (%s): their code patches go into one game and can give a black screen "
+                  "or a crash. Switch all but one off in the Mods tab." % (len(others), ", ".join("mods/" + c[0] for c in others)))
+        others = []
+    for rel, p, _ in others:
+        to = os.path.join(os.path.dirname(p), "_" + os.path.basename(p))
+        i = 2
+        while os.path.exists(to):
+            to = os.path.join(os.path.dirname(p), "_%s.%d" % (os.path.basename(p), i))
+            i += 1
+        try:
+            os.rename(p, to)
+            print("Character Select: a second copy, mods/%s, was set aside as %s: two copies put two code patches into one "
+                  "game (a black screen or a crash). The kit copy, mods/%s, stays. To play with yours: switch the kit copy "
+                  "off in the Mods tab, close the game, rename yours back." % (rel, os.path.relpath(to, mods), mine))
+        except OSError as ex:
+            print("Character Select: a second copy, mods/%s, could not be set aside (%s): two code patches go into one game "
+                  "and can give a black screen or a crash. Close the game, then remove one of them." % (rel, ex.strerror or ex))
 elif cmd == "strip":
     data, dropped = strip(rd(sys.argv[2]))
     fresh(os.path.abspath(sys.argv[3]), data)
@@ -561,6 +620,10 @@ with zipfile.ZipFile(z) as f:
     return 0
 }
 ((check_only)) || charsel_step
+# black-cs-01112: one copy of his mod in the game (a hand copy beside the kit copy is set aside; kit-paths.ps1 Resolve-KitCharacterSelectCopies)
+if ! ((check_only)) && [[ -d $CS_HOME ]] && cs_folder=$(charsel_folder); then
+    while IFS= read -r l; do [[ -n $l ]] && warn "$l"; done < <(charsel_py copies "$CS_HOME" "$cs_folder" || true)
+fi
 
 game_stamp=$GAME/coop-built-from.txt
 # The mods' code patches the game is built with (patches 0034/0035: mods/.../exefs/*.ips and *.pchtxt, folders starting

@@ -1069,6 +1069,30 @@ try {
         $r = Install-KitCharacterSelect $ck $cm
         Confirm-KitCharacterSelect $ck $cm
         Check ($r.Changed -and -not (Test-Path -LiteralPath $csPrev)) 'Character Select confirm: v2 built, v1 dropped' 
+        # black-cs-01112: a second copy (the player's own, beside the kit's) puts two code patches into one game. Copies:
+        # his page's graph in romfs + an exefs folder, found as the game finds mods; the pack is never one.
+        $csHand = Join-Path $cm 'contents\0400486024DEC000\OoT Character Select'; $csOther = Join-Path $cm 'My CS'; $csOffOne = Join-Path $cm 'Off CS'
+        $csPackCopy = Join-Path $cm 'contents\0400486024DEC000\coop-puppet'
+        foreach ($d in $csHand, $csOther, $csOffOne, $csPackCopy) {
+            Write-File (Join-Path $d 'romfs\Sequence\CharacterMenu.module.ainb') 'graph'
+            New-Item -ItemType Directory -Force -Path (Join-Path $d 'exefs') | Out-Null
+        }
+        Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`noff OoT Character Select`noff Off CS`n"
+        $cps = @(Get-KitCharacterSelectCopies $cm)
+        Check (($cps | ForEach-Object { "$($_.Dir)=$($_.Off)" }) -join ',' -ceq 'contents/0400486024DEC000/OoT Character Select=False,My CS=False,Off CS=True,OoT Character Select=True') "Character Select copies: found as the game finds mods, the pack left out, Mods tab Off read [$(($cps | ForEach-Object { $_.Dir }) -join ',')]"
+        $r = Resolve-KitCharacterSelectCopies $ck $cm
+        Check (-not $r.Changed -and (Test-Path -LiteralPath $csHand) -and (Test-Path -LiteralPath $csOther) -and ($r.Lines -join ' ') -match '2 copies are on') 'Character Select copies: the kit copy switched off -> the player chose; two of his on: said, nothing moved'
+        Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`non OoT Character Select`noff Off CS`n"
+        New-Item -ItemType Directory -Force -Path (Join-Path $cm '_My CS') | Out-Null   # (a name taken: .2)
+        $r = Resolve-KitCharacterSelectCopies $ck $cm
+        Check ($r.Changed -and -not (Test-Path -LiteralPath $csHand) -and (Test-Path -LiteralPath (Join-Path $cm 'contents\0400486024DEC000\_OoT Character Select\exefs')) -and
+               -not (Test-Path -LiteralPath $csOther) -and (Test-Path -LiteralPath (Join-Path $cm '_My CS.2\romfs')) -and (Test-Path -LiteralPath $csOffOne) -and
+               (Test-Path -LiteralPath $csPackCopy) -and (Test-Path -LiteralPath $csDir) -and @($r.Lines | Where-Object { $_ -match 'set aside' }).Count -eq 2) "Character Select copies: the kit copy on -> every other copy on is set aside with '_' (the Off one and the pack stay) [$($r.Lines -join ' | ')]"
+        Check (@(Get-KitCharacterSelectCopies $cm | Where-Object { -not $_.Off }).Count -eq 1) 'Character Select copies: one copy left on for the game and its build'
+        $r = Resolve-KitCharacterSelectCopies $ck $cm
+        Check (-not $r.Changed -and -not $r.Lines.Count) 'Character Select copies: a second start does nothing'
+        foreach ($d in (Join-Path $cm 'contents\0400486024DEC000\_OoT Character Select'), (Join-Path $cm '_My CS.2'), (Join-Path $cm '_My CS'), $csOffOne, $csPackCopy) { Remove-Item -LiteralPath $d -Recurse -Force }
+        Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`noff OoT Character Select`n"
         # A new pin whose download fails (his page unreachable here): the old copy stays, nothing half put in.
         Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ((Get-Content -LiteralPath (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') -Raw) -replace 'release=v2', 'release=v3' -replace '(?m)^url=.*$', 'url=https://127.0.0.1:9/cs')
         $r = Install-KitCharacterSelect $ck $cm

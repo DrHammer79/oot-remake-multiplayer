@@ -333,6 +333,18 @@ sed -i 's/^character_select = yes$/character_select = no/' "$D/coop-options.ini"
 check 'Character Select: character_select = no keeps the Characters page, takes the NPC part out, no download' \
     bash -c '[ $CODE -eq 0 ] && [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs" ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] &&
         grep -q "^v1 .* ui cz2$" "$2/coop-charsel.txt" && grep -q "exefs=OoT Character Select/exefs/" "$3/game/coop-built-from.txt" && ! grep -q downloading "$1"' _ "$tmp/build-cs4.txt" "$CS" "$D"
+# black-cs-01112: a hand copy beside the kit's (another name, or under contents/<title>, the emulators' place) puts a
+# second code patch into the game: the start sets every such copy aside with '_' (the game and its build skip it).
+for d in "$D/game/mods/contents/0400486024DEC000/OoT Character Select" "$D/game/mods/My CS"; do
+    mkdir -p "$d/romfs/Sequence" "$d/exefs"; : >"$d/romfs/Sequence/CharacterMenu.module.ainb"
+    printf 'IPS32EEOF' >"$d/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
+done
+OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs5.txt" 2>&1; export CODE=$?
+check 'Character Select copies: two hand copies beside the kit copy are set aside, said, one code patch left in the stamp' \
+    bash -c '[ $CODE -eq 0 ] && [ -d "$2/contents/0400486024DEC000/_OoT Character Select/exefs" ] && [ -d "$2/_My CS/romfs" ] &&
+        [ ! -e "$2/My CS" ] && [ ! -e "$2/contents/0400486024DEC000/OoT Character Select" ] && [ -d "$2/OoT Character Select/romfs" ] &&
+        [ "$(grep -c "a second copy, mods/.* was set aside" "$1")" = 2 ] && ! grep -q "My CS/exefs" "$3/game/coop-built-from.txt"' _ "$tmp/build-cs5.txt" "$D/game/mods" "$D"
+rm -rf "$D/game/mods/contents/0400486024DEC000/_OoT Character Select" "$D/game/mods/_My CS"
 # (player report 210: the UI-only pack was kept in data/pack-variants when the full one was made: put back, not made)
 check 'Character Select pack: full -> UI-only (NPC models taken out) puts the UI-only pack made before back (not made again)' \
     bash -c '! grep -q "^puppet_pack" "$1" && grep -q "puppet pack: the one made before for these characters is put back" "$2"' _ "$log" "$tmp/build-cs4.txt"
