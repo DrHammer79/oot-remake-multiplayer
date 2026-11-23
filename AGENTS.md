@@ -45,7 +45,7 @@ Online co-op for the Ocarina of Time remake on PC. Up to 16 players see each oth
 | `hookshot/patches/`, `hookshot/PIN` | Our small patches to Longshot and the commit they apply to |
 | `hookshot/compat/` | Stand-ins for the emulator API that `lichii/hook` uses |
 | `tests/` | doctest unit tests, one folder per area (`tests/lichii/` for `lichii/hook`, `tests/protocol/`, ...) |
-| `tools/` | `check_content.py`, `autotest/` (two-game tests, maintainer only), `release/` (kit scripts and their tests), `puppet_pack/`, `netsim/`, `game_scan/`, `coop_test/` |
+| `tools/` | `check_content.py`, `autotest/` (two-game tests, maintainer only), `playtest/` (shared play-test scripts and game data), `release/` (kit scripts and their tests), `puppet_pack/`, `netsim/`, `game_scan/`, `coop_test/` |
 | `docs/` | Design and player docs (below) |
 
 Where things are written down:
@@ -118,7 +118,9 @@ A new test file goes in the `add_executable(coop_tests ...)` list in `tests/CMak
 
 This section is only for a session that was handed **running test games** with the play-test bridge on and an MCP
 server per game (`oot-p1`, `oot-p2`, ...; set up by the maintainer: [docs/playtest.md](docs/playtest.md), "Playing
-through the bridge"). Everything above still holds. A coding session never starts games itself.
+through the bridge"). Everything above still holds. A coding session never starts games itself. The order to do things
+in (start, drive, read, shoot, replay) and the shared scripts and data folders (`tools/playtest/`) are in
+[docs/playtest-agents.md](docs/playtest-agents.md).
 
 - You control each game through its own tools (`get_state`, `get_world`, `get_actor`, `walk_to`, `press`, `step`, `warp`,
   `flag`, `give`, `kill`, `go_to_actor`, `attack`, `checkpoint`, `desync_check`, `check_logs`, `session_status`, `log`,
