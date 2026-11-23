@@ -1590,10 +1590,28 @@ TEST_CASE("objects: RouteLife: an enemy goes only through its game's own steps, 
     r = RouteLife(a);
     CHECK(r.route == LifeRoute::step);
     CHECK(r.amount == 2);
-    // Our replay not seen yet by its damage step: nothing more.
+    CHECK_FALSE(r.tied);
+    // enemy-late-kill: our replay not taken by its damage step (a Deku Baba's copy kept its hit id at 0xffffffff
+    // through four replays and the owner's death): the fall still goes to its Life step at once, tied to the
+    // replay (dropped there if the replay lands after all), never a wait with no end.
     a.stale = 0;
     a.replay_seen = false;
-    CHECK(RouteLife(a).route == LifeRoute::wait_replay);
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 2);
+    CHECK(r.tied);
+    a.stale = 2;  // (a tied give taken back as stale: the fall holds it)
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 2);
+    CHECK(r.tied);
+    a.stale = 0;
+    a.life = 0;  // the owner's death
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 3);
+    CHECK(r.tied);
+    a.life = 1;
     a.replay_seen = true;
     // No Life step (emulator), no component, nothing to lower, or unread: lost, never a write.
     a.step_seen = false;
@@ -1615,6 +1633,7 @@ TEST_CASE("objects: RouteLife: an enemy goes only through its game's own steps, 
     r = RouteLife(a);
     CHECK(r.route == LifeRoute::step);
     CHECK(r.amount == 4);
+    CHECK_FALSE(r.tied);  // (a hurt is not the replay's fall)
     // Not native (a pot): a stale give means the old direct write, as before.
     LifeAsk pot = a;
     pot.native = false;

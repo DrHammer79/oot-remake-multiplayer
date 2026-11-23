@@ -2873,6 +2873,8 @@ public:
     bool gimmick_probe_on_ = false;
     CoopLogicProbe::Watch logic_probe_;  // LICHII_COOP_LOGIC_PROBE=1 (jabu-lifts)
     bool logic_probe_on_ = false;
+    bool hit_probe_on_ = false;  // LICHII_COOP_HIT_PROBE=1: a fall given in place of a replay never taken, said
+    std::size_t hit_probe_lines_ = 0;
     std::vector<CoopLiftRide::Lift> ride_lifts_;  // jabu-lifts (#65): this walk's lifts
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
@@ -3574,6 +3576,22 @@ private:
                     step_hits_.emplace_back(e.a, CoopActorEvents::Amount(e.b));  // (for the Sync: StepHits)
                 }
                 break;
+            case CoopActorEvents::Kind::Refused:
+                // enemy-late-kill: why its damage step never took our replayed hit (the lane's question):
+                // the life flags (bits 3 and 12 also make the Life step skip its sum) and whether the replay
+                // still waited (never taken) or was gone (taken without moving the hit id, or overwritten).
+                if (hit_probe_on_ && hit_probe_lines_ < 40) {
+                    ++hit_probe_lines_;
+                    const auto actor = life_components_.find(e.a);
+                    const u64 address = actor != life_components_.end() ? actor->second : 0;
+                    LOG_INFO(Core, "coop: hit probe: {:#x} '{}': its Life step took the fall in place of our "
+                                   "replayed hit, which {} (life flags {:#x})",
+                             address, NameOf(address),
+                             (e.flags & CoopActorEvents::kWithdrawn) != 0 ? "still waited: withdrawn"
+                                                                          : "no longer waited",
+                             e.from);
+                }
+                break;
             default:
                 break;
             }
@@ -3659,13 +3677,15 @@ private:
     };
     // Has the enemy's own damage step seen the hit we replayed last on this Life component? (Its last hit id,
     // Life + 0x1b18, reached our id: hit ids only grow.) True when we never replayed one.
+    static_assert(CoopActorEvents::kLifeLastHitId == CoopHitReplay::kLastHitId &&
+                  CoopActorEvents::kLifeRecordId == CoopHitReplay::kHitRecord + 8 &&
+                  CoopActorEvents::kLifeRecordPresent == CoopHitReplay::kHitRecord + 4 * CoopHitReplay::kRecPresent);
     bool ReplaySeen(Reader& r, u64 life) const {
         const u32 ours = TheMover().ReplayedId(life);
-        if (ours == 0xffffffffu) {
+        if (ours == CoopActorEvents::kNoHitId) {
             return true;
         }
-        const u32 last = r.Get<u32>(life + kLastHitId).value_or(0xffffffffu);
-        return last != 0xffffffffu && static_cast<s32>(last - ours) >= 0;
+        return CoopActorEvents::HitIdReached(r.Get<u32>(life + kLastHitId).value_or(CoopActorEvents::kNoHitId), ours);
     }
     std::string life_scene_;
     bool life_table_full_said_ = false;
@@ -5330,19 +5350,7 @@ private:
             TheMover().AddHit(h);
             return;  // the game takes the life; after 400 ms the rest goes to its Life step (Sync)
         }
-        case LifeRoute::wait_replay:
-#ifdef COOP_HOOKSHOT
-            if (ask.stale != 0) {
-                steps.Give(*life, ask.stale);  // (left as it was)
-            }
-#endif
-            // Our replayed hit still waits for this enemy's own damage step (asleep, paused): it takes that
-            // hit itself when it runs, so the same fall is not given a second time.
-            LOG_INFO(Core, "coop: objects: share life {:#x} '{}': its damage step has not seen our replayed hit "
-                           "yet: nothing given (life {}, owner's {})",
-                     w.address, NameOf(w.address), old, w.life);
-            return;
-        case LifeRoute::step:
+        case LifeRoute::step: {
 #ifdef COOP_HOOKSHOT
             // A life (not a hurt, not a raise) is the owner's for its copy: judged there (PassStops). A test kill
             // is a kill (past the stops where it is not held: our own enemy).
@@ -5351,9 +5359,15 @@ private:
                                "(row 178): life only, through its Life step",
                          w.address, NameOf(w.address), w.hitter);
             }
-            if (steps.Give(*life, routed.amount, (w.hurt <= 0 && !w.heal) || w.test_kill)) {
-                LOG_INFO(Core, "coop: objects: share {} {:#x}: {} through the game's Life step at life {} (to {})",
-                         w.hurt > 0 ? "hurt" : "life", w.address, routed.amount, old, w.life);
+            // enemy-late-kill: tied, the fall our replayed hit was to deal, its damage step not having taken it:
+            // the Life step drops it if the replay lands first and withdraws the replay if it takes the fall.
+            const u32 tied_to = routed.tied ? TheMover().ReplayedId(*life) : CoopActorEvents::kNoHitId;
+            if (steps.Give(*life, routed.amount, (w.hurt <= 0 && !w.heal) || w.test_kill, tied_to)) {
+                LOG_INFO(Core, "coop: objects: share {} {:#x}: {} through the game's Life step at life {} (to {}){}",
+                         w.hurt > 0 ? "hurt" : "life", w.address, routed.amount, old, w.life,
+                         tied_to != CoopActorEvents::kNoHitId
+                             ? fmt::format(", its damage step not having taken our replayed hit {:#x}", tied_to)
+                             : std::string());
                 if (w.hurt <= 0) {
                     // (a hurt's fall the Sync already expects, and writes itself when not taken)
                     sync_.Stepped(w.address, routed.amount, share_now_us_);
@@ -5369,6 +5383,7 @@ private:
             }
 #endif
             break;
+        }
         case LifeRoute::lost:
         case LifeRoute::write:
 #ifdef COOP_HOOKSHOT
@@ -6282,6 +6297,7 @@ Objects& Instance() {
         objects.pose_ = EnvOnUnlessZero("LICHII_COOP_OBJECTS_POSE");
         objects.gimmick_probe_on_ = EnvFlag("LICHII_COOP_GIMMICK_PROBE");  // opt-in: many reads
         objects.logic_probe_on_ = EnvFlag("LICHII_COOP_LOGIC_PROBE");      // jabu-lifts: reads only
+        objects.hit_probe_on_ = EnvFlag("LICHII_COOP_HIT_PROBE");          // enemy-late-kill: log only
         objects.lift_ride_on_ = EnvOnUnlessZero("LICHII_COOP_LIFT_RIDE");            // jabu-lifts (#65), on unless =0
         {
             const std::string platforms = EnvText("LICHII_COOP_PLATFORMS");

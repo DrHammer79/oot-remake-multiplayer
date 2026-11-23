@@ -589,7 +589,6 @@ bool NativeOnlyName(std::string_view name);
 // How WriteLife hands one life change to the game (pure; WriteLife reads the game for it, then acts).
 enum class LifeRoute {
     replay,       // a whole hit for the game's own damage step (Mover::Replay)
-    wait_replay,  // our replayed hit still waits for its damage step: nothing more now
     step,         // `amount` into the game's Life step (patch 0007)
     lost,         // nothing: the actor keeps its game's life (native-only)
     write,        // the old direct write (not native-only: a pot, a crate, an animal)
@@ -613,6 +612,8 @@ struct LifeAsk {
 struct LifeRouted {
     LifeRoute route = LifeRoute::lost;
     std::int32_t amount = 0;  // for step
+    bool tied = false;        // step: the fall our replay was to deal, which its damage step has not taken yet:
+                              // given tied to the replay (LifeTable::Give's tied_to), dropped if the replay lands
 };
 LifeRouted RouteLife(const LifeAsk& a);
 

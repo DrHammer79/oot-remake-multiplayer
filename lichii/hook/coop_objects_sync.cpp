@@ -514,7 +514,10 @@ LifeRouted RouteLife(const LifeAsk& a) {
     const bool steppable = a.step_seen && a.has_component && a.old >= 0 && (a.hurt > 0 || a.life < a.old);
     if (steppable) {
         if (a.native && a.hurt <= 0 && !a.replay_seen) {
-            return {LifeRoute::wait_replay, 0};
+            // enemy-late-kill: our replay is not taken yet (a damage step may refuse it and never move its hit
+            // id: a Deku Baba's copy did, to the owner's death). The fall goes to the Life step now, tied to the
+            // replay: dropped there if the replay lands first, the replay withdrawn if the fall is taken.
+            return {LifeRoute::step, a.old - a.life, true};
         }
         if (a.native) {
             // A stale give is merged: a fall to a life already holds it, a hurt adds it.
