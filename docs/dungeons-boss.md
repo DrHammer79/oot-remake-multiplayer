@@ -746,11 +746,13 @@ fire (probe 2, run 20261123-055243). Every boss move with variants had the same 
   component 24 (`BossVariants`: per change its seq + the name, empty = asked plain; at most 8 names of 32 printable
   characters). No protocol bump: an older peer skips the unknown component and keeps today's behaviour.
 - Copy: the name of the change it puts in (also a resync and a restart) decides the plug: empty -> no plug, even when
-  its own AI's last plug was `Ice`; a name -> written once into a pool of 16 name slots after the request block (the
-  block is `kRequestSize + 16 * 40` bytes) and asked with that address; no name (an older owner) -> its own AI's plug,
-  as before. A move kept (not asked again) also compares the variation, so the same action in another variation is a
+  its own AI's last plug was `Ice`; a name -> written once into a name pool and asked with that address; no name (an
+  older owner) -> its own AI's plug, as before. The first pool (16 slots of 40 bytes) follows the request in our block;
+  when every pool is full the game's own malloc gives another (`native boss sync: variation name pool N at ...`), so
+  every boss of a run keeps its names (the game's plug names are a bounded set; a pool lives as long as the game, as
+  the block). Only past 16 pools (256 names) does a name fall back to the copy's own plug (noted once). A move kept (not asked again) also compares the variation, so the same action in another variation is a
   new move.
-- Tests: boss_native_test (owner keeps names by seq; plain, named and unknown put-ins, a full pool, a resync), codec_test
+- Tests: boss_native_test (owner keeps names by seq; plain, named and unknown put-ins, more names than a pool across two bosses, past the last pool, a resync), codec_test
   'component 24' (round trip, an older build skips it, refusals).
 
 Not proven in a game yet: hs-twinrova-fire must show fire for fire and ice for ice on the copy, the floor on both

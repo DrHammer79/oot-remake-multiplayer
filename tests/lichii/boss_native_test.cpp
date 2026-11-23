@@ -2612,7 +2612,75 @@ TEST_CASE("native boss: row 222 part 2, a copy asks the owner's variation, not i
     CHECK(n.action_applied == 5);
 }
 
-TEST_CASE("native boss: row 222 part 2, a full name pool asks as before") {
+namespace {
+
+// Row 222 part 2: the owner's next action change with the variation `name` (its recent list capped as the sample's),
+// put in by the copy `bsa`. A new name pool first when `pool` is not 0 (the game's malloc answers `pool`). Returns
+// the plug address the request named (0: none).
+std::uint64_t PutInNamed(Table& t, FakeGuest& g, std::uint64_t actor, std::uint32_t seq, std::vector<BossChange>& recent,
+                         const std::string& name, std::uint64_t pool) {
+    const BossAction a = *ActionFromRequest(GameRequest(121, 0, false));
+    recent.push_back(BossChange{seq, a});
+    if (recent.size() > coop::protocol::kMaxBossChanges) {
+        recent.erase(recent.begin());
+    }
+    t.Receive(actor, BossBsa{seq, 2, a, recent}, BossVariants{{{seq, name}}});
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    if (pool != 0) {
+        CHECK(c->function == kMain + addr::kMalloc);  // another pool from the game's heap first
+        CHECK(c->x[0] == addr::kPoolSize);
+        c = t.Step(g, true, pool, kMain);
+        REQUIRE(c);
+    }
+    CHECK(c->function == kMain + addr::kRequestActionVerb);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    return g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 1 ? g.Get<std::uint64_t>(kBlock + addr::kReqPlug) : 0;
+}
+
+} // namespace
+
+TEST_CASE("native boss: row 222 part 2, more names than a pool, across two bosses: another pool, every one named") {
+    constexpr std::uint64_t kActor2 = 0x1100000;
+    constexpr std::uint64_t kBsa2 = 0x2100000;
+    constexpr std::uint64_t kPool = 0x6000000;
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy), Boss{kActor2, kBsa2, Role::copy, "Enemy_DungeonBoss_Gohma", 2}});
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    g.Write(kBsa2 + addr::kBsaBrainVerb, &brain, 4);
+    t.OnActionVerb(kBsa, GameRequest(121, kNode), true, false);
+    t.OnActionVerb(kBsa2, GameRequest(121, kNode + 0x100), true, false);
+    // Twinrova: the first pool (after the request in our block) filled.
+    std::vector<BossChange> recent;
+    const BossAction a = *ActionFromRequest(GameRequest(121, 0, false));
+    recent.push_back(BossChange{1, a});
+    t.Receive(kActor, BossBsa{1, 2, a, recent}, BossVariants{{{1, "V1"}}});
+    REQUIRE(t.Step(g, false, 0, kMain));  // the block
+    REQUIRE(t.Step(g, true, kBlock, kMain));
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    const std::uint64_t first = kBlock + addr::kRequestSize;
+    CHECK(g.Get<std::uint64_t>(kBlock + addr::kReqPlug) == first);
+    for (std::uint32_t seq = 2; seq <= addr::kVariantSlots; ++seq) {
+        CHECK(PutInNamed(t, g, kActor, seq, recent, "V" + std::to_string(seq), 0) ==
+              first + (seq - 1) * addr::kVariantSlotSize);
+    }
+    // Another boss later in the run, new names: a second pool, not its own plug.
+    std::vector<BossChange> recent2;
+    CHECK(PutInNamed(t, g, kActor2, 1, recent2, "W1", kPool) == kPool);
+    CHECK(CString(g, kPool) == "W1");
+    CHECK(PutInNamed(t, g, kActor2, 2, recent2, "W2", 0) == kPool + addr::kVariantSlotSize);
+    // A name of the first pool: the same string (written once, never moved).
+    CHECK(PutInNamed(t, g, kActor2, 3, recent2, "V5", 0) == first + 4 * addr::kVariantSlotSize);
+    CHECK(CString(g, first + 4 * addr::kVariantSlotSize) == "V5");
+    const Counts n = t.Totals();
+    CHECK(n.variant_named == addr::kVariantSlots + 3);
+    CHECK(n.variant_pool_full == 0);
+}
+
+TEST_CASE("native boss: row 222 part 2, past the last pool a name asks as before") {
     Table t;
     t.SetOn(true, true);
     t.Publish({Twinrova(Role::copy)});
@@ -2620,24 +2688,27 @@ TEST_CASE("native boss: row 222 part 2, a full name pool asks as before") {
     const std::int32_t brain = 2;
     g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
     t.OnActionVerb(kBsa, GameRequest(121, kNode), true, false);  // (its node; no plug of its own)
-    const BossAction a = *ActionFromRequest(GameRequest(121, 0, false));
     std::vector<BossChange> recent;
-    for (std::uint32_t seq = 1; seq <= addr::kVariantSlots + 1; ++seq) {
-        recent.push_back(BossChange{seq, a});
-        if (recent.size() > coop::protocol::kMaxBossChanges) {
-            recent.erase(recent.begin());
+    const BossAction a = *ActionFromRequest(GameRequest(121, 0, false));
+    recent.push_back(BossChange{1, a});
+    t.Receive(kActor, BossBsa{1, 2, a, recent}, BossVariants{{{1, "V1"}}});
+    REQUIRE(t.Step(g, false, 0, kMain));  // the block
+    REQUIRE(t.Step(g, true, kBlock, kMain));
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    const auto names = static_cast<std::uint32_t>(addr::kMaxVariantPools * addr::kVariantSlots);
+    for (std::uint32_t seq = 2; seq <= names; ++seq) {
+        const bool new_pool = (seq - 1) % addr::kVariantSlots == 0;
+        const std::uint64_t pool = 0x6000000 + ((seq - 1) / addr::kVariantSlots) * 0x1000;
+        const std::uint64_t at = PutInNamed(t, g, kActor, seq, recent, "V" + std::to_string(seq), new_pool ? pool : 0);
+        if (seq > addr::kVariantSlots) {
+            CHECK(at == pool + ((seq - 1) % addr::kVariantSlots) * addr::kVariantSlotSize);
         }
-        t.Receive(kActor, BossBsa{seq, 2, a, recent}, BossVariants{{{seq, "V" + std::to_string(seq)}}});
-        if (seq == 1) {
-            REQUIRE(t.Step(g, false, 0, kMain));  // the block
-        }
-        REQUIRE(t.Step(g, seq == 1, seq == 1 ? kBlock : 0, kMain));
-        CHECK_FALSE(t.Step(g, true, 0, kMain));
     }
+    // Every pool full: no more allocations, the name asked with the copy's own plug (none here).
+    CHECK(PutInNamed(t, g, kActor, names + 1, recent, "Last", 0) == 0);
     const Counts n = t.Totals();
-    CHECK(n.variant_named == addr::kVariantSlots);
-    CHECK(n.variant_pool_full == 1);  // the 17th name: asked as before (no plug of its own here)
-    CHECK(g.Get<std::uint8_t>(kBlock + addr::kReqHasPlug) == 0);
+    CHECK(n.variant_named == names);
+    CHECK(n.variant_pool_full == 1);
 }
 
 TEST_CASE("native boss: row 222 part 2, a resync's action takes the variation of the owner's action now") {

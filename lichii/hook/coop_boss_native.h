@@ -169,7 +169,10 @@ inline constexpr std::size_t kReqNode = 0x58;     // the asking AI node
 inline constexpr std::size_t kVariantSlots = 16;
 inline constexpr std::size_t kVariantSlotSize = 40;  // kMaxBossVariantChars + its end, rounded up
 static_assert(kVariantSlotSize > coop::protocol::kMaxBossVariantChars);
-inline constexpr std::size_t kBlockSize = kRequestSize + kVariantSlots * kVariantSlotSize;
+inline constexpr std::size_t kPoolSize = kVariantSlots * kVariantSlotSize;  // one pool of names
+inline constexpr std::size_t kBlockSize = kRequestSize + kPoolSize;        // the request, then the first pool
+// Pools full: another kPoolSize from the game's heap (the game's plug names are a bounded set), at most this many.
+inline constexpr std::size_t kMaxVariantPools = 16;
 inline constexpr std::uint32_t kKind = 4;
 inline constexpr std::uint32_t kKind2 = 0x11a;
 inline constexpr std::uint32_t kKind3 = 0x10;
@@ -748,10 +751,14 @@ private:
     void Record(Entry& e, std::variant<BossBrain, BossAction> what);
     void Resync(Entry& e, const BossBsa& state);
     // Row 222 part 2: `ask` named with the owner's variation: not known: as it is (the copy's own AI's, AskFor);
-    // "": no plug (the plain command); a name: its string in our block's pool (written once, never moved). A pool
-    // with no room or a write that fails leaves `ask` as it is. Counted. Needs block_.
-    void WithVariant(CoopPuppet::Guest& guest, const std::optional<std::string>& variant, OwnAsk& ask);
-    std::vector<std::string> pool_;  // the names in our block's pool, by slot (cleared with block_)
+    // "": no plug (the plain command); a name: its string in one of our name pools (written once, never moved).
+    // true: every pool is full: allocate another (PoolCall) and ask again. Past kMaxVariantPools, or a write that
+    // fails, leaves `ask` as it is. Counted. Needs block_.
+    bool WithVariant(CoopPuppet::Guest& guest, const std::optional<std::string>& variant, OwnAsk& ask);
+    std::uint64_t SlotAt(std::size_t slot) const;                       // name slot -> its address in pools_
+    std::optional<CoopPuppet::Call> PoolCall(std::uint64_t main_base);  // the game's malloc for one more pool
+    std::vector<std::string> pool_;     // the names in our pools, by slot (cleared with block_)
+    std::vector<std::uint64_t> pools_;  // each pool's first slot: block_ + kRequestSize, then allocated ones
     Entry* Find(std::uint64_t bsa);
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
@@ -807,7 +814,7 @@ private:
     std::uint64_t block_ = 0;      // our request in guest memory (kRequestSize)
     std::uint64_t main_base_ = 0;  // the game the block belongs to
     bool allocating_ = false;
-    enum class Pending : std::uint8_t { none, malloc, brain, action, late, rechoose, restart } pending_ = Pending::none;
+    enum class Pending : std::uint8_t { none, malloc, pool, brain, action, late, rechoose, restart } pending_ = Pending::none;
     // Row 190: the game's answer to an action request of ours (counted; the first few said).
     void NoteAnswer(const char* what, std::uint64_t result, bool is_action);
     std::uint64_t pending_bsa_ = 0;  // the copy whose change pending_ is (brain, action, late)

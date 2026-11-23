@@ -1180,7 +1180,10 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
                     return true;
                 }
                 OwnAsk ask = e.restart_ask;
-                WithVariant(guest, e.restart_variant, ask);  // row 222 part 2: the variation it ran as a copy
+                if (WithVariant(guest, e.restart_variant, ask)) {  // row 222 part 2: the variation it ran as a copy
+                    call = PoolCall(main_base);  // (a new name pool first; asked again after it)
+                    return true;
+                }
                 const Request r = RequestFromAction(*e.restart_action, ask);
                 if (guest.Write(block_, r.data(), r.size())) {
                     CoopPuppet::Call c;
@@ -1296,7 +1299,10 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
         }
         OwnAsk ask = AskFor(e.own_asks, e.own_slot_asks, e.own_node, action).value_or(OwnAsk{e.own_node});
         // Row 222 part 2: the owner's variation of this move (its plug name, or plain), not our own AI's last.
-        WithVariant(guest, d.variant, ask);
+        if (WithVariant(guest, d.variant, ask)) {
+            call = PoolCall(main_base);  // (a new name pool first; this change is asked again after it)
+            return true;
+        }
         const Request r = RequestFromAction(action, ask);
         if (!guest.Write(block_, r.data(), r.size())) {
             break;
@@ -1352,7 +1358,7 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
     if (!after_call && pending_ != Pending::none) {
         // Last frame's call was not made (the runtime could not, or the
         // frame's calls ran out): its change stays queued and is asked again.
-        if (pending_ == Pending::malloc) {
+        if (pending_ == Pending::malloc || pending_ == Pending::pool) {
             allocating_ = false;
         } else if (pending_ == Pending::rechoose || pending_ == Pending::restart) {
             pending_bsa_ = 0;  // (still asked: the next frame calls it again)
@@ -1367,8 +1373,16 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
             allocating_ = false;
             if (result != 0) {
                 block_ = result;
-                pool_.clear();  // (row 222 part 2: a new block, its name pool empty)
+                pool_.clear();  // (row 222 part 2: a new block: no names, its first pool after the request)
+                pools_.assign(1, result + addr::kRequestSize);
                 Note("native boss sync: request block at " + Hex(result));
+            }
+            break;
+        case Pending::pool:
+            allocating_ = false;
+            if (result != 0 && block_ != 0) {
+                pools_.push_back(result);  // (row 222 part 2: room for kVariantSlots more names)
+                Note("native boss sync: variation name pool " + std::to_string(pools_.size()) + " at " + Hex(result));
             }
             break;
         case Pending::brain:
@@ -1427,6 +1441,7 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
         main_base_ = main_base;
         block_ = 0;
         pool_.clear();
+        pools_.clear();
         allocating_ = false;
     }
     if (!brain_on_ || main_base == 0) {
@@ -1437,16 +1452,16 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool after
     const auto first = by_bsa_.upper_bound(served_);
     for (auto it = first; it != by_bsa_.end(); ++it) {
         if (StepOne(guest, it->first, it->second, main_base, call)) {
-            if (call && pending_ != Pending::malloc) {
-                served_ = it->first;  // (the block's allocation is nobody's turn)
+            if (call && pending_ != Pending::malloc && pending_ != Pending::pool) {
+                served_ = it->first;  // (the block's or a pool's allocation is nobody's turn)
             }
             return call;
         }
     }
     for (auto it = by_bsa_.begin(); it != first; ++it) {
         if (StepOne(guest, it->first, it->second, main_base, call)) {
-            if (call && pending_ != Pending::malloc) {
-                served_ = it->first;  // (the block's allocation is nobody's turn)
+            if (call && pending_ != Pending::malloc && pending_ != Pending::pool) {
+                served_ = it->first;  // (the block's or a pool's allocation is nobody's turn)
             }
             return call;
         }
@@ -1502,40 +1517,62 @@ void Table::Made(bool made) {
     }
 }
 
-void Table::WithVariant(CoopPuppet::Guest& guest, const std::optional<std::string>& variant, OwnAsk& ask) {
+bool Table::WithVariant(CoopPuppet::Guest& guest, const std::optional<std::string>& variant, OwnAsk& ask) {
     if (!variant) {
         ++counts_.variant_unknown;  // an older owner, or a name it could not read: its own AI's (AskFor)
-        return;
+        return false;
     }
     if (variant->empty()) {
         ask = OwnAsk{ask.node};  // the owner asked it plain: no plug (its own AI's last 'Ice' would run Ice)
         ++counts_.variant_plain;
-        return;
+        return false;
     }
-    if (block_ == 0 || variant->size() >= addr::kVariantSlotSize) {
-        ++counts_.variant_pool_full;
-        return;
+    if (block_ == 0 || pools_.empty() || variant->size() >= addr::kVariantSlotSize) {
+        ++counts_.variant_pool_full;  // (no block yet, or a name too long: ValidVariantName refuses those)
+        return false;
     }
     const auto slot = static_cast<std::size_t>(std::find(pool_.begin(), pool_.end(), *variant) - pool_.begin());
-    const std::uint64_t at = block_ + addr::kRequestSize + slot * addr::kVariantSlotSize;
     if (slot == pool_.size()) {
-        if (pool_.size() >= addr::kVariantSlots) {
+        if (slot >= pools_.size() * addr::kVariantSlots) {
+            // Every pool full: another one from the game's heap first (the game's names are a bounded set; each
+            // pool lives as long as the game, as our block). Only past kMaxVariantPools: its own plug, as before.
+            if (pools_.size() < addr::kMaxVariantPools) {
+                return true;
+            }
             ++counts_.variant_pool_full;
             if (counts_.variant_pool_full == 1) {
-                Note("native boss sync: the variation name pool is full (" + std::to_string(addr::kVariantSlots) +
-                     " names): '" + *variant + "' asked with the copy's own plug");
+                Note("native boss sync: the variation name pools are full (" +
+                     std::to_string(addr::kMaxVariantPools * addr::kVariantSlots) + " names): '" + *variant +
+                     "' asked with the copy's own plug");
             }
-            return;
+            return false;
         }
-        // Written once with its end, then never moved or written again while the block lives.
-        if (!guest.Write(at, variant->c_str(), variant->size() + 1)) {
+        // Written once with its end, then never moved or written again while the pool lives.
+        if (!guest.Write(SlotAt(slot), variant->c_str(), variant->size() + 1)) {
             ++counts_.variant_pool_full;
-            return;
+            return false;
         }
         pool_.push_back(*variant);
     }
-    ask = OwnAsk{ask.node, at, true};
+    ask = OwnAsk{ask.node, SlotAt(slot), true};
     ++counts_.variant_named;
+    return false;
+}
+
+std::uint64_t Table::SlotAt(std::size_t slot) const {
+    return pools_[slot / addr::kVariantSlots] + (slot % addr::kVariantSlots) * addr::kVariantSlotSize;
+}
+
+std::optional<CoopPuppet::Call> Table::PoolCall(std::uint64_t main_base) {
+    if (allocating_) {
+        return std::nullopt;  // (an allocation in flight: nothing more this frame)
+    }
+    CoopPuppet::Call c;
+    c.function = main_base + addr::kMalloc;
+    c.x[0] = addr::kPoolSize;
+    allocating_ = true;
+    pending_ = Pending::pool;
+    return c;
 }
 
 std::optional<CoopPuppet::Call> Table::Ask(CoopPuppet::Guest& guest, Entry& e, std::uint64_t bsa, const std::variant<BossBrain, BossAction>& what,
@@ -1621,6 +1658,7 @@ void Table::Reset() {
     notes_.clear();
     block_ = 0;  // (asked again)
     pool_.clear();
+    pools_.clear();
     allocating_ = false;
     pending_ = Pending::none;
 }
