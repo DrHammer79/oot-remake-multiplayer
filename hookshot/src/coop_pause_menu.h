@@ -92,7 +92,8 @@ struct Request {
                       // it (CoopHook::SendChat), so a host row and the command are one path and the chat line says
                       // what changed; the server takes it from the host only.
                       kChat,
-                      kDifficulty };   // kDifficulty: `text` the host's new choice (CoopDifficulty::FormatChoice)
+                      kDifficulty,     // kDifficulty: `text` the host's new choice (CoopDifficulty::FormatChoice)
+                      kCharAges };     // kCharAges: "on", "off", "child=N" or "adult=N" (coop_char_ages.h)
     Kind kind = Kind::kHost;
     std::string text;
 };
@@ -202,13 +203,17 @@ public:
     // (Navi) New Game+ (coop_ngplus.h): the level chosen, the highest unlocked (0: Ganon not beaten yet), the
     // hearts carried (quarters). The Settings page's New Game+ row.
     void SetNgPlus(int level, int unlocked, int hearts);
+    // A Character Select pick per age (coop_char_ages.h): the Settings page's "Character by age" rows, shown only
+    // when `shown` (the mod and its NPC models are there). `characters`: the pickable ones (number, name), Link first.
+    void SetCharacterAges(bool shown, bool on, int child, int adult,
+                          std::vector<std::pair<int, std::string>> characters);
     // (Navi) The Settings page's Saves row: solo or multiplayer saves (CoopSave::MultiplayerSaves).
     void SetSaveSet(bool multiplayer);
     // The session's difficulty (CoopDifficulty::Get) and its players: the Settings page's Difficulty rows, among
     // the host's rows (the host changes it there; everyone else sees it, dimmed).
     void SetDifficulty(const DifficultyState& state, int players);
     // Character Select (coop_char_colours.h ShownCharacter): this game shows a character, not Link, so the
-    // Customize page says Link's colours wait for Link (#308's live display; the character keeps its own).
+    // Customize page says the eye and hair colours show on it and Link's other colours wait for Link (#308's live display).
     void SetCharacter(bool picked) { character_ = picked; }
     // Character Select's code is in the game (coop_pause_tab.h SnailCodeBuiltIn): his Customize screen, with co-op's
     // rows (coop_snail_custom.h), is the one home of Link's look (the owner, 0.11.9: "one home per thing"). The Customize
@@ -217,7 +222,7 @@ public:
     bool SnailHome() const { return snail_home_; }
     static constexpr const char* kSnailHomeNote = "Link's colours are on the Characters tab: pick Link, then Customize.";
     static constexpr const char* kCharacterNote =
-        "A Character Select character is picked: it keeps its own colours (X on its Characters page); these colours show on Link when you pick Link again.";
+        "A Character Select character is picked: it wears your eye and hair colours where its model has them; the other colours show on Link when you pick Link again.";
     // The Find a game page's list (the Join page's first row): the games on this network or the relay's public
     // rooms, as the module hears them while the page shows (find_online() says which). A game picked fills the Join
     // page: `join` its room name or its address, `port` its port (0: the default), then Join.
@@ -281,7 +286,8 @@ private:
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
         kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
-        kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount
+        kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount,
+        kCharAges, kCharChild, kCharAdult
     };
     struct Line;   // a row, what it does and its help
     std::vector<Line> Lines() const;
@@ -328,6 +334,11 @@ private:
     std::string controller_row_, keyboard_row_;
     std::optional<std::vector<std::string>> microphones_;
     int ngplus_level_ = 0, ngplus_unlocked_ = 0, ngplus_hearts_ = 0;   // (Navi) New Game+ (SetNgPlus)
+    struct CharAges {   // SetCharacterAges
+        bool shown = false, on = false;
+        int child = -1, adult = -1;
+        std::vector<std::pair<int, std::string>> characters;
+    } char_ages_;
     bool mp_saves_ = false;   // (Navi) the Saves row (SetSaveSet)
     DifficultyState difficulty_;   // SetDifficulty
     int difficulty_players_ = 0;
