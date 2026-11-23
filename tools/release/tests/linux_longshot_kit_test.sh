@@ -449,6 +449,7 @@ check 'Character Select 0.2.2: the default part: the tool is given data/game/rom
     bash -c '[ $CODE -eq 0 ] && [ "$(grep -c ^ARGS "$3")" = 1 ] && grep -q -- "--romfs .*/data/game/romfs --mod .*/data/game/mods/_OoT Character Select.new " "$3" && grep -q -- "--exclude " "$3" &&
         [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] && [ -f "$2/romfs/Model/Player_Child.Player_Child.bfres.zs" ] &&
         [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex" ] && grep -q "^v2 .* ui cz1$" "$2/coop-charsel.txt" &&
+        [ -f "$2/romfs/Sound/PlAdult_X.bwav" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
         [ ! -e "$2/build-from-your-game" ] && [ ! -e "$4/builder/charsel/charsel-tool" ] && [ ! -e "$4/builder/charsel/CS-v2.zip" ]' _ "$tmp/build-t3.txt" "$CS" "$CS_TOOL_LOG" "$D"
 # run again: nothing is made again
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
