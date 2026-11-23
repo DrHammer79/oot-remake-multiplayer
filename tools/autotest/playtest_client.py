@@ -202,7 +202,10 @@ LEVEL = re.compile(r"^(?:\[[A-Za-z]+\] )?(warning|error|critical): ")   # (one m
 _COOP_LINE = re.compile(r"\bcoop(?: voice)?:")   # the module's lines: `coop: ...` and the voice patch's `coop voice: ...`
 FLAG_WORDS = re.compile(r"\b(fail(?:ed|ure|ures|s)?|error|errors|refus(?:ed|es|al)|resync\w*)", re.IGNORECASE)
 # a count of zero is not the thing it counts: "(0 copies' shots refused)" in the periodic actors line says no refusal
-_ZERO_COUNT = re.compile(r"\(0 [^()]*\)|(?<![\w.])0 (?:fail\w*|errors?|refus\w*|resync\w*)(?!\w)", re.IGNORECASE)
+# (a word or two may stand between the count and the word: "0 write failures"); "not failures" and "no errors" say the
+# word is not what happened
+_ZERO_COUNT = re.compile(r"\(0 [^()]*\)|(?<![\w.])0 (?:[\w']+ ){0,2}(?:fail\w*|errors?|refus\w*|resync\w*)(?!\w)"
+                         r"|\b(?:not|no|never|without) (?:fail\w*|errors?|refus\w*|resync\w*)(?!\w)", re.IGNORECASE)
 MAX_FLAGGED = 40
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?!\.?\d)")
 # an IPv6 address has a `::` or a hex letter (a time such as 12:34:56 has neither)

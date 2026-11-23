@@ -1429,6 +1429,19 @@ class KitThreeFixes(unittest.TestCase):
         self.assertEqual(pc.flag_reason("coop: peer refused us (0 retries left)"), "word:refused")
         self.assertEqual(pc.flag_reason("warning: coop: actors: in 10 s (0 copies' shots refused)"), "level:warning")
 
+    def test_the_flags_traffic_line_is_flagged_only_for_a_real_write_failure(self):
+        # coop_hook.cpp LogFlagTraffic: "{} write failures ({} tries of held flags, not failures)" prints every 10 s
+        line = ("coop: flags: traffic: 4 changes sent, 1 answers sent, 9 entries came, 7 written here (2 count deltas, "
+                "0 load reverts, 0 one-way put back, 0 from a host reset), 0 kept over our own, 3 not shared, "
+                "%s write failures (%s tries of held flags, not failures), 0 messages not for us, 0 bad snapshots; "
+                "0 s holding a join snapshot (0 dropped unfinished), 0 s in load windows")
+        self.assertIsNone(pc.flag_reason(line % (0, 0)))
+        self.assertIsNone(pc.flag_reason(line % (0, 3)))                 # tries are not failures
+        self.assertEqual(pc.flag_reason(line % (2, 3)), "word:failure")
+        self.assertEqual(pc.flag_reason(line % (2, 0)), "word:failure")
+        self.assertIsNone(pc.flag_reason("coop: net: no errors since the join"))
+        self.assertEqual(pc.flag_reason("coop: net: 2 errors, not fatal"), "word:error")
+
     # --- 6: place with a facing, and a walk that says it walks away ---------------------------------------------------
     def test_place_with_a_facing_places_then_turns(self):
         r = self.tool.call("place", {"x": 10, "y": 1.5, "z": 20, "facing": 90})
