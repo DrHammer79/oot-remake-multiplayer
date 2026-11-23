@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
 import kit_look  # noqa: E402
+import kit_move  # noqa: E402
 import kit_route  # noqa: E402
 import kit_setup  # noqa: E402
 import kit_tools  # noqa: E402
@@ -274,6 +275,53 @@ HELPER_TOOLS = [
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
 ]
 
+MOVE_NOTE = (" Each ends with a `look`. It acts on this game only (in a pair, the other game runs the same frames).")
+MOVE_TOOLS = [
+    {"name": "shoot", "description": "Take out an aimed item and fire it at a target: `assign` puts the item on ZR, "
+     "Link turns to the target (`face`), ZR is held to draw (60 + 30 frames), the stick tilts the aim for `tilt_frames` "
+     "(+ up, - down; how far a frame tilts is not measured), ZR is let go, and the target is watched for `watch_frames`. "
+     "The target is `id` + `name` (from get_world) or a point `at` [x, y, z]. `result`: hit (its life fell, it died or "
+     "left the list), changed (another field it shows changed), miss (the ammo went down, the target did not change), "
+     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item) or a "
+     "stop. `aim` has the world yaw and pitch from Link to the target; the game's aim tilt is not readable, so the "
+     "pitch is what the shot needs, not what Link aimed. `assist` true adds the test `aim X Y Z` line: the next arrow "
+     "or seed is steered onto the target (a hit then proves the target takes the shot, not the aim). " + ACT_NOTE
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"], "properties": dict(
+         ACTOR_ARGS, item={"type": "string", "enum": list(kit_move.ITEMS)},
+         at={"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+         assist={"type": "boolean"}, tilt_frames={"type": "integer", "minimum": -60, "maximum": 60},
+         watch_frames={"type": "integer", "minimum": 4, "maximum": 240})}},
+    {"name": "climb", "description": "Climb a ladder or vines: the stick held up (`up` true, the default) or down, a "
+     "look every 8 frames, until Link's height reaches `to_y` (metres), or with no `to_y` until it stops moving (the "
+     "top or the bottom). `face_x`/`face_z`: turn to the wall first and lean into it to grab on; going down with an A "
+     "prompt presses A first. `result`: arrived, stopped (the top or bottom), stuck (the height did not move for 4 "
+     "looks: not on it, or something in the way), not climbing (Link moved across, not up: walking, not on the wall), "
+     "or a stop (hurt: a Skulltula on the vines, an event, a scene change, timed out). `trace` is [frames, height]."
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "properties": {
+         "up": {"type": "boolean"}, "to_y": {"type": "number"}, "face_x": {"type": "number"},
+         "face_z": {"type": "number"}, "max_frames": {"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES}}}},
+    {"name": "push", "description": "Push a block (`id` + `name` from get_world) `distance_m` metres along world yaw "
+     "`yaw` (0 = +z, 90 = +x; none: from Link toward the block). Link walks to the block's far side from the push, "
+     "faces it and leans on it at full stick. `result`: pushed, stuck (it did not move for 48 frames while Link leaned "
+     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), not reached (the walk to its "
+     "side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name", "distance_m"], "properties": dict(
+         ACTOR_ARGS, distance_m={"type": "number", "minimum": 0.1, "maximum": 20}, yaw={"type": "number"},
+         max_frames={"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES})}},
+    {"name": "jump", "description": "Run straight at (`x`, `z`) at full stick so Link jumps off the edge by himself (a "
+     "run off a ledge jumps; a walk only drops), with no side steps, until he is on the ground near the point. "
+     "`land_y` is the far side's height. `result`: landed, fell (on the ground over 1 m below `land_y`), respawned "
+     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), or a stop (an event, a "
+     "scene change, timed out). `airborne` says whether the height moved on the way; `trace` is [frames, x, y, z]."
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["x", "z"], "properties": {
+         "x": {"type": "number"}, "z": {"type": "number"}, "land_y": {"type": "number"},
+         "tolerance": {"type": "number", "minimum": 0.2, "maximum": 5}, "max_frames": {"type": "integer", "minimum": 4,
+                                                                                    "maximum": kit_move.MAX_FRAMES}}}},
+]
+
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
 PLAYER_TOOLS = [
     {"name": "get_state", "description": "This game's state: scene and room, Link's position [x,y,z] in metres, "
@@ -420,7 +468,7 @@ PLAYER_TOOLS = [
      "get_state with inventory=true shows it without a step. Bombs and arrows are counts per player: `bombs` gives the small "
      "bag and 20 bombs; a bomb that can be lifted also needs PlayerStatus.LiftGrade (docs/items.md).",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
-] + ACT_TOOLS + HELPER_TOOLS + [
+] + ACT_TOOLS + HELPER_TOOLS + MOVE_TOOLS + [
     {"name": "checkpoint", "description": "Write this game's shared flags and state under a tag (letters, digits, "
      "- and _) with its frame count, to the run's checkpoint log. Take the same tag on EVERY game after each "
      "action that should sync, then run desync_check.",
@@ -613,6 +661,36 @@ class Game:
             return out
         raise ValueError("action: start, save or cancel")
 
+    def _move(self, name, args):
+        c = self._driver()
+
+        def num(key, lo=None, hi=None, default=None):
+            return default if args.get(key) is None else float(_num(args, key, lo, hi))
+
+        frames = int(_bounded(args, "max_frames", 240 if name == "jump" else kit_move.MAX_FRAMES, 1, kit_move.MAX_FRAMES))
+        who = _word(args, "name") if args.get("name") is not None else None
+        if name == "shoot":
+            at = args.get("at")
+            if at is not None:
+                if not isinstance(at, list) or len(at) != 3:
+                    raise ValueError("at: [x, y, z] in metres")
+                at = [float(_num({"at": v}, "at")) for v in at]
+            out = kit_move.shoot(c, _word(args, "item"), ident=_ident(args), name=who, at=at,
+                                 assist=bool(args.get("assist")), tilt_frames=int(num("tilt_frames", -60, 60, 0)),
+                                 watch_frames=int(num("watch_frames", 4, 240, kit_move.WATCH_FRAMES)))
+        elif name == "climb":
+            face = None
+            if args.get("face_x") is not None or args.get("face_z") is not None:
+                face = (num("face_x"), num("face_z"))
+            out = kit_move.climb(c, up=args.get("up", True) is not False, to_y=num("to_y"), face=face, max_frames=frames)
+        elif name == "push":
+            out = kit_move.push(c, _need_id(args), num("distance_m", 0.1, 20), who, yaw=num("yaw"), max_frames=frames)
+        else:
+            out = kit_move.jump(c, num("x"), num("z"), land_y=num("land_y"), tolerance=num("tolerance", 0.2, 5, 0.6),
+                                max_frames=frames)
+        out["look"], self.last_look = kit_look.look(c.state(), self.last_look)
+        return out
+
     def _driver(self):
         """The client, wrapped to sample Link's place into the route being recorded (if any)."""
         return kit_route.Sampling(self.client, self.recorder) if self.recorder is not None else self.client
@@ -697,6 +775,8 @@ class Game:
         if name == "go_to_actor":
             return ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
                                   int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name in kit_move.VERBS:
+            return self._move(name, args)
         if name == "face":
             return ph.face(c, _need_id(args), _word(args, "name"))
         if name == "attack":
