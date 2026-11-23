@@ -123,5 +123,46 @@ class Presets(unittest.TestCase):
             self.assertIn("deku-start", str(e.exception))
 
 
+class Points(unittest.TestCase):
+    class C:
+        """A game whose flag `Stuck` ignores writes: the restore must say it is not exact."""
+        def __init__(self):
+            self.flags, self.log = {"A": 1, "Stuck": 5}, []
+
+        def dump(self, tag):
+            return {"flags": dict(self.flags), "state": {"scene": "S", "pos": [1.0, 2.0, 3.0], "life": 12}, "frame": 1}
+
+        def state(self):
+            return {"scene": "S"}
+
+        def flag(self, name, value=1):
+            self.log.append(("flag", name, value))
+            if name != "Stuck":
+                self.flags[name] = value
+
+        def act(self, line):
+            self.log.append(("act", line))
+
+        def warp(self, *a):
+            self.log.append(("warp",) + a)
+
+    def test_exact_only_when_the_second_dump_equals_the_saved_one(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.save_point(c, d, "p1", "t")
+            c.flags.update({"A": 9, "Stuck": 6})
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual((r["restored"], r["exact"], r["left"]), (2, False, ["Stuck"]))
+            self.assertIn(("act", "place 1.0 2.0 3.0"), c.log)
+            self.assertIn(("flag", "PlayerStatus.Life", 12), c.log)
+            self.assertFalse([x for x in c.log if x[0] == "warp"])   # already in the scene
+
+    def test_a_missing_tag_is_refused(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(ValueError):
+            ks.load_point(self.C(), d, "p1", "nope")
+
+
 if __name__ == "__main__":
     unittest.main()

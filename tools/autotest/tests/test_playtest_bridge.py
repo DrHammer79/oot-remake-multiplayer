@@ -376,7 +376,7 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "preset", "give", "kill", "hit", "hurt", "place", "wear",
+                         ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
                           "interact", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
@@ -537,6 +537,17 @@ class PlayerServer(unittest.TestCase):
         with self.assertRaises(Exception) as e:
             self.call("p1", "preset", name="nope")
         self.assertIn("deku-start", str(e.exception))
+
+    def test_save_point_and_load_point_restore_the_flags_and_say_when_exact(self):
+        g = self.games["p1"]
+        self.call("p1", "save_point", tag="before-boss")
+        g.flags["F1"], g.flags["F2"] = 7, 9                       # the fight changed things
+        r = self.call("p1", "load_point", tag="before-boss")
+        self.assertEqual((g.flags["F1"], g.flags["F2"]), (0, 0))
+        self.assertEqual((r["restored"], r["exact"], r["left"]), (2, True, []))
+        with self.assertRaises(Exception) as e:
+            self.call("p1", "load_point", tag="never-saved")
+        self.assertIn("save_point first", str(e.exception))
 
     def test_press_warp_flag_give_step_resume(self):
         r = self.call("p1", "press", buttons=["a", "ZL"], stick_angle=90, stick_strength=1.0, frames=4)

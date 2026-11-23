@@ -359,6 +359,15 @@ PLAYER_TOOLS = [
      "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
      "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",
      "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
+    {"name": "save_point", "description": "Save a test point under a tag (letters, digits, - and _): the module's shared flags "
+     "and Link's state (scene, place, life), in the run's checkpoint log. Retry a boss with load_point. Only what `dump` "
+     "lists is saved (shared dungeon, story and item flags).",
+     "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
+    {"name": "load_point", "description": "Restore the last test point saved under a tag by THIS game: goes to its scene, writes "
+     "every flag that differs, places Link and sets his life, then dumps again and replies `exact` (true only when the "
+     "dump equals the saved one) and `left` (the flags still different). A scene outside Longshot's teleport list "
+     "needs the map change event on (see warp). Needs the verb gate.",
+     "inputSchema": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, a bare item name such as Item_Boomerang or "
      "Weapon_Sword_Kokiri, or a full flag name such as IsGet.Item_Boomerang). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
@@ -560,6 +569,10 @@ class Game:
             return c.give(args["item"])
         if name == "preset":
             return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]))}
+        if name == "save_point":
+            return kit_setup.save_point(c, self.log_dir, self.player, args["tag"])
+        if name == "load_point":
+            return kit_setup.load_point(c, self.log_dir, self.player, args["tag"])
         if name == "setup":
             return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k != "player"})}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):

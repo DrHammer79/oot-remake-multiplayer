@@ -18,6 +18,7 @@ import glob
 import json
 import os
 import re
+import playtest_client as pc
 
 # The flag-name dungeon key (DungeonInfo.<key>.SmallKeyNum): the game's own spelling, which is not always the
 # scene's. Every key here is a DungeonInfo.* name the repository's code or docs already use.
@@ -146,3 +147,58 @@ def load_preset(name, root=PRESETS):
         raise ValueError("preset %r: the file needs preset (its name), version 1 and a spec" % name)
     plan(data["spec"])   # a bad file is refused before any call
     return data["spec"]
+
+
+# --- save_point / load_point -----------------------------------------------------------------------------------------
+# A test point is a `checkpoint` (the module's flag list plus Link's state, in the run's checkpoint log). Restoring it
+# writes back every flag that differs, goes to the scene, places Link and sets his life, then takes a second dump and
+# says what still differs: `exact` is true only when that dump equals the saved one. Only the flags the module's dump
+# lists can be saved (the shared dungeon, story and item flags: docs/playtest.md "dump"); anything else stays as it is.
+
+
+def _saved(log_dir, player, tag):
+    path = pc.checkpoint_file(log_dir, player)
+    found = None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                e = json.loads(line)
+                if e.get("tag") == tag and isinstance(e.get("flags"), dict):
+                    found = e
+    except OSError:
+        pass
+    if not found:
+        raise ValueError("test point %r: none saved by this game (save_point first)" % tag)
+    return found
+
+
+def save_point(client, log_dir, player, tag):
+    """Write a test point under `tag` (letters, digits, - and _)."""
+    out = pc.checkpoint(client, log_dir, player, tag)
+    if out.get("error") or out.get("flags") is None:
+        raise RuntimeError("save_point: %s" % (out.get("error") or "the dump has no flags"))
+    return out
+
+
+def load_point(client, log_dir, player, tag, warp_timeout=60):
+    """Restore the last test point of `tag`. Returns {"restored": n flags written, "exact": bool, "left": [...]}."""
+    e = _saved(log_dir, player, tag)
+    want, st = e["flags"], e.get("state") or {}
+    now, cur = pc.read_dump(client.dump("restore-before"))
+    scene = e.get("scene")
+    if scene and (cur or {}).get("scene") != scene:
+        client.warp(scene, None, warp_timeout)
+        now, cur = pc.read_dump(client.dump("restore-before"))
+    written = 0
+    for name, value in want.items():
+        if (now or {}).get(name) != value:
+            client.flag(name, value)
+            written += 1
+    pos = st.get("pos")
+    if isinstance(pos, list) and len(pos) == 3:
+        client.act("place %s %s %s" % tuple(repr(round(float(v), 3)) for v in pos))
+    if isinstance(st.get("life"), int):
+        client.flag("PlayerStatus.Life", st["life"])
+    after, _ = pc.read_dump(client.dump("restore-after"))
+    left = sorted(n for n, v in want.items() if (after or {}).get(n) != v)
+    return {"tag": tag, "restored": written, "exact": not left, "left": left[:20], "scene": scene}
