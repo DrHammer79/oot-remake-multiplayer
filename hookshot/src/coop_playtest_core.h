@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "coop_mod_json.h"
+#include "coop_world_snapshot.h"
 
 namespace CoopPlaytest {
 
@@ -106,5 +107,13 @@ std::string Quote(std::string_view text);
 // A value as JSON on one line, no spaces (CoopModJson::Write is for files: it indents objects and ends with a
 // newline, which would split a reply in two).
 std::string Compact(const CoopModJson::Value& value);
+
+// The `world` member of `state` (docs/playtest.md): the actors near our Link from the object walk's last snapshot.
+// "" (no member) when the snapshot switch is off, so the old reply stays byte for byte the same. `now_frame` is the
+// bridge's frame count, `now_ms` the steady clock in ms. Returns `,"world":{...}`: frame (the snapshot's), age_ms,
+// stale (older than 1.5 s: then `actors` is empty), behind (the game is past the snapshot's frame), cost_us, count,
+// actors [{id,name,kind,pos,dist,life,max_life,owner,alive}] nearest first. No snapshot yet: `actors` empty, `frame` null.
+std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Snapshot>& snapshot,
+                        std::uint64_t now_frame, std::uint64_t now_ms);
 
 }  // namespace CoopPlaytest

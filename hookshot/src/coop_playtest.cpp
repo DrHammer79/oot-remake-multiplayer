@@ -261,6 +261,30 @@ std::string Field(const Value* game, const char* key) {
     return v ? Compact(*v) : std::string("null");
 }
 
+std::uint64_t BridgeFrame() { return g_gate ? g_gate->Frame() : 0; }
+std::uint64_t SteadyMs() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+// The world list (docs/playtest.md, "State"). Held: the game stands at a frame, so wait up to 300 ms for the object
+// walk (the present thread keeps running) to publish a snapshot of that frame; running: the newest one, with its frame.
+std::string WorldText() {
+    auto& store = CoopWorldSnapshot::TheStore();
+    if (!store.Enabled()) return "";
+    const std::uint64_t now = g_gate ? g_gate->Frame() : 0;
+    auto snap = store.Get();
+    if (g_gate && g_gate->Held()) {
+        const auto until = std::chrono::steady_clock::now() + 300ms;
+        while ((!snap || snap->frame < now) && std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(10ms);
+            snap = store.Get();
+        }
+    }
+    return WorldMember(true, snap, now, SteadyMs());
+}
+
 // The state's members (no braces): Longshot's Link snapshot, then the module's equips, inventory and co-op.
 std::string StateMembers() {
     std::string out;
@@ -301,6 +325,7 @@ std::string StateMembers() {
         first = false;
     }
     out += "]}";
+    out += WorldText();
     return out;
 }
 
@@ -538,6 +563,7 @@ void Start(Core::System& system, const std::filesystem::path& game_dir) {
     g_dir = game_dir / "playtest";
     g_gate = std::make_unique<Gate>(IdleFrom(Env("LICHII_COOP_PLAYTEST_IDLE")));
     g_enabled.store(true);
+    CoopWorldSnapshot::TheStore().Enable(&BridgeFrame);  // the object walk fills the `world` list from now on
     g_thread = std::thread(Run);
     LOG_INFO(Core, "coop: playtest: listening on 127.0.0.1:{} (control {}; dumps and shots in {})", *port,
              Env("HOS_CONTROL").empty() ? "off: HOS_CONTROL unset" : "on", g_dir.generic_string());
@@ -551,6 +577,7 @@ void AtFrame() {
 void Stop() {
     if (!g_enabled.exchange(false)) return;
     g_stop.store(true);
+    CoopWorldSnapshot::TheStore().Disable();
     g_gate->Resume();
     if (g_thread.joinable()) g_thread.join();
     CloseSocket(g_listener);

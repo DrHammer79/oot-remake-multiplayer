@@ -126,6 +126,7 @@
 #include "coop_scrubs.h"
 #include "coop_event_member.h"
 #include "coop_event_owner.h"
+#include "coop_world_snapshot.h"
 #include <set>
 
 namespace CoopObjects {
@@ -3440,6 +3441,50 @@ private:
         }
     }
 
+    // The play-test bridge's snapshot of the world (coop_world_snapshot.h): every actor of the walk with its place,
+    // and for the enemies their life; the nearest kept. Every 100 ms at most; `frame` is the bridge's game frame read
+    // before the walk began (a frame the actors may have moved past, never one they have not reached).
+    void PublishWorld(Reader& r, const std::optional<coop::protocol::Vec3>& player, u64 frame) {
+        if (!world_every_.Due(CoopEvery::NowUs())) {
+            return;
+        }
+        const auto began = std::chrono::steady_clock::now();
+        std::vector<CoopWorldSnapshot::Candidate> in;
+        in.reserve(names_.size());
+        for (const auto& [a, known] : names_) {
+            const auto at = r.Get<std::array<float, 3>>(a + kActorPosition);
+            if (!at) {
+                continue;
+            }
+            CoopWorldSnapshot::Candidate c;
+            c.id = a;
+            c.name = &known.first;
+            c.pos = *at;
+            if (CoopWorldSnapshot::KindOf(known.first) == CoopWorldSnapshot::Kind::enemy) {
+                if (const auto value = LifeValue(r, a)) {
+                    c.life = r.Get<s32>(value->first + 8);
+                    c.max_life = r.Get<s32>(value->second + 8);
+                }
+            }
+            if (const auto owner = sync_.OwnerOf(a)) {
+                c.owner = *owner;
+            }
+            in.push_back(std::move(c));
+        }
+        std::optional<std::array<float, 3>> from;
+        if (player) {
+            from = std::array<float, 3>{(*player)[0], (*player)[1], (*player)[2]};
+        }
+        CoopWorldSnapshot::Snapshot snap;
+        snap.actors = CoopWorldSnapshot::Select(in, from, CoopWorldSnapshot::kLimit);
+        snap.frame = frame;
+        snap.taken_ms = SteadyNowMs();
+        snap.cost_us = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - began).count());
+        CoopWorldSnapshot::TheStore().Put(std::move(snap));
+    }
+    CoopEvery::Every world_every_{100'000};
+
     // An enemy or a boss: its life is never written (the native rule), only changed by its game's own steps.
     bool NativeOnly(u64 actor) const {
         return NativeOnlyName(NameOf(actor));
@@ -3999,6 +4044,7 @@ private:
             horde_.Bind(horde);
         }
         const u64 now_ms = SteadyNowMs();
+        const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
             // walk between (our adult Link where the last scene's TerrainScenePermanent was): the cached name
@@ -4369,6 +4415,9 @@ private:
             names.emplace(a, std::move(known));
         }
         names_ = std::move(names);
+        if (CoopWorldSnapshot::TheStore().Enabled()) {  // the play-test bridge's world (off: this one atomic load)
+            PublishWorld(r, player, world_frame);
+        }
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));

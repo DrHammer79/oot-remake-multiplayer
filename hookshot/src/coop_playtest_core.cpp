@@ -393,4 +393,40 @@ std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool p
            Quote(message) + "}";
 }
 
+namespace {
+std::string Num(float v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.1f", std::isfinite(v) ? static_cast<double>(v) : 0.0);
+    return buf;
+}
+}  // namespace
+
+std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Snapshot>& snapshot,
+                        std::uint64_t now_frame, std::uint64_t now_ms) {
+    if (!enabled) return "";
+    if (!snapshot) return ",\"world\":{\"frame\":null,\"stale\":false,\"count\":0,\"actors\":[]}";
+    const std::uint64_t age = now_ms >= snapshot->taken_ms ? now_ms - snapshot->taken_ms : 0;
+    const auto fresh = CoopWorldSnapshot::Judge(snapshot->frame, now_frame, age);
+    const bool stale = fresh == CoopWorldSnapshot::Freshness::stale;
+    std::string out = ",\"world\":{\"frame\":" + std::to_string(snapshot->frame) +
+                      ",\"age_ms\":" + std::to_string(age) +
+                      ",\"stale\":" + (stale ? "true" : "false") +
+                      ",\"behind\":" + (fresh == CoopWorldSnapshot::Freshness::behind ? "true" : "false") +
+                      ",\"cost_us\":" + std::to_string(snapshot->cost_us);
+    const std::size_t count = stale ? 0 : snapshot->actors.size();
+    out += ",\"count\":" + std::to_string(count) + ",\"actors\":[";
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& a = snapshot->actors[i];
+        out += i ? "," : "";
+        out += "{\"id\":" + std::to_string(a.id) + ",\"name\":" + Quote(a.name) + ",\"kind\":\"" +
+               CoopWorldSnapshot::KindName(a.kind) + "\",\"pos\":[" + Num(a.pos[0]) + "," + Num(a.pos[1]) + "," +
+               Num(a.pos[2]) + "],\"dist\":" + Num(a.dist) +
+               ",\"life\":" + (a.life ? std::to_string(*a.life) : "null") +
+               ",\"max_life\":" + (a.max_life ? std::to_string(*a.max_life) : "null") +
+               ",\"owner\":" + CoopWorldSnapshot::OwnerJson(a.owner) + ",\"alive\":" +
+               (a.alive ? (*a.alive ? "true" : "false") : "null") + "}";
+    }
+    return out + "]}";
+}
+
 }  // namespace CoopPlaytest

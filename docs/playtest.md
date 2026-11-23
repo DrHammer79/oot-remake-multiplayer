@@ -131,6 +131,27 @@ quarter hearts. `snapshot_present` is Longshot's present count when it was taken
 pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
 stays `null` until the room is found in memory.
 
+**`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
+the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...), at most 200.
+It is there only while the games are connected and sharing, because the object walk runs only then; alone it is an
+empty list with `frame` null.
+
+```
+"world":{"frame":5400,"age_ms":40,"stale":false,"behind":false,"cost_us":310,"count":1,"actors":[
+  {"id":2147483648,"name":"Enemy_Example","kind":"enemy","pos":[1.5,0.0,-3.2],"dist":4.0,"life":2,"max_life":4,
+   "owner":"server","alive":true}]}
+```
+
+- `owner` is `"server"`, a player number, or `null` (the sharing does not know the actor). `life`, `max_life` and
+  `alive` are read for enemies only; for any other kind they are `null` (unknown, not dead).
+- `frame` is the bridge's frame count when the walk began; the reply's own `frame` is the game's now. While the game
+  is held, `state` waits up to 300 ms for a snapshot of that frame; if none comes, `behind` is true and the older list
+  is returned with its frame. A running game returns the newest list, which is a few frames old.
+- A snapshot older than 1.5 s of wall clock (a load, a closed room, the walk stopped) is not shown: `stale` is true,
+  `count` 0, `actors` empty, `age_ms` says how old.
+- The list costs the object walk `cost_us` microseconds about every 100 ms. Without the bridge (the switch is never
+  turned on) the walk does one atomic load and the `state` text has no `world` member.
+
 Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
 angle `w - camera` (the sign is settled by the LANE1 proof run; `walk_to` learns it from how Link moves). The camera turns as Link walks, so steer in short `input` steps (5 to 10 frames) and read `camera`
 again each time.
@@ -183,9 +204,9 @@ from each game; `setflag ForestTemple_Room18_Picture_Shot 1` in A alone was 1 in
 
 - **Frame step in a game.** The play-test bridge holds the game in the module ([Bridge protocol](#bridge-protocol));
   that is not proven in a game yet. `tools/autotest/bridge_proof.py` on a test lane checks it first.
-- **Enemies and owners in the state.** The state has Link's side only. The module's debug walk already reads every
-  actor's name, place, life and animation, and the objects sync knows each one's owner; a `dump` of those beside the
-  flags is the next step (then the checker compares positions and owners too).
+- **World list: the client and the checker.** The `world` member is in the bridge's `state` and `dump`. The client's
+  `get_world` and `get_actor`, and the checker that compares positions and owners of the two games, come next.
+  Not proven in a game: the list needs a lane run (connected games, an enemy in the room).
 - **More than two games** (the runner starts A and B).
 - **Lag on purpose.** The runner's `--test-delay-ms` and `--test-jitter-ms` give the server a delay; a live session
   can pass them through `start` once it takes them.

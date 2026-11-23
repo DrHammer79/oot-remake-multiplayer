@@ -266,3 +266,77 @@ TEST_CASE("playtest: an error reply carries the frame, the hold and a reason") {
     CHECK(e.find("\"error\":\"busy\"") != std::string::npos);
     CHECK(CoopModJson::Parse(e));  // valid JSON, the quote escaped
 }
+
+TEST_CASE("playtest: the world member is absent when the snapshot switch is off") {
+    CHECK(WorldMember(false, std::nullopt, 10, 1000).empty());
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 10;
+    s.taken_ms = 1000;
+    CHECK(WorldMember(false, s, 10, 1000).empty());  // off: nothing, so the old `state` text is unchanged
+}
+
+TEST_CASE("playtest: the world member with no snapshot yet is an empty list with a null frame") {
+    const std::string m = WorldMember(true, std::nullopt, 10, 1000);
+    const auto v = CoopModJson::Parse("{" + m.substr(1) + "}");
+    REQUIRE(v);
+    const auto* w = v->Get("world");
+    REQUIRE(w);
+    CHECK(w->Get("frame")->kind == CoopModJson::Value::Kind::Null);
+    CHECK(w->Get("actors")->array.empty());
+}
+
+TEST_CASE("playtest: the world member lists actors with owner, alive and both frames") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 8;
+    s.taken_ms = 1000;
+    CoopWorldSnapshot::WorldActor foe;
+    foe.id = 4660;
+    foe.name = "Enemy_Test";
+    foe.kind = CoopWorldSnapshot::Kind::enemy;
+    foe.pos = {1.5f, 2.0f, -3.25f};
+    foe.dist = 4.0f;
+    foe.life = 2;
+    foe.max_life = 4;
+    foe.owner = 0;
+    foe.alive = true;
+    CoopWorldSnapshot::WorldActor grass;
+    grass.name = "Obj_Plant_Grass_A";
+    s.actors = {foe, grass};
+    const std::string m = WorldMember(true, s, 10, 1200);
+    CHECK(m.find('\n') == std::string::npos);
+    const auto v = CoopModJson::Parse("{" + m.substr(1) + "}");
+    REQUIRE(v);
+    const auto* w = v->Get("world");
+    REQUIRE(w);
+    CHECK(w->Get("frame")->number == 8);
+    CHECK(w->Get("age_ms")->number == 200);
+    CHECK(Compact(*w->Get("stale")) == "false");
+    CHECK(Compact(*w->Get("behind")) == "true");  // the game is at 10, the snapshot at 8
+    CHECK(w->Get("count")->number == 2);
+    const auto& a0 = w->Get("actors")->array[0];
+    CHECK(Compact(*a0.Get("owner")) == "\"server\"");
+    CHECK(Compact(*a0.Get("kind")) == "\"enemy\"");
+    CHECK(Compact(*a0.Get("alive")) == "true");
+    CHECK(a0.Get("pos")->array.size() == 3);
+    CHECK(a0.Get("pos")->array[2].number == doctest::Approx(-3.25).epsilon(0.05));
+    const auto& a1 = w->Get("actors")->array[1];
+    CHECK(Compact(*a1.Get("owner")) == "null");  // unknown owner: null
+    CHECK(Compact(*a1.Get("alive")) == "null");  // no life read: unknown, not dead
+    CHECK(Compact(*a1.Get("life")) == "null");
+}
+
+TEST_CASE("playtest: a world snapshot older than 1.5 s is an empty list marked stale") {
+    CoopWorldSnapshot::Snapshot s;
+    s.frame = 8;
+    s.taken_ms = 1000;
+    s.actors.resize(3);
+    const std::string m = WorldMember(true, s, 8, 1000 + CoopWorldSnapshot::kStaleMs + 1);
+    const auto v = CoopModJson::Parse("{" + m.substr(1) + "}");
+    REQUIRE(v);
+    const auto* w = v->Get("world");
+    REQUIRE(w);
+    CHECK(Compact(*w->Get("stale")) == "true");
+    CHECK(w->Get("count")->number == 0);
+    CHECK(w->Get("actors")->array.empty());
+    CHECK(w->Get("age_ms")->number == 1501);
+}
