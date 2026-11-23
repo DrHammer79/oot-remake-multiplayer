@@ -39,6 +39,9 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lanes  # noqa: E402  (brings hs.py: run_quiet and popen_quiet start a console child with no window)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINDOWS = os.name == "nt"
 WANT_TRY = ("welcomed", "refused", "none")
@@ -174,7 +177,7 @@ def count_lines(text, pattern):
     script = ("$t = [Console]::In.ReadToEnd(); "
               "[regex]::Matches($t, '(?m)^.*' + $env:HS_STEPS_PATTERN).Count")
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", script], input=text, capture_output=True,
+        r = lanes.hs.run_quiet(["powershell", "-NoProfile", "-Command", script], input=text, capture_output=True,
                            text=True, encoding="utf-8", env=dict(os.environ, HS_STEPS_PATTERN=pattern), timeout=120)
         return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else None
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -618,7 +621,7 @@ class HookshotGames:
             args += self.server_delay
             env = dict(os.environ, OOT_COOP_TEST="1")
         with open(os.path.join(self.out, "server-out%s.txt" % sfx), "w") as so:
-            self.server = subprocess.Popen(args, stdout=so, stderr=subprocess.STDOUT, env=env)
+            self.server = lanes.hs.popen_quiet(args, stdout=so, stderr=subprocess.STDOUT, env=env)
         time.sleep(1)
 
     def server_stop(self):

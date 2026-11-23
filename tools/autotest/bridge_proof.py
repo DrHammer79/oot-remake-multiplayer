@@ -272,7 +272,9 @@ def main(argv=None):
                              "s = socket.create_connection(('127.0.0.1', %d))" % a.port_a,
                              "s.sendall(%r)" % msgs,
                              "time.sleep(600)"])
-        child = subprocess.Popen([sys.executable, "-I", "-c", code])
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hookshot"))
+        import hs
+        child = hs.popen_quiet([sys.executable, "-I", "-c", code])
         time.sleep(3)
         child.kill()
         child.wait()

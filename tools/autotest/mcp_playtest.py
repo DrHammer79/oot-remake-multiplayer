@@ -21,6 +21,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_look  # noqa: E402
+import kit_route  # noqa: E402
+import kit_tools  # noqa: E402
+import kit_wait  # noqa: E402
 import playtest_client as pc  # noqa: E402
 import playtest_helpers as ph  # noqa: E402
 
@@ -35,8 +39,10 @@ SCRIPT_HELP = (
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
      "camera yaw (0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, whether an event or a load is "
-     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`.",
-     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
+     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`. "
+     "Every look has a `state_id`; pass it as `since` on the next call to get only what changed (`changed`, `removed`).",
+     "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]},
+                                                      "since": {"type": "integer", "minimum": 1}}}},
     {"name": "act", "description": "Play test script lines in one game, then return its state. " + SCRIPT_HELP,
      "inputSchema": {"type": "object", "required": ["player", "script"],
                      "properties": {"player": {"type": "string", "enum": ["A", "B"]},
@@ -101,6 +107,16 @@ def _button(args):
     if b not in pc.BUTTONS:
         raise ValueError("button: one of " + " ".join(pc.BUTTONS))
     return b
+
+
+def _since(args):
+    """The `since` of get_state and state: the state_id of an earlier look (a whole number from 1), or None."""
+    v = args.get("since")
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ValueError("since: the state_id of an earlier look (a whole number, 1 or more)")
+    return v
 
 
 def _bounded(args, key, default, lo, hi):
@@ -247,6 +263,12 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
      "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "interact", "description": "go_to_actor to within 1 m (`near_m`), face it, then as talk: press A only when "
+     "the `prompt` says an action is there. `walk` is go_to_actor's answer; a walk or turn that did not get there says "
+     "why and presses nothing. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name"],
+                     "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
+                                        max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
 ]
 
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
@@ -257,8 +279,14 @@ PLAYER_TOOLS = [
      "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
      "no world list (solo). The inventory is NOT in the reply unless you ask: `inventory_count` says how many items "
      "are set; `inventory` true adds those entries (about 290 on a full save: 10k tokens, ask once). The nearest "
-     "actors are in get_world. " + PAUSED,
-     "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"}}}},
+     "actors are in get_world. Every reply has a `state_id`; pass it as `since` on a later call and only what "
+     "changed comes back: `changed` (dotted path: new value, e.g. `pos`, `equips.weapon`), `removed`, the `frame` "
+     "and a new `state_id` (an id that is no longer kept, the last 16 are, gives the whole state and says why). "
+     "`frame`, `snapshot_present` and the like are left out of a delta: they move on every look. The `inventory` "
+     "is left out too (`inventory_count` changing says it did: ask for the whole state with `inventory` true). "
+     + PAUSED,
+     "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"},
+                                                      "since": {"type": "integer", "minimum": 1}}}},
     {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
      "`within_m` filter; at most `limit` (50 by default, 200 at most) come back, with `matched` and `truncated`. The "
@@ -267,11 +295,40 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": list(pc.KINDS)},
                                                        "within_m": {"type": "number", "minimum": 0},
                                                        "limit": {"type": "integer", "minimum": 1, "maximum": 200}}}},
+    {"name": "look", "description": "ONE call for the whole situation, as short text (about 20 to 40 lines, no picture): "
+     "scene, Link (age, life, place, facing, sword and shield, ammo), doors, enemies (life, metres, world yaw and "
+     "ahead/left/right/behind), chests, switches, items, NPCs near, a running event, what A and B would do, and what "
+     "CHANGED since your last look. Yaw is the one `move` and `walk_to` use (0 = +z, 90 = +x). The text of a text box "
+     "and the C buttons are not readable through the kit yet and it says so. " + PAUSED,
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "wait_until", "description": "Let the game run (in chunks of 8 frames) until `what` happens, then reply with "
+     "`met`, why it stopped and a `look` text. `what`: event_over, scene_changed, enemy_dead (with `id` from look), "
+     "enemies_clear (none alive within 10 m), on_ground (height steady for two looks), prompt (A has something to do) or "
+     "condition (with `condition`, as step_until). It stops early, and says so in `stopped`, when Link is hurt, dies, "
+     "a scene loads, or an event starts (unless that is what you wait for). One call instead of a step loop. " + PAUSED,
+     "inputSchema": {"type": "object", "required": ["what"], "properties": {
+         "what": {"type": "string", "enum": list(kit_wait.WHATS)}, "id": {"type": ["integer", "string"]},
+         "condition": {"type": "string"}, "max_frames": {"type": "integer", "minimum": 1, "maximum": kit_wait.MAX_FRAMES}}}},
+    {"name": "go_to", "description": "Walk to a place and end with a `look`. Give ONE of: `place` (a position name from the "
+     "scene's recorded data, tools/playtest/data; it walks the recorded routes, nearest start within 6 m, else a "
+     "straight line and says so), `id` + `name` (an actor, as go_to_actor), or `x` + `z`. Stops early and says why: a "
+     "scene change (through a door: that is the way out), a load, an event, hurt, a stuck walk (with the recorded "
+     "stuck-spot note if there is one). It does not climb, jump or read the game's collision. " + HELPER_NOTE,
+     "inputSchema": {"type": "object", "properties": dict(ACTOR_ARGS, place={"type": "string"}, x={"type": "number"},
+                                                          z={"type": "number"}, near_m={"type": "number"})}},
+    {"name": "record_route", "description": "Save a played walk as a route for the next tester. `action` start (begin "
+     "sampling Link's place from every reply of this game), save (needs `name`, lowercase words with hyphens, and an "
+     "optional `note`; writes tools/playtest/data/<scene>.json with points named NAME-1, NAME-2 ...; a point is kept "
+     "every 2 m) or cancel. Walk with walk_to, press or go_to between start and save. Only the places Link walked "
+     "through are saved, never anything from the game's files.",
+     "inputSchema": {"type": "object", "required": ["action"], "properties": {
+         "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
+         "note": {"type": "string", "maxLength": 290}}}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
-    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) with the camera-relative stick, a "
-     "few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
+    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) by world direction (the module "
+     "makes the stick from each frame's camera), a few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
      "after max_frames; says why, the frames used and the distance left.",
      "inputSchema": {"type": "object", "required": ["x", "z"],
                      "properties": {"x": {"type": "number"}, "z": {"type": "number"},
@@ -285,6 +342,17 @@ PLAYER_TOOLS = [
          "frames": FRAMES}}},
     {"name": "step", "description": "Let the game run N frames with no input, then pause. " + PAUSED,
      "inputSchema": {"type": "object", "required": ["frames"], "properties": {"frames": FRAMES}}},
+    {"name": "step_until", "description": "Let the game run in steps of `chunk` frames (8 by default, up to 60) with no "
+     "input until a state field matches, then pause. `condition` is `field`, `!field` or `field OP value` (OP: == != < "
+     "<= > >=; the value is JSON or a bare word; a dotted path such as `equips.weapon` or `pos.1`): `event == false` "
+     "(a talk is over), `loading == false`, `scene == KokiriForest_Child`, `prompt` (something to talk to or open), "
+     "`life == 0`, `rupees >= 50`. It looks first, so a condition that holds already costs no frame. At most `max_frames` "
+     "(300 by default, up to 3600) pass. Reply: `met`, the field's `value`, `frames_run`, the last `state` and, "
+     "when not met, `why`. A field the state does not have is an error (a typo is not a time-out); a null field is 'do "
+     "not know' (a stale snapshot), never a match for an ordering. " + PAUSED,
+     "inputSchema": {"type": "object", "required": ["condition"],
+                     "properties": {"condition": {"type": "string"}, "max_frames": FRAMES,
+                                    "chunk": {"type": "integer", "minimum": 1, "maximum": kit_tools.MAX_CHUNK}}}},
     {"name": "warp", "description": "Warp to a scene (a map name, e.g. KokiriForest_Child, ForestTemple) and "
      "optionally an entrance (a start position name in it), through the game's own scene change. In free play it goes by Longshot's teleport: only the maps of its own list "
      "(fields, villages, dungeon entrances) and no entrance (it lands at the map's own start). With an entrance, or for "
@@ -360,9 +428,14 @@ class Game:
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
         self.match_offsets = {}   # one cursor per `log` match (the plain cursor is not moved by a match)
+        self.recorder = None   # a route being recorded (record_route)
+        self.route_dir = kit_route.DATA_DIR
+        self.last_look = None   # what the last `look` saw (the next one says what changed)
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
         self.check_offset = None   # where check_logs read to (None: from the boot)
         self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
+        # the last looks (get_state `since`); ids start at 100000 x the player's number, so p1's id means nothing to p2
+        self.history = kit_tools.StateHistory(start=pc.player_index(self.player) * 100000 + 1)
 
     def log_lines(self, match=None):
         """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
@@ -445,15 +518,64 @@ class Game:
         if self.session:
             live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
             live.touch(self.session)          # the session's watchdog counts this as a tester command
+        since = _since(args) if name == "get_state" else None   # (refused before anything is asked of the game)
         try:
             # no reply carries the whole inventory or the world list unless asked for (get_state inventory=true)
-            return pc.slim_state(self._call(name, args), inventory=name == "get_state" and bool(args.get("inventory")))
+            raw = self._call(name, args)
+            out = pc.slim_state(raw, inventory=name == "get_state" and bool(args.get("inventory")))
+            if name == "get_state":
+                out = self.history.reply({self.player: out}, since)[self.player]
+            return out
         finally:
             if self.session:
                 live.touch(self.session)      # (a long walk_to or warp is not idle time)
 
+    def _go_to(self, args):
+        c = self._driver()
+        if args.get("place") is not None:
+            st = pc.game_of(c.state())
+            data = kit_route.load(st.get("scene") or "", self.route_dir)
+            out = kit_route.go_to(c, data, goal=_word(args, "place"))
+        elif args.get("id") is not None:
+            out = ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
+                                 int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        elif "x" in args and "z" in args:
+            out = kit_route.go_to(c, None, x=_num(args, "x"), z=_num(args, "z"))
+        else:
+            raise ValueError("go_to: give `place`, or `id` and `name`, or `x` and `z`")
+        st = c.state()
+        out.pop("state", None)
+        out["look"], self.last_look = kit_look.look(st, self.last_look)
+        return out
+
+    def _record_route(self, args):
+        action = args.get("action")
+        if action == "start":
+            st = pc.game_of(self.client.state())
+            if not st.get("scene"):
+                raise ValueError("no scene in the state yet")
+            self.recorder = kit_route.Recorder(st["scene"])
+            self.recorder.add(st.get("pos"), st["scene"])
+            return {"recording": True, "scene": st["scene"], "points": len(self.recorder.points)}
+        if self.recorder is None:
+            raise ValueError("no route is being recorded: call record_route start first")
+        if action == "cancel":
+            self.recorder = None
+            return {"recording": False}
+        if action == "save":
+            st = pc.game_of(self.client.state())
+            self.recorder.add(st.get("pos"), st.get("scene"))
+            out = kit_route.save_route(self.recorder, args.get("name"), args.get("note"), self.route_dir)
+            self.recorder = None
+            return out
+        raise ValueError("action: start, save or cancel")
+
+    def _driver(self):
+        """The client, wrapped to sample Link's place into the route being recorded (if any)."""
+        return kit_route.Sampling(self.client, self.recorder) if self.recorder is not None else self.client
+
     def _call(self, name, args):
-        c = self.client
+        c = self._driver()
         if name == "get_state":
             s = c.state()
             s.update(pc.world_words(s))   # life_word, enemy_near, danger beside the numbers
@@ -464,6 +586,18 @@ class Game:
                 return {"frame": r["frame"], "actors": [], "why": "this module has no world list (an older build)"}
             return dict(pc.select_actors(r["world"], args.get("kind"), args.get("within_m"),
                                          args.get("limit", 50)), frame=r["frame"], world_frame=r["world"].get("frame"))
+        if name == "look":
+            text, self.last_look = kit_look.look(c.state(), self.last_look)
+            return text
+        if name == "wait_until":
+            out, st = kit_wait.wait_until(c, args.get("what"), _bounded(args, "max_frames", 300, 1, kit_wait.MAX_FRAMES),
+                                          ident=args.get("id"), condition=args.get("condition"))
+            out["look"], self.last_look = kit_look.look(st, self.last_look)
+            return out
+        if name == "go_to":
+            return self._go_to(args)
+        if name == "record_route":
+            return self._record_route(args)
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
@@ -486,6 +620,9 @@ class Game:
             return c.input(stick, buttons, int(args.get("frames", 2)))
         if name == "step":
             return c.step(int(args["frames"]))
+        if name == "step_until":
+            return kit_tools.step_until(c, args.get("condition"), int(_bounded(args, "max_frames", 300, 1, 3600)),
+                                        int(_bounded(args, "chunk", kit_tools.CHUNK, 1, kit_tools.MAX_CHUNK)))
         if name == "warp":
             return c.warp(args["scene"], args.get("entrance"), _bounded(args, "timeout", 60, 1, 600))
         if name == "flag":
@@ -512,6 +649,10 @@ class Game:
             return ph.use_item(c, _word(args, "item"), _button(args))
         if name in ("talk", "open"):
             return ph.interact(c, name)
+        if name == "interact":
+            return ph.interact_with(c, _need_id(args), _word(args, "name"),
+                                    _bounded(args, "near_m", ph.INTERACT_M, 0.5, 10),
+                                    int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "pause":
             return c.pause()
         if name == "resume":
@@ -539,6 +680,86 @@ class Game:
         raise ValueError("no tool %s" % name)
 
 
+CALLS_FILE = "calls.jsonl"
+
+
+# Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
+NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
+                            "log", "check_logs", "session_status"))
+BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
+ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
+IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "
+           "presses and steps as they happen; a warp's or a test line's frames right after it). `player` is the game. ")
+
+
+def _pair_tool(tool, players):
+    t = json.loads(json.dumps(tool))
+    schema = t["inputSchema"]
+    schema.setdefault("properties", {})["player"] = {"type": "string", "enum": list(players)}
+    if t["name"] in ALWAYS_BOTH:
+        t["description"] += " Both games, always (`games`, by player): a pair is held or runs together."
+        del schema["properties"]["player"]
+    elif t["name"] in BOTH_TOOLS:
+        t["description"] += " With no `player`: both games (`games`, by player)."
+    else:
+        schema["required"] = ["player"] + list(schema.get("required", []))
+    if t["name"] not in NO_FRAME_TOOLS:
+        t["description"] += IN_STEP
+    return t
+
+
+class Pair:
+    """Two games' tools in one server. A call that can run frames goes to its player's game through an InStep, so the
+    other game runs the same frames as they happen; what ran outside input, move and step (a warp, a test line, a
+    shot) is caught up after the call from the game's frame counts. Each reply says what the other game ran
+    (`other`)."""
+
+    def __init__(self, games):
+        self.games = dict(games)   # player -> Game, two of them
+        if len(self.games) != 2:
+            raise ValueError("a pair is two games")
+        self.tools = [_pair_tool(t, self.games) for t in PLAYER_TOOLS]
+
+    def _other(self, player):
+        return next(g for p, g in self.games.items() if p != player)
+
+    def call(self, name, args):
+        rest = {k: v for k, v in args.items() if k != "player"}
+        player = args.get("player")
+        if name in ALWAYS_BOTH or (player is None and name in BOTH_TOOLS):
+            return {"games": {p: g.call(name, dict(rest)) for p, g in self.games.items()}}
+        if player not in self.games:
+            raise ValueError("player is one of %s" % ", ".join(self.games))
+        game, other = self.games[player], self._other(player)
+        if name in NO_FRAME_TOOLS:
+            return game.call(name, rest)
+        own = game.client
+        start = own.hello()["frame"]
+        pair = ph.InStep(own, other.client, start)
+        game.client = pair
+        note = {"player": other.player}
+        try:
+            return game.call(name, rest)
+        finally:
+            game.client = own
+            try:
+                note["caught_up"] = pair.catch_up()
+            except (OSError, ValueError, pc.BridgeError) as e:
+                note["error"] = "%s: %s" % (e.__class__.__name__, e)
+            note["frames"] = pair.stepped
+            if pair.short:
+                note["short"] = pair.short   # frames asked that this game did not run: the other did not run them
+            note["in_step"] = "error" not in note
+            self.last_other = note
+
+    def answer(self, name, args):
+        self.last_other = None
+        out = self.call(name, args)
+        if self.last_other is not None and isinstance(out, dict):
+            out["other"] = self.last_other
+        return out
+
+
 class Args:
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -546,7 +767,7 @@ class Args:
 
 def call(session, name, args):
     if name == "state":
-        return live.state(Args(session=session, player=args.get("player")))
+        return live.state(Args(session=session, player=args.get("player"), since=_since(args)))
     if name == "act":
         return live.do(Args(session=session, player=args["player"], script=args["script"]))
     if name == "shot":
@@ -570,10 +791,19 @@ def reply(id_, result=None, error=None):
     sys.stdout.flush()
 
 
-def serve(session, game=None):
-    """Answers MCP requests on stdin: the two-game session's tools (session), or one game's (game)."""
-    tools = PLAYER_TOOLS if game else TOOLS
-    name = ("oot-%s" % game.player) if game else "oot-playtest"
+def call_log_path(session, log_dir):
+    """Where a server writes its calls: `calls.jsonl` in the session folder, else in the run's log folder."""
+    return os.path.join(session or log_dir or "playtest-logs", CALLS_FILE)
+
+
+def serve(session, game=None, calllog=None):
+    """Answers MCP requests on stdin: the two-game session's tools (session), one game's (game), or a pair's (a Pair).
+    `calllog`: the file every call is also written to (a CallLog; docs/playtest.md, "Kit helpers")."""
+    if isinstance(game, Pair):
+        tools, name = game.tools, "oot-pair"
+    else:
+        tools = PLAYER_TOOLS if game else TOOLS
+        name = ("oot-%s" % game.player) if game else "oot-playtest"
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -594,11 +824,20 @@ def serve(session, game=None):
             reply(id_, {"tools": tools})
         elif method == "tools/call":
             params = req.get("params") or {}
+            began = time.time()
             try:
                 args = params.get("arguments") or {}
-                out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
-                reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
+                if isinstance(game, Pair):
+                    out = game.answer(params.get("name"), args)
+                else:
+                    out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
+                if calllog:
+                    calllog.write(params.get("name"), args, True, t=began)
+                reply(id_, {"content": [{"type": "text", "text": out if isinstance(out, str) else json.dumps(out, indent=1)}]})
             except (Exception, SystemExit) as e:  # (SystemExit from a bad tag too: an error the tester reads)
+                if calllog and isinstance(params.get("name"), str):
+                    calllog.write(params["name"], params.get("arguments"), False, "%s: %s" % (e.__class__.__name__, e),
+                                  t=began)
                 reply(id_, {"content": [{"type": "text", "text": "%s: %s" % (e.__class__.__name__, e)}],
                             "isError": True})
         elif method == "ping":
@@ -612,19 +851,37 @@ def main(argv=None):
     p.add_argument("--session", help="a two-game session (live.py start): the tools state, act, shot, checkpoint, "
                    "desync_check; with --player: the session whose watchdog each call keeps awake")
     p.add_argument("--player", choices=pc.PLAYERS, help="one game's tools, through its play-test bridge")
+    p.add_argument("--pair", action="store_true", help="both games' tools (p1 and p2) from one server, each call "
+                   "with a `player`; every frame one game runs, the other runs too")
     p.add_argument("--port", type=int, help="that game's bridge port (default: the player's, on --lane when given)")
     p.add_argument("--lane", type=int, help="a test lane (tools/autotest/lanes.py): its bridge ports")
     p.add_argument("--log-dir", default="playtest-logs",
                    help="the run's checkpoint logs and shots; give every game's server the same one")
+    p.add_argument("--call-log", metavar="FILE", help="write every call here, for `live.py replay` (default: %s in "
+                   "the session folder, else in --log-dir)" % CALLS_FILE)
+    p.add_argument("--no-call-log", action="store_true", help="write no call log")
     a = p.parse_args(argv)
+    if a.pair:
+        if a.player or a.port:
+            p.error("--pair takes both games' ports from --lane (or the default ports): no --player or --port")
+        session = os.path.abspath(a.session) if a.session else None
+        serve(None, Pair({q: Game(q, pc.Client(pc.port_for(q, a.lane)), os.path.abspath(a.log_dir), session)
+                          for q in ("p1", "p2")}),
+              calllog=None if a.no_call_log else kit_tools.CallLog(
+                  a.call_log or call_log_path(session, os.path.abspath(a.log_dir)), "oot-pair"))
+        return 0
     if not a.player:
         if not a.session:
             p.error("give --session, or --player (and --session when the games came from live.py start)")
-        serve(os.path.abspath(a.session))
+        session = os.path.abspath(a.session)
+        serve(session, calllog=None if a.no_call_log else kit_tools.CallLog(
+            a.call_log or call_log_path(session, None), "oot-playtest"))
         return 0
     session = os.path.abspath(a.session) if a.session else None
     serve(None, Game(a.player, pc.Client(a.port or pc.port_for(a.player, a.lane)), os.path.abspath(a.log_dir),
-                     session))
+                     session),
+          calllog=None if a.no_call_log else kit_tools.CallLog(
+              a.call_log or call_log_path(session, os.path.abspath(a.log_dir)), "oot-" + a.player))
     return 0
 
 

@@ -3,6 +3,7 @@
 // source (a thread calling AtFrame as the game's calc thread does), and every command's checks.
 #include <doctest/doctest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -202,6 +203,170 @@ TEST_CASE("playtest: the stick's angle and strength as Longshot's axes") {
     CHECK(near(StickAxes(-90, 1), -1, 0));
     CHECK(near(StickAxes(45, 2), std::sqrt(0.5), std::sqrt(0.5)));  // strength capped at 1
     CHECK(near(StickAxes(NAN, 1), 0, 0));
+}
+
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+
+// A camera at yaw `cam` (degrees, 0 toward +z, 90 toward +x) pitched down `pitch` degrees, as the game's clip_from_world
+// rows: x = sx * right + jitter * forward, w = forward (depth into the picture). `right_handed`: the picture's right is
+// forward x up (+z forward gives -x right), as GL and Vulkan views are; false: the mirror (+z forward gives +x right).
+std::array<float, 16> Camera(double cam, bool right_handed, double pitch = 0, double jitter = 0) {
+    const double c = cam * kPi / 180, p = pitch * kPi / 180;
+    const double fx = std::sin(c) * std::cos(p), fy = -std::sin(p), fz = std::cos(c) * std::cos(p);
+    const double rx = right_handed ? -std::cos(c) : std::cos(c), rz = right_handed ? std::sin(c) : -std::sin(c);
+    std::array<float, 16> m{};
+    m[0] = static_cast<float>(1.3 * rx + jitter * fx), m[1] = static_cast<float>(jitter * fy);
+    m[2] = static_cast<float>(1.3 * rz + jitter * fz), m[3] = 5.0f;
+    m[5] = 1.7f;  // (y: not used for the ground)
+    m[12] = static_cast<float>(fx), m[13] = static_cast<float>(fy), m[14] = static_cast<float>(fz), m[15] = 2.0f;
+    return m;
+}
+
+// The world yaw Link walks for a stick, as the game moves him: stick up = the camera's forward on the ground, stick
+// right = the picture's right.
+double WalkedYaw(Axes a, double cam, bool right_handed) {
+    const double c = cam * kPi / 180;
+    const double fx = std::sin(c), fz = std::cos(c);
+    const double rx = right_handed ? -std::cos(c) : std::cos(c), rz = right_handed ? std::sin(c) : -std::sin(c);
+    return std::atan2(a.y * fx + a.x * rx, a.y * fz + a.x * rz) * 180 / kPi;
+}
+
+double AngleGap(double a, double b) { return std::fabs(std::remainder(a - b, 360.0)); }
+}  // namespace
+
+TEST_CASE("playtest: move turns a world yaw into the stick that walks that way, for any camera") {
+    for (const bool rh : {true, false}) {
+        for (const double cam : {0.0, 45.0, 90.0, 135.0, 180.0, -135.0, -90.0, -30.0}) {
+            for (const double want : {0.0, 90.0, 180.0, -90.0, 30.0, 150.0, -150.0, -60.0}) {
+                for (const double pitch : {0.0, 35.0, 80.0}) {
+                    CAPTURE(rh);
+                    CAPTURE(cam);
+                    CAPTURE(want);
+                    CAPTURE(pitch);
+                    const auto a = MoveAxes(Camera(cam, rh, pitch, 0.02), want, 1.0);
+                    REQUIRE(a);
+                    CHECK(AngleGap(WalkedYaw(*a, cam, rh), want) < 0.01);
+                    CHECK(std::hypot(a->x, a->y) == doctest::Approx(1.0).epsilon(1e-6));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("playtest: move's stick in the four quadrants with the camera toward +z") {
+    auto near = [](std::optional<Axes> a, double x, double y) {
+        return a && std::fabs(a->x - x) < 1e-6 && std::fabs(a->y - y) < 1e-6;
+    };
+    const auto rh = Camera(0, true), lh = Camera(0, false);
+    CHECK(near(MoveAxes(rh, 0, 1), 0, 1));     // away from the camera: up
+    CHECK(near(MoveAxes(rh, 180, 1), 0, -1));  // toward it: down
+    CHECK(near(MoveAxes(rh, 90, 1), -1, 0));   // +x is the picture's left in a right-handed view
+    CHECK(near(MoveAxes(rh, -90, 1), 1, 0));
+    CHECK(near(MoveAxes(lh, 90, 1), 1, 0));    // and its right in the mirror
+    CHECK(near(MoveAxes(lh, -90, 0.5), -0.5, 0));
+    // The camera turned behind Link (toward -z): the same world yaw is the other way on the stick.
+    CHECK(near(MoveAxes(Camera(180, true), 0, 1), 0, -1));
+    CHECK(near(MoveAxes(Camera(90, true), 90, 1), 0, 1));
+    CHECK(near(MoveAxes(Camera(90, true), 0, 1), 1, 0));
+    CHECK(MoveAxes(rh, 0, 2)->y == doctest::Approx(1.0));  // strength capped at 1
+    CHECK(ViewYaw(Camera(90, true)).value() == doctest::Approx(90.0));
+    CHECK(ViewYaw(Camera(-135, false)).value() == doctest::Approx(-135.0));
+}
+
+TEST_CASE("playtest: move has no stick for a camera with no ground direction") {
+    CHECK_FALSE(MoveAxes(Camera(0, true, 90), 0, 1));  // straight down
+    std::array<float, 16> zero{};
+    CHECK_FALSE(MoveAxes(zero, 0, 1));
+    auto bad = Camera(0, true);
+    bad[0] = NAN;
+    CHECK_FALSE(MoveAxes(bad, 0, 1));
+    CHECK_FALSE(MoveAxes(Camera(0, true), NAN, 1));
+    CHECK_FALSE(ViewYaw(zero));
+}
+
+TEST_CASE("playtest: the move hold puts its stick in only while on, and counts what it did") {
+    MoveHold hold;
+    std::int32_t stick[4] = {100, -200, 300, 400};
+    CHECK_FALSE(hold.Apply(Camera(0, true), stick));
+    CHECK(stick[0] == 100);
+    CHECK(stick[1] == -200);
+
+    hold.Start(-90, 1.0);
+    CHECK(hold.On());
+    CHECK(hold.Apply(Camera(0, true), stick));
+    CHECK(stick[0] == 32767);  // -x: the picture's right
+    CHECK(stick[1] == 0);
+    CHECK(stick[2] == 300);  // the right stick is left alone
+    CHECK(stick[3] == 400);
+    CHECK(hold.Apply(std::nullopt, stick));  // no camera: centred, not a stale direction
+    CHECK(stick[0] == 0);
+    CHECK(stick[1] == 0);
+    CHECK(hold.Apply(Camera(180, true), stick));  // the camera turned: the next read follows it
+    CHECK(stick[0] == -32767);
+    const auto did = hold.Stop();
+    CHECK_FALSE(hold.On());
+    CHECK(did.reads == 3);
+    CHECK(did.no_camera == 1);
+    REQUIRE(did.last);
+    CHECK(did.last->x == doctest::Approx(-1.0));
+    REQUIRE(did.view);
+    CHECK(AngleGap(*did.view, 180) < 1e-6);
+    stick[0] = 5;
+    CHECK_FALSE(hold.Apply(Camera(0, true), stick));
+    CHECK(stick[0] == 5);
+    hold.Start(0, 1.0);
+    CHECK(hold.Stop().reads == 0);  // a new move starts its counts again
+}
+
+TEST_CASE("playtest: the pad thread reads the move hold while moves start and stop") {
+    // The pad hook skips the lock when no move is on; a read that races a Start or a Stop still gives
+    // either the untouched stick or the whole move, and every read it took is counted.
+    MoveHold hold;
+    std::atomic<bool> done{false};
+    std::atomic<std::uint32_t> taken{0}, bad{0};
+    std::thread pad([&] {
+        while (!done.load()) {
+            std::int32_t stick[4] = {7, 7, 0, 0};
+            if (hold.Apply(Camera(0, true), stick)) {
+                ++taken;
+                if (stick[0] != 32767 || stick[1] != 0) ++bad;
+            } else if (stick[0] != 7 || stick[1] != 7) {
+                ++bad;
+            }
+        }
+    });
+    std::uint32_t counted = 0;
+    for (int i = 0; i < 2000; ++i) {
+        hold.Start(-90, 1.0);
+        counted += hold.Stop().reads;
+    }
+    done = true;
+    pad.join();
+    CHECK(bad.load() == 0);
+    CHECK(counted == taken.load());
+}
+
+TEST_CASE("playtest: move parses its world yaw, strength and frames") {
+    auto r = Parse(R"({"cmd":"move","yaw":-135.5,"frames":8})");
+    REQUIRE(r);
+    CHECK(r->yaw == doctest::Approx(-135.5));
+    CHECK(r->strength == doctest::Approx(1.0));
+    CHECK(r->frames == 8);
+    CHECK(r->exclusive);
+    r = Parse(R"({"cmd":"move","yaw":10,"strength":0.4,"exclusive":false})");
+    REQUIRE(r);
+    CHECK(r->strength == doctest::Approx(0.4));
+    CHECK_FALSE(r->exclusive);
+    CHECK(ParseError(R"({"cmd":"move"})").find("yaw") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"move","yaw":"north"})").find("yaw") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"move","yaw":0,"strength":1.5})").find("strength") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"move","yaw":0,"frames":0})").find("frames") != std::string::npos);
+    CHECK(ParseError(R"({"cmd":"move","yaw":0,"exclusive":1})").find("exclusive") != std::string::npos);
+    // The pad sequence a move sends holds both sticks centred: the pad hook puts the move's stick in.
+    Request pad = *r;
+    const std::string c = ControlInput(pad, 4);
+    CHECK(c.find("\"lx\":0.000000,\"ly\":0.000000") != std::string::npos);
 }
 
 TEST_CASE("playtest: every command parses, ids come back as given") {

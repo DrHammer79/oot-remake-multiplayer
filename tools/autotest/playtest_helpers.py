@@ -16,6 +16,7 @@ import playtest_client as pc
 
 MAX_FRAMES = 120       # one helper call runs at most this many frames in the game
 NEAR_M = 1.5           # "near an actor": within this many metres
+INTERACT_M = 1.0       # interact walks this near before it looks for the A prompt
 LEG_M = 4.0            # go_to_actor walks in legs of this length, looking the actor up again after each
 LEG_FRAMES = 30
 STUCK_FRAMES = 60      # no 0.3 m closer to the actor over this many frames: stuck
@@ -28,24 +29,60 @@ CLOSER_M = 0.3         # a leg that brings Link this much nearer is progress
 
 
 class InStep:
-    """Two games in step: every frame the primary game runs through input() or step() the other game runs too. Anything
-    else (state, world, act) goes to the primary only."""
+    """Two games in step: every frame the primary game runs through input(), move() or step() the other game runs too. Anything
+    else (state, world, act) goes to the primary only. The other game runs what the primary's frame count moved (`start`:
+    the primary's frame before the first call, else its last seen frame), so a call that ran fewer frames than it asked
+    (cut short, refused after a partial run) never puts the other game ahead; without frame counts, what was asked."""
 
-    def __init__(self, primary, other):
+    def __init__(self, primary, other, start=None):
         self.primary, self.other = primary, other
+        self.seen = start if start is not None else getattr(primary, "last_frame", None)
+        self.stepped = 0   # frames the other game ran so far
+        self.short = 0     # frames asked that the primary did not run (so the other did not either)
 
     def __getattr__(self, name):
         return getattr(self.primary, name)
 
+    def _ran(self, asked):
+        """What the primary ran since the last look: its frame count's move, else `asked`."""
+        now = getattr(self.primary, "last_frame", None)
+        if self.seen is None or now is None:
+            ran = asked
+        else:
+            ran = max(0, int(now) - int(self.seen))
+        if now is not None:
+            self.seen = now
+        self.short += max(0, asked - ran)
+        return ran
+
+    def _other(self, frames):
+        while frames > 0:
+            n = min(frames, pc.MAX_FRAMES)
+            self.other.step(n)
+            self.stepped += n
+            frames -= n
+
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         r = self.primary.input(stick, buttons, frames, rstick)
-        self.other.step(frames)
+        self._other(self._ran(frames))
+        return r
+
+    def move(self, yaw, strength=1.0, frames=1, check=True):
+        r = self.primary.move(yaw, strength, frames, check)
+        self._other(self._ran(frames if r.get("ok") else 0))   # (a refused move ran no frames)
         return r
 
     def step(self, frames=1):
         r = self.primary.step(frames)
-        self.other.step(frames)
+        self._other(self._ran(frames))
         return r
+
+    def catch_up(self):
+        """Steps the other game by what the primary ran since the last input, move or step (a warp, a test line, a shot,
+        or a call that failed after running some frames), from its frame count. Returns the frames added."""
+        added = self._ran(0)
+        self._other(added)
+        return added
 
 
 def _pos(state):
@@ -259,6 +296,19 @@ def interact(client, what="talk", frames=PRESS_FRAMES):
     after = pc.game_of(client.step(frames))
     return {"result": "pressed A", "pressed": True, "prompt_was": before.get("prompt"), "prompt": after.get("prompt"),
             "event": after.get("event"), "frames": 2 * frames}
+
+
+def interact_with(client, ident, name=None, near_m=INTERACT_M, max_frames=MAX_FRAMES):
+    """go_to_actor, face it, then interact (A only when the state's prompt says an action is there). Returns
+    interact's answer with `walk` (go_to_actor's); when the walk or the turn did not get there, `result` says why and
+    nothing is pressed."""
+    g = go_to_actor(client, ident, name, near_m, max_frames)
+    if not g["arrived"]:
+        return {"result": "not reached: %s" % g["reason"], "pressed": False, "walk": g}
+    f = face(client, ident, name or (g.get("actor") or {}).get("name"))
+    if not f["faced"]:
+        return {"result": "not faced: %s" % f["reason"], "pressed": False, "walk": g}
+    return dict(interact(client, "interact with"), walk=g)
 
 
 def _death(client, line, name, ident, out, death_frames=None):
