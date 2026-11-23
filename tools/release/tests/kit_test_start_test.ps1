@@ -31,8 +31,8 @@ if ($env:OS -eq 'Windows_NT') {
         $id = Start-KitTestGame $prog $dir
         Check ($id -is [int] -and $id -gt 0 -and $id -ne $PID) 'a process id comes back'
         $p = Get-Process -Id $id -ErrorAction SilentlyContinue
-        if ($p) { [void]$p.WaitForExit(10000) }
-        Check $true 'the started program ran and ended'
+        $ended = (-not $p) -or $p.WaitForExit(10000)   # (no process left, or it ended within 10 s)
+        Check $ended 'the started program ran and ended'
         $threw = $false
         try { [void](Start-KitTestGame (Join-Path $dir 'missing.exe') $dir) } catch { $threw = $true }
         Check $threw 'a program that cannot start is an error, not a silent 0'
