@@ -149,6 +149,31 @@ if __name__ == "__main__":
     with open(os.environ["FAKE_LOG"], "a") as f:
         f.write("puppet_pack %s\n" % " ".join(sys.argv[1:]))
 EOF
+# (merge_tables.py's stand-in: the real parked rule, short (the pack's menus kept aside in _coop-menus), and a merge that
+# parks from its FAKE_PARK_FROM-th run on (counted in FAKE_MERGE_COUNT's file) and puts back before it)
+cat >"$kit/data/tools/puppet_pack/merge_tables.py" <<'EOF'
+import os, shutil, sys
+
+
+def charsel_native_parked(pack):
+    return os.path.isdir(os.path.join(pack, "_coop-menus"))
+
+
+if __name__ == "__main__":
+    pack = os.path.join(sys.argv[sys.argv.index("--mods") + 1], "contents", "0400486024DEC000", "coop-puppet")
+    n, count = 0, os.environ.get("FAKE_MERGE_COUNT")
+    if count:
+        n = (int(open(count).read() or 0) if os.path.exists(count) else 0) + 1
+        open(count, "w").write(str(n))
+    start = os.environ.get("FAKE_PARK_FROM")
+    if start is not None:
+        if n >= int(start):
+            os.makedirs(os.path.join(pack, "_coop-menus"), exist_ok=True)
+            print("Menus: fake merge %d parked" % n)
+        else:
+            shutil.rmtree(os.path.join(pack, "_coop-menus"), ignore_errors=True)
+            print("Menus: fake merge %d put back" % n)
+EOF
 : >"$kit/data/tools/puppet_pack/__init__.py"
 mkdir -p "$kit/data/tools/puppet_pack/charsel/data"
 printf 'PATCHcharsel' >"$kit/data/tools/puppet_pack/charsel/data/charsel-native.ips"
@@ -207,6 +232,21 @@ check "build: Character Select's code gone: co-op's tab's patch back in, the gam
 : >"$log"
 FAKE_CHARSEL_FAIL=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/csn3.txt" 2>&1; export CODE=$?
 check "build: the Characters tab's rule failing is said with its error, the start goes on (patch kept, no game build)"     bash -c '[ $CODE -eq 0 ] && grep -q "fake rule broke" "$1" && grep -q "could not tell whether its code patch" "$1" && [ -f "$2" ] && ! grep -q "^make_game" "$3"' _ "$tmp/csn3.txt" "$csn" "$log"
+# MsgNotFound on slot 0 (P-parked): the merge (run first, before the rule) parks the tab's files -> its code out with
+# them, the game built again; put back -> in again. Never the tab's code over the game's own menu files.
+: >"$log"
+FAKE_PARK_FROM=0 bash "$kit/scripts/build.sh" </dev/null >"$tmp/park1.txt" 2>&1; export CODE=$?
+check "build: the tab's files parked by the merge before the rule: its code out, the game built again" \
+    bash -c '[ $CODE -eq 0 ] && grep -q "fake merge 0 parked" "$1" && [ ! -e "$2" ] && grep -q "^make_game" "$3" && [ "$(cat "$4")" = 1 ]' _ \
+    "$tmp/park1.txt" "$csn" "$log" "$D/charsel-parked.txt"
+: >"$log"
+FAKE_PARK_FROM=0 bash "$kit/scripts/build.sh" </dev/null >"$tmp/park2.txt" 2>&1; export CODE=$?
+check "build: still parked: no change, nothing built (no build loop)" bash -c '[ $CODE -eq 0 ] && [ ! -e "$1" ] && ! grep -q "^make_game" "$2"' _ "$csn" "$log"
+: >"$log"
+FAKE_PARK_FROM=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/park3.txt" 2>&1; export CODE=$?
+check "build: put back: the tab's code in again with them, the game as built with it" \
+    bash -c '[ $CODE -eq 0 ] && grep -q "fake merge 0 put back" "$1" && [ -f "$2" ] && grep -q "coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips:" "$3" && [ "$(cat "$4")" = 0 ]' _ \
+    "$tmp/park3.txt" "$csn" "$D/game/coop-built-from.txt" "$D/charsel-parked.txt"
 
 # NVIDIA DLSS (#234): --dlss asks for NVIDIA's license once (a terminal only), data/dlss.txt keeps the answer, the game is
 # built again with the SDK; --no-dlss takes it back. The game's stamp stays the release, pin and patches.
@@ -671,6 +711,18 @@ if [[ $(uname -s) == Linux ]]; then
     OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
     check 'start: builds if needed, then starts the game in data/game' bash -c '[ $CODE -eq 0 ] && grep -q "^started $2 1 $3$" "$1"' _ "$log" "$D" "$D/game"
     check 'start: without a terminal, what it says goes to data/logs/start.log' has "$D/logs/start.log" 'start without a terminal'
+    # MsgNotFound (P-parked): start.sh's own merge after build.sh (its pack step) parks the tab's files that build.sh's
+    # merge left in play (from the 2nd merge on): the game is built again without the tab's code, then it starts.
+    : >"$log"; rm -f "$tmp/merges"
+    FAKE_MERGE_COUNT=$tmp/merges FAKE_PARK_FROM=2 OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/startpark.txt" 2>&1; export CODE=$?
+    check "start: the merge after the pack step parks the tab's files: the game built again without its code, then started" \
+        bash -c '[ $CODE -eq 0 ] && grep -q "kept aside just now" "$1" && [ ! -e "$2" ] && grep -q "^started " "$3" && [ "$(cat "$4")" = 4 ] && [ "$(cat "$5")" = 1 ] && ! grep -q "coop-puppet/exefs/" "$6"' _ \
+        "$tmp/startpark.txt" "$csn" "$log" "$tmp/merges" "$D/charsel-parked.txt" "$D/game/coop-built-from.txt"
+    : >"$log"; rm -f "$tmp/merges"
+    FAKE_MERGE_COUNT=$tmp/merges FAKE_PARK_FROM=99 OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/startpark2.txt" 2>&1; export CODE=$?
+    check "start: put back again: the tab's code back in before the game starts (no second build round)" \
+        bash -c '[ $CODE -eq 0 ] && [ -f "$1" ] && grep -q "^started " "$2" && [ "$(cat "$3")" = 2 ] && ! grep -q "just now" "$4"' _ \
+        "$csn" "$log" "$tmp/merges" "$tmp/startpark2.txt"
     check 'start: an applications menu entry for this kit (Steam: Add a Non-Steam Game)' bash -c 'grep -qF "Exec=bash \"$2/start-squadala.sh\"" "$1" && grep -q "^Categories=Game;" "$1"' _ "$XDG_DATA_HOME/applications/oot-coop.desktop" "$kit"
     check 'start: "sh start-squadala.sh" works too (POSIX sh start file)' sh -n "$kit/start-squadala.sh"
     bash "$kit/start-squadala.sh" --nope </dev/null >"$tmp/start2.txt" 2>&1; export CODE=$?

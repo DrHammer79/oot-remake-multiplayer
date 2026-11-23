@@ -2061,11 +2061,31 @@ function Test-KitCharselNative([string]$Manifest) {
         Where-Object { $_.Extension -in '.ips', '.pchtxt' }).Count
 }
 
+# Whether the tab's files (coop_puppet.json "charsel_native") are kept aside in <pack>\_coop-menus (merge_tables.py
+# guard_menus / park_menus, Move-KitMenuFilesAside: the size table the game reads cannot hold them) and not in the
+# pack's romfs. merge_tables.py charsel_native_parked says the same for the Linux kit. $Mod: the pack folder.
+function Test-KitCharselNativeParked([string]$Mod) {
+    $manifest = Join-Path $Mod 'coop_puppet.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $false }
+    try { $json = [System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
+    if (-not $json.PSObject.Properties['charsel_native']) { return $false }
+    foreach ($rel in @($json.charsel_native)) {
+        if (-not ($rel -is [string]) -or -not $rel) { continue }
+        $r = $rel.Replace('/', '\')
+        if ((Test-Path -LiteralPath (Join-Path $Mod ('_coop-menus\' + $r)) -PathType Leaf) -and
+            -not (Test-Path -LiteralPath (Join-Path $Mod ('romfs\' + $r)) -PathType Leaf)) { return $true }
+    }
+    return $false
+}
+
 # The code patch put in or taken out of the pack folder $Mod (<exe dir>\mods\contents\0400486024DEC000\coop-puppet)
 # before the game's build reads the mods' code patches (hookshot-build.ps1, before Get-KitExefsStampLine): in when
 # Test-KitCharselNative says so and the pack there did not leave the tab out (its coop_puppet.json's "charsel_native"
 # empty: the pack tool could not make the tab for this game; else the next start would build the game again, and
 # again). The pack tool writes the same bytes into the pack it makes. Returns 'in', 'out' or '' (no change).
+# Out too while the tab's files are parked (Test-KitCharselNativeParked): code and files never split (the tab's code
+# over the game's own menu files: MsgNotFound on slot 0, no Map tab, L dead). The start parks or puts them back
+# (Invoke-KitSizeTableMerge) BEFORE this runs (play.ps1), so the game is built for the menus it will read.
 function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
     $src = Join-Path $Kit 'tools\puppet_pack\charsel\data\charsel-native.ips'
     $dst = Join-Path $Mod 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
@@ -2077,6 +2097,7 @@ function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
             if ($json.PSObject.Properties['charsel_native'] -and -not @($json.charsel_native).Count) { $want = $false }
         } catch { }
     }
+    if ($want -and (Test-KitCharselNativeParked $Mod)) { $want = $false }
     $have = Test-Path -LiteralPath $dst -PathType Leaf
     if ($want) {
         if ($have -and (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash) { return '' }

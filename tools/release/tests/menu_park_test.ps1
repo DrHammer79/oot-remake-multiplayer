@@ -83,6 +83,33 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $t.Pack 'coop_puppet.json'), "{`"title_menu`": [`"$rel`"], `"pause_menu`": [], `"charsel_native`": [`"$scr`"]}")
     $null = @(Invoke-KitSizeTableMerge $t.Kit $t.Exe)
     Check ((Kept $t) -and (Test-Path -LiteralPath (Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs'))) 'no menu_keys (an old pack): only title_menu and pause_menu go aside'
+    # 7. MsgNotFound on slot 0 (P-parked): the Characters tab's code patch goes with its files. Parked -> the code
+    #    out (Sync-KitCharselNativePatch 'out', so the stamp changes and the game is built without it); put back ->
+    #    in again. Never the tab's code over the game's own menu files.
+    $t = New-Tree $true; $made += $t
+    $ips = Join-Path $t.Kit 'tools\puppet_pack\charsel\data\charsel-native.ips'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ips) | Out-Null
+    [System.IO.File]::WriteAllText($ips, 'IPS32 code')
+    $code = Join-Path $t.Pack 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'
+    $screens = Join-Path $t.Pack 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $screens) | Out-Null
+    [System.IO.File]::WriteAllText($screens, 'screens')
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack 'coop_puppet.json'),
+        "{`"title_menu`": [`"$rel`"], `"pause_menu`": [], `"charsel_native`": [`"$scr`"], `"menu_keys`": [`"title_menu`", `"pause_menu`", `"charsel_native`"]}")
+    Check (-not (Test-KitCharselNativeParked $t.Pack)) 'the tab''s files in romfs: not parked'
+    Check ((Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq 'in' -and (Test-Path -LiteralPath $code)) 'not parked: the tab''s code goes in'
+    $null = @(Invoke-KitSizeTableMerge $t.Kit $t.Exe)   # (no Python + another size table: parked)
+    Check (Test-KitCharselNativeParked $t.Pack) 'the merge parked the tab''s files: parked'
+    Check ((Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq 'out' -and -not (Test-Path -LiteralPath $code)) 'parked: the tab''s code goes out with them'
+    Check ((Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq '') 'parked, code out: no change (no build loop)'
+    # (put back, as merge_tables.py guard_menus does when the table holds them again)
+    Move-Item -LiteralPath (Join-Path $t.Pack '_coop-menus\RSDB\UIScreen.Product.111.rstbl.byml.zs') -Destination $screens
+    Check (-not (Test-KitCharselNativeParked $t.Pack)) 'put back: not parked'
+    Check ((Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq 'in' -and (Test-Path -LiteralPath $code)) 'put back: the tab''s code goes in again'
+    # A pack made since (its file in romfs) beside an old kept copy: in play, the code stays.
+    New-Item -ItemType Directory -Force -Path (Join-Path $t.Pack '_coop-menus\RSDB') | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $t.Pack '_coop-menus\RSDB\UIScreen.Product.111.rstbl.byml.zs'), 'old screens')
+    Check (-not (Test-KitCharselNativeParked $t.Pack) -and (Sync-KitCharselNativePatch $t.Kit $t.Pack) -eq '') 'an old kept copy beside the file in romfs: not parked, the code stays'
 } finally {
     foreach ($t in $made) { Remove-Item -LiteralPath $t.Root -Recurse -Force -ErrorAction SilentlyContinue }
 }

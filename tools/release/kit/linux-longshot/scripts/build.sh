@@ -613,8 +613,17 @@ mod_fold() { local s=${1//\\//}; printf '%s' "$s" | LC_ALL=C tr 'A-Z' 'a-z'; }
 # stamp, so the build takes it in; out when Character Select's own code is in the mods (his files and code are the
 # tab's then) or the pack said it left the tab out (coop_puppet.json "charsel_native": [], no build loop). The rule is
 # the pack tool's own (build.py charsel_native_wanted), as kit-paths.ps1 Sync-KitCharselNativePatch. Also after
-# charsel_undo below (Character Select put back as the game had it).
+# charsel_undo below (Character Select put back as the game had it). Out too while the tab's files are parked
+# (merge_tables.py charsel_native_parked: kept in <pack>/_coop-menus because the size table the game reads cannot hold
+# them): the tab's code over the game's own menu files said MsgNotFound on slot 0, lost the Map tab and left L dead.
+# So menus_merge (start.sh's merge, parking or putting back) runs first, and data/charsel-parked.txt keeps what this
+# saw: start.sh builds again when its own merge after the pack step parks or puts back otherwise.
+menus_merge() {
+    [[ -n $(kit_game_exe) && -d $GAME/mods && -x $PY && -f $DATA/tools/puppet_pack/merge_tables.py ]] || return 0
+    "$PY" -I -B "$DATA/tools/puppet_pack/merge_tables.py" --mods "$GAME/mods" --romfs "$GAME/romfs" 2>&1 | sed 's/^/  /' || true
+}
 charsel_native_sync() {
+    menus_merge
     local src=$DATA/tools/puppet_pack/charsel/data/charsel-native.ips
     local pack=$GAME/mods/contents/0400486024DEC000/coop-puppet
     local dst=$pack/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips want=0
@@ -635,11 +644,16 @@ try:
         want = False
 except (OSError, ValueError):
     pass
-sys.exit(10 if want else 11)' "$DATA/tools" "$pack" || rc=$?
+from puppet_pack.merge_tables import charsel_native_parked
+parked = charsel_native_parked(pack)
+with open(sys.argv[3], "w", encoding="utf-8") as f:
+    f.write("1" if parked else "0")
+sys.exit(10 if want and not parked else 11)' "$DATA/tools" "$pack" "$DATA/charsel-parked.txt" || rc=$?
         case $rc in
             10) want=1 ;;
             11) ;;
-            *) warn "co-op's Characters tab: could not tell whether its code patch goes into the game (python exit $rc, its error above): left as it was."
+            *) rm -f -- "$DATA/charsel-parked.txt"
+               warn "co-op's Characters tab: could not tell whether its code patch goes into the game (python exit $rc, its error above): left as it was."
                return 0 ;;
         esac
     fi

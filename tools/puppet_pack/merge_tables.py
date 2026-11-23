@@ -1090,6 +1090,30 @@ def menu_files(pack_path):
     return out
 
 
+def charsel_native_parked(pack_path):
+    """Whether co-op's own Characters tab's files (coop_puppet.json "charsel_native", one of the menu lists) are kept
+    aside in <pack>/_coop-menus (guard_menus, park_menus, the kit's Move-KitMenuFilesAside) and not in the pack's romfs.
+    The tab's code patch (charsel-native.ips in the pack's exefs) must go with them: the game built with the tab's code
+    over the game's own three-tab menu files said MsgNotFound on slot 0, lost the Map tab and left L dead. So the kit's
+    code-patch rule (kit-paths.ps1 Sync-KitCharselNativePatch, build.sh charsel_native_sync) leaves the code out while
+    this is true, and the start parks or puts back before that rule runs."""
+    import json
+    try:
+        with open(os.path.join(pack_path, "coop_puppet.json"), "rb") as f:
+            m = json.loads(f.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    rels = m.get("charsel_native") if isinstance(m, dict) else None
+    for rel in rels if isinstance(rels, list) else []:
+        if not isinstance(rel, str) or not rel:
+            continue
+        parts = rel.split("/")
+        if (os.path.isfile(os.path.join(pack_path, MENU_KEEP, *parts))
+                and not os.path.isfile(os.path.join(pack_path, "romfs", *parts))):
+            return True
+    return False
+
+
 def _menu_short(codec, order, pack_path, files):
     """(the mod whose size table the game reads, how many of the menu files it holds smaller than the pack's own table
     does), or (None, 0) when the game reads the pack's own table or one that holds every menu file's size."""

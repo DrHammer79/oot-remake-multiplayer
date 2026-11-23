@@ -593,6 +593,29 @@ class MenuGuardTest(unittest.TestCase):
         self.assertFalse(self.in_play(MALS) or self.in_play(TITLE) or self.in_play(SCREENS))
         self.assertTrue(self.kept(MALS) and self.kept(TITLE) and self.kept(SCREENS))
 
+    def test_the_characters_tab_is_parked_exactly_while_its_files_are_kept_aside(self):
+        # (MsgNotFound on slot 0: the kit's code-patch rule, kit-paths.ps1 Sync-KitCharselNativePatch and build.sh
+        # charsel_native_sync, leaves the tab's code out while this says parked, so code and files never split)
+        self.assertFalse(mt.charsel_native_parked(self.pack))   # (no charsel_native list)
+        self.charsel_pack()
+        self.assertFalse(mt.charsel_native_parked(self.pack))   # (in romfs: in play)
+        self.put_table("oot-remake-randomizer", {self.crc(MALS): self.grown, self.crc(TITLE): 230000, 7: 70})
+        self.guard()
+        self.assertTrue(self.kept(SCREENS))
+        self.assertTrue(mt.charsel_native_parked(self.pack))
+        shutil.rmtree(os.path.join(self.mods, "oot-remake-randomizer"))
+        self.guard()   # (put back: the code goes in again at the next need check)
+        self.assertTrue(self.in_play(SCREENS))
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        # A pack made since (its file in romfs again) beside an old kept copy: in play, not parked.
+        self.put(os.path.join(self.pack, mt.MENU_KEEP, *SCREENS.split("/")), b"old screens")
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        # The tab left out ("charsel_native": []) or an unreadable manifest: nothing parked.
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b'{"title_menu": [], "charsel_native": []}')
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b"{")
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+
     def test_the_pack_reading_its_own_table_keeps_its_menus(self):
         self.assertEqual(self.guard(), 0)
         self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
