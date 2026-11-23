@@ -78,6 +78,10 @@ Material for a submission to the mod author and to the Squadala community. Nothi
     `coop: look:` failed line and no crash record.
   - The frame thread has no such guard. Under the same memory exhaustion a throw on the frame thread would still end
     the game. Not changed here: a guard there touches every frame call of the module and needs its own review.
+  - The memory growth itself is not ours to fix. The maintainer is fixing the host's memory growth at the root, across
+    all host-only paths. The look fix above (the compare in `Same`, `hookshot/src/coop_look_tunic.cpp`, reads into a
+    stack buffer instead of the heap) stays as it is and is not extended to other paths; it is already on the
+    integration branch.
 
 ## Deferred engine items
 
