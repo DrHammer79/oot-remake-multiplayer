@@ -3165,6 +3165,69 @@ class FullBuildTest(unittest.TestCase):
         self.assertNotIn("PreActorRenderInfoHeapSize", out_ai["Player_Child"])
         self.assertNotIn("Cs_MadeUp", out_ai)
 
+    def test_character_puppets_take_the_mods_retargeted_clips(self):
+        # The cow's legs (2026-11-23): the mod gives the player's AnimationParam IsRetarget in its own Player packs
+        # (a character's legs keep their own lengths only with retargeted clips). A character's puppet is built from
+        # the player's pack, so it takes the mod's AnimationParam; the Link puppets keep the game's.
+        plain = zstandard.ZstdCompressor()
+        mods = os.path.join(self.dir, "mods_cs3")
+        cs = os.path.join(mods, "OoT Character Select")
+        romfs = os.path.join(cs, "romfs")
+        os.makedirs(os.path.join(romfs, "Model"))
+        os.makedirs(os.path.join(romfs, "Pack", "Actor"))
+        with open(os.path.join(romfs, "Model", "Player_Adult_C005.Player_Adult.bfres.zs"), "wb") as f:
+            f.write(plain.compress(b"x" * 300))
+        doc = {"format": 1, "mod": "OoT Character Select",
+               "actor_heaps": {v: {"InstanceHeapSize": 0x100, "PreActorRenderInfoHeapSize": 0x100}
+                               for v in ("Adult", "Child")},
+               "characters": [{"number": 7, "file": 5}]}
+        with open(os.path.join(cs, build.CHARACTERS_FILE), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        anim = "Component/AnimationParam/P.engine__component__AnimationParam.bgyml"
+        game = fake_player_pack("Adult")
+        theirs = dict(game)
+        theirs[anim] = byml.dumps({"AnimationResources": [{"ModelProjectName": "Player", "IsRetarget": True}] * 4})
+        theirs["Component/ModelInfo/P.engine__component__ModelInfo.bgyml"] = byml.dumps({"FmdbName": "Mod"})
+        with open(os.path.join(romfs, "Pack", "Actor", "Player_Adult.pack.zs"), "wb") as f:
+            f.write(plain.compress(sarc.write(theirs)))
+        # The game's size table has an entry for the player's AnimationParam: it grows by the mod's growth.
+        d = zs.Dicts.from_romfs(self.romfs)
+        rs = "System/Resource/ResourceSizeTable.Product.999.Test.rsizetable.zs"
+        t = rstb.Rstb.loads(d.decompress(build.read(os.path.join(self.romfs, rs))))
+        t.set(anim, 5344)
+        self.write(rs, plain.compress(t.dumps()))
+        mod = os.path.join(mods, "pack")
+        said = []
+        build.build(self.romfs, mod, log=said.append, look_slots=0, characters=build.find_characters(mod))
+
+        def member(actor, path):
+            raw = build.read(os.path.join(mod, "romfs", "Pack", "Actor", f"{actor}.pack.zs"))
+            return sarc.read(d.decompress(raw)).get(path)
+        self.assertEqual(member("CoopPuppet_Adult_C005", anim), theirs[anim])
+        self.assertEqual(member("CoopPuppet_Adult", anim), game[anim])          # a Link puppet: the game's
+        # Only the AnimationParam is the mod's: its other changes to the pack are not taken.
+        info = "Component/ModelInfo/P.engine__component__ModelInfo.bgyml"
+        self.assertIn(member("CoopPuppet_Adult_C005", info), (None, game[info]))
+        out = rstb.Rstb.loads(d.decompress(build.read(os.path.join(mod, "romfs", rs))))
+        self.assertEqual(out.get(anim), build.character_param_entry(5344, game[anim], theirs[anim]))
+        self.assertGreater(out.get(anim), 5344)
+        self.assertTrue(any("Player_Adult puppets take OoT Character Select's" in line for line in said), said)
+        # A mod without its own Player pack: the game's, as before.
+        os.remove(os.path.join(romfs, "Pack", "Actor", "Player_Adult.pack.zs"))
+        mod = os.path.join(mods, "pack2")
+        build.build(self.romfs, mod, log=lambda *_: None, look_slots=0, characters=build.find_characters(mod))
+        self.assertEqual(member("CoopPuppet_Adult_C005", anim), game[anim])
+
+    def test_character_animation_params(self):
+        a, b = "Component/AnimationParam/A.bgyml", "Component/AnimationParam/B.bgyml"
+        game = {a: b"1", b: b"2", "Component/ModelInfo/M.bgyml": b"3"}
+        mod = {a: b"1", b: b"22", "Component/ModelInfo/M.bgyml": b"33", "Component/AnimationParam/New.bgyml": b"4"}
+        self.assertEqual(build.character_animation_params(game, mod), {b: b"22"})   # changed AnimationParams only
+        self.assertEqual(build.character_animation_params(game, {}), {})
+        self.assertEqual(build.character_param_entry(5344, b"x" * 100, b"x" * 180), 5344 + 96)
+        self.assertEqual(build.character_param_entry(5344, b"x" * 100, b"x" * 100), 5344)
+        self.assertEqual(build.character_param_entry(5344, b"x" * 100, b"x" * 50), 5344)
+
     def test_skin_refusals(self):
         cases = [
             (("Mod", self.make_model_mod("with_code", exefs=True)), "exefs"),

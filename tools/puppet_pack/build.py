@@ -296,6 +296,27 @@ def character_project(variant, file):
     return f"Player_{variant}_C{file:03d}"
 
 
+# The Character Select mod retargets the player's animation sets: its own Pack/Actor/Player_<age>.pack has the
+# player's AnimationParam with IsRetarget on every set, because a character's leg bones carry the character's own
+# lengths and the game keeps them only when the clips are retargeted (the mod's README, "The ankles"). A character's
+# puppet is built from the player's pack, so it takes the mod's AnimationParam too: built from the game's, it played
+# Link's clips with Link's leg lengths on the character's legs, which the player's own character does not.
+ANIMATION_PARAM_DIR = "Component/AnimationParam/"
+
+
+def character_animation_params(members, mod_members):
+    """{member path: bytes} of each AnimationParam of `members` (the game's Player_<age> pack) that the mod's own copy
+    of that pack (`mod_members`) changed. Nothing else of the mod's pack is taken."""
+    return {p: mod_members[p] for p in members
+            if p.startswith(ANIMATION_PARAM_DIR) and p in mod_members and mod_members[p] != members[p]}
+
+
+def character_param_entry(game_entry, old, new):
+    """The size-table entry of a packed file the mod made longer: the game parses it in a heap of the entry, so the
+    entry grows by the growth, 32-byte aligned (the mod's own rule: 80 bytes short, the loading thread died)."""
+    return game_entry + ((max(0, len(new) - len(old)) + 0x1F) & ~0x1F)
+
+
 def mod_list_off(mods_root, name):
     """The Mods tab's list (mods/coop-mods.list, "coop-mods 1") names `name` (its path under mods with '/') off: the
     first row for it, letters without case (as Longshot reads it). No list or no row: on (C #58: a mod switched off
@@ -2047,6 +2068,27 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
     jobs = [(*j, False) for j in jobs]
     if clients:
         jobs = [j for job in jobs for j in (job, (*job[:5], True))]
+    mod_anims = {}   # variant: the mod's changed AnimationParams for its characters' puppets
+
+    def character_anims(v, members):
+        if v not in mod_anims:
+            mod_anims[v] = {}
+            src = os.path.join(characters["dir"], "romfs", "Pack", "Actor", f"Player_{v}.pack.zs")
+            if os.path.isfile(src):
+                try:
+                    theirs = sarc.read(dicts.decompress(read(src)))
+                except (OSError, ValueError, KeyError, IndexError, struct.error) as e:
+                    log(f"characters: {characters['mod']}'s Player_{v} pack could not be read ({e}): its puppets "
+                        "keep the game's AnimationParam")
+                    theirs = {}
+                mod_anims[v] = character_animation_params(members, theirs)
+                for path, data in mod_anims[v].items():
+                    entry = table.get(path)
+                    if entry is not None:
+                        table.set(path, max(entry, character_param_entry(entry, members[path], data)))
+                    log(f"characters: the Player_{v} puppets take {characters['mod']}'s {path} (retargeted clips)")
+        return mod_anims[v]
+
     for v, color, quiet, own_skin, char, pvp_copy in jobs:
         player = f"Player_{v}"
         # A skin job, or (--test-skin) any puppet of an age the tested skin changes.
@@ -2068,6 +2110,8 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             if not os.path.isfile(src):
                 raise BuildError(f"missing {rel(romfs, src)}")
             members = sarc.read(dicts.decompress(read(src)))
+            if char is not None:
+                members = {**members, **character_anims(v, members)}
         pack, ap, names, keys = build_pack(members, v, sound, player_footsteps, sound_user, actor, project,
                                            basic_xlink=basic_xlink, perception=None if quiet else seen_by,
                                            as_ref=wears[1][v] if wears else None, body=body,
