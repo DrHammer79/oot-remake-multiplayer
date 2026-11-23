@@ -1,5 +1,7 @@
 # lichii/
 
+> **Retired (0.11.12):** the Fritchii emulator is no longer built or shipped, and CI no longer builds it. This folder (pin, fetch scripts, patches, hook) stays in the repo for reference; `lichii/hook/` is still compiled into the Hookshot/Longshot module.
+
 Co-op inside Frizti's emulator (Lichii, now [Fritchii](https://github.com/Frizti/Fritchii), GPL-3.0). The emulator's source is not in this repo and not forked on GitHub: `fetch.ps1` clones it at the pinned commit next to this repo and applies our patches as local commits. Everything we add stays small so a new Fritchii release is easy to take.
 
 | File | What |
