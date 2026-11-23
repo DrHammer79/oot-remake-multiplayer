@@ -35,14 +35,18 @@ TEST_CASE("list pages: ZL and ZR go round at both ends, one page stays") {
     CHECK(Wrap(3, 0) == 0);
 }
 
-TEST_CASE("list pages: the page line, with the game's ZL and ZR letters, only with more than one page") {
-    CHECK(std::string(kZL) == "\xEE\x81\x86");   // (U+E046: StaticMsg/GuideKeyIcon.msbt ZL)
-    CHECK(std::string(kZR) == "\xEE\x81\x87");   // (U+E047: its ZR)
-    CHECK(Line(0, 1).empty());                   // (one page: nothing said)
+TEST_CASE("list pages: the page line only with more than one page, the buttons in words only where asked") {
+    CHECK(Line(0, 1).empty());   // (one page: nothing said)
     CHECK(Line(0, 0).empty());
-    CHECK(Line(1, 3) == std::string(kZL) + " Page 2/3 " + kZR);
-    CHECK(Line(-1, 3) == std::string(kZL) + " Page 3/3 " + kZR);   // (taken round)
-    CHECK(Line(0, 2, false) == "Page 1/2 (ZL/ZR)");               // (a font without the game's letters)
+    CHECK(Line(0, 1, true).empty());
+    CHECK(Line(1, 3) == "Page 2/3");    // (the screen shows the game's ZL / ZR icons beside it: the - menu's list)
+    CHECK(Line(-1, 3) == "Page 3/3");   // (taken round)
+    CHECK(Line(0, 2, true) == "Page 1/2 (ZL/ZR)");   // (a screen with no icon pane of the game's: the title)
+    // (row 264: no private-use letter of the game's button-icon font in any words: a words pane's font has none, they
+    // drew as empty boxes)
+    for (const std::string& l : {Line(1, 3), Line(0, 2, true)}) {
+        for (const unsigned char c : l) CHECK(c < 0x80);
+    }
 }
 
 TEST_CASE("list pages: a heading keeps its page line whole, a long name gives way") {
@@ -62,4 +66,8 @@ TEST_CASE("list pages: a heading keeps its page line whole, a long name gives wa
     CHECK(h.size() <= 30u);
     CHECK(CoopTextFit::Halves(h) <= 60u);
     CHECK(h.substr(h.size() - line.size()) == line);
+    // The Chinese browser heading whole (proof-01112-d: "公开游戏" cut to "公..." while the line had the letters):
+    // "公开游戏  第 1/2 页" is 25 bytes and 19 half-letters, in the 30 of kListNameChars.
+    const std::string page = "\xE7\xAC\xAC 1/2 \xE9\xA1\xB5";   // (第 1/2 页)
+    CHECK(Heading(zh, page, 30) == zh + "  " + page);
 }

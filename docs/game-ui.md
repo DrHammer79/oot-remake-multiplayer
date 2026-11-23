@@ -373,8 +373,15 @@ records, and how new parts go after the string pool so nothing moves).
   A U+E040, B U+E041, X U+E042, Y U+E043, L U+E044, R U+E045, ZL U+E046, ZR U+E047, the + U+E04B, the - U+E04C, the
   cross U+E049. `MenuOverlay_00`'s `T_BtnL_00` / `T_BtnR_00` (the tab strip's L and R) are U+E044 / U+E045, the
   System page's controller picture (`PlusMenu_00` `Pa_BtnZL_00`, `Pa_BtnZR_00`) U+E046 / U+E047, `DoCommand_00`'s
-  `T_ZL_00` U+E046. Co-op's page lines use ZL and ZR (`coop_list_pages.h`, row 264). (checked: the USen message
-  archive, 1.1.0; whether a co-op pane's font draws them: the LANE1 screenshot in reports/lobby-pages-264.md)
+  `T_ZL_00` U+E046. The letters draw only in an icon pane of their own whose font is the button-icon font
+  `External_00` (Font2's `External_00.buif`: `PaGuideKey_00`'s `T_Icon_00`, `PaControllerKeyL_00` / `R_00`'s
+  `T_IconL_00` / `T_IconR_00`, `T_BtnL_00`, every pane above): no text of the game's has one inside its words, and a
+  words pane's font (`Normal`: CetraDisplayPro, RoNOWStd, OT-UDTypos) has none, so there they draw as empty boxes (row
+  264, proof-01112-d). Longshot points these letters at the player's own controls (`host/prompts.c`). Co-op's - menu
+  list shows its pages' ZL and ZR as its page's own controller picture's keys beside the heading
+  (`coop_pause_tab_module.cpp` `MinusKeys`); the Title archive has no `External_00` pane (and a part from Common crashes
+  the title's load, title-toggle-0119), so the title's hint names them in words. (checked: the USen message archive and
+  every layout of Common and Title, 1.1.0)
 - Labels the game uses: `Title_00` 0000 to 0002 (co-op adds 0100 to 0102); `SystemWindow_00` the dialog's text as
   `%04d` and its buttons as `10%02d`; `SystemOption_00` `<Key>_Title`, `<Key>_Caption`, `<Key>_00...`; the banner's
   texts in `SimpleInfo_00` by type. (notes)

@@ -363,24 +363,38 @@ bool LiveText(void* ctx, std::uint64_t layout, std::uint64_t gen, const std::str
     return LiveTextIn(ctx, layout, path, l, utf8);
 }
 
+// The text pane at `path` ("Part/Part/Pane") of `layout`, found as the game's pane-text call finds each pane it sets:
+// the game's path lookup (kPathFind: the last part's layout and the pane's name there), then the pane by that name
+// (kPaneByName). 0 when there is none (g_live_why says why). Uses the scratch memory: nothing of the caller's kept there.
+std::uint64_t TextPaneAt(void* ctx, std::uint64_t layout, const std::string& path) {
+    if (path.size() >= 0x40) return g_live_why = "path too long", 0;
+    // [0x00] the path lookup's layout, [0x10] the path.
+    std::uint8_t b[0x50] = {};
+    std::memcpy(b + 0x10, path.c_str(), path.size() + 1);
+    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
+    if (base == 0) return g_live_why = "no scratch", 0;
+    std::uint64_t name = 0;
+    if (!Call(ctx, kPathFind, base + 0x10, layout, base, 0, 0, &name) || name == 0) return g_live_why = "path not in the layout", 0;
+    const std::uint64_t part = Read<std::uint64_t>(base);
+    std::uint64_t table = 0, pane = 0;
+    if (part == 0 || !Call(ctx, kPaneTable, part + 0x40, 0, 0, 0, 0, &table) || table == 0) return g_live_why = "no pane table", 0;
+    if (!Call(ctx, kPaneByName, table, name, 0, 0, 0, &pane) || pane == 0) return g_live_why = "pane not found", 0;
+    if (((Read<std::uint32_t>(pane + 0xa8) >> 22) & 0xf) != kTextPaneKind) return g_live_why = "not a text pane", 0;
+    return pane;
+}
+
 bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSlot& l, const std::string& utf8,
                 bool force) {
     if (!force && l.shown == utf8) return true;
     if (path.size() >= 0x40 || utf8.size() >= l.room || l.text == 0) {
         return g_live_why = "no placeholder", false;
     }
-    // [0x00] the path lookup's layout, [0x10] the path, [0x60] the reference.
+    const std::uint64_t pane = TextPaneAt(ctx, layout, path);
+    if (pane == 0) return false;
+    // [0x60] the reference (the scratch memory again: the path's lookup is done).
     std::uint8_t b[0x80] = {};
-    std::memcpy(b + 0x10, path.c_str(), path.size() + 1);
     const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
     if (base == 0) return g_live_why = "no scratch", false;
-    std::uint64_t name = 0;
-    if (!Call(ctx, kPathFind, base + 0x10, layout, base, 0, 0, &name) || name == 0) return g_live_why = "path not in the layout", false;
-    const std::uint64_t part = Read<std::uint64_t>(base);
-    std::uint64_t table = 0, pane = 0;
-    if (part == 0 || !Call(ctx, kPaneTable, part + 0x40, 0, 0, 0, 0, &table) || table == 0) return g_live_why = "no pane table", false;
-    if (!Call(ctx, kPaneByName, table, name, 0, 0, 0, &pane) || pane == 0) return g_live_why = "pane not found", false;
-    if (((Read<std::uint32_t>(pane + 0xa8) >> 22) & 0xf) != kTextPaneKind) return g_live_why = "not a text pane", false;   // (not a text pane)
     std::string bytes = utf8;
     bytes.push_back('\0');
     if (!CoopRuntime::Write(l.text, bytes.data(), bytes.size())) return g_live_why = "not written", false;
@@ -393,6 +407,33 @@ bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSl
     if (!CoopRuntime::Write(base + 0x60, ref, sizeof ref)) return g_live_why = "reference not written", false;
     if (!Call(ctx, kPaneSetMsg, pane, base + 0x60, 0)) return g_live_why = "the game's set failed", false;
     l.shown = utf8;
+    return true;
+}
+
+// The game's own message `label` of `file` ("StaticMsg/GuideKeyIcon", "ZL") on the text pane at `path` of `layout`: the
+// reference the game makes for it (kMsgRefInit, kMsgRefSet: its text where the loaded file keeps it, its length and its
+// attributes) set on the pane as the game's pane-text call sets one (kPaneSetMsg). For a pane of a copy of ours that no
+// message of the game's names (the pane-text call sets only "@" panes). True when set.
+bool GameMessageIn(void* ctx, std::uint64_t layout, const std::string& path, const std::string& file,
+                   const std::string& label) {
+    if (file.size() >= 0x30 || label.size() >= 0x40) return g_live_why = "name too long", false;
+    const std::uint64_t pane = TextPaneAt(ctx, layout, path);
+    if (pane == 0) return false;
+    // [0x00] the message reference, [0x20] &file, [0x28] &label, [0x30] file, [0x60] label.
+    std::uint8_t b[0xa0] = {};
+    const std::uint64_t base = g_api->scratch(ctx, b, sizeof b);
+    if (base == 0) return g_live_why = "no scratch", false;
+    const std::uint64_t at_file = base + 0x30, at_label = base + 0x60;
+    std::memcpy(b + 0x20, &at_file, 8);
+    std::memcpy(b + 0x28, &at_label, 8);
+    std::memcpy(b + 0x30, file.c_str(), file.size() + 1);
+    std::memcpy(b + 0x60, label.c_str(), label.size() + 1);
+    if (g_api->scratch(ctx, b, sizeof b) != base) return g_live_why = "no scratch", false;
+    if (!Call(ctx, kMsgRefInit, base) || !Call(ctx, kMsgRefSet, base, base + 0x20, base + 0x28, 1)) {
+        return g_live_why = "no message reference", false;
+    }
+    if (Read<std::uint64_t>(base) == 0) return g_live_why = "message not loaded", false;
+    if (!Call(ctx, kPaneSetMsg, pane, base, 0)) return g_live_why = "the game's set failed", false;
     return true;
 }
 
@@ -2071,6 +2112,39 @@ struct MinusList {
     float alpha = -1.0f;
 };
 std::array<MinusList, kLinePanes> g_minus_lists{};
+// The list's ZL and ZR (row 264): the game's own button icons beside the heading of a list with pages. The game shows a
+// button as a letter of its button-icon font (External_00) in an icon pane of its own, never inside words
+// (coop_list_pages.h: in our heading's words pane the letters drew as empty boxes). Our page is a copy of the System
+// page's layout, so it has that page's controller picture (Pa_SystemController_00, hidden on ours), whose ZL and ZR keys
+// (PaControllerKeyL_00 / R_00: the icon T_IconL_00 / T_IconR_00 in External_00 beside a label) are those icons: while
+// the heading has pages the picture shows with only those two keys, their labels hidden, each key's icon the game's own
+// GuideKeyIcon message (Longshot points those letters at the player's own controls), one left and one right of the
+// heading row, as the strip's L and R stand either side of its tabs. Looked up with the page (LookMinusPage).
+struct MinusKeys {
+    std::uint64_t picture = 0;              // Pa_SystemController_00's pane (0: not found, the heading alone)
+    std::array<std::uint64_t, 2> keys{};    // its Pa_BtnZL_00, Pa_BtnZR_00
+    std::vector<std::uint64_t> hide;        // the picture's other panes, and the two keys' labels
+    int vis = -1;                           // shown (1) or not (0) as last set; -1 not set
+    float alpha = -1.0f;
+    bool icons_said = false;
+};
+MinusKeys g_minus_keys;
+// The picture's panes other than the ZL and ZR keys (PaSystemController_00: N_All_00's and N_Basic_00's children).
+constexpr const char* kKeysOthers[] = {"N_CapGuide_00", "N_CapGuideSh_00", "C_Base_00", "P_Base_00", "P_ReCapGuide_00",
+                                       "P_Guide_00", "N_L_00", "N_R_00", "N_Minus_00", "N_Plus_00", "N_LStick_00",
+                                       "N_ABXY_00", "N_CrossKey_00", "N_RStick_00"};
+// Each key's part in its own N_ZL_00 / N_ZR_00 (the game's at (-+268, 0)): the picture at (540, -146) on the page,
+// N_Basic_00 at (0, 230) in it, N_ZL_00 / N_ZR_00 at (-+580, 210), each key's icon 213.28 inward of its part and 8 up;
+// so the ZL icon's centre stands at (-490, 420) and ZR's at (1570, 420): level with the heading row (pause_menu.py: the
+// rows at x 540, 1880 wide, the heading at y 420), 90 outside its ends. ZL's x is -kKeyX, ZR's kKeyX.
+constexpr float kKeyX = 663.0f, kKeyY = 118.0f;
+// The keys' icons: the game's own messages (StaticMsg/GuideKeyIcon's ZL and ZR), or the System page's own texts for
+// them (LayoutMsg/PlusMenu_00) when that file is not loaded.
+constexpr const char* kKeyIconPaths[] = {"Pa_CoopMinus_00/Pa_SystemController_00/Pa_BtnZL_00/T_IconL_00",
+                                         "Pa_CoopMinus_00/Pa_SystemController_00/Pa_BtnZR_00/T_IconR_00"};
+constexpr const char* kKeyIconLabels[] = {"ZL", "ZR"};
+constexpr const char* kKeyIconSystem[] = {"Pa_System_00-Pa_SystemController_00-Pa_BtnZL_00-T_IconL_00",
+                                          "Pa_System_00-Pa_SystemController_00-Pa_BtnZR_00-T_IconR_00"};
 std::array<ListLine, kLinePanes> g_minus_lines{};       // (g_mutex) the lines shown; name "" not shown
 std::array<float, kLinePanes> g_minus_line_alpha{};      // (g_mutex) each line's alpha
 float g_minus_rows_alpha = 1.0f;                         // (g_mutex) the rows: dimmed while the list has the pad
@@ -2132,6 +2206,71 @@ const char* StopPartAnim(void* ctx, std::uint64_t layout, const std::string& pat
     return g_api->call(ctx, &k, &r) ? nullptr : "not stopped";
 }
 
+// The page's controller picture's ZL and ZR keys (MinusKeys), in the page's part layout `part`: found, the rest of the
+// picture and the keys' labels hidden, the keys placed beside the heading; the picture itself then shown by
+// ApplyMinusKeys, no longer among the panes ours always hides. Anything not found: no keys, the picture stays hidden.
+void LookMinusKeys(void* ctx, std::uint64_t part) {
+    g_minus_keys = MinusKeys{};
+    const std::uint64_t picture = PaneIn(ctx, part, "Pa_SystemController_00");
+    const std::uint64_t inner = IsPart(picture) ? PartLayout(part, "Pa_SystemController_00") : 0;
+    MinusKeys k;
+    const char* names[] = {"Pa_BtnZL_00", "Pa_BtnZR_00"};
+    const char* labels[] = {"T_GuideL_00", "T_GuideR_00"};
+    for (std::size_t i = 0; i < 2 && inner != 0; ++i) {
+        const std::uint64_t key = PaneIn(ctx, inner, names[i]);
+        const std::uint64_t label = IsPart(key) ? PaneIn(ctx, PartLayout(inner, names[i]), labels[i]) : 0;
+        if (label == 0) break;
+        k.keys[i] = key;
+        k.hide.push_back(label);
+    }
+    for (const char* name : kKeysOthers) {
+        const std::uint64_t q = k.keys[1] != 0 ? PaneIn(ctx, inner, name) : 0;
+        if (q == 0) break;
+        k.hide.push_back(q);
+    }
+    if (k.hide.size() != 2 + std::size(kKeysOthers)) {
+        LOG_INFO(Core, "coop: pause tab: the - menu's page: no ZL / ZR keys in its controller picture: the list's heading alone");
+        return;
+    }
+    for (const std::uint64_t q : k.hide) SetVisible(ctx, q, false);
+    for (std::size_t i = 0; i < 2; ++i) {
+        PlacePane(ctx, k.keys[i], i == 0 ? -kKeyX : kKeyX);
+        PlacePaneY(ctx, k.keys[i], kKeyY);
+    }
+    k.picture = picture;
+    std::erase(g_minus_hide, picture);   // (shown with the keys alone: ApplyMinusKeys)
+    SetVisible(ctx, picture, false);
+    g_minus_keys = std::move(k);
+}
+
+// The keys shown while `paged` (the list's heading has pages, the page shown), at the heading's alpha; their icons set
+// each time they show (a new opening's panes). g_mutex.
+void ApplyMinusKeys(void* ctx, bool paged, float alpha) {
+    MinusKeys& k = g_minus_keys;
+    if (k.picture == 0) return;
+    if (k.vis != (paged ? 1 : 0)) {
+        if (paged) {
+            for (const std::uint64_t q : k.hide) SetVisible(ctx, q, false);   // (the part's own animations may show them)
+            std::string why;
+            for (std::size_t i = 0; i < 2; ++i) {
+                if (GameMessageIn(ctx, g_minus_layout, kKeyIconPaths[i], "StaticMsg/GuideKeyIcon", kKeyIconLabels[i]) ||
+                    GameMessageIn(ctx, g_minus_layout, kKeyIconPaths[i], "LayoutMsg/PlusMenu_00", kKeyIconSystem[i])) {
+                    continue;
+                }
+                why += std::string(why.empty() ? "" : ", ") + kKeyIconLabels[i] + " " + g_live_why;
+            }
+            if (!k.icons_said || !why.empty()) {
+                k.icons_said = why.empty();
+                LOG_INFO(Core, "coop: pause tab: the - menu's list: ZL / ZR icons beside its heading: {}",
+                         why.empty() ? std::string("set") : why);
+            }
+        }
+        SetVisible(ctx, k.picture, paged);
+        k.vis = paged ? 1 : 0, k.alpha = -1.0f;
+    }
+    if (paged && k.alpha != alpha) CallAlpha(ctx, k.picture, alpha), k.alpha = alpha;
+}
+
 void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     g_minus_page_gen = gen;
     g_minus_layout = layout, g_minus_anim_said = false;
@@ -2180,6 +2319,7 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         for (std::size_t j = 0; j < 2; ++j) l.box_own[j] = l.box[j] != 0 && (Read<std::uint32_t>(l.box[j] + 0xa8) & 1u) != 0;
     }
     g_minus_lines = {}, g_minus_line_alpha.fill(1.0f), g_minus_rows_set.fill(-1.0f);
+    LookMinusKeys(ctx, part);
     if (found == kRows) g_minus_page = page, g_minus_part = part, g_minus_page_x = Read<float>(page + 0x6c);
     g_minus_help = PaneIn(ctx, part, "Pa_CoopHelp_00"), g_minus_help_text.clear(), g_minus_help_vis = -1;
     if (g_minus_help != 0) SetVisible(ctx, g_minus_help, false), g_minus_help_vis = 0;   // (shown with a help: ApplyMinusPage)
@@ -2211,6 +2351,7 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
         if (on) {
             for (const std::uint64_t q : g_minus_hide) SetVisible(ctx, q, false);
         }
+        g_minus_keys.vis = -1;   // (shown again with the page as its list says)
         SetVisible(ctx, g_minus_page, on);
         g_minus_vis = on ? 1 : 0;
         LOG_INFO(Core, "coop: pause tab: the - menu's page {}", on ? kMinusTabNames[tab >= 0 ? tab : g_minus_page_tab] : "gone");
@@ -2287,6 +2428,9 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
         }
         if (l.alpha != g_minus_line_alpha[k]) CallAlpha(ctx, l.pane, g_minus_line_alpha[k]), l.alpha = g_minus_line_alpha[k];
     }
+    // (the heading's ZL and ZR icons beside it while its list has pages)
+    ApplyMinusKeys(ctx, g_minus_lists[0].pane != 0 && g_minus_lines[0].paged && !g_minus_lines[0].name.empty(),
+                   g_minus_line_alpha[0]);
     // (the rows: the focused one bright, the others a little dim, all dimmed while the list has the pad)
     for (int r = 0; r < kRows; ++r) {
         const std::size_t k = static_cast<std::size_t>(r);
@@ -2604,6 +2748,7 @@ void ForgetCoopMenu(const char* why) {
     g_minus_page = 0, g_minus_part = 0, g_minus_buttons = {}, g_minus_cursors = {}, g_minus_selects = {};
     g_minus_hide.clear();
     for (MinusList& l : g_minus_lists) l = MinusList{};
+    g_minus_keys = MinusKeys{};
     g_minus_help = 0, g_minus_vis = -1, g_minus_page_tab = -1;
     g_map_hide = false, g_minus_on = false, g_coop_open_ms = 0;
     LOG_INFO(Core, "coop: pause tab: CoopMenu_00 {}: its page forgotten", why);
