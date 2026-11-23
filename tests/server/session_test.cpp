@@ -1208,6 +1208,34 @@ TEST_CASE("a host's FLAG_RESET replaces the kept values, 0s included, and goes t
   CHECK(snap[0].flags == std::vector<FlagEntry>{flag(5, 0), flag(6, 1)});
 }
 
+TEST_CASE("report 138 (4): a guest's old value in flight just after the host's save load is refused, its new ones go") {
+  Harness h;
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.receive(1, FlagState{0, {flag(5, 16), flag(6, 1)}}, kChannelProgress);
+  h.receive(1, FlagReset{0, {flag(5, 12), flag(6, 0)}}, kChannelProgress);  // the save: MaxLife 12, the boss alive
+  h.clear();
+  // Sent before player 2's game had the reset: its old 16 and its beaten boss. Refused; another flag goes on.
+  h.receive(2, FlagSet{0, {flag(5, 16), flag(6, 1), flag(7, 1)}}, kChannelProgress);
+  auto relayed = messages_of<FlagSet>(h, 1);
+  REQUIRE(relayed.size() == 1);
+  CHECK(relayed[0].flags == std::vector<FlagEntry>{flag(7, 1)});
+  CHECK(h.session.stats().reset_fenced == 2);
+  // The reset's own value, and a count change, are never refused.
+  h.clear();
+  h.receive(2, FlagSet{0, {flag(5, 12), FlagEntry{8, 0, FlagKind::count_delta, 1}}}, kChannelProgress);
+  relayed = messages_of<FlagSet>(h, 1);
+  REQUIRE(relayed.size() == 1);
+  CHECK(relayed[0].flags.size() == 2);
+  // After reset_fence_us the player's change is its own again (a heart container taken in the refight).
+  h.clear();
+  h.now += SessionConfig{}.reset_fence_us;
+  h.receive(2, FlagSet{0, {flag(5, 16)}}, kChannelProgress);
+  relayed = messages_of<FlagSet>(h, 1);
+  REQUIRE(relayed.size() == 1);
+  CHECK(relayed[0].flags == std::vector<FlagEntry>{flag(5, 16)});
+}
+
 TEST_CASE("a joiner gets the table before any flag state sent after it joined") {
   Harness h;
   h.join(1, "Link");

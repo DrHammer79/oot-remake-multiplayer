@@ -737,11 +737,11 @@ void Session::dispatch_player_message(ConnectionId id, Connection& c, std::uint8
     return;
   }
   if (std::holds_alternative<FlagSet>(message)) {
-    on_flag_set(c, message);
+    on_flag_set(c, message, now_us);
     return;
   }
   if (std::holds_alternative<FlagState>(message) || std::holds_alternative<FlagReset>(message)) {
-    on_flag_state(id, c, message);
+    on_flag_state(id, c, message, now_us);
     return;
   }
   if (std::holds_alternative<SaveAsk>(message) || std::holds_alternative<SavePart>(message)) {
@@ -1303,7 +1303,24 @@ void Session::on_join_partner(ConnectionId id, Connection& c, JoinPartner& j) {
 
 // To the host only, the host itself included: a host's own FLAG_SET comes
 // back to it, so its build answers every FLAG_SET the same way.
-void Session::on_flag_set(Connection& c, Message& message) {
+void Session::on_flag_set(Connection& c, Message& message, std::uint64_t now_us) {
+  // Report 138 (4): just after the host's save load, a guest's change to a flag the reset set was most likely sent
+  // before that guest had the reset: its old value. Refused, so the save's value stands.
+  if (now_us < reset_fence_until_ && !reset_fence_.empty()) {
+    auto& entries = std::get<FlagSet>(message).flags;
+    const std::size_t before = entries.size();
+    std::erase_if(entries, [&](const FlagEntry& e) {
+      if (e.kind == FlagKind::count_delta) return false;
+      const auto it = reset_fence_.find(e.key);
+      return it != reset_fence_.end() && it->second != e.value;
+    });
+    if (entries.size() != before) {
+      stats_.reset_fenced += before - entries.size();
+      log("player " + std::to_string(c.number) + ": " + std::to_string(before - entries.size()) +
+          " flag change(s) refused just after the host's save load (sent before its game had the reset; report 138)");
+    }
+    if (entries.empty()) return;
+  }
   set_sender(message, c.number);
   send(*host_, kChannelProgress, message);
   ++stats_.flag_relayed;
@@ -1320,7 +1337,7 @@ void Session::on_flag_set(Connection& c, Message& message) {
   }
 }
 
-void Session::on_flag_state(ConnectionId id, Connection& c, Message& message) {
+void Session::on_flag_state(ConnectionId id, Connection& c, Message& message, std::uint64_t now_us) {
   if (id != host_) {
     ++stats_.flag_refused;
     return;
@@ -1330,7 +1347,7 @@ void Session::on_flag_state(ConnectionId id, Connection& c, Message& message) {
   const auto& flags = std::holds_alternative<FlagReset>(message) ? std::get<FlagReset>(message).flags
                                                                   : std::get<FlagState>(message).flags;
   for (const FlagEntry& e : flags) keep_flag(e);
-  if (std::holds_alternative<FlagReset>(message)) on_host_reset();
+  if (std::holds_alternative<FlagReset>(message)) on_host_reset(flags, now_us);
   set_sender(message, c.number);
   send_to_others(id, kChannelProgress, message);
   ++stats_.flag_relayed;
@@ -1372,8 +1389,13 @@ void Session::on_save(ConnectionId id, Connection& c, Message& message) {
   ++stats_.relayed;
 }
 
-void Session::on_host_reset() {
+void Session::on_host_reset(const std::vector<FlagEntry>& flags, std::uint64_t now_us) {
   ++stats_.host_resets;
+  reset_fence_.clear();
+  if (config_.reset_fence_us != 0) {
+    for (const FlagEntry& e : flags) reset_fence_[e.key] = e.value;
+    reset_fence_until_ = now_us + config_.reset_fence_us;
+  }
   // Owners of session-wide kept state add their clear here (docs/flags.md, "Saves").
   world_.forget_kept();  // locked doors' kept breaks (docs/dungeon.md, "Locked doors")
   dead_.clear();         // kills-late: the save's enemies are alive again
