@@ -40,7 +40,7 @@ It needs CMake 3.24+, Ninja, gcc 13+ or clang 17+, Qt 6 (6.8, as Fritchii's rele
 
 On Linux the emulator's portable folder is `user/` in the **current directory** (not beside the program, as on Windows); without one it uses `~/.local/share/eden` and the other XDG folders. So start it from the folder that holds `user/` (the kit's start scripts do: `cd emulator`, then `./lichii.AppImage`).
 
-CI (`.github/workflows/build.yml`, job `linux-emulator`) compiles the hook on every push, and builds the whole emulator, its AppImage and a start without a game on the `linux-build` branch, on tags and by hand (workflow_dispatch); the AppImage is kept as the artifact `lichii-linux-x86_64`.
+CI no longer builds the emulator (the `linux-emulator` and `windows-emulator` jobs and the AppImage artifact `lichii-linux-x86_64` were removed in 0.11.12). `lichii/hook/` is still compiled by the `linux (gcc)` job's Hookshot module step and the `windows` job.
 
 ## Build (Windows)
 
