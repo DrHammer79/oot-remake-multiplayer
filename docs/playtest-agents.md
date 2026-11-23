@@ -49,7 +49,8 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   the `id` when there are several).
 - Fight with `fight id name`: it walks up, locks on (`ZL`), slashes (`Y`) and guards (`ZL` alone) until the enemy's
   life is 0, Link is low, or the frames run out, then answers `dead`, `gone`, `low`, `stopped` or `alive` with a `look`.
-  Then `desync_check` and look in the other game. A boss that needs a stun first (Gohma: a Deku Seed in her eye) needs
+  It stops (`stopped: event`) during a cutscene and presses nothing: wait it out first (`step_until "event == false"`;
+  a dungeon's title card after a warp is one). Then `desync_check` and look in the other game. A boss that needs a stun first (Gohma: a Deku Seed in her eye) needs
   `use_item` before `fight`.
 - Let the other game run (`step 30`) after an action that should sync: a held game receives nothing.
 - Stuck? Try the data first ([tools/playtest/data](../tools/playtest/data/README.md): known stuck spots and how to

@@ -334,10 +334,11 @@ PLAYER_TOOLS = [
      "reach, then slash with the lock-on held (ZL + Y, then Y let go), guard (ZL alone: the shield) for one round after Link "
      "is hit, in short rounds until it is dead, "
      "gone, Link is low (life 4 quarter hearts or less: he backs off and the fight ends as `low`), a scene change or "
-     "load stops it, or `max_frames` run out. Ends with a `look`. The buttons are Longshot's map (`lock` ZL, `sword` "
+     "load, an event (a cutscene: it waits for no event, so wait it out first), a walk-up the game refuses, or four "
+     "walk-ups that get no nearer (`stuck`) stop it, or `max_frames` run out. Ends with a `look`. The buttons are Longshot's map (`lock` ZL, `sword` "
      "Y, `shield` ZL: lock-on and shield are one button). Longshot's Toggle ZL/ZR setting must be off. When the "
-     "enemy's life never moves, `hint` says why it may be. At most 1200 frames pass "
-     "(`max_frames` lowers it). The enemy is looked up in the world list every round and never swapped for another "
+     "enemy's life never moves, `hint` says why it may be. `max_frames` is 600 by default, 1200 at most; "
+     "no round starts that would pass it (a back-off when low adds 14). The enemy is looked up in the world list every round and never swapped for another "
      "of its name; it needs the world list. It acts on this game only.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": dict(
          ACTOR_ARGS, max_frames={"type": "integer", "minimum": 1, "maximum": kit_fight.MAX_FRAMES},
@@ -662,7 +663,7 @@ class Game:
                     raise ValueError("%s: one of %s" % (key, " ".join(pc.BUTTONS)))
                 return b
             out = kit_fight.fight(c, _need_id(args), _word(args, "name"),
-                                  int(_bounded(args, "max_frames", 600, 1, kit_fight.MAX_FRAMES)),
+                                  int(_bounded(args, "max_frames", kit_fight.MCP_FRAMES, 1, kit_fight.MAX_FRAMES)),
                                   button("lock", kit_fight.LOCK), button("sword", kit_fight.SWORD),
                                   button("shield", kit_fight.SHIELD),
                                   int(_bounded(args, "min_life", kit_fight.MIN_LIFE, 0, 80)))

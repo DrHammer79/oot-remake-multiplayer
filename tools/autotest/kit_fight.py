@@ -32,6 +32,9 @@ SHIELD_FRAMES = 10
 BACK_OFF_FRAMES = 14
 MIN_LIFE = 4         # quarter hearts: at or below this Link backs off and the fight ends ("low")
 MAX_FRAMES = 1200
+MCP_FRAMES = 600     # the MCP tool's default
+STUCK_M = 0.3        # a walk-up that gets less than this much nearer gets nowhere
+STUCK_WALKS = 4      # that many in a row: stopped, stuck
 
 
 def _xz(pos):
@@ -75,15 +78,22 @@ def _guard(client, lock, shield):
     return _hold(client, _buttons(lock, shield), SHIELD_FRAMES)
 
 
+def _event(st):
+    return "event" if st.get("event") else None
+
+
 def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWORD, shield=SHIELD, min_life=MIN_LIFE,
           reach_m=REACH_M):
     """Returns result: `dead` (its life was seen at 0), `gone` (it left the list: perhaps dead; the look says),
-    `low` (Link's life fell to `min_life` or less: he backed off), `stopped` (the scene changed, a load began, an event
-    or a stale list: see `stopped`), `alive` (the frame limit; `hint` when its life never moved). Also `life_before`,
-    `life_after` (the enemy's), `link_before`, `link_after`, `hits` (rounds in which its life went down), `hurt`
-    (rounds in which Link's did), `slashes`, `guards`, `rounds`, `frames`."""
+    `low` (Link's life fell to `min_life` or less: he backed off, BACK_OFF_FRAMES more), `stopped` (see `stopped`: the
+    scene changed, a load began, an event is on (a cutscene: nothing is pressed in it), a stale list, a walk-up the game
+    refused (`move refused: ...`, no position), or `stuck`: STUCK_WALKS walk-ups in a row that got no 0.3 m nearer),
+    `alive` (the frame limit: no round starts that would pass it; `hint` when its life never moved). Also
+    `life_before`, `life_after` (the enemy's), `link_before`, `link_after`, `hits` (rounds in which its life went
+    down), `hurt` (rounds in which Link's did), `slashes`, `guards`, `rounds`, `frames`."""
     if not 1 <= int(max_frames) <= MAX_FRAMES:
         raise ValueError("max_frames is 1 to %d" % MAX_FRAMES)
+    max_frames = int(max_frames)
     a, w = ph._look(client, ident)
     why = ph._no_list(w)
     if why or ph._gone(a, name):
@@ -97,9 +107,9 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
            "link_after": st.get("life"), "hits": 0, "hurt": 0, "slashes": 0, "guards": 0, "rounds": 0, "frames": 0}
     if isinstance(before, (int, float)) and before <= 0:
         return dict(out, result="dead", note="its life was already 0")
-    last_enemy, last_link, guarded = before, st.get("life"), False
-    while out["frames"] < int(max_frames):
-        stop = ph._interrupted(st, scene, w)
+    hurt_last, guarded, still = False, False, 0
+    while True:
+        stop = ph._interrupted(st, scene, w) or _event(st)
         if stop:
             return dict(out, result="stopped", stopped=stop)
         if ph._gone(a, name):
@@ -119,31 +129,47 @@ def fight(client, ident, name=None, max_frames=MAX_FRAMES, lock=LOCK, sword=SWOR
         link, dist = st.get("pos"), None
         if link and isinstance(a.get("pos"), (list, tuple)):
             dist = _dist(link, a)
-        hurt_now = isinstance(mine, (int, float)) and isinstance(last_link, (int, float)) and mine < last_link
+        left = max_frames - out["frames"]
         if dist is not None and dist > reach_m:
             q = a["pos"]
-            r = pc.walk_to(client, q[0], q[2], tolerance=reach_m * 0.6, max_frames=APPROACH_FRAMES, chunk=APPROACH_FRAMES)
-            out["frames"] += max(1, r.get("frames", 0))
+            r = pc.walk_to(client, q[0], q[2], tolerance=reach_m * 0.6, max_frames=min(APPROACH_FRAMES, left),
+                           chunk=APPROACH_FRAMES)
+            out["frames"] += r.get("frames", 0)
+            if not r.get("arrived") and r.get("reason") != "timed out":
+                return dict(out, result="stopped", stopped=r.get("reason") or "walk-up failed")
+            now = r.get("distance")
+            still = still + 1 if not isinstance(now, (int, float)) or dist - now < STUCK_M else 0
+            if still >= STUCK_WALKS:
+                return dict(out, result="stopped", stopped="stuck",
+                            note="%d walk-ups got no %.1f m nearer (%.1f m left)" % (still, STUCK_M, dist))
             guarded = False
-        elif hurt_now and not guarded:
+        elif hurt_last and not guarded:
+            if left < SHIELD_FRAMES:
+                break
             out["frames"] += _guard(client, lock, shield)    # block the next blow, then slash again
             out["guards"] += 1
             guarded = True
+            still = 0
         else:
+            if left < SWING_FRAMES + RECOVER_FRAMES:
+                break
             out["frames"] += _slash(client, lock, sword)
             out["slashes"] += 1
             guarded = False
+            still = 0
         out["rounds"] += 1
+        last_enemy = life
         a, w = ph._look(client, ident)
         st = pc.game_of(client.state())
-        if isinstance(a, dict) and isinstance(a.get("life"), (int, float)) and isinstance(last_enemy, (int, float)) \
-                and a["life"] < last_enemy:
+        if isinstance(a, dict) and isinstance(a.get("life"), (int, float)) and isinstance(last_enemy, (int, float))                 and a["life"] < last_enemy:
             out["hits"] += 1
-        if hurt_now:
+        now_life = st.get("life")
+        hurt_last = isinstance(now_life, (int, float)) and isinstance(mine, (int, float)) and now_life < mine
+        if hurt_last:
             out["hurt"] += 1
-        last_enemy = a.get("life") if isinstance(a, dict) else last_enemy
-        last_link = mine
-    stop = ph._interrupted(st, scene, w)
+        if out["frames"] >= max_frames:
+            break
+    stop = ph._interrupted(st, scene, w) or _event(st)
     if stop:
         return dict(out, result="stopped", stopped=stop)
     if ph._gone(a, name):

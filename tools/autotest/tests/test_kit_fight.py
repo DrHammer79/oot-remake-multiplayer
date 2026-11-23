@@ -17,10 +17,10 @@ class Game:
         self.hits_work, self.scene_after, self.stale_after = hits_work, scene_after, stale_after
         self.presses, self.frames, self.moves, self.rounds, self.scene = [], [], [], 0, "A"
         self.steps, self.held = 0, []
-        self.gone = False
+        self.gone, self.event = False, False
 
     def state(self):
-        return {"scene": self.scene, "life": self.link, "max_life": 12, "pos": [0.0, 0.0, 0.0], "event": False,
+        return {"scene": self.scene, "life": self.link, "max_life": 12, "pos": [0.0, 0.0, 0.0], "event": self.event,
                 "loading": False}
 
     def world(self):
@@ -146,6 +146,61 @@ class FightTest(unittest.TestCase):
     def test_bad_frame_limit_is_refused(self):
         with self.assertRaises(ValueError):
             kit_fight.fight(Game(), 3, max_frames=0)
+
+
+    def test_an_event_stops_the_fight_and_nothing_is_pressed(self):
+        g = Game(dist=1.0, life=3)
+        g.event = True                                                   # a cutscene (Gohma's entrance, a title card)
+        out = kit_fight.fight(g, 3)
+        self.assertEqual((out["result"], out["stopped"]), ("stopped", "event"))
+        self.assertEqual((g.presses, out["life_after"]), ([], 3))
+
+    def test_a_walk_up_that_stops_for_an_event_ends_the_fight(self):
+        g = Game(dist=6.0, life=3)
+        calls = []
+
+        def walk(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
+            calls.append(max_frames)
+            return {"arrived": False, "reason": "event", "frames": 0, "distance": 6.0, "state": client.state()}
+        pc.walk_to = walk
+        out = kit_fight.fight(g, 3)
+        self.assertEqual((out["result"], out["stopped"], len(calls), out["rounds"]), ("stopped", "event", 1, 0))
+
+    def test_a_refused_walk_up_ends_the_fight(self):
+        g = Game(dist=6.0, life=3)
+
+        def walk(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
+            return {"arrived": False, "reason": "move refused: no_camera: no camera", "frames": 0, "distance": 6.0}
+        pc.walk_to = walk
+        out = kit_fight.fight(g, 3)
+        self.assertEqual(out["result"], "stopped")
+        self.assertTrue(out["stopped"].startswith("move refused"))
+
+    def test_walk_ups_that_get_no_nearer_end_as_stuck(self):
+        g = Game(dist=6.0, life=3)
+        calls = []
+
+        def walk(client, x, z, tolerance=0.5, max_frames=600, chunk=8):
+            calls.append(1)
+            return {"arrived": False, "reason": "timed out", "frames": max_frames, "distance": 5.9}
+        pc.walk_to = walk
+        out = kit_fight.fight(g, 3)
+        self.assertEqual((out["result"], out["stopped"]), ("stopped", "stuck"))
+        self.assertEqual(len(calls), kit_fight.STUCK_WALKS)
+        self.assertEqual(out["frames"], kit_fight.STUCK_WALKS * kit_fight.APPROACH_FRAMES)
+
+    def test_the_frame_limit_is_never_passed(self):
+        for limit in (1, 11, 12, 25, 100):
+            g = Game(dist=1.0, life=500, hits_work=False)
+            out = kit_fight.fight(g, 3, max_frames=limit)
+            self.assertEqual(out["result"], "alive")
+            self.assertLessEqual(out["frames"], limit)
+            self.assertEqual(out["frames"], sum(g.frames))
+
+    def test_a_hit_in_the_last_round_is_counted(self):
+        g = Game(dist=1.0, life=500, bite=1, link_life=40, hits_work=False)
+        out = kit_fight.fight(g, 3, max_frames=kit_fight.SWING_FRAMES + kit_fight.RECOVER_FRAMES)
+        self.assertEqual((out["rounds"], out["hurt"]), (1, 1))
 
 
 if __name__ == "__main__":
