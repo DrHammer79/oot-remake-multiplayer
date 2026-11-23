@@ -404,8 +404,21 @@ std::string Reply(const CoopModJson::Value& id, std::uint64_t frame, bool paused
     return out + "}";
 }
 
+std::string TeleportFailure(std::string_view code, std::string_view message) {
+    const std::string c = code.empty() ? "failed" : std::string(code);
+    if (message.empty()) {
+        return "Longshot's teleport: " + c + ", with no message from Longshot (its log, longshot_log.txt, may say why)";
+    }
+    return "Longshot's teleport: " + c + ": " + std::string(message);
+}
+
 std::string ErrorReply(const CoopModJson::Value& id, std::uint64_t frame, bool paused, std::string_view code,
                        std::string_view message) {
+    if (message.empty()) {
+        const std::string why = "no reason was given for `" + std::string(code) +
+                                "` (the game's own log, the `coop:` lines, may say why)";
+        return ErrorReply(id, frame, paused, code, why);
+    }
     return "{\"id\":" + Compact(id) + ",\"ok\":false,\"frame\":" + std::to_string(frame) +
            ",\"paused\":" + (paused ? "true" : "false") + ",\"error\":" + Quote(code) + ",\"message\":" +
            Quote(message) + "}";
