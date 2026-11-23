@@ -183,11 +183,91 @@ TEST_CASE("char ages: a fight over the value is said once, not at every re-write
     s.child = 2;
     s.adult = 9;
     Picks p(s);
-    CHECK(p.Frame(At(true, 0), kFiles).say);
+    const auto first = p.Frame(At(true, 0), kFiles);
+    CHECK(first.say);
+    p.Wrote(*first.write);  // the game took it
     for (int i = 0; i < Picks::kRewriteFrames; ++i) p.Frame(At(true, 0), kFiles);
     const auto again = p.Frame(At(true, 0), kFiles);
     CHECK(again.write == 2);
     CHECK_FALSE(again.say);
+    p.Wrote(*again.write);
     p.Frame(At(true, 2), kFiles);  // taken: settled
     CHECK(p.Frame(At(true, 0), kFiles).say);
+}
+
+TEST_CASE("char ages: a write the game did not take is said with the next one that it takes (the adult line)") {
+    // Lane run 2026-11-23: the age change's first write came during the load and failed; the retry worked but was
+    // not said, so the log had no adult line at all.
+    Stored s;
+    s.on = true;
+    s.child = 2;
+    s.adult = 9;
+    Picks p(s);
+    p.Frame(At(true, 2), kFiles);              // a child showing Saria: nothing to do
+    const auto failed = p.Frame(At(false, 2), kFiles);   // grown up
+    REQUIRE(failed.write == 9);
+    CHECK(failed.say);
+    // (no Wrote: the setter refused it)
+    for (int i = 0; i < Picks::kRewriteFrames; ++i) CHECK_FALSE(p.Frame(At(false, 2), kFiles).write);
+    const auto retry = p.Frame(At(false, 2), kFiles);
+    CHECK(retry.write == 9);
+    CHECK(retry.say);   // said now, with the write that works
+}
+
+TEST_CASE("char ages: the pick wanted for an age") {
+    Stored s;
+    s.on = true;
+    s.child = 2;
+    s.adult = 77;   // no model here
+    CHECK(CoopCharAges::Wanted(s, true, kFiles) == 2);
+    CHECK(CoopCharAges::Wanted(s, false, kFiles) == 0);   // shown as Link, the pick kept
+    CHECK(CoopCharAges::Wanted(s, false, std::nullopt) == 77);   // models unknown: counted as installed
+    CHECK_FALSE(CoopCharAges::Wanted(s, std::nullopt, kFiles));   // age unknown
+    s.adult.reset();
+    CHECK_FALSE(CoopCharAges::Wanted(s, false, kFiles));   // no pick for the adult yet
+    s.on = false;
+    CHECK_FALSE(CoopCharAges::Wanted(s, true, kFiles));
+}
+
+TEST_CASE("char ages: a save load writes the save's age pick at once and holds it through the load") {
+    using CoopCharAges::LoadHold;
+    LoadHold h;
+    // The title load of the lane run: a child save whose own pick is 0, the child's pick 2.
+    CHECK(h.Loaded(2, 0, 1000) == 2);   // written in place before the player is made
+    CHECK(h.held());
+    CHECK_FALSE(h.Applied(2, 1010));    // the game's applier left it
+    CHECK(h.Applied(0, 1020) == 2);     // it put the save's 0 back: written again
+    CHECK_FALSE(h.Applied(2, 1030));
+    CHECK_FALSE(h.TakeSummary());       // still held: nothing said yet
+    h.Expire(1000 + LoadHold::kHoldMs);
+    CHECK_FALSE(h.held());
+    const auto said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->want == 2);
+    CHECK(said->passes == 3);
+    CHECK(said->put_back == 1);
+    CHECK(said->game_value == 0);
+    CHECK_FALSE(h.TakeSummary());       // said once
+    CHECK_FALSE(h.Applied(0, 999999));  // not held: the game's own changes are left alone
+}
+
+TEST_CASE("char ages: a save load with the pick already there, not held, stopped or timed out") {
+    using CoopCharAges::LoadHold;
+    LoadHold h;
+    CHECK_FALSE(h.Loaded(9, 9, 0));   // an adult save that has Sheik already: nothing to write
+    CHECK(h.held());                  // but held: the load may still bring another value
+    CHECK(h.Applied(0, 5) == 9);
+    h.Stop();                         // the frame: his page opened (the player picks)
+    CHECK_FALSE(h.Applied(0, 6));
+    CHECK(h.TakeSummary());
+    CHECK_FALSE(h.Loaded(std::nullopt, 0, 10));   // off, no pick for the age, or the age unknown
+    CHECK_FALSE(h.held());
+    CHECK_FALSE(h.Loaded(2, std::nullopt, 10));   // the mod's value not there (no mod)
+    CHECK_FALSE(h.held());
+    CHECK(h.Loaded(2, 0, 100) == 2);
+    CHECK_FALSE(h.Applied(0, 100 + LoadHold::kHoldMs));   // past the hold: left to the frame
+    CHECK_FALSE(h.held());
+    CHECK(h.Loaded(2, 0, 200) == 2);
+    CHECK(h.Loaded(9, 2, 300) == 9);   // a second load (Try Again soon after): its own hold, the first one said
+    REQUIRE(h.TakeSummary());
 }
