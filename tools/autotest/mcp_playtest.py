@@ -270,8 +270,8 @@ PLAYER_TOOLS = [
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
-    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) with the camera-relative stick, a "
-     "few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
+    {"name": "walk_to", "description": "Walk Link to a point (x, z in metres) by world direction (the module "
+     "makes the stick from each frame's camera), a few frames at a time. Stops on arrival (within tolerance metres), a scene change, a load or an event, or "
      "after max_frames; says why, the frames used and the distance left.",
      "inputSchema": {"type": "object", "required": ["x", "z"],
                      "properties": {"x": {"type": "number"}, "z": {"type": "number"},

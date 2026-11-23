@@ -2389,6 +2389,8 @@ COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) n
     const uint64_t came = buttons;
     int32_t was[4] = {stick[0], stick[1], stick[2], stick[3]};
     try {
+        // A play-test `move` (coop_playtest.h): its stick, from the world yaw and this frame's camera, is the pad's.
+        CoopPlaytest::PadMove(stick);
         const uint64_t got = CoopPadOrder::Run(
             buttons, stick,
             [](uint64_t b, int32_t* s) {

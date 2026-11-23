@@ -28,7 +28,7 @@ CLOSER_M = 0.3         # a leg that brings Link this much nearer is progress
 
 
 class InStep:
-    """Two games in step: every frame the primary game runs through input() or step() the other game runs too. Anything
+    """Two games in step: every frame the primary game runs through input(), move() or step() the other game runs too. Anything
     else (state, world, act) goes to the primary only."""
 
     def __init__(self, primary, other):
@@ -40,6 +40,12 @@ class InStep:
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         r = self.primary.input(stick, buttons, frames, rstick)
         self.other.step(frames)
+        return r
+
+    def move(self, yaw, strength=1.0, frames=1, check=True):
+        r = self.primary.move(yaw, strength, frames, check)
+        if r.get("ok"):                     # (a refused move ran no frames)
+            self.other.step(frames)
         return r
 
     def step(self, frames=1):
