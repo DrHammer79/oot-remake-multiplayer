@@ -123,6 +123,7 @@ runs. So **always hold both games** and step them in turn, the same number of fr
 | `give` | `item` (`bombs`, `bow`, `hookshot`, a bare item name such as `Item_Boomerang` or `Weapon_Sword_Kokiri` (its `PouchData.<name>.StockNum` count if the game has one, else its `IsGet.<name>` flag; neither: the reply says which two it looked for), or a full item flag name such as `IsGet.Item_Boomerang` or `PouchData.Item_Bomb.StockNum`) | The test script's `give`, needs `LICHII_COOP_CHEATS=1`. The flags are written at once inside the held call (the item, its `IsGet`, and the ammo and capacity the game gives with it, never lowered), not queued for a frame: the reply's `result` says what each flag was and is (`no change: ... already 1` when Link had the item; `failed` with the reason when the item was not written; `partial` true when the item is in but its `IsGet` or a grant was not, `result` naming the flag); `get_state` with `inventory` true shows it with no step. Refused with `not_ready` while a load runs or when there is no fresh Link sample (a load sends no Link update, so the old sample cannot tell; a pause and a title the same): the give runs one frame first to take a sample, as `state` does, and if none comes the answer is `not_ready`, nothing written. Step until `state.not_ready` is null, then give again. `bombs` is the small bag and 20 bombs, `bow` the bow with the small quiver and 30 arrows. A bomb that can be lifted also needs `PlayerStatus.LiftGrade` (docs/items.md, "Bombs from the cheat") |
 | `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`. Written at once inside the held call: `place`, `face`, `wear`, `assign`, `setflag`, `setenum`. Queued for the next frames (`step` a few, then read the `state`): `dress`, `kill`, `hit`, `aim`, `hurt`, `chat`, `menu`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. With no world list (solo, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
+| `text` | `since` (a whole number, default 0: every text kept), `layout` (optional: only layouts whose name has it, e.g. `MessageInGame_00`) | The texts the game set in its text panes after `since`, oldest first; read only, no frame runs, not gated. Replies with `hooked` (this exe has patch 0037's wrap: false means `texts` stays empty), `last` (the newest `seq`: pass it as the next `since`), `lost` (texts after `since` that are no longer kept) and `texts`: `[{seq, frame, layout, pane, text, length, cut, markup}]`. See [Text boxes](#text-boxes) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
 **The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only when
@@ -134,9 +135,34 @@ a player starts from names `LICHII_COOP_PLAYTEST_VERBS`: not `play.ps1`, not `st
 - `refused: this is not a test run (LICHII_COOP_PLAYTEST_VERBS is not set by the test runner), and these commands reach the wire and other players`
 - `refused: cheats are off (LICHII_COOP_CHEATS is not set)`
 
+### Text boxes
+
+The `text` command reads what the game writes into its text panes, so a tester can read a talk without a picture.
+Patch 0037 (`hookshot/patches/0037-coop-pane-text-wrap.patch`) adds wrap 25 to patch 0005's table: the game's pane
+text setter (main+0x439520, `kPaneSetMsg` in [addresses.md](addresses.md); x0 the pane, x1 a reference {+0 the text,
++8 its length in bytes, +0x10 its attributes}). The patch only names the function; what is kept, and when, is the
+module's (`hookshot/src/coop_talk_text.{h,cpp}`), and only while the bridge is on (`LICHII_COOP_PLAYTEST_PORT`): a
+player's game copies nothing.
+
+- The text is copied at the call (the box keeps the pointer, not a copy). At most 2048 bytes a text (`cut` true when
+  longer) and the last 256 texts are kept.
+- Each text names its layout and pane, read from the pane as Longshot's `host/hos_wide_ui.c` reads them (pane +0x18
+  its layout, layout +0xf8 the file header: +0x18 its name, +0x20 the pane names; layout +0x100 the pane array of
+  0xb0-byte panes). The message window is `MessageInGame_00`: `T_MessageWhiteOut_00` the box, `T_Name_00` the speaker
+  ([game-ui.md](game-ui.md)).
+- The window sets its text again every frame, so a text the pane already shows is not kept again, and a pane's first
+  set to "" is not kept. A text that only grew replaces its shorter self when nothing came between (a box typed out
+  letter by letter, if the game does that).
+- Valid UTF-8 comes as it is; any other byte and every control character as a JSON `\u00XX`, and `markup` is true:
+  those are the game's markup (colour, a pause, a choice), not read yet.
+- An exe without patch 0037 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
+  text wrap (patch 0037)` once at the HELLO.
+
+The MCP `talk` tool is built on it (see [Helpers](#helpers-several-calls-in-one)); `get_text` is the bare command.
+
 `OOT_COOP_KIT_START` is no sign of a test: the kit's start files set it for every player's game. Nor is a loopback
 server: a real host's game connects to its own server at 127.0.0.1. At start the module logs `coop: playtest: verbs
-on|off (test runner: yes|no, cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause`, `resume` and `shot` are not
+on|off (test runner: yes|no, cheats: on|off)`. `state`, `dump`, `input`, `step`, `pause`, `resume`, `shot` and `text` are not
 gated.
 
 ### State
@@ -377,7 +403,17 @@ server calls them; a script can too). They only use the bridge's commands, so th
 - `attack` walks up, faces the actor and presses the sword button in rounds of 6 frames. The default button `Y` and the
   walk's leg size and stuck limit are guesses made without a game: the first lane run sets them.
 - `use_item` puts the item on a button (`assign`), presses it, and lists what changed in life, rupees, event, prompt,
-  equips and each inventory entry (`inventory_changed`, one entry per item). `talk` and `open` press `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
+  equips and each inventory entry (`inventory_changed`, one entry per item). `open` presses `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `talk` (below) keeps that rule for its first press. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
+- `talk` (optionally with `id` and `name`: go_to_actor and `face` first) presses `A`, then reads each new box through
+  `text`: `boxes` [{speaker, text, markup}], `T_Name_00` the speaker, `T_MessageWhiteOut_00` the box. It presses `A`
+  when a new box came, or when the event went quiet for 3 reads (10 frames each). Any other text of a message layout
+  is taken as a reply choice (`choices`); with `reply` it presses Down to the choice of that text (whole text first,
+  then a part, case and spaces ignored) and `A`; with no `reply` it takes the cursor's own (`picked.default` true).
+  It ends `done` when the event is over and 3 reads bring no text, or says why it stopped: `reply not offered: ...`
+  (the choices listed, the talk left open), `done, but no choices showed`, `too many boxes`, `timed out` (1200 frames),
+  `scene changed`, `loading`, or `no text: ...` (no `text` command, or an exe without patch 0037: one `A` pressed).
+  Read offline only, so unproven: which panes hold the choices, that the cursor starts on the first, and how the end
+  of a talk shows.
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
   on every `input`, `move` and `step`. Over MCP, the `--pair` server does this for every tool (below); with one server per
   game the tester steps the other game itself.
@@ -438,6 +474,18 @@ Nothing here has run in a game. The first run checks:
 - Walk through a door during `go_to_actor`: the answer is `scene changed`, not `gone`.
 - The guesses made without a game, set by this run: the sword button `Y`, the 4 m leg of `go_to_actor` and its
   60-frame stuck limit.
+
+### Check in game (talk and the text wrap, patch 0037)
+
+Needs a game built with patch 0037. Nothing here has run in a game:
+
+- `get_text` after the title: `hooked` true, and HUD or menu texts with their layout and pane names (not "").
+- Kokiri shop: `talk` to the shopkeeper with `reply` "Buy" on the Deku Shield (40 rupees; `give` rupees first if
+  needed): the boxes read as on screen with the speaker, the choices are the two replies, the shield is in
+  `inventory` after, and `done` is true. Note which panes held the choices, where the cursor started and whether a
+  box grew letter by letter (the `frame` of each set).
+- Mido: `talk` with no `reply`: every box, `done` true, Link free to walk after.
+- The `markup` texts: write down which bytes come (`\u00XX`) and where in the box they stand.
 
 ### Set a test up (start a boss or a dungeon in one call)
 

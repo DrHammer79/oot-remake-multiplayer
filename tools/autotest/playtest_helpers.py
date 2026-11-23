@@ -382,3 +382,135 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=No
         return {"result": "refused: %s has no life left" % label if who else "refused: none of that name has a life",
                 "line": line, "seq": seq, "frames": used}
     return {"result": "unknown: the walk said %r" % word, "line": line, "seq": seq, "frames": used}
+
+
+# --- talk: read each text box, press A to the end, pick a reply by its text (docs/playtest.md, "Text boxes") ---------
+# The message window is MessageInGame_00: T_MessageWhiteOut_00 (alias T_Message_00) the box's text, T_Name_00 the
+# speaker (docs/game-ui.md). Read offline; not yet seen in a game: which panes show the reply choices, where the
+# cursor starts and how the end of a talk shows. So a text from another pane of a message layout is taken as a choice,
+# the cursor is taken to start on the first one, and the talk ends when the event has ended and no new text came.
+MESSAGE_LAYOUTS = ("MessageInGame", "BalloonMessage", "MessageDialog", "MessageLog")
+BOX_PANES = ("T_MessageWhiteOut_00", "T_Message_00")
+NAME_PANES = ("T_Name_00",)
+TALK_BOXES = 20        # a talk reads at most this many boxes
+TALK_FRAMES = 1200     # ... and runs at most this many frames
+TALK_WAIT = 10         # frames run after each press before the texts are read
+TALK_IDLE = 3          # reads in a row with no event and no new text: the talk is over (with an event: press A)
+TEXT_NOW = 2 ** 53 - 1  # `text` since this: no texts, only `last` and `hooked`
+
+
+def _message_text(t):
+    return any(name in (t.get("layout") or "") for name in MESSAGE_LAYOUTS)
+
+
+def _same_reply(text, reply):
+    return " ".join(str(text).split()).casefold() == " ".join(str(reply).split()).casefold()
+
+
+def _has_reply(text, reply):
+    return " ".join(str(reply).split()).casefold() in " ".join(str(text).split()).casefold()
+
+
+def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_frames=TALK_FRAMES,
+         near_m=INTERACT_M, wait=TALK_WAIT):
+    """Talk to whoever the A prompt names, or (with `ident` and `name` from get_world) walk to that actor and face it
+    first. Presses A, then reads each new text box (the bridge's `text`), presses A to go on, and picks the choice whose
+    text is `reply` (Down to it, then A) when choices show. Stops when the talk is over (`done`), or says why:
+    not reached, no prompt, no text (this exe lacks patch 0037), reply not offered, too many boxes, timed out, scene
+    changed, loading. Returns result, done, boxes [{speaker, text}], choices (the last seen), picked, presses, frames.
+    The choice panes, the cursor's start and the end of a talk are read offline only: check them in a lane run."""
+    out = {"result": None, "pressed": False, "done": False, "boxes": [], "choices": [], "picked": None, "presses": 0, "frames": 0}
+    try:
+        base = client.text(TEXT_NOW)
+        hooked = bool(base.get("hooked"))
+        seen = base.get("last", 0)
+    except pc.BridgeError as e:
+        hooked, seen = None, 0
+        why = "no text: the bridge has no `text` verb (%s)" % e.code
+    if hooked is False:
+        why = "no text: this Hookshot has no pane text wrap (patch 0037)"
+    if ident is not None:
+        start = interact_with(client, ident, name, near_m)
+        out["walk"] = start.get("walk")
+    else:
+        start = interact(client, "talk")
+    out["pressed"] = bool(start.get("pressed"))
+    if not start.get("pressed"):
+        out["result"] = start["result"]
+        return out
+    out["presses"], out["frames"] = 1, start.get("frames", 2 * PRESS_FRAMES)
+    if not hooked:
+        out["result"] = why + "; one A pressed"
+        return out
+    scene = pc.game_of(client.state()).get("scene")
+    speaker, idle, quiet, fresh = None, 0, 0, False
+    while True:
+        client.step(wait)
+        out["frames"] += wait
+        r = client.text(seen)
+        seen = r.get("last", seen)
+        new = [t for t in r.get("texts", []) if _message_text(t)]
+        choices = []
+        for t in new:
+            pane, text = t.get("pane") or "", t.get("text") or ""
+            if pane in NAME_PANES:
+                speaker = text or None
+            elif pane in BOX_PANES and text:
+                last = out["boxes"][-1] if out["boxes"] else None
+                if last and not last["done"] and text.startswith(last["text"]):
+                    last["text"] = text   # (the same box, grown)
+                else:
+                    out["boxes"].append({"speaker": speaker, "text": text, "markup": bool(t.get("markup")),
+                                         "done": False})
+                fresh = True
+            elif pane not in BOX_PANES and text:
+                choices.append(text)
+        if choices:
+            out["choices"] = choices
+            fresh = True
+        st = pc.game_of(client.state())
+        if st.get("scene") != scene:
+            out["result"] = "scene changed"
+            break
+        if st.get("loading"):
+            out["result"] = "loading"
+            break
+        idle = idle + 1 if not new and not st.get("event") else 0
+        quiet = 0 if new else quiet + 1
+        if idle >= TALK_IDLE:
+            out["result"], out["done"] = "done: the event ended", True
+            break
+        if len(out["boxes"]) > max_boxes:
+            out["result"] = "too many boxes (%d)" % max_boxes
+            break
+        if out["frames"] >= max_frames:
+            out["result"] = "timed out after %d frames" % out["frames"]
+            break
+        if choices and out["picked"] is None:
+            at = 0
+            if reply is not None:
+                at = next((i for i, c in enumerate(choices) if _same_reply(c, reply)), None)
+                if at is None:
+                    at = next((i for i, c in enumerate(choices) if _has_reply(c, reply)), None)
+                if at is None:
+                    out["result"] = "reply not offered: %r (choices: %s)" % (reply, ", ".join(map(repr, choices)))
+                    break
+            for _ in range(at):
+                client.input(None, ["DOWN"], PRESS_FRAMES)
+                client.step(PRESS_FRAMES)
+                out["frames"] += 2 * PRESS_FRAMES
+            out["picked"] = dict({"text": choices[at], "index": at}, **({} if reply is not None else {"default": True}))
+        # A when a box (or the choices) came since the last press, or to nudge an event that went quiet.
+        if st.get("event") and (fresh or quiet >= TALK_IDLE):
+            client.input(None, ["A"], PRESS_FRAMES)
+            out["presses"] += 1
+            out["frames"] += PRESS_FRAMES
+            if out["boxes"]:
+                out["boxes"][-1]["done"] = True
+            fresh, quiet = False, 0
+    for b in out["boxes"]:
+        b.pop("done", None)
+    if reply is not None and out["picked"] is None and out["done"]:
+        out["result"] = "done, but no choices showed: %r was not picked" % reply
+        out["done"] = False
+    return out

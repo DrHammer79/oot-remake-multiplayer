@@ -17,6 +17,8 @@ import hookshot  # noqa: E402
 import lanes  # noqa: E402
 import live  # noqa: E402
 import mcp_playtest  # noqa: E402
+import playtest_client as pc  # noqa: E402
+import playtest_helpers as ph  # noqa: E402
 
 
 def write_checkpoint(d, tag, a_flags, b_flags, when):
@@ -416,6 +418,159 @@ class LiveMenu(unittest.TestCase):
                 self.assertEqual(asked, [5011])
             finally:
                 live.bridge, live.snapshot, live.new_lines, live.menu_of = orig
+
+
+class FakeTalk:
+    """A game seen through the bridge for `talk`: an NPC whose talk is a list of boxes ("box", speaker, text) and
+    choices ("choice", question, [options]). A shows the next one; Down moves the choice cursor (from 0). The texts go
+    in a `text` log as patch 0037's wrap keeps them (one entry per pane set, the same text again not kept)."""
+
+    def __init__(self, talk, hooked=True, verb=True, prompt="Talk"):
+        self.talk, self.hooked, self.verb, self.prompt = talk, hooked, verb, prompt
+        self.at, self.event, self.cursor, self.picked = None, False, 0, []
+        self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
+        self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
+
+    def _entry(self, layout, pane, text):
+        return {"seq": len(self.texts) + 1, "frame": self.frame, "layout": layout, "pane": pane, "text": text,
+                "length": len(text), "cut": False, "markup": False}
+
+    def _set(self, pane, text):
+        if self.shown.get(pane) != text:
+            self.shown[pane] = text
+            self.texts.append(self._entry("MessageInGame_00", pane, text))
+
+    def _show(self):
+        item = self.talk[self.at]
+        if item[0] == "box":
+            self._set("T_Name_00", item[1])
+            self._set("T_MessageWhiteOut_00", item[2])
+        else:
+            self._set("T_MessageWhiteOut_00", item[1])
+            for i, option in enumerate(item[2]):
+                self._set("T_Choice_%02d" % i, option)
+            self.cursor = 0
+
+    def state(self):
+        return {"ok": True, "scene": "Kokiri", "loading": False, "event": self.event,
+                "prompt": None if self.event else self.prompt}
+
+    def step(self, frames=1):
+        self.frame += frames
+        return self.state()
+
+    def input(self, stick=None, buttons=(), frames=1, rstick=None):
+        self.presses.extend(buttons)
+        self.frame += frames
+        if "DOWN" in buttons and self.event and self.talk[self.at][0] == "choice":
+            self.cursor = min(self.cursor + 1, len(self.talk[self.at][2]) - 1)
+        if "A" in buttons:
+            if not self.event and self.prompt:
+                self.event, self.at = True, 0
+                self._show()
+            elif self.event:
+                if self.talk[self.at][0] == "choice":
+                    self.picked.append(self.talk[self.at][2][self.cursor])
+                self.at += 1
+                if self.at < len(self.talk):
+                    self._show()
+                else:
+                    self.event = False
+                    self._set("T_MessageWhiteOut_00", "")
+        return {"ok": True}
+
+    def text(self, since=0, layout=None):
+        if not self.verb:
+            raise pc.BridgeError({"ok": False, "error": "bad_request", "message": "cmd: hello, ..."})
+        texts = [t for t in self.texts if t["seq"] > since and (not layout or layout in t["layout"])] if self.hooked else []
+        return {"ok": True, "hooked": self.hooked, "last": len(self.texts) if self.hooked else 0, "lost": False,
+                "texts": texts}
+
+
+SHOP = [("box", "Shopkeeper", "Welcome!"), ("choice", "Deku Shield: 40 Rupees", ["Buy", "Do not buy"]),
+        ("box", "Shopkeeper", "Thank you!")]
+
+
+class TalkTest(unittest.TestCase):
+    def test_reads_every_box_with_its_speaker_and_ends(self):
+        g = FakeTalk([("box", "Mido", "Hey!"), ("box", "Mido", "Where is your fairy?")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Mido", "Hey!"), ("Mido", "Where is your fairy?")])
+        self.assertFalse(g.event)
+        self.assertNotIn("5", [b["text"] for b in r["boxes"]])     # (the HUD's text before the talk)
+
+    def test_picks_the_reply_by_its_text(self):
+        g = FakeTalk(SHOP)
+        r = ph.talk(g, reply="do not BUY")
+        self.assertTrue(r["done"], r)
+        self.assertEqual(g.picked, ["Do not buy"])
+        self.assertEqual(r["picked"], {"text": "Do not buy", "index": 1})
+        self.assertEqual(r["choices"], ["Buy", "Do not buy"])
+        self.assertEqual(g.presses.count("DOWN"), 1)
+        g = FakeTalk(SHOP)
+        r = ph.talk(g, reply="Buy")
+        self.assertEqual(g.picked, ["Buy"])
+        self.assertNotIn("DOWN", g.presses)
+        self.assertEqual(r["boxes"][-1]["text"], "Thank you!")
+
+    def test_no_reply_asked_takes_the_cursors_choice_and_says_so(self):
+        r = ph.talk(FakeTalk(SHOP))
+        self.assertTrue(r["done"])
+        self.assertEqual(r["picked"], {"text": "Buy", "index": 0, "default": True})
+
+    def test_a_reply_not_offered_stops_and_lists_the_choices(self):
+        g = FakeTalk(SHOP)
+        r = ph.talk(g, reply="Sell")
+        self.assertFalse(r["done"])
+        self.assertIn("reply not offered", r["result"])
+        self.assertIn("'Buy'", r["result"])
+        self.assertEqual(g.picked, [])
+        self.assertTrue(g.event)            # (left in the talk for the tester to decide)
+
+    def test_a_reply_with_no_choices_is_not_done(self):
+        r = ph.talk(FakeTalk([("box", "Saria", "Hi!")]), reply="Yes")
+        self.assertFalse(r["done"])
+        self.assertIn("no choices showed", r["result"])
+
+    def test_no_prompt_presses_nothing(self):
+        g = FakeTalk(SHOP, prompt=None)
+        r = ph.talk(g)
+        self.assertFalse(r["pressed"])
+        self.assertEqual(g.presses, [])
+
+    def test_without_the_wrap_or_the_verb_one_a_and_why(self):
+        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0037"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
+            r = ph.talk(g)
+            self.assertTrue(r["pressed"])
+            self.assertEqual(g.presses, ["A"])
+            self.assertIn(why, r["result"])
+            self.assertFalse(r["done"])
+
+    def test_bounded_by_boxes_and_frames(self):
+        r = ph.talk(FakeTalk([("box", "Know-It-All", "Fact %d" % i) for i in range(40)]), max_boxes=5)
+        self.assertIn("too many boxes", r["result"])
+        self.assertLessEqual(len(r["boxes"]), 6)
+        r = ph.talk(FakeTalk([("box", "K", "Fact %d" % i) for i in range(400)]), max_boxes=1000, max_frames=200)
+        self.assertIn("timed out", r["result"])
+
+    def test_a_box_that_grows_is_one_box(self):
+        g = FakeTalk([("box", "Mido", "Hey!")])
+        orig = g._show
+
+        def typed():
+            g._set("T_Name_00", "Mido")
+            g._set("T_MessageWhiteOut_00", "He")
+            orig()
+        g._show = typed
+        r = ph.talk(g)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Hey!"])
+
+    def test_the_mcp_tools_take_reply_and_since(self):
+        names = {t["name"]: t for t in mcp_playtest.PLAYER_TOOLS}
+        self.assertIn("reply", names["talk"]["inputSchema"]["properties"])
+        self.assertIn("since", names["get_text"]["inputSchema"]["properties"])
 
 
 if __name__ == "__main__":

@@ -261,9 +261,25 @@ HELPER_TOOLS = [
      "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"],
                      "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
-    {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
-     "nothing is pressed and it says so. Returns the prompt and event after (12 frames pass when it presses).",
-     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "talk", "description": "Talk to whoever the A prompt names (or, with `id` and `name` from get_world, walk to "
+     "that actor and face it first): press A, read each text box the game shows, press A to the end, and when reply "
+     "choices show pick the one whose text is `reply` (Down to it, then A; with no `reply` the cursor's own). With no "
+     "prompt nothing is pressed and it says so. Returns `boxes` [{speaker, text}], `choices`, `picked`, `done` (the "
+     "talk ended) or `result` saying why it stopped (reply not offered, too many boxes, timed out, no text: an exe "
+     "without the text wrap presses A once). At most `max_boxes` boxes (20) and 1200 frames. Which panes hold the "
+     "choices and where the cursor starts are not yet confirmed in a game. With an `id`, the walk is go_to_actor's (it "
+     "stops with `gone` for another actor of that name). It acts on this game only: step the other game yourself.",
+     "inputSchema": {"type": "object",
+                     "properties": dict(ACTOR_ARGS, reply={"type": "string", "maxLength": 200},
+                                        max_boxes={"type": "integer", "minimum": 1, "maximum": 60})}},
+    {"name": "get_text", "description": "The texts the game set in its text panes since `since` (the `last` of an "
+     "earlier get_text; 0: the last 256 kept), oldest first: {hooked, last, lost, texts: [{seq, frame, layout, pane, "
+     "text, length, cut, markup}]}. `layout` keeps one layout (MessageInGame_00 is the message window: "
+     "T_MessageWhiteOut_00 the box, T_Name_00 the speaker). Bytes that are not plain text (the game's markup) show as "
+     "JSON \\u escapes and set `markup`. Read only; no frame runs.",
+     "inputSchema": {"type": "object",
+                     "properties": {"since": {"type": "integer", "minimum": 0},
+                                    "layout": {"type": "string", "maxLength": 64}}}},
     {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
      "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "interact", "description": "go_to_actor to within 1 m (`near_m`), face it, then as talk: press A only when "
@@ -704,7 +720,22 @@ class Game:
                              int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "use_item":
             return ph.use_item(c, _word(args, "item"), _button(args))
-        if name in ("talk", "open"):
+        if name == "talk":
+            reply = args.get("reply")
+            if reply is not None and (not isinstance(reply, str) or not reply.strip() or len(reply) > 200):
+                raise ValueError("reply: the text of the choice to pick (1 to 200 characters)")
+            ident = _ident(args)
+            return ph.talk(c, ident, _word(args, "name") if ident is not None else None, reply,
+                           int(_bounded(args, "max_boxes", ph.TALK_BOXES, 1, 60)))
+        if name == "get_text":
+            since = args.get("since", 0)
+            if isinstance(since, bool) or not isinstance(since, int) or since < 0:
+                raise ValueError("since: the `last` of an earlier get_text (a whole number, 0 or more)")
+            layout = args.get("layout")
+            if layout is not None and (not isinstance(layout, str) or not re.match(r"^[A-Za-z0-9_]{1,64}$", layout)):
+                raise ValueError("layout: part of a layout's name (letters, digits and _)")
+            return c.text(since, layout)
+        if name == "open":
             return ph.interact(c, name)
         if name == "interact":
             return ph.interact_with(c, _need_id(args), _word(args, "name"),
@@ -741,8 +772,8 @@ CALLS_FILE = "calls.jsonl"
 
 
 # Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
-NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
-                            "log", "check_logs", "session_status"))
+NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "get_text", "checkpoint", "desync_check",
+                            "pause", "resume", "log", "check_logs", "session_status"))
 BOTH_TOOLS = frozenset(("get_state", "step", "setup", "preset", "save_point", "load_point"))   # with no `player`: both games
 ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
 IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "

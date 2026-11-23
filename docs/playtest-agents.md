@@ -47,6 +47,9 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   `warp`, `step_until "event == false"` instead of a `step`, `get_state`, `step` loop.
 - Act with the helpers: `attack`, `face`, `talk`, `open`, `use_item`, `kill`/`hit` (the **name** from `get_world`, and
   the `id` when there are several).
+- Talk with `talk` (with `reply` to pick a choice by its text): it reads every box and presses A to the end, and says
+  why when it stops early. `get_text` reads the texts the game set since a `last`. Both need a game built with patch
+  0037 (`hooked` true); without it `talk` presses A once and says so ([playtest.md](playtest.md), "Text boxes").
 - Let the other game run (`step 30`) after an action that should sync: a held game receives nothing.
 - Stuck? Try the data first ([tools/playtest/data](../tools/playtest/data/README.md): known stuck spots and how to
   get round them). If a step fails twice the same way, stop, write down what you saw and go to the next goal. Do not
