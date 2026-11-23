@@ -1746,8 +1746,11 @@ function ConvertTo-KitArgLine([string[]]$ArgList) {
 # hangs (Character Select's tool on a damaged game dump: its workers die at start and are started again for good) can
 # no longer hold the start.
 function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSeconds, [int]$MaxSeconds, [string]$WorkDir = '') {
-    $r = @{ Code = -1; Out = @(); Stopped = '' }
+    # (Out: both streams, in the order they were read; Std / Err: stdout / stderr alone. Two pipes have no common order, so
+    # a caller that needs 'the last line' takes it from Std or Err, never from Out's tail)
+    $r = @{ Code = -1; Out = @(); Std = @(); Err = @(); Stopped = '' }
     $lines = New-Object System.Collections.Generic.List[string]
+    $byStream = @((New-Object System.Collections.Generic.List[string]), (New-Object System.Collections.Generic.List[string]))
     try {
         $si = New-Object System.Diagnostics.ProcessStartInfo
         $si.FileName = $Exe
@@ -1769,7 +1772,7 @@ function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSecon
                 while ($tasks[$i] -and $tasks[$i].IsCompleted) {
                     $line = $tasks[$i].Result
                     if ($null -eq $line) { $tasks[$i] = $null; break }
-                    $lines.Add($line); $quietSince = Get-Date
+                    $lines.Add($line); $byStream[$i].Add($line); $quietSince = Get-Date
                     $tasks[$i] = $readers[$i].ReadLineAsync()
                 }
             }
@@ -1787,9 +1790,11 @@ function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSecon
         }
         if (-not $r.Stopped) { $p.WaitForExit(); $r.Code = $p.ExitCode }
     } catch {
-        $lines.Add("$($_.Exception.Message)"); $r.Code = -1
+        $lines.Add("$($_.Exception.Message)"); $byStream[1].Add("$($_.Exception.Message)"); $r.Code = -1
     }
     $r.Out = $lines.ToArray()
+    $r.Std = $byStream[0].ToArray()
+    $r.Err = $byStream[1].ToArray()
     return $r
 }
 
@@ -1828,7 +1833,18 @@ function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]
         return "making its files from your game was stopped ($($run.Stopped)): its tool stopped answering. The game files it reads may be damaged (dump the game again); nothing of it was put in"
     }
     if ($code -ne 0) {
-        $last = @($out | Where-Object { "$_".Trim() }) | Select-Object -Last 1
+        # (the reason: stderr's last line that is not a Python warning (an exception's or sys.exit's message comes last there),
+        # else stdout's last line. Not the tail of both streams together: stdout and stderr are two pipes with no common
+        # order, so a warning printed first on stderr could be read after stdout's last line and shown as the reason)
+        $errReal = New-Object System.Collections.Generic.List[string]; $inWarn = $false
+        foreach ($l in $run.Err) {
+            if ("$l" -match ':\d+: \w*Warning: ') { $inWarn = $true; continue }
+            if ($inWarn -and "$l" -match '^\s') { continue }      # (the warning's source line, indented)
+            $inWarn = $false
+            if ("$l".Trim()) { $errReal.Add("$l") }
+        }
+        $stdLast = @($run.Std | Where-Object { "$_".Trim() }) | Select-Object -Last 1
+        $last = if ($errReal.Count) { $errReal[$errReal.Count - 1] } elseif ($stdLast) { $stdLast } else { @($out | Where-Object { "$_".Trim() }) | Select-Object -Last 1 }
         return "making its files from your game failed ($last). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file); nothing of it was put in"
     }
     return ''

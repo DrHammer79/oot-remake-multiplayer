@@ -404,7 +404,9 @@ sys.stderr.write("player.py:11: SyntaxWarning: invalid escape sequence\n")
 if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
     sys.exit("not the game's RomFS folder")
 if os.environ.get("FAKE_TOOL_FAIL"):
-    print("2287 files could not be made; the mod is not complete.")
+    print("2287 files could not be made; the mod is not complete.", flush=True)
+    sys.stderr.write("lib/astc.py:40: DeprecationWarning: old call\n  x = y\n")   # (a warning AFTER the last stdout line: never the reason)
+    sys.stderr.flush(); import time; time.sleep(0.5)
     sys.exit(1)
 if os.environ.get("FAKE_TOOL_HANG"):
     import subprocess, time

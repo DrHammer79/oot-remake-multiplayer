@@ -388,7 +388,8 @@ charsel_tool_make() {
         return 1
     fi
     if ((rc != 0)); then
-        cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
+        # (the reason: its last line that is not a Python warning ('file:N: SomeWarning: ...' and its indented source line))
+        cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | awk '/:[0-9]+: [A-Za-z]*Warning: /{w=1;next} w&&/^[[:space:]]/{next} {w=0} /[^[:space:]]/' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
         return 1
     fi
     return 0
