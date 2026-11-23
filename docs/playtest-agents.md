@@ -45,6 +45,10 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   script that warps ([playtest.md](playtest.md), "Rules for a tester").
 - Move with `walk_to x z` (short legs, a clear line: it does no pathfinding), `go_to_actor id name`, `press`. After a
   `warp`, `step_until "event == false"` instead of a `step`, `get_state`, `step` loop.
+- Climb, push and jump with `climb` (ladder or vines, to a height), `push` (a block, a distance) and `jump` (run off
+  an edge toward a point). Fire with `shoot item` at an `id` or a point: `hit`, `miss` or `not fired` comes from the
+  target's life and the ammo, and the aim's tilt is not readable (`assist` steers the shot for you). Each says why it
+  stopped (`stuck`, `not climbing`, `slipped`, `respawned` ...).
 - Act with the helpers: `attack`, `face`, `talk`, `open`, `use_item`, `kill`/`hit` (the **name** from `get_world`, and
   the `id` when there are several).
 - Fight with `fight id name`: it walks up, locks on (`ZL`), slashes (`Y`) and guards (`ZL` alone) until the enemy's
@@ -60,9 +64,12 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
 ## 3. Read state
 
 - `get_state`: scene, Link's place `[x, y, z]` in metres, facing (0 = +z, 90 = +x), life, event, loading, the A
-  prompt. Pass the last `state_id` as `since` and only what changed comes back.
+  prompt, `room` (a dungeon room, guessed from the puppet pack's rooms table) and `body` (child or adult, from our Link
+  actor: trust it over `age` right after an area change). Pass the last `state_id` as `since` and only what changed
+  comes back.
 - `get_world [kind] [within_m]`: the actors near Link (enemies, chests, doors, switches), with an `id` you pass to the
-  helpers. An empty list with a `why` is not "nothing here".
+  helpers, solo too (`solo` true: there `kill`/`hit` take the name only). An empty list with a `why` is not "nothing
+  here".
 - `check_logs`: the oracle for "did anything go wrong": flagged `coop:` lines, **masked**. A clean verdict is not proof.
 - `session_status`: is the run still sound (bridge connected, session not ended, both games alive).
 - Pos and facing are the game's last running snapshot: after steps on a held game they can be old
