@@ -544,7 +544,7 @@ void MapProbe(void* ctx) {
     for (const auto& h : CoopNativeTags::LayoutsHeld(game, map, 0x3000, "MapIcon")) {
         held += fmt::format(" +{:#x}={:#x} {}", h.offset, h.layout, h.name);
     }
-    LOG_INFO(Core, "coop: map probe: map screen {:#x}, MapIcon layouts:{}", map, held.empty() ? " none" : held);
+    LOG_INFO(Core, "coop: map icons probe: map screen {:#x}, MapIcon layouts:{}", map, held.empty() ? " none" : held);
     const std::uint64_t balloons = CoopNativeTags::ScreenByVtable(game, CoopNativeTags::addr::kBalloonVtable);
     std::string parts;
     for (std::size_t i = 0; i < CoopNativeTags::addr::kParts && balloons != 0; ++i) {
@@ -562,7 +562,7 @@ void MapProbe(void* ctx) {
         }
         parts += fmt::format(" {}:{:.0f},{:.0f} a{:.2f}", i, xy[0], xy[1], alpha);
     }
-    LOG_INFO(Core, "coop: map probe: balloon screen {:#x} parts{} (ours shown: {})", balloons, parts, g_balloons.shown());
+    LOG_INFO(Core, "coop: map icons probe: balloon screen {:#x} parts{} (ours shown: {})", balloons, parts, g_balloons.shown());
 }
 
 void NativeTags(void* ctx) {
