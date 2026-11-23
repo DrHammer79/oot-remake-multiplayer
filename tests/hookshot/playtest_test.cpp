@@ -50,7 +50,7 @@ std::string ParseError(std::string_view line) {
 
 }  // namespace
 
-TEST_CASE("playtest: the port and idle switches, off unless a real port is given") {
+TEST_CASE("playtest: the port and idle switches: off unless a real port is given") {
     CHECK_FALSE(PortFrom(""));
     CHECK_FALSE(PortFrom("0"));
     CHECK_FALSE(PortFrom("80"));
