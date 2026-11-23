@@ -715,9 +715,10 @@ class FlagWatcher {
   // Whether every key of the unit holding `key` is 0 in `value_of`.
   bool reward_unit_empty(const RewardUnit& u, const std::function<std::uint32_t(FlagKey)>& value_of) const;
   // Another player's write of `entry` is about to land: a source or a unit got.
-  void note_reward_received(FlagStore& store, const FlagEntry& entry);
+  void note_reward_received(FlagStore& store, const protocol::FlagEntry& entry);
   // Our own change `before` -> `now` of `key`: true when it was put back (the reward got twice).
-  bool reward_put_back(FlagStore& store, FlagKey key, const FlagEntry& before, const FlagEntry& now);
+  bool reward_put_back(FlagStore& store, FlagKey key, const protocol::FlagEntry& before,
+                       const protocol::FlagEntry& now);
   std::int32_t doubled_ = 0;                  // expect_doubled_gain: gains still to drop
   std::uint64_t doubled_until_ = 0;           // the frame they lapse
   void settle_guards(FlagStore& store, Table& changes);
