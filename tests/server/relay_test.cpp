@@ -461,6 +461,27 @@ TEST_CASE("relay: host key, per-address limit and bye") {
   CHECK(relay.sessions() == 1);
 }
 
+TEST_CASE("relay: --relay-max-per-address 9 lets 9 hosts in from one address, the default refuses the 3rd (row 264)") {
+  for (const bool raised : {false, true}) {
+    RelayConfig config;
+    if (raised) allow_sessions_per_address(config, 9);
+    Relay relay(config);
+    std::size_t in = 0;
+    for (std::uint64_t i = 1; i <= 10; ++i) {
+      auto out = relay.received(Endpoint{kHost.host, static_cast<std::uint16_t>(i)},
+                                encode(register_message(i, "")), 0);
+      REQUIRE(out.size() == 1);
+      if (decoded(out[0]).kind == Kind::kRegistered) {
+        ++in;
+      } else {
+        CHECK(static_cast<Refusal>(decoded(out[0]).status) == Refusal::kTooMany);
+      }
+    }
+    CHECK(in == (raised ? 9u : 2u));
+    CHECK(relay.sessions() == in);
+  }
+}
+
 TEST_CASE("relay: link addresses") {
   std::string host;
   std::uint16_t port = 0;
