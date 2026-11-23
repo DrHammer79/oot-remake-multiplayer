@@ -148,6 +148,8 @@ struct SessionConfig {
   // the rate was dropped: ENet had acknowledged it, so its sender never sent it again, and a flag, a kill, a break
   // or a hand-over answer was lost for good (report 138's host: 137 in one 4-player session).
   std::size_t reliable_queue_max = 4096;
+  // And at most this many bytes of them (a message may be up to 64 KiB): past it, dropped and counted the same way.
+  std::size_t reliable_queue_bytes_max = 1u << 20;
   std::uint32_t unreliable_per_second = 240;
   // Report 138 (4): after the host's save load (FLAG_RESET) a guest's FLAG_SET still in flight, sent before that
   // guest's game had the reset, put its old values back (a guest's MaxLife 16 over the save's 12, a boss beaten
@@ -678,9 +680,12 @@ class Session {
     struct Deferred {
       std::uint8_t channel = 0;
       protocol::Message message;
-      std::size_t bytes = 0;
+      std::size_t bytes = 0;         // as the rate counts it
+      std::size_t raw_bytes = 0;     // as it came (reliable_queue_bytes_max)
+      std::uint64_t received_us = 0;  // when it came (on_flag_set's reset fence)
     };
     std::deque<Deferred> deferred;
+    std::size_t deferred_bytes = 0;  // the raw_bytes of deferred, all told
     double unreliable_budget = 0;
     double voice_budget = 0;
     // Proximity voice: the speakers this player hears now, by number, and
@@ -902,14 +907,15 @@ class Session {
   // Whether a and b are one game's (the same connection, or its local players).
   bool same_game(ConnectionId a, ConnectionId b) const;
   // After the rate check (on_player_message, or a deferred one from tick).
+  // received_us: when it reached us (now_us, or a deferred one's arrival).
   void dispatch_player_message(ConnectionId id, Connection& c, std::uint8_t channel, protocol::Message& message,
-                               std::uint64_t now_us);
+                               std::uint64_t now_us, std::uint64_t received_us);
   // Handles a player's deferred reliable messages while its budget allows (tick).
   void run_deferred(std::uint64_t now_us);
   void on_player_message(ConnectionId id, Connection& c, std::uint8_t channel,
                          protocol::Message& message, std::size_t bytes, std::uint64_t now_us);
   void on_join_partner(ConnectionId id, Connection& c, protocol::JoinPartner& j);
-  void on_flag_set(Connection& c, protocol::Message& message, std::uint64_t now_us);
+  void on_flag_set(ConnectionId id, Connection& c, protocol::Message& message, std::uint64_t received_us);
   void on_flag_state(ConnectionId id, Connection& c, protocol::Message& message, std::uint64_t now_us);
   void on_flag_snapshot(ConnectionId id, Connection& c, const protocol::FlagSnapshot& part);
   // The host loaded a save (its FLAG_RESET; docs/flags.md, "Saves"). Every

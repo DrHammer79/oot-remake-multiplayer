@@ -648,6 +648,7 @@ std::string Session::client_label(const std::string& build_id) {
 
 void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t channel,
                                 Message& message, std::size_t bytes, std::uint64_t now_us) {
+  const std::size_t raw_bytes = bytes;  // its size as it came (the rate's bytes may leave some out)
   if (std::holds_alternative<Pong>(message)) return;  // our PING answered
   if (std::holds_alternative<FlagSnapshot>(message)) bytes = 0;  // see bytes_per_second
   // The host's save: a few hundred KB at once, paced by the host's game (one
@@ -667,12 +668,18 @@ void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t cha
   const bool waits = channel <= kChannelOwnership && !std::holds_alternative<Ping>(message) && !host_save &&
                      !seat_envelope;
   const auto defer = [&] {
-    if (c.deferred.size() >= config_.reliable_queue_max) {
+    // Bounded by count and by bytes: a message may be up to 64 KiB, so 4096 of them alone would let one player
+    // make the server hold 256 MiB.
+    if (c.deferred.size() >= config_.reliable_queue_max ||
+        c.deferred_bytes + raw_bytes > config_.reliable_queue_bytes_max) {
       ++stats_.rate_limited;
       return;
     }
     ++stats_.rate_deferred;
-    c.deferred.push_back({channel, std::move(message), bytes});
+    c.deferred_bytes += raw_bytes;
+    // Its arrival time goes with it: a FLAG_SET that came before the host's save load is the guest's old value
+    // even when it is handled after it (on_flag_set's reset fence).
+    c.deferred.push_back({channel, std::move(message), bytes, raw_bytes, now_us});
   };
   if (waits && !c.deferred.empty()) {
     defer();
@@ -686,7 +693,7 @@ void Session::on_player_message(ConnectionId id, Connection& c, std::uint8_t cha
     }
     return;
   }
-  dispatch_player_message(id, c, channel, message, now_us);
+  dispatch_player_message(id, c, channel, message, now_us, now_us);
 }
 
 void Session::run_deferred(std::uint64_t now_us) {
@@ -702,19 +709,21 @@ void Session::run_deferred(std::uint64_t now_us) {
       Connection& c = it->second;
       if (c.state != State::joined) {
         c.deferred.clear();
+        c.deferred_bytes = 0;
         break;
       }
       Connection::Deferred& d = c.deferred.front();
       if (!within_rate(c, d.channel, d.bytes, now_us)) break;
       Connection::Deferred next = std::move(d);
       c.deferred.pop_front();
-      dispatch_player_message(id, c, next.channel, next.message, now_us);
+      c.deferred_bytes -= std::min(c.deferred_bytes, next.raw_bytes);
+      dispatch_player_message(id, c, next.channel, next.message, now_us, next.received_us);
     }
   }
 }
 
 void Session::dispatch_player_message(ConnectionId id, Connection& c, std::uint8_t channel, Message& message,
-                                      std::uint64_t now_us) {
+                                      std::uint64_t now_us, std::uint64_t received_us) {
   if (const auto* ping = std::get_if<Ping>(&message)) {
     send(id, kChannelSession, Pong{ping->sender_time_us, now_us});
     return;
@@ -737,7 +746,7 @@ void Session::dispatch_player_message(ConnectionId id, Connection& c, std::uint8
     return;
   }
   if (std::holds_alternative<FlagSet>(message)) {
-    on_flag_set(c, message, now_us);
+    on_flag_set(id, c, message, received_us);
     return;
   }
   if (std::holds_alternative<FlagState>(message) || std::holds_alternative<FlagReset>(message)) {
@@ -1303,10 +1312,14 @@ void Session::on_join_partner(ConnectionId id, Connection& c, JoinPartner& j) {
 
 // To the host only, the host itself included: a host's own FLAG_SET comes
 // back to it, so its build answers every FLAG_SET the same way.
-void Session::on_flag_set(Connection& c, Message& message, std::uint64_t now_us) {
+void Session::on_flag_set(ConnectionId id, Connection& c, Message& message, std::uint64_t received_us) {
   // Report 138 (4): just after the host's save load, a guest's change to a flag the reset set was most likely sent
-  // before that guest had the reset: its old value. Refused, so the save's value stands.
-  if (now_us < reset_fence_until_ && !reset_fence_.empty()) {
+  // before that guest had the reset: its old value. Refused, so the save's value stands. Judged by when it reached
+  // us (received_us), not when it is handled: one that waited over its sender's rate (run_deferred) still came
+  // before. Never the host's own game (its seats included): its changes come after its own load, so they are the
+  // save's game going on.
+  const bool from_host_game = host_ && same_game(id, *host_);
+  if (!from_host_game && received_us < reset_fence_until_ && !reset_fence_.empty()) {
     auto& entries = std::get<FlagSet>(message).flags;
     const std::size_t before = entries.size();
     std::erase_if(entries, [&](const FlagEntry& e) {

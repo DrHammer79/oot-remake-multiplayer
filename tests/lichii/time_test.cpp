@@ -370,6 +370,51 @@ TEST_CASE("time: a host back from its pause makes up the time it stood, a guest 
     CHECK(guest.CatchUps() == 0);
 }
 
+TEST_CASE("time: a host's pause makes up only the time it stopped a running clock (row 164 follow-up)") {
+    std::vector<proto::Message> send;
+    // Indoors: the clock stood before the pause too, so the pause stopped nothing.
+    {
+        Sync host;
+        std::uint64_t t = 0;
+        for (int i = 0; i < 20; ++i, t += 100 * kMs) host.Tick(36'000, true, t, send);
+        host.SetPaused(true, t);
+        for (int i = 0; i < 100; ++i, t += 100 * kMs) host.Tick(36'000, true, t, send);
+        host.SetPaused(false, t);
+        host.Tick(36'000, true, t, send);
+        CHECK_FALSE(host.TakeNudge());
+        CHECK(host.CatchUps() == 0);
+    }
+    // A menu that leaves the clock running: nothing stood, nothing to make up.
+    {
+        Sync host;
+        std::uint32_t clock = 36'000;
+        std::uint64_t t = 0;
+        for (int i = 0; i < 20; ++i, t += 100 * kMs, clock += 12) host.Tick(clock, true, t, send);
+        host.SetPaused(true, t);
+        for (int i = 0; i < 100; ++i, t += 100 * kMs, clock += 12) host.Tick(clock, true, t, send);
+        host.SetPaused(false, t);
+        host.Tick(clock, true, t, send);
+        CHECK_FALSE(host.TakeNudge());
+        CHECK(host.CatchUps() == 0);
+    }
+    // Half the pause running, half standing: only the standing half (about 5 s x 120).
+    {
+        Sync host;
+        std::uint32_t clock = 36'000;
+        std::uint64_t t = 0;
+        for (int i = 0; i < 20; ++i, t += 100 * kMs, clock += 12) host.Tick(clock, true, t, send);
+        host.SetPaused(true, t);
+        for (int i = 0; i < 50; ++i, t += 100 * kMs, clock += 12) host.Tick(clock, true, t, send);
+        for (int i = 0; i < 50; ++i, t += 100 * kMs) host.Tick(clock, true, t, send);
+        host.SetPaused(false, t);
+        host.Tick(clock, true, t, send);
+        const auto n = host.TakeNudge();
+        REQUIRE(n.has_value());
+        CHECK(*n >= clock + 550);
+        CHECK(*n <= clock + 650);
+    }
+}
+
 TEST_CASE("time: a guest's save load is not sent as a jump, it takes the host's clock again (issue 159)") {
     Sync guest;
     std::vector<proto::Message> send;

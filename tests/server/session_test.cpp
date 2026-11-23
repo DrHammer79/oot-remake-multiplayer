@@ -789,6 +789,30 @@ TEST_CASE("row 164 follow-up: reliable messages over the rate wait in order and 
   for (int i = 0; i < 50; ++i) CHECK(texts[static_cast<std::size_t>(i)] == std::to_string(120 + i));
 }
 
+TEST_CASE("row 164 follow-up: the reliable messages that wait are bounded in bytes too (reliable_queue_bytes_max)") {
+  SessionConfig config;
+  config.reliable_queue_bytes_max = 10'000;
+  Harness h(config);
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.clear();
+  for (int i = 0; i < 120; ++i) h.receive(1, Chat{0, "x"}, kChannelSession);  // the burst
+  const Chat big{0, std::string(kMaxChatChars, 'c')};
+  const std::size_t size = bytes_of(big).size();
+  const std::size_t fit = config.reliable_queue_bytes_max / size;
+  REQUIRE(fit >= 1);
+  for (std::size_t i = 0; i < fit + 3; ++i) h.receive(1, big, kChannelSession);
+  CHECK(h.session.stats().rate_deferred == fit);
+  CHECK(h.session.stats().rate_limited == 3);
+  // Once the waiting ones went, the room is free again.
+  for (int i = 0; i < 20; ++i) {
+    h.now += 100'000;
+    h.session.tick(h.now);
+  }
+  h.receive(1, big, kChannelSession);
+  CHECK(h.session.stats().rate_limited == 3);
+}
+
 TEST_CASE("a player flooding samples is held to the unreliable rate") {
   Harness h;
   h.join(1, "Link");
@@ -1234,6 +1258,36 @@ TEST_CASE("report 138 (4): a guest's old value in flight just after the host's s
   relayed = messages_of<FlagSet>(h, 1);
   REQUIRE(relayed.size() == 1);
   CHECK(relayed[0].flags == std::vector<FlagEntry>{flag(5, 16)});
+}
+
+TEST_CASE("report 138 (4): the host's own changes are never fenced, a guest's that waited over its rate are") {
+  Harness h;
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.receive(1, FlagState{0, {flag(5, 16), flag(6, 1)}}, kChannelProgress);
+  h.clear();
+  // Player 2 is over its rate: its FLAG_SET (its old values) waits behind the burst, then the host loads its save.
+  for (int i = 0; i < 120; ++i) h.receive(2, Chat{0, "x"}, kChannelSession);
+  h.receive(2, FlagSet{0, {flag(5, 16), flag(6, 1), flag(7, 1)}}, kChannelProgress);
+  CHECK(h.session.stats().rate_deferred == 1);
+  h.now += 100'000;
+  h.receive(1, FlagReset{0, {flag(5, 12), flag(6, 0)}}, kChannelProgress);
+  h.clear();
+  // Handled after the reset, but it came before it: its old values are refused, the rest goes on.
+  h.now += 100'000;
+  h.session.tick(h.now);
+  h.collect();
+  auto relayed = messages_of<FlagSet>(h, 1);
+  REQUIRE(relayed.size() == 1);
+  CHECK(relayed[0].flags == std::vector<FlagEntry>{flag(7, 1)});
+  CHECK(h.session.stats().reset_fenced == 2);
+  // The host's own game goes on from its load at once: its change to a flag the reset set is its game's, kept.
+  h.clear();
+  h.receive(1, FlagSet{0, {flag(6, 1)}}, kChannelProgress);
+  relayed = messages_of<FlagSet>(h, 1);
+  REQUIRE(relayed.size() == 1);
+  CHECK(relayed[0].flags == std::vector<FlagEntry>{flag(6, 1)});
+  CHECK(h.session.stats().reset_fenced == 2);
 }
 
 TEST_CASE("a joiner gets the table before any flag state sent after it joined") {
