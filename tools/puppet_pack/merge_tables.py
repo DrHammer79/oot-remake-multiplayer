@@ -852,6 +852,28 @@ def english_stand_in(codec, mod_file, game_en_file, game_file):
     return sarc.write(out, data_align=16)
 
 
+def original_of(root, mod_path, rel):
+    """The file to READ for a mod's archive `rel` (romfs path with '/'): the mod's own copy, kept in `_coop-archives`
+    when this tool has rewritten the file in the mod (the stamp's `out` line names the file there now), else the file
+    itself. A mod's English archive that stands in for another language (stand_in) is such a file when the mod wins
+    that English archive too: read as written, a pass would see the English merge of this pass or of the one before
+    (CNzh and EUde sort before EUen), and the next start would merge them again with other bytes."""
+    path = os.path.join(mod_path, "romfs", *rel.split("/"))
+    kept = os.path.join(mod_path, MEMBERS_KEEP, *rel.split("/"))
+    stamp = read_text(kept + ".txt")
+    if (stamp is not None and os.path.isfile(kept) and os.path.isfile(path)
+            and stamp.split("\n")[1:2] == ["out " + file_line(root, path)]):
+        return kept
+    return path
+
+
+def in_line(root, path, source):
+    """`file_line` of `path` as the file it was read from (`source`): its name, but the length and hash of the bytes
+    read, so a stamp names the same input before and after this tool rewrote `path`."""
+    h, n = fnv64(source)
+    return f"{os.path.relpath(path, root).replace(os.sep, '/')} {n} {h}"
+
+
 def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say, others=()):
     """Merges one archive: the pack's members (pack_path, or None) and those of the other mods under the winner
     (others [(name, path)] in load order). Returns the size the written file needs, or 0."""
@@ -861,6 +883,7 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     for _ in rel.split("/"):
         game_romfs = os.path.dirname(game_romfs)
     more, english = [], {}   # (english: a mod's English archive standing in for this language -> the game's English)
+    source = {}   # (the file each stand-in is read from: original_of; its English may be a file this tool wrote)
     for _, p in others:
         t = os.path.join(p, "romfs", *rel.split("/"))
         if not os.path.isfile(t):
@@ -869,9 +892,10 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
                 raise MergeError(f"{t} is gone")
             t = os.path.join(p, "romfs", *en.split("/"))
             english[t] = os.path.join(game_romfs, *en.split("/"))
+            source[t] = original_of(root, p, en)
         more.append(t)
-    ins = "".join(f"in {file_line(root, t)}" + (f" for {ui_pack.language_of(rel)}" if t in english else "") + "\n"
-                  for t in ([pack_file] if pack_file else []) + more)
+    ins = "".join(f"in {in_line(root, t, source.get(t, t))}" + (f" for {ui_pack.language_of(rel)}" if t in english else "")
+                  + "\n" for t in ([pack_file] if pack_file else []) + more)
     gave_english = [n for (n, _), t in zip(others, more) if t in english]
     whose = " and ".join((["the puppet pack's"] if pack_path else []) + [f"{n}'s" for n, _ in others])
     keep = os.path.join(win_path, MEMBERS_KEEP)
@@ -900,7 +924,7 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
     for mod_path, file in list(reversed([(p, t) for (_, p), t in zip(others, more)])) + (
             [(pack_path, pack_file)] if pack_file else []):
         if file in english:   # (its size table sized its English copy, not this one: no length of it)
-            their_data = english_stand_in(codec, file, english[file], game)
+            their_data = english_stand_in(codec, source[file], english[file], game)
         else:
             with open(file, "rb") as f:
                 their_data = codec.unpack(f.read())

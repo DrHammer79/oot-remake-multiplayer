@@ -1414,6 +1414,51 @@ class MessageLabelsTest(unittest.TestCase):
         mt.undo(self.mods, say=self.lines.append)
         self.assertEqual(read(os.path.join(self.pack, "romfs", *self.FR.split("/"))), fr_own)
 
+    def tree(self, top):
+        """Every file under top: {path under top: bytes}."""
+        out = {}
+        for dirpath, _, names in os.walk(top):
+            for n in names:
+                p = os.path.join(dirpath, n)
+                out[os.path.relpath(p, top).replace(os.sep, "/")] = read(p)
+        return out
+
+    def test_every_start_gives_the_same_bytes_whatever_the_order_of_the_languages(self):
+        # His English archive (USen) stands in for the language he has none of (EUfr) and is itself merged with the
+        # pack's members. The pack lists EUfr first, so a pass merged EUfr from his USen before USen was merged:
+        # the next start read the merged USen, and merged EUfr again with other bytes (CNzh and EUde: -352 B).
+        self.put(os.path.join(self.pack, "coop_puppet.json"),
+                 ('{"pause_menu": ["%s", "%s"]}' % (self.FR, self.US)).encode())
+        before = self.tree(os.path.join(self.mods, self.MOD))
+        fresh = os.path.join(self.dir, "fresh_mods")
+        shutil.copytree(self.mods, fresh)
+        shutil.copytree(self.mods, os.path.join(self.dir, "fresh_other_order"))
+        self.assertEqual(self.merge()[0], 0)
+        first = self.tree(self.mods)
+        self.assertNotEqual(first, self.tree(fresh))   # (the merge wrote something)
+        self.merge()
+        self.assertTrue(all("already" in l for l in self.lines if "Menus:" in l), self.lines)
+        self.assertEqual(self.tree(self.mods), first)   # the second start: not one byte moved
+        self.merge()
+        self.assertEqual(self.tree(self.mods), first)
+        self.assertEqual(mt.merge_members(fresh, self.romfs, lambda line: None)[0], 0)
+        self.assertEqual(self.tree(fresh), first)       # a fresh run gives the settled bytes at once
+        # The other order (USen first) must give the same bytes: the stand-in is his own, never what a pass wrote.
+        other = os.path.join(self.dir, "fresh_other_order")
+        self.put(os.path.join(other, *PACK.split("/"), "coop_puppet.json"),
+                 ('{"pause_menu": ["%s", "%s"]}' % (self.US, self.FR)).encode())
+        self.assertEqual(mt.merge_members(other, self.romfs, lambda line: None)[0], 0)
+        got, want = self.tree(other), dict(first)
+        for tree in (got, want):
+            tree.pop("/".join(PACK.split("/") + ["coop_puppet.json"]), None)
+        self.assertEqual(got, want)
+        self.assertEqual(self.served(os.path.join(self.mods, self.MOD), self.US)[self.OV]["Coop_Minus_00"], "Co-op")
+        # The kept original is what stands in, also when his English was merged at an earlier start.
+        fr = self.served(self.pack, self.FR)
+        self.assertEqual((fr[self.OV]["Characters"], fr[self.OV]["Pa_Category_00"]), ("Characters", "Objets"))
+        mt.undo(self.mods, say=self.lines.append)
+        self.assertEqual(self.tree(os.path.join(self.mods, self.MOD)), before)   # --undo: his own files back
+
     def test_a_message_file_three_mods_change_keeps_each_ones_labels(self):
         for rel in (self.US, self.FR):     # a seed: every language, a label of its own in the pause menu's file
             cat, save = self.words[rel]
