@@ -3697,21 +3697,34 @@ bool WriteCharPickNow(coop::host::WritableGameMemory& memory, std::int32_t pick)
     return true;
 }
 
-// Each module frame after the pick guard: the age's pick written into the mod's value when it is not the shown one.
-void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
-                   const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
+// His page up, and its camera, slide or field swap still running (the player picks: the mod's value is his choice).
+struct CharPageState {
+    bool page_open = false;
+    bool swap_busy = false;
+};
+CharPageState CharPageNow(coop::host::GameFlags& flags) {
     static const std::uint32_t page_hash = coop::host::flag_hash("CharacterMenu_IsPageOpen");
     static const std::uint32_t camera_hash = coop::host::flag_hash("CharacterMenu_KeepUICamera");
     static const std::uint32_t swap_hash = coop::host::flag_hash("CharacterMenu_FieldSwapPending");
     static const std::uint32_t slide_hash = coop::host::flag_hash("CharacterMenu_Slide");
     static const std::uint32_t slide_out_hash = coop::host::flag_hash("CharacterMenu_SlideOut");
+    CharPageState out;
+    out.page_open = flags.get_bool(page_hash).value_or(false);
+    out.swap_busy = flags.get_bool(camera_hash).value_or(false) || flags.get_bool(swap_hash).value_or(false) ||
+                    flags.get_int(slide_hash).value_or(0) != 0 || flags.get_int(slide_out_hash).value_or(0) != 0;
+    return out;
+}
+
+// Each module frame after the pick guard: the age's pick written into the mod's value when it is not the shown one.
+void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
+                   const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
     coop::host::GameFlags flags(memory);
     CoopCharAges::Input in;
     in.pick = pick;
     in.childhood = flags.get_bool(kChildhoodHash);
-    in.page_open = flags.get_bool(page_hash).value_or(false);
-    in.swap_busy = flags.get_bool(camera_hash).value_or(false) || flags.get_bool(swap_hash).value_or(false) ||
-                   flags.get_int(slide_hash).value_or(0) != 0 || flags.get_int(slide_out_hash).value_or(0) != 0;
+    const CharPageState page = CharPageNow(flags);
+    in.page_open = page.page_open;
+    in.swap_busy = page.swap_busy;
     in.title = CoopSave::TitleUp();
     CoopCharAges::Step step;
     CoopCharAges::Stored stored;
@@ -3728,8 +3741,8 @@ void CharAgesFrame(EmulatorMemory& memory, std::optional<std::int32_t> pick,
         std::optional<CoopCharAges::LoadHold::Summary> said;
         {
             std::lock_guard lock(g_char_hold_mutex);
-            if (in.page_open || in.swap_busy || step.stored_changed) g_char_hold.Stop();
-            g_char_hold.Follow(stored, in.childhood, files);
+            if (step.stored_changed) g_char_hold.Stop();
+            g_char_hold.Follow(stored, in.childhood, files, in.page_open || in.swap_busy);
             g_char_hold.Expire(CharNowMs());
             g_char_held.store(g_char_hold.held(), std::memory_order_relaxed);
             said = g_char_hold.TakeSummary();
@@ -4078,19 +4091,21 @@ void AtSaveLoaded(coop::host::WritableGameMemory& memory) {
 }
 
 // Wrap 1, phase 1 (the game's flag applier ran): while held, a value the game put back is written in place again,
-// as long as it is still the pick wanted for Link's age now (an age change ends the hold here, on the game's thread,
-// before the frame sees it: no pass writes the other age's pick).
+// as long as it is still the pick wanted for Link's age now and the player is not picking on his page (an age change
+// or his page ends the hold here, on the game's thread, before the frame sees it: no pass writes the other age's
+// pick, nor the held pick over the one the player just picked).
 void AtFlagsApplied(coop::host::WritableGameMemory& memory) {
     if (!CoopHook::g_char_held.load(std::memory_order_relaxed)) return;
     const CoopHook::CharAgesView view = CoopHook::CharAgesViewNow();
     coop::host::GameFlags flags(memory);
     const auto childhood = flags.get_bool(CoopHook::kChildhoodHash);
     const auto live = flags.get_int_live(CoopHook::kPickHash);
+    const CoopHook::CharPageState page = CoopHook::CharPageNow(flags);
     std::optional<std::int32_t> write;
     bool first = false;
     {
         std::lock_guard lock(CoopHook::g_char_hold_mutex);
-        CoopHook::g_char_hold.Follow(view.stored, childhood, view.files);
+        CoopHook::g_char_hold.Follow(view.stored, childhood, view.files, page.page_open || page.swap_busy);
         write = CoopHook::g_char_hold.Applied(live, CoopHook::CharNowMs());
         CoopHook::g_char_held.store(CoopHook::g_char_hold.held(), std::memory_order_relaxed);
         first = write && CoopHook::g_char_hold.put_backs() == 1;   // (once per hold: each load says its first)

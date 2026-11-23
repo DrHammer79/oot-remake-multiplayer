@@ -281,10 +281,10 @@ TEST_CASE("char ages: an age change soon after a save load ends the hold, the ot
     LoadHold h;
     // An adult save (it loads at the Temple of Time): Sheik held.
     CHECK(h.Loaded(CoopCharAges::Wanted(s, false, kFiles), 0, 1000) == 9);
-    h.Follow(s, false, kFiles);          // still the adult: held
+    h.Follow(s, false, kFiles, false);          // still the adult: held
     CHECK(h.Applied(0, 1010) == 9);
     // The Master Sword put back within the hold: Link is a child now, the frame writes Saria (2).
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK_FALSE(h.held());
     CHECK_FALSE(h.Applied(2, 1020));     // Saria stays: Sheik is not written over the child's pick
     CHECK_FALSE(h.Applied(0, 1030));     // and the game's own changes are the frame's again
@@ -302,25 +302,25 @@ TEST_CASE("char ages: the hold follows the picks: age unknown keeps it, a pick s
     s.adult = 9;
     LoadHold h;
     CHECK(h.Loaded(2, 0, 0) == 2);
-    h.Follow(s, std::nullopt, kFiles);   // the age not read this pass (mid-load): kept
+    h.Follow(s, std::nullopt, kFiles, false);   // the age not read this pass (mid-load): kept
     CHECK(h.held());
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK(h.held());
     s.child = 8;                         // the settings rows: another pick for the child
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK_FALSE(h.held());
     REQUIRE(h.TakeSummary());
     CHECK(h.Loaded(8, 0, 10) == 8);
     s.on = false;                        // the feature turned off
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK_FALSE(h.held());
     s.on = true;
     s.child = 77;                        // a pick with no model here: Link (0) wanted
     CHECK(h.Loaded(CoopCharAges::Wanted(s, true, kFiles), 2, 20) == 0);
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK(h.held());
     s.child.reset();                     // no pick for the age any more: nothing wanted, not held
-    h.Follow(s, true, kFiles);
+    h.Follow(s, true, kFiles, false);
     CHECK_FALSE(h.held());
 }
 
@@ -350,4 +350,22 @@ TEST_CASE("char ages: each hold counts its own put-backs and says how it ended")
     REQUIRE(said);
     CHECK(said->end == LoadHold::End::kTime);
     CHECK(std::string(CoopCharAges::EndName(LoadHold::End::kWantChanged)) == "the age or the picks changed");
+}
+
+TEST_CASE("char ages: his page or swap ends the hold on the game's thread, the player's pick is not written over") {
+    using CoopCharAges::LoadHold;
+    Stored s;
+    s.on = true;
+    s.child = 2;
+    s.adult = 9;
+    LoadHold h;
+    CHECK(h.Loaded(2, 0, 0) == 2);
+    // His page opened and the player picked Zelda (8): the applier applied the page's write. The pass sees the page
+    // before the frame does: the hold ends, 8 is left there.
+    h.Follow(s, true, kFiles, true);
+    CHECK_FALSE(h.held());
+    CHECK_FALSE(h.Applied(8, 10));
+    const auto said = h.TakeSummary();
+    REQUIRE(said);
+    CHECK(said->end == LoadHold::End::kStopped);
 }

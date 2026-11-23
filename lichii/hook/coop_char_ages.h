@@ -167,7 +167,7 @@ private:
 
 // The pick held in place through a save load (the game's thread; the caller locks). Loaded at wrap 6 (the save is
 // in, the player not made yet), Applied after each pass of the game's flag applier, until it ends: the next load, his
-// page or swap or a pick learnt (Stop, the frame), the pick wanted for Link's age now is not the held one any more
+// page or swap (Follow, on the game's thread too) or a pick learnt (Stop, the frame), the pick wanted for Link's age now is not the held one any more
 // (Follow: the Master Sword or the Door of Time within kHoldMs of the load, a pick set on the settings rows, the
 // feature turned off), or kHoldMs. Its summary is said once, by the frame.
 class LoadHold {
@@ -198,12 +198,18 @@ public:
         until_ = now_ms + kHoldMs;
         return *live != *want ? want : std::nullopt;
     }
-    // Before each Applied and each frame: the picks and Link's age now (`childhood` nothing: not read, kept). When the
-    // value wanted now (Wanted) is not the held one, the hold ends: holding it would put the other age's pick in
-    // place while the game makes this age's player.
+    // Before each Applied and each frame: the picks, Link's age now (`childhood` nothing: not read, kept) and whether
+    // his page is up or its swap runs (`picking`). When the value wanted now (Wanted) is not the held one, the hold
+    // ends: holding it would put the other age's pick in place while the game makes this age's player. While the
+    // player picks, it ends too: the mod's value is his choice, and an applier pass must not write the held pick over
+    // it before the frame has seen the page.
     void Follow(const Stored& s, std::optional<bool> childhood,
-                const std::optional<std::map<std::uint16_t, std::uint16_t>>& files) {
+                const std::optional<std::map<std::uint16_t, std::uint16_t>>& files, bool picking) {
         if (!held_) return;
+        if (picking) {
+            Stop(End::kStopped);
+            return;
+        }
         if (!s.on) {
             Stop(End::kWantChanged);
             return;
