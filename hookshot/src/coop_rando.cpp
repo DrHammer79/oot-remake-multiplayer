@@ -996,7 +996,7 @@ std::string OotrrKey(const fs::path& ootrr) {
     if (ec) return {};
     const auto when = fs::last_write_time(ootrr, ec);
     if (ec) return {};
-    return std::to_string(size) + "-" + std::to_string(when.time_since_epoch().count());
+    return std::to_string(size) + "-" + std::to_string(static_cast<long long>(when.time_since_epoch().count()));
 }
 
 std::string ChatSafe(std::string line, std::size_t max_chars) {
