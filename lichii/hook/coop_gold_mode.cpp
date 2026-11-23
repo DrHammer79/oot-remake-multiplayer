@@ -5,6 +5,8 @@
 #include <atomic>
 #include <set>
 
+#include "coop/host/save_transfer.hpp"
+
 namespace CoopGoldMode {
 
 namespace proto = coop::protocol;
@@ -233,6 +235,18 @@ void ResetForTest() {
     g_choice.store(Mode::shared);
     g_in_force.store(Mode::shared);
     g_told.store(false);
+}
+
+std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir) {
+    namespace save = coop::host::save;
+    const auto newest = save::newest_slot(coop_dir);
+    if (!newest) return std::nullopt;
+    auto slot = save::read_slot(*newest);
+    if (!slot) return std::nullopt;
+    for (auto& f : slot->files) {
+        if (f.name == "progress.sav") return std::move(f.bytes);
+    }
+    return std::nullopt;
 }
 
 }  // namespace CoopGoldMode

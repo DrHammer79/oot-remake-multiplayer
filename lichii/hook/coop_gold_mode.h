@@ -22,6 +22,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -83,6 +84,11 @@ struct GoldKept {
 GoldKept KeepOwnGold(std::vector<std::uint8_t>& host, const std::vector<std::uint8_t>* own,
                      std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
                      std::uint32_t get_hash);
+
+// Not shared: this game's race so far, the progress.sav of the newest slot in the co-op folder `coop_dir`. Never the
+// player's own (single-player) saves: every player starts the race from 0 tokens (decision of 2026-11-23). None:
+// nothing, and KeepOwnGold starts the race from nothing.
+std::optional<std::vector<std::uint8_t>> RaceSoFar(const std::filesystem::path& coop_dir);
 
 // Test only: back to a fresh start (Shared, choice Shared).
 void ResetForTest();

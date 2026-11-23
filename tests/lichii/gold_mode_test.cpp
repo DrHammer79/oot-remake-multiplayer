@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -215,4 +217,38 @@ TEST_CASE("gold mode: Not shared, a host's save with no key set or that does not
     CHECK_FALSE(bad.done);
     CHECK(bad.why.find("not a saved game") != std::string::npos);
     CHECK(junk == was);
+}
+
+TEST_CASE("gold mode: Not shared, the race starts from 0, never from the player's own save") {
+    // Decision of 2026-11-23: every player starts the race from 0 tokens. Only the co-op folder's slot is ours.
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "coop_tests_race_so_far";
+    fs::remove_all(root);
+    const fs::path own_dir = root / "own";
+    const fs::path coop_dir = root / "own_coop";
+    const auto put = [](const fs::path& slot, const std::vector<std::uint8_t>& bytes) {
+        fs::create_directories(slot);
+        std::ofstream(slot / "progress.sav", std::ios::binary)
+            .write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    };
+    // The player's own save has tokens; the co-op folder has no slot yet.
+    put(own_dir / "slot_00", MakeSave(5, 1, {kSkull[0], kSkull[0] + 2, kSkull[1]}));
+    fs::create_directories(coop_dir);
+    CHECK_FALSE(CoopGoldMode::RaceSoFar(coop_dir).has_value());
+    std::vector<std::uint8_t> host = MakeSave(3, 1, {kSkull[2], kSkull[2] + 2, kWeb});
+    const auto own = CoopGoldMode::RaceSoFar(coop_dir);
+    CHECK(CoopGoldMode::KeepOwnGold(host, own ? &*own : nullptr, kSkull, kCount, kGet).done);
+    CHECK(host == MakeSave(0, 0, {kWeb}));  // 0 tokens, count 0, no IsGet
+
+    // A race so far in the co-op folder is kept.
+    const std::vector<std::uint8_t> race = MakeSave(1, 1, {kSkull[1], kSkull[1] + 2});
+    put(coop_dir / "slot_00", race);
+    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
+    REQUIRE(so_far.has_value());
+    CHECK(*so_far == race);
+    std::vector<std::uint8_t> host2 = MakeSave(3, 1, {kSkull[2], kWeb});
+    CHECK(CoopGoldMode::KeepOwnGold(host2, &*so_far, kSkull, kCount, kGet).done);
+    CHECK(host2 == MakeSave(1, 1, {kSkull[1], kSkull[1] + 2, kWeb}));
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }

@@ -412,24 +412,13 @@ void FixSlotsLocked() {
 }
 
 // Row 63, Gold Skulltulas Not shared: the host's save keeps this game's own tokens, count and IsGet (at join and at
-// Resync from host; review of f36a8852). Ours: the newest slot of the co-op folder `dir` (the race so far), else of
-// our own save folder; none: a race from nothing.
+// Resync from host; review of f36a8852). Ours: the newest slot of the co-op folder `dir` (the race so far); none: a
+// race from 0 tokens. Never the player's own saves (CoopGoldMode::RaceSoFar).
 save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in) {
     save::SaveSlot slot = slot_in;
     if (!CoopGoldMode::NotShared()) return slot;
-    std::optional<save::SaveSlot> own;
-    for (const fs::path& from : {dir, save::own_dir_of(dir)}) {
-        if (const auto newest = save::newest_slot(from)) {
-            own = save::read_slot(*newest);
-            if (own) break;
-        }
-    }
-    const std::vector<std::uint8_t>* own_bytes = nullptr;
-    if (own) {
-        for (const auto& f : own->files) {
-            if (f.name == "progress.sav") own_bytes = &f.bytes;
-        }
-    }
+    const std::optional<std::vector<std::uint8_t>> own = CoopGoldMode::RaceSoFar(dir);
+    const std::vector<std::uint8_t>* own_bytes = own ? &*own : nullptr;
     for (auto& f : slot.files) {
         if (f.name != "progress.sav") continue;
         const CoopGoldMode::GoldKept kept =
@@ -441,7 +430,7 @@ save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in)
         } else {
             LOG_INFO(Core, "coop: save: Gold Skulltulas not shared: the host's save keeps ours ({}): {} keys and "
                            "count {} (the host's: {} keys, count {}){}",
-                     own_bytes ? "from our last save" : "none: a race from nothing", kept.own_keys, kept.own_count,
+                     own_bytes ? "from our last co-op save" : "none: the race starts from 0", kept.own_keys, kept.own_count,
                      kept.host_keys, kept.host_count,
                      kept.keys_left ? "; our taken Skulltulas could not be kept (the save has no key set)" : "");
         }
