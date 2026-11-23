@@ -917,7 +917,12 @@ class PairServer(unittest.TestCase):
     def frames(self):
         return {p: g.frame for p, g in self.games.items()}
 
-    def test_every_tool_takes_a_player_and_only_state_and_step_can_go_without(self):
+    def test_setup_without_a_player_runs_on_both_games(self):
+        r = self.pair.answer("setup", {"rupees": 7})
+        self.assertEqual(set(r["games"]), {"p1", "p2"})
+        self.assertEqual([g.flags["PlayerStatus.CurrentRupee"] for g in self.games.values()], [7, 7])
+
+    def test_every_tool_takes_a_player_and_only_the_both_tools_can_go_without(self):
         by = {t["name"]: t for t in self.pair.tools}
         self.assertEqual(list(by), [t["name"] for t in mcp_playtest.PLAYER_TOOLS])
         for name, t in by.items():
@@ -926,7 +931,7 @@ class PairServer(unittest.TestCase):
                 self.assertNotIn("player", t["inputSchema"].get("required", []), name)
                 continue
             self.assertEqual(t["inputSchema"]["properties"]["player"]["enum"], ["p1", "p2"])
-            self.assertEqual("player" in t["inputSchema"].get("required", []), name not in ("get_state", "step"), name)
+            self.assertEqual("player" in t["inputSchema"].get("required", []), name not in mcp_playtest.BOTH_TOOLS, name)
             self.assertEqual("Both games run the same frames" in t["description"],
                              name not in mcp_playtest.NO_FRAME_TOOLS, name)
         self.assertEqual(by["walk_to"]["inputSchema"]["required"], ["player", "x", "z"])

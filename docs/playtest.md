@@ -414,6 +414,23 @@ Nothing here has run in a game. The first run checks:
 - The guesses made without a game, set by this run: the sword button `Y`, the 4 m leg of `go_to_actor` and its
   60-frame stuck limit.
 
+### Set a test up (start a boss or a dungeon in one call)
+
+Do not walk to a boss or give things one by one. Four tools do it (all need the verb gate, `LICHII_COOP_PLAYTEST_VERBS=1` and `LICHII_COOP_CHEATS=1`):
+
+| I want | Call |
+|---|---|
+| A named start (Deku Tree entrance, the room of a boss) | `preset name`: `deku-start`, `deku-before-gohma`, `before-dodongo`, `before-barinade`, `before-phantom-ganon`, `before-volvagia`, `before-morpha`, `before-bongo-bongo`, `before-twinrova`, `before-ganondorf` |
+| My own start | `setup` with `hearts`, `max_hearts`, `magic`, `rupees`, `small_keys`, `boss_keys`, `maps`, `compasses`, `items`, `flags`, then `warp {scene, entrance}` (a boss room is `<Boss>Stage`, e.g. `GohmaStage`; in free play it goes by the map change event) |
+| To retry the fight | `save_point tag` before it, `load_point tag` after: it replies `exact` and `left` |
+| Both games the same | in a pair, call `setup` or `preset` with no `player` (both games, one after the other) |
+
+Recipe for a boss: (1) start from a save of the age the boss needs (a preset does not set Link's age); (2) `preset before-<boss>`; (3) `save_point <boss>-start`; (4) fight; (5) `load_point <boss>-start` and check `exact` is true; (6) `checkpoint` on both games to see what spread.
+
+What reaches the other game by itself (items.md, flags.md): items, small keys (count deltas), maps, compasses, boss keys, story and dungeon flags, `MaxLife` and `MPMax`. Per player and not shared: `Life`, `MP`, rupees, ammo. A late set-up on one game is a normal flag write: the co-op watcher sends it like any other change, so a preset applied on one game moves the shared parts to the other.
+
+Not proven in a game yet: the map change event in free play, `MaxLife` (the game may write it back, items.md), the exact restore, and the boss defeat flags of the bosses other than Gohma (their names are not in the repository yet).
+
 ### Setting up a run
 
 1. Start the games with the bridge on, one port each: player N on `5000 + N`, or `5000 + 10*L + N` on test lane L.

@@ -345,7 +345,10 @@ PLAYER_TOOLS = [
      "FireTemple, WaterTemple, ShadowTemple, SpiritTemple, BottomOfTheWell, IceCavern, GerudoTrainingGround, "
      "GerudoFortress, GanonsCastle, FinalBattleField. Runs in that order, stops at the first refused call and says which. "
      "Needs the verb gate (LICHII_COOP_PLAYTEST_VERBS, LICHII_COOP_CHEATS). MaxLife may be written back by the game "
-     "(docs/items.md): read it with get_state after.",
+     "(docs/items.md): read it with get_state after. In a pair, with no `player` it runs on BOTH games, one after the "
+     "other. What reaches the other game by itself (co-op sharing, docs/items.md, flags.md): items (max), small keys "
+     "(count deltas), maps, compasses, boss keys, story and dungeon flags, MaxLife and MPMax (max). Per player and NOT "
+     "shared: Life, MP, rupees, ammo. So set per-player parts on each game.",
      "inputSchema": {"type": "object",
                      "properties": {"hearts": {"type": "integer"}, "max_hearts": {"type": "integer"},
                                     "magic": {"type": "integer"}, "rupees": {"type": "integer"},
@@ -632,7 +635,7 @@ CALLS_FILE = "calls.jsonl"
 # Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
 NO_FRAME_TOOLS = frozenset(("get_state", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
                             "log", "check_logs", "session_status"))
-BOTH_TOOLS = frozenset(("get_state", "step"))   # with no `player`: both games
+BOTH_TOOLS = frozenset(("get_state", "step", "setup", "preset", "save_point", "load_point"))   # with no `player`: both games
 ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
 IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "
            "presses and steps as they happen; a warp's or a test line's frames right after it). `player` is the game. ")
