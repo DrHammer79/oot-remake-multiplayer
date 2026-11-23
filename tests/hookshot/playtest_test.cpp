@@ -37,6 +37,17 @@ struct FakeGame {
     }
 };
 
+// Waits until pred() holds, up to the limit (a slow test machine gets the time, a fast one does not wait for it).
+template <class Pred>
+bool WaitFor(Pred pred, std::chrono::milliseconds limit = 2s) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!pred()) {
+        if (std::chrono::steady_clock::now() > deadline) return pred();
+        std::this_thread::sleep_for(1ms);
+    }
+    return true;
+}
+
 std::optional<Request> Parse(std::string_view line) {
     std::string error;
     return ParseRequest(line, error);
@@ -77,8 +88,7 @@ TEST_CASE("playtest: pause holds the game still, resume lets it run") {
     CHECK(gate.Frame() == frame);          // no frame hook passed
     CHECK(game.updates.load() == updates);  // no update ran
     gate.Resume();
-    std::this_thread::sleep_for(50ms);
-    CHECK(gate.Frame() > frame);
+    CHECK(WaitFor([&] { return gate.Frame() > frame; }));
     CHECK_FALSE(gate.Held());
 }
 
@@ -96,9 +106,8 @@ TEST_CASE("playtest: the hold is told when it starts and when it ends (co-op kee
     CHECK(starts.load() == 1);
     CHECK(ends.load() == 0);
     gate.Resume();
-    std::this_thread::sleep_for(50ms);
+    CHECK(WaitFor([&] { return ends.load() == 1; }));
     CHECK_FALSE(held.load());
-    CHECK(ends.load() == 1);
 }
 
 TEST_CASE("playtest: the hold is told it ended on a step, a stop and the idle time") {
@@ -116,8 +125,7 @@ TEST_CASE("playtest: the hold is told it ended on a step, a stop and the idle ti
         CHECK(starts.load() == 2);
         // The module's Stop and a client leaving end the hold with Resume (coop_playtest.cpp Stop).
         gate.Resume();
-        std::this_thread::sleep_for(50ms);
-        CHECK(ends.load() == 2);
+        CHECK(WaitFor([&] { return ends.load() == 2; }));
     }
     starts = 0;
     ends = 0;
@@ -126,7 +134,7 @@ TEST_CASE("playtest: the hold is told it ended on a step, a stop and the idle ti
         watch(gate);
         FakeGame game(gate);
         REQUIRE(gate.Pause(2s));
-        std::this_thread::sleep_for(300ms);
+        CHECK(WaitFor([&] { return ends.load() == 1; }));
         CHECK_FALSE(gate.Held());
         CHECK(starts.load() == ends.load());
     }
@@ -148,7 +156,7 @@ TEST_CASE("playtest: step N runs exactly N frames and holds again, from a hold o
         CHECK(game.updates.load() == updates);
     }
     gate.Resume();
-    std::this_thread::sleep_for(20ms);
+    CHECK(WaitFor([&] { return !gate.Held(); }));
     std::uint64_t from = 0;
     REQUIRE(gate.Step(5, 2s, &from));  // (from running: held first, then 5)
     CHECK(gate.Frame() - from == 5);
@@ -172,16 +180,13 @@ TEST_CASE("playtest: the hold ends when the client leaves (Resume) and when the 
         FakeGame game(gate);
         REQUIRE(gate.Pause(2s));
         gate.Resume();  // (what the bridge does when its client closes or crashes)
-        std::this_thread::sleep_for(30ms);
-        CHECK_FALSE(gate.Holding());
-        CHECK_FALSE(gate.Held());
+        CHECK(WaitFor([&] { return !gate.Holding() && !gate.Held(); }));
     }
     {
         Gate gate(0.1);
         FakeGame game(gate);
         REQUIRE(gate.Pause(2s));
-        std::this_thread::sleep_for(400ms);
-        CHECK_FALSE(gate.Held());
+        CHECK(WaitFor([&] { return !gate.Held(); }));
         CHECK(gate.TakeEndNote() == "idle");
         CHECK(gate.TakeEndNote().empty());
     }
