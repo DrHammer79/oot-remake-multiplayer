@@ -145,6 +145,14 @@ jobs:
         run: python tools/release/tests/test_apply_patch.py -v
       - name: Kit Discord status tests
         run: python tools/release/tests/test_discord_status.py -v
+      # The Windows kit's puppet pack tool staged as make_kit_hookshot.ps1 stages it (kit_pack.ps1) and run from that
+      # copy alone: a module, data folder or strings file the pack needs and the kit misses fails here (the 0.11.12
+      # integrate-01110 kit lacked charsel\data and coopmenu\data). Here, not in the windows job: that one may run on the
+      # self-hosted PC, which has no Python on PATH.
+      - name: Windows kit puppet pack stage tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/kit_pack_test.ps1
       - name: Puppet pack command lines
         run: |
           python tools/puppet_pack/build.py --help
@@ -489,6 +497,11 @@ jobs:
           if ls "$RUNNER_TEMP"/kit/oot-coop-* >/dev/null 2>&1; then echo "::error::the kit has an oot-coop-* asset"; exit 1; fi
           unzip -l "$RUNNER_TEMP"/kit/Squadala-*-linux.zip | tail -n +4 | head -n 60
           echo "KIT=$(ls -d "$RUNNER_TEMP"/kit/Squadala-*-linux)" >> "$GITHUB_ENV"
+      # The kit's own puppet pack tool, run from the kit alone (python -I): every module build.py imports, every path a
+      # module names (charsel/data, coopmenu/data, strings) and the data they read (as kit_pack_test.ps1 for Windows;
+      # build.sh runs build.py from data/tools on the players' PCs).
+      - name: The Linux kit's puppet pack tool runs from the kit alone
+        run: python3 -I tools/release/tests/kit_pack_check.py "$KIT/data"
       - name: Longshot's Linux builder with our patches, and the patched renderer (no game)
         run: bash "$KIT/scripts/build.sh" --renderer-only "$RUNNER_TEMP/vk" --jobs 4
       # (the renderer build compiles no host file: our patches' host/*.c and host/posix/*.c, syntax only, with
