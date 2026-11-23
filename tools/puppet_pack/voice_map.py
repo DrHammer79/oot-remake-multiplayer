@@ -23,6 +23,8 @@ MARGIN_S = 0.15
 LOUDER_DB = 1.0
 QUIETER_DB = 3.0
 LINK = "Link"
+# Every Link model in the mod's characters.json (pickable or not): they keep Link's own clips (decision 2026-11-23).
+LINK_VARIANTS = frozenset({"Link", "Retro Link", "Link (opening)", "Link (adult)", "Dark Link"})
 
 # Link's events (the part of Vo_Pl<Age>_<event>[_NN] before the number) that play often in play.
 FREQUENT = frozenset("""
@@ -205,7 +207,9 @@ def check_map(characters, voices, creature_voices):
     bad = []
     for ch in characters:
         if not ch.chain and ch.default == LINK:
-            continue   # Link himself (and his other models): Link's own clips
+            if ch.name not in LINK_VARIANTS:
+                bad.append("%s: keeps Link's voice but is not one of Link's models" % ch.name)
+            continue   # Link's models: Link's own clips
         near = [v for v in ch.chain + (ch.default,) if is_link_voice(v)]
         if near:
             bad.append("%s: keeps Link's voice (%s)" % (ch.name, ", ".join(near)))

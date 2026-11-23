@@ -5,6 +5,9 @@
   "Link": {
    "link": true
   },
+  "Retro Link": {
+   "link": true
+  },
   "Saria": {
    "chain": [
     "Custom_Saria",
@@ -833,6 +836,9 @@
    "creature": true
   },
   "Link (opening)": {
+   "link": true
+  },
+  "Link (adult)": {
    "link": true
   },
   "Lizalfos": {

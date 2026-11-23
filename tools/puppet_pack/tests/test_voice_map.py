@@ -155,9 +155,14 @@ class Map(unittest.TestCase):
         self.assertIn("Dark Link: keeps Link's voice (Enemy_MiddleBoss_DarkLink)", bad[0])
         self.assertIn("Saria: keeps Link's voice (Player_Child)", bad[1])
 
-    def test_links_other_models_keep_links_clips(self):
-        chars = [vm.Character("Link (opening)", (), vm.LINK)]
+    def test_links_models_keep_links_clips(self):
+        self.assertEqual(vm.LINK_VARIANTS, {"Link", "Retro Link", "Link (opening)", "Link (adult)", "Dark Link"})
+        chars = [vm.Character(n, (), vm.LINK) for n in sorted(vm.LINK_VARIANTS)]
         self.assertEqual(vm.check_map(chars, self.VOICES, self.CREATURES), [])
+
+    def test_only_links_models_may_keep_links_clips(self):
+        bad = vm.check_map([vm.Character("Saria", (), vm.LINK)], self.VOICES, self.CREATURES)
+        self.assertEqual(bad, ["Saria: keeps Link's voice but is not one of Link's models"])
 
     def test_a_chain_voice_without_clips_is_passed_over(self):
         chars = [vm.Character("Ruto", ("Custom_Ruto_Adult",), "Hylia_Girl_Spry")]
