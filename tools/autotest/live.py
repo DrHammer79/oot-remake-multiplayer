@@ -319,12 +319,30 @@ def snapshot(b):
     return out
 
 
+def menu_of(port, client=None):
+    """What co-op's menus show in a game started with the play-test bridge (docs/playtest.md "menu"): {"menu": ...}, or
+    {"menu_error": why}. A bridge shot leaves out Longshot's overlays (the co-op pages), so this is how they are read.
+    The game is not held for it (one `state` on a connection of its own)."""
+    import playtest_client
+    c = client or playtest_client.Client(port, timeout=5.0, hold=False)
+    try:
+        g = playtest_client.game_of(c.request("state"))
+        return {"menu": g["menu"]} if "menu" in g else {"menu_error": "the bridge's state has no menu (an older module?)"}
+    except Exception as e:  # (a game without the bridge, or busy: said, the look still comes back)
+        return {"menu_error": "%s: %s" % (e.__class__.__name__, e)}
+    finally:
+        c.close()
+
+
 def look(d, s, x):
     b = bridge(s, x)
     try:
         st = snapshot(b)
     finally:
         b.close()
+    port = s["games"][x].get("playtest_port")
+    if port:
+        st.update(menu_of(port))
     st["log"] = new_lines(d, s, x)
     return st
 

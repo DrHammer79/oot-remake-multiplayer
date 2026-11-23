@@ -13,7 +13,7 @@ Maintainer only, like the rest of `tools/autotest`: it needs two Hookshot test c
 | --- | --- |
 | `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. |
 | `live.py do --session DIR A "lines"` | Plays test script lines in one game (`goto`, `toward`, `press`, `hold`, `warp`, `place`, `setflag`, `kill`, `hit`, ...; `;` between lines), then returns that game's state. |
-| `live.py state --session DIR [A\|B]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. |
+| `live.py state --session DIR [A\|B]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. A session started with the play-test bridge adds `menu` (what co-op's menus show, see below; `menu_error` when the bridge did not answer). |
 | `live.py shot --session DIR [A\|B]` | A screenshot of each game (a PNG path). |
 | `live.py checkpoint --session DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. |
 | `live.py stop --session DIR` | Ends the session: the watchdog quits both games, kills what did not quit and the server, and lets the lane lock go. |
@@ -32,7 +32,8 @@ claude mcp add oot-playtest -- python -I tools/autotest/mcp_playtest.py --sessio
 with `--display \\.\DISPLAY2` (a device name), or the environment variable `OOT_TEST_DISPLAY`; the default is
 `\\.\DISPLAY2`. A name that no monitor has stops the start with the list of monitors. Details and what to check:
 [testing.md](testing.md#where-the-test-games-windows-go). `live.py shot` and the MCP `shot` tool go through the
-game's own control bridge, so they work wherever the windows are.
+game's own control bridge, so they work wherever the windows are. A bridge shot leaves out Longshot's overlays (the
+co-op pages); read `menu` in the state instead.
 
 ## Bridge protocol
 
@@ -157,6 +158,25 @@ are `null` (no answer from the control bridge, no sample yet, or an old one): a 
 stays `null` until the room is found in memory. `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
 `"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
 tester who pressed Start reads the screen (`shot`), not this.
+
+**`menu`** (in `state`; `hookshot/src/coop_menu_state.h`): what co-op's menus show, as text, because a bridge shot is
+taken before Longshot draws its overlays and so never has co-op's pages on it. Two members:
+
+- `coop`: co-op's tab of Longshot's Insert menu. `{"open":false}` while it is shut, else `"tab":"multiplayer"`, `page`
+  (the same word as `coop_menu`), `rows` (each `{"name", "kind"}`; `kind` is `action`, `choice`, `toggle` (with `on`),
+  `heading` or `note`; `"fixed":true` on a row that cannot be used now), `focused` (the row's index, or `null`),
+  `focused_name` and `typing`. Only the rows' names are given, never their values: a value can be a join code, an
+  address or a password.
+- `customize_screen`: Character Select's Customize screen while co-op drives it. `{"open":false}` when it is not open;
+  `"driven":false` while co-op waits for its panes or has let go of it (no rows then). Driven: `title` (as the screen
+  shows it, e.g. `"Eyes (page 1 of 3)  Y: page  A: exact hue"`), `options` (each `{"option", "label", "value"}`, his
+  six places 0..5, left column top to bottom then the right; empty places are left out), `focused`, `focused_label`,
+  `mixer` (the any-colour mixer is open) and `page_no` and `pages` (`0` and `0` for a character with no colour option).
+  A character's Eye Colour row is left out when its model is known to have no iris.
+
+The labels and values are co-op's own words in the game's language, never text read from the game. Example, a
+Character Select character with irises:
+`"menu":{"coop":{"open":false},"customize_screen":{"open":true,"driven":true,"title":"Eyes (page 1 of 1)  A: exact hue","options":[{"option":0,"label":"Eye Colour","value":"Game's own"}],"focused":0,"focused_label":"Eye Colour","mixer":false,"page_no":1,"pages":1}}`.
 
 **`world`** (the bridge adds it to `state` and to a `dump`): the actors the object walk sees, nearest to our Link first,
 the kinds that matter (player, enemy, npc, chest, door, switch, item) before `other` (grass, pots, ...). The walk

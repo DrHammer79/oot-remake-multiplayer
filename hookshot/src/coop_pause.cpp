@@ -1940,6 +1940,16 @@ std::string MenuState() {
     return CoopPauseMenu::PageWord(g_menu.page());
 }
 
+CoopMenuState::Tab MenuTab() {
+    std::lock_guard lock(g_mutex);
+    CoopMenuState::Tab tab;
+    if (!g_shown && !g_native) return tab;
+    tab.open = true;
+    tab.page = CoopPauseMenu::PageWord(g_menu.page());
+    tab.view = g_menu.view();
+    return tab;
+}
+
 bool TestMenu(const std::string& page) {
     if (page == "customize") {
         Open(CoopPauseMenu::Page::kCustomize);

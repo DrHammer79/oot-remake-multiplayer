@@ -35,7 +35,7 @@ SCRIPT_HELP = (
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
      "camera yaw (0 = +z, 90 = +x), life and max life (quarter hearts), rupees, age, whether an event or a load is "
-     "running, the A-button prompt, and the new co-op log lines since the last look. Both games without `player`.",
+     "running, the A-button prompt, what co-op's menus show (`menu`: a shot leaves the co-op pages out) and the new co-op log lines since the last look. Both games without `player`.",
      "inputSchema": {"type": "object", "properties": {"player": {"type": "string", "enum": ["A", "B"]}}}},
     {"name": "act", "description": "Play test script lines in one game, then return its state. " + SCRIPT_HELP,
      "inputSchema": {"type": "object", "required": ["player", "script"],
@@ -210,7 +210,8 @@ ACT_TOOLS = [
      "line). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
     {"name": "menu", "description": "Open co-op's Customize page, or close co-op's menu. get_state's `coop_menu` "
-     "member says which co-op page is open; it does not see the game's own pause screen (use screenshot). " + ACT_NOTE,
+     "member says which co-op page is open and `menu` its rows (a screenshot leaves the co-op pages out); neither "
+     "sees the game's own pause screen (use screenshot). " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["page"],
                      "properties": {"page": {"type": "string", "enum": ["customize", "close"]}}}},
 ]
@@ -257,7 +258,9 @@ PLAYER_TOOLS = [
      "`enemy_near` (living enemies within 10 m) and `danger` (one within 4 m); the last two are null when there is "
      "no world list (solo). The inventory is NOT in the reply unless you ask: `inventory_count` says how many items "
      "are set; `inventory` true adds those entries (about 290 on a full save: 10k tokens, ask once). The nearest "
-     "actors are in get_world. " + PAUSED,
+     "actors are in get_world. `menu` is what co-op's menus show as text (its Insert-menu tab: page, row names, "
+     "focused row; Character Select's Customize screen: options, focused, page_no of pages): a screenshot leaves out "
+     "Longshot's overlays (the co-op pages), so read `menu` instead. " + PAUSED,
      "inputSchema": {"type": "object", "properties": {"inventory": {"type": "boolean"}}}},
     {"name": "get_world", "description": "The actors near Link in this game, nearest first: id, name, kind, position "
      "[x,y,z] in metres, distance, life, owner (\"server\", a player number or null = unknown), alive. `kind` and "
