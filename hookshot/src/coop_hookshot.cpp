@@ -122,6 +122,7 @@
 #include "hos_coop_host.h"
 #include "hos_coop_world.h"
 #include "hos_coop_view.h"
+#include "hos_coop_turn.h"
 #include "coop_export_guard.h"
 
 #ifdef _WIN32
@@ -2354,6 +2355,15 @@ COOP_HOOKSHOT_EXPORT int hos_coop_menu_picture(int tab, HosCoopMenuPicture* out)
     static CoopBoundary::Site site{"hos_coop_menu_picture"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
         return g_on && CoopPause::Picture(tab, out) ? 1 : 0;
+    });
+}
+// The player camera's angles (hos_coop_turn.h, patch 0036): turned with the Customize page's orbit, so the game's
+// own collision places the eye.
+COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state) {
+    static CoopBoundary::Site site{"hos_coop_turn"};
+    return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
+        // (also with co-op off: a camera still turned is put back once)
+        return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;
     });
 }
 // The gameplay camera (hos_coop_view.h, patch 0019): around your own Link while the Customize page shows him.
