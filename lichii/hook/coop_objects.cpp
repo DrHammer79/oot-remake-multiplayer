@@ -1567,7 +1567,43 @@ private:
     struct NodeDiag {
         u64 node = 0, actor = 0, until_ms = 0, last_ms = 0;
     } diag_;
+    // Row 244 diagnostic 2: the start (main+0x2751790) has two ends. With a goal (+0x4c) and a true bool it looks
+    // up under the key at +0xec (main+0x3db7c0 on the actor's component [[actor+0x270]+0x118]), it aims +0xfc at
+    // the goal, asks the body onto the answer spot and sets +0x129 = 1; else +0xfc is a grid cell (0xd6ef80).
+    // Every block node start of the game (room loads too, both games) is logged once with that key, +0x129 and
+    // the places, to tell which game's start took the answer end and why.
+    std::uint32_t diag_seen_ = 0;
+    void DiagNodeStartsSeen(CoopPuppet::Guest& guest, std::uint64_t now_ms) {
+        const auto& starts = CoopWorld::TheNodeStarts();
+        const std::uint32_t count = starts.Count();
+        if (count - diag_seen_ > CoopWorld::NodeStarts::kSlots) diag_seen_ = count - CoopWorld::NodeStarts::kSlots;
+        for (; diag_seen_ < count; ++diag_seen_) {
+            const auto [node, actor] = starts.At(diag_seen_);
+            u64 vtable = 0;
+            if (node == 0 || main_ == 0 || !guest.Read(node, &vtable, 8) ||
+                !CoopWorld::BlockNode::IsNodeVtable(vtable, main_)) {
+                continue;
+            }
+            u32 key = 0;
+            u8 answered = 0xff;
+            float goal[3] = {NAN, NAN, NAN}, target[3] = {NAN, NAN, NAN}, pos[3] = {NAN, NAN, NAN};
+            guest.Read(node + 0xec, &key, 4);
+            guest.Read(node + 0x129, &answered, 1);
+            for (int i = 0; i < 3; ++i) {
+                guest.Read(node + CoopWorld::BlockNode::kGoal + 4u * i, &goal[i], 4);
+                guest.Read(node + CoopWorld::BlockNode::kTarget + 4u * i, &target[i], 4);
+                guest.Read(actor + kActorPosition + 4u * i, &pos[i], 4);
+            }
+            LOG_INFO(Core,
+                     "coop: world: push node start seen {:x} (actor {:x}): key +0xec {:08x}, +0x129 {}, goal +0x4c "
+                     "({:.2f} {:.2f} {:.2f}) target +0xfc ({:.2f} {:.2f} {:.2f}) block ({:.2f} {:.2f} {:.2f})",
+                     node, actor, key, answered, goal[0], goal[1], goal[2], target[0], target[1], target[2], pos[0],
+                     pos[1], pos[2]);
+            if (diag_.node == 0) diag_ = {node, actor, now_ms + 3000, 0};
+        }
+    }
     void DiagNodeAfterStart(CoopPuppet::Guest& guest, std::uint64_t now_ms) {
+        DiagNodeStartsSeen(guest, now_ms);
         if (diag_.node == 0 || (diag_.last_ms != 0 && now_ms < diag_.last_ms + 100)) return;
         if (now_ms > diag_.until_ms) {
             diag_ = {};
@@ -1582,10 +1618,15 @@ private:
             for (int i = 0; i < 3; ++i) guest.Read(diag_.node + offs[k] + 4u * i, &v[k][i], 4);
         }
         for (int i = 0; i < 3; ++i) guest.Read(diag_.actor + kActorPosition + 4u * i, &pos[i], 4);
+        u32 key = 0;
+        u8 answered = 0xff;
+        guest.Read(diag_.node + 0xec, &key, 4);
+        guest.Read(diag_.node + 0x129, &answered, 1);
         LOG_INFO(Core,
-                 "coop: world: push node diag {:x}: +0x40 ({:.2f} {:.2f} {:.2f}) +0x4c ({:.2f} {:.2f} {:.2f}) "
-                 "+0xfc ({:.2f} {:.2f} {:.2f}) +0x108 ({:.2f} {:.2f} {:.2f}) block ({:.2f} {:.2f} {:.2f})",
-                 diag_.node, v[0][0], v[0][1], v[0][2], v[1][0], v[1][1], v[1][2], v[2][0], v[2][1], v[2][2],
+                 "coop: world: push node diag {:x} (key +0xec {:08x}, +0x129 {}): +0x40 ({:.2f} {:.2f} {:.2f}) +0x4c "
+                 "({:.2f} {:.2f} {:.2f}) +0xfc ({:.2f} {:.2f} {:.2f}) +0x108 ({:.2f} {:.2f} {:.2f}) block ({:.2f} "
+                 "{:.2f} {:.2f})",
+                 diag_.node, key, answered, v[0][0], v[0][1], v[0][2], v[1][0], v[1][1], v[1][2], v[2][0], v[2][1], v[2][2],
                  v[3][0], v[3][1], v[3][2], pos[0], pos[1], pos[2]);
     }
     std::optional<NodeStart> node_after_;  // row 244: the start just called, its target checked after it

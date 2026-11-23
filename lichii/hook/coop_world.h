@@ -439,6 +439,13 @@ public:
         return out;
     }
     std::uint32_t Count() const noexcept { return count_.load(std::memory_order_acquire); }
+    // The start numbered `index` (0-based, as Count counts): (node, actor), zeros once its slot was reused.
+    std::pair<std::uint64_t, std::uint64_t> At(std::uint32_t index) const noexcept {
+        const std::uint32_t count = count_.load(std::memory_order_acquire);
+        if (index >= count || count - index > kSlots) return {0, 0};
+        const Slot& s = slots_[index % kSlots];
+        return {s.node.load(std::memory_order_acquire), s.actor.load(std::memory_order_acquire)};
+    }
     void Clear() noexcept {  // (a new game boot: the old nodes are another heap's)
         for (auto& s : slots_) {
             s.node.store(0, std::memory_order_relaxed);
