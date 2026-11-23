@@ -1,0 +1,31 @@
+{
+  "preset": "before-dodongo",
+  "version": 1,
+  "title": "Dodongo's Cavern (King Dodongo): child Link in the boss room, boss key, 3 hearts",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Kokiri",
+      "Weapon_Shield_Deku",
+      "bombs",
+      "PouchData.Weapon_Range_SlingShot.StockNum"
+    ],
+    "hearts": 3,
+    "max_hearts": 3,
+    "boss_keys": [
+      "DodongoCavern"
+    ],
+    "warp": {
+      "scene": "DodongoStage",
+      "entrance": "DodongoStage"
+    },
+    "flags": {
+      "0x1002b466": "BossBattle",
+      "HavePlayedEvent.Get_StoneOfFire_DefeatBoss": 0,
+      "HavePlayedEvent.Dm_DodongoCave_BossOut": 0
+    }
+  },
+  "notes": [
+    "Rush room DodongoStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Get_StoneOfFire is put back to its step BossBattle and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+  ]
+}

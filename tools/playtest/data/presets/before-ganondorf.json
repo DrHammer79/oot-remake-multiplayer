@@ -1,0 +1,32 @@
+{
+  "preset": "before-ganondorf",
+  "version": 1,
+  "title": "Ganon's Castle (Ganondorf): adult Link in the boss room, boss key, 8 hearts",
+  "spec": {
+    "items": [
+      "Weapon_Sword_Master",
+      "Weapon_Shield_Hylia",
+      "bow",
+      "Item_Arrow_Light"
+    ],
+    "hearts": 8,
+    "max_hearts": 8,
+    "boss_keys": [
+      "GanonsCastle"
+    ],
+    "magic": 1,
+    "warp": {
+      "scene": "GanondorfStage",
+      "entrance": "GanondorfStage"
+    },
+    "flags": {
+      "0x746f47c0": "Step05",
+      "HavePlayedEvent.InsideGanonCastle_Dungeon_BossDie_1": 0,
+      "HavePlayedEvent.Dm_InsideGanonCastle_BossOut": 0
+    }
+  },
+  "notes": [
+    "Rush room GanondorfStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Defeat_Ganon is put back to its step Step05 and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+  ]
+}
