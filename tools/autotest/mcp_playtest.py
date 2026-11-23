@@ -214,10 +214,12 @@ PLAYER_TOOLS = [
      "p2 = B). No frame passes." % live.MAX_LINES,
      "inputSchema": {"type": "object", "properties": {"match": {"type": "string"}}}},
     {"name": "check_logs", "description": "The oracle for 'did anything go wrong': this game's new `coop:` log lines "
-     "that say failed, error, refused or resync, masked (IP addresses, user names in paths, memory addresses, keys, "
-     "names, quoted text are replaced). `since` is `last_check` (the default: since the last check_logs, or the "
-     "boot) or `boot`. `names` are extra words to hide. verdict: clean, flagged, or no log. A clean log is not proof "
-     "that nothing is wrong: it only says the game printed no such line. Needs --session. No frame passes.",
+     "that are a warning, an error or a critical line (the game's level prefix) or say failed, error, refused or "
+     "resync, masked (IP addresses, host names, user names in paths, memory addresses, keys, player names, quoted "
+     "text are replaced; the players' names the games print are hidden by default). Each line has its `why`. `since` "
+     "is `last_check` (the default: since the last check_logs, or the boot) or `boot`. `names` are extra words to "
+     "hide. verdict: clean, flagged, or no log. A clean log is not proof that nothing is wrong: it only says the game "
+     "printed none of these. Works after the session ended. Needs --session. No frame passes.",
      "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "enum": ["last_check", "boot"]},
                                                        "names": {"type": "array", "items": {"type": "string"},
                                                                  "maxItems": 20}}}},
@@ -279,8 +281,11 @@ class Game:
             return {"frame": self.client.last_frame, "verdict": "no log", "flagged": 0, "lines": [], "left_out": 0,
                     "why": "this game's log file is not there (the session has no log path for %s)" % x}
         lines, self.check_offset = pc.read_log_since(path, start)
-        out = pc.flagged_lines(lines, names)
-        out.update(frame=self.client.last_frame, read=len(lines), verdict="flagged" if out["flagged"] else "clean")
+        hide = list(names) + [n for n in pc.session_names([g.get("log") for g in (s.get("games") or {}).values()])
+                              if n not in names]
+        out = pc.flagged_lines(lines, hide)
+        out.update(frame=self.client.last_frame, read=len(lines), names_hidden=len(hide),
+                   verdict="flagged" if out["flagged"] else "clean")
         return out
 
     def session_status(self):
@@ -310,6 +315,9 @@ class Game:
     def call(self, name, args):
         if name == "session_status":
             return self.session_status()   # (also for an ended session; never counts as a tester command)
+        if name == "check_logs":
+            # it only reads the log file, so it answers after the session ended too (that is when it is needed)
+            return self.check_logs(args.get("since", "last_check"), args.get("names") or ())
         if self.session:
             live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
             live.touch(self.session)          # the session's watchdog counts this as a tester command
@@ -375,8 +383,6 @@ class Game:
             return {"result": desync_check.RESULTS[code], "report": buf.getvalue()}
         if name == "log":
             return self.log_lines(args.get("match"))
-        if name == "check_logs":
-            return self.check_logs(args.get("since", "last_check"), args.get("names") or ())
         if name == "screenshot":
             label = args.get("name") or "shot"
             if not pc.TAG.match(label):

@@ -273,17 +273,21 @@ only, no `pip install`.
 | `checkpoint tag` | The game's `dump` (every shared flag) with its frame and state, appended to `<log dir>/<player>.checkpoints.jsonl` |
 | `desync_check [all]` | `desync_check.py --clients` on the log folder: tags matched across every game, each game's frame printed |
 | `log [match]` | **Raw, unmasked** (do not paste it into an issue; use `check_logs` for that). The game's new `coop:` log lines since the last call (`match`: only lines with that text). Needs `--session`: games from `live.py start`, p1 = A, p2 = B |
-| `check_logs [since] [names]` | The oracle for "did anything go wrong". This game's new `coop:` lines that say `failed`, `error`, `refused` or `resync` (any case, also `fails`, `failure`, `refusal`, `resyncing`), **masked**, with `flagged` (how many), `lines` (the newest 40; `left_out` counts the rest), `read` (all new `coop:` lines) and `verdict`: `clean`, `flagged`, or `no log`. `since` is `last_check` (the default: since the last `check_logs` of this server, or the boot) or `boot`. It keeps its own place in the log, so it and `log` never take lines from each other. `names` (up to 20 words) are hidden wherever they stand. Needs `--session`. **A clean verdict is not proof**: it says only that the game printed no such line. No frame passes |
+| `check_logs [since] [names]` | The oracle for "did anything go wrong". This game's new `coop:` lines that are flagged, **masked**. A line is flagged when it starts with the game's level prefix `warning: `, `error: ` or `critical: ` (most real warnings contain none of the four words, for example `connection lost; reconnecting`), or when it says `failed`, `error`, `refused` or `resync` (any case, also `fails`, `failure`, `refusal`, `resyncing`). Reply: `flagged` (how many), `lines` (the newest 40, each `{why, line}` with `why` = `level:warning`, `level:error`, `level:critical` or `word:<word>`; `left_out` counts the rest), `read` (all new `coop:` lines), `names_hidden` and `verdict`: `clean`, `flagged`, or `no log`. `since` is `last_check` (the default: since the last `check_logs` of this server, or the boot) or `boot`. It keeps its own place in the log (and reads only whole lines: a half-written last line waits for the next call), so it and `log` never take lines from each other. `names` (up to 20 words) are extra words to hide; the names the games print themselves (`name '...'`, `player N '...'`) are hidden without being passed. Needs `--session`; **it answers after the session ended** (that is when the last lines matter) and does not restart the idle clock. **A clean verdict is not proof**: it says only that the game printed none of these. No frame passes |
 | `session_status` | Is the run still sound: `bridge` (`connected`, `held`, `last_frame`, `connects`) and, with `--session`, `session` (`running`, or `ended` with the watchdog's reason; each game's `pid` and `alive`; `max_minutes_left`, `idle_minutes_left`). It asks the game nothing, works after the session ended, and does not restart the idle clock. No frame passes |
 | `pause`, `resume` | Hold the game, or let it run in real time (a person takes over; the next call holds it again) |
 | `screenshot [name]` | A PNG of this game: the game saves it as `<game>/playtest/shots/<player>-<name>-<time>.png` (it runs one frame to show it); a copy goes to `<log dir>/shots/` |
 
-**What `check_logs` masks.** IPv4 and IPv6 addresses (with a port); the user name in `C:/Users/<name>`, `/home/<name>`
-and `/Users/<name>` paths; memory addresses (`0x` and six or more hex digits); hex strings of 32 or more characters; the
-value after `name`, `nickname`, `password`, `token`, `secret`, `key`, `host`, `server` and `room`; every double-quoted
-text; and the words in `names`. It is the filter of the tool, not a guarantee: a player name written plainly in a log
-line without one of these words, and not in `names`, stays. Pass the players' names in `names`. Nothing from a log goes
-into an issue or a pull request unmasked (AGENTS.md); quote only the lines you need.
+**What `check_logs` masks.** IPv4 addresses (also before a full stop or a comma) and IPv6 addresses, with a port; a
+host name with a port (`myhouse.duckdns.org:7777`); the user name in `C:/Users/<name>`, `/home/<name>` and
+`/Users/<name>` paths; memory addresses (`0x` and six or more hex digits); hex strings of 32 or more characters; the
+value after `password`, `token`, `secret` and `nickname` with `=` or `:`; the value after `name`, `host`, `server`,
+`room` and `key` with `=` only (`coop: host: refused ...` is a real prefix and keeps its words); the join password;
+`name '...'` and `player N '...'`; every double-quoted text; and the players' names, which are read from the games' own
+logs plus the words in `names`. A name of two characters or fewer is matched with its case. It is the filter of the
+tool, not a guarantee: a name that no log line printed in those forms and that the tester did not pass stays, and so
+does a host name written without a port. Nothing from a log goes into an issue or a pull request unmasked
+(AGENTS.md); quote only the lines you need.
 
 Every reply carries the game's `frame`.
 

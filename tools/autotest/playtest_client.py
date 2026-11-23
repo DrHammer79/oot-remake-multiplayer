@@ -190,53 +190,106 @@ class Client:
 
 
 # --- the log oracle (check_logs): the game's new `coop:` lines that say something went wrong, masked ---------------------
+# A line is flagged by its level (Longshot prints `warning: `, `error: ` or `critical: ` before the text of a LOG_WARNING,
+# LOG_ERROR or LOG_CRITICAL: most of the real warnings contain none of the words) or by one of the four words.
+LEVEL = re.compile(r"^(warning|error|critical): ")
 FLAG_WORDS = re.compile(r"\b(fail(?:ed|ure|ures|s)?|error|errors|refus(?:ed|es|al)|resync\w*)", re.IGNORECASE)
 MAX_FLAGGED = 40
-_IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?![\w.])")
-_IPV6 = re.compile(r"(?<![\w:])\[?(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}\]?(?::\d{1,5})?(?![\w:])")
+_IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?!\.?\d)")
+# an IPv6 address has a `::` or a hex letter (a time such as 12:34:56 has neither)
+_IPV6 = re.compile(r"(?<![\w:])\[?(?=[0-9A-Fa-f:]*(?:::|[A-Fa-f]))(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}\]?(?::\d{1,5})?(?![\w:])")
+_DOTTED_HOST = re.compile(r"(?<![\w.-])(?:[A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z0-9-]*:\d{1,5}(?!\d)")   # myhouse.duckdns.org:7777
 _HOME = re.compile(r"(?i)([A-Z]:[\\/]+Users[\\/]+|/Users/|/home/)[^\\/\s\"']+")
 _ADDR = re.compile(r"\b0[xX][0-9A-Fa-f]{6,}\b")
 _HEX = re.compile(r"\b[0-9A-Fa-f]{32,}\b")
-_SECRET = re.compile(r"(?i)\b(pass(?:word|phrase)?|token|secret|key|nick(?:name)?|name|user(?:name)?|host|server|room)\b(\s*[=:]\s*)(\"[^\"]*\"|\S+)")
+# `password: x`, `token=x`: the value is hidden after `=` or `:`. `host`, `server`, `room`, `key` and `name` open real
+# log prefixes (`coop: host: refused ...`), so they hide a value only after `=`.
+_SECRET_STRONG = re.compile(r"(?i)\b(pass(?:word|phrase)?|token|secret|nick(?:name)?)\b(\s*[=:]\s*)(\"[^\"]*\"|\S+)")
+_SECRET_WEAK = re.compile(r"(?i)\b(key|name|user(?:name)?|host|server|room)\b(\s*=\s*)(\"[^\"]*\"|\S+)")
+_JOIN_PASSWORD = re.compile(r"(?i)\b(join password\s+)\S+")          # `coop: on, ..., join password {}`
+_NAMED = re.compile(r"(?i)\b(name|nick(?:name)?|player\s+\d+)(\s+)'[^'\n]*'")   # `player 2 'Bob' joined`, `name 'Bob'`
 _QUOTED = re.compile(r'"[^"\n]*"')
 _TIME = re.compile(r"^\[hos [^\]]*\] ")
 _NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")   # live.NOISE: the emulator's own chatter
+_NAME_IN_LOG = re.compile(r"(?i)\b(?:name|nick(?:name)?|player\s+\d+)\s+'([^'\n]{1,40})'")
+MAX_NAME_SCAN = 8 << 20
 
 
 def mask_text(text, names=()):
-    """A log line with nothing a person could be found by: IP addresses (v4 and v6, with a port), the user name in a
-    home path, game memory addresses, long hex strings (keys), the value after `name`, `nickname`, `password`, `token`,
-    `host`, `server` and `room`, every double-quoted text, and each of `names` wherever it stands (whole words, any
-    case). Best effort on top of the log's own wording: docs/playtest.md lists what it does not catch."""
+    """A log line with nothing a person could be found by: IP addresses (v4 and v6, with a port; also before a full
+    stop), a host name with a port, the user name in a home path, game memory addresses, long hex strings (keys), the
+    value after `password`, `token`, `secret` and `nickname` (`=` or `:`) and after `name`, `host`, `server`, `room`
+    and `key` (`=` only), the join password, a quoted `name '...'` or `player N '...'`, every double-quoted text, and
+    each of `names` wherever it stands (whole words; case does not matter, except for a name of 2 characters or
+    fewer, which must match its case). Best effort on top of the log's own wording: docs/playtest.md lists what it
+    does not catch."""
     t = _HOME.sub(lambda m: m.group(1) + "<user>", text)
+    t = _DOTTED_HOST.sub("<host>", t)
     t = _IPV6.sub("<ip>", t)
     t = _IPV4.sub("<ip>", t)
     t = _ADDR.sub("<addr>", t)
     t = _HEX.sub("<hex>", t)
-    t = _SECRET.sub(lambda m: m.group(1) + m.group(2) + "<hidden>", t)
+    t = _JOIN_PASSWORD.sub(lambda m: m.group(1) + "<hidden>", t)
+    t = _NAMED.sub(lambda m: "%s%s'<name>'" % (m.group(1), m.group(2)), t)
+    for rx in (_SECRET_STRONG, _SECRET_WEAK):
+        t = rx.sub(lambda m: m.group(1) + m.group(2) + "<hidden>", t)
     t = _QUOTED.sub('"<text>"', t)
     for n in sorted({str(n).strip() for n in names if str(n).strip()}, key=len, reverse=True):
-        t = re.sub(r"(?<!\w)" + re.escape(n) + r"(?!\w)", "<name>", t, flags=re.IGNORECASE)
+        t = re.sub(r"(?<!\w)" + re.escape(n) + r"(?!\w)", "<name>", t, flags=0 if len(n) <= 2 else re.IGNORECASE)
     return t
 
 
+def session_names(paths):
+    """The player names the games printed in their own logs (`name 'X'`, `player N 'X'`): the default `names` of
+    check_logs, so a name that stands plainly in another line is hidden without the tester knowing it."""
+    found = []
+    for path in paths:
+        try:
+            with open(path, "rb") as f:
+                data = f.read(MAX_NAME_SCAN).decode("utf-8", "replace")
+        except (OSError, TypeError):
+            continue
+        for m in _NAME_IN_LOG.finditer(data):
+            n = m.group(1).strip()
+            if n and n not in found:
+                found.append(n)
+    return found
+
+
 def read_log_since(path, offset):
-    """(the `coop:` lines written after byte `offset`, the new offset). A missing file: ([], offset)."""
+    """(the `coop:` lines written after byte `offset`, the new offset). Only whole lines are read: a half-written last
+    line stays for the next call. A file that is shorter than the offset (a new game on the same path) is read from
+    its start. A missing file: ([], offset)."""
     try:
         with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            if f.tell() < offset:
+                offset = 0
             f.seek(offset)
             data = f.read()
-            end = f.tell()
     except OSError:
         return [], offset
-    return [_TIME.sub("", ln) for ln in data.decode("utf-8", "replace").splitlines() if "coop:" in ln and not _NOISE.search(ln)], end
+    cut = data.rfind(b"\n") + 1
+    data = data[:cut]
+    lines = [_TIME.sub("", ln) for ln in data.decode("utf-8", "replace").splitlines()
+             if "coop:" in ln and not _NOISE.search(ln)]
+    return lines, offset + cut
+
+
+def flag_reason(line):
+    """Why a line is flagged: `level:warning`, `level:error`, `level:critical` or `word:<the word>`; None if it is not."""
+    m = LEVEL.search(line)
+    if m:
+        return "level:" + m.group(1)
+    m = FLAG_WORDS.search(line)
+    return "word:" + m.group(1).lower() if m else None
 
 
 def flagged_lines(lines, names=()):
-    """The lines that say failed, error, refused or resync, masked, the newest MAX_FLAGGED, with how many were left out."""
-    hit = [ln for ln in lines if FLAG_WORDS.search(ln)]
-    left = max(0, len(hit) - MAX_FLAGGED)
-    return {"flagged": len(hit), "lines": [mask_text(ln, names) for ln in hit[-MAX_FLAGGED:]], "left_out": left}
+    """The flagged lines, masked, each with its reason, the newest MAX_FLAGGED, and how many were left out."""
+    hit = [(r, ln) for ln in lines for r in [flag_reason(ln)] if r]
+    return {"flagged": len(hit), "left_out": max(0, len(hit) - MAX_FLAGGED),
+            "lines": [{"why": r, "line": mask_text(ln, names)} for r, ln in hit[-MAX_FLAGGED:]]}
 
 
 WORLD_TAG = "world_query"   # the tag of the dump `Client.world` reads: one file, overwritten each time
