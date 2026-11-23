@@ -1,6 +1,8 @@
 """Tests for the play-test kit helpers that need no game (kit_tools.py): step_until's condition and wait, against the
 fake bridge of test_playtest_bridge.py. Run: python -I tools/autotest/tests/test_kit_tools.py"""
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -280,7 +282,7 @@ class DeltaTools(unittest.TestCase):
                 live.look = saved
             self.assertEqual((r["A"]["changed"], r["A"]["since"], r["A"]["log"]), ({"life": 8}, 1, []))
             self.assertTrue(os.path.isfile(os.path.join(d, "state-history.json")))
-        with self.assertRaises(SystemExit):                       # --since takes a number
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):   # --since takes a number
             live.main(["state", "--session", "x", "--since", "soon"])
 
     def test_the_session_state_tool_takes_since(self):
@@ -288,6 +290,199 @@ class DeltaTools(unittest.TestCase):
         self.assertIn("since", props)
         with self.assertRaises(ValueError):
             mcp_playtest.call("x", "state", {"since": 0})
+
+
+def serve_lines(game, calllog, requests):
+    """Runs mcp_playtest.serve on the requests (tool, args) and returns the replies' results."""
+    lines = [json.dumps({"jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": {"name": n, "arguments": a}})
+             for i, (n, a) in enumerate(requests)]
+    stdin, stdout = sys.stdin, sys.stdout
+    sys.stdin, sys.stdout = io.StringIO("\n".join(lines) + "\n"), io.StringIO()
+    try:
+        mcp_playtest.serve(None, game, calllog=calllog)
+        out = sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout = stdin, stdout
+    return [json.loads(x)["result"] for x in out.splitlines()]
+
+
+class CallLogTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "calls.jsonl")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def lines(self):
+        with open(self.path, encoding="utf-8") as f:
+            return [json.loads(x) for x in f]
+
+    def test_a_line_per_call(self):
+        log = kit_tools.CallLog(self.path, "oot-p1")
+        log.write("step", {"frames": 5}, t=10.5)
+        log.write("warp", {"scene": "X"}, False, "ValueError: no scene " + "x" * 400, t=11)
+        a, b = self.lines()
+        self.assertEqual(a, {"t": 10.5, "server": "oot-p1", "tool": "step", "args": {"frames": 5}, "ok": True})
+        self.assertFalse(b["ok"])
+        self.assertTrue(b["error"].startswith("ValueError: no scene"))
+        self.assertEqual(len(b["error"]), 200)
+
+    def test_an_unwritable_log_never_stops_a_test(self):
+        kit_tools.CallLog(os.path.join(self.dir.name, "no", "such", "calls.jsonl"), "live").write("act", {})
+
+    def test_read_merges_files_by_time_and_skips_junk(self):
+        other = os.path.join(self.dir.name, "p2.jsonl")
+        kit_tools.CallLog(self.path, "oot-p1").write("step", {"frames": 1}, t=3)
+        kit_tools.CallLog(other, "oot-p2").write("step", {"frames": 2}, t=1)
+        kit_tools.CallLog(self.path, "oot-p1").write("step", {"frames": 3}, t=2)
+        with open(self.path, "a", encoding="utf-8") as f:
+            f.write('{"t":9,"server":"evil","tool":"step"}\n{"t":9,"server":"oot-p1"}\n[1]\n{"t": 5, "server": "oot-p1", "to')
+        calls = kit_tools.read_calls([self.path, other])
+        self.assertEqual([c["args"]["frames"] for c in calls], [2, 3, 1])
+        self.assertEqual(calls[0]["_at"], "p2.jsonl:1")
+        self.assertEqual(calls[2]["_at"], "calls.jsonl:1")
+
+    def test_serve_logs_calls_and_failures(self):
+        game = FakeGame()
+        tool = mcp_playtest.Game("p1", pc.Client(game.port), self.dir.name)
+        try:
+            res = serve_lines(tool, kit_tools.CallLog(self.path, "oot-p1"),
+                              [("step", {"frames": 4}), ("get_state", {}), ("step", {}),
+                               ("step_until", {"condition": "event == false"})])
+        finally:
+            tool.client.close()
+            game.close()
+        self.assertEqual([bool(r.get("isError")) for r in res], [False, False, True, False])
+        got = self.lines()
+        self.assertEqual([(c["tool"], c["ok"]) for c in got],
+                         [("step", True), ("get_state", True), ("step", False), ("step_until", True)])
+        self.assertEqual(got[0]["args"], {"frames": 4})
+        self.assertEqual(got[0]["server"], "oot-p1")
+        self.assertIn("error", got[2])
+        self.assertEqual(got, sorted(got, key=lambda c: c["t"]))
+
+    def test_serve_without_a_log_writes_none(self):
+        game = FakeGame()
+        tool = mcp_playtest.Game("p1", pc.Client(game.port), self.dir.name)
+        try:
+            serve_lines(tool, None, [("step", {"frames": 1})])
+        finally:
+            tool.client.close()
+            game.close()
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_the_default_place(self):
+        self.assertEqual(mcp_playtest.call_log_path("S", "L"), os.path.join("S", "calls.jsonl"))
+        self.assertEqual(mcp_playtest.call_log_path(None, "L"), os.path.join("L", "calls.jsonl"))
+
+
+class Replay(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "calls.jsonl")
+
+        def w(server, tool, args, ok=True, t=0):
+            kit_tools.CallLog(self.path, server).write(tool, args, ok, None, t)
+        w("oot-p1", "warp", {"scene": "A"}, t=1)
+        w("oot-p1", "get_state", {}, t=2)
+        w("oot-p2", "step", {"frames": 3}, False, t=3)
+        w("live", "act", {"player": "A", "script": "give bow"}, t=4)
+        w("oot-p1", "step", {"frames": 9}, t=5)
+        self.ran = []
+        self.said = []
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def runner(self, server, tool, args):
+        self.ran.append((server, tool, args))
+
+    def go(self, **kw):
+        return kit_tools.replay([self.path], runner=self.runner, say=self.said.append, **kw)
+
+    def test_runs_what_changed_the_game_in_order(self):
+        r = self.go()
+        self.assertEqual(self.ran, [("oot-p1", "warp", {"scene": "A"}),
+                                    ("live", "act", {"player": "A", "script": "give bow"}),
+                                    ("oot-p1", "step", {"frames": 9})])
+        self.assertEqual((r["ran"], r["skipped"], r["failed"]), (3, 2, []))   # the look and the failed step stay out
+        self.assertTrue(self.said[0].startswith("calls.jsonl:1 oot-p1 warp "))
+
+    def test_include_reads_and_failed(self):
+        r = self.go(include_reads=True, include_failed=True)
+        self.assertEqual((r["ran"], r["skipped"]), (5, 0))
+        self.assertEqual([x[1] for x in self.ran], ["warp", "get_state", "step", "act", "step"])
+
+    def test_dry_run_runs_nothing(self):
+        r = self.go(dry_run=True)
+        self.assertEqual((self.ran, r["ran"]), ([], 3))
+        self.assertEqual(len(self.said), 3)
+
+    def test_stops_at_the_first_failure_unless_told_to_go_on(self):
+        def boom(server, tool, args):
+            self.ran.append(tool)
+            if tool == "act":
+                raise ValueError("no game")
+        r = kit_tools.replay([self.path], runner=boom, say=self.said.append)
+        self.assertEqual(self.ran, ["warp", "act"])
+        self.assertEqual((r["ran"], len(r["failed"])), (1, 1))
+        self.assertEqual(r["failed"][0], ["calls.jsonl:4", "ValueError: no game"])
+        self.ran.clear()
+        r = kit_tools.replay([self.path], runner=boom, say=self.said.append, keep_going=True)
+        self.assertEqual(self.ran, ["warp", "act", "step"])
+        self.assertEqual((r["ran"], len(r["failed"])), (2, 1))
+
+    def test_the_default_runner_drives_each_games_bridge(self):
+        game = FakeGame()
+        saved = pc.port_for
+        pc.port_for = lambda player, lane=None: game.port
+        try:
+            r = kit_tools.replay([self.path], session=None, lane=3, log_dir=self.dir.name, keep_going=True,
+                                 say=self.said.append)
+        finally:
+            pc.port_for = saved
+            game.close()
+        steps = [m for m in game.log if m["cmd"] == "step"]
+        self.assertEqual([m["frames"] for m in steps], [9])        # the bridge got the step that had worked
+        self.assertEqual(len(r["failed"]), 1)                      # live act: it needs a --session
+        self.assertIn("--session", r["failed"][0][1])
+
+
+class LiveCli(unittest.TestCase):
+    def test_cli_calls_are_logged_and_replayed(self):
+        with tempfile.TemporaryDirectory() as d:
+            saved = live.do, live.state
+            seen = []
+            live.do = lambda a: {"ok": True}
+            live.state = lambda a: {"A": {"map": "M"}}
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    live.main(["do", "--session", d, "A", "give bow"])
+                    live.main(["state", "--session", d, "B", "--since", "3"])
+                    live.do = lambda a: {"error": "no such line"}
+                    self.assertEqual(live.main(["do", "--session", d, "B", "bad"]), 1)
+                calls = kit_tools.read_calls(os.path.join(d, "calls.jsonl"))
+                self.assertEqual([(c["server"], c["tool"], c["args"], c["ok"]) for c in calls],
+                                 [("live", "act", {"player": "A", "script": "give bow"}, True),
+                                  ("live", "state", {"player": "B", "since": 3}, True),
+                                  ("live", "act", {"player": "B", "script": "bad"}, False)])
+                live.do = lambda a: seen.append((a.player, a.script)) or {"ok": True}
+                err = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(err):
+                    code = live.main(["replay", "--session", d])
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(out.getvalue())["ran"], 1)
+                self.assertEqual(seen, [("A", "give bow")])   # only the call that worked, not the look
+                self.assertIn("live act", err.getvalue())
+                self.assertEqual(len(kit_tools.read_calls(os.path.join(d, "calls.jsonl"))), 3)   # a replay is not logged
+            finally:
+                live.do, live.state = saved
+
+    def test_replay_needs_a_file_or_a_session(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                live.main(["replay"])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
     step_until(client, "event == false")      step the game until a state field matches (or the frames run out)
     StateHistory                              the last states a tester looked at: `since` gives only what changed
+    CallLog, replay                           every kit call in a file, and `live.py replay` to run them again
 """
 import json
 import os
@@ -204,3 +205,107 @@ class StateHistory:
                 out[k] = dict(st, state_id=n, why="no look %s kept (kept: %s): the whole state" % (
                     since, "%d to %d" % kept if kept else "none"))
         return out
+
+
+# --- the call log and its replay ------------------------------------------------------------------------------------
+
+READ_ONLY = frozenset(("state", "get_state", "get_world", "get_actor", "log", "check_logs", "session_status", "pause",
+                       "resume", "shot", "screenshot"))   # nothing to run again: they only look (or move a log cursor)
+NAME = re.compile(r"^(oot-p[1-4]|oot-playtest|live)$")
+
+
+class CallLog:
+    """One JSON line per kit call: {"t" (when it began), "server", "tool", "args", "ok", "error"}. Every server of a session appends to
+    one file (`calls.jsonl` in the session folder), a line in one write, so the lines never mix."""
+
+    def __init__(self, path, server):
+        self.path, self.server = path, server
+
+    def write(self, tool, args, ok=True, error=None, t=None):
+        line = {"t": round(time.time() if t is None else t, 3), "server": self.server, "tool": tool, "args": args or {}, "ok": bool(ok)}
+        if error:
+            line["error"] = str(error)[:200]
+        try:
+            with open(self.path, "ab") as f:
+                f.write((json.dumps(line, separators=(",", ":")) + "\n").encode("utf-8"))
+        except OSError:
+            pass   # (a log that cannot be written never stops a test)
+
+
+def read_calls(paths):
+    """The calls of one or more log files, oldest first. A line that is not a call (a cut last line) is left out."""
+    out = []
+    for p in ([paths] if isinstance(paths, str) else paths):
+        with open(p, encoding="utf-8") as f:
+            for n, ln in enumerate(f, 1):
+                try:
+                    c = json.loads(ln)
+                except ValueError:
+                    continue
+                if isinstance(c, dict) and NAME.match(str(c.get("server"))) and isinstance(c.get("tool"), str):
+                    c["_at"] = "%s:%d" % (os.path.basename(p), n)
+                    out.append(c)
+    out.sort(key=lambda c: c.get("t", 0))   # (stable: lines of one file keep their order)
+    return out
+
+
+def replay(files, session=None, lane=None, log_dir=None, include_reads=False, include_failed=False, keep_going=False,
+           dry_run=False, delay=0.0, say=print, runner=None):
+    """Runs the calls of a call log again, in order. Calls that only look are left out (`include_reads`), and so are the
+    ones that failed the first time (`include_failed`). It stops at the first call that fails now (`keep_going`: runs on).
+    `runner(server, tool, args)` is what runs one call (a test gives its own); the default drives the games of `session`
+    (server oot-p1..p4: that game's bridge, on `lane`'s ports; oot-playtest and live: the session's own tools).
+    Returns {"ran", "skipped", "failed": [[position, error]]}."""
+    calls = read_calls(files)
+    runner = runner or _Runner(session, lane, log_dir)
+    ran, skipped, failed = 0, 0, []
+    try:
+        for c in calls:
+            tool = c["tool"]
+            if (tool in READ_ONLY and not include_reads) or (not c.get("ok", True) and not include_failed):
+                skipped += 1
+                continue
+            say("%s %s %s %s" % (c["_at"], c["server"], tool, json.dumps(c.get("args") or {}, separators=(",", ":"))))
+            if dry_run:
+                ran += 1
+                continue
+            try:
+                runner(c["server"], tool, c.get("args") or {})
+                ran += 1
+            except (Exception, SystemExit) as e:
+                failed.append([c["_at"], "%s: %s" % (e.__class__.__name__, e)])
+                say("  failed: %s" % failed[-1][1])
+                if not keep_going:
+                    break
+            if delay:
+                time.sleep(delay)
+    finally:
+        close = getattr(runner, "close", None)
+        if close:
+            close()
+    return {"ran": ran, "skipped": skipped, "failed": failed}
+
+
+class _Runner:
+    """Runs a logged call against the live games (imports the rest of the kit when first used)."""
+
+    def __init__(self, session, lane, log_dir):
+        self.session, self.lane, self.log_dir = session, lane, log_dir or "playtest-logs"
+        self.games = {}
+
+    def __call__(self, server, tool, args):
+        import mcp_playtest
+        import playtest_client as pc
+        if server in ("oot-playtest", "live"):
+            if not self.session:
+                raise ValueError("a session folder is needed (--session)")
+            return mcp_playtest.call(self.session, tool, args)
+        player = server[4:]
+        if player not in self.games:
+            self.games[player] = mcp_playtest.Game(player, pc.Client(pc.port_for(player, self.lane)),
+                                                   os.path.abspath(self.log_dir), self.session)
+        return self.games[player].call(tool, args)
+
+    def close(self):
+        for g in self.games.values():
+            g.client.close()

@@ -577,6 +577,9 @@ class Game:
         raise ValueError("no tool %s" % name)
 
 
+CALLS_FILE = "calls.jsonl"
+
+
 class Args:
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -608,8 +611,14 @@ def reply(id_, result=None, error=None):
     sys.stdout.flush()
 
 
-def serve(session, game=None):
-    """Answers MCP requests on stdin: the two-game session's tools (session), or one game's (game)."""
+def call_log_path(session, log_dir):
+    """Where a server writes its calls: `calls.jsonl` in the session folder, else in the run's log folder."""
+    return os.path.join(session or log_dir or "playtest-logs", CALLS_FILE)
+
+
+def serve(session, game=None, calllog=None):
+    """Answers MCP requests on stdin: the two-game session's tools (session), or one game's (game). `calllog`: the file
+    every call is also written to (a CallLog; docs/playtest.md, "Kit helpers")."""
     tools = PLAYER_TOOLS if game else TOOLS
     name = ("oot-%s" % game.player) if game else "oot-playtest"
     for line in sys.stdin:
@@ -632,11 +641,17 @@ def serve(session, game=None):
             reply(id_, {"tools": tools})
         elif method == "tools/call":
             params = req.get("params") or {}
+            began = time.time()
             try:
                 args = params.get("arguments") or {}
                 out = game.call(params.get("name"), args) if game else call(session, params.get("name"), args)
+                if calllog:
+                    calllog.write(params.get("name"), args, True, t=began)
                 reply(id_, {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]})
             except (Exception, SystemExit) as e:  # (SystemExit from a bad tag too: an error the tester reads)
+                if calllog and isinstance(params.get("name"), str):
+                    calllog.write(params["name"], params.get("arguments"), False, "%s: %s" % (e.__class__.__name__, e),
+                                  t=began)
                 reply(id_, {"content": [{"type": "text", "text": "%s: %s" % (e.__class__.__name__, e)}],
                             "isError": True})
         elif method == "ping":
@@ -654,15 +669,22 @@ def main(argv=None):
     p.add_argument("--lane", type=int, help="a test lane (tools/autotest/lanes.py): its bridge ports")
     p.add_argument("--log-dir", default="playtest-logs",
                    help="the run's checkpoint logs and shots; give every game's server the same one")
+    p.add_argument("--call-log", metavar="FILE", help="write every call here, for `live.py replay` (default: %s in "
+                   "the session folder, else in --log-dir)" % CALLS_FILE)
+    p.add_argument("--no-call-log", action="store_true", help="write no call log")
     a = p.parse_args(argv)
     if not a.player:
         if not a.session:
             p.error("give --session, or --player (and --session when the games came from live.py start)")
-        serve(os.path.abspath(a.session))
+        session = os.path.abspath(a.session)
+        serve(session, calllog=None if a.no_call_log else kit_tools.CallLog(
+            a.call_log or call_log_path(session, None), "oot-playtest"))
         return 0
     session = os.path.abspath(a.session) if a.session else None
     serve(None, Game(a.player, pc.Client(a.port or pc.port_for(a.player, a.lane)), os.path.abspath(a.log_dir),
-                     session))
+                     session),
+          calllog=None if a.no_call_log else kit_tools.CallLog(
+              a.call_log or call_log_path(session, os.path.abspath(a.log_dir)), "oot-" + a.player))
     return 0
 
 
