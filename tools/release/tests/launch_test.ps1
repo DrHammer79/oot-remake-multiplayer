@@ -21,7 +21,7 @@ function Write-File([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $Text)
 }
 function Read-File([string]$Path) { if (Test-Path -LiteralPath $Path) { [System.IO.File]::ReadAllText($Path) } else { '<none>' } }
-# A kit file as make_kit.ps1 writes it (its own copy function): Windows line ends, the port
+# A kit file as make_kit_hookshot.ps1 writes it (its own copy function): Windows line ends, the port
 # filled in, except in coop.ini.template.
 . (Join-Path $release 'kit_text.ps1')
 function Copy-KitFile([string]$From, [string]$To) { Copy-KitText $From $To 27510 }
@@ -625,7 +625,7 @@ try {
     Check ($out -match 'Game started' -and $gamePid -match '^\d+$') "kit autotest: the game's process id in OOT_COOP_TEST_KIT's file [$gamePid] [$out]"
     Check ((Read-File (Join-Path $hsGame 'coop.ini')) -notmatch '(?m)^\s*server\s*=') 'kit autotest: coop.ini still has no server'
     Get-Process hookshot -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($kit, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
-    # A built kit's coop.ini.template and coop-ini.ps1 keep @PORT@ (make_kit.ps1 copies with
+    # A built kit's coop.ini.template and coop-ini.ps1 keep @PORT@ (make_kit_hookshot.ps1 copies with
     # kit_text.ps1), and play.ps1 writes the port each join needs: 27512 (the join helper) for an
     # invite code, the given port for host:port.
     $kit = Join-Path $tmp 'kit port'; New-Kit $kit 'v0.1.0-beta4' 'old'
@@ -945,7 +945,9 @@ try {
     $csNpcFiles = @('romfs\Tex\Npc_A.bntx.zs', 'romfs\Phive\Cloth\Player_Adult_CAC.Nin_Ounce_NVN2.bphcl', 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs',
                     'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Dark_Animation.Skeleton.bfres.zs', 'romfs\Model\Player_Adult_C115.Player_Adult.bfres.zs')
     $csUiFiles = @('romfs\UI\LayoutArchiveCategory.Product.100.byml.zs', 'romfs\Sequence\CharacterMenu.module.ainb', 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs',
-                   'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs')
+                   'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs',
+                   # (row 242: Link's own textures, named by his Link models, stay in the default part)
+                   'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs', 'romfs\Tex\Mt_Hairs_Player_Adult_Ah9.bntx.zs', 'romfs\Tex\Angin_Tile_A_Dark_Ac7.bntx.zs')
     # His code patch as IPS32: a kept record, one record in each customizer region his source names, a kept run record,
     # then $Extra (@(offset, bytes) pairs).
     $New_CsIps = {
@@ -981,7 +983,7 @@ try {
         Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ("# pin`nrelease=$Tag`nurl=https://example.invalid/cs`nzip=CS-$Tag.zip`nzip_sha256=$zsha`n" +
             "zip_folder=CS-$Tag/mods/OoT Character Select`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`n" +
             "overlay_sha256=$osha`nips_url=$IpsUrl`nips_sha256=$IpsSha`n")
-        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz1"
+        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2"
     }
     $csJson = '{"format": 1, "mod": "OoT Character Select", "puppet_colours": {"offset": 62574416, "head": "FD7BBFA9000100B40B2C40B96B1D0051"}, "characters": []}'
     $onlineWas = $env:OOT_COOP_OFFLINE; $env:OOT_COOP_OFFLINE = '0'
@@ -1026,6 +1028,18 @@ try {
         foreach ($p in $csNpcFiles) { if (-not (Test-KitCharacterSelectNpcFile $p)) { $partsOk = $false } }
         foreach ($p in $csUiFiles + @('romfs\GameData\GameDataList.Product.110.byml.zs', 'exefs\E0F3.ips', 'romfs\Model\Player_Adult.Player_Adult.bfres.zs')) { if (Test-KitCharacterSelectNpcFile $p) { $partsOk = $false } }
         Check $partsOk 'Character Select parts: NPC files and default-part files told apart'
+        # v0.2.2: player.py's --exclude for part 'ui' ($KitCharselToolExclude) says what Test-KitCharacterSelectNpcFile says.
+        $exOk = $true
+        foreach ($p in $csNpcFiles + $csUiFiles + @('romfs\Sound\Resource\Voice.bars.zs', 'romfs\Model\Player_Dark_Link.bfres.zs',
+                'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Child_C005.Player_Child_C005.bfres.zs',
+                'romfs\Tex\a.bntx.zs', 'romfs\Phive\a.bphsh.zs', 'romfs\GameData\GameDataList.Product.110.byml.zs',
+                'romfs\Model\Player_Adult.Player_Adult.bfres.zs', 'romfs\Pack\Actor\Enemy_DarkLink.pack.zs', 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs',
+                'romfs\Tex\Angin_Tile_A_Dark_Ac7.bntx.zs', 'romfs\Tex\Mt_Hairs_Player_Adult_Ah9.bntx.zs', 'romfs\Tex\Npc_Zelda_Alb.bntx.zs')) {
+            $r = $p.Replace('\', '/')
+            if ($r -notmatch '^romfs/') { continue }
+            if (($r.Substring(6) -cmatch $KitCharselToolExclude) -ne (Test-KitCharacterSelectNpcFile $p)) { $exOk = $false; Write-Host "  exclude/NPC rule differ: $p" }
+        }
+        Check $exOk 'Character Select tool: the ui part''s --exclude and the NPC rule agree on every romfs file'
         # review-geno-0118: what the game was built with is kept until its build: nothing there before -> _<folder>.none;
         # a failed or declined build puts it back (play.ps1 Restore-KitCharacterSelectStart), a built one confirms it.
         $csNone = Join-Path $cm '_OoT Character Select.none'; $csPrev = Join-Path $cm '_OoT Character Select.prev'
@@ -1078,7 +1092,7 @@ try {
         Remove-Item -LiteralPath (Join-Path $csDir 'coop-charsel.txt') -Force
         $r = Install-KitCharacterSelect $ck $cm
         Check ($r.Ok -and -not $r.Changed -and ($r.Lines -join ' ') -match 'your own copy') 'Character Select: the player''s own copy is used as it is'
-        Check (-not (Install-KitCharacterSelect $ck $cm '' 'ui').Changed -and (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Tex'))) 'Character Select: character_select = no leaves the player''s own copy as it is (NPC part too)'
+        Check (-not (Install-KitCharacterSelect $ck $cm '' 'ui').Changed -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: character_select = no leaves the player''s own copy as it is (NPC part too)'
         Write-File (Join-Path $csDir 'coop-charsel.txt') "$want`n"
         # The answer: coop-options.ini wins, else the kept answer, else asked (Enter, Y or 15 s: yes; N: no).
         Remove-Item -LiteralPath (Join-Path $ck 'hookshot\character-select-answer.txt') -Force -ErrorAction SilentlyContinue
@@ -1106,7 +1120,37 @@ try {
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq ($want -replace ' full ', ' ui ') -and
                @($csNpcFiles | Where-Object { Test-Path -LiteralPath (Join-Path $csDir $_) }).Count -eq 0 -and
                @($csUiFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $csDir $_)) }).Count -eq 0 -and
-               -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Tex')) -and (Test-Path -LiteralPath $csIps)) 'Character Select: character_select = no keeps the Characters page, takes the NPC part out (from the copy there, no download)'
+               -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Phive')) -and -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound')) -and
+               (Test-Path -LiteralPath $csIps)) 'Character Select: character_select = no keeps the Characters page and Link''s own textures, takes the NPC part out (from the copy there, no download)'
+        # Row 242: a default part made by the old rule (0.11.9/0.11.10: its stamp has no ui-rule field, all of romfs/Tex
+        # gone, Link's own textures too) is made again from his release, never copied from, so Link's textures come back.
+        # (its own mods folder: the kept copies of $cm stay as the checks below expect them)
+        $cm242 = Join-Path $cg 'mods-242'
+        $cs242 = Join-Path $cm242 'OoT Character Select'
+        # (a pin of its own with its zip in the downloads, a copy of that zip for the second install, which takes it
+        # away again; the pin and characters.json of the checks below put back after)
+        $csPinFile = Join-Path $ck 'hookshot\CHARACTER-SELECT.txt'
+        $csJsonFile = Join-Path $cDl 'charsel-characters.json'
+        $csPinKept = [System.IO.File]::ReadAllBytes($csPinFile)
+        $csJsonKept = if (Test-Path -LiteralPath $csJsonFile) { [System.IO.File]::ReadAllBytes($csJsonFile) } else { $null }
+        $want242 = (& $New_CsPin 'v242' $csJson) -replace ' full ', ' ui '
+        $csZip242 = Join-Path $cDl 'CS-v242.zip'
+        $csZipKept = Join-Path $cg 'CS-v242.zip.kept'
+        Copy-Item -LiteralPath $csZip242 -Destination $csZipKept -Force
+        $csLinkTex = Join-Path $cs242 'romfs\Tex\Mt_Vest_Player_Child_Ac1.bntx.zs'
+        $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
+        Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: a new default part keeps Link's own textures (row 242) [$($csNew.Why)]"
+        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2$', ' cz1') + "`n")
+        Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $csZipKept -Destination $csZip242 -Force
+        $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
+        Check ($csOld.Ok -and $csOld.Changed -and (Test-Path -LiteralPath $csLinkTex) -and
+               -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
+               (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: an old-rule default part (no Link textures) is made again with them, not copied from (row 242) [$($csOld.Why)]"
+        [System.IO.File]::WriteAllBytes($csPinFile, $csPinKept)
+        if ($null -ne $csJsonKept) { [System.IO.File]::WriteAllBytes($csJsonFile, $csJsonKept) }
+        Remove-Item -LiteralPath $cm242, $csZipKept, $csZip242, (Join-Path $ck 'src-v242') -Recurse -Force -ErrorAction SilentlyContinue
         Check ((Undo-KitCharacterSelect $ck $cm) -and (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $csDir 'coop-charsel.txt')) -eq $want) 'Character Select undo: a failed build after the change puts the full copy back, its files whole'
         Check ((Invoke-KitCharacterSelectStep $ck $cg) -and -not (Test-Path -LiteralPath (Join-Path $csDir $csNpcFiles[0]))) 'Character Select: the default part again'
@@ -1199,6 +1243,111 @@ try {
         Write-File (Join-Path $cm '_off\characters.json') $csJsonN
         Write-File (Join-Path $cm '_off\romfs\Model\Player_Adult_C006.Player_Adult.bfres.zs') 'm'
         Check ((Get-KitCharacterSelectSeen $pm) -eq $seenFull) 'Character Select seen: a folder starting with _ is skipped (the game skips it)'
+        # v0.2.2: the pin's tool_folder (the zip's build-from-your-game) makes the game-derived files from the game's RomFS with the
+        # kit's Python (a junction to a real Python here; skipped without one). A fake player.py writes Model\Made_By_Tool.bin
+        # holding its arguments, warns on stderr, and exits 1 when FAIL_TOOL is in its folder.
+        $tpy = if ($env:TEST_PYTHON) { $env:TEST_PYTHON } else { (Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+        $tHome = ''
+        if ($tpy -and $tpy -notmatch 'WindowsApps' -and (Test-Path -LiteralPath $tpy)) { try { $tHome = "$(& $tpy -I -c 'import sys; print(sys.base_prefix)' 2>$null)".Trim() } catch { $tHome = '' } }
+        if ($tHome -and (Test-Path -LiteralPath (Join-Path $tHome 'python.exe'))) {
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path (Join-Path $ck 'hookshot\tools') | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $ck 'hookshot\tools\python') -Value $tHome | Out-Null
+            $src2 = Join-Path $ck 'src-tool'
+            $top2 = Join-Path $src2 'CS-t\mods\OoT Character Select'
+            Write-File (Join-Path $top2 'romfs\UI\LayoutArchiveCategory.Product.100.byml.zs') 'ui'
+            [System.IO.Directory]::CreateDirectory((Join-Path $top2 'exefs')) | Out-Null
+            [System.IO.File]::WriteAllBytes((Join-Path $top2 'exefs\E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips'), (& $New_CsIps 't'))
+            Write-File (Join-Path $src2 'CS-t\build-from-your-game\player.py') @'
+import os, sys
+a = sys.argv
+mod = a[a.index("--mod") + 1]
+rom = a[a.index("--romfs") + 1]
+sys.stderr.write("player.py:11: SyntaxWarning: invalid escape sequence\n")
+if not os.path.isfile(os.path.join(rom, "Pack", "ZsDic.pack.zs")):
+    sys.exit("not the game's RomFS folder")
+if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FAIL_TOOL")):
+    print("2287 files could not be made; the mod is not complete.", flush=True)
+    sys.stderr.write("lib/astc.py:40: DeprecationWarning: old call\n  x = y\n")   # (a warning AFTER the last stdout line: never the reason)
+    sys.stderr.flush(); import time; time.sleep(0.5)
+    sys.exit(1)
+if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "HANG_TOOL")):
+    import subprocess, time
+    c = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])   # (a worker: must go with it)
+    open(os.environ["CS_HANG_PID_FILE"], "w").write(str(c.pid))
+    print("Making 2287 files", flush=True)
+    time.sleep(600)
+os.makedirs(os.path.join(mod, "romfs", "Model"), exist_ok=True)
+open(os.path.join(mod, "romfs", "Model", "Made_By_Tool.bin"), "w").write(" ".join(a[1:]))
+print("Done: 1 file. The mod folder is ready.")
+'@
+            $zipT = Join-Path $cDl 'CS-t.zip'
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
+            $zshaT = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            $pinT = "# pin`nrelease=t`nurl=https://example.invalid/cs`nzip=CS-t.zip`nzip_sha256=$zshaT`nzip_folder=CS-t/mods/OoT Character Select`n" +
+                    "tool_folder=CS-t/build-from-your-game`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`noverlay_sha256=$(((Get-FileHash -LiteralPath (Join-Path $cDl 'charsel-characters.json') -Algorithm SHA256).Hash.ToLowerInvariant()))`n"
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') $pinT
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'no game RomFS' -and -not (Test-Path -LiteralPath $csDir)) "Character Select tool: no game RomFS -> not installed, the reason says why [$($r.Lines -join ' | ')]"
+            Write-File (Join-Path $cg 'romfs\Pack\ZsDic.pack.zs') 'z'
+            $r = Install-KitCharacterSelect $ck $cm
+            $made = Join-Path $csDir 'romfs\Model\Made_By_Tool.bin'
+            Check ($r.Ok -and (Test-Path -LiteralPath $made) -and (Get-Content -LiteralPath $made -Raw) -notmatch '--exclude' -and (Get-Content -LiteralPath $made -Raw) -match '--romfs' -and
+                   -not (Test-Path -LiteralPath (Join-Path $cDl 'charsel-tool'))) "Character Select tool: the RomFS there -> the tool makes its files in the mod folder (full part: no --exclude), its stderr warning is no failure, its folder is cleaned up [$($r.Lines -join ' | ')]"
+            Remove-Item -LiteralPath $csDir -Recurse -Force
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'   # (the zip is deleted after an install)
+            $r = Install-KitCharacterSelect $ck $cm '' 'ui'
+            Check ($r.Ok -and (Get-Content -LiteralPath $made -Raw).EndsWith("--exclude $KitCharselToolExclude")) 'Character Select tool: part ui passes --exclude, the NPC rule byte for byte (its | ( ) ^ $ reach the tool as written)'
+            # Arguments reach a program exactly as given (no shell between): '&', '|', '^', '%', spaces, quotes, a trailing backslash.
+            $argsT = @('a b&c', 'x|y^z %PATH%', 'q"uote', 'tail\', 'two\\"', '', 'plain')
+            $echoOut = Join-Path $ck 'argv-echo.txt'
+            $echo = Invoke-KitToolLimited (Join-Path $ck 'hookshot\tools\python\python.exe') (@('-I', '-c', 'import sys; open(sys.argv[1], "w", encoding="utf-8", newline="").write("\n".join(sys.argv[2:]))', $echoOut) + $argsT) 30 60
+            $gotT = if (Test-Path -LiteralPath $echoOut) { [System.IO.File]::ReadAllText($echoOut) } else { '' }
+            Check ($echo.Code -eq 0 -and $gotT -ceq ($argsT -join "`n")) "Invoke-KitToolLimited: every argument reaches the program byte for byte [exit $($echo.Code): $gotT]"
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            # An empty NPC rule would exclude nothing (NPC files in the ui part): refused, nothing installed.
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src2 'CS-t'
+            $ruleKept = $KitCharselToolExclude; $KitCharselToolExclude = ''
+            $r = Install-KitCharacterSelect $ck $cm '' 'ui'
+            $KitCharselToolExclude = $ruleKept
+            Check (-not $r.Ok -and "$($r.Why)" -match 'NPC rule' -and -not (Test-Path -LiteralPath $csDir)) 'Character Select tool: an empty NPC rule -> part ui refused, nothing installed'
+            Remove-Item -LiteralPath $csDir -Recurse -Force -ErrorAction SilentlyContinue
+            # (the tool folder is unpacked fresh at each install: the failing marker goes into the zip's tool folder via a second zip)
+            $src3 = Join-Path $ck 'src-tool3'
+            Copy-Item -LiteralPath (Join-Path $src2 'CS-t') -Destination (Join-Path $src3 'CS-t') -Recurse
+            Write-File (Join-Path $src3 'CS-t\build-from-your-game\FAIL_TOOL') 'x'
+            Remove-Item -LiteralPath $zipT -Force -ErrorAction SilentlyContinue
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src3 'CS-t'
+            $zshaF = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ($pinT -replace $zshaT, $zshaF)
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'making its files from your game failed \(2287 files could not be made' -and ($r.Lines -join ' ') -match 'refused file by file' -and
+                   -not (Test-Path -LiteralPath $csDir)) "Character Select tool: a failing tool (exit 1) -> not installed, its last line and the other-version sentence shown [$($r.Lines -join ' | ')]"
+            # A tool that hangs (writes nothing, a worker of its own): stopped at the idle limit with its whole process tree,
+            # not installed, the reason says it stopped answering.
+            $src4 = Join-Path $ck 'src-tool4'
+            Copy-Item -LiteralPath (Join-Path $src2 'CS-t') -Destination (Join-Path $src4 'CS-t') -Recurse
+            Write-File (Join-Path $src4 'CS-t\build-from-your-game\HANG_TOOL') 'x'
+            Remove-Item -LiteralPath $zipT -Force -ErrorAction SilentlyContinue
+            & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipT -C $src4 'CS-t'
+            $zshaH = (Get-FileHash -LiteralPath $zipT -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ($pinT -replace $zshaT, $zshaH)
+            $env:CS_HANG_PID_FILE = Join-Path $ck 'hang-child.pid'
+            $idleKept = $KitCharselToolIdle; $KitCharselToolIdle = 4
+            $t0 = Get-Date
+            $r = Install-KitCharacterSelect $ck $cm
+            $took = ((Get-Date) - $t0).TotalSeconds
+            $KitCharselToolIdle = $idleKept
+            $childPid = if (Test-Path -LiteralPath $env:CS_HANG_PID_FILE) { [int](Get-Content -LiteralPath $env:CS_HANG_PID_FILE -TotalCount 1) } else { 0 }
+            $childGone = $childPid -gt 0 -and -not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)
+            if (-not $childGone -and $childPid -gt 0) { Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
+            Remove-Item Env:\CS_HANG_PID_FILE -ErrorAction SilentlyContinue
+            Check (-not $r.Ok -and ($r.Lines -join ' ') -match 'was stopped \(it wrote nothing for 4 s\): its tool stopped answering' -and $took -lt 120 -and $childGone -and
+                   -not (Test-Path -LiteralPath $csDir)) "Character Select tool: a hanging tool -> stopped at the idle limit with its worker, not installed, the reason says so [$([int]$took) s, worker gone $childGone; $($r.Lines -join ' | ')]"
+            Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') (($pinT -replace $zshaT, $zshaF) -replace 'tool_folder=CS-t/build', 'tool_folder=CS-t/../build')
+            $r = Install-KitCharacterSelect $ck $cm
+            Check (-not (Test-Path -LiteralPath $csDir)) 'Character Select tool: a tool_folder that leaves the zip makes the pin unusable (nothing installed)'
+        } else { Write-Host 'skip Character Select tool cases (no real Python: TEST_PYTHON)' }
     } finally { $env:OOT_COOP_OFFLINE = $onlineWas }
     Remove-Item -LiteralPath $ck -Recurse -Force -ErrorAction SilentlyContinue
     # A randomizer seed built before the puppet pack was made again: its size table lacks the pack's entries and the
@@ -1672,7 +1821,7 @@ try {
     $commit = 'e7ed2f7a6526cd6b841b86678b3ac96eb6e5b1c8'
     foreach ($k in "$kc\kit-1", "$kc\kit-1 - Copy") {
         Copy-Item -LiteralPath (Join-Path $kitSrc 'scripts') -Destination "$k\scripts" -Recurse
-        Copy-Item -LiteralPath (Join-Path $kitSrc 'coop.ini.template') -Destination "$k\scripts\coop.ini.template"   # (as make_kit.ps1 lays it out)
+        Copy-Item -LiteralPath (Join-Path $kitSrc 'coop.ini.template') -Destination "$k\scripts\coop.ini.template"   # (as make_kit_hookshot.ps1 lays it out)
         Write-File "$k\hookshot\PIN" "runtime=Longshot`nrepo=https://git.magicbean.dev/MagicBeanDev/Longshot`ncommit=$commit`n"
         Write-File "$k\hookshot\TOOLS.txt" "release=v3.0.0-rc.3`nlock_sha256=b3`nsource_commit=$commit`nsource_sha256=aa`n"
         Write-File "$k\hookshot\patches\0001-a.patch" "one`n"

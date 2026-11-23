@@ -1,16 +1,16 @@
-"""Tests for hookshot/patches 0034 and 0035: Longshot's nx2/exefs_patches.py as the two patches make it (0034 adds the
-file, 0035 changes it), written into a temporary folder from the patch files with `git apply` and imported. Made-up
-data only: no Longshot source and no game needed.
+"""Tests for hookshot/patches 0035: the functions it adds to Longshot's nx2/exefs_patches.py (functions_written,
+written_words, the co-op Mods tab's list). Since Longshot 3.1 the file is Longshot's own (our 0034, which added it, is
+dropped), so the test takes 0035's added block for that file out of the patch and runs it alone: no Longshot source,
+no game, made-up data only.
 
     python tools/hookshot/tests/test_exefs_patches.py
 """
-import importlib.util
 import json
 import os
+import re
 import shutil
-import subprocess
-import sys
 import tempfile
+import types
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -20,19 +20,22 @@ MAIN = 0x80020000   # main's link address, as snaildev99's crash lines have it
 
 
 def load():
-    """The module from patches 0034 + 0035 (their hunks for FILE only), or a SkipTest without git."""
-    git = shutil.which("git")
-    if git is None:
-        raise unittest.SkipTest("needs git")
-    work = tempfile.mkdtemp(prefix="exefs_patches_")
-    subprocess.run([git, "init", "-q"], cwd=work, check=True)
-    for name in sorted(os.listdir(PATCHES)):
-        if name.startswith(("0034-", "0035-")):
-            subprocess.run([git, "apply", "--include=" + FILE, os.path.join(PATCHES, name)], cwd=work, check=True)
-    spec = importlib.util.spec_from_file_location("exefs_patches_under_test", os.path.join(work, *FILE.split("/")))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod, work
+    """0035's added block for FILE (the hunk with coop_list), run as a module with what it uses of the file (os, json,
+    ENV)"""
+    name = next(n for n in sorted(os.listdir(PATCHES)) if n.startswith("0035-"))
+    with open(os.path.join(PATCHES, name), encoding="utf-8") as f:
+        text = f.read()
+    part = text[text.index("diff --git a/%s b/%s" % (FILE, FILE)):]
+    end = part.find("\ndiff --git", 1)
+    part = part if end < 0 else part[:end]
+    for hunk in re.split(r"\n(?=@@ )", part)[1:]:
+        added = [line[1:] for line in hunk.split("\n") if line.startswith("+")]
+        if any(line.startswith("def coop_list(") for line in added):
+            mod = types.ModuleType("exefs_patches_0035")
+            mod.__dict__.update(os=os, json=json, ENV="OOT_EXEFS_PATCHES")
+            exec(compile("\n".join(added) + "\n", name, "exec"), mod.__dict__)
+            return mod, tempfile.mkdtemp(prefix="exefs_patches_")
+    raise AssertionError("%s: no hunk adding coop_list to %s" % (name, FILE))
 
 
 class ExefsPatchesTest(unittest.TestCase):
@@ -83,12 +86,15 @@ class ExefsPatchesTest(unittest.TestCase):
             f.write("coop-mods 1\non Second\noff Off Mod\non first\non FIRST\n")
         rows = self.m.coop_list(root)
         self.assertEqual(rows, [("Second", True), ("Off Mod", False), ("first", True)])   # (a name twice: its first)
-        mods = [("zeta", "/z"), ("first", "/f"), ("Off Mod", "/o"), ("alpha", "/a"), ("Second", "/s")]
+        # mods.json's order and switches (Longshot's ordered): alpha is off there
+        mods = [("zeta", "/z", True), ("first", "/f", True), ("Off Mod", "/o", True), ("alpha", "/a", False),
+                ("Second", "/s", True)]
         got = self.m.coop_ordered(mods, rows)
-        # host/mods.c's order: the mods the list does not name first, by name; then the list from its last row up, so
-        # the first row is indexed last and its patch wins a byte two patches write. An off mod stays off.
+        # host/mods.c coop_mods_rank's order: an off one first, then the mods the list does not name in mods.json's order
+        # and with its switches, then the list from its last row up, so the first row is indexed last and its patch wins
+        # a byte two patches write.
         self.assertEqual([(n, on) for n, _, on in got],
-                         [("alpha", True), ("Off Mod", False), ("zeta", True), ("first", True), ("Second", True)])
+                         [("Off Mod", False), ("zeta", True), ("alpha", False), ("first", True), ("Second", True)])
         with open(os.path.join(root, self.m.COOP_LIST), "w", encoding="utf-8") as f:
             f.write("coop-mods 2\non Second\n")
         self.assertIsNone(self.m.coop_list(root))   # another version: not ours

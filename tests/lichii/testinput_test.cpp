@@ -548,6 +548,10 @@ TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (iss
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee lots\n", error));
     CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 9 9\n", error));
+    // past int32: refused (all digits, so only the overflow tells; review-01111-b)
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee 2147483648\n", error));
+    CHECK_FALSE(Parse("setflag PlayerStatus.CurrentRupee -2147483649\n", error));
+    CHECK(Parse("setflag PlayerStatus.CurrentRupee 2147483647\n", error));
     Runner r(Must("setflag PouchData.Weapon_Shield_Deku.StockNum 0\nsetflag PlayerStatus.CurrentRupee 99\n"));
     std::vector<std::string> log;
     r.Advance(0.0, std::nullopt, log);
@@ -558,6 +562,20 @@ TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (iss
     CHECK(requests[0].start == "0");
     CHECK(requests[1].name == "PlayerStatus.CurrentRupee");
     CHECK(requests[1].start == "99");
+}
+
+TEST_CASE("testinput: dump hands the hook a checkpoint tag (play-test kit)") {
+    std::string error;
+    CHECK_FALSE(Parse("dump\n", error));
+    CHECK_FALSE(Parse("dump a b\n", error));
+    CHECK_FALSE(Parse("dump ../x\n", error));  // a tag is part of a file name: no path
+    Runner r(Must("dump after_chest\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::dump);
+    CHECK(requests[0].name == "after_chest");
 }
 
 TEST_CASE("testinput: setenum hands the hook an Enum flag (name or 0x hash) and a value's name (issue 193)") {
@@ -742,4 +760,29 @@ TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, f
     CHECK((*up)[3 + 1 * 3 + 2] == doctest::Approx(1.0f));
     CHECK_FALSE(AimPlace(eye, eye, 0.6f).has_value());
     CHECK_FALSE(AimPlace({std::nanf(""), 0.0f, 0.0f}, eye, 0.6f).has_value());
+}
+
+TEST_CASE("testinput: event hands the hook an event setting's name (boss-route-01112)") {
+    std::string error;
+    CHECK_FALSE(Parse("event\n", error));
+    CHECK_FALSE(Parse("event DreamBossStage_Rematch_Barinade_Start extra\n", error));
+    Runner r(Must("event DreamBossStage_Rematch_Barinade_Start\nmark after\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::event);
+    CHECK(requests[0].name == "DreamBossStage_Rematch_Barinade_Start");
+}
+
+TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
+    std::string error;
+    CHECK_FALSE(Parse("menu host now\n", error));
+    Runner r(Must("menu Host\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::menu);
+    CHECK(requests[0].name == "host");
 }

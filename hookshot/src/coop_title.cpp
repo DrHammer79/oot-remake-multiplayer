@@ -132,6 +132,8 @@ std::atomic<bool> g_mod_asked{false};    // a code mod asked for a re-read (AskS
 std::atomic<bool> g_list_open{false};    // a re-read is asked or running (a mod's or co-op's): not ready
 std::mutex g_mutex;
 CoopTitleMenu::SaveWait g_wait;   // Join at the title -> what the title says while the host's save comes
+// The title's own hint line (Pa_CoopHint_00) says g_wait's line: nothing drawn for it (B10, reports/ui-audit-01112.md).
+std::atomic<bool> g_wait_on_hint{false};
 CoopTitleMenu::PlayerChoice g_choice;   // the player's own A on the title, before the mods' holds (NotePlayerPad)
 std::uint64_t g_pad_last = 0;
 int g_focus_logged = -2;
@@ -968,10 +970,13 @@ void StepNative(void* ctx, std::uint64_t screen) {
     // be shown, the row's own text)
     const bool toggled = look.toggle >= 0 && g_toggle.layout == layout && g_toggle.usable;
     for (int i = 0; i < look.buttons; ++i) {
+        // The page's rows are already in the player's language (coop_title_native.cpp: RowText, TypingLook, LookFor), a
+        // field's own text and a player's or a room's name as it is: not looked up again here, which would turn a name
+        // that is also a word of the table ("Link") into the table's line.
         ok = SetLiveText(ctx, layout, i, toggled && i == look.toggle ? std::string(" ") : look.texts[static_cast<std::size_t>(i)]) && ok;
     }
     if (g_column.layout != layout) FindColumn(ctx, screen, layout);
-    const bool hint = !look.hint.empty() && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, CoopI18n::Tr(look.hint));
+    const bool hint = !look.hint.empty() && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, look.hint);
     ShowColumn(ctx, screen, look.buttons, hint, look.dim);
     if (ok) StepToggle(ctx, screen, layout, look);
     else HideToggle(ctx);
@@ -1001,6 +1006,7 @@ void StepNative(void* ctx, std::uint64_t screen) {
 std::atomic<bool> g_ask{false};
 bool g_ask_looked = false;                 // (g_mutex)
 std::vector<std::string> g_ask_pending;    // (g_mutex) the game folder's records when it was looked for
+bool g_ask_stuck = false;                  // (g_mutex) the record asked about is a stuck load's (coop_stuck_load.h)
 std::uint64_t g_ask_since = 0;             // (g_mutex) when it came up
 bool g_ask_focused = false;                // (g_mutex) OK has the title's cursor
 constexpr std::uint64_t kAskQuietMs = 700;   // presses this soon after it came up are the ones that brought the title
@@ -1017,6 +1023,7 @@ void LookForAsk() {
     if (Env("LICHII_COOP_PROBLEM_ASK") == "0") return;
     const std::filesystem::path folder = AskFolder();
     std::vector<std::string> pending = CoopProblemAsk::PendingNames(folder);
+    for (std::string& name : CoopProblemAsk::StuckNames(folder)) pending.push_back(std::move(name));   // (black-01112)
     const std::int64_t now_s =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     // (the crashes the kit already sent to us are not asked about: coop_problem_ask.h)
@@ -1026,10 +1033,12 @@ void LookForAsk() {
     {
         std::lock_guard lock(g_mutex);
         g_ask_pending = std::move(pending);
+        g_ask_stuck = CoopProblemAsk::IsStuck(*due);
         g_ask_since = NowMs(), g_ask_focused = false;
     }
     g_ask = true;
-    LOG_INFO(Core, "coop: title: the game crashed last time ({}): the title asks for /bugreport once", *due);
+    LOG_INFO(Core, "coop: title: {} last time ({}): the title asks for /bugreport once",
+             CoopProblemAsk::IsStuck(*due) ? "a load never ended" : "the game crashed", *due);
 }
 
 // `seen`: the player pressed on it (it is not asked again for these records); else co-op's page or a host save's load
@@ -1050,16 +1059,22 @@ void CloseAsk(bool seen) {
     if (seen && !CoopProblemAsk::WriteAsked(AskFolder(), CoopProblemAsk::AskedAfter(pending))) {
         LOG_WARNING(Core, "coop: title: bug-reports\\coop-asked.txt could not be written: the ask may come again");
     }
+    if (seen) {   // (a stuck load's records are ours: asked about once, then gone)
+        for (const std::string& name : pending) {
+            if (CoopProblemAsk::IsStuck(name)) CoopProblemAsk::RemoveStuck(AskFolder(), name);
+        }
+    }
     LOG_INFO(Core, "coop: title: the /bugreport ask {}", seen ? "seen and closed" : "shut (the title went to co-op)");
 }
 
 void StepAsk(void* ctx, std::uint64_t screen) {
     const std::uint64_t layout = Read64(screen + kTitleLayout);
     if (layout == 0) return;
-    bool apply = false, focus = false;
+    bool apply = false, focus = false, stuck = false;
     const char* sound = nullptr;
     {
         std::lock_guard lock(g_mutex);
+        stuck = g_ask_stuck;
         const std::uint64_t now = NowMs();
         if (now >= g_apply_next) apply = true, g_apply_next = now + 250;
         focus = !std::exchange(g_ask_focused, true);
@@ -1071,7 +1086,8 @@ void StepAsk(void* ctx, std::uint64_t screen) {
     KeepFocusShown(ctx, screen, CoopTitleNative::kButtons);
     bool ok = true;
     for (int i = 0; i < CoopTitleNative::kButtons; ++i) {
-        ok = SetLiveText(ctx, layout, i, CoopI18n::Tr(CoopProblemAsk::kWords[static_cast<std::size_t>(i)])) && ok;
+        const auto& words = stuck ? CoopProblemAsk::kStuckWords : CoopProblemAsk::kWords;
+        ok = SetLiveText(ctx, layout, i, CoopI18n::Tr(words[static_cast<std::size_t>(i)])) && ok;
     }
     if (!ok) {   // (an older pack: no page of ours on the title, so no ask)
         CloseAsk(false);
@@ -1105,17 +1121,21 @@ std::uint64_t AskPad(std::uint64_t buttons) {
 }
 
 void StepMenu(void* ctx, std::uint64_t screen) {
-    if (!g_menu.load() || ctx == nullptr || !HasScratch()) return;
+    // (g_wait_on_hint: false on every way out before the hint line is set; set once there, so the drawn line never
+    // shows for a step in between)
+    if (!g_menu.load() || ctx == nullptr || !HasScratch()) return g_wait_on_hint.store(false);
     if (g_native_page.load() < 0 && g_auto_load_until.load() == 0) LookForAsk();
     if (g_ask.load()) {
         if (g_native_page.load() >= 0 || g_auto_load_until.load() != 0 || g_auto_press_ms.load() != 0) {
             CloseAsk(false);
         } else {
+            g_wait_on_hint.store(false);
             StepAsk(ctx, screen);
             return;
         }
     }
     if (g_native_page.load() >= 0) {
+        g_wait_on_hint.store(false);
         StepNative(ctx, screen);
         return;
     }
@@ -1123,6 +1143,7 @@ void StepMenu(void* ctx, std::uint64_t screen) {
     bool apply = false, any_save = true, sub = false;
     int focus = -1, decide = -1;
     const char* sound = nullptr;
+    std::string wait_line;   // (g_wait.Line(), read under the lock)
     bool one_start = CoopModsRuntime::FileSelectRuns();   // (before g_mutex: the mods' calls take it, coop_busy)
     {
         std::lock_guard lock(g_mutex);
@@ -1143,6 +1164,7 @@ void StepMenu(void* ctx, std::uint64_t screen) {
         std::swap(focus, g_focus_to);
         std::swap(decide, g_decide);
         std::swap(sound, g_sound);
+        wait_line = g_wait.Line();
     }
     const CoopTitleMenu::TitleMenuLook look = CoopTitleMenu::MenuFor(any_save, sub, one_start);
     const std::uint64_t layout = Read64(screen + kTitleLayout);
@@ -1153,8 +1175,12 @@ void StepMenu(void* ctx, std::uint64_t screen) {
                                 ? CoopTitleMenu::MenuHint(look.rows[static_cast<std::size_t>(f)].action)
                                 : nullptr;
         if (words == nullptr && !sub && CoopPackNotice::DirectOn()) words = CoopPackNotice::kDirectHint;   // (player report 225: solo has no chat box)
-        const bool hint = words != nullptr && layout != 0 && g_column.hint != 0 &&
-                          SetLiveText(ctx, layout, kHintSlot, CoopI18n::Tr(words));
+        // (the host's save on its way after a Join here comes first: "Loading Saria's save...", the name is data)
+        const std::string said = !wait_line.empty() ? CoopI18n::Tr(wait_line)
+                                 : words != nullptr  ? CoopI18n::Tr(words)
+                                                     : std::string();
+        const bool hint = !said.empty() && layout != 0 && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, said);
+        g_wait_on_hint.store(hint && !wait_line.empty());
         ShowColumn(ctx, screen, CoopTitleNative::kButtons, hint, {});
         HideToggle(ctx);
         KeepFocusShown(ctx, screen, CoopTitleNative::kButtons);
@@ -2003,6 +2029,7 @@ std::optional<CoopDraw::TitleView> View() {
         return std::nullopt;
     }
     if (const std::string line = g_wait.Line(); !line.empty()) {
+        if (g_wait_on_hint.load()) return std::nullopt;   // (on the title's own hint line: StepMenu)
         // ("Loading Saria's save..." in the player's language: the name is data)
         return CoopDraw::TitleView{CoopI18n::Tr(line)};
     }

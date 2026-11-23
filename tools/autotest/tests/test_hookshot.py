@@ -17,6 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import hookshot as hs  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))   # (tools: puppet_pack, PackStartTest)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAMEUI = 0x1000200000
@@ -260,9 +261,13 @@ class ParseTest(unittest.TestCase):
         self.assertIn("stun", hs.MODULE_ONLY)
 
     def test_menu_step_goes_to_the_module(self):
-        steps = hs.parse("menu Customize\nmenu close\n")
-        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close")])
+        steps = hs.parse("menu Customize\nmenu close\nmenu Host\n")
+        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host")])
         self.assertIn("menu", hs.MODULE_ONLY)
+
+    def test_host_in_game_env(self):  # row 260: A hosts through its own Multiplayer > Host
+        self.assertEqual(hs.host_in_game_env(27520, "autotest-pass"),
+                         {"LICHII_COOP_TEST_HOST": "27520:autotest-pass", "LICHII_COOP_NAME": "A"})
 
     def test_place_on_a_platform_goes_to_the_module(self):  # #196: a rider on a floor that waves
         s = hs.parse("place Obj_Deku_MoveFloor_A_01 0.3\n")[0]
@@ -295,14 +300,15 @@ class ParseTest(unittest.TestCase):
         for text, want in (("wait", "line 1: want: wait TICKS"), ("\n\nhold Q 3", "line 3: unknown key Q"),
                            ("stick 2 0 5", "line 1: want: STICK"), ("goto 1 2 0.1", "radius at least 0.2"),
                            ("jump", "unknown command jump"), ("# only", "no steps"),
-                           ("wear cape X", "want: wear"), ("dress hat", "want: dress"), ("menu", "want: menu customize|close"),
-                           ("menu map", "want: menu customize|close"), ("hurt", "want: hurt QUARTER_HEARTS"),
+                           ("wear cape X", "want: wear"), ("dress hat", "want: dress"), ("menu", "want: menu customize|close|host"),
+                           ("menu map", "want: menu customize|close|host"), ("hurt", "want: hurt QUARTER_HEARTS"),
                            ("hurt 0", "want: hurt QUARTER_HEARTS"), ("hurt 81", "want: hurt QUARTER_HEARTS"),
                            ("hurt 2x", "want: hurt QUARTER_HEARTS"), ("hit Enemy_DungeonBoss_Gohma", "want: hit ACTOR N"),
                            ("hit Enemy_DungeonBoss_Gohma 0", "want: hit ACTOR N"),
                            ("hit Enemy_DungeonBoss_Gohma 81", "want: hit ACTOR N"),
                            ("hit Enemy_DungeonBoss_Gohma 2x", "want: hit ACTOR N"), ("stun", "want: stun BOSS"),
-                           ("stun A B", "want: stun BOSS")):
+                           ("stun A B", "want: stun BOSS"), ("event", "want: event NAME"),
+                           ("event A B", "want: event NAME"), ("event Dm<x>", "want: event NAME")):
             with self.assertRaises(hs.ScriptError) as e:
                 hs.parse(text)
             self.assertIn(want, str(e.exception))
@@ -634,16 +640,18 @@ class PlayerTest(unittest.TestCase):
                 setenum 0x1234abcd Done
                 kill Enemy_Skulltula_Gold
                 hurt 4
+                event DreamBossStage_Rematch_Barinade_Start
                 mark m
             """, game, commands=path)
             self.assertEqual(len(taken), 3)   # the mark too: the module logs it in the game's log
             self.assertEqual(taken[0].splitlines()[1:], ["give bombs", "chat /teleport B", "place 1 2.5 -3"])
             self.assertEqual(taken[1].splitlines()[1:], [
                 "setflag PouchData.Item_Bomb.StockNum 20", "wear head Mask_Keaton", "assign Bow",
-                "setenum 0x1234abcd Done", "kill Enemy_Skulltula_Gold", "hurt 4"])
+                "setenum 0x1234abcd Done", "kill Enemy_Skulltula_Gold", "hurt 4",
+                "event DreamBossStage_Rematch_Barinade_Start"])
             self.assertEqual(taken[2].splitlines()[1:], ["mark m"])
             self.assertTrue(all(t.startswith("# ") for t in taken))
-            self.assertEqual(sum(" sent (line" in line for line in log.lines), 9)
+            self.assertEqual(sum(" sent (line" in line for line in log.lines), 10)
             self.assertFalse(any("skipped" in line for line in log.lines))
             self.assertEqual(len(game.cmds("press")), 1)
             self.assertEqual(log.lines[-2:], ["coop: test mark m", "coop: test script done"])
@@ -850,7 +858,8 @@ class RunTest(unittest.TestCase):
                 code = hs.main(["run", "--game-a", os.path.join(tmp, "A"), "--game-b", os.path.join(tmp, "B"),
                                 "--out", os.path.join(tmp, "out"), "--name", "t", "--script-a",
                                 os.path.join(tmp, "a.txt"), "--script-b", os.path.join(tmp, "b.txt"),
-                                "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1"])
+                                "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1",
+                                "--playtest-ports", "5010"])
             finally:
                 hs.subprocess.Popen, hs.Bridge.connect = popen, connect
             out = os.path.join(tmp, "out")
@@ -860,6 +869,9 @@ class RunTest(unittest.TestCase):
             self.assertEqual([p.env["HOS_CONTROL_MEM"] for p in started], ["ro", "ro"])
             self.assertEqual([p.env.get("ONLY_B") for p in started], [None, "1"])
             self.assertEqual([p.env["BOTH"] for p in started], ["1", "1"])
+            # the play-test bridge on, each game on its own port: A = p1 = base + 1, B = p2 = base + 2
+            self.assertEqual([p.env["LICHII_COOP_PLAYTEST_PORT"] for p in started], ["5011", "5012"])
+            self.assertEqual([p.env["LICHII_COOP_CHEATS"] for p in started], ["1", "1"])   # give needs it
             self.assertEqual([p.env["LICHII_COOP_TEST_OWN_SAVE"] for p in started], ["1", "1"])   # each game its own save
             # no crash ask on the title to take the load's A presses (TEST_GAME_DEFAULTS; smoke hs-players, kit-0119)
             self.assertEqual([p.env["LICHII_COOP_PROBLEM_ASK"] for p in started], ["0", "0"])
@@ -982,6 +994,97 @@ class DropTest(unittest.TestCase):
         for bad in ("drop\n", "drop X\n", "drop X 0\n", "drop X 501\n", "drop X 1.5\n"):
             with self.assertRaises(hs.ScriptError):
                 hs.parse(bad)
+
+
+class PackStartTest(unittest.TestCase):
+    """Row 265 (0.11.12): a game this file starts gets the kit's start of the pack (play.ps1 Use-KitPuppetPack, then
+    Invoke-KitSizeTableMerge): your own tunic files first, then the merge, so another mod's Link model (Character
+    Select's) names your own tunic textures and the module can paint them (the Customize preview's Kokiri row)."""
+
+    CHILD = b"FRES" + bytes(12) + b"Angin_Tile_A_Alb\x00Angin_Tile_A_Dark_Alb\x00Mt_Cloth_Parts_Player_Child_Alb\x00"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="hookshot_pack_start_")
+        self.game = os.path.join(self.dir, "lane1-A")
+        self.mods = os.path.join(self.game, "mods")
+        self.pack = os.path.join(self.mods, *hs.PACK_REL[1:])
+        self.put(os.path.join(self.game, "longshot.exe"), b"")
+        self.put(os.path.join(self.pack, "coop_self", "green.Angin_Tile_S_Alb.bntx.zs"), b"own green tile")
+        self.put(os.path.join(self.pack, "coop_puppet.json"), json.dumps({
+            "tunics": {"green": ["x"]},
+            "self_files": {"green": {"Tex/Angin_Tile_S_Alb.bntx.zs": "coop_self/green.Angin_Tile_S_Alb.bntx.zs"}},
+        }).encode())
+        self.model = os.path.join(self.mods, "OoT Character Select", "romfs", "Model",
+                                  "Player_Child.Player_Child.bfres.zs")
+        self.put(self.model, self.CHILD)
+        self.tile = os.path.join(self.pack, "romfs", "Tex", "Angin_Tile_S_Alb.bntx.zs")
+        self.lines = []
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    @staticmethod
+    def put(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def test_folders_as_the_kit_finds_them(self):
+        mods, pack, romfs = hs.pack_folders(self.game)
+        self.assertEqual((mods, pack, romfs), (self.mods, self.pack, ""))
+        os.makedirs(os.path.join(self.game, "romfs", "Pack"))
+        self.assertEqual(hs.pack_folders(self.game)[2], os.path.join(self.game, "romfs"))
+
+    def test_your_tunic_files_go_in_before_the_merge(self):
+        from puppet_pack import merge_tables, self_tunic
+        calls = []
+        real_put, real_main = self_tunic.put, merge_tables.main
+        self_tunic.put = lambda pack, color, painted=True: calls.append(("put", pack, color)) or "green"
+        merge_tables.main = lambda argv=None: calls.append(("merge", argv)) or 0
+        try:
+            hs.pack_start(self.game, {"LICHII_COOP_COLOR": "yellow"}, self.lines.append)
+        finally:
+            self_tunic.put, merge_tables.main = real_put, real_main
+        self.assertEqual(calls, [("put", self.pack, "yellow"), ("merge", ["--mods", self.mods])])
+        self.assertEqual(self.lines, ["own tunic files: green"])
+
+    def test_the_colour_from_the_options_and_tunics_off(self):
+        from puppet_pack import merge_tables, self_tunic
+        self.put(os.path.join(self.game, "coop-options.ini"), b"color = red\n")
+        seen = []
+        real_put, real_main = self_tunic.put, merge_tables.main
+        self_tunic.put = lambda pack, color, painted=True: seen.append(color) or ""
+        merge_tables.main = lambda argv=None: 0
+        try:
+            hs.pack_start(self.game, {}, self.lines.append)
+            hs.pack_start(self.game, {"LICHII_COOP_TUNICS": "0"}, self.lines.append)
+        finally:
+            self_tunic.put, merge_tables.main = real_put, real_main
+        self.assertEqual(seen, ["red", ""])
+        self.assertEqual(self.lines, ["own tunic files: none (the game's green)"] * 2)
+
+    def test_character_selects_link_model_names_your_own_tunic(self):
+        try:
+            import zstandard  # noqa: F401 (merge_tables' size tables; CI installs it)
+        except ImportError:
+            self.skipTest("no zstandard")
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            hs.pack_start(self.game, {}, self.lines.append)
+        self.assertTrue(os.path.isfile(self.tile), said.getvalue())
+        with open(self.model, "rb") as f:
+            model = f.read()
+        self.assertIn(b"Angin_Tile_S_Alb\x00", model, said.getvalue())
+        self.assertNotIn(b"Angin_Tile_A_Alb\x00", model)
+        self.assertIn("names co-op's own tunic textures now", said.getvalue())
+
+    def test_no_pack_nothing(self):
+        shutil.rmtree(self.pack)
+        self.assertEqual(hs.pack_start(self.game, {}, self.lines.append), [])
+        self.assertEqual(self.lines, [])
+        with open(self.model, "rb") as f:
+            self.assertEqual(f.read(), self.CHILD)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,9 @@ private:
     std::string note_;      // a write that failed
     std::vector<HosCoopMenuRow> rows_;
     std::string status_;
+    // The page's words in the player's language: the rows and the help point into
+    // these (they must outlive the call that fills the page).
+    std::string name_tr_, turnoff_tr_, help_title_tr_, help_tr_, hint_tr_;
 };
 
 }  // namespace CoopOriginal

@@ -379,3 +379,25 @@ TEST_CASE("mods tab: a mod's long description shows as several rows of its page"
     }
     fs::remove_all(root, ec);
 }
+
+TEST_CASE("mods tab: a mod's title, settings and text are its author's own words, never looked up in the translation table") {
+    Mods m;
+    Tab tab({m.loader.get(), nullptr, nullptr});
+    tab.Show();
+    // the list: another mod's name is its own (a mod called "Swords" is not 剑); the Help of such a row too
+    auto v = tab.view();
+    REQUIRE(v.rows.size() == 2);
+    for (const auto& r : v.rows) CHECK(r.own_name);
+    tab.Press(Input::kDecide);  // Big HUD's page
+    v = tab.view();
+    bool heading = false, caption = false, text = false;
+    for (const auto& r : v.rows) {
+        if (r.kind == RowKind::kHeading && r.name == "Big HUD") heading = r.own_name;
+        if (r.name == "Size") caption = r.own_name && r.own_value;
+        if (r.name == "Label") text = r.own_name && r.own_value;
+        if (r.name == "Move up" || r.name == "On" || r.name == "Settings") CHECK_FALSE(r.own_name);   // (the tab's own words)
+    }
+    CHECK(heading);
+    CHECK(caption);
+    CHECK(text);
+}

@@ -74,6 +74,12 @@ join. A private one says *Needs the host's password*: pressing it opens Join wit
 field chosen. If nothing is listed it says *No public games right now*; if the list cannot be reached it says so and
 what to do.
 
+**More games than fit: pages.** Every list of games turns its pages the same way (row 264): **ZL** the page before,
+**ZR** the page after, round at both ends (ZR on the last page goes to the first). The list says it pages only when it
+does: **Page 2/3** between the game's own ZL and ZR button letters, on the title's Join a game (the line under Back)
+and on the - menu's Find a game (the list's heading). In the F1 menu (Lobby tab, Multiplayer > Find a game) a
+**Page < 2/3 >** row above the games turns it with Left and Right (or A), the same round.
+
 **What a public game keeps safe** (the host's side):
 
 - **Your address stays hidden.** A public game is reached only through the relay: no router forward, no invite code,
@@ -108,7 +114,7 @@ no server-wide block list or report button; chat has the per-player rate limit b
 
 **Hosting from Longshot's Multiplayer tab on a VPN (or in the same house)?** Co-op on Longshot is the first tab of its pause menu: press **F1** (or a pad's **Home**), and **Multiplayer** is the first tab. (The title screen shows no co-op rows; its bottom left says **(-) Multiplayer**, and Minus there opens the tab.) Its **Commands** page lists the chat commands and the key that opens the chat (every command the game takes: `/teleport`, `/tp`, `/pvp`, `/dbno`, `/difficulty`, `/kick`, `/ban`, `/mute`, `/unmute`, `/allow`, `/deny`; a unit test keeps the page and the game's commands the same); **Settings** changes that key, and picks which controller the game reads.
 
-1. **The host** chooses **Host a game** on the Multiplayer tab, then **Same network** (friends in the same house) or **VPN** (friends on Radmin VPN, Hamachi, ZeroTier, Tailscale or WireGuard with you). The game shows one line, for example `192.168.1.20:27510 abcdefghijklmnopqrst` (this PC's address and port, a space, the session's join password), and has copied it. **VPN** finds the VPN program's network card by its name and uses its address (Radmin VPN `26.x.x.x`, Hamachi `25.x.x.x`, Tailscale `100.x.x.x`, ZeroTier and WireGuard whatever they give); with no VPN running it says **No VPN found**.
+1. **The host** chooses **Host a game** on the Multiplayer tab, then **Same network** (friends in the same house) or **VPN** (friends on Radmin VPN, Hamachi, ZeroTier, Tailscale or WireGuard with you). The game shows one line and has copied it: on the same network just the address and port, for example `192.168.1.20:27510` (no password: the host lets its own network in without it), else, for example on Radmin VPN or Hamachi, `26.12.34.56:27510 abcdefghijklmnopqrst` (a space, then the session's join password). **VPN** finds the VPN program's network card by its name and uses its address (Radmin VPN `26.x.x.x`, Hamachi `25.x.x.x`, Tailscale `100.x.x.x`, ZeroTier and WireGuard whatever they give); with no VPN running it says **No VPN found**.
 2. The host pastes that line into a chat with the friends (Ctrl+V). It holds the join password, so keep it among friends.
 3. **The others** choose **Join a game** on the Multiplayer tab and paste the line on the Join page (Ctrl+V), then **Join**. Nothing else to type.
 4. If Windows asks about the firewall on the host's PC, allow the game on private networks.
@@ -237,7 +243,7 @@ For `server_allow` and `server_bind`: remove the `#` in front of the line, put i
 
 ## Playing from the host's save
 
-Everyone plays from the host's save: when you join, the host's game sends the save it is playing to yours, and your game keeps it in its own co-op save folder (your own saves are never touched). Nothing is pressed for you; the chat says when to load:
+Everyone plays from the host's save: when you join, the host's game sends the save it is playing to yours, and your game keeps it in its own co-op save folder (your own saves are never touched). Your rupees, ammo, bottle contents, life and magic stay your own: before the host's save goes into that folder, your game reads them from your newest save there (or from `coop-own-values.txt` beside the slots, kept each time the slots are cleared) and puts them into it, at every join, return to the title, Resync and with another host. Your first join with that folder starts from the host's (row 249). Nothing is pressed for you; the chat says when to load:
 
 1. **"Host save loading, don't load a save."** The host's save is on its way. Wait on the title screen (it takes a few seconds).
 2. **"Success, load any save."** It is in: press Continue (or pick any save in Load). At the title every save there is the host's.
@@ -322,7 +328,7 @@ The invite code holds your internet address and the join password (no name). Sha
 
 ## Your colour
 
-Every player's Link wears that player's colours on every screen, so you can tell each other apart. In the Longshot kit pick them in the game: Multiplayer tab, **Customize Link**: the tunic and each part of the gear (shields, swords, boots, gauntlets), on your own Link and on the others' screens, saved for the next start ([puppet.md, The Link customizer](puppet.md#the-link-customizer)). With no colour picked, each player wears the colour of their player number.
+Every player's Link wears that player's colours on every screen, so you can tell each other apart. In the Longshot kit pick them in the game: Multiplayer tab, **Customize Link** (with Character Select in the game, which every kit has since 0.11.9, the colours are on his screen instead: **−** menu, **Characters** tab (the first), pick Link, **Customize**; the Multiplayer tab's Customize Link page then holds only your name): the tunic and each part of the gear (shields, swords, boots, gauntlets), on your own Link and on the others' screens, saved for the next start ([puppet.md, The Link customizer](puppet.md#the-link-customizer)). With no colour picked, each player wears the colour of their player number.
 
 The tunic colour is also the `color =` line in `coop-options.ini` in the kit folder: one of red, orange, yellow, green, cyan, blue, purple, pink, white, black, brown, gray, or any colour as `#RRGGBB` (for example `color = #FF8020`). Your own Link wears that exact colour; the other players see your tunic in the nearest of ten tunic colours. Two players may pick the same colour; nothing stops it, so agree on yours. The Goron and Zora tunics are other models. The kit makes the puppet pack (the textures the colours are drawn with) from your own game by itself, and again after an update that changes it.
 

@@ -1499,6 +1499,7 @@ function Get-KitCharacterSelectPin([string]$Kit) {
               $op.folder -match '^[A-Za-z0-9][^\\/:*?"<>|]*$' -and
               $op.overlay_url -match '^https://' -and $op.overlay_sha256 -match '^[0-9a-fA-F]{64}$')) { return $null }
     if ($op.ips_url -and ($op.ips_url -notmatch '^https://' -or $op.ips_sha256 -notmatch '^[0-9a-fA-F]{64}$')) { $op.ips_url = '' }
+    if ($op.tool_folder -and ($op.tool_folder -match '\.\.' -or $op.tool_folder -match '^[\\/]')) { return $null }
     return $op
 }
 
@@ -1534,7 +1535,7 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
     Write-Host ''
     Write-Host 'The Characters page (in the - menu) comes with the kit: Character Select by Snail (snaildev99).'
     Write-Host '  Its NPC characters (Saria, Sheik, Darunia and over a hundred more) are an extra download from Snail''s own'
-    Write-Host '  GitHub page (about 1 GB, once). Without them you play as Link, and the page tells you when a character is not'
+    Write-Host '  GitHub page (a 145 MB download, about 1.1 GB on disk, made from your own game in a few minutes, once). Without them you play as Link, and the page tells you when a character is not'
     Write-Host '  downloaded. The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.'
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
@@ -1563,8 +1564,13 @@ function Read-KitCharacterSelectAnswer([int]$Seconds = 15, [scriptblock]$ReadKey
 # Customize screen (UI, Sequence, Mals, RSDB, GameData, SLink2, the size table), Link's own models and packs, and
 # the code patch (exefs) without his customizer. No file of the default part names a file of the NPC part except
 # through the stored character, which the module keeps on an installed one (coop_char_slots.h). $Rel: '/' or '\'.
+# Link's own textures stay (row 242): his Link models Model/Player_<Age>.Player_<Age>, kept in the default part, name
+# 51 textures of his romfs/Tex (Mt_*_Player_<Age>_Ac1..7, Mt_Hairs_Player_Adult_Ah1..9, Angin_Tile_A[_Dark]_Ac1..7);
+# without them the game waits for them for good after a save load and the world stays black (LANE1 sul-D1..D7). Only
+# his NPC characters' textures (no _Player_ in the name, not Angin_Tile_) are NPC files.
 function Test-KitCharacterSelectNpcFile([string]$Rel) {
     $r = $Rel.Replace('\', '/')
+    if ($r -match '^romfs/Tex/([^/]*_Player_|Angin_Tile_)') { return $false }
     return [bool]($r -match '^romfs/(Tex|Phive|Sound)/' -or $r -match '^romfs/Model/Player_(Adult|Child)_C\d{3}\.' -or
                    $r -match '^romfs/Model/Player_Dark_' -or $r -eq 'romfs/Pack/Actor/Enemy_MiddleBoss_DarkLink.pack.zs')
 }
@@ -1583,7 +1589,10 @@ $script:KitCharselCustomizer = @(
     @('COLOUR_MORE', 0x8103AE80L, 0x8103B160L), @('COLOUR_KEEP', 0x83BCDC10L, 0x83BCDDE0L),
     @('COLOUR_TEX', 0x83BCCE70L, 0x83BCD000L))
 $script:KitCharselIpsShift = 0x8001FF00L
-$script:KitCharselStrip = 'cz1'   # (in the stamp: another list of regions makes the kit strip his patch again)
+# (in the stamp: another list of regions, or another default-part file rule, makes the kit make his folder again.
+# cz2, row 242: the default part keeps Link's own textures; a default part stamped with an older one lost them, so it
+# is never copied from: his release is unpacked again.)
+$script:KitCharselStrip = 'cz2'
 
 # An IPS32 file's records: @{ At (offset); Size (bytes it changes); From; To (the record's bytes in the file) }, or a
 # throw when it is not one. IPS32: 'IPS32', records (u32 BE offset, u16 BE size, the bytes; size 0: u16 BE run length
@@ -1682,7 +1691,8 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
         foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $New 'romfs') -Recurse -File -Force -ErrorAction Stop)) {
             if (Test-KitCharacterSelectNpcFile $f.FullName.Substring($root.Length)) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
         }
-        foreach ($d in 'Tex', 'Phive', 'Sound') { Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
+        # (romfs/Tex goes file by file above: Link's own textures stay)
+        foreach ($d in 'Phive', 'Sound') { Remove-Item -LiteralPath (Join-Path $New "romfs\$d") -Recurse -Force -ErrorAction SilentlyContinue }
     }
     $code = @(Get-ChildItem -LiteralPath (Join-Path $New 'exefs') -Filter '*.ips' -File -ErrorAction SilentlyContinue)
     if ($code.Count -ne 1) { return "the release has $($code.Count) code patches, not one" }
@@ -1704,6 +1714,139 @@ function Complete-KitCharacterSelectFolder([string]$New, $Op, [string]$Part, [st
         'Its code is under the MIT licence (Copyright (c) 2026 snaildev99; LICENSE.txt here when it could be fetched).',
         'The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.',
         'Switch it off in the game''s Mods tab.') -join "`r`n") + "`r`n")))
+    return ''
+}
+
+# Since Character Select v0.2.2 (snaildev99) the release makes the game-derived part of the mod on the player's PC:
+# the zip's mod folder holds his own files (the code patch, the voices, his page's graph), and its tool folder
+# (the pin's tool_folder, build-from-your-game) makes the rest from the game's own RomFS: models, textures, menu
+# archives and tables, as byte patches and colour recipes against the player's files. It runs with the kit's
+# Python (numpy, zstandard, astc-encoder-py and texture2ddecoder, which the kit's Python has) into the unpacked
+# folder, checks every source file and every result by SHA-1 and refuses another game version. For part 'ui' it
+# skips the NPC part's files (--exclude: the rule of Test-KitCharacterSelectNpcFile). '' or why not.
+# The NPC part as player.py's --exclude (paths below romfs/, '/'): must say exactly what Test-KitCharacterSelectNpcFile
+# says for romfs files (launch_test.ps1 checks the two agree); change both together. Link's own textures in Tex/ (named
+# *_Player_* or Angin_Tile_*) stay in the ui part (row 242).
+$KitCharselToolExclude = '^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$'
+# One argument line for CreateProcess (no shell: '|', '&', '^' and '%' are plain characters in it): each argument
+# quoted when it is empty or has a space, a tab or a quote; backslashes right before a quote, and at the end of a quoted
+# argument, doubled; a quote escaped. The program gets each argument back byte for byte (the C runtime's rules).
+function ConvertTo-KitArgLine([string[]]$ArgList) {
+    @(foreach ($x in $ArgList) {
+        if ($x -ne '' -and $x -notmatch '[\s"]') { $x; continue }
+        $q = [regex]::Replace($x, '(\\*)"', { param($m) $m.Groups[1].Value + $m.Groups[1].Value + '\"' })
+        $q = [regex]::Replace($q, '(\\+)$', { param($m) $m.Groups[1].Value + $m.Groups[1].Value })
+        '"' + $q + '"'
+    }) -join ' '
+}
+
+# Runs a program (no shell between) with a time limit: @{ Code; Out (its stdout and stderr lines, in the order they
+# came); Stopped ('' or why it was stopped) }. A program that writes nothing for $IdleSeconds, or runs longer than
+# $MaxSeconds, is stopped with its whole process tree (taskkill /T: Python's worker processes too), Code -1. A tool that
+# hangs (Character Select's tool on a damaged game dump: its workers die at start and are started again for good) can
+# no longer hold the start.
+function Invoke-KitToolLimited([string]$Exe, [string[]]$ArgList, [int]$IdleSeconds, [int]$MaxSeconds, [string]$WorkDir = '') {
+    # (Out: both streams, in the order they were read; Std / Err: stdout / stderr alone. Two pipes have no common order, so
+    # a caller that needs 'the last line' takes it from Std or Err, never from Out's tail)
+    $r = @{ Code = -1; Out = @(); Std = @(); Err = @(); Stopped = '' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $byStream = @((New-Object System.Collections.Generic.List[string]), (New-Object System.Collections.Generic.List[string]))
+    try {
+        $si = New-Object System.Diagnostics.ProcessStartInfo
+        $si.FileName = $Exe
+        $si.Arguments = ConvertTo-KitArgLine $ArgList
+        $si.UseShellExecute = $false
+        $si.CreateNoWindow = $true
+        $si.RedirectStandardOutput = $true
+        $si.RedirectStandardError = $true
+        if ($WorkDir) { $si.WorkingDirectory = $WorkDir }
+        $p = [System.Diagnostics.Process]::Start($si)
+        # (both pipes read line by line without a thread: one pending ReadLineAsync each, taken when it completes)
+        $readers = @($p.StandardOutput, $p.StandardError)
+        $tasks = @($readers[0].ReadLineAsync(), $readers[1].ReadLineAsync())
+        $start = Get-Date; $quietSince = $start; $exitedAt = $null
+        while ($tasks[0] -or $tasks[1]) {
+            $live = [System.Threading.Tasks.Task[]]@($tasks | Where-Object { $_ })
+            [void][System.Threading.Tasks.Task]::WaitAny($live, 1000)
+            for ($i = 0; $i -lt 2; $i++) {
+                while ($tasks[$i] -and $tasks[$i].IsCompleted) {
+                    $line = $tasks[$i].Result
+                    if ($null -eq $line) { $tasks[$i] = $null; break }
+                    $lines.Add($line); $byStream[$i].Add($line); $quietSince = Get-Date
+                    $tasks[$i] = $readers[$i].ReadLineAsync()
+                }
+            }
+            if (-not ($tasks[0] -or $tasks[1])) { break }
+            $now = Get-Date
+            # (it ended but a process it left holds the pipes open: what came is enough)
+            if ($p.HasExited) { if (-not $exitedAt) { $exitedAt = $now } elseif (($now - $exitedAt).TotalSeconds -ge 5) { break } }
+            if (($now - $quietSince).TotalSeconds -ge $IdleSeconds) { $r.Stopped = "it wrote nothing for $IdleSeconds s" }
+            elseif (($now - $start).TotalSeconds -ge $MaxSeconds) { $r.Stopped = "it ran longer than $MaxSeconds s" }
+            if ($r.Stopped) {
+                & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $p.Id 2>&1 | Out-Null
+                [void]$p.WaitForExit(10000)
+                break
+            }
+        }
+        if (-not $r.Stopped) { $p.WaitForExit(); $r.Code = $p.ExitCode }
+    } catch {
+        $lines.Add("$($_.Exception.Message)"); $byStream[1].Add("$($_.Exception.Message)"); $r.Code = -1
+    }
+    $r.Out = $lines.ToArray()
+    $r.Std = $byStream[0].ToArray()
+    $r.Err = $byStream[1].ToArray()
+    return $r
+}
+
+# Time limits of the Character Select tool step: stopped when it writes nothing for 15 minutes (it prints a line every
+# 100 files, the slowest first) or runs longer than 2 hours (the whole set took about 140 s on a 24-thread PC).
+$KitCharselToolIdle = 900
+$KitCharselToolMax = 7200
+function Invoke-KitCharacterSelectTool([string]$Kit, [string]$Zip, $Op, [string]$New, [string]$ModsDir, [string]$Downloads, [string]$Part) {
+    $python = Join-Path $Kit 'hookshot\tools\python\python.exe'
+    $exeDir = Split-Path -Parent $ModsDir     # (the game's files: beside longshot.exe or a folder up, as Get-KitHookshotNeed looks)
+    $romfs = @((Join-Path $exeDir 'romfs'), (Join-Path (Split-Path -Parent $exeDir) 'romfs')) |
+             Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Pack\ZsDic.pack.zs') } | Select-Object -First 1
+    if (-not (Test-Path -LiteralPath $python)) { return "no $python to make its files with" }
+    if (-not $romfs) { return "no game RomFS beside $exeDir to make its files from" }
+    $tool = Join-Path $Downloads 'charsel-tool'
+    if (Test-Path -LiteralPath $tool) { Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction Stop }
+    New-Item -ItemType Directory -Force -Path $tool | Out-Null
+    $depth = @($Op.tool_folder -split '/').Count
+    & "$env:SystemRoot\System32\tar.exe" -x -f $Zip -C $tool "--strip-components=$depth" "$($Op.tool_folder)" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $tool 'player.py'))) { return "$($Op.zip) has no $($Op.tool_folder)/player.py" }
+    # (-I drops PYTHON* variables and the current folder; player.py puts its own folder and lib\ on sys.path itself (checked: it runs under -I
+    # from another folder), so nothing else is needed)
+    # (-u: each line reaches the output file at once, so the idle limit sees the tool's progress)
+    $a = @('-I', '-B', '-u', (Join-Path $tool 'player.py'), '--romfs', $romfs, '--mod', $New)
+    if ($Part -eq 'ui') {
+        # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
+        if (-not $KitCharselToolExclude) { return 'the kit could not read its own NPC rule ($KitCharselToolExclude)' }
+        $a += @('--exclude', $KitCharselToolExclude)
+    }
+    Write-Host "  making Character Select's files from your game (a minute or two, once) ..."
+    # (stdout and stderr are read as text, not error records: a warning on its stderr is only text. The exit code decides.)
+    $run = Invoke-KitToolLimited $python $a $KitCharselToolIdle $KitCharselToolMax
+    $out = $run.Out; $code = $run.Code
+    Remove-Item -LiteralPath $tool -Recurse -Force -ErrorAction SilentlyContinue
+    if ($run.Stopped) {
+        return "making its files from your game was stopped ($($run.Stopped)): its tool stopped answering. The game files it reads may be damaged (dump the game again); nothing of it was put in"
+    }
+    if ($code -ne 0) {
+        # (the reason: stderr's last line that is not a Python warning (an exception's or sys.exit's message comes last there),
+        # else stdout's last line. Not the tail of both streams together: stdout and stderr are two pipes with no common
+        # order, so a warning printed first on stderr could be read after stdout's last line and shown as the reason)
+        $errReal = New-Object System.Collections.Generic.List[string]; $inWarn = $false
+        foreach ($l in $run.Err) {
+            if ("$l" -match ':\d+: \w*Warning: ') { $inWarn = $true; continue }
+            if ($inWarn -and "$l" -match '^\s') { continue }      # (the warning's source line, indented)
+            $inWarn = $false
+            if ("$l".Trim()) { $errReal.Add("$l") }
+        }
+        $stdLast = @($run.Std | Where-Object { "$_".Trim() }) | Select-Object -Last 1
+        $last = if ($errReal.Count) { $errReal[$errReal.Count - 1] } elseif ($stdLast) { $stdLast } else { @($out | Where-Object { "$_".Trim() }) | Select-Object -Last 1 }
+        return "making its files from your game failed ($last). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file); nothing of it was put in"
+    }
     return ''
 }
 
@@ -1737,7 +1880,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
     $wantF = @($want -split ' ')
     $havePart = if ($haveF.Count -ge 5) { $haveF[4] } else { 'full' }
     $derive = $have -and (Test-Path -LiteralPath (Join-Path $dir 'romfs')) -and ($haveF[0..3] -join ' ') -eq ($wantF[0..3] -join ' ') -and
-              ($Part -eq 'ui' -or $havePart -eq 'full')
+              ($havePart -eq 'full' -or ($Part -eq 'ui' -and $haveF.Count -ge 6 -and $haveF[5] -eq $script:KitCharselStrip))
     if (-not $Downloads) { $Downloads = Join-Path $Kit 'hookshot\downloads' }
     $zip = Join-Path $Downloads $op.zip
     $json = Join-Path $Downloads 'charsel-characters.json'
@@ -1756,7 +1899,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
             $ips = ''
         } else {
             $zipOk = (Test-Path -LiteralPath $zip) -and (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -eq $op.zip_sha256.ToUpperInvariant()
-            # (a 1 GB zip and 1.1 GB unpacked; the swap keeps the old folder until the new one is in place)
+            # (v0.2.2: a 145 MB zip, then 230 MB (default part) or 1.1 GB (with the NPC part) once the tool has made the game's files; the swap keeps the old folder until the new one is in place, so an update holds two copies: about 3 GB with the zip)
             $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($ModsDir))
             $free = try { (New-Object System.IO.DriveInfo $root).AvailableFreeSpace } catch { [long]::MaxValue }
             if ($free -lt $(if ($zipOk) { 2GB } else { 3GB })) { $why = "too little disk space (about 3 GB free needed on $root)" }
@@ -1772,6 +1915,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
                 & "$env:SystemRoot\System32\tar.exe" -x -f $zip -C $new "--strip-components=$depth" "$($op.zip_folder)" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { $why = "unpacking $($op.zip) failed (tar $LASTEXITCODE)" }
                 elseif (-not (Test-Path -LiteralPath (Join-Path $new 'romfs'))) { $why = "$($op.zip) has no $($op.zip_folder)/romfs" }
+                elseif ($op.tool_folder) { $why = Invoke-KitCharacterSelectTool $Kit $zip $op $new $ModsDir $Downloads $Part }
             }
         }
         if (-not $why) { $why = Complete-KitCharacterSelectFolder $new $op $Part $json $ips $want }
@@ -1784,7 +1928,7 @@ function Install-KitCharacterSelect([string]$Kit, [string]$ModsDir, [string]$Dow
             Save-KitCharacterSelectPrevious $ModsDir $op.folder
             try { [System.IO.Directory]::Move($new, $dir) }
             catch { [void](Undo-KitCharacterSelect $Kit $ModsDir); throw }
-            if (-not $derive) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }   # (1 GB on disk; a new pin downloads its own)
+            if (-not $derive) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }   # (145 MB on disk; a new pin downloads its own)
             $r.Changed = $true
         }
     } catch {
@@ -1963,7 +2107,7 @@ function Get-KitPackCharactersKey($Json) {
 # Every start after the question (row 206: the NPC characters on or off without editing a file): one line, and N within
 # $Seconds changes it. $true when N was pressed. No console (a scripted start): no wait, no change. $ReadKey: tests.
 function Read-KitCharacterSelectToggle([string]$Choice, [int]$Seconds = 2, [scriptblock]$ReadKey = $null) {
-    $now = if ($Choice -eq 'yes') { 'on (press N to take them out)' } else { 'off (press N to download them, about 1 GB)' }
+    $now = if ($Choice -eq 'yes') { 'on (press N to take them out)' } else { 'off (press N to make them, a 145 MB download and about 1.1 GB on disk)' }
     $redirected = $true
     try { $redirected = [Console]::IsInputRedirected } catch { }
     if ($redirected -and -not $ReadKey) { return $false }

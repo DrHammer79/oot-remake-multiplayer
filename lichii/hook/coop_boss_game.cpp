@@ -350,9 +350,11 @@ struct Glue {
                 // the fight (boss_to_ready); with every game in the intro the owner keeps it, as before.
                 const bool in_intro = sync.InIntro(event, now_us);
                 const bool ready =
-                    readiness.Step(room->index, intro, CoopObjects::LastBossPreBattle(Bodies(*room)), in_intro);
+                    readiness.Step(room->index, intro, CoopObjects::LastBossPreBattle(Bodies(*room)), in_intro,
+                                   CoopObjects::LastBossHurt(Bodies(*room)));
                 if (readiness.TakeFoughtNews() && intro.has_value() && !*intro) {
-                    LOG_INFO(Core, "coop: boss: our boss left its pre-battle phase here: ready to own it without our intro");
+                    LOG_INFO(Core, "coop: boss: our boss left its pre-battle phase or lost life here: ready to own it "
+                                   "without our intro");
                 }
                 std::vector<std::string> unready;
                 if (!ready) {
@@ -652,8 +654,26 @@ std::optional<std::int32_t> MaxLifeCap() {
     return TheGlue().max_life_cap;
 }
 
+// The autotest's `event NAME` (WantEvent): the play-test bridge's PlayNow asks it from the calc thread, so it has
+// its own lock (the glue's `wanted` is the present thread's).
+namespace {
+std::mutex g_test_events_mutex;
+std::vector<std::string> g_test_events;
+} // namespace
+
 std::vector<std::string> TakeWantedEvents() {
-    return std::exchange(TheGlue().wanted, {});
+    auto out = std::exchange(TheGlue().wanted, {});
+    std::lock_guard lock(g_test_events_mutex);
+    for (auto& name : g_test_events) {
+        out.push_back(std::move(name));
+    }
+    g_test_events.clear();
+    return out;
+}
+
+void WantEvent(std::string name) {
+    std::lock_guard lock(g_test_events_mutex);
+    g_test_events.push_back(std::move(name));
 }
 
 bool DeathMayRun(std::uint8_t boss) {

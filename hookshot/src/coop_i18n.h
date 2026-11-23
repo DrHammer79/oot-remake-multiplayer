@@ -36,6 +36,16 @@ extern const int kLangCount;
 // each time: a change of the Menu language row shows at once).
 const Lang* Current();
 
+// Tests only: pins the language Current() answers to the table for `code` ("en" or an unknown code: English), so a
+// test can read the Chinese a row would show; nullptr gives the settings back.
+void ForceLanguage(const char* code);
+
+// A line of ours built around a player's, a room's or a mod's own text: `before` + the text + `after`, the template
+// ("Let in {}", "{} (you)") in the table's language and the text put in as it is. The text is never looked up and never
+// seen by the table's shapes, whatever it reads like ("Link", "On", "Hyrule Field", "x left"): translate the line this way,
+// not by Tr() of the finished line.
+std::string TrAround(std::string_view before, std::string_view text, std::string_view after = {});
+
 // The Menu language row's value in longshot_options.ini's text (0 Auto), -1
 // when the text has no such line (empty, or cut short while Longshot writes
 // it); the value after a read, `last` kept when the read had none (`good`

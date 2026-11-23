@@ -148,7 +148,7 @@ make_game() {
 }
 
 # OoT Character Select by Snail (data/longshot/CHARACTER-SELECT.txt; owner, 0.11.8 and 0.11.9), as kit-paths.ps1's
-# Invoke-KitCharacterSelectStep: every kit gets his Characters page (the default part); his NPC characters (about 1 GB)
+# Invoke-KitCharacterSelectStep: every kit gets his Characters page (the default part); his NPC characters (a 145 MB download, 1.1 GB on disk)
 # only on the player's yes (asked once: y is yes; Enter, n, 15 s or no terminal: no; data/coop-options.ini
 # character_select = yes|no|ask wins, data/character-select-answer.txt keeps the answer; every later start in a terminal
 # shows one line and n within 2 s changes it). Snail's own release and his characters.json are downloaded from his GitHub
@@ -205,10 +205,14 @@ CZ = [("cz_head (HEAD_CALL)", 0x804D756C, 0x804D7570), ("cz_frame (FRAME_SITE)",
       ("COLOUR_MORE", 0x8103AE80, 0x8103B160), ("COLOUR_KEEP", 0x83BCDC10, 0x83BCDDE0),
       ("COLOUR_TEX", 0x83BCCE70, 0x83BCD000)]
 SHIFT = 0x8001FF00
+# The NPC part, below romfs/: one rule for npc() and for the v0.2.2 tool --exclude (charsel_tool_make reads it with
+# "exclude"). Link own textures in Tex/ (*_Player_*, Angin_Tile_*: named by his kept Link models) are not NPC files
+# (row 242). Same rule as kit-paths.ps1 Test-KitCharacterSelectNpcFile / $KitCharselToolExclude.
+NPC_RULE = (r"^(Phive|Sound)/|^Tex/(?![^/]*_Player_|Angin_Tile_)|^Model/Player_(Adult|Child)_C\d{3}\.|^Model/Player_Dark_"
+            r"|^Pack/Actor/Enemy_MiddleBoss_DarkLink\.pack\.zs$")
 def npc(rel):
     r = rel.replace("\\", "/")
-    return bool(re.match(r"romfs/(Tex|Phive|Sound)/", r, re.I) or re.match(r"romfs/Model/Player_(Adult|Child)_C\d{3}\.", r, re.I)
-                or re.match(r"romfs/Model/Player_Dark_", r, re.I) or r.lower() == "romfs/pack/actor/enemy_middleboss_darklink.pack.zs")
+    return r[:6].lower() == "romfs/" and bool(re.search(NPC_RULE, r[6:], re.I))
 def records(d):
     if len(d) < 9 or d[:5] != b"IPS32":
         raise ValueError("not an IPS32 file")
@@ -267,7 +271,44 @@ def fresh(p, b):
     with open(p, "wb") as f:
         f.write(b)
 cmd = sys.argv[1]
-if cmd == "derive":
+if cmd == "exclude":
+    print(NPC_RULE)
+elif cmd == "run":
+    # run IDLE MAX -- PROGRAM ARGS: the program with a time limit, its output passed on. One that writes nothing for IDLE s
+    # or runs longer than MAX s is stopped with its whole process group (its worker processes too): exit 124, last line
+    # "stopped: ...". (Character Select tool on a damaged game dump: its workers die at start and are started again for good.)
+    import signal, subprocess, threading, time
+    idle, most, argv = float(sys.argv[2]), float(sys.argv[3]), sys.argv[5:]
+    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    last = [time.monotonic()]
+    def pump():
+        for line in iter(p.stdout.readline, b""):
+            last[0] = time.monotonic()
+            sys.stdout.write(line.decode("utf-8", "replace"))
+            sys.stdout.flush()
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    start, why = time.monotonic(), ""
+    while p.poll() is None:
+        now = time.monotonic()
+        if now - last[0] >= idle:
+            why = "it wrote nothing for %d s" % idle
+        elif now - start >= most:
+            why = "it ran longer than %d s" % most
+        if why:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.wait()
+            break
+        time.sleep(0.5)
+    t.join(5)
+    if why:
+        print("stopped: " + why)
+        sys.exit(124)
+    sys.exit(p.returncode)
+elif cmd == "derive":
     src, dst, part = sys.argv[2:5]
     for r, _, fs in os.walk(src):
         for n in fs:
@@ -290,7 +331,7 @@ elif cmd == "complete":
                 p = os.path.join(r, n)
                 if npc(os.path.relpath(p, new)):
                     os.remove(p)
-        for d in ("Tex", "Phive", "Sound"):
+        for d in ("Phive", "Sound"):   # (romfs/Tex goes file by file above: Link own textures stay)
             shutil.rmtree(os.path.join(romfs, d), ignore_errors=True)
     ex = os.path.join(new, "exefs")
     code = sorted(n for n in os.listdir(ex) if n.lower().endswith(".ips") and os.path.isfile(os.path.join(ex, n))) if os.path.isdir(ex) else []
@@ -318,6 +359,41 @@ elif cmd == "strip":
 '
 charsel_py() { "$PY" -I -B -c "$CHARSEL_PY" "$@"; }
 
+# Character Select v0.2.2's tool (the zip's build-from-your-game, unpacked into $B/charsel/tool) makes the mod's game-derived
+# files from data/game/romfs: byte patches and colour recipes, each source and result checked by SHA-1; a game of another
+# version is refused file by file. charsel_tool_make <mod folder> <part>: 0, or 1 with the reason in cs_tool_why. Part ui
+# skips the NPC part's files (--exclude: charsel's NPC_RULE, the one npc() uses). Needs numpy, zstandard, astc-encoder-py and texture2ddecoder in $PY.
+cs_tool_why=''
+charsel_tool_make() {
+    local mod=$1 part=$2 tout dl=$B/charsel
+    local -a ex=()
+    cs_tool_why=''
+    if [[ $part != full ]]; then
+        local rule
+        rule=$(charsel_py exclude 2>/dev/null) || rule=''
+        # (an empty rule would exclude nothing: the ui part would get the NPC part's files, so no rule = no install)
+        [[ -n $rule ]] || { cs_tool_why="the kit could not read its own NPC rule (charsel exclude)"; return 1; }
+        ex=(--exclude "$rule")
+    fi
+    say "  making Character Select's files from your game (a minute or two, once) ..."
+    # (the exit code decides: a warning on its stderr is only text. -I drops PYTHON* variables and the current folder; player.py
+    # puts its own folder and lib/ on sys.path itself (checked: it runs under -I from another folder), so nothing else is needed)
+    # (time limits as on Windows: stopped after 15 minutes without a line (it prints one every 100 files, the slowest first) or
+    # 2 hours in all, with its worker processes; -u: each line reaches the watcher at once)
+    local rc=0
+    tout=$(charsel_py run "${CHARSEL_TOOL_IDLE:-900}" "${CHARSEL_TOOL_MAX:-7200}" -- "$PY" -I -B -u "$dl/tool/player.py" --romfs "$GAME/romfs" --mod "$mod" ${ex[@]+"${ex[@]}"} 2>&1) || rc=$?
+    if ((rc == 124)); then
+        cs_tool_why="making its files from your game was stopped ($(printf '%s
+' "$tout" | grep -v '^[[:space:]]*$' | tail -n 1 | sed 's/^stopped: //')): its tool stopped answering. The game files it reads may be damaged (dump the game again)"
+        return 1
+    fi
+    if ((rc != 0)); then
+        # (the reason: its last line that is not a Python warning ('file:N: SomeWarning: ...' and its indented source line))
+        cs_tool_why="making its files from your game failed ($(printf '%s\n' "$tout" | awk '/:[0-9]+: [A-Za-z]*Warning: /{w=1;next} w&&/^[[:space:]]/{next} {w=0} /[^[:space:]]/' | tail -n 1)). Its tool needs the same game the kit builds (a RomFS of another version or dump is refused file by file)"
+        return 1
+    fi
+    return 0
+}
 charsel_step() {
     local pin=$LS/CHARACTER-SELECT.txt choice='' line rel url zip zsha zfolder folder ourl osha iurl isha want dir new dl why='' part have derive=0 json ips a=''
     [[ -f $pin ]] || return 0
@@ -332,6 +408,12 @@ charsel_step() {
     [[ -n $iurl && ( ! $iurl =~ ^https:// || ! $isha =~ ^[0-9a-fA-F]{64}$ ) ]] && iurl=''
     zsha=${zsha,,} osha=${osha,,} isha=${isha,,}
     dir=$CS_HOME/$folder
+    # A first start has no game RomFS yet (the game is built after this step) and the tool needs it: the mod is put in at the
+    # next start (then the game is built again with its code patch, as for any change). Nothing is half-installed.
+    if [[ -n $(pin_get "$pin" tool_folder || true) && ! -d $dir && ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then
+        say 'Character Select (the Characters page) is put in at the next start, once the game is built: its files are made from your game, and that start builds the game again (a few minutes) with its code patch.'
+        return 0
+    fi
     line=$(sed -n 's/^[[:space:]]*character_select[[:space:]]*=[[:space:]]*\(yes\|no\|ask\)[[:space:]]*\([#;].*\)\{0,1\}$/\1/p' "$DATA/coop-options.ini" 2>/dev/null | head -n1 || true)
     if [[ -n $line ]]; then choice=$line; [[ $choice == ask ]] && rm -f "$DATA/character-select-answer.txt"
     else choice=$(head -n1 "$DATA/character-select-answer.txt" 2>/dev/null | tr -d '\r[:space:]' || true); [[ $choice == yes || $choice == no ]] || choice=ask
@@ -340,7 +422,7 @@ charsel_step() {
         say ''
         say 'The Characters page (in the - menu) comes with the kit: Character Select by Snail (snaildev99).'
         say "  Its NPC characters (Saria, Sheik, Darunia and over a hundred more) are an extra download from Snail's own"
-        say '  GitHub page (about 1 GB, once). Without them you play as Link, and the page tells you when a character is not'
+        say '  GitHub page (a 145 MB download, about 1.1 GB on disk, made from your game in a few minutes, once). Without them you play as Link, and the page tells you when a character is not'
         say '  downloaded. The Legend of Zelda: Ocarina of Time and its characters belong to Nintendo.'
         local q='Download the NPC characters for the Characters page? [y/N]' s
         choice=no
@@ -360,7 +442,7 @@ charsel_step() {
     elif kit_tty; then
         # (row 206: on or off from the kit itself, no file to edit; coop-options.ini's line follows the change)
         if [[ $choice == yes ]]; then say 'Characters page, NPC characters: on (press n to take them out)'
-        else say 'Characters page, NPC characters: off (press n to download them, about 1 GB)'; fi
+        else say 'Characters page, NPC characters: off (press n to make them, a 145 MB download and about 1.1 GB on disk)'; fi
         if IFS= read -r -s -n 1 -t 2 a && [[ $a == [nN] ]]; then
             if [[ $choice == yes ]]; then choice=no; else choice=yes; fi
             say '  changed.'
@@ -370,7 +452,7 @@ charsel_step() {
     fi
     part=ui
     [[ $choice == yes ]] && part=full
-    want="$rel $zsha $osha ${isha:--} $part cz1"
+    want="$rel $zsha $osha ${isha:--} $part cz2"   # (cz2, row 242: the default part keeps Link own textures; an older ui copy is never derived from)
     local what='the Characters page (NPC characters not downloaded)'
     [[ $part == full ]] && what='with its NPC characters'
     if [[ -d $dir && ! -f $dir/coop-charsel.txt ]]; then say "Character Select: your own copy in $dir is used as it is."; return 0; fi
@@ -379,7 +461,7 @@ charsel_step() {
     # The copy there, of this release (a 0.11.8 stamp, four fields: full): its part decides whether it can give the one wanted.
     local hf wf
     read -r -a hf <<<"$have"; read -r -a wf <<<"$want"
-    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( $part == ui || ${hf[4]:-full} == full ) ]]; then derive=1; fi
+    if [[ -d $dir/romfs && ${#hf[@]} -ge 4 && "${hf[*]:0:4}" == "${wf[*]:0:4}" && ( ${hf[4]:-full} == full || ( $part == ui && ${hf[5]:-} == cz2 ) ) ]]; then derive=1; fi
     dl=$B/charsel new=$CS_HOME/_$folder.new json=$dl/characters.json ips=''
     mkdir -p "$dl" "$CS_HOME"
     rm -rf "$new"
@@ -421,6 +503,39 @@ with zipfile.ZipFile(z) as f:
             shutil.copyfileobj(a, b, 1 << 20)
 ' "$dl/$zip" "$zfolder" "$new" || [[ ! -d $new/romfs ]]; then
                 why="unpacking $zip failed"
+            fi
+            # Since Character Select v0.2.2 (snaildev99) the zip's tool folder (the pin's tool_folder) makes the mod's
+            # game-derived files (models, textures, menus, tables) from the game's own RomFS on this PC (charsel_tool_make).
+            # All or nothing, as the Windows kit: a mod without them (its code patch alone) would build into the game and
+            # leave the Characters page with no menus, tables or models. So the mod is only put in when its files can be made
+            # in the same step; a first start (no data/game/romfs yet) waits (see the check before the question).
+            local tfolder
+            tfolder=$(pin_get "$pin" tool_folder || true)
+            if [[ -z $why && -n $tfolder ]]; then
+                if [[ $tfolder == *..* || $tfolder == /* ]]; then why="the pin's tool_folder is not a folder of the zip"
+                else
+                    rm -rf "$dl/tool"
+                    if ! "$PY" -I -B -c '
+import os, sys, zipfile, shutil
+z, top, out = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
+with zipfile.ZipFile(z) as f:
+    for i in f.infolist():
+        if not i.filename.startswith(top) or i.is_dir():
+            continue
+        rel = i.filename[len(top):]
+        if not rel or rel.startswith("/") or ".." in rel.split("/"):
+            sys.exit("bad name in the zip: " + i.filename)
+        dst = os.path.join(out, *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with f.open(i) as a, open(dst, "wb") as b:
+            shutil.copyfileobj(a, b, 1 << 20)
+' "$dl/$zip" "$tfolder" "$dl/tool" || [[ ! -f $dl/tool/player.py ]]; then
+                        why="$zip has no $tfolder/player.py"; rm -rf "$dl/tool"
+                    elif [[ ! -f $GAME/romfs/Pack/ZsDic.pack.zs ]]; then why="no game RomFS in $GAME/romfs to make its files from"; rm -rf "$dl/tool"
+                    elif charsel_tool_make "$new" "$part"; then rm -rf "$dl/tool"
+                    else why=$cs_tool_why; rm -rf "$dl/tool"
+                    fi
+                fi
             fi
         fi
     fi

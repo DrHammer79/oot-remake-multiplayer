@@ -26,6 +26,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -38,15 +39,19 @@
 #include "coop_camera.h"
 #include "coop_cheats.h"
 #include "coop_cheats_panel.h"
+#include "coop_debug_panels.h"
+#include "coop_playtest.h"
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
+#include "coop_dbno_draw.h"
 #include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
 #include "coop_flag_native.h"
 #include "coop_flags.h"
 #include "coop_game_build.h"
 #include "coop_i18n.h"
+#include "coop_native_ui.h"
 #include "coop_save.h"
 #include "coop_hold.h"
 #include "coop_counters.h"
@@ -54,6 +59,7 @@
 #include "coop_difficulty.h"
 #include "coop_actor_events.h"
 #include "coop_boss_native.h"
+#include "coop_boss_orders.h"
 #include "coop_boss_scenes.h"
 #include "coop_hallway.h"
 #include "coop_dbno_body.h"
@@ -64,6 +70,7 @@
 #include "coop_pad_order.h"
 #include "coop_rando.h"
 #include "coop_hook.h"
+#include "coop_native_tags.h"
 #include "coop_lobby_game.h"
 #include "coop_lobby_tab.h"
 #include "coop_voice.h"
@@ -114,6 +121,7 @@
 #include "hos_coop_actors.h"
 #include "hos_coop_nodes.h"
 #include "hos_coop_bosses.h"
+#include "hos_coop_boss_orders.h"
 #include "hos_coop_pads.h"
 #include "hos_coop_save_load.h"
 #include "hos_coop_sound.h"
@@ -434,6 +442,42 @@ void SetBossNative() {
              brain ? "" : ": bosses as before (owner's animations, gohma-sync)");
 }
 
+// Row 222 (coop_boss_orders.h): one battle manager for every game, when this hookshot.exe wraps the sisters' message
+// handler (patch 0036, row 25) and LICHII_COOP_BOSS_ORDERS is not 0. Asked with SetBossNative.
+void SetBossOrders() {
+    const bool on = WrapIn(HOS_COOP_WRAP_BOSS_ORDER) && Env("LICHII_COOP_BOSS_ORDERS") != "0";
+    CoopBossOrders::Table& t = CoopBossOrders::TheTable();
+    if (t.On() == on) {
+        return;
+    }
+    t.SetOn(on);
+    LOG_INFO(Core, "coop: bosses: battle manager orders {} ({})", on ? "shared" : "each game's own",
+             WrapIn(HOS_COOP_WRAP_BOSS_ORDER) ? (on ? "wrapped" : "wrapped, off by LICHII_COOP_BOSS_ORDERS")
+                                              : "not wrapped in this hookshot.exe");
+}
+
+// Every 10 s while orders move: the counts (the probe run's lines).
+void LogBossOrders() {
+    static std::uint64_t said_ms = 0;
+    static CoopBossOrders::Counts said{};
+    const std::uint64_t now = SteadyMs();
+    if (now - said_ms < 10'000) {
+        return;
+    }
+    const CoopBossOrders::Counts c = CoopBossOrders::TheTable().GetCounts();
+    if (c.owner_kept == said.owner_kept && c.copy_skipped == said.copy_skipped && c.delivered == said.delivered &&
+        c.copy_own_ran == said.copy_own_ran && c.dropped == said.dropped && c.restarts == said.restarts &&
+        c.replayed == said.replayed) {
+        return;
+    }
+    said_ms = now;
+    said = c;
+    LOG_INFO(Core, "coop: bosses: battle orders: ours sent {}; copies: {} owner's put in, {} own skipped, {} own run "
+                   "before the owner's came, {} dropped, {} started again; {} to unlisted actors; made ours: {} of our "
+                   "manager's skipped orders put in",
+             c.owner_kept, c.delivered, c.copy_skipped, c.copy_own_ran, c.dropped, c.restarts, c.unknown, c.replayed);
+}
+
 // Every 10 s while a boss is synced natively: the counts (first proof lines).
 void LogBossNative() {
     static std::uint64_t said_ms = 0;
@@ -465,6 +509,107 @@ void LogBossNative() {
              c.action_waiting, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.busy, c.copy_life_held,
              c.copy_killed, c.copy_finished, c.plain_wants, c.plain_wakes, c.plain_deaths, c.brain_came,
              c.brain_already);
+}
+
+// ---- Name tags on the game's own balloons (coop_native_tags.h, B3 of reports/ui-audit-01112.md), at the frame hook.
+// LICHII_COOP_NATIVE_TAGS=0: the overlay's drawn name text instead (no arrows, no dots either way). The game gave no
+// memory for the names: the drawn text too, said once in the log.
+class TagsGame final : public CoopNativeTags::Game {
+public:
+    explicit TagsGame(void* ctx) : ctx_(ctx) {}
+    std::uint64_t MainBase() const override { return CoopRuntime::MainBase(); }
+    bool Read(std::uint64_t a, void* out, std::size_t n) override { return CoopRuntime::Read(a, out, n); }
+    bool Write(std::uint64_t a, const void* in, std::size_t n) override { return CoopRuntime::Write(a, in, n); }
+    std::optional<std::uint64_t> Call(std::uint64_t f, const std::array<std::uint64_t, 5>& x) override {
+        HosCoopCall k{};
+        k.function = f;
+        for (std::size_t i = 0; i < x.size(); ++i) k.x[i] = x[i];
+        std::uint64_t x0 = 0;
+        if (g_api == nullptr || !g_api->call(ctx_, &k, &x0)) return std::nullopt;
+        return x0;
+    }
+
+private:
+    void* ctx_;
+};
+std::atomic<bool> g_tags_drawn{false};   // true: the overlay draws the name text (native off or failed)
+CoopNativeTags::Balloons g_balloons;     // the game's thread only
+
+// B8's probe (LICHII_COOP_MAP_PROBE=1, off by default): every 5 s, the MapIcon layouts the HUD's map screen holds
+// and the balloon screen's shown parts, into the log (how the game makes its own map icons; whether our balloons stay).
+void MapProbe(void* ctx) {
+    static const bool on = Env("LICHII_COOP_MAP_PROBE") == "1";
+    static std::uint64_t next = 0;
+    if (!on || SteadyMs() < next) return;
+    next = SteadyMs() + 5000;
+    TagsGame game(ctx);
+    const std::uint64_t map = CoopNativeTags::ScreenByVtable(game, CoopNativeTags::kMapMenuVtable);
+    std::string held;
+    for (const auto& h : CoopNativeTags::LayoutsHeld(game, map, 0x3000, "MapIcon")) {
+        held += fmt::format(" +{:#x}={:#x} {}", h.offset, h.layout, h.name);
+    }
+    LOG_INFO(Core, "coop: map icons probe: map screen {:#x}, MapIcon layouts:{}", map, held.empty() ? " none" : held);
+    const std::uint64_t balloons = CoopNativeTags::ScreenByVtable(game, CoopNativeTags::addr::kBalloonVtable);
+    std::string parts;
+    for (std::size_t i = 0; i < CoopNativeTags::addr::kParts && balloons != 0; ++i) {
+        std::uint64_t part = 0, root = 0;
+        float xy[2] = {}, alpha = 0;
+        CoopRuntime::Read(balloons + CoopNativeTags::addr::kPartTable + i * CoopNativeTags::addr::kPartStride, &part, 8);
+        if (const auto r = part != 0 ? game.Call(CoopRuntime::MainBase() + CoopNativeTags::addr::kPartRootPane,
+                                                 {part + 0x40, 0, 0, 0, 0})
+                                     : std::nullopt) {
+            root = *r;
+        }
+        if (root != 0) {
+            CoopRuntime::Read(root + CoopNativeTags::addr::kPaneXY, xy, sizeof xy);
+            CoopRuntime::Read(root + 0x78, &alpha, sizeof alpha);
+        }
+        parts += fmt::format(" {}:{:.0f},{:.0f} a{:.2f}", i, xy[0], xy[1], alpha);
+    }
+    LOG_INFO(Core, "coop: map icons probe: balloon screen {:#x} parts{} (ours shown: {})", balloons, parts, g_balloons.shown());
+}
+
+void NativeTags(void* ctx) {
+    static const bool on = Env("LICHII_COOP_NATIVE_TAGS") != "0";
+    static bool said = false, said_fail = false;
+    MapProbe(ctx);
+    if (!on) {
+        g_tags_drawn.store(true);
+        return;
+    }
+    TagsGame game(ctx);
+    std::vector<CoopNativeTags::Spot> spots;
+    const auto markers = CoopHook::CurrentMarkers();
+    if (markers && !markers->items.empty()) {
+        std::uint8_t self = 0;
+        const auto rows = CoopHook::PlayerList();
+        for (const auto& row : rows) {
+            if (row.self) self = row.number;
+        }
+        for (const auto& m : markers->items) {
+            if (m.edge || m.self || m.tag.empty() || !m.tag_head) continue;
+            CoopNativeTags::Spot s{m.tag, m.tag_x, m.tag_y, m.alpha, 0xFFFFFF};
+            for (const auto& row : rows) {
+                if (row.number != 0 && row.name == m.tag) s.rgb = CoopDraw::Lifted(CoopPuppet::NameColor(row.number, self));
+            }
+            spots.push_back(std::move(s));
+        }
+    }
+    if (spots.empty() && g_balloons.shown() == 0) return;   // solo, or nobody near: the balloons are not touched
+    const bool up = g_balloons.Step(game, spots, markers ? markers->width : 0.0f, markers ? markers->height : 0.0f);
+    if (g_balloons.no_memory()) {
+        g_tags_drawn.store(true);
+        if (!said_fail) {
+            said_fail = true;
+            LOG_WARNING(Core, "coop: native tags: the game gave no memory for the names; drawn name tags instead");
+        }
+        return;
+    }
+    if (up && g_balloons.shown() > 0 && !said) {
+        said = true;
+        LOG_INFO(Core, "coop: native tags: name tags on the game's balloons ({} shown, screen {:#x})", g_balloons.shown(),
+                 g_balloons.screen());
+    }
 }
 
 void RunCalls(void* ctx) {
@@ -893,6 +1038,189 @@ const CoopDraw::MapShown* MapScene(bool camera, std::uint8_t self) {
     return &m;
 }
 
+// ---- Chat as the game's own UI (coop_native_ui.h, docs/native-ui.md), on the game's thread at the frame hook: the
+// chat lines in the game's message window, notices and the held line (down but not out) in its banner, the typed
+// line in the message window. Nothing of it is drawn. LICHII_COOP_NATIVE_UI=0, or a game that gives no memory for
+// the texts: the drawn lines and box of before (text only, no box behind them).
+class NativeGame final : public CoopNativeUi::Game {
+public:
+    explicit NativeGame(void* ctx) : ctx_(ctx) {}
+    bool Read(std::uint64_t a, void* out, std::size_t n) override { return CoopRuntime::Read(a, out, n); }
+    bool Write(std::uint64_t a, const void* in, std::size_t n) override { return CoopRuntime::Write(a, in, n); }
+    std::optional<std::uint64_t> Call(std::uint64_t f, const std::array<std::uint64_t, 5>& x) override {
+        HosCoopCall k{};
+        k.function = f;
+        for (std::size_t i = 0; i < x.size(); ++i) k.x[i] = x[i];
+        std::uint64_t x0 = 0;
+        if (g_api == nullptr || g_api->call(ctx_, &k, &x0) == 0) return std::nullopt;
+        return x0;
+    }
+    std::uint64_t Main() const override { return CoopRuntime::MainBase(); }
+
+private:
+    void* ctx_;
+};
+
+struct Native {
+    enum class Block { kNone, kFailed, kHave } block = Block::kNone;
+    CoopNativeUi::TextRing ring;
+    CoopNativeUi::ChatFeed feed;
+    CoopNativeUi::NameTint tint;
+    CoopNativeUi::Banner banner;
+    bool typing = false;          // the typed line is on the game's window
+    std::string typed;            // what it shows
+    std::uint64_t typed_ms = 0;
+    std::uint64_t failed_ms = 0;  // the window was not free: tried again a second later
+    bool said_wait = false;
+};
+Native g_native;                             // the game's thread only
+std::atomic<bool> g_native_chat{false};      // the game's windows carry the chat: nothing of it drawn (DrawScene)
+
+bool NativeOn() {
+    static const bool on = Env("LICHII_COOP_NATIVE_UI") != "0";
+    return on;
+}
+
+using Colours = std::map<std::string, std::uint32_t, std::less<>>;
+
+// The speakers' colours by the names chat lines call them (the HUD's and tags' colours: CoopPuppet::NameColor).
+Colours SpeakerColours() {
+    Colours out;
+    const auto rows = CoopHook::PlayerList();
+    std::uint8_t self = 0;
+    for (const auto& row : rows) {
+        if (row.self) self = row.number;
+    }
+    for (const auto& row : rows) {
+        if (row.number == 0) continue;
+        const std::uint32_t c = CoopPuppet::NameColor(row.number, self) & 0xFFFFFF;
+        if (!row.name.empty()) out[row.name] = c;
+        out["P" + std::to_string(row.number)] = c;
+        if (row.self) out["you"] = c;
+    }
+    return out;
+}
+
+// The chat box open: the typed line in the game's message window ("you", the text, a caret), changing as it is
+// typed; lines that come meanwhile go to the banner. True while the box is open (the window is the box's).
+bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& colours) {
+    std::optional<std::pair<std::string, bool>> box;
+    {
+        std::lock_guard lock(g_box_mutex);
+        if (g_box.open()) box.emplace(g_box.text(), g_box.failed());
+    }
+    if (!box) {
+        if (g_native.typing) {
+            CoopNativeUi::EndLine(game, g_native.ring);
+            g_native.typing = false;
+        }
+        g_native.typed.clear();
+        return false;
+    }
+    auto line = CoopNativeUi::TypingLine(CoopI18n::Tr("you"), box->first, box->second, CoopI18n::Tr("(not sent)"));
+    if (const auto c = colours.find("you"); c != colours.end()) line.colour = c->second;
+    // Again on a change, and before its time runs out (kTypingSeconds). While the window holds a message of the
+    // game's own the typed line waits for it (the keys still type); nothing is drawn.
+    const bool due = !g_native.typing || line.text != g_native.typed || now > g_native.typed_ms + 30000;
+    if (due && CoopNativeUi::ShowLine(game, g_native.ring, g_native.tint, line, g_native.typing)) {
+        static bool said = false;
+        if (!std::exchange(said, true)) LOG_INFO(Core, "coop: native ui: typing in the game's message window");
+        g_native.typing = true;
+        g_native.typed = line.text;
+        g_native.typed_ms = now;
+    } else if (!g_native.typing && !g_native.banner.up() &&
+               (line.text != g_native.typed || now > g_native.typed_ms + 6000)) {
+        // The window holds a message of the game's own: the typed line on the banner meanwhile (its last line; again
+        // on a change, and every 6 s while the banner may have closed by itself).
+        CoopNativeUi::Shown banner = line;
+        banner.notice = true;
+        const auto rows = CoopNativeUi::Wrap(
+            CoopNativeUi::Clean(line.speaker + ": " + line.text, CoopNativeUi::kTextBytes), CoopNativeUi::kBannerColumns, 99);
+        banner.text = rows.empty() ? std::string() : rows.back();
+        if (g_native.banner.Notice(game, g_native.ring, banner)) {
+            g_native.typed = line.text;  // (shown: again only on a change)
+            g_native.typed_ms = now;
+        }
+        return true;
+    }
+    if (!g_native.banner.up()) {
+        if (const auto said = g_native.feed.Next(now)) {
+            CoopNativeUi::Shown banner = *said;
+            if (!banner.speaker.empty()) banner.text = banner.speaker + ": " + banner.text;
+            if (!g_native.banner.Notice(game, g_native.ring, banner)) g_native.feed.PutBack(*said);
+        }
+    }
+    return true;
+}
+
+void NativeStep(void* ctx) {
+    if (!NativeOn() || g_native.block == Native::Block::kFailed) return;
+    NativeGame game(ctx);
+    const std::uint64_t now = SteadyMs();
+    if (g_native.block == Native::Block::kNone) {
+        const auto block =
+            game.Call(game.At(CoopNativeUi::addr::kMalloc), {CoopNativeUi::TextRing::kBlockBytes + 16, 0, 0, 0, 0});
+        if (!block || *block == 0) {
+            g_native.block = Native::Block::kFailed;
+            LOG_WARNING(Core, "coop: native ui: the game gave no memory for its texts; chat drawn as before");
+            return;
+        }
+        g_native.ring.SetBlock((*block + 15) & ~std::uint64_t{15});
+        g_native.block = Native::Block::kHave;
+        g_native_chat = true;
+        LOG_INFO(Core, "coop: native ui: chat in the game's message window and banner (texts at {:#x})", *block);
+    }
+    const auto lines = CoopHook::ChatLines();
+    const Colours colours = SpeakerColours();
+    std::vector<CoopNativeUi::ChatIn> in;
+    for (const auto& l : lines) {
+        // (a notice is the module's own words: in the player's language; chat is as typed)
+        CoopNativeUi::ChatIn c{l.notice ? CoopI18n::Tr(l.text) : l.text, l.notice, l.age_ms, 0};
+        if (const auto at = l.text.find(": "); !l.notice && at != std::string::npos) {
+            if (const auto it = colours.find(std::string_view(l.text).substr(0, at)); it != colours.end()) {
+                c.colour = it->second;
+            }
+        }
+        in.push_back(std::move(c));
+    }
+    g_native.feed.Update(in, now);
+    // The held line (down but not out) keeps the banner; notices wait meanwhile.
+    g_native.banner.Step(game, g_native.ring, CoopNativeUi::HeldBanner());
+    if (NativeTyping(game, now, colours)) return;
+    if (g_native.tint.tinted()) {
+        const std::uint64_t screen = CoopNativeUi::InGameScreen(game);
+        if (screen != 0 && CoopNativeUi::WindowHolds(game, screen, g_native.ring) != CoopNativeUi::Holds::kOurs) {
+            g_native.tint.Restore(game, g_native.ring);  // our line is done: the game's own name colour again
+        }
+    }
+    if (g_native.feed.Busy(now) || now < g_native.failed_ms + 1000) return;
+    std::optional<CoopNativeUi::Shown> line = g_native.feed.Next(now);
+    if (!line) return;
+    if (line->notice && g_native.banner.up()) {
+        g_native.feed.PutBack(*line);  // (the held line has the banner)
+        g_native.failed_ms = now;
+        return;
+    }
+    const bool shown = line->notice ? g_native.banner.Notice(game, g_native.ring, *line)
+                                    : CoopNativeUi::ShowLine(game, g_native.ring, g_native.tint, *line);
+    if (shown) {
+        static bool said = false;
+        if (!std::exchange(said, true)) {
+            LOG_INFO(Core, "coop: native ui: first chat line shown by the game ({})",
+                     line->notice ? "banner" : "message window");
+        }
+        return;
+    }
+    // No window now (the title, a load) or a message of the game's own on it: tried again in a second, until the
+    // line is stale (ChatFeed::kStaleMs). Nothing drawn meanwhile.
+    g_native.feed.PutBack(*line);
+    g_native.failed_ms = now;
+    if (!std::exchange(g_native.said_wait, true)) {
+        LOG_INFO(Core, "coop: native ui: the game's {} is not free now; the line waits",
+                 line->notice ? "banner" : "message window");
+    }
+}
+
 }  // namespace
 
 void SetMapOptions(bool players, bool names) {
@@ -905,10 +1233,10 @@ CoopDraw::Scene DrawScene() {
     s.title = CoopTitle::View();
     {
         std::lock_guard lock(g_box_mutex);
-        if (g_box.open()) {
+        if (g_box.open() && !g_native_chat.load()) {  // (the game's message window shows it: NativeTyping)
             s.box = CoopDraw::ChatBoxView{g_box.text(), g_box.failed()};
         }
-        if (g_cheats.open()) {
+        if (CoopDebugPanels::kOn && g_cheats.open()) {   // (release kits: no F8 panel, coop_debug_panels.h)
             CoopDraw::CheatsView v;
             v.filter = g_cheats.filter();
             for (const auto& r : CheatRows()) {
@@ -919,21 +1247,52 @@ CoopDraw::Scene DrawScene() {
             s.cheats = std::move(v);
         }
     }
-    s.chat = CoopDraw::ShownChat(CoopHook::ChatLines(), s.box.has_value());
+    if (!g_native_chat.load()) {  // (the game's message window and banner show them: NativeStep)
+        s.chat = CoopDraw::ShownChat(CoopHook::ChatLines(), s.box.has_value());
+    }
     s.markers = CoopHook::CurrentMarkers();
-    s.dbno = CoopDbno::Shown();  // down but not out: the ring
-    bool list = false, panel = false;
+    if (s.markers && !g_tags_drawn.load()) {   // the game's balloons carry the name tags (NativeTags): none drawn
+        std::erase_if(s.markers->items, [](const CoopHook::Marker& m) { return !m.self; });
+    }
+    s.dbno = CoopDbno::Shown();  // down but not out: one line (coop_dbno_draw.h)
+    // With the game's own UI up (coop_native_ui.h: the banner is found and works), the line is held on the game's
+    // banner (SimpleInfo_00) and nothing is drawn; let go when down ends. Without it (LICHII_COOP_NATIVE_UI=0, a game
+    // that gave no memory): the drawn line, text only.
+    // The banner's line always fits it with the clock / share / "A: next player" kept (BannerLine); spectating holds it
+    // only a few seconds after each change of whom we watch, so notices are not kept waiting for minutes (BannerHold).
+    if (g_native_chat.load()) {
+        static std::mutex hold_mutex;
+        static CoopDbnoDraw::BannerHold hold;
+        std::lock_guard hold_lock(hold_mutex);   // (DrawScene runs on the present's thread and from draw_wanted)
+        const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                           std::chrono::steady_clock::now().time_since_epoch())
+                                                           .count());
+        if (s.dbno && hold.Want(*s.dbno, now_ms)) {
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerColumns));
+        } else if (CoopNativeUi::HeldBanner()) {
+            CoopNativeUi::EndBanner();
+        }
+        if (!s.dbno) {
+            hold.Reset();
+        }
+        s.dbno.reset();   // (nothing drawn: the game's banner has it, or had it and let notices go on)
+    } else if (CoopNativeUi::HeldBanner()) {
+        CoopNativeUi::EndBanner();   // (the native UI went: the drawn line takes over)
+    }
+    bool list = false, panel = false, list_press = false, always = false;
     {
         std::lock_guard lock(g_keys_mutex);
         static bool panel_env = [] {
-            g_keys.panel = EnvOn("LICHII_COOP_DEBUG_PANEL");
+            g_keys.panel = CoopDebugPanels::kOn && EnvOn("LICHII_COOP_DEBUG_PANEL");
             return true;
         }();
         (void)panel_env;
         g_keys.Update(KeyDown(0x75 /* F6 */), KeyDown(0x76 /* F7 */));
-        static const bool always = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        static const bool always_env = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        always = always_env;
         list = g_keys.list || always;
-        panel = g_keys.panel;
+        list_press = g_keys.list_press && !always;
+        panel = CoopDebugPanels::kOn && g_keys.panel;   // (release kits: no F7 panel, coop_debug_panels.h)
     }
     auto rows = CoopHook::PlayerList();
     // The HUD blocks, players' colours and place names are the game look's
@@ -1010,7 +1369,23 @@ CoopDraw::Scene DrawScene() {
     if (!s.hud.empty()) {   // row 141: the blocks go below the game's own HUD as it is laid out now
         s.game_hud_bottom = CoopMapPage::GameHudBottom();
     }
-    if (list) {
+    // F6 (ui-audit-01112 B5): the game's own - menu, Multiplayer > Players (coop_players_open.h), when we are in a
+    // scene (never on the title or a file screen, where Minus is not the - menu); the drawn list only when the pack has
+    // no - tabs of ours (OpenPlayers false) or for tests (LICHII_COOP_SHOW_PLAYERS).
+    static std::atomic<bool> native_list{true};
+    {   // Free play for F6's Minus, each frame: our Link's frame is fresh (none in a load or on the title) and no event
+        // (cutscene, talk) has control (CoopHook::CurrentMapView); the pause tab also reads the event manager itself.
+        thread_local CoopHook::MapView view;
+        const bool free_play = !CoopTitle::Up() && CoopHook::CurrentMapView(view) && !view.event;
+        CoopPauseTab::SetFreePlay(free_play);
+    }
+    if (list_press) {
+        const bool in_scene = !CoopTitle::Up() && std::any_of(rows.begin(), rows.end(), [](const CoopHook::PlayerRow& r) {
+            return r.self && r.scene && !r.scene->empty();
+        });
+        native_list = in_scene && CoopPauseTab::OpenPlayers();
+    }
+    if (list && (always || !native_list.load())) {
         if (game) {
             for (auto& row : rows) {
                 if (row.scene && !row.scene->empty()) {
@@ -1047,7 +1422,8 @@ bool TypeKey(std::uint32_t vk, bool repeat) {
     }
     std::lock_guard lock(g_box_mutex);
     // The cheats panel (F8, LICHII_COOP_CHEATS=1) when it is open or the chat box is not.
-    if (g_cheats.open() || (!g_box.open() && CoopCheats::On())) {
+    // Release kits have no panel (coop_debug_panels.h): F8 opens nothing and takes no keys.
+    if (CoopDebugPanels::kOn && (g_cheats.open() || (!g_box.open() && CoopCheats::On()))) {
         const auto rows = CheatRows();
         if (g_cheats.Key(vk, repeat, rows.size())) {
             GiveChosen(rows);
@@ -1135,6 +1511,11 @@ void SetChatKey(const std::string& key) {
 // (a menu's typing ended by Enter or Esc: kept until that key is let go, as the chat box does. The pause page's
 // Enter went on to the game as its own key and shut the pause menu, a test run 2026-11-20)
 static std::atomic<bool> g_menu_keys_release{false};
+
+bool ChatOpen() {
+    std::lock_guard lock(g_box_mutex);
+    return g_box.open() || g_cheats.open();
+}
 
 bool KeysTaken() {
     if (CoopPauseTab::KeysTaken() || CoopPause::KeysTaken()) {
@@ -1307,6 +1688,7 @@ bool Start(const HosCoopApi* api) {
     CoopLongshotSettings::Init(api);   // Longshot's own settings for the Settings tab (patch 0032; none from an older Hookshot)
     CoopPause::Init(server);
     CoopTestInput::SetMenuOpener(CoopPause::TestMenu);   // (the autotest's menu step; only a commands file asks it)
+    CoopPlaytest::Start(g_system, CoopRuntime::GameDir());   // the play-test bridge: off unless LICHII_COOP_PLAYTEST_PORT
     CoopLook::StartModule();  // the look chosen in the pause menu (coop_look.h)
     return true;
 }
@@ -1348,6 +1730,11 @@ void TestState() {
 void Frame(void* ctx, int site) {
     if (g_original_on) {
         return;   // (original game: not even the window's title)
+    }
+    if (site == HOS_COOP_SITE_FRAME) {
+        // The play-test bridge's hold (docs/playtest.md): first, before any co-op work and with no lock of ours held,
+        // so a held frame has not run at all and nothing else waits on it. Off: one atomic load.
+        CoopPlaytest::AtFrame();
     }
     CoopWindowBrand::Tick(CoopRuntime::GameDir());  // the window's title and icon, co-op on or idle (solo too)
     if (!g_on) {
@@ -1391,7 +1778,10 @@ void Frame(void* ctx, int site) {
         }
         RunCalls(ctx);
         RequestHostAutoSave(ctx);   // (only when a guest's ask opened a round: CoopSave::TakeSaveRequest)
+        NativeStep(ctx);            // chat in the game's own message window and banner (coop_native_ui.h)
+        NativeTags(ctx);            // the name tags on the game's balloons (coop_native_tags.h)
         LogBossNative();
+        LogBossOrders();
         CoopMapPage::Frame(ctx, g_api);   // the Map page's panes, found once while the game plays
         if (const auto menu = CoopMapPage::MenuState()) {  // minimap-b: the drop log's menu state (patch 0018)
             coop::host::map_drop_log().set_menu(menu->menu_open, menu->map_page);
@@ -1424,6 +1814,7 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         const WorldLevel level = HelloLevel(a, b);
         g_world_wraps.store(level.wraps);
         SetBossNative();
+        SetBossOrders();
         if (g_world_version.exchange(level.version) != level.version) {
             LOG_INFO(Core, "coop: world hooks: hookshot.exe has level {} (this module {}), wraps {:#x}{}", level.version,
                      HOS_COOP_WORLD_VERSION, level.wraps,
@@ -1736,6 +2127,35 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         x[0] = 0;
         return 1;
     }
+    if (id == HOS_COOP_WRAP_BOSS_ORDER && phase == 0) {
+        // Row 222: a battle manager's order reaches a sister (x0 its receive node, x1 the message: +4 type, +0x10
+        // the payload). A copy's own manager's orders are skipped once the owner's have come (1: the handler does not
+        // run; x0 1, what it always returns).
+        CoopBossOrders::Table& t = CoopBossOrders::TheTable();
+        std::uint32_t type = 0;
+        if (x[1] == 0 || !CoopRuntime::Read(x[1] + CoopBossOrders::addr::kMessageType, &type, sizeof type) ||
+            !CoopBossOrders::IsOrder(type) || !t.On()) {
+            return 0;
+        }
+        std::uint64_t payload_at = 0;
+        CoopBossOrders::Payload payload{};
+        if (!CoopRuntime::Read(x[1] + CoopBossOrders::addr::kMessagePayload, &payload_at, sizeof payload_at) ||
+            payload_at == 0 || !CoopRuntime::Read(payload_at, payload.data(), payload.size())) {
+            return 0;
+        }
+        namespace oa = CoopBossOrders::addr;
+        std::uint64_t context = 0, owner = 0, actor = 0;
+        if (!CoopRuntime::Read(x[0] + oa::kNodeContext, &context, sizeof context) || context == 0 ||
+            !CoopRuntime::Read(context + oa::kContextOwner, &owner, sizeof owner) || owner == 0 ||
+            !CoopRuntime::Read(owner + oa::kOwnerActor, &actor, sizeof actor)) {
+            actor = 0;
+        }
+        if (!t.OnReceive(x[0], actor, type, payload, t_own_call)) {
+            return 0;
+        }
+        x[0] = 1;
+        return 1;
+    }
     if (id == HOS_COOP_WRAP_ACTION_VERB && phase == 0) {
         // Native boss sync: a boss's action verb request (x0 BSA, x1 the request in guest memory).
         CoopBossNative::Table& t = CoopBossNative::TheTable();
@@ -1800,6 +2220,7 @@ std::uint32_t Hold(std::uint64_t component, std::uint32_t bits) {
 }
 
 void Stop() {
+    CoopPlaytest::Stop();   // (a held game let go first)
     CoopModsRuntime::Stop();
     HostMenu().Leave();  // our own server goes after our own client
     CoopHold::TheHostTable().Clear();  // (no copy stays held once co-op is off)

@@ -61,7 +61,8 @@ STICK_KEYS = {  # full stick directions: (stick, x, y)
     "RSTICK_UP": ("R", 0, 1), "RSTICK_DOWN": ("R", 0, -1), "RSTICK_LEFT": ("R", -1, 0), "RSTICK_RIGHT": ("R", 1, 0),
 }
 WEAR_SLOTS = ("weapon", "shield", "head", "armor", "boots", "hand")
-MODULE_ONLY = ("chat", "give", "wear", "dress", "assign", "place", "face", "aim", "kill", "hit", "stun", "drop", "hurt", "setflag", "setenum", "menu")
+MODULE_ONLY = ("chat", "give", "wear", "dress", "assign", "place", "face", "aim", "kill", "hit", "stun", "drop", "hurt", "setflag", "setenum", "menu",
+               "dump", "event")
 
 
 class ScriptError(Exception):
@@ -309,6 +310,17 @@ def parse(text):
                 steps.append(e)
             s.kind, s.name, s.start = "setenum", BOTTLE_ITEMS[-1], "Empty"
             s.text = "setenum %s Empty" % BOTTLE_ITEMS[-1]
+        elif cmd == "DUMP":
+            if len(w) != 2 or not re.fullmatch(r"[A-Za-z0-9_-]+", w[1]):
+                fail("want: dump TAG (letters, digits, - and _)")
+            s.kind, s.name = "dump", w[1]
+        elif cmd == "EVENT":
+            # event NAME: our game asked to play that event setting by name (the module's live-event requester).
+            # boss-route-01112: a boss rush stage reached by `warp` misses its rematch boot event; Barinade and
+            # Ganondorf appear only through theirs (DreamBossStage_Rematch_Barinade_Start / _Ganondorf_Start).
+            if len(w) != 2 or not re.fullmatch(r"[A-Za-z0-9_]+", w[1]):
+                fail("want: event NAME (an event setting's name: letters, digits and _)")
+            s.kind, s.name = "event", w[1]
         elif cmd == "SETENUM":
             if len(w) != 3:
                 fail("want: setenum NAME VALUE (an Enum flag, or 0xHASH, and a value's name)")
@@ -326,8 +338,8 @@ def parse(text):
                 fail("want: assign ITEM")
             s.kind, s.name = "assign", w[1]
         elif cmd == "MENU":
-            if len(w) != 2 or w[1].lower() not in ("customize", "close"):
-                fail("want: menu customize|close")
+            if len(w) != 2 or w[1].lower() not in ("customize", "close", "host"):
+                fail("want: menu customize|close|host")
             s.kind, s.name = "menu", w[1].lower()
         elif cmd == "MARK":
             if len(w) != 2:
@@ -834,19 +846,29 @@ class Player:
 def to_play(bridge, log, timeout, clock=time.monotonic, sleep=time.sleep):
     """Title and file select to the world: A pressed every 2 s until the bridge says play with a map known."""
     deadline = clock() + timeout
+    last, said = {}, clock()
     while clock() < deadline:
         try:
             s = bridge.request("status")
         except BridgeError:
             s = {}
+        last = s
         game = s.get("game") or {}
         if s.get("state") == "play" and s.get("map") and not game.get("loading") and not game.get("event"):
             log("coop: test loaded (map %s)" % s.get("map"))
             return s
+        # (what it waits for, every 30 s: a game that is drawn but never "play with a map, not loading, no event" is
+        # told apart from one that is not there; player-<x>.txt had nothing when the load failed)
+        if clock() - said >= 30:
+            said = clock()
+            log("coop: test waiting for play: state=%s map=%s loading=%s event=%s frame=%s" %
+                (s.get("state"), s.get("map"), game.get("loading"), game.get("event"), s.get("frame")))
         if s.get("frame", 0) > 0:
             bridge.request("press", buttons=["A"], frames=8, wait=False, check=False)
         sleep(2.0)
-    raise TimeoutError("not in play after %d s" % timeout)
+    raise TimeoutError("not in play after %d s (last status: state=%s map=%s loading=%s event=%s)" %
+                       (timeout, last.get("state"), last.get("map"), (last.get("game") or {}).get("loading"),
+                        (last.get("game") or {}).get("event")))
 
 
 # The renderer's start is done: its pipelines are made (from the caches or compiled now). Until then the game shows
@@ -932,6 +954,12 @@ def add_renderer_options(p, wait=600):
 #   records of earlier runs (a killed or crashed proof), so the page came up at a run's first title and took the
 #   load's A presses (smoke hs-players, kit-0119: B left on the title's Host page). A scenario that tests the ask
 #   turns it on in its switches.
+# Row 260: what game A gets for --host-in-game: co-op off at its start (no LICHII_COOP_SERVER), the in-game host's
+# port and password for its `menu host` step (hookshot/src/coop_host_menu.h ParseTestHost) and its name.
+def host_in_game_env(port, password):
+    return {"LICHII_COOP_TEST_HOST": "%d:%s" % (port, password), "LICHII_COOP_NAME": "A"}
+
+
 TEST_GAME_DEFAULTS = (("LICHII_COOP_TEST_OWN_SAVE", "1"), ("LICHII_COOP_PROBLEM_ASK", "0"))
 
 
@@ -979,6 +1007,59 @@ def find_log(game):
     """The newest of the game's longshot_log.txt files (an older one elsewhere is from another build), else None."""
     found = [p for p in log_candidates(game) if os.path.isfile(p)]
     return max(found, key=os.path.getmtime) if found else None
+
+
+# ------------------------------------------------------------------------------- the pack's start, as the kit's
+# What the kit's start does to the puppet pack before each game (play.ps1: Use-KitPuppetPack, then
+# Invoke-KitSizeTableMerge; start.sh the same), for a game this file starts itself: your own Link's tunic files in
+# the colour it will wear (tools/puppet_pack/self_tunic.py), THEN the merge (tools/puppet_pack/merge_tables.py),
+# whose row-202 step gives another mod's Link model (Character Select's) co-op's own tunic names only when those
+# files are there. Row 265 (0.11.12): a lane started without them wore Character Select's model on the game's shared
+# tunic textures, so Customize's Kokiri row recoloured only the belt and boots. Never stops the start.
+PACK_REL = ("mods", "contents", "0400486024DEC000", "coop-puppet")
+
+
+def pack_folders(game):
+    """(mods folder, the pack, the game's romfs or '') of a game folder, as Invoke-KitSizeTableMerge finds them."""
+    exe = exe_dir(game)
+    mods = os.path.join(exe, "mods")
+    if not os.path.isdir(mods):
+        mods = os.path.join(game, "mods")
+    pack = os.path.join(os.path.dirname(mods), *PACK_REL)
+    romfs = next((r for r in (os.path.join(exe, "romfs"), os.path.join(os.path.dirname(exe), "romfs"),
+                              os.path.join(game, "romfs")) if os.path.isdir(os.path.join(r, "Pack"))), "")
+    return mods, pack, romfs
+
+
+def pack_start(game, env, say):
+    """The kit's start of the pack for one game (env: the game's switches). Returns the lines said."""
+    mods, pack, romfs = pack_folders(game)
+    if not os.path.isfile(os.path.join(pack, "coop_puppet.json")):
+        return []
+    tools = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile(os.path.join(tools, "puppet_pack", "self_tunic.py")):
+        # (bigrun-0115: a copy of tools/autotest alone kept the game in green files)
+        line = "own tunic files NOT set: tools/puppet_pack is missing beside tools/autotest"
+        say(line)
+        return [line]
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    lines = []
+    try:
+        from puppet_pack import merge_tables, self_tunic
+        ini = next((p for p in (os.path.join(game, "coop-options.ini"), os.path.join(exe_dir(game), "coop-options.ini"))
+                    if os.path.isfile(p)), os.path.join(game, "coop-options.ini"))
+        color = self_tunic.start_color(env.get("LICHII_COOP_COLOR", ""), ini, os.path.join(game, "coop.ini"),
+                                       env.get("LICHII_COOP_TUNICS", ""))
+        got = self_tunic.put(pack, color)
+        lines.append("own tunic files: %s" % (got or "none (the game's green)"))
+        if os.path.isdir(mods):
+            merge_tables.main(["--mods", mods] + (["--romfs", romfs] if romfs else []))
+    except Exception as e:  # (the kit's start never stops on it either)
+        lines.append("pack start failed (%s: %s)" % (type(e).__name__, e))
+    for line in lines:
+        say(line)
+    return lines
 
 
 # ---------------------------------------------------------------------------------------------- the kit's own start
@@ -1122,6 +1203,18 @@ def run(a):
         load = parse(read_script(a.load))   # (checked; the load itself is "A until play", see to_play)
     procs, bridges, server, commands = {}, {}, None, {}
     failed = None
+
+    def keep_pids():
+        # --keep-open: the games and the server outlive this run, so their pids go to pids.json in the run folder for
+        # whoever closes them later (tools/autotest/live.py's watchdog). Written again as each one starts.
+        if not a.keep_open:
+            return
+        try:
+            with open(os.path.join(out, "pids.json"), "w", encoding="utf-8") as f:
+                json.dump({"games": {x: p.pid for x, p in procs.items()}, "server": server.pid if server else None}, f)
+        except OSError as e:
+            say("pids.json not written: %s" % e)
+
     try:
         if a.server:
             with open(os.path.join(out, "server-out.txt"), "w") as so:
@@ -1132,7 +1225,8 @@ def run(a):
                 if delay:
                     senv["OOT_COOP_TEST"] = "1"   # coop_server refuses the delay without it
                 server = subprocess.Popen([a.server, "--port", str(a.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
-                                          + delay, stdout=so, stderr=subprocess.STDOUT, env=senv)
+                                          + delay + a.server_arg, stdout=so, stderr=subprocess.STDOUT, env=senv)
+            keep_pids()
             time.sleep(1)
         for i, x in enumerate(tags):
             g = games[x]
@@ -1145,10 +1239,18 @@ def run(a):
             open(commands[x], "w").close()
             env = dict(os.environ, OOT_COOP_KIT_START="1", HOS_CONTROL=sock, HOS_CONTROL_MEM="ro", LICHII_COOP_TEST_COMMANDS=commands[x])
             test_game_defaults(env)   # its own save, no crash ask on the title (TEST_GAME_DEFAULTS): a switch can undo it
-            if a.server:
+            if a.server or (a.host_in_game and x != "A"):
                 env["LICHII_COOP_SERVER"] = "127.0.0.1:%d" % a.port
                 env["LICHII_COOP_NAME"] = x   # "A", "B": the scripts type /teleport A, /teleport B
                 env["LICHII_COOP_PASSWORD"] = a.password
+            elif a.host_in_game:
+                # Row 260: A starts with co-op off and hosts through its own Multiplayer > Host (its script's
+                # `menu host`), the in-process server players use; B joins it (it retries until A hosts).
+                env.update(host_in_game_env(a.port, a.password))
+            if a.playtest_ports:
+                # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
+                env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
+                env.setdefault("LICHII_COOP_CHEATS", "1")   # the bridge's give goes through the cheats queue
             for kv in a.env:
                 k, v = kv.split("=", 1)
                 if k[:2] in ("A:", "B:"):
@@ -1162,6 +1264,7 @@ def run(a):
                 say("%s: the kit's own start (%s)" % (x, kits[x]))
                 procs[x] = PidProcess(kit_start(kits[x], env, out, x))
             else:
+                pack_start(g, env, lambda line, x=x: say("%s: %s" % (x, line)))   # (the kit's start does it: row 265)
                 mismatch = code_mods_mismatch(exe_dir(g))
                 if mismatch:   # (charsel-tab-0119: a code mod's menus without its code; the run says so first)
                     say("%s: WARNING: %s" % (x, mismatch))
@@ -1170,6 +1273,7 @@ def run(a):
                     procs[x] = subprocess.Popen([exe], cwd=exe_dir(g), env=env, stdin=subprocess.DEVNULL, stdout=go,
                                                 stderr=subprocess.STDOUT, **kw)
             say("%s: started pid %d, bridge %s" % (x, procs[x].pid, sock))
+            keep_pids()
             bridges[x] = (sock, Bridge.connect(sock, timeout=120))
             if i == 0:
                 time.sleep(3)
@@ -1342,6 +1446,9 @@ def main(argv=None):
     r.add_argument("--game-a", help="(required without --lane)")
     r.add_argument("--game-b", help="(required without --lane)")
     r.add_argument("--server", help="coop_server to start (none: the games use their coop.ini)")
+    r.add_argument("--host-in-game", action="store_true",
+                   help="no coop_server: game A hosts through its own Multiplayer > Host (script step `menu host`) on "
+                        "--port with --password, on 127.0.0.1 only; B joins it (row 260)")
     r.add_argument("--port", type=int, help="default 27560 (a lane: its own)")
     r.add_argument("--password", default="autotest-pass",
                    help="the join password of the server it starts, given to both games (every session has one)")
@@ -1354,11 +1461,16 @@ def main(argv=None):
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--keep-open", action="store_true")
     r.add_argument("--env", action="append", default=[], help="NAME=VALUE (or A:NAME=VALUE) for the games")
+    r.add_argument("--server-arg", action="append", default=[],
+                   help="one more argument for the coop_server it starts (row 251: --same-network-open)")
     r.add_argument("--every", type=float, default=3.0)
     r.add_argument("--timeout", type=int, default=900, help="seconds for the boot and the load")
     r.add_argument("--scenario-timeout", type=int, default=600)
     add_renderer_options(r)
     r.add_argument("--pipe", help="default coop-auto (a lane: its own)")
+    r.add_argument("--playtest-ports", type=int, default=0, metavar="BASE",
+                   help="turn each game's play-test bridge on: A on BASE+1, B on BASE+2, with LICHII_COOP_CHEATS=1 "
+                        "for its give (docs/playtest.md)")
     add_test_delay_options(r)
     r.add_argument("--kit-a", help="start game A through this kit's own start (play.ps1 choose -Hookshot; its "
                                    "hookshot/game-folder.txt names --game-a): tools/autotest/kit_pair.py")
@@ -1393,6 +1505,13 @@ def main(argv=None):
     for kv in a.env:
         if "=" not in kv:
             p.error("--env NAME=VALUE")
+    if getattr(a, "host_in_game", False):
+        if a.server:
+            p.error("--host-in-game hosts in game A: no --server")
+        if not a.script_b:
+            p.error("--host-in-game needs --script-b (B joins A)")
+        if not re.fullmatch(r"[!-~]{1,64}", a.password):
+            p.error("--host-in-game: --password of 1 to 64 printable letters")
     if not a.lane:
         if not (a.game_a and a.game_b and a.out):
             p.error("--game-a, --game-b and --out (or --lane N)")

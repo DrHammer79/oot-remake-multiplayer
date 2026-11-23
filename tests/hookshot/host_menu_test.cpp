@@ -575,3 +575,35 @@ TEST_CASE("host menu: with approve_joins the host's game is asked about a new pl
     game.client->stop();
     menu.Leave();
 }
+
+TEST_CASE("host menu: the process memory line reads this process's numbers (row 260)") {
+  const std::string line = CoopHostMenu::ProcessMemoryText();
+  CHECK(line.rfind("process:", 0) == 0);
+#ifdef _WIN32
+  CHECK(line.find(" private ") != std::string::npos);
+  CHECK(line.find(", handles ") != std::string::npos);
+#else
+  CHECK(line.find("VmRSS") != std::string::npos);
+#endif
+  CHECK(CoopHostMenu::kMemoryLineMs == 30'000);
+}
+
+TEST_CASE("host menu: the autotest's in-game host reads PORT:PASSWORD and nothing else (row 260)") {
+  const auto ok = CoopHostMenu::ParseTestHost("27520:autotest-pass");
+  REQUIRE(ok.has_value());
+  CHECK(ok->first == 27520);
+  CHECK(ok->second == "autotest-pass");
+  CHECK(CoopHostMenu::ParseTestHost("1:x").has_value());
+  CHECK(CoopHostMenu::ParseTestHost("65535:" + std::string(64, 'p')).has_value());
+  CHECK_FALSE(CoopHostMenu::ParseTestHost(""));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("27520"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("27520:"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost(":pass"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("0:pass"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("65536:pass"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("123456:pass"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("27x20:pass"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("27520:two words"));
+  CHECK_FALSE(CoopHostMenu::ParseTestHost("27520:" + std::string(65, 'p')));
+  CHECK(std::string(CoopHostMenu::kTestHostEnv) == "LICHII_COOP_TEST_HOST");
+}

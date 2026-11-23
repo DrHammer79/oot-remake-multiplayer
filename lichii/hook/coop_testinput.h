@@ -155,6 +155,8 @@ enum class Kind {
     setenum, // test only: an Enum flag (name or 0x hash) set to a value's name (issue 193: quests)
     sync,    // sync NAME N: wait here, buttons let go, until N games reached NAME
     menu,    // test only: menu customize|close, the Multiplayer tab's Customize page opened or the menu closed (issue 74)
+    dump,    // test only (play-test kit): this game's shared flags written to <commands file>.dump-TAG.json
+    event,   // test only (boss-route-01112): an event setting asked of our game by name (the live-event requester)
 };
 
 struct Step {
@@ -308,6 +310,19 @@ private:
 // and writes only the test-only steps there; they are played without a pad
 // and the file is emptied once read.
 void OnFrame(Core::System& system);
+
+// The play-test bridge (hookshot/src/coop_playtest.h): test-only lines done at once on the calling thread (the
+// game's calc thread while the bridge holds it), as a commands file's would be: setflag, setenum, give, wear,
+// assign, dress, place, face, aim, kill, hit, stun, drop, hurt, chat, menu, dump, mark. A `warp` (alone) begins a
+// script that asks again as frames run (OnFrame) until Link is in that scene. Timed steps (hold, goto, ...) are
+// refused: the bridge's own input moves Link. False with `error` for a bad or refused line.
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error);
+
+// The value of every flag a dump writes (the shared dungeon and story lists; Bool as 0 or 1), in list order.
+std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& system);
+// One game flag by name: an Int, or a Bool as 0 or 1; a String64. Nothing when the game has no such flag.
+std::optional<std::int32_t> FlagInt(Core::System& system, std::string_view name);
+std::optional<std::string> FlagText(Core::System& system, std::string_view name);
 
 // The menu step's doer: the Hookshot module sets it (coop_pause.cpp); "customize" opens
 // the Multiplayer tab's Customize page, "close" closes the menu. True when asked.

@@ -1,8 +1,8 @@
-# Known issues in the newest release (0.11.10)
+# Known issues in the newest release (0.11.11)
 
 This is an early test release. Everything under "Works" was seen in our two-game tests: two copies of the game on one PC talking through the server, driven by the [autotest](../tools/autotest) scripts or played by hand, with the logs and screenshots of both games read afterwards. Testers play the releases on separate PCs, over a LAN and the internet. Please report what you see ([setup.md, Reporting a problem](setup.md#reporting-a-problem)); every open problem is on the [issues page](https://github.com/daurosk/oot-remake-multiplayer/issues).
 
-**Every player needs the same release.** 0.11.6 to 0.11.10 are protocol 15 and can join each other, but 0.11.10's fixes need 0.11.10 in every game (0.11.6 also still has the crash after about an hour fixed in 0.11.7, tracker row 156): update together; they refuse every older version at join, with the note to run `Update.bat`. 0.11.0 to 0.11.4 are protocol 12 and 0.11.5 is protocol 14: a game and a server (or another game) of different protocol versions refuse each other, so a 0.11.5 or older game cannot join a 0.11.6 game: update together. A 0.10.1 or newer kit offers the update when you start it. A kit from before 0.10.1 cannot: download `Update.bat` from the release page into the kit folder and double-click it. `Revert.bat` goes back to the version you had before.
+**Every player needs the same release.** 0.11.6 to 0.11.11 are protocol 15 and can join each other, but 0.11.11's fixes need 0.11.11 in every game (0.11.6 also still has the crash after about an hour fixed in 0.11.7, tracker row 156): update together; they refuse every older version at join, with the note to run `Update.bat`. 0.11.0 to 0.11.4 are protocol 12 and 0.11.5 is protocol 14: a game and a server (or another game) of different protocol versions refuse each other, so a 0.11.5 or older game cannot join a 0.11.6 game: update together. A 0.10.1 or newer kit offers the update when you start it. A kit from before 0.10.1 cannot: download `Update.bat` from the release page into the kit folder and double-click it. `Revert.bat` goes back to the version you had before.
 
 **The game runs on Longshot v3.0.0** (Team MagicBean's recompilation; its changes are being merged into [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot)). There is no emulator in this release: emulator players keep the last emulator release (the early test release of 2026-11-12 on the [releases page](https://github.com/daurosk/oot-remake-multiplayer/releases)), which cannot join a Longshot game. The first start builds the game from your own copy (10 to 45 minutes); later updates put the new co-op into it in a few minutes, or build it again when Longshot or our game patches move (0.11.6 builds it again, once, for Longshot v3.0.0). If Longshot's server cannot be reached, the build takes the same files from our [mirror](https://github.com/daurosk/oot-remake-multiplayer/releases/tag/longshot-mirror-v3.0.0), each checked by its SHA-256.
 
@@ -14,6 +14,7 @@ This is an early test release. Everything under "Works" was seen in our two-game
 - **Other players as Link**, child and adult ([#111](https://github.com/daurosk/oot-remake-multiplayer/issues/111)), following them live and copying their whole pose, with Navi beside them. New in 0.11.0: they move smoothly, on an even game-frame clock (the steady jitter and the choppy steps of 0.10.1 are gone; see Known issues for what is left). A player who joins later gets a Link for everyone already there. Their sword now shows in their hand (fixed for 0.11.0), and the slingshot no longer stays stuck out.
 - **Customize Link** (new): the Multiplayer tab's **Customize Link** page gives the tunic and each part of the gear (shields, swords, boots, gauntlets) its own colour. Your own Link wears it when the menu closes, and the other players see it on your Link; it is saved for the next start ([puppet.md, The Link customizer](puppet.md#the-link-customizer)). The kit makes the puppet pack again by itself after this update (a few minutes, once).
 - **Randomizer** (new): OOTRR is built in; turn it on in the Mods tab (**OoT Remake Randomizer**, **Settings**). In co-op the host's seed is everyone's: each guest's game builds it by itself ([mods.md, The randomizer](mods.md#the-randomizer)). A game with the randomizer on no longer stops while it loads.
+- **Randomizer presets (rows 250, 255):** the Settings row offers only default and keysanity. OOTRR's easy, open world and full shuffle presets stop with "This build cannot apply these settings yet" (small keys removed, adult start, open bridge, shuffled scrubs), as in every OOTRR since 0.5.0; the Mods tab has hidden them since 0.11.2 instead of failing at the build. For open areas pick **Open areas** (or **Open areas, fast fortress**) in the Settings row (the kit's own presets, in 0.11.12), or the Settings string row with `OOTRR1-AMAQABABAADACAQHAEBA6AIACAAQCEQBAEPACAJGAEASOAIBGMAQCTABAFHACATJAEAG2AIDQ4AQCADGXY` (forest, Kakariko, Door of Time, Zora and Gerudo Fortress open, trials skipped, boss keys removed), made with a new seed.
 - **Minimap**: the dungeon map no longer vanishes, and the other players show on it.
 - **Time of day** (new on Longshot): the host's time of day is everyone's; a guest takes the host's time when the host's save loads ([#192](https://github.com/daurosk/oot-remake-multiplayer/issues/192), [time.md](time.md)).
 - **Difficulty and helping up** (new): the difficulty follows the number of players or what the host sets, and a player at zero hearts can be helped up by another.
@@ -41,6 +42,14 @@ This is an early test release. Everything under "Works" was seen in our two-game
 - **Joining by address** (new in 0.11.2, from bmitch87's PR #230): IP address, Port and Password rows in Join, and a Port row when you host.
 - **Chinese** (new in 0.11.2, from cirnoice9's PR #231): the co-op tabs in Simplified and Traditional Chinese when the game is set to Chinese.
 
+## New in 0.11.11
+
+In 0.11.11 (hotfix: update only, no game rebuild). From your reports (KerbexSenpai, Rorolewinner); checked in my two-game test runs and CI: tell me if it still happens.
+
+- **Black world after loading a save** (row 242, likely also [#314](https://github.com/daurosk/oot-remake-multiplayer/issues/314)): with Character Select's menus only (its NPC characters not downloaded), solo and co-op, on the 0.11.9 and 0.11.10 kits, the kit took out all of Snail's textures for that part while the Link models it keeps use 51 of them: the save load never finished, and other players saw that player's puppet stand still with no animation. That part now keeps Link's own textures. A copy made by 0.11.9 or 0.11.10 is made again on the first start after the update (Snail's release is downloaded again, about 1 GB, once; the game is not rebuilt). A copy with the NPC characters was not affected.
+
+Everything else is as in 0.11.10.
+
 ## New in 0.11.10
 
 In 0.11.10 (hotfix: update only, no game rebuild). From your reports (E'tykalu, Nicktendo, KerbexSenpai, Rick); checked in my two-game test runs and CI (the closed-window build marker and the Goron/Zora tunic are untested): tell me if it still happens.
@@ -50,7 +59,7 @@ In 0.11.10 (hotfix: update only, no game rebuild). From your reports (E'tykalu, 
 - **Customize page**: the title names the page first and adds "Y: page  A: exact hue" (also Simplified and Traditional Chinese).
 - **Puppet tunic green** (row 243): other players saw a default green tunic as lime; puppets now wear the game's own green, child and adult.
 
-Open in 0.11.10: **a puppet that shows no animation** (row 242), planned for the next release.
+Open in 0.11.10: **a puppet that shows no animation** (row 242), fixed in 0.11.11 (above).
 
 ## New in 0.11.9
 
