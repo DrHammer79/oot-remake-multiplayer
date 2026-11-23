@@ -3804,7 +3804,9 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 }
             }
             if (g_hop_on.load()) {   // (the hop: the game's own L, tapped; our page's L first, then the game's)
-                const auto step = CoopPauseTab::CharactersHopNext(g_hop, g_page.MinusTab() >= 0, g_page.StripUp(),
+                const auto step = CoopPauseTab::CharactersHopNext(g_hop, g_page.MinusTab() >= 0,
+                                                                    g_page.MinusStripOpen() && g_page.Typing() < 0 &&
+                                                                        !CoopHookshot::ChatOpen(),
                                                                     g_page.StripLit(), NowMs());
                 if (step == CoopPauseTab::HopStep::kTapL) in |= kPadL;
                 else if (step != CoopPauseTab::HopStep::kWait) {

@@ -2583,8 +2583,15 @@ TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the stri
     CHECK(CharactersHopNext(h, false, true, 0, 2500) == HopStep::kTapL);
     CHECK(CharactersHopNext(h, false, true, 3, 3000) == HopStep::kDone);
     // The strip not up: waits, taps nothing.
-    CharactersHop w;
-    CHECK(CharactersHopNext(w, false, false, 2, 1000) == HopStep::kWait);
+    // The - menu no longer the open screen (closed, the Plus menu, another screen, a load, typing): over at once, no tap.
+    for (const bool ours : {true, false}) {
+        CharactersHop w;
+        CHECK(CharactersHopNext(w, ours, false, 2, 1000) == HopStep::kGiveUp);
+        CharactersHop mid;
+        CHECK(CharactersHopNext(mid, ours, true, 2, 1000) == HopStep::kTapL);
+        CHECK(CharactersHopNext(mid, ours, false, 2, 1600) == HopStep::kGiveUp);   // (shut between two taps)
+        CHECK(CharactersHopNext(mid, ours, false, 3, 1700) == HopStep::kGiveUp);   // (not "arrived" either)
+    }
     // The left edge: a tap that moved nothing ends it (the strip's own numbering unknown).
     CharactersHop e;
     CHECK(CharactersHopNext(e, false, true, 2, 1000) == HopStep::kTapL);
@@ -2604,8 +2611,8 @@ TEST_CASE("pause tab (#322): the hop to the Characters tab taps L until the stri
     }
     CHECK(taps == kHopMaxTaps);
     CharactersHop slow;
-    CHECK(CharactersHopNext(slow, false, false, 2, 1000) == HopStep::kWait);
-    CHECK(CharactersHopNext(slow, false, false, 2, 1000 + kHopMaxMs + 1) == HopStep::kGiveUp);
+    CHECK(CharactersHopNext(slow, true, true, 2, 1000) == HopStep::kTapL);
+    CHECK(CharactersHopNext(slow, true, true, 2, 1000 + kHopMaxMs + 1) == HopStep::kGiveUp);
 }
 
 TEST_CASE("pause tab: the fourth tab's place and fades taken one update ahead, not past where they head") {

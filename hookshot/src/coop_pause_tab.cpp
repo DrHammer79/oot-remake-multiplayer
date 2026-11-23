@@ -815,12 +815,12 @@ std::vector<float> TabRowX(float first, float step, int game, const std::vector<
     return x;
 }
 
-HopStep CharactersHopNext(CharactersHop& h, bool ours, bool strip_ok, int lit, std::uint64_t now_ms) {
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms) {
+    if (!minus_open) return HopStep::kGiveUp;   // (not the open screen any more: not one tap more)
     if (h.started_ms == 0) h.started_ms = now_ms;
     if (now_ms - h.started_ms > kHopMaxMs || h.taps >= kHopMaxTaps) return HopStep::kGiveUp;
     if (now_ms < h.next_ms) return HopStep::kWait;
     if (!ours) {
-        if (!strip_ok) return HopStep::kWait;
         if (lit >= kHopCharactersLit) return HopStep::kDone;
         if (h.off_taps > 0 && lit == h.prev_lit) return HopStep::kDone;   // (the left edge: the last tap moved nothing)
         h.prev_lit = lit;

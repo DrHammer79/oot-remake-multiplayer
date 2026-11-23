@@ -292,6 +292,7 @@ public:
     int MinusTab() const { return minus_tab_; }
     int StripLit() const { return strip_.lit; }
     bool StripUp() const { return strip_.state == 1 || strip_.state == 2; }
+    bool MinusStripOpen() const { return StripUp() && strip_.mode != kPlusMode; }   // (the - menu is the open screen)
     // Our tab's own page (the pack's Pa_CoopMinus_00, the System page's buttons): which of its rows show (bit r: row r,
     // RowTexts(MinusPage) not ""), set by the module for the tab lit. Up and down move the cursor among the rows shown
     // (the game's button_on), A picks the row under it (button_decide): TakeMinusDecide says which, once.
@@ -987,8 +988,10 @@ struct CharactersHop {
 enum class HopStep { kWait, kTapL, kDone, kGiveUp };
 inline constexpr int kHopMaxTaps = 7, kHopCharactersLit = 3;
 inline constexpr std::uint64_t kHopMaxMs = 8000, kHopGapMs = 500;
-// `ours`: our page still shows (Page::MinusTab() >= 0); `strip_ok`: the strip is up (state 1 or 2); `lit`: its lit category.
-HopStep CharactersHopNext(CharactersHop& h, bool ours, bool strip_ok, int lit, std::uint64_t now_ms);
+// `ours`: our page still shows (Page::MinusTab() >= 0); `minus_open`: the - menu is the open screen (its strip up, in
+// its - mode) and nothing is typed into (a field of ours, the chat box): anything else (closed, the Plus menu, another
+// screen, a load, typing) ends the hop at once with no more taps (kGiveUp); `lit`: the strip's lit category.
+HopStep CharactersHopNext(CharactersHop& h, bool ours, bool minus_open, int lit, std::uint64_t now_ms);
 // One update ahead of `now`, from its step since `prev`, and not past `limit` when it heads for it. The module reads
 // the fourth tab's place and fades before the strip's own update, so they are one update old: the Character tab takes
 // them one update ahead to move with the fourth, not a frame after it.
