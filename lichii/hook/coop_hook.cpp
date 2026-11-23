@@ -59,6 +59,7 @@
 #include "coop/presence/presence.hpp"
 #include "coop/version.hpp"
 #include "coop_boss.h"
+#include "coop_gold_mode.h"
 #include "coop_boss_beaten.h"
 #include "coop_frame_clock.h"
 #include "coop_boss_scenes.h"
@@ -577,6 +578,7 @@ public:
         // presents (high refresh presents up to 165 a second).
         session.clock = [] { return CoopEvery::NowUs(); };
         pickups_given_ = 0;
+        gold_local_ = false;  // a new session's watcher shares them until the mode says not
         // Called by service() on the network thread, with the client.
         session.on_event = [this](const coop::net::Event& event, coop::net::Client& client) {
             OnSessionEvent(event, client, false);
@@ -889,6 +891,12 @@ public:
                 for (const std::string& count : CoopWorld::TakeGiveBacks()) {
                     LOG_INFO(Core, "coop: {}", CoopWorld::GiveBack(*game_store, count));
                 }
+                // Row 63: but a token the world sync made here (another game's kill, ours made none) has no
+                // placement for the game's pickup to set: its two keys are written here, within the count
+                // guard's hold of the count's gain, and the flag sync shares the take.
+                for (const std::uint64_t placement : CoopWorld::TakeTokenKeys()) {
+                    LOG_INFO(Core, "coop: {}", CoopWorld::WriteTokenKeys(*game_store, placement));
+                }
             }
             if (sharing_) {
                 // Issue 138: grants wait for a loaded save, and the capacities
@@ -922,6 +930,21 @@ public:
                     ocarina_equip_.link(false, {});  // a load or scene change: the next stay asks again (row 103)
                 }
             }
+        }
+        if (session_ && !gold_local_ && CoopGoldMode::NotShared()) {
+            // Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): every Skulltula's two keys, the token
+            // count and its IsGet stay in this game for the rest of the session.
+            gold_local_ = true;
+            std::vector<coop::protocol::FlagKey> keys;
+            for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key));
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key + 2));
+            }
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}));
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenGet, std::uint16_t{0}));
+            const std::size_t was = session_->keep_local(keys);
+            LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: {} keys kept in this game ({} were shared)",
+                     keys.size(), was);
         }
         if (pickups_) {
             const auto keys = CoopPickups::Since(pickups_given_);
@@ -2731,6 +2754,7 @@ private:
     bool doubled_event_seen_ = false;     // its get scene (our Link's event) began
     static constexpr std::uint64_t kDoubledNoEventMs = 1000;
     std::size_t pickups_given_ = 0;  // CoopPickups keys handed to the session
+    bool gold_local_ = false;        // row 63: this session's Gold Skulltula flags kept in our game (Not shared)
     bool holding_logged_ = false;  // issue 129: HoldFlagStore held something last frame
     std::uint32_t sale_held_logged_ = 0;  // a scrub sale flag the hold kept last frame (log)
 #ifdef COOP_HOOKSHOT

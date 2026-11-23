@@ -187,6 +187,10 @@ constexpr u64 kEnemyKey = u64{1} << 63;
 constexpr u64 kExtraKey = kEnemyKey | u64{1} << 62;
 // Difficulty's night horde (coop_difficulty.h Horde): its own keys on the same list.
 constexpr u64 kHordeKey = kEnemyKey | u64{1} << 61;
+// Row 63: a Gold Skulltula's token another game's kill owes ours (CoopWorld::WorldSync::OweToken): its own keys
+// there, the placement's low 60 bits.
+constexpr u64 kTokenKey = kEnemyKey | u64{1} << 60;
+constexpr u64 kTokenKeyMask = (u64{1} << 60) - 1;
 constexpr int kMoverCallerOrder = CoopCallerOrders::kMover;  // after the puppets, spawn copies (10) and fairies (20)
 constexpr int kGrassCallerOrder = CoopCallerOrders::kGrass;  // the others' field grass cuts (coop_world.h)
 
@@ -2281,6 +2285,7 @@ public:
             }
             PlanExtras(*scene, seen, enemies);
             PlanHorde(*scene, self, server_now_us, seen, enemies);
+            PlanTokens(enemies);
             CoopSpawn::TheDirector().SetEnemies(main_, std::move(enemies));
         }
         for (const auto& note : sync_.TakeNotes()) {
@@ -2313,7 +2318,13 @@ public:
             // of a hammer switch or the box puzzle's last corner would raise our own asker's trigger here (a replay
             // that binds our Link): those world objects follow only once our game has played the event.
             world_.SetTriggerKeepers(TriggerFollowKeepers(system, *scene));
+            for (const auto& d : sync_.TakeGoldDeaths()) {
+                world_.OweToken(d.placement, d.at, server_now_us);  // row 63: the token comes from the share
+            }
             world_.Tick(*scene, self, server_now_us, seen, player_, world);
+            for (const u64 placement : world.token_keys) {
+                CoopWorld::QueueTokenKeys(placement);
+            }
             for (auto& m : world.send) {
                 send.emplace_back(std::move(m));
             }
@@ -4918,6 +4929,37 @@ private:
             c.place = false;  // its own AI moves it; the sync places it where it is a copy
             c.remakes = 0;    // one that went is not made again
             c.real = true;    // the game's own enemy, never a stand-in
+            enemies.push_back(std::move(c));
+        }
+    }
+
+    // Row 63, Gold Skulltulas Shared: the tokens the world sync owes our game (another game's kill, ours
+    // made none), made by the game's own create where its Skulltula's copy was, then let go like a drop.
+    void PlanTokens(std::vector<CoopSpawn::Copy>& enemies) {
+        const auto made = world_.MadeTokens();
+        if (made.empty()) {
+            return;
+        }
+        for (const auto& [key, actor] : CoopSpawn::TheDirector().Live()) {
+            if ((key & ~kTokenKeyMask) != kTokenKey) {
+                continue;
+            }
+            for (const auto& t : made) {
+                if ((t.placement & kTokenKeyMask) == (key & kTokenKeyMask) && t.actor == 0) {
+                    world_.BindMadeToken(t.placement, actor);
+                    LOG_INFO(Core, "coop: world: token {:016x} made here by the share", t.placement);
+                }
+            }
+        }
+        for (const auto& t : world_.MadeTokens()) {
+            CoopSpawn::Copy c;
+            c.key = kTokenKey | (t.placement & kTokenKeyMask);
+            c.actor = "Obj_Token_Gold";
+            c.position = t.at;
+            c.act = t.actor != 0 ? CoopSpawn::Act::release : CoopSpawn::Act::show;
+            c.place = true;   // where the Skulltula's copy was; let go once made
+            c.remakes = 0;    // one taken is not made again
+            c.real = true;    // the game's own token: its pickup is the game's
             enemies.push_back(std::move(c));
         }
     }

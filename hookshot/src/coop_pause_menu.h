@@ -125,6 +125,7 @@ struct Session {
     // of Co-op settings; `rules` false: not heard yet (not in a session), the rows show what the next Host uses.
     bool rules = false;
     bool pvp = false;
+    bool gold_own = false;   // Gold Skulltulas not shared in this session (CoopGoldMode::InForce)
     bool dbno = true;
     int dbno_bleed_s = 45, dbno_revive_tenths = 50, dbno_revive_life = 12;
 
@@ -288,7 +289,7 @@ private:
         kOpenCustomize, kNgPlus, kSaveSet,
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
-        kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
+        kApproveJoins, kGoldSkulltulas, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
         kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount,
         kCharAges, kCharChild, kCharAdult
     };
