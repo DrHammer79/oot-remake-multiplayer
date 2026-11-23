@@ -511,7 +511,7 @@ public:
         bool mods_routine = false;
         std::string actor_name;   // (a puppet made again as another actor starts anew)
         std::optional<std::uint32_t> eyes;   // 0.11.9: the player's eye colour (their look's part 18), exact
-        std::optional<std::uint32_t> hair;   // 0.11.9: the player's hair colour (part 19), a Link puppet's only
+        std::optional<std::uint32_t> hair;   // 0.11.9: the player's hair colour (part 19), CoopCharColours::ColoursOn
     };
     std::vector<DressView> DressTargets() const;
     // Any thread: bit n set while puppet n's actor is live in this scene and
