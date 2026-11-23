@@ -36,7 +36,7 @@ Each rule answers a way the TotK online sync was seen to break.
 
 - Each message type has its channel, and each is sent by the client, the server or both (table below). A receiver refuses a message that came on the wrong channel or from a side that may not send it (`check_received` in the code).
 - The server relays and decides; it never runs the game. The host player's game is the source of truth for shared progress (stage 4).
-- The server holds each player to at most 60 messages a second on channels 0 to 2 and 240 on channels 3 and 4, with bursts of twice that, and drops the rest without a word. A packet longer than any message can be (4 + 65535 bytes, plus 24 when sealed) is thrown away unread.
+- The server holds each player to at most 60 messages a second on channels 0 to 2 and 240 on channels 3 and 4, with bursts of twice that. Over it, a reliable message (channels 0 to 2, not `PING`) waits, in the order it came, behind any that already wait, and is handled as the player's budget refills (each server tick); at most `reliable_queue_max` (4096) wait, and past that they are dropped and counted (`rate_limited`). Before (row 164 follow-up), every message over the rate was dropped without a word, and since ENet had acknowledged it its sender never sent it again: a flag, a kill, a break or a hand-over answer was lost for good (report 138's host: 137 in one 4-player session). The unreliable channels and `PING` are dropped as before (a late `PONG` would skew the clock). The host's stopping line says `over the rate N dropped, M waited`. A packet longer than any message can be (4 + 65535 bytes, plus 24 when sealed) is thrown away unread.
 
 ## Encoding
 
