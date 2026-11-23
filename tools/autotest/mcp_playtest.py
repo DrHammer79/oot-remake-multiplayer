@@ -282,7 +282,8 @@ PLAYER_TOOLS = [
                                     "value": {"type": ["integer", "boolean", "string"]}}}},
     {"name": "give", "description": "Give Link an item (bombs, bow, hookshot, or an item flag name). Written at "
      "once, with its IsGet flag and the ammo the game gives with it: the reply's `result` says each flag's old and "
-     "new value (`no change: ... already N` when Link had it; `failed` with the reason when it was not given). "
+     "new value (`no change: ... already N` when Link had it; `failed` with the reason when it was not given; `partial` "
+     "true when the item is in but its IsGet or a grant was not; `not_ready` while a load runs). "
      "get_state.inventory shows it without a step. Bombs and arrows are counts per player: `bombs` gives the small "
      "bag and 20 bombs; a bomb that can be lifted also needs PlayerStatus.LiftGrade (docs/items.md).",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},

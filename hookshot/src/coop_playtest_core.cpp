@@ -586,6 +586,15 @@ std::string NotReadyReason(const CoopModJson::Value* status) {
     return "";
 }
 
+std::string GiveRefusal(const CoopModJson::Value* status) {
+    const auto* game = GameOf(status);
+    if (game && game->Bool("loading") == true) {
+        return "a scene or save is loading and would put the old values back over the gift: step until the load "
+               "ends (the state's `loading` is false), then give again";
+    }
+    return "";
+}
+
 std::string LinkMembers(const CoopModJson::Value* status) {
     const auto* game = GameOf(status);
     const bool old = SnapshotIsOld(status);

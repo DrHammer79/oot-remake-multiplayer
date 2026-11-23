@@ -151,3 +151,16 @@ TEST_CASE("cheat give: the reasons it fails are said, and nothing is claimed as 
     CHECK(r.text.find("write failed") != std::string::npos);
     CHECK(f.at(kBow) == 0);
 }
+
+TEST_CASE("cheat give: a failed IsGet write is a partial gift, the item is in and the text names the flag") {
+    FakeFlags f;
+    BowSave(f);
+    f.refuses.insert(coop::host::flag_hash(kBowGet));
+    const auto r = CoopCheatGive::Give(f, kBow);
+    CHECK_FALSE(r.ok);
+    CHECK(r.wrote);
+    CHECK(r.changed);
+    CHECK(f.at(kBow) == 1);
+    CHECK(r.text.find("IsGet.Weapon_Range_Bow: write failed") != std::string::npos);
+    CHECK_FALSE(CoopCheatGive::Give(f, "Nothing.Like.This").wrote);
+}

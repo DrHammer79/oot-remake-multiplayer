@@ -648,6 +648,16 @@ TEST_CASE("playtest: not_ready says why the Link members are null, and is null w
     CHECK(LinkMembers(nullptr).find(",\"not_ready\":\"no answer from Longshot") != std::string::npos);
 }
 
+TEST_CASE("playtest: a give is refused while a load runs, and goes otherwise") {
+    const auto loading = Status(Snap(998, false, true));
+    CHECK(GiveRefusal(&loading).find("loading") != std::string::npos);
+    const auto fresh = Status(Snap(998));
+    CHECK(GiveRefusal(&fresh).empty());
+    CHECK(GiveRefusal(nullptr).empty());              // no reply: not a reason to refuse
+    const auto nogame = Status("null");
+    CHECK(GiveRefusal(&nogame).empty());              // the write itself says "not readable" when nothing is loaded
+}
+
 // ---- F2: warp by event, or by Longshot's teleport in free play ----
 
 TEST_CASE("playtest: warp goes by the event request during an event and by the teleport in free play") {

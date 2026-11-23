@@ -515,11 +515,17 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "give") {
         std::string error;
+        // Not while a load runs: it would put the save's values back over the gift (the status is asked without a step).
+        const auto status = g_control.Call("\"cmd\":\"status\"}", 1500);
+        if (const std::string why = GiveRefusal(status ? &*status : nullptr); !why.empty()) return fail("not_ready", why);
         if (!played("give " + r.item, error)) return fail("failed", error);
         // Written at once inside the held call (CoopTestInput::Give): the reply says what each flag was and is.
         const std::string result = CoopTestInput::LastGive();
         if (result.find("NOT given") != std::string::npos) return fail("failed", result);
-        return ok("\"item\":" + Quote(r.item) + ",\"result\":" + Quote(result) +
+        // PARTLY given: the item is in, a later flag (IsGet, a grant) was not written: ok, with `partial` and the text.
+        const bool partial = result.find("PARTLY given") != std::string::npos;
+        return ok("\"item\":" + Quote(r.item) + ",\"partial\":" + (partial ? "true" : "false") +
+                  ",\"result\":" + Quote(result) +
                   ",\"note\":\"written now: the inventory already shows it (no step needed)\"");
     }
     if (r.cmd == "dump") {

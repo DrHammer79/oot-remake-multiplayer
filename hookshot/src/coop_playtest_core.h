@@ -145,6 +145,9 @@ std::string NotReadyReason(const CoopModJson::Value* status);
 // walk that trusts a stale pos says "arrived" 11 m away) and `"snapshot_stale":true`; `snapshot_present` keeps its number.
 // No reply (`status` null) or no `game`: all null, `snapshot_stale` false (`control` says why).
 std::string LinkMembers(const CoopModJson::Value* status);
+// Why a `give` is refused now, "" when it may go: a load is running (`game.loading` true). The write would be made, and
+// the load would put the save's values back over it. No reply, or no `loading` member, is not a refusal.
+std::string GiveRefusal(const CoopModJson::Value* status);
 
 // `warp`: two ways to change scene. While an event runs, the module's own request (`Sequence_ReservedNextBanc`, the test
 // script's `warp`; the game takes it only then, docs/scenes.md "Free-play scene change"). In free play, Longshot's control

@@ -1275,6 +1275,10 @@ std::string g_last_give;
 
 void Give(Core::System& system, const std::string& item) {
     std::string said;
+    {
+        std::lock_guard lock(g_give_mu);
+        g_last_give.clear();  // so a give that never got to run cannot show the last one's text
+    }
     if (!CoopCheats::On()) {
         said = item + ": NOT given (LICHII_COOP_CHEATS is off)";
         LOG_INFO(Core, "coop: test give {}", said);
@@ -1283,8 +1287,10 @@ void Give(Core::System& system, const std::string& item) {
         coop::host::GameFlagStore store(memory);
         for (const auto& name : CoopCheatGive::Names(item)) {
             const auto done = CoopCheatGive::Give(store, name);
+            // "PARTLY given": the item is in but its IsGet or a grant failed (the bridge answers ok, with the text).
             const std::string line = done.ok ? (done.changed ? "" : "no change: ") + done.text
-                                             : "NOT given: " + done.text;
+                                   : done.wrote ? "PARTLY given: " + done.text
+                                                : "NOT given: " + done.text;
             LOG_INFO(Core, "coop: test give {}: {}", name, line);
             said += (said.empty() ? "" : "; ") + line;
         }

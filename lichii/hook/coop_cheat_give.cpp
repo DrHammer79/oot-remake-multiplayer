@@ -83,6 +83,7 @@ Result Give(coop::host::FlagStore& game, std::string_view name) {
     }
     out.ok = Put(game, item->name, item->hash, item->kind, Wanted(*item, static_cast<std::int32_t>(now->value)), out);
     if (!out.ok) return out;
+    out.wrote = true;
     // A pouch item also gets its IsGet flag, as a pickup sets both.
     constexpr std::string_view pouch = "PouchData.", stock = ".StockNum";
     if (name.starts_with(pouch) && name.ends_with(stock)) {

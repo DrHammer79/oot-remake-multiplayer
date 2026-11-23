@@ -26,10 +26,12 @@ bool IsItemFlag(std::string_view name);
 struct Result {
     bool ok = false;           // every flag written, or already at its value
     bool changed = false;      // at least one flag has a new value
+    bool wrote = false;        // the item flag itself is written or already at its value (a later write may still fail)
     std::string text;          // what it did: "NAME was -> now; ..." (also the reason when not ok)
 };
 
-// Gives the item flag `name` into `game` now. Not ok: not an item flag, or a flag the store cannot read or write.
+// Gives the item flag `name` into `game` now. Not ok: not an item flag, or a flag the store cannot read or write. Not ok
+// with `wrote`: the item is in, but its IsGet or a grant failed (a partial gift; `text` says which).
 Result Give(coop::host::FlagStore& game, std::string_view name);
 
 }  // namespace CoopCheatGive
