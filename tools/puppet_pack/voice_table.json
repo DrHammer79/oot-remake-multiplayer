@@ -826,7 +826,7 @@
    "chain": [
     "Enemy_Wolfos"
    ],
-   "default": "Enemy_Wolfos_White",
+   "default": "Enemy_Wolfos",
    "creature": true
   },
   "Cow": {
