@@ -206,8 +206,19 @@ std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::
 }
 
 float ChatFeed::Seconds(std::size_t columns) {
-    return std::min(8.0f, 3.0f + 0.06f * static_cast<float>(columns));
+    return std::min(6.0f, 3.0f + 0.06f * static_cast<float>(columns));
 }
+
+std::string BannerText(const Shown& page) {
+    return page.speaker.empty() ? page.text : page.speaker + ": " + page.text;
+}
+
+namespace {
+// The columns left on the banner's line after "speaker: " (a speaker is at most kNameColumns).
+std::size_t TextColumns(std::string_view speaker) {
+    return speaker.empty() ? kBannerColumns : kBannerColumns - Columns(speaker) - 2;
+}
+}  // namespace
 
 void ChatFeed::Update(const std::vector<ChatIn>& lines, std::uint64_t now_ms) {
     for (const auto& line : lines) {
@@ -229,18 +240,23 @@ void ChatFeed::Update(const std::vector<ChatIn>& lines, std::uint64_t now_ms) {
             speaker = CutColumns(Clean(said.speaker, kSpeakerBytes), kNameColumns);
             text = Clean(said.text, kTextBytes);
         }
-        const auto pages = line.notice ? Wrap(text, kBannerColumns, kBannerLines) : Wrap(text, kLineColumns, kLineLines);
-        for (const auto& page : pages) {
+        const auto pages = Wrap(text, TextColumns(speaker), kBannerLines);
+        for (std::size_t k = 0; k < pages.size(); ++k) {
             Shown shown;
             shown.notice = line.notice;
+            shown.first = k == 0;
             shown.speaker = speaker;
-            shown.text = page;
+            shown.text = pages[k];
             shown.colour = line.notice ? 0 : line.colour;
-            shown.seconds = Seconds(Columns(page));
+            shown.seconds = Seconds(Columns(BannerText(shown)));
             shown.came_ms = came;
             waiting_.push_back(std::move(shown));
         }
-        while (waiting_.size() > kWaiting) waiting_.pop_front();
+        // Too many waiting: the oldest line goes, all of it (never half a line).
+        while (waiting_.size() > kWaiting) {
+            waiting_.pop_front();
+            while (!waiting_.empty() && !waiting_.front().first) waiting_.pop_front();
+        }
     }
     primed_ = true;
     // Forget what can no longer come back (the hook keeps a few lines only).
@@ -260,7 +276,11 @@ std::optional<Shown> ChatFeed::Next(std::uint64_t now_ms) {
     while (!waiting_.empty()) {
         Shown w = std::move(waiting_.front());
         waiting_.pop_front();
-        if (now_ms > w.came_ms + kStaleMs) continue;
+        if (w.first && now_ms > w.came_ms + kStaleMs) {
+            // Stale before it began: the whole line goes.
+            while (!waiting_.empty() && !waiting_.front().first) waiting_.pop_front();
+            continue;
+        }
         busy_until_ = now_ms + static_cast<std::uint64_t>(w.seconds * 1000.0f);
         return w;
     }
@@ -271,7 +291,8 @@ Shown TypingLine(std::string_view speaker, std::string_view typed, bool failed, 
     Shown s;
     s.speaker = CutColumns(Clean(speaker, kSpeakerBytes), kNameColumns);
     const std::string tail = failed ? "_ " + Clean(not_sent, 64) : "_";   // the caret: the game font's own underscore
-    const std::size_t room = kLineColumns * kLineLines - std::min(Columns(tail), kLineColumns);
+    const std::size_t line = TextColumns(s.speaker);
+    const std::size_t room = line - std::min(Columns(tail), line);
     const std::string text = Clean(typed, kTextBytes);
     std::string shown = text;
     if (Columns(text) > room) {
@@ -282,20 +303,7 @@ Shown TypingLine(std::string_view speaker, std::string_view typed, bool failed, 
         shown = "...";
         for (std::size_t k = from; k < chars.size(); ++k) shown.append(chars[k].first);
     }
-    // Broken at characters (not words), so what is typed never jumps between lines as a word grows.
-    std::string page;
-    std::size_t used = 0, rows = 1;
-    const std::string all = shown + tail;   // (kept: Characters' views point into it)
-    for (const auto& [ch, w] : Characters(all)) {
-        if (used + w > kLineColumns && rows < kLineLines) {
-            page.push_back('\n');
-            used = 0;
-            ++rows;
-        }
-        page.append(ch);
-        used += w;
-    }
-    s.text = page;
+    s.text = CutColumns(shown + tail, line);   // (one line: a "(not sent)" longer than the room is cut)
     s.seconds = kTypingSeconds;
     return s;
 }
@@ -360,35 +368,16 @@ std::uint64_t ScreenByVtable(Game& game, std::uint64_t vtable_offset) {
     return 0;
 }
 
-std::uint64_t InGameScreen(Game& game) {
-    std::uint64_t holder = 0;
-    if (!ReadValue(game, game.At(addr::kInGameHolder), holder) || holder == 0) return 0;
-    const auto screen = game.Call(game.At(addr::kInGameGet), {holder, 0, 0, 0, 0});
-    if (!screen || *screen == 0) return 0;
-    std::uint64_t vt = 0;
-    if (!ReadValue(game, *screen, vt) || vt != game.At(addr::kInGameVtable)) return 0;  // not this build's window
-    return *screen;
-}
-
-Holds WindowHolds(Game& game, std::uint64_t screen, const TextRing& ring) {
-    float time = 0.0f;
-    std::uint64_t text = 0;
-    if (!ReadValue(game, screen + addr::kInGameTime, time) || !ReadValue(game, screen + addr::kInGameText, text)) {
-        return Holds::kGames;  // (unreadable: never cover it)
-    }
-    if (!(time > 0.0f) || text == 0) return Holds::kNothing;
-    return ring.Owns(text) ? Holds::kOurs : Holds::kGames;
-}
-
-bool NameTint::Colours(Game& game, const TextRing& ring, const float (&rgba)[8]) {
+bool TextTint::Colours(Game& game, const TextRing& ring, const float (&rgba)[8]) {
     const std::uint64_t scratch = ring.Scratch();
     if (scratch == 0 || box_ == 0 || !game.Write(scratch, rgba, sizeof rgba)) return false;
     return game.Call(game.At(addr::kSetColour0), {box_, scratch, 0, 0, 0}).has_value() &&
            game.Call(game.At(addr::kSetColour1), {box_, scratch + 16, 0, 0, 0}).has_value();
 }
 
-bool NameTint::Set(Game& game, const TextRing& ring, std::uint64_t screen, std::uint32_t rgb) {
-    const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Name_00);
+bool TextTint::Set(Game& game, const TextRing& ring, std::uint64_t screen, std::uint64_t pane_name,
+                   std::uint32_t rgb) {
+    const std::uint64_t box = PaneTextBox(game, screen, pane_name);
     if (box == 0) return false;
     float now[8] = {};
     if (!game.Read(box + addr::kBoxColour0, now, sizeof now)) return false;
@@ -414,46 +403,11 @@ bool NameTint::Set(Game& game, const TextRing& ring, std::uint64_t screen, std::
     return true;
 }
 
-bool NameTint::Restore(Game& game, const TextRing& ring) {
+bool TextTint::Restore(Game& game, const TextRing& ring) {
     if (!tinted_ || !saved_) return true;
     if (!Colours(game, ring, game_)) return false;
     tinted_ = false;
     return true;
-}
-
-bool ShowLine(Game& game, TextRing& ring, NameTint& tint, const Shown& line, bool refresh) {
-    const std::uint64_t screen = InGameScreen(game);
-    if (screen == 0 || WindowHolds(game, screen, ring) == Holds::kGames) return false;
-    const std::uint64_t name_ref = ring.Put(game, line.speaker);
-    const std::uint64_t text_ref = ring.Put(game, line.text);
-    Ref text{};
-    if (name_ref == 0 || text_ref == 0 || !ReadValue(game, text_ref, text)) return false;
-    if (!SetPane(game, screen, addr::kNameT_Name_00, name_ref) || !WriteValue(game, screen + addr::kInGameText, text) ||
-        !WriteValue(game, screen + addr::kInGameTime, line.seconds * addr::kTimePerSecond)) {
-        return false;
-    }
-    // The name plate in the speaker's colour; a line with none (or a text box not found) the game's own.
-    if (line.colour == 0 || !tint.Set(game, ring, screen, line.colour)) tint.Restore(game, ring);
-    // As f_833d25c0 (0x833d262c..0x833d2644): the show flag unless the window is closed with no open asked (state 0,
-    // request below 1), then open. The window's next step puts the text on T_Message_00.
-    std::int8_t request = 0;
-    std::uint8_t state = 0;
-    if (!ReadValue(game, screen + addr::kScreenRequest, request) || !ReadValue(game, screen + addr::kScreenState, state)) {
-        return false;
-    }
-    if (!(state == 0 && request < 1)) {
-        const std::uint8_t one = 1;
-        WriteValue(game, screen + addr::kInGameShow, one);
-    }
-    if (refresh && state == addr::kStateOpen) return true;  // up already: only the text changes, no opening again
-    return Open(game, screen, 1);
-}
-
-bool EndLine(Game& game, const TextRing& ring) {
-    const std::uint64_t screen = InGameScreen(game);
-    if (screen == 0 || WindowHolds(game, screen, ring) != Holds::kOurs) return false;
-    const float zero = 0.0f;
-    return WriteValue(game, screen + addr::kInGameTime, zero);
 }
 
 Holds Banner::Holding(Game& game, const TextRing& ring) {
@@ -481,6 +435,12 @@ Holds Banner::Holding(Game& game, const TextRing& ring) {
 }
 
 bool Banner::Set(Game& game, std::uint64_t screen, std::uint64_t ref) {
+    // As the game's f_83419b10 puts up a banner of an ordinary kind: its Type animation at its first frame (only
+    // kind 0x1d plays it to its end), then T_Text_00. A banner the game showed last as that kind looks ordinary again.
+    std::uint64_t type = 0;
+    if (ReadValue(game, screen + addr::kInfoType, type) && type != 0) {
+        game.Call(game.At(addr::kAnimFirstFrame), {type, 0, 0, 0, 0});
+    }
     if (!SetPane(game, screen, addr::kNameT_Text_00, ref)) return false;
     // What the text box holds after our set: ours from now on, even when the game keeps a copy of its own.
     const std::uint64_t box = PaneTextBox(game, screen, addr::kNameT_Text_00);
@@ -489,11 +449,39 @@ bool Banner::Set(Game& game, std::uint64_t screen, std::uint64_t ref) {
     return true;
 }
 
-bool Banner::Notice(Game& game, TextRing& ring, const Shown& notice) {
-    if (Holding(game, ring) == Holds::kGames) return false;  // the game's own banner: the notice waits
+void Banner::Close(Game& game, std::uint64_t screen) {
+    std::uint64_t vtable = 0, close = 0;
+    if (ReadValue(game, screen, vtable) && vtable != 0 && ReadValue(game, vtable + addr::kSlotClose * 8, close) &&
+        close != 0) {
+        game.Call(close, {screen, static_cast<std::uint64_t>(-1), 0, 0, 0});
+    }
+}
+
+bool Banner::Show(Game& game, TextRing& ring, const Shown& page, std::uint64_t now_ms) {
+    if (up_) return false;  // the held line has the banner
+    const Holds holds = Holding(game, ring);
+    if (holds == Holds::kGames) return false;  // the game's own banner (or none): the page waits
     const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
-    const std::uint64_t ref = ring.Put(game, notice.text);
-    return screen != 0 && ref != 0 && Set(game, screen, ref) && Open(game, screen, addr::kInfoOpenMode);
+    const std::uint64_t ref = ring.Put(game, BannerText(page));
+    if (screen == 0 || ref == 0 || !Set(game, screen, ref)) return false;
+    // The speaker's colour on the line; a notice (or a text box not found) the game's own.
+    if (page.notice || page.colour == 0 || !tint_.Set(game, ring, screen, addr::kNameT_Text_00, page.colour)) {
+        tint_.Restore(game, ring);
+    }
+    // Up with ours already (open, or opening): only the text changed. Shut: opened, with the game's in animation.
+    if (!(page_ && holds == Holds::kOurs) && !Open(game, screen, addr::kInfoOpenMode)) return false;
+    page_ = true;
+    until_ = now_ms + static_cast<std::uint64_t>(page.seconds * 1000.0f);
+    return true;
+}
+
+void Banner::End(Game& game, const TextRing& ring) {
+    if (!page_) return;
+    page_ = false;
+    const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
+    if (screen != 0 && Holding(game, ring) == Holds::kOurs) Close(game, screen);  // (never the game's own)
+    ours_ = 0;
+    tint_.Restore(game, ring);
 }
 
 namespace {
@@ -516,27 +504,27 @@ std::optional<std::string> HeldBanner() {
     return g_held;
 }
 
-bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& held) {
+bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& held, std::uint64_t now_ms) {
     const std::uint64_t screen = ScreenByVtable(game, addr::kInfoVtable);
     if (screen == 0) {
-        up_ = false;   // (no banner now: the title, a load; shown again once it is back)
+        up_ = page_ = false;   // (no banner now: the title, a load; shown again once it is back)
         shown_.clear();
         return held.has_value();
     }
     const Holds holds = Holding(game, ring);
+    if (holds != Holds::kOurs && tint_.tinted()) {
+        tint_.Restore(game, ring);   // (the game's own banner, or shut: its own colour)
+    }
+    if (holds == Holds::kNothing) page_ = false;   // (our page closed by itself)
+    if (page_ && !held && now_ms >= until_) End(game, ring);   // the page's time is over
     if (!held) {
-        if (up_ && holds == Holds::kOurs) {   // (closes only a banner of ours: never the game's own)
-            std::uint64_t vtable = 0, close = 0;
-            if (ReadValue(game, screen, vtable) && vtable != 0 && ReadValue(game, vtable + addr::kSlotClose * 8, close) &&
-                close != 0) {
-                game.Call(close, {screen, static_cast<std::uint64_t>(-1), 0, 0, 0});
-            }
-        }
+        if (up_ && holds == Holds::kOurs) Close(game, screen);   // (closes only a banner of ours: never the game's own)
         if (up_) ours_ = 0;   // (let go: what the banner shows from now on is not the held line's)
-        up_ = false;   // (let go: the notices may have the banner again)
+        up_ = false;   // (let go: pages may have the banner again)
         shown_.clear();
         return false;
     }
+    page_ = false;   // (the held line takes the banner over from a page of ours)
     const auto pages = Wrap(Clean(*held, kTextBytes), kBannerColumns, kBannerLines);
     const std::string text = pages.empty() ? std::string() : pages.front();   // (one line: what fits the banner)
     if (holds == Holds::kGames) {
@@ -548,6 +536,7 @@ bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& 
     if (text != shown_ || !up_ || shut) {
         const std::uint64_t ref = ring.PutFixed(game, 0, text);
         if (ref == 0 || !Set(game, screen, ref)) return true;
+        tint_.Restore(game, ring);   // (the held line in the game's own colour)
         if ((!up_ || shut) && !Open(game, screen, addr::kInfoOpenMode)) return true;
         shown_ = text;
         up_ = true;

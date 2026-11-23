@@ -206,7 +206,7 @@ All vtables (checked); a full list of the 58 is in the names file.
 | `UISystemSaveLoadScreen` | `0x84c0f840` | the save and load questions |
 | `UISystemLoadListScreen` | `0x84c0eba0` | the save list |
 | `UISystemOptionScreen` | `0x84c0f108` | the options, `SystemOption_00` |
-| `UIMessageInGameScreen` | `0x84c09678` | the message window, `MessageInGame_00` |
+| `UIMessageInGameScreen` | `0x84c09678` | the voice subtitle line, `MessageInGame_00` |
 | `UISimpleInfoScreen` | `0x84c0d7c8` | the banner, `SimpleInfo_00` |
 | `UIBalloonMessageScreen` | `0x84c042e8` | the balloons over actors, `BalloonMessage_00` |
 | `UIMessageLogScreen01` | `0x84c09a10` | the dialogue log, `MessageLog_01` |
@@ -641,23 +641,41 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
 
 ### The message window
 
-- `MessageInGame_00` (`UIMessageInGameScreen`, `0x84c09678`): `T_Name_00` the speaker, `T_Message_00` the text (the
-  alias of the pane `T_MessageWhiteOut_00`). (checked)
+- `MessageInGame_00` (`UIMessageInGameScreen`, `0x84c09678`) is the game's voice **subtitle** line (its voiced lines are
+  `Voice/Resource/*_LayoutMsg-_MessageInGame_00--advise*.bwav`), not a framed window. Its layout's panes (checked):
+  `N_Pos_00`, `N_InOut_00`, `N_Text_00`, `N_TextOut_00`, `T_MessageWhiteOut_00` (alias `@T_Message_00`), and a name
+  plate `N_Name_00` (stored hidden) with `N_NameScale_00`, `P_NameBase_00`, `T_Name_00`. No frame pane. Its animations:
+  `In`, `Out`, `RegionType`, `Type` (on `N_Name_00`), `RubyOff`. (checked)
 - The game's call: `f_833d25c0(mgr = **0x84c9e908, &file, &label, &speaker, s0 = time)`. It locks `mgr+0x6218`, gets
-  the screen with `f_833d2690(*0x84ea4518)`, has `f_834091d0` put the label's text into `screen+0x2b0`, the speaker into
-  `T_Name_00` and the time into `+0x408`, sets `+0x2d0` to 1 (`f_83409410`) and opens it with slot 5 `(screen, 1)`.
-  (notes)
-- Each frame its slot 96 `f_83409420` (checked) puts `+0x2b0` into `T_Message_00` (`f_83409510`) while `+0x2d0` is 1.
-  `+0x408` counts down by the slot 40 step (its unit is not known; the game's default is 180); at 0, slot 6
-  `(screen, -1)` closes it. (notes)
-- A line of ours, with no message label: our ref at `+0x2b0`, the speaker through `f_8045b970` on `T_Name_00`, the time
-  at `+0x408`, `+0x2d0` = 1, then slot 5 `(screen, 1)`. (notes, never run)
+  the screen with `f_833d2690(*0x84ea4518)`, has `f_834091d0` put the label's ref into `screen+0x2b0`, the speaker
+  (a message label, looked up with `f_80a8a510`; "" when none) into `T_Name_00` and the time into `+0x408`, sets
+  `+0x2d0` to 1 (`f_83409410`) unless the screen is shut with no open asked, and opens it with slot 5 `(screen, 1)`.
+  Its callers are an actor's talk component (`f_82784d30`, `f_82784f10`), shown again each frame with the time left.
+  (checked)
+- Each frame its slot 96 `f_83409420` puts `+0x2b0` into `T_Message_00` (`f_83409510`) while `+0x2d0` is 1, then
+  plays `Type` (`+0x400`, set up by slot 93 `f_80dd5240`) to its end (`f_802f0f00`) when the player's option
+  `VoiceSubtitleSpeakerName` (hash `0x4ac6a8ab`, read through `f_809d3eb0` / `f_80199f70`) is on, else to its first
+  frame (`f_802f0fe0`): the name plate only with that option. `+0x408` counts down by the slot 40 step; at 0, slot 6
+  `(screen, -1)` closes it. (checked)
+- Its slot 98 `f_83409590` (on open) puts the text and copies the option `VoiceSubtitle` (`0x393669ef`) into
+  `+0x1a8`, which the shared screen code tests for an open screen (`f_802f64c0`, `f_802f0944`). (checked; that it
+  hides the line with subtitles off is inferred)
+- The option keys are the compiled enum at `0x83f3378c` (`VoiceSubtitleSpeakerName`, `ControllerRumble` `0xd9ec5222`,
+  ...; murmur3 of the key names in `LayoutMsg/SystemOption_00`). `MessageDialog_00` (`0x83406e80`) reads the same two
+  options for its own `Type`. (checked)
+- Co-op does not use it: chat there was a bare subtitle with no name and depended on the player's subtitle options
+  ([native-ui.md](native-ui.md#why-not-the-message-window-messageingame_00)).
 
 ### The banner
 
-- `SimpleInfo_00` (`UISimpleInfoScreen`, `0x84c0d7c8`): one `T_Text_00`. `f_83419b10(screen, type, &str, flag)` sets
-  it from `LayoutMsg/SimpleInfo_00` by type; slot 5 with mode 2 or 3 opens it. A text of ours: `T_Text_00` through
-  `f_8045b970`, then slot 5. (notes, never run) Its AI node: `OneShotRequestOpenSimpleInfo` `0x84a48310`. (checked)
+- `SimpleInfo_00` (`UISimpleInfoScreen`, `0x84c0d7c8`): panes `C_Capture_00`, `T_Text_00`, `N_Pos_00`, `N_In_00`, the
+  frame `W_Bg_00` and `P_Capture_00`, all shown (checked). Its set-up, slot 93 `f_80de2490`, finds its `Type`
+  animation (`+0x2b0`).
+- `f_83419b10(screen, type, &str, flag)` shows one: `Type` to its end for type `0x1d`, else to its first frame; the
+  text from `LayoutMsg/SimpleInfo_00` by type into `T_Text_00` (`f_80a87d30`); then slot 5 with mode 2 (flag bit 0
+  set) or 3. Its slots 96 and 98 do nothing. (checked) Co-op's text: `Type` to its first frame, `T_Text_00` through
+  `f_8045b970`, then slot 5 mode 2 ([native-ui.md](native-ui.md)); co-op closes its own text with slot 6. Its AI node:
+  `OneShotRequestOpenSimpleInfo` `0x84a48310`. (checked)
 
 ### The balloons
 
