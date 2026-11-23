@@ -748,7 +748,8 @@ TEST_CASE("dbno banner line: always fits the game's banner, the clock / share / 
     using View = CoopDbno::View;
     const std::string ascii16 = "Abcdefghijklmnop";                                    // 16 letters, 16 columns
     std::string wide16;                                                                 // 16 wide letters, 32 columns
-    for (int i = 0; i < 16; ++i) wide16 += "å­";                              // (U+5B57)
+    for (int i = 0; i < 16; ++i) wide16 += "\xE5\xAD\x97";                              // (U+5B57)
+    CHECK(CoopNativeUi::Columns(wide16) == 32);   // (16 wide letters: the zh case)
     const std::size_t cols = CoopNativeUi::kBannerColumns;
     for (const char* lang : {"en", "zh-Hans"}) {
         CoopI18n::ForceLanguage(lang);
