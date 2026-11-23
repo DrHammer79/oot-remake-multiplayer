@@ -43,8 +43,13 @@ def main(kit):
             manifest = json.load(f)
         for m, data_dir in ((manifest, charsel_ui.DATA), (coop_menu.MANIFEST, coop_menu.DATA)):
             for entry in m["files"]:
-                if not os.path.isfile(os.path.join(data_dir, entry["delta"])):
-                    problems.append(f"{os.path.relpath(data_dir, stage)}/{entry['delta']} ({entry['rel']}) not in the kit")
+                # (a plain file's entry names its delta; a SARC archive's entry ("rel" or "glob") names one per
+                # member: charsel_ui.make's two kinds)
+                where = entry.get("rel") or entry.get("glob")
+                deltas = [entry["delta"]] if "members" not in entry else [mem["delta"] for mem in entry["members"]]
+                for delta in deltas:
+                    if not os.path.isfile(os.path.join(data_dir, delta)):
+                        problems.append(f"{os.path.relpath(data_dir, stage)}/{delta} ({where}) not in the kit")
         for lang in ("USen", "CNzh", "TWzh"):   # (en.txt and each translation the repo has)
             if not ui_pack.load_strings(lang):
                 problems.append(f"ui_pack.load_strings('{lang}') read no words from the kit's strings")
