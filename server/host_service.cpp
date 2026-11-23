@@ -224,6 +224,7 @@ bool HostService::start(std::string& error) {
     upnp::Config c;
     c.internal_port = server_->port();
     c.external_port = server_->port();
+    c.bind = config_.helper_bind;
     c.log = config_.log;
     mapping_ = std::make_unique<upnp::Mapping>(c);
     if (mapping_->open()) {
@@ -234,6 +235,7 @@ bool HostService::start(std::string& error) {
       pcp::Config p;
       p.internal_port = server_->port();
       p.external_port = server_->port();
+      p.bind = config_.helper_bind;
       for (const nat::Addr& at : config_.pcp_routers) p.routers.push_back({at, 0x7F000001u});
       p.log = [this](const std::string& text) { say("router forward: " + text); };
       say("router forward: UPnP did not open the port; asking the router with PCP / NAT-PMP");
@@ -256,6 +258,7 @@ bool HostService::start(std::string& error) {
 
   if (!config_.relay_via.empty()) {
     relay::RelayLinkConfig c;
+    c.bind = config_.helper_bind;
     if (!relay::parse_relay_address(config_.relay_via, c.relay_host, c.relay_port)) {
       say("relay: '" + config_.relay_via + "' is not a relay address (name or IPv4, optional :port)");
       set_message("'" + config_.relay_via + "' is not a relay address", HostProblem::kRelay);
