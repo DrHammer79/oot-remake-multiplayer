@@ -510,3 +510,103 @@ TEST_CASE("gold mode: Not shared, a guest's race never changes the host's save o
     CHECK(CoopGoldMode::ReadRace(host_game, kSkull, kCount, kGet) ==
           MakeRace(4, true, {kSkull[1], kSkull[1] + 2}));
 }
+
+TEST_CASE("gold mode: each playthrough of the host's has its own race id") {
+    const std::string p1 = CoopGoldMode::NewPlaythroughId();
+    const std::string p2 = CoopGoldMode::NewPlaythroughId();
+    CHECK(p1.size() == 16);
+    CHECK(p1 != p2);
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, "") == CoopGoldMode::RaceIdOf(kHostKey));   // none known: as before
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kHostKey));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kHostKey, p2));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kOtherHostKey, p1));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) == CoopGoldMode::RaceIdOf(kHostKey, p1));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1).size() == 16);
+}
+
+TEST_CASE("gold mode: the host's playthroughs per slot, and a new game's") {
+    const fs::path dir = FreshDir("coop_tests_playthroughs");
+    std::string a, b, fresh;
+    {
+        CoopGoldMode::Playthroughs pts(dir);
+        a = pts.OnSlot("slot a", false);   // a save of before: an id of its own, kept
+        CHECK(a.size() == 16);
+        CHECK(pts.OnSlot("slot a", false) == a);
+        b = pts.OnSlot("slot_b", false);
+        CHECK(b != a);
+        // A new game: its own id, the same until the title.
+        fresh = pts.OnNewGame();
+        CHECK(fresh != a);
+        CHECK(pts.OnNewGame() == fresh);
+        // Saved into slot a (written over): the slot is now that new game's.
+        CHECK(pts.OnSlot("slot a", true) == fresh);
+        // Another new game, then the title and a load of slot_b: slot_b keeps its own.
+        const std::string other = pts.OnNewGame();
+        CHECK(other != fresh);
+        pts.OnTitle();
+        CHECK(pts.OnSlot("slot_b", true) == b);   // (a write with no new game first: the same playthrough)
+        CHECK(pts.OnNewGame() != other);          // (the title forgot it)
+        CHECK(pts.OnSlot("slot_b", false) == b);  // a load after a new game: the slot's own
+        CHECK(pts.OnSlot("", false).empty());
+    }
+    // Kept across runs.
+    CoopGoldMode::Playthroughs again(dir);
+    CHECK(again.Slots().size() == 2);
+    CHECK(again.OnSlot("slot a", false) == fresh);
+    CHECK(again.OnSlot("slot_b", false) == b);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: the host's race id follows its playthrough, and its save waits until the id is sent") {
+    const fs::path dir = FreshDir("coop_tests_race_playthrough");
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetRaceDir(dir);
+    CoopGoldMode::SetOwnKey(kHostKey);
+    CoopGoldMode::SetChoice(Mode::own);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK(CoopGoldMode::RaceId() == CoopGoldMode::RaceIdOf(kHostKey));   // no playthrough known yet
+    CHECK(CoopGoldMode::RaceSendDue());
+    CoopGoldMode::MarkRaceSent(CoopGoldMode::RaceId());
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    const std::string p1 = CoopGoldMode::NewPlaythroughId();
+    CoopGoldMode::SetPlaythrough(p1);
+    const std::string id1 = CoopGoldMode::RaceIdOf(kHostKey, p1);
+    CHECK(CoopGoldMode::RaceId() == id1);
+    REQUIRE(CoopGoldMode::RaceSetting().has_value());
+    CHECK(CoopGoldMode::RaceSetting()->value == id1);
+    CHECK(CoopGoldMode::RaceSendDue());   // the save waits for this id to go out
+    CoopGoldMode::MarkRaceSent(id1);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+    CoopGoldMode::SetPlaythrough("not an id");   // ignored: the key's alone
+    CHECK(CoopGoldMode::RaceId() == CoopGoldMode::RaceIdOf(kHostKey));
+    CoopGoldMode::SetPlaythrough(p1);
+
+    // Shared: nothing waits.
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::SetChoice(Mode::shared);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    // A host after a migration keeps the told id, whatever its own game plays.
+    CoopGoldMode::SetChoice(Mode::own);
+    JoinRace(id1);
+    CoopGoldMode::OnHosting();
+    CoopGoldMode::SetPlaythrough(CoopGoldMode::NewPlaythroughId());
+    CHECK(CoopGoldMode::RaceId() == id1);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    // A guest: each playthrough of the host's is a race of its own.
+    const std::string id2 = CoopGoldMode::RaceIdOf(kHostKey, CoopGoldMode::NewPlaythroughId());
+    JoinRace(id1);
+    CHECK(CoopGoldMode::GrowRace(MakeRace(3, true, {kSkull[0]})));
+    JoinRace(id2);
+    CHECK(CoopGoldMode::TheRace().empty());
+    CHECK(CoopGoldMode::GrowRace(MakeRace(1, false, {kSkull[1]})));
+    JoinRace(id1);
+    CHECK(CoopGoldMode::TheRace() == MakeRace(3, true, {kSkull[0]}));
+    CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}

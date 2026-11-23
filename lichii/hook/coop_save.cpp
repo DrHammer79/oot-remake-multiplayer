@@ -105,6 +105,11 @@ bool g_set_applied = false;
 bool g_list_stale = false;
 // Row 63, Not shared: the co-op folder whose host's save was last written with our race (OwnGoldLocked); empty: none.
 fs::path g_race_dir;
+std::string g_race_dir_id;   // the race id that save was written with (a host's other playthrough has another)
+// The host's playthroughs (coordinator #11): per slot of its own, and a new game's (CoopGoldMode::Playthroughs).
+std::optional<CoopGoldMode::Playthroughs> g_playthroughs;
+std::optional<fs::path> g_playthrough_slot;   // the slot the playthrough was last taken for
+bool g_playthrough_new = false;               // a new game's playthrough taken
 
 // An environment variable's text ("" when unset).
 std::string EnvText(const char* name) {
@@ -453,7 +458,10 @@ save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot_in
     g_race_dir.clear();
     switch (result) {
     case save::WriteResult::written:
-        if (race_kept) g_race_dir = dir;
+        if (race_kept) {
+            g_race_dir = dir;
+            g_race_dir_id = CoopGoldMode::RaceId();
+        }
         g_guest.ready = true;
         LOG_INFO(Core, "coop: save: the host's save written to {}", dir.string());
         if (played_from) Say(g_lines.on_ready(g_in_game));
@@ -549,7 +557,7 @@ bool SessionLive() {
 
 bool PlaysRaceSave() {
     std::lock_guard lock(g_mutex);
-    return !g_race_dir.empty() && g_dir == g_race_dir;
+    return !g_race_dir.empty() && g_dir == g_race_dir && g_race_dir_id == CoopGoldMode::RaceId();
 }
 
 namespace {
@@ -662,6 +670,7 @@ void NoteTitle(bool title_up) {
     if (title_up && !g_title_up) {
         FixSlotsLocked();      // (rows 239/240/241: before the player can load one of them)
         g_played.on_title();   // (a new pick follows: a file, or New Game)
+        if (g_playthroughs) g_playthroughs->OnTitle();
         g_title_seen = true;
         if (std::exchange(g_guest_played, false)) g_title_ask = true;   // (decided by the next OnFrame: TitleResync)
     }
@@ -1046,6 +1055,29 @@ void Resync(bool connected_guest) {
 }
 }  // namespace
 
+namespace {
+// Under g_mutex, the host: the playthrough its game plays (a slot of its own, or a new game), so each has its own race
+// with each guest (row 63, CoopGoldMode::SetPlaythrough). The slot unknown: the last one stays.
+void PlaythroughLocked(bool new_game) {
+    if (!g_playthroughs) g_playthroughs.emplace(CoopGoldMode::RaceDir());
+    std::string id;
+    if (new_game && !g_playthrough_new) {
+        g_playthrough_new = true;
+        id = g_playthroughs->OnNewGame();
+        if (CoopGoldMode::NotShared()) {
+            LOG_INFO(Core, "coop: save: a new game: each guest's Gold Skulltula race with it starts from 0");
+        }
+    }
+    if (!new_game) g_playthrough_new = false;
+    if (g_played.slot() && g_played.slot() != g_playthrough_slot) {
+        g_playthrough_slot = g_played.slot();
+        id = g_playthroughs->OnSlot(g_played.slot()->filename().string(),
+                                    g_played.source() == save::PlayedSlot::Source::write);
+    }
+    if (!id.empty()) CoopGoldMode::SetPlaythrough(std::move(id));
+}
+}  // namespace
+
 void OnFrame(coop::net::Client& client, bool host_reset) {
     std::lock_guard lock(g_mutex);
     SwitchFrame(client);
@@ -1110,6 +1142,7 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
     }
     // A new game not saved yet: the guests hear "no save yet", never another slot of ours (player report 120).
     const bool new_game = g_played.new_game(g_in_game, g_title_seen);
+    PlaythroughLocked(new_game);
     // Twice a second: what the host owes (it reads the folder's file times).
     if (!g_dir.empty() && !g_planner.idle() && g_folder_every.Due(CoopEvery::NowUs())) {
         const auto newest = new_game ? std::nullopt : save::newest_write(g_dir);
@@ -1164,7 +1197,8 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             }
         }
     }
-    if (!g_outbox.empty()) {
+    // Not shared: the save waits until the guests have the race id of the playthrough it is (CoopGoldMode).
+    if (!g_outbox.empty() && !CoopGoldMode::RaceSendDue()) {
         if (client.send(proto::Message{g_outbox.front()})) {
             g_outbox.pop_front();
         }

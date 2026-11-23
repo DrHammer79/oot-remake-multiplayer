@@ -583,7 +583,7 @@ public:
         session.clock = [] { return CoopEvery::NowUs(); };
         pickups_given_ = 0;
         gold_local_ = false;  // a new session's watcher shares them until the mode says not
-        race_loaded_ = false;  // row 63: our race is kept only once the race save is loaded
+        race_loaded_.clear();  // row 63: our race is kept only once the race save is loaded
         race_read_at_ = 0;
         // Called by service() on the network thread, with the client.
         session.on_event = [this](const coop::net::Event& event, coop::net::Client& client) {
@@ -965,7 +965,7 @@ public:
             LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: {} keys kept in this game ({} were shared)",
                      keys.size(), was);
         }
-        if (session_ && gold_local_ && race_loaded_ && game_store && reading && CoopSave::PlaysRaceSave()) {
+        if (session_ && gold_local_ && !race_loaded_.empty() && race_loaded_ == CoopGoldMode::RaceId() && game_store && reading && CoopSave::PlaysRaceSave()) {
             RaceFrame(*game_store);
         }
         if (pickups_) {
@@ -1232,7 +1232,7 @@ public:
             CoopTime::SaveLoaded(report.server_now_us);  // issue 159
             // Row 63: a loaded race save gets our race back, then keeps it. Another save (the player's own, still
             // in the game at the title) is never read into the race.
-            race_loaded_ = CoopSave::PlaysRaceSave();
+            race_loaded_ = CoopSave::PlaysRaceSave() ? CoopGoldMode::RaceId() : std::string();
             race_put_tries_ = kRacePutTries;
             lent_keys_.forget();  // dungeon-sync-b: the save has its own key counts
             start_source_.Reset();  // deku-sync-fix: what the game asked before the load is not ours now
@@ -2785,7 +2785,7 @@ private:
     // Row 63, Not shared, a guest: our race with this host (CoopGoldMode::TheRace), put back into the game after
     // each load of the race save (tries left), and kept from what the game shows (read time).
     static constexpr int kRacePutTries = 120;
-    bool race_loaded_ = false;
+    std::string race_loaded_;  // the race id of the race save the game loaded ("": none; another: not ours now)
     int race_put_tries_ = 0;
     std::uint64_t race_read_at_ = 0;
 
@@ -3483,7 +3483,7 @@ static void WithPlayerKey(Settings& settings) {
     }
     // Row 63, Gold Skulltulas Not shared: each race is kept per host beside coop.ini (coop_gold_mode.h).
     CoopGoldMode::SetRaceDir(config / "gold-race");
-    if (settings.player_key) CoopGoldMode::SetOwnRaceId(CoopGoldMode::RaceIdOf(*settings.player_key));
+    if (settings.player_key) CoopGoldMode::SetOwnKey(*settings.player_key);
 }
 
 void Start() {

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <mutex>
+#include <random>
 #include <set>
 
 #include "coop/protocol/traffic_crypto.hpp"
@@ -21,7 +22,11 @@ std::atomic<Mode> g_choice{Mode::shared};
 std::atomic<Mode> g_in_force{Mode::shared};
 std::atomic<bool> g_told{false};  // this connection has a mode (a host's settings, or our own Host)
 std::mutex g_race_mutex;
-std::string g_own_race;   // SetOwnRaceId
+std::string g_own_race;   // SetOwnRaceId, or from g_own_key and g_playthrough
+std::optional<std::array<std::uint8_t, 16>> g_own_key;   // SetOwnKey
+std::string g_playthrough;   // SetPlaythrough
+bool g_host_own = false;     // hosting the session this game started (OnHosting with no told mode)
+std::string g_race_sent;     // MarkRaceSent
 std::string g_race;       // the session's race id ("" until known)
 std::filesystem::path g_race_dir;          // SetRaceDir
 std::optional<std::string> g_cached_id;    // the id g_cached is for (nullopt: none read yet)
@@ -70,6 +75,8 @@ void OnConnection() {
     g_race.clear();
     g_cached_id.reset();
     g_cached = Race{};
+    g_host_own = false;
+    g_race_sent.clear();
 }
 
 void OnHosting() {
@@ -78,6 +85,7 @@ void OnHosting() {
         g_in_force.store(g_choice.load());
         std::lock_guard lock(g_race_mutex);
         g_race = g_own_race;
+        g_host_own = true;
     }
 }
 
@@ -100,7 +108,16 @@ void OnHostSettings(const std::vector<proto::ModSetting>& settings) {
 }
 
 std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key) {
-    const auto tag = proto::player_key_tag(player_key, "oot-coop gold race v1");
+    return RaceIdOf(player_key, {});
+}
+
+std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key, std::string_view playthrough) {
+    std::string label = "oot-coop gold race v1";
+    if (!playthrough.empty()) {
+        label = "oot-coop gold race v2 ";
+        label += playthrough;
+    }
+    const auto tag = proto::player_key_tag(player_key, label);
     static constexpr char kHex[] = "0123456789abcdef";
     std::string id;
     for (const std::uint8_t b : tag) {
@@ -113,6 +130,113 @@ std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key) {
 void SetOwnRaceId(std::string id) {
     std::lock_guard lock(g_race_mutex);
     g_own_race = IsRaceId(id) ? std::move(id) : std::string();
+}
+
+namespace {
+// Under g_race_mutex: our own id from the key and the playthrough; the session's too while we host our own.
+void OwnRaceLocked() {
+    if (!g_own_key) return;
+    g_own_race = RaceIdOf(*g_own_key, g_playthrough);
+    if (g_host_own) g_race = g_own_race;
+}
+
+std::optional<std::map<std::string, std::string>> ParsePlaythroughs(std::string_view text) {
+    std::map<std::string, std::string> out;
+    bool header = false;
+    while (!text.empty()) {
+        const std::size_t nl = text.find('\n');
+        std::string_view line = text.substr(0, nl);
+        text = nl == std::string_view::npos ? std::string_view() : text.substr(nl + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        if (line.empty()) continue;
+        if (!header) {
+            if (line != "oot-coop playthroughs 1") return std::nullopt;
+            header = true;
+            continue;
+        }
+        // "slot <id> <name>": the name last, as it may hold spaces.
+        if (line.size() < 22 || line.substr(0, 5) != "slot " || line[21] != ' ') return std::nullopt;
+        const std::string_view id = line.substr(5, 16);
+        if (!IsRaceId(id)) return std::nullopt;
+        out[std::string(line.substr(22))] = std::string(id);
+    }
+    if (!header) return std::nullopt;
+    return out;
+}
+}  // namespace
+
+std::string NewPlaythroughId() {
+    std::random_device rd;
+    const std::uint64_t v = (static_cast<std::uint64_t>(rd()) << 32) ^ rd();
+    char out[17];
+    std::snprintf(out, sizeof out, "%016llx", static_cast<unsigned long long>(v));
+    return out;
+}
+
+Playthroughs::Playthroughs(std::filesystem::path dir) : dir_(std::move(dir)) {
+    if (dir_.empty()) return;
+    std::ifstream in(dir_ / "playthroughs.txt", std::ios::binary);
+    if (!in) return;
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (auto kept = ParsePlaythroughs(text)) slots_ = std::move(*kept);
+}
+
+std::string Playthroughs::OnNewGame() {
+    if (pending_.empty()) pending_ = NewPlaythroughId();
+    return pending_;
+}
+
+std::string Playthroughs::OnSlot(const std::string& slot, bool by_write) {
+    if (slot.empty() || slot.find('\n') != std::string::npos) return {};
+    std::string& id = slots_[slot];
+    const bool fresh_game = by_write && !pending_.empty();
+    if (fresh_game || id.empty()) {
+        id = fresh_game ? pending_ : NewPlaythroughId();
+        Save();
+    }
+    pending_.clear();
+    return id;
+}
+
+void Playthroughs::Save() const {
+    if (dir_.empty()) return;
+    std::string text = "oot-coop playthroughs 1\n";
+    for (const auto& [slot, id] : slots_) text += "slot " + id + " " + slot + "\n";
+    std::error_code ec;
+    std::filesystem::create_directories(dir_, ec);
+    const std::filesystem::path to = dir_ / "playthroughs.txt";
+    std::filesystem::path tmp = to;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        if (!out) return;
+    }
+    std::filesystem::rename(tmp, to, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
+}
+
+void SetOwnKey(const std::array<std::uint8_t, 16>& player_key) {
+    std::lock_guard lock(g_race_mutex);
+    g_own_key = player_key;
+    OwnRaceLocked();
+}
+
+void SetPlaythrough(std::string playthrough) {
+    std::lock_guard lock(g_race_mutex);
+    g_playthrough = IsRaceId(playthrough) ? std::move(playthrough) : std::string();
+    OwnRaceLocked();
+}
+
+void MarkRaceSent(std::string id) {
+    std::lock_guard lock(g_race_mutex);
+    g_race_sent = std::move(id);
+}
+
+bool RaceSendDue() {
+    if (!NotShared()) return false;
+    std::lock_guard lock(g_race_mutex);
+    return g_host_own && !g_race.empty() && g_race != g_race_sent;
 }
 
 std::string RaceId() {
@@ -296,6 +420,10 @@ void ResetForTest() {
     g_told.store(false);
     std::lock_guard lock(g_race_mutex);
     g_own_race.clear();
+    g_own_key.reset();
+    g_playthrough.clear();
+    g_host_own = false;
+    g_race_sent.clear();
     g_race.clear();
     g_race_dir.clear();
     g_cached_id.reset();
@@ -425,6 +553,11 @@ void SetRaceDir(std::filesystem::path dir) {
     std::lock_guard lock(g_race_mutex);
     g_race_dir = std::move(dir);
     g_cached_id.reset();
+}
+
+std::filesystem::path RaceDir() {
+    std::lock_guard lock(g_race_mutex);
+    return g_race_dir;
 }
 
 Race TheRace() {

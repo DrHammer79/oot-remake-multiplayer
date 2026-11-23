@@ -24,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -128,11 +129,46 @@ void SetOwnRaceId(std::string id);   // at start (the hook)
 std::string RaceId();                // the session's; "" until known
 std::optional<coop::protocol::ModSetting> RaceSetting();   // the host's entry: Not shared with a known id
 
+// Each playthrough of the host's has its own race (coordinator #11): a save of the host's own, or a new game, gets a
+// random playthrough id (16 hex digits), and the race id is a tag of the player key and that id. With no playthrough
+// (the slot the host plays is not known on this runtime) the id is the key's alone, as before.
+std::string RaceIdOf(const std::array<std::uint8_t, 16>& player_key, std::string_view playthrough);
+std::string NewPlaythroughId();
+// The host's playthrough ids per slot folder (its name), kept in `dir`/playthroughs.txt. OnNewGame: the game plays a
+// new game not saved yet: a fresh id, the same until the title. OnSlot: the slot the game plays is known; when the
+// game saved into it (`by_write`) right after a new game, the slot takes the new game's id (the old save there was
+// written over); else the slot's own id (a fresh one the first time). OnTitle: a new pick follows.
+class Playthroughs {
+public:
+    explicit Playthroughs(std::filesystem::path dir = {});
+    std::string OnNewGame();
+    std::string OnSlot(const std::string& slot, bool by_write);
+    void OnTitle() { pending_.clear(); }
+    const std::map<std::string, std::string>& Slots() const { return slots_; }
+
+private:
+    void Save() const;
+    std::filesystem::path dir_;
+    std::map<std::string, std::string> slots_;
+    std::string pending_;   // the new game's id until it is saved into a slot (or the title)
+};
+// The host side: this game's player key (at start) and the playthrough its game plays now ("" : not known). While this
+// game hosts the session it started (not a host after a migration, which keeps the told id) the session's race id
+// follows the playthrough.
+void SetOwnKey(const std::array<std::uint8_t, 16>& player_key);
+void SetPlaythrough(std::string playthrough);
+// The race id the host's settings carried last (MarkRaceSent, by coop_mod_share once sent). RaceSendDue: a Not shared
+// host whose race id is not sent yet; its save waits, so a guest has the id before the save it keeps its race in (both
+// on the session channel, reliable and in order).
+void MarkRaceSent(std::string id);
+bool RaceSendDue();
+
 // This player's race with the session's host (RaceId), in memory and in `dir` (SetRaceDir: `gold-race` beside
 // coop.ini). Any thread. TheRace: the race so far (read from its file the first time an id is asked; none: a race from
 // 0). GrowRace: `seen` added (Race::Join) and, when it grew, written to its file at once; true when it grew. With no
 // race id the race lives for this session only. A new connection (OnConnection) forgets the one in memory.
 void SetRaceDir(std::filesystem::path dir);
+std::filesystem::path RaceDir();
 Race TheRace();
 bool GrowRace(const Race& seen);
 
