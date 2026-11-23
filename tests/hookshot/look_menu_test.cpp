@@ -263,9 +263,15 @@ TEST_CASE("look menu (0.11.9): the Character page: three pages of six, ZL and ZR
     page.Press(Input::kPagePrev);
     page.Press(Input::kPagePrev);
     CHECK(page.GroupShown() == 2u);
-    // Every part is on exactly one page, but the hair: no row (0.11.9 lane, its tint too weak; on the wire still).
+    // Every part is on exactly one of Link's pages, but the hair: no row (0.11.9 lane, its tint too weak; on the wire
+    // still). The last group is a character's own page, the Eye Colour alone.
     std::vector<Part> seen;
-    for (const auto& g : CoopLookMenu::Groups()) seen.insert(seen.end(), g.parts.begin(), g.parts.end());
+    const auto& groups = CoopLookMenu::Groups();
+    REQUIRE(groups.size() == CoopLookMenu::kEyesGroup + 1);
+    for (std::size_t i = 0; i < CoopLookMenu::kEyesGroup; i++) {
+        seen.insert(seen.end(), groups[i].parts.begin(), groups[i].parts.end());
+    }
+    CHECK(groups[CoopLookMenu::kEyesGroup].parts == std::vector<Part>{Part::eyes});
     CHECK(seen.size() == CoopLook::kParts - 1);
     for (const auto& info : CoopLook::Parts()) {
         CHECK(std::count(seen.begin(), seen.end(), info.part) == (info.part == Part::hair ? 0 : 1));
@@ -283,11 +289,32 @@ TEST_CASE("look menu (0.11.9): the Character page: three pages of six, ZL and ZR
     CHECK(page.look() == Look{});
 }
 
-TEST_CASE("look menu (0.11.9): a character other than Link: its gear pages once shown to work, else one plain line") {
+TEST_CASE("look menu: a character other than Link: its Eyes page, its gear pages once shown to work") {
     Page page;
     page.SetPaged(true);
     page.Open(Look{});
-    page.SetCharacter(9, false);
+    page.SetCharacter(9, false);   // (player report 2026-11-22: the eye colour goes on a character's model)
+    auto v = page.view();
+    REQUIRE(v.rows.size() == 2);
+    CHECK(v.rows[0].name == "Eyes (page 1 of 1)");
+    CHECK(v.rows[1].name == "Eye Colour");
+    CHECK(page.GroupsOffered() == 1u);
+    page.Press(Input::kRight);
+    REQUIRE(page.TakeChange());
+    page.SetCharacter(9, true);
+    v = page.view();
+    CHECK(v.rows[0].name == "Eyes (page 1 of 3)");
+    page.Press(Input::kPageNext);
+    CHECK(page.view().rows[0].name == "Shields (page 2 of 3)");
+    page.Press(Input::kPageNext);
+    CHECK(page.view().rows[0].name == "Swords (page 3 of 3)");
+}
+
+TEST_CASE("look menu (0.11.9): a character whose model has no iris: its gear pages once shown to work, else one plain line") {
+    Page page;
+    page.SetPaged(true);
+    page.Open(Look{});
+    page.SetCharacter(9, false, false);
     auto v = page.view();
     REQUIRE(v.rows.size() == 2);
     CHECK(v.rows[1].name == CoopLookMenu::kNoColourOptions);
@@ -296,11 +323,11 @@ TEST_CASE("look menu (0.11.9): a character other than Link: its gear pages once 
     page.Press(Input::kDecide);                     // nothing to press: no change, no mixer
     CHECK_FALSE(page.editing());
     CHECK_FALSE(page.TakeChange());
-    page.SetCharacter(9, true);
+    page.SetCharacter(9, true, false);
     v = page.view();
     CHECK(v.rows[0].name == "Shields (page 1 of 2)");   // (a character: its held gear only)
     page.Press(Input::kPageNext);
     CHECK(page.view().rows[0].name == "Swords (page 2 of 2)");
-    page.SetCharacter(0, true);                     // Link again: every page
+    page.SetCharacter(0, true, false);              // Link again: every page
     CHECK(page.view().rows[0].name == "Link (page 1 of 4)");
 }

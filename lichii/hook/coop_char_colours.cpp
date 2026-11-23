@@ -161,9 +161,11 @@ public:
             u.looked_up = true;
         }
         if (o.hair_exact && !Stopped()) {
-            // (co-op's hair colour on a Link model: the parameters alone, as the game colours its own hair)
+            // (co-op's hair colour: the parameters alone, as the game colours its own hair; on a character its real
+            // hair only, the stand-in rule below)
             for (std::size_t i = 0; i < kHairNames.size() && !Stopped(); i++) {
                 if (u.material[i] < 0) continue;
+                if (o.character && i == 0 && !HasPalette(MaterialObject(u.unit, u.material[i]))) continue;
                 const bool brow = i + 1 == kHairNames.size();
                 for (int p = 0; p < 2; p++) {
                     SetFloats(u.unit, u.material[i], u.param[i][static_cast<std::size_t>(p)],
@@ -301,6 +303,37 @@ void SetModPresent(bool present) { g_mod_present.store(present, std::memory_orde
 bool ModPresent() { return g_mod_present.load(std::memory_order_relaxed); }
 std::uint16_t ShownCharacter() { return g_shown.load(std::memory_order_relaxed); }
 
+namespace {
+// The character (bits 0..15), known (bit 16), iris (bit 17).
+std::atomic<std::uint32_t> g_own_iris{0};
+}  // namespace
+
+void SetOwnIris(std::uint16_t character, std::optional<bool> iris) {
+    g_own_iris.store(iris ? character | 1u << 16 | (*iris ? 1u << 17 : 0u) : 0u, std::memory_order_relaxed);
+}
+
+std::optional<bool> OwnIris(std::uint16_t character) {
+    const std::uint32_t v = g_own_iris.load(std::memory_order_relaxed);
+    if ((v & 1u << 16) == 0 || (v & 0xFFFFu) != character) return std::nullopt;
+    return (v & 1u << 17) != 0;
+}
+
+std::optional<bool> HasIris(const State& state) {
+    bool looked = false;
+    const std::size_t e = kHairNames.size();
+    for (const auto& u : state.units) {
+        if (!u.looked_up) continue;
+        looked = true;
+        if (u.material[e] >= 0 && u.param[e][2] >= 0) return true;
+    }
+    return looked ? std::optional<bool>(false) : std::nullopt;
+}
+
+std::optional<bool> Wardrobe::IrisOf(std::uint64_t actor) const {
+    const auto it = std::find_if(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.state.actor == actor; });
+    return it == kept_.end() ? std::nullopt : HasIris(it->state);
+}
+
 Wardrobe& TheWardrobe() {
     static Wardrobe w;
     return w;
@@ -383,6 +416,7 @@ std::size_t Wardrobe::Frame(const Game& game, const std::vector<Target>& targets
         Options o = Options::Of(t.custom);
         if (t.eyes) o.eyes_exact = EyeParam(*t.eyes);
         if (t.hair) o.hair_exact = HairParam(*t.hair);
+        o.character = t.character;
         const bool colours = o.Colours();
         bool due;
         if (viewer_paints) {
