@@ -114,8 +114,10 @@ class ExefsPatchesTest(unittest.TestCase):
         got = self.m.coop_ordered(mods, rows, default_off)
         self.assertEqual([(n, on) for n, _, on in got],
                          [("randomizer-SpeedyKokiri", False), ("OoT Character Select", False), ("kept", True)])
-        # Without the line the unnamed one keeps mods.json's switch, as before.
-        self.assertEqual([(n, on) for n, _, on in self.m.coop_ordered(mods, rows)][0], ("randomizer-SpeedyKokiri", True))
+        # Without the line the unnamed one keeps mods.json's switch and its place under the named ones, as before (the
+        # off row first, then it, then the named "on" row).
+        self.assertEqual([(n, on) for n, _, on in self.m.coop_ordered(mods, rows)],
+                         [("OoT Character Select", False), ("randomizer-SpeedyKokiri", True), ("kept", True)])
         for near in ("default  off", "Default off", "default on"):
             with open(os.path.join(root, self.m.COOP_LIST), "w", encoding="utf-8") as f:
                 f.write("coop-mods 1\n%s\n" % near)
