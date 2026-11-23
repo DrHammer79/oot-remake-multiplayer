@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "coop_pause_menu.h"
 
+#include "coop_text_fit.h"
+
 #include "coop_browse.h"
 #include "coop_difficulty.h"
 
@@ -317,14 +319,8 @@ std::string MicWords(const std::string& chosen, const std::vector<std::string>& 
         return "Default";
     }
     std::string words = chosen;
-    if (CodePoints(words) > kMicChars) {
-        std::size_t at = 0;
-        for (std::size_t points = 0; at < words.size(); ++at) {   // (the byte where character kMicChars - 3 starts)
-            if ((static_cast<unsigned char>(words[at]) & 0xc0) != 0x80 && points++ == kMicChars - 3) {
-                break;
-            }
-        }
-        words = words.substr(0, at) + "...";
+    if (CodePoints(words) > kMicChars || CoopTextFit::Halves(words) > 2 * kMicChars) {   // (by width, coop_text_fit.h)
+        words = words.substr(0, CoopTextFit::PrefixEnd(words, words.size(), 2 * kMicChars - 6)) + "...";
     }
     const bool there = std::find(listed.begin(), listed.end(), chosen) != listed.end();
     return there ? words : words + " (not connected)";
