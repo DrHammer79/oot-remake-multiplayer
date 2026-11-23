@@ -603,13 +603,13 @@ TEST_CASE("char colours (npc-customize-2): the page's rows are the Customize pic
     f.W64(kPicVt + 0xf8, 0x1234);
     Wardrobe w;
     const Game g = f.AsGame();
-    Target field{FakeGame::kActor, FakeGame::kCell, 0, false, 0, std::nullopt, std::nullopt, 1};
+    Target field{.actor = FakeGame::kActor, .cell = FakeGame::kCell, .model = 1};
     field.own = true, field.character = kCow;
     // The field model is still the earlier pick's (Saria's materials) while the menu shows the Cow: its rows are not
     // the Cow's page.
     w.Frame(g, {field}, 1000, {});
     CHECK(w.OwnRows(kCow) == (kRowHair | kRowEyes | kRowCloth1 | 8 | kRowGear | kRowsKnown));
-    Target picture{kPicture, FakeGame::kCell + 0x1000, 0, false, 0, std::nullopt, std::nullopt, 2};
+    Target picture{.actor = kPicture, .cell = FakeGame::kCell + 0x1000, .model = 2};
     picture.character = kCow, picture.picture = true;
     w.Frame(g, {field, picture}, 1001, {});
     CHECK(w.OwnRows(kCow) == (kRowGear | kRowsKnown));
@@ -673,5 +673,25 @@ TEST_CASE("char colours: a model made again as another actor at the same address
     // Its player switched age: another actor at the same address, before kAgainMs.
     CHECK(w.Frame(g, {PuppetTarget(FakeGame::kActor, FakeGame::kCell, false, "CoopPuppet_Adult_C007", c)}, 1200, {}) > 0);
     CHECK(f.calls - looked > 1);   // (its materials looked up again, then the iris set)
+    CHECK(f.sets.size() == 1);
+}
+
+TEST_CASE("char colours: your own model after a pick switch at the same address starts anew (ModelKey of the pick)") {
+    // (the glue's own target: OwnTarget with ModelKey(actor name, character shown); with the key left 0 the kept
+    // slot of the earlier pick stayed and its material numbers were used on the new model)
+    FakeGame f(Character());
+    Wardrobe w;
+    const Game g = f.AsGame();
+    const ModelColours c{.eyes = 0x00FF00u};
+    const auto own = [&](std::uint16_t character) {
+        return OwnTarget(FakeGame::kActor, FakeGame::kCell, ModelKey("Player_Child", character), c, character, true,
+                         false);
+    };
+    CHECK(w.Frame(g, {own(2)}, 1000, {}) > 0);
+    const std::size_t looked = f.calls;
+    f.sets.clear();
+    CHECK(w.Frame(g, {own(2)}, 1100, {}) == 0);   // (the same pick: not before kAgainMs)
+    CHECK(w.Frame(g, {own(8)}, 1200, {}) > 0);    // (another pick, same actor address: looked up and dressed at once)
+    CHECK(f.calls - looked > 1);
     CHECK(f.sets.size() == 1);
 }
