@@ -6,6 +6,7 @@
 // tests drive Page and Probe themselves).
 #include "coop_i18n.h"
 #include "coop_pause_tab.h"
+#include "coop_players_open.h"
 #include "coop_browse.h"
 #include "coop_title.h"
 
@@ -2450,6 +2451,11 @@ int MinusCategoryNow() {
     return manager != 0 ? Read<std::int32_t>(manager + 0x52c) : -1;
 }
 std::atomic<bool> g_hop_on{false};   // (a hop to the Characters tab runs: OnPad taps L for it)
+// F6 (coop_players_open.h): the - menu opened on our Multiplayer tab's Players view. g_players_mutex: the run (F6 on the
+// window's or present's thread, OnPad on the input thread). g_players_no_tabs: a - menu opened without tabs of ours.
+std::mutex g_players_mutex;
+CoopPlayersOpen::Run g_players_run;
+std::atomic<bool> g_players_no_tabs{false};
 void MinusDecide(int tab, int row) {
     if (tab < 0 || tab >= kMinusTabs) return;
     if (ViewShown() == View::kMenu) {
@@ -3808,6 +3814,37 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     g_live_poke = true;
                 }
             }
+            {   // F6: the - menu on our Multiplayer tab, Players view (coop_players_open.h): the game's own Minus, R, L
+                std::lock_guard players_lock(g_players_mutex);
+                if (g_players_run.On()) {
+                    CoopPlayersOpen::Seen seen;
+                    seen.strip_open = g_page.MinusStripOpen();
+                    seen.our_tab = g_page.MinusTab();
+                    seen.tabs_ok = g_minus_ok;
+                    seen.blocked = g_page.Typing() >= 0 || CoopHookshot::ChatOpen() || g_hop_on.load();
+                    switch (g_players_run.Next(seen, NowMs())) {
+                    case CoopPlayersOpen::Step::kPressMinus: in |= kPadMinus; break;
+                    case CoopPlayersOpen::Step::kTapL: in |= kPadL; break;
+                    case CoopPlayersOpen::Step::kTapR: in |= kPadR; break;
+                    case CoopPlayersOpen::Step::kShowPlayers:
+                        SetView(View::kPlayers);
+                        LOG_INFO(Core, "coop: pause tab: F6: the Players view, after {} Minus press(es) and {} tap(s)",
+                                 g_players_run.presses(), g_players_run.taps());
+                        break;
+                    case CoopPlayersOpen::Step::kNoTabs:
+                        g_players_no_tabs = true;
+                        LOG_INFO(Core, "coop: pause tab: F6: the - menu has no tabs of ours (build the puppet pack "
+                                       "again): F6 shows the list over the picture");
+                        break;
+                    case CoopPlayersOpen::Step::kGiveUp:
+                        LOG_INFO(Core, "coop: pause tab: F6: given up (the - menu did not come, was shut, or typing) "
+                                       "after {} press(es), {} tap(s)",
+                                 g_players_run.presses(), g_players_run.taps());
+                        break;
+                    default: break;
+                    }
+                }
+            }
             if (g_hop_on.load()) {   // (the hop: the game's own L, tapped; our page's L first, then the game's)
                 const auto step = CoopPauseTab::CharactersHopNext(g_hop, g_page.MinusTab() >= 0,
                                                                     g_page.MinusStripOpen() && g_page.Typing() < 0 &&
@@ -4502,6 +4539,21 @@ void CensusFromMenuState() noexcept {
 
 bool GameMenuUp() noexcept {
     return MenuUpFrom(g_strip_state.load(), g_strip_seen_ms.load(), NowMs());
+}
+
+bool OpenPlayers() noexcept {
+    if (g_players_no_tabs.load()) return false;
+    try {
+        std::lock_guard lock(g_players_mutex);
+        if (!g_players_run.On()) {
+            const bool menu_up = GameMenuUp();
+            g_players_run.Start(NowMs(), menu_up);
+            LOG_INFO(Core, "coop: pause tab: F6: to the Players view ({})",
+                     menu_up ? "a menu is up: no Minus" : "Minus opens the - menu");
+        }
+    } catch (...) {
+    }
+    return true;
 }
 
 bool OwnMinusPageShown() noexcept {

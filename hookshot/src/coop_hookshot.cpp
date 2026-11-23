@@ -1174,7 +1174,7 @@ CoopDraw::Scene DrawScene() {
     } else if (CoopNativeUi::HeldBanner()) {
         CoopNativeUi::EndBanner();   // (the native UI went: the drawn line takes over)
     }
-    bool list = false, panel = false;
+    bool list = false, panel = false, list_press = false, always = false;
     {
         std::lock_guard lock(g_keys_mutex);
         static bool panel_env = [] {
@@ -1183,8 +1183,10 @@ CoopDraw::Scene DrawScene() {
         }();
         (void)panel_env;
         g_keys.Update(KeyDown(0x75 /* F6 */), KeyDown(0x76 /* F7 */));
-        static const bool always = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        static const bool always_env = EnvOn("LICHII_COOP_SHOW_PLAYERS");  // tests: no F6 to hold
+        always = always_env;
         list = g_keys.list || always;
+        list_press = g_keys.list_press && !always;
         panel = CoopDebugPanels::kOn && g_keys.panel;   // (release kits: no F7 panel, coop_debug_panels.h)
     }
     auto rows = CoopHook::PlayerList();
@@ -1262,7 +1264,17 @@ CoopDraw::Scene DrawScene() {
     if (!s.hud.empty()) {   // row 141: the blocks go below the game's own HUD as it is laid out now
         s.game_hud_bottom = CoopMapPage::GameHudBottom();
     }
-    if (list) {
+    // F6 (ui-audit-01112 B5): the game's own - menu, Multiplayer > Players (coop_players_open.h), when we are in a
+    // scene (never on the title or a file screen, where Minus is not the - menu); the drawn list only when the pack has
+    // no - tabs of ours (OpenPlayers false) or for tests (LICHII_COOP_SHOW_PLAYERS).
+    static std::atomic<bool> native_list{true};
+    if (list_press) {
+        const bool in_scene = !CoopTitle::Up() && std::any_of(rows.begin(), rows.end(), [](const CoopHook::PlayerRow& r) {
+            return r.self && r.scene && !r.scene->empty();
+        });
+        native_list = in_scene && CoopPauseTab::OpenPlayers();
+    }
+    if (list && (always || !native_list.load())) {
         if (game) {
             for (auto& row : rows) {
                 if (row.scene && !row.scene->empty()) {

@@ -237,15 +237,20 @@ struct PlayerListSize {
 PlayerListSize PlayerListAt(float width, float height, float top, std::size_t rows, float px, float line_k,
                             const std::function<std::vector<float>(float)>& measure);
 
-// The keys (docs/hookshot.md): F6 held shows the player list, F7 turns the
-// panel on and off. Tab and Enter, the emulator's keys, are the game's Plus
-// on Hookshot. Update turns the panel over when F7 goes down.
+// The keys (docs/hookshot.md): F6 opens the game's - menu on the Players view (list_press, once as F6 goes down;
+// coop_players_open.h), or, without our - tabs, holding it shows the drawn list (list); F7 turns the panel on and
+// off (developer builds). Tab and Enter, the emulator's keys, are the game's Plus on Hookshot. Update turns the panel
+// over when F7 goes down.
 struct Keys {
     bool list = false;
+    bool list_press = false;   // F6 went down at this Update
+    bool list_was_down = false;
     bool panel = false;
     bool panel_was_down = false;
     void Update(bool list_down, bool panel_down) {
         list = list_down;
+        list_press = list_down && !list_was_down;
+        list_was_down = list_down;
         if (panel_down && !panel_was_down) {
             panel = !panel;
         }

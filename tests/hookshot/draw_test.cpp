@@ -339,7 +339,11 @@ TEST_CASE("hookshot draw: the panel at the top left, and F7 turns it over on eac
     CHECK(k.panel);
     k.Update(true, false);
     CHECK(k.list);
+    CHECK(k.list_press);   // F6 went down: the - menu's Players view is asked once (coop_players_open.h)
     CHECK(k.panel);
+    k.Update(true, false);
+    CHECK(k.list);
+    CHECK_FALSE(k.list_press);   // still held: not again
     k.Update(false, true);
     CHECK_FALSE(k.panel);
     CHECK_FALSE(k.list);
