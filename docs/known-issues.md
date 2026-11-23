@@ -47,6 +47,7 @@ This is an early test release. Everything under "Works" was seen in our two-game
 In 0.11.12 (game rebuild on Longshot v3.1.1; protocol 16). Checked in a game by me: the essentials (start solo, host and join, Character Select off, menus only and full, a player without the mod, Classic Link Voices on, updating from 0.11.11 and 0.11.10) and the items marked seen in [the release notes](https://github.com/daurosk/oot-remake-multiplayer/releases/tag/v0.11.12). The rest is in the code and CI and **not yet seen in a game**: tell me if something is off.
 
 - **Not yet seen in a game**: the Longshot Settings menu itself, name tags on the game's balloons, the F6 player list, the guest crash fix on missing game data, the King Dodongo roll crash fix (#325), Character Select with two copies installed, a won Ganondorf rally, the Door of Time in open randomizer seeds, menus fitting in every language, the ZL/ZR page icons, Character Select pick per age.
+- **Rejoining alone after the host quits**: If the host quits and the server restarts, a player who rejoins alone comes back as player 2, not as host, and stays on the co-op save. Workaround: restart your game, then it joins as host with your own save. (Fix planned for 0.11.13.)
 - **Twinrova's attacks** (row 222): which sister's ice or fire comes when, and where a shot lands, can still differ between the games. The stuck attacks and the fusion are fixed.
 
 ## New in 0.11.11
