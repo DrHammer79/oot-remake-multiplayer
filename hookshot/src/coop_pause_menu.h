@@ -92,7 +92,8 @@ struct Request {
                       // it (CoopHook::SendChat), so a host row and the command are one path and the chat line says
                       // what changed; the server takes it from the host only.
                       kChat,
-                      kDifficulty };   // kDifficulty: `text` the host's new choice (CoopDifficulty::FormatChoice)
+                      kDifficulty,     // kDifficulty: `text` the host's new choice (CoopDifficulty::FormatChoice)
+                      kCharAges };     // kCharAges: "on", "off", "child=N" or "adult=N" (coop_char_ages.h)
     Kind kind = Kind::kHost;
     std::string text;
 };
@@ -202,6 +203,10 @@ public:
     // (Navi) New Game+ (coop_ngplus.h): the level chosen, the highest unlocked (0: Ganon not beaten yet), the
     // hearts carried (quarters). The Settings page's New Game+ row.
     void SetNgPlus(int level, int unlocked, int hearts);
+    // A Character Select pick per age (coop_char_ages.h): the Settings page's "Character by age" rows, shown only
+    // when `shown` (the mod and its NPC models are there). `characters`: the pickable ones (number, name), Link first.
+    void SetCharacterAges(bool shown, bool on, int child, int adult,
+                          std::vector<std::pair<int, std::string>> characters);
     // (Navi) The Settings page's Saves row: solo or multiplayer saves (CoopSave::MultiplayerSaves).
     void SetSaveSet(bool multiplayer);
     // The session's difficulty (CoopDifficulty::Get) and its players: the Settings page's Difficulty rows, among
@@ -281,7 +286,8 @@ private:
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
         kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
-        kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount
+        kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount,
+        kCharAges, kCharChild, kCharAdult
     };
     struct Line;   // a row, what it does and its help
     std::vector<Line> Lines() const;
@@ -328,6 +334,11 @@ private:
     std::string controller_row_, keyboard_row_;
     std::optional<std::vector<std::string>> microphones_;
     int ngplus_level_ = 0, ngplus_unlocked_ = 0, ngplus_hearts_ = 0;   // (Navi) New Game+ (SetNgPlus)
+    struct CharAges {   // SetCharacterAges
+        bool shown = false, on = false;
+        int child = -1, adult = -1;
+        std::vector<std::pair<int, std::string>> characters;
+    } char_ages_;
     bool mp_saves_ = false;   // (Navi) the Saves row (SetSaveSet)
     DifficultyState difficulty_;   // SetDifficulty
     int difficulty_players_ = 0;
