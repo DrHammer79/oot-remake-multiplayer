@@ -114,10 +114,35 @@ def delta_shared(call):
     return call[0] == "flag" and str(call[1]).endswith(".SmallKeyNum")
 
 
-def apply(client, spec, warp_timeout=60, shared=True):
+def _memory_file(log_dir, player):
+    return os.path.join(log_dir, "%s.setup-flags.json" % player.lower())
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(log_dir, player, flags):
+    """The flags a setup wrote, kept by game: the module's dump does not list them (a boss quest, a boss key), so a test
+    point could not otherwise put them back."""
+    if not flags:
+        return
+    data = _read_json(_memory_file(log_dir, player))
+    data.update(flags)
+    os.makedirs(log_dir, exist_ok=True)
+    with open(_memory_file(log_dir, player), "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+
+
+def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None):
     """Run a spec's calls in order. Stops at the first refused call and says which; returns the answers. With
     `shared` false (the second game of a pair) the counts the share carries as deltas are left out: the first game's
-    write reaches this game by itself."""
+    write reaches this game by itself. With `log_dir` and `player` the flags it wrote are kept for `save_point`."""
     done = []
     calls = plan(spec)
     if not shared:
@@ -137,6 +162,8 @@ def apply(client, spec, warp_timeout=60, shared=True):
         except Exception as e:  # the client raises its own error with the bridge's code and message
             raise RuntimeError("step %d of %d (%s) failed: %s; done so far: %s" % (len(done) + 1, len(calls), " ".join(str(x) for x in call if x is not None), e, [d["call"] for d in done])) from e
         done.append({"call": list(call), "reply": reply})
+        if call[0] == "flag" and log_dir and player:
+            _remember(log_dir, player, {call[1]: call[2]})
     return done
 
 
@@ -175,6 +202,10 @@ def load_preset(name, root=PRESETS):
 # lists can be saved (the shared dungeon, story and item flags: docs/playtest.md "dump"); anything else stays as it is.
 
 
+def _extra_file(log_dir, player):
+    return os.path.join(log_dir, "%s.points-setup.json" % player.lower())
+
+
 def _saved(log_dir, player, tag):
     path = pc.checkpoint_file(log_dir, player)
     found = None
@@ -196,6 +227,12 @@ def save_point(client, log_dir, player, tag):
     out = pc.checkpoint(client, log_dir, player, tag)
     if out.get("error") or out.get("flags") is None:
         raise RuntimeError("save_point: %s" % (out.get("error") or "the dump has no flags"))
+    extra = _read_json(_memory_file(log_dir, player))   # what the last setup wrote and the dump cannot show
+    points = _read_json(_extra_file(log_dir, player))
+    points[tag] = extra
+    with open(_extra_file(log_dir, player), "w", encoding="utf-8") as fh:
+        json.dump(points, fh)
+    out["setup_flags"] = len(extra)
     return out
 
 
@@ -210,6 +247,10 @@ def load_point(client, log_dir, player, tag, warp_timeout=60, shared=True):
     now, cur = pc.read_dump(client.dump("restore-before"))
     scene = e.get("scene")
     written = 0
+    extra = _read_json(_extra_file(log_dir, player)).get(tag) or {}
+    for name, value in extra.items():   # not in the dump, so written always, and not checked after
+        if shared or not delta_shared(("flag", name)):
+            client.flag(name, value)
     for name, value in want.items():
         if not shared and delta_shared(("flag", name)):
             continue   # the other game's write comes here by the share
@@ -233,4 +274,4 @@ def load_point(client, log_dir, player, tag, warp_timeout=60, shared=True):
     after, _ = pc.read_dump(client.dump("restore-after"))
     left = sorted(n for n, v in want.items() if (after or {}).get(n) != v and (shared or not delta_shared(("flag", n))))
     return {"tag": tag, "restored": written, "reloaded": reloaded, "exact": not left and reloaded, "left": left[:20],
-            "scene": scene}
+            "scene": scene, "setup_flags_written": len(extra)}

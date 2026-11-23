@@ -665,14 +665,16 @@ class Game:
             return c.give(args["item"])
         if name == "preset":
             return {"preset": args["name"], "steps": kit_setup.apply(c, kit_setup.load_preset(args["name"]),
-                                                                      shared=args.get("_shared", True))}
+                                                                      shared=args.get("_shared", True),
+                                                                      log_dir=self.log_dir, player=self.player)}
         if name == "save_point":
             return kit_setup.save_point(c, self.log_dir, self.player, args["tag"])
         if name == "load_point":
             return kit_setup.load_point(c, self.log_dir, self.player, args["tag"], shared=args.get("_shared", True))
         if name == "setup":
             return {"steps": kit_setup.apply(c, {k: v for k, v in args.items() if k not in ("player", "_shared")},
-                                             shared=args.get("_shared", True))}
+                                             shared=args.get("_shared", True),
+                                             log_dir=self.log_dir, player=self.player)}
         if name == "place" and any(k in args for k in ("facing", "face_x", "face_z")):
             return ph.place_facing(c, act_line(name, args), face_point(args))
         line = act_line(name, args)

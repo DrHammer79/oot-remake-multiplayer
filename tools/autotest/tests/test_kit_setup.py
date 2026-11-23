@@ -186,6 +186,18 @@ class Points(unittest.TestCase):
                             kinds.index("warp"))   # the flags go in first, then the scene loads again
             self.assertTrue(r["reloaded"])
 
+    def test_the_flags_a_setup_wrote_come_back_though_the_dump_cannot_show_them(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"0xabc": "DefeatBoss"}}, log_dir=d, player="p1")
+            ks.save_point(c, d, "p1", "t")
+            c.log.clear()
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual(r["setup_flags_written"], 1)
+            kinds = [x[0] for x in c.log]
+            self.assertLess(c.log.index(("flag", "0xabc", "DefeatBoss")), kinds.index("warp"))   # written before the room loads
+
     def test_a_same_scene_load_that_cannot_be_told_is_not_exact(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
