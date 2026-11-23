@@ -461,6 +461,7 @@ class Game:
 
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
+        kit_setup.forget_setup(log_dir, self.player)   # a new server starts with no setup to put back
         self.match_offsets = {}   # one cursor per `log` match (the plain cursor is not moved by a match)
         self.recorder = None   # a route being recorded (record_route)
         self.route_dir = kit_route.DATA_DIR

@@ -153,7 +153,8 @@ class Points(unittest.TestCase):
             self.flags, self.log, self.pos, self.moves = {"A": 1, "Stuck": 5}, [], [1.0, 2.0, 3.0], True
 
         def dump(self, tag):
-            return {"flags": dict(self.flags), "state": {"scene": "S", "pos": list(self.pos), "life": 12}, "frame": 1}
+            return {"flags": {k: v for k, v in self.flags.items() if not k.startswith("0x")},   # the game's dump has no quest hashes
+                    "state": {"scene": "S", "pos": list(self.pos), "life": 12}, "frame": 1}
 
         def state(self):
             return {"scene": "S"}
@@ -197,6 +198,35 @@ class Points(unittest.TestCase):
             self.assertEqual(r["setup_flags_written"], 1)
             kinds = [x[0] for x in c.log]
             self.assertLess(c.log.index(("flag", "0xabc", "DefeatBoss")), kinds.index("warp"))   # written before the room loads
+
+    def test_a_second_setup_replaces_the_first_ones_flags(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"0xabc": "DefeatBoss"}}, log_dir=d, player="p1")
+            ks.apply(c, {"flags": {"0xdef": "Step05"}}, log_dir=d, player="p1")
+            ks.save_point(c, d, "p1", "t")
+            c.log.clear()
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual(r["setup_flags_written"], 1)
+            self.assertNotIn(("flag", "0xabc", "DefeatBoss"), c.log)
+            self.assertIn(("flag", "0xdef", "Step05"), c.log)
+            ks.forget_setup(d, "p1")   # a new server: nothing to put back
+            ks.save_point(c, d, "p1", "u")
+            self.assertEqual(ks.load_point(c, d, "p1", "u")["setup_flags_written"], 0)
+
+    def test_a_name_the_dump_lists_ends_at_the_saved_value_not_the_setups(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            c = self.C()
+            ks.apply(c, {"flags": {"A": 5}}, log_dir=d, player="p1")   # the setup wrote A=5 ...
+            c.flags["A"] = 1
+            ks.save_point(c, d, "p1", "t")                              # ... but the save has A=1
+            c.log.clear()
+            r = ks.load_point(c, d, "p1", "t")
+            self.assertEqual(r["setup_flags_written"], 0)               # A is the dump's, not the setup's
+            self.assertNotIn(("flag", "A", 5), c.log)
+            self.assertFalse(r["setup_flags_checked"])
 
     def test_a_same_scene_load_that_cannot_be_told_is_not_exact(self):
         import tempfile
