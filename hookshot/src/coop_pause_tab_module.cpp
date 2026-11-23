@@ -1538,8 +1538,9 @@ void KeepPageShown(void* ctx, int which) {
     }
 }
 
-// The pages screen's one shown button in a focus state, by its name ("" none, or more than one): System's Longshot
-// Settings button (Pa_Button_05) is not a row RowOfButton knows.
+// The pages screen's one shown button the game's cursor is on (CursorOnState: the focus on it or coming to it; never
+// the one it is leaving), by its name ("" none, or more than one): System's Longshot Settings button (Pa_Button_05) is
+// not a row RowOfButton knows. (Player report 261: the one the focus left a moment ago counted too.)
 std::string FocusedShownName() {
     const std::uint64_t pages = g_pages_screen;
     if (pages == 0) return {};
@@ -1548,49 +1549,40 @@ std::string FocusedShownName() {
     int found = 0;
     for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
         const std::uint8_t state = CoopModScreens::FocusState(read, b);
-        if (state == 0 || (state & 0xfe) == 4 || !CoopModScreens::HitBox(read, b)) continue;
+        if (!CursorOnState(state) || !CoopModScreens::HitBox(read, b)) continue;
         name = CoopModScreens::ButtonName(read, b);
         ++found;
     }
     return found == 1 ? name : std::string();
 }
 
-// Which of System's buttons of ours the game's cursor is on or going to (0 Multiplayer, 1 Longshot Settings, -1
-// neither): any shown one in a focus state but leaving. FocusedShownName wants one alone, and while the focus moves
-// (Longshot's mouse moved it just before its click's A) two are: that A went to the game, which does not know the
-// button and then took no B, + or A (the menu stuck open, a test run 2026-11-20).
+// Which of System's buttons of ours the game's cursor is on (0 Multiplayer, 1 Longshot Settings, 2 Customize Link, -1
+// one of the game's own or none): SystemButtonOf over every shown button of the page, the game's own too, so an A on
+// Title Screen just after the cursor left Longshot Settings is Title Screen's (player report 261: it opened our old
+// Longshot Settings page). Two at the cursor while the focus moves (Longshot's mouse moved it just before its click's
+// A): the one under the mouse, else the one the focus comes to; an A on ours that went to the game left the menu stuck
+// open (a test run 2026-11-20). g_mutex.
 int OurSystemButtonFocused() {
     const std::uint64_t pages = g_pages_screen;
     if (pages == 0) return -1;
     const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
-    bool mp = false, ls = false, cl = false;
-    std::optional<CoopModScreens::Box> mp_box, ls_box, cl_box;
+    std::vector<SystemButtonSeen> seen;
     for (const std::uint64_t b : CoopModScreens::Buttons(read, pages)) {
         const std::uint8_t state = CoopModScreens::FocusState(read, b);
         const auto box = CoopModScreens::HitBox(read, b);
         if (state == 0 || (state & 0xfe) == 4 || !box) continue;
         const std::string name = CoopModScreens::ButtonName(read, b);
-        if (name == "Pa_Button_06" && g_mp_button != 0) mp = true, mp_box = box;   // (0.11.9: never; an old pack's)
-        if (name == "Pa_Button_05" && g_page.SettingsUsable()) ls = true, ls_box = box;
-        if (name == "Pa_Button_07" && g_cl_button != 0) cl = true, cl_box = box;
+        int ours = -1;
+        if (name == "Pa_Button_06" && g_mp_button != 0) ours = 0;   // (0.11.9: never; an old pack's)
+        if (name == "Pa_Button_05" && g_page.SettingsUsable()) ours = 1;
+        if (name == "Pa_Button_07" && g_cl_button != 0) ours = 2;
+        seen.push_back({ours, state, box->x0, box->y0, box->x1, box->y1});
     }
-    if (static_cast<int>(mp) + static_cast<int>(ls) + static_cast<int>(cl) > 1) {
-        // (two while the focus moves from one to another: the one under the mouse, else the focused one's name)
-        float x = 0, y = 0;
-        bool held = false;
-        if (LayoutCursor(&x, &y, &held)) {
-            const auto in = [&](const std::optional<CoopModScreens::Box>& b) {
-                return b && x >= std::min(b->x0, b->x1) && x <= std::max(b->x0, b->x1) && y >= std::min(b->y0, b->y1) &&
-                       y <= std::max(b->y0, b->y1);
-            };
-            if (ls && in(ls_box)) return 1;
-            if (cl && in(cl_box)) return 2;
-            if (mp && in(mp_box)) return 0;
-        }
-        const std::string name = FocusedShownName();
-        return name == "Pa_Button_05" ? 1 : name == "Pa_Button_07" ? 2 : mp ? 0 : cl ? 2 : 1;
-    }
-    return mp ? 0 : ls ? 1 : cl ? 2 : -1;
+    float x = 0, y = 0;
+    bool held = false;
+    std::optional<std::pair<float, float>> mouse;
+    if (LayoutCursor(&x, &y, &held)) mouse = std::make_pair(x, y);
+    return SystemButtonOf(seen, mouse);
 }
 
 // System's two buttons of ours, at each update of the pages: Multiplayer shown while our pages can be used, Longshot
