@@ -61,6 +61,7 @@ class Client:
         self.connects = 0
         self.next_id = 1
         self.last_frame = None
+        self.held = False   # the game is held by this connection now (a `resume`, or a closed connection, lets it run)
 
     def close(self):
         """Closes the connection: the bridge lets the game run again."""
@@ -71,6 +72,7 @@ class Client:
             except OSError:
                 pass
         self.sock = self.rfile = None
+        self.held = False
 
     def _open(self):
         self.sock = self._connect((self.host, self.port), self.timeout)
@@ -106,11 +108,14 @@ class Client:
                 if not held.get("ok"):
                     self.close()
                     raise BridgeError(held)
+                self.held = True
         try:
             reply = self._send(cmd, wait, args)
         except (OSError, ValueError):
             self.close()   # (the next request connects again and holds the game)
             raise
+        if reply.get("ok") and cmd in ("pause", "resume"):
+            self.held = cmd == "pause"
         if reconnected:
             reply["reconnected"] = True
         if reply.get("frame") is not None:
@@ -182,6 +187,56 @@ class Client:
         if name is not None and not TAG.match(name):
             raise ValueError("a shot name is 1 to 64 letters, digits, - and _")
         return self.request("shot", reply_timeout=60, **({"name": name} if name else {}))
+
+
+# --- the log oracle (check_logs): the game's new `coop:` lines that say something went wrong, masked ---------------------
+FLAG_WORDS = re.compile(r"\b(fail(?:ed|ure|ures|s)?|error|errors|refus(?:ed|es|al)|resync\w*)", re.IGNORECASE)
+MAX_FLAGGED = 40
+_IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?![\w.])")
+_IPV6 = re.compile(r"(?<![\w:])\[?(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}\]?(?::\d{1,5})?(?![\w:])")
+_HOME = re.compile(r"(?i)([A-Z]:[\\/]+Users[\\/]+|/Users/|/home/)[^\\/\s\"']+")
+_ADDR = re.compile(r"\b0[xX][0-9A-Fa-f]{6,}\b")
+_HEX = re.compile(r"\b[0-9A-Fa-f]{32,}\b")
+_SECRET = re.compile(r"(?i)\b(pass(?:word|phrase)?|token|secret|key|nick(?:name)?|name|user(?:name)?|host|server|room)\b(\s*[=:]\s*)(\"[^\"]*\"|\S+)")
+_QUOTED = re.compile(r'"[^"\n]*"')
+_TIME = re.compile(r"^\[hos [^\]]*\] ")
+_NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")   # live.NOISE: the emulator's own chatter
+
+
+def mask_text(text, names=()):
+    """A log line with nothing a person could be found by: IP addresses (v4 and v6, with a port), the user name in a
+    home path, game memory addresses, long hex strings (keys), the value after `name`, `nickname`, `password`, `token`,
+    `host`, `server` and `room`, every double-quoted text, and each of `names` wherever it stands (whole words, any
+    case). Best effort on top of the log's own wording: docs/playtest.md lists what it does not catch."""
+    t = _HOME.sub(lambda m: m.group(1) + "<user>", text)
+    t = _IPV6.sub("<ip>", t)
+    t = _IPV4.sub("<ip>", t)
+    t = _ADDR.sub("<addr>", t)
+    t = _HEX.sub("<hex>", t)
+    t = _SECRET.sub(lambda m: m.group(1) + m.group(2) + "<hidden>", t)
+    t = _QUOTED.sub('"<text>"', t)
+    for n in sorted({str(n).strip() for n in names if str(n).strip()}, key=len, reverse=True):
+        t = re.sub(r"(?<!\w)" + re.escape(n) + r"(?!\w)", "<name>", t, flags=re.IGNORECASE)
+    return t
+
+
+def read_log_since(path, offset):
+    """(the `coop:` lines written after byte `offset`, the new offset). A missing file: ([], offset)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            data = f.read()
+            end = f.tell()
+    except OSError:
+        return [], offset
+    return [_TIME.sub("", ln) for ln in data.decode("utf-8", "replace").splitlines() if "coop:" in ln and not _NOISE.search(ln)], end
+
+
+def flagged_lines(lines, names=()):
+    """The lines that say failed, error, refused or resync, masked, the newest MAX_FLAGGED, with how many were left out."""
+    hit = [ln for ln in lines if FLAG_WORDS.search(ln)]
+    left = max(0, len(hit) - MAX_FLAGGED)
+    return {"flagged": len(hit), "lines": [mask_text(ln, names) for ln in hit[-MAX_FLAGGED:]], "left_out": left}
 
 
 WORLD_TAG = "world_query"   # the tag of the dump `Client.world` reads: one file, overwritten each time

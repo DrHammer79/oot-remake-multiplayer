@@ -213,6 +213,19 @@ PLAYER_TOOLS = [
      "%d at most; `match` keeps only lines containing that text. Needs --session (games from live.py start: p1 = A, "
      "p2 = B). No frame passes." % live.MAX_LINES,
      "inputSchema": {"type": "object", "properties": {"match": {"type": "string"}}}},
+    {"name": "check_logs", "description": "The oracle for 'did anything go wrong': this game's new `coop:` log lines "
+     "that say failed, error, refused or resync, masked (IP addresses, user names in paths, memory addresses, keys, "
+     "names, quoted text are replaced). `since` is `last_check` (the default: since the last check_logs, or the "
+     "boot) or `boot`. `names` are extra words to hide. verdict: clean, flagged, or no log. A clean log is not proof "
+     "that nothing is wrong: it only says the game printed no such line. Needs --session. No frame passes.",
+     "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "enum": ["last_check", "boot"]},
+                                                       "names": {"type": "array", "items": {"type": "string"},
+                                                                 "maxItems": 20}}}},
+    {"name": "session_status", "description": "Is the run still sound: this game's bridge (connected, held, last "
+     "frame) and, with --session, the session (running or why it ended, each game's process alive, minutes left of "
+     "the maximum and of the idle limit). Answers also after the session ended. It does not touch the game and "
+     "does not count as a tester command for the idle watchdog. No frame passes.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "screenshot", "description": "A PNG of this game's screen (the path: open it to see). Use sparingly; "
      "get_state is cheaper. Anything visible is proven only by a picture. A held game runs 1 frame for it.",
      "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}},
@@ -226,6 +239,8 @@ class Game:
     def __init__(self, player, client, log_dir, session=None):
         self.player, self.client, self.log_dir, self.session = player.lower(), client, log_dir, session
         self.offsets = None   # this server's own place in the game's log (two servers never write one session file)
+        self.check_offset = None   # where check_logs read to (None: from the boot)
+        self.alive = live.lanes.hs.pid_alive   # (a test gives its own)
 
     def log_lines(self, match=None):
         """The game's new co-op log lines since the last call (live.py's session log: p1 = A, p2 = B)."""
@@ -243,7 +258,58 @@ class Game:
             lines = [ln for ln in lines if match in ln]
         return {"frame": self.client.last_frame, "lines": lines}
 
+    def check_logs(self, since="last_check", names=()):
+        """The new flagged `coop:` lines of this game's log, masked (its own offsets: `log` and check_logs never take
+        lines from each other)."""
+        if not self.session:
+            raise ValueError("check_logs needs --session (games from live.py start); read the game's own log otherwise")
+        if since not in ("last_check", "boot"):
+            raise ValueError("since: last_check or boot")
+        if not isinstance(names, (list, tuple)) or len(names) > 20 or not all(isinstance(n, str) for n in names):
+            raise ValueError("names: up to 20 words")
+        i = pc.player_index(self.player) - 1
+        if i >= len(live.TAGS):
+            raise ValueError("live.py starts games A and B only (p1, p2): %s has no session log" % self.player)
+        x = live.TAGS[i]
+        s = live.load(self.session)
+        path = (s.get("games") or {}).get(x, {}).get("log")
+        boot = (s.get("offsets") or {}).get(x, 0)
+        start = boot if since == "boot" or self.check_offset is None else self.check_offset
+        if not path or not os.path.isfile(path):
+            return {"frame": self.client.last_frame, "verdict": "no log", "flagged": 0, "lines": [], "left_out": 0,
+                    "why": "this game's log file is not there (the session has no log path for %s)" % x}
+        lines, self.check_offset = pc.read_log_since(path, start)
+        out = pc.flagged_lines(lines, names)
+        out.update(frame=self.client.last_frame, read=len(lines), verdict="flagged" if out["flagged"] else "clean")
+        return out
+
+    def session_status(self):
+        """This game's bridge, and the session's state from its files (no request to the game: it stays as it is)."""
+        c = self.client
+        out = {"player": self.player, "bridge": {"connected": c.sock is not None, "held": c.held,
+                                                 "last_frame": c.last_frame, "connects": c.connects}}
+        if not self.session:
+            out["session"] = None
+            out["why"] = "no --session: only this game's bridge is known"
+            return out
+        d = self.session
+        s = live.load(d)
+        why = live.ended(d)
+        pids = live.game_pids(d)[0]
+        now = time.time()
+        sess = {"running": not why, "ended": why or None,
+                "games": {x: {"pid": p, "alive": bool(self.alive(p))} for x, p in sorted(pids.items())}}
+        if s.get("max_s"):
+            sess["max_minutes_left"] = max(0, round((s.get("started", now) + s["max_s"] - now) / 60, 1))
+        if s.get("booted") and s.get("idle_s"):
+            sess["idle_minutes_left"] = max(0, round((live.activity(d, s) + s["idle_s"] - now) / 60, 1))
+        sess["booted"] = bool(s.get("booted"))
+        out["session"] = sess
+        return out
+
     def call(self, name, args):
+        if name == "session_status":
+            return self.session_status()   # (also for an ended session; never counts as a tester command)
         if self.session:
             live.open_session(self.session)   # (an ended session's games are gone: say so, do not drive them)
             live.touch(self.session)          # the session's watchdog counts this as a tester command
@@ -309,6 +375,8 @@ class Game:
             return {"result": desync_check.RESULTS[code], "report": buf.getvalue()}
         if name == "log":
             return self.log_lines(args.get("match"))
+        if name == "check_logs":
+            return self.check_logs(args.get("since", "last_check"), args.get("names") or ())
         if name == "screenshot":
             label = args.get("name") or "shot"
             if not pc.TAG.match(label):

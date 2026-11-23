@@ -261,7 +261,7 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "get_world", "get_actor", "walk_to", "press", "step", "warp", "flag", "give", "kill", "hit", "hurt", "place", "wear",
                           "dress", "assign", "chat", "menu", "checkpoint",
-                          "desync_check", "pause", "resume", "log", "screenshot"])
+                          "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
 
@@ -500,6 +500,130 @@ class PlayerServer(unittest.TestCase):
             self.tools["p1"].call("log", {})                             # no --session
         with self.assertRaises(ValueError):
             mcp_playtest.Game("p3", self.tools["p1"].client, self.tmp.name, session=d).log_lines()
+
+    CANNED = (
+        "[hos 00:00:01] vk: noise coop: ignore\n"
+        "[hos 00:00:02] coop: connected to 203.0.113.7:5000 as \"Zelda99\" (name=Zelda99)\n"
+        "[hos 00:00:03] coop: fine line, nothing wrong\n"
+        "[hos 00:00:04] coop: save: refused to write the host's save into C:\\Users\\zachb\\Downloads\\x\n"
+        "[hos 00:00:05] coop: look: the look worker's pass failed (no pose): tried again\n"
+        "plain error line without the module prefix\n"
+        "[hos 00:00:06] coop: peer [2001:db8::1]:5000 sent resync for 0x80123456 password=hunter2\n")
+
+    def make_session(self, text=None):
+        d = os.path.join(self.tmp.name, "session")
+        os.makedirs(d, exist_ok=True)
+        logs = {x: os.path.join(d, "game-out-%s.txt" % x) for x in live.TAGS}
+        with open(logs["A"], "w", encoding="utf-8", newline="") as f:
+            f.write("old coop: failed before the boot\n")
+        boot = os.path.getsize(logs["A"])
+        live.save(d, {"started": time.time(), "booted": True, "max_s": 1800, "idle_s": 600,
+                      "offsets": {"A": boot, "B": 0}, "games": {x: {"log": logs[x]} for x in live.TAGS}})
+        if text is not None:
+            with open(logs["A"], "a", encoding="utf-8", newline="") as f:
+                f.write(text)
+        return d, logs
+
+    def test_check_logs_flags_the_four_words_and_masks_everything(self):
+        d, _ = self.make_session(self.CANNED)
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        out = g.call("check_logs", {"names": ["Zelda99"]})
+        self.assertEqual((out["verdict"], out["flagged"], out["read"]), ("flagged", 3, 5))   # 5 coop lines, 3 flagged
+        text = "\n".join(out["lines"])
+        for secret in ("203.0.113.7", "5000", "Zelda99", "zachb", "2001:db8", "0x80123456", "hunter2", "[hos"):
+            self.assertNotIn(secret, text, secret)
+        self.assertIn("<user>", text)
+        self.assertIn("<ip>", text)
+        self.assertIn("refused", text)
+        self.assertIn("resync", text)
+        self.assertNotIn("plain error line", text)                 # not a `coop:` line
+        # the next call has nothing new, and "boot" reads it all again
+        again = g.call("check_logs", {})
+        self.assertEqual((again["verdict"], again["lines"]), ("clean", []))
+        self.assertEqual(g.call("check_logs", {"since": "boot"})["flagged"], 3)
+        self.assertNotIn("before the boot", "\n".join(g.call("check_logs", {"since": "boot"})["lines"]))
+
+    def test_check_logs_and_log_never_take_lines_from_each_other(self):
+        d, logs = self.make_session("[x] coop: one failed thing\n")
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        self.assertEqual(len(g.call("log", {})["lines"]), 1)
+        self.assertEqual(g.call("check_logs", {})["flagged"], 1)
+        with open(logs["A"], "a", encoding="utf-8", newline="") as f:
+            f.write("[x] coop: another error\n")
+        self.assertEqual(g.call("check_logs", {})["flagged"], 1)
+        self.assertEqual(len(g.call("log", {})["lines"]), 1)
+
+    def test_check_logs_is_clean_with_no_flagged_line_and_says_when_there_is_no_log(self):
+        d, logs = self.make_session("[x] coop: all is well\n")
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        self.assertEqual(g.call("check_logs", {})["verdict"], "clean")
+        out = mcp_playtest.Game("p2", self.tools["p2"].client, self.tmp.name, session=d).call("check_logs", {})
+        self.assertEqual((out["verdict"], out["flagged"]), ("no log", 0))   # B's file was never written
+        with self.assertRaises(ValueError):
+            self.tools["p1"].call("check_logs", {})                            # no --session
+        for bad in ({"since": "yesterday"}, {"names": "Zelda"}, {"names": ["a"] * 21}, {"names": [1]}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                g.call("check_logs", bad)
+
+    def test_check_logs_keeps_the_newest_forty_and_counts_the_rest(self):
+        d, _ = self.make_session("".join("[x] coop: failed %d\n" % i for i in range(55)))
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        out = g.call("check_logs", {})
+        self.assertEqual((out["flagged"], len(out["lines"]), out["left_out"]), (55, 40, 15))
+        self.assertIn("failed 54", out["lines"][-1])
+
+    def test_session_status_without_a_session_and_with_one(self):
+        out = self.call("p1", "session_status")
+        self.assertIsNone(out["session"])
+        self.assertTrue(out["bridge"]["connected"] is False and out["bridge"]["held"] is False)   # nothing asked yet
+        self.call("p1", "get_state")
+        out = self.call("p1", "session_status")
+        self.assertEqual((out["bridge"]["connected"], out["bridge"]["held"]), (True, True))
+        self.assertEqual(out["bridge"]["last_frame"], self.games["p1"].frame)
+        self.call("p1", "resume")
+        self.assertFalse(self.call("p1", "session_status")["bridge"]["held"])
+        self.call("p1", "pause")
+        self.assertTrue(self.call("p1", "session_status")["bridge"]["held"])
+
+        d, _ = self.make_session()
+        live.write_json(os.path.join(d, "pids.json"), {"games": {"A": 111, "B": 222}, "server": 333})
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        g.alive = lambda pid: pid != 222
+        sent = len(self.games["p1"].log)
+        s = g.call("session_status", {})["session"]
+        self.assertEqual((s["running"], s["ended"]), (True, None))
+        self.assertEqual(s["games"], {"A": {"pid": 111, "alive": True}, "B": {"pid": 222, "alive": False}})
+        self.assertTrue(29 <= s["max_minutes_left"] <= 30)
+        self.assertTrue(0 < s["idle_minutes_left"] <= 10)
+        self.assertEqual(len(self.games["p1"].log), sent)                   # it asked the game nothing
+
+    def test_session_status_answers_after_the_session_ended_and_is_no_tester_command(self):
+        d, _ = self.make_session()
+        g = mcp_playtest.Game("p1", self.tools["p1"].client, self.tmp.name, session=d)
+        live.touch(d)
+        os.utime(live.active_file(d), (1000.0, 1000.0))
+        live.write_json(live.watchdog_file(d), {"ended": "game B ended"})
+        s = g.call("session_status", {})["session"]
+        self.assertEqual((s["running"], s["ended"]), (False, "game B ended"))
+        self.assertEqual(os.path.getmtime(live.active_file(d)), 1000.0)   # the idle clock was not restarted
+        with self.assertRaises(SystemExit):
+            g.call("get_state", {})                                          # the games' tools still refuse
+
+    def test_the_mask_keeps_ordinary_text_and_hides_the_rest(self):
+        keep = ["coop: look: the puppets' tunics are green now", "coop: version 0.11.10 build 1.2.3", "coop: frame 12345"]
+        for line in keep:
+            self.assertEqual(pc.mask_text(line), line)
+        cases = [("to 10.0.0.5:7777 ok", "to <ip> ok"), ("from 192.168.1.20 ok", "from <ip> ok"),
+                 ("[::1]:5000 up", "<ip> up"), ("fe80::1ff:fe23:4567:890a lost", "<ip> lost"),
+                 ("C:\\Users\\alex\\Downloads\\g", "C:\\Users\\<user>\\Downloads\\g"),
+                 ("C:/Users/alex/Downloads/g", "C:/Users/<user>/Downloads/g"),
+                 ("/home/alex/kit", "/home/<user>/kit"), ("/Users/alex/kit", "/Users/<user>/kit"),
+                 ("at 0x8000A1B2", "at <addr>"), ("key " + "ab12" * 8, "key <hex>"),
+                 ("nickname=Bob ok", "nickname=<hidden> ok"), ("password: s3cret!", "password: <hidden>"),
+                 ('said "hello Bob"', 'said "<text>"')]
+        for raw, want in cases:
+            self.assertEqual(pc.mask_text(raw), want, raw)
+        self.assertEqual(pc.mask_text("Bob and bobby and BOB.", names=["bob"]), "<name> and bobby and <name>.")
 
     def test_main_needs_session_or_player(self):
         err = sys.stderr
