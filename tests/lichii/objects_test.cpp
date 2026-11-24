@@ -5242,6 +5242,17 @@ TEST_CASE("objects: a plain enemy's copy stunned beside another player's shot co
     CHECK(plays.empty());
     c.animation = proto::Animation{"Stun_Loop", 0.0f, 1.0f};
     CHECK(All<proto::Damage>(Tick(copy, 3500 * kMs, {c}, 2)).empty());
+
+    // Our own nut hit it (its game's hit record names our shot, issue 133) beside their shot copy: ours, so it asks.
+    c.animation = proto::Animation{"Attack", 10.0f, 1.0f};
+    Tick(copy, 6000 * kMs, {c}, 2);
+    c.hit_ours = true;
+    Tick(copy, 6050 * kMs, {c}, 2);
+    c.hit_ours.reset();
+    c.animation = proto::Animation{"Stun_Start", 0.0f, 1.0f};
+    auto damage = All<proto::Damage>(Tick(copy, 6100 * kMs, {c}, 2));
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].amount == 0);
 }
 
 TEST_CASE("objects: a boss copy's own stun is told every walk while it plays, never the owner's (row 169)") {

@@ -2414,7 +2414,11 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                     o.react_at = now_us;
                     o.react_over = owners;
                     // Not when another player's shot copy hit there: that stun is the thrower's (its game asks).
-                    const bool theirs = shot_hit_near_ && shot_hit_near_(s.position, now_us);
+                    // Unless its game's own hit record says the hit was ours (issue 133): then the stun is ours.
+                    const bool ours = (s.hit_ours && *s.hit_ours) ||
+                                      (o.ours_hit_at != 0 && now_us >= o.ours_hit_at &&
+                                       now_us - o.ours_hit_at <= kOurHitKeepUs);
+                    const bool theirs = !ours && shot_hit_near_ && shot_hit_near_(s.position, now_us);
                     if (!theirs && (o.stun_at == 0 || now_us - o.stun_at >= kStunEveryUs)) {
                         o.stun_due = true;
                     }
