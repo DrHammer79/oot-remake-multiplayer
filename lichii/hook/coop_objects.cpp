@@ -479,6 +479,71 @@ bool EnvFlag(const char* name) {
 }
 
 // The variable as a hex number (0 when unset or not one).
+u64 EnvHex(const char* name);
+
+// Skulltula-roll probe (LICHII_COOP_ROLL_PROBE=1): for the ceiling Skulltula while it turns
+// (an animation with Roll or Rotate in its name), its 3x3 and frame every 100 ms, ours or a copy's
+// (with the owner's 3x3 beside it), and in the owner's game the actor's float words that changed
+// since the last look (+0 .. +0x800), to find the word its AI turns by. 2000 lines at most.
+bool RollTurning(std::string_view anim) {
+    return anim.find("Roll") != std::string_view::npos || anim.find("Rotate") != std::string_view::npos;
+}
+
+// LICHII_COOP_ROLL_KEEP=1 (the guess under test): a copy's turn is set on its frame on every
+// owner's sample, never left to its own playback.
+bool RollKeep() {
+    static const bool on = EnvFlag("LICHII_COOP_ROLL_KEEP");
+    return on;
+}
+
+template <typename R, typename S>
+void RollProbe(R& r, u64 a, const S& s, u64 now_ms, const std::optional<Mat3>& owner) {
+    static const bool on = EnvFlag("LICHII_COOP_ROLL_PROBE");
+    if (!on || s.name != "Enemy_Skulltula" || !s.animation || !RollTurning(s.animation->name)) {
+        return;
+    }
+    static std::unordered_map<u64, u64> last_at;
+    static std::unordered_map<u64, std::vector<float>> last_words;
+    static int lines = 0;
+    auto& at = last_at[a];
+    if (lines >= 2000 || (at != 0 && now_ms - at < 100)) {
+        return;
+    }
+    at = now_ms;
+    ++lines;
+    const auto fmt = [](const std::optional<std::array<float, 9>>& m) {
+        if (!m) return std::string("-");
+        const float yaw = std::atan2((*m)[2], (*m)[8]) * 57.29578f;
+        return fmt::format("yaw {:.1f} [{:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f}]", yaw, (*m)[0],
+                           (*m)[1], (*m)[2], (*m)[3], (*m)[4], (*m)[5], (*m)[6], (*m)[7], (*m)[8]);
+    };
+    LOG_INFO(Core, "coop: roll probe: {:#x} {} '{}' frame {:.1f} rate {:.2f} at {} ms: ours {} owner {}", a,
+             owner ? "copy" : "own", s.animation->name, s.animation->frame, s.animation->rate, now_ms,
+             fmt(s.rotation), owner ? fmt(std::optional<std::array<float, 9>>(*owner)) : std::string("-"));
+    if (owner) {
+        return;  // the words: in the owner's game only
+    }
+    std::vector<float> words(0x200, 0.0f);
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        words[i] = r.template Get<float>(a + 4 * i).value_or(0.0f);
+    }
+    auto& before = last_words[a];
+    if (before.size() == words.size()) {
+        std::string changed;
+        int n = 0;
+        for (std::size_t i = 0; i < words.size() && n < 40; ++i) {
+            const float v = words[i], w = before[i];
+            if (std::isfinite(v) && std::isfinite(w) && std::fabs(v) < 1e4f && std::fabs(v - w) > 0.01f) {
+                changed += fmt::format(" +{:#x}:{:.3f}>{:.3f}", 4 * i, w, v);
+                ++n;
+            }
+        }
+        LOG_INFO(Core, "coop: roll probe: {:#x} words changed:{}", a, changed.empty() ? " none" : changed);
+    }
+    before = std::move(words);
+}
+
+// The variable as a hex number (0 when unset or not one).
 u64 EnvHex(const char* name) {
 #ifdef _WIN32
     char* value = nullptr;
@@ -1050,7 +1115,7 @@ public:
                                        "({:.1f} frames off): left to its own playback",
                                  p.address, p.name, gap);
                     }
-                    if (verdict != CoopNpcAnim::Resync::Verdict::set) {
+                    if (verdict != CoopNpcAnim::Resync::Verdict::set && !(RollKeep() && RollTurning(p.name))) {
                         continue;
                     }
                     ++npc_framed_;
@@ -4679,6 +4744,9 @@ private:
                 s.animation = PlaysByFrame(s.name)
                                   ? AnimationAt(r, a, 0, false, CoopNpcAnim::kSlotPlayFrame)
                                   : Animation(r, a);
+                if (s.name == "Enemy_Skulltula") {
+                    RollProbe(r, a, s, now_ms, sync_.OwnerRotation(a));
+                }
                 // Its life, read between two reads of its hit id (NewHits).
                 const auto life_value = LifeValue(r, a);
                 std::optional<s32> life_read;

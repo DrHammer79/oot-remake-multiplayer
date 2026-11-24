@@ -1230,6 +1230,8 @@ public:
     static constexpr std::uint64_t kHeldSayUs = 10'000'000;
     // Present thread, every frame: where each copy we do not own should be.
     void Poses(std::uint64_t now_us, std::vector<PoseWrite>& out) const;
+    // Roll probe (skulltula-roll): the owner's latest rotation for our copy at this address (none: not a copy).
+    std::optional<Mat3> OwnerRotation(std::uint64_t address) const;
 
     // Present thread: for each copy we do not own, the owner's latest
     // animation and its frame (the mover compares it with the copy's own).

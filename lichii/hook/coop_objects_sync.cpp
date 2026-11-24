@@ -4693,6 +4693,18 @@ void Sync::Lower(Object& o, std::int32_t life, std::uint64_t now_us,
     o.hurt_until = now_us + kHurtWaitUs;
 }
 
+std::optional<Mat3> Sync::OwnerRotation(std::uint64_t address) const {
+    const auto it = objects_.find(address);
+    if (it == objects_.end() || it->second.received.empty() || !it->second.received.back().rotation) {
+        return std::nullopt;
+    }
+    const auto owner = owners_.find(it->second.id);
+    if (owner == owners_.end() || owner->second.player == 0 || owner->second.player == self_) {
+        return std::nullopt;
+    }
+    return MatOf(*it->second.received.back().rotation);
+}
+
 void Sync::Poses(std::uint64_t now_us, std::vector<PoseWrite>& out) const {
     for (const auto& [address, o] : objects_) {
         if (o.received.empty() || now_us < o.received.back().time ||
