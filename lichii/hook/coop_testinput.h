@@ -223,16 +223,27 @@ inline bool Aimable(std::string_view name) {
 
 // `aim`: the aim that waits for our next shot. The walk offers it every listed arrow or seed of ours, not only one it
 // sees for the first time: the slingshot makes its next seed right after a shot, so that seed is already listed when
-// the aim is armed (lane run). The first one offered is taken; AimStep then watches it until it is let go.
+// the aim is armed (lane run). The first one offered within kAimHandM of our Link is taken (a shot still flying or
+// lying from before is farther); AimStep then watches it until it is let go. With Link's place unknown, the first.
+inline constexpr float kAimHandM = 2.0f;
 struct AimWait {
     std::array<float, 3> target{};
     std::uint64_t until_ms = 0;
     std::uint64_t arrow = 0;       // our nocked arrow or seed (0: none yet)
     std::array<float, 3> last{};   // its place the frame before
 
-    bool Offer(std::string_view name, std::uint64_t actor, const std::array<float, 3>& at) {
+    bool Offer(std::string_view name, std::uint64_t actor, const std::array<float, 3>& at,
+               const std::array<float, 3>* link = nullptr) {
         if (arrow != 0 || actor == 0 || !Aimable(name)) {
             return false;
+        }
+        if (link) {
+            const float dx = at[0] - (*link)[0];
+            const float dy = at[1] - (*link)[1];
+            const float dz = at[2] - (*link)[2];
+            if (!(dx * dx + dy * dy + dz * dz <= kAimHandM * kAimHandM)) {
+                return false;
+            }
         }
         arrow = actor;
         last = at;

@@ -36,6 +36,7 @@ JUMP_STEP_M = 0.1         # a run look that brings Link less than this nearer ma
 FALL_M = 1.0              # landing this far below `land_y`: fell
 RESPAWN_M = 3.0           # Link moved this far between two looks without running there: put back (a pit, a void)
 ON_GROUND_M = 0.02        # two looks with the height this steady: on the ground
+AT_LAND_M = 0.15          # jump: this near `land_y` (or one steady look) and at the point: down, the stick lets go
 DRAW_FRAMES = 60          # ZR held to take the item out and draw (docs/testing.md, the slingshot scenario: 60, then 30)
 HOLD_FRAMES = 30
 RELEASE_FRAMES = 2
@@ -424,8 +425,8 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
     not more than FALL_M below `land_y`), `fell` (on the ground more than FALL_M below `land_y`), `respawned` (Link was put back: a pit or a void; the life may be lower), `stuck` (no nearer for
     `stuck_looks` looks: a wall, or the edge does not jump), `stopped` (the bridge refused the move: no camera, an
     event; no frame ran), or a stop (scene changed, event, timed out). On the ground means two looks in a row with the
-    height steady (ON_GROUND_M), so the top of the arc is not taken for a landing; within `tolerance` of the point the
-    stick lets go, so Link stops there and the landing is called two looks (2 x `chunk` frames) after he comes down. The trace
+    height steady (ON_GROUND_M), so the top of the arc is not taken for a landing; within `tolerance` of the point and
+    down (one steady look, or within AT_LAND_M of `land_y`) the stick lets go, so Link stops there and the landing is called two looks (2 x `chunk` frames) after he comes down. The trace
     has [frames, x, y, z] at each look."""
     st = _st(client)
     out = _base(st)
@@ -473,9 +474,11 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
             return _out(out, "timed out", "%.2f m from the point" % dist, st)
         last, prev_y = pos, pos[1]
         n = min(chunk, max_frames - out["frames"])
-        # At the point: let go of the stick, or Link runs on past it before the second steady look (in the air he
-        # keeps his speed; only the take-off needs the full stick).
-        hold = 0.0 if dist <= tolerance else 1.0
+        # At the point and down (one steady look, or at the height of `land_y`): let go of the stick, or Link runs on
+        # past it before the second steady look. In the air the stick stays full: a point just past a gap's far edge
+        # is within tolerance while he is still over the gap, and the game may not keep his speed with the stick at 0.
+        down = ground >= 1 or (land_y is not None and abs(pos[1] - land_y) <= AT_LAND_M)
+        hold = 0.0 if dist <= tolerance and down else 1.0
         why = _refused(client.move(pc.yaw_to(pos, x, z) % 360, hold, n, check=False))
         if why:
             return _out(out, "stopped", "move refused: " + why, st)

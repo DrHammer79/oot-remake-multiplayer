@@ -632,10 +632,11 @@ public:
         return aim_open_.load(std::memory_order_relaxed);
     }
     // The walks: each listed NormalArrow or Shootable_DekuSeed (ours: another player's is a CoopShot_ stand-in), new
-    // or already listed, while an aim waits for one (CoopTestInput::AimWait).
-    void AimArrow(std::string_view name, u64 actor, const std::array<float, 3>& at) {
+    // or already listed, while an aim waits for one (CoopTestInput::AimWait: the one in our Link's hands, `link`).
+    void AimArrow(std::string_view name, u64 actor, const std::array<float, 3>& at,
+                  const std::optional<std::array<float, 3>>& link) {
         std::lock_guard lock(mutex_);
-        if (aim_ && aim_->Offer(name, actor, at)) {
+        if (aim_ && aim_->Offer(name, actor, at, link ? &*link : nullptr)) {
             aim_open_.store(false, std::memory_order_relaxed);
             LOG_INFO(Core, "coop: test aim: our {} {:#x} nocked at {:.2f} {:.2f} {:.2f}", name, actor, at[0], at[1],
                      at[2]);
@@ -3551,7 +3552,9 @@ private:
             }
             if (TheMover().AimOpen() && CoopTestInput::Aimable(known.first)) {  // test only (`aim`)
                 if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
-                    TheMover().AimArrow(known.first, a, *at);
+                    const u64 link = TheLinkActor().load();
+                    TheMover().AimArrow(known.first, a, *at,
+                                        link ? r.Get<std::array<float, 3>>(link + kActorPosition) : std::nullopt);
                 }
             }
             if (known.first == "Player_Child" || known.first == "Player_Adult") {
@@ -4161,7 +4164,9 @@ private:
             }
             if (TheMover().AimOpen() && CoopTestInput::Aimable(known.first)) {  // test only (`aim`): ours, new or not
                 if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
-                    TheMover().AimArrow(known.first, a, *at);
+                    const u64 link = TheLinkActor().load();
+                    TheMover().AimArrow(known.first, a, *at,
+                                        link ? r.Get<std::array<float, 3>>(link + kActorPosition) : std::nullopt);
                 }
             }
             if (const auto extra = extras_.HashOf(a, known.first)) {

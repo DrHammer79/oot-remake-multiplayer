@@ -131,6 +131,8 @@ class Sim:
 
     def _walk(self, yaw, strength):
         if getattr(self, "gap_run", 0.0) > 0.0:   # in the air: the take-off speed and way, whatever the stick
+            if strength < 1.0 and getattr(self, "air_needs_stick", False):   # or a stick let go falls short
+                self.gap_run = self.jump_m
             yaw, strength = self.air_yaw, 1.0
         self.air_yaw = yaw
         step = 0.15 * strength
@@ -394,6 +396,15 @@ class Jump(unittest.TestCase):
         self.assertLessEqual(abs(r["pos"][2] - 6.5), 0.6, r)
         down = next(f for f, _x, y, _z in r["trace"] if y == 0.0)
         self.assertLessEqual(r["frames"] - down, 8, r)   # the landing is called within 8 frames of the touch down
+
+    def test_keeps_the_stick_over_the_gap_for_a_point_near_the_far_edge(self):
+        # Review: the point 0.3 m past the far edge is within tolerance while Link is still over the gap. A game that
+        # does not keep his speed with the stick at 0 would drop him in; the stick lets go only on the ground.
+        g = Sim(pos=(0.0, 7.0, 0.0), ground=lambda x, z: 7.0 if z < 5.0 else (None if z < 6.2 else 0.0))
+        g.air_needs_stick = True
+        r = km.jump(g, 0.0, 6.5, land_y=0.0)
+        self.assertEqual(r["result"], "landed", r)
+        self.assertLessEqual(abs(r["pos"][2] - 6.5), 0.6, r)
 
     def test_stuck_at_a_wall(self):
         g = Sim()

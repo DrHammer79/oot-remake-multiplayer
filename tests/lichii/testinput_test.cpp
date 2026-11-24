@@ -799,6 +799,19 @@ TEST_CASE("testinput: aim steers our arrow and our slingshot seed, nothing else"
     CHECK_FALSE(Aimable("Obj_DekuSeed"));  // a pickup
 }
 
+TEST_CASE("testinput: aim skips a shot from before, far from Link, for the one in his hands (review)") {
+    using CoopTestInput::AimWait;
+    AimWait aim;
+    const std::array<float, 3> link{-2.5f, 100.4f, -7.0f};
+    CHECK_FALSE(aim.Offer("Shootable_DekuSeed", 0x40, {-12.0f, 103.0f, -20.0f}, &link));   // still flying
+    CHECK_FALSE(aim.Offer("NormalArrow", 0x50, {-30.0f, 100.4f, 4.0f}, &link));            // lying where it fell
+    CHECK(aim.arrow == 0);
+    CHECK(aim.Offer("Shootable_DekuSeed", 0x60, {-2.8f, 100.97f, -6.93f}, &link));
+    CHECK(aim.arrow == 0x60);
+    AimWait unknown;   // Link's place not read: the first one, as before
+    CHECK(unknown.Offer("Shootable_DekuSeed", 0x40, {-12.0f, 103.0f, -20.0f}));
+}
+
 TEST_CASE("testinput: aim takes our seed that was listed before it was armed (lane run)") {
     // The slingshot makes its next seed right after a shot, so the walk offers a seed it already knew.
     AimWait aim;
