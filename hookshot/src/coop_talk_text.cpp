@@ -80,8 +80,9 @@ void Log::Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const
 void Log::NoteText(std::uint64_t pane, std::uint64_t text, std::uint64_t length64, std::uint64_t frame,
                    const ReadFn& read, std::uint32_t wrap) {
     if (pane == 0) return;
-    // (wrap 26 takes a 16-bit length, the others a 32-bit one: the game's own masks)
-    const auto length = static_cast<std::uint32_t>(wrap == 26 ? (length64 & 0xffff) : (length64 & 0xffffffffu));
+    // (the letter-animated setter takes a 16-bit length, the others a 32-bit one: the game's own masks)
+    const auto length = static_cast<std::uint32_t>(wrap == HOS_COOP_WRAP_PANE_BODY ? (length64 & 0xffff)
+                                                                                   : (length64 & 0xffffffffu));
     Entry e;
     e.frame = frame;
     e.length = length;

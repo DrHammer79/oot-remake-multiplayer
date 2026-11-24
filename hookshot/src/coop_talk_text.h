@@ -21,6 +21,9 @@
 // (tests/hookshot/talk_text_test.cpp) feed a fake memory.
 #pragma once
 
+#include "hos_coop_pane_body.h"
+#include "hos_coop_pane_text.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -68,14 +71,17 @@ struct Entry {
     std::string text;          // the bytes as the game gave them (its trailing 0s dropped)
     std::uint32_t length = 0;  // the length the game gave
     bool cut = false;          // longer than kMaxBytes: `text` is its start
-    std::uint32_t wrap = 25;   // the wrap that gave it (25 set-message, 26 letter-animated, 27 by alias)
+    // The wrap that gave it: HOS_COOP_WRAP_PANE_TEXT (set-message), _PANE_BODY (letter-animated) or
+    // _PANE_ALIAS (by alias).
+    std::uint32_t wrap = HOS_COOP_WRAP_PANE_TEXT;
 };
 
 class Log {
    public:
     // The wrap's phase 0: copies the text the setter is given (`pane`, `ref` as x0 and x1) and keeps it when the pane
     // did not show it already, or was not set for more than kSameAgain frames. Any read that fails keeps nothing (or an empty name). Thread-safe.
-    void Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const ReadFn& read, std::uint32_t wrap = 25);
+    void Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const ReadFn& read,
+              std::uint32_t wrap = HOS_COOP_WRAP_PANE_TEXT);
     // The same with the text and its length given as they are (wrap 26: x1, w2; only the low 16 bits of the length
     // count, as the game takes them).
     void NoteText(std::uint64_t pane, std::uint64_t text, std::uint64_t length, std::uint64_t frame, const ReadFn& read,
