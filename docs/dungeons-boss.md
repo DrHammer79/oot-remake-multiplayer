@@ -835,8 +835,10 @@ Two-game run on 2026-11-24 (this fix): both copies fired phase 2's bullets, and 
 One copy's Attack_R fired nothing: it put the move in with its own learnt plug (plain), because no variation came
 (`0 named, 0 plain, N not known`). One probe with that game as owner showed the owner reads every plug name
 (`owner's variations kept N (plug names read N, not read 0)` in the boss log line). The variations were lost at the
-lane's server, built before component 24 (above). Not seen with a matching server yet: Attack_R on the copy, and
-whether the copy's first bullet matches the owner's (Fire or Ice).
+lane's server, built before component 24 (above). A second run with a server of the same build: every copy put-in
+had its variation (0 not known), the copy's Attack_R fired its FireBullet, and every copy bullet matched its attack
+(Attack_L Ice, Attack_R Fire) through two hand-overs. Not this row: right at a hand-over a copy played an attack with
+no bullet twice, and one copy showed fewer attacks than its owner in the same stretch.
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
