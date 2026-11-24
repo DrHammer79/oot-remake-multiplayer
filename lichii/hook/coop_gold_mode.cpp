@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <random>
 #include <set>
@@ -280,6 +281,7 @@ struct SaveView {
     std::vector<std::uint64_t> keys;
     std::optional<std::size_t> count_at;  // the Int's value word
     std::optional<std::size_t> get_at;    // the Bool's value word
+    std::map<std::uint32_t, std::size_t> flag_at;  // each race flag's value word (a Bool or an Int)
 };
 
 std::uint32_t Word(const std::vector<std::uint8_t>& d, std::size_t at) {
@@ -294,7 +296,7 @@ std::uint64_t Quad(const std::vector<std::uint8_t>& d, std::size_t at) {
 }
 
 std::optional<SaveView> ReadSave(const std::vector<std::uint8_t>& d, std::uint32_t count_hash,
-                                 std::uint32_t get_hash, std::string& why) {
+                                 std::uint32_t get_hash, std::span<const std::uint32_t> flags, std::string& why) {
     constexpr std::uint32_t kMagic = 0x01020304;
     constexpr std::size_t kTable = 0x20;
     constexpr std::uint32_t kBool = 0;
@@ -335,6 +337,8 @@ std::optional<SaveView> ReadSave(const std::vector<std::uint8_t>& d, std::uint32
             v.count_at = at + 4;
         } else if (*kind == kBool && first == get_hash) {
             v.get_at = at + 4;
+        } else if ((*kind == kBool || *kind == kInt) && std::find(flags.begin(), flags.end(), first) != flags.end()) {
+            v.flag_at.emplace(first, at + 4);
         }
     }
     if (v.end_pair == 0) {
@@ -373,14 +377,14 @@ std::optional<SaveView> ReadSave(const std::vector<std::uint8_t>& d, std::uint32
 
 GoldKept KeepRaceIn(std::vector<std::uint8_t>& host, const Race* race,
                     std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
-                    std::uint32_t get_hash) {
+                    std::uint32_t get_hash, std::span<const std::uint32_t> flag_hashes) {
     GoldKept out;
     std::set<std::uint64_t> gold;
     for (const std::uint64_t k : skulltula_keys) {
         gold.insert(k);
         gold.insert(k + 2);
     }
-    const auto h = ReadSave(host, count_hash, get_hash, out.why);
+    const auto h = ReadSave(host, count_hash, get_hash, flag_hashes, out.why);
     if (!h) {
         out.why = "the host's save: " + out.why;
         return out;
@@ -408,6 +412,15 @@ GoldKept KeepRaceIn(std::vector<std::uint8_t>& host, const Race* race,
 
     if (h->count_at) PutWord(host, *h->count_at, static_cast<std::uint32_t>(out.own_count));
     if (h->get_at) PutWord(host, *h->get_at, own_get);
+    // The race's flags (a reward claimed, a wallet tier, the Stone of Agony): ours, 0 where our race has none.
+    for (const auto& [hash, at] : h->flag_at) {
+        std::uint32_t own = 0;
+        if (race != nullptr) {
+            if (const auto it = race->flags.find(hash); it != race->flags.end()) own = it->second;
+        }
+        PutWord(host, at, own);
+        ++out.flags;
+    }
     if (h->set_at == 0) {
         // No key set to rewrite: the host's save has no gold keys either. Ours are not added (a new set's place is
         // not known), so the Skulltulas we took are alive again in this save.
@@ -451,6 +464,14 @@ bool Race::Join(const Race& other) {
         get = true;
         grew = true;
     }
+    for (const auto& [hash, value] : other.flags) {
+        if (value == 0) continue;
+        auto [it, added] = flags.emplace(hash, value);
+        if (added || value > it->second) {
+            it->second = value;
+            grew = true;
+        }
+    }
     return grew;
 }
 
@@ -464,6 +485,10 @@ std::string RaceText(const Race& race) {
     char line[32];
     for (const std::uint64_t k : race.keys) {
         std::snprintf(line, sizeof line, "key %016llx\n", static_cast<unsigned long long>(k));
+        out += line;
+    }
+    for (const auto& [hash, value] : race.flags) {
+        std::snprintf(line, sizeof line, "flag %08x %u\n", static_cast<unsigned>(hash), static_cast<unsigned>(value));
         out += line;
     }
     return out;
@@ -502,6 +527,19 @@ std::optional<Race> ParseRace(std::string_view text) {
         } else if (name == "get") {
             if (value != "0" && value != "1") return std::nullopt;
             race.get = value == "1";
+        } else if (name == "flag") {
+            // flag <8 hex> <value>: a race flag's hash and its value (never 0)
+            const std::size_t gap = value.find(' ');
+            if (gap != 8 || gap + 1 == value.size()) return std::nullopt;
+            std::uint32_t hash = 0;
+            std::uint32_t v = 0;
+            const auto rh = std::from_chars(first, first + gap, hash, 16);
+            const auto rv = std::from_chars(first + gap + 1, last, v);
+            if (rh.ec != std::errc() || rh.ptr != first + gap || rv.ec != std::errc() || rv.ptr != last || hash == 0 ||
+                v == 0) {
+                return std::nullopt;
+            }
+            race.flags[hash] = v;
         } else {
             return std::nullopt;
         }
@@ -584,7 +622,8 @@ bool GrowRace(const Race& seen) {
 }
 
 std::optional<Race> ReadRace(coop::host::FlagStore& game, std::span<const std::uint64_t> skulltula_keys,
-                             std::uint32_t count_hash, std::uint32_t get_hash) {
+                             std::uint32_t count_hash, std::uint32_t get_hash,
+                             std::span<const std::uint32_t> flag_hashes) {
     const auto count = game.read(proto::FlagKey(count_hash, std::uint16_t{0}));
     if (!count) return std::nullopt;   // no save in the game yet
     Race race;
@@ -595,6 +634,10 @@ std::optional<Race> ReadRace(coop::host::FlagStore& game, std::span<const std::u
             const auto now = game.read(proto::FlagKey::key64_flag(key));
             if (now && now->value != 0) race.keys.insert(key);
         }
+    }
+    for (const std::uint32_t hash : flag_hashes) {
+        const auto now = game.read(proto::FlagKey(hash, std::uint16_t{0}));
+        if (now && now->value != 0) race.flags[hash] = now->value;
     }
     return race;
 }
@@ -629,6 +672,14 @@ PutBack PutRaceBack(coop::host::FlagStore& game, const Race& race, std::uint32_t
             ++out.unread;
         } else if (now->value == 0) {
             put(proto::FlagEntry(get_key, now->kind, 1));
+        }
+    }
+    for (const auto& [hash, value] : race.flags) {
+        const proto::FlagKey key(hash, std::uint16_t{0});
+        if (const auto now = game.read(key); !now) {
+            ++out.unread;
+        } else if (now->value < value) {
+            put(proto::FlagEntry(key, now->kind, value));
         }
     }
     return out;

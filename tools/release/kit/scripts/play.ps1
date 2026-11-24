@@ -647,6 +647,20 @@ if ($Hookshot) {
     foreach ($l in @(Invoke-KitDiscordStatus $kit $emu)) { Write-Host $l }   # ('Playing Squadala!' on Discord)
     $started = Get-Date
     foreach ($l in @(Get-KitSteamInputHint)) { Write-Host $l -ForegroundColor Yellow }   # (player report 202: a Steam Controller outside Steam)
+    # Local co-op (scripts\local-coop.ps1): 2 to 4 players on this PC, one game each, game 1 hosts, the others join it.
+    # Asked only for the kit's own start (title mode), never in the autotest's kit mode.
+    $localPlayers = 1
+    if ($Mode -eq 'title' -and -not $env:OOT_COOP_TEST_KIT) {
+        . (Join-Path $PSScriptRoot 'local-coop.ps1')
+        $localPlayers = Read-KitLocalPlayers $kit
+    }
+    if ($localPlayers -gt 1) {
+        $games = @(Start-KitLocalCoop $kit $exe $localPlayers)
+        if (-not $games) { exit 1 }
+        foreach ($g in $games) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $g.Id } catch { } }
+        Write-Host "Games started. Each one's log: longshot_log.txt in its logs folder (game 2 to $localPlayers`: $(Join-Path (Split-Path -Parent $exe) 'local-players')); collect-logs.cmd takes them all."
+        exit 0
+    }
     $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
     if ($game) { try { & (Join-Path $PSScriptRoot 'problem-send.ps1') -Watch $game.Id } catch { } }   # (sending on: after it closes)
     Write-Host "Game started. Its log (longshot_log.txt in the game's logs folder) says 'coop: module loaded', then 'coop: connected'."

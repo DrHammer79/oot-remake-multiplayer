@@ -49,9 +49,9 @@
 // dropped, and an actor counts as gone only when two walks in a row miss it.
 
 #include "coop_objects.h"
+#include "coop_life_gauge.h"
 #include "coop_strike.h"
 #include "coop_gold_mode.h"
-#include "coop_life_gauge.h"
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
@@ -4411,8 +4411,8 @@ private:
             horde_.Bind(horde);
         }
         const u64 now_ms = SteadyNowMs();
-        const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         std::vector<std::string> rally_balls;  // row 211: the boss balls a sword sends back, alive in this walk
+        const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
             // walk between (our adult Link where the last scene's TerrainScenePermanent was): the cached name
@@ -4814,11 +4814,11 @@ private:
             names.emplace(a, std::move(known));
         }
         names_ = std::move(names);
+        NoteFallingRocks();  // row 234: Volvagia's rocks, per game
         if (CoopWorldSnapshot::TheStore().Enabled() &&  // the play-test bridge's world (off: this one atomic load)
             world_every_.Due(CoopEvery::NowUs())) {
             PublishWorld(r, player, world_frame, names_);
         }
-        NoteFallingRocks();  // row 234: Volvagia's rocks, per game
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));

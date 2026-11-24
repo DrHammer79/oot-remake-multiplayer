@@ -27,6 +27,9 @@ mkdir -p "$tmp/bin"
 printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$py" >"$tmp/bin/python3"
 chmod +x "$tmp/bin/python3"
 export PATH="$tmp/bin:$PATH" HOME=$tmp/home XDG_DATA_HOME=$tmp/xdg
+# Hermetic: no start in this test asks GitHub for main's problem-report address (docs/problem-send-address.txt); the
+# test kits have none of their own, so no start asks the question or writes problem-send.json.
+export OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off
 mkdir -p "$HOME" "$XDG_DATA_HOME"   # start.sh skips the menu entry when the XDG folder has no parent
 unset DISPLAY WAYLAND_DISPLAY
 log=$tmp/calls.log
@@ -264,13 +267,15 @@ write_note
 : >"$log"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix0.txt" 2>&1; export CODE=$?
 check 'mixed: a clean set with its note: built already, nothing built' bash -c '[ $CODE -eq 0 ] && grep -q "built already" "$1" && ! grep -q "^make_game" "$2"' _ "$tmp/mix0.txt" "$log"
-export VARIANTS_BEFORE=$(ls "$D/game-variants" 2>/dev/null)
 printf 'image.bin of another build' >"$D/game/image.bin"
+# (the builds the Characters-tab tests above kept stay as they are: none added, none changed)
+export VARIANTS_BEFORE=$(find "$D/game-variants" -type f 2>/dev/null -exec sha1sum {} + | sort)
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix1.txt" 2>&1; export CODE=$?
 check 'mixed: image.bin swapped: the start stops, names the file, says nothing was changed and how to build again' \
     bash -c '[ $CODE -ne 0 ] && grep -q "image.bin is not the file Longshot put into this game" "$1" && grep -q "Nothing was changed" "$1" && grep -q -- "--rebuild" "$1"' _ "$tmp/mix1.txt"
 check 'mixed: nothing built, the file untouched, nothing kept as a build' \
-    bash -c '! grep -q "^make_game" "$1" && [ "$(cat "$2/game/image.bin")" = "image.bin of another build" ] && [ "$(ls "$2/game-variants" 2>/dev/null)" = "$VARIANTS_BEFORE" ]' _ "$log" "$D"
+    bash -c '! grep -q "^make_game" "$1" && [ "$(cat "$2/game/image.bin")" = "image.bin of another build" ] &&
+        [ "$(find "$2/game-variants" -type f 2>/dev/null -exec sha1sum {} + | sort)" = "$VARIANTS_BEFORE" ]' _ "$log" "$D"
 rm -f "$D/game/longshot_vk.so"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix2.txt" 2>&1; export CODE=$?
 check 'mixed: a file the note lists is missing: refused too' bash -c '[ $CODE -ne 0 ] && grep -q "longshot_vk.so is missing" "$1"' _ "$tmp/mix2.txt"

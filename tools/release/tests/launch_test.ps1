@@ -8,6 +8,7 @@
 # Then "Start Squadala.bat" (start.ps1) and each check it makes before the game starts.
 # Exits 1 when a check fails.
 $ErrorActionPreference = 'Stop'
+$env:OOT_COOP_PROBLEM_ADDRESS_LOOKUP = 'off'   # hermetic: no start here looks up main's problem-report address on GitHub
 $release = Split-Path -Parent $PSScriptRoot
 $kitSrc = Join-Path $release 'kit'
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -1041,10 +1042,6 @@ try {
         foreach ($p in $csNpcFiles) { if (-not (Test-KitCharacterSelectNpcFile $p)) { $partsOk = $false } }
         foreach ($p in $csUiFiles + @('romfs\GameData\GameDataList.Product.110.byml.zs', 'exefs\E0F3.ips', 'romfs\Model\Player_Adult.Player_Adult.bfres.zs')) { if (Test-KitCharacterSelectNpcFile $p) { $partsOk = $false } }
         Check $partsOk 'Character Select parts: NPC files and default-part files told apart'
-        $voiceOk = (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\PlayerVoice_Child_Saria.bars.zs') -and (Test-KitCharacterSelectVoiceFile 'romfs/Sound/Resource/Stream/VSaPlAdult_Damage_M_01.bwav') -and
-                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Npc_X.bars.zs') -and -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Stream\Vo_PlChild_Jump_S_01.bwav') -and
-                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\ResourceListPack\BarslistPack.Product.111.byml.zs')
-        Check $voiceOk 'Character Select voices: his voice archives and stream files told apart from the rest'
         # v0.2.2: player.py's --exclude for part 'ui' ($KitCharselToolExclude) says what Test-KitCharacterSelectNpcFile says.
         $exOk = $true
         foreach ($p in $csNpcFiles + $csUiFiles + @('romfs\Sound\Resource\Voice.bars.zs', 'romfs\Model\Player_Dark_Link.bfres.zs',
@@ -1057,6 +1054,10 @@ try {
             if (($r.Substring(6) -cmatch $KitCharselToolExclude) -ne (Test-KitCharacterSelectNpcFile $p)) { $exOk = $false; Write-Host "  exclude/NPC rule differ: $p" }
         }
         Check $exOk 'Character Select tool: the ui part''s --exclude and the NPC rule agree on every romfs file'
+        $voiceOk = (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\PlayerVoice_Child_Saria.bars.zs') -and (Test-KitCharacterSelectVoiceFile 'romfs/Sound/Resource/Stream/VSaPlAdult_Damage_M_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Npc_X.bars.zs') -and -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Stream\Vo_PlChild_Jump_S_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\ResourceListPack\BarslistPack.Product.111.byml.zs')
+        Check $voiceOk 'Character Select voices: his voice archives and stream files told apart from the rest'
         # review-geno-0118: what the game was built with is kept until its build: nothing there before -> _<folder>.none;
         # a failed or declined build puts it back (play.ps1 Restore-KitCharacterSelectStart), a built one confirms it.
         $csNone = Join-Path $cm '_OoT Character Select.none'; $csPrev = Join-Path $cm '_OoT Character Select.prev'

@@ -3,7 +3,7 @@
 For the maintainer's agent, from the agent that worked on the play-test kit branch (pull request #315). Everything here is information
 about the game (addresses, offsets, names, behaviour) and about our tools; nothing from the game's files. The code is
 the source: each item names where it lives. The full list of every address and offset the code names, with its
-comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (973 constants, 94 files; run it
+comment, is generated into [addresses.md](addresses.md) by `tools/address_index.py` (run it
 again after a game update).
 
 What is done, open and waiting on (the coordination state, kept current): [agent-state.md](agent-state.md).

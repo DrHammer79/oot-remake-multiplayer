@@ -76,6 +76,9 @@ Check ((Update-ProblemSendAddress $kit { throw 'offline' }) -eq '') 'a failed lo
 $mark = Join-Path $kit 'lookup-marker.txt'
 $counted = [scriptblock]::Create("Add-Content -LiteralPath '$mark' -Value x; 'https://x.example.org/a'")
 Check ((Update-ProblemSendAddress $kit $counted -Send 'off') -eq '' -and -not (Test-Path -LiteralPath $mark)) 'sending off: no lookup at all'
+$env:OOT_COOP_PROBLEM_ADDRESS_LOOKUP = 'off'
+Check ((Update-ProblemSendAddress $kit $counted) -eq '' -and -not (Test-Path -LiteralPath $mark)) 'OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off (tests): no lookup at all'
+Remove-Item Env:OOT_COOP_PROBLEM_ADDRESS_LOOKUP
 [void](Update-ProblemSendAddress $kit $counted -Send 'on')
 [void](Update-ProblemSendAddress $kit $counted)
 Check (@(Get-Content -LiteralPath $mark).Count -eq 2) 'sending on or not answered: the lookup is made'

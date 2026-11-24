@@ -115,8 +115,8 @@ jobs:
         run: python tools/autotest/tests/test_playtest_bridge.py -v
       - name: Test game window placement tests
         run: python tools/autotest/tests/test_placement.py -v
-      - name: Play-test bridge client and MCP tools tests (fake bridge)
-        run: python tools/autotest/tests/test_playtest_bridge.py -v
+      - name: hs.py cache, locks and game build tests
+        run: python tools/hookshot/tests/test_hs.py -v
       - name: Play-test kit helpers tests (step_until, delta state, call log, doctor)
         run: python tools/autotest/tests/test_kit_tools.py -v
       - name: Play-test look (one-call situation text) tests
@@ -149,6 +149,8 @@ jobs:
         run: python tools/hookshot/tests/test_puppet_bow_guard.py -v
       - name: The kit's size table, actor rows and menu archives merge tests
         run: python tools/puppet_pack/tests/test_merge_tables.py -v
+      - name: Character Select's readable names tests
+        run: python tools/puppet_pack/tests/test_charsel_names.py -v
       - name: Test lanes tests
         run: python tools/autotest/tests/test_lanes.py -v
       - name: Autotest groups tests
@@ -291,6 +293,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/hosting_test.ps1
       - name: Nucleus handler tests
         run: cscript //nologo //E:jscript tools/nucleus/test_handler.js
+      - name: Kit local co-op (2 to 4 games on one PC) tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/local_coop_test.ps1
       - name: Kit launch-update tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/launch_test.ps1
       - name: Kit test-mode game start (no window activation) tests

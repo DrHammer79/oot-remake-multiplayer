@@ -21,7 +21,7 @@ A module that does not answer state -1 with 1: nothing changes.
  3 files changed, 50 insertions(+)
 
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 1f904cd..e50a163 100644
+index 1f904cd6..e50a1639 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -273,6 +273,8 @@ void hos_coop_title(Ctx *c, uint64_t screen, int event) {
@@ -34,7 +34,7 @@ index 1f904cd..e50a163 100644
  }
  
 diff --git a/host/hos_coop_turn.h b/host/hos_coop_turn.h
-index f96e73f..4eb2f74 100644
+index f96e73f2..4eb2f741 100644
 --- a/host/hos_coop_turn.h
 +++ b/host/hos_coop_turn.h
 @@ -9,6 +9,9 @@
@@ -48,10 +48,10 @@ index f96e73f..4eb2f74 100644
     The same file is in Hookshot's host/ through our patch and in our repository (hookshot/src): keep them equal
     (tests/hookshot/module_test.cpp checks it). Plain C. */
 diff --git a/host/mouse_native.c b/host/mouse_native.c
-index a3f8174..bc26cb2 100644
+index f0ccb09b..dd01c30f 100644
 --- a/host/mouse_native.c
 +++ b/host/mouse_native.c
-@@ -140,12 +140,57 @@ static int coop_turns(uint64_t cam) {
+@@ -140,6 +140,50 @@ static int coop_turns(uint64_t cam) {
      return 1;
  }
  
@@ -102,10 +102,11 @@ index a3f8174..bc26cb2 100644
  /* f_80644c80's first line (nx2/oot_patches.py): cam is the player camera, the game's thread.
     (longshot, issue 1113) An input recording takes each update's decisions down (HOS_INPUT_RECORD: whether the mouse camera was
     on, whether the game left the camera free, whether a stick turned it, and the degrees the mouse turned it by), and a
-    replay gives them back at the same update (HOS_INPUT_PLAY) in place of the mouse, the menu's row and the window's
+@@ -147,6 +191,7 @@ static int coop_turns(uint64_t cam) {
     clock: the camera then turns as it did, whatever the mouse and the settings do now */
  void hos_mouse_camera(uint64_t cam) {
-+    if (cam && looks_like_camera(cam)) coop_node_seen(cam);   /* (patch 0043: hos_coop_camera_wake) */
+     if (!cam) return;
++    if (looks_like_camera(cam)) coop_node_seen(cam);   /* (patch 0043: hos_coop_camera_wake) */
      /* (oot-remake-multiplayer, patch 0040) the co-op module may turn the camera first (hos_coop_turn.h), whatever the
         Mouse camera row says: its angles go in before the camera's update reads them, so the game's own collision still
         places the eye. While it does, the mouse does not turn the camera, and its angles start from the camera's again. */

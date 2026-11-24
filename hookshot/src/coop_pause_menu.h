@@ -34,9 +34,6 @@ struct Command {
     const char* help;    // one short paragraph
 };
 const std::vector<Command>& Commands();
-// The word the play-test bridge's `menu` state member shows for a page (docs/playtest.md): "main", "host", "join",
-// "local", "settings", "commands", "customize", "find".
-const char* PageWord(Page page);
 // The help of the main page's rows that open a page (Local co-op, Settings, Customize Link, Commands): the same words
 // on the - page's Settings and look rows (CoopPauseTab::MenuTabHelp), one source.
 inline constexpr const char* kLocalHelp = "Two players on this PC.";
@@ -47,6 +44,9 @@ inline constexpr const char* kCustomizeHelp =
     "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture. Your Link wears it "
     "when you close the menu.";
 inline constexpr const char* kCommandsHelp = "The chat's commands, and the key that opens the chat.";
+// The word the play-test bridge's `menu` state member shows for a page (docs/playtest.md): "main", "host", "join",
+// "local", "settings", "commands", "customize", "find".
+const char* PageWord(Page page);
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
 std::string ChatKeyWords(const std::string& chat_key);
@@ -133,6 +133,7 @@ struct Session {
     bool by_launcher = false;  // co-op came with the game's start (Host.bat, Join.bat, coop.ini): not stopped here
     int players = 0;           // in the session, this one included (0: not known)
     std::string code;          // the invite code (hosting), or the answer code (kWaitHost)
+    bool code_done = false;    // hosting: the code's making ended (an empty `code` then: none could be made)
     std::vector<std::string> lines;   // what it is doing or what went wrong, in plain words
     std::string password;      // the host's join password while it hosts ("" none): shown on A, never logged
     std::vector<std::string> asking;  // who asks to join this host now, oldest first (CoopLobby::Asking)
@@ -323,6 +324,9 @@ private:
     void TitleListLines(std::vector<Line>& out, bool off) const;
     void TitleCodeLines(std::vector<Line>& out, bool off) const;
     void TitleHostLines(std::vector<Line>& out, bool host, bool guest) const;
+    // The Host page's Code row's value, on the title and the - page alike: the code (ShownCode), "Starting..." until
+    // there is one, "None" when none could be made (the page's help says why).
+    std::string CodeValue() const;
     void HostRuleLines(std::vector<Line>& out, bool guest) const;
     bool Selectable(const Line& line) const;
     void Go(Page page, Act select = Act::kNone);

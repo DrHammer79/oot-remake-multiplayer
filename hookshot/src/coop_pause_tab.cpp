@@ -226,12 +226,7 @@ void Page::MinusEnterList() {
 }
 
 void Page::MinusLineStep(int dir) {
-    for (int k = minus_line_ + dir; k >= 0 && k < 32; k += dir) {   // (no wrap, as the rows)
-        if ((minus_lines_ & (1u << k)) != 0) {
-            minus_line_ = k;
-            return;
-        }
-    }
+    minus_line_ = CoopMenuNav::StepMask(minus_lines_, minus_line_, dir);   // (no wrap, as the rows)
 }
 
 void Page::MinusTabMoved() {
@@ -254,7 +249,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             minus_tab_ = 0, minus_slide_ = 1;
             MinusTabMoved();
             if (minus_native_) return buttons & ~swallow_;   // (the game's: the Map sequence opens CoopMenu_00)
-            strip_sound_ = "mc_TabToRight";
+            strip_sound_ = CoopMenuNav::kSoundTabRight;
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
         }
@@ -275,7 +270,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
     if ((down & kPadR) != 0) {
         if (minus_tab_ < kMinusTabs - 1) {
             ++minus_tab_, minus_slide_ = 1;
-            strip_sound_ = "mc_TabToRight";
+            strip_sound_ = CoopMenuNav::kSoundTabRight;
             MinusTabMoved();
         }
         swallow_ |= kPadR;
@@ -283,7 +278,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
         // (a list's page: the games list's 6 at a time, as the game's own long lists page)
         // (swallowed on every tab and view, but it clicks only when the list really pages: review-01110-c)
         minus_page_step_ = (down & kPadZR) != 0 ? 1 : -1;
-        if (minus_pageable_) strip_sound_ = "button_on";
+        if (minus_pageable_) strip_sound_ = CoopMenuNav::kSoundMove;
         swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
@@ -292,49 +287,53 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             swallow_ |= buttons & ~(kPadL | kPadB | kPadPlus | kPadMinus);
             return buttons & (kPadL | kPadB | kPadPlus | kPadMinus) & ~swallow_;
         }
-        strip_sound_ = "mc_TabToLeft";
+        strip_sound_ = CoopMenuNav::kSoundTabLeft;
         swallow_ |= kPadL;
     } else if (minus_list_ && minus_raw_) {   // (co-op's menu's own page: the moves are its events)
         if ((down & kPadB) != 0 && (minus_rows_ != 0 || minus_raw_back_)) {
             if (minus_rows_ != 0) minus_list_ = false;   // (back to the rows; a tab with none keeps the list)
             minus_list_back_ = true;
-            strip_sound_ = "button_cancel";
+            strip_sound_ = CoopMenuNav::kSoundBack;
             swallow_ |= kPadB;
         } else if ((down & kPadB) == 0) {
-            const std::uint32_t moves = (up ? kMinusMoveUp : 0u) | (dn ? kMinusMoveDown : 0u) |
+            // (a held Up or Down: only while the menu's selection can go that way without going round)
+            const bool rep_up = (minus_repeated_ & (kPadUp | kPadStickUp)) != 0;
+            const bool rep_dn = (minus_repeated_ & (kPadDown | kPadStickDown)) != 0;
+            const bool go_up = up && (!rep_up || minus_raw_up_), go_dn = dn && (!rep_dn || minus_raw_down_);
+            const std::uint32_t moves = (go_up ? kMinusMoveUp : 0u) | (go_dn ? kMinusMoveDown : 0u) |
                                         (left ? kMinusMoveLeft : 0u) | (right ? kMinusMoveRight : 0u) |
                                         ((down & kPadA) != 0 ? kMinusMoveA : 0u);
             minus_moves_ |= moves;
-            if ((moves & kMinusMoveA) != 0) strip_sound_ = "button_decide";
-            else if (moves != 0) strip_sound_ = "button_on";
+            if ((moves & kMinusMoveA) != 0) strip_sound_ = CoopMenuNav::kSoundDecide;
+            else if (moves != 0) strip_sound_ = CoopMenuNav::kSoundMove;
         }
     } else if (minus_list_) {
         if (((down & kPadB) != 0 || left) && minus_rows_ != 0) {
             minus_list_ = false;
-            strip_sound_ = "button_cancel";
+            strip_sound_ = CoopMenuNav::kSoundBack;
             if ((down & kPadB) != 0) swallow_ |= kPadB;
         } else if (up || dn) {
             const int was = minus_line_;
             MinusLineStep(up ? -1 : 1);
-            if (minus_line_ != was) strip_sound_ = "button_on";
+            if (minus_line_ != was) strip_sound_ = CoopMenuNav::kSoundMove;
         } else if ((down & kPadA) != 0 && minus_line_ >= 0) {
             minus_line_decide_ = minus_line_;
-            strip_sound_ = "button_decide";
+            strip_sound_ = CoopMenuNav::kSoundDecide;
         }
     } else if (right && minus_lines_ != 0) {   // (into the list on the right)
         minus_list_ = true;
         if (!minus_raw_) SetMinusLines(minus_lines_, false);   // (a line picked)
-        strip_sound_ = "button_on";
+        strip_sound_ = CoopMenuNav::kSoundMove;
     } else if ((up || dn) && minus_rows_ != 0) {
         const int was = minus_row_;
         MinusStep(up ? -1 : 1);
-        if (minus_row_ != was) strip_sound_ = "button_on";
+        if (minus_row_ != was) strip_sound_ = CoopMenuNav::kSoundMove;
     } else if ((down & kPadA) != 0 && (minus_rows_ & (1u << minus_row_)) != 0) {
         minus_decide_ = minus_row_;
-        strip_sound_ = "button_decide";
+        strip_sound_ = CoopMenuNav::kSoundDecide;
     } else if ((down & kPadB) != 0 && minus_in_view_) {   // (a view: back a view, not out of the menu)
         minus_back_ = true;
-        strip_sound_ = "button_cancel";
+        strip_sound_ = CoopMenuNav::kSoundBack;
         swallow_ |= kPadB;
     }
     // (ours shows: its page has the pad; B (on the tab's own rows), + and - stay the game's, which close or change
@@ -464,17 +463,24 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     pad_ms_ = now_ms;
     const std::uint64_t down = buttons & ~pad_last_;
     pad_last_ = buttons;
+    // (the - page's rows and list: a held Up or Down steps again, as the game's own lists; never round, since
+    // MinusStep and MinusLineStep stop at the ends. Typing has its own repeat: TypingPad)
+    const std::uint64_t vertical = kPadUp | kPadDown | kPadStickUp | kPadStickDown;
+    const std::uint64_t repeated = minus_repeat_.Presses(buttons, now_ms, vertical) & ~down;
+    minus_repeated_ = repeated;
     swallow_ &= buttons;   // (let go: the game gets it again)
     if (shown_ && !CanStay(now_ms)) {
         Hide("the menu's state changed", pages_.state == 3 || pages_.state == 0 || strip_.state == 3 || strip_.state == 0);
     }
-    if (!shown_ && CanMinus(now_ms)) return MinusPad(buttons, down);   // (the - menu: its tabs of ours)
+    if (!shown_ && CanMinus(now_ms)) {   // (the - menu: its tabs of ours)
+        return MinusPad(buttons, minus_tab_ >= 0 && typing_ < 0 ? down | repeated : down);
+    }
     if (!shown_) {
         if ((down & kPadA) != 0 && system_button_ == 1 && settings_ok_ && longshot_menu_ && CanShow(now_ms)) {
             // (player report 261: Longshot Settings is Longshot's own menu, opened over the pause menu by the module;
             // never our copy of its rows. The A is ours: the game does not know the button)
             open_longshot_ = true;
-            pages_sound_ = "button_decide";
+            pages_sound_ = CoopMenuNav::kSoundDecide;
             swallow_ |= kPadA;
             return buttons & ~swallow_;
         }
@@ -487,7 +493,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
             customize_open_ = system_button_ == 2;
             slide_ = 0;
             opened_ = true;
-            pages_sound_ = "button_decide";
+            pages_sound_ = CoopMenuNav::kSoundDecide;
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
         }
@@ -520,7 +526,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if ((down & kPadA) != 0) {
         decide_ = true;
-        pages_sound_ = "button_decide";
+        pages_sound_ = CoopMenuNav::kSoundDecide;
     }
     if (sub_ && (down & kPadB) != 0) {   // (a view: B goes back to the five rows, kept until let go)
         back_ = true;
@@ -541,7 +547,7 @@ void Page::StartTyping(int which) {
     typing_was_ = Field(typing_).text();
     key_ = 0;
     letter_ = 0;
-    repeat_since_ = repeat_last_ = 0;
+    typing_repeat_.Forget(pad_last_);   // (the direction held as typing starts is not a press of the keys)
     swallow_ |= pad_last_;   // (the A that started it is not the first key's press)
     typing_from_ms_ = pad_ms_;   // (nor the same A coming again: a click's A, in two pulses, typed the first key)
 }
@@ -551,7 +557,7 @@ void Page::EndTyping(bool ok) {
     if (!ok) Field(typing_).Set(typing_was_);
     typed_ = ok ? typing_ : -1;
     typing_ = -1;
-    pages_sound_ = "button_decide";
+    pages_sound_ = CoopMenuNav::kSoundDecide;
 }
 
 char Page::TypingLetter() const {
@@ -570,7 +576,7 @@ void Page::PressKey(int key) {
     case TypeKey::kCancel: EndTyping(false); return;
     case TypeKey::kOk: EndTyping(true); return;
     }
-    pages_sound_ = "button_decide";
+    pages_sound_ = CoopMenuNav::kSoundDecide;
 }
 
 const char* TypingTitle(int which) {
@@ -616,32 +622,23 @@ void Page::TypingPad(std::uint64_t down, std::uint64_t held, std::uint64_t now_m
     }
     if ((down & kPadY) != 0) {
         f.Backspace();
-        pages_sound_ = "button_on";
+        pages_sound_ = CoopMenuNav::kSoundMove;
     }
     if ((down & (kPadL | kPadZL)) != 0) f.Move(-1);
     if ((down & (kPadR | kPadZR)) != 0) f.Move(+1);
     const std::uint64_t up = kPadUp | kPadStickUp, dn = kPadDown | kPadStickDown;
     const std::uint64_t left = kPadLeft | kPadStickLeft, right = kPadRight | kPadStickRight;
     const std::uint64_t dirs = up | dn | left | right;
-    const auto step = [&](std::uint64_t bits) {
-        // (up and down: the key, round the four; Left and Right: Letter's letter, round the field's letters)
-        const int dy = (bits & dn) != 0 ? 1 : (bits & up) != 0 ? -1 : 0;
-        key_ = (key_ + dy + kTypeKeys) % kTypeKeys;
-        const int dx = (bits & right) != 0 ? 1 : (bits & left) != 0 ? -1 : 0;
-        if (dx != 0 && key_ == static_cast<int>(TypeKey::kLetter)) {
-            const std::size_t n = f.Letters().size();
-            letter_ = (letter_ % n + n + static_cast<std::size_t>(dx + static_cast<int>(n))) % n;
-        }
-    };
-    if ((down & dirs) != 0) {
-        step(down & dirs);
-        repeat_since_ = repeat_last_ = now_ms;
-        pages_sound_ = "button_on";
-    } else if ((held & dirs) != 0 && repeat_since_ != 0 && now_ms - repeat_since_ > 400 && now_ms - repeat_last_ > 90) {
-        step(held & dirs);   // (held: again and again, as the game's own lists scroll)
-        repeat_last_ = now_ms;
+    // (one cursor model, coop_menu_nav.h: up and down the key, round on a fresh press only; Left and Right Letter's
+    // letter, round held too; a held direction again and again, as the game's own lists)
+    std::uint64_t held_again = 0;
+    const std::uint64_t moves = typing_repeat_.Presses(held, now_ms, dirs, &held_again);
+    const int dy = (moves & dn) != 0 ? 1 : (moves & up) != 0 ? -1 : 0;
+    const int dx = (moves & right) != 0 ? 1 : (moves & left) != 0 ? -1 : 0;
+    if (CoopMenuNav::TypingKeysStep(dy, dx, (held_again & (up | dn)) != 0, kTypeKeys, static_cast<int>(TypeKey::kLetter),
+                                    f.Letters().size(), &key_, &letter_)) {
+        pages_sound_ = CoopMenuNav::kSoundMove;
     }
-    if ((held & dirs) == 0) repeat_since_ = 0;
 }
 
 bool Page::Key(std::uint32_t vk, bool repeat) {
@@ -1213,7 +1210,7 @@ std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
         if (v.s.hosting) {
             rows[3] = main[kRowHost];   // ("Your game", "Your game: Saria asks")
         } else if (v.s.in_one || v.s.by_launcher) {
-            rows[3] = main[kRowJoin];   // ("Your session", "Turned away", "Copy answer code")
+            rows[3] = main[kRowJoin];   // ("Your game", "Turned away", "Copy answer code")
         }
         break;
     case MinusPage::kMods: break;
@@ -1266,15 +1263,15 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.connecting && !v.s.hosting) {
         rows[kRowJoin] = "Connecting...";
     } else if (v.s.by_launcher) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else if (v.s.in_one && !v.s.hosting) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else {
         rows[kRowJoin] = "Join a game";
     }
     rows[kRowPlayers] = v.players <= 0 ? "Players"
-                        : v.players == 1 ? "Players: just you"
-                                         : "Players: " + std::to_string(v.players);
+                        : v.players == 1 ? "Players (just you)"
+                                         : "Players (" + std::to_string(v.players) + ")";
     rows[kRowSettings] = "Co-op settings";
     // (the rows in the player's language before the cut: the composed ones are the
     // table's shapes, a player's own name comes back as it is)
@@ -1435,7 +1432,7 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
                                                  : "Stop hosting";
         } else if (v.s.in_one || v.s.by_launcher) {
             rows[0] = v.s.by_launcher ? "Co-op is on" : "In a friend's game";
-            rows[1] = "Leave it first: Join";
+            rows[1] = "Leave your game first";
         } else {
             rows[0] = "Start hosting";
             rows[1] = "Host settings";
@@ -1475,8 +1472,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             }
             if (!v.room.empty()) around(1, "Copy room: ", v.room);
             else rows[1] = v.s.code ? "Copy invite code" : "Room: coming...";
-            rows[2] = "Copy same-network line";
-            rows[3] = "Copy VPN line";
+            rows[2] = "Copy network address";
+            rows[3] = "Copy VPN address";
             break;
         }
         if (v.s.failed && !v.s.in_one) {
@@ -1526,8 +1523,8 @@ const char* RowHelp(RowAction a) {
     case RowAction::kJoinPaste: return "Joins with the code you copied. You play on the host's save; yours are not touched.";
     case RowAction::kRejoin: return "Joins the last game you played in again.";
     case RowAction::kViewSession: return "Your game now: what co-op is doing, the lines to give your friends, and why it stopped.";
-    case RowAction::kCopyLan: return "Copies the line friends on your network use to join you.";
-    case RowAction::kCopyVpn: return "Copies the line friends on your VPN use to join you.";
+    case RowAction::kCopyLan: return "Copies your address on this network. Friends paste it in Join a game's Room row.";
+    case RowAction::kCopyVpn: return "Copies your address on your VPN. Friends paste it in Join a game's Room row.";
     case RowAction::kResync: return "Loads the host's save again, so your game matches theirs.";
     case RowAction::kViewPlayer: return "This player: go to them, or mute their voice or chat for you.";
     case RowAction::kMorePlayers: return "The next page of players.";
@@ -1539,7 +1536,7 @@ const char* RowHelp(RowAction a) {
     case RowAction::kHostChat: return "Mutes this player's chat for everyone, or unmutes it.";
     case RowAction::kKick: return "Sends this player out of your game. Press A again to confirm.";
     case RowAction::kBan: return "Keeps this player out until you stop hosting. Press A again to confirm.";
-    case RowAction::kTypeRoom: return "Type the room name your friend gave you.";
+    case RowAction::kTypeRoom: return "Type the room name your friend gave you, or their address (192.168.1.5:27510).";
     case RowAction::kTypePassword: return "Type the game's join password, if it has one.";
     case RowAction::kJoinRoom: return "Joins that room with the password typed.";
     case RowAction::kViewLan: return "Games on your network that you can join.";
@@ -1873,9 +1870,15 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
         const std::size_t at = static_cast<std::size_t>(at_page * per_page + i);
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
+        // (a setting that applies at the next start says so on its row, in words: a bare "*" read as nothing. The tag
+        // is kept whole and the name gives way to it)
+        std::string name = CoopI18n::Tr(r.name);
+        if (r.restart) {
+            const std::string tag = " (" + CoopI18n::Tr("restart") + ")";
+            name = tag.size() < kListNameChars ? FitTo(name, kListNameChars - tag.size()) + tag : tag;
+        }
         lines[static_cast<std::size_t>(i) + 1] =
-            ListLine{FitTo(r.restart ? CoopI18n::Tr(r.name) + " *" : CoopI18n::Tr(r.name), kListNameChars),
-                     FitTo(CoopI18n::Tr(r.text), kListValueChars)};
+            ListLine{FitTo(name, kListNameChars), FitTo(CoopI18n::Tr(r.text), kListValueChars)};
     }
     return lines;
 }
@@ -1995,7 +1998,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     } else if (v.s.in_one) {
         header = "In a session";
     } else {
-        header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
+        header = v.s.by_launcher ? "Started with the game" : "Not in a session";
         if (v.s.by_launcher && why.empty()) why = CoopI18n::Tr("Restart the game to change it");
     }
     // (the header's value: hosting, who can reach this game. The header had none: the game's cursor frame, which
@@ -2218,5 +2221,45 @@ int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std:
     }
     return coming != nullptr ? coming->ours : -1;
 }
+
+
+PageCursor CursorAt(int row, std::uint32_t rows_shown, bool list, int line) {
+    PageCursor c;
+    c.list = list;
+    if (list) {
+        if (line >= 0 && line < kCursorLines) c.frame_line = line;
+        return c;
+    }
+    if (row >= 0 && row < kRows && ((rows_shown >> row) & 1u) != 0) c.frame_row = row;
+    return c;
+}
+
+float MinusRowAlpha(const PageCursor& c, int r) {
+    if (c.list) return 0.45f;
+    return r == c.frame_row ? 1.0f : 0.8f;
+}
+
+float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list) {
+    const bool pick = i >= 0 && i < 32 && ((pickable >> i) & 1u) != 0;
+    if (i == 0 && !pick) return 0.7f;               // (a header, as a table's)
+    if (!pick && picked != i) return 0.55f;         // (a line of text, a heading)
+    return !list || picked == i ? 1.0f : 0.45f;
+}
+
+
+GameFrame GameFrameOf(std::string_view focused) {
+    GameFrame g;
+    const auto number = [&](std::string_view prefix) {
+        if (focused.size() != prefix.size() + 2 || focused.substr(0, prefix.size()) != prefix) return -1;
+        const char a = focused[prefix.size()], b = focused[prefix.size() + 1];
+        if (a < '0' || a > '9' || b < '0' || b > '9') return -1;
+        return (a - '0') * 10 + (b - '0');
+    };
+    if (const int r = number("Pa_Button_"); r >= 0 && r < kRows) g.row = r;
+    if (const int l = number("Pa_List_"); l >= 0 && l < kCursorLines) g.line = l;
+    return g;
+}
+
+bool GivenBackShown(bool all_own, int index, int game_focus) { return all_own || (index >= 0 && index == game_focus); }
 
 }  // namespace CoopPauseTab

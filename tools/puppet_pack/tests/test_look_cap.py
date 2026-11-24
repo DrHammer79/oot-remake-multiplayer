@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from puppet_pack import bfres, look_cap as lc, look_metal as lm  # noqa: E402
+from puppet_pack import bfres, look_cap as lc, look_live, look_metal as lm  # noqa: E402
 from puppet_pack.tunic import TunicError  # noqa: E402
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "..", "..", "hookshot", "src")
@@ -283,14 +283,14 @@ class LookCapTest(unittest.TestCase):
         logs = []
         tex = texture()
         blob = lc.cap(lambda n: tex if n == "Mt_Cloth_Parts_Player_Child_Alb" else None,
-                      lambda v: test_model() if v == "Child" else None, logs.append)
+                      lambda v: test_model() if v == "Player_Child" else None, logs.append)
         self.assertIsNone(blob)   # the test model's material samples Tex_A, not the game's name
         self.assertTrue(any("0 of 16 blocks" in line for line in logs), logs)
         self.assertTrue(any("no Mt_Vest_Player_Adult_Alb" in line for line in logs), logs)
         # The texture under the name a material of the model samples.
         old = lc.CAP
         try:
-            lc.CAP = (("Tex_A", "Child"),)
+            lc.CAP = (("Tex_A", "Player_Child"),)
             blob = lc.cap(lambda n: tex, lambda v: test_model(), logs.append)
         finally:
             lc.CAP = old
@@ -316,12 +316,33 @@ class LookCapTest(unittest.TestCase):
             lc.unpack(b"COOPMTL1" + blob[8:])
 
     def test_the_module_paints_these_textures(self):
-        # Each texture is a tunic texture of the module's (green.bin holds its texels), painted in green.
+        # The Kokiri tunic's are tunic textures of the module's (green.bin holds their texels), painted in
+        # green; the Goron and Zora tunics' (row 278) are gear textures (gear.bin), painted in their tones.
         with open(os.path.join(SRC, "coop_look_parts.cpp"), encoding="utf-8") as f:
             src = f.read()
-        for name in lc.TEXTURES:
-            self.assertIn(f'{{"{name}", Format::', src)
+        tunic = src[src.index("TunicTextures() {"):]
+        tunic = tunic[:tunic.index("\n}\n")]
+        gear = src[src.index("Gear() {"):]
+        gear = gear[:gear.index("\n}\n")]
+        self.assertEqual(lc.TUNIC_TEXTURES + lc.GEAR_TEXTURES, lc.TEXTURES)
+        for name in lc.TUNIC_TEXTURES:
+            self.assertIn(f'{{"{name}", Format::', tunic)
+        for name in lc.GEAR_TEXTURES:
+            self.assertIn(f'{{"{name}", Format::', gear)
+            self.assertIn(name, look_live.GEAR)   # gear.bin holds its texels
         self.assertTrue('"COOPCAP1"' in src, "the module reads cap.bin (CoopLookParts::ParseCap)")
+
+    def test_every_tunic_has_its_trim(self):
+        # Row 278: the Cap trim on the Kokiri tunic only. Every tunic model of the game has its trims listed,
+        # each from the model that draws it.
+        models = {m for _, m in lc.CAP}
+        self.assertEqual(models, {"Player_Child", "Player_Adult", "Armor_Adult_Goron", "Armor_Adult_Zora"})
+        for name, model in lc.CAP:
+            self.assertEqual(lc.model_path(model), f"Model/{model}.{model}.bfres.zs")
+            if "Armor_Adult_Goron" in name:
+                self.assertEqual(model, "Armor_Adult_Goron")
+            if "Armor_Adult_Zora" in name:
+                self.assertEqual(model, "Armor_Adult_Zora")
 
 
 if __name__ == "__main__":

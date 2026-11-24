@@ -99,6 +99,25 @@ double AverageLuma(Format f, std::span<const std::uint8_t> texels);
 std::size_t Recolour(Format f, std::span<const std::uint8_t> texels, std::span<std::uint8_t> out,
                      const std::vector<Rule>& rules);
 
+// Row 185: a block's end colours are the encoder's, not the texture's. Beside
+// the Hylian Shield frame's grey the encoder often put a pale green
+// (165, 199, 148) or a dark brown (66, 60, 49) end that no texel shows as such;
+// no rule took it by its tone, so the block was painted at one end only and
+// its texels came out half painted: specks of the old grey on the frame. The
+// pack lists the blocks wholly on a part (by the game's own metalness texture:
+// tools/puppet_pack/look_metal.py regions, coop_look/region.bin); in such a
+// block the part's rule also takes every end that is Forceable.
+struct Region {
+    std::span<const std::int8_t> rule;   // per block (texel bytes / BlockBytes): a rule's index, or -1
+    std::uint32_t tones = 0;             // every part's tones in this texture (painted or not)
+};
+std::size_t Recolour(Format f, std::span<const std::uint8_t> texels, std::span<std::uint8_t> out,
+                     const std::vector<Rule>& rules, const Region& region);
+// An end a part's region may take: no tone of `tones` (no part's own colour), and
+// grey enough (spread under 35% of its brightness) or too dark to say: not a
+// coloured part such as the Triforce's gold (tools/puppet_pack/look_metal.py forceable).
+bool Forceable(const Rgb& c, std::uint32_t tones);
+
 // --- the pieces, for the tests ---
 
 // sRGB colour scaled to `target`'s colour at its linear brightness against `base`.

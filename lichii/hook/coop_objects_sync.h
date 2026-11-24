@@ -1311,6 +1311,8 @@ public:
     // What Flush decided for each shared object that left the walk, as log
     // lines; taken (and cleared) by the caller.
     std::vector<std::string> TakeNotes() { return std::exchange(notes_, {}); }
+    // Row 211: the makers of the rally balls in this walk (RallyMakers), for the next Tick's AttackWithRally.
+    void SetRallyMakers(std::vector<std::string_view> makers) { rally_makers_ = std::move(makers); }
     // Row 63 (Gold Skulltulas Shared): placed Gold Skulltulas whose owner said they died, since the last
     // call, with where our copy was: the world sync owes this game their tokens (WorldSync::OweToken).
     struct GoldDeath {
@@ -1318,9 +1320,6 @@ public:
         coop::protocol::Vec3 at{};
     };
     std::vector<GoldDeath> TakeGoldDeaths() { return std::exchange(gold_deaths_, {}); }
-
-    // Row 211: the makers of the rally balls in this walk (RallyMakers), for the next Tick's AttackWithRally.
-    void SetRallyMakers(std::vector<std::string_view> makers) { rally_makers_ = std::move(makers); }
     std::optional<coop::protocol::ObjectId> IdOf(std::uint64_t address) const;
     // Difficulty's night horde (coop_difficulty.h Horde): how many players'
     // Links stand within kRollNearM of `at`, we among them: the others in our

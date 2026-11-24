@@ -1,6 +1,6 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 869da3b45be173376a957c593771cdb440e12beb Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
-Date: Mon, 23 Nov 2026 17:00:00 -0600
+Date: Mon, 23 Nov 2026 16:13:46 -0900
 Subject: [PATCH] Co-op pane text wrap: the texts the game sets in its text
  panes, to the module
 
@@ -20,7 +20,7 @@ the checks (build id, first words) and the hello's bits are 0005's.
 
 diff --git a/host/hos_coop_pane_text.h b/host/hos_coop_pane_text.h
 new file mode 100644
-index 0000000..1303195
+index 00000000..13031951
 --- /dev/null
 +++ b/host/hos_coop_pane_text.h
 @@ -0,0 +1,18 @@
@@ -43,7 +43,7 @@ index 0000000..1303195
 +
 +#endif
 diff --git a/nx2/coop_world_wraps.py b/nx2/coop_world_wraps.py
-index c1485d9..57dd9a9 100644
+index c1485d9c..57dd9a9c 100644
 --- a/nx2/coop_world_wraps.py
 +++ b/nx2/coop_world_wraps.py
 @@ -58,6 +58,11 @@ WRAPS = (
