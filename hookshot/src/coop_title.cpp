@@ -1242,6 +1242,12 @@ void RefreshSaveList(void* ctx) {
     const std::uint64_t mgr = CaptionMgr();
     std::uint8_t state = 0;
     const bool found = mgr != 0 && CoopRuntime::Read(mgr + kCaptionState, &state, 1);
+    // (rejoin-host-273-2) the title's slot fixes went into the folder the game mounted: it is mounted again, only
+    // while the game is not reading its list; the switch marks the list stale, read again just below
+    if (found && CoopSave::RestageDue()) {
+        const auto busy = GameCall(ctx, Main(kCaptionBusy), mgr);
+        if (busy && (*busy & 1) == 0) CoopSave::RestageSaveFolder();
+    }
     R::Input in;
     in.stale = CoopSave::TakeSaveListStale();
     in.stale = g_mod_asked.exchange(false) || in.stale;
