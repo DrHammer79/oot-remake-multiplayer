@@ -270,9 +270,21 @@ def cache_root():
     return root
 
 
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003   # (a junction's reparse tag: stat.IO_REPARSE_TAG_MOUNT_POINT, Windows)
+
+
 def is_link(path):
     """A symlink or (Windows) a junction: the game folders link romfs to a shared copy."""
-    return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+    if os.path.islink(path):
+        return True
+    if hasattr(os.path, "isjunction"):   # (Python 3.12+)
+        return os.path.isjunction(path)
+    # Before 3.12 (CI's 3.10): the junction's reparse tag. Without this a junction looked like a real folder, and
+    # remove_tree / cache_prune went into it and deleted the shared romfs it points to.
+    try:
+        return os.lstat(path).st_reparse_tag == IO_REPARSE_TAG_MOUNT_POINT
+    except (OSError, AttributeError):   # (missing, or not Windows: no st_reparse_tag)
+        return False
 
 
 def entries(root=None):
