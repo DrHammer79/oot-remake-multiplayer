@@ -467,6 +467,29 @@ TEST_CASE("hookshot: the game's camera reaches the module for the name tags (no 
           std::string::npos);
 }
 
+TEST_CASE("hookshot: the camera reaches the module at a low Render resolution too (patch 0039)") {
+    // Patch 0001 asked the module only from scene targets of 640x360 and up. 33 % of a 1536x864 output is 512x288 (a
+    // lane game on the lowest settings, 2026-11-24): no camera, no name tags, every walk refused. Patch 0039 takes the
+    // sizes Longshot's upscalers take as the scene (temporal_scene_size: the output 1 to 3 times it), and 640x360 and
+    // up as before.
+    const std::filesystem::path path = kRepo / "hookshot" / "patches" / "0039-coop-camera-scene-size.patch";
+    REQUIRE(std::filesystem::exists(path));
+    const std::string patch = ReadFile(path);
+    CHECK(patch.find("+++ b/gpu/vk/vk_coop.cpp\n") != std::string::npos);
+    CHECK(patch.find("\n-    if (!cw || !color0 || !camera || camera_size < 0x130 || width < 640 || height < 360 ||\n") !=
+          std::string::npos);
+    CHECK(patch.find("\n+        !(temporal_scene_size(width, height) || (width >= 640 && height >= 360)) ||\n") !=
+          std::string::npos);
+    CHECK(patch.find("\n+#include \"vk_temporal.h\"") != std::string::npos);
+    // One file, nothing else changed: the module's own checks stay (CameraBlockOk, the largest target wins).
+    CHECK(patch.find("1 file changed") != std::string::npos);
+    std::array<float, 0x130 / 4> block{};
+    block[0x120 / 4] = 512.0f;
+    block[0x124 / 4] = 288.0f;
+    block[0xa8 / 4] = -1.0f;
+    CHECK(CoopHookshot::CameraBlockOk(block.data(), 512.0f, 288.0f));
+}
+
 TEST_CASE("hookshot: the world hooks (patch 0005) hand the pause counter starts to the module") {
     const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0005-coop-world-hooks.patch");
     CHECK(NewFile(patch, "host/hos_coop_world.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_world.h"));

@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: coop-fetch <coop-fetch@localhost>
+Date: Tue, 24 Nov 2026 00:00:00 -0600
+Subject: [PATCH] Co-op camera at any render size: the scene sizes the
+ upscalers take
+
+vk_coop.cpp note_scene_draw (patch 0001) asked the module for the game's
+camera only from scene targets of 640x360 and up. A low Render resolution
+draws the scene smaller: 33 % of a 1536x864 output is 512x288, 33 % of
+1280x720 is 427x240. There the module was never asked, so co-op had no
+camera: no name tags, no edge arrows, and every play-test step that walks
+by the camera was refused.
+
+The scene is now any size temporal_scene_size takes (the output 1 to 3
+times it, as the upscalers find the scene: Off's stretch, DLSS, FSR, XeSS
+and the game's own), or 640x360 and up as before, until the first upscale
+names the output. The module's own checks are unchanged: the largest
+target of the frame wins, and its camera block must hold the target's size.
+---
+ gpu/vk/vk_coop.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/gpu/vk/vk_coop.cpp b/gpu/vk/vk_coop.cpp
+index d3a2673..c43be90 100644
+--- a/gpu/vk/vk_coop.cpp
++++ b/gpu/vk/vk_coop.cpp
+@@ -17,6 +17,7 @@
+ #include "vk_imgui.h"
+ #include "vk_internal.h"   // (logf, memory_read_as_submitted)
+ #include "vk_texture.h"    // (Texture, texture_frame_no)
++#include "vk_temporal.h"   // (temporal_scene_size: the scene sizes of the output)
+ #include "hos_coop_draw.h"
+ #include "hos_coop_menu.h"
+ 
+@@ -133,7 +134,11 @@ float text_width(void *, float px, const char *s) {
+ 
+ void note_scene_draw(const Texture *color0, uint32_t width, uint32_t height, uint64_t camera, uint64_t camera_size) {
+     const auto cw = camera_wanted_fn.load(std::memory_order_acquire);
+-    if (!cw || !color0 || !camera || camera_size < 0x130 || width < 640 || height < 360 ||
++    // (the scene: a size the gameplay upscale's output can come from, 1 to 3 times smaller, as the upscalers take it; at
++    // a low Render resolution that is under 640x360 (33 % of 1536x864: 512x288). Before the first upscale names the
++    // output, 640x360 and up, as before)
++    if (!cw || !color0 || !camera || camera_size < 0x130 ||
++        !(temporal_scene_size(width, height) || (width >= 640 && height >= 360)) ||
+         color0->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32)
+         return;
+     const uint64_t frame = texture_frame_no();
+-- 
+2.56.0.windows.4
+
