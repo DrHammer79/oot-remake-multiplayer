@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import hs  # noqa: E402
@@ -633,6 +633,84 @@ class CodeModsTest(Fixture):
         self.assertTrue(hs.cache_restore(pair, self.repo, say=self.say))
         self.assertFalse(os.path.exists(os.path.join(pair, "exefs_patches.txt")))
         self.assertIn("older build's exefs_patches.txt removed", self.out.getvalue())
+
+
+class PinModsTest(Fixture):
+    """hs-mods-root (rejoin-host-273): a game build never reads the pin game folder's own mods (the last kit build's
+    puppet pack, with whatever code patch it had): HOS_MODS is always set, to the pairs' mods or an empty folder."""
+
+    LINE = CodeModsTest.LINE
+    mods = CodeModsTest.mods
+
+    def kit(self):
+        k = os.path.join(self.tmp, "kit")
+        write(os.path.join(k, "scripts", "hookshot-build.ps1"),
+              "param([string]$Game = '', [string]$Out = '', [int]$Jobs = 0, [string]$Tools = '', [string]$Work = '')\n")
+        return k
+
+    def build_env(self, pairs, line=""):
+        """The env the kit's hookshot-build.ps1 gets from a dry build of these pairs (a stale pack in the pin)."""
+        shared = hs.pin_dir(hs.stamp(self.repo) + line)
+        write(os.path.join(shared, "game", hs.PACK_DIR, "exefs", "E0F3.ips"), "co-op's Characters tab of a CS-on build")
+        envs = []
+
+        def run_steps(steps, prefix, dry, say=print, cwd=None, env=None):
+            envs.extend(env for s in steps if any("hookshot-build.ps1" in c for c in s))
+            return True
+        old_run, old_line = hs.run_steps, hs.code_mods_line
+        hs.run_steps = run_steps
+        hs.code_mods_line = lambda mods, repo=None, run=None: line if hs.has_code_patches(mods) else ""
+        os.environ["HOS_MODS"] = os.path.join(shared, "game", "mods")   # (a caller's own must not leak in either)
+        try:
+            self.assertTrue(hs.build(pairs, os.path.join(self.tmp, "b"), kit=self.kit(), game="g.nup",
+                                     repo=self.repo, dry=True, say=self.say))
+        finally:
+            hs.run_steps, hs.code_mods_line = old_run, old_line
+            os.environ.pop("HOS_MODS", None)
+        self.assertEqual(len(envs), 1)
+        return envs[0]
+
+    def test_pairs_without_code_mods_build_with_an_empty_mods_folder(self):
+        env = self.build_env([os.path.join(self.tmp, "A1"), os.path.join(self.tmp, "B1")])
+        self.assertEqual(env["HOS_MODS"], os.path.abspath(os.path.join(self.cache, hs.NO_MODS)))
+        self.assertNotIn(os.path.join("pins", ""), env["HOS_MODS"])
+
+    def test_pairs_with_code_mods_build_with_theirs(self):
+        a = os.path.join(self.tmp, "A1")
+        self.mods("A1"), self.mods("B1")
+        env = self.build_env([a, os.path.join(self.tmp, "B1")], self.LINE)
+        self.assertEqual(env["HOS_MODS"], os.path.abspath(os.path.join(a, "mods")))
+
+    def test_the_empty_folder_is_made_empty_again(self):
+        d = os.path.join(self.cache, hs.NO_MODS)
+        self.assertEqual(hs.no_mods_dir(dry=True), os.path.abspath(d))
+        self.assertFalse(os.path.exists(d))   # (a dry run makes nothing)
+        write(os.path.join(d, "OoT Character Select", "exefs", "E0.ips"), "PATCH")
+        self.assertEqual(hs.no_mods_dir(), os.path.abspath(d))
+        self.assertEqual(os.listdir(d), [])
+        self.assertFalse(hs.CACHE_NAME.match(hs.NO_MODS))   # (cache_prune leaves it)
+
+    def test_store_from_a_pins_game_folder_needs_the_pairs(self):
+        st = hs.stamp(self.repo)
+        g = self.game(os.path.join("cache", "pins", hs.pin_of(st), "game"), stamp=st)
+        write(os.path.join(g, hs.PACK_DIR, "exefs", "E0F3.ips"), "stale")
+        with self.assertRaises(hs.Fail) as e:
+            hs.cache_store(g, self.repo, say=self.say)
+        self.assertIn("--pair", str(e.exception))
+        self.assertEqual(hs.cache_store(g, self.repo, say=self.say, want=st), hs.key_of(st))
+        with redirect_stdout(io.StringIO()):   # (the CLI: --pair gives the pairs' want; pairs without code mods)
+            self.assertEqual(hs.main(["--repo", self.repo, "cache", "store", "--from", g,
+                                      "--pair", os.path.join(self.tmp, "A1")]), 0)
+
+    def test_a_cache_in_a_packaged_apps_appdata_is_named_once(self):
+        # (release-01112-4: sessions in a packaged app wrote the whole cache into its own AppData copy, unseen outside)
+        self.assertFalse(hs.packaged(self.cache))
+        os.environ["OOT_COOP_HS_CACHE"] = os.path.join(self.tmp, "AppData", "Local", "Packages", "App_x", "hs-cache")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            hs.cache_root(), hs.cache_root()
+        self.assertEqual(err.getvalue().count("WARNING"), 1)
+        self.assertIn("OOT_COOP_HS_CACHE", err.getvalue())
 
 
 if __name__ == "__main__":
