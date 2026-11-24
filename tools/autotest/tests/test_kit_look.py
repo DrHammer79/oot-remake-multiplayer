@@ -69,6 +69,14 @@ class LookTest(unittest.TestCase):
         self.assertIn("scene KokiriForest_Child -> LostWoods", text)
         self.assertIn("age child -> adult", text)
 
+    def test_body_wins_over_age(self):
+        # after an area change Longshot's `age` can lag; the module's `body` (our Link actor's name) does not
+        text, first = kit_look.look(state(age="child", body="adult"))
+        self.assertIn("Link adult,", text)
+        self.assertEqual(first["age"], "adult")
+        text, _ = kit_look.look(state(age="child", body=None))
+        self.assertIn("Link child,", text)
+
     def test_no_world_says_why_and_stale_says_so(self):
         text, _ = kit_look.look(state(world={"why": "solo: no co-op session", "actors": []}))
         self.assertIn("none listed (solo: no co-op session)", text)

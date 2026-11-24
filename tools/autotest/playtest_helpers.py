@@ -134,13 +134,21 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
     st = pc.game_of(client.state())
     scene, used, still = st.get("scene"), 0, 0
     start = _pos(st)
-    prev, leg_n = None, 0
+    prev, leg_n, misses = None, 0, 0
     while True:
         stop = _interrupted(st, scene, w)         # (before `gone`: a scene change or a stale list is not a death)
         if stop:
             return dict(out, reason=stop)
         if _gone(a, name):
-            return dict(out, reason="gone")
+            misses += 1
+            if misses >= GONE_READS:
+                return dict(out, reason="gone")
+            client.step(PRESS_FRAMES)             # (one read can miss an actor that is there: look again)
+            used += PRESS_FRAMES
+            a, w = _look(client, ident)
+            st = pc.game_of(client.state())
+            continue
+        misses = 0
         out["actor"] = a
         pos, at = _pos(st), a.get("pos")
         if pos is None or not at:
@@ -169,8 +177,45 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
         st = pc.game_of(client.state())     # (the state at the look, so the scene and the list agree)
 
 
+TURN_TOL = 10.0        # Link's facing within this many degrees of the point: turned
+TURN_STRENGTH = 0.25   # a light push of the stick: Link turns that way and takes only a small step
+TURN_FRAMES = 2        # frames of each push
+TURN_ROUNDS = 12       # pushes before giving up
+
+
+def turn_to(client, x, z, tol=TURN_TOL, rounds=TURN_ROUNDS):
+    """Turn Link toward (x, z) the way a player does: light pushes of the left stick that way (`move`, TURN_FRAMES
+    each) until the state's `facing` is within `tol` degrees. No line writes his yaw. Returns turned, reason, facing,
+    off (degrees left), rounds, frames and moved_m (how far the pushes stepped him)."""
+    st = pc.game_of(client.state())
+    start = st.get("pos")
+    out = {"turned": False, "reason": "", "facing": st.get("facing"), "off": None, "rounds": 0, "frames": 0,
+           "moved_m": 0.0}
+    for r in range(rounds + 1):
+        pos, facing = st.get("pos"), st.get("facing")
+        if not pos or not start or facing is None:
+            out["reason"] = "no place or facing in the state"
+            return out
+        want = pc.yaw_to(pos, x, z) % 360
+        off = (want - float(facing) + 180.0) % 360.0 - 180.0
+        out.update(facing=facing, off=round(off, 1), rounds=r, moved_m=round(math.dist(start, pos), 3))
+        if abs(off) <= tol:
+            out.update(turned=True, reason="ok")
+            return out
+        if r == rounds:
+            break
+        m = client.move(want, TURN_STRENGTH, TURN_FRAMES, check=False)
+        if not m.get("ok"):
+            out["reason"] = "move refused: " + str(m.get("error") or "no reason")
+            return out
+        out["frames"] += TURN_FRAMES
+        st = pc.game_of(client.state())
+    out["reason"] = "still %.0f degrees off after %d pushes of the stick" % (out["off"], rounds)
+    return out
+
+
 def face(client, ident, name=None):
-    """Turn Link to the actor: the bridge's `face X Z` (the actor's place), then two frames. Looks the actor up first."""
+    """Turn Link to the actor with the stick (`turn_to`, the actor's place). Looks the actor up first."""
     a, w = _look(client, ident)
     if _no_list(w):
         return {"faced": False, "reason": _no_list(w), "actor": a}
@@ -179,14 +224,14 @@ def face(client, ident, name=None):
     at = a.get("pos")
     if not at:
         return {"faced": False, "reason": "no position", "actor": a}
-    client.act("face %.2f %.2f" % (at[0], at[2]))
-    client.step(2)
-    return {"faced": True, "reason": "ok", "actor": a}
+    t = turn_to(client, at[0], at[2])
+    return {"faced": t["turned"], "reason": t["reason"], "actor": a, "turn": t}
 
 
 def place_facing(client, place_line, point, frames=2):
     """`place X Y Z` and then `face X Z` (the point to look at): the bridge puts Link on its next frames, so a frame pair
-    passes between the two lines and after the second. Returns the replies of both and the frames used."""
+    passes between the two lines and after the second. Returns the replies of both and the frames used. A set-up step,
+    not play (like `place` itself): the only kit helper that still writes Link's yaw."""
     placed = client.act(place_line)
     client.step(frames)
     faced = client.act("face %.2f %.2f" % point)
@@ -250,7 +295,7 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     return out
 
 
-CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age")
+CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age", "body", "room")
 
 
 def _changed(before, after):
@@ -385,3 +430,211 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=No
         return {"result": "refused: %s has no life left" % label if who else "refused: none of that name has a life",
                 "line": line, "seq": seq, "frames": used}
     return {"result": "unknown: the walk said %r" % word, "line": line, "seq": seq, "frames": used}
+
+
+# --- talk: read each text box, press A to the end, pick a reply by its text (docs/playtest.md, "Text boxes") ---------
+# The talk ends when the event has ended and no new text came; the cursor is taken to start on the first button.
+# Read in a lane run (Kokiri shop, Mido; game 0001-0037): a talk is `MessageDialog_00` (T_Name_00 and T_NameNavi_00 the
+# speaker), its reply buttons `PaMessageBtn_00` (ONE pane, T_Btn_00, set once per button). The box's body did not come
+# through the wrap there (another setter): BOX_PANES are kept for when it does. Patch 0042 wraps the letter-animated
+# pane's set-text (BODY_WRAP, read from main only): a text of a message layout from it is a box, whatever its pane.
+MESSAGE_LAYOUTS = ("MessageInGame", "BalloonMessage", "MessageDialog", "MessageLog")
+CHOICE_LAYOUTS = ("PaMessageBtn",)
+BOX_PANES = ("T_MessageWhiteOut_00", "T_Message_00")
+NAME_PANES = ("T_Name_00", "T_NameNavi_00")
+BODY_WRAP = 26         # a text's `wrap` from patch 0042's letter-animated pane setter
+TALK_BOXES = 20        # a talk reads at most this many boxes
+TALK_FRAMES = 1200     # ... and gives up after this many frames with nothing new (no box, name or buttons)
+TALK_TOTAL = 7200      # ... and never runs more than this many frames in all
+TALK_WAIT = 10         # frames run after each press before the texts are read
+TALK_IDLE = 3          # reads in a row with no event and no new text: the talk is over (with an event: press A)
+TEXT_NOW = 2 ** 53 - 1  # `text` since this: no texts, only `last` and `hooked`
+GONE_READS = 3         # reads in a row without the actor before go_to_actor says `gone` (one read can miss it)
+
+
+def _message_text(t):
+    return any(name in (t.get("layout") or "") for name in MESSAGE_LAYOUTS + CHOICE_LAYOUTS)
+
+
+def _choice_text(t):
+    return any(name in (t.get("layout") or "") for name in CHOICE_LAYOUTS)
+
+
+PAGE_BREAK = (0, 4)  # the markup tag (group, type) that starts a new page of the same text
+
+
+def strip_markup(text):
+    """The words of a box text without its markup. The game's text holds tags as bytes: 0x0e, then group, type and size
+    (16-bit little-endian each), then `size` bytes of parameters (a name such as an animation or a variable, a pause,
+    a colour). A tag cut short, or one that names more bytes than there are, loses only its first byte."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "":
+            if i + 7 <= n and ord(text[i + 5]) < 256 and ord(text[i + 6]) < 256:
+                size = ord(text[i + 5]) | ord(text[i + 6]) << 8
+                if i + 7 + size <= n:
+                    kind = (ord(text[i + 1]) | ord(text[i + 2]) << 8, ord(text[i + 3]) | ord(text[i + 4]) << 8)
+                    if kind == PAGE_BREAK and out and not out[-1].isspace():
+                        out.append(" ")  # a page break ends a sentence: its two sides are not one word
+                    i += 7 + size
+                    continue
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out).strip()
+
+
+def _same_reply(text, reply):
+    return " ".join(str(text).split()).casefold() == " ".join(str(reply).split()).casefold()
+
+
+def _has_reply(text, reply):
+    return " ".join(str(reply).split()).casefold() in " ".join(str(text).split()).casefold()
+
+
+def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_frames=TALK_FRAMES,
+         near_m=INTERACT_M, wait=TALK_WAIT, since=None, max_total=TALK_TOTAL):
+    """Talk to whoever the A prompt names, or (with `ident` and `name` from get_world, when no prompt shows yet) walk
+    to that actor and face it first. Presses A, then reads each new text (the bridge's `text`): the speaker, the boxes,
+    the reply buttons. Presses A to go on, and when buttons show picks the next of `reply` (one text, or a list: one
+    per set of buttons, in order) by Down and A. With no reply left it stops and lists the buttons, the talk left open:
+    call again with `reply` and `since` (this answer's `since`) to go on from there, no new A first.
+    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0041),
+    choices and no reply, reply not offered, too many boxes, timed out, scene changed, loading.
+    Returns result, done, speakers (in order), boxes [{speaker, text, markup, raw}], choices (the last seen), picked
+    [{text, index}], since, presses, frames. A box's `text` is its words without the markup; `raw` (only when markup
+    was cut) is the text as the game set it. A box set twice in a row is one box; a text of only markup is no box.
+    `speaker` is the name pane shown with the box (None when the game shows none). `max_frames` is the frames the
+    talk waits with nothing new (a box, a name, buttons): it keeps going while boxes keep coming, up to `max_total`."""
+    replies = [] if reply is None else [reply] if isinstance(reply, str) else list(reply)
+    out = {"result": None, "pressed": False, "done": False, "speakers": [], "boxes": [], "choices": [], "picked": [],
+           "since": None, "presses": 0, "frames": 0}
+    try:
+        base = client.text(TEXT_NOW)
+        hooked = bool(base.get("hooked"))
+        seen = base.get("last", 0) if since is None else int(since)
+    except pc.BridgeError as e:
+        hooked, seen = None, 0
+        why = "no text: the bridge has no `text` verb (%s)" % e.code
+    if hooked is False:
+        why = "no text: this Hookshot has no pane text wrap (patch 0041)"
+    st = pc.game_of(client.state())
+    if since is not None and hooked and st.get("event"):
+        out["frames"] = 0                       # (going on with a talk that is open: no first A)
+    else:
+        if ident is not None and no_prompt(st.get("prompt")):
+            start = interact_with(client, ident, name, near_m)
+            out["walk"] = start.get("walk")
+        else:
+            start = interact(client, "talk")
+        out["pressed"] = bool(start.get("pressed"))
+        if not start.get("pressed"):
+            out["result"] = start["result"]
+            return out
+        out["presses"], out["frames"] = 1, start.get("frames", 2 * PRESS_FRAMES)
+        if not hooked:
+            out["result"] = why + "; one A pressed"
+            return out
+    scene = pc.game_of(client.state()).get("scene")
+    speaker, idle, quiet, fresh = None, 0, 0, False
+    moved = out["frames"]                       # (the frame count when something new last came)
+    while True:
+        client.step(wait)
+        out["frames"] += wait
+        before = seen
+        r = client.text(seen)
+        seen = r.get("last", seen)
+        new = [t for t in r.get("texts", []) if _message_text(t)]
+        choices, first = [], None
+        for t in new:
+            pane, text = t.get("pane") or "", t.get("text") or ""
+            if _choice_text(t):
+                if text:
+                    choices.append(text)
+                    first = t.get("seq", before + 1) if first is None else first
+            elif pane in NAME_PANES:
+                if text and text != speaker:
+                    out["speakers"].append(text)
+                    moved = out["frames"]
+                speaker = text or None
+                last = out["boxes"][-1] if out["boxes"] else None
+                if speaker and last and not last["done"]:
+                    last["speaker"] = speaker   # (the game sets the name after the body: it is this box's)
+                fresh = True
+            elif (pane in BOX_PANES or t.get("wrap") == BODY_WRAP) and text:
+                last = out["boxes"][-1] if out["boxes"] else None
+                words = strip_markup(text)
+                if last and not last["done"] and text.startswith(last["_raw"]) and text != last["_raw"]:
+                    last.update(_raw=text, text=words)   # (the same box, grown)
+                    moved = out["frames"]
+                elif last and text == last["_raw"]:
+                    pass                                   # (the same box set again)
+                elif words:
+                    out["boxes"].append({"speaker": speaker, "text": words, "_raw": text, "done": False,
+                                         "markup": bool(t.get("markup")) or words != text})
+                    moved = out["frames"]
+                fresh = True
+        if choices:
+            if choices != out["choices"]:
+                moved = out["frames"]
+            out["choices"] = choices
+            fresh = True
+        st = pc.game_of(client.state())
+        if st.get("scene") != scene:
+            out["result"] = "scene changed"
+            break
+        if st.get("loading"):
+            out["result"] = "loading"
+            break
+        idle = idle + 1 if not new and not st.get("event") else 0
+        quiet = 0 if new else quiet + 1
+        if idle >= TALK_IDLE:
+            out["result"], out["done"] = "done: the event ended", True
+            break
+        if len(out["boxes"]) > max_boxes:
+            out["result"] = "too many boxes (%d)" % max_boxes
+            break
+        if out["frames"] - moved >= max_frames:
+            out["result"] = "timed out after %d frames with nothing new" % (out["frames"] - moved)
+            break
+        if out["frames"] >= max_total:
+            out["result"] = "timed out: more than %d frames in all" % max_total
+            break
+        if choices:
+            out["since"] = first - 1           # (a call with this `since` reads these buttons again)
+            listed = ", ".join(map(repr, choices))
+            if len(out["picked"]) >= len(replies):
+                out["result"] = "choices showed and no reply is left: %s (the talk is left open: talk again with " \
+                                "`reply` and `since`)" % listed
+                break
+            want = replies[len(out["picked"])]
+            at = next((i for i, c in enumerate(choices) if _same_reply(c, want)), None)
+            if at is None:
+                at = next((i for i, c in enumerate(choices) if _has_reply(c, want)), None)
+            if at is None:
+                out["result"] = "reply not offered: %r (choices: %s)" % (want, listed)
+                break
+            for _ in range(at):
+                client.input(None, ["DOWN"], PRESS_FRAMES)
+                client.step(PRESS_FRAMES)
+                out["frames"] += 2 * PRESS_FRAMES
+            out["picked"].append({"text": choices[at], "index": at})
+        # A when a box, a speaker or the choices came since the last press, or to nudge an event that went quiet.
+        if st.get("event") and (fresh or quiet >= TALK_IDLE):
+            client.input(None, ["A"], PRESS_FRAMES)
+            out["presses"] += 1
+            out["frames"] += PRESS_FRAMES
+            if out["boxes"]:
+                out["boxes"][-1]["done"] = True
+            fresh, quiet = False, 0
+    for b in out["boxes"]:
+        b.pop("done", None)
+        raw = b.pop("_raw")
+        if raw != b["text"]:
+            b["raw"] = raw
+    if out["done"] and len(out["picked"]) < len(replies):
+        out["result"] = "done, but no choices showed for %s" % ", ".join(map(repr, replies[len(out["picked"]):]))
+        out["done"] = False
+    return out

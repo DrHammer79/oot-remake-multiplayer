@@ -69,7 +69,63 @@ bool Ticks(std::string_view word, std::uint32_t& out) {
     return true;
 }
 
+// One scenario grammar for both readers (row 325 review): tools/autotest/hookshot.py's parse takes the same words for
+// TICKS and numbers as this parser (its _ticks, _await_ticks, _number, _whole_in, _int32), so a line one of them
+// plays is never refused by the other.
+//
+// A runner-only step's TICKS (await): hookshot.py's _await_ticks, any whole number from 0 up (the most it waits; 0: no
+// wait). Not Ticks: that is the rule of the module's own timed steps (1 up to kMaxStepTicks), and a line the runner
+// plays must not be refused here.
+bool RunnerTicks(std::string_view word) {
+    if (word.empty()) {
+        return false;
+    }
+    for (const char c : word) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A plain decimal: [+-] digits [. digits] or [+-] . digits, then an optional exponent (e [+-] digits); hookshot.py's
+// _DECIMAL. strtod alone also takes hex ("0x10"), "inf" and "nan", which Python's float() reads otherwise or not.
+bool Decimal(std::string_view word) {
+    std::size_t i = 0;
+    const auto digits = [&] {
+        const std::size_t from = i;
+        while (i < word.size() && word[i] >= '0' && word[i] <= '9') {
+            ++i;
+        }
+        return i - from;
+    };
+    if (i < word.size() && (word[i] == '+' || word[i] == '-')) {
+        ++i;
+    }
+    std::size_t mantissa = digits();
+    if (i < word.size() && word[i] == '.') {
+        ++i;
+        mantissa += digits();
+    }
+    if (mantissa == 0) {
+        return false;
+    }
+    if (i < word.size() && (word[i] == 'e' || word[i] == 'E')) {
+        ++i;
+        if (i < word.size() && (word[i] == '+' || word[i] == '-')) {
+            ++i;
+        }
+        if (digits() == 0) {
+            return false;
+        }
+    }
+    return i == word.size();
+}
+
 bool Axis(std::string_view word, std::int32_t& out) {
+    if (!Decimal(word)) {
+        return false;
+    }
     const std::string s(word);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
@@ -136,6 +192,9 @@ bool Keys(std::string_view word, Step& step, std::string& bad) {
 }
 
 bool Number(std::string_view word, float& out) {
+    if (!Decimal(word)) {
+        return false;
+    }
     const std::string s(word);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
@@ -414,12 +473,13 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             const auto to = static_cast<std::size_t>(w.back().data() + w.back().size() - line.data());
             step.mark = std::string(line.substr(from, to - from));
         } else if (cmd == "MENU") {
-            // menu customize|close: the Customize page opened, or the menu closed. Test only.
+            // menu customize|close|host: the Customize page opened, the menu closed, or the game hosts through the
+            // Multiplayer page's Host (hookshot.py --host-in-game: LICHII_COOP_TEST_HOST). Test only.
             std::string page = w.size() == 2 ? std::string(w[1]) : std::string{};
             std::transform(page.begin(), page.end(), page.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (page != "customize" && page != "close") {
-                return fail("want: menu customize|close");
+            if (page != "customize" && page != "close" && page != "host") {
+                return fail("want: menu customize|close|host");
             }
             step.kind = Kind::menu;
             step.mark = page;
@@ -481,6 +541,18 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
                 return fail("want: give ITEM");
             }
             step.kind = Kind::give;
+            step.mark = std::string(w[1]);
+        } else if (cmd == "EVENT") {
+            // event NAME: our game asked to play the event setting NAME (an RSDB EventSetting row) by name, through
+            // the hook's live-event requester (the path the shared boss intros take). Test only. boss-route-01112:
+            // a boss rush stage reached by `warp` misses the boot event the game's own rematch reserves with the
+            // scene change (DreamBossStage's BossStageEnterBase calls: BootEventName), and Barinade and Ganondorf
+            // appear only through theirs (DreamBossStage_Rematch_<Boss>_Start: DreamWorld_BossAppear on, the
+            // boss's EventTriggerSetWasAppearInEvent); their stages have no asker of their own.
+            if (w.size() != 2) {
+                return fail("want: event NAME");
+            }
+            step.kind = Kind::event;
             step.mark = std::string(w[1]);
         } else if (cmd == "SETFLAG") {
             // setflag NAME VALUE: this game's Int or Bool flag NAME (a GameDataList
@@ -574,6 +646,15 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             }
             step.kind = Kind::mark;
             step.mark = std::string(w[1]);
+        } else if (cmd == "AWAIT") {
+            // tools/autotest/hookshot.py's own step (row 325): it reads the game's log until a new line matches, the
+            // module is never asked anything for it (never in the commands file). One scenario grammar for both
+            // readers: its shape is checked here and it makes no module step (test_hookshot.py checks that every
+            // verb the runner reads is one of this parser's).
+            if (w.size() < 3 || !RunnerTicks(w[1])) {
+                return fail("want: await TICKS REGEX (the runner's own step)");
+            }
+            continue;
         } else {
             return fail("unknown command " + std::string(w[0]));
         }
@@ -676,7 +757,8 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
         if (s.kind == Kind::warp || s.kind == Kind::give || s.kind == Kind::wear ||
             s.kind == Kind::assign || s.kind == Kind::dress || s.kind == Kind::chat || s.kind == Kind::kill || s.kind == Kind::drop || s.kind == Kind::hurt ||
             s.kind == Kind::hit || s.kind == Kind::stun ||
-            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump) {
+            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump ||
+            s.kind == Kind::event) {
             requests_.push_back(Request{s.kind, s.mark, s.start, {}, s.id});
             ++index_;
             continue;
@@ -799,34 +881,25 @@ void Runner::Steer(const Step& step, double now_s, std::optional<std::array<floa
     Hold(angle, now_s);
 }
 
-std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, const std::array<float, 3>& target,
-                                             float short_m) {
-    const float d[3] = {target[0] - from[0], target[1] - from[1], target[2] - from[2]};
-    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    if (!std::isfinite(len) || len < 1e-3f || !std::isfinite(short_m)) {
+std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
+                                  const std::array<float, 3>& target, float max_deg, float max_side_m) {
+    const float d[3] = {target[0] - at[0], target[1] - at[1], target[2] - at[2]};
+    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const float fl = std::sqrt(flight[0] * flight[0] + flight[1] * flight[1] + flight[2] * flight[2]);
+    if (!std::isfinite(dl) || !std::isfinite(fl) || !std::isfinite(max_deg) || !std::isfinite(max_side_m) || dl < 1e-3f || fl < 1e-6f) {
         return std::nullopt;
     }
-    const float f[3] = {d[0] / len, d[1] / len, d[2] / len};  // the way it faces (column 2)
-    // Right (column 0): the world's up crossed with f, flat; straight up or down has none, so +x is taken.
-    float r[3] = {f[2], 0.0f, -f[0]};
-    const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
-    if (rl < 1e-4f) {
-        r[0] = 1.0f;
-        r[2] = 0.0f;
-    } else {
-        r[0] /= rl;
-        r[2] /= rl;
-    }
-    const float u[3] = {f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]};  // f x r
-    const float back = std::min(std::max(short_m, 0.0f), len);
-    std::array<float, 12> t{};
-    for (int i = 0; i < 3; ++i) {
-        t[i] = target[i] - f[i] * back;
-        t[3 + i * 3 + 0] = r[i];
-        t[3 + i * 3 + 1] = u[i];
-        t[3 + i * 3 + 2] = f[i];
-    }
-    return t;
+    const float f[3] = {flight[0] / fl, flight[1] / fl, flight[2] / fl};
+    const float along = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];   // how far along the flight the target is passed
+    AimNudged out;
+    out.off_deg = std::acos(std::clamp(along / dl, -1.0f, 1.0f)) * 57.2957795f;
+    out.side_m = dl * std::sin(out.off_deg / 57.2957795f);
+    if (along <= 0.0f || out.off_deg > max_deg || out.side_m > max_side_m) return out;
+    // The place whose line along f goes through the target, `along` before it: only the sideways miss is taken away.
+    std::array<float, 3> p{};
+    for (int i = 0; i < 3; ++i) p[i] = target[i] - f[i] * along;
+    out.put = p;
+    return out;
 }
 
 } // namespace CoopTestInput
@@ -862,6 +935,7 @@ const char* KindWord(Kind kind) {
     case Kind::drop: return "drop";
     case Kind::setflag: return "setflag";
     case Kind::setenum: return "setenum";
+    case Kind::event: return "event";
     case Kind::sync: return "sync";
     case Kind::menu: return "menu";
     case Kind::dump: return "dump";
@@ -1486,6 +1560,7 @@ bool NowKind(Kind k) {
     case Kind::mark: case Kind::give: case Kind::wear: case Kind::assign: case Kind::dress: case Kind::chat:
     case Kind::place: case Kind::face: case Kind::aim: case Kind::kill: case Kind::hurt: case Kind::hit:
     case Kind::stun: case Kind::drop: case Kind::setflag: case Kind::setenum: case Kind::menu: case Kind::dump:
+    case Kind::event:
         return true;
     default:
         return false;
@@ -1522,6 +1597,11 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         SetEnum(system, request.name, request.start);
     } else if (request.kind == Kind::dump) {
         Dump(system, request.name);
+    } else if (request.kind == Kind::event) {
+        // Asked when no event runs and our game is in a session with live events on (coop_hook.cpp); the
+        // requester's own lines say when it was asked and whether the game took it.
+        CoopBoss::WantEvent(request.name);
+        LOG_INFO(Core, "coop: test event {}: handed to the live-event requester", request.name);
     } else if (request.kind == Kind::place && !request.name.empty()) {
         const auto on = CoopObjects::TestPlatformPlace(request.name);
         const bool ok = on && CoopBoss::MoveLink(system, g_state.main,
@@ -1543,11 +1623,8 @@ void Do(Core::System& system, const Runner::Request& request, double now,
             LOG_INFO(Core, "coop: test face {:.2f} {:.2f}: failed", request.at[0], request.at[2]);
         }  // done: logged where it is turned
     } else if (request.kind == Kind::aim) {
-        // Row 173: Link turned to the target (as face), then our next arrow put on its way into it.
-        if (!CoopBoss::FaceLink(system, g_state.main, request.at[0], request.at[2])) {
-            LOG_INFO(Core, "coop: test aim {:.2f} {:.2f} {:.2f}: Link not turned", request.at[0], request.at[1],
-                     request.at[2]);
-        }
+        // Row 173: our next arrow is watched and, when its flight already points at the target, nudged the last bit.
+        // Link is not turned here: the tester aims with the sticks (kit_move.shoot).
         CoopObjects::QueueTestAim(request.at[0], request.at[1], request.at[2]);
     } else if (request.kind == Kind::kill) {
         CoopObjects::QueueTestKill(request.name, request.id);  // logged where it is done

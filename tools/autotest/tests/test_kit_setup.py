@@ -29,12 +29,27 @@ class Fake:
     def warp(self, scene, entrance=None, timeout=60):
         return self._do("warp", scene, entrance)
 
+    def act(self, line):
+        return self._do("act", line)
+
+    def step(self, frames=1):
+        return self._do("step", frames)
+
 
 class Plan(unittest.TestCase):
     def test_life_is_quarter_hearts_and_the_warp_comes_last(self):
         calls = ks.plan({"warp": {"scene": "GohmaStage", "entrance": "GohmaStage"}, "hearts": 5, "max_hearts": 5})
         self.assertEqual(calls, [("flag", "PlayerStatus.MaxLife", 20), ("flag", "PlayerStatus.Life", 20),
                                  ("warp", "GohmaStage", "GohmaStage")])
+
+    def test_place_comes_after_the_warp_and_is_checked(self):
+        calls = ks.plan({"place": {"x": -12, "y": 48.5, "z": 66.5}, "warp": {"scene": "InsideTheDekuTree", "entrance": "Entrance"},
+                         "hearts": 3})
+        self.assertEqual(calls[-2:], [("warp", "InsideTheDekuTree", "Entrance"), ("place", -12.0, 48.5, 66.5)])
+        for bad in ({"x": 1, "y": 2}, {"x": 1, "y": 2, "z": "3"}, {"x": 1, "y": 2, "z": float("nan")},
+                    {"x": True, "y": 2, "z": 3}, {"x": 1, "y": 2, "z": 3, "w": 4}, [1, 2, 3], {"x": 1e9, "y": 0, "z": 0}):
+            with self.assertRaises(ValueError, msg=bad):
+                ks.plan({"place": bad})
 
     def test_items_first_then_magic_rupees_keys(self):
         calls = ks.plan({"magic": 2, "rupees": 99, "items": ["bow"], "small_keys": {"ForestTemple": 3},
@@ -84,6 +99,11 @@ class Plan(unittest.TestCase):
 
 
 class Apply(unittest.TestCase):
+    def test_place_is_sent_as_one_place_line_after_the_warp(self):
+        c = Fake()
+        ks.apply(c, {"warp": {"scene": "InsideTheDekuTree", "entrance": "Entrance"}, "place": {"x": -12, "y": 48.5, "z": 66.5}})
+        self.assertEqual(c.log, [("warp", "InsideTheDekuTree", "Entrance"), ("act", "place -12.0 48.5 66.5")])
+
     def test_runs_every_call_in_order(self):
         c = Fake()
         done = ks.apply(c, {"hearts": 3, "items": ["bombs"], "warp": {"scene": "S"}})
@@ -123,15 +143,17 @@ class Presets(unittest.TestCase):
         names = set(ks.presets())
         self.assertTrue({"deku-start", "deku-before-gohma", "before-dodongo", "before-barinade", "before-phantom-ganon",
                          "before-volvagia", "before-morpha", "before-bongo-bongo", "before-twinrova",
-                         "before-ganondorf"} <= names, names)
+                         "before-ganondorf", "before-ganon"} <= names, names)
 
     def test_every_preset_plans_and_every_name_is_one_the_repository_already_uses(self):
         text = _source_text()
         starts = open(os.path.join(REPO, "lichii/hook/coop_start_points.inc"), encoding="utf-8").read()
         for name in ks.presets():
             calls = ks.plan(ks.load_preset(name))
-            self.assertEqual(calls[-1][0], "warp", name)       # the warp is last
-            scene, start = calls[-1][1], calls[-1][2]
+            kinds = [c[0] for c in calls]
+            self.assertEqual(kinds.count("warp"), 1, name)
+            self.assertTrue(all(k == "place" for k in kinds[kinds.index("warp") + 1:]), name)   # only a place after it
+            scene, start = calls[kinds.index("warp")][1], calls[kinds.index("warp")][2]
             self.assertIn('{"%s", "%s"' % (scene, start), starts, name)
             for c in calls:
                 if c[0] == "give":
@@ -139,6 +161,88 @@ class Presets(unittest.TestCase):
                                   text, (name, c))
                 elif c[0] == "flag" and not c[1].startswith(("PlayerStatus.", "DungeonInfo.")):
                     self.assertIn(c[1], text, (name, c))
+
+    def test_the_gohma_preset_walks_in_through_the_door_not_the_rush_room(self):
+        # A free-play warp into the boss rush's GohmaStage left both games black, with no control and no camera
+        # (kit-fight's lane run). The preset goes into the Deku Tree, clears the boss room's and the intro's flags so
+        # the door's own trigger runs, and puts Link in the corridor before the door (as gohma-door).
+        calls = ks.plan(ks.load_preset("deku-before-gohma"))
+        self.assertIn(("warp", "InsideTheDekuTree", "Entrance"), calls)
+        self.assertNotIn("GohmaStage", [c[1] for c in calls if c[0] == "warp"])
+        self.assertEqual(calls[-1], ("place", -12.0, 48.5, 66.5))
+        flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+        for name in ("HavePlayedEvent.InsideTheDekuTree_BossArea_ShutIn", "HavePlayedEvent.Dm_Deku_BossIn",
+                     "HavePlayedEvent.Dm_Deku_BossOut", "HavePlayedEvent.InsideTheDekuTree_BossArea_Warp",
+                     "InsideTheDekuTree_BossArea_ShutIn", "InsideTheDekuTree_BossArea_ChangeENVForBoss",
+                     "Gohma_IsLightingForBattle", "Gohma_DefeatBoss", "HavePlayedEvent.InsideTheDekuTree_BossDie"):
+            self.assertEqual(flags.get(name), 0, name)
+        self.assertEqual(flags.get("0x7d776b61"), "DefeatBoss")
+
+    def test_age_sets_the_childhood_flag_just_before_the_warp_and_apply_lets_frames_run(self):
+        # A warp loads Link at the age of Sequence_IsChildhood; the lane recipe is setflag, wait, then warp.
+        for age, value in (("adult", 0), ("child", 1)):
+            calls = ks.plan({"age": age, "hearts": 3, "max_hearts": 3, "warp": {"scene": "ForestTemple", "entrance": "ForestTemple"},
+                             "place": {"x": 1, "y": 2, "z": 3}})
+            kinds = [c[0] for c in calls]
+            self.assertEqual(calls[kinds.index("warp") - 1], ("flag", "Sequence_IsChildhood", value))
+        for bad in ("teen", 1, None, True):
+            with self.assertRaises(ValueError):
+                ks.plan({"age": bad, "warp": {"scene": "ForestTemple"}})
+        fake = Fake()
+        ks.apply(fake, {"age": "adult", "warp": {"scene": "ForestTemple", "entrance": "ForestTemple"}})
+        self.assertEqual(fake.log, [("flag", "Sequence_IsChildhood", 0), ("step", 30), ("warp", "ForestTemple", "ForestTemple")])
+
+    def test_the_adult_boss_presets_set_the_age_and_go_through_their_dungeon(self):
+        # name: (scene, start, the intro played flag, the room's arrival point from docs/dungeons-boss.md / the start list)
+        want = {
+            "before-phantom-ganon": ("ForestTemple", "ForestTemple", "HavePlayedEvent.Dm_ForestTemple_BossIn", (-5.6, 74.67, -65.83)),
+            "before-volvagia": ("FireTemple", "FireTemple", "HavePlayedEvent.Dm_FireTemple_BossIn", (-64.51, 102.58, -0.01)),
+            "before-morpha": ("WaterTemple", "WaterTemple_FromLakeHylia", "HavePlayedEvent.Dm_WaterTemple_BossIn", (0.17, 131.36, -87.12)),
+            "before-bongo-bongo": ("ShadowTemple", "Entrance", "HavePlayedEvent.Dm_ShadowTemple_BossIn", (-138.26, -11.46, 22.01)),
+            "before-twinrova": ("SpiritTemple", "SpiritTemple_Entrance", "HavePlayedEvent.Dm_SpiritTemple_BossIn", (-0.73, 142.17, -158.59)),
+            "before-ganondorf": ("InsideGanonCastle", "Entrance", "HavePlayedEvent.Dm_InsideGanonCastle_BossIn", (0.01, 171.05, -11.31)),
+            "before-ganon": ("FinalBattleField", "FinalBattleField_Entrance", "HavePlayedEvent.Dm_FinalBattle_BossIn", (11.79, 100.05, -1.07)),
+        }
+        for name, (scene, start, intro, xyz) in want.items():
+            calls = ks.plan(ks.load_preset(name))
+            kinds = [c[0] for c in calls]
+            w = kinds.index("warp")
+            self.assertEqual(calls[w], ("warp", scene, start), name)
+            self.assertEqual(calls[w - 1], ("flag", "Sequence_IsChildhood", 0), name)   # adult, just before the warp
+            self.assertEqual(calls[-1], ("place",) + xyz, name)
+            flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+            self.assertEqual(flags.get(intro), 0, name)
+            self.assertNotIn("Stage", scene, name)
+
+    def test_the_child_boss_presets_set_the_age_and_place_link_at_the_rooms_arrival(self):
+        for name, xyz in (("before-dodongo", (24.0, 73.41, -77.5)), ("before-barinade", (42.41, 102.01, -98.14))):
+            calls = ks.plan(ks.load_preset(name))
+            w = [c[0] for c in calls].index("warp")
+            self.assertEqual(calls[w - 1], ("flag", "Sequence_IsChildhood", 1), name)
+            self.assertEqual(calls[-1], ("place",) + xyz, name)
+
+    def test_the_dodongo_and_barinade_presets_load_the_dungeon_not_the_rush_room(self):
+        # As the Gohma preset: the rush rooms DodongoStage and BarinadeStage are not the dungeon, and a warp straight
+        # into a boss room skips the door's own trigger. Both go into their dungeon at its entrance, keep the boss key,
+        # and clear the boss's intro and death flags so the game's own door trigger can run.
+        want = {
+            "before-dodongo": ("DodongoCavern", "DodongoCavern_MountainTrailSide", "DodongoStage",
+                               ("HavePlayedEvent.Dm_DodongoCave_BossIn", "HavePlayedEvent.Dm_DodongoCave_BossOut",
+                                "HavePlayedEvent.Get_StoneOfFire_DefeatBoss"),
+                               ("flag", "DungeonInfo.DodongoCavern.IsGetBossKey", 1)),
+            "before-barinade": ("InsideJabuJabuBelly", "InsideJabuJabuBelly_FromZoraFountain", "BarinadeStage",
+                                ("HavePlayedEvent.Dm_InsideJabu_Jabu_BossIn", "HavePlayedEvent.Dm_InsideJabu_Jabu_BossOut",
+                                 "HavePlayedEvent.Get_StoneOfWater_DestroyBoss"),
+                                ("flag", "DungeonInfo.InsideJabuJabuBelly.IsGetBossKey", 1)),
+        }
+        for name, (scene, start, rush, cleared, key) in want.items():
+            calls = ks.plan(ks.load_preset(name))
+            self.assertIn(("warp", scene, start), calls, name)
+            self.assertNotIn(rush, [c[1] for c in calls if c[0] == "warp"], name)
+            self.assertIn(key, calls, name)
+            flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+            for f in cleared:
+                self.assertEqual(flags.get(f), 0, (name, f))
 
     def test_a_bad_preset_name_is_refused_with_the_list(self):
         for bad in ("nope", "../x", "", None, "A"):

@@ -274,6 +274,19 @@ TEST_CASE("playtest: move's stick in the four quadrants with the camera toward +
     CHECK(ViewYaw(Camera(-135, false)).value() == doctest::Approx(-135.0));
 }
 
+TEST_CASE("playtest: the state's view has the camera's yaw, pitch and matrix") {
+    const std::string v = ViewMember(Camera(90, true, 30), true);
+    CHECK(v.rfind(",\"view\":{\"yaw\":90,\"pitch\":-30,\"clip\":[", 0) == 0);
+    CHECK(v.find(",1.7,") != std::string::npos);
+    CHECK(v.size() - v.rfind("],\"y_down\":true}") == std::string("],\"y_down\":true}").size());
+    CHECK(ViewMember(Camera(-45, false)).find("\"yaw\":-45,\"pitch\":0,") != std::string::npos);
+    CHECK(ViewMember(std::nullopt) == ",\"view\":null");
+    CHECK(ViewMember(std::array<float, 16>{}) == ",\"view\":null");   // no forward
+    auto bad = Camera(0, true);
+    bad[5] = NAN;
+    CHECK(ViewMember(bad) == ",\"view\":null");
+}
+
 TEST_CASE("playtest: move has no stick for a camera with no ground direction") {
     CHECK_FALSE(MoveAxes(Camera(0, true, 90), 0, 1));  // straight down
     std::array<float, 16> zero{};
@@ -551,6 +564,12 @@ TEST_CASE("playtest: the world member lists actors with owner, alive and both fr
     CHECK(w->Get("total")->number == 2);
     CHECK(w->Get("other_count")->number == 1);
     CHECK(w->Get("why") == nullptr);  // not empty: no reason
+    CHECK(Compact(*w->Get("solo")) == "false");  // the sharing walk's list
+    s.solo = true;
+    const auto solo = CoopModJson::Parse("{" + WorldMember(true, s, 10, 1200).substr(1) + "}");
+    REQUIRE(solo);
+    CHECK(Compact(*solo->Get("world")->Get("solo")) == "true");  // the solo walk's: a strike by id is refused
+    s.solo = false;
     const auto& a0 = w->Get("actors")->array[0];
     CHECK(a0.Get("id")->number == 4660);
     CHECK(Compact(*a0.Get("addr")) == "\"0x1234\"");  // the id in hex, as the debug log prints addresses
@@ -910,6 +929,38 @@ TEST_CASE("playtest: LinkMembers shows null for every Link member of an old snap
     CHECK(m.find(",\"snapshot_stale\":true") != std::string::npos);
 }
 
+TEST_CASE("playtest: RoomMember gives the room of the nearest placement, null when it cannot know") {
+    const CoopRooms::Table rooms(CoopRooms::Parse("Dungeon 3 1.5 100 -4\nDungeon 7 40 100 40\n"));
+    const auto fresh = Status(Snap(998), 1000, "\"Dungeon\"");
+    CHECK(RoomMember(&fresh, "Dungeon", rooms) == ",\"room\":3");
+    CHECK(RoomMember(&fresh, "KokiriForest", rooms) == ",\"room\":null");  // a scene with no rooms
+    CHECK(RoomMember(&fresh, "", rooms) == ",\"room\":null");
+    CHECK(RoomMember(&fresh, "Dungeon", CoopRooms::Table{}) == ",\"room\":null");  // no pack
+    const CoopRooms::Table far(CoopRooms::Parse("Dungeon 3 500 100 500\n"));
+    CHECK(RoomMember(&fresh, "Dungeon", far) == ",\"room\":null");  // no placement near
+    const auto old = Status(Snap(11890), 12984, "\"Dungeon\"");
+    CHECK(RoomMember(&old, "Dungeon", rooms) == ",\"room\":null");  // never the room of an old place
+    const auto none = Status("null", 1000, "\"Dungeon\"");
+    CHECK(RoomMember(&none, "Dungeon", rooms) == ",\"room\":null");
+    CHECK(RoomMember(nullptr, "Dungeon", rooms) == ",\"room\":null");
+}
+
+TEST_CASE("playtest: BodyMember reads the age from our Link actor's name, null without a live list") {
+    CoopWorldSnapshot::Snapshot snap;
+    CoopWorldSnapshot::WorldActor puppet;
+    puppet.name = "CoopPuppet_Adult";
+    snap.actors.push_back(puppet);
+    CHECK(BodyMember(snap, true) == ",\"body\":null");  // a puppet is not our Link
+    CoopWorldSnapshot::WorldActor link;
+    link.name = "Player_Child";
+    snap.actors.push_back(link);
+    CHECK(BodyMember(snap, true) == ",\"body\":\"child\"");
+    snap.actors.back().name = "Player_Adult";
+    CHECK(BodyMember(snap, true) == ",\"body\":\"adult\"");
+    CHECK(BodyMember(snap, false) == ",\"body\":null");  // a stale list (a load) says nothing
+    CHECK(BodyMember(std::nullopt, true) == ",\"body\":null");
+}
+
 TEST_CASE("playtest: LinkMembers with no reply or no game: all null, not stale") {
     const std::string none = LinkMembers(nullptr);
     CHECK(none.find(",\"pos\":null") != std::string::npos);
@@ -992,10 +1043,10 @@ TEST_CASE("playtest: warp with an entrance in free play goes by the game's map c
     const auto play = Status(Snap(999));
     CHECK(PlanWarp(&play, true, "KokiriForest").route == WarpRoute::map_event);
     CHECK(PlanWarp(&play, true, "GohmaStage").route == WarpRoute::map_event);
-    // The age rule holds on this route too: the map change event does not change Link's age.
+    // The map change event does not change Link's age: the other age's map sets the age first (set_age).
     const auto adult = PlanWarp(&play, true, "KokiriForest_Adult");
-    CHECK(adult.route == WarpRoute::refuse);
-    CHECK(adult.code == "wrong_age");
+    CHECK(adult.route == WarpRoute::map_event);
+    CHECK(adult.set_age == "adult");
     // During an event the module's own request still takes the start.
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, true, "GohmaStage").route == WarpRoute::event);
@@ -1027,17 +1078,26 @@ TEST_CASE("playtest: a missing sample is treated like an old one by warp, the ty
     }
 }
 
-TEST_CASE("playtest: a teleport to the other age's map is refused up front (Longshot picks the map by Link's age)") {
+TEST_CASE("playtest: a warp to the other age's map sets the age first and goes by the map change event") {
+    // Longshot's teleport picks the map by Link's current age, and a free-play warp with the suffix alone left Link
+    // a child (lane runs): the bridge sets Sequence_IsChildhood and lets frames run, then asks the map change event.
     const auto child = Status(Snap(999));                                  // Snap: age child
-    CHECK(PlanWarp(&child, false, "KokiriForest_Child").route == WarpRoute::teleport);
+    const auto same = PlanWarp(&child, false, "KokiriForest_Child");
+    CHECK(same.route == WarpRoute::teleport);
+    CHECK(same.set_age.empty());
     CHECK(PlanWarp(&child, false, "kokiriforest_child").route == WarpRoute::teleport);   // any case
-    const auto plan = PlanWarp(&child, false, "KokiriForest_Adult");
-    CHECK(plan.route == WarpRoute::refuse);
-    CHECK(plan.code == "wrong_age");
-    CHECK(plan.why.find("child") != std::string::npos);
-    CHECK(PlanWarp(&child, false, "kokiriforest_ADULT").route == WarpRoute::refuse);
+    CHECK(PlanWarp(&child, false, "KokiriForest").set_age.empty());                     // no suffix: as it was
+    for (const char* scene : {"KokiriForest_Adult", "kokiriforest_ADULT"}) {
+        const auto plan = PlanWarp(&child, false, scene);
+        CHECK(plan.route == WarpRoute::map_event);
+        CHECK(plan.set_age == "adult");
+    }
+    const auto with_start = PlanWarp(&child, true, "KokiriForest_Adult");
+    CHECK(with_start.route == WarpRoute::map_event);
+    CHECK(with_start.set_age == "adult");
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, false, "KokiriForest_Adult").route == WarpRoute::event);   // the event request sets the age itself
+    CHECK(PlanWarp(&event, false, "KokiriForest_Adult").set_age.empty());
 }
 
 TEST_CASE("playtest: the teleport's reply says what to wait for and fails at once when the game did not accept it") {

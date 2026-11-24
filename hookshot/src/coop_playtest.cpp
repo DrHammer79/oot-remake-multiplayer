@@ -29,13 +29,18 @@
 #include "coop/host/game_items.hpp"
 #include "coop_camera.h"
 #include "coop_cheats.h"
+#include "coop_fairy.h"
 #include "coop_hook.h"
+#include "coop_hookshot.h"
 #include "coop_menu_state.h"
 #include "coop_pause.h"
 #include "coop_pause_tab.h"
 #include "coop_playtest_core.h"
+#include "coop_talk_text.h"
 #include "coop_teleport_game.h"
 #include "coop_testinput.h"
+#include "hos_coop_pane_body.h"
+#include "hos_coop_pane_text.h"
 #include "core/core.h"
 
 // (the platform's sockets and pipe after our own headers, as coop_lan_net.cpp: no Windows macro reaches them)
@@ -303,6 +308,14 @@ bool WorldListNow() {
     return store.Enabled() && WorldListLive(store.Get(), SteadyMs(), g_gate ? g_gate->Frame() : 0);
 }
 
+// Whether the sharing walk (the one that runs strikes) made the list: a live list that is not the solo walk's.
+bool StrikeWalkNow() {
+    auto& store = CoopWorldSnapshot::TheStore();
+    if (!store.Enabled()) return false;
+    const auto snap = store.Get();
+    return WorldListLive(snap, SteadyMs(), g_gate ? g_gate->Frame() : 0) && !snap->solo;
+}
+
 constexpr auto kHoldWait = 5000ms;  // a hold (or a held job) that does not come in this time: timeout
 
 // Longshot's status with a Link snapshot that is not old (SnapshotIsOld) and not missing (SnapshotMissing). Longshot
@@ -330,8 +343,26 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
     const Value* game = status ? status->Get("game") : nullptr;
     if (game && game->kind != Value::Kind::Object) game = nullptr;
     out += "\"scene\":" + (status && status->Get("map") ? Compact(*status->Get("map")) : Field(game, "map"));
-    out += ",\"room\":null";
+    {
+        // The rooms table (the puppet pack's coop_rooms.txt), read once; empty without a pack (room null).
+        static const CoopRooms::Table rooms = CoopFairy::RoomTable();
+        std::string scene;
+        if (status) {
+            if (const auto map = status->Text("map")) scene = *map;
+            else if (game) scene = game->Text("map").value_or("");
+        }
+        out += RoomMember(status ? &*status : nullptr, scene, rooms);
+    }
     out += LinkMembers(status ? &*status : nullptr);
+    {
+        auto& store = CoopWorldSnapshot::TheStore();
+        out += BodyMember(store.Enabled() ? store.Get() : std::nullopt, WorldListNow());
+    }
+    {
+        const auto camera = CoopCamera::Latest();
+        out += ViewMember(camera ? std::optional<std::array<float, 16>>(camera->clip_from_world) : std::nullopt,
+                          camera && camera->y_down);
+    }
     out += ",\"control\":" + std::string(status ? "true" : "false");
     Core::System& sys = *g_system;
     out += ",\"equips\":{";
@@ -477,9 +508,9 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "act") {
         std::string error;
-        // An actor id is resolved in the objects walk, which runs only with a world list: with none, refuse it here
-        // (never run it as a name, which would strike another actor).
-        const bool listed = WorldListNow();
+        // An actor id is resolved in the sharing walk, which runs only in a session: without its list (none, or the
+        // solo walk's), refuse it here (never run it as a name, which would strike another actor).
+        const bool listed = StrikeWalkNow();
         if (const std::string refusal = StrikeIdRefusal(r.lines, listed); !refusal.empty()) {
             return fail("refused", refusal);
         }
@@ -500,6 +531,12 @@ std::string Handle(const Request& r) {
         const auto now = LinkStatus();
         WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
         if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
+        if (!plan.set_age.empty()) {
+            // The age first, and frames for the game to take it (the lane recipe: setflag, wait, then warp).
+            std::string error;
+            if (!played(std::string("setflag Sequence_IsChildhood ") + (plan.set_age == "child" ? "1" : "0"), error)) return fail("failed", error);
+            if (!gate.Step(30, kHoldWait)) return fail("timeout", "the frames did not run in time");
+        }
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
         std::string wait_for = r.scene;   // the map to wait for: the teleport route takes Longshot's (Link's age, its spelling)
         // Free play, an entrance or a map Longshot's list lacks (a boss stage): the game's own map change event
@@ -605,6 +642,15 @@ std::string Handle(const Request& r) {
         if (!ran) return fail("timeout", "the game was not held in time");
         if (v.kind == "enum" && v.hash) g_enum_values.Remember(r.name, *v.hash);
         return ok(FlagReadMembers(r.name, v));
+    }
+    if (r.cmd == "text") {
+        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; the wraps of
+        // patches 0041 and 0042 fill them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
+        bool lost = false;
+        const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);
+        return ok(CoopTalkText::Members(CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_TEXT),
+                                        CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_BODY), CoopTalkText::TheLog().Last(),
+                                        lost, texts));
     }
     if (r.cmd == "give") {
         std::string error;
@@ -796,6 +842,10 @@ bool PadMove(std::int32_t stick[4]) {
     const auto camera = CoopCamera::Latest();
     return g_move.Apply(camera ? std::optional(camera->clip_from_world) : std::nullopt, stick);
 }
+
+bool On() { return g_enabled.load(std::memory_order_acquire); }
+
+std::uint64_t Frame() { return On() ? BridgeFrame() : 0; }
 
 void AtFrame() {
     if (!g_enabled.load(std::memory_order_acquire)) return;

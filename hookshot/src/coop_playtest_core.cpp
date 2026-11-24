@@ -429,6 +429,25 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.lines = *lines;
         return r;
     }
+    if (c == "text") {
+        // Read only (the texts the game set in its text panes, coop_talk_text.h): not gated.
+        if (const auto* s = v->Get("since"); s && s->kind != CoopModJson::Value::Kind::Null) {
+            const auto n = v->Number("since");
+            if (!n || !(*n >= 0 && *n <= 9007199254740991.0) || *n != std::floor(*n)) {
+                error = "since: the `last` of an earlier text reply (0: every text kept)";
+                return std::nullopt;
+            }
+            r.since = static_cast<std::uint64_t>(*n);
+        }
+        if (const auto* l = v->Get("layout"); l && l->kind != CoopModJson::Value::Kind::Null) {
+            if (l->kind != CoopModJson::Value::Kind::String || !PlainText(l->string, 64)) {
+                error = "layout: part of a layout's name (MessageInGame_00 is the message window)";
+                return std::nullopt;
+            }
+            r.layout = l->string;
+        }
+        return r;
+    }
     if (c == "give") {
         const auto item = v->Text("item");
         if (!item || !PlainText(*item, 128)) {
@@ -455,7 +474,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, text, give, dump or shot";
     return std::nullopt;
 }
 
@@ -648,7 +667,8 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
                       ",\"age_ms\":" + std::to_string(age) +
                       ",\"stale\":" + (stale ? "true" : "false") +
                       ",\"behind\":" + (fresh == CoopWorldSnapshot::Freshness::behind ? "true" : "false") +
-                      ",\"cost_us\":" + std::to_string(snapshot->cost_us);
+                      ",\"cost_us\":" + std::to_string(snapshot->cost_us) +
+                      ",\"solo\":" + (snapshot->solo ? "true" : "false");  // the solo walk: no strike by id
     // The snapshot is sorted known kinds first, so the known ones lead; `state` stops at kStateLimit of them.
     std::size_t other = 0;
     for (const auto& a : snapshot->actors) other += a.kind == CoopWorldSnapshot::Kind::other ? 1 : 0;
@@ -812,6 +832,51 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     return out;
 }
 
+std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms) {
+    const auto* game = GameOf(status);
+    const auto* pos = game && !SnapshotIsOld(status) && !SnapshotMissing(status) ? game->Get("pos") : nullptr;
+    if (!pos || pos->kind != CoopModJson::Value::Kind::Array || pos->array.size() != 3 || scene.empty()) {
+        return ",\"room\":null";
+    }
+    CoopRooms::Vec3 at{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (pos->array[i].kind != CoopModJson::Value::Kind::Number) return ",\"room\":null";
+        at[i] = static_cast<float>(pos->array[i].number);
+    }
+    const auto guess = rooms.Nearest(scene, at);
+    return ",\"room\":" + (guess ? std::to_string(guess->room) : std::string("null"));
+}
+
+std::string ViewMember(const std::optional<std::array<float, 16>>& clip_from_world, bool y_down) {
+    if (!clip_from_world) return ",\"view\":null";
+    const auto& m = *clip_from_world;
+    for (const float v : m) {
+        if (!std::isfinite(v)) return ",\"view\":null";
+    }
+    const auto yaw = ViewYaw(m);
+    if (!yaw) return ",\"view\":null";
+    const double pitch = std::atan2(static_cast<double>(m[13]), std::hypot(m[12], m[14])) * 180.0 / 3.14159265358979323846;
+    auto num = [](double v, double scale) { return Compact(CoopModJson::Value::Of(std::round(v * scale) / scale + 0.0)); };   // + 0.0: no "-0"
+    std::string out = ",\"view\":{\"yaw\":" + num(*yaw, 100) + ",\"pitch\":" + num(pitch, 100) + ",\"clip\":[";
+    for (std::size_t i = 0; i < m.size(); ++i) {
+        if (i) out += ",";
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.6g", static_cast<double>(m[i]));
+        out += buf;
+    }
+    return out + "],\"y_down\":" + (y_down ? "true" : "false") + "}";
+}
+
+std::string BodyMember(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, bool live) {
+    if (snapshot && live) {
+        for (const auto& a : snapshot->actors) {
+            if (a.name == "Player_Child") return ",\"body\":\"child\"";
+            if (a.name == "Player_Adult") return ",\"body\":\"adult\"";
+        }
+    }
+    return ",\"body\":null";
+}
+
 namespace {
 bool SameName(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;
@@ -836,22 +901,21 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
     const auto* game = GameOf(status);
     // A missing sample is no better than an old one: the typed members alone are not a Link sample (not_in_play).
     if (game && !SnapshotIsOld(status) && !SnapshotMissing(status)) {
-        if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
+        if (game->Bool("event") == true) return {WarpRoute::event, {}, {}, {}};
         if (game->Bool("event") == false) {
             const auto want = AgeEnding(scene);
             const auto age = game->Text("age");
             if (!want.empty() && age && *age != want) {
-                return {WarpRoute::refuse, "wrong_age",
-                        "Longshot's teleport lands at Link's current age (" + *age + "), so " + std::string(scene) +
-                            " would not be taken as asked: ask for the " + *age + " map, or switch age first"};
+                // Longshot's teleport lands at Link's current age: set the age first, then the map change event.
+                return {WarpRoute::map_event, {}, {}, std::string(want)};
             }
             // An entrance names a start point, which Longshot's teleport cannot take: the game's map change event can.
-            return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}};
+            return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}, {}};
         }
     }
     return {WarpRoute::refuse, "not_in_play",
             "this game's state is not readable now (no Link update: a title, a pause or a load). Try again once the "
-            "game runs"};
+            "game runs", {}};
 }
 
 TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scene) {

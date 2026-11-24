@@ -44,6 +44,11 @@ using Texels = std::vector<Texture>;
 
 // The first bytes of a texture's texels, compared before anything else.
 inline constexpr std::size_t kHead = 64;
+// The rest of a texture's texels is read from the game's memory and compared
+// this much at a time, in a buffer on the look worker's stack: a search makes
+// no heap allocation per texture (row 260: a fresh buffer of up to 4 MiB a
+// texture, many a search, threw std::bad_alloc once Windows ran out of commit).
+inline constexpr std::size_t kComparePiece = 16 * 1024;
 // How much larger than its texels a texture's storage may be (its layout
 // rounded up): only storages up to this much larger are compared.
 inline constexpr std::uint64_t kStorageSlack = 0x10000;
@@ -62,8 +67,6 @@ inline constexpr std::uint64_t kLateTexelsMs = 1000;
 inline constexpr std::size_t kLateChecks = 64;
 // A texture file's header is at most this long (the game's are 4096 bytes).
 inline constexpr std::uint64_t kMaxOffset = 0x10000;
-// A texture's texels are compared with the game's memory in reads of at most this many bytes, into the stack.
-inline constexpr std::size_t kComparePiece = 0x10000;
 // A wardrobe step that failed (no memory left: std::bad_alloc) is said at most this many times.
 inline constexpr int kFailedSaid = 20;
 

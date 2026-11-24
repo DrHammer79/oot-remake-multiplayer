@@ -374,10 +374,8 @@ void FixSlotsLocked() {
         if (!it->is_directory(dec)) continue;
         const fs::path file = it->path() / "progress.sav";
         std::FILE* in = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32  // (a Windows path is wide with MSVC and llvm-mingw alike: _WIN32, as ReadSaveSetLocked)
         if (_wfopen_s(&in, file.c_str(), L"rb") != 0) in = nullptr;
-#elif defined(_WIN32)
-        in = _wfopen(file.c_str(), L"rb");  // llvm-mingw: a Windows path is wide too
 #else
         in = std::fopen(file.c_str(), "rb");
 #endif
@@ -399,10 +397,8 @@ void FixSlotsLocked() {
         }
         const fs::path tmp = it->path() / "progress.sav.coop-tmp";
         std::FILE* out = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32
         if (_wfopen_s(&out, tmp.c_str(), L"wb") != 0) out = nullptr;
-#elif defined(_WIN32)
-        out = _wfopen(tmp.c_str(), L"wb");  // llvm-mingw: a Windows path is wide too
 #else
         out = std::fopen(tmp.c_str(), "wb");
 #endif
@@ -454,7 +450,8 @@ save::SaveSlot OwnGoldLocked(const save::SaveSlot& slot_in, bool& race_kept) {
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot_in, bool played_from) {
     bool race_kept = false;
     const save::SaveSlot slot = FixedSlotLocked(OwnGoldLocked(slot_in, race_kept));
-    const auto result = save::write_coop_save(dir, slot, save::own_dir_of(dir));
+    int own_kept = -1;
+    const auto result = save::write_coop_save(dir, slot, save::own_dir_of(dir), &own_kept);
     g_race_dir.clear();
     switch (result) {
     case save::WriteResult::written:
@@ -464,6 +461,13 @@ save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot_in
         }
         g_guest.ready = true;
         LOG_INFO(Core, "coop: save: the host's save written to {}", dir.string());
+        // (row 249: rupees, ammo, bottles, life and magic are each player's own)
+        if (own_kept < 0) {
+            LOG_INFO(Core, "coop: save: no values of our own kept yet (a first join here): the host's rupees, ammo and "
+                           "bottles are where ours start");
+        } else {
+            LOG_INFO(Core, "coop: save: our own {} rupees/ammo/bottles/life/magic values kept in it", own_kept);
+        }
         if (played_from) Say(g_lines.on_ready(g_in_game));
         break;
     case save::WriteResult::not_coop:
@@ -1167,6 +1171,15 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
                                   : send.fresh ? save::newest_slot(g_dir)
                                                : save::slot_to_send(g_dir, g_played.slot(), &played);
             const auto slot = slot_dir ? save::read_slot(*slot_dir) : std::nullopt;
+            if (slot && !played) {
+                // Row 63: the slot played is not known (the title): the guests' race is the playthrough of the slot
+                // they get. Its id goes out before the save (RaceSendDue), and the host's load of that slot keeps it.
+                // A known played slot that could not be sent: OnSend leaves the host's own playthrough in force.
+                if (!g_playthroughs) g_playthroughs.emplace(CoopGoldMode::RaceDir());
+                const std::string id = g_playthroughs->OnSend(
+                    slot_dir->filename().string(), g_played.slot() ? g_played.slot()->filename().string() : std::string());
+                if (!id.empty()) CoopGoldMode::SetPlaythrough(id);
+            }
             const auto packed =
                 send.no_save ? save::pack_no_save() : (slot ? save::pack(*slot) : std::vector<std::uint8_t>{});
             if (packed.empty()) {

@@ -305,7 +305,7 @@ void Steer::Viewed() {
     if (++since_turn_ == kNoTurnFrames) {
         char line[300];
         std::snprintf(line, sizeof line,
-                      "coop: look: the camera hook (hos_coop_turn, patch 0036) was not called in %d frames of the "
+                      "coop: look: the camera hook (hos_coop_turn, patch 0040) was not called in %d frames of the "
                       "Customize picture: the game camera is not turned (no player camera update reaches the hook)",
                       kNoTurnFrames);
         Say(line);

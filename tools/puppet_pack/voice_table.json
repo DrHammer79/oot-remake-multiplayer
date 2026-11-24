@@ -830,9 +830,9 @@
   },
   "Cow": {
    "chain": [
-    "Animal_Cow"
+    "NV_Cow"
    ],
-   "default": "NV_Cow",
+   "default": "Animal_Cow",
    "creature": true
   },
   "Link (opening)": {

@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 
-#include "coop_char_colours.h"
 #include "coop_look_menu.h"
 #include "coop_menu_state.h"
 
@@ -16,9 +15,9 @@ namespace {
 
 bool Has(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 
-// As the module opens his screen: the character's Eye Colour unless its model is known to have no iris (SnailEyes).
+// As the module opens his screen (coop_pause_tab_module.cpp): his rows come from the model the screen shows.
 Screen OpenFor(Driver& d, std::uint16_t character) {
-    d.Open(CoopLook::Look{}, character, CoopCharColours::OwnIris(character).value_or(true));
+    d.Open(CoopLook::Look{}, character);
     return FromDriver(d, true, true);
 }
 
@@ -55,28 +54,13 @@ TEST_CASE("menu state: no focused row is null") {
     CHECK(Has(j, "\"focused\":null,\"focused_name\":null"));
 }
 
-TEST_CASE("menu state: a character with irises has the Eye Colour row on his Customize screen") {
-    CoopCharColours::SetOwnIris(9, std::nullopt);
+TEST_CASE("menu state: a Character Select character's screen is driven and pages as its title says") {
     Driver d;
     const auto s = OpenFor(d, 9);
     const auto j = Json(Tab{}, s);
     CHECK(Has(j, "\"customize_screen\":{\"open\":true,\"driven\":true,"));
-    CHECK(Has(j, "{\"option\":0,\"label\":\"Eye Colour\","));
-    CHECK(Has(j, "\"focused\":0,\"focused_label\":\"Eye Colour\""));
     CHECK(Has(j, "\"page_no\":1,\"pages\":1"));
-    CHECK(s.texts.title == "Eyes (page 1 of 1)  A: exact hue");
-    CHECK_FALSE(Has(j, "\"option\":1,"));   // (his other places are empty: left out)
-}
-
-TEST_CASE("menu state: character 27 (no iris) has no Eye Colour row") {
-    CoopCharColours::SetOwnIris(27, false);   // (as found when the colour was put on: its model has no iris)
-    Driver d;
-    const auto s = OpenFor(d, 27);
-    const auto j = Json(Tab{}, s);
-    CHECK_FALSE(Has(j, "Eye Colour"));
-    CHECK(Has(j, std::string("\"label\":\"") + CoopLookMenu::kNoColourOptions + "\""));
-    CHECK(Has(j, "\"page_no\":0,\"pages\":0"));
-    CoopCharColours::SetOwnIris(27, std::nullopt);
+    CHECK(Has(s.texts.title, "(page 1 of 1)"));
 }
 
 TEST_CASE("menu state: Link's pages count as the title does, and Y turns them") {

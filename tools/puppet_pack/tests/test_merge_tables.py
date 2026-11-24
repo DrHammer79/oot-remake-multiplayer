@@ -14,7 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from puppet_pack import byml, merge_tables as mt, rstb, sarc  # noqa: E402
+from puppet_pack import byml, merge_tables as mt, rstb, sarc, ui_pack  # noqa: E402
 
 try:
     import zstandard
@@ -326,24 +326,31 @@ class MergeTablesTest(unittest.TestCase):
         self.assertEqual(self.table("skins").by_crc, {1: 100, 7: 7})
         self.assertEqual(self.mark_rule("skins"), "merged")
 
-    def test_a_title_mod_that_wins_is_marked_only_when_it_holds_the_pack_entries(self):
+    def test_a_mod_under_contents_that_wins_is_merged_like_any_mod(self):
+        # Player report 259: Classic Link Voices (mods/contents/<title>/, its own size table) won the table, was never
+        # rewritten, and the game read it without the other mods' sizes: an abort at every boot.
         title_mod = "contents/0400486024DEC000/skins"   # (by name above coop-puppet: its table wins)
         self.put_table(PACK, {1: 100, 2: 50})
-        own = read(self.put_table(title_mod, {1: 100}))
-        self.assertEqual(self.run_merge(), 1)  # lacks entry 2: never rewritten, said, no mark
+        own = read(self.put_table(title_mod, {1: 90, 4: 4}))
+        self.assertEqual(self.run_merge(), 0)
+        self.assertEqual(self.table(title_mod).by_crc, {1: 100, 2: 50, 4: 4})
+        self.assertEqual(self.mark_rule(title_mod), "merged")
+        self.assertEqual(read(self.path(title_mod, mt.KEEP_DIR, NAME)), own)
+        self.run_merge()
+        self.assertIn("already", self.lines[0])
+        mt.undo(self.mods, self.say)
         self.assertEqual(read(self.path(title_mod, "romfs", "System", "Resource", NAME)), own)
         self.assertIsNone(self.mark_rule(title_mod))
-        self.assertIn("lacks 1 of the puppet pack's entries", self.lines[0])
+        # One that holds the pack's entries already is left as it is, as any mod.
         self.put_table(title_mod, {1: 100, 2: 50, 3: 3})
         self.assertEqual(self.run_merge(), 0)
         self.assertEqual(self.mark_rule(title_mod), "contains")
-        self.put_table(title_mod, {1: 100})  # (a stale mark goes)
-        self.run_merge()
-        self.assertIsNone(self.mark_rule(title_mod))
-        # A title mod with nothing of the pack's under it: left alone as before, nothing said.
+        # Without the pack's table, two other mods' tables are merged too (nothing of the pack's in either).
         os.remove(self.path(PACK, "romfs", "System", "Resource", NAME))
+        self.put_table("aaa-textures", {7: 7})
+        self.put_table(title_mod, {1: 1})
         self.assertEqual(self.run_merge(), 0)
-        self.assertEqual(self.lines, [])
+        self.assertEqual(self.table(title_mod).by_crc, {1: 1, 7: 7})
 
     def test_the_mods_list_decides_the_winner_and_mods_switched_off_are_left_out(self):
         self.put_table(PACK, {1: 100})
@@ -380,6 +387,21 @@ class MergeTablesTest(unittest.TestCase):
         self.run_merge()
         self.assertEqual(self.table("bbb-listed").by_crc, {1: 100, 2: 5, 3: 6, 4: 4})
         self.assertEqual([n for n, _ in mt.load_order(self.mods)][-1], "bbb-listed")
+
+    def test_a_default_off_list_leaves_out_every_mod_it_does_not_name(self):
+        # Original game (report 266, hos_coop_mods.h "default off"): a mod put in after the list was written is off,
+        # as the game leaves it out; the pack too when not named on.
+        self.put_table(PACK, {1: 100})
+        self.put_table("late-seed", {2: 5})
+        self.put_table("named-on", {3: 6})
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\r\ndefault off\r\non named-on\r\n")
+        self.assertEqual([n for n, _ in mt.load_order(self.mods)], ["named-on"])
+        self.assertEqual(mt.read_list_default(self.mods), ([("named-on", False)], True))
+        self.assertEqual(mt.read_list(self.mods), [("named-on", False)])
+        with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("coop-mods 1\non named-on\n")   # without the line: the unnamed ones are on, as before
+        self.assertEqual(sorted(n for n, _ in mt.load_order(self.mods)), sorted([PACK, "late-seed", "named-on"]))
 
     def test_folders_with_a_leading_dash_or_underscore_are_no_mods(self):
         self.put_table(PACK, {1: 100})
@@ -438,6 +460,92 @@ SEED = "randomizer-adzfteae2h83-s89dbd7a9"
 
 MALS = "Mals/USen.Product.110.sarc.zs"
 TITLE = "UI/Layout2Archive/Title.Product.100.Nin_Ounce_NVN2.blarc.zs"
+SCREENS = "RSDB/UIScreen.Product.111.rstbl.byml.zs"   # (one of co-op's Characters tab's files)
+
+
+class ParkMenusTest(unittest.TestCase):
+    """Row 235: park_menus and main() move the pack's menu files aside when the merge cannot check the size table the
+    game reads (no zstandard, a step that raised), but only where another mod that is on could win a pack table."""
+
+    REL = "Mals/EUen.Nin_NX_NVN.zs"
+
+    def make(self, other):
+        d = tempfile.mkdtemp(prefix="merge_tables_park_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.mods = os.path.join(d, "mods")
+        self.pack = os.path.join(self.mods, *PACK.split("/"))
+        self.put(os.path.join(self.pack, "romfs", *self.REL.split("/")), b"x")
+        self.put(os.path.join(self.pack, *mt.RESOURCE, NAME), b"pack table")
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b'{"title_menu": ["%s"], "pause_menu": []}' % self.REL.encode())
+        if other:
+            self.put(os.path.join(self.mods, "OoT Character Select", *mt.RESOURCE, NAME), b"cs table")
+        return self.mods
+
+    @staticmethod
+    def put(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def in_play(self):
+        return os.path.isfile(os.path.join(self.pack, "romfs", *self.REL.split("/")))
+
+    def kept(self):
+        return os.path.isfile(os.path.join(self.pack, mt.MENU_KEEP, *self.REL.split("/")))
+
+    def test_another_mods_table_could_win_so_unchecked_park_moves_the_files(self):
+        mods = self.make(other=True)
+        lines = []
+        self.assertEqual(mt.park_menus(mods, lines.append), 1)
+        self.assertTrue(self.kept() and not self.in_play())
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(mt.park_menus(mods, lines.append), 0)   # (nothing left to move)
+
+    def test_the_pack_alone_keeps_its_menus(self):
+        mods = self.make(other=False)
+        self.assertEqual(mt.park_menus(mods, lambda _l: None), 0)
+        self.assertTrue(self.in_play() and not self.kept())
+
+    def test_a_mod_that_is_off_does_not_count(self):
+        mods = self.make(other=True)
+        self.put(os.path.join(mods, "coop-mods.list"), b"coop-mods 1\noff OoT Character Select\n")
+        self.assertEqual(mt.park_menus(mods, lambda _l: None), 0)
+        self.assertTrue(self.in_play())
+
+    def run_main(self, other, boom):
+        mods = self.make(other)
+        real = mt.merge_rows
+        mt.merge_rows = boom
+        try:
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = mt.main(["--mods", mods])
+        finally:
+            mt.merge_rows = real
+        return code, out.getvalue()
+
+    def test_main_parks_when_zstandard_is_missing(self):
+        def boom(*_a):
+            raise SystemExit(1)
+        code, said = self.run_main(True, boom)
+        self.assertEqual(code, 1)
+        self.assertIn("zstandard", said)
+        self.assertTrue(self.kept() and not self.in_play())
+
+    def test_main_parks_when_a_merge_step_raises(self):
+        def boom(*_a):
+            raise KeyError("a table row")
+        code, said = self.run_main(True, boom)
+        self.assertEqual(code, 1)
+        self.assertIn("not merged", said)
+        self.assertTrue(self.kept() and not self.in_play())
+
+    def test_main_with_the_pack_alone_parks_nothing_when_a_step_raises(self):
+        def boom(*_a):
+            raise KeyError("a table row")
+        code, _said = self.run_main(False, boom)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.in_play() and not self.kept())
 
 
 @unittest.skipIf(zstandard is None, "needs zstandard")
@@ -493,6 +601,56 @@ class MenuGuardTest(unittest.TestCase):
         os.remove(os.path.join(self.pack, "coop_puppet.json"))
         self.assertEqual(mt.menu_files(self.pack), [])
 
+    def charsel_pack(self, menu_keys=True):
+        """The pack with co-op's own Characters tab (charsel_native: one of its files, the screens table)."""
+        self.put(os.path.join(self.pack, "romfs", *SCREENS.split("/")), b"pack screens")
+        keys = b', "menu_keys": ["title_menu", "pause_menu", "charsel_native"]' if menu_keys else b""
+        self.put(os.path.join(self.pack, "coop_puppet.json"),
+                 b'{"title_menu": ["%s"], "pause_menu": ["%s"], "charsel_native": ["%s"]%s}'
+                 % (TITLE.encode(), MALS.encode(), SCREENS.encode(), keys))
+        self.put_table(PACK, {self.crc(MALS): self.grown, self.crc(TITLE): 230000, self.crc(SCREENS): 9000, 7: 70})
+
+    def test_the_menu_files_are_the_lists_the_pack_names_in_menu_keys(self):
+        # (charsel-native-0119: co-op's Characters tab's files go with the menus; one list, ui_pack.MENU_KEYS, written
+        # by build.py into the pack's json; a pack without "menu_keys" has the two old lists)
+        self.assertEqual(list(ui_pack.MENU_KEYS), ["title_menu", "pause_menu", "charsel_native"])
+        self.charsel_pack()
+        self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS, SCREENS])
+        self.charsel_pack(menu_keys=False)
+        self.assertEqual(mt.menu_files(self.pack), [TITLE, MALS])
+
+    def test_a_table_holding_the_menus_but_not_the_characters_tab_keeps_them_all_aside(self):
+        # All or nothing: another mod's table wins with the menus' sizes but not the Characters tab's screens table
+        # (a seed's own table): every one of them aside, the game keeps its own menus and screens.
+        self.charsel_pack()
+        self.put_table("oot-remake-randomizer", {self.crc(MALS): self.grown, self.crc(TITLE): 230000, 7: 70})
+        self.guard()
+        self.assertFalse(self.in_play(MALS) or self.in_play(TITLE) or self.in_play(SCREENS))
+        self.assertTrue(self.kept(MALS) and self.kept(TITLE) and self.kept(SCREENS))
+
+    def test_the_characters_tab_is_parked_exactly_while_its_files_are_kept_aside(self):
+        # (MsgNotFound on slot 0: the kit's code-patch rule, kit-paths.ps1 Sync-KitCharselNativePatch and build.sh
+        # charsel_native_sync, leaves the tab's code out while this says parked, so code and files never split)
+        self.assertFalse(mt.charsel_native_parked(self.pack))   # (no charsel_native list)
+        self.charsel_pack()
+        self.assertFalse(mt.charsel_native_parked(self.pack))   # (in romfs: in play)
+        self.put_table("oot-remake-randomizer", {self.crc(MALS): self.grown, self.crc(TITLE): 230000, 7: 70})
+        self.guard()
+        self.assertTrue(self.kept(SCREENS))
+        self.assertTrue(mt.charsel_native_parked(self.pack))
+        shutil.rmtree(os.path.join(self.mods, "oot-remake-randomizer"))
+        self.guard()   # (put back: the code goes in again at the next need check)
+        self.assertTrue(self.in_play(SCREENS))
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        # A pack made since (its file in romfs again) beside an old kept copy: in play, not parked.
+        self.put(os.path.join(self.pack, mt.MENU_KEEP, *SCREENS.split("/")), b"old screens")
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        # The tab left out ("charsel_native": []) or an unreadable manifest: nothing parked.
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b'{"title_menu": [], "charsel_native": []}')
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+        self.put(os.path.join(self.pack, "coop_puppet.json"), b"{")
+        self.assertFalse(mt.charsel_native_parked(self.pack))
+
     def test_the_pack_reading_its_own_table_keeps_its_menus(self):
         self.assertEqual(self.guard(), 0)
         self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
@@ -500,7 +658,7 @@ class MenuGuardTest(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.pack, mt.MENU_KEEP)))
 
     def test_an_old_pack_left_in_contents_takes_the_menus_out_and_they_come_back_without_it(self):
-        old = PACK + ".old-b26"   # (sorts after the pack: its table wins; a title's own mod, never rewritten)
+        old = PACK + ".old-b26"   # (sorts after the pack: its table wins; the guard alone, no merge)
         self.put_table(old, {self.crc(MALS): self.mals, 7: 70})
         self.assertEqual(self.guard(), 0)
         self.assertFalse(self.in_play(MALS) or self.in_play(TITLE))
@@ -547,13 +705,54 @@ class MenuGuardTest(unittest.TestCase):
         self.guard()
         self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
 
+    SCREENS = "RSDB/UIScreen.Product.111.rstbl.byml.zs"
+
+    def screens(self, mod, archives):
+        """A UIScreen table a mod ships (Title_00's ArchiveCategory as given) beside its romfs size table."""
+        raw = zstandard.ZstdCompressor(write_content_size=True).compress(
+            byml.dumps([{"ArchiveCategory": ["Common"], "Name": "Other_00"},
+                        {"ArchiveCategory": archives, "Name": "Title_00"}]))
+        self.put(os.path.join(self.mods, *mod.split("/"), "romfs", *self.SCREENS.split("/")), raw)
+
+    def with_screens_pack(self):
+        """The pack with a UIScreen table in its menu files (CoopMenu_00 's row)."""
+        self.put(os.path.join(self.pack, "coop_puppet.json"),
+                 b'{"title_rows": true, "title_menu": ["%s", "%s", "%s"], "pause_menu": ["%s"]}'
+                 % (TITLE.encode(), MALS.encode(), self.SCREENS.encode(), MALS.encode()))
+        self.screens(PACK, ["Title", "Common"])
+
+    def test_a_pack_with_a_screens_table_keeps_its_title_archive_whatever_screens_table_wins(self):
+        """The title has no part from Common (the Host toggle is gone), so no UIScreen table parks the Title archive;
+        the pack's UIScreen row for CoopMenu_00 (pause menu) must not park it either."""
+        self.with_screens_pack()
+        self.put_table("zz-site-seed", {self.crc(MALS): self.grown + 5, self.crc(TITLE): 230000})
+        for archives in (["Title"], ["Title", "Common"]):
+            self.screens("zz-site-seed", archives)
+            self.assertEqual(self.guard(), 0)
+            self.assertTrue(self.in_play(TITLE) and self.in_play(MALS))
+            self.assertFalse(self.kept(TITLE))
+            self.assertEqual(self.lines, [])
+        os.remove(os.path.join(self.mods, "zz-site-seed", "romfs", *self.SCREENS.split("/")))   # (no screens table at all)
+        self.assertEqual(self.guard(), 0)
+        self.assertTrue(self.in_play(TITLE) and not self.kept(TITLE))
+
     def test_every_start_runs_the_guard_after_the_merge(self):
-        self.put_table(PACK + ".old-b26", {self.crc(MALS): self.mals})
+        # The guard sees the tables as the merge left them: an old copy left under contents/ that wins the table gets
+        # the pack's entries (player report 259: merged like any mod), so the menus stay.
+        old = PACK + ".old-b26"
+        self.put_table(old, {self.crc(MALS): self.mals})
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             mt.main(["--mods", self.mods, "--romfs", self.romfs])
+        self.assertTrue(self.in_play(MALS) and self.in_play(TITLE))
+        self.assertIn("Size tables: the game reads contents/0400486024DEC000/coop-puppet.old-b26's", out.getvalue())
+        # A winning table the merge cannot read: the guard takes the menus out.
+        self.put(os.path.join(self.mods, *old.split("/"), "romfs", "System", "Resource", NAME), b"not a table")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(mt.main(["--mods", self.mods, "--romfs", self.romfs]), 1)
         self.assertFalse(self.in_play(MALS))
-        self.assertIn("Menus: the game reads contents/0400486024DEC000/coop-puppet.old-b26's size table", out.getvalue())
+        self.assertIn("Multiplayer tab are off", out.getvalue())
 
 
 @unittest.skipIf(zstandard is None, "needs zstandard")
@@ -847,14 +1046,56 @@ class MergeRowsTest(unittest.TestCase):
         self.assertEqual(self.run_all()[0], 0)
         self.assertEqual(self.table_bytes("ootrr-site"), before)
 
-    def test_a_title_mod_that_wins_the_actor_table_is_never_rewritten_and_said(self):
+    def test_a_mod_under_contents_that_wins_the_actor_table_gets_the_rows_and_its_size(self):
         self.put_rows(PACK, self.pack_rows())
+        self.put_sizes(PACK, 5000)
         title = "contents/0400486024DEC000/zz-skins"
         raw = read(self.put_rows(title, self.game_rows()))
-        failed, _ = self.run_all()
-        self.assertEqual(failed, 1)
+        self.put_sizes(title, 4000)
+        failed, fit = self.run_all()
+        self.assertEqual(failed, 0)
+        self.assertIn("CoopPuppet_Child", {r["__RowId"] for r in self.rows(title)})
+        self.assertGreaterEqual(self.sizes(title).get(AI_KEY), fit[AI_KEY])
+        self.assertTrue(os.path.exists(self.path(title, mt.ROWS_MARK)))
+        mt.undo(self.mods, self.say)
         self.assertEqual(read(self.path(title, "romfs", "RSDB", AI)), raw)
-        self.assertTrue(any("can't be shown" in line and "zz-skins" in line for line in self.lines))
+
+    def test_a_mod_under_contents_with_only_a_size_table_that_wins_holds_the_merged_actor_tables_size(self):
+        # Player report 259 as it was: the pack and the Character Select mod ship RSDB/ActorInfo (merged into the
+        # Character Select mod's copy, larger than the game's), Classic Link Voices (under contents/) ships only its
+        # own size table and wins it. The table the game reads must hold the merged actor table's size, in any order.
+        import itertools
+        cs, voices = "OoT Character Select", "contents/0400486024DEC000/Classic Link Voices"
+        game = os.path.join(self.romfs, "RSDB", AI)
+        os.makedirs(os.path.dirname(game), exist_ok=True)
+        with open(game, "wb") as f:
+            f.write(zstandard.ZstdCompressor(write_content_size=True).compress(byml.dumps(self.game_rows())))
+        for order in itertools.permutations([PACK, cs, voices]):
+            with self.subTest(order=order):
+                shutil.rmtree(self.mods)
+                os.makedirs(self.mods)
+                self.put_rows(PACK, self.pack_rows())
+                self.put_sizes(PACK, 5000)
+                self.put_rows(cs, self.game_rows() + [{"__RowId": "Npc_CharSel_" + "x" * 40, "Heap": 6}] * 1
+                              + [{"__RowId": "Player_Snail", "Heap": 7}])
+                t = rstb.Rstb(by_crc={rstb.Rstb.crc(AI_KEY): 3000, 7: 70, 8: 80})   # (the game's sizes, its own)
+                p = self.path(voices, "romfs", "System", "Resource", NAME)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "wb") as f:
+                    f.write(zstandard.ZstdCompressor(write_content_size=True).compress(t.dumps()))
+                with open(os.path.join(self.mods, mt.LIST_FILE), "w", encoding="utf-8", newline="\n") as f:
+                    f.write("coop-mods 1\n" + "".join(f"on {n}\n" for n in order))   # (the first row wins)
+                failed, fit = self.run_all()
+                self.assertEqual(failed, 0, self.lines)
+                order_now = mt.load_order(self.mods)
+                rows_win = [n for n, p_ in order_now if AI in mt.rsdb_tables_of(p_)][-1]
+                size_win = [n for n, p_ in order_now if NAME in mt.tables_of(p_)][-1]
+                ids = {r["__RowId"] for r in self.rows(rows_win)}
+                self.assertTrue({"CoopPuppet_Child", "Player_Snail"} <= ids)
+                served = self.sizes(size_win)
+                self.assertGreaterEqual(served.get(AI_KEY), fit[AI_KEY])   # (the abort: an entry too small)
+                self.assertEqual((served.by_crc.get(7), served.by_crc.get(8)), (70, 80))   # (both tables' entries)
+                self.assertTrue(os.path.exists(self.path(size_win, mt.MARK)) or size_win == PACK)
 
     def test_a_mod_switched_off_in_the_mods_list_is_not_merged(self):
         own = self.seed_with_own_tables()
@@ -899,6 +1140,52 @@ class MergeRowsBetweenModsTest(MergeRowsTest):
         self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", AI)), before)
         mt.undo(self.mods, self.say)
         self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", AI)), seed)
+
+    def test_the_screens_table_has_no_row_id_its_rows_are_keyed_by_name(self):
+        """The pack's Title_00 (Common added to its archives) and its CoopMenu_00 row, Character Select's CharacterMenu_00
+        row: all in the winner's UIScreen table, in the game's order then added rows, the winner's own rows kept."""
+        screens = "UIScreen.Product.111.rstbl.byml.zs"
+        title = {"ArchiveCategory": ["Title"], "Class": "UITitleScreen", "Name": "Title_00"}
+        other = {"ArchiveCategory": ["Common"], "Name": "Other_00"}
+        p = os.path.join(self.romfs, "RSDB", screens)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(zstandard.ZstdCompressor(write_content_size=True).compress(byml.dumps([title, other])))
+        title_common = dict(title, ArchiveCategory=["Title", "Common"])
+        coop = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CoopMenu_00", "Name": "CoopMenu_00"}
+        charsel = {"ArchiveCategory": ["Common"], "BodyLayoutFile": "CharacterMenu_00", "Name": "CharacterMenu_00"}
+        self.put_rows(PACK, [title_common, other, coop], screens)
+        self.put_rows(self.CS, [title, other, charsel], screens)
+        seed = read(self.put_rows(self.HAND, [title, other], screens))
+        self.assertEqual(self.run_all()[0], 0)
+        got = self.rows(self.HAND, screens)
+        self.assertEqual([r["Name"] for r in got], ["CharacterMenu_00", "CoopMenu_00", "Other_00", "Title_00"])   # (sorted by Name, as the game's)
+        self.assertEqual(got[3]["ArchiveCategory"], ["Title", "Common"])
+        before = read(self.path(self.HAND, "romfs", "RSDB", screens))
+        self.assertEqual(self.run_all()[0], 0)
+        self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", screens)), before)   # (merged once: stamps hold)
+        mt.undo(self.mods, self.say)
+        self.assertEqual(read(self.path(self.HAND, "romfs", "RSDB", screens)), seed)
+
+    def test_a_table_is_keyed_by_row_id_or_by_name_never_a_mix(self):
+        mt.rows_of(byml.dumps([{"__RowId": "A"}, {"__RowId": "B", "Name": "x"}]))
+        mt.rows_of(byml.dumps([{"Name": "A"}, {"Name": "B"}]))
+        with self.assertRaises(mt.MergeError):
+            mt.rows_of(byml.dumps([{"__RowId": "A"}, {"Name": "B"}]))
+        with self.assertRaises(mt.MergeError):
+            mt.rows_of(byml.dumps([{"Heap": 1}]))
+
+    def test_a_winner_that_changed_the_title_row_keeps_its_own(self):
+        screens = "UIScreen.Product.111.rstbl.byml.zs"
+        title = {"ArchiveCategory": ["Title"], "Name": "Title_00", "SortKey": 1}
+        p = os.path.join(self.romfs, "RSDB", screens)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(zstandard.ZstdCompressor(write_content_size=True).compress(byml.dumps([title])))
+        self.put_rows(PACK, [dict(title, ArchiveCategory=["Title", "Common"])], screens)
+        self.put_rows(self.HAND, [dict(title, SortKey=2)], screens)
+        self.run_all()
+        self.assertEqual(self.rows(self.HAND, screens), [dict(title, SortKey=2)])
 
     def test_the_other_order_gives_the_same_rows(self):
         self.both_mods()
@@ -993,6 +1280,13 @@ class MergeRowsBetweenModsTest(MergeRowsTest):
 
 GD = "GameDataList.Product.110.byml.zs"
 GD_KEY = "GameData/GameDataList.Product.110.byml"
+
+
+@unittest.skipIf(zstandard is None, "needs zstandard")
+class MergeRowsUnderContentsTest(MergeRowsBetweenModsTest):
+    """The same, both mods under contents/<title id>/ (player report 259: such a winner was never rewritten)."""
+    CS = "contents/0400486024DEC000/OoT Character Select"
+    HAND = "contents/0400486024DEC000/OoT_Randomizer_0123456789abcdef"
 
 
 class MergeGameDataTest(unittest.TestCase):
@@ -1774,15 +2068,15 @@ class SelfModelsTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.top, mt.MODELS_KEEP, *mt.SELF_MODELS["Child"].split("/"))), newer)
         self.assertTrue(self.model(self.top, "Child").endswith(b"new\x00"))
 
-    def assert_put_back(self):
+    def assert_put_back(self, warned=0):
         for m in (self.top, self.under):
             self.assertEqual(self.model(m, "Child"), self.child)
             self.assertEqual(self.model(m, "Adult"), self.adult)
             self.assertFalse(os.path.isdir(os.path.join(m, mt.MODELS_KEEP)))
-        self.assertEqual(len(self.lines), 2)   # (one line a mod)
+        self.assertEqual(len(self.lines), 2 + warned)   # (one line a mod, and a warning a mod when the pack is on)
         self.lines = []
-        self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)   # (the next start: nothing)
-        self.assertEqual(self.lines, [])
+        self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)   # (the next start: the warnings)
+        self.assertEqual(len(self.lines), warned)
 
     def test_the_pack_off_puts_every_mods_own_models_back(self):
         # (their copies named co-op's own tunic textures, which no mod has with the pack off: never left so)
@@ -1806,7 +2100,8 @@ class SelfModelsTest(unittest.TestCase):
                                self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
         self.lines = []
         self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)
-        self.assert_put_back()
+        self.assert_put_back(warned=2)   # (row 265: the pack on without them, each mod's Link models named)
+        self.assertTrue(all("none of your own tunic textures" in l and "self_tunic.py" in l for l in self.lines))
 
     def test_the_pack_off_keeps_a_model_changed_since(self):
         # (a new copy of the mod since the start that named it: its own, never the old kept one over it)
@@ -1824,7 +2119,35 @@ class SelfModelsTest(unittest.TestCase):
                                self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
         self.assertEqual(mt.merge_self_models(self.mods, "", self.lines.append), 0)
         self.assertEqual(self.model(self.top, "Child"), self.child)
+        # Row 265: said, a line for each mod whose Link models win (the lane proof had Character Select's own model
+        # and a pack whose start never put your tunic textures in: the tunic stayed the model's green, silently)
+        self.assertEqual(len(self.lines), 2)
+        self.assertTrue(any("OoT Character Select has its own " + mt.SELF_MODELS["Child"] + ", " +
+                            mt.SELF_MODELS["Adult"] in l for l in self.lines))
+
+    def test_no_word_about_a_mod_without_link_models_or_with_the_pack_off(self):
+        os.remove(os.path.join(self.pack, "romfs", "Tex",
+                               self.tunic.tile_name("green", self.tunic.SELF_LETTER) + ".bntx.zs"))
+        for m in (self.top, self.under):
+            for rel in mt.SELF_MODELS.values():
+                os.remove(os.path.join(m, "romfs", *rel.split("/")))
+        mt.merge_self_models(self.mods, "", self.lines.append)
         self.assertEqual(self.lines, [])
+        shutil.rmtree(self.pack)   # (no pack: nothing of yours to name, nothing said)
+        self.put(os.path.join(self.top, "romfs", *mt.SELF_MODELS["Child"].split("/")), self.child)
+        mt.merge_self_models(self.mods, "", self.lines.append)
+        self.assertEqual(self.lines, [])
+
+
+class MergeGameDataUnderContentsTest(MergeGameDataTest):
+    """The saved values list, both mods under contents/<title id>/ (player report 259)."""
+    CS = "contents/0400486024DEC000/OoT Character Select"
+    HAND = "contents/0400486024DEC000/OoT_Randomizer_0123456789abcdef"
+
+
+class MergeMembersUnderContentsTest(MergeMembersTest):
+    """The menu archives, the winning mod under contents/<title id>/ beside the pack (player report 259)."""
+    MOD = "contents/0400486024DEC000/zz-voices"
 
 
 if __name__ == "__main__":

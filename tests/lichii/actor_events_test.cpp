@@ -144,6 +144,54 @@ TEST_CASE("actor events: a judged give is told to its step once, only an owner's
     CHECK_FALSE(judged);
 }
 
+TEST_CASE("actor events: a fall given in place of a replay its damage step never took is taken once, never twice") {
+    static Ring ring;
+    static CoopActorEvents::LifeTable table;
+    using CoopActorEvents::kNoHitId;
+    using CoopActorEvents::HitIdReached;
+    using CoopActorEvents::WithdrawReplay;
+    // Hit ids only grow; none read or none of ours: not reached.
+    CHECK(HitIdReached(0x1000, 0x1000));
+    CHECK(HitIdReached(0x1002, 0x1000));
+    CHECK_FALSE(HitIdReached(0x0ffe, 0x1000));
+    CHECK_FALSE(HitIdReached(kNoHitId, 0x1000));
+    CHECK_FALSE(HitIdReached(0x1000, kNoHitId));
+    // enemy-late-kill: the Deku Baba's copy. Our replay 0x1000 waits; its hit id stays 0xffffffff. The owner's
+    // death (3) is given tied to the replay and the next Life step takes it, judged, and names the replay.
+    bool judged = false;
+    std::uint32_t withdraw = 0;
+    CHECK(table.Give(0x900, 3, true, 0x1000));
+    CHECK(table.Pending(0x900) == 3);
+    CHECK(CoopActorEvents::Step(ring, table, 0x900, 0, &judged, kNoHitId, &withdraw) == 3);
+    CHECK(judged);
+    CHECK(withdraw == 0x1000);
+    CHECK(CoopActorEvents::Step(ring, table, 0x900, 0, &judged, kNoHitId, &withdraw) == 0);  // (once)
+    CHECK(withdraw == kNoHitId);
+    // The replay still waiting in the record (its id, present set) is withdrawn; another, or one taken, is not.
+    CHECK(WithdrawReplay(0x1000, 0x1000, 1));
+    CHECK_FALSE(WithdrawReplay(0x1000, 0x1000, 0));
+    CHECK_FALSE(WithdrawReplay(0x1000, 0x1002, 1));
+    CHECK_FALSE(WithdrawReplay(kNoHitId, kNoHitId, 1));
+    // The replay landed after all (the damage step took it this frame: the id reached it, its hit dealt the fall):
+    // the tied give is dropped, a plain give with it is still taken.
+    CHECK(table.Give(0x900, 2, true, 0x1002));
+    CHECK(table.Give(0x900, 1));
+    CHECK(CoopActorEvents::Step(ring, table, 0x900, 2, &judged, 0x1002, &withdraw) == 3);
+    CHECK_FALSE(judged);  // (the judged part was dropped)
+    CHECK(withdraw == kNoHitId);
+    CHECK(table.Pending(0x900) == 0);
+    ring.Drain();
+    // Taken back on our own thread (stale): all of it, tied or not, so the fall can be given again.
+    CHECK(table.Give(0x900, 2, true, 0x1004));
+    CHECK(table.Give(0x900, 1));
+    CHECK(table.Take(0x900) == 3);
+    CHECK(table.Pending(0x900) == 0);
+    table.Give(0x900, 2, true, 0x1004);
+    table.Clear();
+    CHECK(CoopActorEvents::Step(ring, table, 0x900, 0, &judged, kNoHitId, &withdraw) == 0);
+    CHECK(withdraw == kNoHitId);
+}
+
 TEST_CASE("actor events: a create keeps its name") {
     Event e;
     e.SetName("Shootable_DekuSeed");

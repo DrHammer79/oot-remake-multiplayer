@@ -28,6 +28,8 @@ VARIANTS = ("Child", "Adult")
 SILENCE_DB = 40.0      # a 10 ms frame this far below the loudest is silence at the ends
 PEAK = 32767 * 10 ** (-1 / 20)
 FADE_S = 0.02          # fade-out when a clip is cut to the length cap
+FADE_IN_S = 0.01       # fade-in when the cut starts inside the clip
+PEAK_AT = 0.25         # where in a cut the clip's loudest 10 ms falls (part of the cut's length)
 
 
 class VoiceError(ValueError):
@@ -117,13 +119,29 @@ def fit(x, gain_db):
     return (np.sign(y) * a).round().astype(np.int16)
 
 
+def loudest(x, rate):
+    """The middle sample of x's loudest 10 ms frame."""
+    hop = max(1, rate // 100)
+    m = len(x) // hop
+    if m < 1:
+        return len(x) // 2
+    f = (x[:m * hop].astype(np.float64).reshape(m, hop) ** 2).sum(axis=1)
+    return int(np.argmax(f)) * hop + hop // 2
+
+
 def cut(x, rate, seconds):
+    """x cut to `seconds` around its loudest 10 ms: that frame falls PEAK_AT into the cut (or the cut starts at the
+    clip's start, or ends at its end). A fade-in when the cut starts inside the clip, a fade-out at its end."""
     n = int(seconds * rate)
     if len(x) <= n:
         return x
-    y = x[:n].astype(np.float64)
+    start = min(max(0, loudest(x, rate) - int(PEAK_AT * n)), len(x) - n)
+    y = x[start:start + n].astype(np.float64)
     k = min(n, int(FADE_S * rate))
     y[n - k:] *= np.linspace(1, 0, k)
+    if start:
+        k = min(n, int(FADE_IN_S * rate))
+        y[:k] *= np.linspace(0, 1, k)
     return y.astype(np.int16)
 
 
@@ -208,20 +226,41 @@ class Link:
         return max(self.length[n] for n in self.events[event])
 
 
+def _fit(v, c, n, cap, rate):
+    """n of voice v's clips of class c that fit the cap, rotated; None when none fits."""
+    fits = [k for k in v.by_class.get(c, []) if cap is None or len(k[1]) <= cap * rate]
+    return [(v.voice, c) + fits[i % len(fits)] for i in range(n)] if fits else None
+
+
+def _cut(v, c, n, cap, rate):
+    """n of voice v's clips of class c, each cut to the cap around its loudest part, rotated; None when it has none."""
+    got = []
+    for name, x, _ in v.by_class.get(c, []):
+        y = cut(x, rate, cap)
+        got.append((v.voice, c, name, y, rms_db(y)))
+    return [got[i % len(got)] for i in range(n)] if got else None
+
+
 def choose(event, voices, n, cap, rate):
-    """n (voice, class, name, samples, rms) for one event: the first voice of the chain with a clip of a class
-    in prefs(event) that fits the cap, rotated to n. When none fits, the shortest clip there is, cut to the cap."""
-    for v in voices:
-        for c in vm.prefs(event):
-            fits = [k for k in v.by_class.get(c, []) if cap is None or len(k[1]) <= cap * rate]
-            if fits:
-                return [(v.voice, c) + fits[i % len(fits)] for i in range(n)]
-    for v in voices:
-        for c in vm.prefs(event):
-            if v.by_class.get(c):
-                name, x, r = min(v.by_class[c], key=lambda k: len(k[1]))
-                y = cut(x, rate, cap)
-                return [(v.voice, c, name, y, rms_db(y))] * n
+    """n (voice, class, name, samples, rms) for one event, rotated to n.
+    1. The event's own classes (vm.own(event)), in order: the first voice of the chain with clips of the class that
+       fit the cap, else the first voice with any clip of it, every clip cut to the cap around its loudest part.
+    2. Else the other classes of prefs(event), voice by voice: the first voice with a fitting clip of one of them,
+       else the first with any clip of one of them, cut."""
+    own = vm.own(event)
+    for c in own:
+        for pick in (_fit, _cut):
+            for v in voices:
+                got = pick(v, c, n, cap, rate)
+                if got:
+                    return got
+    rest = [c for c in vm.prefs(event) if c not in own]
+    for pick in (_fit, _cut):
+        for v in voices:
+            for c in rest:
+                got = pick(v, c, n, cap, rate)
+                if got:
+                    return got
     return []
 
 

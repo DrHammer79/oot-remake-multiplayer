@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Customize page's camera turned with the orbit (patch 0036, hos_coop_turn.h): the game's camera given the
+// The Customize page's camera turned with the orbit (patch 0040, hos_coop_turn.h): the game's camera given the
 // yaw and pitch that put its eye in the orbit's direction, and the picture framed from the eye the game placed
 // (hookshot/src/coop_look_view.h Steer, Framed, ReAim).
 #include <doctest/doctest.h>
@@ -619,7 +619,7 @@ TEST_CASE("look steer: while the camera is driven the orbit's shot is never a fa
     REQUIRE(kept);
     CHECK_FALSE(above.IsAim(kept));
     CHECK(Distance(kept->eye, held) < 1e-6);
-    // Not driven (no patch 0036, a camera that does not follow): the orbit's own picture, as before.
+    // Not driven (no patch 0040, a camera that does not follow): the orbit's own picture, as before.
     Place lost;
     lost.cam.frozen = true;
     std::optional<Shot> last;
