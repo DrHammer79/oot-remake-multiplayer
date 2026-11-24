@@ -363,7 +363,7 @@ void FixSlotsLocked() {
         if (!it->is_directory(dec)) continue;
         const fs::path file = it->path() / "progress.sav";
         std::FILE* in = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32  // (a Windows path is wide with MSVC and llvm-mingw alike: _WIN32, as ReadSaveSetLocked)
         if (_wfopen_s(&in, file.c_str(), L"rb") != 0) in = nullptr;
 #else
         in = std::fopen(file.c_str(), "rb");
@@ -386,7 +386,7 @@ void FixSlotsLocked() {
         }
         const fs::path tmp = it->path() / "progress.sav.coop-tmp";
         std::FILE* out = nullptr;
-#ifdef _MSC_VER
+#ifdef _WIN32
         if (_wfopen_s(&out, tmp.c_str(), L"wb") != 0) out = nullptr;
 #else
         out = std::fopen(tmp.c_str(), "wb");
@@ -409,11 +409,19 @@ void FixSlotsLocked() {
 // `played_from`: the game already plays from `dir` (else Success is said once it is switched to: PendingFrame).
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot_in, bool played_from) {
     const save::SaveSlot slot = FixedSlotLocked(slot_in);
-    const auto result = save::write_coop_save(dir, slot, save::own_dir_of(dir));
+    int own_kept = -1;
+    const auto result = save::write_coop_save(dir, slot, save::own_dir_of(dir), &own_kept);
     switch (result) {
     case save::WriteResult::written:
         g_guest.ready = true;
         LOG_INFO(Core, "coop: save: the host's save written to {}", dir.string());
+        // (row 249: rupees, ammo, bottles, life and magic are each player's own)
+        if (own_kept < 0) {
+            LOG_INFO(Core, "coop: save: no values of our own kept yet (a first join here): the host's rupees, ammo and "
+                           "bottles are where ours start");
+        } else {
+            LOG_INFO(Core, "coop: save: our own {} rupees/ammo/bottles/life/magic values kept in it", own_kept);
+        }
         if (played_from) Say(g_lines.on_ready(g_in_game));
         break;
     case save::WriteResult::not_coop:
