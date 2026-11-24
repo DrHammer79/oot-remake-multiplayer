@@ -68,6 +68,26 @@ class Classes(unittest.TestCase):
         self.assertEqual(vm.event_class("Wait_42"), "BREATH")
         self.assertEqual(vm.prefs("Shield_S")[0], "EFFORT")
 
+    def test_cow_clips(self):
+        self.assertEqual(vm.clip_class("SE_Animal_Cow_DamagedAngry_00"), "DAMAGE")
+        self.assertEqual(vm.clip_class("SE_Animal_Cow_Roar_01"), "ATTACK_BIG")
+        self.assertEqual(vm.clip_class("NV_Cow_Sad00"), "DIE")
+        self.assertEqual(vm.clip_class("NV_Cow_Happy01"), "BREATH")
+        self.assertEqual(vm.clip_class("NV_Cow_TalkPositive02"), "BREATH")
+        self.assertIsNone(vm.clip_class("SE_Animal_Cow_Moo_00"))   # the same sound as TalkPositive
+        self.assertIsNone(vm.clip_class("SE_Animal_Cow_DummyBlank"))
+
+    def test_own_classes(self):
+        self.assertEqual(vm.own("SwordAttack_B"), ("ATTACK_BIG", "ATTACK"))
+        self.assertEqual(vm.own("JumpAttack"), ("ATTACK_BIG", "ATTACK"))
+        self.assertEqual(vm.own("Death"), ("DIE", "DAMAGE"))
+        self.assertEqual(vm.own("SwordAttack_S"), ("ATTACK",))
+        self.assertEqual(vm.own("Damage_S"), ("DAMAGE",))
+        self.assertEqual(vm.own("Wait_31"), ("BREATH",))
+        self.assertEqual(vm.own("Shield_B"), ("EFFORT",))
+        for ev in ("SwordAttack_B", "Death", "Wait_31", "Shield_B", "SomethingNew"):
+            self.assertEqual(vm.prefs(ev)[:len(vm.own(ev))], vm.own(ev), ev)
+
 
 class Clips(unittest.TestCase):
     def test_good_clips_pass(self):

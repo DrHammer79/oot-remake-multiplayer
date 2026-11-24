@@ -9,6 +9,7 @@ A spec is a dict (the body of a preset file, tools/playtest/data/presets/*.json,
      "rupees": 200,
      "small_keys": {"ForestTemple": 2}, "boss_keys": ["ForestTemple"], "maps": [...], "compasses": [...],
      "items": ["bow", "Item_Boomerang"],      # `give` names
+     "age": "child"|"adult",   # Sequence_IsChildhood, set and given 30 frames before the warp (a warp loads Link at that age)
      "flags": {"Gohma_DefeatBoss": 0},        # any flag name: number, true/false or an enum value's name
      "place": {"x": -12.0, "y": 48.5, "z": 66.5}}   # after the warp: Link put at a point of the scene (`place`)
 
@@ -31,7 +32,7 @@ KEYS = {"DekuTree": "InsideTheDekuTree", "DodongoCavern": "DodongoCavern", "Jabu
         "GerudoFortress": "GerudoFortress", "GanonsCastle": "InsideGanonCastle",
         "FinalBattleField": "FinalBattleField"}
 SPEC_KEYS = {"warp", "hearts", "max_hearts", "magic", "rupees", "small_keys", "boss_keys", "maps", "compasses",
-             "items", "flags", "place", "name", "version", "note"}
+             "items", "flags", "place", "age", "name", "version", "note"}
 NAME = re.compile(r"^[A-Za-z0-9_.]{1,128}$")
 
 
@@ -103,6 +104,10 @@ def plan(spec):
         calls.append(("flag", "PlayerStatus.MaxLife", 4 * _int(spec, "max_hearts", 3, 20)))
     if "hearts" in spec:
         calls.append(("flag", "PlayerStatus.Life", 4 * _int(spec, "hearts", 1, 20)))
+    if "age" in spec:   # Link loads at the age of Sequence_IsChildhood, so it is set (and given frames) before the warp
+        if spec["age"] not in ("child", "adult"):
+            raise ValueError("age: child or adult (got %r)" % (spec["age"],))
+        calls.append(("flag", "Sequence_IsChildhood", 1 if spec["age"] == "child" else 0))
     w = spec.get("warp")
     if w is not None:
         if not isinstance(w, dict) or "scene" not in w or set(w) - {"scene", "entrance"}:
@@ -183,6 +188,8 @@ def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None)
         except Exception as e:  # the client raises its own error with the bridge's code and message
             raise RuntimeError("step %d of %d (%s) failed: %s; done so far: %s" % (len(done) + 1, len(calls), " ".join(str(x) for x in call if x is not None), e, [d["call"] for d in done])) from e
         done.append({"call": list(call), "reply": reply})
+        if call[0] == "flag" and call[1] == "Sequence_IsChildhood":
+            client.step(30)   # the game takes the age before the scene is read (the lane recipe: setflag, wait, warp)
         if call[0] == "flag" and log_dir and player:
             written[call[1]] = call[2]
             _remember(log_dir, player, written)

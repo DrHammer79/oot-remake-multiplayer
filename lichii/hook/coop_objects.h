@@ -169,8 +169,10 @@ std::optional<std::array<float, 3>> TestPlatformPlace(const std::string& name);
 // Test only ("hit NAME N", "hit ID NAME N"): as QueueTestKill, a hit of `amount` through the game's own Life step.
 // 0 (no strike queued, no number) for an amount below 1 or a full queue.
 std::uint64_t QueueTestHit(std::string name, std::int32_t amount, std::uint64_t id = 0);
-// Test only ("aim X Y Z", row 173): our next arrow (nocked within 10 s) is put on its way into the world point the
-// first frame it flies (the mover's AimStep); logs "coop: test aim ...".
+// Test only ("aim X Y Z", row 173): our arrow or seed in Link's hands within 10 s (one listed before the aim counts:
+// the slingshot makes its next seed right after a shot) is watched; the first frame it flies, when its flight already
+// points within CoopTestInput::kAimNudgeDeg and kAimNudgeM of the world point, it is moved sideways onto the line
+// through it (the mover's AimStep, CoopTestInput::AimNudge). Link is not turned. Logs "coop: test aim ...".
 void QueueTestAim(float x, float y, float z);
 // Test only ("stun NAME"): our copy of the nearest boss of that name says its owner a stun (Sync::TestStun).
 void QueueTestStun(std::string name);

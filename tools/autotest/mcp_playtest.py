@@ -36,8 +36,20 @@ SCRIPT_HELP = (
     "Movement: `goto X Z TOLERANCE FRAMES` (walk to a point, metres), `toward X Z FRAMES [BUTTONS]` (walk that way, "
     "holding buttons), `stick LX LY FRAMES`, `wait FRAMES`. Buttons: `press A 8`, `hold ZL+B 30` (A B X Y L R ZL ZR "
     "PLUS MINUS UP DOWN LEFT RIGHT). Co-op test commands (need LICHII_COOP_CHEATS=1): `warp SCENE` (e.g. "
-    "ForestTemple, SacredForestMeadow_Adult), `place X Y Z`, `face X Z`, `give ITEM`, `setflag NAME VALUE`, "
-    "`kill ACTOR`, `hit ACTOR N`, `hurt N`, `chat TEXT`, `mark NAME`.")
+    "ForestTemple, SacredForestMeadow_Adult), `place X Y Z`, `give ITEM`, `setflag NAME VALUE`, "
+    "`kill ACTOR`, `hit ACTOR N`, `hurt N`, `chat TEXT`, `mark NAME`. No `face` line: a written yaw is not play "
+    "(turn Link with the `face` tool, which uses the stick, or set him up with `place` and a facing).")
+
+FACE_REFUSED = ("`face` is refused in act: no player can set Link's yaw. Turn him with the `face` tool (the stick) "
+                "or put him there with `place` and a facing (set-up).")
+
+
+def refuse_face(script):
+    """Raises ValueError when a line of the act script is the test `face X Z` line (a written yaw)."""
+    for line in str(script).replace(";", "\n").split("\n"):
+        w = line.split("#", 1)[0].split()
+        if w and w[0].lower() == "face":
+            raise ValueError(FACE_REFUSED)
 
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
@@ -274,7 +286,9 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
-    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
+    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world) with light pushes of the left stick, "
+     "until his facing is within 10 degrees (12 pushes of 2 frames at most). `turn` says the pushes, the degrees left "
+     "and how far he stepped.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
     {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default: "
      "Longshot's attack button) in rounds until its life is 0 or the frames run out. Returns `result` "
@@ -292,10 +306,12 @@ HELPER_TOOLS = [
      "game shows, press A to go on, and when buttons show pick the next of `reply` (a text, or a list: one per set of "
      "buttons, in order; Down to it, then A). With no reply left it stops and lists the buttons, the talk left open: "
      "call again with `reply` and `since` (from that answer) to go on, no new A. With no prompt nothing is pressed. "
-     "Returns `speakers`, `boxes` [{speaker, text}], `choices`, `picked`, `since`, `done` (the talk ended) or `result` "
-     "saying why it stopped. The box body does not come through the text wrap yet (read in a lane run): `boxes` is "
-     "empty; take a screenshot to read it. A shop's item list is not buttons: move to the item yourself (press), then "
-     "talk with since. At most `max_boxes` boxes (20) and 1200 frames. It acts on this game only.",
+     "Returns `speakers`, `boxes` [{speaker, text, markup, raw}], `choices`, `picked`, `since`, `done` (the talk "
+     "ended) or `result` saying why it stopped. A box's `text` is its words with the game's markup cut out (`raw` "
+     "keeps the whole when something was cut); `speaker` is null only when the game shows no name. `boxes` is empty "
+     "without patch 0042 (take a screenshot to read it). A shop's item list is not buttons: move to the item "
+     "yourself (press), then talk with since. At most `max_boxes` boxes (20); it keeps going while boxes come and "
+     "gives up after 1200 frames with nothing new (7200 in all). It acts on this game only.",
      "inputSchema": {"type": "object",
                      "properties": dict(ACTOR_ARGS,
                                         reply={"anyOf": [{"type": "string", "maxLength": 200},
@@ -323,15 +339,18 @@ HELPER_TOOLS = [
 
 MOVE_NOTE = (" Each ends with a `look`. It acts on this game only (in a pair, the other game runs the same frames).")
 MOVE_TOOLS = [
-    {"name": "shoot", "description": "Take out an aimed item and fire it at a target: `assign` puts the item on ZR, "
-     "Link turns to the target (`face`), ZR is held to draw (60 + 30 frames), the stick tilts the aim for `tilt_frames` "
-     "(+ up, - down; how far a frame tilts is not measured), ZR is let go, and the target is watched for `watch_frames`. "
+    {"name": "shoot", "description": "Take out an aimed item and fire it at a target the way a player aims: `assign` "
+     "puts the item on ZR, Link turns to the target with the stick and ZL puts the camera behind him, ZR is held 60 frames to "
+     "draw, then a stick turns the view until the target is under the reticle (from the state's `view`; which stick and "
+     "which way is learnt by a small push of each), ZR is held 30 more, the aim is checked again, ZR is let go, and the "
+     "target is watched for `watch_frames`. `tilt_frames` (+ up, - down) tilts by hand after the aim. "
      "The target is `id` + `name` (from get_world) or a point `at` [x, y, z]. `result`: hit (its life fell, it died or "
      "left the list), changed (another field it shows changed), miss (the ammo went down, the target did not change), "
-     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item) or a "
-     "stop. `aim` has the world yaw and pitch from Link to the target; the game's aim tilt is not readable, so the "
-     "pitch is what the shot needs, not what Link aimed. `assist` true adds the test `aim X Y Z` line: the next arrow "
-     "or seed is steered onto the target (a hit then proves the target takes the shot, not the aim). " + ACT_NOTE
+     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item), "
+     "not aimed (the view could not be turned onto it; B puts the item away, no shot) or a stop. `aim` has the world "
+     "yaw and pitch from Link to the target, the stick used, the turns and the last `error` on the screen. `assist` "
+     "true adds the test `aim X Y Z` line: a shot whose flight is within 4 degrees and 0.5 m of the target is moved sideways onto "
+     "its line (a nudge; farther off it is left alone). " + ACT_NOTE
      + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["item"], "properties": dict(
          ACTOR_ARGS, item={"type": "string", "enum": list(kit_move.ITEMS)},
@@ -350,8 +369,9 @@ MOVE_TOOLS = [
          "face_z": {"type": "number"}, "max_frames": {"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES}}}},
     {"name": "push", "description": "Push a block (`id` + `name` from get_world) `distance_m` metres along world yaw "
      "`yaw` (0 = +z, 90 = +x; none: from Link toward the block). Link walks to the block's far side from the push, "
-     "faces it and leans on it at full stick. `result`: pushed, stuck (it did not move for 48 frames while Link leaned "
-     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
+     "turns to it with the stick, leans on it until A offers \"Grab\", holds A 30 frames to grab it, then pushes at full "
+     "stick. `grab` says what A offered and whether it was held. `result`: pushed, stuck (it did not move for 48 frames "
+     "while Link pushed: blocked, at its end, not a moving block; or Link went up onto it), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
      "frame ran), not reached (the walk to its side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name", "distance_m"], "properties": dict(
          ACTOR_ARGS, distance_m={"type": "number", "minimum": 0.1, "maximum": 20}, yaw={"type": "number"},
@@ -359,7 +379,7 @@ MOVE_TOOLS = [
     {"name": "jump", "description": "Run straight at (`x`, `z`) at full stick so Link jumps off the edge by himself (a "
      "run off a ledge jumps; a walk only drops), with no side steps, until he is on the ground near the point. "
      "`land_y` is the far side's height. `result`: landed, fell (on the ground over 1 m below `land_y`), respawned "
-     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), stopped (a move was "
+     "(put back: a pit or a void), stuck (no nearer for 4 looks on the ground: a wall, or no jump there; a fall past the point is not stuck), stopped (a move was "
      "refused: no camera; no frame ran), or a stop (an event, a "
      "scene change, timed out). `airborne` says whether the height moved on the way; `trace` is [frames, x, y, z]."
      + MOVE_NOTE,
@@ -472,7 +492,7 @@ PLAYER_TOOLS = [
      "own list; it lands at the map's own start). With an entrance, or for a map not in that list (a boss stage such as "
      "GohmaStage), the module opens the game's own map change event (needs LICHII_COOP_TELEPORT_EVENT; else `not_in_event` "
      "with the reason). Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
-     "name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event "
+     "name ending in the other age than Link's sets that age first (30 frames) and goes by the map change event. It runs until Link is there with no event "
      "or load (up to `timeout` seconds, default 60), then is held. A warp asked while a talk is open waits until the "
      "talk ends and answers `timeout` meanwhile: end the talk first (A or B until `event` is false).",
      "inputSchema": {"type": "object", "required": ["scene"],
@@ -504,13 +524,14 @@ PLAYER_TOOLS = [
                                     "small_keys": {"type": "object"}, "boss_keys": {"type": "array"},
                                     "maps": {"type": "array"}, "compasses": {"type": "array"},
                                     "items": {"type": "array"}, "flags": {"type": "object"},
-                                    "warp": {"type": "object"}, "place": {"type": "object"}}}},
+                                    "warp": {"type": "object"}, "place": {"type": "object"},
+                                    "age": {"type": "string", "enum": ["child", "adult"]}}}},
     {"name": "preset", "description": "Apply a named test start (tools/playtest/data/presets/*.json) with one call: the same "
      "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma (child, the corridor before Gohma's door: walk "
-     "through it), "
-     "before-dodongo, before-barinade, before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, "
-     "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
-     "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",
+     "through it), before-dodongo and before-barinade (child), "
+     "before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, before-twinrova, before-ganondorf, "
+     "before-ganon (adult): the dungeon's entrance, then Link at the boss room's arrival point, the boss put back. "
+     "A preset sets its age first. A wrong name lists the right ones. Needs the verb gate.",
      "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "save_point", "description": "Save a test point under a tag (letters, digits, - and _): the module's shared flags "
      "and Link's state (scene, place, life), in the run's checkpoint log. Retry a boss with load_point. Only what `dump` "
@@ -1005,6 +1026,7 @@ def call(session, name, args):
     if name == "state":
         return live.state(Args(session=session, player=args.get("player"), since=_since(args)))
     if name == "act":
+        refuse_face(args["script"])
         return live.do(Args(session=session, player=args["player"], script=args["script"]))
     if name == "shot":
         return live.shot(Args(session=session, player=args.get("player")))

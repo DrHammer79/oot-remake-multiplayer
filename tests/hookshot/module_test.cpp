@@ -25,6 +25,7 @@
 #include "hos_coop_save_load.h"
 #include "hos_coop_crash.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_body.h"
 #include "hos_coop_pane_text.h"
 #include "hos_coop_world.h"
 #include "hos_coop_actors.h"
@@ -913,6 +914,36 @@ TEST_CASE("hookshot: the pane text wrap (patch 0041) is one row in 0005's table,
     // The module copies the text only while the play-test bridge is on, and never writes for it.
     const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     const auto at = module.find("if (id == HOS_COOP_WRAP_PANE_TEXT) {");
+    REQUIRE(at != std::string::npos);
+    const std::string body = module.substr(at, module.find("return 0;", at) - at);
+    CHECK(body.find("phase == 0 && CoopPlaytest::On()") != std::string::npos);
+    CHECK(body.find("Write") == std::string::npos);
+}
+
+TEST_CASE("hookshot: the pane body wraps (patch 0042) are two rows after 0041's, its header hookshot/src's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0042-coop-pane-body-wrap.patch");
+    CHECK(NewFile(patch, "host/hos_coop_pane_body.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_pane_body.h"));
+    char row[128];
+    std::snprintf(row, sizeof row, "+    (%u, 0x76a460, (0xd503237f, 0xa9bc7bfd, 0xa9015ff8, 0xa90257f6)),",
+                  HOS_COOP_WRAP_PANE_BODY);
+    CHECK(patch.find(row) != std::string::npos);
+    std::snprintf(row, sizeof row, "+    (%u, 0x377a990, (0xd503237f, 0xa9bc7bfd, 0xf9000bf7, 0xa90257f6)),",
+                  HOS_COOP_WRAP_PANE_ALIAS);
+    CHECK(patch.find(row) != std::string::npos);
+    // After 0041's row, at the table's end.
+    CHECK(patch.find(" stp x20, x19\n+    # HOS_COOP_WRAP_PANE_BODY") != std::string::npos);
+    // The ids are free in the one wrap space (1-9, 16-19, 24, 25).
+    for (const unsigned id : {HOS_COOP_WRAP_PANE_BODY, HOS_COOP_WRAP_PANE_ALIAS}) {
+        for (const unsigned used : {HOS_COOP_WRAP_SOUND_EMIT, HOS_COOP_WRAP_GAME_OVER_SAVE, HOS_COOP_WRAP_SAVE_LOADED,
+                                    HOS_COOP_WRAP_EVENT_REQUEST, HOS_COOP_WRAP_PANE_TEXT}) {
+            CHECK(id != used);
+        }
+        CHECK(id < 64);
+    }
+    CHECK(HOS_COOP_WRAP_PANE_BODY != HOS_COOP_WRAP_PANE_ALIAS);
+    // The module copies the texts only while the play-test bridge is on, and never writes for them.
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    const auto at = module.find("if (id == HOS_COOP_WRAP_PANE_BODY || id == HOS_COOP_WRAP_PANE_ALIAS) {");
     REQUIRE(at != std::string::npos);
     const std::string body = module.substr(at, module.find("return 0;", at) - at);
     CHECK(body.find("phase == 0 && CoopPlaytest::On()") != std::string::npos);

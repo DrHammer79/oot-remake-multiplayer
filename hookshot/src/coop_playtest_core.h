@@ -236,6 +236,12 @@ std::string LinkMembers(const CoopModJson::Value* status);
 // `pos`. null when the sample is old or missing, the scene has no rooms (not a dungeon, or no pack) or no placement of
 // it is near (CoopRooms::kFar).
 std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms);
+// The state's `view` member (leading comma): the game's camera of the last drawn frame, so a tester can aim the way a
+// player does (turn the view until the target sits under the reticle). {"yaw": degrees (the `facing` convention),
+// "pitch": degrees up (negative: looking down), "clip": the 16 numbers of clip_from_world, row-major, clip = m * [x y
+// z 1]: a point's place on the screen is x/w, y/w, "y_down": true when +y/w is lower on the screen (Vulkan)}. null with
+// no camera (a title, a load) or one with no forward.
+std::string ViewMember(const std::optional<std::array<float, 16>>& clip_from_world, bool y_down = false);
 // The state's `body` member (leading comma): "child" or "adult" from the name of our own Link actor in the world list
 // (Player_Child, Player_Adult; the others are CoopPuppet_). It follows the actor the game made, so it is right at once
 // after an area change. null without a live list (`live` false) or without our Link in it (a load).
@@ -258,12 +264,14 @@ struct WarpPlan {
     WarpRoute route = WarpRoute::refuse;
     std::string code;  // for `refuse`: the bridge's error code (not_in_play, not_in_event)
     std::string why;   // for `refuse`: the text
+    std::string set_age;  // "child" or "adult": set Sequence_IsChildhood and let frames run before the warp; else empty
 };
 // Which way, from `status` (a reply with a fresh Link snapshot: an old or missing one cannot say, so it refuses), whether
 // the caller named an `entrance`, and the `scene` asked: an event runs -> event; none and no entrance -> teleport; none
 // and an entrance -> refuse (the teleport has no start position, the event-only request does). Longshot's teleport picks
-// the map for Link's current age, so a `scene` ending in the other age (`_Child`/`_Adult`, any case) is refused
-// (`wrong_age`) on that route; the event request sets the age itself.
+// the map for Link's current age, so in free play a `scene` ending in the other age (`_Child`/`_Adult`, any case)
+// goes by the map change event with `set_age` filled (the caller sets the age flag and runs frames first); the event
+// request sets the age itself.
 WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene);
 // What the teleport route does with Longshot's ok reply (`sent`, `map`: the map it sent, `accepted`: the game's event
 // manager's answer): `accepted` false fails now (`refused`) instead of waiting out the timeout; else wait for `map`

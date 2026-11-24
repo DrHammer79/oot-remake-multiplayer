@@ -130,6 +130,7 @@
 #include "hos_coop_pads.h"
 #include "hos_coop_save_load.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_body.h"
 #include "hos_coop_pane_text.h"
 #include "hos_coop_host.h"
 #include "hos_coop_world.h"
@@ -1818,6 +1819,10 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
             if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_TEXT & 1) == 0) {
                 LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0041): `text` stays empty");
             }
+            if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_BODY & 1) == 0) {
+                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane body wrap (patch 0042): a talk's box text "
+                               "is not in `text`");
+            }
         }
         {
             // Patch 0024: the game's own save loads (docs/flags.md, "A load window"). All three wraps, or the old signs.
@@ -2135,6 +2140,19 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             CoopTalkText::TheLog().Note(x[0], x[1], CoopPlaytest::Frame(), [](std::uint64_t a, void* out, std::size_t n) {
                 return CoopRuntime::Read(a, out, n);
             });
+        }
+        return 0;
+    }
+    if (id == HOS_COOP_WRAP_PANE_BODY || id == HOS_COOP_WRAP_PANE_ALIAS) {
+        // The texts of the two setters that skip 0041's call (patch 0042): a letter-animated pane's (x1 the text, w2
+        // its length) and each pane with a matching alias (x1 a reference, as 0041's). The same log. Reads only.
+        if (phase == 0 && CoopPlaytest::On()) {
+            const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+            if (id == HOS_COOP_WRAP_PANE_BODY) {
+                CoopTalkText::TheLog().NoteText(x[0], x[1], x[2], CoopPlaytest::Frame(), read, id);
+            } else {
+                CoopTalkText::TheLog().Note(x[0], x[1], CoopPlaytest::Frame(), read, id);
+            }
         }
         return 0;
     }
