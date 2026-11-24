@@ -54,6 +54,7 @@ MAX_MINUTES = 30     # a session's whole length (the lane lock goes stale after 
 BACKUP = ".live-backup"   # --dll: the lane's own module beside it while a session runs
 IDLE_MINUTES = 10    # no tester command for this long after the boot: the tester is gone (hand-off, crash, pause)
 WATCH_EVERY = 5.0    # s between the watchdog's looks
+SERVER_PASSWORD = "autotest-pass"   # hookshot.py run's default --password: the boot's server and games have it
 QUIT_WAIT = 15.0     # s a game gets to quit before it is killed
 
 
@@ -238,7 +239,11 @@ def start(a):
             pass
     s = {"started": time.time(), "dir": d, "lane": a.lane, "port": port, "booted": False,
          "max_s": int(a.max_minutes * 60), "idle_s": int(a.idle_minutes * 60), "lock_wait": a.lock_wait,
-         "games": {}, "offsets": {}}
+         "games": {}, "offsets": {}, "planned": {},
+         "runner": {"game_a": os.path.abspath(game_a), "game_b": os.path.abspath(game_b), "port": port, "pipe": pipe,
+                    "server": os.path.abspath(a.server), "env": list(a.env), "display": getattr(a, "display", None),
+                    "boot_timeout": a.boot_timeout,
+                    "playtest": playtest_base(a.lane) if getattr(a, "playtest", False) else 0}}
     for i, (x, g) in enumerate(zip(TAGS, (game_a, game_b))):
         s["games"][x] = {"folder": os.path.abspath(g), "pipe": "%s-%s" % (pipe, x),
                          "commands": os.path.join(d, "commands-%s.txt" % x),
@@ -489,6 +494,145 @@ def release_lock(n, owner):
     return lanes.hs.lock_release(lanes.hs.main_root(lanes.REPO), "lane%d" % n, owner, say=lambda *_: None)
 
 
+# --- a game or the server closed and started again inside one session (quit, server, relaunch) ----------------------
+# A planned exit is a step of the test, not the session's end: `planned` in session.json names what is down on purpose,
+# and the watchdog's "game X ended" leaves those out. `relaunch` starts the game again through the runner (hookshot.py
+# run --only X, into this session's folder: its pid is added to pids.json) with the session's own switches and ports.
+
+def write_pids(d, games=None, server=False):
+    """pids.json with these games' pids replaced (a pid of None: down) and, unless False, the server's."""
+    p = read_json(os.path.join(d, "pids.json"), {}) or {}
+    g = dict(p.get("games") or {})
+    for x, pid in (games or {}).items():
+        g[x] = pid
+    p["games"] = g
+    if server is not False:
+        p["server"] = server
+    write_json(os.path.join(d, "pids.json"), p)
+
+
+def plan(d, what, why):
+    """Marks `what` (A, B or server) as down on purpose (why) or, with why None, as back."""
+    s = load(d)
+    planned = s.setdefault("planned", {})
+    if why:
+        planned[what] = why
+    else:
+        planned.pop(what, None)
+    save(d, s)
+    return s
+
+
+def quit_one(a, alive=None, quit=None, killer=None, wait=QUIT_WAIT, clock=time.monotonic, sleep=time.sleep):
+    """Closes one game in the middle of a session (asked to quit, or `--kill`ed as a crash would end it)."""
+    alive = alive or lanes.hs.pid_alive
+    quit, killer = quit or quit_game, killer or kill
+    d = os.path.abspath(a.session)
+    open_session(d)
+    s = plan(d, a.player, "killed" if a.kill else "quit")
+    pid = game_pids(d)[0].get(a.player)
+    if not pid or not alive(pid):
+        write_pids(d, {a.player: None})
+        return {"player": a.player, "pid": pid, "how": "was not running"}
+    how = "killed"
+    if a.kill:
+        killer(pid)
+    else:
+        try:
+            quit(s, a.player)
+            how = "quit asked"
+        except Exception as e:
+            how = "quit not reached (%s)" % e
+    end = clock() + wait
+    while alive(pid) and clock() < end:
+        sleep(0.5)
+    if alive(pid):
+        killer(pid)
+        how += ", killed after %d s" % wait
+    write_pids(d, {a.player: None})
+    touch(d)
+    return {"player": a.player, "pid": pid, "how": how}
+
+
+def server_cmd(a, alive=None, killer=None, popen=None, sleep=time.sleep):
+    """Stops the session's server, or starts it again (same exe, port and password as the boot's)."""
+    alive = alive or lanes.hs.pid_alive
+    killer = killer or kill
+    d = os.path.abspath(a.session)
+    s = open_session(d)
+    r = s.get("runner")
+    if not r:
+        raise SystemExit("this session was started by an older live.py: no server settings kept")
+    pid = game_pids(d)[1]
+    if a.action == "stop":
+        plan(d, "server", "stopped")
+        if pid and alive(pid):
+            killer(pid)
+        write_pids(d, server=None)
+        return {"server": "stopped", "pid": pid}
+    if pid and alive(pid):
+        return {"error": "the server still runs (pid %d): live.py server stop first" % pid}
+    n = len([f for f in os.listdir(d) if f.startswith("server-out")])
+    with open(os.path.join(d, "server-out-%d.txt" % n), "w") as so:
+        env = dict(os.environ, OOT_COOP_TEST_PASSWORD=SERVER_PASSWORD)   # (in the environment, never on the command line)
+        proc = (popen or lanes.hs.popen_quiet)([r["server"], "--port", str(r["port"]), "--password-env",
+                                                "OOT_COOP_TEST_PASSWORD"], stdout=so, stderr=subprocess.STDOUT, env=env)
+    write_pids(d, server=proc.pid)
+    plan(d, "server", None)
+    sleep(1)
+    return {"server": "started", "pid": proc.pid, "port": r["port"]}
+
+
+def relaunch_argv(r, d, x, boot=None, no_load=False, restore=False):
+    """hookshot.py run's arguments that start game x again into session folder d (r: the session's `runner`)."""
+    argv = ["run", "--only", x, "--game-a", r["game_a"], "--game-b", r["game_b"], "--port", str(r["port"]),
+            "--out", d, "--name", "live-%s" % x.lower(), "--pipe", r["pipe"], "--keep-open", "--every", "0",
+            "--scenario-timeout", str(r["boot_timeout"])]
+    if not restore:
+        argv.append("--no-restore")   # (the point of a rejoin is the save the game has now)
+    if boot:
+        argv += ["--script-%s" % x.lower(), boot]
+    if no_load:
+        argv.append("--no-load")
+    if r.get("playtest"):
+        argv += ["--playtest-ports", str(r["playtest"])]
+    for kv in r.get("env") or []:
+        argv += ["--env", kv]
+    if r.get("display"):
+        argv += ["--display", r["display"]]
+    return argv
+
+
+def relaunch(a, alive=None, runner=None):
+    """Starts a game that `quit` closed (or that crashed) again, joining the session's server."""
+    alive = alive or lanes.hs.pid_alive
+    d = os.path.abspath(a.session)
+    s = open_session(d)
+    r = s.get("runner")
+    if not r:
+        raise SystemExit("this session was started by an older live.py: no runner settings kept")
+    x = a.player
+    pid = game_pids(d)[0].get(x)
+    if pid and alive(pid):
+        return {"error": "game %s still runs (pid %d): live.py quit first" % (x, pid)}
+    plan(d, x, "relaunch")
+    log = s["games"][x]["log"]
+    if os.path.exists(log):   # the runner writes game-out-X.txt from the start: the old one is kept beside it
+        n = 1
+        while os.path.exists("%s.%d" % (log, n)):
+            n += 1
+        os.replace(log, "%s.%d" % (log, n))
+    code = (runner or hookshot.main)(relaunch_argv(r, d, x, a.boot, a.no_load, a.restore))
+    s = load(d)
+    s["offsets"][x] = 0
+    save(d, s)
+    if code == 0:
+        plan(d, x, None)
+    touch(d)
+    return {"ok": code == 0, "player": x, "pid": game_pids(d)[0].get(x),
+            "boot": "played" if code == 0 else "FAILED (see steps.txt): the game stays down"}
+
+
 def lane_dlls(n, kit=None):
     """The hookshot_coop.dll path of each game of lane n (where lanes.py install puts it)."""
     L = lanes.lane(n, kit)
@@ -582,7 +726,8 @@ def watch(d, clock=time.time, sleep=time.sleep, alive=None, every=WATCH_EVERY):
         if s.get("booted"):
             if s.get("idle_s") and now - activity(d, s) >= s["idle_s"]:
                 return "no tester command for %d min" % (s["idle_s"] // 60)
-            gone = [x for x, p in sorted(game_pids(d)[0].items()) if not alive(p)]
+            planned = s.get("planned") or {}   # (a game closed on purpose: live.py quit / relaunch)
+            gone = [x for x, p in sorted(game_pids(d)[0].items()) if p and not planned.get(x) and not alive(p)]
             if gone:
                 return "game %s ended" % " and ".join(gone)
         sleep(every)
@@ -691,6 +836,19 @@ def main(argv=None):
                     "and put back when the session ends")
     st.add_argument("--playtest", action="store_true",
                     help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
+    qt = sub.add_parser("quit", help="close one game in the middle of the session (a planned exit, not its end)")
+    qt.add_argument("--session", required=True)
+    qt.add_argument("player", choices=TAGS)
+    qt.add_argument("--kill", action="store_true", help="end it at once, as a crash would (default: ask it to quit)")
+    sv = sub.add_parser("server", help="stop the session's server, or start it again")
+    sv.add_argument("--session", required=True)
+    sv.add_argument("action", choices=["stop", "start"])
+    rl = sub.add_parser("relaunch", help="start a game that quit (or crashed) again; it joins the session's server")
+    rl.add_argument("--session", required=True)
+    rl.add_argument("player", choices=TAGS)
+    rl.add_argument("--boot", help="a boot script for it (default: none, the load presses A until play)")
+    rl.add_argument("--no-load", action="store_true", help="the boot script takes the title itself")
+    rl.add_argument("--restore", action="store_true", help="put its save baseline back first (default: keep its save)")
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)
@@ -726,7 +884,7 @@ def main(argv=None):
     began = time.time()
     try:
         out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
-               "watchdog": watchdog}[a.cmd](a)
+               "watchdog": watchdog, "quit": quit_one, "server": server_cmd, "relaunch": relaunch}[a.cmd](a)
     except (Exception, SystemExit) as e:
         log_call(a, False, "%s: %s" % (e.__class__.__name__, e), began)
         raise

@@ -240,6 +240,151 @@ class LiveDll(unittest.TestCase):
             live.start(a)
 
 
+RUNNER = {"game_a": "ga", "game_b": "gb", "port": 27520, "pipe": "coop-lane1", "server": "srv.exe",
+          "env": ["LICHII_COOP_DEBUG_FLAGS=1", "B:X=1"], "display": "D2", "boot_timeout": 900, "playtest": 5010}
+
+
+class FakeProc:
+    def __init__(self, pid):
+        self.pid = pid
+
+
+class LiveLifecycle(unittest.TestCase):
+    """quit / server / relaunch: a game or the server closed and started again inside one session."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        write_session(self.d, runner=dict(RUNNER), planned={})
+        self.pids({"A": 11, "B": 22}, 33)
+        self.live = {11, 22, 33}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def pids(self, games, server=None):
+        with open(os.path.join(self.d, "pids.json"), "w", encoding="utf-8") as f:
+            json.dump({"games": games, "server": server}, f)
+
+    def alive(self, p):
+        return p in self.live
+
+    def args(self, **kw):
+        return argparse.Namespace(session=self.d, **kw)
+
+    def test_a_planned_exit_does_not_end_the_session(self):
+        out = live.quit_one(self.args(player="B", kill=True), alive=self.alive, killer=self.live.discard,
+                            sleep=lambda s: None)
+        self.assertEqual(out["how"], "killed")
+        self.assertEqual(live.game_pids(self.d)[0], {"A": 11})
+        self.assertEqual(live.load(self.d)["planned"], {"B": "killed"})
+        c = FakeClock(1000.0)
+
+        def sleep(s):   # B's pid is gone and planned: only the stop request ends the watch
+            c.sleep(s)
+            open(live.stop_file(self.d), "w").close()
+        live.touch(self.d)
+        self.assertEqual(live.watch(self.d, clock=c, sleep=sleep, alive=self.alive), "stop asked")
+
+    def test_an_unplanned_exit_still_ends_it(self):
+        self.live.discard(22)
+        c = FakeClock(1000.0)
+        live.touch(self.d)
+        self.assertEqual(live.watch(self.d, clock=c, sleep=c.sleep, alive=self.alive), "game B ended")
+
+    def test_quit_asks_first_then_kills(self):
+        asked = []
+        c = FakeClock(0.0)
+        out = live.quit_one(self.args(player="A", kill=False), alive=self.alive, quit=lambda s, x: asked.append(x),
+                            killer=self.live.discard, wait=5, clock=c, sleep=c.sleep)
+        self.assertEqual(asked, ["A"])
+        self.assertEqual(out["how"], "quit asked, killed after 5 s")
+        self.assertNotIn(11, self.live)
+
+    def test_server_stop_and_start(self):
+        out = live.server_cmd(self.args(action="stop"), alive=self.alive, killer=self.live.discard)
+        self.assertEqual((out["server"], out["pid"]), ("stopped", 33))
+        self.assertIsNone(live.game_pids(self.d)[1])
+        self.assertEqual(live.load(self.d)["planned"], {"server": "stopped"})
+        seen = {}
+
+        def popen(cmd, **kw):
+            seen["cmd"], seen["env"] = cmd, kw["env"]
+            return FakeProc(44)
+        out = live.server_cmd(self.args(action="start"), alive=self.alive, popen=popen, sleep=lambda s: None)
+        self.assertEqual(out["pid"], 44)
+        self.assertEqual(seen["cmd"], ["srv.exe", "--port", "27520", "--password-env", "OOT_COOP_TEST_PASSWORD"])
+        self.assertEqual(seen["env"]["OOT_COOP_TEST_PASSWORD"], live.SERVER_PASSWORD)
+        self.assertEqual(live.game_pids(self.d), ({"A": 11, "B": 22}, 44))
+        self.assertEqual(live.load(self.d)["planned"], {})
+
+    def test_server_start_refused_while_it_runs(self):
+        out = live.server_cmd(self.args(action="start"), alive=self.alive, popen=lambda *a, **k: 1 / 0)
+        self.assertIn("still runs", out["error"])
+
+    def test_relaunch_argv_keeps_the_session_settings(self):
+        argv = live.relaunch_argv(RUNNER, self.d, "B", boot="boot.B.txt", no_load=True)
+        self.assertEqual(argv[:3], ["run", "--only", "B"])
+        for pair in (["--port", "27520"], ["--pipe", "coop-lane1"], ["--out", self.d], ["--script-b", "boot.B.txt"],
+                     ["--playtest-ports", "5010"], ["--display", "D2"]):
+            i = argv.index(pair[0])
+            self.assertEqual(argv[i:i + 2], pair)
+        self.assertEqual([argv[i + 1] for i, w in enumerate(argv) if w == "--env"], RUNNER["env"])
+        self.assertIn("--no-restore", argv)
+        self.assertIn("--no-load", argv)
+        self.assertNotIn("--server", argv)   # (the game joins the session's server; none is started)
+        self.assertNotIn("--no-restore", live.relaunch_argv(RUNNER, self.d, "A", restore=True))
+
+    def test_relaunch_refused_while_the_game_runs(self):
+        out = live.relaunch(self.args(player="A", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=lambda argv: 1 / 0)
+        self.assertIn("still runs", out["error"])
+
+    def test_relaunch_keeps_the_old_log_and_merges_the_pid(self):
+        live.quit_one(self.args(player="B", kill=True), alive=self.alive, killer=self.live.discard,
+                      sleep=lambda s: None)
+        log = os.path.join(self.d, "game-out-B.txt")
+        with open(log, "w") as f:
+            f.write("first run")
+
+        def runner(argv):   # as hookshot.py run --only B does: B's new pid added to pids.json
+            p = live.read_json(os.path.join(self.d, "pids.json"))
+            p["games"]["B"] = 55
+            live.write_json(os.path.join(self.d, "pids.json"), p)
+            return 0
+        s = live.load(self.d)
+        s["offsets"] = {"A": 7, "B": 99}
+        live.save(self.d, s)
+        out = live.relaunch(self.args(player="B", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=runner)
+        self.assertTrue(out["ok"])
+        self.assertEqual(live.game_pids(self.d), ({"A": 11, "B": 55}, 33))
+        with open(log + ".1") as f:
+            self.assertEqual(f.read(), "first run")
+        s = live.load(self.d)
+        self.assertEqual(s["offsets"], {"A": 7, "B": 0})
+        self.assertEqual(s["planned"], {})
+
+    def test_a_failed_relaunch_stays_planned(self):
+        self.live.discard(22)
+        live.plan(self.d, "B", "killed")
+        out = live.relaunch(self.args(player="B", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=lambda argv: 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(live.load(self.d)["planned"], {"B": "relaunch"})
+
+    def test_older_session_says_so(self):
+        write_session(self.d)
+        with self.assertRaises(SystemExit):
+            live.server_cmd(self.args(action="stop"))
+
+
+class HookshotOnly(unittest.TestCase):
+    def test_only_needs_no_script_a(self):
+        with self.assertRaises(SystemExit):
+            hookshot.main(["run", "--game-a", "a", "--game-b", "b", "--out", "o"])   # neither --script-a nor --only
+
+
 class FakeClock:
     def __init__(self, t):
         self.t = t
