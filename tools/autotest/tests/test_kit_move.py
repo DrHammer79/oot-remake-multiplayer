@@ -14,8 +14,8 @@ import mcp_playtest  # noqa: E402
 
 class Sim:
     """A held game: Link moves 0.15 m a frame at full stick along the world yaw, stands on `ground(x, z)` (None: a
-    pit, which puts him back at `respawn` and takes 2 life unless he runs across it at full stick, at most `jump_m`
-    wide). A ladder (`ladder`: x, z, bottom, top) holds him when he is within 0.6 m of it: the stick up climbs 0.05 m a
+    pit, which puts him back at `respawn` and takes 2 life unless he runs off the edge at full stick and it is at most
+    `jump_m` wide). A ladder (`ladder`: x, z, bottom, top) holds him when he is within 0.6 m of it: the stick up climbs 0.05 m a
     frame. A block moves after Link leaned on it `lean` frames. A shot: ZR held 30 frames or more and let go spends one
     seed and, when the target `takes` shots and Link faces it, takes one life."""
 
@@ -130,6 +130,9 @@ class Sim:
         self._walk((self.facing + angle) % 360, strength)
 
     def _walk(self, yaw, strength):
+        if getattr(self, "gap_run", 0.0) > 0.0:   # in the air: the take-off speed and way, whatever the stick
+            yaw, strength = self.air_yaw, 1.0
+        self.air_yaw = yaw
         step = 0.15 * strength
         nx = self.pos[0] + math.sin(math.radians(yaw)) * step
         nz = self.pos[2] + math.cos(math.radians(yaw)) * step
@@ -145,7 +148,7 @@ class Sim:
         g = self.ground(nx, nz)
         if g is None:
             self.gap_run = getattr(self, "gap_run", 0.0) + step
-            if strength < 1.0 or self.gap_run > self.jump_m:
+            if (strength < 1.0 and self.gap_run <= step) or self.gap_run > self.jump_m:   # a walk off drops
                 self.pos = list(self.respawn)
                 self.life -= 2
                 self.gap_run = 0.0
@@ -380,6 +383,17 @@ class Jump(unittest.TestCase):
         r = km.jump(g, 0.0, 10.0, land_y=0.0)
         self.assertEqual(r["result"], "landed", r)
         self.assertGreaterEqual(len(r["trace"]), 6, r)
+
+    def test_lets_go_of_the_stick_at_the_point(self):
+        # The lane run: Link came down 0.05 m from the point, but the stick stayed at full until the second steady look,
+        # so he ran 1.5 m past it and was called stuck. Near the point on the ground the stick lets go.
+        g = Sim(pos=(0.0, 7.0, 0.0), ground=lambda x, z: 7.0 if z < 5.0 else (None if z < 6.2 else 0.0))
+        r = km.jump(g, 0.0, 6.5, land_y=0.0)
+        self.assertEqual(r["result"], "landed", r)
+        self.assertTrue(r["airborne"])
+        self.assertLessEqual(abs(r["pos"][2] - 6.5), 0.6, r)
+        down = next(f for f, _x, y, _z in r["trace"] if y == 0.0)
+        self.assertLessEqual(r["frames"] - down, 8, r)   # the landing is called within 8 frames of the touch down
 
     def test_stuck_at_a_wall(self):
         g = Sim()

@@ -424,7 +424,8 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
     not more than FALL_M below `land_y`), `fell` (on the ground more than FALL_M below `land_y`), `respawned` (Link was put back: a pit or a void; the life may be lower), `stuck` (no nearer for
     `stuck_looks` looks: a wall, or the edge does not jump), `stopped` (the bridge refused the move: no camera, an
     event; no frame ran), or a stop (scene changed, event, timed out). On the ground means two looks in a row with the
-    height steady (ON_GROUND_M), so the top of the arc is not taken for a landing. The trace
+    height steady (ON_GROUND_M), so the top of the arc is not taken for a landing; within `tolerance` of the point the
+    stick lets go, so Link stops there and the landing is called two looks (2 x `chunk` frames) after he comes down. The trace
     has [frames, x, y, z] at each look."""
     st = _st(client)
     out = _base(st)
@@ -472,7 +473,10 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
             return _out(out, "timed out", "%.2f m from the point" % dist, st)
         last, prev_y = pos, pos[1]
         n = min(chunk, max_frames - out["frames"])
-        why = _refused(client.move(pc.yaw_to(pos, x, z) % 360, 1.0, n, check=False))
+        # At the point: let go of the stick, or Link runs on past it before the second steady look (in the air he
+        # keeps his speed; only the take-off needs the full stick).
+        hold = 0.0 if dist <= tolerance else 1.0
+        why = _refused(client.move(pc.yaw_to(pos, x, z) % 360, hold, n, check=False))
         if why:
             return _out(out, "stopped", "move refused: " + why, st)
         out["frames"] += n
