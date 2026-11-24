@@ -7,6 +7,7 @@
 #include "coop_i18n.h"
 #include "coop_pause_tab.h"
 #include "coop_list_pages.h"
+#include "coop_text_fit.h"
 #include "coop_players_open.h"
 #include "coop_browse.h"
 #include "coop_title.h"
@@ -290,6 +291,11 @@ struct LiveSlot {
     std::uint64_t attrs = 0;    // the reference's third word, kept
     bool bad = false;           // looked up and not ours (an old pack): no live text
     std::string shown;          // what the pane shows now (per pages screen)
+    // Fitted to the pane by its drawn width (FitPut, menu-polish-01113): the words asked for, the letter budget they are
+    // cut to (0: whole), and whether the drawn width was read and fits.
+    std::string fit_for;
+    std::size_t fit_n = 0;
+    bool fit_done = false;
 };
 std::mutex g_live_mutex;        // the slots (the pages' updates come on several threads)
 LiveSlot g_live[kLiveSlots];
@@ -2718,11 +2724,36 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
             LiveSlot& l = g_minus_live[static_cast<std::size_t>(slot)];
             return LiveLookupIn(ctx, l, "LayoutMsg/MenuOverlay_00", label, gen) && LiveTextIn(ctx, layout, path, l, words);
         };
+        // (a row's or a line's words fitted to their pane by the width the game drew them: once shown, read; too wide,
+        // cut to what fits ("..."), read again at the next pass. One rule for every text box of the page)
+        const auto fit_put = [&](int slot, const std::string& path, const std::string& words) {
+            LiveSlot& l = g_minus_live[static_cast<std::size_t>(slot)];
+            if (l.fit_for != words) l.fit_for = words, l.fit_n = 0, l.fit_done = false;
+            const std::string shown = l.fit_n != 0 ? CoopTextFit::Fit(words, l.fit_n) : words;
+            const bool drawn_before = l.shown == shown;   // (the game drew these words already: its width is theirs)
+            if (!put(slot, path, shown)) return false;
+            if (!l.fit_done && drawn_before) {
+                const std::uint64_t pane = TextPaneAt(ctx, layout, path);
+                const float drawn = pane != 0 ? Read<float>(pane + kPaneTextWidth) : 0.0f;
+                const float box = pane != 0 ? Read<float>(pane + kPaneBoxWidth) : 0.0f;
+                if (drawn > 0.0f && box > 10.0f) {
+                    const std::size_t n = CoopTextFit::LettersForWidth(shown, drawn, box);
+                    if (n == 0) {
+                        l.fit_done = true;
+                    } else {
+                        l.fit_n = n;
+                        LOG_INFO(Core, "coop: pause tab: the - page's text {} drew {:.0f} wide in a box of {:.0f}: cut to "
+                                       "{} letters", slot, drawn, box, n);
+                    }
+                }
+            }
+            return true;
+        };
         for (std::size_t k = 0; k < texts.size(); ++k) {
             if (texts[k].empty()) continue;
             char path[64];
             std::snprintf(path, sizeof path, "Pa_CoopMinus_00/Pa_Button_%02d/T_Btn_00", static_cast<int>(k));
-            if (!put(static_cast<int>(k), path, texts[k])) texts[k].clear();
+            if (!fit_put(static_cast<int>(k), path, texts[k])) texts[k].clear();
         }
         for (int i = 0; i < kLinePanes; ++i) {
             ListLine& line = lines[static_cast<std::size_t>(i)];
@@ -2733,9 +2764,9 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
             }
             char path[64];
             std::snprintf(path, sizeof path, "Pa_CoopMinus_00/Pa_List_%02d/T_Option_00", i);
-            const bool named = put(kRows + 2 * i, path, line.name);
+            const bool named = fit_put(kRows + 2 * i, path, line.name);
             std::snprintf(path, sizeof path, "Pa_CoopMinus_00/Pa_List_%02d/T_Text_00", i);
-            const bool valued = put(kRows + 2 * i + 1, path, line.value.empty() ? std::string(" ") : line.value);
+            const bool valued = fit_put(kRows + 2 * i + 1, path, line.value.empty() ? std::string(" ") : line.value);
             if (!named || !valued) line.name.clear(), pickable &= ~(1u << i);   // (a line without its words: not shown)
         }
         g_minus_live[kMinusHelpSlot].room = kHelpPlaceholder;

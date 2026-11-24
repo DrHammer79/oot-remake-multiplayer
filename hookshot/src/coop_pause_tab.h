@@ -956,6 +956,7 @@ bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t
 // So slot 3 counts when it is visible and the game holds his code (SnailCodeBuiltIn: another mod's code fills no tab;
 // review-0119-b) (charsel-tab-0119).
 inline constexpr std::uint64_t kPaneTextWidth = 0x13c;   // f32: a text pane's drawn width (docs/game-ui.md, checked)
+inline constexpr std::uint64_t kPaneBoxWidth = 0x58;     // f32: a pane's own size, its width (f_8154b220 sets it; docs/game-ui.md)
 inline int GameTabsShown(bool slot3_visible, bool snail_code_built_in) {
     return slot3_visible && snail_code_built_in ? 4 : 3;
 }
