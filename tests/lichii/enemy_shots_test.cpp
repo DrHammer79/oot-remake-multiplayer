@@ -194,6 +194,8 @@ TEST_CASE("enemy shots: Phantom Ganon's thunder and rally ball are split shots: 
     CHECK(es::IsSplitShot("Ganondorf_Bullet_Spread"));                   // every boss shot, each game's own
     CHECK(es::IsSplitShot("FlareDancer_Bullet_FireBall"));               // the Flare Dancer's (enemy survey)
     CHECK(es::IsSplitShot("FlareDancer_Bullet_FireDanceBall"));
+    CHECK(es::IsSplitShot("PoeHyrule_Bullet_FireBall"));  // the Poe's fireball, each game's own
+    CHECK_FALSE(es::IsSplitShot("SkullKid_Bullet"));
     CHECK_FALSE(es::IsSplitShot("Octorok_Bullet"));     // sent back by the player shot at: shared
     CHECK_FALSE(es::IsSplitShot("ScrubDeku_DekuNut"));
     CHECK(es::IsSplitShot("Twinrova_Bullet_IceBeam"));

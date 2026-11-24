@@ -207,6 +207,7 @@ a game run (unit tests only), for players to check:
 | Anubis keeps its target (it mirrors the player moving it) | `KeepsTarget` in `Sync::StateOf` | the mirror follows one player |
 | Ganon bound for the last blow (`InsideGanonCastle_Dungeon_BossBind0`) shared like the other stage changes | `coop_boss_scenes` entry 12 | both games' Ganon bound |
 | The Flare Dancer's fireballs split | `kSplit` | each player gets their own fire |
+| The Poe's fireball (`PoeHyrule_Bullet_*`) split | `kSplit` | each player gets their own fireball; Gohma's eggs and Volvagia's rocks are not shots (minions / each game's own), so not on the list |
 | The Goron City statue's moves shared | `IsMovable` | both see it pushed |
 | Capstans' turns shared (Spirit Temple mirrors, Shadow Temple room 1 statue) | `IsCapstan` shifters | the turn shows; the beam and the "correct" check in the game that follows |
 | Per-player room flags no longer shared: the Dark Link rooms' passage flags, the Shadow lifts' crush flag | `coop_dungeon.cpp` | B in room 22/23 while A passes a Dark Link door; B on the boat while A is crushed |
