@@ -1838,6 +1838,54 @@ class SnailCustomizeTest(MergeMembersTest):
         self.assertNotIn(mt.SNAIL_MSG, self.served())
 
 
+class SnailKeysTest(unittest.TestCase):
+    """menu-customize-01113: his Customize screen's Y and A as the game's guide keys (two hidden PaGuideKey_00 parts on
+    the footer's line, their words and button letters in his message file); the title then drops its worded hints."""
+
+    # (his layout's shape: RootPane > N_All_00 > N_Custom_00 > N_Mark_00 > Pa_MarkL_00, then his overlay after it)
+    TREE = [("RootPane", -1), ("N_All_00", 0), ("N_Custom_00", 1), ("T_Head_00", 2), ("N_Mark_00", 2),
+            ("Pa_MarkL_00", 4), ("P_Overlay_00", 0)]
+
+    def entries(self):
+        from test_ui_pack import make_layout, make_msbt
+        return [(mt.SNAIL_LAYOUT, make_layout(self.TREE, {"Pa_MarkL_00": ("PaCharacterKey_00", [])})),
+                (mt.SNAIL_MSG, make_msbt([("T_Head_00", "Customize")])), ("Other.buil", b"other")]
+
+    def test_two_hidden_guide_keys_on_the_footer_line_with_their_messages(self):
+        from puppet_pack import msbt
+        out, changed = mt.add_snail_keys(self.entries())
+        self.assertTrue(changed)
+        got = dict(out)
+        d = got[mt.SNAIL_LAYOUT]
+        panes, _ = ui_pack.read_layout(d)
+        names = [p.name for p in panes]
+        self.assertEqual(names[-2:], ["Pa_CoopKeyY_00", "Pa_CoopKeyA_00"])
+        self.assertEqual(ui_pack.part_layouts(d)[-2:], [("Pa_CoopKeyY_00", "PaGuideKey_00"),
+                                                         ("Pa_CoopKeyA_00", "PaGuideKey_00")])
+        root = names.index("RootPane")
+        for p in panes[-2:]:
+            self.assertEqual(struct.unpack_from("<I", d, p.record + 0x28)[0], root)
+            self.assertEqual(struct.unpack_from("<I", d, p.record + 0x38)[0] & 1, 0)   # (stored hidden)
+        xs = [struct.unpack_from("<ff", d, p.record + 0x1c) for p in panes[-2:]]
+        self.assertEqual(xs, [(1510.0, -1018.0), (1050.0, -1018.0)])
+        m = msbt.read(got[mt.SNAIL_MSG])
+        self.assertEqual(m.text("Pa_CoopKeyY_00-T_Icon_00"), ["\ue043"])
+        self.assertEqual(m.text("Pa_CoopKeyY_00-T_Guide_00"), ["Next page"])
+        self.assertEqual(m.text("Pa_CoopKeyA_00-T_Icon_00"), ["\ue040"])
+        self.assertEqual(m.text("Pa_CoopKeyA_00-T_Guide_00"), ["Fine-tune"])
+        self.assertEqual(m.text("T_Head_00"), ["Customize"])   # (his own kept)
+        self.assertEqual(got["Other.buil"], b"other")
+        again, changed = mt.add_snail_keys(out)                      # (the next start: nothing new)
+        self.assertFalse(changed)
+        self.assertEqual(again, out)
+
+    def test_a_layout_without_his_key_part_is_left_alone(self):
+        from test_ui_pack import make_layout
+        d = make_layout([("RootPane", -1), ("N_All_00", 0)], {})
+        out, changed = mt.add_snail_keys([(mt.SNAIL_LAYOUT, d)])
+        self.assertEqual((out, changed), ([(mt.SNAIL_LAYOUT, d)], False))
+
+
 class MessageLabelsTest(unittest.TestCase):
     """Row 224: Character Select's - menu tab read 'msgnotfound' (and his page crashed). His messages are only in USen
     and EUen: every other language's archive the game reads (the pack's, a seed's) lacked them. And a message file two

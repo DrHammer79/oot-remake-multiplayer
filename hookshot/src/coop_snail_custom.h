@@ -66,6 +66,16 @@ public:
     // His screen's texts in the game's language (CoopI18n::Current); Shown(lang) in that one (nullptr: English).
     Texts Shown() const;
     Texts Shown(const CoopI18n::Lang* lang) const;
+    // menu-customize-01113: the keys his screen shows as the game's guide keys (the pack's Pa_CoopKeyY_00 / _A_00 in
+    // his layout, merge_tables.py add_snail_keys): Y turns the page (more than one page, the mixer closed), A opens the
+    // mixer (a page with parts, the mixer closed). With them shown (SetKeysShown(true)) the title is the page's name
+    // alone; without them (a kit not merged again) it keeps the hints in words.
+    struct Keys {
+        bool page = false, mix = false;
+        bool operator==(const Keys&) const = default;
+    };
+    Keys KeysNow() const;
+    void SetKeysShown(bool on) { keys_shown_ = on; }
     int Focus() const { return focus_; }
     bool Editing() const { return page_.editing(); }
     // The look after a change, once.
@@ -75,6 +85,7 @@ private:
     CoopLookMenu::Page page_;
     int focus_ = 0;
     bool active_ = false;
+    bool keys_shown_ = false;
 };
 
 }  // namespace CoopSnailCustom

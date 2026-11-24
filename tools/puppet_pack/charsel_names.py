@@ -30,7 +30,7 @@ SLOT = re.compile(r"^T_(Slot|CellName)_(\d+)$")
 
 def kind_of(name):
     """The kind (the readable name before its number) of a model id, or None for a name of his own."""
-    m = MODEL_ID.match(name.replace("\n", ""))
+    m = MODEL_ID.match(name.replace("\n", "_"))   # (his wrapped label: "Gerudo_GEN\n011_Leader", the break for a "_")
     if not m:
         return None
     race, code, _, word = m.groups()
@@ -87,7 +87,7 @@ def picker_labels(texts):
         if m:
             slots.setdefault(int(m.group(2)), {})[m.group(1)] = text
     order = sorted(slots)
-    names = [slots[i].get("CellName", slots[i].get("Slot", "")).replace("\n", " ") for i in order]
+    names = [slots[i].get("CellName", slots[i].get("Slot", "")) for i in order]
     out = {}
     for i, old, new in zip(order, names, readable(names)):
         if new == old:

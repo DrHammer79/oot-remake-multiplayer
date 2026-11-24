@@ -194,3 +194,31 @@ TEST_CASE("snail customize: the title fits its pane (61 bytes) on every page in 
     }
     CHECK(lost == 0);   // (no title loses a hint: the hints are short enough for all of them)
 }
+
+TEST_CASE("snail customize: Y and A as the game's guide keys (menu-customize-01113), the title then the page's name only") {
+    Driver d;
+    CHECK(d.KeysNow() == Driver::Keys{});   // (closed: no key)
+    d.Open(Look{}, 0);
+    // Link: four pages, each with parts: both keys.
+    CHECK(d.KeysNow() == Driver::Keys{true, true});
+    // Without the key parts in his layout (a kit not merged again) the title keeps the hints in words.
+    CHECK(d.Shown().title.find("Y:") != std::string::npos);
+    d.SetKeysShown(true);
+    auto t = d.Shown();
+    CHECK(t.title.find("Y:") == std::string::npos);
+    CHECK(t.title.find("A:") == std::string::npos);
+    CHECK(t.title.rfind("Link", 0) == 0);
+    // The mixer: neither key (A is on its own rows' values, B the footer's Back).
+    CHECK(d.Pad(kA) == 0);
+    REQUIRE(d.Editing());
+    CHECK(d.KeysNow() == Driver::Keys{});
+    CHECK(d.Pad(kB) == 0);
+    CHECK(d.KeysNow() == Driver::Keys{true, true});
+    // A character with one page (the equipment only): no page key, the mix key stays.
+    Driver c;
+    c.Open(Look{}, 9);
+    c.SetRows(32 | 0x80);
+    CHECK(c.KeysNow() == Driver::Keys{false, true});
+    c.Close();
+    CHECK(c.KeysNow() == Driver::Keys{});
+}
