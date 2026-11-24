@@ -142,3 +142,32 @@ TEST_CASE("lift ride: a failed malloc turns it off") {
     CHECK_FALSE(r.Step(g, false, 0, 200));
     CHECK(r.TakeNotes().size() == 1);
 }
+
+TEST_CASE("switch stand: another player on our step switch sets its contact bool, and leaving lets go") {
+    CHECK(CoopLiftRide::IsStandSwitch("Obj_StepSwitch_A_01"));
+    CHECK(CoopLiftRide::IsStandSwitch("Obj_DodongoCave_StepSwitch_A_02"));
+    CHECK_FALSE(CoopLiftRide::IsStandSwitch("Obj_SwitchShutter_A_06"));
+    CHECK_FALSE(CoopLiftRide::IsStandSwitch("Npc_StepSwitch_A_01"));
+    // Dodongo's held switch (coop_room_objects.cpp): a puppet on it, beside it, above it.
+    const std::vector<CoopLiftRide::Lift> sw{{kLift, "Obj_StepSwitch_A_01", {-49.0f, 114.2f, -8.0f}}};
+    CHECK(CoopLiftRide::Stood(sw, {{-49.3f, 114.4f, -7.6f}}) == std::vector<std::uint64_t>{kLift});
+    CHECK(CoopLiftRide::Stood(sw, {{-49.0f, 114.6f, -3.0f}}).empty());  // 5 m off
+    CHECK(CoopLiftRide::Stood(sw, {{-49.0f, 117.0f, -8.0f}}).empty());  // on the ledge above
+    FakeGuest g;
+    Lift(g, CoopLiftRide::kStepContact ^ 7u);
+    CHECK(g.Get<std::uint32_t>(0x6000 + p::kKey) == 0x9cdaf491u);  // the probe's plug key
+    CoopLiftRide::Rider r(CoopLiftRide::kStepContact, "switch stand");
+    r.Want(CoopLiftRide::Stood(sw, {{-49.0f, 114.3f, -8.0f}}), kMain, 100);
+    REQUIRE(r.Step(g, false, 0, 100));  // the malloc
+    auto c = r.Step(g, true, kBlock, 100);
+    REQUIRE(c);
+    CHECK(c->function == kMain + a::kExecute);
+    CHECK((g.Get<std::uint32_t>(kBlock + a::kNodeKey) ^ 7u) == 0x9cdaf491u);
+    // The holder leaves the scene or the session: OthersHere no longer has them, nothing is wanted, and after the
+    // hold nothing of ours sets the bool (the switch's AI puts its 0 back).
+    r.Want(CoopLiftRide::Stood(sw, {}), kMain, 200);
+    CHECK(r.Step(g, false, 0, 300));  // still within the hold
+    CHECK_FALSE(r.Step(g, true, 0, 300));
+    CHECK_FALSE(r.Step(g, false, 0, 100 + CoopLiftRide::kHoldMs + 1));
+    CHECK(r.TakeNotes().front().starts_with("switch stand:"));
+}
