@@ -807,7 +807,9 @@ public:
     static constexpr std::uint64_t kStepWaitUs = 300'000;
     static constexpr std::uint64_t kStepGivenUs = 1'000'000;
     std::size_t LooseDrops() const { return loose_drops_; }
-    // sync-address-reuse probe: signs counted so far (log only).
+    // sync-address-reuse: objects ended because another actor took their address (Reused), and the
+    // log-only signs of one (life back from 0, still listed after the game's delete) counted so far.
+    std::size_t Replaced() const { return replaced_; }
     std::size_t ReuseSigns() const { return reuse_signs_; }
     // Hookshot with patch 0007: the game accepted a delete request for this
     // actor (its own code asked: killed, broken, taken, or our own remove).
@@ -1393,11 +1395,12 @@ private:
         int missed = 0;                         // walks in a row without it
         std::uint64_t deleted_until = 0;        // GameDeleted: gone at the first miss until then
         bool game_deleted = false;              // ... and the game's own request, not one of ours (Left)
-        // sync-address-reuse probe (log only): its placement hash when made, and when the game's own delete
-        // request for it came (0: none), so a new actor at the same address can be told in the log (ReuseProbe).
+        // sync-address-reuse: its placement hash when made, so another actor at the same address is told
+        // apart (Reused), and when the game's own delete request for it came (0: none; logged only).
         std::uint64_t hash = 0;
         std::uint64_t game_deleted_at = 0;
         bool reuse_said = false;  // the "still listed after its delete request" line went out once
+        bool replaced = false;    // another actor took its address: gone at this walk (Reused)
         // Chasing our Link (NoteDrift): the run of steps towards it.
         std::uint64_t chase_first = 0;
         std::uint64_t chase_last = 0;
@@ -1636,13 +1639,14 @@ private:
     std::uint8_t decider_ = 0;
     std::set<std::uint64_t> refused_;  // our own rolls, to delete
     std::size_t refused_count_ = 0;
-    // sync-address-reuse probe: lines said (at most kReuseLines) and signs counted (ReuseProbe).
+    // sync-address-reuse: lines said (at most kReuseLines), objects replaced and log-only signs counted (Reused).
     std::size_t reuse_lines_ = 0;
+    std::size_t replaced_ = 0;
     std::size_t reuse_signs_ = 0;
     static constexpr std::size_t kReuseLines = 40;
-    static constexpr float kReuseJumpM = 5.0f;                // a move this far in one walk
     static constexpr std::uint64_t kReuseListedUs = 3'000'000;  // listed this long after the game's delete
-    void ReuseProbe(const Seen& s, Object& o, std::uint64_t now_us);
+    // True when the actor the walk shows at a kept address is another one: another name or placement hash.
+    bool Reused(const Seen& s, Object& o, std::uint64_t now_us);
     // Each other player's scene and the server time of its latest sample
     // (guarded by inbox_mutex_: PLAYER_SAMPLE comes too often for the inbox).
     std::map<std::uint8_t, std::pair<std::string, std::uint64_t>> scenes_;

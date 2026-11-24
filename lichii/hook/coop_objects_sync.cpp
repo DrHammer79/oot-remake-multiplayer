@@ -1484,36 +1484,51 @@ void Sync::Written(std::uint64_t address, std::int32_t life, std::uint64_t now_u
     }
 }
 
-// sync-address-reuse probe (log only, no change to what Sync does): signs that the actor now at a known address is
-// another one than the Object kept for it, with no walk between that missed the address. Lines go out through the
-// notes ("coop: objects: reuse probe: ..."), at most kReuseLines; every sign is counted (ReuseSigns).
-void Sync::ReuseProbe(const Seen& s, Object& o, std::uint64_t now_us) {
+// Lines go out through the notes ("coop: objects: another actor at a kept address: ..." and "reuse sign (log only)"),
+// at most kReuseLines; every one is counted (Replaced, ReuseSigns).
+namespace {
+// 0 and ~0: an actor the game made (no placement). Either reads as made.
+bool SameHash(std::uint64_t a, std::uint64_t b) {
+    const auto made = [](std::uint64_t h) { return h == 0 || h == ~0ULL; };
+    return a == b || (made(a) && made(b));
+}
+} // namespace
+
+// sync-address-reuse: the game can free an actor and make another at the same address with no walk between
+// (row 172, proven at a scene change; not seen inside a scene in the lane run). Sync keys objects by address, so
+// another name or placement hash there is a new actor: the old object ends as if it left, the new one is fresh.
+// A new actor of the same kind and placement (a spawner's) cannot be told this way; its signs are only logged.
+bool Sync::Reused(const Seen& s, Object& o, std::uint64_t now_us) {
     std::string sign;
+    bool other = false;
     if (s.name != o.name) {
         sign = "another name (was '" + o.name + "')";
-    } else if (s.hash != o.hash) {
+        other = true;
+    } else if (!SameHash(s.hash, o.hash)) {
         sign = "another placement hash";
+        other = true;
     } else if (o.life && s.life && (*o.life <= 0 || o.dead_said) && s.life->life > 0) {
         sign = "life back from " + std::to_string(*o.life) + (o.dead_said ? " (said dead)" : "") + " to " +
                std::to_string(s.life->life);
-    } else if (Finite(s.position) && Distance(s.position, o.position) > kReuseJumpM) {
-        sign = "moved " + std::to_string(static_cast<int>(Distance(s.position, o.position))) + " m in one walk";
     } else if (o.game_deleted_at != 0 && !o.reuse_said && now_us - o.game_deleted_at > kReuseListedUs) {
         o.reuse_said = true;
         sign = "still listed " + std::to_string((now_us - o.game_deleted_at) / 1000) + " ms after the game's delete";
     }
     if (sign.empty()) {
-        return;
+        return false;
     }
-    ++reuse_signs_;
+    ++(other ? replaced_ : reuse_signs_);
     if (reuse_lines_ < kReuseLines) {
         ++reuse_lines_;
         const std::uint64_t since = o.game_deleted_at != 0 ? (now_us - o.game_deleted_at) / 1000 : 0;
-        notes_.emplace_back("reuse probe: " + s.name + " at " + std::to_string(s.address) + " (id " +
-                            std::to_string(o.id.value) + "): " + sign +
+        notes_.emplace_back(std::string(other ? "another actor at a kept address: " : "reuse sign (log only): ") +
+                            s.name + " at " + std::to_string(s.address) + " (id " + std::to_string(o.id.value) +
+                            "): " + sign +
                             (o.game_deleted_at != 0 ? ", game delete " + std::to_string(since) + " ms ago"
-                                                    : ", no game delete seen"));
+                                                    : ", no game delete seen") +
+                            (other ? "; the old one ends, the new one is shared" : ""));
     }
+    return other;
 }
 
 void Sync::GameHit(std::uint64_t address, std::int32_t amount) {
@@ -1951,6 +1966,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
     // A pickup taken elsewhere (taken_, from the last Apply) is hidden.
     std::map<std::uint64_t, const Seen*> now_seen;
     std::vector<const Seen*> fresh;
+    std::vector<const Seen*> replaced;  // sync-address-reuse: new actors at a kept address (Reused)
     std::set<std::uint64_t> hidden;
     {
         std::vector<std::uint64_t> takes;
@@ -2263,7 +2279,14 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             continue;
         }
         Object& o = it->second;
-        ReuseProbe(s, o, now_us);
+        if (Reused(s, o, now_us)) {
+            // Another actor: the old object ends at this walk as one that left (below), the new one is fresh.
+            o.replaced = true;
+            now_seen.erase(s.address);
+            replaced.push_back(&s);
+            fresh.push_back(&s);
+            continue;
+        }
         if (now_us > o.seen_at && now_us - o.seen_at < 500'000 && Finite(s.position)) {
             const float dt = static_cast<float>(now_us - o.seen_at) / 1e6f;
             for (std::size_t i = 0; i < 3; ++i) {
@@ -2549,7 +2572,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             continue;
         }
         // (the game's own delete request was seen for it: no second walk needed)
-        const bool deleted = it->second.deleted_until != 0 && now_us < it->second.deleted_until;
+        // (another actor took its address: gone at once, Reused)
+        const bool deleted =
+            it->second.replaced || (it->second.deleted_until != 0 && now_us < it->second.deleted_until);
         if (++it->second.missed < kMissedWalks && !deleted) {
             ++it;
             continue;
@@ -2669,6 +2694,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         it = objects_.erase(it);
     }
     Flush(self, now_us, gone, send);
+    for (const Seen* r : replaced) {
+        now_seen[r->address] = r;  // the new actor there is on this walk
+    }
     // Off our walk: its owner is forgotten with it (see OBJECT_OWNER in
     // Apply). Another actor with the same placed id still here keeps it.
     for (const Object& o : gone) {

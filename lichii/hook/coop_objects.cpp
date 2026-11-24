@@ -3690,9 +3690,10 @@ private:
             }
         }
         step_hits_.clear();
-        if (const std::size_t signs = sync_.ReuseSigns() + reuse_stamps_; signs != reuse_said_) {
-            LOG_INFO(Core, "coop: objects: reuse probe: {} signs of another actor at a kept address ({} so far, {} "
-                           "by the walk's stamp)", signs - reuse_said_, signs, reuse_stamps_);
+        if (const std::size_t signs = sync_.Replaced() + sync_.ReuseSigns() + reuse_stamps_; signs != reuse_said_) {
+            LOG_INFO(Core, "coop: objects: address reuse: {} new ({} so far: {} replaced in sharing, {} signs logged "
+                           "only, {} by the walk's stamp)", signs - reuse_said_, signs, sync_.Replaced(),
+                     sync_.ReuseSigns(), reuse_stamps_);
             reuse_said_ = signs;
         }
         if (const std::size_t loose = sync_.LooseDrops(); loose != loose_said_) {

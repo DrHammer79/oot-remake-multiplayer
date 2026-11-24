@@ -8065,3 +8065,99 @@ TEST_CASE("boss-turns-older-0119: a game that takes boss turns lists its bosses 
         }
     }
 }
+
+// sync-address-reuse: the game can free an actor and make another at the same address with no walk between (row 172,
+// proven at a scene change). Sync keys objects by address: another name or placement hash there is a new actor.
+TEST_CASE("objects: another actor at the address of one said dead is a new actor, listed and not deleted") {
+    Sync sync;
+    sync.SetHurt(true);
+    const auto skull = [](std::int32_t life) { return Enemy(0x100, 0x11, life, 0.0f, "Enemy_Skulltula"); };
+    Tick(sync, 0, {skull(2)});
+    const proto::ObjectId old_id = *sync.IdOf(0x100);
+    Own(sync, old_id, 1, 3);
+    proto::Damage d;
+    d.player_number = 2;
+    d.id = old_id;
+    d.amount = 2;
+    sync.Receive(d);
+    Tick(sync, 10 * kMs, {skull(2)});
+    Tick(sync, 430 * kMs, {skull(2)});
+    REQUIRE(All<proto::ObjectRemove>(Tick(sync, 500 * kMs, {skull(0)})).size() == 1);  // said dead
+    // Freed and another made at the same address before the next walk.
+    const Seen keese = Enemy(0x100, 0x22, 2, 0.0f, "Enemy_Keese");
+    const auto step = Tick(sync, 600 * kMs, {keese});
+    REQUIRE(sync.IdOf(0x100).has_value());
+    CHECK(sync.IdOf(0x100)->value == 0x22);
+    CHECK(Listed(step, *sync.IdOf(0x100)));  // on our presence list: shared
+    CHECK(All<proto::ObjectRemove>(step).empty());  // the old one was said dead once already
+    // The old one's delete (3 s after its death) never hits the new actor.
+    Tick(sync, 3600 * kMs, {keese});
+    Tick(sync, 4000 * kMs, {keese});
+    CHECK(sync.Removes().empty());
+    CHECK(sync.IdOf(0x100)->value == 0x22);
+}
+
+TEST_CASE("objects: another placement at the address of one at life 0 is a new actor with its own life") {
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2)});
+    const proto::ObjectId old_id = *sync.IdOf(0x100);
+    Own(sync, old_id, 1, 4);
+    Tick(sync, 10 * kMs, {Enemy(0x100, 0x11, 2)});
+    Tick(sync, 100 * kMs, {Enemy(0x100, 0x11, 0)});  // read at life 0
+    // A Stalchild of another placement at the same address, life 2.
+    const auto step = Tick(sync, 200 * kMs, {Enemy(0x100, 0x33, 2)});
+    REQUIRE(sync.IdOf(0x100).has_value());
+    CHECK(sync.IdOf(0x100)->value == 0x33);
+    CHECK(Listed(step, *sync.IdOf(0x100)));
+    // Its life 2 is no hit and no revive of the old one; the old one ends as dead, once.
+    CHECK(All<proto::Damage>(step).empty());
+    std::size_t old_removes = 0;
+    for (const auto& r : All<proto::ObjectRemove>(step)) {
+        CHECK(r.id == old_id);
+        CHECK(r.reason == proto::RemoveReason::dead);
+        ++old_removes;
+    }
+    const auto later = Tick(sync, 300 * kMs, {Enemy(0x100, 0x33, 2)});
+    for (const auto& r : All<proto::ObjectRemove>(later)) {
+        CHECK(r.id != old_id);
+    }
+    CHECK(old_removes <= 1);
+    CHECK(sync.Removes().empty());
+}
+
+TEST_CASE("objects: a scene change that puts new actors at old addresses ends nothing twice") {
+    // The scene name changed in the same walk: the reset forgets every object first, nothing is said.
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 2, 1.0f)});
+    auto step = Tick(sync, 100 * kMs, {Enemy(0x100, 0x55, 2, 0.0f, "Enemy_Keese"),
+                                       Enemy(0x200, 0x66, 2, 1.0f, "Enemy_Keese")},
+                     1, "Spot_Field");
+    CHECK(All<proto::ObjectRemove>(step).empty());
+    CHECK(sync.IdOf(0x100)->value == 0x55);
+    CHECK(sync.IdOf(0x200)->value == 0x66);
+
+    // The walk sees the new scene's actors one walk before the scene name changes: each address is a new actor
+    // once, and the reset after it says nothing more.
+    Sync late;
+    Tick(late, 0, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 2, 1.0f)});
+    const std::vector<Seen> next = {Enemy(0x100, 0x55, 2, 0.0f, "Enemy_Keese"),
+                                    Enemy(0x200, 0x66, 2, 1.0f, "Enemy_Keese")};
+    step = Tick(late, 100 * kMs, next);
+    CHECK(late.IdOf(0x100)->value == 0x55);
+    CHECK(late.IdOf(0x200)->value == 0x66);
+    CHECK(All<proto::ObjectRemove>(step).empty());  // nobody owned them: nothing to end
+    step = Tick(late, 200 * kMs, next, 1, "Spot_Field");
+    CHECK(All<proto::ObjectRemove>(step).empty());
+    CHECK(late.IdOf(0x100)->value == 0x55);
+    step = Tick(late, 300 * kMs, next, 1, "Spot_Field");
+    CHECK(All<proto::ObjectRemove>(step).empty());
+}
+
+TEST_CASE("objects: the same actor at its address stays the same object") {
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2)});
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Tick(sync, 100 * kMs, {Enemy(0x100, 0x11, 1, 3.0f)});
+    Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 1, 4.0f)});
+    CHECK(*sync.IdOf(0x100) == id);
+}
