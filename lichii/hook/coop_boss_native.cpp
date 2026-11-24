@@ -284,10 +284,26 @@ const Table::Entry* Table::FindActor(std::uint64_t actor) const {
     return nullptr;
 }
 
-void Table::ForgetOwnAsks(Entry& e) {
+void Table::SwitchOwnAsks(Entry& e, std::int32_t to) {
+    if (e.own_brain == to) {
+        return;
+    }
+    if (e.own_brain && (e.own_by_brain.size() < kMaxOwnBrains || e.own_by_brain.contains(*e.own_brain))) {
+        Entry::OwnAskSet& away = e.own_by_brain[*e.own_brain];
+        away.asks = std::move(e.own_asks);
+        away.slot_asks = std::move(e.own_slot_asks);
+        away.variants.choices = std::move(e.own_variants.choices);
+    }
     e.own_asks.clear();
     e.own_slot_asks.clear();
     e.own_variants.choices.clear();
+    if (const auto it = e.own_by_brain.find(to); it != e.own_by_brain.end()) {
+        e.own_asks = std::move(it->second.asks);
+        e.own_slot_asks = std::move(it->second.slot_asks);
+        e.own_variants.choices = std::move(it->second.variants.choices);
+        e.own_by_brain.erase(it);
+    }
+    e.own_brain = to;
 }
 
 void Table::LearnOwnAsk(Entry& e, const Request& request, const std::optional<std::string>& plug_name) {
@@ -395,7 +411,7 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                     if (plan == MadeOurs::restart_move) {
                         // Row 178: made ours in the middle of the owner's move (Phantom Ganon handed over mid
                         // RushAttack when his owner went down): that move starts over as ours through the game's
-                        // own request, named by the node its own AI names for it (before ForgetOwnAsks below).
+                        // own request, named by the node its own AI names for it (before a brain change puts them away).
                         BossAction again = *e.put_action;
                         again.flags = static_cast<std::uint16_t>(again.flags | addr::kReqStartOver);
                         again.changed = true;
@@ -704,7 +720,11 @@ bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool o
             return false;  // our event's verb (its cutscene), not the fight's: sent when it is over
         }
         if (e->have_mine && e->mine.brain_verb != verb) {
-            ForgetOwnAsks(*e);  // row 177 review: a brain change while we run it (its nodes may go with it)
+            // Row 177 review: a brain change while we run it (its nodes may go with it): its own asks go away.
+            if (!e->own_brain) {
+                e->own_brain = e->mine.brain_verb;
+            }
+            SwitchOwnAsks(*e, verb);
         }
         e->mine.brain_verb = verb;
         Record(*e, BossBrain{verb, force});
@@ -1372,6 +1392,9 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
         std::int32_t own = 0;
         if (!event_ && guest.Read(bsa + addr::kBsaBrainVerb, &own, sizeof own)) {
             e.mine.brain_verb = own;
+            if (!e.own_brain) {
+                e.own_brain = own;  // (SwitchOwnAsks)
+            }
             if (std::exchange(e.record_after_event, false)) {
                 Record(e, BossBrain{own, true});
                 ++counts_.owner_brain;
@@ -1472,6 +1495,9 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
     }
     std::int32_t now = 0;
     const bool read = guest.Read(bsa + addr::kBsaBrainVerb, &now, sizeof now);
+    if (read && !e.own_brain) {
+        e.own_brain = now;  // (the brain verb its own asks so far were learnt in: SwitchOwnAsks)
+    }
     while (!e.due.empty()) {
         Entry::Due& d = e.due.front();
         if (const auto* brain = std::get_if<BossBrain>(&d.change.what)) {
@@ -1743,9 +1769,12 @@ void Table::Made(bool made) {
                        (asking == Entry::Asking::late && !e->own_late.empty() &&
                         std::holds_alternative<BossBrain>(e->own_late.front()));
     if (brain) {
-        // Row 177 review: a new brain verb may change the copy's action sequence, whose AI nodes go with it; the
-        // nodes kept for its moves are learnt again from its next own asks (the game reads a named node's name).
-        ForgetOwnAsks(*e);
+        // Row 177 review: a new brain verb may change the copy's action sequence, whose AI nodes go with it: the
+        // nodes kept for its moves are put away with the old verb; the new verb's are named (or learnt again from
+        // its next own asks; the game reads a named node's name).
+        const BossBrain& to = asking == Entry::Asking::due ? std::get<BossBrain>(e->due.front().change.what)
+                                                           : std::get<BossBrain>(e->own_late.front());
+        SwitchOwnAsks(*e, to.verb);
     }
     if (asking == Entry::Asking::due && !e->due.empty()) {
         if (const auto* action = std::get_if<BossAction>(&e->due.front().change.what)) {

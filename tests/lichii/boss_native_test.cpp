@@ -3394,6 +3394,47 @@ TEST_CASE("native boss: Twinrova hand-over, a copy that was the owner for a whil
     CHECK(nodes[0] == kAttackNode);  // its own node of the attack as a copy
 }
 
+TEST_CASE("native boss: Twinrova hand-over, a copy back in a brain verb names that verb's own nodes (NEXT48)") {
+    // NEXT48: copy A's brain went 28 -> 65 and back; the change forgot its own asks, and the owner's next Attack_R
+    // went in through its slot's last node (another move's): no bullet. Each brain verb keeps its own asks.
+    constexpr std::uint64_t kAttackNode = 0x4000300;  // its own node of the attack, in brain 6
+    constexpr std::uint64_t kFlyNode = 0x4000400;     // its own node of Fly, in brain 6
+    constexpr std::uint64_t kOtherNode = 0x4000500;   // its own node of Fly, in brain 7
+    FakeGuest g;
+    std::int32_t brain = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    t.Receive(kActor, BossBsa{1, 6, std::nullopt, {}});
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kAttackNode), true, false));
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kFlyNode), true, false));
+    PutIns(t, g);
+    t.Receive(kActor, BossBsa{2, 7, std::nullopt, {BossChange{2, BossBrain{7, false}}}});  // the owner's brain 7
+    PutIns(t, g);
+    brain = 7;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kOtherNode), true, false));  // learnt in brain 7
+    BossAction fly = *ActionFromRequest(GameRequest(4, 0));
+    fly.changed = true;
+    t.Receive(kActor, BossBsa{3, 7, fly, {BossChange{3, fly}}});
+    std::vector<std::uint64_t> nodes;
+    CHECK(PutIns(t, g, &nodes) == std::vector<std::int32_t>{4});
+    REQUIRE(nodes.size() == 1);
+    CHECK(nodes[0] == kOtherNode);  // brain 7's own node, never brain 6's (row 177)
+    t.Receive(kActor, BossBsa{4, 6, fly, {BossChange{4, BossBrain{6, false}}}});  // back to brain 6
+    PutIns(t, g);
+    brain = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    BossAction attack = *ActionFromRequest(GameRequest(121, 0));
+    attack.changed = true;
+    t.Receive(kActor, BossBsa{5, 6, attack, {BossChange{5, attack}}});
+    nodes.clear();
+    CHECK(PutIns(t, g, &nodes) == std::vector<std::int32_t>{121});
+    REQUIRE(nodes.size() == 1);
+    CHECK(nodes[0] == kAttackNode);  // brain 6's own node of the attack, not Fly's
+}
+
 TEST_CASE("native boss: Twinrova hand-over, the new copy makes every move the new owner made, not only its last") {
     // NEXT29: copy B logged 4 attacks while owner A logged 6. At a hand-over the new copy started again from the new
     // owner's first state (only its move now), so the moves it had made since its last state never played here.

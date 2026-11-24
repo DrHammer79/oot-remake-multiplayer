@@ -714,6 +714,7 @@ public:
     static constexpr std::size_t kMaxSkippedKept = 8;
     static constexpr std::size_t kMaxHeld = 8;  // copy bosses held at once (more: not held)
     static constexpr std::size_t kMaxOwnAsks = 64;     // moves kept per copy (AskFor)
+    static constexpr std::size_t kMaxOwnBrains = 16;   // brain verbs whose own asks are kept per copy
     static constexpr std::uint64_t kMaxStreamNotes = 240;  // row 177's action stream lines per game
 
 private:
@@ -748,6 +749,15 @@ private:
         std::map<std::pair<std::int32_t, std::int32_t>, OwnAsk> own_asks;
         std::map<std::int32_t, OwnAsk> own_slot_asks;
         OwnVariants own_variants;  // row 222: each node's own last ask and its variation (AskFor)
+        // Twinrova hand-over: the brain verb the own asks above were learnt in, and those learnt in its other
+        // brain verbs (at most kMaxOwnBrains), taken out again when the boss is back in that verb (SwitchOwnAsks).
+        struct OwnAskSet {
+            std::map<std::pair<std::int32_t, std::int32_t>, OwnAsk> asks;
+            std::map<std::int32_t, OwnAsk> slot_asks;
+            OwnVariants variants;
+        };
+        std::optional<std::int32_t> own_brain;
+        std::map<std::int32_t, OwnAskSet> own_by_brain;
         // Twinrova hand-over: the chain we held when the owner changed (ContinuesChain), until its first state.
         std::optional<BossBsa> handover;
         // Row 177's log: the action stream's last kind (who, slot, verb, changed, plug or node source) and its run.
@@ -852,11 +862,13 @@ private:
     Entry* Find(std::uint64_t bsa);
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
-    // Row 177 review: the kept own asks (their AI nodes) go: a brain change (its action sequence's nodes may
-    // go with it); the copy's next own asks fill them again. A role change keeps them (all learnt as a copy: the
-    // owner learns none); forgetting them there put a copy's attacks in with no bullet (NEXT29, NEXT36b). (Keeping them across a hand-over
-    // was tried for Twinrova: a former owner's nodes put the copy's Attack_R in with no bullet, lane run NEXT36.)
-    static void ForgetOwnAsks(Entry& e);
+    // Row 177 review: a brain change may change the action sequence whose AI nodes the kept own asks name: the
+    // asks of one brain verb are never used in another. A brain change puts the asks away under the verb they were
+    // learnt in and takes out those of the new verb (none: the copy's next own asks fill them). Back in a verb, its
+    // asks are named again: the game keeps a brain verb's nodes (lane run NEXT48: the same Attack node before and
+    // after; forgetting them put the copy's next Attack_R in through another move's node, no bullet). A role change
+    // keeps them (all learnt as a copy: the owner learns none; NEXT29, NEXT36b).
+    static void SwitchOwnAsks(Entry& e, std::int32_t to);
     static void LearnOwnAsk(Entry& e, const Request& request, const std::optional<std::string>& plug_name);
     void Note(std::string line);
     // Row 177's log: one line when the stream's kind changes (the last kind's run length with it), capped.

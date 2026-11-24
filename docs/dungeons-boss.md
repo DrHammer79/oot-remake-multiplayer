@@ -851,9 +851,11 @@ change:
    through a node its AI had named while it was the owner, and 0 of 3 fired a bullet. The node its own AI names as a
    copy works (NEXT29). So the owner learns none, and a role change keeps the copy's own (forgetting them there put
    the copy's attacks in through another move's node, no bullet: NEXT29 copy to copy, NEXT36b and NEXT48 owner to
-   copy). A brain change still forgets them, as an owner too (row 177's review). NEXT48 showed that this also loses
-   the attack's node (no bullet after a brain change); the same node came back after a forget, so keeping them per
-   brain verb is the next step.
+   copy). A brain change forgot them, as an owner too (row 177's review), and NEXT48 showed that this also lost the
+   attack's node (no bullet after a brain change); the same node came back after a forget. Now the own asks are kept
+   per brain verb: a brain change puts them away under the verb they were learnt in and takes out the new verb's.
+   A node learnt in one brain verb is never named in another (row 177 stays fixed); back in a verb, its nodes are named
+   again (unit test NEXT48; game check pending).
 2. The new copy started again from the new owner's first state (a resync: only the move it is in now). Every move the
    new owner made before that state reached us was lost. A new owner counts on from the last state it had of the old
    owner, so its changes up to our newest seq are ours when it had all of them. Now the chain we held is kept (our own
