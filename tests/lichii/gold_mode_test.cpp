@@ -3,13 +3,17 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "coop/host/save_transfer.hpp"
+#include "coop/host/flags.hpp"
 #include "coop_gold_mode.h"
 
 namespace proto = coop::protocol;
@@ -172,13 +176,79 @@ std::vector<std::uint8_t> MakeSave(std::uint32_t count, std::uint32_t get, std::
     }
     return d;
 }
+// A race: our Skulltulas, count and IsGet.
+CoopGoldMode::Race MakeRace(std::int32_t count, bool get, std::initializer_list<std::uint64_t> keys) {
+    CoopGoldMode::Race r;
+    r.count = count;
+    r.get = get;
+    r.keys = keys;
+    return r;
+}
+
+// The game's flags over a map: a flag not in it does not read (not loaded).
+class FakeGame final : public coop::host::FlagStore {
+public:
+    std::optional<proto::FlagEntry> read(proto::FlagKey key) override {
+        const auto it = flags.find(key);
+        if (it == flags.end()) return std::nullopt;
+        return it->second;
+    }
+    bool write(const proto::FlagEntry& entry) override {
+        const auto it = flags.find(entry.key);
+        if (refuse || it == flags.end()) return false;
+        it->second.value = entry.value;
+        return true;
+    }
+    void Bool(std::uint64_t key, bool on) {
+        const auto k = proto::FlagKey::key64_flag(key);
+        flags[k] = proto::FlagEntry(k, proto::FlagKind::boolean, on ? 1 : 0);
+    }
+    bool On(std::uint64_t key) const { return flags.at(proto::FlagKey::key64_flag(key)).value != 0; }
+    void Named(std::uint32_t hash, proto::FlagKind kind, std::uint32_t v) {
+        const proto::FlagKey k(hash, std::uint16_t{0});
+        flags[k] = proto::FlagEntry(k, kind, v);
+    }
+    std::uint32_t Value(std::uint32_t hash) const { return flags.at(proto::FlagKey(hash, std::uint16_t{0})).value; }
+    std::map<proto::FlagKey, proto::FlagEntry> flags;
+    bool refuse = false;
+};
+
+// A game with every Skulltula's two keys off, count `count`, IsGet `get`.
+FakeGame MakeGame(std::int32_t count, bool get) {
+    FakeGame g;
+    for (const std::uint64_t k : kSkull) {
+        g.Bool(k, false);
+        g.Bool(k + 2, false);
+    }
+    g.Named(kCount, proto::FlagKind::int32, static_cast<std::uint32_t>(count));
+    g.Named(kGet, proto::FlagKind::boolean, get ? 1 : 0);
+    return g;
+}
+
+namespace fs = std::filesystem;
+fs::path FreshDir(const char* name) {
+    const fs::path dir = fs::temp_directory_path() / name;
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    return dir;
+}
+
+const std::array<std::uint8_t, 16> kHostKey{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+const std::array<std::uint8_t, 16> kOtherHostKey{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+
+// As a guest of the host with race id `id` in a Not shared session.
+void JoinRace(const std::string& id) {
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::OnWelcomed(false);
+    CoopGoldMode::OnHostSettings({CoopGoldMode::AsSetting(Mode::own), {"coop", "gold_race", id}});
+}
 }  // namespace
 
-TEST_CASE("gold mode: Not shared, the host's save keeps this game's own tokens, count and IsGet") {
+TEST_CASE("gold mode: Not shared, the host's save keeps this game's race: tokens, count and IsGet") {
     // Review of f36a8852: a race guest got the host's tokens and count at join and at Resync from host.
-    const std::vector<std::uint8_t> own = MakeSave(1, 1, {kSkull[1] + 2, kSkull[1], 0x9000});
+    const auto race = MakeRace(1, true, {kSkull[1] + 2, kSkull[1], 0x9000});
     std::vector<std::uint8_t> host = MakeSave(2, 1, {kSkull[0], kSkull[0] + 2, kSkull[2], kSkull[2] + 2, kWeb});
-    const auto kept = CoopGoldMode::KeepOwnGold(host, &own, kSkull, kCount, kGet);
+    const auto kept = CoopGoldMode::KeepRaceIn(host, &race, kSkull, kCount, kGet);
     REQUIRE(kept.done);
     CHECK(kept.host_keys == 4);
     CHECK(kept.own_keys == 2);
@@ -191,68 +261,205 @@ TEST_CASE("gold mode: Not shared, the host's save keeps this game's own tokens, 
     CHECK(Get32(host, 0x20 + 8 * 4 + 4 + 8) == 77);  // the other Int (after type 0's two records and type 1's)
 }
 
-TEST_CASE("gold mode: Not shared, a guest with no save of its own starts the race from nothing") {
+TEST_CASE("gold mode: Not shared, no race with this host starts from nothing") {
     std::vector<std::uint8_t> host = MakeSave(3, 1, {kSkull[0], kSkull[0] + 2, kWeb});
-    const auto kept = CoopGoldMode::KeepOwnGold(host, nullptr, kSkull, kCount, kGet);
-    REQUIRE(kept.done);
+    CHECK(CoopGoldMode::KeepRaceIn(host, nullptr, kSkull, kCount, kGet).done);
     CHECK(host == MakeSave(0, 0, {kWeb}));
-    // An unreadable save of ours: the same.
+    const CoopGoldMode::Race none;
     std::vector<std::uint8_t> host2 = MakeSave(3, 1, {kSkull[0], kWeb});
-    const std::vector<std::uint8_t> junk(64, 0xee);
-    CHECK(CoopGoldMode::KeepOwnGold(host2, &junk, kSkull, kCount, kGet).done);
+    CHECK(CoopGoldMode::KeepRaceIn(host2, &none, kSkull, kCount, kGet).done);
     CHECK(host2 == MakeSave(0, 0, {kWeb}));
 }
 
 TEST_CASE("gold mode: Not shared, a host's save with no key set or that does not read") {
     // No key set: count and IsGet are ours, our keys cannot be added (said in the log).
-    const std::vector<std::uint8_t> own = MakeSave(1, 1, {kSkull[1]});
+    const auto race = MakeRace(1, true, {kSkull[1]});
     std::vector<std::uint8_t> host = MakeSave(0, 0, {}, false);
-    const auto kept = CoopGoldMode::KeepOwnGold(host, &own, kSkull, kCount, kGet);
+    const auto kept = CoopGoldMode::KeepRaceIn(host, &race, kSkull, kCount, kGet);
     REQUIRE(kept.done);
     CHECK(kept.keys_left);
     CHECK(host == MakeSave(1, 1, {}, false));
     // Not a save: left as it is.
     std::vector<std::uint8_t> junk(64, 0xee);
     const std::vector<std::uint8_t> was = junk;
-    const auto bad = CoopGoldMode::KeepOwnGold(junk, &own, kSkull, kCount, kGet);
+    const auto bad = CoopGoldMode::KeepRaceIn(junk, &race, kSkull, kCount, kGet);
     CHECK_FALSE(bad.done);
     CHECK(bad.why.find("not a saved game") != std::string::npos);
     CHECK(junk == was);
 }
 
-TEST_CASE("gold mode: Not shared, the race starts from 0, never from the player's own save") {
-    // Decision of 2026-11-23: every player starts the race from 0 tokens. Only the co-op folder's slot is ours.
-    namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "coop_tests_race_so_far";
-    fs::remove_all(root);
-    const fs::path own_dir = root / "own";
-    const fs::path coop_dir = root / "own_coop";
-    const auto put = [](const fs::path& slot, const std::vector<std::uint8_t>& bytes) {
-        fs::create_directories(slot);
-        std::ofstream(slot / "progress.sav", std::ios::binary)
-            .write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    };
-    // The player's own save has tokens; the co-op folder has no slot yet.
-    put(own_dir / "slot_00", MakeSave(5, 1, {kSkull[0], kSkull[0] + 2, kSkull[1]}));
-    fs::create_directories(coop_dir);
-    CHECK_FALSE(CoopGoldMode::RaceSoFar(coop_dir).has_value());
-    std::vector<std::uint8_t> host = MakeSave(3, 1, {kSkull[2], kSkull[2] + 2, kWeb});
-    const auto own = CoopGoldMode::RaceSoFar(coop_dir);
-    CHECK(CoopGoldMode::KeepOwnGold(host, own ? &*own : nullptr, kSkull, kCount, kGet).done);
-    CHECK(host == MakeSave(0, 0, {kWeb}));  // 0 tokens, count 0, no IsGet
+TEST_CASE("gold mode: a race is saved and read back as text, and its file is per host") {
+    const auto race = MakeRace(3, true, {kSkull[0], kSkull[0] + 2, 0xfedcba9876543210ULL});
+    const std::string text = CoopGoldMode::RaceText(race);
+    CHECK(CoopGoldMode::ParseRace(text) == race);
+    CHECK(CoopGoldMode::ParseRace(CoopGoldMode::RaceText({})) == CoopGoldMode::Race{});
+    CHECK_FALSE(CoopGoldMode::ParseRace("").has_value());
+    CHECK_FALSE(CoopGoldMode::ParseRace("something else\ncount 1\n").has_value());
+    CHECK_FALSE(CoopGoldMode::ParseRace(text + "count -1\n").has_value());
+    CHECK_FALSE(CoopGoldMode::ParseRace(text + "key 12zz\n").has_value());
+    CHECK_FALSE(CoopGoldMode::ParseRace(text + "colour red\n").has_value());
 
-    // A race so far in the co-op folder is kept.
-    const std::vector<std::uint8_t> race = MakeSave(1, 1, {kSkull[1], kSkull[1] + 2});
-    put(coop_dir / "slot_00", race);
-    CoopGoldMode::MarkRace(coop_dir, true);  // (written in a Not shared session)
-    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
-    REQUIRE(so_far.has_value());
-    CHECK(*so_far == race);
-    std::vector<std::uint8_t> host2 = MakeSave(3, 1, {kSkull[2], kWeb});
-    CHECK(CoopGoldMode::KeepOwnGold(host2, &*so_far, kSkull, kCount, kGet).done);
-    CHECK(host2 == MakeSave(1, 1, {kSkull[1], kSkull[1] + 2, kWeb}));
+    const fs::path dir = FreshDir("coop_tests_race_file");
+    const std::string a = CoopGoldMode::RaceIdOf(kHostKey);
+    const std::string b = CoopGoldMode::RaceIdOf(kOtherHostKey);
+    CHECK(a.size() == 16);
+    CHECK(a != b);
+    CHECK(a == CoopGoldMode::RaceIdOf(kHostKey));
+    CHECK(CoopGoldMode::RaceFile(dir, a) == dir / (a + ".txt"));
+    CHECK(CoopGoldMode::RaceFile(dir, "../escape").empty());  // a told id is never a path
+    CHECK_FALSE(CoopGoldMode::SaveRace(dir, "ABC", race));
+    CHECK_FALSE(CoopGoldMode::LoadRace(dir, a).has_value());
+    CHECK(CoopGoldMode::SaveRace(dir, a, race));
+    CHECK(CoopGoldMode::LoadRace(dir, a) == race);
+    CHECK_FALSE(CoopGoldMode::LoadRace(dir, b).has_value());  // another host's: none
     std::error_code ec;
-    fs::remove_all(root, ec);
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: Not shared, the race is read from the game and put back, never lowered") {
+    FakeGame game = MakeGame(2, true);
+    game.Bool(kSkull[0], true);
+    game.Bool(kSkull[0] + 2, true);
+    game.Bool(kSkull[1], true);
+    const auto seen = CoopGoldMode::ReadRace(game, kSkull, kCount, kGet);
+    REQUIRE(seen.has_value());
+    CHECK(*seen == MakeRace(2, true, {kSkull[0], kSkull[0] + 2, kSkull[1]}));
+    FakeGame empty;
+    CHECK_FALSE(CoopGoldMode::ReadRace(empty, kSkull, kCount, kGet).has_value());  // no save in the game yet
+
+    // A loaded save that has fewer: ours go back in.
+    FakeGame loaded = MakeGame(0, false);
+    loaded.Bool(kSkull[2], true);  // one the save has that the race does not: left on
+    auto put = CoopGoldMode::PutRaceBack(loaded, *seen, kCount, kGet);
+    CHECK(put.done());
+    CHECK(put.written == 5);
+    CHECK(loaded.On(kSkull[0]));
+    CHECK(loaded.On(kSkull[0] + 2));
+    CHECK(loaded.On(kSkull[1]));
+    CHECK(loaded.On(kSkull[2]));
+    CHECK(loaded.Value(kCount) == 2);
+    CHECK(loaded.Value(kGet) == 1);
+    // Again: nothing to write.
+    CHECK(CoopGoldMode::PutRaceBack(loaded, *seen, kCount, kGet).written == 0);
+    // A higher count in the game stays.
+    FakeGame more = MakeGame(5, true);
+    CoopGoldMode::PutRaceBack(more, *seen, kCount, kGet);
+    CHECK(more.Value(kCount) == 5);
+    // Not loaded yet, or refused: not done (the hook tries again).
+    FakeGame partial;
+    partial.Named(kCount, proto::FlagKind::int32, 0);
+    CHECK(CoopGoldMode::PutRaceBack(partial, *seen, kCount, kGet).unread == 4);
+    FakeGame refusing = MakeGame(0, false);
+    refusing.refuse = true;
+    put = CoopGoldMode::PutRaceBack(refusing, *seen, kCount, kGet);
+    CHECK_FALSE(put.done());
+    CHECK(put.failed == 5);
+
+    // Join: only grows.
+    auto race = MakeRace(3, false, {kSkull[0]});
+    CHECK(race.Join(*seen));
+    CHECK(race == MakeRace(3, true, {kSkull[0], kSkull[0] + 2, kSkull[1]}));
+    CHECK_FALSE(race.Join(MakeRace(1, false, {kSkull[1]})));
+}
+
+TEST_CASE("gold mode: Not shared, a guest's race with a host is kept per host across sessions and loads") {
+    const fs::path dir = FreshDir("coop_tests_race_store");
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetRaceDir(dir);
+    const std::string host_a = CoopGoldMode::RaceIdOf(kHostKey);
+    const std::string host_b = CoopGoldMode::RaceIdOf(kOtherHostKey);
+
+    // Session 1 with host A: the race starts from 0, and grows from what the game shows.
+    JoinRace(host_a);
+    CHECK(CoopGoldMode::RaceId() == host_a);
+    CHECK(CoopGoldMode::TheRace().empty());
+    FakeGame game = MakeGame(1, true);
+    game.Bool(kSkull[0], true);
+    game.Bool(kSkull[0] + 2, true);
+    CHECK(CoopGoldMode::GrowRace(*CoopGoldMode::ReadRace(game, kSkull, kCount, kGet)));
+    CHECK_FALSE(CoopGoldMode::GrowRace(*CoopGoldMode::ReadRace(game, kSkull, kCount, kGet)));  // nothing new
+    const auto race = MakeRace(1, true, {kSkull[0], kSkull[0] + 2});
+    CHECK(CoopGoldMode::LoadRace(dir, host_a) == race);  // on disk at once
+
+    // A save load that lost the token (not saved): it goes back in.
+    FakeGame reloaded = MakeGame(0, false);
+    CHECK(CoopGoldMode::PutRaceBack(reloaded, CoopGoldMode::TheRace(), kCount, kGet).done());
+    CHECK(reloaded.Value(kCount) == 1);
+    CHECK(reloaded.On(kSkull[0]));
+
+    // Both games stopped and started again: the race is read from its file. Join and Resync: the host's save keeps it.
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetRaceDir(dir);
+    JoinRace(host_a);
+    CHECK(CoopGoldMode::TheRace() == race);
+    const auto kept = CoopGoldMode::TheRace();
+    std::vector<std::uint8_t> host_save = MakeSave(4, 1, {kSkull[1], kSkull[1] + 2, kSkull[2], kSkull[2] + 2, kWeb});
+    CHECK(CoopGoldMode::KeepRaceIn(host_save, &kept, kSkull, kCount, kGet).done);
+    CHECK(host_save == MakeSave(1, 1, {kSkull[0], kSkull[0] + 2, kWeb}));
+    std::vector<std::uint8_t> resync = MakeSave(5, 1, {kSkull[1], kSkull[1] + 2, kWeb});
+    CHECK(CoopGoldMode::KeepRaceIn(resync, &kept, kSkull, kCount, kGet).done);
+    CHECK(resync == MakeSave(1, 1, {kSkull[0], kSkull[0] + 2, kWeb}));
+
+    // Another host's game does not take it: a race of its own, from 0.
+    JoinRace(host_b);
+    CHECK(CoopGoldMode::TheRace().empty());
+    std::vector<std::uint8_t> other = MakeSave(4, 1, {kSkull[1], kWeb});
+    const auto none = CoopGoldMode::TheRace();
+    CHECK(CoopGoldMode::KeepRaceIn(other, &none, kSkull, kCount, kGet).done);
+    CHECK(other == MakeSave(0, 0, {kWeb}));
+    CHECK(CoopGoldMode::LoadRace(dir, host_a) == race);  // A's untouched
+
+    // An older host that sends no id: the race lives for this session only, no file.
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::OnWelcomed(false);
+    CoopGoldMode::OnHostSettings({CoopGoldMode::AsSetting(Mode::own)});
+    CHECK(CoopGoldMode::RaceId().empty());
+    CHECK(CoopGoldMode::GrowRace(MakeRace(2, false, {kSkull[2]})));
+    CHECK(CoopGoldMode::TheRace() == MakeRace(2, false, {kSkull[2]}));
+    // A told id that is not one: ignored.
+    CoopGoldMode::OnHostSettings({{"coop", "gold_race", "../../x"}});
+    CHECK(CoopGoldMode::RaceId().empty());
+    CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: the host sends its race id only Not shared, and a switch to Not shared starts from 0") {
+    const fs::path dir = FreshDir("coop_tests_race_switch");
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetRaceDir(dir);
+    CoopGoldMode::SetOwnRaceId(CoopGoldMode::RaceIdOf(kHostKey));
+
+    // A Shared host: no id in its settings.
+    CoopGoldMode::SetChoice(Mode::shared);
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::OnWelcomed(true);
+    CHECK_FALSE(CoopGoldMode::RaceSetting().has_value());
+    // Not shared: the coop entry carries its own id.
+    CoopGoldMode::SetChoice(Mode::own);
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::OnWelcomed(true);
+    const auto id = CoopGoldMode::RaceSetting();
+    REQUIRE(id.has_value());
+    CHECK(id->mod_id == "coop");
+    CHECK(id->key == "gold_race");
+    CHECK(id->value == CoopGoldMode::RaceIdOf(kHostKey));
+
+    // A guest in a Shared session never keeps a race (the hook keeps one only from a race save): a switch to Not
+    // shared later starts from 0 with that host, never from the shared count.
+    JoinRace(CoopGoldMode::RaceIdOf(kOtherHostKey));
+    CHECK(CoopGoldMode::TheRace().empty());
+    std::vector<std::uint8_t> shared = MakeSave(7, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2, kWeb});
+    const auto race = CoopGoldMode::TheRace();
+    CHECK(CoopGoldMode::KeepRaceIn(shared, &race, kSkull, kCount, kGet).done);
+    CHECK(shared == MakeSave(0, 0, {kWeb}));
+
+    // A host that was a guest (migration) keeps the old host's id, not its own.
+    CoopGoldMode::OnHosting();
+    CHECK(CoopGoldMode::RaceId() == CoopGoldMode::RaceIdOf(kOtherHostKey));
+    CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("gold mode: the first player in hosts from its welcome, with no host change, and plays its own choice") {
@@ -279,71 +486,142 @@ TEST_CASE("gold mode: the first player in hosts from its welcome, with no host c
     CoopGoldMode::ResetForTest();
 }
 
-TEST_CASE("gold mode: Not shared, a race guest's count carries into its next session, a Shared one's never") {
-    // Review of 7f88444d: each join empties the co-op folder (coop_save.cpp clear_coop_slots) before the host's save
-    // comes. The race slot is kept beside the folder first (KeepRace), with the mark only (MarkRace).
-    namespace fs = std::filesystem;
-    namespace save = coop::host::save;
-    const fs::path root = fs::temp_directory_path() / "coop_tests_race_carry";
-    fs::remove_all(root);
-    const fs::path coop_dir = root / "own-coop";
-    const auto put = [](const fs::path& slot, const std::vector<std::uint8_t>& bytes) {
-        fs::create_directories(slot);
-        std::ofstream(slot / "progress.sav", std::ios::binary)
-            .write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    };
-    CHECK(CoopGoldMode::RaceFile(coop_dir).parent_path() == root);  // beside the folder, never in it
+TEST_CASE("gold mode: Not shared, a guest's race never changes the host's save or the host's game") {
+    // Coordinator #11: the race goes into the guest's copy of the host's save (the bytes it got, written to its own
+    // co-op folder) and into the guest's game; the host's save and the host's game keep the host's count.
+    const std::vector<std::uint8_t> host_save = MakeSave(4, 1, {kSkull[1], kSkull[1] + 2, kWeb});
+    FakeGame host_game = MakeGame(4, true);
+    host_game.Bool(kSkull[1], true);
+    host_game.Bool(kSkull[1] + 2, true);
+    const FakeGame host_before = host_game;
 
-    // Session 1, Not shared: the host's save was written with ours (mark on); our race got to 2 tokens.
-    const std::vector<std::uint8_t> race = MakeSave(2, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2});
-    put(coop_dir / "slot_00", race);
-    CoopGoldMode::MarkRace(coop_dir, true);
-    // Session 2's join: kept, then the folder is emptied; the race so far is still ours.
-    CHECK(CoopGoldMode::KeepRace(coop_dir));
-    CHECK(save::clear_coop_slots(coop_dir) == 1);
-    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
-    REQUIRE(so_far.has_value());
-    CHECK(*so_far == race);
-    std::vector<std::uint8_t> host = MakeSave(5, 1, {kSkull[2], kSkull[2] + 2, kWeb});
-    CHECK(CoopGoldMode::KeepOwnGold(host, &*so_far, kSkull, kCount, kGet).done);
-    CHECK(host == MakeSave(2, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2, kWeb}));
+    // The guest: its copy of what the host sent gets its race (none yet: from 0).
+    const auto race = MakeRace(1, false, {kSkull[0], kSkull[0] + 2});
+    std::vector<std::uint8_t> guest_copy = host_save;
+    CHECK(CoopGoldMode::KeepRaceIn(guest_copy, &race, kSkull, kCount, kGet).done);
+    CHECK(guest_copy == MakeSave(1, 0, {kSkull[0], kSkull[0] + 2, kWeb}));
+    CHECK(host_save == MakeSave(4, 1, {kSkull[1], kSkull[1] + 2, kWeb}));   // the host's own, unchanged
 
-    // A Shared session's save (mark off) is never kept: the race does not start from a shared count.
-    CoopGoldMode::MarkRace(coop_dir, false);
-    put(coop_dir / "slot_00", MakeSave(9, 1, {kSkull[2], kSkull[2] + 2}));
-    CHECK_FALSE(CoopGoldMode::KeepRace(coop_dir));
-    save::clear_coop_slots(coop_dir);
-    const auto still = CoopGoldMode::RaceSoFar(coop_dir);
-    REQUIRE(still.has_value());
-    CHECK(*still == race);  // the earlier race, untouched
-    std::error_code ec;
-    fs::remove_all(root, ec);
+    // The guest's game after its load: its race goes back in there only.
+    FakeGame guest_game = MakeGame(0, false);
+    CHECK(CoopGoldMode::PutRaceBack(guest_game, race, kCount, kGet).done());
+    CHECK(guest_game.Value(kCount) == 1);
+    CHECK(host_game.flags == host_before.flags);
+    CHECK(CoopGoldMode::ReadRace(host_game, kSkull, kCount, kGet) ==
+          MakeRace(4, true, {kSkull[1], kSkull[1] + 2}));
 }
 
-TEST_CASE("gold mode: a switch to Not shared midway starts the race from 0, never from the Shared count") {
-    // Review of 5a7a020b: the co-op folder's slot was written in the Shared part of the session (no mark). A Resync
-    // after the switch keeps none of its shared tokens: the race starts from 0, or from the race kept beside it.
-    namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "coop_tests_race_switch";
-    fs::remove_all(root);
-    const fs::path coop_dir = root / "own-coop";
-    fs::create_directories(coop_dir / "slot_00");
-    const std::vector<std::uint8_t> shared = MakeSave(7, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2});
-    std::ofstream(coop_dir / "slot_00" / "progress.sav", std::ios::binary)
-        .write(reinterpret_cast<const char*>(shared.data()), static_cast<std::streamsize>(shared.size()));
-    CoopGoldMode::MarkRace(coop_dir, false);  // the Shared write
-    CHECK_FALSE(CoopGoldMode::RaceSoFar(coop_dir).has_value());
-    std::vector<std::uint8_t> host = MakeSave(7, 1, {kSkull[0], kSkull[0] + 2, kSkull[1], kSkull[1] + 2, kWeb});
-    CHECK(CoopGoldMode::KeepOwnGold(host, nullptr, kSkull, kCount, kGet).done);
-    CHECK(host == MakeSave(0, 0, {kWeb}));
+TEST_CASE("gold mode: each playthrough of the host's has its own race id") {
+    const std::string p1 = CoopGoldMode::NewPlaythroughId();
+    const std::string p2 = CoopGoldMode::NewPlaythroughId();
+    CHECK(p1.size() == 16);
+    CHECK(p1 != p2);
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, "") == CoopGoldMode::RaceIdOf(kHostKey));   // none known: as before
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kHostKey));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kHostKey, p2));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) != CoopGoldMode::RaceIdOf(kOtherHostKey, p1));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1) == CoopGoldMode::RaceIdOf(kHostKey, p1));
+    CHECK(CoopGoldMode::RaceIdOf(kHostKey, p1).size() == 16);
+}
 
-    // A race kept from an earlier session is the start instead.
-    const std::vector<std::uint8_t> kept = MakeSave(1, 1, {kSkull[2], kSkull[2] + 2});
-    std::ofstream(CoopGoldMode::RaceFile(coop_dir), std::ios::binary)
-        .write(reinterpret_cast<const char*>(kept.data()), static_cast<std::streamsize>(kept.size()));
-    const auto so_far = CoopGoldMode::RaceSoFar(coop_dir);
-    REQUIRE(so_far.has_value());
-    CHECK(*so_far == kept);
+TEST_CASE("gold mode: the host's playthroughs per slot, and a new game's") {
+    const fs::path dir = FreshDir("coop_tests_playthroughs");
+    std::string a, b, fresh;
+    {
+        CoopGoldMode::Playthroughs pts(dir);
+        a = pts.OnSlot("slot_00", false);   // a load of a save from before: an id of its own, kept
+        CHECK(a.size() == 16);
+        CHECK(pts.Current() == a);
+        CHECK(pts.OnSlot("slot_00", false) == a);
+        b = pts.OnSlot("slot_01", false);   // an older playthrough, loaded once
+        CHECK(b != a);
+        CHECK(pts.OnSlot("slot_00", false) == a);   // back to A
+        // Review of af66da86: a save while playing A is A, whatever slot it goes to (another slot, a rotated autosave
+        // slot never seen).
+        CHECK(pts.OnSlot("slot_01", true) == a);
+        CHECK(pts.OnSlot("slot_02", true) == a);
+        CHECK(pts.Current() == a);
+        CHECK(pts.OnSlot("slot_01", false) == a);   // slot_01 now holds A
+        CHECK(pts.OnSlot("", false).empty());
+
+        // Load X, the title, New Game: a fresh id, the same until the title; saved into the slot loaded before it.
+        pts.OnTitle();
+        fresh = pts.OnNewGame();
+        CHECK(fresh != a);
+        CHECK(pts.OnNewGame() == fresh);
+        CHECK(pts.OnSlot("slot_00", true) == fresh);
+        CHECK(pts.OnSlot("slot_03", true) == fresh);   // its next autosave into another slot
+        // Load X, the title, New Game (not saved), the title, Continue X: X's own.
+        pts.OnSlot("slot_02", false);
+        pts.OnTitle();
+        const std::string unsaved = pts.OnNewGame();
+        CHECK(unsaved != fresh);
+        pts.OnTitle();
+        CHECK(pts.OnSlot("slot_02", false) == a);
+        CHECK(pts.OnNewGame() != unsaved);   // (the title forgot that new game)
+    }
+    // Kept across runs.
+    CoopGoldMode::Playthroughs again(dir);
+    CHECK(again.Slots().size() == 4);
+    CHECK(again.Current().empty());
+    CHECK(again.OnSlot("slot_00", false) == fresh);
+    CHECK(again.OnSlot("slot_01", false) == a);
+    // Hosting began mid-game (nothing in force yet), and the game saves: that slot's own.
+    CoopGoldMode::Playthroughs mid(dir);
+    CHECK(mid.OnSlot("slot_03", true) == fresh);
     std::error_code ec;
-    fs::remove_all(root, ec);
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: the host's race id follows its playthrough, and its save waits until the id is sent") {
+    const fs::path dir = FreshDir("coop_tests_race_playthrough");
+    CoopGoldMode::ResetForTest();
+    CoopGoldMode::SetRaceDir(dir);
+    CoopGoldMode::SetOwnKey(kHostKey);
+    CoopGoldMode::SetChoice(Mode::own);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK(CoopGoldMode::RaceId() == CoopGoldMode::RaceIdOf(kHostKey));   // no playthrough known yet
+    CHECK(CoopGoldMode::RaceSendDue());
+    CoopGoldMode::MarkRaceSent(CoopGoldMode::RaceId());
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    const std::string p1 = CoopGoldMode::NewPlaythroughId();
+    CoopGoldMode::SetPlaythrough(p1);
+    const std::string id1 = CoopGoldMode::RaceIdOf(kHostKey, p1);
+    CHECK(CoopGoldMode::RaceId() == id1);
+    REQUIRE(CoopGoldMode::RaceSetting().has_value());
+    CHECK(CoopGoldMode::RaceSetting()->value == id1);
+    CHECK(CoopGoldMode::RaceSendDue());   // the save waits for this id to go out
+    CoopGoldMode::MarkRaceSent(id1);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+    CoopGoldMode::SetPlaythrough("not an id");   // ignored: the key's alone
+    CHECK(CoopGoldMode::RaceId() == CoopGoldMode::RaceIdOf(kHostKey));
+    CoopGoldMode::SetPlaythrough(p1);
+
+    // Shared: nothing waits.
+    CoopGoldMode::OnConnection();
+    CoopGoldMode::SetChoice(Mode::shared);
+    CoopGoldMode::OnWelcomed(true);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    // A host after a migration keeps the told id, whatever its own game plays.
+    CoopGoldMode::SetChoice(Mode::own);
+    JoinRace(id1);
+    CoopGoldMode::OnHosting();
+    CoopGoldMode::SetPlaythrough(CoopGoldMode::NewPlaythroughId());
+    CHECK(CoopGoldMode::RaceId() == id1);
+    CHECK_FALSE(CoopGoldMode::RaceSendDue());
+
+    // A guest: each playthrough of the host's is a race of its own.
+    const std::string id2 = CoopGoldMode::RaceIdOf(kHostKey, CoopGoldMode::NewPlaythroughId());
+    JoinRace(id1);
+    CHECK(CoopGoldMode::GrowRace(MakeRace(3, true, {kSkull[0]})));
+    JoinRace(id2);
+    CHECK(CoopGoldMode::TheRace().empty());
+    CHECK(CoopGoldMode::GrowRace(MakeRace(1, false, {kSkull[1]})));
+    JoinRace(id1);
+    CHECK(CoopGoldMode::TheRace() == MakeRace(3, true, {kSkull[0]}));
+    CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }

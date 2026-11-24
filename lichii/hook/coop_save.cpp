@@ -103,6 +103,13 @@ bool g_set_applied = false;
 // which the title's Continue and Load read) still shows the old folder's saves. Taken by the title's step
 // (TakeSaveListStale), which has the game re-read it.
 bool g_list_stale = false;
+// Row 63, Not shared: the co-op folder whose host's save was last written with our race (OwnGoldLocked); empty: none.
+fs::path g_race_dir;
+std::string g_race_dir_id;   // the race id that save was written with (a host's other playthrough has another)
+// The host's playthroughs (coordinator #11): per slot of its own, and a new game's (CoopGoldMode::Playthroughs).
+std::optional<CoopGoldMode::Playthroughs> g_playthroughs;
+std::optional<fs::path> g_playthrough_slot;   // the slot the playthrough was last taken for
+bool g_playthrough_new = false;               // a new game's playthrough taken
 
 // An environment variable's text ("" when unset).
 std::string EnvText(const char* name) {
@@ -152,7 +159,6 @@ bool RemountLocked(const fs::path& dir);
 void FixSlotsLocked();
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, bool played_from = true);
 void PendingFrame();
-void KeptRaceLocked(const fs::path& dir);
 void AskAtTitle();
 
 // Under g_mutex: a session's choice with a file loaded (a Join from the pause menu, a rejoin during play): nothing
@@ -162,6 +168,7 @@ void DecideInGame(coop::net::Client& client) {
     g_decided = true;
     g_decided_client = &client;
     g_ended = false;
+    g_race_dir.clear();
     if (client.is_host()) {
         g_use = false;
         g_guest = save::GuestSession{};   // (an earlier session's host's save, still waiting: not this game's)
@@ -200,6 +207,7 @@ void SwitchFrame(coop::net::Client& client) {
                     st == coop::net::State::stopped || st == coop::net::State::refused;
         if (save::decide_again(g_decided, over, g_in_game)) {
             g_decided = false;   // the next session (the title menu's Host after a Join, a rejoin) decides again
+            g_race_dir.clear();   // (row 63: a race save is one session's host's; the next host's race is not it)
             g_guest = save::GuestSession{};   // and asks for the host's save again: everything of the last one goes
             g_lines = save::GuestNotices{};
             g_pending.clear();
@@ -248,7 +256,6 @@ void SwitchFrame(coop::net::Client& client) {
         g_use = choice == save::FolderChoice::coop;
         if (g_use) {
             g_pending = save::coop_dir_of(own);
-            KeptRaceLocked(g_pending);
             // Empty until the host's save comes: an older host's save there must not be the one loaded.
             if (const int n = save::clear_coop_slots(g_pending); n > 0) {
                 LOG_INFO(Core, "coop: save: {} older slot(s) taken out of {}", n, g_pending.string());
@@ -261,14 +268,6 @@ void SwitchFrame(coop::net::Client& client) {
         }
     }
     PendingFrame();
-}
-
-// Row 63: before the co-op folder `dir` is emptied, a race's slot is kept beside it (CoopGoldMode::KeepRace), so a
-// race guest's own count is the start of its next Not shared session in the co-op game.
-void KeptRaceLocked(const fs::path& dir) {
-    if (CoopGoldMode::KeepRace(dir)) {
-        LOG_INFO(Core, "coop: save: Gold Skulltulas not shared: the race so far kept beside {}", dir.string());
-    }
 }
 
 // Under g_mutex, each frame (Hookshot): the host's save that came is written whole into the pending co-op folder,
@@ -291,7 +290,6 @@ void PendingFrame() {
             g_use = false;
             return;
         }
-        KeptRaceLocked(g_pending);
         if (const int n = save::clear_coop_slots(g_pending); n > 0) {
             LOG_INFO(Core, "coop: save: {} older slot(s) taken out of {}", n, g_pending.string());
         }
@@ -422,30 +420,29 @@ void FixSlotsLocked() {
     }
 }
 
-// Row 63, Gold Skulltulas Not shared: the host's save keeps this game's own tokens, count and IsGet (at join and at
-// Resync from host; review of f36a8852). Ours: the newest slot of the co-op folder `dir` (the race so far); none: a
-// race from 0 tokens. Never the player's own saves (CoopGoldMode::RaceSoFar).
-save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in) {
+// Row 63, Gold Skulltulas Not shared: the host's save keeps this game's own race with this host (at join and at
+// Resync from host; review of f36a8852): CoopGoldMode::TheRace, kept per player and per host beside coop.ini. None: a
+// race from 0 tokens. Never the host's tokens, never the player's own saves. `race_kept` says whether the slot holds
+// our race (the hook then keeps the race from what the game shows: PlaysRaceSave).
+save::SaveSlot OwnGoldLocked(const save::SaveSlot& slot_in, bool& race_kept) {
     save::SaveSlot slot = slot_in;
-    // (read before the mark changes: the slot there counts only if it was a race; the slot written next is one, or not)
-    const std::optional<std::vector<std::uint8_t>> own =
-        CoopGoldMode::NotShared() ? CoopGoldMode::RaceSoFar(dir) : std::nullopt;
-    CoopGoldMode::MarkRace(dir, CoopGoldMode::NotShared());
+    race_kept = false;
     if (!CoopGoldMode::NotShared()) return slot;
-    const std::vector<std::uint8_t>* own_bytes = own ? &*own : nullptr;
+    const CoopGoldMode::Race race = CoopGoldMode::TheRace();
     for (auto& f : slot.files) {
         if (f.name != "progress.sav") continue;
         const CoopGoldMode::GoldKept kept =
-            CoopGoldMode::KeepOwnGold(f.bytes, own_bytes, coop::host::gold_skulltula_keys(),
-                                      coop::host::kGoldTokenCount, coop::host::kGoldTokenGet);
+            CoopGoldMode::KeepRaceIn(f.bytes, &race, coop::host::gold_skulltula_keys(),
+                                     coop::host::kGoldTokenCount, coop::host::kGoldTokenGet);
+        race_kept = kept.done;
         if (!kept.done) {
             LOG_WARNING(Core, "coop: save: Gold Skulltulas not shared: {}: the host's tokens are in this save",
                         kept.why);
         } else {
             LOG_INFO(Core, "coop: save: Gold Skulltulas not shared: the host's save keeps ours ({}): {} keys and "
                            "count {} (the host's: {} keys, count {}){}",
-                     own_bytes ? "from our last co-op save" : "none: the race starts from 0", kept.own_keys, kept.own_count,
-                     kept.host_keys, kept.host_count,
+                     race.empty() ? "none with this host: the race starts from 0" : "our race with this host",
+                     kept.own_keys, kept.own_count, kept.host_keys, kept.host_count,
                      kept.keys_left ? "; our taken Skulltulas could not be kept (the save has no key set)" : "");
         }
     }
@@ -455,10 +452,16 @@ save::SaveSlot OwnGoldLocked(const fs::path& dir, const save::SaveSlot& slot_in)
 // Under g_mutex: the host's slot written whole into the co-op folder `dir`.
 // `played_from`: the game already plays from `dir` (else Success is said once it is switched to: PendingFrame).
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot_in, bool played_from) {
-    const save::SaveSlot slot = FixedSlotLocked(OwnGoldLocked(dir, slot_in));
+    bool race_kept = false;
+    const save::SaveSlot slot = FixedSlotLocked(OwnGoldLocked(slot_in, race_kept));
     const auto result = save::write_coop_save(dir, slot, save::own_dir_of(dir));
+    g_race_dir.clear();
     switch (result) {
     case save::WriteResult::written:
+        if (race_kept) {
+            g_race_dir = dir;
+            g_race_dir_id = CoopGoldMode::RaceId();
+        }
         g_guest.ready = true;
         LOG_INFO(Core, "coop: save: the host's save written to {}", dir.string());
         if (played_from) Say(g_lines.on_ready(g_in_game));
@@ -550,6 +553,11 @@ bool HostHasNoSave() {
 bool SessionLive() {
     std::lock_guard lock(g_mutex);
     return g_live;
+}
+
+bool PlaysRaceSave() {
+    std::lock_guard lock(g_mutex);
+    return !g_race_dir.empty() && g_dir == g_race_dir && g_race_dir_id == CoopGoldMode::RaceId();
 }
 
 namespace {
@@ -662,6 +670,8 @@ void NoteTitle(bool title_up) {
     if (title_up && !g_title_up) {
         FixSlotsLocked();      // (rows 239/240/241: before the player can load one of them)
         g_played.on_title();   // (a new pick follows: a file, or New Game)
+        if (g_playthroughs) g_playthroughs->OnTitle();
+        g_playthrough_slot.reset();   // (the next load or save is a new pick, even of the same slot)
         g_title_seen = true;
         if (std::exchange(g_guest_played, false)) g_title_ask = true;   // (decided by the next OnFrame: TitleResync)
     }
@@ -1046,6 +1056,30 @@ void Resync(bool connected_guest) {
 }
 }  // namespace
 
+namespace {
+// Under g_mutex, the host: the playthrough its game plays (a slot of its own, or a new game), so each has its own race
+// with each guest (row 63, CoopGoldMode::SetPlaythrough). The slot unknown: the last one stays.
+void PlaythroughLocked(bool new_game) {
+    if (!g_playthroughs) g_playthroughs.emplace(CoopGoldMode::RaceDir());
+    std::string id;
+    if (new_game && !g_playthrough_new) {
+        g_playthrough_new = true;
+        id = g_playthroughs->OnNewGame();
+        g_playthrough_slot.reset();   // (its first save, even into the slot played before, takes the new game's id)
+        if (CoopGoldMode::NotShared()) {
+            LOG_INFO(Core, "coop: save: a new game: each guest's Gold Skulltula race with it starts from 0");
+        }
+    }
+    if (!new_game) g_playthrough_new = false;
+    if (g_played.slot() && g_played.slot() != g_playthrough_slot) {
+        g_playthrough_slot = g_played.slot();
+        id = g_playthroughs->OnSlot(g_played.slot()->filename().string(),
+                                    g_played.source() == save::PlayedSlot::Source::write);
+    }
+    if (!id.empty()) CoopGoldMode::SetPlaythrough(std::move(id));
+}
+}  // namespace
+
 void OnFrame(coop::net::Client& client, bool host_reset) {
     std::lock_guard lock(g_mutex);
     SwitchFrame(client);
@@ -1110,6 +1144,7 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
     }
     // A new game not saved yet: the guests hear "no save yet", never another slot of ours (player report 120).
     const bool new_game = g_played.new_game(g_in_game, g_title_seen);
+    PlaythroughLocked(new_game);
     // Twice a second: what the host owes (it reads the folder's file times).
     if (!g_dir.empty() && !g_planner.idle() && g_folder_every.Due(CoopEvery::NowUs())) {
         const auto newest = new_game ? std::nullopt : save::newest_write(g_dir);
@@ -1164,7 +1199,8 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             }
         }
     }
-    if (!g_outbox.empty()) {
+    // Not shared: the save waits until the guests have the race id of the playthrough it is (CoopGoldMode).
+    if (!g_outbox.empty() && !CoopGoldMode::RaceSendDue()) {
         if (client.send(proto::Message{g_outbox.front()})) {
             g_outbox.pop_front();
         }

@@ -667,7 +667,8 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
                       ",\"age_ms\":" + std::to_string(age) +
                       ",\"stale\":" + (stale ? "true" : "false") +
                       ",\"behind\":" + (fresh == CoopWorldSnapshot::Freshness::behind ? "true" : "false") +
-                      ",\"cost_us\":" + std::to_string(snapshot->cost_us);
+                      ",\"cost_us\":" + std::to_string(snapshot->cost_us) +
+                      ",\"solo\":" + (snapshot->solo ? "true" : "false");  // the solo walk: no strike by id
     // The snapshot is sorted known kinds first, so the known ones lead; `state` stops at kStateLimit of them.
     std::size_t other = 0;
     for (const auto& a : snapshot->actors) other += a.kind == CoopWorldSnapshot::Kind::other ? 1 : 0;
@@ -829,6 +830,31 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     const std::string why = NotReadyReason(status);
     out += ",\"not_ready\":" + (why.empty() ? std::string("null") : Quote(why));
     return out;
+}
+
+std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms) {
+    const auto* game = GameOf(status);
+    const auto* pos = game && !SnapshotIsOld(status) && !SnapshotMissing(status) ? game->Get("pos") : nullptr;
+    if (!pos || pos->kind != CoopModJson::Value::Kind::Array || pos->array.size() != 3 || scene.empty()) {
+        return ",\"room\":null";
+    }
+    CoopRooms::Vec3 at{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (pos->array[i].kind != CoopModJson::Value::Kind::Number) return ",\"room\":null";
+        at[i] = static_cast<float>(pos->array[i].number);
+    }
+    const auto guess = rooms.Nearest(scene, at);
+    return ",\"room\":" + (guess ? std::to_string(guess->room) : std::string("null"));
+}
+
+std::string BodyMember(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, bool live) {
+    if (snapshot && live) {
+        for (const auto& a : snapshot->actors) {
+            if (a.name == "Player_Child") return ",\"body\":\"child\"";
+            if (a.name == "Player_Adult") return ",\"body\":\"adult\"";
+        }
+    }
+    return ",\"body\":null";
 }
 
 namespace {

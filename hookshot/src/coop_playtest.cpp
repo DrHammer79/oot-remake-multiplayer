@@ -29,6 +29,7 @@
 #include "coop/host/game_items.hpp"
 #include "coop_camera.h"
 #include "coop_cheats.h"
+#include "coop_fairy.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
 #include "coop_menu_state.h"
@@ -306,6 +307,14 @@ bool WorldListNow() {
     return store.Enabled() && WorldListLive(store.Get(), SteadyMs(), g_gate ? g_gate->Frame() : 0);
 }
 
+// Whether the sharing walk (the one that runs strikes) made the list: a live list that is not the solo walk's.
+bool StrikeWalkNow() {
+    auto& store = CoopWorldSnapshot::TheStore();
+    if (!store.Enabled()) return false;
+    const auto snap = store.Get();
+    return WorldListLive(snap, SteadyMs(), g_gate ? g_gate->Frame() : 0) && !snap->solo;
+}
+
 constexpr auto kHoldWait = 5000ms;  // a hold (or a held job) that does not come in this time: timeout
 
 // Longshot's status with a Link snapshot that is not old (SnapshotIsOld) and not missing (SnapshotMissing). Longshot
@@ -333,8 +342,21 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
     const Value* game = status ? status->Get("game") : nullptr;
     if (game && game->kind != Value::Kind::Object) game = nullptr;
     out += "\"scene\":" + (status && status->Get("map") ? Compact(*status->Get("map")) : Field(game, "map"));
-    out += ",\"room\":null";
+    {
+        // The rooms table (the puppet pack's coop_rooms.txt), read once; empty without a pack (room null).
+        static const CoopRooms::Table rooms = CoopFairy::RoomTable();
+        std::string scene;
+        if (status) {
+            if (const auto map = status->Text("map")) scene = *map;
+            else if (game) scene = game->Text("map").value_or("");
+        }
+        out += RoomMember(status ? &*status : nullptr, scene, rooms);
+    }
     out += LinkMembers(status ? &*status : nullptr);
+    {
+        auto& store = CoopWorldSnapshot::TheStore();
+        out += BodyMember(store.Enabled() ? store.Get() : std::nullopt, WorldListNow());
+    }
     out += ",\"control\":" + std::string(status ? "true" : "false");
     Core::System& sys = *g_system;
     out += ",\"equips\":{";
@@ -480,9 +502,9 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "act") {
         std::string error;
-        // An actor id is resolved in the objects walk, which runs only with a world list: with none, refuse it here
-        // (never run it as a name, which would strike another actor).
-        const bool listed = WorldListNow();
+        // An actor id is resolved in the sharing walk, which runs only in a session: without its list (none, or the
+        // solo walk's), refuse it here (never run it as a name, which would strike another actor).
+        const bool listed = StrikeWalkNow();
         if (const std::string refusal = StrikeIdRefusal(r.lines, listed); !refusal.empty()) {
             return fail("refused", refusal);
         }
