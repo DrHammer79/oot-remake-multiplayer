@@ -530,6 +530,22 @@ LifeRouted RouteLife(const LifeAsk& a) {
     return {a.native ? LifeRoute::lost : LifeRoute::write, 0};
 }
 
+GivenFate StaleGivenFate(const GivenAsk& a) {
+    if (!a.due) {
+        return GivenFate::wait;
+    }
+    if (!a.same_component) {
+        return GivenFate::gone;
+    }
+    if (a.pending == 0) {
+        return GivenFate::taken;
+    }
+    // An enemy's life is never written, and taking the change back lost it for good: the copy kept its full life
+    // while its owner's had fallen (lane NEXT5b). Its own Life step takes it when the enemy wakes, with the same
+    // tie to the replay (dropped if the replay lands first, the replay withdrawn if the fall is taken).
+    return a.native ? GivenFate::keep : GivenFate::write;
+}
+
 bool PlaysByFrame(std::string_view name) {
     return name.starts_with("Npc_") || (name.starts_with("Enemy_") && !IsBossOrPart(name));
 }
@@ -1528,6 +1544,18 @@ void Sync::Stepped(std::uint64_t address, std::int32_t amount, std::uint64_t now
         it->second.step_given += amount;
         it->second.step_given_until = now_us + kStepGivenUs;
     }
+}
+
+void Sync::KeepGiven(std::uint64_t address, std::int32_t amount, std::uint64_t now_us) {
+    const auto it = objects_.find(address);
+    if (it == objects_.end() || amount <= 0) {
+        return;
+    }
+    Object& o = it->second;
+    o.late_left = std::max(o.late_left, amount);  // (the same fall the hurt's end booked: never added twice)
+    o.late_until = std::max(o.late_until, now_us + kHurtLateUs);
+    o.step_given = std::max(o.step_given, amount);
+    o.step_given_until = std::max(o.step_given_until, now_us + kStepGivenUs);
 }
 
 std::int32_t Sync::StepHits(Object& o, std::int32_t fell, std::int32_t life, std::uint64_t now_us) {

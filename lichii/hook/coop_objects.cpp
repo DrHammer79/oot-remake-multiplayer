@@ -3520,6 +3520,7 @@ private:
         return known != names_.end() ? known->second.first : std::string("?");
     }
     std::size_t lives_lost_ = 0;  // enemy life changes no game step took (never written: lost)
+    std::size_t lives_kept_ = 0;  // enemy life changes kept for a later Life step (asleep: GivenFate::keep)
 
     // The pause counters (coop_counters.h): the nodes the cave kept, read.
 #ifdef COOP_HOOKSHOT
@@ -3638,27 +3639,51 @@ private:
             loose_said_ = loose;
         }
     }
-    // A life change given to the Life step that no step took in kGivenWaitUs
-    // (the actor asleep or paused): taken back and written, as before.
+    // A life change given to the Life step that no step took in kGivenWaitUs (the actor asleep or paused):
+    // StaleGivenFate decides (objects_test). Anything but an enemy is taken back and written, as before. An
+    // enemy's waits for its next Life step (enemy-late-kill, lane NEXT5b: a sleeping Deku Baba's copy lost its
+    // owner's fall here and kept its full life), and the Sync keeps that fall from counting as our hit meanwhile.
     void StaleGiven(Core::Memory::Memory& memory, Reader& r, u64 now_us) {
         auto& steps = CoopActorEvents::TheLifeTable();
-        std::erase_if(life_given_, [&](const LifeGiven& g) {
-            if (now_us < g.at_us + kGivenWaitUs) {
+        std::erase_if(life_given_, [&](LifeGiven& g) {
+            GivenAsk ask;
+            ask.due = now_us >= g.at_us + kGivenWaitUs;
+            if (!ask.due) {
                 return false;
             }
             const auto table = r.Ptr(g.address + kActorComponents);
             const auto life = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
-            if (!life || *life != g.component) {
+            ask.same_component = life && *life == g.component;
+            ask.pending = steps.Pending(g.component);
+            ask.native = NativeOnly(g.address);
+            switch (StaleGivenFate(ask)) {
+            case GivenFate::wait:
+                return false;
+            case GivenFate::gone:
                 steps.Take(g.component);  // (another actor there now, or none)
                 return true;
+            case GivenFate::taken:
+                if (g.kept) {
+                    LOG_INFO(Core, "coop: objects: {:#x} '{}': its Life step took the kept change {} ms after it "
+                                   "was given",
+                             g.address, NameOf(g.address), (now_us - g.at_us) / 1000);
+                }
+                return true;
+            case GivenFate::keep:
+                if (!g.kept) {
+                    g.kept = true;
+                    ++lives_kept_;
+                    LOG_INFO(Core, "coop: objects: {:#x} '{}': its Life step did not take the change yet (asleep): "
+                                   "{} kept for its next step ({} kept so far)",
+                             g.address, NameOf(g.address), ask.pending, lives_kept_);
+                }
+                sync_.KeepGiven(g.address, ask.pending, now_us);
+                return false;
+            case GivenFate::write:
+                break;
             }
             const s32 left = steps.Take(g.component);
-            if (left != 0 && NativeOnly(g.address)) {
-                ++lives_lost_;
-                LOG_INFO(Core, "coop: objects: {:#x} '{}': its Life step did not take the change: lost, its life "
-                               "stays its game's ({} lost so far)",
-                         g.address, NameOf(g.address), lives_lost_);
-            } else if (left != 0) {
+            if (left != 0) {
                 const auto value = LifeValue(r, g.address);
                 if (value && memory.IsValidVirtualAddressRange(value->first + 8, 4) &&
                     r.Get<s32>(value->first + 8).value_or(g.life) > g.life) {
@@ -3675,6 +3700,7 @@ private:
         u64 address = 0;
         s32 life = 0;
         u64 at_us = 0;
+        bool kept = false;  // an enemy's, kept for its next Life step (GivenFate::keep)
     };
     // Has the enemy's own damage step seen the hit we replayed last on this Life component? (Its last hit id,
     // Life + 0x1b18, reached our id: hit ids only grow.) True when we never replayed one.
@@ -5372,6 +5398,8 @@ private:
                 if (w.hurt <= 0) {
                     // (a hurt's fall the Sync already expects, and writes itself when not taken)
                     sync_.Stepped(w.address, routed.amount, share_now_us_);
+                    // (this give holds any earlier one, taken back above: one entry per component)
+                    std::erase_if(life_given_, [&](const LifeGiven& g) { return g.component == *life; });
                     life_given_.push_back({*life, w.address, w.life, share_now_us_});
                 }
                 return;
