@@ -33,7 +33,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -51,10 +50,10 @@ PORT = 27593         # without a lane
 NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")
 MAX_LINES = 80
 MAX_MINUTES = 30     # a session's whole length (the lane lock goes stale after 4 h anyway; a slot is shorter)
-BACKUP = ".live-backup"   # --dll: the lane's own module beside it while a session runs
+BACKUP = lanes.LIVE_BACKUP   # --dll: the lane's own module beside it while a session runs (lanes.py swap_in)
 IDLE_MINUTES = 10    # no tester command for this long after the boot: the tester is gone (hand-off, crash, pause)
 WATCH_EVERY = 5.0    # s between the watchdog's looks
-SERVER_PASSWORD = "autotest-pass"   # hookshot.py run's default --password: the boot's server and games have it
+SERVER_PASSWORD = "autotest-pass"   # the session's join password: given to the boot, kept in session.json (runner)
 QUIT_WAIT = 15.0     # s a game gets to quit before it is killed
 
 
@@ -158,7 +157,7 @@ def runner_argv(a, game_a, game_b, port, pipe, d):
     """hookshot.py run's arguments for the boot. No --lane: the watchdog holds the lane lock for the whole session (the
     runner would let it go when the boot ends, with the games still open)."""
     argv = ["run", "--game-a", game_a, "--game-b", game_b, "--server", a.server, "--port", str(port),
-            "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0",
+            "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0", "--password", SERVER_PASSWORD,
             "--scenario-timeout", str(a.boot_timeout)]
     if a.no_restore:
         argv.append("--no-restore")
@@ -242,7 +241,7 @@ def start(a):
          "games": {}, "offsets": {}, "planned": {},
          "runner": {"game_a": os.path.abspath(game_a), "game_b": os.path.abspath(game_b), "port": port, "pipe": pipe,
                     "server": os.path.abspath(a.server), "env": list(a.env), "display": getattr(a, "display", None),
-                    "boot_timeout": a.boot_timeout,
+                    "boot_timeout": a.boot_timeout, "password": SERVER_PASSWORD,
                     "playtest": playtest_base(a.lane) if getattr(a, "playtest", False) else 0}}
     for i, (x, g) in enumerate(zip(TAGS, (game_a, game_b))):
         s["games"][x] = {"folder": os.path.abspath(g), "pipe": "%s-%s" % (pipe, x),
@@ -574,7 +573,7 @@ def server_cmd(a, alive=None, killer=None, popen=None, sleep=time.sleep):
         return {"error": "the server still runs (pid %d): live.py server stop first" % pid}
     n = len([f for f in os.listdir(d) if f.startswith("server-out")])
     with open(os.path.join(d, "server-out-%d.txt" % n), "w") as so:
-        env = dict(os.environ, OOT_COOP_TEST_PASSWORD=SERVER_PASSWORD)   # (in the environment, never on the command line)
+        env = dict(os.environ, OOT_COOP_TEST_PASSWORD=r.get("password", SERVER_PASSWORD))   # (in the environment, never on the command line)
         proc = (popen or lanes.hs.popen_quiet)([r["server"], "--port", str(r["port"]), "--password-env",
                                                 "OOT_COOP_TEST_PASSWORD"], stdout=so, stderr=subprocess.STDOUT, env=env)
     write_pids(d, server=proc.pid)
@@ -587,6 +586,7 @@ def relaunch_argv(r, d, x, boot=None, no_load=False, restore=False):
     """hookshot.py run's arguments that start game x again into session folder d (r: the session's `runner`)."""
     argv = ["run", "--only", x, "--game-a", r["game_a"], "--game-b", r["game_b"], "--port", str(r["port"]),
             "--out", d, "--name", "live-%s" % x.lower(), "--pipe", r["pipe"], "--keep-open", "--every", "0",
+            "--password", r.get("password", SERVER_PASSWORD),
             "--scenario-timeout", str(r["boot_timeout"])]
     if not restore:
         argv.append("--no-restore")   # (the point of a rejoin is the save the game has now)
@@ -653,47 +653,18 @@ def wait_log(session, x, pattern, mn=1, mx=None, timeout=60.0, clock=time.monoto
         sleep(1.0)
 
 
-def lane_dlls(n, kit=None):
-    """The hookshot_coop.dll path of each game of lane n (where lanes.py install puts it)."""
-    L = lanes.lane(n, kit)
-    out = []
-    for folder in (L["a"], L["b"]):
-        exe = lanes.hs.find_exe(folder)
-        if not exe:
-            raise lanes.Fail("%s: no game (lanes.py setup)" % folder)
-        out.append(os.path.join(os.path.dirname(exe), "hookshot_coop.dll"))
-    return out
+def install_dll(s, dll, kit=None, swap=None):
+    """--dll: `dll` in the lane for this session only (lanes.py swap_in: the lane's own kept beside it, also when the
+    lane had none); close() puts the lane's own back (restore_dlls). lanes.py owns the lane's module state."""
+    s["dll"] = {"installed": os.path.abspath(dll)}   # (written first: a half-done swap is still put back at close)
+    return (swap or (lambda n, path: lanes.swap_in(n, path, kit=kit)))(s["lane"], dll)
 
 
-def install_dll(s, dll, kit=None, installer=None):
-    """--dll: the lane's own module put aside (DLL.live-backup) and `dll` installed for this session only; close() puts
-    the lane's own back. A backup left by a session that could not clean up is the lane's own: it is kept, not replaced."""
-    installer = installer or (lambda n, path: lanes.install(n, path, say=lambda *_: None, kit=kit))
-    if not os.path.isfile(dll):
-        raise lanes.Fail("no %s" % dll)
-    backups = []
-    for dst in lane_dlls(s["lane"], kit):
-        bak = dst + BACKUP
-        if os.path.isfile(dst) and not os.path.isfile(bak):
-            shutil.copy2(dst, bak)
-        backups.append([dst, bak])
-    s["dll"] = {"installed": os.path.abspath(dll), "backups": backups}
-    installer(s["lane"], dll)
-    return backups
-
-
-def restore_dlls(s):
-    """Puts the lane's own module back after a --dll session (what close() does); returns what it did."""
-    did = []
-    for dst, bak in (s.get("dll") or {}).get("backups", []):
-        if os.path.isfile(bak):
-            if os.path.lexists(dst):
-                os.unlink(dst)   # never write into a file that may be a hard link
-            os.replace(bak, dst)
-            did.append("restored")
-        else:
-            did.append("no backup")
-    return ", ".join(did) if did else None
+def restore_dlls(s, kit=None, swap_back=None):
+    """The lane's own module back after a --dll session (what close() does): one word per game, joined."""
+    if not s.get("dll"):
+        return None
+    return ", ".join((swap_back or (lambda n: lanes.swap_back(n, kit=kit)))(s["lane"]))
 
 
 def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, wait=QUIT_WAIT,

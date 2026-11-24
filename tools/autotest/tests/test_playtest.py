@@ -164,6 +164,7 @@ class LiveLane(unittest.TestCase):
         self.assertIn("--keep-open", argv)
         self.assertEqual(argv[argv.index("--pipe") + 1], "coop-lane1")
         self.assertEqual(argv[argv.index("--port") + 1], "27520")
+        self.assertEqual(argv[argv.index("--password") + 1], live.SERVER_PASSWORD)   # (kept in session.json too)
         self.assertIn("--no-restore", live.runner_argv(start_args(no_restore=True), "ga", "gb", 1, "p", "dir"))
 
     def test_the_runner_keeps_pids_for_the_watchdog(self):
@@ -176,7 +177,7 @@ class LiveLane(unittest.TestCase):
 
 
 class LiveDll(unittest.TestCase):
-    """live.py start --dll: the lane's own module put aside, the session's installed, the lane's own back at close."""
+    """The lane's module: lanes.py owns it (install, setup, swap_in/swap_back); live.py start --dll swaps for a session."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -187,53 +188,138 @@ class LiveDll(unittest.TestCase):
             os.makedirs(b)
             open(os.path.join(b, "longshot.exe"), "w").close()
             dst = os.path.join(b, "hookshot_coop.dll")
-            with open(dst, "w") as f:
-                f.write("lane own")
+            self.write(dst, "lane own")
             self.dsts.append(dst)
         self.new = os.path.join(self.kit, "new.dll")
-        with open(self.new, "w") as f:
-            f.write("session")
+        self.write(self.new, "session")
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def write(self, p, text):
+        with open(p, "w") as f:
+            f.write(text)
 
     def read(self, p):
         with open(p) as f:
             return f.read()
 
-    def install(self, s):
-        return live.install_dll(s, self.new, kit=self.kit,
-                                installer=lambda n, dll: lanes.install(n, dll, say=lambda *_: None, kit=self.kit,
-                                                                       busy=lambda _f: False))
+    def lane(self):
+        return [self.read(d) if os.path.exists(d) else None for d in self.dsts]
+
+    def swap(self, s, dll=None):
+        return live.install_dll(s, dll or self.new, swap=lambda n, p: lanes.swap_in(n, p, kit=self.kit,
+                                                                                    busy=lambda _f: False))
+
+    def back(self, s, **kw):
+        return live.restore_dlls(s, swap_back=lambda n: lanes.swap_back(n, kit=self.kit, **kw))
 
     def test_swap_and_restore(self):
         s = {"lane": 1}
-        self.install(s)
-        self.assertEqual([self.read(d) for d in self.dsts], ["session", "session"])
+        self.swap(s)
+        self.assertEqual(self.lane(), ["session", "session"])
         self.assertEqual([self.read(d + live.BACKUP) for d in self.dsts], ["lane own", "lane own"])
-        self.assertEqual(live.restore_dlls(s), "restored, restored")
-        self.assertEqual([self.read(d) for d in self.dsts], ["lane own", "lane own"])
-        self.assertFalse(any(os.path.exists(d + live.BACKUP) for d in self.dsts))
+        self.assertEqual(len(lanes.swap_left(1, kit=self.kit)), 2)
+        self.assertEqual(self.back(s), "restored, restored")
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
 
-    def test_old_backup_is_the_lane_own(self):
-        # a session that could not clean up left its backup: the next one keeps it (the lane's own), not the test dll
+    def test_a_left_backup_is_the_lane_own(self):
+        # a session that could not put it back left its backup: the next one keeps it (the lane's own), not the test dll
         for d in self.dsts:
-            with open(d + live.BACKUP, "w") as f:
-                f.write("lane own")
-            with open(d, "w") as f:
-                f.write("left over")
+            self.write(d + live.BACKUP, "lane own")
+            self.write(d, "left over")
         s = {"lane": 1}
-        self.install(s)
-        live.restore_dlls(s)
-        self.assertEqual([self.read(d) for d in self.dsts], ["lane own", "lane own"])
+        self.swap(s)
+        self.back(s)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_an_install_after_a_failed_restore_wins(self):
+        # review-01112-h 1: the backup stayed (a game held the file), then lanes.py install put a newer module in. The
+        # newer one is the lane's own now: no later session may put the old backup back.
+        for d in self.dsts:
+            self.write(d + live.BACKUP, "old own")
+            self.write(d, "left over")
+        newer = os.path.join(self.kit, "newer.dll")
+        self.write(newer, "newer")
+        lanes.install(1, newer, say=lambda *_: None, kit=self.kit, busy=lambda _f: False)
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+        s = {"lane": 1}
+        self.swap(s)
+        self.back(s)
+        self.assertEqual(self.lane(), ["newer", "newer"])
+
+    def test_a_lane_with_no_module_gets_none_back(self):
+        # review-01112-h 2: the lane had no module: the session's is removed at its end, not left behind
+        for d in self.dsts:
+            os.unlink(d)
+        s = {"lane": 1}
+        self.swap(s)
+        self.assertEqual(self.lane(), ["session", "session"])
+        self.assertEqual(self.back(s), "removed (the lane had none), removed (the lane had none)")
+        self.assertEqual(self.lane(), [None, None])
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+
+    def test_a_held_file_is_tried_again(self):
+        s = {"lane": 1}
+        self.swap(s)
+        calls = {"n": 0}
+        real = os.replace
+
+        def flaky(a, b):   # the killed game holds the module for two tries
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise PermissionError("in use")
+            return real(a, b)
+        slept = []
+        os.replace = flaky
+        try:
+            words = self.back(s, sleep=slept.append)
+        finally:
+            os.replace = real
+        self.assertEqual(words, "restored, restored")
+        self.assertEqual(len(slept), 2)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_still_held_says_so_and_check_names_it(self):
+        s = {"lane": 1}
+        self.swap(s)
+        real = os.replace
+
+        def held(a, b):
+            raise PermissionError("in use")
+        os.replace = held
+        try:
+            words = self.back(s, tries=3, sleep=lambda _s: None)
+        finally:
+            os.replace = real
+        self.assertIn("NOT restored", words)
+        self.assertIn("lanes.py restore --lane 1", words)
+        found = lanes.problems(1, kit=self.kit, busy=lambda _f: False)
+        self.assertTrue(any("was not put back" in p for p in found), found)
+        lanes.swap_back(1, kit=self.kit)   # (lanes.py restore)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_setup_drops_a_left_swap(self):
+        src = {}
+        for x in ("A", "B"):
+            src[x] = os.path.join(self.kit, "src-%s" % x, "bin")
+            os.makedirs(src[x])
+            open(os.path.join(src[x], "longshot.exe"), "w").close()
+            self.write(os.path.join(src[x], "hookshot_coop.dll"), "source")
+        for d in self.dsts:
+            self.write(d + live.BACKUP, "old own")
+        lanes.setup(1, os.path.dirname(src["A"]), os.path.dirname(src["B"]), say=lambda *_: None, kit=self.kit,
+                    busy=lambda _f: False)
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+        self.assertEqual(self.lane(), ["source", "source"])
 
     def test_missing_dll_changes_nothing(self):
         s = {"lane": 1}
-        self.new = os.path.join(self.kit, "none.dll")
         with self.assertRaises(lanes.Fail):
-            self.install(s)
-        self.assertEqual([self.read(d) for d in self.dsts], ["lane own", "lane own"])
-        self.assertIsNone(live.restore_dlls(s))
+            self.swap(s, os.path.join(self.kit, "none.dll"))
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+        self.assertEqual(self.back(s), "nothing to put back, nothing to put back")
 
     def test_dll_needs_lane(self):
         a = argparse.Namespace(dll=self.new, lane=None, session=os.path.join(self.kit, "s"))
@@ -242,7 +328,8 @@ class LiveDll(unittest.TestCase):
 
 
 RUNNER = {"game_a": "ga", "game_b": "gb", "port": 27520, "pipe": "coop-lane1", "server": "srv.exe",
-          "env": ["LICHII_COOP_DEBUG_FLAGS=1", "B:X=1"], "display": "D2", "boot_timeout": 900, "playtest": 5010}
+          "env": ["LICHII_COOP_DEBUG_FLAGS=1", "B:X=1"], "display": "D2", "boot_timeout": 900, "playtest": 5010,
+          "password": "pw-of-session"}
 
 
 class FakeProc:
@@ -315,7 +402,7 @@ class LiveLifecycle(unittest.TestCase):
         out = live.server_cmd(self.args(action="start"), alive=self.alive, popen=popen, sleep=lambda s: None)
         self.assertEqual(out["pid"], 44)
         self.assertEqual(seen["cmd"], ["srv.exe", "--port", "27520", "--password-env", "OOT_COOP_TEST_PASSWORD"])
-        self.assertEqual(seen["env"]["OOT_COOP_TEST_PASSWORD"], live.SERVER_PASSWORD)
+        self.assertEqual(seen["env"]["OOT_COOP_TEST_PASSWORD"], "pw-of-session")   # (the session's, review-01112-h 3)
         self.assertEqual(live.game_pids(self.d), ({"A": 11, "B": 22}, 44))
         self.assertEqual(live.load(self.d)["planned"], {})
 
@@ -327,7 +414,7 @@ class LiveLifecycle(unittest.TestCase):
         argv = live.relaunch_argv(RUNNER, self.d, "B", boot="boot.B.txt", no_load=True)
         self.assertEqual(argv[:3], ["run", "--only", "B"])
         for pair in (["--port", "27520"], ["--pipe", "coop-lane1"], ["--out", self.d], ["--script-b", "boot.B.txt"],
-                     ["--playtest-ports", "5010"], ["--display", "D2"]):
+                     ["--playtest-ports", "5010"], ["--display", "D2"], ["--password", "pw-of-session"]):
             i = argv.index(pair[0])
             self.assertEqual(argv[i:i + 2], pair)
         self.assertEqual([argv[i + 1] for i, w in enumerate(argv) if w == "--env"], RUNNER["env"])
