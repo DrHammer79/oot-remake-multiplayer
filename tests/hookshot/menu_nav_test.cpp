@@ -106,3 +106,23 @@ TEST_CASE("menu nav: the typing keys go round on a press, stop at the ends when 
     CHECK_FALSE(TypingKeysStep(0, 1, false, 4, 0, 26, &key, &letter));  // (Left/Right off the Letter key: nothing)
     CHECK(letter == 0);
 }
+
+TEST_CASE("menu nav: another's list read at its page's refresh, trusted only while no move went to it since") {
+    // (the Mods tab's list on the - page: its view is built at the refresh, never at each pad read, review-01112-h)
+    ListReading r;
+    CHECK_FALSE(r.Trusted(0));                       // (nothing read yet)
+    CHECK_FALSE(r.CanRepeat(1, 0));
+    // lines: 0 heading, 1, 2, 3 note, 4; line 2 picked; read with 5 moves sent before the view was built
+    r.Fill(5, {false, true, true, false, true}, 2);
+    CHECK(r.Trusted(5));
+    CHECK(r.CanRepeat(1, 5));                        // (down: over the note to 4)
+    CHECK(r.CanRepeat(-1, 5));                       // (up: 1)
+    CHECK_FALSE(r.CanRepeat(1, 6));                  // (a move went to it since: stale, no repeat until read again)
+    r.Fill(6, {false, true, true, false, true}, 4);
+    CHECK_FALSE(r.CanRepeat(1, 6));                  // (at its last line: a held Down never goes round)
+    CHECK(r.CanRepeat(-1, 6));
+    r.Fill(6, {false, true, true, false, true}, 1);
+    CHECK_FALSE(r.CanRepeat(-1, 6));                 // (at its first pickable line: the heading above is not one)
+    r.Fill(7, {true, true}, -1);
+    CHECK_FALSE(r.Trusted(7));                       // (no line picked)
+}

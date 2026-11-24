@@ -123,6 +123,10 @@ std::vector<ListLine> g_menu_typing_lines;
 constexpr std::string_view kMenuLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.: ";
 bool g_menu_typed_last = false;
 std::uint64_t g_menu_pad_last = 0;
+// The Mods tab's list on the - page as MinusWords read it (its view built at the page's refresh, not at each pad read),
+// and the moves given to it (OnPad: after each, the reading is stale until the next refresh). g_mutex for the reading.
+CoopMenuNav::ListReading g_mods_reading;
+std::atomic<std::uint64_t> g_mods_sent{0};
 CoopMenuNav::Repeat g_menu_keys_repeat;   // co-op's menu's typing keys on the + page: held directions (coop_menu_nav.h)
 std::atomic<bool> g_menu_host_rules{false};   // (Host settings: the page opens at its host rows, FollowMenu)
 std::atomic<bool> g_menu_focus_reset{false};   // (the view came: the game's cursor's row then is no choice)
@@ -2783,9 +2787,19 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
         picked = ml.picked >= 0 ? ml.picked + 1 : -1;
     };
     std::string menu_help;   // (co-op's menu's or the Mods tab's help for their row picked)
+    std::vector<bool> mods_pickable;
+    int mods_selected = -1;
+    bool mods_read = false;
+    const std::uint64_t mods_sent = g_mods_sent.load();   // (before the view is built: a move after it makes it stale)
     if (mods) {
         CoopPauseMenu::View mv;
-        if (CoopModsTab::View(&mv, &raw_back)) menu_list(mv, -1, &g_minus_mods_top, "Mods"), menu_help = mv.help;
+        if (CoopModsTab::View(&mv, &raw_back)) {
+            menu_list(mv, -1, &g_minus_mods_top, "Mods"), menu_help = mv.help;
+            for (const CoopPauseMenu::Row& r : mv.rows) {
+                mods_pickable.push_back(r.kind != CoopPauseMenu::RowKind::kHeading && r.kind != CoopPauseMenu::RowKind::kNote);
+            }
+            mods_selected = mv.selected, mods_read = true;
+        }
     } else if (!v.typing_lines.empty()) {
         lines = v.typing_lines;   // (the keys: the Page's typing has the pad, the key picked bright)
         picked = v.typing_key + 1;
@@ -2873,6 +2887,7 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     g_page.SetMinusInView(!mods && view != View::kMain);
     g_page.SetMinusLines(pickable, raw);
     g_page.SetMinusRawBack(raw_back);
+    if (mods_read) g_mods_reading.Fill(mods_sent, std::move(mods_pickable), mods_selected);
     g_page.SetMinusPageable(!mods && view == View::kLan && CellPages(BrowseListed(v.s)) > 1);
     for (int i = 0; i < kLinePanes; ++i) g_minus_lines[static_cast<std::size_t>(i)] = lines[static_cast<std::size_t>(i)];
     // (the cursor's part of what was read: the frames and the alphas from it at each update, ApplyMinusPage)
@@ -4353,19 +4368,19 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             }
             {   // (co-op's menu's or the Mods tab's own page on the - page: where a held Up or Down may still go, never round)
                 bool can_up = false, can_down = false;
-                CoopPauseMenu::View raw_view;
-                bool raw_back_unused = false;
-                const bool mods_tab = g_page.MinusTab() == static_cast<int>(MinusPage::kMods);
-                const CoopPauseMenu::View* rv = mods_tab ? (CoopModsTab::View(&raw_view, &raw_back_unused) ? &raw_view : nullptr)
-                                                : g_menu_open.load() >= 0 ? &mv : nullptr;
-                if (rv != nullptr && rv->selected >= 0 && rv->selected < static_cast<int>(rv->rows.size())) {
-                    const int n = static_cast<int>(rv->rows.size());
+                if (g_page.MinusTab() == static_cast<int>(MinusPage::kMods)) {
+                    // (the Mods tab's list as MinusWords last read it, at the page's refresh: never built here at
+                    // each pad read; trusted only while no move went to it since: g_mods_sent)
+                    const std::uint64_t sent = g_mods_sent.load();
+                    can_up = g_mods_reading.CanRepeat(-1, sent), can_down = g_mods_reading.CanRepeat(1, sent);
+                } else if (g_menu_open.load() >= 0 && mv.selected >= 0 && mv.selected < static_cast<int>(mv.rows.size())) {
+                    const int n = static_cast<int>(mv.rows.size());
                     const auto pick = [&](int i) {
-                        const auto kind = rv->rows[static_cast<std::size_t>(i)].kind;
+                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
                         return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
                     };
-                    can_up = CoopMenuNav::CanStep(rv->selected, -1, n, pick);
-                    can_down = CoopMenuNav::CanStep(rv->selected, 1, n, pick);
+                    can_up = CoopMenuNav::CanStep(mv.selected, -1, n, pick);
+                    can_down = CoopMenuNav::CanStep(mv.selected, 1, n, pick);
                 }
                 g_page.SetMinusRawEnds(can_up, can_down);
             }
@@ -5002,6 +5017,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             if (minus_mods) {
                 FollowMods(true);
                 moves([](int event, int arg) { CoopModsTab::MenuInput(event, arg, 0); });
+                if (minus_moves != 0) g_mods_sent.fetch_add(1), g_live_poke = true;   // (its reading stale: read again soon)
                 if (minus_list_back) CoopModsTab::MenuInput(HOS_COOP_MENU_BACK, 0, 0);
             } else if (view == View::kMenu) {
                 moves([&](int event, int arg) { menu_events.push_back({event, arg, 0}); });

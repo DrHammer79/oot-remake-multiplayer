@@ -20,6 +20,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace CoopMenuNav {
 
@@ -116,6 +118,30 @@ inline bool TypingKeysStep(int dy, int dx, bool dy_held, int keys, int letter_ke
     }
     return moved;
 }
+
+// What a list owned by someone else (the Mods tab's) last showed: which lines can be picked and the selected one, as
+// read at the page's own refresh (its view is built then, never at each pad read: review-01112-h). `sent` counts the
+// moves given to that list; a reading is only trusted while no move was given after it (Fill takes the count read
+// BEFORE the view was built, so a refresh that raced a move is stale, never fresh). A held direction repeats only on a
+// trusted reading; a stale one waits for the next refresh (asked for at each move).
+struct ListReading {
+    std::vector<bool> pickable;
+    int selected = -1;
+    std::uint64_t sent = ~std::uint64_t{0};   // (none yet: never trusted)
+
+    void Fill(std::uint64_t sent_before_view, std::vector<bool> lines, int picked) {
+        pickable = std::move(lines), selected = picked, sent = sent_before_view;
+    }
+    bool Trusted(std::uint64_t sent_now) const {
+        return sent == sent_now && selected >= 0 && selected < static_cast<int>(pickable.size());
+    }
+    // A held Up (dir -1) or Down (+1) may go on: trusted, and a pickable line that way without going round.
+    bool CanRepeat(int dir, std::uint64_t sent_now) const {
+        if (!Trusted(sent_now)) return false;
+        const auto& p = pickable;
+        return CanStep(selected, dir, static_cast<int>(p.size()), [&p](int i) { return p[static_cast<std::size_t>(i)]; });
+    }
+};
 
 // A bit mask of pickable lines (bit i: line i), as the - page keeps its rows and lines.
 inline int StepMask(std::uint32_t mask, int at, int dir, bool wrap = false) {
