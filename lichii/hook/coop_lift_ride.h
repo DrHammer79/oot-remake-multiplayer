@@ -99,6 +99,9 @@ public:
 
 private:
     std::optional<CoopPuppet::Call> Next(CoopPuppet::Guest& guest, std::uint64_t main);
+    // A note, once per step, of why a wanted actor got no set-bool (the in-game check reads it).
+    void Why(std::string_view step);
+    std::vector<std::string> whys_;
 
     std::mutex mutex_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> wanted_;  // (lift, until ms)

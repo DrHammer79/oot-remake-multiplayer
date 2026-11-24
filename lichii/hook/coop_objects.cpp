@@ -2780,7 +2780,22 @@ public:
         // of the world is shared there; this path sends no message for race_private to stop).
         if (switch_stand_on_ && CoopSwitchStandMode::InForce() && !CoopRaceMode::InForce()) {
             auto& stander = CoopLiftRide::TheStander();
-            stander.Want(CoopLiftRide::Stood(stand_switches_, sync_.OthersHere(server_now_us)), main_, SteadyNowMs());
+            const auto others = sync_.OthersHere(server_now_us);
+            const auto stood = CoopLiftRide::Stood(stand_switches_, others);
+            // (NEXT40 found nothing pressed: every 5 s with switches here, what the footprint sees)
+            if (!stand_switches_.empty() && SteadyNowMs() >= stand_note_ms_) {
+                stand_note_ms_ = SteadyNowMs() + 5000;
+                float best = 1e9f, dx = 0, dy = 0, dz = 0;
+                for (const auto& s : stand_switches_) {
+                    for (const auto& o : others) {
+                        const float x = o[0] - s.position[0], y = o[1] - s.position[1], z = o[2] - s.position[2];
+                        if (x * x + z * z < best) best = x * x + z * z, dx = x, dy = y, dz = z;
+                    }
+                }
+                LOG_INFO(Core, "coop: switch stand: {} switches, {} others here, {} stood; nearest other {:.2f} {:.2f} {:.2f} off a switch",
+                         stand_switches_.size(), others.size(), stood.size(), dx, dy, dz);
+            }
+            stander.Want(stood, main_, SteadyNowMs());
             for (const auto& line : stander.TakeNotes()) {
                 LOG_INFO(Core, "coop: {}", line);
             }
@@ -3127,6 +3142,7 @@ public:
     std::vector<CoopLiftRide::Lift> ride_lifts_;  // jabu-lifts (#65): this walk's lifts
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     std::vector<CoopLiftRide::Lift> stand_switches_;  // ai-switches: this walk's step switches
+    std::uint64_t stand_note_ms_ = 0;                 // ai-switches: the next footprint note
     bool switch_stand_on_ = true;                     // LICHII_COOP_SWITCH_STAND=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
     std::vector<CoopScrubs::Seen> scrubs_seen_;

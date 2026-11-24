@@ -101,7 +101,12 @@ std::optional<CoopPuppet::Call> Rider::Step(CoopPuppet::Guest& guest, bool after
             for (const auto& w : wanted_) frame_.push_back(w.first);
         }
     }
-    if (failed_ || main == 0 || frame_.empty()) return std::nullopt;
+    if (failed_ || frame_.empty()) return std::nullopt;
+    if (main == 0) {
+        Why("main's base not known");
+        return std::nullopt;
+    }
+    if (!after_call) Why("the caller runs with an actor wanted");
     if (block_ == 0) {
         if (after_call) return std::nullopt;  // the malloc is asked at the start of a frame only
         std::lock_guard lock(mutex_);
@@ -115,12 +120,24 @@ std::optional<CoopPuppet::Call> Rider::Next(CoopPuppet::Guest& guest, std::uint6
     while (!frame_.empty()) {
         const std::uint64_t lift = frame_.front();
         frame_.pop_front();
-        if (!CoopFairy::ActorPresent(guest, lift)) continue;
+        if (!CoopFairy::ActorPresent(guest, lift)) {
+            Why("actor not present");
+            continue;
+        }
         // The execute reads [actor+0x270] without a check: only a lift whose logic has a live bool RideOnPlayer.
         const auto plug = CoopLogicSet::BoolPlug(guest, lift, key_);
-        if (!plug) continue;
-        if (plug->value == std::uint8_t{1}) continue;  // on already (our Link, or set this frame)
-        if (!CoopLogicSet::WriteNode(guest, block_, main, lift, key_)) continue;
+        if (!plug) {
+            Why("no live bool plug with our key");
+            continue;
+        }
+        if (plug->value == std::uint8_t{1}) {
+            Why("plug on already");
+            continue;  // on already (our Link, or set this frame)
+        }
+        if (!CoopLogicSet::WriteNode(guest, block_, main, lift, key_)) {
+            Why("node write failed");
+            continue;
+        }
         {
             std::lock_guard lock(mutex_);
             if (std::find(told_.begin(), told_.end(), lift) == told_.end()) {
@@ -135,6 +152,13 @@ std::optional<CoopPuppet::Call> Rider::Next(CoopPuppet::Guest& guest, std::uint6
         return CoopLogicSet::Execute(main, block_);
     }
     return std::nullopt;
+}
+
+void Rider::Why(std::string_view step) {
+    std::lock_guard lock(mutex_);
+    if (std::find(whys_.begin(), whys_.end(), step) != whys_.end()) return;
+    whys_.emplace_back(step);
+    notes_.push_back(what_ + ": " + std::string(step));
 }
 
 Rider& TheRider() {

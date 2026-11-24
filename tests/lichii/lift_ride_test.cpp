@@ -109,7 +109,7 @@ TEST_CASE("lift ride: one malloc, then the game's set-bool on our node block nam
     c = r.Step(g, false, 0, 116);
     REQUIRE(c);
     CHECK(c->function == kMain + a::kExecute);
-    CHECK(r.TakeNotes().size() == 1);  // logged once
+    CHECK(r.TakeNotes().size() == 2);  // logged once (after the caller-runs note)
 }
 
 TEST_CASE("lift ride: not set when on already, gone, without the plug, or no longer ridden") {
@@ -140,7 +140,7 @@ TEST_CASE("lift ride: a failed malloc turns it off") {
     CHECK_FALSE(r.Step(g, true, 0, 100));
     r.Want({kLift}, kMain, 200);
     CHECK_FALSE(r.Step(g, false, 0, 200));
-    CHECK(r.TakeNotes().size() == 1);
+    CHECK(r.TakeNotes().size() == 2);
 }
 
 TEST_CASE("switch stand: another player on our step switch sets its contact bool, and leaving lets go") {
