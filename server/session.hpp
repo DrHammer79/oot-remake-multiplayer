@@ -283,12 +283,18 @@ struct SessionConfig {
   std::uint64_t boss_turn_us = 4'000'000;
   std::uint64_t boss_turn_quiet_us = 3'000'000;
   float boss_turn_m = 40.0f;
-  // Every enemy takes turns too (#308): the same rule, among the players near it (enemy_turn_m). OFF by default
-  // (review-geno-0119-4, owner): a plain enemy's AI chases only its owner's Link, so a turn at each attack's end
-  // walks it to the other player and back (report 138's shuttle; the turn skips the sticky/hand-back rules), where
-  // solo it keeps the Link it fights. The chase, near and sticky rules already give it to the player it fights.
-  bool enemy_turns = false;
+  // A plain enemy takes turns too (#308), among the players near it (enemy_turn_m): the same rule as a boss's, only
+  // for the kinds the hook lists with object_presence::takes_turns (the big melee kinds: Moblin, Lizalfos, Dinolfos,
+  // Stalfos, Like Like, Iron Knuckle; coop_objects_sync.h TurnsAsEnemy), so any other plain enemy keeps the player it
+  // fights. Report 138's shuttle (a turn at each attack's end walked it to the other player and back) is held by
+  // caps: at most one move per enemy per enemy_turn_gap_us (counted from its last change of owner or its fight's
+  // start), never mid-attack, only when its owner and the next player are both up and within enemy_turn_m of it
+  // (2 fit players near; solo and a lone player in range never turn), and a turn goes to the near player who owns
+  // the fewest fighting enemies, only if that player owns fewer than the owner does (balance: a pack spreads, two
+  // players with one Moblin each keep theirs). false: no plain enemy turns.
+  bool enemy_turns = true;
   float enemy_turn_m = 12.0f;
+  std::uint64_t enemy_turn_gap_us = 15'000'000;
   // ...and only right at the end of the boss's own attack (boss-turns-0119): its owner's samples say an attack
   // ran (object_state::attacking, the hook's addr::InAttackSequence: after a reaction it stays on until the
   // boss's own next attack ends) and the latest one says it ended, within boss_turn_edge_us. An owner whose
@@ -1121,6 +1127,8 @@ class Session {
   bool owner_hit_lately(const Object& o, std::uint64_t now_us) const;
   // attack_hold_max_us: its owner's attack runs (never moved but by a turn or an unfit owner).
   bool mid_attack(const Object& o, std::uint64_t now_us) const;
+  // ai-turns: how many plain enemies in a fight this game owns (a turn goes to the near player with the fewest).
+  std::size_t fighting_enemies(ConnectionId owner, std::uint64_t now_us) const;
   // Boss turns (boss_turn_us): the player whose turn it is now, if a boss
   // root in its fight is due for one at a calm moment.
   std::optional<ConnectionId> next_turn(Object& o, ConnectionId owner, std::uint64_t now_us);

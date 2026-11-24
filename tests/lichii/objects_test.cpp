@@ -3655,9 +3655,23 @@ TEST_CASE("objects: group rules for parts and bosses") {
     CHECK_FALSE(IsBoss("Enemy_Dodongo"));
 }
 
+TEST_CASE("ai-turns: TurnsAsEnemy lists the big melee kinds only, never a boss or part") {
+    for (const char* name : {"Enemy_Moblin", "Enemy_Moblin_Club", "Enemy_Lizalfos", "Enemy_Dinolfos", "Enemy_Stalfos",
+                             "Enemy_Stalfos_Weak", "Enemy_LikeLike", "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black"}) {
+        CAPTURE(name);
+        CHECK(CoopObjects::TurnsAsEnemy(name));
+        CHECK_FALSE(CoopObjects::IsBossOrPart(name));
+    }
+    for (const char* name : {"Enemy_Keese", "Enemy_Tektite", "Enemy_Poe_Amy", "Enemy_Dodongo", "Enemy_Ganondorf",
+                             "Enemy_Wolfos_White", "Enemy_Anubis", ""}) {
+        CAPTURE(name);
+        CHECK_FALSE(CoopObjects::TurnsAsEnemy(name));
+    }
+}
+
 TEST_CASE("objects: one-on-one fighters stay plain enemies (no boss group), Anubis keeps its target (enemy survey)") {
     // Their AI chases only its owner's Link: the boss bit (server boss rules, turns at 40 m) would pass them between
-    // players, the mob shuttle the owner settled off (enemy_turns off, review-geno-0119-4). Not a boss group.
+    // players, the mob shuttle of review-geno-0119-4 (plain turns are limited to TurnsAsEnemy kinds). Not a boss group.
     using CoopObjects::GroupInput;
     const auto id = [](std::uint64_t v) { return proto::ObjectId{proto::ObjectKind::placed, 0, v}; };
     for (const char* name : {"Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_Silver", "Enemy_Poe_Amy", "Enemy_Poe_Beth",

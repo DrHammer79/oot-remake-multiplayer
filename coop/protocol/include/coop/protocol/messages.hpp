@@ -1020,6 +1020,7 @@ inline constexpr std::uint8_t unready = 1u << 3;
 // Boss turns (boss-turns-older-0119): this game reads its bosses' attacks (object_state::attack_read in its
 // samples when it owns one) and takes turns. An older build never sets it: the server gives it no turn, as a
 // boss it owned would never send an attack end and keep its one owner for the rest of the fight.
+// A game also sets it on the plain enemy kinds it lists for turns (ai-turns, CoopObjects::TurnsAsEnemy): no layout change.
 inline constexpr std::uint8_t takes_turns = 1u << 4;
 // Row 212 (gerudo-212): this game's own level logic made this encounter (not a copy of another game's) and answers
 // its death with its own defeat event: Gerudo Fortress's cell guards (GerudoFortress_Common_Level_CarpenterSet_0N:
