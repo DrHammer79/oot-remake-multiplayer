@@ -477,7 +477,8 @@ public:
     bool OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool own);
     // Row 222 part 2: `plug_name`, the request's plug read as a name (VariantName; the wrap reads it for every
     // request with a plug): an owner's action keeps it as its variation (component 24), "" for a plain ask.
-    // Row 222 (tw-222): a copy's own ask of the move the owner's last put-in named (same slot and verb) runs in the
+    // Row 222 (tw-222): a copy's own repeat (changed 0) of the move the owner's last put-in named (same slot and verb;
+    // its own starts, changed 1, stay skipped: only the owner's start a move, else two shots) runs in the
     // game: the move goes on frame by frame from its own AI (its own places and kind: it aims at its own Link), as
     // the owner's does, so it reaches its shot. The owner's sparse put-ins alone left the copy's move without its
     // per-frame asks: Twinrova's copy went PreAttack -> Attack_R with no Fire/IceBullet while the other game owned

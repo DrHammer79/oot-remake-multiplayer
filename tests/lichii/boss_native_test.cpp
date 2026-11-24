@@ -3247,6 +3247,11 @@ TEST_CASE("native boss: row 222 (tw-222), a copy's own asks of the owner's move 
     CHECK_FALSE(t.OnActionVerb(kBsa, PlugRequest(121, kShotNode, ice), false, false, std::string("Ice"), &renamed));
     CHECK_FALSE(renamed);
     CHECK(t.Totals().copy_own_move == 2);
+    // Its own AI starting the move again (changed 1) is skipped: the owner's next start would fire a second shot.
+    renamed.reset();
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{}, &renamed));
+    CHECK_FALSE(renamed);
+    CHECK(t.Totals().copy_own_move == 2);
     // The owner's repeat of the move is left out; another own move is still skipped.
     BossAction again = a;
     again.changed = false;

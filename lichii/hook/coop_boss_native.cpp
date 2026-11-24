@@ -753,8 +753,10 @@ bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed
     }
     const std::int32_t ask_slot = Get<std::int32_t>(request, addr::kReqSlot);
     const std::int32_t ask_verb = Get<std::int32_t>(request, addr::kReqVerb);
-    if (node != 0 && e->put_action && e->put_action->slot == ask_slot && e->put_action->verb == ask_verb) {
-        // Row 222: its own AI asks the owner's move: the game runs it (see the header), with the owner's variation.
+    if (!changed && node != 0 && e->put_action && e->put_action->slot == ask_slot && e->put_action->verb == ask_verb) {
+        // Row 222: its own AI asks the owner's move on: the game runs it (see the header), with the owner's variation.
+        // A start of its own (changed 1: the AI asks the move again after it ended) is skipped: only the owner's
+        // starts go in, or the owner's next start would fire a second shot.
         bool runs = !e->put_variant || *e->put_variant == OwnAskVariant(request, plug_name);
         if (!runs && renamed != nullptr) {
             Request r = request;
