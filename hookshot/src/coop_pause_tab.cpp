@@ -1475,8 +1475,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             }
             if (!v.room.empty()) around(1, "Copy room: ", v.room);
             else rows[1] = v.s.code ? "Copy invite code" : "Room: coming...";
-            rows[2] = "Copy same-network line";
-            rows[3] = "Copy VPN line";
+            rows[2] = "Copy network address";
+            rows[3] = "Copy VPN address";
             break;
         }
         if (v.s.failed && !v.s.in_one) {
@@ -1526,8 +1526,8 @@ const char* RowHelp(RowAction a) {
     case RowAction::kJoinPaste: return "Joins with the code you copied. You play on the host's save; yours are not touched.";
     case RowAction::kRejoin: return "Joins the last game you played in again.";
     case RowAction::kViewSession: return "Your game now: what co-op is doing, the lines to give your friends, and why it stopped.";
-    case RowAction::kCopyLan: return "Copies the line friends on your network use to join you.";
-    case RowAction::kCopyVpn: return "Copies the line friends on your VPN use to join you.";
+    case RowAction::kCopyLan: return "Copies your address on this network. Friends paste it in Join a game's Room row.";
+    case RowAction::kCopyVpn: return "Copies your address on your VPN. Friends paste it in Join a game's Room row.";
     case RowAction::kResync: return "Loads the host's save again, so your game matches theirs.";
     case RowAction::kViewPlayer: return "This player: go to them, or mute their voice or chat for you.";
     case RowAction::kMorePlayers: return "The next page of players.";

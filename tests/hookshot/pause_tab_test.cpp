@@ -847,7 +847,7 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     hv.s = host;
     hv.players = 3;
     CHECK(RowTexts(View::kSession, hv) == std::vector<std::string>{"Hosting: 3 players", "Room: coming...",
-                                                                    "Copy same-network line", "Copy VPN line", "Back"});
+                                                                    "Copy network address", "Copy VPN address", "Back"});
     hv.s.code = true;
     hv.room = "forest-gang";
     hv.note = "Copied the room name";   // (what the last copy did, on the row the player looks at)
