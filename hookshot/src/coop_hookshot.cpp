@@ -1580,7 +1580,7 @@ bool Start(const HosCoopApi* api) {
     // Original game (coop_original.h): the module stays off, all of it, and Longshot's F1 menu gets one tab with the
     // switch alone, so the player can turn it back.
     if (const auto options = CoopTitle::KitOptionsFile();
-        options && CoopOriginal::OnIn(CoopFiles::ReadText(*options))) {
+        options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions())) {
         g_original.Open(*options, CoopRuntime::GameDir() / "mods");
         g_original_on = true;
         LOG_INFO(Core, "coop: original game ({}): the module stays off; F1's \"Original game\" tab turns it back",

@@ -737,13 +737,14 @@ void MicRows() {
 void Save() {
     // (the coop-options.ini the game reads at its start: the kit's, or the one beside longshot.exe in a game with no kit
     // of its own, Nucleus Co-op's instances: before, those saved nothing but coop.ini, a tester's "not saving")
-    const auto kit = CoopTitle::KitOptionsFile();
+    // (with this game's coop-player.ini, local co-op and Nucleus: its controller and look there, the rest in the kit's)
+    const bool kit = CoopTitle::KitOptionsFile() || CoopTitle::PlayerOptionsFile();
     std::string coop = ReadText(CoopIni());
-    std::string options = kit ? ReadText(*kit) : std::string();
+    std::string options = kit ? CoopTitle::ReadKitOptions() : std::string();
     g_menu.options().Write(coop, options);
     bool ok = WriteText(CoopIni(), coop);
     if (kit) {
-        ok = WriteText(*kit, options) && ok;
+        ok = CoopTitle::WriteKitOptions(options) && ok;
     }
     const bool live = g_coop_on || g_doing == "hosting" || g_doing == "joined";
     if (!live) {
@@ -798,16 +799,16 @@ void CycleInput(bool controller) {
     const bool usual = controller ? s.pad == CoopInput::kAuto : s.keyboard == CoopInput::Keyboard::Focus;
     InputRows();
     LOG_INFO(Core, "coop: multiplayer tab: {} = {}", key, value);
-    const auto kit = FindKit();
-    if (!kit) {
+    // (the file the game reads at its start, as Save: the kit's, or this game's coop-player.ini where several games of
+    // this PC share the kit, so player 2's controller is not player 1's)
+    if (!CoopTitle::KitOptionsFile() && !CoopTitle::PlayerOptionsFile()) {
         g_menu.SetNote({"No co-op kit found with this game: the choice counts until the game closes."});
         return;
     }
-    const auto file = *kit / "coop-options.ini";
-    const std::string before = ReadText(file);
+    const std::string before = CoopTitle::ReadKitOptions();
     const std::string after =
         usual ? CoopTitleMenu::IniUnset(before, key) : CoopTitleMenu::IniSet(before, key, value, false);
-    if (!WriteText(file, after)) {
+    if (!CoopTitle::WriteKitOptions(after)) {
         g_menu.SetNote({"A settings file could not be written: the choice counts until the game closes."});
     }
 }
@@ -1140,9 +1141,47 @@ void LanJoinStep(std::uint64_t now) {
     }
 }
 
+// Local co-op (the kit's Start Squadala with 2 to 4 players on this PC, scripts\local-coop.ps1): game 1 hosts the
+// session itself at its start, on the port and with the password the launcher gave in OOT_COOP_LOCAL_HOST
+// (CoopHostMenu::kLocalHostEnv), as the Multiplayer page's Host does: a private game, no relay, router port or
+// invite, the listener on 127.0.0.1 only (Menu::RunHost). The other games of this PC join it from their coop.ini. The
+// host is this game: when it closes, the others get the usual "the host left". Nothing is pressed on the title (the
+// players load their saves themselves). g_mutex.
+std::optional<std::pair<std::uint16_t, std::string>> g_local_host;
+
+void LocalHostStep() {
+    if (!g_local_host) return;
+    const auto [port, password] = *g_local_host;
+    g_local_host.reset();
+    if (Busy()) {
+        LOG_INFO(Core, "coop: multiplayer tab: local co-op: co-op is on already in this game: not hosting");
+        return;
+    }
+    g_menu.Show(ReadOptions());   // (the files' settings, the player's name above all, as LanJoinStep)
+    CoopTitleMenu::Options o = g_menu.options();
+    o.host_port = port;
+    o.password = password;
+    o.public_game = false;
+    o.approve_joins = false;
+    o.relay.clear();
+    o.relay_key.clear();
+    o.relay_room.clear();
+    o.list_room = false;
+    LOG_INFO(Core, "coop: multiplayer tab: local co-op: this game hosts the session of this PC's games (port {}, "
+                   "127.0.0.1 only)", port);
+    if (!Host(o, true)) LOG_WARNING(Core, "coop: multiplayer tab: local co-op: the host did not start");
+}
+
 void Init(bool coop_on) {
     std::lock_guard lock(g_mutex);
     g_coop_on = coop_on;
+    if (const char* local = std::getenv(CoopHostMenu::kLocalHostEnv); local != nullptr && *local != 0) {
+        g_local_host = coop_on ? std::nullopt : CoopHostMenu::ParseTestHost(local);
+        if (!g_local_host) {
+            LOG_WARNING(Core, "coop: multiplayer tab: local co-op: {} {}: not hosting", CoopHostMenu::kLocalHostEnv,
+                        coop_on ? "with a server in coop.ini" : "is not PORT:PASSWORD");
+        }
+    }
     if (!coop_on) {
         if (const auto want = CoopTitleMenu::IniGet(ReadText(CoopIni()), "join_lan"); want && !CoopTitleMenu::Trim(*want).empty()) {
             g_lan_join = std::string(CoopTitleMenu::Trim(*want));
@@ -1231,6 +1270,7 @@ void Tick() {
     g_next_follow_ms = now + 250;
     Follow(Status());
     RefreshFound(now);
+    LocalHostStep();
     LanJoinStep(now);
     // (a test's trigger, LICHII_COOP_TEST_TO_TITLE=1 only: a file "to-title.now" in the game's folder starts the way
     // back to the title a join with a file loaded takes, with no host to join)

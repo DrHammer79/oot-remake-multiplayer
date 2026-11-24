@@ -49,7 +49,7 @@ Game.KeepSymLinkOnExit = true;   // instance folders stay: the next start makes 
 // (the game makes it at its start), else every game writes the same longshot_log.txt and co-op logs.
 Game.DirExclusions = ["user", "nucleus-players", "logs"];
 // Written by Game.Play for each game.
-Game.FileSymlinkExclusions = ["coop.ini", "coop-options.ini", "coop-kit.txt", "player-key.txt", "longshot_log.txt",
+Game.FileSymlinkExclusions = ["coop.ini", "coop-options.ini", "coop-player.ini", "coop-kit.txt", "player-key.txt", "longshot_log.txt",
     "longshot_log.1.txt", "hookshot_log.txt", "longshot_load_start.txt", "longshot_damaged_files.txt"];
 // Small files a game writes in place: a copy each. (The big caches stay links: the game saves one through a .tmp
 // moved over it, which puts the game's own file in its instance folder and leaves the original as it is.)
@@ -438,6 +438,13 @@ function coopOwnWritten(text) {
     return coopTrim(t.substring(COOP_WRITTEN.length).replace(/^\r?\n/, ""));
 }
 
+// coop-player.ini (a game's own lines over the kit's coop-options.ini; the module's CoopTitleMenu::PlayerKey).
+var COOP_PLAYER_HEAD = "# This player's own co-op settings (controller, keyboard, look) on a PC where several games share one kit.\r\n" +
+    "# Everything else is in the kit's coop-options.ini. Written by the game.\r\n";
+function coopPlayerKey(k) {   // (k lower case, as coopKeepKeys passes it)
+    return k === "lichii_coop_pad" || k === "lichii_coop_keyboard" || k === "color" || k.indexOf("look_") === 0;
+}
+
 // `text` with key=value set (the line replaced, else added).
 function coopSetKey(text, key, value) {
     var t = coopDropKeys(text, [key]);
@@ -687,12 +694,41 @@ Game.Play = function () {
                     "password = " + coopSession.password + "\r\n") +
               (ownLook !== "" ? ownLook + "\r\n" : ""));
 
-    // coop-options.ini: this game's own from last time (the settings and look the game saved there), else the kit's
-    // (else the game's) switches; with this game's controller and keyboard. The game reads it beside longshot.exe, as no
-    // kit is above the instance folder (CoopTitle::ApplyKitOptions). Removed, the next start takes the kit's again.
-    var ownOptions = coopOwnWritten(coopRead(coopPath(inst, "coop-options.ini")));
-    var options = ownOptions !== "" ? coopDropKeys(ownOptions, ["LICHII_COOP_PAD", "LICHII_COOP_KEYBOARD"])
-        : coopDropKeys(kitOptions, ["LICHII_COOP_PAD", "LICHII_COOP_KEYBOARD"].concat(player === 1 ? [] : ["color"]));
+    // The settings. With a kit: the kit's own coop-options.ini, read by every game (coop-kit.txt names the kit), and this
+    // game's coop-player.ini with only the player's own lines (the controller, the keyboard, the look: the module's
+    // CoopTitleMenu::PlayerKey; it reads the kit's file with these over it and saves each line back where it belongs). So
+    // a setting changed in the kit, or a new one a newer kit brings, reaches every split-screen game. Before (0.11.8 to
+    // 0.11.12) each instance had a full copy of its own that went stale: its player lines are taken over once, then the
+    // copy goes. No kit: the game's switches copied beside longshot.exe, as before.
+    var oldCopy = coopPath(inst, "coop-options.ini"), playerFile = coopPath(inst, "coop-player.ini");
+    var options;
+    if (kit !== "") {
+        var own = coopRead(playerFile);
+        if (own === "") {
+            var was = coopOwnWritten(coopRead(oldCopy));
+            own = COOP_PLAYER_HEAD + coopKeepKeys(was !== "" ? was : (player === 1 ? kitOptions : ""), coopPlayerKey);
+        }
+        if (System.IO.File.Exists(oldCopy) && coopOwnWritten(coopRead(oldCopy)) !== "") {
+            System.IO.File.Delete(oldCopy);   // (the handler's own old copy only)
+        }
+        options = own;
+        coopWrite(coopPath(inst, "coop-kit.txt"), kit + "\r\n");
+    } else {
+        var ownOptions = coopOwnWritten(coopRead(oldCopy));
+        options = ownOptions !== "" ? ownOptions : coopDropKeys(kitOptions, player === 1 ? [] : ["color"]);
+        if (System.IO.File.Exists(playerFile)) {
+            // (a kit start made it; with no kit the game reads the copy beside it alone, so its look goes in there)
+            var lines = coopKeepKeys(coopRead(playerFile), coopPlayerKey).split(/\r?\n/);
+            for (var li = 0; li < lines.length; li++) {
+                var eq = lines[li].indexOf("=");
+                if (eq > 0 && coopGetKey(options, coopTrim(lines[li].substring(0, eq))) === "") {
+                    options = coopTrim(options) + "\r\n" + lines[li];
+                }
+            }
+            System.IO.File.Delete(playerFile);
+        }
+    }
+    options = coopTrim(coopDropKeys(options, ["LICHII_COOP_PAD", "LICHII_COOP_KEYBOARD"]));
     if (Context.IsKeyboardPlayer) {
         options = coopSetKey(options, "LICHII_COOP_PAD", "none");
         options = coopSetKey(options, "LICHII_COOP_KEYBOARD", "focus");
@@ -703,16 +739,24 @@ Game.Play = function () {
         options = coopSetKey(options, "LICHII_COOP_PAD", String(pad));
         options = coopSetKey(options, "LICHII_COOP_KEYBOARD", "off");
     }
-    coopWrite(coopPath(inst, "coop-options.ini"), COOP_WRITTEN + "\r\n" + options + "\r\n");
+    if (kit !== "") {
+        coopWrite(playerFile, options + "\r\n");
+    } else {
+        coopWrite(oldCopy, COOP_WRITTEN + "\r\n" + options + "\r\n");
+    }
 
     // Longshot's own options: in a window (Nucleus places it), no Discord status from every copy. A controller
     // player's camera is its pad's: Mouse camera "As the stick" (0), not Native (1), whose last mouse angles would be
     // put back over the right stick each frame (patch 0015 keeps a game with no mouse out of it as well). A keyboard
-    // player keeps its own choice.
+    // player keeps its own choice. The frame cap: every split-screen game at the same steady one (coop-options.ini
+    // local_fps = 30, the default, or 60), as the kit's own local co-op (scripts\local-coop.ps1): two to four games want
+    // more than one PC gives, and Windows hands the window in front the bigger share, so the others got uneven leftovers
+    // and looked choppy (row 83 / #245). Longshot's own cap row, frame_rate_cap: -1 its 30 FPS cap, 0 the console's 60.
     var lsOptions = coopPath(inst, "longshot_options.ini");
     if (System.IO.File.Exists(lsOptions)) {
         var o = coopSetKey(coopRead(lsOptions), "fullscreen", "0");
         o = coopSetKey(o, "discord_status", "0");
+        o = coopSetKey(o, "frame_rate_cap", coopGetKey(kitOptions, "local_fps") === "60" ? "0" : "-1");
         if (!Context.IsKeyboardPlayer) {
             o = coopSetKey(o, "mouse_camera", "0");
         }

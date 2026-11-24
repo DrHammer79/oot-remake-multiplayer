@@ -351,6 +351,10 @@ void Menu::RunHost(HostJob job) {
             // The autotest's in-game host (ParseTestHost): its listener on 127.0.0.1 only, as every test listener.
             config.bind = 0x7F000001u;
             Say("coop: host: test host (LICHII_COOP_TEST_HOST): listening on 127.0.0.1 only");
+        } else if (const char* local = std::getenv(kLocalHostEnv); local != nullptr && ParseTestHost(local)) {
+            // Local co-op's game 1 (kLocalHostEnv): the games of this PC only.
+            config.bind = 0x7F000001u;
+            Say("coop: host: local co-op (OOT_COOP_LOCAL_HOST): listening on 127.0.0.1 only, for this PC's games");
         }
         coop::server::HostService host(config);
         std::string why;

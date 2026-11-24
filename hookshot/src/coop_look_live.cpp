@@ -760,7 +760,7 @@ void StartModule() {
     // read from a kit's coop-options.ini only, a game with its coop-options.ini beside longshot.exe (the owner's
     // test pair, Nucleus instances) saved the look there and started without it: the chosen colours never came back.
     std::vector<std::string> part_errors;
-    Look worn = ReadParts(CoopFiles::ReadText(CoopTitle::LookFile()), &part_errors);
+    Look worn = ReadParts(CoopTitle::LookText(), &part_errors);
     worn[Part::tunic] = CoopHook::LoadSettings(ini, errors).color;
 
     g_textures = std::make_unique<GameTextures>();

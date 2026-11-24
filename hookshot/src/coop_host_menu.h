@@ -145,6 +145,10 @@ std::string ProcessMemoryText();
 // only: such a host listens on 127.0.0.1 alone (Menu::RunHost) and opens no router port or invite.
 inline constexpr const char* kTestHostEnv = "LICHII_COOP_TEST_HOST";
 std::optional<std::pair<std::uint16_t, std::string>> ParseTestHost(std::string_view text);
+// Local co-op's host (the kit's scripts\local-coop.ps1, CoopPause's LocalHostStep): game 1 of 2 to 4 games on one PC
+// hosts at its start, OOT_COOP_LOCAL_HOST=PORT:PASSWORD (as ParseTestHost reads it). Its listener is on 127.0.0.1 only,
+// as the test host's: the session is this PC's.
+inline constexpr const char* kLocalHostEnv = "OOT_COOP_LOCAL_HOST";
 inline constexpr std::uint64_t kMemoryLineMs = 30'000;
 
 } // namespace CoopHostMenu
