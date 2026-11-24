@@ -261,21 +261,26 @@ HELPER_TOOLS = [
      "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"],
                      "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
-    {"name": "talk", "description": "Talk to whoever the A prompt names (or, with `id` and `name` from get_world, walk to "
-     "that actor and face it first): press A, read each text box the game shows, press A to the end, and when reply "
-     "choices show pick the one whose text is `reply` (Down to it, then A; with no `reply` the cursor's own). With no "
-     "prompt nothing is pressed and it says so. Returns `boxes` [{speaker, text}], `choices`, `picked`, `done` (the "
-     "talk ended) or `result` saying why it stopped (reply not offered, too many boxes, timed out, no text: an exe "
-     "without the text wrap presses A once). At most `max_boxes` boxes (20) and 1200 frames. Which panes hold the "
-     "choices and where the cursor starts are not yet confirmed in a game. With an `id`, the walk is go_to_actor's (it "
-     "stops with `gone` for another actor of that name). It acts on this game only: step the other game yourself.",
+    {"name": "talk", "description": "Talk to whoever the A prompt names (or, with `id` and `name` from get_world, when no "
+     "prompt shows yet, walk to that actor and face it first): press A, read the speakers and the reply buttons the "
+     "game shows, press A to go on, and when buttons show pick the next of `reply` (a text, or a list: one per set of "
+     "buttons, in order; Down to it, then A). With no reply left it stops and lists the buttons, the talk left open: "
+     "call again with `reply` and `since` (from that answer) to go on, no new A. With no prompt nothing is pressed. "
+     "Returns `speakers`, `boxes` [{speaker, text}], `choices`, `picked`, `since`, `done` (the talk ended) or `result` "
+     "saying why it stopped. The box body does not come through the text wrap yet (read in a lane run): `boxes` is "
+     "empty; take a screenshot to read it. A shop's item list is not buttons: move to the item yourself (press), then "
+     "talk with since. At most `max_boxes` boxes (20) and 1200 frames. It acts on this game only.",
      "inputSchema": {"type": "object",
-                     "properties": dict(ACTOR_ARGS, reply={"type": "string", "maxLength": 200},
+                     "properties": dict(ACTOR_ARGS,
+                                        reply={"anyOf": [{"type": "string", "maxLength": 200},
+                                                         {"type": "array", "maxItems": 8,
+                                                          "items": {"type": "string", "maxLength": 200}}]},
+                                        since={"type": "integer", "minimum": 0},
                                         max_boxes={"type": "integer", "minimum": 1, "maximum": 60})}},
     {"name": "get_text", "description": "The texts the game set in its text panes since `since` (the `last` of an "
      "earlier get_text; 0: the last 256 kept), oldest first: {hooked, last, lost, texts: [{seq, frame, layout, pane, "
-     "text, length, cut, markup}]}. `layout` keeps one layout (MessageInGame_00 is the message window: "
-     "T_MessageWhiteOut_00 the box, T_Name_00 the speaker). Bytes that are not plain text (the game's markup) show as "
+     "text, length, cut, markup}]}. `layout` keeps one layout (a talk is MessageDialog_00: T_Name_00 the "
+     "speaker; its reply buttons PaMessageBtn_00, one T_Btn_00 set per button). Bytes that are not plain text (the game's markup) show as "
      "JSON \\u escapes and set `markup`. Read only; no frame runs.",
      "inputSchema": {"type": "object",
                      "properties": {"since": {"type": "integer", "minimum": 0},
@@ -722,11 +727,16 @@ class Game:
             return ph.use_item(c, _word(args, "item"), _button(args))
         if name == "talk":
             reply = args.get("reply")
-            if reply is not None and (not isinstance(reply, str) or not reply.strip() or len(reply) > 200):
-                raise ValueError("reply: the text of the choice to pick (1 to 200 characters)")
+            many = reply if isinstance(reply, list) else [reply]
+            if reply is not None and (not 1 <= len(many) <= 8 or any(
+                    not isinstance(r, str) or not r.strip() or len(r) > 200 for r in many)):
+                raise ValueError("reply: the text of the choice to pick (1 to 200 characters), or a list of 1 to 8")
+            since = args.get("since")
+            if since is not None and (isinstance(since, bool) or not isinstance(since, int) or since < 0):
+                raise ValueError("since: the `since` of an earlier talk (a whole number, 0 or more)")
             ident = _ident(args)
             return ph.talk(c, ident, _word(args, "name") if ident is not None else None, reply,
-                           int(_bounded(args, "max_boxes", ph.TALK_BOXES, 1, 60)))
+                           int(_bounded(args, "max_boxes", ph.TALK_BOXES, 1, 60)), since=since)
         if name == "get_text":
             since = args.get("since", 0)
             if isinstance(since, bool) or not isinstance(since, int) or since < 0:

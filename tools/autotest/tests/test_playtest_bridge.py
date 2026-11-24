@@ -1320,6 +1320,21 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
         self.assertLess(r["frames"], ph.MAX_FRAMES)
 
+    def test_one_missed_read_is_not_gone(self):
+        n, hidden = [], {}
+
+        def blink():
+            n.append(1)
+            acts = self.game.world["actors"]
+            if len(n) == 2:                                     # one read without the actor
+                hidden.update(a=self.actor(3))
+                acts.remove(hidden["a"])
+            elif hidden.get("a") is not None:
+                acts.append(hidden.pop("a"))
+        self.game.dump_hook = blink
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
+        self.assertTrue(r["arrived"], r)
+
     def test_go_to_actor_says_stuck_with_how_far_it_got(self):
         self.game.wall_x = 1.0
         r = ph.go_to_actor(self.c, 3, stuck_after=40)
