@@ -594,10 +594,25 @@ bool IsSizeTablePath(std::string_view rel) {
 }
 }  // namespace
 
+bool IsCharacterSelectFolder(std::string_view name) {
+    std::string lower(name);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower.find("character select") != std::string::npos;
+}
+
+bool IsLookFile(std::string_view key) {
+    for (const std::string_view dir : {"tex/", "model/", "phive/", "sound/"}) {
+        if (key.substr(0, dir.size()) == dir) return true;
+    }
+    return false;
+}
+
 std::optional<fs::path> ShareStandIn(const fs::path& folder_in, const fs::path& file, const std::string& key) {
     if (IsSizeTablePath(key) && key.find(".rsizetable") != std::string::npos) return std::nullopt;
     fs::path folder = folder_in;
     if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
+    if (IsCharacterSelectFolder(CoopMods::ToUtf8(folder.filename())) && IsLookFile(key)) return std::nullopt;
     const fs::path rel_path = file.lexically_relative(folder / "romfs");
     if (rel_path.empty() || rel_path.begin()->string() == "..") return file;  // (not under its romfs)
     if (fs::path kept = KitKeptCopy(folder, file, rel_path, key); !kept.empty()) return kept;

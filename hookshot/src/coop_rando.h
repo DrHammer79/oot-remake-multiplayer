@@ -161,9 +161,18 @@ std::string SeedFilesHash(const std::filesystem::path& folder, const std::functi
 // (CoopMods::StandIn, row 274: one seed on one kit hashed alike on every PC): nothing for its size tables
 // (romfs/System/Resource/<f>: file sizes, into which the kit, OOTRR and the button prompts merge the other mods' entries
 // on each PC, e.g. Character Select's own looks), the mod's own kept copy of a file the kit's start merged other mods'
-// rows, saved values or archive members into (as SeedFilesHash), else the file itself. Any mod's folder.
+// rows, saved values or archive members into (as SeedFilesHash), else the file itself. Any mod's folder. For Character
+// Select (IsCharacterSelectFolder) also nothing for its look files (IsLookFile): each player's own choice (its NPC
+// part is an opt-in download, its looks are per player), never the world; its UI, menus (Sequence), saved values
+// (GameData), actor tables (RSDB), text (Mals), SLink2 and actor packs (Pack) still count.
 std::optional<std::filesystem::path> ShareStandIn(const std::filesystem::path& folder,
                                                   const std::filesystem::path& file, const std::string& key);
+// Character Select's folder: a mod whose name has "character select" in any case (the kit installs it as "OoT Character
+// Select"; the same rule as coop_pause_tab.h SnailCodeBuiltIn).
+bool IsCharacterSelectFolder(std::string_view name);
+// A look file by its romfs path (lower case, '/'): textures (Tex/), models and skeletons (Model/), cloth (Phive/),
+// sounds and voices (Sound/).
+bool IsLookFile(std::string_view key);
 // The chat lines about the host's hand-put seed: this game's (a guest) and the one the host gets (TellLine's limit).
 enum class HandMatch { same, missing, different };
 std::string HandLine(HandMatch match, std::string_view folder, bool restart);

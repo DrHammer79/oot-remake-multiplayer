@@ -2321,3 +2321,61 @@ TEST_CASE("rando: a seed's co-op hash leaves out its size table and reads the ki
                              "system/resource/resourcesizetable.product.111.nin_ounce_nvn2.rsizetable.zs"));
     CHECK(ShareStandIn(base / "f" / "OoT Character Select" / "", f / "Event" / "x", "event/x") == f / "Event" / "x");
 }
+
+// A #98 (row 274's related case): Character Select's look files are each player's own (its NPC part is an opt-in
+// download; its looks differ per PC), so two players with it are not told 'your files differ'; what changes the game
+// (its menus, saved values, actor tables, text, packs) still counts. Other mods' look files still count.
+TEST_CASE("rando: Character Select's look files are left out of the co-op hash, its game files count (row 274)") {
+    CHECK(IsCharacterSelectFolder("OoT Character Select"));
+    CHECK(IsCharacterSelectFolder("my CHARACTER SELECT v2"));
+    CHECK_FALSE(IsCharacterSelectFolder("randomizer-utnqymaageg5"));
+    CHECK_FALSE(IsCharacterSelectFolder("CharacterSelect"));
+    CHECK(IsLookFile("tex/angin_tile_a_dark_ac3.bntx.zs"));
+    CHECK(IsLookFile("model/player_child.player_child.bfres.zs"));
+    CHECK(IsLookFile("phive/cloth/player_adult_cac.nin_ounce_nvn2.bphcl"));
+    CHECK(IsLookFile("sound/resource/playervoice_adult_x.bars.zs"));
+    CHECK_FALSE(IsLookFile("ui/layoutarchivecategory.product.100.byml.zs"));
+    CHECK_FALSE(IsLookFile("pack/actor/player_child.pack.zs"));
+    CHECK_FALSE(IsLookFile("texture/x"));  // (only the folders themselves)
+
+    const fs::path base = ModTestDir("coop-rando-share-charsel");
+    const auto pc = [&](const std::string& name, const std::string& folder, const std::string& look,
+                        const std::string& menu, bool npc_part) {
+        const fs::path mod = base / name / folder;
+        Put(mod / "romfs" / "Tex" / "Mt_Boots_Player_Adult_Ac6.bntx.zs", look);
+        Put(mod / "romfs" / "Model" / "Player_Child.Player_Child.bfres.zs", "model " + look);
+        Put(mod / "romfs" / "Sequence" / "CharacterMenu.module.ainb", menu);
+        Put(mod / "romfs" / "GameData" / "GameDataList.Product.110.byml.zs", "saved values");
+        Put(mod / "romfs" / "Pack" / "Actor" / "Player_Child.pack.zs", "pack");
+        if (npc_part) {
+            Put(mod / "romfs" / "Tex" / "Npc_A.bntx.zs", "npc");
+            Put(mod / "romfs" / "Sound" / "Resource" / "PlayerVoice_Adult_X.bars.zs", "voice");
+            Put(mod / "romfs" / "Phive" / "Cloth" / "Player_Adult_CAC.Nin_Ounce_NVN2.bphcl", "cloth");
+        }
+        return base / name;
+    };
+    const auto hash = [](const fs::path& mods, const std::string& folder) {
+        const std::vector<CoopMods::Mod> found = CoopMods::Scan(mods);
+        const auto m = std::find_if(found.begin(), found.end(), [&](const CoopMods::Mod& x) { return x.name == folder; });
+        REQUIRE(m != found.end());
+        const CoopMods::StandIn pick = [&](const fs::path& file, const std::string& key) {
+            return ShareStandIn(m->folder, file, key);
+        };
+        return CoopMods::HashMod(*m, nullptr, &pick).value().game_files;
+    };
+    const std::string cs = "OoT Character Select";
+    const auto a = hash(pc("a", cs, "player A's boots", "menu", false), cs);
+    CHECK(a == hash(pc("b", cs, "player B's boots", "menu", true), cs));  // other looks, NPC part opted in
+    CHECK(a != hash(pc("c", cs, "player A's boots", "another menu", false), cs));  // the game's menu differs
+    // GameData merged by the kit: its kept copy stands for it (the same as a seed's).
+    const fs::path d = pc("d", cs, "boots", "menu", false);
+    const fs::path d_mod = d / cs;
+    const fs::path gd = fs::path("GameData") / "GameDataList.Product.110.byml.zs";
+    Put(d_mod / "_coop-gamedata" / gd.filename(), "saved values");
+    Put(d_mod / "romfs" / gd, "saved values + pack's");
+    PutKeptStamp(d_mod, fs::path("_coop-gamedata") / (gd.filename().string() + ".txt"), "coop-gamedata 1", gd);
+    CHECK(a == hash(d, cs));
+    // Another mod's textures are its content: they still count.
+    const std::string other = "Hylian Tunics";
+    CHECK(hash(pc("e", other, "red", "menu", false), other) != hash(pc("f", other, "blue", "menu", false), other));
+}
