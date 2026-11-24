@@ -633,6 +633,26 @@ def relaunch(a, alive=None, runner=None):
             "boot": "played" if code == 0 else "FAILED (see steps.txt): the game stays down"}
 
 
+def wait_log(session, x, pattern, mn=1, mx=None, timeout=60.0, clock=time.monotonic, sleep=time.sleep):
+    """Waits until game x's log (this run of it: game-out-X.txt) has at least `mn` lines matching `pattern`, at most
+    `timeout` s; `mx` (0: none) fails as soon as more match. {ok, count, lines (the last 5 matches)}."""
+    d = os.path.abspath(session)
+    s = open_session(d)
+    rx = re.compile(pattern)
+    end = clock() + float(timeout)
+    while True:
+        hits = [ln for ln in hookshot.read_text(s["games"][x]["log"]).splitlines() if rx.search(ln)]
+        if mx is not None and len(hits) > mx:
+            return {"ok": False, "count": len(hits), "lines": hits[-5:], "why": "more than %d match" % mx}
+        if len(hits) >= mn and (mx is None or clock() >= end or mn > 0):
+            return {"ok": True, "count": len(hits), "lines": hits[-5:]}
+        if clock() >= end:
+            return {"ok": False, "count": len(hits), "lines": hits[-5:],
+                    "why": "%d of %d after %g s" % (len(hits), mn, float(timeout))}
+        touch(d)
+        sleep(1.0)
+
+
 def lane_dlls(n, kit=None):
     """The hookshot_coop.dll path of each game of lane n (where lanes.py install puts it)."""
     L = lanes.lane(n, kit)

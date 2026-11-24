@@ -107,7 +107,8 @@ class Mcp(unittest.TestCase):
         self.assertEqual([m["id"] for m in out], [1, 2, 3, 4])  # the notification is not answered
         self.assertEqual(out[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["state", "act", "shot", "checkpoint", "desync_check"])
+                         ["state", "act", "shot", "checkpoint", "desync_check", "quit_game", "server", "relaunch",
+                          "wait_log", "sleep"])
         self.assertTrue(out[2]["result"]["isError"])
         self.assertEqual(out[3]["error"]["code"], -32601)
 
@@ -377,6 +378,48 @@ class LiveLifecycle(unittest.TestCase):
         write_session(self.d)
         with self.assertRaises(SystemExit):
             live.server_cmd(self.args(action="stop"))
+
+
+class LiveWaitLog(unittest.TestCase):
+    """wait_log and the lifecycle tools as session tools (scripts: tools/playtest/scripts/leave-solo-273.jsonl)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        write_session(self.d, runner=dict(RUNNER), planned={})
+        with open(os.path.join(self.d, "game-out-B.txt"), "w") as f:
+            f.write("coop: save: the host: this game uses its own saves\nother\ncoop: null read at 0x1\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def wait(self, pattern, mn=1, mx=None, timeout=5):
+        c = FakeClock(0.0)
+        return live.wait_log(self.d, "B", pattern, mn, mx, timeout, clock=c, sleep=c.sleep)
+
+    def test_found(self):
+        out = self.wait("the host: this game uses its own saves")
+        self.assertEqual((out["ok"], out["count"]), (True, 1))
+
+    def test_missing_times_out(self):
+        out = self.wait("now playing from the co-op save folder")
+        self.assertFalse(out["ok"])
+        self.assertIn("0 of 1", out["why"])
+
+    def test_none_allowed(self):
+        out = self.wait("unhandled exception|fault at|coop: null read", 0, 0, 0)
+        self.assertFalse(out["ok"])
+        self.assertEqual(self.wait("unhandled exception|fault at", 0, 0, 0)["ok"], True)
+
+    def test_a_failed_session_tool_stops_a_script(self):
+        with self.assertRaises(RuntimeError):
+            mcp_playtest.call(self.d, "wait_log", {"player": "B", "pattern": "never there", "timeout_s": 0})
+        self.assertEqual(mcp_playtest.call(self.d, "wait_log", {"player": "B", "pattern": "own saves",
+                                                                "timeout_s": 0})["count"], 1)
+
+    def test_the_tools_are_listed_for_scripts(self):
+        names = {t["name"] for t in mcp_playtest.TOOLS}
+        self.assertLessEqual({"quit_game", "server", "relaunch", "wait_log", "sleep"}, names)
 
 
 class HookshotOnly(unittest.TestCase):

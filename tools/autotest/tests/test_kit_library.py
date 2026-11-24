@@ -62,7 +62,15 @@ class TheRepositoryLibrary(unittest.TestCase):
             games = {p: FakeGame() for p in ("p1", "p2", "p3", "p4")}
             players = {p: mcp_playtest.Game(p, pc.Client(g.port), tempfile.gettempdir()) for p, g in games.items()}
 
-            def run(server, tool, args, players=players):
+            pair = mcp_playtest.Pair({"p1": players["p1"], "p2": players["p2"]})
+            session_calls = []
+
+            def run(server, tool, args, players=players, pair=pair, session_calls=session_calls):
+                if server == "oot-pair":
+                    return pair.answer(tool, args)
+                if server in ("live", "oot-playtest"):   # a live session's tools (games and server started and
+                    session_calls.append(tool)          # closed): their arguments are checked by check_all
+                    return {}
                 if server.startswith("oot-p"):
                     return players[server[4:]].call(tool, args)
                 self.fail("%s: a script call for %s is not run by this test" % (name, server))
