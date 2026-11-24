@@ -619,7 +619,7 @@ public:
 
     using Hit = CoopHitReplay::Hit;
 
-    // Test only (`aim X Y Z`, row 173): our next arrow is put on its way into `target` the first frame it flies.
+    // Test only (`aim X Y Z`, row 173): our next arrow is watched; the first frame it flies it may be nudged (AimStep).
     void ArmAim(const std::array<float, 3>& target, u64 until_ms) {
         std::lock_guard lock(mutex_);
         aim_ = Aim{};

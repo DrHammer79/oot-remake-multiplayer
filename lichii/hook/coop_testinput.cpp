@@ -1534,11 +1534,8 @@ void Do(Core::System& system, const Runner::Request& request, double now,
             LOG_INFO(Core, "coop: test face {:.2f} {:.2f}: failed", request.at[0], request.at[2]);
         }  // done: logged where it is turned
     } else if (request.kind == Kind::aim) {
-        // Row 173: Link turned to the target (as face), then our next arrow put on its way into it.
-        if (!CoopBoss::FaceLink(system, g_state.main, request.at[0], request.at[2])) {
-            LOG_INFO(Core, "coop: test aim {:.2f} {:.2f} {:.2f}: Link not turned", request.at[0], request.at[1],
-                     request.at[2]);
-        }
+        // Row 173: our next arrow is watched and, when its flight already points at the target, nudged the last bit.
+        // Link is not turned here: the tester aims with the sticks (kit_move.shoot).
         CoopObjects::QueueTestAim(request.at[0], request.at[1], request.at[2]);
     } else if (request.kind == Kind::kill) {
         CoopObjects::QueueTestKill(request.name, request.id);  // logged where it is done
