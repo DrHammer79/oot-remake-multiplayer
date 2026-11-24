@@ -758,8 +758,9 @@ TEST_CASE("dbno banner line: always fits the game's banner, the clock / share / 
     const std::string ascii16 = "Abcdefghijklmnop";                                    // 16 letters, 16 columns
     std::string wide16;                                                                 // 16 wide letters, 32 columns
     for (int i = 0; i < 16; ++i) wide16 += "\xE5\xAD\x97";                              // (U+5B57)
-    CHECK(CoopNativeUi::Columns(wide16) == 32);   // (16 wide letters: the zh case)
-    const std::size_t cols = CoopNativeUi::kBannerColumns;
+    CHECK(CoopNativeUi::Width(wide16) == 16 * CoopNativeUi::kWideWidth);   // (16 wide letters: the zh case)
+    CoopNativeUi::ResetFontWidths();
+    const std::size_t cols = CoopNativeUi::kBannerWidth;
     for (const char* lang : {"en", "zh-Hans"}) {
         CoopI18n::ForceLanguage(lang);
         for (const std::string& name : {std::string("Saria"), ascii16, wide16}) {
@@ -774,7 +775,7 @@ TEST_CASE("dbno banner line: always fits the game's banner, the clock / share / 
             for (const auto& v : views) {
                 const std::string line = CoopDbnoDraw::BannerLine(v, cols);
                 INFO(lang << " " << line);
-                CHECK(CoopNativeUi::Columns(line) <= cols);
+                CHECK(CoopNativeUi::Width(line) <= cols);
                 // One page on the banner as its step cuts it: the whole line, nothing lost.
                 const auto pages = CoopNativeUi::Wrap(CoopNativeUi::Clean(line, CoopNativeUi::kTextBytes), cols, 1);
                 REQUIRE_FALSE(pages.empty());
@@ -802,9 +803,9 @@ TEST_CASE("dbno banner line: always fits the game's banner, the clock / share / 
     const std::string far_line = CoopDbnoDraw::BannerLine(far, cols);
     CHECK(far_line.find("(out of sight)") == std::string::npos);
     CHECK(far_line.find(ascii16) != std::string::npos);
-    const std::string cut = CoopDbnoDraw::BannerLine(View{View::Kind::downed, wide16, 32'000'000, 0.6f, false}, 30);
+    const std::string cut = CoopDbnoDraw::BannerLine(View{View::Kind::downed, wide16, 32'000'000, 0.6f, false}, 1500);
     CHECK(cut.find("...") != std::string::npos);
-    CHECK(CoopNativeUi::Columns(cut) <= 30);
+    CHECK(CoopNativeUi::Width(cut) <= 1500);
 }
 
 TEST_CASE("dbno banner hold: downed and reviving always, spectating a few seconds after each change") {

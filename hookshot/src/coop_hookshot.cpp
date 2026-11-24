@@ -1121,7 +1121,8 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
         return false;
     }
     auto line = CoopNativeUi::TypingLine(CoopI18n::Tr("you"), box->first, box->second, CoopI18n::Tr("(not sent)"));
-    if (const auto c = colours.find("you"); c != colours.end()) line.colour = c->second;
+    if (const auto c = colours.find("you"); c != colours.end() && !box->second) line.colour = c->second;
+    // (a failed send keeps TypingLine's kFailedColour: the line plainly did not go)
     // Again on a change, and before its time runs out (kTypingSeconds); while the banner shows the game's own (or the
     // held line) the typed line waits for it, the keys still type. Nothing is drawn.
     const bool due = !g_native.typing || !g_native.banner.showing() || line.text != g_native.typed ||
@@ -1154,6 +1155,17 @@ void NativeStep(void* ctx) {
         }
         g_native.ring.SetBlock((*block + 15) & ~std::uint64_t{15});
         g_native.block = Native::Block::kHave;
+        // The game's own font (the HUD pack's font-medium.otf) measures every banner line (CoopNativeUi::Width);
+        // without the pack the widths are the safe guesses.
+        if (const auto dir = CoopHud::Folder()) {
+            std::ifstream f(*dir / "font-medium.otf", std::ios::binary);
+            const std::vector<std::uint8_t> font{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+            if (CoopNativeUi::SetFontWidths(font)) {
+                LOG_INFO(Core, "coop: native ui: banner lines measured with the game's font ({} bytes)", font.size());
+            } else {
+                LOG_WARNING(Core, "coop: native ui: font-medium.otf not read; banner lines measured by safe guesses");
+            }
+        }
         g_native_chat = true;
         LOG_INFO(Core, "coop: native ui: chat on the game's banner (SimpleInfo_00; texts at {:#x})", *block);
     }
@@ -1241,7 +1253,7 @@ CoopDraw::Scene DrawScene() {
                                                            std::chrono::steady_clock::now().time_since_epoch())
                                                            .count());
         if (s.dbno && hold.Want(*s.dbno, now_ms)) {
-            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerColumns));
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerWidth));
         } else if (CoopNativeUi::HeldBanner()) {
             CoopNativeUi::EndBanner();
         }
