@@ -1144,7 +1144,7 @@ void LanJoinStep(std::uint64_t now) {
 // Local co-op (the kit's Start Squadala with 2 to 4 players on this PC, scripts\local-coop.ps1): game 1 hosts the
 // session itself at its start, on the port and with the password the launcher gave in OOT_COOP_LOCAL_HOST
 // (CoopHostMenu::kLocalHostEnv), as the Multiplayer page's Host does: a private game, no relay, router port or
-// invite, the listener on 127.0.0.1 only (Menu::RunHost). The other games of this PC join it from their coop.ini. The
+// invite, the listener on 127.0.0.1 only (Menu::LoopbackNextHost: this host alone). The other games of this PC join it from their coop.ini. The
 // host is this game: when it closes, the others get the usual "the host left". Nothing is pressed on the title (the
 // players load their saves themselves). g_mutex.
 std::optional<std::pair<std::uint16_t, std::string>> g_local_host;
@@ -1169,6 +1169,7 @@ void LocalHostStep() {
     o.list_room = false;
     LOG_INFO(Core, "coop: multiplayer tab: local co-op: this game hosts the session of this PC's games (port {}, "
                    "127.0.0.1 only)", port);
+    CoopHookshot::HostMenu().LoopbackNextHost();   // (this host only: a later Host from the menu is a usual one)
     if (!Host(o, true)) LOG_WARNING(Core, "coop: multiplayer tab: local co-op: the host did not start");
 }
 

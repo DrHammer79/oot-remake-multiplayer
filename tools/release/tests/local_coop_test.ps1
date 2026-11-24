@@ -41,15 +41,28 @@ try {
 
     # --- How many players ---
     $env:OOT_COOP_LOCAL_PLAYERS = '3'
-    Check ((Read-KitLocalPlayers $kit 0) -eq 3) 'players: OOT_COOP_LOCAL_PLAYERS answers without asking'
+    Check ((Read-KitLocalPlayers $kit) -eq 3) 'players: OOT_COOP_LOCAL_PLAYERS answers without asking'
     $env:OOT_COOP_LOCAL_PLAYERS = '7'
-    $n = Read-KitLocalPlayers $kit 0
+    $n = Read-KitLocalPlayers $kit
     Check ($n -ge 1 -and $n -le 4) "players: a number past 4 is not taken ($n)"
     Remove-Item env:OOT_COOP_LOCAL_PLAYERS
+    Check ((Get-KitLocalPlayersLast $kit) -eq 1) 'players: 1 the first time'
     Write-File (Join-Path $kit 'hookshot\local-players.txt') "2`r`n"
-    if ([Console]::IsInputRedirected) {
-        Check ((Read-KitLocalPlayers $kit 0) -eq 2) 'players: no console to ask in: the last answer'
+    Check ((Get-KitLocalPlayersLast $kit) -eq 2) 'players: the last count is remembered'
+    Write-File (Join-Path $kit 'hookshot\local-players.txt') "9`r`n"
+    Check ((Get-KitLocalPlayersLast $kit) -eq 1) 'players: a damaged file is 1'
+    Write-File (Join-Path $kit 'hookshot\local-players.txt') "2`r`n"
+    if (-not (Test-KitLocalConsole)) {
+        Check ((Read-KitLocalPlayers $kit) -eq 1) 'players: an unattended start (no console) is 1 player, not the remembered 2'
     }
+    # Nothing waits: the choice is read from keys already pressed (a solo start is not slower).
+    $t = [Diagnostics.Stopwatch]::StartNew()
+    [void](Read-KitLocalPlayers $kit)
+    Check ($t.ElapsedMilliseconds -lt 1000) "players: no wait ($($t.ElapsedMilliseconds) ms)"
+    $lc = Read-File (Join-Path $scripts 'local-coop.ps1')
+    Check (-not ($lc -match 'function Read-KitLocalPlayers\([^)]*Seconds') -and $lc.Contains('[Console]::KeyAvailable')) 'players: keys already pressed only, no time to wait'
+    $st = Read-File (Join-Path $scripts 'start.ps1')
+    Check ($st.Contains('Show-KitLocalPlayersHint')) 'Start Squadala says the count at its start, so a digit can be pressed while it goes on'
 
     # --- The instance folder ---
     $inst = Join-Path $game 'local-players\player2'
@@ -76,6 +89,43 @@ try {
     Write-File (Join-Path $inst 'longshot_pipeline_states.bin') 'mine'
     [void](Sync-KitLocalInstance $game $inst)
     Check ((Read-File (Join-Path $inst 'longshot_pipeline_states.bin')) -eq 'mine' -and (Read-File (Join-Path $game 'longshot_pipeline_states.bin')) -eq 'cache') 'instance: its own copy stays, the game''s untouched'
+
+    # A junction that names another folder (the game moved, the kit copied): made again to this game's.
+    $elsewhere = Join-Path $root 'old-game\romfs'
+    Write-File (Join-Path $elsewhere 'a.txt') 'old place'
+    [System.IO.Directory]::Delete((Join-Path $inst 'romfs'), $false)
+    New-Item -ItemType Junction -Path (Join-Path $inst 'romfs') -Target $elsewhere | Out-Null
+    $said = @(Sync-KitLocalInstance $game $inst)
+    Check ((Read-File (Join-Path $inst 'romfs\a.txt')) -eq 'romfs' -and $said.Count -eq 0) "instance: a link to an old place is made again ($($said -join ' | '))"
+    Check ((Read-File (Join-Path $elsewhere 'a.txt')) -eq 'old place') 'instance: the old place is left as it was'
+    # A link whose folder is gone (the old game folder deleted): made again too.
+    [System.IO.Directory]::Delete((Join-Path $inst 'mods'), $false)
+    $gone = Join-Path $root 'gone-mods'
+    New-Item -ItemType Directory -Path $gone | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $inst 'mods') -Target $gone | Out-Null
+    [System.IO.Directory]::Delete($gone, $false)
+    $said = @(Sync-KitLocalInstance $game $inst)
+    Check ((Read-File (Join-Path $inst 'mods\m.txt')) -eq 'mod') "instance: a link to a folder that is gone is made again ($($said -join ' | '))"
+
+    # --- Copies of this game folder never take the local players (review: robocopy follows the junctions) ---
+    # hookshot-build.ps1's copy from another kit's game: its command as written, run on this game folder.
+    $hb = Read-File (Join-Path $scripts 'hookshot-build.ps1')
+    $line = @($hb -split "`r?`n" | Where-Object { $_ -match '^\s*& robocopy \$from \$Out /E /R:1' })
+    Check ($line.Count -eq 1 -and $line[0].Contains('/XD @xdPlayers') -and $line[0].Contains('coop-player.ini')) 'kit build copy: the local and Nucleus players'' folders left out'
+    Check ($hb -match "\`$xdPlayers = @\('local-players', 'nucleus-players'\)") 'kit build copy: both folders named'
+    Check ($hb -match "\`$xd = @\([^)]*'local-players', 'nucleus-players'\)") 'kit build copy from the game cache: both folders left out too'
+    $copy = Join-Path $root 'copied-game'
+    $from = $game; $Out = $copy
+    $xdPlayers = @('local-players', 'nucleus-players') | ForEach-Object { Join-Path $from $_ }
+    & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD @xdPlayers /XF coop.ini coop-options.ini coop-player.ini *.log *_log.txt | Out-Null
+    Check ($LASTEXITCODE -lt 8 -and (Test-Path (Join-Path $copy 'romfs\a.txt')) -and -not (Test-Path (Join-Path $copy 'local-players'))) "kit build copy: the game copied, local-players not (robocopy $LASTEXITCODE)"
+    # start.ps1's move of the whole kit: no folder link followed, the players' own files kept.
+    $st = Read-File (Join-Path $scripts 'start.ps1')
+    Check ($st -match '& robocopy \$kit \$to /E /XJD') 'kit move: robocopy /XJD (no folder link followed)'
+    $moved = Join-Path $root 'moved-kit'
+    & robocopy $kit $moved /E /XJD /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    $mi = Join-Path $moved 'hookshot\game\local-players\player2'
+    Check ($LASTEXITCODE -lt 8 -and (Test-Path (Join-Path $mi 'user')) -and -not (Test-Path (Join-Path $mi 'romfs')) -and (Test-Path (Join-Path $moved 'hookshot\game\romfs\a.txt'))) "kit move: the players' own folders, no copy of the linked game (robocopy $LASTEXITCODE)"
 
     # --- The player's files for the session ---
     Write-KitLocalPlayer $inst $kit 2 27561 'pw123' 30

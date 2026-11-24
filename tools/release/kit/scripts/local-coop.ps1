@@ -29,38 +29,45 @@ $script:KitLocalCopied = @('longshot_options.ini', 'language.txt', 'longshot_pip
 $script:KitLocalLinkedPattern = '^(?i)(.+\.(exe|dll|bin|idx|png)|exefs_patches\.txt|longshot_title\.txt|coop-built-from\.txt)$'
 $script:KitLocalKeys = @('LICHII_COOP_PAD', 'LICHII_COOP_KEYBOARD', 'LICHII_COOP_COLOR')
 
-# How many players on this PC: 1 (just you, as before) or 2 to 4 (local co-op). One key, $Seconds at most; Enter or no
-# key in time keeps the last answer (hookshot\local-players.txt; 1 the first time). OOT_COOP_LOCAL_PLAYERS answers it
-# (1-4) without asking, and a start with no console to ask in (input from a file or pipe) is 1 player.
-function Read-KitLocalPlayers([string]$Kit, [int]$Seconds = 8) {
+# How many players on this PC: 1 (just you, as before) or 2 to 4 (local co-op). Nothing waits for an answer, so a solo
+# start is not slower: Start Squadala says at its start which count it will use (Show-KitLocalPlayersHint: the last one,
+# hookshot\local-players.txt, 1 the first time) and a digit 1 to 4 pressed in its window while it checks, updates or
+# builds picks another (the last one pressed counts; it is kept for the next start). OOT_COOP_LOCAL_PLAYERS (1-4) sets it
+# outright. A start with no console (input from a file or a pipe: unattended) is always 1 player.
+function Get-KitLocalPlayersLast([string]$Kit) {
     $file = Join-Path $Kit 'hookshot\local-players.txt'
-    $last = 1
-    try { if (Test-Path -LiteralPath $file) { $n = [int]"$(Get-Content -LiteralPath $file -TotalCount 1)".Trim(); if ($n -ge 1 -and $n -le 4) { $last = $n } } } catch { }
+    try { if (Test-Path -LiteralPath $file) { $n = [int]"$(Get-Content -LiteralPath $file -TotalCount 1)".Trim(); if ($n -ge 1 -and $n -le 4) { return $n } } } catch { }
+    return 1
+}
+
+function Test-KitLocalConsole {
+    try { return -not [Console]::IsInputRedirected } catch { return $false }
+}
+
+function Show-KitLocalPlayersHint([string]$Kit) {
+    if ("$env:OOT_COOP_LOCAL_PLAYERS".Trim() -match '^[1-4]$' -or -not (Test-KitLocalConsole)) { return }
+    $last = Get-KitLocalPlayersLast $Kit
+    $now = if ($last -eq 1) { '1 (just you)' } else { "$last (local co-op: a game and a controller each)" }
+    Write-Host "Players on this PC: $now. Press 1, 2, 3 or 4 in this window while Squadala starts to change it." -ForegroundColor Cyan
+}
+
+function Read-KitLocalPlayers([string]$Kit) {
     $given = "$env:OOT_COOP_LOCAL_PLAYERS".Trim()
     if ($given -match '^[1-4]$') { return [int]$given }
+    if (-not (Test-KitLocalConsole)) { return 1 }
+    $last = Get-KitLocalPlayersLast $Kit
     $answer = $last
-    $interactive = $true
-    try { $interactive = -not [Console]::IsInputRedirected } catch { $interactive = $false }
-    if ($interactive) {
-        Write-Host ''
-        Write-Host "Players on this PC: 1 = just you, 2, 3 or 4 = local co-op (one game each, a controller each) [$last]: " -NoNewline
-        try {
-            while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }   # (keys typed ahead: not an answer)
-            $until = (Get-Date).AddSeconds($Seconds)
-            while ((Get-Date) -lt $until) {
-                if ([Console]::KeyAvailable) {
-                    $k = [Console]::ReadKey($true)
-                    if ("$($k.KeyChar)" -match '^[1-4]$') { $answer = [int]"$($k.KeyChar)" }
-                    break
-                }
-                Start-Sleep -Milliseconds 50
-            }
-        } catch { }
-        Write-Host $answer
-    }
+    try {
+        while ([Console]::KeyAvailable) {   # (only what was pressed already: no wait)
+            $k = [Console]::ReadKey($true)
+            if ("$($k.KeyChar)" -match '^[1-4]$') { $answer = [int]"$($k.KeyChar)" }
+        }
+    } catch { }
     if ($answer -ne $last) {
+        $file = Join-Path $Kit 'hookshot\local-players.txt'
         try { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $file) | Out-Null; [System.IO.File]::WriteAllText($file, "$answer`r`n") } catch { }
     }
+    if ($answer -gt 1) { Write-Host "Players on this PC: $answer. (Press 1 while Squadala starts next time for just you.)" }
     return $answer
 }
 
@@ -134,11 +141,19 @@ function Sync-KitLocalInstance([string]$Game, [string]$Inst) {
     foreach ($d in @(Get-ChildItem -LiteralPath $Game -Directory -Force -ErrorAction SilentlyContinue)) {
         if ($script:KitLocalDirsNotLinked -contains $d.Name -or $d.Name -like 'autotest*' -or $d.Name -like '*.old*' -or $d.Name -like '*.bak*') { continue }
         $to = Join-Path $Inst $d.Name
-        if (Test-Path -LiteralPath $to) {
-            $item = Get-Item -LiteralPath $to -Force
-            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }   # (a junction made before)
-            $said += "Local co-op: $to is a folder of its own, not the game's: left as it is."
-            continue
+        $item = Get-Item -LiteralPath $to -Force -ErrorAction SilentlyContinue   # (also a link whose folder is gone)
+        if ($item) {
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                # (a junction made before: kept while it names this game's folder; a game folder moved since, its kit
+                # copied or the game built somewhere else, left it naming the old place: made again)
+                $target = "$(@($item.Target)[0])" -replace '^\\\\[?]\\|^\\[?][?]\\', ''
+                $target = $target.TrimEnd('\')
+                if ($target -ieq $d.FullName.TrimEnd('\')) { continue }
+                try { [System.IO.Directory]::Delete($to, $false) } catch { $said += "Local co-op: could not renew the link $to ($($_.Exception.Message))."; continue }
+            } else {
+                $said += "Local co-op: $to is a folder of its own, not the game's: left as it is."
+                continue
+            }
         }
         try { New-Item -ItemType Junction -Path $to -Target $d.FullName -ErrorAction Stop | Out-Null }
         catch { $said += "Local co-op: could not link $($d.Name) into $Inst ($($_.Exception.Message))." }
