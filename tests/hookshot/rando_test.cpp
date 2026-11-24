@@ -2333,6 +2333,7 @@ TEST_CASE("rando: Character Select's look files are left out of the co-op hash, 
     CHECK(IsLookFile("tex/angin_tile_a_dark_ac3.bntx.zs"));
     CHECK(IsLookFile("model/player_child.player_child.bfres.zs"));
     CHECK(IsLookFile("phive/cloth/player_adult_cac.nin_ounce_nvn2.bphcl"));
+    CHECK_FALSE(IsLookFile("phive/shape/dungeon_wall.bphsh"));  // (collision: it changes the world)
     CHECK(IsLookFile("sound/resource/playervoice_adult_x.bars.zs"));
     CHECK_FALSE(IsLookFile("ui/layoutarchivecategory.product.100.byml.zs"));
     CHECK_FALSE(IsLookFile("pack/actor/player_child.pack.zs"));
@@ -2375,6 +2376,23 @@ TEST_CASE("rando: Character Select's look files are left out of the co-op hash, 
     Put(d_mod / "romfs" / gd, "saved values + pack's");
     PutKeptStamp(d_mod, fs::path("_coop-gamedata") / (gd.filename().string() + ".txt"), "coop-gamedata 1", gd);
     CHECK(a == hash(d, cs));
+    // A collision shape in Character Select still counts (only Phive/Cloth is a look).
+    const fs::path g = pc("g", cs, "boots", "menu", false);
+    Put(g / cs / "romfs" / "Phive" / "Shape" / "Wall.bphsh", "wall");
+    CHECK(a != hash(g, cs));
+    // A renamed Character Select is known by its own files (characters.json, or the kit's coop-charsel.txt): its looks
+    // are still left out.
+    const fs::path h = pc("h", "CS", "player A's boots", "menu", false);
+    const fs::path i = pc("i", "CS", "player B's boots", "menu", true);
+    CHECK(hash(h, "CS") != hash(i, "CS"));  // (not known yet: a plain mod)
+    Put(h / "CS" / "characters.json", "{}");
+    Put(i / "CS" / "characters.json", "{}");
+    CHECK(hash(h, "CS") == hash(i, "CS"));
+    CHECK(IsCharacterSelectMod(h / "CS"));
+    const fs::path j = base / "j" / "OoT_CS";
+    Put(j / "coop-charsel.txt", "v0.2.2 - - - ui cz2\n");
+    CHECK(IsCharacterSelectMod(j));
+    CHECK_FALSE(IsCharacterSelectMod(base / "e" / "Hylian Tunics"));
     // Another mod's textures are its content: they still count.
     const std::string other = "Hylian Tunics";
     CHECK(hash(pc("e", other, "red", "menu", false), other) != hash(pc("f", other, "blue", "menu", false), other));

@@ -601,8 +601,14 @@ bool IsCharacterSelectFolder(std::string_view name) {
     return lower.find("character select") != std::string::npos;
 }
 
+bool IsCharacterSelectMod(const fs::path& folder) {
+    std::error_code ec;
+    return IsCharacterSelectFolder(CoopMods::ToUtf8(folder.filename())) ||
+           fs::is_regular_file(folder / "characters.json", ec) || fs::is_regular_file(folder / "coop-charsel.txt", ec);
+}
+
 bool IsLookFile(std::string_view key) {
-    for (const std::string_view dir : {"tex/", "model/", "phive/", "sound/"}) {
+    for (const std::string_view dir : {"tex/", "model/", "phive/cloth/", "sound/"}) {
         if (key.substr(0, dir.size()) == dir) return true;
     }
     return false;
@@ -612,7 +618,7 @@ std::optional<fs::path> ShareStandIn(const fs::path& folder_in, const fs::path& 
     if (IsSizeTablePath(key) && key.find(".rsizetable") != std::string::npos) return std::nullopt;
     fs::path folder = folder_in;
     if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
-    if (IsCharacterSelectFolder(CoopMods::ToUtf8(folder.filename())) && IsLookFile(key)) return std::nullopt;
+    if (IsLookFile(key) && IsCharacterSelectMod(folder)) return std::nullopt;
     const fs::path rel_path = file.lexically_relative(folder / "romfs");
     if (rel_path.empty() || rel_path.begin()->string() == "..") return file;  // (not under its romfs)
     if (fs::path kept = KitKeptCopy(folder, file, rel_path, key); !kept.empty()) return kept;
