@@ -848,6 +848,20 @@ void StartModule() {
         LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/metal.bin: painted metal parts stay metal "
                        "(make it again)");
     }
+    // The parts' regions (row 185): without region.bin (an older pack) parts are painted by tones only.
+    if (const auto region_file = ReadFile(LookDir() / "region.bin")) {
+        std::string why;
+        if (auto region = CoopLookParts::ParseRegion(*region_file, &why)) {
+            LOG_INFO(Core, "coop: look: {} part region block lists (a painted part takes its whole region)",
+                     region->size());
+            CoopLookParts::UseRegion(std::make_shared<const CoopLookParts::Region>(std::move(*region)));
+        } else {
+            LOG_WARNING(Core, "coop: look: coop_look/region.bin: {}; parts painted by tones only", why);
+        }
+    } else if (gear_file) {
+        LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/region.bin: parts painted by tones only "
+                       "(make it again)");
+    }
     // The Cap trim's blocks: without cap.bin (an older pack) the Cap trim row changes nothing.
     if (const auto cap_file = ReadFile(LookDir() / "cap.bin")) {
         std::string why;

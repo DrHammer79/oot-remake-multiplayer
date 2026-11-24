@@ -99,9 +99,18 @@ std::shared_ptr<const Metal> CurrentMetal() {
     std::lock_guard lock(g_metal_mutex);
     return g_metal;
 }
-}  // namespace
 
-std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::string* why) {
+std::mutex g_region_mutex;
+std::shared_ptr<const Region> g_region;   // guarded
+
+std::shared_ptr<const Region> CurrentRegion() {
+    std::lock_guard lock(g_region_mutex);
+    return g_region;
+}
+
+// metal.bin's layout (tools/puppet_pack/look_metal.py pack), under `magic`.
+std::optional<Metal> ParseBlocks(const std::vector<std::uint8_t>& file, const char* magic, const char* what,
+                                 std::string* why) {
     const auto fail = [&](const char* w) -> std::optional<Metal> {
         if (why != nullptr) {
             *why = w;
@@ -109,9 +118,8 @@ std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::stri
         return std::nullopt;
     };
     constexpr std::size_t kName = 64;
-    static constexpr char kMagic[] = "COOPMTL1";
-    if (file.size() < 12 || std::memcmp(file.data(), kMagic, 8) != 0) {
-        return fail("not a metal file");
+    if (file.size() < 12 || std::memcmp(file.data(), magic, 8) != 0) {
+        return fail(what);
     }
     const auto u32 = [&](std::size_t at) {
         std::uint32_t v = 0;
@@ -147,6 +155,43 @@ std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::stri
     }
     return out;
 }
+}  // namespace
+
+std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::string* why) {
+    return ParseBlocks(file, "COOPMTL1", "not a metal file", why);
+}
+
+std::optional<Region> ParseRegion(const std::vector<std::uint8_t>& file, std::string* why) {
+    return ParseBlocks(file, "COOPRGN1", "not a region file", why);
+}
+
+void UseRegion(std::shared_ptr<const Region> region) {
+    std::lock_guard lock(g_region_mutex);
+    g_region = std::move(region);
+}
+
+std::vector<std::int8_t> RegionRules(const Region& region, const std::string& name, std::size_t blocks,
+                                     std::size_t block_bytes, const std::vector<CoopLook::Part>& parts) {
+    std::vector<std::int8_t> out;
+    for (const MetalBlocks& b : region) {
+        if (b.texture != name) {
+            continue;
+        }
+        const auto it = std::find(parts.begin(), parts.end(), b.part);
+        if (it == parts.end()) {
+            continue;   // the part has no colour: its blocks stay the game's
+        }
+        if (out.empty()) {
+            out.assign(blocks, std::int8_t{-1});
+        }
+        for (const std::uint32_t at : b.offsets) {
+            if (block_bytes != 0 && at % block_bytes == 0 && at / block_bytes < blocks) {
+                out[at / block_bytes] = static_cast<std::int8_t>(it - parts.begin());
+            }
+        }
+    }
+    return out;
+}
 
 void UseMetal(std::shared_ptr<const Metal> metal) {
     std::lock_guard lock(g_metal_mutex);
@@ -174,6 +219,7 @@ std::size_t PaintMetal(const Metal& metal, const std::string& name, std::vector<
 CoopLookTunic::Texels Painted(const CoopLookTunic::Texels& gear, const CoopLook::Look& look) {
     CoopLookTunic::Texels out = gear;
     const std::shared_ptr<const Metal> metal = CurrentMetal();
+    const std::shared_ptr<const Region> region = CurrentRegion();
     for (CoopLookTunic::Texture& t : out) {
         if (metal) {
             PaintMetal(*metal, t.name, t.texels, look);
@@ -189,13 +235,20 @@ CoopLookTunic::Texels Painted(const CoopLookTunic::Texels& gear, const CoopLook:
             continue;
         }
         std::vector<CoopLookPaint::Rule> rules;
+        std::vector<CoopLook::Part> parts;   // each rule's part
+        std::uint32_t tones = 0;             // every part's, painted or not (never taken by a region)
         for (const GearRule& r : entry->rules) {
+            tones |= r.tones;
             if (const auto& c = look[r.part]) {
                 rules.push_back({r.tones, *c});
+                parts.push_back(r.part);
             }
         }
         if (!rules.empty()) {
-            CoopLookPaint::Recolour(entry->format, t.texels, t.texels, rules);
+            const std::size_t step = CoopLookPaint::BlockBytes(entry->format);
+            const std::vector<std::int8_t> blocks =
+                region ? RegionRules(*region, t.name, t.texels.size() / step, step, parts) : std::vector<std::int8_t>{};
+            CoopLookPaint::Recolour(entry->format, t.texels, t.texels, rules, {blocks, tones});
         }
     }
     return out;

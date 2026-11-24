@@ -2044,6 +2044,11 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             if metal_blob is not None:
                 write(os.path.join(mod_dir, look_live.DIR, look_metal.FILE), metal_blob)
                 look_files["metal"] = f"{look_live.DIR}/{look_metal.FILE}"
+            # Which colour blocks lie wholly on a metal part (row 185, look_metal.regions).
+            region_blob = look_metal.regions(read_tex, log)
+            if region_blob is not None:
+                write(os.path.join(mod_dir, look_live.DIR, look_metal.REGION_FILE), region_blob)
+                look_files["region"] = f"{look_live.DIR}/{look_metal.REGION_FILE}"
         # The blocks of the tunic's textures that only the cap uses (the Customize page's Cap trim,
         # look_cap), beside green.bin, which holds their texels.
         if "green" in look_files:

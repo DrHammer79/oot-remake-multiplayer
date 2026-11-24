@@ -1092,6 +1092,55 @@ TEST_CASE("look parts: a painted metal part loses its metal, the other blocks an
     CHECK(CoopLookParts::Painted(*gear, look)[1].texels == MetalTexels());
 }
 
+TEST_CASE("look parts: a painted part takes its whole region, from region.bin (row 185 reopened)") {
+    // region.bin: metal.bin's layout under its own magic.
+    auto file = MetalFile({{kHylian, 3, {0, 16}}, {kHylian, 4, {8}}, {"Other_Alb", 3, {0}}});
+    std::memcpy(file.data(), "COOPRGN1", 8);
+    std::string why;
+    CHECK_FALSE(CoopLookParts::ParseMetal(file, &why));   // never taken for a metal file
+    CHECK_FALSE(CoopLookParts::ParseRegion(MetalFile({}), &why));
+    CHECK(why == "not a region file");
+    const auto region = CoopLookParts::ParseRegion(file);
+    REQUIRE(region);
+    REQUIRE(region->size() == 3);
+
+    // Per block, the index of the painted rule's part; the face is not painted: its block stays -1.
+    const std::vector<Part> frame_only{Part::hylian_frame};
+    CHECK(CoopLookParts::RegionRules(*region, kHylian, 4, 8, frame_only) == std::vector<std::int8_t>{0, -1, 0, -1});
+    const std::vector<Part> both{Part::hylian_face, Part::hylian_frame};
+    CHECK(CoopLookParts::RegionRules(*region, kHylian, 4, 8, both) == std::vector<std::int8_t>{1, 0, 1, -1});
+    CHECK(CoopLookParts::RegionRules(*region, kHylian, 4, 8, {Part::hylian_emblem}).empty());
+    CHECK(CoopLookParts::RegionRules(*region, "Nothing_Alb", 4, 8, both).empty());
+    CHECK(CoopLookParts::RegionRules(*region, kHylian, 2, 8, frame_only) == std::vector<std::int8_t>{0, -1});   // (16: past the end)
+
+    // Painted: the frame's most common block in the game (a pale green end, (165, 199, 148), beside a pale
+    // purple-grey one) is painted at both ends inside the region, at one end without region.bin.
+    std::vector<std::uint8_t> frame;
+    for (std::size_t b = 0; b < kTexels / 8; ++b) {
+        const std::uint8_t block[8] = {0x32, 0xa6, 0x73, 0xa4, 0xe4, 0xe4, 0xe4, 0xe4};
+        frame.insert(frame.end(), block, block + 8);
+    }
+    const auto gear = Colour({{kHylian, frame}});
+    Look look;
+    look[Part::hylian_frame] = 0x2060E0u;
+    const auto green_ends = [](const std::vector<std::uint8_t>& t, std::size_t block) {
+        int n = 0;
+        for (const auto& e : CoopLookPaint::Ends(CoopLookPaint::Format::bc1, std::span<const std::uint8_t>(t.data() + 8 * block, 8))) {
+            n += CoopLookPaint::ToneOf(e) == CoopLookPaint::kGreen ? 1 : 0;
+        }
+        return n;
+    };
+    CHECK(green_ends(CoopLookParts::Painted(*gear, look)[0].texels, 0) == 1);   // no region: the old specks
+    CoopLookParts::UseRegion(std::make_shared<const CoopLookParts::Region>(*region));
+    const auto painted = CoopLookParts::Painted(*gear, look)[0].texels;
+    CHECK(green_ends(painted, 0) == 0);   // block 0 (offset 0): in the frame's region
+    CHECK(green_ends(painted, 1) == 1);   // block 1 (offset 8): the face's region, the face not painted
+    CHECK(green_ends(painted, 2) == 0);   // block 2 (offset 16)
+    CHECK(green_ends(painted, 3) == 1);   // block 3: in no region
+    CoopLookParts::UseRegion(nullptr);
+    CHECK(green_ends(CoopLookParts::Painted(*gear, look)[0].texels, 0) == 1);
+}
+
 TEST_CASE("look parts: the adult's Goron and Zora tunics are painted in all their cloth") {
     // The adult's tunic models name more cloth than the vest and hat (the dump: Armor_Adult_Goron's inner,
     // Armor_Adult_Zora's parts and feather): each is in the table under its tunic.
