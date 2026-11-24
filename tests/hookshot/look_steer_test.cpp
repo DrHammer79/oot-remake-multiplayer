@@ -688,3 +688,34 @@ TEST_CASE("look steer: blocked with no clear view yet, the camera rises toward k
     CHECK(lowered->elevation < Steer::kLiftTo - 2.0);
     CHECK(Distance(shot->eye, p.eye) < 1e-9);
 }
+
+TEST_CASE("look steer: once the view is clear, a raised camera comes back down to the orbit's elevation") {
+    // The orbit's own elevation, in open ground.
+    Place open;
+    for (int f = 0; f < 60; ++f) {
+        open.Step();
+    }
+    REQUIRE(open.steer.Driving());
+    const auto level = Seen(open.cam);
+    REQUIRE(level);
+    // Blocked from the start: raised to kLiftTo.
+    Place p;
+    p.wall = [](double) { return 0.9; };
+    for (int f = 0; f < 120; ++f) {
+        p.Step();
+    }
+    REQUIRE(Seen(p.cam)->elevation == doctest::Approx(Steer::kLiftTo).epsilon(0.02));
+    // Clear (the turn reached the open side): lowered a step at a time, the picture shown all the way.
+    p.wall = [](double) { return 4.0; };
+    double before = Seen(p.cam)->elevation;
+    for (int f = 0; f < 80; ++f) {
+        CAPTURE(f);
+        CHECK(p.Step());
+        const double now = Seen(p.cam)->elevation;
+        CHECK(now <= before + 1e-6);
+        before = now;
+    }
+    CHECK(Seen(p.cam)->elevation == doctest::Approx(level->elevation).epsilon(0.01));
+    CHECK(p.steer.Driving());
+    CHECK_FALSE(p.steer.Hidden());
+}

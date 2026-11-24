@@ -427,6 +427,7 @@ std::optional<Shot> Steer::Picture(const Vec3& game_eye, const Vec3& game_target
         }
         blocked_ = false;
         held_ = Vec3{shot->eye[0] - middle[0], shot->eye[1] - middle[1], shot->eye[2] - middle[2]};
+        lift_ = std::max(lift_ - kLiftStep, 0.0);   // (a clear view: back down to the orbit's elevation)
         return shot;
     }
     if (!blocked_) {
@@ -441,6 +442,7 @@ std::optional<Shot> Steer::Picture(const Vec3& game_eye, const Vec3& game_target
         Say(line);
     }
     if (held_) {
+        lift_ = std::max(lift_ - kLiftStep, 0.0);   // (it rises only until the first clear view)
         const Vec3 eye{middle[0] + (*held_)[0], middle[1] + (*held_)[1], middle[2] + (*held_)[2]};
         return ReAim(eye, middle, window, fov_y);
     }

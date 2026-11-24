@@ -181,7 +181,8 @@ public:
     // Blocked with no clear view yet: the camera is raised this many degrees a frame, to look down over the wall,
     // up to kLiftTo degrees above level (the game's collision still places the eye); lowered again when the eye is
     // far enough but the view would have to tilt past straight down to put Link in the window's middle (a window
-    // off the screen's middle runs out of tilt sooner).
+    // off the screen's middle runs out of tilt sooner). Once a clear view has been had it comes back down,
+    // kLiftStep a frame, to the orbit's own elevation (blocked again on the way: the clear view is held).
     static constexpr double kLiftStep = 1.5;
     static constexpr double kLiftTo = 60.0;
     // The free distance is kept over openings of the page while the game's target stays within this (metres) of
