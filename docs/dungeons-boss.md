@@ -117,7 +117,7 @@ Goal: every boss fight the same in every game, run by the game's own code. Gohma
 - **Every change, once, in order** (branch bosses). Each sample carries the owner's newest 8 changes (a brain verb set with its force, or an action request with its "verb changed" argument), each with its `seq`, beside the state now. A copy makes every change after the newest it made, one call each, in the owner's order, so a lost sample loses no attack and no phase. An older sample after a newer one is dropped. A copy that missed more than 8 starts from the state now (the brain verb, then the last action, each only when it is not so already; log `started again from the owner's state`).
 - **Put back.** A copy's brain verb that differs from the owner's for about a second with nothing queued (a change the game made where no wrap sees it, or one of ours it refused) is set to the owner's again, at most 5 times per owner state (a verb the game keeps refusing is then left alone until the owner's next state; the log says so once).
 - **Minions.** A boss's mid-fight minions (`CoopObjects::MinionMaker`: King Dodongo's baby spawner `Enemy_DungeonBoss_Dodongo_SpawnBabyDodongo` and the `Enemy_BabyDodongo` it makes, Gohma's fight eggs `Enemy_DungeonBoss_Gohma_Egg`, Big Octo's `Enemy_Shabom_BigOctoChild`) are made only by the game that owns their boss. They are shared like every made object; a copy boss's own create request for one is stopped (`Table::CopyMakes`), or the minion is deleted when it was made anyway. A minion's create is judged by its whole name (the create hook reads 63 bytes; 31 before boss-larva-0116, so the 42-byte spawner name never matched). Gohma's larvae keep their own rule (out of an egg, gohma-sync, above), and so do the eggs the Deku Tree places (`Enemy_Gohma_Egg`, a placement hash); the bosses' shots go through the enemy-shot rule (only the shooter's owner fires). Parts a boss makes as it loads (Attention actors, Barinade's jellyfish, Morpha's tentacle) are each game's own and follow their root.
-- A hand-over (the boss changes owner) keeps the state: the new owner counts on from the old owner's `seq`, and the brain verb it sends is always the one its own game's boss is in (read from the BSA each frame), never a queued change it had not made yet. The other copies forget the old owner's last state when the owner changes, see the new owner's number and start again from its first state, so a new owner whose count is behind theirs is not ignored. A resync (joiner, new owner, more than 8 changes missed) asks the owner's current action again, so that move starts over on the copy, except when that action is the one last put into the copy and its own AI ran no action since (row 149: a sword hit with no stun restarted King Dodongo's roll on the hitter's screen).
+- A hand-over (the boss changes owner) keeps the state: the new owner counts on from the old owner's `seq`, and the brain verb it sends is always the one its own game's boss is in (read from the BSA each frame), never a queued change it had not made yet. The other copies forget the old owner's last state when the owner changes, see the new owner's number and start again from its first state, so a new owner whose count is behind theirs is not ignored. When that first state goes on from the chain the copy held (below, "Twinrova hand-over"), its changes after the copy's newest are made in order instead. A resync (joiner, new owner, more than 8 changes missed) asks the owner's current action again, so that move starts over on the copy, except when that action is the one last put into the copy and its own AI ran no action since (row 149: a sword hit with no stun restarted King Dodongo's roll on the hitter's screen).
 
 **Log.** `coop: bosses: native sync on (brain verbs wrapped, action verbs wrapped)`; per boss `coop: bosses: Enemy_DungeonBoss_Gohma: native boss sync on (BSA 0x..., ours|a copy)` and on a copy `...: the owner's verbs came (brain N): the copy's own brain is skipped from now`; every 10 s while it works `coop: bosses: ours sent N brain + N action verbs (N by plug); copies: N own skipped, N brain + N action verbs put in (N waited for a node), N busy`.
 
@@ -838,7 +838,34 @@ One copy's Attack_R fired nothing: it put the move in with its own learnt plug (
 lane's server, built before component 24 (above). A second run with a server of the same build: every copy put-in
 had its variation (0 not known), the copy's Attack_R fired its FireBullet, and every copy bullet matched its attack
 (Attack_L Ice, Attack_R Fire) through two hand-overs. Not this row: right at a hand-over a copy played an attack with
-no bullet twice, and one copy showed fewer attacks than its owner in the same stretch.
+no bullet twice, and one copy showed fewer attacks than its owner in the same stretch (next section).
+
+## Twinrova hand-over: a copy's attack with no bullet, and attacks lost (0.11.13)
+
+Seen in the second row 222 run: right at a hand-over a copy played an attack with no bullet (one Attack_R, one
+Attack_L), and a copy logged 4 attacks while its owner logged 6. Two causes, both in `Table::Publish` at an owner
+change:
+
+1. The own asks (each move's node, plug and variation, `AskFor`) were forgotten at every role change (row 177's
+   review). A copy's first put-ins after the hand-over then went in through its last node, a node of another move
+   (Fly), whose own choice of the attack may be the other variation: the attack ran with no shot. Row 177's reason
+   holds only for a brain change (the action sequence's nodes may go with it). Now the asks are kept across a hand-over
+   and forgotten when a new brain verb runs in our game (`BrainRuns`: the owner's own, the copy's own or put in) or when
+   it is not known which verb they were learnt in. The owner learns its own asks too (`LearnOwnAsk`), so a game that
+   hands its boss over knows the nodes of the brain verb it is in (before, an old owner made a copy had no node at all
+   until its own AI asked again).
+2. The new copy started again from the new owner's first state (a resync: only the move it is in now). Every move the
+   new owner made before that state reached us was lost. A new owner counts on from the last state it had of the old
+   owner, so its changes up to our newest seq are ours when it had all of them. Now the chain we held is kept (our own
+   state as the old owner, the old owner's last state as a copy), and when the new owner's first state holds our newest
+   change unchanged (`ContinuesChain`), the changes after it are made in order; a copy that stays a copy also keeps the
+   old owner's moves still queued. Any change both hold that differs (it had not had all of ours): a resync, as before.
+   The log says `the new owner goes on from seq N`.
+
+No protocol change. Solo play and owners are not touched (an owner only learns its asks). Not covered: a copy made
+the owner drops the old owner's moves still queued (its own AI runs the boss from here). Tests: boss_native_test
+("Twinrova hand-over": the attack's node kept, a brain change still forgets it; both moves the new owner made are put
+in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 

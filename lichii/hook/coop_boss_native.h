@@ -283,6 +283,12 @@ std::optional<std::string> VariantOf(const std::optional<BossVariants>& v, std::
 // The variation of `state.action` (a resync's move): its newest action change in recent, else (all of recent brain
 // changes) the newest entry older than recent, which the owner sends for its action now (Table::OwnerState).
 std::optional<std::string> ActionVariantOf(const BossBsa& state, const std::optional<BossVariants>& v);
+// Twinrova hand-over (0.11.13): a new owner's first state `theirs` goes on from the chain we held at the hand-over
+// (`ours`: our own state as its old owner, or the old owner's last state as a copy). A new owner counts on from the
+// last state it had of the old owner, so its change at our newest seq is ours (the same change) when it had all of
+// ours; then every change after it is new and is made in order, not collapsed into a resync. Any change both hold
+// that differs (it had not had all of ours): not this chain.
+bool ContinuesChain(const BossBsa& ours, const BossBsa& theirs);
 
 enum class Role : std::uint8_t { owner, copy };
 // A boss whose new copy runs its own start first (Table::kStartSteps): a
@@ -742,6 +748,9 @@ private:
         std::map<std::pair<std::int32_t, std::int32_t>, OwnAsk> own_asks;
         std::map<std::int32_t, OwnAsk> own_slot_asks;
         OwnVariants own_variants;  // row 222: each node's own last ask and its variation (AskFor)
+        std::optional<std::int32_t> asks_brain;  // the brain verb the own asks were learnt in (BrainRuns)
+        // Twinrova hand-over: the chain we held when the owner changed (ContinuesChain), until its first state.
+        std::optional<BossBsa> handover;
         // Row 177's log: the action stream's last kind (who, slot, verb, changed, plug or node source) and its run.
         std::string stream_last;
         std::uint64_t stream_run = 0;
@@ -844,9 +853,15 @@ private:
     Entry* Find(std::uint64_t bsa);
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
-    // Row 177 review: the kept own asks (their AI nodes) go: a brain change (its action sequence's nodes may
-    // go with it) or a role change; the copy's next own asks fill them again.
+    // Row 177 review: the kept own asks (their AI nodes) go on a brain change (its action sequence's nodes may
+    // go with it); its next own asks fill them again. Not on a role change (Twinrova hand-over, 0.11.13): the
+    // same boss in the same game keeps its nodes, and a copy put the first moves after a hand-over in through a
+    // node of another move (no bullet). The owner's own asks are learnt too (LearnOwnAsk), so a game that hands
+    // its boss over knows the nodes of the brain verb it is in.
     static void ForgetOwnAsks(Entry& e);
+    // A brain verb that runs in our game (the owner's, or the copy's own or put in): a new one forgets the asks.
+    static void BrainRuns(Entry& e, std::int32_t verb);
+    static void LearnOwnAsk(Entry& e, const Request& request, const std::optional<std::string>& plug_name);
     void Note(std::string line);
     // Row 177's log: one line when the stream's kind changes (the last kind's run length with it), capped.
     void Stream(Entry& e, std::string kind);
