@@ -216,6 +216,17 @@ class Choose(unittest.TestCase):
         self.assertEqual(got[:3], ("V0", "ATTACK", "long"))
         self.assertEqual(len(got[3]), int(0.40 * RATE))
 
+    def test_a_fitting_clip_from_a_later_voice_wins_over_cutting_the_first_voices_clip(self):
+        v = chain({"ATTACK": [("long", burst(1.0, 0.6))]}, {"ATTACK": [("short", burst(0.3, 0.1))]})
+        got = voices.choose("SwordAttack_S", v, 2, 0.40, RATE)
+        self.assertEqual([g[:3] for g in got], [("V1", "ATTACK", "short")] * 2)
+        self.assertEqual(len(got[0][3]), int(0.3 * RATE))   # whole, not cut
+        # Breath: the own voice has only a 2 s clip, the default a 0.3 s one.
+        v = chain({"BREATH": [("own_sigh", burst(2.0, 1.2))]}, {"BREATH": [("default_sigh", burst(0.3, 0.1))]})
+        got = voices.choose("Wait", v, 1, 0.40, RATE)[0]
+        self.assertEqual(got[:3], ("V1", "BREATH", "default_sigh"))
+        self.assertEqual(len(got[3]), int(0.3 * RATE))
+
     def test_the_cow(self):
         names = {"NV_Cow": ["NV_Cow_Angry00", "NV_Cow_Angry01", "NV_Cow_Happy00", "NV_Cow_Sad00",
                             "NV_Cow_TalkPositive00"],
