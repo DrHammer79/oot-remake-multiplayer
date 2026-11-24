@@ -1603,7 +1603,10 @@ bool Menu::Press(Input input) {
 void Menu::Decide(Act act) {
     switch (act) {
     case Act::kOpenHost:
-        Go(Page::kHost);
+        // (the title's Host page opens on Start hosting: one A hosts with the choices as they are (Private, the
+        // players from Co-op Settings), the most a host needs; the choices are one Up away. It opened on Who can join,
+        // two Downs from hosting: the audit's item 16, as few steps as possible)
+        Go(Page::kHost, title_ && !InSession() && !session_.by_launcher ? Act::kStartHost : Act::kNone);
         if (!InSession() && !title_) {   // (the title: its choices first, Start hosting hosts)   // one press hosts; the page then shows the code
             request_ = Request{Request::Kind::kHost, {}};
         }

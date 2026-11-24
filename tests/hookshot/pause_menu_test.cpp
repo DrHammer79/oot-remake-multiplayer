@@ -1986,6 +1986,9 @@ TEST_CASE("pause tab: the title's Host opens on its choices, hosts on Start host
     m.Open(Page::kHost);
     CHECK_FALSE(m.TakeRequest().has_value());   // (not hosted on opening)
     CHECK(Names(m) == std::vector<std::string>{"Who can join", "Players", "Start hosting"});
+    // (the cursor on Start hosting: one A hosts with the choices as they are, as most hosts want; Up to change them)
+    CHECK(Selected(m) == "Start hosting");
+    SelectRow(m, "Who can join");
     CHECK(SelectedValue(m) == "Private");
     // (Who can join is the title's toggle: its two cells, Private chosen; no other row has cells)
     CHECK(m.view().rows[0].cells == std::array<std::string, 2>{"Private", "Public"});
