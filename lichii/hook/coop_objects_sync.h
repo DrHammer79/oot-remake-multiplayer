@@ -622,13 +622,15 @@ LifeRouted RouteLife(const LifeAsk& a);
 // while it sleeps (no Link near in that game), so its copy took nothing while the other player's Link was away.
 enum class GivenFate {
     wait,   // not due yet
-    gone,   // another actor there now, or none: taken back and forgotten
+    gone,   // the actor is off the walk (removed, freed), or another one is there now: taken back, never written
     taken,  // nothing waits any more: its step took it (or a newer give took it back)
     keep,   // an enemy (its life is never written): left for its next Life step, however late (when it wakes)
     write,  // anything else: taken back and its life written (as before)
 };
 struct GivenAsk {
     bool due = false;             // its wait is over
+    bool on_walk = false;         // the actor it was given to is still on the walk (its address listed, its stamp
+                                  // the same): off it, the actor was removed and its memory may be another's now
     bool same_component = false;  // the actor there still has the Life component it was given to
     std::int32_t pending = 0;     // LifeTable::Pending for it
     bool native = false;          // NativeOnlyName

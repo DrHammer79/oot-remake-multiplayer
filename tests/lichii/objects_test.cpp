@@ -1663,6 +1663,8 @@ TEST_CASE("objects: a sleeping enemy copy keeps its owner's hit and kill for its
     GivenAsk g;
     CHECK(StaleGivenFate(g) == GivenFate::wait);
     g.due = true;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);  // (off the walk)
+    g.on_walk = true;
     CHECK(StaleGivenFate(g) == GivenFate::gone);  // (another actor there now, or none)
     g.same_component = true;
     CHECK(StaleGivenFate(g) == GivenFate::taken);
@@ -1670,6 +1672,19 @@ TEST_CASE("objects: a sleeping enemy copy keeps its owner's hit and kill for its
     CHECK(StaleGivenFate(g) == GivenFate::write);  // a pot: written, as before
     g.native = true;
     CHECK(StaleGivenFate(g) == GivenFate::keep);  // an enemy: kept (1dc967e0 took it back: lost for good)
+    // reviewer-12: a kept give outlives its actor (A's remove while B's copy sleeps). Off the walk the actor's
+    // name is unknown (native reads false) and its freed memory can still hold the old Life component: gone, never
+    // written into the freed actor (or another actor that took its memory).
+    g.on_walk = false;
+    g.native = false;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    g.pending = 2;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    g.native = true;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    // A pot removed within the wait: not written either (the same hole, before the keep).
+    g = {true, false, true, 1, false};
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
 
     // Lane NEXT5b: B's copy of A's Deku Baba, B's Link far away, so the copy sleeps: no damage step, no Life step.
     // Each owner's change is refused as a replay (its hit id stays 0xffffffff), and the 400 ms fallback gives the
@@ -1690,9 +1705,10 @@ TEST_CASE("objects: a sleeping enemy copy keeps its owner's hit and kill for its
         REQUIRE(r.tied);
         CHECK(table.Give(kLife, r.amount, true, replay));
     };
-    // Its wait ends with no step: as StaleGiven, taken back unless kept.
+    // Its wait ends with no step: as StaleGiven, taken back unless kept. on_walk: the copy is still on the walk.
+    bool on_walk = true;
     const auto fate = [&] {
-        const GivenFate f = StaleGivenFate({true, true, table.Pending(kLife), true});
+        const GivenFate f = StaleGivenFate({true, on_walk, true, table.Pending(kLife), on_walk});
         if (f == GivenFate::gone || f == GivenFate::write) {
             table.Take(kLife);
         }
@@ -1722,6 +1738,14 @@ TEST_CASE("objects: a sleeping enemy copy keeps its owner's hit and kill for its
     CHECK(CoopActorEvents::Step(ring, table, kLife, 1, &judged, 0x1004, &withdraw) == 1);
     CHECK(withdraw == kNoHitId);
     CHECK(fate() == GivenFate::taken);
+    // Kill while asleep, then A's remove deletes the copy before it wakes (lane NEXT5b: +60 to +90 frames): the
+    // kept fall is gone with it, taken back, and nothing waits for a Life step any more.
+    give(2, 0, 0x1006);
+    CHECK(fate() == GivenFate::keep);
+    on_walk = false;
+    CHECK(fate() == GivenFate::gone);
+    CHECK(table.Pending(kLife) == 0);
+    on_walk = true;
     ring.Drain();
 }
 

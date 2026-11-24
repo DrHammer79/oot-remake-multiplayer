@@ -3708,16 +3708,25 @@ private:
             if (!ask.due) {
                 return false;
             }
-            const auto table = r.Ptr(g.address + kActorComponents);
-            const auto life = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
-            ask.same_component = life && *life == g.component;
+            // (the actor's memory is read only while it is on the walk: off it, it may be freed)
+            const auto stamp = stamps_.find(g.address);
+            ask.on_walk = names_.contains(g.address) && stamp != stamps_.end() && stamp->second == g.stamp;
+            if (ask.on_walk) {
+                const auto table = r.Ptr(g.address + kActorComponents);
+                const auto life = table ? r.Ptr(*table + kComponentLife) : std::nullopt;
+                ask.same_component = life && *life == g.component;
+            }
             ask.pending = steps.Pending(g.component);
-            ask.native = NativeOnly(g.address);
+            ask.native = ask.on_walk && NativeOnly(g.address);
             switch (StaleGivenFate(ask)) {
             case GivenFate::wait:
                 return false;
             case GivenFate::gone:
-                steps.Take(g.component);  // (another actor there now, or none)
+                steps.Take(g.component);  // (removed, or another actor there now: nothing is written)
+                if (g.kept) {
+                    LOG_INFO(Core, "coop: objects: {:#x}: kept change dropped: the actor is gone ({} still waited)",
+                             g.address, ask.pending);
+                }
                 return true;
             case GivenFate::taken:
                 if (g.kept) {
@@ -3758,6 +3767,7 @@ private:
         s32 life = 0;
         u64 at_us = 0;
         bool kept = false;  // an enemy's, kept for its next Life step (GivenFate::keep)
+        ActorStamp stamp;   // the actor's when given: another stamp at the address is another actor (GivenAsk)
     };
     // Has the enemy's own damage step seen the hit we replayed last on this Life component? (Its last hit id,
     // Life + 0x1b18, reached our id: hit ids only grow.) True when we never replayed one.
@@ -5458,7 +5468,9 @@ private:
                     sync_.Stepped(w.address, routed.amount, share_now_us_);
                     // (this give holds any earlier one, taken back above: one entry per component)
                     std::erase_if(life_given_, [&](const LifeGiven& g) { return g.component == *life; });
-                    life_given_.push_back({*life, w.address, w.life, share_now_us_});
+                    const auto stamp = stamps_.find(w.address);
+                    life_given_.push_back({*life, w.address, w.life, share_now_us_, false,
+                                           stamp != stamps_.end() ? stamp->second : ActorStamp{}});
                 }
                 return;
             }

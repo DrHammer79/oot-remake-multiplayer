@@ -534,7 +534,9 @@ GivenFate StaleGivenFate(const GivenAsk& a) {
     if (!a.due) {
         return GivenFate::wait;
     }
-    if (!a.same_component) {
+    // A kept give can outlive its actor (A's remove while B's copy sleeps): its address is then freed, and a write
+    // there would land in another actor's memory (reviewer-12). Off the walk it is gone, before any write.
+    if (!a.on_walk || !a.same_component) {
         return GivenFate::gone;
     }
     if (a.pending == 0) {
