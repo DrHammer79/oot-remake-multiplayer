@@ -1,0 +1,65 @@
+# what: Row 222: Twinrova's fire and ice floors on the copy's screen as on the owner's; the sisters killed, the merge, then 24 paired shots.
+# scene: TwinrovaStage
+# start: Both games at the Twinrova intro (boot tools/autotest/scenarios/live-twinrova-room, start --env LICHII_COOP_DEBUG_BOSS=1 --env LICHII_COOP_CHEATS=1).
+# expect: each FireBullet/IceBullet in the owner's log has the same bullet and its FireField/IceField in the copy's log within 3 s; checkpoints f-NN taken while a floor is logged show it on both shots.
+# kit: 1
+{"server":"oot-pair","tool":"get_state","args":{}}
+{"server":"oot-pair","tool":"step","args":{"frames":1800}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":240}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"in"}}
+{"server":"oot-pair","tool":"kill","args":{"player":"p1","actor":"Enemy_DungeonBoss_Koume"}}
+{"server":"oot-pair","tool":"kill","args":{"player":"p1","actor":"Enemy_DungeonBoss_Kotake"}}
+{"server":"oot-pair","tool":"kill","args":{"player":"p2","actor":"Enemy_DungeonBoss_Koume"}}
+{"server":"oot-pair","tool":"kill","args":{"player":"p2","actor":"Enemy_DungeonBoss_Kotake"}}
+{"server":"oot-pair","tool":"step","args":{"frames":3000}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"merged"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-01"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-02"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-03"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-04"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-05"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-06"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-07"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-08"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-09"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-10"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-11"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-12"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-13"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-14"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-15"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-16"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-17"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-18"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-19"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-20"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-21"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-22"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-23"}}
+{"server":"oot-pair","tool":"press","args":{"player":"p1","buttons":["ZL"],"frames":90}}
+{"server":"oot-playtest","tool":"checkpoint","args":{"tag":"f-24"}}
+{"server":"oot-pair","tool":"check_logs","args":{"player":"p1"}}
+{"server":"oot-pair","tool":"check_logs","args":{"player":"p2"}}
