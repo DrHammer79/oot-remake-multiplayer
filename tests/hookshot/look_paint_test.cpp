@@ -246,6 +246,63 @@ TEST_CASE("look paint: the Hylian frame's warm grey is painted with the frame, t
     CHECK(ToneOf(Ends(Format::bc1, std::span<const std::uint8_t>(out.data(), 8))[0]) == (kGold | kWarmGrey));
 }
 
+TEST_CASE("look paint: a part's region takes the encoder's pale and dark ends (row 185 reopened)") {
+    // The Hylian Shield frame's own end pairs (565 values read from the game's texture): its most common
+    // block (4537 of the frame's region) is a pale green end beside a pale purple-grey one, whose blends
+    // are the frame's grey; by tone the green end is green, so the block was painted at one end only.
+    auto block = [](std::uint16_t a, std::uint16_t b) {
+        std::array<std::uint8_t, 8> out{static_cast<std::uint8_t>(a), static_cast<std::uint8_t>(a >> 8),
+                                        static_cast<std::uint8_t>(b), static_cast<std::uint8_t>(b >> 8), 0xe4, 0xe4, 0xe4, 0xe4};
+        return out;
+    };
+    std::vector<std::uint8_t> tex;
+    for (const auto& b : {block(0xa632, 0xa473),    // (165, 199, 148) green + (165, 142, 156) grey
+                          block(0xa513, 0x6b2b),    // (165, 162, 156) grey + (107, 101, 90) dark brown
+                          block(0xa632, 0xa473),    // the same pair outside the region
+                          block(0xfe6d, 0xad14),    // the Triforce's gold (247, 207, 107) + grey
+                          block(0xad14, 0x2973)}) { // grey + the face's blue (41, 44, 156)
+        tex.insert(tex.end(), b.begin(), b.end());
+    }
+    auto ends = [](const std::vector<std::uint8_t>& t, std::size_t k) {
+        return Ends(Format::bc1, std::span<const std::uint8_t>(t.data() + 8 * k, 8));
+    };
+    // How many of block k's two ends have tone `t` (painting may swap them, to keep the block's mode).
+    auto count = [&](const std::vector<std::uint8_t>& t, std::size_t k, std::uint32_t tone) {
+        int n = 0;
+        for (const Rgb& e : ends(t, k)) {
+            n += ToneOf(e) == tone ? 1 : 0;
+        }
+        return n;
+    };
+    CHECK(count(tex, 0, kGreen) == 1);
+    const std::uint32_t tones = kGrey | kWarmGrey | kBlue | kPurple | kRed;   // the Hylian Shield's parts
+    CHECK(Forceable({165, 199, 148}, tones));
+    CHECK(Forceable({107, 101, 90}, tones));
+    CHECK(Forceable({66, 60, 49}, tones));             // the frame's darkest end
+    CHECK(Forceable({8, 4, 0}, tones));                // black
+    CHECK_FALSE(Forceable({247, 207, 107}, tones));    // the Triforce's gold: a part of its own
+    CHECK_FALSE(Forceable({140, 60, 30}, tones));      // a gold guard's dark shade (Biggoron)
+    CHECK_FALSE(Forceable({41, 44, 90}, tones));       // the face's blue: a part's tone
+    CHECK_FALSE(Forceable({165, 142, 156}, tones));    // grey: the frame's own tone, matched as before
+
+    const std::vector<Rule> rules{{kGrey | kWarmGrey, 0x2060E0}};   // the frame only
+    const std::vector<std::int8_t> region{0, 0, -1, 0, 0};
+    std::vector<std::uint8_t> out(tex.size());
+    CHECK(Recolour(Format::bc1, tex, out, rules, Region{region, tones}) == 5);
+    CHECK(count(out, 0, kBlue) == 2);   // the region's blocks: both ends painted
+    CHECK(count(out, 1, kBlue) == 2);
+    CHECK(count(out, 2, kGreen) == 1);  // outside: by tone, as before (one end)
+    CHECK(count(out, 2, kBlue) == 1);
+    CHECK(count(out, 3, kGold) == 1);   // the gold never
+    CHECK(count(out, 3, kBlue) == 1);
+    const Rgb face = ends(tex, 4)[1];   // the face's end stays the game's own blue (the face is not painted)
+    CHECK((ends(out, 4)[0] == face || ends(out, 4)[1] == face));
+    // Without a region (an older pack): by tone, as before; the green end stays.
+    CHECK(Recolour(Format::bc1, tex, out, rules) == 5);
+    CHECK(count(out, 0, kGreen) == 1);
+    CHECK(count(out, 1, kBrown) == 1);
+}
+
 TEST_CASE("look paint: formats as a BNTX names them") {
     CHECK(FormatOf(0x1a06) == Format::bc1);
     CHECK(FormatOf(0x1c01) == Format::bc3);

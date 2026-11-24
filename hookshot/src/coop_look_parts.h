@@ -80,6 +80,22 @@ void UseMetal(std::shared_ptr<const Metal> metal);
 std::size_t PaintMetal(const Metal& metal, const std::string& name, std::vector<std::uint8_t>& texels,
                        const CoopLook::Look& look);
 
+// The parts' regions (row 185, CoopLookPaint::Region): per colour texture and
+// part, the byte offsets of its blocks wholly on that part (every mip level),
+// from the game's own metalness texture (tools/puppet_pack/look_metal.py
+// regions, coop_look/region.bin: metal.bin's layout, magic COOPRGN1). Painted
+// has the part take those blocks' pale and dark encoder ends too, so a painted
+// frame has no specks of its old grey. Without the file: by tones only, as before.
+using Region = std::vector<MetalBlocks>;
+std::optional<Region> ParseRegion(const std::vector<std::uint8_t>& file, std::string* why = nullptr);
+// The table Painted uses from now on (nothing: by tones only).
+void UseRegion(std::shared_ptr<const Region> region);
+// Texture `name`'s region as Recolour takes it: per block (`blocks` of
+// `block_bytes`) the index in `parts` (the painted rules' parts, in order) of
+// the part whose region it is, -1 none; empty when no painted part has one there.
+std::vector<std::int8_t> RegionRules(const Region& region, const std::string& name, std::size_t blocks,
+                                     std::size_t block_bytes, const std::vector<CoopLook::Part>& parts);
+
 // The puppets' gear (docs/puppet.md, "Gear colours on the puppets"): the
 // pack's item copies name textures of their own, "Mt_..." as "C<copy>_..."
 // (tools/puppet_pack/look_items.py tex_name). One more wardrobe keeps every
