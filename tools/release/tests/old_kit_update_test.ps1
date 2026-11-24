@@ -40,6 +40,7 @@ $own = -not $Work
 if ($own) { $Work = Join-Path ([System.IO.Path]::GetTempPath()) ('oot-coop-oldkit-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)) }
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $savedApi = $env:OOT_COOP_UPDATE_API
+$kitPy = ''
 try {
     # --- The old kit, unzipped as a player has it, with a player's things in it
     if (Test-Path -LiteralPath "$OldZip.sha256") {
@@ -197,7 +198,14 @@ try {
     } else {
         Check ($newStamp -ne $oldStamp) 'the game''s stamp no longer matches: the next start builds the game again'
     }
+    # (the kit's Python for Character Select's tool: the one on PATH, never the WindowsApps stub; none: that part is skipped)
+    $pyHome = ''
     if ($CharSel) {
+        $py = (Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        if ($py -and $py -notmatch 'WindowsApps') { try { $pyHome = "$(& $py -I -c 'import sys; print(sys.base_prefix)' 2>$null)".Trim() } catch { $pyHome = '' } }
+        if (-not $pyHome -or -not (Test-Path -LiteralPath (Join-Path $pyHome 'python.exe'))) { $pyHome = ''; Write-Host '     | no Python on PATH: the Character Select part is skipped' }
+    }
+    if ($CharSel -and $pyHome) {
         # The new kit's pinned Character Select, as a stand-in of the same shape: its zip (mod folder + build-from-your-game
         # tool) and characters.json in hookshot\downloads, so nothing is downloaded. The fake tool writes one file.
         $pinFile = Join-Path $kit 'hookshot\CHARACTER-SELECT.txt'
@@ -242,7 +250,6 @@ $ms.Write([System.Text.Encoding]::ASCII.GetBytes('EEOF'), 0, 4)
         # (the game's RomFS beside its mods, and the kit's Python: a junction to the one on PATH)
         New-Item -ItemType Directory -Force -Path (Join-Path $game 'romfs\Pack'), (Join-Path $kit 'hookshot\tools') | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $game 'romfs\Pack\ZsDic.pack.zs'), 'z')
-        $pyHome = "$(& python -I -c 'import sys; print(sys.base_prefix)')".Trim()
         $kitPy = Join-Path $kit 'hookshot\tools\python'
         if (-not (Test-Path -LiteralPath $kitPy)) { New-Item -ItemType Junction -Path $kitPy -Value $pyHome | Out-Null }
         $s = Join-Path $Work 'new-cs.ps1'
@@ -290,6 +297,7 @@ $r.wantNow = Get-KitHookshotStamp $K
     }
 } finally {
     $env:OOT_COOP_UPDATE_API = $savedApi
+    if ($kitPy -and (Test-Path -LiteralPath $kitPy)) { [System.IO.Directory]::Delete($kitPy) }   # (the junction, not the Python behind it)
     if ($own) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
 }
 if ($failed) { Write-Host "$failed check(s) failed"; exit 1 }
