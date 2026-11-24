@@ -32,6 +32,8 @@ PUSH_STEP_M = 0.05        # a block that moves less than this in a look did not 
 PUSH_STUCK_LOOKS = 6      # a block starts to slide only after Link has leaned on it a while (about 20 frames)
 PUSH_STAND_M = 1.2        # Link starts this far from the block's centre, on the side away from the push
 PUSH_DONE_M = 0.15        # the block counts as pushed when it is this close to the distance asked
+GRAB_FRAMES = 30          # A held this long on a block grabs it (a short tap climbs onto it instead)
+GRAB_LEAN_FRAMES = 24     # at most this much leaning on the block, 4 frames a look, for the A prompt to come
 JUMP_STEP_M = 0.1         # a run look that brings Link less than this nearer made no progress
 FALL_M = 1.0              # landing this far below `land_y`: fell
 RESPAWN_M = 3.0           # Link moved this far between two looks without running there: put back (a pit, a void)
@@ -42,6 +44,13 @@ HOLD_FRAMES = 30
 RELEASE_FRAMES = 2
 WATCH_FRAMES = 40         # after the release, the shot has this long to reach the target
 WATCH_LOOK = 4
+RETICLE = (0.0, 0.028)    # the slingshot's reticle on the screen (x right, y up, -1..1): about pixel 640,350 of 720p
+AIM_TOL = 0.02            # the target within this of the reticle (about half a degree): aimed
+AIM_STEPS = 40            # turns of the view, `AIM_FRAMES` each, before giving up
+AIM_FRAMES = 2
+AIM_PROBE = (0.5, 4)      # a probe of each stick axis: this strength for this many frames, to learn which way it turns
+AIM_MOVED = 0.003         # a probe that moves the target less than this on the screen did not turn the view
+AIM_MIN = 0.12            # the smallest stick that still turns the view (a dead zone)
 
 ITEMS = {                 # the name a tester types -> (the `assign` name, the ammo item or None)
     "slingshot": ("SlingShot", "Item_DekuSeed"),
@@ -131,6 +140,103 @@ def aim_angles(link, target):
     return round(yaw, 1), round(pitch, 1)
 
 
+def on_screen(view, point):
+    """Where `point` [x, y, z] is on the screen of the state's `view` (its `clip`, clip = m * p): (x right, y up),
+    -1..1 at the edges; None when it is behind the camera or there is no view."""
+    if not isinstance(view, dict) or not isinstance(view.get("clip"), list) or len(view["clip"]) != 16:
+        return None
+    m = view["clip"]
+    p = (float(point[0]), float(point[1]), float(point[2]), 1.0)
+    c = [sum(m[4 * i + j] * p[j] for j in range(4)) for i in range(4)]
+    if c[3] <= 1e-6:
+        return None
+    y = c[1] / c[3]
+    return (c[0] / c[3], -y if view.get("y_down") else y)
+
+
+def _aim_error(client, point):
+    st = _st(client)
+    s = on_screen(st.get("view"), point)
+    return st, (None if s is None else (s[0] - RETICLE[0], s[1] - RETICLE[1]))
+
+
+def _stick_of(x, y):
+    """[angle, strength] for the stick axes x (right) and y (up), each -1..1."""
+    strength = min(1.0, math.hypot(x, y))
+    return [math.degrees(math.atan2(x, y)) % 360, strength]
+
+
+def _turn(client, which, x, y, frames):
+    stick = _stick_of(x, y)
+    if which == "right":
+        client.input(None, ["ZR"], frames, rstick=stick)
+    else:
+        client.input(stick, ["ZR"], frames)
+
+
+def aim_view(client, point, out):
+    """With ZR held (drawing), turn the view the way a player aims until `point` sits under the reticle. Which stick
+    turns it and which way is learnt first: each axis of the right stick, then the left, is pushed a little and the
+    target's move on the screen measured. Then each turn pushes the stick by how far the target is from the reticle.
+    Returns None when aimed, else why not. Fills out["aim"] with the sticks, the steps and the last error."""
+    aim = out["aim"]
+    st, err = _aim_error(client, point)
+    if err is None:
+        return ("no camera view in the state" if not isinstance(st.get("view"), dict)
+                else "the target is behind the camera while drawing")
+    aim["error_start"] = [round(err[0], 3), round(err[1], 3)]
+    gains, which = None, None
+    strength, frames = AIM_PROBE
+    for name in ("right", "left"):
+        g = []
+        for x, y in ((strength, 0.0), (0.0, strength)):
+            _turn(client, name, x, y, frames)
+            out["frames"] += frames
+            st, now = _aim_error(client, point)
+            if now is None:
+                return "the target left the screen while learning the %s stick" % name
+            g.append(((now[0] - err[0]) / (strength * frames), (now[1] - err[1]) / (strength * frames)))
+            err = now
+        if max(abs(v) for row in g for v in row) * strength * frames >= AIM_MOVED:
+            gains, which = g, name
+            break
+    if gains is None:
+        return "neither stick turned the view while drawing (the target stayed at %.3f %.3f)" % err
+    aim["stick"] = which
+    aim["gains"] = [[round(v, 4) for v in row] for row in gains]
+    (ax, ay), (bx, by) = gains          # the screen move per frame for a full stick right (a) and up (b)
+    det = ax * by - bx * ay
+    if abs(det) < 1e-9:
+        return "the %s stick turns the view only one way (gains %s)" % (which, aim["gains"])
+    for step in range(AIM_STEPS):
+        aim["error"] = [round(err[0], 3), round(err[1], 3)]
+        aim["steps"] = step
+        if math.hypot(*err) <= AIM_TOL:
+            return None
+        # The stick (x, y) whose screen move over AIM_FRAMES takes the error away: solve gains * (x, y) = -err.
+        wx = -err[0] / AIM_FRAMES
+        wy = -err[1] / AIM_FRAMES
+        x = (wx * by - bx * wy) / det
+        y = (ax * wy - wx * ay) / det
+        n = math.hypot(x, y)
+        if n > 1.0:
+            x, y = x / n, y / n
+        elif n < AIM_MIN:
+            x, y = x / n * AIM_MIN, y / n * AIM_MIN
+        _turn(client, which, x, y, AIM_FRAMES)
+        out["frames"] += AIM_FRAMES
+        st, now = _aim_error(client, point)
+        if now is None:
+            return "the target left the screen while aiming"
+        err = now
+    aim["error"] = [round(err[0], 3), round(err[1], 3)]
+    aim["steps"] = AIM_STEPS
+    if math.hypot(*err) <= AIM_TOL:
+        return None
+    return "the view did not reach the target in %d turns (it is %.3f %.3f from the reticle)" % (
+        AIM_STEPS, err[0], err[1])
+
+
 def _judge(before, after):
     """hit: its life fell, it died or it left the list; changed: another field it shows changed (a switch, an eye);
     None: nothing seen."""
@@ -149,16 +255,22 @@ def _judge(before, after):
 
 def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frames=0, draw_frames=DRAW_FRAMES,
           hold_frames=HOLD_FRAMES, watch_frames=WATCH_FRAMES):
-    """Take out `item` (slingshot, bow, boomerang, hookshot, longshot, bomb, nut: put on ZR with `assign`), turn Link to
-    the target, hold ZR to draw (`draw_frames` + `hold_frames`), tilt the aim with the stick for `tilt_frames` (+ up the
-    stick, - down; how far a frame tilts is not measured), let go to fire, then watch the target for `watch_frames`.
+    """Take out `item` (slingshot, bow, boomerang, hookshot, longshot, bomb, nut: put on ZR with `assign`) and aim it
+    the way a player does: turn Link to the target and tap ZL (the camera goes behind him), hold ZR to draw
+    (`draw_frames`), then turn the view with a stick until the target sits under the reticle (`aim_view`, read from
+    the state's `view`), hold `hold_frames`, check the aim once more, let go to fire, and watch the target for
+    `watch_frames`. A target the view cannot reach is not fired at: B puts the item away and the reason is said.
+    `tilt_frames` (+ up the stick, - down) tilts by hand after the aim, for a target that needs an arc.
 
     The target: an actor `ident` (+ `name`) from the world list, or a point `at` [x, y, z] (then nothing can be judged
     beyond `fired`). Results: `hit` (its life fell, it died or left the list), `changed` (another field it shows changed),
     `miss` (the ammo went down or the item left, the target did not change), `fired` (a point target, or an item with no
     ammo count: it left Link, nothing to judge), `not fired` (the ammo did not move: no ammo, a help box opened, the item
-    is not Link's), or a stop reason (gone before the shot, no world list, scene changed, event, hurt). `aim` has the
-    yaw and pitch from Link to the target (the yaw is what `face` turned to)."""
+    is not Link's), `not aimed` (the view could not be turned onto it: no view, neither stick turned it, it left the
+    screen, too far), or a stop reason (gone before the shot, no world list, scene changed, event, hurt). `aim` has
+    the yaw and pitch from Link to the target, the stick that turned the view, the turns it took and the last `error`
+    on the screen (x, y from the reticle; 1 is the screen's half). `assist` only nudges the last bit: the shot is
+    moved sideways onto the target's line when its flight already points within 4 degrees of it."""
     key = str(item or "").strip().lower()
     if key not in ITEMS:
         raise ValueError("item: one of %s" % ", ".join(ITEMS))
@@ -198,28 +310,45 @@ def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frame
     if ammo_item and ammo_before == 0:
         return _out(out, "not fired", "no ammo (%s is 0)" % ammo_item, st)
 
-    used = 0
     client.act("assign %s" % assign_name)
     client.step(2)
     client.act("face %.2f %.2f" % (point[0], point[2]))
     client.step(2)
-    used += 4
+    client.input(None, ["ZL"], 2)     # the camera goes behind Link, so the draw (which turns him to it) keeps the way
+    client.step(8)
+    out["frames"] += 14
     if assist:
         out["assist_reply"] = client.act("aim %.2f %.2f %.2f" % tuple(point))
     client.input(None, ["ZR"], draw_frames)
-    used += draw_frames
-    if tilt_frames:
-        client.input([0 if tilt_frames > 0 else 180, 1.0], ["ZR"], abs(int(tilt_frames)))
-        used += abs(int(tilt_frames))
-    client.input(None, ["ZR"], hold_frames)
-    used += hold_frames
+    out["frames"] += draw_frames
     st = _st(client)
     stop = watch.stop(st)
     if stop:
-        out["frames"] = used
         return _out(out, "not fired", stop + (" (a help box?)" if stop == "event" else "") + " while drawing", st)
+    why = aim_view(client, point, out)
+    if not why:
+        if tilt_frames:
+            client.input([0 if tilt_frames > 0 else 180, 1.0], ["ZR"], abs(int(tilt_frames)))
+            out["frames"] += abs(int(tilt_frames))
+        client.input(None, ["ZR"], hold_frames)
+        out["frames"] += hold_frames
+        st, err = _aim_error(client, point)
+        if not tilt_frames and (err is None or math.hypot(*err) > AIM_TOL):   # the line through the target, once more
+            why = "the aim drifted off before the let-go (%s)" % (
+                "off the screen" if err is None else "%.3f %.3f from the reticle" % err)
+    st = _st(client)
+    stop = watch.stop(st)
+    if stop:
+        return _out(out, "not fired", stop + (" (a help box?)" if stop == "event" else "") + " while aiming", st)
+    if why:
+        client.input(None, ["ZR", "B"], 4)   # put it away: no shot at a target the view is not on
+        client.step(4)
+        out["frames"] += 8
+        st = _st(client)
+        return _out(out, "not aimed", why, st)
     client.input(None, [], RELEASE_FRAMES)
-    used += RELEASE_FRAMES
+    out["frames"] += RELEASE_FRAMES
+    used = out["frames"]
 
     seen, judged, why, ended = 0, None, None, None
     while seen < watch_frames:
@@ -343,7 +472,9 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
          stuck_looks=PUSH_STUCK_LOOKS, stand_m=PUSH_STAND_M):
     """Push the block `ident` (+ `name`, from the world list) `distance_m` metres along world yaw `yaw` (none: the
     direction from Link to the block). Link walks to the block's far side from the push (`stand_m` from its centre),
-    faces it and leans on it with the stick at full, a look every `chunk` frames.
+    faces it and leans on it until A offers something (the game's "Grab"), holds A `GRAB_FRAMES` to grab (a short tap
+    would climb onto it), then pushes with the stick at full, a look every `chunk` frames. `grab` says what A offered
+    and whether it was held.
 
     Results: `pushed` (the block moved the distance), `stuck` (it did not move for `stuck_looks` looks while Link stayed
     on it: it is blocked, at its end, or not a block that moves), `slipped` (Link moved but the block did not: he slid
@@ -379,6 +510,32 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
     out["frames"] += 2
     st = _st(client)
     watch = _Watch(st)
+    # The grab: lean on the block until A offers something, then hold A (a tap climbs onto the block). The stick
+    # alone then pushes; without a prompt nothing is pressed and the stick leans on it as before.
+    leaned = 0
+    while ph.no_prompt(st.get("prompt")) and leaned < GRAB_LEAN_FRAMES:
+        why = _refused(client.move(yaw, 1.0, 4, check=False))
+        if why:
+            return _out(out, "stopped", "move refused: " + why, st)
+        leaned += 4
+        out["frames"] += 4
+        st = _st(client)
+        stop = watch.stop(st)
+        if stop:
+            return _out(out, stop.split(" (")[0], stop, st)
+    out["grab"] = {"prompt": st.get("prompt"), "held": False}
+    if not ph.no_prompt(st.get("prompt")):
+        client.input(None, ["A"], GRAB_FRAMES)
+        out["frames"] += GRAB_FRAMES
+        st = _st(client)
+        out["grab"].update(held=True, after=st.get("prompt"))
+        now = _pos(st)
+        if now and link and now[1] > link[1] + 0.5:
+            return _out(out, "stuck", "Link went up %.2f m: he climbed onto the block instead of grabbing it"
+                        % (now[1] - link[1]), st)
+        stop = watch.stop(st)
+        if stop:
+            return _out(out, stop.split(" (")[0], stop + " while grabbing", st)
     still, last_moved, last_link = 0, 0.0, _pos(st)
     while True:
         a, w = ph._look(client, ident)

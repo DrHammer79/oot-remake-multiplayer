@@ -274,6 +274,19 @@ TEST_CASE("playtest: move's stick in the four quadrants with the camera toward +
     CHECK(ViewYaw(Camera(-135, false)).value() == doctest::Approx(-135.0));
 }
 
+TEST_CASE("playtest: the state's view has the camera's yaw, pitch and matrix") {
+    const std::string v = ViewMember(Camera(90, true, 30), true);
+    CHECK(v.rfind(",\"view\":{\"yaw\":90,\"pitch\":-30,\"clip\":[", 0) == 0);
+    CHECK(v.find(",1.7,") != std::string::npos);
+    CHECK(v.size() - v.rfind("],\"y_down\":true}") == std::string("],\"y_down\":true}").size());
+    CHECK(ViewMember(Camera(-45, false)).find("\"yaw\":-45,\"pitch\":0,") != std::string::npos);
+    CHECK(ViewMember(std::nullopt) == ",\"view\":null");
+    CHECK(ViewMember(std::array<float, 16>{}) == ",\"view\":null");   // no forward
+    auto bad = Camera(0, true);
+    bad[5] = NAN;
+    CHECK(ViewMember(bad) == ",\"view\":null");
+}
+
 TEST_CASE("playtest: move has no stick for a camera with no ground direction") {
     CHECK_FALSE(MoveAxes(Camera(0, true, 90), 0, 1));  // straight down
     std::array<float, 16> zero{};

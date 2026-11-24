@@ -357,6 +357,11 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
         auto& store = CoopWorldSnapshot::TheStore();
         out += BodyMember(store.Enabled() ? store.Get() : std::nullopt, WorldListNow());
     }
+    {
+        const auto camera = CoopCamera::Latest();
+        out += ViewMember(camera ? std::optional<std::array<float, 16>>(camera->clip_from_world) : std::nullopt,
+                          camera && camera->y_down);
+    }
     out += ",\"control\":" + std::string(status ? "true" : "false");
     Core::System& sys = *g_system;
     out += ",\"equips\":{";

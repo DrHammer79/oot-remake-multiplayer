@@ -16,8 +16,11 @@ class Sim:
     """A held game: Link moves 0.15 m a frame at full stick along the world yaw, stands on `ground(x, z)` (None: a
     pit, which puts him back at `respawn` and takes 2 life unless he runs off the edge at full stick and it is at most
     `jump_m` wide). A ladder (`ladder`: x, z, bottom, top) holds him when he is within 0.6 m of it: the stick up climbs 0.05 m a
-    frame. A block moves after Link leaned on it `lean` frames. A shot: ZR held 30 frames or more and let go spends one
-    seed and, when the target `takes` shots and Link faces it, takes one life."""
+    frame. A block moves after Link leaned on it `lean` frames. The camera (`cam_yaw`, `cam_pitch`, from 1 m over
+    Link) is in the state's `view` as the game's clip matrix (right-handed, y up); ZL puts it behind Link, drawing
+    (ZR) turns Link to it, and while drawing the `aim_stick` ("right", "left" or None) turns it, the stick's up
+    looking down (an inverted aim). A shot: ZR held 30 frames or more and let go spends one seed and, when the target
+    `takes` shots and the reticle's line passes within 1 degree of it (4 with `aim`: the nudge), takes one life."""
 
     def __init__(self, pos=(0.0, 0.0, 0.0), ground=None, ladder=None, actors=None, seeds=5, item_owned=True):
         self.pos = list(pos)
@@ -42,11 +45,47 @@ class Sim:
         self.no_list = False
         self.refuse_move = False   # every `move` answers no_camera and runs no frame
         self.refused = 0
+        self.cam_yaw, self.cam_pitch = 0.0, 0.0
+        self.aim_stick = "right"
+        self.has_view = True
+        self.grab_needed = False   # a block moves only after A was held 30 frames at it (prompt "Grab"); a tap climbs
+        self.grabbed = False
+        self.a_held = 0
 
     # --- the bridge ---
     def state(self):
         return {"scene": self.scene, "pos": list(self.pos), "life": self.life, "max_life": 12, "event": self.event,
-                "loading": False, "prompt": self.prompt, "inventory": dict(self.inv), "frame": self.frame}
+                "loading": False, "prompt": self.prompt, "inventory": dict(self.inv), "frame": self.frame,
+                "view": self._view() if self.has_view else None}
+
+    def _eye(self):
+        return (self.pos[0], self.pos[1] + 1.0, self.pos[2])
+
+    def _forward(self):
+        y, p = math.radians(self.cam_yaw), math.radians(self.cam_pitch)
+        return (math.sin(y) * math.cos(p), math.sin(p), math.cos(y) * math.cos(p))
+
+    def _view(self):
+        f = self._forward()
+        y = math.radians(self.cam_yaw)
+        r = (-math.cos(y), 0.0, math.sin(y))              # right-handed: +z ahead has -x on the right
+        u = (r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0])
+        e = self._eye()
+        dot = lambda a, b: sum(a[i] * b[i] for i in range(3))
+        sx, sy = 1.0 / math.tan(math.radians(35)), 1.0 / math.tan(math.radians(30))
+        clip = [sx * r[0], sx * r[1], sx * r[2], -sx * dot(r, e),
+                sy * u[0], sy * u[1], sy * u[2], -sy * dot(u, e),
+                0.0, 0.0, 0.0, 0.0,
+                f[0], f[1], f[2], -dot(f, e)]
+        return {"yaw": round(self.cam_yaw, 2), "pitch": round(self.cam_pitch, 2), "clip": clip, "y_down": False}
+
+    def _look(self, stick):
+        angle, strength = stick
+        x, y = math.sin(math.radians(angle)) * strength, math.cos(math.radians(angle)) * strength
+        x = 0.0 if abs(x) < 0.1 else x                    # a dead zone
+        y = 0.0 if abs(y) < 0.1 else y
+        self.cam_yaw = (self.cam_yaw - 1.5 * x) % 360     # right turns right: the yaw goes down in a right-handed view
+        self.cam_pitch = max(-80.0, min(80.0, self.cam_pitch - 1.0 * y))
 
     def world(self):
         if self.no_list:
@@ -70,18 +109,44 @@ class Sim:
 
     def input(self, stick=None, buttons=(), frames=1, rstick=None):
         for _ in range(frames):
-            if "ZR" in buttons:
+            if "ZL" in buttons:
+                self.cam_yaw, self.cam_pitch = self.facing, 0.0
+            if "B" in buttons and self.zr:
+                self.zr = -1                              # put away: no shot on the let-go
+            if "ZR" in buttons and self.zr >= 0:
                 self.zr += 1
+                if self.zr == 1:
+                    self.facing = self.cam_yaw            # the draw turns Link to the camera
                 if self.event_on_draw and self.zr == 10:
                     self.event = True
-            else:
+            elif "ZR" not in buttons:
                 if self.zr >= 30:
                     self._fire()
                 self.zr = 0
+            if self.zr > 0 and rstick and self.aim_stick == "right":
+                self._look(rstick)
+            if self.zr > 0 and stick and self.aim_stick == "left":
+                self._look(stick)
+                stick = None
+            if self.zr > 0:
+                stick = None                              # no walking while aiming
+            if "A" in buttons:
+                self.a_held += 1
+                if self.a_held == 30 and self.prompt == "Grab":
+                    self.grabbed, self.prompt = True, "Empty"
+            else:
+                self._let_go_a()
             if stick:
                 self._stick(stick)
             self._frames(1)
+        self._let_go_a()   # the pad goes back to nothing after the frames
         return {"ok": True, "state": self.state()}
+
+    def _let_go_a(self):
+        if 0 < self.a_held < 30 and self.prompt == "Grab":   # a tap: up onto the block
+            self.pos[1] += 1.0
+            self.prompt = None
+        self.a_held = 0
 
     def move(self, yaw, strength=1.0, frames=1, check=True):
         if self.refuse_move:
@@ -106,10 +171,18 @@ class Sim:
         if n <= 0:
             return
         self.inv["PouchData.Item_DekuSeed.StockNum"] = n - 1
+        f, e = self._forward(), self._eye()
+        # The reticle is a little over the middle (km.RETICLE): the shot goes along its line, not the camera's.
+        y, p = math.radians(self.cam_yaw), math.radians(self.cam_pitch)
+        up = (-math.sin(y) * math.sin(p), math.cos(p), -math.cos(y) * math.sin(p))
+        lift = km.RETICLE[1] * math.tan(math.radians(30))
+        f = [f[i] + up[i] * lift for i in range(3)]
         for a in self.actors:
             if a.get("takes"):
-                want = math.degrees(math.atan2(a["pos"][0] - self.pos[0], a["pos"][2] - self.pos[2])) % 360
-                if self.assist or abs((want - self.facing + 180) % 360 - 180) < 3:
+                d = [a["pos"][i] - e[i] for i in range(3)]
+                off = math.degrees(math.acos(max(-1.0, min(1.0, sum(d[i] * f[i] for i in range(3)) /
+                                                             (math.hypot(*d) * math.hypot(*f))))))
+                if off < (4.0 if self.assist else 1.0):
                     a["life"] -= 1
                     if a["life"] <= 0:
                         a["alive"] = False
@@ -140,6 +213,9 @@ class Sim:
         nz = self.pos[2] + math.cos(math.radians(yaw)) * step
         for a in self.actors:
             if a.get("block") and math.hypot(nx - a["pos"][0], nz - a["pos"][2]) < 0.9:
+                if self.grab_needed and not self.grabbed:
+                    self.prompt = "Grab"
+                    return
                 self.lean += 1
                 if self.lean < self.lean_needed:
                     return
@@ -203,6 +279,50 @@ class Shoot(unittest.TestCase):
         self.assertEqual(r["result"], "not fired")
         self.assertIn("help box", r["reason"])
 
+    def test_turns_the_view_with_the_right_stick_and_checks_the_reticle(self):
+        g = Sim(actors=[eye(pos=(3.0, 4.0, 7.0))])
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "hit", r)
+        self.assertEqual(r["aim"]["stick"], "right")
+        self.assertLessEqual(math.hypot(*r["aim"]["error"]), km.AIM_TOL)
+        self.assertGreater(abs(r["aim"]["error_start"][1]), 0.1)   # it started well off: the turn did the aim
+
+    def test_falls_back_to_the_left_stick(self):
+        g = Sim(actors=[eye()])
+        g.aim_stick = "left"
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "hit", r)
+        self.assertEqual(r["aim"]["stick"], "left")
+
+    def test_no_stick_turns_the_view_is_not_fired(self):
+        g = Sim(actors=[eye()])
+        g.aim_stick = None
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "not aimed", r)
+        self.assertIn("neither stick", r["reason"])
+        self.assertEqual(g.inv["PouchData.Item_DekuSeed.StockNum"], 5)   # put away with B, no seed spent
+
+    def test_no_view_is_not_fired(self):
+        g = Sim(actors=[eye()])
+        g.has_view = False
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "not aimed", r)
+        self.assertIn("no camera view", r["reason"])
+        self.assertEqual(g.inv["PouchData.Item_DekuSeed.StockNum"], 5)
+
+    def test_on_screen_projects_and_flips_y_down(self):
+        g = Sim()
+        v = g._view()
+        x, y = km.on_screen(v, (0.0, 1.0, 5.0))
+        self.assertAlmostEqual(x, 0.0)
+        self.assertAlmostEqual(y, 0.0)
+        x, y = km.on_screen(v, (-1.0, 2.0, 5.0))         # -x is the right of a +z view (right-handed), up is up
+        self.assertGreater(x, 0.0)
+        self.assertGreater(y, 0.0)
+        self.assertLess(km.on_screen(dict(v, y_down=True), (-1.0, 2.0, 5.0))[1], 0.0)
+        self.assertIsNone(km.on_screen(v, (0.0, 1.0, -5.0)))   # behind
+        self.assertIsNone(km.on_screen(None, (0.0, 1.0, 5.0)))
+
     def test_assist_adds_the_aim_line(self):
         g = Sim(actors=[eye(pos=(4.0, 3.0, 8.0))])
         r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye", assist=True)
@@ -245,7 +365,7 @@ class Shoot(unittest.TestCase):
         calls = []
         orig = g.input
         g.input = lambda stick=None, buttons=(), frames=1, rstick=None: (calls.append((stick, list(buttons), frames)),
-                                                                         orig(stick, buttons, frames))[1]
+                                                                         orig(stick, buttons, frames, rstick))[1]
         km.shoot(g, "slingshot", ident=7, name="Obj_Eye", tilt_frames=-6)
         self.assertIn(([180, 1.0], ["ZR"], 6), calls)
 
@@ -338,6 +458,38 @@ class Push(unittest.TestCase):
         frames_before = r["frames"]
         self.assertEqual(r["moved_m"], 0.0)
         self.assertEqual(g.frame - 100, frames_before)    # only frames that ran are counted
+
+    def test_holds_a_to_grab_before_the_stick(self):
+        g = Sim(actors=[block()])
+        g.grab_needed = True
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["result"], "pushed", r)
+        self.assertEqual(r["grab"], {"prompt": "Grab", "held": True, "after": "Empty"})
+        self.assertEqual(g.pos[1], 0.0)   # not climbed onto it
+
+    def test_without_the_grab_the_block_does_not_move(self):
+        g = Sim(actors=[block()])
+        g.grab_needed = True
+        orig = g.input
+        g.input = lambda stick=None, buttons=(), frames=1, rstick=None: orig(stick, [b for b in buttons if b != "A"],
+                                                                             frames, rstick)
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["result"], "stuck", r)
+        self.assertEqual(r["moved_m"], 0.0)
+
+    def test_a_tap_climbs_onto_it_and_is_reported(self):
+        g = Sim(actors=[block()])
+        g.grab_needed = True
+        orig = g.input
+        g.input = lambda stick=None, buttons=(), frames=1, rstick=None: orig(stick, buttons, min(frames, 4), rstick)
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["result"], "stuck", r)
+        self.assertIn("climbed onto the block", r["reason"])
+
+    def test_no_prompt_presses_nothing(self):
+        g = Sim(actors=[block()])
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["grab"], {"prompt": None, "held": False})
 
     def test_no_list_and_gone(self):
         g = Sim(actors=[block()])

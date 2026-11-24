@@ -206,12 +206,18 @@ const char* KindWord(Kind kind);
 // on the parsed kinds, so case, spacing and a hidden second line cannot get past it.
 std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
 
-// `aim` (row 173): where an arrow flying from `from` is put so it goes into `target`: `short_m` short of the target
-// on the line from `from` (at `from` when nearer than that), turned to face it (place, then the 3x3 rows, as the
-// actor's +0x31c..+0x34b: column 2 is the way it faces, column 1 the up nearest the world's). Nothing when the two
-// points are the same or not finite.
-std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, const std::array<float, 3>& target,
-                                             float short_m);
+// `aim` (row 173): the last bit of a player's aim. The shot is aimed by turning the view the way a player does; at
+// the let-go the arrow or seed is only moved sideways onto the line through the target along its own flight (its
+// way `flight` and speed stay the game's), and only when that flight already points within `max_deg` of the target.
+// `off_deg`: how far it pointed off. `put`: the new place, none when it was too far off (no cheat for a bad aim) or
+// flying away. Nothing at all when there is no flight, the shot is at the target, or a value is not finite.
+struct AimNudged {
+    float off_deg = 0.0f;
+    std::optional<std::array<float, 3>> put;
+};
+std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
+                                  const std::array<float, 3>& target, float max_deg);
+inline constexpr float kAimNudgeDeg = 4.0f;   // ~0.5 m sideways at 8 m: the reticle's slack, not a new aim
 // `aim`: a nocked arrow is let go when it moves more than this between two frames (its flight is ~113 m/s, ~1.9 m
 // a frame at 60; a nocked one moves with Link's hands, well under it).
 inline constexpr float kAimLetGoM = 1.0f;

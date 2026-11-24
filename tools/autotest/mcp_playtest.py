@@ -299,15 +299,18 @@ HELPER_TOOLS = [
 
 MOVE_NOTE = (" Each ends with a `look`. It acts on this game only (in a pair, the other game runs the same frames).")
 MOVE_TOOLS = [
-    {"name": "shoot", "description": "Take out an aimed item and fire it at a target: `assign` puts the item on ZR, "
-     "Link turns to the target (`face`), ZR is held to draw (60 + 30 frames), the stick tilts the aim for `tilt_frames` "
-     "(+ up, - down; how far a frame tilts is not measured), ZR is let go, and the target is watched for `watch_frames`. "
+    {"name": "shoot", "description": "Take out an aimed item and fire it at a target the way a player aims: `assign` "
+     "puts the item on ZR, Link turns to the target (`face`) and ZL puts the camera behind him, ZR is held 60 frames to "
+     "draw, then a stick turns the view until the target is under the reticle (from the state's `view`; which stick and "
+     "which way is learnt by a small push of each), ZR is held 30 more, the aim is checked again, ZR is let go, and the "
+     "target is watched for `watch_frames`. `tilt_frames` (+ up, - down) tilts by hand after the aim. "
      "The target is `id` + `name` (from get_world) or a point `at` [x, y, z]. `result`: hit (its life fell, it died or "
      "left the list), changed (another field it shows changed), miss (the ammo went down, the target did not change), "
-     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item) or a "
-     "stop. `aim` has the world yaw and pitch from Link to the target; the game's aim tilt is not readable, so the "
-     "pitch is what the shot needs, not what Link aimed. `assist` true adds the test `aim X Y Z` line: the next arrow "
-     "or seed is steered onto the target (a hit then proves the target takes the shot, not the aim). " + ACT_NOTE
+     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item), "
+     "not aimed (the view could not be turned onto it; B puts the item away, no shot) or a stop. `aim` has the world "
+     "yaw and pitch from Link to the target, the stick used, the turns and the last `error` on the screen. `assist` "
+     "true adds the test `aim X Y Z` line: a shot whose flight is within 4 degrees of the target is moved sideways onto "
+     "its line (a nudge; farther off it is left alone). " + ACT_NOTE
      + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["item"], "properties": dict(
          ACTOR_ARGS, item={"type": "string", "enum": list(kit_move.ITEMS)},
