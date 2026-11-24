@@ -264,12 +264,13 @@ write_note
 : >"$log"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix0.txt" 2>&1; export CODE=$?
 check 'mixed: a clean set with its note: built already, nothing built' bash -c '[ $CODE -eq 0 ] && grep -q "built already" "$1" && ! grep -q "^make_game" "$2"' _ "$tmp/mix0.txt" "$log"
+export VARIANTS_BEFORE=$(ls "$D/game-variants" 2>/dev/null)
 printf 'image.bin of another build' >"$D/game/image.bin"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix1.txt" 2>&1; export CODE=$?
 check 'mixed: image.bin swapped: the start stops, names the file, says nothing was changed and how to build again' \
     bash -c '[ $CODE -ne 0 ] && grep -q "image.bin is not the file Longshot put into this game" "$1" && grep -q "Nothing was changed" "$1" && grep -q -- "--rebuild" "$1"' _ "$tmp/mix1.txt"
 check 'mixed: nothing built, the file untouched, nothing kept as a build' \
-    bash -c '! grep -q "^make_game" "$1" && [ "$(cat "$2/game/image.bin")" = "image.bin of another build" ] && [ ! -d "$2/game-variants" ]' _ "$log" "$D"
+    bash -c '! grep -q "^make_game" "$1" && [ "$(cat "$2/game/image.bin")" = "image.bin of another build" ] && [ "$(ls "$2/game-variants" 2>/dev/null)" = "$VARIANTS_BEFORE" ]' _ "$log" "$D"
 rm -f "$D/game/longshot_vk.so"
 bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix2.txt" 2>&1; export CODE=$?
 check 'mixed: a file the note lists is missing: refused too' bash -c '[ $CODE -ne 0 ] && grep -q "longshot_vk.so is missing" "$1"' _ "$tmp/mix2.txt"
@@ -601,7 +602,7 @@ check 'Character Select tool: a hanging tool -> stopped at the idle limit with i
 rm -rf "$CS"; cs2_zip; printf 'character_select = yes\n' >>"$D/coop-options.ini"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t4.txt" 2>&1; export CODE=$?
 check 'Character Select tool: the RomFS there at the install -> made at once, full part gets no --exclude' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Made_By_Tool.bin" ] && ! grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q "^v2 .* full cz2$" "$2/coop-charsel.txt" && [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t4.txt" "$CS" "$D"
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Made_By_Tool.bin" ] && ! grep -q -- "--exclude" "$2/romfs/Model/Made_By_Tool.bin" && grep -q "^v2 .* full cz2v$" "$2/coop-charsel.txt" && [ ! -e "$3/builder/charsel/tool" ]' _ "$tmp/build-t4.txt" "$CS" "$D"
 # A tool_folder that leaves the zip is refused.
 rm -rf "$CS"; cs2_zip; cs2_pin 'CS-v2/../x'
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-t5.txt" 2>&1
@@ -775,7 +776,8 @@ rm -rf "$kit2"
 # --- start.sh (Linux only: its checks read this PC) --------------------------------------------
 if [[ $(uname -s) == Linux ]]; then
     : >"$log"
-    OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
+    # (the problem-report address lookup (problem_report.py ADDRESS_LOOKUP) kept offline: this kit has no address)
+    https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
     check 'start: builds if needed, then starts the game in data/game' bash -c '[ $CODE -eq 0 ] && grep -q "^started $2 1 $3$" "$1"' _ "$log" "$D" "$D/game"
     check 'start: without a terminal, what it says goes to data/logs/start.log' has "$D/logs/start.log" 'start without a terminal'
     # MsgNotFound (P-parked): start.sh's own merge after build.sh (its pack step) parks the tab's files that build.sh's
