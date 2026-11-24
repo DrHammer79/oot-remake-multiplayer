@@ -2966,6 +2966,10 @@ void OnEvent(const coop::net::Event& event) {
         }
         ++g_emote_serials[emote->player_number];
         const CoopEmote::Def* def = CoopEmote::ById(emote->id);
+        if (g_director) {
+            g_director->Note("P" + std::to_string(emote->player_number) + " EMOTE received: '" +
+                            (def != nullptr ? def->name : "?") + "'");
+        }
         if (def != nullptr && def->sound[0] != '\0') {
             auto& queue = g_sounds[emote->player_number];
             if (queue.size() >= CoopLinkSound::kHeardMax) {
@@ -3139,6 +3143,18 @@ void Publish(std::uint64_t main_base, const std::optional<std::string>& scene,
         return;  // puppets are off
     }
     std::vector<Remote> remotes = Collect(session, server_now_us);
+    {
+        // One log line when a puppet starts playing an emote (its serial is the emote's own: kEmoteSerialBase up).
+        static std::array<std::uint32_t, kNumbers> logged{};
+        for (const auto& r : remotes) {
+            if (r.number < logged.size() && r.anim && r.anim_serial >= kEmoteSerialBase &&
+                r.anim_serial != logged[r.number]) {
+                logged[r.number] = r.anim_serial;
+                g_director->Note("P" + std::to_string(r.number) + " EMOTE played on the puppet: AS '" +
+                                r.anim->name + "'");
+            }
+        }
+    }
     Gear own_gear;
     std::optional<std::uint8_t> own_drawn;
     std::optional<std::uint32_t> own_color;
