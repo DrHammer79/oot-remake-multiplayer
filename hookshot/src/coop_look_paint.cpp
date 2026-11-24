@@ -67,6 +67,8 @@ struct Painter {
     const std::vector<Rule>& rules;
     std::vector<double> base;    // each rule's average linear luma in the texture
     std::vector<Rgb> target;
+    int forced = -1;              // the region's rule for this block (Region), -1 none
+    std::uint32_t tones = 0;      // every part's tones (Region::tones): never forced
 
     int Match(const Rgb& c) const {
         std::optional<std::uint32_t> tone;   // (worked out once, when a rule asks)
@@ -88,7 +90,10 @@ struct Painter {
     }
     bool Usable(int rule) const { return rule >= 0 && base[static_cast<std::size_t>(rule)] > 0; }
     int Paints(const Rgb& c) const {
-        const int r = Match(c);
+        int r = Match(c);
+        if (r < 0 && forced >= 0 && Forceable(c, tones)) {
+            r = forced;   // row 185: an encoder's end inside the part's region
+        }
         return Usable(r) ? r : -1;
     }
     Rgb Paint(const Rgb& c, int rule) const {
@@ -875,6 +880,14 @@ std::uint32_t ToneOf(const Rgb& c) {
     return kPink;
 }
 
+bool Forceable(const Rgb& c, std::uint32_t tones) {
+    if ((ToneOf(c) & tones) != 0) {
+        return false;
+    }
+    const int hi = std::max({c[0], c[1], c[2]}), lo = std::min({c[0], c[1], c[2]});
+    return hi < 25 || hi - lo < 0.35 * hi;
+}
+
 bool IsGreen(const Rgb& c) {
     const int hi = std::max({c[0], c[1], c[2]}), lo = std::min({c[0], c[1], c[2]});
     if (hi == lo) {
@@ -946,7 +959,13 @@ double AverageLuma(Format f, std::span<const std::uint8_t> texels) {
 
 std::size_t Recolour(Format f, std::span<const std::uint8_t> texels, std::span<std::uint8_t> out,
                      const std::vector<Rule>& rules) {
+    return Recolour(f, texels, out, rules, Region{});
+}
+
+std::size_t Recolour(Format f, std::span<const std::uint8_t> texels, std::span<std::uint8_t> out,
+                     const std::vector<Rule>& rules, const Region& region) {
     Painter p{rules, std::vector<double>(rules.size(), 0.0), {}};
+    p.tones = region.tones;
     for (const Rule& r : rules) {
         p.target.push_back(RgbOf(r.colour));
     }
@@ -976,6 +995,10 @@ std::size_t Recolour(Format f, std::span<const std::uint8_t> texels, std::span<s
     std::size_t changed = 0;
     for (std::size_t at = 0; at + step <= size; at += step) {
         std::uint8_t* o = out.data() + at;
+        // The part whose region this block is in takes its other pale or dark ends (each rule's average
+        // above is the tones' own, as before).
+        const std::size_t block = at / step;
+        p.forced = block < region.rule.size() ? region.rule[block] : -1;
         if (f == Format::astc) {
             if (const auto nv = AstcBlock(Load(texels.data() + at), p)) {
                 Store(*nv, o);

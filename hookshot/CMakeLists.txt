@@ -48,12 +48,12 @@ add_library(hookshot_coop MODULE src/coop_hookshot.cpp src/coop_draw.cpp src/coo
   src/coop_host_menu.cpp src/coop_title.cpp src/coop_title_menu.cpp src/coop_input.cpp src/coop_pause.cpp
   src/coop_pause_menu.cpp src/coop_original.cpp src/coop_pause_files.cpp src/coop_i18n.cpp src/coop_null_page.cpp
   src/coop_mod_json.cpp src/coop_mod_library.cpp src/coop_mods.cpp src/coop_mod_plugins.cpp src/coop_mod_guard.cpp
-  src/coop_mod_screens.cpp src/coop_playtest.cpp src/coop_playtest_core.cpp
+  src/coop_mod_screens.cpp src/coop_playtest.cpp src/coop_playtest_core.cpp src/coop_talk_text.cpp
   src/coop_mods_runtime.cpp src/coop_rando.cpp src/coop_mods_tab.cpp src/coop_mods_tab_module.cpp
   src/coop_lobby_tab.cpp src/coop_lobby_tab_module.cpp
   src/coop_pause_tab.cpp src/coop_pause_tab_module.cpp src/coop_title_native.cpp src/coop_problem_ask.cpp src/coop_native_tags.cpp
   src/coop_auto_rejoin.cpp src/coop_lan.cpp src/coop_lan_net.cpp src/coop_room_list.cpp src/coop_browse.cpp src/coop_longshot_settings.cpp
-  src/coop_look.cpp src/coop_look_live.cpp src/coop_look_tunic.cpp src/coop_look_paint.cpp src/coop_look_parts.cpp src/coop_look_menu.cpp src/coop_snail_custom.cpp src/coop_look_view.cpp
+  src/coop_look.cpp src/coop_look_live.cpp src/coop_look_tunic.cpp src/coop_look_paint.cpp src/coop_look_parts.cpp src/coop_look_menu.cpp src/coop_snail_custom.cpp src/coop_menu_state.cpp src/coop_look_view.cpp
   ${_coop_sources})
 # compat/ first: its core/ and common/ headers stand in for the emulator's.
 target_include_directories(hookshot_coop PRIVATE compat src "${_coop_hook}" ../server)

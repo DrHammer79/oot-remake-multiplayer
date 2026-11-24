@@ -80,6 +80,9 @@ bool HostHasNoSave();
 // Hookshot: a session has chosen its save folder and is still connected (false before that, and once it ended:
 // the host dropped, the link went, Leave). A title waiting for the host's save stops when it goes off.
 bool SessionLive();
+// Row 63, Gold Skulltulas Not shared, a guest: the game plays from the co-op folder whose host's save was written with
+// our race (coop_gold_mode.h), so the Skulltulas it shows are ours and the hook keeps the race from them.
+bool PlaysRaceSave();
 
 // Hookshot's title module, each pad poll: whether the title's menu is up. A guest switches to the host's save only
 // then (never while a file loads).

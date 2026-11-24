@@ -40,6 +40,29 @@ import sys
 import time
 
 WINDOWS = os.name == "nt"
+CREATE_NO_WINDOW = 0x08000000   # a console program started with this gets no window, and its own children none either
+
+
+def no_window(kw=None):
+    """Popen keywords with CREATE_NO_WINDOW added on Windows (other keywords and other creation flags kept).
+    Why: a console program (powershell, tasklist, cmd, git, ninja, a python helper) started by a process that has no
+    console of its own, such as the lane watchdog or a harness's shell, gets a NEW visible console window; started from
+    a long run, they flash on the screen in a chain. Use run_quiet and popen_quiet for every such child. NEVER for a
+    game (Longshot's exe): its window is the game's own and a hidden console would change how it starts."""
+    kw = dict(kw or {})
+    if WINDOWS:
+        kw["creationflags"] = kw.get("creationflags", 0) | CREATE_NO_WINDOW
+    return kw
+
+
+def run_quiet(cmd, **kw):
+    """subprocess.run of a console program with no window on Windows (see no_window)."""
+    return subprocess.run(cmd, **no_window(kw))
+
+
+def popen_quiet(cmd, **kw):
+    """subprocess.Popen of a console program with no window on Windows (see no_window)."""
+    return subprocess.Popen(cmd, **no_window(kw))
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 # build-game.lock: a game build (a cache miss) is running; it stops both test lanes (tools/autotest/lanes.py), whose
@@ -152,7 +175,7 @@ def has_code_patches(mods):
     return False
 
 
-def code_mods_line(mods, repo=REPO, run=subprocess.run):
+def code_mods_line(mods, repo=REPO, run=run_quiet):
     """The code patches' part of a game's stamp for a mods folder: '' without code patches, else the kit's own line
     (Get-KitExefsStampLine: each patch file's path and SHA-256, and those mods' on/off rows in coop-mods.list)."""
     if not has_code_patches(mods):
@@ -168,7 +191,7 @@ def code_mods_line(mods, repo=REPO, run=subprocess.run):
     return r.stdout.replace("\r", "")
 
 
-def code_mods_mismatch(game, repo=REPO, run=subprocess.run):
+def code_mods_mismatch(game, repo=REPO, run=run_quiet):
     """None when a game folder's mods have the code patches its game was built with (coop-built-from.txt's exefs= line,
     none without), else why not. A code mod put into a pair after its build (lane-0119 2026-11-21: Character Select
     copied into lane1's mods) shows his menus without his code: no Characters tab, a pick does nothing."""
@@ -188,7 +211,7 @@ def code_mods_mismatch(game, repo=REPO, run=subprocess.run):
 PACK_DIR = os.path.join("mods", "contents", "0400486024DEC000", "coop-puppet")
 
 
-def sync_charsel_native(pairs, repo=REPO, run=subprocess.run):
+def sync_charsel_native(pairs, repo=REPO, run=run_quiet):
     """Co-op's own Characters tab's code patch (charsel/data/charsel-native.ips) put into or taken out of each pair's
     pack folder before the pairs' code patches are read, by the kit's own rule (kit-paths.ps1
     Sync-KitCharselNativePatch, what hookshot-build.ps1 does before its stamp): a pair without Character Select's code
@@ -211,7 +234,7 @@ def sync_charsel_native(pairs, repo=REPO, run=subprocess.run):
     return {p: g for (p, _), g in zip(packs, got)}
 
 
-def pairs_code_mods(pairs, repo=REPO, run=subprocess.run):
+def pairs_code_mods(pairs, repo=REPO, run=run_quiet):
     """(line, mods folder) of the pairs' code patches; ('', None) when no pair has any. One game serves every pair,
     so pairs with different code patches cannot be built together (Fail)."""
     found = [(code_mods_line(os.path.join(p, "mods"), repo, run), os.path.join(p, "mods")) for p in pairs]
@@ -246,17 +269,45 @@ def key_of(stamp_text):
 
 # --- the cache ---------------------------------------------------------------------------------------------------
 
+_packaged_warned = set()
+
+
+def packaged(path):
+    """Whether a path resolves into a packaged (MSIX) app's own copy of AppData (<...>/AppData/Local/Packages/):
+    a process started from such an app writes its %LOCALAPPDATA% files there, where no other process sees them."""
+    p = os.path.realpath(path).replace("\\", "/").lower()
+    return "/appdata/local/packages/" in p
+
+
 def cache_root():
     root = os.environ.get("OOT_COOP_HS_CACHE")
     if not root:
         base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".cache")
         root = os.path.join(base, "oot-coop", "hs-cache")
+    if root not in _packaged_warned and packaged(root):
+        _packaged_warned.add(root)
+        sys.stderr.write("hs.py: WARNING: the cache %s resolves into a packaged app's own AppData (%s): its files are"
+                         " invisible to processes started outside that app (the kit's start, Explorer) and go with"
+                         " the app. Set OOT_COOP_HS_CACHE to a folder outside AppData (docs/testing.md).\n"
+                         % (root, os.path.realpath(root)))
     return root
+
+
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003   # (a junction's reparse tag: stat.IO_REPARSE_TAG_MOUNT_POINT, Windows)
 
 
 def is_link(path):
     """A symlink or (Windows) a junction: the game folders link romfs to a shared copy."""
-    return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+    if os.path.islink(path):
+        return True
+    if hasattr(os.path, "isjunction"):   # (Python 3.12+)
+        return os.path.isjunction(path)
+    # Before 3.12 (CI's 3.10): the junction's reparse tag. Without this a junction looked like a real folder, and
+    # remove_tree / cache_prune went into it and deleted the shared romfs it points to.
+    try:
+        return os.lstat(path).st_reparse_tag == IO_REPARSE_TAG_MOUNT_POINT
+    except (OSError, AttributeError):   # (missing, or not Windows: no st_reparse_tag)
+        return False
 
 
 def entries(root=None):
@@ -381,7 +432,7 @@ def make_link(path, target):
         else:
             raise Fail("%s is a real folder; will not replace it with a link to %s" % (path, target))
     if WINDOWS and os.path.isdir(target):
-        r = subprocess.run(["cmd", "/c", "mklink", "/J", path, target], capture_output=True, text=True)
+        r = run_quiet(["cmd", "/c", "mklink", "/J", path, target], capture_output=True, text=True)
         if r.returncode:
             raise Fail("mklink /J %s failed: %s" % (path, r.stdout + r.stderr))
     else:
@@ -390,7 +441,11 @@ def make_link(path, target):
 
 def cache_store(src, repo=REPO, force=False, dry=False, say=print, want=None):
     """Stores a built game folder under the current key (want: the stamp; default the repo's with the folder's own
-    mods' code patches). The folder's coop-built-from.txt must match the stamp."""
+    mods' code patches). The folder's coop-built-from.txt must match the stamp. A pin's game folder has no mods of a
+    player (its mods hold the last kit build's puppet pack): its want must be given (the pairs': cache store --pair)."""
+    if not want and in_pins(src):
+        raise Fail("%s is a pin's game folder: its mods are the last kit build's, not a pair's; name the pairs whose"
+                   " game it is (cache store --pair <pair>)" % src)
     want = want or stamp(repo) + code_mods_line(os.path.join(src, "mods"), repo)
     k = key_of(want)
     if not find_exe(src):
@@ -620,24 +675,59 @@ def remove_tree(path):
 def main_root(repo=REPO):
     """The main checkout's root (locks are shared by all worktrees)."""
     try:
-        common = subprocess.run(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        common = run_quiet(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                 capture_output=True, text=True, check=True).stdout.strip()
         return os.path.dirname(common)
     except (OSError, subprocess.CalledProcessError):
         return repo
 
 
-def pid_alive(pid):
-    if pid <= 0:
-        return False
-    if WINDOWS:
-        r = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], capture_output=True, text=True)
-        return ('"%d"' % pid) in r.stdout
+def _win_pid_probe(pid):
+    """'alive', 'gone' or 'unknown' for a pid, from the process itself (OpenProcess and a zero wait on its handle).
+    Gone only when Windows says so: no such process (ERROR_INVALID_PARAMETER) or its handle is signalled (exited).
+    Anything else (access denied, an API error) is 'unknown'."""
+    import ctypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+    k.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+    k.WaitForSingleObject.restype = ctypes.c_ulong
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    h = k.OpenProcess(0x00100000 | 0x1000, False, pid)   # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        err = ctypes.get_last_error()
+        return "gone" if err == 87 else ("alive" if err == 5 else "unknown")   # 87 no such pid, 5 exists but denied
+    try:
+        w = k.WaitForSingleObject(h, 0)
+        return "gone" if w == 0 else ("alive" if w == 0x102 else "unknown")   # WAIT_OBJECT_0: exited; WAIT_TIMEOUT
+    finally:
+        k.CloseHandle(h)
+
+
+def _posix_pid_probe(pid):
     try:
         os.kill(pid, 0)
-        return True
+        return "alive"
+    except PermissionError:
+        return "alive"      # (exists, someone else's)
+    except ProcessLookupError:
+        return "gone"
     except OSError:
+        return "unknown"
+
+
+def pid_alive(pid, probe=None):
+    """False only when the process is known to be gone. A probe that cannot tell (an API error, a busy PC) counts as
+    alive: every caller ends a session, kills or takes a lock on False, so a wrong False is the harmful one (a live game
+    once had its session closed under it when one tasklist call came back empty). The lock's age limit still frees a
+    lock whose owner can never be probed."""
+    if pid <= 0:
         return False
+    probe = probe or (_win_pid_probe if WINDOWS else _posix_pid_probe)
+    try:
+        return probe(pid) != "gone"
+    except Exception:
+        return True
 
 
 def host_id():
@@ -759,7 +849,7 @@ def msvc_prefix():
                            "Microsoft Visual Studio", "Installer", "vswhere.exe")
     if not os.path.isfile(vswhere):
         raise Fail("no cl.exe on PATH and no vswhere.exe: run from a VS developer prompt")
-    inst = subprocess.run([vswhere, "-latest", "-products", "*", "-requires",
+    inst = run_quiet([vswhere, "-latest", "-products", "*", "-requires",
                            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"],
                           capture_output=True, text=True).stdout.strip()
     bat = os.path.join(inst, "VC", "Auxiliary", "Build", "vcvars64.bat")
@@ -799,7 +889,7 @@ def run_steps(steps, prefix, dry, say=print, cwd=None, env=None):
         say("$ " + " ".join('"%s"' % c if " " in c else c for c in s))
         if dry:
             continue
-        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, errors="replace")
+        r = run_quiet(cmd, cwd=cwd, env=env, capture_output=True, text=True, errors="replace")
         if r.returncode:
             tail = (r.stdout + r.stderr).strip().splitlines()[-25:]
             say("\n".join(tail))
@@ -829,7 +919,7 @@ def compile_all(build, emu_build=None, jobs=8, repo=REPO, dry=False, say=print, 
                 say("$ ninja -C %s -t targets all  (then: ninja -C %s -j %d <lichii/hook objects>)"
                     % (emu_build, emu_build, jobs))
             else:
-                r = subprocess.run(prefix + ["ninja", "-C", emu_build, "-t", "targets", "all"],
+                r = run_quiet(prefix + ["ninja", "-C", emu_build, "-t", "targets", "all"],
                                    capture_output=True, text=True, errors="replace")
                 objs = hook_objects(r.stdout)
                 if not objs:
@@ -882,6 +972,27 @@ def romfs_source(out, root=None):
             continue
         found.append((os.path.getmtime(stamp_file), game))
     return max(found)[1] if found else None
+
+
+NO_MODS = "no-mods"   # (in the cache root: an empty mods folder for builds whose pairs have no code mods)
+
+
+def no_mods_dir(dry=False):
+    """The empty folder a game build gets as HOS_MODS when the pairs have no mods with code patches (made empty again
+    if anything was put into it: it must never decide what goes into a build)."""
+    d = os.path.join(cache_root(), NO_MODS)
+    if not dry:
+        if os.path.isdir(d) and os.listdir(d):
+            remove_tree(d)
+        os.makedirs(d, exist_ok=True)
+    return os.path.abspath(d)
+
+
+def in_pins(folder):
+    """Whether a folder is (in) a pin's shared folder of the cache: its game folder's mods are the last kit build's."""
+    pins = os.path.normcase(os.path.realpath(os.path.join(cache_root(), "pins")))
+    f = os.path.normcase(os.path.realpath(folder))
+    return f.startswith(pins + os.sep)
 
 
 def build(pairs, build_dir, kit=None, game=None, jobs=0, keep=3, repo=REPO, dry=False, say=print, root=None,
@@ -937,10 +1048,12 @@ def build(pairs, build_dir, kit=None, game=None, jobs=0, keep=3, repo=REPO, dry=
             else:
                 say("cache: miss; this kit's hookshot-build.ps1 has no -Tools/-Work (a kit from before hs-build-speed):"
                     " a full build in the kit's own folders")
+            # HOS_MODS always set (nx2/exefs_patches.py and Get-KitExefsStampLine read it): the pairs' mods, or an
+            # empty folder. Unset, both fall back to the OUTPUT folder's own mods: the pin's game folder keeps the
+            # puppet pack of its last kit build, with whatever code patch that build had (rejoin-host-273: a pair
+            # without code mods got a game with co-op's Characters-tab patch from it, and the store was refused).
             env = dict(os.environ)
-            env.pop("HOS_MODS", None)
-            if mods:
-                env["HOS_MODS"] = os.path.abspath(mods)   # (nx2/exefs_patches.py and Get-KitExefsStampLine read it)
+            env["HOS_MODS"] = os.path.abspath(mods) if mods else no_mods_dir(dry)
             if not run_steps([cmd], [], dry, say, env=env):
                 raise Fail("hookshot-build.ps1 failed")
             if dry:
@@ -992,6 +1105,8 @@ def main(argv=None):
     c = sub.add_parser("cache")
     c.add_argument("action", choices=["list", "status", "store", "restore", "prune"])
     c.add_argument("--from", dest="src")
+    c.add_argument("--pair", action="append", default=[],
+                   help="store: the pairs whose game it is (their mods' code patches are in its key; repeat)")
     c.add_argument("--to")
     c.add_argument("--keep", type=int, default=3)
     c.add_argument("--force", action="store_true")
@@ -1048,7 +1163,10 @@ def main(argv=None):
             if a.action == "store":
                 if not a.src:
                     raise Fail("--from <game folder>")
-                cache_store(os.path.abspath(a.src), repo, a.force, a.dry_run)
+                want = None
+                if a.pair:
+                    want = stamp(repo) + pairs_code_mods([os.path.abspath(p) for p in a.pair], repo)[0]
+                cache_store(os.path.abspath(a.src), repo, a.force, a.dry_run, want=want)
                 return 0
             if a.action == "restore":
                 if not a.to:

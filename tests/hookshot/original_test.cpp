@@ -12,6 +12,7 @@
 #include "coop_title_menu.h"
 #include "hos_coop_menu.h"
 #include "hos_coop_mods.h"
+#include "../test_temp.h"
 
 namespace fs = std::filesystem;
 
@@ -30,7 +31,7 @@ void Put(const fs::path& p, const std::string& text) {
 }
 
 struct Folder {
-    fs::path root = fs::temp_directory_path() / "coop-original-test";
+    fs::path root = ModTestDir("coop-original-test");
     fs::path mods = root / "mods";
     Folder() {
         fs::remove_all(root);
@@ -48,6 +49,14 @@ struct Folder {
 };
 
 }  // namespace
+
+TEST_CASE("original game: two test folders at the same time do not delete each other") {
+    Folder one;
+    Folder two;
+    CHECK(one.root != two.root);
+    CHECK(fs::exists(one.mods / "save-profiles" / "mod.json"));
+    CHECK(fs::exists(two.mods / "save-profiles" / "mod.json"));
+}
 
 TEST_CASE("original game: the switch in coop-options.ini") {
     CHECK_FALSE(CoopOriginal::OnIn(""));

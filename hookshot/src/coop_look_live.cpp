@@ -760,7 +760,7 @@ void StartModule() {
     // read from a kit's coop-options.ini only, a game with its coop-options.ini beside longshot.exe (the owner's
     // test pair, Nucleus instances) saved the look there and started without it: the chosen colours never came back.
     std::vector<std::string> part_errors;
-    Look worn = ReadParts(CoopFiles::ReadText(CoopTitle::LookFile()), &part_errors);
+    Look worn = ReadParts(CoopTitle::LookText(), &part_errors);
     worn[Part::tunic] = CoopHook::LoadSettings(ini, errors).color;
 
     g_textures = std::make_unique<GameTextures>();
@@ -848,6 +848,20 @@ void StartModule() {
         LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/metal.bin: painted metal parts stay metal "
                        "(make it again)");
     }
+    // The parts' regions (row 185): without region.bin (an older pack) parts are painted by tones only.
+    if (const auto region_file = ReadFile(LookDir() / "region.bin")) {
+        std::string why;
+        if (auto region = CoopLookParts::ParseRegion(*region_file, &why)) {
+            LOG_INFO(Core, "coop: look: {} part region block lists (a painted part takes its whole region)",
+                     region->size());
+            CoopLookParts::UseRegion(std::make_shared<const CoopLookParts::Region>(std::move(*region)));
+        } else {
+            LOG_WARNING(Core, "coop: look: coop_look/region.bin: {}; parts painted by tones only", why);
+        }
+    } else if (gear_file) {
+        LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/region.bin: parts painted by tones only "
+                       "(make it again)");
+    }
     // The Cap trim's blocks: without cap.bin (an older pack) the Cap trim row changes nothing.
     if (const auto cap_file = ReadFile(LookDir() / "cap.bin")) {
         std::string why;
@@ -856,9 +870,17 @@ void StartModule() {
             for (const auto& b : *cap) {
                 blocks += b.offsets.size();
             }
-            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures", blocks, cap->size());
+            const std::size_t gear_textures = CoopLookParts::GearCapTextures(*cap);
+            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures ({} of the Goron and Zora "
+                           "tunics)", blocks, cap->size(), gear_textures);
+            if (gear_textures == 0) {   // (row 278: a pack made before it lists the Kokiri tunic's only)
+                LOG_INFO(Core, "coop: look: coop_look/cap.bin has no Goron or Zora tunic trims: those tunics' hood "
+                               "trims follow the tunic (make the puppet pack again)");
+            }
+            auto shared = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            CoopLookParts::UseCap(shared);   // the gear's: the Goron and Zora hood trims, own Link and puppets
             std::lock_guard lock(g_tunic_mutex);
-            g_tunic_cap = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            g_tunic_cap = std::move(shared);
         } else {
             LOG_WARNING(Core, "coop: look: coop_look/cap.bin: {}; the Cap trim changes nothing", why);
         }
@@ -944,6 +966,7 @@ void StopModule() {
         g_tunic_kept.clear();
         g_tunic_cap.reset();
     }
+    CoopLookParts::UseCap(nullptr);   // (the gear's too: the next start reads cap.bin again)
     CoopLookShare::EnableSlots(false);
     g_number = 0;
     g_textures.reset();
@@ -960,6 +983,7 @@ namespace {
 std::mutex g_mutex;
 Orbit g_orbit;   // guarded
 Watch g_watch;   // guarded
+Steer g_steer;   // guarded (patch 0040: the game's camera turned with the orbit)
 std::mutex g_keep_mutex;   // (its own: OwnLink runs outside g_mutex)
 Keep g_keep;               // guarded by g_keep_mutex
 
@@ -1039,21 +1063,59 @@ bool Camera(double eye[3], double target[3]) {
         std::lock_guard lock(g_mutex);
         if (!g_orbit.Asked(now)) {
             g_orbit.Camera({}, {}, std::nullopt, now);   // (ends a turn)
+            g_steer.Want(std::nullopt);
             return false;
         }
     }
     const auto link = OwnLink();   // (outside the lock: the hook's own lock)
     const double fov = GameFov();
     std::lock_guard lock(g_mutex);
-    const auto shot = g_orbit.Camera({eye[0], eye[1], eye[2]}, {target[0], target[1], target[2]}, link, now, fov);
-    if (!shot) {
+    const Vec3 game_eye{eye[0], eye[1], eye[2]};
+    const Vec3 game_target{target[0], target[1], target[2]};
+    const auto aim = g_orbit.Camera(game_eye, game_target, link, now, fov);
+    if (!aim || !link) {
+        g_steer.Want(std::nullopt);
         return false;
     }
+    // The game's camera turned with the orbit (patch 0040): its own eye, placed by its collision, kept and aimed at
+    // Link. Otherwise (no patch 0040, the probe, a camera that does not follow): Aim's shot.
+    g_steer.Observe(game_eye, game_target);
+    std::optional<Shot> shot;
+    if (g_steer.Driving()) {
+        shot = Framed(game_eye, game_target, *aim, *link, g_orbit.window(), g_steer.FreeDistance(), fov);
+    }
+    if (!shot) {
+        shot = aim;
+    }
+    g_steer.Want(DirectionOf(game_target, aim->eye),
+                 std::hypot(aim->eye[0] - game_target[0], aim->eye[1] - game_target[1], aim->eye[2] - game_target[2]));
     g_watch.Framed(now);
     for (int i = 0; i < 3; ++i) {
         eye[i] = shot->eye[i];
         target[i] = shot->target[i];
     }
+    return true;
+}
+
+bool Turn(float* yaw, float* pitch, int state, bool coop_on) {
+    if (yaw == nullptr || pitch == nullptr) {
+        return false;
+    }
+    std::optional<Angles> angles;
+    std::optional<std::string> note;
+    {
+        std::lock_guard lock(g_mutex);
+        angles = g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()));
+        note = g_steer.TakeNote();
+    }
+    if (note) {
+        LOG_INFO(Core, "{}", *note);
+    }
+    if (!angles) {
+        return false;
+    }
+    *yaw = angles->yaw;
+    *pitch = angles->pitch;
     return true;
 }
 

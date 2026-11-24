@@ -8,6 +8,7 @@
 # Then "Start Squadala.bat" (start.ps1) and each check it makes before the game starts.
 # Exits 1 when a check fails.
 $ErrorActionPreference = 'Stop'
+$env:OOT_COOP_PROBLEM_ADDRESS_LOOKUP = 'off'   # hermetic: no start here looks up main's problem-report address on GitHub
 $release = Split-Path -Parent $PSScriptRoot
 $kitSrc = Join-Path $release 'kit'
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -955,6 +956,7 @@ try {
     $csDir = Join-Path $cm 'OoT Character Select'
     # The two parts (Test-KitCharacterSelectNpcFile): NPC files go only with a yes; the rest every kit gets.
     $csNpcFiles = @('romfs\Tex\Npc_A.bntx.zs', 'romfs\Phive\Cloth\Player_Adult_CAC.Nin_Ounce_NVN2.bphcl', 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs',
+                    'romfs\Sound\Resource\Stream\VXxPlChild_Jump_S_01.bwav', 'romfs\Sound\Resource\Npc_X.bars.zs',
                     'romfs\Pack\Actor\Enemy_MiddleBoss_DarkLink.pack.zs', 'romfs\Model\Player_Dark_Animation.Skeleton.bfres.zs', 'romfs\Model\Player_Adult_C115.Player_Adult.bfres.zs')
     $csUiFiles = @('romfs\UI\LayoutArchiveCategory.Product.100.byml.zs', 'romfs\Sequence\CharacterMenu.module.ainb', 'romfs\RSDB\UIScreen.Product.111.rstbl.byml.zs',
                    'romfs\Model\Player_Child.Player_Child.bfres.zs', 'romfs\Model\Player_Adult_Cba_Animation.Skeleton.bfres.zs', 'romfs\Pack\Actor\Player_Child.pack.zs',
@@ -995,7 +997,7 @@ try {
         Write-File (Join-Path $ck 'hookshot\CHARACTER-SELECT.txt') ("# pin`nrelease=$Tag`nurl=https://example.invalid/cs`nzip=CS-$Tag.zip`nzip_sha256=$zsha`n" +
             "zip_folder=CS-$Tag/mods/OoT Character Select`nfolder=OoT Character Select`noverlay_url=https://example.invalid/characters.json`n" +
             "overlay_sha256=$osha`nips_url=$IpsUrl`nips_sha256=$IpsSha`n")
-        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2"
+        return "$Tag $zsha $osha $(if ($IpsUrl) { $IpsSha } else { '-' }) full cz2v"
     }
     $csJson = '{"format": 1, "mod": "OoT Character Select", "puppet_colours": {"offset": 62574416, "head": "FD7BBFA9000100B40B2C40B96B1D0051"}, "characters": []}'
     $onlineWas = $env:OOT_COOP_OFFLINE; $env:OOT_COOP_OFFLINE = '0'
@@ -1052,6 +1054,10 @@ try {
             if (($r.Substring(6) -cmatch $KitCharselToolExclude) -ne (Test-KitCharacterSelectNpcFile $p)) { $exOk = $false; Write-Host "  exclude/NPC rule differ: $p" }
         }
         Check $exOk 'Character Select tool: the ui part''s --exclude and the NPC rule agree on every romfs file'
+        $voiceOk = (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\PlayerVoice_Child_Saria.bars.zs') -and (Test-KitCharacterSelectVoiceFile 'romfs/Sound/Resource/Stream/VSaPlAdult_Damage_M_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Npc_X.bars.zs') -and -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\Resource\Stream\Vo_PlChild_Jump_S_01.bwav') -and
+                   -not (Test-KitCharacterSelectVoiceFile 'romfs\Sound\ResourceListPack\BarslistPack.Product.111.byml.zs')
+        Check $voiceOk 'Character Select voices: his voice archives and stream files told apart from the rest'
         # review-geno-0118: what the game was built with is kept until its build: nothing there before -> _<folder>.none;
         # a failed or declined build puts it back (play.ps1 Restore-KitCharacterSelectStart), a built one confirms it.
         $csNone = Join-Path $cm '_OoT Character Select.none'; $csPrev = Join-Path $cm '_OoT Character Select.prev'
@@ -1062,6 +1068,8 @@ try {
         $r = Install-KitCharacterSelect $ck $cm
         Confirm-KitCharacterSelect $ck $cm
         Check ($r.Changed -and (Test-Path -LiteralPath $csDir) -and -not (Test-Path -LiteralPath $csNone)) 'Character Select confirm: a built game drops the kept state'
+        Check (-not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\PlayerVoice_Adult_X.bars.zs')) -and -not (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\Stream\VXxPlChild_Jump_S_01.bwav')) -and
+               (Test-Path -LiteralPath (Join-Path $csDir 'romfs\Sound\Resource\Npc_X.bars.zs'))) 'Character Select: his release''s voice files are deleted in the full part, his other sound files kept'
         # its code patch is in the game's stamp, so the start's check asks for the 'mods' build (patches 0034/0035)
         Check ((Get-KitExefsStampLine $cg) -match 'exefs=OoT Character Select/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348\.ips:') 'Character Select: its .ips is in the game stamp (the build takes it in)'
         $r = Install-KitCharacterSelect $ck $cm
@@ -1189,7 +1197,7 @@ try {
         $csNew = Install-KitCharacterSelect $ck $cm242 '' 'ui'
         Check ($csNew.Ok -and (Test-Path -LiteralPath $csLinkTex) -and -not (Test-Path -LiteralPath (Join-Path $cs242 $csNpcFiles[0])) -and
                (Read-KitFirstLine (Join-Path $cs242 'coop-charsel.txt')) -eq $want242) "Character Select: a new default part keeps Link's own textures (row 242) [$($csNew.Why)]"
-        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2$', ' cz1') + "`n")
+        Write-File (Join-Path $cs242 'coop-charsel.txt') (($want242 -replace ' cz2v$', ' cz1') + "`n")
         Remove-Item -LiteralPath (Join-Path $cs242 'romfs\Tex') -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $csZipKept -Destination $csZip242 -Force
         $csOld = Install-KitCharacterSelect $ck $cm242 '' 'ui'
@@ -1286,6 +1294,22 @@ try {
         Check ((Get-KitCharacterSelectSeen $pm) -eq '') 'Character Select pack key: the mod switched off in the Mods tab counts as none (the pack is made again without its characters)'
         Write-File (Join-Path $cm 'coop-mods.list') "coop-mods 1`non OoT Character Select`n"
         Check ((Get-KitCharacterSelectSeen $pm) -eq $seenFull) 'Character Select pack key: switched on again: the same key as the pack made with it'
+        # The pack's copy of the mod's sound lists (build.py character_voices) hides the mod's: a CS update that
+        # changes only that file makes the pack again (C #11).
+        $blRel = 'Sound/ResourceListPack/BarslistPack.Product.111.byml.zs'
+        Write-File (Join-Path $csDir "romfs\$blRel") 'lists'
+        $blSha = (Get-FileHash -LiteralPath (Join-Path $csDir "romfs\$blRel") -Algorithm SHA256).Hash.ToLowerInvariant()
+        Check ((Get-KitCharacterSelectFileHash $pm 'OoT Character Select' $blRel) -eq $blSha) 'Character Select voices: the hash of the mod''s sound lists in mods'
+        Check ((Get-KitCharacterSelectFileHash $pm 'OoT Character Select' '../characters.json') -eq '') 'Character Select voices: a path out of romfs is refused'
+        Check ((Get-KitCharacterSelectFileHash $pm '..' $blRel) -eq '') 'Character Select voices: a mod name out of mods is refused'
+        $pmJson = { param($sha) '{"actors": [], "sound": true, "tunics": {}, "tunics_off": true, "characters": {"mod": "OoT Character Select", "numbers": {"5": 7}, "variants": {"5": ["Child", "Adult"]}, "colours": {"offset": 62574416, "head": "fd7bbfa9000100b40b2c40b96b1d0051"}, "barslist": {"file": "' + $blRel + '", "sha256": "' + $sha + '", "voices": true}}}' }
+        Write-File $pm (& $pmJson $blSha)
+        Check ($null -eq (Get-PuppetPackHint $pm (Join-Path $ck 'no-tool'))) "Character Select voices: the same sound lists: nothing said [$(Get-PuppetPackHint $pm (Join-Path $ck 'no-tool'))]"
+        Write-File (Join-Path $csDir "romfs\$blRel") 'new lists'
+        Check ((Get-PuppetPackHint $pm (Join-Path $ck 'no-tool')) -match 'other Character Select voices') 'Character Select voices: the mod''s sound lists changed: the pack is made again'
+        Remove-Item -LiteralPath (Join-Path $csDir "romfs\$blRel") -Force
+        Check ((Get-PuppetPackHint $pm (Join-Path $ck 'no-tool')) -match 'other Character Select voices') 'Character Select voices: the mod''s sound lists gone: the pack is made again'
+        Remove-Item -LiteralPath $pm -Force
         Remove-Item -LiteralPath (Join-Path $cm 'coop-mods.list') -Force
         Check ($null -eq (Get-KitCharacterSelectSeen (Join-Path $ck 'elsewhere\coop_puppet.json'))) 'Character Select seen: a pack outside mods\contents has nothing to compare'
         Write-File (Join-Path $cm '_off\characters.json') $csJsonN

@@ -44,6 +44,9 @@ inline constexpr const char* kCustomizeHelp =
     "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture. Your Link wears it "
     "when you close the menu.";
 inline constexpr const char* kCommandsHelp = "The chat's commands, and the key that opens the chat.";
+// The word the play-test bridge's `menu` state member shows for a page (docs/playtest.md): "main", "host", "join",
+// "local", "settings", "commands", "customize", "find".
+const char* PageWord(Page page);
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
 std::string ChatKeyWords(const std::string& chat_key);
@@ -130,6 +133,7 @@ struct Session {
     bool by_launcher = false;  // co-op came with the game's start (Host.bat, Join.bat, coop.ini): not stopped here
     int players = 0;           // in the session, this one included (0: not known)
     std::string code;          // the invite code (hosting), or the answer code (kWaitHost)
+    bool code_done = false;    // hosting: the code's making ended (an empty `code` then: none could be made)
     std::vector<std::string> lines;   // what it is doing or what went wrong, in plain words
     std::string password;      // the host's join password while it hosts ("" none): shown on A, never logged
     std::vector<std::string> asking;  // who asks to join this host now, oldest first (CoopLobby::Asking)
@@ -137,6 +141,7 @@ struct Session {
     // of Co-op settings; `rules` false: not heard yet (not in a session), the rows show what the next Host uses.
     bool rules = false;
     bool pvp = false;
+    bool gold_own = false;   // Gold Skulltulas not shared in this session (CoopGoldMode::InForce)
     bool dbno = true;
     int dbno_bleed_s = 45, dbno_revive_tenths = 50, dbno_revive_life = 12;
 
@@ -309,7 +314,7 @@ private:
         kOpenCustomize, kNgPlus, kSaveSet,
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh, kFindPage,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
-        kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
+        kApproveJoins, kGoldSkulltulas, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
         kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount,
         kCharAges, kCharChild, kCharAdult
     };
@@ -319,6 +324,9 @@ private:
     void TitleListLines(std::vector<Line>& out, bool off) const;
     void TitleCodeLines(std::vector<Line>& out, bool off) const;
     void TitleHostLines(std::vector<Line>& out, bool host, bool guest) const;
+    // The Host page's Code row's value, on the title and the - page alike: the code (ShownCode), "Starting..." until
+    // there is one, "None" when none could be made (the page's help says why).
+    std::string CodeValue() const;
     void HostRuleLines(std::vector<Line>& out, bool guest) const;
     bool Selectable(const Line& line) const;
     void Go(Page page, Act select = Act::kNone);

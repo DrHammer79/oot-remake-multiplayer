@@ -280,14 +280,14 @@ TEST_CASE("coop i18n: the pause menu's Multiplayer tab (the game's own page)") {
     CHECK(CoopI18n::Tr(hans, "Hosting") == "房间已开");
     CHECK(CoopI18n::Tr(hant, "Hosting") == "房間已開");
     CHECK(CoopI18n::Tr(hans, "Copy invite code") == "复制邀请码");
-    CHECK(CoopI18n::Tr(hans, "Players: just you") == "人数：只有你");
+    CHECK(CoopI18n::Tr(hans, "Players (just you)") == "人数：只有你");
     CHECK(CoopI18n::Tr(hans, "Stop hosting") == "停止房间");
     CHECK(CoopI18n::Tr(hans, "Host a game") == "创建房间");
     CHECK(CoopI18n::Tr(hans, "Join a game") == "加入房间");
     // The rows with a value: the whole row is the shape's line.
     CHECK(CoopI18n::Tr(hans, "Room: 7QK-2") == "房间：7QK-2");
     CHECK(CoopI18n::Tr(hans, "Copy room: 7QK-2") == "复制房间：7QK-2");
-    CHECK(CoopI18n::Tr(hans, "Players: 3") == "人数：3");
+    CHECK(CoopI18n::Tr(hans, "Players (3)") == "人数：3");
     CHECK(CoopI18n::Tr(hans, "Let in Saria") == "放行 Saria");
     CHECK(CoopI18n::Tr(hans, "Let in Saria (+2)") == "放行 Saria（+2）");
     CHECK(CoopI18n::Tr(hant, "Let in Saria (+2)") == "放行 Saria（+2）");
@@ -1109,5 +1109,23 @@ TEST_CASE("coop i18n: native rows show a table only when the game's own font set
     for (int i = 0; i < CoopI18n::kLangCount; ++i) {
         if (CoopI18n::kLangs[i].entries == nullptr) continue;
         CHECK(CoopI18n::Shown(&CoopI18n::kLangs[i], CoopI18n::kLangs[i].code) == &CoopI18n::kLangs[i]);
+    }
+}
+
+TEST_CASE("coop i18n: the Gold Skulltulas row's joined help lines are translated whole") {
+    // Review of f36a8852: HostRuleLines joins two table lines; Tr has a line for each joined shape.
+    for (const char* code : {"zh-Hans", "zh-Hant"}) {
+        CAPTURE(code);
+        const CoopI18n::Lang* lang = ByCode(code);
+        REQUIRE(lang != nullptr);
+        for (const char* first : {"Applies at your next Host: stop hosting, then start again.",
+                                  "Your own setting for the next game you host; the game you are in keeps its host's."}) {
+            for (const char* now : {"This game: Shared.", "This game: Not shared."}) {
+                const std::string en = std::string(first) + " " + now;
+                CAPTURE(en);
+                const std::string zh = CoopI18n::Tr(lang, en);
+                CHECK(zh == CoopI18n::Tr(lang, first) + CoopI18n::Tr(lang, now));
+            }
+        }
     }
 }

@@ -59,6 +59,7 @@
 #include "coop/presence/presence.hpp"
 #include "coop/version.hpp"
 #include "coop_boss.h"
+#include "coop_gold_mode.h"
 #include "coop_boss_beaten.h"
 #include "coop_frame_clock.h"
 #include "coop_boss_scenes.h"
@@ -146,6 +147,9 @@ namespace {
 std::atomic<bool> g_pick_said{false};
 // black-01112 (coop_stuck_load.h): a scene load ran CoopStuckLoad::kStuckMs; a session's Frame says so in the chat once.
 std::atomic<bool> g_stuck_said{false};
+
+// SetHeld: the play-test bridge holds the game; the network thread passes it to the session each round.
+std::atomic<bool> g_game_held{false};
 
 // The game and build the addresses in coop/host are for.
 constexpr u64 kOcarinaProgramId = 0x0400486024DEC000ULL;
@@ -535,6 +539,7 @@ public:
         config.hello.nickname = settings_.name;
         config.player_key = settings_.player_key;
         config.join_password = settings_.password;
+        CoopGoldMode::OnConnection();  // row 63: an earlier session's mode ends here; Shared until told
         client_ = std::make_unique<coop::net::Client>(std::move(config));
         if (!client_->start()) {
             LOG_ERROR(Core, "coop: ENet did not start; co-op is off");
@@ -583,6 +588,9 @@ public:
         // presents (high refresh presents up to 165 a second).
         session.clock = [] { return CoopEvery::NowUs(); };
         pickups_given_ = 0;
+        gold_local_ = false;  // a new session's watcher shares them until the mode says not
+        race_loaded_.clear();  // row 63: our race is kept only once the race save is loaded
+        race_read_at_ = 0;
         // Called by service() on the network thread, with the client.
         session.on_event = [this](const coop::net::Event& event, coop::net::Client& client) {
             OnSessionEvent(event, client, false);
@@ -776,6 +784,14 @@ public:
             session_->guard_count(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}),
                                   skulltulas);
         }
+        if (sharing_) {  // row 272: once-per-save rewards (bottles, upgrades) given once for the group
+            for (const auto family : coop::host::rewards::kFamilies) {  // each family on its own
+                session_->guard_reward(coop::host::rewards::units(family), coop::host::rewards::sources(family));
+            }
+            for (const auto& r : coop::host::rewards::kOther) {
+                session_->share_pickup_named(coop::protocol::FlagKey(r.hash, std::uint16_t{0}));
+            }
+        }
         // Row 218: heart containers add up across players as heart pieces do (FlagWatcher::share_containers).
         session_->share_containers(coop::protocol::FlagKey{0xfbe01da1u, 0});
         thread_ = std::thread([this] { Run(); });
@@ -807,6 +823,16 @@ public:
         CoopDbno::OnEvent(event, client);  // down but not out (docs/play-online.md)
         CoopDifficulty::OnEvent(event, client);  // docs/play-online.md "Difficulty"
         CoopModShare::OnEvent(event, client);  // mods (docs/mods.md "Mods in co-op")
+        if (event.kind == coop::net::EventKind::welcomed ||
+            (event.kind == coop::net::EventKind::message && !client.is_host() &&
+             std::holds_alternative<coop::protocol::ModSettings>(event.message))) {
+            // Row 63: the Gold Skulltula mode in force (CoopModShare puts it: our choice as the first player in,
+            // else Shared until the host's MOD_SETTINGS).
+            LOG_INFO(Core, "coop: Gold Skulltulas: {} ({}): {}",
+                     event.kind == coop::net::EventKind::welcomed ? "welcomed" : "the host's settings",
+                     client.is_host() ? "the host" : "a guest",
+                     CoopGoldMode::NotShared() ? "Not shared" : (CoopGoldMode::Told() ? "Shared" : "Shared until told"));
+        }
         CoopSave::OnEvent(event, client);  // the host's save for the guests (issue 167)
         CoopHud::OnEvent(event);  // the others' hearts for the HUD (PLAYER_LIFE)
         CoopLookShare::OnEvent(event, client);  // looks of several parts (PLAYER_LOOK, coop_look_share.h)
@@ -896,6 +922,15 @@ public:
                 for (const std::string& count : CoopWorld::TakeGiveBacks()) {
                     LOG_INFO(Core, "coop: {}", CoopWorld::GiveBack(*game_store, count));
                 }
+                // Row 63: but a token the world sync made here (another game's kill, ours made none) has no
+                // placement for the game's pickup to set: its two keys are written here, within the count
+                // guard's hold of the count's gain, and the flag sync shares the take.
+                // A write the game refuses is tried again on the next frames (kTokenKeyTries).
+                for (const CoopWorld::TokenKeyJob& job : CoopWorld::TakeTokenKeys()) {
+                    if (const std::string line = CoopWorld::WriteTokenKeys(*game_store, job); !line.empty()) {
+                        LOG_INFO(Core, "coop: {}", line);
+                    }
+                }
             }
             if (sharing_) {
                 // Issue 138: grants wait for a loaded save, and the capacities
@@ -929,6 +964,29 @@ public:
                     ocarina_equip_.link(false, {});  // a load or scene change: the next stay asks again (row 103)
                 }
             }
+        }
+        if (session_ && !gold_local_ && CoopGoldMode::KeepLocalNow()) {
+            // Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): every Skulltula's two keys, the token
+            // count and its IsGet stay in this game for the rest of the session, and so do the Skulltula House's
+            // rewards and what only they give (gold_race_flags, review-01112-h: each racer claims its own; the
+            // row 272 guard is for Shared).
+            gold_local_ = true;
+            std::vector<coop::protocol::FlagKey> keys;
+            for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key));
+                keys.push_back(coop::protocol::FlagKey::key64_flag(key + 2));
+            }
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}));
+            keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenGet, std::uint16_t{0}));
+            for (const std::uint32_t hash : coop::host::gold_race_flags()) {
+                keys.push_back(coop::protocol::FlagKey(hash, std::uint16_t{0}));
+            }
+            const std::size_t was = session_->keep_local(keys);
+            LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: {} keys kept in this game ({} were shared)",
+                     keys.size(), was);
+        }
+        if (session_ && gold_local_ && !race_loaded_.empty() && race_loaded_ == CoopGoldMode::RaceId() && game_store && reading && CoopSave::PlaysRaceSave()) {
+            RaceFrame(*game_store);
         }
         if (pickups_) {
             const auto keys = CoopPickups::Since(pickups_given_);
@@ -1074,7 +1132,10 @@ public:
                 if (CoopStory::On() && CoopStory::GiftHolds(key.hash, gifts_held)) {
                     return true;  // rows 195/204: a gift scene played elsewhere lands once its item is ours
                 }
-                if (talk.Holds(key.hash) || CoopScrubTalk::NearHolds(near, key.hash)) {
+                // Row 275: the event hold only in the scrubs' own scene; the near guard is about a scrub loaded here.
+                if (CoopScrubTalk::HoldsIn(talk, scene ? std::optional<std::string_view>(*scene) : std::nullopt,
+                                           key.hash) ||
+                    CoopScrubTalk::NearHolds(near, key.hash)) {
                     return true;
                 }
                 if (shop_on && CoopShopSale::Waits(key.hash, sale_here.in_event)) {
@@ -1164,7 +1225,7 @@ public:
             ++presents_;
             const std::uint64_t now_us = CoopEvery::NowUs();
             if (samples_log_.Due(now_us)) {
-                const std::uint32_t seq = session_->sampler().next_sequence();
+                const std::uint32_t seq = session_->next_sample_sequence();
                 if (samples_log_at_ != 0 && now_us > samples_log_at_) {
                     const double seconds = static_cast<double>(now_us - samples_log_at_) / 1e6;
                     LOG_INFO(Core, "coop: samples: {:.1f} sent/s, {:.1f} presents/s",
@@ -1193,6 +1254,10 @@ public:
                      report.save_load_flags, report.save_load_frames,
                      report.save_load_native ? "the game's own load nodes" : "the old signs");
             CoopTime::SaveLoaded(report.server_now_us);  // issue 159
+            // Row 63: a loaded race save gets our race back, then keeps it. Another save (the player's own, still
+            // in the game at the title) is never read into the race.
+            race_loaded_ = CoopSave::PlaysRaceSave() ? CoopGoldMode::RaceId() : std::string();
+            race_put_tries_ = kRacePutTries;
             lent_keys_.forget();  // dungeon-sync-b: the save has its own key counts
             start_source_.Reset();  // deku-sync-fix: what the game asked before the load is not ours now
             story_source_.Reset();
@@ -1495,6 +1560,21 @@ public:
                      "coop: flags: count {:#010x} +{} here was a pickup another player had taken: "
                      "put back, not sent",
                      g.count.hash, g.amount);
+        }
+        if (sharing_) {  // row 272: our number, so the host's answer to our own reward Bool counts as ours
+            std::uint8_t self = 0;
+            session_->with_client([&](coop::net::Client& c) {
+                self = c.player_number();
+                return 0;
+            });
+            session_->set_reward_self(self);
+        }
+        for (const auto& g : session_->take_rewards_guarded()) {  // row 272 (docs/items.md)
+            const auto* item = coop::host::find_item(g.key.hash);
+            LOG_INFO(Core,
+                     "coop: flags: reward {} ({:#010x}) got here while another player's copy of the same reward "
+                     "had come: put back, not sent (row 272)",
+                     item != nullptr ? item->name : std::string_view("?"), g.key.hash);
         }
         {  // issue 195: a chest another player had opened, opened again here
             const bool in_event = OurLinkInEvent(reading);  // G1: our Link's get scene, not another player's event here
@@ -2593,6 +2673,7 @@ private:
     void Run() {
         auto last_state = coop::net::State::idle;
         while (!stop_) {
+            session_->set_held(g_game_held.load(std::memory_order_relaxed));  // SetHeld
             session_->service();
             session_->with_client([](coop::net::Client& c) { CoopPose::Send(c, SteadyMs()); });
             RoomView room = session_->with_client([&](coop::net::Client& c) {
@@ -2852,6 +2933,48 @@ private:
     bool doubled_event_seen_ = false;     // its get scene (our Link's event) began
     static constexpr std::uint64_t kDoubledNoEventMs = 1000;
     std::size_t pickups_given_ = 0;  // CoopPickups keys handed to the session
+    bool gold_local_ = false;        // row 63: this session's Gold Skulltula flags kept in our game (Not shared)
+    // Row 63, Not shared, a guest: our race with this host (CoopGoldMode::TheRace), put back into the game after
+    // each load of the race save (tries left), and kept from what the game shows (read time).
+    static constexpr int kRacePutTries = 120;
+    std::string race_loaded_;  // the race id of the race save the game loaded ("": none; another: not ours now)
+    int race_put_tries_ = 0;
+    std::uint64_t race_read_at_ = 0;
+
+    void RaceFrame(coop::host::FlagStore& game) {
+        if (race_put_tries_ > 0) {
+            const CoopGoldMode::Race race = CoopGoldMode::TheRace();
+            const CoopGoldMode::PutBack put =
+                CoopGoldMode::PutRaceBack(game, race, coop::host::kGoldTokenCount, coop::host::kGoldTokenGet);
+            --race_put_tries_;
+            if (put.done()) {
+                race_put_tries_ = 0;
+                if (put.written > 0) {
+                    LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: our race with this host put back "
+                                   "({} flags: {} Skulltulas, count {}, {} rewards and items)",
+                             put.written, race.keys.size(), race.count, race.flags.size());
+                }
+            } else if (race_put_tries_ == 0) {
+                LOG_WARNING(Core, "coop: flags: Gold Skulltulas not shared: our race could not all be put back "
+                                  "({} written, {} refused, {} unread)",
+                            put.written, put.failed, put.unread);
+            }
+            return;   // read the game's again once ours is in it
+        }
+        const std::uint64_t now = CoopEvery::NowUs();
+        if (now - race_read_at_ < 500'000) return;
+        race_read_at_ = now;
+        const auto seen = CoopGoldMode::ReadRace(game, coop::host::gold_skulltula_keys(),
+                                                 coop::host::kGoldTokenCount, coop::host::kGoldTokenGet,
+                                                 coop::host::gold_race_flags());
+        if (seen && CoopGoldMode::GrowRace(*seen)) {
+            const CoopGoldMode::Race race = CoopGoldMode::TheRace();
+            LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: our race with this host kept ({} Skulltulas, "
+                           "count {}, {} rewards and items{})",
+                     race.keys.size(), race.count, race.flags.size(),
+                     CoopGoldMode::RaceId().empty() ? ", this session only" : "");
+        }
+    }
     bool holding_logged_ = false;  // issue 129: HoldFlagStore held something last frame
     std::uint32_t sale_held_logged_ = 0;  // a scrub sale flag the hold kept last frame (log)
 #ifdef COOP_HOOKSHOT
@@ -3504,15 +3627,17 @@ Coop* LastEnded() {
 // player-key.txt beside coop.ini (made there once), so the host's mutes and
 // bans follow the player and not the name.
 static void WithPlayerKey(Settings& settings) {
-    if (settings.player_key) {
-        return;
+    const auto config = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir);
+    if (!settings.player_key) {
+        std::string note;
+        settings.player_key = LoadPlayerKey(config / "player-key.txt", note);
+        if (!note.empty()) {
+            LOG_INFO(Core, "coop: {}", note);
+        }
     }
-    std::string note;
-    settings.player_key =
-        LoadPlayerKey(Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "player-key.txt", note);
-    if (!note.empty()) {
-        LOG_INFO(Core, "coop: {}", note);
-    }
+    // Row 63, Gold Skulltulas Not shared: each race is kept per host beside coop.ini (coop_gold_mode.h).
+    CoopGoldMode::SetRaceDir(config / "gold-race");
+    if (settings.player_key) CoopGoldMode::SetOwnKey(*settings.player_key);
 }
 
 void Start() {
@@ -4204,6 +4329,10 @@ void SetColor(std::optional<std::uint32_t> color) {
     }
     LOG_INFO(Core, "coop: colour changed in the game: {}",
              color ? CoopColors::Text(*color) : std::string("none chosen (slot colour)"));
+}
+
+void SetHeld(bool held) {
+    g_game_held.store(held, std::memory_order_relaxed);
 }
 
 std::vector<OverlayLine> OverlayLines() {

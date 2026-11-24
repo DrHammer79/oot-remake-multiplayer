@@ -158,15 +158,21 @@ void ForgetKeptBreaks();
 
 // Test only (coop_testinput's "kill NAME" step): the nearest actor of that
 // name to our Link takes a hit of its whole life from our Link in the next
-// walk of LICHII_COOP_OBJECTS (logs "coop: test kill ..."). Any thread.
-void QueueTestKill(std::string name);
+// walk of LICHII_COOP_OBJECTS (logs "coop: test kill ..."). Any thread. `id` (the address `get_world` lists, from
+// "kill ID NAME"): exactly that actor, resolved in the walk against the walk's own list and refused when no actor
+// there has that name (CoopStrike::PickTarget). Returns the strike's number: the walk leaves its result under it
+// (CoopStrike::TheBook, the bridge's `state.strike`).
+std::uint64_t QueueTestKill(std::string name, std::uint64_t id = 0);
 // Test only ("place PLATFORM UP", #196): the place of the moving platform (a PlatformSync driver) of that name
 // nearest our Link at the last walk; nothing when none is here.
 std::optional<std::array<float, 3>> TestPlatformPlace(const std::string& name);
-// Test only ("hit NAME N"): as QueueTestKill, a hit of `amount` through the game's own Life step.
-void QueueTestHit(std::string name, std::int32_t amount);
-// Test only ("aim X Y Z", row 173): our next arrow (nocked within 10 s) is put on its way into the world point the
-// first frame it flies (the mover's AimStep); logs "coop: test aim ...".
+// Test only ("hit NAME N", "hit ID NAME N"): as QueueTestKill, a hit of `amount` through the game's own Life step.
+// 0 (no strike queued, no number) for an amount below 1 or a full queue.
+std::uint64_t QueueTestHit(std::string name, std::int32_t amount, std::uint64_t id = 0);
+// Test only ("aim X Y Z", row 173): our arrow or seed in Link's hands within 10 s (one listed before the aim counts:
+// the slingshot makes its next seed right after a shot) is watched; the first frame it flies, when its flight already
+// points within CoopTestInput::kAimNudgeDeg and kAimNudgeM of the world point, it is moved sideways onto the line
+// through it (the mover's AimStep, CoopTestInput::AimNudge). Link is not turned. Logs "coop: test aim ...".
 void QueueTestAim(float x, float y, float z);
 // Test only ("stun NAME"): our copy of the nearest boss of that name says its owner a stun (Sync::TestStun).
 void QueueTestStun(std::string name);

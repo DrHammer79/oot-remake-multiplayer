@@ -233,12 +233,17 @@ void Hash(std::vector<CoopMods::Mod> mods) {
                              " shared mods: the rest are not compared with the other players'");
             break;
         }
-        const auto h = CoopMods::HashMod(m, &stop);
+        // Only what decides the mod's world, alike on every PC with the same kit (row 274: CoopRando::ShareStandIn).
+        const CoopMods::StandIn stand_in = [&m](const std::filesystem::path& file, const std::string& key) {
+            return CoopRando::ShareStandIn(m.folder, file, key);
+        };
+        const auto h = CoopMods::HashMod(m, &stop, &stand_in);
         if (!h) {
             return;  // stopped
         }
-        list.mods.push_back({m.manifest.id, m.manifest.version.substr(0, coop::protocol::kMaxModVersionChars),
-                             Combined(*h)});
+        coop::protocol::ModHash hash = Combined(*h);
+        if (hash != coop::protocol::ModHash{}) CoopModShare::MarkHashWay(hash);
+        list.mods.push_back({m.manifest.id, m.manifest.version.substr(0, coop::protocol::kMaxModVersionChars), hash});
     }
     CoopRuntime::Log("coop: mods: " + std::to_string(list.mods.size()) + " shared mods ready for co-op");
     const std::lock_guard lock(g_mine_mutex);

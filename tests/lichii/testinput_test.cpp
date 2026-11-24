@@ -629,6 +629,33 @@ TEST_CASE("testinput: hit and stun hand the hook an actor name (and an amount), 
     CHECK(r.Done());
 }
 
+TEST_CASE("testinput: kill and hit take the actor's id before its name (S4)") {
+    std::string error;
+    Runner r(Must("kill 4096 Enemy_Test\nhit 8192 Enemy_Test 3\nkill Enemy_Test\nhit Enemy_Test 2\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 4);
+    CHECK(requests[0].kind == Kind::kill);
+    CHECK(requests[0].name == "Enemy_Test");
+    CHECK(requests[0].id == 4096);
+    CHECK(requests[1].kind == Kind::hit);
+    CHECK(requests[1].name == "Enemy_Test");
+    CHECK(requests[1].start == "3");
+    CHECK(requests[1].id == 8192);
+    CHECK(requests[2].id == 0);
+    CHECK(requests[3].id == 0);
+    CHECK(requests[3].start == "2");
+    // an id needs its name (never a number), is not zero, and nothing may follow
+    CHECK_FALSE(Parse("kill 4096\n", error));
+    CHECK_FALSE(Parse("kill 4096 77\n", error));
+    CHECK_FALSE(Parse("kill 0 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("kill 4096 Enemy_Test now\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("hit 4096 3\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test 0\n", error));
+}
+
 TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (issue 130)") {
     std::string error;
     CHECK_FALSE(Parse("setflag\n", error));
@@ -807,46 +834,86 @@ TEST_CASE("testinput: aim X Y Z hands the hook the world point our next arrow is
     CHECK(log[0] == "mark aimed");
 }
 
-TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, facing it (row 173)") {
-    // Row 173's relief: the arrow let go 2 m in front of Link (z -4.0 at bow height), the eye 6.1 m on and 5.3 m up.
-    const std::array<float, 3> from{-56.5f, 126.2f, -4.0f};
+TEST_CASE("testinput: aim steers our arrow and our slingshot seed, nothing else") {
+    CHECK(Aimable("NormalArrow"));
+    CHECK(Aimable("Shootable_DekuSeed"));
+    CHECK_FALSE(Aimable("CoopShot_Arrow"));  // another player's shot
+    CHECK_FALSE(Aimable("Item_DekuNut"));
+    CHECK_FALSE(Aimable("Obj_DekuSeed"));  // a pickup
+}
+
+TEST_CASE("testinput: aim skips a shot from before, far from Link, for the one in his hands (review)") {
+    using CoopTestInput::AimWait;
+    AimWait aim;
+    const std::array<float, 3> link{-2.5f, 100.4f, -7.0f};
+    CHECK_FALSE(aim.Offer("Shootable_DekuSeed", 0x40, {-12.0f, 103.0f, -20.0f}, &link));   // still flying
+    CHECK_FALSE(aim.Offer("NormalArrow", 0x50, {-30.0f, 100.4f, 4.0f}, &link));            // lying where it fell
+    CHECK(aim.arrow == 0);
+    CHECK(aim.Offer("Shootable_DekuSeed", 0x60, {-2.8f, 100.97f, -6.93f}, &link));
+    CHECK(aim.arrow == 0x60);
+    AimWait unknown;   // Link's place not read: the first one, as before
+    CHECK(unknown.Offer("Shootable_DekuSeed", 0x40, {-12.0f, 103.0f, -20.0f}));
+}
+
+TEST_CASE("testinput: aim takes our seed that was listed before it was armed (lane run)") {
+    // The slingshot makes its next seed right after a shot, so the walk offers a seed it already knew.
+    AimWait aim;
+    aim.target = {-35.6f, 114.3f, 10.7f};
+    CHECK_FALSE(aim.Offer("Obj_DekuSeed", 0x10, {0.0f, 0.0f, 0.0f}));
+    CHECK_FALSE(aim.Offer("CoopShot_Arrow", 0x20, {0.0f, 0.0f, 0.0f}));
+    CHECK(aim.arrow == 0);
+    CHECK(aim.Offer("Shootable_DekuSeed", 0x105250c3e0, {-2.8f, 100.97f, -6.93f}));
+    CHECK(aim.arrow == 0x105250c3e0);
+    CHECK(aim.last[1] == doctest::Approx(100.97f));
+    // Offered again on each walk, or another one of ours: the first one stays.
+    CHECK_FALSE(aim.Offer("Shootable_DekuSeed", 0x105250c3e0, {-2.7f, 101.0f, -6.9f}));
+    CHECK_FALSE(aim.Offer("NormalArrow", 0x30, {0.0f, 0.0f, 0.0f}));
+    CHECK(aim.arrow == 0x105250c3e0);
+    CHECK(aim.last[0] == doctest::Approx(-2.8f));
+}
+
+TEST_CASE("testinput: AimNudge moves the shot sideways onto the target's line, only when it was nearly aimed") {
+    // Row 173's relief: the seed let go at bow height, the eye 6.1 m on and 5.3 m up. Aimed 2 degrees under it.
+    const std::array<float, 3> at{-56.5f, 126.2f, -4.0f};
     const std::array<float, 3> eye{-56.5f, 131.5f, -10.1f};
-    const auto t = AimPlace(from, eye, 0.6f);
-    REQUIRE(t.has_value());
-    const float d[3] = {eye[0] - from[0], eye[1] - from[1], eye[2] - from[2]};
-    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const float up = std::atan2(5.3f, 6.1f) - 2.0f * 3.14159265f / 180.0f;
+    const std::array<float, 3> flight{0.0f, 1.9f * std::sin(up), -1.9f * std::cos(up)};
+    const auto n = AimNudge(at, flight, eye, kAimNudgeDeg);
+    REQUIRE(n.has_value());
+    CHECK(n->off_deg == doctest::Approx(2.0f).epsilon(1e-3));
+    REQUIRE(n->put.has_value());
+    // Its line along its own flight now goes through the eye, and the move was sideways only (square to the flight).
+    const float fl = std::sqrt(flight[1] * flight[1] + flight[2] * flight[2]);
+    float along = 0.0f, side = 0.0f;
     for (int i = 0; i < 3; ++i) {
-        const float f = d[i] / len;
-        CHECK((*t)[i] == doctest::Approx(eye[i] - f * 0.6f).epsilon(1e-4));  // 0.6 m short, on the line
-        CHECK((*t)[3 + i * 3 + 2] == doctest::Approx(f).epsilon(1e-4));      // column 2: the way to the eye
+        along += (eye[i] - (*n->put)[i]) * flight[i] / fl;
+        side += ((*n->put)[i] - at[i]) * flight[i] / fl;
     }
-    // The 3x3 is a rotation: columns of length 1, each square to the others; its up (column 1) is up-ish.
-    for (int c = 0; c < 3; ++c) {
-        float n = 0.0f;
-        for (int r = 0; r < 3; ++r) n += (*t)[3 + r * 3 + c] * (*t)[3 + r * 3 + c];
-        CHECK(n == doctest::Approx(1.0f).epsilon(1e-4));
-        for (int o = c + 1; o < 3; ++o) {
-            float dot = 0.0f;
-            for (int r = 0; r < 3; ++r) dot += (*t)[3 + r * 3 + c] * (*t)[3 + r * 3 + o];
-            CHECK(dot == doctest::Approx(0.0f).epsilon(1e-4));
-        }
-    }
-    CHECK((*t)[3 + 1 * 3 + 1] > 0.5f);
-    // A flat aim is face's turn: facing -z is the yaw of 180 degrees (face writes {c, 0, s, 0, 1, 0, -s, 0, c}).
-    const auto flat = AimPlace({0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, -8.0f}, 0.6f);
-    REQUIRE(flat.has_value());
-    const float want[12] = {0.0f, 1.0f, -7.4f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f};
-    for (int i = 0; i < 12; ++i) CHECK((*flat)[i] == doctest::Approx(want[i]).epsilon(1e-4));
-    // Nearer than the short way: put where it is. Straight up: still a rotation. The same point or NaN: nothing.
-    const auto near = AimPlace({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -0.3f}, 0.6f);
-    REQUIRE(near.has_value());
-    CHECK((*near)[2] == doctest::Approx(0.0f));
-    const auto up = AimPlace({0.0f, 0.0f, 0.0f}, {0.0f, 5.0f, 0.0f}, 0.6f);
-    REQUIRE(up.has_value());
-    CHECK((*up)[1] == doctest::Approx(4.4f));
-    CHECK((*up)[3 + 1 * 3 + 2] == doctest::Approx(1.0f));
-    CHECK_FALSE(AimPlace(eye, eye, 0.6f).has_value());
-    CHECK_FALSE(AimPlace({std::nanf(""), 0.0f, 0.0f}, eye, 0.6f).has_value());
+    for (int i = 0; i < 3; ++i) CHECK((*n->put)[i] + flight[i] / fl * along == doctest::Approx(eye[i]).epsilon(1e-4));
+    CHECK(side == doctest::Approx(0.0f).epsilon(1e-3));
+    CHECK(std::hypot((*n->put)[1] - at[1], (*n->put)[2] - at[2]) < 0.3f);   // 8 m at 2 degrees: under 0.3 m
+    // Aimed 10 degrees off: nothing is moved, and how far off is said.
+    const float wide = std::atan2(5.3f, 6.1f) - 10.0f * 3.14159265f / 180.0f;
+    const auto far = AimNudge(at, {0.0f, std::sin(wide), -std::cos(wide)}, eye, kAimNudgeDeg);
+    REQUIRE(far.has_value());
+    CHECK(far->off_deg == doctest::Approx(10.0f).epsilon(1e-3));
+    CHECK_FALSE(far->put.has_value());
+    // 2 degrees off at 30 m passes ~1 m wide: more than kAimNudgeM, so not put though under 4 degrees.
+    const std::array<float, 3> distant{-56.5f, 126.2f, -34.0f};
+    const float lean = 2.0f * 3.14159265f / 180.0f;
+    const auto wide2 = AimNudge(at, {std::sin(lean), 0.0f, -std::cos(lean)}, distant, kAimNudgeDeg);
+    REQUIRE(wide2.has_value());
+    CHECK(wide2->off_deg == doctest::Approx(2.0f).epsilon(1e-3));
+    CHECK(wide2->side_m == doctest::Approx(30.0f * std::sin(lean)).epsilon(1e-3));
+    CHECK_FALSE(wide2->put.has_value());
+    CHECK(AimNudge(at, {std::sin(lean), 0.0f, -std::cos(lean)}, distant, kAimNudgeDeg, 2.0f)->put.has_value());
+    // Flying away from it: never put. No flight, the same point, NaN: nothing.
+    const auto away = AimNudge(at, {0.0f, 0.0f, 1.0f}, eye, 180.0f);
+    REQUIRE(away.has_value());
+    CHECK_FALSE(away->put.has_value());
+    CHECK_FALSE(AimNudge(at, {0.0f, 0.0f, 0.0f}, eye, kAimNudgeDeg).has_value());
+    CHECK_FALSE(AimNudge(eye, flight, eye, kAimNudgeDeg).has_value());
+    CHECK_FALSE(AimNudge({std::nanf(""), 0.0f, 0.0f}, flight, eye, kAimNudgeDeg).has_value());
 }
 
 TEST_CASE("testinput: event hands the hook an event setting's name (boss-route-01112)") {
@@ -884,4 +951,29 @@ TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
     REQUIRE(requests.size() == 1);
     CHECK(requests[0].kind == Kind::menu);
     CHECK(requests[0].name == "host");
+}
+
+TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses the whole script otherwise") {
+    const auto& allowed = ActKinds();
+    CHECK(NotAllowed(Must("kill Enemy_Test\nhit Enemy_Test 2\nhurt 2\nplace 1 2 3\nface 1 2\nchat hello"), allowed).empty());
+    CHECK(NotAllowed(Must("menu customize"), allowed).empty());
+    CHECK(NotAllowed(Must("setflag some_flag 1"), allowed).empty());
+    // an unlisted kind: a wait, a warp, a give, a sync, a dump
+    const std::string wait = NotAllowed(Must("wait 1"), allowed);
+    CHECK(wait.find("not allowed here") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("warp Market_Child"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("give bombs"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("sync title 2"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("dump x"), allowed).empty());
+    // a hidden second command (new line), in a different case, behind a legal first one
+    const std::string hidden = NotAllowed(Must("kill Enemy_Test\nWARP Market_Child"), allowed);
+    CHECK(hidden.find("line 2") != std::string::npos);
+    CHECK(hidden.find("warp") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("KILL Enemy_Test\nGive bombs"), allowed).empty());
+    // the list in the message
+    CHECK(wait.find("kill") != std::string::npos);
+    CHECK(wait.find("chat") != std::string::npos);
+    // every kind has a word and a word that Parse reads back as that kind is how the table is kept honest
+    CHECK(std::string(KindWord(Kind::go)) == "goto");
+    for (const Kind k : allowed) CHECK(std::string(KindWord(k)) != "?");
 }

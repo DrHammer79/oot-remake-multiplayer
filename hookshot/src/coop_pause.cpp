@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -21,6 +22,7 @@
 #include "coop_colors.h"
 #include "coop_dbno_game.h"
 #include "coop_difficulty.h"
+#include "coop_gold_mode.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
 #include "coop_host_menu.h"
@@ -40,6 +42,7 @@
 #include "coop_room_list.h"
 #include "coop_runtime.h"
 #include "coop_char_ages.h"
+#include "coop_charsel_names.h"
 #include "coop_ngplus.h"
 #include "coop_puppet_config.h"
 #include "coop_save.h"
@@ -177,11 +180,8 @@ std::vector<std::string> StatusLines(const HosCoopStatus& st, const CoopLobby::S
     if (v.host && v.state == HOS_COOP_HOSTING && !g_lan_lines.empty() && g_lan_password == st.password) {
         return g_lan_lines;
     }
+    // (the room is the Host page's Room row: no line of its own here, which said it a second time)
     std::vector<std::string> lines = CoopTitleMenu::PlainStatus(v);
-    if (v.host && v.state == HOS_COOP_HOSTING && st.relay_room[0] != '\0') {
-        lines.push_back(std::string("Room ") + st.relay_room +
-                        ": friends type it in Join a game (IP address), with your join password.");
-    }
     if (!g_answer_note.empty() && v.problem != HOS_COOP_PROBLEM_BAD_CODE) {
         lines.push_back(v.players > 1 ? "Connected!" : g_answer_note);
     }
@@ -239,6 +239,7 @@ CoopPauseMenu::Session SessionNow() {
     if (s.hosting) {
         s.players = st.players;
         s.code = ShareCode(st);
+        s.code_done = st.invite_done != 0;
         // (the Host page's Join password row, shown on A, and its Let in and Refuse rows; the password is never logged)
         if (st.state == HOS_COOP_HOSTING) s.password.assign(st.password, strnlen(st.password, sizeof st.password));
         s.asking = CoopLobby::Asking();
@@ -252,6 +253,7 @@ CoopPauseMenu::Session SessionNow() {
         const CoopDbno::Rules rules = CoopDbno::Current();
         s.rules = true;
         s.pvp = CoopPvp::On();
+        s.gold_own = CoopGoldMode::NotShared();
         s.dbno = rules.on;
         s.dbno_bleed_s = rules.bleed_s;
         s.dbno_revive_tenths = rules.revive_tenths;
@@ -581,6 +583,7 @@ bool Host(const CoopTitleMenu::Options& o, bool test) {
     }
     CoopHookshot::HostMenu().Leave();   // (a failed start: clear it)
     CoopFiles::SetCoopEnvironment(o);
+    CoopGoldMode::SetChoice(o.gold_own ? CoopGoldMode::Mode::own : CoopGoldMode::Mode::shared);   // (row 63)
     HosCoopHostOptions h{};
     h.size = sizeof h;
     h.name = o.name.c_str();
@@ -737,13 +740,14 @@ void MicRows() {
 void Save() {
     // (the coop-options.ini the game reads at its start: the kit's, or the one beside longshot.exe in a game with no kit
     // of its own, Nucleus Co-op's instances: before, those saved nothing but coop.ini, a tester's "not saving")
-    const auto kit = CoopTitle::KitOptionsFile();
+    // (with this game's coop-player.ini, local co-op and Nucleus: its controller and look there, the rest in the kit's)
+    const bool kit = CoopTitle::KitOptionsFile() || CoopTitle::PlayerOptionsFile();
     std::string coop = ReadText(CoopIni());
-    std::string options = kit ? ReadText(*kit) : std::string();
+    std::string options = kit ? CoopTitle::ReadKitOptions() : std::string();
     g_menu.options().Write(coop, options);
     bool ok = WriteText(CoopIni(), coop);
     if (kit) {
-        ok = WriteText(*kit, options) && ok;
+        ok = CoopTitle::WriteKitOptions(options) && ok;
     }
     const bool live = g_coop_on || g_doing == "hosting" || g_doing == "joined";
     if (!live) {
@@ -798,16 +802,16 @@ void CycleInput(bool controller) {
     const bool usual = controller ? s.pad == CoopInput::kAuto : s.keyboard == CoopInput::Keyboard::Focus;
     InputRows();
     LOG_INFO(Core, "coop: multiplayer tab: {} = {}", key, value);
-    const auto kit = FindKit();
-    if (!kit) {
+    // (the file the game reads at its start, as Save: the kit's, or this game's coop-player.ini where several games of
+    // this PC share the kit, so player 2's controller is not player 1's)
+    if (!CoopTitle::KitOptionsFile() && !CoopTitle::PlayerOptionsFile()) {
         g_menu.SetNote({"No co-op kit found with this game: the choice counts until the game closes."});
         return;
     }
-    const auto file = *kit / "coop-options.ini";
-    const std::string before = ReadText(file);
+    const std::string before = CoopTitle::ReadKitOptions();
     const std::string after =
         usual ? CoopTitleMenu::IniUnset(before, key) : CoopTitleMenu::IniSet(before, key, value, false);
-    if (!WriteText(file, after)) {
+    if (!CoopTitle::WriteKitOptions(after)) {
         g_menu.SetNote({"A settings file could not be written: the choice counts until the game closes."});
     }
 }
@@ -899,11 +903,21 @@ void Copy(const std::string& text, const char* what) {
 
 // The Settings page's Character by age rows (coop_char_ages.h): the picks and the characters this PC can show.
 void FeedCharacterAges() {
-    const auto list = CoopCharAges::Pickable(CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText()),
-                                             CoopPuppetConfig::KnownCharacterFiles());
+    const auto all = CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText());
+    const auto list = CoopCharAges::Pickable(all, CoopPuppetConfig::KnownCharacterFiles());
     const auto stored = CoopCharAges::Current();
+    // (his model ids, "Hylia_MN_005", by the names his picker shows after the kit's merge: numbered by the ids among his
+    // whole list, not among the characters this PC can show, nor by any list's order; coop_charsel_names.h)
+    std::vector<std::string> names;
+    for (const auto& c : all) names.push_back(c.name);
+    const auto readable = CoopCharselNames::Readable(names);
+    std::map<int, std::string> shown;
+    for (std::size_t i = 0; i < all.size(); ++i) shown.emplace(all[i].number, readable[i]);
     std::vector<std::pair<int, std::string>> rows;
-    for (const auto& c : list) rows.emplace_back(c.number, c.name);
+    for (const auto& c : list) {
+        const auto it = shown.find(c.number);
+        rows.emplace_back(c.number, it != shown.end() ? it->second : c.name);
+    }
     g_menu.SetCharacterAges(list.size() > 1, stored.on, stored.child.value_or(-1), stored.adult.value_or(-1),
                             std::move(rows));
 }
@@ -1140,9 +1154,48 @@ void LanJoinStep(std::uint64_t now) {
     }
 }
 
+// Local co-op (the kit's Start Squadala with 2 to 4 players on this PC, scripts\local-coop.ps1): game 1 hosts the
+// session itself at its start, on the port and with the password the launcher gave in OOT_COOP_LOCAL_HOST
+// (CoopHostMenu::kLocalHostEnv), as the Multiplayer page's Host does: a private game, no relay, router port or
+// invite, the listener on 127.0.0.1 only (Menu::LoopbackNextHost: this host alone). The other games of this PC join it from their coop.ini. The
+// host is this game: when it closes, the others get the usual "the host left". Nothing is pressed on the title (the
+// players load their saves themselves). g_mutex.
+std::optional<std::pair<std::uint16_t, std::string>> g_local_host;
+
+void LocalHostStep() {
+    if (!g_local_host) return;
+    const auto [port, password] = *g_local_host;
+    g_local_host.reset();
+    if (Busy()) {
+        LOG_INFO(Core, "coop: multiplayer tab: local co-op: co-op is on already in this game: not hosting");
+        return;
+    }
+    g_menu.Show(ReadOptions());   // (the files' settings, the player's name above all, as LanJoinStep)
+    CoopTitleMenu::Options o = g_menu.options();
+    o.host_port = port;
+    o.password = password;
+    o.public_game = false;
+    o.approve_joins = false;
+    o.relay.clear();
+    o.relay_key.clear();
+    o.relay_room.clear();
+    o.list_room = false;
+    LOG_INFO(Core, "coop: multiplayer tab: local co-op: this game hosts the session of this PC's games (port {}, "
+                   "127.0.0.1 only)", port);
+    CoopHookshot::HostMenu().LoopbackNextHost();   // (this host only: a later Host from the menu is a usual one)
+    if (!Host(o, true)) LOG_WARNING(Core, "coop: multiplayer tab: local co-op: the host did not start");
+}
+
 void Init(bool coop_on) {
     std::lock_guard lock(g_mutex);
     g_coop_on = coop_on;
+    if (const char* local = std::getenv(CoopHostMenu::kLocalHostEnv); local != nullptr && *local != 0) {
+        g_local_host = coop_on ? std::nullopt : CoopHostMenu::ParseTestHost(local);
+        if (!g_local_host) {
+            LOG_WARNING(Core, "coop: multiplayer tab: local co-op: {} {}: not hosting", CoopHostMenu::kLocalHostEnv,
+                        coop_on ? "with a server in coop.ini" : "is not PORT:PASSWORD");
+        }
+    }
     if (!coop_on) {
         if (const auto want = CoopTitleMenu::IniGet(ReadText(CoopIni()), "join_lan"); want && !CoopTitleMenu::Trim(*want).empty()) {
             g_lan_join = std::string(CoopTitleMenu::Trim(*want));
@@ -1231,6 +1284,7 @@ void Tick() {
     g_next_follow_ms = now + 250;
     Follow(Status());
     RefreshFound(now);
+    LocalHostStep();
     LanJoinStep(now);
     // (a test's trigger, LICHII_COOP_TEST_TO_TITLE=1 only: a file "to-title.now" in the game's folder starts the way
     // back to the title a join with a file loaded takes, with no host to join)
@@ -1429,6 +1483,10 @@ void WantLongshotMenu() {
     g_wanted = kWantLongshotMenu;
 }
 
+void WantClose() {
+    g_wanted = HOS_COOP_MENU_WANT_CLOSE;
+}
+
 // Ctrl and Shift held now. Windows: GetKeyState. Linux: the game's own SDL (SDL2 or SDL3, the library the game
 // loaded: CoopClipboard::GameSdl; Longshot loads it RTLD_LOCAL, so RTLD_DEFAULT never saw it and Ctrl+V did not
 // paste on Linux), whose KMOD_CTRL / KMOD_SHIFT bits are the same in both; without SDL, neither.
@@ -1464,7 +1522,7 @@ bool Key(std::uint32_t vk, bool repeat) {
         return false;
     }
     const auto [ctrl_down, shift_down] = Modifiers();
-    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste friend's answer (players press
+    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste answer code (players press
     // Ctrl+V there), on Join the code. A plain Insert stays Hookshot's.
     if (!repeat && ((vk == 'V' && ctrl_down) || (vk == 0x2D && shift_down && !ctrl_down))) {
         const bool taken = g_menu.Press(Input::kPaste);
@@ -1821,7 +1879,7 @@ void JoinLanNow(const std::string& address, std::uint16_t port, const std::strin
         SayOnPage(kSayLauncher);
         return;
     }
-    // (the same-network line: "<address>:<port> <password>", as the host's Copy same-network line gives it)
+    // (the same-network line: "<address>:<port> <password>", as the host's Copy network address gives it)
     const std::string line = address + ":" + std::to_string(port) + (password.empty() ? std::string() : " " + password);
     if (!Join(line)) SayOnPage(kSayRefused);
 }
@@ -1978,6 +2036,22 @@ bool TestHost() {
     o.list_room = false;
     LOG_INFO(Core, "coop: multiplayer tab: test host on port {} (Multiplayer > Host, as the page's Host row)", o.host_port);
     return Host(o, true);
+}
+
+std::string MenuState() {
+    std::lock_guard lock(g_mutex);
+    if (!g_shown && !g_native) return "closed";
+    return CoopPauseMenu::PageWord(g_menu.page());
+}
+
+CoopMenuState::Tab MenuTab() {
+    std::lock_guard lock(g_mutex);
+    CoopMenuState::Tab tab;
+    if (!g_shown && !g_native) return tab;
+    tab.open = true;
+    tab.page = CoopPauseMenu::PageWord(g_menu.page());
+    tab.view = g_menu.view();
+    return tab;
 }
 
 bool TestMenu(const std::string& page) {

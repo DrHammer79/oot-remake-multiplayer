@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -196,6 +197,50 @@ class Locks(Base):
         self.assertFalse(ok)
         hs.lock_release(self.root, "lane1", say=q)
         self.assertTrue(hs.wait_free(os.path.join(self.root, "lane1.lock"), 30, say=q))
+
+
+class PidAlive(unittest.TestCase):
+    def test_a_probe_that_cannot_tell_counts_as_alive(self):
+        # A busy PC once made one tasklist call come back empty: the watchdog read "game B ended" and quit both games.
+        self.assertTrue(hs.pid_alive(1234, probe=lambda pid: "unknown"))
+        def broken(pid):
+            raise OSError("the API failed")
+        self.assertTrue(hs.pid_alive(1234, probe=broken))
+        self.assertTrue(hs.pid_alive(1234, probe=lambda pid: "alive"))
+        self.assertFalse(hs.pid_alive(1234, probe=lambda pid: "gone"))
+        self.assertFalse(hs.pid_alive(0, probe=lambda pid: "alive"))
+
+    def test_the_real_probe(self):
+        self.assertTrue(hs.pid_alive(os.getpid()))
+        p = subprocess.Popen([sys.executable, "-I", "-c", "pass"])
+        p.wait()
+        self.assertFalse(hs.pid_alive(p.pid))       # (exited; Popen still holds its handle on Windows: signalled)
+        p = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(30)"])
+        try:
+            self.assertTrue(hs.pid_alive(p.pid))
+        finally:
+            p.kill()
+            p.wait()
+
+    def test_a_busy_probe_does_not_end_a_live_session_or_free_a_live_lock(self):
+        import live
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
+            json.dump({"started": time.time(), "max_s": 0, "booted": True, "idle_s": 0}, f)
+        with open(os.path.join(d, "pids.json"), "w", encoding="utf-8") as f:
+            json.dump({"games": {"A": 11, "B": 22}}, f)
+        looks = []
+        def sleep(_s):
+            looks.append(1)
+            if len(looks) == 3:
+                open(os.path.join(d, "stop-request"), "w").close()
+        alive = lambda pid: hs.pid_alive(pid, probe=lambda p: "unknown")
+        self.assertEqual(live.watch(d, sleep=sleep, alive=alive, every=0), "stop asked")
+        lock = os.path.join(d, "lock")
+        os.makedirs(lock)
+        write(os.path.join(lock, "owner.txt"), json.dumps({"host": hs.host_id(), "pid": 22, "time": time.time()}))
+        self.assertEqual(hs.lock_stale(lock, alive=alive), "")
 
 
 class CopyTreeLinks(Base):

@@ -12,6 +12,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "coop_gold_mode.h"
 #include "coop_name_privacy.h"
 #include "coop_runtime.h"
 
@@ -222,9 +223,11 @@ void CheckName() {
 
 CoopTitleMenu::Options ReadOptions() {
     CheckName();
-    const auto kit = CoopTitle::KitOptionsFile();   // (the one the game reads at its start, and Save writes)
+    // (the one the game reads at its start, and Save writes: with this game's coop-player.ini over it)
     const std::string coop = ReadText(CoopIni());
-    auto o = CoopTitleMenu::Options::Read(coop, kit ? ReadText(*kit) : std::string());
+    auto o = CoopTitleMenu::Options::Read(coop, CoopTitle::ReadKitOptions());
+    // Row 63: the next Host's Gold Skulltula mode (a Host.bat start too: this is read at the module's start).
+    CoopGoldMode::SetChoice(o.gold_own ? CoopGoldMode::Mode::own : CoopGoldMode::Mode::shared);
     if (o.name.empty() && !g_fallback_name.empty()) {
         o.name = g_fallback_name;
     }

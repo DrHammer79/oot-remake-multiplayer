@@ -33,6 +33,8 @@
 #include <utility>
 #include <vector>
 
+#include "coop_menu_state.h"
+#include "coop_menu_nav.h"
 #include "coop_pause_menu.h"
 #include "coop_screen_panes.h"
 #include "hos_coop_api.h"
@@ -321,6 +323,10 @@ public:
     // A tab with no rows of its own (Mods: its list is the page) has the list always; B there is the list's Back while
     // it has somewhere to go back to (SetMinusRawBack: a mod's page), else the game's (the menu closes).
     void SetMinusRawBack(bool can) { minus_raw_back_ = can; }
+    // Co-op's menu's own page on the - page (raw): whether its selection can go up or down without going round. A held
+    // Up or Down repeats only while it can (coop_menu_nav.h: a list goes round on a fresh press only); unknown (the
+    // Mods tab's page): false, no repeat.
+    void SetMinusRawEnds(bool can_up, bool can_down) { minus_raw_up_ = can_up, minus_raw_down_ = can_down; }
     bool MinusInList() const { return minus_list_; }
     // Another view shows (the module saw it change): the rows' cursor on `row` (a view's own: Co-op settings' page
     // chosen), the list without the pad. MinusEnterList: the list has the pad (A on a Co-op settings row), when it
@@ -380,7 +386,8 @@ private:
     std::size_t letter_ = 0;     // Letter's letter: its place in the field's Letters()
     std::string typing_was_;   // (the field before typing: Cancel puts it back)
     void EndTyping(bool ok);
-    std::uint64_t repeat_since_ = 0, repeat_last_ = 0;
+    CoopMenuNav::Repeat typing_repeat_;   // the typing keys' held directions (TypingPad, coop_menu_nav.h)
+    CoopMenuNav::Repeat minus_repeat_;   // the - page's rows and list: a held Up or Down moves again (coop_menu_nav.h)
     std::uint64_t pad_ms_ = 0, typing_from_ms_ = 0;   // (the last pad read; when typing began: its first A is not a key's)   // a held direction: when it went down, its last step
 
     bool CanShow(std::uint64_t now_ms) const;
@@ -417,6 +424,8 @@ private:
     bool minus_list_ = false;           // MinusInList
     bool minus_raw_ = false;            // SetMinusLines' raw
     bool minus_raw_back_ = false;       // SetMinusRawBack
+    bool minus_raw_up_ = false, minus_raw_down_ = false;   // SetMinusRawEnds
+    std::uint64_t minus_repeated_ = 0;   // this read's held Up / Down repeats (not presses): OnPad
     int minus_line_ = -1;               // MinusLine
     std::uint32_t minus_lines_ = 0;     // SetMinusLines' pickable
     int minus_line_decide_ = -1;        // TakeMinusLineDecide
@@ -788,7 +797,7 @@ std::vector<std::string> RowTexts(const SessionView& v);
 // is the R1 probe's answer (the module's part); these are their rows.
 // - Multiplayer: 0 Players, 1 Co-op settings, 2 Local co-op, 3 your game or session (its details, Stop or Leave there),
 //   shown only in one.
-// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your session, Copy answer code).
+// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your game, Copy answer code).
 // - Mods: the Mods tab's own page (coop_mods_tab.h), not rows of these.
 enum class MinusPage { kMultiplayer = 0, kLobby = 1, kMods = 2 };
 std::vector<std::string> RowTexts(MinusPage page, const SessionView& v);
@@ -948,6 +957,7 @@ bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t
 // So slot 3 counts when it is visible and the game holds his code (SnailCodeBuiltIn: another mod's code fills no tab;
 // review-0119-b) (charsel-tab-0119).
 inline constexpr std::uint64_t kPaneTextWidth = 0x13c;   // f32: a text pane's drawn width (docs/game-ui.md, checked)
+inline constexpr std::uint64_t kPaneBoxWidth = 0x58;     // f32: a pane's own size, its width (f_8154b220 sets it; docs/game-ui.md)
 inline int GameTabsShown(bool slot3_visible, bool snail_code_built_in) {
     return slot3_visible && snail_code_built_in ? 4 : 3;
 }
@@ -1131,6 +1141,12 @@ bool OwnMinusPageShown() noexcept;
 // the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
 // ours (seen once a - menu opened without them): F6's drawn list is used then.
 bool OpenPlayers() noexcept;
+// F1 in play (menu-polish-01113, A #100: our tabs leave Longshot's F1 menu, F1 opens co-op's home): the same run as
+// F6's to the - menu's Multiplayer tab, its main view. False (F1 left to Longshot's own menu) when the pack has no - tabs
+// of ours, or when nothing can open now (not in free play and no menu up: an event, a load, the title).
+bool OpenMultiplayer() noexcept;
+// Whether a - menu opened without tabs of ours this session (an old pack): Longshot's F1 menu keeps co-op's tabs then.
+bool NoMinusTabs() noexcept;
 // Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
 // module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
 void SetFreePlay(bool free_play) noexcept;
@@ -1143,6 +1159,9 @@ struct MenuActor {
 };
 std::array<MenuActor, 4> MenuActors() noexcept;
 int MousePage() noexcept;
+// Character Select's Customize screen as co-op drives it, for the play-test bridge's `menu` state (coop_menu_state.h).
+// Any thread (takes the screen's lock).
+CoopMenuState::Screen CustomizeScreen();
 // The mouse in the game's window (its client area, 0..1 each way) and the left button, when the window is in front:
 // the title's mouse reads it too (coop_title.cpp).
 bool ClientCursor(float* fx, float* fy, bool* left) noexcept;
@@ -1173,5 +1192,42 @@ struct SystemButtonSeen {
 // Screen question (player report 261). Two at it (the mouse moved the focus just before its click): the one under the
 // mouse (`mouse`: x, y in the layout's units), else the one the focus is coming to (1), else none.
 int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse);
+
+// --- One cursor a page (player report 276: the outline on another row or line than the one lit) ---
+// A page's focus frame (the game's own W_Select_00 and the button's Select animation, on a row or on a line of the
+// list) and which row or line shows bright came from two places at two times: on the - menu's page the frame from the
+// Page's row at every update but the brightness from the words' pass (every 250 ms or a poke), and on the + page the
+// game's own frame stayed on the rows' button while a line of the list was the one lit. Both now come from one
+// PageCursor, worked out from where the pad is, and the module sets the frames and the alphas from it in one pass.
+inline constexpr int kCursorLines = kMenuMost + 1;   // the list's panes (Pa_List_00..07; 0 the heading)
+struct PageCursor {
+    int frame_row = -1;    // the row (0..kRows-1) whose focus frame shows; -1 none
+    int frame_line = -1;   // the list's pane (0..kCursorLines-1) whose focus frame shows; -1 none
+    bool list = false;     // the list (or a field's keys) has the pad: the rows dimmed, no frame on them
+    bool operator==(const PageCursor&) const = default;
+};
+// `row` the rows' cursor, `rows_shown` the rows with words (bit r), `list` whether the list has the pad, `line` the
+// list's pane lit there (-1 none). The frame is on exactly the one thing shown lit, or on nothing.
+PageCursor CursorAt(int row, std::uint32_t rows_shown, bool list, int line);
+// A row's alpha on the - menu's page: the framed one bright, the others a little dim, all dimmed while the list has the
+// pad.
+float MinusRowAlpha(const PageCursor& c, int r);
+// A list pane's alpha on the - menu's page: `pickable` the panes that can be picked (bit i), `picked` the pane lit (co-op's
+// menu's own selection even while the rows have the pad): the heading (0) a little dim when it cannot be picked, a line of
+// text dim, and while the list has the pad the picked one bright and the others dimmed.
+float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list);
+
+// The frame the game's cursor is on (its focused button's name: Pa_Button_NN a row, Pa_List_NN a line of the list;
+// "" or any other none), for the frames a page gives back to the game.
+struct GameFrame {
+    int row = -1, line = -1;
+    bool operator==(const GameFrame&) const = default;
+};
+GameFrame GameFrameOf(std::string_view focused);
+// Whether a row's (or line's) W_Select_00 shows when the page gives its frames back to the game (review-01112-h: given
+// back as each was at the opening, the row the cursor was on then kept its frame beside the one it is on now, two
+// outlines after B from the list). `all_own` the layout showed every one at the opening (the panes are not what the
+// game's focus moves, its Select animation is): all shown again; else only the one the game's cursor is on now.
+bool GivenBackShown(bool all_own, int index, int game_focus);
 
 }  // namespace CoopPauseTab

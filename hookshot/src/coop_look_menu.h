@@ -100,6 +100,8 @@ public:
     // The page of groups shown (0..Groups().size()-1) and how many are offered.
     std::size_t GroupShown() const;
     std::size_t GroupsOffered() const;
+    // The page shown among those offered (0 first), as its heading counts it ("page N of M": N - 1).
+    std::size_t PageIndex() const;
     // One press; false for a Back on the list (the tab goes back to its first page).
     bool Press(Input input);
     // The mouse over a row, and a click on its name (0) or the left (-1) or right (1) half of its value.

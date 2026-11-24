@@ -83,6 +83,9 @@ std::optional<std::string> NearestStart(std::string_view scene, const Vec& to);
 // it writes a scene into the game (a name the game does not have, such as "Market" for Market_Child, crashed a game
 // worker right after the load began, 2026-11-23). A scene the list lacks is a scene to add there, not to let through.
 bool IsKnownScene(std::string_view scene);
+// The first start point the list has for `scene` (a boss stage has just one, named like the scene): what a warp with no
+// entrance uses. Nothing for a scene the list lacks.
+std::optional<std::string> DefaultStart(std::string_view scene);
 // The known scenes that `name` is the start of (a name given without its age: "Market" gives Market_Adult and
 // Market_Child), for the "did you mean" of an error. At most `most`, in list order.
 std::vector<std::string> ScenesLike(std::string_view name, std::size_t most = 6);

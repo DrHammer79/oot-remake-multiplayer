@@ -4,6 +4,9 @@
 // sends, compares and hands the host's values to the loader.
 #include "coop_mod_share.h"
 
+#include "coop_gold_mode.h"
+
+#include <array>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -82,6 +85,7 @@ std::vector<std::string> Compare(const proto::ModList& host, const proto::ModLis
         }
         return nullptr;
     };
+    int kit_other = 0;  // > 0: the host's kit is older (its hashes made an older way), < 0: ours is
     for (const auto& h : host.mods) {
         const proto::ModEntry* m = find(mine, h.id);
         if (m == nullptr) {
@@ -90,8 +94,17 @@ std::vector<std::string> Compare(const proto::ModList& host, const proto::ModLis
             add(h.id + ": you have " + (m->version.empty() ? "no version" : m->version) + ", the host " +
                 (h.version.empty() ? "no version" : h.version));
         } else if (m->hash != h.hash && m->hash != proto::ModHash{} && h.hash != proto::ModHash{}) {
-            add(Short(h) + ": your files differ from the host's");
+            if (HashWay(m->hash) == HashWay(h.hash)) {
+                add(Short(h) + ": your files differ from the host's");
+            } else if (kit_other == 0) {
+                kit_other = HashWay(m->hash) > HashWay(h.hash) ? 1 : -1;
+            }
         }
+    }
+    if (kit_other > 0) {
+        add("the host's kit is older than yours: its mod files can't be checked against yours (the host updates)");
+    } else if (kit_other < 0) {
+        add("your kit is older than the host's: your mod files can't be checked against its (update to its kit)");
     }
     for (const auto& m : mine.mods) {
         if (find(host, m.id) == nullptr) {
@@ -102,6 +115,21 @@ std::vector<std::string> Compare(const proto::ModList& host, const proto::ModLis
         out.push_back("and " + std::to_string(more) + " more");
     }
     return out;
+}
+
+namespace {
+constexpr std::size_t kWayAt = std::tuple_size_v<proto::ModHash> - 3;  // 'S', 'Q', the way
+}  // namespace
+
+void MarkHashWay(proto::ModHash& hash) {
+    hash[kWayAt] = 'S';
+    hash[kWayAt + 1] = 'Q';
+    hash[kWayAt + 2] = kHashWay;
+}
+
+std::uint8_t HashWay(const proto::ModHash& hash) {
+    if (hash[kWayAt] != 'S' || hash[kWayAt + 1] != 'Q' || hash[kWayAt + 2] < 2) return 1;
+    return hash[kWayAt + 2];
 }
 
 bool IsSeedId(std::string_view id) {
@@ -138,10 +166,24 @@ std::string SeedFilesOther(const proto::ModList& host, const proto::ModList& the
     for (const auto& h : host.mods) {
         if (!IsSeedId(h.id) || h.hash == proto::ModHash{}) continue;
         for (const auto& t : theirs.mods) {
-            if (t.id == h.id && t.hash != proto::ModHash{} && t.hash != h.hash) return SeedWordOf(h.id);
+            if (t.id == h.id && t.hash != proto::ModHash{} && t.hash != h.hash && HashWay(t.hash) == HashWay(h.hash)) {
+                return SeedWordOf(h.id);
+            }
         }
     }
     return {};
+}
+
+int SeedKitOther(const proto::ModList& host, const proto::ModList& theirs, std::string* seed) {
+    for (const auto& h : host.mods) {
+        if (!IsSeedId(h.id) || h.hash == proto::ModHash{}) continue;
+        for (const auto& t : theirs.mods) {
+            if (t.id != h.id || t.hash == proto::ModHash{} || HashWay(t.hash) == HashWay(h.hash)) continue;
+            if (seed != nullptr) *seed = SeedWordOf(h.id);
+            return HashWay(t.hash) > HashWay(h.hash) ? 1 : -1;
+        }
+    }
+    return 0;
 }
 
 namespace {
@@ -173,6 +215,20 @@ std::string SeedOtherMineLine(std::string_view seed) {
            "update to the host's kit";
 }
 
+std::string SeedKitLine(std::uint8_t number, std::string_view name, std::string_view seed, bool newer) {
+    return "Mods: " + Who(number, name) + " is on " + (newer ? "a newer" : "an older") +
+           " kit than the host's, so its randomizer seed " + std::string(seed) +
+           " can't be checked (it may be another world); " +
+           (newer ? "the host updates to it" : "it updates to the host's kit");
+}
+
+std::string SeedKitMineLine(std::string_view seed, bool newer) {
+    return newer ? "Mods: the host's kit is older than yours, so its randomizer seed " + std::string(seed) +
+                       " can't be checked against yours (it may be another world): the host updates to your kit"
+                 : "Mods: your kit is older than the host's, so your randomizer seed " + std::string(seed) +
+                       " can't be checked against its (it may be another world): update to the host's kit";
+}
+
 std::string SeedBackLine(std::uint8_t number, std::string_view name) {
     return "Mods: " + Who(number, name) + " runs the host's randomizer seed now";
 }
@@ -194,6 +250,11 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         g.Reset();  // each connection starts with nothing; the server gives the rest
         g.connected = event.kind != EventKind::disconnected;
         g.hosting = g.connected && client.is_host();
+        if (event.kind == EventKind::welcomed) {
+            // A new session: Shared until its host says (a rejoin keeps it). The first player in is the host
+            // from here and gets no host change: its own choice is in force now.
+            CoopGoldMode::OnWelcomed(g.hosting);  // (coop_hook.cpp logs the mode)
+        }
         g.host_number = client.host_number();
         for (const auto& p : client.players()) {
             g.names[p.number] = p.nickname;
@@ -206,6 +267,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         if (g.hosting) {
             g.host_values.reset();
             g.host_values_due = true;
+            CoopGoldMode::OnHosting();  // our choice, unless a host before us told the session's mode
         }
         g.differences.clear();
         g.guests_told.clear();
@@ -231,6 +293,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         if (!g.hosting) {
             g.host_values = settings->settings;
             g.host_values_due = true;
+            CoopGoldMode::OnHostSettings(settings->settings);
         }
     }
 }
@@ -239,6 +302,7 @@ void Frame(coop::host::Session* session) {
     Glue& g = TheGlue();
     std::optional<proto::Message> send_list;
     std::optional<proto::Message> send_settings;
+    std::string race_in_settings;   // the race id send_settings carries (CoopGoldMode::MarkRaceSent once sent)
     std::optional<std::optional<std::vector<proto::ModSetting>>> hand_on;
     std::function<void(std::optional<std::vector<proto::ModSetting>>)> host_values;
     {
@@ -254,14 +318,30 @@ void Frame(coop::host::Session* session) {
                 g.list_sent = true;
                 send_list = *mine;
             }
-            if (g.hosting && g.provider.shared) {
-                std::vector<proto::ModSetting> shared = g.provider.shared();
+            if (g.hosting) {
+                // Co-op's own host settings first (CoopGoldMode: the mode in force and, Not shared, the race id;
+                // never cut off below), then the mods'. A mod that calls itself "coop" cannot give the same keys.
+                std::vector<proto::ModSetting> shared{CoopGoldMode::AsSetting(CoopGoldMode::InForce())};
+                if (auto race = CoopGoldMode::RaceSetting()) {
+                    race_in_settings = race->value;
+                    shared.push_back(std::move(*race));
+                }
+                if (g.provider.shared) {
+                    for (proto::ModSetting& s : g.provider.shared()) {
+                        if (s.mod_id != CoopGoldMode::kModId ||
+                            (s.key != CoopGoldMode::kKey && s.key != CoopGoldMode::kRaceKey)) {
+                            shared.push_back(std::move(s));
+                        }
+                    }
+                }
                 if (shared.size() > proto::kMaxModSettingEntries) {
                     shared.resize(proto::kMaxModSettingEntries);
                 }
                 if (g.shared_sent != shared) {
                     g.shared_sent = shared;
                     send_settings = proto::ModSettings{proto::kPlayerSelf, std::move(shared)};
+                } else if (!race_in_settings.empty()) {
+                    CoopGoldMode::MarkRaceSent(race_in_settings);   // (sent before)
                 }
             }
             if (mine && !g.hosting) {
@@ -273,6 +353,8 @@ void Frame(coop::host::Session* session) {
                             g.Line(SeedlessMineLine(seed));  // (the other differences are in the Mods tab)
                         } else if (const std::string other = SeedFilesOther(host->second, *mine); !other.empty()) {
                             g.Line(SeedOtherMineLine(other));
+                        } else if (std::string kit_seed; const int kit = SeedKitOther(host->second, *mine, &kit_seed)) {
+                            g.Line(SeedKitMineLine(kit_seed, kit > 0));
                         } else if (!diff.empty()) {
                             g.Line("Mods: yours differ from the host's (" + diff.front() +
                                    (diff.size() > 1 ? ", ..." : "") + "): see the Mods tab");
@@ -295,12 +377,16 @@ void Frame(coop::host::Session* session) {
             if (host_list != nullptr) {
                 for (const auto& [number, list] : g.lists) {
                     if (!g.hosting && number == g.host_number) continue;
-                    // 0: the host's seed, 1: none (SeedMissing), 2: other files (SeedFilesOther: another kit)
+                    // 0: the host's seed, 1: none (SeedMissing), 2: other files (SeedFilesOther: another kit),
+                    // 3 / 4: hashed another way (SeedKitOther: the player's kit is older / newer than the host's)
                     std::string seed = SeedMissing(*host_list, list);
                     int state = seed.empty() ? 0 : 1;
                     if (state == 0) {
                         seed = SeedFilesOther(*host_list, list);
                         if (!seed.empty()) state = 2;
+                    }
+                    if (state == 0) {
+                        if (const int kit = SeedKitOther(*host_list, list, &seed)) state = kit > 0 ? 4 : 3;
                     }
                     const auto told = g.seedless.try_emplace(number, 0).first;
                     if (told->second == state) continue;
@@ -309,6 +395,7 @@ void Frame(coop::host::Session* session) {
                     const std::string who = name != g.names.end() ? name->second : std::string();
                     g.Line(state == 1   ? SeedlessLine(number, who, seed)
                            : state == 2 ? SeedOtherLine(number, who, seed)
+                           : state >= 3 ? SeedKitLine(number, who, seed, state == 4)
                                         : SeedBackLine(number, who));
                 }
             }
@@ -339,6 +426,9 @@ void Frame(coop::host::Session* session) {
         const bool sent = session->with_client([&](coop::net::Client& client) {
             return client.state() == coop::net::State::connected && client.send(**m);
         });
+        if (sent && m == &send_settings && !race_in_settings.empty()) {
+            CoopGoldMode::MarkRaceSent(race_in_settings);
+        }
         if (!sent) {
             std::lock_guard lock(g.mutex);
             if (m == &send_list) {

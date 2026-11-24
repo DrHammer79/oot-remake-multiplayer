@@ -30,9 +30,19 @@ void ApplyKitOptions();
 // The coop-options.ini ApplyKitOptions reads: the kit's, or the one beside longshot.exe (a game with no kit of its own);
 // none when neither is there.
 std::optional<std::filesystem::path> KitOptionsFile();
+// This game's own player file, coop-player.ini beside longshot.exe (CoopTitleMenu::PlayerKey: the controller, the
+// keyboard, the look), when it has one: a local co-op game (<game>\local-players\playerN) or a Nucleus Co-op instance.
+std::optional<std::filesystem::path> PlayerOptionsFile();
+// The coop-options.ini text this game goes by: KitOptionsFile's, with coop-player.ini's lines over it.
+std::string ReadKitOptions();
+// `text` (ReadKitOptions' after an edit) written back: the player's keys to coop-player.ini when there is one, the rest
+// to KitOptionsFile. False when a file could not be written (or there is neither file).
+bool WriteKitOptions(const std::string& text);
 // The file Link's look is saved to (SaveLook) and read from at the start (coop_look_live): KitOptionsFile, else
 // coop.ini. One place, so the two never differ (row 198).
 std::filesystem::path LookFile();
+// The text Link's look is read from at the start: ReadKitOptions when there is a kit's or a player's file, else coop.ini.
+std::string LookText();
 // The look the player chose in the pause menu (coop_look.h), written to the
 // kit's coop-options.ini (else coop.ini) so the next start keeps it (the
 // title's Settings page reads the files when it opens). The calc thread.

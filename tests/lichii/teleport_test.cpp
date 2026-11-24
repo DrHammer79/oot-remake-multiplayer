@@ -337,6 +337,14 @@ TEST_CASE("teleport: a map change event the game does not take is asked again, t
     CHECK(t < 15 * kS);  // well before the 60 s give-up
 }
 
+TEST_CASE("teleport: a scene's default start is its first start point, a boss stage has its own") {
+    CHECK(CoopTeleport::DefaultStart("GohmaStage") == "GohmaStage");
+    CHECK(CoopTeleport::DefaultStart("InsideTheDekuTree") == "Entrance");
+    CHECK(CoopTeleport::DefaultStart("MorphaStage") == "MorphaStage");
+    CHECK_FALSE(CoopTeleport::DefaultStart("Market").has_value());   // no age: not a scene
+    CHECK_FALSE(CoopTeleport::DefaultStart("").has_value());
+}
+
 TEST_CASE("teleport: the arrival event is the entrance's own, else the plain one") {
     CHECK(CoopTeleport::ArrivalEvent("KakarikoVillage_Child", "KakarikoVillage_Entrance") ==
           "Dm_SY_BancChangeArrive_KakarikoVillage_01");

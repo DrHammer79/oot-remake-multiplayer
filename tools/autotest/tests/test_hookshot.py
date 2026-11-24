@@ -287,6 +287,10 @@ class ParseTest(unittest.TestCase):
         steps = hs.parse("menu Customize\nmenu close\nmenu Host\n")
         self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host")])
         self.assertIn("menu", hs.MODULE_ONLY)
+        self.assertIn("autosave", hs.MODULE_ONLY)   # rejoin-host-273-2: the game's own autosave, asked
+        self.assertEqual(hs.parse("autosave\n")[0].kind, "autosave")
+        with self.assertRaises(hs.ScriptError):
+            hs.parse("autosave now\n")
 
     def test_host_in_game_env(self):  # row 260: A hosts through its own Multiplayer > Host
         self.assertEqual(hs.host_in_game_env(27520, "autotest-pass"),
@@ -883,7 +887,7 @@ class RunTest(unittest.TestCase):
                                 "--out", os.path.join(tmp, "out"), "--name", "t", "--script-a",
                                 os.path.join(tmp, "a.txt"), "--script-b", os.path.join(tmp, "b.txt"),
                                 "--every", "0", "--env", "B:ONLY_B=1", "--env", "BOTH=1",
-                                "--playtest-ports", "5010", "--display", "DISPLAY7"])
+                                "--display", "DISPLAY7", "--playtest-ports", "5010"])
             finally:
                 hs.subprocess.Popen, hs.Bridge.connect = popen, connect
                 FakePlacement.restore()
@@ -900,6 +904,7 @@ class RunTest(unittest.TestCase):
             # the play-test bridge on, each game on its own port: A = p1 = base + 1, B = p2 = base + 2
             self.assertEqual([p.env["LICHII_COOP_PLAYTEST_PORT"] for p in started], ["5011", "5012"])
             self.assertEqual([p.env["LICHII_COOP_CHEATS"] for p in started], ["1", "1"])   # give needs it
+            self.assertEqual([p.env["LICHII_COOP_PLAYTEST_VERBS"] for p in started], ["1", "1"])   # act, warp, flag, give
             self.assertEqual([p.env["LICHII_COOP_TEST_OWN_SAVE"] for p in started], ["1", "1"])   # each game its own save
             # no crash ask on the title to take the load's A presses (TEST_GAME_DEFAULTS; smoke hs-players, kit-0119)
             self.assertEqual([p.env["LICHII_COOP_PROBLEM_ASK"] for p in started], ["0", "0"])

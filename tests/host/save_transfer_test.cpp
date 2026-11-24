@@ -12,6 +12,7 @@
 
 #include "coop/host/save_transfer.hpp"
 #include "coop/protocol/codec.hpp"
+#include "../test_temp.h"
 
 namespace save = coop::host::save;
 namespace proto = coop::protocol;
@@ -34,7 +35,7 @@ save::SaveSlot Slot(std::uint32_t seed) {
 // A fresh folder under the temp folder, removed at the end of the test.
 struct TempDir {
   fs::path path;
-  explicit TempDir(const char* name) : path(fs::temp_directory_path() / name) {
+  explicit TempDir(const char* name) : path(ModTestDir(name)) {
     fs::remove_all(path);
     fs::create_directories(path);
   }
@@ -655,7 +656,7 @@ TEST_CASE("save transfer: row 273's cases end on the folder of the role the game
 
 TEST_CASE("save transfer: a co-op folder is emptied of slots before the host's save comes (issue 167)") {
   namespace fs = std::filesystem;
-  const fs::path base = fs::temp_directory_path() / "coop-clear-slots-test";
+  const fs::path base = ModTestDir("coop-clear-slots-test");
   std::error_code ec;
   fs::remove_all(base, ec);
   const fs::path coop = base / "0123-coop", own = base / "0123";

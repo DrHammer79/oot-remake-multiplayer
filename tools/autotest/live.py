@@ -23,7 +23,8 @@ boot, as the lane runs do (`--no-restore` keeps whatever the copies hold).
                                            [--boot-a boot.A.txt --boot-b boot.B.txt] [--env K=V ...]
                                            [--max-minutes 30] [--idle-minutes 10] [--lock-wait S] [--no-restore]
     python -I tools/autotest/live.py do --session DIR A "goto 10.0 20.0 0.5 300; press A"
-    python -I tools/autotest/live.py state --session DIR [A|B]
+    python -I tools/autotest/live.py state --session DIR [A|B] [--since ID]
+    python -I tools/autotest/live.py replay [FILE ...] [--session DIR] [--dry-run]   (run a call log again)
     python -I tools/autotest/live.py shot --session DIR [A|B]
     python -I tools/autotest/live.py checkpoint --session DIR TAG
     python -I tools/autotest/live.py stop --session DIR
@@ -39,6 +40,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hookshot  # noqa: E402  (the same folder)
+import kit_tools  # noqa: E402
 import lanes  # noqa: E402  (the same folder; it brings tools/hookshot/hs.py)
 
 TAGS = ("A", "B")
@@ -48,8 +50,10 @@ PORT = 27593         # without a lane
 NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")
 MAX_LINES = 80
 MAX_MINUTES = 30     # a session's whole length (the lane lock goes stale after 4 h anyway; a slot is shorter)
+BACKUP = lanes.LIVE_BACKUP   # --dll: the lane's own module beside it while a session runs (lanes.py swap_in)
 IDLE_MINUTES = 10    # no tester command for this long after the boot: the tester is gone (hand-off, crash, pause)
 WATCH_EVERY = 5.0    # s between the watchdog's looks
+SERVER_PASSWORD = "autotest-pass"   # the session's join password: given to the boot, kept in session.json (runner)
 QUIT_WAIT = 15.0     # s a game gets to quit before it is killed
 
 
@@ -153,7 +157,7 @@ def runner_argv(a, game_a, game_b, port, pipe, d):
     """hookshot.py run's arguments for the boot. No --lane: the watchdog holds the lane lock for the whole session (the
     runner would let it go when the boot ends, with the games still open)."""
     argv = ["run", "--game-a", game_a, "--game-b", game_b, "--server", a.server, "--port", str(port),
-            "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0",
+            "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0", "--password", SERVER_PASSWORD,
             "--scenario-timeout", str(a.boot_timeout)]
     if a.no_restore:
         argv.append("--no-restore")
@@ -181,7 +185,12 @@ def playtest_base(lane):
 
 
 def spawn_watchdog(d):
-    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008}   # DETACHED_PROCESS: outlives the shell
+    # It must outlive the shell that started it, and it must not make a window flash. DETACHED_PROCESS has no console, so
+    # every console program the watchdog (or lanes.running_in, tasklist, git ...) starts gets a NEW visible console
+    # window: a chain of flashing windows through a run. CREATE_NO_WINDOW gives it a hidden console its children share;
+    # CREATE_NEW_PROCESS_GROUP keeps the shell's Ctrl+C away from it, and with its own console the shell's closing does
+    # not end it.
+    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | lanes.hs.CREATE_NO_WINDOW}
           if os.name == "nt" else {"start_new_session": True})
     with open(os.path.join(d, "watchdog.txt"), "ab") as log:
         return subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "watchdog", "--session", d],
@@ -203,7 +212,19 @@ def wait_lock(d, proc, timeout, clock=time.monotonic, sleep=time.sleep):
     return "the watchdog did not answer in %d s" % timeout
 
 
+def ends_text(max_minutes, idle_minutes):
+    """What the answer to `start` says about when the session ends on its own (0 = no limit)."""
+    parts = []
+    if max_minutes:
+        parts.append("after %d min" % max_minutes)
+    if idle_minutes:
+        parts.append("%d min without a command" % idle_minutes)
+    return (", or ".join(parts) if parts else "never by itself") + " (live.py stop, or a game that ended)"
+
+
 def start(a):
+    if getattr(a, "dll", None) and not a.lane:
+        raise SystemExit("--dll needs --lane (it swaps a lane's own module for the session)")
     d = os.path.abspath(a.session)
     os.makedirs(d, exist_ok=True)
     w = read_json(watchdog_file(d), {}) or {}
@@ -217,7 +238,11 @@ def start(a):
             pass
     s = {"started": time.time(), "dir": d, "lane": a.lane, "port": port, "booted": False,
          "max_s": int(a.max_minutes * 60), "idle_s": int(a.idle_minutes * 60), "lock_wait": a.lock_wait,
-         "games": {}, "offsets": {}}
+         "games": {}, "offsets": {}, "planned": {},
+         "runner": {"game_a": os.path.abspath(game_a), "game_b": os.path.abspath(game_b), "port": port, "pipe": pipe,
+                    "server": os.path.abspath(a.server), "env": list(a.env), "display": getattr(a, "display", None),
+                    "boot_timeout": a.boot_timeout, "password": SERVER_PASSWORD,
+                    "playtest": playtest_base(a.lane) if getattr(a, "playtest", False) else 0}}
     for i, (x, g) in enumerate(zip(TAGS, (game_a, game_b))):
         s["games"][x] = {"folder": os.path.abspath(g), "pipe": "%s-%s" % (pipe, x),
                          "commands": os.path.join(d, "commands-%s.txt" % x),
@@ -229,6 +254,15 @@ def start(a):
     lock = wait_lock(d, spawn_watchdog(d), a.lock_wait + 30)
     if lock not in ("held", "none"):
         return {"ok": False, "session": d, "lane": a.lane, "error": lock}
+    if getattr(a, "dll", None):
+        try:
+            install_dll(s, a.dll)
+            save(d, s)
+        except (lanes.Fail, OSError) as e:
+            save(d, s)
+            out = {"ok": False, "session": d, "lane": a.lane, "error": "--dll: %s" % e}
+            out["stop"] = stop(argparse.Namespace(session=d))
+            return out
     code = hookshot.main(runner_argv(a, game_a, game_b, port, pipe, d))
     s = load(d)
     for x in TAGS:
@@ -239,7 +273,7 @@ def start(a):
     touch(d)
     out = {"ok": code == 0, "session": d, "lane": a.lane, "lock": lock, "port": port,
            "boot": "played" if code == 0 else "FAILED (see steps.txt): the session is closed",
-           "ends": "after %d min, or %d min without a command" % (a.max_minutes, a.idle_minutes)}
+           "ends": ends_text(a.max_minutes, a.idle_minutes)}
     if getattr(a, "playtest", False):
         out["playtest"] = {"p%d" % (i + 1): s["games"][x]["playtest_port"] for i, x in enumerate(TAGS)}
     if code != 0:
@@ -251,9 +285,15 @@ def bridge(s, x):
     return hookshot.Bridge.connect(s["games"][x]["pipe"], timeout=15)
 
 
-def new_lines(d, s, x):
-    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest)."""
+def new_lines(d, s, x, match=None):
+    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest).
+    With `match` (a text), only the lines holding it, the OLDEST MAX_LINES of them; the cursor given moves past the lines
+    looked at only when all their matches were returned (more than MAX_LINES: it stops after the last one returned, so
+    no match is lost). The caller keeps this cursor apart from the plain one: the lines a match left out are still there
+    for a plain look."""
     path = s["games"][x]["log"]
+    if match:
+        return _new_matching(path, s, x, match)
     try:
         with open(path, "rb") as f:
             f.seek(s["offsets"].get(x, 0))
@@ -268,6 +308,31 @@ def new_lines(d, s, x):
     return lines
 
 
+def _new_matching(path, s, x, match):
+    try:
+        with open(path, "rb") as f:
+            start = s["offsets"].get(x, 0)
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return []
+    out, end, pos, capped = [], start, 0, False
+    for raw in data.splitlines(keepends=True):
+        if not raw.endswith(b"\n"):
+            break   # a half-written last line: left for the next look
+        pos += len(raw)
+        ln = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if "coop:" in ln and not NOISE.search(ln) and match in ln:
+            out.append(re.sub(r"^\[hos [^\]]*\] ", "", ln))
+            if len(out) >= MAX_LINES:
+                end, capped = start + pos, True
+                break
+    if not capped:
+        end = start + pos   # every complete line was looked at, and every match is in `out`
+    s["offsets"][x] = end
+    return out
+
+
 def snapshot(b):
     r = b.request("status", reply_timeout=10.0)
     g = r.get("game") or {}
@@ -278,12 +343,30 @@ def snapshot(b):
     return out
 
 
+def menu_of(port, client=None):
+    """What co-op's menus show in a game started with the play-test bridge (docs/playtest.md "menu"): {"menu": ...}, or
+    {"menu_error": why}. A bridge shot leaves out Longshot's overlays (the co-op pages), so this is how they are read.
+    The game is not held for it (one `state` on a connection of its own)."""
+    import playtest_client
+    c = client or playtest_client.Client(port, timeout=5.0, hold=False)
+    try:
+        g = playtest_client.game_of(c.request("state"))
+        return {"menu": g["menu"]} if "menu" in g else {"menu_error": "the bridge's state has no menu (an older module?)"}
+    except Exception as e:  # (a game without the bridge, or busy: said, the look still comes back)
+        return {"menu_error": "%s: %s" % (e.__class__.__name__, e)}
+    finally:
+        c.close()
+
+
 def look(d, s, x):
     b = bridge(s, x)
     try:
         st = snapshot(b)
     finally:
         b.close()
+    port = s["games"][x].get("playtest_port")
+    if port:
+        st.update(menu_of(port))
     st["log"] = new_lines(d, s, x)
     return st
 
@@ -293,7 +376,9 @@ def state(a):
     s = open_session(d)
     out = {x: look(d, s, x) for x in ([a.player] if a.player else TAGS)}
     save(d, s)
-    return out
+    # every look gets a `state_id`; with `since` (an earlier look's id) only what changed comes back (the new log lines
+    # are new since the last look already, so they are always whole)
+    return kit_tools.StateHistory(os.path.join(d, "state-history.json")).reply(out, getattr(a, "since", None))
 
 
 def do(a):
@@ -408,6 +493,180 @@ def release_lock(n, owner):
     return lanes.hs.lock_release(lanes.hs.main_root(lanes.REPO), "lane%d" % n, owner, say=lambda *_: None)
 
 
+# --- a game or the server closed and started again inside one session (quit, server, relaunch) ----------------------
+# A planned exit is a step of the test, not the session's end: `planned` in session.json names what is down on purpose,
+# and the watchdog's "game X ended" leaves those out. `relaunch` starts the game again through the runner (hookshot.py
+# run --only X, into this session's folder: its pid is added to pids.json) with the session's own switches and ports.
+
+def write_pids(d, games=None, server=False):
+    """pids.json with these games' pids replaced (a pid of None: down) and, unless False, the server's."""
+    p = read_json(os.path.join(d, "pids.json"), {}) or {}
+    g = dict(p.get("games") or {})
+    for x, pid in (games or {}).items():
+        g[x] = pid
+    p["games"] = g
+    if server is not False:
+        p["server"] = server
+    write_json(os.path.join(d, "pids.json"), p)
+
+
+def plan(d, what, why):
+    """Marks `what` (A, B or server) as down on purpose (why) or, with why None, as back."""
+    s = load(d)
+    planned = s.setdefault("planned", {})
+    if why:
+        planned[what] = why
+    else:
+        planned.pop(what, None)
+    save(d, s)
+    return s
+
+
+def quit_one(a, alive=None, quit=None, killer=None, wait=QUIT_WAIT, clock=time.monotonic, sleep=time.sleep):
+    """Closes one game in the middle of a session (asked to quit, or `--kill`ed as a crash would end it)."""
+    alive = alive or lanes.hs.pid_alive
+    quit, killer = quit or quit_game, killer or kill
+    d = os.path.abspath(a.session)
+    open_session(d)
+    s = plan(d, a.player, "killed" if a.kill else "quit")
+    pid = game_pids(d)[0].get(a.player)
+    if not pid or not alive(pid):
+        write_pids(d, {a.player: None})
+        return {"player": a.player, "pid": pid, "how": "was not running"}
+    how = "killed"
+    if a.kill:
+        killer(pid)
+    else:
+        try:
+            quit(s, a.player)
+            how = "quit asked"
+        except Exception as e:
+            how = "quit not reached (%s)" % e
+    end = clock() + wait
+    while alive(pid) and clock() < end:
+        sleep(0.5)
+    if alive(pid):
+        killer(pid)
+        how += ", killed after %d s" % wait
+    write_pids(d, {a.player: None})
+    touch(d)
+    return {"player": a.player, "pid": pid, "how": how}
+
+
+def server_cmd(a, alive=None, killer=None, popen=None, sleep=time.sleep):
+    """Stops the session's server, or starts it again (same exe, port and password as the boot's)."""
+    alive = alive or lanes.hs.pid_alive
+    killer = killer or kill
+    d = os.path.abspath(a.session)
+    s = open_session(d)
+    r = s.get("runner")
+    if not r:
+        raise SystemExit("this session was started by an older live.py: no server settings kept")
+    pid = game_pids(d)[1]
+    if a.action == "stop":
+        plan(d, "server", "stopped")
+        if pid and alive(pid):
+            killer(pid)
+        write_pids(d, server=None)
+        return {"server": "stopped", "pid": pid}
+    if pid and alive(pid):
+        return {"error": "the server still runs (pid %d): live.py server stop first" % pid}
+    n = len([f for f in os.listdir(d) if f.startswith("server-out")])
+    with open(os.path.join(d, "server-out-%d.txt" % n), "w") as so:
+        env = dict(os.environ, OOT_COOP_TEST_PASSWORD=r.get("password", SERVER_PASSWORD))   # (in the environment, never on the command line)
+        proc = (popen or lanes.hs.popen_quiet)([r["server"], "--port", str(r["port"]), "--password-env",
+                                                "OOT_COOP_TEST_PASSWORD"], stdout=so, stderr=subprocess.STDOUT, env=env)
+    write_pids(d, server=proc.pid)
+    plan(d, "server", None)
+    sleep(1)
+    return {"server": "started", "pid": proc.pid, "port": r["port"]}
+
+
+def relaunch_argv(r, d, x, boot=None, no_load=False, restore=False):
+    """hookshot.py run's arguments that start game x again into session folder d (r: the session's `runner`)."""
+    argv = ["run", "--only", x, "--game-a", r["game_a"], "--game-b", r["game_b"], "--port", str(r["port"]),
+            "--out", d, "--name", "live-%s" % x.lower(), "--pipe", r["pipe"], "--keep-open", "--every", "0",
+            "--password", r.get("password", SERVER_PASSWORD),
+            "--scenario-timeout", str(r["boot_timeout"])]
+    if not restore:
+        argv.append("--no-restore")   # (the point of a rejoin is the save the game has now)
+    if boot:
+        argv += ["--script-%s" % x.lower(), boot]
+    if no_load:
+        argv.append("--no-load")
+    if r.get("playtest"):
+        argv += ["--playtest-ports", str(r["playtest"])]
+    for kv in r.get("env") or []:
+        argv += ["--env", kv]
+    if r.get("display"):
+        argv += ["--display", r["display"]]
+    return argv
+
+
+def relaunch(a, alive=None, runner=None):
+    """Starts a game that `quit` closed (or that crashed) again, joining the session's server."""
+    alive = alive or lanes.hs.pid_alive
+    d = os.path.abspath(a.session)
+    s = open_session(d)
+    r = s.get("runner")
+    if not r:
+        raise SystemExit("this session was started by an older live.py: no runner settings kept")
+    x = a.player
+    pid = game_pids(d)[0].get(x)
+    if pid and alive(pid):
+        return {"error": "game %s still runs (pid %d): live.py quit first" % (x, pid)}
+    plan(d, x, "relaunch")
+    log = s["games"][x]["log"]
+    if os.path.exists(log):   # the runner writes game-out-X.txt from the start: the old one is kept beside it
+        n = 1
+        while os.path.exists("%s.%d" % (log, n)):
+            n += 1
+        os.replace(log, "%s.%d" % (log, n))
+    code = (runner or hookshot.main)(relaunch_argv(r, d, x, a.boot, a.no_load, a.restore))
+    s = load(d)
+    s["offsets"][x] = 0
+    save(d, s)
+    if code == 0:
+        plan(d, x, None)
+    touch(d)
+    return {"ok": code == 0, "player": x, "pid": game_pids(d)[0].get(x),
+            "boot": "played" if code == 0 else "FAILED (see steps.txt): the game stays down"}
+
+
+def wait_log(session, x, pattern, mn=1, mx=None, timeout=60.0, clock=time.monotonic, sleep=time.sleep):
+    """Waits until game x's log (this run of it: game-out-X.txt) has at least `mn` lines matching `pattern`, at most
+    `timeout` s; `mx` (0: none) fails as soon as more match. {ok, count, lines (the last 5 matches)}."""
+    d = os.path.abspath(session)
+    s = open_session(d)
+    rx = re.compile(pattern)
+    end = clock() + float(timeout)
+    while True:
+        hits = [ln for ln in hookshot.read_text(s["games"][x]["log"]).splitlines() if rx.search(ln)]
+        if mx is not None and len(hits) > mx:
+            return {"ok": False, "count": len(hits), "lines": hits[-5:], "why": "more than %d match" % mx}
+        if len(hits) >= mn and (mx is None or clock() >= end or mn > 0):
+            return {"ok": True, "count": len(hits), "lines": hits[-5:]}
+        if clock() >= end:
+            return {"ok": False, "count": len(hits), "lines": hits[-5:],
+                    "why": "%d of %d after %g s" % (len(hits), mn, float(timeout))}
+        touch(d)
+        sleep(1.0)
+
+
+def install_dll(s, dll, kit=None, swap=None):
+    """--dll: `dll` in the lane for this session only (lanes.py swap_in: the lane's own kept beside it, also when the
+    lane had none); close() puts the lane's own back (restore_dlls). lanes.py owns the lane's module state."""
+    s["dll"] = {"installed": os.path.abspath(dll)}   # (written first: a half-done swap is still put back at close)
+    return (swap or (lambda n, path: lanes.swap_in(n, path, kit=kit)))(s["lane"], dll)
+
+
+def restore_dlls(s, kit=None, swap_back=None):
+    """The lane's own module back after a --dll session (what close() does): one word per game, joined."""
+    if not s.get("dll"):
+        return None
+    return ", ".join((swap_back or (lambda n: lanes.swap_back(n, kit=kit)))(s["lane"]))
+
+
 def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, wait=QUIT_WAIT,
           clock=time.monotonic, sleep=time.sleep):
     """Ends a session: both games asked to quit, what is still running after `wait` s killed, the server killed, the
@@ -431,6 +690,11 @@ def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, w
     if server and alive(server):
         killer(server)
         out["server"] = "killed"
+    if s.get("dll"):
+        try:
+            out["dll"] = restore_dlls(s)
+        except OSError as e:
+            out["dll"] = "NOT restored: %s" % e
     if s.get("lane"):
         out["lock"] = "lane%d.lock %s" % (s["lane"], "released" if release(s["lane"], lock_owner(d)) else "held by another")
     return out
@@ -448,12 +712,13 @@ def watch(d, clock=time.time, sleep=time.sleep, alive=None, every=WATCH_EVERY):
         now = clock()
         if os.path.exists(stop_file(d)):
             return "stop asked"
-        if now - s["started"] >= s["max_s"]:
+        if s["max_s"] and now - s["started"] >= s["max_s"]:   # (0: no limit)
             return "maximum duration (%d min) reached" % (s["max_s"] // 60)
         if s.get("booted"):
             if s.get("idle_s") and now - activity(d, s) >= s["idle_s"]:
                 return "no tester command for %d min" % (s["idle_s"] // 60)
-            gone = [x for x, p in sorted(game_pids(d)[0].items()) if not alive(p)]
+            planned = s.get("planned") or {}   # (a game closed on purpose: live.py quit / relaunch)
+            gone = [x for x, p in sorted(game_pids(d)[0].items()) if p and not planned.get(x) and not alive(p)]
             if gone:
                 return "game %s ended" % " and ".join(gone)
         sleep(every)
@@ -519,6 +784,21 @@ def stop(a, wait=60.0, clock=time.monotonic, sleep=time.sleep, alive=None):
     return {"ended": w["ended"], "closed": w.get("closed")}
 
 
+CALLS_FILE = "calls.jsonl"
+# the CLI commands that are kit calls, under the MCP tool each one is (docs/playtest.md, "Kit helpers")
+LOGGED = {"do": ("act", ("player", "script")), "state": ("state", ("player", "since")), "shot": ("shot", ("player",)),
+          "checkpoint": ("checkpoint", ("tag",))}
+
+
+def log_call(a, ok, error, began):
+    """Writes a CLI command to the session's call log (server `live`), so `live.py replay` can run it again."""
+    if a.cmd not in LOGGED or not os.path.isdir(a.session):
+        return
+    tool, keys = LOGGED[a.cmd]
+    args = {k: getattr(a, k) for k in keys if getattr(a, k, None) is not None}
+    kit_tools.CallLog(os.path.join(a.session, CALLS_FILE), "live").write(tool, args, ok, error, t=began)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -537,14 +817,29 @@ def main(argv=None):
     st.add_argument("--no-restore", action="store_true", help="keep the copies' saves (default: their baseline)")
     st.add_argument("--env", action="append", default=[], help="K=V, or A:K=V / B:K=V for one game")
     st.add_argument("--boot-timeout", type=int, default=900)
-    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length")
-    st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
-    st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
-    st.add_argument("--playtest", action="store_true",
-                    help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
     st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
                                       "tools/autotest/placement.py" % (hookshot.placement.ENV,
                                                                        hookshot.placement.DEFAULT_DISPLAY))
+    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length; 0: no limit")
+    st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
+    st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
+    st.add_argument("--dll", help="(with --lane) a hookshot_coop.dll for this session only: the lane's own is put aside "
+                    "and put back when the session ends")
+    st.add_argument("--playtest", action="store_true",
+                    help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
+    qt = sub.add_parser("quit", help="close one game in the middle of the session (a planned exit, not its end)")
+    qt.add_argument("--session", required=True)
+    qt.add_argument("player", choices=TAGS)
+    qt.add_argument("--kill", action="store_true", help="end it at once, as a crash would (default: ask it to quit)")
+    sv = sub.add_parser("server", help="stop the session's server, or start it again")
+    sv.add_argument("--session", required=True)
+    sv.add_argument("action", choices=["stop", "start"])
+    rl = sub.add_parser("relaunch", help="start a game that quit (or crashed) again; it joins the session's server")
+    rl.add_argument("--session", required=True)
+    rl.add_argument("player", choices=TAGS)
+    rl.add_argument("--boot", help="a boot script for it (default: none, the load presses A until play)")
+    rl.add_argument("--no-load", action="store_true", help="the boot script takes the title itself")
+    rl.add_argument("--restore", action="store_true", help="put its save baseline back first (default: keep its save)")
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)
@@ -553,11 +848,38 @@ def main(argv=None):
             q.add_argument("script", help="test script lines, ';' between them")
         elif name in ("state", "shot"):
             q.add_argument("player", nargs="?", choices=TAGS)
+            if name == "state":
+                q.add_argument("--since", type=int, metavar="ID",
+                               help="the state_id of an earlier look: only what changed since it (default: all)")
         elif name == "checkpoint":
             q.add_argument("tag")
+    rp = sub.add_parser("replay", help="run the calls of a call log again (docs/playtest.md, \"Kit helpers\")")
+    rp.add_argument("files", nargs="*", metavar="FILE", help="call logs (default: calls.jsonl of --session)")
+    rp.add_argument("--session", help="the session the games are in (needed for oot-playtest and live calls)")
+    rp.add_argument("--lane", type=int, help="a test lane: the bridge ports of the player servers")
+    rp.add_argument("--log-dir", default="playtest-logs", help="where checkpoint logs and shots go (as the servers' --log-dir)")
+    rp.add_argument("--include-reads", action="store_true", help="also repeat the calls that only look (get_state ...)")
+    rp.add_argument("--include-failed", action="store_true", help="also repeat the calls that failed the first time")
+    rp.add_argument("--keep-going", action="store_true", help="go on after a call that fails (default: stop there)")
+    rp.add_argument("--dry-run", action="store_true", help="list the calls, run nothing")
+    rp.add_argument("--delay", type=float, default=0.0, help="s to wait between calls")
     a = p.parse_args(argv)
-    out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
-           "watchdog": watchdog}[a.cmd](a)
+    if a.cmd == "replay":
+        files = a.files or ([os.path.join(a.session, CALLS_FILE)] if a.session else [])
+        if not files:
+            p.error("replay: give a call log FILE, or --session")
+        out = kit_tools.replay(files, a.session, a.lane, a.log_dir, a.include_reads, a.include_failed, a.keep_going,
+                               a.dry_run, a.delay, say=lambda s: print(s, file=sys.stderr))
+        print(json.dumps(out, indent=1))
+        return 1 if out["failed"] else 0
+    began = time.time()
+    try:
+        out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
+               "watchdog": watchdog, "quit": quit_one, "server": server_cmd, "relaunch": relaunch}[a.cmd](a)
+    except (Exception, SystemExit) as e:
+        log_call(a, False, "%s: %s" % (e.__class__.__name__, e), began)
+        raise
+    log_call(a, "error" not in out, out.get("error") if isinstance(out, dict) else None, began)
     print(json.dumps(out, indent=1))
     return 1 if a.cmd == "do" and "error" in out else 0
 

@@ -441,8 +441,8 @@ class Kit:
         logs/problem-send-address.txt. Any failure keeps what was cached. fetch (tests) returns the text. With send
         "off" nothing is requested. The whole lookup is bounded by wall time (urllib's timeout does not cover the
         DNS lookup): it runs in a daemon thread that is waited for ADDRESS_LOOKUP_TIMEOUT seconds."""
-        if send == "off":
-            return ""
+        if send == "off" or os.environ.get("OOT_COOP_PROBLEM_ADDRESS_LOOKUP", "").strip().lower() == "off":
+            return ""   # (the env: tests whose kit must not see main's live address; problem-send.ps1 the same)
         box = {}
 
         def work():

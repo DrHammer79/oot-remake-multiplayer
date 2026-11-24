@@ -171,6 +171,7 @@ struct Step {
     std::string mark;  // mark: its name; warp: the scene; give: the item; wear: the piece;
                        // assign: the item's name in the button enum (Bow, Hookshot, Hammer)
     std::string start; // warp: the start position name (empty: the scene's own); wear: the slot
+    std::uint64_t id = 0;  // kill and hit: the actor's address ("kill ID NAME"); 0: the nearest of that name
     float x = 0.0f;  // goto and toward: the world point (x, z); place: (x, y, z)
     float y = 0.0f;
     float z = 0.0f;
@@ -197,15 +198,69 @@ std::string WarpGiveUpLine(std::string_view target, double seconds, const std::o
 // "line N: why".
 std::optional<Script> Parse(std::string_view text, std::string& error);
 
-// `aim` (row 173): where an arrow flying from `from` is put so it goes into `target`: `short_m` short of the target
-// on the line from `from` (at `from` when nearer than that), turned to face it (place, then the 3x3 rows, as the
-// actor's +0x31c..+0x34b: column 2 is the way it faces, column 1 the up nearest the world's). Nothing when the two
-// points are the same or not finite.
-std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, const std::array<float, 3>& target,
-                                             float short_m);
+// The kinds the play-test bridge's `act` command may run (hookshot/src/coop_playtest.cpp): kill, hit, hurt, place, face,
+// aim, wear, dress, assign, chat, menu, setflag, setenum. The rest of what a script can do has its own bridge command or
+// makes no sense while the game is held (wait, hold, press, goto, toward, sync, mark, dump, warp, give, stun, drop).
+const std::vector<Kind>& ActKinds();
+// The word a script line starts with for this kind ("kill", "goto", ...; a timed step: "timed").
+const char* KindWord(Kind kind);
+// Empty when every step of `script` is one of `allowed`; else "line N: WORD is not allowed here (allowed: ...)". The check is
+// on the parsed kinds, so case, spacing and a hidden second line cannot get past it.
+std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
+
+// `aim` (row 173): the last bit of a player's aim. The shot is aimed by turning the view the way a player does; at
+// the let-go the arrow or seed is only moved sideways onto the line through the target along its own flight (its
+// way `flight` and speed stay the game's), and only when that flight already points within `max_deg` of the target
+// and passes within `max_side_m` of it (a fixed distance, so the slack does not grow with range).
+// `off_deg`: how far it pointed off. `put`: the new place, none when it was too far off (no cheat for a bad aim) or
+// flying away. Nothing at all when there is no flight, the shot is at the target, or a value is not finite.
+struct AimNudged {
+    float off_deg = 0.0f;
+    float side_m = 0.0f;   // how far the flight's line passes from the target
+    std::optional<std::array<float, 3>> put;
+};
+inline constexpr float kAimNudgeDeg = 4.0f;   // the reticle's slack, not a new aim
+inline constexpr float kAimNudgeM = 0.5f;     // and never more than this sideways (4 degrees is 2 m at 30 m)
+std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
+                                  const std::array<float, 3>& target, float max_deg, float max_side_m = kAimNudgeM);
 // `aim`: a nocked arrow is let go when it moves more than this between two frames (its flight is ~113 m/s, ~1.9 m
 // a frame at 60; a nocked one moves with Link's hands, well under it).
 inline constexpr float kAimLetGoM = 1.0f;
+// `aim`: the projectiles of ours it steers, by actor name: the bow's arrow and the slingshot's seed
+// (coop_projectiles.cpp names both; another player's shot is a CoopShot_ stand-in, never one of these).
+inline bool Aimable(std::string_view name) {
+    return name == "NormalArrow" || name == "Shootable_DekuSeed";
+}
+
+// `aim`: the aim that waits for our next shot. The walk offers it every listed arrow or seed of ours, not only one it
+// sees for the first time: the slingshot makes its next seed right after a shot, so that seed is already listed when
+// the aim is armed (lane run). The first one offered within kAimHandM of our Link is taken (a shot still flying or
+// lying from before is farther); AimStep then watches it until it is let go. With Link's place unknown, the first.
+inline constexpr float kAimHandM = 2.0f;
+struct AimWait {
+    std::array<float, 3> target{};
+    std::uint64_t until_ms = 0;
+    std::uint64_t arrow = 0;       // our nocked arrow or seed (0: none yet)
+    std::array<float, 3> last{};   // its place the frame before
+
+    bool Offer(std::string_view name, std::uint64_t actor, const std::array<float, 3>& at,
+               const std::array<float, 3>* link = nullptr) {
+        if (arrow != 0 || actor == 0 || !Aimable(name)) {
+            return false;
+        }
+        if (link) {
+            const float dx = at[0] - (*link)[0];
+            const float dy = at[1] - (*link)[1];
+            const float dz = at[2] - (*link)[2];
+            if (!(dx * dx + dy * dy + dz * dz <= kAimHandM * kAimHandM)) {
+                return false;
+            }
+        }
+        arrow = actor;
+        last = at;
+        return true;
+    }
+};
 
 // wear SLOT: the PlayerStatus flag name for weapon, shield, head, armor or
 // boots (any case), e.g. "EquipHeadArmor"; nothing for another word.
@@ -269,6 +324,7 @@ public:
         std::string name;
         std::string start;
         std::array<float, 3> at{};  // place
+        std::uint64_t id = 0;       // kill and hit: the actor's address; 0: by name
     };
     std::vector<Request> TakeRequests() { return std::exchange(requests_, {}); }
     bool Done() const { return index_ >= script_.steps.size(); }
@@ -330,13 +386,37 @@ void OnFrame(Core::System& system);
 // assign, dress, place, face, aim, kill, hit, stun, drop, hurt, chat, menu, dump, mark. A `warp` (alone) begins a
 // script that asks again as frames run (OnFrame) until Link is in that scene. Timed steps (hold, goto, ...) are
 // refused: the bridge's own input moves Link. False with `error` for a bad or refused line.
-bool PlayNow(Core::System& system, std::string_view lines, std::string& error);
+// `allowed` (the bridge's `act` gives ActKinds()): a script with a step of another kind is refused whole, before any
+// step runs. Null: every kind PlayNow can do (the bridge's warp, flag and give lines).
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error,
+             const std::vector<Kind>* allowed = nullptr);
+// What the last `give` did, one text for all its flags ("NAME was -> now; ..."; "no change: ... already N"; "NOT
+// given: why"). Any thread. Empty before the first give.
+std::string LastGive();
 
 // The value of every flag a dump writes (the shared dungeon and story lists; Bool as 0 or 1), in list order.
 std::vector<std::pair<std::string, std::int32_t>> SharedFlags(Core::System& system);
 // One game flag by name: an Int, or a Bool as 0 or 1; a String64. Nothing when the game has no such flag.
 std::optional<std::int32_t> FlagInt(Core::System& system, std::string_view name);
 std::optional<std::string> FlagText(Core::System& system, std::string_view name);
+// One flag read for the play-test bridge's `flag_read`: read only, writes nothing. `name` is a GameData flag name, a
+// 0x hash, or key64:0xKEY. The kinds are tried in this order: Int, Bool, Enum, UInt, String64 (key64 only for the
+// key64: form). `kind` is "int", "bool", "enum", "uint", "key64", "text", or "unknown" when the game has no such flag
+// (or its flag table is not up). An Int's `live` is its table value without a write of ours still waiting in the
+// queue (GameFlags::get_int_live): `number` and `live` differ while a write waits.
+struct FlagReading {
+    std::string kind = "unknown";
+    std::optional<std::int64_t> number;  // int, bool (0 or 1), uint, key64 (0 or 1)
+    std::optional<std::uint32_t> hash;   // enum: the flag_hash of the value's name
+    std::string text;                    // text
+    std::optional<std::int32_t> live;    // int only
+};
+FlagReading ReadFlag(Core::System& system, std::string_view name);
+// Write an Enum flag (a name or a 0x hash) to a value given by its hash, through the game's own queue. Only the
+// bridge's `flag` calls it, and only with a value hash that `flag_read` read from that same flag in this game run
+// (CoopPlaytest::EnumValues), so no raw number is ever written to an Enum. Call it inside the held frame. False when
+// the flag is unknown or the write was not queued.
+bool SetEnumHash(Core::System& system, std::string_view name, std::uint32_t value);
 
 // The menu step's doer: the Hookshot module sets it (coop_pause.cpp); "customize" opens
 // the Multiplayer tab's Customize page, "close" closes the menu. True when asked.

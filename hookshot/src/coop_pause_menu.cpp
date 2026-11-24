@@ -327,6 +327,20 @@ std::string MicWords(const std::string& chosen, const std::vector<std::string>& 
     return there ? words : words + " (not connected)";
 }
 
+const char* PageWord(Page page) {
+    switch (page) {
+    case Page::kMain: return "main";
+    case Page::kHost: return "host";
+    case Page::kJoin: return "join";
+    case Page::kLocal: return "local";
+    case Page::kSettings: return "settings";
+    case Page::kCommands: return "commands";
+    case Page::kCustomize: return "customize";
+    case Page::kFind: return "find";
+    }
+    return "unknown";
+}
+
 std::string ChatKeyWords(const std::string& chat_key) {
     std::string k = chat_key.empty() ? std::string("T") : chat_key;
     std::string low = k;
@@ -379,6 +393,19 @@ void Menu::HostRuleLines(std::vector<Line>& out, bool guest) const {
                          : std::string("On: each player who asks to join waits until you let them in or refuse them "
                                        "(Let in on Your game, or /allow and /deny in the chat). Applies at your next "
                                        "Host.")});
+    // Row 63 (coop_gold_mode.h): this player's choice for the next Host, as Approve joins; the session's mode
+    // holds until it ends.
+    const std::string gold_now =
+        live ? std::string(session_.gold_own ? "This game: Not shared." : "This game: Shared.") : std::string();
+    out.push_back({Choice("Gold Skulltulas", options_.gold_own ? "Not shared" : "Shared"), Act::kGoldSkulltulas,
+                   guest ? std::string(kYourNextHost) + " " + gold_now
+                   : live && options_.gold_own != session_.gold_own
+                       ? "Applies at your next Host: stop hosting, then start again. " + gold_now
+                       : std::string(options_.gold_own
+                                         ? "Not shared: a race. Each player's Gold Skulltulas, tokens and count are "
+                                           "their own. Applies at your next Host."
+                                         : "Shared: a kill drops the token in every game, and one pickup counts once "
+                                           "for everyone. Applies at your next Host.")});
     Row pvp = Toggle("PvP", live ? session_.pvp : options_.pvp);
     pvp.fixed = guest;
     out.push_back({pvp, Act::kPvp,
@@ -485,16 +512,20 @@ std::vector<Menu::Line> Menu::Lines() const {
             }
             // (a public game: relay only, so no row that holds an address or a password: no code, answer,
             // same-network, VPN or password line)
+            // (the code and the room as rows, as on the title's Host page: they were only in the page's status lines,
+            // which both pages then showed again under their rows: "Code: Starting..." and "Starting...", the audit's
+            // item 16)
+            if (session_.public_game) out.push_back({NamedNote("Room  ", options_.relay_room, ""), Act::kNone, {}});
             if (!session_.public_game) {
-            out.push_back({Action("Copy the code again", "Copy", session_.code.empty()), Act::kCopyInvite,
-                           "Puts your code on the clipboard again. Share it in DMs only: it contains your internet address."});
-            out.push_back({Action("Paste friend's answer (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
+            out.push_back({Action("Code", CodeValue(), session_.code.empty()), Act::kCopyInvite,
+                           "Puts the invite code on the clipboard. Share it in DMs only (it contains your internet address); your friend pastes it in Join a game."});
+            out.push_back({Action("Paste answer code (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
                            "Only when a friend's game shows an answer code (their way in was blocked): copy the code they "
                            "send you, then press this."});
-            out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+            out.push_back({Action("Same network", "Copy address"), Act::kCopyLan,
                            "For friends in the same house, on your home network: copies one line with this PC's address. "
                            "They paste it in Join a game instead of the code."});
-            out.push_back({Action("VPN", "Copy the line"), Act::kCopyVpn,
+            out.push_back({Action("VPN", "Copy address"), Act::kCopyVpn,
                            "For friends on a VPN with you (Radmin VPN, Hamachi, ZeroTier, Tailscale, WireGuard): copies one "
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
             if (session_.state == State::kHosting && !session_.password.empty()) {
@@ -856,7 +887,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
         const std::string asks = " asks for a password";
         out.push_back({NamedNote("", TitleGameName(picked_, picked_host_, asks.size()), asks), Act::kNone, {}});
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
-                       "The host sees it on their Hosting screen. Type it with Letter, or on the keyboard."});
+                       "The host sees it on their Hosting screen. Type it with the on-screen keys, or on the keyboard."});
         out.push_back({Action("Join", "", off), Act::kJoinNow, "Joins the game with this password."});
         return;
     }
@@ -864,7 +895,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     out.push_back({Action("Paste a code", code_in ? ShownCode(std::string(Trim(join_))) : std::string(), off),
                    Act::kCode, "Your friend sees the code on their Host screen. Copy it, then press A here."});
     out.push_back({Action("Type an address", typing_ip ? join_ip_ + "_" : join_ip_, off), Act::kJoinIp,
-                   "A room name, an IP address or a PC name, typed with Letter or on the keyboard."});
+                   "A room name, an IP address or a PC name, typed with the on-screen keys or on the keyboard."});
     if (!join_ip_.empty()) {
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
                        "The host's join password, if their game has one."});
@@ -905,23 +936,27 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
         out.push_back({NamedNote("Room  ", options_.relay_room, ""), Act::kNone, {}});
         out.push_back({Note("Players  " + players), Act::kNone, {}});
     } else {
-        out.push_back({Action("Code", session_.code.empty() ? std::string("Starting...") : ShownCode(session_.code),
-                              session_.code.empty()),
+        out.push_back({Action("Code", CodeValue(), session_.code.empty()),
                        Act::kCopyInvite,
-                       "The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code."});
+                       "Puts the invite code on the clipboard. Share it in DMs only (it contains your internet address); your friend pastes it in Join a game."});
         if (session_.state == State::kHosting && !session_.password.empty()) {
             const std::string shown = show_password_ ? PasswordLines(session_.password).front() : Ph("Hidden");
             out.push_back({Action("Password", shown), Act::kShowPassword,
                            "Your friend types it after picking your game. A shows it."});
         }
         out.push_back({Note("Players  " + players), Act::kNone, {}});
-        out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+        out.push_back({Action("Same network", "Copy address"), Act::kCopyLan,
                        "For friends on your home network: copies one line they paste in Enter a code."});
-        out.push_back({Action("Paste friend's answer", ""), Act::kPasteAnswer,
+        out.push_back({Action("Paste answer code", ""), Act::kPasteAnswer,
                        "Only when your friend's game shows an answer code: copy it, then press A here."});
     }
     out.push_back({Action("Stop hosting", confirm_leave_ ? "Press again" : ""), Act::kLeave,
                    "Ends your game for everyone in it. Back keeps it going."});
+}
+
+std::string Menu::CodeValue() const {
+    if (!session_.code.empty()) return ShownCode(session_.code);
+    return session_.state == State::kHosting && session_.code_done ? Ph("None") : std::string("Starting...");
 }
 
 void Menu::SetTitle(bool on) {
@@ -1581,7 +1616,7 @@ bool Menu::Press(Input input) {
         }
         if (page_ == Page::kHost && std::any_of(lines.begin(), lines.end(), [](const Line& l) {
                 return l.act == Act::kPasteAnswer;
-            })) {   // Ctrl+V on the Host page: the same as Paste friend's answer
+            })) {   // Ctrl+V on the Host page: the same as Paste answer code
             request_ = Request{Request::Kind::kPasteAnswer, {}};
             return true;
         }
@@ -1595,7 +1630,10 @@ bool Menu::Press(Input input) {
 void Menu::Decide(Act act) {
     switch (act) {
     case Act::kOpenHost:
-        Go(Page::kHost);
+        // (the title's Host page opens on Start hosting: one A hosts with the choices as they are (Private, the
+        // players from Co-op Settings), the most a host needs; the choices are one Up away. It opened on Who can join,
+        // two Downs from hosting: the audit's item 16, as few steps as possible)
+        Go(Page::kHost, title_ && !InSession() && !session_.by_launcher ? Act::kStartHost : Act::kNone);
         if (!InSession() && !title_) {   // (the title: its choices first, Start hosting hosts)   // one press hosts; the page then shows the code
             request_ = Request{Request::Kind::kHost, {}};
         }
@@ -1853,6 +1891,7 @@ void Menu::Decide(Act act) {
     case Act::kOriginal:
     case Act::kGameKind:
     case Act::kApproveJoins:
+    case Act::kGoldSkulltulas:
     case Act::kPvp:
     case Act::kDbno:
         Change(act, 0);   // (a toggle: A flips it)
@@ -1982,6 +2021,10 @@ void Menu::Change(Act act, int step) {
         break;
     case Act::kApproveJoins:
         options_.approve_joins = step > 0 ? true : step < 0 ? false : !options_.approve_joins;
+        request_ = Request{Request::Kind::kSave, {}};
+        break;
+    case Act::kGoldSkulltulas:
+        options_.gold_own = !options_.gold_own;   // (two choices: either way flips it)
         request_ = Request{Request::Kind::kSave, {}};
         break;
     case Act::kPvp: {
@@ -2280,6 +2323,10 @@ bool Menu::Paste(std::string_view text) {
         typing_fresh_ = false;
         replace_typed_ = false;
         Go(Page::kJoin, Act::kJoinNow);
+        // (the title's Paste a code with a whole invite code: it joins at once. The code holds the address and the
+        // password, so nothing is left to fill, and Join was the next press every time: one press, not two. An address
+        // or a room name waits on Join, as it may still need its password)
+        if (title_ && CodeShaped(join_)) request_ = Request{Request::Kind::kJoin, join_};
         return true;
     }
     std::string* t = Typed();
