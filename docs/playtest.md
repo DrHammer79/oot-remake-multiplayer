@@ -151,10 +151,17 @@ player's game copies nothing.
   0xb0-byte panes).
 - Read in a lane run (Kokiri shop, Mido): a talk is `MessageDialog_00`, `T_Name_00` (and `T_NameNavi_00`) the
   speaker; its reply buttons are `PaMessageBtn_00`, one pane `T_Btn_00` set once per button, in order. The box's own
-  text did **not** come through this setter there: the game sets it some other way, not found yet, so a talk's body
-  is not in `text` (take a screenshot to read it). Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
+  text did **not** come through this setter there. Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
   while it counts), `PaShopBuyInfo_00` (a shop item's info, with markup), `DoCommand_00` `T_GuideA_00` (the A
   prompt), `PaGuideKey_00`, `ActionGuideTips_00`, `PaMenuMessage_00` ([game-ui.md](game-ui.md)).
+- Patch 0038 (`hookshot/patches/0038-coop-pane-body-wrap.patch`) wraps the two setters found in main that skip
+  0037's call and call the text box's set-string (main+0x439680) themselves ([game-ui.md](game-ui.md), "Text"): wrap
+  26, a letter-animated pane's set-text (main+0x76a460, `kPaneSetBody`; x0 the pane, x1 the text, w2 its length; its
+  only caller is a LetterAnimControl's set-text), and wrap 27, the set-text of each pane with a matching alias
+  (main+0x377a990, `kPaneSetAlias`; the same reference as 0037's). Inferred, not yet seen in a run: a talk's box text
+  comes through wrap 26. The reply's `body` is true when the exe has 0038, and each text's `wrap` (25, 26 or 27)
+  says which setter gave it. `talk` takes a wrap-26 text of a message layout as a box whatever its pane. Without
+  0038 a talk's body is not in `text` (take a screenshot to read it).
 - The window sets its text again every frame, so a text the pane already shows is not kept again (unless the pane went 30 frames without a set: a later talk with the same speaker or button is kept), and a pane's first
   set to "" is not kept. A text that only grew replaces its shorter self when nothing came between (a box typed out
   letter by letter, if the game does that).
@@ -506,8 +513,10 @@ button layout was known):
 - Seen: `hooked` true, texts with their layout and pane names, no crash; the speaker and the reply buttons came
   (layouts above). The Deku Shield was bought by talk (stock 0 to 1, rupees down by 40), but by the cursor's default
   picks; the helper now stops at buttons instead.
-- Not seen: the box body (another setter, not found); Mido's talk timed out with `boxes` empty. Next run: `talk` to
-  Mido with no `reply`: `speakers` filled and `done` true, Link free to walk after. Kokiri shop: `talk` stops at the
+- Not seen: the box body (not through 0037); Mido's talk timed out with `boxes` empty. Next run, with patch 0038:
+  `get_text` shows `body` true; `talk` to Mido with no `reply`: `speakers` filled, `boxes` with the lines as on
+  screen (note each one's `wrap` and pane, from `get_text`), `done` true, Link free to walk after. If no box comes,
+  note which `wrap` values came at all during the talk. Kokiri shop: `talk` stops at the
   first buttons and lists them; `talk` with the `reply` texts as listed and `since` buys the shield.
 - The `markup` texts: write down which bytes come (`\u00XX`) and where they stand.
 

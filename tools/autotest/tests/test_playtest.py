@@ -427,23 +427,26 @@ class FakeTalk:
     a lane run read them: MessageDialog_00 (T_Name_00 the speaker), the reply buttons PaMessageBtn_00 (one pane,
     T_Btn_00, set once per button). `body` False: the box text does not come through the wrap (as in that run)."""
 
-    def __init__(self, talk, hooked=True, verb=True, prompt="Talk", body=True):
+    def __init__(self, talk, hooked=True, verb=True, prompt="Talk", body=True, body_pane=None):
         self.talk, self.hooked, self.verb, self.prompt, self.body = talk, hooked, verb, prompt, body
+        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0038's wrap 26 in that pane)
         self.at, self.event, self.cursor, self.picked = None, False, 0, []
         self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
         self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
 
-    def _entry(self, layout, pane, text):
+    def _entry(self, layout, pane, text, wrap=25):
         return {"seq": len(self.texts) + 1, "frame": self.frame, "layout": layout, "pane": pane, "text": text,
-                "length": len(text), "cut": False, "markup": False}
+                "length": len(text), "cut": False, "markup": False, "wrap": wrap}
 
-    def _set(self, pane, text, layout="MessageDialog_00"):
+    def _set(self, pane, text, layout="MessageDialog_00", wrap=25):
         if self.shown.get((layout, pane)) != text:
             self.shown[(layout, pane)] = text
-            self.texts.append(self._entry(layout, pane, text))
+            self.texts.append(self._entry(layout, pane, text, wrap))
 
     def _box(self, text):
-        if self.body:
+        if self.body_pane:
+            self._set(self.body_pane, text, wrap=26)
+        elif self.body:
             self._set("T_MessageWhiteOut_00", text)
 
     def _show(self):
@@ -517,6 +520,14 @@ class TalkTest(unittest.TestCase):
         self.assertEqual(r["boxes"], [])
         self.assertEqual(r["speakers"], ["Speaker A", "Speaker B"])
         self.assertFalse(g.event)
+
+    def test_a_box_from_the_body_wrap_is_read_whatever_its_pane(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")], body_pane="T_Pane_X")
+        g._set("T_Pane_Y", "Not a box", layout="HUD_00", wrap=26)    # (a body-wrap text outside a message layout)
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Speaker A", "Line 1"), ("Speaker A", "Line 2")])
 
     def test_picks_each_reply_by_its_text_in_order(self):
         g = FakeTalk(SHOP)

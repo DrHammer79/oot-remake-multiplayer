@@ -69,14 +69,23 @@ void PaneNames(std::uint64_t pane, const ReadFn& read, std::string& layout, std:
     if (ReadU64(read, names + (pane - base) / kPaneSize * 8, pname)) name = ReadName(pname, read);
 }
 
-void Log::Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const ReadFn& read) {
+void Log::Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const ReadFn& read, std::uint32_t wrap) {
     if (pane == 0 || ref == 0) return;
     std::uint64_t text = 0;
     std::uint32_t length = 0;
     if (!read(ref + kRefText, &text, sizeof text) || !read(ref + kRefLength, &length, sizeof length)) return;
+    NoteText(pane, text, length, frame, read, wrap);
+}
+
+void Log::NoteText(std::uint64_t pane, std::uint64_t text, std::uint64_t length64, std::uint64_t frame,
+                   const ReadFn& read, std::uint32_t wrap) {
+    if (pane == 0) return;
+    // (wrap 26 takes a 16-bit length, the others a 32-bit one: the game's own masks)
+    const auto length = static_cast<std::uint32_t>(wrap == 26 ? (length64 & 0xffff) : (length64 & 0xffffffffu));
     Entry e;
     e.frame = frame;
     e.length = length;
+    e.wrap = wrap;
     if (text != 0 && length != 0) {
         const std::size_t n = std::min<std::size_t>(length, kMaxBytes);
         e.text.resize(n);
@@ -212,8 +221,9 @@ bool HasMarkup(std::string_view s) {
     return false;
 }
 
-std::string Members(bool hooked, std::uint64_t last, bool lost, const std::vector<Entry>& texts) {
-    std::string out = std::string("\"hooked\":") + (hooked ? "true" : "false") + ",\"last\":" + std::to_string(last) +
+std::string Members(bool hooked, bool body, std::uint64_t last, bool lost, const std::vector<Entry>& texts) {
+    std::string out = std::string("\"hooked\":") + (hooked ? "true" : "false") + ",\"body\":" +
+                      (body ? "true" : "false") + ",\"last\":" + std::to_string(last) +
                       ",\"lost\":" + (lost ? "true" : "false") + ",\"texts\":[";
     for (std::size_t i = 0; i < texts.size(); ++i) {
         const Entry& e = texts[i];
@@ -221,7 +231,7 @@ std::string Members(bool hooked, std::uint64_t last, bool lost, const std::vecto
         out += "\"seq\":" + std::to_string(e.seq) + ",\"frame\":" + std::to_string(e.frame) +
                ",\"layout\":" + JsonText(e.layout) + ",\"pane\":" + JsonText(e.pane) + ",\"text\":" + JsonText(e.text) +
                ",\"length\":" + std::to_string(e.length) + ",\"cut\":" + (e.cut ? "true" : "false") +
-               ",\"markup\":" + (HasMarkup(e.text) ? "true" : "false") + "}";
+               ",\"markup\":" + (HasMarkup(e.text) ? "true" : "false") + ",\"wrap\":" + std::to_string(e.wrap) + "}";
     }
     return out + "]";
 }
