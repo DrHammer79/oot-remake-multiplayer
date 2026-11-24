@@ -173,7 +173,7 @@ TEST_CASE("mods tab: typing stops at the setting's max_length and a long value s
     Tab tab({m.loader.get(), nullptr, nullptr});
     tab.Show();
     tab.Press(Input::kDecide);
-    for (int i = 0; i < 4; ++i) tab.Press(Input::kDown);
+    for (int i = 0; i < 5; ++i) tab.Press(Input::kDown);   // (About first)
     tab.Press(Input::kDown);  // Size, look, Label
     auto v = tab.view();
     REQUIRE(v.rows[v.selected].name == "Label");
@@ -201,7 +201,7 @@ TEST_CASE("mods tab: Paste into a text row (the pad's way) and Ctrl+V while typi
     Mods m;
     Tab tab({m.loader.get(), nullptr, nullptr});
     tab.Show();
-    tab.Press(Input::kDecide);
+    tab.Press(Input::kDecide);   // (About first)
     for (int i = 0; i < 5; ++i) tab.Press(Input::kDown);
     auto v = tab.view();
     REQUIRE(v.rows[v.selected].name == "Label");
@@ -245,7 +245,7 @@ TEST_CASE("mods tab: Paste is only for text rows (a number row still steps)") {
     Mods m;
     Tab tab({m.loader.get(), nullptr, nullptr});
     tab.Show();
-    tab.Press(Input::kDecide);
+    tab.Press(Input::kDecide);   // (About first)
     for (int i = 0; i < 3; ++i) tab.Press(Input::kDown);
     auto v = tab.view();
     REQUIRE(v.rows[v.selected].name == "Size");
