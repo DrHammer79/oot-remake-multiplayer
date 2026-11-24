@@ -46,8 +46,10 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
 - Move with `walk_to x z` (short legs, a clear line: it does no pathfinding), `go_to_actor id name`, `press`. After a
   `warp`, `step_until "event == false"` instead of a `step`, `get_state`, `step` loop.
 - Climb, push and jump with `climb` (ladder or vines, to a height), `push` (a block, a distance) and `jump` (run off
-  an edge toward a point). Fire with `shoot item` at an `id` or a point: `hit`, `miss` or `not fired` comes from the
-  target's life and the ammo, and the aim's tilt is not readable (`assist` steers the shot for you). Each says why it
+  an edge toward a point). `push` holds A to grab the block first. Fire with `shoot item` at an `id` or a point: it
+  turns the view with a stick until the target is under the reticle, as a player aims, and says `not aimed` (no shot)
+  when it cannot; `hit`, `miss` or `not fired` comes from the target's life and the ammo (`assist` only nudges a shot
+  that was already within 4 degrees and 0.5 m). Link turns with the stick, never by a written yaw. Each says why it
   stopped (`stuck`, `not climbing`, `slipped`, `respawned` ...).
 - Act with the helpers: `attack`, `face`, `talk`, `open`, `use_item`, `kill`/`hit` (the **name** from `get_world`, and
   the `id` when there are several).

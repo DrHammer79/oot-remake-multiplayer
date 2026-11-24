@@ -236,6 +236,12 @@ std::string LinkMembers(const CoopModJson::Value* status);
 // `pos`. null when the sample is old or missing, the scene has no rooms (not a dungeon, or no pack) or no placement of
 // it is near (CoopRooms::kFar).
 std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms);
+// The state's `view` member (leading comma): the game's camera of the last drawn frame, so a tester can aim the way a
+// player does (turn the view until the target sits under the reticle). {"yaw": degrees (the `facing` convention),
+// "pitch": degrees up (negative: looking down), "clip": the 16 numbers of clip_from_world, row-major, clip = m * [x y
+// z 1]: a point's place on the screen is x/w, y/w, "y_down": true when +y/w is lower on the screen (Vulkan)}. null with
+// no camera (a title, a load) or one with no forward.
+std::string ViewMember(const std::optional<std::array<float, 16>>& clip_from_world, bool y_down = false);
 // The state's `body` member (leading comma): "child" or "adult" from the name of our own Link actor in the world list
 // (Player_Child, Player_Adult; the others are CoopPuppet_). It follows the actor the game made, so it is right at once
 // after an area change. null without a live list (`live` false) or without our Link in it (a load).
