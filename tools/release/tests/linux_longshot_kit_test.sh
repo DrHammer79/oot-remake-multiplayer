@@ -27,6 +27,9 @@ mkdir -p "$tmp/bin"
 printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$py" >"$tmp/bin/python3"
 chmod +x "$tmp/bin/python3"
 export PATH="$tmp/bin:$PATH" HOME=$tmp/home XDG_DATA_HOME=$tmp/xdg
+# Hermetic: no start in this test asks GitHub for main's problem-report address (docs/problem-send-address.txt); the
+# test kits have none of their own, so no start asks the question or writes problem-send.json.
+export OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off
 mkdir -p "$HOME" "$XDG_DATA_HOME"   # start.sh skips the menu entry when the XDG folder has no parent
 unset DISPLAY WAYLAND_DISPLAY
 log=$tmp/calls.log
@@ -778,8 +781,7 @@ rm -rf "$kit2"
 # --- start.sh (Linux only: its checks read this PC) --------------------------------------------
 if [[ $(uname -s) == Linux ]]; then
     : >"$log"
-    # (no lookup of main's live address, docs/problem-send-address.txt: this start is a kit without one)
-    OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
+    OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
     check 'start: builds if needed, then starts the game in data/game' bash -c '[ $CODE -eq 0 ] && grep -q "^started $2 1 $3$" "$1"' _ "$log" "$D" "$D/game"
     check 'start: without a terminal, what it says goes to data/logs/start.log' has "$D/logs/start.log" 'start without a terminal'
     # MsgNotFound (P-parked): start.sh's own merge after build.sh (its pack step) parks the tab's files that build.sh's
