@@ -177,11 +177,8 @@ std::vector<std::string> StatusLines(const HosCoopStatus& st, const CoopLobby::S
     if (v.host && v.state == HOS_COOP_HOSTING && !g_lan_lines.empty() && g_lan_password == st.password) {
         return g_lan_lines;
     }
+    // (the room is the Host page's Room row: no line of its own here, which said it a second time)
     std::vector<std::string> lines = CoopTitleMenu::PlainStatus(v);
-    if (v.host && v.state == HOS_COOP_HOSTING && st.relay_room[0] != '\0') {
-        lines.push_back(std::string("Room ") + st.relay_room +
-                        ": friends type it in Join a game (IP address), with your join password.");
-    }
     if (!g_answer_note.empty() && v.problem != HOS_COOP_PROBLEM_BAD_CODE) {
         lines.push_back(v.players > 1 ? "Connected!" : g_answer_note);
     }
@@ -239,6 +236,7 @@ CoopPauseMenu::Session SessionNow() {
     if (s.hosting) {
         s.players = st.players;
         s.code = ShareCode(st);
+        s.code_done = st.invite_done != 0;
         // (the Host page's Join password row, shown on A, and its Let in and Refuse rows; the password is never logged)
         if (st.state == HOS_COOP_HOSTING) s.password.assign(st.password, strnlen(st.password, sizeof st.password));
         s.asking = CoopLobby::Asking();

@@ -55,7 +55,7 @@ Session Hosting(int players, std::string code = "ABCDE-FGHJK") {
     s.hosting = true;
     s.players = players;
     s.code = std::move(code);
-    s.lines = {CoopTitleMenu::HostHeadline(true), s.code};
+    s.code_done = true;
     return s;
 }
 
@@ -110,7 +110,7 @@ TEST_CASE("pause tab: Host hosts in one press, then the page shows the code, the
     m.SetSession(starting);
     CHECK(m.view().gold == "Starting your game...");
     m.SetSession(Hosting(1));
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Code", "Paste friend's answer (or Ctrl+V)",
                                                "Same network", "VPN", "Port", "Game", "Stop hosting"});
     // Ctrl+V (or Shift+Insert) on the Host page is Paste friend's answer, wherever the cursor is.
     CHECK(m.Press(Input::kPaste));
@@ -120,7 +120,9 @@ TEST_CASE("pause tab: Host hosts in one press, then the page shows the code, the
     View v = m.view();
     CHECK(v.hint == "ABCDE-FGHJK");
     CHECK(v.gold == "Hosting: waiting for friends");
-    CHECK(v.help.find("Invite code copied to your clipboard") == 0);   // what the host does, in place of the row's help
+    // (the code is the Code row's value, as on the title; the help is the row's: no status line saying it again)
+    CHECK(v.rows[0].value == "ABCDE-FGHJK");
+    CHECK(v.help.find("ABCDE-FGHJK") == std::string::npos);
     m.SetSession(Hosting(3));
     CHECK(m.view().gold == "Hosting: 3 players");
     m.Press(Input::kDecide);
@@ -208,7 +210,11 @@ TEST_CASE("pause tab: Host page: Private game is the default, Public game offers
     Session s = Hosting(1, "");
     s.public_game = true;
     m.SetSession(s);
-    CHECK(Names(m) == std::vector<std::string>{"Port", "Game", "Stop hosting"});
+    // (its room as a note first, as on the title's Host page: no status line saying it again)
+    const std::vector<std::string> pub = Names(m);
+    REQUIRE(pub.size() == 4);
+    CHECK(pub[0] == "Room  " + m.options().relay_room);
+    CHECK(std::vector<std::string>(pub.begin() + 1, pub.end()) == std::vector<std::string>{"Port", "Game", "Stop hosting"});
     // Switched to private while hosting public: it says plainly it applies at the next Host.
     SelectRow(m, "Game");
     m.Press(Input::kDecide);
@@ -1503,6 +1509,33 @@ TEST_CASE("pause tab: Settings: List my room and Auto-rejoin, under Room name, o
     CHECK(options_ini.find("auto_rejoin = on") != std::string::npos);
 }
 
+TEST_CASE("pause tab: Host: the Code row says Starting... until there is a code, None when none could be made") {
+    Menu m;
+    m.Show(CoopTitleMenu::Options{});
+    m.Open(Page::kHost);
+    m.TakeRequest();
+    Session s = Hosting(1, "");
+    s.code_done = false;
+    m.SetSession(s);
+    CHECK(m.view().rows[0].name == "Code");
+    CHECK(m.view().rows[0].value == "Starting...");
+    s.code_done = true;
+    m.SetSession(s);
+    CHECK(m.view().rows[0].value != "Starting...");
+    CHECK_FALSE(m.view().rows[0].value.empty());
+    s.code = "ABCDE-FGHJK";
+    m.SetSession(s);
+    CHECK(m.view().rows[0].value == "ABCDE-FGHJK");
+    // The title's Host page: the same row, the same words
+    m.SetTitle(true);
+    s.code.clear();
+    s.code_done = false;
+    m.SetSession(s);
+    CHECK(m.view().rows[0].name == "Code");
+    CHECK(m.view().rows[0].value == "Starting...");
+    CHECK(m.view().help.find("Starting") == std::string::npos);   // (no status line saying it a second time)
+}
+
 TEST_CASE("pause tab: Host: the join password is hidden until A, shown in groups of five, A again hides it") {
     Menu m;
     m.Show(CoopTitleMenu::Options{});
@@ -1510,11 +1543,11 @@ TEST_CASE("pause tab: Host: the join password is hidden until A, shown in groups
     REQUIRE(m.TakeRequest()->kind == Request::Kind::kHost);
     Session s = Hosting(1);
     m.SetSession(s);   // (no password: no row)
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Code", "Paste friend's answer (or Ctrl+V)",
                                                "Same network", "VPN", "Port", "Game", "Stop hosting"});
     s.password = "abcdefghijklmnopqrst";
     m.SetSession(s);
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Code", "Paste friend's answer (or Ctrl+V)",
                                                "Same network", "VPN", "Join password", "Change join password",
                                                "Port", "Game", "Stop hosting"});
     SelectRow(m, "Join password");
@@ -1649,13 +1682,13 @@ TEST_CASE("pause tab: Host: the player asking to join is let in or refused from 
     m.TakeRequest();
     Session s = Hosting(1);
     m.SetSession(s);
-    CHECK(Selected(m) == "Copy the code again");
+    CHECK(Selected(m) == "Code");
     s.asking = {"Saria"};
     m.SetSession(s);
-    CHECK(Names(m) == std::vector<std::string>{"Let in Saria", "Refuse Saria", "Copy the code again",
+    CHECK(Names(m) == std::vector<std::string>{"Let in Saria", "Refuse Saria", "Code",
                                                "Paste friend's answer (or Ctrl+V)", "Same network", "VPN", "Port",
                                                "Game", "Stop hosting"});
-    CHECK(Selected(m) == "Copy the code again");   // (the rows came above it: the same row stays chosen)
+    CHECK(Selected(m) == "Code");   // (the rows came above it: the same row stays chosen)
     CHECK(Fits(m.view().rows[0]));
     CHECK(Fits(m.view().rows[1]));
     SelectRow(m, "Let in Saria");
@@ -1681,7 +1714,7 @@ TEST_CASE("pause tab: Host: the player asking to join is let in or refused from 
     // Nobody asks any more: the rows go
     s.asking.clear();
     m.SetSession(s);
-    CHECK(Names(m).front() == "Copy the code again");
+    CHECK(Names(m).front() == "Code");
     // Not while the server starts
     Session starting;
     starting.state = State::kStarting;
@@ -1879,6 +1912,16 @@ TEST_CASE("pause tab: the title's Join opens on one list of both kinds, Enter a 
     CHECK(r->kind == Request::Kind::kPaste);
     m.Paste("192.168.1.9");
     CHECK(Selected(m) == "Join");
+    CHECK_FALSE(m.TakeRequest().has_value());   // (an address waits on Join: it may still need its password)
+    // A whole invite code: it joins at once (it holds the address and the password: Join was always the next press)
+    SelectRow(m, "Paste a code");
+    m.Press(Input::kDecide);
+    REQUIRE(m.TakeRequest()->kind == Request::Kind::kPaste);
+    m.Paste("ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2-34567\n");
+    r = m.TakeRequest();
+    REQUIRE(r.has_value());
+    CHECK(r->kind == Request::Kind::kJoin);
+    CHECK(r->text == "ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2-34567");
     m.Press(Input::kBack);
     CHECK(m.page() == Page::kFind);
     // Off the title: the overlay's Join page as before.

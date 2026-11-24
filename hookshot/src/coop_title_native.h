@@ -26,6 +26,9 @@ inline constexpr std::size_t kHintBytes = 159;         // (the hint line's place
 
 // A row's words on a title button: "Your name: Link", "Players when you host: < 4 >", "Voice: On", a note's line.
 std::string RowText(const CoopPauseMenu::Row& r);
+// `name` then `tail` (": value") within `n` letters of width and bytes (coop_text_fit.h): too long, the name is cut
+// ("Kakariko-cr...: 3/16  Public"), never the value; a tail with no room left for a name: the whole cut at its end.
+std::string FitRow(const std::string& name, const std::string& tail, std::size_t n);
 
 struct Look {
     std::array<std::string, kMaxButtons> texts{};
@@ -64,6 +67,11 @@ inline constexpr int kListButtons = 11;
 // game's own place) nor so high that `highest` (the first button's upper edge) leaves the screen's top.
 float ColumnRaise(float lowest, float highest, float raised, float scale);
 inline constexpr float kScreenFoot = -1030.0f, kScreenTop = 1030.0f;   // (a margin inside the 3840x2160 layout's +-1080)
+// The raise that puts the column's middle on the screen's (y 0), for a co-op page, which shows no logo: every page
+// opened from Multiplayer looks the same (the audit's item 16: the logo was on the pages of four buttons and gone on
+// the longer ones, so it came and went between Host a game, Join a game and the code page). The same arguments as
+// ColumnRaise; never below the game's place, the foot and the top kept on the screen.
+float ColumnCentre(float lowest, float highest, float raised, float scale);
 // ZL (-1) or ZR (+1) on a look: the view's row to select, the first of the page before or after, round at both ends
 // (ZR on the last page: the first; CoopListPages::Step); -1 with one page.
 int PageJump(const CoopPauseMenu::View& v, const Look& l, int dir);

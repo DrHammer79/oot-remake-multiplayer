@@ -26,19 +26,32 @@ std::string RowText(const CoopPauseMenu::Row& r) {
     // is: a name that is also a word of the table must not turn into the table's line.
     const std::string name = r.own_name ? r.name : CoopI18n::Tr(r.name);
     const std::string value = r.own_value ? r.value : CoopI18n::Tr(r.value);
-    std::string t = name;
+    std::string tail;   // (what follows the name: the value, which is what the row is read for)
     switch (r.kind) {
-    case RowKind::kToggle: t += CoopI18n::Tr(": ") + (r.on ? CoopI18n::Tr("On") : CoopI18n::Tr("Off")); break;
+    case RowKind::kToggle: tail = CoopI18n::Tr(": ") + (r.on ? CoopI18n::Tr("On") : CoopI18n::Tr("Off")); break;
     case RowKind::kChoice:
-        t += CoopI18n::Tr(": ") + std::string(r.left ? "< " : "") + value + (r.right ? " >" : "");
+        tail = CoopI18n::Tr(": ") + std::string(r.left ? "< " : "") + value + (r.right ? " >" : "");
         break;
     default:
         // (a value that only says the row's own word again, "Join: Join", is left off)
         if (!value.empty() && (name.empty() || r.name.rfind(r.value, 0) != 0))
-            t += t.empty() ? value : CoopI18n::Tr(": ") + value;
+            tail = name.empty() ? value : CoopI18n::Tr(": ") + value;
         break;
     }
-    return Fit(t, kTextBytes);
+    return FitRow(name, tail, kTextBytes);
+}
+
+std::string FitRow(const std::string& name, const std::string& tail, std::size_t n) {
+    const std::string whole = name + tail;
+    if (whole.size() <= n && CoopTextFit::Halves(whole) <= 2 * n) return whole;
+    // (too long: the name is cut, never the value. A game's row "Kakariko-crew-of-friends (Saria): 3/16  Public" read
+    // "...: 3/16..." with the players and the kind gone, the audit's item 16; a value longer than the button alone is
+    // cut at its end as before)
+    const std::size_t tail_bytes = tail.size(), tail_halves = CoopTextFit::Halves(tail);
+    if (name.empty() || tail_bytes + 4 > n || tail_halves + 8 > 2 * n) return Fit(whole, n);
+    const std::size_t room = std::min(n - tail_bytes, (2 * n - tail_halves) / 2);
+    const std::string cut = Fit(name, room);
+    return cut.empty() ? Fit(whole, n) : cut + tail;
 }
 
 const std::string& Letters() {
@@ -149,6 +162,17 @@ float ColumnRaise(float lowest, float highest, float raised, float scale) {
     if (lowest < kScreenFoot) want += (kScreenFoot - lowest) / scale;            // (the foot: up by what is under it)
     else if (lowest > kScreenFoot + 1.0f) want -= (lowest - kScreenFoot) / scale;   // (room under it: back down)
     // (the top kept on the screen: the column taller than the screen is never raised past its first row)
+    const float top_after = highest + (want - raised) * scale;
+    if (top_after > kScreenTop) want -= (top_after - kScreenTop) / scale;
+    return std::max(0.0f, want);
+}
+
+float ColumnCentre(float lowest, float highest, float raised, float scale) {
+    if (scale <= 0.0f) scale = 1.0f;
+    float want = raised - (lowest + highest) / 2.0f / scale;   // (its middle on the screen's: y 0)
+    // (still on the screen: the foot kept above the screen's foot, then the top below its top, as ColumnRaise)
+    const float foot_after = lowest + (want - raised) * scale;
+    if (foot_after < kScreenFoot) want += (kScreenFoot - foot_after) / scale;
     const float top_after = highest + (want - raised) * scale;
     if (top_after > kScreenTop) want -= (top_after - kScreenTop) / scale;
     return std::max(0.0f, want);
