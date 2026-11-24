@@ -1055,6 +1055,7 @@ bool Camera(double eye[3], double target[3]) {
     const auto link = OwnLink();   // (outside the lock: the hook's own lock)
     const double fov = GameFov();
     std::unique_lock lock(g_mutex);
+    g_steer.Viewed();   // (the log: no camera hook call while the page is asked)
     const Vec3 game_eye{eye[0], eye[1], eye[2]};
     const Vec3 game_target{target[0], target[1], target[2]};
     const auto aim = g_orbit.Camera(game_eye, game_target, link, now, fov);

@@ -188,11 +188,18 @@ public:
     // The free distance is kept over openings of the page while the game's target stays within this (metres) of
     // where it was learned; further away (another scene, Link walked on), it is learned anew.
     static constexpr double kSamePlace = 1.5;
+    // The log while the page is asked and the camera is not turned (the lane run of 2026-11-24 saw no steer line at
+    // all): the camera hook's state, said once per change after it held this many calls.
+    static constexpr int kGateCalls = 30;
+    // The view hook's frames with the page asked and no call of the camera hook: said once at this many.
+    static constexpr int kNoTurnFrames = 120;
 
     // The camera hook (the game's thread), before the camera's update: the angles to give it, or none. `state`:
     // the camera's (3 follows Link, 4 the player's; others: another camera has the view). `asked`: the picture is
     // still asked for.
     std::optional<Angles> Command(Angles now, int state, bool asked);
+    // The view hook, each frame the page is asked: counts the frames with no Command since the last one.
+    void Viewed();
     // The view hook (the game's thread): the eye and target the game's camera placed this frame.
     void Observe(const Vec3& game_eye, const Vec3& game_target);
     // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now), and how
@@ -218,6 +225,15 @@ public:
     std::optional<std::string> TakeNote();
 
 private:
+    // What the camera hook was handed while the page is asked and the camera is not turned (for the log).
+    struct Gate {
+        int state = 0;
+        bool want = false;
+        Phase phase = Phase::idle;
+        bool operator==(const Gate&) const = default;
+    };
+    std::optional<Angles> Step(Angles now, int state, bool asked);
+    void Watch(int state, bool asked);
     std::optional<Angles> Restore();
     void Lose(const std::string& why);
     std::optional<Angles> Drive();
@@ -241,6 +257,9 @@ private:
     std::optional<Vec3> held_;                   // the last clear view's eye, from Link's middle
     double lift_ = 0;                            // degrees the camera is raised over the orbit's elevation
     std::deque<std::string> notes_;
+    std::optional<Gate> gate_now_, gate_said_;
+    int gate_calls_ = 0;
+    int since_turn_ = 0;   // the view hook's frames since the last Command
 };
 
 // What the page shows, for the log (0.11.1: adult Link got the flat picture

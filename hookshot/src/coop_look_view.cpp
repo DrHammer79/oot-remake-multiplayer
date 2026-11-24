@@ -269,6 +269,50 @@ std::optional<Angles> Steer::Drive() {
 }
 
 std::optional<Angles> Steer::Command(Angles now, int state, bool asked) {
+    since_turn_ = 0;
+    auto angles = Step(now, state, asked);
+    Watch(state, asked);
+    return angles;
+}
+
+void Steer::Watch(int state, bool asked) {
+    if (!asked || phase_ == Phase::probe || phase_ == Phase::drive) {
+        gate_now_.reset();
+        gate_said_.reset();   // (said again at the next opening that does not turn)
+        gate_calls_ = 0;
+        return;
+    }
+    const Gate gate{state, want_.has_value(), phase_};
+    if (gate_now_ != gate) {
+        gate_now_ = gate;
+        gate_calls_ = 0;
+    }
+    if (++gate_calls_ != kGateCalls || gate_said_ == gate) {
+        return;
+    }
+    gate_said_ = gate;
+    char line[400];
+    std::snprintf(line, sizeof line,
+                  "coop: look: the game camera is not turned by the Customize picture (the camera hook hands in "
+                  "state %d, the page is asked, a wanted direction: %s, the steer %s): the probe starts only in "
+                  "states 3 and 4 with a wanted direction",
+                  state, gate.want ? "yes" : "no",
+                  phase_ == Phase::lost ? "gave up on it (lost)" : "has not started (idle)");
+    Say(line);
+}
+
+void Steer::Viewed() {
+    if (++since_turn_ == kNoTurnFrames) {
+        char line[300];
+        std::snprintf(line, sizeof line,
+                      "coop: look: the camera hook (hos_coop_turn, patch 0036) was not called in %d frames of the "
+                      "Customize picture: the game camera is not turned (no player camera update reaches the hook)",
+                      kNoTurnFrames);
+        Say(line);
+    }
+}
+
+std::optional<Angles> Steer::Step(Angles now, int state, bool asked) {
     if (state != 3 && state != 4) {
         // Another camera has the view (an event): its angles are not the ones to put back; the probe starts again.
         phase_ = Phase::idle;

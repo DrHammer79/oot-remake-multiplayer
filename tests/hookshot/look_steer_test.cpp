@@ -719,3 +719,87 @@ TEST_CASE("look steer: once the view is clear, a raised camera comes back down t
     CHECK(p.steer.Driving());
     CHECK_FALSE(p.steer.Hidden());
 }
+
+TEST_CASE("look steer: a normal-play camera state (3 or 4) with the page asked starts the probe, and says nothing else") {
+    for (const int state : {3, 4}) {
+        CAPTURE(state);
+        Steer steer;
+        steer.Want(Direction{30.0, 20.0}, 4.0);
+        steer.Command({10.0f, 15.0f}, state, true);
+        CHECK(steer.phase() == Steer::Phase::probe);
+    }
+    // The whole way in normal play (state 3, the view seen each frame): driven, and no "not turned" line.
+    Place p;
+    for (int f = 0; f < Steer::kGateCalls * 3; ++f) {
+        p.Step();
+    }
+    CHECK(p.steer.Driving());
+    while (const auto note = p.steer.TakeNote()) {
+        CHECK(note->find("is not turned") == std::string::npos);
+    }
+}
+
+TEST_CASE("look steer: while the page is asked and the camera is not turned, the log says the hook's state once per change") {
+    Steer steer;
+    steer.Want(Direction{30.0, 20.0}, 4.0);
+    // Another camera's state: idle, said once after kGateCalls calls, not each frame.
+    for (int f = 0; f < Steer::kGateCalls - 1; ++f) {
+        steer.Command({10.0f, 15.0f}, 7, true);
+    }
+    CHECK_FALSE(steer.TakeNote());   // (not a passing frame)
+    steer.Command({10.0f, 15.0f}, 7, true);
+    const auto first = steer.TakeNote();
+    REQUIRE(first);
+    CHECK(first->find("hands in state 7") != std::string::npos);
+    CHECK(first->find("a wanted direction: yes") != std::string::npos);
+    CHECK(first->find("has not started (idle)") != std::string::npos);
+    for (int f = 0; f < Steer::kGateCalls * 3; ++f) {
+        steer.Command({10.0f, 15.0f}, 7, true);
+    }
+    CHECK_FALSE(steer.TakeNote());
+    // A change (no wanted direction now): said again.
+    steer.Want(std::nullopt);
+    for (int f = 0; f < Steer::kGateCalls; ++f) {
+        steer.Command({10.0f, 15.0f}, 7, true);
+    }
+    const auto second = steer.TakeNote();
+    REQUIRE(second);
+    CHECK(second->find("a wanted direction: no") != std::string::npos);
+    // Not asked: nothing.
+    Steer closed;
+    closed.Want(Direction{30.0, 20.0}, 4.0);
+    for (int f = 0; f < Steer::kGateCalls * 2; ++f) {
+        closed.Command({10.0f, 15.0f}, 7, false);
+    }
+    CHECK_FALSE(closed.TakeNote());
+    // Back to a normal-play state: the probe starts.
+    steer.Want(Direction{30.0, 20.0}, 4.0);
+    steer.Command({10.0f, 15.0f}, 3, true);
+    CHECK(steer.phase() == Steer::Phase::probe);
+}
+
+TEST_CASE("look steer: the view hook with no camera hook call says so once") {
+    Steer steer;
+    for (int f = 0; f < Steer::kNoTurnFrames - 1; ++f) {
+        steer.Viewed();
+    }
+    CHECK_FALSE(steer.TakeNote());
+    steer.Viewed();
+    const auto note = steer.TakeNote();
+    REQUIRE(note);
+    CHECK(note->find("hos_coop_turn") != std::string::npos);
+    for (int f = 0; f < Steer::kNoTurnFrames * 2; ++f) {
+        steer.Viewed();
+    }
+    CHECK_FALSE(steer.TakeNote());
+    // The hook called each frame: never said.
+    Steer called;
+    called.Want(Direction{30.0, 20.0}, 4.0);
+    for (int f = 0; f < Steer::kNoTurnFrames * 2; ++f) {
+        called.Viewed();
+        called.Command({10.0f, 15.0f}, 3, true);
+    }
+    while (const auto n = called.TakeNote()) {
+        CHECK(n->find("was not called") == std::string::npos);
+    }
+}
