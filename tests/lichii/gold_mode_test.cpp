@@ -639,7 +639,7 @@ TEST_CASE("gold mode: the host's save sent before its game loads a slot carries 
     CoopGoldMode::MarkRaceSent(CoopGoldMode::RaceId());
 
     CoopGoldMode::Playthroughs host(dir);
-    const std::string sent = host.OnSend("slot_02");
+    const std::string sent = host.OnSend("slot_02", "");
     REQUIRE_FALSE(sent.empty());
     CoopGoldMode::SetPlaythrough(sent);
     const std::string id = CoopGoldMode::RaceId();
@@ -657,13 +657,33 @@ TEST_CASE("gold mode: the host's save sent before its game loads a slot carries 
 
     // Both games started again: the newest slot sent at the title is the same playthrough, so the same race.
     CoopGoldMode::Playthroughs again(dir);
-    CHECK(again.OnSend("slot_03") == sent);
+    CHECK(again.OnSend("slot_03", "") == sent);
 
     // The host loads another slot after the send: another playthrough, its id goes out before the save that follows.
     CoopGoldMode::SetPlaythrough(host.OnSlot("slot_01", false));
     CHECK(CoopGoldMode::RaceId() != id);
     CHECK(CoopGoldMode::RaceSendDue());
     CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: a slot sent in place of a known played slot leaves the host's playthrough as it is") {
+    // Review of ba791a54: the host's game plays slot_01 (known), but its save cannot be sent (its progress.sav is
+    // gone), so the newest slot_03 goes out. The host still plays slot_01's playthrough: its race id stays.
+    const fs::path dir = FreshDir("coop_tests_race_sent_known");
+    CoopGoldMode::Playthroughs host(dir);
+    const std::string played = host.OnSlot("slot_01", false);
+    REQUIRE_FALSE(played.empty());
+    CHECK(host.OnSend("slot_03", "slot_01").empty());   // nothing new in force
+    CHECK(host.Current() == played);
+    CHECK(host.Slots().count("slot_03") == 0);   // and no id made up for the slot sent
+    // The slot played not known (the title): the sent slot's playthrough is in force, as before.
+    CoopGoldMode::Playthroughs title(dir);
+    const std::string sent = title.OnSend("slot_03", "");
+    REQUIRE_FALSE(sent.empty());
+    CHECK(title.Current() == sent);
+    CHECK(sent != played);
     std::error_code ec;
     fs::remove_all(dir, ec);
 }
