@@ -138,6 +138,7 @@ bool g_lines_held = false;   // (the details list's own click: the left button a
 int g_lines_press = -1;
 // The pad's and the mouse's last state for the cells (OnPad, g_mutex).
 std::uint64_t g_browse_last = 0;
+CoopMenuNav::Repeat g_lists_repeat;   // the + page's lists (Find a game cells, Settings, Settings and look): OnPad
 float g_cells_mouse_x = 0, g_cells_mouse_y = 0;
 bool g_cells_held = false;
 int g_cells_press = -1;
@@ -3625,7 +3626,7 @@ void ClickLine(int line) {
     if (line < 0 || line >= static_cast<int>(lines.size()) || lines[static_cast<std::size_t>(line)].act == RowAction::kNone) return;
     {
         std::lock_guard lock(g_mutex);
-        g_page.Sound("button_decide");
+        g_page.Sound(CoopMenuNav::kSoundDecide);
     }
     Act(-1, line, true);
 }
@@ -4103,7 +4104,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         case TypeKey::kCancel: menu_keys.push_back(0x1B); break;
                         case TypeKey::kOk: menu_keys.push_back(0x0D); break;
                         }
-                        g_page.Sound("button_decide");
+                        g_page.Sound(CoopMenuNav::kSoundDecide);
                     };
                     float x = 0, y = 0;
                     bool left = false;
@@ -4119,10 +4120,10 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     // (up and down: the key, round the four; Left and Right: Letter's letter, round kMenuLetters)
                     const int dr = (d & (kPadDown | kPadStickDown)) != 0 ? 1 : (d & (kPadUp | kPadStickUp)) != 0 ? -1 : 0;
                     const int dc = (d & (kPadRight | kPadStickRight)) != 0 ? 1 : (d & (kPadLeft | kPadStickLeft)) != 0 ? -1 : 0;
-                    if (dr != 0) g_menu_key = (g_menu_key + dr + kTypeKeys) % kTypeKeys, g_page.Sound("button_on");
+                    if (dr != 0) g_menu_key = (g_menu_key + dr + kTypeKeys) % kTypeKeys, g_page.Sound(CoopMenuNav::kSoundMove);
                     if (dc != 0 && g_menu_key == static_cast<int>(TypeKey::kLetter)) {
                         g_menu_letter = (g_menu_letter % nl + nl + static_cast<std::size_t>(dc + static_cast<int>(nl))) % nl;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                     if ((d & kPadA) != 0) press(g_menu_key);
                     if ((d & kPadB) != 0) menu_keys.push_back(0x1B);
@@ -4217,6 +4218,21 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                              step == CoopPauseTab::HopStep::kDone ? "arrived" : "given up", g_hop.taps, MinusCategoryNow());
                 }
             }
+            {   // (co-op's menu's own page on the - page: where a held Up or Down may still go, never round)
+                bool can_up = false, can_down = false;
+                // (not the Mods tab: its page is the Mods tab's own list, whose ends are not known here: no repeat)
+                if (g_menu_open.load() >= 0 && g_page.MinusTab() != static_cast<int>(MinusPage::kMods) &&
+                    mv.selected >= 0 && mv.selected < static_cast<int>(mv.rows.size())) {
+                    const int n = static_cast<int>(mv.rows.size());
+                    const auto pick = [&](int i) {
+                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
+                        return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
+                    };
+                    can_up = CoopMenuNav::CanStep(mv.selected, -1, n, pick);
+                    can_down = CoopMenuNav::CanStep(mv.selected, 1, n, pick);
+                }
+                g_page.SetMinusRawEnds(can_up, can_down);
+            }
             out = g_page.OnPad(in, NowMs());
             minus_tab = g_page.MinusTab();
             if (minus_tab >= 0) {
@@ -4243,7 +4259,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                          g_page.Usable(), g_pages_ok, g_mp_button, NowMs() - g_pages_seen_ms.load(),
                          g_pages_seen_state.load());
             }
-            if (b_to_rows) out |= kPadLeft, g_page.Sound("button_cancel");
+            if (b_to_rows) out |= kPadLeft, g_page.Sound(CoopMenuNav::kSoundBack);
             typing = g_page.Typing() >= 0;
             if (const int typed = g_page.TakeTyped(); typed == 2) {
                 new_password = g_page.Field(2).text();
@@ -4345,7 +4361,10 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             // (while typing, the mouse's presses are the keyboard's: one begun on the list before it opened (Longshot's
             // A opens it at the press) is forgotten, or its release after typing was a click again, a test run's search)
             if (typing) g_cells_held = false, g_cells_press = -1, g_lines_held = false, g_lines_press = -1;
-            const std::uint64_t bdown = in & ~g_browse_last;
+            // (presses, and a held Up or Down again and again as the game's own lists (coop_menu_nav.h); `brep` the
+            // repeats alone: a list that goes round, or turns its page, does so on a fresh press only)
+            std::uint64_t brep = 0;
+            const std::uint64_t bdown = g_lists_repeat.Presses(in, NowMs(), kPadUp | kPadDown | kPadStickUp | kPadStickDown, &brep);
             g_browse_last = in;
             int cell = browse ? g_cell.load() : -1;
             const int games = g_cell_games.load();
@@ -4356,18 +4375,18 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 const int pages = CellPages(g_browse_listed.load());
                 if ((bdown & kPadY) != 0) {
                     browse_refresh = true;   // (Y: the list asked again, as the heading's Refresh box)
-                } else if (cell >= 0 && down && cell == games - 1 && pages > 1) {
+                } else if (cell >= 0 && down && cell == games - 1 && pages > 1 && (brep & (kPadDown | kPadStickDown)) == 0) {
                     g_cell_page = (g_cell_page.load() + 1) % pages, cell = 0;   // (past the page's last: the next page)
-                    g_page.Sound("button_on"), g_live_poke = true;
-                } else if (cell == 0 && up && g_cell_page.load() > 0) {
+                    g_page.Sound(CoopMenuNav::kSoundMove), g_live_poke = true;
+                } else if (cell == 0 && up && g_cell_page.load() > 0 && (brep & (kPadUp | kPadStickUp)) == 0) {
                     g_cell_page = g_cell_page.load() - 1, cell = kCells - 1;   // (above its first: the page before)
-                    g_page.Sound("button_on"), g_live_poke = true;
+                    g_page.Sound(CoopMenuNav::kSoundMove), g_live_poke = true;
                 } else if (cell < 0 && right && games > 0) {
                     cell = 0;   // (the list's first game)
-                    g_page.Sound("button_on");
+                    g_page.Sound(CoopMenuNav::kSoundMove);
                 } else if (cell >= 0 && (right || left || up || down)) {
                     const int to = CellMove(cell, right ? 1 : left ? -1 : 0, down ? 1 : up ? -1 : 0, games);
-                    if (to != cell) g_page.Sound("button_on");
+                    if (to != cell) g_page.Sound(CoopMenuNav::kSoundMove);
                     cell = to;
                 }
                 float x = 0, y = 0;
@@ -4376,13 +4395,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     const int hover = CellAt(ReadCellBoxes(), x, y);
                     const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
                     g_cells_mouse_x = x, g_cells_mouse_y = y;
-                    if (moved && hover >= 0 && hover < games && hover != cell) cell = hover, g_page.Sound("button_on");
+                    if (moved && hover >= 0 && hover < games && hover != cell) cell = hover, g_page.Sound(CoopMenuNav::kSoundMove);
                     const bool on_head = hover < 0 && LineAt(x, y) == 0;   // (the heading: its page and Refresh)
                     if (held && !g_cells_held) g_cells_press = on_head ? -2 : hover;
                     if (held && on_head) g_head_click_ms = NowMs();   // (Longshot's A for it is not the line's)
                     if (!held && g_cells_held && hover >= 0 && hover == g_cells_press && hover < games) {
                         pick_cell = hover;   // (a click on a cell: its A)
-                        g_page.Sound("button_decide");
+                        g_page.Sound(CoopMenuNav::kSoundDecide);
                     }
                     if (!held && g_cells_held && on_head && g_cells_press == -2) {
                         // (its box at the right: Refresh; its words: back a page on their left half, on on their right)
@@ -4394,7 +4413,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         } else if (pages > 1) {
                             const int dir = x < (head.x0 + box_x) / 2 ? -1 : 1;
                             g_cell_page = CoopListPages::Step(g_cell_page.load(), pages, dir), cell = -1;
-                            g_page.Sound("button_decide"), g_live_poke = true;
+                            g_page.Sound(CoopMenuNav::kSoundDecide), g_live_poke = true;
                         }
                     }
                     g_cells_held = held;
@@ -4507,13 +4526,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 if (set_row < 0) {
                     if ((right || decide) && count > 0) {
                         set_row = 0, g_set_page = 0, decide = false, g_set_enter_ms = now;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                 } else {
                     if (up || down) {
                         int page = g_set_page.load(), r = set_row;
                         SettingMove(count, down ? 1 : -1, &page, &r, g_set_per_page.load());
-                        if (page != g_set_page.load() || r != set_row) g_page.Sound("button_on");
+                        if (page != g_set_page.load() || r != set_row) g_page.Sound(CoopMenuNav::kSoundMove);
                         g_set_page = page, set_row = r;
                     }
                     if (left || right) set_change = g_set_page.load() * g_set_per_page.load() + set_row, set_dir = left ? -1 : 1;
@@ -4530,7 +4549,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                     const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
                     g_cells_mouse_x = x, g_cells_mouse_y = y;
-                    if (moved && hover >= 0 && hover != set_row) set_row = hover, g_page.Sound("button_on");
+                    if (moved && hover >= 0 && hover != set_row) set_row = hover, g_page.Sound(CoopMenuNav::kSoundMove);
                     // The mouse onto the categories while the list has the pad: the rows have it again, so the mouse's
                     // steps move their cursor (and the category with it).
                     if (moved && hover < 0 && set_row >= 0 && RowAt(ReadRowBoxes(now), x, y) >= 0) {
@@ -4550,7 +4569,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             const int dir = x < (head.x0 + head.x1) / 2 ? -1 : 1;
                             g_set_page = ((g_set_page.load() + dir) % pages + pages) % pages;
                             set_row = -1, g_live_poke = true;
-                            g_page.Sound("button_decide");
+                            g_page.Sound(CoopMenuNav::kSoundDecide);
                             LOG_INFO(Core, "coop: pause tab: settings: the header clicked: page {} of {}", g_set_page.load() + 1, pages);
                         }
                     }
@@ -4613,13 +4632,30 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                 }
                 if (!list) {
-                    if (right) list = true, g_page.Sound("button_on");
+                    if (right) list = true, g_page.Sound(CoopMenuNav::kSoundMove);
                 } else {
-                    if (up) menu_events.push_back({HOS_COOP_MENU_UP, 0, 0});
-                    if (down) menu_events.push_back({HOS_COOP_MENU_DOWN, 0, 0});
+                    // (one cursor model, coop_menu_nav.h: a held Up or Down repeats but never goes round; the move
+                    // sound only when something moves: a row, or a choice that can go that way)
+                    const int n = static_cast<int>(mv.rows.size());
+                    const bool at = mv.selected >= 0 && mv.selected < n;
+                    const auto pick = [&](int i) {
+                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
+                        return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
+                    };
+                    const bool rep_up = (brep & (kPadUp | kPadStickUp)) != 0, rep_down = (brep & (kPadDown | kPadStickDown)) != 0;
+                    const bool go_up = up && at && (!rep_up || CoopMenuNav::CanStep(mv.selected, -1, n, pick));
+                    const bool go_down = down && at && (!rep_down || CoopMenuNav::CanStep(mv.selected, 1, n, pick));
+                    const CoopPauseMenu::Row* sel = at ? &mv.rows[static_cast<std::size_t>(mv.selected)] : nullptr;
+                    const bool sideways = sel != nullptr && !sel->fixed &&
+                                          ((sel->kind == CoopPauseMenu::RowKind::kChoice && ((left && sel->left) || (right && sel->right))) ||
+                                           (sel->kind == CoopPauseMenu::RowKind::kToggle && (left || right)));
+                    if (go_up) menu_events.push_back({HOS_COOP_MENU_UP, 0, 0});
+                    if (go_down) menu_events.push_back({HOS_COOP_MENU_DOWN, 0, 0});
                     if (left) menu_events.push_back({HOS_COOP_MENU_LEFT, 0, 0});
                     if (right) menu_events.push_back({HOS_COOP_MENU_RIGHT, 0, 0});
-                    if (up || down || left || right) g_page.Sound("button_on");
+                    const bool row_moves = (go_up && CoopMenuNav::Step(mv.selected, -1, n, true, pick) != mv.selected) ||
+                                           (go_down && CoopMenuNav::Step(mv.selected, 1, n, true, pick) != mv.selected);
+                    if (row_moves || sideways) g_page.Sound(CoopMenuNav::kSoundMove);
                 }
                 // The mouse. Longshot's mouse does not press A on the list's lines (it presses A only as a click takes
                 // its focus onto a button), so a click on a line is the module's: pressed and let go on the same line.
@@ -4637,7 +4673,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     if (moved && pick && (!list || mrow != mv.selected)) {
                         menu_events.push_back({HOS_COOP_MENU_SELECT, mrow, 0});
                         list = true;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                     if (moved && line < 0 && list && RowAt(ReadRowBoxes(now), x, y) >= 0) list = false;   // (onto the rows)
                     if (held && !g_cells_held) {
@@ -4660,7 +4696,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             const int dir = x < (head.x0 + head.x1) / 2 ? -1 : 1;
                             g_menu_top = std::max(0, g_menu_top.load() + dir * g_menu_per_page.load());
                             list = false;
-                            g_page.Sound("button_decide"), g_live_poke = true;
+                            g_page.Sound(CoopMenuNav::kSoundDecide), g_live_poke = true;
                         } else if (pick) {
                             const std::array<RowBox, kCells> boxes = ReadCellBoxes();
                             const RowBox b = line - 1 < kCells ? boxes[static_cast<std::size_t>(line - 1)] : LastLineBox();
@@ -4674,7 +4710,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                                 menu_events.push_back({HOS_COOP_MENU_CONFIRM, 0, 0});
                             }
                             list = true;
-                            g_page.Sound("button_decide");
+                            g_page.Sound(CoopMenuNav::kSoundDecide);
                         }
                     }
                     g_cells_held = held;
@@ -4684,7 +4720,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 if ((held && (g_cells_press >= 0 || g_model_dragging)) || now - g_menu_click_ms < 400) decide = false;
                 if (decide && list) {   // (the pad's A: the selected row's)
                     menu_events.push_back({HOS_COOP_MENU_CONFIRM, 0, 0});
-                    g_page.Sound("button_decide");
+                    g_page.Sound(CoopMenuNav::kSoundDecide);
                     decide = false;
                 }
                 if (list) {   // (the rows' cursor stays: left and right too, or they took it onto the list or back)

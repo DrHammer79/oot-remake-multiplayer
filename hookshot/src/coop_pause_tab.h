@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "coop_menu_nav.h"
 #include "coop_pause_menu.h"
 #include "coop_screen_panes.h"
 #include "hos_coop_api.h"
@@ -321,6 +322,10 @@ public:
     // A tab with no rows of its own (Mods: its list is the page) has the list always; B there is the list's Back while
     // it has somewhere to go back to (SetMinusRawBack: a mod's page), else the game's (the menu closes).
     void SetMinusRawBack(bool can) { minus_raw_back_ = can; }
+    // Co-op's menu's own page on the - page (raw): whether its selection can go up or down without going round. A held
+    // Up or Down repeats only while it can (coop_menu_nav.h: a list goes round on a fresh press only); unknown (the
+    // Mods tab's page): false, no repeat.
+    void SetMinusRawEnds(bool can_up, bool can_down) { minus_raw_up_ = can_up, minus_raw_down_ = can_down; }
     bool MinusInList() const { return minus_list_; }
     // Another view shows (the module saw it change): the rows' cursor on `row` (a view's own: Co-op settings' page
     // chosen), the list without the pad. MinusEnterList: the list has the pad (A on a Co-op settings row), when it
@@ -381,6 +386,7 @@ private:
     std::string typing_was_;   // (the field before typing: Cancel puts it back)
     void EndTyping(bool ok);
     std::uint64_t repeat_since_ = 0, repeat_last_ = 0;
+    CoopMenuNav::Repeat minus_repeat_;   // the - page's rows and list: a held Up or Down moves again (coop_menu_nav.h)
     std::uint64_t pad_ms_ = 0, typing_from_ms_ = 0;   // (the last pad read; when typing began: its first A is not a key's)   // a held direction: when it went down, its last step
 
     bool CanShow(std::uint64_t now_ms) const;
@@ -417,6 +423,8 @@ private:
     bool minus_list_ = false;           // MinusInList
     bool minus_raw_ = false;            // SetMinusLines' raw
     bool minus_raw_back_ = false;       // SetMinusRawBack
+    bool minus_raw_up_ = false, minus_raw_down_ = false;   // SetMinusRawEnds
+    std::uint64_t minus_repeated_ = 0;   // this read's held Up / Down repeats (not presses): OnPad
     int minus_line_ = -1;               // MinusLine
     std::uint32_t minus_lines_ = 0;     // SetMinusLines' pickable
     int minus_line_decide_ = -1;        // TakeMinusLineDecide
