@@ -268,10 +268,12 @@ HELPER_TOOLS = [
      "game shows, press A to go on, and when buttons show pick the next of `reply` (a text, or a list: one per set of "
      "buttons, in order; Down to it, then A). With no reply left it stops and lists the buttons, the talk left open: "
      "call again with `reply` and `since` (from that answer) to go on, no new A. With no prompt nothing is pressed. "
-     "Returns `speakers`, `boxes` [{speaker, text}], `choices`, `picked`, `since`, `done` (the talk ended) or `result` "
-     "saying why it stopped. The box body does not come through the text wrap yet (read in a lane run): `boxes` is "
-     "empty; take a screenshot to read it. A shop's item list is not buttons: move to the item yourself (press), then "
-     "talk with since. At most `max_boxes` boxes (20) and 1200 frames. It acts on this game only.",
+     "Returns `speakers`, `boxes` [{speaker, text, markup, raw}], `choices`, `picked`, `since`, `done` (the talk "
+     "ended) or `result` saying why it stopped. A box's `text` is its words with the game's markup cut out (`raw` "
+     "keeps the whole when something was cut); `speaker` is null only when the game shows no name. `boxes` is empty "
+     "without patch 0038 (take a screenshot to read it). A shop's item list is not buttons: move to the item "
+     "yourself (press), then talk with since. At most `max_boxes` boxes (20); it keeps going while boxes come and "
+     "gives up after 1200 frames with nothing new (7200 in all). It acts on this game only.",
      "inputSchema": {"type": "object",
                      "properties": dict(ACTOR_ARGS,
                                         reply={"anyOf": [{"type": "string", "maxLength": 200},

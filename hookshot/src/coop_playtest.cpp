@@ -39,6 +39,7 @@
 #include "coop_talk_text.h"
 #include "coop_teleport_game.h"
 #include "coop_testinput.h"
+#include "hos_coop_pane_body.h"
 #include "hos_coop_pane_text.h"
 #include "core/core.h"
 
@@ -632,12 +633,13 @@ std::string Handle(const Request& r) {
         return ok(FlagReadMembers(r.name, v));
     }
     if (r.cmd == "text") {
-        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; patch 0037's wrap
-        // fills them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
+        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; the wraps of
+        // patches 0037 and 0038 fill them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
         bool lost = false;
         const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);
         return ok(CoopTalkText::Members(CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_TEXT),
-                                        CoopTalkText::TheLog().Last(), lost, texts));
+                                        CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_BODY), CoopTalkText::TheLog().Last(),
+                                        lost, texts));
     }
     if (r.cmd == "give") {
         std::string error;

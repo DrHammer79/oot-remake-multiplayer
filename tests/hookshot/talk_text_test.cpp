@@ -271,17 +271,19 @@ TEST_CASE("talk text: JSON text keeps UTF-8 and shows the game's other bytes") {
     e.pane = "T_MessageWhiteOut_00";
     e.text = std::string("Buy?\n\x0e\x05 Yes", 10);
     e.length = 10;
-    const std::string members = Members(true, 3, false, {e});
+    const std::string members = Members(true, false, 3, false, {e});
     const auto v = CoopModJson::Parse("{" + members + "}");
     REQUIRE(v);
     CHECK(v->Bool("hooked").value_or(false));
     CHECK(v->Number("last").value_or(0) == 3);
+    CHECK_FALSE(v->Bool("body").value_or(true));
     const auto* texts = v->Get("texts");
     REQUIRE(texts);
     REQUIRE(texts->array.size() == 1);
     CHECK(texts->array[0].Text("text").value_or("") == e.text);
     CHECK(texts->array[0].Bool("markup").value_or(false));
     CHECK(texts->array[0].Text("pane").value_or("") == "T_MessageWhiteOut_00");
+    CHECK(texts->array[0].Number("wrap").value_or(0) == 25);
 }
 
 TEST_CASE("talk text: threads may note at once") {
@@ -331,4 +333,52 @@ TEST_CASE("talk text: panes only ever cleared do not grow the frame memory past 
     CHECK(log.PanesTimed() <= kMaxPanes);
     CHECK(log.PanesTimed() > 0);
     CHECK(log.Last() == 0);   // (nothing kept: every set was a clear)
+}
+
+TEST_CASE("talk text: a letter-animated pane's text (wrap 26) is taken as given, its length 16 bits") {
+    Fake m = Window();
+    Log log;
+    m.Str(kBuf, "Line 1");
+    // The game masks w2 to 16 bits: high bits in x2 are not the length.
+    log.NoteText(kText, kBuf, 0xabcd0000ull | 6, 4, m.Reader(), 26);
+    auto got = log.Since(0, "");
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].text == "Line 1");
+    CHECK(got[0].length == 6);
+    CHECK(got[0].wrap == 26);
+    CHECK(got[0].layout == "MessageInGame_00");
+    CHECK(got[0].pane == "T_MessageWhiteOut_00");
+    // The same text in the same pane while it shows: not kept again, whichever wrap gave it.
+    log.NoteText(kText, kBuf, 6, 5, m.Reader(), 26);
+    m.U64(kRef + kRefText, kBuf);
+    m.U32(kRef + kRefLength, 6);
+    log.Note(kText, kRef, 6, m.Reader(), 27);
+    CHECK(log.Since(0, "").size() == 1);
+    // A text pointer that cannot be read keeps nothing; a zero pane neither.
+    log.NoteText(kText, 0x77770000, 3, 7, m.Reader(), 26);
+    log.NoteText(0, kBuf, 6, 8, m.Reader(), 26);
+    CHECK(log.Since(0, "").size() == 1);
+}
+
+TEST_CASE("talk text: the alias setter (wrap 27) reads the reference as 0037's and says its wrap") {
+    Fake m = Window();
+    Log log;
+    m.Str(kBuf, "Speaker A");
+    m.U64(kRef + kRefText, kBuf);
+    m.U32(kRef + kRefLength, 9);
+    log.Note(kName, kRef, 1, m.Reader(), 27);
+    const auto got = log.Since(0, "MessageInGame");
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].text == "Speaker A");
+    CHECK(got[0].pane == "T_Name_00");
+    CHECK(got[0].wrap == 27);
+    const auto v = CoopModJson::Parse("{" + Members(true, true, log.Last(), false, got) + "}");
+    REQUIRE(v);
+    CHECK(v->Bool("body").value_or(false));
+    CHECK(v->Get("texts")->array[0].Number("wrap").value_or(0) == 27);
+}
+
+TEST_CASE("talk text: the wrapped setters are the ones read from main") {
+    CHECK(0x80020000 + kPaneSetBody == 0x8078a460);
+    CHECK(0x80020000 + kPaneSetAlias == 0x8379a990);
 }

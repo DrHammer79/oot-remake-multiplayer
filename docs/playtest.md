@@ -151,15 +151,30 @@ player's game copies nothing.
   0xb0-byte panes).
 - Read in a lane run (Kokiri shop, Mido): a talk is `MessageDialog_00`, `T_Name_00` (and `T_NameNavi_00`) the
   speaker; its reply buttons are `PaMessageBtn_00`, one pane `T_Btn_00` set once per button, in order. The box's own
-  text did **not** come through this setter there: the game sets it some other way, not found yet, so a talk's body
-  is not in `text` (take a screenshot to read it). Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
+  text did **not** come through this setter there. Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
   while it counts), `PaShopBuyInfo_00` (a shop item's info, with markup), `DoCommand_00` `T_GuideA_00` (the A
   prompt), `PaGuideKey_00`, `ActionGuideTips_00`, `PaMenuMessage_00` ([game-ui.md](game-ui.md)).
+- Patch 0038 (`hookshot/patches/0038-coop-pane-body-wrap.patch`) wraps the two setters found in main that skip
+  0037's call and call the text box's set-string (main+0x439680) themselves ([game-ui.md](game-ui.md), "Text"): wrap
+  26, a letter-animated pane's set-text (main+0x76a460, `kPaneSetBody`; x0 the pane, x1 the text, w2 its length; its
+  only caller is a LetterAnimControl's set-text), and wrap 27, the set-text of each pane with a matching alias
+  (main+0x377a990, `kPaneSetAlias`; the same reference as 0037's). Seen in a lane run (2026-11-24, Kokiri shop and
+  Mido): a talk's box text comes through wrap 26, layout `MessageDialog_00`, pane `T_Message_00`, `markup` true; the
+  speaker panes (`T_Name_00`, `T_NameNavi_00`), the reply buttons and the HUD panes stay wrap 25; wrap 27 did not
+  appear in a talk. The reply's `body` is true when the exe has 0038, and each text's `wrap` (25, 26 or 27)
+  says which setter gave it. `talk` takes a wrap-26 text of a message layout as a box whatever its pane. Without
+  0038 a talk's body is not in `text` (take a screenshot to read it).
 - The window sets its text again every frame, so a text the pane already shows is not kept again (unless the pane went 30 frames without a set: a later talk with the same speaker or button is kept), and a pane's first
   set to "" is not kept. A text that only grew replaces its shorter self when nothing came between (a box typed out
   letter by letter, if the game does that).
 - Valid UTF-8 comes as it is; any other byte and every control character as a JSON `\u00XX`, and `markup` is true:
-  those are the game's markup (colour, a pause, a choice), not read yet.
+  those are the game's markup. A tag is the byte 0x0e, then group, type and size (16-bit little-endian each), then
+  `size` bytes of parameters; seen: a pause or colour (no or few bytes), a name (a length, the name, a 0 byte: an
+  animation such as `Greeting`) and a variable (`Shop_SelectItemName`, `UI_MessageTargetActorName`), between the
+  words. `talk` cuts the tags out of a box's `text` and keeps the whole in `raw`. The page-break tag (group 0, type 4,
+  no bytes, seen in the Kokiri shop and Mido's text, 2026-11-24) becomes one space, so two pages are not glued into one
+  word. Not yet handled: a variable (an item name, a price) is cut with the markup and its words are missing from
+  `text`; read `raw` or `get_text` for those.
 - An exe without patch 0037 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
   text wrap (patch 0037)` once at the HELLO.
 
@@ -424,8 +439,11 @@ server calls them; a script can too). They only use the bridge's commands, so th
   equips and each inventory entry (`inventory_changed`, one entry per item). `open` presses `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `talk` (below) keeps that rule for its first press. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
 - `talk` (with `id` and `name`, and no prompt up yet: go_to_actor and `face` first; with the prompt already up it
   does not walk) presses `A`, then reads the new texts of the message layouts through `text`: `speakers` (in order),
-  `boxes` [{speaker, text, markup}] (`T_MessageWhiteOut_00`; empty while the body does not come through the wrap, see
-  [Text boxes](#text-boxes)), and the reply buttons (`PaMessageBtn_00`) as `choices`. It presses `A` when a speaker,
+  `boxes` [{speaker, text, markup, raw}] (a wrap-26 text of a message layout, see [Text boxes](#text-boxes); empty
+  without patch 0038), and the reply buttons (`PaMessageBtn_00`) as `choices`. A box's `text` is its words with the
+  markup cut out; `raw` (only when something was cut) is the text as the game set it. A box set again as it was is
+  one box, and a text of only markup (a name variable) is no box. `speaker` is the name pane set with the box, also
+  when the game sets it after the body; it is null only when the game shows no name. It presses `A` when a speaker,
   a box or buttons came, or when the event went quiet for 3 reads (10 frames each). When buttons show it takes the
   next of `reply` (a text, or a list: one per set of buttons, in order), presses Down to the button of that text
   (whole text first, then a part, case and spaces ignored) and `A`. With no reply left it picks nothing: it stops with
@@ -433,7 +451,8 @@ server calls them; a script can too). They only use the bridge's commands, so th
   with `reply` and that `since` to go on (no new `A`: the same buttons are read again). A shop's item list is not
   buttons: move to the item with `press`, then `talk` with `since`.
   It ends `done` when the event is over and 3 reads bring no text, or says why it stopped: `reply not offered: ...`,
-  `done, but no choices showed for ...`, `too many boxes`, `timed out` (1200 frames), `scene changed`, `loading`, or
+  `done, but no choices showed for ...`, `too many boxes`, `timed out` (1200 frames with nothing new, or 7200 in all: it keeps waiting while boxes
+  come), `scene changed`, `loading`, or
   `no text: ...` (no `text` command, or an exe without patch 0037: one `A` pressed).
 - `go_to_actor` calls an actor `gone` only after 3 reads in a row without it (one read of the list can miss an actor
   that is there).
@@ -506,10 +525,14 @@ button layout was known):
 - Seen: `hooked` true, texts with their layout and pane names, no crash; the speaker and the reply buttons came
   (layouts above). The Deku Shield was bought by talk (stock 0 to 1, rupees down by 40), but by the cursor's default
   picks; the helper now stops at buttons instead.
-- Not seen: the box body (another setter, not found); Mido's talk timed out with `boxes` empty. Next run: `talk` to
-  Mido with no `reply`: `speakers` filled and `done` true, Link free to walk after. Kokiri shop: `talk` stops at the
-  first buttons and lists them; `talk` with the `reply` texts as listed and `since` buys the shield.
-- The `markup` texts: write down which bytes come (`\u00XX`) and where they stand.
+- Not seen (0037 alone): the box body. Patch 0038, lane run 2026-11-24: `body` true, each box came through wrap 26
+  (see "Text boxes"), the shop was bought by `reply`, Mido's long talk was still giving boxes when the old
+  1200-frame cap ended it; the boxes had raw markup, one was set twice, and the first box's
+  `speaker` was null (the shop sets the name after the body; Mido's talk set none).
+- Next run (helper fixed for these): `talk` to Mido with `reply` "Yes, master!" where buttons show: `boxes` with
+  clean `text` and the `raw` kept, no box twice, `speaker` the name pane when the game shows one, `done` true, Link
+  free to walk after. Kokiri shop: `talk` stops at the first buttons and lists them; `talk` with the `reply` texts
+  as listed and `since` buys the shield.
 
 ### Set a test up (start a boss or a dungeon in one call)
 

@@ -53,7 +53,7 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   the `id` when there are several).
 - Talk with `talk`: it reads the speakers and the reply buttons and presses A to the end. When buttons show and no
   `reply` is left it stops and lists them: talk again with `reply` (a text, or a list in order) and the `since` it
-  gave. The box body is not read yet: take a screenshot for it. `get_text` reads the texts the game set since a `last`. Both need a game built with patch
+  gave. `boxes` hold each box's words (the markup cut out, kept in `raw`) with its speaker; `get_text` reads the texts the game set since a `last`. Both need a game built with patch
   0037 (`hooked` true); without it `talk` presses A once and says so ([playtest.md](playtest.md), "Text boxes").
 - Fight with `fight id name`: it walks up, locks on (`ZL`), slashes (`Y`) and guards (`ZL` alone) until the enemy's
   life is 0, Link is low, or the frames run out, then answers `dead`, `gone`, `low`, `stopped` or `alive` with a `look`.

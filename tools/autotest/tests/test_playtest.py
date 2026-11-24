@@ -427,30 +427,40 @@ class FakeTalk:
     a lane run read them: MessageDialog_00 (T_Name_00 the speaker), the reply buttons PaMessageBtn_00 (one pane,
     T_Btn_00, set once per button). `body` False: the box text does not come through the wrap (as in that run)."""
 
-    def __init__(self, talk, hooked=True, verb=True, prompt="Talk", body=True):
+    def __init__(self, talk, hooked=True, verb=True, prompt="Talk", body=True, body_pane=None, stall=False,
+                 name_after=False):
         self.talk, self.hooked, self.verb, self.prompt, self.body = talk, hooked, verb, prompt, body
+        self.stall = stall               # (the last box stays up: A does not end the event)
+        self.name_after = name_after     # (the body is set before the name pane, as the shop does)
+        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0038's wrap 26 in that pane)
         self.at, self.event, self.cursor, self.picked = None, False, 0, []
         self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
         self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
 
-    def _entry(self, layout, pane, text):
+    def _entry(self, layout, pane, text, wrap=25):
         return {"seq": len(self.texts) + 1, "frame": self.frame, "layout": layout, "pane": pane, "text": text,
-                "length": len(text), "cut": False, "markup": False}
+                "length": len(text), "cut": False, "markup": False, "wrap": wrap}
 
-    def _set(self, pane, text, layout="MessageDialog_00"):
+    def _set(self, pane, text, layout="MessageDialog_00", wrap=25):
         if self.shown.get((layout, pane)) != text:
             self.shown[(layout, pane)] = text
-            self.texts.append(self._entry(layout, pane, text))
+            self.texts.append(self._entry(layout, pane, text, wrap))
 
     def _box(self, text):
-        if self.body:
+        if self.body_pane:
+            self._set(self.body_pane, text, wrap=26)
+        elif self.body:
             self._set("T_MessageWhiteOut_00", text)
 
     def _show(self):
         item = self.talk[self.at]
         if item[0] == "box":
-            self._set("T_Name_00", item[1])
-            self._box(item[2])
+            if self.name_after:
+                self._box(item[2])
+            if item[1] is not None:
+                self._set("T_Name_00", item[1])
+            if not self.name_after:
+                self._box(item[2])
         else:
             self._box(item[1])
             for option in item[2]:
@@ -480,6 +490,8 @@ class FakeTalk:
                 self.at += 1
                 if self.at < len(self.talk):
                     self._show()
+                elif self.stall:
+                    self.at -= 1
                 else:
                     self.event = False
                     self._box("")
@@ -496,6 +508,14 @@ class FakeTalk:
 # Placeholders only: no text from the game (AGENTS.md).
 SHOP = [("box", "Keeper", "Line 1"), ("choice", "Item: 40", ["Pick one", "Pick two"]),
         ("choice", "Sure?", ["Yes", "No"]), ("box", "Keeper", "Line 2")]
+
+
+def tag(group, kind, params=b""):
+    """A markup tag as the game's text holds it: 0x0e, then group, type and size (16-bit little-endian), then the
+    params (one character a byte, as the bridge's `text` shows them)."""
+    n = len(params)
+    head = bytes([0x0e, group & 255, group >> 8, kind & 255, kind >> 8, n & 255, n >> 8])
+    return (head + bytes(params)).decode("latin-1")
 
 
 class TalkTest(unittest.TestCase):
@@ -517,6 +537,14 @@ class TalkTest(unittest.TestCase):
         self.assertEqual(r["boxes"], [])
         self.assertEqual(r["speakers"], ["Speaker A", "Speaker B"])
         self.assertFalse(g.event)
+
+    def test_a_box_from_the_body_wrap_is_read_whatever_its_pane(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")], body_pane="T_Pane_X")
+        g._set("T_Pane_Y", "Not a box", layout="HUD_00", wrap=26)    # (a body-wrap text outside a message layout)
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Speaker A", "Line 1"), ("Speaker A", "Line 2")])
 
     def test_picks_each_reply_by_its_text_in_order(self):
         g = FakeTalk(SHOP)
@@ -580,12 +608,10 @@ class TalkTest(unittest.TestCase):
             self.assertIn(why, r["result"])
             self.assertFalse(r["done"])
 
-    def test_bounded_by_boxes_and_frames(self):
+    def test_bounded_by_boxes(self):
         r = ph.talk(FakeTalk([("box", "Speaker A", "Line %d" % i) for i in range(40)]), max_boxes=5)
         self.assertIn("too many boxes", r["result"])
         self.assertLessEqual(len(r["boxes"]), 6)
-        r = ph.talk(FakeTalk([("box", "K", "Line %d" % i) for i in range(400)]), max_boxes=1000, max_frames=200)
-        self.assertIn("timed out", r["result"])
 
     def test_a_box_that_grows_is_one_box(self):
         g = FakeTalk([("box", "Speaker A", "Line 1")])
@@ -598,6 +624,104 @@ class TalkTest(unittest.TestCase):
         g._show = typed
         r = ph.talk(g)
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
+
+    # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0038: Kokiri shop and Mido) -------------
+    def test_strip_markup_page_break_is_a_space(self):
+        # The page break (group 0, type 4, no params) ends a page: its two sides are two sentences, not one word.
+        self.assertEqual(ph.strip_markup("Link!" + tag(0, 4) + "Let's go."), "Link! Let's go.")
+        # No second space when the text already has one, or a newline, at the break.
+        self.assertEqual(ph.strip_markup("Link! " + tag(0, 4) + "Let's go."), "Link! Let's go.")
+        self.assertEqual(ph.strip_markup("Link!\n" + tag(0, 4) + "Let's go."), "Link!\nLet's go.")
+        # A break at the start or the end leaves no space at the edge.
+        self.assertEqual(ph.strip_markup(tag(0, 4) + "Start" + tag(0, 4)), "Start")
+        # Other tags still join without a space.
+        self.assertEqual(ph.strip_markup("a" + tag(0, 3, b"\x00\x00") + "b"), "ab")
+
+    def test_strip_markup_keeps_the_words(self):
+        self.assertEqual(ph.strip_markup(tag(3, 0, b"\x0f\x00\x00") + tag(4, 0, b"\x03\x00Ab\x00") + "Hello there."),
+                         "Hello there.")
+        self.assertEqual(ph.strip_markup("One " + tag(0, 3, b"\x00\x00") + "two" + tag(0, 3, b"\xff\xff") + " three."),
+                         "One two three.")
+        self.assertEqual(ph.strip_markup("Line" + tag(5, 1) + " next\nrow — end"), "Line next\nrow — end")
+        self.assertEqual(ph.strip_markup("No markup at all"), "No markup at all")
+        self.assertEqual(ph.strip_markup(tag(2, 23, b"\x05\x00Name\x00\xff\xff")), "")
+        # a tag cut short, or one that names more bytes than there are, loses only its first byte
+        self.assertEqual(ph.strip_markup("Words\x0e\x01\x00"), "Words\x01\x00")
+        cut = ph.strip_markup("\x0e\x01\x00\x02\x00\x40\x00words")
+        self.assertIn("words", cut)
+        self.assertNotIn("\x0e", cut)
+
+    def test_a_box_text_is_clean_and_the_raw_is_kept(self):
+        raw = tag(3, 0, b"\x0f\x00\x00") + tag(4, 0, b"\x03\x00Ab\x00") + "Line 1" + tag(5, 1) + " more."
+        g = FakeTalk([("box", "Speaker A", raw), ("box", "Speaker A", "Plain")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual(r["boxes"][0]["text"], "Line 1 more.")
+        self.assertEqual(r["boxes"][0]["raw"], raw)
+        self.assertTrue(r["boxes"][0]["markup"])
+        self.assertEqual(r["boxes"][1]["text"], "Plain")
+        self.assertNotIn("raw", r["boxes"][1])             # (nothing was cut: the text is the raw)
+        self.assertFalse(r["boxes"][1]["markup"])
+
+    def test_a_text_of_only_markup_is_not_a_box(self):
+        g = FakeTalk([("box", "Speaker A", tag(2, 23, b"\x05\x00Name\x00\xff\xff")), ("box", "Speaker A", "Line 2")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Line 2"])
+
+    def test_a_box_set_twice_is_one_box_but_a_repeat_later_is_two(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2"), ("box", "Speaker A", "Line 1")])
+        orig = g._show
+
+        def twice():
+            orig()
+            g.texts.append(g._entry("MessageDialog_00", "T_Message_00", g.talk[g.at][2], 26))   # (the same box again)
+        g._show = twice
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1", "Line 2", "Line 1"])
+
+    def test_the_speaker_is_the_name_pane_even_when_it_is_set_after_the_body(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")], name_after=True)
+        r = ph.talk(g)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Speaker A", "Line 1"), ("Speaker A", "Line 2")])
+        self.assertEqual(r["speakers"], ["Speaker A"])
+
+    def test_a_name_set_after_the_next_body_is_that_box_only(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker B", "Line 2")], name_after=True)
+        r = ph.talk(g)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Speaker A", "Line 1"), ("Speaker B", "Line 2")])
+
+    def test_no_name_pane_means_no_speaker(self):
+        g = FakeTalk([("box", None, "Line 1"), ("box", None, "Line 2")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([b["speaker"] for b in r["boxes"]], [None, None])
+        self.assertEqual(r["speakers"], [])
+
+    def test_the_frame_cap_waits_while_boxes_keep_coming(self):
+        r = ph.talk(FakeTalk([("box", "K", "Line %d" % i) for i in range(40)]), max_boxes=1000, max_frames=60)
+        self.assertTrue(r["done"], r)
+        self.assertEqual(len(r["boxes"]), 40)
+        self.assertGreater(r["frames"], 60)
+
+    def test_the_frame_cap_gives_up_after_frames_with_nothing_new(self):
+        g = FakeTalk([("box", "K", "Line 1"), ("box", "K", "Line 2")], stall=True)
+        r = ph.talk(g, max_frames=100)
+        self.assertFalse(r["done"])
+        self.assertIn("timed out", r["result"])
+        self.assertIn("nothing new", r["result"])
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1", "Line 2"])
+        self.assertLess(r["frames"], 200)
+
+    def test_a_talk_that_never_stops_is_cut_at_the_total(self):
+        r = ph.talk(FakeTalk([("box", "K", "Line %d" % i) for i in range(400)]), max_boxes=1000, max_frames=100,
+                    max_total=300)
+        self.assertFalse(r["done"])
+        self.assertIn("timed out", r["result"])
+        self.assertIn("300 frames in all", r["result"])
 
     def test_the_mcp_tools_take_reply_and_since(self):
         names = {t["name"]: t for t in mcp_playtest.PLAYER_TOOLS}
