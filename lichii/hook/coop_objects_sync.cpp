@@ -1498,6 +1498,12 @@ bool SameHash(std::uint64_t a, std::uint64_t b) {
 // (row 172, proven at a scene change; not seen inside a scene in the lane run). Sync keys objects by address, so
 // another name or placement hash there is a new actor: the old object ends as if it left, the new one is fresh.
 // A new actor of the same kind and placement (a spawner's) cannot be told this way; its signs are only logged.
+bool Sync::HoldReplace(std::uint64_t address, const Object& o) const {
+    const bool ending = o.deleted_until != 0 || o.game_deleted || o.dead_at != 0 || o.dead_said ||
+                        hidden_.contains(address) || refused_.contains(address) || dead_.contains(address);
+    return !ending && !o.replace_held;
+}
+
 bool Sync::Reused(const Seen& s, Object& o, std::uint64_t now_us) {
     std::string sign;
     bool other = false;
@@ -1517,7 +1523,7 @@ bool Sync::Reused(const Seen& s, Object& o, std::uint64_t now_us) {
     if (sign.empty()) {
         return false;
     }
-    if (other && !o.game_deleted && !o.replace_held) {
+    if (other && HoldReplace(s.address, o)) {
         return true;  // held one walk first (Tick); said when it is replaced
     }
     ++(other ? replaced_ : reuse_signs_);
@@ -2287,8 +2293,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             // normal grace). The walk can show a new scene's actors one walk before the scene name changes; the
             // reset then forgets the old one with nothing said (no ObjectRemove for our own made enemy, which the
             // server hands over), and the new one is not made under the old scene's name (review r12).
-            if (!o.game_deleted && !o.replace_held) {
+            if (HoldReplace(s.address, o)) {
                 o.replace_held = true;
+                now_seen.erase(s.address);  // a real miss: nothing reads the new actor as the old object
                 continue;
             }
             // Another actor: the old object ends at this walk as one that left (below), the new one is fresh.

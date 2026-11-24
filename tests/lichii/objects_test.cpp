@@ -8083,10 +8083,10 @@ TEST_CASE("objects: another actor at the address of one said dead is a new actor
     Tick(sync, 10 * kMs, {skull(2)});
     Tick(sync, 430 * kMs, {skull(2)});
     REQUIRE(All<proto::ObjectRemove>(Tick(sync, 500 * kMs, {skull(0)})).size() == 1);  // said dead
-    // Freed and another made at the same address before the next walk. Held one walk (no game delete), then new.
+    // Freed and another made at the same address before the next walk. The old one is already ending (said
+    // dead): replaced at once, no held walk.
     const Seen keese = Enemy(0x100, 0x22, 2, 0.0f, "Enemy_Keese");
-    CHECK(All<proto::ObjectRemove>(Tick(sync, 600 * kMs, {keese})).empty());
-    const auto step = Tick(sync, 650 * kMs, {keese});
+    const auto step = Tick(sync, 600 * kMs, {keese});
     REQUIRE(sync.IdOf(0x100).has_value());
     CHECK(sync.IdOf(0x100)->value == 0x22);
     CHECK(Listed(step, *sync.IdOf(0x100)));  // on our presence list: shared
@@ -8200,4 +8200,25 @@ TEST_CASE("objects: another actor at a kept address for one walk only is no new 
     Tick(sync, 200 * kMs, {Enemy(0x100, 0x11, 2)});
     CHECK(*sync.IdOf(0x100) == id);
     CHECK(sync.Replaced() == 0);
+}
+
+TEST_CASE("objects: another actor at the address of a copy we are deleting is not deleted with it") {
+    // review r12 P6: the owner said gone, so Removes() lists the address. Another actor there is replaced at once
+    // (no held walk): else the module would delete the new actor at that address.
+    Sync sync;
+    const Seen keese = Enemy(0x100, 0x11, 2, 0.0f, "Enemy_Keese");
+    Tick(sync, 0, {keese}, 2);
+    const proto::ObjectId id = *sync.IdOf(0x100);
+    Own(sync, id, 1, 1);
+    Tick(sync, 10 * kMs, {keese}, 2);
+    sync.Receive(proto::ObjectRemove{1, id, 1, proto::RemoveReason::gone, {}});
+    Tick(sync, 30 * kMs, {keese}, 2);
+    REQUIRE(sync.Removes() == std::vector<std::uint64_t>{0x100});
+    const Seen bat = Enemy(0x100, 0x22, 2, 0.0f, "Enemy_FireKeese");
+    Tick(sync, 40 * kMs, {bat}, 2);
+    CHECK(sync.Removes().empty());
+    REQUIRE(sync.IdOf(0x100).has_value());
+    CHECK(sync.IdOf(0x100)->value == 0x22);
+    Tick(sync, 50 * kMs, {bat}, 2);
+    CHECK(sync.Removes().empty());
 }

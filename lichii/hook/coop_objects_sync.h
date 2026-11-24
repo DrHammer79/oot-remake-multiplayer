@@ -1648,6 +1648,9 @@ private:
     static constexpr std::uint64_t kReuseListedUs = 3'000'000;  // listed this long after the game's delete
     // True when the actor the walk shows at a kept address is another one: another name or placement hash.
     bool Reused(const Seen& s, Object& o, std::uint64_t now_us);
+    // A replace waits one walk (a real miss) unless the old actor is already ending: deleted by its game or by us,
+    // dead, or its address on Removes() (else the module would delete the new actor there; review r12 P6).
+    bool HoldReplace(std::uint64_t address, const Object& o) const;
     // Each other player's scene and the server time of its latest sample
     // (guarded by inbox_mutex_: PLAYER_SAMPLE comes too often for the inbox).
     std::map<std::uint8_t, std::pair<std::string, std::uint64_t>> scenes_;
