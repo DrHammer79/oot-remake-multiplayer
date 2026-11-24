@@ -380,9 +380,9 @@ class PlayerServer(unittest.TestCase):
             sys.stdin, sys.stdout = stdin, stdout
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "flag_read", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
-                          "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
-                          "interact", "checkpoint",
+                         ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "fight", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "flag_read", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
+                          "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "get_text", "open",
+                          "interact", "shoot", "climb", "push", "jump", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
         self.assertTrue(out[3]["result"]["isError"])          # the session tools are not a game's tools
@@ -1322,6 +1322,21 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
         self.assertLess(r["frames"], ph.MAX_FRAMES)
 
+    def test_one_missed_read_is_not_gone(self):
+        n, hidden = [], {}
+
+        def blink():
+            n.append(1)
+            acts = self.game.world["actors"]
+            if len(n) == 2:                                     # one read without the actor
+                hidden.update(a=self.actor(3))
+                acts.remove(hidden["a"])
+            elif hidden.get("a") is not None:
+                acts.append(hidden.pop("a"))
+        self.game.dump_hook = blink
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
+        self.assertTrue(r["arrived"], r)
+
     def test_go_to_actor_says_stuck_with_how_far_it_got(self):
         self.game.wall_x = 1.0
         r = ph.go_to_actor(self.c, 3, stuck_after=40)
@@ -1469,6 +1484,20 @@ class StrikeAndHelpers(unittest.TestCase):
         self.assertLessEqual(r["frames"], 60 + 2 * ph.PRESS_FRAMES)
         self.assertEqual((r["life_before"], r["life_after"]), (4, 4))
 
+    def test_fight_tool_locks_on_slashes_and_ends_with_a_look(self):
+        self.actor(3)["pos"] = [1, 0, 0]
+        self.game.on_press = lambda buttons: self.actor(3).update(life=0) if "Y" in buttons and "ZL" in buttons else None
+        r = self.tool.call("fight", {"id": 3, "name": "Enemy_Near", "max_frames": 90})
+        self.assertEqual(r["result"], "dead", r)
+        self.assertIn("look", r)
+        inputs = [m["buttons"] for m in self.game.log if m["cmd"] == "input"]
+        self.assertEqual(inputs[:2], [["ZL", "Y"], ["ZL"]])        # Longshot's map: lock-on ZL, sword Y, let go
+        self.assertFalse([m for m in self.game.log if m["cmd"] == "step"])   # ZL is never let go between inputs
+        for args in ({"id": 3, "name": "Enemy_Near", "sword": "Q"}, {"id": 3}, {"name": "Enemy_Near"},
+                     {"id": 3, "name": "Enemy_Near", "max_frames": 1201}):
+            with self.assertRaises(ValueError, msg=args):
+                self.tool.call("fight", args)
+
     def test_the_helper_tools_take_the_id_and_the_name_and_are_bounded(self):
         r = self.tool.call("go_to_actor", {"id": "3", "name": "Enemy_Near"})
         self.assertEqual((r["arrived"], r["reason"]), (True, "near"))
@@ -1491,7 +1520,8 @@ class StrikeAndHelpers(unittest.TestCase):
         for name in ("go_to_actor", "attack"):
             self.assertIn("120 frames", by[name])
             self.assertIn("never goes for another", by[name])
-        self.assertIn("not yet confirmed", by["attack"])
+        self.assertIn("Longshot's attack button", by["attack"])
+        self.assertIn("`shield` ZL", by["fight"])
 
     def test_talk_and_open_press_a_only_with_a_prompt(self):
         self.assertFalse(self.tool.call("talk", {})["pressed"])
@@ -1503,7 +1533,7 @@ class StrikeAndHelpers(unittest.TestCase):
         r = ph.use_item(self.c, "Bow")
         self.assertEqual(r["changed"]["rupees"], {"was": 5, "now": 9})
         self.assertIn("assign Bow", self.acts())
-        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["Y"]])
+        self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"], [["ZR"]])   # assign's button
         r = ph.use_item(self.c, "Hookshot", button="X")
         self.assertEqual([m["buttons"] for m in self.game.log if m["cmd"] == "input"][-1], ["X"])
 

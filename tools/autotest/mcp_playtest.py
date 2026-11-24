@@ -21,7 +21,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desync_check  # noqa: E402
 import live  # noqa: E402
+import kit_fight  # noqa: E402
 import kit_look  # noqa: E402
+import kit_move  # noqa: E402
 import kit_route  # noqa: E402
 import kit_setup  # noqa: E402
 import kit_tools  # noqa: E402
@@ -104,8 +106,8 @@ def _need_id(args):
     return n
 
 
-def _button(args):
-    b = str(args.get("button", "Y")).upper()
+def _button(args, default="Y"):
+    b = str(args.get("button", default)).upper()
     if b not in pc.BUTTONS:
         raise ValueError("button: one of " + " ".join(pc.BUTTONS))
     return b
@@ -250,20 +252,41 @@ HELPER_TOOLS = [
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
-    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default, which "
-     "is a guess not yet confirmed in a game) in rounds until its life is 0 or the frames run out. Returns `result` "
+    {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default: "
+     "Longshot's attack button) in rounds until its life is 0 or the frames run out. Returns `result` "
      "(dead, gone, alive, or stopped with `stopped` saying why) and its life before and after. " + HELPER_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, button={"type": "string", "enum": list(pc.BUTTONS)},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
     {"name": "use_item", "description": "Put an item on a button (`assign`), press that button, and say what changed in "
-     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one the item goes on (Y by default, a "
-     "guess not yet confirmed in a game). About 14 frames pass. " + ACT_NOTE,
+     "the state (life, rupees, event, prompt, equips, inventory). `button` is the one pressed: ZR by default, the "
+     "button `assign` puts the item on (Y is the sword). About 14 frames pass. " + ACT_NOTE,
      "inputSchema": {"type": "object", "required": ["item"],
                      "properties": {"item": {"type": "string"}, "button": {"type": "string", "enum": list(pc.BUTTONS)}}}},
-    {"name": "talk", "description": "Press A when the state's `prompt` says there is something to talk to; with no prompt "
-     "nothing is pressed and it says so. Returns the prompt and event after (12 frames pass when it presses).",
-     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "talk", "description": "Talk to whoever the A prompt names (or, with `id` and `name` from get_world, when no "
+     "prompt shows yet, walk to that actor and face it first): press A, read the speakers and the reply buttons the "
+     "game shows, press A to go on, and when buttons show pick the next of `reply` (a text, or a list: one per set of "
+     "buttons, in order; Down to it, then A). With no reply left it stops and lists the buttons, the talk left open: "
+     "call again with `reply` and `since` (from that answer) to go on, no new A. With no prompt nothing is pressed. "
+     "Returns `speakers`, `boxes` [{speaker, text}], `choices`, `picked`, `since`, `done` (the talk ended) or `result` "
+     "saying why it stopped. The box body does not come through the text wrap yet (read in a lane run): `boxes` is "
+     "empty; take a screenshot to read it. A shop's item list is not buttons: move to the item yourself (press), then "
+     "talk with since. At most `max_boxes` boxes (20) and 1200 frames. It acts on this game only.",
+     "inputSchema": {"type": "object",
+                     "properties": dict(ACTOR_ARGS,
+                                        reply={"anyOf": [{"type": "string", "maxLength": 200},
+                                                         {"type": "array", "maxItems": 8,
+                                                          "items": {"type": "string", "maxLength": 200}}]},
+                                        since={"type": "integer", "minimum": 0},
+                                        max_boxes={"type": "integer", "minimum": 1, "maximum": 60})}},
+    {"name": "get_text", "description": "The texts the game set in its text panes since `since` (the `last` of an "
+     "earlier get_text; 0: the last 256 kept), oldest first: {hooked, last, lost, texts: [{seq, frame, layout, pane, "
+     "text, length, cut, markup}]}. `layout` keeps one layout (a talk is MessageDialog_00: T_Name_00 the "
+     "speaker; its reply buttons PaMessageBtn_00, one T_Btn_00 set per button). Bytes that are not plain text (the game's markup) show as "
+     "JSON \\u escapes and set `markup`. Read only; no frame runs.",
+     "inputSchema": {"type": "object",
+                     "properties": {"since": {"type": "integer", "minimum": 0},
+                                    "layout": {"type": "string", "maxLength": 64}}}},
     {"name": "open", "description": "As talk, for a chest or a door: press A when the `prompt` says there is something to "
      "open; with no prompt nothing is pressed.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "interact", "description": "go_to_actor to within 1 m (`near_m`), face it, then as talk: press A only when "
@@ -272,6 +295,54 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
+]
+
+MOVE_NOTE = (" Each ends with a `look`. It acts on this game only (in a pair, the other game runs the same frames).")
+MOVE_TOOLS = [
+    {"name": "shoot", "description": "Take out an aimed item and fire it at a target: `assign` puts the item on ZR, "
+     "Link turns to the target (`face`), ZR is held to draw (60 + 30 frames), the stick tilts the aim for `tilt_frames` "
+     "(+ up, - down; how far a frame tilts is not measured), ZR is let go, and the target is watched for `watch_frames`. "
+     "The target is `id` + `name` (from get_world) or a point `at` [x, y, z]. `result`: hit (its life fell, it died or "
+     "left the list), changed (another field it shows changed), miss (the ammo went down, the target did not change), "
+     "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item) or a "
+     "stop. `aim` has the world yaw and pitch from Link to the target; the game's aim tilt is not readable, so the "
+     "pitch is what the shot needs, not what Link aimed. `assist` true adds the test `aim X Y Z` line: the next arrow "
+     "or seed is steered onto the target (a hit then proves the target takes the shot, not the aim). " + ACT_NOTE
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["item"], "properties": dict(
+         ACTOR_ARGS, item={"type": "string", "enum": list(kit_move.ITEMS)},
+         at={"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+         assist={"type": "boolean"}, tilt_frames={"type": "integer", "minimum": -60, "maximum": 60},
+         watch_frames={"type": "integer", "minimum": 4, "maximum": 240})}},
+    {"name": "climb", "description": "Climb a ladder or vines: the stick held up (`up` true, the default) or down, a "
+     "look every 8 frames, until Link's height reaches `to_y` (metres), or with no `to_y` until it stops moving (the "
+     "top or the bottom). `face_x`/`face_z`: turn to the wall first and lean into it to grab on; going down with an A "
+     "prompt presses A first. `result`: arrived, stopped (the top or bottom), stuck (the height did not move for 4 "
+     "looks: not on it, or something in the way), not climbing (Link moved across, not up: walking, not on the wall), "
+     "or a stop (hurt: a Skulltula on the vines, an event, a scene change, timed out). `trace` is [frames, height]."
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "properties": {
+         "up": {"type": "boolean"}, "to_y": {"type": "number"}, "face_x": {"type": "number"},
+         "face_z": {"type": "number"}, "max_frames": {"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES}}}},
+    {"name": "push", "description": "Push a block (`id` + `name` from get_world) `distance_m` metres along world yaw "
+     "`yaw` (0 = +z, 90 = +x; none: from Link toward the block). Link walks to the block's far side from the push, "
+     "faces it and leans on it at full stick. `result`: pushed, stuck (it did not move for 48 frames while Link leaned "
+     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
+     "frame ran), not reached (the walk to its side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["id", "name", "distance_m"], "properties": dict(
+         ACTOR_ARGS, distance_m={"type": "number", "minimum": 0.1, "maximum": 20}, yaw={"type": "number"},
+         max_frames={"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES})}},
+    {"name": "jump", "description": "Run straight at (`x`, `z`) at full stick so Link jumps off the edge by himself (a "
+     "run off a ledge jumps; a walk only drops), with no side steps, until he is on the ground near the point. "
+     "`land_y` is the far side's height. `result`: landed, fell (on the ground over 1 m below `land_y`), respawned "
+     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), stopped (a move was "
+     "refused: no camera; no frame ran), or a stop (an event, a "
+     "scene change, timed out). `airborne` says whether the height moved on the way; `trace` is [frames, x, y, z]."
+     + MOVE_NOTE,
+     "inputSchema": {"type": "object", "required": ["x", "z"], "properties": {
+         "x": {"type": "number"}, "z": {"type": "number"}, "land_y": {"type": "number"},
+         "tolerance": {"type": "number", "minimum": 0.2, "maximum": 5}, "max_frames": {"type": "integer", "minimum": 4,
+                                                                                    "maximum": kit_move.MAX_FRAMES}}}},
 ]
 
 # One game's tools (--player): that game's play-test bridge (docs/playtest.md, "Bridge protocol").
@@ -329,6 +400,20 @@ PLAYER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["action"], "properties": {
          "action": {"type": "string", "enum": ["start", "save", "cancel"]}, "name": {"type": "string"},
          "note": {"type": "string", "maxLength": 290}}}},
+    {"name": "fight", "description": "Fight ONE enemy (`id` and `name` from look or get_world): walk up to sword "
+     "reach, then slash with the lock-on held (ZL + Y, then Y let go), guard (ZL alone: the shield) for one round after Link "
+     "is hit, in short rounds until it is dead, "
+     "gone, Link is low (life 4 quarter hearts or less: he backs off and the fight ends as `low`), a scene change or "
+     "load, an event (a cutscene: it waits for no event, so wait it out first), a walk-up the game refuses, or four "
+     "walk-ups that get no nearer (`stuck`) stop it, or `max_frames` run out. Ends with a `look`. The buttons are Longshot's map (`lock` ZL, `sword` "
+     "Y, `shield` ZL: lock-on and shield are one button). Longshot's Toggle ZL/ZR setting must be off. When the "
+     "enemy's life never moves, `hint` says why it may be. `max_frames` is 600 by default, 1200 at most; "
+     "no round starts that would pass it (a back-off when low adds 14). The enemy is looked up in the world list every round and never swapped for another "
+     "of its name; it needs the world list. It acts on this game only.",
+     "inputSchema": {"type": "object", "required": ["id", "name"], "properties": dict(
+         ACTOR_ARGS, max_frames={"type": "integer", "minimum": 1, "maximum": kit_fight.MAX_FRAMES},
+         lock={"type": "string", "enum": list(pc.BUTTONS)}, sword={"type": "string", "enum": list(pc.BUTTONS)},
+         shield={"type": "string", "enum": list(pc.BUTTONS)}, min_life={"type": "integer", "minimum": 0})}},
     {"name": "get_actor", "description": "One actor from the world list by `id` (the number get_world gives, or its "
      "`0x...` address). Not found says why (gone, outside the 200 nearest, or no list at all). No frame passes.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": ["integer", "string"]}}}},
@@ -421,7 +506,7 @@ PLAYER_TOOLS = [
      "get_state with inventory=true shows it without a step. Bombs and arrows are counts per player: `bombs` gives the small "
      "bag and 20 bombs; a bomb that can be lifted also needs PlayerStatus.LiftGrade (docs/items.md).",
      "inputSchema": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string"}}}},
-] + ACT_TOOLS + HELPER_TOOLS + [
+] + ACT_TOOLS + HELPER_TOOLS + MOVE_TOOLS + [
     {"name": "checkpoint", "description": "Write this game's shared flags and state under a tag (letters, digits, "
      "- and _) with its frame count, to the run's checkpoint log. Take the same tag on EVERY game after each "
      "action that should sync, then run desync_check.",
@@ -614,6 +699,36 @@ class Game:
             return out
         raise ValueError("action: start, save or cancel")
 
+    def _move(self, name, args):
+        c = self._driver()
+
+        def num(key, lo=None, hi=None, default=None):
+            return default if args.get(key) is None else float(_num(args, key, lo, hi))
+
+        frames = int(_bounded(args, "max_frames", 240 if name == "jump" else kit_move.MAX_FRAMES, 1, kit_move.MAX_FRAMES))
+        who = _word(args, "name") if args.get("name") is not None else None
+        if name == "shoot":
+            at = args.get("at")
+            if at is not None:
+                if not isinstance(at, list) or len(at) != 3:
+                    raise ValueError("at: [x, y, z] in metres")
+                at = [float(_num({"at": v}, "at")) for v in at]
+            out = kit_move.shoot(c, _word(args, "item"), ident=_ident(args), name=who, at=at,
+                                 assist=bool(args.get("assist")), tilt_frames=int(num("tilt_frames", -60, 60, 0)),
+                                 watch_frames=int(num("watch_frames", 4, 240, kit_move.WATCH_FRAMES)))
+        elif name == "climb":
+            face = None
+            if args.get("face_x") is not None or args.get("face_z") is not None:
+                face = (num("face_x"), num("face_z"))
+            out = kit_move.climb(c, up=args.get("up", True) is not False, to_y=num("to_y"), face=face, max_frames=frames)
+        elif name == "push":
+            out = kit_move.push(c, _need_id(args), num("distance_m", 0.1, 20), who, yaw=num("yaw"), max_frames=frames)
+        else:
+            out = kit_move.jump(c, num("x"), num("z"), land_y=num("land_y"), tolerance=num("tolerance", 0.2, 5, 0.6),
+                                max_frames=frames)
+        out["look"], self.last_look = kit_look.look(c.state(), self.last_look)
+        return out
+
     def _driver(self):
         """The client, wrapped to sample Link's place into the route being recorded (if any)."""
         return kit_route.Sampling(self.client, self.recorder) if self.recorder is not None else self.client
@@ -642,6 +757,19 @@ class Game:
             return self._go_to(args)
         if name == "record_route":
             return self._record_route(args)
+        if name == "fight":
+            def button(key, default):
+                b = str(args.get(key, default)).upper()
+                if b not in pc.BUTTONS:
+                    raise ValueError("%s: one of %s" % (key, " ".join(pc.BUTTONS)))
+                return b
+            out = kit_fight.fight(c, _need_id(args), _word(args, "name"),
+                                  int(_bounded(args, "max_frames", kit_fight.MCP_FRAMES, 1, kit_fight.MAX_FRAMES)),
+                                  button("lock", kit_fight.LOCK), button("sword", kit_fight.SWORD),
+                                  button("shield", kit_fight.SHIELD),
+                                  int(_bounded(args, "min_life", kit_fight.MIN_LIFE, 0, 80)))
+            out["look"], self.last_look = kit_look.look(c.state(), self.last_look)
+            return out
         if name == "get_actor":
             r = c.world()
             w = r["world"] or {}
@@ -698,14 +826,36 @@ class Game:
         if name == "go_to_actor":
             return ph.go_to_actor(c, _need_id(args), _word(args, "name"), _bounded(args, "near_m", ph.NEAR_M, 0.5, 10),
                                   int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
+        if name in kit_move.VERBS:
+            return self._move(name, args)
         if name == "face":
             return ph.face(c, _need_id(args), _word(args, "name"))
         if name == "attack":
             return ph.attack(c, _need_id(args), _button(args), _word(args, "name"),
                              int(_bounded(args, "max_frames", ph.MAX_FRAMES, 1, ph.MAX_FRAMES)))
         if name == "use_item":
-            return ph.use_item(c, _word(args, "item"), _button(args))
-        if name in ("talk", "open"):
+            return ph.use_item(c, _word(args, "item"), _button(args, ph.ITEM_BUTTON))
+        if name == "talk":
+            reply = args.get("reply")
+            many = reply if isinstance(reply, list) else [reply]
+            if reply is not None and (not 1 <= len(many) <= 8 or any(
+                    not isinstance(r, str) or not r.strip() or len(r) > 200 for r in many)):
+                raise ValueError("reply: the text of the choice to pick (1 to 200 characters), or a list of 1 to 8")
+            since = args.get("since")
+            if since is not None and (isinstance(since, bool) or not isinstance(since, int) or since < 0):
+                raise ValueError("since: the `since` of an earlier talk (a whole number, 0 or more)")
+            ident = _ident(args)
+            return ph.talk(c, ident, _word(args, "name") if ident is not None else None, reply,
+                           int(_bounded(args, "max_boxes", ph.TALK_BOXES, 1, 60)), since=since)
+        if name == "get_text":
+            since = args.get("since", 0)
+            if isinstance(since, bool) or not isinstance(since, int) or since < 0:
+                raise ValueError("since: the `last` of an earlier get_text (a whole number, 0 or more)")
+            layout = args.get("layout")
+            if layout is not None and (not isinstance(layout, str) or not re.match(r"^[A-Za-z0-9_]{1,64}$", layout)):
+                raise ValueError("layout: part of a layout's name (letters, digits and _)")
+            return c.text(since, layout)
+        if name == "open":
             return ph.interact(c, name)
         if name == "interact":
             return ph.interact_with(c, _need_id(args), _word(args, "name"),
@@ -742,8 +892,8 @@ CALLS_FILE = "calls.jsonl"
 
 
 # Two games from one server (--pair): every PLAYER_TOOLS tool with a `player`; the frames one game runs, the other runs too.
-NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "checkpoint", "desync_check", "pause", "resume",
-                            "log", "check_logs", "session_status"))
+NO_FRAME_TOOLS = frozenset(("get_state", "look", "get_world", "get_actor", "get_text", "checkpoint", "desync_check",
+                            "pause", "resume", "log", "check_logs", "session_status"))
 BOTH_TOOLS = frozenset(("get_state", "step", "setup", "preset", "save_point", "load_point"))   # with no `player`: both games
 ALWAYS_BOTH = frozenset(("pause", "resume"))    # both games always: one running free would leave the other behind
 IN_STEP = (" Both games run the same frames: every frame this player's game runs, the other game runs too (walks, "

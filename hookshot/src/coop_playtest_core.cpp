@@ -429,6 +429,25 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.lines = *lines;
         return r;
     }
+    if (c == "text") {
+        // Read only (the texts the game set in its text panes, coop_talk_text.h): not gated.
+        if (const auto* s = v->Get("since"); s && s->kind != CoopModJson::Value::Kind::Null) {
+            const auto n = v->Number("since");
+            if (!n || !(*n >= 0 && *n <= 9007199254740991.0) || *n != std::floor(*n)) {
+                error = "since: the `last` of an earlier text reply (0: every text kept)";
+                return std::nullopt;
+            }
+            r.since = static_cast<std::uint64_t>(*n);
+        }
+        if (const auto* l = v->Get("layout"); l && l->kind != CoopModJson::Value::Kind::Null) {
+            if (l->kind != CoopModJson::Value::Kind::String || !PlainText(l->string, 64)) {
+                error = "layout: part of a layout's name (MessageInGame_00 is the message window)";
+                return std::nullopt;
+            }
+            r.layout = l->string;
+        }
+        return r;
+    }
     if (c == "give") {
         const auto item = v->Text("item");
         if (!item || !PlainText(*item, 128)) {
@@ -455,7 +474,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, text, give, dump or shot";
     return std::nullopt;
 }
 
@@ -648,7 +667,8 @@ std::string WorldMember(bool enabled, const std::optional<CoopWorldSnapshot::Sna
                       ",\"age_ms\":" + std::to_string(age) +
                       ",\"stale\":" + (stale ? "true" : "false") +
                       ",\"behind\":" + (fresh == CoopWorldSnapshot::Freshness::behind ? "true" : "false") +
-                      ",\"cost_us\":" + std::to_string(snapshot->cost_us);
+                      ",\"cost_us\":" + std::to_string(snapshot->cost_us) +
+                      ",\"solo\":" + (snapshot->solo ? "true" : "false");  // the solo walk: no strike by id
     // The snapshot is sorted known kinds first, so the known ones lead; `state` stops at kStateLimit of them.
     std::size_t other = 0;
     for (const auto& a : snapshot->actors) other += a.kind == CoopWorldSnapshot::Kind::other ? 1 : 0;
@@ -810,6 +830,31 @@ std::string LinkMembers(const CoopModJson::Value* status) {
     const std::string why = NotReadyReason(status);
     out += ",\"not_ready\":" + (why.empty() ? std::string("null") : Quote(why));
     return out;
+}
+
+std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms) {
+    const auto* game = GameOf(status);
+    const auto* pos = game && !SnapshotIsOld(status) && !SnapshotMissing(status) ? game->Get("pos") : nullptr;
+    if (!pos || pos->kind != CoopModJson::Value::Kind::Array || pos->array.size() != 3 || scene.empty()) {
+        return ",\"room\":null";
+    }
+    CoopRooms::Vec3 at{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (pos->array[i].kind != CoopModJson::Value::Kind::Number) return ",\"room\":null";
+        at[i] = static_cast<float>(pos->array[i].number);
+    }
+    const auto guess = rooms.Nearest(scene, at);
+    return ",\"room\":" + (guess ? std::to_string(guess->room) : std::string("null"));
+}
+
+std::string BodyMember(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, bool live) {
+    if (snapshot && live) {
+        for (const auto& a : snapshot->actors) {
+            if (a.name == "Player_Child") return ",\"body\":\"child\"";
+            if (a.name == "Player_Adult") return ",\"body\":\"adult\"";
+        }
+    }
+    return ",\"body\":null";
 }
 
 namespace {

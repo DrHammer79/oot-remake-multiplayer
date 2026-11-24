@@ -624,8 +624,8 @@ public:
         std::lock_guard lock(mutex_);
         aim_ = Aim{target, until_ms};
     }
-    // The walk: a NormalArrow first seen (ours, nocked: another player's is a CoopShot_Arrow stand-in), taken
-    // while an aim waits for one.
+    // The walk: a NormalArrow or a Shootable_DekuSeed first seen (ours: another player's is a CoopShot_ stand-in),
+    // taken while an aim waits for one (CoopTestInput::Aimable).
     void AimArrow(u64 actor, const std::array<float, 3>& at) {
         std::lock_guard lock(mutex_);
         if (aim_ && aim_->arrow == 0) {
@@ -1958,8 +1958,16 @@ public:
                 }
                 sharing_ = false;
             }
+            if (CoopWorldSnapshot::TheStore().Enabled() && scene && !scene->empty() && Ready(system)) {
+                SoloWorld(system);  // the play-test bridge's world list in solo play (off: the one atomic load)
+            } else if (!solo_names_.empty()) {
+                solo_names_.clear();
+                solo_stamps_.clear();
+            }
             return;
         }
+        solo_names_.clear();  // (a session walks with its own cache)
+        solo_stamps_.clear();
         if (!Ready(system)) {
             return;
         }
@@ -3465,16 +3473,15 @@ private:
     }
 
     // The play-test bridge's snapshot of the world (coop_world_snapshot.h): every actor of the walk with its place,
-    // and for the enemies their life; the nearest kept. Every 100 ms at most; `frame` is the bridge's game frame read
-    // before the walk began (a frame the actors may have moved past, never one they have not reached).
-    void PublishWorld(Reader& r, const std::optional<coop::protocol::Vec3>& player, u64 frame) {
-        if (!world_every_.Due(CoopEvery::NowUs())) {
-            return;
-        }
+    // and for the enemies their life; the nearest kept. The callers take it every 100 ms at most (world_every_);
+    // `frame` is the bridge's game frame read before the walk began (a frame the actors may have moved past, never one
+    // they have not reached). `names`: the walk's actors and names (names_, or solo_names_ in solo play).
+    void PublishWorld(Reader& r, const std::optional<coop::protocol::Vec3>& player, u64 frame,
+                      const std::unordered_map<u64, std::pair<std::string, u64>>& names, bool solo = false) {
         const auto began = std::chrono::steady_clock::now();
         std::vector<CoopWorldSnapshot::Candidate> in;
-        in.reserve(names_.size());
-        for (const auto& [a, known] : names_) {
+        in.reserve(names.size());
+        for (const auto& [a, known] : names) {
             const auto at = r.Get<std::array<float, 3>>(a + kActorPosition);
             if (!at) {
                 continue;
@@ -3501,12 +3508,62 @@ private:
         CoopWorldSnapshot::Snapshot snap;
         snap.actors = CoopWorldSnapshot::Select(in, from, CoopWorldSnapshot::kLimit);
         snap.frame = frame;
+        snap.solo = solo;
         snap.taken_ms = SteadyNowMs();
         snap.cost_us = static_cast<u64>(
             std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - began).count());
         CoopWorldSnapshot::TheStore().Put(std::move(snap));
     }
     CoopEvery::Every world_every_{100'000};
+
+    // The play-test bridge's world list in solo play: with no session the sharing walk (Collect) does not run, so
+    // this light walk lists the actors by name and place for PublishWorld and nothing else (no sharing state is read
+    // or kept; a session's first walk starts from its own empty cache). Names are cached by the walk's ActorStamp.
+    // Our new arrow or seed is handed to a waiting test `aim` here too.
+    void SoloWorld(Core::System& system) {
+        if (!world_every_.Due(CoopEvery::NowUs())) {
+            return;
+        }
+        const u64 frame = CoopWorldSnapshot::TheStore().Frame();
+        Reader r(system.ApplicationMemory());
+        std::vector<u64> actors;
+        if (!List(r, actors)) {
+            return;
+        }
+        std::unordered_map<u64, std::pair<std::string, u64>> names;
+        std::unordered_map<u64, ActorStamp> stamps;
+        std::optional<coop::protocol::Vec3> player;
+        for (const u64 a : actors) {
+            const u64 name_at = r.Ptr(a + kActorName).value_or(0);
+            const ActorStamp stamp{name_at, name_at ? r.Get<u64>(name_at).value_or(0) : 0,
+                                   r.Ptr(a + kActorPlacement).value_or(0)};
+            std::pair<std::string, u64> known;
+            const auto it = solo_names_.find(a);
+            const auto was = solo_stamps_.find(a);
+            if (it != solo_names_.end() && was != solo_stamps_.end() && was->second == stamp) {
+                known = std::move(it->second);
+            } else {
+                known.first = r.Name(a);
+                if (CoopTestInput::Aimable(known.first)) {
+                    if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                        TheMover().AimArrow(a, *at);
+                    }
+                }
+            }
+            if (known.first == "Player_Child" || known.first == "Player_Adult") {
+                if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                    player = coop::protocol::Vec3{(*at)[0], (*at)[1], (*at)[2]};
+                }
+            }
+            stamps.emplace(a, stamp);
+            names.emplace(a, std::move(known));
+        }
+        solo_names_ = std::move(names);
+        solo_stamps_ = std::move(stamps);
+        PublishWorld(r, player, frame, solo_names_, true);
+    }
+    std::unordered_map<u64, std::pair<std::string, u64>> solo_names_;  // SoloWorld's cache (solo play only)
+    std::unordered_map<u64, ActorStamp> solo_stamps_;
 
     // An enemy or a boss: its life is never written (the native rule), only changed by its game's own steps.
     bool NativeOnly(u64 actor) const {
@@ -4089,7 +4146,7 @@ private:
                 const auto placement = r.Ptr(a + kActorPlacement);
                 known.second = placement ? r.Get<u64>(*placement + kPlacementHash).value_or(0) : 0;
                 CoopPickups::Note(known.first, known.second);  // one-time pickups (docs/items.md)
-                if (known.first == "NormalArrow") {  // test only (`aim`): a new arrow of ours
+                if (CoopTestInput::Aimable(known.first)) {  // test only (`aim`): a new arrow or seed of ours
                     if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
                         TheMover().AimArrow(a, *at);
                     }
@@ -4451,8 +4508,9 @@ private:
             names.emplace(a, std::move(known));
         }
         names_ = std::move(names);
-        if (CoopWorldSnapshot::TheStore().Enabled()) {  // the play-test bridge's world (off: this one atomic load)
-            PublishWorld(r, player, world_frame);
+        if (CoopWorldSnapshot::TheStore().Enabled() &&  // the play-test bridge's world (off: this one atomic load)
+            world_every_.Due(CoopEvery::NowUs())) {
+            PublishWorld(r, player, world_frame, names_);
         }
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
