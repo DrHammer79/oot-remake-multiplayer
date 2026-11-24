@@ -812,13 +812,13 @@ asks the move went PreAttack -> Attack_R with no shot. Her bullets are split sho
 so a copy that never reaches the shot shows none.
 
 Now a copy's own repeat (changed 0) of the move the owner's last put-in named (the same slot and verb) runs in the
-game, through its
-own node, with its own places and kind (it aims at its own Link, as a split shot should). When its plug is another
-variation than the owner's, the wrap writes the owner's into the request first: its name from our pools, or no plug
-for a plain ask. A name not in a pool yet is skipped as before. While its own asks run the move (within
-`kOwnMoveSteps` frames), the owner's repeats of it (changed 0) are left out; the owner's starts and other moves go in
-as before, and the copy's own asks of any other move are still skipped. Its own starts of the move (changed 1, its AI
-asking it again after it ended) stay skipped: only the owner's start a move, or a copy would fire twice (review). Owners and solo games never take this path.
+game, through its own node, with its own places and kind (it aims at its own Link, as a split shot should). When its
+plug is another variation than the owner's, the wrap writes the owner's into the request first: its name from our
+pools, or no plug for a plain ask. A name not in a pool yet is skipped as before. While its own asks run the move
+(within `kOwnMoveSteps` frames), the owner's repeats of it (changed 0) are left out; the owner's starts and other
+moves go in as before, and the copy's own asks of any other move are still skipped. Its own starts of the move
+(changed 1, its AI asking it again after it ended) stay skipped: only the owner's start a move, or a copy would fire
+twice (review). Owners and solo games never take this path.
 
 Same path, same fix: every boss move on the native sync whose module needs its AI's per-frame asks. From the
 boss-share list: Twinrova phases 1 and 2, Phantom Ganon (bolt, shockwaves, light ball), Ganondorf (row 211), Ganon,
