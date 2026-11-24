@@ -19,7 +19,8 @@ both games, kills what did not quit and the server, and lets the lock go. A watc
 but its lock goes stale with it (the lock names its pid). Each game's save is restored to its baseline before the
 boot, as the lane runs do (`--no-restore` keeps whatever the copies hold).
 
-    python -I tools/autotest/live.py start --session DIR --server coop_server.exe (--lane N | --game-a A --game-b B)
+    python -I tools/autotest/live.py start --session DIR [--server coop_server.exe] (--lane N [--only A|B] |
+                                           --game-a A --game-b B | --game-a A | --game-b B)
                                            [--boot-a boot.A.txt --boot-b boot.B.txt] [--env K=V ...]
                                            [--max-minutes 30] [--idle-minutes 10] [--lock-wait S] [--no-restore]
     python -I tools/autotest/live.py do --session DIR A "goto 10.0 20.0 0.5 300; press A"
@@ -142,26 +143,45 @@ def open_session(d):
 
 
 def resolve(a):
-    """(game A folder, game B folder, port, pipe): the lane's (tools/autotest/lanes.py) unless given."""
+    """({tag: game folder}, port, pipe): the lane's (tools/autotest/lanes.py) unless given. One game alone: only
+    --game-a or only --game-b, or --only A / B (a lane's one game); the other game is not started or touched."""
+    only = getattr(a, "only", None)
     if a.lane:
         L = lanes.lane(a.lane)
-        return (a.game_a or L["a"]), (a.game_b or L["b"]), (a.port or L["port"]), L["pipe"]
-    if not (a.game_a and a.game_b):
-        raise SystemExit("--game-a and --game-b (or --lane N)")
-    return a.game_a, a.game_b, (a.port or PORT), PIPE
+        games, port, pipe = {"A": a.game_a or L["a"], "B": a.game_b or L["b"]}, a.port or L["port"], L["pipe"]
+    else:
+        if not (a.game_a or a.game_b):
+            raise SystemExit("--game-a and/or --game-b (or --lane N)")
+        games, port, pipe = {x: g for x, g in (("A", a.game_a), ("B", a.game_b)) if g}, a.port or PORT, PIPE
+    if only:
+        if only not in games:
+            raise SystemExit("--only %s: no game %s given" % (only, only))
+        games = {only: games[only]}
+    return games, port, pipe
 
 
-def runner_argv(a, game_a, game_b, port, pipe, d):
+def session_tags(s):
+    """The games the session started, A before B (one alone, or both)."""
+    return [x for x in TAGS if x in (s.get("games") or {})]
+
+
+def runner_argv(a, games, port, pipe, d):
     """hookshot.py run's arguments for the boot. No --lane: the watchdog holds the lane lock for the whole session (the
-    runner would let it go when the boot ends, with the games still open)."""
-    argv = ["run", "--game-a", game_a, "--game-b", game_b, "--server", a.server, "--port", str(port),
-            "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0",
-            "--scenario-timeout", str(a.boot_timeout)]
+    runner would let it go when the boot ends, with the games still open). No --server: the games use their coop.ini
+    (a game alone needs none)."""
+    argv = ["run"]
+    for x in TAGS:
+        if x in games:
+            argv += ["--game-%s" % x.lower(), games[x]]
+    if a.server:
+        argv += ["--server", a.server]
+    argv += ["--port", str(port), "--out", d, "--name", "live", "--pipe", pipe, "--keep-open", "--every", "0",
+             "--scenario-timeout", str(a.boot_timeout)]
     if a.no_restore:
         argv.append("--no-restore")
-    if a.boot_a:
+    if a.boot_a and "A" in games:
         argv += ["--script-a", a.boot_a]
-    if a.boot_b:
+    if a.boot_b and "B" in games:
         argv += ["--script-b", a.boot_b]
     if a.no_load:
         argv.append("--no-load")
@@ -226,7 +246,7 @@ def start(a):
     w = read_json(watchdog_file(d), {}) or {}
     if w.get("pid") and not w.get("ended") and lanes.hs.pid_alive(int(w["pid"])):
         raise SystemExit("a session is still open in %s: stop it first" % d)
-    game_a, game_b, port, pipe = resolve(a)
+    games, port, pipe = resolve(a)
     for f in (watchdog_file(d), stop_file(d), os.path.join(d, "pids.json")):
         try:
             os.remove(f)
@@ -235,7 +255,10 @@ def start(a):
     s = {"started": time.time(), "dir": d, "lane": a.lane, "port": port, "booted": False,
          "max_s": int(a.max_minutes * 60), "idle_s": int(a.idle_minutes * 60), "lock_wait": a.lock_wait,
          "games": {}, "offsets": {}}
-    for i, (x, g) in enumerate(zip(TAGS, (game_a, game_b))):
+    if a.lane and len(games) == 1:
+        s["game_lock"] = next(iter(games))   # one game of the lane: its own lock, the other game stays free
+    for x, g in games.items():
+        i = TAGS.index(x)   # (B alone keeps B's pipe and port: another worker may drive A)
         s["games"][x] = {"folder": os.path.abspath(g), "pipe": "%s-%s" % (pipe, x),
                          "commands": os.path.join(d, "commands-%s.txt" % x),
                          "log": os.path.join(d, "game-out-%s.txt" % x)}
@@ -246,9 +269,9 @@ def start(a):
     lock = wait_lock(d, spawn_watchdog(d), a.lock_wait + 30)
     if lock not in ("held", "none"):
         return {"ok": False, "session": d, "lane": a.lane, "error": lock}
-    code = hookshot.main(runner_argv(a, game_a, game_b, port, pipe, d))
+    code = hookshot.main(runner_argv(a, games, port, pipe, d))
     s = load(d)
-    for x in TAGS:
+    for x in session_tags(s):
         log = s["games"][x]["log"]
         s["offsets"][x] = os.path.getsize(log) if os.path.exists(log) else 0
     s["booted"] = True
@@ -258,7 +281,7 @@ def start(a):
            "boot": "played" if code == 0 else "FAILED (see steps.txt): the session is closed",
            "ends": ends_text(a.max_minutes, a.idle_minutes)}
     if getattr(a, "playtest", False):
-        out["playtest"] = {"p%d" % (i + 1): s["games"][x]["playtest_port"] for i, x in enumerate(TAGS)}
+        out["playtest"] = {"p%d" % (TAGS.index(x) + 1): s["games"][x]["playtest_port"] for x in session_tags(s)}
     if code != 0:
         out["stop"] = stop(argparse.Namespace(session=d))
     return out
@@ -357,7 +380,9 @@ def look(d, s, x):
 def state(a):
     d = os.path.abspath(a.session)
     s = open_session(d)
-    out = {x: look(d, s, x) for x in ([a.player] if a.player else TAGS)}
+    if a.player and a.player not in session_tags(s):
+        return {"error": "game %s is not in this session (it has %s)" % (a.player, " and ".join(session_tags(s)))}
+    out = {x: look(d, s, x) for x in ([a.player] if a.player else session_tags(s))}
     save(d, s)
     # every look gets a `state_id`; with `since` (an earlier look's id) only what changed comes back (the new log lines
     # are new since the last look already, so they are always whole)
@@ -373,6 +398,8 @@ def do(a):
         steps = hookshot.parse(text)
     except hookshot.ScriptError as e:   # (a warp to a scene the module would refuse: nothing is sent)
         return {"error": "ScriptError: %s" % e}
+    if x not in session_tags(s):
+        return {"error": "game %s is not in this session (it has %s)" % (x, " and ".join(session_tags(s)))}
     b = bridge(s, x)
     err = None
     try:
@@ -408,7 +435,7 @@ def shot(a):
     s = open_session(d)
     os.makedirs(os.path.join(d, "shots"), exist_ok=True)
     return {x: take_shot(s, x, os.path.join(d, "shots", "%s-%d.png" % (x, int(time.time() * 1000))))
-            for x in ([a.player] if a.player else TAGS)}
+            for x in ([a.player] if a.player else session_tags(s))}
 
 
 def checkpoint(a):
@@ -419,13 +446,13 @@ def checkpoint(a):
     cps = os.path.join(d, "checkpoints")
     os.makedirs(cps, exist_ok=True)
     out = {"tag": a.tag}
-    for x in TAGS:
+    for x in session_tags(s):
         dump = s["games"][x]["commands"] + ".dump-%s.json" % a.tag
         try:
             os.remove(dump)
         except OSError:
             pass
-    for x in TAGS:
+    for x in session_tags(s):
         b = bridge(s, x)
         try:
             p = hookshot.Player(b, hookshot.Log(os.path.join(d, "player-%s.txt" % x)),
@@ -434,10 +461,10 @@ def checkpoint(a):
             out[x] = {"status": snapshot(b)}
         finally:
             b.close()
-    for x in TAGS:   # (the picture proves what the flags say: owner rule, no PASS from data alone)
+    for x in session_tags(s):   # (the picture proves what the flags say: owner rule, no PASS from data alone)
         got = take_shot(s, x, os.path.join(cps, "%s-%s.png" % (a.tag, x)))
         out[x]["shot" if not got.startswith("no shot") else "shot_error"] = got
-    for x in TAGS:
+    for x in session_tags(s):
         dump = s["games"][x]["commands"] + ".dump-%s.json" % a.tag
         deadline = time.monotonic() + 10
         while not os.path.exists(dump) and time.monotonic() < deadline:
@@ -452,7 +479,7 @@ def checkpoint(a):
         json.dump(out, f, indent=1)
     save(d, s)
     return {"tag": a.tag, **{x: {"map": out[x]["status"].get("map"), "flags": len(out[x]["flags"] or {}),
-                                 "shot": out[x].get("shot") or out[x].get("shot_error")} for x in TAGS}}
+                                 "shot": out[x].get("shot") or out[x].get("shot_error")} for x in session_tags(s)}}
 
 
 # --- the watchdog ------------------------------------------------------------------------------------------------
@@ -472,8 +499,8 @@ def kill(pid):
         pass
 
 
-def release_lock(n, owner):
-    return lanes.hs.lock_release(lanes.hs.main_root(lanes.REPO), "lane%d" % n, owner, say=lambda *_: None)
+def release_lock(n, owner, game=None):
+    return lanes.hs.lock_release(lanes.hs.main_root(lanes.REPO), lanes.lock_name(n, game), owner, say=lambda *_: None)
 
 
 def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, wait=QUIT_WAIT,
@@ -483,7 +510,7 @@ def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, w
     alive = alive or lanes.hs.pid_alive
     games, server = game_pids(d)
     out = {}
-    for x in TAGS:
+    for x in session_tags(s):
         try:
             quit(s, x)
             out[x] = "quit asked"
@@ -500,7 +527,9 @@ def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, w
         killer(server)
         out["server"] = "killed"
     if s.get("lane"):
-        out["lock"] = "lane%d.lock %s" % (s["lane"], "released" if release(s["lane"], lock_owner(d)) else "held by another")
+        g = s.get("game_lock")
+        out["lock"] = "%s.lock %s" % (lanes.lock_name(s["lane"], g),
+                                      "released" if release(s["lane"], lock_owner(d), g) else "held by another")
     return out
 
 
@@ -534,8 +563,9 @@ def run_watchdog(d, acquire=None, watcher=watch, closer=close, pid=None):
     s = load(d)
     w = {"pid": pid, "lock": None, "ended": None}
     if s.get("lane"):
-        acquire = acquire or (lambda n, owner, wait: lanes.lock_acquire(n, owner, wait=wait, pid=pid))
-        if not acquire(s["lane"], lock_owner(d), s.get("lock_wait", 0)):
+        acquire = acquire or (lambda n, owner, wait, game=None: lanes.lock_acquire(n, owner, wait=wait, pid=pid,
+                                                                                    game=game))
+        if not acquire(s["lane"], lock_owner(d), s.get("lock_wait", 0), s.get("game_lock")):
             w.update(lock="refused", ended="lane %d is not free (lanes.py lock status)" % s["lane"])
             write_json(watchdog_file(d), w)
             return 1
@@ -609,9 +639,10 @@ def main(argv=None):
     st.add_argument("--session", required=True)
     st.add_argument("--lane", type=int, choices=list(lanes.LANES),
                     help="a test lane: its pair, port and pipes unless given; its lock held for the whole session")
-    st.add_argument("--game-a", help="(required without --lane)")
-    st.add_argument("--game-b", help="(required without --lane)")
-    st.add_argument("--server", required=True)
+    st.add_argument("--game-a", help="(without --lane: this one, --game-b, or both)")
+    st.add_argument("--game-b", help="(without --lane: this one, --game-a, or both)")
+    st.add_argument("--only", choices=TAGS, help="start only this game (of the lane, or of the two given)")
+    st.add_argument("--server", help="coop_server to start (none: the games use their coop.ini)")
     st.add_argument("--port", type=int, help="default %d (a lane: its own)" % PORT)
     st.add_argument("--boot-a")
     st.add_argument("--boot-b")
