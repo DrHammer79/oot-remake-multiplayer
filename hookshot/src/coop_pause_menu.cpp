@@ -417,6 +417,18 @@ void Menu::HostRuleLines(std::vector<Line>& out, bool guest) const {
                                            "no items, enemies, doors, switches or saves are shared. PvP works as "
                                            "set below. Applies at your next Host."
                                          : "Off: the world is shared (the usual co-op). Applies at your next Host.")});
+    // Shared floor switches (coop_switch_stand_mode.h), the same way: on by default.
+    const std::string switches_now =
+        live ? std::string(session_.floor_switches ? "This game: On." : "This game: Off.") : std::string();
+    out.push_back({Toggle("Shared floor switches", options_.floor_switches), Act::kFloorSwitches,
+                   guest ? std::string(kYourNextHost) + " " + switches_now
+                   : live && options_.floor_switches != session_.floor_switches
+                       ? "Applies at your next Host: stop hosting, then start again. " + switches_now
+                       : std::string(options_.floor_switches
+                                         ? "On: another player standing on a floor switch holds it down in every "
+                                           "game. Applies at your next Host."
+                                         : "Off: a floor switch is held only by your own Link or a block. Applies at "
+                                           "your next Host.")});
     Row pvp = Toggle("PvP", live ? session_.pvp : options_.pvp);
     pvp.fixed = guest;
     out.push_back({pvp, Act::kPvp,
@@ -1904,6 +1916,7 @@ void Menu::Decide(Act act) {
     case Act::kApproveJoins:
     case Act::kGoldSkulltulas:
     case Act::kRace:
+    case Act::kFloorSwitches:
     case Act::kPvp:
     case Act::kDbno:
         Change(act, 0);   // (a toggle: A flips it)
@@ -2041,6 +2054,10 @@ void Menu::Change(Act act, int step) {
         break;
     case Act::kRace:
         options_.race = step > 0 ? true : step < 0 ? false : !options_.race;
+        request_ = Request{Request::Kind::kSave, {}};
+        break;
+    case Act::kFloorSwitches:
+        options_.floor_switches = step > 0 ? true : step < 0 ? false : !options_.floor_switches;
         request_ = Request{Request::Kind::kSave, {}};
         break;
     case Act::kPvp: {

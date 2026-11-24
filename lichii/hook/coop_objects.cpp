@@ -119,6 +119,8 @@
 #include <atomic>
 #include <unordered_map>
 #include "coop_world.h"
+#include "coop_race_mode.h"
+#include "coop_switch_stand_mode.h"
 #include "coop_lift_ride.h"
 #include "coop_room_objects.h"
 #include "coop_switch_share.h"
@@ -2774,7 +2776,9 @@ public:
                 LOG_INFO(Core, "coop: {}", line);
             }
         }
-        if (switch_stand_on_) {  // ai-switches: held step switches, anyone stands on it
+        // ai-switches: held step switches, anyone stands on it; the host's setting, and never in race mode (nothing
+        // of the world is shared there; this path sends no message for race_private to stop).
+        if (switch_stand_on_ && CoopSwitchStandMode::InForce() && !CoopRaceMode::InForce()) {
             auto& stander = CoopLiftRide::TheStander();
             stander.Want(CoopLiftRide::Stood(stand_switches_, sync_.OthersHere(server_now_us)), main_, SteadyNowMs());
             for (const auto& line : stander.TakeNotes()) {
