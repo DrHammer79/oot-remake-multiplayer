@@ -195,6 +195,23 @@ TEST_CASE("look steer: a camera that does not turn is given up, put back, and le
     CHECK(steer.phase() == Steer::Phase::probe);
 }
 
+TEST_CASE("look steer: the camera's update is wanted only while the page is asked, a direction is wanted and the camera "
+          "was not given up on") {
+    Steer steer;
+    Camera cam;
+    CHECK_FALSE(steer.WantsCamera(true));   // (no direction yet)
+    steer.Want(Direction{40.0, 30.0});
+    CHECK(steer.WantsCamera(true));
+    CHECK_FALSE(steer.WantsCamera(false));
+    CHECK(steer.phase() == Steer::Phase::idle);   // (asking changes nothing)
+    cam.frozen = true;
+    for (int f = 0; f < 20 && steer.phase() != Steer::Phase::lost; ++f) {
+        Frame(steer, cam, Direction{40.0, 30.0});
+    }
+    REQUIRE(steer.phase() == Steer::Phase::lost);
+    CHECK_FALSE(steer.WantsCamera(true));
+}
+
 TEST_CASE("look steer: the probe puts the camera back after it gave up on a turn it could not read") {
     Steer steer;
     Camera cam;

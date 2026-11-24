@@ -200,6 +200,9 @@ public:
     std::optional<Angles> Command(Angles now, int state, bool asked);
     // The view hook, each frame the page is asked: counts the frames with no Command since the last one.
     void Viewed();
+    // The camera's update is wanted (patch 0036's wake, hos_coop_turn.h): the page is asked, the orbit wants a
+    // direction, and the camera was not given up on. Changes nothing.
+    bool WantsCamera(bool asked) const { return asked && want_.has_value() && phase_ != Phase::lost; }
     // The view hook (the game's thread): the eye and target the game's camera placed this frame.
     void Observe(const Vec3& game_eye, const Vec3& game_target);
     // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now), and how
@@ -327,7 +330,8 @@ void Ask(const Window& window);
 // hos_coop_view (the game's thread): 1 = eye and target replaced.
 bool Camera(double eye[3], double target[3]);
 // hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced. `coop_on` false (co-op switched off):
-// a camera still turned is put back once, then left alone.
+// a camera still turned is put back once, then left alone. Yaw and pitch null with state -1 (the host's wake,
+// hos_coop_turn.h): true while the Customize picture wants the camera's update (Steer::WantsCamera); nothing changes.
 bool Turn(float* yaw, float* pitch, int state, bool coop_on);
 
 }  // namespace CoopLookView

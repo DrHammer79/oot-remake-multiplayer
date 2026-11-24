@@ -1089,6 +1089,10 @@ bool Camera(double eye[3], double target[3]) {
 }
 
 bool Turn(float* yaw, float* pitch, int state, bool coop_on) {
+    if (yaw == nullptr && pitch == nullptr && state == -1) {   // (the host's wake: a question only)
+        std::lock_guard lock(g_mutex);
+        return g_steer.WantsCamera(coop_on && g_orbit.Asked(NowMs()));
+    }
     if (yaw == nullptr || pitch == nullptr) {
         return false;
     }
