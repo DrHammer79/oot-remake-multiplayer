@@ -53,6 +53,9 @@ class Sim:
         self.a_held = 0
         self.wrote_yaw = 0         # `face` lines seen (a written yaw; the kit must turn with the stick)
         self.drift = 0.0           # degrees a frame the view drifts while drawing with no stick (a wobble)
+        self.dropped = 0           # grabs let go by a frame without A
+        self.cam_keep = 0.0        # 0..1: the share of last frame's view turn kept (an eased camera that coasts on)
+        self.cam_vel = [0.0, 0.0]
 
     # --- the bridge ---
     def state(self):
@@ -82,12 +85,16 @@ class Sim:
         return {"yaw": round(self.cam_yaw, 2), "pitch": round(self.cam_pitch, 2), "clip": clip, "y_down": False}
 
     def _look(self, stick):
-        angle, strength = stick
-        x, y = math.sin(math.radians(angle)) * strength, math.cos(math.radians(angle)) * strength
+        x = y = 0.0
+        if stick:
+            angle, strength = stick
+            x, y = math.sin(math.radians(angle)) * strength, math.cos(math.radians(angle)) * strength
         x = 0.0 if abs(x) < 0.1 else x                    # a dead zone
         y = 0.0 if abs(y) < 0.1 else y
-        self.cam_yaw = (self.cam_yaw - 1.5 * x) % 360     # right turns right: the yaw goes down in a right-handed view
-        self.cam_pitch = max(-80.0, min(80.0, self.cam_pitch - 1.0 * y))
+        k = self.cam_keep                                 # the turn speed eases in and coasts on after the stick
+        self.cam_vel = [k * self.cam_vel[0] + (1 - k) * 1.5 * x, k * self.cam_vel[1] + (1 - k) * 1.0 * y]
+        self.cam_yaw = (self.cam_yaw - self.cam_vel[0]) % 360   # right turns right: the yaw goes down (right-handed)
+        self.cam_pitch = max(-80.0, min(80.0, self.cam_pitch - self.cam_vel[1]))
 
     def world(self):
         if self.no_list:
@@ -125,11 +132,13 @@ class Sim:
                 if self.zr >= 30:
                     self._fire()
                 self.zr = 0
+            look = None
             if self.zr > 0 and rstick and self.aim_stick == "right":
-                self._look(rstick)
+                look = rstick
             if self.zr > 0 and stick and self.aim_stick == "left":
-                self._look(stick)
-                stick = None
+                look, stick = stick, None
+            if self.zr > 0 and (look or self.cam_keep):
+                self._look(look)
             if self.zr > 0 and not stick and not rstick:
                 self.cam_yaw = (self.cam_yaw + self.drift) % 360
             if self.zr > 0:
@@ -140,11 +149,17 @@ class Sim:
                     self.grabbed, self.prompt = True, "Empty"
             else:
                 self._let_go_a()
+                self._drop_grab()
             if stick:
                 self._stick(stick)
             self._frames(1)
         self._let_go_a()   # the pad goes back to nothing after the frames
         return {"ok": True, "state": self.state()}
+
+    def _drop_grab(self):
+        if self.grabbed:                                      # a frame without A lets go of the block
+            self.grabbed, self.prompt = False, "Grab"
+            self.dropped += 1
 
     def _let_go_a(self):
         if 0 < self.a_held < 30 and self.prompt == "Grab":   # a tap: up onto the block
@@ -157,6 +172,7 @@ class Sim:
             self.refused += 1
             return {"ok": False, "error": "no_camera", "no_camera": True, "state": self.state()}
         for _ in range(frames):
+            self._drop_grab()                                 # `move` presses no button
             self._walk(yaw, strength)
             self._frames(1)
         return {"ok": True, "stick": [0, strength], "state": self.state()}
@@ -204,7 +220,7 @@ class Sim:
             dy = 0.05 * strength * (1 if angle == 0 else -1)
             self.pos[1] = max(bottom, min(top, self.pos[1] + dy))
             return
-        self._walk((self.facing + angle) % 360, strength)
+        self._walk((self.cam_yaw - angle) % 360, strength)   # the stick is camera-relative: up = away, right = right
 
     def _walk(self, yaw, strength):
         if getattr(self, "gap_run", 0.0) > 0.0:   # in the air: the take-off speed and way, whatever the stick
@@ -293,6 +309,17 @@ class Shoot(unittest.TestCase):
         self.assertEqual(r["aim"]["stick"], "right")
         self.assertLessEqual(math.hypot(*r["aim"]["error"]), km.AIM_TOL)
         self.assertGreater(abs(r["aim"]["error_start"][1]), 0.1)   # it started well off: the turn did the aim
+
+    def test_aims_a_view_that_eases_in_and_coasts_on(self):
+        # The game's aim view keeps turning a few frames after the stick (NEXT13b: the up probe moved the target
+        # sideways as much as the right probe did, and the loop stalled 0.11 off). Measures must wait for it.
+        g = Sim(actors=[eye(pos=(3.0, 4.0, 7.0))])
+        g.cam_keep = 0.8
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "hit", r)
+        self.assertLessEqual(math.hypot(*r["aim"]["error"]), km.AIM_TOL)
+        (ax, ay), (bx, by) = r["aim"]["gains"]
+        self.assertLess(abs(bx), 0.2 * abs(ax), r["aim"])   # the up probe learnt no sideways turn from the right one
 
     def test_falls_back_to_the_left_stick(self):
         g = Sim(actors=[eye()])
@@ -519,6 +546,34 @@ class Push(unittest.TestCase):
         self.assertEqual(r["result"], "pushed", r)
         self.assertEqual(r["grab"], {"prompt": "Grab", "held": True, "after": "Empty"})
         self.assertEqual(g.pos[1], 0.0)   # not climbed onto it
+        self.assertEqual(g.dropped, 0)    # A held through the push: the grab never let go
+
+    def test_input_order_a_then_a_with_the_stick(self):
+        # The by-hand order: A alone GRAB_FRAMES, then A with the stick toward the block, never the stick alone.
+        g = Sim(actors=[block()])
+        g.grab_needed = True
+        g.cam_yaw = 30.0                  # a camera not along the push: the stick must be turned for it
+        calls, orig_input, orig_move = [], g.input, g.move
+
+        def rec_input(stick=None, buttons=(), frames=1, rstick=None):
+            calls.append(("input", stick and [round(stick[0], 1), round(stick[1], 2)], sorted(buttons), frames))
+            return orig_input(stick, buttons, frames, rstick)
+
+        def rec_move(yaw, strength=1.0, frames=1, check=True):
+            calls.append(("move", round(yaw, 1), strength, frames))
+            return orig_move(yaw, strength, frames, check)
+        g.input, g.move = rec_input, rec_move
+        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        self.assertEqual(r["result"], "pushed", r)
+        grab = next(i for i, c in enumerate(calls) if c[0] == "input" and c[2] == ["A"])
+        self.assertEqual(calls[grab], ("input", None, ["A"], km.GRAB_FRAMES))
+        after = calls[grab + 1:]
+        self.assertTrue(after)
+        for c in after:
+            self.assertEqual(c[0], "input", calls)            # no `move`: it would let go of A
+            self.assertEqual(c[2], ["A"], c)
+            self.assertEqual(c[1], [30.0, 1.0], c)            # world yaw 0 with the camera at 30: 30 to the right
+        self.assertEqual(g.dropped, 0)
 
     def test_without_the_grab_the_block_does_not_move(self):
         g = Sim(actors=[block()])

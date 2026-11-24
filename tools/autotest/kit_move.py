@@ -53,6 +53,8 @@ AIM_FRAMES = 2
 AIM_PROBE = (0.5, 4)      # a probe of each stick axis: this strength for this many frames, to learn which way it turns
 AIM_MOVED = 0.003         # a probe that moves the target less than this on the screen did not turn the view
 AIM_MIN = 0.12            # the smallest stick that still turns the view (a dead zone)
+AIM_SETTLE = 12           # frames at most, ZR held and no stick, waiting for the view to stop after a turn
+AIM_STILL = 0.001         # the target's move on the screen in a frame below this: the view stopped
 
 ITEMS = {                 # the name a tester types -> (the `assign` name, the ammo item or None)
     "slingshot": ("SlingShot", "Item_DekuSeed"),
@@ -168,6 +170,31 @@ def _stick_of(x, y):
     return [math.degrees(math.atan2(x, y)) % 360, strength]
 
 
+def move_stick(view, yaw, strength=1.0):
+    """[angle, strength] of the stick that walks world yaw `yaw` with this camera view, the bridge's own rule
+    (coop_playtest_core.cpp MoveAxes): forward is where clip w grows, right where clip x grows across it. For an
+    `input` that must hold a button with the stick (`move` presses none). None without a usable view."""
+    m = view.get("clip") if isinstance(view, dict) else None
+    if not isinstance(m, list) or len(m) != 16 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in m):
+        return None
+    fx, fz = m[12], m[14]
+    fl = math.hypot(fx, fz)
+    if fl <= 1e-6:
+        return None
+    fx, fz = fx / fl, fz / fl
+    rx, rz = m[0], m[2]
+    along = rx * fx + rz * fz
+    rx, rz = rx - along * fx, rz - along * fz
+    rl = math.hypot(rx, rz)
+    if rl <= 1e-6 * max(1.0, math.hypot(m[0], m[2])):
+        return None
+    rx, rz = rx / rl, rz / rl
+    dx, dz = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
+    stick = _stick_of(dx * rx + dz * rz, dx * fx + dz * fz)
+    stick[1] = max(0.0, min(1.0, strength))
+    return stick
+
+
 def _turn(client, which, x, y, frames):
     stick = _stick_of(x, y)
     if which == "right":
@@ -176,10 +203,32 @@ def _turn(client, which, x, y, frames):
         client.input(stick, ["ZR"], frames)
 
 
+def _settle(client, point, out, err):
+    """Hold ZR with no stick until the view stops (the game's aim view eases in and coasts on for a few frames after
+    the stick: a look before it stops reads part of the last turn as the next one's). A steady drift counts as stopped,
+    and it waits at most AIM_SETTLE frames. Returns (state, error), the error None when the target left the screen."""
+    st, last = None, None
+    for _ in range(AIM_SETTLE):
+        client.input(None, ["ZR"], 1)
+        out["frames"] += 1
+        st, now = _aim_error(client, point)
+        if now is None:
+            return st, None
+        v = (now[0] - err[0], now[1] - err[1])
+        err = now
+        # Stopped, or a steady drift (within a tenth of the frame before; a coast slows faster): the coast is over.
+        steady = last and math.hypot(v[0] - last[0], v[1] - last[1]) <= 0.1 * math.hypot(*last)
+        if math.hypot(*v) < AIM_STILL or steady:
+            break
+        last = v
+    return st, err
+
+
 def aim_view(client, point, out):
     """With ZR held (drawing), turn the view the way a player aims until `point` sits under the reticle. Which stick
     turns it and which way is learnt first: each axis of the right stick, then the left, is pushed a little and the
-    target's move on the screen measured. Then each turn pushes the stick by how far the target is from the reticle.
+    target's move on the screen measured once the view stopped (it eases in and coasts on). Then each turn pushes the
+    stick by how far the target is from the reticle, and again waits for the view to stop before it looks.
     Returns None when aimed, else why not. Fills out["aim"] with the sticks, the steps and the last error."""
     aim = out["aim"]
     st, err = _aim_error(client, point)
@@ -189,12 +238,17 @@ def aim_view(client, point, out):
     aim["error_start"] = [round(err[0], 3), round(err[1], 3)]
     gains, which = None, None
     strength, frames = AIM_PROBE
+    st, err = _settle(client, point, out, err)
+    if err is None:
+        return "the target left the screen while drawing"
     for name in ("right", "left"):
         g = []
         for x, y in ((strength, 0.0), (0.0, strength)):
             _turn(client, name, x, y, frames)
             out["frames"] += frames
             st, now = _aim_error(client, point)
+            if now is not None:
+                st, now = _settle(client, point, out, now)   # the whole turn, coast included, and none left over
             if now is None:
                 return "the target left the screen while learning the %s stick" % name
             g.append(((now[0] - err[0]) / (strength * frames), (now[1] - err[1]) / (strength * frames)))
@@ -228,6 +282,8 @@ def aim_view(client, point, out):
         _turn(client, which, x, y, AIM_FRAMES)
         out["frames"] += AIM_FRAMES
         st, now = _aim_error(client, point)
+        if now is not None:
+            st, now = _settle(client, point, out, now)
         if now is None:
             return "the target left the screen while aiming"
         err = now
@@ -483,7 +539,8 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
     """Push the block `ident` (+ `name`, from the world list) `distance_m` metres along world yaw `yaw` (none: the
     direction from Link to the block). Link walks to the block's far side from the push (`stand_m` from its centre),
     turns to it with the stick and leans on it until A offers something (the game's "Grab"), holds A `GRAB_FRAMES` to grab (a short tap
-    would climb onto it), then pushes with the stick at full, a look every `chunk` frames. `grab` says what A offered
+    would climb onto it), then pushes with the stick at full with A still held (a frame without A lets go), a look
+    every `chunk` frames. `grab` says what A offered
     and whether it was held.
 
     Results: `pushed` (the block moved the distance), `stuck` (it did not move for `stuck_looks` looks while Link stayed
@@ -522,8 +579,8 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
     if not t["turned"]:
         return _out(out, "stopped" if "refused" in t["reason"] else "stuck", "the turn to the block: " + t["reason"], st)
     watch = _Watch(st)
-    # The grab: lean on the block until A offers something, then hold A (a tap climbs onto the block). The stick
-    # alone then pushes; without a prompt nothing is pressed and the stick leans on it as before.
+    # The grab: lean on the block until A offers something, then hold A (a tap climbs onto the block). A and the
+    # stick then push; without a prompt nothing is pressed and the stick alone leans on it as before.
     leaned = 0
     while ph.no_prompt(st.get("prompt")) and leaned < GRAB_LEAN_FRAMES:
         why = _refused(client.move(yaw, 1.0, 4, check=False))
@@ -578,9 +635,17 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
             return _out(out, "timed out", "the block moved %.2f m of %.2f" % (moved, distance_m), st)
         last_moved, last_link = moved, link
         n = min(chunk, max_frames - out["frames"])
-        why = _refused(client.move(yaw, 1.0, n, check=False))
-        if why:
-            return _out(out, "stopped", "move refused: " + why, st)
+        if out["grab"]["held"]:
+            # A stays held with the stick (by hand: A, then A and the stick): a frame without A lets go of the block.
+            # `move` presses no button, so the stick comes from the camera view, as the bridge turns it.
+            stick = move_stick(st.get("view"), yaw)
+            if stick is None:
+                return _out(out, "stopped", "no camera view in the state for the stick (A must stay held)", st)
+            client.input(stick, ["A"], n)
+        else:
+            why = _refused(client.move(yaw, 1.0, n, check=False))
+            if why:
+                return _out(out, "stopped", "move refused: " + why, st)
         out["frames"] += n
 
 
