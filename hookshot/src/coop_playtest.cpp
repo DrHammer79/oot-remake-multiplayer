@@ -39,6 +39,7 @@
 #include "coop_talk_text.h"
 #include "coop_teleport_game.h"
 #include "coop_testinput.h"
+#include "hos_coop_pane_body.h"
 #include "hos_coop_pane_text.h"
 #include "core/core.h"
 
@@ -357,6 +358,11 @@ std::string StateMembers(bool full_world = false, std::optional<Value> status = 
         auto& store = CoopWorldSnapshot::TheStore();
         out += BodyMember(store.Enabled() ? store.Get() : std::nullopt, WorldListNow());
     }
+    {
+        const auto camera = CoopCamera::Latest();
+        out += ViewMember(camera ? std::optional<std::array<float, 16>>(camera->clip_from_world) : std::nullopt,
+                          camera && camera->y_down);
+    }
     out += ",\"control\":" + std::string(status ? "true" : "false");
     Core::System& sys = *g_system;
     out += ",\"equips\":{";
@@ -525,6 +531,12 @@ std::string Handle(const Request& r) {
         const auto now = LinkStatus();
         WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
         if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
+        if (!plan.set_age.empty()) {
+            // The age first, and frames for the game to take it (the lane recipe: setflag, wait, then warp).
+            std::string error;
+            if (!played(std::string("setflag Sequence_IsChildhood ") + (plan.set_age == "child" ? "1" : "0"), error)) return fail("failed", error);
+            if (!gate.Step(30, kHoldWait)) return fail("timeout", "the frames did not run in time");
+        }
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
         std::string wait_for = r.scene;   // the map to wait for: the teleport route takes Longshot's (Link's age, its spelling)
         // Free play, an entrance or a map Longshot's list lacks (a boss stage): the game's own map change event
@@ -632,12 +644,13 @@ std::string Handle(const Request& r) {
         return ok(FlagReadMembers(r.name, v));
     }
     if (r.cmd == "text") {
-        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; patch 0041's wrap
-        // fills them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
+        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; the wraps of
+        // patches 0037 and 0038 fill them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
         bool lost = false;
         const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);
         return ok(CoopTalkText::Members(CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_TEXT),
-                                        CoopTalkText::TheLog().Last(), lost, texts));
+                                        CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_BODY), CoopTalkText::TheLog().Last(),
+                                        lost, texts));
     }
     if (r.cmd == "give") {
         std::string error;

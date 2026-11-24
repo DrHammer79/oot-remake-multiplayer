@@ -6,6 +6,7 @@ import os
 import sys
 import unittest
 import zlib
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -13,7 +14,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from puppet_pack import bwav, voices  # noqa: E402
+from puppet_pack import bwav, voice_map as vm, voices  # noqa: E402
 from test_bwav import amta, sine, template  # noqa: E402
 
 RATE = 48000
@@ -135,6 +136,120 @@ class Build(unittest.TestCase):
         self.assertEqual(e["Bars"], ["CoopVoice_Child_Custom_Saria.bars", "Player.bars", "Player_Child.bars"])
         self.assertEqual(e["ChoiceAsset"], ["a.casset.byml"])
         self.assertEqual(base["Bars"], ["Player.bars", "Player_Child.bars"])
+
+
+def burst(seconds, at, amp=20000, rate=RATE):
+    """A quiet clip `seconds` long with one loud 20 ms burst `at` seconds in."""
+    x = sine(int(seconds * rate), 300, 500)
+    i = int(at * rate)
+    x[i:i + rate // 50] = sine(rate // 50, 300, amp)
+    return x
+
+
+def chain(*voices_):
+    """Voices for choose(): each a {class: [(name, samples)]}."""
+    return [SimpleNamespace(voice="V%d" % i, by_class={c: [(nm, x, voices.rms_db(x)) for nm, x in rows]
+                                                       for c, rows in v.items()})
+            for i, v in enumerate(voices_)]
+
+
+class Choose(unittest.TestCase):
+    def test_a_capped_clip_keeps_its_peak(self):
+        x = burst(1.0, 0.60)
+        y = voices.cut(x, RATE, 0.40)
+        self.assertEqual(len(y), int(0.40 * RATE))
+        self.assertGreater(np.abs(y.astype(np.int32)).max(), 15000)
+        early = burst(1.0, 0.05)
+        self.assertTrue(np.array_equal(voices.cut(early, RATE, 0.40)[:4800], early[:4800]))   # from the start
+        self.assertIs(voices.cut(x, RATE, 2.0), x)
+
+    def test_a_capped_event_keeps_every_peak_and_rotates_its_clips(self):
+        v = chain({"ATTACK": [("A%d" % i, burst(1.0, 0.5 + 0.1 * i)) for i in range(3)]})
+        got = voices.choose("SwordAttack_S", v, 5, 0.40, RATE)
+        self.assertEqual([g[2] for g in got], ["A0", "A1", "A2", "A0", "A1"])
+        for g in got:
+            self.assertEqual(len(g[3]), int(0.40 * RATE))
+            self.assertGreater(np.abs(g[3].astype(np.int32)).max(), 15000, g[2])
+
+    def test_a_class_missing_from_the_first_voice_is_found_later_in_the_chain(self):
+        v = chain({"DAMAGE": [("hurt", sine(9600))]}, {"ATTACK": [("swing", sine(9600))]})
+        self.assertEqual(voices.choose("SwordAttack_S", v, 1, None, RATE)[0][:3], ("V1", "ATTACK", "swing"))
+        self.assertEqual(voices.choose("Damage_S", v, 1, None, RATE)[0][:3], ("V0", "DAMAGE", "hurt"))
+
+    def test_the_first_voice_keeps_what_no_voice_has_the_events_own_class_for(self):
+        v = chain({"SURPRISE": [("gasp", sine(9600))]}, {"BREATH": [("sigh", sine(9600))]})
+        self.assertEqual(voices.choose("SwordAttack_S", v, 1, None, RATE)[0][:3], ("V0", "SURPRISE", "gasp"))
+        v = chain({"ATTACK": [("mine", sine(9600))]}, {"ATTACK": [("theirs", sine(9600))]})
+        self.assertEqual(voices.choose("SwordAttack_S", v, 1, None, RATE)[0][:3], ("V0", "ATTACK", "mine"))
+
+    def test_a_chain_whose_first_voice_has_every_class_picks_as_before(self):
+        def before(event, voices_, n, cap):   # choose() of 50b46faf when a clip fits
+            for v in voices_:
+                for c in vm.prefs(event):
+                    fits = [k for k in v.by_class.get(c, []) if cap is None or len(k[1]) <= cap * RATE]
+                    if fits:
+                        return [(v.voice, c) + fits[i % len(fits)] for i in range(n)]
+        own = {c: [("own_%s%d" % (c, i), sine(int((0.2 + 0.05 * i) * RATE))) for i in range(2)]
+               for c in ("ATTACK", "EFFORT", "DAMAGE", "SURPRISE", "BREATH")}
+        v = chain(own, {c: [("default_" + c, sine(4800))] for c in own})
+        for ev in ("SwordAttack_S", "SwordAttack_B", "JumpAttack", "Jump_S", "Climb", "Shield_S", "Damage_B", "Death",
+                   "Wait", "Wait_31", "Dm_TimeTemple_0030", "FallingScream", "SomethingNew"):
+            for cap in (None, 0.30):
+                got = voices.choose(ev, v, 4, cap, RATE)
+                self.assertEqual([g[:3] for g in got], [g[:3] for g in before(ev, v, 4, cap)], (ev, cap))
+                self.assertEqual({g[0] for g in got}, {"V0"}, ev)
+
+    def test_mido_keeps_his_own_voice_but_for_the_class_he_lacks(self):
+        # Mido's own voice has surprise only; Kokiri_Boy after it has attack, surprise and breath.
+        mido = chain({"SURPRISE": [("NV_Mido_Notice00", sine(9600))]},
+                     {"ATTACK": [("NV_Kokiri_Boy_WeaponSwingS00", sine(9600))],
+                      "SURPRISE": [("NV_Kokiri_Boy_SurpriseS00", sine(9600))],
+                      "BREATH": [("NV_Kokiri_Boy_Ease00", sine(9600))]})
+        for ev in ("Climb", "Jump_S", "Shield_S", "Damage_S", "Dm_TimeTemple_0030"):   # nobody's own class, or his
+            self.assertEqual(voices.choose(ev, mido, 1, None, RATE)[0][:3], ("V0", "SURPRISE", "NV_Mido_Notice00"), ev)
+        self.assertEqual(voices.choose("SwordAttack_S", mido, 1, None, RATE)[0][2], "NV_Kokiri_Boy_WeaponSwingS00")
+        self.assertEqual(voices.choose("Wait", mido, 1, None, RATE)[0][2], "NV_Kokiri_Boy_Ease00")
+
+    def test_the_events_own_class_is_cut_before_a_worse_class_that_fits(self):
+        v = chain({"ATTACK": [("long", burst(1.0, 0.6))], "DAMAGE": [("hurt", sine(4800))]})
+        got = voices.choose("SwordAttack_S", v, 1, 0.40, RATE)[0]
+        self.assertEqual(got[:3], ("V0", "ATTACK", "long"))
+        self.assertEqual(len(got[3]), int(0.40 * RATE))
+
+    def test_a_fitting_clip_from_a_later_voice_wins_over_cutting_the_first_voices_clip(self):
+        v = chain({"ATTACK": [("long", burst(1.0, 0.6))]}, {"ATTACK": [("short", burst(0.3, 0.1))]})
+        got = voices.choose("SwordAttack_S", v, 2, 0.40, RATE)
+        self.assertEqual([g[:3] for g in got], [("V1", "ATTACK", "short")] * 2)
+        self.assertEqual(len(got[0][3]), int(0.3 * RATE))   # whole, not cut
+        # Breath: the own voice has only a 2 s clip, the default a 0.3 s one.
+        v = chain({"BREATH": [("own_sigh", burst(2.0, 1.2))]}, {"BREATH": [("default_sigh", burst(0.3, 0.1))]})
+        got = voices.choose("Wait", v, 1, 0.40, RATE)[0]
+        self.assertEqual(got[:3], ("V1", "BREATH", "default_sigh"))
+        self.assertEqual(len(got[3]), int(0.3 * RATE))
+
+    def test_the_cow(self):
+        names = {"NV_Cow": ["NV_Cow_Angry00", "NV_Cow_Angry01", "NV_Cow_Happy00", "NV_Cow_Sad00",
+                            "NV_Cow_TalkPositive00"],
+                 "Animal_Cow": ["SE_Animal_Cow_DamagedAngry_00", "SE_Animal_Cow_DamagedAngry_01",
+                                "SE_Animal_Cow_Roar_00", "SE_Animal_Cow_Moo_00"]}
+        cow = []
+        for bank in ("NV_Cow", "Animal_Cow"):     # voice_table.json: chain NV_Cow, default Animal_Cow
+            by = {}
+            for nm in names[bank]:
+                if vm.clip_class(nm):
+                    by.setdefault(vm.clip_class(nm), []).append((nm, burst(2.5 if "Roar" in nm else 0.8, 0.5)))
+            cow.append(by)
+        cow = chain(*cow)
+
+        def picks(event, cap=None):
+            return {g[2] for g in voices.choose(event, cow, 3, cap, RATE)}
+        self.assertEqual(picks("SwordAttack_B", 0.83), {"SE_Animal_Cow_Roar_00"})
+        self.assertEqual(picks("SwordAttack_S", 0.40), {"NV_Cow_Angry00", "NV_Cow_Angry01"})
+        self.assertEqual(picks("Damage_S"), {"SE_Animal_Cow_DamagedAngry_00", "SE_Animal_Cow_DamagedAngry_01"})
+        self.assertEqual(picks("Death"), {"NV_Cow_Sad00"})
+        for ev in ("Wait", "Wait_31", "Jump_S", "Climb", "Shield_S", "lifting"):
+            self.assertFalse(any("Damaged" in p for p in picks(ev, 0.40)), ev)
+        self.assertEqual(picks("Wait"), {"NV_Cow_Happy00", "NV_Cow_TalkPositive00"})
 
 
 class Silent(unittest.TestCase):

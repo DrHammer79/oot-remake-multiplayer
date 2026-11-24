@@ -11,147 +11,20 @@ Maintainer only, like the rest of `tools/autotest`: it needs two Hookshot test c
 
 | Piece | What it does |
 | --- | --- |
-| `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. `--dll FILE` (with `--lane`) runs the lane on that `hookshot_coop.dll` for this session only (`lanes.py` owns the lane's module: `swap_in` keeps the lane's own beside it as `.live-backup`, or `.live-absent` when the lane had none, and the session's end puts it back after the games quit, trying again for 5 s while a killed game still holds the file). A swap that still could not be put back is named by `lanes.py check` and put back by `lanes.py restore --lane N`; a `lanes.py install` or `setup` makes the new module the lane's own and drops the leftover backup, so an old one never comes back. |
+| `tools/autotest/live.py start` | Starts the server and both games (the runner with `--keep-open`), plays each game's boot script (e.g. warp to a dungeon, past the title), and leaves them running. Each game's save is restored to its baseline first (`--no-restore` keeps the copies' saves). `--lane N` uses a test lane's pair, port and pipes (`tools/autotest/lanes.py`). Starts the session's watchdog. Writes `session.json` in the session folder. |
 | `live.py do --session DIR A "lines"` | Plays test script lines in one game (`goto`, `toward`, `press`, `hold`, `warp`, `place`, `setflag`, `kill`, `hit`, ...; `;` between lines), then returns that game's state. |
 | `live.py state --session DIR [A\|B] [--since ID]` | Each game's control-bridge snapshot (map, Link's place, facing, camera, life, rupees, age, event, loading, A prompt) and its new `coop:` log lines since the last look. Each look has a `state_id`; with `--since` only what changed comes back ("Kit helpers"). A session started with the play-test bridge adds `menu` (what co-op's menus show, see below; `menu_error` when the bridge did not answer). |
 | `live.py shot --session DIR [A\|B]` | A screenshot of each game (a PNG path). |
-| `live.py checkpoint --session DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. It needs both games running: while a per-game or `oot-pair` client holds them it gets no flags and no shot (`no present came in time`, seen in a lane run); use the per-game `checkpoint` and `screenshot` tools then, and `desync_check.py --clients` on their log folder. |
-| `live.py quit --session DIR A\|B [--kill]` | Closes one game in the middle of the session: asked to quit (killed after 15 s), or `--kill` at once as a crash ends it. A planned exit: the watchdog does not end the session for it (`planned` in `session.json`). |
-| `live.py server --session DIR stop\|start` | Stops the session's server, or starts it again with the boot's exe, port and password (its output in `server-out-N.txt`). The games stay open: what they do while it is down and when it is back is the test. |
-| `live.py relaunch --session DIR A\|B [--boot FILE] [--no-load] [--restore]` | Starts a game that quit or crashed again through the runner (`hookshot.py run --only X` into the session folder), with the session's switches, bridge port and server; it keeps its save unless `--restore`. The old `game-out-X.txt` is kept as `game-out-X.txt.N`. A game that does not boot stays down and planned. Rejoin, host-leaves and crash-rejoin checks are this plus `quit` and `server`. A per-game MCP client of that game connects again on its next call. |
+| `live.py checkpoint --session DIR TAG` | Both games write the value of every flag in the shared dungeon and story lists (the module's `dump TAG` test command, next to its commands file; `CoopDungeon::Flags` and `CoopStory::Flags`, not the live-only or autogen lists), and a screenshot of each game is taken (`checkpoints/TAG-A.png`, `TAG-B.png`); all are kept as `checkpoints/TAG.json` with each game's status. The games dump one after the other, so a flag still on its way between them can differ in one checkpoint: a real desync still differs in the next one. |
 | `live.py stop --session DIR` | Ends the session: the watchdog quits both games, kills what did not quit and the server, and lets the lane lock go. |
 | `tools/autotest/desync_check.py DIR` | Compares the checkpoints in order: the first tag where the two games' shared flags differ, and which flags, with the checkpoint's shots. Exit 0 every checkpoint compared and agrees, 1 desync, 2 nothing compared (no checkpoint, or none with both games' flags), 3 incomplete (one could not be compared). A plain script, no judgment. |
-| `tools/autotest/mcp_playtest.py --session DIR` | An MCP server (stdio, standard library only) with the tools `state`, `act`, `shot`, `checkpoint`, `desync_check`, and for rejoin checks `quit_game`, `server`, `relaunch` (the `live.py` commands of the same names), `wait_log` (a game's log has a line matching a pattern; `max` 0: none may) and `sleep` (real seconds), so Claude Code calls them by name. |
+| `tools/autotest/mcp_playtest.py --session DIR` | An MCP server (stdio, standard library only) with the tools `state`, `act`, `shot`, `checkpoint` and `desync_check`, so Claude Code calls them by name. |
 
 Register the MCP server once from the repository folder, for a session started with `live.py start`:
 
 ```sh
 claude mcp add oot-playtest -- python -I tools/autotest/mcp_playtest.py --session <session folder>
 ```
-
-## Bridge protocol
-
-The play-test bridge is a small part of the co-op module inside each game (`hookshot/src/coop_playtest.cpp`). An agent
-or MCP client drives one game per connection. It adds what Longshot's own control bridge lacks: **frame control** (the
-game holds still between calls). It also gives the co-op module's test commands and Longshot's input, shots and Link
-snapshot through one socket with one frame count.
-
-### Turning it on (off by default)
-
-Nothing listens unless the game is started with:
-
-| Switch | Value |
-|---|---|
-| `LICHII_COOP_PLAYTEST_PORT` | TCP port, 1024 to 65535. Unset, empty or `0`: the bridge is off and nothing listens |
-| `HOS_CONTROL` | Longshot's control socket (Linux) or pipe (Windows). The bridge forwards `input`, `shot` and the Link snapshot in `state` to it. Without it those answer `no_control` |
-| `LICHII_COOP_PLAYTEST_IDLE` | Seconds a hold may last with no command before the game resumes by itself (default 600, `0` never), in case the tester crashed |
-
-The shipped 0.11.12 kits (Windows and Linux) have the bridge built in but off. A tester turns it on for one game with
-these variables; `live.py start` sets them for each game it starts. The log says
-`coop: playtest: listening on 127.0.0.1:<port>` or `coop: playtest: off (<why>)`.
-
-**Ports, one per game:** player N on `5000 + N` (p1 5001, p2 5002, ... p4 5004). On test lane L: `5000 + 10*L + N`
-(lane 1: 5011, 5012). The MCP server takes the port as its argument.
-
-**Security:** bound to `127.0.0.1` only, never another address. One client at a time: a second connection gets one
-`busy` reply and is closed. **Keep one connection open for the whole session:** when the client's connection closes
-(it quit or crashed), a held game runs again at once, so a lost tester never leaves a game frozen. Dumps and shots go
-only into the game's own `playtest/dumps/` and `playtest/shots/` folders, named by a tag; no path is taken from the
-client. It can do what Longshot's control bridge and the cheats panel can do (move Link, warp, set
-flags, give items), so it is for test copies with a throwaway save.
-
-### Messages
-
-One JSON object per line (UTF-8, `\n`), at most 64 KB a line. A request has `cmd` and an optional `id` (any JSON value,
-given back). Requests are answered in order, one reply each. Every reply carries:
-
-| Field | Meaning |
-|---|---|
-| `id` | The request's `id`, or `null` |
-| `ok` | `true`, or `false` with `error` (a code below) and `message` (for a person) |
-| `frame` | The game's frame count: calc frames since the game started (the module's per-frame hook). It is what `step` counts and what lines up two games' dumps |
-| `paused` | Whether the game is held now |
-
-`input`, `step` and `warp` replies hold the end state nested as `"state": {...}`; `state` itself is flat.
-
-Error codes: `bad_request` (unknown `cmd`, a missing or bad field), `busy` (another client), `no_control`
-(`HOS_CONTROL` unset or unreachable), `not_in_play` (no Link: title, file select, a load), `timeout`, `failed` (the
-game refused; `message` says why).
-
-```
-> {"id":1,"cmd":"hello"}
-< {"id":1,"ok":true,"frame":5321,"paused":false,"protocol":1,"control":true}
-```
-
-### Frame control
-
-The game holds inside its own per-frame hook: the calc thread waits there before the frame's update, so a held game
-does not advance at all (no Link, no enemies, no timers). The window, the sound thread, Longshot's control bridge and
-the co-op connection keep running (the network thread answers the server's pings, so a held game is never dropped
-as timed out). The other game's puppet of this player stands still while it is held. The server does not know a game
-is held: an enemy or boss this game owns stays with it while the other game runs. So **always hold both games** and
-step them in turn, the same number of frames.
-
-| Command | Fields | Does |
-|---|---|---|
-| `pause` | | Holds the game at its next frame. Replies once it is held |
-| `resume` | | Lets it run in real time again |
-| `step` | `frames` (1 to 3600, default 1) | Lets exactly that many frames run, then holds. Replies when held again, with `from` (`frame - from == frames`). A running game is held first |
-
-### Commands
-
-| Command | Fields | Does / replies |
-|---|---|---|
-| `state` | | The state below. Does not advance the game |
-| `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
-| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). The game runs (10 frames at a time) until Link is in that scene with no event or load, then holds again. Replies with `"arrived": true` and the `state`; after the timeout, still held, `timeout` with the state in `message` |
-| `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value` |
-| `give` | `item` (`bombs`, `bow`, `hookshot`, or an item flag name the cheats panel knows) | The test script's `give` (the cheats panel's queue, so it needs `LICHII_COOP_CHEATS=1`): queued inside the held frame, in the inventory after the next frame runs |
-| `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
-| `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
-
-### State
-
-```
-{"frame":5400,"paused":true,"scene":"KokiriForest_Child","room":null,"pos":[-7.5,0.0,71.1],"facing":90.0,
- "camera":180.0,"life":12,"max_life":12,"rupees":5,"age":"child","event":false,"loading":false,"prompt":"Talk",
- "equips":{"weapon":"KokiriSword","shield":"DekuShield","head":null,"armor":"Kokiri","boots":"Normal"},
- "inventory":{"PouchData.Item_Bomb.StockNum":0,"PouchData.Item_Hookshot.StockNum":1},"coop":{"players":[{"number":1,"name":"A","self":true,"state":"connected","scene":"KokiriForest_Child"}]},
- "snapshot_present":5398,"control":true}
-```
-
-`scene`, `pos`, `facing`, `camera`, `life`, `max_life`, `rupees`, `age`, `event`, `loading` and `prompt` are
-Longshot's Link snapshot (the control bridge's `status`, `game`): metres, yaw in degrees (0 toward +z, 90 toward +x),
-quarter hearts. `snapshot_present` is Longshot's present count when it was taken (Link's last update; on a title,
-pause or load it is older). `control` is false when Longshot's bridge did not answer (those fields are then `null`). `equips`, `inventory` and `coop` come from the module. A field it cannot read is `null`; `room`
-stays `null` until the room is found in memory.
-
-Walking: the stick is camera-relative. To walk toward world yaw `w` (`atan2(dx, dz)` in degrees), push the stick at
-angle `w - camera` (the sign is settled by the LANE1 proof run; `walk_to` learns it from how Link moves). The camera turns as Link walks, so steer in short `input` steps (5 to 10 frames) and read `camera`
-again each time.
-
-## On a test lane: the lock and the watchdog
-
-`live.py start --lane N` takes the lane's game pair (`<kit root>\ls\laneN-A` / `-B`), its server port and its control
-pipes (`coop-laneN-A` / `-B`) from `tools/autotest/lanes.py`, and holds the lane's lock (`laneN.lock`) for the whole
-session: the games stay open after the boot, so the lock must too. A busy lane refuses the session at once
-(`--lock-wait S` waits for it). The lock is held by the session's watchdog (`live.py watchdog`, a process of its own
-that `start` starts), under the watchdog's own pid. The watchdog ends the session when:
-
-- `live.py stop` asks;
-- the maximum duration is reached (`--max-minutes`, 30 by default: a lane slot, not an evening);
-- no tester command came for `--idle-minutes` (10 by default; counted from the end of the boot): the tester handed
-  off, crashed or paused;
-- a game ended by itself;
-- the watchdog is stopped by a signal, or fails.
-
-Then it asks both games to quit, kills what is still running 15 s later and the server, and lets the lock go;
-`watchdog.json` in the session folder says why and what happened. Commands on an ended session are refused. A
-watchdog killed outright cannot clean up, but the lock names its pid, so the lock is stale as soon as it is gone.
-Without `--lane` the same watchdog runs (the end rules and the clean-up), with no lock.
-
-The lane rules still hold: one game run at a time on the lane, only in a slot the coordinator gave, no local builds
-or tests while it runs.
 
 ## Where the game windows go
 
@@ -210,7 +83,7 @@ given back). Requests are answered in order, one reply each. Every reply carries
 Error codes: `bad_request` (unknown `cmd`, a missing or bad field), `busy` (another client), `no_control`
 (`HOS_CONTROL` unset or unreachable), `not_in_play` (no Link: title, file select, a load), `not_in_event` (a `warp`
 in free play that only an event can take: an entrance, or a map Longshot's teleport does not list; the message names
-the way out), `wrong_age` (a `warp` scene ending in the other age than Link's), `not_ready` (a `give` with a load running or no fresh Link sample: step until `state.not_ready` is null), `refused` (a verb the gate shuts, a strike
+the way out), `wrong_age` (no verb answers it now: a `warp` scene ending in the other age sets that age first), `not_ready` (a `give` with a load running or no fresh Link sample: step until `state.not_ready` is null), `refused` (a verb the gate shuts, a strike
 id with no world list, or a full strike queue), `timeout`, `failed` (the game refused; `message`
 says why).
 
@@ -244,13 +117,13 @@ runs. So **always hold both games** and step them in turn, the same number of fr
 | `state` | | The state below. Does not advance the game, with one exception: when Longshot's Link snapshot is older than the frame, or none was ever taken (the first `state` on a game held since its start), and the game is held, `state` lets ONE frame run (a status pending) to take a fresh one. If none comes (a title, a pause or a load) the Link members are `null`, `snapshot_stale` is `true` for an old one, and `not_ready` says why |
 | `input` | `buttons` (list of names, default none), `stick` `[angle, strength]` (left stick: angle in degrees, 0 = up, 90 = right, clockwise; strength 0 to 1), `rstick` (the same for the right stick), `frames` (1 to 3600, default 1), `exclusive` (default `true`: the real pad and keys are shut out meanwhile) | Holds that pad for `frames` frames from the next frame, lets them run, then holds. Replies with `from` and the `state` at the end. Buttons (Switch names): `A B X Y L R ZL ZR PLUS MINUS LS RS UP DOWN LEFT RIGHT` |
 | `move` | `yaw` (the world direction in degrees: 0 toward +z, 90 toward +x, the state's `facing` and `camera` convention), `strength` (0 to 1, default 1), `frames` (1 to 3600, default 1), `exclusive` (as `input`) | Walks toward that world direction for `frames` frames, then holds. The module turns the yaw into the left stick at each pad read with the camera of that same frame (the renderer's `clip_from_world`, the matrix the name tags use; the bridge keeps it on while it runs, so `move` works solo and before a session too: the ground part of its view direction is stick up, its screen x made square to that is stick right), so a camera that turns during the walk is followed and no handedness or offset is assumed. Buttons and the right stick are neutral. Replies with `from`, `yaw`, `reads` (pad reads it steered), `no_camera` (reads with no camera: the stick was centred), `stick` (the last `[angle, strength]` it made, as `input`'s, or null), `view` (that frame's camera yaw, or null) and the `state`. Refused with `no_camera` (nothing run) when the game has no camera yet (a title, a load) or the view looks straight down |
-| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). Two ways, picked from a fresh snapshot (`PlanWarp`). **While an event runs** (a talk, a sign, the event a save load starts) the module's own request goes in; the game takes that only then ([scenes.md](scenes.md) "Free-play scene change": the game reads `Sequence_ReservedNextBanc` only while an event runs; [testing.md](testing.md)). **In free play** the verb asks Longshot's control `teleport` (the Cheats page's list: fields, villages, dungeon entrances; the game takes it at Link's next update, so frames run), the way `hookshot.py` boot-script warps go; the reply has `"via":"teleport"` (or `"event"`) and `"map"`, the map it waited for. Longshot picks the map for Link's current age, in its own spelling: the verb waits for the map in Longshot's reply, not for the name asked, so any case of the name works; a name ending in the other age (`KokiriForest_Adult` on a child Link) answers `wrong_age` at once, and a teleport Longshot sent but the game's event manager did not accept (`accepted` false) answers `refused` at once instead of waiting out the timeout. The teleport has no start position and no map outside its list, so in free play an `entrance`, or a map not in the list (a boss stage), answers `not_in_event` at once and changes nothing: restart the session with a boot script that warps there, or use `place` and `walk_to` inside the scene. The free-play path is not proven through this verb in a game yet (Longshot refuses a teleport while an event plays, so one asked during the save's arrival event answers `failed: Longshot's teleport: refused: an event is playing ...`; Longshot also allows one teleport every 8 s per game, so two warps in a row on one game answer `failed` with `another teleport is still in progress`). The game runs (10 frames at a time) until Link is in that scene with no event or load (a fresh snapshot says so), then holds again. Replies with `"arrived": true` and the `state`; after `timeout` seconds, still held, `timeout` with the state in `message` |
+| `warp` | `scene` (a map name, e.g. `KokiriForest_Child`), `entrance` (a start position name in that scene; omitted: the scene's own), `timeout` (seconds, default 60) | The co-op test warp (the game's own `Sequence_ReservedNextBanc`, as the test script's `warp`). Two ways, picked from a fresh snapshot (`PlanWarp`). **While an event runs** (a talk, a sign, the event a save load starts) the module's own request goes in; the game takes that only then ([scenes.md](scenes.md) "Free-play scene change": the game reads `Sequence_ReservedNextBanc` only while an event runs; [testing.md](testing.md)). **In free play** the verb asks Longshot's control `teleport` (the Cheats page's list: fields, villages, dungeon entrances; the game takes it at Link's next update, so frames run), the way `hookshot.py` boot-script warps go; the reply has `"via":"teleport"` (or `"event"`) and `"map"`, the map it waited for. Longshot picks the map for Link's current age, in its own spelling: the verb waits for the map in Longshot's reply, not for the name asked, so any case of the name works; a name ending in the other age (`KokiriForest_Adult` on a child Link) first sets `Sequence_IsChildhood` (the lane recipe: setflag, 30 frames, then the warp) and goes by the module's map change event, since Longshot's teleport lands at Link's current age (a name with no suffix is as it was), and a teleport Longshot sent but the game's event manager did not accept (`accepted` false) answers `refused` at once instead of waiting out the timeout. The teleport has no start position and no map outside its list, so in free play an `entrance`, or a map not in the list (a boss stage), answers `not_in_event` at once and changes nothing: restart the session with a boot script that warps there, or use `place` and `walk_to` inside the scene. The free-play path is not proven through this verb in a game yet (Longshot refuses a teleport while an event plays, so one asked during the save's arrival event answers `failed: Longshot's teleport: refused: an event is playing ...`; Longshot also allows one teleport every 8 s per game, so two warps in a row on one game answer `failed` with `another teleport is still in progress`). The game runs (10 frames at a time) until Link is in that scene with no event or load (a fresh snapshot says so), then holds again. Replies with `"arrived": true` and the `state`; after `timeout` seconds, still held, `timeout` with the state in `message` |
 | `flag` | `name` (a GameData flag name or a `0x` hash), `value` (number, `true`/`false`, or an enum value's name) | Sets the flag through the game's own setter (the test script's `setflag` / `setenum`). Done inside the held frame: no frame passes. Replies with `was` and `value`. A `0x` value goes to an Enum and is taken only when `flag_read` read that hash from that same flag in this game run (no raw number is written to an Enum) |
 | `flag_read` | `name` (a GameData flag name, a `0x` hash or `key64:0xKEY`) | Reads one flag inside the held frame; writes nothing, so it is not gated (it exists only where the bridge does). Replies with `kind` (`int`, `bool`, `enum`, `uint`, `key64`, `text`, `unknown`) and `value` (an enum as its value's hash `0x` and 8 hex digits; `null` when unknown); an `int` also has `pending` (true while a write of ours still waits in the game's queue) |
 | `give` | `item` (`bombs`, `bow`, `hookshot`, a bare item name such as `Item_Boomerang` or `Weapon_Sword_Kokiri` (its `PouchData.<name>.StockNum` count if the game has one, else its `IsGet.<name>` flag; neither: the reply says which two it looked for), or a full item flag name such as `IsGet.Item_Boomerang` or `PouchData.Item_Bomb.StockNum`) | The test script's `give`, needs `LICHII_COOP_CHEATS=1`. The flags are written at once inside the held call (the item, its `IsGet`, and the ammo and capacity the game gives with it, never lowered), not queued for a frame: the reply's `result` says what each flag was and is (`no change: ... already 1` when Link had the item; `failed` with the reason when the item was not written; `partial` true when the item is in but its `IsGet` or a grant was not, `result` naming the flag); `get_state` with `inventory` true shows it with no step. Refused with `not_ready` while a load runs or when there is no fresh Link sample (a load sends no Link update, so the old sample cannot tell; a pause and a title the same): the give runs one frame first to take a sample, as `state` does, and if none comes the answer is `not_ready`, nothing written. Step until `state.not_ready` is null, then give again. `bombs` is the small bag and 20 bombs, `bow` the bow with the small quiver and 30 arrows. A bomb that can be lifted also needs `PlayerStatus.LiftGrade` (docs/items.md, "Bombs from the cheat") |
 | `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`. Written at once inside the held call: `place`, `face`, `wear`, `assign`, `setflag`, `setenum`. Queued for the next frames (`step` a few, then read the `state`): `dress`, `kill`, `hit`, `aim`, `hurt`, `chat`, `menu`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. Without the sharing walk's list (solo, where the list is the solo walk's, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
-| `text` | `since` (a whole number, default 0: every text kept), `layout` (optional: only layouts whose name has it, e.g. `MessageDialog_00`) | The texts the game set in its text panes after `since`, oldest first; read only, no frame runs, not gated. Replies with `hooked` (this exe has patch 0041's wrap: false means `texts` stays empty), `last` (the newest `seq`: pass it as the next `since`), `lost` (texts after `since` that are no longer kept) and `texts`: `[{seq, frame, layout, pane, text, length, cut, markup}]`. See [Text boxes](#text-boxes) |
+| `text` | `since` (a whole number, default 0: every text kept), `layout` (optional: only layouts whose name has it, e.g. `MessageDialog_00`) | The texts the game set in its text panes after `since`, oldest first; read only, no frame runs, not gated. Replies with `hooked` (this exe has patch 0037's wrap: false means `texts` stays empty), `last` (the newest `seq`: pass it as the next `since`), `lost` (texts after `since` that are no longer kept) and `texts`: `[{seq, frame, layout, pane, text, length, cut, markup}]`. See [Text boxes](#text-boxes) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
 **The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only when
@@ -265,7 +138,7 @@ a player starts from names `LICHII_COOP_PLAYTEST_VERBS`: not `play.ps1`, not `st
 ### Text boxes
 
 The `text` command reads what the game writes into its text panes, so a tester can read a talk without a picture.
-Patch 0041 (`hookshot/patches/0041-coop-pane-text-wrap.patch`) adds wrap 25 to patch 0005's table: the game's pane
+Patch 0037 (`hookshot/patches/0037-coop-pane-text-wrap.patch`) adds wrap 25 to patch 0005's table: the game's pane
 text setter (main+0x439520, `kPaneSetMsg` in [addresses.md](addresses.md); x0 the pane, x1 a reference {+0 the text,
 +8 its length in bytes, +0x10 its attributes}). The patch only names the function; what is kept, and when, is the
 module's (`hookshot/src/coop_talk_text.{h,cpp}`), and only while the bridge is on (`LICHII_COOP_PLAYTEST_PORT`): a
@@ -278,17 +151,32 @@ player's game copies nothing.
   0xb0-byte panes).
 - Read in a lane run (Kokiri shop, Mido): a talk is `MessageDialog_00`, `T_Name_00` (and `T_NameNavi_00`) the
   speaker; its reply buttons are `PaMessageBtn_00`, one pane `T_Btn_00` set once per button, in order. The box's own
-  text did **not** come through this setter there: the game sets it some other way, not found yet, so a talk's body
-  is not in `text` (take a screenshot to read it). Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
+  text did **not** come through this setter there. Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
   while it counts), `PaShopBuyInfo_00` (a shop item's info, with markup), `DoCommand_00` `T_GuideA_00` (the A
   prompt), `PaGuideKey_00`, `ActionGuideTips_00`, `PaMenuMessage_00` ([game-ui.md](game-ui.md)).
+- Patch 0038 (`hookshot/patches/0038-coop-pane-body-wrap.patch`) wraps the two setters found in main that skip
+  0037's call and call the text box's set-string (main+0x439680) themselves ([game-ui.md](game-ui.md), "Text"): wrap
+  26, a letter-animated pane's set-text (main+0x76a460, `kPaneSetBody`; x0 the pane, x1 the text, w2 its length; its
+  only caller is a LetterAnimControl's set-text), and wrap 27, the set-text of each pane with a matching alias
+  (main+0x377a990, `kPaneSetAlias`; the same reference as 0037's). Seen in a lane run (2026-11-24, Kokiri shop and
+  Mido): a talk's box text comes through wrap 26, layout `MessageDialog_00`, pane `T_Message_00`, `markup` true; the
+  speaker panes (`T_Name_00`, `T_NameNavi_00`), the reply buttons and the HUD panes stay wrap 25; wrap 27 did not
+  appear in a talk. The reply's `body` is true when the exe has 0038, and each text's `wrap` (25, 26 or 27)
+  says which setter gave it. `talk` takes a wrap-26 text of a message layout as a box whatever its pane. Without
+  0038 a talk's body is not in `text` (take a screenshot to read it).
 - The window sets its text again every frame, so a text the pane already shows is not kept again (unless the pane went 30 frames without a set: a later talk with the same speaker or button is kept), and a pane's first
   set to "" is not kept. A text that only grew replaces its shorter self when nothing came between (a box typed out
   letter by letter, if the game does that).
 - Valid UTF-8 comes as it is; any other byte and every control character as a JSON `\u00XX`, and `markup` is true:
-  those are the game's markup (colour, a pause, a choice), not read yet.
-- An exe without patch 0041 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
-  text wrap (patch 0041)` once at the HELLO.
+  those are the game's markup. A tag is the byte 0x0e, then group, type and size (16-bit little-endian each), then
+  `size` bytes of parameters; seen: a pause or colour (no or few bytes), a name (a length, the name, a 0 byte: an
+  animation such as `Greeting`) and a variable (`Shop_SelectItemName`, `UI_MessageTargetActorName`), between the
+  words. `talk` cuts the tags out of a box's `text` and keeps the whole in `raw`. The page-break tag (group 0, type 4,
+  no bytes, seen in the Kokiri shop and Mido's text, 2026-11-24) becomes one space, so two pages are not glued into one
+  word. Not yet handled: a variable (an item name, a price) is cut with the markup and its words are missing from
+  `text`; read `raw` or `get_text` for those.
+- An exe without patch 0037 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
+  text wrap (patch 0037)` once at the HELLO.
 
 The MCP `talk` tool is built on it (see [Helpers](#helpers-several-calls-in-one)); `get_text` is the bare command.
 
@@ -323,7 +211,12 @@ the Fairy and the joiner use: the room of the nearest placement, `lichii/hook/co
 `pos`; it is a guess, not the game's own room number, and `null` outside a dungeon, without a pack, with no placement
 near, or when the sample is old. `body` is `"child"` or `"adult"` from the name of our own Link actor in the world list
 (`Player_Child`, `Player_Adult`): it follows the actor the game made, so it is right at once after an area change,
-where Longshot's `age` can lag. It is `null` without a live world list (a load). `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
+where Longshot's `age` can lag. It is `null` without a live world list (a load). `view` is the game's camera of the
+last drawn frame (the renderer's `clip_from_world`, the matrix `move` steers by): `{"yaw", "pitch", "clip", "y_down"}`,
+the yaw in the `facing` convention, the pitch in degrees up (negative: looking down), `clip` the 16 numbers row-major
+(clip = m * [x y z 1]; a point is on the screen at x/w, y/w, -1 to 1, with y flipped when `y_down`), so a tester can
+aim the way a player does: turn the view until the target is under the reticle. `null` with no camera (a title, a
+load). `coop_menu` is where co-op's own menu is (`"closed"`, or the page's name such as
 `"customize"`). It does not see the game's own pause screen: `"closed"` says only that co-op's menu is shut, so a
 tester who pressed Start reads the screen (`shot`), not this.
 
@@ -483,10 +376,10 @@ only, no `pip install`.
 | `look` | ONE call for the whole situation, as short text (no picture, about 20 to 40 lines): scene, Link (age, life, place, facing, sword, shield, ammo), doors, enemies (life, metres, world yaw, ahead/left/right/behind), chests, switches, items, NPCs within 25 m, a running event, what A and B would do, and what CHANGED since the last `look` of this game. It reads one state, so it costs one bridge call. The text of a text box and the C buttons are not readable yet (it says so) |
 | `wait_until what` | Runs the game in chunks of 8 frames until `what` happens: `event_over`, `scene_changed`, `enemy_dead` (with `id`), `enemies_clear` (none alive within 10 m), `on_ground` (height steady for two looks), `prompt`, or `condition` (as `step_until`). Ends early, with `stopped` saying why, when Link is hurt, dies, a scene loads or an event starts (unless that is the wait). An enemy id that was never listed is "not met", never "dead". Reply: `met`, `frames_run`, `stopped`, `why`, and a `look` |
 | `go_to` | Walk and end with a `look`. ONE of `place` (a position name from the scene's file in `tools/playtest/data`; the recorded routes are walked from the named position nearest to Link within 6 m, one way, start to end; no chain: a straight line, said in `note`), `id` + `name` (an actor, as `go_to_actor`) or `x` + `z`. Stops early and says why: scene change (through a door is the way out), load, event, hurt, stuck (with the recorded stuck-spot note and fix). It does not climb, jump or read the game's collision: `climb`, `jump` and `push` do those |
-| `shoot item` | Takes out `item` (slingshot, bow, boomerang, hookshot, longshot, bomb, nut) with `assign` (ZR), turns Link to the target (`id` + `name`, or a point `at` [x, y, z]), holds ZR 60 + 30 frames, tilts the aim with the stick for `tilt_frames` (+ up, - down), lets go and watches the target for `watch_frames` (40). `result`: `hit` (its life fell, it died or left the list), `changed` (another field it shows), `miss` (the ammo went down, the target did not change), `fired` (a point, or no ammo count), `not fired` (no ammo, a help box opened while drawing, the ammo did not move) or a stop. `aim` is the world yaw and pitch from Link's feet to the target: the game's aim tilt is not readable, so the pitch is what the shot needs, not what Link aimed. `assist` adds the test `aim X Y Z` line (the next arrow or seed that leaves Link is steered onto the target) |
-| `climb [up] [to_y] [face_x face_z]` | The stick up (or down) a look every 8 frames until the height reaches `to_y`, or with no `to_y` until it stops (the top or the bottom). `face_x`/`face_z` turn Link to the wall first; going down with an A prompt presses A first. `result`: `arrived`, `stopped`, `stuck` (the height did not move for 4 looks), `not climbing` (Link moved across instead: not on the wall), or a stop (hurt, event, scene change, timed out). `trace` is [frames, height] |
-| `push id name distance_m [yaw]` | Walks to the block's far side from the push (1.2 m from its centre), faces it and leans at full stick until the block moved `distance_m` along `yaw` (none: from Link toward it). `result`: `pushed`, `stuck` (it did not move for 48 frames: blocked, at its end, not a block that moves), `slipped` (Link slid off its side), `stopped` (a move was refused, such as no camera; no frame ran), `not reached`, `gone`, or a stop. Needs the world list |
-| `jump x z [land_y] [tolerance]` | Runs straight at the point at full stick, no side steps, so Link jumps off the edge by himself (a run off a ledge jumps, a walk drops). `result`: `landed`, `fell` (on the ground more than 1 m below `land_y`), `respawned` (put back more than 3 m: a pit, a void), `stuck` (no nearer for 4 looks), `stopped` (a move was refused, such as no camera; no frame ran), or a stop. On the ground means two looks in a row with a steady height. `airborne` says if the height moved on the way |
+| `shoot item` | Aims the way a player does. Takes out `item` (slingshot, bow, boomerang, hookshot, longshot, bomb, nut) with `assign` (ZR), turns Link to the target (`id` + `name`, or a point `at` [x, y, z]) (with the stick) and taps ZL (the camera goes behind him; drawing turns Link to the camera), holds ZR 60 frames to draw, then turns the view with a stick until the target sits under the reticle (screen x 0, y +0.028: about pixel 640,350 of 720p), read from the state's `view`. It first pushes each axis of the right stick, then the left, a little to learn which one turns the view and which way; each turn after that pushes the stick by how far the target is from the reticle (40 turns of 2 frames at most). The game's aim view eases in and coasts on after the stick, so each look (the probes too) first waits with ZR held and no stick until the view stops, drifts steadily, or 40 frames passed; a coast still slowing is counted to where it will rest. 40 turns can take about 1700 frames. It holds 30 frames, checks the target is still under the reticle (not with `tilt_frames`: a hand tilt moves it off on purpose, so that shot is not checked), lets go and watches the target for `watch_frames` (40). `tilt_frames` (+ up, - down) tilts by hand after the aim, for an arc. `result`: `hit` (its life fell, it died or left the list), `changed` (another field it shows), `miss` (the ammo went down, the target did not change), `fired` (a point, or no ammo count), `not fired` (no ammo, a help box opened while drawing, the ammo did not move), `not aimed` (no view, neither stick turned it, the target left the screen, not reached in 40 turns, or it drifted off before the let-go: B puts the item away, no shot) or a stop. `aim` has the world yaw and pitch from Link's feet to the target, the `stick` that turned the view, its `gains`, `error_start`, the `steps` and the last `error` (screen x, y from the reticle). `assist` adds the test `aim X Y Z` line: it only nudges the last bit. When the arrow or seed in Link's hands leaves him (also one made before the line; one more than 2 m from Link, a shot from before, is not taken) and its flight points within 4 degrees of the target and passes within 0.5 m of it, it is moved sideways onto the line through the target along its own flight; its way and speed stay the game's. Farther off it is left alone and the log says how far off (`not put (... flew N degrees, M m off it ...)`) |
+| `climb [up] [to_y] [face_x face_z]` | The stick up (or down) a look every 8 frames until the height reaches `to_y`, or with no `to_y` until it stops (the top or the bottom). `face_x`/`face_z` turn Link to the wall first with the stick; going down with an A prompt presses A first. `result`: `arrived`, `stopped`, `stuck` (the height did not move for 4 looks), `not climbing` (Link moved across instead: not on the wall), or a stop (hurt, event, scene change, timed out). `trace` is [frames, height] |
+| `push id name distance_m [yaw]` | Walks to the block's far side from the push (1.2 m from its centre), turns to it with the stick, leans on it until A offers something (the game's "Grab", 24 frames at most), holds A 30 frames to grab it (a short tap climbs onto the block instead), then pushes at full stick with A still held (a frame without A lets go of the block; the stick is worked out from the state's `view` by the bridge's own `move` rule) until the block moved `distance_m` along `yaw` (none: from Link toward it). `grab` says what A offered, whether it was held and the prompt after. `result`: `pushed`, `stuck` (it did not move for 48 frames: blocked, at its end, not a block that moves; or Link went up onto it), `slipped` (Link slid off its side), `stopped` (a move was refused, such as no camera, or after the grab there is no camera view in the state for the stick; no frame ran), `not reached`, `gone`, or a stop. Needs the world list |
+| `jump x z [land_y] [tolerance]` | Runs straight at the point at full stick, no side steps, so Link jumps off the edge by himself (a run off a ledge jumps, a walk drops). `result`: `landed`, `fell` (on the ground more than 1 m below `land_y`), `respawned` (put back more than 3 m: a pit, a void), `stuck` (no nearer for 4 looks on the ground; a long fall that carries Link past the point is not counted), `stopped` (a move was refused, such as no camera; no frame ran), or a stop. On the ground means two looks in a row with a steady height; within `tolerance` of the point and down (one steady look, or within 0.15 m of `land_y`) the stick lets go, so Link stops there and does not run on past it; over a gap it stays full. `airborne` says if the height moved on the way |
 | `record_route action` | `start` samples Link's place from every reply of this game (a point every 2 m, at most 40, same scene only); `save` with `name` (lowercase words with hyphens) and `note` writes the points as route NAME in `tools/playtest/data/<scene>.json` (points NAME-1, NAME-2 ...; the file must pass `kit_library.py check`); `cancel` drops it. Every `move`, `step` and `press` reply of this game while recording adds Link's place, whichever tool walked, so the corners of a walk are kept. Only places Link walked through are saved. A replay and `save_script` leave it out |
 | `fight id name [max_frames] [lock] [sword] [shield] [min_life]` | Fight ONE enemy and end with a `look`: walk to sword reach, then slash with the lock-on held (`ZL`+`Y` for 4 frames, then `Y` let go for 8, `ZL` still held), guard for one round after Link is hit (`ZL` held alone: the shield), repeat. `ZL` stays held from one round to the next (each round is one `input`, with no `step` between that would let it go); only a walk up lets it go. Ends as `dead` (its life seen at 0), `gone` (left the list: perhaps dead, the look says), `low` (Link at `min_life` quarter hearts or less, default 4: he backs off and the fight ends), `stopped` (scene change, load, event, stale list, a walk-up the game refused, or `stuck`: four walk-ups in a row that got no 0.3 m nearer; it never says `gone` then, and it presses nothing during an event: wait a cutscene out first, for example `step_until "event == false"`) or `alive` (`max_frames` used: 600 by default, 1200 at most; no round starts that would pass it, a back-off when low adds 14; `hint` when its life never moved). Also `hits`, `hurt`, `slashes`, `guards`, `rounds`. The buttons are Longshot's own map (its `host/nn_hid.c`: the mouse's left button is `Y`, attack; its right button is `ZL`, shield and lock-on; a logged Longshot run held the shield with `ZL`): lock-on `ZL`, sword `Y`, shield `ZL`. Longshot's Toggle ZL/ZR setting must be off (it latches `ZL` on one press). The enemy's life is the world list's `life` (the objects walk's Life read, `kComponentLife` in [addresses.md](addresses.md)). Gohma takes the sword only in her eye while stunned: a Deku Seed first (`use_item`), then `fight` |
 | `get_actor id` | One actor by `id` (the number `get_world` gives) or by `0x...` address. `found` is false with a `why` when it is gone, outside the 200 nearest, or there is no list |
@@ -495,8 +388,8 @@ only, no `pip install`.
 | `step frames` | Lets N frames run with no input |
 | `step_until condition [max_frames] [chunk]` | Steps `chunk` frames at a time (8 by default, 1 to 60) until a state field matches, then holds. `condition` is `field`, `!field` or `field OP value` (OP: `==` `!=` `<` `<=` `>` `>=`; the value is JSON or a bare word; a dotted path reaches into objects and lists: `equips.weapon`, `pos.1`): `event == false`, `loading == false`, `scene == KokiriForest_Child`, `prompt`, `life == 0`, `rupees >= 50`. It looks first (a condition that holds costs no frame) and stops after `max_frames` (300 by default, 3600 at most). Reply: `met`, `value` (the field now), `frames_run`, the last `state`, and `why` when not met. A field the state does not have is an error (a typo is not a time-out). A null (a stale Link snapshot) is "do not know": it never matches an ordering, and `== null` matches it. It replaces a `step`, `get_state`, `step` loop ("Kit helpers") |
 | `warp scene [entrance] [timeout]` | The game's own scene change: by the module's request during an event, in free play by Longshot's teleport (a map of its list, no entrance) or, with an entrance or for a boss stage such as `GohmaStage`, by the module's map change event (`via` says which; `not_in_event` with the reason if that event is off). It returns once Link is there with no event or load; `timeout` is 1 to 600 seconds (default 60) |
-| `setup` (hearts, max_hearts, magic, rupees, small_keys, boss_keys, maps, compasses, items, flags, warp, place) | A whole test start in one call: the spec's parts run in order (items, magic, rupees, keys, flags, max life, life, then the warp, then the place), one answer per step; it stops at the first refused call and says which. Hearts are written as quarter hearts (`PlayerStatus.Life`, `MaxLife`: the game may write `MaxLife` back, [items.md](items.md)); magic is `give Item_FairyBless_MP` (and `_MPDouble`); keys are `DungeonInfo.<Dungeon>.SmallKeyNum` / `IsGetBossKey`. Code: `tools/autotest/kit_setup.py` (the same spec is a preset file's body). Needs the verb gate. Names only, nothing from the game. Unproven in a game |
-| `preset name` | `setup` from a named, versioned data file in `tools/playtest/data/presets/` (`deku-start`, `deku-before-gohma`, `before-dodongo`, `before-barinade`, `before-phantom-ganon`, `before-volvagia`, `before-morpha`, `before-bongo-bongo`, `before-twinrova`, `before-ganondorf`). A file is `{preset, version: 1, title, spec, notes}`; `spec` is the `setup` spec. `deku-before-gohma` warps into the Deku Tree and places Link in the corridor before Gohma's door (`place`); walk through the door so the game's own trigger and intro make Gohma (a free-play warp into the rush room `GohmaStage` left both games black with no control). The other boss presets warp to the boss's rush room (`<Boss>Stage`); that they arrive with control in free play is not proven. Link's age is not set (start from a save of the right age). A `before-<boss>` preset makes the boss alive the way the host-reset put-back does ([dungeons-boss.md](dungeons-boss.md), the boss set table): the shared quest goes back to the step of the fight, and the boss's Bools to their before values (the intro's `BossIn` flag stays as the save has it). Unproven in a game |
+| `setup` (hearts, max_hearts, magic, rupees, small_keys, boss_keys, maps, compasses, items, flags, age, warp, place) | A whole test start in one call: the spec's parts run in order (items, magic, rupees, keys, flags, max life, life, then the warp, then the place), one answer per step; it stops at the first refused call and says which. Hearts are written as quarter hearts (`PlayerStatus.Life`, `MaxLife`: the game may write `MaxLife` back, [items.md](items.md)); magic is `give Item_FairyBless_MP` (and `_MPDouble`); keys are `DungeonInfo.<Dungeon>.SmallKeyNum` / `IsGetBossKey`. Code: `tools/autotest/kit_setup.py` (the same spec is a preset file's body). Needs the verb gate. Names only, nothing from the game. Unproven in a game |
+| `preset name` | `setup` from a named, versioned data file in `tools/playtest/data/presets/` (`deku-start`, `deku-before-gohma`, `before-dodongo`, `before-barinade`, `before-phantom-ganon`, `before-volvagia`, `before-morpha`, `before-bongo-bongo`, `before-twinrova`, `before-ganondorf`, `before-ganon`). A file is `{preset, version: 1, title, spec, notes}`; `spec` is the `setup` spec. `deku-before-gohma` warps into the Deku Tree and places Link in the corridor before Gohma's door (`place`); walk through the door so the game's own trigger and intro make Gohma (a free-play warp into the rush room `GohmaStage` left both games black with no control). The seven other boss presets do the same in their dungeon (the entrance, the boss key, the intro's played flag and the boss's quest step and Bools put back), then `place` Link at the boss room's arrival point from [dungeons-boss.md](dungeons-boss.md); the place before each boss door is not in the repository and is set once a lane run has measured it. `before-ganon` loads the final battle field. A preset's `age` (`child` or `adult`) is set with `Sequence_IsChildhood` and 30 frames before the warp, so a save of either age works. A `before-<boss>` preset makes the boss alive the way the host-reset put-back does ([dungeons-boss.md](dungeons-boss.md), the boss set table): the shared quest goes back to the step of the fight, and the boss's Bools to their before values. Unproven in a game |
 | `save_point tag` / `load_point tag` | A test point to retry a fight: `save_point` is a `checkpoint` (shared flags plus Link's scene, place and life); `load_point` writes every flag that differs first, then loads the scene again (also when Link is already in it: a room reads its boss state when it loads, so a beaten room comes back only by a load), places Link, sets his life and dumps again; `reloaded` is false when the scene did not change and Link did not move after the warp (no load could be told); `exact` is true only when reloaded and the second dump equals the saved one, `left` names what still differs. The flags `dump` lists are saved from the dump. The names the LAST `setup` or `preset` of this server wrote that the dump does not list (a boss quest, a boss key) are read by `save_point` with `flag_read` and kept under the tag at their values at save time (`setup_flags`; a name the game has no flag for is in `setup_flags_unread`). `load_point` writes them first and reads them again at the end: `setup_flags_checked` is true only when every one matches, a mismatch is in `left` and `setup_flags_left` (want and now), and `exact` needs them all. An enum read in an earlier game run is refused by `flag` (`setup_flags_refused`) and is not checked. A new server starts with none, and a name the dump lists takes the saved dump value. A scene outside Longshot's teleport list uses the map change event (see `warp`). Proved on the test lane (2026-11-23), with the old `deku-before-gohma` that warped into the rush room GohmaStage (now replaced: a later lane run found that warp black, with no control): Gohma was alive, `load_point` put Link's place and the boss key back. `reloaded` stays false while Link has not left the room's start (the 0.5 m check cannot see a load there): move first. Not proven: a retry after a real fight |
 | `flag name [value]` | Sets a flag (name or `0x` hash; a number, true/false or an enum name) inside the held frame; replies with the old value |
 | `give item` | Gives the item at once (the item, its `IsGet` and its ammo); the reply's `result` says what changed, and `get_state` with `inventory` true shows it with no step |
@@ -532,6 +425,12 @@ need.
 `go_to_actor`, `face`, `attack`, `use_item`, `talk`, `open` and `interact` are in `tools/autotest/playtest_helpers.py` (the MCP
 server calls them; a script can too). They only use the bridge's commands, so they add no game code. Rules:
 
+- Only inputs play. `face` (and the turns in `attack`, `interact`, `talk`, `shoot`, `push` and `climb`) turns Link with
+  light pushes of the left stick toward the point (`move` at 0.25 strength, 2 frames each, 12 pushes at most) until the
+  state's `facing` is within 10 degrees; it says `turned`, the degrees left (`off`), the pushes and how far they
+  stepped him (`moved_m`). None of them writes his yaw. The test `face X Z` line is kept for set-up only: `place` with a
+  facing (Link is put somewhere, so it is not play either).
+
 - Each takes the `id` and the `name` `get_world` gave, and looks the actor up in the world list again on every leg of
   the walk and before every press. When the id is not in the list any more, or has another name, the answer is `gone`:
   they never go for another actor of the name. A reused address (the game puts a new actor of the same name at the
@@ -551,8 +450,11 @@ server calls them; a script can too). They only use the bridge's commands, so th
   equips and each inventory entry (`inventory_changed`, one entry per item). `open` presses `A` only when the state's `prompt` says something: no prompt, or the game's `Empty`, presses nothing. `talk` (below) keeps that rule for its first press. `interact` is go_to_actor to within 1 m, `face`, then the same A rule; a walk or turn that did not get there presses nothing and says why (`not reached: ...`, `not faced: ...`).
 - `talk` (with `id` and `name`, and no prompt up yet: go_to_actor and `face` first; with the prompt already up it
   does not walk) presses `A`, then reads the new texts of the message layouts through `text`: `speakers` (in order),
-  `boxes` [{speaker, text, markup}] (`T_MessageWhiteOut_00`; empty while the body does not come through the wrap, see
-  [Text boxes](#text-boxes)), and the reply buttons (`PaMessageBtn_00`) as `choices`. It presses `A` when a speaker,
+  `boxes` [{speaker, text, markup, raw}] (a wrap-26 text of a message layout, see [Text boxes](#text-boxes); empty
+  without patch 0038), and the reply buttons (`PaMessageBtn_00`) as `choices`. A box's `text` is its words with the
+  markup cut out; `raw` (only when something was cut) is the text as the game set it. A box set again as it was is
+  one box, and a text of only markup (a name variable) is no box. `speaker` is the name pane set with the box, also
+  when the game sets it after the body; it is null only when the game shows no name. It presses `A` when a speaker,
   a box or buttons came, or when the event went quiet for 3 reads (10 frames each). When buttons show it takes the
   next of `reply` (a text, or a list: one per set of buttons, in order), presses Down to the button of that text
   (whole text first, then a part, case and spaces ignored) and `A`. With no reply left it picks nothing: it stops with
@@ -560,8 +462,9 @@ server calls them; a script can too). They only use the bridge's commands, so th
   with `reply` and that `since` to go on (no new `A`: the same buttons are read again). A shop's item list is not
   buttons: move to the item with `press`, then `talk` with `since`.
   It ends `done` when the event is over and 3 reads bring no text, or says why it stopped: `reply not offered: ...`,
-  `done, but no choices showed for ...`, `too many boxes`, `timed out` (1200 frames), `scene changed`, `loading`, or
-  `no text: ...` (no `text` command, or an exe without patch 0041: one `A` pressed).
+  `done, but no choices showed for ...`, `too many boxes`, `timed out` (1200 frames with nothing new, or 7200 in all: it keeps waiting while boxes
+  come), `scene changed`, `loading`, or
+  `no text: ...` (no `text` command, or an exe without patch 0037: one `A` pressed).
 - `go_to_actor` calls an actor `gone` only after 3 reads in a row without it (one read of the list can miss an actor
   that is there).
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
@@ -625,18 +528,22 @@ Nothing here has run in a game. The first run checks:
 - The guesses made without a game, set by this run: the 4 m leg of `go_to_actor` and its 60-frame stuck limit. (The
   sword button `Y` and the lock-on and shield button `ZL` are Longshot's input map: see `fight`.)
 
-### Check in game (talk and the text wrap, patch 0041)
+### Check in game (talk and the text wrap, patch 0037)
 
-Needs a game built with patch 0041. One lane run so far (Kokiri shop, Mido; with the helper as it was before the
+Needs a game built with patch 0037. One lane run so far (Kokiri shop, Mido; with the helper as it was before the
 button layout was known):
 
 - Seen: `hooked` true, texts with their layout and pane names, no crash; the speaker and the reply buttons came
   (layouts above). The Deku Shield was bought by talk (stock 0 to 1, rupees down by 40), but by the cursor's default
   picks; the helper now stops at buttons instead.
-- Not seen: the box body (another setter, not found); Mido's talk timed out with `boxes` empty. Next run: `talk` to
-  Mido with no `reply`: `speakers` filled and `done` true, Link free to walk after. Kokiri shop: `talk` stops at the
-  first buttons and lists them; `talk` with the `reply` texts as listed and `since` buys the shield.
-- The `markup` texts: write down which bytes come (`\u00XX`) and where they stand.
+- Not seen (0037 alone): the box body. Patch 0038, lane run 2026-11-24: `body` true, each box came through wrap 26
+  (see "Text boxes"), the shop was bought by `reply`, Mido's long talk was still giving boxes when the old
+  1200-frame cap ended it; the boxes had raw markup, one was set twice, and the first box's
+  `speaker` was null (the shop sets the name after the body; Mido's talk set none).
+- Next run (helper fixed for these): `talk` to Mido with `reply` "Yes, master!" where buttons show: `boxes` with
+  clean `text` and the `raw` kept, no box twice, `speaker` the name pane when the game shows one, `done` true, Link
+  free to walk after. Kokiri shop: `talk` stops at the first buttons and lists them; `talk` with the `reply` texts
+  as listed and `since` buys the shield.
 
 ### Set a test up (start a boss or a dungeon in one call)
 
@@ -644,7 +551,7 @@ Do not walk to a boss or give things one by one. Four tools do it (all need the 
 
 | I want | Call |
 |---|---|
-| A named start (Deku Tree entrance, the room of a boss) | `preset name`: `deku-start`, `deku-before-gohma`, `before-dodongo`, `before-barinade`, `before-phantom-ganon`, `before-volvagia`, `before-morpha`, `before-bongo-bongo`, `before-twinrova`, `before-ganondorf` |
+| A named start (Deku Tree entrance, the room of a boss) | `preset name`: `deku-start`, `deku-before-gohma`, `before-dodongo`, `before-barinade`, `before-phantom-ganon`, `before-volvagia`, `before-morpha`, `before-bongo-bongo`, `before-twinrova`, `before-ganondorf`, `before-ganon` |
 | My own start | `setup` with `hearts`, `max_hearts`, `magic`, `rupees`, `small_keys`, `boss_keys`, `maps`, `compasses`, `items`, `flags`, then `warp {scene, entrance}` (in free play it goes by the map change event) and `place {x, y, z}` after it (Link put at a point of the new scene) |
 | To retry the fight | `save_point tag` before it, `load_point tag` after: it replies `exact` and `left` |
 | Both games the same | in a pair, call `setup`, `preset` or `load_point` with no `player` (both games, one after the other; small keys, which the share carries as count deltas, are written on the first game only, so they are not added twice) |

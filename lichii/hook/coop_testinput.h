@@ -207,12 +207,21 @@ const char* KindWord(Kind kind);
 // on the parsed kinds, so case, spacing and a hidden second line cannot get past it.
 std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
 
-// `aim` (row 173): where an arrow flying from `from` is put so it goes into `target`: `short_m` short of the target
-// on the line from `from` (at `from` when nearer than that), turned to face it (place, then the 3x3 rows, as the
-// actor's +0x31c..+0x34b: column 2 is the way it faces, column 1 the up nearest the world's). Nothing when the two
-// points are the same or not finite.
-std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, const std::array<float, 3>& target,
-                                             float short_m);
+// `aim` (row 173): the last bit of a player's aim. The shot is aimed by turning the view the way a player does; at
+// the let-go the arrow or seed is only moved sideways onto the line through the target along its own flight (its
+// way `flight` and speed stay the game's), and only when that flight already points within `max_deg` of the target
+// and passes within `max_side_m` of it (a fixed distance, so the slack does not grow with range).
+// `off_deg`: how far it pointed off. `put`: the new place, none when it was too far off (no cheat for a bad aim) or
+// flying away. Nothing at all when there is no flight, the shot is at the target, or a value is not finite.
+struct AimNudged {
+    float off_deg = 0.0f;
+    float side_m = 0.0f;   // how far the flight's line passes from the target
+    std::optional<std::array<float, 3>> put;
+};
+inline constexpr float kAimNudgeDeg = 4.0f;   // the reticle's slack, not a new aim
+inline constexpr float kAimNudgeM = 0.5f;     // and never more than this sideways (4 degrees is 2 m at 30 m)
+std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
+                                  const std::array<float, 3>& target, float max_deg, float max_side_m = kAimNudgeM);
 // `aim`: a nocked arrow is let go when it moves more than this between two frames (its flight is ~113 m/s, ~1.9 m
 // a frame at 60; a nocked one moves with Link's hands, well under it).
 inline constexpr float kAimLetGoM = 1.0f;
@@ -221,6 +230,36 @@ inline constexpr float kAimLetGoM = 1.0f;
 inline bool Aimable(std::string_view name) {
     return name == "NormalArrow" || name == "Shootable_DekuSeed";
 }
+
+// `aim`: the aim that waits for our next shot. The walk offers it every listed arrow or seed of ours, not only one it
+// sees for the first time: the slingshot makes its next seed right after a shot, so that seed is already listed when
+// the aim is armed (lane run). The first one offered within kAimHandM of our Link is taken (a shot still flying or
+// lying from before is farther); AimStep then watches it until it is let go. With Link's place unknown, the first.
+inline constexpr float kAimHandM = 2.0f;
+struct AimWait {
+    std::array<float, 3> target{};
+    std::uint64_t until_ms = 0;
+    std::uint64_t arrow = 0;       // our nocked arrow or seed (0: none yet)
+    std::array<float, 3> last{};   // its place the frame before
+
+    bool Offer(std::string_view name, std::uint64_t actor, const std::array<float, 3>& at,
+               const std::array<float, 3>* link = nullptr) {
+        if (arrow != 0 || actor == 0 || !Aimable(name)) {
+            return false;
+        }
+        if (link) {
+            const float dx = at[0] - (*link)[0];
+            const float dy = at[1] - (*link)[1];
+            const float dz = at[2] - (*link)[2];
+            if (!(dx * dx + dy * dy + dz * dz <= kAimHandM * kAimHandM)) {
+                return false;
+            }
+        }
+        arrow = actor;
+        last = at;
+        return true;
+    }
+};
 
 // wear SLOT: the PlayerStatus flag name for weapon, shield, head, armor or
 // boots (any case), e.g. "EquipHeadArmor"; nothing for another word.

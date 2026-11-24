@@ -274,6 +274,19 @@ TEST_CASE("playtest: move's stick in the four quadrants with the camera toward +
     CHECK(ViewYaw(Camera(-135, false)).value() == doctest::Approx(-135.0));
 }
 
+TEST_CASE("playtest: the state's view has the camera's yaw, pitch and matrix") {
+    const std::string v = ViewMember(Camera(90, true, 30), true);
+    CHECK(v.rfind(",\"view\":{\"yaw\":90,\"pitch\":-30,\"clip\":[", 0) == 0);
+    CHECK(v.find(",1.7,") != std::string::npos);
+    CHECK(v.size() - v.rfind("],\"y_down\":true}") == std::string("],\"y_down\":true}").size());
+    CHECK(ViewMember(Camera(-45, false)).find("\"yaw\":-45,\"pitch\":0,") != std::string::npos);
+    CHECK(ViewMember(std::nullopt) == ",\"view\":null");
+    CHECK(ViewMember(std::array<float, 16>{}) == ",\"view\":null");   // no forward
+    auto bad = Camera(0, true);
+    bad[5] = NAN;
+    CHECK(ViewMember(bad) == ",\"view\":null");
+}
+
 TEST_CASE("playtest: move has no stick for a camera with no ground direction") {
     CHECK_FALSE(MoveAxes(Camera(0, true, 90), 0, 1));  // straight down
     std::array<float, 16> zero{};
@@ -1030,10 +1043,10 @@ TEST_CASE("playtest: warp with an entrance in free play goes by the game's map c
     const auto play = Status(Snap(999));
     CHECK(PlanWarp(&play, true, "KokiriForest").route == WarpRoute::map_event);
     CHECK(PlanWarp(&play, true, "GohmaStage").route == WarpRoute::map_event);
-    // The age rule holds on this route too: the map change event does not change Link's age.
+    // The map change event does not change Link's age: the other age's map sets the age first (set_age).
     const auto adult = PlanWarp(&play, true, "KokiriForest_Adult");
-    CHECK(adult.route == WarpRoute::refuse);
-    CHECK(adult.code == "wrong_age");
+    CHECK(adult.route == WarpRoute::map_event);
+    CHECK(adult.set_age == "adult");
     // During an event the module's own request still takes the start.
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, true, "GohmaStage").route == WarpRoute::event);
@@ -1065,17 +1078,26 @@ TEST_CASE("playtest: a missing sample is treated like an old one by warp, the ty
     }
 }
 
-TEST_CASE("playtest: a teleport to the other age's map is refused up front (Longshot picks the map by Link's age)") {
+TEST_CASE("playtest: a warp to the other age's map sets the age first and goes by the map change event") {
+    // Longshot's teleport picks the map by Link's current age, and a free-play warp with the suffix alone left Link
+    // a child (lane runs): the bridge sets Sequence_IsChildhood and lets frames run, then asks the map change event.
     const auto child = Status(Snap(999));                                  // Snap: age child
-    CHECK(PlanWarp(&child, false, "KokiriForest_Child").route == WarpRoute::teleport);
+    const auto same = PlanWarp(&child, false, "KokiriForest_Child");
+    CHECK(same.route == WarpRoute::teleport);
+    CHECK(same.set_age.empty());
     CHECK(PlanWarp(&child, false, "kokiriforest_child").route == WarpRoute::teleport);   // any case
-    const auto plan = PlanWarp(&child, false, "KokiriForest_Adult");
-    CHECK(plan.route == WarpRoute::refuse);
-    CHECK(plan.code == "wrong_age");
-    CHECK(plan.why.find("child") != std::string::npos);
-    CHECK(PlanWarp(&child, false, "kokiriforest_ADULT").route == WarpRoute::refuse);
+    CHECK(PlanWarp(&child, false, "KokiriForest").set_age.empty());                     // no suffix: as it was
+    for (const char* scene : {"KokiriForest_Adult", "kokiriforest_ADULT"}) {
+        const auto plan = PlanWarp(&child, false, scene);
+        CHECK(plan.route == WarpRoute::map_event);
+        CHECK(plan.set_age == "adult");
+    }
+    const auto with_start = PlanWarp(&child, true, "KokiriForest_Adult");
+    CHECK(with_start.route == WarpRoute::map_event);
+    CHECK(with_start.set_age == "adult");
     const auto event = Status(Snap(999, true));
     CHECK(PlanWarp(&event, false, "KokiriForest_Adult").route == WarpRoute::event);   // the event request sets the age itself
+    CHECK(PlanWarp(&event, false, "KokiriForest_Adult").set_age.empty());
 }
 
 TEST_CASE("playtest: the teleport's reply says what to wait for and fails at once when the game did not accept it") {

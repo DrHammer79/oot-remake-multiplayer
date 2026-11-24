@@ -403,6 +403,17 @@ records, and how new parts go after the string pool so nothing moves).
 - Inferred: the two colours are the top and the bottom of the text's gradient, so set both for one colour; the values
   are floats from 0 to 1. A run must check both.
 - Still open: one run of our own string and of the colour setters.
+- Who calls the set-string `f_80459680` (read from main 1.1.1, 2026-11-23; checked by disassembly, not yet seen in a
+  run): `f_80459520` (main+0x439520, the set-message call that patch 0037 wraps; reached from `f_8045b970` and
+  `f_83408970`), and three that skip it. Each takes the pane as x0 and its text box as `*(f_8045b6b0(pane)+8)`:
+  `f_8078a460` (main+0x76a460; x1 the text, w2 the length, 16 bits), called only from `f_8078a390`, a
+  `LetterAnimControl`'s vtable slot 7 (vtable `0x84c41470`), which then resets the control's letter counters;
+  `f_8379a990` (main+0x377a990; x1 the same reference as `f_80459520`'s), called from `f_83795920`, which walks a
+  layout's text panes and sets each one whose `@` alias matches; `f_8379aa60` (main+0x377aa60; x1 the text, w3 the
+  length), from `f_83408970`. `f_81514740` jumps to the set-string with no pane (not followed). The message window's
+  set-up `f_834091d0` uses only `f_8045b970`. Patch 0038 wraps the first two for the play-test bridge
+  ([playtest.md](playtest.md#text-boxes)).
+
 
 ## Frames for a text field
 
