@@ -853,7 +853,8 @@ private:
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
     // Row 177 review: the kept own asks (their AI nodes) go: a brain change (its action sequence's nodes may
-    // go with it) or a role change; the copy's next own asks fill them again. (Keeping them across a hand-over
+    // go with it) or a change from owner to copy; the copy's next own asks fill them again. A copy whose owner
+    // changes to another player keeps them (NEXT29). (Keeping them across a hand-over
     // was tried for Twinrova: a former owner's nodes put the copy's Attack_R in with no bullet, lane run NEXT36.)
     static void ForgetOwnAsks(Entry& e);
     static void LearnOwnAsk(Entry& e, const Request& request, const std::optional<std::string>& plug_name);

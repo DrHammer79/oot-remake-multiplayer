@@ -3342,6 +3342,31 @@ TEST_CASE("native boss: Twinrova hand-over, a former owner's nodes are not the c
     CHECK(nodes[0] == kCopyNode);  // its node as a copy, not the one it had as the owner
 }
 
+TEST_CASE("native boss: Twinrova hand-over, a copy that stays a copy keeps its attack's node (NEXT29)") {
+    // NEXT29: the owner changed from player 1 to player 3; our copy forgot its own asks and put the attack in
+    // through Fly's node: no bullet. A copy that stays a copy keeps them.
+    constexpr std::uint64_t kAttackNode = 0x4000300;
+    constexpr std::uint64_t kFlyNode = 0x4000400;
+    FakeGuest g;
+    const std::int32_t brain = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    t.Receive(kActor, BossBsa{1, 6, std::nullopt, {}});
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kAttackNode), true, false));
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kFlyNode), true, false));
+    PutIns(t, g);
+    t.Publish({Twinrova(Role::copy, 3)});  // handed from player 1 to player 3
+    BossAction attack = *ActionFromRequest(GameRequest(121, 0));
+    attack.changed = true;
+    t.Receive(kActor, BossBsa{9, 6, attack, {BossChange{9, attack}}});
+    std::vector<std::uint64_t> nodes;
+    CHECK(PutIns(t, g, &nodes) == std::vector<std::int32_t>{121});
+    REQUIRE(nodes.size() == 1);
+    CHECK(nodes[0] == kAttackNode);  // its own node of the attack, not Fly's
+}
+
 TEST_CASE("native boss: Twinrova hand-over, the new copy makes every move the new owner made, not only its last") {
     // NEXT29: copy B logged 4 attacks while owner A logged 6. At a hand-over the new copy started again from the new
     // owner's first state (only its move now), so the moves it had made since its last state never played here.

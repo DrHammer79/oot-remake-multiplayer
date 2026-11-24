@@ -422,7 +422,11 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                 e.hold_asks = 0;
                 e.hold_rechoices = 0;
                 e.stall_rechoices = 0;  // (another game's turn since: judged anew)
-                ForgetOwnAsks(e);  // (row 177 review: learnt again as a copy from its own asks)
+                if (e.role == Role::owner) {
+                    // Row 177 review: learnt again as a copy from its own asks. A copy that stays a copy (the
+                    // owner changed between other players) keeps its own: else NEXT29, an attack with no bullet.
+                    ForgetOwnAsks(e);
+                }
                 if (b.role == Role::copy) {
                     // Twinrova hand-over: the chain we held, so the new owner's changes after it are made in
                     // order (Receive), not collapsed into a resync of its last move.
