@@ -166,10 +166,14 @@ Rider& TheRider() {
     return rider;
 }
 
+std::uint32_t StandKey(const char* env) {
+    return env != nullptr && std::string_view(env) == "contact" ? kStepContact : kStepOnState;
+}
+
 Rider& TheStander() {
     static Rider stander([] {
         const char* v = std::getenv("LICHII_COOP_SWITCH_STAND");
-        return v != nullptr && std::string_view(v) == "onstate" ? kStepOnState : kStepContact;
+        return StandKey(v);
     }(), "switch stand");
     return stander;
 }

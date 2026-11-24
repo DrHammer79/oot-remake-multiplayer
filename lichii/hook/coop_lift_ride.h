@@ -70,7 +70,10 @@ std::vector<std::uint64_t> Ridden(const std::vector<Lift>& lifts, const std::vec
 // that bool through the game's set-bool each frame a fresh player of our scene stands on the switch; the AI puts
 // its 0 back once nobody is on it (holder left, timed out or stepped off: OthersHere drops them, kHoldMs later).
 // Blocks need nothing: a pushed block is in every game (WORLD_MOVE) and presses the switch by its own physics.
-// LICHII_COOP_SWITCH_STAND=0 turns it off; =onstate sets OnState instead (the in-game check's fallback).
+// LICHII_COOP_SWITCH_STAND=0 turns it off.
+// The lane (NEXT42): the contact bool already read 1 in the watching game with nobody on the switch, so a set-bool
+// on it changes nothing; it is not what presses the switch. The stander sets OnState (the switch's "on" output its
+// shutter follows) instead; LICHII_COOP_SWITCH_STAND=contact puts the contact bool back, for a probe.
 inline constexpr std::uint32_t kStepContact = 0x9cdaf491u ^ 7u;  // name key of the unnamed contact bool
 inline constexpr std::uint32_t kStepOnState = 0xf1792ec3u;        // Murmur3("OnState")
 inline constexpr float kStandRadiusM = 1.2f;
@@ -120,6 +123,8 @@ private:
 // The one rider (coop_objects.cpp registers it).
 Rider& TheRider();
 // The one switch stander (plug from LICHII_COOP_SWITCH_STAND).
+// The stander's plug key for LICHII_COOP_SWITCH_STAND's value (null: unset): OnState unless "contact".
+std::uint32_t StandKey(const char* env);
 Rider& TheStander();
 
 }  // namespace CoopLiftRide

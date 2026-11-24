@@ -171,3 +171,9 @@ TEST_CASE("switch stand: another player on our step switch sets its contact bool
     CHECK_FALSE(r.Step(g, false, 0, 100 + CoopLiftRide::kHoldMs + 1));
     CHECK(r.TakeNotes().front().starts_with("switch stand:"));
 }
+
+TEST_CASE("switch stand: the stander sets OnState (the contact bool reads 1 already in the other game), contact only on ask") {
+    CHECK(CoopLiftRide::StandKey(nullptr) == CoopLiftRide::kStepOnState);
+    CHECK(CoopLiftRide::StandKey("1") == CoopLiftRide::kStepOnState);
+    CHECK(CoopLiftRide::StandKey("contact") == CoopLiftRide::kStepContact);
+}
