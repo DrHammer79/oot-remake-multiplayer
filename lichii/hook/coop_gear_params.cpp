@@ -187,7 +187,9 @@ std::size_t Dresser::Frame(const Game& game, std::uint64_t cell, const std::vect
                     return p.actor == t.actor && p.piece == piece && p.part == i;
                 });
                 if (it == pieces_.end()) {
-                    pieces_.push_back({.actor = t.actor, .piece = piece, .part = i});
+                    Piece fresh;
+                    fresh.actor = t.actor, fresh.piece = piece, fresh.part = i;
+                    pieces_.push_back(fresh);
                     it = pieces_.end() - 1;
                 }
                 Piece& p = *it;

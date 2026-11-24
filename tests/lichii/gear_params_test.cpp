@@ -151,7 +151,8 @@ struct FakeGame {
 };
 
 Target Wearer(std::optional<std::uint32_t> hilt) {
-    Target t{.actor = FakeGame::kActor};
+    Target t;
+    t.actor = FakeGame::kActor;
     t.colours[0] = hilt;
     return t;
 }
@@ -331,7 +332,8 @@ TEST_CASE("gear params: each wearer's own colour, your Link and a puppet in one 
     fg.Remove(7);
     const CC::Game g = fg.AsGame();
     Dresser d;
-    Target puppet{.actor = kPuppet};
+    Target puppet;
+    puppet.actor = kPuppet;
     puppet.colours[0] = 0x0000FF;
     d.Frame(g, FakeGame::kCell, {Wearer(0xFF0000), puppet}, 1000, nullptr);
     REQUIRE(fg.sets.size() == 2);

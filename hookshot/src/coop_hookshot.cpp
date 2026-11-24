@@ -2327,7 +2327,8 @@ void DressGearParams(const CoopCharColours::Game& g, const std::vector<CoopPuppe
         any = any || own.colours[i].has_value();
     }
     for (const auto& v : views) {
-        CoopGearParams::Target t{.actor = v.actor};
+        CoopGearParams::Target t;
+        t.actor = v.actor;
         if (const auto parts = CoopLookShare::Of(v.number)) {
             for (const auto& p : *parts) {
                 for (std::size_t i = 0; i < CoopGearParams::kPartCount; i++) {
