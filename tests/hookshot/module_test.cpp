@@ -1635,3 +1635,16 @@ TEST_CASE("hookshot: SDL's audio is started once for the microphones, not at eve
         }
     }
 }
+
+TEST_CASE("hookshot: F1 in play opens co-op's - menu, co-op's tabs stay in Longshot's F1 menu only as the fallback") {
+    // (menu-polish-01113, A #100: co-op's home is the game's - menu; the F1 tabs are Longshot's ImGui menu, not the game's)
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("vk == 0x70 /* F1 */ && repeat == 0 && g_on && !CoopTitle::Up() && CoopPauseTab::OpenMultiplayer()") !=
+          std::string::npos);
+    CHECK(module.find("CoopPause::WantClose();") != std::string::npos);
+    CHECK(module.find("return !has_pack || CoopPauseTab::NoMinusTabs() ? CoopPause::Tabs() : 0;") != std::string::npos);
+    CHECK(module.find("if (!g_on) return g_original_on ? 1 : 0;") != std::string::npos);   // (original game: its tab)
+    const std::string tab = ReadFile(kRepo / "hookshot" / "src" / "coop_pause_tab_module.cpp");
+    CHECK(tab.find("if (g_players_to_main.load()) OpenLongshotMenu();") != std::string::npos);   // (old pack: as before)
+    CHECK(tab.find("SetView(g_players_to_main.load() ? View::kMain : View::kPlayers);") != std::string::npos);
+}

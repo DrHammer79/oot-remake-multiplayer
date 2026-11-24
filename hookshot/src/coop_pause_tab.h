@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "coop_menu_state.h"
+#include "coop_menu_nav.h"
 #include "coop_pause_menu.h"
 #include "coop_screen_panes.h"
 #include "hos_coop_api.h"
@@ -322,6 +323,10 @@ public:
     // A tab with no rows of its own (Mods: its list is the page) has the list always; B there is the list's Back while
     // it has somewhere to go back to (SetMinusRawBack: a mod's page), else the game's (the menu closes).
     void SetMinusRawBack(bool can) { minus_raw_back_ = can; }
+    // Co-op's menu's own page on the - page (raw): whether its selection can go up or down without going round. A held
+    // Up or Down repeats only while it can (coop_menu_nav.h: a list goes round on a fresh press only); unknown (the
+    // Mods tab's page): false, no repeat.
+    void SetMinusRawEnds(bool can_up, bool can_down) { minus_raw_up_ = can_up, minus_raw_down_ = can_down; }
     bool MinusInList() const { return minus_list_; }
     // Another view shows (the module saw it change): the rows' cursor on `row` (a view's own: Co-op settings' page
     // chosen), the list without the pad. MinusEnterList: the list has the pad (A on a Co-op settings row), when it
@@ -381,7 +386,8 @@ private:
     std::size_t letter_ = 0;     // Letter's letter: its place in the field's Letters()
     std::string typing_was_;   // (the field before typing: Cancel puts it back)
     void EndTyping(bool ok);
-    std::uint64_t repeat_since_ = 0, repeat_last_ = 0;
+    CoopMenuNav::Repeat typing_repeat_;   // the typing keys' held directions (TypingPad, coop_menu_nav.h)
+    CoopMenuNav::Repeat minus_repeat_;   // the - page's rows and list: a held Up or Down moves again (coop_menu_nav.h)
     std::uint64_t pad_ms_ = 0, typing_from_ms_ = 0;   // (the last pad read; when typing began: its first A is not a key's)   // a held direction: when it went down, its last step
 
     bool CanShow(std::uint64_t now_ms) const;
@@ -418,6 +424,8 @@ private:
     bool minus_list_ = false;           // MinusInList
     bool minus_raw_ = false;            // SetMinusLines' raw
     bool minus_raw_back_ = false;       // SetMinusRawBack
+    bool minus_raw_up_ = false, minus_raw_down_ = false;   // SetMinusRawEnds
+    std::uint64_t minus_repeated_ = 0;   // this read's held Up / Down repeats (not presses): OnPad
     int minus_line_ = -1;               // MinusLine
     std::uint32_t minus_lines_ = 0;     // SetMinusLines' pickable
     int minus_line_decide_ = -1;        // TakeMinusLineDecide
@@ -949,6 +957,7 @@ bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t
 // So slot 3 counts when it is visible and the game holds his code (SnailCodeBuiltIn: another mod's code fills no tab;
 // review-0119-b) (charsel-tab-0119).
 inline constexpr std::uint64_t kPaneTextWidth = 0x13c;   // f32: a text pane's drawn width (docs/game-ui.md, checked)
+inline constexpr std::uint64_t kPaneBoxWidth = 0x58;     // f32: a pane's own size, its width (f_8154b220 sets it; docs/game-ui.md)
 inline int GameTabsShown(bool slot3_visible, bool snail_code_built_in) {
     return slot3_visible && snail_code_built_in ? 4 : 3;
 }
@@ -1132,6 +1141,12 @@ bool OwnMinusPageShown() noexcept;
 // the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
 // ours (seen once a - menu opened without them): F6's drawn list is used then.
 bool OpenPlayers() noexcept;
+// F1 in play (menu-polish-01113, A #100: our tabs leave Longshot's F1 menu, F1 opens co-op's home): the same run as
+// F6's to the - menu's Multiplayer tab, its main view. False (F1 left to Longshot's own menu) when the pack has no - tabs
+// of ours, or when nothing can open now (not in free play and no menu up: an event, a load, the title).
+bool OpenMultiplayer() noexcept;
+// Whether a - menu opened without tabs of ours this session (an old pack): Longshot's F1 menu keeps co-op's tabs then.
+bool NoMinusTabs() noexcept;
 // Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
 // module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
 void SetFreePlay(bool free_play) noexcept;

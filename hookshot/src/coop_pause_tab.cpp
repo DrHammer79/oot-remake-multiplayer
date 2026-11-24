@@ -226,12 +226,7 @@ void Page::MinusEnterList() {
 }
 
 void Page::MinusLineStep(int dir) {
-    for (int k = minus_line_ + dir; k >= 0 && k < 32; k += dir) {   // (no wrap, as the rows)
-        if ((minus_lines_ & (1u << k)) != 0) {
-            minus_line_ = k;
-            return;
-        }
-    }
+    minus_line_ = CoopMenuNav::StepMask(minus_lines_, minus_line_, dir);   // (no wrap, as the rows)
 }
 
 void Page::MinusTabMoved() {
@@ -254,7 +249,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             minus_tab_ = 0, minus_slide_ = 1;
             MinusTabMoved();
             if (minus_native_) return buttons & ~swallow_;   // (the game's: the Map sequence opens CoopMenu_00)
-            strip_sound_ = "mc_TabToRight";
+            strip_sound_ = CoopMenuNav::kSoundTabRight;
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
         }
@@ -275,7 +270,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
     if ((down & kPadR) != 0) {
         if (minus_tab_ < kMinusTabs - 1) {
             ++minus_tab_, minus_slide_ = 1;
-            strip_sound_ = "mc_TabToRight";
+            strip_sound_ = CoopMenuNav::kSoundTabRight;
             MinusTabMoved();
         }
         swallow_ |= kPadR;
@@ -283,7 +278,7 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
         // (a list's page: the games list's 6 at a time, as the game's own long lists page)
         // (swallowed on every tab and view, but it clicks only when the list really pages: review-01110-c)
         minus_page_step_ = (down & kPadZR) != 0 ? 1 : -1;
-        if (minus_pageable_) strip_sound_ = "button_on";
+        if (minus_pageable_) strip_sound_ = CoopMenuNav::kSoundMove;
         swallow_ |= kPadZL | kPadZR;
     } else if ((down & kPadL) != 0) {
         --minus_tab_, minus_slide_ = -1;   // (off the first: Map again)
@@ -292,49 +287,53 @@ std::uint64_t Page::MinusPad(std::uint64_t buttons, std::uint64_t down) {
             swallow_ |= buttons & ~(kPadL | kPadB | kPadPlus | kPadMinus);
             return buttons & (kPadL | kPadB | kPadPlus | kPadMinus) & ~swallow_;
         }
-        strip_sound_ = "mc_TabToLeft";
+        strip_sound_ = CoopMenuNav::kSoundTabLeft;
         swallow_ |= kPadL;
     } else if (minus_list_ && minus_raw_) {   // (co-op's menu's own page: the moves are its events)
         if ((down & kPadB) != 0 && (minus_rows_ != 0 || minus_raw_back_)) {
             if (minus_rows_ != 0) minus_list_ = false;   // (back to the rows; a tab with none keeps the list)
             minus_list_back_ = true;
-            strip_sound_ = "button_cancel";
+            strip_sound_ = CoopMenuNav::kSoundBack;
             swallow_ |= kPadB;
         } else if ((down & kPadB) == 0) {
-            const std::uint32_t moves = (up ? kMinusMoveUp : 0u) | (dn ? kMinusMoveDown : 0u) |
+            // (a held Up or Down: only while the menu's selection can go that way without going round)
+            const bool rep_up = (minus_repeated_ & (kPadUp | kPadStickUp)) != 0;
+            const bool rep_dn = (minus_repeated_ & (kPadDown | kPadStickDown)) != 0;
+            const bool go_up = up && (!rep_up || minus_raw_up_), go_dn = dn && (!rep_dn || minus_raw_down_);
+            const std::uint32_t moves = (go_up ? kMinusMoveUp : 0u) | (go_dn ? kMinusMoveDown : 0u) |
                                         (left ? kMinusMoveLeft : 0u) | (right ? kMinusMoveRight : 0u) |
                                         ((down & kPadA) != 0 ? kMinusMoveA : 0u);
             minus_moves_ |= moves;
-            if ((moves & kMinusMoveA) != 0) strip_sound_ = "button_decide";
-            else if (moves != 0) strip_sound_ = "button_on";
+            if ((moves & kMinusMoveA) != 0) strip_sound_ = CoopMenuNav::kSoundDecide;
+            else if (moves != 0) strip_sound_ = CoopMenuNav::kSoundMove;
         }
     } else if (minus_list_) {
         if (((down & kPadB) != 0 || left) && minus_rows_ != 0) {
             minus_list_ = false;
-            strip_sound_ = "button_cancel";
+            strip_sound_ = CoopMenuNav::kSoundBack;
             if ((down & kPadB) != 0) swallow_ |= kPadB;
         } else if (up || dn) {
             const int was = minus_line_;
             MinusLineStep(up ? -1 : 1);
-            if (minus_line_ != was) strip_sound_ = "button_on";
+            if (minus_line_ != was) strip_sound_ = CoopMenuNav::kSoundMove;
         } else if ((down & kPadA) != 0 && minus_line_ >= 0) {
             minus_line_decide_ = minus_line_;
-            strip_sound_ = "button_decide";
+            strip_sound_ = CoopMenuNav::kSoundDecide;
         }
     } else if (right && minus_lines_ != 0) {   // (into the list on the right)
         minus_list_ = true;
         if (!minus_raw_) SetMinusLines(minus_lines_, false);   // (a line picked)
-        strip_sound_ = "button_on";
+        strip_sound_ = CoopMenuNav::kSoundMove;
     } else if ((up || dn) && minus_rows_ != 0) {
         const int was = minus_row_;
         MinusStep(up ? -1 : 1);
-        if (minus_row_ != was) strip_sound_ = "button_on";
+        if (minus_row_ != was) strip_sound_ = CoopMenuNav::kSoundMove;
     } else if ((down & kPadA) != 0 && (minus_rows_ & (1u << minus_row_)) != 0) {
         minus_decide_ = minus_row_;
-        strip_sound_ = "button_decide";
+        strip_sound_ = CoopMenuNav::kSoundDecide;
     } else if ((down & kPadB) != 0 && minus_in_view_) {   // (a view: back a view, not out of the menu)
         minus_back_ = true;
-        strip_sound_ = "button_cancel";
+        strip_sound_ = CoopMenuNav::kSoundBack;
         swallow_ |= kPadB;
     }
     // (ours shows: its page has the pad; B (on the tab's own rows), + and - stay the game's, which close or change
@@ -464,17 +463,24 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     pad_ms_ = now_ms;
     const std::uint64_t down = buttons & ~pad_last_;
     pad_last_ = buttons;
+    // (the - page's rows and list: a held Up or Down steps again, as the game's own lists; never round, since
+    // MinusStep and MinusLineStep stop at the ends. Typing has its own repeat: TypingPad)
+    const std::uint64_t vertical = kPadUp | kPadDown | kPadStickUp | kPadStickDown;
+    const std::uint64_t repeated = minus_repeat_.Presses(buttons, now_ms, vertical) & ~down;
+    minus_repeated_ = repeated;
     swallow_ &= buttons;   // (let go: the game gets it again)
     if (shown_ && !CanStay(now_ms)) {
         Hide("the menu's state changed", pages_.state == 3 || pages_.state == 0 || strip_.state == 3 || strip_.state == 0);
     }
-    if (!shown_ && CanMinus(now_ms)) return MinusPad(buttons, down);   // (the - menu: its tabs of ours)
+    if (!shown_ && CanMinus(now_ms)) {   // (the - menu: its tabs of ours)
+        return MinusPad(buttons, minus_tab_ >= 0 && typing_ < 0 ? down | repeated : down);
+    }
     if (!shown_) {
         if ((down & kPadA) != 0 && system_button_ == 1 && settings_ok_ && longshot_menu_ && CanShow(now_ms)) {
             // (player report 261: Longshot Settings is Longshot's own menu, opened over the pause menu by the module;
             // never our copy of its rows. The A is ours: the game does not know the button)
             open_longshot_ = true;
-            pages_sound_ = "button_decide";
+            pages_sound_ = CoopMenuNav::kSoundDecide;
             swallow_ |= kPadA;
             return buttons & ~swallow_;
         }
@@ -487,7 +493,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
             customize_open_ = system_button_ == 2;
             slide_ = 0;
             opened_ = true;
-            pages_sound_ = "button_decide";
+            pages_sound_ = CoopMenuNav::kSoundDecide;
             swallow_ |= buttons & ~kPadPassed;
             return buttons & kPadPassed & ~swallow_;
         }
@@ -520,7 +526,7 @@ std::uint64_t Page::OnPad(std::uint64_t buttons, std::uint64_t now_ms) {
     }
     if ((down & kPadA) != 0) {
         decide_ = true;
-        pages_sound_ = "button_decide";
+        pages_sound_ = CoopMenuNav::kSoundDecide;
     }
     if (sub_ && (down & kPadB) != 0) {   // (a view: B goes back to the five rows, kept until let go)
         back_ = true;
@@ -541,7 +547,7 @@ void Page::StartTyping(int which) {
     typing_was_ = Field(typing_).text();
     key_ = 0;
     letter_ = 0;
-    repeat_since_ = repeat_last_ = 0;
+    typing_repeat_.Forget(pad_last_);   // (the direction held as typing starts is not a press of the keys)
     swallow_ |= pad_last_;   // (the A that started it is not the first key's press)
     typing_from_ms_ = pad_ms_;   // (nor the same A coming again: a click's A, in two pulses, typed the first key)
 }
@@ -551,7 +557,7 @@ void Page::EndTyping(bool ok) {
     if (!ok) Field(typing_).Set(typing_was_);
     typed_ = ok ? typing_ : -1;
     typing_ = -1;
-    pages_sound_ = "button_decide";
+    pages_sound_ = CoopMenuNav::kSoundDecide;
 }
 
 char Page::TypingLetter() const {
@@ -570,7 +576,7 @@ void Page::PressKey(int key) {
     case TypeKey::kCancel: EndTyping(false); return;
     case TypeKey::kOk: EndTyping(true); return;
     }
-    pages_sound_ = "button_decide";
+    pages_sound_ = CoopMenuNav::kSoundDecide;
 }
 
 const char* TypingTitle(int which) {
@@ -616,32 +622,23 @@ void Page::TypingPad(std::uint64_t down, std::uint64_t held, std::uint64_t now_m
     }
     if ((down & kPadY) != 0) {
         f.Backspace();
-        pages_sound_ = "button_on";
+        pages_sound_ = CoopMenuNav::kSoundMove;
     }
     if ((down & (kPadL | kPadZL)) != 0) f.Move(-1);
     if ((down & (kPadR | kPadZR)) != 0) f.Move(+1);
     const std::uint64_t up = kPadUp | kPadStickUp, dn = kPadDown | kPadStickDown;
     const std::uint64_t left = kPadLeft | kPadStickLeft, right = kPadRight | kPadStickRight;
     const std::uint64_t dirs = up | dn | left | right;
-    const auto step = [&](std::uint64_t bits) {
-        // (up and down: the key, round the four; Left and Right: Letter's letter, round the field's letters)
-        const int dy = (bits & dn) != 0 ? 1 : (bits & up) != 0 ? -1 : 0;
-        key_ = (key_ + dy + kTypeKeys) % kTypeKeys;
-        const int dx = (bits & right) != 0 ? 1 : (bits & left) != 0 ? -1 : 0;
-        if (dx != 0 && key_ == static_cast<int>(TypeKey::kLetter)) {
-            const std::size_t n = f.Letters().size();
-            letter_ = (letter_ % n + n + static_cast<std::size_t>(dx + static_cast<int>(n))) % n;
-        }
-    };
-    if ((down & dirs) != 0) {
-        step(down & dirs);
-        repeat_since_ = repeat_last_ = now_ms;
-        pages_sound_ = "button_on";
-    } else if ((held & dirs) != 0 && repeat_since_ != 0 && now_ms - repeat_since_ > 400 && now_ms - repeat_last_ > 90) {
-        step(held & dirs);   // (held: again and again, as the game's own lists scroll)
-        repeat_last_ = now_ms;
+    // (one cursor model, coop_menu_nav.h: up and down the key, round on a fresh press only; Left and Right Letter's
+    // letter, round held too; a held direction again and again, as the game's own lists)
+    std::uint64_t held_again = 0;
+    const std::uint64_t moves = typing_repeat_.Presses(held, now_ms, dirs, &held_again);
+    const int dy = (moves & dn) != 0 ? 1 : (moves & up) != 0 ? -1 : 0;
+    const int dx = (moves & right) != 0 ? 1 : (moves & left) != 0 ? -1 : 0;
+    if (CoopMenuNav::TypingKeysStep(dy, dx, (held_again & (up | dn)) != 0, kTypeKeys, static_cast<int>(TypeKey::kLetter),
+                                    f.Letters().size(), &key_, &letter_)) {
+        pages_sound_ = CoopMenuNav::kSoundMove;
     }
-    if ((held & dirs) == 0) repeat_since_ = 0;
 }
 
 bool Page::Key(std::uint32_t vk, bool repeat) {

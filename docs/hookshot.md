@@ -102,6 +102,15 @@ What the module expects from that install (`hookshot/compat`): `coop.ini` beside
 
 ## The Multiplayer tab
 
+**Since 0.11.13 (menu-polish-01113) co-op's home is the game's own - menu** (its Multiplayer, Lobby and Mods tabs) and
+the title's Multiplayer rows. Longshot's F1 menu no longer carries co-op's tabs while the pack has our - tabs; it keeps
+them only as a fallback: no pack, or a pack without our - tabs (an old pack), known from the first opening of the
+pause menu (+ or -) in a session; before any opening Longshot's menu shows none of co-op's tabs. **F1** in play now opens the - menu
+on the Multiplayer tab (the module takes the key first, `hos_coop_key`, and drives the game's own Minus and L / R as
+F6 does, `coop_players_open.h`; Longshot's own menu closes if it was open). Longshot's own menu stays on Insert, Esc,
+its pad keys and System > Longshot Settings. In original game, F1's menu keeps its one "Original game" tab (the way
+back). What follows describes the F1 tabs as they still are in that fallback.
+
 Hookshot only (patch `0012-coop-menu-tabs.patch`, with `0004-coop-title-menu.patch` for the title's rows): co-op lives in Hookshot's own pause menu, so nobody edits files or runs a .bat to play together. Open the menu with **F1** (or Insert, Esc by default) or a pad's **Home** (or Select and Start together); **Multiplayer** is its first tab, before Graphics. Its pages: **Host a game**, **Join a game**, **Local co-op**, **Settings**, **Customize Link** and **Commands**. The **Lobby** tab follows it (below), then a **Mods** tab, through the same table, with no further Hookshot build.
 
 - **How it is drawn.** Patch 0012 changes only Hookshot's Vulkan back end (`gpu/vk`: no game rebuild). `hos_coop_menu.h` is the table (the same file in `hookshot/src`, checked by `tests/hookshot/module_test.cpp`): the module names its tabs (`hos_coop_menu_tabs`, `hos_coop_menu_tab_name`), gives a tab's rows, the selected one, the help box and the prompts' words (`hos_coop_menu_page`), and takes the presses (`hos_coop_menu_input`: Up, Down, Left, Right, Confirm, Back, the tab shown or gone, the mouse over a row and its clicks); `hos_coop_menu_wanted` opens the menu on a tab or closes it. `vk_coop.cpp` finds the exports once the module is loaded; `vk_menu.cpp` puts the tabs first in its strip, draws a module tab with its own cells (an action, a choice with arrows, Off / On halves, a heading, a note) and help box, and hands the presses on. A Hookshot without the patch shows no tab; a module without the exports, none either. The tab's logic is `coop_pause_menu.cpp` (tests in `tests/hookshot/pause_menu_test.cpp`); `coop_pause.cpp` carries out what it asks.
