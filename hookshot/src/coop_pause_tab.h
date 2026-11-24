@@ -1174,4 +1174,28 @@ struct SystemButtonSeen {
 // mouse (`mouse`: x, y in the layout's units), else the one the focus is coming to (1), else none.
 int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std::pair<float, float>> mouse);
 
+// --- One cursor a page (player report 276: the outline on another row or line than the one lit) ---
+// A page's focus frame (the game's own W_Select_00 and the button's Select animation, on a row or on a line of the
+// list) and which row or line shows bright came from two places at two times: on the - menu's page the frame from the
+// Page's row at every update but the brightness from the words' pass (every 250 ms or a poke), and on the + page the
+// game's own frame stayed on the rows' button while a line of the list was the one lit. Both now come from one
+// PageCursor, worked out from where the pad is, and the module sets the frames and the alphas from it in one pass.
+inline constexpr int kCursorLines = kMenuMost + 1;   // the list's panes (Pa_List_00..07; 0 the heading)
+struct PageCursor {
+    int frame_row = -1;    // the row (0..kRows-1) whose focus frame shows; -1 none
+    int frame_line = -1;   // the list's pane (0..kCursorLines-1) whose focus frame shows; -1 none
+    bool list = false;     // the list (or a field's keys) has the pad: the rows dimmed, no frame on them
+    bool operator==(const PageCursor&) const = default;
+};
+// `row` the rows' cursor, `rows_shown` the rows with words (bit r), `list` whether the list has the pad, `line` the
+// list's pane lit there (-1 none). The frame is on exactly the one thing shown lit, or on nothing.
+PageCursor CursorAt(int row, std::uint32_t rows_shown, bool list, int line);
+// A row's alpha on the - menu's page: the framed one bright, the others a little dim, all dimmed while the list has the
+// pad.
+float MinusRowAlpha(const PageCursor& c, int r);
+// A list pane's alpha on the - menu's page: `pickable` the panes that can be picked (bit i), `picked` the pane lit (co-op's
+// menu's own selection even while the rows have the pad): the heading (0) a little dim when it cannot be picked, a line of
+// text dim, and while the list has the pad the picked one bright and the others dimmed.
+float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list);
+
 }  // namespace CoopPauseTab

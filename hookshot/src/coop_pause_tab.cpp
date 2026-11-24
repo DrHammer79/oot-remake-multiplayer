@@ -2219,4 +2219,28 @@ int SystemButtonOf(const std::vector<SystemButtonSeen>& seen, std::optional<std:
     return coming != nullptr ? coming->ours : -1;
 }
 
+
+PageCursor CursorAt(int row, std::uint32_t rows_shown, bool list, int line) {
+    PageCursor c;
+    c.list = list;
+    if (list) {
+        if (line >= 0 && line < kCursorLines) c.frame_line = line;
+        return c;
+    }
+    if (row >= 0 && row < kRows && ((rows_shown >> row) & 1u) != 0) c.frame_row = row;
+    return c;
+}
+
+float MinusRowAlpha(const PageCursor& c, int r) {
+    if (c.list) return 0.45f;
+    return r == c.frame_row ? 1.0f : 0.8f;
+}
+
+float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list) {
+    const bool pick = i >= 0 && i < 32 && ((pickable >> i) & 1u) != 0;
+    if (i == 0 && !pick) return 0.7f;               // (a header, as a table's)
+    if (!pick && picked != i) return 0.55f;         // (a line of text, a heading)
+    return !list || picked == i ? 1.0f : 0.45f;
+}
+
 }  // namespace CoopPauseTab
