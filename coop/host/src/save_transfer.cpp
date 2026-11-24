@@ -525,8 +525,8 @@ PendingStep pending_step(bool slot_in, bool title_up, bool in_game) {
   return slot_in && title_up && !in_game ? PendingStep::go : PendingStep::keep;
 }
 
-bool old_coop_first(bool pending, bool slot_in, bool title_up, bool in_game, bool on_pending_dir) {
-  return pending && !slot_in && title_up && !in_game && on_pending_dir;
+bool old_coop_first(bool pending, bool title_up, bool in_game, bool on_pending_dir) {
+  return pending && title_up && !in_game && on_pending_dir;
 }
 
 bool decide_again(bool decided, bool over, bool in_game) {

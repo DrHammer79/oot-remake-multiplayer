@@ -44,6 +44,7 @@ std::mutex g_mutex;  // everything below; the game's file service and the networ
 fs::path g_dir;      // the folder the game opened for its account save
 save::Planner g_planner;
 bool g_save_requests = false;   // SetSaveRequests: Hookshot asks our game for its own autosave (TakeSaveRequest)
+bool g_test_save_ask = false;   // AskOwnAutoSave (the test commands' `autosave`), taken by TakeSaveRequest
 std::atomic<bool> g_save_request_due{false};   // set under g_mutex when an ask opens a round; TakeSaveRequest's
                                                // lock-free check (the calc thread, every frame)
 // Player report 120: the slot our game plays (patch 0025's opens, patch 0024's load windows), sent to the guests.
@@ -156,7 +157,7 @@ void Decide() {
 
 void NoteSaveDirLocked(const fs::path& dir);
 bool RemountLocked(const fs::path& dir);
-void FixSlotsLocked();
+void FixSlotsLocked(const fs::path& dir);
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, bool played_from = true);
 void PendingFrame();
 void AskAtTitle();
@@ -326,9 +327,9 @@ void PendingFrame() {
         g_suspended = false;   // (the player's own pick has loaded: back on the title's menu, the switch goes)
         LOG_INFO(Core, "coop: save: a file is loaded: the host's save is switched to when the title is back");
     }
-    if (save::old_coop_first(true, g_guest.unwritten.has_value(), g_title_up && !g_suspended, g_in_game,
-                             g_dir == g_pending)) {
-        // (AskAtTitle while the game played an earlier host's save: that one must not be the one the title offers)
+    if (save::old_coop_first(true, g_title_up && !g_suspended, g_in_game, g_dir == g_pending)) {
+        // (AskAtTitle while the game played an earlier host's save: that one must not be the one the title offers;
+        // with the new save in, Longshot 3.1 copies the co-op folder only when it is mounted anew: RemountLocked)
         const fs::path own = save::own_dir_of(g_pending);
         if (!RemountLocked(own)) {
             LOG_WARNING(Core, "coop: save: could not switch the save folder back to {} before the host's save: the "
@@ -340,7 +341,13 @@ void PendingFrame() {
         if (const int n = save::clear_coop_slots(g_pending); n > 0) {
             LOG_INFO(Core, "coop: save: {} older slot(s) taken out of {}", n, g_pending.string());
         }
-        LOG_INFO(Core, "coop: save: on the title before the host's save came: back on {} until it is in", own.string());
+        if (g_guest.unwritten) {
+            LOG_INFO(Core, "coop: save: on the title with the host's save in: back on {} first, so the co-op folder "
+                           "is mounted anew with it", own.string());
+        } else {
+            LOG_INFO(Core, "coop: save: on the title before the host's save came: back on {} until it is in",
+                     own.string());
+        }
     }
     switch (save::pending_step(g_guest.unwritten.has_value(), g_title_up && !g_suspended, g_in_game)) {
     case save::PendingStep::keep:
@@ -386,12 +393,17 @@ void AskAtTitle() {
 // a new session, to the co-op folder once the host's save is in it, which Resync from host also ends in) goes through
 // here. After a switch the game's save list is stale (player report 124): the title has the game re-read it
 // (TakeSaveListStale). False: not switched, the game keeps its folder and its list.
+// Longshot 3.1 stages a save (patch 0008): the mount copies the folder into its work copy, the game reads and writes
+// only that copy, and its Commit publishes the copy's changed files back. So everything this module writes into a
+// folder is written BEFORE it is mounted (rejoin-host-273-2): the slot fixes here, the host's save (PendingFrame); a
+// file written into the folder after its mount is never seen by the game, and its next Commit of that file writes
+// over it. A remount of the folder already mounted copies nothing again (its work copy is the live mount).
 bool RemountLocked(const fs::path& dir) {
+    FixSlotsLocked(dir);   // (rows 239/240/241: the folder switched to, before its list is offered; before its copy)
     if (!g_remount || !g_remount(dir.string())) return false;
     NoteSaveDirLocked(dir);
     g_list_stale = true;
     LOG_INFO(Core, "coop: save: the save folder is now {}: the game re-reads its save list on the title", dir.string());
-    FixSlotsLocked();   // (rows 239/240/241: the folder switched to, before its list is offered)
     return true;
 }
 
@@ -413,10 +425,10 @@ save::SaveSlot FixedSlotLocked(const save::SaveSlot& slot) {
 // Rows 239/240/241: every slot of the folder the game plays from, each time the title comes up (the player's own saves,
 // a save set switched to, a host's save written before this fix). Only a slot that changes is written, whole, through a
 // temporary file.
-void FixSlotsLocked() {
-    if (!g_save_fix || g_dir.empty()) return;
+void FixSlotsLocked(const fs::path& dir) {
+    if (!g_save_fix || dir.empty()) return;
     std::error_code ec;
-    for (fs::directory_iterator it(g_dir, ec), end; !ec && it != end; it.increment(ec)) {
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         std::error_code dec;
         if (!it->is_directory(dec)) continue;
         const fs::path file = it->path() / "progress.sav";
@@ -545,12 +557,23 @@ void SetSaveRequests(bool on) {
     g_save_requests = on;
 }
 
-bool TakeSaveRequest() {
+SaveRequest TakeSaveRequest() {
     // The calc thread asks every frame: no lock unless a guest's ask opened a round (the host's game never waits on
     // g_mutex while OnFrame packs a slot, except on the one frame that takes the request).
-    if (!g_save_request_due.exchange(false, std::memory_order_acq_rel)) return false;
+    if (!g_save_request_due.exchange(false, std::memory_order_acq_rel)) return SaveRequest::none;
     std::lock_guard lock(g_mutex);
-    return g_in_game && g_planner.take_save_request();   // (back on the title: no file to save; the limit sends)
+    const bool test = std::exchange(g_test_save_ask, false);
+    if (!g_in_game) return SaveRequest::none;   // (back on the title: no file to save; the limit sends)
+    if (g_planner.take_save_request()) return SaveRequest::guests;   // (a test's ask in the same frame: this save)
+    return test ? SaveRequest::test : SaveRequest::none;
+}
+
+bool AskOwnAutoSave() {
+    std::lock_guard lock(g_mutex);
+    if (!g_save_requests || !g_in_game) return false;
+    g_test_save_ask = true;
+    g_save_request_due.store(true, std::memory_order_release);
+    return true;
 }
 
 bool HostSaveComing() {
@@ -679,7 +702,7 @@ void NoteTitle(bool title_up) {
     }
     std::lock_guard lock(g_mutex);
     if (title_up && !g_title_up) {
-        FixSlotsLocked();      // (rows 239/240/241: before the player can load one of them)
+        FixSlotsLocked(g_dir);   // (rows 239/240/241: before the player can load one of them)
         g_played.on_title();   // (a new pick follows: a file, or New Game)
         g_title_seen = true;
         if (std::exchange(g_guest_played, false)) g_title_ask = true;   // (decided by the next OnFrame: TitleResync)
@@ -1004,6 +1027,17 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         // Written when the game opens its save folder, or (Hookshot) into the co-op folder at the next frame and
         // only then switched to (PendingFrame).
         g_guest.unwritten = *slot;
+        return;
+    }
+    if (g_root && g_remount && save::is_coop_dir(g_dir)) {
+        // (rejoin-host-273-2) Hookshot, the game already on the co-op folder (the host loaded a save): never written
+        // into the folder the game has mounted (Longshot 3.1 plays its work copy, and its next Commit writes over a
+        // file put under it). It waits for the title's menu, where the game leaves the folder, the save is written,
+        // and the folder is mounted anew with it (PendingFrame, save::old_coop_first): as on a join.
+        g_guest.unwritten = *slot;
+        g_pending = g_dir;
+        LOG_INFO(Core, "coop: save: the host's next save is kept for the title's menu: written and switched to there "
+                       "(never under the save folder the game has mounted)");
         return;
     }
     WriteSlot(*slot);

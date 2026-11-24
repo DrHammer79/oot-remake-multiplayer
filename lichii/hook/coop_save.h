@@ -54,7 +54,13 @@ void PollSlotOpens();
 // that save (save::Planner's round), and Hookshot's game-thread step takes the request once (TakeSaveRequest) and
 // makes the game's call (the EventTriggerRequestAutoSave node's own). Unset (the emulator): the save on disk at once.
 void SetSaveRequests(bool on);
-bool TakeSaveRequest();
+// Which ask the game-thread step takes (once): a guest's (the send waits for that save) or the test commands'
+// `autosave` (AskOwnAutoSave); none when no file is played.
+enum class SaveRequest { none, guests, test };
+SaveRequest TakeSaveRequest();
+// The test commands' `autosave` (rejoin-host-273-2): our game asked for its own autosave with the same call, at the
+// game-thread step. False when it cannot be: no file played, or a runtime with no such call (the emulator).
+bool AskOwnAutoSave();
 // The Lobby tab's "Resync from host" (a guest; save::resync_check): taken at the next OnFrame, which asks the host
 // again; the chat says how it goes. CanResync: the row is shown (a connected guest on a switchable folder).
 void RequestResync();

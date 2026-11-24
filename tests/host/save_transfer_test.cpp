@@ -1116,12 +1116,21 @@ TEST_CASE("save transfer: an ask while the host plays a file waits for the save 
 
 TEST_CASE("save transfer: a rejoin with the game on an earlier host's save goes back to its own folder on the title") {
   // (AskAtTitle while the co-op folder holds the OLDER host's save: never offered by the title)
-  CHECK(save::old_coop_first(true, false, true, false, true));
-  CHECK_FALSE(save::old_coop_first(true, false, false, true, true));   // a file played: nothing under it
-  CHECK_FALSE(save::old_coop_first(true, true, true, false, true));    // the new save is in: written and switched
-  CHECK_FALSE(save::old_coop_first(true, false, true, false, false));  // on its own folder already (a first join)
-  CHECK_FALSE(save::old_coop_first(false, false, true, false, true));  // nothing asked (solo, the host)
-  CHECK_FALSE(save::old_coop_first(true, false, false, false, true));  // a pick loading (suspended): after it
+  CHECK(save::old_coop_first(true, true, false, true));
+  CHECK_FALSE(save::old_coop_first(true, false, true, true));   // a file played: nothing under it
+  CHECK_FALSE(save::old_coop_first(true, true, false, false));  // on its own folder already (a first join)
+  CHECK_FALSE(save::old_coop_first(false, true, false, true));  // nothing asked (solo, the host)
+  CHECK_FALSE(save::old_coop_first(true, false, false, true));  // a pick loading (suspended): after it
+}
+
+TEST_CASE("save transfer: a new host's save for the co-op folder already mounted leaves it first (Longshot 3.1)") {
+  // rejoin-host-273-2: Longshot 3.1 stages the mounted folder in a work copy; a remount of the same folder copies
+  // nothing again. So with the new save in, a guest on the co-op folder still goes to its own folder first, and the
+  // switch back to the co-op folder copies the save just written (the host loaded a save, Resync during play).
+  CHECK(save::old_coop_first(true, true, false, true));
+  // ... and still never under a file played, nor during a pick's load: on the title's menu after it
+  CHECK_FALSE(save::old_coop_first(true, false, true, true));
+  CHECK_FALSE(save::old_coop_first(true, false, false, true));
 }
 
 TEST_CASE("save transfer: a failed write or switch ends the ask, so Resync is not 'already on its way' for good") {

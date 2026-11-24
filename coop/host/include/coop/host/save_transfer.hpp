@@ -400,13 +400,16 @@ bool keeps_group_save(bool on_coop_dir, bool others_in);
 // title loads (CoopSave::CancelPendingSwitch, ResumePendingSwitch).
 enum class PendingStep { keep, go };
 PendingStep pending_step(bool slot_in, bool title_up, bool in_game);
-// A guest that asked without a switch (a join with a file loaded, Resync from host: AskAtTitle) while its game
-// already plays from the co-op folder (it played an earlier host's save) holds the OLDER host's save there. Once it
-// is on the title's menu with no file loaded and the new save not in yet, the title would offer that older one: the
-// game goes back to its own folder first and the co-op folder is emptied, as on any join (folder_choice's `coop`),
-// and the new save is then written and switched to as always. `on_pending_dir`: the folder mounted is the pending
-// co-op folder.
-bool old_coop_first(bool pending, bool slot_in, bool title_up, bool in_game, bool on_pending_dir);
+// A guest that asked without a switch (a join with a file loaded, Resync from host: AskAtTitle), or got the host's
+// next save while it plays from the co-op folder (the host loaded a save), already has that folder mounted with the
+// OLDER host's save. Once it is on the title's menu with no file loaded, the game goes back to its own folder first
+// and the co-op folder is emptied, as on any join (folder_choice's `coop`); the new save is then written and switched
+// to as always. Also when the new save is already in (rejoin-host-273-2): Longshot 3.1 stages the mounted folder in a
+// work copy that a remount of the same folder never copies again, so a save written into it and "switched to" there
+// would leave the game on the older save; leaving the folder first makes the switch copy it fresh. Before the new save
+// is in, it keeps the title from offering the older one. `on_pending_dir`: the folder mounted is the pending co-op
+// folder.
+bool old_coop_first(bool pending, bool title_up, bool in_game, bool on_pending_dir);
 
 // A guest's save state for ONE session (CoopSave): the ask sent, the parts coming in, a slot that came before the
 // save folder was open, whether the host's save is written, the "stuck" note said. A new session starts from a

@@ -1125,7 +1125,8 @@ TEST_CASE("hookshot: a guest's ask makes the host's game save first, with the ca
     CHECK(module.find("constexpr std::uint64_t kRequestAutoSave = 0xba7730;") != std::string::npos);
     CHECK(module.find("constexpr std::uint64_t kAutoSaveKindEvent = 5;") != std::string::npos);
     const std::string ask = body("void RequestHostAutoSave(void* ctx) {");
-    CHECK(ask.find("if (!CoopSave::TakeSaveRequest()) return;") != std::string::npos);   // only a guest's ask
+    CHECK(ask.find("const auto request = CoopSave::TakeSaveRequest();\n    if (request == CoopSave::SaveRequest::none) "
+                   "return;") != std::string::npos);   // only a guest's ask (or the test commands' autosave)
     CHECK(ask.find("base + kSystemComponent") != std::string::npos);
     CHECK(ask.find("base + kRequestAutoSave") != std::string::npos);
     CHECK(ask.find("g_api->write") == std::string::npos);   // the game's own call; nothing written by us
@@ -1138,11 +1139,15 @@ TEST_CASE("hookshot: a guest's ask makes the host's game save first, with the ca
     const std::string save = ReadFile(kRepo / "lichii" / "hook" / "coop_save.cpp");
     CHECK(save.find("const bool fresh = g_save_requests && g_in_game && "
                     "!g_played.new_game(g_in_game, g_title_seen);") != std::string::npos);
-    CHECK(save.find("return g_in_game && g_planner.take_save_request();") != std::string::npos);
+    CHECK(save.find("if (!g_in_game) return SaveRequest::none;") <
+          save.find("if (g_planner.take_save_request()) return SaveRequest::guests;"));
+    // (the test commands' autosave asks only while a file is played, and only where the call exists)
+    CHECK(save.find("if (!g_save_requests || !g_in_game) return false;") != std::string::npos);
     // (the calc thread's every-frame look takes no lock: an atomic set when an ask opens a round)
     const auto take = save.find("bool TakeSaveRequest() {");
     REQUIRE(take != std::string::npos);
-    CHECK(save.find("if (!g_save_request_due.exchange(false, std::memory_order_acq_rel)) return false;", take) <
+    CHECK(save.find("if (!g_save_request_due.exchange(false, std::memory_order_acq_rel)) return SaveRequest::none;",
+                    take) <
           save.find("std::lock_guard lock(g_mutex);", take));
     CHECK(save.find("if (fresh && !open) g_save_request_due.store(true, std::memory_order_release);") !=
           std::string::npos);
@@ -1482,6 +1487,15 @@ TEST_CASE("hookshot: every switch of the save folder marks the game's save list 
     const auto apply = save.find("std::string ApplySaveSetLocked() {");
     REQUIRE(apply != std::string::npos);
     CHECK(save.find("if (!RemountLocked(want)) {", apply) != std::string::npos);
+    // rejoin-host-273-2: Longshot 3.1 copies a folder into its work copy at the mount, so the slot fixes go in
+    // before it, and a host's next save for the co-op folder already mounted is never written under the game: it
+    // waits for the title, where the folder is left and mounted anew with it (save::old_coop_first).
+    const auto fix = save.find("FixSlotsLocked(dir);", helper);
+    REQUIRE(fix != std::string::npos);
+    CHECK(fix < first);
+    const auto later = save.find("if (g_root && g_remount && save::is_coop_dir(g_dir)) {");
+    REQUIRE(later != std::string::npos);
+    CHECK(save.find("g_pending = g_dir;", later) < save.find("WriteSlot(*slot);", later));
     const std::string title = ReadFile(kRepo / "hookshot" / "src" / "coop_title.cpp");
     CHECK(title.find("constexpr std::uint64_t kCaptionReload = 0xf6da40;") != std::string::npos);
     CHECK(title.find("constexpr std::uint64_t kCaptionBusy = 0x33ad380;") != std::string::npos);
