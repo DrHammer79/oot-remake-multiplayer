@@ -1616,7 +1616,7 @@ def main(argv=None):
                    help="the join password of the server it starts, given to both games (every session has one)")
     r.add_argument("--out", help="run folder (required without --lane; a lane: <its shots>/<name>/<time>)")
     r.add_argument("--name", default="scenario")
-    r.add_argument("--script-a", required=True)
+    r.add_argument("--script-a", help="game A's script (a game B alone: --script-b only)")
     r.add_argument("--script-b")
     r.add_argument("--load", help="load.txt: checked only; the load presses A until the game plays")
     r.add_argument("--no-load", action="store_true")
