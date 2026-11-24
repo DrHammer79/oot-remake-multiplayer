@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The texts the game puts in its text panes, kept for the play-test bridge's `text` (docs/playtest.md, "Text boxes").
 //
-// Patch 0037 wraps the game's pane text setter (main+0x439520, kPaneSetMsg: x0 the pane, x1 a reference {text, length
+// Patch 0041 wraps the game's pane text setter (main+0x439520, kPaneSetMsg: x0 the pane, x1 a reference {text, length
 // in bytes, attributes}). The text box keeps the pointer and the length, not a copy (seen in a run, 2026-11-19), so the
 // text is copied at the call. Each kept text names its layout and pane, read from the pane as Longshot's
 // host/hos_wide_ui.c reads them: a pane is 0xb0 bytes in its layout's array (+0x100), +0x18 is its layout, the
 // layout's +0xf8 its file header (+0x18 its name, +0x20 the pane names: a char* each, in the array's order). The
 // message window is MessageInGame_00 (T_MessageWhiteOut_00 the text, T_Name_00 the speaker; docs/game-ui.md).
 //
-// Patch 0038 wraps the two setters that skip 0037's call and call the text box's set-string (main+0x439680)
+// Patch 0042 wraps the two setters that skip 0041's call and call the text box's set-string (main+0x439680)
 // themselves (read from main, 2026-11-23; not yet seen in a run): kPaneSetBody, a letter-animated pane's set-text
-// (x0 the pane, x1 the text, w2 its length: a talk's box text, which a lane run did not see through 0037), and
-// kPaneSetAlias, the set-text of each pane with a matching alias (x0 the pane, x1 the same reference as 0037's).
+// (x0 the pane, x1 the text, w2 its length: a talk's box text, which a lane run did not see through 0041), and
+// kPaneSetAlias, the set-text of each pane with a matching alias (x0 the pane, x1 the same reference as 0041's).
 // Each kept text says which wrap gave it.
 //
 // The window sets its text again every frame while it is open (docs/game-ui.md, "The message window"), so a text the
@@ -47,12 +47,12 @@ inline constexpr std::uint64_t kPaneSize = 0xb0;      // a pane in the layout's 
 inline constexpr std::uint64_t kRefText = 0x0;     // reference: the text (char*)
 inline constexpr std::uint64_t kRefLength = 0x8;   // reference: its length in bytes (u32)
 
-// The setters wrapped besides 0037's (kPaneSetMsg in coop_pause_tab.h, wrap 25; main offsets, docs/game-ui.md "Text").
+// The setters wrapped besides 0041's (kPaneSetMsg in coop_pause_tab.h, wrap 25; main offsets, docs/game-ui.md "Text").
 inline constexpr std::uint64_t kPaneSetBody = 0x76a460;   // a letter-animated pane's set-text (pane, text, u16
-                                                          // length): patch 0038, wrap 26; called only from a
+                                                          // length): patch 0042, wrap 26; called only from a
                                                           // LetterAnimControl's vtable slot 7 (main+0x76a390)
 inline constexpr std::uint64_t kPaneSetAlias = 0x377a990;  // each pane with a matching alias (pane, &ref): patch
-                                                           // 0038, wrap 27
+                                                           // 0042, wrap 27
 
 inline constexpr std::size_t kKeep = 256;        // texts kept (the oldest go first)
 inline constexpr std::size_t kMaxBytes = 2048;   // of one text (a longer one is cut and says so)
@@ -115,7 +115,7 @@ std::string JsonText(std::string_view bytes);
 // Whether the text has bytes JsonText turns into \u00XX (control characters or bytes that are not UTF-8): the game's
 // markup (colour, a pause, a choice), not yet read in a game.
 bool HasMarkup(std::string_view bytes);
-// The bridge's `text` members (after id, ok, frame, paused): "hooked" (patch 0037's wrap), "body" (patch 0038's),
+// The bridge's `text` members (after id, ok, frame, paused): "hooked" (patch 0041's wrap), "body" (patch 0042's),
 // "last", "lost", "texts":[{seq, frame, layout, pane, text, length, cut, markup, wrap}].
 std::string Members(bool hooked, bool body, std::uint64_t last, bool lost, const std::vector<Entry>& texts);
 

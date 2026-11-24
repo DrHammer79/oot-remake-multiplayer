@@ -285,7 +285,7 @@ HELPER_TOOLS = [
      "Returns `speakers`, `boxes` [{speaker, text, markup, raw}], `choices`, `picked`, `since`, `done` (the talk "
      "ended) or `result` saying why it stopped. A box's `text` is its words with the game's markup cut out (a variable stays as `{Name}`; `raw` "
      "keeps the whole when something was cut); `speaker` is null only when the game shows no name. `boxes` is empty "
-     "without patch 0038 (take a screenshot to read it). A shop's item list is not buttons: move to the item "
+     "without patch 0042 (take a screenshot to read it). A shop's item list is not buttons: move to the item "
      "yourself (press), then talk with since. At most `max_boxes` boxes (20); it keeps going while boxes come and "
      "gives up after 1200 frames with nothing new (7200 in all). It acts on this game only.",
      "inputSchema": {"type": "object",

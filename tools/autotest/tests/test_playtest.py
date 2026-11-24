@@ -443,7 +443,7 @@ class LiveMenu(unittest.TestCase):
 class FakeTalk:
     """A game seen through the bridge for `talk`: an NPC whose talk is a list of boxes ("box", speaker, text) and
     choices ("choice", question, [options]). A shows the next one; Down moves the choice cursor (from 0). The texts go
-    in a `text` log as patch 0037's wrap keeps them (one entry per pane set, the same text again not kept), laid out as
+    in a `text` log as patch 0041's wrap keeps them (one entry per pane set, the same text again not kept), laid out as
     a lane run read them: MessageDialog_00 (T_Name_00 the speaker), the reply buttons PaMessageBtn_00 (one pane,
     T_Btn_00, set once per button). `body` False: the box text does not come through the wrap (as in that run)."""
 
@@ -452,7 +452,7 @@ class FakeTalk:
         self.talk, self.hooked, self.verb, self.prompt, self.body = talk, hooked, verb, prompt, body
         self.stall = stall               # (the last box stays up: A does not end the event)
         self.name_after = name_after     # (the body is set before the name pane, as the shop does)
-        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0038's wrap 26 in that pane)
+        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0042's wrap 26 in that pane)
         self.at, self.event, self.cursor, self.picked = None, False, 0, []
         self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
         self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
@@ -621,7 +621,7 @@ class TalkTest(unittest.TestCase):
         self.assertNotIn("walk", r)
 
     def test_without_the_wrap_or_the_verb_one_a_and_why(self):
-        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0037"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
+        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0041"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
             r = ph.talk(g)
             self.assertTrue(r["pressed"])
             self.assertEqual(g.presses, ["A"])
@@ -645,7 +645,7 @@ class TalkTest(unittest.TestCase):
         r = ph.talk(g)
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
 
-    # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0038: Kokiri shop and Mido) -------------
+    # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0042: Kokiri shop and Mido) -------------
     def test_strip_markup_counts_the_params_in_bytes(self):
         # A name with a character of more than one byte: the tag's size is bytes, the text has one character for it.
         name = "Gr\u0101t"                                     # 4 characters, 5 bytes in UTF-8

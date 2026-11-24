@@ -462,6 +462,49 @@ std::string ReadScenario(const std::filesystem::path& path, int depth = 0) {
 }
 }  // namespace
 
+TEST_CASE("testinput: await is the runner's own step: its shape checked, no module step (row 325)") {
+    std::string error;
+    const auto script = Parse("await 3600 anim Enemy_DungeonBoss_Dodongo \\S+ 'Rolling_Loop'$\nmark after\n", error);
+    REQUIRE_MESSAGE(script.has_value(), error);
+    REQUIRE(script->steps.size() == 1);
+    CHECK(script->steps[0].kind == Kind::mark);
+    CHECK(script->steps[0].line == 2);
+    CHECK(Parse("await 0 x\nmark after\n", error).has_value());  // (the runner takes 0 too)
+    CHECK_FALSE(Parse("await 600\nmark after\n", error));
+    CHECK(error.find("await TICKS REGEX") != std::string::npos);
+    CHECK_FALSE(Parse("await soon foo\nmark after\n", error));
+    CHECK_FALSE(Parse("await 600 foo\n", error));  // (no module step at all: "no steps")
+}
+
+TEST_CASE("testinput: the runner's grammar: every TICKS and number line is taken by both readers or refused by both") {
+    // Row 325 review: await's TICKS here was the module's own timed-step rule (1 to 36000) while the runner
+    // (tools/autotest/hookshot.py) takes 0 up, so 'await 0' played there and was refused here. The same lists are
+    // in tools/autotest/tests/test_hookshot.py GrammarTest: keep them equal.
+    static constexpr std::array kTaken = {
+        "wait 1", "wait 36000", "wait 0007", "hold A 36000", "press A 1", "stick -1 +1 5", "stick .5 -0.5 5",
+        "toward 1 2 36000", "goto 1.5 -2 0.2 600", "goto .5 5. 1", "goto 1e3 -1E-2", "goto 1000000 -1000000",
+        "await 0 x", "await 99999999999 x", "hit X 80", "drop X 500", "hurt 1", "setflag F -2147483648",
+        "setflag F 2147483647", "setflag F 007"};
+    static constexpr std::array kRefused = {
+        "wait 0", "wait 36001", "wait +5", "wait -0", "wait 1_0", "wait 0000000001", "hold A 0", "press A 0",
+        "stick 0 0 0", "toward 1 2 0", "toward 1 2 36001", "goto 1 2 1 0", "await -1 x", "await +1 x",
+        "await 1_0 x", "goto 0x10 2", "goto 1_0 2", "goto inf 2", "goto nan 2", "goto 1000001 2", "goto 1e7 2",
+        "goto . 2", "goto 1e 2", "stick 0x1 0 5", "hit X 0", "hit X 81", "hit X \xc2\xb2", "drop X 501",
+        "hurt 81", "hurt \xc2\xb3", "setflag F 2147483648", "setflag F -2147483649", "setflag F --5",
+        "setflag F +5"};
+    std::string error;
+    for (const char* line : kTaken) {
+        CAPTURE(line);
+        const auto script = Parse(std::string(line) + "\nmark z\n", error);
+        CHECK_MESSAGE(script.has_value(), error);
+    }
+    for (const char* line : kRefused) {
+        CAPTURE(line);
+        CHECK_FALSE(Parse(std::string(line) + "\nmark z\n", error));
+        CHECK(error.rfind("line 1:", 0) == 0);
+    }
+}
+
 TEST_CASE("testinput: every autotest scenario script parses") {
     const std::filesystem::path dir =
         std::filesystem::path(COOP_TEST_SOURCE_DIR) / ".." / "tools" / "autotest" / "scenarios";
@@ -896,4 +939,29 @@ TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses 
     // every kind has a word and a word that Parse reads back as that kind is how the table is kept honest
     CHECK(std::string(KindWord(Kind::go)) == "goto");
     for (const Kind k : allowed) CHECK(std::string(KindWord(k)) != "?");
+}
+
+TEST_CASE("testinput: event hands the hook an event setting's name (boss-route-01112)") {
+    std::string error;
+    CHECK_FALSE(Parse("event\n", error));
+    CHECK_FALSE(Parse("event DreamBossStage_Rematch_Barinade_Start extra\n", error));
+    Runner r(Must("event DreamBossStage_Rematch_Barinade_Start\nmark after\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::event);
+    CHECK(requests[0].name == "DreamBossStage_Rematch_Barinade_Start");
+}
+
+TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
+    std::string error;
+    CHECK_FALSE(Parse("menu host now\n", error));
+    Runner r(Must("menu Host\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::menu);
+    CHECK(requests[0].name == "host");
 }

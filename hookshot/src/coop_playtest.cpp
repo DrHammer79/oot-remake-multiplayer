@@ -645,7 +645,7 @@ std::string Handle(const Request& r) {
     }
     if (r.cmd == "text") {
         // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; the wraps of
-        // patches 0037 and 0038 fill them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
+        // patches 0041 and 0042 fill them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
         bool lost = false;
         const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);
         return ok(CoopTalkText::Members(CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_TEXT),
