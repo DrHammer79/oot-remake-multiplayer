@@ -321,3 +321,14 @@ TEST_CASE("talk text: the bridge's text request") {
     CHECK_FALSE(ParseRequest(R"({"cmd":"nope"})", error));
     CHECK(error.find("text") != std::string::npos);
 }
+
+TEST_CASE("talk text: panes only ever cleared do not grow the frame memory past kMaxPanes") {
+    Fake m = Window();
+    m.U64(kRef + kRefText, 0);
+    m.U32(kRef + kRefLength, 0);
+    Log log;
+    for (std::uint64_t i = 0; i < kMaxPanes + 50; ++i) log.Note(0x100000 + i * kPaneSize, kRef, i, m.Reader());
+    CHECK(log.PanesTimed() <= kMaxPanes);
+    CHECK(log.PanesTimed() > 0);
+    CHECK(log.Last() == 0);   // (nothing kept: every set was a clear)
+}

@@ -67,6 +67,7 @@ class Log {
     std::vector<Entry> Since(std::uint64_t since, std::string_view layout, bool* lost = nullptr) const;
     std::uint64_t Last() const;   // the newest seq (0: none yet)
     std::uint64_t Seen() const;   // setter calls looked at
+    std::size_t PanesTimed() const;   // panes whose last set frame is remembered (at most kMaxPanes)
     void Clear();
 
    private:

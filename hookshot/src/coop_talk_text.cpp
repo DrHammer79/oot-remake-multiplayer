@@ -92,7 +92,14 @@ void Log::Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const
         // same button), kept again. While a window is open it sets its text every frame, so no gap comes then.
         const auto at = set_at_.find(pane);
         const bool gap = at != set_at_.end() && frame > at->second + kSameAgain;
-        set_at_[pane] = at != set_at_.end() ? std::max(at->second, frame) : frame;   // (threads note out of order)
+        if (at != set_at_.end()) {
+            at->second = std::max(at->second, frame);   // (threads note out of order)
+        } else {
+            // Panes only ever set to "" never reach shown_, so this map has its own bound (a long run: forget them;
+            // a pane forgotten has no gap on its next set).
+            if (set_at_.size() >= kMaxPanes) set_at_.clear();
+            set_at_[pane] = frame;
+        }
         const auto it = shown_.find(pane);
         if (it == shown_.end() ? e.text.empty() : it->second == e.text && (!gap || e.text.empty()))
             return;   // (shown already, or a first clear)
@@ -125,6 +132,11 @@ void Log::Keep(std::uint64_t pane, Entry e, bool again) {
         last_of_.clear();
         set_at_.clear();
     }
+}
+
+std::size_t Log::PanesTimed() const {
+    std::lock_guard lock(mu_);
+    return set_at_.size();
 }
 
 std::vector<Entry> Log::Since(std::uint64_t since, std::string_view layout, bool* lost) const {
