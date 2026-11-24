@@ -1479,7 +1479,7 @@ bool Key(std::uint32_t vk, bool repeat) {
         return false;
     }
     const auto [ctrl_down, shift_down] = Modifiers();
-    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste friend's answer (players press
+    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste answer code (players press
     // Ctrl+V there), on Join the code. A plain Insert stays Hookshot's.
     if (!repeat && ((vk == 'V' && ctrl_down) || (vk == 0x2D && shift_down && !ctrl_down))) {
         const bool taken = g_menu.Press(Input::kPaste);
@@ -1836,7 +1836,7 @@ void JoinLanNow(const std::string& address, std::uint16_t port, const std::strin
         SayOnPage(kSayLauncher);
         return;
     }
-    // (the same-network line: "<address>:<port> <password>", as the host's Copy same-network line gives it)
+    // (the same-network line: "<address>:<port> <password>", as the host's Copy network address gives it)
     const std::string line = address + ":" + std::to_string(port) + (password.empty() ? std::string() : " " + password);
     if (!Join(line)) SayOnPage(kSayRefused);
 }

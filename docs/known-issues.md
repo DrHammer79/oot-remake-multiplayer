@@ -56,7 +56,7 @@ In 0.11.10 (hotfix: update only, no game rebuild). From your reports (E'tykalu, 
 
 - **Black screen after Character Select's menu** (rows 239 to 241): with Character Select's menus only (the NPC models not downloaded), a pick whose model is not installed goes back to Link at once, on every frame, co-op on or off. With co-op on, a save that holds such a pick is stored as Link before it is loaded or sent to a guest; the original is kept beside it as `progress.sav.coop-pick-backup`. A solo save that already holds such a pick is not rewritten on disk; the per-frame guard keeps the game on Link.
 - **Unfinished build** (Windows kits only): a kit window closed during the update's build is never started as built; the next start finishes it.
-- **Customize page**: the title names the page first and adds "Y: page  A: exact hue" (also Simplified and Traditional Chinese).
+- **Customize page**: the title names the page first and adds "Y: page  A: Fine-tune" (also Simplified and Traditional Chinese).
 - **Puppet tunic green** (row 243): other players saw a default green tunic as lime; puppets now wear the game's own green, child and adult.
 
 Open in 0.11.10: **a puppet that shows no animation** (row 242), fixed in 0.11.11 (above).

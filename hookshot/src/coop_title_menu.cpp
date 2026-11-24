@@ -853,11 +853,11 @@ std::vector<std::string> PlainStatus(const HostView& v) {
             // Row 209: still no way in after the helper's wait (join_helper punch_ms). That is also a host who has not
             // pasted the code yet, so the code stays and the VPN is for when a paste did not help.
             return {"Your friend's router blocks the way in.",
-                    "Send your friend this answer code; they press \"Paste friend's answer\" on their Host page:", v.answer,
+                    "Send your friend this answer code; they press \"Paste answer code\" on their Host page:", v.answer,
                     "If they pasted it and nothing happens, both routers are strict or a provider shares one address (CGNAT): both join a free VPN network (Radmin VPN or Tailscale); the host copies the line from \"VPN\" on their Host page and you paste it in Join a game."};
         }
         return {"Your friend's router blocks the way in.",
-                "Send your friend this answer code; they press \"Paste friend's answer\" on their Host page:", v.answer,
+                "Send your friend this answer code; they press \"Paste answer code\" on their Host page:", v.answer,
                 "Or ask them to turn on UPnP in their router's settings and host again."};
     case HOS_COOP_CONNECTED:
         if (!v.refused.empty()) {

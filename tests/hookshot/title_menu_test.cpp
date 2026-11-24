@@ -214,7 +214,7 @@ TEST_CASE("title menu: Host and Join in plain words, nothing about ports or pass
     j.answer = "QWERT-YUPAS";
     s = PlainStatus(j);
     CHECK(s[0] == "Your friend's router blocks the way in.");
-    CHECK(s[1] == "Send your friend this answer code; they press \"Paste friend's answer\" on their Host page:");
+    CHECK(s[1] == "Send your friend this answer code; they press \"Paste answer code\" on their Host page:");
     CHECK(s[2] == "QWERT-YUPAS");
     // Row 209: still no way in after the helper's wait. That can be a host who has not pasted yet, so the answer code
     // and where to paste it stay on the page; the VPN is for when a paste did not help (review-ui-tabs-0119).
@@ -222,7 +222,7 @@ TEST_CASE("title menu: Host and Join in plain words, nothing about ports or pass
     s = PlainStatus(j);
     REQUIRE(s.size() == 4);
     CHECK(s[0] == "Your friend's router blocks the way in.");
-    CHECK(s[1] == "Send your friend this answer code; they press \"Paste friend's answer\" on their Host page:");
+    CHECK(s[1] == "Send your friend this answer code; they press \"Paste answer code\" on their Host page:");
     CHECK(s[2] == "QWERT-YUPAS");
     CHECK(s[3].rfind("If they pasted it and nothing happens", 0) == 0);
     CHECK(s[3].find("Radmin VPN or Tailscale") != std::string::npos);

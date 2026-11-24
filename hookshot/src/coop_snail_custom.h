@@ -6,7 +6,7 @@
 // left and right across, no wrap; the first option at the start). Co-op drives what it shows and what its keys do:
 // the six options are a page of co-op's look (CoopLookMenu::Page in pages of six: Clothes, Shields, Swords), every
 // value pane of an option shows co-op's value, ZL / ZR (his slider keys) step the focused part's colour, A opens
-// co-op's any-colour mixer in the same six places (Hue, Saturation, Brightness | Preset, Game's own colour, Done), Y
+// co-op's any-colour mixer in the same six places (Hue, Saturation, Brightness | Preset, Default colour, Done), Y
 // turns the page, B leaves the mixer (else his: back). The d-pad stays his graph's, so his marker moves, and this
 // mirrors his rule to know the row.
 //

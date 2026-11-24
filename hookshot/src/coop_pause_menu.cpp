@@ -515,13 +515,13 @@ std::vector<Menu::Line> Menu::Lines() const {
             if (!session_.public_game) {
             out.push_back({Action("Copy the code again", "Copy", session_.code.empty()), Act::kCopyInvite,
                            "Puts your code on the clipboard again. Share it in DMs only: it contains your internet address."});
-            out.push_back({Action("Paste friend's answer (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
+            out.push_back({Action("Paste answer code (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
                            "Only when a friend's game shows an answer code (their way in was blocked): copy the code they "
                            "send you, then press this."});
-            out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+            out.push_back({Action("Same network", "Copy address"), Act::kCopyLan,
                            "For friends in the same house, on your home network: copies one line with this PC's address. "
                            "They paste it in Join a game instead of the code."});
-            out.push_back({Action("VPN", "Copy the line"), Act::kCopyVpn,
+            out.push_back({Action("VPN", "Copy address"), Act::kCopyVpn,
                            "For friends on a VPN with you (Radmin VPN, Hamachi, ZeroTier, Tailscale, WireGuard): copies one "
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
             if (session_.state == State::kHosting && !session_.password.empty()) {
@@ -883,7 +883,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
         const std::string asks = " asks for a password";
         out.push_back({NamedNote("", TitleGameName(picked_, picked_host_, asks.size()), asks), Act::kNone, {}});
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
-                       "The host sees it on their Hosting screen. Type it with Letter, or on the keyboard."});
+                       "The host sees it on their Hosting screen. Type it with the on-screen keys, or on the keyboard."});
         out.push_back({Action("Join", "", off), Act::kJoinNow, "Joins the game with this password."});
         return;
     }
@@ -891,7 +891,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     out.push_back({Action("Paste a code", code_in ? ShownCode(std::string(Trim(join_))) : std::string(), off),
                    Act::kCode, "Your friend sees the code on their Host screen. Copy it, then press A here."});
     out.push_back({Action("Type an address", typing_ip ? join_ip_ + "_" : join_ip_, off), Act::kJoinIp,
-                   "A room name, an IP address or a PC name, typed with Letter or on the keyboard."});
+                   "A room name, an IP address or a PC name, typed with the on-screen keys or on the keyboard."});
     if (!join_ip_.empty()) {
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
                        "The host's join password, if their game has one."});
@@ -942,9 +942,9 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                            "Your friend types it after picking your game. A shows it."});
         }
         out.push_back({Note("Players  " + players), Act::kNone, {}});
-        out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+        out.push_back({Action("Same network", "Copy address"), Act::kCopyLan,
                        "For friends on your home network: copies one line they paste in Enter a code."});
-        out.push_back({Action("Paste friend's answer", ""), Act::kPasteAnswer,
+        out.push_back({Action("Paste answer code", ""), Act::kPasteAnswer,
                        "Only when your friend's game shows an answer code: copy it, then press A here."});
     }
     out.push_back({Action("Stop hosting", confirm_leave_ ? "Press again" : ""), Act::kLeave,
@@ -1608,7 +1608,7 @@ bool Menu::Press(Input input) {
         }
         if (page_ == Page::kHost && std::any_of(lines.begin(), lines.end(), [](const Line& l) {
                 return l.act == Act::kPasteAnswer;
-            })) {   // Ctrl+V on the Host page: the same as Paste friend's answer
+            })) {   // Ctrl+V on the Host page: the same as Paste answer code
             request_ = Request{Request::Kind::kPasteAnswer, {}};
             return true;
         }
