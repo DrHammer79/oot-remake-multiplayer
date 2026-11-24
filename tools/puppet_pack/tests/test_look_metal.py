@@ -232,6 +232,10 @@ class LookRegionTest(unittest.TestCase):
         self.assertEqual(blob[:8], b"COOPRGN1")
         entries = lm.unpack(blob, lm.REGION_MAGIC)
         self.assertEqual([(n, p, len(o)) for n, p, o in entries], [("Mt_Weapon_Shield_Hylian_Alb", 3, 2)])
-        with self.assertRaises(tunic.TunicError):
+        with self.assertRaises(tunic.TunicError) as e:
             lm.unpack(blob)   # never read as a metal file
+        self.assertEqual(str(e.exception), "not a metal file")
+        with self.assertRaises(tunic.TunicError) as e:
+            lm.unpack(b"COOPMTL1" + blob[8:], lm.REGION_MAGIC)
+        self.assertEqual(str(e.exception), "not a region file")
         self.assertIsNone(lm.regions(lambda name: None))

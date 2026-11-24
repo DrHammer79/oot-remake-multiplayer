@@ -230,7 +230,7 @@ def pack(entries, magic=MAGIC):
 def unpack(blob, magic=MAGIC):
     """The metal file (or the region file, under its magic) -> [(name, part, [offsets])]."""
     if blob[:8] != magic:
-        raise TunicError("not a metal file")
+        raise TunicError("not a region file" if magic == REGION_MAGIC else "not a metal file")
     count = struct.unpack_from("<I", blob, 8)[0]
     out, at = [], 12
     for _ in range(count):
