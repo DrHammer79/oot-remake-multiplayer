@@ -1,0 +1,36 @@
+# hilt-look (row 277): B's half, see hilt-look.A.txt (B's coop.ini look_master_hilt = #20C020). B stands in Kakariko by day,
+# watches A's puppet (red grip) come close, then shows its own sword (green grip) sheathed and drawn.
+#! noload
+#! start coop: test warp done
+#! timeout 360
+mark start
+warp KakarikoVillage_Adult Kakariko_WellSide
+wait 1200               # the title screen
+mark title
+press A
+wait 180
+press A
+wait 180
+press A
+wait 300
+press A                 # loads the save, then the warp
+wait 2400               # the save loads, then the warp lands (about 30 s)
+mark after
+wait 200
+stick 0 -0.6 30         # walk back toward the camera
+stick 0 0.3 8           # turn to face up the path (A comes from there)
+press ZL                # camera behind B
+wait 60
+mark b-watch            # A's puppet: its hilt
+wait 300
+mark b-watch-drawn      # A's puppet with its sword out
+wait 120
+mark b-sheathed         # B's own hilt over the shoulder
+press Y 8
+wait 40
+mark b-drawn
+stick 1 0 20
+wait 30
+mark b-drawn-side
+wait 60
+mark end

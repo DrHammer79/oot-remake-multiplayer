@@ -650,32 +650,22 @@ void DrawMap(const HosCoopDraw& d, const MapShown& m, const Look* look) {
         }
         const std::uint32_t rgb = icon.rgb;
         const std::uint32_t fill = Rgba(static_cast<int>(rgb >> 16), static_cast<int>(rgb >> 8), static_cast<int>(rgb), a);
-        const std::uint32_t dark = Rgba(0, 0, 0, a * 3 / 4);
-        if (icon.angle) {
-            const float ca = std::cos(*icon.angle), sa = std::sin(*icon.angle);
-            const auto arrow = [&](float k, std::uint32_t c) {
-                d.triangle(d.user, icon.x + ca * r * k, icon.y + sa * r * k,                                       //
-                           icon.x - ca * r * 0.7f * k - sa * r * 0.75f * k, icon.y - sa * r * 0.7f * k + ca * r * 0.75f * k,  //
-                           icon.x - ca * r * 0.7f * k + sa * r * 0.75f * k, icon.y - sa * r * 0.7f * k - ca * r * 0.75f * k, c);
-            };
-            arrow(1.35f, dark);
-            arrow(1.0f, fill);
-        } else {
-            d.circle(d.user, icon.x, icon.y, r * 0.6f + 1.5f, dark, 0.0f);
-            d.circle(d.user, icon.x, icon.y, r * 0.6f, fill, 0.0f);
-        }
+        // No shapes (the owner's UI rule, as the name tags' B3 in reports/ui-audit-01112.md): no dot and no edge arrow,
+        // the player's name in their colour where the dot was (a player past the map's edge: at the edge, dimmer).
+        // With names off on the maps, "P<n>" marks them.
         std::size_t at = 0;
         while (at < m.players.size() && m.players[at].number != icon.number) {
             ++at;
         }
-        if (at >= m.names.size() || m.names[at].empty()) {
-            continue;
+        if (at < m.names.size() && !m.names[at].empty()) {
+            label.assign(m.names[at]);
+        } else {
+            label.assign("P" + std::to_string(icon.number));
         }
-        label.assign(m.names[at]);
         label += FloorWords(icon.floor_delta);
         const float tw = d.text_width(d.user, px, label.c_str());
         const float x = std::clamp(icon.x - tw / 2, 2.0f, std::max(2.0f, d.width - tw - 2.0f));
-        const float y = icon.y + r * 1.2f;
+        const float y = std::clamp(icon.y - px / 2, 2.0f, std::max(2.0f, d.height - px - 2.0f));
         if (look) {
             GameText(d, x, y, px, fill, label.c_str());
         } else {

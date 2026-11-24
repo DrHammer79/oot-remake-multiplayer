@@ -11,8 +11,8 @@
 #include "coop_original.h"
 #include "coop_title_menu.h"
 #include "hos_coop_menu.h"
-#include "../test_temp.h"
 #include "hos_coop_mods.h"
+#include "../test_temp.h"
 
 namespace fs = std::filesystem;
 

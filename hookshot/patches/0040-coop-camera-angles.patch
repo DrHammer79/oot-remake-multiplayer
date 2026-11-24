@@ -1,4 +1,4 @@
-From 6bf2ca68918b00316a2384adc0ccf5ba2351bac1 Mon Sep 17 00:00:00 2001
+From 6788fb343320d06a7a9e3dec1be048e0969cf766 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Mon, 23 Nov 2026 09:53:07 -0600
 Subject: [PATCH] Co-op camera: the module may turn the player camera's yaw and
@@ -29,7 +29,7 @@ ones. A module without it: the game's camera, as before.
  create mode 100644 host/hos_coop_turn.h
 
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 89fe118..1f904cd 100644
+index 89fe118a..1f904cd6 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -8,6 +8,7 @@
@@ -70,7 +70,7 @@ index 89fe118..1f904cd 100644
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2) coop_frame(NULL, HOS_COOP_SITE_PRESENT);
 diff --git a/host/hos_coop_turn.h b/host/hos_coop_turn.h
 new file mode 100644
-index 0000000..f96e73f
+index 00000000..f96e73f2
 --- /dev/null
 +++ b/host/hos_coop_turn.h
 @@ -0,0 +1,20 @@
@@ -95,10 +95,10 @@ index 0000000..f96e73f
 +
 +#endif
 diff --git a/host/mouse_native.c b/host/mouse_native.c
-index 2149fe0..a3f8174 100644
+index 2149fe0e..f0ccb09b 100644
 --- a/host/mouse_native.c
 +++ b/host/mouse_native.c
-@@ -121,12 +121,38 @@ void hos_mouse_native_free(int free) { InterlockedExchange(&game_free, free ? 1
+@@ -121,6 +121,25 @@ void hos_mouse_native_free(int free) { InterlockedExchange(&game_free, free ? 1
     mouse both turn the camera instead of undoing each other. */
  void hos_mouse_native_stick(int held) { InterlockedExchange(&stick_held, held ? 1 : 0); }
  
@@ -124,19 +124,20 @@ index 2149fe0..a3f8174 100644
  /* f_80644c80's first line (nx2/oot_patches.py): cam is the player camera, the game's thread.
     (longshot, issue 1113) An input recording takes each update's decisions down (HOS_INPUT_RECORD: whether the mouse camera was
     on, whether the game left the camera free, whether a stick turned it, and the degrees the mouse turned it by), and a
-    replay gives them back at the same update (HOS_INPUT_PLAY) in place of the mouse, the menu's row and the window's
+@@ -128,6 +147,13 @@ void hos_mouse_native_stick(int held) { InterlockedExchange(&stick_held, held ?
     clock: the camera then turns as it did, whatever the mouse and the settings do now */
  void hos_mouse_camera(uint64_t cam) {
+     if (!cam) return;
 +    /* (oot-remake-multiplayer, patch 0040) the co-op module may turn the camera first (hos_coop_turn.h), whatever the
 +       Mouse camera row says: its angles go in before the camera's update reads them, so the game's own collision still
 +       places the eye. While it does, the mouse does not turn the camera, and its angles start from the camera's again. */
-+    if (cam && looks_like_camera(cam) && coop_turns(cam)) {
++    if (looks_like_camera(cam) && coop_turns(cam)) {
 +        target_ok = 0;
 +        return;
 +    }
-     if (!cam) return;
      /* (no recording written or played: as before, the mouse camera's row first, and nothing of the guest's read while it is
         off. With one, every update goes through it, the native camera on or not) */
+     const int recorded = hos_input_movie_active();
 -- 
 2.56.0.windows.4
 

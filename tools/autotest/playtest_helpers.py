@@ -435,7 +435,7 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=No
 
 # --- talk: read each text box, press A to the end, pick a reply by its text (docs/playtest.md, "Text boxes") ---------
 # The talk ends when the event has ended and no new text came; the cursor is taken to start on the first button.
-# Read in a lane run (Kokiri shop, Mido; game 0001-0037): a talk is `MessageDialog_00` (T_Name_00 and T_NameNavi_00 the
+# Read in a lane run (Kokiri shop, Mido; game 0001-0041): a talk is `MessageDialog_00` (T_Name_00 and T_NameNavi_00 the
 # speaker), its reply buttons `PaMessageBtn_00` (ONE pane, T_Btn_00, set once per button). The box's body did not come
 # through the wrap there (another setter): BOX_PANES are kept for when it does. Patch 0042 wraps the letter-animated
 # pane's set-text (BODY_WRAP, read from main only): a text of a message layout from it is a box, whatever its pane.

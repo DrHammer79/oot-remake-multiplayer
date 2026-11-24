@@ -50,6 +50,33 @@ class FindMonitor(unittest.TestCase):
         self.assertIn("primary", msg)
         self.assertIn(pl.ENV, msg)
 
+    def test_primary_names_the_primary_monitor(self):
+        self.assertEqual(pl.find_monitor(MONS, "primary")["name"], "\\\\.\\DISPLAY1")
+        self.assertEqual(pl.find_monitor(MONS, "PRIMARY")["name"], "\\\\.\\DISPLAY1")
+
+    def test_the_default_gone_is_the_primary_monitor(self):
+        one = [MONS[0]]   # (a laptop alone: no DISPLAY2)
+        self.assertEqual(pl.find_monitor(one, pl.DEFAULT_DISPLAY, primary_if_gone=True)["name"], "\\\\.\\DISPLAY1")
+        with self.assertRaises(pl.PlacementError):   # (a name asked for stays an error)
+            pl.find_monitor(one, pl.DEFAULT_DISPLAY)
+
+    def test_check_display_falls_back_only_for_the_default(self):
+        one = [MONS[0]]
+        real, env = pl.monitors, os.environ.pop(pl.ENV, None)
+        pl.monitors = lambda: one
+        try:
+            self.assertEqual(pl.check_display()["name"], "\\\\.\\DISPLAY1")
+            with self.assertRaises(pl.PlacementError):
+                pl.check_display("DISPLAY2")
+            os.environ[pl.ENV] = "DISPLAY2"
+            with self.assertRaises(pl.PlacementError):
+                pl.check_display()
+        finally:
+            pl.monitors = real
+            os.environ.pop(pl.ENV, None)
+            if env is not None:
+                os.environ[pl.ENV] = env
+
     def test_no_monitors_at_all(self):
         with self.assertRaises(pl.PlacementError):
             pl.find_monitor([], "DISPLAY2")

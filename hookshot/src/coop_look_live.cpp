@@ -761,7 +761,7 @@ void StartModule() {
     // read from a kit's coop-options.ini only, a game with its coop-options.ini beside longshot.exe (the owner's
     // test pair, Nucleus instances) saved the look there and started without it: the chosen colours never came back.
     std::vector<std::string> part_errors;
-    Look worn = ReadParts(CoopFiles::ReadText(CoopTitle::LookFile()), &part_errors);
+    Look worn = ReadParts(CoopTitle::LookText(), &part_errors);
     worn[Part::tunic] = CoopHook::LoadSettings(ini, errors).color;
 
     g_textures = std::make_unique<GameTextures>();
@@ -849,6 +849,20 @@ void StartModule() {
         LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/metal.bin: painted metal parts stay metal "
                        "(make it again)");
     }
+    // The parts' regions (row 185): without region.bin (an older pack) parts are painted by tones only.
+    if (const auto region_file = ReadFile(LookDir() / "region.bin")) {
+        std::string why;
+        if (auto region = CoopLookParts::ParseRegion(*region_file, &why)) {
+            LOG_INFO(Core, "coop: look: {} part region block lists (a painted part takes its whole region)",
+                     region->size());
+            CoopLookParts::UseRegion(std::make_shared<const CoopLookParts::Region>(std::move(*region)));
+        } else {
+            LOG_WARNING(Core, "coop: look: coop_look/region.bin: {}; parts painted by tones only", why);
+        }
+    } else if (gear_file) {
+        LOG_INFO(Core, "coop: look: the puppet pack has no coop_look/region.bin: parts painted by tones only "
+                       "(make it again)");
+    }
     // The Cap trim's blocks: without cap.bin (an older pack) the Cap trim row changes nothing.
     if (const auto cap_file = ReadFile(LookDir() / "cap.bin")) {
         std::string why;
@@ -857,9 +871,17 @@ void StartModule() {
             for (const auto& b : *cap) {
                 blocks += b.offsets.size();
             }
-            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures", blocks, cap->size());
+            const std::size_t gear_textures = CoopLookParts::GearCapTextures(*cap);
+            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures ({} of the Goron and Zora "
+                           "tunics)", blocks, cap->size(), gear_textures);
+            if (gear_textures == 0) {   // (row 278: a pack made before it lists the Kokiri tunic's only)
+                LOG_INFO(Core, "coop: look: coop_look/cap.bin has no Goron or Zora tunic trims: those tunics' hood "
+                               "trims follow the tunic (make the puppet pack again)");
+            }
+            auto shared = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            CoopLookParts::UseCap(shared);   // the gear's: the Goron and Zora hood trims, own Link and puppets
             std::lock_guard lock(g_tunic_mutex);
-            g_tunic_cap = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            g_tunic_cap = std::move(shared);
         } else {
             LOG_WARNING(Core, "coop: look: coop_look/cap.bin: {}; the Cap trim changes nothing", why);
         }
@@ -945,6 +967,7 @@ void StopModule() {
         g_tunic_kept.clear();
         g_tunic_cap.reset();
     }
+    CoopLookParts::UseCap(nullptr);   // (the gear's too: the next start reads cap.bin again)
     CoopLookShare::EnableSlots(false);
     g_number = 0;
     g_textures.reset();

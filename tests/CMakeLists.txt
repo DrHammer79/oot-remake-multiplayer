@@ -163,6 +163,7 @@ add_executable(coop_tests
   lichii/switch_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_switch_share.cpp
   lichii/caller_orders_test.cpp
   lichii/char_colours_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_char_colours.cpp
+  lichii/gear_params_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_gear_params.cpp
   lichii/charsel_tidy_test.cpp
   lichii/char_slots_test.cpp
   lichii/char_ages_test.cpp
@@ -224,6 +225,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/look_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_menu.cpp
   hookshot/snail_custom_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_snail_custom.cpp
   hookshot/menu_state_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_menu_state.cpp
+  hookshot/charsel_names_test.cpp
   hookshot/look_view_test.cpp
   hookshot/look_steer_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_view.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_tunic.cpp
@@ -235,6 +237,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/stuck_load_test.cpp
   hookshot/text_fit_test.cpp
   hookshot/list_pages_test.cpp
+  hookshot/menu_nav_test.cpp
   hookshot/auto_rejoin_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_auto_rejoin.cpp
   hookshot/lan_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_lan.cpp
   hookshot/playtest_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_playtest_core.cpp

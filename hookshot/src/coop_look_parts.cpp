@@ -56,10 +56,11 @@ const std::vector<GearTexture>& Gear() {
 }
 
 namespace {
-// The parts the gear wardrobe paints (the tunic and the Cap trim are the tunic wardrobe's; the eyes are no texture:
-// the model's own parameter, CoopCharColours).
+// The parts the gear wardrobe paints (the Kokiri tunic is the tunic wardrobe's; the Cap trim both wardrobes': the
+// Goron and Zora tunics' hood trims are gear textures, row 278; the eyes are no texture: the model's own parameter,
+// CoopCharColours).
 bool IsGear(Part p) {
-    return p != Part::tunic && p != Part::cap_trim && p != Part::eyes && p != Part::hair && !CoopLook::IsCharacterPart(p);
+    return p != Part::tunic && p != Part::eyes && p != Part::hair && !CoopLook::IsCharacterPart(p);
 }
 }  // namespace
 
@@ -99,9 +100,35 @@ std::shared_ptr<const Metal> CurrentMetal() {
     std::lock_guard lock(g_metal_mutex);
     return g_metal;
 }
-}  // namespace
 
-std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::string* why) {
+std::mutex g_region_mutex;
+std::shared_ptr<const Region> g_region;   // guarded
+
+std::shared_ptr<const Region> CurrentRegion() {
+    std::lock_guard lock(g_region_mutex);
+    return g_region;
+}
+
+std::mutex g_cap_mutex;
+std::shared_ptr<const Cap> g_cap;   // guarded: the Cap trim's blocks (row 278: the gear textures' are Painted's)
+
+std::shared_ptr<const Cap> CurrentCap() {
+    std::lock_guard lock(g_cap_mutex);
+    return g_cap;
+}
+
+const GearTexture* GearOf(const std::string& name) {
+    for (const GearTexture& g : Gear()) {
+        if (name == g.name) {
+            return &g;
+        }
+    }
+    return nullptr;
+}
+
+// metal.bin's layout (tools/puppet_pack/look_metal.py pack), under `magic`.
+std::optional<Metal> ParseBlocks(const std::vector<std::uint8_t>& file, const char* magic, const char* what,
+                                 std::string* why) {
     const auto fail = [&](const char* w) -> std::optional<Metal> {
         if (why != nullptr) {
             *why = w;
@@ -109,9 +136,8 @@ std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::stri
         return std::nullopt;
     };
     constexpr std::size_t kName = 64;
-    static constexpr char kMagic[] = "COOPMTL1";
-    if (file.size() < 12 || std::memcmp(file.data(), kMagic, 8) != 0) {
-        return fail("not a metal file");
+    if (file.size() < 12 || std::memcmp(file.data(), magic, 8) != 0) {
+        return fail(what);
     }
     const auto u32 = [&](std::size_t at) {
         std::uint32_t v = 0;
@@ -147,10 +173,60 @@ std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::stri
     }
     return out;
 }
+}  // namespace
+
+std::optional<Metal> ParseMetal(const std::vector<std::uint8_t>& file, std::string* why) {
+    return ParseBlocks(file, "COOPMTL1", "not a metal file", why);
+}
+
+std::optional<Region> ParseRegion(const std::vector<std::uint8_t>& file, std::string* why) {
+    return ParseBlocks(file, "COOPRGN1", "not a region file", why);
+}
+
+void UseRegion(std::shared_ptr<const Region> region) {
+    std::lock_guard lock(g_region_mutex);
+    g_region = std::move(region);
+}
+
+std::vector<std::int8_t> RegionRules(const Region& region, const std::string& name, std::size_t blocks,
+                                     std::size_t block_bytes, const std::vector<CoopLook::Part>& parts) {
+    std::vector<std::int8_t> out;
+    for (const MetalBlocks& b : region) {
+        if (b.texture != name) {
+            continue;
+        }
+        const auto it = std::find(parts.begin(), parts.end(), b.part);
+        if (it == parts.end()) {
+            continue;   // the part has no colour: its blocks stay the game's
+        }
+        if (out.empty()) {
+            out.assign(blocks, std::int8_t{-1});
+        }
+        for (const std::uint32_t at : b.offsets) {
+            if (block_bytes != 0 && at % block_bytes == 0 && at / block_bytes < blocks) {
+                out[at / block_bytes] = static_cast<std::int8_t>(it - parts.begin());
+            }
+        }
+    }
+    return out;
+}
 
 void UseMetal(std::shared_ptr<const Metal> metal) {
     std::lock_guard lock(g_metal_mutex);
     g_metal = std::move(metal);
+}
+
+void UseCap(std::shared_ptr<const Cap> cap) {
+    std::lock_guard lock(g_cap_mutex);
+    g_cap = std::move(cap);
+}
+
+std::size_t GearCapTextures(const Cap& cap) {
+    std::size_t n = 0;
+    for (const CapBlocks& b : cap) {
+        n += GearOf(b.texture) != nullptr ? 1 : 0;
+    }
+    return n;
 }
 
 std::size_t PaintMetal(const Metal& metal, const std::string& name, std::vector<std::uint8_t>& texels,
@@ -174,28 +250,50 @@ std::size_t PaintMetal(const Metal& metal, const std::string& name, std::vector<
 CoopLookTunic::Texels Painted(const CoopLookTunic::Texels& gear, const CoopLook::Look& look) {
     CoopLookTunic::Texels out = gear;
     const std::shared_ptr<const Metal> metal = CurrentMetal();
-    for (CoopLookTunic::Texture& t : out) {
+    const std::shared_ptr<const Region> region = CurrentRegion();
+    const std::shared_ptr<const Cap> cap = CurrentCap();
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        CoopLookTunic::Texture& t = out[i];
         if (metal) {
             PaintMetal(*metal, t.name, t.texels, look);
         }
-        const GearTexture* entry = nullptr;
-        for (const GearTexture& g : Gear()) {
-            if (t.name == g.name) {
-                entry = &g;
-                break;
-            }
-        }
+        const GearTexture* entry = GearOf(t.name);
         if (entry == nullptr) {
             continue;
         }
         std::vector<CoopLookPaint::Rule> rules;
+        std::vector<CoopLook::Part> parts;   // each rule's part
+        std::uint32_t tones = 0;             // every part's, painted or not (never taken by a region)
         for (const GearRule& r : entry->rules) {
+            tones |= r.tones;
             if (const auto& c = look[r.part]) {
                 rules.push_back({r.tones, *c});
+                parts.push_back(r.part);
             }
         }
         if (!rules.empty()) {
-            CoopLookPaint::Recolour(entry->format, t.texels, t.texels, rules);
+            const std::size_t step = CoopLookPaint::BlockBytes(entry->format);
+            const std::vector<std::int8_t> blocks =
+                region ? RegionRules(*region, t.name, t.texels.size() / step, step, parts) : std::vector<std::int8_t>{};
+            CoopLookPaint::Recolour(entry->format, t.texels, t.texels, rules, {blocks, tones});
+        }
+        // Row 278: then the hood's trims (the Goron and Zora tunics' cap blocks) in the Cap trim colour, from the
+        // game's own texels, by the texture's own tones, shaded against that part's average as the tunic is: a trim
+        // in the tunic's colour is the tunic's painting byte for byte. Unset, they follow the tunic.
+        if (const auto& trim = look[Part::cap_trim]; trim && cap) {
+            const std::span<const std::uint8_t> original(gear[i].texels);
+            double sum = 0;
+            std::size_t n = 0;
+            for (const T::Rgb& e : CoopLookPaint::Ends(entry->format, original)) {
+                if ((CoopLookPaint::ToneOf(e) & tones) != 0) {
+                    sum += CoopLookPaint::Luma(e);
+                    ++n;
+                }
+            }
+            if (n != 0 && sum > 0) {
+                PaintCap(*cap, t.name, entry->format, original, t.texels,
+                         CoopLookPaint::Rule{tones, *trim & 0xFFFFFFu, T::Takes::tones, sum / static_cast<double>(n)});
+            }
         }
     }
     return out;
@@ -350,8 +448,14 @@ std::optional<Cap> ParseCap(const std::vector<std::uint8_t>& file, std::string* 
 std::size_t PaintCap(const Cap& cap, const std::string& name, CoopLookPaint::Format format,
                      std::span<const std::uint8_t> green, std::vector<std::uint8_t>& texels, std::uint32_t colour,
                      double base) {
+    return PaintCap(cap, name, format, green, texels, CoopLookPaint::Rule{0, colour & 0xFFFFFFu, T::Takes::green, base});
+}
+
+std::size_t PaintCap(const Cap& cap, const std::string& name, CoopLookPaint::Format format,
+                     std::span<const std::uint8_t> original, std::vector<std::uint8_t>& texels,
+                     const CoopLookPaint::Rule& rule) {
     const std::size_t step = CoopLookPaint::BlockBytes(format);
-    const std::size_t size = std::min(green.size(), texels.size());
+    const std::size_t size = std::min(original.size(), texels.size());
     const std::span<std::uint8_t> out(texels);
     std::size_t changed = 0;
     for (const CapBlocks& b : cap) {
@@ -362,8 +466,7 @@ std::size_t PaintCap(const Cap& cap, const std::string& name, CoopLookPaint::For
             if (at % step != 0 || at > size || size - at < step) {
                 continue;
             }
-            changed += CoopLookPaint::Recolour(format, green.subspan(at, step), out.subspan(at, step),
-                                               {{0, colour & 0xFFFFFFu, T::Takes::green, base}});
+            changed += CoopLookPaint::Recolour(format, original.subspan(at, step), out.subspan(at, step), {rule});
         }
     }
     return changed;

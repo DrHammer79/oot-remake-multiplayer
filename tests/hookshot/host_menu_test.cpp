@@ -454,7 +454,7 @@ TEST_CASE("host menu: the same helper nonce and port for the same invite on this
     CHECK(CoopHostMenu::RejoinIds("pc-one", "PW2", host).nonce != a.nonce);  // another session
 }
 
-TEST_CASE("host menu: Paste friend's answer says plainly what was wrong with the clipboard") {
+TEST_CASE("host menu: Paste answer code says plainly what was wrong with the clipboard") {
     using CoopHostMenu::ReadPastedAnswer;
     namespace nat = coop::server::nat;
     constexpr std::uint64_t now = 1'800'000'000;

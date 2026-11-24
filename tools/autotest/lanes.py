@@ -4,6 +4,7 @@
     python -I tools/autotest/lanes.py setup   --lane N --from-a <game folder> --from-b <game folder> [--dry-run]
     python -I tools/autotest/lanes.py check   [--lane N]
     python -I tools/autotest/lanes.py install --lane N --dll <hookshot_coop.dll> [--dry-run]
+    python -I tools/autotest/lanes.py restore --lane N   (the lane's own module back after a live.py --dll session)
     python -I tools/autotest/lanes.py lock    status|acquire|release --lane N [--owner WHO] [--wait S]
 
 Lane N has its own game pair (<kit root>\\ls\\laneN-A and -B), server port (27510 + 10*N, with +1 and +2 for
@@ -165,6 +166,10 @@ def setup(n, from_a, from_b, dry=False, say=print, kit=None, busy=running_in):
         fill(os.path.abspath(src), dst, dry, say)
     if not dry:
         os.makedirs(L["shots"], exist_ok=True)
+        for folder in (L["a"], L["b"]):   # (the source's module is the lane's own now)
+            exe = hs.find_exe(folder)
+            if exe:
+                drop_swap(os.path.join(os.path.dirname(exe), MODULE))
     return L
 
 
@@ -184,6 +189,10 @@ def problems(n, kit=None, now=None, busy=running_in):
             mismatch = str(e)
         if mismatch:
             out.append(mismatch)
+        for m in (LIVE_BACKUP, LIVE_ABSENT):
+            if os.path.exists(os.path.join(os.path.dirname(hs.find_exe(folder)), MODULE + m)) and not busy(folder):
+                out.append("%s: a live session's module was not put back (%s%s, no game running): lanes.py restore "
+                           "--lane %d" % (folder, MODULE, m, n))
         if not os.path.isfile(os.path.join(hs.warm_dir(folder), "longshot_pipelines.bin.built")):
             out.append("%s: not warmed (no longshot_pipelines.bin.built: the first start prepares every shader)" % folder)
         for top, dirs, files in os.walk(folder):
@@ -220,9 +229,101 @@ def install(n, dll, dry=False, say=print, kit=None, busy=running_in):
         dst = os.path.join(os.path.dirname(exe), "hookshot_coop.dll")
         say("copy %s -> %s" % (dll, dst))
         if not dry:
-            if os.path.lexists(dst):
-                os.unlink(dst)   # never write into a file that may be a hard link
-            shutil.copy2(dll, dst)
+            _put(dll, dst)
+            drop_swap(dst)   # this module is the lane's own now: a session's leftover backup must never come back
+
+
+# --- a module for one session (live.py start --dll), and the lane's own back -------------------------------------
+# This file is the one owner of what module a lane runs. `install` and `setup` give the lane its own module (and drop
+# any session swap left beside it); `swap_in` puts a test module in for one session with the lane's own kept beside
+# it (MODULE + LIVE_BACKUP, or an empty MODULE + LIVE_ABSENT when the lane had none); `swap_back` puts it back.
+
+MODULE = "hookshot_coop.dll"
+LIVE_BACKUP = ".live-backup"   # the lane's own module while a session runs another
+LIVE_ABSENT = ".live-absent"   # the lane had no module: the session's is removed at its end
+
+
+def module_paths(n, kit=None):
+    """Where each game of lane n loads its module from."""
+    L = lane(n, kit)
+    out = []
+    for folder in (L["a"], L["b"]):
+        exe = hs.find_exe(folder)
+        if not exe:
+            raise Fail("%s: no game (lanes.py setup)" % folder)
+        out.append(os.path.join(os.path.dirname(exe), MODULE))
+    return out
+
+
+def _put(dll, dst):
+    if os.path.lexists(dst):
+        os.unlink(dst)   # never write into a file that may be a hard link
+    shutil.copy2(dll, dst)
+
+
+def drop_swap(dst):
+    """A plain install or setup: what is there now is the lane's own; a session's leftover markers go."""
+    for m in (dst + LIVE_BACKUP, dst + LIVE_ABSENT):
+        if os.path.lexists(m):
+            os.unlink(m)
+
+
+def swap_in(n, dll, kit=None, busy=running_in):
+    """`dll` into both games of lane n for one session, the lane's own kept beside it. A backup or marker left by a
+    session that could not put it back is still the lane's own (install and setup drop them), so it is kept."""
+    if not os.path.isfile(dll):
+        raise Fail("no %s" % dll)
+    L = lane(n, kit)
+    for folder in (L["a"], L["b"]):
+        if busy(folder):
+            raise Fail("%s: its game is running; close it first" % folder)
+    paths = module_paths(n, kit)
+    for dst in paths:
+        if not (os.path.exists(dst + LIVE_BACKUP) or os.path.exists(dst + LIVE_ABSENT)):
+            if os.path.isfile(dst):
+                shutil.copy2(dst, dst + LIVE_BACKUP)
+            else:
+                open(dst + LIVE_ABSENT, "w").close()
+        _put(dll, dst)
+    return paths
+
+
+def swap_back(n, kit=None, tries=10, wait=0.5, sleep=time.sleep):
+    """The lane's own module back after a session (a killed game can hold the file a moment on Windows: tried again
+    for tries x wait s). One word per game: restored, removed (the lane had none), nothing to put back, or NOT ..."""
+    out = []
+    for dst in module_paths(n, kit):
+        bak, absent = dst + LIVE_BACKUP, dst + LIVE_ABSENT
+        word = "nothing to put back"
+        for i in range(tries):
+            try:
+                if os.path.exists(bak):
+                    if os.path.lexists(dst):
+                        os.unlink(dst)
+                    os.replace(bak, dst)
+                    if os.path.lexists(absent):
+                        os.unlink(absent)
+                    word = "restored"
+                elif os.path.exists(absent):
+                    if os.path.lexists(dst):
+                        os.unlink(dst)
+                    os.unlink(absent)
+                    word = "removed (the lane had none)"
+                break
+            except OSError as e:
+                word = "NOT restored (%s): lanes.py restore --lane %d" % (e, n)
+                if i + 1 < tries:
+                    sleep(wait)
+        out.append(word)
+    return out
+
+
+def swap_left(n, kit=None):
+    """The session swaps still waiting to be put back in lane n (paths of their markers)."""
+    out = []
+    for dst in module_paths(n, kit):
+        out += [m for m in (dst + LIVE_BACKUP, dst + LIVE_ABSENT) if os.path.exists(m)]
+    return out
 
 
 # --- the lane's run lock -----------------------------------------------------------------------------------------
@@ -300,6 +401,8 @@ def main(argv=None):
     s.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("check")
     c.add_argument("--lane", type=int)
+    rs = sub.add_parser("restore", help="put the lane's own module back after a live session that could not")
+    rs.add_argument("--lane", type=int, required=True)
     n = sub.add_parser("install")
     n.add_argument("--lane", type=int, required=True)
     n.add_argument("--dll", required=True)
@@ -337,6 +440,10 @@ def main(argv=None):
             return 1 if bad else 0
         if a.cmd == "install":
             install(a.lane, os.path.abspath(a.dll), a.dry_run)
+            return 0
+        if a.cmd == "restore":
+            for p, w in zip(module_paths(a.lane), swap_back(a.lane)):
+                print("%s: %s" % (p, w))
             return 0
         root = hs.main_root(REPO)
         if a.action == "status":

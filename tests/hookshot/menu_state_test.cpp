@@ -2,7 +2,6 @@
 // The play-test bridge's `menu` state member (hookshot/src/coop_menu_state.h).
 #include <doctest/doctest.h>
 
-#include <optional>
 #include <string>
 
 #include "coop_look_menu.h"
@@ -15,7 +14,7 @@ namespace {
 
 bool Has(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 
-// As the module opens his screen (coop_pause_tab_module.cpp): his rows come from the model the screen shows.
+// As the module opens his screen (a character's rows: its model's own parts, CoopCharColours::ForModel).
 Screen OpenFor(Driver& d, std::uint16_t character) {
     d.Open(CoopLook::Look{}, character);
     return FromDriver(d, true, true);
@@ -54,13 +53,28 @@ TEST_CASE("menu state: no focused row is null") {
     CHECK(Has(j, "\"focused\":null,\"focused_name\":null"));
 }
 
-TEST_CASE("menu state: a Character Select character's screen is driven and pages as its title says") {
+TEST_CASE("menu state: a character's Customize screen gives its model's own rows (npc-customize ForModel)") {
     Driver d;
-    const auto s = OpenFor(d, 9);
+    OpenFor(d, 9);
+    d.SetRows(1 | 2 | 4 | 32 | 0x80);   // (hair, eyes, one clothing colour, the equipment)
+    const auto s = FromDriver(d, true, true);
     const auto j = Json(Tab{}, s);
     CHECK(Has(j, "\"customize_screen\":{\"open\":true,\"driven\":true,"));
     CHECK(Has(j, "\"page_no\":1,\"pages\":1"));
-    CHECK(Has(s.texts.title, "(page 1 of 1)"));
+    CHECK(Has(j, "{\"option\":0,\"label\":\"Hair Colour\","));
+    CHECK(Has(j, "{\"option\":1,\"label\":\"Eye Colour\","));
+    CHECK(Has(j, "\"focused\":0,\"focused_label\":\"Hair Colour\""));
+    CHECK(s.page_no == 1);
+}
+
+TEST_CASE("menu state: a character whose model has only the equipment shows that row alone") {
+    Driver d;
+    OpenFor(d, 27);
+    d.SetRows(32 | 0x80);
+    const auto j = Json(Tab{}, FromDriver(d, true, true));
+    CHECK(Has(j, "{\"option\":0,\"label\":\"Equipment\","));
+    CHECK_FALSE(Has(j, "Eye Colour"));
+    CHECK_FALSE(Has(j, "\"option\":1,"));   // (his other places are empty: left out)
 }
 
 TEST_CASE("menu state: Link's pages count as the title does, and Y turns them") {

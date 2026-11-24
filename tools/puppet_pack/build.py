@@ -298,6 +298,44 @@ def character_project(variant, file):
     return f"Player_{variant}_C{file:03d}"
 
 
+def charsel_native_wanted(mod_dir):
+    """Whether the pack makes co-op's own Characters tab (charsel_ui.py): not when the Character Select mod is in the
+    mods (its characters.json, where find_characters looks, switched on; with its NPC models or only its default
+    part) with a code patch of its own (exefs/*.ips or *.pchtxt): his files and his code are then the tab's. The kit
+    decides the same for the code patch it puts in before the game's build (kit-paths.ps1 Test-KitCharselNative), so
+    the game and the pack agree."""
+    here = os.path.abspath(mod_dir)
+    roots = [os.path.dirname(here)]
+    if os.path.basename(os.path.dirname(os.path.dirname(here))).lower() == "contents":
+        roots.append(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+    for root in roots:
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(root, name, CHARACTERS_FILE)
+            if name.startswith(("-", "_", ".")) or not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    doc = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(doc, dict) or doc.get("mod") != CHARACTERS_MOD or doc.get("format") != CHARACTERS_FORMAT:
+                continue
+            if len(roots) > 1 and mod_list_off(roots[1], (f"contents/{os.path.basename(root)}/{name}"
+                                                         if root == roots[0] else name)):
+                continue
+            try:
+                code = os.listdir(os.path.join(root, name, "exefs"))
+            except OSError:
+                code = []
+            if any(n.lower().endswith((".ips", ".pchtxt")) for n in code):
+                return False
+    return True
+
+
 # The Character Select mod retargets the player's animation sets: its own Pack/Actor/Player_<age>.pack has the
 # player's AnimationParam with IsRetarget on every set, because a character's leg bones carry the character's own
 # lengths and the game keeps them only when the clips are retargeted (the mod's README, "The ankles"). A character's
@@ -348,44 +386,6 @@ def character_param_entry(game_entry, old, new):
     """The size-table entry of a packed file the mod made longer: the game parses it in a heap of the entry, so the
     entry grows by the growth, 32-byte aligned (the mod's own rule: 80 bytes short, the loading thread died)."""
     return game_entry + ((max(0, len(new) - len(old)) + 0x1F) & ~0x1F)
-
-
-def charsel_native_wanted(mod_dir):
-    """Whether the pack makes co-op's own Characters tab (charsel_ui.py): not when the Character Select mod is in the
-    mods (its characters.json, where find_characters looks, switched on; with its NPC models or only its default
-    part) with a code patch of its own (exefs/*.ips or *.pchtxt): his files and his code are then the tab's. The kit
-    decides the same for the code patch it puts in before the game's build (kit-paths.ps1 Test-KitCharselNative), so
-    the game and the pack agree."""
-    here = os.path.abspath(mod_dir)
-    roots = [os.path.dirname(here)]
-    if os.path.basename(os.path.dirname(os.path.dirname(here))).lower() == "contents":
-        roots.append(os.path.dirname(os.path.dirname(os.path.dirname(here))))
-    for root in roots:
-        try:
-            names = sorted(os.listdir(root))
-        except OSError:
-            continue
-        for name in names:
-            path = os.path.join(root, name, CHARACTERS_FILE)
-            if name.startswith(("-", "_", ".")) or not os.path.isfile(path):
-                continue
-            try:
-                with open(path, encoding="utf-8") as f:
-                    doc = json.load(f)
-            except (OSError, ValueError):
-                continue
-            if not isinstance(doc, dict) or doc.get("mod") != CHARACTERS_MOD or doc.get("format") != CHARACTERS_FORMAT:
-                continue
-            if len(roots) > 1 and mod_list_off(roots[1], (f"contents/{os.path.basename(root)}/{name}"
-                                                         if root == roots[0] else name)):
-                continue
-            try:
-                code = os.listdir(os.path.join(root, name, "exefs"))
-            except OSError:
-                code = []
-            if any(n.lower().endswith((".ips", ".pchtxt")) for n in code):
-                return False
-    return True
 
 
 def mod_list_off(mods_root, name):
@@ -2220,11 +2220,17 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             if metal_blob is not None:
                 write(os.path.join(mod_dir, look_live.DIR, look_metal.FILE), metal_blob)
                 look_files["metal"] = f"{look_live.DIR}/{look_metal.FILE}"
-        # The blocks of the tunic's textures that only the cap uses (the Customize page's Cap trim,
-        # look_cap), beside green.bin, which holds their texels.
+            # Which colour blocks lie wholly on a metal part (row 185, look_metal.regions).
+            region_blob = look_metal.regions(read_tex, log)
+            if region_blob is not None:
+                write(os.path.join(mod_dir, look_live.DIR, look_metal.REGION_FILE), region_blob)
+                look_files["region"] = f"{look_live.DIR}/{look_metal.REGION_FILE}"
+        # The blocks of the tunics' textures that only the cap uses (the Customize page's Cap trim,
+        # look_cap), beside green.bin and gear.bin, which hold their texels (the Kokiri tunic's, the
+        # Goron and Zora tunics').
         if "green" in look_files:
-            def read_model(variant):
-                p = os.path.join(romfs, *look_cap.model_path(variant).split("/"))
+            def read_model(model):
+                p = os.path.join(romfs, *look_cap.model_path(model).split("/"))
                 return dicts.decompress(read(p)) if os.path.isfile(p) else None
             cap_blob = look_cap.cap(read_tex, read_model, log)
             if cap_blob is not None:

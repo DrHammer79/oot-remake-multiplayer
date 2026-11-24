@@ -692,7 +692,7 @@ TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patc
     // The bridge looks for the optional export; the camera hook asks it first, whatever the Mouse camera row, and
     // writes the angles only in states 3 and 4, the pitch within the camera's limits.
     CHECK(patch.find("GetProcAddress(m, \"hos_coop_turn\")") != std::string::npos);
-    CHECK(patch.find("+    if (cam && looks_like_camera(cam) && coop_turns(cam)) {") != std::string::npos);
+    CHECK(patch.find("+    if (looks_like_camera(cam) && coop_turns(cam)) {") != std::string::npos);
     CHECK(patch.find("+    if ((state != STATE_FOLLOWS && state != STATE_PLAYER) || !isfinite(yaw) || !isfinite(pitch)) return 0;") !=
           std::string::npos);
     CHECK(patch.find("+    if (pitch < lo) pitch = lo;") != std::string::npos);
@@ -941,9 +941,9 @@ TEST_CASE("hookshot: the pane text wrap (patch 0041) is one row in 0005's table,
     std::snprintf(row, sizeof row, "+    (%u, 0x439520, (0xd503237f, 0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4)),",
                   HOS_COOP_WRAP_PANE_TEXT);
     CHECK(patch.find(row) != std::string::npos);
-    // After 0036's row (10), at the table's end.
-    CHECK(patch.find(" stp x20, x19\n+    # HOS_COOP_WRAP_PANE_TEXT") != std::string::npos);
-    // The id is free in the one wrap space (1-10, 16-19, 24).
+    // After 0024's last row (9), at the table's end.
+    CHECK(patch.find(" stp x20, x19\n+    # HOS_COOP_WRAP_PANE_TEXT") != std::string::npos);   // (after 0036's boss orders row)
+    // The id is free in the one wrap space (1-9, 16-19, 24).
     for (const unsigned used : {HOS_COOP_WRAP_SOUND_EMIT, HOS_COOP_WRAP_GAME_OVER_SAVE, HOS_COOP_WRAP_SAVE_LOADED,
                                 HOS_COOP_WRAP_EVENT_REQUEST, HOS_COOP_WRAP_BOSS_ORDER}) {
         CHECK(HOS_COOP_WRAP_PANE_TEXT != used);
@@ -1359,11 +1359,11 @@ TEST_CASE("hookshot: patch 0018's screens' tracker and menu state build on Linux
 
 TEST_CASE("hookshot: every patch touches only what Longshot's Linux AppImage ships, so the Linux kit applies it") {
     // tools/release/kit/linux-longshot/scripts/build.sh applies every hookshot/patches/*.patch to a copy of the
-    // AppImage's usr/share/longshot, which holds only what Longshot's scripts/linux/appimage.sh copies (v3.1.1, the same as v3.1.0):
+    // AppImage's usr/share/longshot, which holds only what Longshot's scripts/linux/appimage.sh copies (v3.2.0, the same folders as v3.1.1):
     // no tests/, docs/, .forgejo/, most of third_party/. A hunk on anything else applies on Windows' full source and
     // stops every Linux build. Keep this list to appimage.sh's when the pin moves: the list is for kShippedFor, and
     // the test fails on any other tag in hookshot/LINUX.txt until the list is re-checked and kShippedFor moved.
-    const std::string kShippedFor = "v3.1.1";
+    const std::string kShippedFor = "v3.2.0";
     const std::string linux_pin = ReadFile(kRepo / "hookshot" / "LINUX.txt");
     const auto tag_at = linux_pin.find("\ntag=");
     REQUIRE(tag_at != std::string::npos);
@@ -1703,4 +1703,17 @@ TEST_CASE("hookshot: SDL's audio is started once for the microphones, not at eve
             }
         }
     }
+}
+
+TEST_CASE("hookshot: F1 in play opens co-op's - menu, co-op's tabs stay in Longshot's F1 menu only as the fallback") {
+    // (menu-polish-01113, A #100: co-op's home is the game's - menu; the F1 tabs are Longshot's ImGui menu, not the game's)
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("vk == 0x70 /* F1 */ && repeat == 0 && g_on && !CoopTitle::Up() && CoopPauseTab::OpenMultiplayer()") !=
+          std::string::npos);
+    CHECK(module.find("CoopPause::WantClose();") != std::string::npos);
+    CHECK(module.find("return !has_pack || CoopPauseTab::NoMinusTabs() ? CoopPause::Tabs() : 0;") != std::string::npos);
+    CHECK(module.find("if (!g_on) return g_original_on ? 1 : 0;") != std::string::npos);   // (original game: its tab)
+    const std::string tab = ReadFile(kRepo / "hookshot" / "src" / "coop_pause_tab_module.cpp");
+    CHECK(tab.find("if (g_players_to_main.load()) OpenLongshotMenu();") != std::string::npos);   // (old pack: as before)
+    CHECK(tab.find("SetView(g_players_to_main.load() ? View::kMain : View::kPlayers);") != std::string::npos);
 }

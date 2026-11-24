@@ -73,6 +73,19 @@ inline std::string Fit(const std::string& t, std::size_t n) {
     return t.substr(0, PrefixEnd(t, n - 3, 2 * n - 6)) + "...";
 }
 
+// The letter budget (for Fit) that makes `shown`, drawn `drawn` wide by the game, fit its box `box` wide
+// (menu-polish-01113: a count of letters alone cannot know a proportional font: "Co-op came with the game" is 24
+// letters and ran past its button). The drawn width scaled down to the box, always at least a letter shorter than now,
+// never below 4 (one letter and "..."); 0 when it fits already, or there is nothing to cut.
+inline std::size_t LettersForWidth(const std::string& shown, float drawn, float box) {
+    if (!(box > 0.0f) || !(drawn > box)) return 0;
+    const std::size_t now = (Halves(shown) + 1) / 2;
+    if (now <= 4) return 0;
+    std::size_t n = static_cast<std::size_t>(static_cast<float>(now) * box / drawn);
+    if (n >= now) n = now - 1;
+    return n < 4 ? 4 : n;
+}
+
 // The end of the first line of `t` from `at`, for a line of `n` letters: the last space that fits, else the letter
 // before the one that does not (never inside a letter; at least one letter, so a loop always moves on).
 inline std::size_t LineEnd(const std::string& t, std::size_t at, std::size_t n) {

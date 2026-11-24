@@ -73,6 +73,30 @@ TOOLS = [
     {"name": "desync_check", "description": "Compare every checkpoint of the session: the first tag where the two "
      "games' shared flags differ, and which flags.",
      "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
+    {"name": "quit_game", "description": "Close one game in the middle of the session (asked to quit, or `kill`: at "
+     "once, as a crash ends it). A planned exit: the session goes on (live.py quit).",
+     "inputSchema": {"type": "object", "required": ["player"],
+                     "properties": {"player": {"type": "string", "enum": ["A", "B"]}, "kill": {"type": "boolean"}}}},
+    {"name": "server", "description": "Stop the session's server, or start it again (the boot's exe, port and "
+     "password). The games stay open (live.py server).",
+     "inputSchema": {"type": "object", "required": ["action"],
+                     "properties": {"action": {"type": "string", "enum": ["stop", "start"]}}}},
+    {"name": "relaunch", "description": "Start a game that quit or crashed again; it joins the session's server and "
+     "keeps its save unless `restore` (live.py relaunch). `boot`: a boot script; `no_load`: the script takes the title.",
+     "inputSchema": {"type": "object", "required": ["player"],
+                     "properties": {"player": {"type": "string", "enum": ["A", "B"]}, "boot": {"type": "string"},
+                                    "no_load": {"type": "boolean"}, "restore": {"type": "boolean"}}}},
+    {"name": "wait_log", "description": "Wait until a game's log (this run of the game) has at least `min` lines "
+     "matching `pattern` (a regular expression; default 1), at most `timeout_s` seconds (default 60). With `max`, "
+     "also fails when more lines than that match (`max` 0: none may). A failed check stops a script (a proof's line).",
+     "inputSchema": {"type": "object", "required": ["player", "pattern"],
+                     "properties": {"player": {"type": "string", "enum": ["A", "B"]}, "pattern": {"type": "string"},
+                                    "min": {"type": "integer", "minimum": 0}, "max": {"type": "integer", "minimum": 0},
+                                    "timeout_s": {"type": "number", "minimum": 0, "maximum": 1800}}}},
+    {"name": "sleep", "description": "Wait this many seconds of real time (the games run as they are: a held game "
+     "stays held), e.g. while the server is down.",
+     "inputSchema": {"type": "object", "required": ["seconds"],
+                     "properties": {"seconds": {"type": "number", "minimum": 0, "maximum": 600}}}},
 ]
 
 
@@ -1012,7 +1036,29 @@ def call(session, name, args):
         buf = io.StringIO()
         code = desync_check.check(session, bool(args.get("all")), out=lambda s: buf.write(s + "\n"))
         return {"result": ["agree", "desync", "nothing to compare", "incomplete"][code], "report": buf.getvalue()}
+    if name == "quit_game":
+        return _done(live.quit_one(Args(session=session, player=args["player"], kill=bool(args.get("kill")))))
+    if name == "server":
+        return _done(live.server_cmd(Args(session=session, action=args["action"])))
+    if name == "relaunch":
+        return _done(live.relaunch(Args(session=session, player=args["player"], boot=args.get("boot"),
+                                        no_load=bool(args.get("no_load")), restore=bool(args.get("restore")))))
+    if name == "wait_log":
+        return _done(live.wait_log(session, args["player"], args["pattern"], args.get("min", 1), args.get("max"),
+                                   args.get("timeout_s", 60)))
+    if name == "sleep":
+        live.touch(os.path.abspath(session))
+        time.sleep(float(args["seconds"]))
+        live.touch(os.path.abspath(session))
+        return {"slept": args["seconds"]}
     raise ValueError("no tool %s" % name)
+
+
+def _done(out):
+    """A session tool's answer; one that did not do its job raises, so a script stops there (replay)."""
+    if out.get("error") or out.get("ok") is False:
+        raise RuntimeError(json.dumps(out))
+    return out
 
 
 def reply(id_, result=None, error=None):

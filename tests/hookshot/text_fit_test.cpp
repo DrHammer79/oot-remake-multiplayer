@@ -79,3 +79,18 @@ TEST_CASE("text fit: LineEnd breaks at a space, and never inside a letter of a t
     }
     CHECK(at == zh.size());
 }
+
+TEST_CASE("text fit: a text the game drew wider than its box is cut to the width that fits") {
+    // (menu-polish-01113: "Co-op came with the game", 24 letters, ran past its button)
+    const std::string row = "Co-op came with the game";
+    CHECK(CoopTextFit::LettersForWidth(row, 200.0f, 220.0f) == 0);   // (fits: nothing cut)
+    CHECK(CoopTextFit::LettersForWidth(row, 220.0f, 220.0f) == 0);
+    const std::size_t n = CoopTextFit::LettersForWidth(row, 264.0f, 220.0f);
+    CHECK(n == 20);                                                   // (24 letters at 220/264)
+    CHECK(CoopTextFit::Fit(row, n).size() <= 20);
+    CHECK(CoopTextFit::Fit(row, n).find("...") != std::string::npos);
+    CHECK(CoopTextFit::LettersForWidth(row, 221.0f, 220.0f) == 23);   // (a hair too wide: always a letter shorter)
+    CHECK(CoopTextFit::LettersForWidth(row, 2000.0f, 220.0f) == 4);   // (never below one letter and "...")
+    CHECK(CoopTextFit::LettersForWidth("Back", 500.0f, 100.0f) == 0); // (nothing to cut)
+    CHECK(CoopTextFit::LettersForWidth(row, 300.0f, 0.0f) == 0);      // (no box read: left as it is)
+}

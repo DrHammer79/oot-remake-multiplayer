@@ -43,6 +43,7 @@
 #include "coop_playtest.h"
 #include "coop_talk_text.h"
 #include "coop_char_colours.h"
+#include "coop_gear_params.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
 #include "coop_dbno_draw.h"
@@ -90,6 +91,7 @@
 #include "coop_hit_replay.h"
 #include "coop_input.h"
 #include "coop_look.h"
+#include "coop_look_share.h"
 #include "coop_look_view.h"
 #include "coop_lift_player_game.h"
 #include "coop_objects.h"
@@ -1125,7 +1127,8 @@ bool NativeTyping(CoopNativeUi::Game& game, std::uint64_t now, const Colours& co
         return false;
     }
     auto line = CoopNativeUi::TypingLine(CoopI18n::Tr("you"), box->first, box->second, CoopI18n::Tr("(not sent)"));
-    if (const auto c = colours.find("you"); c != colours.end()) line.colour = c->second;
+    if (const auto c = colours.find("you"); c != colours.end() && !box->second) line.colour = c->second;
+    // (a failed send keeps TypingLine's kFailedColour: the line plainly did not go)
     // Again on a change, and before its time runs out (kTypingSeconds); while the banner shows the game's own (or the
     // held line) the typed line waits for it, the keys still type. Nothing is drawn.
     const bool due = !g_native.typing || !g_native.banner.showing() || line.text != g_native.typed ||
@@ -1158,6 +1161,17 @@ void NativeStep(void* ctx) {
         }
         g_native.ring.SetBlock((*block + 15) & ~std::uint64_t{15});
         g_native.block = Native::Block::kHave;
+        // The game's own font (the HUD pack's font-medium.otf) measures every banner line (CoopNativeUi::Width);
+        // without the pack the widths are the safe guesses.
+        if (const auto dir = CoopHud::Folder()) {
+            std::ifstream f(*dir / "font-medium.otf", std::ios::binary);
+            const std::vector<std::uint8_t> font{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+            if (CoopNativeUi::SetFontWidths(font)) {
+                LOG_INFO(Core, "coop: native ui: banner lines measured with the game's font ({} bytes)", font.size());
+            } else {
+                LOG_WARNING(Core, "coop: native ui: font-medium.otf not read; banner lines measured by safe guesses");
+            }
+        }
         g_native_chat = true;
         LOG_INFO(Core, "coop: native ui: chat on the game's banner (SimpleInfo_00; texts at {:#x})", *block);
     }
@@ -1245,7 +1259,7 @@ CoopDraw::Scene DrawScene() {
                                                            std::chrono::steady_clock::now().time_since_epoch())
                                                            .count());
         if (s.dbno && hold.Want(*s.dbno, now_ms)) {
-            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerColumns));
+            CoopNativeUi::HoldBanner(CoopDbnoDraw::BannerLine(*s.dbno, CoopNativeUi::kBannerWidth));
         } else if (CoopNativeUi::HeldBanner()) {
             CoopNativeUi::EndBanner();
         }
@@ -1584,7 +1598,7 @@ bool Start(const HosCoopApi* api) {
     // Original game (coop_original.h): the module stays off, all of it, and Longshot's F1 menu gets one tab with the
     // switch alone, so the player can turn it back.
     if (const auto options = CoopTitle::KitOptionsFile();
-        options && CoopOriginal::OnIn(CoopFiles::ReadText(*options))) {
+        options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions())) {
         g_original.Open(*options, CoopRuntime::GameDir() / "mods");
         g_original_on = true;
         LOG_INFO(Core, "coop: original game ({}): the module stays off; F1's \"Original game\" tab turns it back",
@@ -2381,6 +2395,44 @@ void LocalLayer(void* ctx) {
     second.Step(first);
 }
 
+// Row 277: the gear parts that are a material's parameter (coop_gear_params.h: the Master Sword's hilt), on your Link's
+// equipped pieces (the look shown: Customize's choice at once) and each live puppet's (its player's look). Solo too:
+// your Link alone. A cell of guest memory only once a colour was ever chosen (`cell` makes it).
+void DressGearParams(const CoopCharColours::Game& g, const std::vector<CoopPuppet::Director::DressView>& views,
+                     const CoopLook::Look& shown, const std::function<std::uint64_t()>& cell) {
+    static CoopGearParams::Dresser dresser;
+    static bool ever = false;   // a part's colour was chosen or received: from then on the dresser runs (puts back)
+    std::vector<CoopGearParams::Target> targets;
+    CoopGearParams::Target own;
+    bool any = false;
+    for (std::size_t i = 0; i < CoopGearParams::kPartCount; i++) {
+        if (const auto part = CoopLook::PartOf(CoopGearParams::kParts[i].part)) own.colours[i] = shown[*part];
+        any = any || own.colours[i].has_value();
+    }
+    for (const auto& v : views) {
+        CoopGearParams::Target t;
+        t.actor = v.actor;
+        if (const auto parts = CoopLookShare::Of(v.number)) {
+            for (const auto& p : *parts) {
+                for (std::size_t i = 0; i < CoopGearParams::kPartCount; i++) {
+                    if (p.part == CoopGearParams::kParts[i].part) t.colours[i] = p.colour;
+                }
+            }
+        }
+        for (const auto& c : t.colours) any = any || c.has_value();
+        targets.push_back(t);
+    }
+    ever = ever || any;
+    if (!ever) return;   // (nothing ever chosen: no reads, no calls)
+    BridgeGuest guest;
+    own.actor = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
+    if (own.actor != 0) targets.push_back(own);
+    if (targets.empty()) return;
+    const std::uint64_t at = cell();
+    if (at == 0) return;
+    dresser.Frame(g, at, targets, SteadyMs(), [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });
+}
+
 // Character Select's Customize options on the puppets, co-op's own (coop_char_colours.h): each frame, the game's own
 // model calls for each live puppet that is due. Solo nothing is live, so nothing is done.
 void DressCharacters(void* ctx) {
@@ -2417,8 +2469,8 @@ void DressCharacters(void* ctx) {
     // is a model of the menu's own, so the eyes chosen showed on your Link in the field but not in the picture,
     // lane-0119 13:03. Your Link there: an actor of the field player's own actor name, while you are Link; never the
     // picker's other characters (review). Each its own cell: 0 your Link's, 1..4 the menu's slots)
-    static std::array<std::uint64_t, 5> cells{};
-    static std::array<bool, 5> cells_asked{};
+    static std::array<std::uint64_t, 6> cells{};   // (5: the gear parameters' dresser, below)
+    static std::array<bool, 6> cells_asked{};
     const auto cell = [&](std::size_t i) {
         if (cells[i] == 0 && !cells_asked[i]) {
             cells_asked[i] = true;
@@ -2482,6 +2534,7 @@ void DressCharacters(void* ctx) {
             }
         }
     }
+    DressGearParams(g, views, shown, [&] { return cell(5); });
     if (targets.empty()) return;
     CoopCharColours::TheWardrobe().Frame(g, targets, SteadyMs(),
                                          [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });
@@ -2669,7 +2722,16 @@ COOP_HOOKSHOT_EXPORT int hos_coop_key(uint32_t vk, int repeat) {
     #ifndef _WIN32
         const CoopClipboard::OnSdlThread sdl_thread;
     #endif
-        return CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0) ? 1 : 0;
+        if (CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0)) return 1;
+        // F1 in play: co-op's home, the - menu's Multiplayer tab (menu-polish-01113; our tabs left Longshot's F1 menu).
+        // Longshot's own menu stays on Insert, Esc, its pad keys and System > Longshot Settings; F1 closes it if open.
+        // Not on the title (its - opens Multiplayer), not in original game (g_on off), and with an old pack without our
+        // - tabs F1 stays Longshot's (its menu has co-op's tabs then).
+        if (vk == 0x70 /* F1 */ && repeat == 0 && g_on && !CoopTitle::Up() && CoopPauseTab::OpenMultiplayer()) {
+            CoopPause::WantClose();
+            return 1;
+        }
+        return 0;
     });
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_char(uint32_t ch) {
@@ -2772,7 +2834,11 @@ COOP_HOOKSHOT_EXPORT int hos_coop_game_pause_page(void) noexcept {
 COOP_HOOKSHOT_EXPORT int hos_coop_menu_tabs(void) {
     static CoopBoundary::Site site{"hos_coop_menu_tabs"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
-        return g_on ? CoopPause::Tabs() : g_original_on ? 1 : 0;
+        // (co-op's tabs in Longshot's F1 menu only as the fallback: no pack, or a pack without our - tabs; co-op's home
+        // is the game's - menu. Original game: its one tab, the way back)
+        if (!g_on) return g_original_on ? 1 : 0;
+        static const bool has_pack = CoopPuppetConfig::HasPack();   // (a folder scan: once; the pack is set at the start)
+        return !has_pack || CoopPauseTab::NoMinusTabs() ? CoopPause::Tabs() : 0;
     });
 }
 COOP_HOOKSHOT_EXPORT const char* hos_coop_menu_tab_name(int tab) {

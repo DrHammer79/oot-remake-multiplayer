@@ -2159,23 +2159,6 @@ function Get-KitCharacterSelectSeen([string]$Manifest, [switch]$Folder) {
     return ''
 }
 
-# The SHA-256 (lower case) of $Rel (a romfs path) in the Character Select folder $Mod, looked for where
-# Get-KitCharacterSelectSeen looks (beside the pack, and in mods for the contents layout); '' when it is not there.
-function Get-KitCharacterSelectFileHash([string]$Manifest, [string]$Mod, [string]$Rel) {
-    if (-not $Mod -or $Mod -match '[\\/]' -or $Mod -eq '.' -or $Mod -eq '..' -or -not $Rel -or $Rel -match '(^|[\\/])\.\.([\\/]|$)') { return '' }
-    $title = Split-Path -Parent (Split-Path -Parent $Manifest)
-    $roots = @($title)
-    $contents = Split-Path -Parent $title
-    if ($contents -and (Split-Path -Leaf $contents) -ieq 'contents') { $roots += Split-Path -Parent $contents }
-    foreach ($root in $roots) {
-        $file = Join-Path (Join-Path (Join-Path $root $Mod) 'romfs') $Rel
-        if (Test-Path -LiteralPath $file -PathType Leaf) {
-            return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-        }
-    }
-    return ''
-}
-
 # Co-op's own Characters tab (tools/puppet_pack/charsel_ui.py, 0.11.10; the owner: "our mod itself should natively
 # include the character tab even without downloading any of Snails mod"): its code patch, Snail's header and page
 # hooks for Link (charsel/data/charsel-native.ips), goes into the pack's exefs, where the game's build takes the
@@ -2237,6 +2220,23 @@ function Sync-KitCharselNativePatch([string]$Kit, [string]$Mod) {
     if (-not $have) { return '' }
     Remove-Item -LiteralPath $dst -Force
     return 'out'
+}
+
+# The SHA-256 (lower case) of $Rel (a romfs path) in the Character Select folder $Mod, looked for where
+# Get-KitCharacterSelectSeen looks (beside the pack, and in mods for the contents layout); '' when it is not there.
+function Get-KitCharacterSelectFileHash([string]$Manifest, [string]$Mod, [string]$Rel) {
+    if (-not $Mod -or $Mod -match '[\\/]' -or $Mod -eq '.' -or $Mod -eq '..' -or -not $Rel -or $Rel -match '(^|[\\/])\.\.([\\/]|$)') { return '' }
+    $title = Split-Path -Parent (Split-Path -Parent $Manifest)
+    $roots = @($title)
+    $contents = Split-Path -Parent $title
+    if ($contents -and (Split-Path -Leaf $contents) -ieq 'contents') { $roots += Split-Path -Parent $contents }
+    foreach ($root in $roots) {
+        $file = Join-Path (Join-Path (Join-Path $root $Mod) 'romfs') $Rel
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    return ''
 }
 
 # What a pack's coop_puppet.json records of its characters, in Get-KitCharacterSelectSeen's form ('' for none).
