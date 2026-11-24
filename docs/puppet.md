@@ -714,6 +714,19 @@ Log lines: the sender `coop: link sound 'Pl_...' sent (N sent, M held back by th
 
 Not known until a run: that every Link sound goes through `searchAndEmit` (the AS's own sound events may start through xlink2's trigger path instead: the probe shows which), that `[[x1]]` is the name in every case, and where the Ocarina's notes are started (the "Ocarina" user, not our Link's: then they are not sent this way and the note path above stays).
 
+## Emotes
+
+Chat commands that make a puppet play a game gesture on the other players' screens: `/wave`, `/yes`, `/no`, `/look`, `/here` (a ping: the gesture and a call), `/wow`, or `/emote <name>` (`lichii/hook/coop_emote.{h,cpp}`, `coop_emote_game.cpp`; message `EMOTE` 615, [protocol.md](protocol.md#emotes-emote)). Nothing is drawn: it is the game's own animation and sound.
+
+| Part | Where | What |
+|---|---|---|
+| Send | `CoopEmote::OnChat` | Parse the line, refuse it alone in the game or within 1.5 s of the last one (a chat notice), else send `EMOTE` with the id |
+| Receive | `CoopPuppet::OnEvent`, `CoopEmote::Holds::Start` | An id in the table starts a hold for that player, up to 6 s (the table's time, 2 to 3 s) and queues the emote's sound (if it has one) into the same per-player queue as `LINK_SOUND` |
+| Play | `CoopPuppet::Collect`, `Holds::Apply` | While the hold lasts, the puppet's animation is the emote's AS command on slot 0 (frame 0, rate 1), at a serial of its own so it starts once; the director plays it as any other animation name |
+| End | `Holds::Apply` | The hold ends at its time, when the sender's own sampled animation differs from what it was at the start (they moved), when the sender leaves or on a new connection |
+
+The AS command names (`EvtTalkHello`, `EvtTalkYes`, `EvtTalkNo`, `EvtLookAround`, `EvtLookAroundAttention`, `EvtSurprise`) are in the game's own Link animation sets (names only; never commit game data). Not known until a run: that the puppet plays each of them as a command on slot 0, and a better call for `/here` (it uses `Pl_Voice_Attack_00`). There is no pointing animation in the game; `/here` is "look around with attention" and a call. A command the puppet cannot play is skipped: its sender's own animation shows, as before.
+
 ## Riding (issue 199)
 
 Alex (2026-11-12): "epona makes another player disappear when they mount her". Up to then a remote rider was parked out of sight on purpose (cutscene-hide): the other game has no horse, so the puppet would sit in the air. Now the rider stays seen, on a copy of the horse (`lichii/hook/coop_ride.h`):

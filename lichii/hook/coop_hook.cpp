@@ -64,6 +64,7 @@
 #include "coop_frame_clock.h"
 #include "coop_boss_scenes.h"
 #include "coop_teleport_game.h"
+#include "coop_emote_game.h"
 #include "coop_pvp_game.h"
 #include "coop_lift_player_game.h"
 #include "coop_pvp_native_game.h"
@@ -1989,6 +1990,9 @@ public:
         for (auto& line : CoopTeleport::TakeLines()) {
             chat_.Add(std::move(line), true);
         }
+        for (auto& line : CoopEmote::TakeLines()) {
+            chat_.Add(std::move(line), true);
+        }
         // PvP (docs/play-online.md "PvP"), after the objects and spawn syncs:
         // their swings and shots of this frame, and our Link's life.
         CoopPvp::Frame(view.scene, reading, report.connected ? session_.get() : nullptr,
@@ -2124,6 +2128,9 @@ public:
         }
         if (CoopPvp::OnChat(text, *session_)) {
             return true;  // /pvp: the same
+        }
+        if (CoopEmote::OnChat(text, *session_)) {
+            return true;  // /wave, /here, /emote ...: the same (coop_emote.h)
         }
         if (CoopDbno::OnChat(text, *session_)) {
             return true;  // /dbno: the same

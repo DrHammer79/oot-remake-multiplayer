@@ -1613,6 +1613,27 @@ TEST_CASE("a Link sound has its number, channel and layout, and only the game's 
   CHECK(decode(bad, m) == Error::bad_value);
 }
 
+TEST_CASE("an emote has its number, channel and layout, and only a known range of ids passes") {
+  CHECK(static_cast<int>(MessageType::emote) == 615);
+  CHECK(channel_of(MessageType::emote) == kChannelSession);
+  CHECK_FALSE(allowed_on_channel(MessageType::emote, kChannelPlayerSamples));
+  CHECK(may_send(Sender::client, MessageType::emote));
+  CHECK(may_send(Sender::server, MessageType::emote));
+  Message n = Emote{0, 3};
+  CHECK(check_received(n, Sender::client, kChannelSession) == Error::none);
+  CHECK(set_sender(n, 7));
+  CHECK(sender_of(n) == 7);
+  const Bytes b = must_encode(Emote{7, kMaxEmoteId});
+  REQUIRE(b.size() == kHeaderSize + 2);
+  Message back;
+  REQUIRE(decode(b, back) == Error::none);
+  CHECK(std::get<Emote>(back) == Emote{7, kMaxEmoteId});
+  Bytes out;
+  CHECK(encode(Emote{0, 0}, out) == Error::bad_value);
+  CHECK(encode(Emote{0, kMaxEmoteId + 1}, out) == Error::bad_value);
+  CHECK(encode(Emote{17, 1}, out) == Error::bad_value);
+}
+
 TEST_CASE("a player's look has its number, channel and layout, each part once") {
   CHECK(static_cast<int>(MessageType::player_look) == 430);
   CHECK(channel_of(MessageType::player_look) == kChannelSession);

@@ -603,6 +603,30 @@ TEST_CASE("relayed messages carry the sender's real number, on the channel they 
   CHECK(h.session.stats().relayed == 3);
 }
 
+TEST_CASE("an emote goes to the other players with the sender's number, and a late joiner gets none") {
+  Harness h;
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.join(3, "Saria");
+  h.clear();
+
+  h.receive(2, Emote{0, 5}, kChannelSession);
+  CHECK(h.to(2).empty());  // never echoed to the sender
+  for (ConnectionId id : {1u, 3u}) {
+    auto msgs = h.to(id);
+    REQUIRE(msgs.size() == 1);
+    CHECK(msgs[0].channel == kChannelSession);
+    CHECK(std::get<Emote>(msgs[0].message) == Emote{2, 5});
+  }
+
+  // It is not kept: the fourth player's join brings no EMOTE.
+  h.clear();
+  h.join(4, "Sam");
+  for (const auto& sent : h.sent) {
+    CHECK(std::get_if<Emote>(&sent.message) == nullptr);
+  }
+}
+
 TEST_CASE("TEST_PAYLOAD is relayed unchanged on channel 0 or 3") {
   Harness h;
   h.join(1, "a");

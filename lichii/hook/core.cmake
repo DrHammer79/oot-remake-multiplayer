@@ -11,6 +11,8 @@ target_sources(core PRIVATE
     "${_coop_hook}/coop_boss_scenes.cpp"
     "${_coop_hook}/coop_teleport.cpp"
     "${_coop_hook}/coop_teleport_game.cpp"
+    "${_coop_hook}/coop_emote.cpp"
+    "${_coop_hook}/coop_emote_game.cpp"
     "${_coop_hook}/coop_hallway.cpp"
     "${_coop_hook}/coop_hallway_game.cpp"
     "${_coop_hook}/coop_pivot.cpp"

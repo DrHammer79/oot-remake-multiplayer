@@ -112,6 +112,7 @@ Dungeon state is in named flags that the room logic reads ([dungeon.md](dungeon.
 | Threads of Time (pause menu quest log) | the unlock flag `UI_IsFinishChallengeMenuOpenEvent` in `CoopStory::Flags()`; 11 listed quests' saved Enums by step order, highest wins (`CoopQuests`, [flags.md](flags.md#threads-of-time-issue-193)) | live; late joiner by the host's table | unit | Before (issue 193): the second player never saw the owl, so the tab stayed shut; quests were each game's own | **P1** to check in game |
 | Time of day | `TIME_OF_DAY` (host's clock) | live | game | - | P3 |
 | Song events (Zelda's Lullaby doors, Sun's Song, Song of Storms well) | none, unless the result is a flag | ? | - | The door a song opened in A stays in B | P2 |
+| Emotes and pings (`/wave`, `/here`, `/emote <name>`) | `EMOTE` (615), one-shot, relayed to the others, never kept; the puppet holds the game's own gesture animation and sound ([puppet.md](puppet.md#emotes)) | live | unit tests (codec, server relay, hold rules) | A gesture not seen, or a call not heard; a late joiner gets nothing on purpose | P3 |
 | Shops (stock sold out) | none; a bought Deku Shield reaches everyone (max, issue 130), a lost one is bought again by that player | - | - | - | P2 |
 
 ## Per-player state (not shared on purpose)
