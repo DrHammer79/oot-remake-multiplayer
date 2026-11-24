@@ -1,4 +1,4 @@
-From 1cc39d2a27dd2ab7b6d1986a2ca9fe7785c90a58 Mon Sep 17 00:00:00 2001
+From a5a545f162209294f6f408c2812d3245704de516 Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Fri, 13 Nov 2026 00:35:10 -0900
 Subject: [PATCH] Co-op mods: the Mods tab's order and switches, read at the

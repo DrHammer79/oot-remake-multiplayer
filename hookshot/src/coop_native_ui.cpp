@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
 
 namespace CoopNativeUi {
 
@@ -62,16 +64,60 @@ std::vector<std::pair<std::string_view, std::size_t>> Characters(std::string_vie
     return out;
 }
 
-// The text cut to `columns` at a character.
-std::string CutColumns(std::string_view s, std::size_t columns) {
+// The advances SetFontWidths read (hundredths of an em by code point), none before it.
+using WidthTable = std::unordered_map<std::uint32_t, std::uint16_t>;
+std::mutex g_widths_mutex;
+std::shared_ptr<const WidthTable> g_widths;
+
+std::shared_ptr<const WidthTable> Widths() {
+    std::lock_guard lock(g_widths_mutex);
+    return g_widths;
+}
+
+// The guess for a character no font told us (Width): at least its advance in each of the game's Latin fonts.
+std::size_t Guess(std::uint32_t c) {
+    if (c == ' ') return kGuessSpace;
+    if (c >= 0x80) return kGuessWidest;   // accented, Cyrillic, Greek...: as wide as the widest Latin letter
+    const auto in = [c](std::string_view set) { return set.find(static_cast<char>(c)) != std::string_view::npos; };
+    if (in("ilj',.I!:;f")) return kGuessNarrow;
+    if (in("tr()[]{}|-/\\J`")) return kGuessSlim;
+    if (in("W@")) return kGuessWidest;
+    if (in("wm%M")) return kGuessBroad;
+    if ((c >= 'A' && c <= 'Z' && !in("LFSET")) || in("#&")) return kGuessUpper;
+    return kGuessLower;   // the other lower-case letters, the digits, L F S E T and the rest of the punctuation
+}
+
+// One character's width (Width): a wide one 1 em; else the font's advance, else the guess.
+std::size_t Units(std::uint32_t c, const WidthTable* table) {
+    if (Wide(c) == 2) return kWideWidth;
+    if (table != nullptr) {
+        if (const auto it = table->find(c); it != table->end()) return it->second;
+    }
+    return Guess(c);
+}
+
+// The text cut to `width` (Width) at a character.
+std::string CutWidth(std::string_view s, std::size_t width) {
+    const auto table = Widths();
     std::string out;
     std::size_t used = 0;
-    for (const auto& [ch, w] : Characters(s)) {
-        if (used + w > columns) break;
-        out.append(ch);
+    for (std::size_t i = 0; i < s.size();) {
+        const auto [c, n] = CodePoint(s, i);
+        const std::size_t w = Units(c, table.get());
+        if (used + w > width) break;
+        out.append(s.substr(i, n));
         used += w;
+        i += n;
     }
     return out;
+}
+
+// Big-endian reads of a font's bytes; 0 past its end.
+std::uint32_t Be(const std::vector<std::uint8_t>& b, std::size_t at, int n) {
+    if (at > b.size() || static_cast<std::size_t>(n) > b.size() - at) return 0;
+    std::uint32_t v = 0;
+    for (int k = 0; k < n; ++k) v = (v << 8) | b[at + static_cast<std::size_t>(k)];
+    return v;
 }
 
 template <typename T>
@@ -140,9 +186,110 @@ std::size_t Columns(std::string_view utf8) {
     return n;
 }
 
-std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::size_t lines) {
-    columns = std::max<std::size_t>(columns, 4);
+std::size_t Width(std::string_view utf8) {
+    const auto table = Widths();
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < utf8.size();) {
+        const auto [c, bytes] = CodePoint(utf8, i);
+        n += Units(c, table.get());
+        i += bytes;
+    }
+    return n;
+}
+
+std::vector<std::pair<std::uint32_t, std::uint16_t>> FontWidths(const std::vector<std::uint8_t>& font) {
+    // The table directory: 12 bytes, then 16 a table (tag, checksum, offset, length).
+    std::size_t head = 0, hhea = 0, hmtx = 0, cmap = 0, hmtx_len = 0;
+    const std::size_t tables = Be(font, 4, 2);
+    for (std::size_t i = 0; i < tables && 12 + 16 * (i + 1) <= font.size(); ++i) {
+        const std::size_t at = 12 + 16 * i;
+        const std::uint32_t tag = Be(font, at, 4), off = Be(font, at + 8, 4), len = Be(font, at + 12, 4);
+        if (off >= font.size() || len > font.size() - off) continue;
+        if (tag == 0x68656164u && len >= 54) {          // 'head'
+            head = off;
+        } else if (tag == 0x68686561u && len >= 36) {   // 'hhea'
+            hhea = off;
+        } else if (tag == 0x686d7478u) {                // 'hmtx'
+            hmtx = off;
+            hmtx_len = len;
+        } else if (tag == 0x636d6170u && len >= 4) {    // 'cmap'
+            cmap = off;
+        }
+    }
+    std::vector<std::pair<std::uint32_t, std::uint16_t>> out;
+    const std::uint32_t upm = head != 0 ? Be(font, head + 18, 2) : 0;
+    const std::size_t metrics = hhea != 0 ? Be(font, hhea + 34, 2) : 0;
+    if (upm < 16 || metrics == 0 || hmtx == 0 || cmap == 0 || hmtx_len < 4 * metrics) return out;
+    const auto advance = [&](std::uint32_t glyph) -> std::uint16_t {
+        const std::size_t g = std::min<std::size_t>(glyph, metrics - 1);   // (past the last: the last's advance)
+        const std::uint32_t a = Be(font, hmtx + 4 * g, 2);
+        return static_cast<std::uint16_t>(std::min<std::uint32_t>((a * 100 + upm - 1) / upm, 1000));   // rounded up
+    };
+    // The cmap: a Unicode subtable (platform 0, or 3 with encoding 1 or 10), format 12 (all planes) before 4 (BMP).
+    std::size_t f4 = 0, f12 = 0;
+    const std::size_t subtables = Be(font, cmap + 2, 2);
+    for (std::size_t i = 0; i < subtables; ++i) {
+        const std::uint32_t platform = Be(font, cmap + 4 + 8 * i, 2), encoding = Be(font, cmap + 6 + 8 * i, 2);
+        const std::size_t at = cmap + Be(font, cmap + 8 + 8 * i, 4);
+        if (at >= font.size() || !(platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10)))) continue;
+        const std::uint32_t format = Be(font, at, 2);
+        if (format == 12 && f12 == 0) f12 = at;
+        if (format == 4 && f4 == 0) f4 = at;
+    }
+    constexpr std::uint32_t kLast = 0x2FFFF;   // (past every plane a chat line uses)
+    constexpr std::size_t kMost = 70000;       // a damaged table never takes the memory
+    if (f12 != 0) {
+        const std::size_t groups = Be(font, f12 + 12, 4);
+        for (std::size_t g = 0; g < groups && 16 + 12 * (g + 1) <= font.size() - f12; ++g) {
+            const std::size_t at = f12 + 16 + 12 * g;
+            const std::uint32_t first = Be(font, at, 4), last = std::min(Be(font, at + 4, 4), kLast);
+            const std::uint32_t glyph = Be(font, at + 8, 4);
+            for (std::uint32_t c = first; c <= last && out.size() < kMost; ++c) {
+                if (glyph + (c - first) != 0) out.emplace_back(c, advance(glyph + (c - first)));
+            }
+        }
+    } else if (f4 != 0) {
+        const std::size_t segs = Be(font, f4 + 6, 2) / 2;
+        const std::size_t ends = f4 + 14, starts = ends + 2 * segs + 2, deltas = starts + 2 * segs,
+                          ranges = deltas + 2 * segs;
+        if (ranges + 2 * segs > font.size()) return {};
+        for (std::size_t k = 0; k < segs; ++k) {
+            const std::uint32_t first = Be(font, starts + 2 * k, 2), last = Be(font, ends + 2 * k, 2);
+            const std::uint32_t delta = Be(font, deltas + 2 * k, 2), range = Be(font, ranges + 2 * k, 2);
+            for (std::uint32_t c = first; c <= last && c != 0xFFFF && out.size() < kMost; ++c) {
+                std::uint32_t glyph = 0;
+                if (range == 0) {
+                    glyph = (c + delta) & 0xFFFF;
+                } else {
+                    glyph = Be(font, ranges + 2 * k + range + 2 * (c - first), 2);
+                    if (glyph != 0) glyph = (glyph + delta) & 0xFFFF;
+                }
+                if (glyph != 0) out.emplace_back(c, advance(glyph));
+            }
+        }
+    }
+    return out;
+}
+
+bool SetFontWidths(const std::vector<std::uint8_t>& font) {
+    const auto widths = FontWidths(font);
+    if (widths.empty()) return false;
+    auto table = std::make_shared<const WidthTable>(widths.begin(), widths.end());
+    std::lock_guard lock(g_widths_mutex);
+    g_widths = std::move(table);
+    return true;
+}
+
+void ResetFontWidths() {
+    std::lock_guard lock(g_widths_mutex);
+    g_widths.reset();
+}
+
+std::vector<std::string> Wrap(std::string_view clean, std::size_t width, std::size_t lines) {
+    const auto table = Widths();
+    width = std::max<std::size_t>(width, kWideWidth + kGuessWidest);   // (room for any one character)
     lines = std::max<std::size_t>(lines, 1);
+    const std::size_t space = Units(' ', table.get());
     // The lines, broken at spaces; a word wider than a line is broken inside, at a character. A wide (CJK) character
     // may break anywhere, as the game's own Chinese and Japanese texts do.
     std::vector<std::string> rows;
@@ -157,9 +304,9 @@ std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::
     std::size_t i = 0;
     while (i < clean.size()) {
         if (clean[i] == ' ') {
-            if (used > 0 && used + 1 <= columns) {
+            if (used > 0 && used + space <= width) {
                 row.push_back(' ');
-                ++used;
+                used += space;
             }
             ++i;
             continue;
@@ -169,25 +316,28 @@ std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::
         std::size_t word = 0;
         while (end < clean.size() && clean[end] != ' ') {
             const auto [c, n] = CodePoint(clean, end);
-            const std::size_t w = Wide(c);
-            if (w == 2 && end > i) break;  // a wide character is a word of its own
+            const bool wide = Wide(c) == 2;
+            if (wide && end > i) break;  // a wide character is a word of its own
             end += n;
-            word += w;
-            if (w == 2) break;
+            word += Units(c, table.get());
+            if (wide) break;
         }
         const std::string_view piece = clean.substr(i, end - i);
-        if (used + word <= columns) {
+        if (used + word <= width) {
             row.append(piece);
             used += word;
-        } else if (word <= columns) {
+        } else if (word <= width) {
             flush();
             row.append(piece);
             used = word;
         } else {
-            for (const auto& [ch, w] : Characters(piece)) {  // too long for any line: broken at a character
-                if (used + w > columns) flush();
-                row.append(ch);
+            for (std::size_t k = 0; k < piece.size();) {  // too long for any line: broken at a character
+                const auto [c, n] = CodePoint(piece, k);
+                const std::size_t w = Units(c, table.get());
+                if (used + w > width) flush();
+                row.append(piece.substr(k, n));
                 used += w;
+                k += n;
             }
         }
         i = end;
@@ -214,9 +364,9 @@ std::string BannerText(const Shown& page) {
 }
 
 namespace {
-// The columns left on the banner's line after "speaker: " (a speaker is at most kNameColumns).
-std::size_t TextColumns(std::string_view speaker) {
-    return speaker.empty() ? kBannerColumns : kBannerColumns - Columns(speaker) - 2;
+// The width left on the banner's line after "speaker: " (a speaker is at most kNameWidth).
+std::size_t TextWidth(std::string_view speaker) {
+    return speaker.empty() ? kBannerWidth : kBannerWidth - std::min(Width(std::string(speaker) + ": "), kBannerWidth);
 }
 }  // namespace
 
@@ -237,10 +387,10 @@ void ChatFeed::Update(const std::vector<ChatIn>& lines, std::uint64_t now_ms) {
             text = Clean(line.text, kTextBytes);
         } else {
             const Said said = SplitSpeaker(line.text);
-            speaker = CutColumns(Clean(said.speaker, kSpeakerBytes), kNameColumns);
+            speaker = CutWidth(Clean(said.speaker, kSpeakerBytes), kNameWidth);
             text = Clean(said.text, kTextBytes);
         }
-        const auto pages = Wrap(text, TextColumns(speaker), kBannerLines);
+        const auto pages = Wrap(text, TextWidth(speaker), kBannerLines);
         for (std::size_t k = 0; k < pages.size(); ++k) {
             Shown shown;
             shown.notice = line.notice;
@@ -289,21 +439,22 @@ std::optional<Shown> ChatFeed::Next(std::uint64_t now_ms) {
 
 Shown TypingLine(std::string_view speaker, std::string_view typed, bool failed, std::string_view not_sent) {
     Shown s;
-    s.speaker = CutColumns(Clean(speaker, kSpeakerBytes), kNameColumns);
+    s.speaker = CutWidth(Clean(speaker, kSpeakerBytes), kNameWidth);
     const std::string tail = failed ? "_ " + Clean(not_sent, 64) : "_";   // the caret: the game font's own underscore
-    const std::size_t line = TextColumns(s.speaker);
-    const std::size_t room = line - std::min(Columns(tail), line);
+    const std::size_t line = TextWidth(s.speaker);
+    const std::size_t room = line - std::min(Width(tail), line);
     const std::string text = Clean(typed, kTextBytes);
     std::string shown = text;
-    if (Columns(text) > room) {
+    if (Width(text) > room) {
         // The end of what is typed, where the caret is: "..." and as much as fits before it.
         const auto chars = Characters(text);
-        std::size_t used = 3, from = chars.size();
-        while (from > 0 && used + chars[from - 1].second <= room) used += chars[--from].second;
+        std::size_t used = Width("..."), from = chars.size();
+        while (from > 0 && used + Width(chars[from - 1].first) <= room) used += Width(chars[--from].first);
         shown = "...";
         for (std::size_t k = from; k < chars.size(); ++k) shown.append(chars[k].first);
     }
-    s.text = CutColumns(shown + tail, line);   // (one line: a "(not sent)" longer than the room is cut)
+    s.text = CutWidth(shown + tail, line);   // (one line: a "(not sent)" longer than the room is cut)
+    s.colour = failed ? kFailedColour : 0;
     s.seconds = kTypingSeconds;
     return s;
 }
@@ -525,7 +676,7 @@ bool Banner::Step(Game& game, TextRing& ring, const std::optional<std::string>& 
         return false;
     }
     page_ = false;   // (the held line takes the banner over from a page of ours)
-    const auto pages = Wrap(Clean(*held, kTextBytes), kBannerColumns, kBannerLines);
+    const auto pages = Wrap(Clean(*held, kTextBytes), kBannerWidth, kBannerLines);
     const std::string text = pages.empty() ? std::string() : pages.front();   // (one line: what fits the banner)
     if (holds == Holds::kGames) {
         up_ = false;   // the game's own banner: the held line waits for it, set again once it is gone

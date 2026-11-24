@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "coop_menu_state.h"
 #include "coop_menu_nav.h"
 #include "coop_pause_menu.h"
 #include "coop_screen_panes.h"
@@ -385,7 +386,7 @@ private:
     std::size_t letter_ = 0;     // Letter's letter: its place in the field's Letters()
     std::string typing_was_;   // (the field before typing: Cancel puts it back)
     void EndTyping(bool ok);
-    std::uint64_t repeat_since_ = 0, repeat_last_ = 0;
+    CoopMenuNav::Repeat typing_repeat_;   // the typing keys' held directions (TypingPad, coop_menu_nav.h)
     CoopMenuNav::Repeat minus_repeat_;   // the - page's rows and list: a held Up or Down moves again (coop_menu_nav.h)
     std::uint64_t pad_ms_ = 0, typing_from_ms_ = 0;   // (the last pad read; when typing began: its first A is not a key's)   // a held direction: when it went down, its last step
 
@@ -796,7 +797,7 @@ std::vector<std::string> RowTexts(const SessionView& v);
 // is the R1 probe's answer (the module's part); these are their rows.
 // - Multiplayer: 0 Players, 1 Co-op settings, 2 Local co-op, 3 your game or session (its details, Stop or Leave there),
 //   shown only in one.
-// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your session, Copy answer code).
+// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your game, Copy answer code).
 // - Mods: the Mods tab's own page (coop_mods_tab.h), not rows of these.
 enum class MinusPage { kMultiplayer = 0, kLobby = 1, kMods = 2 };
 std::vector<std::string> RowTexts(MinusPage page, const SessionView& v);
@@ -956,6 +957,7 @@ bool MapUnderHidden(bool hide, bool up, bool sliding, bool native, std::uint64_t
 // So slot 3 counts when it is visible and the game holds his code (SnailCodeBuiltIn: another mod's code fills no tab;
 // review-0119-b) (charsel-tab-0119).
 inline constexpr std::uint64_t kPaneTextWidth = 0x13c;   // f32: a text pane's drawn width (docs/game-ui.md, checked)
+inline constexpr std::uint64_t kPaneBoxWidth = 0x58;     // f32: a pane's own size, its width (f_8154b220 sets it; docs/game-ui.md)
 inline int GameTabsShown(bool slot3_visible, bool snail_code_built_in) {
     return slot3_visible && snail_code_built_in ? 4 : 3;
 }
@@ -1139,6 +1141,12 @@ bool OwnMinusPageShown() noexcept;
 // the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
 // ours (seen once a - menu opened without them): F6's drawn list is used then.
 bool OpenPlayers() noexcept;
+// F1 in play (menu-polish-01113, A #100: our tabs leave Longshot's F1 menu, F1 opens co-op's home): the same run as
+// F6's to the - menu's Multiplayer tab, its main view. False (F1 left to Longshot's own menu) when the pack has no - tabs
+// of ours, or when nothing can open now (not in free play and no menu up: an event, a load, the title).
+bool OpenMultiplayer() noexcept;
+// Whether a - menu opened without tabs of ours this session (an old pack): Longshot's F1 menu keeps co-op's tabs then.
+bool NoMinusTabs() noexcept;
 // Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
 // module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
 void SetFreePlay(bool free_play) noexcept;
@@ -1151,6 +1159,9 @@ struct MenuActor {
 };
 std::array<MenuActor, 4> MenuActors() noexcept;
 int MousePage() noexcept;
+// Character Select's Customize screen as co-op drives it, for the play-test bridge's `menu` state (coop_menu_state.h).
+// Any thread (takes the screen's lock).
+CoopMenuState::Screen CustomizeScreen();
 // The mouse in the game's window (its client area, 0..1 each way) and the left button, when the window is in front:
 // the title's mouse reads it too (coop_title.cpp).
 bool ClientCursor(float* fx, float* fy, bool* left) noexcept;

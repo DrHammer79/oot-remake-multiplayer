@@ -91,7 +91,7 @@ const char* Note(Part part) {
 }
 
 // What an unset part shows: the game's own colour; the Cap trim follows the tunic.
-const char* Unset(Part part) { return part == Part::cap_trim ? "As the tunic" : "Game's own"; }
+const char* Unset(Part part) { return part == Part::cap_trim ? "Same as tunic" : "Default"; }
 
 std::string ValueText(Part part, const std::optional<std::uint32_t>& colour) {
     if (part == Part::char_gear) return CoopI18n::Tr(colour ? "Hidden" : "Shown");
@@ -356,7 +356,7 @@ std::vector<Page::Line> Page::Lines() const {
             preset = Unset(p);
         }
         out.push_back({{"Preset", preset, 1, true, true}, What::kPreset, p, "Left and Right: the preset colours."});
-        out.push_back({{"Game's own colour", "", 0}, What::kGameOwn, p, "This part back to the game's own colour."});
+        out.push_back({{"Default colour", "", 0}, What::kGameOwn, p, "This part back to the game's own colour."});
         out.push_back({{"Done", "", 0}, What::kDone, p, "Back to the list of parts."});
         return out;
     }
@@ -369,8 +369,10 @@ std::vector<Page::Line> Page::Lines() const {
         }
         const std::size_t shown = std::min(group_, offered.size() - 1);
         const Group& g = Groups()[offered[shown]];
-        out.push_back({{std::string(g.name) + " (page " + std::to_string(shown + 1) + " of " +
-                            std::to_string(offered.size()) + ")",
+        // (a lone page is only its name: "(page 1 of 1)" said nothing)
+        out.push_back({{offered.size() < 2 ? std::string(g.name)
+                                           : std::string(g.name) + " (page " + std::to_string(shown + 1) + " of " +
+                                                 std::to_string(offered.size()) + ")",
                         "", 3},
                        What::kHeading, g.parts[0], ""});
         for (const Part p : g.parts) {
@@ -449,6 +451,11 @@ std::vector<std::size_t> Page::Offered() const {
 std::size_t Page::GroupShown() const {
     const auto offered = Offered();
     return offered.empty() ? 0 : offered[std::min(group_, offered.size() - 1)];
+}
+
+std::size_t Page::PageIndex() const {
+    const std::size_t n = Offered().size();
+    return n == 0 ? 0 : std::min(group_, n - 1);
 }
 
 std::size_t Page::GroupsOffered() const {

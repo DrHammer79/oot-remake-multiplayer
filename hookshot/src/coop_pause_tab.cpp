@@ -547,7 +547,7 @@ void Page::StartTyping(int which) {
     typing_was_ = Field(typing_).text();
     key_ = 0;
     letter_ = 0;
-    repeat_since_ = repeat_last_ = 0;
+    typing_repeat_.Forget(pad_last_);   // (the direction held as typing starts is not a press of the keys)
     swallow_ |= pad_last_;   // (the A that started it is not the first key's press)
     typing_from_ms_ = pad_ms_;   // (nor the same A coming again: a click's A, in two pulses, typed the first key)
 }
@@ -629,25 +629,16 @@ void Page::TypingPad(std::uint64_t down, std::uint64_t held, std::uint64_t now_m
     const std::uint64_t up = kPadUp | kPadStickUp, dn = kPadDown | kPadStickDown;
     const std::uint64_t left = kPadLeft | kPadStickLeft, right = kPadRight | kPadStickRight;
     const std::uint64_t dirs = up | dn | left | right;
-    const auto step = [&](std::uint64_t bits) {
-        // (up and down: the key, round the four; Left and Right: Letter's letter, round the field's letters)
-        const int dy = (bits & dn) != 0 ? 1 : (bits & up) != 0 ? -1 : 0;
-        key_ = (key_ + dy + kTypeKeys) % kTypeKeys;
-        const int dx = (bits & right) != 0 ? 1 : (bits & left) != 0 ? -1 : 0;
-        if (dx != 0 && key_ == static_cast<int>(TypeKey::kLetter)) {
-            const std::size_t n = f.Letters().size();
-            letter_ = (letter_ % n + n + static_cast<std::size_t>(dx + static_cast<int>(n))) % n;
-        }
-    };
-    if ((down & dirs) != 0) {
-        step(down & dirs);
-        repeat_since_ = repeat_last_ = now_ms;
+    // (one cursor model, coop_menu_nav.h: up and down the key, round on a fresh press only; Left and Right Letter's
+    // letter, round held too; a held direction again and again, as the game's own lists)
+    std::uint64_t held_again = 0;
+    const std::uint64_t moves = typing_repeat_.Presses(held, now_ms, dirs, &held_again);
+    const int dy = (moves & dn) != 0 ? 1 : (moves & up) != 0 ? -1 : 0;
+    const int dx = (moves & right) != 0 ? 1 : (moves & left) != 0 ? -1 : 0;
+    if (CoopMenuNav::TypingKeysStep(dy, dx, (held_again & (up | dn)) != 0, kTypeKeys, static_cast<int>(TypeKey::kLetter),
+                                    f.Letters().size(), &key_, &letter_)) {
         pages_sound_ = CoopMenuNav::kSoundMove;
-    } else if ((held & dirs) != 0 && repeat_since_ != 0 && now_ms - repeat_since_ > 400 && now_ms - repeat_last_ > 90) {
-        step(held & dirs);   // (held: again and again, as the game's own lists scroll)
-        repeat_last_ = now_ms;
     }
-    if ((held & dirs) == 0) repeat_since_ = 0;
 }
 
 bool Page::Key(std::uint32_t vk, bool repeat) {
@@ -1219,7 +1210,7 @@ std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
         if (v.s.hosting) {
             rows[3] = main[kRowHost];   // ("Your game", "Your game: Saria asks")
         } else if (v.s.in_one || v.s.by_launcher) {
-            rows[3] = main[kRowJoin];   // ("Your session", "Turned away", "Copy answer code")
+            rows[3] = main[kRowJoin];   // ("Your game", "Turned away", "Copy answer code")
         }
         break;
     case MinusPage::kMods: break;
@@ -1272,15 +1263,15 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.connecting && !v.s.hosting) {
         rows[kRowJoin] = "Connecting...";
     } else if (v.s.by_launcher) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else if (v.s.in_one && !v.s.hosting) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else {
         rows[kRowJoin] = "Join a game";
     }
     rows[kRowPlayers] = v.players <= 0 ? "Players"
-                        : v.players == 1 ? "Players: just you"
-                                         : "Players: " + std::to_string(v.players);
+                        : v.players == 1 ? "Players (just you)"
+                                         : "Players (" + std::to_string(v.players) + ")";
     rows[kRowSettings] = "Co-op settings";
     // (the rows in the player's language before the cut: the composed ones are the
     // table's shapes, a player's own name comes back as it is)
@@ -1441,7 +1432,7 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
                                                  : "Stop hosting";
         } else if (v.s.in_one || v.s.by_launcher) {
             rows[0] = v.s.by_launcher ? "Co-op is on" : "In a friend's game";
-            rows[1] = "Leave it first: Join";
+            rows[1] = "Leave your game first";
         } else {
             rows[0] = "Start hosting";
             rows[1] = "Host settings";
@@ -1481,8 +1472,8 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
             }
             if (!v.room.empty()) around(1, "Copy room: ", v.room);
             else rows[1] = v.s.code ? "Copy invite code" : "Room: coming...";
-            rows[2] = "Copy same-network line";
-            rows[3] = "Copy VPN line";
+            rows[2] = "Copy network address";
+            rows[3] = "Copy VPN address";
             break;
         }
         if (v.s.failed && !v.s.in_one) {
@@ -1532,8 +1523,8 @@ const char* RowHelp(RowAction a) {
     case RowAction::kJoinPaste: return "Joins with the code you copied. You play on the host's save; yours are not touched.";
     case RowAction::kRejoin: return "Joins the last game you played in again.";
     case RowAction::kViewSession: return "Your game now: what co-op is doing, the lines to give your friends, and why it stopped.";
-    case RowAction::kCopyLan: return "Copies the line friends on your network use to join you.";
-    case RowAction::kCopyVpn: return "Copies the line friends on your VPN use to join you.";
+    case RowAction::kCopyLan: return "Copies your address on this network. Friends paste it in Join a game's Room row.";
+    case RowAction::kCopyVpn: return "Copies your address on your VPN. Friends paste it in Join a game's Room row.";
     case RowAction::kResync: return "Loads the host's save again, so your game matches theirs.";
     case RowAction::kViewPlayer: return "This player: go to them, or mute their voice or chat for you.";
     case RowAction::kMorePlayers: return "The next page of players.";
@@ -1545,7 +1536,7 @@ const char* RowHelp(RowAction a) {
     case RowAction::kHostChat: return "Mutes this player's chat for everyone, or unmutes it.";
     case RowAction::kKick: return "Sends this player out of your game. Press A again to confirm.";
     case RowAction::kBan: return "Keeps this player out until you stop hosting. Press A again to confirm.";
-    case RowAction::kTypeRoom: return "Type the room name your friend gave you.";
+    case RowAction::kTypeRoom: return "Type the room name your friend gave you, or their address (192.168.1.5:27510).";
     case RowAction::kTypePassword: return "Type the game's join password, if it has one.";
     case RowAction::kJoinRoom: return "Joins that room with the password typed.";
     case RowAction::kViewLan: return "Games on your network that you can join.";
@@ -1879,9 +1870,15 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
         const std::size_t at = static_cast<std::size_t>(at_page * per_page + i);
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
+        // (a setting that applies at the next start says so on its row, in words: a bare "*" read as nothing. The tag
+        // is kept whole and the name gives way to it)
+        std::string name = CoopI18n::Tr(r.name);
+        if (r.restart) {
+            const std::string tag = " (" + CoopI18n::Tr("restart") + ")";
+            name = tag.size() < kListNameChars ? FitTo(name, kListNameChars - tag.size()) + tag : tag;
+        }
         lines[static_cast<std::size_t>(i) + 1] =
-            ListLine{FitTo(r.restart ? CoopI18n::Tr(r.name) + " *" : CoopI18n::Tr(r.name), kListNameChars),
-                     FitTo(CoopI18n::Tr(r.text), kListValueChars)};
+            ListLine{FitTo(name, kListNameChars), FitTo(CoopI18n::Tr(r.text), kListValueChars)};
     }
     return lines;
 }
@@ -2001,7 +1998,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     } else if (v.s.in_one) {
         header = "In a session";
     } else {
-        header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
+        header = v.s.by_launcher ? "Started with the game" : "Not in a session";
         if (v.s.by_launcher && why.empty()) why = CoopI18n::Tr("Restart the game to change it");
     }
     // (the header's value: hosting, who can reach this game. The header had none: the game's cursor frame, which

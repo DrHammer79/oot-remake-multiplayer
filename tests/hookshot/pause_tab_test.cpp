@@ -560,18 +560,18 @@ TEST_CASE("pause tab (0.11.9): the five entries' words, in at most a row's width
     host.s.hosting = host.s.in_one = true;
     host.players = 1;
     CHECK(RowTexts(host) ==
-          std::vector<std::string>{"Find a game", "Your game", "Join a game", "Players: just you", "Co-op settings"});
+          std::vector<std::string>{"Find a game", "Your game", "Join a game", "Players (just you)", "Co-op settings"});
     host.players = 3;
     host.asking = {"Saria"};
     CHECK(RowTexts(host)[kRowHost] == "Your game: Saria asks");
-    CHECK(RowTexts(host)[kRowPlayers] == "Players: 3");
+    CHECK(RowTexts(host)[kRowPlayers] == "Players (3)");
     host.asking = {"Saria", "Mido"};
     CHECK(RowTexts(host)[kRowHost] == "Your game: 2 ask");
     SessionView guest;
     guest.s.in_one = true;
     guest.players = 2;
     CHECK(RowTexts(guest) ==
-          std::vector<std::string>{"Find a game", "Host a game", "Your session", "Players: 2", "Co-op settings"});
+          std::vector<std::string>{"Find a game", "Host a game", "Your game", "Players (2)", "Co-op settings"});
     SessionView joining;
     joining.connecting = true;
     joining.s.in_one = true;
@@ -683,7 +683,7 @@ TEST_CASE("pause tab: co-op that came with the game's start, and a failed Host, 
     CHECK(ActionFor(View::kJoin, kJoinRowLeave, launcher) == RowAction::kConfirmLeave);
     SessionView lv;
     lv.s = launcher;
-    CHECK(RowTexts(lv)[kRowJoin] == "Your session");
+    CHECK(RowTexts(lv)[kRowJoin] == "Your game");
     CHECK(RowTexts(View::kJoin, lv)[kJoinRowLeave] == "Leave the game");
     lv.confirm_leave = true;
     CHECK(RowTexts(View::kJoin, lv)[kJoinRowLeave] == "A again: leave");
@@ -847,7 +847,7 @@ TEST_CASE("pause tab: the Session view: the host's lines to copy, a guest's host
     hv.s = host;
     hv.players = 3;
     CHECK(RowTexts(View::kSession, hv) == std::vector<std::string>{"Hosting: 3 players", "Room: coming...",
-                                                                    "Copy same-network line", "Copy VPN line", "Back"});
+                                                                    "Copy network address", "Copy VPN address", "Back"});
     hv.s.code = true;
     hv.room = "forest-gang";
     hv.note = "Copied the room name";   // (what the last copy did, on the row the player looks at)
@@ -2250,8 +2250,16 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     lines = SettingLines(graphics, 1, "Graphics");
     CHECK(lines[0].name == "Graphics  < 2 of 2 >");
     CHECK(lines[1].name == "Graphics 6");
-    CHECK(lines[4].name == "Aspect ratio *");   // (a restart one)
+    CHECK(lines[4].name == "Aspect ratio (restart)");   // (a restart one: says so in words)
     CHECK(lines[5].name.empty());
+    {   // a long name gives way to the tag: "(restart)" stays whole within the name box
+        SettingRow longer = res;
+        longer.key = "long", longer.name = "A very long setting name that cannot fit its box", longer.tab = "Audio";
+        const auto row = SettingLines(SettingsOf(std::vector<SettingRow>{longer}, 1), 0, "Audio");
+        CHECK(row[1].name.size() <= kListNameChars);
+        CHECK(row[1].name.size() >= 9);
+        CHECK(row[1].name.substr(row[1].name.size() - 9) == "(restart)");
+    }
     CHECK(SettingLines(SettingsOf(all, 1), 0, "Audio")[0].name == "Audio");   // (one page: no page shown)
 
     CHECK(SettingNext(vol, 1) == 85);
@@ -2365,7 +2373,7 @@ TEST_CASE("pause tab: Settings and look shows co-op's own menu's pages on the li
     CoopPauseMenu::View m;
     m.rows.push_back(Row{"Tunic", "", RowKind::kHeading});
     for (int i = 0; i < 12; ++i) {
-        Row r{"Part " + std::to_string(i), "Game's own", RowKind::kChoice};
+        Row r{"Part " + std::to_string(i), "Default", RowKind::kChoice};
         r.right = true;
         m.rows.push_back(r);
     }
@@ -2379,7 +2387,7 @@ TEST_CASE("pause tab: Settings and look shows co-op's own menu's pages on the li
     CHECK(ml.rows[1] == 0);
     CHECK_FALSE(ml.selectable[1]);   // (a heading)
     CHECK(ml.lines[2].name == "Part 0");
-    CHECK(ml.lines[2].value == "Game's own >");
+    CHECK(ml.lines[2].value == "Default >");
     CHECK(ml.selectable[2]);
     CHECK(ml.picked == -1);   // (the rows have the pad: nothing picked)
     // The list has the pad: the selected row is picked, and the list scrolls to keep it in view.
@@ -2882,7 +2890,7 @@ TEST_CASE("pause tab (0.11.9): a view on the - page: B steps back a view, on the
     CHECK(p.OnPad(kPadB, now + 14) == 0);
     CHECK(p.TakeMinusBack());
     CHECK_FALSE(p.TakeMinusBack());
-    CHECK(std::string(p.TakeStripSound()) == "button_cancel");
+    CHECK(std::string(p.TakeStripSound()) == std::string(CoopMenuNav::kSoundBack));
     CHECK(p.OnPad(kPadB, now + 16) == 0);   // (held: still ours)
     p.OnPad(0, now + 18);
     // The view's rows take A as the tab's did (the module acts on the view's row).
@@ -3052,7 +3060,7 @@ TEST_CASE("pause tab (0.11.9): the - menu's Lobby and Multiplayer pages: every r
     CHECK(ActionFor(MinusPage::kMultiplayer, 3, host.s) == RowAction::kViewHost);
     SessionView guest;
     guest.s.in_one = true;
-    CHECK(RowTexts(MinusPage::kMultiplayer, guest)[3] == "Your session");
+    CHECK(RowTexts(MinusPage::kMultiplayer, guest)[3] == "Your game");
     CHECK(ActionFor(MinusPage::kMultiplayer, 3, guest.s) == RowAction::kViewJoin);
     // Every row with words opens something; every row without opens nothing.
     for (const SessionView& v : {idle, host, guest}) {
@@ -3068,19 +3076,19 @@ TEST_CASE("pause tab (0.11.9): the - menu's Lobby and Multiplayer pages: every r
 }
 
 TEST_CASE("pause tab: co-op that came with the game: short rows, and the Lobby's Host and Join views say why") {
-    // (menu-parity-0119, a lane shot: "Co-op came with the game" ran past both edges of its button; the right half
+    // (menu-parity-0119, a lane shot: "Started with the game" ran past both edges of its button; the right half
     // of the Host and Join views was empty)
     SessionView v;
     v.s.by_launcher = true;
     for (const View view : {View::kHost, View::kJoin, View::kSession, View::kPassword, View::kLan}) {
         for (const std::string& row : RowTexts(view, v)) {
-            CHECK(row != "Co-op came with the game");
+            CHECK(row != "Started with the game");
             CHECK(row.size() <= kRowChars);
         }
     }
     for (const View view : {View::kHost, View::kJoin}) {
         const auto d = DetailLines(view, v);
-        CHECK(d[0].name == "Co-op came with the game");
+        CHECK(d[0].name == "Started with the game");
         CHECK(d[1].name == "Restart the game to change it");
     }
     CHECK(DetailLines(View::kHost, SessionView{})[0].name.empty());   // (not by the launcher: the rows say it all)

@@ -629,6 +629,33 @@ TEST_CASE("testinput: hit and stun hand the hook an actor name (and an amount), 
     CHECK(r.Done());
 }
 
+TEST_CASE("testinput: kill and hit take the actor's id before its name (S4)") {
+    std::string error;
+    Runner r(Must("kill 4096 Enemy_Test\nhit 8192 Enemy_Test 3\nkill Enemy_Test\nhit Enemy_Test 2\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 4);
+    CHECK(requests[0].kind == Kind::kill);
+    CHECK(requests[0].name == "Enemy_Test");
+    CHECK(requests[0].id == 4096);
+    CHECK(requests[1].kind == Kind::hit);
+    CHECK(requests[1].name == "Enemy_Test");
+    CHECK(requests[1].start == "3");
+    CHECK(requests[1].id == 8192);
+    CHECK(requests[2].id == 0);
+    CHECK(requests[3].id == 0);
+    CHECK(requests[3].start == "2");
+    // an id needs its name (never a number), is not zero, and nothing may follow
+    CHECK_FALSE(Parse("kill 4096\n", error));
+    CHECK_FALSE(Parse("kill 4096 77\n", error));
+    CHECK_FALSE(Parse("kill 0 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("kill 4096 Enemy_Test now\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test\n", error));
+    CHECK_FALSE(Parse("hit 4096 3\n", error));
+    CHECK_FALSE(Parse("hit 4096 Enemy_Test 0\n", error));
+}
+
 TEST_CASE("testinput: setflag hands the hook a flag name and a whole number (issue 130)") {
     std::string error;
     CHECK_FALSE(Parse("setflag\n", error));
@@ -807,6 +834,14 @@ TEST_CASE("testinput: aim X Y Z hands the hook the world point our next arrow is
     CHECK(log[0] == "mark aimed");
 }
 
+TEST_CASE("testinput: aim steers our arrow and our slingshot seed, nothing else") {
+    CHECK(Aimable("NormalArrow"));
+    CHECK(Aimable("Shootable_DekuSeed"));
+    CHECK_FALSE(Aimable("CoopShot_Arrow"));  // another player's shot
+    CHECK_FALSE(Aimable("Item_DekuNut"));
+    CHECK_FALSE(Aimable("Obj_DekuSeed"));  // a pickup
+}
+
 TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, facing it (row 173)") {
     // Row 173's relief: the arrow let go 2 m in front of Link (z -4.0 at bow height), the eye 6.1 m on and 5.3 m up.
     const std::array<float, 3> from{-56.5f, 126.2f, -4.0f};
@@ -872,4 +907,29 @@ TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
     REQUIRE(requests.size() == 1);
     CHECK(requests[0].kind == Kind::menu);
     CHECK(requests[0].name == "host");
+}
+
+TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses the whole script otherwise") {
+    const auto& allowed = ActKinds();
+    CHECK(NotAllowed(Must("kill Enemy_Test\nhit Enemy_Test 2\nhurt 2\nplace 1 2 3\nface 1 2\nchat hello"), allowed).empty());
+    CHECK(NotAllowed(Must("menu customize"), allowed).empty());
+    CHECK(NotAllowed(Must("setflag some_flag 1"), allowed).empty());
+    // an unlisted kind: a wait, a warp, a give, a sync, a dump
+    const std::string wait = NotAllowed(Must("wait 1"), allowed);
+    CHECK(wait.find("not allowed here") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("warp Market_Child"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("give bombs"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("sync title 2"), allowed).empty());
+    CHECK_FALSE(NotAllowed(Must("dump x"), allowed).empty());
+    // a hidden second command (new line), in a different case, behind a legal first one
+    const std::string hidden = NotAllowed(Must("kill Enemy_Test\nWARP Market_Child"), allowed);
+    CHECK(hidden.find("line 2") != std::string::npos);
+    CHECK(hidden.find("warp") != std::string::npos);
+    CHECK_FALSE(NotAllowed(Must("KILL Enemy_Test\nGive bombs"), allowed).empty());
+    // the list in the message
+    CHECK(wait.find("kill") != std::string::npos);
+    CHECK(wait.find("chat") != std::string::npos);
+    // every kind has a word and a word that Parse reads back as that kind is how the table is kept honest
+    CHECK(std::string(KindWord(Kind::go)) == "goto");
+    for (const Kind k : allowed) CHECK(std::string(KindWord(k)) != "?");
 }

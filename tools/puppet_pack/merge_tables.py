@@ -56,9 +56,9 @@ import sys
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from puppet_pack import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
+    from puppet_pack import byml, charsel_names, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
 else:
-    from . import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs
+    from . import byml, charsel_names, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs
 
 LIST_FILE = "coop-mods.list"
 KEEP_DIR = "_coop-size-table"
@@ -80,7 +80,9 @@ MENU_KEEP = "_coop-menus"     # the pack's menu files while the table the game r
 # (coop_puppet.json's "menu_keys": the file lists kept aside together, ui_pack.MENU_KEYS when the pack was made; a pack
 # without the field has the two old keys)
 MEMBERS_KEEP = "_coop-archives"   # a mod's own copies of archives the pack's members were merged into (merge_members)
-MEMBERS_HEAD = "coop-members 1"
+# (2: menu-customize-01113, Character Select's picker names made readable (add_snail_placeholders' tidy_picker): a
+# kit merged before re-merges once from its kept copies)
+MEMBERS_HEAD = "coop-members 2"
 
 
 class MergeError(Exception):
@@ -640,7 +642,7 @@ def merge_members(root, romfs, say=print):
     pack's members (its texts, MenuOverlay_00, PlusMenu_00) were lost. The winner's copy gets every member the pack
     changed from the game's own archive (romfs) where the winner left that member as the game has it; a member both
     changed stays the winner's and is named (a decision for the two mods: the pause header). Its own copy is kept in
-    `<mod>/_coop-archives/<path>` with `<path>.txt` (`coop-members 1` / `out <the file written>` / `in <the pack's
+    `<mod>/_coop-archives/<path>` with `<path>.txt` (`coop-members 2` / `out <the file written>` / `in <the pack's
     copy>` / `fit <size path> <size>`), so the next start merges again only when one of them changed, from the kept
     copy; --undo puts it back. Needs the game's romfs (to tell which member changed); without it nothing is merged.
 
@@ -716,11 +718,65 @@ SNAIL_PLACEHOLDER = "." * 64
 
 
 def add_snail_placeholders(entries):
-    """(entries with the placeholders in his Customize screen's message file, whether one changed)."""
+    """(entries with the placeholders in his Customize screen's message file and his picker's names readable,
+    whether one changed)."""
     labels = {"Coop_Custom_%02d" % i: SNAIL_PLACEHOLDER for i in range(SNAIL_SLOTS)}
     out, changed = [], False
     for n, d in entries:
         if n == SNAIL_MSG:
+            d2 = ui_pack.add_labels(d, labels, replace=True)
+            changed = changed or d2 != d
+            d = d2
+        elif n == charsel_names.PICKER_MSG:
+            # (menu-customize-01113: his picker's model ids, "Gerudo_GEN_002", as readable names; charsel_names.py)
+            d2 = charsel_names.tidy_picker(d)
+            changed = changed or d2 != d
+            d = d2
+        out.append((n, d))
+    return out, changed
+
+
+# menu-customize-01113 (lane A's ask: "keep the words out of the title once the icons show"): his Customize screen's
+# keys as the game shows keys, in its footer's guide-key part (PaGuideKey_00: its words, then the button letter in the
+# button-icon font External_00, docs/game-ui.md "Button letters"); button letters drawn in his title's words pane are
+# empty boxes, so the title said "Y: page  A: Fine-tune" in words. Two copies of that part go into his layout
+# (CharacterCustomize_00, under its RootPane: a copy is a last pane, and only the root's subtree reaches the last one;
+# his N_Custom_00 ends before his overlay and message panes) on the footer's line, left of the game's own "Back"
+# (its icon at x 1794, its words from x 1629; each copy has room for about twelve letters), stored hidden: the module
+# shows each one while its key does something (hookshot/src/coop_snail_custom.h Driver::Keys) and hides both when his
+# screen is left (they are not under his open/close panes). Their words and button
+# letters are messages of his file ("<part>-<pane>", as his Pa_MarkL_00-T_Icon_00), English as his own.
+SNAIL_LAYOUT = "CharacterCustomize_00.buil"
+SNAIL_KEY_SOURCE = "Pa_MarkL_00"      # (his ZL key beside a value: a part, x -300 under N_Mark_00, scale 0.7)
+SNAIL_KEY_PARENT = "RootPane"         # (at 0, 0)
+SNAIL_KEY_LAYOUT = "PaGuideKey_00"
+SNAIL_KEY_SIZE = (200.0, 200.0)       # (MenuOverlay_00's Pa_Guide_NN)
+SNAIL_KEY_Y = -1018.0                 # (the footer's guide line: MenuOverlay_00 A_FirstGuide_00)
+# (name, icon centre x, button letter, words)
+SNAIL_KEYS = (("Pa_CoopKeyY_00", 1510.0, "\ue043", "Next page"),
+              ("Pa_CoopKeyA_00", 1050.0, "\ue040", "Fine-tune"))
+
+
+def add_snail_keys(entries):
+    """(entries with co-op's key parts in his Customize layout and their messages in his message file, whether one
+    changed). A layout or file that has them already is left as it is."""
+    out, changed = [], False
+    for n, d in entries:
+        if n == SNAIL_LAYOUT:
+            panes, _ = ui_pack.read_layout(d)
+            names = {p.name for p in panes}
+            if SNAIL_KEY_SOURCE in names and SNAIL_KEY_PARENT in names and SNAIL_KEYS[0][0] not in names:
+                source_x, source_y = pause_menu._xy(d, SNAIL_KEY_SOURCE)
+                d = ui_pack.clone_parts(d, [ui_pack.Copy(SNAIL_KEY_SOURCE, name, (x - source_x, SNAIL_KEY_Y - source_y),
+                                                         parent=SNAIL_KEY_PARENT, hidden=True, part_layout=SNAIL_KEY_LAYOUT,
+                                                         size=SNAIL_KEY_SIZE, scale=(1.0, 1.0))
+                                            for name, x, _, _ in SNAIL_KEYS])
+                changed = True
+        elif n == SNAIL_MSG:
+            labels = {}
+            for name, _, icon, words in SNAIL_KEYS:
+                labels[name + "-T_Icon_00"] = icon
+                labels[name + "-T_Guide_00"] = words
             d2 = ui_pack.add_labels(d, labels, replace=True)
             changed = changed or d2 != d
             d = d2
@@ -1024,6 +1080,8 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
             out.append((n, d))
     out.extend((n, x) for n in sorted(take) if n not in done for x in take[n])
     out, placeholders = add_snail_placeholders(out)
+    out, keys = add_snail_keys(out)
+    placeholders = placeholders or keys
     if take or placeholders:
         new_data = sarc.write(out, data_align=16)
         data = codec.pack(new_data, orig_raw)
@@ -1049,8 +1107,8 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
         + (f" A label both changed, the nearer mod's kept: {', '.join(labels_kept)}." if labels_kept else "")
         + (f" {', '.join(gave_english)}: no archive in this language, its English messages taken."
            if gave_english else "")
-        + (" Its Customize screen's messages got co-op's placeholders (co-op's customization in it)."
-           if placeholders else ""))
+        + (" Character Select's screens got co-op's part (his Customize screen's placeholders and keys, his picker's"
+           " names readable)." if placeholders else ""))
     return need
 
 

@@ -18,7 +18,10 @@
 // Logic only (no game calls): tests/hookshot/menu_nav_test.cpp.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace CoopMenuNav {
 
@@ -26,11 +29,13 @@ inline constexpr std::uint64_t kRepeatDelayMs = 400;   // held this long: the fi
 inline constexpr std::uint64_t kRepeatEveryMs = 90;    // then one step this often
 
 // The game's menu sounds by name (heard in runs, 2026-11-19: "button_on" at a cursor step, "button_decide" at a
-// choice; the strip's "mc_TabToRight" / "mc_TabToLeft"). kSoundBack is the name our pages have used for B since
-// 0.11.9; whether the game's xlink user knows it is to be read in the lane run (the play call's bit 0: started).
+// choice; the strip's "mc_TabToRight" / "mc_TabToLeft"). Back is "mc_ReturnFromDetail", the game's own back from a
+// detail (docs/game-ui.md "Sounds"): the "button_cancel" our pages played since 0.11.9 is in no table of the game's
+// (the sound link file SLink2/slink2.Product.111.bslnk.zs, read 2026-11-24: button_on, button_decide,
+// button_decide_Cancel, mc_OpenDetail, mc_ReturnFromDetail, SE_Sys_Cancel00; no button_cancel), so B was silent.
 inline constexpr const char* kSoundMove = "button_on";
 inline constexpr const char* kSoundDecide = "button_decide";
-inline constexpr const char* kSoundBack = "button_cancel";
+inline constexpr const char* kSoundBack = "mc_ReturnFromDetail";
 inline constexpr const char* kSoundTabRight = "mc_TabToRight";
 inline constexpr const char* kSoundTabLeft = "mc_TabToLeft";
 
@@ -91,6 +96,52 @@ template <typename Pickable>
 bool CanStep(int at, int dir, int count, Pickable pickable) {
     return Step(at, dir, count, false, pickable) != at;
 }
+
+// The typing keys' cursor (the - page's and the + page's on-screen keys: `keys` keys up and down, the Letter key
+// `letter_key`'s letter Left and Right among `letters`): `dy` / `dx` one step (-1, 0, 1). A fresh press goes round the
+// keys, a held one (`dy_held`) stops at the ends, as every list; the letter wheel goes round held too (a value turned,
+// as the game's own number wheels). True when something moved (its sound then).
+inline bool TypingKeysStep(int dy, int dx, bool dy_held, int keys, int letter_key, std::size_t letters, int* key,
+                           std::size_t* letter) {
+    bool moved = false;
+    if (dy != 0 && keys > 0) {
+        const int to = *key + (dy < 0 ? -1 : 1);
+        if (to >= 0 && to < keys) {
+            *key = to, moved = true;
+        } else if (!dy_held && keys > 1) {
+            *key = (to % keys + keys) % keys, moved = true;
+        }
+    }
+    if (dx != 0 && *key == letter_key && letters > 0) {
+        *letter = (*letter % letters + (dx < 0 ? letters - 1 : 1)) % letters;
+        moved = true;
+    }
+    return moved;
+}
+
+// What a list owned by someone else (the Mods tab's) last showed: which lines can be picked and the selected one, as
+// read at the page's own refresh (its view is built then, never at each pad read: review-01112-h). `sent` counts the
+// moves given to that list; a reading is only trusted while no move was given after it (Fill takes the count read
+// BEFORE the view was built, so a refresh that raced a move is stale, never fresh). A held direction repeats only on a
+// trusted reading; a stale one waits for the next refresh (asked for at each move).
+struct ListReading {
+    std::vector<bool> pickable;
+    int selected = -1;
+    std::uint64_t sent = ~std::uint64_t{0};   // (none yet: never trusted)
+
+    void Fill(std::uint64_t sent_before_view, std::vector<bool> lines, int picked) {
+        pickable = std::move(lines), selected = picked, sent = sent_before_view;
+    }
+    bool Trusted(std::uint64_t sent_now) const {
+        return sent == sent_now && selected >= 0 && selected < static_cast<int>(pickable.size());
+    }
+    // A held Up (dir -1) or Down (+1) may go on: trusted, and a pickable line that way without going round.
+    bool CanRepeat(int dir, std::uint64_t sent_now) const {
+        if (!Trusted(sent_now)) return false;
+        const auto& p = pickable;
+        return CanStep(selected, dir, static_cast<int>(p.size()), [&p](int i) { return p[static_cast<std::size_t>(i)]; });
+    }
+};
 
 // A bit mask of pickable lines (bit i: line i), as the - page keeps its rows and lines.
 inline int StepMask(std::uint32_t mask, int at, int dir, bool wrap = false) {

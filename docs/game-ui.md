@@ -446,8 +446,10 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   held Up or Down again after 400 ms and then every 90 ms (the typing keys' timing), never round from the last line
   to the first while held (only a fresh press goes round, on a list that goes round), headings and notes are stepped
   over, and the move sound plays only when something moved. Its sound names (`kSoundMove` `button_on`,
-  `kSoundDecide` `button_decide`, `kSoundBack` `button_cancel`) are the ones every page of ours plays; whether the
-  game knows `button_cancel` is still to be read in a run. (code)
+  `kSoundDecide` `button_decide`, `kSoundBack` `mc_ReturnFromDetail`) are the ones every page of ours plays. The
+  `button_cancel` our pages played for B until 0.11.12 is in no table of the game's: the sound link file
+  (`SLink2/slink2.Product.111.bslnk.zs`) names `button_on`, `button_decide`, `button_decide_Cancel`, `mc_OpenDetail`,
+  `mc_ReturnFromDetail` and `SE_Sys_Cancel00`, no `button_cancel` (checked 2026-11-24), so B was silent. (checked)
 
 ## The pause menu
 
@@ -609,6 +611,20 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   `Unopened`, string `0x83ce30d7`, when disabled); the tab of the category at `+0x358` is highlighted with
   `f_802ecf60(tab, on, instant)`. In the Minus menu the tabs are [6, 1, 2] and tab 3 is hidden (`f_802edef0`). `+0x350`
   is the mode (Plus or Minus); `+0x308` and `+0x310` the `MinusToPlus` and `PlusToMinus` animations. (checked)
+- **A tab that reads `???` is the game's own masked tab, not lost text.** The third argument of `f_80a8ab50` is whether
+  the page is open to the player; when it is 0 the tab shows `Unopened` (`???` in English; the label is in the stock
+  `MenuOverlay_00`, a mod's merged copy and our pack keep it). In the Minus menu `FillTabs` decides it per tab: Key
+  Items (category 6) is on only while one of the key items of `ItemDatabase::GetList(4)` passes the check
+  `f_801a1160` (inferred: the item is owned); Threads of Time (category 1) is on only while the Bool
+  `UI_IsFinishChallengeMenuOpenEvent` (`0x1450c74f`, read through `f_833a5f50`; [flags.md](flags.md), "Threads of
+  Time") is set, which only the owl at the Hyrule Field entrance does (in a co-op session the flag is a shared story
+  flag, so another player's owl, or a `setflag` on one game, opens the tab on every game). So a fresh save, or a test
+  state set up with flags and warps, shows `Characters, ???, ???, Map, ...` on a build with Character Select's
+  Characters tab, and `???, ???, Map` without it; stock is inferred to be the same (the code read is the lane
+  build's). (checked in the disassembly of `FillTabs`, 2026-11-23, on the lane build; the Key Items check and the
+  stock case are inferred) A test that needs the tabs named sets `setflag UI_IsFinishChallengeMenuOpenEvent 1` and
+  gives key items first (docs/playtest.md, "Rules for a tester": the Zelda's Letter alone did not name the tab in a
+  two-game run; five items together did).
 - `f_802ecf60`: on, it stops `CurrentOut` (`f_802f0fe0`) and plays `CurrentIn` (`f_802eda70(anim, 0, 1.0)`, or
   `f_802f0f00` when instant); off, the reverse; nothing when the animation is already at its end. (checked)
 

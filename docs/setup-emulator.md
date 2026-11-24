@@ -40,7 +40,7 @@ Co-op now also runs on [Hookshot](https://git.notrexed.dev/Hookshot/Hookshot) (N
 
 ### Co-op on Hookshot
 
-The same co-op code runs on Hookshot as in the emulator, drawn over the game's picture instead of in the emulator's window. Some keys differ, because Enter and Tab are the game's Plus button on Hookshot:
+The same co-op code runs on Hookshot as in the emulator, drawn over the game's picture instead of in the emulator's window. Some keys differ, because Tab is the game's Plus button on Hookshot (and Enter too before Longshot v3.2.0):
 
 | What | On Hookshot |
 |---|---|

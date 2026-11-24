@@ -17,6 +17,8 @@ import hookshot  # noqa: E402
 import lanes  # noqa: E402
 import live  # noqa: E402
 import mcp_playtest  # noqa: E402
+import playtest_client as pc  # noqa: E402
+import playtest_helpers as ph  # noqa: E402
 
 
 def write_checkpoint(d, tag, a_flags, b_flags, when):
@@ -105,7 +107,8 @@ class Mcp(unittest.TestCase):
         self.assertEqual([m["id"] for m in out], [1, 2, 3, 4])  # the notification is not answered
         self.assertEqual(out[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
-                         ["state", "act", "shot", "checkpoint", "desync_check"])
+                         ["state", "act", "shot", "checkpoint", "desync_check", "quit_game", "server", "relaunch",
+                          "wait_log", "sleep"])
         self.assertTrue(out[2]["result"]["isError"])
         self.assertEqual(out[3]["error"]["code"], -32601)
 
@@ -161,6 +164,7 @@ class LiveLane(unittest.TestCase):
         self.assertIn("--keep-open", argv)
         self.assertEqual(argv[argv.index("--pipe") + 1], "coop-lane1")
         self.assertEqual(argv[argv.index("--port") + 1], "27520")
+        self.assertEqual(argv[argv.index("--password") + 1], live.SERVER_PASSWORD)   # (kept in session.json too)
         self.assertIn("--no-restore", live.runner_argv(start_args(no_restore=True), "ga", "gb", 1, "p", "dir"))
 
     def test_the_runner_keeps_pids_for_the_watchdog(self):
@@ -170,6 +174,345 @@ class LiveLane(unittest.TestCase):
             self.assertEqual(live.game_pids(d), ({"A": 11, "B": 12}, 13))
             os.remove(os.path.join(d, "pids.json"))
             self.assertEqual(live.game_pids(d), ({}, None))
+
+
+class LiveDll(unittest.TestCase):
+    """The lane's module: lanes.py owns it (install, setup, swap_in/swap_back); live.py start --dll swaps for a session."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.kit = self.tmp.name
+        self.dsts = []
+        for x in ("A", "B"):
+            b = os.path.join(self.kit, "ls", "lane1-%s" % x, "bin")
+            os.makedirs(b)
+            open(os.path.join(b, "longshot.exe"), "w").close()
+            dst = os.path.join(b, "hookshot_coop.dll")
+            self.write(dst, "lane own")
+            self.dsts.append(dst)
+        self.new = os.path.join(self.kit, "new.dll")
+        self.write(self.new, "session")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, p, text):
+        with open(p, "w") as f:
+            f.write(text)
+
+    def read(self, p):
+        with open(p) as f:
+            return f.read()
+
+    def lane(self):
+        return [self.read(d) if os.path.exists(d) else None for d in self.dsts]
+
+    def swap(self, s, dll=None):
+        return live.install_dll(s, dll or self.new, swap=lambda n, p: lanes.swap_in(n, p, kit=self.kit,
+                                                                                    busy=lambda _f: False))
+
+    def back(self, s, **kw):
+        return live.restore_dlls(s, swap_back=lambda n: lanes.swap_back(n, kit=self.kit, **kw))
+
+    def test_swap_and_restore(self):
+        s = {"lane": 1}
+        self.swap(s)
+        self.assertEqual(self.lane(), ["session", "session"])
+        self.assertEqual([self.read(d + live.BACKUP) for d in self.dsts], ["lane own", "lane own"])
+        self.assertEqual(len(lanes.swap_left(1, kit=self.kit)), 2)
+        self.assertEqual(self.back(s), "restored, restored")
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+
+    def test_a_left_backup_is_the_lane_own(self):
+        # a session that could not put it back left its backup: the next one keeps it (the lane's own), not the test dll
+        for d in self.dsts:
+            self.write(d + live.BACKUP, "lane own")
+            self.write(d, "left over")
+        s = {"lane": 1}
+        self.swap(s)
+        self.back(s)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_an_install_after_a_failed_restore_wins(self):
+        # review-01112-h 1: the backup stayed (a game held the file), then lanes.py install put a newer module in. The
+        # newer one is the lane's own now: no later session may put the old backup back.
+        for d in self.dsts:
+            self.write(d + live.BACKUP, "old own")
+            self.write(d, "left over")
+        newer = os.path.join(self.kit, "newer.dll")
+        self.write(newer, "newer")
+        lanes.install(1, newer, say=lambda *_: None, kit=self.kit, busy=lambda _f: False)
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+        s = {"lane": 1}
+        self.swap(s)
+        self.back(s)
+        self.assertEqual(self.lane(), ["newer", "newer"])
+
+    def test_a_lane_with_no_module_gets_none_back(self):
+        # review-01112-h 2: the lane had no module: the session's is removed at its end, not left behind
+        for d in self.dsts:
+            os.unlink(d)
+        s = {"lane": 1}
+        self.swap(s)
+        self.assertEqual(self.lane(), ["session", "session"])
+        self.assertEqual(self.back(s), "removed (the lane had none), removed (the lane had none)")
+        self.assertEqual(self.lane(), [None, None])
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+
+    def test_a_held_file_is_tried_again(self):
+        s = {"lane": 1}
+        self.swap(s)
+        calls = {"n": 0}
+        real = os.replace
+
+        def flaky(a, b):   # the killed game holds the module for two tries
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise PermissionError("in use")
+            return real(a, b)
+        slept = []
+        os.replace = flaky
+        try:
+            words = self.back(s, sleep=slept.append)
+        finally:
+            os.replace = real
+        self.assertEqual(words, "restored, restored")
+        self.assertEqual(len(slept), 2)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_still_held_says_so_and_check_names_it(self):
+        s = {"lane": 1}
+        self.swap(s)
+        real = os.replace
+
+        def held(a, b):
+            raise PermissionError("in use")
+        os.replace = held
+        try:
+            words = self.back(s, tries=3, sleep=lambda _s: None)
+        finally:
+            os.replace = real
+        self.assertIn("NOT restored", words)
+        self.assertIn("lanes.py restore --lane 1", words)
+        found = lanes.problems(1, kit=self.kit, busy=lambda _f: False)
+        self.assertTrue(any("was not put back" in p for p in found), found)
+        lanes.swap_back(1, kit=self.kit)   # (lanes.py restore)
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+
+    def test_setup_drops_a_left_swap(self):
+        src = {}
+        for x in ("A", "B"):
+            src[x] = os.path.join(self.kit, "src-%s" % x, "bin")
+            os.makedirs(src[x])
+            open(os.path.join(src[x], "longshot.exe"), "w").close()
+            self.write(os.path.join(src[x], "hookshot_coop.dll"), "source")
+        for d in self.dsts:
+            self.write(d + live.BACKUP, "old own")
+        lanes.setup(1, os.path.dirname(src["A"]), os.path.dirname(src["B"]), say=lambda *_: None, kit=self.kit,
+                    busy=lambda _f: False)
+        self.assertEqual(lanes.swap_left(1, kit=self.kit), [])
+        self.assertEqual(self.lane(), ["source", "source"])
+
+    def test_missing_dll_changes_nothing(self):
+        s = {"lane": 1}
+        with self.assertRaises(lanes.Fail):
+            self.swap(s, os.path.join(self.kit, "none.dll"))
+        self.assertEqual(self.lane(), ["lane own", "lane own"])
+        self.assertEqual(self.back(s), "nothing to put back, nothing to put back")
+
+    def test_dll_needs_lane(self):
+        a = argparse.Namespace(dll=self.new, lane=None, session=os.path.join(self.kit, "s"))
+        with self.assertRaises(SystemExit):
+            live.start(a)
+
+
+RUNNER = {"game_a": "ga", "game_b": "gb", "port": 27520, "pipe": "coop-lane1", "server": "srv.exe",
+          "env": ["LICHII_COOP_DEBUG_FLAGS=1", "B:X=1"], "display": "D2", "boot_timeout": 900, "playtest": 5010,
+          "password": "pw-of-session"}
+
+
+class FakeProc:
+    def __init__(self, pid):
+        self.pid = pid
+
+
+class LiveLifecycle(unittest.TestCase):
+    """quit / server / relaunch: a game or the server closed and started again inside one session."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        write_session(self.d, runner=dict(RUNNER), planned={})
+        self.pids({"A": 11, "B": 22}, 33)
+        self.live = {11, 22, 33}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def pids(self, games, server=None):
+        with open(os.path.join(self.d, "pids.json"), "w", encoding="utf-8") as f:
+            json.dump({"games": games, "server": server}, f)
+
+    def alive(self, p):
+        return p in self.live
+
+    def args(self, **kw):
+        return argparse.Namespace(session=self.d, **kw)
+
+    def test_a_planned_exit_does_not_end_the_session(self):
+        out = live.quit_one(self.args(player="B", kill=True), alive=self.alive, killer=self.live.discard,
+                            sleep=lambda s: None)
+        self.assertEqual(out["how"], "killed")
+        self.assertEqual(live.game_pids(self.d)[0], {"A": 11})
+        self.assertEqual(live.load(self.d)["planned"], {"B": "killed"})
+        c = FakeClock(1000.0)
+
+        def sleep(s):   # B's pid is gone and planned: only the stop request ends the watch
+            c.sleep(s)
+            open(live.stop_file(self.d), "w").close()
+        live.touch(self.d)
+        self.assertEqual(live.watch(self.d, clock=c, sleep=sleep, alive=self.alive), "stop asked")
+
+    def test_an_unplanned_exit_still_ends_it(self):
+        self.live.discard(22)
+        c = FakeClock(1000.0)
+        live.touch(self.d)
+        self.assertEqual(live.watch(self.d, clock=c, sleep=c.sleep, alive=self.alive), "game B ended")
+
+    def test_quit_asks_first_then_kills(self):
+        asked = []
+        c = FakeClock(0.0)
+        out = live.quit_one(self.args(player="A", kill=False), alive=self.alive, quit=lambda s, x: asked.append(x),
+                            killer=self.live.discard, wait=5, clock=c, sleep=c.sleep)
+        self.assertEqual(asked, ["A"])
+        self.assertEqual(out["how"], "quit asked, killed after 5 s")
+        self.assertNotIn(11, self.live)
+
+    def test_server_stop_and_start(self):
+        out = live.server_cmd(self.args(action="stop"), alive=self.alive, killer=self.live.discard)
+        self.assertEqual((out["server"], out["pid"]), ("stopped", 33))
+        self.assertIsNone(live.game_pids(self.d)[1])
+        self.assertEqual(live.load(self.d)["planned"], {"server": "stopped"})
+        seen = {}
+
+        def popen(cmd, **kw):
+            seen["cmd"], seen["env"] = cmd, kw["env"]
+            return FakeProc(44)
+        out = live.server_cmd(self.args(action="start"), alive=self.alive, popen=popen, sleep=lambda s: None)
+        self.assertEqual(out["pid"], 44)
+        self.assertEqual(seen["cmd"], ["srv.exe", "--port", "27520", "--password-env", "OOT_COOP_TEST_PASSWORD"])
+        self.assertEqual(seen["env"]["OOT_COOP_TEST_PASSWORD"], "pw-of-session")   # (the session's, review-01112-h 3)
+        self.assertEqual(live.game_pids(self.d), ({"A": 11, "B": 22}, 44))
+        self.assertEqual(live.load(self.d)["planned"], {})
+
+    def test_server_start_refused_while_it_runs(self):
+        out = live.server_cmd(self.args(action="start"), alive=self.alive, popen=lambda *a, **k: 1 / 0)
+        self.assertIn("still runs", out["error"])
+
+    def test_relaunch_argv_keeps_the_session_settings(self):
+        argv = live.relaunch_argv(RUNNER, self.d, "B", boot="boot.B.txt", no_load=True)
+        self.assertEqual(argv[:3], ["run", "--only", "B"])
+        for pair in (["--port", "27520"], ["--pipe", "coop-lane1"], ["--out", self.d], ["--script-b", "boot.B.txt"],
+                     ["--playtest-ports", "5010"], ["--display", "D2"], ["--password", "pw-of-session"]):
+            i = argv.index(pair[0])
+            self.assertEqual(argv[i:i + 2], pair)
+        self.assertEqual([argv[i + 1] for i, w in enumerate(argv) if w == "--env"], RUNNER["env"])
+        self.assertIn("--no-restore", argv)
+        self.assertIn("--no-load", argv)
+        self.assertNotIn("--server", argv)   # (the game joins the session's server; none is started)
+        self.assertNotIn("--no-restore", live.relaunch_argv(RUNNER, self.d, "A", restore=True))
+
+    def test_relaunch_refused_while_the_game_runs(self):
+        out = live.relaunch(self.args(player="A", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=lambda argv: 1 / 0)
+        self.assertIn("still runs", out["error"])
+
+    def test_relaunch_keeps_the_old_log_and_merges_the_pid(self):
+        live.quit_one(self.args(player="B", kill=True), alive=self.alive, killer=self.live.discard,
+                      sleep=lambda s: None)
+        log = os.path.join(self.d, "game-out-B.txt")
+        with open(log, "w") as f:
+            f.write("first run")
+
+        def runner(argv):   # as hookshot.py run --only B does: B's new pid added to pids.json
+            p = live.read_json(os.path.join(self.d, "pids.json"))
+            p["games"]["B"] = 55
+            live.write_json(os.path.join(self.d, "pids.json"), p)
+            return 0
+        s = live.load(self.d)
+        s["offsets"] = {"A": 7, "B": 99}
+        live.save(self.d, s)
+        out = live.relaunch(self.args(player="B", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=runner)
+        self.assertTrue(out["ok"])
+        self.assertEqual(live.game_pids(self.d), ({"A": 11, "B": 55}, 33))
+        with open(log + ".1") as f:
+            self.assertEqual(f.read(), "first run")
+        s = live.load(self.d)
+        self.assertEqual(s["offsets"], {"A": 7, "B": 0})
+        self.assertEqual(s["planned"], {})
+
+    def test_a_failed_relaunch_stays_planned(self):
+        self.live.discard(22)
+        live.plan(self.d, "B", "killed")
+        out = live.relaunch(self.args(player="B", boot=None, no_load=False, restore=False), alive=self.alive,
+                            runner=lambda argv: 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(live.load(self.d)["planned"], {"B": "relaunch"})
+
+    def test_older_session_says_so(self):
+        write_session(self.d)
+        with self.assertRaises(SystemExit):
+            live.server_cmd(self.args(action="stop"))
+
+
+class LiveWaitLog(unittest.TestCase):
+    """wait_log and the lifecycle tools as session tools (scripts: tools/playtest/scripts/leave-solo-273.jsonl)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        write_session(self.d, runner=dict(RUNNER), planned={})
+        with open(os.path.join(self.d, "game-out-B.txt"), "w") as f:
+            f.write("coop: save: the host: this game uses its own saves\nother\ncoop: null read at 0x1\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def wait(self, pattern, mn=1, mx=None, timeout=5):
+        c = FakeClock(0.0)
+        return live.wait_log(self.d, "B", pattern, mn, mx, timeout, clock=c, sleep=c.sleep)
+
+    def test_found(self):
+        out = self.wait("the host: this game uses its own saves")
+        self.assertEqual((out["ok"], out["count"]), (True, 1))
+
+    def test_missing_times_out(self):
+        out = self.wait("now playing from the co-op save folder")
+        self.assertFalse(out["ok"])
+        self.assertIn("0 of 1", out["why"])
+
+    def test_none_allowed(self):
+        out = self.wait("unhandled exception|fault at|coop: null read", 0, 0, 0)
+        self.assertFalse(out["ok"])
+        self.assertEqual(self.wait("unhandled exception|fault at", 0, 0, 0)["ok"], True)
+
+    def test_a_failed_session_tool_stops_a_script(self):
+        with self.assertRaises(RuntimeError):
+            mcp_playtest.call(self.d, "wait_log", {"player": "B", "pattern": "never there", "timeout_s": 0})
+        self.assertEqual(mcp_playtest.call(self.d, "wait_log", {"player": "B", "pattern": "own saves",
+                                                                "timeout_s": 0})["count"], 1)
+
+    def test_the_tools_are_listed_for_scripts(self):
+        names = {t["name"] for t in mcp_playtest.TOOLS}
+        self.assertLessEqual({"quit_game", "server", "relaunch", "wait_log", "sleep"}, names)
+
+
+class HookshotOnly(unittest.TestCase):
+    def test_only_needs_no_script_a(self):
+        with self.assertRaises(SystemExit):
+            hookshot.main(["run", "--game-a", "a", "--game-b", "b", "--out", "o"])   # neither --script-a nor --only
 
 
 class FakeClock:
@@ -200,6 +543,23 @@ class LiveWatchdog(unittest.TestCase):
         c = FakeClock(1000.0)
         self.assertIn("maximum duration (30 min)", live.watch(self.d, clock=c, sleep=c.sleep, alive=lambda p: True))
         self.assertGreaterEqual(c.t, 1000.0 + 1800)
+
+    def test_maximum_minutes_0_means_no_limit(self):
+        # 0 must not end the session at once: only a stop request (here after a simulated day) does.
+        write_session(self.d, max_s=0, idle_s=0)
+        c = FakeClock(1000.0)
+
+        def sleep(s):
+            c.sleep(s)
+            if c.t > 1000.0 + 86400:
+                open(live.stop_file(self.d), "w").close()
+        self.assertEqual(live.watch(self.d, clock=c, sleep=sleep, alive=lambda p: True), "stop asked")
+        self.assertGreater(c.t, 1000.0 + 86400)
+
+    def test_no_limits_say_so_in_the_answer(self):
+        self.assertEqual(live.ends_text(0, 0), "never by itself (live.py stop, or a game that ended)")
+        self.assertEqual(live.ends_text(30, 10), "after 30 min, or 10 min without a command (live.py stop, or a game that ended)")
+        self.assertEqual(live.ends_text(0, 5), "5 min without a command (live.py stop, or a game that ended)")
 
     def test_idle_ends_only_after_the_boot(self):
         write_session(self.d, booted=False)
@@ -350,6 +710,242 @@ class LiveCheckpoint(unittest.TestCase):
             cp = live.read_json(os.path.join(cps, "after_chest.json"))
             self.assertEqual(cp["B"]["shot"], os.path.join(cps, "after_chest-B.png"))
             self.assertEqual(cp["A"]["flags"], {"F": 1})
+
+
+class LiveMenu(unittest.TestCase):
+    """live.py state's `menu`: co-op's pages as text from the play-test bridge (a bridge shot leaves them out)."""
+
+    class Fake:
+        def __init__(self, reply=None, error=None):
+            self.reply, self.error, self.asked, self.closed = reply, error, [], False
+
+        def request(self, cmd):
+            self.asked.append(cmd)
+            if self.error:
+                raise self.error
+            return self.reply
+
+        def close(self):
+            self.closed = True
+
+    def test_the_menu_member_of_the_state(self):
+        menu = {"coop": {"open": True, "page": "customize"}, "customize_screen": {"open": False}}
+        f = self.Fake({"ok": True, "frame": 3, "menu": menu})
+        self.assertEqual(live.menu_of(5001, f), {"menu": menu})
+        self.assertEqual(f.asked, ["state"])
+        self.assertTrue(f.closed)
+
+    def test_an_older_module_says_so(self):
+        self.assertIn("no menu", live.menu_of(5001, self.Fake({"ok": True}))["menu_error"])
+
+    def test_no_bridge_is_an_error_not_a_crash(self):
+        f = self.Fake(error=ConnectionRefusedError("refused"))
+        self.assertIn("refused", live.menu_of(5001, f)["menu_error"])
+        self.assertTrue(f.closed)
+
+    def test_a_game_without_the_bridge_is_not_asked(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = {"games": {"A": {}}}
+            asked = []
+            orig = (live.bridge, live.snapshot, live.new_lines, live.menu_of)
+            try:
+                live.bridge = lambda s, x: type("B", (), {"close": lambda self: None})()
+                live.snapshot = lambda b: {"map": "m"}
+                live.new_lines = lambda d, s, x: []
+                live.menu_of = lambda port: asked.append(port) or {"menu": {}}
+                self.assertNotIn("menu", live.look(d, s, "A"))
+                s["games"]["A"]["playtest_port"] = 5011
+                self.assertEqual(live.look(d, s, "A")["menu"], {})
+                self.assertEqual(asked, [5011])
+            finally:
+                live.bridge, live.snapshot, live.new_lines, live.menu_of = orig
+
+
+class FakeTalk:
+    """A game seen through the bridge for `talk`: an NPC whose talk is a list of boxes ("box", speaker, text) and
+    choices ("choice", question, [options]). A shows the next one; Down moves the choice cursor (from 0). The texts go
+    in a `text` log as patch 0041's wrap keeps them (one entry per pane set, the same text again not kept), laid out as
+    a lane run read them: MessageDialog_00 (T_Name_00 the speaker), the reply buttons PaMessageBtn_00 (one pane,
+    T_Btn_00, set once per button). `body` False: the box text does not come through the wrap (as in that run)."""
+
+    def __init__(self, talk, hooked=True, verb=True, prompt="Talk", body=True):
+        self.talk, self.hooked, self.verb, self.prompt, self.body = talk, hooked, verb, prompt, body
+        self.at, self.event, self.cursor, self.picked = None, False, 0, []
+        self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
+        self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
+
+    def _entry(self, layout, pane, text):
+        return {"seq": len(self.texts) + 1, "frame": self.frame, "layout": layout, "pane": pane, "text": text,
+                "length": len(text), "cut": False, "markup": False}
+
+    def _set(self, pane, text, layout="MessageDialog_00"):
+        if self.shown.get((layout, pane)) != text:
+            self.shown[(layout, pane)] = text
+            self.texts.append(self._entry(layout, pane, text))
+
+    def _box(self, text):
+        if self.body:
+            self._set("T_MessageWhiteOut_00", text)
+
+    def _show(self):
+        item = self.talk[self.at]
+        if item[0] == "box":
+            self._set("T_Name_00", item[1])
+            self._box(item[2])
+        else:
+            self._box(item[1])
+            for option in item[2]:
+                self._set("T_Btn_00", option, "PaMessageBtn_00")
+            self.cursor = 0
+
+    def state(self):
+        return {"ok": True, "scene": "Kokiri", "loading": False, "event": self.event,
+                "prompt": None if self.event else self.prompt}
+
+    def step(self, frames=1):
+        self.frame += frames
+        return self.state()
+
+    def input(self, stick=None, buttons=(), frames=1, rstick=None):
+        self.presses.extend(buttons)
+        self.frame += frames
+        if "DOWN" in buttons and self.event and self.talk[self.at][0] == "choice":
+            self.cursor = min(self.cursor + 1, len(self.talk[self.at][2]) - 1)
+        if "A" in buttons:
+            if not self.event and self.prompt:
+                self.event, self.at = True, 0
+                self._show()
+            elif self.event:
+                if self.talk[self.at][0] == "choice":
+                    self.picked.append(self.talk[self.at][2][self.cursor])
+                self.at += 1
+                if self.at < len(self.talk):
+                    self._show()
+                else:
+                    self.event = False
+                    self._box("")
+        return {"ok": True}
+
+    def text(self, since=0, layout=None):
+        if not self.verb:
+            raise pc.BridgeError({"ok": False, "error": "bad_request", "message": "cmd: hello, ..."})
+        texts = [t for t in self.texts if t["seq"] > since and (not layout or layout in t["layout"])] if self.hooked else []
+        return {"ok": True, "hooked": self.hooked, "last": len(self.texts) if self.hooked else 0, "lost": False,
+                "texts": texts}
+
+
+# Placeholders only: no text from the game (AGENTS.md).
+SHOP = [("box", "Keeper", "Line 1"), ("choice", "Item: 40", ["Pick one", "Pick two"]),
+        ("choice", "Sure?", ["Yes", "No"]), ("box", "Keeper", "Line 2")]
+
+
+class TalkTest(unittest.TestCase):
+    def test_reads_every_box_with_its_speaker_and_ends(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([(b["speaker"], b["text"]) for b in r["boxes"]],
+                         [("Speaker A", "Line 1"), ("Speaker A", "Line 2")])
+        self.assertEqual(r["speakers"], ["Speaker A"])
+        self.assertFalse(g.event)
+        self.assertNotIn("5", [b["text"] for b in r["boxes"]])     # (the HUD's text before the talk)
+
+    def test_without_the_body_text_it_still_ends_with_the_speakers(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2"), ("box", "Speaker B", "x")],
+                     body=False)
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual(r["boxes"], [])
+        self.assertEqual(r["speakers"], ["Speaker A", "Speaker B"])
+        self.assertFalse(g.event)
+
+    def test_picks_each_reply_by_its_text_in_order(self):
+        g = FakeTalk(SHOP)
+        r = ph.talk(g, reply=["pick TWO", "Yes"])
+        self.assertTrue(r["done"], r)
+        self.assertEqual(g.picked, ["Pick two", "Yes"])
+        self.assertEqual(r["picked"], [{"text": "Pick two", "index": 1}, {"text": "Yes", "index": 0}])
+        self.assertEqual(g.presses.count("DOWN"), 1)
+        self.assertEqual(r["boxes"][-1]["text"], "Line 2")
+
+    def test_choices_with_no_reply_left_stop_and_list_them(self):
+        g = FakeTalk(SHOP)
+        r = ph.talk(g)
+        self.assertFalse(r["done"])
+        self.assertIn("no reply is left", r["result"])
+        self.assertEqual(r["choices"], ["Pick one", "Pick two"])
+        self.assertEqual(g.picked, [])                     # (nothing bought blindly)
+        self.assertTrue(g.event)                           # (left open for the tester to decide)
+        self.assertIsNotNone(r["since"])
+        # going on from there: the same buttons read again, no new A first
+        r2 = ph.talk(g, reply="Pick one", since=r["since"])
+        self.assertFalse(r2["pressed"])
+        self.assertEqual(r2["picked"], [{"text": "Pick one", "index": 0}])
+        self.assertIn("no reply is left", r2["result"])
+        self.assertEqual(r2["choices"], ["Yes", "No"])
+        r3 = ph.talk(g, reply="No", since=r2["since"])
+        self.assertTrue(r3["done"], r3)
+        self.assertEqual(g.picked, ["Pick one", "No"])
+
+    def test_a_reply_not_offered_stops_and_lists_the_choices(self):
+        g = FakeTalk(SHOP)
+        r = ph.talk(g, reply="Other")
+        self.assertFalse(r["done"])
+        self.assertIn("reply not offered", r["result"])
+        self.assertIn("'Pick one'", r["result"])
+        self.assertEqual(g.picked, [])
+        self.assertTrue(g.event)
+
+    def test_a_reply_with_no_choices_is_not_done(self):
+        r = ph.talk(FakeTalk([("box", "Speaker A", "Line 1")]), reply="Yes")
+        self.assertFalse(r["done"])
+        self.assertIn("no choices showed", r["result"])
+
+    def test_no_prompt_presses_nothing(self):
+        g = FakeTalk(SHOP, prompt=None)
+        r = ph.talk(g)
+        self.assertFalse(r["pressed"])
+        self.assertEqual(g.presses, [])
+
+    def test_an_id_with_the_prompt_already_up_does_not_walk(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1")])
+        r = ph.talk(g, ident=5, name="Npc_X")             # (FakeTalk has no world: a walk would fail)
+        self.assertTrue(r["done"], r)
+        self.assertNotIn("walk", r)
+
+    def test_without_the_wrap_or_the_verb_one_a_and_why(self):
+        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0041"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
+            r = ph.talk(g)
+            self.assertTrue(r["pressed"])
+            self.assertEqual(g.presses, ["A"])
+            self.assertIn(why, r["result"])
+            self.assertFalse(r["done"])
+
+    def test_bounded_by_boxes_and_frames(self):
+        r = ph.talk(FakeTalk([("box", "Speaker A", "Line %d" % i) for i in range(40)]), max_boxes=5)
+        self.assertIn("too many boxes", r["result"])
+        self.assertLessEqual(len(r["boxes"]), 6)
+        r = ph.talk(FakeTalk([("box", "K", "Line %d" % i) for i in range(400)]), max_boxes=1000, max_frames=200)
+        self.assertIn("timed out", r["result"])
+
+    def test_a_box_that_grows_is_one_box(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1")])
+        orig = g._show
+
+        def typed():
+            g._set("T_Name_00", "Speaker A")
+            g._set("T_MessageWhiteOut_00", "Li")
+            orig()
+        g._show = typed
+        r = ph.talk(g)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
+
+    def test_the_mcp_tools_take_reply_and_since(self):
+        names = {t["name"]: t for t in mcp_playtest.PLAYER_TOOLS}
+        props = names["talk"]["inputSchema"]["properties"]
+        self.assertIn("reply", props)
+        self.assertIn("since", props)
+        self.assertIn("since", names["get_text"]["inputSchema"]["properties"])
 
 
 if __name__ == "__main__":
