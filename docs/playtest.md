@@ -173,8 +173,9 @@ player's game copies nothing.
   animation such as `Greeting`) and a variable (`Shop_SelectItemName`, `UI_MessageTargetActorName`), between the
   words. `talk` cuts the tags out of a box's `text` and keeps the whole in `raw`. The page-break tag (group 0, type 4,
   no bytes, seen in the Kokiri shop and Mido's text, 2026-11-24) becomes one space, so two pages are not glued into one
-  word. Not yet handled: a variable (an item name, a price) is cut with the markup and its words are missing from
-  `text`; read `raw` or `get_text` for those.
+  word. A variable (an item name, a price: tag group 2) stays in `text` as `{Name}`, e.g. `The {Shop_SelectItemName}?`:
+  the bridge has only the variable's name, the game fills in the value later (read it from the shop's info panes). A
+  tag's size is in bytes; a character from U+0100 up counts as its UTF-8 bytes, a lower one as one byte.
 - An exe without patch 0041 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
   text wrap (patch 0041)` once at the HELLO.
 
@@ -452,8 +453,8 @@ server calls them; a script can too). They only use the bridge's commands, so th
   does not walk) presses `A`, then reads the new texts of the message layouts through `text`: `speakers` (in order),
   `boxes` [{speaker, text, markup, raw}] (a wrap-26 text of a message layout, see [Text boxes](#text-boxes); empty
   without patch 0042), and the reply buttons (`PaMessageBtn_00`) as `choices`. A box's `text` is its words with the
-  markup cut out; `raw` (only when something was cut) is the text as the game set it. A box set again as it was is
-  one box, and a text of only markup (a name variable) is no box. `speaker` is the name pane set with the box, also
+  markup cut out; `raw` (only when something was cut) is the text as the game set it. A box set again as it was, before
+  the next A, is one box; the same line after an A is a new box. A text of only markup or variables is no box. `speaker` is the name pane set with the box, also
   when the game sets it after the body; it is null only when the game shows no name. It presses `A` when a speaker,
   a box or buttons came, or when the event went quiet for 3 reads (10 frames each). When buttons show it takes the
   next of `reply` (a text, or a list: one per set of buttons, in order), presses Down to the button of that text
@@ -544,6 +545,9 @@ button layout was known):
   clean `text` and the `raw` kept, no box twice, `speaker` the name pane when the game shows one, `done` true, Link
   free to walk after. Kokiri shop: `talk` stops at the first buttons and lists them; `talk` with the `reply` texts
   as listed and `since` buys the shield.
+- Also look at (helper nits, 2026-11-24): a box with an item or price shows `{Shop_SelectItemName}` and
+  `{Shop_SelectItemPrice}` in `text`; two equal lines in a row are two boxes. A box's `speaker` can be the name of the
+  box before when the name pane is set late: check the first box after a speaker change.
 
 ### Set a test up (start a boss or a dungeon in one call)
 

@@ -72,6 +72,21 @@ std::string NewFile(const std::string& patch, const std::string& path) {
     return out;
 }
 
+// `text` without the lines `patch` adds to `path` (each once, the first match): what it was before that patch.
+std::string WithoutAddedLines(std::string text, const std::string& patch, const std::string& path) {
+    const std::size_t from = patch.find("diff --git a/" + path + " ");
+    if (from == std::string::npos) return text;
+    const std::size_t to = patch.find("\ndiff --git a/", from + 1);
+    std::istringstream in(patch.substr(from, to == std::string::npos ? std::string::npos : to - from));
+    for (std::string line; std::getline(in, line);) {
+        if (line.size() < 1 || line[0] != '+' || line.rfind("+++", 0) == 0) continue;
+        const std::string whole = line.substr(1) + "\n";
+        const std::size_t at = text.find(whole);
+        if (at != std::string::npos) text.erase(at, whole.size());
+    }
+    return text;
+}
+
 // `text` with a later patch's hunks for `path` applied (unified diff: context
 // ' ', removed '-', added '+' lines; each hunk at its "@@ -line" in the text
 // as the earlier hunks left it). Empty when a hunk does not match.
@@ -670,7 +685,10 @@ TEST_CASE("hookshot: a module tab may draw a picture beside its page (patch 0019
 TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patch 0040, hos_coop_turn.h)") {
     const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0040-coop-camera-angles.patch");
     REQUIRE_FALSE(patch.empty());
-    CHECK(NewFile(patch, "host/hos_coop_turn.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_turn.h"));
+    // hookshot/src's header is 0040's with 0043's added lines (the wake's state -1).
+    CHECK(WithoutAddedLines(ReadFile(kRepo / "hookshot" / "src" / "hos_coop_turn.h"),
+                            ReadFile(kRepo / "hookshot" / "patches" / "0043-coop-camera-wake.patch"),
+                            "host/hos_coop_turn.h") == NewFile(patch, "host/hos_coop_turn.h"));
     // The bridge looks for the optional export; the camera hook asks it first, whatever the Mouse camera row, and
     // writes the angles only in states 3 and 4, the pitch within the camera's limits.
     CHECK(patch.find("GetProcAddress(m, \"hos_coop_turn\")") != std::string::npos);
@@ -694,6 +712,26 @@ TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patc
     CHECK(module.find("return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;") != std::string::npos);
     const std::string live = ReadFile(kRepo / "hookshot" / "src" / "coop_look_live.cpp");
     CHECK(live.find("g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()))") != std::string::npos);
+}
+
+TEST_CASE("hookshot: the camera wake (patch 0043) asks the module with state -1 and clears only the skip bit") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0043-coop-camera-wake.patch");
+    REQUIRE_FALSE(patch.empty());
+    CHECK(patch.find("+    if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_turn_fn) hos_coop_camera_wake();") !=
+          std::string::npos);
+    CHECK(patch.find("+    if (hos_coop_turn_filter(NULL, NULL, -1) != 1) return;") != std::string::npos);
+    CHECK(patch.find("+    if (*skip & NODE_SKIP_UPDATE) __atomic_fetch_and(skip, (char)~NODE_SKIP_UPDATE, __ATOMIC_SEQ_CST);") != std::string::npos);
+    CHECK(patch.find("+#define WAKE_AFTER_NS 50000000LL") != std::string::npos);
+    for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
+        bool allowed = false;
+        for (const std::string prefix : {"diff --git a/host/coop_bridge.c ", "diff --git a/host/mouse_native.c ",
+                                         "diff --git a/host/hos_coop_turn.h "}) {
+            allowed = allowed || patch.compare(at, prefix.size(), prefix) == 0;
+        }
+        CHECK(allowed);
+    }
+    const std::string view = ReadFile(kRepo / "hookshot" / "src" / "coop_look_view.h");
+    CHECK(view.find("return asked && want_.has_value() && phase_ != Phase::lost;") != std::string::npos);
 }
 
 TEST_CASE("hookshot: every export's guard site has a name of its own (a crash log names the right export)") {
