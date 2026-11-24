@@ -132,7 +132,7 @@ class Parse(unittest.TestCase):
 def start_args(**kw):
     a = dict(session="s", lane=None, game_a=None, game_b=None, server="coop_server.exe", port=None, boot_a=None,
              boot_b=None, load=None, no_load=False, no_restore=False, env=[], boot_timeout=900, max_minutes=30,
-             idle_minutes=10, lock_wait=0)
+             idle_minutes=10, lock_wait=0, only=None)
     a.update(kw)
     return argparse.Namespace(**a)
 
@@ -150,20 +150,40 @@ def write_session(d, **kw):
 class LiveLane(unittest.TestCase):
     def test_a_lane_gives_its_pair_port_and_pipes(self):
         L = lanes.lane(1)
-        self.assertEqual(live.resolve(start_args(lane=1)), (L["a"], L["b"], L["port"], "coop-lane1"))
-        self.assertEqual(live.resolve(start_args(lane=1, port=27999))[2], 27999)
-        self.assertEqual(live.resolve(start_args(game_a="ga", game_b="gb")), ("ga", "gb", live.PORT, live.PIPE))
+        self.assertEqual(live.resolve(start_args(lane=1)), ({"A": L["a"], "B": L["b"]}, L["port"], "coop-lane1"))
+        self.assertEqual(live.resolve(start_args(lane=1, port=27999))[1], 27999)
+        self.assertEqual(live.resolve(start_args(game_a="ga", game_b="gb")),
+                         ({"A": "ga", "B": "gb"}, live.PORT, live.PIPE))
         with self.assertRaises(SystemExit):
-            live.resolve(start_args(game_a="ga"))
+            live.resolve(start_args())
+
+    def test_one_game_alone(self):
+        # each game is its own lane: one game starts without the other, and without a server
+        L = lanes.lane(1)
+        self.assertEqual(live.resolve(start_args(game_b="gb"))[0], {"B": "gb"})
+        self.assertEqual(live.resolve(start_args(lane=1, only="B"))[0], {"B": L["b"]})
+        with self.assertRaises(SystemExit):
+            live.resolve(start_args(game_a="ga", only="B"))
+        argv = live.runner_argv(start_args(server=None, boot_a="a.txt", boot_b="b.txt"), {"B": "gb"}, 1, "p", "dir")
+        self.assertEqual(argv[argv.index("--game-b") + 1], "gb")
+        for flag in ("--game-a", "--server", "--script-a"):
+            self.assertNotIn(flag, argv)
+        self.assertIn("--script-b", argv)
+        with tempfile.TemporaryDirectory() as d:
+            s = write_session(d)
+            del s["games"]["A"]
+            live.save(d, s)
+            self.assertEqual(live.session_tags(s), ["B"])
+            self.assertIn("error", live.do(argparse.Namespace(session=d, player="A", script="press A")))
 
     def test_runner_restores_the_saves_and_never_takes_the_lane_itself(self):
-        argv = live.runner_argv(start_args(lane=1), "ga", "gb", 27520, "coop-lane1", "dir")
+        argv = live.runner_argv(start_args(lane=1), {"A": "ga", "B": "gb"}, 27520, "coop-lane1", "dir")
         self.assertNotIn("--no-restore", argv)   # the baseline save, as lane runs
         self.assertNotIn("--lane", argv)         # the watchdog holds the lock for the whole session
         self.assertIn("--keep-open", argv)
         self.assertEqual(argv[argv.index("--pipe") + 1], "coop-lane1")
         self.assertEqual(argv[argv.index("--port") + 1], "27520")
-        self.assertIn("--no-restore", live.runner_argv(start_args(no_restore=True), "ga", "gb", 1, "p", "dir"))
+        self.assertIn("--no-restore", live.runner_argv(start_args(no_restore=True), {"A": "ga", "B": "gb"}, 1, "p", "dir"))
 
     def test_the_runner_keeps_pids_for_the_watchdog(self):
         with tempfile.TemporaryDirectory() as d:
@@ -249,7 +269,7 @@ class LiveWatchdog(unittest.TestCase):
         c = FakeClock(0.0)
         out = live.close(self.d, s, alive=lambda p: p in (12, 13) and p not in kills,
                          quit=lambda s, x: quits.append(x), killer=kills.append,
-                         release=lambda n, o: released.append((n, o)) or True, clock=c, sleep=c.sleep)
+                         release=lambda n, o, g=None: released.append((n, o)) or True, clock=c, sleep=c.sleep)
         self.assertEqual(quits, ["A", "B"])
         self.assertEqual(kills, [12, 13])   # B did not quit; the server always goes
         self.assertEqual(released, [(1, live.lock_owner(self.d))])
@@ -263,7 +283,7 @@ class LiveWatchdog(unittest.TestCase):
         def unreachable(s, x):
             raise OSError("no pipe")
         out = live.close(self.d, s, alive=lambda p: False, quit=unreachable, killer=lambda p: None,
-                         release=lambda n, o: released.append(n), wait=0)
+                         release=lambda n, o, g=None: released.append(n), wait=0)
         self.assertEqual(released, [])
         self.assertIn("not reached", out["A"])
 
@@ -275,7 +295,7 @@ class LiveWatchdog(unittest.TestCase):
             w = live.read_json(live.watchdog_file(d))
             self.assertEqual((w["lock"], w["pid"], w["ended"]), ("held", 4242, None))
             raise RuntimeError("bridge gone")
-        code = live.run_watchdog(self.d, acquire=lambda n, o, wait: taken.append((n, o, wait)) or True,
+        code = live.run_watchdog(self.d, acquire=lambda n, o, wait, g=None: taken.append((n, o, wait)) or True,
                                  watcher=boom, closer=lambda d, s: closed.append(s["lane"]) or {"lock": "released"},
                                  pid=4242)
         self.assertEqual(code, 0)
@@ -298,7 +318,7 @@ class LiveWatchdog(unittest.TestCase):
     def test_a_busy_lane_refuses_the_session(self):
         write_session(self.d, lane=1)
         closed = []
-        code = live.run_watchdog(self.d, acquire=lambda n, o, wait: False, watcher=lambda d: "x",
+        code = live.run_watchdog(self.d, acquire=lambda n, o, wait, g=None: False, watcher=lambda d: "x",
                                  closer=lambda d, s: closed.append(1), pid=1)
         self.assertEqual(code, 1)
         self.assertEqual(closed, [])   # nothing started, nothing to close
