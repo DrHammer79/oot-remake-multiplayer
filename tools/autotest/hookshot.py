@@ -309,7 +309,8 @@ def parse(text):
             s.kind = "face"
             s.x, s.z = (_number(v) for v in w[1:])
         elif cmd == "AIM":
-            # Row 173: Link turned to world X Z, then our next arrow put on its way into X Y Z (CoopObjects::QueueTestAim).
+            # Row 173: our next arrow is watched and nudged the last bit when its flight already points within 4 degrees
+            # and 0.5 m of X Y Z (CoopObjects::QueueTestAim). Link is not turned.
             if len(w) != 4 or any(_number(v) is None for v in w[1:]):
                 fail("want: aim X Y Z")
             s.kind = "aim"

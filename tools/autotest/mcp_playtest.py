@@ -36,8 +36,20 @@ SCRIPT_HELP = (
     "Movement: `goto X Z TOLERANCE FRAMES` (walk to a point, metres), `toward X Z FRAMES [BUTTONS]` (walk that way, "
     "holding buttons), `stick LX LY FRAMES`, `wait FRAMES`. Buttons: `press A 8`, `hold ZL+B 30` (A B X Y L R ZL ZR "
     "PLUS MINUS UP DOWN LEFT RIGHT). Co-op test commands (need LICHII_COOP_CHEATS=1): `warp SCENE` (e.g. "
-    "ForestTemple, SacredForestMeadow_Adult), `place X Y Z`, `face X Z`, `give ITEM`, `setflag NAME VALUE`, "
-    "`kill ACTOR`, `hit ACTOR N`, `hurt N`, `chat TEXT`, `mark NAME`.")
+    "ForestTemple, SacredForestMeadow_Adult), `place X Y Z`, `give ITEM`, `setflag NAME VALUE`, "
+    "`kill ACTOR`, `hit ACTOR N`, `hurt N`, `chat TEXT`, `mark NAME`. No `face` line: a written yaw is not play "
+    "(turn Link with the `face` tool, which uses the stick, or set him up with `place` and a facing).")
+
+FACE_REFUSED = ("`face` is refused in act: no player can set Link's yaw. Turn him with the `face` tool (the stick) "
+                "or put him there with `place` and a facing (set-up).")
+
+
+def refuse_face(script):
+    """Raises ValueError when a line of the act script is the test `face X Z` line (a written yaw)."""
+    for line in str(script).replace(";", "\n").split("\n"):
+        w = line.split("#", 1)[0].split()
+        if w and w[0].lower() == "face":
+            raise ValueError(FACE_REFUSED)
 
 TOOLS = [
     {"name": "state", "description": "What a game shows now: map, Link's position [x,y,z] in metres, facing and "
@@ -331,8 +343,9 @@ MOVE_TOOLS = [
          "face_z": {"type": "number"}, "max_frames": {"type": "integer", "minimum": 8, "maximum": kit_move.MAX_FRAMES}}}},
     {"name": "push", "description": "Push a block (`id` + `name` from get_world) `distance_m` metres along world yaw "
      "`yaw` (0 = +z, 90 = +x; none: from Link toward the block). Link walks to the block's far side from the push, "
-     "faces it and leans on it at full stick. `result`: pushed, stuck (it did not move for 48 frames while Link leaned "
-     "on it: blocked, at its end, not a moving block), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
+     "turns to it with the stick, leans on it until A offers \"Grab\", holds A 30 frames to grab it, then pushes at full "
+     "stick. `grab` says what A offered and whether it was held. `result`: pushed, stuck (it did not move for 48 frames "
+     "while Link pushed: blocked, at its end, not a moving block; or Link went up onto it), slipped (Link slid off its side), stopped (a move was refused: no camera; no "
      "frame ran), not reached (the walk to its side stopped), gone, or a stop. `moved_m` is how far it went along the push. Needs the world list." + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["id", "name", "distance_m"], "properties": dict(
          ACTOR_ARGS, distance_m={"type": "number", "minimum": 0.1, "maximum": 20}, yaw={"type": "number"},
@@ -985,6 +998,7 @@ def call(session, name, args):
     if name == "state":
         return live.state(Args(session=session, player=args.get("player"), since=_since(args)))
     if name == "act":
+        refuse_face(args["script"])
         return live.do(Args(session=session, player=args["player"], script=args["script"]))
     if name == "shot":
         return live.shot(Args(session=session, player=args.get("player")))

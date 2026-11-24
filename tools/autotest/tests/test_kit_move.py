@@ -406,6 +406,15 @@ class Shoot(unittest.TestCase):
 
 
 class Climb(unittest.TestCase):
+    def test_turns_to_the_wall_with_the_stick_and_writes_no_yaw(self):
+        g = Sim(ladder=(0.0, 0.0, 0.0, 6.0))
+        g.facing = 180.0                                   # back to the wall at +z
+        r = km.climb(g, up=True, to_y=4.0, face=[0.0, 1.0])
+        self.assertEqual(r["result"], "arrived", r)
+        self.assertTrue(r["turn"]["turned"], r)
+        self.assertGreater(r["turn"]["rounds"], 0)
+        self.assertEqual(g.wrote_yaw, 0)
+
     def test_up_to_a_height(self):
         g = Sim(ladder=(0.0, 0.0, 0.0, 6.0))
         r = km.climb(g, up=True, to_y=4.0)

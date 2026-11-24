@@ -476,6 +476,24 @@ class Replay(unittest.TestCase):
         self.assertIn("--session", r["failed"][0][1])
 
 
+class ActRefusesFace(unittest.TestCase):
+    def test_a_face_line_is_refused_and_nothing_is_sent(self):
+        saved = live.do
+        seen = []
+        live.do = lambda a: seen.append(a.script) or {"ok": True}
+        try:
+            for script in ("face 1 2", "wait 5; face 1 2", "wait 5\n  FACE 1 2  # turn"):
+                with self.assertRaises(ValueError) as e:
+                    mcp_playtest.call("x", "act", {"player": "A", "script": script})
+                self.assertIn("`face` tool", str(e.exception))
+            self.assertEqual(seen, [])
+            mcp_playtest.call("x", "act", {"player": "A", "script": "wait 5; place 1 2 3"})   # other lines still go
+            self.assertEqual(seen, ["wait 5; place 1 2 3"])
+            self.assertNotIn("`face X Z`", mcp_playtest.SCRIPT_HELP)
+        finally:
+            live.do = saved
+
+
 class LiveCli(unittest.TestCase):
     def test_cli_calls_are_logged_and_replayed(self):
         with tempfile.TemporaryDirectory() as d:
