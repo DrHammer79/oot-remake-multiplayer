@@ -1093,8 +1093,7 @@ TEST_CASE("hookshot: a guest that joins with a file loaded asks for the host's s
     CHECK(frame.find("g_group_save = g_decided_host && save::keeps_group_save(") != std::string::npos);
     CHECK(frame.find("if (own != g_dir && !g_group_save) {") != std::string::npos);
     CHECK(in_game.find("save::keeps_group_save(save::is_coop_dir(g_dir), OthersIn(client))") != std::string::npos);
-    CHECK(frame.find("HomeFrame();
-    PendingFrame();") != std::string::npos);
+    CHECK(frame.find("HomeFrame();\n    PendingFrame();") != std::string::npos);
     CHECK(frame.find("save::home_due(") == std::string::npos);
     const std::string home = body("void HomeFrame() {");
     CHECK(home.find("g_decided && (g_use || g_group_save)") != std::string::npos);
