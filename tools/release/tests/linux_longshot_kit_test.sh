@@ -720,7 +720,8 @@ rm -rf "$kit2"
 # --- start.sh (Linux only: its checks read this PC) --------------------------------------------
 if [[ $(uname -s) == Linux ]]; then
     : >"$log"
-    OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
+    # (no lookup of main's live address, docs/problem-send-address.txt: this start is a kit without one)
+    OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off OOT_COOP_SECRET=1 bash "$kit/start-squadala.sh" --no-update </dev/null >"$tmp/start1.txt" 2>&1; export CODE=$?
     check 'start: builds if needed, then starts the game in data/game' bash -c '[ $CODE -eq 0 ] && grep -q "^started $2 1 $3$" "$1"' _ "$log" "$D" "$D/game"
     check 'start: without a terminal, what it says goes to data/logs/start.log' has "$D/logs/start.log" 'start without a terminal'
     # MsgNotFound (P-parked): start.sh's own merge after build.sh (its pack step) parks the tab's files that build.sh's
