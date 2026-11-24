@@ -906,9 +906,8 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
             const auto want = AgeEnding(scene);
             const auto age = game->Text("age");
             if (!want.empty() && age && *age != want) {
-                return {WarpRoute::refuse, "wrong_age",
-                        "Longshot's teleport lands at Link's current age (" + *age + "), so " + std::string(scene) +
-                            " would not be taken as asked: ask for the " + *age + " map, or switch age first"};
+                // Longshot's teleport lands at Link's current age: set the age first, then the map change event.
+                return {WarpRoute::map_event, {}, {}, std::string(want)};
             }
             // An entrance names a start point, which Longshot's teleport cannot take: the game's map change event can.
             return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}};

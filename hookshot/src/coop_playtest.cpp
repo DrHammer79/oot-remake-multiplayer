@@ -531,6 +531,12 @@ std::string Handle(const Request& r) {
         const auto now = LinkStatus();
         WarpPlan plan = PlanWarp(now ? &*now : nullptr, !r.entrance.empty(), r.scene);
         if (plan.route == WarpRoute::refuse) return fail(plan.code, plan.why);
+        if (!plan.set_age.empty()) {
+            // The age first, and frames for the game to take it (the lane recipe: setflag, wait, then warp).
+            std::string error;
+            if (!played(std::string("setflag Sequence_IsChildhood ") + (plan.set_age == "child" ? "1" : "0"), error)) return fail("failed", error);
+            if (!gate.Step(30, kHoldWait)) return fail("timeout", "the frames did not run in time");
+        }
         const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(r.timeout_s);
         std::string wait_for = r.scene;   // the map to wait for: the teleport route takes Longshot's (Link's age, its spelling)
         // Free play, an entrance or a map Longshot's list lacks (a boss stage): the game's own map change event

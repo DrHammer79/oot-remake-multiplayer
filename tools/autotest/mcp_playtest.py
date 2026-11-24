@@ -468,7 +468,7 @@ PLAYER_TOOLS = [
      "own list; it lands at the map's own start). With an entrance, or for a map not in that list (a boss stage such as "
      "GohmaStage), the module opens the game's own map change event (needs LICHII_COOP_TELEPORT_EVENT; else `not_in_event` "
      "with the reason). Longshot allows one teleport every 8 s per game and refuses one while an event plays (`failed`); a "
-     "name ending in the other age than Link's is refused (`wrong_age`). It runs until Link is there with no event "
+     "name ending in the other age than Link's sets that age first (30 frames) and goes by the map change event. It runs until Link is there with no event "
      "or load (up to `timeout` seconds, default 60), then is held. A warp asked while a talk is open waits until the "
      "talk ends and answers `timeout` meanwhile: end the talk first (A or B until `event` is false).",
      "inputSchema": {"type": "object", "required": ["scene"],
@@ -500,13 +500,14 @@ PLAYER_TOOLS = [
                                     "small_keys": {"type": "object"}, "boss_keys": {"type": "array"},
                                     "maps": {"type": "array"}, "compasses": {"type": "array"},
                                     "items": {"type": "array"}, "flags": {"type": "object"},
-                                    "warp": {"type": "object"}, "place": {"type": "object"}}}},
+                                    "warp": {"type": "object"}, "place": {"type": "object"},
+                                    "age": {"type": "string", "enum": ["child", "adult"]}}}},
     {"name": "preset", "description": "Apply a named test start (tools/playtest/data/presets/*.json) with one call: the same "
      "steps as `setup`, from a versioned data file. deku-start (child, Deku Tree entrance), deku-before-gohma (child, the corridor before Gohma's door: walk "
-     "through it), "
-     "before-dodongo, before-barinade, before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, "
-     "before-twinrova, before-ganondorf. A wrong name lists the right ones. Link's age is NOT set by a preset: a boss "
-     "stage is warped to as it is, so start from a save of the age the boss needs. Needs the verb gate.",
+     "through it), before-dodongo and before-barinade (child), "
+     "before-phantom-ganon, before-volvagia, before-morpha, before-bongo-bongo, before-twinrova, before-ganondorf, "
+     "before-ganon (adult): the dungeon's entrance, then Link at the boss room's arrival point, the boss put back. "
+     "A preset sets its age first. A wrong name lists the right ones. Needs the verb gate.",
      "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "save_point", "description": "Save a test point under a tag (letters, digits, - and _): the module's shared flags "
      "and Link's state (scene, place, life), in the run's checkpoint log. Retry a boss with load_point. Only what `dump` "
