@@ -31,12 +31,15 @@
 #include "coop_cheats.h"
 #include "coop_fairy.h"
 #include "coop_hook.h"
+#include "coop_hookshot.h"
 #include "coop_menu_state.h"
 #include "coop_pause.h"
 #include "coop_pause_tab.h"
 #include "coop_playtest_core.h"
+#include "coop_talk_text.h"
 #include "coop_teleport_game.h"
 #include "coop_testinput.h"
+#include "hos_coop_pane_text.h"
 #include "core/core.h"
 
 // (the platform's sockets and pipe after our own headers, as coop_lan_net.cpp: no Windows macro reaches them)
@@ -628,6 +631,14 @@ std::string Handle(const Request& r) {
         if (v.kind == "enum" && v.hash) g_enum_values.Remember(r.name, *v.hash);
         return ok(FlagReadMembers(r.name, v));
     }
+    if (r.cmd == "text") {
+        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; patch 0037's wrap
+        // fills them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
+        bool lost = false;
+        const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);
+        return ok(CoopTalkText::Members(CoopHookshot::HasWrap(HOS_COOP_WRAP_PANE_TEXT),
+                                        CoopTalkText::TheLog().Last(), lost, texts));
+    }
     if (r.cmd == "give") {
         std::string error;
         // Not while a load runs, and not without a fresh Link sample (a load sends no Link update, so the old sample
@@ -818,6 +829,10 @@ bool PadMove(std::int32_t stick[4]) {
     const auto camera = CoopCamera::Latest();
     return g_move.Apply(camera ? std::optional(camera->clip_from_world) : std::nullopt, stick);
 }
+
+bool On() { return g_enabled.load(std::memory_order_acquire); }
+
+std::uint64_t Frame() { return On() ? BridgeFrame() : 0; }
 
 void AtFrame() {
     if (!g_enabled.load(std::memory_order_acquire)) return;

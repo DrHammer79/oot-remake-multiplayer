@@ -429,6 +429,25 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.lines = *lines;
         return r;
     }
+    if (c == "text") {
+        // Read only (the texts the game set in its text panes, coop_talk_text.h): not gated.
+        if (const auto* s = v->Get("since"); s && s->kind != CoopModJson::Value::Kind::Null) {
+            const auto n = v->Number("since");
+            if (!n || !(*n >= 0 && *n <= 9007199254740991.0) || *n != std::floor(*n)) {
+                error = "since: the `last` of an earlier text reply (0: every text kept)";
+                return std::nullopt;
+            }
+            r.since = static_cast<std::uint64_t>(*n);
+        }
+        if (const auto* l = v->Get("layout"); l && l->kind != CoopModJson::Value::Kind::Null) {
+            if (l->kind != CoopModJson::Value::Kind::String || !PlainText(l->string, 64)) {
+                error = "layout: part of a layout's name (MessageInGame_00 is the message window)";
+                return std::nullopt;
+            }
+            r.layout = l->string;
+        }
+        return r;
+    }
     if (c == "give") {
         const auto item = v->Text("item");
         if (!item || !PlainText(*item, 128)) {
@@ -455,7 +474,7 @@ std::optional<Request> ParseRequest(std::string_view line, std::string& error) {
         r.tag = tag.value_or("");
         return r;
     }
-    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, give, dump or shot";
+    error = "cmd: hello, state, pause, resume, step, input, move, act, warp, flag, flag_read, text, give, dump or shot";
     return std::nullopt;
 }
 

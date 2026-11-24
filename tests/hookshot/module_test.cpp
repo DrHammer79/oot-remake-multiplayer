@@ -25,6 +25,7 @@
 #include "hos_coop_save_load.h"
 #include "hos_coop_crash.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_text.h"
 #include "hos_coop_world.h"
 #include "hos_coop_actors.h"
 #include "hos_coop_nodes.h"
@@ -887,6 +888,30 @@ TEST_CASE("hookshot: the sound wrap (patch 0014) is one row in 0005's table, its
     CHECK(HOS_COOP_WRAP_SOUND_EMIT < 64);
     const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     CHECK(module.find("if (id == HOS_COOP_WRAP_SOUND_EMIT) {") != std::string::npos);
+}
+
+TEST_CASE("hookshot: the pane text wrap (patch 0037) is one row in 0005's table, its header hookshot/src's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0037-coop-pane-text-wrap.patch");
+    CHECK(NewFile(patch, "host/hos_coop_pane_text.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_pane_text.h"));
+    char row[128];
+    std::snprintf(row, sizeof row, "+    (%u, 0x439520, (0xd503237f, 0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4)),",
+                  HOS_COOP_WRAP_PANE_TEXT);
+    CHECK(patch.find(row) != std::string::npos);
+    // After 0024's last row (9), at the table's end.
+    CHECK(patch.find(" mov x29, sp\n+    # HOS_COOP_WRAP_PANE_TEXT") != std::string::npos);
+    // The id is free in the one wrap space (1-9, 16-19, 24).
+    for (const unsigned used : {HOS_COOP_WRAP_SOUND_EMIT, HOS_COOP_WRAP_GAME_OVER_SAVE, HOS_COOP_WRAP_SAVE_LOADED,
+                                HOS_COOP_WRAP_EVENT_REQUEST}) {
+        CHECK(HOS_COOP_WRAP_PANE_TEXT != used);
+    }
+    CHECK(HOS_COOP_WRAP_PANE_TEXT < 64);
+    // The module copies the text only while the play-test bridge is on, and never writes for it.
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    const auto at = module.find("if (id == HOS_COOP_WRAP_PANE_TEXT) {");
+    REQUIRE(at != std::string::npos);
+    const std::string body = module.substr(at, module.find("return 0;", at) - at);
+    CHECK(body.find("phase == 0 && CoopPlaytest::On()") != std::string::npos);
+    CHECK(body.find("Write") == std::string::npos);
 }
 
 TEST_CASE("hookshot: the AI node starts (patch 0029) are one generic world event, their header hookshot/src's") {
