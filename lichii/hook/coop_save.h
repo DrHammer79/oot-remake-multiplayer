@@ -61,6 +61,11 @@ SaveRequest TakeSaveRequest();
 // The test commands' `autosave` (rejoin-host-273-2): our game asked for its own autosave with the same call, at the
 // game-thread step. False when it cannot be: no file played, or a runtime with no such call (the emulator).
 bool AskOwnAutoSave();
+// rejoin-host-273-2: the title's slot fixes (rows 239/240/241) written into the folder the game already mounted
+// (Longshot 3.1 plays a work copy made at the mount): RestageDue says the folder is to be mounted again, and the
+// title's step calls RestageSaveFolder when the game is not reading its save list (the list is then re-read).
+bool RestageDue();
+void RestageSaveFolder();
 // The Lobby tab's "Resync from host" (a guest; save::resync_check): taken at the next OnFrame, which asks the host
 // again; the chat says how it goes. CanResync: the row is shown (a connected guest on a switchable folder).
 void RequestResync();

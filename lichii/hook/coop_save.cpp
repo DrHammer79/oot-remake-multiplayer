@@ -113,6 +113,9 @@ bool g_set_applied = false;
 // which the title's Continue and Load read) still shows the old folder's saves. Taken by the title's step
 // (TakeSaveListStale), which has the game re-read it.
 bool g_list_stale = false;
+// rejoin-host-273-2: the first title's slot fixes went into the folder the game mounted at boot (Longshot 3.1 plays
+// its work copy): it is mounted again at the title's next idle step (RestageSaveFolder), so the game sees them.
+bool g_restage_due = false;
 // Row 63, Not shared: the co-op folder whose host's save was last written with our race (OwnGoldLocked); empty: none.
 fs::path g_race_dir;
 std::string g_race_dir_id;   // the race id that save was written with (a host's other playthrough has another)
@@ -166,7 +169,7 @@ void Decide() {
 
 void NoteSaveDirLocked(const fs::path& dir);
 bool RemountLocked(const fs::path& dir);
-void FixSlotsLocked(const fs::path& dir);
+int FixSlotsLocked(const fs::path& dir);
 save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, bool played_from = true);
 void PendingFrame();
 void AskAtTitle();
@@ -408,7 +411,8 @@ void AskAtTitle() {
 // only that copy, and its Commit publishes the copy's changed files back. So everything this module writes into a
 // folder is written BEFORE it is mounted (rejoin-host-273-2): the slot fixes here, the host's save (PendingFrame); a
 // file written into the folder after its mount is never seen by the game, and its next Commit of that file writes
-// over it. A remount of the folder already mounted copies nothing again (its work copy is the live mount).
+// over it. A remount of the folder already mounted copies it again only when nothing is open or unpublished there
+// (patch 0008, rejoin-host-273-2: RestageSaveFolder); else Longshot keeps the work copy and says so.
 bool RemountLocked(const fs::path& dir) {
     FixSlotsLocked(dir);   // (rows 239/240/241: the folder switched to, before its list is offered; before its copy)
     if (!g_remount || !g_remount(dir.string())) return false;
@@ -436,8 +440,9 @@ save::SaveSlot FixedSlotLocked(const save::SaveSlot& slot) {
 // Rows 239/240/241: every slot of the folder the game plays from, each time the title comes up (the player's own saves,
 // a save set switched to, a host's save written before this fix). Only a slot that changes is written, whole, through a
 // temporary file.
-void FixSlotsLocked(const fs::path& dir) {
-    if (!g_save_fix || dir.empty()) return;
+int FixSlotsLocked(const fs::path& dir) {
+    int fixed = 0;   // (the slots written: the caller re-mounts a folder already mounted, RestageSaveFolder)
+    if (!g_save_fix || dir.empty()) return 0;
     std::error_code ec;
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         std::error_code dec;
@@ -483,7 +488,9 @@ void FixSlotsLocked(const fs::path& dir) {
             continue;
         }
         LOG_INFO(Core, "coop: save: {}: {}", it->path().filename().string(), line);
+        ++fixed;
     }
+    return fixed;
 }
 
 // Row 63, Gold Skulltulas Not shared: the host's save keeps this game's own race with this host (at join and at
@@ -754,7 +761,9 @@ void NoteTitle(bool title_up) {
     }
     std::lock_guard lock(g_mutex);
     if (title_up && !g_title_up) {
-        FixSlotsLocked(g_dir);   // (rows 239/240/241: before the player can load one of them)
+        // (rows 239/240/241: before the player can load one of them; written into the folder the game already
+        // mounted, so where it can be switched it is mounted again at the title's idle step: RestageSaveFolder)
+        if (FixSlotsLocked(g_dir) > 0 && g_remount) g_restage_due = true;
         g_played.on_title();   // (a new pick follows: a file, or New Game)
         if (g_playthroughs) g_playthroughs->OnTitle();
         g_playthrough_slot.reset();   // (the next load or save is a new pick, even of the same slot)
@@ -939,6 +948,24 @@ GameSaveLoads TakeGameSaveLoads() {
 
 bool TakeKeeperSaveLoad() {
     return g_keeper_load.exchange(false, std::memory_order_relaxed);
+}
+
+bool RestageDue() {
+    std::lock_guard lock(g_mutex);
+    return g_restage_due && g_title_up && !g_in_game;
+}
+
+void RestageSaveFolder() {
+    std::lock_guard lock(g_mutex);
+    if (!g_restage_due || !g_title_up || g_in_game || g_dir.empty()) return;   // (kept for the next title step)
+    g_restage_due = false;
+    if (RemountLocked(g_dir)) {
+        LOG_INFO(Core, "coop: save: the slots fixed on the title are in the folder the game plays: mounted again, so the "
+                       "game reads them (Longshot copies it again when nothing is open there, else it says it kept it)");
+    } else {
+        LOG_WARNING(Core, "coop: save: the slots fixed on the title: the folder {} could not be mounted again: the game "
+                          "reads them from its next start", g_dir.string());
+    }
 }
 
 bool TakeSaveListStale() {

@@ -1598,6 +1598,22 @@ TEST_CASE("hookshot: every switch of the save folder marks the game's save list 
     const auto fix = save.find("FixSlotsLocked(dir);", helper);
     REQUIRE(fix != std::string::npos);
     CHECK(fix < first);
+    // ... and the first title's fixes (into the folder mounted at boot) mount it again at the title's idle step.
+    CHECK(save.find("if (FixSlotsLocked(g_dir) > 0 && g_remount) g_restage_due = true;") != std::string::npos);
+    const auto restage = save.find("void RestageSaveFolder() {");
+    REQUIRE(restage != std::string::npos);
+    CHECK(save.find("if (!g_restage_due || !g_title_up || g_in_game || g_dir.empty()) return;", restage) <
+          save.find("RemountLocked(g_dir)", restage));
+    const std::string title_step = ReadFile(kRepo / "hookshot" / "src" / "coop_title.cpp");
+    const auto due = title_step.find("if (found && CoopSave::RestageDue()) {");
+    REQUIRE(due != std::string::npos);
+    CHECK(due < title_step.find("in.stale = CoopSave::TakeSaveListStale();"));
+    CHECK(title_step.find("if (busy && (*busy & 1) == 0) CoopSave::RestageSaveFolder();", due) != std::string::npos);
+    // Patch 0008: a remount of the folder already mounted copies it again when nothing is open or unpublished.
+    const std::string p0008 = ReadFile(kRepo / "hookshot" / "patches" / "0008-coop-host-save.patch");
+    CHECK(p0008.find("+    if (coop_restage && live && s && coop_same_dir(s->committed, committed)) {") != std::string::npos);
+    CHECK(p0008.find("+        if (!s->handles && !s->writers && !s->notes && !s->deleted && !s->lost) {") !=
+          std::string::npos);
     const auto later = save.find("if (g_root && g_remount && save::is_coop_dir(g_dir)) {");
     REQUIRE(later != std::string::npos);
     CHECK(save.find("g_pending = g_dir;", later) < save.find("WriteSlot(*slot);", later));
