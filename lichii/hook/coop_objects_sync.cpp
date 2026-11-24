@@ -1517,6 +1517,9 @@ bool Sync::Reused(const Seen& s, Object& o, std::uint64_t now_us) {
     if (sign.empty()) {
         return false;
     }
+    if (other && !o.game_deleted && !o.replace_held) {
+        return true;  // held one walk first (Tick); said when it is replaced
+    }
     ++(other ? replaced_ : reuse_signs_);
     if (reuse_lines_ < kReuseLines) {
         ++reuse_lines_;
@@ -2280,6 +2283,14 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         Object& o = it->second;
         if (Reused(s, o, now_us)) {
+            // Another actor with no game delete seen for the old one: held one walk, counted as a miss (the
+            // normal grace). The walk can show a new scene's actors one walk before the scene name changes; the
+            // reset then forgets the old one with nothing said (no ObjectRemove for our own made enemy, which the
+            // server hands over), and the new one is not made under the old scene's name (review r12).
+            if (!o.game_deleted && !o.replace_held) {
+                o.replace_held = true;
+                continue;
+            }
             // Another actor: the old object ends at this walk as one that left (below), the new one is fresh.
             o.replaced = true;
             now_seen.erase(s.address);
@@ -2287,6 +2298,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             fresh.push_back(&s);
             continue;
         }
+        o.replace_held = false;  // the same actor again: a held replace was a one-walk misread
         if (now_us > o.seen_at && now_us - o.seen_at < 500'000 && Finite(s.position)) {
             const float dt = static_cast<float>(now_us - o.seen_at) / 1e6f;
             for (std::size_t i = 0; i < 3; ++i) {

@@ -1401,6 +1401,7 @@ private:
         std::uint64_t game_deleted_at = 0;
         bool reuse_said = false;  // the "still listed after its delete request" line went out once
         bool replaced = false;    // another actor took its address: gone at this walk (Reused)
+        bool replace_held = false;  // ... seen for one walk with no game delete: held as a miss first (Reused)
         // Chasing our Link (NoteDrift): the run of steps towards it.
         std::uint64_t chase_first = 0;
         std::uint64_t chase_last = 0;
