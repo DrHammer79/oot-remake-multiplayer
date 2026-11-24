@@ -293,6 +293,22 @@ What it proves: the file is the one the release had when it was published, check
 
 ## Automatic tests
 
+**The way to test in a game is the live play-test kit** ([playtest.md](playtest.md), for agents
+[playtest-agents.md](playtest-agents.md)): `tools/autotest/live.py start --playtest --lane N` boots a lane's two
+games and keeps them open, the games are held and stepped frame for frame (`oot-pair`), set up with `setup` /
+`preset` / `flag` / `give` instead of long walks, and every check ends with a `checkpoint` (both games' shared flags
+and a screenshot of each) and `desync_check.py`. A check that someone will run again is a script in
+`tools/playtest/scripts/` (`live.py replay`, with `--include-reads` for a proof run so its `screenshot` and
+`checkpoint` calls are taken). `live.py start --dll FILE` runs a lane on a module of your own for that session only:
+the lane's own `hookshot_coop.dll` is put aside and put back when the session ends.
+
+What stays with the older runners below (`run.ps1`, `hookshot.py run`, `hs_steps.py`, `groups.py`) until it is ported:
+the release gate's stages (a kit from the release zips, Update.bat and update tests, a game that quits and joins again,
+a server restart, solo without co-op). Those need games started from other folders or a game closed in the middle,
+which a live session (one fixed pair) does not do. Every other new check is written for the live kit.
+
+### The older runners (gate stages)
+
 `tools/autotest/run.ps1` runs a two-game test on one PC with no one playing: it plays scripted controller input into both games and keeps screenshots of both windows, so a check can be done and looked at later.
 
 ```

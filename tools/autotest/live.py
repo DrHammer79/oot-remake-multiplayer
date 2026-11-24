@@ -33,6 +33,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -50,6 +51,7 @@ PORT = 27593         # without a lane
 NOISE = re.compile(r"\] (vk:|nvn:|hid:|vi:|vcores:|barrier:|\[debug\])")
 MAX_LINES = 80
 MAX_MINUTES = 30     # a session's whole length (the lane lock goes stale after 4 h anyway; a slot is shorter)
+BACKUP = ".live-backup"   # --dll: the lane's own module beside it while a session runs
 IDLE_MINUTES = 10    # no tester command for this long after the boot: the tester is gone (hand-off, crash, pause)
 WATCH_EVERY = 5.0    # s between the watchdog's looks
 QUIT_WAIT = 15.0     # s a game gets to quit before it is killed
@@ -221,6 +223,8 @@ def ends_text(max_minutes, idle_minutes):
 
 
 def start(a):
+    if getattr(a, "dll", None) and not a.lane:
+        raise SystemExit("--dll needs --lane (it swaps a lane's own module for the session)")
     d = os.path.abspath(a.session)
     os.makedirs(d, exist_ok=True)
     w = read_json(watchdog_file(d), {}) or {}
@@ -246,6 +250,15 @@ def start(a):
     lock = wait_lock(d, spawn_watchdog(d), a.lock_wait + 30)
     if lock not in ("held", "none"):
         return {"ok": False, "session": d, "lane": a.lane, "error": lock}
+    if getattr(a, "dll", None):
+        try:
+            install_dll(s, a.dll)
+            save(d, s)
+        except (lanes.Fail, OSError) as e:
+            save(d, s)
+            out = {"ok": False, "session": d, "lane": a.lane, "error": "--dll: %s" % e}
+            out["stop"] = stop(argparse.Namespace(session=d))
+            return out
     code = hookshot.main(runner_argv(a, game_a, game_b, port, pipe, d))
     s = load(d)
     for x in TAGS:
@@ -476,6 +489,49 @@ def release_lock(n, owner):
     return lanes.hs.lock_release(lanes.hs.main_root(lanes.REPO), "lane%d" % n, owner, say=lambda *_: None)
 
 
+def lane_dlls(n, kit=None):
+    """The hookshot_coop.dll path of each game of lane n (where lanes.py install puts it)."""
+    L = lanes.lane(n, kit)
+    out = []
+    for folder in (L["a"], L["b"]):
+        exe = lanes.hs.find_exe(folder)
+        if not exe:
+            raise lanes.Fail("%s: no game (lanes.py setup)" % folder)
+        out.append(os.path.join(os.path.dirname(exe), "hookshot_coop.dll"))
+    return out
+
+
+def install_dll(s, dll, kit=None, installer=None):
+    """--dll: the lane's own module put aside (DLL.live-backup) and `dll` installed for this session only; close() puts
+    the lane's own back. A backup left by a session that could not clean up is the lane's own: it is kept, not replaced."""
+    installer = installer or (lambda n, path: lanes.install(n, path, say=lambda *_: None, kit=kit))
+    if not os.path.isfile(dll):
+        raise lanes.Fail("no %s" % dll)
+    backups = []
+    for dst in lane_dlls(s["lane"], kit):
+        bak = dst + BACKUP
+        if os.path.isfile(dst) and not os.path.isfile(bak):
+            shutil.copy2(dst, bak)
+        backups.append([dst, bak])
+    s["dll"] = {"installed": os.path.abspath(dll), "backups": backups}
+    installer(s["lane"], dll)
+    return backups
+
+
+def restore_dlls(s):
+    """Puts the lane's own module back after a --dll session (what close() does); returns what it did."""
+    did = []
+    for dst, bak in (s.get("dll") or {}).get("backups", []):
+        if os.path.isfile(bak):
+            if os.path.lexists(dst):
+                os.unlink(dst)   # never write into a file that may be a hard link
+            os.replace(bak, dst)
+            did.append("restored")
+        else:
+            did.append("no backup")
+    return ", ".join(did) if did else None
+
+
 def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, wait=QUIT_WAIT,
           clock=time.monotonic, sleep=time.sleep):
     """Ends a session: both games asked to quit, what is still running after `wait` s killed, the server killed, the
@@ -499,6 +555,11 @@ def close(d, s, alive=None, quit=quit_game, killer=kill, release=release_lock, w
     if server and alive(server):
         killer(server)
         out["server"] = "killed"
+    if s.get("dll"):
+        try:
+            out["dll"] = restore_dlls(s)
+        except OSError as e:
+            out["dll"] = "NOT restored: %s" % e
     if s.get("lane"):
         out["lock"] = "lane%d.lock %s" % (s["lane"], "released" if release(s["lane"], lock_owner(d)) else "held by another")
     return out
@@ -626,6 +687,8 @@ def main(argv=None):
     st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length; 0: no limit")
     st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
     st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
+    st.add_argument("--dll", help="(with --lane) a hookshot_coop.dll for this session only: the lane's own is put aside "
+                    "and put back when the session ends")
     st.add_argument("--playtest", action="store_true",
                     help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
