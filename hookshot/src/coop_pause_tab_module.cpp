@@ -2075,7 +2075,7 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
 void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
     const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
     std::uint64_t started = 0;
-    if (at == 0 || !Call(ctx, kScreenSound, screen, at, 0, 0, 0, 0, &started)) return;
+    if (at == 0 || !Call(ctx, kScreenSound, screen, at, 0, 0, 0, &started)) return;
     // (each name's first play said once: whether the game knows it, bit 0 started. menu-polish-01113: B's
     // "button_cancel" was never heard in a run; a name the game does not know is silent)
     static std::mutex said_mutex;
