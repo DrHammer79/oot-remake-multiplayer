@@ -11,7 +11,7 @@ The randomizer is **off** until the host turns it on. Each game builds the seed 
 
 ## Host
 
-1. Open the co-op menu (**−** and **+** together, **Home**, or **F1**; on the title screen **−** alone) and go to the **Mods** tab, right after **Multiplayer**. Press **Settings** on the **OoT Remake Randomizer** row.
+1. Open the game's **−** menu (on the title screen **−** alone) and go right to the **Mods** tab, after **Multiplayer** and **Lobby**. Press **Settings** on the **OoT Remake Randomizer** row.
 2. Turn **Randomizer** on. The row that shows "on" in the mod list is only the mod itself; the **Randomizer** switch inside Settings is what turns the randomizer on.
 3. Choose the world:
    - **Seed**: leave it empty for a new one, or type a seed word to play a seed again.

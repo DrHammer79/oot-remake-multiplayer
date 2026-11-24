@@ -58,7 +58,7 @@ TEST_CASE("look menu: every part on the list, by item, under its heading") {
     CHECK(link_parts == static_cast<std::ptrdiff_t>(CoopLook::kParts) - 6);
     CHECK(headings == 11);   // Tunic, 3 shields, 3 swords, Boots, Gauntlets, Eyes, Hair (0.11.9)
     CHECK(v.rows[static_cast<std::size_t>(v.selected)].kind == 1);   // a part, not a heading
-    CHECK(v.rows[static_cast<std::size_t>(RowOf(page, "Hylian Shield", "Frame"))].value == "Game's own");
+    CHECK(v.rows[static_cast<std::size_t>(RowOf(page, "Hylian Shield", "Frame"))].value == "Default");
     CHECK(v.back == "Back");
     CHECK_FALSE(v.picture.empty());
 }
@@ -137,7 +137,7 @@ TEST_CASE("look menu: a part with no colour mixes from the game's own, Game's ow
     auto v = page.view();
     int own = -1, done = -1;
     for (std::size_t i = 0; i < v.rows.size(); ++i) {
-        if (v.rows[i].name == "Game's own colour") own = static_cast<int>(i);
+        if (v.rows[i].name == "Default colour") own = static_cast<int>(i);
         if (v.rows[i].name == "Done") done = static_cast<int>(i);
     }
     REQUIRE(own > 0);
@@ -181,7 +181,7 @@ TEST_CASE("look menu: the Cap trim, under the Tunic heading after the tunics, fo
     REQUIRE(cap > 0);
     CHECK(cap == zora + 1);
     auto v = page.view();
-    CHECK(v.rows[static_cast<std::size_t>(cap)].value == "As the tunic");
+    CHECK(v.rows[static_cast<std::size_t>(cap)].value == "Same as tunic");
     CHECK(CoopLookMenu::Shown(start, Part::cap_trim) == 0x3070FFu);   // the picture's band: the tunic's colour
     page.Select(static_cast<std::size_t>(cap));
     v = page.view();
@@ -205,7 +205,7 @@ TEST_CASE("look menu: the Cap trim, under the Tunic heading after the tunics, fo
     CHECK(v.rows[static_cast<std::size_t>(v.selected)].name == "Hue");
     const CoopLookMenu::Hsv tunic = CoopLookMenu::ToHsv(0x3070FFu);   // the sliders start at the tunic's colour
     CHECK(v.rows[1].value == std::to_string(tunic.h) + " degrees");
-    CHECK(v.rows[4].value == "As the tunic");   // the Preset row
+    CHECK(v.rows[4].value == "Same as tunic");   // the Preset row
     page.Press(Input::kRight);
     CHECK(page.look()[Part::cap_trim] == CoopLookMenu::ToRgb({(tunic.h + 10) % 360, tunic.s, tunic.v}));
     CHECK(page.look()[Part::tunic] == 0x3070FFu);
@@ -297,7 +297,7 @@ TEST_CASE("look menu (npc-customize): a character other than Link: its own parts
     page.SetCharacter(9, false);
     auto v = page.view();
     REQUIRE(v.rows.size() == 7);                    // (rows not known yet: every row)
-    CHECK(v.rows[0].name == "Character (page 1 of 1)");
+    CHECK(v.rows[0].name == "Character");
     CHECK(v.rows[1].name == "Hair Colour");
     CHECK(v.rows[6].name == "Equipment");
     CHECK(v.rows[6].value == "Shown");

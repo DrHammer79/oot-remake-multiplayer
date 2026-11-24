@@ -1213,7 +1213,7 @@ std::vector<std::string> RowTexts(MinusPage page, const SessionView& v) {
         if (v.s.hosting) {
             rows[3] = main[kRowHost];   // ("Your game", "Your game: Saria asks")
         } else if (v.s.in_one || v.s.by_launcher) {
-            rows[3] = main[kRowJoin];   // ("Your session", "Turned away", "Copy answer code")
+            rows[3] = main[kRowJoin];   // ("Your game", "Turned away", "Copy answer code")
         }
         break;
     case MinusPage::kMods: break;
@@ -1266,9 +1266,9 @@ std::vector<std::string> RowTexts(const SessionView& v) {
     } else if (v.connecting && !v.s.hosting) {
         rows[kRowJoin] = "Connecting...";
     } else if (v.s.by_launcher) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else if (v.s.in_one && !v.s.hosting) {
-        rows[kRowJoin] = "Your session";
+        rows[kRowJoin] = "Your game";
     } else {
         rows[kRowJoin] = "Join a game";
     }
@@ -1435,7 +1435,7 @@ std::vector<std::string> RowTexts(View view, const SessionView& v) {
                                                  : "Stop hosting";
         } else if (v.s.in_one || v.s.by_launcher) {
             rows[0] = v.s.by_launcher ? "Co-op is on" : "In a friend's game";
-            rows[1] = "Leave it first: Join";
+            rows[1] = "Leave your game first";
         } else {
             rows[0] = "Start hosting";
             rows[1] = "Host settings";
@@ -1873,9 +1873,15 @@ std::vector<ListLine> SettingLines(const std::vector<SettingRow>& rows, int page
         const std::size_t at = static_cast<std::size_t>(at_page * per_page + i);
         if (at >= rows.size()) break;
         const SettingRow& r = rows[at];
+        // (a setting that applies at the next start says so on its row, in words: a bare "*" read as nothing. The tag
+        // is kept whole and the name gives way to it)
+        std::string name = CoopI18n::Tr(r.name);
+        if (r.restart) {
+            const std::string tag = " (" + CoopI18n::Tr("restart") + ")";
+            name = tag.size() < kListNameChars ? FitTo(name, kListNameChars - tag.size()) + tag : tag;
+        }
         lines[static_cast<std::size_t>(i) + 1] =
-            ListLine{FitTo(r.restart ? CoopI18n::Tr(r.name) + " *" : CoopI18n::Tr(r.name), kListNameChars),
-                     FitTo(CoopI18n::Tr(r.text), kListValueChars)};
+            ListLine{FitTo(name, kListNameChars), FitTo(CoopI18n::Tr(r.text), kListValueChars)};
     }
     return lines;
 }
@@ -1995,7 +2001,7 @@ std::vector<ListLine> DetailLines(View view, const SessionView& v) {
     } else if (v.s.in_one) {
         header = "In a session";
     } else {
-        header = v.s.by_launcher ? "Co-op came with the game" : "Not in a session";
+        header = v.s.by_launcher ? "Started with the game" : "Not in a session";
         if (v.s.by_launcher && why.empty()) why = CoopI18n::Tr("Restart the game to change it");
     }
     // (the header's value: hosting, who can reach this game. The header had none: the game's cursor frame, which

@@ -373,7 +373,7 @@ TEST_CASE("mods tab: a text longer than a row is handed over as several note row
     }
 }
 
-TEST_CASE("mods tab: a mod's long description shows as several rows of its page") {
+TEST_CASE("mods tab: a mod's long description is the help line of its On row, not rows of the page") {
     const fs::path root = ModTestDir("coop-mods-tab-long");
     std::error_code ec;
     fs::remove_all(root, ec);
@@ -388,16 +388,10 @@ TEST_CASE("mods tab: a mod's long description shows as several rows of its page"
         tab.Show();
         tab.Press(Input::kDecide);
         REQUIRE(tab.on_mod_page());
-        std::string joined;
-        int notes = 0;
-        for (const auto& row : tab.view().rows) {
-            if (row.kind == RowKind::kNote) {
-                ++notes;
-                joined += row.name;
-            }
-        }
-        CHECK(notes >= 2);
-        CHECK(joined == description);
+        const auto v = tab.view();
+        for (const auto& row : v.rows) CHECK(row.kind != RowKind::kNote);   // (no text rows: the list fits its 7 lines)
+        CHECK(v.rows[v.selected].name == "On");
+        CHECK(v.help == description);   // (the module wraps the help over its lines)
     }
     fs::remove_all(root, ec);
 }

@@ -110,9 +110,9 @@ TEST_CASE("pause tab: Host hosts in one press, then the page shows the code, the
     m.SetSession(starting);
     CHECK(m.view().gold == "Starting your game...");
     m.SetSession(Hosting(1));
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste answer code (or Ctrl+V)",
                                                "Same network", "VPN", "Port", "Game", "Stop hosting"});
-    // Ctrl+V (or Shift+Insert) on the Host page is Paste friend's answer, wherever the cursor is.
+    // Ctrl+V (or Shift+Insert) on the Host page is Paste answer code, wherever the cursor is.
     CHECK(m.Press(Input::kPaste));
     const auto paste = m.TakeRequest();
     REQUIRE(paste.has_value());
@@ -1510,11 +1510,11 @@ TEST_CASE("pause tab: Host: the join password is hidden until A, shown in groups
     REQUIRE(m.TakeRequest()->kind == Request::Kind::kHost);
     Session s = Hosting(1);
     m.SetSession(s);   // (no password: no row)
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste answer code (or Ctrl+V)",
                                                "Same network", "VPN", "Port", "Game", "Stop hosting"});
     s.password = "abcdefghijklmnopqrst";
     m.SetSession(s);
-    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste friend's answer (or Ctrl+V)",
+    CHECK(Names(m) == std::vector<std::string>{"Copy the code again", "Paste answer code (or Ctrl+V)",
                                                "Same network", "VPN", "Join password", "Change join password",
                                                "Port", "Game", "Stop hosting"});
     SelectRow(m, "Join password");
@@ -1653,7 +1653,7 @@ TEST_CASE("pause tab: Host: the player asking to join is let in or refused from 
     s.asking = {"Saria"};
     m.SetSession(s);
     CHECK(Names(m) == std::vector<std::string>{"Let in Saria", "Refuse Saria", "Copy the code again",
-                                               "Paste friend's answer (or Ctrl+V)", "Same network", "VPN", "Port",
+                                               "Paste answer code (or Ctrl+V)", "Same network", "VPN", "Port",
                                                "Game", "Stop hosting"});
     CHECK(Selected(m) == "Copy the code again");   // (the rows came above it: the same row stays chosen)
     CHECK(Fits(m.view().rows[0]));

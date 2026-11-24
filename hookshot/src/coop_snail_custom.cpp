@@ -66,7 +66,7 @@ std::uint64_t Driver::Pad(std::uint64_t down) {
     return his;
 }
 
-// A value as his screen writes its values ("Game's own", "As the tunic"): its first letter a capital, after the
+// A value as his screen writes its values ("Default", "Same as tunic"): its first letter a capital, after the
 // translation (the colour names are lower case for chat and the files, "red"; capitalised before it, "Red" would be
 // another line of the table, zh's "红" of a colour's red part, not the colour "红色"). A text not starting with an
 // ASCII letter (#RRGGBB, Chinese) comes back unchanged.
@@ -93,7 +93,7 @@ Texts Driver::Shown(const CoopI18n::Lang* lang) const {
         if (t.title.size() + more.size() <= kTitleBytes) t.title += more;
     };
     if (!page_.editing() && page_.GroupsOffered() > 1) add("Y: page");
-    if (!page_.editing() && page_.GroupsOffered() >= 1) add("A: exact hue");
+    if (!page_.editing() && page_.GroupsOffered() >= 1) add("A: Fine-tune");
     for (int f = 0; f < kOptions; ++f) {
         const std::size_t r = static_cast<std::size_t>(f + 1);
         if (r >= v.rows.size()) break;

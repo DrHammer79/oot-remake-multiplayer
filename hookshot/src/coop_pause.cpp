@@ -1464,7 +1464,7 @@ bool Key(std::uint32_t vk, bool repeat) {
         return false;
     }
     const auto [ctrl_down, shift_down] = Modifiers();
-    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste friend's answer (players press
+    // Ctrl+V and Shift+Insert paste, typing or not: on the Host page that is Paste answer code (players press
     // Ctrl+V there), on Join the code. A plain Insert stays Hookshot's.
     if (!repeat && ((vk == 'V' && ctrl_down) || (vk == 0x2D && shift_down && !ctrl_down))) {
         const bool taken = g_menu.Press(Input::kPaste);

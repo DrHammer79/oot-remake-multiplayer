@@ -32,14 +32,14 @@ TEST_CASE("snail customize: his six options show co-op's parts, ZL / ZR step the
     d.Open(start, 0);
     REQUIRE(d.Active());
     auto t = d.Shown();
-    CHECK(t.title == "Link (page 1 of 4)  Y: page  A: exact hue");
+    CHECK(t.title == "Link (page 1 of 4)  Y: page  A: Fine-tune");
     CHECK(t.labels[0] == "Eye Colour");
     CHECK(t.labels[1] == "Kokiri Tunic");
     CHECK(t.labels[3] == "Goron Tunic");   // (his right column)
     CHECK(t.labels[4] == "Zora Tunic");
     CHECK(t.labels[5].empty());
     CHECK(t.values[4] == "Red");   // (capitalised as his own values: the UI gate, review-ui-tabs-0119-4)
-    CHECK(t.values[1] == "Game's own");
+    CHECK(t.values[1] == "Default");
     // The d-pad is his (his marker moves); co-op follows: right to Goron Tunic, down to Zora Tunic.
     CHECK(d.Pad(kRight) == kRight);
     CHECK(d.Pad(kDown) == kDown);
@@ -52,7 +52,7 @@ TEST_CASE("snail customize: his six options show co-op's parts, ZL / ZR step the
     // Y: the Shields page, the same six places.
     CHECK(d.Pad(kY) == 0);
     t = d.Shown();
-    CHECK(t.title == "Shields (page 2 of 4)  Y: page  A: exact hue");
+    CHECK(t.title == "Shields (page 2 of 4)  Y: page  A: Fine-tune");
     CHECK(t.labels[0] == "Hylian Shield Frame");
     CHECK(t.labels[5] == "Deku Shield");
     // B and -: his (back to his picker).
@@ -70,7 +70,7 @@ TEST_CASE("snail customize: A opens co-op's any-colour mixer in his six places, 
     CHECK(t.labels[1] == "Saturation");
     CHECK(t.labels[2] == "Brightness");
     CHECK(t.labels[3] == "Preset");
-    CHECK(t.labels[4] == "Game's own colour");
+    CHECK(t.labels[4] == "Default colour");
     CHECK(t.values[4] == "A");
     CHECK(t.labels[5] == "Done");
     CHECK(t.title.find("Y:") == std::string::npos);   // (no page turn in the mixer)
@@ -161,16 +161,16 @@ TEST_CASE("snail customize: his screen's texts in the game's language, as co-op'
     CHECK(t.values[4] == CoopI18n::Tr(hans, "red"));
     CHECK(t.values[4] != "red");
     CHECK(t.values[4] != CoopI18n::Tr(hans, "Red"));   // (capitalised after the table: the colour, not a colour's red part)
-    CHECK(t.values[1] == CoopI18n::Tr(hans, "Game's own"));
+    CHECK(t.values[1] == CoopI18n::Tr(hans, "Default"));
     CHECK(t.values[3] == d.Shown(nullptr).values[3]);   // (#123456 stays)
     // English (no table): the same texts as before.
-    CHECK(d.Shown(nullptr).title == "Link (page 1 of 4)  Y: page  A: exact hue");
+    CHECK(d.Shown(nullptr).title == "Link (page 1 of 4)  Y: page  A: Fine-tune");
     CHECK(d.Shown(nullptr).values[4] == "Red");
 }
 
 TEST_CASE("snail customize: values capitalised as his own (Red next to Game's own), the rest unchanged") {
     CHECK(Capitalised("red") == "Red");
-    CHECK(Capitalised("Game's own") == "Game's own");
+    CHECK(Capitalised("Default") == "Default");
     CHECK(Capitalised("#123456") == "#123456");
     CHECK(Capitalised("") == "");
     CHECK(Capitalised("çº¢è²") == "çº¢è²");   // (Chinese: unchanged)
@@ -187,7 +187,7 @@ TEST_CASE("snail customize: the title fits its pane (61 bytes) on every page in 
             CHECK(t.title.size() <= 61);
             const auto name = CoopI18n::Tr(&CoopI18n::kLangs[i], std::vector<std::string>{"Link", "Shields", "Swords", "Boots and gauntlets"}[static_cast<std::size_t>(page)]);
             CHECK(t.title.compare(0, name.size(), name) == 0);   // (the group's name first)
-            const auto y = CoopI18n::Tr(&CoopI18n::kLangs[i], "Y: page"), a = CoopI18n::Tr(&CoopI18n::kLangs[i], "A: exact hue");
+            const auto y = CoopI18n::Tr(&CoopI18n::kLangs[i], "Y: page"), a = CoopI18n::Tr(&CoopI18n::kLangs[i], "A: Fine-tune");
             if (t.title.find(y) == std::string::npos || t.title.find(a) == std::string::npos) ++lost;
             d.Pad(kY);
         }

@@ -151,7 +151,7 @@ inline constexpr std::uint64_t kMemoryLineMs = 30'000;
 
 namespace CoopHostMenu {
 
-// The host's "Paste friend's answer" (the pause menu's Host page), checked at once so the player is told plainly what
+// The host's "Paste answer code" (the pause menu's Host page), checked at once so the player is told plainly what
 // was wrong: nothing when the clipboard could not be read. The answer code may sit anywhere in what was copied (a
 // whole chat message: name, time, "code:", quotes, line breaks; nat::find_codes).
 struct PastedAnswer {

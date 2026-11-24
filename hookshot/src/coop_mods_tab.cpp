@@ -340,9 +340,9 @@ std::vector<Tab::Line> Tab::Lines() const {
     head.row = Make(m.title, "", RowKind::kHeading);
     head.row.own_name = !kit;
     out.push_back(head);
-    if (!m.description.empty()) {
-        for (const std::string& line : NoteLines(m.description)) note(line, !kit);
-    }
+    // (the description and the mod's note are not rows of the list: a page of 7 rows had no room for three lines of
+    // text above On, and a cut line read as broken. They are the help line of the On row, the row the page opens on,
+    // wrapped over its lines; the author and version stay one row.)
     if (!m.author.empty()) {
         // The table's words around the author and the version, and the author's own
         // text through it too (the kit's randomizer writes a sentence there, which
@@ -353,9 +353,6 @@ std::vector<Tab::Line> Tab::Lines() const {
         }
         note(std::move(by), true);   // (the words around the author are in the player's language, the author's are its own)
     }
-    if (!m.note.empty()) {
-        for (const std::string& line : NoteLines(m.note)) note(line, !kit);
-    }
     if (m.id == CoopRando::kId && src_.rando) {
         if (std::string r = src_.rando(); !r.empty()) note("Randomizer: " + r);
     }
@@ -364,8 +361,17 @@ std::vector<Tab::Line> Tab::Lines() const {
     on.row.on = m.on;
     on.row.fixed = !m.can_switch;
     on.act = Act::kOn;
-    on.help = m.can_switch ? "Off: the game leaves this mod out from its next start." : m.note;
-    on.own_help = !m.can_switch && !kit;   // (a mod's note)
+    {
+        std::string about = m.description;
+        if (!m.note.empty()) about += (about.empty() ? "" : "
+") + m.note;
+        if (!about.empty()) {
+            on.help = std::move(about);
+            on.own_help = !kit;   // (a mod's own text)
+        } else if (m.can_switch) {
+            on.help = "Off: the game leaves this mod out from its next start.";
+        }
+    }
     out.push_back(on);
     for (const auto& [act, name, help] :
          {std::tuple{Act::kUp, "Move up", "Up: it wins a file it shares with the mods under it."},
