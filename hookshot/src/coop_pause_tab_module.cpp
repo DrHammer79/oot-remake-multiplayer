@@ -361,13 +361,17 @@ bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSl
                 bool force = false);
 thread_local const char* g_live_why = "";   // (why LiveTextIn last returned false: named in the Customize line)
 
+bool FitPut(void* ctx, std::uint64_t layout, const std::string& path, LiveSlot& l, const std::string& words,
+            const std::function<bool(const std::string&)>& put);   // (below: after TextPaneAt)
 bool LiveText(void* ctx, std::uint64_t layout, std::uint64_t gen, const std::string& path, int slot,
               const std::string& utf8) {
     if (slot < 0 || slot >= kLiveSlots) return false;
     LiveSlot& l = g_live[slot];
-    if (l.shown == utf8) return true;
-    if (path.size() >= 0x40 || utf8.size() >= kLivePlaceholder || !LiveLookup(ctx, slot, gen)) return false;
-    return LiveTextIn(ctx, layout, path, l, utf8);
+    return FitPut(ctx, layout, path, l, utf8, [&](const std::string& shown) {
+        if (l.shown == shown) return true;
+        if (path.size() >= 0x40 || shown.size() >= kLivePlaceholder || !LiveLookup(ctx, slot, gen)) return false;
+        return LiveTextIn(ctx, layout, path, l, shown);
+    });
 }
 
 // The text pane at `path` ("Part/Part/Pane") of `layout`, found as the game's pane-text call finds each pane it sets:
@@ -388,6 +392,37 @@ std::uint64_t TextPaneAt(void* ctx, std::uint64_t layout, const std::string& pat
     if (!Call(ctx, kPaneByName, table, name, 0, 0, 0, &pane) || pane == 0) return g_live_why = "pane not found", 0;
     if (((Read<std::uint32_t>(pane + 0xa8) >> 22) & 0xf) != kTextPaneKind) return g_live_why = "not a text pane", 0;
     return pane;
+}
+
+// `words` on the text pane at `path` through `put` (which sets the words it is given), fitted to the pane by the width
+// the game drew them (menu-polish-01113: a count of letters cannot know a proportional font; "Co-op came with the game"
+// ran past its button). Once the game has drawn the words now shown, their drawn width (+0x13c) is read against the
+// pane's own width (+0x58); too wide, they are cut to what fits (CoopTextFit::LettersForWidth, Fit's "...") and read
+// again after the next set. One rule for every text box of our pages (the - page's rows and lines, the + page's rows,
+// cells and settings). True when `put` set them.
+bool FitPut(void* ctx, std::uint64_t layout, const std::string& path, LiveSlot& l, const std::string& words,
+            const std::function<bool(const std::string&)>& put) {
+    if (l.fit_for != words) l.fit_for = words, l.fit_n = 0, l.fit_done = false;
+    const std::string shown = l.fit_n != 0 ? CoopTextFit::Fit(words, l.fit_n) : words;
+    const bool drawn_before = l.shown == shown;   // (the game drew these words already: its width is theirs)
+    if (!put(shown)) return false;
+    if (l.fit_done || !drawn_before || words.size() <= 4) return true;
+    const std::uint64_t pane = TextPaneAt(ctx, layout, path);
+    const float drawn = pane != 0 ? Read<float>(pane + kPaneTextWidth) : 0.0f;
+    const float box = pane != 0 ? Read<float>(pane + kPaneBoxWidth) : 0.0f;
+    if (!(drawn > 0.0f) || !(box > 10.0f)) return true;
+    if (box < drawn * 0.5f) {   // (a box read under half the words: not the pane's real width; nothing cut, said once)
+        l.fit_done = true;
+        LOG_INFO(Core, "coop: pause tab: {} drew {:.0f} wide, its box read {:.0f}: not trusted, left whole", path, drawn, box);
+        return true;
+    }
+    if (const std::size_t n = CoopTextFit::LettersForWidth(shown, drawn, box); n == 0) {
+        l.fit_done = true;
+    } else {
+        l.fit_n = n;
+        LOG_INFO(Core, "coop: pause tab: {} drew {:.0f} wide in a box of {:.0f}: cut to {} letters", path, drawn, box, n);
+    }
+    return true;
 }
 
 bool LiveTextIn(void* ctx, std::uint64_t layout, const std::string& path, LiveSlot& l, const std::string& utf8,
@@ -2768,28 +2803,11 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
         };
         // (a row's or a line's words fitted to their pane by the width the game drew them: once shown, read; too wide,
         // cut to what fits ("..."), read again at the next pass. One rule for every text box of the page)
+        // (a row's or a line's words fitted to their pane by the width the game drew them: FitPut, one rule for every
+        // text box of our pages)
         const auto fit_put = [&](int slot, const std::string& path, const std::string& words) {
-            LiveSlot& l = g_minus_live[static_cast<std::size_t>(slot)];
-            if (l.fit_for != words) l.fit_for = words, l.fit_n = 0, l.fit_done = false;
-            const std::string shown = l.fit_n != 0 ? CoopTextFit::Fit(words, l.fit_n) : words;
-            const bool drawn_before = l.shown == shown;   // (the game drew these words already: its width is theirs)
-            if (!put(slot, path, shown)) return false;
-            if (!l.fit_done && drawn_before) {
-                const std::uint64_t pane = TextPaneAt(ctx, layout, path);
-                const float drawn = pane != 0 ? Read<float>(pane + kPaneTextWidth) : 0.0f;
-                const float box = pane != 0 ? Read<float>(pane + kPaneBoxWidth) : 0.0f;
-                if (drawn > 0.0f && box > 10.0f) {
-                    const std::size_t n = CoopTextFit::LettersForWidth(shown, drawn, box);
-                    if (n == 0) {
-                        l.fit_done = true;
-                    } else {
-                        l.fit_n = n;
-                        LOG_INFO(Core, "coop: pause tab: the - page's text {} drew {:.0f} wide in a box of {:.0f}: cut to "
-                                       "{} letters", slot, drawn, box, n);
-                    }
-                }
-            }
-            return true;
+            return FitPut(ctx, layout, path, g_minus_live[static_cast<std::size_t>(slot)], words,
+                          [&](const std::string& shown) { return put(slot, path, shown); });
         };
         for (std::size_t k = 0; k < texts.size(); ++k) {
             if (texts[k].empty()) continue;
