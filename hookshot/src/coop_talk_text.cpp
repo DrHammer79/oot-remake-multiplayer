@@ -84,20 +84,28 @@ void Log::Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const
         e.cut = length > kMaxBytes;
         while (!e.text.empty() && e.text.back() == 0) e.text.pop_back();
     }
+    bool again = false;
     {
         std::lock_guard lock(mu_);
         ++seen_;
+        // A pane the game left alone for a while that gets its same text again: a later talk (the same speaker, the
+        // same button), kept again. While a window is open it sets its text every frame, so no gap comes then.
+        const auto at = set_at_.find(pane);
+        const bool gap = at != set_at_.end() && frame > at->second + kSameAgain;
+        set_at_[pane] = at != set_at_.end() ? std::max(at->second, frame) : frame;   // (threads note out of order)
         const auto it = shown_.find(pane);
-        if (it != shown_.end() ? it->second == e.text : e.text.empty()) return;   // (shown already, or a first clear)
+        if (it == shown_.end() ? e.text.empty() : it->second == e.text && (!gap || e.text.empty()))
+            return;   // (shown already, or a first clear)
+        again = it != shown_.end() && it->second == e.text;
     }
     PaneNames(pane, read, e.layout, e.pane);   // (outside the lock: guest reads)
-    Keep(pane, std::move(e));
+    Keep(pane, std::move(e), again);
 }
 
-void Log::Keep(std::uint64_t pane, Entry e) {
+void Log::Keep(std::uint64_t pane, Entry e, bool again) {
     std::lock_guard lock(mu_);
     auto& shown = shown_[pane];
-    if (shown == e.text) return;   // (another thread kept the same text meanwhile)
+    if (shown == e.text && !again) return;   // (another thread kept the same text meanwhile)
     // A text that only grew replaces its shorter self, when that one is still the newest kept text of all (no other
     // text came between: a box typed out letter by letter).
     if (!shown.empty() && e.text.size() > shown.size() && e.text.compare(0, shown.size(), shown) == 0) {
@@ -115,6 +123,7 @@ void Log::Keep(std::uint64_t pane, Entry e) {
     if (shown_.size() > kMaxPanes) {   // (a long run: forget the panes; the next set of each is kept again)
         shown_.clear();
         last_of_.clear();
+        set_at_.clear();
     }
 }
 
@@ -145,6 +154,7 @@ void Log::Clear() {
     kept_.clear();
     shown_.clear();
     last_of_.clear();
+    set_at_.clear();
     dropped_ = seq_;
 }
 

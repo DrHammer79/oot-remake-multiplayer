@@ -103,6 +103,33 @@ TEST_CASE("talk text: the window sets the same text every frame, it is kept once
     CHECK(log.Since(0, "").size() == 4);
 }
 
+TEST_CASE("talk text: the same text in the same pane after a frame gap is kept again") {
+    Fake m = Window();
+    Log log;
+    Set(m, "Hello");
+    for (int f = 0; f < 10; ++f) log.Note(kText, kRef, f, m.Reader());   // (one talk: set every frame)
+    CHECK(log.Since(0, "").size() == 1);
+    // Within kSameAgain frames of the last set: still the same showing, not kept.
+    log.Note(kText, kRef, 9 + kSameAgain, m.Reader());
+    CHECK(log.Since(0, "").size() == 1);
+    // A later talk: the pane was not set for more than kSameAgain frames, then the same text again.
+    const std::uint64_t later = 9 + 2 * kSameAgain + 1;
+    log.Note(kText, kRef, later, m.Reader());
+    auto all = log.Since(0, "");
+    REQUIRE(all.size() == 2);
+    CHECK(all[1].text == "Hello");
+    CHECK(all[1].frame == later);
+    // Then set every frame again: kept once.
+    for (std::uint64_t f = later + 1; f < later + 20; ++f) log.Note(kText, kRef, f, m.Reader());
+    CHECK(log.Since(0, "").size() == 2);
+    // An empty text after a gap is not kept again either (a window closed, closed again).
+    Set(m, "");
+    log.Note(kText, kRef, later + 20, m.Reader());
+    CHECK(log.Since(0, "").size() == 3);
+    log.Note(kText, kRef, later + 100, m.Reader());
+    CHECK(log.Since(0, "").size() == 3);
+}
+
 TEST_CASE("talk text: a text that only grows replaces its shorter self") {
     Fake m = Window();
     Log log;

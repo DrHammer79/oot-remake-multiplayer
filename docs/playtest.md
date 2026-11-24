@@ -155,7 +155,7 @@ player's game copies nothing.
   is not in `text` (take a screenshot to read it). Others seen: `PaNumDisplay_00` (the rupee counter, set every frame
   while it counts), `PaShopBuyInfo_00` (a shop item's info, with markup), `DoCommand_00` `T_GuideA_00` (the A
   prompt), `PaGuideKey_00`, `ActionGuideTips_00`, `PaMenuMessage_00` ([game-ui.md](game-ui.md)).
-- The window sets its text again every frame, so a text the pane already shows is not kept again, and a pane's first
+- The window sets its text again every frame, so a text the pane already shows is not kept again (unless the pane went 30 frames without a set: a later talk with the same speaker or button is kept), and a pane's first
   set to "" is not kept. A text that only grew replaces its shorter self when nothing came between (a box typed out
   letter by letter, if the game does that).
 - Valid UTF-8 comes as it is; any other byte and every control character as a JSON `\u00XX`, and `markup` is true:

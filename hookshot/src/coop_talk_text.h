@@ -9,7 +9,8 @@
 // message window is MessageInGame_00 (T_MessageWhiteOut_00 the text, T_Name_00 the speaker; docs/game-ui.md).
 //
 // The window sets its text again every frame while it is open (docs/game-ui.md, "The message window"), so a text the
-// pane already shows is not kept again; a text that only grows (a box typed out letter by letter, if the game does
+// pane already shows is not kept again, unless the pane was not set for more than kSameAgain frames (a later talk
+// that puts the same text in the same pane: the speaker's name, the same button); a text that only grows (a box typed out letter by letter, if the game does
 // that: not seen yet) replaces its shorter self. Game-free: the reads go through a function, so the unit tests
 // (tests/hookshot/talk_text_test.cpp) feed a fake memory.
 #pragma once
@@ -41,6 +42,7 @@ inline constexpr std::size_t kKeep = 256;        // texts kept (the oldest go fi
 inline constexpr std::size_t kMaxBytes = 2048;   // of one text (a longer one is cut and says so)
 inline constexpr std::size_t kMaxName = 64;      // of a layout or pane name
 inline constexpr std::size_t kMaxPanes = 4096;   // panes remembered for the "already shows it" test
+inline constexpr std::uint64_t kSameAgain = 30;  // frames a pane went unset before its same text is kept again
 
 // Reads guest memory: false when the address cannot be read.
 using ReadFn = std::function<bool(std::uint64_t addr, void* out, std::size_t size)>;
@@ -58,7 +60,7 @@ struct Entry {
 class Log {
    public:
     // The wrap's phase 0: copies the text the setter is given (`pane`, `ref` as x0 and x1) and keeps it when the pane
-    // did not show it already. Any read that fails keeps nothing (or an empty name). Thread-safe.
+    // did not show it already, or was not set for more than kSameAgain frames. Any read that fails keeps nothing (or an empty name). Thread-safe.
     void Note(std::uint64_t pane, std::uint64_t ref, std::uint64_t frame, const ReadFn& read);
     // The kept texts after `since` (0: all kept), oldest first, of the layouts whose name contains `layout` (empty:
     // every layout). `lost`: texts after `since` that are no longer kept (more than kKeep came since).
@@ -68,11 +70,12 @@ class Log {
     void Clear();
 
    private:
-    void Keep(std::uint64_t pane, Entry e);
+    void Keep(std::uint64_t pane, Entry e, bool again);
     mutable std::mutex mu_;
     std::deque<Entry> kept_;
     std::unordered_map<std::uint64_t, std::string> shown_;      // pane -> its text now
     std::unordered_map<std::uint64_t, std::uint64_t> last_of_;  // pane -> the seq of its newest kept text
+    std::unordered_map<std::uint64_t, std::uint64_t> set_at_;   // pane -> the newest frame it was set (any text)
     std::uint64_t seq_ = 0, seen_ = 0;
     std::uint64_t dropped_ = 0;   // the newest seq dropped for room (or cleared)
 };
