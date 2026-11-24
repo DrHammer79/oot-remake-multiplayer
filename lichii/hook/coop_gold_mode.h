@@ -145,15 +145,19 @@ std::string NewPlaythroughId();
 // OnNewGame: the game plays a new game not saved yet: a fresh id, the same until the title. OnSlot, a load
 // (`by_write` false): the slot's own id (a fresh one the first time) is in force. OnSlot, a save (`by_write`): the game
 // saves what it plays, so the slot takes the id in force (a new game saved over an old one, a save into another or a
-// rotated autosave slot); with none in force yet (hosting began mid-game), the slot's own. OnSend: the host sends a
-// slot while the slot its game plays is not known (at the title): the guests get that slot, so its id is in force, as
-// at a load; the host's load of that slot then keeps the id the guests already have. OnTitle: a new pick follows.
+// rotated autosave slot); with none in force yet (hosting began mid-game), the slot's own. OnSend: the host sends
+// `slot`. The slot its game plays not known (`played` "", at the title): the guests get that slot, so its id is in
+// force, as at a load, and the host's load of that slot keeps the id the guests already have. A known played slot
+// that could not be sent (another went out): nothing changes, the host plays its own playthrough. OnTitle: a new pick
+// follows.
 class Playthroughs {
 public:
     explicit Playthroughs(std::filesystem::path dir = {});
     std::string OnNewGame();
     std::string OnSlot(const std::string& slot, bool by_write);
-    std::string OnSend(const std::string& slot) { return OnSlot(slot, false); }
+    std::string OnSend(const std::string& slot, const std::string& played) {
+        return played.empty() ? OnSlot(slot, false) : std::string();
+    }
     void OnTitle() { new_game_ = false; }
     const std::string& Current() const { return current_; }
     const std::map<std::string, std::string>& Slots() const { return slots_; }

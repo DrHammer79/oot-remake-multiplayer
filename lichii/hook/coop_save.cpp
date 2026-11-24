@@ -1175,8 +1175,10 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             if (slot && !played) {
                 // Row 63: the slot played is not known (the title): the guests' race is the playthrough of the slot
                 // they get. Its id goes out before the save (RaceSendDue), and the host's load of that slot keeps it.
+                // A known played slot that could not be sent: OnSend leaves the host's own playthrough in force.
                 if (!g_playthroughs) g_playthroughs.emplace(CoopGoldMode::RaceDir());
-                const std::string id = g_playthroughs->OnSend(slot_dir->filename().string());
+                const std::string id = g_playthroughs->OnSend(
+                    slot_dir->filename().string(), g_played.slot() ? g_played.slot()->filename().string() : std::string());
                 if (!id.empty()) CoopGoldMode::SetPlaythrough(id);
             }
             const auto packed =

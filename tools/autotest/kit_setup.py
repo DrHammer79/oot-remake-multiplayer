@@ -2,20 +2,22 @@
 
 A spec is a dict (the body of a preset file, tools/playtest/data/presets/*.json, and the `setup` tool's arguments):
 
-    {"warp": {"scene": "GohmaStage", "entrance": "GohmaStage"},   # last: a warp moves Link, so set things first
+    {"warp": {"scene": "InsideTheDekuTree", "entrance": "Entrance"},   # after the rest: a warp moves Link
      "hearts": 12,            # current life in hearts (PlayerStatus.Life, quarter hearts: 4 a heart)
      "max_hearts": 3,         # PlayerStatus.MaxLife (the game may write it back: docs/items.md "not where the game keeps")
      "magic": 0|1|2,          # 0 none, 1 the meter, 2 double magic (give Item_FairyBless_MP / _MPDouble: MPMax, MP full)
      "rupees": 200,
      "small_keys": {"ForestTemple": 2}, "boss_keys": ["ForestTemple"], "maps": [...], "compasses": [...],
      "items": ["bow", "Item_Boomerang"],      # `give` names
-     "flags": {"Gohma_DefeatBoss": 0}}        # any flag name: number, true/false or an enum value's name
+     "flags": {"Gohma_DefeatBoss": 0},        # any flag name: number, true/false or an enum value's name
+     "place": {"x": -12.0, "y": 48.5, "z": 66.5}}   # after the warp: Link put at a point of the scene (`place`)
 
 Names only: nothing from the game. `plan` checks a spec and returns the calls, `apply` runs them on a client and
 returns what each one answered. Unknown spec keys are an error, so a typo never passes as "set".
 """
 import glob
 import json
+import math
 import os
 import re
 import playtest_client as pc
@@ -29,7 +31,7 @@ KEYS = {"DekuTree": "InsideTheDekuTree", "DodongoCavern": "DodongoCavern", "Jabu
         "GerudoFortress": "GerudoFortress", "GanonsCastle": "InsideGanonCastle",
         "FinalBattleField": "FinalBattleField"}
 SPEC_KEYS = {"warp", "hearts", "max_hearts", "magic", "rupees", "small_keys", "boss_keys", "maps", "compasses",
-             "items", "flags", "name", "version", "note"}
+             "items", "flags", "place", "name", "version", "note"}
 NAME = re.compile(r"^[A-Za-z0-9_.]{1,128}$")
 
 
@@ -53,7 +55,8 @@ def _dungeon(d, what):
 
 
 def plan(spec):
-    """The ordered bridge calls for a spec: ("flag", name, value), ("give", item) or ("warp", scene, entrance)."""
+    """The ordered bridge calls for a spec: ("flag", name, value), ("give", item), ("warp", scene, entrance) or
+    ("place", x, y, z)."""
     if not isinstance(spec, dict):
         raise ValueError("a spec is an object")
     bad = sorted(set(spec) - SPEC_KEYS)
@@ -105,6 +108,17 @@ def plan(spec):
         if not isinstance(w, dict) or "scene" not in w or set(w) - {"scene", "entrance"}:
             raise ValueError("warp: {scene, entrance?}")
         calls.append(("warp", _name(w["scene"], "warp.scene"), _name(w["entrance"], "warp.entrance") if w.get("entrance") else None))
+    p = spec.get("place")
+    if p is not None:   # after the warp: a warp puts Link at the entrance, so a place before it would be lost
+        if not isinstance(p, dict) or set(p) != {"x", "y", "z"}:
+            raise ValueError("place: {x, y, z}")
+        xyz = []
+        for k in ("x", "y", "z"):
+            v = p[k]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or abs(v) > 100000:
+                raise ValueError("place.%s: a finite number (got %r)" % (k, v))
+            xyz.append(round(float(v), 3))
+        calls.append(("place",) + tuple(xyz))
     return calls
 
 
@@ -162,6 +176,8 @@ def apply(client, spec, warp_timeout=60, shared=True, log_dir=None, player=None)
                 reply = client.give(call[1])
             elif call[0] == "flag":
                 reply = client.flag(call[1], call[2])
+            elif call[0] == "place":
+                reply = client.act("place %s %s %s" % tuple(repr(v) for v in call[1:]))
             else:
                 reply = client.warp(call[1], call[2], warp_timeout)
         except Exception as e:  # the client raises its own error with the bridge's code and message
