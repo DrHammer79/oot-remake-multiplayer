@@ -175,6 +175,29 @@ class Presets(unittest.TestCase):
             self.assertEqual(flags.get(name), 0, name)
         self.assertEqual(flags.get("0x7d776b61"), "DefeatBoss")
 
+    def test_the_dodongo_and_barinade_presets_load_the_dungeon_not_the_rush_room(self):
+        # As the Gohma preset: the rush rooms DodongoStage and BarinadeStage are not the dungeon, and a warp straight
+        # into a boss room skips the door's own trigger. Both go into their dungeon at its entrance, keep the boss key,
+        # and clear the boss's intro and death flags so the game's own door trigger can run.
+        want = {
+            "before-dodongo": ("DodongoCavern", "DodongoCavern_MountainTrailSide", "DodongoStage",
+                               ("HavePlayedEvent.Dm_DodongoCave_BossIn", "HavePlayedEvent.Dm_DodongoCave_BossOut",
+                                "HavePlayedEvent.Get_StoneOfFire_DefeatBoss"),
+                               ("flag", "DungeonInfo.DodongoCavern.IsGetBossKey", 1)),
+            "before-barinade": ("InsideJabuJabuBelly", "InsideJabuJabuBelly_FromZoraFountain", "BarinadeStage",
+                                ("HavePlayedEvent.Dm_InsideJabu_Jabu_BossIn", "HavePlayedEvent.Dm_InsideJabu_Jabu_BossOut",
+                                 "HavePlayedEvent.Get_StoneOfWater_DestroyBoss"),
+                                ("flag", "DungeonInfo.InsideJabuJabuBelly.IsGetBossKey", 1)),
+        }
+        for name, (scene, start, rush, cleared, key) in want.items():
+            calls = ks.plan(ks.load_preset(name))
+            self.assertIn(("warp", scene, start), calls, name)
+            self.assertNotIn(rush, [c[1] for c in calls if c[0] == "warp"], name)
+            self.assertIn(key, calls, name)
+            flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+            for f in cleared:
+                self.assertEqual(flags.get(f), 0, (name, f))
+
     def test_a_bad_preset_name_is_refused_with_the_list(self):
         for bad in ("nope", "../x", "", None, "A"):
             with self.assertRaises(ValueError) as e:

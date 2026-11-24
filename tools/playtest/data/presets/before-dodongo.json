@@ -1,7 +1,7 @@
 {
   "preset": "before-dodongo",
   "version": 1,
-  "title": "Dodongo's Cavern (King Dodongo): child Link in the boss room, boss key, 3 hearts",
+  "title": "Dodongo's Cavern (King Dodongo): child Link in the dungeon, boss key, 3 hearts",
   "spec": {
     "items": [
       "Weapon_Sword_Kokiri",
@@ -15,17 +15,19 @@
       "DodongoCavern"
     ],
     "warp": {
-      "scene": "DodongoStage",
-      "entrance": "DodongoStage"
+      "scene": "DodongoCavern",
+      "entrance": "DodongoCavern_MountainTrailSide"
     },
     "flags": {
       "0x1002b466": "BossBattle",
       "HavePlayedEvent.Get_StoneOfFire_DefeatBoss": 0,
-      "HavePlayedEvent.Dm_DodongoCave_BossOut": 0
+      "HavePlayedEvent.Dm_DodongoCave_BossOut": 0,
+      "HavePlayedEvent.Dm_DodongoCave_BossIn": 0
     }
   },
   "notes": [
-    "Rush room DodongoStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
-    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Get_StoneOfFire is put back to its step BossBattle and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+    "Link loads at the dungeon's entrance, not in the boss rush room DodongoStage (a free-play warp into a rush room left the Deku Tree's rush room black, with no control and no camera, so the Gohma preset goes through the dungeon too). Walk or place to the boss door; the game's own door trigger and intro then make King Dodongo.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Get_StoneOfFire is put back to its step BossBattle, and the boss room's played flags (the quest's DefeatBoss, the intro Dm_DodongoCave_BossIn, the death Dm_DodongoCave_BossOut) to their before values. The save must be of child Link.",
+    "Not set yet: the place before the boss door (the repository has no door position for this dungeon; the lane run kit-boss-child measures it), and Enemy_DungeonBoss_Dodongo_BossAppear (the boss set clears it on death; if no boss comes, check it first)."
   ]
 }

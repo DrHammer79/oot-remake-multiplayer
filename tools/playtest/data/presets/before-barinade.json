@@ -1,7 +1,7 @@
 {
   "preset": "before-barinade",
   "version": 1,
-  "title": "Jabu-Jabu (Barinade): child Link in the boss room, boss key, 3 hearts",
+  "title": "Jabu-Jabu's Belly (Barinade): child Link in the dungeon, boss key, 3 hearts",
   "spec": {
     "items": [
       "Weapon_Sword_Kokiri",
@@ -15,17 +15,19 @@
       "JabuJabu"
     ],
     "warp": {
-      "scene": "BarinadeStage",
-      "entrance": "BarinadeStage"
+      "scene": "InsideJabuJabuBelly",
+      "entrance": "InsideJabuJabuBelly_FromZoraFountain"
     },
     "flags": {
       "0x5bca02a6": "Step13_01",
       "HavePlayedEvent.Get_StoneOfWater_DestroyBoss": 0,
-      "HavePlayedEvent.Dm_InsideJabu_Jabu_BossOut": 0
+      "HavePlayedEvent.Dm_InsideJabu_Jabu_BossOut": 0,
+      "HavePlayedEvent.Dm_InsideJabu_Jabu_BossIn": 0
     }
   },
   "notes": [
-    "Rush room BarinadeStage from coop_start_points.inc. Item and flag names appear in coop/host/src/game_items.cpp or the autotest scenarios;.",
-    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Get_StoneOfWater is put back to its step Step13_01 and the boss's Bools to their before values (the intro's BossIn flag is left as the save has it). The save must be of the right age and have the dungeon's keys."
+    "Link loads at the dungeon's entrance, not in the boss rush room BarinadeStage (a free-play warp into a rush room left the Deku Tree's rush room black, with no control and no camera, so the Gohma preset goes through the dungeon too). Walk or place to the boss door; the game's own door trigger and intro then make Barinade.",
+    "The boss is made alive as docs/dungeons-boss.md (the boss set table) has it: the shared quest Get_StoneOfWater is put back to its step Step13_01, and the boss room's played flags (the quest's DestroyBoss, the intro Dm_InsideJabu_Jabu_BossIn, the death Dm_InsideJabu_Jabu_BossOut) to their before values. The save must be of child Link.",
+    "Not set yet: the place before the boss door (the repository has no door position for this dungeon; the lane run kit-boss-child measures it)."
   ]
 }
