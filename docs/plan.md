@@ -104,7 +104,7 @@ Alex's calls, taken 2026-11-09 (the suggested answers this plan assumed, plus th
 A planned mode, not built yet. Players see each other in passing (puppets and name tags), but nothing else is shared: each player has their own bosses, enemies, keys, items, flags and Gold Skulltulas, and finishes the game on their own. The fastest player wins. A host turns it on for the session.
 
 - What is shared: positions and looks, chat, voice. What is not: every flag, item, enemy, boss, door, switch and drop.
-- It builds on the per-setting "not shared" modes that exist today (Gold Skulltulas "Not shared", shared floor switches Off).
+- It builds on the per-setting "not shared" modes that exist today (Gold Skulltulas "Not shared"), and on the "Shared floor switches" setting being added (Off).
 - A PvP option inside race mode lets players hit each other when they meet (the existing `PVP_MODE` / `PVP_HIT` messages).
 - To decide: a shared start and finish signal, a timer, and what happens when one player finishes.
 
