@@ -459,6 +459,15 @@ const ItemFlag* find_item(std::uint32_t hash) {
 
 std::span<const std::uint64_t> gold_skulltula_keys() { return kGoldSkulltulas; }
 
+std::span<const std::uint32_t> gold_race_flags() {
+  static constexpr std::uint32_t kRace[] = {
+      0x9086a22e, 0x39dad76d, 0xcdcc9add, 0x8dc37ac6, 0xe3c6e4a3,  // GetReward10, 20, 30, 40, 50
+      0x1d74617e, 0xb6e5a3a5, 0x2d2c874b, 0xd1360de8, 0xafa4bb52, 0xb5031190,  // the wallet tiers (StockNum, IsGet)
+      0xdd587ed8, 0xf3b14ce2,  // IsGet.Item_AgonyStone, PouchData.Item_AgonyStone.StockNum
+  };
+  return kRace;
+}
+
 SharedFlags item_shared_flags(bool with_off) {
   std::vector<FlagKey> keys;
   for (const auto& item : kItems) {
