@@ -147,6 +147,11 @@ std::size_t FlagWatcher::keep_local(std::span<const FlagKey> keys) {
     one_way_.erase(key);
     guard_source_.erase(key);
     guards_.erase(key);
+    // (review-01112-h) No row 272 reward guard either: a reward kept in each game is each player's own, so its
+    // own gain is never judged against another player's (a Not shared racer claims the Skulltula House's own).
+    reward_source_.erase(key);
+    reward_key_.erase(key);
+    reward_received_.erase(key);
   }
   return was;
 }

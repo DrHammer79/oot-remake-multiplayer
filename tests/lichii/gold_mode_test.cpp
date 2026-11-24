@@ -639,7 +639,7 @@ TEST_CASE("gold mode: the host's save sent before its game loads a slot carries 
     CoopGoldMode::MarkRaceSent(CoopGoldMode::RaceId());
 
     CoopGoldMode::Playthroughs host(dir);
-    const std::string sent = host.OnSend("slot_02");
+    const std::string sent = host.OnSend("slot_02", "");
     REQUIRE_FALSE(sent.empty());
     CoopGoldMode::SetPlaythrough(sent);
     const std::string id = CoopGoldMode::RaceId();
@@ -657,13 +657,100 @@ TEST_CASE("gold mode: the host's save sent before its game loads a slot carries 
 
     // Both games started again: the newest slot sent at the title is the same playthrough, so the same race.
     CoopGoldMode::Playthroughs again(dir);
-    CHECK(again.OnSend("slot_03") == sent);
+    CHECK(again.OnSend("slot_03", "") == sent);
 
     // The host loads another slot after the send: another playthrough, its id goes out before the save that follows.
     CoopGoldMode::SetPlaythrough(host.OnSlot("slot_01", false));
     CHECK(CoopGoldMode::RaceId() != id);
     CHECK(CoopGoldMode::RaceSendDue());
     CoopGoldMode::ResetForTest();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("gold mode: Not shared, the Skulltula House's rewards and what they give are in each racer's race (review-01112-h)") {
+    constexpr std::uint32_t kReward10 = 0x9086a22e;  // KakarikoVillage_GatheringTokenGold_GetReward10 (a Bool)
+    constexpr std::uint32_t kWallet = 0x1d74617e;    // PouchData.Item_Wallet_Small.StockNum (an Int)
+    const std::uint32_t flags[] = {kReward10, kWallet};
+
+    // Read from the game with the race, kept as text, joined by the higher value.
+    FakeGame game = MakeGame(10, true);
+    game.Named(kReward10, proto::FlagKind::boolean, 1);
+    game.Named(kWallet, proto::FlagKind::int32, 1);
+    const auto seen = CoopGoldMode::ReadRace(game, kSkull, kCount, kGet, flags);
+    REQUIRE(seen.has_value());
+    CHECK(seen->flags == std::map<std::uint32_t, std::uint32_t>{{kReward10, 1}, {kWallet, 1}});
+    CHECK_FALSE(seen->empty());
+    const auto back = CoopGoldMode::ParseRace(CoopGoldMode::RaceText(*seen));
+    REQUIRE(back.has_value());
+    CHECK(*back == *seen);
+    CHECK(CoopGoldMode::RaceText(*seen).find("flag 9086a22e 1\n") != std::string::npos);
+    for (const char* bad : {"flag 9086a22e 0", "flag 9086a22e", "flag 9086a2 1", "flag 00000000 1", "flag 9086a22e x"}) {
+        INFO(bad);
+        CHECK_FALSE(CoopGoldMode::ParseRace(std::string("oot-coop gold race 1\n") + bad + "\n").has_value());
+    }
+    CoopGoldMode::Race race = MakeRace(10, true, {});
+    CHECK(race.Join(*seen));
+    CoopGoldMode::Race higher;
+    higher.flags = {{kWallet, 2}};
+    CHECK(race.Join(higher));
+    CHECK(race.flags.at(kWallet) == 2);
+    CHECK_FALSE(race.Join(*seen));   // never lowered
+
+    // Put back after a load of a save that has neither: both in again; a higher value in the game stays.
+    FakeGame loaded = MakeGame(0, false);
+    loaded.Named(kReward10, proto::FlagKind::boolean, 0);
+    loaded.Named(kWallet, proto::FlagKind::int32, 0);
+    auto put = CoopGoldMode::PutRaceBack(loaded, race, kCount, kGet);
+    CHECK(put.done());
+    CHECK(loaded.Value(kReward10) == 1);
+    CHECK(loaded.Value(kWallet) == 2);
+    FakeGame unread = MakeGame(10, true);
+    CHECK(CoopGoldMode::PutRaceBack(unread, race, kCount, kGet).unread == 2);   // not loaded yet: tried again
+}
+
+TEST_CASE("gold mode: Not shared, two racers each reaching 10: the host's save carries each one's own reward (review-01112-h)") {
+    // kOther stands for a race flag the host's save has (MakeSave's second Int, 77 there: the host's own).
+    const std::uint32_t flags[] = {kOther, 0x22222222 /* not in this save */};
+    CoopGoldMode::Race a = MakeRace(10, true, {kSkull[0]});
+    a.flags = {{kOther, 1}};
+    CoopGoldMode::Race b = MakeRace(10, true, {kSkull[1]});
+    b.flags = {{kOther, 3}};
+    for (const auto* race : {&a, &b}) {
+        std::vector<std::uint8_t> host = MakeSave(25, 1, {kSkull[2], kSkull[2] + 2, kWeb});
+        const auto kept = CoopGoldMode::KeepRaceIn(host, race, kSkull, kCount, kGet, flags);
+        REQUIRE(kept.done);
+        CHECK(kept.flags == 1);
+        std::vector<std::uint8_t> want = MakeSave(10, 1, {*race->keys.begin(), kWeb});
+        // the race flag's value word: the Int after kCount's pair in MakeSave
+        const std::uint32_t own = race->flags.at(kOther);
+        CHECK(Get32(host, 0x20 + 8 * 4 + 4 + 8) == own);   // (MakeSave: type 0 opener, kGet, type 1, type 2, kCount, kOther)
+        want[0x20 + 8 * 4 + 4 + 8] = static_cast<std::uint8_t>(own);
+        want[0x20 + 8 * 4 + 4 + 8 + 1] = want[0x20 + 8 * 4 + 4 + 8 + 2] = want[0x20 + 8 * 4 + 4 + 8 + 3] = 0;
+        CHECK(host == want);
+    }
+    // No race with this host: a race from 0, the host's reward is not ours.
+    std::vector<std::uint8_t> host = MakeSave(25, 1, {kWeb});
+    CHECK(CoopGoldMode::KeepRaceIn(host, nullptr, kSkull, kCount, kGet, flags).done);
+    CHECK(Get32(host, 0x20 + 8 * 4 + 4 + 8) == 0);
+}
+
+TEST_CASE("gold mode: a slot sent in place of a known played slot leaves the host's playthrough as it is") {
+    // Review of ba791a54: the host's game plays slot_01 (known), but its save cannot be sent (its progress.sav is
+    // gone), so the newest slot_03 goes out. The host still plays slot_01's playthrough: its race id stays.
+    const fs::path dir = FreshDir("coop_tests_race_sent_known");
+    CoopGoldMode::Playthroughs host(dir);
+    const std::string played = host.OnSlot("slot_01", false);
+    REQUIRE_FALSE(played.empty());
+    CHECK(host.OnSend("slot_03", "slot_01").empty());   // nothing new in force
+    CHECK(host.Current() == played);
+    CHECK(host.Slots().count("slot_03") == 0);   // and no id made up for the slot sent
+    // The slot played not known (the title): the sent slot's playthrough is in force, as before.
+    CoopGoldMode::Playthroughs title(dir);
+    const std::string sent = title.OnSend("slot_03", "");
+    REQUIRE_FALSE(sent.empty());
+    CHECK(title.Current() == sent);
+    CHECK(sent != played);
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

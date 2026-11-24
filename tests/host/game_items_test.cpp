@@ -1856,6 +1856,46 @@ TEST_CASE("rewards: each once-per-save reward's Bool is its name's hash (row 272
   for (const rewards::Source& s : rewards::kOther) CHECK(s.family == rewards::Family::none);
 }
 
+TEST_CASE("gold race flags: every Skulltula House reward and what only they give, each a known flag (review-01112-h)") {
+  const auto race = coop::host::gold_race_flags();
+  const std::set<std::uint32_t> flags(race.begin(), race.end());
+  CHECK(flags.size() == race.size());
+  // Every reward of the Skulltula House (its Bools are named KakarikoVillage_GatheringTokenGold_GetReward<N>).
+  std::size_t house = 0;
+  const auto each = [&](const auto& sources) {
+    for (const rewards::Source& s : sources) {
+      if (s.name.find("GatheringTokenGold_GetReward") == std::string_view::npos) continue;
+      INFO(s.name);
+      CHECK(flags.contains(s.hash));
+      ++house;
+    }
+  };
+  each(rewards::kGuarded);
+  each(rewards::kOther);
+  CHECK(house == 5);
+  // The wallet tiers: given only by the House (the wallet family's Bools are the House's).
+  for (const FlagKey s : rewards::sources(rewards::Family::wallet)) {
+    bool is_house = false;
+    for (const rewards::Source& g : rewards::kGuarded) {
+      is_house = is_house || (g.hash == s.hash && g.name.find("GatheringTokenGold") != std::string_view::npos);
+    }
+    CHECK(is_house);
+  }
+  for (const auto& unit : rewards::units(rewards::Family::wallet)) {
+    for (const FlagKey key : unit) CHECK(flags.contains(key.hash));
+  }
+  // The Stone of Agony (reward 20), by name.
+  CHECK(flags.contains(coop::protocol::flag_hash("IsGet.Item_AgonyStone")));
+  CHECK(flags.contains(coop::protocol::flag_hash("PouchData.Item_AgonyStone.StockNum")));
+  // Each one a flag of the game's item list or a reward Bool; never the count or IsGet the race keeps already.
+  for (const std::uint32_t h : race) {
+    INFO(h);
+    CHECK(h != coop::host::kGoldTokenCount);
+    CHECK(h != coop::host::kGoldTokenGet);
+  }
+  CHECK(race.size() == 5 + 6 + 2);
+}
+
 TEST_CASE("rewards: every family has its units and its Bools, each key in one unit (row 272)") {
   std::set<std::uint32_t> seen;
   std::size_t bools = 0;

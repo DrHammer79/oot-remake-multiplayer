@@ -967,7 +967,9 @@ public:
         }
         if (session_ && !gold_local_ && CoopGoldMode::KeepLocalNow()) {
             // Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): every Skulltula's two keys, the token
-            // count and its IsGet stay in this game for the rest of the session.
+            // count and its IsGet stay in this game for the rest of the session, and so do the Skulltula House's
+            // rewards and what only they give (gold_race_flags, review-01112-h: each racer claims its own; the
+            // row 272 guard is for Shared).
             gold_local_ = true;
             std::vector<coop::protocol::FlagKey> keys;
             for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
@@ -976,6 +978,9 @@ public:
             }
             keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}));
             keys.push_back(coop::protocol::FlagKey(coop::host::kGoldTokenGet, std::uint16_t{0}));
+            for (const std::uint32_t hash : coop::host::gold_race_flags()) {
+                keys.push_back(coop::protocol::FlagKey(hash, std::uint16_t{0}));
+            }
             const std::size_t was = session_->keep_local(keys);
             LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: {} keys kept in this game ({} were shared)",
                      keys.size(), was);
@@ -2946,8 +2951,8 @@ private:
                 race_put_tries_ = 0;
                 if (put.written > 0) {
                     LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: our race with this host put back "
-                                   "({} flags: {} Skulltulas, count {})",
-                             put.written, race.keys.size(), race.count);
+                                   "({} flags: {} Skulltulas, count {}, {} rewards and items)",
+                             put.written, race.keys.size(), race.count, race.flags.size());
                 }
             } else if (race_put_tries_ == 0) {
                 LOG_WARNING(Core, "coop: flags: Gold Skulltulas not shared: our race could not all be put back "
@@ -2960,12 +2965,14 @@ private:
         if (now - race_read_at_ < 500'000) return;
         race_read_at_ = now;
         const auto seen = CoopGoldMode::ReadRace(game, coop::host::gold_skulltula_keys(),
-                                                 coop::host::kGoldTokenCount, coop::host::kGoldTokenGet);
+                                                 coop::host::kGoldTokenCount, coop::host::kGoldTokenGet,
+                                                 coop::host::gold_race_flags());
         if (seen && CoopGoldMode::GrowRace(*seen)) {
             const CoopGoldMode::Race race = CoopGoldMode::TheRace();
             LOG_INFO(Core, "coop: flags: Gold Skulltulas not shared: our race with this host kept ({} Skulltulas, "
-                           "count {}{})",
-                     race.keys.size(), race.count, CoopGoldMode::RaceId().empty() ? ", this session only" : "");
+                           "count {}, {} rewards and items{})",
+                     race.keys.size(), race.count, race.flags.size(),
+                     CoopGoldMode::RaceId().empty() ? ", this session only" : "");
         }
     }
     bool holding_logged_ = false;  // issue 129: HoldFlagStore held something last frame

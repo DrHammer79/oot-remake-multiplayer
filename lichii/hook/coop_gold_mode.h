@@ -84,6 +84,7 @@ struct GoldKept {
     int own_keys = 0;         // gold keys it has now (ours)
     std::int32_t host_count = 0;
     std::int32_t own_count = 0;
+    int flags = 0;            // race flags (flag_hashes) the host's save has, each now the race's value
     bool keys_left = false;   // ours could not be added: the host's save has no key set
     std::string why;          // not done: why
 };
@@ -96,14 +97,19 @@ struct Race {
     std::set<std::uint64_t> keys;
     std::int32_t count = 0;
     bool get = false;
-    bool empty() const { return keys.empty() && count == 0 && !get; }
-    // Adds `other` (its keys, the higher count, IsGet if either): true when this race grew. Tokens are never spent,
-    // so a race only grows: a save load that shows fewer (an older save) never takes any away.
+    // The named flags each racer keeps too (coop::host::gold_race_flags: the Skulltula House's rewards, the wallet
+    // tiers and the Stone of Agony; review-01112-h), by hash: the value, never 0 (a flag at 0 is not listed).
+    std::map<std::uint32_t, std::uint32_t> flags;
+    bool empty() const { return keys.empty() && count == 0 && !get && flags.empty(); }
+    // Adds `other` (its keys, the higher count, IsGet if either, each flag's higher value): true when this race grew.
+    // Tokens are never spent and a reward is never given back, so a race only grows: a save load that shows fewer (an
+    // older save) never takes any away.
     bool Join(const Race& other);
     bool operator==(const Race&) const = default;
 };
 
-// The race as text (one `count N`, `get 0|1` and `key <hex>` per line) and back; nullopt for a text that is not one.
+// The race as text (one `count N`, `get 0|1`, `key <hex>` and `flag <8 hex> <value>` per line) and back; nullopt
+// for a text that is not one.
 std::string RaceText(const Race& race);
 std::optional<Race> ParseRace(std::string_view text);
 
@@ -114,9 +120,10 @@ std::optional<Race> LoadRace(const std::filesystem::path& dir, std::string_view 
 bool SaveRace(const std::filesystem::path& dir, std::string_view race_id, const Race& race);
 
 // The host's save (a progress.sav, `host`, changed in place) written with `race` (nullptr: none, a race from 0).
+// Each Bool or Int of `flag_hashes` the save has takes the race's value (0 without one), as the count does.
 GoldKept KeepRaceIn(std::vector<std::uint8_t>& host, const Race* race,
                     std::span<const std::uint64_t> skulltula_keys, std::uint32_t count_hash,
-                    std::uint32_t get_hash);
+                    std::uint32_t get_hash, std::span<const std::uint32_t> flag_hashes = {});
 
 // The race id: the host's game, 16 hex digits. Each game's own id is a tag of its player key
 // (coop::protocol::player_key_tag); a Not shared host sends the session's id in its MOD_SETTINGS coop entry
@@ -138,15 +145,19 @@ std::string NewPlaythroughId();
 // OnNewGame: the game plays a new game not saved yet: a fresh id, the same until the title. OnSlot, a load
 // (`by_write` false): the slot's own id (a fresh one the first time) is in force. OnSlot, a save (`by_write`): the game
 // saves what it plays, so the slot takes the id in force (a new game saved over an old one, a save into another or a
-// rotated autosave slot); with none in force yet (hosting began mid-game), the slot's own. OnSend: the host sends a
-// slot while the slot its game plays is not known (at the title): the guests get that slot, so its id is in force, as
-// at a load; the host's load of that slot then keeps the id the guests already have. OnTitle: a new pick follows.
+// rotated autosave slot); with none in force yet (hosting began mid-game), the slot's own. OnSend: the host sends
+// `slot`. The slot its game plays not known (`played` "", at the title): the guests get that slot, so its id is in
+// force, as at a load, and the host's load of that slot keeps the id the guests already have. A known played slot
+// that could not be sent (another went out): nothing changes, the host plays its own playthrough. OnTitle: a new pick
+// follows.
 class Playthroughs {
 public:
     explicit Playthroughs(std::filesystem::path dir = {});
     std::string OnNewGame();
     std::string OnSlot(const std::string& slot, bool by_write);
-    std::string OnSend(const std::string& slot) { return OnSlot(slot, false); }
+    std::string OnSend(const std::string& slot, const std::string& played) {
+        return played.empty() ? OnSlot(slot, false) : std::string();
+    }
     void OnTitle() { new_game_ = false; }
     const std::string& Current() const { return current_; }
     const std::map<std::string, std::string>& Slots() const { return slots_; }
@@ -179,9 +190,11 @@ Race TheRace();
 bool GrowRace(const Race& seen);
 
 // The game's Gold Skulltula state through `game` (read), and the race put back into it (write): each key of the race
-// not set in the game is set, the count raised to the race's, IsGet set. Nothing lowers the game's.
+// not set in the game is set, the count raised to the race's, IsGet set, each of the race's flags raised to its
+// value. Nothing lowers the game's. ReadRace reads each of `flag_hashes` the game has (not 0) into the race's flags.
 std::optional<Race> ReadRace(coop::host::FlagStore& game, std::span<const std::uint64_t> skulltula_keys,
-                             std::uint32_t count_hash, std::uint32_t get_hash);
+                             std::uint32_t count_hash, std::uint32_t get_hash,
+                             std::span<const std::uint32_t> flag_hashes = {});
 struct PutBack {
     int written = 0;   // flags written
     int failed = 0;    // writes the game refused (try again)

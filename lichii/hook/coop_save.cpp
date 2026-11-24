@@ -429,16 +429,17 @@ save::SaveSlot OwnGoldLocked(const save::SaveSlot& slot_in, bool& race_kept) {
         if (f.name != "progress.sav") continue;
         const CoopGoldMode::GoldKept kept =
             CoopGoldMode::KeepRaceIn(f.bytes, &race, coop::host::gold_skulltula_keys(),
-                                     coop::host::kGoldTokenCount, coop::host::kGoldTokenGet);
+                                     coop::host::kGoldTokenCount, coop::host::kGoldTokenGet,
+                                     coop::host::gold_race_flags());
         race_kept = kept.done;
         if (!kept.done) {
             LOG_WARNING(Core, "coop: save: Gold Skulltulas not shared: {}: the host's tokens are in this save",
                         kept.why);
         } else {
             LOG_INFO(Core, "coop: save: Gold Skulltulas not shared: the host's save keeps ours ({}): {} keys and "
-                           "count {} (the host's: {} keys, count {}){}",
+                           "count {}, {} rewards and items as ours (the host's: {} keys, count {}){}",
                      race.empty() ? "none with this host: the race starts from 0" : "our race with this host",
-                     kept.own_keys, kept.own_count, kept.host_keys, kept.host_count,
+                     kept.own_keys, kept.own_count, kept.flags, kept.host_keys, kept.host_count,
                      kept.keys_left ? "; our taken Skulltulas could not be kept (the save has no key set)" : "");
         }
     }
@@ -1174,8 +1175,10 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             if (slot && !played) {
                 // Row 63: the slot played is not known (the title): the guests' race is the playthrough of the slot
                 // they get. Its id goes out before the save (RaceSendDue), and the host's load of that slot keeps it.
+                // A known played slot that could not be sent: OnSend leaves the host's own playthrough in force.
                 if (!g_playthroughs) g_playthroughs.emplace(CoopGoldMode::RaceDir());
-                const std::string id = g_playthroughs->OnSend(slot_dir->filename().string());
+                const std::string id = g_playthroughs->OnSend(
+                    slot_dir->filename().string(), g_played.slot() ? g_played.slot()->filename().string() : std::string());
                 if (!id.empty()) CoopGoldMode::SetPlaythrough(id);
             }
             const auto packed =
