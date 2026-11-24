@@ -390,6 +390,9 @@ struct Counts {
     std::uint64_t owner_action = 0;   // the owner's action requests kept
     std::uint64_t plug_actions = 0;   // of those, named through a plug (places not sent)
     std::uint64_t copy_skipped = 0;   // a copy's own changes not run
+    std::uint64_t copy_own_move = 0;  // row 222: a copy's own asks of the owner's move run in the game (OnActionVerb)
+    std::uint64_t own_move_renamed = 0;  // row 222: ... with its plug set to the owner's variation
+    std::uint64_t owner_move_left = 0;   // row 222: the owner's repeats of a move the copy's own asks run, left out
     std::uint64_t brain_applied = 0;  // owner's brain verbs put into a copy
     std::uint64_t brain_came = 0;     // owner's brain verbs a copy took from its queue (a change, or a resync's state);
                                       // one queued and then replaced by a resync is not counted
@@ -442,6 +445,8 @@ struct Counts {
 
 class Table {
 public:
+    // Row 222: the frames a copy's own ask of the owner's move keeps the owner's repeats of that move out.
+    static constexpr std::uint64_t kOwnMoveSteps = 30;
     static constexpr int kBusyAsks = 3;  // row 211: an owner's move answered busy, asked again on this many frames
     // Switches (LICHII_COOP_BOSS_NATIVE, LICHII_COOP_BOSS_ACTIONS): off -> no
     // skip, no apply, nothing kept (the old gohma-sync path alone).
@@ -472,8 +477,16 @@ public:
     bool OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool own);
     // Row 222 part 2: `plug_name`, the request's plug read as a name (VariantName; the wrap reads it for every
     // request with a plug): an owner's action keeps it as its variation (component 24), "" for a plain ask.
+    // Row 222 (tw-222): a copy's own ask of the move the owner's last put-in named (same slot and verb) runs in the
+    // game: the move goes on frame by frame from its own AI (its own places and kind: it aims at its own Link), as
+    // the owner's does, so it reaches its shot. The owner's sparse put-ins alone left the copy's move without its
+    // per-frame asks: Twinrova's copy went PreAttack -> Attack_R with no Fire/IceBullet while the other game owned
+    // her. When its own plug is another variation than the owner's, `renamed` gets the request with the owner's
+    // (no plug for a plain ask, or its name in our pools) for the wrap to write before the game reads it; with no
+    // `renamed`, or the name not in a pool yet, it is skipped as before. The owner's repeats (changed 0) of that
+    // move are then left out for kOwnMoveSteps (StepOne).
     bool OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own,
-                      std::optional<std::string> plug_name = std::nullopt);
+                      std::optional<std::string> plug_name = std::nullopt, std::optional<Request>* renamed = nullptr);
 
     // Our game runs an event now (the boss glue, every frame; the player
     // reader's event flag). Copies then run their own changes; the owner keeps
@@ -805,6 +818,8 @@ private:
         std::array<std::optional<coop::protocol::Vec3>, 3> put_variant_places{};
         std::optional<std::uint32_t> put_variant_kind = std::nullopt;  // row 222: the owner's places' kind it was put in with
         bool own_action_ran = false;
+        // Row 222: per slot, the owner's move (verb) the copy's own AI last asked itself, and the step it did.
+        std::map<std::int32_t, std::pair<std::int32_t, std::uint64_t>> own_moves;
     };
     void Hold(Entry& e, const Boss& b);   // the owner's stall check (Publish)
     void Fall(Entry& e, const Boss& b);   // row 178's fall guard (Publish; a boss, owner or copy: its start)

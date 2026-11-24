@@ -668,7 +668,7 @@ bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool o
 }
 
 bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own,
-                         std::optional<std::string> plug_name) {
+                         std::optional<std::string> plug_name, std::optional<Request>* renamed) {
     std::lock_guard lock(mutex_);  // (waits: see the header, "The wraps")
     if (!actions_on_) {
         return false;
@@ -750,6 +750,34 @@ bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed
         ++counts_.copy_own_run;
         e->own_action_ran = true;  // its body leaves the owner's move: a resync asks that move again
         return false;
+    }
+    const std::int32_t ask_slot = Get<std::int32_t>(request, addr::kReqSlot);
+    const std::int32_t ask_verb = Get<std::int32_t>(request, addr::kReqVerb);
+    if (node != 0 && e->put_action && e->put_action->slot == ask_slot && e->put_action->verb == ask_verb) {
+        // Row 222: its own AI asks the owner's move: the game runs it (see the header), with the owner's variation.
+        bool runs = !e->put_variant || *e->put_variant == OwnAskVariant(request, plug_name);
+        if (!runs && renamed != nullptr) {
+            Request r = request;
+            std::uint64_t plug = 0;
+            if (!e->put_variant->empty()) {
+                const auto at = std::find(pool_.begin(), pool_.end(), *e->put_variant);
+                if (at != pool_.end()) {
+                    plug = SlotAt(static_cast<std::size_t>(at - pool_.begin()));
+                }
+            }
+            if (e->put_variant->empty() || plug != 0) {
+                std::memcpy(r.data() + addr::kReqPlug, &plug, sizeof plug);
+                r[addr::kReqHasPlug] = plug != 0 ? 1 : 0;
+                *renamed = r;
+                ++counts_.own_move_renamed;
+                runs = true;
+            }
+        }
+        if (runs) {
+            e->own_moves[ask_slot] = {ask_verb, steps_};
+            ++counts_.copy_own_move;
+            return false;
+        }
     }
     if (auto a = ActionFromRequest(request)) {
         a->changed = changed;
@@ -1412,6 +1440,16 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
         const BossAction& action = std::get<BossAction>(d.change.what);
         if (e.busy_step == steps_) {
             break;  // row 211: its slot is busy this frame: asked again next frame
+        }
+        if (!action.changed) {
+            // Row 222: its own AI runs this move now (asked it within kOwnMoveSteps): the owner's repeat is left out.
+            const auto own = e.own_moves.find(action.slot);
+            if (own != e.own_moves.end() && own->second.first == action.verb &&
+                steps_ - own->second.second <= kOwnMoveSteps) {
+                ++counts_.owner_move_left;
+                e.due.pop_front();
+                continue;
+            }
         }
         if (e.own_node == 0) {
             ++counts_.action_waiting;  // (asked again next frame; the changes after it wait too)

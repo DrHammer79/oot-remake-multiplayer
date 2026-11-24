@@ -802,6 +802,30 @@ name the copy still lost ice shots and aimed its floors at neither Link:
   kind; plain 0 and `Ice` 0x10 put in with the owner's kind; no owner's kind: its own AI's; the restart keeps it),
   codec_test (the kind's round trip).
 
+## A copy's own asks of the owner's move run (row 222, Twinrova's copy fired nothing)
+
+With the variation, node and place kind right, the copy still spawned no FireBullet or IceBullet while the other game
+owned Twinrova, and fired at once when it became the owner. The cause: the owner's AI asks its move (verb 121) every
+frame, and its module runs the move on from those asks. A copy skipped every own ask (answered as taken) and got only
+the owner's put-ins, sparse over the network (a second put-in in the same frame answers busy). Without its per-frame
+asks the move went PreAttack -> Attack_R with no shot. Her bullets are split shots (each game shoots its own copy's),
+so a copy that never reaches the shot shows none.
+
+Now a copy's own ask of the move the owner's last put-in named (the same slot and verb) runs in the game, through its
+own node, with its own places and kind (it aims at its own Link, as a split shot should). When its plug is another
+variation than the owner's, the wrap writes the owner's into the request first: its name from our pools, or no plug
+for a plain ask. A name not in a pool yet is skipped as before. While its own asks run the move (within
+`kOwnMoveSteps` frames), the owner's repeats of it (changed 0) are left out; the owner's starts and other moves go in
+as before, and the copy's own asks of any other move are still skipped. Owners and solo games never take this path.
+
+Same path, same fix: every boss move on the native sync whose module needs its AI's per-frame asks. From the
+boss-share list: Twinrova phases 1 and 2, Phantom Ganon (bolt, shockwaves, light ball), Ganondorf (row 211), Ganon,
+King Dodongo's breath, Flare Dancer, Volvagia's rocks and Barinade's beam. Not this path: owner-only minions and shots
+(Gohma's eggs, King Dodongo's babies, Big Octo's child, Meg's dummies, Octorok and scrub shots).
+Counts in the boss log: `copy_own_move`, `own_move_renamed`, `owner_move_left`. Tests: boss_native_test (the own ask
+runs renamed to the owner's 'Ice', an own 'Ice' runs as it is, the owner's repeat is left out, another own move is
+skipped; the owner's next move still goes in and then the old move's own asks are skipped again).
+
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
 **Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on

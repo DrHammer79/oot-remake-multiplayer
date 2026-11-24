@@ -3212,3 +3212,76 @@ TEST_CASE("native boss: row 222, a move made ours mid-move starts over with the 
     CHECK((g.Get<std::uint16_t>(kBlock + addr::kReqFlags) & addr::kReqStartOver) != 0);
     CHECK(g.Get<std::uint32_t>(kBlock + addr::kReqKind3) == 0);
 }
+
+TEST_CASE("native boss: row 222 (tw-222), a copy's own asks of the owner's move run, with the owner's variation") {
+    // Twinrova's copy fired no Fire/IceBullet while the other game owned her: its own AI's per-frame asks of the
+    // owner's ranged attack were skipped, and the owner's sparse put-ins alone never took the move to its shot.
+    constexpr std::uint64_t kShotNode = 0x4000100;
+    constexpr std::uint64_t kStartNode = 0x4000200;
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    t.OnActionVerb(kBsa, PlugRequest(65, kStartNode, 0x77), true, false, std::string("StartBattle"));
+    t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});
+    Request owner = GameRequest(121, 0, true);
+    owner[addr::kReqHasPlug] = 1;
+    BossAction a = *ActionFromRequest(owner);
+    a.changed = true;
+    t.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, "Ice", PlacesOf(owner)}}});
+    REQUIRE(t.Step(g, false, 0, kMain));  // the block
+    REQUIRE(t.Step(g, true, kBlock, kMain));  // the owner's 'Ice' put in
+    const std::uint64_t ice = g.Get<std::uint64_t>(kBlock + addr::kReqPlug);
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    // Its own AI asks the ranged attack plain (Fire) next frame: the game runs it, renamed to the owner's 'Ice'.
+    std::optional<Request> renamed;
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), false, false, std::string{}, &renamed));
+    REQUIRE(renamed);
+    CHECK((*renamed)[addr::kReqHasPlug] == 1);
+    CHECK(ReqAt<std::uint64_t>(*renamed, addr::kReqPlug) == ice);
+    CHECK(ReqAt<std::uint64_t>(*renamed, addr::kReqNode) == kShotNode);  // its own node, places and kind
+    // An own ask already 'Ice': runs as it is.
+    renamed.reset();
+    CHECK_FALSE(t.OnActionVerb(kBsa, PlugRequest(121, kShotNode, ice), false, false, std::string("Ice"), &renamed));
+    CHECK_FALSE(renamed);
+    CHECK(t.Totals().copy_own_move == 2);
+    // The owner's repeat of the move is left out; another own move is still skipped.
+    BossAction again = a;
+    again.changed = false;
+    t.Receive(kActor, BossBsa{2, 2, again, {BossChange{1, a}, BossChange{2, again}}},
+              BossVariants{{{1, "Ice"}, {2, "Ice"}}});
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    CHECK(t.Totals().owner_move_left == 1);
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kShotNode), true, false, std::string{}));
+}
+
+TEST_CASE("native boss: row 222 (tw-222), the owner's next move still goes in while the copy runs its own asks") {
+    // The known risk: the copy's own asks must never hold the owner's next move (a new verb, changed 1) out.
+    constexpr std::uint64_t kShotNode = 0x4000100;
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});
+    t.OnActionVerb(kBsa, GameRequest(4, kShotNode), true, false, std::string{});
+    BossAction a = *ActionFromRequest(GameRequest(121, 0, true));
+    a.changed = true;
+    t.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, ""}}});
+    REQUIRE(t.Step(g, false, 0, kMain));
+    REQUIRE(t.Step(g, true, kBlock, kMain));
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), false, false, std::string{}));  // runs
+    BossAction fly = *ActionFromRequest(GameRequest(4, 0, true));
+    fly.changed = true;
+    t.Receive(kActor, BossBsa{2, 2, fly, {BossChange{1, a}, BossChange{2, fly}}}, BossVariants{{{1, ""}, {2, ""}}});
+    auto c = t.Step(g, false, 0, kMain);
+    REQUIRE(c);
+    CHECK(g.Get<std::int32_t>(kBlock + addr::kReqVerb) == 4);
+    // Now the owner's move is Fly: the copy's own 121 is skipped again.
+    CHECK_FALSE(t.Step(g, true, 0, kMain));
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), false, false, std::string{}));
+}
