@@ -1484,6 +1484,38 @@ void Sync::Written(std::uint64_t address, std::int32_t life, std::uint64_t now_u
     }
 }
 
+// sync-address-reuse probe (log only, no change to what Sync does): signs that the actor now at a known address is
+// another one than the Object kept for it, with no walk between that missed the address. Lines go out through the
+// notes ("coop: objects: reuse probe: ..."), at most kReuseLines; every sign is counted (ReuseSigns).
+void Sync::ReuseProbe(const Seen& s, Object& o, std::uint64_t now_us) {
+    std::string sign;
+    if (s.name != o.name) {
+        sign = "another name (was '" + o.name + "')";
+    } else if (s.hash != o.hash) {
+        sign = "another placement hash";
+    } else if (o.life && s.life && (*o.life <= 0 || o.dead_said) && s.life->life > 0) {
+        sign = "life back from " + std::to_string(*o.life) + (o.dead_said ? " (said dead)" : "") + " to " +
+               std::to_string(s.life->life);
+    } else if (Finite(s.position) && Distance(s.position, o.position) > kReuseJumpM) {
+        sign = "moved " + std::to_string(static_cast<int>(Distance(s.position, o.position))) + " m in one walk";
+    } else if (o.game_deleted_at != 0 && !o.reuse_said && now_us - o.game_deleted_at > kReuseListedUs) {
+        o.reuse_said = true;
+        sign = "still listed " + std::to_string((now_us - o.game_deleted_at) / 1000) + " ms after the game's delete";
+    }
+    if (sign.empty()) {
+        return;
+    }
+    ++reuse_signs_;
+    if (reuse_lines_ < kReuseLines) {
+        ++reuse_lines_;
+        const std::uint64_t since = o.game_deleted_at != 0 ? (now_us - o.game_deleted_at) / 1000 : 0;
+        notes_.emplace_back("reuse probe: " + s.name + " at " + std::to_string(s.address) + " (id " +
+                            std::to_string(o.id.value) + "): " + sign +
+                            (o.game_deleted_at != 0 ? ", game delete " + std::to_string(since) + " ms ago"
+                                                    : ", no game delete seen"));
+    }
+}
+
 void Sync::GameHit(std::uint64_t address, std::int32_t amount) {
     const auto it = objects_.find(address);
     if (it != objects_.end() && amount > 0) {
@@ -1496,6 +1528,9 @@ void Sync::GameDeleted(std::uint64_t address, std::uint64_t now_us, bool by_coop
     if (it != objects_.end()) {
         it->second.deleted_until = now_us + kDeletedKeepUs;
         it->second.game_deleted = !by_coop;
+        if (!by_coop && it->second.game_deleted_at == 0) {
+            it->second.game_deleted_at = now_us;
+        }
     }
     if (!by_coop) {
         std::erase_if(game_deletes_, [now_us](std::uint64_t at) { return at + 2 * kDeleteBurstUs < now_us; });
@@ -2228,6 +2263,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
             continue;
         }
         Object& o = it->second;
+        ReuseProbe(s, o, now_us);
         if (now_us > o.seen_at && now_us - o.seen_at < 500'000 && Finite(s.position)) {
             const float dt = static_cast<float>(now_us - o.seen_at) / 1e6f;
             for (std::size_t i = 0; i < 3; ++i) {
@@ -2680,6 +2716,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.attacking = s->attacking;
         o.seen_at = now_us;
         o.name = s->name;
+        o.hash = s->hash;
         o.breakable = CoopWorld::IsBreakable(s->name);
         o.reacts = s->name.starts_with("Enemy_");
         o.fish = IsFish(s->name);

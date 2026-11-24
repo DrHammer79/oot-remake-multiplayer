@@ -3690,6 +3690,11 @@ private:
             }
         }
         step_hits_.clear();
+        if (const std::size_t signs = sync_.ReuseSigns() + reuse_stamps_; signs != reuse_said_) {
+            LOG_INFO(Core, "coop: objects: reuse probe: {} signs of another actor at a kept address ({} so far, {} "
+                           "by the walk's stamp)", signs - reuse_said_, signs, reuse_stamps_);
+            reuse_said_ = signs;
+        }
         if (const std::size_t loose = sync_.LooseDrops(); loose != loose_said_) {
             LOG_INFO(Core, "coop: actors: {} life fell on copies with no Life step for it (counted as hits)",
                      loose - loose_said_);
@@ -4202,6 +4207,16 @@ private:
                 known.first = r.Name(a);
                 const auto placement = r.Ptr(a + kActorPlacement);
                 known.second = placement ? r.Get<u64>(*placement + kPlacementHash).value_or(0) : 0;
+                if (it != names_.end() && was != stamps_.end()) {
+                    // sync-address-reuse probe (log only): on the last walk too, now another actor (row 172's case).
+                    ++reuse_stamps_;
+                    if (reuse_stamp_lines_ < 40) {
+                        ++reuse_stamp_lines_;
+                        LOG_INFO(Core, "coop: objects: reuse probe: address {:#x} held '{}' on the last walk, now '{}'{}",
+                                 a, it->second.first, known.first,
+                                 it->second.second != known.second ? " (another placement)" : "");
+                    }
+                }
                 CoopPickups::Note(known.first, known.second);  // one-time pickups (docs/items.md)
                 if (CoopTestInput::Aimable(known.first)) {  // test only (`aim`): a new arrow or seed of ours
                     if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
@@ -6348,6 +6363,10 @@ private:
     std::uint8_t decider_logged_ = 0;
     std::unordered_map<u64, std::pair<std::string, u64>> names_;  // name, hash by actor
     std::unordered_map<u64, ActorStamp> stamps_;  // what each cached name was read with (row 172)
+    // sync-address-reuse probe (log only): actors whose stamp changed between two walks, lines said, signs said.
+    std::size_t reuse_stamps_ = 0;
+    std::size_t reuse_stamp_lines_ = 0;
+    std::size_t reuse_said_ = 0;
     // Row 138(8): townspeople and animals (by actor, its placement hash) whose live logic has no area input.
     std::unordered_map<u64, u64> no_area_;
     static constexpr std::size_t kNoAreaMax = 4096;
