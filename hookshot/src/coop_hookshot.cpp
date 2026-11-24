@@ -42,6 +42,7 @@
 #include "coop_debug_panels.h"
 #include "coop_playtest.h"
 #include "coop_char_colours.h"
+#include "coop_gear_params.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
 #include "coop_dbno_draw.h"
@@ -89,6 +90,7 @@
 #include "coop_hit_replay.h"
 #include "coop_input.h"
 #include "coop_look.h"
+#include "coop_look_share.h"
 #include "coop_look_view.h"
 #include "coop_lift_player_game.h"
 #include "coop_objects.h"
@@ -2310,6 +2312,43 @@ void LocalLayer(void* ctx) {
     second.Step(first);
 }
 
+// Row 277: the gear parts that are a material's parameter (coop_gear_params.h: the Master Sword's hilt), on your Link's
+// equipped pieces (the look shown: Customize's choice at once) and each live puppet's (its player's look). Solo too:
+// your Link alone. A cell of guest memory only once a colour was ever chosen (`cell` makes it).
+void DressGearParams(const CoopCharColours::Game& g, const std::vector<CoopPuppet::Director::DressView>& views,
+                     const CoopLook::Look& shown, const std::function<std::uint64_t()>& cell) {
+    static CoopGearParams::Dresser dresser;
+    static bool ever = false;   // a part's colour was chosen or received: from then on the dresser runs (puts back)
+    std::vector<CoopGearParams::Target> targets;
+    CoopGearParams::Target own;
+    bool any = false;
+    for (std::size_t i = 0; i < CoopGearParams::kPartCount; i++) {
+        if (const auto part = CoopLook::PartOf(CoopGearParams::kParts[i].part)) own.colours[i] = shown[*part];
+        any = any || own.colours[i].has_value();
+    }
+    for (const auto& v : views) {
+        CoopGearParams::Target t{.actor = v.actor};
+        if (const auto parts = CoopLookShare::Of(v.number)) {
+            for (const auto& p : *parts) {
+                for (std::size_t i = 0; i < CoopGearParams::kPartCount; i++) {
+                    if (p.part == CoopGearParams::kParts[i].part) t.colours[i] = p.colour;
+                }
+            }
+        }
+        for (const auto& c : t.colours) any = any || c.has_value();
+        targets.push_back(t);
+    }
+    ever = ever || any;
+    if (!ever) return;   // (nothing ever chosen: no reads, no calls)
+    BridgeGuest guest;
+    own.actor = CoopPose::FindPlayer(guest, CoopRuntime::MainBase());
+    if (own.actor != 0) targets.push_back(own);
+    if (targets.empty()) return;
+    const std::uint64_t at = cell();
+    if (at == 0) return;
+    dresser.Frame(g, at, targets, SteadyMs(), [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });
+}
+
 // Character Select's Customize options on the puppets, co-op's own (coop_char_colours.h): each frame, the game's own
 // model calls for each live puppet that is due. Solo nothing is live, so nothing is done.
 void DressCharacters(void* ctx) {
@@ -2346,8 +2385,8 @@ void DressCharacters(void* ctx) {
     // is a model of the menu's own, so the eyes chosen showed on your Link in the field but not in the picture,
     // lane-0119 13:03. Your Link there: an actor of the field player's own actor name, while you are Link; never the
     // picker's other characters (review). Each its own cell: 0 your Link's, 1..4 the menu's slots)
-    static std::array<std::uint64_t, 5> cells{};
-    static std::array<bool, 5> cells_asked{};
+    static std::array<std::uint64_t, 6> cells{};   // (5: the gear parameters' dresser, below)
+    static std::array<bool, 6> cells_asked{};
     const auto cell = [&](std::size_t i) {
         if (cells[i] == 0 && !cells_asked[i]) {
             cells_asked[i] = true;
@@ -2411,6 +2450,7 @@ void DressCharacters(void* ctx) {
             }
         }
     }
+    DressGearParams(g, views, shown, [&] { return cell(5); });
     if (targets.empty()) return;
     CoopCharColours::TheWardrobe().Frame(g, targets, SteadyMs(),
                                          [](const std::string& line) { LOG_INFO(Core, "coop: {}", line); });

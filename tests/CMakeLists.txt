@@ -160,6 +160,7 @@ add_executable(coop_tests
   lichii/switch_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_switch_share.cpp
   lichii/caller_orders_test.cpp
   lichii/char_colours_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_char_colours.cpp
+  lichii/gear_params_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_gear_params.cpp
   lichii/charsel_tidy_test.cpp
   lichii/char_slots_test.cpp
   lichii/char_ages_test.cpp
