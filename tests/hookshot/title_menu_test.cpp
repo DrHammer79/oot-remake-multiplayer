@@ -180,20 +180,25 @@ TEST_CASE("title menu: Host and Join in plain words, nothing about ports or pass
     h.invite = "ABCDE-FGHJK";
     h.copied = true;
     h.players = 1;
+    // Hosting as it should: nothing. The Host page's rows say it (Code, Players, Room); the lines were the page's help
+    // under them, the same words twice (the audit's item 16: "Code: Starting..." and "Starting...").
     auto s = PlainStatus(h);
-    REQUIRE(s.size() >= 3);
-    // First: the invite code is the way to host (it is on the clipboard); the other rows come after.
-    CHECK(s[0] == "Invite code copied to your clipboard. Share it in DMs only: it contains your internet address.");
-    CHECK(s[1] == "ABCDE-FGHJK");
-    CHECK(s[2] == "Waiting for your friends to join...");
+    CHECK(s.empty());
     h.copied = false;
-    CHECK(PlainStatus(h)[0].find("Share it in DMs only") != std::string::npos);
-    CHECK(PlainStatus(h)[2].find("Copy the code again") != std::string::npos);
-    h.copied = true;
     h.players = 3;
-    CHECK(PlainStatus(h).back() == "2 friend(s) joined.");
-    h.invite.clear();
-    CHECK(PlainStatus(h)[0] == "Making your code...");
+    CHECK(PlainStatus(h).empty());
+    h.invite.clear();   // (the code still being made: the Code row says "Starting...")
+    CHECK(PlainStatus(h).empty());
+    h.invite_done = true;   // (none could be made: said, the row says "None")
+    CHECK(PlainStatus(h)[0] == "No code could be made: your internet connection blocks it.");
+    h.invite_done = false;
+    h.problem = HOS_COOP_PROBLEM_UPNP_REFUSED;   // (what no row says stays)
+    CHECK(PlainStatus(h) == std::vector<std::string>{
+                                "Your router may block friends: if they cannot join, turn on UPnP in the router's settings."});
+    h.state = HOS_COOP_STARTING;
+    h.problem = HOS_COOP_PROBLEM_NONE;
+    CHECK(PlainStatus(h).empty());
+    h.state = HOS_COOP_HOSTING;
     h.problem = HOS_COOP_PROBLEM_PORT_TAKEN;
     CHECK(PlainStatus(h)[0] == "Another co-op window is already open on this PC.");
     h.problem = HOS_COOP_PROBLEM_BAD_CODE;   // the host pasted an answer code that is not right
@@ -550,8 +555,6 @@ TEST_CASE("Same network and VPN: two rows, the VPN found by its card's name") {
     CHECK(LanLinePassword("127.0.0.1", "pw", true) == "pw");       // (the server never takes the key from there)
     CHECK(LanLinePassword("172.32.0.1", "pw", true) == "pw");
     CHECK(LanLinePassword("not an address", "pw", true) == "pw");
-    CHECK(HostHeadline(true) ==
-          "Invite code copied to your clipboard. Share it in DMs only: it contains your internet address.");
 }
 
 TEST_CASE("title menu: players on the map are on unless turned off: off writes 0, on takes the line away") {
@@ -680,7 +683,10 @@ TEST_CASE("title menu: a join told to connect says joining until the session's w
     HostView h;
     h.state = HOS_COOP_CONNECTED;
     h.in_session = false;
-    CHECK(PlainStatus(h) == std::vector<std::string>{"Joining your friend's game..."});
+    CHECK(PlainStatus(h).empty());   // (the Join page's note says it: "Joining your friend's game")
+    h.state = HOS_COOP_JOINING;
+    CHECK(PlainStatus(h).empty());
+    h.state = HOS_COOP_CONNECTED;
     h.refused = "the session is full";
     CHECK(PlainStatus(h)[0] == "Your friend's game turned this one away: the session is full.");
     CHECK(PlainStatus(h)[1] == "Press Leave, then join again.");

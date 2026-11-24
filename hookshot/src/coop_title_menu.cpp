@@ -880,11 +880,6 @@ std::vector<std::string> VpnLines(const std::vector<LanAddress>& vpn, std::uint1
     return AddressLines(vpn, port, password, copied, same_network_open);
 }
 
-std::string HostHeadline(bool copied) {
-    return copied ? "Invite code copied to your clipboard. Share it in DMs only: it contains your internet address."
-                  : "Your invite code is below. Share it in DMs only: it contains your internet address.";
-}
-
 
 std::vector<std::string> PlainStatus(const HostView& v) {
     std::vector<std::string> out;
@@ -912,18 +907,14 @@ std::vector<std::string> PlainStatus(const HostView& v) {
     }
     if (v.host) {
         switch (v.state) {
+        // (starting, and hosting with a code: nothing here. The Host page's rows show it (Code: the code or
+        // "Starting...", Players, Room) and the - page's gold line says "Starting your game..." / "Hosting: ...";
+        // these lines were shown under them as the page's help, the same words twice, the audit's item 16)
         case HOS_COOP_STARTING:
-            return {"Starting..."};
+            return {};
         case HOS_COOP_HOSTING:
-            if (!v.invite.empty()) {
-                out = {HostHeadline(v.copied), v.invite};
-                if (!v.copied) {
-                    out.push_back("Press \"Copy the code again\" to put it on the clipboard.");
-                }
-                out.push_back(v.players <= 1 ? "Waiting for your friends to join..."
-                                             : std::to_string(v.players - 1) + " friend(s) joined.");
-            } else if (!v.invite_done) {
-                out = {"Making your code..."};
+            if (!v.invite.empty() || !v.invite_done) {
+                // (nothing: see above)
             } else {
                 out = {"No code could be made: your internet connection blocks it.",
                        "Friends on the same home network or VPN can still join."};
@@ -941,7 +932,7 @@ std::vector<std::string> PlainStatus(const HostView& v) {
     switch (v.state) {
     case HOS_COOP_STARTING:
     case HOS_COOP_JOINING:
-        return {"Joining your friend..."};
+        return {};   // (the Join page's note says "Joining your friend's game"; the - page's gold line too)
     case HOS_COOP_WAIT_HOST:
         // (row 209: where the host pastes it, by the row's own name on their Host page)
         if (v.problem == HOS_COOP_PROBLEM_NO_WAY) {
@@ -959,7 +950,7 @@ std::vector<std::string> PlainStatus(const HostView& v) {
             return {RefusedLine(v.refused), v.banned ? "Press Leave." : "Press Leave, then join again."};
         }
         if (!v.in_session) {
-            return {"Joining your friend's game..."};
+            return {};   // (still joining: as above)
         }
         return {"Connected! Choose your file and play."};
     case HOS_COOP_FAILED:

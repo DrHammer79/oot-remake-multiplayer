@@ -257,8 +257,6 @@ std::vector<std::string> HomeLines(const std::vector<LanAddress>& home, std::uin
                                    bool copied, bool same_network_open = false);
 std::vector<std::string> VpnLines(const std::vector<LanAddress>& vpn, std::uint16_t port, std::string_view password,
                                   bool copied, bool same_network_open = false);
-// The Host dialog's first line while hosting with an invite code: the code is the way to host, the rows the others.
-std::string HostHeadline(bool copied);
 
 // After Join connects at the title: what the title's bottom-left line says
 // while the host's save (lichii/hook/coop_save.h, the co-op folder) comes.
