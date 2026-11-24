@@ -2015,6 +2015,10 @@ TEST_CASE("pause tab: the title's Host opens on its choices, hosts on Start host
     REQUIRE(r.has_value());
     CHECK(r->kind == Request::Kind::kHost);
     Session s = Hosting(1, "ABCD-EFGH-IJKL");
+    // (hosting: Start hosting went, the cursor lands on Code, whose help warns: DMs only, it holds the address)
+    m.SetSession(s);
+    CHECK(Selected(m) == "Code");
+    CHECK(m.view().help.find("Share it in DMs only") != std::string::npos);
     s.password = "1234567890";
     m.SetSession(s);
     const std::vector<std::string> names = Names(m);

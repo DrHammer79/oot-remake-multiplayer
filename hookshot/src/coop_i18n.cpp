@@ -109,8 +109,6 @@ constexpr Entry kzh_Hans[] = {
     {"Your name, Link's look, how many players can join your game, voice chat, the chat key, which controller this game reads, and players on the map.",
      "名字、林克外观、房间人数上限、语音聊天、聊天键、本游戏读取哪个手柄，以及地图上的玩家。"},
     {"The chat's commands, and the key that opens the chat.", "聊天命令，以及打开聊天的按键。"},
-    {"Puts your code on the clipboard again. Share it in DMs only: it contains your internet address.",
-     "把邀请码再放进剪贴板。只在私信里发：它含有你的网络地址。"},
     {"Only when a friend's game shows an answer code (their way in was blocked): copy the code they "
      "send you, then press this.",
      "仅当朋友的游戏显示「邀请码」（他被路由器挡住）时：复制他发来的码，再按这里。"},
@@ -1089,7 +1087,6 @@ constexpr Entry kzh_Hans[] = {
     {"Starts your game on this PC. They play on your save.", "在这台电脑上开房。他们在你的存档里游玩。"},
     {"Room  {}", "房间  {}"},
     {"Page {}/{}", "第 {}/{} 页"},
-    {"The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code.", "邀请码已复制。私信发给朋友；他选“加入房间”>“输入邀请码或地址”>“粘贴邀请码”。"},
     {"Your friend types it after picking your game. A shows it.", "朋友选了你的房间后输入它。按 A 显示。"},
     {"For friends on your home network: copies one line they paste in Enter a code.", "给同一家庭网络的朋友：复制一行，他在“输入邀请码或地址”里粘贴。"},
     {"Only when your friend's game shows an answer code: copy it, then press A here.", "只在朋友的房间显示回复码时用：复制后在这里按 A。"},
@@ -1555,8 +1552,6 @@ constexpr Entry kzh_Hant[] = {
     {"Your name, Link's look, how many players can join your game, voice chat, the chat key, which controller this game reads, and players on the map.",
      "名字、林克外觀、房間人數上限、語音聊天、聊天鍵、本遊戲讀取哪個手把，以及地圖上的玩家。"},
     {"The chat's commands, and the key that opens the chat.", "聊天指令，以及開啟聊天的按鍵。"},
-    {"Puts your code on the clipboard again. Share it in DMs only: it contains your internet address.",
-     "把邀請碼再放進剪貼簿。只在私訊裡傳：它含有你的網路位址。"},
     {"Only when a friend's game shows an answer code (their way in was blocked): copy the code they "
      "send you, then press this.",
      "僅當朋友的遊戲顯示「邀請碼」（他被路由器擋住）時：複製他傳來的碼，再按這裡。"},
@@ -2517,7 +2512,6 @@ constexpr Entry kzh_Hant[] = {
     {"Starts your game on this PC. They play on your save.", "在這台電腦上開房。他們在你的存檔裡遊玩。"},
     {"Room  {}", "房間  {}"},
     {"Page {}/{}", "第 {}/{} 頁"},
-    {"The code is copied. Send it in a DM; your friend picks Join a game > Enter a code > Paste a code.", "邀請碼已複製。私訊發給朋友；他選「加入房間」>「輸入邀請碼或位址」>「貼上邀請碼」。"},
     {"Your friend types it after picking your game. A shows it.", "朋友選了你的房間後輸入它。按 A 顯示。"},
     {"For friends on your home network: copies one line they paste in Enter a code.", "給同一家庭網路的朋友：複製一行，他在「輸入邀請碼或位址」裡貼上。"},
     {"Only when your friend's game shows an answer code: copy it, then press A here.", "只在朋友的房間顯示回覆碼時用：複製後在這裡按 A。"},

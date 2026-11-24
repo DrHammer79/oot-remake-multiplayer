@@ -722,6 +722,21 @@ void ShowColumn(void* ctx, std::uint64_t screen, int buttons, bool hint,
     c.logo_off = logo_off;
 }
 
+// The screen's own menu sound by name (kScreenSound: xlink's searchAndEmit on the title's user), its bit 0 whether it
+// started. Each name's first play says so in the log once: a name the title's sound user does not know is silent
+// (CoopMenuNav::kSoundBack's "button_cancel" is in no table of the game's: SLink2's names checked offline,
+// menu-title-01113), so a run's log shows which of ours the title really plays.
+void TitleSound(void* ctx, std::uint64_t screen, const char* name) {
+    const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
+    if (at == 0) return;
+    const auto r = GameCall3(ctx, Main(kScreenSound), screen, at);
+    static std::vector<std::string> said;   // (the title's step only)
+    if (std::find(said.begin(), said.end(), name) != said.end()) return;
+    said.emplace_back(name);
+    LOG_INFO(Core, "coop: title: the menu sound {} {}", name,
+             r && (*r & 1) != 0 ? "started" : "NOT started (a name the title does not know?)");
+}
+
 // The game moves its cursor a step after it is asked (kSetFocus), so the cursor read back is the old one until then.
 // Every ask of ours is timed here: the hidden-focus guard below leaves a cursor that was just asked for alone (it read
 // the old cursor, on a button the new page hides, and its own ask then landed after the page's: the password page
@@ -1000,11 +1015,7 @@ void StepNative(void* ctx, std::uint64_t screen) {
         if (const std::uint64_t button = TitleButton(screen, look.focus); button != 0) AskFocus(ctx, screen, button);
     }
     KeepFocusShown(ctx, screen, look.buttons);   // (after the page's own cursor, which it then leaves alone)
-    if (sound != nullptr) {
-        if (const std::uint64_t at = g_api->scratch(ctx, sound, std::strlen(sound) + 1); at != 0) {
-            GameCall3(ctx, Main(kScreenSound), screen, at);
-        }
-    }
+    if (sound != nullptr) TitleSound(ctx, screen, sound);
 }
 
 // After a crash, the ask to send /bugreport (coop_problem_ask.h): looked for once a run, at the first title the menu
@@ -1106,11 +1117,7 @@ void StepAsk(void* ctx, std::uint64_t screen) {
             AskFocus(ctx, screen, button);
         }
     }
-    if (sound != nullptr) {
-        if (const std::uint64_t at = g_api->scratch(ctx, sound, std::strlen(sound) + 1); at != 0) {
-            GameCall3(ctx, Main(kScreenSound), screen, at);
-        }
-    }
+    if (sound != nullptr) TitleSound(ctx, screen, sound);
 }
 
 // The pad while the ask shows: the title gets none of it; A, B or + (a mouse click is an A) closes it.
@@ -1221,11 +1228,7 @@ void StepMenu(void* ctx, std::uint64_t screen) {
         LOG_INFO(Core, "coop: title: menu: the game's button {} chosen in the row's place{}", decide,
                  r && (*r & 1) != 0 ? "" : " (it did not take it)");
     }
-    if (sound != nullptr) {
-        if (const std::uint64_t at = g_api->scratch(ctx, sound, std::strlen(sound) + 1); at != 0) {
-            GameCall3(ctx, Main(kScreenSound), screen, at);
-        }
-    }
+    if (sound != nullptr) TitleSound(ctx, screen, sound);
 }
 
 // From the title's step (its ctx may call()): after a switch of the save folder (CoopSave::TakeSaveListStale) the game
