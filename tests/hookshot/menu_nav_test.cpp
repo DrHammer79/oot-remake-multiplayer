@@ -84,3 +84,25 @@ TEST_CASE("menu nav: a mask of lines, as the - page keeps them") {
     CHECK(StepMask(mask, 1, -1) == 1);
     CHECK(StepMask(0, 0, 1) == 0);
 }
+
+TEST_CASE("menu nav: the typing keys go round on a press, stop at the ends when held, the letter wheel always goes round") {
+    int key = 3;   // (4 keys: Letter 0, Delete 1, Cancel 2, OK 3)
+    std::size_t letter = 0;
+    CHECK_FALSE(TypingKeysStep(1, 0, true, 4, 0, 26, &key, &letter));   // (held Down at the last key: stays)
+    CHECK(key == 3);
+    CHECK(TypingKeysStep(1, 0, false, 4, 0, 26, &key, &letter));        // (a fresh Down: round to the first)
+    CHECK(key == 0);
+    CHECK_FALSE(TypingKeysStep(-1, 0, true, 4, 0, 26, &key, &letter));  // (held Up at the first: stays)
+    CHECK(TypingKeysStep(-1, 0, false, 4, 0, 26, &key, &letter));       // (a fresh Up: round to the last)
+    CHECK(key == 3);
+    CHECK(TypingKeysStep(-1, 0, true, 4, 0, 26, &key, &letter));        // (held, not at the end: moves)
+    CHECK(key == 2);
+    key = 0;
+    CHECK(TypingKeysStep(0, -1, true, 4, 0, 26, &key, &letter));        // (the letter wheel, held: round)
+    CHECK(letter == 25);
+    CHECK(TypingKeysStep(0, 1, true, 4, 0, 26, &key, &letter));
+    CHECK(letter == 0);
+    key = 1;
+    CHECK_FALSE(TypingKeysStep(0, 1, false, 4, 0, 26, &key, &letter));  // (Left/Right off the Letter key: nothing)
+    CHECK(letter == 0);
+}

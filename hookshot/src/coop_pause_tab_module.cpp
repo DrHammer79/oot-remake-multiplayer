@@ -123,6 +123,7 @@ std::vector<ListLine> g_menu_typing_lines;
 constexpr std::string_view kMenuLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.: ";
 bool g_menu_typed_last = false;
 std::uint64_t g_menu_pad_last = 0;
+CoopMenuNav::Repeat g_menu_keys_repeat;   // co-op's menu's typing keys on the + page: held directions (coop_menu_nav.h)
 std::atomic<bool> g_menu_host_rules{false};   // (Host settings: the page opens at its host rows, FollowMenu)
 std::atomic<bool> g_menu_focus_reset{false};   // (the view came: the game's cursor's row then is no choice)
 int g_menu_focus_seen = -2;                     // the game's cursor's row as last followed. g_mutex
@@ -504,6 +505,8 @@ std::array<LiveSlot, kSnailSlots> g_snail_live{};
 CoopSnailCustom::Texts g_snail_shown;
 std::string g_snail_failed_said;   // (the panes last named as not set: said once per list)
 bool g_snail_wait = false;   // his screen open, his panes not found in its layout: co-op waits (keys kept from his rows)
+CoopMenuNav::Repeat g_snail_repeat;     // his screen's held Up / Down (SnailPad)
+std::uint64_t g_snail_repress = 0;     // a repeat let go at the last read, pressed again at this one (SnailPad)
 std::atomic<bool> g_snail_driven{false};   // (CharacterCustomizeOpen: any thread)
 std::size_t CountOf(const std::string& text, const char* what) {
     std::size_t n = 0;
@@ -685,11 +688,28 @@ bool SnailPad(std::uint64_t in, std::uint64_t* out) {
     std::lock_guard lock(g_snail_mutex);
     const CoopPauseTab::SnailPadState seen = CoopPauseTab::SnailPadFrom(g_snail_seen_ms, NowMs());
     if (g_snail_open && seen == CoopPauseTab::SnailPadState::kGone) SnailClose("not seen");
-    const std::uint64_t down = in & ~g_snail_pad_last;
+    std::uint64_t down = in & ~g_snail_pad_last;
     g_snail_pad_last = in;
+    // (a held Up or Down steps again, as every list of ours (coop_menu_nav.h). His screen moves his marker from fresh
+    // presses only (his graph's), and the driver follows his rule from what he is given, so a repeat is given to him
+    // as a press: the direction let go for this read, pressed again at the next; the driver moves with that press)
+    constexpr std::uint64_t kSnailVertical =
+        CoopSnailCustom::kUp | CoopSnailCustom::kDown | CoopSnailCustom::kStickUp | CoopSnailCustom::kStickDown;
+    std::uint64_t held_again = 0;
+    g_snail_repeat.Presses(in, NowMs(), kSnailVertical, &held_again);
+    std::uint64_t let_go = 0;
+    const bool driving = g_snail_open && seen == CoopPauseTab::SnailPadState::kDrive;
+    if (!driving) {
+        g_snail_repress = 0;   // (none left over for his screen's next opening)
+    } else if (g_snail_repress != 0) {
+        down |= g_snail_repress & in;   // (pressed again now: his step and the driver's)
+        g_snail_repress = 0;
+    } else if (held_again != 0) {
+        g_snail_repress = held_again, let_go = held_again;   // (let go for this read)
+    }
     // (not updated lately: a stall, or gone unseen. The game gets every key; co-op's page, focus and changes are kept
     // for the next update. Lane gc198-l5b: closed at 300 ms, each stall reopened it on page 1)
-    if (!g_snail_open || seen != CoopPauseTab::SnailPadState::kDrive) return false;
+    if (!driving) return false;
     using namespace CoopSnailCustom;
     constexpr std::uint64_t kDirs = kUp | kDown | kLeft | kRight | kStickUp | kStickDown | kStickLeft | kStickRight;
     std::uint64_t pass = kDirs | kB | kMinus | kPadPlus;
@@ -697,7 +717,7 @@ bool SnailPad(std::uint64_t in, std::uint64_t* out) {
         g_snail.Pad(down);
         if (g_snail.Editing()) pass &= ~(kB | kMinus);   // (B leaves co-op's mixer, not his screen)
     }
-    *out = in & pass;
+    *out = in & pass & ~let_go;
     return true;
 }
 
@@ -2133,7 +2153,6 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         }
     }
     g_minus_ok = g_game_tabs[2] != 0;
-    if (g_minus_ok) g_players_no_tabs = false;   // (F6: this opening has our tabs, whatever an earlier one had)
     for (int i = 0; i < 2; ++i) {
         const std::uint64_t b = FindOwnPane(ctx, f.layout, i == 0 ? "T_BtnL_00" : "T_BtnR_00");
         g_strip_btns[static_cast<std::size_t>(i)] = b;
@@ -2159,6 +2178,10 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_minus_tab_words[static_cast<std::size_t>(i)] = PaneIn(ctx, PartLayout(table, name), "T_Text_00");
         g_minus_ok = g_minus_ok && IsPart(g_minus_panes[static_cast<std::size_t>(i)]);
     }
+    // (F6 and F1, and co-op's tabs in Longshot's F1 menu: whether this pack has our - tabs, known at any opening of the
+    // pause menu (the strip is the + and the - menu's), not only after an F6 or F1 run: our tabs' parts are in the
+    // strip's layout or not. Only when the game's own tabs were found: a failed lookup says nothing)
+    if (g_game_tabs[2] != 0) g_players_no_tabs = !g_minus_ok;
     // (pause_menu.add_tab: ours i at the fourth tab's place plus (i + 1) steps, in the root's frame)
     // (once per pane: a strip opened again on the same layout has ours where FollowMinus last put them)
     static std::uint64_t framed = 0;
@@ -4193,7 +4216,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     g_key_end_ms = now, g_typing_end_ms = now;
                     in &= ~(kPadA | kPadB | kPadPlus);
                 }
-                if (!g_menu_typed_last && menu_typing) g_menu_key = 0, g_menu_letter = 0;
+                if (!g_menu_typed_last && menu_typing) g_menu_key = 0, g_menu_letter = 0, g_menu_keys_repeat.Forget(in);
                 g_menu_typed_last = menu_typing;
                 const std::uint64_t mdown = in & ~g_menu_pad_last;
                 g_menu_pad_last = in;
@@ -4220,12 +4243,17 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                     std::uint64_t d = mdown;
                     if (g_kb_held || now - g_kb_click_ms < 400) d &= ~kPadA;
-                    // (up and down: the key, round the four; Left and Right: Letter's letter, round kMenuLetters)
-                    const int dr = (d & (kPadDown | kPadStickDown)) != 0 ? 1 : (d & (kPadUp | kPadStickUp)) != 0 ? -1 : 0;
-                    const int dc = (d & (kPadRight | kPadStickRight)) != 0 ? 1 : (d & (kPadLeft | kPadStickLeft)) != 0 ? -1 : 0;
-                    if (dr != 0) g_menu_key = (g_menu_key + dr + kTypeKeys) % kTypeKeys, g_page.Sound(CoopMenuNav::kSoundMove);
-                    if (dc != 0 && g_menu_key == static_cast<int>(TypeKey::kLetter)) {
-                        g_menu_letter = (g_menu_letter % nl + nl + static_cast<std::size_t>(dc + static_cast<int>(nl))) % nl;
+                    // (one cursor model, coop_menu_nav.h, as the - page's keys: up and down the key, round on a fresh press
+                    // only; Left and Right Letter's letter round kMenuLetters, held too; a held direction repeats)
+                    constexpr std::uint64_t kKeyDirs = kPadUp | kPadDown | kPadLeft | kPadRight | kPadStickUp |
+                                                       kPadStickDown | kPadStickLeft | kPadStickRight;
+                    std::uint64_t held_again = 0;
+                    const std::uint64_t dirs = g_menu_keys_repeat.Presses(in, now, kKeyDirs, &held_again) & kKeyDirs;
+                    const int dr = (dirs & (kPadDown | kPadStickDown)) != 0 ? 1 : (dirs & (kPadUp | kPadStickUp)) != 0 ? -1 : 0;
+                    const int dc = (dirs & (kPadRight | kPadStickRight)) != 0 ? 1 : (dirs & (kPadLeft | kPadStickLeft)) != 0 ? -1 : 0;
+                    if (CoopMenuNav::TypingKeysStep(dr, dc, (held_again & (kPadUp | kPadDown | kPadStickUp | kPadStickDown)) != 0,
+                                                    kTypeKeys, static_cast<int>(TypeKey::kLetter), nl, &g_menu_key,
+                                                    &g_menu_letter)) {
                         g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                     if ((d & kPadA) != 0) press(g_menu_key);
@@ -4323,18 +4351,21 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                              step == CoopPauseTab::HopStep::kDone ? "arrived" : "given up", g_hop.taps, MinusCategoryNow());
                 }
             }
-            {   // (co-op's menu's own page on the - page: where a held Up or Down may still go, never round)
+            {   // (co-op's menu's or the Mods tab's own page on the - page: where a held Up or Down may still go, never round)
                 bool can_up = false, can_down = false;
-                // (not the Mods tab: its page is the Mods tab's own list, whose ends are not known here: no repeat)
-                if (g_menu_open.load() >= 0 && g_page.MinusTab() != static_cast<int>(MinusPage::kMods) &&
-                    mv.selected >= 0 && mv.selected < static_cast<int>(mv.rows.size())) {
-                    const int n = static_cast<int>(mv.rows.size());
+                CoopPauseMenu::View raw_view;
+                bool raw_back_unused = false;
+                const bool mods_tab = g_page.MinusTab() == static_cast<int>(MinusPage::kMods);
+                const CoopPauseMenu::View* rv = mods_tab ? (CoopModsTab::View(&raw_view, &raw_back_unused) ? &raw_view : nullptr)
+                                                : g_menu_open.load() >= 0 ? &mv : nullptr;
+                if (rv != nullptr && rv->selected >= 0 && rv->selected < static_cast<int>(rv->rows.size())) {
+                    const int n = static_cast<int>(rv->rows.size());
                     const auto pick = [&](int i) {
-                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
+                        const auto kind = rv->rows[static_cast<std::size_t>(i)].kind;
                         return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
                     };
-                    can_up = CoopMenuNav::CanStep(mv.selected, -1, n, pick);
-                    can_down = CoopMenuNav::CanStep(mv.selected, 1, n, pick);
+                    can_up = CoopMenuNav::CanStep(rv->selected, -1, n, pick);
+                    can_down = CoopMenuNav::CanStep(rv->selected, 1, n, pick);
                 }
                 g_page.SetMinusRawEnds(can_up, can_down);
             }

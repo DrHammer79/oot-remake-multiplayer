@@ -385,7 +385,7 @@ private:
     std::size_t letter_ = 0;     // Letter's letter: its place in the field's Letters()
     std::string typing_was_;   // (the field before typing: Cancel puts it back)
     void EndTyping(bool ok);
-    std::uint64_t repeat_since_ = 0, repeat_last_ = 0;
+    CoopMenuNav::Repeat typing_repeat_;   // the typing keys' held directions (TypingPad, coop_menu_nav.h)
     CoopMenuNav::Repeat minus_repeat_;   // the - page's rows and list: a held Up or Down moves again (coop_menu_nav.h)
     std::uint64_t pad_ms_ = 0, typing_from_ms_ = 0;   // (the last pad read; when typing began: its first A is not a key's)   // a held direction: when it went down, its last step
 

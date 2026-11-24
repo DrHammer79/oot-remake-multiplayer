@@ -18,6 +18,7 @@
 // Logic only (no game calls): tests/hookshot/menu_nav_test.cpp.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace CoopMenuNav {
@@ -92,6 +93,28 @@ int Step(int at, int dir, int count, bool wrap, Pickable pickable) {
 template <typename Pickable>
 bool CanStep(int at, int dir, int count, Pickable pickable) {
     return Step(at, dir, count, false, pickable) != at;
+}
+
+// The typing keys' cursor (the - page's and the + page's on-screen keys: `keys` keys up and down, the Letter key
+// `letter_key`'s letter Left and Right among `letters`): `dy` / `dx` one step (-1, 0, 1). A fresh press goes round the
+// keys, a held one (`dy_held`) stops at the ends, as every list; the letter wheel goes round held too (a value turned,
+// as the game's own number wheels). True when something moved (its sound then).
+inline bool TypingKeysStep(int dy, int dx, bool dy_held, int keys, int letter_key, std::size_t letters, int* key,
+                           std::size_t* letter) {
+    bool moved = false;
+    if (dy != 0 && keys > 0) {
+        const int to = *key + (dy < 0 ? -1 : 1);
+        if (to >= 0 && to < keys) {
+            *key = to, moved = true;
+        } else if (!dy_held && keys > 1) {
+            *key = (to % keys + keys) % keys, moved = true;
+        }
+    }
+    if (dx != 0 && *key == letter_key && letters > 0) {
+        *letter = (*letter % letters + (dx < 0 ? letters - 1 : 1)) % letters;
+        moved = true;
+    }
+    return moved;
 }
 
 // A bit mask of pickable lines (bit i: line i), as the - page keeps its rows and lines.

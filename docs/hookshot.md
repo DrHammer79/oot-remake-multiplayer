@@ -102,7 +102,8 @@ What the module expects from that install (`hookshot/compat`): `coop.ini` beside
 
 **Since 0.11.13 (menu-polish-01113) co-op's home is the game's own - menu** (its Multiplayer, Lobby and Mods tabs) and
 the title's Multiplayer rows. Longshot's F1 menu no longer carries co-op's tabs while the pack has our - tabs; it keeps
-them only as a fallback (no pack, or a - menu seen without our tabs: an old pack). **F1** in play now opens the - menu
+them only as a fallback: no pack, or a pack without our - tabs (an old pack), known from the first opening of the
+pause menu (+ or -) in a session; before any opening Longshot's menu shows none of co-op's tabs. **F1** in play now opens the - menu
 on the Multiplayer tab (the module takes the key first, `hos_coop_key`, and drives the game's own Minus and L / R as
 F6 does, `coop_players_open.h`; Longshot's own menu closes if it was open). Longshot's own menu stays on Insert, Esc,
 its pad keys and System > Longshot Settings. In original game, F1's menu keeps its one "Original game" tab (the way

@@ -2882,7 +2882,7 @@ TEST_CASE("pause tab (0.11.9): a view on the - page: B steps back a view, on the
     CHECK(p.OnPad(kPadB, now + 14) == 0);
     CHECK(p.TakeMinusBack());
     CHECK_FALSE(p.TakeMinusBack());
-    CHECK(std::string(p.TakeStripSound()) == "button_cancel");
+    CHECK(std::string(p.TakeStripSound()) == std::string(CoopMenuNav::kSoundBack));
     CHECK(p.OnPad(kPadB, now + 16) == 0);   // (held: still ours)
     p.OnPad(0, now + 18);
     // The view's rows take A as the tab's did (the module acts on the view's row).
