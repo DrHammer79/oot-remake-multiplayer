@@ -221,6 +221,25 @@ inline bool Aimable(std::string_view name) {
     return name == "NormalArrow" || name == "Shootable_DekuSeed";
 }
 
+// `aim`: the aim that waits for our next shot. The walk offers it every listed arrow or seed of ours, not only one it
+// sees for the first time: the slingshot makes its next seed right after a shot, so that seed is already listed when
+// the aim is armed (lane run). The first one offered is taken; AimStep then watches it until it is let go.
+struct AimWait {
+    std::array<float, 3> target{};
+    std::uint64_t until_ms = 0;
+    std::uint64_t arrow = 0;       // our nocked arrow or seed (0: none yet)
+    std::array<float, 3> last{};   // its place the frame before
+
+    bool Offer(std::string_view name, std::uint64_t actor, const std::array<float, 3>& at) {
+        if (arrow != 0 || actor == 0 || !Aimable(name)) {
+            return false;
+        }
+        arrow = actor;
+        last = at;
+        return true;
+    }
+};
+
 // wear SLOT: the PlayerStatus flag name for weapon, shield, head, armor or
 // boots (any case), e.g. "EquipHeadArmor"; nothing for another word.
 std::optional<std::string> WearFlag(std::string_view slot);

@@ -622,16 +622,23 @@ public:
     // Test only (`aim X Y Z`, row 173): our next arrow is put on its way into `target` the first frame it flies.
     void ArmAim(const std::array<float, 3>& target, u64 until_ms) {
         std::lock_guard lock(mutex_);
-        aim_ = Aim{target, until_ms};
+        aim_ = Aim{};
+        aim_->target = target;
+        aim_->until_ms = until_ms;
+        aim_open_.store(true, std::memory_order_relaxed);
     }
-    // The walk: a NormalArrow or a Shootable_DekuSeed first seen (ours: another player's is a CoopShot_ stand-in),
-    // taken while an aim waits for one (CoopTestInput::Aimable).
-    void AimArrow(u64 actor, const std::array<float, 3>& at) {
+    // The walks, so they read no place while no aim waits for an arrow.
+    bool AimOpen() const {
+        return aim_open_.load(std::memory_order_relaxed);
+    }
+    // The walks: each listed NormalArrow or Shootable_DekuSeed (ours: another player's is a CoopShot_ stand-in), new
+    // or already listed, while an aim waits for one (CoopTestInput::AimWait).
+    void AimArrow(std::string_view name, u64 actor, const std::array<float, 3>& at) {
         std::lock_guard lock(mutex_);
-        if (aim_ && aim_->arrow == 0) {
-            aim_->arrow = actor;
-            aim_->last = at;
-            LOG_INFO(Core, "coop: test aim: our arrow {:#x} nocked at {:.2f} {:.2f} {:.2f}", actor, at[0], at[1], at[2]);
+        if (aim_ && aim_->Offer(name, actor, at)) {
+            aim_open_.store(false, std::memory_order_relaxed);
+            LOG_INFO(Core, "coop: test aim: our {} {:#x} nocked at {:.2f} {:.2f} {:.2f}", name, actor, at[0], at[1],
+                     at[2]);
         }
     }
 
@@ -1428,6 +1435,7 @@ private:
             LOG_INFO(Core, "coop: test aim {:.2f} {:.2f} {:.2f}: not put ({})", target[0], target[1], target[2],
                      a.arrow ? "the arrow was never let go" : "no arrow of ours nocked");
             aim_.reset();
+            aim_open_.store(false, std::memory_order_relaxed);
             return std::nullopt;
         }
         if (a.arrow == 0) {
@@ -1477,14 +1485,10 @@ private:
                guest.Read(a, &vtable, 8) && vtable == main_ + kActorVtable;
     }
 
-    struct Aim {
-        std::array<float, 3> target{};
-        u64 until_ms = 0;
-        u64 arrow = 0;               // our nocked arrow, from the walk (0: none yet)
-        std::array<float, 3> last{};  // its place the frame before
-    };
+    using Aim = CoopTestInput::AimWait;
     static constexpr float kAimShortM = 0.6f;  // the arrow is put this far short of the target
     std::optional<Aim> aim_;                    // test only (`aim`)
+    std::atomic<bool> aim_open_{false};         // aim_ waits for an arrow (read by the walks without mutex_)
     std::mutex mutex_;
     CoopHitReplay::Replayer replayer_;  // the hit replay: its own locks (Step runs it under mutex_)
     u64 main_ = 0;
@@ -3544,10 +3548,10 @@ private:
                 known = std::move(it->second);
             } else {
                 known.first = r.Name(a);
-                if (CoopTestInput::Aimable(known.first)) {
-                    if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
-                        TheMover().AimArrow(a, *at);
-                    }
+            }
+            if (TheMover().AimOpen() && CoopTestInput::Aimable(known.first)) {  // test only (`aim`)
+                if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                    TheMover().AimArrow(known.first, a, *at);
                 }
             }
             if (known.first == "Player_Child" || known.first == "Player_Adult") {
@@ -4146,11 +4150,6 @@ private:
                 const auto placement = r.Ptr(a + kActorPlacement);
                 known.second = placement ? r.Get<u64>(*placement + kPlacementHash).value_or(0) : 0;
                 CoopPickups::Note(known.first, known.second);  // one-time pickups (docs/items.md)
-                if (CoopTestInput::Aimable(known.first)) {  // test only (`aim`): a new arrow or seed of ours
-                    if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
-                        TheMover().AimArrow(a, *at);
-                    }
-                }
                 if (IsShared(known.first) && vtables_logged_.insert(known.first).second) {
                     // The set-matrix node (0x2622e50) writes +0x31c..+0x34b and
                     // then calls vtable slot 0x218 (actor, 0): what does it do?
@@ -4158,6 +4157,11 @@ private:
                     const u64 slot = vt ? r.Get<u64>(vt + 0x218).value_or(0) : 0;
                     LOG_INFO(Core, "coop: objects: share vtable {} main+{:#x}, slot 0x218 main+{:#x}",
                              known.first, vt - main_, slot - main_);
+                }
+            }
+            if (TheMover().AimOpen() && CoopTestInput::Aimable(known.first)) {  // test only (`aim`): ours, new or not
+                if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                    TheMover().AimArrow(known.first, a, *at);
                 }
             }
             if (const auto extra = extras_.HashOf(a, known.first)) {

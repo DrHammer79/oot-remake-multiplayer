@@ -799,6 +799,23 @@ TEST_CASE("testinput: aim steers our arrow and our slingshot seed, nothing else"
     CHECK_FALSE(Aimable("Obj_DekuSeed"));  // a pickup
 }
 
+TEST_CASE("testinput: aim takes our seed that was listed before it was armed (lane run)") {
+    // The slingshot makes its next seed right after a shot, so the walk offers a seed it already knew.
+    AimWait aim;
+    aim.target = {-35.6f, 114.3f, 10.7f};
+    CHECK_FALSE(aim.Offer("Obj_DekuSeed", 0x10, {0.0f, 0.0f, 0.0f}));
+    CHECK_FALSE(aim.Offer("CoopShot_Arrow", 0x20, {0.0f, 0.0f, 0.0f}));
+    CHECK(aim.arrow == 0);
+    CHECK(aim.Offer("Shootable_DekuSeed", 0x105250c3e0, {-2.8f, 100.97f, -6.93f}));
+    CHECK(aim.arrow == 0x105250c3e0);
+    CHECK(aim.last[1] == doctest::Approx(100.97f));
+    // Offered again on each walk, or another one of ours: the first one stays.
+    CHECK_FALSE(aim.Offer("Shootable_DekuSeed", 0x105250c3e0, {-2.7f, 101.0f, -6.9f}));
+    CHECK_FALSE(aim.Offer("NormalArrow", 0x30, {0.0f, 0.0f, 0.0f}));
+    CHECK(aim.arrow == 0x105250c3e0);
+    CHECK(aim.last[0] == doctest::Approx(-2.8f));
+}
+
 TEST_CASE("testinput: AimPlace puts the arrow short of the target on its line, facing it (row 173)") {
     // Row 173's relief: the arrow let go 2 m in front of Link (z -4.0 at bow height), the eye 6.1 m on and 5.3 m up.
     const std::array<float, 3> from{-56.5f, 126.2f, -4.0f};
