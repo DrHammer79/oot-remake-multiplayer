@@ -121,8 +121,8 @@ MAX_OFFSET = 200   # (lines a hunk's exact text may sit away from the line it na
 def near(lines, want, at, lowest):
     """The start of want's exact lines nearest to at, at most MAX_OFFSET lines away and not above lowest, or None.
     Longshot v3.1.0's Linux AppImage was built a few commits before its tag: one file (gpu/vk/vk_draw.cpp) had the same
-    text four lines higher, so one set of patches had to apply to both (as git's offset does). v3.1.1 (the pin now, the
-    same commit as v3.1.0's tag) ships its tag's files exactly; the offset stays, as git's, for the next AppImage built
+    text four lines higher, so one set of patches had to apply to both (as git's offset does). v3.1.1 (the same commit as
+    v3.1.0's tag) and v3.2.0 ship their tag's files exactly; the offset stays, as git's, for the next AppImage built
     off its tag. The text itself is never matched loosely."""
     for d in range(1, MAX_OFFSET + 1):
         for p in (at - d, at + d):

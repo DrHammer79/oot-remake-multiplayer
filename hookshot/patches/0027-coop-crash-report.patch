@@ -34,7 +34,7 @@ tags and the module's level word).
  create mode 100644 host/hos_coop_crash.h
 
 diff --git a/gpu/vk/menu/bug_report.cpp b/gpu/vk/menu/bug_report.cpp
-index 260697c7..4e535527 100644
+index 260697c..4e53552 100644
 --- a/gpu/vk/menu/bug_report.cpp
 +++ b/gpu/vk/menu/bug_report.cpp
 @@ -26,9 +26,10 @@ const char* bug_report_cell() {
@@ -52,7 +52,7 @@ index 260697c7..4e535527 100644
  /// Under its help once pressed: how the report goes
  const char* bug_report_hint() {
 diff --git a/gpu/vk/menu/pipeline_list.cpp b/gpu/vk/menu/pipeline_list.cpp
-index 8fcfae93..e3ee588f 100644
+index 8fcfae9..e3ee588 100644
 --- a/gpu/vk/menu/pipeline_list.cpp
 +++ b/gpu/vk/menu/pipeline_list.cpp
 @@ -462,9 +462,10 @@ MENU_MODULE(pipeline_share) {
@@ -68,7 +68,7 @@ index 8fcfae93..e3ee588f 100644
  }
  
 diff --git a/gpu/vk/perf_report.cpp b/gpu/vk/perf_report.cpp
-index d3d15d57..7240458c 100644
+index d3d15d5..7240458 100644
 --- a/gpu/vk/perf_report.cpp
 +++ b/gpu/vk/perf_report.cpp
 @@ -386,6 +386,9 @@ void at_exit() {
@@ -82,7 +82,7 @@ index d3d15d57..7240458c 100644
      {   // (what the launcher configured: the relay's address, the source fingerprint and the copies setting)
          std::ifstream stamp_file(folder / "longshot_version.txt");
 diff --git a/gpu/vk/vk_bug_report.cpp b/gpu/vk/vk_bug_report.cpp
-index 5c9fbc75..fd866d55 100644
+index 5c9fbc7..fd866d5 100644
 --- a/gpu/vk/vk_bug_report.cpp
 +++ b/gpu/vk/vk_bug_report.cpp
 @@ -2,6 +2,7 @@
@@ -155,7 +155,7 @@ index 5c9fbc75..fd866d55 100644
              ":\n" + link + "\n";
 diff --git a/host/hos_coop_crash.h b/host/hos_coop_crash.h
 new file mode 100644
-index 00000000..45b12ec9
+index 0000000..45b12ec
 --- /dev/null
 +++ b/host/hos_coop_crash.h
 @@ -0,0 +1,44 @@
@@ -204,7 +204,7 @@ index 00000000..45b12ec9
 +}
 +#endif
 diff --git a/host/hos_crash_dialog.c b/host/hos_crash_dialog.c
-index 5dc29677..2a63e587 100644
+index 5dc2967..2a63e58 100644
 --- a/host/hos_crash_dialog.c
 +++ b/host/hos_crash_dialog.c
 @@ -328,6 +328,7 @@ static void read_log(RunLog *r, const Who *who) {
@@ -256,7 +256,7 @@ index 5dc29677..2a63e587 100644
          if (!found) {   /* (the lines before it: the last 150, a ring) */
              if (ring.n < HOS_CRASH_TAIL_LINES) lines_add(&ring, line);
 diff --git a/host/hos_crash_dialog.h b/host/hos_crash_dialog.h
-index bc502bf6..41d74f6f 100644
+index bc502bf..41d74f6 100644
 --- a/host/hos_crash_dialog.h
 +++ b/host/hos_crash_dialog.h
 @@ -27,7 +27,8 @@
@@ -296,7 +296,7 @@ index bc502bf6..41d74f6f 100644
      size_t used = n < 0 ? 0 : (size_t)n < cap ? (size_t)n : cap ? cap - 1 : 0;
      const char *tail = saved ? "." : "";
 diff --git a/nx2/addresses.ini b/nx2/addresses.ini
-index a1671d32..de57b7e2 100644
+index a1671d3..de57b7e 100644
 --- a/nx2/addresses.ini
 +++ b/nx2/addresses.ini
 @@ -2,7 +2,8 @@

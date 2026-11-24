@@ -22,7 +22,7 @@ before; SDL leaves a failed start uncounted.
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/host/hos_sdl.c b/host/hos_sdl.c
-index 72c38f26..3b0d9110 100644
+index 72c38f2..3b0d911 100644
 --- a/host/hos_sdl.c
 +++ b/host/hos_sdl.c
 @@ -894,10 +894,20 @@ static struct {

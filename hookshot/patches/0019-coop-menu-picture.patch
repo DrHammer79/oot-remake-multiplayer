@@ -33,7 +33,7 @@ A module without the exports: no picture, the game's camera.
 
 diff --git a/gpu/vk/hos_coop_menu_picture.h b/gpu/vk/hos_coop_menu_picture.h
 new file mode 100644
-index 00000000..e1dad1c5
+index 0000000..e1dad1c
 --- /dev/null
 +++ b/gpu/vk/hos_coop_menu_picture.h
 @@ -0,0 +1,44 @@
@@ -82,7 +82,7 @@ index 00000000..e1dad1c5
 +
 +#endif
 diff --git a/gpu/vk/vk_coop.cpp b/gpu/vk/vk_coop.cpp
-index d0bc0ea1..9d638362 100644
+index d0bc0ea..9d63836 100644
 --- a/gpu/vk/vk_coop.cpp
 +++ b/gpu/vk/vk_coop.cpp
 @@ -167,6 +167,7 @@ std::atomic<hos_coop_menu_tab_name_fn> menu_tab_name_fn{nullptr};
@@ -121,7 +121,7 @@ index d0bc0ea1..9d638362 100644
 +
  }  // namespace mkwvk::coop
 diff --git a/gpu/vk/vk_coop.h b/gpu/vk/vk_coop.h
-index 17c4cf0d..a3931bcb 100644
+index 17c4cf0..a3931bc 100644
 --- a/gpu/vk/vk_coop.h
 +++ b/gpu/vk/vk_coop.h
 @@ -4,6 +4,7 @@
@@ -142,7 +142,7 @@ index 17c4cf0d..a3931bcb 100644
  
  }  // namespace mkwvk::coop
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index 49ae7b6c..07985c1d 100644
+index c914030..c4b8953 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
 @@ -2603,6 +2603,30 @@ void draw_mods(ui::Ctx& c, float cx0, float cx1, float hx0, float hx1, bool narr
@@ -231,7 +231,7 @@ index 49ae7b6c..07985c1d 100644
      hits.clear(0, 0, k.w, k.h);
      if (debug_warning) draw_debug_warning(k);
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index edae1a3d..6bf35e14 100644
+index edae1a3..6bf35e1 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -7,6 +7,7 @@
@@ -272,7 +272,7 @@ index edae1a3d..6bf35e14 100644
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2) coop_frame(NULL, HOS_COOP_SITE_PRESENT);
 diff --git a/host/hos_coop_view.h b/host/hos_coop_view.h
 new file mode 100644
-index 00000000..2e7b586d
+index 0000000..2e7b586
 --- /dev/null
 +++ b/host/hos_coop_view.h
 @@ -0,0 +1,18 @@
@@ -295,10 +295,10 @@ index 00000000..2e7b586d
 +
 +#endif
 diff --git a/host/hos_main.c b/host/hos_main.c
-index 914e8271..461df64c 100644
+index 907fd16..b3349f8 100644
 --- a/host/hos_main.c
 +++ b/host/hos_main.c
-@@ -1986,6 +1986,33 @@ static void oot_build_free_view(Ctx *c, uint64_t view, uint64_t out) {
+@@ -2005,6 +2005,33 @@ static void oot_build_free_view(Ctx *c, uint64_t view, uint64_t out) {
          }
      }
  }
@@ -332,7 +332,7 @@ index 914e8271..461df64c 100644
  #endif
  
  void hos_oot_free_view(Ctx *c, uint64_t view) {
-@@ -1995,6 +2022,7 @@ void hos_oot_free_view(Ctx *c, uint64_t view) {
+@@ -2014,6 +2041,7 @@ void hos_oot_free_view(Ctx *c, uint64_t view) {
  
      // Camera zero supplies the gameplay view. The same matrix routine also serves other cameras.
      if (oot_gameplay_view(c) != view) return;

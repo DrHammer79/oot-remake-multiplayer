@@ -23,7 +23,7 @@ instead of looking for it in the heap. Words and build id checked.
 
 diff --git a/host/hos_coop_nodes.h b/host/hos_coop_nodes.h
 new file mode 100644
-index 00000000..d1fe54a4
+index 0000000..d1fe54a
 --- /dev/null
 +++ b/host/hos_coop_nodes.h
 @@ -0,0 +1,26 @@
@@ -54,7 +54,7 @@ index 00000000..d1fe54a4
 +
 +#endif
 diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py
-index e9905c58..cd126a73 100644
+index e9905c5..cd126a7 100644
 --- a/nx2/coop_hooks.py
 +++ b/nx2/coop_hooks.py
 @@ -73,4 +73,6 @@ def install(lifter, img, build_id):
@@ -66,7 +66,7 @@ index e9905c58..cd126a73 100644
      return len(FRAME_SITES) + 1
 diff --git a/nx2/coop_node_lift.py b/nx2/coop_node_lift.py
 new file mode 100644
-index 00000000..bb086a00
+index 0000000..bb086a0
 --- /dev/null
 +++ b/nx2/coop_node_lift.py
 @@ -0,0 +1,62 @@

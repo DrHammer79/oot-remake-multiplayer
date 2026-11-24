@@ -16,7 +16,7 @@ stand (Off, Hosting, the player's name) and still open a page.
  1 file changed, 7 insertions(+)
 
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index cfb3f035..8d6084e1 100644
+index 33a5908..7f5dbc9 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
 @@ -2632,6 +2632,10 @@ void draw_coop_page(ui::Ctx& c, float hh) {

@@ -25,7 +25,7 @@ only, words checked. Called from nx2/coop_hooks.py install().
  create mode 100644 nx2/coop_puppet_bow_guard.py
 
 diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py
-index cd126a73..a5ba68d7 100644
+index cd126a7..a5ba68d 100644
 --- a/nx2/coop_hooks.py
 +++ b/nx2/coop_hooks.py
 @@ -69,6 +69,8 @@ def install(lifter, img, build_id):
@@ -39,7 +39,7 @@ index cd126a73..a5ba68d7 100644
      import coop_title_hooks   # (patch 0004: the title menu)
 diff --git a/nx2/coop_puppet_bow_guard.py b/nx2/coop_puppet_bow_guard.py
 new file mode 100644
-index 00000000..9fc9c496
+index 0000000..9fc9c49
 --- /dev/null
 +++ b/nx2/coop_puppet_bow_guard.py
 @@ -0,0 +1,63 @@

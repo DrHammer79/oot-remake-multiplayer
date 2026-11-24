@@ -31,7 +31,7 @@ out (player report 266).
  2 files changed, 93 insertions(+)
 
 diff --git a/nx2/exefs_patches.py b/nx2/exefs_patches.py
-index 54916f67..680fef10 100644
+index 54916f6..680fef1 100644
 --- a/nx2/exefs_patches.py
 +++ b/nx2/exefs_patches.py
 @@ -59,6 +59,90 @@ def mods_root(game):
@@ -137,7 +137,7 @@ index 54916f67..680fef10 100644
      for line in said if files else ():
          log(line)
 diff --git a/nx2/lift.py b/nx2/lift.py
-index dcbb883b..0333826f 100644
+index dcbb883..0333826 100644
 --- a/nx2/lift.py
 +++ b/nx2/lift.py
 @@ -211,6 +211,11 @@ def main():

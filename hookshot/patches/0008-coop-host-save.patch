@@ -18,11 +18,11 @@ the game nor any mod has (the first 32 distinct paths, then every 256th
 such open with the count): player report 242's black world (a mod's model
 naming textures no folder had) left nothing in the log.
 ---
- host/nn_fs.c | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ host/nn_fs.c | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++-
  1 file changed, 159 insertions(+), 1 deletion(-)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
-index 40f2c342..fa745c1b 100644
+index 40f2c34..fa745c1 100644
 --- a/host/nn_fs.c
 +++ b/host/nn_fs.c
 @@ -862,11 +862,61 @@ int hos_fs_save_root(char *out, size_t cap) {

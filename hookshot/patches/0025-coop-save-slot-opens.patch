@@ -17,7 +17,7 @@ on disk. Nothing else changes: the open itself is as before.
  1 file changed, 40 insertions(+)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
-index 4b9e4918..5e28c66d 100644
+index fa745c1..149f259 100644
 --- a/host/nn_fs.c
 +++ b/host/nn_fs.c
 @@ -1121,6 +1121,45 @@ HOS_COOP_FS_EXPORT int hos_coop_fs_save_remount(const char *root) {
@@ -66,7 +66,7 @@ index 4b9e4918..5e28c66d 100644
  
  /* nn::fs::IsSaveDataExisting(ApplicationId, account::Uid const&) -> bool */
  HLE(_ZN2nn2fs18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE) {
-@@ -1316,6 +1355,7 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
+@@ -1353,6 +1392,7 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
      }
      snprintf(fh->path, sizeof fh->path, "%s", g);
      G64(ARG(0)) = new_handle(fh);

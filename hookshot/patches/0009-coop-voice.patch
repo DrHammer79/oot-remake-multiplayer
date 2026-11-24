@@ -31,7 +31,7 @@ HOS_COOP_VOICE=0 keeps the module unattached. Linux: not yet.
 
 diff --git a/host/coop_voice.c b/host/coop_voice.c
 new file mode 100644
-index 00000000..c2c88e80
+index 0000000..c2c88e8
 --- /dev/null
 +++ b/host/coop_voice.c
 @@ -0,0 +1,120 @@
@@ -157,7 +157,7 @@ index 00000000..c2c88e80
 +}
 diff --git a/host/hos_coop_voice.h b/host/hos_coop_voice.h
 new file mode 100644
-index 00000000..6873d47c
+index 0000000..6873d47
 --- /dev/null
 +++ b/host/hos_coop_voice.h
 @@ -0,0 +1,58 @@
@@ -220,7 +220,7 @@ index 00000000..6873d47c
 +
 +#endif
 diff --git a/host/nn_audio.c b/host/nn_audio.c
-index 93f8498c..9710c721 100644
+index 93f8498..9710c72 100644
 --- a/host/nn_audio.c
 +++ b/host/nn_audio.c
 @@ -751,6 +751,18 @@ static void render_frame(int16_t *pcm, int channels) {   /* 240 frames of the de
@@ -243,7 +243,7 @@ index 93f8498c..9710c721 100644
          Mix *f = &mixes[sink_mix];
          const float g = f->volume;
 diff --git a/host/nn_audio_in.c b/host/nn_audio_in.c
-index 7a6e1dc5..b1ae3d49 100644
+index 7a6e1dc..b1ae3d4 100644
 --- a/host/nn_audio_in.c
 +++ b/host/nn_audio_in.c
 @@ -58,6 +58,7 @@ typedef struct {

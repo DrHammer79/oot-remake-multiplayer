@@ -15,7 +15,7 @@ themselves, so patch 0041's wrap (main+0x439520) never sees their texts:
 Phase 0 only reads. Nothing else changes: the wrap machinery, the checks
 (build id, first words) and the hello's bits are 0005's.
 ---
- host/hos_coop_pane_body.h | 23 ++++++++++++++++++++++
+ host/hos_coop_pane_body.h | 23 +++++++++++++++++++++++
  nx2/coop_world_wraps.py   |  6 ++++++
  2 files changed, 29 insertions(+)
  create mode 100644 host/hos_coop_pane_body.h

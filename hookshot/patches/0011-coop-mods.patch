@@ -38,7 +38,7 @@ folder after the list was written stays out (player report 266).
 
 diff --git a/host/hos_coop_mods.h b/host/hos_coop_mods.h
 new file mode 100644
-index 00000000..cdc49726
+index 0000000..cdc4972
 --- /dev/null
 +++ b/host/hos_coop_mods.h
 @@ -0,0 +1,227 @@
@@ -270,7 +270,7 @@ index 00000000..cdc49726
 +
 +#endif
 diff --git a/host/mods.c b/host/mods.c
-index c5f63179..6db36c81 100644
+index c5f6317..6db36c8 100644
 --- a/host/mods.c
 +++ b/host/mods.c
 @@ -71,6 +71,7 @@ static Entry *find(const char *key) {

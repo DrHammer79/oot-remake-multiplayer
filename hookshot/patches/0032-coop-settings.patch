@@ -29,7 +29,7 @@ and then matched no row. A cut key now matches the row it starts.
  5 files changed, 72 insertions(+), 1 deletion(-)
 
 diff --git a/gpu/vk/menu/audio.cpp b/gpu/vk/menu/audio.cpp
-index 88d36f1c..67bb25f8 100644
+index 88d36f1..67bb25f 100644
 --- a/gpu/vk/menu/audio.cpp
 +++ b/gpu/vk/menu/audio.cpp
 @@ -19,6 +19,8 @@
@@ -58,7 +58,7 @@ index 88d36f1c..67bb25f8 100644
  // it is the one chosen)
  void mic_chosen() {
 diff --git a/gpu/vk/menu/audio.h b/gpu/vk/menu/audio.h
-index 6032a4f8..4cc092f0 100644
+index 6032a4f..4cc092f 100644
 --- a/gpu/vk/menu/audio.h
 +++ b/gpu/vk/menu/audio.h
 @@ -18,6 +18,7 @@ void refresh_outputs();   // (the host's playback devices listed again, the row
@@ -70,10 +70,10 @@ index 6032a4f8..4cc092f0 100644
  
  // (the microphone test: on while the player has it on (Test microphone), the levels the host measured and its state)
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index 8d6084e1..c721770d 100644
+index 7f5dbc9..491af88 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
-@@ -4847,6 +4847,9 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
+@@ -4849,6 +4849,9 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
  int menu_setting(int index, MkwVkSetting* out) {
      bridge_probe_first();
      std::lock_guard lk(menu_mu);
@@ -83,7 +83,7 @@ index 8d6084e1..c721770d 100644
      for (int i = 0, n = 0; i < (int)std::size(rows); i++)
          if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
      return 0;
-@@ -4944,11 +4947,17 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
+@@ -4946,11 +4949,17 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
  /// through a list of their own (the Upscaler, Render resolution, the output resolution) are walked to value: walk_to. out: the
  /// row as it is now. 1 set, 0 no such row, -1 nothing to choose on this PC (row_fixed), -2 none of a list row's steps reach
  /// value here (the row and the rest as they were)
@@ -103,7 +103,7 @@ index 8d6084e1..c721770d 100644
      Row& r = rows[i];
      if (row_fixed(r.value)) return bridge_fill(i, out), -1;
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 889a0716..89fe118a 100644
+index 889a071..89fe118 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -8,6 +8,7 @@
@@ -161,7 +161,7 @@ index 889a0716..89fe118a 100644
          hos_log("coop: the module stays off");
          __atomic_store_n(&state, 3, __ATOMIC_RELEASE);
 diff --git a/host/hos_coop_api.h b/host/hos_coop_api.h
-index bc47834c..c45382fc 100644
+index bc47834..c45382f 100644
 --- a/host/hos_coop_api.h
 +++ b/host/hos_coop_api.h
 @@ -28,6 +28,15 @@ typedef struct HosCoopCall {

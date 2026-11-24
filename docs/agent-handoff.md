@@ -135,3 +135,41 @@ Any of these, as a reply comment or a docs file in a PR:
    then hold). Still wanted: the same in Longshot's own bridge, so no module is needed.
 6. **An AI-graph reader with the wiring** (node inputs and links), if your agent has one: ours reads names only.
 7. **Your agent's own handoff**: its scripts, memory notes and what it learned that is not written down.
+
+## 6. Moving the Longshot pin
+
+How the pin moved from v3.1.1 to v3.2.0 (2026-11-24). The same steps work for the next release tag (never a
+`nightly-N`).
+
+1. **Check the release.** Download `SHA256SUMS`, `SHA256SUMS.sig` and `tools.lock` from the release page. The
+   signature is base64 DER (ECDSA P-256, SHA-256) over `SHA256SUMS`; the key is in Longshot's
+   `scripts/release_keys.json` (check it did not change): `base64 -d SHA256SUMS.sig > sig.der`, the key as a PEM
+   public key, `openssl dgst -sha256 -verify key.pem -signature sig.der SHA256SUMS`. Check that the game build id
+   Longshot names (`hos_main_build_id` in `host/hos_mem.c`, `e0f3ccfaf50065ae...`) is unchanged; if the game build
+   changed, stop: every address in the module needs checking.
+2. **Move the patches by a rebase, not `git am --3way`.** The patch files' blob ids are the old tag's, so a three-way
+   `git am` on the new tag cannot build its base. Instead: clone Longshot, `git checkout -B coop-old <old tag>`,
+   `git am` every `hookshot/patches/*.patch` in order (they apply there as they are), then
+   `git rebase --onto <new tag> <old tag> coop`. Fix each conflict by keeping Longshot's new code and putting the
+   co-op change back into it. For v3.2.0 two needed it:
+   - 0016 (local pads): v3.2.0 reads the triggers through `trigger_pull` (#2337). 0016 collects each pad's buttons in
+     its own `pb`, so the new touchpad and trigger lines write `pb`, not `b`.
+   - 0020 (texture overrides): v3.2.0 adds a GPU clear for all-zero depth buffers next to `upload_all_zero`. A
+     texture a module overrides must skip both (`!coop_over`).
+3. **Write the patches back** with `git -c core.abbrev=7 format-patch --no-signature <new tag>..coop`, keeping each
+   file's name and its original header (only the body after `---` changes, so the diff of the move stays small).
+4. **Check the kit applies them**: unpack Forgejo's source archive of the new commit
+   (`/api/v1/repos/MagicBeanDev/Longshot/archive/<commit>.zip`) and run
+   `python -I tools/release/kit/scripts/apply_patch.py <unpacked folder> hookshot/patches/*.patch`; then
+   `diff -r` it against the rebased tree (they should be the same).
+5. **Move the pin files**: `hookshot/PIN` (commit, tag); `tools/release/kit/hookshot/TOOLS.txt` (release,
+   lock_sha256, source_commit, source_sha256 = the archive's SHA-256, mirror tag); `hookshot/LINUX.txt` (tag,
+   AppImage name, url, sha256 and size from `SHA256SUMS` and the release API); `kShippedFor` in
+   `tests/hookshot/module_test.cpp` after checking `scripts/linux/appimage.sh` still copies the same folders.
+6. **Test**: unit tests, `tools/check_content.py`, `tools/release/tests/test_apply_patch.py`,
+   `tools/autotest/tests/test_hookshot.py`. CI's windows job runs `tools/hookshot/host_compile_check.ps1` (every
+   patched file compiled with Longshot's own compiler) and the linux-longshot job applies the patches to the AppImage.
+7. **The mirror** (`longshot-mirror-<tag>` on the main repository's releases) is made by the maintainer with
+   `tools/release/mirror_longshot.ps1`; until it exists the kit downloads from Longshot's own servers.
+8. **In game**: a game build from the kit, then boot two games, join, walk, name tags, chat, the pause menu's
+   Multiplayer tab.

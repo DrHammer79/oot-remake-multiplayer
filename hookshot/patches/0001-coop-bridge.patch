@@ -55,7 +55,7 @@ patches); on Windows they are dllexport.
 
 diff --git a/gpu/vk/hos_coop_draw.h b/gpu/vk/hos_coop_draw.h
 new file mode 100644
-index 00000000..9329c4bd
+index 0000000..9329c4b
 --- /dev/null
 +++ b/gpu/vk/hos_coop_draw.h
 @@ -0,0 +1,43 @@
@@ -104,7 +104,7 @@ index 00000000..9329c4bd
 +#endif
 diff --git a/gpu/vk/vk_coop.cpp b/gpu/vk/vk_coop.cpp
 new file mode 100644
-index 00000000..693d1247
+index 0000000..693d124
 --- /dev/null
 +++ b/gpu/vk/vk_coop.cpp
 @@ -0,0 +1,160 @@
@@ -270,7 +270,7 @@ index 00000000..693d1247
 +}  // namespace mkwvk::coop
 diff --git a/gpu/vk/vk_coop.h b/gpu/vk/vk_coop.h
 new file mode 100644
-index 00000000..59acc4be
+index 0000000..59acc4b
 --- /dev/null
 +++ b/gpu/vk/vk_coop.h
 @@ -0,0 +1,20 @@
@@ -295,7 +295,7 @@ index 00000000..59acc4be
 +
 +}  // namespace mkwvk::coop
 diff --git a/gpu/vk/vk_draw.cpp b/gpu/vk/vk_draw.cpp
-index 230a4d0f..185cc472 100644
+index 813d343..0789e64 100644
 --- a/gpu/vk/vk_draw.cpp
 +++ b/gpu/vk/vk_draw.cpp
 @@ -59,6 +59,7 @@
@@ -306,7 +306,7 @@ index 230a4d0f..185cc472 100644
  #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
  #include "vk_fsr3_inputs.h"
  #include "reactive_policy.h"
-@@ -8891,6 +8892,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
+@@ -9073,6 +9074,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
      // FSR 3.1 (vk_fsr3_inputs.cpp). The vertex stage's uniform buffer 3 (NVN's binding 0)
      if (at.n && at.color[0] && at.depth) {
          temporal_note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
@@ -315,7 +315,7 @@ index 230a4d0f..185cc472 100644
          if (upscale_route::wanted() && s.ubo[0][0].addr && s.ubo[0][0].size >= 0x230 && route_scene_format(at.color[0]->format))
              upscale_route::note_scene(at.width, at.height);
 diff --git a/gpu/vk/vk_menu.cpp b/gpu/vk/vk_menu.cpp
-index 2f7366ff..9bf441c4 100644
+index 78a74af..88124d5 100644
 --- a/gpu/vk/vk_menu.cpp
 +++ b/gpu/vk/vk_menu.cpp
 @@ -44,6 +44,7 @@
@@ -326,7 +326,7 @@ index 2f7366ff..9bf441c4 100644
  #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
  #include "vk_dlss.h"
  #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
-@@ -5681,7 +5682,8 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
+@@ -5683,7 +5684,8 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
      const bool start = startup_on.load(std::memory_order_acquire);
      const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
      const bool open = open_now.load(std::memory_order_relaxed);
@@ -336,7 +336,7 @@ index 2f7366ff..9bf441c4 100644
          // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
          // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
          if (prebake_needed(w, h) && ui::begin(w, h)) {
-@@ -5704,6 +5706,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
+@@ -5706,6 +5708,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
      ui::Ctx c = ui_ctx(w, h);
      prebake(c);   // (the menu's glyphs at this size, before it opens: no hitch then)
      if (start) draw_startup(c);   // (under the menu)
@@ -344,7 +344,7 @@ index 2f7366ff..9bf441c4 100644
      if (open) draw_menu(c);
      if (fps) draw_fps(c, open);
      ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
-@@ -5713,9 +5716,11 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
+@@ -5715,9 +5718,11 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, in
  void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uint32_t w, uint32_t h) {
      const bool open = open_now.load(std::memory_order_relaxed);
      const bool fps = opts.show_fps && !startup_on.load(std::memory_order_acquire);
@@ -359,7 +359,7 @@ index 2f7366ff..9bf441c4 100644
      ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
 new file mode 100644
-index 00000000..63de418a
+index 0000000..63de418
 --- /dev/null
 +++ b/host/coop_bridge.c
 @@ -0,0 +1,204 @@
@@ -568,7 +568,7 @@ index 00000000..63de418a
 +    return __atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 ? coop_hold(component, bits) : bits;
 +}
 diff --git a/host/display.c b/host/display.c
-index 4f933b8b..5d83ae2f 100644
+index 4f933b8..5d83ae2 100644
 --- a/host/display.c
 +++ b/host/display.c
 @@ -403,10 +403,20 @@ void hos_display_paste(void) {
@@ -635,7 +635,7 @@ index 4f933b8b..5d83ae2f 100644
          else if (c >= 0x20 && c != 0x7F) hos_text_put(c);   /* (Backspace, Enter, Esc and Ctrl+letters: WM_KEYDOWN above) */
 diff --git a/host/hos_coop_api.h b/host/hos_coop_api.h
 new file mode 100644
-index 00000000..9e2075c4
+index 0000000..9e2075c
 --- /dev/null
 +++ b/host/hos_coop_api.h
 @@ -0,0 +1,76 @@
@@ -716,10 +716,10 @@ index 00000000..9e2075c4
 +
 +#endif
 diff --git a/host/nn_hid.c b/host/nn_hid.c
-index 2cd5f943..2f401d30 100644
+index e1e7da0..eb47959 100644
 --- a/host/nn_hid.c
 +++ b/host/nn_hid.c
-@@ -62,7 +62,8 @@ static int64_t sampling;
+@@ -63,7 +63,8 @@ static int64_t sampling;
  
  int rx_option(int id, int otherwise);
  /* (the Insert menu takes the keyboard while it is open) */
@@ -729,7 +729,7 @@ index 2cd5f943..2f401d30 100644
  
  int hos_mouse_take(int32_t *dx, int32_t *dy);   /* display.c */
  
-@@ -1554,6 +1555,7 @@ done:
+@@ -1567,6 +1568,7 @@ done:
  static void vibration_send(uint64_t handle, uint64_t value);
  volatile int64_t hos_hid_last_read;
  volatile uint64_t hos_hid_buttons;   /* (the buttons the game was last given: HidNpadButton bits) */
@@ -737,7 +737,7 @@ index 2cd5f943..2f401d30 100644
  
  /* GetNpadStates(State* out, int count, unsigned int const& npadId): the latest state first */
  static void npad_states(Ctx *c) {
-@@ -1685,6 +1687,7 @@ static void npad_states(Ctx *c) {
+@@ -1698,6 +1700,7 @@ static void npad_states(Ctx *c) {
          hos_input_movie_end(&pad);   /* (recording: the frame's pad) */
      }
      int64_t s = ++sampling;
@@ -746,7 +746,7 @@ index 2cd5f943..2f401d30 100644
          uint64_t e = out + (uint64_t)i * STATE_SIZE;
          memset(GP(e), 0, STATE_SIZE);
 diff --git a/host/nvn_native.c b/host/nvn_native.c
-index 3b18d4ab..e7b8a751 100644
+index 3b18d4a..e7b8a75 100644
 --- a/host/nvn_native.c
 +++ b/host/nvn_native.c
 @@ -3070,6 +3070,8 @@ NV(nvnQueuePresentTexture) {
@@ -759,7 +759,7 @@ index 3b18d4ab..e7b8a751 100644
  
  /* ---- NVN2 (mkw-recomp): what the Switch 2's NVN adds, as MKW uses it ---- */
 diff --git a/host/posix/display_sdl.c b/host/posix/display_sdl.c
-index 3d76f1bb..b4edaf14 100644
+index 3d76f1b..b4edaf1 100644
 --- a/host/posix/display_sdl.c
 +++ b/host/posix/display_sdl.c
 @@ -90,6 +90,43 @@ static void pointer_update(uint32_t pressed, int wheel) {
@@ -874,10 +874,10 @@ index 3d76f1bb..b4edaf14 100644
          const int asked = __atomic_exchange_n(&fullscreen_asked, -1, __ATOMIC_ACQ_REL);
          if (asked >= 0) set_fullscreen(asked);
 diff --git a/nx2/build.py b/nx2/build.py
-index dac1d534..e642e102 100644
+index e9af355..c2bd262 100644
 --- a/nx2/build.py
 +++ b/nx2/build.py
-@@ -2090,7 +2090,7 @@ def main():
+@@ -2089,7 +2089,7 @@ def main():
                         "-DIMGUI_DISABLE_WIN32_FUNCTIONS", "-DIMGUI_DISABLE_DEMO_WINDOWS", "-DIMGUI_DISABLE_DEBUG_TOOLS"]
          imgui_deps = b"".join(open(os.path.join(d, f), "rb").read() for d in (imgui, os.path.join(imgui, "backends"), zbic)
                                for f in sorted(os.listdir(d)) if f.endswith(".h"))
@@ -886,7 +886,7 @@ index dac1d534..e642e102 100644
          for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp", "backends/imgui_impl_vulkan.cpp"):
              vk_jobs.append((cxx, os.path.join(imgui, *f.split("/")),
                              os.path.join(obj_dir, "vk_imgui_" + os.path.basename(f)[:-4] + ".o"), tp_vflags + imgui_flags,
-@@ -2311,11 +2311,17 @@ def main():
+@@ -2310,11 +2310,17 @@ def main():
          exe = os.path.join(out, EXE)   # (+ longshot.map: crash offsets -> f_<guest address>)
          t = time.time()
          # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
@@ -907,7 +907,7 @@ index dac1d534..e642e102 100644
                       (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS, exe)
 diff --git a/nx2/coop_hooks.py b/nx2/coop_hooks.py
 new file mode 100644
-index 00000000..a3aa4a38
+index 0000000..a3aa4a3
 --- /dev/null
 +++ b/nx2/coop_hooks.py
 @@ -0,0 +1,61 @@
@@ -973,7 +973,7 @@ index 00000000..a3aa4a38
 +        FRAME_SITES[0][0], FRAME_SITES[1][0], HOLD_CALL + 4))
 +    return len(FRAME_SITES) + 1
 diff --git a/nx2/lift.py b/nx2/lift.py
-index 5608ac89..dcbb883b 100644
+index 5608ac8..dcbb883 100644
 --- a/nx2/lift.py
 +++ b/nx2/lift.py
 @@ -203,6 +203,8 @@ def main():

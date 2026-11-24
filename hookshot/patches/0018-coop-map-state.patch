@@ -42,7 +42,7 @@ source, which has no tests/ folder; our module_test checks the hook.)
  1 file changed, 109 insertions(+), 4 deletions(-)
 
 diff --git a/host/oot_menu.c b/host/oot_menu.c
-index a6f5bfb5..e58f73d7 100644
+index a6f5bfb..e58f73d 100644
 --- a/host/oot_menu.c
 +++ b/host/oot_menu.c
 @@ -30,13 +30,18 @@ static void sprint_menu_tick(uint64_t screen) {

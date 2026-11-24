@@ -35,7 +35,7 @@ after 120 s. Each choice and each stop is logged with its reason.
  create mode 100644 host/hos_skip_title.h
 
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 6bf35e14..957c34e8 100644
+index 6bf35e1..957c34e 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -85,6 +85,7 @@ static hos_coop_mouse_fn coop_mouse;   /* (optional: the cheats panel's clicks,
@@ -68,7 +68,7 @@ index 6bf35e14..957c34e8 100644
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_title) coop_title(c, screen, event);
 diff --git a/host/hos_skip_title.h b/host/hos_skip_title.h
 new file mode 100644
-index 00000000..23e5c98a
+index 0000000..23e5c98
 --- /dev/null
 +++ b/host/hos_skip_title.h
 @@ -0,0 +1,64 @@
@@ -137,7 +137,7 @@ index 00000000..23e5c98a
 +}
 +#endif
 diff --git a/host/oot_autoload.c b/host/oot_autoload.c
-index 4110c56c..381042c3 100644
+index 4110c56..381042c 100644
 --- a/host/oot_autoload.c
 +++ b/host/oot_autoload.c
 @@ -9,6 +9,8 @@
@@ -355,7 +355,7 @@ index 4110c56c..381042c3 100644
 +    __atomic_store_n(&screen_busy, 0, __ATOMIC_RELEASE);
  }
 diff --git a/host/oot_autoload.h b/host/oot_autoload.h
-index 557c6e9f..0598e4a6 100644
+index 557c6e9..0598e4a 100644
 --- a/host/oot_autoload.h
 +++ b/host/oot_autoload.h
 @@ -8,8 +8,14 @@
@@ -375,7 +375,7 @@ index 557c6e9f..0598e4a6 100644
  /* (tests) forget the run's state, as after a restart. */
  void hos_oot_autoload_reset(void);
 diff --git a/host/oot_menu.c b/host/oot_menu.c
-index e58f73d7..0eb57207 100644
+index e58f73d..0eb5720 100644
 --- a/host/oot_menu.c
 +++ b/host/oot_menu.c
 @@ -27,6 +27,7 @@ static void sprint_menu_tick(uint64_t screen) {

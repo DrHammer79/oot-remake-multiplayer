@@ -25,7 +25,7 @@ are 0005's.
 
 diff --git a/host/hos_coop_boss_orders.h b/host/hos_coop_boss_orders.h
 new file mode 100644
-index 00000000..2a1a7366
+index 0000000..2a1a736
 --- /dev/null
 +++ b/host/hos_coop_boss_orders.h
 @@ -0,0 +1,20 @@
@@ -50,7 +50,7 @@ index 00000000..2a1a7366
 +
 +#endif
 diff --git a/nx2/coop_world_wraps.py b/nx2/coop_world_wraps.py
-index 20aca8a9..c1485d9c 100644
+index 20aca8a..c1485d9 100644
 --- a/nx2/coop_world_wraps.py
 +++ b/nx2/coop_world_wraps.py
 @@ -52,6 +52,12 @@ WRAPS = (

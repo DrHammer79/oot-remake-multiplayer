@@ -35,7 +35,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 51 insertions(+), 6 deletions(-)
 
 diff --git a/host/coop_bridge.c b/host/coop_bridge.c
-index 957c34e8..889a0716 100644
+index 957c34e..889a071 100644
 --- a/host/coop_bridge.c
 +++ b/host/coop_bridge.c
 @@ -86,6 +86,11 @@ static hos_coop_pad_fn coop_pad;       /* (optional: the title menu, nn_hid.c an
@@ -76,7 +76,7 @@ index 957c34e8..889a0716 100644
  void hos_coop_title(Ctx *c, uint64_t screen, int event) {
      if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_title) coop_title(c, screen, event);
 diff --git a/host/oot_menu.c b/host/oot_menu.c
-index 0eb57207..e3b29d70 100644
+index 0eb5720..e3b29d7 100644
 --- a/host/oot_menu.c
 +++ b/host/oot_menu.c
 @@ -28,6 +28,10 @@ static void sprint_menu_tick(uint64_t screen) {

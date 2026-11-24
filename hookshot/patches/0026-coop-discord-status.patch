@@ -34,7 +34,7 @@ status when the pipe closes.
  create mode 100644 host/hos_discord_activity.h
 
 diff --git a/host/discord_rpc.c b/host/discord_rpc.c
-index 37a863a9..38328345 100644
+index 37a863a..3832834 100644
 --- a/host/discord_rpc.c
 +++ b/host/discord_rpc.c
 @@ -17,12 +17,24 @@
@@ -189,7 +189,7 @@ index 37a863a9..38328345 100644
              if (strcmp(now_json, sent) && now_ms() >= sent_at + 15000) send_at = 0;
 diff --git a/host/hos_discord_activity.h b/host/hos_discord_activity.h
 new file mode 100644
-index 00000000..5b363d6b
+index 0000000..5b363d6
 --- /dev/null
 +++ b/host/hos_discord_activity.h
 @@ -0,0 +1,137 @@
