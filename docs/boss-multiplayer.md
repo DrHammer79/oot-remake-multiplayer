@@ -58,6 +58,7 @@ except the split shots below.
 - **Ceiling / wander:** she crawls toward her target and drops eggs. With turns she goes after each player; the
   eggs hatch in every game. Fun: yes, one player stuns the eye with the slingshot, the others slash.
 - **Change:** none needed. Later: more eggs with more players (the enemies scale says 125%).
+- **Not yet proven (split shot):** whether Gohma spits a shot at one player (her acid), and its actor name. A test run on 2026-11-24 never got her out of her ceiling wait (no drawn window, intro not played), so no name was read and she is not on the split list. Needs a run with a drawn window or the intro played by hand; the shot's log line then names it.
 
 ### King Dodongo (Dodongo's Cavern, child)
 - **Inhale / fire breath:** aimed at one player; any player can throw the bomb in. **Roll:** chases one player.
