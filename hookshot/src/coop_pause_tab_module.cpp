@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <vector>
 #include <utility>
 #include <string>
 #include <string_view>
@@ -2049,7 +2050,17 @@ void ApplyPages(void* ctx, const Facts& f, const Page::Do& d) {
 // A screen's own menu sound by name (kScreenSound), on its update.
 void PlaySound(void* ctx, std::uint64_t screen, const char* name) {
     const std::uint64_t at = g_api->scratch(ctx, name, std::strlen(name) + 1);
-    if (at != 0) Call(ctx, kScreenSound, screen, at);
+    std::uint64_t started = 0;
+    if (at == 0 || !Call(ctx, kScreenSound, screen, at, 0, 0, 0, 0, &started)) return;
+    // (each name's first play said once: whether the game knows it, bit 0 started. menu-polish-01113: B's
+    // "button_cancel" was never heard in a run; a name the game does not know is silent)
+    static std::mutex said_mutex;
+    static std::vector<std::string> said;
+    std::lock_guard lock(said_mutex);
+    if (std::find(said.begin(), said.end(), name) == said.end()) {
+        said.emplace_back(name);
+        LOG_INFO(Core, "coop: pause tab: the menu sound {} {}", name, (started & 1) != 0 ? "started" : "NOT started (unknown name?)");
+    }
 }
 
 // --- The - menu's tabs of ours (0.11.9): Multiplayer, Lobby, Mods, right of Map ---
