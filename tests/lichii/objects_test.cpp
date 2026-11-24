@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "coop/protocol/codec.hpp"
+#include "coop_actor_events.h"
 #include "coop_bomb_share.h"
 #include "coop_boss_native.h"  // (row 178: Table::kFallBelowStart)
 #include "coop_guard.h"
@@ -1637,10 +1638,28 @@ TEST_CASE("objects: RouteLife: an enemy goes only through its game's own steps, 
     r = RouteLife(a);
     CHECK(r.route == LifeRoute::step);
     CHECK(r.amount == 2);
-    // Our replay not seen yet by its damage step: nothing more.
+    CHECK_FALSE(r.tied);
+    // enemy-late-kill: our replay not taken by its damage step (a Deku Baba's copy kept its hit id at 0xffffffff
+    // through four replays and the owner's death): the fall still goes to its Life step at once, tied to the
+    // replay (dropped there if the replay lands after all), never a wait with no end.
     a.stale = 0;
     a.replay_seen = false;
-    CHECK(RouteLife(a).route == LifeRoute::wait_replay);
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 2);
+    CHECK(r.tied);
+    a.stale = 2;  // (a tied give taken back as stale: the fall holds it)
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 2);
+    CHECK(r.tied);
+    a.stale = 0;
+    a.life = 0;  // the owner's death
+    r = RouteLife(a);
+    CHECK(r.route == LifeRoute::step);
+    CHECK(r.amount == 3);
+    CHECK(r.tied);
+    a.life = 1;
     a.replay_seen = true;
     // No Life step (emulator), no component, nothing to lower, or unread: lost, never a write.
     a.step_seen = false;
@@ -1662,6 +1681,7 @@ TEST_CASE("objects: RouteLife: an enemy goes only through its game's own steps, 
     r = RouteLife(a);
     CHECK(r.route == LifeRoute::step);
     CHECK(r.amount == 4);
+    CHECK_FALSE(r.tied);  // (a hurt is not the replay's fall)
     // Not native (a pot): a stale give means the old direct write, as before.
     LifeAsk pot = a;
     pot.native = false;
@@ -1673,6 +1693,144 @@ TEST_CASE("objects: RouteLife: an enemy goes only through its game's own steps, 
     CHECK(RouteLife(pot).route == LifeRoute::step);
     pot.step_seen = false;
     CHECK(RouteLife(pot).route == LifeRoute::write);
+}
+
+TEST_CASE("objects: a sleeping enemy copy keeps its owner's hit and kill for its Life step when it wakes (lane NEXT5b)") {
+    using CoopActorEvents::kNoHitId;
+    using CoopObjects::GivenAsk;
+    using CoopObjects::GivenFate;
+    using CoopObjects::LifeAsk;
+    using CoopObjects::LifeRoute;
+    using CoopObjects::RouteLife;
+    using CoopObjects::StaleGivenFate;
+    static CoopActorEvents::Ring ring;
+    static CoopActorEvents::LifeTable table;
+    constexpr std::uint64_t kLife = 0x900;
+    // What becomes of a give no Life step took in its wait.
+    GivenAsk g;
+    CHECK(StaleGivenFate(g) == GivenFate::wait);
+    g.due = true;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);  // (off the walk)
+    g.on_walk = true;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);  // (another actor there now, or none)
+    g.same_component = true;
+    CHECK(StaleGivenFate(g) == GivenFate::taken);
+    g.pending = 1;
+    CHECK(StaleGivenFate(g) == GivenFate::write);  // a pot: written, as before
+    g.native = true;
+    CHECK(StaleGivenFate(g) == GivenFate::keep);  // an enemy: kept (1dc967e0 took it back: lost for good)
+    // reviewer-12: a kept give outlives its actor (A's remove while B's copy sleeps). Off the walk the actor's
+    // name is unknown (native reads false) and its freed memory can still hold the old Life component: gone, never
+    // written into the freed actor (or another actor that took its memory).
+    g.on_walk = false;
+    g.native = false;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    g.pending = 2;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    g.native = true;
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+    // A pot removed within the wait: not written either (the same hole, before the keep).
+    g = {true, false, true, 1, false};
+    CHECK(StaleGivenFate(g) == GivenFate::gone);
+
+    // Lane NEXT5b: B's copy of A's Deku Baba, B's Link far away, so the copy sleeps: no damage step, no Life step.
+    // Each owner's change is refused as a replay (its hit id stays 0xffffffff), and the 400 ms fallback gives the
+    // fall to the Life step tied to that replay, taking back what still waits (WriteLife).
+    const auto give = [&](std::int32_t old, std::int32_t life, std::uint32_t replay) {
+        LifeAsk a;
+        a.native = true;
+        a.replay_on = true;
+        a.has_player = true;
+        a.life = life;
+        a.old = old;
+        a.step_seen = true;
+        a.has_component = true;
+        a.replay_seen = false;
+        a.stale = table.Take(kLife);
+        const auto r = RouteLife(a);
+        REQUIRE(r.route == LifeRoute::step);
+        REQUIRE(r.tied);
+        CHECK(table.Give(kLife, r.amount, true, replay));
+    };
+    // Its wait ends with no step: as StaleGiven, taken back unless kept. on_walk: the copy is still on the walk.
+    bool on_walk = true;
+    const auto fate = [&] {
+        const GivenFate f = StaleGivenFate({true, on_walk, true, table.Pending(kLife), on_walk});
+        if (f == GivenFate::gone || f == GivenFate::write) {
+            table.Take(kLife);
+        }
+        return f;
+    };
+    // A's hit (2 -> 1). No step runs; its wait ends: kept, not taken back.
+    give(2, 1, 0x1000);
+    CHECK(fate() == GivenFate::keep);
+    CHECK(table.Pending(kLife) == 1);
+    // A's kill (1 -> 0) while it still sleeps: the copy is still at 2, so the fall is the whole 2, once.
+    give(2, 0, 0x1002);
+    CHECK(table.Pending(kLife) == 2);
+    CHECK(fate() == GivenFate::keep);
+    // B's Link comes back: it wakes. Its damage step does not take the replay: its Life step takes the whole fall,
+    // judged (its own death, past its life stops), and the newest replay is withdrawn.
+    bool judged = false;
+    std::uint32_t withdraw = kNoHitId;
+    CHECK(CoopActorEvents::Step(ring, table, kLife, 0, &judged, kNoHitId, &withdraw) == 2);
+    CHECK(judged);
+    CHECK(withdraw == 0x1002);
+    CHECK(CoopActorEvents::Step(ring, table, kLife, 0, &judged, kNoHitId, &withdraw) == 0);  // (once)
+    CHECK(fate() == GivenFate::taken);
+    // Or it wakes and its damage step takes the waiting replay that frame (the id reached it): the kept fall is
+    // dropped, so the hit is dealt once (the step's own sum).
+    give(2, 1, 0x1004);
+    CHECK(fate() == GivenFate::keep);
+    CHECK(CoopActorEvents::Step(ring, table, kLife, 1, &judged, 0x1004, &withdraw) == 1);
+    CHECK(withdraw == kNoHitId);
+    CHECK(fate() == GivenFate::taken);
+    // Kill while asleep, then A's remove deletes the copy before it wakes (lane NEXT5b: +60 to +90 frames): the
+    // kept fall is gone with it, taken back, and nothing waits for a Life step any more.
+    give(2, 0, 0x1006);
+    CHECK(fate() == GivenFate::keep);
+    on_walk = false;
+    CHECK(fate() == GivenFate::gone);
+    CHECK(table.Pending(kLife) == 0);
+    on_walk = true;
+    ring.Drain();
+}
+
+TEST_CASE("objects: a fall kept for a sleeping copy's Life step is no hit of ours when it lands late (lane NEXT5b)") {
+    // The owner's hit (4 -> 3) on our copy; the copy sleeps, so neither the replay nor the 400 ms fallback is
+    // taken. The kept fall lands when it wakes, seconds later: without KeepGiven that drop went to the owner as
+    // our hit (a second hit there).
+    const auto run = [](bool keep) {
+        Sync sync;
+        sync.SetHurt(true);
+        Tick(sync, 0, {Enemy(0x100, 0x11, 4)}, 2);
+        const proto::ObjectId id = *sync.IdOf(0x100);
+        Own(sync, id, 1);
+        proto::ObjectSample s;
+        s.player_number = 1;
+        s.id = id;
+        s.state.life = proto::ObjectLife{3, 4};
+        sync.Receive(s);
+        Tick(sync, 10 * kMs, {Enemy(0x100, 0x11, 4)}, 2);
+        for (std::uint64_t t = 50; t < 3000; t += 50) {
+            if (keep && t >= 700) {
+                sync.KeepGiven(0x100, 1, t * kMs);  // (StaleGiven, each walk while it waits)
+            }
+            CHECK(All<proto::Damage>(Tick(sync, t * kMs, {Enemy(0x100, 0x11, 4)}, 2)).empty());
+        }
+        std::size_t damage = 0;
+        for (std::uint64_t t = 3000; t < 3300; t += 50) {
+            damage += All<proto::Damage>(Tick(sync, t * kMs, {Enemy(0x100, 0x11, 3)}, 2)).size();
+        }
+        // A real hit of ours after it still goes to the owner.
+        std::size_t ours = 0;
+        Tick(sync, 3300 * kMs, {Enemy(0x100, 0x11, 2)}, 2);
+        ours += All<proto::Damage>(Tick(sync, 3600 * kMs, {Enemy(0x100, 0x11, 2)}, 2)).size();
+        return std::make_pair(damage, ours);
+    };
+    CHECK(run(true).first == 0);
+    CHECK(run(true).second == 1);
+    CHECK(run(false).first >= 1);  // (the double the keep would make without it)
 }
 
 TEST_CASE("objects: NativeOnlyName: enemies, bosses and unknown names are never written") {
