@@ -59,8 +59,9 @@ class TheRepositoryLibrary(unittest.TestCase):
         names = [n for n in sorted(os.listdir(folder)) if n.endswith(".jsonl")]
         self.assertTrue(names)
         for name in names:
-            games = {p: FakeGame() for p in ("p1", "p2", "p3", "p4")}
-            players = {p: mcp_playtest.Game(p, pc.Client(g.port), tempfile.gettempdir()) for p, g in games.items()}
+            tmp = tempfile.TemporaryDirectory()   # (the per-game checkpoint's dumps and the shots go there)
+            games = {p: FakeGame(dump_dir=tmp.name) for p in ("p1", "p2", "p3", "p4")}
+            players = {p: mcp_playtest.Game(p, pc.Client(g.port), tmp.name) for p, g in games.items()}
 
             pair = mcp_playtest.Pair({"p1": players["p1"], "p2": players["p2"]})
             session_calls = []
@@ -85,6 +86,7 @@ class TheRepositoryLibrary(unittest.TestCase):
                     p.client.close()
                 for g in games.values():
                     g.close()
+                tmp.cleanup()
 
     def test_the_readmes_are_there(self):
         for sub in ("", "scripts", "data"):
