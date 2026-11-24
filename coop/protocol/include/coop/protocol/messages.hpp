@@ -209,6 +209,7 @@ enum class MessageType : std::uint16_t {
   pvp_strike = 540,  // 540 to 544: PvP on real bodies (docs/protocol.md, "PvP on real bodies")
   pvp_result = 541,
   pvp_native = 542,
+  emote = 615,  // 615 to 619: emotes and pings (docs/protocol.md, "Emotes")
 };
 
 // PLAYER_SAMPLE component ids.
@@ -1803,6 +1804,18 @@ struct BossAlive {
   bool operator==(const BossAlive&) const = default;
 };
 
+// EMOTE (branch ai-emotes, 615): one emote or ping of the sender's Link (/wave, /yes, /no, /look, /here), by its
+// number in the emote table (lichii/hook/coop_emote.h). A one-shot event, never kept: the others' games play the
+// emote's animation on the sender's puppet for a moment and start its sound there. The id is any 1 to
+// kMaxEmoteId; a game that does not know the id ignores it, so the table can grow with no version bump.
+inline constexpr std::uint8_t kMaxEmoteId = 32;
+
+struct Emote {
+  std::uint8_t player_number = kPlayerSelf;  // 0 from a client, 1 to 16 relayed
+  std::uint8_t id = 0;                       // 1 to kMaxEmoteId
+  bool operator==(const Emote&) const = default;
+};
+
 // VOICE_FRAME (protocol 11, branch proximity-voip): 20 ms of the sender's
 // microphone as one Opus packet (48 kHz mono), or an empty packet with
 // voice::end that closes a talk spurt (the gate closed). Channel 5,
@@ -2190,7 +2203,7 @@ using Message = std::variant<Hello, Welcome, Refused, PlayerJoined, PlayerLeft,
                              LocalJoin, LocalJoined, LocalLeave, LocalSample, LocalMessage, LinkSound,
                              BossScene, BossHeart, PlayerLook, SwitchState, JoinKnock, JoinAllow,
                              BombTake, BombAnswer, BombShare, LiftAsk, LiftAnswer, LiftPlace,
-                             LiftShare, PvpStrike, PvpResult, PvpNative, BossAlive>;
+                             LiftShare, PvpStrike, PvpResult, PvpNative, BossAlive, Emote>;
 
 MessageType type_of(const Message& message);
 

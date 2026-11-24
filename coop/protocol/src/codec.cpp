@@ -2490,6 +2490,26 @@ Error decode_body(Reader& r, BossAlive& m) {
   return check_boss_alive(m);
 }
 
+// EMOTE: u8 player, u8 id (1 to kMaxEmoteId).
+Error check_emote(const Emote& m) {
+  if (!valid_player_or_self(m.player_number) || m.id == 0 || m.id > kMaxEmoteId) return Error::bad_value;
+  return Error::none;
+}
+
+Error encode_body(const Emote& m, Writer& w) {
+  COOP_TRY(check_emote(m));
+  w.u8(m.player_number);
+  w.u8(m.id);
+  return Error::none;
+}
+
+Error decode_body(Reader& r, Emote& m) {
+  m = Emote{};
+  COOP_READ(r.u8(m.player_number));
+  COOP_READ(r.u8(m.id));
+  return check_emote(m);
+}
+
 // BOSS_HEART: u8 player, u8 boss (0 to 15), u8 given (0, 1), u32 max life (1 to 80).
 Error check_boss_heart(const BossHeart& m) {
   if (!valid_player_or_self(m.player_number) || m.boss > kMaxSceneBoss || m.max_life < 1 ||
@@ -3406,6 +3426,7 @@ MessageType type_of(const Message& message) {
       MessageType::lift_share,
       MessageType::pvp_strike,  MessageType::pvp_result,  MessageType::pvp_native,
       MessageType::boss_alive,
+      MessageType::emote,
   };
   static_assert(std::size(kTypes) == std::variant_size_v<Message>);
   return kTypes[message.index()];
@@ -3513,6 +3534,7 @@ bool allowed_on_channel(MessageType type, std::uint8_t channel) {
     case MessageType::local_message:
     case MessageType::player_look:
     case MessageType::link_sound:
+    case MessageType::emote:
     case MessageType::boss_scene:
     case MessageType::boss_heart:
     case MessageType::join_knock:
@@ -3658,6 +3680,7 @@ bool may_send(Sender from, MessageType type) {
     case MessageType::boss_scene:
     case MessageType::boss_heart:
     case MessageType::boss_alive:
+    case MessageType::emote:
     case MessageType::lift_ask:
     case MessageType::lift_answer:
     case MessageType::lift_place:
@@ -3707,7 +3730,7 @@ auto* player_field(M& message) {
                       std::is_same_v<T, ModList> || std::is_same_v<T, ModSettings> ||
                       std::is_same_v<T, LinkSound> ||
                       std::is_same_v<T, BossScene> || std::is_same_v<T, BossHeart> ||
-                      std::is_same_v<T, BossAlive> || std::is_same_v<T, PlayerLook> || std::is_same_v<T, LiftAsk> ||
+                      std::is_same_v<T, BossAlive> || std::is_same_v<T, Emote> || std::is_same_v<T, PlayerLook> || std::is_same_v<T, LiftAsk> ||
                       std::is_same_v<T, LiftAnswer> || std::is_same_v<T, LiftPlace> ||
                       std::is_same_v<T, PvpStrike> || std::is_same_v<T, PvpResult> ||
                       std::is_same_v<T, PvpNative>) {
@@ -3873,6 +3896,7 @@ Error decode(std::span<const std::uint8_t> bytes, Message& out) {
     case MessageType::boss_scene: return decode_as<BossScene>(body, out);
     case MessageType::boss_heart: return decode_as<BossHeart>(body, out);
     case MessageType::boss_alive: return decode_as<BossAlive>(body, out);
+    case MessageType::emote: return decode_as<Emote>(body, out);
     case MessageType::drop_spawn: return decode_as<DropSpawn>(body, out);
     case MessageType::drop_take: return decode_as<DropTake>(body, out);
     case MessageType::drop_ask: return decode_as<DropAsk>(body, out);
