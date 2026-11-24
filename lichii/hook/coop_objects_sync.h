@@ -958,6 +958,9 @@ public:
     // after it is written back up by that much.
     using BlastNear = std::function<bool(const coop::protocol::Vec3&, std::uint64_t)>;
     void SetBlastNear(BlastNear near) { blast_near_ = std::move(near); }
+    // ai-stuns: another player's shot copy hit near here (CoopProjectiles::TheShotHits). A copy stunned there shows
+    // the stun but asks nothing: the thrower's game asks for the enemy.
+    void SetShotHitNear(BlastNear near) { shot_hit_near_ = std::move(near); }
     static constexpr std::uint64_t kBlastCreditUs = 2'000'000;
     std::size_t BlastDrops() const { return blast_drops_; }  // drops kept back so far
 
@@ -1919,6 +1922,7 @@ private:
     std::size_t part_kills_held_ = 0;     // boss-body-life: rows 257/258 kills waiting for the owner's death
     std::size_t split_kills_ = 0;  // copies dead here, owner alive after the resends
     BlastNear blast_near_;
+    BlastNear shot_hit_near_;
     std::size_t blast_drops_ = 0;
 
     mutable std::mutex inbox_mutex_;

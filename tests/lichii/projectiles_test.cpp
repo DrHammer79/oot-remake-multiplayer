@@ -975,6 +975,7 @@ TEST_CASE("shots: a nut copy that hit something reaches the spot before it goes"
     std::vector<proto::Message> send;
     std::vector<Copy> copies;
     const std::map<std::uint64_t, std::uint64_t> live;
+    shots::TheShotHits().Reset();
     const std::uint64_t t0 = 10'000'000;
     sync.Tick(kScene, 2, t0, {}, live, send, copies);
     proto::ObjectSpawn spawn;
@@ -1011,11 +1012,16 @@ TEST_CASE("shots: a nut copy that hit something reaches the spot before it goes"
     CHECK(copies[0].act == Act::show);  // reached the spot: it bursts there
     CHECK(copies[0].position[0] == doctest::Approx(2.0f));
     CHECK(copies[0].effect == "Chemical_Light");
+    // ai-stuns: where another player's shot hit here is kept: a stun beside it is that player's, not ours.
+    CHECK(shots::TheShotHits().Size() == 1);
+    CHECK(shots::TheShotHits().Near({2.0f, 1.0f, 0.0f}, got + shots::Track::kBehindUs + 100 * kMs));
     copies.clear();
     sync.Tick(kScene, 2, got + shots::Track::kBehindUs + shots::LandHoldUs(shots::Kind::nut), {}, live, send,
               copies);
     REQUIRE(copies.size() == 1);
     CHECK(copies[0].act == Act::remove);
+    CHECK(shots::TheShotHits().Size() == 1);  // once
+    shots::TheShotHits().Reset();
 }
 
 TEST_CASE("shots: a bomb copy that went off by itself is noted as a blast") {

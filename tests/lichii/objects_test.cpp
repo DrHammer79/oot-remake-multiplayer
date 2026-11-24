@@ -5204,6 +5204,46 @@ TEST_CASE("objects: a plain enemy's copy stunned here sends a DAMAGE of 0 and ke
     CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Down_Start"));
 }
 
+// ai-stuns (NEXT33 lane run): another player's nut, shown here as a copy, bursts here too and stuns our copy. That
+// stun is the thrower's: its own game asks. Ours only shows it; no DAMAGE, so the enemy never goes to a non-thrower.
+TEST_CASE("objects: a plain enemy's copy stunned beside another player's shot copy asks nothing (ai-stuns)") {
+    const std::string baba = "Enemy_Dekubaba";
+    Sync owner;
+    Seen e = Enemy(0x100, 0x11, 2, 0.0f, baba);
+    e.animation = proto::Animation{"Attack", 10.0f, 1.0f};
+    Tick(owner, 0, {e});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Own(owner, id, 1, 3);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 10 * kMs, {e}));
+    REQUIRE(samples.size() == 1);
+
+    Sync copy;
+    std::vector<proto::Vec3> asked;
+    copy.SetShotHitNear([&](const proto::Vec3& at, std::uint64_t) {
+        asked.push_back(at);
+        return true;
+    });
+    Seen c = Enemy(0x200, 0x11, 2, 0.0f, baba);
+    c.animation = proto::Animation{"Attack", 10.0f, 1.0f};
+    Tick(copy, 0, {c}, 2);
+    Own(copy, id, 1, 3);
+    proto::ObjectSample s = samples[0];
+    s.player_number = 1;
+    s.state.time = {1000 * kMs, 1};
+    copy.Receive(s);
+    Tick(copy, 1010 * kMs, {c}, 2);
+
+    c.animation = proto::Animation{"Stun_Start", 0.0f, 1.0f};
+    CHECK(All<proto::Damage>(Tick(copy, 1100 * kMs, {c}, 2)).empty());
+    CHECK_FALSE(asked.empty());
+    // Still shown: the owner's play does not cover the copy's own stun.
+    std::vector<CoopObjects::PlayWish> plays;
+    copy.Plays(1110 * kMs, plays);
+    CHECK(plays.empty());
+    c.animation = proto::Animation{"Stun_Loop", 0.0f, 1.0f};
+    CHECK(All<proto::Damage>(Tick(copy, 3500 * kMs, {c}, 2)).empty());
+}
+
 TEST_CASE("objects: a boss copy's own stun is told every walk while it plays, never the owner's (row 169)") {
     const std::string dodongo = "Enemy_DungeonBoss_Dodongo";
     Sync owner;

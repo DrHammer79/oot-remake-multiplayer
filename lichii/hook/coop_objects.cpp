@@ -2231,6 +2231,9 @@ public:
             sync_.SetBlastNear([](const coop::protocol::Vec3& at, std::uint64_t now) {
                 return CoopProjectiles::TheBlasts().Near(at, now);
             });
+            sync_.SetShotHitNear([](const coop::protocol::Vec3& at, std::uint64_t now) {
+                return CoopProjectiles::TheShotHits().Near(at, now);
+            });
             take_at_ = server_now_us + 3'000'000;
             LOG_INFO(Core, "coop: objects: share on, poses {}, hurt {}", pose_ ? "on" : "off",
                      hurt_ ? "through the game" : "written as life");
