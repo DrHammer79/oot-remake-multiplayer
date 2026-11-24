@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -899,7 +900,20 @@ coop::overlay::map::Capture Field() {
 
 }  // namespace
 
-TEST_CASE("hookshot draw: the others on the minimap where the game's picture has them, names under them") {
+namespace {
+// A map label's fill (the last of its outline's nine calls) and its centre (the canvas: half the size a byte wide).
+std::optional<Call> MapLabel(const Canvas& c, const std::string& text) {
+    std::optional<Call> out;
+    for (const auto& t : c.Of("text")) {
+        if (t.text == text) out = t;
+    }
+    return out;
+}
+float CentreX(const Call& t) { return t.x + static_cast<float>(t.text.size()) * t.px * 0.25f; }
+float CentreY(const Call& t) { return t.y + t.px / 2; }
+}  // namespace
+
+TEST_CASE("hookshot draw: the others on the minimap where the game's picture has them: their names, no shapes") {
     const auto field = Field();
     Canvas c(1920, 1080);
     CoopDraw::Scene s;
@@ -913,26 +927,32 @@ TEST_CASE("hookshot draw: the others on the minimap where the game's picture has
     s.map = &m;
     CHECK(CoopDraw::Wanted(s));
     CoopDraw::Draw(c.d, s);
-    // The frame's centre on a 1920 x 1080 picture: (1920 + 1536, 1080 + 690) / 2.
-    const auto tris = c.Of("triangle");
-    REQUIRE(tris.size() == 2);  // rim, then the arrow
-    CHECK(tris[1].rgba == CoopDraw::Rgba(255, 0, 0, 255));
-    CHECK(tris[1].x == doctest::Approx(1728 + 10).epsilon(0.001));  // the tip, below the player at (1738, 865)
-    CHECK(tris[1].y > 865);
-    const auto dots = c.Of("circle");
-    REQUIRE(dots.size() == 2);  // no rotation: a dot on a rim
-    CHECK(dots[1].x == doctest::Approx(1728));
-    CHECK(dots[1].y == doctest::Approx(885));
-    CHECK(dots[1].rgba == CoopDraw::Rgba(0, 255, 0, 255));
-    bool saria = false;
-    for (const auto& t : c.Of("text")) saria = saria || t.text == "Saria";
-    CHECK(saria);
+    // No drawn shapes (the owner's UI rule): no dot, no arrow, no box.
+    CHECK(c.Of("triangle").empty());
+    CHECK(c.Of("circle").empty());
+    CHECK(c.Of("rect").empty());
+    // The frame's centre on a 1920 x 1080 picture: (1920 + 1536, 1080 + 690) / 2 = (1728, 885); each name centred
+    // where the player is, in their colour.
+    const auto saria = MapLabel(c, "Saria");
+    REQUIRE(saria);
+    CHECK(saria->rgba == CoopDraw::Rgba(255, 0, 0, 255));
+    CHECK(CentreX(*saria) == doctest::Approx(1738).epsilon(0.001));
+    CHECK(CentreY(*saria) == doctest::Approx(865).epsilon(0.001));
+    const auto darunia = MapLabel(c, "Darunia");
+    REQUIRE(darunia);
+    CHECK(darunia->rgba == CoopDraw::Rgba(0, 255, 0, 255));
+    CHECK(CentreX(*darunia) == doctest::Approx(1728).epsilon(0.001));
+    CHECK(CentreY(*darunia) == doctest::Approx(885).epsilon(0.001));
 
-    // Names off: arrows only. No one: nothing wanted.
+    // Names off: "P<n>" marks them, still no shapes. No one: nothing wanted.
     Canvas quiet(1920, 1080);
     m.names.clear();
     CoopDraw::Draw(quiet.d, s);
-    CHECK(quiet.Of("text").empty());
+    CHECK(MapLabel(quiet, "P2"));
+    CHECK(MapLabel(quiet, "P3"));
+    CHECK_FALSE(MapLabel(quiet, "Saria"));
+    CHECK(quiet.Of("circle").empty());
+    CHECK(quiet.Of("triangle").empty());
     m.players.clear();
     CHECK_FALSE(CoopDraw::Wanted(s));
 }
@@ -966,13 +986,14 @@ TEST_CASE("hookshot draw: a player far off the minimap is held at the frame's ed
     m.players = {OnMap(2, 5000, 0, 0x0000FF)};
     s.map = &m;
     CoopDraw::Draw(c.d, s);
-    const auto dots = c.Of("circle");
-    REQUIRE(dots.size() == 2);
+    CHECK(c.Of("circle").empty());
+    const auto p2 = MapLabel(c, "P2");
+    REQUIRE(p2);
     const float right = 1728 + 552.0f / 4;  // the frame's right edge on this picture
-    CHECK(dots[1].x < right);
-    CHECK(dots[1].x > right - 20);
-    CHECK(dots[1].y == doctest::Approx(885));
-    CHECK(AlphaOf(dots[1].rgba) < 255);
+    CHECK(CentreX(*p2) < right);
+    CHECK(CentreX(*p2) > right - 20);
+    CHECK(CentreY(*p2) == doctest::Approx(885).epsilon(0.001));
+    CHECK(AlphaOf(p2->rgba) < 255);
 }
 
 TEST_CASE("hookshot map page: a pane's box from its global matrix, in the layout's units") {
@@ -1014,10 +1035,12 @@ TEST_CASE("hookshot draw: the Map page's map shows everyone in our place's map, 
     CHECK(CoopDraw::Wanted(s));
     Canvas c(1920, 1080);
     CoopDraw::Draw(c.d, s);
-    const auto dots = c.Of("circle");
-    REQUIRE(dots.size() == 2);
-    CHECK(dots[1].x == doctest::Approx(960 + 0.125f * 1000));  // 25 of 200 m: 1/8 of the half-size picture
-    CHECK(dots[1].y == doctest::Approx(540));
+    CHECK(c.Of("circle").empty());
+    CHECK(c.Of("triangle").empty());
+    const auto saria = MapLabel(c, "Saria");
+    REQUIRE(saria);
+    CHECK(CentreX(*saria) == doctest::Approx(960 + 0.125f * 1000).epsilon(0.001));  // 25 of 200 m: 1/8 of the picture
+    CHECK(CentreY(*saria) == doctest::Approx(540).epsilon(0.001));
 
     m.page.reset();
     m.minimap.reset();  // a game menu in front (the game shows no minimap), no Map page: nothing
@@ -1052,12 +1075,10 @@ TEST_CASE("hookshot draw: a player on another floor is paler, the floors after t
     s.map = &m;
     Canvas c(1920, 1080);
     CoopDraw::Draw(c.d, s);
-    const auto dots = c.Of("circle");
-    REQUIRE(dots.size() == 2);
-    CHECK(AlphaOf(dots[1].rgba) < 160);
-    bool named = false;
-    for (const auto& t : c.Of("text")) named = named || t.text == "Ruto (1 below)";
-    CHECK(named);
+    CHECK(c.Of("circle").empty());
+    const auto ruto = MapLabel(c, "Ruto (1 below)");
+    REQUIRE(ruto);
+    CHECK(AlphaOf(ruto->rgba) < 160);
 }
 
 TEST_CASE("hookshot map page: our place's map until Y turns it to the World Map, and back") {
