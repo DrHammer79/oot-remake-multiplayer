@@ -313,13 +313,24 @@ class Shoot(unittest.TestCase):
     def test_aims_a_view_that_eases_in_and_coasts_on(self):
         # The game's aim view keeps turning a few frames after the stick (NEXT13b: the up probe moved the target
         # sideways as much as the right probe did, and the loop stalled 0.11 off). Measures must wait for it.
-        g = Sim(actors=[eye(pos=(3.0, 4.0, 7.0))])
-        g.cam_keep = 0.8
+        # A slow coast (0.93, 0.95 of the speed kept a frame) must not pass for a steady drift (review-12).
+        for keep in (0.8, 0.9, 0.93, 0.95, 0.97):
+            with self.subTest(keep=keep):
+                g = Sim(actors=[eye(pos=(3.0, 4.0, 7.0))])
+                g.cam_keep = keep
+                r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+                self.assertEqual(r["result"], "hit", r)
+                self.assertLessEqual(math.hypot(*r["aim"]["error"]), km.AIM_TOL)
+                (ax, ay), (bx, by) = r["aim"]["gains"]
+                self.assertLess(abs(bx), 0.2 * abs(ax), r["aim"])   # the up probe learnt no sideways turn
+
+    def test_a_coast_with_a_drift_still_fires_nothing_off_target(self):
+        # A coasting view that also drifts: the settle ends on the drift, and the drift-off check still holds.
+        g = Sim(actors=[eye()])
+        g.cam_keep, g.drift = 0.9, 0.3
         r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
-        self.assertEqual(r["result"], "hit", r)
-        self.assertLessEqual(math.hypot(*r["aim"]["error"]), km.AIM_TOL)
-        (ax, ay), (bx, by) = r["aim"]["gains"]
-        self.assertLess(abs(bx), 0.2 * abs(ax), r["aim"])   # the up probe learnt no sideways turn from the right one
+        self.assertEqual(r["result"], "not aimed", r)
+        self.assertEqual(g.inv["PouchData.Item_DekuSeed.StockNum"], 5)
 
     def test_falls_back_to_the_left_stick(self):
         g = Sim(actors=[eye()])

@@ -53,7 +53,9 @@ AIM_FRAMES = 2
 AIM_PROBE = (0.5, 4)      # a probe of each stick axis: this strength for this many frames, to learn which way it turns
 AIM_MOVED = 0.003         # a probe that moves the target less than this on the screen did not turn the view
 AIM_MIN = 0.12            # the smallest stick that still turns the view (a dead zone)
-AIM_SETTLE = 12           # frames at most, ZR held and no stick, waiting for the view to stop after a turn
+AIM_SETTLE = 40           # frames at most, ZR held and no stick, waiting for the view to stop after a turn
+AIM_COAST_MAX = 0.97      # the largest share kept a frame that the coast's rest is worked out with
+AIM_STEADY = (2, 0.02)    # this many frames in a row whose move changed by at most this share: a steady drift
 AIM_STILL = 0.001         # the target's move on the screen in a frame below this: the view stopped
 
 ITEMS = {                 # the name a tester types -> (the `assign` name, the ammo item or None)
@@ -205,9 +207,11 @@ def _turn(client, which, x, y, frames):
 
 def _settle(client, point, out, err):
     """Hold ZR with no stick until the view stops (the game's aim view eases in and coasts on for a few frames after
-    the stick: a look before it stops reads part of the last turn as the next one's). A steady drift counts as stopped,
-    and it waits at most AIM_SETTLE frames. Returns (state, error), the error None when the target left the screen."""
-    st, last = None, None
+    the stick: a look before it stops reads part of the last turn as the next one's). A steady drift (AIM_STEADY) counts
+    as stopped; a coast slows by more than 2 % a frame, even one that keeps 0.95 of its speed. It waits at most
+    AIM_SETTLE frames. Returns (state, error), the error None when the target left the screen."""
+    st, last, run, ratio = None, None, 0, None
+    frames, share = AIM_STEADY
     for _ in range(AIM_SETTLE):
         client.input(None, ["ZR"], 1)
         out["frames"] += 1
@@ -216,12 +220,31 @@ def _settle(client, point, out, err):
             return st, None
         v = (now[0] - err[0], now[1] - err[1])
         err = now
-        # Stopped, or a steady drift (within a tenth of the frame before; a coast slows faster): the coast is over.
-        steady = last and math.hypot(v[0] - last[0], v[1] - last[1]) <= 0.1 * math.hypot(*last)
-        if math.hypot(*v) < AIM_STILL or steady:
+        r = _coast_ratio(last, v)
+        same = r is not None and (ratio is None or abs(r - ratio) < 0.05)   # the same slowing as the frame before
+        ratio = r if same else None
+        if math.hypot(*v) < AIM_STILL:
             break
+        run = run + 1 if last and math.hypot(v[0] - last[0], v[1] - last[1]) <= share * math.hypot(*last) else 0
+        if run >= frames:
+            return st, err   # a steady drift: nothing to add
         last = v
+    if ratio is not None and last is not None:
+        # A coast still slowing the same way each frame: add the turn still to come (v r + v r^2 + ...), so a slow
+        # coast stopped by AIM_STILL or AIM_SETTLE is read as where it will rest.
+        k = min(ratio, AIM_COAST_MAX)
+        err = (err[0] + v[0] * k / (1 - k), err[1] + v[1] * k / (1 - k))
     return st, err
+
+
+def _coast_ratio(last, v):
+    """The share of last frame's move kept by this one when it goes the same way and is smaller (a coast), else None."""
+    if not last:
+        return None
+    a, b = math.hypot(*last), math.hypot(*v)
+    if a <= 0 or b <= 0 or b >= a or (last[0] * v[0] + last[1] * v[1]) < 0.9 * a * b:
+        return None
+    return b / a
 
 
 def aim_view(client, point, out):
