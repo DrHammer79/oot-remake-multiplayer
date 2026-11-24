@@ -737,6 +737,71 @@ Not proven in a game yet: the probe run (two games, hs-twinrova-native) must sho
 `N owner's put in, M own skipped` in the copy's, and both games' sisters in the same attack through a forced
 hand-over.
 
+## Variations: the owner's attack variation reaches every copy (row 222 part 2, Twinrova's fire/ice)
+
+A boss move asked "by plug" carries a short name the game adds to the action's command (main+0xbe070 builds
+`RangedAttack` plain = Fire, `RangedAttack:Ice` = Ice, and the feints `1FeintFire` ...). Before, only "by plug or not"
+was sent, so a copy named whatever plug its own AI last asked for that move: Twinrova's copy threw ice for the owner's
+fire (probe 2, run 20261123-055243). Every boss move with variants had the same gap, not only Twinrova's.
+
+- Owner: the action-verb wrap reads the plug name of every request (`CoopBossNative::PlugName`), and the table keeps
+  it with the change; the boss sample sends the names of the action changes in its recent list as OBJECT_SAMPLE
+  component 24 (`BossVariants`: per change its seq + the name, empty = asked plain; at most 8 names of 32 printable
+  characters). No protocol bump: an older peer skips the unknown component and keeps today's behaviour.
+- Copy: the name of the change it puts in (also a resync and a restart) decides the plug: empty -> no plug, even when
+  its own AI's last plug was `Ice`; a name -> written once into a name pool and asked with that address; no name (an
+  older owner) -> its own AI's plug, as before. The first pool (16 slots of 40 bytes) follows the request in our block;
+  when every pool is full the game's own malloc gives another (`native boss sync: variation name pool N at ...`), so
+  every boss of a run keeps its names (the game's plug names are a bounded set; a pool lives as long as the game, as
+  the block). Only past 16 pools (256 names) does a name fall back to the copy's own plug (noted once). A move kept (not asked again) also compares the variation, so the same action in another variation is a
+  new move.
+- Tests: boss_native_test (owner keeps names by seq; plain, named and unknown put-ins, more names than a pool across two bosses, past the last pool, a resync), codec_test
+  'component 24' (round trip, an older build skips it, refusals).
+
+Not proven in a game yet: hs-twinrova-fire must show fire for fire and ice for ice on the copy, the floor on both
+screens. Merges only after the owner's OK on component 24.
+
+**The node and the places (row 222, LANE1 runs 20261123-115945 and the diag run 20261123-160338).** With the right
+name the copy still lost ice shots and aimed its floors at neither Link:
+- Twinrova's bullets and floors are made once when the room loads and reused (12 creates on each game, none stopped):
+  a missing shot is never a create we stopped.
+- An AI node keeps its own choice of a move's variation. The copy's two `Ice` put-ins were the same bytes but for the
+  node: through its StartBattle node the IceBullet came; through its own 121 node, whose own AI had just asked the
+  plain (Fire) shot, `Attack_L` played and nothing was shot (both failed put-ins of run 115945 used that node too).
+  Fix: the table keeps each node's own last choice of each move it asked (node, slot, verb -> variation, `OwnVariants`;
+  a node that chose Fire and then asked another move still holds its Fire), and a named or plain owner's move
+  never goes in through a node that chose ANOTHER variation of the same move: the slot's last node, the last node, or
+  another node of its own instead (only when every node conflicts, the move's own, as before).
+- An ask by plug names its places too (the owner's `Ice`: the Link it aims at and a second point), but component 20
+  leaves them out for an ask by plug, so the copy's move aimed at nothing (probe 3 showed the same: a place whose first
+  float is NaN is none, and the shot dropped straight from the hand). Component 20 stays as it was (an older copy puts
+  its own plug in only for an action with no place); the named ask's places go with its name in component 24, and the
+  copy puts them in with the named plug, also when the move starts over as ours (row 178 restart).
+- The put-in line names the node it used and why (`node 0x...: its node of this move / its slot's last node / its
+  last node / another node of its own / ... though it chose another variation`), and the boss summary counts the
+  put-ins moved to another node and those with no such node left (the case still open).
+- Related cases, all by the same code (every boss and mini-boss on the native sync, no name list): Koume's and Kotake's
+  own shots before the fusion, the fused Twinrova's fire, ice and feints, every move a boss asks by plug name in more
+  than one variation (StartBattle and other named moves keep working: a node whose last ask was another move never
+  conflicts), the resync and the restart of a move (same AskFor with the variation). Plain enemies are not on this path.
+- Tests: boss_native_test (a plug ask's places go with its variation; AskFor never picks a node that chose another
+  variation; a copy puts `Ice` in through a node that did not choose Fire, with the owner's place; then plain through
+  its shot node), codec_test (component 24 places: round trip, none on a plain name, finite only).
+- The places' kind (run 20261124-011531, LANE1 FAIL: as a copy, A got all three of B's 121 put-ins with the right
+  variation and node, with the owner's places, and shot nothing until it became the owner). The game's request
+  function (main+0xc09f0) takes the request's word at 0x34 (the game's default 0x10, kept when the request says 0x10)
+  and keeps it in the move's slot with the places. Each asking node sets its own: Twinrova's 121 node asks with 0
+  (places: Link and a point off him), another of her nodes with 0x10 (Link and a point 0.8 above him); verbs 28 and 80
+  ask with 0x10. Our put-in always wrote 0x10, so the owner's places went in under the wrong kind and the move spawned
+  no FireBullet or IceBullet; with no place (probe 3) the kind was not read and the node aimed by itself. The owner now
+  sends each ask's kind in component 24 (plain and named), and the copy puts the owner's action in, and starts a move
+  over as ours (row 178), with that kind; with no kind from the owner, the kind its own AI asked that same move with,
+  else 0x10 (KindFor). The other words of the request (0x44, the bytes after the flags) are not read by the function.
+  Related cases, same code: every boss move put in with places (plain or named, every boss on the native sync), the
+  restart, and the copy's own late asks (Table::Ask). Tests: boss_native_test (KindFor's order; the owner records the
+  kind; plain 0 and `Ice` 0x10 put in with the owner's kind; no owner's kind: its own AI's; the restart keeps it),
+  codec_test (the kind's round trip).
+
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
 **Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on

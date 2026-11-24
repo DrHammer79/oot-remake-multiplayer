@@ -1503,6 +1503,14 @@ std::vector<std::pair<std::uint64_t, proto::BossBsa>> Sync::BossVerbsIn() const 
     return out;
 }
 
+std::optional<proto::BossVariants> Sync::BossVariantsIn(std::uint64_t address) const {
+    const auto it = objects_.find(address);
+    if (it == objects_.end() || !it->second.bsa_in) {
+        return std::nullopt;
+    }
+    return it->second.variants_in;
+}
+
 std::vector<std::pair<std::uint64_t, proto::BossOrders>> Sync::BossOrdersIn() const {
     std::vector<std::pair<std::uint64_t, proto::BossOrders>> out;
     for (const auto& [address, o] : objects_) {
@@ -1756,6 +1764,9 @@ proto::ObjectState Sync::StateOf(Object& o, std::uint64_t now_us) {
     }
     if (o.bsa) {
         state.bsa = o.bsa;  // native boss sync: a boss's brain and action verbs
+    }
+    if (o.bsa && o.variants) {
+        state.variants = o.variants;  // row 222 part 2: its action variations (component 24)
     }
     if (o.orders) {
         state.orders = o.orders;  // row 222: its battle manager's orders
@@ -2433,6 +2444,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         }
         o.slots = s.slots;
         o.bsa = s.bsa;
+        o.variants = s.variants;
         o.orders = s.orders;
         o.attacking = AttackWithRally(s, rally_makers);
         const bool rally_held = o.attacking.value_or(false) && !s.attacking.value_or(true);
@@ -2827,6 +2839,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.animation = s->animation;
         o.slots = s->slots;
         o.bsa = s->bsa;
+        o.variants = s->variants;
         o.orders = s->orders;
         o.attacking = AttackWithRally(*s, rally_makers);
         o.seen_at = now_us;
@@ -4193,6 +4206,7 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             // new owner's first state is the one the copy starts from.
             o->received.clear();
             o->bsa_in.reset();
+            o->variants_in.reset();
             o->orders_in.reset();
             if (owner->owner == self) {
                 // Ours now, where it stands here: nothing pulls it. A hit of
@@ -4234,6 +4248,7 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             }
             if (sample->state.bsa) {
                 o->bsa_in = sample->state.bsa;  // native boss sync: the owner's boss verbs
+                o->variants_in = sample->state.variants;  // row 222 part 2: with it (none from an older owner)
                 o->boss_native = true;
             }
             if (sample->state.orders) {
