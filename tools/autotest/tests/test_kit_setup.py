@@ -32,6 +32,9 @@ class Fake:
     def act(self, line):
         return self._do("act", line)
 
+    def step(self, frames=1):
+        return self._do("step", frames)
+
 
 class Plan(unittest.TestCase):
     def test_life_is_quarter_hearts_and_the_warp_comes_last(self):
@@ -140,7 +143,7 @@ class Presets(unittest.TestCase):
         names = set(ks.presets())
         self.assertTrue({"deku-start", "deku-before-gohma", "before-dodongo", "before-barinade", "before-phantom-ganon",
                          "before-volvagia", "before-morpha", "before-bongo-bongo", "before-twinrova",
-                         "before-ganondorf"} <= names, names)
+                         "before-ganondorf", "before-ganon"} <= names, names)
 
     def test_every_preset_plans_and_every_name_is_one_the_repository_already_uses(self):
         text = _source_text()
@@ -174,6 +177,49 @@ class Presets(unittest.TestCase):
                      "Gohma_IsLightingForBattle", "Gohma_DefeatBoss", "HavePlayedEvent.InsideTheDekuTree_BossDie"):
             self.assertEqual(flags.get(name), 0, name)
         self.assertEqual(flags.get("0x7d776b61"), "DefeatBoss")
+
+    def test_age_sets_the_childhood_flag_just_before_the_warp_and_apply_lets_frames_run(self):
+        # A warp loads Link at the age of Sequence_IsChildhood; the lane recipe is setflag, wait, then warp.
+        for age, value in (("adult", 0), ("child", 1)):
+            calls = ks.plan({"age": age, "hearts": 3, "max_hearts": 3, "warp": {"scene": "ForestTemple", "entrance": "ForestTemple"},
+                             "place": {"x": 1, "y": 2, "z": 3}})
+            kinds = [c[0] for c in calls]
+            self.assertEqual(calls[kinds.index("warp") - 1], ("flag", "Sequence_IsChildhood", value))
+        for bad in ("teen", 1, None, True):
+            with self.assertRaises(ValueError):
+                ks.plan({"age": bad, "warp": {"scene": "ForestTemple"}})
+        fake = Fake()
+        ks.apply(fake, {"age": "adult", "warp": {"scene": "ForestTemple", "entrance": "ForestTemple"}})
+        self.assertEqual(fake.log, [("flag", "Sequence_IsChildhood", 0), ("step", 30), ("warp", "ForestTemple", "ForestTemple")])
+
+    def test_the_adult_boss_presets_set_the_age_and_go_through_their_dungeon(self):
+        # name: (scene, start, the intro played flag, the room's arrival point from docs/dungeons-boss.md / the start list)
+        want = {
+            "before-phantom-ganon": ("ForestTemple", "ForestTemple", "HavePlayedEvent.Dm_ForestTemple_BossIn", (-5.6, 74.67, -65.83)),
+            "before-volvagia": ("FireTemple", "FireTemple", "HavePlayedEvent.Dm_FireTemple_BossIn", (-64.51, 102.58, -0.01)),
+            "before-morpha": ("WaterTemple", "WaterTemple_FromLakeHylia", "HavePlayedEvent.Dm_WaterTemple_BossIn", (0.17, 131.36, -87.12)),
+            "before-bongo-bongo": ("ShadowTemple", "Entrance", "HavePlayedEvent.Dm_ShadowTemple_BossIn", (-138.26, -11.46, 22.01)),
+            "before-twinrova": ("SpiritTemple", "SpiritTemple_Entrance", "HavePlayedEvent.Dm_SpiritTemple_BossIn", (-0.73, 142.17, -158.59)),
+            "before-ganondorf": ("InsideGanonCastle", "Entrance", "HavePlayedEvent.Dm_InsideGanonCastle_BossIn", (0.01, 171.05, -11.31)),
+            "before-ganon": ("FinalBattleField", "FinalBattleField_Entrance", "HavePlayedEvent.Dm_FinalBattle_BossIn", (11.79, 100.05, -1.07)),
+        }
+        for name, (scene, start, intro, xyz) in want.items():
+            calls = ks.plan(ks.load_preset(name))
+            kinds = [c[0] for c in calls]
+            w = kinds.index("warp")
+            self.assertEqual(calls[w], ("warp", scene, start), name)
+            self.assertEqual(calls[w - 1], ("flag", "Sequence_IsChildhood", 0), name)   # adult, just before the warp
+            self.assertEqual(calls[-1], ("place",) + xyz, name)
+            flags = {c[1]: c[2] for c in calls if c[0] == "flag"}
+            self.assertEqual(flags.get(intro), 0, name)
+            self.assertNotIn("Stage", scene, name)
+
+    def test_the_child_boss_presets_set_the_age_and_place_link_at_the_rooms_arrival(self):
+        for name, xyz in (("before-dodongo", (24.0, 73.41, -77.5)), ("before-barinade", (42.41, 102.01, -98.14))):
+            calls = ks.plan(ks.load_preset(name))
+            w = [c[0] for c in calls].index("warp")
+            self.assertEqual(calls[w - 1], ("flag", "Sequence_IsChildhood", 1), name)
+            self.assertEqual(calls[-1], ("place",) + xyz, name)
 
     def test_the_dodongo_and_barinade_presets_load_the_dungeon_not_the_rush_room(self):
         # As the Gohma preset: the rush rooms DodongoStage and BarinadeStage are not the dungeon, and a warp straight

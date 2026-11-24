@@ -258,12 +258,14 @@ struct WarpPlan {
     WarpRoute route = WarpRoute::refuse;
     std::string code;  // for `refuse`: the bridge's error code (not_in_play, not_in_event)
     std::string why;   // for `refuse`: the text
+    std::string set_age;  // "child" or "adult": set Sequence_IsChildhood and let frames run before the warp; else empty
 };
 // Which way, from `status` (a reply with a fresh Link snapshot: an old or missing one cannot say, so it refuses), whether
 // the caller named an `entrance`, and the `scene` asked: an event runs -> event; none and no entrance -> teleport; none
 // and an entrance -> refuse (the teleport has no start position, the event-only request does). Longshot's teleport picks
-// the map for Link's current age, so a `scene` ending in the other age (`_Child`/`_Adult`, any case) is refused
-// (`wrong_age`) on that route; the event request sets the age itself.
+// the map for Link's current age, so in free play a `scene` ending in the other age (`_Child`/`_Adult`, any case)
+// goes by the map change event with `set_age` filled (the caller sets the age flag and runs frames first); the event
+// request sets the age itself.
 WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::string_view scene);
 // What the teleport route does with Longshot's ok reply (`sent`, `map`: the map it sent, `accepted`: the game's event
 // manager's answer): `accepted` false fails now (`refused`) instead of waiting out the timeout; else wait for `map`

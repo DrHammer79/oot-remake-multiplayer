@@ -27,8 +27,8 @@ MAX_FRAMES = 3600
 class BridgeError(Exception):
     """The game refused a command (ok false): its error code (bad_request, busy, no_control, not_in_play,
     not_in_event, wrong_age, refused, not_ready, timeout, failed) and message. `not_in_event`: a warp in free play that only an
-    event can take (an entrance, or a map Longshot's teleport does not list); `wrong_age`: a scene name ending in the
-    other age than Link's; `refused`: a verb the gate shuts, a strike id with no world list, or a full
+    event can take (an entrance, or a map Longshot's teleport does not list); `wrong_age`: not answered now (a scene name ending in the
+    other age sets that age first); `refused`: a verb the gate shuts, a strike id with no world list, or a full
     strike queue."""
 
     def __init__(self, reply):
