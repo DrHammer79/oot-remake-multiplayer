@@ -107,6 +107,7 @@
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 #include "coop_objects_sync.h"
+#include "coop_roll_mirror.h"
 #include "coop_follow.h"
 #include "coop_frame_clock.h"
 #include "coop_link_sound.h"
@@ -520,9 +521,6 @@ void RollProbe(R& r, u64 a, const S& s, u64 now_ms, const std::optional<Mat3>& o
     LOG_INFO(Core, "coop: roll probe: {:#x} {} '{}' frame {:.1f} rate {:.2f} at {} ms: ours {} owner {}", a,
              owner ? "copy" : "own", s.animation->name, s.animation->frame, s.animation->rate, now_ms,
              fmt(s.rotation), owner ? fmt(std::optional<std::array<float, 9>>(*owner)) : std::string("-"));
-    if (owner) {
-        return;  // the words: in the owner's game only
-    }
     std::vector<float> words(0x200, 0.0f);
     for (std::size_t i = 0; i < words.size(); ++i) {
         words[i] = r.template Get<float>(a + 4 * i).value_or(0.0f);
@@ -680,6 +678,7 @@ public:
         std::array<float, 12> transform{};  // place, then the 3x3 rows
         bool rotation = false;              // false: keep the actor's own
         bool asleep = false;                // state 6 may be moved too (issue 101)
+        bool mirror = false;                // the rotation also at +0x60c (coop_roll_mirror.h)
         // jitter-b (coop_follow.h): a townsperson's velocity, metres a second: followed
         // each game frame from when it was wished. Unset: written where it is.
         std::optional<std::array<float, 3>> velocity;
@@ -1298,6 +1297,11 @@ public:
             }
             if (p.rotation) {
                 guest.Write(p.actor + kActorPosition, followed.transform.data(), 48);
+                if (std::array<float, 9> second{};
+                    p.mirror && guest.Read(p.actor + CoopRollMirror::kSecondRotation, second.data(), sizeof(second)) &&
+                    CoopRollMirror::IsRotation(second)) {
+                    guest.Write(p.actor + CoopRollMirror::kSecondRotation, followed.transform.data() + 3, sizeof(second));
+                }
             } else {
                 guest.Write(p.actor + kActorPosition, followed.transform.data(), 12);
             }
@@ -6210,6 +6214,11 @@ private:
             if (w.rotation) {
                 std::copy(w.rotation->begin(), w.rotation->end(), p.transform.begin() + 3);
                 p.rotation = true;
+                static const bool mirror_on = EnvHex("LICHII_COOP_ROLL_MIRROR") != 0 || std::getenv("LICHII_COOP_ROLL_MIRROR") == nullptr;
+                if (const auto name = names_.find(w.address);
+                    mirror_on && name != names_.end() && CoopRollMirror::Mirrors(name->second.first)) {
+                    p.mirror = true;
+                }
             }
             // jitter-b: a townsperson is followed in even steps each game frame (coop_follow.h). Issue 239 /
             // rows 37, 54: an enemy copy too (plain, mid-boss, boss). Its place was worked out at the present
