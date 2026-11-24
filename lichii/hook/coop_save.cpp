@@ -2,6 +2,7 @@
 
 #include "coop_save.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -93,6 +94,9 @@ const void* g_decided_client = nullptr;   // the session's client it was made fo
 bool g_decided_host = false;
 // Row 273: the own folder a switch back to failed for (save::home_due): not tried again every frame.
 fs::path g_home_failed;
+// Row 273: this game took over the host's role with other players staying, on the co-op folder (the group's game): it
+// keeps playing that save for the session (save::keeps_group_save), never sent its own older save instead.
+bool g_group_save = false;
 // The session the choice was made for was seen over while a file was loaded (the choice is kept then: no switch under
 // a game being played). A new session connected in that state chooses again (save::rejoined_in_game).
 bool g_ended = false;
@@ -157,6 +161,12 @@ save::WriteResult WriteSlotTo(const fs::path& dir, const save::SaveSlot& slot, b
 void PendingFrame();
 void AskAtTitle();
 
+// Another player in this game's session (not this game): with them, a new host keeps the group's save (row 273).
+bool OthersIn(const coop::net::Client& client) {
+    const auto& players = client.players();
+    return std::any_of(players.begin(), players.end(), [](const auto& p) { return !p.self; });
+}
+
 // Under g_mutex: a session's choice with a file loaded (a Join from the pause menu, a rejoin during play): nothing
 // of the folder is touched under the game being played. A guest asks for the host's save as on any join; it is
 // written and switched to on the title's menu (AskAtTitle), and the chat says so.
@@ -164,6 +174,7 @@ void DecideInGame(coop::net::Client& client) {
     g_decided = true;
     g_decided_client = &client;
     g_decided_host = client.is_host();
+    g_group_save = client.is_host() && save::keeps_group_save(save::is_coop_dir(g_dir), OthersIn(client));
     g_ended = false;
     if (client.is_host()) {
         g_use = false;
@@ -171,8 +182,8 @@ void DecideInGame(coop::net::Client& client) {
         g_lines = save::GuestNotices{g_in_game};
         g_pending.clear();
         g_suspended = false;
-        LOG_INFO(Core, "coop: save: the host (a file is loaded): this game keeps the saves it plays ({})",
-                 g_dir.string());
+        LOG_INFO(Core, "coop: save: the host (a file is loaded): this game keeps the saves it plays ({}){}",
+                 g_dir.string(), g_group_save ? ", the group's save, for this session" : "");
         return;
     }
     if (TestOwnSave()) {
@@ -189,6 +200,28 @@ void DecideInGame(coop::net::Client& client) {
                    "to {} and switched to on the title's menu, the game played now keeps {}",
              g_pending.string(), g_dir.string());
     Say(std::string(save::GuestNotices::kJoinedPlaying));
+}
+
+// Under g_mutex (row 273): on the title with the co-op folder (the host's save) mounted, a game no live session holds
+// there goes back to its own folder: the session ended (the Leave, the server gone: solo), or it hosts alone (a lone
+// rejoiner, a host that took over during play with nobody staying). A live guest, and a new host whose group stayed
+// (g_group_save), keep the group's save for the session. The title then offers its own saves, and what it plays next
+// is saved there, never into the co-op folder that the next join empties.
+void HomeFrame() {
+    if (g_dir.empty() || g_dir == g_home_failed) return;
+    if (!save::home_due(save::is_coop_dir(g_dir), g_title_up && !g_suspended, g_in_game,
+                        g_decided && (g_use || g_group_save))) {
+        return;
+    }
+    const fs::path own = save::own_dir_of(g_dir);
+    if (RemountLocked(own)) {
+        LOG_INFO(Core, "coop: save: on the title and no session holds the co-op save here: back on this game's own "
+                       "saves");
+    } else {
+        g_home_failed = g_dir;
+        LOG_WARNING(Core, "coop: save: could not switch the save folder back to {}: this game keeps {}", own.string(),
+                    g_dir.string());
+    }
 }
 
 // Under g_mutex, each frame where the folder can be switched (Hookshot): the folder as mounted, and the choice.
@@ -220,6 +253,7 @@ void SwitchFrame(coop::net::Client& client) {
             g_ended = false;
             g_guest_played = false;   // (the title's ask is this session's)
             g_title_ask = false;
+            g_group_save = false;
             LOG_INFO(Core, "coop: save: the session is over: the next one chooses the save folder again");
         } else if (g_decided && over) {
             g_ended = true;   // (a file is loaded: the choice is kept for the title, or for a rejoin below)
@@ -231,24 +265,13 @@ void SwitchFrame(coop::net::Client& client) {
         }
         g_live = g_decided && !over;   // (decided below in this frame: on from the next one)
     }
-    // Row 273: on the title with the co-op folder (the host's save) mounted, a game that is not a guest of a live
-    // session (it hosts now, or its session ended) goes back to its own folder: the title offers its own saves, and
-    // what it plays next is saved there, never into the co-op folder that the next join empties.
-    if (!g_dir.empty() && g_dir != g_home_failed &&
-        save::home_due(save::is_coop_dir(g_dir), g_title_up && !g_suspended, g_in_game, g_live && g_use)) {
-        const fs::path own = save::own_dir_of(g_dir);
-        if (RemountLocked(own)) {
-            LOG_INFO(Core, "coop: save: on the title and not a guest of a session: back on this game's own saves");
-        } else {
-            g_home_failed = g_dir;
-            LOG_WARNING(Core, "coop: save: could not switch the save folder back to {}: this game keeps {}",
-                        own.string(), g_dir.string());
-        }
-    }
     if (!g_decided && !g_dir.empty()) {
         const bool connected = client.state() == coop::net::State::connected && client.host_number() != 0;
         auto choice = save::folder_choice(std::nullopt, true, connected, connected && client.is_host(), g_in_game);
-        if (choice == save::FolderChoice::wait) return;
+        if (choice == save::FolderChoice::wait) {
+            HomeFrame();   // (no session: the Leave, a server gone, solo)
+            return;
+        }
         if (choice == save::FolderChoice::coop_later) {
             DecideInGame(client);
             PendingFrame();
@@ -261,10 +284,11 @@ void SwitchFrame(coop::net::Client& client) {
         g_decided = true;
         g_decided_client = &client;
         g_decided_host = connected && client.is_host();
+        g_group_save = g_decided_host && save::keeps_group_save(save::is_coop_dir(g_dir), OthersIn(client));
         // Both sides start on the game's own folder: a guest moves to the co-op one only once the host's save is
-        // whole in it (PendingFrame), never onto an empty one.
+        // whole in it (PendingFrame), never onto an empty one. A new host with others staying keeps the group's save.
         const fs::path own = save::is_coop_dir(g_dir) ? save::own_dir_of(g_dir) : g_dir;
-        if (own != g_dir) {
+        if (own != g_dir && !g_group_save) {
             if (!RemountLocked(own)) {
                 LOG_WARNING(Core, "coop: save: could not switch the save folder back to {}: this game keeps {}",
                             own.string(), g_dir.string());
@@ -282,10 +306,14 @@ void SwitchFrame(coop::net::Client& client) {
             LOG_INFO(Core, "coop: save: a guest: this game plays from the co-op save folder (the host's save) in {} "
                            "once the host's save is written there; until then it stays on {}",
                      g_pending.string(), g_dir.string());
+        } else if (g_group_save) {
+            LOG_INFO(Core, "coop: save: the host now, with other players staying: this game keeps the group's save "
+                           "in {} for this session", g_dir.string());
         } else if (connected && client.is_host()) {
             LOG_INFO(Core, "coop: save: the host: this game uses its own saves");
         }
     }
+    HomeFrame();
     PendingFrame();
 }
 

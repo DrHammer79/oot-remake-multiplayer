@@ -548,8 +548,12 @@ bool role_changed(bool decided, bool connected, bool decided_as_host, bool is_ho
   return decided && connected && decided_as_host != is_host;
 }
 
-bool home_due(bool on_coop_dir, bool title_menu, bool in_game, bool live_guest) {
-  return on_coop_dir && title_menu && !in_game && !live_guest;
+bool home_due(bool on_coop_dir, bool title_menu, bool in_game, bool held) {
+  return on_coop_dir && title_menu && !in_game && !held;
+}
+
+bool keeps_group_save(bool on_coop_dir, bool others_in) {
+  return on_coop_dir && others_in;
 }
 
 std::optional<SaveValueAt> save_value_at(std::span<const std::uint8_t> progress, std::uint32_t hash,

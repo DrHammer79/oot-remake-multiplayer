@@ -381,11 +381,16 @@ bool rejoined_in_game(bool decided, bool ended, bool connected, bool in_game);
 // role is only read then; during the reconnect nothing changes).
 bool role_changed(bool decided, bool connected, bool decided_as_host, bool is_host);
 // Row 273: a game on the co-op folder (the host's save) goes back to its own folder once it is on the title's menu
-// (`title_menu`: no file being picked) with no file played, and is not a guest of a live session: it hosts now (it
-// was a guest, or it took over the host's role while a file was played), or no session holds it (the session
-// ended). Never under a game being played or loaded; a live guest stays on the co-op folder (also while it
-// reconnects).
-bool home_due(bool on_coop_dir, bool title_menu, bool in_game, bool live_guest);
+// (`title_menu`: no file being picked) with no file played, and no live session holds it there (`held`: a guest of a
+// live session, or a new host whose group stayed: keeps_group_save). So: the session ended (the Leave, the server
+// gone: solo), or it hosts alone (a lone rejoiner, a host that took over during play with nobody staying). Never
+// under a game being played or loaded.
+bool home_due(bool on_coop_dir, bool title_menu, bool in_game, bool held);
+// Row 273 (A #97's decision): a game that becomes the host with other players staying (a host migration, or others
+// back on a restarted server before its choice) while on the co-op folder keeps playing that save, the group's game,
+// for the whole session: the group's progress stays offered and no older own save goes to the guests. A host alone
+// goes to its own saves.
+bool keeps_group_save(bool on_coop_dir, bool others_in);
 
 // A guest's pending switch to the co-op folder (Hookshot), each frame: `go` only on the title's menu with the host's
 // save in and no file loaded (never during a load, where a re-mount changes the folder under the game's read: the

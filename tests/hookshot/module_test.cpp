@@ -1088,10 +1088,17 @@ TEST_CASE("hookshot: a guest that joins with a file loaded asks for the host's s
     CHECK(frame.find("st == coop::net::State::refused || role;") != std::string::npos);
     CHECK(frame.find("g_decided_host = connected && client.is_host();") != std::string::npos);
     CHECK(in_game.find("g_decided_host = client.is_host();") != std::string::npos);
-    const auto home = frame.find("save::home_due(");
-    REQUIRE(home != std::string::npos);
-    CHECK(frame.find("g_live && g_use", home) != std::string::npos);
-    CHECK(frame.find("RemountLocked(own)", home) < frame.find("if (!g_decided && !g_dir.empty())", home));
+    // A new host with others staying keeps the group's save (no remount); HomeFrame runs after the choice (and with
+    // no session), and only a game no live session holds goes home.
+    CHECK(frame.find("g_group_save = g_decided_host && save::keeps_group_save(") != std::string::npos);
+    CHECK(frame.find("if (own != g_dir && !g_group_save) {") != std::string::npos);
+    CHECK(in_game.find("save::keeps_group_save(save::is_coop_dir(g_dir), OthersIn(client))") != std::string::npos);
+    CHECK(frame.find("HomeFrame();
+    PendingFrame();") != std::string::npos);
+    CHECK(frame.find("save::home_due(") == std::string::npos);
+    const std::string home = body("void HomeFrame() {");
+    CHECK(home.find("g_decided && (g_use || g_group_save)") != std::string::npos);
+    CHECK(home.find("RemountLocked(own)") != std::string::npos);
     // On the title before the new save is in, a game still on an earlier host's co-op folder goes back to its own
     // first, through the one switch path (never the older save offered).
     const std::string pending = body("void PendingFrame() {");
