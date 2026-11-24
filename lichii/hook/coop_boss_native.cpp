@@ -422,11 +422,9 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                 e.hold_asks = 0;
                 e.hold_rechoices = 0;
                 e.stall_rechoices = 0;  // (another game's turn since: judged anew)
-                if (e.role == Role::owner) {
-                    // Row 177 review: learnt again as a copy from its own asks. A copy that stays a copy (the
-                    // owner changed between other players) keeps its own: else NEXT29, an attack with no bullet.
-                    ForgetOwnAsks(e);
-                }
+                // (own asks kept across a role change: all learnt as a copy, the owner learns none; a brain
+                // change forgets them, as an owner too. NEXT29 and NEXT36b: a copy that had them forgotten put
+                // its attacks in through another move's node, no bullet.)
                 if (b.role == Role::copy) {
                     // Twinrova hand-over: the chain we held, so the new owner's changes after it are made in
                     // order (Receive), not collapsed into a resync of its last move.
@@ -704,6 +702,9 @@ bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool o
     if (e->role == Role::owner) {
         if (event_) {
             return false;  // our event's verb (its cutscene), not the fight's: sent when it is over
+        }
+        if (e->have_mine && e->mine.brain_verb != verb) {
+            ForgetOwnAsks(*e);  // row 177 review: a brain change while we run it (its nodes may go with it)
         }
         e->mine.brain_verb = verb;
         Record(*e, BossBrain{verb, force});

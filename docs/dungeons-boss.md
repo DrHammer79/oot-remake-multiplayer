@@ -849,9 +849,11 @@ change:
 1. Tried and taken back: keeping the own asks (each move's node, plug and variation, `AskFor`) across a hand-over,
    and the owner learning its own asks. Lane run NEXT36: a former owner made a copy put the owner's Attack_R in
    through a node its AI had named while it was the owner, and 0 of 3 fired a bullet. The node its own AI names as a
-   copy works (NEXT29). So a change from owner to copy still forgets them (row 177's review), and the copy learns
-   them again from its own asks, which its AI makes right after the hand-over. A copy that stays a copy (the owner
-   changes between other players) keeps its own: forgetting them put its attack in through Fly's node (NEXT29).
+   copy works (NEXT29). So the owner learns none, and a role change keeps the copy's own (forgetting them there put
+   the copy's attacks in through another move's node, no bullet: NEXT29 copy to copy, NEXT36b and NEXT48 owner to
+   copy). A brain change still forgets them, as an owner too (row 177's review). NEXT48 showed that this also loses
+   the attack's node (no bullet after a brain change); the same node came back after a forget, so keeping them per
+   brain verb is the next step.
 2. The new copy started again from the new owner's first state (a resync: only the move it is in now). Every move the
    new owner made before that state reached us was lost. A new owner counts on from the last state it had of the old
    owner, so its changes up to our newest seq are ours when it had all of them. Now the chain we held is kept (our own
@@ -862,7 +864,7 @@ change:
 
 No protocol change. Solo play and owners are not touched. Not covered: a copy made
 the owner drops the old owner's moves still queued (its own AI runs the boss from here). Tests: boss_native_test
-("Twinrova hand-over": a former owner's nodes are not the copy's, a copy that stays a copy keeps its own; both moves the new owner made are put
+("Twinrova hand-over": a former owner's nodes are not the copy's, a copy keeps its own across role changes; both moves the new owner made are put
 in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
