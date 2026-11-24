@@ -512,6 +512,7 @@ struct Stats {
   std::uint64_t owner_changes = 0;      // owner set or moved (not first owner)
   std::uint64_t damage_relayed = 0;     // DAMAGE passed on to an owner
   std::uint64_t boss_to_hitter = 0;     // a boss asked over to the player who hurt it (issue 150)
+  std::uint64_t stun_to_stunner = 0;    // a plain enemy asked over to the player who stunned it (ai-stuns)
   std::uint64_t boss_to_near = 0;       // a boss asked over to the player near it (issue 150)
   std::uint64_t boss_to_grabbed = 0;    // row 232: a boss asked over to a game whose Link its summoned piece holds
   std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)

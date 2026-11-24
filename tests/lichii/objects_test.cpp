@@ -5161,6 +5161,49 @@ TEST_CASE("objects: a boss copy stunned here sends a DAMAGE of 0 and keeps its s
     CHECK(step.writes.empty());
 }
 
+// ai-stuns: a nut, boomerang or hookshot stun on a plain enemy's copy takes no life: the copy's own game stuns it, and
+// a DAMAGE of 0 asks the server to hand it to us. The owner's animation is not played over the stun.
+TEST_CASE("objects: a plain enemy's copy stunned here sends a DAMAGE of 0 and keeps its stun (ai-stuns)") {
+    const std::string lizalfos = "Enemy_Lizalfos";
+    Sync owner;
+    Seen e = Enemy(0x100, 0x11, 6, 0.0f, lizalfos);
+    e.animation = proto::Animation{"Walk", 10.0f, 1.0f};
+    Tick(owner, 0, {e});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Own(owner, id, 1, 3);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 10 * kMs, {e}));
+    REQUIRE(samples.size() == 1);
+
+    Sync copy;
+    Seen c = Enemy(0x200, 0x11, 6, 0.0f, lizalfos);
+    c.animation = proto::Animation{"Walk", 10.0f, 1.0f};
+    Tick(copy, 0, {c}, 2);
+    Own(copy, id, 1, 3);
+    proto::ObjectSample s = samples[0];
+    s.player_number = 1;
+    s.state.time = {1000 * kMs, 1};
+    copy.Receive(s);
+    CHECK(All<proto::Damage>(Tick(copy, 1010 * kMs, {c}, 2)).empty());
+
+    c.animation = proto::Animation{"StunA_St", 0.0f, 1.0f};
+    auto damage = All<proto::Damage>(Tick(copy, 1100 * kMs, {c}, 2));
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].id == id);
+    CHECK(damage[0].epoch == 3);
+    CHECK(damage[0].amount == 0);
+    std::vector<CoopObjects::PlayWish> plays;
+    copy.Plays(1110 * kMs, plays);
+    CHECK(plays.empty());
+    CHECK(copy.TakeOwnStuns().empty());  // the boss table's own time is a boss's only
+    // Its knock-down is not kept from the owner's play (a plain enemy's own move).
+    CoopObjects::PlayWish wish;
+    wish.name = "Walk";
+    wish.keep_own_stun = true;
+    wish.stun_plain = true;
+    CHECK(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
+    CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Down_Start"));
+}
+
 TEST_CASE("objects: a boss copy's own stun is told every walk while it plays, never the owner's (row 169)") {
     const std::string dodongo = "Enemy_DungeonBoss_Dodongo";
     Sync owner;
@@ -5346,19 +5389,24 @@ TEST_CASE("objects: a boss's brain and action verbs go with its samples, a new o
     CHECK_FALSE(ps[0].state.bsa);
 }
 
-TEST_CASE("objects: no stun DAMAGE from a plain enemy, our own boss, or when the owner is stunned too") {
+TEST_CASE("objects: no stun DAMAGE from our own enemy, a plain enemy's knock-down, or when the owner is stunned too") {
     const std::string gohma = "Enemy_DungeonBoss_Gohma";
     Seen plain = Enemy(0x300, 0x33, 2, 0.0f, "Enemy_Stalchild");
     plain.animation = proto::Animation{"Walk", 0.0f, 1.0f};
+    Seen mine = Enemy(0x500, 0x55, 2, 0.0f, "Enemy_Stalchild");
+    mine.animation = proto::Animation{"Walk", 0.0f, 1.0f};
     Seen boss = Enemy(0x400, 0x44, 12, 0.0f, gohma);
     boss.animation = proto::Animation{"Walk", 0.0f, 1.0f};
     Sync sync;
-    Tick(sync, 0, {plain, boss}, 2);
+    Tick(sync, 0, {plain, mine, boss}, 2);
     Own(sync, *sync.IdOf(0x300), 1);
+    Own(sync, *sync.IdOf(0x500), 2);  // ours
     Own(sync, *sync.IdOf(0x400), 2);  // ours
-    plain.animation = proto::Animation{"Stun_Lp", 0.0f, 1.0f};
+    // ai-stuns: a plain enemy's 'Down' / 'Fall' are its own moves or a hit's, no stun; only a boss's are.
+    plain.animation = proto::Animation{"Down_Start", 0.0f, 1.0f};
+    mine.animation = proto::Animation{"Stun_Lp", 0.0f, 1.0f};
     boss.animation = proto::Animation{"Stun_Lp", 0.0f, 1.0f};
-    CHECK(All<proto::Damage>(Tick(sync, 100 * kMs, {plain, boss}, 2)).empty());
+    CHECK(All<proto::Damage>(Tick(sync, 100 * kMs, {plain, mine, boss}, 2)).empty());
 
     // A copy whose owner's boss is stunned already: its stun is the owner's.
     Sync owner;

@@ -1603,7 +1603,7 @@ TEST_CASE("objects: row 175, the Mover's report of a painting's own death marks 
     REQUIRE(plays.size() == 1);
     CHECK(plays[0].name == "Pct_Wait");
     CHECK(plays[0].keep_own_death);  // the owner's idle never covers its own death
-    CHECK_FALSE(plays[0].keep_own_stun);
+    CHECK(plays[0].stun_plain);  // ai-stuns: a plain enemy keeps only its own plain stun (no Down, no Fall)
     send.clear();
 
     // The Mover saw its own 'Pct_Die' in slot 0 and did not cover it; the walk has not seen it yet.

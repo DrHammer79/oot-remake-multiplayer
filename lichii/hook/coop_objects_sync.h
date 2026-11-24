@@ -146,11 +146,12 @@ struct PlayWish {
     bool alias = false;
     float loop = 0.0f;
     float run = -1.0f;
-    // Row 175: never played over the copy's own death (`keep_own_death`) or a boss copy's own stun
-    // (`keep_own_stun`) in slot 0. We read those from its own animation (PictureDeathHere, LifelessKillHere,
+    // Row 175: never played over the copy's own death (`keep_own_death`) or a copy's own stun
+    // (`keep_own_stun`; ai-stuns: a plain enemy's too, `stun_plain`: only IsPlainStunAnimation) in slot 0. We read those from its own animation (PictureDeathHere, LifelessKillHere,
     // row 169's own stun), and a play put over it at once erased it before any walk saw it (CoversOwnReaction).
     bool keep_own_death = false;
     bool keep_own_stun = false;
+    bool stun_plain = false;
 };
 
 // The frame of an animation `age_us` after it showed `frame` at `rate`
@@ -577,6 +578,14 @@ bool UnderCeilingEnemy(const coop::protocol::Vec3& enemy, const coop::protocol::
 // Gerudo Thief), ShortStun (Big Octo), Dark Link's Dark_Chance / DarkChance,
 // Paralysis and Freeze, and Ganon's Tail_Chance.
 bool IsStunAnimation(std::string_view name);
+
+// ai-stuns: a plain (not boss) enemy's stun of a hit that takes no life (a Deku Nut, the boomerang, the hookshot):
+// the first word starts with Stun ('Stun_Lp', the Lizalfos' 'StunA_St'), or is ShortStun, Paralysis or Faint.
+// Not 'Down', 'Fall', 'Chance' or 'Freeze': a plain enemy's own moves or a hit's reaction that takes life.
+bool IsPlainStunAnimation(std::string_view name);
+
+// The stun rule for an enemy of this name: IsStunAnimation for a boss or its part, else IsPlainStunAnimation.
+bool IsStunFor(std::string_view actor, std::string_view animation);
 
 // An animation name without its level-of-detail suffix ("Wait_ModelOnlyLOD"
 // is "Wait"), so a far copy's LOD variant is not another animation.
