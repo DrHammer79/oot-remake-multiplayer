@@ -404,7 +404,7 @@ TEST_CASE("mods tab: a long note and description are pages of the About row, the
         CHECK(FitsHelpBox(list.help));
         tab.Press(Input::kDecide);
         REQUIRE(tab.on_mod_page());
-        for (const auto& row : tab.view().rows) CHECK(row.kind != RowKind::kNote || row.name.rfind("By ", 0) == 0);
+        for (const auto& row : tab.view().rows) CHECK((row.kind != RowKind::kNote || row.name.rfind("By ", 0) == 0));
         const auto first = tab.view();
         REQUIRE(first.rows[first.selected].name == "About");
         const std::string count = first.rows[first.selected].value;   // "1/2"
