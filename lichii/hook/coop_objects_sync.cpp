@@ -1003,6 +1003,16 @@ bool IsStunAnimation(std::string_view name) {
            base.starts_with("Tail_Chance");
 }
 
+bool IsPlainStunAnimation(std::string_view name) {
+    const std::string_view base = AnimationBase(name);
+    const std::string_view first = base.substr(0, base.find('_'));
+    return first.starts_with("Stun") || first == "ShortStun" || first == "Paralysis" || first == "Faint";
+}
+
+bool IsStunFor(std::string_view actor, std::string_view animation) {
+    return IsBossOrPart(actor) ? IsStunAnimation(animation) : IsPlainStunAnimation(animation);
+}
+
 proto::Quat QuatOf(const Mat3& m) {
     // m[3 * row + column], Shepperd's method. Rows that are not unit length
     // (a read of something else) give no turn.
@@ -2409,25 +2419,33 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         // server to hand the boss to us, whose boss is the stunned one.
         // Row 169: every walk while a stun begun here plays, it is the copy's own time (TakeOwnStuns); a stun the
         // copy began as the owner's is not, also in the walk or two it still plays after the owner's ended.
+        // ai-stuns: a plain enemy's copy the same (a nut, boomerang or hookshot stun here takes no life): the
+        // server hands it to us, the stunner, whose enemy is the stunned one. Only a boss goes to the boss table.
         bool own_stun = false;
-        if (s.animation && IsStunAnimation(s.animation->name) && IsBossOrPart(s.name)) {
+        if (s.animation && IsStunAnimation(s.animation->name) && IsStunFor(s.name, s.animation->name)) {
             const auto owner = owners_.find(o.id);
             const std::string owners = !o.received.empty() && o.received.back().animation
                                            ? o.received.back().animation->name
                                            : std::string{};
             if (owner != owners_.end() && owner->second.player != 0 &&
                 owner->second.player != self && !IsStunAnimation(owners)) {
-                if (!(o.animation && IsStunAnimation(o.animation->name))) {
+                if (!(o.animation && IsStunFor(s.name, o.animation->name))) {
                     own_stun = true;
                     o.react_at = now_us;
                     o.react_over = owners;
-                    if (o.stun_at == 0 || now_us - o.stun_at >= kStunEveryUs) {
+                    // Not when another player's shot copy hit there: that stun is the thrower's (its game asks).
+                    // Unless its game's own hit record says the hit was ours (issue 133): then the stun is ours.
+                    const bool ours = (s.hit_ours && *s.hit_ours) ||
+                                      (o.ours_hit_at != 0 && now_us >= o.ours_hit_at &&
+                                       now_us - o.ours_hit_at <= kOurHitKeepUs);
+                    const bool theirs = !ours && shot_hit_near_ && shot_hit_near_(s.position, now_us);
+                    if (!theirs && (o.stun_at == 0 || now_us - o.stun_at >= kStunEveryUs)) {
                         o.stun_due = true;
                     }
                 } else {
                     own_stun = o.own_stun;
                 }
-                if (own_stun && own_stuns_.size() < 64) {
+                if (own_stun && IsBossOrPart(s.name) && own_stuns_.size() < 64) {
                     own_stuns_.push_back(o.address);
                 }
             }
@@ -3248,7 +3266,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 notes_.emplace_back("its copy died here (a painting, our hit): the kill goes to its owner: " + o.name);
             }
         }
-        // Issue 150: our boss copy's own stun, as a DAMAGE of 0.
+        // Issue 150: our boss copy's own stun, as a DAMAGE of 0 (ai-stuns: a plain enemy's copy too).
         if (o.stun_due) {
             o.stun_due = false;
             if (known && owner->second.player != self) {
@@ -4828,7 +4846,8 @@ bool CoversOwnReaction(const PlayWish& wish, std::string_view slot_name) {
     if (wish.keep_own_death && IsDeathAnimation(slot_name) && !IsDeathAnimation(wish.name)) {
         return true;
     }
-    return wish.keep_own_stun && IsStunAnimation(slot_name) && !IsStunAnimation(wish.name);
+    const bool stunned = wish.stun_plain ? IsPlainStunAnimation(slot_name) : IsStunAnimation(slot_name);
+    return wish.keep_own_stun && stunned && !IsStunAnimation(wish.name);
 }
 
 bool DeathReadFromAnimation(std::string_view name, bool reacts, bool life_read) {
@@ -4955,10 +4974,11 @@ void Sync::Plays(std::uint64_t now_us, std::vector<PlayWish>& out) const {
             wish.frame =
                 CoopNpcAnim::Wrapped(FrameAfter(wanted->frame, wish.run, age), wish.loop);
         }
-        // Row 175: its own death (or a boss's own stun) here is read from its own animation: never covered by the
-        // owner's (CoversOwnReaction).
+        // Row 175: its own death (or its own stun, ai-stuns: a plain enemy's too) here is read from its own
+        // animation: never covered by the owner's (CoversOwnReaction).
         out.back().keep_own_death = DeathReadFromAnimation(o.name, o.reacts, o.life.has_value());
-        out.back().keep_own_stun = IsBossOrPart(o.name);
+        out.back().keep_own_stun = true;
+        out.back().stun_plain = !IsBossOrPart(o.name);
         // Issue 150: a boss's other slots (Gohma's eye guard and eyelids,
         // whose AS events open and close the eye's guard). Without them
         // each game's copy kept its own AI's guard: the eye stood open for

@@ -3828,6 +3828,46 @@ TEST_CASE("issue 150: a DAMAGE of 0 (a stun in the hitter's game) asks for the b
         std::vector<HandoverState>{{1, placed(7), 1, state_at(0, 12)}});
 }
 
+// ai-stuns: a nut, boomerang or hookshot stun on a plain enemy's copy (a DAMAGE of 0) hands the enemy to the
+// stunner, whose game has the stunned enemy; every other game follows the new owner, a third one too.
+TEST_CASE("ai-stuns: a stun on a plain enemy's copy hands it to the stunner, and a third game follows") {
+  OwnerHarness h;
+  h.join(3, "Saria");
+  h.receive(3, present_in("Field", {placed(7)}), kChannelOwnership);
+  h.stand(1, 4);  // all three near it: a hit with life would not move it
+  h.stand(2, 6);
+  h.stand(3, 8);
+  h.clear();
+  h.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+  CHECK(h.session.stats().stun_to_stunner == 1);
+  h.receive(1, HandoverState{0, placed(7), 0, state_at(0, 12)}, kChannelOwnership);
+  CHECK(h.session.object_owner(placed(7)) == owned(2, 1));
+  CHECK(messages_to<ObjectOwner>(h, 3) == std::vector<ObjectOwner>{{placed(7), 2, 1, 0}});
+  // The stunner's samples (its stunned enemy) reach the third game.
+  h.clear();
+  h.receive(2, ObjectSample{0, placed(7), 1, state_at(1, 12)}, kChannelObjectSamples);
+  CHECK(messages_to<ObjectSample>(h, 3).size() == 1);
+  // Player 3's stun within 5 s of the change waits.
+  h.run(kSecond);
+  h.clear();
+  h.receive(3, Damage{0, placed(7), 1, 0, 0, {}, {}}, kChannelOwnership);
+  CHECK(messages_to<HandoverAsk>(h, 2).empty());
+  // After it, player 1's stun takes it back, though player 1 gave it up lately and player 2 stands by it.
+  h.run(5 * kSecond);
+  h.clear();
+  h.receive(1, Damage{0, placed(7), 1, 0, 0, {}, {}}, kChannelOwnership);
+  CHECK(messages_to<HandoverAsk>(h, 2) == std::vector<HandoverAsk>{{placed(7), 1, 1}});
+  CHECK(h.session.stats().stun_to_stunner == 2);
+
+  OwnerHarness far;  // a stunner over 30 m from it: no move
+  far.stand(1, 4);
+  far.stand(2, 60);
+  far.clear();
+  far.receive(2, Damage{0, placed(7), 0, 0, 0, {}, {}}, kChannelOwnership);
+  CHECK(far.asks() == 0);
+}
+
 // Hand-over life (fable-g2-bosses, rows 104/118, issue 150): the life the new
 // owner gets has every hit in it, none twice.
 TEST_CASE("boss hand-over: a hit passed on after the ask is taken off the answer's life (H2)") {

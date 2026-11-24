@@ -1955,6 +1955,17 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
     const double at = metres(*c.position, d.position);
     if (!mine || at < *mine) mine = at;
   }
+  // ai-stuns: a stun on a copy (a nut, boomerang or hookshot: a DAMAGE of 0) is in the stunner's game only, and
+  // the owner's enemy goes on attacking. The stunner within handover_near_m takes it, whatever the margin, the
+  // hand-back or the sticky-target rule (the stun is a player's own act, sent at most every 2 s; the 5 s
+  // cooldown above still holds), and every game then follows its stunned enemy.
+  if (d.amount == 0) {
+    if (mine && *mine <= config_.handover_near_m &&
+        ask_handover(d.id, o, id, now_us, "a stun by a copy (ai-stuns)")) {
+      ++stats_.stun_to_stunner;
+    }
+    return;
+  }
   const auto theirs = distance_to(owner->second, o, now_us);
   if (mine && theirs && *mine <= config_.handover_near_m &&
       *mine + config_.handover_margin_m <= *theirs && !hands_back_soon(o, id, now_us)) {

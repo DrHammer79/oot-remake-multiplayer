@@ -147,11 +147,12 @@ struct PlayWish {
     bool alias = false;
     float loop = 0.0f;
     float run = -1.0f;
-    // Row 175: never played over the copy's own death (`keep_own_death`) or a boss copy's own stun
-    // (`keep_own_stun`) in slot 0. We read those from its own animation (PictureDeathHere, LifelessKillHere,
+    // Row 175: never played over the copy's own death (`keep_own_death`) or a copy's own stun
+    // (`keep_own_stun`; ai-stuns: a plain enemy's too, `stun_plain`: only IsPlainStunAnimation) in slot 0. We read those from its own animation (PictureDeathHere, LifelessKillHere,
     // row 169's own stun), and a play put over it at once erased it before any walk saw it (CoversOwnReaction).
     bool keep_own_death = false;
     bool keep_own_stun = false;
+    bool stun_plain = false;
 };
 
 // The frame of an animation `age_us` after it showed `frame` at `rate`
@@ -579,6 +580,14 @@ bool UnderCeilingEnemy(const coop::protocol::Vec3& enemy, const coop::protocol::
 // Paralysis and Freeze, and Ganon's Tail_Chance.
 bool IsStunAnimation(std::string_view name);
 
+// ai-stuns: a plain (not boss) enemy's stun of a hit that takes no life (a Deku Nut, the boomerang, the hookshot):
+// the first word starts with Stun ('Stun_Lp', the Lizalfos' 'StunA_St'), or is ShortStun, Paralysis or Faint.
+// Not 'Down', 'Fall', 'Chance' or 'Freeze': a plain enemy's own moves or a hit's reaction that takes life.
+bool IsPlainStunAnimation(std::string_view name);
+
+// The stun rule for an enemy of this name: IsStunAnimation for a boss or its part, else IsPlainStunAnimation.
+bool IsStunFor(std::string_view actor, std::string_view animation);
+
 // An animation name without its level-of-detail suffix ("Wait_ModelOnlyLOD"
 // is "Wait"), so a far copy's LOD variant is not another animation.
 std::string_view AnimationBase(std::string_view name);
@@ -955,6 +964,9 @@ public:
     // after it is written back up by that much.
     using BlastNear = std::function<bool(const coop::protocol::Vec3&, std::uint64_t)>;
     void SetBlastNear(BlastNear near) { blast_near_ = std::move(near); }
+    // ai-stuns: another player's shot copy hit near here (CoopProjectiles::TheShotHits). A copy stunned there shows
+    // the stun but asks nothing: the thrower's game asks for the enemy.
+    void SetShotHitNear(BlastNear near) { shot_hit_near_ = std::move(near); }
     static constexpr std::uint64_t kBlastCreditUs = 2'000'000;
     std::size_t BlastDrops() const { return blast_drops_; }  // drops kept back so far
 
@@ -1920,6 +1932,7 @@ private:
     std::size_t part_kills_held_ = 0;     // boss-body-life: rows 257/258 kills waiting for the owner's death
     std::size_t split_kills_ = 0;  // copies dead here, owner alive after the resends
     BlastNear blast_near_;
+    BlastNear shot_hit_near_;
     std::size_t blast_drops_ = 0;
 
     mutable std::mutex inbox_mutex_;
