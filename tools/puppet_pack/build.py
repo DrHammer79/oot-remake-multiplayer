@@ -2049,11 +2049,12 @@ def build(romfs, mod_dir, log=print, heaps=None, sound=True, player_footsteps=Fa
             if region_blob is not None:
                 write(os.path.join(mod_dir, look_live.DIR, look_metal.REGION_FILE), region_blob)
                 look_files["region"] = f"{look_live.DIR}/{look_metal.REGION_FILE}"
-        # The blocks of the tunic's textures that only the cap uses (the Customize page's Cap trim,
-        # look_cap), beside green.bin, which holds their texels.
+        # The blocks of the tunics' textures that only the cap uses (the Customize page's Cap trim,
+        # look_cap), beside green.bin and gear.bin, which hold their texels (the Kokiri tunic's, the
+        # Goron and Zora tunics').
         if "green" in look_files:
-            def read_model(variant):
-                p = os.path.join(romfs, *look_cap.model_path(variant).split("/"))
+            def read_model(model):
+                p = os.path.join(romfs, *look_cap.model_path(model).split("/"))
                 return dicts.decompress(read(p)) if os.path.isfile(p) else None
             cap_blob = look_cap.cap(read_tex, read_model, log)
             if cap_blob is not None:
