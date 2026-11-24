@@ -486,6 +486,10 @@ void LogBossOrders() {
              c.owner_kept, c.delivered, c.copy_skipped, c.copy_own_ran, c.dropped, c.restarts, c.unknown, c.replayed);
 }
 
+// Row 222: how many plugs of the action-verb wrap read as a name (the owner's variations), and how many did not.
+std::atomic<std::uint64_t> g_plug_read{0};
+std::atomic<std::uint64_t> g_plug_unread{0};
+
 // Every 10 s while a boss is synced natively: the counts (first proof lines).
 void LogBossNative() {
     static std::uint64_t said_ms = 0;
@@ -507,7 +511,8 @@ void LogBossNative() {
         c.body_deaths == said.body_deaths &&
         c.variant_named == said.variant_named && c.variant_plain == said.variant_plain &&
         c.variant_node_moved == said.variant_node_moved && c.variant_node_conflict == said.variant_node_conflict &&
-        c.copy_own_move == said.copy_own_move && c.owner_move_left == said.owner_move_left) {
+        c.copy_own_move == said.copy_own_move && c.owner_move_left == said.owner_move_left &&
+        c.owner_variants == said.owner_variants) {
         return;
     }
     said_ms = now;
@@ -520,12 +525,13 @@ void LogBossNative() {
                    "owner's brain verbs given to copies {} ({} the copy was in already); variations put in: {} named, {} "
                    "plain, {} not known, {} past the name pools; {} through another node (the move's chose another "
                    "variation), {} with no such node left (row 222); {} own asks of the owner's move run ({} renamed to its "
-                   "variation), {} owner's repeats left out",
+                   "variation), {} owner's repeats left out; owner's variations kept {} (plug names read {}, not read {})",
              c.owner_brain, c.owner_action, c.plug_actions, c.copy_skipped, c.brain_applied, c.action_applied,
              c.action_waiting, c.action_slot_busy, c.action_busy_again, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.copy_life_held,
              c.copy_killed, c.copy_finished, c.plain_wants, c.plain_wakes, c.plain_deaths, c.body_deaths, c.brain_came,
              c.brain_already, c.variant_named, c.variant_plain, c.variant_unknown, c.variant_pool_full,
-             c.variant_node_moved, c.variant_node_conflict, c.copy_own_move, c.own_move_renamed, c.owner_move_left);
+             c.variant_node_moved, c.variant_node_conflict, c.copy_own_move, c.own_move_renamed, c.owner_move_left, c.owner_variants, g_plug_read.load(),
+             g_plug_unread.load());
 }
 
 // ---- Name tags on the game's own balloons (coop_native_tags.h, B3 of reports/ui-audit-01112.md), at the frame hook.
@@ -2267,6 +2273,11 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             std::memcpy(&plug, r.data() + CoopBossNative::addr::kReqPlug, sizeof plug);
             plug_name = CoopBossNative::VariantName(
                 [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); }, plug);
+            if (plug_name) {
+                g_plug_read.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                g_plug_unread.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         std::optional<CoopBossNative::Request> renamed;
         if (!t.OnActionVerb(x[0], r, (x[2] & 1) != 0, t_own_call, std::move(plug_name), &renamed)) {

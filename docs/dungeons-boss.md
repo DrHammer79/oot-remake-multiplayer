@@ -748,6 +748,9 @@ fire (probe 2, run 20261123-055243). Every boss move with variants had the same 
   it with the change; the boss sample sends the names of the action changes in its recent list as OBJECT_SAMPLE
   component 24 (`BossVariants`: per change its seq + the name, empty = asked plain; at most 8 names of 32 printable
   characters). No protocol bump: an older peer skips the unknown component and keeps today's behaviour.
+  The server decodes each sample and encodes it again to forward it, so a server older than component 24 drops it:
+  every copy then counts its put-ins `not known` (no `named`, no `plain`), as in the two-game run on 2026-11-24
+  whose server was built before component 24. Host with a server of the same build as the module.
 - Copy: the name of the change it puts in (also a resync and a restart) decides the plug: empty -> no plug, even when
   its own AI's last plug was `Ice`; a name -> written once into a name pool and asked with that address; no name (an
   older owner) -> its own AI's plug, as before. The first pool (16 slots of 40 bytes) follows the request in our block;
@@ -827,6 +830,13 @@ King Dodongo's breath, Flare Dancer, Volvagia's rocks and Barinade's beam. Not t
 Counts in the boss log: `copy_own_move`, `own_move_renamed`, `owner_move_left`. Tests: boss_native_test (the own ask
 runs renamed to the owner's 'Ice', an own 'Ice' runs as it is, the owner's repeat is left out, another own move is
 skipped; the owner's next move still goes in and then the old move's own asks are skipped again).
+
+Two-game run on 2026-11-24 (this fix): both copies fired phase 2's bullets, and a mid-fight hand-over fired once.
+One copy's Attack_R fired nothing: it put the move in with its own learnt plug (plain), because no variation came
+(`0 named, 0 plain, N not known`). One probe with that game as owner showed the owner reads every plug name
+(`owner's variations kept N (plug names read N, not read 0)` in the boss log line). The variations were lost at the
+lane's server, built before component 24 (above). Not seen with a matching server yet: Attack_R on the copy, and
+whether the copy's first bullet matches the owner's (Fire or Ice).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
