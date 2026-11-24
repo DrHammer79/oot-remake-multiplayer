@@ -168,7 +168,7 @@ TEST_CASE("snail customize: his screen's texts in the game's language, as co-op'
     CHECK(d.Shown(nullptr).values[4] == "Red");
 }
 
-TEST_CASE("snail customize: values capitalised as his own (Red next to Game's own), the rest unchanged") {
+TEST_CASE("snail customize: values capitalised as his own (Red next to Default), the rest unchanged") {
     CHECK(Capitalised("red") == "Red");
     CHECK(Capitalised("Default") == "Default");
     CHECK(Capitalised("#123456") == "#123456");

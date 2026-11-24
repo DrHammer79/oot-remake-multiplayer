@@ -4,6 +4,7 @@
 // of each kind, typing, the host's locked values and the notes.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <fstream>
@@ -104,7 +105,10 @@ TEST_CASE("mods tab: a mod's page moves it and changes each kind of setting") {
     CHECK(v.rows[0].kind == RowKind::kHeading);
     CHECK(v.rows[0].name == "Big HUD");
     CHECK(RowNamed(v, "By someone, version 2") > 0);
-    CHECK(v.rows[v.selected].name == "On");
+    CHECK(v.rows[v.selected].name == "About");   // (the page opens on its text: the description)
+    CHECK(v.help == "Bigger hearts.");
+    tab.Press(Input::kDown);  // On
+    CHECK(tab.view().rows[tab.view().selected].name == "On");
 
     tab.Press(Input::kDown);  // Move up: first already
     tab.Press(Input::kDown);  // Move down
@@ -373,27 +377,74 @@ TEST_CASE("mods tab: a text longer than a row is handed over as several note row
     }
 }
 
-TEST_CASE("mods tab: a mod's long description is the help line of its On row, not rows of the page") {
+namespace {
+// Whole in the help box (40 x 4): a fifth line would be the cut.
+bool FitsHelpBox(const std::string& text) {
+    const std::string shown = CoopPauseTab::HelpText(text, CoopPauseTab::kHelpColumns, CoopPauseTab::kHelpLines + 1);
+    return std::count(shown.begin(), shown.end(), '\n') < static_cast<std::ptrdiff_t>(CoopPauseTab::kHelpLines);
+}
+}  // namespace
+
+TEST_CASE("mods tab: a long note and description are pages of the About row, the note first, nothing cut") {
     const fs::path root = ModTestDir("coop-mods-tab-long");
     std::error_code ec;
     fs::remove_all(root, ec);
     const std::string description =
-        "打乱宝箱、迷宫道具和奖励（OOTRR）。联机时所有人玩房主的种子，拾取共享。换种子只需重启游戏，不用重新构建。";
+        "Shuffles chests, dungeon items and rewards (OOTRR). In co-op everyone plays the host's seed and every pickup is shared. A new seed needs a restart of the game, never a game build.";
     Put(root / "long" / "mod.json",
-        R"json({"id": "long", "name": "Long", "description": "打乱宝箱、迷宫道具和奖励（OOTRR）。联机时所有人玩房主的种子，拾取共享。换种子只需重启游戏，不用重新构建。"})json");
+        R"json({"id": "long", "name": "Long", "description": "Shuffles chests, dungeon items and rewards (OOTRR). In co-op everyone plays the host's seed and every pickup is shared. A new seed needs a restart of the game, never a game build."})json");
     {
         CoopMods::Loader loader(root, {nullptr, 1, nullptr, nullptr});
         loader.Start();
         Tab tab({&loader, nullptr, nullptr});
         tab.Show();
+        // the list: the help is a first page that fits whole (no "...")
+        const auto list = tab.view();
+        CHECK(list.help.find("...") == std::string::npos);
+        CHECK(FitsHelpBox(list.help));
         tab.Press(Input::kDecide);
         REQUIRE(tab.on_mod_page());
-        const auto v = tab.view();
-        for (const auto& row : v.rows) CHECK(row.kind != RowKind::kNote);   // (no text rows: the list fits its 7 lines)
-        CHECK(v.rows[v.selected].name == "On");
-        CHECK(v.help == description);   // (the module wraps the help over its lines)
+        for (const auto& row : tab.view().rows) CHECK(row.kind != RowKind::kNote || row.name.rfind("By ", 0) == 0);
+        const auto first = tab.view();
+        REQUIRE(first.rows[first.selected].name == "About");
+        const std::string count = first.rows[first.selected].value;   // "1/2"
+        REQUIRE(count.size() == 3);
+        REQUIRE(count.rfind("1/", 0) == 0);
+        const int pages = count[2] - '0';
+        REQUIRE(pages >= 2);   // (183 letters do not fit 40 x 4)
+        std::string joined;
+        for (int page = 0; page < pages; ++page) {
+            const auto v = tab.view();
+            REQUIRE(v.rows[v.selected].name == "About");
+            CHECK(FitsHelpBox(v.help));   // fits the help box whole: nothing cut
+            CHECK(v.help.find("...") == std::string::npos);
+            joined += (joined.empty() ? "" : " ") + v.help;
+            tab.Press(Input::kDecide);   // the next page; the last one goes round to the first
+        }
+        CHECK(tab.view().rows[tab.view().selected].value == "1/" + std::to_string(pages));
+        std::string flat;
+        for (const char c : joined) flat += c == '\n' ? ' ' : c;
+        CHECK(flat == description);
     }
     fs::remove_all(root, ec);
+}
+
+TEST_CASE("mods tab: HelpPages puts the note before the description and every page fits the help box") {
+    const std::string note = "Start Squadala.bat once so the game is built with this mod, then turn it on.";
+    const std::string text = note + "\n" +
+        "Shuffles chests, dungeon items and rewards (OOTRR). In co-op everyone plays the host's seed.";
+    const auto pages = CoopModsTab::HelpPages(text);
+    REQUIRE(pages.size() >= 2);
+    CHECK(pages.front().rfind("Start Squadala.bat", 0) == 0);
+    for (const auto& p : pages) {
+        CHECK(FitsHelpBox(p));
+        CHECK(p.find("...") == std::string::npos);
+    }
+    CHECK(CoopModsTab::HelpPages("").empty());
+    CHECK(CoopModsTab::HelpPages("Short.") == std::vector<std::string>{"Short."});
+    // Chinese has no spaces: the pages still fit
+    const auto zh = CoopModsTab::HelpPages("打乱宝箱、迷宫道具和奖励（OOTRR）。联机时所有人玩房主的种子，拾取共享。换种子只需重启游戏，不用重新构建。再加一句话让它变得更长一些。");
+    for (const auto& p : zh) CHECK(FitsHelpBox(p));
 }
 
 TEST_CASE("mods tab: a mod's title, settings and text are its author's own words, never looked up in the translation table") {

@@ -98,7 +98,7 @@ Texts Driver::Shown(const CoopI18n::Lang* lang) const {
         const std::size_t r = static_cast<std::size_t>(f + 1);
         if (r >= v.rows.size()) break;
         t.labels[static_cast<std::size_t>(f)] = CoopI18n::Tr(lang, v.rows[r].name);
-        // (an action row, Game's own colour or Done, has no value of its own: its key)
+        // (an action row, Default colour or Done, has no value of its own: its key)
         t.values[static_cast<std::size_t>(f)] = v.rows[r].kind == 0 ? std::string("A") : Capitalised(CoopI18n::Tr(lang, v.rows[r].value));
     }
     return t;

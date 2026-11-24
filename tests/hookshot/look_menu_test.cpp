@@ -124,7 +124,7 @@ TEST_CASE("look menu (0.11.9): Confirm picks any colour by hue, saturation and b
     CHECK_FALSE(page.Press(Input::kBack));         // the list: the tab's own Back
 }
 
-TEST_CASE("look menu: a part with no colour mixes from the game's own, Game's own colour and Done") {
+TEST_CASE("look menu: a part with no colour mixes from the game's own, Default colour and Done") {
     Page page;
     page.Open(Look{});
     page.Select(static_cast<std::size_t>(RowOf(page, "Boots", "Leather")));
@@ -196,7 +196,7 @@ TEST_CASE("look menu: the Cap trim, under the Tunic heading after the tunics, fo
     CHECK((*change)[Part::tunic] == 0x3070FFu);
     CHECK(page.view().rows[static_cast<std::size_t>(cap)].value == "red");
     CHECK(PictureHas(page.view(), *CoopColors::Parse("red")));
-    // Mixing an unset trim starts from the tunic's colour; Game's own colour sets it back to follow the tunic.
+    // Mixing an unset trim starts from the tunic's colour; Default colour sets it back to follow the tunic.
     page.Press(Input::kLeft);   // back to unset
     CHECK_FALSE(page.look()[Part::cap_trim]);
     page.Press(Input::kDecide);

@@ -788,7 +788,7 @@ std::vector<std::string> RowTexts(const SessionView& v);
 // is the R1 probe's answer (the module's part); these are their rows.
 // - Multiplayer: 0 Players, 1 Co-op settings, 2 Local co-op, 3 your game or session (its details, Stop or Leave there),
 //   shown only in one.
-// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your session, Copy answer code).
+// - Lobby: 0 Find a game, 1 Host a game (or Your game), 2 Join a game (or Your game, Copy answer code).
 // - Mods: the Mods tab's own page (coop_mods_tab.h), not rows of these.
 enum class MinusPage { kMultiplayer = 0, kLobby = 1, kMods = 2 };
 std::vector<std::string> RowTexts(MinusPage page, const SessionView& v);

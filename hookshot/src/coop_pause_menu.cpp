@@ -491,10 +491,10 @@ std::vector<Menu::Line> Menu::Lines() const {
             out.push_back({Action("Paste answer code (or Ctrl+V)", "Paste"), Act::kPasteAnswer,
                            "Only when a friend's game shows an answer code (their way in was blocked): copy the code they "
                            "send you, then press this."});
-            out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+            out.push_back({Action("Same network", "Copy invite code"), Act::kCopyLan,
                            "For friends in the same house, on your home network: copies one line with this PC's address. "
                            "They paste it in Join a game instead of the code."});
-            out.push_back({Action("VPN", "Copy the line"), Act::kCopyVpn,
+            out.push_back({Action("VPN", "Copy invite code"), Act::kCopyVpn,
                            "For friends on a VPN with you (Radmin VPN, Hamachi, ZeroTier, Tailscale, WireGuard): copies one "
                            "line with this PC's VPN address. They paste it in Join a game instead of the code."});
             if (session_.state == State::kHosting && !session_.password.empty()) {
@@ -864,7 +864,7 @@ void Menu::TitleCodeLines(std::vector<Line>& out, bool off) const {
     out.push_back({Action("Paste a code", code_in ? ShownCode(std::string(Trim(join_))) : std::string(), off),
                    Act::kCode, "Your friend sees the code on their Host screen. Copy it, then press A here."});
     out.push_back({Action("Type an address", typing_ip ? join_ip_ + "_" : join_ip_, off), Act::kJoinIp,
-                   "A room name, an IP address or a PC name, typed with Letter or on the keyboard."});
+                   "A room name, an IP address or a PC name, typed with the on-screen keys or on the keyboard."});
     if (!join_ip_.empty()) {
         out.push_back({Action("Password", password, off), Act::kJoinPassword,
                        "The host's join password, if their game has one."});
@@ -915,7 +915,7 @@ void Menu::TitleHostLines(std::vector<Line>& out, bool host, bool guest) const {
                            "Your friend types it after picking your game. A shows it."});
         }
         out.push_back({Note("Players  " + players), Act::kNone, {}});
-        out.push_back({Action("Same network", "Copy the line"), Act::kCopyLan,
+        out.push_back({Action("Same network", "Copy invite code"), Act::kCopyLan,
                        "For friends on your home network: copies one line they paste in Enter a code."});
         out.push_back({Action("Paste answer code", ""), Act::kPasteAnswer,
                        "Only when your friend's game shows an answer code: copy it, then press A here."});

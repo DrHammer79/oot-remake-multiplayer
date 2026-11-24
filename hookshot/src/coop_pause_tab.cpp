@@ -1273,8 +1273,8 @@ std::vector<std::string> RowTexts(const SessionView& v) {
         rows[kRowJoin] = "Join a game";
     }
     rows[kRowPlayers] = v.players <= 0 ? "Players"
-                        : v.players == 1 ? "Players: just you"
-                                         : "Players: " + std::to_string(v.players);
+                        : v.players == 1 ? "Players (just you)"
+                                         : "Players (" + std::to_string(v.players) + ")";
     rows[kRowSettings] = "Co-op settings";
     // (the rows in the player's language before the cut: the composed ones are the
     // table's shapes, a player's own name comes back as it is)
@@ -1539,7 +1539,7 @@ const char* RowHelp(RowAction a) {
     case RowAction::kHostChat: return "Mutes this player's chat for everyone, or unmutes it.";
     case RowAction::kKick: return "Sends this player out of your game. Press A again to confirm.";
     case RowAction::kBan: return "Keeps this player out until you stop hosting. Press A again to confirm.";
-    case RowAction::kTypeRoom: return "Type the room name your friend gave you.";
+    case RowAction::kTypeRoom: return "Type the room name your friend gave you, or their address (192.168.1.5:27510).";
     case RowAction::kTypePassword: return "Type the game's join password, if it has one.";
     case RowAction::kJoinRoom: return "Joins that room with the password typed.";
     case RowAction::kViewLan: return "Games on your network that you can join.";

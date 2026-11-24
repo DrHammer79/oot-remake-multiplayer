@@ -560,18 +560,18 @@ TEST_CASE("pause tab (0.11.9): the five entries' words, in at most a row's width
     host.s.hosting = host.s.in_one = true;
     host.players = 1;
     CHECK(RowTexts(host) ==
-          std::vector<std::string>{"Find a game", "Your game", "Join a game", "Players: just you", "Co-op settings"});
+          std::vector<std::string>{"Find a game", "Your game", "Join a game", "Players (just you)", "Co-op settings"});
     host.players = 3;
     host.asking = {"Saria"};
     CHECK(RowTexts(host)[kRowHost] == "Your game: Saria asks");
-    CHECK(RowTexts(host)[kRowPlayers] == "Players: 3");
+    CHECK(RowTexts(host)[kRowPlayers] == "Players (3)");
     host.asking = {"Saria", "Mido"};
     CHECK(RowTexts(host)[kRowHost] == "Your game: 2 ask");
     SessionView guest;
     guest.s.in_one = true;
     guest.players = 2;
     CHECK(RowTexts(guest) ==
-          std::vector<std::string>{"Find a game", "Host a game", "Your game", "Players: 2", "Co-op settings"});
+          std::vector<std::string>{"Find a game", "Host a game", "Your game", "Players (2)", "Co-op settings"});
     SessionView joining;
     joining.connecting = true;
     joining.s.in_one = true;
@@ -2252,6 +2252,14 @@ TEST_CASE("pause tab: the Settings page's list: a category's settings, its pages
     CHECK(lines[1].name == "Graphics 6");
     CHECK(lines[4].name == "Aspect ratio (restart)");   // (a restart one: says so in words)
     CHECK(lines[5].name.empty());
+    {   // a long name gives way to the tag: "(restart)" stays whole within the name box
+        SettingRow longer = res;
+        longer.key = "long", longer.name = "A very long setting name that cannot fit its box", longer.tab = "Audio";
+        const auto row = SettingLines(SettingsOf(std::vector<SettingRow>{longer}, 1), 0, "Audio");
+        CHECK(row[1].name.size() <= kListNameChars);
+        CHECK(row[1].name.size() >= 9);
+        CHECK(row[1].name.substr(row[1].name.size() - 9) == "(restart)");
+    }
     CHECK(SettingLines(SettingsOf(all, 1), 0, "Audio")[0].name == "Audio");   // (one page: no page shown)
 
     CHECK(SettingNext(vol, 1) == 85);
