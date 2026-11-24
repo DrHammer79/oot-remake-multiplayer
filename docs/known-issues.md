@@ -98,7 +98,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 
 ## Known issues
 
-- **Link looks thin in the Twinrova cutscene**: in two two-game tests on one PC, both Links (yours and the other player's) looked thin and stretched during the Twinrova boss cutscene, on both screens. Outside cutscenes Link looks normal. Character Select was off. Not yet seen on a second PC; the cause is not known yet (that PC's game install is being checked first).
+- **Link looks thin in the Twinrova cutscene**: in two two-game tests on one PC, both Links (yours and the other player's) looked thin and stretched during the Twinrova boss cutscene, on both screens. Outside cutscenes Link looks normal. Character Select was off. Both tests entered the boss room by a test warp, which may have loaded Link at the wrong age (child Link in an adult-only room); a normal play-through to Twinrova will show whether players can see it.
 - **A ceiling Gold Skulltula does not turn for the other player**: when a ceiling Gold Skulltula turns to face a player, it stays still on the other player's screen. Killing it and its token are shared as before.
 - **Gold Skulltulas Not shared: your race is kept on your computer**: your own tokens, the Skulltula House rewards you claimed and the wallets and Stone of Agony they gave you, with each of a host's saves, come back when you join again and after a load. A new game of the host's starts every race from 0. Not checked in a game yet.
 - **Linux: away/paused state, Map page and HUD refresh** ([#150](https://github.com/daurosk/oot-remake-multiplayer/issues/150)): fixed in the code, not yet checked on Linux.
