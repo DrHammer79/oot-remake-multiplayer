@@ -840,20 +840,17 @@ had its variation (0 not known), the copy's Attack_R fired its FireBullet, and e
 (Attack_L Ice, Attack_R Fire) through two hand-overs. Not this row: right at a hand-over a copy played an attack with
 no bullet twice, and one copy showed fewer attacks than its owner in the same stretch (next section).
 
-## Twinrova hand-over: a copy's attack with no bullet, and attacks lost (0.11.13)
+## Twinrova hand-over: attacks lost (0.11.13)
 
 Seen in the second row 222 run: right at a hand-over a copy played an attack with no bullet (one Attack_R, one
 Attack_L), and a copy logged 4 attacks while its owner logged 6. Two causes, both in `Table::Publish` at an owner
 change:
 
-1. The own asks (each move's node, plug and variation, `AskFor`) were forgotten at every role change (row 177's
-   review). A copy's first put-ins after the hand-over then went in through its last node, a node of another move
-   (Fly), whose own choice of the attack may be the other variation: the attack ran with no shot. Row 177's reason
-   holds only for a brain change (the action sequence's nodes may go with it). Now the asks are kept across a hand-over
-   and forgotten when a new brain verb runs in our game (`BrainRuns`: the owner's own, the copy's own or put in) or when
-   it is not known which verb they were learnt in. The owner learns its own asks too (`LearnOwnAsk`), so a game that
-   hands its boss over knows the nodes of the brain verb it is in (before, an old owner made a copy had no node at all
-   until its own AI asked again).
+1. Tried and taken back: keeping the own asks (each move's node, plug and variation, `AskFor`) across a hand-over,
+   and the owner learning its own asks. Lane run NEXT36: a former owner made a copy put the owner's Attack_R in
+   through a node its AI had named while it was the owner, and 0 of 3 fired a bullet. The node its own AI names as a
+   copy works (NEXT29). So a role change still forgets them (row 177's review), and the copy learns them again from
+   its own asks, which its AI makes right after the hand-over.
 2. The new copy started again from the new owner's first state (a resync: only the move it is in now). Every move the
    new owner made before that state reached us was lost. A new owner counts on from the last state it had of the old
    owner, so its changes up to our newest seq are ours when it had all of them. Now the chain we held is kept (our own
@@ -862,9 +859,9 @@ change:
    old owner's moves still queued. Any change both hold that differs (it had not had all of ours): a resync, as before.
    The log says `the new owner goes on from seq N`.
 
-No protocol change. Solo play and owners are not touched (an owner only learns its asks). Not covered: a copy made
+No protocol change. Solo play and owners are not touched. Not covered: a copy made
 the owner drops the old owner's moves still queued (its own AI runs the boss from here). Tests: boss_native_test
-("Twinrova hand-over": the attack's node kept, a brain change still forgets it; both moves the new owner made are put
+("Twinrova hand-over": a former owner's nodes are not the copy's; both moves the new owner made are put
 in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)

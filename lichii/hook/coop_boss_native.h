@@ -748,7 +748,6 @@ private:
         std::map<std::pair<std::int32_t, std::int32_t>, OwnAsk> own_asks;
         std::map<std::int32_t, OwnAsk> own_slot_asks;
         OwnVariants own_variants;  // row 222: each node's own last ask and its variation (AskFor)
-        std::optional<std::int32_t> asks_brain;  // the brain verb the own asks were learnt in (BrainRuns)
         // Twinrova hand-over: the chain we held when the owner changed (ContinuesChain), until its first state.
         std::optional<BossBsa> handover;
         // Row 177's log: the action stream's last kind (who, slot, verb, changed, plug or node source) and its run.
@@ -853,14 +852,10 @@ private:
     Entry* Find(std::uint64_t bsa);
     Entry* FindActor(std::uint64_t actor);
     const Entry* FindActor(std::uint64_t actor) const;
-    // Row 177 review: the kept own asks (their AI nodes) go on a brain change (its action sequence's nodes may
-    // go with it); its next own asks fill them again. Not on a role change (Twinrova hand-over, 0.11.13): the
-    // same boss in the same game keeps its nodes, and a copy put the first moves after a hand-over in through a
-    // node of another move (no bullet). The owner's own asks are learnt too (LearnOwnAsk), so a game that hands
-    // its boss over knows the nodes of the brain verb it is in.
+    // Row 177 review: the kept own asks (their AI nodes) go: a brain change (its action sequence's nodes may
+    // go with it) or a role change; the copy's next own asks fill them again. (Keeping them across a hand-over
+    // was tried for Twinrova: a former owner's nodes put the copy's Attack_R in with no bullet, lane run NEXT36.)
     static void ForgetOwnAsks(Entry& e);
-    // A brain verb that runs in our game (the owner's, or the copy's own or put in): a new one forgets the asks.
-    static void BrainRuns(Entry& e, std::int32_t verb);
     static void LearnOwnAsk(Entry& e, const Request& request, const std::optional<std::string>& plug_name);
     void Note(std::string line);
     // Row 177's log: one line when the stream's kind changes (the last kind's run length with it), capped.
