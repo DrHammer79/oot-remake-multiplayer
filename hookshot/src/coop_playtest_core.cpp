@@ -901,7 +901,7 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
     const auto* game = GameOf(status);
     // A missing sample is no better than an old one: the typed members alone are not a Link sample (not_in_play).
     if (game && !SnapshotIsOld(status) && !SnapshotMissing(status)) {
-        if (game->Bool("event") == true) return {WarpRoute::event, {}, {}};
+        if (game->Bool("event") == true) return {WarpRoute::event, {}, {}, {}};
         if (game->Bool("event") == false) {
             const auto want = AgeEnding(scene);
             const auto age = game->Text("age");
@@ -910,12 +910,12 @@ WarpPlan PlanWarp(const CoopModJson::Value* status, bool entrance_given, std::st
                 return {WarpRoute::map_event, {}, {}, std::string(want)};
             }
             // An entrance names a start point, which Longshot's teleport cannot take: the game's map change event can.
-            return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}};
+            return {entrance_given ? WarpRoute::map_event : WarpRoute::teleport, {}, {}, {}};
         }
     }
     return {WarpRoute::refuse, "not_in_play",
             "this game's state is not readable now (no Link update: a title, a pause or a load). Try again once the "
-            "game runs"};
+            "game runs", {}};
 }
 
 TeleportWait ReadTeleport(const CoopModJson::Value& reply, std::string_view scene) {
