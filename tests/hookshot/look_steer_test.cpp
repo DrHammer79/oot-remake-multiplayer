@@ -803,3 +803,22 @@ TEST_CASE("look steer: the view hook with no camera hook call says so once") {
         CHECK(n->find("was not called") == std::string::npos);
     }
 }
+
+TEST_CASE("look steer: a quiet camera hook gets a right stick that turns its sign each frame") {
+    Steer steer;
+    steer.Want(Direction{30.0, 20.0}, 4.0);
+    for (int f = 0; f < Steer::kWakeFrames - 1; ++f) {
+        CHECK(steer.Viewed() == 0);
+    }
+    const int first = steer.Viewed();
+    CHECK(std::abs(first) == Steer::kWakeStick);
+    CHECK(steer.Viewed() == -first);
+    // The hook runs again: no stick.
+    steer.Command({10.0f, 15.0f}, 3, true);
+    CHECK(steer.Viewed() == 0);
+    // The hook called each frame: never a stick.
+    for (int f = 0; f < 10; ++f) {
+        CHECK(steer.Viewed() == 0);
+        steer.Command({10.0f, 15.0f}, 3, true);
+    }
+}

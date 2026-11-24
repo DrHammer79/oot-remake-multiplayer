@@ -193,13 +193,19 @@ public:
     static constexpr int kGateCalls = 30;
     // The view hook's frames with the page asked and no call of the camera hook: said once at this many.
     static constexpr int kNoTurnFrames = 120;
+    // The game skips its camera's update (and so the camera hook) while nothing moves it, and the page takes the
+    // right stick: after this many view frames with no camera hook call, the game gets a small right stick
+    // (kWakeStick of 32767, its sign turned each frame so the camera does not drift one way) until the hook runs.
+    static constexpr int kWakeFrames = 3;
+    static constexpr int kWakeStick = 8192;
 
     // The camera hook (the game's thread), before the camera's update: the angles to give it, or none. `state`:
     // the camera's (3 follows Link, 4 the player's; others: another camera has the view). `asked`: the picture is
     // still asked for.
     std::optional<Angles> Command(Angles now, int state, bool asked);
-    // The view hook, each frame the page is asked: counts the frames with no Command since the last one.
-    void Viewed();
+    // The view hook, each frame the page is asked: counts the frames with no Command since the last one. Returns
+    // the right stick's x to hand the game to wake its camera (0: none).
+    int Viewed();
     // The view hook (the game's thread): the eye and target the game's camera placed this frame.
     void Observe(const Vec3& game_eye, const Vec3& game_target);
     // The view hook: where the orbit wants the eye seen from the game's target, or none (no picture now), and how
@@ -260,6 +266,7 @@ private:
     std::optional<Gate> gate_now_, gate_said_;
     int gate_calls_ = 0;
     int since_turn_ = 0;   // the view hook's frames since the last Command
+    int wake_sign_ = 1;    // the next nudge's sign
 };
 
 // What the page shows, for the log (0.11.1: adult Link got the flat picture
@@ -326,6 +333,9 @@ bool LinkShown(bool* clear = nullptr);
 void Ask(const Window& window);
 // hos_coop_view (the game's thread): 1 = eye and target replaced.
 bool Camera(double eye[3], double target[3]);
+// The pad filter (the game's input thread), while the page takes the pad: the right stick's x to give the game this
+// frame, so its camera update runs again (Steer::kWakeStick), or 0.
+int CameraNudge();
 // hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced. `coop_on` false (co-op switched off):
 // a camera still turned is put back once, then left alone.
 bool Turn(float* yaw, float* pitch, int state, bool coop_on);
