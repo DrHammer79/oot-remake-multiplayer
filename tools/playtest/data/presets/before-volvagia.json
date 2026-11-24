@@ -5,8 +5,8 @@
   "spec": {
     "items": [
       "Weapon_Sword_Master",
-      "Weapon_Shield_Hylia",
-      "hammer",
+      "Weapon_Shield_Hylian",
+      "Item_Hammer",
       "PouchData.Armor_Adult_Goron.StockNum"
     ],
     "hearts": 8,
