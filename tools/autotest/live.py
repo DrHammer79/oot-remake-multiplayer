@@ -23,7 +23,8 @@ boot, as the lane runs do (`--no-restore` keeps whatever the copies hold).
                                            [--boot-a boot.A.txt --boot-b boot.B.txt] [--env K=V ...]
                                            [--max-minutes 30] [--idle-minutes 10] [--lock-wait S] [--no-restore]
     python -I tools/autotest/live.py do --session DIR A "goto 10.0 20.0 0.5 300; press A"
-    python -I tools/autotest/live.py state --session DIR [A|B]
+    python -I tools/autotest/live.py state --session DIR [A|B] [--since ID]
+    python -I tools/autotest/live.py replay [FILE ...] [--session DIR] [--dry-run]   (run a call log again)
     python -I tools/autotest/live.py shot --session DIR [A|B]
     python -I tools/autotest/live.py checkpoint --session DIR TAG
     python -I tools/autotest/live.py stop --session DIR
@@ -39,6 +40,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hookshot  # noqa: E402  (the same folder)
+import kit_tools  # noqa: E402
 import lanes  # noqa: E402  (the same folder; it brings tools/hookshot/hs.py)
 
 TAGS = ("A", "B")
@@ -181,7 +183,12 @@ def playtest_base(lane):
 
 
 def spawn_watchdog(d):
-    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008}   # DETACHED_PROCESS: outlives the shell
+    # It must outlive the shell that started it, and it must not make a window flash. DETACHED_PROCESS has no console, so
+    # every console program the watchdog (or lanes.running_in, tasklist, git ...) starts gets a NEW visible console
+    # window: a chain of flashing windows through a run. CREATE_NO_WINDOW gives it a hidden console its children share;
+    # CREATE_NEW_PROCESS_GROUP keeps the shell's Ctrl+C away from it, and with its own console the shell's closing does
+    # not end it.
+    kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | lanes.hs.CREATE_NO_WINDOW}
           if os.name == "nt" else {"start_new_session": True})
     with open(os.path.join(d, "watchdog.txt"), "ab") as log:
         return subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "watchdog", "--session", d],
@@ -201,6 +208,16 @@ def wait_lock(d, proc, timeout, clock=time.monotonic, sleep=time.sleep):
             return "the watchdog ended (exit %s, see watchdog.txt)" % proc.returncode
         sleep(0.2)
     return "the watchdog did not answer in %d s" % timeout
+
+
+def ends_text(max_minutes, idle_minutes):
+    """What the answer to `start` says about when the session ends on its own (0 = no limit)."""
+    parts = []
+    if max_minutes:
+        parts.append("after %d min" % max_minutes)
+    if idle_minutes:
+        parts.append("%d min without a command" % idle_minutes)
+    return (", or ".join(parts) if parts else "never by itself") + " (live.py stop, or a game that ended)"
 
 
 def start(a):
@@ -239,7 +256,7 @@ def start(a):
     touch(d)
     out = {"ok": code == 0, "session": d, "lane": a.lane, "lock": lock, "port": port,
            "boot": "played" if code == 0 else "FAILED (see steps.txt): the session is closed",
-           "ends": "after %d min, or %d min without a command" % (a.max_minutes, a.idle_minutes)}
+           "ends": ends_text(a.max_minutes, a.idle_minutes)}
     if getattr(a, "playtest", False):
         out["playtest"] = {"p%d" % (i + 1): s["games"][x]["playtest_port"] for i, x in enumerate(TAGS)}
     if code != 0:
@@ -251,9 +268,15 @@ def bridge(s, x):
     return hookshot.Bridge.connect(s["games"][x]["pipe"], timeout=15)
 
 
-def new_lines(d, s, x):
-    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest)."""
+def new_lines(d, s, x, match=None):
+    """The game's co-op log lines since the last look (noise left out), at most MAX_LINES (the newest).
+    With `match` (a text), only the lines holding it, the OLDEST MAX_LINES of them; the cursor given moves past the lines
+    looked at only when all their matches were returned (more than MAX_LINES: it stops after the last one returned, so
+    no match is lost). The caller keeps this cursor apart from the plain one: the lines a match left out are still there
+    for a plain look."""
     path = s["games"][x]["log"]
+    if match:
+        return _new_matching(path, s, x, match)
     try:
         with open(path, "rb") as f:
             f.seek(s["offsets"].get(x, 0))
@@ -268,6 +291,31 @@ def new_lines(d, s, x):
     return lines
 
 
+def _new_matching(path, s, x, match):
+    try:
+        with open(path, "rb") as f:
+            start = s["offsets"].get(x, 0)
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return []
+    out, end, pos, capped = [], start, 0, False
+    for raw in data.splitlines(keepends=True):
+        if not raw.endswith(b"\n"):
+            break   # a half-written last line: left for the next look
+        pos += len(raw)
+        ln = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if "coop:" in ln and not NOISE.search(ln) and match in ln:
+            out.append(re.sub(r"^\[hos [^\]]*\] ", "", ln))
+            if len(out) >= MAX_LINES:
+                end, capped = start + pos, True
+                break
+    if not capped:
+        end = start + pos   # every complete line was looked at, and every match is in `out`
+    s["offsets"][x] = end
+    return out
+
+
 def snapshot(b):
     r = b.request("status", reply_timeout=10.0)
     g = r.get("game") or {}
@@ -278,12 +326,30 @@ def snapshot(b):
     return out
 
 
+def menu_of(port, client=None):
+    """What co-op's menus show in a game started with the play-test bridge (docs/playtest.md "menu"): {"menu": ...}, or
+    {"menu_error": why}. A bridge shot leaves out Longshot's overlays (the co-op pages), so this is how they are read.
+    The game is not held for it (one `state` on a connection of its own)."""
+    import playtest_client
+    c = client or playtest_client.Client(port, timeout=5.0, hold=False)
+    try:
+        g = playtest_client.game_of(c.request("state"))
+        return {"menu": g["menu"]} if "menu" in g else {"menu_error": "the bridge's state has no menu (an older module?)"}
+    except Exception as e:  # (a game without the bridge, or busy: said, the look still comes back)
+        return {"menu_error": "%s: %s" % (e.__class__.__name__, e)}
+    finally:
+        c.close()
+
+
 def look(d, s, x):
     b = bridge(s, x)
     try:
         st = snapshot(b)
     finally:
         b.close()
+    port = s["games"][x].get("playtest_port")
+    if port:
+        st.update(menu_of(port))
     st["log"] = new_lines(d, s, x)
     return st
 
@@ -293,7 +359,9 @@ def state(a):
     s = open_session(d)
     out = {x: look(d, s, x) for x in ([a.player] if a.player else TAGS)}
     save(d, s)
-    return out
+    # every look gets a `state_id`; with `since` (an earlier look's id) only what changed comes back (the new log lines
+    # are new since the last look already, so they are always whole)
+    return kit_tools.StateHistory(os.path.join(d, "state-history.json")).reply(out, getattr(a, "since", None))
 
 
 def do(a):
@@ -448,7 +516,7 @@ def watch(d, clock=time.time, sleep=time.sleep, alive=None, every=WATCH_EVERY):
         now = clock()
         if os.path.exists(stop_file(d)):
             return "stop asked"
-        if now - s["started"] >= s["max_s"]:
+        if s["max_s"] and now - s["started"] >= s["max_s"]:   # (0: no limit)
             return "maximum duration (%d min) reached" % (s["max_s"] // 60)
         if s.get("booted"):
             if s.get("idle_s") and now - activity(d, s) >= s["idle_s"]:
@@ -519,6 +587,21 @@ def stop(a, wait=60.0, clock=time.monotonic, sleep=time.sleep, alive=None):
     return {"ended": w["ended"], "closed": w.get("closed")}
 
 
+CALLS_FILE = "calls.jsonl"
+# the CLI commands that are kit calls, under the MCP tool each one is (docs/playtest.md, "Kit helpers")
+LOGGED = {"do": ("act", ("player", "script")), "state": ("state", ("player", "since")), "shot": ("shot", ("player",)),
+          "checkpoint": ("checkpoint", ("tag",))}
+
+
+def log_call(a, ok, error, began):
+    """Writes a CLI command to the session's call log (server `live`), so `live.py replay` can run it again."""
+    if a.cmd not in LOGGED or not os.path.isdir(a.session):
+        return
+    tool, keys = LOGGED[a.cmd]
+    args = {k: getattr(a, k) for k in keys if getattr(a, k, None) is not None}
+    kit_tools.CallLog(os.path.join(a.session, CALLS_FILE), "live").write(tool, args, ok, error, t=began)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -537,14 +620,14 @@ def main(argv=None):
     st.add_argument("--no-restore", action="store_true", help="keep the copies' saves (default: their baseline)")
     st.add_argument("--env", action="append", default=[], help="K=V, or A:K=V / B:K=V for one game")
     st.add_argument("--boot-timeout", type=int, default=900)
-    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length")
+    st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
+                                      "tools/autotest/placement.py" % (hookshot.placement.ENV,
+                                                                       hookshot.placement.DEFAULT_DISPLAY))
+    st.add_argument("--max-minutes", type=float, default=MAX_MINUTES, help="the session's whole length; 0: no limit")
     st.add_argument("--idle-minutes", type=float, default=IDLE_MINUTES, help="0: no idle end")
     st.add_argument("--lock-wait", type=float, default=0, help="s to wait for a busy lane (default: refuse at once)")
     st.add_argument("--playtest", action="store_true",
                     help="turn each game's play-test bridge on (A = p1, B = p2: 5001/5002, lane L 5000+10*L+1/+2)")
-    st.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
-                                      "tools/autotest/placement.py" % (hookshot.placement.ENV,
-                                                                       hookshot.placement.DEFAULT_DISPLAY))
     for name in ("do", "state", "shot", "checkpoint", "stop", "watchdog"):
         q = sub.add_parser(name)
         q.add_argument("--session", required=True)
@@ -553,11 +636,38 @@ def main(argv=None):
             q.add_argument("script", help="test script lines, ';' between them")
         elif name in ("state", "shot"):
             q.add_argument("player", nargs="?", choices=TAGS)
+            if name == "state":
+                q.add_argument("--since", type=int, metavar="ID",
+                               help="the state_id of an earlier look: only what changed since it (default: all)")
         elif name == "checkpoint":
             q.add_argument("tag")
+    rp = sub.add_parser("replay", help="run the calls of a call log again (docs/playtest.md, \"Kit helpers\")")
+    rp.add_argument("files", nargs="*", metavar="FILE", help="call logs (default: calls.jsonl of --session)")
+    rp.add_argument("--session", help="the session the games are in (needed for oot-playtest and live calls)")
+    rp.add_argument("--lane", type=int, help="a test lane: the bridge ports of the player servers")
+    rp.add_argument("--log-dir", default="playtest-logs", help="where checkpoint logs and shots go (as the servers' --log-dir)")
+    rp.add_argument("--include-reads", action="store_true", help="also repeat the calls that only look (get_state ...)")
+    rp.add_argument("--include-failed", action="store_true", help="also repeat the calls that failed the first time")
+    rp.add_argument("--keep-going", action="store_true", help="go on after a call that fails (default: stop there)")
+    rp.add_argument("--dry-run", action="store_true", help="list the calls, run nothing")
+    rp.add_argument("--delay", type=float, default=0.0, help="s to wait between calls")
     a = p.parse_args(argv)
-    out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
-           "watchdog": watchdog}[a.cmd](a)
+    if a.cmd == "replay":
+        files = a.files or ([os.path.join(a.session, CALLS_FILE)] if a.session else [])
+        if not files:
+            p.error("replay: give a call log FILE, or --session")
+        out = kit_tools.replay(files, a.session, a.lane, a.log_dir, a.include_reads, a.include_failed, a.keep_going,
+                               a.dry_run, a.delay, say=lambda s: print(s, file=sys.stderr))
+        print(json.dumps(out, indent=1))
+        return 1 if out["failed"] else 0
+    began = time.time()
+    try:
+        out = {"start": start, "do": do, "state": state, "shot": shot, "checkpoint": checkpoint, "stop": stop,
+               "watchdog": watchdog}[a.cmd](a)
+    except (Exception, SystemExit) as e:
+        log_call(a, False, "%s: %s" % (e.__class__.__name__, e), began)
+        raise
+    log_call(a, "error" not in out, out.get("error") if isinstance(out, dict) else None, began)
     print(json.dumps(out, indent=1))
     return 1 if a.cmd == "do" and "error" in out else 0
 

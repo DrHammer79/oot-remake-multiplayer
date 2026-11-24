@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "coop_menu_state.h"
 #include "coop_pause_menu.h"
 #include "coop_screen_panes.h"
 #include "hos_coop_api.h"
@@ -1143,6 +1144,9 @@ struct MenuActor {
 };
 std::array<MenuActor, 4> MenuActors() noexcept;
 int MousePage() noexcept;
+// Character Select's Customize screen as co-op drives it, for the play-test bridge's `menu` state (coop_menu_state.h).
+// Any thread (takes the screen's lock).
+CoopMenuState::Screen CustomizeScreen();
 // The mouse in the game's window (its client area, 0..1 each way) and the left button, when the window is in front:
 // the title's mouse reads it too (coop_title.cpp).
 bool ClientCursor(float* fx, float* fy, bool* left) noexcept;

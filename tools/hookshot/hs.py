@@ -40,6 +40,29 @@ import sys
 import time
 
 WINDOWS = os.name == "nt"
+CREATE_NO_WINDOW = 0x08000000   # a console program started with this gets no window, and its own children none either
+
+
+def no_window(kw=None):
+    """Popen keywords with CREATE_NO_WINDOW added on Windows (other keywords and other creation flags kept).
+    Why: a console program (powershell, tasklist, cmd, git, ninja, a python helper) started by a process that has no
+    console of its own, such as the lane watchdog or a harness's shell, gets a NEW visible console window; started from
+    a long run, they flash on the screen in a chain. Use run_quiet and popen_quiet for every such child. NEVER for a
+    game (Longshot's exe): its window is the game's own and a hidden console would change how it starts."""
+    kw = dict(kw or {})
+    if WINDOWS:
+        kw["creationflags"] = kw.get("creationflags", 0) | CREATE_NO_WINDOW
+    return kw
+
+
+def run_quiet(cmd, **kw):
+    """subprocess.run of a console program with no window on Windows (see no_window)."""
+    return subprocess.run(cmd, **no_window(kw))
+
+
+def popen_quiet(cmd, **kw):
+    """subprocess.Popen of a console program with no window on Windows (see no_window)."""
+    return subprocess.Popen(cmd, **no_window(kw))
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 # build-game.lock: a game build (a cache miss) is running; it stops both test lanes (tools/autotest/lanes.py), whose
@@ -152,7 +175,7 @@ def has_code_patches(mods):
     return False
 
 
-def code_mods_line(mods, repo=REPO, run=subprocess.run):
+def code_mods_line(mods, repo=REPO, run=run_quiet):
     """The code patches' part of a game's stamp for a mods folder: '' without code patches, else the kit's own line
     (Get-KitExefsStampLine: each patch file's path and SHA-256, and those mods' on/off rows in coop-mods.list)."""
     if not has_code_patches(mods):
@@ -168,7 +191,7 @@ def code_mods_line(mods, repo=REPO, run=subprocess.run):
     return r.stdout.replace("\r", "")
 
 
-def code_mods_mismatch(game, repo=REPO, run=subprocess.run):
+def code_mods_mismatch(game, repo=REPO, run=run_quiet):
     """None when a game folder's mods have the code patches its game was built with (coop-built-from.txt's exefs= line,
     none without), else why not. A code mod put into a pair after its build (lane-0119 2026-11-21: Character Select
     copied into lane1's mods) shows his menus without his code: no Characters tab, a pick does nothing."""
@@ -188,7 +211,7 @@ def code_mods_mismatch(game, repo=REPO, run=subprocess.run):
 PACK_DIR = os.path.join("mods", "contents", "0400486024DEC000", "coop-puppet")
 
 
-def sync_charsel_native(pairs, repo=REPO, run=subprocess.run):
+def sync_charsel_native(pairs, repo=REPO, run=run_quiet):
     """Co-op's own Characters tab's code patch (charsel/data/charsel-native.ips) put into or taken out of each pair's
     pack folder before the pairs' code patches are read, by the kit's own rule (kit-paths.ps1
     Sync-KitCharselNativePatch, what hookshot-build.ps1 does before its stamp): a pair without Character Select's code
@@ -211,7 +234,7 @@ def sync_charsel_native(pairs, repo=REPO, run=subprocess.run):
     return {p: g for (p, _), g in zip(packs, got)}
 
 
-def pairs_code_mods(pairs, repo=REPO, run=subprocess.run):
+def pairs_code_mods(pairs, repo=REPO, run=run_quiet):
     """(line, mods folder) of the pairs' code patches; ('', None) when no pair has any. One game serves every pair,
     so pairs with different code patches cannot be built together (Fail)."""
     found = [(code_mods_line(os.path.join(p, "mods"), repo, run), os.path.join(p, "mods")) for p in pairs]
@@ -381,7 +404,7 @@ def make_link(path, target):
         else:
             raise Fail("%s is a real folder; will not replace it with a link to %s" % (path, target))
     if WINDOWS and os.path.isdir(target):
-        r = subprocess.run(["cmd", "/c", "mklink", "/J", path, target], capture_output=True, text=True)
+        r = run_quiet(["cmd", "/c", "mklink", "/J", path, target], capture_output=True, text=True)
         if r.returncode:
             raise Fail("mklink /J %s failed: %s" % (path, r.stdout + r.stderr))
     else:
@@ -620,24 +643,59 @@ def remove_tree(path):
 def main_root(repo=REPO):
     """The main checkout's root (locks are shared by all worktrees)."""
     try:
-        common = subprocess.run(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        common = run_quiet(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                 capture_output=True, text=True, check=True).stdout.strip()
         return os.path.dirname(common)
     except (OSError, subprocess.CalledProcessError):
         return repo
 
 
-def pid_alive(pid):
-    if pid <= 0:
-        return False
-    if WINDOWS:
-        r = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], capture_output=True, text=True)
-        return ('"%d"' % pid) in r.stdout
+def _win_pid_probe(pid):
+    """'alive', 'gone' or 'unknown' for a pid, from the process itself (OpenProcess and a zero wait on its handle).
+    Gone only when Windows says so: no such process (ERROR_INVALID_PARAMETER) or its handle is signalled (exited).
+    Anything else (access denied, an API error) is 'unknown'."""
+    import ctypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+    k.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+    k.WaitForSingleObject.restype = ctypes.c_ulong
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    h = k.OpenProcess(0x00100000 | 0x1000, False, pid)   # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        err = ctypes.get_last_error()
+        return "gone" if err == 87 else ("alive" if err == 5 else "unknown")   # 87 no such pid, 5 exists but denied
+    try:
+        w = k.WaitForSingleObject(h, 0)
+        return "gone" if w == 0 else ("alive" if w == 0x102 else "unknown")   # WAIT_OBJECT_0: exited; WAIT_TIMEOUT
+    finally:
+        k.CloseHandle(h)
+
+
+def _posix_pid_probe(pid):
     try:
         os.kill(pid, 0)
-        return True
+        return "alive"
+    except PermissionError:
+        return "alive"      # (exists, someone else's)
+    except ProcessLookupError:
+        return "gone"
     except OSError:
+        return "unknown"
+
+
+def pid_alive(pid, probe=None):
+    """False only when the process is known to be gone. A probe that cannot tell (an API error, a busy PC) counts as
+    alive: every caller ends a session, kills or takes a lock on False, so a wrong False is the harmful one (a live game
+    once had its session closed under it when one tasklist call came back empty). The lock's age limit still frees a
+    lock whose owner can never be probed."""
+    if pid <= 0:
         return False
+    probe = probe or (_win_pid_probe if WINDOWS else _posix_pid_probe)
+    try:
+        return probe(pid) != "gone"
+    except Exception:
+        return True
 
 
 def host_id():
@@ -759,7 +817,7 @@ def msvc_prefix():
                            "Microsoft Visual Studio", "Installer", "vswhere.exe")
     if not os.path.isfile(vswhere):
         raise Fail("no cl.exe on PATH and no vswhere.exe: run from a VS developer prompt")
-    inst = subprocess.run([vswhere, "-latest", "-products", "*", "-requires",
+    inst = run_quiet([vswhere, "-latest", "-products", "*", "-requires",
                            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"],
                           capture_output=True, text=True).stdout.strip()
     bat = os.path.join(inst, "VC", "Auxiliary", "Build", "vcvars64.bat")
@@ -799,7 +857,7 @@ def run_steps(steps, prefix, dry, say=print, cwd=None, env=None):
         say("$ " + " ".join('"%s"' % c if " " in c else c for c in s))
         if dry:
             continue
-        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, errors="replace")
+        r = run_quiet(cmd, cwd=cwd, env=env, capture_output=True, text=True, errors="replace")
         if r.returncode:
             tail = (r.stdout + r.stderr).strip().splitlines()[-25:]
             say("\n".join(tail))
@@ -829,7 +887,7 @@ def compile_all(build, emu_build=None, jobs=8, repo=REPO, dry=False, say=print, 
                 say("$ ninja -C %s -t targets all  (then: ninja -C %s -j %d <lichii/hook objects>)"
                     % (emu_build, emu_build, jobs))
             else:
-                r = subprocess.run(prefix + ["ninja", "-C", emu_build, "-t", "targets", "all"],
+                r = run_quiet(prefix + ["ninja", "-C", emu_build, "-t", "targets", "all"],
                                    capture_output=True, text=True, errors="replace")
                 objs = hook_objects(r.stdout)
                 if not objs:

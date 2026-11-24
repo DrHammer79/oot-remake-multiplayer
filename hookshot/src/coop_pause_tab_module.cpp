@@ -4785,6 +4785,11 @@ std::array<MenuActor, 4> MenuActors() noexcept {
     return out;
 }
 
+CoopMenuState::Screen CustomizeScreen() {
+    std::lock_guard lock(g_snail_mutex);
+    return CoopMenuState::FromDriver(g_snail, g_snail_open, !g_snail_wait && !g_snail_fallback);
+}
+
 int MousePage() noexcept {
     return g_mouse.load();
 }

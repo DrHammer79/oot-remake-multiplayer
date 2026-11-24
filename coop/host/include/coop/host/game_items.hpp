@@ -92,6 +92,8 @@ std::uint32_t merge_item(ItemRule rule, protocol::FlagKind kind, std::uint32_t l
 // count raised only by a Skulltula's token. Taking the token sets the 64-bit
 // key of that Skulltula's placement (Enemy_Skulltula_Gold) in the same scan.
 inline constexpr std::uint32_t kGoldTokenCount = 0x04735978;
+// IsGet.Item_Token_Gold (item_flags): the first token's get flag.
+inline constexpr std::uint32_t kGoldTokenGet = 0x6ba394fe;
 // The placement keys of all 100 Gold Skulltulas (the Enemy_Skulltula_Gold
 // placements of every map, Child and Adult the same key; each key is in the
 // game's key list), sorted. The hook shares them all from the start and

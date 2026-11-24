@@ -84,6 +84,7 @@ struct Options {
     bool show_players = false;     // LICHII_COOP_SHOW_PLAYERS (the list always shown)
     bool pvp = false;              // pvp (the host's)
     bool approve_joins = false;    // approve_joins (the host's: each new player waits for /allow or /deny); read only
+    bool gold_own = false;         // gold_skulltulas = own (the host's: Gold Skulltulas not shared; no line: shared)
     bool same_network_open = true;    // the host's: on, the default, players from a private address join without
                                       // the join password; off (same_network_password = on), they need it too
     bool auto_rejoin = false;      // auto_rejoin (join the last friend's game again by itself: coop_auto_rejoin.h)

@@ -6,6 +6,7 @@
 #include "coop_boss.h"
 #include "coop_dungeon.h"
 #include "coop_enemy_shots.h"
+#include "coop_gold_mode.h"
 #include "coop_guard.h"
 #include "coop_pickups.h"
 #include "coop_world.h"
@@ -262,6 +263,8 @@ std::optional<bool> BossHurt(const std::vector<Seen>& seen, std::span<const std:
 
 bool IsShared(std::string_view name) {
     if (IsOwnPuzzle(name)) return false;  // before the Npc_ rule: the pond owner is one
+    // Gold Skulltulas Not shared (race mode, coop_gold_mode.h): each game keeps its own.
+    if (CoopGoldMode::NotShared() && name == "Enemy_Skulltula_Gold") return false;
     if (IsOwnFollower(name)) return false;  // before the Npc_ and Animal_ rules (row 214)
     // Enemy shots (Enemy_MoblinClub_ShockWave is named like an enemy)
     // stay with the spawn sync: the game whose enemy fired one sends it.
@@ -4071,6 +4074,13 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
                 remove->id.kind == proto::ObjectKind::placed &&
                 (had == owners_.end() || remove->epoch >= had->second.epoch)) {
                 Object* o = find(remove->id);
+                if (o != nullptr && o->dead_at == 0 && o->name == "Enemy_Skulltula_Gold" &&
+                    !CoopGoldMode::NotShared() && !gold_taken_.contains(remove->id.value)) {
+                    // Row 63: its token is owed here whatever our copy's death does (far, asleep, or deleted
+                    // after kDeadGraceUs with no death): CoopWorld::WorldSync::OweToken makes it when our game
+                    // made none.
+                    if (gold_deaths_.size() < 64) gold_deaths_.push_back({remove->id.value, o->position});
+                }
                 if (o != nullptr && o->fish && o->dead_at == 0) {
                     // Issue 151: caught in its owner's game. Ours goes now.
                     o->dead_now = true;

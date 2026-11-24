@@ -4,6 +4,8 @@
 // sends, compares and hands the host's values to the loader.
 #include "coop_mod_share.h"
 
+#include "coop_gold_mode.h"
+
 #include <map>
 #include <mutex>
 #include <utility>
@@ -194,6 +196,11 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         g.Reset();  // each connection starts with nothing; the server gives the rest
         g.connected = event.kind != EventKind::disconnected;
         g.hosting = g.connected && client.is_host();
+        if (event.kind == EventKind::welcomed) {
+            // A new session: Shared until its host says (a rejoin keeps it). The first player in is the host
+            // from here and gets no host change: its own choice is in force now.
+            CoopGoldMode::OnWelcomed(g.hosting);  // (coop_hook.cpp logs the mode)
+        }
         g.host_number = client.host_number();
         for (const auto& p : client.players()) {
             g.names[p.number] = p.nickname;
@@ -206,6 +213,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         if (g.hosting) {
             g.host_values.reset();
             g.host_values_due = true;
+            CoopGoldMode::OnHosting();  // our choice, unless a host before us told the session's mode
         }
         g.differences.clear();
         g.guests_told.clear();
@@ -231,6 +239,7 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
         if (!g.hosting) {
             g.host_values = settings->settings;
             g.host_values_due = true;
+            CoopGoldMode::OnHostSettings(settings->settings);
         }
     }
 }
@@ -239,6 +248,7 @@ void Frame(coop::host::Session* session) {
     Glue& g = TheGlue();
     std::optional<proto::Message> send_list;
     std::optional<proto::Message> send_settings;
+    std::string race_in_settings;   // the race id send_settings carries (CoopGoldMode::MarkRaceSent once sent)
     std::optional<std::optional<std::vector<proto::ModSetting>>> hand_on;
     std::function<void(std::optional<std::vector<proto::ModSetting>>)> host_values;
     {
@@ -254,14 +264,30 @@ void Frame(coop::host::Session* session) {
                 g.list_sent = true;
                 send_list = *mine;
             }
-            if (g.hosting && g.provider.shared) {
-                std::vector<proto::ModSetting> shared = g.provider.shared();
+            if (g.hosting) {
+                // Co-op's own host settings first (CoopGoldMode: the mode in force and, Not shared, the race id;
+                // never cut off below), then the mods'. A mod that calls itself "coop" cannot give the same keys.
+                std::vector<proto::ModSetting> shared{CoopGoldMode::AsSetting(CoopGoldMode::InForce())};
+                if (auto race = CoopGoldMode::RaceSetting()) {
+                    race_in_settings = race->value;
+                    shared.push_back(std::move(*race));
+                }
+                if (g.provider.shared) {
+                    for (proto::ModSetting& s : g.provider.shared()) {
+                        if (s.mod_id != CoopGoldMode::kModId ||
+                            (s.key != CoopGoldMode::kKey && s.key != CoopGoldMode::kRaceKey)) {
+                            shared.push_back(std::move(s));
+                        }
+                    }
+                }
                 if (shared.size() > proto::kMaxModSettingEntries) {
                     shared.resize(proto::kMaxModSettingEntries);
                 }
                 if (g.shared_sent != shared) {
                     g.shared_sent = shared;
                     send_settings = proto::ModSettings{proto::kPlayerSelf, std::move(shared)};
+                } else if (!race_in_settings.empty()) {
+                    CoopGoldMode::MarkRaceSent(race_in_settings);   // (sent before)
                 }
             }
             if (mine && !g.hosting) {
@@ -339,6 +365,9 @@ void Frame(coop::host::Session* session) {
         const bool sent = session->with_client([&](coop::net::Client& client) {
             return client.state() == coop::net::State::connected && client.send(**m);
         });
+        if (sent && m == &send_settings && !race_in_settings.empty()) {
+            CoopGoldMode::MarkRaceSent(race_in_settings);
+        }
         if (!sent) {
             std::lock_guard lock(g.mutex);
             if (m == &send_list) {

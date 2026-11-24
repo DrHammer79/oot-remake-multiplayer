@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <string>
 
+#include "coop_menu_state.h"
 #include "coop_pause_menu.h"
 #include "hos_coop_menu.h"
 #include "hos_coop_menu_picture.h"
@@ -146,5 +147,11 @@ void PasteAnswerNow();
 // opened on the Customize page, or closed, or the game hosts through the Multiplayer page's Host
 // (LICHII_COOP_TEST_HOST, CoopHostMenu::ParseTestHost). Never asked in a player's game (no commands file there).
 bool TestMenu(const std::string& page);
+// Where co-op's own menu is, for the play-test bridge's `coop_menu` state member: "closed" while it is shut, else the
+// page word (CoopPauseMenu::PageWord). It does not see the game's own pause screen, so "closed" is not "the game's
+// pause menu is shut".
+std::string MenuState();
+// The same menu for the bridge's `menu` member: open, its page word and its rows (coop_menu_state.h).
+CoopMenuState::Tab MenuTab();
 
 }  // namespace CoopPause

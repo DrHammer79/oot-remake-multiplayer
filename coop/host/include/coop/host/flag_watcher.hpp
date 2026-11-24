@@ -149,6 +149,13 @@ class FlagWatcher {
   // to 0 through the session (a key that the game resets on a scene change
   // must not put the pickup back for the others). False: already a pickup.
   bool share_pickup(FlagKey key);
+  // These keys stay in this game for the rest of the session: off the shared
+  // list, the pickups and the count guards, never sent, never written from a
+  // message, and never shared again by a later share_* call or by learning
+  // (Gold Skulltulas Not shared, docs/world.md; the mode holds for a whole
+  // session, so there is no way back). Returns how many were shared before.
+  std::size_t keep_local(std::span<const FlagKey> keys);
+  bool kept_local(FlagKey key) const { return local_.contains(key); }
   // Row 218 (heart containers given to only some players): a max-rule int32
   // (PlayerStatus.MaxLife) whose rises add up across players as a heart
   // piece's count does, while the store still merges it by the highest value
@@ -579,6 +586,7 @@ class FlagWatcher {
   SharedFlags shared_;
   FlagRole role_;
   std::set<FlagKey> pickups_;  // one-way 64-bit keys
+  std::set<FlagKey> local_;    // keep_local: never shared again
   std::set<FlagKey> containers_;  // row 218: max-rule ints whose rises add up (share_containers)
   std::set<FlagKey> one_way_;  // one-way named flags, no load write-back (share_one_way)
   std::set<FlagKey> down_only_;  // share_down_only

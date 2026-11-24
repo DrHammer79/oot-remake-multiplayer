@@ -12,6 +12,7 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "hos_coop_save_load.h"
 #include "hos_coop_crash.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_text.h"
 #include "hos_coop_world.h"
 #include "hos_coop_actors.h"
 #include "hos_coop_nodes.h"
@@ -664,6 +666,54 @@ TEST_CASE("hookshot: a module tab may draw a picture beside its page (patch 0019
     CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_view(double eye[3], double target[3])") != std::string::npos);
 }
 
+TEST_CASE("hookshot: the module may turn the player camera's yaw and pitch (patch 0036, hos_coop_turn.h)") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0036-coop-camera-angles.patch");
+    REQUIRE_FALSE(patch.empty());
+    CHECK(NewFile(patch, "host/hos_coop_turn.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_turn.h"));
+    // The bridge looks for the optional export; the camera hook asks it first, whatever the Mouse camera row, and
+    // writes the angles only in states 3 and 4, the pitch within the camera's limits.
+    CHECK(patch.find("GetProcAddress(m, \"hos_coop_turn\")") != std::string::npos);
+    CHECK(patch.find("+    if (cam && looks_like_camera(cam) && coop_turns(cam)) {") != std::string::npos);
+    CHECK(patch.find("+    if ((state != STATE_FOLLOWS && state != STATE_PLAYER) || !isfinite(yaw) || !isfinite(pitch)) return 0;") !=
+          std::string::npos);
+    CHECK(patch.find("+    if (pitch < lo) pitch = lo;") != std::string::npos);
+    // Host files only: no lift, no game code, no new hook in the game (hos_mouse_camera is already called).
+    for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
+        bool allowed = false;
+        for (const std::string prefix : {"diff --git a/host/coop_bridge.c ", "diff --git a/host/mouse_native.c ",
+                                         "diff --git a/host/hos_coop_turn.h "}) {
+            allowed = allowed || patch.compare(at, prefix.size(), prefix) == 0;
+        }
+        CHECK(allowed);
+    }
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state)") !=
+          std::string::npos);
+    // Asked with co-op off too, so a camera still turned is put back (review of fd5949c1).
+    CHECK(module.find("return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;") != std::string::npos);
+    const std::string live = ReadFile(kRepo / "hookshot" / "src" / "coop_look_live.cpp");
+    CHECK(live.find("g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()))") != std::string::npos);
+}
+
+TEST_CASE("hookshot: every export's guard site has a name of its own (a crash log names the right export)") {
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    REQUIRE_FALSE(module.empty());
+    const std::string key = "CoopBoundary::Site site{\"";
+    std::set<std::string> names;
+    int sites = 0;
+    for (std::size_t at = module.find(key); at != std::string::npos; at = module.find(key, at + 1)) {
+        const std::size_t from = at + key.size();
+        const std::string name = module.substr(from, module.find('"', from) - from);
+        CAPTURE(name);
+        CHECK(names.insert(name).second);
+        ++sites;
+    }
+    CHECK(sites > 10);
+    // The two camera exports: each its own.
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT void hos_coop_camera(uint64_t frame, const float* block, float width, float height) {\n"
+                      "    static CoopBoundary::Site site{\"hos_coop_camera\"};") != std::string::npos);
+}
+
 namespace {
 
 // s without spaces, tabs and line ends.
@@ -843,6 +893,30 @@ TEST_CASE("hookshot: the sound wrap (patch 0014) is one row in 0005's table, its
     CHECK(HOS_COOP_WRAP_SOUND_EMIT < 64);
     const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
     CHECK(module.find("if (id == HOS_COOP_WRAP_SOUND_EMIT) {") != std::string::npos);
+}
+
+TEST_CASE("hookshot: the pane text wrap (patch 0037) is one row in 0005's table, its header hookshot/src's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0037-coop-pane-text-wrap.patch");
+    CHECK(NewFile(patch, "host/hos_coop_pane_text.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_pane_text.h"));
+    char row[128];
+    std::snprintf(row, sizeof row, "+    (%u, 0x439520, (0xd503237f, 0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4)),",
+                  HOS_COOP_WRAP_PANE_TEXT);
+    CHECK(patch.find(row) != std::string::npos);
+    // After 0024's last row (9), at the table's end.
+    CHECK(patch.find(" mov x29, sp\n+    # HOS_COOP_WRAP_PANE_TEXT") != std::string::npos);
+    // The id is free in the one wrap space (1-9, 16-19, 24).
+    for (const unsigned used : {HOS_COOP_WRAP_SOUND_EMIT, HOS_COOP_WRAP_GAME_OVER_SAVE, HOS_COOP_WRAP_SAVE_LOADED,
+                                HOS_COOP_WRAP_EVENT_REQUEST}) {
+        CHECK(HOS_COOP_WRAP_PANE_TEXT != used);
+    }
+    CHECK(HOS_COOP_WRAP_PANE_TEXT < 64);
+    // The module copies the text only while the play-test bridge is on, and never writes for it.
+    const std::string module = ReadFile(kRepo / "hookshot" / "src" / "coop_hookshot.cpp");
+    const auto at = module.find("if (id == HOS_COOP_WRAP_PANE_TEXT) {");
+    REQUIRE(at != std::string::npos);
+    const std::string body = module.substr(at, module.find("return 0;", at) - at);
+    CHECK(body.find("phase == 0 && CoopPlaytest::On()") != std::string::npos);
+    CHECK(body.find("Write") == std::string::npos);
 }
 
 TEST_CASE("hookshot: the AI node starts (patch 0029) are one generic world event, their header hookshot/src's") {

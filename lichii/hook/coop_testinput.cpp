@@ -326,6 +326,28 @@ std::string WarpGiveUpLine(std::string_view target, double seconds, const std::o
     return line + ")";
 }
 
+bool AllDigits(std::string_view s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+// The words of "kill [ID] NAME" and "hit [ID] NAME N": a first word that is all digits is the actor's id (its address, as
+// get_world lists it), and then the actor's name must follow (never a number). `at` is where the NAME is; `id` the id
+// (0: none given). False for an id of 0 or too long, or an id with no name after it.
+bool StrikeId(const std::vector<std::string_view>& w, std::size_t& at, std::uint64_t& id) {
+    at = 1;
+    id = 0;
+    if (w.size() < 2 || !AllDigits(w[1])) {
+        return true;
+    }
+    const std::string_view n = w[1];
+    const auto r = std::from_chars(n.data(), n.data() + n.size(), id);
+    if (r.ec != std::errc{} || r.ptr != n.data() + n.size() || id == 0 || w.size() < 3 || AllDigits(w[2])) {
+        return false;
+    }
+    at = 2;
+    return true;
+}
+
 std::optional<Script> Parse(std::string_view text, std::string& error) {
     Script script;
     int number = 0;
@@ -462,11 +484,16 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             step.kind = Kind::menu;
             step.mark = page;
         } else if (cmd == "KILL") {
-            if (w.size() != 2) {
-                return fail("want: kill ACTOR");
+            // kill NAME, or kill ID NAME (the ID is the address get_world lists; the NAME is the one it lists with it)
+            std::size_t at = 1;
+            if (!StrikeId(w, at, step.id)) {
+                return fail("want: kill [ID] ACTOR (an ID needs the actor's name after it)");
+            }
+            if (w.size() != at + 1) {
+                return fail("want: kill [ID] ACTOR");
             }
             step.kind = Kind::kill;
-            step.mark = std::string(w[1]);
+            step.mark = std::string(w[at]);
         } else if (cmd == "DROP") {
             // drop ACTOR METRES: test only (row 178's fall guard): the nearest boss of that name that our game owns
             // is put METRES straight down by the set-matrix call the copies are placed with (a copy: not moved).
@@ -481,13 +508,17 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             step.start = std::string(w[2]);
         } else if (cmd == "HIT") {
             int amount = 0;
-            const std::string_view n = w.size() == 3 ? std::string_view(w[2]) : std::string_view();
+            std::size_t at = 1;
+            if (!StrikeId(w, at, step.id)) {
+                return fail("want: hit [ID] ACTOR N (1 to 80; an ID needs the actor's name after it)");
+            }
+            const std::string_view n = w.size() == at + 2 ? std::string_view(w[at + 1]) : std::string_view();
             const auto r = std::from_chars(n.data(), n.data() + n.size(), amount);
-            if (w.size() != 3 || r.ec != std::errc{} || r.ptr != n.data() + n.size() || amount < 1 || amount > 80) {
-                return fail("want: hit ACTOR N (1 to 80)");
+            if (w.size() != at + 2 || r.ec != std::errc{} || r.ptr != n.data() + n.size() || amount < 1 || amount > 80) {
+                return fail("want: hit [ID] ACTOR N (1 to 80)");
             }
             step.kind = Kind::hit;
-            step.mark = std::string(w[1]);
+            step.mark = std::string(w[at]);
             step.start = std::to_string(amount);
         } else if (cmd == "STUN") {
             if (w.size() != 2) {
@@ -728,7 +759,7 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
             s.kind == Kind::hit || s.kind == Kind::stun ||
             s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump ||
             s.kind == Kind::event) {
-            requests_.push_back(Request{s.kind, s.mark, s.start});
+            requests_.push_back(Request{s.kind, s.mark, s.start, {}, s.id});
             ++index_;
             continue;
         }
@@ -882,6 +913,61 @@ std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, 
 
 } // namespace CoopTestInput
 
+namespace CoopTestInput {
+
+const std::vector<Kind>& ActKinds() {
+    static const std::vector<Kind> kinds = {Kind::kill, Kind::hit,  Kind::hurt,    Kind::place, Kind::face,
+                                            Kind::aim,  Kind::wear, Kind::dress,   Kind::assign, Kind::chat,
+                                            Kind::menu, Kind::setflag, Kind::setenum};
+    return kinds;
+}
+
+const char* KindWord(Kind kind) {
+    switch (kind) {
+    case Kind::timed: return "timed";
+    case Kind::mark: return "mark";
+    case Kind::go: return "goto";
+    case Kind::toward: return "toward";
+    case Kind::warp: return "warp";
+    case Kind::give: return "give";
+    case Kind::wear: return "wear";
+    case Kind::assign: return "assign";
+    case Kind::dress: return "dress";
+    case Kind::chat: return "chat";
+    case Kind::place: return "place";
+    case Kind::face: return "face";
+    case Kind::aim: return "aim";
+    case Kind::kill: return "kill";
+    case Kind::hurt: return "hurt";
+    case Kind::hit: return "hit";
+    case Kind::stun: return "stun";
+    case Kind::drop: return "drop";
+    case Kind::setflag: return "setflag";
+    case Kind::setenum: return "setenum";
+    case Kind::sync: return "sync";
+    case Kind::menu: return "menu";
+    case Kind::dump: return "dump";
+    case Kind::event: return "event";
+    }
+    return "?";
+}
+
+std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed) {
+    for (const Step& s : script.steps) {
+        if (std::find(allowed.begin(), allowed.end(), s.kind) != allowed.end()) {
+            continue;
+        }
+        std::string list;
+        for (const Kind k : allowed) {
+            list += (list.empty() ? "" : " ") + std::string(KindWord(k));
+        }
+        return "line " + std::to_string(s.line) + ": " + KindWord(s.kind) + " is not allowed here (allowed: " + list + ")";
+    }
+    return {};
+}
+
+} // namespace CoopTestInput
+
 #ifdef LICHII_COOP
 
 #include <array>
@@ -896,6 +982,7 @@ std::optional<std::array<float, 12>> AimPlace(const std::array<float, 3>& from, 
 #include "coop/host/flags.hpp"
 #include "coop/host/game_flags.hpp"
 #include "coop/host/player_reader.hpp"
+#include "coop_cheat_give.h"
 #include "coop_cheats.h"
 #include "coop_every.h"
 #include "coop_boss.h"
@@ -1210,6 +1297,68 @@ std::optional<std::string> FlagText(Core::System& system, std::string_view name)
 }
 
 namespace {
+// A 0x name (0x and 1 to 8 hex digits, not 0) as its hash; else the flag_hash of the name.
+std::uint32_t NameHash(std::string_view name) {
+    if (name.size() > 2 && name.size() <= 10 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
+        std::uint32_t hash = 0;
+        const char* end = name.data() + name.size();
+        if (std::from_chars(name.data() + 2, end, hash, 16).ptr == end && hash != 0) return hash;
+        return 0;
+    }
+    return coop::host::flag_hash(std::string(name));
+}
+}  // namespace
+
+FlagReading ReadFlag(Core::System& system, std::string_view name) {
+    std::lock_guard play_lock(g_play_mu);
+    PlayerXZ(system);
+    CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+    coop::host::GameFlags flags(memory);
+    FlagReading out;
+    if (name.starts_with("key64:0x") || name.starts_with("key64:0X")) {
+        std::uint64_t key = 0;
+        const char* end = name.data() + name.size();
+        if (std::from_chars(name.data() + 8, end, key, 16).ptr == end && key != 0) {
+            if (const auto v = flags.get_key64(key)) {
+                out.kind = "key64";
+                out.number = *v ? 1 : 0;
+            }
+        }
+        return out;
+    }
+    const std::uint32_t hash = NameHash(name);
+    if (hash == 0) return out;
+    if (const auto v = flags.get_int(hash)) {
+        out.kind = "int";
+        out.number = *v;
+        out.live = flags.get_int_live(hash);
+    } else if (const auto b = flags.get_bool(hash)) {
+        out.kind = "bool";
+        out.number = *b ? 1 : 0;
+    } else if (const auto e = flags.get_enum(hash)) {
+        out.kind = "enum";
+        out.hash = *e;
+    } else if (const auto u = flags.get_uint(hash)) {
+        out.kind = "uint";
+        out.number = *u;
+    } else if (auto t = flags.get_string64(hash)) {
+        out.kind = "text";
+        out.text = std::move(*t);
+    }
+    return out;
+}
+
+bool SetEnumHash(Core::System& system, std::string_view name, std::uint32_t value) {
+    std::lock_guard play_lock(g_play_mu);
+    PlayerXZ(system);
+    CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+    const std::uint32_t hash = NameHash(name);
+    const bool ok = hash != 0 && value != 0 && coop::host::GameFlags::set_enum(memory, hash, value);
+    LOG_INFO(Core, "coop: test setenum {} {:#010x}: {}", name, value, ok ? "set" : "NOT set");
+    return ok;
+}
+
+namespace {
 
 // dump TAG (play-test kit): the value in this game of every flag in the shared dungeon and story lists
 // (CoopDungeon::Flags, CoopStory::Flags; not the live-only or autogen lists), as JSON next to the commands file,
@@ -1262,31 +1411,37 @@ void SetEnum(Core::System& system, const std::string& name, const std::string& v
              known ? fmt::format("{:#010x}", *was) : std::string("-"));
 }
 
-// give: bombs, bow and hookshot are the item flags of each; any other name is
-// given as it is. Needs LICHII_COOP_CHEATS=1 (applied on the co-op frame).
-void Give(const std::string& item) {
-    std::vector<std::string> names;
-    if (item == "bombs") {
-        names = {"PouchData.Item_BombBag_Small.StockNum", "PouchData.Item_Bomb.StockNum"};
-    } else if (item == "bow") {
-        names = {"PouchData.Weapon_Range_Bow.StockNum", "PouchData.Item_Quiver_Small.StockNum",
-                 "PouchData.Item_Arrow_Normal.StockNum"};
-    } else if (item == "hookshot") {
-        names = {"PouchData.Item_Hookshot.StockNum"};
+// give: bombs, bow and hookshot are the item flags of each; any other name is given as it is. Needs
+// LICHII_COOP_CHEATS=1. The flags are written at once, into the game's own store (as setflag does), not queued for
+// the co-op frame: the bridge's held call (and a script step) sees the new value as soon as this returns, and a game
+// with no co-op session gets it too. What it did is logged and kept for LastGive.
+std::mutex g_give_mu;
+std::string g_last_give;
+
+void Give(Core::System& system, const std::string& item) {
+    std::string said;
+    {
+        std::lock_guard lock(g_give_mu);
+        g_last_give.clear();  // so a give that never got to run cannot show the last one's text
+    }
+    if (!CoopCheats::On()) {
+        said = item + ": NOT given (LICHII_COOP_CHEATS is off)";
+        LOG_INFO(Core, "coop: test give {}", said);
     } else {
-        names = {item};
-    }
-    const auto known = CoopCheats::Items();
-    for (const auto& name : names) {
-        const bool listed = std::find(known.begin(), known.end(), name) != known.end();
-        if (listed && CoopCheats::On()) {
-            CoopCheats::Give(name);
+        CoopHook::EmulatorMemory memory(system.ApplicationMemory(), g_state.main);
+        coop::host::GameFlagStore store(memory);
+        for (const auto& name : CoopCheatGive::Names(item)) {
+            const auto done = CoopCheatGive::Give(store, name);
+            // "PARTLY given": the item is in but its IsGet or a grant failed (the bridge answers ok, with the text).
+            const std::string line = done.ok ? (done.changed ? "" : "no change: ") + done.text
+                                   : done.wrote ? "PARTLY given: " + done.text
+                                                : "NOT given: " + done.text;
+            LOG_INFO(Core, "coop: test give {}: {}", name, line);
+            said += (said.empty() ? "" : "; ") + line;
         }
-        LOG_INFO(Core, "coop: test give {}: {}", name,
-                 !CoopCheats::On() ? "NOT given (LICHII_COOP_CHEATS is off)"
-                 : listed          ? "queued"
-                                   : "NOT given (unknown item flag)");
     }
+    std::lock_guard lock(g_give_mu);
+    g_last_give = said;
 }
 
 void StopRunning() {
@@ -1484,9 +1639,9 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         }
         CoopObjects::QueueTestAim(request.at[0], request.at[1], request.at[2]);
     } else if (request.kind == Kind::kill) {
-        CoopObjects::QueueTestKill(request.name);  // logged where it is done
+        CoopObjects::QueueTestKill(request.name, request.id);  // logged where it is done
     } else if (request.kind == Kind::hit) {
-        CoopObjects::QueueTestHit(request.name, Whole(request.start));  // logged where it is done
+        CoopObjects::QueueTestHit(request.name, Whole(request.start), request.id);  // logged where it is done
     } else if (request.kind == Kind::stun) {
         CoopObjects::QueueTestStun(request.name);  // logged where it is done
     } else if (request.kind == Kind::drop) {
@@ -1508,20 +1663,31 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         const bool sent = CoopHook::SendChat(request.name);
         LOG_INFO(Core, "coop: test chat '{}': {}", request.name, sent ? "sent" : "NOT sent");
     } else {
-        Give(request.name);
+        Give(system, request.name);
     }
 }
 
 } // namespace
 
+std::string LastGive() {
+    std::lock_guard lock(g_give_mu);
+    return g_last_give;
+}
+
 void SetMenuOpener(MenuOpener opener) {
     g_menu_opener = std::move(opener);
 }
 
-bool PlayNow(Core::System& system, std::string_view lines, std::string& error) {
+bool PlayNow(Core::System& system, std::string_view lines, std::string& error, const std::vector<Kind>* allowed) {
     auto script = Parse(lines, error);
     if (!script) {
         return false;
+    }
+    if (allowed) {
+        error = NotAllowed(*script, *allowed);
+        if (!error.empty()) {
+            return false;
+        }
     }
     std::lock_guard play_lock(g_play_mu);
     const auto player = PlayerXZ(system);

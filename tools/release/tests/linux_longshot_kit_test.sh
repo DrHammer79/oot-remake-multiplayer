@@ -248,6 +248,61 @@ check "build: put back: the tab's code in again with them, the game as built wit
     bash -c '[ $CODE -eq 0 ] && grep -q "fake merge 0 put back" "$1" && [ -f "$2" ] && grep -q "coop-puppet/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips:" "$3" && [ "$(cat "$4")" = 0 ]' _ \
     "$tmp/park3.txt" "$csn" "$D/game/coop-built-from.txt" "$D/charsel-parked.txt"
 
+# kit-harden: a game whose files are not the ones Longshot's note names (.longshot_installed.json: a sha1 for each file it
+# copied in) is never started, kept or built on; --rebuild takes the wrong file out and builds again. A kit with
+# data/hold-game.txt never builds its game for patches other than the ones it was built from. No note (the runs above:
+# the stand-in builder writes none) and a note without sha1 are no refusal.
+write_note() {  # the note as Longshot's finish leaves it, for the files in data/game
+    "$py" - "$D/game" <<'PY'
+import hashlib, json, os, sys
+g = sys.argv[1]
+note = {n: {"sha1": hashlib.sha1(open(os.path.join(g, n), "rb").read()).hexdigest(), "stat": [1, 2]} for n in ("longshot", "image.bin", "longshot_vk.so")}
+json.dump(note, open(os.path.join(g, ".longshot_installed.json"), "w"))
+PY
+}
+write_note
+: >"$log"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix0.txt" 2>&1; export CODE=$?
+check 'mixed: a clean set with its note: built already, nothing built' bash -c '[ $CODE -eq 0 ] && grep -q "built already" "$1" && ! grep -q "^make_game" "$2"' _ "$tmp/mix0.txt" "$log"
+printf 'image.bin of another build' >"$D/game/image.bin"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix1.txt" 2>&1; export CODE=$?
+check 'mixed: image.bin swapped: the start stops, names the file, says nothing was changed and how to build again' \
+    bash -c '[ $CODE -ne 0 ] && grep -q "image.bin is not the file Longshot put into this game" "$1" && grep -q "Nothing was changed" "$1" && grep -q -- "--rebuild" "$1"' _ "$tmp/mix1.txt"
+check 'mixed: nothing built, the file untouched, nothing kept as a build' \
+    bash -c '! grep -q "^make_game" "$1" && [ "$(cat "$2/game/image.bin")" = "image.bin of another build" ] && [ ! -d "$2/game-variants" ]' _ "$log" "$D"
+rm -f "$D/game/longshot_vk.so"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix2.txt" 2>&1; export CODE=$?
+check 'mixed: a file the note lists is missing: refused too' bash -c '[ $CODE -ne 0 ] && grep -q "longshot_vk.so is missing" "$1"' _ "$tmp/mix2.txt"
+bash "$kit/scripts/build.sh" --check-only </dev/null >"$tmp/mix3.txt" 2>&1
+check 'mixed: --check-only does not stop for it (it only checks the game file)' bash -c '! grep -q "Longshot put into this game" "$1"' _ "$tmp/mix3.txt"
+: >"$log"
+bash "$kit/scripts/build.sh" --rebuild </dev/null >"$tmp/mix4.txt" 2>&1; export CODE=$?
+check 'mixed: --rebuild takes the wrong files out and builds the game again' \
+    bash -c '[ $CODE -eq 0 ] && grep -q "taking them out" "$1" && grep -q "^make_game .* --out" "$2" && [ "$(cat "$3/game/image.bin")" = image.bin ] && [ -f "$3/game/longshot_vk.so" ]' _ "$tmp/mix4.txt" "$log" "$D"
+write_note
+"$py" -c 'import json, sys; json.dump({"image.bin": {}, "longshot": {"stat": [1]}}, open(sys.argv[1], "w"))' "$D/game/.longshot_installed.json"
+printf 'changed' >"$D/game/image.bin"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/mix5.txt" 2>&1; export CODE=$?
+check 'mixed: a note without sha1 (an older Longshot) is no refusal' bash -c '[ $CODE -eq 0 ] && ! grep -q "Longshot put into this game" "$1"' _ "$tmp/mix5.txt"
+printf 'image.bin' >"$D/game/image.bin"
+rm -f "$D/game/.longshot_installed.json"
+# (another patch name is another stamp, and the patch itself still applies)
+first=$(ls "$D/longshot/patches" | head -n 1)
+mv "$D/longshot/patches/$first" "$D/longshot/patches/0000-renamed-for-test.patch"
+: >"$log"
+printf 'test kit\n' >"$D/hold-game.txt"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/hold1.txt" 2>&1; export CODE=$?
+check 'hold: data/hold-game.txt and other patches than the game was built from: refused, nothing built, how to go on said' \
+    bash -c '[ $CODE -ne 0 ] && grep -q "hold-game.txt" "$1" && grep -q "Nothing was changed" "$1" && grep -q "patches" "$1" && grep -q "delete data/hold-game.txt" "$1" && ! grep -q "^make_game" "$2"' _ "$tmp/hold1.txt" "$log"
+bash "$kit/scripts/build.sh" --rebuild </dev/null >"$tmp/hold2.txt" 2>&1; export CODE=$?
+check 'hold: --rebuild does not get past the marker either' bash -c '[ $CODE -ne 0 ] && grep -q "hold-game.txt" "$1" && ! grep -q "^make_game" "$2"' _ "$tmp/hold2.txt" "$log"
+rm -f "$D/hold-game.txt"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/hold3.txt" 2>&1; export CODE=$?
+check 'hold: without the marker the other patches build the game again, as before' bash -c '[ $CODE -eq 0 ] && grep -q "^make_game .* --out" "$1"' _ "$log"
+# (the patch back under its name: one more build, so the game is as the tests below expect it)
+mv "$D/longshot/patches/0000-renamed-for-test.patch" "$D/longshot/patches/$first"
+bash "$kit/scripts/build.sh" </dev/null >"$tmp/hold4.txt" 2>&1
+
 # NVIDIA DLSS (#234): --dlss asks for NVIDIA's license once (a terminal only), data/dlss.txt keeps the answer, the game is
 # built again with the SDK; --no-dlss takes it back. The game's stamp stays the release, pin and patches.
 : >"$log"
@@ -382,7 +437,7 @@ OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs1.txt"
 check 'Character Select: no -> the default part alone (the Characters page, Link), characters.json, stamped ui, credited, the answer kept' \
     bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] && [ -f "$2/romfs/Model/Player_Child.Player_Child.bfres.zs" ] &&
         [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs" ] && [ -f "$2/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips" ] &&
-        [ -f "$2/characters.json" ] && [ ! -e "$2/INSTALL.txt" ] && grep -q "^v1 .* ui cz2$" "$2/coop-charsel.txt" && grep -q "belong to Nintendo" "$2/CREDITS-coop.txt" &&
+        [ -f "$2/characters.json" ] && [ ! -e "$2/INSTALL.txt" ] && grep -q "^v1 .* ui cz2v$" "$2/coop-charsel.txt" && grep -q "belong to Nintendo" "$2/CREDITS-coop.txt" &&
         grep -qx no "$3/character-select-answer.txt" && [ ! -e "$3/builder/charsel/CS-v1.zip" ] && [ ! -e "$3/game/mods/coop-mods.list" ]' _ "$tmp/build-cs1.txt" "$CS" "$D"
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select strip: the exefs patch keeps only the 2 records outside his customizer, his own whole beside it (outside exefs)' \
@@ -397,7 +452,7 @@ cp "$tmp/cs-rel/CS-v1.zip" "$D/builder/charsel/CS-v1.zip"
 : >"$log"; OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs3.txt" 2>&1; export CODE=$?
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select: character_select = yes gets the NPC part too, his patch still stripped' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && grep -q "^v1 .* full cz2$" "$2/coop-charsel.txt" &&
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ -f "$2/romfs/Tex/Npc_A.bntx.zs" ] && grep -q "^v1 .* full cz2v$" "$2/coop-charsel.txt" &&
         [ "$CS_RECS" = 2 ]' _ "$tmp/build-cs3.txt" "$CS"
 check 'Character Select pack: UI-only -> full (NPC models put in) makes the puppet pack again' bash -c 'grep -q "^puppet_pack" "$1" && grep -q "models:" "$2/.coop-stamp"' _ "$log" "$P"
 # Off again: from the copy there (no zip here, nothing downloaded): the NPC part out, the Characters page kept.
@@ -405,7 +460,7 @@ sed -i 's/^character_select = yes$/character_select = no/' "$D/coop-options.ini"
 : >"$log"; OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs4.txt" 2>&1; export CODE=$?
 check 'Character Select: character_select = no keeps the Characters page, takes the NPC part out, no download' \
     bash -c '[ $CODE -eq 0 ] && [ ! -e "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && [ ! -e "$2/romfs/Tex/Npc_A.bntx.zs" ] && [ -f "$2/romfs/Tex/Mt_Vest_Player_Child_Ac1.bntx.zs" ] && [ -f "$2/romfs/UI/LayoutArchiveCategory.Product.100.byml.zs" ] &&
-        grep -q "^v1 .* ui cz2$" "$2/coop-charsel.txt" && grep -q "exefs=OoT Character Select/exefs/" "$3/game/coop-built-from.txt" && ! grep -q downloading "$1"' _ "$tmp/build-cs4.txt" "$CS" "$D"
+        grep -q "^v1 .* ui cz2v$" "$2/coop-charsel.txt" && grep -q "exefs=OoT Character Select/exefs/" "$3/game/coop-built-from.txt" && ! grep -q downloading "$1"' _ "$tmp/build-cs4.txt" "$CS" "$D"
 # black-cs-01112: a hand copy beside the kit's (another name, or under contents/<title>, the emulators' place) puts a
 # second code patch into the game: the start sets every such copy aside with '_' (the game and its build skip it).
 for d in "$D/game/mods/contents/0400486024DEC000/OoT Character Select" "$D/game/mods/My CS"; do
@@ -451,7 +506,7 @@ cp "$tmp/cs-his.ips" "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs5.txt" 2>&1; export CODE=$?
 export CS_RECS=$(cs_recs "$CS/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips")
 check 'Character Select: a 0.11.8 full copy keeps its NPC part, his patch stripped, his own kept aside, no download' \
-    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v1 .* full cz2$" "$2/coop-charsel.txt" &&
+    bash -c '[ $CODE -eq 0 ] && [ -f "$2/romfs/Model/Player_Child_C000.Player_Child.bfres.zs" ] && grep -q "^v1 .* full cz2v$" "$2/coop-charsel.txt" &&
         [ "$CS_RECS" = 2 ] && cmp -s "$2/coop-charsel-code.ips" "$3" && ! grep -q downloading "$1"' _ "$tmp/build-cs5.txt" "$CS" "$tmp/cs-his.ips"
 # A newer patch of his laid out otherwise (no record at cz_head): refused, the copy there kept as it was.
 cs_ips "$D/builder/charsel/code.ips" 0
@@ -459,7 +514,7 @@ cs_pin https://example.invalid/code.ips "$(sha256sum "$D/builder/charsel/code.ip
 cp "$tmp/cs-rel/CS-v1.zip" "$D/builder/charsel/CS-v1.zip"
 OOT_COOP_OFFLINE=1 bash "$kit/scripts/build.sh" </dev/null >"$tmp/build-cs6.txt" 2>&1; export CODE=$?
 check 'Character Select strip: a patch without a customizer region is refused, the copy there kept' \
-    bash -c '[ $CODE -eq 0 ] && grep -q "nothing at cz_head" "$1" && grep -q "^v1 .* - full cz2$" "$2/coop-charsel.txt"' _ "$tmp/build-cs6.txt" "$CS"
+    bash -c '[ $CODE -eq 0 ] && grep -q "nothing at cz_head" "$1" && grep -q "^v1 .* - full cz2v$" "$2/coop-charsel.txt"' _ "$tmp/build-cs6.txt" "$CS"
 cs_pin
 # A copy the player put in by hand (no stamp) is never touched.
 rm -f "$CS/coop-charsel.txt"

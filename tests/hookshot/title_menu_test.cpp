@@ -916,6 +916,22 @@ TEST_CASE("title menu: Skip title screen is free solo and held while co-op does 
     CHECK(std::string(SkipTitleHold(join)) == "co-op is joining");
 }
 
+TEST_CASE("title menu: gold_skulltulas (the host's) is read from coop-options.ini, shared without a line") {
+    CHECK_FALSE(Options::Read("", "").gold_own);
+    CHECK_FALSE(Options::Read("", "gold_skulltulas = shared\r\n").gold_own);
+    CHECK_FALSE(Options::Read("", "# gold_skulltulas = own\r\n").gold_own);
+    CHECK(Options::Read("", "gold_skulltulas = own\r\n").gold_own);
+    Options o;
+    std::string coop, options;
+    o.gold_own = true;
+    o.Write(coop, options);
+    CHECK(IniGet(options, "gold_skulltulas") == "own");
+    CHECK(Options::Read("", options).gold_own);
+    o.gold_own = false;
+    o.Write(coop, options);
+    CHECK_FALSE(IniGet(options, "gold_skulltulas").has_value());   // (shared: no line)
+}
+
 TEST_CASE("title menu: approve_joins (the host's) is read from coop-options.ini, off without a line, kept as written") {
     CHECK_FALSE(Options::Read("", "").approve_joins);
     CHECK_FALSE(Options::Read("", "# approve_joins = on\r\n").approve_joins);

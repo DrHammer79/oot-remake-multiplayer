@@ -451,6 +451,11 @@ std::size_t Page::GroupShown() const {
     return offered.empty() ? 0 : offered[std::min(group_, offered.size() - 1)];
 }
 
+std::size_t Page::PageIndex() const {
+    const std::size_t n = Offered().size();
+    return n == 0 ? 0 : std::min(group_, n - 1);
+}
+
 std::size_t Page::GroupsOffered() const {
     return Offered().size();
 }
