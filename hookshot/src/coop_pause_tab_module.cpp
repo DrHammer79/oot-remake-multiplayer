@@ -40,7 +40,6 @@
 #include "coop_runtime.h"
 #include "coop_lobby_game.h"
 #include "coop_look.h"
-#include "coop_look_view.h"
 #include "coop_char_colours.h"
 #include "coop_mods_tab.h"
 #include "coop_snail_custom.h"
@@ -4084,9 +4083,6 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
         if (stick != nullptr) g_model_spin = shown ? static_cast<float>(stick[2]) / 32767.0f : 0.0f;   // (Link's turn)
         if (shown && stick != nullptr) {
             stick[0] = 0, stick[2] = 0, stick[3] = 0;   // (only the left stick's up and down: the game's cursor over our rows)
-            // (the Customize picture: a small right stick wakes the game's camera when its update stopped; else the camera
-            // hook is never called and the camera does not turn, coop_look_view.h Steer::kWakeFrames)
-            stick[2] = CoopLookView::CameraNudge();
             if (typing || g_cell.load() >= 0 || (g_page.Which() == 1 && g_set_row.load() >= 0) ||
                 (ViewShown() == View::kMenu && (g_menu_list.load() || mv.typing))) {
                 stick[1] = 0;

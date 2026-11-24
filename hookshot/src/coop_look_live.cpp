@@ -962,7 +962,6 @@ std::mutex g_mutex;
 Orbit g_orbit;   // guarded
 Watch g_watch;   // guarded
 Steer g_steer;   // guarded (patch 0036: the game's camera turned with the orbit)
-std::atomic<int> g_nudge{0};   // the right stick's x for the pad filter (Steer::Viewed)
 std::mutex g_keep_mutex;   // (its own: OwnLink runs outside g_mutex)
 Keep g_keep;               // guarded by g_keep_mutex
 
@@ -1050,14 +1049,13 @@ bool Camera(double eye[3], double target[3]) {
         if (!g_orbit.Asked(now)) {
             g_orbit.Camera({}, {}, std::nullopt, now);   // (ends a turn)
             g_steer.Want(std::nullopt);
-            g_nudge = 0;
             return false;
         }
     }
     const auto link = OwnLink();   // (outside the lock: the hook's own lock)
     const double fov = GameFov();
     std::unique_lock lock(g_mutex);
-    g_nudge = g_steer.Viewed();   // (no camera hook call while the page is asked: the log, and a stick to wake it)
+    g_steer.Viewed();   // (the log: no camera hook call while the page is asked)
     const Vec3 game_eye{eye[0], eye[1], eye[2]};
     const Vec3 game_target{target[0], target[1], target[2]};
     const auto aim = g_orbit.Camera(game_eye, game_target, link, now, fov);
@@ -1088,10 +1086,6 @@ bool Camera(double eye[3], double target[3]) {
         LOG_INFO(Core, "{}", note);
     }
     return shot.has_value();   // (none: hidden behind the flat picture, the game's own view)
-}
-
-int CameraNudge() {
-    return g_nudge.load();
 }
 
 bool Turn(float* yaw, float* pitch, int state, bool coop_on) {

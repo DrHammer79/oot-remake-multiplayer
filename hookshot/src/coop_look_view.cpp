@@ -301,9 +301,8 @@ void Steer::Watch(int state, bool asked) {
     Say(line);
 }
 
-int Steer::Viewed() {
-    ++since_turn_;
-    if (since_turn_ == kNoTurnFrames) {
+void Steer::Viewed() {
+    if (++since_turn_ == kNoTurnFrames) {
         char line[300];
         std::snprintf(line, sizeof line,
                       "coop: look: the camera hook (hos_coop_turn, patch 0036) was not called in %d frames of the "
@@ -311,11 +310,6 @@ int Steer::Viewed() {
                       kNoTurnFrames);
         Say(line);
     }
-    if (since_turn_ < kWakeFrames) {
-        return 0;
-    }
-    wake_sign_ = -wake_sign_;
-    return wake_sign_ * kWakeStick;
 }
 
 std::optional<Angles> Steer::Step(Angles now, int state, bool asked) {
