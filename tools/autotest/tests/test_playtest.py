@@ -646,6 +646,30 @@ class TalkTest(unittest.TestCase):
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
 
     # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0042: Kokiri shop and Mido) -------------
+    def test_strip_markup_counts_the_params_in_bytes(self):
+        # A name with a character of more than one byte: the tag's size is bytes, the text has one character for it.
+        name = "Gr\u0101t"                                     # 4 characters, 5 bytes in UTF-8
+        n = len(name.encode("utf-8"))
+        t = bytes([0x0e, 4, 0, 0, 0, n & 255, n >> 8]).decode("latin-1") + name
+        self.assertEqual(ph.strip_markup("A" + t + "B"), "AB")
+        self.assertEqual(ph.strip_markup("A" + t), "A")
+        # a size that names more bytes than the text has still loses only the first byte
+        self.assertEqual(ph.strip_markup("A" + t[:-2]), "A" + t[1:-2])
+
+    def test_the_helper_source_has_no_literal_markup_byte(self):
+        src = open(ph.__file__, "rb").read()
+        self.assertNotIn(b"\x0e", src)                           # (the tag byte is written "\\x0e" in the source)
+
+    def test_strip_markup_keeps_a_variable_as_its_name_in_braces(self):
+        item = tag(2, 3, b"\x13\x00Shop_SelectItemName\xff\xff")
+        price = tag(2, 1, b"\x14\x00Shop_SelectItemPrice\xff\xff\x00")
+        span = tag(0, 3, b"\xff\xff")
+        self.assertEqual(ph.strip_markup("The " + item + span + "? That'll cost\n" + price + " rupees."),
+                         "The {Shop_SelectItemName}? That'll cost\n{Shop_SelectItemPrice} rupees.")
+        self.assertEqual(ph.strip_markup("Hi " + tag(2, 23, b"\x05\x00Name\x00\xff\xff")), "Hi {Name}")
+        self.assertEqual(ph.strip_markup("Hi " + tag(2, 23, b"\x05\x00Name\x00\xff\xff"), variables=False), "Hi")
+        self.assertEqual(ph.strip_markup("Hi " + tag(2, 23, b"")), "Hi")             # (a variable with no name)
+
     def test_strip_markup_page_break_is_a_space(self):
         # The page break (group 0, type 4, no params) ends a page: its two sides are two sentences, not one word.
         self.assertEqual(ph.strip_markup("Link!" + tag(0, 4) + "Let's go."), "Link! Let's go.")
@@ -664,7 +688,7 @@ class TalkTest(unittest.TestCase):
                          "One two three.")
         self.assertEqual(ph.strip_markup("Line" + tag(5, 1) + " next\nrow — end"), "Line next\nrow — end")
         self.assertEqual(ph.strip_markup("No markup at all"), "No markup at all")
-        self.assertEqual(ph.strip_markup(tag(2, 23, b"\x05\x00Name\x00\xff\xff")), "")
+        self.assertEqual(ph.strip_markup(tag(2, 23, b"\x05\x00Name\x00\xff\xff"), variables=False), "")
         # a tag cut short, or one that names more bytes than there are, loses only its first byte
         self.assertEqual(ph.strip_markup("Words\x0e\x01\x00"), "Words\x01\x00")
         cut = ph.strip_markup("\x0e\x01\x00\x02\x00\x40\x00words")
@@ -683,6 +707,13 @@ class TalkTest(unittest.TestCase):
         self.assertNotIn("raw", r["boxes"][1])             # (nothing was cut: the text is the raw)
         self.assertFalse(r["boxes"][1]["markup"])
 
+    def test_whitespace_at_the_edges_is_not_markup(self):
+        g = FakeTalk([("box", "Speaker A", "  Hi  ")])
+        r = ph.talk(g)
+        self.assertEqual(r["boxes"][0]["text"], "Hi")
+        self.assertFalse(r["boxes"][0]["markup"])
+        self.assertNotIn("raw", r["boxes"][0])
+
     def test_a_text_of_only_markup_is_not_a_box(self):
         g = FakeTalk([("box", "Speaker A", tag(2, 23, b"\x05\x00Name\x00\xff\xff")), ("box", "Speaker A", "Line 2")])
         r = ph.talk(g)
@@ -700,6 +731,25 @@ class TalkTest(unittest.TestCase):
         r = ph.talk(g)
         self.assertTrue(r["done"], r)
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1", "Line 2", "Line 1"])
+
+    def test_the_same_line_twice_in_a_row_is_two_boxes(self):
+        g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")])
+        orig = g._show
+
+        def again():
+            g.shown.clear()                                # (the game sets a box's text every time, same or not)
+            orig()
+        g._show = again
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1", "Line 1", "Line 2"])
+
+    def test_a_box_with_a_variable_keeps_it_and_a_lone_variable_is_no_box(self):
+        item = tag(2, 3, b"\x13\x00Shop_SelectItemName\xff\xff")
+        g = FakeTalk([("box", "Speaker A", item), ("box", "Speaker A", "Buy " + item + "?")])
+        r = ph.talk(g)
+        self.assertTrue(r["done"], r)
+        self.assertEqual([b["text"] for b in r["boxes"]], ["Buy {Shop_SelectItemName}?"])
 
     def test_the_speaker_is_the_name_pane_even_when_it_is_set_after_the_body(self):
         g = FakeTalk([("box", "Speaker A", "Line 1"), ("box", "Speaker A", "Line 2")], name_after=True)
