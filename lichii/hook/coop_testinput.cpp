@@ -800,18 +800,19 @@ void Runner::Steer(const Step& step, double now_s, std::optional<std::array<floa
 }
 
 std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
-                                  const std::array<float, 3>& target, float max_deg) {
+                                  const std::array<float, 3>& target, float max_deg, float max_side_m) {
     const float d[3] = {target[0] - at[0], target[1] - at[1], target[2] - at[2]};
     const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     const float fl = std::sqrt(flight[0] * flight[0] + flight[1] * flight[1] + flight[2] * flight[2]);
-    if (!std::isfinite(dl) || !std::isfinite(fl) || !std::isfinite(max_deg) || dl < 1e-3f || fl < 1e-6f) {
+    if (!std::isfinite(dl) || !std::isfinite(fl) || !std::isfinite(max_deg) || !std::isfinite(max_side_m) || dl < 1e-3f || fl < 1e-6f) {
         return std::nullopt;
     }
     const float f[3] = {flight[0] / fl, flight[1] / fl, flight[2] / fl};
     const float along = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];   // how far along the flight the target is passed
     AimNudged out;
     out.off_deg = std::acos(std::clamp(along / dl, -1.0f, 1.0f)) * 57.2957795f;
-    if (along <= 0.0f || out.off_deg > max_deg) return out;
+    out.side_m = dl * std::sin(out.off_deg / 57.2957795f);
+    if (along <= 0.0f || out.off_deg > max_deg || out.side_m > max_side_m) return out;
     // The place whose line along f goes through the target, `along` before it: only the sideways miss is taken away.
     std::array<float, 3> p{};
     for (int i = 0; i < 3; ++i) p[i] = target[i] - f[i] * along;

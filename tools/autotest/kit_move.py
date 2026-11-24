@@ -13,10 +13,12 @@ lock-on on ZL, jump-attack on X, A for actions. The stick angle is 0 = away from
 No new address is read: the target's life, place and `alive` come from the world list (the objects walk's reads, docs/
 addresses.md), the ammo from the state's inventory (`PouchData.<item>.StockNum`), the height from Link's `pos`.
 
-What the kit cannot see: the aim's pitch (the first-person view's tilt is not in the state), so `shoot` reports the yaw
-and pitch it wanted and `tilt_frames` (stick frames up or down while aiming) is a hand control, not a measured angle.
-`assist` uses the test `aim X Y Z` line (needs LICHII_COOP_TEST_COMMANDS): the module steers the next arrow or seed
-that leaves Link onto the target, so a hit then says the target takes the shot, not that the aim was right.
+Only inputs play: Link turns with light pushes of the left stick (playtest_helpers.turn_to), never by a written yaw,
+and `shoot` aims by turning the view with a stick until the target sits under the reticle, read from the state's
+`view` (the camera's clip matrix). `tilt_frames` (stick frames up or down after the aim) is a hand control for an arc.
+`assist` uses the test `aim X Y Z` line (needs LICHII_COOP_TEST_COMMANDS): it only nudges the last bit, moving a shot
+whose own flight already points within 4 degrees and 0.5 m of the target sideways onto its line; the flight's way
+and speed stay the game's.
 """
 import math
 
@@ -312,11 +314,16 @@ def shoot(client, item, ident=None, name=None, at=None, assist=False, tilt_frame
 
     client.act("assign %s" % assign_name)
     client.step(2)
-    client.act("face %.2f %.2f" % (point[0], point[2]))
-    client.step(2)
+    out["frames"] += 2
+    t = ph.turn_to(client, point[0], point[2])
+    out["turn"] = t
+    out["frames"] += t["frames"]
+    if not t["turned"]:
+        return _out(out, "stopped" if "refused" in t["reason"] else "not fired", "the turn: " + t["reason"],
+                    _st(client))
     client.input(None, ["ZL"], 2)     # the camera goes behind Link, so the draw (which turns him to it) keeps the way
     client.step(8)
-    out["frames"] += 14
+    out["frames"] += 10
     if assist:
         out["assist_reply"] = client.act("aim %.2f %.2f %.2f" % tuple(point))
     client.input(None, ["ZR"], draw_frames)
@@ -413,9 +420,12 @@ def climb(client, up=True, to_y=None, face=None, max_frames=MAX_FRAMES, chunk=CH
         return _out(out, "arrived", "already %s %.2f" % ("above" if up else "below", to_y), st)
     watch = _Watch(st)
     if face:
-        client.act("face %.2f %.2f" % (face[0], face[1]))
-        client.step(2)
-        out["frames"] += 2
+        t = ph.turn_to(client, face[0], face[1])
+        out["turn"] = t
+        out["frames"] += t["frames"]
+        st = _st(client)
+        if not t["turned"]:
+            return _out(out, "stuck", "the turn to the wall: " + t["reason"], st)
     if not up and st.get("prompt"):
         client.input(None, ["A"], 2)
         out["frames"] += 2
@@ -472,7 +482,7 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
          stuck_looks=PUSH_STUCK_LOOKS, stand_m=PUSH_STAND_M):
     """Push the block `ident` (+ `name`, from the world list) `distance_m` metres along world yaw `yaw` (none: the
     direction from Link to the block). Link walks to the block's far side from the push (`stand_m` from its centre),
-    faces it and leans on it until A offers something (the game's "Grab"), holds A `GRAB_FRAMES` to grab (a short tap
+    turns to it with the stick and leans on it until A offers something (the game's "Grab"), holds A `GRAB_FRAMES` to grab (a short tap
     would climb onto it), then pushes with the stick at full, a look every `chunk` frames. `grab` says what A offered
     and whether it was held.
 
@@ -505,10 +515,12 @@ def push(client, ident, distance_m, name=None, yaw=None, max_frames=MAX_FRAMES, 
     st = pc.game_of(r["state"]) if isinstance(r.get("state"), dict) else _st(client)
     if not r.get("arrived"):
         return _out(out, "not reached", "the walk to the block's side: " + str(r.get("reason")), st)
-    client.act("face %.2f %.2f" % (start[0], start[2]))
-    client.step(2)
-    out["frames"] += 2
+    t = ph.turn_to(client, start[0], start[2])
+    out["turn"] = t
+    out["frames"] += t["frames"]
     st = _st(client)
+    if not t["turned"]:
+        return _out(out, "stopped" if "refused" in t["reason"] else "stuck", "the turn to the block: " + t["reason"], st)
     watch = _Watch(st)
     # The grab: lean on the block until A offers something, then hold A (a tap climbs onto the block). The stick
     # alone then pushes; without a prompt nothing is pressed and the stick leans on it as before.

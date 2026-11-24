@@ -1427,7 +1427,8 @@ private:
     // actor list (its node points back at it), awake, and an actor.
     // `asleep`: state 6 counts too (a copy moved to us from its far home).
     // `aim` (row 173), each frame under mutex_: the nocked arrow is watched until it moves more than
-    // CoopTestInput::kAimLetGoM in a frame (let go: ~113 m/s). If its flight then points within kAimNudgeDeg of the
+    // CoopTestInput::kAimLetGoM in a frame (let go: ~113 m/s). If its flight then points within kAimNudgeDeg (and
+    // kAimNudgeM sideways) of the
     // target (the tester aimed the view at it), it is moved sideways once onto the line through the target along its
     // own flight (its way and speed stay the game's); farther off it is left alone. The set-matrix call is returned.
     std::optional<CoopPuppet::Call> AimStep(CoopPuppet::Guest& guest) {
@@ -1464,9 +1465,9 @@ private:
         if (!nudge || !nudge->put) {
             LOG_INFO(Core,
                      "coop: test aim {:.2f} {:.2f} {:.2f}: not put (arrow {:#x} at {:.2f} {:.2f} {:.2f} flew {:.1f} "
-                     "degrees off it, more than {:.0f}: aim the view nearer)",
+                     "degrees, {:.2f} m off it, more than {:.0f} degrees or {:.1f} m: aim the view nearer)",
                      target[0], target[1], target[2], arrow, at[0], at[1], at[2], nudge ? nudge->off_deg : -1.0f,
-                     CoopTestInput::kAimNudgeDeg);
+                     nudge ? nudge->side_m : -1.0f, CoopTestInput::kAimNudgeDeg, CoopTestInput::kAimNudgeM);
             return std::nullopt;
         }
         const auto& put = *nudge->put;

@@ -51,12 +51,14 @@ class Sim:
         self.grab_needed = False   # a block moves only after A was held 30 frames at it (prompt "Grab"); a tap climbs
         self.grabbed = False
         self.a_held = 0
+        self.wrote_yaw = 0         # `face` lines seen (a written yaw; the kit must turn with the stick)
+        self.drift = 0.0           # degrees a frame the view drifts while drawing with no stick (a wobble)
 
     # --- the bridge ---
     def state(self):
         return {"scene": self.scene, "pos": list(self.pos), "life": self.life, "max_life": 12, "event": self.event,
                 "loading": False, "prompt": self.prompt, "inventory": dict(self.inv), "frame": self.frame,
-                "view": self._view() if self.has_view else None}
+                "facing": round(self.facing, 2), "view": self._view() if self.has_view else None}
 
     def _eye(self):
         return (self.pos[0], self.pos[1] + 1.0, self.pos[2])
@@ -98,7 +100,7 @@ class Sim:
         if word[0] == "assign":
             self.assigned = word[1]
         elif word[0] == "face":
-            self.facing = math.degrees(math.atan2(float(word[1]) - self.pos[0], float(word[2]) - self.pos[2])) % 360
+            self.wrote_yaw += 1           # a written yaw: no player can do it, and it turns nothing here
         elif word[0] == "aim":
             self.assist = True
         return {"ok": True}
@@ -128,6 +130,8 @@ class Sim:
             if self.zr > 0 and stick and self.aim_stick == "left":
                 self._look(stick)
                 stick = None
+            if self.zr > 0 and not stick and not rstick:
+                self.cam_yaw = (self.cam_yaw + self.drift) % 360
             if self.zr > 0:
                 stick = None                              # no walking while aiming
             if "A" in buttons:
@@ -208,6 +212,8 @@ class Sim:
                 self.gap_run = self.jump_m
             yaw, strength = self.air_yaw, 1.0
         self.air_yaw = yaw
+        turn = (yaw - self.facing + 180.0) % 360.0 - 180.0
+        self.facing = (self.facing + max(-45.0, min(45.0, turn))) % 360   # Link turns toward the stick, 45 a frame
         step = 0.15 * strength
         nx = self.pos[0] + math.sin(math.radians(yaw)) * step
         nz = self.pos[2] + math.cos(math.radians(yaw)) * step
@@ -248,7 +254,8 @@ class Shoot(unittest.TestCase):
         self.assertEqual(r["result"], "hit", r)
         self.assertEqual((r["ammo_before"], r["ammo_after"]), (5, 4))
         self.assertIn("assign SlingShot", g.lines)
-        self.assertTrue(any(line.startswith("face 0.00 8.00") for line in g.lines))
+        self.assertEqual(g.wrote_yaw, 0)             # turned with the stick, no written yaw
+        self.assertTrue(r["turn"]["turned"])
         self.assertEqual(r["aim"]["yaw"], 0.0)
         self.assertAlmostEqual(r["aim"]["pitch"], math.degrees(math.atan2(3, 8)), places=1)
         self.assertFalse(r["aim"]["pitch_read"])
@@ -322,6 +329,34 @@ class Shoot(unittest.TestCase):
         self.assertLess(km.on_screen(dict(v, y_down=True), (-1.0, 2.0, 5.0))[1], 0.0)
         self.assertIsNone(km.on_screen(v, (0.0, 1.0, -5.0)))   # behind
         self.assertIsNone(km.on_screen(None, (0.0, 1.0, 5.0)))
+
+    def test_turns_link_with_the_stick_from_behind_and_writes_no_yaw(self):
+        g = Sim(actors=[eye()])
+        g.facing = 200.0
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "hit", r)
+        self.assertEqual(g.wrote_yaw, 0)
+        self.assertGreater(r["turn"]["rounds"], 1)
+        self.assertLess(r["turn"]["moved_m"], 0.5)
+
+    def test_a_turn_that_never_comes_is_not_fired(self):
+        g = Sim(actors=[eye()])
+        g.facing = 180.0
+        g._walk = lambda yaw, strength: None          # the stick turns nothing (a cut-scene, a held pose)
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "not fired", r)
+        self.assertIn("the turn: still", r["reason"])
+        self.assertEqual(g.wrote_yaw, 0)
+        self.assertEqual(g.inv["PouchData.Item_DekuSeed.StockNum"], 5)
+
+    def test_a_view_that_drifts_off_before_the_let_go_is_not_fired(self):
+        g = Sim(actors=[eye()])
+        g.drift = 0.3                                 # 9 degrees over the 30-frame hold
+        r = km.shoot(g, "slingshot", ident=7, name="Obj_Eye")
+        self.assertEqual(r["result"], "not aimed", r)
+        self.assertIn("drifted off before the let-go", r["reason"])
+        self.assertEqual(g.inv["PouchData.Item_DekuSeed.StockNum"], 5)
+        self.assertEqual(g.actors[0]["life"], 1)
 
     def test_assist_adds_the_aim_line(self):
         g = Sim(actors=[eye(pos=(4.0, 3.0, 8.0))])
@@ -449,11 +484,20 @@ class Push(unittest.TestCase):
 
     def test_a_refused_move_stops_it(self):
         g = Sim(actors=[block()])
-        orig = g.act
-        g.act = lambda line: (setattr(g, "refuse_move", g.refuse_move or line.startswith("face")), orig(line))[1]
-        r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        walk = km.pc.walk_to
+
+        def walk_then_refuse(*a, **k):
+            r = walk(*a, **k)
+            g.facing = (g.facing + 180.0) % 360         # back to the block: the turn needs the stick
+            g.refuse_move = True
+            return r
+        km.pc.walk_to = walk_then_refuse
+        try:
+            r = km.push(g, 3, 2.0, name="Obj_PushBlock")
+        finally:
+            km.pc.walk_to = walk
         self.assertEqual(r["result"], "stopped", r)
-        self.assertEqual(r["reason"], "move refused: no_camera")
+        self.assertEqual(r["reason"], "the turn to the block: move refused: no_camera")
         self.assertEqual(g.refused, 1)
         frames_before = r["frames"]
         self.assertEqual(r["moved_m"], 0.0)

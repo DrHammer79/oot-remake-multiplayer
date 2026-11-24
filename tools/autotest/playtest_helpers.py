@@ -177,8 +177,45 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
         st = pc.game_of(client.state())     # (the state at the look, so the scene and the list agree)
 
 
+TURN_TOL = 10.0        # Link's facing within this many degrees of the point: turned
+TURN_STRENGTH = 0.25   # a light push of the stick: Link turns that way and takes only a small step
+TURN_FRAMES = 2        # frames of each push
+TURN_ROUNDS = 12       # pushes before giving up
+
+
+def turn_to(client, x, z, tol=TURN_TOL, rounds=TURN_ROUNDS):
+    """Turn Link toward (x, z) the way a player does: light pushes of the left stick that way (`move`, TURN_FRAMES
+    each) until the state's `facing` is within `tol` degrees. No line writes his yaw. Returns turned, reason, facing,
+    off (degrees left), rounds, frames and moved_m (how far the pushes stepped him)."""
+    st = pc.game_of(client.state())
+    start = st.get("pos")
+    out = {"turned": False, "reason": "", "facing": st.get("facing"), "off": None, "rounds": 0, "frames": 0,
+           "moved_m": 0.0}
+    for r in range(rounds + 1):
+        pos, facing = st.get("pos"), st.get("facing")
+        if not pos or not start or facing is None:
+            out["reason"] = "no place or facing in the state"
+            return out
+        want = pc.yaw_to(pos, x, z) % 360
+        off = (want - float(facing) + 180.0) % 360.0 - 180.0
+        out.update(facing=facing, off=round(off, 1), rounds=r, moved_m=round(math.dist(start, pos), 3))
+        if abs(off) <= tol:
+            out.update(turned=True, reason="ok")
+            return out
+        if r == rounds:
+            break
+        m = client.move(want, TURN_STRENGTH, TURN_FRAMES, check=False)
+        if not m.get("ok"):
+            out["reason"] = "move refused: " + str(m.get("error") or "no reason")
+            return out
+        out["frames"] += TURN_FRAMES
+        st = pc.game_of(client.state())
+    out["reason"] = "still %.0f degrees off after %d pushes of the stick" % (out["off"], rounds)
+    return out
+
+
 def face(client, ident, name=None):
-    """Turn Link to the actor: the bridge's `face X Z` (the actor's place), then two frames. Looks the actor up first."""
+    """Turn Link to the actor with the stick (`turn_to`, the actor's place). Looks the actor up first."""
     a, w = _look(client, ident)
     if _no_list(w):
         return {"faced": False, "reason": _no_list(w), "actor": a}
@@ -187,14 +224,14 @@ def face(client, ident, name=None):
     at = a.get("pos")
     if not at:
         return {"faced": False, "reason": "no position", "actor": a}
-    client.act("face %.2f %.2f" % (at[0], at[2]))
-    client.step(2)
-    return {"faced": True, "reason": "ok", "actor": a}
+    t = turn_to(client, at[0], at[2])
+    return {"faced": t["turned"], "reason": t["reason"], "actor": a, "turn": t}
 
 
 def place_facing(client, place_line, point, frames=2):
     """`place X Y Z` and then `face X Z` (the point to look at): the bridge puts Link on its next frames, so a frame pair
-    passes between the two lines and after the second. Returns the replies of both and the frames used."""
+    passes between the two lines and after the second. Returns the replies of both and the frames used. A set-up step,
+    not play (like `place` itself): the only kit helper that still writes Link's yaw."""
     placed = client.act(place_line)
     client.step(frames)
     faced = client.act("face %.2f %.2f" % point)

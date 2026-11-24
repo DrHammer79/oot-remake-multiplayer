@@ -250,7 +250,9 @@ HELPER_TOOLS = [
      "inputSchema": {"type": "object", "required": ["id", "name"],
                      "properties": dict(ACTOR_ARGS, near_m={"type": "number", "minimum": 0.5, "maximum": 10},
                                         max_frames={"type": "integer", "minimum": 1, "maximum": 120})}},
-    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world). Two frames pass.",
+    {"name": "face", "description": "Turn Link toward an actor (`id` and `name` from get_world) with light pushes of the left stick, "
+     "until his facing is within 10 degrees (12 pushes of 2 frames at most). `turn` says the pushes, the degrees left "
+     "and how far he stepped.",
      "inputSchema": {"type": "object", "required": ["id", "name"], "properties": ACTOR_ARGS}},
     {"name": "attack", "description": "go_to_actor, face it, then press a button (the sword; `button` Y by default: "
      "Longshot's attack button) in rounds until its life is 0 or the frames run out. Returns `result` "
@@ -300,7 +302,7 @@ HELPER_TOOLS = [
 MOVE_NOTE = (" Each ends with a `look`. It acts on this game only (in a pair, the other game runs the same frames).")
 MOVE_TOOLS = [
     {"name": "shoot", "description": "Take out an aimed item and fire it at a target the way a player aims: `assign` "
-     "puts the item on ZR, Link turns to the target (`face`) and ZL puts the camera behind him, ZR is held 60 frames to "
+     "puts the item on ZR, Link turns to the target with the stick and ZL puts the camera behind him, ZR is held 60 frames to "
      "draw, then a stick turns the view until the target is under the reticle (from the state's `view`; which stick and "
      "which way is learnt by a small push of each), ZR is held 30 more, the aim is checked again, ZR is let go, and the "
      "target is watched for `watch_frames`. `tilt_frames` (+ up, - down) tilts by hand after the aim. "
@@ -309,7 +311,7 @@ MOVE_TOOLS = [
      "fired (a point, or an item with no ammo count), not fired (with why: no ammo, a help box, not Link's item), "
      "not aimed (the view could not be turned onto it; B puts the item away, no shot) or a stop. `aim` has the world "
      "yaw and pitch from Link to the target, the stick used, the turns and the last `error` on the screen. `assist` "
-     "true adds the test `aim X Y Z` line: a shot whose flight is within 4 degrees of the target is moved sideways onto "
+     "true adds the test `aim X Y Z` line: a shot whose flight is within 4 degrees and 0.5 m of the target is moved sideways onto "
      "its line (a nudge; farther off it is left alone). " + ACT_NOTE
      + MOVE_NOTE,
      "inputSchema": {"type": "object", "required": ["item"], "properties": dict(

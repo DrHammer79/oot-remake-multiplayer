@@ -208,16 +208,19 @@ std::string NotAllowed(const Script& script, const std::vector<Kind>& allowed);
 
 // `aim` (row 173): the last bit of a player's aim. The shot is aimed by turning the view the way a player does; at
 // the let-go the arrow or seed is only moved sideways onto the line through the target along its own flight (its
-// way `flight` and speed stay the game's), and only when that flight already points within `max_deg` of the target.
+// way `flight` and speed stay the game's), and only when that flight already points within `max_deg` of the target
+// and passes within `max_side_m` of it (a fixed distance, so the slack does not grow with range).
 // `off_deg`: how far it pointed off. `put`: the new place, none when it was too far off (no cheat for a bad aim) or
 // flying away. Nothing at all when there is no flight, the shot is at the target, or a value is not finite.
 struct AimNudged {
     float off_deg = 0.0f;
+    float side_m = 0.0f;   // how far the flight's line passes from the target
     std::optional<std::array<float, 3>> put;
 };
+inline constexpr float kAimNudgeDeg = 4.0f;   // the reticle's slack, not a new aim
+inline constexpr float kAimNudgeM = 0.5f;     // and never more than this sideways (4 degrees is 2 m at 30 m)
 std::optional<AimNudged> AimNudge(const std::array<float, 3>& at, const std::array<float, 3>& flight,
-                                  const std::array<float, 3>& target, float max_deg);
-inline constexpr float kAimNudgeDeg = 4.0f;   // ~0.5 m sideways at 8 m: the reticle's slack, not a new aim
+                                  const std::array<float, 3>& target, float max_deg, float max_side_m = kAimNudgeM);
 // `aim`: a nocked arrow is let go when it moves more than this between two frames (its flight is ~113 m/s, ~1.9 m
 // a frame at 60; a nocked one moves with Link's hands, well under it).
 inline constexpr float kAimLetGoM = 1.0f;

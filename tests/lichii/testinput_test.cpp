@@ -855,6 +855,15 @@ TEST_CASE("testinput: AimNudge moves the shot sideways onto the target's line, o
     REQUIRE(far.has_value());
     CHECK(far->off_deg == doctest::Approx(10.0f).epsilon(1e-3));
     CHECK_FALSE(far->put.has_value());
+    // 2 degrees off at 30 m passes ~1 m wide: more than kAimNudgeM, so not put though under 4 degrees.
+    const std::array<float, 3> distant{-56.5f, 126.2f, -34.0f};
+    const float lean = 2.0f * 3.14159265f / 180.0f;
+    const auto wide2 = AimNudge(at, {std::sin(lean), 0.0f, -std::cos(lean)}, distant, kAimNudgeDeg);
+    REQUIRE(wide2.has_value());
+    CHECK(wide2->off_deg == doctest::Approx(2.0f).epsilon(1e-3));
+    CHECK(wide2->side_m == doctest::Approx(30.0f * std::sin(lean)).epsilon(1e-3));
+    CHECK_FALSE(wide2->put.has_value());
+    CHECK(AimNudge(at, {std::sin(lean), 0.0f, -std::cos(lean)}, distant, kAimNudgeDeg, 2.0f)->put.has_value());
     // Flying away from it: never put. No flight, the same point, NaN: nothing.
     const auto away = AimNudge(at, {0.0f, 0.0f, 1.0f}, eye, 180.0f);
     REQUIRE(away.has_value());
