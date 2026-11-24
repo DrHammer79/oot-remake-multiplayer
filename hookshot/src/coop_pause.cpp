@@ -1336,10 +1336,15 @@ bool Picture(int tab, HosCoopMenuPicture* out) {
         return false;   // (not the Customize page)
     }
     // Your own Link in the game, through a clear window, the camera around him (coop_look_view.h); the flat picture
-    // when he cannot be shown (the title screen, a cutscene).
+    // when he cannot be shown (the title screen, a cutscene), or while the camera's eye is blocked with no clear
+    // view yet (it is still asked for, so the camera keeps turning toward one).
     const CoopLookView::Window window{out->window[0], out->window[1], out->window[2], out->window[3], out->aspect};
-    if (window.Valid() && CoopLookView::LinkShown()) {
+    bool clear = true;
+    const bool shown = window.Valid() && CoopLookView::LinkShown(&clear);
+    if (shown) {
         CoopLookView::Ask(window);
+    }
+    if (shown && clear) {
         out->live = 1;
         out->shapes_n = 0;
         out->shapes = nullptr;
