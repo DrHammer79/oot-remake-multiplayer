@@ -76,13 +76,11 @@ std::string NewFile(const std::string& patch, const std::string& path) {
 std::string WithoutAddedLines(std::string text, const std::string& patch, const std::string& path) {
     const std::size_t from = patch.find("diff --git a/" + path + " ");
     if (from == std::string::npos) return text;
-    const std::size_t to = patch.find("
-diff --git a/", from + 1);
+    const std::size_t to = patch.find("\ndiff --git a/", from + 1);
     std::istringstream in(patch.substr(from, to == std::string::npos ? std::string::npos : to - from));
     for (std::string line; std::getline(in, line);) {
         if (line.size() < 1 || line[0] != '+' || line.rfind("+++", 0) == 0) continue;
-        const std::string whole = line.substr(1) + "
-";
+        const std::string whole = line.substr(1) + "\n";
         const std::size_t at = text.find(whole);
         if (at != std::string::npos) text.erase(at, whole.size());
     }
