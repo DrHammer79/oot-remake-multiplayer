@@ -185,7 +185,7 @@ class Client:
 
     def text(self, since=0, layout=None):
         """The texts the game set in its text panes after `since` (the `last` of an earlier reply; 0: all kept), read
-        only: {"hooked": the exe has patch 0037's wrap, "last": the newest seq, "lost": some after `since` are no longer
+        only: {"hooked": the exe has patch 0041's wrap, "last": the newest seq, "lost": some after `since` are no longer
         kept, "texts": [{seq, frame, layout, pane, text, length, cut, markup}]}. `layout`: only layouts whose name has
         it ("MessageDialog_00" is a talk). docs/playtest.md, "Text boxes"."""
         args = {"since": since}

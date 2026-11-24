@@ -1,6 +1,6 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 869da3b45be173376a957c593771cdb440e12beb Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
-Date: Mon, 23 Nov 2026 17:00:00 -0600
+Date: Mon, 23 Nov 2026 16:13:46 -0900
 Subject: [PATCH] Co-op pane text wrap: the texts the game sets in its text
  panes, to the module
 
@@ -20,7 +20,7 @@ the checks (build id, first words) and the hello's bits are 0005's.
 
 diff --git a/host/hos_coop_pane_text.h b/host/hos_coop_pane_text.h
 new file mode 100644
-index 0000000..63d6e30
+index 00000000..13031951
 --- /dev/null
 +++ b/host/hos_coop_pane_text.h
 @@ -0,0 +1,18 @@
@@ -29,7 +29,7 @@ index 0000000..63d6e30
 +   boxes").
 +
 +   One wrapped game function more in the one wrap table (patch 0005's nx2/coop_world_wraps.py WRAPS; the ids are in
-+   the one wrap space of hos_coop_world.h). Patch 0037 adds its row and this file (Hookshot's host/hos_coop_pane_text.h
++   the one wrap space of hos_coop_world.h). Patch 0041 adds its row and this file (Hookshot's host/hos_coop_pane_text.h
 +   is the same file). The module's hos_coop_wrap gets it; Hookshot announces it in HOS_COOP_WORLD_HELLO's bits. The row:
 +     (25, 0x439520, (0xd503237f, 0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4)),  # pacibsp; stp x29, x30; str x21; stp x20, x19
 +   Phase 0 only reads (never skips): x0 the pane (0xb0 bytes in its layout's array), x1 a reference {+0 the text,
@@ -43,14 +43,14 @@ index 0000000..63d6e30
 +
 +#endif
 diff --git a/nx2/coop_world_wraps.py b/nx2/coop_world_wraps.py
-index 20aca8a..8cea7e3 100644
+index c1485d9c..57dd9a9c 100644
 --- a/nx2/coop_world_wraps.py
 +++ b/nx2/coop_world_wraps.py
-@@ -52,6 +52,11 @@ WRAPS = (
-     # main+0x4ba4a28 slot 29, only called through it), which only Game Over's graphs run (Retry: Try Again,
-     # EventToTitle: Quit Game). A save load after it with no title menu between is Try Again. Phase 0 reads only
-     (9, 0x32bbce0, (0xd503237f, 0xa9be7bfd, 0xf9000bf3, 0x910003fd)),  # pacibsp; stp x29, x30; str x19; mov x29, sp
-+    # HOS_COOP_WRAP_PANE_TEXT (patch 0037): a text pane's set-message call (x0 the pane, x1 a reference {+0 the text,
+@@ -58,6 +58,11 @@ WRAPS = (
+     # the others' copies take them through this same function, whose own manager's orders it skips there (phase 0
+     # answers 1; the function returns 1)
+     (10, 0x2723f80, (0xd503237f, 0xd10103ff, 0xa9027bfd, 0xa9034ff4)),  # pacibsp; sub sp, #0x40; stp x29, x30; stp x20, x19
++    # HOS_COOP_WRAP_PANE_TEXT (patch 0041): a text pane's set-message call (x0 the pane, x1 a reference {+0 the text,
 +    # +8 its length in bytes}): every text the game shows in a layout's text pane, the message window's too. The text
 +    # box keeps the pointer, so the module copies the text at the call, for the play-test bridge only
 +    # (oot-remake-multiplayer's docs/playtest.md "Text boxes"). Phase 0 reads only, never skips

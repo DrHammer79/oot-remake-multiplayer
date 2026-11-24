@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The texts the game puts in its text panes, kept for the play-test bridge's `text` (docs/playtest.md, "Text boxes").
 //
-// Patch 0037 wraps the game's pane text setter (main+0x439520, kPaneSetMsg: x0 the pane, x1 a reference {text, length
+// Patch 0041 wraps the game's pane text setter (main+0x439520, kPaneSetMsg: x0 the pane, x1 a reference {text, length
 // in bytes, attributes}). The text box keeps the pointer and the length, not a copy (seen in a run, 2026-11-19), so the
 // text is copied at the call. Each kept text names its layout and pane, read from the pane as Longshot's
 // host/hos_wide_ui.c reads them: a pane is 0xb0 bytes in its layout's array (+0x100), +0x18 is its layout, the

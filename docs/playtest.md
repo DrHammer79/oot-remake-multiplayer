@@ -247,7 +247,7 @@ runs. So **always hold both games** and step them in turn, the same number of fr
 | `give` | `item` (`bombs`, `bow`, `hookshot`, a bare item name such as `Item_Boomerang` or `Weapon_Sword_Kokiri` (its `PouchData.<name>.StockNum` count if the game has one, else its `IsGet.<name>` flag; neither: the reply says which two it looked for), or a full item flag name such as `IsGet.Item_Boomerang` or `PouchData.Item_Bomb.StockNum`) | The test script's `give`, needs `LICHII_COOP_CHEATS=1`. The flags are written at once inside the held call (the item, its `IsGet`, and the ammo and capacity the game gives with it, never lowered), not queued for a frame: the reply's `result` says what each flag was and is (`no change: ... already 1` when Link had the item; `failed` with the reason when the item was not written; `partial` true when the item is in but its `IsGet` or a grant was not, `result` naming the flag); `get_state` with `inventory` true shows it with no step. Refused with `not_ready` while a load runs or when there is no fresh Link sample (a load sends no Link update, so the old sample cannot tell; a pause and a title the same): the give runs one frame first to take a sample, as `state` does, and if none comes the answer is `not_ready`, nothing written. Step until `state.not_ready` is null, then give again. `bombs` is the small bag and 20 bombs, `bow` the bow with the small quiver and 30 arrows. A bomb that can be lifted also needs `PlayerStatus.LiftGrade` (docs/items.md, "Bombs from the cheat") |
 | `act` | `lines`: ONE test line, at most 256 characters, no control characters, no `;` or `#`. Allowed kinds: `kill`, `hit`, `hurt`, `place`, `face`, `aim`, `wear`, `dress`, `assign`, `chat`, `menu`, `setflag`, `setenum` | The test script's line, run on the game's own thread inside the held frame (the same parser as `live.py do`). Any other kind (`goto`, `warp`, `press`, ...) is refused with `line N: WORD is not allowed here (allowed: ...)`; use the commands above for those. Replies with `lines` and a `note`. Written at once inside the held call: `place`, `face`, `wear`, `assign`, `setflag`, `setenum`. Queued for the next frames (`step` a few, then read the `state`): `dress`, `kill`, `hit`, `aim`, `hurt`, `chat`, `menu`. `kill` and `hit` take an optional actor id before the name (`kill 2147483648 Enemy_Example`, `hit 2147483648 Enemy_Example 2`); their reply also carries `strike_seq`, the number the result in `state.strike` will have. Without the sharing walk's list (solo, where the list is the solo walk's, or the walk not running) an id is refused with `refused: no world list`. Behind the verb gate below |
 | `dump` | `tag` (1 to 64 letters, digits, `-` and `_`) | Writes `playtest/dumps/<tag>.json` in the game's folder: `{"frame", "tag", "state", "flags": {name: value}}`, the shared flags (the checkpoint's lists) read inside the held frame. Replies with `path` (absolute) and `flags` (the count) |
-| `text` | `since` (a whole number, default 0: every text kept), `layout` (optional: only layouts whose name has it, e.g. `MessageDialog_00`) | The texts the game set in its text panes after `since`, oldest first; read only, no frame runs, not gated. Replies with `hooked` (this exe has patch 0037's wrap: false means `texts` stays empty), `last` (the newest `seq`: pass it as the next `since`), `lost` (texts after `since` that are no longer kept) and `texts`: `[{seq, frame, layout, pane, text, length, cut, markup}]`. See [Text boxes](#text-boxes) |
+| `text` | `since` (a whole number, default 0: every text kept), `layout` (optional: only layouts whose name has it, e.g. `MessageDialog_00`) | The texts the game set in its text panes after `since`, oldest first; read only, no frame runs, not gated. Replies with `hooked` (this exe has patch 0041's wrap: false means `texts` stays empty), `last` (the newest `seq`: pass it as the next `since`), `lost` (texts after `since` that are no longer kept) and `texts`: `[{seq, frame, layout, pane, text, length, cut, markup}]`. See [Text boxes](#text-boxes) |
 | `shot` | `name` (optional; letters, digits, `-` and `_`; default `shot-f<frame>`) | A screenshot through Longshot's bridge into `playtest/shots/<name>.png`. A held game presents nothing, so it runs 1 frame at a time (at most 5) until the picture comes: the reply's `advanced` says how many. Replies with `path`, `width`, `height` |
 
 **The verb gate.** `act`, `warp`, `flag` and `give` reach the wire and the other players' games, so they run only when
@@ -262,7 +262,7 @@ a player starts from names `LICHII_COOP_PLAYTEST_VERBS`: not `play.ps1`, not `st
 ### Text boxes
 
 The `text` command reads what the game writes into its text panes, so a tester can read a talk without a picture.
-Patch 0037 (`hookshot/patches/0037-coop-pane-text-wrap.patch`) adds wrap 25 to patch 0005's table: the game's pane
+Patch 0041 (`hookshot/patches/0041-coop-pane-text-wrap.patch`) adds wrap 25 to patch 0005's table: the game's pane
 text setter (main+0x439520, `kPaneSetMsg` in [addresses.md](addresses.md); x0 the pane, x1 a reference {+0 the text,
 +8 its length in bytes, +0x10 its attributes}). The patch only names the function; what is kept, and when, is the
 module's (`hookshot/src/coop_talk_text.{h,cpp}`), and only while the bridge is on (`LICHII_COOP_PLAYTEST_PORT`): a
@@ -284,8 +284,8 @@ player's game copies nothing.
   letter by letter, if the game does that).
 - Valid UTF-8 comes as it is; any other byte and every control character as a JSON `\u00XX`, and `markup` is true:
   those are the game's markup (colour, a pause, a choice), not read yet.
-- An exe without patch 0037 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
-  text wrap (patch 0037)` once at the HELLO.
+- An exe without patch 0041 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
+  text wrap (patch 0041)` once at the HELLO.
 
 The MCP `talk` tool is built on it (see [Helpers](#helpers-several-calls-in-one)); `get_text` is the bare command.
 
@@ -558,7 +558,7 @@ server calls them; a script can too). They only use the bridge's commands, so th
   buttons: move to the item with `press`, then `talk` with `since`.
   It ends `done` when the event is over and 3 reads bring no text, or says why it stopped: `reply not offered: ...`,
   `done, but no choices showed for ...`, `too many boxes`, `timed out` (1200 frames), `scene changed`, `loading`, or
-  `no text: ...` (no `text` command, or an exe without patch 0037: one `A` pressed).
+  `no text: ...` (no `text` command, or an exe without patch 0041: one `A` pressed).
 - `go_to_actor` calls an actor `gone` only after 3 reads in a row without it (one read of the list can miss an actor
   that is there).
 - They act on this one game. A script can wrap two clients in `InStep`, which steps the other game by the same frames
@@ -622,9 +622,9 @@ Nothing here has run in a game. The first run checks:
 - The guesses made without a game, set by this run: the 4 m leg of `go_to_actor` and its 60-frame stuck limit. (The
   sword button `Y` and the lock-on and shield button `ZL` are Longshot's input map: see `fight`.)
 
-### Check in game (talk and the text wrap, patch 0037)
+### Check in game (talk and the text wrap, patch 0041)
 
-Needs a game built with patch 0037. One lane run so far (Kokiri shop, Mido; with the helper as it was before the
+Needs a game built with patch 0041. One lane run so far (Kokiri shop, Mido; with the helper as it was before the
 button layout was known):
 
 - Seen: `hooked` true, texts with their layout and pane names, no crash; the speaker and the reply buttons came

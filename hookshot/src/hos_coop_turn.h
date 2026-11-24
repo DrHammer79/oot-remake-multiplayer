@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    The co-op module may turn the player camera (oot-remake-multiplayer, docs/hookshot.md "The camera's angles"; our patch
-   0036): the Multiplayer tab's Customize page turns the game's own camera around the player's Link, so the game's own
+   0040): the Multiplayer tab's Customize page turns the game's own camera around the player's Link, so the game's own
    collision places the eye (a wall or a low ceiling in the way brings the eye nearer, as in play).
 
    One optional export, hos_coop_turn, asked by hos_mouse_camera (host/mouse_native.c) on the game's thread at the start

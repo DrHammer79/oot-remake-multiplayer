@@ -106,11 +106,11 @@ private:
     double start_yaw_ = 0;
 };
 
-// The game's own camera turned with the orbit (patch 0036, hos_coop_turn.h), so the game's own collision places
+// The game's own camera turned with the orbit (patch 0040, hos_coop_turn.h), so the game's own collision places
 // the eye: a wall or a low ceiling between Link and the eye brings the eye nearer, as in play (look-camera: next to
 // a cliff, one side of the turn put the eye inside the rock). The game's camera hook asks for its yaw and pitch
 // (Steer::Command) before the camera's update; the view hook then gets the eye the game placed and the module keeps
-// it (Framed). Without patch 0036, or when the camera does not follow, the picture is Aim's as before.
+// it (Framed). Without patch 0040, or when the camera does not follow, the picture is Aim's as before.
 
 // The game camera's angles, in degrees (hos_coop_turn.h: yaw falls as the view turns right, pitch rises as it
 // tilts down).
@@ -267,7 +267,7 @@ bool LinkShown();
 void Ask(const Window& window);
 // hos_coop_view (the game's thread): 1 = eye and target replaced.
 bool Camera(double eye[3], double target[3]);
-// hos_coop_turn (the game's thread, patch 0036): 1 = yaw and pitch replaced. `coop_on` false (co-op switched off):
+// hos_coop_turn (the game's thread, patch 0040): 1 = yaw and pitch replaced. `coop_on` false (co-op switched off):
 // a camera still turned is put back once, then left alone.
 bool Turn(float* yaw, float* pitch, int state, bool coop_on);
 

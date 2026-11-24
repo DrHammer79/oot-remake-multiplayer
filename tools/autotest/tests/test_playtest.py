@@ -423,7 +423,7 @@ class LiveMenu(unittest.TestCase):
 class FakeTalk:
     """A game seen through the bridge for `talk`: an NPC whose talk is a list of boxes ("box", speaker, text) and
     choices ("choice", question, [options]). A shows the next one; Down moves the choice cursor (from 0). The texts go
-    in a `text` log as patch 0037's wrap keeps them (one entry per pane set, the same text again not kept), laid out as
+    in a `text` log as patch 0041's wrap keeps them (one entry per pane set, the same text again not kept), laid out as
     a lane run read them: MessageDialog_00 (T_Name_00 the speaker), the reply buttons PaMessageBtn_00 (one pane,
     T_Btn_00, set once per button). `body` False: the box text does not come through the wrap (as in that run)."""
 
@@ -573,7 +573,7 @@ class TalkTest(unittest.TestCase):
         self.assertNotIn("walk", r)
 
     def test_without_the_wrap_or_the_verb_one_a_and_why(self):
-        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0037"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
+        for g, why in ((FakeTalk(SHOP, hooked=False), "patch 0041"), (FakeTalk(SHOP, verb=False), "no `text` verb")):
             r = ph.talk(g)
             self.assertTrue(r["pressed"])
             self.assertEqual(g.presses, ["A"])

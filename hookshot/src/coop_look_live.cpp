@@ -960,7 +960,7 @@ namespace {
 std::mutex g_mutex;
 Orbit g_orbit;   // guarded
 Watch g_watch;   // guarded
-Steer g_steer;   // guarded (patch 0036: the game's camera turned with the orbit)
+Steer g_steer;   // guarded (patch 0040: the game's camera turned with the orbit)
 std::mutex g_keep_mutex;   // (its own: OwnLink runs outside g_mutex)
 Keep g_keep;               // guarded by g_keep_mutex
 
@@ -1054,8 +1054,8 @@ bool Camera(double eye[3], double target[3]) {
         g_steer.Want(std::nullopt);
         return false;
     }
-    // The game's camera turned with the orbit (patch 0036): its own eye, placed by its collision, kept and aimed at
-    // Link. Otherwise (no patch 0036, the probe, a camera that does not follow): Aim's shot.
+    // The game's camera turned with the orbit (patch 0040): its own eye, placed by its collision, kept and aimed at
+    // Link. Otherwise (no patch 0040, the probe, a camera that does not follow): Aim's shot.
     g_steer.Observe(game_eye, game_target);
     std::optional<Shot> shot;
     if (g_steer.Driving()) {

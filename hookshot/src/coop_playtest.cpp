@@ -632,7 +632,7 @@ std::string Handle(const Request& r) {
         return ok(FlagReadMembers(r.name, v));
     }
     if (r.cmd == "text") {
-        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; patch 0037's wrap
+        // Read only: the texts the game set in its text panes since `since` (coop_talk_text.h; patch 0041's wrap
         // fills them while the bridge is on). No frame is held: the log is the wrap's, under its own lock.
         bool lost = false;
         const auto texts = CoopTalkText::TheLog().Since(r.since, r.layout, &lost);

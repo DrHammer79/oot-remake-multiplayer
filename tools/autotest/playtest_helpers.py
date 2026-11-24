@@ -435,7 +435,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
     the reply buttons. Presses A to go on, and when buttons show picks the next of `reply` (one text, or a list: one
     per set of buttons, in order) by Down and A. With no reply left it stops and lists the buttons, the talk left open:
     call again with `reply` and `since` (this answer's `since`) to go on from there, no new A first.
-    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0037),
+    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0041),
     choices and no reply, reply not offered, too many boxes, timed out, scene changed, loading.
     Returns result, done, speakers (in order), boxes [{speaker, text, markup}], choices (the last seen), picked
     [{text, index}], since, presses, frames. Read in a lane run (Kokiri shop, Mido): the box body is not set through
@@ -451,7 +451,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
         hooked, seen = None, 0
         why = "no text: the bridge has no `text` verb (%s)" % e.code
     if hooked is False:
-        why = "no text: this Hookshot has no pane text wrap (patch 0037)"
+        why = "no text: this Hookshot has no pane text wrap (patch 0041)"
     st = pc.game_of(client.state())
     if since is not None and hooked and st.get("event"):
         out["frames"] = 0                       # (going on with a talk that is open: no first A)

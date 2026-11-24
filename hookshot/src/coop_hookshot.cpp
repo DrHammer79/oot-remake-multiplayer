@@ -1802,7 +1802,7 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
                 LOG_INFO(Core, "coop: this Hookshot has no sound wrap (patch 0014): our Link's sounds are not sent");
             }
             if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_TEXT & 1) == 0) {
-                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0037): `text` stays empty");
+                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0041): `text` stays empty");
             }
         }
         {
@@ -2081,7 +2081,7 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         return 0;
     }
     if (id == HOS_COOP_WRAP_PANE_TEXT) {
-        // A text the game sets in a text pane (patch 0037): copied for the play-test bridge's `text` only
+        // A text the game sets in a text pane (patch 0041): copied for the play-test bridge's `text` only
         // (coop_talk_text.h). Nothing when the bridge is off. Reads only.
         if (phase == 0 && CoopPlaytest::On()) {
             CoopTalkText::TheLog().Note(x[0], x[1], CoopPlaytest::Frame(), [](std::uint64_t a, void* out, std::size_t n) {
@@ -2765,7 +2765,7 @@ COOP_HOOKSHOT_EXPORT int hos_coop_menu_picture(int tab, HosCoopMenuPicture* out)
         return g_on && CoopPause::Picture(tab, out) ? 1 : 0;
     });
 }
-// The player camera's angles (hos_coop_turn.h, patch 0036): turned with the Customize page's orbit, so the game's
+// The player camera's angles (hos_coop_turn.h, patch 0040): turned with the Customize page's orbit, so the game's
 // own collision places the eye.
 COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state) {
     static CoopBoundary::Site site{"hos_coop_turn"};
