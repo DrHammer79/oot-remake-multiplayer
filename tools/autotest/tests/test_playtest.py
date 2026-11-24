@@ -687,6 +687,13 @@ class TalkTest(unittest.TestCase):
         self.assertNotIn("raw", r["boxes"][1])             # (nothing was cut: the text is the raw)
         self.assertFalse(r["boxes"][1]["markup"])
 
+    def test_whitespace_at_the_edges_is_not_markup(self):
+        g = FakeTalk([("box", "Speaker A", "  Hi  ")])
+        r = ph.talk(g)
+        self.assertEqual(r["boxes"][0]["text"], "Hi")
+        self.assertFalse(r["boxes"][0]["markup"])
+        self.assertNotIn("raw", r["boxes"][0])
+
     def test_a_text_of_only_markup_is_not_a_box(self):
         g = FakeTalk([("box", "Speaker A", tag(2, 23, b"\x05\x00Name\x00\xff\xff")), ("box", "Speaker A", "Line 2")])
         r = ph.talk(g)

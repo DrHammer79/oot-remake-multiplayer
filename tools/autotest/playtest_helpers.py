@@ -598,7 +598,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
                     pass                                   # (the same box set again, before any A)
                 elif has_words:
                     out["boxes"].append({"speaker": speaker, "text": words, "_raw": text, "done": False,
-                                         "markup": bool(t.get("markup")) or words != text})
+                                         "markup": bool(t.get("markup")) or words != text.strip()})
                     moved = out["frames"]
                 fresh = True
         if choices:
@@ -657,7 +657,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
     for b in out["boxes"]:
         b.pop("done", None)
         raw = b.pop("_raw")
-        if raw != b["text"]:
+        if raw.strip() != b["text"]:   # (whitespace at the edges alone is not markup)
             b["raw"] = raw
     if out["done"] and len(out["picked"]) < len(replies):
         out["result"] = "done, but no choices showed for %s" % ", ".join(map(repr, replies[len(out["picked"]):]))
