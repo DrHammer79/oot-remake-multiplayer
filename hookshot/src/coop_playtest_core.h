@@ -135,6 +135,8 @@ struct Request {
     bool exclusive = true;
     std::string scene, entrance, name, item, tag, value;
     std::string lines;  // act: one test-script line (kill, hit, hurt, place, ...); PlayNow checks its kind
+    std::uint64_t since = 0;  // text: only the texts after this seq (0: all kept)
+    std::string layout;       // text: only the layouts whose name has this in it ("": every layout)
     double timeout_s = 60;
 };
 // The request on one line, or `error` (bad_request's message).

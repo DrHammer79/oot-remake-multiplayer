@@ -381,7 +381,7 @@ class PlayerServer(unittest.TestCase):
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "oot-p2")
         self.assertEqual([t["name"] for t in out[1]["result"]["tools"]],
                          ["get_state", "get_world", "look", "wait_until", "go_to", "record_route", "fight", "get_actor", "walk_to", "press", "step", "step_until", "warp", "flag", "flag_read", "setup", "preset", "save_point", "load_point", "give", "kill", "hit", "hurt", "place", "wear",
-                          "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "open",
+                          "dress", "assign", "chat", "menu", "go_to_actor", "face", "attack", "use_item", "talk", "get_text", "open",
                           "interact", "shoot", "climb", "push", "jump", "checkpoint",
                           "desync_check", "pause", "resume", "log", "check_logs", "session_status", "screenshot"])
         self.assertEqual(json.loads(out[2]["result"]["content"][0]["text"])["frame"], 1005)
@@ -1319,6 +1319,21 @@ class StrikeAndHelpers(unittest.TestCase):
         r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
         self.assertEqual((r["arrived"], r["reason"]), (False, "gone"))
         self.assertLess(r["frames"], ph.MAX_FRAMES)
+
+    def test_one_missed_read_is_not_gone(self):
+        n, hidden = [], {}
+
+        def blink():
+            n.append(1)
+            acts = self.game.world["actors"]
+            if len(n) == 2:                                     # one read without the actor
+                hidden.update(a=self.actor(3))
+                acts.remove(hidden["a"])
+            elif hidden.get("a") is not None:
+                acts.append(hidden.pop("a"))
+        self.game.dump_hook = blink
+        r = ph.go_to_actor(self.c, 3, name="Enemy_Near")
+        self.assertTrue(r["arrived"], r)
 
     def test_go_to_actor_says_stuck_with_how_far_it_got(self):
         self.game.wall_x = 1.0
