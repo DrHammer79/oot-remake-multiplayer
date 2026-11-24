@@ -243,8 +243,8 @@ def _cut(v, c, n, cap, rate):
 
 def choose(event, voices, n, cap, rate):
     """n (voice, class, name, samples, rms) for one event, rotated to n.
-    1. The event's own classes (vm.own(event)), each from the first voice of the chain that has it: clips that fit
-       the cap, else every clip of the class cut to the cap around its loudest part.
+    1. The event's own classes (vm.own(event)), in order: the first voice of the chain with clips of the class that
+       fit the cap, else the first voice with any clip of it, every clip cut to the cap around its loudest part.
     2. Else the other classes of prefs(event), voice by voice: the first voice with a fitting clip of one of them,
        else the first with any clip of one of them, cut."""
     own = vm.own(event)
