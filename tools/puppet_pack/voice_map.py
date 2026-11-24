@@ -15,6 +15,10 @@ The rules (user decisions, 2026-11-23):
 - Only short, wordless clip kinds: no laughs, cries or speech lines (KINDS lists the allowed ones).
 - An event gets as many clips as Link has for it, so the game rotates them as it does Link's.
 - People fall back to a neutral voice of their sex and age; creatures fall back to a creature voice.
+- An event takes its own class from any voice of the chain before another class (2026-11-23); a clip
+  longer than the cap is cut around its loudest part.
+- The cow (2026-11-23): its roar for big attacks, its angry moo for attacks, its hurt moo for hits, its sad moo
+  for death (ATTACK_BIG and DIE, classes only the cow's clips have; for everyone else they stay empty).
 """
 import re
 from dataclasses import dataclass
@@ -47,7 +51,7 @@ KINDS = {
     "SURPRISE": frozenset("SurpriseS SurpriseM SurpriseL Surprise SurpriseSi PanicSurprise Notice Scare".split()),
     "BREATH": frozenset("Ease Stretch Wakep Sigh Tired Run Cough".split()),
 }
-CLASSES = tuple(KINDS)
+CLASSES = tuple(KINDS) + ("ATTACK_BIG", "DIE")
 
 ENEMY_RULES = [
     ("DAMAGE", r"(DamageVoice|Voice_Damage|StunVoice|DamagedAngry|Voice_AfterDamage|Body_Damage|DeadVoice|DieVoice)"),
@@ -58,6 +62,8 @@ ENEMY_RULES = [
                r"Voice_Guard\d|Voice_Turn|ProvokeVoice|RepelledVoice|RepelledLongVoice|ParryVoice|FaintEndVoice|"
                r"StunEndVoice|RecoveryVoice|MissingVoice)"),
     ("SURPRISE", r"(NoticeVoice|AppearVoice|DiscoverVoice|FindVoice|Voice_AttackPre|PreAttackVoice)"),
+    ("ATTACK_BIG", r"SE_Animal_Cow_Roar_"),
+    ("DIE", r"NV_Cow_Sad"),
     ("BREATH", r"(WaitVoice|IdleVoice|BreathVoice|Voice_Wait|NV_Cow_(?!Angry))"),
 ]
 
@@ -73,15 +79,21 @@ _EVENT_RULES = [
     ("SURPRISE", r"Surprised|WakeUp|Dm_|Npc_Dream"),
 ]
 
-# Preference order of classes per class of Link's event: the first class the voice has fills the slot.
+# Preference order of classes per class of Link's event: the first class a voice of the chain has fills the slot.
+# ATTACK_BIG and DIE have only the cow's clips; for everyone else ATTACK_BIG and DIE events fall to ATTACK and DAMAGE.
 PREFS = {
-    "ATTACK": ("ATTACK", "EFFORT", "SURPRISE", "DAMAGE", "BREATH"),
-    "EFFORT": ("EFFORT", "ATTACK", "SURPRISE", "BREATH", "DAMAGE"),
-    "DAMAGE": ("DAMAGE", "SURPRISE", "EFFORT", "BREATH", "ATTACK"),
-    "SURPRISE": ("SURPRISE", "BREATH", "EFFORT", "DAMAGE", "ATTACK"),
-    "BREATH": ("BREATH", "SURPRISE", "EFFORT", "DAMAGE", "ATTACK"),
+    "ATTACK_BIG": ("ATTACK_BIG", "ATTACK", "EFFORT", "SURPRISE", "DAMAGE", "BREATH", "DIE"),
+    "ATTACK": ("ATTACK", "ATTACK_BIG", "EFFORT", "SURPRISE", "DAMAGE", "BREATH", "DIE"),
+    "EFFORT": ("EFFORT", "ATTACK", "SURPRISE", "BREATH", "DAMAGE", "ATTACK_BIG", "DIE"),
+    "DIE": ("DIE", "DAMAGE", "SURPRISE", "EFFORT", "BREATH", "ATTACK", "ATTACK_BIG"),
+    "DAMAGE": ("DAMAGE", "SURPRISE", "EFFORT", "BREATH", "ATTACK", "DIE", "ATTACK_BIG"),
+    "SURPRISE": ("SURPRISE", "BREATH", "EFFORT", "DAMAGE", "ATTACK", "ATTACK_BIG", "DIE"),
+    "BREATH": ("BREATH", "SURPRISE", "EFFORT", "DAMAGE", "ATTACK", "ATTACK_BIG", "DIE"),
 }
-_SHIELD = ("EFFORT", "SURPRISE", "ATTACK", "BREATH", "DAMAGE")
+_SHIELD = ("EFFORT", "SURPRISE", "ATTACK", "BREATH", "DAMAGE", "ATTACK_BIG", "DIE")
+# Link's events that try the cow's own classes first (their event_class stays ATTACK and DAMAGE).
+_BIG_ATTACK = re.compile(r"^(SwordAttack_B|BigSwordAttack_B|JumpAttack|BS_JumpAttack|H_JumpAttack|RotaryCut_B)$")
+_DIE = re.compile(r"^(Death|WaterDeath)$")
 
 
 def event_of(link_name):
@@ -102,7 +114,19 @@ def prefs(event):
     """Classes to try for one of Link's events, best first; every class is in it, so no slot stays empty."""
     if event.startswith("Shield_"):
         return _SHIELD
+    if _BIG_ATTACK.match(event):
+        return PREFS["ATTACK_BIG"]
+    if _DIE.match(event):
+        return PREFS["DIE"]
     return PREFS[event_class(event)]
+
+
+def own(event):
+    """The event's own classes: the ones taken from any voice of the chain before another class is tried. Its
+    event_class, after the cow's ATTACK_BIG or DIE where prefs(event) puts one first."""
+    p = prefs(event)
+    c = "EFFORT" if p is _SHIELD else event_class(event)
+    return p[:p.index(c) + 1]
 
 
 def kind_of(clip_name):
