@@ -2842,6 +2842,7 @@ std::array<CoopPuppetSound::Wanted, kNumbers> g_ocarina;  // the same; guarded (
 std::array<std::vector<CoopLinkSound::Sound>, kNumbers> g_sounds;  // the same; guarded (LINK_SOUND)
 CoopEmote::Holds g_emotes;                                  // guarded (EMOTE, coop_emote.h)
 std::array<std::uint32_t, kNumbers> g_emote_serials{};      // goes up with each EMOTE; guarded
+std::array<std::uint32_t, kNumbers> g_emote_logged{};       // the serial last logged as played; guarded, reset with a new session
 constexpr std::uint32_t kEmoteSerialBase = 0x80000000u;     // apart from the samples' serials
 
 } // namespace
@@ -2897,6 +2898,8 @@ void OnEvent(const coop::net::Event& event) {
         g_ocarina = {};
         g_sounds = {};
         g_emotes.ClearAll();
+        g_emote_serials = {};
+        g_emote_logged = {};
     } else if (event.kind == EventKind::player_left && event.player < g_anims.size()) {
         std::lock_guard lock(g_anim_mutex);
         g_anims[event.player].Clear();
@@ -3145,11 +3148,11 @@ void Publish(std::uint64_t main_base, const std::optional<std::string>& scene,
     std::vector<Remote> remotes = Collect(session, server_now_us);
     {
         // One log line when a puppet starts playing an emote (its serial is the emote's own: kEmoteSerialBase up).
-        static std::array<std::uint32_t, kNumbers> logged{};
+        std::lock_guard lock(g_anim_mutex);
         for (const auto& r : remotes) {
-            if (r.number < logged.size() && r.anim && r.anim_serial >= kEmoteSerialBase &&
-                r.anim_serial != logged[r.number]) {
-                logged[r.number] = r.anim_serial;
+            if (r.number < g_emote_logged.size() && r.anim && r.anim_serial >= kEmoteSerialBase &&
+                r.anim_serial != g_emote_logged[r.number]) {
+                g_emote_logged[r.number] = r.anim_serial;
                 g_director->Note("P" + std::to_string(r.number) + " EMOTE played on the puppet: AS '" +
                                 r.anim->name + "'");
             }
