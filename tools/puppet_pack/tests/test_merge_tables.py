@@ -1816,6 +1816,22 @@ class SnailCustomizeTest(MergeMembersTest):
         self.merge()                                               # the next start: nothing new
         self.assertIn("already", self.lines[0])
 
+    def test_his_picker_names_are_made_readable(self):
+        # (menu-customize-01113: his model ids, "Gerudo_GEN_002", were the labels under his icons; charsel_names.py)
+        from puppet_pack import charsel_names, msbt
+        from test_ui_pack import make_msbt
+        his = make_msbt([("T_Slot_000", "Link"), ("T_CellName_000", "Link"), ("T_Slot_001", "Goron_GON_001"),
+                         ("T_CellName_001", "Goron_GON_001")])
+        self.mod_raw = self.archive(dict(self.game, **{"Hdr.msbt": b"mod header", charsel_names.PICKER_MSG: his}))
+        self.put(os.path.join(self.mod, "romfs", *MALS.split("/")), self.mod_raw)
+        failed, _ = self.merge()
+        self.assertEqual(failed, 0)
+        got = msbt.read(self.served()[charsel_names.PICKER_MSG])
+        self.assertEqual((got.text("T_Slot_001"), got.text("T_CellName_001")), (["Goron"], ["Goron"]))
+        self.assertEqual(got.text("T_Slot_000"), ["Link"])
+        self.merge()                                               # the next start: nothing new
+        self.assertIn("already", self.lines[0])
+
     def test_without_his_customize_screen_nothing_is_added(self):
         failed, _ = self.merge()
         self.assertEqual(failed, 0)

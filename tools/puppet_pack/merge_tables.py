@@ -56,9 +56,9 @@ import sys
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from puppet_pack import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
+    from puppet_pack import byml, charsel_names, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs  # noqa: E402
 else:
-    from . import byml, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs
+    from . import byml, charsel_names, msbt, pause_menu, rstb, sarc, title_menu, tunic, tunic_extra, ui_pack, zs
 
 LIST_FILE = "coop-mods.list"
 KEEP_DIR = "_coop-size-table"
@@ -80,7 +80,9 @@ MENU_KEEP = "_coop-menus"     # the pack's menu files while the table the game r
 # (coop_puppet.json's "menu_keys": the file lists kept aside together, ui_pack.MENU_KEYS when the pack was made; a pack
 # without the field has the two old keys)
 MEMBERS_KEEP = "_coop-archives"   # a mod's own copies of archives the pack's members were merged into (merge_members)
-MEMBERS_HEAD = "coop-members 1"
+# (2: menu-customize-01113, Character Select's picker names made readable (add_snail_placeholders' tidy_picker): a
+# kit merged before re-merges once from its kept copies)
+MEMBERS_HEAD = "coop-members 2"
 
 
 class MergeError(Exception):
@@ -640,7 +642,7 @@ def merge_members(root, romfs, say=print):
     pack's members (its texts, MenuOverlay_00, PlusMenu_00) were lost. The winner's copy gets every member the pack
     changed from the game's own archive (romfs) where the winner left that member as the game has it; a member both
     changed stays the winner's and is named (a decision for the two mods: the pause header). Its own copy is kept in
-    `<mod>/_coop-archives/<path>` with `<path>.txt` (`coop-members 1` / `out <the file written>` / `in <the pack's
+    `<mod>/_coop-archives/<path>` with `<path>.txt` (`coop-members 2` / `out <the file written>` / `in <the pack's
     copy>` / `fit <size path> <size>`), so the next start merges again only when one of them changed, from the kept
     copy; --undo puts it back. Needs the game's romfs (to tell which member changed); without it nothing is merged.
 
@@ -716,12 +718,18 @@ SNAIL_PLACEHOLDER = "." * 64
 
 
 def add_snail_placeholders(entries):
-    """(entries with the placeholders in his Customize screen's message file, whether one changed)."""
+    """(entries with the placeholders in his Customize screen's message file and his picker's names readable,
+    whether one changed)."""
     labels = {"Coop_Custom_%02d" % i: SNAIL_PLACEHOLDER for i in range(SNAIL_SLOTS)}
     out, changed = [], False
     for n, d in entries:
         if n == SNAIL_MSG:
             d2 = ui_pack.add_labels(d, labels, replace=True)
+            changed = changed or d2 != d
+            d = d2
+        elif n == charsel_names.PICKER_MSG:
+            # (menu-customize-01113: his picker's model ids, "Gerudo_GEN_002", as readable names; charsel_names.py)
+            d2 = charsel_names.tidy_picker(d)
             changed = changed or d2 != d
             d = d2
         out.append((n, d))
@@ -1049,8 +1057,8 @@ def merge_members_one(root, codec, rel, win_name, win_path, pack_path, game, say
         + (f" A label both changed, the nearer mod's kept: {', '.join(labels_kept)}." if labels_kept else "")
         + (f" {', '.join(gave_english)}: no archive in this language, its English messages taken."
            if gave_english else "")
-        + (" Its Customize screen's messages got co-op's placeholders (co-op's customization in it)."
-           if placeholders else ""))
+        + (" Character Select's messages got co-op's part (his Customize screen's placeholders, his picker's names"
+           " readable)." if placeholders else ""))
     return need
 
 

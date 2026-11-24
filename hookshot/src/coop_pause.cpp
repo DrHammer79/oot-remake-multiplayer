@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -40,6 +41,7 @@
 #include "coop_room_list.h"
 #include "coop_runtime.h"
 #include "coop_char_ages.h"
+#include "coop_charsel_names.h"
 #include "coop_ngplus.h"
 #include "coop_puppet_config.h"
 #include "coop_save.h"
@@ -899,11 +901,21 @@ void Copy(const std::string& text, const char* what) {
 
 // The Settings page's Character by age rows (coop_char_ages.h): the picks and the characters this PC can show.
 void FeedCharacterAges() {
-    const auto list = CoopCharAges::Pickable(CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText()),
-                                             CoopPuppetConfig::KnownCharacterFiles());
+    const auto all = CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText());
+    const auto list = CoopCharAges::Pickable(all, CoopPuppetConfig::KnownCharacterFiles());
     const auto stored = CoopCharAges::Current();
+    // (his model ids, "Hylia_MN_005", by the names his picker shows after the kit's merge: numbered over his whole
+    // list, as there, not over the characters this PC can show; coop_charsel_names.h)
+    std::vector<std::string> names;
+    for (const auto& c : all) names.push_back(c.name);
+    const auto readable = CoopCharselNames::Readable(names);
+    std::map<int, std::string> shown;
+    for (std::size_t i = 0; i < all.size(); ++i) shown.emplace(all[i].number, readable[i]);
     std::vector<std::pair<int, std::string>> rows;
-    for (const auto& c : list) rows.emplace_back(c.number, c.name);
+    for (const auto& c : list) {
+        const auto it = shown.find(c.number);
+        rows.emplace_back(c.number, it != shown.end() ? it->second : c.name);
+    }
     g_menu.SetCharacterAges(list.size() > 1, stored.on, stored.child.value_or(-1), stored.adult.value_or(-1),
                             std::move(rows));
 }
