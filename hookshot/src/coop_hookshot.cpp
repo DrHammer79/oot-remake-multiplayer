@@ -2598,7 +2598,16 @@ COOP_HOOKSHOT_EXPORT int hos_coop_key(uint32_t vk, int repeat) {
     #ifndef _WIN32
         const CoopClipboard::OnSdlThread sdl_thread;
     #endif
-        return CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0) ? 1 : 0;
+        if (CoopHookshot::TypeKey(vk, repeat != 0) || CoopModsRuntime::Key(vk, repeat != 0)) return 1;
+        // F1 in play: co-op's home, the - menu's Multiplayer tab (menu-polish-01113; our tabs left Longshot's F1 menu).
+        // Longshot's own menu stays on Insert, Esc, its pad keys and System > Longshot Settings; F1 closes it if open.
+        // Not on the title (its - opens Multiplayer), not in original game (g_on off), and with an old pack without our
+        // - tabs F1 stays Longshot's (its menu has co-op's tabs then).
+        if (vk == 0x70 /* F1 */ && repeat == 0 && g_on && !CoopTitle::Up() && CoopPauseTab::OpenMultiplayer()) {
+            CoopPause::WantClose();
+            return 1;
+        }
+        return 0;
     });
 }
 COOP_HOOKSHOT_EXPORT int hos_coop_char(uint32_t ch) {
@@ -2701,7 +2710,11 @@ COOP_HOOKSHOT_EXPORT int hos_coop_game_pause_page(void) noexcept {
 COOP_HOOKSHOT_EXPORT int hos_coop_menu_tabs(void) {
     static CoopBoundary::Site site{"hos_coop_menu_tabs"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
-        return g_on ? CoopPause::Tabs() : g_original_on ? 1 : 0;
+        // (co-op's tabs in Longshot's F1 menu only as the fallback: no pack, or a pack without our - tabs; co-op's home
+        // is the game's - menu. Original game: its one tab, the way back)
+        if (!g_on) return g_original_on ? 1 : 0;
+        static const bool has_pack = CoopPuppetConfig::HasPack();   // (a folder scan: once; the pack is set at the start)
+        return !has_pack || CoopPauseTab::NoMinusTabs() ? CoopPause::Tabs() : 0;
     });
 }
 COOP_HOOKSHOT_EXPORT const char* hos_coop_menu_tab_name(int tab) {

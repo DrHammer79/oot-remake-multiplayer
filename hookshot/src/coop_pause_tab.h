@@ -1139,6 +1139,12 @@ bool OwnMinusPageShown() noexcept;
 // the game's own Minus and L / R (a run already going: nothing more). Any thread. False when the pack has no - tabs of
 // ours (seen once a - menu opened without them): F6's drawn list is used then.
 bool OpenPlayers() noexcept;
+// F1 in play (menu-polish-01113, A #100: our tabs leave Longshot's F1 menu, F1 opens co-op's home): the same run as
+// F6's to the - menu's Multiplayer tab, its main view. False (F1 left to Longshot's own menu) when the pack has no - tabs
+// of ours, or when nothing can open now (not in free play and no menu up: an event, a load, the title).
+bool OpenMultiplayer() noexcept;
+// Whether a - menu opened without tabs of ours this session (an old pack): Longshot's F1 menu keeps co-op's tabs then.
+bool NoMinusTabs() noexcept;
 // Free play for F6's Minus (coop_players_open.h Seen::free_play): our Link in a scene, no event, no load, as the
 // module read it this frame (coop_hookshot.cpp DrawScene, each frame). Any thread.
 void SetFreePlay(bool free_play) noexcept;

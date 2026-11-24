@@ -2021,6 +2021,7 @@ bool g_strip_looked = false;
 // F6 (coop_players_open.h): the last - menu opening looked up had no tabs of ours (F6's drawn list then); a later
 // opening that has them clears it (LookStrip).
 std::atomic<bool> g_players_no_tabs{false};
+std::atomic<bool> g_players_to_main{false};   // the run is F1's (Multiplayer, main view), not F6's (Players)
 std::array<std::uint64_t, 4> g_game_tabs{};
 std::array<float, 4> g_game_tabs_x{};
 std::array<std::uint64_t, 4> g_game_words{};   // each game tab's T_Text_00: its drawn width says whether the tab shows a word
@@ -4180,14 +4181,16 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     case CoopPlayersOpen::Step::kTapL: in |= kPadL; break;
                     case CoopPlayersOpen::Step::kTapR: in |= kPadR; break;
                     case CoopPlayersOpen::Step::kShowPlayers:
-                        SetView(View::kPlayers);
-                        LOG_INFO(Core, "coop: pause tab: F6: the Players view, after {} Minus press(es) and {} tap(s)",
+                        SetView(g_players_to_main.load() ? View::kMain : View::kPlayers);
+                        LOG_INFO(Core, "coop: pause tab: {}: the {} view, after {} Minus press(es) and {} tap(s)",
+                                 g_players_to_main.load() ? "F1" : "F6", g_players_to_main.load() ? "Multiplayer" : "Players",
                                  g_players_run.presses(), g_players_run.taps());
                         break;
                     case CoopPlayersOpen::Step::kNoTabs:
                         g_players_no_tabs = true;
-                        LOG_INFO(Core, "coop: pause tab: F6: the - menu has no tabs of ours (build the puppet pack "
-                                       "again): F6 shows the list over the picture");
+                        LOG_INFO(Core, "coop: pause tab: F6/F1: the - menu has no tabs of ours (build the puppet pack "
+                                       "again): F6 shows the list over the picture, F1 Longshot's menu with co-op's tabs");
+                        if (g_players_to_main.load()) OpenLongshotMenu();   // (F1: its menu, as before, co-op's tabs in it)
                         break;
                     case CoopPlayersOpen::Step::kNotFree:
                         LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): "
@@ -4955,6 +4958,7 @@ bool OpenPlayers() noexcept {
     try {
         std::lock_guard lock(g_players_mutex);
         if (!g_players_run.On()) {
+            g_players_to_main = false;
             const bool menu_up = GameMenuUp();
             if (!menu_up && !FreePlayNow()) {
                 LOG_INFO(Core, "coop: pause tab: F6: not in free play (an event, a load or another screen): nothing pressed");
@@ -4967,6 +4971,28 @@ bool OpenPlayers() noexcept {
     } catch (...) {
     }
     return true;
+}
+
+bool OpenMultiplayer() noexcept {
+    if (g_players_no_tabs.load()) return false;
+    try {
+        std::lock_guard lock(g_players_mutex);
+        if (!g_players_run.On()) {
+            const bool menu_up = GameMenuUp();
+            if (!menu_up && !FreePlayNow()) return false;   // (an event, a load: F1 stays Longshot's)
+            g_players_to_main = true;
+            g_players_run.Start(NowMs(), menu_up);
+            LOG_INFO(Core, "coop: pause tab: F1: to the Multiplayer tab ({})",
+                     menu_up ? "a menu is up: no Minus" : "Minus opens the - menu");
+        }
+        return true;
+    } catch (...) {
+    }
+    return false;
+}
+
+bool NoMinusTabs() noexcept {
+    return g_players_no_tabs.load();
 }
 
 bool OwnMinusPageShown() noexcept {
