@@ -36,8 +36,8 @@ Gerudo_GEN_004	Gerudo 4
 Gerudo_GEN_011	Gerudo 5
 Gerudo_GEN_011_Leader	Gerudo leader
 Goron_GON_001	Goron 1
-Goron_GON_006	Goron 2
-Goron_GON_002	Goron 3
+Goron_GON_006	Goron 3
+Goron_GON_002	Goron 2
 Hylia_MF_001	Townsman 1
 Hylia_MF_002	Townsman 2
 Hylia_MF_003	Townsman 3

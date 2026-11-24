@@ -2,7 +2,9 @@
 // Readable names for Character Select's unnamed characters (hookshot/src/coop_charsel_names.h).
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -31,10 +33,29 @@ TEST_CASE("charsel names: his own names stay, model ids get their kind") {
     CHECK(KindOf("Sheikah_SN_001") == "Sheikah");
 }
 
-TEST_CASE("charsel names: a kind of more than one is numbered in the list's order, a kind of one is not") {
+TEST_CASE("charsel names: a kind of more than one is numbered by its ids' order, a kind of one is not") {
     CHECK(Readable({"Goron_GON_001", "Saria", "Goron_GON_006", "Zora_ZN_001", "Goron_GON_002"}) ==
-          std::vector<std::string>{"Goron 1", "Saria", "Goron 2", "Zora", "Goron 3"});
+          std::vector<std::string>{"Goron 1", "Saria", "Goron 3", "Zora", "Goron 2"});
+    // (one kind over several codes: the code first, then the number's value, then the word)
+    CHECK(Readable({"Hylia_MN_010", "Hylia_MF_002", "Hylia_MN_9", "Gerudo_GEN_011_Leader", "Gerudo_GEN_011_Chief",
+                    "Gerudo_GEN_011_Leader"}) ==
+          std::vector<std::string>{"Townsman 3", "Townsman 1", "Townsman 2", "Gerudo leader 1", "Gerudo chief",
+                                   "Gerudo leader 2"});
     CHECK(Readable({}).empty());
+    CHECK_FALSE(KindOf("Hylia_MN_1234567890123456789").has_value());   // (19 digits: not an id, as the Python side)
+}
+
+TEST_CASE("charsel names: a list in another order names each character alike (review-01112-h: picker vs json)") {
+    std::vector<std::string> names{"Goron_GON_001", "Goron_GON_006", "Goron_GON_002", "Hylia_WO_001",
+                                   "Hylia_MN_014", "Hylia_MF_003", "Saria", "Hylia_MN_003", "Kokiri_WC_002",
+                                   "Kokiri_WC_001"};
+    const auto shown = Readable(names);
+    std::map<std::string, std::string> by_id;
+    for (std::size_t i = 0; i < names.size(); ++i) by_id[names[i]] = shown[i];
+    std::vector<std::string> other(names.rbegin(), names.rend());
+    std::rotate(other.begin(), other.begin() + 3, other.end());
+    const auto again = Readable(other);
+    for (std::size_t i = 0; i < other.size(); ++i) CHECK(again[i] == by_id[other[i]]);
 }
 
 TEST_CASE("charsel names: his v0.2.2 list gives the names the kit's merge puts in his picker") {

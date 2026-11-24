@@ -904,8 +904,8 @@ void FeedCharacterAges() {
     const auto all = CoopCharAges::ParseCharacters(CoopPuppetConfig::CharacterListText());
     const auto list = CoopCharAges::Pickable(all, CoopPuppetConfig::KnownCharacterFiles());
     const auto stored = CoopCharAges::Current();
-    // (his model ids, "Hylia_MN_005", by the names his picker shows after the kit's merge: numbered over his whole
-    // list, as there, not over the characters this PC can show; coop_charsel_names.h)
+    // (his model ids, "Hylia_MN_005", by the names his picker shows after the kit's merge: numbered by the ids among his
+    // whole list, not among the characters this PC can show, nor by any list's order; coop_charsel_names.h)
     std::vector<std::string> names;
     for (const auto& c : all) names.push_back(c.name);
     const auto readable = CoopCharselNames::Readable(names);

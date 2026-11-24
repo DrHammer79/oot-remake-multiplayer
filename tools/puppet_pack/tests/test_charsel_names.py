@@ -41,9 +41,34 @@ class KindTest(unittest.TestCase):
                      ("Sheikah_SN_001", "Sheikah")):
             self.assertEqual(cn.kind_of(n), k, n)
 
-    def test_numbered_in_order_only_when_more_than_one(self):
+    def test_numbered_by_the_ids_order_only_when_more_than_one(self):
         self.assertEqual(cn.readable(["Goron_GON_001", "Saria", "Goron_GON_006", "Zora_ZN_001", "Goron_GON_002"]),
-                         ["Goron 1", "Saria", "Goron 2", "Zora", "Goron 3"])
+                         ["Goron 1", "Saria", "Goron 3", "Zora", "Goron 2"])
+        self.assertEqual(cn.readable(["Hylia_MN_010", "Hylia_MF_002", "Hylia_MN_9", "Gerudo_GEN_011_Leader",
+                                      "Gerudo_GEN_011_Chief", "Gerudo_GEN_011_Leader"]),
+                         ["Townsman 3", "Townsman 1", "Townsman 2", "Gerudo leader 1", "Gerudo chief",
+                          "Gerudo leader 2"])
+        self.assertIsNone(cn.kind_of("Hylia_MN_1234567890123456789"))   # (19 digits: not an id, as the C++ side)
+
+    def test_another_order_names_each_character_alike(self):
+        # (review-01112-h: his picker's slots and his characters.json are two lists; a release ordering one otherwise)
+        his, _ = fixture()
+        by_id = dict(zip(his, cn.readable(his)))
+        other = list(reversed(his))
+        other = other[7:] + other[:7]
+        for name, shown in zip(other, cn.readable(other)):
+            self.assertEqual(shown, by_id[name], name)
+
+    def test_his_picker_in_another_slot_order_gives_the_same_names(self):
+        a = make_msbt([("T_Slot_000", "Goron_GON_001"), ("T_CellName_000", "Goron_GON_001"),
+                       ("T_Slot_001", "Goron_GON_006"), ("T_CellName_001", "Goron_GON_006"),
+                       ("T_Slot_002", "Goron_GON_002"), ("T_CellName_002", "Goron_GON_002")])
+        b = make_msbt([("T_Slot_000", "Goron_GON_002"), ("T_CellName_000", "Goron_GON_002"),
+                       ("T_Slot_001", "Goron_GON_001"), ("T_CellName_001", "Goron_GON_001"),
+                       ("T_Slot_002", "Goron_GON_006"), ("T_CellName_002", "Goron_GON_006")])
+        ga, gb = msbt.read(cn.tidy_picker(a)), msbt.read(cn.tidy_picker(b))
+        self.assertEqual([ga.text("T_Slot_%03d" % i)[0] for i in range(3)], ["Goron 1", "Goron 3", "Goron 2"])
+        self.assertEqual([gb.text("T_Slot_%03d" % i)[0] for i in range(3)], ["Goron 2", "Goron 1", "Goron 3"])
 
     def test_his_v022_list_as_the_cpp_side(self):
         his, want = fixture()

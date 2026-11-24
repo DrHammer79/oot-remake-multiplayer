@@ -14,26 +14,34 @@ letters (M a man, W a woman, C a child, O old, S a soldier; checked against his 
   Kokiri MC -> Kokiri boy, WC -> Kokiri girl
   Gerudo, Goron, Zora, any other race -> the race's word (Hylia -> Hylian)
   a trailing word -> "<kind> <word in lower case>" (Gerudo_GEN_011_Leader -> Gerudo leader)
-Kinds with more than one character are numbered 1, 2, ... in the list's order (his picker's slots, his characters.json:
-both list the ids in the same order); a kind of one has no number. Every name fits his label (at most 13 letters,
+Kinds with more than one character are numbered 1, 2, ... by their model ids in order (the code, then the id's number,
+then its word: Goron_GON_001, _002, _006), never by where they stand in a list: his picker's slots and his
+characters.json are two lists (review-01112-h), and a release that orders one of them otherwise still gives each
+character the same name in both places. A kind of one has no number. Every name fits his label (at most 13 letters,
 "Townswoman 14"); a longer one is broken at a space onto a second line, as his own long names ("Ingo (adult\\nera)").
 """
 import re
 
 # <Race>_<CODE>_<digits>, then an optional _<Word>
-MODEL_ID = re.compile(r"^([A-Za-z]+)_([A-Z]+)_(\d+)(?:_([A-Za-z]+))?$")
+MODEL_ID = re.compile(r"^([A-Za-z]+)_([A-Z]+)_([0-9]{1,18})(?:_([A-Za-z]+))?$")   # (ASCII digits, 18 at most: the C++ side)
 RACE_WORD = {"Hylia": "Hylian"}
 LABEL_ROOM = 13   # (letters on one line of his label: "Phantom Ganon", "Darunia's son" fit, "Goron_GON_006" does not)
 PICKER_MSG = "LayoutMsg/CharacterMenu_00.msbt"
 SLOT = re.compile(r"^T_(Slot|CellName)_(\d+)$")
 
 
+def _id(name):
+    """The model id's parts (race, code, digits, word or None), or None for a name of his own."""
+    m = MODEL_ID.match(name.replace("\n", "_"))   # (his wrapped label: "Gerudo_GEN\n011_Leader", the break for a "_")
+    return m.groups() if m else None
+
+
 def kind_of(name):
     """The kind (the readable name before its number) of a model id, or None for a name of his own."""
-    m = MODEL_ID.match(name.replace("\n", "_"))   # (his wrapped label: "Gerudo_GEN\n011_Leader", the break for a "_")
-    if not m:
+    parts = _id(name)
+    if parts is None:
         return None
-    race, code, _, word = m.groups()
+    race, code, _, word = parts
     man, woman = code.startswith("M"), code.startswith("W")
     if race == "Hylia" and (man or woman):
         if code[1:2] == "O":
@@ -49,22 +57,27 @@ def kind_of(name):
     return kind + " " + word.lower() if word else kind
 
 
+def _order(parts):
+    """A model id's place among its kind's: its code, the value of its digits, its word ("" none)."""
+    _, code, digits, word = parts
+    return (code, int(digits), word or "")
+
+
 def readable(names):
-    """Each name of the list (in its order) as shown: model ids as their kind (numbered when the kind has more than
-    one), the others unchanged."""
+    """Each name of the list (in its order) as shown: model ids as their kind (numbered by their ids' order when the
+    kind has more than one, whatever the list's order), the others unchanged."""
+    ids = [_id(n) for n in names]
     kinds = [kind_of(n) for n in names]
-    total = {}
-    for k in kinds:
+    of_kind = {}
+    for i, k in enumerate(kinds):
         if k is not None:
-            total[k] = total.get(k, 0) + 1
-    seen, out = {}, []
-    for n, k in zip(names, kinds):
-        if k is None:
-            out.append(n)
-            continue
-        seen[k] = seen.get(k, 0) + 1
-        out.append(k if total[k] == 1 else "%s %d" % (k, seen[k]))
-    return out
+            of_kind.setdefault(k, []).append(i)
+    number = {}
+    for members in of_kind.values():
+        for rank, i in enumerate(sorted(members, key=lambda j: _order(ids[j])), 1):
+            number[i] = rank if len(members) > 1 else None
+    return [n if kinds[i] is None else kinds[i] if number[i] is None else "%s %d" % (kinds[i], number[i])
+            for i, n in enumerate(names)]
 
 
 def label_lines(text, room=LABEL_ROOM):
