@@ -201,8 +201,8 @@ TEST_CASE("mods tab: Paste into a text row (the pad's way) and Ctrl+V while typi
     Mods m;
     Tab tab({m.loader.get(), nullptr, nullptr});
     tab.Show();
-    tab.Press(Input::kDecide);   // (About first)
-    for (int i = 0; i < 5; ++i) tab.Press(Input::kDown);
+    tab.Press(Input::kDecide);
+    for (int i = 0; i < 6; ++i) tab.Press(Input::kDown);   // (About first)
     auto v = tab.view();
     REQUIRE(v.rows[v.selected].name == "Label");
     CHECK(v.change == "Paste");
@@ -245,8 +245,8 @@ TEST_CASE("mods tab: Paste is only for text rows (a number row still steps)") {
     Mods m;
     Tab tab({m.loader.get(), nullptr, nullptr});
     tab.Show();
-    tab.Press(Input::kDecide);   // (About first)
-    for (int i = 0; i < 3; ++i) tab.Press(Input::kDown);
+    tab.Press(Input::kDecide);
+    for (int i = 0; i < 4; ++i) tab.Press(Input::kDown);   // (About first)
     auto v = tab.view();
     REQUIRE(v.rows[v.selected].name == "Size");
     CHECK(v.change == "Switch");
