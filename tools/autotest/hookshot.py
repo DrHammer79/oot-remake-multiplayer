@@ -920,7 +920,8 @@ def read_text(path):
 # game compiles cold at every start (~440 s on Longshot rc.7, ~230 s on rc.4, longer with several compiling at once).
 # A fixed deadline is wrong for some of them, so the wait follows the progress: it fails only when the count stops
 # rising for RENDERER_STALL s, or at RENDERER_LIMIT s in all.
-RENDERER_PROGRESS = re.compile(r"vk: (start-up: pipelines|noted pipelines:) (\d+) of (\d+)")
+# Longshot rc.4 to rc.7 write "start-up: pipelines N of M"; later builds write "start-up: shaders N of M".
+RENDERER_PROGRESS = re.compile(r"vk: (start-up: (?:pipelines|shaders)|noted pipelines:) (\d+) of (\d+)")
 RENDERER_STALL = 180    # s without a new progress count (it comes every ~10 s while the compile moves)
 RENDERER_LIMIT = 3600   # s in all, progress or not (a new game folder's first start: ~18 min)
 
