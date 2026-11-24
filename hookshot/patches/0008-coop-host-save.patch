@@ -1,4 +1,4 @@
-From 7c6769c57c1e41ae0b96094f8a326022fb8fd885 Mon Sep 17 00:00:00 2001
+From b3032be55f9000d7ff61c6223ac7de2cb3bbfceb Mon Sep 17 00:00:00 2001
 From: coop-fetch <coop-fetch@localhost>
 Date: Thu, 12 Nov 2026 18:34:41 -0900
 Subject: [PATCH] Co-op host save: the account save's folder and a re-mount,
@@ -18,7 +18,7 @@ the game nor any mod has (the first 32 distinct paths, then every 256th
 such open with the count): player report 242's black world (a mod's model
 naming textures no folder had) left nothing in the log.
 ---
- host/nn_fs.c | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ host/nn_fs.c | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++-
  1 file changed, 159 insertions(+), 1 deletion(-)
 
 diff --git a/host/nn_fs.c b/host/nn_fs.c
