@@ -75,6 +75,14 @@ std::string Capitalised(std::string s) {
     return s;
 }
 
+Driver::Keys Driver::KeysNow() const {
+    Keys k;
+    if (!active_ || page_.editing()) return k;
+    k.page = page_.GroupsOffered() > 1;
+    k.mix = page_.GroupsOffered() >= 1;
+    return k;
+}
+
 Texts Driver::Shown() const { return Shown(CoopI18n::Current()); }
 
 // In the player's language, as co-op's own pages put their rows' names and values (CoopI18n::Tr at the write, the
@@ -89,6 +97,7 @@ Texts Driver::Shown(const CoopI18n::Lang* lang) const {
     // hint (more than one page), then the A hint (any set with colours: it opens the mixer) follow only while the
     // whole stays within it, the A hint dropped before the Y hint.)
     const auto add = [&](const char* hint) {
+        if (keys_shown_) return;   // (the keys show as the game's guide keys: KeysNow)
         const std::string more = "  " + CoopI18n::Tr(lang, hint);
         if (t.title.size() + more.size() <= kTitleBytes) t.title += more;
     };

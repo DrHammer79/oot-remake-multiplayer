@@ -462,6 +462,35 @@ CoopSnailCustom::Texts g_snail_shown;
 std::string g_snail_failed_said;   // (the panes last named as not set: said once per list)
 bool g_snail_wait = false;   // his screen open, his panes not found in its layout: co-op waits (keys kept from his rows)
 std::atomic<bool> g_snail_driven{false};   // (CharacterCustomizeOpen: any thread)
+// menu-customize-01113: his screen's keys as the game's guide keys (the pack's Pa_CoopKeyY_00 / Pa_CoopKeyA_00 in his
+// layout, stored hidden: merge_tables.py add_snail_keys), looked up at each opening (0: not in this layout, a kit not
+// merged again: the title keeps its worded hints). g_snail_keys_on: what each shows now (-1 not set yet).
+std::uint64_t g_snail_key_page = 0, g_snail_key_mix = 0;
+std::array<int, 2> g_snail_keys_on{-1, -1};
+
+void SnailKeysLookUp(void* ctx, std::uint64_t layout) {
+    g_snail_key_page = FindOwnPane(ctx, layout, "Pa_CoopKeyY_00");
+    g_snail_key_mix = FindOwnPane(ctx, layout, "Pa_CoopKeyA_00");
+    g_snail_keys_on = {-1, -1};
+    g_snail.SetKeysShown(g_snail_key_page != 0 && g_snail_key_mix != 0);
+}
+
+// Each key shown while it does something (both hidden: on = {false, false}); only a change is written.
+void SnailKeysShow(void* ctx, CoopSnailCustom::Driver::Keys on) {
+    const std::array<std::pair<std::uint64_t, bool>, 2> keys{{{g_snail_key_page, on.page}, {g_snail_key_mix, on.mix}}};
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        const auto [pane, want] = keys[i];
+        if (pane == 0 || g_snail_keys_on[i] == (want ? 1 : 0)) continue;
+        SetVisible(ctx, pane, want);
+        g_snail_keys_on[i] = want ? 1 : 0;
+    }
+}
+
+// His screen left while its layout is still there (it reads closed): the keys hidden, as his own panes close.
+void SnailKeysHide(void* ctx) {
+    if (g_snail_open) SnailKeysShow(ctx, {});
+    g_snail_key_page = g_snail_key_mix = 0;
+}
 std::size_t CountOf(const std::string& text, const char* what) {
     std::size_t n = 0;
     for (std::size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
@@ -545,12 +574,15 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         // (a screen taken as his that now reads closed, or comes with other panes: left)
         if (g_snail_open && screen == g_snail_screen && layout == g_snail_layout) {
             g_snail_edge_ms = 0;
+            if (!open_now) SnailKeysHide(ctx);   // (read closed: hidden; its panes gone: not touched)
+            g_snail_key_page = g_snail_key_mix = 0;
             SnailClose(open_now ? "its panes are gone" : "closed");
         }
         return;
     }
     if (!open_now) {
         g_snail_edge_ms = 0;
+        if (screen == g_snail_screen && layout == g_snail_layout) SnailKeysHide(ctx);
         SnailClose("closed");
         return;
     }
@@ -560,7 +592,10 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
     if (g_snail_edge_ms == 0) g_snail_edge_ms = now;
     switch (SnailEdgeFrom(g_snail_open, g_snail_edge_ms, g_strip_state.load(), g_strip_seen_ms.load(), now)) {
         case SnailEdge::kWait: return;
-        case SnailEdge::kClose: SnailClose("the menu is closing"); return;
+        case SnailEdge::kClose:
+            if (screen == g_snail_screen && layout == g_snail_layout) SnailKeysHide(ctx);
+            SnailClose("the menu is closing");
+            return;
         case SnailEdge::kOpen: break;
     }
     g_snail_seen_ms = now;
@@ -576,6 +611,7 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         // and looks again at each update)
         g_snail_wait = !his_panes();
         if (!g_snail_wait) g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
+        SnailKeysLookUp(ctx, layout);
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen opened (screen {:#x}, layout {:#x}): {}",
                  screen, layout, g_snail_wait ? "his panes are not in its layout yet: co-op waits for them (his keys "
                                                 "kept from his rows)" : "co-op's customization in it");
@@ -585,6 +621,7 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         g_snail_failed_said.clear();
         for (auto& l : g_snail_live) l.shown.clear();
         g_snail.Open(CoopLook::Shown(), CoopCharColours::ShownCharacter());
+        SnailKeysLookUp(ctx, layout);
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: his panes are there now: co-op's "
                        "customization in it");
     }
@@ -599,11 +636,13 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
         CoopLook::SetPending(*look);   // (your Link wears it at once, a preview)
         g_snail_changed = true;
     }
+    SnailKeysShow(ctx, g_snail.KeysNow());
     const auto t = g_snail.Shown();
     if (t == g_snail_shown) return;
     std::string failed;
     const SnailWritten w = SnailWrite(ctx, t, failed);
     if (w == SnailWritten::kNoPlaceholders) {
+        SnailKeysShow(ctx, {});   // (his keys are the game's again: none of co-op's shown)
         g_snail.Close();   // (his screen stays; its keys are kept from the game: the fallback)
         g_snail_fallback = true;
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: {} is not in its messages (start the "
@@ -612,7 +651,9 @@ void SnailScreen(void* ctx, std::uint64_t screen) {
     }
     if (w == SnailWritten::kSome && CountOf(failed, "(pane not found)") + CountOf(failed, "(path not in the layout)") ==
                                            static_cast<std::size_t>(kSnailSlots) && !his_panes()) {
-        // (every pane gone from under co-op while open: wait for them as at an opening, his keys kept from his rows)
+        // (every pane gone from under co-op while open: wait for them as at an opening, his keys kept from his rows;
+        // the key parts went with them: not touched)
+        g_snail_key_page = g_snail_key_mix = 0;
         g_snail.Close();
         g_snail_wait = true;
         LOG_INFO(Core, "coop: characters: Character Select's Customize screen: none of his panes is in its layout now: "
