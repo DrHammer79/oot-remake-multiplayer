@@ -39,6 +39,7 @@
 #include "coop_cheats.h"
 #include "coop_cheats_panel.h"
 #include "coop_playtest.h"
+#include "coop_talk_text.h"
 #include "coop_char_colours.h"
 #include "coop_chatbox.h"
 #include "coop_draw.h"
@@ -119,6 +120,7 @@
 #include "hos_coop_pads.h"
 #include "hos_coop_save_load.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_text.h"
 #include "hos_coop_host.h"
 #include "hos_coop_world.h"
 #include "hos_coop_view.h"
@@ -1442,6 +1444,9 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
             if ((level.wraps >> HOS_COOP_WRAP_SOUND_EMIT & 1) == 0) {
                 LOG_INFO(Core, "coop: this Hookshot has no sound wrap (patch 0014): our Link's sounds are not sent");
             }
+            if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_TEXT & 1) == 0) {
+                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0037): `text` stays empty");
+            }
         }
         {
             // Patch 0024: the game's own save loads (docs/flags.md, "A load window"). All three wraps, or the old signs.
@@ -1736,6 +1741,16 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             // age is written in place now (coop_char_ages.h). Writes the pick's live value only.
             CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
             CoopCharAges::AtSaveLoaded(memory);
+        }
+        return 0;
+    }
+    if (id == HOS_COOP_WRAP_PANE_TEXT) {
+        // A text the game sets in a text pane (patch 0037): copied for the play-test bridge's `text` only
+        // (coop_talk_text.h). Nothing when the bridge is off. Reads only.
+        if (phase == 0 && CoopPlaytest::On()) {
+            CoopTalkText::TheLog().Note(x[0], x[1], CoopPlaytest::Frame(), [](std::uint64_t a, void* out, std::size_t n) {
+                return CoopRuntime::Read(a, out, n);
+            });
         }
         return 0;
     }

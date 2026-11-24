@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "coop_mod_json.h"
+#include "coop_rooms.h"
 #include "coop_strike.h"
 #include "coop_world_snapshot.h"
 
@@ -134,6 +135,8 @@ struct Request {
     bool exclusive = true;
     std::string scene, entrance, name, item, tag, value;
     std::string lines;  // act: one test-script line (kill, hit, hurt, place, ...); PlayNow checks its kind
+    std::uint64_t since = 0;  // text: only the texts after this seq (0: all kept)
+    std::string layout;       // text: only the layouts whose name has this in it ("": every layout)
     double timeout_s = 60;
 };
 // The request on one line, or `error` (bad_request's message).
@@ -228,6 +231,15 @@ std::string NotReadyReason(const CoopModJson::Value* status);
 // walk that trusts a stale pos says "arrived" 11 m away) and `"snapshot_stale":true`; `snapshot_present` keeps its number.
 // No reply (`status` null) or no `game`: all null, `snapshot_stale` false (`control` says why).
 std::string LinkMembers(const CoopModJson::Value* status);
+// The state's `room` member (leading comma): the dungeon room our Link stands in, guessed from the rooms table
+// (coop_rooms.h: the puppet pack's coop_rooms.txt, the same guess the Fairy and the joiner use) at the Link sample's
+// `pos`. null when the sample is old or missing, the scene has no rooms (not a dungeon, or no pack) or no placement of
+// it is near (CoopRooms::kFar).
+std::string RoomMember(const CoopModJson::Value* status, std::string_view scene, const CoopRooms::Table& rooms);
+// The state's `body` member (leading comma): "child" or "adult" from the name of our own Link actor in the world list
+// (Player_Child, Player_Adult; the others are CoopPuppet_). It follows the actor the game made, so it is right at once
+// after an area change. null without a live list (`live` false) or without our Link in it (a load).
+std::string BodyMember(const std::optional<CoopWorldSnapshot::Snapshot>& snapshot, bool live);
 // Why a `give` is refused now, "" when it may go. Refused: a load runs (`game.loading` true), or the Link sample is old
 // or missing (NotReadyReason: no Link update ran, as in a load, a pause or a title, so `loading` cannot be trusted: a
 // load sends no Link update, so the sample taken before it still says `loading` false). The write would be made, and a

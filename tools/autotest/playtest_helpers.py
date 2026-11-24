@@ -134,13 +134,21 @@ def go_to_actor(client, ident, name=None, near_m=NEAR_M, max_frames=MAX_FRAMES, 
     st = pc.game_of(client.state())
     scene, used, still = st.get("scene"), 0, 0
     start = _pos(st)
-    prev, leg_n = None, 0
+    prev, leg_n, misses = None, 0, 0
     while True:
         stop = _interrupted(st, scene, w)         # (before `gone`: a scene change or a stale list is not a death)
         if stop:
             return dict(out, reason=stop)
         if _gone(a, name):
-            return dict(out, reason="gone")
+            misses += 1
+            if misses >= GONE_READS:
+                return dict(out, reason="gone")
+            client.step(PRESS_FRAMES)             # (one read can miss an actor that is there: look again)
+            used += PRESS_FRAMES
+            a, w = _look(client, ident)
+            st = pc.game_of(client.state())
+            continue
+        misses = 0
         out["actor"] = a
         pos, at = _pos(st), a.get("pos")
         if pos is None or not at:
@@ -196,7 +204,7 @@ def place_facing(client, place_line, point, frames=2):
 
 
 def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_frames=PRESS_FRAMES):
-    """go_to_actor, face, then press `button` (the sword; Y is a guess to confirm in the lane run) in rounds until the
+    """go_to_actor, face, then press `button` (the sword: Y, Longshot's attack button, host/nn_hid.c) in rounds until the
     actor's life is 0 or `max_frames` frames are used. The actor is looked up before the walk and before every press:
     nothing is pressed at an actor that is gone or has another name. Returns result (dead: its life was seen at 0;
     gone: it left the list in the fight, perhaps dead; alive: the frame limit, with a `hint` when its life never moved;
@@ -245,12 +253,12 @@ def attack(client, ident, button="Y", name=None, max_frames=MAX_FRAMES, press_fr
     if isinstance(out["life_after"], (int, float)) and out["life_after"] <= 0:
         out["result"] = "dead"
     elif out["rounds"] and out["life_after"] == before:
-        out["hint"] = ("its life never moved in %d rounds: the button %s may be wrong (it is a guess), or the sword is "
-                       "not out, or the actor cannot be hurt that way" % (out["rounds"], button))
+        out["hint"] = ("its life never moved in %d rounds (button %s): the sword may not be out, or the "
+                       "actor cannot be hurt that way (`fight` locks on first)" % (out["rounds"], button))
     return out
 
 
-CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age")
+CHANGED = ("life", "max_life", "rupees", "event", "prompt", "equips", "age", "body", "room")
 
 
 def _changed(before, after):
@@ -264,10 +272,13 @@ def _changed(before, after):
     return out
 
 
-def use_item(client, item, button="Y", frames=PRESS_FRAMES):
+ITEM_BUTTON = "ZR"    # the button `assign` puts an item on (lichii/hook/coop_testinput.cpp; Y is the sword)
+
+
+def use_item(client, item, button=ITEM_BUTTON, frames=PRESS_FRAMES):
     """`assign` the item (the bridge's `assign ITEM`), press `button` for `frames` frames and step as many, and return
-    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is a guess to confirm in the
-    lane run: it is the one the item was assigned to."""
+    what changed in the state (life, rupees, event, prompt, equips, inventory). The button is ZR, the one `assign` puts
+    the item on (the bridge's `assign`, docs/testing.md); Y would swing the sword."""
     before = pc.game_of(client.state())
     client.act("assign " + item)
     client.step(2)
@@ -382,3 +393,162 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=No
         return {"result": "refused: %s has no life left" % label if who else "refused: none of that name has a life",
                 "line": line, "seq": seq, "frames": used}
     return {"result": "unknown: the walk said %r" % word, "line": line, "seq": seq, "frames": used}
+
+
+# --- talk: read each text box, press A to the end, pick a reply by its text (docs/playtest.md, "Text boxes") ---------
+# The talk ends when the event has ended and no new text came; the cursor is taken to start on the first button.
+# Read in a lane run (Kokiri shop, Mido; game 0001-0037): a talk is `MessageDialog_00` (T_Name_00 and T_NameNavi_00 the
+# speaker), its reply buttons `PaMessageBtn_00` (ONE pane, T_Btn_00, set once per button). The box's body did not come
+# through the wrap there (another setter): BOX_PANES are kept for when it does.
+MESSAGE_LAYOUTS = ("MessageInGame", "BalloonMessage", "MessageDialog", "MessageLog")
+CHOICE_LAYOUTS = ("PaMessageBtn",)
+BOX_PANES = ("T_MessageWhiteOut_00", "T_Message_00")
+NAME_PANES = ("T_Name_00", "T_NameNavi_00")
+TALK_BOXES = 20        # a talk reads at most this many boxes
+TALK_FRAMES = 1200     # ... and runs at most this many frames
+TALK_WAIT = 10         # frames run after each press before the texts are read
+TALK_IDLE = 3          # reads in a row with no event and no new text: the talk is over (with an event: press A)
+TEXT_NOW = 2 ** 53 - 1  # `text` since this: no texts, only `last` and `hooked`
+GONE_READS = 3         # reads in a row without the actor before go_to_actor says `gone` (one read can miss it)
+
+
+def _message_text(t):
+    return any(name in (t.get("layout") or "") for name in MESSAGE_LAYOUTS + CHOICE_LAYOUTS)
+
+
+def _choice_text(t):
+    return any(name in (t.get("layout") or "") for name in CHOICE_LAYOUTS)
+
+
+def _same_reply(text, reply):
+    return " ".join(str(text).split()).casefold() == " ".join(str(reply).split()).casefold()
+
+
+def _has_reply(text, reply):
+    return " ".join(str(reply).split()).casefold() in " ".join(str(text).split()).casefold()
+
+
+def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_frames=TALK_FRAMES,
+         near_m=INTERACT_M, wait=TALK_WAIT, since=None):
+    """Talk to whoever the A prompt names, or (with `ident` and `name` from get_world, when no prompt shows yet) walk
+    to that actor and face it first. Presses A, then reads each new text (the bridge's `text`): the speaker, the boxes,
+    the reply buttons. Presses A to go on, and when buttons show picks the next of `reply` (one text, or a list: one
+    per set of buttons, in order) by Down and A. With no reply left it stops and lists the buttons, the talk left open:
+    call again with `reply` and `since` (this answer's `since`) to go on from there, no new A first.
+    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0037),
+    choices and no reply, reply not offered, too many boxes, timed out, scene changed, loading.
+    Returns result, done, speakers (in order), boxes [{speaker, text, markup}], choices (the last seen), picked
+    [{text, index}], since, presses, frames. Read in a lane run (Kokiri shop, Mido): the box body is not set through
+    the wrap, so `boxes` stays empty there; the speakers and the buttons come."""
+    replies = [] if reply is None else [reply] if isinstance(reply, str) else list(reply)
+    out = {"result": None, "pressed": False, "done": False, "speakers": [], "boxes": [], "choices": [], "picked": [],
+           "since": None, "presses": 0, "frames": 0}
+    try:
+        base = client.text(TEXT_NOW)
+        hooked = bool(base.get("hooked"))
+        seen = base.get("last", 0) if since is None else int(since)
+    except pc.BridgeError as e:
+        hooked, seen = None, 0
+        why = "no text: the bridge has no `text` verb (%s)" % e.code
+    if hooked is False:
+        why = "no text: this Hookshot has no pane text wrap (patch 0037)"
+    st = pc.game_of(client.state())
+    if since is not None and hooked and st.get("event"):
+        out["frames"] = 0                       # (going on with a talk that is open: no first A)
+    else:
+        if ident is not None and no_prompt(st.get("prompt")):
+            start = interact_with(client, ident, name, near_m)
+            out["walk"] = start.get("walk")
+        else:
+            start = interact(client, "talk")
+        out["pressed"] = bool(start.get("pressed"))
+        if not start.get("pressed"):
+            out["result"] = start["result"]
+            return out
+        out["presses"], out["frames"] = 1, start.get("frames", 2 * PRESS_FRAMES)
+        if not hooked:
+            out["result"] = why + "; one A pressed"
+            return out
+    scene = pc.game_of(client.state()).get("scene")
+    speaker, idle, quiet, fresh = None, 0, 0, False
+    while True:
+        client.step(wait)
+        out["frames"] += wait
+        before = seen
+        r = client.text(seen)
+        seen = r.get("last", seen)
+        new = [t for t in r.get("texts", []) if _message_text(t)]
+        choices, first = [], None
+        for t in new:
+            pane, text = t.get("pane") or "", t.get("text") or ""
+            if _choice_text(t):
+                if text:
+                    choices.append(text)
+                    first = t.get("seq", before + 1) if first is None else first
+            elif pane in NAME_PANES:
+                if text and text != speaker:
+                    out["speakers"].append(text)
+                speaker = text or None
+                fresh = True
+            elif pane in BOX_PANES and text:
+                last = out["boxes"][-1] if out["boxes"] else None
+                if last and not last["done"] and text.startswith(last["text"]):
+                    last["text"] = text   # (the same box, grown)
+                else:
+                    out["boxes"].append({"speaker": speaker, "text": text, "markup": bool(t.get("markup")),
+                                         "done": False})
+                fresh = True
+        if choices:
+            out["choices"] = choices
+            fresh = True
+        st = pc.game_of(client.state())
+        if st.get("scene") != scene:
+            out["result"] = "scene changed"
+            break
+        if st.get("loading"):
+            out["result"] = "loading"
+            break
+        idle = idle + 1 if not new and not st.get("event") else 0
+        quiet = 0 if new else quiet + 1
+        if idle >= TALK_IDLE:
+            out["result"], out["done"] = "done: the event ended", True
+            break
+        if len(out["boxes"]) > max_boxes:
+            out["result"] = "too many boxes (%d)" % max_boxes
+            break
+        if out["frames"] >= max_frames:
+            out["result"] = "timed out after %d frames" % out["frames"]
+            break
+        if choices:
+            out["since"] = first - 1           # (a call with this `since` reads these buttons again)
+            listed = ", ".join(map(repr, choices))
+            if len(out["picked"]) >= len(replies):
+                out["result"] = "choices showed and no reply is left: %s (the talk is left open: talk again with " \
+                                "`reply` and `since`)" % listed
+                break
+            want = replies[len(out["picked"])]
+            at = next((i for i, c in enumerate(choices) if _same_reply(c, want)), None)
+            if at is None:
+                at = next((i for i, c in enumerate(choices) if _has_reply(c, want)), None)
+            if at is None:
+                out["result"] = "reply not offered: %r (choices: %s)" % (want, listed)
+                break
+            for _ in range(at):
+                client.input(None, ["DOWN"], PRESS_FRAMES)
+                client.step(PRESS_FRAMES)
+                out["frames"] += 2 * PRESS_FRAMES
+            out["picked"].append({"text": choices[at], "index": at})
+        # A when a box, a speaker or the choices came since the last press, or to nudge an event that went quiet.
+        if st.get("event") and (fresh or quiet >= TALK_IDLE):
+            client.input(None, ["A"], PRESS_FRAMES)
+            out["presses"] += 1
+            out["frames"] += PRESS_FRAMES
+            if out["boxes"]:
+                out["boxes"][-1]["done"] = True
+            fresh, quiet = False, 0
+    for b in out["boxes"]:
+        b.pop("done", None)
+    if out["done"] and len(out["picked"]) < len(replies):
+        out["result"] = "done, but no choices showed for %s" % ", ".join(map(repr, replies[len(out["picked"]):]))
+        out["done"] = False
+    return out

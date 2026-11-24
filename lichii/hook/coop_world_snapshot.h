@@ -154,6 +154,7 @@ struct Snapshot {
     std::uint64_t frame = 0;     // the game frame (the bridge's count) when the walk began
     std::uint64_t taken_ms = 0;  // steady clock, ms
     std::uint64_t cost_us = 0;   // what building it took (the walk's own time, for the lane check)
+    bool solo = false;  // from the solo walk (no session): names and places only; a strike by id is not run there
 };
 
 inline constexpr std::uint64_t kStaleMs = 1500;    // a snapshot older than this (wall clock) ...

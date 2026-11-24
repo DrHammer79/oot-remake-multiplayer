@@ -45,8 +45,21 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
   script that warps ([playtest.md](playtest.md), "Rules for a tester").
 - Move with `walk_to x z` (short legs, a clear line: it does no pathfinding), `go_to_actor id name`, `press`. After a
   `warp`, `step_until "event == false"` instead of a `step`, `get_state`, `step` loop.
+- Climb, push and jump with `climb` (ladder or vines, to a height), `push` (a block, a distance) and `jump` (run off
+  an edge toward a point). Fire with `shoot item` at an `id` or a point: `hit`, `miss` or `not fired` comes from the
+  target's life and the ammo, and the aim's tilt is not readable (`assist` steers the shot for you). Each says why it
+  stopped (`stuck`, `not climbing`, `slipped`, `respawned` ...).
 - Act with the helpers: `attack`, `face`, `talk`, `open`, `use_item`, `kill`/`hit` (the **name** from `get_world`, and
   the `id` when there are several).
+- Talk with `talk`: it reads the speakers and the reply buttons and presses A to the end. When buttons show and no
+  `reply` is left it stops and lists them: talk again with `reply` (a text, or a list in order) and the `since` it
+  gave. The box body is not read yet: take a screenshot for it. `get_text` reads the texts the game set since a `last`. Both need a game built with patch
+  0037 (`hooked` true); without it `talk` presses A once and says so ([playtest.md](playtest.md), "Text boxes").
+- Fight with `fight id name`: it walks up, locks on (`ZL`), slashes (`Y`) and guards (`ZL` alone) until the enemy's
+  life is 0, Link is low, or the frames run out, then answers `dead`, `gone`, `low`, `stopped` or `alive` with a `look`.
+  It stops (`stopped: event`) during a cutscene and presses nothing: wait it out first (`step_until "event == false"`;
+  a dungeon's title card after a warp is one). Then `desync_check` and look in the other game. A boss that needs a stun first (Gohma: a Deku Seed in her eye) needs
+  `use_item` before `fight`.
 - Let the other game run (`step 30`) after an action that should sync: a held game receives nothing.
 - Stuck? Try the data first ([tools/playtest/data](../tools/playtest/data/README.md): known stuck spots and how to
   get round them). If a step fails twice the same way, stop, write down what you saw and go to the next goal. Do not
@@ -55,9 +68,12 @@ calls you wrote. `tools/check_content.py` enforces it and must pass; never bypas
 ## 3. Read state
 
 - `get_state`: scene, Link's place `[x, y, z]` in metres, facing (0 = +z, 90 = +x), life, event, loading, the A
-  prompt. Pass the last `state_id` as `since` and only what changed comes back.
+  prompt, `room` (a dungeon room, guessed from the puppet pack's rooms table) and `body` (child or adult, from our Link
+  actor: trust it over `age` right after an area change). Pass the last `state_id` as `since` and only what changed
+  comes back.
 - `get_world [kind] [within_m]`: the actors near Link (enemies, chests, doors, switches), with an `id` you pass to the
-  helpers. An empty list with a `why` is not "nothing here".
+  helpers, solo too (`solo` true: there `kill`/`hit` take the name only). An empty list with a `why` is not "nothing
+  here".
 - `check_logs`: the oracle for "did anything go wrong": flagged `coop:` lines, **masked**. A clean verdict is not proof.
 - `session_status`: is the run still sound (bridge connected, session not ended, both games alive).
 - Pos and facing are the game's last running snapshot: after steps on a held game they can be old
